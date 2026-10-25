@@ -347,7 +347,7 @@ class FormEditor[F: FormModel](QWidget):
         self._close_control: dict[QWidget, Callable[[], None]] = {}
         self._scope.add_cleanup(self._discard_view)
         self._scope.add_cleanup(self._close_controls)
-        self._editing_enabled = True
+        self._editing_enabled = self._idle_commit = True
         self._local: dict[FormWritePath, LocalText] = {}
         self._rows: dict[FormWritePath, FieldRow] = {}
         self._groups: list[GroupBlock] = []
@@ -441,6 +441,28 @@ class FormEditor[F: FormModel](QWidget):
             return
         self._editing_enabled = enabled
         self._publish()
+
+    def set_idle_commit(self, *, enabled: bool) -> None:
+        """Enable 500 ms text commits, or require Enter/ordinary focus loss.
+
+        Disabling cancels pending expiry without parsing or discarding text.
+        Dropdowns, checkboxes and commands still commit immediately.
+        Applies to mounted rows and rows built later. Default is enabled.
+        Raises RuntimeError after detach.
+        """
+        self._require_state()
+        self._idle_commit = enabled
+        for row in self._rows.values():
+            row.set_idle_commit(enabled=enabled)
+
+    def has_pending_text(self) -> bool:
+        """Report text not yet installed in state, without parsing or committing.
+
+        Includes folded rows and rejected text. Hosts use this to preserve an
+        active edit across source publications. Raises RuntimeError after detach.
+        """
+        self._require_state()
+        return any(row.has_pending_text() for row in self._rows.values())
 
     def local_parse_errors(self) -> FormErrors | None:
         """Return detached local input errors, or None when state holds all input.
@@ -649,6 +671,7 @@ class FormEditor[F: FormModel](QWidget):
                         select=self._scope.callback(self._select),
                     ),
                 )
+                row.set_idle_commit(enabled=self._idle_commit)
                 self._close_control[row.widget] = row.close
                 row.configure_body(element=level.elements)
                 row.connect_fold(self._fold_changed)

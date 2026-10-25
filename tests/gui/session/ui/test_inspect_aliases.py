@@ -1,13 +1,8 @@
-"""The shared Inspect's Aliases page edits the ordered global alias table.
-
-Every case drives the page through the real session owner: Apply commits the
-whole draft atomically, the resolution column projects the installed table,
-unsaved drafts follow Inspect's Save/Discard/Cancel close decision and the
-read-only mode only locks writes.
-"""
+"""Inspect commits completed valid alias edits atomically through its owner."""
 
 from __future__ import annotations
 
+import os
 from collections.abc import Generator
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -100,7 +95,7 @@ def memory_session(qapp: QApplication, tmp_path: Path) -> Generator[_Session]:
 
 @pytest.fixture
 def entry_session(qapp: QApplication, tmp_path: Path) -> Generator[_Session]:
-    """A selected point; Apply saves its point-local aliases.yaml."""
+    """A selected point; Completed edits save its point-local aliases.yaml."""
     entry = ResultEntry.create(
         "entry", result_root=tmp_path / "result", database_root=tmp_path / "Database"
     )
@@ -163,6 +158,8 @@ def _open(
     )
     session.dialogs.append(dialog)
     dialog.show()
+    dialog.activateWindow()
+    QApplication.processEvents()
     return dialog
 
 
@@ -217,7 +214,45 @@ def _fresh_rows(entry: ResultEntry) -> tuple[AliasRow, ...]:
     return fresh.get_alias_rows()
 
 
-def test_apply_without_point_shows_actionable_error(
+def test_alias_cell_completion_add_and_remove_write_through(
+    entry_session, tmp_path: Path
+) -> None:
+    ui = ComponentDriver(_open(entry_session))
+    tmp_path = Path(os.environ.get("INSPECT_IMPLICIT_EVIDENCE", str(tmp_path)))
+    ui.select_tab("Aliases")
+    ui.edit_table_value("Q1", "Q2", object_name="inspect.aliases.table", column="Value")
+    ui.screenshot(
+        Path(os.environ.get("INSPECT_IMPLICIT_EVIDENCE", str(tmp_path)))
+        / "aliases-cell-written.png"
+    )
+    assert _fresh_rows(entry_session.entry) == (AliasRow("qubit", "Q2"),)
+    ui.click(object_name="inspect.aliases.add")
+    ui.screenshot(
+        Path(os.environ.get("INSPECT_IMPLICIT_EVIDENCE", str(tmp_path)))
+        / "aliases-empty-new-row.png"
+    )
+    assert len(ui.table_rows(object_name="inspect.aliases.table")) == 2
+    assert _fresh_rows(entry_session.entry) == (AliasRow("qubit", "Q2"),)
+    ui.type_text("spare")
+    ui.press_key(Qt.Key.Key_Return)
+    ui.screenshot(
+        Path(os.environ.get("INSPECT_IMPLICIT_EVIDENCE", str(tmp_path)))
+        / "aliases-new-row-complete.png"
+    )
+    assert _fresh_rows(entry_session.entry) == (
+        AliasRow("qubit", "Q2"),
+        AliasRow("spare", ""),
+    )
+    ui.select_table_row("spare", object_name="inspect.aliases.table")
+    ui.click(object_name="inspect.aliases.remove")
+    ui.screenshot(
+        Path(os.environ.get("INSPECT_IMPLICIT_EVIDENCE", str(tmp_path)))
+        / "aliases-row-removed.png"
+    )
+    assert _fresh_rows(entry_session.entry) == (AliasRow("qubit", "Q2"),)
+
+
+def test_edit_without_point_shows_actionable_error(
     qapp: QApplication, tmp_path: Path
 ) -> None:
     bus = BaseEventBus()
@@ -226,13 +261,16 @@ def test_apply_without_point_shows_actionable_error(
     try:
         ui = ComponentDriver(_open(session))
         ui.select_tab("Aliases")
-        ui.screenshot(tmp_path / "aliases-before-apply.png")
-        ui.click(object_name="inspect.aliases.apply")
+        ui.edit_table_value(
+            "Q1", "Q2", object_name="inspect.aliases.table", column="Value"
+        )
+        ui.screenshot(
+            Path(os.environ.get("INSPECT_IMPLICIT_EVIDENCE", str(tmp_path)))
+            / "aliases-no-point-error.png"
+        )
         error = ui.observe(object_name="inspect.aliases.error")
-        ui.screenshot(tmp_path / "aliases-no-point-error.png")
         assert error.visible
         assert "Select or create a working point" in error.text
-        assert ui.observe(object_name="inspect.aliases.apply").enabled
     finally:
         _close_all(session, qapp)
 
@@ -247,68 +285,7 @@ def test_clean_alias_draft_follows_selected_point(entry_session) -> None:
     assert _shown_rows(_table(page)) == [("other_alias", "R2")]
 
 
-@pytest.mark.parametrize("switch", ["point", "entry"])
-def test_dirty_alias_draft_rejects_different_target_without_writing(
-    entry_session,
-    tmp_path: Path,
-    switch: str,
-) -> None:
-    entry = entry_session.entry
-    assert entry is not None
-    control = entry_session.control
-    control.apply_alias_rows(control.get_alias_rows())
-    source_rows = entry.load_aliases(point="working")
-    if switch == "entry":
-        destination = ResultEntry.create(
-            "different",
-            result_root=tmp_path / "result",
-            database_root=tmp_path / "Database",
-        )
-        label = "working"
-    else:
-        destination = entry
-        label = "other"
-    destination.new_point(label)
-    destination.save_aliases(EntryAliases(aliases={"destination": "R2"}), point=label)
-    dialog = _open(entry_session)
-    page = _aliases_page(dialog)
-    _cell(_table(page), 0, 1).setText("DraftOnly")
-    if switch == "entry":
-        owner = entry_session.owner
-        assert owner is not None
-        owner.install_entry(destination)
-    control.use_point(PointUseRequest(label))
-    ui = ComponentDriver(dialog)
-    ui.click(object_name="inspect.aliases.apply")
-    assert ui.observe(object_name="inspect.aliases.error").text
-    assert _shown_rows(_table(page)) == [("qubit", "DraftOnly")]
-    assert entry.load_aliases(point="working") == source_rows
-    assert destination.load_aliases(point=label).aliases == {"destination": "R2"}
-
-
-def test_alias_revert_loads_current_target_then_apply_saves_there(
-    entry_session,
-) -> None:
-    entry = entry_session.entry
-    assert entry is not None
-    source_rows = entry.load_aliases(point="working")
-    entry.new_point("other")
-    entry.save_aliases(EntryAliases(aliases={"destination": "R2"}), point="other")
-    dialog = _open(entry_session)
-    page = _aliases_page(dialog)
-    _cell(_table(page), 0, 1).setText("DraftOnly")
-    entry_session.control.use_point(PointUseRequest("other"))
-    ui = ComponentDriver(dialog)
-    ui.click(object_name="inspect.aliases.revert")
-    assert _shown_rows(_table(page)) == [("destination", "R2")]
-    _cell(_table(page), 0, 1).setText("Confirmed")
-    ui.click(object_name="inspect.aliases.apply")
-    assert ui.observe(object_name="inspect.aliases.error").text == ""
-    assert entry.load_aliases(point="other").aliases == {"destination": "Confirmed"}
-    assert entry.load_aliases(point="working") == source_rows
-
-
-def test_driver_edits_list_applies_and_reopens(entry_session, tmp_path: Path) -> None:
+def test_driver_edits_list_commits_and_reopens(entry_session, tmp_path: Path) -> None:
     dialog = _open(entry_session)
     driver = ComponentDriver(dialog)
     driver.select_tab("Aliases")
@@ -318,9 +295,14 @@ def test_driver_edits_list_applies_and_reopens(entry_session, tmp_path: Path) ->
     driver.edit_table_value(
         "Q1", "[Q3, Q1]", object_name="inspect.aliases.table", column="Value"
     )
-    driver.screenshot(tmp_path / "list-draft.png")
-    driver.click(object_name="inspect.aliases.apply")
-    driver.screenshot(tmp_path / "list-applied.png")
+    driver.screenshot(
+        Path(os.environ.get("INSPECT_IMPLICIT_EVIDENCE", str(tmp_path)))
+        / "list-draft.png"
+    )
+    driver.screenshot(
+        Path(os.environ.get("INSPECT_IMPLICIT_EVIDENCE", str(tmp_path)))
+        / "list-applied.png"
+    )
     assert driver.observe(object_name="inspect.aliases.error").text == ""
     assert driver.table_rows(object_name="inspect.aliases.table")[0].columns == (
         "participants",
@@ -330,7 +312,10 @@ def test_driver_edits_list_applies_and_reopens(entry_session, tmp_path: Path) ->
     driver.click("Close")
     reopened = ComponentDriver(_open(entry_session))
     reopened.select_tab("Aliases")
-    reopened.screenshot(tmp_path / "list-reopened.png")
+    reopened.screenshot(
+        Path(os.environ.get("INSPECT_IMPLICIT_EVIDENCE", str(tmp_path)))
+        / "list-reopened.png"
+    )
     assert reopened.table_rows(object_name="inspect.aliases.table")[0].columns == (
         "participants",
         "[Q3, Q1]",
@@ -351,61 +336,83 @@ def test_aliases_page_shows_the_installed_ordered_rows(memory_session) -> None:
     assert _shown_rows(table) == [("qubit", "Q1"), ("resonator", "$qubit.resonator")]
 
 
-def test_invalid_apply_keeps_installed_rows_and_editable_draft(memory_session) -> None:
-    control = memory_session.control
-    page = _aliases_page(_open(memory_session))
-    table = _table(page)
-    original = control.get_alias_rows()
-    _cell(table, 0, 1).setText("$resonator")
-    _button(page, "apply").click()
-    assert control.get_alias_rows() == original
-    assert _cell(table, 0, 1).text() == "$resonator"
-    assert _error(page)
-    error = _child(page, QLabel, "inspect.aliases.error")
-    assert error.textInteractionFlags() & Qt.TextInteractionFlag.TextSelectableByMouse
-
-    _cell(table, 0, 1).setText("Q2")
-    _button(page, "apply").click()
-    assert control.get_alias_rows() == (
-        AliasRow("qubit", "Q2"),
-        AliasRow("resonator", "$qubit.resonator"),
-    )
-    assert _error(page) == ""
-
-
-def test_add_remove_preserves_order_and_empty_apply_clears_owner(
-    memory_session,
+def test_invalid_cell_is_red_without_writing_and_repair_commits(
+    entry_session,
+    tmp_path: Path,
 ) -> None:
-    control = memory_session.control
-    page = _aliases_page(_open(memory_session))
-    table = _table(page)
-    _button(page, "add").click()
-    _cell(table, 2, 0).setText("spare")
-    _cell(table, 2, 1).setText("Q3")
-    table.clearSelection()
-    table.selectRow(1)
-    _button(page, "remove").click()
-    assert control.get_alias_rows() == (
+    ui = ComponentDriver(_open(entry_session))
+    ui.select_tab("Aliases")
+    ui.edit_table_value(
+        "Q1", "$missing.field", object_name="inspect.aliases.table", column="Value"
+    )
+    ui.screenshot(
+        Path(os.environ.get("INSPECT_IMPLICIT_EVIDENCE", str(tmp_path)))
+        / "aliases-invalid-red.png"
+    )
+    assert ui.observe(object_name="inspect.aliases.error").text
+    assert ui.table_rows(object_name="inspect.aliases.table")[0].tooltips[1]
+    assert _fresh_rows(entry_session.entry) == (AliasRow("qubit", "Q1"),)
+    ui.edit_table_value(
+        "$missing.field", "Q2", object_name="inspect.aliases.table", column="Value"
+    )
+    ui.screenshot(
+        Path(os.environ.get("INSPECT_IMPLICIT_EVIDENCE", str(tmp_path)))
+        / "aliases-repaired.png"
+    )
+    assert ui.observe(object_name="inspect.aliases.error").text == ""
+    assert _fresh_rows(entry_session.entry) == (AliasRow("qubit", "Q2"),)
+
+
+def test_point_switch_discards_invalid_alias_input(
+    entry_session, tmp_path: Path
+) -> None:
+    entry_session.entry.new_point("second")
+    ui = ComponentDriver(_open(entry_session))
+    ui.select_tab("Aliases")
+    ui.edit_table_value(
+        "Q1", "not a name", object_name="inspect.aliases.table", column="Value"
+    )
+    assert ui.observe(object_name="inspect.aliases.error").text
+    entry_session.control.use_point(PointUseRequest("second"))
+    ui.screenshot(
+        Path(os.environ.get("INSPECT_IMPLICIT_EVIDENCE", str(tmp_path)))
+        / "aliases-switch-discards-invalid.png"
+    )
+    assert ui.table_rows(object_name="inspect.aliases.table") == ()
+    assert _fresh_rows(entry_session.entry) == (AliasRow("qubit", "Q1"),)
+    ui.click("Close")
+
+
+def test_each_invalid_alias_row_is_marked(memory_session, tmp_path: Path) -> None:
+    ui = ComponentDriver(_open(memory_session))
+    ui.select_tab("Aliases")
+    ui.edit_table_value(
+        "Q1", "bad name", object_name="inspect.aliases.table", column="Value"
+    )
+    ui.edit_table_value(
+        "$qubit.resonator",
+        "bad second",
+        object_name="inspect.aliases.table",
+        column="Value",
+    )
+    ui.screenshot(
+        Path(os.environ.get("INSPECT_IMPLICIT_EVIDENCE", str(tmp_path)))
+        / "aliases-two-invalid.png"
+    )
+    rows = ui.table_rows(object_name="inspect.aliases.table")
+    assert rows[0].tooltips[1]
+    assert rows[1].tooltips[1]
+    assert memory_session.control.get_alias_rows() == (
         AliasRow("qubit", "Q1"),
         AliasRow("resonator", "$qubit.resonator"),
     )
-    _button(page, "apply").click()
-    assert control.get_alias_rows() == (
-        AliasRow("qubit", "Q1"),
-        AliasRow("spare", "Q3"),
-    )
-    table.selectAll()
-    _button(page, "remove").click()
-    _button(page, "apply").click()
-    assert control.get_alias_rows() == ()
 
 
-def test_apply_saves_to_the_opened_entry(entry_session) -> None:
+def test_edit_saves_to_the_opened_entry(entry_session) -> None:
     entry = entry_session.entry
     assert entry is not None
     page = _aliases_page(_open(entry_session))
     _cell(_table(page), 0, 1).setText("Q2")
-    _button(page, "apply").click()
     assert _fresh_rows(entry) == (AliasRow("qubit", "Q2"),)
     assert entry_session.control.get_alias_rows() == (AliasRow("qubit", "Q2"),)
 
@@ -418,13 +425,12 @@ def test_storage_error_keeps_draft_and_installed_table_for_retry(
     control = entry_session.control
     page = _aliases_page(_open(entry_session))
     value = _cell(_table(page), 0, 1)
-    value.setText("Q2")
     # A directory where aliases.yaml belongs makes the atomic replace fail.
     blocker = entry.result_path / "points" / "working" / "aliases.yaml"
     original = blocker.read_bytes()
     blocker.unlink()
     blocker.mkdir()
-    _button(page, "apply").click()
+    value.setText("Q2")
     assert control.get_alias_rows() == (AliasRow("qubit", "Q1"),)
     assert _error(page)
     assert value.text() == "Q2"
@@ -432,7 +438,8 @@ def test_storage_error_keeps_draft_and_installed_table_for_retry(
     blocker.rmdir()
     # Restore the captured revision; removing the blocker alone is a stale edit.
     blocker.write_bytes(original)
-    _button(page, "apply").click()
+    value.setText("Q3")
+    value.setText("Q2")
     assert control.get_alias_rows() == (AliasRow("qubit", "Q2"),)
     assert _error(page) == ""
     assert _fresh_rows(entry) == (AliasRow("qubit", "Q2"),)
@@ -465,23 +472,6 @@ def test_resolution_column_shows_owner_projection_and_read_only_cells(
         assert _cell(table, 0, column).flags() & Qt.ItemFlag.ItemIsEditable
 
 
-def test_resolution_stays_applied_until_successful_apply(resolved_session) -> None:
-    control = resolved_session.control
-    page = _aliases_page(_open(resolved_session))
-    table = _table(page)
-    _cell(table, 0, 1).setText("$resonator")
-    _button(page, "apply").click()
-    assert _cell(table, 0, 2).text() == "Q1"
-    _cell(table, 0, 1).setText("R1")
-    assert _cell(table, 0, 2).text() == "Q1"
-    _button(page, "apply").click()
-    assert control.get_alias_rows()[0].value == "R1"
-    assert _cell(table, 0, 2).text() == "R1"
-    linked = _cell(table, 1, 2)
-    assert linked.text() == control.read_context().resolved_aliases()[1].error
-    assert linked.toolTip() == linked.text()
-
-
 def test_resolution_without_selected_point_is_empty(qapp: QApplication) -> None:
     bus = BaseEventBus()
     control = ContextControlFacet(context=_service(bus, (AliasRow("qubit", "Q1"),)))
@@ -496,7 +486,7 @@ def test_resolution_without_selected_point_is_empty(qapp: QApplication) -> None:
     _close_all(session, qapp)
 
 
-def test_added_resolution_cell_is_read_only_and_updates_on_apply(
+def test_added_resolution_cell_is_read_only_and_updates_on_completion(
     resolved_session,
 ) -> None:
     page = _aliases_page(_open(resolved_session))
@@ -507,78 +497,7 @@ def test_added_resolution_cell_is_read_only_and_updates_on_apply(
     assert not result.flags() & Qt.ItemFlag.ItemIsEditable
     _cell(table, 4, 0).setText("spare")
     _cell(table, 4, 1).setText("R1")
-    _button(page, "apply").click()
     assert _cell(table, 4, 2).text() == "R1"
-
-
-def test_dirty_alias_close_cancel_keeps_the_draft_and_save_applies(
-    entry_session,
-) -> None:
-    entry = entry_session.entry
-    assert entry is not None
-    presenter = RecordingDialogPresenter()
-    dialog = _open(entry_session, presenter)
-    page = _aliases_page(dialog)
-    _cell(_table(page), 0, 1).setText("Q2")
-
-    presenter.queue_save_discard_cancel("cancel")
-    dialog.close()
-    assert [call.kind for call in presenter.calls] == ["save_discard_cancel"]
-    assert dialog.isVisible()
-    assert _cell(_table(page), 0, 1).text() == "Q2"
-    assert entry_session.control.get_alias_rows() == (AliasRow("qubit", "Q1"),)
-
-    presenter.queue_save_discard_cancel("save")
-    dialog.close()
-    assert not dialog.isVisible()
-    assert entry_session.control.get_alias_rows() == (AliasRow("qubit", "Q2"),)
-    assert _fresh_rows(entry) == (AliasRow("qubit", "Q2"),)
-
-
-def test_dirty_alias_close_discard_leaves_the_installed_table(memory_session) -> None:
-    control = memory_session.control
-    installed = control.get_alias_rows()
-    presenter = RecordingDialogPresenter()
-    dialog = _open(memory_session, presenter)
-    page = _aliases_page(dialog)
-    _cell(_table(page), 0, 1).setText("Q7")
-    presenter.queue_save_discard_cancel("discard")
-    dialog.close()
-    assert not dialog.isVisible()
-    assert control.get_alias_rows() == installed
-
-
-def test_a_rejected_save_on_close_keeps_inspect_open_on_the_draft(
-    memory_session,
-) -> None:
-    control = memory_session.control
-    installed = control.get_alias_rows()
-    presenter = RecordingDialogPresenter()
-    dialog = _open(memory_session, presenter)
-    page = _aliases_page(dialog)
-    _cell(_table(page), 0, 1).setText("$resonator")
-    tabs = dialog.findChild(QTabWidget)
-    assert tabs is not None
-    tabs.setCurrentIndex(0)
-
-    presenter.queue_save_discard_cancel("save")
-    dialog.close()
-    assert dialog.isVisible()
-    assert control.get_alias_rows() == installed
-    assert tabs.currentWidget() is page
-    assert _error(page)
-    assert _cell(_table(page), 0, 1).text() == "$resonator"
-
-
-def test_clean_aliases_close_without_asking(memory_session) -> None:
-    presenter = RecordingDialogPresenter()
-    dialog = _open(memory_session, presenter)
-    page = _aliases_page(dialog)
-    _cell(_table(page), 0, 1).setText("Q2")
-    _button(page, "apply").click()
-    dialog.close()
-    assert not dialog.isVisible()
-    assert presenter.calls == []
 
 
 def test_read_only_locks_alias_writes_but_keeps_the_table_readable(
@@ -589,7 +508,7 @@ def test_read_only_locks_alias_writes_but_keeps_the_table_readable(
     page = _aliases_page(dialog)
     table = _table(page)
     dialog.set_read_only(read_only=True)
-    for name in ("add", "remove", "apply"):
+    for name in ("add", "remove"):
         assert not _button(page, name).isEnabled(), name
     assert table.isEnabled()
     assert table.editTriggers() == QAbstractItemView.EditTrigger.NoEditTriggers
@@ -598,11 +517,10 @@ def test_read_only_locks_alias_writes_but_keeps_the_table_readable(
     assert table.selectedItems()
 
     dialog.set_read_only(read_only=False)
-    for name in ("add", "remove", "apply"):
+    for name in ("add", "remove"):
         assert _button(page, name).isEnabled(), name
     assert table.editTriggers() != QAbstractItemView.EditTrigger.NoEditTriggers
     _cell(table, 0, 1).setText("Q2")
-    _button(page, "apply").click()
     assert control.get_alias_rows()[0] == AliasRow("qubit", "Q2")
 
 
@@ -610,7 +528,7 @@ def test_alias_resolution_error_uses_table_theme(resolved_session, window_palett
     page = _aliases_page(_open(resolved_session))
     table = _table(page)
     table.setPalette(window_palette)
-    _button(page, "apply").click()
+    _cell(table, 0, 1).setText("R1")
     broken = _cell(table, 3, 2)
     assert (
         broken.text()

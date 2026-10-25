@@ -12,7 +12,7 @@ Editor 初次只建立可見層與初始展開的 model rows。每層依宣告�
 
 其他 Model 節起始折疊。首次建立 editor 時，子樹有錯誤（含尚未建立或 hidden 的後代）的節也展開，欄位名為 modules 時使用相同規則。已記錄的使用者 fold 優先，之後輸入、驗證、選項或 nullable 重建都保留節的展開狀態。折起的錯誤仍標在可見祖先，group 標題仍顯示 Contains errors。Core 的 `can_expand` 只提供結構上的展開能力，首次展開才查下一層；實際沒有可畫 children 時，該列回到普通標題，不留空白區塊。收起已建區塊會保留 QWidget 與未提交文字，state 維持原狀。實際 branch 改變或啟停普通 nullable model 時只替換該子樹，無關 rows 與使用者設定的 folds 保持不變。沒有 converter 的選項切換只更新 selector，不清除仍相同的 children 與 local parse text。Editor 以 description.branch 判斷子結構，不用 selected 猜 branch。Editor 以已建立的 Qt 子層記錄展開情況，不另持 writable draft。
 
-文字欄位停止輸入 0.5 秒後提交，Enter 或一般 focus loss 仍立即提交。新輸入重新排程，立即提交會取消 pending timer。打到一半的值也走同一 parse／validation，錯誤保留原文，修正後自動清除。折疊、移除舊分支、唯讀與 detach 會取消 pending timer，pending 輸入保持未提交。折疊引起的 focus loss 不提交，重新展開後的一般 focus loss 仍提交保留文字。Expression action、dropdown、checkbox 與 Enabled 立即提交。未解析或 host 拒絕的輸入保留在 view，`local_parse_errors()` 讓 host 阻止提交。`discard_local_text()` 只丟掉 view-local 輸入，不重設 FormState。外部 publication 仍以 state 的輸入更新已建 controls。完整 preview 與 local errors 決定 validity，折疊、hidden 或尚未建立的 child 不會隱藏錯誤；錯誤標示落在可見祖先或 group 標題。
+文字欄位預設停止輸入 0.5 秒後提交，Enter 或一般 focus loss 仍立即提交。Host 可用 `set_idle_commit(enabled=False)` 停用文字 idle 提交並取消 pending timer，保留 Enter、一般 focus loss 與非文字 controls 的提交。`has_pending_text()` 不解析、不提交，只回報已建立 controls 是否仍有不同於 state 的文字，包含折疊與遭拒的文字。新輸入重新排程，立即提交會取消 pending timer。打到一半的值也走同一 parse／validation，錯誤保留原文，修正後自動清除。折疊、移除舊分支、唯讀與 detach 會取消 pending timer，pending 輸入保持未提交。折疊引起的 focus loss 不提交，重新展開後的一般 focus loss 仍提交保留文字。Expression action、dropdown、checkbox 與 Enabled 立即提交。未解析或 host 拒絕的輸入保留在 view，`local_parse_errors()` 讓 host 阻止提交。`discard_local_text()` 只丟掉 view-local 輸入，不重設 FormState。外部 publication 仍以 state 的輸入更新已建 controls。完整 preview 與 local errors 決定 validity，折疊、hidden 或尚未建立的 child 不會隱藏錯誤；錯誤標示落在可見祖先或 group 標題。
 
 Host 可訂閱 `errors_changed`，在 `errors()` 結果改變時取得新的 `FormErrors`，全部有效時取得 `None`。本地 parse／拒絕錯誤與 state publication 都會觸發比較；錯誤集合相同時不重送，detach 後不再發出。`validity_changed` 仍只在有效與無效之間切換時發出 bool。
 
@@ -26,7 +26,7 @@ Host 必須同時傳入 `write=`、`select=` 與 `run_command=`，或全部省�
 
 欄位錯誤不增加 row 高度。Direct 文字與 dropdown 以目前 palette 的 Base 混合淡紅底色，checkbox 與 model section 的名稱標紅。Expression 保留原底色，改以紅色邊框標示錯誤。帶色控制項或名稱標籤的 `formError` property 反映錯誤狀態，tooltip 先顯示錯誤再保留說明。錯誤消失時還原顏色與 tooltip；form-wide error label 與 group 的 Contains errors 提示仍保留。Expression 的求值結果以 `= ` 前綴顯示，字串用 JSON 引號。Direct 數值的 authored input 與 preview value 不同時，旁邊以 `Effective: ` 明示有效值；相同時不重複顯示。Step 不整除後的 stop／center／span 使用這條路徑，Qt 不重做採樣公式。
 
-Measure Run panel 使用 tab resource 的 guarded callbacks。Workflows 使用自己的 FormState 與 Apply／Discard／Start policy。Inspect、New Entry 與 writeback 編輯器沿用各自的 entry capture、Apply／Cancel 與 destination guard。共用 editor 不接管這些 lifetime 或提交政策。公開 control object names、keyboard 與 Expression 細節見 `FormEditor` docstring。
+Measure Run panel 使用 tab resource 的 guarded callbacks。Workflows 使用自己的 FormState 與 Apply／Discard／Start policy。Inspect 停用文字 idle commit，明確完成編輯後由 host 寫入有效 Spec。New Entry 與 writeback 編輯器保留各自的 entry capture、Apply／Cancel 與 destination guard。共用 editor 不接管這些 lifetime 或提交政策。公開 control object names、keyboard 與 Expression 細節見 `FormEditor` docstring。
 
 `InputSuggestions` 欄位預設使用下拉，清單外值仍顯示目前值而不清空。欄位標題與輸入控制項的右鍵選單都列出 field commands。Edit as text 與 Choose from list 透過相同的 guarded command callback 切換呈現。模式改變時重建該 row，保留 cfg 值；retiring row 先停用再解除 parent，等待 Qt deleteLater 期間不再提交文字。
 

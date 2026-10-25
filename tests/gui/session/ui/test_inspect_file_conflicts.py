@@ -140,6 +140,24 @@ def conflict_ui(
 
 
 @pytest.mark.parametrize("conflict_ui", ["library"], indirect=True)
+def test_library_source_publication_preserves_unsubmitted_text(conflict_ui) -> None:
+    ui, path, evidence, source, _ = conflict_ui
+    ui.select_tab("Modules")
+    ui.select_tree_row(
+        ("waveforms", "Q1", "waveforms", "flat"), object_name="inspect.library"
+    )
+    ui.enter_text(object_name="form.input.length", value="0.4", commit=False)
+    candidate = path.read_text().replace("0.1", "0.7")
+    path.write_text(candidate)
+    source.synchronize_files(admit_reload=True)
+    ui.screenshot(evidence / "typing-source-change.png")
+    assert ui.observe(object_name="form.input.length").text == "0.4"
+    ui.press_key(Qt.Key.Key_Return, object_name="form.input.length")
+    assert ui.observe(object_name="inspect.entry.error").text
+    assert path.read_text() == candidate
+
+
+@pytest.mark.parametrize("conflict_ui", ["library"], indirect=True)
 def test_library_keep_cannot_rebase_stale_draft(conflict_ui) -> None:
     ui, path, evidence, *_ = conflict_ui
     ui.select_tab("Modules")
@@ -150,20 +168,17 @@ def test_library_keep_cannot_rebase_stale_draft(conflict_ui) -> None:
         object_name="inspect.entry.name", value="Q1.waveforms.draft", commit=False
     )
     assert ui.text_input(object_name="inspect.entry.name").text == "Q1.waveforms.draft"
-    assert ui.observe(object_name="inspect.entry.status").text == "Unsaved"
     ui.screenshot(evidence / "01-draft.png")
     path.write_text(path.read_text().replace("0.1", "0.7"))
-    ui.click(object_name="inspect.entry.apply")
-    assert ui.observe(object_name="inspect.entry.status").text == "Unsaved"
+    ui.press_key(Qt.Key.Key_Return, object_name="inspect.entry.name")
     assert ui.observe(object_name="inspect.library.sync.message").visible
     ui.screenshot(evidence / "02-rejected.png")
     ui.click(object_name="inspect.library.sync.keep")
-    ui.click(object_name="inspect.entry.apply")
+    ui.press_key(Qt.Key.Key_Return, object_name="inspect.entry.name")
     assert ui.observe(object_name="inspect.library.sync.message").visible
     assert ui.text_input(object_name="inspect.entry.name").text == "Q1.waveforms.draft"
     ui.screenshot(evidence / "03-keep-rejected.png")
     ui.click(object_name="inspect.library.sync.reload")
-    assert ui.observe(object_name="inspect.entry.status").text == "Saved"
     assert ui.text_input(object_name="inspect.entry.name").text == "Q1.waveforms.flat"
     assert "0.7" in ui.text_input(object_name="form.input.length").text
     ui.screenshot(evidence / "04-reloaded.png")
@@ -209,16 +224,19 @@ def test_source_notification_preserves_live_alias_editor(
         message = ui.observe(object_name="inspect.aliases.sync.message")
         assert message.visible
         assert ("reloaded" if admit_reload else "pending") in message.text
+        ui.press_key(Qt.Key.Key_Return)
         ui.click(object_name="inspect.aliases.sync.keep")
         assert not ui.observe(object_name="inspect.aliases.sync.message").visible
         assert (
             ui.table_rows(object_name="inspect.aliases.table")[0].columns[0] == "draft"
         )
-        ui.click(object_name="inspect.aliases.apply")
+        ui.edit_table_value(
+            "draft", "retry", object_name="inspect.aliases.table", column="Alias"
+        )
         assert ui.observe(object_name="inspect.aliases.error").text
         assert ui.observe(object_name="inspect.aliases.sync.message").visible
         assert (
-            ui.table_rows(object_name="inspect.aliases.table")[0].columns[0] == "draft"
+            ui.table_rows(object_name="inspect.aliases.table")[0].columns[0] == "retry"
         )
         assert alias_path.read_text() == changed
         ui.screenshot(evidence / "03-keep-cannot-rebase.png")
@@ -231,7 +249,6 @@ def test_source_notification_preserves_live_alias_editor(
     else:
         assert not ui.observe(object_name="inspect.aliases.sync.message").visible
         ui.press_key(Qt.Key.Key_Return)
-        ui.click(object_name="inspect.aliases.apply")
         assert not ui.observe(object_name="inspect.aliases.error").text
         assert ui.table_rows(object_name="inspect.aliases.table")[0].columns[:2] == (
             "draft",
@@ -247,18 +264,19 @@ def test_alias_draft_revision_includes_missing_file(conflict_ui) -> None:
     initial_count = len(ui.table_rows(object_name="inspect.aliases.table"))
     ui.click(object_name="inspect.aliases.add")
     ui.type_text("x")
-    ui.press_key(Qt.Key.Key_Return)
     ui.screenshot(evidence / "01-draft.png")
     path.write_text(
         "format: zcu.aliases\nformat_version: '1.0'\naliases:\n  external: Q2\n"
     )
-    ui.click(object_name="inspect.aliases.apply")
+    ui.press_key(Qt.Key.Key_Return)
     assert ui.observe(object_name="inspect.aliases.error").text
     assert len(ui.table_rows(object_name="inspect.aliases.table")) == initial_count + 1
     ui.screenshot(evidence / "02-rejected.png")
     _assert_notice_fits(ui, "aliases")
     ui.click(object_name="inspect.aliases.sync.keep")
-    ui.click(object_name="inspect.aliases.apply")
+    ui.edit_table_value(
+        "x", "retry", object_name="inspect.aliases.table", column="Alias"
+    )
     assert ui.observe(object_name="inspect.aliases.sync.message").visible
     ui.screenshot(evidence / "03-keep-rejected.png")
     ui.click(object_name="inspect.aliases.sync.reload")
@@ -518,7 +536,6 @@ def test_source_publications_keep_visible_drafts_until_valid_reload(
         ui.select_tab("Aliases")
         ui.click(object_name="inspect.aliases.add")
         ui.type_text("draft")
-        ui.press_key(Qt.Key.Key_Return)
     ui.screenshot(evidence / "01-draft.png")
     original = path.read_text()
     changed = _external_candidate(document, original)
@@ -533,14 +550,10 @@ def test_source_publications_keep_visible_drafts_until_valid_reload(
         assert (
             ui.text_input(object_name="inspect.entry.name").text == "Q1.waveforms.draft"
         )
-        ui.click(object_name="inspect.entry.apply")
-        assert ui.observe(object_name="inspect.entry.status").text == "Unsaved"
+        ui.press_key(Qt.Key.Key_Return, object_name="inspect.entry.name")
     else:
-        assert any(
-            row.columns[0] == "draft"
-            for row in ui.table_rows(object_name="inspect.aliases.table")
-        )
-        ui.click(object_name="inspect.aliases.apply")
+        assert ui.focused_input().text == "draft"
+        ui.press_key(Qt.Key.Key_Return)
         assert ui.observe(object_name="inspect.aliases.error").text
     ui.screenshot(evidence / "02-reloaded-source-rejects-draft.png")
     path.write_text("invalid: true\n")
@@ -560,7 +573,6 @@ def test_source_publications_keep_visible_drafts_until_valid_reload(
         assert (
             ui.text_input(object_name="inspect.entry.name").text == "Q1.waveforms.flat"
         )
-        assert ui.observe(object_name="inspect.entry.status").text == "Saved"
     else:
         assert ui.table_rows(object_name="inspect.aliases.table")[0].columns[:2] == (
             "external",

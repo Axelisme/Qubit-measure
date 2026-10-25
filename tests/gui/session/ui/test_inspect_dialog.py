@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-import json
 import os
 import sys
 from collections.abc import Callable, Generator, Mapping
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -138,6 +137,8 @@ def session(qapp: QApplication, tmp_path: Path) -> Generator[_Session]:
             # A window-modal New dialog left open would block later owner turns.
             for child in dialog.findChildren(QDialog):
                 child.close()
+            if isinstance(dialog, InspectDialog):
+                dialog.set_read_only(read_only=True)
             dialog.close()
             dialog.deleteLater()
         qapp.processEvents()
@@ -163,6 +164,7 @@ def _open(
     assert tabs is not None
     tabs.setCurrentIndex(1)
     dialog.show()
+    dialog.activateWindow()
     QApplication.processEvents()
     return dialog
 
@@ -204,16 +206,67 @@ def _select(dialog: InspectDialog, name: str) -> None:
     tree.setCurrentItem(item)
 
 
-def _status(dialog: QWidget) -> str:
-    return _child(dialog, QLabel, "inspect.entry.status").text()
-
-
 def _group_fold(parent: QWidget, name: str) -> QLabel:
     return _child(parent, QLabel, f"form.fold.group.{name}")
 
 
 def _library(session: _Session):
     return session.entry.module_library("point").snapshot()
+
+
+def _pulse(session: _Session, name: str = PULSE) -> PulseSpec:
+    spec = _library(session).module_spec(name)
+    assert isinstance(spec, PulseSpec)
+    return spec
+
+
+@pytest.mark.parametrize("submit", ["enter", "focus-loss"])
+def test_module_commits_on_enter_not_while_typing(
+    session: _Session, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, submit: str
+) -> None:
+    from zcu_tools.gui.widgets.form import value_widgets
+
+    from tests.gui.widgets.form._clock import Clock
+
+    clock = Clock()
+    monkeypatch.setattr(value_widgets, "QTimer", clock.timer)
+    dialog = _open(session, RecordingDialogPresenter())
+    ui = ComponentDriver(dialog)
+    ui.resize_window(1100, 760)
+    ui.select_tree_row(("modules", "Q1", "pulses", "pi"), object_name="inspect.library")
+    evidence = Path(os.environ.get("INSPECT_IMPLICIT_EVIDENCE", str(tmp_path)))
+    ui.screenshot(evidence / "modules-01-open.png")
+    # Synthetic mouse delivery does not assign Qt focus. Traverse the real
+    # focus chain so the focus-loss branch exercises an ordinary FocusOut.
+    for _ in range(20):
+        if ui.text_input(object_name="form.input.gain").focused:
+            break
+        ui.press_key(Qt.Key.Key_Tab)
+    assert ui.text_input(object_name="form.input.gain").focused
+    ui.enter_text(object_name="form.input.gain", value="0.5", commit=False)
+    clock.advance(1000)
+    ui.screenshot(evidence / "modules-02-typing.png")
+    assert _pulse(session).gain == 0.25
+    if submit == "enter":
+        ui.press_key(Qt.Key.Key_Return, object_name="form.input.gain")
+    else:
+        ui.press_key(Qt.Key.Key_Tab, object_name="form.input.gain")
+    ui.screenshot(evidence / f"modules-03-{submit}.png")
+    assert _pulse(session).gain == 0.5
+    assert ui.observe(object_name="form.input.gain").text == "0.5"
+
+
+def test_module_dropdown_writes_immediately(session: _Session, tmp_path: Path) -> None:
+    ui = ComponentDriver(_open(session, RecordingDialogPresenter()))
+    ui.resize_window(1100, 760)
+    ui.select_tree_row(("modules", "Q1", "pulses", "pi"), object_name="inspect.library")
+    ui.click(object_name="form.fold.group.Advanced")
+    ui.choose_option(object_name="form.input.nqz", value="2")
+    ui.screenshot(
+        Path(os.environ.get("INSPECT_IMPLICIT_EVIDENCE", str(tmp_path)))
+        / "dropdown-written.png"
+    )
+    assert _pulse(session).nqz == 2
 
 
 def test_library_filter_and_hierarchy_keep_leaf_edit_actions(
@@ -253,23 +306,14 @@ def test_library_filter_and_hierarchy_keep_leaf_edit_actions(
     ui.enter_text(object_name="inspect.library.filter", value="PI", commit=False)
     ui.expand_tree(leaf, object_name="inspect.library")
     assert ui.observe(object_name="inspect.entry.name").text == PULSE
-    ui.enter_text(
-        object_name="inspect.entry.name", value="Q1.pulses.changed", commit=False
-    )
-    ui.click(object_name="inspect.entry.revert")
-    assert ui.observe(object_name="inspect.entry.name").text == PULSE
     ui.press_key(Qt.Key.Key_Home, object_name="inspect.library")
     ui.press_key(Qt.Key.Key_Down, object_name="inspect.library")
     assert not ui.observe(object_name="inspect.entry.name").enabled
     ui.expand_tree(leaf, object_name="inspect.library")
     assert ui.observe(object_name="inspect.entry.name").text == PULSE
-    ui.enter_text(
-        object_name="inspect.entry.name", value="Q1.pulses.pi_v2", commit=False
-    )
-    ui.click(object_name="inspect.entry.apply")
+    ui.enter_text(object_name="inspect.entry.name", value="Q1.pulses.pi_v2")
     assert ui.observe(object_name="inspect.entry.name").text == "Q1.pulses.pi_v2"
     assert ("modules", "Q1", "pulses", "pi_v2") in rows()
-    assert ui.observe(object_name="inspect.entry.status").text == "Saved"
     presenter.queue_confirm(True)
     ui.click("Delete")
     ui.enter_text(object_name="inspect.library.filter", value="", commit=False)
@@ -281,84 +325,23 @@ def test_library_filter_and_hierarchy_keep_leaf_edit_actions(
     assert not rows()
 
 
-def test_entry_edit_is_unsaved_until_revert_or_apply(
-    session: _Session, tmp_path: Path
-) -> None:
-    presenter = RecordingDialogPresenter()
-    dialog = _open(session, presenter)
-    _select(dialog, PULSE)
-    assert _child(dialog, QLineEdit, "inspect.entry.name").text() == PULSE
-    assert _status(dialog) == "Saved"
-    apply = _child(dialog, QPushButton, "inspect.entry.apply")
-    revert = _child(dialog, QPushButton, "inspect.entry.revert")
-    assert not apply.isEnabled()
-    dialog.activateWindow()
-    _child(dialog, QLineEdit, "form.input.gain").setFocus()
-    QApplication.processEvents()
-
-    driver = ComponentDriver(dialog)
-
-    def capture(step: str) -> None:
-        driver.screenshot(tmp_path / f"{step}.png")
-        (tmp_path / f"{step}.json").write_text(
-            json.dumps(asdict(driver.visible()), indent=2), encoding="utf-8"
-        )
-
-    capture("01-saved")
-    driver.enter_text(value="0.5", object_name="form.input.gain", commit=False)
-    driver.press_key(Qt.Key.Key_Tab, object_name="form.input.gain")
-    capture("02-unsaved")
-    assert _status(dialog) == "Unsaved"
-    assert apply.isEnabled() and revert.isEnabled()
-    driver.click(object_name="inspect.entry.revert")
-    capture("03-reverted")
-    assert _status(dialog) == "Saved"
-    assert float(_child(dialog, QLineEdit, "form.input.gain").text()) == 0.25
-    assert _library(session).module_spec(PULSE) == PulseSpec(
-        ch=0, nqz=1, freq=100.0, gain=0.25, waveform=WAVEFORM
-    )
-
-    driver.press_key(Qt.Key.Key_Backtab, object_name="form.input.gain")
-    driver.enter_text(value="0.5", object_name="form.input.gain", commit=False)
-    driver.press_key(Qt.Key.Key_Tab, object_name="form.input.gain")
-    capture("04-reedited")
-    driver.click(object_name="inspect.entry.apply")
-    capture("05-applied")
-    written = _library(session).module_spec(PULSE)
-    assert isinstance(written, PulseSpec)
-    assert written.gain == 0.5
-    assert _status(dialog) == "Saved"
-    presenter.assert_no_unexpected_messages()
-
-
-def test_reopened_module_preserves_full_frequency_precision_on_apply(
+def test_reopened_module_preserves_full_frequency_precision_on_commit(
     session: _Session,
 ) -> None:
-    presenter = RecordingDialogPresenter()
     session.control.set_module(
         session.control.read_context().target,
         PULSE,
         PulseSpec(ch=0, nqz=1, freq=5000.1234, gain=0.25, waveform=WAVEFORM),
     )
-    before = _library(session).document()
-    dialog = _open(session, presenter)
-    _select(dialog, PULSE)
-    freq = _child(dialog, QLineEdit, "form.input.freq")
-    apply = _child(dialog, QPushButton, "inspect.entry.apply")
-    assert freq.text() == "5000.123"
-    assert not apply.isEnabled()
-    apply.click()
-    assert _library(session).document() == before
-
-    # A real write through another field must not submit the rounded display.
-    commit_text(_child(dialog, QLineEdit, "form.input.gain"), "0.5")
-    assert apply.isEnabled()
-    apply.click()
+    ui = ComponentDriver(_open(session, RecordingDialogPresenter()))
+    ui.resize_window(1100, 760)
+    ui.select_tree_row(("modules", "Q1", "pulses", "pi"), object_name="inspect.library")
+    assert ui.observe(object_name="form.input.freq").text == "5000.123"
+    ui.enter_text(object_name="form.input.gain", value="0.5")
     written = _library(session).module_spec(PULSE)
     assert isinstance(written, PulseSpec)
     assert written.freq == 5000.1234
     assert written.gain == 0.5
-    presenter.assert_no_unexpected_messages()
 
 
 def test_child_waveform_key_stays_a_key_after_apply(session: _Session) -> None:
@@ -396,7 +379,6 @@ def test_child_waveform_key_stays_a_key_after_apply(session: _Session) -> None:
         "(missing)" in waveform.itemText(index) for index in range(waveform.count())
     )
     commit_text(_child(dialog, QLineEdit, "form.input.freq"), "150")
-    _child(dialog, QPushButton, "inspect.entry.apply").click()
     written = _library(session).module_spec(PULSE)
     assert isinstance(written, PulseSpec)
     assert written.waveform == WAVEFORM
@@ -414,66 +396,66 @@ def test_root_family_tag_has_no_row(session: _Session) -> None:
     assert dialog.findChild(QWidget, "form.input.type") is None
 
 
-def test_name_apply_renames_and_a_taken_name_keeps_the_draft(
+def test_name_enter_renames_and_a_taken_name_keeps_input_inline(
     session: _Session,
+    tmp_path: Path,
 ) -> None:
-    # Install the collision before drafting: this tests name validation, not stale revision.
-    before = _library(session).document()
-    # The waveform family is separate; a module name must not reuse a module key.
     session.control.set_module(
         session.control.read_context().target,
         f"{PULSE}_v2",
         PulseSpec(ch=0, nqz=1, freq=1.0, gain=0.1, waveform=WAVEFORM),
     )
-    taken = _library(session).document()
-    assert taken != before
-    presenter = RecordingDialogPresenter()
-    dialog = _open(session, presenter)
-    _select(dialog, PULSE)
-    name = _child(dialog, QLineEdit, "inspect.entry.name")
-    _type(name, "_v2")
-    commit_text(_child(dialog, QLineEdit, "form.input.gain"), "0.75")
-    _child(dialog, QPushButton, "inspect.entry.apply").click()
-    assert presenter.messages("warning"), "a taken name must be reported"
-    assert _library(session).document() == taken
-    assert _status(dialog) == "Unsaved"
-    assert name.text() == f"{PULSE}_v2"
-
-    name.setText(f"{PULSE}_v3")
-    presenter.calls.clear()
-    _child(dialog, QPushButton, "inspect.entry.apply").click()
-    library = _library(session)
-    assert PULSE not in library.module_keys()
-    written = library.module_spec(f"{PULSE}_v3")
-    assert isinstance(written, PulseSpec)
-    assert written.gain == 0.75
-    assert name.text() == f"{PULSE}_v3"
-    assert _status(dialog) == "Saved"
-    presenter.assert_no_unexpected_messages()
+    before = _library(session).document()
+    ui = ComponentDriver(_open(session, RecordingDialogPresenter()))
+    ui.resize_window(1100, 760)
+    ui.select_tree_row(("modules", "Q1", "pulses", "pi"), object_name="inspect.library")
+    ui.enter_text(object_name="inspect.entry.name", value=f"{PULSE}_v2")
+    ui.screenshot(
+        Path(os.environ.get("INSPECT_IMPLICIT_EVIDENCE", str(tmp_path)))
+        / "name-rejected.png"
+    )
+    assert ui.observe(object_name="inspect.entry.error").text
+    assert ui.observe(object_name="inspect.entry.name").text == f"{PULSE}_v2"
+    assert _library(session).document() == before
+    ui.enter_text(object_name="inspect.entry.name", value=f"{PULSE}_v3")
+    ui.screenshot(
+        Path(os.environ.get("INSPECT_IMPLICIT_EVIDENCE", str(tmp_path)))
+        / "name-renamed.png"
+    )
+    assert ui.observe(object_name="inspect.entry.error").text == ""
+    assert PULSE not in _library(session).module_keys()
+    assert _pulse(session, f"{PULSE}_v3").gain == 0.25
 
 
-def test_switching_with_unsaved_changes_prompts_and_discard_loads_next(
-    session: _Session,
+@pytest.mark.parametrize("invalid", ["oops", "2"])
+def test_invalid_module_input_is_red_and_discarded_when_switching(
+    session: _Session, tmp_path: Path, invalid: str
 ) -> None:
     presenter = RecordingDialogPresenter()
-    dialog = _open(session, presenter)
-    _select(dialog, PULSE)
-    commit_text(_child(dialog, QLineEdit, "form.input.gain"), "0.9")
+    ui = ComponentDriver(_open(session, presenter))
+    ui.resize_window(1100, 760)
+    ui.select_tree_row(("modules", "Q1", "pulses", "pi"), object_name="inspect.library")
     before = _library(session).document()
-
-    presenter.queue_save_discard_cancel("cancel")
-    _select(dialog, WAVEFORM)
-    assert [call.kind for call in presenter.calls] == ["save_discard_cancel"]
-    assert _child(dialog, QLineEdit, "inspect.entry.name").text() == PULSE
-    assert _child(dialog, QLineEdit, "form.input.gain").text() == "0.9"
-    assert _status(dialog) == "Unsaved"
-
-    presenter.queue_save_discard_cancel("discard")
-    _select(dialog, WAVEFORM)
-    assert _child(dialog, QLineEdit, "inspect.entry.name").text() == WAVEFORM
-    assert float(_child(dialog, QLineEdit, "form.input.length").text()) == 0.1
-    assert _status(dialog) == "Saved"
+    help_before = ui.observe(object_name="form.row.gain").tooltip
+    ui.enter_text(object_name="form.input.gain", value=invalid)
+    ui.screenshot(
+        Path(os.environ.get("INSPECT_IMPLICIT_EVIDENCE", str(tmp_path)))
+        / "invalid-module.png"
+    )
+    assert ui.observe(object_name="form.row.gain").tooltip != help_before
+    assert ui.observe(object_name="form.input.gain").text == invalid
     assert _library(session).document() == before
+    ui.select_tree_row(
+        ("waveforms", "Q1", "waveforms", "base"), object_name="inspect.library"
+    )
+    ui.screenshot(
+        Path(os.environ.get("INSPECT_IMPLICIT_EVIDENCE", str(tmp_path)))
+        / "invalid-discarded.png"
+    )
+    ui.select_tree_row(("modules", "Q1", "pulses", "pi"), object_name="inspect.library")
+    assert ui.observe(object_name="form.input.gain").text == "0.25"
+    ui.click("Close")
+    presenter.assert_no_unexpected_messages()
 
 
 def test_escape_retires_inspect_before_late_context_broadcast(
@@ -506,71 +488,6 @@ def test_escape_retires_inspect_before_late_context_broadcast(
     assert other.observe(object_name="inspect.entry.name").text == PULSE
 
 
-def test_dirty_close_requires_an_explicit_decision(session: _Session) -> None:
-    presenter = RecordingDialogPresenter()
-    dialog = _open(session, presenter)
-    dialog.show()
-    _select(dialog, PULSE)
-    commit_text(_child(dialog, QLineEdit, "form.input.gain"), "0.9")
-
-    presenter.queue_save_discard_cancel("cancel")
-    dialog.close()
-    assert dialog.isVisible()
-    assert _status(dialog) == "Unsaved"
-
-    presenter.queue_save_discard_cancel("save")
-    dialog.close()
-    assert not dialog.isVisible()
-    written = _library(session).module_spec(PULSE)
-    assert isinstance(written, PulseSpec)
-    assert written.gain == 0.9
-
-
-@pytest.mark.parametrize("action", ["switch", "close"])
-def test_unsaved_save_rejects_local_parse_errors_and_keeps_the_draft(
-    session: _Session, action: str
-) -> None:
-    presenter = RecordingDialogPresenter()
-    dialog = _open(session, presenter)
-    _select(dialog, PULSE)
-    name = _child(dialog, QLineEdit, "inspect.entry.name")
-    commit_text(name, "Q1.pulses.renamed")
-    commit_text(_child(dialog, QLineEdit, "form.input.freq"), "234")
-    gain = _child(dialog, QLineEdit, "form.input.gain")
-    commit_text(gain, "oops")
-    before = _library(session).document()
-    assert _status(dialog) == "Unsaved"
-    assert not _child(dialog, QPushButton, "inspect.entry.apply").isEnabled()
-
-    presenter.queue_save_discard_cancel("save")
-    if action == "switch":
-        _select(dialog, WAVEFORM)
-    else:
-        dialog.close()
-
-    assert _library(session).document() == before
-    assert dialog.isVisible()
-    assert _child(dialog, QLineEdit, "form.input.gain") is gain
-    assert gain.text() == "oops"
-    assert name.text() == "Q1.pulses.renamed"
-    assert _child(dialog, QLineEdit, "form.input.freq").text() == "234"
-    assert _status(dialog) == "Unsaved"
-    selected = _child(dialog, QTreeWidget, "inspect.library").currentItem()
-    assert selected is not None and selected.text(0) == "pi"
-
-    commit_text(gain, "0.6")
-    presenter.queue_save_discard_cancel("save")
-    if action == "switch":
-        _select(dialog, WAVEFORM)
-        assert _child(dialog, QLineEdit, "inspect.entry.name").text() == WAVEFORM
-    else:
-        dialog.close()
-        assert not dialog.isVisible()
-    written = _library(session).module_spec("Q1.pulses.renamed")
-    assert isinstance(written, PulseSpec)
-    assert (written.freq, written.gain, written.waveform) == (234.0, 0.6, WAVEFORM)
-
-
 def test_read_only_locks_inputs_but_keeps_scrolling_and_folds(
     session: _Session, qapp: QApplication
 ) -> None:
@@ -588,10 +505,8 @@ def test_read_only_locks_inputs_but_keeps_scrolling_and_folds(
         assert not _button(dialog, text).isEnabled(), text
     # The host opens ARB read-only by its own rule; the entry stays reachable.
     assert _button(dialog, "Arb Waveforms…").isEnabled()
-    assert not _child(dialog, QPushButton, "inspect.entry.apply").isEnabled()
     _type(gain, "9")
     assert float(gain.text()) == 0.25
-    assert _status(dialog) == "Saved"
 
     advanced = _group_fold(dialog, "Advanced")
     assert advanced.text().startswith("▸ ")
@@ -717,7 +632,6 @@ def test_template_switch_keeps_only_the_name_and_creates_the_new_template(
     assert (
         _child(dialog, QLineEdit, "inspect.entry.name").text() == "Q1.pulses.my_pulse"
     )
-    assert _status(dialog) == "Saved"
     presenter.assert_no_unexpected_messages()
 
 
@@ -811,9 +725,15 @@ def test_new_entry_uses_point_aliases_and_recovers_after_missing_bindings(
     presenter = RecordingDialogPresenter()
     dialog = _open(session, presenter, templates=templates)
     ui = ComponentDriver(dialog)
-    ui.screenshot(tmp_path / "01-inspect.png")
+    ui.screenshot(
+        Path(os.environ.get("INSPECT_IMPLICIT_EVIDENCE", str(tmp_path)))
+        / "01-inspect.png"
+    )
     ui.click("New")
-    ui.screenshot(tmp_path / "02-new-entry.png")
+    ui.screenshot(
+        Path(os.environ.get("INSPECT_IMPLICIT_EVIDENCE", str(tmp_path)))
+        / "02-new-entry.png"
+    )
     assert not unhandled, f"New must handle template bindings: {unhandled}"
     assert any(d.title == "Create ModuleLibrary entry" for d in ui.dialogs())
     new = _child(dialog, QDialog, "inspect.new_entry")
@@ -834,7 +754,10 @@ def test_new_entry_uses_point_aliases_and_recovers_after_missing_bindings(
     editor.choose_option(
         object_name="inspect.new_entry.template", value="Drive pulse  (module)"
     )
-    editor.screenshot(tmp_path / "03-other-template.png")
+    editor.screenshot(
+        Path(os.environ.get("INSPECT_IMPLICIT_EVIDENCE", str(tmp_path)))
+        / "03-other-template.png"
+    )
     assert not unhandled, f"Template switching must not escape Qt: {unhandled}"
     assert editor.observe("Create").enabled
     assert not editor.observe(object_name="inspect.new_entry.error").visible
@@ -843,7 +766,10 @@ def test_new_entry_uses_point_aliases_and_recovers_after_missing_bindings(
     editor.choose_option(
         object_name="inspect.new_entry.template", value="Aliased pulse  (module)"
     )
-    editor.screenshot(tmp_path / "04-return-to-aliased.png")
+    editor.screenshot(
+        Path(os.environ.get("INSPECT_IMPLICIT_EVIDENCE", str(tmp_path)))
+        / "04-return-to-aliased.png"
+    )
     assert not unhandled
     assert editor.observe("Create").enabled == loaded
     if loaded:

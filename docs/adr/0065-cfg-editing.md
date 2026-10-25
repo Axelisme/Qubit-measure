@@ -16,6 +16,8 @@ Measure 的 `TabFormResource` 擁有一份 Qt-free `FormState` 與固定來源�
 
 Library、Inspect 與 writeback 也使用 FormState／FormEditor，但各自持有 state 與提交政策，不借用 tab resource。Library 寫入持久 Spec，writeback 的 opaque draft 與 selected Apply 見 [[0008]]。舊 CfgSchema、gui.cfg、widgets.cfg 與 experiment.cfg_editing 已移除。
 
+使用者於 2026-10-25 裁定：「但我比较想是我改完就自动 apply，有隐式 apply。然后 revert 的话，感觉三个 panel 都可以有，只是 UI UX 怎么设计我还不确定。」「因为目前是 write through，所以我觉得好算了，就不做 reverse undo 功能了。」Inspect 三頁採隱式提交，不提供 revert 或 undo。
+
 ## 共用機制與領域 owner
 
 2026-10-18 採用的欄位轉換、固定 list 與保存還原設計見 [[0079]]，實作尚待完成。以下相關條款描述目標契約，不代表目前程式已完成遷移。
@@ -90,7 +92,7 @@ Form expression 的 `$alias` 與 `$alias.path` 沿固定 ParameterContext 解析
 
 ## Library 與 Inspect
 
-`open_library_entry` 從持久 ModuleSpec／WaveformSpec 建立 LibraryEntryForm。Expression 使用開啟時固定的 env，Apply 將求得的數字寫進 Spec，不把 expression 存成 Library 來源。Name、Saved／Unsaved、Revert 與切換條目前的未存確認由 Inspect 管理。表單 Invalid 或有 local parse errors 時不提交。
+`open_library_entry` 從持久 ModuleSpec／WaveformSpec 建立 LibraryEntryForm。Expression 使用開啟時固定的 env，提交將求得的數字寫進 Spec，不把 expression 存成 Library 來源。Inspect 的 Modules 在 Enter、一般離開欄位、改下拉或勾選時，將 Name 與有效 Spec 以一次 replace 交 `apply_library_change`。文字 idle debounce 在此頁停用，打字途中不寫入。表單 Invalid 或有 local parse errors 時標紅、不提交。寫入被 owner 拒絕時，錯誤留在頁面，輸入可再編輯，檔案不變。Revision 過期沿 [[0081]] 的 Keep／Reload 流程。切換條目、切換 point 或關閉時直接丟棄未提交輸入，不詢問 Save／Discard／Cancel，也沒有 Apply、Revert 或 Saved／Unsaved 標籤。
 
 New 從 Registry 注入的 TemplateDef 目錄建立 entry input。換範本建新 State 與 Editor，欄位、折疊與捲動回預設，只保留 Name。已綁定的 Slot 保留 child key。生成器負責 defaults 與驗證，caller 不另建 normalization 或 shape catalog。
 
@@ -102,7 +104,9 @@ Inspect、Device 與 ARB UI 及其 service 由 session 提供，host 經公開�
 
 使用者於 2026-10-23 對 alias 表加 participants 列裁定：「甲」。Alias 是目前工作焦點，parameters 是元件事實。Participants 的有序名稱清單由通用 alias owner 保存與解析，不在 recipe 重做這些規則。名稱轉索引屬於領域表單捕捉邊界，不放進通用 alias owner。
 
-Aliases 由共用 Inspect 的第三頁編輯，沒有獨立 AliasDialog 或 aliases wire 名稱。Value 欄可輸入單一識別名、既有 `$` link 或 YAML flow list，例如 `[Q3, Q1]`。清單元素各自沿用 earlier-row link 規則，順序不變。空清單是未綁，不是已選零個元件。List 讀回使用普通固定 capture 的 `lookup`／`lookup_point`／`value`，不另造字串編碼。單一元件路徑及 template placeholder 拒絕清單，不取首項。Apply 將有序 authored rows 整表交 `apply_alias_rows`。它要求已選 point，否則回 `no_context`；成功時先原子保存該 point 的 `aliases.yaml`，再安裝 memory 與發布。失敗保留舊表、檔案、版本與 draft。Alias draft 固定載入時的 entry／point，沿用 Modules 固定 capture 的慣例。Clean draft 隨切換換表，dirty draft 保留。Apply 發現來源與目前 target 不同時拒絕並提示，兩端檔案都不改。同 target 才能提交；Revert 或重開會丟棄草稿並載入目前 point 的表。關閉時未存修改仍走 Save／Discard／Cancel。
+Aliases 由共用 Inspect 的第三頁編輯，沒有獨立 AliasDialog 或 aliases wire 名稱。Value 欄可輸入單一識別名、既有 `$` link 或 YAML flow list，例如 `[Q3, Q1]`。清單元素各自沿用 earlier-row link 規則，順序不變。空清單是未綁，不是已選零個元件。List 讀回使用普通固定 capture 的 `lookup`／`lookup_point`／`value`，不另造字串編碼。單一元件路徑及 template placeholder 拒絕清單，不取首項。
+
+Aliases 在每次儲存格編輯完成或 Remove 後，將有效的有序 authored rows 整表交 `apply_alias_rows`。Add 的新列在 alias 名稱有效前只留在畫面，空 Value 仍是合法的未綁值。無效列標紅、不寫入。Owner 要求已選 point，否則回 `no_context`；成功時先原子保存該 point 的 `aliases.yaml`，再安裝 memory 與發布。失敗保留舊表、檔案、版本與畫面輸入。Revision 過期沿 [[0081]] 的 Keep／Reload 流程。切換 point 或 entry 時直接丟棄未提交輸入並載入目前表。關閉不詢問，也不提供 Apply、Revert 或 undo。
 
 MCP 直接呼叫 owning context，不開 dialog、不切頁或焦點。`context.aliases_set` 回已安裝的 authored rows，不解析；解析另讀 snapshot。`context.set_parameter` 用一次 capture 固定具體 target 與 before，保留 metadata、不寫 ledger。這些 mutation 沿既有 owner 與 holder admission，Run 中可寫，但不改既有 Form 或 Run 的固定 capture。`dialog.screenshot` 只擷取目前已開 dialog 的當前頁，不切 Inspect tab。
 

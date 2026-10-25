@@ -356,6 +356,10 @@ class FieldRow:
         self._tooltip = "\n".join(filter(None, (field.description, hint)))
         self.set_error("")
 
+    def set_idle_commit(self, *, enabled: bool) -> None:
+        """Enable or cancel text idle commits without changing pending text."""
+        self._set_idle_commit(enabled)
+
     def close(self) -> None:
         """Retire row callbacks, timers and filters before deleting its widget."""
         self._scope.close()
@@ -550,6 +554,7 @@ class FieldRow:
 
     def _build_control(self, header: QHBoxLayout) -> None:
         """Build the input or navigation control selected by this row's metadata."""
+        self._set_idle_commit: Callable[[bool], None] = lambda _enabled: None
         field = self.field
         if field.options is not None:
             self._build_options(header)
@@ -669,7 +674,9 @@ class FieldRow:
             )
         # Shared text policy commits on idle/Enter/focus loss; a checkbox
         # commits each toggle.
-        connect_committed_value_widget(widget, self._input_changed, scope=self._scope)
+        self._set_idle_commit = connect_committed_value_widget(
+            widget, self._input_changed, scope=self._scope
+        )
 
     def _build_mode(self, widget: QLineEdit) -> QAction:
         """Return the Expression action, listed on widget and after its menu."""
@@ -725,6 +732,12 @@ class FieldRow:
             and _expression(self.field)
             and self.field.has_value
             and widget.text() == _input_text(self.field)
+        )
+
+    def has_pending_text(self) -> bool:
+        """Return whether the text control differs from published state input."""
+        return isinstance(self.input, QLineEdit) and not self._shows_state(
+            self.input.text(), expression=self._expression_selected()
         )
 
     def _shows_state(self, text: str, *, expression: bool) -> bool:

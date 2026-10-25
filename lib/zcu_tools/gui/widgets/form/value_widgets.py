@@ -174,6 +174,7 @@ class _TextCommit(QObject):
         scope: LifetimeScope | None,
     ) -> None:
         super().__init__(widget)
+        self._idle = True
         self._scope = LifetimeScope(self)
         if scope is not None:
             scope.add_cleanup(self._scope.close)
@@ -198,6 +199,16 @@ class _TextCommit(QObject):
             self._scope.connect(self._numeric_committed, callback)
             self._scope.connect(widget.valueChanged, self._numeric_changed)
 
+    def idle_setter(self) -> Callable[[bool], None]:
+        """Return a scope-guarded idle policy callback for the owning row."""
+        return self._scope.callback(lambda enabled: self.set_idle(enabled=enabled))
+
+    def set_idle(self, *, enabled: bool) -> None:
+        """Enable idle expiry, or cancel it while keeping Enter/focus commits."""
+        self._idle = enabled
+        if not enabled:
+            self._cancel()
+
     def _cancel(self) -> None:
         self._timer.stop()
         self._pending_text = None
@@ -206,7 +217,7 @@ class _TextCommit(QObject):
         return self._widget.isEnabled() and not self._widget.isReadOnly()
 
     def _edited(self, text: str) -> None:
-        if self._editable():
+        if self._idle and self._editable():
             self._pending_text = text
             self._timer.start()
 
@@ -281,9 +292,12 @@ def connect_committed_value_widget(
     callback: Callable[..., object],
     *,
     scope: LifetimeScope | None = None,
-) -> None:
-    """Commit user text after 500 ms idle, Enter or ordinary focus loss.
+) -> Callable[[bool], None]:
+    """Connect commits and return a callable that enables/disables idle expiry.
 
+    Idle commits start enabled at 500 ms. Call the returned setter with False
+    to cancel idle expiry without changing Enter/focus commits; True enables it.
+    For checkboxes/dropdowns the setter has no effect.
     Line-edit commits call callback with no arguments. New input restarts the
     idle interval; explicit commits consume it. Programmatic text changes do not
     schedule commits. A supplied scope retires callbacks, timer and filters on
@@ -294,10 +308,11 @@ def connect_committed_value_widget(
     checkboxes and dropdowns keep immediate value-change callbacks.
     """
     if isinstance(widget, QLineEdit):
-        _TextCommit(widget, widget, callback, scope)
-        return
+        connection = _TextCommit(widget, widget, callback, scope)
+        return connection.idle_setter()
     if isinstance(widget, (QSpinBox, TrimDoubleSpinBox)):
         text = widget.findChild(QLineEdit)
-        _TextCommit(widget, text, callback, scope)
-        return
+        connection = _TextCommit(widget, text, callback, scope)
+        return connection.idle_setter()
     connect_value_widget(widget, callback, scope=scope)
+    return lambda _enabled: None
