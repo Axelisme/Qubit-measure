@@ -110,9 +110,16 @@ class CalibrationTunablesForm(FrequencyTunablesForm):
         Literal["auto_pi_product", "fixed"], Display(label="Rabi drive gain mode")
     ] = Field(default="auto_pi_product", description="Rabi drive gain mode")
     target_pi_length_us: Annotated[
-        float | None, Display(label="Target pi duration", unit="µs")
+        float | None,
+        Display(
+            label="Target pi duration",
+            unit="µs",
+            placeholder="min(seed π, stop floor / stop factor); default ≤ 0.166667 µs",
+        ),
     ] = Field(
-        default=None, gt=0, description="Target pi duration; blank uses host pi seed"
+        default=None,
+        gt=0,
+        description="Target pi duration; blank uses min(seed π, Rabi stop floor / stop factor)",
     )
     rabi_min_start_us: Annotated[
         float, Display(label="Rabi start floor", unit="µs")

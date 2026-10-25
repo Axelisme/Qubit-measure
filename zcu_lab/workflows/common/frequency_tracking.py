@@ -207,7 +207,9 @@ class FrequencyTracker:
 
     predictor is an independent model from the fixed plan. begin_point queries
     residual confidence once (not once per widening), and publishes cur_m and
-    m_ratio relative to the first point. finish_point observes trusted frequency
+    m_ratio relative to seed_flux supplied to begin_point, or None when unknown.
+    matrix_element_at queries the active physical model at an explicit device
+    coordinate. finish_point observes trusted frequency
     or counts a failed point; observe_linewidth updates gain feedback. Recovery runs on the
     first failure and first success after failure, activating only a validated
     overlay and reseeding residuals against that overlay.
@@ -223,7 +225,6 @@ class FrequencyTracker:
     last_recovery: RecoveryAttempt | None = None
     cur_m: float | None = None
     m_ratio: float | None = None
-    first_m: float | None = None
     qfw_factor: float | None = None
     last_linewidth_index: int = 0
 
@@ -236,14 +237,29 @@ class FrequencyTracker:
             self.predictor.flux_bias,
         )
 
-    def begin_point(self, flux: float) -> float:
-        """Clear point recovery; return corrected MHz center and publish matrix element."""
+    def matrix_element_at(self, flux: float) -> float:
+        """Return |<0|n|1>| at finite flux in the predictor's device coordinate.
+
+        Use the active model, including accepted recovery. Zero is a valid
+        matrix element but cannot be a feed-forward denominator. Invalid flux
+        raises ValueError; predictor failures propagate.
+        """
+        if not math.isfinite(flux):
+            raise ValueError("Matrix-element flux must be finite")
+        return float(self.predictor.predict_matrix_element(flux))
+
+    def begin_point(self, flux: float, *, seed_flux: float | None = None) -> float:
+        """Clear recovery and return corrected MHz; publish the seed-relative matrix ratio.
+
+        seed_flux is the seed pulse's calibration setpoint in the same coordinate
+        as flux. None or a zero reference element disables m_ratio; it never
+        silently uses the first point as the reference.
+        """
         self.last_recovery = None
         base = float(self.predictor.predict_freq(flux))
-        self.cur_m = float(self.predictor.predict_matrix_element(flux))
-        if self.first_m is None:
-            self.first_m = self.cur_m
-        self.m_ratio = self.cur_m / self.first_m if self.first_m > 0 else None
+        self.cur_m = self.matrix_element_at(flux)
+        seed_m = self.matrix_element_at(seed_flux) if seed_flux is not None else 0.0
+        self.m_ratio = self.cur_m / seed_m if seed_m > 0 and self.cur_m > 0 else None
         correction = self.residuals.estimate(flux)
         center = base + (
             correction.confidence * correction.value if correction else 0.0

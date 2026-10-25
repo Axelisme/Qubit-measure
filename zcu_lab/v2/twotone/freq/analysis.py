@@ -6,7 +6,13 @@ from typing import Annotated, Literal
 import numpy as np
 from numpy.typing import NDArray
 from zcu_tools.analysis.failure import AnalysisFailed
-from zcu_tools.analysis.fitting import PeakCandidate, detect_peaks, fit_qubit_freq
+from zcu_tools.analysis.fitting import (
+    PeakCandidate,
+    detect_peaks,
+    fit_qubit_freq,
+    fitlor,
+    lorfunc,
+)
 from zcu_tools.cfg_model import FieldMeta
 
 
@@ -102,9 +108,30 @@ def fit_spectrum(
         freqs, observed = freqs[mask], observed[mask]
         if freqs.size < 6:
             raise AnalysisFailed("Fewer than six samples around selected peak")
-    frequency, error, width, width_error, fitted, _ = fit_qubit_freq(
-        freqs, observed, options.model_type
-    )
+    if isolate_peaks and options.model_type == "lor" and selected is not None:
+        # A broad peak can occupy most of the isolated window. Its median is
+        # then signal, not background; seed the detected positive peak explicitly.
+        baseline = float(np.min(observed))
+        parameters, covariance = fitlor(
+            freqs,
+            observed,
+            fitparams=[
+                baseline,
+                0.0,
+                selected.height - baseline,
+                selected.center,
+                selected.width / 2,
+            ],
+            fixedparams=[None, 0.0, None, None, None],
+        )
+        errors = np.sqrt(np.diag(covariance))
+        frequency, error = parameters[3], errors[3]
+        width, width_error = 2 * parameters[4], 2 * errors[4]
+        fitted = lorfunc(freqs, *parameters)
+    else:
+        frequency, error, width, width_error, fitted, _ = fit_qubit_freq(
+            freqs, observed, options.model_type
+        )
     return SpectrumFit(
         float(frequency),
         float(error),

@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 from zcu_tools.analysis.fitting import PeakCandidate
+from zcu_tools.program.v2 import SweepCfg
 from zcu_tools.simulate.fluxonium.physical_fit import FluxoniumModelSnapshot
 
 from zcu_lab.workflows.common.frequency_tracking import RecoveryAttempt
@@ -80,6 +81,12 @@ class RabiResult:
     fitting failures return failed/reason. Unexpected errors propagate.
     too_fast_pi_length_us records a quality-trusted rejected fit below .03 us,
     never a usable pulse. Auto mode uses it only to propose a lower gain.
+    too_slow_pi_length_us records a quality-trusted rejected fit above 90% of
+    the measured maximum duration; auto mode uses it only to raise gain.
+    target_pi_length_us is the resolved setpoint in us. requested_sweep and
+    planned_sweep are the original and clock-planned length grids in us.
+    Planned is None if acquisition failed before returning a native record;
+    all three are None on dependency skip.
     """
 
     status: StageStatus
@@ -90,6 +97,10 @@ class RabiResult:
     file: str | None
     drive_gain: float | None = None
     too_fast_pi_length_us: float | None = None
+    too_slow_pi_length_us: float | None = None
+    target_pi_length_us: float | None = None
+    requested_sweep: SweepCfg | None = None
+    planned_sweep: SweepCfg | None = None
 
 
 @dataclass(frozen=True)

@@ -72,7 +72,9 @@ from zcu_lab.workflows.common.saving import save_native
 class CoherencePlan(T1Plan):
     """Choose flux points and lifetimes to map relaxation and dephasing.
 
-    probe_pulse supplies independent spectroscopy waveform/gain, while the
+    seed_flux is the seed pulse's calibration setpoint in flux_unit; None
+    disables matrix-element feed-forward. probe_pulse supplies independent
+    spectroscopy waveform/gain, while the
     inherited qub_pulse remains the Rabi and downstream pi drive.
     Inherited fields retain T1Plan's explicit unit, resolved native routing and
     delay resolution. measure_t1/measure_t2ramsey/measure_t2echo are fixed bools,
@@ -82,6 +84,10 @@ class CoherencePlan(T1Plan):
     GE shots after calibration and before lifetimes, without fitting.
     """
 
+    seed_flux: float | None = Field(
+        default=None,
+        description="Seed pulse calibration flux in flux_unit; None disables matrix feed-forward",
+    )
     probe_pulse: PulseCfg = Field(
         description="Independent spectroscopy pulse with its own waveform and initial gain"
     )
@@ -603,7 +609,9 @@ async def coherence_fluxdep(
     _ = env.soc
     _ = env.devices
     carry = CalCarry(
-        env.context, frequency_tracker=FrequencyTracker(plan.predictor.make_predictor())
+        env.context,
+        seed_flux=plan.seed_flux,
+        frequency_tracker=FrequencyTracker(plan.predictor.make_predictor()),
     )
     last_ge_flux: float | None = None
     t1_by_flux: LifetimeHistory = []

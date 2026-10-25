@@ -29,6 +29,7 @@ class FrequencyFit:
     error. width_mhz/width_error_mhz are the FWHM and its standard error.
     freqs/observed/fitted are float64 vectors for the selected fit interval.
     peaks holds all candidates; selected_peak is the sampled target or None.
+    source retains the full acquired spectrum for window gates and plotting.
     quality contains residual diagnostics with no parameter-error entries.
     Values are not acceptance-filtered: native nonfinite errors and unavailable
     diagnostics remain visible for the workflow to reject.
