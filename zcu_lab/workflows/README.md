@@ -58,7 +58,7 @@ Plan 是 frozen、extra-forbid 的 Pydantic model。Tunables 是 extra-forbid mo
 每次 `tun.current` 取得目前已接受的完整 model。需要子 model 時直接讀
 `tun.current.t1` 或 `tun.current.cal`，再傳給該段 helper。
 
-序列與 core 相同時，helper 接同一個 Scope 與 typed cfg：
+直接轉送 operation 的薄 helper 可以接同一個 Scope 與 typed cfg。量測＋分析的 stage 接 pulses、settings 與 guess，不收完整 experiment cfg：
 
 ```python
 async def run_t1(scope: Scope, cfg: T1Cfg):
@@ -75,7 +75,15 @@ Cfg 是位置參數，context 是 keyword-only。不要複製 core 的 pulse 序
 一趟開始建可變的 Pydantic point_record，未填欄位為 None。每個結果到了再填。
 Coherence 用 t1、t2ramsey、t2echo 三個欄位保存 lifetime，不再使用 measurements 列表。未量測或未到達的欄位為 None，讀取端不提供舊列表格式轉換。
 Coherence 與 MIST 共用的 calibrate_point 是校準複合 stage，內部依序呼叫 frequency、Rabi（依模式含 AmpRabi）、readout 的單實驗 helper，再回傳 PointCalibrationResult。主迴圈填各校準欄位，接著量 GE 與 lifetimes。
+T1、Ramsey、Echo 與 GE 的單實驗 helper 位於 `coherence_fluxdep/stages/`。各 stage 接收 `StageEnv`、本點已校準 pulses、自己的 settings 與本點 timing，不接收整份 plan 或 point record。
+Ramsey 與 Echo 各自回傳獨立的 frozen Result，記錄原有接受門檻的 `gates`。各 lifetime 與 GE 的 DAC 截斷值保存在自己的 `gain_clamped`，不重複寫入 point map。
+主迴圈填結果、更新各自的 accepted history，並以 `history.lifetime_guess` 計算 alpha=0.5 EWMA。T2 的 relax 另收本點 accepted T1，否則用 T1 EWMA／seed。
 校準遇到 unexpected exception 時不回傳 aggregate。Run 失敗，point 只保留主迴圈已填的欄位；已存的 native raw 仍在磁碟。Expected failed/rejected 正常回傳，不受影響。
+Overnight 的 `measure_t1`／`measure_echo` 接固定 `FixedPulses`、本 stage 的 `T1Settings`／`EchoSettings` 與 timing guess，分別回傳 frozen `T1Result`／`EchoResult`。Stage 內組裝 T1Cfg／T2EchoCfg，不共用 Coherence 的逐點校準 pulse stage。
+Overnight_mux 的 `measure_mux_t1`／`measure_mux_echo` 接 `FixedMuxPulses`、本 stage settings 與 timing guess。Stage 內組裝 MuxT1Cfg／MuxT2EchoCfg，再各量一次 mux 並逐 participant 分析，回傳 `MuxT1StageResult`／`MuxEchoStageResult`。固定 pulses 只含完整 tone 順序、readout、participant 選擇與 reset，不混入 timing policy 或機械服務。每個 fit 保留原始 tone index，不把 participant 順序當作 tone index。
+這兩個 workflow 的主迴圈在每個 stage 前只讀一次 `tun.current`，捕捉 averaging、retry、earlystop、掃描／relax policy 與 fit gates。T1 另收 `points` 與 `guess_us`。Echo 另收 `points` 與 `EchoTiming`，其中 `guess_us` 決定掃描終點，`relax_delay_us` 是主迴圈用 `echo_relaxation` 決定的值。`StageEnv` 只傳 plots、snapshot 與 summary。Stage 不修改 point record 或 history；主迴圈填結果與 gain clamp 診斷、判斷取消，再 commit 與追加 samples。
+T1／Echo 結果的拒絕原因列出未通過的 `Gate`，保留原接受門檻。Point record 仍使用原有的 status、reason、scalar、models 與 raw 檔名欄位，不加入 gates 欄位。
+Stage 遇到 unexpected exception 不回傳部分結果，point 只保留主迴圈已填欄位。已存 raw 留在磁碟；partial acquisition 則照常回傳 rejected/stopped 與 raw 檔名。
 主 body 用 try/finally，只在 finally 同步呼叫 `iteration.commit(point_record)` 一次，不加 await。
 量測間若 iteration.cancelled，補 status="skipped" 再 continue，下一點仍可執行。
 在 helper 裡則用 return 退出目前點，不用主 workflow 的 return 結束整個 run。
@@ -118,7 +126,7 @@ Frequency widening 以最後一次完整 attempt 取代該點的一列。Heatmap
 | `mist/<mode>/vs_flux` | 各 preparation 的背景扣除及 3σ 截斷 map。 | `map-<mode>.png` |
 
 Coherence 的 `measure_singleshot` 預設關閉。打開後，GE 在 readout 校準之後、lifetimes 之前執行。
-GE 要求本點 Rabi 已接受。`singleshot` 子表單控制 flux 最小間距與每種 preparation 的 shots。
+GE 要求本點 Rabi 已接受。主迴圈判斷資格與最小間距，呼叫 `stages.ge.measure_ge` 後填 `singleshot`；每個已保存 Completed（含 partial）更新最後 GE flux。`singleshot` 子表單控制 flux 最小間距與每種 preparation 的 shots。
 預設是暫定模擬值：間距 0、shots 100000。GE 只保存 `singleshot-ge.h5`，不擬合、不新增 workflow 圖；core 的 operation 即時圖照常。
 
 Coherence 與 MIST 的 frequency stage 使用獨立 `probe_pulse`，保留它的 waveform 與長度，頻率由 tracker 的掃描設定。

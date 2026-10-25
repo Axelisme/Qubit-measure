@@ -10,7 +10,7 @@ import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from pydantic import BaseModel, ConfigDict, Field, model_validator
-from zcu_tools.cfg_model import Gain
+from zcu_tools.cfg_model import DeviceName, Gain
 from zcu_tools.experiment.metadata import RunSnapshot
 from zcu_tools.experiment.scope import Scope
 from zcu_tools.experiment.workflows import (
@@ -77,7 +77,7 @@ class MISTPlan(BaseModel):
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
-    flux_dev: str = Field(min_length=1)
+    flux_dev: DeviceName = Field(min_length=1)
     flux_unit: Literal["A", "V", "native"]
     fluxes: tuple[float, ...]
     qub_pulse: PulseCfg

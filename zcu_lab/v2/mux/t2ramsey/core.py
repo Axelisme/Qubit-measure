@@ -115,8 +115,6 @@ frequency correction. NaN detune does not meet that requirement.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
-from functools import partial
 from typing import Annotated, ClassVar
 
 import numpy as np
@@ -133,7 +131,6 @@ from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     Delay,
-    ModularProgramV2,
     Pulse,
     ResetCfg,
     SweepCfg,
@@ -146,7 +143,7 @@ from zcu_tools.program.v2.modules import (
 )
 
 from zcu_lab.v2.support import live_line
-from zcu_lab.v2.support.mux import MuxFitFailure
+from zcu_lab.v2.support.mux import MuxFitFailure, averaged_mux_signal
 from zcu_lab.v2.support.mux_coherence import (
     MuxCoherenceResult,
     MuxCoherenceToneCfg,
@@ -319,7 +316,9 @@ class MuxT2RamseyExp(Experiment[MuxCoherenceResult, MuxT2RamseyCfg]):
             # 4. Average rounds into tone-major IQ without filling missing points.
             prog = builder.build()
             _ = builder.run_program(
-                prog, raw2signal_fn=partial(_averaged_signal, prog), rounds=cfg.rounds
+                prog,
+                raw2signal_fn=lambda raw: averaged_mux_signal(prog, raw).T,
+                rounds=cfg.rounds,
             )
         signals.trigger_update(flush=True)
         return MuxCoherenceResult(
@@ -408,14 +407,3 @@ class MuxT2RamseyExp(Experiment[MuxCoherenceResult, MuxT2RamseyCfg]):
             ax.grid(True)
             fig.tight_layout()
         return tuple(outcomes)
-
-
-def _averaged_signal(
-    prog: ModularProgramV2, acquired: Sequence[NDArray[np.float64]]
-) -> NDArray[np.complex128]:
-    """Convert normalized mux IQ from (point, tone, I/Q) to (tone, point)."""
-    for module in prog.modules:
-        if isinstance(module, MuxReadout) and module.name == "readout":
-            iq = module.collect_iq(prog, acquired, read_index=0)
-            return (iq[..., 0] + 1j * iq[..., 1]).T
-    raise ValueError("Coherence program is missing its named MuxReadout")

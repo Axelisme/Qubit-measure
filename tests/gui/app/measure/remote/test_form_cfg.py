@@ -6,7 +6,7 @@ from typing import ClassVar
 
 import pytest
 from pydantic import BaseModel, Field, create_model
-from zcu_tools.cfg_model import Range
+from zcu_tools.cfg_model import DeviceName, Range
 from zcu_tools.gui.app.measure.adapter import (
     Adapter,
 )
@@ -21,6 +21,54 @@ from tests.gui.app.measure._synthetic import SampleAdapter, SampleCfg
 
 from ._form_rpc import FormRpc, ModuleRpcAdapter, ModuleRpcCfg
 from ._helpers import Fixture
+
+
+class DeviceInput(SampleCfg):
+    instrument: DeviceName = "offline-coil"
+
+
+def DeviceAdapter_make_form(ctx: FormContext) -> Form[DeviceInput]:
+    del ctx
+    return Form(DeviceInput, {"sweep": Range(1.0, 2.0, expts=3)})
+
+
+DeviceAdapter = Adapter(
+    spec=replace(SampleAdapter.spec, cfg_type=SampleCfg),
+    make_form=DeviceAdapter_make_form,
+    run=SampleAdapter.run,
+    guide=None,
+    analysis=SampleAdapter.analysis,
+    post_analysis=SampleAdapter.post_analysis,
+)
+
+
+def test_device_text_command_uses_rpc_without_changing_input(form_rpc):
+    fixture, _, rpc = form_rpc
+    fixture.registry.register("device-input", DeviceAdapter)
+    tab = fixture.ctrl.tab_control.new_tab("device-input")
+    try:
+        owner = fixture.ctrl.cfg_resources.lookup(tab)
+        before = owner.input.to_json()
+        params = {"tab_id": tab, "path": ["instrument"]}
+        description = rpc.call("tab.describe_cfg", params)
+        target = description["result"]["description"]["target"]
+        assert target["options"] == []
+        assert target["commands"][0]["label"] == "Edit as text"
+        reply = rpc.call("tab.run_cfg_command", {**params, "name": "toggle_text"})
+        assert reply["ok"], reply
+        description = rpc.call("tab.describe_cfg", params)
+        target = description["result"]["description"]["target"]
+        assert not target["selector"]
+        assert target["commands"][0]["label"] == "Choose from list"
+        assert owner.input.to_json() == before
+        owner.write({("instrument",): "arbitrary instrument"})
+        reply = rpc.call("tab.run_cfg_command", {**params, "name": "toggle_text"})
+        assert reply["ok"], reply
+        target_field = owner.describe(("instrument",)).target
+        assert target_field is not None and target_field.selector
+        assert owner.input.data["instrument"] == "arbitrary instrument"
+    finally:
+        fixture.ctrl.tab_control.close_tab(tab)
 
 
 class TupleCfg(SampleCfg):

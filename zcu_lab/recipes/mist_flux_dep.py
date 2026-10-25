@@ -3,6 +3,7 @@
 from typing import Annotated
 
 from pydantic import Field
+from zcu_tools.cfg_model import DeviceName
 from zcu_tools.mcp.measure.recipe_api import (
     KEEP,
     Keep,
@@ -20,7 +21,7 @@ class MistFluxDepInputs(RecipeInputs):
     """Inputs for mist flux dep; all units and null policies are declared per
     field."""
 
-    flux_device: str = Field(
+    flux_device: DeviceName = Field(
         description="Registered flux-device name; read only its cached snapshot, without connecting."
     )
     flux_unit: str = Field(

@@ -21,10 +21,10 @@ from zcu_lab.v2.singleshot.ge.core import (
     GEAnalyzeOptions,
     GEPostAnalysis,
     GEPostAnalyzeOptions,
-    ge_signals_by_state,
 )
 from zcu_lab.v2.support.mux import MuxFitFailure
 from zcu_lab.v2.support.singleshot.plot import draw_ge_scatter
+from zcu_lab.v2.support.singleshot.util import ge_signals_by_state
 
 if TYPE_CHECKING:
     from .core import MuxGECfg, MuxGEResult

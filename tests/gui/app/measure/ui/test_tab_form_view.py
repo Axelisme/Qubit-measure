@@ -459,7 +459,8 @@ def test_detach_stops_following_the_resource(
 
     assert view.input("gain").text() == "0.1"
     assert not view.input("gain").isEnabled()
-    view.tab.attach(snapshot(), view.actions)
+    with pytest.raises(RuntimeError, match="detached"):
+        view.tab.attach(snapshot(), view.actions)
 
 
 class ModuleCore(ConfigBase):

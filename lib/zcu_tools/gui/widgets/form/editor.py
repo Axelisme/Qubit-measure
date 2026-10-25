@@ -8,7 +8,6 @@ from weakref import ref
 
 from pydantic import JsonValue
 from pydantic_core import PydanticCustomError
-from PyQt6 import sip
 from PyQt6.QtCore import pyqtSignal
 from qtpy.QtCore import QSignalBlocker, Qt, QThread
 from qtpy.QtGui import QCloseEvent
@@ -28,6 +27,7 @@ from zcu_tools.gui.form import (
     FormWritePath,
     WriteRejected,
 )
+from zcu_tools.gui.lifetime import LifetimeScope
 from zcu_tools.gui.session.context_types import ContextSourceUnavailableError
 from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 
@@ -62,6 +62,7 @@ def _shape(field: FieldView) -> tuple[object, ...]:
         field.placeholder,
         field.nullable,
         field.can_expand,
+        field.section,
     )
 
 
@@ -199,8 +200,10 @@ class FormEditor[F: FormModel](QWidget):
     form.fold.<path> is the fold title of the model row at <path>: a nested
     model, a tagged union, an option row whose selected option draws fields
     and an enabled nullable model. It is that row's name label, in its
-    level's label column, and folds the row's child rows; a unit follows
-    it, after the row's dropdown or Enabled box if any. Other rows show
+    header at its natural width, and folds the row's child rows. Section
+    dropdowns fill the remaining width independently of scalar labels. Units
+    appear only beside scalar inputs, in an equal-width column per level,
+    with an empty slot for unitless inputs. Other rows show
     their name in normal weight without a mark, and a click on it does
     nothing. form.enabled.<path> is a nullable-model activation QCheckBox
     beside the title. A disabled nullable model draws only its plain label
@@ -210,7 +213,7 @@ class FormEditor[F: FormModel](QWidget):
     block of one Display group of the model level at <path>. It holds the
     level's fields of that group, in declaration order, under a header whose
     fold title form.fold.group.<path>.<group> (form.fold.group.<group> at the
-    root) shows the group name in the level's label column. Rows retain their
+    root) shows the group name at its natural width. Rows retain their
     declaration order, with each group block at its first visible member's
     position. A group whose fields are all hidden has no block.
     While any of its rows (or their children) shows an error, the header
@@ -340,7 +343,10 @@ class FormEditor[F: FormModel](QWidget):
         self._host_write = write
         self._host_command = run_command
         self._host_select = select
-        self._unsubscribe: Callable[[], None] | None = None
+        self._scope = LifetimeScope(self)
+        self._close_control: dict[QWidget, Callable[[], None]] = {}
+        self._scope.add_cleanup(self._discard_view)
+        self._scope.add_cleanup(self._close_controls)
         self._editing_enabled = True
         self._local: dict[FormWritePath, LocalText] = {}
         self._rows: dict[FormWritePath, FieldRow] = {}
@@ -370,22 +376,26 @@ class FormEditor[F: FormModel](QWidget):
         self._level = _Level((), self._content, content_layout)
         self._publication_count = 0
         self._publish()
+        self._follow_state(state)
+
+    def _follow_state(self, state: FormState[F]) -> None:
         # The state callback must not keep the QWidget alive. No Python slot is
         # connected to destroyed: cyclic GC may clear such a slot before Qt
         # calls it while deleting the widget, which crashes the process. A
         # publication that finds this view collected or deleted unsubscribes.
         weak_view = ref(self)
+        publish = self._scope.callback(self._publish)
 
         def published() -> None:
             view = weak_view()
-            if view is None or sip.isdeleted(view):
+            if view is None or view._scope.closed:
                 # Bound below, before state can publish to this callback.
                 unsubscribe()
-            elif view._state is not None:
-                view._publish()
+            else:
+                publish()
 
         unsubscribe = state.subscribe(published)
-        self._unsubscribe = unsubscribe
+        self._scope.add_cleanup(unsubscribe)
 
     def refresh(self, env: FormEnv) -> None:
         """Re-evaluate with env and refresh controls, choices, values and errors.
@@ -465,13 +475,19 @@ class FormEditor[F: FormModel](QWidget):
         """Idempotently unsubscribe, disable the view and discard local text.
 
         Do not reset, close or submit caller-owned state. Later publications do
-        not update this view. The QWidget may still be destroyed normally.
+        not update this view. Queued scalar commits become no-ops, including
+        commits from retired rows awaiting Qt deletion. A host write callback
+        may detach the editor; that commit will not redraw it afterwards.
+        The QWidget may still be destroyed normally.
         """
-        if self._state is None:
-            return
-        if self._unsubscribe is not None:
-            self._unsubscribe()
-            self._unsubscribe = None
+        self._scope.close()
+
+    def _close_controls(self) -> None:
+        for close in self._close_control.values():
+            close()
+        self._close_control.clear()
+
+    def _discard_view(self) -> None:
         self._state = None
         self._env = None
         self._local.clear()
@@ -532,6 +548,9 @@ class FormEditor[F: FormModel](QWidget):
         level.groups.clear()
 
     def _retire(self, widget: QWidget) -> None:
+        close = self._close_control.pop(widget, None)
+        if close is not None:
+            close()
         # Retire names immediately, but let an emitting Qt control finish.
         focused = QApplication.focusWidget()
         if focused is not None and widget.isAncestorOf(focused):
@@ -572,8 +591,9 @@ class FormEditor[F: FormModel](QWidget):
                     tuple(item.path for item in members),
                     level.widget,
                     self._group_expanded,
-                    self._fold_changed,
+                    self._scope.callback(self._fold_changed),
                 )
+                self._close_control[block.widget] = block.close
                 body = _Level(level.path, block.body, block.rows)
                 level.groups[name] = block, body
                 level.layout.addWidget(block.widget)
@@ -584,11 +604,10 @@ class FormEditor[F: FormModel](QWidget):
                 # Group membership is already in this layer's metadata. No
                 # model description is queried until its own body is expanded.
                 self._sync_rows(body, tuple(members), data, preview, redraw=redraw)
+                # Hidden wrappers may still cache hints from their empty bodies.
+                block.layout.invalidate()
         _order_widgets(level, shown)
-        _align_labels(
-            [row.label for row in level.rows.values()]
-            + [block.label for block, _ in level.groups.values()]
-        )
+        level.layout.invalidate()
 
     def _sync_rows(
         self,
@@ -622,11 +641,15 @@ class FormEditor[F: FormModel](QWidget):
                 row = FieldRow(
                     field,
                     level.widget,
-                    self._write,
-                    self._unparsed,
+                    self._scope.callback(self._write),
+                    self._scope.callback(self._unparsed),
                     self._model_expanded,
-                    RowActions(command=self._run_command, select=self._select),
+                    RowActions(
+                        command=self._scope.callback(self._run_command),
+                        select=self._scope.callback(self._select),
+                    ),
                 )
+                self._close_control[row.widget] = row.close
                 row.configure_body(element=level.elements)
                 row.connect_fold(self._fold_changed)
                 row.connect_pick(self._pick_changed)
@@ -650,7 +673,9 @@ class FormEditor[F: FormModel](QWidget):
                 row.display(field, local, editable=self._editing_enabled)
                 row.set_completion_candidates(self._completion_names)
             self._sync_children(level, row, data, preview, redraw=redraw)
-        _align_labels([row.label for row in level.rows.values()])
+            row.layout.invalidate()
+        level.layout.invalidate()
+        _align_scalar_columns(list(level.rows.values()))
 
     def _remember_initial_fold(
         self, field: FieldView, errors: FormErrors | None
@@ -713,7 +738,7 @@ class FormEditor[F: FormModel](QWidget):
     def _write(
         self, path: FormWritePath, batch: Mapping[FormWritePath, JsonValue]
     ) -> None:
-        """Install batch from the row at path, or keep it local if rejected."""
+        """Install a row batch, ignoring callbacks after its editor detached."""
         state = self._require_state()
         publication = self._publication_count
         self._local.pop(path, None)
@@ -734,7 +759,7 @@ class FormEditor[F: FormModel](QWidget):
             self._local[path] = self._rows[path].rejected_input(message)
         # A changed write already rendered synchronously in the subscriber.
         # Unchanged/rejected writes still need to update view-local errors.
-        if self._publication_count == publication:
+        if not self._scope.closed and self._publication_count == publication:
             self._publish()
 
     def _select(self, path: FormWritePath, selection: JsonValue) -> None:
@@ -883,6 +908,16 @@ def _element_text(row: FieldRow, path: FormPath) -> str:
         str(index),
     )
     return ".".join((name, *(str(part) for part in path[len(row.field.path) + 1 :])))
+
+
+def _align_scalar_columns(rows: list[FieldRow]) -> None:
+    """Align scalar label/unit columns, leaving section titles at natural width."""
+    _align_labels([row.label for row in rows if not row.field.section])
+    units = [row.unit for row in rows if row.unit is not None]
+    _align_labels(units)
+    has_units = any(unit.text() for unit in units)
+    for unit in units:
+        unit.setVisible(has_units)
 
 
 def _align_labels(labels: list[QLabel]) -> None:

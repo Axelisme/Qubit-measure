@@ -11,7 +11,6 @@ from pydantic import Field
 from skopt import Optimizer
 from skopt.space import Real
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.datafile import LabberPayload
 from zcu_tools.experiment import (
     Experiment,
     GroupedAxesSpec,
@@ -154,12 +153,6 @@ RO_AUTO_GROUPED_VARIABLES = (
     RO_AUTO_READOUT_LENGTH_VARIABLE,
     RO_AUTO_SNR_VARIABLE,
 )
-
-
-def auto_opt_result_to_grouped_payloads(
-    result: AutoOptResult,
-) -> dict[str, LabberPayload]:
-    return RO_AUTO_GROUPED_AXES_SPEC.payloads_from_result(result)
 
 
 def _validate_auto_opt_arrays(

@@ -9,7 +9,7 @@ from typing import Annotated, ClassVar, Literal, Self
 import numpy as np
 from numpy.typing import NDArray
 from pydantic import Field, model_validator
-from zcu_tools.cfg_model import ConfigBase, FieldMeta
+from zcu_tools.cfg_model import ConfigBase, DeviceName, FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
@@ -104,7 +104,7 @@ class SpectroscopyCfg(ConfigBase):
         ),
     ]
     contrast: Annotated[bool, FieldMeta(label="Double Xπ contrast")] = True
-    dc_device: Annotated[str | None, FieldMeta(label="Coupler DC source")] = None
+    dc_device: Annotated[DeviceName | None, FieldMeta(label="Coupler DC source")] = None
     dc_unit: Annotated[
         Literal["A", "V", "native"], FieldMeta(label="DC source working unit")
     ] = "native"

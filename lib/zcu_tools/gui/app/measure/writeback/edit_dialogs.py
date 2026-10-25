@@ -22,6 +22,7 @@ from qtpy.QtWidgets import (
 
 from zcu_tools.gui.expected_error import ExpectedError
 from zcu_tools.gui.form import FormErrors, FormModel, FormWritePath, WriteRejected
+from zcu_tools.gui.lifetime import LifetimeScope
 from zcu_tools.gui.widgets import error_colour, secondary_colour
 from zcu_tools.gui.widgets.form import FormEditor
 from zcu_tools.gui.widgets.selectable_text import make_label_selectable
@@ -54,6 +55,21 @@ class WritebackEditDialogs:
         self._tab_id = tab_id
         self._pane: WritebackPane = pane
         self._module_dialogs: dict[str, QDialog] = {}
+        self._scope = LifetimeScope(parent)
+        self._dialogs: set[_EditDialog] = set()
+        self._scope.add_cleanup(self._close_dialogs)
+
+    def close(self) -> None:
+        """Retire every open editor without committing pending input."""
+        self._scope.close()
+
+    def _track(self, dialog: _EditDialog) -> None:
+        self._dialogs.add(dialog)
+        dialog.scope.add_cleanup(lambda: self._dialogs.discard(dialog))
+
+    def _close_dialogs(self) -> None:
+        for dialog in tuple(self._dialogs):
+            dialog.detach()
 
     def open_module_ids(self) -> tuple[str, ...]:
         """Return stable item IDs whose module editors still hold local input."""
@@ -84,6 +100,7 @@ class WritebackEditDialogs:
             refresh()
 
         dialog = _ValueDialog(self._parent, item, values, save)
+        self._track(dialog)
         dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         dialog.open()
 
@@ -158,6 +175,7 @@ class WritebackEditDialogs:
             form.state, form.env, write=write, select=select, run_command=run_command
         )
         dialog = _ModuleDialog(self._parent, item, editor, retarget)
+        self._track(dialog)
 
         def refresh_preview(*_: object) -> None:
             valid = editor.errors() is None and not isinstance(
@@ -166,9 +184,10 @@ class WritebackEditDialogs:
             refresh(valid)
             dialog.refresh_feedback(preview() if valid else None)
 
-        editor.errors_changed.connect(refresh_preview)
-        unsubscribe = form.state.subscribe(refresh_preview)
-        dialog.destroyed.connect(unsubscribe)
+        scope = LifetimeScope(dialog)
+        scope.add_cleanup(editor.detach)
+        scope.connect(editor.errors_changed, refresh_preview)
+        scope.add_cleanup(form.state.subscribe(scope.callback(refresh_preview)))
         self._module_dialogs[item.session_id] = dialog
         refresh_preview()
         dialog.adjustSize()
@@ -177,14 +196,13 @@ class WritebackEditDialogs:
             # Ignore late/duplicate finished delivery after this editor was removed.
             if self._module_dialogs.get(item.session_id) is not dialog:
                 return
-            unsubscribe()
-            editor.errors_changed.disconnect(refresh_preview)
-            editor.detach()
+            scope.close()
             self._module_dialogs.pop(item.session_id)
-            refresh(not isinstance(form.result(), FormErrors))
+            if not self._scope.closed:
+                refresh(not isinstance(form.result(), FormErrors))
 
         dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
-        dialog.finished.connect(on_finished)
+        dialog.scope.add_cleanup(on_finished)
         dialog.open()
 
 
@@ -193,20 +211,33 @@ class _EditDialog(QDialog):
 
     def __init__(self, parent: QWidget) -> None:
         super().__init__(parent)
+        self.scope = LifetimeScope(self)
         self.foregrounds = ThemedForegrounds(self)
         # A styled parent does not propagate its explicit palette to Qt windows.
         self._palette_owner = parent
         self.setPalette(parent.palette())
-        parent.installEventFilter(self)
+        self.scope.install_event_filter(parent, self._on_palette_event)
 
-    def eventFilter(self, a0: QObject | None, a1: QEvent | None) -> bool:
+    def detach(self) -> None:
+        """Release input without committing a name or value during owner retirement."""
+        active = not self.scope.closed
+        self.scope.close()
+        if active:
+            self.hide()
+
+    def done(self, a0: int) -> None:
+        """Retire signals, filters and form borrows before dialog completion."""
+        self.scope.close()
+        super().done(a0)
+
+    def _on_palette_event(self, a0: QObject | None, a1: QEvent | None) -> bool:
         if (
             a0 is self._palette_owner
             and a1 is not None
             and a1.type() == QEvent.Type.PaletteChange
         ):
             self.setPalette(self._palette_owner.palette())
-        return super().eventFilter(a0, a1)
+        return False
 
     def changeEvent(self, a0: QEvent | None) -> None:
         super().changeEvent(a0)
@@ -298,7 +329,7 @@ def _show_module_refusal(parent: QWidget, item: ModuleWriteback, message: str) -
     buttons = QHBoxLayout()
     buttons.addStretch(1)
     done = QPushButton("Done")
-    done.clicked.connect(dialog.accept)
+    dialog.scope.connect(done.clicked, lambda: dialog.accept())
     buttons.addWidget(done)
     layout.addLayout(buttons)
     dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
@@ -363,11 +394,11 @@ class _ModuleDialog(_EditDialog):
         done = QPushButton("Done")
         # Enter finishes a field, not the dialog, like the shared FormEditor.
         done.setAutoDefault(False)
-        done.clicked.connect(self.accept)
+        self.scope.connect(done.clicked, lambda: self.accept())
         buttons.addWidget(done)
         layout.addLayout(buttons)
-        self._name.editingFinished.connect(self._commit_name)
-        editor.errors_changed.connect(self._refresh_errors)
+        self.scope.connect(self._name.editingFinished, self._commit_name)
+        self.scope.connect(editor.errors_changed, self._refresh_errors)
 
     def _commit_name(self) -> bool:
         text = self._name.text().strip()
@@ -392,7 +423,7 @@ class _ModuleDialog(_EditDialog):
         return True
 
     def done(self, a0: int) -> None:
-        if self._commit_name():
+        if self.scope.closed or self._commit_name():
             super().done(a0)
 
     def refresh_feedback(self, values: WritebackValues | None) -> None:
@@ -491,8 +522,8 @@ class _ValueDialog(_EditDialog):
         self.foregrounds.set(self._error, error_colour)
         layout.addWidget(self._error)
         self._add_actions(layout)
-        self._name.textChanged.connect(self._validate)
-        self._value.textChanged.connect(self._validate)
+        self.scope.connect(self._name.textChanged, self._validate)
+        self.scope.connect(self._value.textChanged, self._validate)
         self._validate()
 
     def _add_actions(self, layout: QVBoxLayout) -> None:
@@ -500,10 +531,10 @@ class _ValueDialog(_EditDialog):
         buttons.addStretch(1)
         cancel = QPushButton("Cancel")
         cancel.setAutoDefault(False)
-        cancel.clicked.connect(self.reject)
+        self.scope.connect(cancel.clicked, lambda: self.reject())
         self._save_button = QPushButton("Save")
         self._save_button.setDefault(True)
-        self._save_button.clicked.connect(self._commit)
+        self.scope.connect(self._save_button.clicked, self._commit)
         buttons.addWidget(cancel)
         buttons.addWidget(self._save_button)
         layout.addLayout(buttons)

@@ -10,8 +10,7 @@ from matplotlib.colors import Normalize
 from mpl_toolkits.mplot3d import Axes3D
 from numpy.typing import NDArray
 from pydantic import Field
-from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.datafile import LabberPayload
+from zcu_tools.cfg_model import ConfigBase, DeviceName, FieldMeta
 from zcu_tools.experiment import (
     Experiment,
     GroupedAxesSpec,
@@ -81,14 +80,14 @@ class JPAOptCfg(ConfigBase):
     pi_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Pi pulse")]
     readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
     jpa_flux_dev: Annotated[
-        str,
+        DeviceName,
         FieldMeta(
             label="JPA flux device",
             description="Connected flux device driven at each optimizer point.",
         ),
     ]
     jpa_rf_dev: Annotated[
-        str,
+        DeviceName,
         FieldMeta(
             label="JPA RF device",
             description="Connected pump RF device driven at each optimizer point.",
@@ -136,12 +135,6 @@ JPA_AUTO_GROUPED_VARIABLES = (
     JPA_AUTO_PHASE_VARIABLE,
     JPA_AUTO_SNR_VARIABLE,
 )
-
-
-def jpa_auto_result_to_grouped_payloads(
-    result: JPAOptimizeResult,
-) -> dict[str, LabberPayload]:
-    return JPA_AUTO_GROUPED_AXES_SPEC.payloads_from_result(result)
 
 
 def _validate_jpa_auto_arrays(

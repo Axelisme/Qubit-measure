@@ -5,6 +5,8 @@ from __future__ import annotations
 from matplotlib.figure import Figure
 from qtpy.QtWidgets import QWidget
 
+from zcu_tools.gui.lifetime import LifetimeScope
+
 from ..adapter.hooks import InteractiveFrontendEnv as InteractiveFrontendEnv
 
 
@@ -13,6 +15,7 @@ class InteractiveFrontend(QWidget):
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        self._scope = LifetimeScope(self)
 
     def set_read_only(self, *, read_only: bool) -> None:
         """Gate plugin edits without disabling the figure's viewing interactions."""
@@ -31,4 +34,10 @@ class InteractiveFrontend(QWidget):
         raise NotImplementedError
 
     def teardown(self) -> None:
-        raise NotImplementedError
+        """Retire registered callbacks and presentation borrows without closing the session.
+
+        Subclasses register their subscriptions, connections, filters and local
+        presentation cleanup in _scope as acquired. Cleanup failures propagate
+        and may be retried before deleting this frontend.
+        """
+        self._scope.close()

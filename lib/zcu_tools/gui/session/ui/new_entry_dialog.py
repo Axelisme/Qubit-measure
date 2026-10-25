@@ -21,6 +21,7 @@ from qtpy.QtWidgets import (
 
 from zcu_tools.cfg_model import Template, TemplateDef
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
+from zcu_tools.gui.lifetime import LifetimeScope
 from zcu_tools.gui.session.aliases import scalar_alias_bindings
 from zcu_tools.gui.session.library_entry import (
     LIBRARY_WRITE_ERRORS,
@@ -97,6 +98,9 @@ class NewEntryDialog(QDialog):
         self._templates = templates
         self._arb_waveforms = arb_waveforms
         self._presenter = dialog_presenter
+        self._scope = LifetimeScope(self)
+        self._editor_scope = LifetimeScope(self)
+        self._scope.add_cleanup(self._detach_editor)
         self._entry: ModuleEntryForm | WaveformEntryForm | None = None
         self._editor: FormEditor[FormModel] | None = None
         # Set by the first keystroke in Name; programmatic setText never sets it.
@@ -145,11 +149,12 @@ class NewEntryDialog(QDialog):
         buttons.addWidget(cancel_btn)
         layout.addLayout(buttons)
 
-        self._name_edit.textEdited.connect(self._on_name_typed)
-        self._template_combo.currentIndexChanged.connect(self._on_template_changed)
-        self._create_btn.clicked.connect(self._on_create)
-        cancel_btn.clicked.connect(self.reject)
-        self.finished.connect(self._detach_editor)
+        self._scope.connect(self._name_edit.textEdited, self._on_name_typed)
+        self._scope.connect(
+            self._template_combo.currentIndexChanged, self._on_template_changed
+        )
+        self._scope.connect(self._create_btn.clicked, self._on_create)
+        self._scope.connect(cancel_btn.clicked, lambda: self.reject())
         self._load_template()
 
     def _on_name_typed(self, _text: str) -> None:
@@ -194,6 +199,7 @@ class NewEntryDialog(QDialog):
         self._scroll.setWidget(editor)
         self._entry = entry
         self._editor = editor
+        self._editor_scope.add_cleanup(editor.detach)
         self._error.hide()
         self._create_btn.setEnabled(True)
         if not self._name_typed:
@@ -207,10 +213,15 @@ class NewEntryDialog(QDialog):
         self._error.show()
         self._create_btn.setEnabled(False)
 
-    def _detach_editor(self, *_args: object) -> None:
-        if self._editor is not None:
-            self._editor.detach()
-            self._editor = None
+    def done(self, a0: int) -> None:
+        """Retire input before accepted/rejected observers can run."""
+        self._scope.close()
+        super().done(a0)
+
+    def _detach_editor(self) -> None:
+        self._editor_scope.close()
+        self._editor_scope = LifetimeScope(self)
+        self._editor = None
 
     @staticmethod
     def _suggest_name(

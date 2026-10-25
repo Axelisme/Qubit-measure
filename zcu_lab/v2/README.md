@@ -28,6 +28,20 @@ Mux/onetone core 也擁有逐 tone 數值 outcomes 與擬合失敗隔離。
 GUI 只接線、解析固定 capture 的 route prior／resonator 來源與提出 writeback。
 Leaf 的 `__init__.py` 只提供 core exports，不載入 GUI。
 
+同目錄的獨立實驗各有量測入口。TwoTone T1 的 [core.py](twotone/time_domain/t1/core.py)
+只放基本 T1，[t1_with_tone.py](twotone/time_domain/t1/t1_with_tone.py) 與
+[scan_t1_with_tone.py](twotone/time_domain/t1/scan_t1_with_tone.py) 各放固定 tone 與 gain sweep。
+兩者共用基本 T1 的 Result、Analysis 或訊號轉換，不增加 GUI adapter。
+AC Stark 的 [core.py](twotone/ac_stark/core.py) 與
+[ramsey_core.py](twotone/ac_stark/ramsey_core.py) 分別對應既有 spectroscopy／Ramsey adapters。
+Singleshot GE 的 [analysis.py](singleshot/ge/analysis.py) 擁有混淆矩陣求解與繪圖。
+跨實驗的 row mapping 在 [support/singleshot/util.py](support/singleshot/util.py)，
+mux IQ 平均轉換在 [support/mux.py](support/mux.py)，
+AC Stark／CKP 的連續共振中心擷取在 [support/resonance.py](support/resonance.py)。
+Two-qubit chevron／constructive phase 各自在 `run()` 寫出序列，
+共用型別在 [\_rabi_scan.py](two_qubit/_rabi_scan.py)，分類、擬合與繪圖在
+[\_rabi_analysis.py](two_qubit/_rabi_analysis.py)。
+
 `v2` 延續 program/v2 的版本脈絡，不表示 GUI framework 的第二版。通用 runtime、量化、SNR 與 tracker 工具留在 `zcu_tools.experiment.v2`。Core 不依賴 GUI，import-linter C15 檢查 core 到 GUI framework 的直接與間接依賴。
 
 Save／MCP 透過單一 `summarize_analysis` 轉換 native 結果，不使用已退休的實驗 serializer 或結果 base。

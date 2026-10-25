@@ -132,7 +132,6 @@ The adapter below owns component proposals using the captured binding.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
 from dataclasses import dataclass
 from functools import partial
 from typing import Annotated, ClassVar, Self
@@ -153,7 +152,6 @@ from zcu_tools.program.v2 import (
     Delay,
     DelayAuto,
     LoadValue,
-    ModularProgramV2,
     ResetCfg,
     SweepCfg,
     sweep2param,
@@ -167,7 +165,7 @@ from zcu_tools.program.v2.modules import (
 
 from zcu_lab.v2.support import live_line
 from zcu_lab.v2.support.acquire import mux_snr_checker
-from zcu_lab.v2.support.mux import MuxFitFailure
+from zcu_lab.v2.support.mux import MuxFitFailure, averaged_mux_signal
 from zcu_lab.v2.support.mux_sweep_cfg import MuxDriveToneCfg, validate_mux_tones
 from zcu_lab.v2.twotone.time_domain.t1.core import T1AnalyzeOptions
 
@@ -271,17 +269,6 @@ class MuxT1Result:
     times: NDArray[np.float64]
     tone_indices: NDArray[np.int64]
     signals: NDArray[np.complex128]
-
-
-def _averaged_signal(
-    prog: ModularProgramV2, acquired: Sequence[NDArray[np.float64]]
-) -> NDArray[np.complex128]:
-    # Builder copies modules; collection must use the initialized program owner.
-    for module in prog.modules:
-        if isinstance(module, MuxReadout) and module.name == "readout":
-            iq = module.collect_iq(prog, acquired, read_index=0)
-            return iq[..., 0] + 1j * iq[..., 1]
-    raise ValueError("T1 program is missing its named MuxReadout")
 
 
 class MuxT1Exp(Experiment[MuxT1Result, MuxT1Cfg]):
@@ -393,7 +380,7 @@ class MuxT1Exp(Experiment[MuxT1Result, MuxT1Cfg]):
             # Each completed round supplies the full delay/participant IQ matrix.
             _ = builder.run_program(
                 prog,
-                raw2signal_fn=partial(_averaged_signal, prog),
+                raw2signal_fn=partial(averaged_mux_signal, prog),
                 rounds=cfg.rounds,
                 options=AcquireOptions(
                     retry=cfg.acquire_retry,

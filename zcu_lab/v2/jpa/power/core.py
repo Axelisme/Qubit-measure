@@ -8,7 +8,7 @@ import numpy as np
 from matplotlib.axes import Axes
 from numpy.typing import NDArray
 from pydantic import Field
-from zcu_tools.cfg_model import ConfigBase, FieldMeta
+from zcu_tools.cfg_model import ConfigBase, DeviceName, FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment, config
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
@@ -57,7 +57,7 @@ class PowerCfg(ConfigBase):
     pi_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Pi pulse")]
     readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
     jpa_rf_dev: Annotated[
-        str,
+        DeviceName,
         FieldMeta(
             label="JPA RF device",
             description="Connected RF device driven by the pump-power sweep.",

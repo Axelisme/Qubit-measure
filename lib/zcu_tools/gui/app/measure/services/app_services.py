@@ -53,7 +53,6 @@ from .startup import StartupService
 from .tab import TabService
 from .tab_control import TabControlFacet
 from .tab_form import TabFormResources, TabFormSources
-from .workflow_borrower import WorkflowBorrower as WorkflowBorrower
 from .workflow_control import WorkflowControlFacet
 from .workspace import WorkspaceService
 
