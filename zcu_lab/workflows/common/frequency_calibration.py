@@ -32,6 +32,7 @@ from zcu_lab.workflows.common.frequency_scan import (
     frequency_probe_gains,
     observe_frequency_linewidth,
 )
+from zcu_lab.workflows.common.gain import GainClamp, clamp_gain
 
 if TYPE_CHECKING:
     from zcu_tools.simulate.fluxonium.physical_fit import FluxoniumModelSnapshot
@@ -50,14 +51,15 @@ def _frequency_cfg(
     center: float,
     gain: float,
     span: float,
-    offset: float = 0.0,
+    *,
+    gain_clamped: list[GainClamp] | None = None,
 ) -> FreqCfg:
     from zcu_lab.workflows.common.calibration import apply_readout_calibration
 
     drive = inputs.probe_pulse.model_copy(deep=True)
-    drive.set_param("gain", gain)
+    drive.set_param("gain", clamp_gain(gain, "probe", gain_clamped))
     ro = inputs.readout.model_copy(deep=True)
-    apply_readout_calibration(ro, prior)
+    apply_readout_calibration(ro, prior, gain_clamped)
     return FreqCfg(
         reps=inputs.tun.qf_reps,
         rounds=inputs.tun.qf_rounds,
@@ -67,8 +69,8 @@ def _frequency_cfg(
         qub_pulse=drive,
         readout=ro,
         freq=SweepCfg(
-            start=center + offset - span / 2,
-            stop=center + offset + span / 2,
+            start=center - span / 2,
+            stop=center + span / 2,
             expts=inputs.tun.qf_points,
             step=span / (inputs.tun.qf_points - 1),
         ),
@@ -120,9 +122,20 @@ def _plan_frequency_scan(
         if stage == "single"
         else f"frequency-{stage}-{index:02d}.h5"
     )
+    gain_clamped: list[GainClamp] = []
+    cfg = _frequency_cfg(
+        inputs, prior, center + offset, gain, span, gain_clamped=gain_clamped
+    )
     return (
-        _frequency_cfg(inputs, prior, center, gain, span, offset),
-        FrequencyScan(stage, filename, gain, span, center + offset),
+        cfg,
+        FrequencyScan(
+            stage,
+            filename,
+            float(cfg.qub_pulse.gain),
+            span,
+            center + offset,
+            gain_clamped=tuple(gain_clamped),
+        ),
     )
 
 
@@ -208,7 +221,8 @@ async def calibrate_frequency(
     tracker, hint, predictor_model = _capture_frequency_prediction(carry, flux)
     prior = carry.seed if carry.last is None else carry.last
     tun = inputs.tun
-    gains = frequency_probe_gains(inputs, tracker)
+    gain_clamped: list[GainClamp] = []
+    gains = frequency_probe_gains(inputs, tracker, gain_clamped)
     first_stage: Literal["coarse", "fine", "single"] = (
         "coarse" if tun.frequency_mode == "two_step" else "single"
     )
@@ -217,8 +231,7 @@ async def calibrate_frequency(
     ] = [(first_stage, widen, None) for widen in tun.qf_widen]
     scans: list[FrequencyScan] = []
     attempts: list[FrequencyCandidateAttempt] = []
-    status: StageStatus = "rejected"
-    reason = "No accepted frequency fit"
+    status, reason = "rejected", "No accepted frequency fit"
     coarse_file: str | None = None
     while pending:
         stage, widen, coarse_fit = pending.pop(0)
@@ -289,6 +302,7 @@ async def calibrate_frequency(
                 tracker.last_recovery,
                 tuple(scans),
                 tuple(attempts),
+                gain_clamped=tuple(gain_clamped),
             )
         status, reason = "rejected", "No accepted frequency fit"
     if reason not in ("stopped", "Point cancelled"):
@@ -304,4 +318,5 @@ async def calibrate_frequency(
         tracker.last_recovery,
         tuple(scans),
         tuple(attempts),
+        gain_clamped=tuple(gain_clamped),
     )

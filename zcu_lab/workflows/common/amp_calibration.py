@@ -31,6 +31,7 @@ from zcu_lab.workflows.common.calibration_results import (
     RabiResult,
 )
 from zcu_lab.workflows.common.frequency_tracking import trusted_curve
+from zcu_lab.workflows.common.gain import GainClamp, clamp_gain
 from zcu_lab.workflows.common.saving import save_native
 from zcu_lab.workflows.common.summary import observe_operation
 
@@ -124,17 +125,28 @@ async def calibrate_amp_rabi(
     length = float(drive.waveform.length)
     ro = inputs.readout.model_copy(deep=True)
     ro.set_param("freq", prior.readout_freq_mhz)
-    ro.set_param("gain", prior.readout_gain)
+    gain_clamped: list[GainClamp] = []
+    ro.set_param(
+        "gain", clamp_gain(prior.readout_gain, "readout", gain_clamped, lower=0.0)
+    )
     start = 0.0
     if tun.rabi_mode == "len_then_amp":
         if rabi.drive_gain is None:
             raise ValueError("AmpRabi after Len requires its acquisition gain")
-        stop = min(1.0, 2.5 * rabi.drive_gain)
+        stop = 2.5 * rabi.drive_gain
     elif carry.last_amp_gain is None:
         stop = tun.amp_gain_max
     else:
-        start = max(0.0, carry.last_amp_gain - tun.amp_gain_half_width)
-        stop = min(tun.amp_gain_max, carry.last_amp_gain + tun.amp_gain_half_width)
+        start = carry.last_amp_gain - tun.amp_gain_half_width
+        stop = carry.last_amp_gain + tun.amp_gain_half_width
+    start = clamp_gain(start, "amp.start", gain_clamped, lower=0.0)
+    stop = clamp_gain(
+        stop,
+        "amp.stop",
+        gain_clamped,
+        lower=0.0,
+        upper=1.0 if tun.rabi_mode == "len_then_amp" else tun.amp_gain_max,
+    )
     cfg = AmpRabiCfg(
         reps=tun.rabi_reps,
         rounds=tun.rabi_rounds,
@@ -154,7 +166,7 @@ async def calibrate_amp_rabi(
     )
     outcome = await scope.run(AmpRabiExp().run, cfg, name="AmpRabi")
     observe_operation(inputs.summary, outcome)
-    amp = AmpCalibrationResult("failed", None, length)
+    amp = AmpCalibrationResult("failed", None, length, gain_clamped=tuple(gain_clamped))
     accepted_gain = None
     pi2_gain = None
     if isinstance(outcome, Failed):
@@ -173,8 +185,17 @@ async def calibrate_amp_rabi(
         else:
             amp = _analyze_completed(outcome.value.result, amp, inputs, carry, plots)
     if amp.status == "accepted":
-        accepted_gain = amp.pi_gain
-        pi2_gain = amp.pi2_gain
+        accepted_gain = (
+            None
+            if amp.pi_gain is None
+            else clamp_gain(amp.pi_gain, "pi", gain_clamped, lower=tun.amp_min_gain)
+        )
+        pi2_gain = (
+            None
+            if amp.pi2_gain is None
+            else clamp_gain(amp.pi2_gain, "pi2", gain_clamped, lower=tun.amp_min_gain)
+        )
+        amp = replace(amp, gain_clamped=tuple(gain_clamped))
         carry.last_amp_gain = accepted_gain
         carry.last = replace(
             prior,

@@ -34,6 +34,7 @@ from zcu_lab.workflows.common.analysis import (
 )
 from zcu_lab.workflows.common.calibration_results import StageStatus
 from zcu_lab.workflows.common.devices import set_flux
+from zcu_lab.workflows.common.gain import GainClamp, clamp_gain
 from zcu_lab.workflows.common.relaxation import echo_relaxation
 from zcu_lab.workflows.common.saving import save_native
 from zcu_lab.workflows.common.summary import RunSummary, SummaryAccumulator
@@ -161,6 +162,7 @@ class OvernightPoint(BaseModel):
     rejected fits retain their raw acquisition filenames. echo_relax_delay_us
     is the Echo cfg relaxation in us; echo_t1_source is accepted_t1 for this
     round's accepted T1, otherwise guess. Both stay None until Echo cfg setup.
+    gain_clamped records any truncated Echo pi/2 gain before/after.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -189,6 +191,7 @@ class OvernightPoint(BaseModel):
     t2_file: str | None = None
     echo_relax_delay_us: float | None = None
     echo_t1_source: Literal["accepted_t1", "guess"] | None = None
+    gain_clamped: list[GainClamp] = Field(default_factory=list)
     status: Literal["collecting", "completed", "skipped"] = "collecting"
 
 
@@ -450,7 +453,11 @@ async def overnight[C](
                 earlystop_snr=tun.current.t2_earlystop_snr,
                 relax_delay=point_record.echo_relax_delay_us,
                 pi_pulse=plan.qub_pulse,
-                pi2_pulse=plan.qub_pulse.with_updates(gain=plan.qub_pulse.gain / 2),
+                pi2_pulse=plan.qub_pulse.with_updates(
+                    gain=clamp_gain(
+                        plan.qub_pulse.gain / 2, "echo.pi2", point_record.gain_clamped
+                    )
+                ),
                 readout=plan.readout,
                 length=SweepCfg(
                     start=0.0,

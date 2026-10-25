@@ -9,6 +9,7 @@ from zcu_tools.program.v2 import SweepCfg
 from zcu_tools.simulate.fluxonium.physical_fit import FluxoniumModelSnapshot
 
 from zcu_lab.workflows.common.frequency_tracking import RecoveryAttempt
+from zcu_lab.workflows.common.gain import GainClamp
 
 type StageStatus = Literal["accepted", "rejected", "failed", "skipped"]
 
@@ -64,6 +65,7 @@ class FrequencyScan:
     the sampled target; fitted_center_mhz is None when fitting did not finish.
     diagnostics retains its decision metrics. coarse_candidate_diagnostics
     records every locally tried coarse fit, not just the first selected target.
+    gain_clamped records field names and before/after values only on truncation.
     """
 
     stage: Literal["coarse", "fine", "single"]
@@ -76,6 +78,7 @@ class FrequencyScan:
     fitted_center_mhz: float | None = None
     diagnostics: FrequencyDiagnostics = field(default_factory=FrequencyDiagnostics)
     coarse_candidate_diagnostics: tuple[FrequencyDiagnostics, ...] = ()
+    gain_clamped: tuple[GainClamp, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -116,6 +119,8 @@ class FrequencyResult:
     candidate_attempts records each tried coarse peak, its local fitted center,
     fine filename and rejection reason, including coarse fit failures. None
     rejection_reason means its fine confirmation passed all frequency gates.
+    gain_clamped records adaptive requests before/after the configured DAC cap;
+    per-scan gain_clamped records truncation at cfg construction.
     These diagnostics contain no live predictor.
     """
 
@@ -129,6 +134,7 @@ class FrequencyResult:
     recovery: RecoveryAttempt | None = None
     scans: tuple[FrequencyScan, ...] = ()
     candidate_attempts: tuple[FrequencyCandidateAttempt, ...] = ()
+    gain_clamped: tuple[GainClamp, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -140,6 +146,7 @@ class AmpCalibrationResult:
     the trusted pi/2 gain on acceptance, otherwise None.
     file is amp-rabi.h5 only after Completed, including stopped partial data.
     Missing fits remain None. No diagnostic here certifies a usable pulse.
+    gain_clamped records truncated scan endpoints and applied pi/pi2 gains.
     """
 
     status: StageStatus
@@ -149,6 +156,7 @@ class AmpCalibrationResult:
     pi_gain: float | None = None
     pi_gain_error: float | None = None
     pi2_gain: float | None = None
+    gain_clamped: tuple[GainClamp, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -178,7 +186,8 @@ class RabiResult:
     target_pi_length_us is the resolved setpoint in us. requested_sweep and
     planned_sweep are the original and clock-planned length grids in us.
     Planned is None if acquisition failed before returning a native record;
-    all three are None on dependency skip.
+    all three are None on dependency skip. gain_clamped records any truncated
+    drive/readout gain, including controller requests before DAC limiting.
     """
 
     status: StageStatus
@@ -196,6 +205,7 @@ class RabiResult:
     target_pi_length_us: float | None = None
     requested_sweep: SweepCfg | None = None
     planned_sweep: SweepCfg | None = None
+    gain_clamped: tuple[GainClamp, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -208,7 +218,8 @@ class ReadoutResult:
     file names the Completed landscape, including rejection, otherwise None.
     Nonacceptance leaves the legal seed/prior readout carry unchanged.
     Partial returns rejected/stopped after saving, without SNR selection.
-    Unexpected analysis/configuration/writer errors propagate.
+    Unexpected analysis/configuration/writer errors propagate. gain_clamped
+    records truncated preparation/readout gains, window endpoints and optimum.
     """
 
     status: StageStatus
@@ -216,3 +227,4 @@ class ReadoutResult:
     frequency_mhz: float | None
     gain: float | None
     file: str | None
+    gain_clamped: tuple[GainClamp, ...] = ()
