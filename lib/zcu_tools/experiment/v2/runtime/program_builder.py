@@ -6,6 +6,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable, Sequence
 from copy import deepcopy
 from dataclasses import dataclass
+from logging import getLogger
 from math import isfinite
 from typing import TYPE_CHECKING, Any, Generic, Literal, Protocol, Self, TypeAlias
 
@@ -15,7 +16,11 @@ from typing_extensions import TypeVar
 
 from zcu_tools.experiment.acquisition_facts import AcquisitionFacts, StopDecision
 from zcu_tools.experiment.v2.runtime.acquire_cancel import AcquireCancelFlag
-from zcu_tools.program.acquisition import CancelFlagProtocol, StoppedPartialAcquireError
+from zcu_tools.program.acquisition import (
+    AcquisitionContractError,
+    CancelFlagProtocol,
+    StoppedPartialAcquireError,
+)
 from zcu_tools.program.v2 import (
     Module,
     Pulse,
@@ -41,6 +46,7 @@ T_AcquireRaw_co = TypeVar("T_AcquireRaw_co", covariant=True)
 T_DecimatedRaw_co = TypeVar("T_DecimatedRaw_co", covariant=True)
 SignalArray: TypeAlias = NDArray[Any]
 StopCondition: TypeAlias = Callable[[], bool | StopDecision]
+logger = getLogger(__name__)
 
 
 def _require_positive_rounds(rounds: object) -> None:
@@ -155,7 +161,11 @@ class ModuleFacade(ABC):
 class AcquireOptions:
     """Policy shared by integrated and decimated program acquisition.
 
-    retry is a non-negative number of extra attempts, default zero. progress
+    retry is a non-negative number of extra attempts, default zero. Shot
+    overrun (AcquisitionContractError) uses max(retry, 1) extra attempts, even
+    when retry is zero. Each retry reruns all rounds on the same program with
+    fresh producer buffers; overrun discards the failed attempt's slot data.
+    External cancellation and interruption are never retried. progress
     defaults to hiding native acquisition progress. progress_label names the
     rounds bar (default "rounds"). progress_leave=None keeps the completed bar
     visible at the root and removes it for a host step; explicit True/False
@@ -182,6 +192,26 @@ class _AcquireProgress:
     completed_rounds: int = 0
     decision: bool | StopDecision = False
     succeeded: bool = False
+    retry_reasons: tuple[str, ...] = ()
+
+    def retry_after(
+        self,
+        error: Exception,
+        retry: int,
+        slot: SignalSlot,
+        initial_signal: SignalArray,
+    ) -> bool:
+        overrun = isinstance(error, AcquisitionContractError)
+        if overrun:
+            slot.set(initial_signal)
+        retry_limit = max(retry, 1) if overrun else retry
+        if self.attempts > retry_limit:
+            return False
+        reason = "shot_overrun" if overrun else type(error).__name__
+        self.retry_reasons += (reason,)
+        if overrun:
+            logger.warning("Retrying acquisition after shot overrun: %s", error)
+        return True
 
     def facts(self) -> AcquisitionFacts:
         early = (
@@ -195,6 +225,7 @@ class _AcquireProgress:
             completed_rounds=self.completed_rounds,
             attempts=self.attempts,
             early_stopped=early,
+            retry_reasons=self.retry_reasons,
             stop_value=value
             if early and value is not None and isfinite(value)
             else None,
@@ -424,6 +455,7 @@ class ProgramBuilder(ModuleFacade, Generic[ProgramT]):
         self._schedule.ensure_active()
 
         slot = self._default_slot()
+        initial_signal = slot.view.copy()
         signal_fn = self._resolve_raw2signal_fn(raw2signal_fn, default_raw2signal_fn)
 
         pbar = make_pbar(
@@ -435,7 +467,7 @@ class ProgramBuilder(ModuleFacade, Generic[ProgramT]):
         )
         observation = _AcquireProgress(rounds, pbar)
         try:
-            for attempt in range(retry + 1):
+            for _ in range(max(retry, 1) + 1):
                 if self._schedule.check_stop_requested():
                     break
                 pbar.reset()
@@ -466,7 +498,7 @@ class ProgramBuilder(ModuleFacade, Generic[ProgramT]):
                     cause = None if isinstance(exc, StoppedPartialAcquireError) else exc
                     if self._schedule.check_stop_requested(exception=cause):
                         break
-                    if attempt == retry:
+                    if not observation.retry_after(exc, retry, slot, initial_signal):
                         self._schedule.mark_failed(exc)
                         break
                     continue

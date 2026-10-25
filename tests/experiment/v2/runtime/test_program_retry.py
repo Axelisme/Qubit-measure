@@ -14,8 +14,11 @@ from zcu_tools.experiment.v2.runtime.schedule import (
     Schedule,
     SignalBuffer,
 )
-from zcu_tools.program.acquisition import CancelFlagProtocol
+from zcu_tools.program.acquisition import AcquisitionContractError, CancelFlagProtocol
 from zcu_tools.program.v2 import Module
+from zcu_tools.program.v2.modular import ModularProgramV2
+from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
+from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 
 from tests.experiment.v2.runtime._flow_cfg import make_flow_cfg as _cfg
 from tests.experiment.v2.runtime._flow_fakes import (
@@ -27,6 +30,86 @@ from tests.experiment.v2.runtime._flow_fakes import (
     StopBeforeDataProgram,
     identity_array,
 )
+from tests.program._acquisition_soc import make_acquisition_soc
+
+
+def _overrun_acquisition(monkeypatch: pytest.MonkeyPatch, *, recover: bool):
+    soc, soccfg = make_acquisition_soc()
+    program = ModularProgramV2(
+        soccfg,
+        modules=[
+            PulseReadoutCfg(
+                gen_ch=0,
+                nqz=1,
+                gain=0.1,
+                waveform=ConstWaveformCfg(length=1.0),
+                ro_ch=0,
+                ro_length=1.0,
+                freq=100.0,
+            ).build("readout")
+        ],
+        reps=3,
+    )
+    length = program.ro_chs[0]["length"]
+
+    def chunk(shots: int, value: int):
+        return (shots, ([np.tile([value * length, -value * length], (shots, 1))], {}))
+
+    # Complete one round, then store a partial chunk before the offending one.
+    failed = [[chunk(3, 91)], [chunk(1, 99)], [chunk(3, 99)]]
+    batches = iter(failed + ([[chunk(3, 4)], [chunk(3, 6)]] if recover else failed))
+    monkeypatch.setattr(soc, "poll_data", lambda: next(batches))
+    return soc, program
+
+
+def test_shot_overrun_restarts_all_rounds_without_opt_in_retry(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    result = None
+    soc, program = _overrun_acquisition(monkeypatch, recover=True)
+    buffer = SignalBuffer((), dtype=np.complex128)
+    with Schedule(_cfg(), buffer, scope=Scope("run")) as sched:
+        result = sched.prog_builder(soc, "unused").run_program(program, rounds=2)
+
+    assert sched.outcome.status == "completed"
+    assert result is not None
+    np.testing.assert_allclose(result, 5 - 5j)
+    np.testing.assert_allclose(buffer.array, 5 - 5j)
+    acquisition = sched.outcome.acquisitions[0]
+    assert acquisition.attempts == 2
+    assert acquisition.completed_rounds == 2
+    assert acquisition.retry_reasons == ("shot_overrun",)
+    assert not acquisition.early_stopped
+    warnings = [r for r in caplog.records if r.levelname == "WARNING"]
+    assert len(warnings) == 1
+    assert "expected_shots=3, received_shots=1, chunk_shots=3" in warnings[0].message
+    assert "round_index=1" in warnings[0].message
+    raw = program.get_raw()
+    assert raw is not None
+    np.testing.assert_array_equal(
+        raw[0], np.tile([6, -6], (3, 1, 1)) * program.ro_chs[0]["length"]
+    )
+
+
+def test_repeated_shot_overrun_exhausts_default_retry_and_discards_failed_data(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    result = None
+    soc, program = _overrun_acquisition(monkeypatch, recover=False)
+    buffer = SignalBuffer((), dtype=np.complex128)
+    with Schedule(_cfg(), buffer, scope=Scope("run")) as sched:
+        result = sched.prog_builder(soc, "unused").run_program(program, rounds=2)
+
+    acquisition = sched.outcome.acquisitions[0]
+    assert acquisition.attempts == 2
+    assert acquisition.retry_reasons == ("shot_overrun",)
+    assert sched.outcome.status == "failed"
+    assert isinstance(sched.outcome.exception, AcquisitionContractError)
+    assert sched.stop.error is not None
+    assert not acquisition.early_stopped
+    assert result is not None
+    assert np.isnan(result)
+    assert np.isnan(buffer.array)
 
 
 def test_build_and_acquire_stop_condition_stops_program_without_schedule_stop():
