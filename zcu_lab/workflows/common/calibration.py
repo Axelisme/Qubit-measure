@@ -49,6 +49,18 @@ from zcu_lab.workflows.common.calibration_plots import (
     draw_readout,
     retain_trace,
 )
+from zcu_lab.workflows.common.calibration_results import (
+    FrequencyResult as FrequencyResult,
+)
+from zcu_lab.workflows.common.calibration_results import (
+    RabiResult as RabiResult,
+)
+from zcu_lab.workflows.common.calibration_results import (
+    ReadoutResult as ReadoutResult,
+)
+from zcu_lab.workflows.common.calibration_results import (
+    StageStatus,
+)
 from zcu_lab.workflows.common.frequency_tracking import (
     FrequencyTracker,
     FrequencyTunables,
@@ -101,6 +113,11 @@ class CalibrationTunables(FrequencyTunables):
     )
     max_rabi_rel_err: float = Field(
         default=0.3, gt=0, le=1, description="Strict pi-error/pi-duration upper bound"
+    )
+    rabi_max_mean_residual_ratio: float = Field(
+        default=0.1,
+        gt=0,
+        description="Strict mean absolute Rabi residual/fit-range upper bound",
     )
     max_fit_residual: float = Field(
         default=0.2,
@@ -280,9 +297,6 @@ class CalibrationSource(BaseModel):
     fallback: bool = True
 
 
-type StageStatus = Literal["accepted", "rejected", "failed", "skipped"]
-
-
 @dataclass(frozen=True)
 class CalibrationInputs:
     """Fixed native routing and captured policy shared by the three experiments.
@@ -306,76 +320,6 @@ class CalibrationInputs:
     point_index: int
     flux: float
     flux_unit: str
-
-
-@dataclass(frozen=True)
-class FrequencyResult:
-    """One point's spectroscopy outcome and immutable relative native references.
-
-    status is accepted, rejected (fit gates or stopped partial), or failed
-    (Schedule or expected fitting failure). Partial reason is stopped.
-    reason is None on acceptance, otherwise the diagnostic. frequency_mhz is
-    this point's positive fitted MHz only on acceptance, never a prior seed.
-    files lists every Completed widening attempt in acquisition order, including
-    partial, rejected and failed fits; Schedule failures have no filename.
-    References do not guarantee later existence. Unexpected writer/adapter/fit/
-    plot exceptions propagate instead. probe_gains records actual spectroscopy
-    gain for every acquisition attempt, including failed/partial attempts.
-    scan_center_mhz is the physical-plus-IDW center before window offset.
-    """
-
-    status: StageStatus
-    reason: str | None
-    frequency_mhz: float | None
-    files: tuple[str, ...]
-    probe_gains: tuple[float, ...] = ()
-    scan_center_mhz: float | None = None
-
-
-@dataclass(frozen=True)
-class RabiResult:
-    """One point's Length-Rabi outcome, not a substitute for prior calibration.
-
-    status is accepted/rejected/failed/skipped; reason is None only on acceptance.
-    frequency_mhz is the accepted frequency used at this point (MHz), or None
-    when frequency was not accepted and Rabi is skipped. It never carries a
-    previous point's frequency. Accepted implies a current accepted frequency.
-    pi_length_us is the accepted fitted duration. pi2_length_us is the trusted
-    phase-aware duration >= .03 us, or None when pi2 is untrusted. drive_gain
-    records the actual acquisition gain even on failure/rejection, or None on
-    dependency skip. file is the relative native
-    filename after Completed, including partial and failed/rejected fits,
-    otherwise None. Partial returns rejected/stopped without fitting; expected
-    fitting failures return failed/reason. Unexpected errors propagate.
-    """
-
-    status: StageStatus
-    reason: str | None
-    frequency_mhz: float | None
-    pi_length_us: float | None
-    pi2_length_us: float | None
-    file: str | None
-    drive_gain: float | None = None
-
-
-@dataclass(frozen=True)
-class ReadoutResult:
-    """Readout scan outcome and immutable relative native reference.
-
-    status is accepted/rejected/failed/skipped (dependency or flux cadence).
-    reason is None only on acceptance. frequency_mhz/gain are this point's
-    accepted readout MHz/native gain only; nonaccepted results have no values.
-    file names the Completed landscape, including rejection, otherwise None.
-    Nonacceptance leaves the legal seed/prior readout carry unchanged.
-    Partial returns rejected/stopped after saving, without SNR selection.
-    Unexpected analysis/configuration/writer errors propagate.
-    """
-
-    status: StageStatus
-    reason: str | None
-    frequency_mhz: float | None
-    gain: float | None
-    file: str | None
 
 
 def apply_readout_calibration(readout: ReadoutCfg, cal: Calibrated) -> None:
@@ -427,11 +371,17 @@ def _frequency_cfg(
     )
 
 
-def _accept_frequency(fit: FrequencyFit, tun: CalibrationTunables) -> bool:
+def _accept_frequency(
+    fit: FrequencyFit, result: FreqResult, tun: CalibrationTunables
+) -> bool:
+    margin = tun.frequency_edge_margin * float(np.ptp(result.freqs))
     residual = fit.quality.normalized_residual_rms
     return (
         math.isfinite(fit.frequency_mhz)
         and fit.frequency_mhz > 0
+        and float(np.min(result.freqs)) + margin
+        <= fit.frequency_mhz
+        <= float(np.max(result.freqs)) - margin
         and math.isfinite(fit.width_mhz)
         and fit.width_mhz > 0
         and math.isfinite(fit.error_mhz)
@@ -449,9 +399,10 @@ def _observe_linewidth(
     result: FreqResult,
     gain: float,
     index: int,
+    tun: CalibrationTunables,
 ) -> None:
     if 0 < fit.width_mhz <= float(np.ptp(result.freqs)) and trusted_curve(
-        fit.observed, fit.fitted, 0.1
+        fit.observed, fit.fitted, tun.linewidth_max_mean_residual_ratio
     ):
         tracker.observe_linewidth(index, fit.width_mhz, gain)
 
@@ -488,6 +439,7 @@ async def calibrate_frequency(
     if tracker is None:
         raise ValueError("Frequency calibration requires a captured physical predictor")
     hint = tracker.begin_point(flux)
+    predictor_model = tracker.model_snapshot()
     carry.cur_m, carry.m_ratio = tracker.cur_m, tracker.m_ratio
     gain = tracker.probe_gain(float(inputs.qub_pulse.gain), inputs.tun)
     filenames: list[str] = []
@@ -497,7 +449,14 @@ async def calibrate_frequency(
     for attempt, widen in enumerate(inputs.tun.qf_widen, start=1):
         if scope.cancelled:
             return FrequencyResult(
-                "skipped", "Point cancelled", None, tuple(filenames), tuple(gains), hint
+                "skipped",
+                "Point cancelled",
+                None,
+                tuple(filenames),
+                tuple(gains),
+                hint,
+                predictor_model,
+                tracker.last_recovery,
             )
         cfg = _frequency_cfg(inputs, prior, hint, gain, widen)
         gains.append(gain)
@@ -537,12 +496,14 @@ async def calibrate_frequency(
             )
             status, reason = "failed", fit.reason
             continue
-        accepted = _accept_frequency(fit, inputs.tun)
+        accepted = _accept_frequency(fit, result, inputs.tun)
         if accepted:
             carry.last = replace(prior, f01_mhz=fit.frequency_mhz)
             carry.f01_by_flux.append((flux, fit.frequency_mhz))
             tracker.finish_point(flux, fit.frequency_mhz, tun=inputs.tun)
-            _observe_linewidth(tracker, fit, result, gain, inputs.point_index)
+            _observe_linewidth(
+                tracker, fit, result, gain, inputs.point_index, inputs.tun
+            )
         carry.frequency_traces[-1] = replace(
             trace,
             observed=fit.observed,
@@ -564,11 +525,22 @@ async def calibrate_frequency(
                 tuple(filenames),
                 tuple(gains),
                 hint,
+                predictor_model,
+                tracker.last_recovery,
             )
         status, reason = "rejected", "No accepted frequency fit"
     if reason != "stopped":
         tracker.finish_point(flux, None, tun=inputs.tun)
-    return FrequencyResult(status, reason, None, tuple(filenames), tuple(gains), hint)
+    return FrequencyResult(
+        status,
+        reason,
+        None,
+        tuple(filenames),
+        tuple(gains),
+        hint,
+        predictor_model,
+        tracker.last_recovery,
+    )
 
 
 async def calibrate_rabi(
@@ -587,7 +559,9 @@ async def calibrate_rabi(
     finite historical smoothed us. Relaxation uses the Rabi auto/fixed knobs.
     inputs supplies captured modules/policy. Auto gain blends pi-product prediction
     with confidence-aged log feedback; fixed mode retains template gain. Sweep
-    endpoints honor physical floors. Only accepted fits update pi/product feedback. inputs.snapshot is the fixed historical entry/point state
+    endpoints honor physical floors. Only accepted fits update pi/product feedback.
+    Quality-trusted fits below .03 us remain rejected but propose a lower auto
+    gain, without changing the usable pulse. inputs.snapshot is the fixed historical entry/point state
     used to save rabi.h5 after Completed, including rejected fits. point_index
     must be a nonnegative integer (not bool), the zero-based flux index; invalid
     indexes raise ValueError at entry. The title shows its flux setpoint. Lengths
@@ -689,17 +663,20 @@ async def calibrate_rabi(
         )
         return RabiResult("failed", fit.reason, f01, None, None, "rabi.h5", gain)
     residual = fit.quality.normalized_residual_rms
-    accepted = (
+    quality_trusted = (
         math.isfinite(fit.pi_length_us)
-        and 0.03 <= fit.pi_length_us <= 0.9 * float(np.max(result.lengths))
-        and float(np.mean(np.abs(fit.observed - fit.fitted)))
-        < 0.1 * float(np.ptp(fit.fitted))
+        and 0 < fit.pi_length_us <= 0.9 * float(np.max(result.lengths))
+        and trusted_curve(
+            fit.observed, fit.fitted, inputs.tun.rabi_max_mean_residual_ratio
+        )
         and math.isfinite(fit.error_us)
         and fit.error_us >= 0
         and fit.error_us / fit.pi_length_us < inputs.tun.max_rabi_rel_err
         and residual is not None
         and residual < inputs.tun.max_fit_residual
     )
+    too_fast = quality_trusted and fit.pi_length_us < 0.03
+    accepted = quality_trusted and not too_fast
     carry.rabi_traces[-1] = replace(
         trace,
         observed=fit.observed,
@@ -710,8 +687,21 @@ async def calibrate_rabi(
         plots, carry.rabi_traces, flux_unit=inputs.flux_unit, directory=inputs.directory
     )
     if not accepted:
+        if too_fast and inputs.tun.rabi_drive_gain_mode == "auto_pi_product":
+            carry.rabi_drive.observe_too_fast(
+                fit.pi_length_us, gain, max(target_pi_us, 0.03)
+            )
         return RabiResult(
-            "rejected", "Rabi fit rejected", f01, None, None, "rabi.h5", gain
+            "rejected",
+            "π shorter than minimum trusted length"
+            if too_fast
+            else "Rabi fit rejected",
+            f01,
+            None,
+            None,
+            "rabi.h5",
+            gain,
+            too_fast_pi_length_us=fit.pi_length_us if too_fast else None,
         )
     carry.rabi_drive.observe(
         inputs.point_index,

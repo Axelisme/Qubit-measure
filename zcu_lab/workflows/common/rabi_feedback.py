@@ -13,7 +13,8 @@ class RabiDriveFeedback:
     pi_product is the gap-smoothed accepted pi duration times acquisition gain,
     or None before the first accepted fit. last_index is its zero-based flux
     index. controller uses step_gain=.5 and confidence decay over three queries.
-    Failed/rejected points never observe; subsequent selections age confidence.
+    Quality-trusted too-fast rejections may propose a lower gain without learning
+    an accepted pi product. Other failures only age confidence on selection.
     """
 
     pi_product: float | None = None
@@ -38,6 +39,20 @@ class RabiDriveFeedback:
             base *= math.exp(latest.confidence * math.log(latest.value / base))
         # Keep a strictly positive representable gain without imposing a new .01 floor.
         return min(1.0, max(float.fromhex("0x1p-1022"), base))
+
+    def observe_too_fast(self, pi_us: float, gain: float, target_pi_us: float) -> None:
+        """Propose a lower gain from a quality-trusted rejected fast fit.
+
+        pi_us and target_pi_us are positive finite durations in us, with target
+        strictly longer than pi_us. gain is the actual acquisition gain in (0, 1].
+        Invalid inputs raise ValueError. Only the controller proposal changes;
+        the accepted pi product and its index remain untouched.
+        """
+        if not all(math.isfinite(x) and x > 0 for x in (pi_us, gain, target_pi_us)):
+            raise ValueError("Fast Rabi observation requires positive finite inputs")
+        if gain > 1 or pi_us >= target_pi_us:
+            raise ValueError("Fast Rabi requires gain <= 1 and target longer than pi")
+        self.controller.propose(gain, math.log(pi_us / target_pi_us))
 
     def observe(
         self,
