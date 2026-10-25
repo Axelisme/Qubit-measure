@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
@@ -14,7 +14,6 @@ from zcu_tools.cfg_model import DeviceName, Gain
 from zcu_tools.experiment.metadata import RunSnapshot
 from zcu_tools.experiment.scope import Scope
 from zcu_tools.experiment.workflows import (
-    Failed,
     Live,
     WorkflowEnv,
     workflow,
@@ -23,28 +22,33 @@ from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import SweepCfg
 from zcu_tools.program.v2.modules import PulseCfg, PulseReadoutCfg, ResetCfg
 
-from zcu_lab.v2.mist.power_dep.single_trace.core import PowerDepCfg, PowerDepResult
+from zcu_lab.v2.mist.power_dep.single_trace.core import (
+    PowerDepCfg,
+    PowerDepExp,
+    PowerDepResult,
+)
 from zcu_lab.workflows.common.calibration import (
     CalCarry,
     Calibrated,
-    CalibrationInputs,
     CalibrationSource,
     CalibrationTunables,
     FrequencyResult,
     RabiResult,
     ReadoutResult,
-    apply_readout_calibration,
-    calibrate_frequency,
-    calibrate_rabi,
-    calibrate_readout,
     calibration_source,
     current_pi_calibration,
-    readout_due,
 )
 from zcu_lab.workflows.common.calibration_results import StageStatus
+from zcu_lab.workflows.common.calibration_stage_types import (
+    CalibrationPoint,
+    CalibrationPulses,
+    PointGuess,
+)
 from zcu_lab.workflows.common.devices import set_flux
 from zcu_lab.workflows.common.frequency_tracking import FrequencyModel, FrequencyTracker
 from zcu_lab.workflows.common.gain import GainClamp, clamp_gain
+from zcu_lab.workflows.common.point_calibration import calibrate_point
+from zcu_lab.workflows.common.stages import NativeOutput, StageEnv, acquire_saved
 from zcu_lab.workflows.common.summary import RunSummary, SummaryAccumulator
 from zcu_lab.workflows.common.summary_points import mist_summary_point
 from zcu_lab.workflows.mist_fluxdep.acquire import run_mist
@@ -52,7 +56,6 @@ from zcu_lab.workflows.mist_fluxdep.analysis import (
     mist_fluxdep_signal2real,
     mist_signal2real,
 )
-from zcu_lab.workflows.mist_fluxdep.saving import save_mist
 
 
 class MISTPlan(BaseModel):
@@ -177,24 +180,60 @@ class MISTPoint(BaseModel):
     status: Literal["collecting", "completed", "skipped"] = "collecting"
 
 
-def mist_cfg(
-    plan: MISTPlan,
-    tun: MISTTunables,
-    cal: Calibrated,
-    *,
-    mode: Literal["excited", "ground"] = "excited",
-    gain_clamped: list[GainClamp] | None = None,
-) -> PowerDepCfg:
-    """Configure a fixed disturbance gain scan to measure MIST after a calibrated pi.
+@dataclass(frozen=True)
+class MISTPulses:
+    """Calibrated pulses of one MIST preparation.
 
-    Native init_pulse is the calibrated pi preparation; probe_pulse is the
-    selected MIST disturbance pulse. Preserve fixed waveform/routing and the
-    disturbance pulse. Apply the source pi's gain/duration/frequency and latest
-    readout scalars. None drive_gain retains template preparation gain.
-    mode=ground omits preparation. gain SweepCfg comes entirely from plan;
-    relax is five times captured T1, or tun.relax_factor * tun.guess_us. Native
-    validation errors propagate; input models stay unchanged and no I/O occurs.
-    Clip runtime gains to DAC limits; append any changes to gain_clamped.
+    pi is this point's accepted pi preparation, or None for ground. mist is the
+    disturbance pulse template and reset the optional fixed reset. readout
+    holds the retained readout freq/gain. Stages copy these before changing.
+    """
+
+    pi: PulseCfg | None
+    mist: PulseCfg
+    reset: ResetCfg | None
+    readout: PulseReadoutCfg
+
+
+@dataclass(frozen=True)
+class MISTSweep:
+    """Requested disturbance-gain scan: start/stop in a.u. and point count."""
+
+    start: float
+    stop: float
+    points: int
+
+
+@dataclass(frozen=True, kw_only=True)
+class MISTResult:
+    """One preparation's measured outcome, independent of point/trace records.
+
+    status is accepted for a complete trace, rejected for a stopped partial
+    trace, or failed on acquisition failure. reason is None on acceptance,
+    otherwise the acquisition reason or stopped. gain_file is the saved raw
+    filename after any Completed, including partial, else None. gain_clamped
+    lists truncated DAC requests. relax_source/relax_delay_us document the
+    timing. result holds the actual rounded axes only for a complete trace.
+    Construct with keywords; the stage never changes point records or history.
+    """
+
+    status: StageStatus
+    reason: str | None = None
+    gain_file: str | None = None
+    gain_clamped: tuple[GainClamp, ...] = ()
+    relax_source: Literal["captured_t1", "guess"]
+    relax_delay_us: float
+    result: PowerDepResult | None = None
+
+
+def mist_pulses(
+    plan: MISTPlan, cal: Calibrated, *, mode: Literal["excited", "ground"]
+) -> MISTPulses:
+    """Prepare one MIST preparation's pulses from the plan and calibrated scalars.
+
+    Excited applies the source pi's frequency/length (and gain, when not None, else the
+    template gain) to a copy of plan.qub_pulse; ground has no pi. Readout copies
+    the plan and takes cal's retained frequency and gain. Inputs stay unchanged.
     """
     pi = None
     if mode == "excited":
@@ -202,29 +241,54 @@ def mist_cfg(
         pi.set_param("freq", cal.f01_mhz)
         pi.set_param("length", cal.pi_length_us)
         if cal.drive_gain is not None:
-            pi.set_param("gain", clamp_gain(cal.drive_gain, "pi", gain_clamped))
+            pi.set_param("gain", cal.drive_gain)
     readout = plan.readout.model_copy(deep=True)
-    apply_readout_calibration(readout, cal, gain_clamped)
-    start = clamp_gain(plan.gain_start, "mist.start", gain_clamped)
-    stop = clamp_gain(plan.gain_stop, "mist.stop", gain_clamped)
-    return PowerDepCfg(
-        reps=tun.reps,
-        rounds=tun.rounds,
-        acquire_retry=tun.acquire_retry,
-        relax_delay=(
-            5.0 * plan.t1_us
-            if plan.t1_us is not None
-            else tun.relax_factor * tun.guess_us
-        ),
+    readout.set_param("freq", cal.readout_freq_mhz)
+    readout.set_param("gain", cal.readout_gain)
+    return MISTPulses(
+        pi=pi,
+        mist=plan.mist_pulse.model_copy(deep=True),
         reset=None if plan.reset is None else plan.reset.model_copy(deep=True),
+        readout=readout,
+    )
+
+
+def _mist_cfg(
+    pulses: MISTPulses,
+    settings: MISTTunables,
+    sweep: MISTSweep,
+    *,
+    t1_us: float | None,
+    gain_clamped: list[GainClamp],
+) -> PowerDepCfg:
+    pi = None
+    if pulses.pi is not None:
+        pi = pulses.pi.model_copy(deep=True)
+        pi.set_param("gain", clamp_gain(float(pi.gain), "pi", gain_clamped))
+    readout = pulses.readout.model_copy(deep=True)
+    readout.set_param(
+        "gain", clamp_gain(float(readout.gain), "readout", gain_clamped, lower=0.0)
+    )
+    start = clamp_gain(sweep.start, "mist.start", gain_clamped)
+    stop = clamp_gain(sweep.stop, "mist.stop", gain_clamped)
+    return PowerDepCfg(
+        reps=settings.reps,
+        rounds=settings.rounds,
+        acquire_retry=settings.acquire_retry,
+        relax_delay=(
+            5.0 * t1_us
+            if t1_us is not None
+            else settings.relax_factor * settings.guess_us
+        ),
+        reset=None if pulses.reset is None else pulses.reset.model_copy(deep=True),
         init_pulse=pi,
-        probe_pulse=plan.mist_pulse.model_copy(deep=True),
+        probe_pulse=pulses.mist.model_copy(deep=True),
         readout=readout,
         gain=SweepCfg(
             start=start,
             stop=stop,
-            expts=plan.gain_points,
-            step=(stop - start) / (plan.gain_points - 1),
+            expts=sweep.points,
+            step=(stop - start) / (sweep.points - 1),
         ),
     )
 
@@ -244,91 +308,6 @@ def _save_gain(
 
     plots.draw(name, draw)
     plots.save(name, directory / f"gain-{mode}.png")
-
-
-async def run_frequency_stage(
-    iteration: Scope,
-    inputs: CalibrationInputs,
-    point_record: MISTPoint,
-    plots: Plots,
-    *,
-    carry: CalCarry,
-) -> bool:
-    """Collect frequency calibration before checking whether this point was cancelled."""
-    point_record.frequency = await calibrate_frequency(
-        iteration,
-        plots=plots,
-        inputs=inputs,
-        flux=point_record.flux,
-        carry=carry,
-    )
-    if iteration.cancelled:
-        point_record.status = "skipped"
-    return iteration.cancelled
-
-
-async def run_rabi_stage(
-    iteration: Scope,
-    inputs: CalibrationInputs,
-    point_record: MISTPoint,
-    plots: Plots,
-    *,
-    carry: CalCarry,
-    estimate: float,
-) -> bool:
-    """Collect Rabi at the current frequency without starting work after point cancellation."""
-    assert point_record.frequency is not None
-    point_record.rabi = await calibrate_rabi(
-        iteration,
-        plots=plots,
-        inputs=inputs,
-        frequency=point_record.frequency,
-        carry=carry,
-        t1_estimate_us=estimate,
-    )
-    if iteration.cancelled:
-        point_record.status = "skipped"
-    return iteration.cancelled
-
-
-async def run_readout_stage(
-    iteration: Scope,
-    inputs: CalibrationInputs,
-    point_record: MISTPoint,
-    plots: Plots,
-    *,
-    carry: CalCarry,
-    estimate: float,
-) -> bool:
-    """Scan readout on cadence with this point\'s pi, then check cancellation."""
-    assert point_record.rabi is not None
-    if readout_due(inputs.point_index, inputs.tun):
-        point_record.readout = await calibrate_readout(
-            iteration,
-            plots=plots,
-            inputs=inputs,
-            rabi=point_record.rabi,
-            carry=carry,
-            t1_estimate_us=estimate,
-        )
-    else:
-        point_record.readout = ReadoutResult(
-            "skipped",
-            "Readout flux-point cadence",
-            None,
-            None,
-            None,
-        )
-    if point_record.readout.status != "skipped":
-        point_record.calibration_sources["readout"] = CalibrationSource(
-            need="now",
-            source_index=inputs.point_index,
-            source_flux=inputs.flux,
-            fallback=False,
-        )
-    if iteration.cancelled:
-        point_record.status = "skipped"
-    return iteration.cancelled
 
 
 def prepare_mist_map(plots: Plots, mode: str) -> None:
@@ -359,57 +338,64 @@ def draw_mist_map(
     plots.draw(f"mist/{mode}/vs_flux", draw)
 
 
-@dataclass(frozen=True)
-class MISTStageInputs:
-    """Captured preparation plan and run-local delivered-facts report."""
-
-    plan: MISTPlan
-    summary: SummaryAccumulator
-
-
 async def run_mist_stage(
-    iteration: Scope,
-    cfg: PowerDepCfg,
-    point: MISTPoint,
-    plots: Plots,
+    scope: Scope,
+    env: StageEnv,
+    pulses: MISTPulses,
+    settings: MISTTunables,
     *,
-    inputs: MISTStageInputs,
-    mode: Literal["excited", "ground"],
-) -> PowerDepResult | None:
-    """Acquire one preparation, save every Completed raw trace, and draw complete IQ.
+    sweep: MISTSweep,
+    t1_us: float | None,
+) -> MISTResult:
+    """Acquire one preparation, save every Completed raw trace and draw its gain.
 
-    point.traces[mode] must exist. Failures and partial stops update its reason;
-    return None without a map row. Complete traces return actual rounded axes.
+    pulses are the calibrated preparation, MIST disturbance, reset and readout;
+    settings supplies averaging and the fallback relax policy; sweep is the
+    requested disturbance-gain scan. The preparation is excited when pulses.pi exists, otherwise ground; it names
+    the file, operation and plot.
+    t1_us is the captured T1 (relax five times it), or None to use
+    relax_factor * guess_us. Inputs stay unchanged; env supplies plots, snapshot
+    and summary. Failure returns failed without a file; Partial saves raw then
+    returns rejected/stopped without drawing. Complete returns accepted with the
+    actual rounded axes. Unexpected exceptions propagate. No point record or
+    history is modified.
     """
-    trace = point.traces[mode]
-    point.relax_source = "captured_t1" if inputs.plan.t1_us is not None else "guess"
-    point.relax_delay_us = cfg.relax_delay
-    outcome = await iteration.run(run_mist, cfg, name=f"MIST {mode}")
-    inputs.summary.observe(outcome)
-    if isinstance(outcome, Failed):
-        trace.status = "failed"
-        trace.reason = outcome.reason
-        return None
-    trace.gain_file = f"mist-{mode}.h5"
-    save_mist(
-        outcome,
-        iteration.dir / trace.gain_file,
-        snapshot=inputs.plan.snapshot,
-        identity=iteration.identity,
+    mode = "ground" if pulses.pi is None else "excited"
+    gain_clamped: list[GainClamp] = []
+    cfg = _mist_cfg(pulses, settings, sweep, t1_us=t1_us, gain_clamped=gain_clamped)
+    relax_source: Literal["captured_t1", "guess"] = (
+        "captured_t1" if t1_us is not None else "guess"
     )
-    if outcome.partial_result:
-        trace.status = "rejected"
-        trace.reason = "stopped"
-        return None
-    result = outcome.value.result
-    _save_gain(plots, result, iteration.dir, mode)
-    trace.status = "accepted"
-    trace.success, trace.reason = True, None
-    return result
+    acquisition = await acquire_saved(
+        scope,
+        env,
+        run_mist,
+        cfg,
+        name=f"MIST {mode}",
+        output=NativeOutput(filename=f"mist-{mode}.h5", spec=PowerDepExp.AXES_SPEC),
+    )
+    if acquisition.result is None:
+        return MISTResult(
+            status="rejected" if acquisition.status == "partial" else "failed",
+            reason=acquisition.reason,
+            gain_file=acquisition.file,
+            gain_clamped=tuple(gain_clamped),
+            relax_source=relax_source,
+            relax_delay_us=cfg.relax_delay,
+        )
+    _save_gain(env.plots, acquisition.result, scope.dir, mode)
+    return MISTResult(
+        status="accepted",
+        gain_file=acquisition.file,
+        gain_clamped=tuple(gain_clamped),
+        relax_source=relax_source,
+        relax_delay_us=cfg.relax_delay,
+        result=acquisition.result,
+    )
 
 
 @workflow("mist_fluxdep", "Calibrate and acquire MIST gain traces versus flux.")
-async def mist_fluxdep(
+async def mist_fluxdep(  # noqa: C901, PLR0912, PLR0915  # tolerated: workflow flow reads top to bottom
     env: WorkflowEnv[Calibrated], plan: MISTPlan, tun: Live[MISTTunables]
 ) -> RunSummary:
     """Calibrate and acquire a fixed gain trace at each absolute flux setpoint.
@@ -428,6 +414,12 @@ async def mist_fluxdep(
     history from the previous run using the saved_run reader.
     """
     summary = SummaryAccumulator(len(plan.fluxes), plan.flux_unit)
+    stage_env = StageEnv(plots=env.plots, snapshot=plan.snapshot, summary=summary)
+    live_calibration = Live(lambda: tun.current.cal)
+    calibration_pulses = CalibrationPulses(
+        qub=plan.qub_pulse, probe=plan.probe_pulse, readout=plan.readout
+    )
+    sweep = MISTSweep(plan.gain_start, plan.gain_stop, plan.gain_points)
     carry = CalCarry(
         env.context,
         seed_flux=plan.seed_flux,
@@ -461,40 +453,31 @@ async def mist_fluxdep(
             if iteration.cancelled:
                 point_record.status = "skipped"
                 continue
-            captured = CalibrationInputs(
-                qub_pulse=plan.qub_pulse,
-                probe_pulse=plan.probe_pulse,
-                readout=plan.readout,
-                tun=tun.current.cal,
-                snapshot=plan.snapshot,
-                directory=d,
-                point_index=index,
-                flux=flux,
-                flux_unit=plan.flux_unit,
-                summary=summary,
+            calibration = await calibrate_point(
+                iteration,
+                stage_env,
+                calibration_pulses,
+                live_calibration,
+                guess=PointGuess(
+                    point=CalibrationPoint(
+                        index=index, flux=flux, flux_unit=plan.flux_unit
+                    ),
+                    relax_us=tun.current.guess_us,
+                ),
+                carry=carry,
             )
-            # Locate frequency, calibrate pulses, then refresh readout on cadence.
+            point_record.frequency = calibration.frequency
+            point_record.rabi = calibration.rabi
+            point_record.readout = calibration.readout
             if (
-                await run_frequency_stage(
-                    iteration, captured, point_record, env.plots, carry=carry
-                )
-                or await run_rabi_stage(
-                    iteration,
-                    replace(captured, tun=tun.current.cal),
-                    point_record,
-                    env.plots,
-                    carry=carry,
-                    estimate=tun.current.guess_us,
-                )
-                or await run_readout_stage(
-                    iteration,
-                    replace(captured, tun=tun.current.cal),
-                    point_record,
-                    env.plots,
-                    carry=carry,
-                    estimate=tun.current.guess_us,
-                )
+                point_record.readout is not None
+                and point_record.readout.status != "skipped"
             ):
+                point_record.calibration_sources["readout"] = CalibrationSource(
+                    need="now", source_index=index, source_flux=flux, fallback=False
+                )
+            if iteration.cancelled:
+                point_record.status = "skipped"
                 continue
             assert point_record.rabi is not None
             cal = current_pi_calibration(point_record.rabi, carry)
@@ -514,25 +497,25 @@ async def mist_fluxdep(
                     point_record.calibration_sources[mode] = CalibrationSource(
                         need="now", source_index=index, source_flux=flux, fallback=False
                     )
-                cfg = mist_cfg(
-                    plan,
-                    tun.current,
-                    cal or carry.last or carry.seed,
-                    mode=mode,
-                    gain_clamped=trace.gain_clamped,
-                )
-                result = await run_mist_stage(
+                stage = await run_mist_stage(
                     iteration,
-                    cfg,
-                    point_record,
-                    env.plots,
-                    inputs=MISTStageInputs(plan, summary),
-                    mode=mode,
+                    stage_env,
+                    mist_pulses(plan, cal or carry.last or carry.seed, mode=mode),
+                    tun.current,
+                    sweep=sweep,
+                    t1_us=plan.t1_us,
                 )
-                if result is None:
+                trace.status = stage.status
+                trace.success = stage.status == "accepted"
+                trace.reason = stage.reason
+                trace.gain_file = stage.gain_file
+                trace.gain_clamped = list(stage.gain_clamped)
+                point_record.relax_source = stage.relax_source
+                point_record.relax_delay_us = stage.relax_delay_us
+                if stage.result is None:
                     continue
-                traces[mode][index] = result.signals
-                gains = result.gains.copy()
+                traces[mode][index] = stage.result.signals
+                gains = stage.result.gains.copy()
                 draw_mist_map(env.plots, plan, traces[mode], gains, mode)
                 if index == len(plan.fluxes) - 1:
                     env.plots.save(f"mist/{mode}/vs_flux", d / f"map-{mode}.png")

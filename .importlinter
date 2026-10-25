@@ -387,6 +387,8 @@ name = Workflow calibration and coherence science do not depend on frontend owne
 type = forbidden
 source_modules =
     zcu_lab.workflows.common.calibration
+    zcu_lab.workflows.common.point_calibration
+    zcu_lab.workflows.common.calibration_stage_types
     zcu_lab.workflows.coherence_fluxdep.calibration
     zcu_lab.workflows.coherence_fluxdep.workflow
     zcu_lab.workflows.coherence_fluxdep.history

@@ -74,7 +74,7 @@ Cfg 是位置參數，context 是 keyword-only。不要複製 core 的 pulse 序
 逐點量測用 `zip(plan.fluxes, env.iterations())`，變數命名為 `iteration`。
 一趟開始建可變的 Pydantic point_record，未填欄位為 None。每個結果到了再填。
 Coherence 用 t1、t2ramsey、t2echo 三個欄位保存 lifetime，不再使用 measurements 列表。未量測或未到達的欄位為 None，讀取端不提供舊列表格式轉換。
-Coherence 的 calibrate_point 是校準複合 stage，內部依序呼叫 frequency、Rabi（依模式含 AmpRabi）、readout 的單實驗 helper，再回傳 PointCalibrationResult。主迴圈填各校準欄位，接著量 GE 與 lifetimes。
+Coherence 與 MIST 共用的 calibrate_point 是校準複合 stage，內部依序呼叫 frequency、Rabi（依模式含 AmpRabi）、readout 的單實驗 helper，再回傳 PointCalibrationResult。主迴圈填各校準欄位，接著量 GE 與 lifetimes。
 T1、Ramsey、Echo 與 GE 的單實驗 helper 位於 `coherence_fluxdep/stages/`。各 stage 接收 `StageEnv`、本點已校準 pulses、自己的 settings 與本點 timing，不接收整份 plan 或 point record。
 Ramsey 與 Echo 各自回傳獨立的 frozen Result，記錄原有接受門檻的 `gates`。各 lifetime 與 GE 的 DAC 截斷值保存在自己的 `gain_clamped`，不重複寫入 point map。
 主迴圈填結果、更新各自的 accepted history，並以 `history.lifetime_guess` 計算 alpha=0.5 EWMA。T2 的 relax 另收本點 accepted T1，否則用 T1 EWMA／seed。

@@ -24,7 +24,6 @@ from zcu_lab.workflows.coherence_fluxdep.history import (
 from zcu_lab.workflows.coherence_fluxdep.pulses import calibrated_pulses
 from zcu_lab.workflows.coherence_fluxdep.samples import append_point_sample
 from zcu_lab.workflows.coherence_fluxdep.singleshot import SingleshotTunables
-from zcu_lab.workflows.coherence_fluxdep.stages.calibration import calibrate_point
 from zcu_lab.workflows.coherence_fluxdep.stages.echo import EchoResult, measure_echo
 from zcu_lab.workflows.coherence_fluxdep.stages.ge import SingleshotResult, measure_ge
 from zcu_lab.workflows.coherence_fluxdep.stages.ramsey import (
@@ -38,7 +37,6 @@ from zcu_lab.workflows.coherence_fluxdep.t2 import T2EchoTunables, T2RamseyTunab
 from zcu_lab.workflows.common.calibration import (
     CalCarry,
     Calibrated,
-    CalibrationInputs,
     CalibrationSource,
     CalibrationTunables,
     FrequencyResult,
@@ -48,8 +46,14 @@ from zcu_lab.workflows.common.calibration import (
     current_pi_calibration,
     current_point_calibration,
 )
+from zcu_lab.workflows.common.calibration_stage_types import (
+    CalibrationPoint,
+    CalibrationPulses,
+    PointGuess,
+)
 from zcu_lab.workflows.common.devices import set_flux
 from zcu_lab.workflows.common.frequency_tracking import FrequencyModel, FrequencyTracker
+from zcu_lab.workflows.common.point_calibration import calibrate_point
 from zcu_lab.workflows.common.stages import StageEnv
 from zcu_lab.workflows.common.summary import (
     RunSummary,
@@ -245,6 +249,9 @@ async def coherence_fluxdep(  # noqa: C901, PLR0912, PLR0915  # tolerated: workf
     summary = SummaryAccumulator(len(plan.fluxes), plan.flux_unit)
     stage_env = StageEnv(plots=env.plots, snapshot=plan.snapshot, summary=summary)
     live_calibration = Live(lambda: tun.current.cal)
+    calibration_pulses = CalibrationPulses(
+        qub=plan.qub_pulse, probe=plan.probe_pulse, readout=plan.readout
+    )
     carry = CalCarry(
         env.context,
         seed_flux=plan.seed_flux,
@@ -287,25 +294,20 @@ async def coherence_fluxdep(  # noqa: C901, PLR0912, PLR0915  # tolerated: workf
                 if t1_by_flux
                 else tun.current.t1.guess_us
             )
-            captured = CalibrationInputs(
-                qub_pulse=plan.qub_pulse,
-                probe_pulse=plan.probe_pulse,
-                readout=plan.readout,
-                tun=tun.current.cal,
-                snapshot=plan.snapshot,
-                directory=iteration.dir,
-                point_index=point_record.index,
-                flux=point_record.flux,
-                flux_unit=plan.flux_unit,
-                summary=summary,
-            )
             calibration_result = await calibrate_point(
                 iteration,
-                env.plots,
-                captured,
+                stage_env,
+                calibration_pulses,
                 live_calibration,
+                guess=PointGuess(
+                    point=CalibrationPoint(
+                        index=point_record.index,
+                        flux=point_record.flux,
+                        flux_unit=plan.flux_unit,
+                    ),
+                    relax_us=estimate,
+                ),
                 carry=carry,
-                t1_estimate_us=estimate,
             )
             point_record.frequency = calibration_result.frequency
             point_record.rabi = calibration_result.rabi
