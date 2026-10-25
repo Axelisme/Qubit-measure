@@ -16,6 +16,9 @@ in readout order. Readout references the module slot `$mux.module.readout` when
 present, preserving the library's tones and scalar settings. Use a mux-family
 module with the full group tone count. If the slot is empty, Readout starts
 inline from the blank mux template with group calibration tones.
+Pulse length, ADC window and trigger offset remain blank and required, even
+when the group has a time of flight. This form does not derive readout timing.
+Enter confirmed values or use a calibrated readout slot.
 The generator comes from `$mux.wiring.gen_ch`. Tone i's ADC channel is an
 integer seed from the fixed capture's `group.wiring.ro_ch[i]`, in the group's
 resonator order. Each tone starts

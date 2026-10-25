@@ -96,7 +96,7 @@ def ro(
     }
 
 
-# Insertion order preserves library creation menus. Blank seeds retain legacy zeros.
+# Insertion order preserves library creation menus.
 TEMPLATES: dict[str, TemplateDef] = {
     "res_probe": TemplateDef(
         PulseSpec,
@@ -204,7 +204,8 @@ TEMPLATES: dict[str, TemplateDef] = {
             "nqz": 1,
             "pre_delay": 0.0,
             "post_delay": 0.0,
-            "trig_offset": 0.0,
+            # None overrides the Spec default so uncalibrated timing stays required.
+            "trig_offset": None,
         },
         default_name="readout_rf",
     ),
