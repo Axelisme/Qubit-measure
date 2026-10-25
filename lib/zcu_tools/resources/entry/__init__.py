@@ -66,7 +66,7 @@ from .writeback import (
     ModuleWriteback,
     ParameterWriteback,
     PointWritebackTarget,
-    SampleWriteback,
+    RecordWriteback,
     WaveformWriteback,
     WritebackApplyError,
     WritebackEvidence,

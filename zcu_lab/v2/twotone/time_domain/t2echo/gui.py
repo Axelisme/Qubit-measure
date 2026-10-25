@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import math
 from collections.abc import Sequence
+from copy import deepcopy
 from pathlib import Path
 from typing import TypeAlias
 
@@ -15,7 +16,7 @@ from zcu_tools.gui.app.measure.adapter import (
     Analysis,
     AnalyzeRequest,
     ParameterWriteback,
-    SampleWriteback,
+    RecordWriteback,
     WritebackItem,
     WritebackRequest,
 )
@@ -105,17 +106,26 @@ def _T2Echo_analyze(
 def _T2Echo_get_writeback_items(
     req: WritebackRequest[T2EchoRunResult, T2EchoAnalysis],
 ) -> Sequence[WritebackItem]:
-    """Propose fitted T2E in us and a sample for the Run's resolved $qubit.
+    """Propose fitted T2E in us and a record for the Run's resolved $qubit.
 
     req supplies the result and its captured context; source.cfg may be None.
     WritebackService resolves the role and destination on req.ctx.parameters
     and rejects a missing capture or unbound role. Without a capture,
     retain parameter proposals only so loaded data can still be analyzed.
-    With a capture, unbound $qubit raises RoleResolutionError. The service
-    adds bias coordinates or omits the sample with a public reason. This
+    With a capture, unbound $qubit raises RoleResolutionError. The adapter
+    copies Run device facts; missing snapshot logs "no device snapshot" and
+    omits only the record. This
     Run leaves devices fixed; no live lookup, device access, frequency/module
     update or write occurs here.
     """
+    metadata = req.run_result.metadata
+    devices = (
+        None
+        if metadata is None or metadata.device_snapshot is None
+        else deepcopy(dict(metadata.device_snapshot))
+    )
+    if devices is None:
+        logging.warning("no device snapshot")
     result = req.analyze_result
     quality = None if result.fit_quality is None else result.fit_quality.get("fit")
     note = coherence_review_note(result.t2e, result.t2e_err, quality)
@@ -129,13 +139,17 @@ def _T2Echo_get_writeback_items(
         ),
     ]
     parameters = req.ctx.parameters
-    if parameters is not None:
+    if parameters is not None and metadata is not None and devices is not None:
         items.append(
-            SampleWriteback(
+            RecordWriteback(
                 target_name=parameters.resolve_path("$qubit"),
-                description="T2 Echo sample at the captured bias",
-                coordinate_device="$qubit.flux_source",
-                proposed_value={
+                description="T2 Echo record at the captured bias",
+                record={
+                    "devices": {name: deepcopy(info) for name, info in devices.items()},
+                    "run": {
+                        "run_id": metadata.run_id,
+                        "experiment": metadata.experiment,
+                    },
                     "t2e_us": result.t2e,
                     "t2e_err_us": result.t2e_err,
                 },

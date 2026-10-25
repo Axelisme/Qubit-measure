@@ -24,7 +24,7 @@ from zcu_tools.gui.app.measure.services.post_analyze import PostAnalyzeService
 from zcu_tools.gui.app.measure.writeback import (
     ModuleWriteback,
     ParameterWriteback,
-    SampleWriteback,
+    RecordWriteback,
     WritebackDraft,
     WritebackEdit,
     WritebackItem,
@@ -169,11 +169,10 @@ def test_mixed_submission_receipts_and_applied_flags_follow_committed_indices(
                     ch=0, nqz=1, freq=100.0, gain=0.3, waveform="Q1.waveforms.base"
                 ),
             ),
-            SampleWriteback(
+            RecordWriteback(
                 "invalid/component" if fails else "Q1",
                 "Sample",
                 {"freq": 12.0},
-                coordinate_device="$coordinate",
             ),
             ParameterWriteback("Q1.ext.gain", "Gain", proposed_value=0.4),
             ParameterWriteback("Q1.ext.rate", "Rate", proposed_value=5000.0),
@@ -185,12 +184,12 @@ def test_mixed_submission_receipts_and_applied_flags_follow_committed_indices(
     )
     ids = tuple(item.session_id for item in draft.items)
     result = session.service.accept_drafts((WritebackSelection(draft, ids),))
-    expected_ids = ("param-1", "param-2", "ml-1") + (() if fails else ("sample-1",))
+    expected_ids = ("param-1", "param-2", "ml-1") + (() if fails else ("record-1",))
     assert tuple(item.id for item in result.written[0]) == expected_ids
     assert set(result.applied_ids[0]) == set(expected_ids)
     assert session.service.get_all_applied(draft) == {
         "ml-1": True,
-        "sample-1": not fails,
+        "record-1": not fails,
         "param-1": True,
         "param-2": True,
     }
@@ -205,8 +204,10 @@ def test_write_draft_associates_before_and_after_values_after_group_reordering(
     session.control.set_alias_rows((AliasRow("coordinate", "device"),))
     draft = session.service.create_draft(
         [
-            SampleWriteback(
-                "Q1", "Sample", {"freq": 12.0}, coordinate_device="$coordinate"
+            RecordWriteback(
+                "Q1",
+                "Sample",
+                {"freq": 12.0},
             ),
             ParameterWriteback("Q1.ext.gain", "Gain", proposed_value=0.4),
         ],
@@ -218,11 +219,11 @@ def test_write_draft_associates_before_and_after_values_after_group_reordering(
     receipts = session.service.write_draft(
         draft, tuple(WritebackEdit(item.session_id) for item in draft.items)
     )
-    assert [item.id for item in receipts] == ["param-1", "sample-1"]
+    assert [item.id for item in receipts] == ["param-1", "record-1"]
     by_id = {item.id: item for item in receipts}
     assert by_id["param-1"].after == 0.4
-    assert isinstance(by_id["sample-1"].after, dict)
-    assert by_id["sample-1"].after["freq"] == 12.0
+    assert isinstance(by_id["record-1"].after, dict)
+    assert by_id["record-1"].after["freq"] == 12.0
 
 
 @pytest.mark.parametrize("readback_fails", [False, True])

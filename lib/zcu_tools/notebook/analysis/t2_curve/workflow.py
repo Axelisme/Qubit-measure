@@ -594,6 +594,7 @@ def run_t2_curve_analysis(
 ) -> T2CurveAnalysisResult:
     context = load_t2_curve_context(
         result_dir=config.result_dir,
+        device_name=config.device_name,
         samples_filename=config.samples_filename,
         image_dir=config.image_dir,
         default_bare_rf=config.default_bare_rf,

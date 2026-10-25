@@ -49,7 +49,7 @@ registration. Capabilities derive from the primary value and post declaration.
 Every value requires SoC for Run and permits a Load attempt; restore compatibility
 is decided by the declared spec. `restore`, `data_item` and `analysis_item`
 provide framework projections without I/O. Guide reads its declared Markdown
-only when called. Sample proposals declare `coordinate_device` on each item.
+only when called. Record proposals contain adapter-owned JSON, with no coordinate declaration.
 
 Each adapter declares `run(inp, *, context) -> RunRecord`, converts its input
 to the actual experiment cfg and invokes the experiment. Even without a
@@ -86,7 +86,7 @@ result has an empty object summary. Before completion, RPC returns summary=null.
 - [`artifacts/`](artifacts/handover.py)：tracker、SaveService、SaveControl、保存中心與 `ArtifactHandover`。
   保存中心在全部 artifact 都是 SAVED 時停用 Save All 與各列 Save。
   任一 artifact 不是 SAVED 時恢復啟用，但仍須符合 idle、可寫與 active context 條件。
-- [`writeback/`](writeback/service.py)：parameter／module／sample proposals、draft、service、control 與 Qt review widget。
+- [`writeback/`](writeback/service.py)：parameter／module／record proposals、draft、service、control 與 Qt review widget。
 - [`ui/`](ui/main_window.py)：Qt widgets、MainWindow top-level façade、capability-driven `ExpTabWidget`、
   feedback widgets；writeback view 由 `writeback/` 擁有，generic cfg form不屬於app package。
   Footer 訊息在可用寬度內換行，不以長錯誤文字撐大視窗；tooltip 與 view snapshot 保留完整文字。
@@ -325,10 +325,10 @@ Run、WB 與目前 point 的 Inspect Set 要先選取或建立工作點；GUI �
 但目的地仍是候選捕捉的 SavedPoint，不跟隨畫面上的 point。
 Cfg/editor drafts 與 WB 候選 preview 保持各自的生命週期。
 
-每個 `SampleWriteback` 以 `coordinate_device` 宣告座標裝置的 alias path。
-預設 `None` 略過該 Sample，不影響 Parameter／Module proposals。
-WritebackService 從固定 Run／Load parameters 與 device snapshot 解析座標。
-缺 alias 或裝置證據時略過 Sample，並提供不可用原因。不查 live 裝置。
+`RecordWriteback` 只提出 adapter 組裝的 JSON object。
+WritebackService 不解析欄位、不補座標、不查裝置或 alias。
+格式由 adapter 間的 policy 決定，見 [Record policy](../../../../../zcu_lab/v2/measure-authoring.md#record-policy)。
+元件記錄放在 `records/components/<target>.jsonl`，wire kind 與 ID prefix 使用 `record`。
 
 `AdapterCapabilities` 由定義值推導 analysis 與 post-analysis。
 每個 Run 都需要 SoC，guard 檢查 context、cfg 與連線。實驗的輸入驗證在 run 內執行。

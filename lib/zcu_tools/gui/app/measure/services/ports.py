@@ -220,9 +220,9 @@ class WritebackLifecyclePort(Protocol):
 
         run_id is historical RunMetadata.run_id, even before Save, or None
         without native evidence. Save does not change the draft's identity.
-        Each Sample proposal supplies coordinate_device. Resolve that alias from
-        parameters and the fixed device_snapshot; missing facts produce public
-        unavailable reasons without discarding other proposals.
+        Record proposals supply opaque JSON. The framework does not interpret
+        fields or inject coordinates; adapters own record policy. device_snapshot
+        remains a detached Run fact, not an automatic source for record fields.
         A module proposal that is not a concrete persistent Spec raises.
         """
         ...

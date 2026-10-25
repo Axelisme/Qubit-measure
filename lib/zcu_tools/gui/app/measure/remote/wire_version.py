@@ -16,8 +16,9 @@ from __future__ import annotations
 # result_state.partial_result preserves inner cancellation independently of root Stop.
 # Writeback receipts, validated recipe batches, all-tone diagnostics and analysis recovery.
 # value.read identifies unregistered sources with a structured reason and path.
-WIRE_VERSION = 122
+# Record writeback uses record IDs/kinds and written.records; no sample aliases.
+WIRE_VERSION = 123
 
 # Bump for meaningful GUI code changes that need a reload signal.
 # Wire-contract changes bump both versions.
-GUI_VERSION = 155
+GUI_VERSION = 156

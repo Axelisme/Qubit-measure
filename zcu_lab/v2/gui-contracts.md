@@ -27,9 +27,11 @@ gui.py 保留來源與 route prior 解析，以及 writeback。
 
 每個 gui.py 宣告具名參數的 Adapter 值，form.py 提供 make_form(ctx)。
 PostAnalysis 的 writeback 與 primary 各自持有 opaque draft，adapter 不接觸 Writeback 實作。
-SampleWriteback 在每項 proposal 宣告 coordinate_device，單 qubit 用 "$qubit.flux_source"，
-mux 用 "$mux.flux_source"。Framework 只依固定 parameters 與 Run device snapshot 補入座標，
-不重新查 live 裝置。缺少證據保留 unavailable 原因，Parameter／Module proposals 不受影響。
+`RecordWriteback` 只 append adapter 提供的 JSON object，framework 不補座標。
+格式由 adapter 間的 policy 決定，見 [Record policy](measure-authoring.md#record-policy)。
+這八個 adapter 自行複製 Run 的完整 device snapshot，mux 的 global coil 與各 local 線都保留。
+缺 metadata 或 snapshot 時，adapter 記 `no device snapshot` warning 並省略 record，其他 proposals 不受影響。
+RPC kind 與 ID prefix 使用 `record`，written key 使用 `records`，不接受舊名稱。
 
 ## Ownership
 

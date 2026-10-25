@@ -6,7 +6,7 @@ from pathlib import Path
 from types import MappingProxyType
 from uuid import UUID
 
-from zcu_tools.resources.sample_table import JsonlSampleTable
+from zcu_tools.resources.record_table import JsonlRecordTable
 
 from ._path_segments import validate_path_segment
 from .aliases import AliasValue
@@ -38,19 +38,20 @@ class PointStorageBinding:
     roles: Mapping[str, AliasValue]
 
 
-def bind_sample_table(result_path: Path, component: str) -> JsonlSampleTable:
-    """Bind entry sample history without reading schemas, ledger or files.
+def bind_record_table(result_path: Path, component: str) -> JsonlRecordTable:
+    """Bind entry record history without reading schemas, ledger or files.
 
     result_path is the exact entry Result directory, not its parent root.
     component is a safe single path segment, never a role alias. Rows live at
-    samples/<component>.jsonl. Unsafe names or symlinks escaping the entry raise
+    records/components/<component>.jsonl. Unsafe names or symlinks escaping the entry raise
     ValueError. The returned owner handles append, latest-row read and export.
     """
     validate_path_segment(component, field="component")
-    path = result_path / "samples" / f"{component}.jsonl"
-    if not path.resolve().is_relative_to(result_path.resolve()):
-        raise ValueError(f"{path}: samples escape their entry")
-    return JsonlSampleTable(path)
+    path = result_path / "records" / "components" / f"{component}.jsonl"
+    record_root = result_path.resolve() / "records" / "components"
+    if not path.resolve().is_relative_to(record_root):
+        raise ValueError(f"{path}: records escape their component namespace")
+    return JsonlRecordTable(path)
 
 
 def capture_point_storage(

@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 from .items import (
     ModuleWriteback,
     ParameterWriteback,
-    SampleWriteback,
+    RecordWriteback,
     WritebackItem,
 )
 
@@ -34,7 +34,7 @@ if TYPE_CHECKING:
 __all__ = [
     "ModuleWriteback",
     "ParameterWriteback",
-    "SampleWriteback",
+    "RecordWriteback",
     "WritebackItem",
     "WritebackControlFacet",
     "WritebackControlPort",

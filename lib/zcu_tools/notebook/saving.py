@@ -40,8 +40,8 @@ from zcu_tools.resources.entry import (
     ParameterWriteback,
     PointView,
     PointWritebackTarget,
+    RecordWriteback,
     RoleView,
-    SampleWriteback,
     SaveLayout,
     WaveformWriteback,
     WritebackEvidence,
@@ -225,9 +225,9 @@ class SavedRun(Generic[CfgT, ResultT]):
         | None = None,
         module: Mapping[str, ModuleSpec] | None = None,
         waveform: Mapping[str, WaveformSpec] | None = None,
-        samples: Mapping[str, JsonObject] | None = None,
+        records: Mapping[str, JsonObject] | None = None,
     ) -> str:
-        """Accept results into this run's captured point, library and samples.
+        """Accept results into this run's captured point, library and records.
 
         parameter maps dotted point paths to working-unit JSON/complex values
         or (value, metadata) pairs. A plain value keeps the path's existing
@@ -239,14 +239,14 @@ class SavedRun(Generic[CfgT, ResultT]):
         not raw dictionaries. Parameter and library paths expand only their
         first segment using this run's captured roles. At least one mapping
         must be nonempty.
-        samples maps concrete component names (not role aliases) to JSON field
+        records maps concrete component names (not role aliases) to JSON field
         dictionaries. Device fields and units are optional and preserved as
         provided; the caller owns their consistency. Only run_id, point, UTC at
         and source are set automatically, overriding these keys if supplied.
-        No live aliases, device state or cfg are consulted for sample values.
+        No live aliases, device state or cfg are consulted for record values.
 
         Append one accepted event, then apply parameter, module, waveform and
-        samples in that order, preserving each mapping's iteration order.
+        records in that order, preserving each mapping's iteration order.
         Each item commits separately. An item failure raises WritebackApplyError
         with event_id/applied and the original cause; ledger append fails unchanged.
         The first failure stops later writes; prior successful items
@@ -255,7 +255,7 @@ class SavedRun(Generic[CfgT, ResultT]):
         caller-supplied. Parameter metadata receives no event, run or time.
         Return the accepted event ID after all items succeed.
         """
-        if not parameter and not module and not waveform and not samples:
+        if not parameter and not module and not waveform and not records:
             raise ValueError("accept requires at least one nonempty mapping")
         document = snapshot(self._point)
         items: list[WritebackItem] = []
@@ -275,8 +275,8 @@ class SavedRun(Generic[CfgT, ResultT]):
         for path, spec in (waveform or {}).items():
             actual_path = resolve_path(document, path, roles=self._storage.roles)
             items.append(WaveformWriteback(actual_path, spec))
-        for component, fields in (samples or {}).items():
-            items.append(SampleWriteback(component, fields))
+        for component, fields in (records or {}).items():
+            items.append(RecordWriteback(component, fields))
         return apply_writeback(
             tuple(items),
             target=PointWritebackTarget(self._point, self._storage),

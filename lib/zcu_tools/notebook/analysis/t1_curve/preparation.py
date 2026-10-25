@@ -17,12 +17,13 @@ from zcu_tools.notebook.analysis.fit_tools import (
 from zcu_tools.resources.qubit_params import (
     QubitParams,
 )
-from zcu_tools.resources.sample_table import (
+from zcu_tools.resources.record_table import (
     DeviceValueUnit,
-    JsonlSampleTable,
-    SampleFluxFrame,
-    resolve_sample_flux,
-    validate_sample_table_v2,
+    JsonlRecordTable,
+    RecordFluxFrame,
+    project_device_coordinates,
+    resolve_record_flux,
+    validate_record_table_v2,
 )
 
 from .models import (
@@ -39,13 +40,16 @@ _REQUIRED_COLUMNS = ("freq_mhz", "t1_us")
 def load_t1_curve_context(
     *,
     result_dir: str,
-    samples_filename: str = "samples.jsonl",
+    device_name: str,
+    samples_filename: str = "records.jsonl",
     image_dir: str | None = None,
     preview_rows: int = 10,
 ) -> T1CurveContext:
     """Load fluxdep params and latest JSONL sample rows from result_dir.
 
-    samples_filename is relative to result_dir and defaults to samples.jsonl;
+    device_name selects devices[device_name].value/value_unit; missing facts
+    fail without flat-field fallback. samples_filename is relative to
+    result_dir and defaults to records.jsonl;
     required measurements are freq_mhz and t1_us. Create image_dir (default
     result_dir/t1_curve) and return params, rows and preview_rows preview rows.
     Missing params, invalid JSONL or missing required columns fail fast.
@@ -56,7 +60,10 @@ def load_t1_curve_context(
 
     params_file = QubitParams(os.path.join(result_dir, "params.json"), readonly=True)
     fit_inputs = params_file.require_fluxdep_fit()
-    samples_df = JsonlSampleTable(os.path.join(result_dir, samples_filename)).read()
+    samples_df = project_device_coordinates(
+        JsonlRecordTable(os.path.join(result_dir, samples_filename)).read(),
+        device_name=device_name,
+    )
     _validate_required_columns(samples_df)
 
     params = fit_inputs.params
@@ -101,10 +108,10 @@ def calibrate_t1_flux(
     sample-table validation error; source row order is retained.
     """
     samples_df = context.samples_df
-    fallback_frame = SampleFluxFrame(
+    fallback_frame = RecordFluxFrame(
         fallback_frame_unit, context.flux_int, context.flux_period
     )
-    resolution = resolve_sample_flux(
+    resolution = resolve_record_flux(
         samples_df,
         fallback_frame=fallback_frame,
     )
@@ -120,7 +127,7 @@ def calibrate_t1_flux(
     }
     summary_table = pd.DataFrame(
         [
-            ("samples.jsonl rows", str(len(samples_df))),
+            ("records.jsonl rows", str(len(samples_df))),
             ("explicit flux rows", str(source_counts["explicit"])),
             ("row-frame flux rows", str(source_counts["row-frame"])),
             ("fallback-frame flux rows", str(source_counts["fallback-frame"])),
@@ -197,12 +204,12 @@ def prepare_t1_curve_data(
 
 
 def _validate_required_columns(samples_df: pd.DataFrame) -> None:
-    validate_sample_table_v2(samples_df, allow_empty=True)
+    validate_record_table_v2(samples_df, allow_empty=True)
     missing = [
         column for column in _REQUIRED_COLUMNS if column not in samples_df.columns
     ]
     if missing:
-        raise ValueError(f"samples.jsonl missing required columns: {missing}")
+        raise ValueError(f"records.jsonl missing required columns: {missing}")
 
 
 def _float_column(frame: pd.DataFrame, column: str) -> NDArray[np.float64]:

@@ -9,7 +9,7 @@ from zcu_tools.datafile import load
 from zcu_tools.experiment.native_persistence import metadata_from_container
 from zcu_tools.experiment.workflows.export import load_trace
 from zcu_tools.experiment.workflows.saved_run import SavedRecord, native_path
-from zcu_tools.resources.sample_table import JsonlSampleTable
+from zcu_tools.resources.record_table import JsonlRecordTable
 
 from zcu_lab.v2.singleshot.ge.core import GE_Exp
 from zcu_lab.v2.twotone.freq.core import FreqExp
@@ -63,11 +63,11 @@ class SampleExportReport:
     path: Path
 
 
-def append_samples(
+def append_records(
     run_id: str,
     *,
     rows: tuple[SampleRow, ...],
-    table: JsonlSampleTable,
+    table: JsonlRecordTable,
     point: str | None,
 ) -> SampleExportReport:
     """Append an entirely prepared batch, retaining prefix/count/cause on OSError.

@@ -39,7 +39,7 @@ uv run --directory <checkout> --no-sync -- python -m migrations.migrate_storage 
 
 `--assume-flux-unit` 只補缺少的 global/predictor 單位證據，報告標「假設單位」，不改明示值，也不換算 component 數字。Global 磁通取同檔、根 meta_info、params 根的 `flux_unit`，之後才用假設。JPA 只取同檔或根 meta_info 的 `jpa_flux_unit`，之後才用獨立的 `--assume-jpa-flux-unit A|V`。未提供這個選項就保持 pending，不借 global 假設。Point 本檔單位可覆寫繼承單位，同組未覆寫的 setup 數字與 metadata 會清除。`local_flux_unit` 只照抄，不影響 global 數值。Owner 不接受的單位或同層明示衝突使該組 pending。Predictor 仍只採 params 根與 fit 的單位證據。
 
-樣本單位獨立由 `--sample-source-unit` 宣告。缺 legacy CSV 宣告或資料非法時，報告按列定位 pending。合法列轉進唯一 qubit 的 `samples/<component>.jsonl`。V2 CSV 自帶 `dev_value/dev_unit`，不需要 legacy 宣告。Resume 沿用首次提供的四個選項，不能中途改單位或欄位。兩種假設都不能修補非法或衝突的明示單位。API 與 CLI 在任何寫入前拒絕不合法的假設輸入。
+樣本單位獨立由 `--sample-source-unit` 宣告。缺 legacy CSV 宣告或資料非法時，報告按列定位 pending。合法列轉進唯一 qubit 的 `records/components/<component>.jsonl`。V2 CSV 自帶 `dev_value/dev_unit`，不需要 legacy 宣告。Resume 沿用首次提供的四個選項，不能中途改單位或欄位。兩種假設都不能修補非法或衝突的明示單位。API 與 CLI 在任何寫入前拒絕不合法的假設輸入。
 
 根 `module_cfg.yaml` 寫成 setup library。Exps 外的 `image/` 保留完整來源相對路徑，發布到 `result/<entry>/figures/`。其他未支援 result 檔與 `autofluxdep_runs/**` 保留在新 result entry 的相對位置，exps 附屬未知檔放到對應 point。Database 未支援檔保留 entry 相對位置，所有 Labber 原檔則統一放 `Database/<entry>/Labber/<來源相對路徑>`，不依 native 轉換成功與否分流。成功者另產 native，失敗者仍列 pending。CSV 有無法轉換的列時，合法列照常寫入樣本表，另將完整原文保存在 `result/<entry>/samples.csv`。`params.json` 不在新 entry 留副本，原文由完整備份保存。
 
@@ -47,7 +47,7 @@ uv run --directory <checkout> --no-sync -- python -m migrations.migrate_storage 
 
 ## Sample CSV → JSONL
 
-`migrations.sample_csv.convert_sample_csv` 接受一或多份 CSV、已開啟的 `ResultEntry` 與元件名，追加到該條目的 `samples/<component>.jsonl`。來源位元組不變。公開函式回傳 `MigrationReport`，列出追加列數、待判斷列及原因、輸出路徑與 `preserved_fields`。`plan_sample_csv` 使用相同欄位與單位宣告，回傳 `SampleCsvPlan(rows, pending, preserved_fields)`，不取得 entry 或寫檔。Storage migration 與直接追加工具共用這個 owner 規劃介面。
+`migrations.sample_csv.convert_sample_csv` 接受一或多份 CSV、已開啟的 `ResultEntry` 與元件名，追加到該條目的 `records/components/<component>.jsonl`。來源位元組不變。公開函式回傳 `MigrationReport`，列出追加列數、待判斷列及原因、輸出路徑與 `preserved_fields`。`plan_sample_csv` 使用相同欄位與單位宣告，回傳 `SampleCsvPlan(rows, pending, preserved_fields)`，不取得 entry 或寫檔。Storage migration 與直接追加工具共用這個 owner 規劃介面。
 
 ```python
 from migrations.sample_csv import convert_sample_csv

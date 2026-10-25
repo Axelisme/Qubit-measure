@@ -20,7 +20,7 @@ from zcu_tools.cfg_model import WaveformAssetInfo
 from zcu_tools.format_version import YamlMap
 from zcu_tools.resources.document_store import DocumentRevision, DocumentStore
 from zcu_tools.resources.parameter_metadata import validate_parameter_header
-from zcu_tools.resources.sample_table import JsonlSampleTable
+from zcu_tools.resources.record_table import JsonlRecordTable
 
 from . import _point_origin
 from ._path_segments import validate_path_segment
@@ -43,7 +43,7 @@ from .schema import (
     SetupDocument,
     SetupGeneral,
 )
-from .storage import bind_sample_table
+from .storage import bind_record_table
 from .views import (
     SetupView,
     validate_view_components,
@@ -284,15 +284,15 @@ class ResultEntry:
         self.ledger.append(event, record=record)
         return event.id
 
-    def samples(self, component: str) -> JsonlSampleTable:
-        """Bind this component's append-only sample history without touching disk.
+    def records(self, component: str) -> JsonlRecordTable:
+        """Bind this component's append-only record history without touching disk.
 
         component is a safe single path segment, not a role alias. Rows live at
-        result_path/samples/<component>.jsonl; no component schema or ledger is
+        result_path/records/components/<component>.jsonl; no component schema or ledger is
         read. Unsafe names and symlinks escaping this entry raise ValueError.
         The returned table owns append, latest-per-run read and CSV export.
         """
-        return bind_sample_table(self._result_path, component)
+        return bind_record_table(self._result_path, component)
 
     def list_points(self) -> list[str]:
         """Return sorted labels of directories containing both point files.

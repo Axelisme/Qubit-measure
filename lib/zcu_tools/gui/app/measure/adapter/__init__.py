@@ -5,7 +5,7 @@
 from zcu_tools.gui.app.measure.writeback import (
     ModuleWriteback,
     ParameterWriteback,
-    SampleWriteback,
+    RecordWriteback,
     WritebackItem,
 )
 from zcu_tools.gui.session.types import (
