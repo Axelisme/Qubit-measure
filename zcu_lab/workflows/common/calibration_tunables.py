@@ -42,8 +42,8 @@ class CalibrationTunables(FrequencyTunables):
         gt=0,
         description="Completed-round trace SNR threshold; None disables early stop",
     )
-    ro_reps: int = Field(default=1000, ge=1, description="Readout averages")
-    ro_rounds: int = Field(default=10, ge=1, description="Readout rounds")
+    ro_reps: int = Field(default=100, ge=1, description="Readout averages")
+    ro_rounds: int = Field(default=1, ge=1, description="Readout rounds")
     ro_acquire_retry: int = Field(
         default=3, ge=0, description="Retries after a transient acquisition failure"
     )
