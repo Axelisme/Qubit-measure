@@ -4,7 +4,7 @@
 
 The measurement runs on real hardware. It sweeps readout frequency and fits the resonator response to extract its frequency and linewidth. Run it after a coarse resonator search has placed you near the right frequency.
 
-**Last updated:** 2026-10-21
+**Last updated:** 2026-10-25
 
 After changing the parameter source, use Reset to recapture initial values. Refresh only updates sources and choices while preserving authored inputs; Reset can overwrite unsaved inputs.
 
@@ -28,7 +28,9 @@ For a file from the same opened entry, Load reads the current persisted values a
 
 Analysis proposes fitted values for `resonator.freq`, `resonator.kappa`, and `resonator.ext.theta0`. The selected result's parameter source identifies the destination resonator when that source is available. When the run includes pulse-readout settings, analysis also proposes a `resonator.readout.readout_rf` library module based on those settings. It changes the pulse/readout frequency and preserves gain, lengths, channels, and trigger timing.
 
-When the selected result has a parameter source, an update to the `$qubit.module.readout` slot follows the module proposal. The slot value is the resolved `$resonator.readout.readout_rf` path from that same source. Apply both the module and slot updates to select that library readout for downstream experiments. Scalar and module proposals are also available for runs made without saved parameters.
+When the selected result has a parameter source, an update to the `$resonator.module.readout` slot follows the module proposal. The slot value is the resolved `$resonator.readout.readout_rf` path from that same source. Apply both the module and slot updates to select that library readout for downstream experiments. Scalar and module proposals are also available for runs made without saved parameters.
+
+The resonator owns both the module and its readout slot; this writeback does not require a `$qubit` alias. Single-qubit forms read that slot through the `resonator: $qubit.resonator` alias. Existing points are not migrated: rerun onetone/freq and Apply both updates, or manually set `R1.module.readout` to an existing library module; otherwise the forms use the readout template.
 
 The `resonator.ext.edelay` proposal keeps delay and route together. It requires an identifiable absolute branch or a trusted prior calibration or manual seed.
 

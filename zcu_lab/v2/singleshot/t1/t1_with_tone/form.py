@@ -20,8 +20,8 @@ def make_form(ctx: FormContext) -> Form[T1WithToneCfg]:
             if ctx.has("$qubit.module.x180")
             else Template("pi_pulse", bindings={"qubit": "$qubit"}),
             "probe_pulse": Template("res_probe", bindings={"resonator": "$resonator"}),
-            "readout": Slot("$qubit.module.readout")
-            if ctx.has("$qubit.module.readout")
+            "readout": Slot("$resonator.module.readout")
+            if ctx.has("$resonator.module.readout")
             else Template("readout", bindings={"resonator": "$resonator"}),
             "length": Range(0.0, sweep_stop, expts=101),
             "g_center": Expr("$qubit.ext.readout_cal.g_center"),

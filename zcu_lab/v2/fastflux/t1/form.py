@@ -24,8 +24,8 @@ def make_form(ctx: FormContext) -> Form[T1Cfg]:
                 # Run supplies gain; length remains a waveform-shape baseline.
                 set={"gain": Hidden(0.0), "waveform.length": 0.1},
             ),
-            "readout": Slot("$qubit.module.readout")
-            if ctx.has("$qubit.module.readout")
+            "readout": Slot("$resonator.module.readout")
+            if ctx.has("$resonator.module.readout")
             else Template("readout", bindings={"resonator": "$resonator"}),
             "gain": Range(0.0, 0.0, expts=1),
             "length": Range(0.1, relax_delay, expts=101),

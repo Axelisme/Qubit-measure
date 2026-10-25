@@ -37,8 +37,8 @@ def make_form(ctx: FormContext) -> Form[AcStarkCfg]:
                     "post_delay": Expr("0.5 / $resonator.kappa"),
                 },
             ),
-            "readout": Slot("$qubit.module.readout")
-            if ctx.has("$qubit.module.readout")
+            "readout": Slot("$resonator.module.readout")
+            if ctx.has("$resonator.module.readout")
             else Template("readout", bindings={"resonator": "$resonator"}),
             "gain": Range(0.0, 0.22, expts=301),
             "freq": Range("$qubit.freq - 700.0", "$qubit.freq + 100.0", expts=801),

@@ -22,8 +22,8 @@ def make_form(ctx: FormContext) -> Form[PhaseCfg]:
                     "cavity_tone_cfg.gain": Expr("$qubit.ext.reset_bath_gain"),
                 },
             ),
-            "readout": Slot("$qubit.module.readout")
-            if ctx.has("$qubit.module.readout")
+            "readout": Slot("$resonator.module.readout")
+            if ctx.has("$resonator.module.readout")
             else Template("readout", bindings={"resonator": "$resonator"}),
             "phase": Range(-360.0, 360.0, expts=201),
             "relax_delay": t1_initial_time(ctx.parameters, multiplier=5),

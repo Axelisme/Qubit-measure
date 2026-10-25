@@ -20,8 +20,8 @@ def make_form(ctx: FormContext) -> Form[FreqCfg]:
                 # Run supplies these probe scan coordinates.
                 set={"freq": Hidden(0.0)},
             ),
-            "readout": Slot("$qubit.module.readout")
-            if ctx.has("$qubit.module.readout")
+            "readout": Slot("$resonator.module.readout")
+            if ctx.has("$resonator.module.readout")
             else Template("readout", bindings={"resonator": "$resonator"}),
             "freq": Range.around("$resonator.freq", "1.5 * $resonator.kappa", expts=51),
             "g_center": Expr("$qubit.ext.readout_cal.g_center"),

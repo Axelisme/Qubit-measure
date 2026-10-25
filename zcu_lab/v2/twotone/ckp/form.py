@@ -43,8 +43,8 @@ def make_form(ctx: FormContext) -> Form[CKP_Cfg]:
                     "post_delay": Expr(f"{3.1 / (2 * pi)} / $resonator.kappa"),
                 },
             ),
-            "readout": Slot("$qubit.module.readout")
-            if ctx.has("$qubit.module.readout")
+            "readout": Slot("$resonator.module.readout")
+            if ctx.has("$resonator.module.readout")
             else Template("readout", bindings={"resonator": "$resonator"}),
             "res_freq": Range.around(
                 "$resonator.freq", "1.5 * $resonator.kappa", expts=101

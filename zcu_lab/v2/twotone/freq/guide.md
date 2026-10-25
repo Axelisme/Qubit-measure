@@ -12,7 +12,9 @@ Open and Reset fill editable starting values from captured calibration. The freq
 
 ## Module slots
 
-The drive starts with a fresh 'qub_probe' constant pulse for spectroscopy. Readout uses the `$qubit.module.readout` slot captured at Open/Reset; an unset slot, missing module or unbound alias uses a fresh 'readout' template with a constant waveform. That fallback still needs its required parameter sources. Reset uses the optional `$qubit.module.reset` slot; an unset slot, missing module or unbound alias leaves it disabled and Valid. Init Pulse stays disabled.
+The drive starts with a fresh 'qub_probe' constant pulse for spectroscopy. Readout uses the `$resonator.module.readout` slot captured at Open/Reset; an unset slot, missing module or unbound alias uses a fresh 'readout' template with a constant waveform. That fallback still needs its required parameter sources. Reset uses the optional `$qubit.module.reset` slot; an unset slot, missing module or unbound alias leaves it disabled and Valid. Init Pulse stays disabled.
+
+Bind `resonator: $qubit.resonator` so the readout follows the selected qubit's resonator. Existing points are not migrated: rerun onetone/freq and Apply its module and slot updates, or manually set `R1.module.readout` to an existing library module; otherwise this form uses the readout template. It does not read old qubit readout slots.
 
 ## Peak selection
 

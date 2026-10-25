@@ -124,13 +124,15 @@ Bath reset phase 仍可編輯。這個入口不擴充 nested readonly，不複�
 def make_form(ctx: FormContext) -> Form[FreqCfg]:
     return Form(FreqCfg, {
         "modules": {
-            "readout": Slot("$qubit.module.readout")
-            if ctx.has("$qubit.module.readout") else Template("readout"),
+            "readout": Slot("$resonator.module.readout")
+            if ctx.has("$resonator.module.readout") else Template("readout"),
         },
         "sweep": {"freq": Range.around("$qubit.freq", "1.5 * $qubit.kappa", expts=301)},
         "reps": 1000,
     })
 ```
+
+單 qubit 表單的 `$resonator` 由 `resonator: $qubit.resonator` alias 解析。Readout module 與 slot 的 resonator 所有權見 [[0072]]。
 
 初值 expression 在建立 fresh input 時求值，成功後保存 direct 值。
 缺來源或求值失敗不補數字 fallback；必要欄位維持未填。

@@ -12,7 +12,7 @@
 - Qubit spectroscopy probe 使用 `qub_probe` 範本，起始長度為 1 us。
 - Probe frequency 以 `$qubit.freq` 為中心，半寬為 `1.5 * $qubit.kappa`，共 201 點。缺校準時欄位保持未填，請手動設定。
 - Stark gain 初始範圍為 0 到 0.1，共 21 點。掃描在 gain 平方上等距取點，再做硬體量化。
-- Reset 可停用。Readout 優先使用 `$qubit.module.readout`，沒有時提供可編輯範本。
+- Reset 可停用。Readout 優先使用 `$resonator.module.readout`，沒有時提供可編輯範本。
 - Reps／Rounds 控制平均次數。Early-stop SNR 可留空，或讓每條頻譜達到指定 SNR 後提早結束平均。
 
 每點先 reset，再啟動 Stark tone，於 Stark tone 持續期間執行 qubit probe，最後 readout。請檢查兩個 pulse 的 pre/post delay 與長度，確認所需的重疊及 readout 時間。1 us 是可編輯的初值，硬體安全仍須依功率與時序審核。若加長 Stark tone，必須同步檢查 probe 與 readout 時序，避免同一 generator 的 pulse 衝突。真實硬體 Run 前必須審核功率、接線及時序。

@@ -21,7 +21,7 @@
 
 1. 在 New Tab 選單選 `twotone` → `dispersive`，開啟實驗。
 2. Qubit preparation pulse 優先使用 `$qubit.module.x180`；沒有時提供可編輯的 pi-pulse template。
-3. Readout 優先使用 `$qubit.module.readout`；沒有時提供可編輯的 readout template。
+3. Readout 優先使用 `$resonator.module.readout`；沒有時提供可編輯的 readout template。
 4. Reset 使用 `$qubit.module.reset`，缺少時維持停用。Initial pulse 維持隱藏及停用。
 5. Readout freq 初值以 `$resonator.freq` 為中心，完整寬度為三倍 `$resonator.kappa`，共 301 點。確認範圍足以包含兩個共振，必要時擴大。
 6. Relax delay 初值為五倍 T1；未存 T1 時使用 30 µs 時間尺度，即 150 µs。已存但無效的 T1 會使相關必填欄位保持空白。

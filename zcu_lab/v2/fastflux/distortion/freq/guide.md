@@ -17,7 +17,7 @@
   Channel 無法解析時保持 Invalid，須填入已確認的通道。這些初值僅供編輯，flux 校準須另行確認。
   執行前必須核對接線、gain、pulse 長度與 pre-delay，或選擇已確認的 library pulse。
 - Qubit probe 使用既有 qubit probe 範本，初始 gain 為 0.1、長度為 0.05 us。確認頻率、generator channel 與探測功率適合目前 qubit。
-- Readout 有 `$qubit.module.readout` 時保留引用，否則從 readout 範本填寫。
+- Readout 有 `$resonator.module.readout` 時保留引用，否則從 readout 範本填寫。
 - Length sweep 是 qubit probe 開始前的等待時間，單位 us。初始為 0 到 1 us，共 101 點。
 - Frequency sweep 以 `$qubit.freq` 為中心，半寬為 `1.5 * $qubit.kappa`，共 101 點。缺校準值時請手填，並讓頻率範圍涵蓋整條暫態共振。
 - `readout_t` 初始為 2 us。它設定平行分支的最短等待時間，實際 readout 時刻由最晚結束的分支決定。

@@ -20,8 +20,8 @@ def make_form(ctx: FormContext) -> Form[PowerDepCfg]:
                 # Run supplies these probe scan coordinates.
                 set={"gain": Hidden(0.0)},
             ),
-            "readout": Slot("$qubit.module.readout")
-            if ctx.has("$qubit.module.readout")
+            "readout": Slot("$resonator.module.readout")
+            if ctx.has("$resonator.module.readout")
             else Template("readout", bindings={"resonator": "$resonator"}),
             "gain": Range(0.0, 1.0, expts=151),
             "relax_delay": t1_initial_time(ctx.parameters, multiplier=5),

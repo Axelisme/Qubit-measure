@@ -32,8 +32,8 @@ def make_form(ctx: FormContext) -> Form[FluxDepCfg]:
                 # Run supplies these probe scan coordinates.
                 set={"gain": Hidden(0.0)},
             ),
-            "readout": Slot("$qubit.module.readout")
-            if ctx.has("$qubit.module.readout")
+            "readout": Slot("$resonator.module.readout")
+            if ctx.has("$resonator.module.readout")
             else Template("readout", bindings={"resonator": "$resonator"}),
             "flux_dev": flux_source,
             "flux_unit": "A",

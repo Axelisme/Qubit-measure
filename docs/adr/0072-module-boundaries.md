@@ -116,6 +116,10 @@ Library 的設計是「元件 → 分組 → Pydantic model」。分組是擴充
 
 Component 的 module slot 指向下游實驗要使用的模組，不用來為每一種校準方案保存一個 slot。參數累積、哪些實驗只提參數、哪些收尾實驗建立或更新模組，都由實驗作者決定。Framework 不提供通用的齊全檢查或累積機制。具體欄位、reset 名稱及 pair 方向留在實驗作者文件，不提升成框架規則。使用者於 2026-10-16 以「都採用建議」確認這個歸檔範圍。
 
+單音 readout module 與其 `module.readout` slot 由 resonator 擁有，module root 例如 `R1.readout.readout_rf`，slot 例如 `R1.module.readout`。Qubit 經自己的 `resonator` 欄位與 session 的 `$resonator` alias 取得讀出；alias 宣告為 `resonator: $qubit.resonator`。單 qubit 表單不讀取 qubit 上的舊 readout slot，resonator 未設定 slot 時改用 readout 範本。Component 的 `module` 是可擴充的 `dict[str, str]`，新增 slot 不需修改 component schema。本次不遷移既有 point。`twotone/ro_optimize/*` 將最佳化 module 寫到 `$resonator.readout.readout_dpm`，並提出 `$resonator.module.readout` 指向該 root 的更新。Apply module 與 slot 後，之後所有使用該 resonator 的實驗都沿此 slot 取得最佳化讀出。`$qubit.ext.best_ro_freq`、`best_ro_gain`、`best_ro_length` 保留原有位置與用途。
+
+使用者於 2026-10-25 裁定：「目前onetone/freq的readout module writeback是寫到qubit裡，但我認為應該是寫入到resonator componenet裡。而qubit要使用的readout應該是去綁定的resonator中找才對」。方案選擇與遷移政策的原話為「選甲，不遷移，應該說，目前module欄位下應該沒有限制型態吧？應該可以擴充吧？」。使用者同日以「Readout採用建議」確認最佳化讀出也寫入 resonator，並取代其 readout slot 指標。
+
 ### Mux group 是實驗室的 component 定義
 
 `zcu_lab.components.MuxGroupSchema` 宣告 `group/mux`，沿既有 ComponentRegistry 註冊。

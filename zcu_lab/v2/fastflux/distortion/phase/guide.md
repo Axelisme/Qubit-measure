@@ -11,7 +11,7 @@ working flux. Bind the qubit and resonator aliases before opening the tab.
 Open and Reset capture the current sources. After changing aliases, use Reset
 to refresh the displayed inputs.
 
-The form selects `$qubit.module.x90` and `$qubit.module.readout` when present.
+The form selects `$qubit.module.x90` and `$resonator.module.readout` when present.
 Otherwise it opens editable pulse templates. Reset is optional and uses
 `$qubit.module.reset`. The Flux pulse module slot uses the `flux_pulse` template.
 It starts with a const waveform, gain 1.0, frequency 0 MHz, Nyquist zone 2 and channel from

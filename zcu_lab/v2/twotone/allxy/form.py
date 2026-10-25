@@ -20,8 +20,8 @@ def make_form(ctx: FormContext) -> Form[AllXYCfg]:
             "X180_pulse": Slot("$qubit.module.x180")
             if ctx.has("$qubit.module.x180")
             else Template("pi_pulse", bindings={"qubit": "$qubit"}),
-            "readout": Slot("$qubit.module.readout")
-            if ctx.has("$qubit.module.readout")
+            "readout": Slot("$resonator.module.readout")
+            if ctx.has("$resonator.module.readout")
             else Template("readout", bindings={"resonator": "$resonator"}),
             "I_pulse": Hidden(),
             "relax_delay": t1_initial_time(ctx.parameters, multiplier=5),

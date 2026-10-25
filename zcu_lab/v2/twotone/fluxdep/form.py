@@ -42,8 +42,8 @@ def make_form(ctx: FormContext) -> Form[FreqFluxCfg]:
                 bindings={"qubit": "$qubit"},
                 set={"freq": Hidden(0.0)},
             ),
-            "readout": Slot("$qubit.module.readout")
-            if ctx.has("$qubit.module.readout")
+            "readout": Slot("$resonator.module.readout")
+            if ctx.has("$resonator.module.readout")
             else Template("readout", bindings={"resonator": "$resonator"}),
             "flux_dev": flux_source,
             "flux_unit": "A",
@@ -62,7 +62,7 @@ def make_form(ctx: FormContext) -> Form[FreqFluxCfg]:
         {
             **(
                 {}
-                if ctx.has("$qubit.module.readout")
+                if ctx.has("$resonator.module.readout")
                 else pulse_readout_seed_metadata(gain=0.1)
             ),
             **{

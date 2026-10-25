@@ -21,7 +21,7 @@ preparation, or select a calibrated pulse to prepare another state.
 
 Probe starts from the `res_probe` template using `$resonator.freq` and
 `$resonator.wiring.ch`, with a 1 us constant pulse. Readout uses
-`$qubit.module.readout` when present, otherwise the `readout` template. The
+`$resonator.module.readout` when present, otherwise the `readout` template. The
 readout template needs resonator frequency, generator/ADC wiring and
 `$resonator.time_of_fly`. Missing required sources stay Invalid; select a
 valid module or fill the inline fields before Run.

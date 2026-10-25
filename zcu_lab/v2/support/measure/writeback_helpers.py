@@ -11,7 +11,11 @@ from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any, Protocol
 
 from zcu_tools.cfg_model import module_spec_from_raw
-from zcu_tools.gui.app.measure.adapter import ModuleWriteback
+from zcu_tools.gui.app.measure.adapter import (
+    ModuleWriteback,
+    ParameterWriteback,
+    WritebackItem,
+)
 from zcu_tools.program.v2.modules import AbsModuleCfg, PulseReadoutCfg
 
 from zcu_lab.v2.support.measure.ctx_helpers import optional_parameter_float
@@ -114,7 +118,17 @@ def readout_dpm_writeback_items(
     cfg_snapshot: _HasReadout | None,
     *,
     proposed: Mapping[str, float],
-) -> list[ModuleWriteback]:
+) -> list[WritebackItem]:
+    """Propose the resonator's optimized pulse readout and select it for later forms.
+
+    cfg_snapshot supplies the Run's readout settings. proposed supplies any of
+    best_ro_freq (MHz), best_ro_gain (normalized), and best_ro_length (us);
+    missing coordinates come from ctx's captured $qubit.ext calibration.
+    Missing cfg, non-pulse readout, or missing/non-finite coordinates yields no
+    items. A captured parameter source adds a slot proposal after the module,
+    pointing $resonator.module.readout to the resolved optimized module root.
+    Without a capture only the module is proposed. Source/alias errors propagate.
+    """
     if cfg_snapshot is None:
         return []
 
@@ -123,9 +137,10 @@ def readout_dpm_writeback_items(
         return []
 
     best_ro_freq, best_ro_gain, best_ro_length = resolved
-    return pulse_readout_module_writeback_items(
+    items: list[WritebackItem] = []
+    module_items = pulse_readout_module_writeback_items(
         cfg_snapshot,
-        target="readout_dpm",
+        target="$resonator.readout.readout_dpm",
         desc="Optimized readout (DPM)",
         field_updates=(
             ("freq", best_ro_freq),
@@ -138,3 +153,15 @@ def readout_dpm_writeback_items(
         ),
         role_id="readout_dpm",
     )
+    items.extend(module_items)
+    if module_items and ctx.parameters is not None:
+        items.append(
+            ParameterWriteback(
+                target_name="$resonator.module.readout",
+                description="Select optimized readout for downstream experiments",
+                proposed_value=ctx.parameters.resolve_path(
+                    "$resonator.readout.readout_dpm"
+                ),
+            )
+        )
+    return items
