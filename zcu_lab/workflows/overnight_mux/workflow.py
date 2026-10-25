@@ -11,6 +11,7 @@ from zcu_tools.program.v2.modules import MuxReadoutCfg, PulseCfg
 
 from zcu_lab.v2.mux.t1.core import MuxT1Cfg, MuxT1Exp, MuxT1ToneCfg
 from zcu_lab.v2.mux.t2echo.core import MuxEchoToneCfg, MuxT2EchoCfg, MuxT2EchoExp
+from zcu_lab.v2.support.lifetime_models import LifetimeModelRecord
 from zcu_lab.workflows.common.relaxation import echo_relaxation
 from zcu_lab.workflows.overnight_mux.analysis import record_echo, record_t1
 from zcu_lab.workflows.overnight_mux.trend import draw_overnight_mux_trend
@@ -103,6 +104,11 @@ class OvernightMuxTunables(BaseModel):
     relax_min_us: float = Field(
         default=1.0, ge=0, description="Relaxation lower bound in us"
     )
+    max_model_window_factor: float = Field(
+        default=2.0,
+        gt=0,
+        description="Diagnostic lifetime / maximum fitted delay upper bound; no feedback change",
+    )
     min_lifetime_points: int = Field(
         default=5,
         ge=1,
@@ -128,9 +134,11 @@ class OvernightMuxQubit(BaseModel):
     t1_us: float | None = None
     t1_error_us: float | None = None
     t1_reason: str | None = None
+    t1_models: tuple[LifetimeModelRecord, ...] = ()
     t2_us: float | None = None
     t2_error_us: float | None = None
     t2_reason: str | None = None
+    t2_models: tuple[LifetimeModelRecord, ...] = ()
 
 
 class OvernightMuxPoint(BaseModel):

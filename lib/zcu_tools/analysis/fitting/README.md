@@ -18,6 +18,11 @@ Cosine 與 damped-cosine fitting 在 optimizer 內不限制 phase 的週期表�
 
 `fit_decay`、`fit_dual_decay` 與 `fit_decay_fringe` 將自由衰減時間限制在 `decay_time_bounds` 的區間。下限為第一個正 delay 與最小正取樣間距的較小者，上限為十倍掃描窗長。固定參數不被裁切。Caller 將同一區間傳入 `compute_fit_quality(..., decay_bounds=...)`；時間貼界或越界時，`invalid` 的原因列出參數名稱、擬合值、lower／upper bound 與端點值，並保留「窗口內無法解析衰減時間」。Mux T1、Echo 與 Ramsey summary 沿用 owner 的原因，不重做判斷。其他模型不啟用這組界限。
 
+`fit_gauss_decay_fringe` 擬合 `baseline + A*exp(-(t/T)**2)*cos(2*pi*(f*t + phase/360))`。
+包絡中心固定零，回傳的 T 是 1/e time，不是 sigma；頻率使用 delay 的反單位。
+自由 T 沿用 `decay_time_bounds`，支援明填初值與固定參數，數值失敗 raise `AnalysisFailed`。
+無條紋的 `fit_gauss_decay` 保留原有可漂移中心契約；caller 可用 `fixedparams=(None, None, 0.0, None)` 固定中心零，其 T 為 `sqrt(2)*sigma`。
+
 `assess_fringe_sampling` 以實際擬合的 delay 座標、擬合頻率及可選的已知頻率下界回傳
 `FringeSamplingQuality`。它用排序去重後的最大 delay gap 計算每週期點數；至少十點且
 掃描窗包含完整週期才為 adequate。不足十點為 undersampled，沒有 gap、零頻率或不足

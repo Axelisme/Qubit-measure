@@ -300,14 +300,14 @@ class T2StageInputs:
     """Captured T2 save identity, calibration producer and sampling requirement.
 
     snapshot is the historical entry state for native saving. source identifies
-    the accepted pi/pi2 producer. min_lifetime_points is the positive minimum
-    count of fitted delays between zero and the fitted lifetime, inclusive.
-    Ramsey and Echo each capture their own tunable value before acquisition.
+    the accepted pi/pi2 producer. tun captures this lifetime's sampling minimum
+    and diagnostic window factor before acquisition. Ramsey and Echo retain
+    independent tunables; acceptance still uses only the exponential model.
     """
 
     snapshot: RunSnapshot
     source: CalibrationSource
-    min_lifetime_points: int
+    tun: T2EchoTunables
 
 
 async def run_ramsey_stage(
@@ -323,7 +323,7 @@ async def run_ramsey_stage(
     ramsey = await measure_ramsey(
         iteration,
         cfg,
-        min_lifetime_points=inputs.min_lifetime_points,
+        tun=inputs.tun,
         snapshot=inputs.snapshot,
         directory=iteration.dir,
         plots=plots,
@@ -347,7 +347,7 @@ async def run_echo_stage(
     echo = await measure_echo(
         iteration,
         cfg,
-        min_lifetime_points=inputs.min_lifetime_points,
+        tun=inputs.tun,
         snapshot=inputs.snapshot,
         directory=iteration.dir,
         plots=plots,
@@ -713,7 +713,7 @@ async def coherence_fluxdep(
                         inputs=T2StageInputs(
                             snapshot=plan.snapshot,
                             source=calibration_source(carry.pi_source, index),
-                            min_lifetime_points=tun.current.t2ramsey.min_lifetime_points,
+                            tun=tun.current.t2ramsey,
                         ),
                     )
                     _append(t2ramsey_by_flux, flux, point_record.measurements[-1])
@@ -735,7 +735,7 @@ async def coherence_fluxdep(
                         inputs=T2StageInputs(
                             snapshot=plan.snapshot,
                             source=calibration_source(carry.pi_source, index),
-                            min_lifetime_points=tun.current.t2echo.min_lifetime_points,
+                            tun=tun.current.t2echo,
                         ),
                     )
                     _append(t2echo_by_flux, flux, point_record.measurements[-1])

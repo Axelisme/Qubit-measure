@@ -23,14 +23,20 @@ Schedule failure 不更新間距基準，Completed partial 仍更新。預設間
 每種 preparation 預設 100000 shots，是暫定模擬值。
 GE 使用本點 fitted pi pulse 與接受或保留的合法 readout，relax delay 使用 T1 的 relax_factor × 該點 history-based guess，即使 T1 關閉也沿用此公式。
 每個 Completed GE 保存 `singleshot-ge.h5`，partial 也先保存。Workflow 不呼叫 GE analyze，不做分類、擬合或 workflow 結果圖。Core 的 operation 即時圖保留。
-三份 lifetime history 只收各自接受值，delay grid 保留 alpha=0.5 的 EWMA 與各自初始 guess。
-T1 的 relax delay 沿它的 delay guess。T2 的 relax delay 仍是 relax_factor × 自己的初始 guess，不用本點 T1 改寫。
+主模型有擬合結果時，每個 lifetime 都記兩種模型。T1 記含 baseline 的單指數與雙指數，T2 記指數與零中心高斯包絡；有條紋時兩者都帶 cosine。
+`measurements[].models` 記各模型的 lifetime、誤差、residual RMS、quality、BIC 與狀態，圖上疊加兩條可用曲線。
+只有原有主模型參與接受、relax 與歷史。BIC 不選接受模型，副模型不改下游值。
+非有限、非正 lifetime、誤差大於值、負誤差、quality.invalid 或 lifetime 超過 `max_model_window_factor * max(fitted delays)` 時，模型診斷記 `discarded` 與原因。倍數預設 2，三種 lifetime 各自可調。
+有限但 discarded 的值仍保留，非有限值存 null。副模型失敗只記 failed/reason；主模型失敗不嘗試副模型，partial 不擬合。
+三份 lifetime history 只收各自原有主模型的接受值，delay grid 保留 alpha=0.5 的 EWMA 與各自初始 guess。
+T1 的 relax delay 沿它的 delay guess。T2 的 auto relax 優先用本點接受的主模型 T1，其次 T1 EWMA，無歷史用 t1.guess_us，再套 relax_factor 與 relax_min_us。Fixed relax 使用明填值。
 Rabi／readout 的 relax delay 是最近 accepted T1 的五倍；尚無 accepted T1 或 T1 關閉時，用合法 T1 guess。
 例如 T1 關閉且 guess=50 µs，兩個校準 stage 等待 250 µs，不補量 T1。
 
 Ramsey 的 detune_ratio 是有限 fringes/step 值，無論 plan 開關都驗證，預設 0.05。
 Requested detune 為 ratio/length_step；公開 acquisition result 保留原生量化後的 actual detune。
-Echo detune 為零。兩者使用原有 fringe／whole-trace decay fit，拒絕超過兩倍最大 delay 或 mean absolute error 超過 0.1 倍 fit peak-to-peak 的值。
+Echo 的 detune_ratio 預設 0.1，零選純 decay，非零選 fringe；requested detune 同樣是 ratio/length_step。
+兩者仍以原有 fringe／whole-trace decay 作主模型，拒絕超過兩倍最大 delay 或 mean absolute error 超過 0.1 倍 fit peak-to-peak 的值。
 T1 保留原有 relative error 與 normalized residual RMS 門檻。
 Pi2 使用 Length-Rabi 的 phase-aware fitted duration，不取 pi duration 除以二；waveform 與 gain 保留選定值。
 `coherence_fluxdep.t1`、`coherence_fluxdep.t2` 提供 native cfg 科學 helper。其純資料 plan/point carrier 仍有既有 conversion caller，不代表 standalone workflow 入口。
@@ -106,6 +112,8 @@ Plan 保存完整 mux readout 順序、participants 原始索引、每個 tone �
 Mux tunables 與 overnight 的欄位及意義相同。`uniform` 預設 true，只控制 T1 的取樣分布，所有 participants 共用同一條 delay grid。
 設 false 時使用 native mux T1 的非均勻 cycle table，Echo 仍為線性。兩個 guess 請分別填最長的 T1 與 Echo。
 Native mux 分析逐 tone 擬合，再各自套 overnight 的 relative-error 與 normalized-residual 門檻。
+Overnight 與 mux 沿用 Coherence 的雙模型診斷，分別保存在 point 與每個 qubit 的 `t1_models/t2_models`。
+T1 的副模型為雙指數，零 detune Echo 的副模型為零中心高斯；圖上兩條曲線都標示。`max_model_window_factor` 只控制診斷 discarded，不改接受值、Echo relax 或趨勢圖。
 每輪保存兩個 native 檔名、排程與實際 UTC 開始時間、status，以及每個 participant 的名稱、T1/Echo 接受值、誤差與原因。
 `overnight_mux_trend` 的 T1/Echo panels 各為每個 qubit 畫一條線，缺值留 gap。單輪範圍、更新時機與不自動保存的契約同 overnight。
 

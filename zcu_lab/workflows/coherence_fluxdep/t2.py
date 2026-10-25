@@ -93,6 +93,11 @@ class T2EchoTunables(BaseModel):
     relax_min_us: float = Field(
         default=1.0, ge=0, description="Auto relaxation lower bound in us"
     )
+    max_model_window_factor: float = Field(
+        default=2.0,
+        gt=0,
+        description="Diagnostic lifetime / maximum fitted delay upper bound; no feedback change",
+    )
     min_lifetime_points: int = Field(
         default=5,
         ge=1,
