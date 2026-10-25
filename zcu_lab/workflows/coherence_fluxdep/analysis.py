@@ -4,7 +4,12 @@ from dataclasses import dataclass
 
 import numpy as np
 from numpy.typing import NDArray
-from zcu_tools.analysis.fitting import compute_fit_quality, fit_decay, fit_decay_fringe
+from zcu_tools.analysis.fitting import (
+    compute_fit_quality,
+    decay_time_bounds,
+    fit_decay,
+    fit_decay_fringe,
+)
 from zcu_tools.experiment.workflows import Failed
 
 from zcu_lab.v2.twotone.time_domain.t2echo.core import T2EchoResult, t2echo_signal2real
@@ -65,18 +70,29 @@ def analyze_t2echo_fluxdep(
         fit = fit_or_failed(lambda: fit_decay(result.times, observed))
         if isinstance(fit, Failed):
             return fit
-        lifetime, error, fitted, _ = fit
+        lifetime, error, fitted, (parameters, covariance) = fit
+        names = ("y0", "yscale", "decay_time")
     else:
         fringe = fit_or_failed(lambda: fit_decay_fringe(result.times, observed))
         if isinstance(fringe, Failed):
             return fringe
-        lifetime, error, _detune, _detune_error, fitted, _ = fringe
+        lifetime, error, _detune, _detune_error, fitted, (parameters, covariance) = (
+            fringe
+        )
+        names = ("y0", "yscale", "freq", "phase", "decay_time")
     return DecayFit(
         float(lifetime),
         float(error),
         observed,
         fitted,
-        compute_fit_quality(observed, fitted, {}, None),
+        compute_fit_quality(
+            observed,
+            fitted,
+            dict(zip(names, map(float, parameters), strict=True)),
+            covariance,
+            decay_bounds=decay_time_bounds(result.times),
+        ),
+        result.times,
     )
 
 
@@ -107,13 +123,26 @@ def analyze_t2ramsey(result: T2RamseyResult) -> RamseyFit | Failed:
     fit = fit_or_failed(lambda: fit_decay_fringe(result.times, observed))
     if isinstance(fit, Failed):
         return fit
-    lifetime, error, detune, _error, fitted, _ = fit
+    lifetime, error, detune, _error, fitted, (parameters, covariance) = fit
     return RamseyFit(
         float(lifetime),
         float(error),
         observed,
         fitted,
-        compute_fit_quality(observed, fitted, {}, None),
+        compute_fit_quality(
+            observed,
+            fitted,
+            dict(
+                zip(
+                    ("y0", "yscale", "freq", "phase", "decay_time"),
+                    map(float, parameters),
+                    strict=True,
+                )
+            ),
+            covariance,
+            decay_bounds=decay_time_bounds(result.times),
+        ),
+        result.times,
         float(detune - result.true_activate_detune),
     )
 

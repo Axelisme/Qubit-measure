@@ -20,7 +20,7 @@ from zcu_tools.program.v2.modules import PulseCfg, PulseReadoutCfg
 
 from zcu_lab.v2.twotone.time_domain.t1.core import T1Cfg, T1Exp
 from zcu_lab.v2.twotone.time_domain.t2echo.core import T2EchoCfg, T2EchoExp
-from zcu_lab.workflows.common.analysis import DecayFit, analyze_t1
+from zcu_lab.workflows.common.analysis import DecayFit, analyze_t1, lifetime_rejection
 from zcu_lab.workflows.common.devices import set_flux
 from zcu_lab.workflows.common.saving import save_native
 from zcu_lab.workflows.overnight.analysis import analyze_t2echo
@@ -71,7 +71,9 @@ class OvernightTunables(BaseModel):
     that guess gives its relaxation delay. No accepted fit changes any timing,
     drive or readout. max_rel_err and max_fit_residual are strict dimensionless
     upper bounds on error/lifetime and normalized residual RMS; rejected fits
-    keep raw data but omit accepted lifetime/error scalars.
+    keep raw data but omit accepted lifetime/error scalars. min_lifetime_points
+    defaults to 5 fitted delays within [0, lifetime], including endpoints.
+    Invalid quality diagnostics reject regardless of scalar error/residual.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
@@ -105,6 +107,11 @@ class OvernightTunables(BaseModel):
     )
     relax_factor: float = Field(
         default=5.0, gt=0, description="Relaxation delay / timing guess"
+    )
+    min_lifetime_points: int = Field(
+        default=5,
+        ge=1,
+        description="Minimum fitted delay points with 0 <= delay <= lifetime",
     )
     max_rel_err: float = Field(
         default=0.5, gt=0, description="Strict error/lifetime upper bound"
@@ -158,6 +165,11 @@ def _summary(
     """
     if isinstance(fit, Failed):
         return None, None, fit.reason
+    rejection = lifetime_rejection(
+        fit.quality, fit.times, fit.lifetime_us, tun.min_lifetime_points
+    )
+    if rejection is not None:
+        return None, None, f"{name} fit rejected: {rejection}"
     residual = fit.quality.normalized_residual_rms
     if not (
         isfinite(fit.lifetime_us)

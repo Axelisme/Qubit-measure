@@ -23,7 +23,7 @@ from zcu_lab.workflows.coherence_fluxdep.analysis import (
 )
 from zcu_lab.workflows.coherence_fluxdep.saving import save_t2ramsey
 from zcu_lab.workflows.coherence_fluxdep.t1 import T1Tunables
-from zcu_lab.workflows.common.analysis import DecayFit, analyze_t1
+from zcu_lab.workflows.common.analysis import DecayFit, analyze_t1, lifetime_rejection
 from zcu_lab.workflows.common.calibration import StageStatus
 from zcu_lab.workflows.common.saving import save_native
 
@@ -90,8 +90,13 @@ def _plot(plots: Plots, kind: LifetimeKind) -> LinePlot:
     )
 
 
-def _t2_rejection(fit: DecayFit, maximum: float) -> str | None:
-    if fit.lifetime_us > 2 * maximum:
+def _t2_rejection(fit: DecayFit, min_lifetime_points: int) -> str | None:
+    rejection = lifetime_rejection(
+        fit.quality, fit.times, fit.lifetime_us, min_lifetime_points
+    )
+    if rejection is not None:
+        return rejection
+    if fit.lifetime_us > 2 * float(np.max(fit.times)):
         return "T2 lifetime exceeds twice the maximum delay"
     if np.mean(np.abs(fit.observed - fit.fitted)) > 0.1 * np.ptp(fit.fitted):
         return "T2 mean fit error exceeds 0.1 peak-to-peak fit"
@@ -186,6 +191,12 @@ async def measure_t1(
         if accepted
         else "T1 fit rejected: error/RMS, twice-window or 10% span gate"
     )
+    reason = (
+        lifetime_rejection(
+            fit.quality, fit.times, fit.lifetime_us, tun.min_lifetime_points
+        )
+        or reason
+    )
     return _finish(plots, "t1", fit, outcome.value.result.times, reason)
 
 
@@ -193,6 +204,7 @@ async def measure_ramsey(
     scope: Scope,
     cfg: T2RamseyCfg,
     *,
+    min_lifetime_points: int,
     snapshot: RunSnapshot,
     directory: Path,
     plots: Plots,
@@ -210,7 +222,9 @@ async def measure_ramsey(
     Detune remains detune_ratio/length_step; native actual detune is retained.
     Relax timing is already resolved in cfg from T1 feedback or fixed tunables.
     Accepted physical detune subtracts the actual artificial phase ramp.
-    Original overlong/mean-absolute-error gates apply, with rejected raw retained.
+    min_lifetime_points requires that many fitted delays in [0, lifetime],
+    inclusive; invalid quality rejects too. Original overlong/mean-absolute-error
+    gates apply, with rejected raw retained.
     """
     # Acquire this lifetime on its own delay grid, with a live trace.
     plot = _plot(plots, "t2ramsey")
@@ -239,7 +253,7 @@ async def measure_ramsey(
         "t2ramsey",
         fit,
         outcome.value.result.times,
-        _t2_rejection(fit, float(np.max(outcome.value.result.times))),
+        _t2_rejection(fit, min_lifetime_points),
     )
     return replace(
         result, detune_mhz=fit.detune_mhz if result.status == "accepted" else None
@@ -250,6 +264,7 @@ async def measure_echo(
     scope: Scope,
     cfg: T2EchoCfg,
     *,
+    min_lifetime_points: int,
     snapshot: RunSnapshot,
     directory: Path,
     plots: Plots,
@@ -263,7 +278,9 @@ async def measure_echo(
     commit path. Partial saves then returns rejected/stopped without fitting.
     Schedule failures return failed without a file; expected fit failures return
     failed with the raw filename. Unexpected errors propagate.
-    Whole-trace fluxdep projection and T2 gates remain unchanged. Nonzero
+    min_lifetime_points requires that many fitted delays in [0, lifetime],
+    inclusive; invalid quality rejects too. Whole-trace fluxdep projection and
+    the original T2 gates remain unchanged. Nonzero
     artificial detune selects a fringe fit; zero selects pure decay.
     No extra T1 measurement or fallback is made; history belongs to the caller.
     """
@@ -291,5 +308,5 @@ async def measure_echo(
         "t2echo",
         fit,
         outcome.value.result.times,
-        _t2_rejection(fit, float(np.max(outcome.value.result.times))),
+        _t2_rejection(fit, min_lifetime_points),
     )

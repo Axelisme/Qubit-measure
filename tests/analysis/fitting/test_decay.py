@@ -52,7 +52,7 @@ def test_unresolved_fast_decay_stays_at_sampling_lower_bound() -> None:
         covariance,
         decay_bounds=decay_time_bounds(xs),
     )
-    assert any(issue.reason == "窗口內無法解析衰減時間" for issue in quality.invalid)
+    assert any("窗口內無法解析衰減時間" in issue.reason for issue in quality.invalid)
 
 
 @pytest.mark.parametrize("fringe", [False, True])

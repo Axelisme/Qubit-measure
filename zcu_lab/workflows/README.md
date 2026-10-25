@@ -85,6 +85,8 @@ Probe gain 從這個 pulse 的 gain 起跑，再依線寬自適應；每次 atte
 Readout 在 cadence 到期且有 LATEST accepted pi pulse 時更新。未到期保留上一張圖，不在目前 point 另存 `readout.png`。
 校準圖顯示完整但未通過接受門檻的 fit，分析失敗時只顯示 raw I。Partial 不更新 heatmap 或 fit。
 Coherence 的 decay 使用 Result.times/signals，觀測值與 fit 使用同一投影。未通過門檻的 fit 標示 rejected，不進 lifetime history。
+Coherence、overnight 與 overnight_mux 拒絕 quality.invalid 非空的 lifetime fit，原因保留診斷內容。
+`min_lifetime_points` 預設為 5，只計入實際用於擬合且落在 `0 <= delay <= lifetime` 的 delay，不平移時間原點。
 每個 point 提交後更新上方 accepted history，保存含上下兩個 panel 的 `<kind>-decay.png`，不另存 summary PNG。
 MIST 的 measure_mode 可選 excited、ground 或 both，預設 excited。Ground 不加 pi preparation。Both 在每個 flux 點量兩種，分別保存 native 與 PNG。
 MIST 的 gain-<mode>.png 使用 Result 的實際 gains/signals；map-<mode>.png 使用保留的 traces，扣中位數背景並截斷於 3σ。

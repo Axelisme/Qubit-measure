@@ -15,6 +15,7 @@ class T2EchoTunablesForm(FormModel):
     floors relax_factor*T1 at relax_min_us. Fixed modes use the explicit
     sweep endpoints or relax_delay_us without clamps. Echo detune_ratio=0
     selects pure decay; a nonzero ratio selects a fringe fit.
+    min_lifetime_points defaults to 5 fitted delays in [0, lifetime], inclusive.
     """
 
     reps: Annotated[int, Display(label="Averages")] = Field(
@@ -61,6 +62,11 @@ class T2EchoTunablesForm(FormModel):
     relax_min_us: Annotated[float, Display(label="Auto relax minimum", unit="µs")] = (
         Field(default=1.0, ge=0)
     )
+    min_lifetime_points: Annotated[int, Display(label="Min lifetime points")] = Field(
+        default=5,
+        ge=1,
+        description="Minimum fitted delay points with 0 <= delay <= lifetime",
+    )
     detune_ratio: Annotated[
         float, Display(label="Detune ratio", unit="fringes/step")
     ] = Field(
@@ -71,6 +77,7 @@ class T2EchoTunablesForm(FormModel):
     def to_cfg(self) -> T2EchoTunables:
         """Copy ordinary values; native validation rejects invalid timing windows."""
         return T2EchoTunables(
+            min_lifetime_points=self.min_lifetime_points,
             reps=self.reps,
             rounds=self.rounds,
             acquire_retry=self.acquire_retry,
@@ -99,6 +106,7 @@ class T2RamseyTunablesForm(T2EchoTunablesForm):
     def to_cfg(self) -> T2RamseyTunables:
         """Copy ordinary values, retaining the Ramsey detune ratio."""
         return T2RamseyTunables(
+            min_lifetime_points=self.min_lifetime_points,
             reps=self.reps,
             rounds=self.rounds,
             acquire_retry=self.acquire_retry,

@@ -295,21 +295,36 @@ async def run_t1_stage(
     return iteration.cancelled
 
 
+@dataclass(frozen=True)
+class T2StageInputs:
+    """Captured T2 save identity, calibration producer and sampling requirement.
+
+    snapshot is the historical entry state for native saving. source identifies
+    the accepted pi/pi2 producer. min_lifetime_points is the positive minimum
+    count of fitted delays between zero and the fitted lifetime, inclusive.
+    Ramsey and Echo each capture their own tunable value before acquisition.
+    """
+
+    snapshot: RunSnapshot
+    source: CalibrationSource
+    min_lifetime_points: int
+
+
 async def run_ramsey_stage(
     iteration: Scope,
     cfg: T2RamseyCfg,
     point_record: CoherencePoint,
     plots: Plots,
     *,
-    snapshot: RunSnapshot,
-    source: CalibrationSource,
+    inputs: T2StageInputs,
 ) -> bool:
-    """Record the pi2 producer, then save and classify Ramsey before cancellation."""
-    point_record.calibration_sources["t2ramsey"] = source
+    """Record the pi/pi2 source, save and classify Ramsey before cancellation."""
+    point_record.calibration_sources["t2ramsey"] = inputs.source
     ramsey = await measure_ramsey(
         iteration,
         cfg,
-        snapshot=snapshot,
+        min_lifetime_points=inputs.min_lifetime_points,
+        snapshot=inputs.snapshot,
         directory=iteration.dir,
         plots=plots,
     )
@@ -325,15 +340,15 @@ async def run_echo_stage(
     point_record: CoherencePoint,
     plots: Plots,
     *,
-    snapshot: RunSnapshot,
-    source: CalibrationSource,
+    inputs: T2StageInputs,
 ) -> bool:
-    """Record the pi/pi2 producer, then save and classify Echo before cancellation."""
-    point_record.calibration_sources["t2echo"] = source
+    """Record the pi/pi2 source, save and classify Echo before cancellation."""
+    point_record.calibration_sources["t2echo"] = inputs.source
     echo = await measure_echo(
         iteration,
         cfg,
-        snapshot=snapshot,
+        min_lifetime_points=inputs.min_lifetime_points,
+        snapshot=inputs.snapshot,
         directory=iteration.dir,
         plots=plots,
     )
@@ -695,8 +710,11 @@ async def coherence_fluxdep(
                         ),
                         point_record,
                         env.plots,
-                        snapshot=plan.snapshot,
-                        source=calibration_source(carry.pi_source, index),
+                        inputs=T2StageInputs(
+                            snapshot=plan.snapshot,
+                            source=calibration_source(carry.pi_source, index),
+                            min_lifetime_points=tun.current.t2ramsey.min_lifetime_points,
+                        ),
                     )
                     _append(t2ramsey_by_flux, flux, point_record.measurements[-1])
                     if skip:
@@ -714,8 +732,11 @@ async def coherence_fluxdep(
                         ),
                         point_record,
                         env.plots,
-                        snapshot=plan.snapshot,
-                        source=calibration_source(carry.pi_source, index),
+                        inputs=T2StageInputs(
+                            snapshot=plan.snapshot,
+                            source=calibration_source(carry.pi_source, index),
+                            min_lifetime_points=tun.current.t2echo.min_lifetime_points,
+                        ),
                     )
                     _append(t2echo_by_flux, flux, point_record.measurements[-1])
                     if skip:

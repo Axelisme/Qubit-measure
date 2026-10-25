@@ -104,9 +104,21 @@ def test_near_constant_predictions_are_invalid_even_with_finite_errors(
     assert quality.relative_parameter_errors == {"offset": 1.0}
 
 
-@pytest.mark.parametrize("time", [0.01, 0.1, 0.100000001, 19.99999999, 20.0, 100.0])
+@pytest.mark.parametrize(
+    ("time", "bound"),
+    [
+        (0.01, "lower bound 0.1"),
+        (0.1, "lower bound 0.1"),
+        (0.100000001, "lower bound 0.1"),
+        (19.99999999, "upper bound 20"),
+        (20.0, "upper bound 20"),
+        (100.0, "upper bound 20"),
+    ],
+)
 @pytest.mark.parametrize("name", ["decay_time", "decay_time1", "decay_time2"])
-def test_boundary_and_outside_decay_times_are_invalid(time: float, name: str) -> None:
+def test_boundary_and_outside_decay_times_are_invalid(
+    time: float, name: str, bound: str
+) -> None:
     quality = compute_fit_quality(
         np.array([0.0, 1.0, 2.0]),
         np.array([0.0, 1.0, 2.0]),
@@ -115,7 +127,10 @@ def test_boundary_and_outside_decay_times_are_invalid(time: float, name: str) ->
         decay_bounds=(0.1, 20.0),
     )
     assert quality.to_summary_dict()["invalid"] == [
-        {"path": name, "reason": "窗口內無法解析衰減時間"}
+        {
+            "path": name,
+            "reason": f"{name}={time:.9g} at/outside {bound}: 窗口內無法解析衰減時間",
+        }
     ]
     assert quality.r2 == 1.0
     assert quality.relative_parameter_errors[name] == pytest.approx(1.0 / time)

@@ -227,7 +227,8 @@ class OvernightMuxTunablesForm(FormModel):
     controls T1 sampling only; Echo retains its linear delay grid.
     reps/rounds average each native member, not monitoring pairs. Guesses are in
     microseconds; sweep/relax factors multiply their fixed timing. Dimensionless
-    fit thresholds only accept scalar summaries; no fit changes cfg. Expressions
+    min_lifetime_points defaults to 5 acquired fitted delays in [0, lifetime].
+    Invalid quality rejects too. Fit thresholds accept summaries; no fit changes cfg. Expressions
     stay in FormInput, while this model and native conversion carry ordinary values.
     """
 
@@ -267,6 +268,11 @@ class OvernightMuxTunablesForm(FormModel):
     relax_factor: Annotated[float, Display(label="Relax factor")] = Field(
         default=5.0, gt=0, description="Relaxation delay / timing guess"
     )
+    min_lifetime_points: Annotated[int, Display(label="Min lifetime points")] = Field(
+        default=5,
+        ge=1,
+        description="Minimum fitted delay points with 0 <= delay <= lifetime",
+    )
     max_rel_err: Annotated[float, Display(label="Max relative error")] = Field(
         default=0.5, gt=0, description="Strict error/lifetime upper bound"
     )
@@ -278,6 +284,7 @@ class OvernightMuxTunablesForm(FormModel):
         """Convert validated ordinary knobs; no source, hardware or expression parsing."""
         return OvernightMuxTunables(
             uniform=self.uniform,
+            min_lifetime_points=self.min_lifetime_points,
             reps=self.reps,
             rounds=self.rounds,
             t1_acquire_retry=self.t1_acquire_retry,

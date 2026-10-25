@@ -1,6 +1,6 @@
 # zcu_tools.analysis.fitting
 
-**Last updated:** 2026-10-23
+**Last updated:** 2026-10-25
 
 **讀者：** lab-author。擬合模型、數值輸入、結果與失敗契約速查。
 
@@ -16,7 +16,7 @@ Cosine 與 damped-cosine fitting 在 optimizer 內不限制 phase 的週期表�
 
 `compute_fit_quality` 使用實際 optimizer observations、同座標的 model values、具名參數與 covariance，回傳 `FitQuality`。三個 array 參數必須已是 float64，缺失 covariance 可用 None。它計算未 clamp 的 r2、以 observations peak-to-peak 正規化的 residual RMS，以及具名參數相對誤差。已知不可估欄位為 None，`invalid` 保留欄位路徑與直接原因。Covariance 缺失、對角非有限、自由參數 stderr 為零或非有限，以及預測範圍小於 observations 範圍的 1e-8，都會留下 invalid 診斷，不改三項指標的數值。只有非對角非有限時，marginal errors 仍可用。Caller 以 `fixed_parameters` 明列刻意固定的參數，owner 不對它們的 stderr 或 relative error 加 invalid，但保留原數值。Mux fringe 固定 phase 時傳入該名稱，純 decay 不傳固定的 fringe 參數。dtype、形狀或名稱誤用直接 ValueError。Calibration 與 accept 的有效性仍由 caller 決定。
 
-`fit_decay`、`fit_dual_decay` 與 `fit_decay_fringe` 將自由衰減時間限制在 `decay_time_bounds` 的區間。下限為第一個正 delay 與最小正取樣間距的較小者，上限為十倍掃描窗長。固定參數不被裁切。Caller 將同一區間傳入 `compute_fit_quality(..., decay_bounds=...)`；時間貼界或越界時，`invalid` 的原因為「窗口內無法解析衰減時間」。Mux T1、Echo 與 Ramsey summary 沿用 owner 的原因，不重做判斷。其他模型不啟用這組界限。
+`fit_decay`、`fit_dual_decay` 與 `fit_decay_fringe` 將自由衰減時間限制在 `decay_time_bounds` 的區間。下限為第一個正 delay 與最小正取樣間距的較小者，上限為十倍掃描窗長。固定參數不被裁切。Caller 將同一區間傳入 `compute_fit_quality(..., decay_bounds=...)`；時間貼界或越界時，`invalid` 的原因列出參數名稱、擬合值、lower／upper bound 與端點值，並保留「窗口內無法解析衰減時間」。Mux T1、Echo 與 Ramsey summary 沿用 owner 的原因，不重做判斷。其他模型不啟用這組界限。
 
 `assess_fringe_sampling` 以實際擬合的 delay 座標、擬合頻率及可選的已知頻率下界回傳
 `FringeSamplingQuality`。它用排序去重後的最大 delay gap 計算每週期點數；至少十點且

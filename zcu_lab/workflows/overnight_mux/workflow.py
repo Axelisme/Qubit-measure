@@ -60,7 +60,9 @@ class OvernightMuxTunables(BaseModel):
     that guess gives its relaxation delay. No accepted fit changes any timing,
     drive or readout. max_rel_err and max_fit_residual are strict dimensionless
     upper bounds on error/lifetime and normalized residual RMS; rejected fits
-    keep raw data but omit accepted lifetime/error scalars.
+    keep raw data but omit accepted lifetime/error scalars. min_lifetime_points
+    defaults to 5 fitted delays within [0, lifetime], including endpoints.
+    Invalid quality diagnostics reject regardless of scalar error/residual.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
@@ -94,6 +96,11 @@ class OvernightMuxTunables(BaseModel):
     )
     relax_factor: float = Field(
         default=5.0, gt=0, description="Relaxation delay / timing guess"
+    )
+    min_lifetime_points: int = Field(
+        default=5,
+        ge=1,
+        description="Minimum fitted delay points with 0 <= delay <= lifetime",
     )
     max_rel_err: float = Field(
         default=0.5, gt=0, description="Strict error/lifetime upper bound"
