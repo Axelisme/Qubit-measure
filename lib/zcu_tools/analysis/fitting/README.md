@@ -8,12 +8,26 @@
 
 ## Peak candidates
 
-`detect_peaks(detune, signal, *, min_prominence=0.2, min_distance=0.0)`
+`detect_peaks(detune, signal, *, min_prominence=0.2, min_distance=0.0, min_snr=5.0, min_width_samples=3.0)`
 接收同形狀、有限的 float64 一維座標與正向投影訊號。座標須嚴格單調，至少兩點。
 `min_prominence` 是訊號 ptp 的比例，`min_distance` 使用座標單位。
 結果是依 prominence 降序排列的 `PeakCandidate` 列表。
-每個候選提供取樣中心、原訊號高度、半 prominence 寬度與 prominence。
+每個候選提供取樣中心、原訊號高度、半 prominence 寬度、prominence 與 snr。
+雜訊 σ 使用一階差分的 MAD，除以 `0.67448975 * sqrt(2)` 換算為獨立高斯雜訊標準差。
+Prominence 須同時超過相對 ptp 門檻與 `min_snr * σ`。
+峰高相對訊號 median 也須至少為 `min_snr * σ`，避免純雜訊的峰谷差冒充高 SNR。
+回傳的 `snr = (height - median(signal)) / σ`，不是 prominence/σ。
+半 prominence 的窗內可觀察寬度須至少 `min_width_samples` 個取樣間隔。
+這個門檻在非等距軸上仍用取樣間隔，不用物理座標寬度。
+兩個新參數都須有限且非負，設為零會關閉對應門檻。
+零 MAD 使用 machine epsilon 乘訊號 ptp 作下限，至少為 float tiny，因此 snr 保持有限。
 平坦訊號回傳空列表，無效輸入 raise ValueError，不修改輸入。
+
+這些是統計門檻，不能保證任意雜訊都回空列表。
+若 σ 與背景已知，201 個獨立高斯取樣至少一點超過單側 5σ 的機率約為
+`1 - (1 - 2.87e-7)^201 ≈ 5.76e-5`，即 0.00576%。
+這只是峰高 gate 的理想估算，尚未套用 prominence 與寬度條件。
+實作會估計 σ 與背景，短序列、相關雜訊或訊號占據大部分窗口都可能改變誤報與漏報率。
 
 端點背景使用窗內最小值。若半高交點落在窗外，候選保留 `truncated=True`，
 寬度只記窗內可觀察部分，不外推完整線寬。

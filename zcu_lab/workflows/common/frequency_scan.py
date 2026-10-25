@@ -22,7 +22,10 @@ from zcu_lab.workflows.common.calibration_analysis import (
     FrequencyFit,
     analyze_qubit_freq,
 )
-from zcu_lab.workflows.common.calibration_results import FrequencyScan
+from zcu_lab.workflows.common.calibration_results import (
+    FrequencyCandidateAttempt,
+    FrequencyScan,
+)
 from zcu_lab.workflows.common.frequency_tracking import FrequencyTracker, trusted_curve
 from zcu_lab.workflows.common.saving import save_native
 from zcu_lab.workflows.common.summary import observe_operation
@@ -99,19 +102,18 @@ def frequency_probe_gains(
     return coarse, fine, adaptive
 
 
-async def measure_frequency_scan(
+async def acquire_frequency_scan(
     scope: Scope,
     cfg: FreqCfg,
+    *,
     scan: FrequencyScan,
     inputs: CalibrationInputs,
-) -> tuple[FrequencyScan, FrequencyFit | Failed]:
-    """Save one Completed scan before detecting candidates and fitting the target.
+) -> tuple[FrequencyScan, FreqResult | Failed]:
+    """Save one Completed scan and detect candidates without selecting or fitting.
 
-    scan.file supplies the intended relative filename; it is cleared on
-    acquisition failure. Partial acquisition returns Failed("stopped") without
-    detection. A truncated target returns Failed("Selected peak is truncated")
-    in two-step mode, leaving its candidates in the scan for widening decisions.
-    No history, predictor or linewidth feedback changes here.
+    scan.file supplies the intended relative filename; clear it on acquisition
+    failure. Partial acquisition returns Failed("stopped") without detection.
+    Preserve raw data before analysis. Do not change history or feedback.
     """
     outcome = await scope.run(FreqExp().run, cfg, name="frequency")
     observe_operation(inputs.summary, outcome)
@@ -139,13 +141,32 @@ async def measure_frequency_scan(
             observed,
             min_prominence=tun.peak_min_prominence,
             min_distance=tun.peak_min_distance_mhz,
+            min_snr=tun.peak_min_snr,
+            min_width_samples=tun.peak_min_width_samples,
         )
     )
-    expected = scan.center_mhz - (
-        0.0 if scan.stage == "fine" else tun.detune_center_mhz
-    )
+    return replace(scan, peaks=peaks), result
+
+
+def fit_frequency_scan(
+    result: FreqResult | Failed,
+    scan: FrequencyScan,
+    tun: CalibrationTunables,
+    expected_center_mhz: float | None,
+) -> tuple[FrequencyScan, FrequencyFit | Failed]:
+    """Fit the nearest expected or strongest candidate using this scan's peaks.
+
+    None selects the strongest candidate. two_step rejects truncated targets
+    and coarse fits outside their isolated interval. single fits the full window.
+    No acquisition, saving or feedback occurs; retain candidates on failure.
+    """
+    if isinstance(result, Failed):
+        return scan, result
+    peaks = scan.peaks
     selected = (
-        min(peaks, key=lambda peak: abs(peak.center - expected)) if peaks else None
+        min(peaks, key=lambda peak: abs(peak.center - expected_center_mhz))
+        if peaks and expected_center_mhz is not None
+        else next(iter(peaks), None)
     )
     scan = replace(scan, peaks=peaks, selected_peak=selected)
     if scan.stage != "single" and selected is not None and selected.truncated:
@@ -153,13 +174,91 @@ async def measure_frequency_scan(
     fit = analyze_qubit_freq(
         result,
         FreqAnalyzeOptions(
-            expected_center_mhz=expected,
+            expected_center_mhz=expected_center_mhz,
             min_prominence=tun.peak_min_prominence,
             min_distance_mhz=tun.peak_min_distance_mhz,
+            min_snr=tun.peak_min_snr,
+            min_width_samples=tun.peak_min_width_samples,
         ),
         peaks=peaks,
         isolate_peaks=scan.stage != "single",
     )
     if not isinstance(fit, Failed):
         scan = replace(scan, fitted_center_mhz=fit.frequency_mhz)
+        if scan.stage == "coarse" and not float(
+            np.min(fit.freqs)
+        ) <= fit.frequency_mhz <= float(np.max(fit.freqs)):
+            return scan, Failed(
+                "Coarse fitted center is outside its candidate interval"
+            )
     return scan, fit
+
+
+def confirm_frequency_candidate(
+    coarse_fit: FrequencyFit,
+    coarse_file: str | None,
+    scan: FrequencyScan,
+    fit: FrequencyFit | Failed,
+    tun: CalibrationTunables,
+    acquisition: FreqResult | Failed,
+) -> FrequencyCandidateAttempt:
+    """Record fine confirmation against the coarse target's center and width.
+
+    The strongest fine peak must lie within one coarse candidate width of its
+    fitted center, then pass the existing frequency gates. Failed acquisitions
+    and partials retain their failure reason; no fine file is invented.
+    """
+    peak = coarse_fit.selected_peak
+    if peak is None:
+        raise ValueError("Fine confirmation requires a coarse candidate")
+    strongest = next(iter(scan.peaks), None)
+    if isinstance(acquisition, Failed):
+        reason = acquisition.reason
+    elif strongest is None:
+        reason = "False coarse peak: no fine candidates"
+    elif abs(strongest.center - coarse_fit.frequency_mhz) > peak.width:
+        reason = "False coarse peak: fine peak outside coarse width"
+    elif isinstance(fit, Failed):
+        reason = fit.reason
+    elif not accept_frequency_fit(fit, fit.source, tun):
+        reason = "Fine frequency fit failed quality gates"
+    else:
+        reason = None
+    return FrequencyCandidateAttempt(
+        coarse_file, peak, coarse_fit.frequency_mhz, scan.file, reason
+    )
+
+
+def fit_coarse_candidates(
+    result: FreqResult | Failed,
+    scan: FrequencyScan,
+    tun: CalibrationTunables,
+    limit: int,
+) -> tuple[
+    FrequencyScan, tuple[FrequencyFit, ...], tuple[FrequencyCandidateAttempt, ...]
+]:
+    """Locally fit up to limit targets, nearest prediction first, then prominence.
+
+    Reuse scan.peaks without acquiring or redetecting. Return usable fits and
+    per-candidate rejection diagnostics. The scan keeps its first target's fit.
+    """
+    if isinstance(result, Failed) or not scan.peaks or limit <= 0:
+        return scan, (), ()
+    expected = scan.center_mhz - tun.detune_center_mhz
+    nearest = min(scan.peaks, key=lambda peak: abs(peak.center - expected))
+    candidates = [nearest, *(peak for peak in scan.peaks if peak is not nearest)]
+    fits: list[FrequencyFit] = []
+    rejected: list[FrequencyCandidateAttempt] = []
+    for index, peak in enumerate(candidates[:limit]):
+        candidate_scan, fit = fit_frequency_scan(result, scan, tun, peak.center)
+        if index == 0:
+            scan = candidate_scan
+        if isinstance(fit, Failed):
+            rejected.append(
+                FrequencyCandidateAttempt(
+                    scan.file, peak, candidate_scan.fitted_center_mhz, None, fit.reason
+                )
+            )
+        else:
+            fits.append(fit)
+    return scan, tuple(fits), tuple(rejected)
