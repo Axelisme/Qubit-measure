@@ -16,7 +16,7 @@ from numpy.typing import NDArray
 from plotly.graph_objects import Figure, Scatter
 from zcu_tools.analysis.fluxdep.models import TransitionDict
 from zcu_tools.notebook.analysis.fluxdep.utils import FreqFluxDependVisualizer
-from zcu_tools.resources.sample_table import SampleFluxFrame, SampleTableV2Error
+from zcu_tools.resources.record_table import RecordFluxFrame, RecordTableV2Error
 
 
 def _sample_points_trace(fig: Figure) -> Scatter:
@@ -48,15 +48,44 @@ def _make_table(rows: list[dict[str, object]]) -> pd.DataFrame:
     return pd.DataFrame(
         [
             {
-                "dev_value": 0.0,
-                "dev_unit": "A",
+                "devices": {
+                    "bias": {
+                        "value": row.get("dev_value", 0.0),
+                        "value_unit": row.get("dev_unit", "A"),
+                    }
+                },
                 "freq_mhz": 4000.0,
                 "t1_us": 10.0,
-                **row,
+                **{
+                    key: value
+                    for key, value in row.items()
+                    if key not in ("dev_value", "dev_unit")
+                },
             }
             for row in rows
         ]
     )
+
+
+def test_device_records_plot_at_the_selected_coordinate() -> None:
+    table = pd.DataFrame(
+        {
+            "devices": [
+                {
+                    "bias": {"value": 0.25, "value_unit": "A"},
+                    "other": {"value": 99, "value_unit": "A"},
+                }
+            ],
+            "freq_mhz": [4000.0],
+        }
+    )
+    vis = FreqFluxDependVisualizer()
+    vis.plot_sample_points(
+        table, device_name="bias", fallback_frame=RecordFluxFrame("A", 0, 1)
+    )
+    trace = _sample_points_trace(vis.fig)
+    np.testing.assert_allclose(_coordinates(trace.x), [0.25])
+    np.testing.assert_allclose(_coordinates(trace.y), [4.0])
 
 
 def test_explicit_flux_rows_plot_at_resolved_flux() -> None:
@@ -67,7 +96,7 @@ def test_explicit_flux_rows_plot_at_resolved_flux() -> None:
         ]
     )
     vis = FreqFluxDependVisualizer()
-    vis.plot_sample_points(table)
+    vis.plot_sample_points(table, device_name="bias")
 
     trace = _sample_points_trace(vis.fig)
     np.testing.assert_allclose(_coordinates(trace.x), [0.3, 0.7])
@@ -88,7 +117,7 @@ def test_explicit_flux_precedes_row_frame() -> None:
         ]
     )
     vis = FreqFluxDependVisualizer()
-    vis.plot_sample_points(table)
+    vis.plot_sample_points(table, device_name="bias")
 
     trace = _sample_points_trace(vis.fig)
     np.testing.assert_allclose(_coordinates(trace.x), [0.25])
@@ -102,7 +131,7 @@ def test_row_frame_derived_rows_plot_at_derived_flux() -> None:
         ]
     )
     vis = FreqFluxDependVisualizer()
-    vis.plot_sample_points(table)
+    vis.plot_sample_points(table, device_name="bias")
 
     trace = _sample_points_trace(vis.fig)
     np.testing.assert_allclose(_coordinates(trace.x), [0.5, -0.5])
@@ -117,7 +146,9 @@ def test_fallback_frame_rows_plot_at_fallback_flux() -> None:
     )
     vis = FreqFluxDependVisualizer()
     vis.plot_sample_points(
-        table, fallback_frame=SampleFluxFrame("A", flux_int=0.0, flux_period=1.0)
+        table,
+        device_name="bias",
+        fallback_frame=RecordFluxFrame("A", flux_int=0.0, flux_period=1.0),
     )
 
     trace = _sample_points_trace(vis.fig)
@@ -134,7 +165,9 @@ def test_mixed_provenance_rows_plot_together() -> None:
     )
     vis = FreqFluxDependVisualizer()
     vis.plot_sample_points(
-        table, fallback_frame=SampleFluxFrame("A", flux_int=0.0, flux_period=1.0)
+        table,
+        device_name="bias",
+        fallback_frame=RecordFluxFrame("A", flux_int=0.0, flux_period=1.0),
     )
 
     trace = _sample_points_trace(vis.fig)
@@ -157,7 +190,7 @@ def test_hover_labels_exclude_coordinate_and_freq_columns() -> None:
         ]
     )
     vis = FreqFluxDependVisualizer()
-    vis.plot_sample_points(table)
+    vis.plot_sample_points(table, device_name="bias")
 
     trace = _sample_points_trace(vis.fig)
     hovertext = trace.hovertext
@@ -177,8 +210,8 @@ def test_unresolved_rows_fail_with_indexes() -> None:
     table = _make_table([{"flux": 0.3}, {"comment": "no frame"}])
     vis = FreqFluxDependVisualizer()
 
-    with pytest.raises(SampleTableV2Error, match="row\\(s\\) \\[1\\]"):
-        vis.plot_sample_points(table)
+    with pytest.raises(RecordTableV2Error, match="row\\(s\\) \\[1\\]"):
+        vis.plot_sample_points(table, device_name="bias")
     # nothing was plotted before the failure
     assert _trace_count(vis.fig) == 0
 
@@ -187,23 +220,29 @@ def test_fallback_frame_unit_mismatch_is_unresolved() -> None:
     table = _make_table([{"dev_value": 1.0}])  # dev_unit "A"
     vis = FreqFluxDependVisualizer()
 
-    with pytest.raises(SampleTableV2Error, match="row\\(s\\) \\[0\\]"):
+    with pytest.raises(RecordTableV2Error, match="row\\(s\\) \\[0\\]"):
         vis.plot_sample_points(
-            table, fallback_frame=SampleFluxFrame("V", flux_int=0.0, flux_period=1.0)
+            table,
+            device_name="bias",
+            fallback_frame=RecordFluxFrame("V", flux_int=0.0, flux_period=1.0),
         )
 
 
 def test_legacy_coordinate_column_fails_before_analysis() -> None:
     table = pd.DataFrame(
         {
+            "devices": [
+                {"bias": {"value": 0.1, "value_unit": "A"}},
+                {"bias": {"value": 0.2, "value_unit": "A"}},
+            ],
             "calibrated mA": [0.1, 0.2],
             "freq_mhz": [4000.0, 4100.0],
         }
     )
     vis = FreqFluxDependVisualizer()
 
-    with pytest.raises(SampleTableV2Error, match="calibrated mA"):
-        vis.plot_sample_points(table)
+    with pytest.raises(RecordTableV2Error, match="calibrated mA"):
+        vis.plot_sample_points(table, device_name="bias")
     assert _trace_count(vis.fig) == 0
 
 
@@ -213,8 +252,8 @@ def test_empty_table_fails_before_analysis() -> None:
     )
     vis = FreqFluxDependVisualizer()
 
-    with pytest.raises(SampleTableV2Error, match="empty"):
-        vis.plot_sample_points(table)
+    with pytest.raises(RecordTableV2Error, match="empty"):
+        vis.plot_sample_points(table, device_name="bias")
     assert _trace_count(vis.fig) == 0
 
 
@@ -235,7 +274,7 @@ def test_mixed_unit_rows_plot_at_resolved_flux() -> None:
         ]
     )
     vis = FreqFluxDependVisualizer()
-    vis.plot_sample_points(table)
+    vis.plot_sample_points(table, device_name="bias")
 
     trace = _sample_points_trace(vis.fig)
     np.testing.assert_allclose(_coordinates(trace.x), [0.5, 0.5])
@@ -253,7 +292,7 @@ def test_plot_md_fluent_chain_smoke() -> None:
     """
     flxs = np.linspace(0.5, 1.0, 100)
     energies = np.zeros((len(flxs), 10))
-    frame = SampleFluxFrame("A", flux_int=0.0, flux_period=1.0)
+    frame = RecordFluxFrame("A", flux_int=0.0, flux_period=1.0)
     dev_values = frame.dev_value_from_flux(flxs)
 
     v_allows: TransitionDict = {
@@ -265,8 +304,10 @@ def test_plot_md_fluent_chain_smoke() -> None:
     # v2 rows with no explicit flux and no row frame: resolved via fallback.
     freqs_df = pd.DataFrame(
         {
-            "dev_value": [0.5, 0.8],
-            "dev_unit": ["A", "A"],
+            "devices": [
+                {"bias": {"value": 0.5, "value_unit": "A"}},
+                {"bias": {"value": 0.8, "value_unit": "A"}},
+            ],
             "freq_mhz": [4000.0, 4100.0],
             "t1_us": [10.0, 12.0],
         }
@@ -275,7 +316,7 @@ def test_plot_md_fluent_chain_smoke() -> None:
     fig = (
         FreqFluxDependVisualizer()
         .plot_simulation_lines(flxs, energies, v_allows)
-        .plot_sample_points(freqs_df, fallback_frame=frame)
+        .plot_sample_points(freqs_df, device_name="bias", fallback_frame=frame)
         .plot_constant_freq(v_allows["r_f"], "r_f")
         .plot_constant_freq(v_allows["sample_f"], "sample_f")
         .plot_constant_freq(2 * v_allows["sample_f"] - v_allows["r_f"], "mirror r_f")

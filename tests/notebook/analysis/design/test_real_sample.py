@@ -21,10 +21,10 @@ from zcu_tools.resources.qubit_params import (
     ParamsProject,
     QubitParams,
 )
-from zcu_tools.resources.sample_table import (
-    JsonlSampleTable,
-    SampleFluxFrame,
-    SampleTableV2Error,
+from zcu_tools.resources.record_table import (
+    JsonlRecordTable,
+    RecordFluxFrame,
+    RecordTableV2Error,
 )
 
 _NOISE_CHANNELS: list[tuple[str, dict[str, object]]] = []
@@ -61,17 +61,17 @@ def result_dir(tmp_path) -> str:
 
 
 @pytest.fixture
-def samples(tmp_path: Path) -> JsonlSampleTable:
-    return JsonlSampleTable(tmp_path / "caller-samples.jsonl")
+def samples(tmp_path: Path) -> JsonlRecordTable:
+    return JsonlRecordTable(tmp_path / "caller-samples.jsonl")
 
 
 def _write_sample_jsonl(
-    samples: JsonlSampleTable, rows: list[dict[str, object]]
+    samples: JsonlRecordTable, rows: list[dict[str, object]]
 ) -> None:
     _write_sample_frame(samples, pd.DataFrame(rows))
 
 
-def _write_sample_frame(samples: JsonlSampleTable, frame: pd.DataFrame) -> None:
+def _write_sample_frame(samples: JsonlRecordTable, frame: pd.DataFrame) -> None:
 
     frame = frame.copy()
     frame["run_id"] = [f"run-{index}" for index in range(len(frame))]
@@ -81,6 +81,12 @@ def _write_sample_frame(samples: JsonlSampleTable, frame: pd.DataFrame) -> None:
     if "dev_value" not in frame:
         frame["dev_value"] = 0.0
         frame["dev_unit"] = "A"
+    frame["devices"] = [
+        {"bias": {"value": value, "value_unit": unit}}
+        for value, unit in zip(
+            frame.pop("dev_value"), frame.pop("dev_unit"), strict=True
+        )
+    ]
     path = samples.path
     if frame.empty:
         with open(path, "w", encoding="utf-8"):
@@ -90,7 +96,7 @@ def _write_sample_frame(samples: JsonlSampleTable, frame: pd.DataFrame) -> None:
 
 
 def test_unresolved_rows_report_indexes(
-    result_dir: str, samples: JsonlSampleTable
+    result_dir: str, samples: JsonlRecordTable
 ) -> None:
     _write_sample_jsonl(
         samples,
@@ -101,12 +107,19 @@ def test_unresolved_rows_report_indexes(
     )
     fig = _new_fig()
 
-    with pytest.raises(SampleTableV2Error, match=r"row\(s\) \[1\]"):
-        S.add_real_sample(fig, result_dir, _NOISE_CHANNELS, Temp=0.05, samples=samples)
+    with pytest.raises(RecordTableV2Error, match=r"row\(s\) \[1\]"):
+        S.add_real_sample(
+            fig,
+            result_dir,
+            _NOISE_CHANNELS,
+            Temp=0.05,
+            device_name="bias",
+            samples=samples,
+        )
 
 
 def test_fallback_frame_unit_mismatch_is_unresolved(
-    result_dir: str, samples: JsonlSampleTable
+    result_dir: str, samples: JsonlRecordTable
 ) -> None:
     _write_sample_jsonl(
         samples,
@@ -114,19 +127,20 @@ def test_fallback_frame_unit_mismatch_is_unresolved(
     )
     fig = _new_fig()
 
-    with pytest.raises(SampleTableV2Error, match=r"row\(s\) \[0\]"):
+    with pytest.raises(RecordTableV2Error, match=r"row\(s\) \[0\]"):
         S.add_real_sample(
             fig,
             result_dir,
             _NOISE_CHANNELS,
             Temp=0.05,
+            device_name="bias",
             samples=samples,
-            fallback_frame=SampleFluxFrame("V", flux_int=0.0, flux_period=1.0),
+            fallback_frame=RecordFluxFrame("V", flux_int=0.0, flux_period=1.0),
         )
 
 
 def test_legacy_coordinate_column_is_rejected(
-    result_dir: str, samples: JsonlSampleTable
+    result_dir: str, samples: JsonlRecordTable
 ) -> None:
     _write_sample_jsonl(
         samples,
@@ -136,19 +150,33 @@ def test_legacy_coordinate_column_is_rejected(
     )
     fig = _new_fig()
 
-    with pytest.raises(SampleTableV2Error, match="calibrated mA"):
-        S.add_real_sample(fig, result_dir, _NOISE_CHANNELS, Temp=0.05, samples=samples)
+    with pytest.raises(RecordTableV2Error, match="calibrated mA"):
+        S.add_real_sample(
+            fig,
+            result_dir,
+            _NOISE_CHANNELS,
+            Temp=0.05,
+            device_name="bias",
+            samples=samples,
+        )
 
 
-def test_empty_table_is_rejected(result_dir: str, samples: JsonlSampleTable) -> None:
+def test_empty_table_is_rejected(result_dir: str, samples: JsonlRecordTable) -> None:
     # Empty JSONL tables report a public validation error.
     _write_sample_frame(
         samples, pd.DataFrame(columns=["dev_value", "dev_unit", "t1_us"])
     )
     fig = _new_fig()
 
-    with pytest.raises(SampleTableV2Error, match="empty"):
-        S.add_real_sample(fig, result_dir, _NOISE_CHANNELS, Temp=0.05, samples=samples)
+    with pytest.raises(RecordTableV2Error, match="empty"):
+        S.add_real_sample(
+            fig,
+            result_dir,
+            _NOISE_CHANNELS,
+            Temp=0.05,
+            device_name="bias",
+            samples=samples,
+        )
 
 
 def _new_fig() -> Figure:

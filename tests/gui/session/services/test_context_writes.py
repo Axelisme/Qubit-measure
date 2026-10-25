@@ -618,14 +618,14 @@ def test_sample_only_writeback_rejects_invalid_saved_point_before_acceptance(
     with pytest.raises(error_type):
         session.service.apply_writeback(
             target,
-            (writeback.SampleWriteback("Q1", {"t1_us": 50}),),
+            (writeback.RecordWriteback("Q1", {"t1_us": 50}),),
             evidence=writeback.WritebackEvidence(
                 kind="test/sample", origin="gui", run_id="run-1"
             ),
         )
 
     assert session.entry.ledger.events() == ()
-    assert session.entry.samples("Q1").read().empty
+    assert session.entry.records("Q1").read().empty
     assert session.entry.list_points() == points
     current = session.control.read_context()
     assert current.target == selected
@@ -646,7 +646,7 @@ def test_saved_point_samples_persist_and_replace_latest_run_row(
     result = session.control.apply_writeback(
         target,
         (
-            writeback.SampleWriteback(
+            writeback.RecordWriteback(
                 "Q1", {"t1_us": 20.09, "dev_value": 0.125, "dev_unit": "native"}
             ),
             writeback.ParameterWriteback("general.description", "draft value"),
@@ -657,7 +657,7 @@ def test_saved_point_samples_persist_and_replace_latest_run_row(
     )
     event_id = result.event_id
     event = session.entry.ledger.get(event_id).event
-    row = session.entry.samples("Q1").read().iloc[0].to_dict()
+    row = session.entry.records("Q1").read().iloc[0].to_dict()
     assert datetime.fromisoformat(row["at"]) == datetime.fromisoformat(event.at)
     expected = {
         "t1_us": 20.09,
@@ -668,23 +668,23 @@ def test_saved_point_samples_persist_and_replace_latest_run_row(
         "at": row["at"],
         "source": event_id,
     }
-    assert session.entry.samples("Q1").read().iloc[0].to_dict() == expected
+    assert session.entry.records("Q1").read().iloc[0].to_dict() == expected
     assert result.committed[1].value == expected
-    assert session.control.read_sample(target, "Q1", "run-1") == expected
-    assert session.control.read_sample(target, "Q1", "missing") is None
+    assert session.control.read_record(target, "Q1", "run-1") == expected
+    assert session.control.read_record(target, "Q1", "missing") is None
     second = session.control.apply_writeback(
         session.control.read_context().target,
-        (writeback.SampleWriteback("Q1", {"t1_us": 31.7}),),
+        (writeback.RecordWriteback("Q1", {"t1_us": 31.7}),),
         evidence=writeback.WritebackEvidence(
             kind="test/sample", origin="gui", run_id="run-1"
         ),
     )
     second_id = second.event_id
-    second_row = session.entry.samples("Q1").read().iloc[0].to_dict()
+    second_row = session.entry.records("Q1").read().iloc[0].to_dict()
     assert datetime.fromisoformat(second_row["at"]) == datetime.fromisoformat(
         session.entry.ledger.get(second_id).event.at
     )
-    assert session.control.read_sample(
+    assert session.control.read_record(
         session.control.read_context().target, "Q1", "run-1"
     ) == {
         "t1_us": 31.7,

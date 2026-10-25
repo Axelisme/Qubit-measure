@@ -12,7 +12,7 @@ from zcu_tools.gui.app.measure.adapter import AnalysisMode
 from zcu_tools.gui.app.measure.writeback import (
     ModuleWriteback,
     ParameterWriteback,
-    SampleWriteback,
+    RecordWriteback,
     WritebackEdit,
     WritebackItem,
 )
@@ -67,9 +67,9 @@ def _writeback_item_wire(item: WritebackItem) -> dict[str, object]:
     if isinstance(item, ParameterWriteback):
         base["kind"] = "parameter"
         base["proposed_value"] = _writeback_wire_value(item.proposed_value)
-    elif isinstance(item, SampleWriteback):
-        base["kind"] = "sample"
-        base["proposed_value"] = _writeback_wire_value(item.proposed_value)
+    elif isinstance(item, RecordWriteback):
+        base["kind"] = "record"
+        base["proposed_value"] = _writeback_wire_value(item.record)
     elif isinstance(item, ModuleWriteback):
         base["kind"] = "module"
         if item.role_id is not None:

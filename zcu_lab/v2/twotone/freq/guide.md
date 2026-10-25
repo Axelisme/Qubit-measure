@@ -21,6 +21,8 @@ Set `expected_center_mhz` to fit the nearest candidate. Leave it blank to fit th
 most prominent candidate. `min_prominence` defaults to 0.2 of projected signal
 peak-to-peak, and `min_distance_mhz` defaults to zero.
 Analysis fits the selected interval bounded halfway to neighbouring candidates.
+The Lorentzian fit starts from the detected positive peak's center and width.
+This avoids treating a broad peak's local median as background and fitting a dip.
 Dotted gray lines mark other candidates; the red line marks the fitted center.
 Candidate center and width are sampled estimates, not fitted frequency or FWHM.
 `truncated=True` means the scan clips a half-prominence crossing.

@@ -56,7 +56,8 @@ def _validate_file_paths(
     elif state.operation == "samples":
         if (
             state.source != source.result_path / "samples.csv"
-            or state.destination.parent != destination.result_path / "samples"
+            or state.destination.parent
+            != destination.result_path / "records" / "components"
             or state.destination.suffix != ".jsonl"
         ):
             raise MigrationInputError("manifest: invalid samples publication paths")

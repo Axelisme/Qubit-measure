@@ -502,6 +502,8 @@ MCP 保留同一份 owner-native summary，不重算 fit_quality、不套 recipe
 Recipe 的 typed T 驗證不會補資料或更改這份 owner summary。
 
 `apply_writeback(tab, items=None)` 按當前 preview 的穩定 target_name 選項目。
+Record proposal 的 kind 是 `record`，ID 是 `record-<n>`，逐目的地清單使用 `written.records`。
+Record JSON 由 adapter 組裝，框架只補 provenance 信封。Wire 123 不接受舊 sample 名稱。
 省略或 null 寫全部，[] 寫零項，不看 GUI 勾選，也不回答 recipe。
 工具先讀 Primary 與既有 Post，再拒絕未知、重複或跨 stage 同名，
 全部通過後才以當前 session ID 寫入。

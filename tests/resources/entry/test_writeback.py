@@ -15,12 +15,12 @@ from zcu_tools.resources.entry import (
     document_value,
     snapshot,
 )
-from zcu_tools.resources.entry.storage import bind_sample_table
+from zcu_tools.resources.entry.storage import bind_record_table
 from zcu_tools.resources.entry.writeback import (
     ModuleWriteback,
     ParameterWriteback,
     PointWritebackTarget,
-    SampleWriteback,
+    RecordWriteback,
     WaveformWriteback,
     WritebackApplyError,
     WritebackEvidence,
@@ -146,12 +146,12 @@ def test_group_order_preserves_accepted_order_and_per_item_receipts(
     waveform = ConstWaveformCfg(length=0.1)
     result = apply_writeback(
         (
-            SampleWriteback("Q1", {"freq": 10.0}),
+            RecordWriteback("Q1", {"freq": 10.0}),
             WaveformWriteback("Q1.waveforms.base", waveform),
             ParameterWriteback("Q1.ext.fit", {"gain": 0.1}),
             WaveformWriteback("Q1.waveforms.base", ConstWaveformCfg(length=0.2)),
             ParameterWriteback("Q1.ext.fit.gain", 0.2),
-            SampleWriteback("Q1", {"freq": 20.0}),
+            RecordWriteback("Q1", {"freq": 20.0}),
         ),
         target=writer,
         evidence=evidence(),
@@ -189,7 +189,7 @@ def test_invalid_library_rolls_back_mixed_family_group_and_keeps_point_prefix(
         apply_writeback(
             (
                 WaveformWriteback("Q1.waveforms.base", ConstWaveformCfg(length=0.1)),
-                SampleWriteback("Q1", {"freq": 10.0}),
+                RecordWriteback("Q1", {"freq": 10.0}),
                 ParameterWriteback("Q1.rate", 5300.0),
                 ModuleWriteback(
                     "Q1.waveforms.wrong",
@@ -216,11 +216,11 @@ def test_invalid_library_rolls_back_mixed_family_group_and_keeps_point_prefix(
         database_root=storage.database_path.parent,
     ).module_library("a")
     assert library.snapshot().document().components == {}
-    assert bind_sample_table(storage.result_path, "Q1").latest("run-1") is None
+    assert bind_record_table(storage.result_path, "Q1").latest("run-1") is None
     assert len(writer.ledger.events()) == 1
 
 
-def test_sample_numpy_producer_values_reach_ledger_and_sample_history(
+def test_record_numpy_producer_values_reach_ledger_and_record_history(
     point: PointView,
 ) -> None:
     storage = capture_point_storage(point)
@@ -250,18 +250,18 @@ def test_sample_numpy_producer_values_reach_ledger_and_sample_history(
     }
     try:
         event_id = apply_writeback(
-            (SampleWriteback("Q1", fields),), target=writer, evidence=evidence()
+            (RecordWriteback("Q1", fields),), target=writer, evidence=evidence()
         )
     except ValueError as error:
         raise AssertionError(
-            "Sample Apply must accept finite numpy producer numbers, including nested JSON"
+            "Record Apply must accept finite numpy producer numbers, including nested JSON"
         ) from error
     event = writer.ledger.get(event_id.event_id).event
     assert isinstance(event.payload, AcceptedPayload)
     assert [(write.path, write.value) for write in event.payload.writes] == [
         ("Q1", expected)
     ]
-    row = bind_sample_table(storage.result_path, "Q1").latest("run-1")
+    row = bind_record_table(storage.result_path, "Q1").latest("run-1")
     assert row is not None
     assert datetime.fromisoformat(str(row["at"])) == datetime.fromisoformat(event.at)
     assert row == expected | {
@@ -301,7 +301,7 @@ def test_sample_numpy_producer_values_reach_ledger_and_sample_history(
         pytest.param(object(), id="object"),
     ],
 )
-def test_sample_invalid_producer_value_rejects_before_any_write(
+def test_record_invalid_producer_value_rejects_before_any_write(
     point: PointView, value: object
 ) -> None:
     storage = capture_point_storage(point)
@@ -310,12 +310,12 @@ def test_sample_invalid_producer_value_rejects_before_any_write(
         apply_writeback(
             (
                 ParameterWriteback("Q1.rate", 5300.0),
-                SampleWriteback("Q1", {"fit": [{"value": value}]}),
+                RecordWriteback("Q1", {"fit": [{"value": value}]}),
             ),
             target=writer,
             evidence=evidence(),
         )
     assert writer.ledger.events() == ()
-    assert bind_sample_table(storage.result_path, "Q1").latest("run-1") is None
+    assert bind_record_table(storage.result_path, "Q1").latest("run-1") is None
     point.refresh()
     assert point.Q1.rate == 5000.0

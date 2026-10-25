@@ -9,7 +9,7 @@ from zcu_tools.cfg_model import ArbWaveformCfg, ConstWaveformCfg, PulseSpec
 from zcu_tools.gui.app.measure.writeback import (
     ModuleWriteback,
     ParameterWriteback,
-    SampleWriteback,
+    RecordWriteback,
     WritebackEdit,
     WritebackService,
     WritebackWritten,
@@ -24,6 +24,7 @@ from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.state import SessionState
 from zcu_tools.gui.session.types import SessionEnv
 from zcu_tools.resources.entry import ResultEntry, document_meta
+from zcu_tools.resources.entry.ledger_models import JsonObject
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
 from tests.resources.entry.fakes import register_fakes, registry_state, restore_registry
@@ -69,15 +70,17 @@ def session(tmp_path: Path):
         restore_registry(before)
 
 
-@pytest.mark.parametrize("kind", ["parameter", "module", "sample"])
+@pytest.mark.parametrize("kind", ["parameter", "module", "record"])
 def test_proposal_initial_selection_and_note_survive_manual_review(session, kind):
     _entry, control, service = session
     control.set_alias_rows((AliasRow("flux_dev", "bias"),))
     proposals = {
         "parameter": ParameterWriteback("general.ext.value", "fit", 5.0),
         "module": ModuleWriteback(PULSE, "fit", pulse_proposal()),
-        "sample": SampleWriteback(
-            "Q1", "fit", {"freq": 5.0}, coordinate_device="$flux_dev"
+        "record": RecordWriteback(
+            "Q1",
+            "fit",
+            {"freq": 5.0},
         ),
     }
     original = proposals[kind]
@@ -103,6 +106,34 @@ def test_proposal_initial_selection_and_note_survive_manual_review(session, kind
     service.edit_draft(draft, item.session_id, selected=False)
     assert not item.selected and item.note == "Fit needs manual review"
     assert not original.selected and original.note == "Fit needs manual review"
+
+
+def test_record_append_preserves_adapter_json_without_coordinate_policy(session):
+    entry, control, service = session
+    record: JsonObject = {
+        "devices": {"rf": {"freq_Hz": 5e9}},
+        "fit": [1, {"text": "raw"}],
+    }
+    original = RecordWriteback("Q1", "Record", record)
+    draft = service.create_draft(
+        [original],
+        parameters=control.read_context(),
+        experiment_name="synthetic/record",
+        run_id="record-run",
+    )
+    (item,) = service.preview_draft(draft)
+    assert isinstance(item, RecordWriteback)
+    assert item.record == record
+    service.apply_draft(draft)
+    rows = entry.records("Q1").read().to_dict(orient="records")
+    assert len(rows) == 1
+    assert rows[0] == record | {
+        "run_id": "record-run",
+        "point": "a",
+        "at": rows[0]["at"],
+        "source": entry.ledger.events()[-1].id,
+    }
+    assert original.record == record
 
 
 def test_default_proposal_selection_and_optional_note(session):

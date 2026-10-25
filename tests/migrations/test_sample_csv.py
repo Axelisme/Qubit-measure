@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 from zcu_tools.resources.entry import ResultEntry
-from zcu_tools.resources.sample_table import LegacyDeviceValueUnit
+from zcu_tools.resources.record_table import LegacyDeviceValueUnit
 
 from migrations import sample_csv
 from migrations.__main__ import main
@@ -31,8 +31,8 @@ def test_v2_conversion_renames_measurements_preserves_source_and_appends(
         encoding="utf-8",
     )
     before = source.read_bytes()
-    entry.samples("Q1").append(run_id="existing", dev_value=0.1, dev_unit="V", t1_us=10)
-    output = entry.result_path / "samples" / "Q1.jsonl"
+    entry.records("Q1").append(run_id="existing", dev_value=0.1, dev_unit="V", t1_us=10)
+    output = entry.result_path / "records" / "components" / "Q1.jsonl"
     history = output.read_bytes()
 
     report = sample_csv.convert_sample_csv(
@@ -44,7 +44,7 @@ def test_v2_conversion_renames_measurements_preserves_source_and_appends(
     assert report.output_path == output
     assert source.read_bytes() == before
     assert output.read_bytes().startswith(history)
-    row = entry.samples("Q1").read().set_index("run_id").loc["legacy-old-1"]
+    row = entry.records("Q1").read().set_index("run_id").loc["legacy-old-1"]
     assert row["dev_value"] == 0.002
     assert row["dev_unit"] == "A"
     assert row["point"] == "bias"
@@ -107,7 +107,7 @@ def test_csv_cli_rerun_skips_and_conflict_exits_two(
     ]
     assert main(arguments) == 0
     capsys.readouterr()
-    output = entry.samples("Q1").path
+    output = entry.records("Q1").path
     before = output.read_bytes(), output.stat().st_mtime_ns
     assert main(arguments) == 0
     report = json.loads(capsys.readouterr().out)
@@ -131,7 +131,7 @@ def test_v2_native_unit_is_preserved_without_scaling(
 
     assert report.converted_rows == 1
     assert report.pending_rows == ()
-    row = entry.samples("Q1").read().iloc[0]
+    row = entry.records("Q1").read().iloc[0]
     assert row["run_id"] == "legacy-native-1"
     assert row["dev_value"] == 1.25
     assert row["dev_unit"] == "native"
@@ -174,7 +174,7 @@ def test_legacy_conversion_requires_explicit_units(
     )
     assert report.converted_rows == 1
     assert report.pending_rows == ()
-    row = entry.samples("Q1").read().iloc[0]
+    row = entry.records("Q1").read().iloc[0]
     assert row["run_id"] == "legacy-old-1"
     assert row["point"] is None
     assert row["dev_value"] == expected_value
@@ -202,11 +202,11 @@ def test_pending_coordinates_are_reported_and_unknown_measurements_are_preserved
     ]
     assert "dev_value" in report.pending_rows[0].reason
     assert "dev_unit" in report.pending_rows[1].reason
-    assert list(entry.samples("Q1").read()["run_id"]) == [
+    assert list(entry.records("Q1").read()["run_id"]) == [
         "legacy-known-1",
         "legacy-unknown-1",
     ]
-    assert entry.samples("Q1").read().iloc[1]["T1 error (us)"] == "1"
+    assert entry.records("Q1").read().iloc[1]["T1 error (us)"] == "1"
 
 
 @pytest.mark.parametrize("legacy", [False, True])
@@ -253,7 +253,7 @@ def test_unknown_csv_fields_keep_raw_values_in_plan_and_public_readback(
     assert report.converted_rows == 2
     assert report.pending_rows == ()
     assert report.preserved_fields == plan.preserved_fields
-    rows = entry.samples("Q1").read()
+    rows = entry.records("Q1").read()
     assert list(rows["comment"]) == ["Manual Added", "Manual Added"]
     assert list(rows["custom"]) == [" 001 ", "NaN"]
     assert list(rows["empty"]) == ["", ""]
@@ -261,7 +261,7 @@ def test_unknown_csv_fields_keep_raw_values_in_plan_and_public_readback(
     assert list(rows["dev_unit"]) == ["A", "A"]
     assert list(rows["t1_us"]) == [50, 60]
     assert rows.iloc[0]["tcomment"] == "known"
-    last = entry.samples("Q1").latest("legacy-synthetic-2")
+    last = entry.records("Q1").latest("legacy-synthetic-2")
     assert last is not None
     assert last["tcomment"] is None
     assert source.read_bytes() == original
@@ -287,7 +287,7 @@ def test_unknown_csv_collisions_use_lossless_nested_fields_and_literal_report_ke
     )
     assert report.converted_rows == 1
     assert report.pending_rows == ()
-    row = entry.samples("Q1").latest("legacy-collision-1")
+    row = entry.records("Q1").latest("legacy-collision-1")
     assert row is not None
     assert row["run_id"] == "legacy-collision-1"
     assert row["point"] == "new point"
@@ -333,7 +333,7 @@ def test_duplicate_stems_fail_before_writing_any_input(
 
     with pytest.raises(ValueError, match="stem.*old"):
         sample_csv.convert_sample_csv([source, duplicate], entry=entry, component="Q1")
-    assert not (entry.result_path / "samples" / "Q1.jsonl").exists()
+    assert not (entry.result_path / "records" / "components" / "Q1.jsonl").exists()
     assert source.read_bytes() == before
     assert duplicate.read_bytes() == before
 
@@ -341,7 +341,7 @@ def test_duplicate_stems_fail_before_writing_any_input(
 def test_source_alias_of_output_is_rejected_without_changing_bytes(
     tmp_path: Path, entry: ResultEntry
 ) -> None:
-    output = entry.result_path / "samples" / "Q1.jsonl"
+    output = entry.result_path / "records" / "components" / "Q1.jsonl"
     output.parent.mkdir()
     output.write_text("dev_value,dev_unit,T1 (us)\n0.1,V,50\n", encoding="utf-8")
     source = tmp_path / "old.csv"

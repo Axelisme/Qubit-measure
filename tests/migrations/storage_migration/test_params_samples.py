@@ -45,7 +45,7 @@ def test_sample_declarations_publish_runtime_rows_and_resume_once(
     dry = migrate(replace(request, dry_run=True), analysis_mapping)
     assert not (request.results_root / request.name).exists()
     report = migrate(request, analysis_mapping)
-    table = open_entry(request).samples("Qlegacy")
+    table = open_entry(request).records("Qlegacy")
     assert len(table.read()) == 1
     row = table.latest("legacy-samples-1")
     assert row is not None
@@ -102,7 +102,7 @@ def test_unknown_csv_fields_survive_storage_publication_reports_and_completed_ed
         validate_native=noop_validation,
     )
     assert report.preserved_sample_fields == dry.preserved_sample_fields
-    table = open_entry(request).samples("Qlegacy")
+    table = open_entry(request).records("Qlegacy")
     assert list(table.read()["comment"]) == ["Manual Added", "Manual Added"]
     assert list(table.read()["custom"]) == [" 001 ", "NaN"]
     assert list(table.read()["empty"]) == ["", ""]
@@ -172,7 +172,7 @@ def test_sample_prepared_publication_resumes_without_duplicate_rows(
     )
     source = request.result_root / "chip/qubit/samples.csv"
     source.write_text("calibrated mA,T1 (us)\n2,50\n", encoding="utf-8")
-    output = request.results_root / request.name / "samples/Qlegacy.jsonl"
+    output = request.results_root / request.name / "records/components/Qlegacy.jsonl"
     link = os.link
 
     def fail_sample_publish(src: Path, dst: Path) -> None:
@@ -185,7 +185,7 @@ def test_sample_prepared_publication_resumes_without_duplicate_rows(
         with pytest.raises(OSError, match="sample publish interrupted"):
             migrate(request, analysis_mapping)
     migrate(replace(request, resume=True), analysis_mapping)
-    table = open_entry(request).samples("Qlegacy")
+    table = open_entry(request).records("Qlegacy")
     assert len(table.read()) == 1
     assert len(output.read_text().splitlines()) == 1
 
@@ -227,4 +227,4 @@ def test_sample_missing_declarations_are_located_without_using_flux_assumption(
     assert any(
         item.source == source and item.location == "row 1" for item in report.pending
     )
-    assert open_entry(request_data).samples("Qlegacy").read().empty
+    assert open_entry(request_data).records("Qlegacy").read().empty

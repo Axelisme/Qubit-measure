@@ -37,15 +37,15 @@ class WritebackEdit:
 class WritebackWritten:
     """Actual destination values around a successful context write.
 
-    id is the draft-local item ID. kind identifies parameter/module/sample.
-    target is a concrete point path, library key or sample component. before is
+    id is the draft-local item ID. kind identifies parameter/module/record.
+    target is a concrete point path, library key or record component. before is
     the latest stored value before application, or None when absent. after is the
-    value read after successful application. Sample values are complete JSONL
+    value read after successful application. Record values are complete JSONL
     rows, including accepted metadata, not the producer-only proposal fields.
     """
 
     id: str
-    kind: Literal["parameter", "module", "sample"]
+    kind: Literal["parameter", "module", "record"]
     target: str
     before: object
     after: object
@@ -55,7 +55,7 @@ class WritebackWritten:
 class WritebackValues:
     """Complete preview facts for one item at its captured destination.
 
-    actual_path is the captured parameter path, library key or sample component,
+    actual_path is the captured parameter path, library key or record component,
     after any draft-local retarget edit. current is the latest stored value at
     that destination, or None if missing. proposed is the complete validated
     value; for a module it is the Spec from the item's Form, evaluated against
@@ -95,13 +95,13 @@ class WritebackDestination(TypedDict):
 class WritebackApplied:
     """One confirmed write captured at submission, never a later preview.
 
-    id is draft-local; kind is parameter/module/sample. target is the concrete
-    path or sample component. value is the actual stored value after the write.
+    id is draft-local; kind is parameter/module/record. target is the concrete
+    path or record component. value is the actual stored value after the write.
     destination identifies the fixed entry and point that received it.
     """
 
     id: str
-    kind: Literal["parameter", "module", "sample"]
+    kind: Literal["parameter", "module", "record"]
     target: str
     value: object
     destination: WritebackDestination

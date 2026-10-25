@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import logging
 import math
 from collections.abc import Sequence
+from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TypeAlias
@@ -17,7 +19,7 @@ from zcu_tools.gui.app.measure.adapter import (
     Analysis,
     AnalyzeRequest,
     ParameterWriteback,
-    SampleWriteback,
+    RecordWriteback,
     WritebackItem,
     WritebackRequest,
 )
@@ -110,11 +112,19 @@ def _get_writeback_items(
     Missing capture returns no items. Captured bindings must match any source
     cfg names/count; errors propagate. Partial/nonfinite rows and failed fits
     produce no calibration items. Pulse proposals copy source cfg only, never
-    current library values. T2/sample require the coherence review gate;
+    current library values. T2/record require the coherence review gate;
     frequency additionally requires adequate sampling and relative error <=0.5.
     Failed gates retain unselected candidates with notes for manual review.
     This method neither writes nor applies proposals.
     """
+    metadata = req.run_result.metadata
+    devices = (
+        None
+        if metadata is None or metadata.device_snapshot is None
+        else deepcopy(dict(metadata.device_snapshot))
+    )
+    if devices is None:
+        logging.warning("no device snapshot")
     snapshot = req.run_result.cfg
     names = None if snapshot is None else tuple(t.name for t in snapshot.tones)
     qubits = captured_qubits(req.ctx.parameters, names)
@@ -139,19 +149,28 @@ def _get_writeback_items(
                     selected=t2_note is None,
                     note=t2_note,
                 ),
-                SampleWriteback(
+            ]
+        )
+        if metadata is not None and devices is not None:
+            row_items.append(
+                RecordWriteback(
                     target_name=qubit,
-                    description="t2r sample at captured bias",
-                    coordinate_device="$mux.flux_source",
-                    proposed_value={
+                    description="t2r record at captured bias",
+                    record={
+                        "devices": {
+                            name: deepcopy(info) for name, info in devices.items()
+                        },
+                        "run": {
+                            "run_id": metadata.run_id,
+                            "experiment": metadata.experiment,
+                        },
                         "t2r_us": outcome.t2,
                         "t2r_err_us": outcome.t2_err,
                     },
                     selected=t2_note is None,
                     note=t2_note,
-                ),
-            ]
-        )
+                )
+            )
         data = req.run_result.result
         if (
             snapshot is not None

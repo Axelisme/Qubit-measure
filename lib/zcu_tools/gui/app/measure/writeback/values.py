@@ -12,7 +12,7 @@ from zcu_tools.resources.entry import document_value
 from zcu_tools.resources.entry.writeback import WritebackResult
 
 from .contracts import WritebackApplied
-from .items import ParameterWriteback, SampleWriteback, WritebackItem
+from .items import ParameterWriteback, RecordWriteback, WritebackItem
 
 if TYPE_CHECKING:
     from .service import WritebackDraft
@@ -20,7 +20,7 @@ if TYPE_CHECKING:
 
 def destination_path(item: WritebackItem, parameters: ParameterContext) -> str:
     """Resolve the concrete destination from the fixed draft capture."""
-    if isinstance(item, SampleWriteback):
+    if isinstance(item, RecordWriteback):
         return item.target_name
     if isinstance(item, ParameterWriteback):
         return parameters.resolve_path(item.target_name)
@@ -50,17 +50,17 @@ def read_destination_value(
     current: ParameterContext,
     path: str,
 ) -> object:
-    """Read a fixed destination, including accepted Sample row metadata.
+    """Read a fixed destination, including accepted Record row metadata.
 
     current is the latest fixed-target context, never active focus. path must
-    already be concrete. Samples read the draft's run-specific row, not a module.
+    already be concrete. Records read the draft's run-specific row, not a module.
     Missing captured parameters or I/O errors propagate.
     """
-    if isinstance(item, SampleWriteback) and draft.run_id is not None:
+    if isinstance(item, RecordWriteback) and draft.run_id is not None:
         parameters = draft.parameters
         if parameters is None:
             raise FailedPreconditionError("Writeback requires captured parameters")
-        return write_port.read_sample(parameters.target, path, draft.run_id)
+        return write_port.read_record(parameters.target, path, draft.run_id)
     return destination_value(item, current, path)
 
 
@@ -85,8 +85,8 @@ def applied_values(
         values.append(
             WritebackApplied(
                 id=item.session_id,
-                kind="sample"
-                if isinstance(item, SampleWriteback)
+                kind="record"
+                if isinstance(item, RecordWriteback)
                 else "parameter"
                 if isinstance(item, ParameterWriteback)
                 else "module",

@@ -38,7 +38,7 @@
 | `exps/<sub>/` 或舊直屬 child 的 meta／library | `points/<sub>/point.yaml`、`points/<sub>/module_cfg.yaml` |
 | `exps/<sub>/image/*.png` | `points/<sub>/figures/<原檔名>` |
 | exps 外的 `image/` | entry 的 `figures/<來源相對路徑>` |
-| `samples.csv` | `samples/<Q>.jsonl`；有待轉列時另保全完整 `samples.csv` |
+| `samples.csv` | `records/components/<Q>.jsonl`；有待轉列時另保全完整 `samples.csv` |
 | `data/fluxdep/spectrums.hdf5` | 同相對位置的正式檔，未轉原文另存 `spectrums.legacy.hdf5` |
 | Database 的 Labber 檔 | `Labber/<來源相對路徑>`；可轉者另產 `runs/<experiment>_<run_id>/data.h5` |
 | 其他未支援 result／Database 檔 | 對應新根的原相對路徑；point 附屬檔留在該 point |
@@ -123,7 +123,7 @@ T1 的 fit 欄位包括 `params`、`stderr`、`bounds`、`fixed`、`free`、`cos
 
 ## Samples mapping
 
-- Parameters 將根 `samples.csv` 交給 `sample_csv.plan_sample_csv`。唯一 qubit component 決定 `ResultEntry.samples(component)`，找不到唯一元件就 located pending。Legacy CSV 的 `sample_value_column` 與 `sample_source_unit` 必須獨立宣告，不能借 `assume_flux_unit`。合法列寫入同目錄 temp JSONL，再走 manifest 的 samples publication、hash 與 prepared/published resume；不直接對既有目的地 append。無法轉換的列依 owner plan 的來源路徑、資料列號與原因 pending，並經 copy publication 另留完整原 CSV 到 `result/<entry>/samples.csv`。沒有合法列就不建 JSONL。
+- Parameters 將根 `samples.csv` 交給 `sample_csv.plan_sample_csv`。唯一 qubit component 決定 `ResultEntry.records(component)`，找不到唯一元件就 located pending。Legacy CSV 的 `sample_value_column` 與 `sample_source_unit` 必須獨立宣告，不能借 `assume_flux_unit`。合法列寫入同目錄 temp JSONL，再走 manifest 的 samples publication、hash 與 prepared/published resume；不直接對既有目的地 append。無法轉換的列依 owner plan 的來源路徑、資料列號與原因 pending，並經 copy publication 另留完整原 CSV 到 `result/<entry>/samples.csv`。沒有合法列就不建 JSONL。
 
 - CSV 未知欄位保留原名原字串，空字串不改成 null。一般欄位留在 JSONL 根層，碰 producer metadata、canonical 量測名稱及 `legacy_fields` 的欄位放進 `legacy_fields` mapping。`MigrationReport.preserved_sample_fields` 記錄來源檔、資料列、欄名、原值、synthetic run_id、literal 目的 keys 與 JSONL 路徑，不冒充語意已轉換。Dry-run、正式發布與 manifest/resume 共用這份 typed 報告。
 

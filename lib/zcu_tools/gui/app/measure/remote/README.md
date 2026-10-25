@@ -11,6 +11,11 @@ serializes selected events, and pushes diagnostics.
 The agent-facing MCP bridge lives in `zcu_tools.mcp.measure`. This package does
 not declare MCP tools and does not own stdio transport.
 
+Record writeback uses kind=`record`, IDs `record-<n>` and `written.records`.
+The preview's `proposed_value` carries the adapter's JSON object unchanged.
+Wire version 123 removes the old sample names without aliases. Component records
+live at `records/components/<target>.jsonl`; the event ledger stays at `records/ledger.jsonl`.
+
 ## Owners
 
 - [`service.py`](service.py)：`RemoteControlAdapter`, a measure-gui subclass of shared

@@ -50,7 +50,7 @@ chip_name = "Q12_2D[7]"
 qub_name = "Q4"
 
 result_dir = f"../../result/{chip_name}/{qub_name}"
-samples_filename = "samples.csv"
+samples_filename = "records.jsonl"
 image_dir = None  # None: use result_dir/t2_curve.
 default_bare_rf = 5.0
 
@@ -59,6 +59,7 @@ figure_paths = {}
 
 ```python
 ctx = zt2.load_t2_curve_context(
+    device_name="bias_device",  # Replace with a device name from records.devices.
     result_dir=result_dir,
     samples_filename=samples_filename,
     image_dir=image_dir,
