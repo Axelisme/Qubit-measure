@@ -18,6 +18,7 @@ from collections.abc import Callable, Mapping
 from datetime import datetime
 from typing import TYPE_CHECKING
 
+from pydantic import JsonValue
 from qtpy.QtCore import Qt
 from qtpy.QtGui import QCloseEvent, QFont, QKeyEvent
 from qtpy.QtWidgets import (
@@ -37,6 +38,7 @@ from qtpy.QtWidgets import (
 )
 
 from zcu_tools.gui.expected_error import ExpectedError, FailedPreconditionError
+from zcu_tools.gui.form import FormWritePath
 from zcu_tools.gui.session.context_types import LibraryChange
 from zcu_tools.gui.session.events import (
     ContextSwitchedPayload,
@@ -47,7 +49,6 @@ from zcu_tools.gui.session.events import (
 )
 from zcu_tools.gui.session.library_entry import (
     LIBRARY_WRITE_ERRORS,
-    LibraryEntryInvalid,
     LibraryKind,
     ModuleEntryForm,
     WaveformEntryForm,
@@ -113,35 +114,27 @@ class InspectDialog(QDialog):
         ancestors stay shown and expand; clearing restores browsing expansion.
       - inspect.library: the QTreeWidget of dotted-key segments, grouped under
         "modules" and "waveforms"; the "New" and "Delete" buttons below it.
-      - inspect.entry.name: the Name QLineEdit of the selected entry;
-        inspect.entry.status: a QLabel "Saved" or "Unsaved";
-        inspect.entry.revert and inspect.entry.apply: the Revert and Apply
-        QPushButtons; inspect.entry.scroll: the QScrollArea holding the
-        selected entry's FormEditor (form.* names as FormEditor documents).
+      - inspect.entry.name: the selected entry's Name QLineEdit.
+        inspect.entry.error: the QLabel for rejected writes.
+        inspect.entry.scroll: the QScrollArea holding its FormEditor.
 
-    Selecting an entry opens it as a library entry form at one fixed capture
-    (see open_library_entry). The entry is Unsaved while its Name differs
-    from the stored name, its FormState input differs from the opened base,
-    or the editor holds unparsed text. Revert resets the state to the opened
-    base and the Name. Apply writes the Spec under Name in one replace and
-    reopens the result clean; a rejected write is shown through
-    dialog_presenter and keeps the draft. Switching entries, deleting, or
-    closing while Unsaved asks Save, Discard or Cancel through
-    dialog_presenter. Library and parameter publications rebuild the tree
-    and reopen the selected entry when the library changed, except while
-    Unsaved; the refresh then waits for the next explicit decision.
+    Selecting an entry captures its expression environment. Enter, ordinary
+    focus loss, dropdown changes and checkbox toggles replace Name and the valid
+    Spec together through apply_library_change. Typing alone never writes.
+    Invalid text stays marked in the form. Owner/revision failures appear in
+    inspect.entry.error and keep the input editable without changing the file.
+    PointFileBanner offers Keep/Reload for stale revisions. Switching entries or
+    points, deleting, or closing discards uncommitted input without questions.
+    Successful writes keep the mounted form and focus; no undo is retained.
 
     The Delete button asks for confirmation; the Delete key on the focused
     tree deletes without asking. Both pin the capture before acting. New
     opens a NewEntryDialog over templates and selects the created entry.
     "Arb Waveforms…" calls the host's open_arb_waveforms.
 
-    Aliases fixes its draft to the loaded entry/point. Clean drafts follow
-    session switches; dirty drafts stay shown and Apply rejects a different
-    current entry/point. Revert loads the current point's table. Apply saves
-    only that selected point. Closing with an Unsaved module entry
-    or alias draft asks Save, Discard or Cancel for each in turn; a rejected
-    alias Save keeps the dialog open on the Aliases page with its error.
+    Aliases commits the complete valid table after a cell edit or Remove.
+    New incomplete rows stay local. Point switches discard invalid rows and
+    load the selected point. Closing never asks to save or discard.
     """
 
     # tolerated: Hosts inject distinct context/event, template, ARB, presenter and alias capabilities; no shared options record.
@@ -164,7 +157,7 @@ class InspectDialog(QDialog):
         template catalog New offers. arb_waveforms lists the arb asset names
         offered to arb data fields when an entry opens. open_arb_waveforms
         opens the host's ARB waveform dialog. dialog_presenter shows every
-        question and failure of this dialog.
+        deletion question and New/Delete failures. Entry write failures stay inline.
         """
         super().__init__(parent)
         self._ctrl = ctrl
@@ -177,11 +170,8 @@ class InspectDialog(QDialog):
         self._selected: _EntryKey | None = None
         self._entry: ModuleEntryForm | WaveformEntryForm | None = None
         self._editor: FormEditor[FormModel] | None = None
-        self._unsubscribe_state: Callable[[], None] | None = None
         # The library the tree was last built from; a different one reopens.
         self._library: LibrarySnapshot | None = None
-        # A publication arrived while Unsaved or during Apply; rebuild later.
-        self._refresh_pending = False
         self._applying = False
         self._new_dialog: NewEntryDialog | None = None
         self.setWindowTitle("Inspect Context")
@@ -207,6 +197,8 @@ class InspectDialog(QDialog):
         self._bus_subs_active = True
         self.finished.connect(self._on_finished)
         self.destroyed.connect(self._cleanup_bus_subscriptions)
+        for button in self.findChildren(QPushButton):
+            button.setAutoDefault(False)
         self.refresh()
 
     # ------------------------------------------------------------------
@@ -287,23 +279,16 @@ class InspectDialog(QDialog):
         self._name_edit.setPlaceholderText("ModuleLibrary name")
         self._name_edit.setEnabled(False)
         entry_row.addWidget(self._name_edit, stretch=1)
-        self._entry_status = QLabel("Saved")
-        self._entry_status.setObjectName("inspect.entry.status")
-        entry_row.addWidget(self._entry_status)
-        self._revert_btn = QPushButton("Revert")
-        self._revert_btn.setObjectName("inspect.entry.revert")
-        self._apply_btn = QPushButton("Apply")
-        self._apply_btn.setObjectName("inspect.entry.apply")
-        entry_row.addWidget(self._revert_btn)
-        entry_row.addWidget(self._apply_btn)
         right_layout.addLayout(entry_row)
         self._scroll = QScrollArea()
         self._scroll.setObjectName("inspect.entry.scroll")
         self._scroll.setWidgetResizable(True)
         right_layout.addWidget(self._scroll, stretch=1)
-        self._name_edit.textChanged.connect(self._update_controls)
-        self._revert_btn.clicked.connect(self._on_revert_clicked)
-        self._apply_btn.clicked.connect(self._on_apply_clicked)
+        self._name_edit.editingFinished.connect(self._commit_entry)
+        self._entry_error = QLabel()
+        self._entry_error.setObjectName("inspect.entry.error")
+        self._entry_error.setWordWrap(True)
+        right_layout.addWidget(self._entry_error)
         return right
 
     # ------------------------------------------------------------------
@@ -313,12 +298,12 @@ class InspectDialog(QDialog):
     def set_read_only(self, *, read_only: bool) -> None:
         """Lock or unlock every input while keeping the dialog readable.
 
-        Read-only disables New, Delete, Revert, Apply, the component tree's
+        Read-only disables New, Delete, the component tree's
         edits and the Aliases page's writes; the Name, the
         entry form and the alias table stay readable, scrollable and foldable
         but ignore input. Arb Waveforms stays clickable: the host opens the
-        ARB dialog read-only under its own rule. A draft made before locking stays shown and closing
-        no longer asks about it. Call again with False to unlock.
+        ARB dialog read-only under its own rule. Input made before locking stays
+        shown. Call again with False to unlock.
         """
         self._read_only = read_only
         self._library_sync.set_read_only(read_only=read_only)
@@ -330,14 +315,14 @@ class InspectDialog(QDialog):
         self._update_controls()
 
     def refresh(self) -> None:
-        """Refresh components/library and follow alias selection only while clean.
+        """Refresh installed values, preserving local edits only on the same point.
 
-        Unsaved alias drafts keep their loaded entry/point and reject Apply
-        after selection changes. Revert explicitly loads the current point.
+        Context-switch publications discard local input before refreshing.
+        Source changes retain input for the file banner's Keep/Reload decision.
         """
         self._aliases.refresh()
         self._component_tree.refresh()
-        self._library_sync.refresh(has_draft=self._is_unsaved())
+        self._library_sync.refresh(has_draft=self._has_library_draft())
         try:
             parameters = self._ctrl.read_context()
         except FailedPreconditionError:
@@ -354,10 +339,8 @@ class InspectDialog(QDialog):
 
     def _populate(self, library: LibrarySnapshot | None) -> None:
         """Rebuild the tree; reopen the selection when the library changed."""
-        if self._applying or self._is_unsaved():
-            self._refresh_pending = True
+        if self._applying or self._has_library_draft():
             return
-        self._refresh_pending = False
         changed = library is not self._library
         self._library = library
         desired = self._selected
@@ -441,15 +424,10 @@ class InspectDialog(QDialog):
         if key == self._selected:
             self._update_controls()
             return
-        if not self._resolve_unsaved():
-            self._select_in_tree(self._selected)
-            return
         self._close_entry()
         self._selected = key
         if key is not None:
             self._open_entry(key)
-        if self._refresh_pending:
-            self._populate_from_context()
         self._update_controls()
 
     def _populate_from_context(self) -> None:
@@ -478,119 +456,105 @@ class InspectDialog(QDialog):
             self._selected = None
             self._select_in_tree(None)
             return
-        editor = FormEditor(entry.state, entry.env)
+
+        def write(batch: Mapping[FormWritePath, JsonValue]) -> None:
+            entry.state.write(batch, entry.env)
+            self._commit_entry()
+
+        def select(path: FormWritePath, value: JsonValue) -> None:
+            entry.state.select(path, value, entry.env)
+            self._commit_entry()
+
+        def run_command(path: FormWritePath, name: str) -> None:
+            entry.state.run_command(path, name, entry.env)
+            self._commit_entry()
+
+        editor = FormEditor(
+            entry.state,
+            entry.env,
+            write=write,
+            select=select,
+            run_command=run_command,
+        )
+        editor.set_idle_commit(enabled=False)
         editor.set_editing_enabled(enabled=not self._read_only)
-        editor.validity_changed.connect(self._update_controls)
         # setWidget deletes the previous form, so folds and scroll start fresh.
         self._scroll.setWidget(editor)
         self._entry = entry
         self._library_revision = self._library_sync.capture()
         self._editor = editor
-        self._unsubscribe_state = entry.state.subscribe(self._update_controls)
         self._name_edit.blockSignals(True)
         self._name_edit.setText(name)
         self._name_edit.blockSignals(False)
 
     def _close_entry(self) -> None:
-        if self._unsubscribe_state is not None:
-            self._unsubscribe_state()
-            self._unsubscribe_state = None
         if self._editor is not None:
             self._editor.detach()
             self._editor = None
             self._scroll.setWidget(QWidget())
         self._entry = None
+        self._entry_error.clear()
         self._name_edit.blockSignals(True)
         self._name_edit.clear()
         self._name_edit.blockSignals(False)
 
-    def _is_unsaved(self) -> bool:
+    def _has_library_draft(self) -> bool:
         entry, editor, key = self._entry, self._editor, self._selected
         if entry is None or editor is None or key is None:
             return False
         return (
             self._name_edit.text() != key[1]
             or entry.state.is_dirty
-            or editor.local_parse_errors() is not None
+            or editor.has_pending_text()
         )
 
     def _update_controls(self, *_args: object) -> None:
         editable = self._entry is not None and not self._read_only
-        unsaved = self._is_unsaved()
-        valid = self._editor is not None and self._editor.errors() is None
         self._name_edit.setEnabled(self._entry is not None)
         self._name_edit.setReadOnly(not editable)
-        self._revert_btn.setEnabled(editable and unsaved)
-        self._apply_btn.setEnabled(
-            editable and unsaved and valid and bool(self._name_edit.text().strip())
-        )
-        self._entry_status.setText("Unsaved" if unsaved else "Saved")
         self._delete_btn.setEnabled(
             not self._read_only and self._current_key() is not None
         )
 
-    def _on_revert_clicked(self) -> None:
+    def _commit_entry(self) -> None:
+        """Replace a valid edited entry once; retain rejected input inline."""
         entry, editor, key = self._entry, self._editor, self._selected
-        if self._read_only or entry is None or editor is None or key is None:
+        if (
+            self._read_only
+            or self._applying
+            or entry is None
+            or editor is None
+            or key is None
+            or not self._has_library_draft()
+        ):
             return
-        entry.state.reset(entry.state.base)
-        editor.discard_local_text()
-        self._name_edit.setText(key[1])
-        self._update_controls()
-
-    def _on_apply_clicked(self) -> None:
-        if self._read_only:
+        if editor.errors() is not None:
             return
-        if self._apply():
-            self._populate_from_context()
-
-    def _apply(self) -> bool:
-        """Write the draft under Name; True after the write, False to keep it."""
-        entry, editor, key = self._entry, self._editor, self._selected
-        if entry is None or editor is None or key is None:
-            return False
         new_name = self._name_edit.text().strip()
         if not new_name:
-            self._presenter.warning(
-                self, "Invalid name", "Entry name must not be empty."
-            )
-            return False
+            self._entry_error.setText("Entry name must not be empty.")
+            return
         self._applying = True
         try:
-            local_errors = editor.local_parse_errors()
-            if local_errors is not None:
-                raise LibraryEntryInvalid(entry.kind, local_errors)
             self._library_sync.check(self._library_revision)
             self._ctrl.apply_library_change(
                 entry.parameters, entry.replace(key[1], new_name)
             )
         except LIBRARY_WRITE_ERRORS as exc:
-            logger.info("Library entry apply failed: %s", exc)
-            self._presenter.warning(self, "Apply failed", str(exc))
-            return False
+            logger.info("Library entry write failed: %s", exc)
+            self._entry_error.setText(str(exc))
+            return
         finally:
             self._applying = False
-        self._close_entry()
+        # Keep the mounted editor, focus and captured expression environment.
+        # Reset only the accepted base; no undo history is retained.
+        entry.state.reset(entry.state.input)
         self._selected = (key[0], new_name)
-        # The write published a refresh while applying; the caller rebuilds.
-        self._refresh_pending = True
-        return True
-
-    def _resolve_unsaved(self) -> bool:
-        """Settle an Unsaved draft; True when the caller may continue."""
-        if self._read_only or not self._is_unsaved():
-            return True
-        answer = self._presenter.save_discard_cancel(
-            self,
-            "Unsaved ModuleLibrary changes",
-            "Apply the current draft before continuing?",
-        )
-        if answer == "save":
-            return self._apply()
-        if answer == "discard":
-            self._close_entry()
-            return True
-        return False
+        self._name_edit.setText(new_name)
+        self._library_revision = self._library_sync.capture()
+        self._library = self._ctrl.read_context().library
+        self._rebuild_tree(self._library, self._selected)
+        self._entry_error.clear()
 
     # ------------------------------------------------------------------
     # Delete, New and ARB
@@ -605,8 +569,6 @@ class InspectDialog(QDialog):
     def _delete(self, *, confirm: bool) -> None:
         key = self._current_key()
         if self._read_only or key is None:
-            return
-        if not self._resolve_unsaved():
             return
         kind, name = key
         # Pin the target before any question: a context switch while asking
@@ -659,9 +621,6 @@ class InspectDialog(QDialog):
         created = dialog.created
         if created is None:
             return
-        if self._is_unsaved():
-            self._refresh_pending = True
-            return
         self._close_entry()
         self._selected = created
         self._populate_from_context()
@@ -677,12 +636,13 @@ class InspectDialog(QDialog):
     def _on_file_changed(self, payload: PointFileChangedPayload) -> None:
         del payload
         # Source observations alone must not rebuild an active parameter editor.
-        self._library_sync.refresh(has_draft=self._is_unsaved())
+        self._library_sync.refresh(has_draft=self._has_library_draft())
         self._aliases.refresh()
         self._component_tree.refresh_file_status()
 
     def _on_bus_refresh(self, payload: SessionPayload) -> None:
-        del payload
+        if isinstance(payload, ContextSwitchedPayload):
+            self._close_entry()
         self.refresh()
 
     def _cleanup_bus_subscriptions(self, *_args: object) -> None:
@@ -698,40 +658,12 @@ class InspectDialog(QDialog):
         self._close_entry()
         self._cleanup_bus_subscriptions()
 
-    def _resolve_unsaved_aliases(self) -> bool:
-        """Settle an Unsaved alias draft; True when closing may continue."""
-        if self._read_only or not self._aliases.is_unsaved():
-            return True
-        answer = self._presenter.save_discard_cancel(
-            self,
-            "Unsaved alias changes",
-            "Apply the alias table before closing?",
-        )
-        if answer == "save":
-            if self._aliases.apply():
-                return True
-            # The rejection is shown inline on the page; bring it into view.
-            self._tabs.setCurrentWidget(self._aliases)
-            return False
-        if answer == "discard":
-            self._aliases.revert()
-            return True
-        return False
-
-    def _resolve_before_close(self) -> bool:
-        return self._resolve_unsaved() and self._resolve_unsaved_aliases()
-
     def closeEvent(self, a0: QCloseEvent | None) -> None:
-        if not self._resolve_before_close():
-            if a0 is not None:
-                a0.ignore()
-            return
         self._close_entry()
         super().closeEvent(a0)
 
     def reject(self) -> None:
-        if not self._resolve_before_close():
-            return
+        self._close_entry()
         super().reject()
 
 

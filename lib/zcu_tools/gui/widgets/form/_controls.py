@@ -295,6 +295,7 @@ class FieldRow:
         collapsed hint, and records each user fold there. Other rows ignore it.
         """
         self.field = field
+        self._set_idle_commit: Callable[[bool], None] = lambda _enabled: None
         self._changed = changed
         self._unparsed = unparsed
         self._folds = folds
@@ -348,6 +349,10 @@ class FieldRow:
         hint = _MODE_HINT if self.mode is not None else ""
         self._tooltip = "\n".join(filter(None, (field.description, hint)))
         self.set_error("")
+
+    def set_idle_commit(self, *, enabled: bool) -> None:
+        """Enable or cancel text idle commits without changing pending text."""
+        self._set_idle_commit(enabled)
 
     def set_completion_candidates(self, candidates: tuple[str, ...]) -> None:
         """Pass captured $alias and one-level field names to this row's text input.
@@ -642,7 +647,9 @@ class FieldRow:
             self.mode = self._build_mode(widget)
         # Shared text policy commits on idle/Enter/focus loss; a checkbox
         # commits each toggle.
-        connect_committed_value_widget(widget, self._input_changed)
+        self._set_idle_commit = connect_committed_value_widget(
+            widget, self._input_changed
+        )
 
     def _build_mode(self, widget: QLineEdit) -> QAction:
         """Return the Expression action, listed on widget and after its menu."""
@@ -695,6 +702,12 @@ class FieldRow:
             and _expression(self.field)
             and self.field.has_value
             and widget.text() == _input_text(self.field)
+        )
+
+    def has_pending_text(self) -> bool:
+        """Return whether the text control differs from published state input."""
+        return isinstance(self.input, QLineEdit) and not self._shows_state(
+            self.input.text(), expression=self._expression_selected()
         )
 
     def _shows_state(self, text: str, *, expression: bool) -> bool:

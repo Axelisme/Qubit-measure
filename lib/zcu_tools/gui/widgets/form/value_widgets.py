@@ -166,6 +166,7 @@ class _TextCommit(QObject):
         callback: Callable[..., object],
     ) -> None:
         super().__init__(widget)
+        self._idle = True
         self._widget = widget
         self._text = text
         self._callback = callback
@@ -186,6 +187,12 @@ class _TextCommit(QObject):
             self._numeric_committed.connect(callback)
             widget.valueChanged.connect(self._numeric_changed)
 
+    def set_idle(self, *, enabled: bool) -> None:
+        """Enable idle expiry, or cancel it while keeping Enter/focus commits."""
+        self._idle = enabled
+        if not enabled:
+            self._cancel()
+
     def _cancel(self) -> None:
         self._timer.stop()
         self._pending_text = None
@@ -194,7 +201,7 @@ class _TextCommit(QObject):
         return self._widget.isEnabled() and not self._widget.isReadOnly()
 
     def _edited(self, text: str) -> None:
-        if self._editable():
+        if self._idle and self._editable():
             self._pending_text = text
             self._timer.start()
 
@@ -266,9 +273,12 @@ class _TextCommit(QObject):
 
 def connect_committed_value_widget(
     widget: QWidget, callback: Callable[..., object]
-) -> None:
-    """Commit user text after 500 ms idle, Enter or ordinary focus loss.
+) -> Callable[[bool], None]:
+    """Connect commits and return a callable that enables/disables idle expiry.
 
+    Idle commits start enabled at 500 ms. Call the returned setter with False
+    to cancel idle expiry without changing Enter/focus commits; True enables it.
+    For checkboxes/dropdowns the setter has no effect.
     Line-edit commits call callback with no arguments. New input restarts the
     idle interval; explicit commits consume it. Programmatic text changes do not
     schedule commits. Hidden, reparented, disabled or read-only controls cancel
@@ -278,10 +288,11 @@ def connect_committed_value_widget(
     checkboxes and dropdowns keep immediate value-change callbacks.
     """
     if isinstance(widget, QLineEdit):
-        _TextCommit(widget, widget, callback)
-        return
+        connection = _TextCommit(widget, widget, callback)
+        return lambda enabled: connection.set_idle(enabled=enabled)
     if isinstance(widget, (QSpinBox, TrimDoubleSpinBox)):
         text = widget.findChild(QLineEdit)
-        _TextCommit(widget, text, callback)
-        return
+        connection = _TextCommit(widget, text, callback)
+        return lambda enabled: connection.set_idle(enabled=enabled)
     connect_value_widget(widget, callback)
+    return lambda _enabled: None
