@@ -21,8 +21,8 @@ def make_form(ctx: FormContext) -> Form[ResetCheckCfg]:
             "tested_reset": Slot("$qubit.module.reset")
             if ctx.has("$qubit.module.reset")
             else Template("reset", bindings={"qubit": "$qubit"}),
-            "readout": Slot("$qubit.module.readout")
-            if ctx.has("$qubit.module.readout")
+            "readout": Slot("$resonator.module.readout")
+            if ctx.has("$resonator.module.readout")
             else Template("readout", bindings={"resonator": "$resonator"}),
             "gain": Range(0.0, "4.0 * $qubit.module.x180.gain", expts=51),
             "g_center": Expr("$qubit.ext.readout_cal.g_center"),

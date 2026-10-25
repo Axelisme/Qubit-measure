@@ -10,7 +10,7 @@ The live plot shows Ground, Excited and Other versus preparation frequency in MH
 
 Open and Reset take a snapshot of aliases, parameters and module choices. The preparation pulse starts from the qub_probe template. Its sweep spans `$qubit.freq +/- 1.5 * $qubit.kappa` with 51 points. The fixed MIST probe starts from res_probe at `$resonator.freq`. Check both pulse gains and lengths before Run.
 
-Optional reset and pi pulse use `$qubit.module.reset` and `$qubit.module.x180`. Missing optional slots start disabled. Readout uses `$qubit.module.readout` when available, otherwise the readout template. Missing required wiring, frequencies or classification calibration remain Invalid. Supply them before previewing a complete configuration or running.
+Optional reset and pi pulse use `$qubit.module.reset` and `$qubit.module.x180`. Missing optional slots start disabled. Readout uses `$resonator.module.readout` when available, otherwise the readout template. Missing required wiring, frequencies or classification calibration remain Invalid. Supply them before previewing a complete configuration or running.
 
 Classification uses `$qubit.ext.readout_cal.g_center`, `e_center` and `radius` as starting values in the editable run configuration. Run classifies shots with those configured values, and saved data retain that configuration. Analyze separately reads the optional `$qubit.ext.readout_cal.confusion_matrix` from the selected result's parameter source to correct populations. Calibrate these values with singleshot/ge at the same readout settings. The centres must be finite and distinct, and radius must be positive and finite.
 

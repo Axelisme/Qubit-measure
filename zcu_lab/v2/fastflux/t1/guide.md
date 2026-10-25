@@ -16,7 +16,7 @@ calibration. Length and fitted T1 use us.
 
 Open and Reset capture the current aliases and library. The pi pulse uses
 `$qubit.module.x180` when available, otherwise the `pi_pulse` template.
-Readout uses `$qubit.module.readout` or the `readout` template. Missing reset
+Readout uses `$resonator.module.readout` or the `readout` template. Missing reset
 disables that optional module. Missing required calibration leaves fields Invalid.
 
 The Flux pulse module slot uses the `flux_pulse` template. It starts with a const

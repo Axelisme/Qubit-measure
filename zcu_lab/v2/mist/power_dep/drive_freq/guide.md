@@ -23,7 +23,7 @@ displayed configuration. Open or Reset again to apply alias changes.
   `$qubit.module.x180`. Missing slots leave these modules disabled.
 - Probe starts from the resonator probe template: resonator frequency and
   generator channel, gain 0.05, and a 1 us constant waveform.
-- Readout uses `$qubit.module.readout` when available, otherwise the readout
+- Readout uses `$resonator.module.readout` when available, otherwise the readout
   template. The template needs resonator frequency, generator/ADC channels and
   `$resonator.time_of_fly`. Missing required sources stay Invalid.
 - Frequency starts at `$resonator.freq` ± 1.5 times

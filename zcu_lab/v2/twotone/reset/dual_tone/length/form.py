@@ -24,8 +24,8 @@ def make_form(ctx: FormContext) -> Form[LengthCfg]:
                     "pulse2_cfg.gain": Expr("$qubit.ext.reset_gain2"),
                 },
             ),
-            "readout": Slot("$qubit.module.readout")
-            if ctx.has("$qubit.module.readout")
+            "readout": Slot("$resonator.module.readout")
+            if ctx.has("$resonator.module.readout")
             else Template("readout", bindings={"resonator": "$resonator"}),
             "length": Range(0.05, 40.0, expts=51),
             "relax_delay": t1_initial_time(ctx.parameters, multiplier=5),

@@ -12,7 +12,7 @@
 
 Open 與 Reset 使用固定來源選初值。Reset 會清除本 tab 的編輯並重新捕捉來源。
 X90 優先取 `$qubit.module.x90`，readout 優先取
-`$qubit.module.readout`。缺少時顯示可編輯範本。
+`$resonator.module.readout`。缺少時顯示可編輯範本。
 Reset module 為選填，來源是 `$qubit.module.reset`。
 Relax delay 初值為已校準 T1 的 5 倍；缺 T1 時使用 150 us，可自行調整。
 

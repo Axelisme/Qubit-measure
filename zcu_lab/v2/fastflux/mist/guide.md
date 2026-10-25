@@ -18,7 +18,7 @@ Open 與 Reset 讀取當時的 `$qubit` 與 `$resonator` alias。
 
 - Reset 與 init pulse 分別使用 `$qubit.module.reset`、`$qubit.module.x180`。
   缺來源時停用，可手動選取 library module 或保持停用。
-- Readout 有來源就使用 `$qubit.module.readout`，否則使用可編輯的 readout template。
+- Readout 有來源就使用 `$resonator.module.readout`，否則使用可編輯的 readout template。
 - MIST pulse 使用 resonator probe template。確認頻率、generator 與 waveform 長度。
 - Flux pulse 模組槽使用 `flux_pulse` 範本，channel 初值來自 `$qubit.wiring.lo_flux_ch`。
   缺 channel 時保持 Invalid，須填入已確認的通道。

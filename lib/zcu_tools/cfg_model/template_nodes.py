@@ -67,7 +67,7 @@ class Template:
 
 @dataclass(frozen=True, slots=True)
 class Slot:
-    """Request a library module slot/root, such as ``$qubit.module.readout``.
+    """Request a library module slot/root, such as ``$resonator.module.readout``.
 
     ``path`` is an authored slot or library root, optionally containing component
     placeholders. Forms resolve it at Reset to a direct key. ``copy=False`` keeps

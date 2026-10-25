@@ -34,8 +34,8 @@ def make_form(ctx: FormContext) -> Form[FreqCfg]:
                 # Run replaces probe frequency with the scan.
                 set={"freq": Hidden(0.0), "gain": 0.1, "waveform.length": 1.0},
             ),
-            "readout": Slot("$qubit.module.readout")
-            if ctx.has("$qubit.module.readout")
+            "readout": Slot("$resonator.module.readout")
+            if ctx.has("$resonator.module.readout")
             else Template("readout", bindings={"resonator": "$resonator"}),
             "freq": Range.around("$qubit.freq", "20 * $qubit.kappa", expts=301),
             "relax_delay": 1.0,
@@ -46,7 +46,7 @@ def make_form(ctx: FormContext) -> Form[FreqCfg]:
         {
             **(
                 {}
-                if ctx.has("$qubit.module.readout")
+                if ctx.has("$resonator.module.readout")
                 else pulse_readout_seed_metadata(gain=0.1)
             ),
             **{

@@ -70,6 +70,8 @@ Run 不重新讀目前的 point、library 或 alias。所有 Run 都需要 SoC�
 Open／Reset 呼叫 `make_form(ctx)`，依固定來源建立 fresh input。Refresh 也重建 Form 定義，
 但保留 authored input、explicit selections 與已解析初值，不重新套 defaults。
 `ctx.has(ref)` 用固定來源選 Slot 或 Template，缺參照回 False，來源故障 raise。
+單音 readout module 與 `module.readout` slot 由 resonator 擁有。單 qubit 表單透過 `resonator: $qubit.resonator` alias 讀取 `$resonator.module.readout`，沒有 slot 時使用 `Template("readout")`，不讀 qubit 上的舊 slot。
+既有 point 不自動遷移，需重跑 onetone/freq 並 Apply module／slot，或手動設定 `R1.module.readout` 指向有效的 library module，否則表單使用 readout 範本。
 字串是 literal，Expr 才是運算式。
 初值 expression 在建立 input 時求成 direct 值；使用者輸入的 expression 保留原文。
 必要來源缺少時留 Invalid，不由 framework 補數字。實驗可在 `make_form` 明確選擇已定案的首次初值，見下節。Reset 重新捕捉並可換形狀，Run 使用畫面上的值。
@@ -397,7 +399,7 @@ GUI / MCP 只使用這個公開契約。
 
 GUI 以 CommonMark 加表格顯示內容，不解析 HTML。外部連結交給系統瀏覽器。
 行內 `$...$`、行內或獨立成段的 `$$...$$` 使用 matplotlib mathtext，不能解析時保留原文。
-Alias 引用一律寫成 code span，例如 `$qubit.freq`、`$qubit.module.readout`。
+Alias 引用一律寫成 code span，例如 `$qubit.freq`、`$resonator.module.readout`。
 其他字面 `$` 寫成 `\$`。Code span、code block 與連結網址內的 `$` 保留原文。
 本機圖片以相對於 guide 目錄的路徑引用。以下是語法示意，`pulse.png` 必須由作者放在 guide 同目錄：
 
@@ -432,9 +434,9 @@ twotone `ro_optimize/length` 的 GUI analyze param 對外命名為 `duration_t0`
 twotone `ro_optimize` adapters 的 readout spec 一律只接受 pulse readout；writeback
 產生兩層 readout writeback：`best_ro_freq` / `best_ro_gain` / `best_ro_length`
 仍是 parameter context scalar；當來源 RunRecord 的 `source.cfg` 非 None 且三個 best 值可由本次
-analyze result 加上 current parameter context 補齊且皆為 finite number 時，adapter 同時提出
-ModuleLibrary `readout_dpm`，並以 writeback `role_id="readout_dpm"` 標示這個
-readout role proposal；缺值或 non-finite 值只略過 module writeback。
+analyze result 加上固定 capture 補齊且皆為 finite number 時，adapter 同時提出
+ModuleLibrary `$resonator.readout.readout_dpm`，並以 writeback `role_id="readout_dpm"` 標示這個
+readout role proposal。有 capture 時，module 後新增 `$resonator.module.readout` row，值為該 capture 解析的最佳化 root。Apply module 與 slot 後，後續使用該 resonator 的表單改用最佳化讀出。無 capture 時只提出 module；缺值或 non-finite 值略過 module 與 slot writeback。
 `readout_dpm` 以 `source.cfg.readout` 作為 template，將 readout
 `freq` 設為 `best_ro_freq`、`gain` 設為 `best_ro_gain`、
 waveform length 設為 `best_ro_length + READOUT_DPM_PULSE_TAIL_US`（0.1 us tail）、

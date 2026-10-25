@@ -34,8 +34,8 @@ def make_form(ctx: FormContext) -> Form[AmpRabiCfg]:
         tree={
             "reset": Slot("$qubit.module.reset"),
             "qub_pulse": pulse,
-            "readout": Slot("$qubit.module.readout")
-            if ctx.has("$qubit.module.readout")
+            "readout": Slot("$resonator.module.readout")
+            if ctx.has("$resonator.module.readout")
             else Template("readout", bindings={"resonator": "$resonator"}),
             "init_pulse": Hidden(),
             "gain": Range(-0.3, 1.0, expts=51),
@@ -46,7 +46,7 @@ def make_form(ctx: FormContext) -> Form[AmpRabiCfg]:
     ).with_seed_metadata(
         (
             {}
-            if ctx.has("$qubit.module.readout")
+            if ctx.has("$resonator.module.readout")
             else pulse_readout_seed_metadata(gain=0.1)
         )
     )

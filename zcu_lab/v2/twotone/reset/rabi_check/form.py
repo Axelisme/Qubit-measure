@@ -21,8 +21,8 @@ def make_form(ctx: FormContext) -> Form[RabiCheckCfg]:
             "tested_reset": Slot("$qubit.module.reset")
             if ctx.has("$qubit.module.reset")
             else Template("reset", bindings={"qubit": "$qubit"}),
-            "readout": Slot("$qubit.module.readout")
-            if ctx.has("$qubit.module.readout")
+            "readout": Slot("$resonator.module.readout")
+            if ctx.has("$resonator.module.readout")
             else Template("readout", bindings={"resonator": "$resonator"}),
             "gain": Range(0.0, 1.0, expts=51),
             "relax_delay": t1_initial_time(ctx.parameters, multiplier=5),

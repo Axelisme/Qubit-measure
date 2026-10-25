@@ -22,8 +22,8 @@ def make_form(ctx: FormContext) -> Form[LenRabiCfg]:
         tree={
             "reset": Slot("$qubit.module.reset"),
             "qub_pulse": qub_pulse,
-            "readout": Slot("$qubit.module.readout")
-            if ctx.has("$qubit.module.readout")
+            "readout": Slot("$resonator.module.readout")
+            if ctx.has("$resonator.module.readout")
             else Template("readout", bindings={"resonator": "$resonator"}),
             "length": Range(0.03, length_stop, expts=51),
             "g_center": Expr("$qubit.ext.readout_cal.g_center"),

@@ -89,8 +89,8 @@ def make_form(ctx: FormContext) -> Form[CPMGInput]:
             "pi2_pulse": Slot("$qubit.module.x90")
             if ctx.has("$qubit.module.x90")
             else Template("pi2_pulse", bindings={"qubit": "$qubit"}),
-            "readout": Slot("$qubit.module.readout")
-            if ctx.has("$qubit.module.readout")
+            "readout": Slot("$resonator.module.readout")
+            if ctx.has("$resonator.module.readout")
             else Template("readout", bindings={"resonator": "$resonator"}),
             "times": LogPoints(max=16, points=5, include_zero=False),
             "detune_ratio": 0.1,
@@ -101,7 +101,7 @@ def make_form(ctx: FormContext) -> Form[CPMGInput]:
     ).with_seed_metadata(
         (
             {}
-            if ctx.has("$qubit.module.readout")
+            if ctx.has("$resonator.module.readout")
             else pulse_readout_seed_metadata(gain=0.1)
         )
     )

@@ -18,7 +18,7 @@ These starting values remain editable and separate from calibration writeback. A
 
 ## Module slots
 
-Uses `$qubit.module.x180` for optional init and required probe, `$qubit.module.reset` for optional reset, and `$qubit.module.readout` for readout. Missing required slots use pi_pulse/readout templates; missing optional slots stay disabled. Run uses the Open/Reset snapshot.
+Uses `$qubit.module.x180` for optional init and required probe, `$qubit.module.reset` for optional reset, and `$resonator.module.readout` for readout. Missing required slots use pi_pulse/readout templates; missing optional slots stay disabled. Run uses the Open/Reset snapshot.
 
 ## Assignment and model quality
 

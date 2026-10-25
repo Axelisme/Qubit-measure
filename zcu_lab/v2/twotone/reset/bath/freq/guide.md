@@ -12,7 +12,7 @@ Open and Reset capture the T1 used for starting values. A missing or null T1, or
 
 ## Module slots
 
-Tested reset starts as an editable copy of the bath_reset template. Optional initialization uses `$qubit.module.x180`. An unset slot, missing module or unbound alias leaves it disabled and Valid. The pi/2 tone requires `$qubit.module.x90`; missing calibration leaves it Invalid. An editable copy starts with a 90-degree tomography offset. The saved module stays unchanged. Readout uses the captured `$qubit.module.readout` slot, or a fresh readout template with a constant waveform. Its required parameter sources must still be present. Optional reset uses `$qubit.module.reset`. An unset slot, missing module or unbound alias leaves it disabled and Valid.
+Tested reset starts as an editable copy of the bath_reset template. Optional initialization uses `$qubit.module.x180`. An unset slot, missing module or unbound alias leaves it disabled and Valid. The pi/2 tone requires `$qubit.module.x90`; missing calibration leaves it Invalid. An editable copy starts with a 90-degree tomography offset. The saved module stays unchanged. Readout uses the captured `$resonator.module.readout` slot, or a fresh readout template with a constant waveform. Its required parameter sources must still be present. Optional reset uses `$qubit.module.reset`. An unset slot, missing module or unbound alias leaves it disabled and Valid.
 
 ## Typical writeback
 

@@ -16,7 +16,7 @@ These starting values remain editable and separate from calibration writeback. A
 
 ## Module slots
 
-Optional init/reset use `$qubit.module.x180`/reset. Probe starts from qub_probe. Readout uses `$qubit.module.readout` or the readout template. Run uses the Open/Reset snapshot.
+Optional init/reset use `$qubit.module.x180`/reset. Probe starts from qub_probe. Readout uses `$resonator.module.readout` or the readout template. Run uses the Open/Reset snapshot.
 
 ## Typical writeback
 

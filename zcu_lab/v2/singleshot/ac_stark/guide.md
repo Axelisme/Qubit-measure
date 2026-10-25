@@ -18,7 +18,7 @@ These starting values remain editable and separate from calibration writeback. A
 
 ## Module slots
 
-Reset and init start disabled. Cavity/qubit tones start from res_probe/pi_pulse with calibrated timing. Readout uses `$qubit.module.readout` or readout template. Pulse values remain editable, including those replaced by the sweep. You can select module slots by key. Run uses the Open/Reset snapshot.
+Reset and init start disabled. Cavity/qubit tones start from res_probe/pi_pulse with calibrated timing. Readout uses `$resonator.module.readout` or readout template. Pulse values remain editable, including those replaced by the sweep. You can select module slots by key. Run uses the Open/Reset snapshot.
 
 ## Typical writeback
 

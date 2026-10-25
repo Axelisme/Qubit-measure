@@ -18,8 +18,8 @@ def make_form(ctx: FormContext) -> Form[AccPhaseCfg]:
             "pi2_pulse": Slot("$qubit.module.x90")
             if ctx.has("$qubit.module.x90")
             else Template("pi2_pulse", bindings={"qubit": "$qubit"}),
-            "readout": Slot("$qubit.module.readout")
-            if ctx.has("$qubit.module.readout")
+            "readout": Slot("$resonator.module.readout")
+            if ctx.has("$resonator.module.readout")
             else Template("readout", bindings={"resonator": "$resonator"}),
             "length": Range(0.0, 2.0, expts=101),
             "phase": Range(0.0, 360.0, expts=21),

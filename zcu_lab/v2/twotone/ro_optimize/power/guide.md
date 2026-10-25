@@ -12,11 +12,11 @@ Open and Reset capture the T1 used for starting values. A missing or null T1, or
 
 ## Module slots
 
-The qubit pulse uses the `$qubit.module.x180` slot captured at Open/Reset, or a fresh pi_pulse template with a constant waveform. Readout uses the captured `$qubit.module.readout` slot, or a fresh readout template with a constant waveform. Its required parameter sources must still be present. Optional reset uses `$qubit.module.reset`. An unset slot, missing module or unbound alias leaves it disabled and Valid.
+The qubit pulse uses the `$qubit.module.x180` slot captured at Open/Reset, or a fresh pi_pulse template with a constant waveform. Readout uses the captured `$resonator.module.readout` slot, or a fresh readout template with a constant waveform. Its required parameter sources must still be present. Optional reset uses `$qubit.module.reset`. An unset slot, missing module or unbound alias leaves it disabled and Valid.
 
 ## Typical writeback
 
-Proposes the SNR-maximizing readout gain to `$qubit.ext.best_ro_gain` (a.u.). When acquired run settings include pulse readout and `$qubit.ext.best_ro_freq` / `$qubit.ext.best_ro_gain` / `$qubit.ext.best_ro_length` are known from this result plus captured calibration, also proposes `$qubit.readout.readout_dpm`.
+Proposes the SNR-maximizing readout gain to `$qubit.ext.best_ro_gain` (a.u.). When acquired run settings include pulse readout and `$qubit.ext.best_ro_freq` / `$qubit.ext.best_ro_gain` / `$qubit.ext.best_ro_length` are known from this result plus captured calibration, also proposes `$resonator.readout.readout_dpm`. With a captured parameter source, a following `$resonator.module.readout` proposal points to that optimized module. Apply both updates to replace the selected readout for all later forms using this resonator. The qubit's `best_ro_*` scalar destinations stay unchanged.
 
 ## Recommended
 

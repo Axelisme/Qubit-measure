@@ -25,8 +25,8 @@ def make_form(ctx: FormContext) -> Form[MistCfg]:
                 bindings={"resonator": "$resonator"},
                 set={"gain": Hidden(0.0)},
             ),
-            "readout": Slot("$qubit.module.readout")
-            if ctx.has("$qubit.module.readout")
+            "readout": Slot("$resonator.module.readout")
+            if ctx.has("$resonator.module.readout")
             else Template("readout", bindings={"resonator": "$resonator"}),
             "flux_gain": Range(0.0, 0.1, expts=101),
             "mist_gain": Range(0.0, 0.1, expts=101),

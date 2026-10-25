@@ -112,8 +112,9 @@ Prior 同樣只查 capture 的 resonator.ext.edelay，按原始 tone 的 generat
 ## OneTone、TwoTone 與 Lookback
 
 OneTone Freq 提供 route-qualified delay calibration 與 readout writeback。
-有效 pulse-readout module 提案後，有 capture 時新增 `$qubit.module.readout` ParameterWriteback，值為同份 capture 將 `$resonator.readout.readout_rf` 解析的具體 root。
-Apply 模組列與 slot 列後，qubit 的 readout slot 指向該 library root。
+有效 pulse-readout module 提案後，有 capture 時新增 `$resonator.module.readout` ParameterWriteback，值為同份 capture 將 `$resonator.readout.readout_rf` 解析的具體 root。
+Apply 模組列與 slot 列後，resonator 的 readout slot 指向該 library root，不需要 `$qubit` alias。
+單 qubit 表單透過 `resonator: $qubit.resonator` alias 讀取 `$resonator.module.readout`，缺 slot 時使用 readout 範本，不讀 qubit 上的舊 slot。
 Capture 為 None 時保留原有 scalar 與 module 提案，alias／來源故障沿 owner 契約傳播。
 PowerDep 把 SNR stop control 放進 typed cfg，不提供 analysis。
 OneTone FluxDep 的 run 將同次 cfg 與純 Result 配成 RunRecord，interactive plugin 明確取該 source 的資料並捕捉成唯讀 inputs。
@@ -146,7 +147,8 @@ Singleshot Amp／Len Rabi、Check、ResetCheck、AC Stark 的 run 回傳 RunReco
 Singleshot T1／Tone／Tone sweep adapters 直接組裝含 uniform 的 typed cfg，將同次 cfg／Result 配成 RunRecord。FIT 向本次 Plots 發布 fit 圖；Tone 保留 t1_with_tone writeback，其餘兩者只提交空數值結果。Correction／photon-axis 參數仍從分析當次 md 讀取。
 Singleshot MIST Freq／Power／FreqPower adapters 將本次校準 cfg 與純 Result 配成 RunRecord。FIT 使用 explicit source 與 typed options，只提交空數值結果，fit 圖另交 Plots。Confusion matrix 仍讀分析當次 md；只有 Power 使用 ac_stark_coeff／log_scale，FreqPower 不轉交無作用的參數。
 Readout AutoOpt 將 num_points 保留在 typed cfg，run 配對 cfg／Result，FIT 只發布三個最佳 scalar 與具名 fit；readout_dpm 由 source.cfg 產生，缺 cfg 時只保留 scalar writeback。Native restore 與保存內容準備沿用核心的 grouped persistence spec。
-Readout optimize Freq／FreqGain／Length／Power adapters 將 cfg／Result 配成 RunRecord，FIT 將表單 smoothing／duration／penalty 轉為 core options，只提交 best scalar 與獨立具名 fit。Writeback 保留 best_ro_* scalar；readout_dpm 以 source.cfg 的 pulse readout 配合當次 md 補足缺少的最佳值，cfg=None 時略過 module，不以目前表單補來源。
+Readout optimize Freq／FreqGain／Length／Power adapters 將 cfg／Result 配成 RunRecord，FIT 將表單 smoothing／duration／penalty 轉為 core options，只提交 best scalar 與獨立具名 fit。Writeback 保留 `$qubit.ext.best_ro_*` scalar；readout_dpm 以 source.cfg 的 pulse readout 配合固定 capture 補足缺少的最佳值，cfg=None 時略過 module，不以目前表單補來源。
+五個 readout optimize adapter 的 module target 是 `$resonator.readout.readout_dpm`。有效 module 提案後，有 capture 時新增 `$resonator.module.readout` ParameterWriteback，指向同份 capture 解析的最佳化 root。Apply module 與 slot 後，後續使用該 resonator 的表單沿 slot 取得最佳化讀出。無 capture 時只提出 module；沒有 module 提案時不提出 slot。
 
 ## JPA adapters
 

@@ -16,7 +16,7 @@ Detune ratio is the number of fringe periods per time index. The default is 0.1.
 
 ## Module sources and waiting
 
-The form uses the captured `$qubit.module.x180`, `$qubit.module.x90` and `$qubit.module.readout` slots. Missing slots use pi_pulse, pi2_pulse and readout templates. Reset uses `$qubit.module.reset` and stays disabled when absent. Missing calibration in a template remains Invalid until supplied.
+The form uses the captured `$qubit.module.x180`, `$qubit.module.x90` and `$resonator.module.readout` slots. Missing slots use pi_pulse, pi2_pulse and readout templates. Reset uses `$qubit.module.reset` and stays disabled when absent. Missing calibration in a template remains Invalid until supplied.
 
 Relax delay starts at 5 times the captured `$qubit.t1`. A missing or null T1 uses 30 us, giving a 150 us wait. An invalid stored T1 leaves the derived input empty. Open and Reset capture these sources. After alias or calibration edits, use Reset to refresh the form.
 

@@ -18,8 +18,8 @@ def make_form(ctx: FormContext) -> Form[PreFreqCfg]:
             ),
             "pi_pulse": Slot("$qubit.module.x180"),
             "probe_pulse": Template("res_probe", bindings={"resonator": "$resonator"}),
-            "readout": Slot("$qubit.module.readout")
-            if ctx.has("$qubit.module.readout")
+            "readout": Slot("$resonator.module.readout")
+            if ctx.has("$resonator.module.readout")
             else Template("readout", bindings={"resonator": "$resonator"}),
             "freq": Range.around("$qubit.freq", "1.5 * $qubit.kappa", expts=51),
             "g_center": Expr("$qubit.ext.readout_cal.g_center"),

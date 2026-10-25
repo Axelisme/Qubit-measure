@@ -271,7 +271,7 @@ def _get_writeback_items(
     if module_items and req.ctx.parameters is not None:
         items.append(
             ParameterWriteback(
-                target_name="$qubit.module.readout",
+                target_name="$resonator.module.readout",
                 description="Select fitted readout for downstream experiments",
                 proposed_value=req.ctx.parameters.resolve_path(
                     "$resonator.readout.readout_rf"

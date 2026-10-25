@@ -29,8 +29,8 @@ def make_form_gain(ctx: FormContext) -> Form[T1WithToneSweepCfg]:
                 # Run supplies the outer gain scan; keep waveform baseline.
                 set={"gain": Hidden(0.0)},
             ),
-            "readout": Slot("$qubit.module.readout")
-            if ctx.has("$qubit.module.readout")
+            "readout": Slot("$resonator.module.readout")
+            if ctx.has("$resonator.module.readout")
             else Template("readout", bindings={"resonator": "$resonator"}),
             "length": _length_sweep(ctx),
             "gain": Range(0.0, 1.0, expts=21),
@@ -62,8 +62,8 @@ def make_form_freq(ctx: FormContext) -> Form[T1WithToneSweepCfg]:
                 # Run supplies the outer freq scan; keep waveform baseline.
                 set={"freq": Hidden(0.0)},
             ),
-            "readout": Slot("$qubit.module.readout")
-            if ctx.has("$qubit.module.readout")
+            "readout": Slot("$resonator.module.readout")
+            if ctx.has("$resonator.module.readout")
             else Template("readout", bindings={"resonator": "$resonator"}),
             "length": _length_sweep(ctx),
             "freq": Range.around("$resonator.freq", "1.5 * $resonator.kappa", expts=21),

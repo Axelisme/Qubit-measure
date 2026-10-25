@@ -82,7 +82,8 @@ frequency 點數改為 `101`。這些只是新表單的起始值，不代表硬�
   它們讀取 Open／Reset 的固定來源。缺校準時欄位保持 Invalid，不填猜測數字。
 - `Template("qub_probe", bindings={"qubit": "$qubit"}, ...)` 產生 inline probe。
   保留 freq／gain 的 `Hidden(0.0)`，因為 `run` 會用 sweep 座標覆寫它們。
-- `Slot("$qubit.module.readout")` 使用已選 library module。
+- `Slot("$resonator.module.readout")` 使用綁定 resonator 已選的 library module。
+  Alias `resonator: $qubit.resonator` 讓讀出跟隨目前 qubit 的 resonator，不讀 qubit 上的舊 readout slot。
   來源不存在時，原範本改用 `Template("readout", bindings={"resonator": "$resonator"})`。
 - `Slot("$qubit.module.reset")` 是選用的 reset 來源。`init_pulse` 繼續隱藏。
   不要為了開表單而建立假的 library reference。

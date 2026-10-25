@@ -25,8 +25,8 @@ def make_form(ctx: FormContext) -> Form[FreqCfg]:
                     "pulse2_cfg.gain": Expr("$qubit.ext.reset_gain2"),
                 },
             ),
-            "readout": Slot("$qubit.module.readout")
-            if ctx.has("$qubit.module.readout")
+            "readout": Slot("$resonator.module.readout")
+            if ctx.has("$resonator.module.readout")
             else Template("readout", bindings={"resonator": "$resonator"}),
             "freq1": Range.around("$qubit.ext.reset_f1", 50.0, expts=201),
             "freq2": Range.around("$qubit.ext.reset_f2", 50.0, expts=201),

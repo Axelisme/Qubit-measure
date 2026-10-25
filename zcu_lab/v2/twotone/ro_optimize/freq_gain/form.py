@@ -17,10 +17,10 @@ def make_form(ctx: FormContext) -> Form[FreqGainCfg]:
             if ctx.has("$qubit.module.x180")
             else Template("pi_pulse", bindings={"qubit": "$qubit"}),
             "readout": Slot(
-                "$qubit.module.readout",
+                "$resonator.module.readout",
                 set={"freq": Hidden(0.0), "gain": Hidden(0.0)},
             )
-            if ctx.has("$qubit.module.readout")
+            if ctx.has("$resonator.module.readout")
             else Template(
                 "readout",
                 bindings={"resonator": "$resonator"},
