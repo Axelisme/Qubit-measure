@@ -19,6 +19,7 @@ from zcu_tools.experiment.v2.utils.tracker.moment import MomentTracker
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     Branch,
+    GainSweep,
     Pulse,
     PulseReadout,
     Readout,
@@ -33,7 +34,7 @@ from zcu_lab.v2.support import live_heatmap
 
 @dataclass(frozen=True)
 class FreqGainResult:
-    """MHz frequencies, normalized gains and moment-SNR scores (frequency, gain)."""
+    """MHz frequencies, gains in a.u. within [-1, 1] and moment-SNR scores (frequency, gain)."""
 
     freqs: NDArray[np.float64]
     gains: NDArray[np.float64]
@@ -68,7 +69,7 @@ class FreqGainCfg(ConfigBase):
     qub_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Qubit pulse")]
     readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
     freq: Annotated[SweepCfg, FieldMeta(label="Readout freq", unit="MHz")]
-    gain: Annotated[SweepCfg, FieldMeta(label="Readout gain", unit="a.u.")]
+    gain: Annotated[GainSweep, FieldMeta(label="Readout gain", unit="a.u.")]
     skew_penalty: Annotated[float, FieldMeta(label="Skew penalty", decimals=3)] = Field(
         default=0.0, ge=0.0
     )
@@ -114,7 +115,7 @@ class FreqGainExp(Experiment[FreqGainResult, FreqGainCfg]):
 
         At each point, apply the optional reset, omit or apply qub_pulse,
         then read out. Configure qub_pulse for the intended excitation.
-        Return frequencies in MHz, normalized gains and moment-based SNR
+        Return frequencies in MHz, gains in a.u. within [-1, 1] and moment-based SNR
         shaped (Nfreq, Ngain), optionally reduced by skew_penalty for distorted
         IQ distributions. This score is not assignment fidelity.
         acquire_kwargs is forwarded to acquisition.
@@ -198,7 +199,7 @@ class FreqGainExp(Experiment[FreqGainResult, FreqGainCfg]):
         """Select the joint maximum of the smoothed frequency/gain SNR map.
 
         options controls smoothing; unmeasured NaN scores become zero before
-        smoothing. Return best_freq in MHz and normalized best_gain, and
+        smoothing. Return best_freq in MHz and best_gain in a.u. within [-1, 1], and
         publish fit. source.cfg may be None.
         """
         result = source.result

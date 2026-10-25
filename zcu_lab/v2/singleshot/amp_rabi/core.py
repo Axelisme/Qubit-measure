@@ -22,7 +22,7 @@ from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.acquisition import StoppedPartialAcquireError
-from zcu_tools.program.v2 import Pulse, Readout, Reset, SweepCfg, sweep2param
+from zcu_tools.program.v2 import GainSweep, Pulse, Readout, Reset, sweep2param
 
 from zcu_lab.v2.singleshot.plot_rabi import RabiJointPlotOptions, plot_rabi_joint
 from zcu_lab.v2.support import live_line
@@ -67,7 +67,7 @@ class AmpRabiCfg(ConfigBase):
     reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
     qub_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Qub Pulse")]
     readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
-    gain: Annotated[SweepCfg, FieldMeta(label="Gain", unit="a.u.")]
+    gain: Annotated[GainSweep, FieldMeta(label="Gain", unit="a.u.")]
     g_center: Annotated[complex, FieldMeta(label="Ground center")]
     e_center: Annotated[complex, FieldMeta(label="Excited center")]
     radius: Annotated[float, FieldMeta(label="Classification radius")]

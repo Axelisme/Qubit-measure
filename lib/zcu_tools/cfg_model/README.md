@@ -1,6 +1,6 @@
 # cfg_model — 共享配置核心
 
-**Last updated:** 2026-10-24
+**Last updated:** 2026-10-25
 
 **讀者：** framework-dev。配置模型、持久 Spec 與 materialization 邊界速查。
 
@@ -15,7 +15,7 @@ Caller 從 package root import 公開名稱。
 - `FieldMeta` 在 core 與持久 Spec 欄位承載 label、unit、decimals、description、group、readonly 與 element_label，不改 cfg 驗證或序列化的值。group 是 MCP schema 可用的前端中立分類名稱 hint。前端用 `get_field_meta` 讀取，並決定實際的 widget、排版與折疊行為。`readonly=True` 由上層 Form core 強制執行，同值寫入通過，不同值拒絕；element_label 提供 picker label。選填 calibration 接受 uncalibrated／None，供 Form 的逐位置 seed metadata 宣告校準狀態；None 表示未知。它不驗證 calibration 數值，也不推論缺值的校準狀態。
 - `Expr`、`Range`、`LogPoints`、`Hidden`、`Slot` 與 `Template` 是前端中立的起始值宣告。求值與來源讀取由 Form consumer 負責。`Hidden(value)` 攜帶 core 單位的 literal，包含明填 None；Form 隱藏欄位並保留 core 驗證。`Hidden()` 保留普通 core 欄位的 default 還原語意。`Template.set`／`Slot.set` 接受 dotted Spec 路徑的 `Hidden(value)`，不宣告值的來源或更動 Run。`LogPoints.include_zero` 預設 True，False 請求正值 Log／List；分支與產生規則由 form_adapter 擁有。固定欄位使用初值與 readonly。FormNode 的 list 按位置提供 model 元素或 scalar list 的初值，各位置的唯讀值可以不同。`TemplateDef` 的持久 Spec 目錄由呼叫者注入，Form 保留各範本的非 lock 初值與 input projection，不以單值 Literal 實作 lock。還原保留唯讀欄位的存檔值，不重算宣告初值。Core cfg 自有的單值 Literal 仍保留其固定值語意。
 - `Template.set`／`Slot.set` 可提供 typed model-list 初值。List 元素以原 Spec 欄位名對應 literal 或 Expr 等 seed，consumer 按原 schema 遞迴驗證，不改 annotation。它不把 scalar list 擴成逐項編輯，也不產生 mux group 或校準政策。
-- Pulse 與 Pulse readout 依模型宣告結構排列主要欄位，順序為 Waveform、Gen ch、Frequency、Gain。Pulse、pulse readout 與 mux tone 的 Frequency 單位為 MHz，Gain 單位為 normalized。Form 不另設前端排序表。Pulse 的持久欄位仍為 `ch`，Pulse readout 仍為 `gen_ch`；儲存形狀與驗證不因排版改變。Mux readout 沒有 waveform，不新增該欄位。
+- Pulse 與 Pulse readout 依模型宣告結構排列主要欄位，順序為 Waveform、Gen ch、Frequency、Gain。Pulse、pulse readout 與 mux tone 的 Frequency 單位為 MHz，Gain 單位為 a.u.，表示 DAC full-scale fraction，範圍為 [-1, 1]。`Gain` 驗證固定值，`GainParam` 也驗證 QICK 多軸 sweep 所有角點的值；超界錯誤包含範圍與實際值。Form 不另設前端排序表。Pulse 的持久欄位仍為 `ch`，Pulse readout 仍為 `gen_ch`；儲存形狀與驗證不因排版改變。Mux readout 沒有 waveform，不新增該欄位。
 - `Range(start, stop, expts)` 的端點接受數值、`Expr`、expression 字串或 `None`。字串在建構時轉成 `Expr`，不當場求值。`None` 表示 Form 中可見空白且必填的端點，不是 0／1 或可執行預設。即使對應 input key 缺席，生成 model 仍要求操作員填入數字才能提交。另一端點與 `expts` 不受影響。Literal 與 `Expr` 端點沿用既有語意。
 - `WaveformSamples` 由 core.waveform_format 擁有。它攜帶一次 asset 讀取的 reference time axis 與 normalized I/Q samples，不從 cfg_model re-export。
 - `ModuleSpec`／`WaveformSpec` 表示持久候選，保留具體 key 的 child 引用。兩個 `spec_from_raw` 入口驗證持久值，不查 library 或 assets，不將 runtime 資訊轉成字串。

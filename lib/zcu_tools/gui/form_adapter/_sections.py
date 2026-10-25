@@ -43,8 +43,8 @@ from ._modules import (
     module_specs,
 )
 from ._seeds import persistent_input
+from ._types import annotated_type, branch_metadata, union_type
 from ._types import members as _members
-from ._types import union_type
 from .fixed_elements import FixedElementsForm
 from .log_points import (
     ExplicitIntegerPoints,
@@ -110,7 +110,9 @@ def _sweep_model(node: FormNode, info: FieldInfo) -> object:
         _sweep_branch(base, node, decimals, meta.unit if meta is not None else None)
         for base in (LinRange, CenterSpan, StepRange, StepCenter)
     )
-    annotation = Annotated[union_type(branches), Field(discriminator="kind")]
+    annotation: object = Annotated[union_type(branches), Field(discriminator="kind")]
+    for item in branch_metadata(info.annotation, SweepCfg):
+        annotation = annotated_type(annotation, item)
     return (
         union_type((annotation, type(None)))
         if type(None) in _members(info.annotation)

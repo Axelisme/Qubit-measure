@@ -38,5 +38,5 @@ from .modules import (
     WaveformCfg,
     WaveformCfgFactory,
 )
-from .sweep import SweepCfg
+from .sweep import GainSweep, SweepCfg
 from .utils import sweep2param

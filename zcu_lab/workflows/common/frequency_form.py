@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Literal, Self
 
 from pydantic import Field, JsonValue, model_validator
+from zcu_tools.cfg_model import Gain
 from zcu_tools.gui.form import FormEnv, FormModel, field_error
 
 from zcu_lab.workflows.common.frequency_tracking import FrequencyModel
@@ -54,19 +55,17 @@ class FrequencyTunablesForm(FormModel):
     """
 
     frequency_mode: Literal["two_step", "single"] = "two_step"
-    coarse_gain: float | None = Field(
+    coarse_gain: Gain | None = Field(
         default=None,
         gt=0,
-        le=1,
         description="Coarse probe gain; None uses the probe pulse gain",
     )
     coarse_span_factor: float = Field(
         default=3.0, gt=0, description="Coarse span / span_mhz before widening"
     )
-    fine_gain: float | None = Field(
+    fine_gain: Gain | None = Field(
         default=None,
         gt=0,
-        le=1,
         description="Fine probe gain; None uses half the adaptive gain, capped at half coarse gain",
     )
     fine_span_mhz: float | None = Field(
@@ -113,7 +112,7 @@ class FrequencyTunablesForm(FormModel):
     )
     drive_gain_mode: Literal["adaptive", "fixed"] = "adaptive"
     target_kappa: float = Field(default=6.5, gt=0, description="Target linewidth (MHz)")
-    drive_gain_cap: float = Field(
-        default=1.0, gt=0, le=1, description="Maximum adaptive probe gain"
+    drive_gain_cap: Gain = Field(
+        default=1.0, gt=0, description="Maximum adaptive probe gain"
     )
     physical_recovery_mode: Literal["off", "fail_triggered_fit"] = "fail_triggered_fit"

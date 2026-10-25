@@ -28,14 +28,14 @@ class DualLineCfg(ConfigBase):
         PulseCfg,
         FieldMeta(
             label="F1 drive",
-            description="填入 F1 charge-line pulse：frequency MHz、signed gain normalized、NQZ 與 envelope duration us。先做 F1 frequency 與 amplitude／length Rabi 取得 pulse 參考，高能階 drive 範圍及 CZ pulse slot 仍由操作者確認。",
+            description="填入 F1 charge-line pulse：frequency MHz、signed gain a.u. within [-1, 1]、NQZ 與 envelope duration us。先做 F1 frequency 與 amplitude／length Rabi 取得 pulse 參考，高能階 drive 範圍及 CZ pulse slot 仍由操作者確認。",
         ),
     ]
     f2: Annotated[
         PulseCfg,
         FieldMeta(
             label="F2 drive",
-            description="填入 F2 charge-line pulse：frequency MHz、signed gain normalized、NQZ 與 envelope duration us。先做 F2 frequency 與 amplitude／length Rabi 取得 pulse 參考，高能階 drive 範圍及 CZ pulse slot 仍由操作者確認。",
+            description="填入 F2 charge-line pulse：frequency MHz、signed gain a.u. within [-1, 1]、NQZ 與 envelope duration us。先做 F2 frequency 與 amplitude／length Rabi 取得 pulse 參考，高能階 drive 範圍及 CZ pulse slot 仍由操作者確認。",
         ),
     ]
 

@@ -27,6 +27,7 @@ from zcu_tools.experiment.v2.utils.t1_sampling import (
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     Branch,
+    GainSweep,
     Pulse,
     Readout,
     Reset,
@@ -168,7 +169,7 @@ class T1WithToneSweepCfg(ConfigBase):
             ),
         ),
     ]
-    gain: Annotated[SweepCfg | None, FieldMeta(label="Gain", unit="a.u.")] = None
+    gain: Annotated[GainSweep | None, FieldMeta(label="Gain", unit="a.u.")] = None
     freq: Annotated[SweepCfg | None, FieldMeta(label="Frequency", unit="MHz")] = None
     g_center: Annotated[complex, FieldMeta(label="Ground center")]
     e_center: Annotated[complex, FieldMeta(label="Excited center")]

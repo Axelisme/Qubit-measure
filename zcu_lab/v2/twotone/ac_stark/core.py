@@ -21,6 +21,7 @@ from zcu_tools.experiment.v2.utils.round_zcu import round_zcu_gain, sweep2array
 from zcu_tools.experiment.v2.utils.snr import snr_checker
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
+    GainSweep,
     Join,
     Pulse,
     Readout,
@@ -140,7 +141,7 @@ class AcStarkCfg(ConfigBase):
     stark_pulse1: Annotated[Pulse.Cfg, FieldMeta(label="Stark resonator tone")]
     stark_pulse2: Annotated[Pulse.Cfg, FieldMeta(label="Qubit spectroscopy probe")]
     readout: Readout.Cfg
-    gain: Annotated[SweepCfg, FieldMeta(label="Stark gain", unit="a.u.")]
+    gain: Annotated[GainSweep, FieldMeta(label="Stark gain", unit="a.u.")]
     freq: Annotated[SweepCfg, FieldMeta(label="Probe frequency", unit="MHz")]
     earlystop_snr: Annotated[float | None, FieldMeta(label="Early-stop SNR")] = None
 
@@ -384,7 +385,7 @@ class AcStarkRamseyCfg(ConfigBase):
     stark_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Stark resonator tone")]
     readout: Readout.Cfg
     wait_delay: Annotated[float, FieldMeta(label="Tone settling delay", unit="us")]
-    gain: Annotated[SweepCfg, FieldMeta(label="Stark gain", unit="a.u.")]
+    gain: Annotated[GainSweep, FieldMeta(label="Stark gain", unit="a.u.")]
     length: Annotated[SweepCfg, FieldMeta(label="Ramsey delay", unit="us")]
     detune: Annotated[float, FieldMeta(label="Phase-ramp detune", unit="MHz")] = 0.0
 

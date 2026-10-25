@@ -18,11 +18,11 @@ from zcu_tools.experiment.v2.utils.tracker.moment import MomentTracker
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     Branch,
+    GainSweep,
     Pulse,
     PulseReadout,
     Readout,
     Reset,
-    SweepCfg,
     sweep2param,
 )
 from zcu_tools.utils.process import SmoothingOptions, SmoothMethod, smooth_signal1d
@@ -32,7 +32,7 @@ from zcu_lab.v2.support import live_line
 
 @dataclass(frozen=True)
 class PowerResult:
-    """Normalized readout gains and moment-SNR scores (gain,)."""
+    """readout gains in a.u. within [-1, 1] and moment-SNR scores (gain,)."""
 
     gains: NDArray[np.float64]
     signals: NDArray[np.float64]
@@ -58,7 +58,7 @@ class PowerCfg(ConfigBase):
     reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
     qub_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Qubit pulse")]
     readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
-    gain: Annotated[SweepCfg, FieldMeta(label="Readout gain", unit="a.u.")]
+    gain: Annotated[GainSweep, FieldMeta(label="Readout gain", unit="a.u.")]
     skew_penalty: Annotated[float, FieldMeta(label="Skew penalty", decimals=3)] = Field(
         default=0.0, ge=0.0
     )
@@ -102,12 +102,12 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
 
         At each gain, apply the optional reset, omit or apply qub_pulse,
         then read out. Configure qub_pulse for the intended excitation.
-        Return normalized gains and moment-based SNR shaped (Ngain,),
+        Return gains in a.u. within [-1, 1] and moment-based SNR shaped (Ngain,),
         optionally reduced by skew_penalty for distorted IQ distributions.
         This score is not assignment fidelity. acquire_kwargs is forwarded
         to acquisition.
         """
-        # Quantize normalized readout gain on the pulse generator.
+        # Quantize readout gain in a.u. within [-1, 1] on the pulse generator.
         soc, soccfg = context.soc, context.soccfg
         cfg = deepcopy(cfg)
 
@@ -176,7 +176,7 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
 
         options controls smoothing and penalty_ratio. Maximize
         SNR * exp(-gain * penalty_ratio); zero penalty selects pure SNR.
-        NaN scores become zero before smoothing. Return normalized best_gain
+        NaN scores become zero before smoothing. Return best_gain in a.u. within [-1, 1]
         and publish the unpenalized SNR curve as fit. source.cfg may be None.
         """
         result = source.result

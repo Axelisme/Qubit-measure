@@ -16,10 +16,11 @@ from zcu_lab.v2.twotone.rabi.amp_rabi.core import (
 
 @dataclass(frozen=True)
 class MuxAmpRabiFit:
-    """Original tone index, normalized pi/pi2 gains and one-sigma errors.
+    """Original tone index, pi/pi2 DAC gains in a.u. and one-sigma errors.
 
     quality describes the undamped cosine fit with the single-qubit owner's
-    zero-gain phase choice. Gains and errors are normalized generator gains.
+    zero-gain phase choice. Gains are DAC full-scale fractions in a.u., within
+    [-1, 1]. Errors use the same a.u. scale.
     """
 
     index: int

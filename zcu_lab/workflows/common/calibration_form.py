@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Annotated, Literal, Self
 
 from pydantic import Field, model_validator
+from zcu_tools.cfg_model import Gain
 from zcu_tools.gui.form import Display, field_error
 
 from zcu_lab.workflows.common.calibration import CalibrationTunables
@@ -22,10 +23,10 @@ class CalibrationTunablesForm(FrequencyTunablesForm):
     """
 
     qf_reps: Annotated[int, Display(label="Spectroscopy averages")] = Field(
-        default=100, ge=1, description="Spectroscopy averages"
+        default=1000, ge=1, description="Spectroscopy averages"
     )
     qf_rounds: Annotated[int, Display(label="Spectroscopy rounds")] = Field(
-        default=1, ge=1, description="Spectroscopy averaging rounds"
+        default=10, ge=1, description="Spectroscopy averaging rounds"
     )
     qf_acquire_retry: int = Field(
         default=3, ge=0, description="Retries after a transient acquisition failure"
@@ -36,10 +37,10 @@ class CalibrationTunablesForm(FrequencyTunablesForm):
         description="Completed-round trace SNR threshold; None disables early stop",
     )
     rabi_reps: Annotated[int, Display(label="Rabi averages")] = Field(
-        default=100, ge=1, description="Rabi averages"
+        default=1000, ge=1, description="Rabi averages"
     )
     rabi_rounds: Annotated[int, Display(label="Rabi rounds")] = Field(
-        default=1, ge=1, description="Rabi averaging rounds"
+        default=10, ge=1, description="Rabi averaging rounds"
     )
     rabi_acquire_retry: int = Field(
         default=3, ge=0, description="Retries after a transient acquisition failure"
@@ -50,10 +51,10 @@ class CalibrationTunablesForm(FrequencyTunablesForm):
         description="Completed-round trace SNR threshold; None disables early stop",
     )
     ro_reps: Annotated[int, Display(label="Readout averages")] = Field(
-        default=100, ge=1, description="Readout averages"
+        default=1000, ge=1, description="Readout averages"
     )
     ro_rounds: Annotated[int, Display(label="Readout rounds")] = Field(
-        default=1, ge=1, description="Readout averaging rounds"
+        default=10, ge=1, description="Readout averaging rounds"
     )
     ro_acquire_retry: int = Field(
         default=3, ge=0, description="Retries after a transient acquisition failure"
@@ -112,16 +113,14 @@ class CalibrationTunablesForm(FrequencyTunablesForm):
         default="len_then_amp",
         description="Length then gain, gain only, or length only",
     )
-    amp_gain_max: Annotated[float, Display(label="Amp-only gain upper limit")] = Field(
-        default=1.0, gt=0, le=1, description="Amp-only gain sweep upper limit"
+    amp_gain_max: Annotated[Gain, Display(label="Amp-only gain upper limit")] = Field(
+        default=1.0, gt=0, description="Amp-only gain sweep upper limit"
     )
-    amp_gain_half_width: Annotated[float, Display(label="Amp-only gain half width")] = (
-        Field(
-            default=0.2, gt=0, le=1, description="Amp-only tracking window half width"
-        )
+    amp_gain_half_width: Annotated[Gain, Display(label="Amp-only gain half width")] = (
+        Field(default=0.2, gt=0, description="Amp-only tracking window half width")
     )
-    amp_min_gain: Annotated[float, Display(label="Minimum trusted Rabi gain")] = Field(
-        default=1e-4, gt=0, le=1, description="Minimum trusted pi and pi/2 gain"
+    amp_min_gain: Annotated[Gain, Display(label="Minimum trusted Rabi gain")] = Field(
+        default=1e-4, gt=0, description="Minimum trusted pi and pi/2 gain"
     )
     amp_max_window_fraction: Annotated[
         float, Display(label="Amp pi / sweep stop limit")
@@ -180,8 +179,8 @@ class CalibrationTunablesForm(FrequencyTunablesForm):
     ro_freq_half_width_mhz: Annotated[
         float, Display(label="Readout frequency half width", unit="MHz")
     ] = Field(default=1.0, gt=0, description="Readout frequency half width")
-    ro_gain_half_width: Annotated[float, Display(label="Readout gain half width")] = (
-        Field(default=0.1, gt=0, le=1, description="Readout gain half width")
+    ro_gain_half_width: Annotated[Gain, Display(label="Readout gain half width")] = (
+        Field(default=0.1, gt=0, description="Readout gain half width")
     )
     ro_skew_penalty: Annotated[float, Display(label="Readout skew penalty")] = Field(
         default=0.0, ge=0, description="Readout skew penalty"

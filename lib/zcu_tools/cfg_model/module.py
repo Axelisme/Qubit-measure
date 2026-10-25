@@ -10,6 +10,7 @@ from qick.asm_v2 import QickParam
 
 from .base import ConfigBase
 from .field_meta import FieldMeta
+from .gain import Gain, GainParam
 from .waveform import WaveformCfg, WaveformSpec
 
 
@@ -32,7 +33,8 @@ class _PulseFields[WaveformT](_ModuleFields):
     """Pulse waveform and scalar knobs shared by persistent and materialized schemas.
 
     type is pulse. ch is the explicit generator channel; nqz is Nyquist zone 1
-    or 2. freq and mixer_freq are MHz, phase is degrees, gain is normalized,
+    or 2. freq and mixer_freq are MHz, phase is degrees,
+    gain is the DAC full-scale fraction in a.u., within [-1, 1],
     and pre_delay/post_delay are µs. freq, phase, gain and delays accept QICK
     sweeps. Optional mixer_freq configures mixing; None leaves it unspecified.
     Readout-channel matching is supplied at runtime, not persisted.
@@ -49,9 +51,7 @@ class _PulseFields[WaveformT](_ModuleFields):
         float | QickParam,
         FieldMeta(label="Phase", unit="deg", decimals=2, group="Advanced"),
     ] = 0.0
-    gain: Annotated[
-        float | QickParam, FieldMeta(label="Gain", unit="normalized", decimals=4)
-    ]
+    gain: Annotated[GainParam, FieldMeta(label="Gain", unit="a.u.", decimals=4)]
     pre_delay: Annotated[
         float | QickParam,
         FieldMeta(label="Pre-delay", unit="us", decimals=3, group="Advanced"),
@@ -92,7 +92,8 @@ class _PulseReadoutFields[WaveformT](_ModuleFields):
 
     gen_ch selects the generator and ro_ch the ADC. nqz is Nyquist zone 1 or 2.
     freq is the shared generator/ADC frequency in MHz; mixer_freq is an optional
-    generator mixer frequency in MHz. gain is normalized and phase is degrees.
+    generator mixer frequency in MHz. Gain is the DAC full-scale fraction in
+    a.u., within [-1, 1]. Phase is degrees.
     pre_delay/post_delay are generator delays in us; ro_length is the integration
     window in us and trig_offset is the trigger delay in us. Frequency, gain,
     phase and timing accept QICK sweeps in materialized cfgs, not persistent Specs.
@@ -105,9 +106,7 @@ class _PulseReadoutFields[WaveformT](_ModuleFields):
     freq: Annotated[
         float | QickParam, FieldMeta(label="Frequency", unit="MHz", decimals=3)
     ]
-    gain: Annotated[
-        float | QickParam, FieldMeta(label="Gain", unit="normalized", decimals=4)
-    ]
+    gain: Annotated[GainParam, FieldMeta(label="Gain", unit="a.u.", decimals=4)]
     phase: Annotated[
         float | QickParam,
         FieldMeta(label="Phase", unit="deg", decimals=2, group="Advanced"),
@@ -157,7 +156,7 @@ class MuxReadoutTone(ConfigBase):
     """One ordered, numeric DAC tone and its explicit logical ADC channel.
 
     freq is finite absolute MHz (negative values are permitted), gain is finite
-    normalized amplitude in [-1, 1], phase is any finite degree value, and ro_ch
+    DAC full-scale fraction in a.u., within [-1, 1], phase is any finite degree value, and ro_ch
     is a nonnegative integer, never bool. Equal frequencies are permitted. Tone
     order, not frequency or channel order, defines identity. label is optional
     display text, defaults to the empty string, and may repeat; it is not a
@@ -168,9 +167,7 @@ class MuxReadoutTone(ConfigBase):
     model_config = ConfigDict(strict=True, allow_inf_nan=False)
 
     freq: Annotated[float, FieldMeta(label="Frequency", unit="MHz")]
-    gain: Annotated[
-        float, Field(ge=-1.0, le=1.0), FieldMeta(label="Gain", unit="normalized")
-    ]
+    gain: Annotated[Gain, FieldMeta(label="Gain", unit="a.u.")]
     phase: Annotated[float, FieldMeta(label="Phase", unit="deg")] = 0.0
     ro_ch: Annotated[int, Field(ge=0)]
     label: str = ""

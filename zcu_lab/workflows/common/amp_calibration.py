@@ -42,7 +42,7 @@ if TYPE_CHECKING:
 class AmpFit:
     """Unfiltered pi/pi2 gain estimates with marginal error and projected curves.
 
-    Gains/error use native normalized gain units. observed/fitted align with
+    Gains use DAC full-scale fractions in a.u. within [-1, 1]; errors use a.u. observed/fitted align with
     result.amps. quality contains normalized residual diagnostics.
     """
 

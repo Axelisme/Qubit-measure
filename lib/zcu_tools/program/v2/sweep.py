@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import math
+from typing import Annotated, Protocol
 
-from pydantic import model_validator
+from pydantic import AfterValidator, model_validator
 
-from zcu_tools.cfg_model import ConfigBase
+from zcu_tools.cfg_model import ConfigBase, validate_gain
 
 
 class SweepCfg(ConfigBase):
@@ -43,3 +44,24 @@ class SweepCfg(ConfigBase):
             )
 
         return self
+
+
+class _SweepEndpoints(Protocol):
+    # Both native sweeps and editable coordinate representations expose endpoints.
+    @property
+    def start(self) -> float: ...
+
+    @property
+    def stop(self) -> float: ...
+
+
+def _validate_gain_sweep[T: _SweepEndpoints](value: T) -> T:
+    validate_gain(value.start)
+    validate_gain(value.stop)
+    if isinstance(value, SweepCfg):
+        validate_gain(value.start + value.step * (value.expts - 1))
+    return value
+
+
+GainSweep = Annotated[SweepCfg, AfterValidator(_validate_gain_sweep)]
+"""DAC sweep in a.u.; native endpoints and every actual point stay in [-1, 1]."""

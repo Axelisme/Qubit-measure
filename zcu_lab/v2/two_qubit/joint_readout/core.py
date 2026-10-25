@@ -102,21 +102,21 @@ class JointReadoutCfg(ConfigBase):
         Pulse.Cfg,
         FieldMeta(
             label="F1 Xπ",
-            description="填入 F1 x180 slot，先做 amplitude／length Rabi。frequency MHz、gain normalized、duration us。",
+            description="填入 F1 x180 slot，先做 amplitude／length Rabi。frequency MHz、gain a.u. within [-1, 1]、duration us。",
         ),
     ]
     x180_f2: Annotated[
         Pulse.Cfg,
         FieldMeta(
             label="F2 Xπ",
-            description="填入 F2 x180 slot，先做 amplitude／length Rabi。frequency MHz、gain normalized、duration us。",
+            description="填入 F2 x180 slot，先做 amplitude／length Rabi。frequency MHz、gain a.u. within [-1, 1]、duration us。",
         ),
     ]
     readout: Annotated[
         MuxReadout.Cfg,
         FieldMeta(
             label="Mux readout",
-            description="填入 full-group mux readout slot。先用 lookback 取得 timing，再做 mux onetone，確認 frequency MHz、gain normalized 與 timing us。",
+            description="填入 full-group mux readout slot。先用 lookback 取得 timing，再做 mux onetone，確認 frequency MHz、gain a.u. within [-1, 1] 與 timing us。",
         ),
     ]
     roles: JointRoles

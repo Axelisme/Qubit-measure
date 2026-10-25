@@ -10,6 +10,8 @@ GUI／MCP 只支援 `coherence_fluxdep`、`mist_fluxdep`、`overnight`。不提�
 
 ## Coherence
 
+各 workflow 的量測與共用校準預設 `reps=1000`、`rounds=10`。Early-stop SNR 留空（None）關閉，不改變每輪的 reps。各 stage 保留原有門檻，Spectroscopy 50、LenRabi／AmpRabi 30、Coherence lifetime 20；overnight 與 overnight_mux 預設 None。Readout 優化與 MIST 沒有此欄位，完整執行 10 輪。Singleshot shots 不受此預設影響。
+
 `CoherencePlan` 固定 flux setpoints、明填的 flux_unit、resolved drive/readout modules、delay points 與 historical RunSnapshot。
 `measure_t1`、`measure_t2ramsey`、`measure_t2echo` 預設 true，至少開啟一項。全關在 acquisition 前拒絕。
 每點先設 flux，再依 frequency、Rabi、readout、可選 singleshot GE、T1、Ramsey、Echo 順序執行。

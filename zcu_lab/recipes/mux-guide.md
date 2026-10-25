@@ -261,7 +261,7 @@ The three pulse-scan recipes also accept:
 | `sweeps` | One `{start, stop}` for every original tone, including nonparticipants | Keep ranges |
 | `n` | A positive integer point count shared by all tones | Keep Expts |
 
-Frequency endpoints use MHz, amplitude endpoints normalized gain and length
+Frequency endpoints use MHz, amplitude endpoints gain in a.u. within [-1, 1] and length
 endpoints us. Each sweep accepts only start and stop; use top-level `n` for the
 shared count. A list length mismatch returns `needs_parameters` naming missing
 or extra original positions. Null `sweeps` clears every range's bounds; null

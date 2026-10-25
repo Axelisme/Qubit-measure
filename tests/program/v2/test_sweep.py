@@ -1,5 +1,6 @@
 import pytest
-from zcu_tools.program.v2.sweep import SweepCfg
+from pydantic import TypeAdapter, ValidationError
+from zcu_tools.program.v2.sweep import GainSweep, SweepCfg
 
 
 def test_sweep_consistency_expts_zero():
@@ -41,3 +42,26 @@ def test_sweep_consistency_valid():
     assert cfg_one.stop == 2.5
     assert cfg_one.expts == 1
     assert cfg_one.step == 0.0
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        dict(start=-1.1, stop=0.9, step=1.0, expts=3),
+        dict(start=-0.9, stop=1.1, step=1.0, expts=3),
+        dict(start=-1.0, stop=1.0, step=1.00000000025, expts=3),
+    ],
+)
+def test_gain_sweep_checks_requested_and_actual_range(raw):
+    # SweepCfg permits a small consistency tolerance, but gain may not exceed 1.
+    sweep = SweepCfg.model_validate(raw)
+    with pytest.raises(ValidationError, match=r"Gain must be within \[-1, 1\]"):
+        TypeAdapter(GainSweep).validate_python(sweep)
+
+
+@pytest.mark.parametrize("start,stop,step", [(-1.0, 1.0, 1.0), (1.0, -1.0, -1.0)])
+def test_gain_sweep_accepts_signed_boundaries(start, stop, step):
+    sweep = TypeAdapter(GainSweep).validate_python(
+        dict(start=start, stop=stop, step=step, expts=3)
+    )
+    assert (sweep.start, sweep.stop) == (start, stop)

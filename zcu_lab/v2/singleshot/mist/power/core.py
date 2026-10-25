@@ -20,7 +20,7 @@ from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import Pulse, Readout, Reset, SweepCfg, sweep2param
+from zcu_tools.program.v2 import GainSweep, Pulse, Readout, Reset, sweep2param
 
 from zcu_lab.v2.support import live_line
 
@@ -59,7 +59,7 @@ class PowerCfg(ConfigBase):
     init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init Pulse")] = None
     probe_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Probe Pulse")]
     readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
-    gain: Annotated[SweepCfg, FieldMeta(label="Probe gain", unit="a.u.")]
+    gain: Annotated[GainSweep, FieldMeta(label="Probe gain", unit="a.u.")]
     g_center: Annotated[complex, FieldMeta(label="Ground center")]
     e_center: Annotated[complex, FieldMeta(label="Excited center")]
     radius: Annotated[float, FieldMeta(label="Classification radius")]

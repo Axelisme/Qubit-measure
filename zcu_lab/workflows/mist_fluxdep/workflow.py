@@ -10,6 +10,7 @@ import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+from zcu_tools.cfg_model import Gain
 from zcu_tools.experiment.metadata import RunSnapshot
 from zcu_tools.experiment.scope import Scope
 from zcu_tools.experiment.workflows import (
@@ -79,8 +80,8 @@ class MISTPlan(BaseModel):
     mist_pulse: PulseCfg
     reset: ResetCfg | None
     readout: PulseReadoutCfg
-    gain_start: float
-    gain_stop: float
+    gain_start: Gain
+    gain_stop: Gain
     gain_points: int = Field(ge=2)
     seed_flux: float | None = Field(
         default=None,
@@ -115,7 +116,7 @@ class MISTTunables(BaseModel):
 
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
     cal: CalibrationTunables = Field(default_factory=CalibrationTunables)
-    reps: int = Field(default=100, ge=1)
+    reps: int = Field(default=1000, ge=1)
     rounds: int = Field(default=10, ge=1)
     acquire_retry: int = Field(
         default=3, ge=0, description="Retries after a transient acquisition failure"

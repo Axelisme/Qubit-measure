@@ -95,8 +95,8 @@ class OvernightTunables(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
     uniform: bool = Field(default=True, description="Uniform (linear) sweep for T1")
-    reps: int = Field(default=100, ge=1, description="Native averages per acquisition")
-    rounds: int = Field(default=2, ge=1, description="Native acquisition rounds")
+    reps: int = Field(default=1000, ge=1, description="Native averages per acquisition")
+    rounds: int = Field(default=10, ge=1, description="Native acquisition rounds")
     t1_guess_us: float = Field(
         default=20.0, gt=0, description="Fixed T1 timing guess, microseconds"
     )

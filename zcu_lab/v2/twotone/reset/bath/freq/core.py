@@ -14,7 +14,15 @@ from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import BathReset, Pulse, Readout, Reset, SweepCfg, sweep2param
+from zcu_tools.program.v2 import (
+    BathReset,
+    GainSweep,
+    Pulse,
+    Readout,
+    Reset,
+    SweepCfg,
+    sweep2param,
+)
 from zcu_tools.utils.process import SmoothingOptions, SmoothMethod, smooth_signal_nd
 
 from zcu_lab.v2.support import live_heatmap
@@ -69,7 +77,7 @@ class FreqGainCfg(ConfigBase):
     init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init pulse")] = None
     tested_reset: Annotated[BathReset.Cfg, FieldMeta(label="Tested reset")]
     readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
-    gain: Annotated[SweepCfg, FieldMeta(label="Gain", unit="a.u.")]
+    gain: Annotated[GainSweep, FieldMeta(label="Gain", unit="a.u.")]
     freq: Annotated[SweepCfg, FieldMeta(label="Freq", unit="MHz")]
 
 
@@ -109,8 +117,8 @@ class FreqGainExp(Experiment[FreqGainResult, FreqGainCfg]):
         tones together, apply the final pi/2 pulse after the cavity tone,
         then read out. Sweep
         its phase by 0, 90, 180 and 270 degrees relative to the configured
-        phase. Return mean complex IQ with shape (4, Ngain, Nfreq), normalized
-        gains and frequencies in MHz. Opposite-phase differences probe
+        phase. Return mean complex IQ with shape (4, Ngain, Nfreq),
+        gains in a.u. within [-1, 1] and frequencies in MHz. Opposite-phase differences probe
         transverse contrast, not reset fidelity.
         """
         # Prepare cavity-drive coordinates and four relative tomography phases.
@@ -185,7 +193,7 @@ class FreqGainExp(Experiment[FreqGainResult, FreqGainCfg]):
         """Select cavity gain and frequency from the strongest smoothed contrast.
 
         options controls smoothing along gain and frequency, not phase.
-        Return normalized gain and MHz frequency from the four-phase contrast
+        Return gain in a.u. within [-1, 1] and MHz frequency from the four-phase contrast
         map, and publish it as fit; source.cfg may be None.
         """
         result = source.result

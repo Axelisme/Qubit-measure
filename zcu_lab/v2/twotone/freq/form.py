@@ -51,7 +51,7 @@ def make_form(ctx: FormContext) -> Form[FreqCfg]:
             ),
             **{
                 ("qub_pulse", "module", "gain"): FieldMeta(
-                    description="未校準的起始值，來源：固定常數。qub_probe Template gain 0.1 normalized; operator confirmation required",
+                    description="未校準的起始值，來源：固定常數。qub_probe Template gain 0.1 a.u. within [-1, 1]; operator confirmation required",
                     calibration="uncalibrated",
                 )
             },

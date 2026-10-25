@@ -11,7 +11,7 @@ from zcu_tools.experiment import AxesSpec, Experiment
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
-from zcu_tools.program.v2 import Pulse, Readout, Reset, SweepCfg, sweep2param
+from zcu_tools.program.v2 import GainSweep, Pulse, Readout, Reset, SweepCfg, sweep2param
 from zcu_tools.utils.process import minus_background
 
 from zcu_lab.v2.support import live_heatmap_with_line
@@ -51,7 +51,7 @@ class PowerCfg(ConfigBase):
     init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init Pulse")] = None
     qub_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Probe Pulse")]
     readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
-    gain: Annotated[SweepCfg, FieldMeta(label="Gain", unit="a.u.")]
+    gain: Annotated[GainSweep, FieldMeta(label="Gain", unit="a.u.")]
     freq: Annotated[SweepCfg, FieldMeta(label="Freq", unit="MHz")]
 
 

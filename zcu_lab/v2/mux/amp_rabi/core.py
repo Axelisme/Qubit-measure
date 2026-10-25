@@ -35,7 +35,7 @@ sweep. If no round completes, all signals remain NaN.
 Amplitude scan and analysis
 --------------------------
 MuxAmpRabiCfg.reset is optional; MuxAmpRabiCfg.readout is the full mux readout.
-Sweep bounds are normalized gains within [-1, 1]. prepare_amplitude_scan copies
+Sweep bounds are DAC full-scale fractions in a.u., within [-1, 1]. prepare_amplitude_scan copies
 cfg and builds independently rounded scalar gain grids. run publishes the
 compiled integer-step gain grids instead.
 
@@ -43,7 +43,7 @@ Analysis uses the single-qubit undamped Rabi fitter and zero-gain phase policy.
 Options.skip removes leading zipped points before finite-IQ filtering. Each
 curve needs six remaining points. Each original index returns MuxAmpRabiFit or
 MuxFitFailure with a reason, and a fit_i figure. Pi/pi2 gains and errors use
-normalized gain units. FitQuality describes the numerical fit; a finite fit
+DAC full-scale fractions in a.u. within [-1, 1]. FitQuality describes the numerical fit; a finite fit
 alone does not establish calibration quality.
 
 Native persistence retains the full cfg, original indices, independent gain axes
@@ -134,7 +134,7 @@ class MuxAmpRabiCfg(ConfigBase):
     participants is a nonempty, duplicate-free list of original tone indices; its order
     determines execution/data rows (Q3/Q1 maps to original indices 2/0).
     Selected drives are required/validated on independent
-    generators distinct from readout. Independent normalized-gain ranges stay
+    generators distinct from readout. Independent DAC gain ranges in a.u. within [-1, 1] stay
     in [-1,1]; expts is the positive hardware point count shared by all tones.
     Explicit reps/rounds are positive; initial_delay/relax_delay are finite
     nonnegative us. No capture, bindings or writeback destinations are stored.
@@ -245,7 +245,7 @@ class MuxAmpRabiExp(Experiment[MuxSweepResult, MuxAmpRabiCfg]):
         waits for the longest drive at that point, without end-alignment padding.
         context supplies the board, plots and stop signal. Coordinates and IQ have
         shape (participants, points), in participant order, with actual hardware-
-        quantized normalized gains. All gains advance in one shared hardware loop.
+        quantized gains in a.u. within [-1, 1]. All gains advance in one shared hardware loop.
         Each completed round updates the full sweep's live plots. Cancellation
         keeps completed-round averages, or NaN if no round completes.
         Call context.scope.stop.raise_if_error() before reporting success;

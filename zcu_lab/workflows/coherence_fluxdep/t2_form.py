@@ -19,7 +19,7 @@ class T2EchoTunablesForm(FormModel):
     """
 
     reps: Annotated[int, Display(label="Averages")] = Field(
-        default=100, ge=1, description="T2 averages"
+        default=1000, ge=1, description="T2 averages"
     )
     rounds: Annotated[int, Display(label="Rounds")] = Field(
         default=10, ge=1, description="T2 averaging rounds"
