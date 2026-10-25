@@ -14,7 +14,14 @@ from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import Join, Pulse, Readout, Reset, SweepCfg, sweep2param
+from zcu_tools.program.v2 import (
+    GainSweep,
+    Join,
+    Pulse,
+    Readout,
+    Reset,
+    sweep2param,
+)
 from zcu_tools.utils.process import rotate2real
 
 from zcu_lab.v2.support import live_heatmap
@@ -53,8 +60,8 @@ class MistCfg(ConfigBase):
     flux_pulse: Pulse.Cfg
     mist_pulse: Pulse.Cfg
     readout: Readout.Cfg
-    flux_gain: SweepCfg
-    mist_gain: SweepCfg
+    flux_gain: Annotated[GainSweep, FieldMeta(label="flux gain", unit="a.u.")]
+    mist_gain: Annotated[GainSweep, FieldMeta(label="mist gain", unit="a.u.")]
 
 
 @dataclass(frozen=True)

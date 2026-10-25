@@ -16,7 +16,7 @@ from zcu_tools.analysis.fitting import (
     fit_decay,
     fit_dual_decay,
 )
-from zcu_tools.cfg_model import ConfigBase, FieldMeta
+from zcu_tools.cfg_model import ConfigBase, FieldMeta, Gain
 from zcu_tools.experiment import AxesSpec, Experiment, config
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
@@ -29,6 +29,7 @@ from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     Delay,
     DelayAuto,
+    GainSweep,
     LoadValue,
     Pulse,
     Readout,
@@ -467,7 +468,7 @@ class ScanT1WithToneCfg(ConfigBase):
     pi_pulse: Pulse.Cfg
     test_pulse: Pulse.Cfg
     readout: Readout.Cfg
-    gain: SweepCfg | list[float]
+    gain: Annotated[GainSweep | list[Gain], FieldMeta(label="Gain", unit="a.u.")]
     length: SweepCfg
 
 

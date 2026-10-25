@@ -104,7 +104,7 @@ def make_form(ctx: FormContext) -> Form[LookbackCfg]:
     ).with_seed_metadata(
         {
             ("readout", "module", "gain"): FieldMeta(
-                description="未校準的起始值，來源：固定常數。lookback Template gain 1.0 normalized; operator confirmation required",
+                description="未校準的起始值，來源：固定常數。lookback Template gain 1.0 a.u. within [-1, 1]; operator confirmation required",
                 calibration="uncalibrated",
             ),
             ("readout", "module", "freq"): FieldMeta(

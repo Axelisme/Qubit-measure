@@ -27,14 +27,22 @@ from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.experiment.v2.utils.snr import snr_as_signal
 from zcu_tools.experiment.v2.utils.tracker.moment import MomentTracker
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import Branch, Pulse, PulseReadout, Readout, Reset, SweepCfg
+from zcu_tools.program.v2 import (
+    Branch,
+    GainSweep,
+    Pulse,
+    PulseReadout,
+    Readout,
+    Reset,
+    SweepCfg,
+)
 
 from zcu_lab.v2.support import live_line
 
 
 @dataclass(frozen=True)
 class AutoOptResult:
-    """Candidate rows (MHz frequency, normalized gain, RF length in us) and SNR."""
+    """Candidate rows (MHz frequency, gain in a.u. within [-1, 1], RF length in us) and SNR."""
 
     params: NDArray[np.float64]
     signals: NDArray[np.float64]
@@ -123,7 +131,7 @@ class AutoOptCfg(ConfigBase):
         FieldMeta(label="Readout freq", unit="MHz"),
     ]
     gain: Annotated[
-        SweepCfg,
+        GainSweep,
         FieldMeta(label="Readout gain", unit="a.u."),
     ]
     length: Annotated[
@@ -281,7 +289,7 @@ class AutoOptExp(Experiment[AutoOptResult, AutoOptCfg]):
         Feed moment-based SNR, optionally reduced by skew_penalty for distorted
         IQ distributions, back to the optimizer. Sweep min/max values define
         continuous bounds, not a Cartesian grid; num_points is the budget.
-        Return params shaped (Npoint, 3) in MHz, normalized gain and us, plus
+        Return params shaped (Npoint, 3) in MHz, gain in a.u. within [-1, 1] and us, plus
         SNR shaped (Npoint,). Unvisited rows remain NaN. SNR is not assignment
         fidelity. acquire_kwargs is forwarded to acquisition.
         """
@@ -408,7 +416,7 @@ class AutoOptExp(Experiment[AutoOptResult, AutoOptCfg]):
     ) -> AutoOptAnalysis:
         """Return the measured candidate with the largest non-NaN SNR.
 
-        Report best_freq in MHz, normalized best_gain and RF best_length in
+        Report best_freq in MHz, best_gain in a.u. within [-1, 1] and RF best_length in
         us, and publish fit. This is the best sampled point, not a fitted
         global optimum. An all-NaN score array raises ValueError.
         source.cfg may be None.

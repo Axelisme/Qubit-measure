@@ -17,7 +17,7 @@ from zcu_tools.experiment.v2.runtime.schedule import (
 )
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.experiment.v2.utils.snr import snr_checker
-from zcu_tools.program.v2 import PulseReadout, Reset, SweepCfg, sweep2param
+from zcu_tools.program.v2 import GainSweep, PulseReadout, Reset, SweepCfg, sweep2param
 from zcu_tools.utils.process import minus_background, rescale
 
 from zcu_lab.v2.support import live_heatmap_with_line
@@ -59,7 +59,7 @@ class PowerDepCfg(ConfigBase):
     ] = 1.0
     reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
     readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
-    gain: Annotated[SweepCfg, FieldMeta(label="Gain", unit="normalized")]
+    gain: Annotated[GainSweep, FieldMeta(label="Gain", unit="a.u.")]
     freq: Annotated[SweepCfg, FieldMeta(label="Frequency", unit="MHz")]
     earlystop_snr: Annotated[
         float | None,

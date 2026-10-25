@@ -35,13 +35,13 @@ Cfg 繼承 `ConfigBase`。Module 與掃描欄位放在頂層，不加 Modules／
 from typing import Annotated
 
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.program.v2 import Pulse, Readout, Reset, SweepCfg
+from zcu_tools.program.v2 import GainSweep, Pulse, Readout, Reset, SweepCfg
 
 class PowerMapCfg(ConfigBase):
     reset: Reset.Cfg | None = None
     qub_pulse: Pulse.Cfg
     readout: Readout.Cfg
-    gain: Annotated[SweepCfg, FieldMeta(unit="normalized")]
+    gain: Annotated[GainSweep, FieldMeta(unit="a.u.")]
     freq: Annotated[SweepCfg, FieldMeta(unit="MHz")]
     reps: int = 1
     rounds: int = 1

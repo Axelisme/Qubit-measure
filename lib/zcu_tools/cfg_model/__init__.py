@@ -8,6 +8,7 @@ from .dependencies import (
 )
 from .field_meta import FieldMeta, get_field_meta
 from .form_nodes import FormNode, Hidden, LogPoints, Range
+from .gain import Gain, GainParam, validate_gain
 from .inputs import CfgInputMap, CfgInputValue
 from .materialization import (
     ModuleCfgFactory,
@@ -69,6 +70,9 @@ __all__ = [
     "Range",
     "LogPoints",
     "ConfigBase",
+    "Gain",
+    "GainParam",
+    "validate_gain",
     "Expr",
     "Slot",
     "Template",

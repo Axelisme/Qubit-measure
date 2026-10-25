@@ -18,6 +18,20 @@ def members(annotation: object) -> tuple[object, ...]:
     return (annotation,)
 
 
+def branch_metadata(annotation: object, member: type) -> tuple[object, ...]:
+    """Read metadata on one type branch, including annotations inside nullable unions."""
+    if isinstance(annotation, TypeAliasType):
+        return branch_metadata(annotation.__value__, member)
+    args = get_args(annotation)
+    if get_origin(annotation) is Annotated:
+        if member not in members(args[0]):
+            return ()
+        return (*branch_metadata(args[0], member), *args[1:])
+    if get_origin(annotation) in (UnionType, Union):
+        return tuple(item for arg in args for item in branch_metadata(arg, member))
+    return ()
+
+
 def union_type(items: tuple[object, ...]) -> object:
     return items[0] if len(items) == 1 else methodcaller("__getitem__", items)(Union)
 

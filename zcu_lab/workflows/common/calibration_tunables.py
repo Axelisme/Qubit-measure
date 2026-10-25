@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Literal
 
 from pydantic import ConfigDict, Field, model_validator
+from zcu_tools.cfg_model import Gain
 
 from zcu_lab.workflows.common.frequency_tracking import FrequencyTunables
 
@@ -83,14 +84,14 @@ class CalibrationTunables(FrequencyTunables):
         default="len_then_amp",
         description="Length then gain, gain only, or length only",
     )
-    amp_gain_max: float = Field(
-        default=1.0, gt=0, le=1, description="Amp-only gain sweep upper limit"
+    amp_gain_max: Gain = Field(
+        default=1.0, gt=0, description="Amp-only gain sweep upper limit"
     )
-    amp_gain_half_width: float = Field(
-        default=0.2, gt=0, le=1, description="Amp-only tracking window half width"
+    amp_gain_half_width: Gain = Field(
+        default=0.2, gt=0, description="Amp-only tracking window half width"
     )
-    amp_min_gain: float = Field(
-        default=1e-4, gt=0, le=1, description="Minimum trusted pi and pi/2 gain"
+    amp_min_gain: Gain = Field(
+        default=1e-4, gt=0, description="Minimum trusted pi and pi/2 gain"
     )
     amp_max_window_fraction: float = Field(
         default=0.9,
@@ -142,8 +143,8 @@ class CalibrationTunables(FrequencyTunables):
     ro_freq_half_width_mhz: float = Field(
         default=1.0, gt=0, description="Readout frequency search half width in MHz"
     )
-    ro_gain_half_width: float = Field(
-        default=0.1, gt=0, le=1, description="Readout gain search half width"
+    ro_gain_half_width: Gain = Field(
+        default=0.1, gt=0, description="Readout gain search half width"
     )
     ro_skew_penalty: float = Field(
         default=0.0, ge=0, description="Readout IQ skewness score penalty"

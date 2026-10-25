@@ -6,7 +6,7 @@ from collections.abc import Mapping
 from typing import TYPE_CHECKING, Annotated, Literal
 
 from pydantic import Field, JsonValue, model_validator
-from zcu_tools.cfg_model import ModuleCfgFactory, ModuleSpec
+from zcu_tools.cfg_model import Gain, ModuleCfgFactory, ModuleSpec
 from zcu_tools.experiment.metadata import RunSnapshot
 from zcu_tools.gui.form import (
     Display,
@@ -107,10 +107,10 @@ class MISTPlanForm(FormModel):
     measure_mode: Annotated[
         Literal["excited", "ground", "both"], Display(label="Preparation")
     ] = Field(default="excited", description="Excited pi, ground without pi, or both")
-    gain_start: Annotated[float, Display(label="Gain start", unit="a.u.")] = Field(
+    gain_start: Annotated[Gain, Display(label="Gain start", unit="a.u.")] = Field(
         description="Fixed sweep start gain (a.u.)"
     )
-    gain_stop: Annotated[float, Display(label="Gain stop", unit="a.u.")] = Field(
+    gain_stop: Annotated[Gain, Display(label="Gain stop", unit="a.u.")] = Field(
         description="Fixed sweep stop gain (a.u.)"
     )
     gain_points: Annotated[int, Display(label="Gain points")] = Field(

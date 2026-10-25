@@ -103,7 +103,7 @@ async def mux_len_rabi(
     Overrides run last. Only participant drive/sweep settings are required;
     readout identities remain required for every tone.
     n sets shared Expts; sweeps covers all original tones with start/stop only.
-    Frequency uses MHz, length us and gain normalized units.
+    Frequency uses MHz, length us and gain in a.u. within [-1, 1].
     Analyze with the supplied decay, fit_phase, then ask before writeback.
     Save raw and completed artifacts after Run, including expected fit failures.
     Operation errors propagate without rolling back earlier edits or saves.

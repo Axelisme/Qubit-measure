@@ -7,7 +7,7 @@ from zcu_tools.gui.form import FormModel
 class ToneRangeInputs(FormModel):
     """One tone's finite start/stop in experiment units, without a point count.
 
-    Frequency uses MHz, gain normalized units and length us. Supply all tones
+    Frequency uses MHz, gain in a.u. within [-1, 1] and length us. Supply all tones
     in original list order. Only start and stop are accepted; n is shared.
     """
 

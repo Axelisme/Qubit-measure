@@ -1,6 +1,6 @@
 # README - program/v2
 
-**Last updated:** 2026-10-24
+**Last updated:** 2026-10-25
 
 **讀者：** framework-dev。V2 program、module、readout 與 acquisition 契約。
 
@@ -14,6 +14,10 @@
 - **Offline acquisition**: `make_mock_soccfg(n_gens, n_readouts)` builds only a compile profile. Explicit environments use `SimulationSoc` and `SimulationBinding`; ordinary acquisition tests may inject a deterministic transport. `ProgramTrace` records emission and does not replace real acquire coverage.
 - **QICK External Types**: `QickParam` runtime objects expose methods/attributes (`is_sweep`, `minval`, `maxval`, `start`, `spans`, `to_array`) that can be missing from third-party stubs. Program code narrows through `program.v2.utils.is_qick_param()` / `QickParamLike` instead of local `cast()` calls, so every use has a runtime guard.
 - **Cfg Contracts**: `AbsModuleCfg` and `AbsWaveformCfg` are abstract contracts. Concrete cfg classes implement both `build()` and `set_param()`; unknown parameter names raise `ValueError` rather than being ignored. [`tests/cfg_model/test_set_param_contract.py`](../../../../tests/cfg_model/test_set_param_contract.py) is the cross-family audit for this fail-fast rule.
+
+## Gain sweeps
+
+`GainSweep` annotates a `SweepCfg` whose start, stop and computed last point must be in [-1, 1]. Values are DAC full-scale fractions in a.u. The same validator runs on Form coordinate representations after their endpoint projection. For example, start=-1, stop=1.1, step=0.5 is accepted when the actual last point is 1.0. Range + Expts retains its stop, so stop=1.1 is rejected. Ordinary `SweepCfg` remains unit-independent.
 
 ## Fixed offline profile
 

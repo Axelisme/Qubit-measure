@@ -184,7 +184,7 @@ NotebookAdapter 執行量測，互動選線由獨立 FluxDepAnalyzer 處理，�
 完整 `tones: list[MuxToneCfg]` 保留 readout 原始順序。Prepare 在 numeric 邊界一次選出 active indices，
 產生各 drive 自己的量化座標 `(K,P)`。只有 Amp Rabi 另建 nominal `point_pulses (P,K)`。
 Inactive tone 不限制掃描點數。
-Freq 的座標是 MHz，Amp Rabi 是 normalized gain。不同範圍按 index zip，不展開 Cartesian product。
+Freq 的座標是 MHz，Amp Rabi 是 gain in a.u. within [-1, 1]。不同範圍按 index zip，不展開 Cartesian product。
 
 兩個 run 各自在函式本體直接組成 reset、`Join(Pulse(...), ...)` 與 active
 `MuxReadout`，不經共用 acquisition helper 選擇或隱藏序列。

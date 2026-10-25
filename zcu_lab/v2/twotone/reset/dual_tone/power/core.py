@@ -14,10 +14,10 @@ from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
+    GainSweep,
     Pulse,
     Readout,
     Reset,
-    SweepCfg,
     TwoPulseReset,
     sweep2param,
 )
@@ -28,7 +28,7 @@ from zcu_lab.v2.support import live_heatmap
 
 @dataclass(frozen=True)
 class PowerResult:
-    """Normalized gain axes and mean complex IQ (gain1, gain2)."""
+    """gain in a.u. within [-1, 1] axes and mean complex IQ (gain1, gain2)."""
 
     gains1: NDArray[np.float64]
     gains2: NDArray[np.float64]
@@ -56,8 +56,8 @@ class PowerCfg(ConfigBase):
     init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init pulse")] = None
     tested_reset: Annotated[TwoPulseReset.Cfg, FieldMeta(label="Tested reset")]
     readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
-    gain1: Annotated[SweepCfg, FieldMeta(label="Gain1", unit="a.u.")]
-    gain2: Annotated[SweepCfg, FieldMeta(label="Gain2", unit="a.u.")]
+    gain1: Annotated[GainSweep, FieldMeta(label="Gain1", unit="a.u.")]
+    gain2: Annotated[GainSweep, FieldMeta(label="Gain2", unit="a.u.")]
 
 
 @dataclass(frozen=True)
@@ -97,7 +97,7 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
 
         Apply optional reset and initialization, start the two gain-swept
         reset pulses together, then read out after the longer pulse finishes.
-        Return normalized gains and mean complex IQ shaped (Ngain1, Ngain2).
+        Return gains in a.u. within [-1, 1] and mean complex IQ shaped (Ngain1, Ngain2).
         The display uses the minimum-gain corner as background; this contrast
         is not a calibrated reset fidelity.
         """
@@ -173,7 +173,7 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
         options controls smoothing and optional axis names. Use the
         minimum-gain corner as background, then choose a peak or dip per axis
         according to the first corner's contrast relative to the map mean.
-        Return normalized gain1/gain2 and publish fit; source.cfg may be None.
+        Return gain1/gain2 in a.u. within [-1, 1] and publish fit; source.cfg may be None.
         """
         result = source.result
 

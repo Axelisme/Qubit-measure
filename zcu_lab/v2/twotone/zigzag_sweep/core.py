@@ -15,6 +15,7 @@ from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
+    GainSweep,
     LoadValue,
     Pulse,
     Readout,
@@ -66,7 +67,7 @@ class ZigZagScanCfg(ConfigBase):
     X90_pulse: Annotated[Pulse.Cfg, FieldMeta(label="X90 Pulse")]
     X180_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="X180 Pulse")] = None
     readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
-    gain: Annotated[SweepCfg | None, FieldMeta(label="Gain", unit="a.u.")] = None
+    gain: Annotated[GainSweep | None, FieldMeta(label="Gain", unit="a.u.")] = None
     freq: Annotated[SweepCfg | None, FieldMeta(label="Freq", unit="MHz")] = None
     n_times: Annotated[
         int,

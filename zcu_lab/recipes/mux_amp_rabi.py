@@ -59,13 +59,15 @@ class MuxAmpRabiToneReport(MuxToneReport):
     """
 
     pi_gain: float | None = Field(
-        default=None, description="Fitted pi gain in normalized generator units."
+        default=None,
+        description="Fitted pi gain as a DAC full-scale fraction in a.u., within [-1, 1].",
     )
     pi_gain_err: float | None = Field(
         default=None, description="One-sigma pi gain uncertainty."
     )
     pi2_gain: float | None = Field(
-        default=None, description="Fitted pi/2 gain in normalized generator units."
+        default=None,
+        description="Fitted pi/2 gain as a DAC full-scale fraction in a.u., within [-1, 1].",
     )
     pi2_gain_err: float | None = Field(
         default=None, description="One-sigma pi/2 gain uncertainty."
@@ -93,7 +95,7 @@ async def mux_amp_rabi(
     Overrides run last. Only participant drive/sweep settings are required;
     readout identities remain required for every tone.
     n sets shared Expts; sweeps covers all original tones with start/stop only.
-    Frequency uses MHz, length us and gain normalized units.
+    Frequency uses MHz, length us and gain in a.u. within [-1, 1].
     Analyze with the supplied skip, then ask before writeback.
     Save raw and completed artifacts after Run, including expected fit failures.
     Operation errors propagate without rolling back earlier edits or saves.

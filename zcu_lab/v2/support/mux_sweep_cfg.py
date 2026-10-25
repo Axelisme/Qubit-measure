@@ -42,7 +42,7 @@ class MuxAcquisition(Protocol):
 class ToneRangeCfg(ConfigBase):
     """Finite sweep endpoints; units are determined by the experiment.
 
-    start and stop use MHz, normalized gain or us according to the leaf.
+    start and stop use MHz, gain in a.u. within [-1, 1] or us according to the leaf.
     The experiment supplies the shared point count, not individual tones.
     """
 
@@ -59,7 +59,7 @@ class MuxDriveToneCfg(ConfigBase):
 
     name is its nonempty capture-generated qubit name; full-list admission
     rejects duplicates. drive is required only when participating. Its MHz
-    frequency, normalized gain, degree phase and us delays must be fixed finite
+    frequency, gain in a.u. within [-1, 1], degree phase and us delays must be fixed finite
     values, with nonnegative delays and unswept waveform duration.
     Native pulse/waveform schemas own shape and clock conversion.
     """
@@ -92,7 +92,7 @@ class MuxToneCfg(MuxDriveToneCfg):
     """One nullable drive and independent pulse-scan range, required when active.
 
     Inherited name and drive identify the original tone. sweep holds finite
-    start/stop in MHz, normalized gain or us for twotone, amp or length scans.
+    start/stop in MHz, gain in a.u. within [-1, 1] or us for twotone, amp or length scans.
     Coherence uses a shared delay instead and does not use this range schema.
     """
 
