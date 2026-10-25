@@ -134,7 +134,7 @@ class SummaryPoint(BaseModel):
 _OPERATION_STAGES: dict[str, StageName] = {
     "frequency": "frequency",
     "Rabi": "Rabi",
-    "amp Rabi": "amp Rabi",
+    "AmpRabi": "amp Rabi",
     "readout": "readout",
     "singleshot GE": "singleshot",
     "T1": "T1",

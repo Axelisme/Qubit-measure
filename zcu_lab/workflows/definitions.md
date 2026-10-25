@@ -38,10 +38,26 @@ Requested detune 為 ratio/length_step；公開 acquisition result 保留原生�
 Echo 的 detune_ratio 預設 0.1，零選純 decay，非零選 fringe；requested detune 同樣是 ratio/length_step。
 兩者仍以原有 fringe／whole-trace decay 作主模型，拒絕超過兩倍最大 delay 或 mean absolute error 超過 0.1 倍 fit peak-to-peak 的值。
 T1 保留原有 relative error 與 normalized residual RMS 門檻。
-Pi2 使用 Length-Rabi 的 phase-aware fitted duration，不取 pi duration 除以二；waveform 與 gain 保留選定值。
+Pi2 使用所選 Rabi 模式的 fitted pulse，不取 pi duration 或 gain 除以二。Len 模式使用 phase-aware fitted duration 與相同 gain。Amp 模式使用相同固定長度與獨立 fitted pi/2 gain。
 `coherence_fluxdep.t1`、`coherence_fluxdep.t2` 提供 native cfg 科學 helper。其純資料 plan/point carrier 仍有既有 conversion caller，不代表 standalone workflow 入口。
 
 ## 獨立校準與 point
+
+共用 calibration 的 `rabi_mode` 預設 `len_then_amp`，也可選 `amp_only` 或 `len_only`。
+
+| 模式 | 掃描與下游 pulse |
+| --- | --- |
+| `len_then_amp` | 先接受 LenRabi，再固定其 π 長度掃 gain，範圍 0 到 min\(1, 2.5 × 本次 Len gain\)。下游 π 與 π/2 用該長度及 Amp 各自 fitted gain。Amp 未接受時，本點 Rabi 不接受。 |
+| `amp_only` | 不跑 LenRabi。固定 `target_pi_length_us`，未填時取 min(host seed π, rabi_min_stop_us / rabi_stop_factor)。首次掃 0 到 `amp_gain_max`，之後以上次 accepted Amp π gain 為中心掃 ±`amp_gain_half_width`，限於 0 到上限。 |
+| `len_only` | 保留 Length-Rabi 的 gain 回饋、長度掃描及 fitted π/π2 duration。 |
+
+Amp 共用 `max_rabi_rel_err`、`max_fit_residual` 與 `rabi_max_mean_residual_ratio`。π gain 至少為 `amp_min_gain`，且不超過 `amp_max_window_fraction × 實際掃描上限`。
+預設最小 gain 為 0.0001，窗比例 0.9，amp-only 上限 1，追蹤半寬 0.2。
+π/2 gain 必須有限且至少為最小 gain，固定長度也須至少 0.03 µs，否則只接受 π，不產生新的 π/π2 pair。
+`RabiResult.amp` 保留 gain fit、誤差、固定長度與 `amp-rabi.h5` 引用，拒絕 fit 也保留診斷。
+Combined 模式的 `file` 仍指 `rabi.h5`，`len_status` 記 Len 的接受狀態。Amp-only 的 `file` 指 `amp-rabi.h5`。
+Amp 的 partial raw 先保存，不擬合、不更新 carry。下游 NOW／LATEST 的規則不變。
+`Calibrated.drive_gain` 與 `pi_length_us` 一起定義 π。`CalibratedPi2.pi2_drive_gain` 與 `pi2_length_us` 一起定義 π/2，gain 為 None 時沿用 π gain。
 
 `calibrate_frequency`、`calibrate_rabi`、`calibrate_readout` 可分別用 await 呼叫。
 `CalibrationInputs` 固定 Rabi/pi drive `qub_pulse`、獨立 spectroscopy `probe_pulse`、pulse-backed readout、point_index 與 captured policy。

@@ -34,14 +34,21 @@ def _calibration_stages(point: CoherencePoint | MISTPoint) -> tuple[StageOutcome
         ("Rabi", point.rabi),
         ("readout", point.readout),
     )
-    return tuple(
-        StageOutcome(
-            stage=name,
-            status=result.status if result else "skipped",
-            reason=result.reason if result else "not reached",
+    outcomes = []
+    for name, result in stages:
+        outcomes.append(
+            StageOutcome(
+                stage=name,
+                status=result.status if result else "skipped",
+                reason=result.reason if result else "not reached",
+            )
         )
-        for name, result in stages
-    )
+        if name == "Rabi" and point.rabi is not None and point.rabi.amp is not None:
+            amp = point.rabi.amp
+            outcomes.append(
+                StageOutcome(stage="amp Rabi", status=amp.status, reason=amp.reason)
+            )
+    return tuple(outcomes)
 
 
 def coherence_summary_point(point: CoherencePoint, plan: CoherencePlan) -> SummaryPoint:
