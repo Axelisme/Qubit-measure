@@ -37,6 +37,7 @@ class FieldView:
     description, unit and placeholder are display text. collapsed is the initial
     fold hint, nullable permits null, and active means the model is enabled.
     can_expand is the core's active child capability, controlling fold titles.
+    section marks a structured field even when its selected option has no children.
     expression permits explicit Expr input. options/selected are the core's
     detached selector list and matching index (None for no list/no match).
     branch identifies the actual child structure independently of selection.
@@ -60,6 +61,7 @@ class FieldView:
     nullable: bool
     active: bool
     can_expand: bool
+    section: bool
     expression: bool
     options: tuple[FormOptionDescription, ...] | None
     selected: int | None
@@ -123,11 +125,9 @@ def present_fields(
         if field.group == "Sweep":
             field = replace(field, collapsed=False)
             if len(axes) == 1 and field.can_expand and not field.nullable:
-                unit = f" ({field.unit})" if field.unit else ""
                 field = replace(
                     field,
-                    title=f"Sweep · {field.title}{unit}",
-                    unit=None,
+                    title=f"Sweep · {field.title}",
                     group=None,
                 )
         result.append(field)
@@ -177,6 +177,7 @@ def project_field(
         nullable=field.nullable,
         active=not field.nullable or (present and current is not None),
         can_expand=field.can_expand,
+        section=field.kind in ("model", "elements") or field.can_expand,
         expression=field.expression and not (field.fixed or field.readonly),
         options=options,
         selected=field.selected,

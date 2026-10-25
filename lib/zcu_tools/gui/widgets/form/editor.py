@@ -62,6 +62,7 @@ def _shape(field: FieldView) -> tuple[object, ...]:
         field.placeholder,
         field.nullable,
         field.can_expand,
+        field.section,
     )
 
 
@@ -199,8 +200,10 @@ class FormEditor[F: FormModel](QWidget):
     form.fold.<path> is the fold title of the model row at <path>: a nested
     model, a tagged union, an option row whose selected option draws fields
     and an enabled nullable model. It is that row's name label, in its
-    level's label column, and folds the row's child rows; a unit follows
-    it, after the row's dropdown or Enabled box if any. Other rows show
+    header at its natural width, and folds the row's child rows. Section
+    dropdowns fill the remaining width independently of scalar labels. Units
+    appear only beside scalar inputs, in an equal-width column per level,
+    with an empty slot for unitless inputs. Other rows show
     their name in normal weight without a mark, and a click on it does
     nothing. form.enabled.<path> is a nullable-model activation QCheckBox
     beside the title. A disabled nullable model draws only its plain label
@@ -210,7 +213,7 @@ class FormEditor[F: FormModel](QWidget):
     block of one Display group of the model level at <path>. It holds the
     level's fields of that group, in declaration order, under a header whose
     fold title form.fold.group.<path>.<group> (form.fold.group.<group> at the
-    root) shows the group name in the level's label column. Rows retain their
+    root) shows the group name at its natural width. Rows retain their
     declaration order, with each group block at its first visible member's
     position. A group whose fields are all hidden has no block.
     While any of its rows (or their children) shows an error, the header
@@ -585,10 +588,6 @@ class FormEditor[F: FormModel](QWidget):
                 # model description is queried until its own body is expanded.
                 self._sync_rows(body, tuple(members), data, preview, redraw=redraw)
         _order_widgets(level, shown)
-        _align_labels(
-            [row.label for row in level.rows.values()]
-            + [block.label for block, _ in level.groups.values()]
-        )
 
     def _sync_rows(
         self,
@@ -650,7 +649,7 @@ class FormEditor[F: FormModel](QWidget):
                 row.display(field, local, editable=self._editing_enabled)
                 row.set_completion_candidates(self._completion_names)
             self._sync_children(level, row, data, preview, redraw=redraw)
-        _align_labels([row.label for row in level.rows.values()])
+        _align_scalar_columns(list(level.rows.values()))
 
     def _remember_initial_fold(
         self, field: FieldView, errors: FormErrors | None
@@ -883,6 +882,16 @@ def _element_text(row: FieldRow, path: FormPath) -> str:
         str(index),
     )
     return ".".join((name, *(str(part) for part in path[len(row.field.path) + 1 :])))
+
+
+def _align_scalar_columns(rows: list[FieldRow]) -> None:
+    """Align scalar label/unit columns, leaving section titles at natural width."""
+    _align_labels([row.label for row in rows if not row.field.section])
+    units = [row.unit for row in rows if row.unit is not None]
+    _align_labels(units)
+    has_units = any(unit.text() for unit in units)
+    for unit in units:
+        unit.setVisible(has_units)
 
 
 def _align_labels(labels: list[QLabel]) -> None:
