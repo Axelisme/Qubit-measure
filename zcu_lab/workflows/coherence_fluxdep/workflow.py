@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Literal
 
@@ -21,7 +21,6 @@ from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2.modules import PulseCfg
 
 from zcu_lab.v2.singleshot.ge.core import GE_Exp
-from zcu_lab.v2.twotone.time_domain.t1.core import T1Cfg
 from zcu_lab.v2.twotone.time_domain.t2echo.core import T2EchoCfg
 from zcu_lab.v2.twotone.time_domain.t2ramsey.core import T2RamseyCfg
 from zcu_lab.workflows.coherence_fluxdep.measurements import (
@@ -29,10 +28,11 @@ from zcu_lab.workflows.coherence_fluxdep.measurements import (
     LifetimeKind,
     LifetimeResult,
     history_guess,
+    lifetime_guess,
     measure_echo,
     measure_ramsey,
-    measure_t1,
 )
+from zcu_lab.workflows.coherence_fluxdep.pulses import calibrated_pulses
 from zcu_lab.workflows.coherence_fluxdep.singleshot import (
     SingleshotInputs,
     SingleshotResult,
@@ -40,7 +40,8 @@ from zcu_lab.workflows.coherence_fluxdep.singleshot import (
     singleshot_cfg,
     singleshot_skip_reason,
 )
-from zcu_lab.workflows.coherence_fluxdep.t1 import T1Plan, T1Tunables, t1_cfg
+from zcu_lab.workflows.coherence_fluxdep.stages.t1 import T1Result, measure_t1
+from zcu_lab.workflows.coherence_fluxdep.t1 import T1Plan, T1Tunables
 from zcu_lab.workflows.coherence_fluxdep.t2 import (
     T2EchoTunables,
     T2RamseyTunables,
@@ -67,6 +68,7 @@ from zcu_lab.workflows.common.calibration import (
 from zcu_lab.workflows.common.devices import set_flux
 from zcu_lab.workflows.common.frequency_tracking import FrequencyModel, FrequencyTracker
 from zcu_lab.workflows.common.saving import save_native
+from zcu_lab.workflows.common.stages import StageEnv
 from zcu_lab.workflows.common.summary import (
     RunSummary,
     SummaryAccumulator,
@@ -160,7 +162,7 @@ class CoherencePoint(BaseModel):
     singleshot: SingleshotResult | None = None
     calibration_sources: dict[str, CalibrationSource] = Field(default_factory=dict)
     readout_source: CalibrationSource | None = None
-    measurements: tuple[LifetimeResult, ...] = ()
+    measurements: tuple[T1Result | LifetimeResult, ...] = ()
     status: Literal["collecting", "completed", "skipped"] = "collecting"
 
 
@@ -254,65 +256,6 @@ def _append(history: LifetimeHistory, flux: float, result: LifetimeResult) -> No
         if result.lifetime_us is None or result.error_us is None:
             raise ValueError("Accepted lifetime requires microseconds and error")
         history.append((flux, result.lifetime_us, result.error_us))
-
-
-@dataclass(frozen=True)
-class T1StageInputs:
-    """Historical save identity, captured T1 gates and optional run report."""
-
-    snapshot: RunSnapshot
-    tun: T1Tunables
-    summary: SummaryAccumulator | None = None
-
-
-async def run_t1_stage(
-    iteration: Scope,
-    cfg: T1Cfg | None,
-    point_record: CoherencePoint,
-    plots: Plots,
-    *,
-    inputs: T1StageInputs,
-) -> bool:
-    """Use cfg from current_pi_calibration, independent of pi2 trust.
-
-    None cfg or nonaccepted Rabi records a NOW dependency skip. Otherwise record
-    this point as the pi producer, save and classify T1, then return whether the
-    iteration was cancelled. cfg contains this point\'s pi frequency and gain.
-    """
-    if (
-        cfg is None
-        or point_record.rabi is None
-        or point_record.rabi.status != "accepted"
-    ):
-        point_record.measurements += (
-            LifetimeResult(
-                "t1",
-                "skipped",
-                "Requires this point's accepted pi pulse (NOW)",
-                None,
-                None,
-                None,
-            ),
-        )
-        return iteration.cancelled
-    point_record.calibration_sources["t1"] = CalibrationSource(
-        need="now",
-        source_index=point_record.index,
-        source_flux=point_record.flux,
-        fallback=False,
-    )
-    t1 = await measure_t1(
-        iteration,
-        cfg,
-        tun=inputs.tun,
-        snapshot=inputs.snapshot,
-        plots=plots,
-        summary=inputs.summary,
-    )
-    point_record.measurements += (t1,)
-    if iteration.cancelled:
-        point_record.status = "skipped"
-    return iteration.cancelled
 
 
 @dataclass(frozen=True)
@@ -604,6 +547,176 @@ async def run_singleshot_stage(
     return point_record.flux
 
 
+@dataclass
+class CoherenceState:
+    """Run-local calibration carry and independent accepted lifetime histories.
+
+    carry retains calibrated scalars/plots between points. Each *_by_flux list
+    holds accepted (flux, lifetime_us, error_us) triples for that lifetime only.
+    last_ge_flux is the last completed raw GE setpoint, including partials, or
+    None before any acquisition. A new workflow run creates a fresh state.
+    """
+
+    carry: CalCarry
+    t1_by_flux: LifetimeHistory = field(default_factory=list)
+    t2ramsey_by_flux: LifetimeHistory = field(default_factory=list)
+    t2echo_by_flux: LifetimeHistory = field(default_factory=list)
+    last_ge_flux: float | None = None
+
+
+async def measure_point(
+    iteration: Scope,
+    stage_env: StageEnv,
+    plan: CoherencePlan,
+    tun: Live[CoherenceTunables],
+    point_record: CoherencePoint,
+    state: CoherenceState,
+) -> None:
+    """Calibrate one flux point, collect optional GE, then T1, Ramsey and Echo.
+
+    Fill point_record in measurement order; update state only with accepted
+    lifetimes or completed GE. Missing current pi skips all enabled lifetimes;
+    missing pi2 skips only T2. These dependency skips still complete the point.
+    Cancellation returns with status=skipped. Read live tunables before stages.
+    Caller owns the single finally commit and summary/figure updates. Unexpected
+    errors propagate with already collected results intact.
+    """
+    index, flux = point_record.index, point_record.flux
+    # Set flux, locate frequency, calibrate pulses and refresh readout.
+    await run_calibration_stages(
+        iteration,
+        plan,
+        tun,
+        stage_env.plots,
+        point_record,
+        CalibrationStageHistory(state.carry, state.t1_by_flux, stage_env.summary),
+    )
+    # Every pulse consumer requires current Rabi; only T2 needs pi2.
+    now_cal = current_pi_calibration(point_record.rabi, state.carry)
+    cal = current_point_calibration(point_record.rabi, state.carry)
+    point_record.readout_source = calibration_source(state.carry.readout_source, index)
+    # Optionally collect raw GE after readout, before any lifetime.
+    if plan.measure_singleshot:
+        state.last_ge_flux = await run_singleshot_stage(
+            iteration,
+            plan,
+            tun.current.singleshot,
+            point_record,
+            SingleshotInputs(
+                now_cal,
+                state.last_ge_flux,
+                tun.current.t1.relax_factor
+                * history_guess(tun.current.t1.guess_us, state.t1_by_flux),
+            ),
+            summary=stage_env.summary,
+        )
+    if iteration.cancelled:
+        point_record.status = "skipped"
+        return
+    pulses = calibrated_pulses(plan, now_cal)
+    if pulses is None:
+        # All later measurements drive the qubit and need this point's pi.
+        point_record.measurements += dependency_skips(plan)
+        point_record.status = "completed"
+        return
+    # T1 needs current pi, not pi2 or a prior pair.
+    if plan.measure_t1:
+        point_record.calibration_sources["t1"] = CalibrationSource(
+            need="now", source_index=index, source_flux=flux, fallback=False
+        )
+        t1_result = await measure_t1(
+            iteration,
+            stage_env,
+            pulses,
+            tun.current.t1,
+            points=plan.points,
+            guess_us=lifetime_guess(tun.current.t1.guess_us, state.t1_by_flux),
+        )
+        point_record.measurements += (t1_result,)
+        # Accepted T1 values guide the next point's scan window and relax delay.
+        if t1_result.status == "accepted":
+            # The stage guarantees both scalars on acceptance.
+            assert t1_result.lifetime_us is not None
+            assert t1_result.error_us is not None
+            state.t1_by_flux.append((flux, t1_result.lifetime_us, t1_result.error_us))
+        if iteration.cancelled:
+            point_record.status = "skipped"
+            return
+    # A current pi without a trusted pi2 still permits T1, but not T2.
+    if cal is None:
+        point_record.measurements += dependency_skips(plan, include_t1=False)
+        point_record.status = "completed"
+        return
+    # Prefer current accepted T1; failed/disabled T1 uses its EWMA/seed.
+    t1_estimate = next(
+        (
+            item.lifetime_us
+            for item in point_record.measurements
+            if item.kind == "t1"
+            and item.status == "accepted"
+            and item.lifetime_us is not None
+        ),
+        history_guess(tun.current.t1.guess_us, state.t1_by_flux),
+    )
+    # Measure Ramsey dephasing with its own grid and detuning policy.
+    if plan.measure_t2ramsey:
+        skip = await run_ramsey_stage(
+            iteration,
+            t2ramsey_cfg(
+                plan,
+                tun.current.t2ramsey,
+                cal,
+                history_guess(tun.current.t2ramsey.guess_us, state.t2ramsey_by_flux),
+                t1_estimate_us=t1_estimate,
+            ),
+            point_record,
+            stage_env.plots,
+            inputs=T2StageInputs(
+                snapshot=plan.snapshot,
+                source=CalibrationSource(
+                    need="now",
+                    source_index=index,
+                    source_flux=flux,
+                    fallback=False,
+                ),
+                tun=tun.current.t2ramsey,
+                summary=stage_env.summary,
+            ),
+        )
+        _append(state.t2ramsey_by_flux, flux, point_record.measurements[-1])
+        if skip:
+            return
+    # Measure echo coherence with fitted pi/2 pulses and its own grid.
+    if plan.measure_t2echo:
+        skip = await run_echo_stage(
+            iteration,
+            t2echo_cfg(
+                plan,
+                tun.current.t2echo,
+                cal,
+                history_guess(tun.current.t2echo.guess_us, state.t2echo_by_flux),
+                t1_estimate_us=t1_estimate,
+            ),
+            point_record,
+            stage_env.plots,
+            inputs=T2StageInputs(
+                snapshot=plan.snapshot,
+                source=CalibrationSource(
+                    need="now",
+                    source_index=index,
+                    source_flux=flux,
+                    fallback=False,
+                ),
+                tun=tun.current.t2echo,
+                summary=stage_env.summary,
+            ),
+        )
+        _append(state.t2echo_by_flux, flux, point_record.measurements[-1])
+        if skip:
+            return
+    point_record.status = "completed"
+
+
 @workflow(
     "coherence_fluxdep", "Calibrate and measure independent lifetimes versus flux."
 )
@@ -629,20 +742,19 @@ async def coherence_fluxdep(
     history from the previous run using the saved_run reader.
     """
     summary = SummaryAccumulator(len(plan.fluxes), plan.flux_unit)
-    carry = CalCarry(
-        env.context,
-        seed_flux=plan.seed_flux,
-        frequency_tracker=FrequencyTracker(plan.predictor.make_predictor()),
+    stage_env = StageEnv(plots=env.plots, snapshot=plan.snapshot, summary=summary)
+    state = CoherenceState(
+        carry=CalCarry(
+            env.context,
+            seed_flux=plan.seed_flux,
+            frequency_tracker=FrequencyTracker(plan.predictor.make_predictor()),
+        )
     )
-    last_ge_flux: float | None = None
-    t1_by_flux: LifetimeHistory = []
-    t2ramsey_by_flux: LifetimeHistory = []
-    t2echo_by_flux: LifetimeHistory = []
     directory: Path | None = None
     summaries: tuple[tuple[LifetimeKind, LifetimeHistory, bool], ...] = (
-        ("t1", t1_by_flux, plan.measure_t1),
-        ("t2ramsey", t2ramsey_by_flux, plan.measure_t2ramsey),
-        ("t2echo", t2echo_by_flux, plan.measure_t2echo),
+        ("t1", state.t1_by_flux, plan.measure_t1),
+        ("t2ramsey", state.t2ramsey_by_flux, plan.measure_t2ramsey),
+        ("t2echo", state.t2echo_by_flux, plan.measure_t2echo),
     )
     for index, (flux, iteration) in enumerate(
         zip(plan.fluxes, env.iterations(), strict=False)
@@ -651,133 +763,9 @@ async def coherence_fluxdep(
         try:
             env.pbar("flux points", total=len(plan.fluxes)).set_progress(index)
             draw_summaries(env.plots, summaries, committed_points=index)
-            # Set flux, locate frequency, calibrate pulses and refresh readout.
-            await run_calibration_stages(
-                iteration,
-                plan,
-                tun,
-                env.plots,
-                point_record,
-                CalibrationStageHistory(carry, t1_by_flux, summary),
-            )
-            # Every pulse consumer requires current Rabi; only T2 needs pi2.
-            now_cal = current_pi_calibration(point_record.rabi, carry)
-            cal = current_point_calibration(point_record.rabi, carry)
-            point_record.readout_source = calibration_source(
-                carry.readout_source, index
-            )
-            # Optionally collect raw GE after readout, before any lifetime.
-            if plan.measure_singleshot:
-                last_ge_flux = await run_singleshot_stage(
-                    iteration,
-                    plan,
-                    tun.current.singleshot,
-                    point_record,
-                    SingleshotInputs(
-                        now_cal,
-                        last_ge_flux,
-                        tun.current.t1.relax_factor
-                        * history_guess(tun.current.t1.guess_us, t1_by_flux),
-                    ),
-                    summary=summary,
-                )
-            if iteration.cancelled:
-                point_record.status = "skipped"
-                continue
-            # T1 needs current pi, not pi2 or a prior pair.
-            if plan.measure_t1:
-                skip = await run_t1_stage(
-                    iteration,
-                    t1_cfg(
-                        plan,
-                        tun.current.t1,
-                        now_cal,
-                        history_guess(tun.current.t1.guess_us, t1_by_flux),
-                    )
-                    if now_cal is not None
-                    else None,
-                    point_record,
-                    env.plots,
-                    inputs=T1StageInputs(plan.snapshot, tun.current.t1, summary),
-                )
-                _append(t1_by_flux, flux, point_record.measurements[-1])
-                if skip:
-                    continue
-            # Missing current pi/pi2 skips only T2; T1 needs only current pi.
-            if cal is None:
-                point_record.measurements += dependency_skips(plan, include_t1=False)
-            else:
-                # Prefer current accepted T1; failed/disabled T1 uses its EWMA/seed.
-                t1_estimate = next(
-                    (
-                        item.lifetime_us
-                        for item in point_record.measurements
-                        if item.kind == "t1"
-                        and item.status == "accepted"
-                        and item.lifetime_us is not None
-                    ),
-                    history_guess(tun.current.t1.guess_us, t1_by_flux),
-                )
-                # Measure Ramsey dephasing with its own grid and detuning policy.
-                if plan.measure_t2ramsey:
-                    skip = await run_ramsey_stage(
-                        iteration,
-                        t2ramsey_cfg(
-                            plan,
-                            tun.current.t2ramsey,
-                            cal,
-                            history_guess(
-                                tun.current.t2ramsey.guess_us, t2ramsey_by_flux
-                            ),
-                            t1_estimate_us=t1_estimate,
-                        ),
-                        point_record,
-                        env.plots,
-                        inputs=T2StageInputs(
-                            snapshot=plan.snapshot,
-                            source=CalibrationSource(
-                                need="now",
-                                source_index=index,
-                                source_flux=flux,
-                                fallback=False,
-                            ),
-                            tun=tun.current.t2ramsey,
-                            summary=summary,
-                        ),
-                    )
-                    _append(t2ramsey_by_flux, flux, point_record.measurements[-1])
-                    if skip:
-                        continue
-                # Measure echo coherence with fitted pi/2 pulses and its own grid.
-                if plan.measure_t2echo:
-                    skip = await run_echo_stage(
-                        iteration,
-                        t2echo_cfg(
-                            plan,
-                            tun.current.t2echo,
-                            cal,
-                            history_guess(tun.current.t2echo.guess_us, t2echo_by_flux),
-                            t1_estimate_us=t1_estimate,
-                        ),
-                        point_record,
-                        env.plots,
-                        inputs=T2StageInputs(
-                            snapshot=plan.snapshot,
-                            source=CalibrationSource(
-                                need="now",
-                                source_index=index,
-                                source_flux=flux,
-                                fallback=False,
-                            ),
-                            tun=tun.current.t2echo,
-                            summary=summary,
-                        ),
-                    )
-                    _append(t2echo_by_flux, flux, point_record.measurements[-1])
-                    if skip:
-                        continue
-            point_record.status = "completed"
-            directory = iteration.dir
+            await measure_point(iteration, stage_env, plan, tun, point_record, state)
+            if point_record.status == "completed":
+                directory = iteration.dir
         finally:
             iteration.commit(point_record)
             summary.points.append(coherence_summary_point(point_record, plan))

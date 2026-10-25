@@ -1,4 +1,4 @@
-"""Native T1 flux-dependence plan, state and complete cfg generation.
+"""Native T1 flux-dependence plan, settings and saved point data.
 
 The workflow owns generation, calibration policy and accepted scalar history.
 Engine owns copied inputs, cancellation and record commits. The workflow owns
@@ -7,21 +7,18 @@ native filenames and saving.
 
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from zcu_tools.experiment.metadata import RunSnapshot
-from zcu_tools.program.v2 import SweepCfg
 from zcu_tools.program.v2.modules import PulseCfg, PulseReadoutCfg
 
-from zcu_lab.v2.twotone.time_domain.t1.core import T1Cfg
 from zcu_lab.workflows.coherence_fluxdep.calibration import (
     CalibrationFailed,
     CalibrationFiles,
 )
-from zcu_lab.workflows.common.calibration import Calibrated, apply_readout_calibration
+from zcu_lab.workflows.common.calibration import Calibrated
 
 
 class T1Plan(BaseModel):
@@ -141,63 +138,6 @@ class T1Tunables(BaseModel):
         elif not self.sweep_start_us < self.sweep_stop_min_us <= self.max_length_us:
             raise ValueError("Auto T1 requires start < stop minimum <= max length")
         return self
-
-
-def t1_cfg(plan: T1Plan, tun: T1Tunables, cal: Calibrated, lifetime_us: float) -> T1Cfg:
-    """Build a detached native T1 cfg with linear or exponential delay sampling.
-
-    lifetime_us is the positive finite lifetime guess in microseconds;
-    invalid values raise ValueError. Auto stop clamps sweep_factor*lifetime_us
-    between sweep_stop_min_us and max_length_us. Auto relax floors
-    relax_factor*lifetime_us at relax_min_us. Fixed mode uses sweep_stop_us or
-    relax_delay_us unchanged. Both grids start at sweep_start_us with plan.points
-    samples. reps/rounds and uniform come from tun.
-    Pi drive uses plan.qub_pulse waveform and cal's acquisition gain, frequency
-    and duration. None drive_gain retains the template gain. Readout uses cal's
-    frequency/gain on plan.readout routing.
-    Native initial_delay/dev defaults remain owned by the native cfg model;
-    no reset or extra module role is selected. Flux is set by the workflow,
-    never patched into a cfg device mapping.
-    Inputs are unchanged; native cfg construction/set_param errors propagate.
-    """
-    if not math.isfinite(lifetime_us) or lifetime_us <= 0:
-        raise ValueError("T1 lifetime guess must be positive and finite")
-    pi_pulse = plan.qub_pulse.model_copy(deep=True)
-    pi_pulse.set_param("freq", cal.f01_mhz)
-    pi_pulse.set_param("length", cal.pi_length_us)
-    if cal.drive_gain is not None:
-        pi_pulse.set_param("gain", cal.drive_gain)
-    readout = plan.readout.model_copy(deep=True)
-    apply_readout_calibration(readout, cal)
-    stop = (
-        min(
-            tun.max_length_us,
-            max(tun.sweep_stop_min_us, tun.sweep_factor * lifetime_us),
-        )
-        if tun.sweep_mode == "auto"
-        else tun.sweep_stop_us
-    )
-    relax = (
-        max(tun.relax_min_us, tun.relax_factor * lifetime_us)
-        if tun.relax_mode == "auto"
-        else tun.relax_delay_us
-    )
-    return T1Cfg(
-        reps=tun.reps,
-        rounds=tun.rounds,
-        acquire_retry=tun.acquire_retry,
-        earlystop_snr=tun.earlystop_snr,
-        relax_delay=relax,
-        uniform=tun.uniform,
-        pi_pulse=pi_pulse,
-        readout=readout,
-        length=SweepCfg(
-            start=tun.sweep_start_us,
-            stop=stop,
-            expts=plan.points,
-            step=(stop - tun.sweep_start_us) / (plan.points - 1),
-        ),
-    )
 
 
 @dataclass(frozen=True)
