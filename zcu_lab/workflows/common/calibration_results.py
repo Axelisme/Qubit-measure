@@ -33,6 +33,23 @@ class FrequencyScan:
 
 
 @dataclass(frozen=True)
+class FrequencyCandidateAttempt:
+    """One coarse candidate and the result of its fine confirmation.
+
+    coarse_file identifies the saved survey; peak is its sampled candidate.
+    coarse_center_mhz is the local fitted center, None on coarse fit failure.
+    fine_file is the saved confirmation, None if no fine acquisition completed.
+    rejection_reason is None only when the fine fit passed all frequency gates.
+    """
+
+    coarse_file: str | None
+    peak: PeakCandidate
+    coarse_center_mhz: float | None
+    fine_file: str | None
+    rejection_reason: str | None
+
+
+@dataclass(frozen=True)
 class FrequencyResult:
     """One point's spectroscopy outcome and immutable relative native references.
 
@@ -50,6 +67,9 @@ class FrequencyResult:
     recovery is this point's physical refit attempt, or None; an accepted candidate
     first affects the next point. scans records stage, filename, gain, span and
     all candidates for every coarse/fine/single attempt, including failures.
+    candidate_attempts records each tried coarse peak, its local fitted center,
+    fine filename and rejection reason, including coarse fit failures. None
+    rejection_reason means its fine confirmation passed all frequency gates.
     These diagnostics contain no live predictor.
     """
 
@@ -62,6 +82,7 @@ class FrequencyResult:
     predictor_model: FluxoniumModelSnapshot | None = None
     recovery: RecoveryAttempt | None = None
     scans: tuple[FrequencyScan, ...] = ()
+    candidate_attempts: tuple[FrequencyCandidateAttempt, ...] = ()
 
 
 @dataclass(frozen=True)

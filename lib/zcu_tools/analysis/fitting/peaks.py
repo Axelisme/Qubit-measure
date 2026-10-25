@@ -14,6 +14,7 @@ class PeakCandidate:
     center/width use the input axis units; height/prominence use signal units.
     truncated means a half-prominence crossing lies outside the measured window.
     Its width is only the observable portion, not an extrapolated full width.
+    snr is (height - signal median) / estimated noise sigma, not prominence/sigma.
     """
 
     center: float
@@ -21,6 +22,7 @@ class PeakCandidate:
     width: float
     prominence: float
     truncated: bool = False
+    snr: float = 0.0
 
 
 def detect_peaks(
@@ -29,12 +31,22 @@ def detect_peaks(
     *,
     min_prominence: float = 0.2,
     min_distance: float = 0.0,
+    min_snr: float = 5.0,
+    min_width_samples: float = 3.0,
 ) -> list[PeakCandidate]:
     """Find positive peaks in matching finite float64 vectors (at least 2 points).
 
     detune must be strictly monotonic; uneven/descending sampling is supported.
     min_prominence is in [0, 1], relative to signal peak-to-peak. min_distance is
-    finite, nonnegative and uses axis units. Keep the more prominent candidate
+    finite, nonnegative and uses axis units. min_snr (default 5) requires both
+    prominence and height above the signal median to exceed min_snr * sigma.
+    Estimate sigma from first-difference MAD / (0.67448975 * sqrt(2)), with a
+    machine-epsilon * signal-range floor (at least float tiny) for zero MAD.
+    min_width_samples (default 3) is the observable half-prominence width in
+    fractional sample intervals, including on uneven axes. Both noise knobs
+    must be finite and nonnegative; zero disables the corresponding gate.
+    These statistical gates cannot exclude every possible noise realization.
+    Keep the more prominent candidate
     when centers are closer than min_distance. Return descending prominence,
     with ascending center breaking ties. Flat signals return an empty list.
     Endpoints use the measured minimum as background; clipped half-prominence
@@ -42,12 +54,25 @@ def detect_peaks(
     ValueError. Negative-going signals must be inverted by the caller.
     """
     _validate_inputs(detune, signal, min_prominence, min_distance)
+    if not np.isfinite(min_snr) or min_snr < 0:
+        raise ValueError("min_snr must be finite and nonnegative")
+    if not np.isfinite(min_width_samples) or min_width_samples < 0:
+        raise ValueError("min_width_samples must be finite and nonnegative")
+    differences = np.diff(signal)
+    sigma = float(np.median(np.abs(differences - np.median(differences)))) / (
+        0.6744897501960817 * np.sqrt(2)
+    )
+    # Keep SNR finite for noiseless/quantized traces, including a zero MAD.
+    sigma = max(
+        sigma, np.finfo(float).eps * float(np.ptp(signal)), np.finfo(float).tiny
+    )
+    baseline = float(np.median(signal))
     if detune[0] > detune[-1]:
         detune, signal = detune[::-1], signal[::-1]
     # A background sample beyond each edge makes clipped peaks observable.
     padded = np.pad(signal, 1, constant_values=float(np.min(signal)))
     indices, properties = find_peaks(
-        padded, prominence=min_prominence * float(np.ptp(signal))
+        padded, prominence=max(min_prominence * float(np.ptp(signal)), min_snr * sigma)
     )
     _, _, left, right = peak_widths(padded, indices, rel_height=0.5)
     samples = np.arange(signal.size)
@@ -61,14 +86,18 @@ def detect_peaks(
             ),
             float(prominence),
             bool(left_ip < 1 or right_ip > signal.size),
+            float((signal[index - 1] - baseline) / sigma),
         )
         for index, left_ip, right_ip, prominence in zip(
             indices, left, right, properties["prominences"], strict=True
         )
+        if min(right_ip, float(signal.size)) - max(left_ip, 1.0) >= min_width_samples
     ]
     selected: list[PeakCandidate] = []
     for peak in sorted(candidates, key=lambda peak: -peak.prominence):
-        if all(abs(peak.center - other.center) >= min_distance for other in selected):
+        if peak.snr >= min_snr and all(
+            abs(peak.center - other.center) >= min_distance for other in selected
+        ):
             selected.append(peak)
     return selected
 

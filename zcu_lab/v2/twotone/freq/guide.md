@@ -20,6 +20,14 @@ Analysis lists all candidates in `peaks`, ordered by prominence.
 Set `expected_center_mhz` to fit the nearest candidate. Leave it blank to fit the
 most prominent candidate. `min_prominence` defaults to 0.2 of projected signal
 peak-to-peak, and `min_distance_mhz` defaults to zero.
+`min_snr` defaults to 5. Both prominence and height above the signal median
+must reach this multiple of first-difference MAD noise sigma.
+`min_width_samples` defaults to 3 observable half-prominence sample intervals;
+single-sample spikes do not qualify.
+Each candidate's `snr` is height above the median divided by noise sigma,
+not prominence divided by sigma. These are statistical gates, not proof that
+a candidate is a physical transition. Lowering `min_snr` can recover weak lines
+and also admit more noise. See the fitting README for the estimator and limits.
 Analysis fits the selected interval bounded halfway to neighbouring candidates.
 The Lorentzian fit starts from the detected positive peak's center and width.
 This avoids treating a broad peak's local median as background and fitting a dip.

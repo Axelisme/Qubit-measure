@@ -21,7 +21,10 @@ class FreqAnalyzeOptions:
     """Select lor/sinc and a candidate near expected_center_mhz (None: strongest).
 
     min_prominence is relative to projected signal ptp; min_distance_mhz is the
-    minimum candidate separation. plot_fit controls only the fitted overlay.
+    minimum candidate separation. min_snr gates prominence and height above
+    the median in first-difference MAD noise units. min_width_samples gates
+    observable half-prominence width in sample intervals. peaks reports height
+    SNR, not prominence SNR. plot_fit controls only the fitted overlay.
     """
 
     model_type: Annotated[Literal["lor", "sinc"], FieldMeta(label="Model type")] = "lor"
@@ -32,6 +35,12 @@ class FreqAnalyzeOptions:
     min_prominence: Annotated[
         float, FieldMeta(label="Minimum prominence / signal range")
     ] = 0.2
+    min_snr: Annotated[
+        float, FieldMeta(label="Minimum height above median / noise sigma")
+    ] = 5.0
+    min_width_samples: Annotated[
+        float, FieldMeta(label="Minimum half-prominence width", unit="samples")
+    ] = 3.0
     min_distance_mhz: Annotated[
         float, FieldMeta(label="Minimum peak separation", unit="MHz")
     ] = 0.0
@@ -84,6 +93,8 @@ def fit_spectrum(
                 observed,
                 min_prominence=options.min_prominence,
                 min_distance=options.min_distance_mhz,
+                min_snr=options.min_snr,
+                min_width_samples=options.min_width_samples,
             )
         )
     selected = (

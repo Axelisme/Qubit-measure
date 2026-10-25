@@ -95,6 +95,20 @@ class FrequencyTunables(BaseModel):
         default=0.0, ge=0, description="Minimum candidate separation in MHz"
     )
 
+    peak_min_snr: float = Field(
+        default=5.0, ge=0, description="Minimum peak height above median / noise sigma"
+    )
+    peak_min_width_samples: float = Field(
+        default=3.0,
+        ge=0,
+        description="Minimum observable half-prominence width in samples",
+    )
+    max_candidates: int = Field(
+        default=3,
+        ge=1,
+        description="Maximum coarse candidates tried per frequency point",
+    )
+
     detune_center_mhz: float = Field(
         default=0.0, description="Detune window offset (MHz)"
     )
