@@ -50,7 +50,12 @@ Global qubit alias 必須可讀；EMPTY 可開 workflow tab，但來源依 base 
 Defaults 在同一 capture 解析 $qubit.module.x180.waveform.length，以具體路徑 expression 宣告，開表單時算成值；缺值、不可讀或不合法就留 pi_length_us 未填。
 它是 required Rabi-range estimate，供 host seed 使用，不是 fitted pi，也不放進 native CoherencePlan。
 
-`common.calibration_modules.resolve_calibration_modules` 集中 Coherence/MIST 的 drive 與 pulse-backed readout 規則。
+`common.calibration_modules.resolve_calibration_modules` 集中 Coherence/MIST 的 pi drive、獨立 spectroscopy probe 與 pulse-backed readout 規則。
+兩張 plan 表單的 `probe_pulse` 與 `qub_pulse` 並列，使用同一個 drive 家族 ModuleInputField。
+新表單先引用固定 capture 的 `$qubit.pulses.qub_probe`。沒有時，複製 captured `$qubit.module.x180` 成 inline，設 freq 0 MHz、gain 0.1、waveform.length 5 µs，不改 library 或 pi drive。
+缺 x180 時 probe 留空必填，不借 Template 或使用者稍後填入的 `qub_pulse`。既有 draft 不重新種值。
+Frequency stage 保留 probe waveform/長度，頻率由 tracker 掃描設定，線寬自適應 gain 從 probe 的 gain 起跑。Rabi 與下游仍用 `qub_pulse`。
+每次 attempt 的實際 probe gain 照舊存入 `frequency.probe_gains`。
 三個 plan 表單用 `gui.form_adapter.ModuleInputField` 生成 tagged module 欄位，在 `converters(env)` 與 `options(env)` 綁同一份固定 capture，經公開 `to_spec` 取 key 或持久 Spec，再交 captured core/native factories materialize modules 與 assets。Inline 保留全部 module 家族，ref choices 仍依各欄位的原篩選，nullable reset 保 None。科學檢查仍由 workflows 負責。
 Inline module 子表單與 `input_schema` 不含 `desc`，`to_spec` 使用 Spec 預設值。把 library key 複製成 Inline 時，description 捨棄 library 原值、改用預設。Pulse 不保存 `ro_ch`。Flat `PulseReadoutCfg.ro_ch` 是必填 ADC 通道，表單照常提供編輯。
 Pure arb drive 不能改 Length-Rabi duration，回 qub_pulse consuming-field error；flat_top arb ramp 與 arb readout 保留。

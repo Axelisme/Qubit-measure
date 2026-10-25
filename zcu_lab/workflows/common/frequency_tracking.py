@@ -222,7 +222,7 @@ class FrequencyTracker:
         return center
 
     def probe_gain(self, initial_gain: float, tun: FrequencyTunables) -> float:
-        """Return initial/fixed gain, or target linewidth divided by smoothed factor."""
+        """Use the spectroscopy pulse gain initially/in fixed mode, else track linewidth."""
         if tun.drive_gain_mode == "fixed" or self.qfw_factor is None:
             return initial_gain
         return min(tun.drive_gain_cap, tun.target_kappa / self.qfw_factor)

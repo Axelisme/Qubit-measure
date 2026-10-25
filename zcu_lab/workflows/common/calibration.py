@@ -301,7 +301,8 @@ class CalibrationSource(BaseModel):
 class CalibrationInputs:
     """Fixed native routing and captured policy shared by the three experiments.
 
-    qub_pulse/readout are resolved shared drive/pulse-backed readout modules.
+    qub_pulse is the Rabi/downstream pi drive; probe_pulse independently supplies
+    spectroscopy waveform and initial gain. readout is shared pulse-backed readout.
     tun is this invocation's ordinary generation/acceptance/cadence policy.
     The wrapper is frozen; nested modules are copied before applying scalars.
     snapshot is the fixed historical entry/point/role state used by all three
@@ -313,6 +314,7 @@ class CalibrationInputs:
     """
 
     qub_pulse: PulseCfg
+    probe_pulse: PulseCfg
     readout: PulseReadoutCfg
     tun: CalibrationTunables
     snapshot: RunSnapshot
@@ -348,7 +350,7 @@ def _frequency_cfg(
     gain: float,
     widen: float,
 ) -> FreqCfg:
-    drive = inputs.qub_pulse.model_copy(deep=True)
+    drive = inputs.probe_pulse.model_copy(deep=True)
     drive.set_param("gain", gain)
     ro = inputs.readout.model_copy(deep=True)
     apply_readout_calibration(ro, prior)
@@ -441,7 +443,7 @@ async def calibrate_frequency(
     hint = tracker.begin_point(flux)
     predictor_model = tracker.model_snapshot()
     carry.cur_m, carry.m_ratio = tracker.cur_m, tracker.m_ratio
-    gain = tracker.probe_gain(float(inputs.qub_pulse.gain), inputs.tun)
+    gain = tracker.probe_gain(float(inputs.probe_pulse.gain), inputs.tun)
     filenames: list[str] = []
     gains: list[float] = []
     status: StageStatus = "rejected"

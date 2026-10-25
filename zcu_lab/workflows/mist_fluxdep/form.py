@@ -59,7 +59,8 @@ class MISTPlanForm(FormModel):
 
     flux_dev/unit/fluxes are explicit absolute driver coordinates. qub_pulse
     supplies the Length-Rabi/calibrated pi waveform/gain; pi_length_us is its
-    required initial range estimate, not a measured scalar. readout is shared
+    required initial range estimate, not a measured scalar. probe_pulse supplies
+    independent spectroscopy waveform/gain. readout is shared
     pulse-backed calibration readout. reset is a ref/inline native reset or
     None to omit reset; mist_pulse is the required disturbance pulse selection.
     gain_start/stop/points are finite dimensionless sweep parameters, locked
@@ -83,7 +84,10 @@ class MISTPlanForm(FormModel):
         gt=0, description="Initial pi-duration estimate (µs)"
     )
     qub_pulse: Annotated[DriveModuleInput, Display(label="Drive pulse")] = Field(
-        description="Shared spectroscopy/Rabi/pi drive"
+        description="Rabi and calibrated pi drive"
+    )
+    probe_pulse: Annotated[DriveModuleInput, Display(label="Probe pulse")] = Field(
+        description="Independent spectroscopy drive; frequency comes from the tracker"
     )
     readout: Annotated[ReadoutModuleInput, Display(label="Readout")] = Field(
         description="Shared pulse-backed readout"
@@ -128,6 +132,7 @@ class MISTPlanForm(FormModel):
         """Bind each generated field's converter to the host's fixed capture."""
         return {
             ("qub_pulse",): DRIVE_MODULE_FIELD.converter(env),
+            ("probe_pulse",): DRIVE_MODULE_FIELD.converter(env),
             ("readout",): READOUT_MODULE_FIELD.converter(env),
             ("reset",): RESET_MODULE_FIELD.converter(env),
             ("mist_pulse",): MIST_MODULE_FIELD.converter(env),
@@ -135,16 +140,17 @@ class MISTPlanForm(FormModel):
 
     @classmethod
     def options(cls, env: FormEnv) -> Mapping[FormPath, tuple[Option, ...]]:
-        """Declare all four generated module selections, including nullable reset."""
+        """Declare the probe, pi, readout, MIST and nullable reset selections."""
         return {
             ("qub_pulse",): DRIVE_MODULE_FIELD.options(env),
+            ("probe_pulse",): DRIVE_MODULE_FIELD.options(env),
             ("readout",): READOUT_MODULE_FIELD.options(env),
             ("reset",): RESET_MODULE_FIELD.options(env),
             ("mist_pulse",): MIST_MODULE_FIELD.options(env),
         }
 
     def to_cfg(self, env: FormEnv, snapshot: RunSnapshot) -> MISTPlan | FormErrors:
-        """Resolve four fixed native modules, gain grid and historical snapshot.
+        """Resolve five fixed native modules, gain grid and historical snapshot.
 
         env supplies captured library/assets context for ref/inline selections.
         Invalid families/materialization ValueErrors return consuming-field
@@ -153,7 +159,10 @@ class MISTPlanForm(FormModel):
         source/device read, acquisition, fit or threshold creation occurs.
         """
         shared = resolve_calibration_modules(
-            qub_pulse=self.qub_pulse, readout=self.readout, env=env
+            qub_pulse=self.qub_pulse,
+            probe_pulse=self.probe_pulse,
+            readout=self.readout,
+            env=env,
         )
         if isinstance(shared, FormErrors):
             return shared
@@ -195,6 +204,7 @@ class MISTPlanForm(FormModel):
             flux_unit=self.flux_unit,
             fluxes=expand_fluxes(self.fluxes),
             qub_pulse=shared.qub_pulse,
+            probe_pulse=shared.probe_pulse,
             readout=shared.readout,
             reset=reset,
             mist_pulse=mist,

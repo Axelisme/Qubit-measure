@@ -38,7 +38,10 @@ Pi2 使用 Length-Rabi 的 phase-aware fitted duration，不取 pi duration 除�
 ## 獨立校準與 point
 
 `calibrate_frequency`、`calibrate_rabi`、`calibrate_readout` 可分別用 await 呼叫。
-`CalibrationInputs` 固定共用的 drive、pulse-backed readout、point_index 與 captured policy。
+`CalibrationInputs` 固定 Rabi/pi drive `qub_pulse`、獨立 spectroscopy `probe_pulse`、pulse-backed readout、point_index 與 captured policy。
+Coherence 與 MIST 的 plan 分別保存兩個 drive。Frequency cfg 複製 `probe_pulse` 的 waveform/長度，頻率仍由 tracker 掃描設定，gain 從 probe 的 gain 起跑，再依線寬自適應。
+新表單先引用 captured `$qubit.pulses.qub_probe`，沒有則複製 captured x180，設 freq 0 MHz、gain 0.1、長度 5 µs；缺 x180 時保留必填。
+Rabi 與下游仍複製 `qub_pulse`，不受 probe 長度或 gain 影響。Frequency result 的 `probe_gains` 保留每次 attempt 實際用值。
 Helper 收 Scope，需要 workflow 圖時明收 plots: Plots，不另收 env。
 三個 stage 各回 frozen 具名結果，保留 status、reason、accepted scalar 與自己的 immutable native 檔名。
 Frequency 在接受時立即更新 frequency history；Rabi 只在本點 frequency 接受後執行，接受時更新 pi/pi2。

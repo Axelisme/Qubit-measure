@@ -25,8 +25,14 @@ from zcu_tools.gui.form import (
     FormErrors,
     FormPath,
 )
-from zcu_tools.gui.form_adapter import ModuleInput, ModuleInputField, SweepInput
+from zcu_tools.gui.form_adapter import (
+    ModuleInput,
+    ModuleInputField,
+    SweepInput,
+    module_form,
+)
 from zcu_tools.gui.session.context_types import ContextSourceUnavailableError
+from zcu_tools.gui.session.parameters import ModuleSlotError
 from zcu_tools.program.v2.modules import ArbWaveformCfg, PulseCfg, PulseReadoutCfg
 from zcu_tools.program.v2.modules import ModuleCfgFactory as NativeModuleCfgFactory
 from zcu_tools.resources.entry import RoleResolutionError
@@ -51,16 +57,22 @@ class CalibrationModules:
     """Resolved shared native modules for T1, T2 and MIST calibration.
 
     qub_pulse supplies Length-Rabi's variable-duration drive and waveform/gain;
-    pure arb drive is excluded. readout supplies the pulse-backed landscape
-    routing and gain control. Both are detached products of the fixed capture.
+    pure arb drive is excluded. probe_pulse supplies independent spectroscopy
+    waveform and initial gain. readout supplies the pulse-backed landscape
+    routing and gain control. All are detached products of the fixed capture.
     """
 
     qub_pulse: PulseCfg
+    probe_pulse: PulseCfg
     readout: PulseReadoutCfg
 
 
 def resolve_calibration_modules(
-    *, qub_pulse: DriveModuleInput, readout: ReadoutModuleInput, env: FormEnv
+    *,
+    qub_pulse: DriveModuleInput,
+    probe_pulse: DriveModuleInput,
+    readout: ReadoutModuleInput,
+    env: FormEnv,
 ) -> CalibrationModules | FormErrors:
     """Resolve shared ref/inline drive and readout in one captured FormEnv.
 
@@ -68,7 +80,7 @@ def resolve_calibration_modules(
     drive must be a PulseCfg whose length is variable for Length-Rabi (not pure
     arb); flat_top arb ramps remain valid. Readout must be pulse-backed for gain
     scanning; arb readout remains valid. Resolution/materialization ValueErrors
-    return qub_pulse/readout consuming-field FormErrors. Asset I/O errors
+    return qub_pulse/probe_pulse/readout consuming-field FormErrors. Asset I/O errors
     propagate. No live source/device read, acquisition or default module occurs.
     """
     context = env.library.validation_context() if env.library is not None else None
@@ -103,9 +115,51 @@ def resolve_calibration_modules(
         native_readout = native_ro
     except ValueError as exc:
         errors[("readout",)] = str(exc)
-    if drive is None or native_readout is None:
+    probe = _resolve_probe(probe_pulse, env)
+    if isinstance(probe, FormErrors):
+        errors.update(probe.messages)
+    if drive is None or native_readout is None or isinstance(probe, FormErrors):
         return FormErrors(errors)
-    return CalibrationModules(drive, native_readout)
+    return CalibrationModules(drive, probe, native_readout)
+
+
+def _resolve_probe(value: DriveModuleInput, env: FormEnv) -> PulseCfg | FormErrors:
+    context = env.library.validation_context() if env.library is not None else None
+    try:
+        core = ModuleCfgFactory.from_raw(
+            DRIVE_MODULE_FIELD.to_spec(value), context=context
+        )
+        native = NativeModuleCfgFactory.from_core(core, context=context)
+        if not isinstance(native, PulseCfg):
+            raise ValueError("Spectroscopy probe selection must be a pulse")
+        return native
+    except ValueError as exc:
+        return FormErrors({("probe_pulse",): str(exc)})
+
+
+def _probe_default(env: FormEnv) -> JsonValue:
+    if env.parameters is None or env.library is None:
+        return None
+    try:
+        key = env.parameters.resolve_path("$qubit.pulses.qub_probe")
+        if key in env.library.module_keys():
+            return {"kind": "ref", "name": key}
+        pi_key = env.parameters.library_key("$qubit.module.x180")
+    except ModuleSlotError:
+        return None
+    except RoleResolutionError as error:
+        if error.reason not in {"Alias is not bound", "Unknown alias"}:
+            raise
+        return None
+    pulse = env.library.get_module(pi_key)
+    pulse.set_param("freq", 0.0)
+    pulse.set_param("gain", 0.1)
+    pulse.set_param("length", 5.0)
+    spec = PulseSpec.model_validate(pulse.model_dump(mode="json"))
+    return {
+        "kind": "inline",
+        "module": module_form(PulseSpec).input_from_spec(spec, env).data,
+    }
 
 
 def calibration_defaults(
@@ -115,9 +169,13 @@ def calibration_defaults(
 
     data is caller-owned and changed in place. flux_dev is a direct, editable
     name from $qubit.flux_source; absent sources leave it required and blank.
-    pi_length_us uses the captured x180 length when available. No live lookups,
+    pi_length_us uses the captured x180 length when available. probe_pulse
+    references $qubit.pulses.qub_probe when present; otherwise it copies captured
+    x180 with frequency 0 MHz, gain 0.1 and length 5 us. Missing x180 leaves the
+    probe required. The capture is not modified. No live lookups,
     device connections or simulator constants supply missing values.
     """
+    data["probe_pulse"] = _probe_default(env)
     data["predictor"] = FrequencyModelForm.defaults(env)
     data["flux_dev"] = None
     if env.parameters is None:
@@ -152,6 +210,11 @@ def calibration_choices(env: FormEnv) -> Mapping[FormPath, tuple[JsonValue, ...]
         return {}
     return {
         ("qub_pulse", "name"): tuple(
+            key
+            for key in env.library.module_keys()
+            if isinstance(env.library.module_spec(key), PulseSpec)
+        ),
+        ("probe_pulse", "name"): tuple(
             key
             for key in env.library.module_keys()
             if isinstance(env.library.module_spec(key), PulseSpec)

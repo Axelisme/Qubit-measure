@@ -55,7 +55,8 @@ class MISTPlan(BaseModel):
 
     flux_dev names the connected driver and flux_unit is explicit A/V/native.
     fluxes are ordered absolute setpoints. qub_pulse supplies the calibrated
-    pi preparation waveform/gain and native calibration drive. reset is the
+    pi preparation waveform/gain and Length-Rabi drive. probe_pulse supplies
+    independent spectroscopy waveform and initial gain. reset is the
     explicitly selected native reset or None to omit it. mist_pulse supplies
     disturbance routing/waveform/frequency, not a generic missing probe.
     readout supplies pulse-backed calibrated readout routing. gain_start/stop
@@ -76,6 +77,9 @@ class MISTPlan(BaseModel):
     gain_start: float
     gain_stop: float
     gain_points: int = Field(ge=2)
+    probe_pulse: PulseCfg = Field(
+        description="Independent spectroscopy pulse with its own waveform and initial gain"
+    )
     predictor: FrequencyModel = Field(
         description="Captured fluxonium model and device affine map"
     )
@@ -416,6 +420,7 @@ async def mist_fluxdep(
                 continue
             captured = CalibrationInputs(
                 qub_pulse=plan.qub_pulse,
+                probe_pulse=plan.probe_pulse,
                 readout=plan.readout,
                 tun=tun.current.cal,
                 snapshot=plan.snapshot,

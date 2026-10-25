@@ -96,18 +96,20 @@ class CoherenceTunablesForm(FormModel):
 
 
 class CoherencePlanForm(FormModel):
-    """Start-time setpoints and two shared module reference/inline selections.
+    """Start-time setpoints and independent probe, pi drive and readout selections.
 
     flux_dev is the resolved host device name; new input defaults to a literal
     read from $qubit.flux_source in the fixed parameter capture. Required flux_unit declares A, V or native.
     fluxes contain absolute values in that coordinate; no conversion occurs.
     points >= 5 controls runtime T1 delay resolution. qub_pulse selects the
-    shared pulse drive; readout selects a pulse-backed readout because native
-    readout landscape acquisition requires gain control. Both use ModuleInput
+    Rabi/pi drive; probe_pulse selects independent spectroscopy waveform/gain.
+    readout selects a pulse-backed readout because native
+    readout landscape acquisition requires gain control. All use ModuleInput
     wire envelopes and the fixed host library, never a live lookup. pi_length_us
     is the required initial Rabi-range estimate, not an accepted calibration;
     host seed composition must consume it separately from the native plan. Required
-    selections stay unfilled until supplied. Runtime owns every cfg and grid.
+    selections other than the captured probe stay unfilled until supplied.
+    Runtime owns every cfg and grid.
     """
 
     predictor: Annotated[FrequencyModelForm, Display(label="Fluxonium predictor")] = (
@@ -128,7 +130,10 @@ class CoherencePlanForm(FormModel):
     )
     points: int = Field(default=51, ge=5, description="Uniform T1 delay samples")
     qub_pulse: Annotated[DriveModuleInput, Display(label="Drive pulse")] = Field(
-        description="Shared spectroscopy/Rabi/pi drive"
+        description="Rabi and calibrated pi drive"
+    )
+    probe_pulse: Annotated[DriveModuleInput, Display(label="Probe pulse")] = Field(
+        description="Independent spectroscopy drive; frequency comes from the tracker"
     )
     readout: Annotated[ReadoutModuleInput, Display(label="Readout")] = Field(
         description="Shared pulse-backed readout"
@@ -163,8 +168,10 @@ class CoherencePlanForm(FormModel):
         the fixed alias capture and declare its concrete path as an expression
         default if readable and non-null; default_input stores its value. No
         capture, absent/null values or unreadable paths leave the field
-        unfilled for explicit user input. Other modules and simulator constants
-        are never consulted. Invalid readable values leave it unfilled too,
+        unfilled for explicit user input. Probe references captured qub_probe,
+        or copies captured x180 at gain 0.1 and length 5 us. Missing both leaves
+        probe required. Simulator constants are never consulted.
+        Invalid readable pi estimates leave pi_length_us unfilled too,
         not a fallback.
         No live selection, YAML refresh or device access occurs.
         """
@@ -184,6 +191,7 @@ class CoherencePlanForm(FormModel):
         """Bind each generated field's converter to the host's fixed capture."""
         return {
             ("qub_pulse",): DRIVE_MODULE_FIELD.converter(env),
+            ("probe_pulse",): DRIVE_MODULE_FIELD.converter(env),
             ("readout",): READOUT_MODULE_FIELD.converter(env),
         }
 
@@ -192,6 +200,7 @@ class CoherencePlanForm(FormModel):
         """Declare generated module selections against the same fixed capture."""
         return {
             ("qub_pulse",): DRIVE_MODULE_FIELD.options(env),
+            ("probe_pulse",): DRIVE_MODULE_FIELD.options(env),
             ("readout",): READOUT_MODULE_FIELD.options(env),
         }
 
@@ -212,7 +221,10 @@ class CoherencePlanForm(FormModel):
         layer is involved; Engine owns plan isolation.
         """
         modules = resolve_calibration_modules(
-            qub_pulse=self.qub_pulse, readout=self.readout, env=env
+            qub_pulse=self.qub_pulse,
+            probe_pulse=self.probe_pulse,
+            readout=self.readout,
+            env=env,
         )
         if isinstance(modules, FormErrors):
             return modules
@@ -227,6 +239,7 @@ class CoherencePlanForm(FormModel):
             fluxes=expand_fluxes(self.fluxes),
             points=self.points,
             qub_pulse=modules.qub_pulse,
+            probe_pulse=modules.probe_pulse,
             readout=modules.readout,
             snapshot=snapshot,
         )

@@ -77,6 +77,11 @@ Coherence 的 `measure_singleshot` 預設關閉。打開後，GE 在 readout 校
 GE 要求本點 Rabi 已接受。`singleshot` 子表單控制 flux 最小間距與每種 preparation 的 shots。
 預設是暫定模擬值：間距 0、shots 100000。GE 只保存 `singleshot-ge.h5`，不擬合、不新增 workflow 圖；core 的 operation 即時圖照常。
 
+Coherence 與 MIST 的 frequency stage 使用獨立 `probe_pulse`，保留它的 waveform 與長度，頻率由 tracker 的掃描設定。
+Probe gain 從這個 pulse 的 gain 起跑，再依線寬自適應；每次 attempt 的實際值保存在 `frequency.probe_gains`。
+`qub_pulse` 只供 Rabi 與下游 pi preparation，不作 spectroscopy probe。
+新表單先引用 captured `$qubit.pulses.qub_probe`。沒有該 entry 時，從 captured `$qubit.module.x180` 複製 inline，設 freq 0 MHz、gain 0.1、長度 5 µs；x180 也缺時留待填入。
+
 Readout 在 cadence 到期且有 LATEST accepted pi pulse 時更新。未到期保留上一張圖，不在目前 point 另存 `readout.png`。
 校準圖顯示完整但未通過接受門檻的 fit，分析失敗時只顯示 raw I。Partial 不更新 heatmap 或 fit。
 Coherence 的 decay 使用 Result.times/signals，觀測值與 fit 使用同一投影。未通過門檻的 fit 標示 rejected，不進 lifetime history。

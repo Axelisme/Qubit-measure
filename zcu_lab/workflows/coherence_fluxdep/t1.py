@@ -49,9 +49,7 @@ class T1Plan(BaseModel):
         description="Ordered absolute setpoints in native device units"
     )
     points: int = Field(default=51, ge=5, description="T1 delay samples")
-    qub_pulse: PulseCfg = Field(
-        description="Resolved shared spectroscopy/Rabi/pi drive"
-    )
+    qub_pulse: PulseCfg = Field(description="Resolved Rabi and downstream pi drive")
     readout: PulseReadoutCfg = Field(description="Resolved shared pulse-backed readout")
     snapshot: RunSnapshot = Field(description="Host-captured historical entry state")
 
