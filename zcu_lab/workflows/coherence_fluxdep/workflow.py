@@ -33,6 +33,7 @@ from zcu_lab.workflows.coherence_fluxdep.measurements import (
 from zcu_lab.workflows.coherence_fluxdep.pulses import (
     calibrated_pulses,
 )
+from zcu_lab.workflows.coherence_fluxdep.samples import append_point_sample
 from zcu_lab.workflows.coherence_fluxdep.singleshot import (
     SingleshotInputs,
     SingleshotResult,
@@ -99,6 +100,10 @@ class CoherencePlan(T1Plan):
     )
     predictor: FrequencyModel = Field(
         description="Captured fluxonium model and device affine map"
+    )
+    result_path: Path | None = Field(
+        default=None,
+        description="Exact entry Result path captured at Start. None means no entry (e.g. headless); skip auto samples and use offline --result later.",
     )
     measure_singleshot: bool = False
     measure_t1: bool = True
@@ -320,7 +325,9 @@ async def coherence_fluxdep(  # noqa: C901, PLR0912, PLR0915  # tolerated: workf
     point's accepted pi/pi2, with producer coordinates in calibration_sources.
     Nonaccepted readout retains legal prior values.
     Save each completed trace before fitting and commit one CoherencePoint per
-    setpoint. Each accepted lifetime updates only its own delay-grid history.
+    setpoint. After commit, append a sample to the captured entry's record table
+    when result_path is set; append failure propagates without undoing the commit.
+    Each accepted lifetime updates only its own delay-grid history.
     Unexpected adapter/writer/fit/plot errors propagate. Pause resumes the pending
     operation, not the whole point. Tunables reads use tun.current.
     Calibration returns its aggregate only on normal completion. An unexpected
@@ -544,6 +551,7 @@ async def coherence_fluxdep(  # noqa: C901, PLR0912, PLR0915  # tolerated: workf
             directory = iteration.dir
         finally:
             iteration.commit(point_record)
+            append_point_sample(env.identity.run_id, plan, point_record, iteration.dir)
             summary.points.append(coherence_summary_point(point_record, plan))
             draw_summaries(
                 env.plots,

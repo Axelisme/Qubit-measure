@@ -216,6 +216,9 @@ class OvernightMuxPlanForm(FormModel):
                 "start_interval_s": self.start_interval_s,
                 "points": self.points,
                 "snapshot": snapshot,
+                "result_path": env.parameters.capture_storage().result_path
+                if env.parameters
+                else None,
             }
         )
 

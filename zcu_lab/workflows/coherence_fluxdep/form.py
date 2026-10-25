@@ -249,4 +249,7 @@ class CoherencePlanForm(FormModel):
             probe_pulse=modules.probe_pulse,
             readout=modules.readout,
             snapshot=snapshot,
+            result_path=env.parameters.capture_storage().result_path
+            if env.parameters
+            else None,
         )

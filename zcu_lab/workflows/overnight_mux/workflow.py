@@ -1,6 +1,7 @@
 """Monitor simultaneous T1 and Hahn echo with T1-based recovery delays."""
 
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -17,6 +18,7 @@ from zcu_lab.workflows.common.relaxation import echo_relaxation
 from zcu_lab.workflows.common.summary import RunSummary, SummaryAccumulator
 from zcu_lab.workflows.common.summary_points import mux_summary_point
 from zcu_lab.workflows.overnight_mux.analysis import record_echo, record_t1
+from zcu_lab.workflows.overnight_mux.samples import append_point_samples
 from zcu_lab.workflows.overnight_mux.trend import draw_overnight_mux_trend
 
 
@@ -51,6 +53,10 @@ class OvernightMuxPlan(BaseModel):
     start_interval_s: float = Field(gt=0, description="Actual start spacing, seconds")
     points: int = Field(default=51, ge=5, description="Common delay samples per member")
     snapshot: RunSnapshot
+    result_path: Path | None = Field(
+        default=None,
+        description="Exact entry Result path captured at Start. None means no entry (e.g. headless); skip auto samples and use offline --result later.",
+    )
 
 
 class OvernightMuxTunables(BaseModel):
@@ -191,7 +197,9 @@ async def overnight_mux[C](
     No flux setup, context read or calibration occurs. Save Completed raw before
     fitting; partial results are not fitted. Native/fit failures do not skip Echo.
     Iteration cancellation skips remaining work; Stop/errors propagate after
-    finally commits collected fields. Pause retains local progress. Pair starts
+    finally commits collected fields, then appends one sample per participant
+    to the captured entry when result_path is set. Append failures propagate
+    without undoing commits or earlier rows. Pause retains local progress. Pair starts
     follow max(now, previous completed pair's actual start + interval), matching
     overnight. Trends retain scalars only and are not automatically saved.
     """
@@ -298,6 +306,7 @@ async def overnight_mux[C](
             )
         finally:
             iteration.commit(point_record)
+            append_point_samples(env.identity.run_id, plan, point_record, iteration.dir)
             summary.points.append(mux_summary_point(point_record))
     env.pbar("overnight mux rounds", total=plan.outer_rounds).set_progress(
         plan.outer_rounds

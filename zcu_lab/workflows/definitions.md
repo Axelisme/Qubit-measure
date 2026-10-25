@@ -218,7 +218,8 @@ Conversion 的科學型別與輸入驗證留在此 package，不在框架建立 
 
 `coherence_fluxdep.export.export_run` 支援 Labber 與 samples，`mist_fluxdep.export.export_run` 只支援 Labber。
 函式收到 `database` 就寫 Labber，Coherence 收到 `result` 就追加 samples。兩個目的地都給就都寫，未給任何目的地就 raise ValueError。
-兩個模組提供同 process 的 `main(argv)`，也能以 `python -m zcu_lab.workflows.coherence_fluxdep.export` 或 `python -m zcu_lab.workflows.mist_fluxdep.export` 執行。
+四個 workflow 的 export 模組都提供同 process 的 `main(argv)`，也可用 `python -m zcu_lab.workflows.<name>.export` 執行。
+Overnight 與 overnight_mux 只接受 `--result`，重新匯出已提交各輪的 samples，不寫 Labber。
 傳入 run 的 metadata 目錄。CLI 給 `--database <Database>` 就寫 Labber，Coherence 給 `--result <entry result>` 就追加 samples。
 不另選格式旗標。沒有任何目的地是 CLI error。
 工具在任何寫入前驗共同輸入。Labber 每次在日期樹取新檔。
@@ -235,11 +236,24 @@ MIST 使用保存的 actual gain 作為 inner-first Signal 軸，另寫 Flux-onl
 所有已取得 trace 的 actual gain grid 必須完全相同，否則拒絕並列出兩點的 index 與值。
 Plan gain grid 是請求，不拿它與 QICK 量化後的實際值比較。
 
-Coherence samples 每點最多一行，有 accepted frequency 或任一 lifetime 才寫。
-僅寫接受值，欄位沿 freq_mhz 與 t1/t2r/t2e_us、對應 err_us，未接受欄位省略。
-座標來自 frequency→Rabi→readout→GE→T1→Ramsey→Echo 的最後 Completed native snapshot，包括拒絕的 fit。
-歷史 point/component 取固定 plan，key 為 run_id/index。全部 rows 先驗再追加，I/O failure 保留 prefix/count/cause。
-Latest-wins 由 sample table owner 決定。GUI、RPC、MCP 沒有 conversion controls。
+Coherence 在每個 `iteration.commit(point_record)` 成功後立即 append 一列 sample。Overnight 每輪一列，mux 每輪每個 participant 一列。
+目的地是固定 entry 的 `Result/records/components/<qubit>.jsonl`，與 GUI RecordWriteback 相同。
+三個 plan 的 `result_path` 由表單從固定 `FormEnv.parameters.capture_storage()` 捕捉，manifest 保存絕對路徑。
+None 表示沒有 entry，例如 headless 腳本，不自動寫入；手動 `--result` 可補寫，也可指定搬移後的新 entry。
+拒絕、跳過與中止的已提交點仍產生 row，保留 stage status／reason。未到達的 stage 記 skipped 及原因。
+主頻率、Rabi、readout 與 lifetime 只填 accepted 值，非接受值為 null。副模型保留各自 status 與完整診斷，不宣稱接受。
+Coherence 使用 `frequency`、`rabi`、`readout`、`t1`、`t2ramsey`、`t2echo`、`singleshot` 等巢狀欄位。
+Frequency 含 freq_mhz／err_mhz／fwhm_mhz／probe_gain。Rabi 含 mode、π／π2 的 us 與 gain，以及 AmpRabi 診斷。
+Lifetime 含 us／err_us／detune_mhz／models，保留雙指數第二個時間常數。GE 記相對 raw 檔名。
+`flux` 記 commanded device／value／unit。`devices` 原樣保存最後一次已保存 acquisition 的完整 snapshot。
+順序為 frequency、LenRabi、AmpRabi、readout、GE、T1、Ramsey、Echo，包含 rejected 與 partial raw。沒有 raw 時為 null，不另讀儀器。
+Overnight 類記 T1／Echo 的 status／reason／accepted 值／models、UTC 排程及開始時間、raw 檔名、Echo relax 來源。
+固定 frequency、π／π2 與 readout 保存在 `settings`，不冒充本輪校準。Mux 不設定 flux，`flux` 為 null，座標由讀取端從完整 devices 選擇。
+Coherence key 是 `<run_id>/<index>`，overnight 類是 `<run_id>/round/<round_index>`，mux 每個 component 各用同一輪的 key。
+自動與手動使用同一個 row producer。手動在任何 append 前準備所有 rows。I/O failure 保留已寫 prefix/count/cause，不 rollback。
+Commit 與 append 不是原子交易；append 失敗會讓 run 停止，先前 commit 與 rows 保留，可手動補寫。
+Latest-wins 由 record table owner 決定，重匯出更新整列，僅 append 時間 `at` 隨每次寫入改變。GUI、RPC、MCP 沒有 conversion controls。
+用法見 [每點 sample 與重新匯出](README.md#每點-sample-與重新匯出)。
 
 `common.devices.set_flux` 讀 live typed cfg，重用 check_flux_unit，再以 model_copy 只改 value，await 完整 setup。
 Fake 明填 native；YOKO 明填 A 或 V。Plan／表單不推測、換算單位或預驗 connected membership。
