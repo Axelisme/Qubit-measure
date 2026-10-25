@@ -191,6 +191,39 @@ class OvernightPoint(BaseModel):
     status: Literal["collecting", "completed", "skipped"] = "collecting"
 
 
+def _t1_settings(current: OvernightTunables) -> T1Settings:
+    """Copy this stage's settings from one captured tunables revision."""
+    return T1Settings(
+        uniform=current.uniform,
+        reps=current.reps,
+        rounds=current.rounds,
+        acquire_retry=current.t1_acquire_retry,
+        earlystop_snr=current.t1_earlystop_snr,
+        sweep_factor=current.sweep_factor,
+        relax_factor=current.relax_factor,
+        relax_min_us=current.relax_min_us,
+        max_rel_err=current.max_rel_err,
+        max_fit_residual=current.max_fit_residual,
+        min_lifetime_points=current.min_lifetime_points,
+        max_model_window_factor=current.max_model_window_factor,
+    )
+
+
+def _echo_settings(current: OvernightTunables) -> EchoSettings:
+    """Copy this stage's settings from one captured tunables revision."""
+    return EchoSettings(
+        reps=current.reps,
+        rounds=current.rounds,
+        acquire_retry=current.t2_acquire_retry,
+        earlystop_snr=current.t2_earlystop_snr,
+        sweep_factor=current.sweep_factor,
+        max_rel_err=current.max_rel_err,
+        max_fit_residual=current.max_fit_residual,
+        min_lifetime_points=current.min_lifetime_points,
+        max_model_window_factor=current.max_model_window_factor,
+    )
+
+
 @workflow("overnight", "Monitor fixed-flux T1 and Hahn-echo lifetime pairs.")
 async def overnight[C](  # noqa: PLR0915  # tolerated: workflow flow reads top to bottom
     env: WorkflowEnv[C],
@@ -264,20 +297,7 @@ async def overnight[C](  # noqa: PLR0915  # tolerated: workflow flow reads top t
                 iteration,
                 stage_env,
                 pulses,
-                T1Settings(
-                    uniform=current.uniform,
-                    reps=current.reps,
-                    rounds=current.rounds,
-                    acquire_retry=current.t1_acquire_retry,
-                    earlystop_snr=current.t1_earlystop_snr,
-                    sweep_factor=current.sweep_factor,
-                    relax_factor=current.relax_factor,
-                    relax_min_us=current.relax_min_us,
-                    max_rel_err=current.max_rel_err,
-                    max_fit_residual=current.max_fit_residual,
-                    min_lifetime_points=current.min_lifetime_points,
-                    max_model_window_factor=current.max_model_window_factor,
-                ),
+                settings=_t1_settings(current),
                 points=plan.points,
                 guess_us=current.t1_guess_us,
             )
@@ -304,17 +324,7 @@ async def overnight[C](  # noqa: PLR0915  # tolerated: workflow flow reads top t
                 iteration,
                 stage_env,
                 pulses,
-                EchoSettings(
-                    reps=current.reps,
-                    rounds=current.rounds,
-                    acquire_retry=current.t2_acquire_retry,
-                    earlystop_snr=current.t2_earlystop_snr,
-                    sweep_factor=current.sweep_factor,
-                    max_rel_err=current.max_rel_err,
-                    max_fit_residual=current.max_fit_residual,
-                    min_lifetime_points=current.min_lifetime_points,
-                    max_model_window_factor=current.max_model_window_factor,
-                ),
+                settings=_echo_settings(current),
                 points=plan.points,
                 timing=EchoTiming(
                     guess_us=current.t2_guess_us,
