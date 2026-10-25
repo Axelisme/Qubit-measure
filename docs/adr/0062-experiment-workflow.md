@@ -101,7 +101,11 @@ Engine 仍擁有 manifest、journal 與 best-effort `record.json`。結果 journ
 
 具體 workflow 的 stage 隔離不改每個 point 一次 commit 的邊界。Frequency 接受即更新自己的 history；Rabi 需要本點 frequency，readout 與 enabled lifetime 需要本點 frequency/Rabi。Readout 非接受時沿合法 seed／prior accepted 設定繼續量 lifetime，不用 prior frequency 或 pi 取代缺少的本點依賴。Carry 與 history 由作者 coroutine 的區域變數保存。Pause 只重試被打斷的 operation，不丟棄整點；Stop 讓作者處理 partial 並收尾，不增加 stage checkpoint。
 
-Coherence 固定 plan flags，按 T1、Ramsey、Echo 量 enabled 項目。三份 lifetime history 獨立，只有各自接受的值更新 delay grid。Point 的 measurements tuple 只含 enabled 結果；disabled 不用 null placeholder。各個 completed raw 都有明示用途的 relative native reference，讓轉換工具取得部分證據，而不從 acquisition 次序或目錄猜資料。
+Coherence 固定 plan flags，按 T1、Ramsey、Echo 量 enabled 項目。三份 lifetime history 獨立，只有各自接受的值更新 delay grid。Point 以 t1、t2ramsey、t2echo 三個欄位保存具名結果；未量測或未到達的欄位是 None。T1Result 是獨立型別，不繼承共同 lifetime result。各個 completed raw 都有明示用途的 relative native reference，讓轉換工具取得部分證據，而不從 acquisition 次序或目錄猜資料。
+
+2026-10-25 使用者選擇 point record 的獨立欄位形狀。目前沒有真實量測資料，不保留舊 measurements 格式的相容讀取；generic saved_run 只依 caller 指定的 model 讀取。
+
+同日使用者同意保留校準複合 stage，函式體依序呼叫單實驗 helper。Coherence 的 calibrate_point 依序呼叫 frequency、Rabi（含所選 AmpRabi）與 readout，再回傳 PointCalibrationResult，由主迴圈填 point。Expected failed/rejected 正常回傳；unexpected exception 不回傳 aggregate，point 只保留主迴圈已填的欄位，已存 native raw 保留在磁碟。例如 frequency 成功後 Rabi 內部 bug，point 沒有 frequency 結果，但 frequency h5 仍在。
 
 校準與具體 lifetime policy 留在 zcu_lab.workflows。共用 CalibrationInputs 服務 Coherence 與 MIST 的三個 native stage，readout_due 讓兩個 caller 共用零基 flux index cadence。這些 module 不依賴 frontend，方向由 workflow-science-no-frontends 與 C16 保護。GUI forms/capture、單一 Controller 與 operation 邊界不改；不增加通用 pipeline、registry、export bridge 或 saved input migration。
 

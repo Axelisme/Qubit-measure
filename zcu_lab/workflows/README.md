@@ -41,6 +41,9 @@ Cfg 是位置參數，context 是 keyword-only。不要複製 core 的 pulse 序
 `env` 是 workflow 根。`with env.scope("calibration") as scope` 建作者 child。
 逐點量測用 `zip(plan.fluxes, env.iterations())`，變數命名為 `iteration`。
 一趟開始建可變的 Pydantic point_record，未填欄位為 None。每個結果到了再填。
+Coherence 用 t1、t2ramsey、t2echo 三個欄位保存 lifetime，不再使用 measurements 列表。未量測或未到達的欄位為 None，讀取端不提供舊列表格式轉換。
+Coherence 的 calibrate_point 是校準複合 stage，內部依序呼叫 frequency、Rabi（依模式含 AmpRabi）、readout 的單實驗 helper，再回傳 PointCalibrationResult。主迴圈填各校準欄位，接著量 GE 與 lifetimes。
+校準遇到 unexpected exception 時不回傳 aggregate。Run 失敗，point 只保留主迴圈已填的欄位；已存的 native raw 仍在磁碟。Expected failed/rejected 正常回傳，不受影響。
 主 body 用 try/finally，只在 finally 同步呼叫 `iteration.commit(point_record)` 一次，不加 await。
 量測間若 iteration.cancelled，補 status="skipped" 再 continue，下一點仍可執行。
 在 helper 裡則用 return 退出目前點，不用主 workflow 的 return 結束整個 run。
@@ -99,7 +102,7 @@ Readout 在 cadence 到期且本點 Rabi accepted 時，用本點 π 更新。�
 Coherence 的 decay 使用 Result.times/signals，觀測值與 fit 使用同一投影。未通過門檻的 fit 標示 rejected，不進 lifetime history。
 Coherence、overnight 與 overnight_mux 每次主模型擬合成功後，同時記錄兩種 lifetime 模型。
 T1 比較含 baseline 的單指數與雙指數。Ramsey／Echo 比較指數與固定零中心的高斯包絡，條紋資料保留各自的 cosine。
-Coherence 的 `measurements[].models`、overnight 的 `t1_models/t2_models`、overnight_mux 各 qubit 的同名欄位記錄 lifetime、誤差、residual RMS、quality 與 BIC。雙指數依長、短順序記兩個 lifetime。
+Coherence 的 `t1.models/t2ramsey.models/t2echo.models`、overnight 的 `t1_models/t2_models`、overnight_mux 各 qubit 的同名欄位記錄 lifetime、誤差、residual RMS、quality 與 BIC。雙指數依長、短順序記兩個 lifetime。
 兩條可用曲線都畫出模型名稱與狀態。副模型擬合失敗時記 `failed` 與原因，不畫假曲線。
 非有限、非正 lifetime、負誤差、誤差大於值、quality.invalid 或超過 `max_model_window_factor * max(fitted delays)` 時，診斷標記 `discarded` 並保留原因。倍數預設 2，可在各 lifetime tunable 調整；非有限數值存 null。
 BIC 使用同一組觀測點與自由參數數量，只供比較。接受值、relax、歷史與歷史圖仍只看原有主模型，副模型與診斷 discarded 不改接受規則。

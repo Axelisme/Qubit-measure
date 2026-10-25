@@ -37,6 +37,7 @@ from zcu_lab.workflows.coherence_fluxdep.samples import (
     append_records,
     prepare_samples,
 )
+from zcu_lab.workflows.coherence_fluxdep.stages.t1 import T1Result
 from zcu_lab.workflows.coherence_fluxdep.workflow import CoherencePlan, CoherencePoint
 
 
@@ -55,7 +56,7 @@ class CoherenceExportReport:
     missing_records: tuple[Path, ...]
 
 
-def _validate_lifetime_evidence(item: LifetimeResult) -> None:
+def _validate_lifetime_evidence(item: T1Result | LifetimeResult) -> None:
     """Reject inconsistent completion files or accepted lifetime/error scalars."""
     if (item.status in {"accepted", "rejected"}) != (item.file is not None):
         raise ValueError(
@@ -80,15 +81,6 @@ def _validate_lifetime_evidence(item: LifetimeResult) -> None:
 def _points(run: Path, plan: CoherencePlan) -> tuple[SavedRecord[CoherencePoint], ...]:
     points = read_records(run, CoherencePoint)
     seen: set[int] = set()
-    expected = tuple(
-        kind
-        for kind, enabled in (
-            ("t1", plan.measure_t1),
-            ("t2ramsey", plan.measure_t2ramsey),
-            ("t2echo", plan.measure_t2echo),
-        )
-        if enabled
-    )
     for saved in points:
         point = saved.record
         try:
@@ -102,12 +94,15 @@ def _points(run: Path, plan: CoherencePlan) -> tuple[SavedRecord[CoherencePoint]
                     "Point index must be unique/inside plan and flux finite"
                 )
             seen.add(point.index)
-            if tuple(item.kind for item in point.measurements) != expected:
-                raise ValueError(
-                    "Point lifetime order/selection differs from fixed plan"
-                )
-            for item in point.measurements:
-                _validate_lifetime_evidence(item)
+            for enabled, item in (
+                (plan.measure_t1, point.t1),
+                (plan.measure_t2ramsey, point.t2ramsey),
+                (plan.measure_t2echo, point.t2echo),
+            ):
+                if item is not None:
+                    if not enabled:
+                        raise ValueError("Disabled lifetime cannot carry a result")
+                    _validate_lifetime_evidence(item)
         except ValueError as error:
             raise ValueError(f"{saved.record_path}: {error}") from error
     return points
@@ -126,10 +121,12 @@ def _channels(
     for saved in points:
         point = saved.record
         fluxes[point.index] = point.flux
-        item = next(item for item in point.measurements if item.kind == kind)
-        if item.file is None:
+        item = {"t1": point.t1, "t2ramsey": point.t2ramsey, "t2echo": point.t2echo}[
+            kind
+        ]
+        if item is None or item.file is None:
             continue
-        traces[point.index] = load_lifetime_trace(saved.directory, item.file, item.kind)
+        traces[point.index] = load_lifetime_trace(saved.directory, item)
         if item.status == "accepted" and item.lifetime_us is not None:
             lifetimes[point.index] = item.lifetime_us / 1e6
             if item.detune_mhz is not None:
@@ -163,7 +160,8 @@ def prepare_export(
 ) -> PreparedRunData:
     """Prepare each enabled, actually measured lifetime on its own index grid.
 
-    points are typed, validated saved commits, never Engine.records or journal.
+    points are typed, validated saved commits with t1/t2ramsey/t2echo fields,
+    never Engine.records or journal. None means disabled or not reached.
     Each measured kind has Signal/Time Flux×index and Flux-only lifetime seconds;
     rejected fits keep raw and NaN lifetime. Ramsey also exports physical detune
     in Hz, with NaN for rejected or historical records lacking that scalar.

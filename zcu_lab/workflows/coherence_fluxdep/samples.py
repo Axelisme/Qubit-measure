@@ -118,9 +118,9 @@ def _last_completed(saved: SavedRecord[CoherencePoint]) -> str:
             saved.directory, point.singleshot.file, GE_Exp.AXES_SPEC, allow_stopped=True
         )
         references.append(point.singleshot.file)
-    for item in point.measurements:
-        if item.file is not None:
-            load_lifetime_trace(saved.directory, item.file, item.kind)
+    for item in (point.t1, point.t2ramsey, point.t2echo):
+        if item is not None and item.file is not None:
+            load_lifetime_trace(saved.directory, item)
             references.append(item.file)
     if not references:
         raise ValueError(
@@ -174,8 +174,8 @@ def prepare_samples(
                         value=_positive(point.frequency.frequency_mhz, "frequency"),
                     )
                 )
-            for item in point.measurements:
-                if item.status != "accepted":
+            for item in (point.t1, point.t2ramsey, point.t2echo):
+                if item is None or item.status != "accepted":
                     continue
                 quantity = {"t1": "t1", "t2ramsey": "t2r", "t2echo": "t2e"}[item.kind]
                 value = _positive(item.lifetime_us, quantity)

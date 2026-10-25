@@ -69,7 +69,7 @@ def coherence_summary_point(point: CoherencePoint, plan: CoherencePlan) -> Summa
                 reason=result.reason if result else "not reached",
             )
         )
-    results = {item.kind: item for item in point.measurements}
+    results = {"t1": point.t1, "t2ramsey": point.t2ramsey, "t2echo": point.t2echo}
     enabled_stages: tuple[tuple[str, StageName, bool], ...] = (
         ("t1", "T1", plan.measure_t1),
         ("t2ramsey", "Ramsey", plan.measure_t2ramsey),
