@@ -87,7 +87,7 @@ Probe gain 從這個 pulse 的 gain 起跑，再依線寬自適應；每次 atte
 `qub_pulse` 只供 Rabi 與下游 pi preparation，不作 spectroscopy probe。
 新表單先引用 captured `$qubit.pulses.qub_probe`。沒有該 entry 時，從 captured `$qubit.module.x180` 複製 inline，設 freq 0 MHz、gain 0.1、長度 5 µs；x180 也缺時留待填入。
 
-Readout 在 cadence 到期且有 LATEST accepted pi pulse 時更新。未到期保留上一張圖，不在目前 point 另存 `readout.png`。
+Readout 在 cadence 到期且本點 Rabi accepted 時，用本點 π 更新。不接受本點 π 就跳過該次，不順延 cadence。未到期保留上一張圖，不在目前 point 另存 `readout.png`。
 校準圖顯示完整但未通過接受門檻的 fit，分析失敗時只顯示 raw I。Partial 不更新 heatmap 或 fit。
 Coherence 的 decay 使用 Result.times/signals，觀測值與 fit 使用同一投影。未通過門檻的 fit 標示 rejected，不進 lifetime history。
 Coherence、overnight 與 overnight_mux 每次主模型擬合成功後，同時記錄兩種 lifetime 模型。
@@ -103,7 +103,7 @@ Coherence、overnight 與 overnight_mux 拒絕 quality.invalid 非空的主 life
 MIST 的 measure_mode 可選 excited、ground 或 both，預設 excited。Ground 不加 pi preparation。Both 在每個 flux 點量兩種，分別保存 native 與 PNG。
 MIST 的 gain-<mode>.png 使用 Result 的實際 gains/signals；map-<mode>.png 使用保留的 traces，扣中位數背景並截斷於 3σ。
 `cal.rabi_mode` 預設 `len_then_amp`，先由 LenRabi 找 π 長度，再以 AmpRabi 的 π/π2 gain 建立下游 pulse。`amp_only` 固定目標長度只掃 gain，`len_only` 保留長度校準。範圍與接受門檻見 [definitions](definitions.md#獨立校準與-point)。
-T1 的 pi 依賴為 NOW；Ramsey、Echo、MIST 與 readout 可用 LATEST。Point 的 calibration_sources 記回退與來源點。
+所有用到 π 的下游都要求本點 accepted π，Ramsey／Echo 另要求本點可信 π/π2 pair。Readout 與 excited MIST 只要求 π。Ground MIST 不加 π，不受 Rabi 接受狀態限制。Point 的 calibration_sources 記本點 pulse 來源；readout_source 另記保留的 readout 校準來源。
 這些保存不讀 operation 圖、不改 native raw／export 格式，也不更動科學序列。Overnight 的趨勢圖維持原樣，新增的 model comparison 圖不自動保存。
 
 Pause 保留等待中的 await。若 Pause 中斷 operation 並產生 partial result，框架丟棄該次結果，

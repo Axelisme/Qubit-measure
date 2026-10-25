@@ -89,8 +89,8 @@ class CalCarry:
     amp_traces retains gain-scan rows; last_amp_gain is the last accepted Amp pi
     gain and centers the next amp-only window, or None before Amp acceptance.
     rabi_drive holds the pi-product history and query-aged gain controller.
-    last_pi retains the frequency paired with accepted pi/pi2; pi_source and
-    readout_source identify their producer points, or None before acceptance.
+    readout_source identifies the accepted readout producer, or None before
+    acceptance. Downstream pulse consumers resolve only this point's Rabi.
     Widening replaces the current point's frequency row. Pause preserves this carry;
     only explicit point commits persist reports. There are no stage checkpoints.
     frequency_tracker owns the run-local physical overlay, IDW and linewidth
@@ -109,8 +109,6 @@ class CalCarry:
     amp_traces: list[CalibrationTrace] = field(default_factory=list)
     last_amp_gain: float | None = None
     rabi_drive: RabiDriveFeedback = field(default_factory=RabiDriveFeedback)
-    last_pi: CalibratedPi2 | None = None
-    pi_source: CalibrationSource | None = None
     readout_source: CalibrationSource | None = None
     frequency_tracker: FrequencyTracker | None = None
     # Matrix-element feed-forward for the Rabi lane; refreshed at every point.
@@ -471,7 +469,7 @@ def readout_due(point_index: int, tun: CalibrationTunables) -> bool:
     The rule is point_index % tun.ro_every == 0; index zero naturally scans.
     Failed/rejected prior scans do not change the cadence or cause extra scans.
     The caller retains legal seed/prior readout on cadence skips and checks this
-    point's latest-pi dependency separately. Negative indexes raise ValueError.
+    point's current-pi dependency separately. Negative indexes raise ValueError.
     """
     if point_index < 0:
         raise ValueError("Readout point index must be nonnegative")
@@ -489,10 +487,10 @@ async def calibrate_readout(
 ) -> ReadoutResult:
     """Scan readout frequency and gain to maximize discrimination after Rabi.
 
-    Resolve the latest accepted pi pulse with its source frequency and gain.
-    A failed Rabi can reuse that pulse; no accepted pulse gives a dependency skip.
-    Caller uses readout_due to decide cadence. Accepted pulse pairs record their
-    producer in carry. Relaxation follows smoothed T1 or the fixed readout knob.
+    Require this point's accepted pi pulse with its source frequency and gain.
+    Failed Rabi skips this scan. Caller uses readout_due to decide cadence;
+    a dependency skip does not postpone it. Relaxation follows smoothed T1 or
+    the fixed readout knob.
     Search windows follow retained readout with configurable half widths and gain
     clipped to [0, 1]. A wavelet-smoothed map needs a unique interior prominent
     maximum meeting the SNR floor. Failure/rejection retains legal prior
@@ -502,14 +500,11 @@ async def calibrate_readout(
     selecting a best point or updating carry. Invalid input/unexpected errors raise.
     Await in a workflow; cancellation remains Engine-owned.
     """
-    # Readout consumes the latest accepted pi module, unlike Rabi's NOW frequency.
     _validate_calibration_inputs(0.0, t1_estimate_us)
-    cal = current_point_calibration(
-        rabi, carry, point_index=inputs.point_index, flux=inputs.flux
-    )
+    cal = current_pi_calibration(rabi, carry)
     if cal is None:
         return ReadoutResult(
-            "skipped", "Requires a latest accepted pi pulse", None, None, None
+            "skipped", "Requires this point's accepted pi pulse (NOW)", None, None, None
         )
     prior = carry.seed if carry.last is None else carry.last
     # Sweep readout gain and frequency with the calibrated pi drive.
@@ -605,8 +600,8 @@ def current_pi_calibration(
 
     Nonaccepted or absent Rabi returns None; no prior pi is borrowed. An accepted
     record missing its frequency or pi duration raises ValueError. Readout uses
-    its independent latest value or host seed. This resolver does not change the
-    retained pi/pi2 pair or its source, so T1/GE NOW cannot overwrite T2 LATEST.
+    its independent latest value or host seed. No pulse calibration is retained
+    for use at a later point.
     """
     if rabi is None or rabi.status != "accepted":
         return None
@@ -623,47 +618,25 @@ def current_pi_calibration(
 
 
 def current_point_calibration(
-    rabi: RabiResult,
-    carry: CalCarry,
-    *,
-    point_index: int,
-    flux: float,
-    need: Literal["latest", "now"] = "latest",
+    rabi: RabiResult | None, carry: CalCarry
 ) -> CalibratedPi2 | None:
-    """Resolve accepted pulse pairs with latest or current-point-only semantics.
+    """Return this point's accepted pi/pi2 pair, or None without a trusted pi2.
 
-    A trusted current pi/pi2 pair stores its frequency, acquisition gain and
-    producer index/flux in carry. Rejected/skipped Rabi or untrusted pi2 leaves
-    the previous pair intact. latest may reuse it without an age limit; now
-    returns None when this point has no trusted pair. Later frequency/gain
-    updates never retune an older pi module. Readout independently uses its
-    latest accepted value or host seed. No seed pi/2 is fabricated.
+    Frequency, duration and gains come only from current accepted Rabi.
+    Readout uses its independent accepted value or host seed. No prior pulse
+    pair or fabricated pi/2 can satisfy this dependency.
     """
-    prior = carry.seed if carry.last is None else carry.last
-    if rabi.status == "accepted":
-        if rabi.frequency_mhz is None or rabi.pi_length_us is None:
-            raise ValueError("Accepted Rabi requires current frequency and pi")
-        if rabi.pi2_length_us is not None:
-            carry.last_pi = CalibratedPi2(
-                rabi.frequency_mhz,
-                rabi.pi_length_us,
-                prior.readout_freq_mhz,
-                prior.readout_gain,
-                rabi.pi2_length_us,
-                drive_gain=rabi.drive_gain,
-                pi2_drive_gain=rabi.pi2_drive_gain,
-            )
-            carry.pi_source = CalibrationSource(
-                source_index=point_index, source_flux=flux, fallback=False
-            )
-    if need == "now" and (rabi.status != "accepted" or rabi.pi2_length_us is None):
+    cal = current_pi_calibration(rabi, carry)
+    if cal is None or rabi is None or rabi.pi2_length_us is None:
         return None
-    if carry.last_pi is None:
-        return None
-    return replace(
-        carry.last_pi,
-        readout_freq_mhz=prior.readout_freq_mhz,
-        readout_gain=prior.readout_gain,
+    return CalibratedPi2(
+        cal.f01_mhz,
+        cal.pi_length_us,
+        cal.readout_freq_mhz,
+        cal.readout_gain,
+        rabi.pi2_length_us,
+        drive_gain=cal.drive_gain,
+        pi2_drive_gain=rabi.pi2_drive_gain,
     )
 
 
