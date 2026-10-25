@@ -20,6 +20,12 @@ MCP 以 `workflow_open(name)` 明填名稱，再以回傳的 tab_id 呼叫 `work
 All false 回 consuming-field error，不提交 acquisition。Disabled lifetime 不量、不保存、不產生 record 元素。
 共用 FormEditor 顯示 owner 的 Plan draft 與 Form preview。Start 經 headless owner 驗 Form，再呼附件 converter；remote preview 不執行 native lowering。
 
+`CalibrationTunablesForm` 的 `rabi_mode` 預設 `len_then_amp`，可改 `amp_only` 或 `len_only`。MIST 與 Coherence 共用這份子表單。
+`amp_gain_max` 預設 1，控制 amp-only 上限；`amp_gain_half_width` 預設 0.2，控制後續 gain 追蹤半寬。
+`amp_min_gain` 預設 0.0001，`amp_max_window_fraction` 預設 0.9，控制 gain 接受範圍。Amp 與 Len 共用 Rabi 誤差、RMS residual 與 MAE ratio knobs。
+`target_pi_length_us` 是 Len feedback 的目標，也是 amp-only 的固定長度；空白時用 captured host seed。
+Amp 使用同一份 Rabi averages、rounds、acquire_retry、earlystop_snr 與 relaxation knobs。已開始的 acquisition 不受後續表單修改影響。
+
 `CoherenceTunablesForm` 含共用 `cal` 與獨立 `singleshot`、`t1`、`t2ramsey`、`t2echo`，不把 plan flags 放進 tunables。
 `SingleshotTunablesForm` 提供 `min_spacing`、`shots`。間距是 plan flux 單位，從上次實際 GE 擷取起算；shots 是每種 probe-off/on preparation 的數量。
 預設間距 0、shots 100000 是暫定模擬值。GE 要求本點 Rabi 已接受，不另加 residual 或對比門檻。它們可在 run 中更新，已開始的 GE operation 保留當次 cfg。

@@ -64,13 +64,14 @@ Operation 圖只作即時呈現。保存 PNG 要從 completed.value.result 重�
 保存尺寸不隨 GUI tile 改變。單面板為 640×480，frequency 為 1280×960，Rabi 為 1280×480，
 coherence lifetime 為 640×960。保存時沿用 constrained layout，未設定 layout 的圖套 tight layout。
 Overnight 與 overnight_mux 只保存 native 資料，不自動保存 PNG。
-Coherence 與 MIST 共用三張校準圖，每個完成的 flux 點保留一列掃描資料，僅供本次 run 畫圖。
+Coherence 與 MIST 共用 frequency、LenRabi、AmpRabi 與 readout 校準圖，依選定模式建立，每個完成的 flux 點保留一列掃描資料，僅供本次 run 畫圖。
 Frequency widening 以最後一次完整 attempt 取代該點的一列。Heatmap 各列保留自己的實際掃描座標，不把變動的掃描範圍當成同一個 grid。
 
 | Workflow 圖名 | 面板內容 | Point 目錄內的 PNG |
 | --- | --- | --- |
 | `calibration/qubit_freq` | 上方 accepted f01 對 flux 點圖，下方 flux × detune heatmap 與目前 trace/fit。Detune 相對該點掃描中心。 | `qubit-freq.png` |
 | `calibration/len_rabi` | Flux × pulse-length heatmap，紅線連各點 accepted pi duration，側欄目前 trace/fit。 | `len-rabi.png` |
+| `calibration/amp_rabi` | Flux × gain heatmap，紅線連各點 accepted pi gain，側欄目前 trace/fit。 | `amp-rabi.png` |
 | `calibration/readout` | 最近一次 readout freq × gain SNR landscape，紅叉標有限 SNR 最大點。 | `readout.png` |
 | `t1`、`t2ramsey`、`t2echo` | 各一張，上方 accepted lifetime 對 flux 的 error bar 點圖，下方目前 decay/fit。只建立 enabled lifetime 的圖。 | `<kind>-decay.png` |
 | `mist/<mode>/gain` | excited 或 ground 的 MIST gain trace。 | `gain-<mode>.png` |
@@ -93,6 +94,7 @@ Coherence、overnight 與 overnight_mux 拒絕 quality.invalid 非空的 lifetim
 每個 point 提交後更新上方 accepted history，保存含上下兩個 panel 的 `<kind>-decay.png`，不另存 summary PNG。
 MIST 的 measure_mode 可選 excited、ground 或 both，預設 excited。Ground 不加 pi preparation。Both 在每個 flux 點量兩種，分別保存 native 與 PNG。
 MIST 的 gain-<mode>.png 使用 Result 的實際 gains/signals；map-<mode>.png 使用保留的 traces，扣中位數背景並截斷於 3σ。
+`cal.rabi_mode` 預設 `len_then_amp`，先由 LenRabi 找 π 長度，再以 AmpRabi 的 π/π2 gain 建立下游 pulse。`amp_only` 固定目標長度只掃 gain，`len_only` 保留長度校準。範圍與接受門檻見 [definitions](definitions.md#獨立校準與-point)。
 T1 的 pi 依賴為 NOW；Ramsey、Echo、MIST 與 readout 可用 LATEST。Point 的 calibration_sources 記回退與來源點。
 這些保存不讀 operation 圖、不改 native raw／export 格式，也不更動科學序列。Overnight 的圖維持原樣。
 

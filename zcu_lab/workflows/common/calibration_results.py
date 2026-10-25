@@ -40,8 +40,28 @@ class FrequencyResult:
 
 
 @dataclass(frozen=True)
+class AmpCalibrationResult:
+    """Fixed-length gain calibration, including rejected fit diagnostics.
+
+    status/reason follow StageStatus. length_us is the actual fixed pulse length.
+    pi_gain/error retain fitted diagnostics even when rejected. pi2_gain is
+    the trusted pi/2 gain on acceptance, otherwise None.
+    file is amp-rabi.h5 only after Completed, including stopped partial data.
+    Missing fits remain None. No diagnostic here certifies a usable pulse.
+    """
+
+    status: StageStatus
+    reason: str | None
+    length_us: float
+    file: str | None = None
+    pi_gain: float | None = None
+    pi_gain_error: float | None = None
+    pi2_gain: float | None = None
+
+
+@dataclass(frozen=True)
 class RabiResult:
-    """One point's Length-Rabi outcome, not a substitute for prior calibration.
+    """One point's selected Rabi-mode outcome, not a substitute for prior calibration.
 
     status is accepted/rejected/failed/skipped; reason is None only on acceptance.
     frequency_mhz is the accepted frequency used at this point (MHz), or None
@@ -56,6 +76,10 @@ class RabiResult:
     fitting failures return failed/reason. Unexpected errors propagate.
     too_fast_pi_length_us records a quality-trusted rejected fit below .03 us,
     never a usable pulse. Auto mode uses it only to propose a lower gain.
+    pi2_drive_gain is Amp fitted pi/2 gain; None retains drive_gain for Len.
+    amp stores gain-stage diagnostics/native reference, None when not run.
+    len_status records the first-stage status when Amp follows Len. file keeps
+    the Len native reference in combined mode, otherwise the only Rabi file.
     """
 
     status: StageStatus
@@ -66,6 +90,9 @@ class RabiResult:
     file: str | None
     drive_gain: float | None = None
     too_fast_pi_length_us: float | None = None
+    pi2_drive_gain: float | None = None
+    amp: AmpCalibrationResult | None = None
+    len_status: StageStatus | None = None
 
 
 @dataclass(frozen=True)

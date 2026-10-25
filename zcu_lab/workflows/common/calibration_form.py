@@ -106,6 +106,29 @@ class CalibrationTunablesForm(FrequencyTunablesForm):
         default=3.0, gt=0, description="Sweep stop divided by prior pi duration"
     )
 
+    rabi_mode: Annotated[
+        Literal["len_then_amp", "amp_only", "len_only"], Display(label="Rabi mode")
+    ] = Field(
+        default="len_then_amp",
+        description="Length then gain, gain only, or length only",
+    )
+    amp_gain_max: Annotated[float, Display(label="Amp-only gain upper limit")] = Field(
+        default=1.0, gt=0, le=1, description="Amp-only gain sweep upper limit"
+    )
+    amp_gain_half_width: Annotated[float, Display(label="Amp-only gain half width")] = (
+        Field(
+            default=0.2, gt=0, le=1, description="Amp-only tracking window half width"
+        )
+    )
+    amp_min_gain: Annotated[float, Display(label="Minimum trusted Rabi gain")] = Field(
+        default=1e-4, gt=0, le=1, description="Minimum trusted pi and pi/2 gain"
+    )
+    amp_max_window_fraction: Annotated[
+        float, Display(label="Amp pi / sweep stop limit")
+    ] = Field(
+        default=0.9, gt=0, le=1, description="Pi gain upper fraction of sweep stop"
+    )
+
     rabi_drive_gain_mode: Annotated[
         Literal["auto_pi_product", "fixed"], Display(label="Rabi drive gain mode")
     ] = Field(default="auto_pi_product", description="Rabi drive gain mode")
@@ -205,6 +228,11 @@ class CalibrationTunablesForm(FrequencyTunablesForm):
             ro_every=self.ro_every,
             rabi_start_factor=self.rabi_start_factor,
             rabi_stop_factor=self.rabi_stop_factor,
+            rabi_mode=self.rabi_mode,
+            amp_gain_max=self.amp_gain_max,
+            amp_gain_half_width=self.amp_gain_half_width,
+            amp_min_gain=self.amp_min_gain,
+            amp_max_window_fraction=self.amp_max_window_fraction,
             rabi_drive_gain_mode=self.rabi_drive_gain_mode,
             target_pi_length_us=self.target_pi_length_us,
             rabi_min_start_us=self.rabi_min_start_us,

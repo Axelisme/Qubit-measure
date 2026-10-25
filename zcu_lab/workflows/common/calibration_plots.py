@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 import numpy as np
 from matplotlib.axes import Axes
@@ -128,12 +129,15 @@ def draw_rabi(
     *,
     flux_unit: str,
     directory: Path,
+    coordinate: Literal["length", "gain"] = "length",
 ) -> None:
-    """Draw native length rows, accepted pi durations in red and current fit.
+    """Draw native length/gain rows, accepted pi coordinates and current fit.
 
-    Save the combined figure as len-rabi.png in this point directory.
+    Save len-rabi.png or amp-rabi.png according to coordinate.
     """
-    name = "calibration/len_rabi"
+    name = "calibration/len_rabi" if coordinate == "length" else "calibration/amp_rabi"
+    xlabel = "Pulse length (us)" if coordinate == "length" else "Pulse gain"
+    filename = "len-rabi.png" if coordinate == "length" else "amp-rabi.png"
     if name not in plots:
         plots.subplots(name)
     current = rows[-1]
@@ -152,7 +156,7 @@ def draw_rabi(
             "r.-",
             label="Accepted pi",
         )
-        heatmap.set(xlabel="Pulse length (us)", ylabel=f"Flux ({flux_unit})")
+        heatmap.set(xlabel=xlabel, ylabel=f"Flux ({flux_unit})")
         heatmap.legend()
         trace.plot(current.x, current.observed, ".", label="observed")
         if current.fitted is not None:
@@ -160,14 +164,14 @@ def draw_rabi(
         if current.accepted is not None:
             trace.axvline(current.accepted, color="red", linestyle="--", label="pi")
         trace.set(
-            xlabel="Pulse length (us)",
+            xlabel=xlabel,
             ylabel="Signal (a.u.)",
             title=f"Current flux\n{current.flux:.6g} {flux_unit}",
         )
         trace.legend()
 
     plots.draw(name, draw)
-    plots.save(name, directory / "len-rabi.png", figsize=(12.8, 4.8))
+    plots.save(name, directory / filename, figsize=(12.8, 4.8))
 
 
 def draw_readout(

@@ -7,13 +7,16 @@ from typing import Annotated, ClassVar
 
 import numpy as np
 from numpy.typing import NDArray
+from pydantic import Field
 from zcu_tools.analysis.fitting import FitQuality, compute_fit_quality, fit_rabi
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment, config
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
+from zcu_tools.experiment.v2.runtime.program_builder import AcquireOptions
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
+from zcu_tools.experiment.v2.utils.snr import snr_checker
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import Pulse, Readout, Reset, SweepCfg, sweep2param
 from zcu_tools.utils.process import rotate2real
@@ -55,6 +58,20 @@ class AmpRabiCfg(ConfigBase):
         int,
         FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
     ] = 1
+    acquire_retry: Annotated[
+        int,
+        FieldMeta(
+            label="Acquire retry",
+            description="Retries after transient acquisition failure.",
+        ),
+    ] = Field(default=0, ge=0)
+    earlystop_snr: Annotated[
+        float | None,
+        FieldMeta(
+            label="Early-stop SNR",
+            description="Stop after a completed round reaches this SNR; None disables.",
+        ),
+    ] = Field(default=None, gt=0)
     relax_delay: Annotated[
         float,
         FieldMeta(
@@ -94,6 +111,8 @@ class AmpRabiExp(Experiment[AmpRabiResult, AmpRabiCfg]):
         Reset, apply the optional init pulse, play the gain-swept qubit
         pulse, then read out. Return gains and mean complex IQ; subsequent
         analysis uses the oscillation period to infer pi and pi/2 gains.
+        acquire_retry retries transient acquisition failures; earlystop_snr stops
+        averaging at completed-round boundaries. None disables SNR early stop.
         """
         # Prepare the hardware gain grid and display the mean IQ projection.
         cfg = deepcopy(cfg)
@@ -127,7 +146,15 @@ class AmpRabiExp(Experiment[AmpRabiResult, AmpRabiCfg]):
                 .add_pulse("qubit_pulse", cfg.qub_pulse)
                 .add_readout("readout", cfg.readout)
                 .declare_sweep("gain", gain_sweep)
-                .build_and_acquire(rounds=cfg.rounds)
+                .build_and_acquire(
+                    rounds=cfg.rounds,
+                    options=AcquireOptions(
+                        retry=cfg.acquire_retry,
+                        stop_condition=snr_checker(
+                            signals_buffer.at(), cfg.earlystop_snr, rabi_signal2real
+                        ),
+                    ),
+                )
             )
 
         return AmpRabiResult(amps=gains, signals=signals_buffer.array)

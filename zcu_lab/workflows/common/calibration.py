@@ -30,6 +30,7 @@ from zcu_lab.v2.twotone.ro_optimize.freq_gain.core import (
     FreqGainCfg,
     FreqGainExp,
 )
+from zcu_lab.workflows.common.amp_calibration import calibrate_amp_rabi
 from zcu_lab.workflows.common.calibration_analysis import (
     FrequencyFit as FrequencyFit,
 )
@@ -60,6 +61,12 @@ from zcu_lab.workflows.common.calibration_results import (
 )
 from zcu_lab.workflows.common.calibration_results import (
     StageStatus,
+)
+from zcu_lab.workflows.common.calibration_types import (
+    Calibrated as Calibrated,
+)
+from zcu_lab.workflows.common.calibration_types import (
+    CalibratedPi2 as CalibratedPi2,
 )
 from zcu_lab.workflows.common.frequency_tracking import (
     FrequencyTracker,
@@ -138,6 +145,26 @@ class CalibrationTunables(FrequencyTunables):
         default=3.0, gt=0, description="Sweep stop divided by prior pi duration"
     )
 
+    rabi_mode: Literal["len_then_amp", "amp_only", "len_only"] = Field(
+        default="len_then_amp",
+        description="Length then gain, gain only, or length only",
+    )
+    amp_gain_max: float = Field(
+        default=1.0, gt=0, le=1, description="Amp-only gain sweep upper limit"
+    )
+    amp_gain_half_width: float = Field(
+        default=0.2, gt=0, le=1, description="Amp-only tracking window half width"
+    )
+    amp_min_gain: float = Field(
+        default=1e-4, gt=0, le=1, description="Minimum trusted pi and pi/2 gain"
+    )
+    amp_max_window_fraction: float = Field(
+        default=0.9,
+        gt=0,
+        le=1,
+        description="Pi gain must not exceed this fraction of sweep stop",
+    )
+
     rabi_drive_gain_mode: Literal["auto_pi_product", "fixed"] = Field(
         default="auto_pi_product",
         description="Predict/control gain or retain template gain",
@@ -197,58 +224,6 @@ class CalibrationTunables(FrequencyTunables):
         return self
 
 
-@dataclass(frozen=True)
-class Calibrated:
-    """Accepted scalar calibration, also usable as deeply read-only host seed.
-
-    f01_mhz/readout_freq_mhz are positive finite frequencies in MHz.
-    pi_length_us is a positive finite pi-pulse duration at drive_gain.
-    readout_gain is a finite nonnegative native readout gain.
-    drive_gain is the acquisition gain in [0, 1]; None retains the template gain.
-    Invalid values raise ValueError at construction.
-    """
-
-    f01_mhz: float
-    pi_length_us: float
-    readout_freq_mhz: float
-    readout_gain: float
-    drive_gain: float | None = field(default=None, kw_only=True)
-
-    def __post_init__(self) -> None:
-        for name, value in (
-            ("f01_mhz", self.f01_mhz),
-            ("pi_length_us", self.pi_length_us),
-            ("readout_freq_mhz", self.readout_freq_mhz),
-        ):
-            if not math.isfinite(value) or value <= 0:
-                raise ValueError(f"{name} must be positive and finite")
-        if not math.isfinite(self.readout_gain) or self.readout_gain < 0:
-            raise ValueError("readout_gain must be nonnegative and finite")
-        if self.drive_gain is not None and (
-            not math.isfinite(self.drive_gain) or not 0 <= self.drive_gain <= 1
-        ):
-            raise ValueError("drive_gain must be finite and in [0, 1]")
-
-
-@dataclass(frozen=True)
-class CalibratedPi2(Calibrated):
-    """Successful calibration with a fitted pi/2 duration for Echo and Ramsey.
-
-    The original four Calibrated scalars retain their meanings and validation.
-    pi2_length_us is a positive finite, phase-aware Length-Rabi fit duration in
-    microseconds at drive_gain and the selected waveform. It is at least 0.03 us.
-    It is neither half pi_length_us nor an initial seed; callers obtain it from accepted Rabi.
-    Invalid original scalars or pi2 duration raise ValueError at construction.
-    """
-
-    pi2_length_us: float
-
-    def __post_init__(self) -> None:
-        super().__post_init__()
-        if not math.isfinite(self.pi2_length_us) or self.pi2_length_us < 0.03:
-            raise ValueError("pi2_length_us must be finite and at least 0.03 us")
-
-
 @dataclass
 class CalCarry:
     """Coroutine-local calibration carry retained between committed points.
@@ -273,6 +248,8 @@ class CalCarry:
     f01_by_flux: list[tuple[float, float]] = field(default_factory=list)
     frequency_traces: list[CalibrationTrace] = field(default_factory=list)
     rabi_traces: list[CalibrationTrace] = field(default_factory=list)
+    amp_traces: list[CalibrationTrace] = field(default_factory=list)
+    last_amp_gain: float | None = None
     rabi_drive: RabiDriveFeedback = field(default_factory=RabiDriveFeedback)
     last_pi: CalibratedPi2 | None = None
     pi_source: CalibrationSource | None = None
@@ -546,6 +523,65 @@ async def calibrate_frequency(
 
 
 async def calibrate_rabi(
+    scope: Scope,
+    *,
+    plots: Plots,
+    inputs: CalibrationInputs,
+    frequency: FrequencyResult,
+    carry: CalCarry,
+    t1_estimate_us: float,
+) -> RabiResult:
+    """Calibrate current pi/pi2 with the selected length/gain Rabi mode.
+
+    len_only retains length fitting. len_then_amp requires accepted LenRabi,
+    then uses its length for gain calibration. amp_only skips length acquisition
+    and fixes length to target_pi_length_us or the host seed. Both Amp modes
+    require accepted current frequency; failures never borrow a previous pulse.
+    Partial results save raw but do not proceed to another acquisition.
+    """
+    if inputs.tun.rabi_mode != "amp_only":
+        rabi = await calibrate_len_rabi(
+            scope,
+            plots=plots,
+            inputs=inputs,
+            frequency=frequency,
+            carry=carry,
+            t1_estimate_us=t1_estimate_us,
+        )
+        if inputs.tun.rabi_mode == "len_only" or rabi.status != "accepted":
+            return rabi
+    else:
+        _validate_calibration_inputs(inputs.flux, t1_estimate_us)
+        if frequency.status != "accepted":
+            return RabiResult(
+                "skipped",
+                "Requires this point's accepted frequency",
+                None,
+                None,
+                None,
+                None,
+            )
+        length = inputs.tun.target_pi_length_us or carry.seed.pi_length_us
+        rabi = RabiResult("accepted", None, frequency.frequency_mhz, length, None, None)
+    if scope.cancelled:
+        return replace(
+            rabi,
+            status="skipped",
+            reason="Point cancelled",
+            pi_length_us=None,
+            pi2_length_us=None,
+        )
+    return await calibrate_amp_rabi(
+        scope,
+        plots=plots,
+        inputs=inputs,
+        carry=carry,
+        rabi=rabi,
+        t1_estimate_us=t1_estimate_us,
+    )
+
+
+async def calibrate_len_rabi(
     scope: Scope,
     *,
     plots: Plots,
@@ -912,6 +948,7 @@ def current_point_calibration(
                 prior.readout_gain,
                 rabi.pi2_length_us,
                 drive_gain=rabi.drive_gain,
+                pi2_drive_gain=rabi.pi2_drive_gain,
             )
             carry.pi_source = CalibrationSource(
                 source_index=point_index, source_flux=flux, fallback=False

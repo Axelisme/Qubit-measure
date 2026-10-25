@@ -176,8 +176,9 @@ def t2echo_cfg(
     pi2 = plan.qub_pulse.model_copy(deep=True)
     pi2.set_param("freq", cal.f01_mhz)
     pi2.set_param("length", cal.pi2_length_us)
-    if cal.drive_gain is not None:
-        pi2.set_param("gain", cal.drive_gain)
+    pi2_gain = cal.pi2_drive_gain if cal.pi2_drive_gain is not None else cal.drive_gain
+    if pi2_gain is not None:
+        pi2.set_param("gain", pi2_gain)
     ro = plan.readout.model_copy(deep=True)
     apply_readout_calibration(ro, cal)
     return T2EchoCfg(
@@ -205,15 +206,16 @@ def t2ramsey_cfg(
     """Build detached Ramsey cfg with native detune_ratio/length_step MHz.
 
     Inputs share t2echo_cfg's fixed modules and positive finite microsecond grid
-    contract. Pi/2 uses fit.pi2_length_us at the same waveform/gain, never half
-    the fitted pi. No hardware, plotting or saving occurs; cfg errors propagate.
+    contract. Pi/2 uses cal.pi2_length_us and its independent pi2_drive_gain
+    when present, otherwise the Len gain. Neither scalar is halved from pi. No hardware, plotting or saving occurs; cfg errors propagate.
     """
     sweep = _sweep(plan, tun, guess_us)
     pi2 = plan.qub_pulse.model_copy(deep=True)
     pi2.set_param("freq", cal.f01_mhz)
     pi2.set_param("length", cal.pi2_length_us)
-    if cal.drive_gain is not None:
-        pi2.set_param("gain", cal.drive_gain)
+    pi2_gain = cal.pi2_drive_gain if cal.pi2_drive_gain is not None else cal.drive_gain
+    if pi2_gain is not None:
+        pi2.set_param("gain", pi2_gain)
     ro = plan.readout.model_copy(deep=True)
     apply_readout_calibration(ro, cal)
     return T2RamseyCfg(
