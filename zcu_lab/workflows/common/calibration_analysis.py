@@ -9,12 +9,13 @@ import numpy as np
 from numpy.typing import NDArray
 from zcu_tools.analysis.fitting import (
     FitQuality,
+    PeakCandidate,
     compute_fit_quality,
-    fit_qubit_freq,
     fit_rabi,
 )
 from zcu_tools.experiment.workflows import Failed
 
+from zcu_lab.v2.twotone.freq.analysis import FreqAnalyzeOptions, fit_spectrum
 from zcu_lab.v2.twotone.freq.core import FreqResult, qubfreq_signal2real
 from zcu_lab.v2.twotone.rabi.len_rabi.core import LenRabiResult, rabi_signal2real
 from zcu_lab.workflows.common.analysis import fit_or_failed, validate_fit_trace
@@ -26,7 +27,8 @@ class FrequencyFit:
 
     frequency_mhz/error_mhz are the fitted center and its marginal standard
     error. width_mhz/width_error_mhz are the FWHM and its standard error.
-    observed/fitted are float64 vectors aligned with source.freqs.
+    freqs/observed/fitted are float64 vectors for the selected fit interval.
+    peaks holds all candidates; selected_peak is the sampled target or None.
     quality contains residual diagnostics with no parameter-error entries.
     Values are not acceptance-filtered: native nonfinite errors and unavailable
     diagnostics remain visible for the workflow to reject.
@@ -39,6 +41,10 @@ class FrequencyFit:
     observed: NDArray[np.float64]
     fitted: NDArray[np.float64]
     quality: FitQuality
+    freqs: NDArray[np.float64]
+    peaks: tuple[PeakCandidate, ...]
+    selected_peak: PeakCandidate | None
+    source: FreqResult
 
 
 @dataclass(frozen=True)
@@ -64,12 +70,20 @@ class RabiFit:
     quality: FitQuality
 
 
-def analyze_qubit_freq(result: FreqResult) -> FrequencyFit | Failed:
+def analyze_qubit_freq(
+    result: FreqResult,
+    options: FreqAnalyzeOptions | None = None,
+    *,
+    peaks: tuple[PeakCandidate, ...] | None = None,
+    isolate_peaks: bool = True,
+) -> FrequencyFit | Failed:
     """Fit the spectroscopy trace to estimate the qubit resonance and linewidth.
 
     result uses MHz coordinates and complex128 signals of matching shape.
-    Reuse the native background-removal/magnitude projection without skipping
-    or masking observations. Return estimate, error, FWHM and residual curves.
+    Reuse the native background-removal/magnitude projection, detect all peaks,
+    then fit the nearest expected or strongest candidate between neighbours.
+    peaks may supply precomputed candidates on that projection. isolate_peaks=False
+    retains single-mode whole-window fitting. Return FWHM/errors and local curves.
     Do not mutate result or acquire, plot, save, or apply an acceptance threshold.
     Return Failed(reason) for nonfinite measured IQ or the expected fit
     failures documented by fit_or_failed. Structural/configuration errors and
@@ -78,22 +92,28 @@ def analyze_qubit_freq(result: FreqResult) -> FrequencyFit | Failed:
     failure = validate_fit_trace(result.freqs, result.signals)
     if failure is not None:
         return failure
-    # Remove the native background, then fit the complete resonance trace.
+    options = options if options is not None else FreqAnalyzeOptions()
     observed = qubfreq_signal2real(result.signals)
-    fit = fit_or_failed(lambda: fit_qubit_freq(result.freqs, observed, type="lor"))
+    fit = fit_or_failed(
+        lambda: fit_spectrum(
+            result.freqs, observed, options, peaks=peaks, isolate_peaks=isolate_peaks
+        )
+    )
     if isinstance(fit, Failed):
         return fit
-    frequency, error, width, width_error, fitted, _optimizer = fit
-    # The workflow uses public estimates/errors, not positional optimizer vectors.
-    quality = compute_fit_quality(observed, fitted, {}, None)
+    quality = compute_fit_quality(fit.observed, fit.fitted, {}, None)
     return FrequencyFit(
-        float(frequency),
-        float(error),
-        float(width),
-        float(width_error),
-        observed,
-        fitted,
+        fit.freq,
+        fit.freq_err,
+        fit.fwhm,
+        fit.fwhm_err,
+        fit.observed,
+        fit.fitted,
         quality,
+        fit.freqs,
+        fit.peaks,
+        fit.selected_peak,
+        result,
     )
 
 

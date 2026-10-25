@@ -56,7 +56,24 @@ Point 的 calibration_sources 記 consumer、need、source_index、source_flux �
 `singleshot` 保留 measured／skipped／failed、reason 與相對 native 檔名。未開、Rabi 未接受、間距不足或取消皆記 skipped 原因。
 完整擷取記 measured，Schedule failure 記 failed 且沒有檔名，partial 記 failed／partial 並保留檔名。未走到此 stage 的點記 skipped／not reached，歷史 record 缺欄位時為 None。
 Tuple 按 T1、Ramsey、Echo 排序，每個 kind 最多一個結果；開啟但失敗／拒絕／skipped 的項目有原因，關閉的項目沒有 placeholder。
-Frequency widening 保存每個 Completed attempt 的引用，fit 拒絕也保留 native raw。
+Frequency 預設 `frequency_mode="two_step"`。粗掃使用 probe pulse gain，
+span 為 `span_mhz * coarse_span_factor`，預設倍率 3。可用 `coarse_gain` 覆寫粗掃 gain。
+粗掃以 predictor 加 IDW 的中心選最近候選，再隔離其他峰做局部擬合。
+粗掃失敗或主峰為 truncated 時，才沿 `qf_widen` 擴窗重掃。
+粗掃成功後，以擬合中心細掃一次，不再套 detune offset。
+細掃 span 預設為 `span_mhz`，可用 `fine_span_mhz` 覆寫。
+細掃 gain 預設為自適應 gain 的一半，且不超過粗掃 gain 的一半，可用 `fine_gain` 覆寫。
+只有細掃結果進入頻率接受門檻、IDW、可信歷史與線寬回饋。
+細掃失敗不退回粗掃，整點失敗才觸發 recovery 判斷。
+`frequency_mode="single"` 保留原有整窗擬合、gain 與 widening。
+
+`peak_min_prominence` 是投影訊號 ptp 比例，預設 0.2。
+`peak_min_distance_mhz` 是候選最小間距，預設 0 MHz。
+每點 Frequency result 的 `scans` 保存 coarse、fine 或 single 階段、
+檔名、gain、span、實際中心、全部候選、選定候選及擬合中心。
+候選的 `truncated` 表示窗內無法觀察完整半 prominence 寬度。
+兩步檔名含 coarse 或 fine，single 維持 frequency-NN.h5。
+Frequency 保存每個 Completed attempt 的引用，fit 拒絕也保留 native raw。
 Schedule Failed／skipped stage 沒有偽造檔名。分析失敗仍保留先保存的 Completed 檔名。工具按 point 的用途欄位讀檔，不掃目錄或猜 effect 次序。
 這讓 frequency 接受而 Rabi 失敗的點仍保留部分科學證據。
 
@@ -67,7 +84,7 @@ Pause 中斷目前 operation，Resume 重試同一 request；已完成的校準�
 量測間若 iteration.cancelled，補 status="skipped" 再 continue，只跳過目前點。Helper 以 return 退出該點。
 根 Stop 在 async operation 或 Ask raise ScriptCancelled。Finally 提交已有成果，不改 status，例外繼續向上傳播。
 分析 helper 對非有限 measured IQ 回 Failed(reason)，不填值或 mask。Native fitter 的具名 AnalysisFailed 與訊息恰為 `array must not contain infs or NaNs` 的 scipy ValueError 也轉 Failed。Caller 記 status=failed 並保留 raw 檔名。
-Shape、grid、detune、cfg 與其他程式錯誤仍 raise。其他 warning 沿原政策處理。完整資料的投影、fit 選擇、接受門檻與 history 政策不變。
+Shape、grid、detune、cfg 與其他程式錯誤仍 raise。其他 warning 沿原政策處理。投影與接受門檻不變。兩步掃描只讓細掃結果更新 history，single 保留原整窗擬合。
 沒有 stage checkpoint、原始檔 reader、檔案追蹤或 rollback 保證。Unexpected adapter、fit、writer 或 plot 例外停止 run，不改標為正常失敗。
 
 ## MIST 與 overnight

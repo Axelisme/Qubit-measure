@@ -46,11 +46,41 @@ class FrequencyModelForm(FormModel):
 
 
 class FrequencyTunablesForm(FormModel):
-    """Edit detune offset, point count, linewidth gain and physical recovery mode.
+    """Edit two-step/single scanning, peak selection and linewidth/recovery knobs.
 
-    The inherited calibration form supplies span and widening. Offset plus/minus
-    half-span supports asymmetric windows, e.g. offset 15, span 70 gives -20..50.
+    The inherited calibration form supplies base span and coarse widening.
+    Coarse gain/span and fine gain/span are independently editable. Offset
+    shifts coarse/single windows only; fine scans center on the coarse fit.
     """
+
+    frequency_mode: Literal["two_step", "single"] = "two_step"
+    coarse_gain: float | None = Field(
+        default=None,
+        gt=0,
+        le=1,
+        description="Coarse probe gain; None uses the probe pulse gain",
+    )
+    coarse_span_factor: float = Field(
+        default=3.0, gt=0, description="Coarse span / span_mhz before widening"
+    )
+    fine_gain: float | None = Field(
+        default=None,
+        gt=0,
+        le=1,
+        description="Fine probe gain; None uses half the adaptive gain, capped at half coarse gain",
+    )
+    fine_span_mhz: float | None = Field(
+        default=None, gt=0, description="Fine span in MHz; None uses span_mhz"
+    )
+    peak_min_prominence: float = Field(
+        default=0.2,
+        ge=0,
+        le=1,
+        description="Minimum candidate prominence / projected signal range",
+    )
+    peak_min_distance_mhz: float = Field(
+        default=0.0, ge=0, description="Minimum candidate separation in MHz"
+    )
 
     detune_center_mhz: float = Field(
         default=0.0, description="Detune window offset (MHz)"

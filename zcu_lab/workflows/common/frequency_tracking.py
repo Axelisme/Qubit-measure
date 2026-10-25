@@ -55,13 +55,46 @@ class FrequencyTunables(BaseModel):
     """Spectroscopy window, probe gain and recovery policy for one invocation.
 
     detune_center_mhz offsets the window relative to the physical prediction;
-    span_mhz*qf_widen gives its full width. qf_points includes both endpoints.
-    Adaptive gain targets target_kappa using trusted linewidth/gain feedback,
-    capped at drive_gain_cap. Fixed mode retains the selected pulse's gain.
+    span_mhz*qf_widen gives the single scan width. two_step widens only the
+    coarse span_mhz*coarse_span_factor survey; fine_span_mhz defaults to span_mhz.
+    Coarse uses the pulse gain unless overridden. Fine defaults to half adaptive
+    gain, capped at half coarse gain. Only the fine linewidth updates feedback.
+    detune_center_mhz applies to coarse/single, not to the recentered fine scan.
+    qf_points includes both endpoints. Adaptive gain targets target_kappa using
+    trusted linewidth/gain feedback, capped at drive_gain_cap.
     """
 
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
     span_mhz: float = Field(default=30.0, gt=0, description="Base spectroscopy span")
+    frequency_mode: Literal["two_step", "single"] = "two_step"
+    coarse_gain: float | None = Field(
+        default=None,
+        gt=0,
+        le=1,
+        description="Coarse probe gain; None uses the probe pulse gain",
+    )
+    coarse_span_factor: float = Field(
+        default=3.0, gt=0, description="Coarse span / span_mhz before widening"
+    )
+    fine_gain: float | None = Field(
+        default=None,
+        gt=0,
+        le=1,
+        description="Fine probe gain; None uses half the adaptive gain, capped at half coarse gain",
+    )
+    fine_span_mhz: float | None = Field(
+        default=None, gt=0, description="Fine span in MHz; None uses span_mhz"
+    )
+    peak_min_prominence: float = Field(
+        default=0.2,
+        ge=0,
+        le=1,
+        description="Minimum candidate prominence / projected signal range",
+    )
+    peak_min_distance_mhz: float = Field(
+        default=0.0, ge=0, description="Minimum candidate separation in MHz"
+    )
+
     detune_center_mhz: float = Field(
         default=0.0, description="Detune window offset (MHz)"
     )

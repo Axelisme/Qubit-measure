@@ -3,11 +3,32 @@
 from dataclasses import dataclass
 from typing import Literal
 
+from zcu_tools.analysis.fitting import PeakCandidate
 from zcu_tools.simulate.fluxonium.physical_fit import FluxoniumModelSnapshot
 
 from zcu_lab.workflows.common.frequency_tracking import RecoveryAttempt
 
 type StageStatus = Literal["accepted", "rejected", "failed", "skipped"]
+
+
+@dataclass(frozen=True)
+class FrequencyScan:
+    """One coarse/fine/single attempt, including acquisition and fit failures.
+
+    file is the relative native filename after Completed, otherwise None.
+    gain/span_mhz/center_mhz describe the actual scan. peaks contains every
+    detected candidate, empty for failed/partial acquisition. selected_peak is
+    the sampled target; fitted_center_mhz is None when fitting did not finish.
+    """
+
+    stage: Literal["coarse", "fine", "single"]
+    file: str | None
+    gain: float
+    span_mhz: float
+    center_mhz: float
+    peaks: tuple[PeakCandidate, ...] = ()
+    selected_peak: PeakCandidate | None = None
+    fitted_center_mhz: float | None = None
 
 
 @dataclass(frozen=True)
@@ -18,7 +39,7 @@ class FrequencyResult:
     (Schedule or expected fitting failure). Partial reason is stopped.
     reason is None on acceptance, otherwise the diagnostic. frequency_mhz is
     this point's positive fitted MHz only on acceptance, never a prior seed.
-    files lists every Completed widening attempt in acquisition order, including
+    files lists every Completed coarse/fine/single attempt in acquisition order, including
     partial, rejected and failed fits; Schedule failures have no filename.
     References do not guarantee later existence. Unexpected writer/adapter/fit/
     plot exceptions propagate instead. probe_gains records actual spectroscopy
@@ -26,7 +47,9 @@ class FrequencyResult:
     scan_center_mhz is the physical-plus-IDW center before window offset.
     predictor_model captures the model used to choose this point's center.
     recovery is this point's physical refit attempt, or None; an accepted candidate
-    first affects the next point. These diagnostics contain no live predictor.
+    first affects the next point. scans records stage, filename, gain, span and
+    all candidates for every coarse/fine/single attempt, including failures.
+    These diagnostics contain no live predictor.
     """
 
     status: StageStatus
@@ -37,6 +60,7 @@ class FrequencyResult:
     scan_center_mhz: float | None = None
     predictor_model: FluxoniumModelSnapshot | None = None
     recovery: RecoveryAttempt | None = None
+    scans: tuple[FrequencyScan, ...] = ()
 
 
 @dataclass(frozen=True)
