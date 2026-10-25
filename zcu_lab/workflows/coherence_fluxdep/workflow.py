@@ -66,6 +66,7 @@ from zcu_lab.workflows.common.calibration import (
 )
 from zcu_lab.workflows.common.devices import set_flux
 from zcu_lab.workflows.common.frequency_tracking import FrequencyModel, FrequencyTracker
+from zcu_lab.workflows.common.gain import GainClamp
 from zcu_lab.workflows.common.saving import save_native
 from zcu_lab.workflows.common.summary import (
     RunSummary,
@@ -148,6 +149,7 @@ class CoherencePoint(BaseModel):
     existence/completeness guarantee and are never inferred from effect order.
     calibration_sources names each consumer's pulse producer and fallback use;
     readout_source identifies the retained readout producer or fixed host seed.
+    gain_clamped maps downstream stage names to changed DAC gains (before/after).
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -161,6 +163,7 @@ class CoherencePoint(BaseModel):
     calibration_sources: dict[str, CalibrationSource] = Field(default_factory=dict)
     readout_source: CalibrationSource | None = None
     measurements: tuple[LifetimeResult, ...] = ()
+    gain_clamped: dict[str, list[GainClamp]] = Field(default_factory=dict)
     status: Literal["collecting", "completed", "skipped"] = "collecting"
 
 
@@ -583,7 +586,13 @@ async def run_singleshot_stage(
         source_flux=point_record.flux,
         fallback=False,
     )
-    cfg = singleshot_cfg(plan, tun, inputs.cal, relax_delay=inputs.relax_delay)
+    cfg = singleshot_cfg(
+        plan,
+        tun,
+        inputs.cal,
+        relax_delay=inputs.relax_delay,
+        gain_clamped=point_record.gain_clamped.setdefault("singleshot", []),
+    )
     ge = await iteration.run(GE_Exp().run, cfg, name="singleshot GE")
     observe_operation(summary, ge)
     if isinstance(ge, Failed):
@@ -693,6 +702,7 @@ async def coherence_fluxdep(
                         tun.current.t1,
                         now_cal,
                         history_guess(tun.current.t1.guess_us, t1_by_flux),
+                        gain_clamped=point_record.gain_clamped.setdefault("t1", []),
                     )
                     if now_cal is not None
                     else None,
@@ -730,6 +740,9 @@ async def coherence_fluxdep(
                                 tun.current.t2ramsey.guess_us, t2ramsey_by_flux
                             ),
                             t1_estimate_us=t1_estimate,
+                            gain_clamped=point_record.gain_clamped.setdefault(
+                                "t2ramsey", []
+                            ),
                         ),
                         point_record,
                         env.plots,
@@ -758,6 +771,9 @@ async def coherence_fluxdep(
                             cal,
                             history_guess(tun.current.t2echo.guess_us, t2echo_by_flux),
                             t1_estimate_us=t1_estimate,
+                            gain_clamped=point_record.gain_clamped.setdefault(
+                                "t2echo", []
+                            ),
                         ),
                         point_record,
                         env.plots,

@@ -44,6 +44,7 @@ from zcu_lab.workflows.common.calibration import (
 from zcu_lab.workflows.common.calibration_results import StageStatus
 from zcu_lab.workflows.common.devices import set_flux
 from zcu_lab.workflows.common.frequency_tracking import FrequencyModel, FrequencyTracker
+from zcu_lab.workflows.common.gain import GainClamp, clamp_gain
 from zcu_lab.workflows.common.summary import RunSummary, SummaryAccumulator
 from zcu_lab.workflows.common.summary_points import mist_summary_point
 from zcu_lab.workflows.mist_fluxdep.acquire import run_mist
@@ -126,7 +127,10 @@ class MISTTunables(BaseModel):
 
 
 class MISTTrace(BaseModel):
-    """One preparation's outcome; gain_file retains raw IQ even for partial stops."""
+    """One preparation's outcome, raw gain_file and any truncated DAC gains.
+
+    gain_clamped records field names and before/after values at cfg construction.
+    """
 
     status: StageStatus = Field(
         default="skipped",
@@ -135,6 +139,7 @@ class MISTTrace(BaseModel):
     success: bool = False
     reason: str | None = None
     gain_file: str | None = None
+    gain_clamped: list[GainClamp] = Field(default_factory=list)
 
 
 class MISTPoint(BaseModel):
@@ -178,6 +183,7 @@ def mist_cfg(
     cal: Calibrated,
     *,
     mode: Literal["excited", "ground"] = "excited",
+    gain_clamped: list[GainClamp] | None = None,
 ) -> PowerDepCfg:
     """Configure a fixed disturbance gain scan to measure MIST after a calibrated pi.
 
@@ -188,6 +194,7 @@ def mist_cfg(
     mode=ground omits preparation. gain SweepCfg comes entirely from plan;
     relax is five times captured T1, or tun.relax_factor * tun.guess_us. Native
     validation errors propagate; input models stay unchanged and no I/O occurs.
+    Clip runtime gains to DAC limits; append any changes to gain_clamped.
     """
     pi = None
     if mode == "excited":
@@ -195,9 +202,11 @@ def mist_cfg(
         pi.set_param("freq", cal.f01_mhz)
         pi.set_param("length", cal.pi_length_us)
         if cal.drive_gain is not None:
-            pi.set_param("gain", cal.drive_gain)
+            pi.set_param("gain", clamp_gain(cal.drive_gain, "pi", gain_clamped))
     readout = plan.readout.model_copy(deep=True)
-    apply_readout_calibration(readout, cal)
+    apply_readout_calibration(readout, cal, gain_clamped)
+    start = clamp_gain(plan.gain_start, "mist.start", gain_clamped)
+    stop = clamp_gain(plan.gain_stop, "mist.stop", gain_clamped)
     return PowerDepCfg(
         reps=tun.reps,
         rounds=tun.rounds,
@@ -212,10 +221,10 @@ def mist_cfg(
         probe_pulse=plan.mist_pulse.model_copy(deep=True),
         readout=readout,
         gain=SweepCfg(
-            start=plan.gain_start,
-            stop=plan.gain_stop,
+            start=start,
+            stop=stop,
             expts=plan.gain_points,
-            step=(plan.gain_stop - plan.gain_start) / (plan.gain_points - 1),
+            step=(stop - start) / (plan.gain_points - 1),
         ),
     )
 
@@ -506,7 +515,11 @@ async def mist_fluxdep(
                         need="now", source_index=index, source_flux=flux, fallback=False
                     )
                 cfg = mist_cfg(
-                    plan, tun.current, cal or carry.last or carry.seed, mode=mode
+                    plan,
+                    tun.current,
+                    cal or carry.last or carry.seed,
+                    mode=mode,
+                    gain_clamped=trace.gain_clamped,
                 )
                 result = await run_mist_stage(
                     iteration,

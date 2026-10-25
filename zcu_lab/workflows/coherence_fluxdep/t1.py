@@ -22,6 +22,7 @@ from zcu_lab.workflows.coherence_fluxdep.calibration import (
     CalibrationFiles,
 )
 from zcu_lab.workflows.common.calibration import Calibrated, apply_readout_calibration
+from zcu_lab.workflows.common.gain import GainClamp, clamp_gain
 
 
 class T1Plan(BaseModel):
@@ -143,7 +144,14 @@ class T1Tunables(BaseModel):
         return self
 
 
-def t1_cfg(plan: T1Plan, tun: T1Tunables, cal: Calibrated, lifetime_us: float) -> T1Cfg:
+def t1_cfg(
+    plan: T1Plan,
+    tun: T1Tunables,
+    cal: Calibrated,
+    lifetime_us: float,
+    *,
+    gain_clamped: list[GainClamp] | None = None,
+) -> T1Cfg:
     """Build a detached native T1 cfg with linear or exponential delay sampling.
 
     lifetime_us is the positive finite lifetime guess in microseconds;
@@ -154,7 +162,8 @@ def t1_cfg(plan: T1Plan, tun: T1Tunables, cal: Calibrated, lifetime_us: float) -
     samples. reps/rounds and uniform come from tun.
     Pi drive uses plan.qub_pulse waveform and cal's acquisition gain, frequency
     and duration. None drive_gain retains the template gain. Readout uses cal's
-    frequency/gain on plan.readout routing.
+    frequency/gain on plan.readout routing. Clip runtime gains to DAC limits;
+    append changed before/after values to gain_clamped when supplied.
     Native initial_delay/dev defaults remain owned by the native cfg model;
     no reset or extra module role is selected. Flux is set by the workflow,
     never patched into a cfg device mapping.
@@ -166,9 +175,9 @@ def t1_cfg(plan: T1Plan, tun: T1Tunables, cal: Calibrated, lifetime_us: float) -
     pi_pulse.set_param("freq", cal.f01_mhz)
     pi_pulse.set_param("length", cal.pi_length_us)
     if cal.drive_gain is not None:
-        pi_pulse.set_param("gain", cal.drive_gain)
+        pi_pulse.set_param("gain", clamp_gain(cal.drive_gain, "pi", gain_clamped))
     readout = plan.readout.model_copy(deep=True)
-    apply_readout_calibration(readout, cal)
+    apply_readout_calibration(readout, cal, gain_clamped)
     stop = (
         min(
             tun.max_length_us,

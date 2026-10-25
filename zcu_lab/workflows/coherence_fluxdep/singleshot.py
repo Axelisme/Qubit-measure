@@ -12,6 +12,7 @@ from zcu_lab.workflows.common.calibration import (
     RabiResult,
     apply_readout_calibration,
 )
+from zcu_lab.workflows.common.gain import GainClamp, clamp_gain
 
 
 class SingleshotTunables(BaseModel):
@@ -78,7 +79,12 @@ def singleshot_skip_reason(
 
 
 def singleshot_cfg(
-    plan: T1Plan, tun: SingleshotTunables, cal: Calibrated, *, relax_delay: float
+    plan: T1Plan,
+    tun: SingleshotTunables,
+    cal: Calibrated,
+    *,
+    relax_delay: float,
+    gain_clamped: list[GainClamp] | None = None,
 ) -> GE_Cfg:
     """Build GE with this point's calibrated pi pulse and retained readout.
 
@@ -86,15 +92,16 @@ def singleshot_cfg(
     in microseconds, also when T1 is disabled. Use no reset or init pulse;
     compare probe off/on. Copy modules, applying cal.drive_gain when present and retaining waveform and
     readout routing. Native cfg validation errors propagate; no acquisition,
-    fitting or input mutation occurs.
+    fitting or input mutation occurs. Clip runtime gains to DAC limits;
+    append changed before/after values to gain_clamped when supplied.
     """
     pulse = plan.qub_pulse.model_copy(deep=True)
     pulse.set_param("freq", cal.f01_mhz)
     pulse.set_param("length", cal.pi_length_us)
     if cal.drive_gain is not None:
-        pulse.set_param("gain", cal.drive_gain)
+        pulse.set_param("gain", clamp_gain(cal.drive_gain, "pi", gain_clamped))
     readout = plan.readout.model_copy(deep=True)
-    apply_readout_calibration(readout, cal)
+    apply_readout_calibration(readout, cal, gain_clamped)
     return GE_Cfg(
         probe_pulse=pulse,
         readout=readout,

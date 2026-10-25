@@ -22,6 +22,7 @@ from zcu_lab.workflows.common.calibration import (
     CalibratedPi2,
     apply_readout_calibration,
 )
+from zcu_lab.workflows.common.gain import GainClamp, clamp_gain
 
 
 class T2Plan(BaseModel):
@@ -160,6 +161,7 @@ def t2echo_cfg(
     guess_us: float,
     *,
     t1_estimate_us: float,
+    gain_clamped: list[GainClamp] | None = None,
 ) -> T2EchoCfg:
     """Build detached Echo cfg with the fitted pi/pi2 and optional fringes.
 
@@ -172,21 +174,22 @@ def t2echo_cfg(
     (current accepted T1, historical EWMA, then seed), floored at relax_min_us.
     Fixed modes use explicit timing unchanged. Detune in MHz is ratio/step.
     Invalid grid/T1 estimates raise ValueError; inputs remain unchanged.
+    Clip runtime gains to DAC limits; append any changes to gain_clamped.
     """
     sweep = _sweep(plan, tun, guess_us)
     pi = plan.qub_pulse.model_copy(deep=True)
     pi.set_param("freq", cal.f01_mhz)
     pi.set_param("length", cal.pi_length_us)
     if cal.drive_gain is not None:
-        pi.set_param("gain", cal.drive_gain)
+        pi.set_param("gain", clamp_gain(cal.drive_gain, "pi", gain_clamped))
     pi2 = plan.qub_pulse.model_copy(deep=True)
     pi2.set_param("freq", cal.f01_mhz)
     pi2.set_param("length", cal.pi2_length_us)
     pi2_gain = cal.pi2_drive_gain if cal.pi2_drive_gain is not None else cal.drive_gain
     if pi2_gain is not None:
-        pi2.set_param("gain", pi2_gain)
+        pi2.set_param("gain", clamp_gain(pi2_gain, "pi2", gain_clamped))
     ro = plan.readout.model_copy(deep=True)
-    apply_readout_calibration(ro, cal)
+    apply_readout_calibration(ro, cal, gain_clamped)
     return T2EchoCfg(
         reps=tun.reps,
         rounds=tun.rounds,
@@ -208,11 +211,12 @@ def t2ramsey_cfg(
     guess_us: float,
     *,
     t1_estimate_us: float,
+    gain_clamped: list[GainClamp] | None = None,
 ) -> T2RamseyCfg:
     """Build detached Ramsey cfg with native detune_ratio/length_step MHz.
 
     Inputs share t2echo_cfg's fixed modules and positive finite microsecond grid
-    contract. Pi/2 uses cal.pi2_length_us and its independent pi2_drive_gain
+    contract, including optional gain_clamped before/after diagnostics. Pi/2 uses cal.pi2_length_us and its independent pi2_drive_gain
     when present, otherwise the Len gain. Neither scalar is halved from pi. No hardware, plotting or saving occurs; cfg errors propagate.
     """
     sweep = _sweep(plan, tun, guess_us)
@@ -221,9 +225,9 @@ def t2ramsey_cfg(
     pi2.set_param("length", cal.pi2_length_us)
     pi2_gain = cal.pi2_drive_gain if cal.pi2_drive_gain is not None else cal.drive_gain
     if pi2_gain is not None:
-        pi2.set_param("gain", pi2_gain)
+        pi2.set_param("gain", clamp_gain(pi2_gain, "pi2", gain_clamped))
     ro = plan.readout.model_copy(deep=True)
-    apply_readout_calibration(ro, cal)
+    apply_readout_calibration(ro, cal, gain_clamped)
     return T2RamseyCfg(
         reps=tun.reps,
         rounds=tun.rounds,

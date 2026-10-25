@@ -70,6 +70,7 @@ from zcu_lab.workflows.common.frequency_tracking import (
     FrequencyTracker,
     trusted_curve,
 )
+from zcu_lab.workflows.common.gain import GainClamp, clamp_gain
 from zcu_lab.workflows.common.rabi_feedback import RabiDriveFeedback
 from zcu_lab.workflows.common.rabi_measurement import measure_planned_rabi
 from zcu_lab.workflows.common.readout_analysis import accepted_readout_optimum
@@ -159,15 +160,22 @@ class CalibrationInputs:
     summary: SummaryAccumulator | None = None
 
 
-def apply_readout_calibration(readout: ReadoutCfg, cal: Calibrated) -> None:
+def apply_readout_calibration(
+    readout: ReadoutCfg,
+    cal: Calibrated,
+    gain_clamped: list[GainClamp] | None = None,
+) -> None:
     """Apply accepted readout scalars to a caller-owned native cfg in place.
 
     Updates the shared generator/ADC frequency in MHz and native readout gain.
+    Clip gain to [0, 1], appending any before/after change to gain_clamped.
     Callers must copy any template they need to retain before calling.
     Native set_param errors propagate. No acquisition or saving occurs.
     """
     readout.set_param("freq", cal.readout_freq_mhz)
-    readout.set_param("gain", cal.readout_gain)
+    readout.set_param(
+        "gain", clamp_gain(cal.readout_gain, "readout", gain_clamped, lower=0.0)
+    )
 
 
 def _validate_calibration_inputs(flux: float, t1_estimate_us: float) -> None:
@@ -293,17 +301,22 @@ async def calibrate_len_rabi(
     # Sweep duration at the accepted frequency, retaining legal readout.
     drive = inputs.qub_pulse.model_copy(deep=True)
     drive.set_param("freq", f01)
-    gain = float(drive.gain)
+    gain_clamped: list[GainClamp] = []
     target_pi_us = inputs.tun.resolve_target_pi_length_us(carry.seed.pi_length_us)
-    if inputs.tun.rabi_drive_gain_mode == "auto_pi_product":
-        gain = carry.rabi_drive.select_gain(
+    gain = (
+        carry.rabi_drive.select_gain(
             carry.seed.pi_length_us * float(inputs.qub_pulse.gain),
             target_pi_us,
             m_ratio=carry.m_ratio,
+            gain_clamped=gain_clamped,
         )
-        drive.set_param("gain", gain)
+        if inputs.tun.rabi_drive_gain_mode == "auto_pi_product"
+        else float(drive.gain)
+    )
+    gain = clamp_gain(gain, "rabi.drive", gain_clamped)
+    drive.set_param("gain", gain)
     ro = inputs.readout.model_copy(deep=True)
-    apply_readout_calibration(ro, prior)
+    apply_readout_calibration(ro, prior, gain_clamped)
     start = max(
         inputs.tun.rabi_min_start_us, inputs.tun.rabi_start_factor * prior.pi_length_us
     )
@@ -345,6 +358,7 @@ async def calibrate_len_rabi(
         None,
         gain,
         target_pi_length_us=target_pi_us,
+        gain_clamped=tuple(gain_clamped),
         requested_sweep=cfg.length,
         planned_sweep=(
             None
@@ -511,12 +525,23 @@ async def calibrate_readout(
     drive = inputs.qub_pulse.model_copy(deep=True)
     drive.set_param("freq", cal.f01_mhz)
     drive.set_param("length", cal.pi_length_us)
+    gain_clamped: list[GainClamp] = []
     if cal.drive_gain is not None:
-        drive.set_param("gain", cal.drive_gain)
+        drive.set_param("gain", clamp_gain(cal.drive_gain, "pi", gain_clamped))
     ro = inputs.readout.model_copy(deep=True)
-    apply_readout_calibration(ro, prior)
-    gain_start = max(0.0, prior.readout_gain - inputs.tun.ro_gain_half_width)
-    gain_stop = min(1.0, prior.readout_gain + inputs.tun.ro_gain_half_width)
+    apply_readout_calibration(ro, prior, gain_clamped)
+    gain_start = clamp_gain(
+        prior.readout_gain - inputs.tun.ro_gain_half_width,
+        "readout.start",
+        gain_clamped,
+        lower=0.0,
+    )
+    gain_stop = clamp_gain(
+        prior.readout_gain + inputs.tun.ro_gain_half_width,
+        "readout.stop",
+        gain_clamped,
+        lower=0.0,
+    )
     cfg = FreqGainCfg(
         reps=inputs.tun.ro_reps,
         rounds=inputs.tun.ro_rounds,
@@ -545,7 +570,9 @@ async def calibrate_readout(
     outcome = await scope.run(FreqGainExp().run, cfg, name="readout")
     observe_operation(inputs.summary, outcome)
     if isinstance(outcome, Failed):
-        return ReadoutResult("failed", outcome.reason, None, None, None)
+        return ReadoutResult(
+            "failed", outcome.reason, None, None, None, tuple(gain_clamped)
+        )
     # Save the landscape and choose its best point meeting the SNR threshold.
     save_native(
         outcome,
@@ -555,7 +582,9 @@ async def calibrate_readout(
         identity=scope.identity,
     )
     if outcome.partial_result:
-        return ReadoutResult("rejected", "stopped", None, None, "readout.h5")
+        return ReadoutResult(
+            "rejected", "stopped", None, None, "readout.h5", tuple(gain_clamped)
+        )
     signals = np.abs(
         smooth_signal_nd(
             outcome.value.result.signals,
@@ -583,14 +612,17 @@ async def calibrate_readout(
             None,
             None,
             "readout.h5",
+            tuple(gain_clamped),
         )
     frequency = optimum.freq
-    gain = optimum.gain
+    gain = clamp_gain(optimum.gain, "readout.optimum", gain_clamped, lower=0.0)
     carry.last = replace(prior, readout_freq_mhz=frequency, readout_gain=gain)
     carry.readout_source = CalibrationSource(
         source_index=inputs.point_index, source_flux=inputs.flux, fallback=False
     )
-    return ReadoutResult("accepted", None, frequency, gain, "readout.h5")
+    return ReadoutResult(
+        "accepted", None, frequency, gain, "readout.h5", tuple(gain_clamped)
+    )
 
 
 def current_pi_calibration(
