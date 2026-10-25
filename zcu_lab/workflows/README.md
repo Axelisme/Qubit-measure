@@ -53,7 +53,7 @@ Reader 走 nested 樹依 commit_seq 排序，不依目錄名排序。
 `coherence_fluxdep`、`mist_fluxdep`、`overnight` 與 `overnight_mux` 都走這條路徑，不在 point payload 複製欄位。
 每筆 acquisition 記 `requested_rounds`、最後一次 attempt 的 `completed_rounds`、實際 acquire 呼叫數 `attempts`、`early_stopped` 與 `stop_value`。
 所有 workflow 量測 stage 預設 `reps=1000`、`rounds=10`，包括共用 spectroscopy、LenRabi、AmpRabi、readout 校準與 MIST。Singleshot 的 shots 不變。
-有 early-stop 欄位的 stage 預設 SNR 門檻 15，欄位留空（None）即關閉。Readout 優化與 MIST 沒有 early stop，會完成全部 rounds。
+Early-stop 欄位保留各 stage 原有的預設值，留空（None）即關閉。Spectroscopy 預設 50，LenRabi／AmpRabi 預設 30，Coherence lifetime 預設 20；overnight 與 overnight_mux 保持預設關閉。Readout 優化與 MIST 沒有 early stop，會完成全部 rounds。
 SNR 提前停止時 `stop_value` 是停止當下的 SNR，mux 是 active tones 的最小 SNR。非有限 SNR 存 None，early_stopped 仍保留 True。
 Failed stage 的已觀察 attempts 也保留。Native `docs/metadata.acquisitions` 使用同一資料，舊記錄缺少欄位時讀成空 tuple。
 

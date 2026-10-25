@@ -65,7 +65,7 @@ class T2EchoTunables(BaseModel):
         default=3, ge=0, description="Retries after a transient acquisition failure"
     )
     earlystop_snr: float | None = Field(
-        default=15.0,
+        default=20.0,
         gt=0,
         description="Completed-round trace SNR threshold; None disables early stop",
     )

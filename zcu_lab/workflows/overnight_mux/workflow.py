@@ -86,7 +86,7 @@ class OvernightMuxTunables(BaseModel):
         default=3, ge=0, description="Retries after a transient acquisition failure"
     )
     t1_earlystop_snr: float | None = Field(
-        default=15.0,
+        default=None,
         gt=0,
         description="Completed-round trace SNR threshold; None disables early stop",
     )
@@ -94,7 +94,7 @@ class OvernightMuxTunables(BaseModel):
         default=3, ge=0, description="Retries after a transient acquisition failure"
     )
     t2_earlystop_snr: float | None = Field(
-        default=15.0,
+        default=None,
         gt=0,
         description="Completed-round trace SNR threshold; None disables early stop",
     )
