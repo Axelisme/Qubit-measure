@@ -121,6 +121,12 @@ class CoherencePlanForm(FormModel):
     flux_unit: Annotated[Literal["A", "V", "native"], Display(label="Flux unit")] = (
         Field(description="Explicit flux coordinate: YOKO A/V, Fake native")
     )
+    seed_flux: Annotated[float | None, Display(label="Seed pulse calibration flux")] = (
+        Field(
+            default=None,
+            description="Seed pulse calibration setpoint in Flux unit; blank disables matrix feed-forward. Confirm the value and unit before starting.",
+        )
+    )
     fluxes: Annotated[SweepInput, Display(label="Fluxes")] = Field(
         description="Ordered absolute device setpoints"
     )
@@ -236,6 +242,7 @@ class CoherencePlanForm(FormModel):
             predictor=self.predictor.to_cfg(),
             flux_dev=self.flux_dev,
             flux_unit=self.flux_unit,
+            seed_flux=self.seed_flux,
             fluxes=expand_fluxes(self.fluxes),
             points=self.points,
             qub_pulse=modules.qub_pulse,

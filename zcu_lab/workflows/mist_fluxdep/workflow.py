@@ -53,6 +53,8 @@ from zcu_lab.workflows.mist_fluxdep.saving import save_mist
 class MISTPlan(BaseModel):
     """Scan disturbance gain across flux to measure MIST without a threshold fit.
 
+    seed_flux is the seed pulse's calibration setpoint in flux_unit; None
+    disables matrix-element feed-forward.
     flux_dev names the connected driver and flux_unit is explicit A/V/native.
     fluxes are ordered absolute setpoints. qub_pulse supplies the calibrated
     pi preparation waveform/gain and Length-Rabi drive. probe_pulse supplies
@@ -77,6 +79,10 @@ class MISTPlan(BaseModel):
     gain_start: float
     gain_stop: float
     gain_points: int = Field(ge=2)
+    seed_flux: float | None = Field(
+        default=None,
+        description="Seed pulse calibration flux in flux_unit; None disables matrix feed-forward",
+    )
     probe_pulse: PulseCfg = Field(
         description="Independent spectroscopy pulse with its own waveform and initial gain"
     )
@@ -392,7 +398,9 @@ async def mist_fluxdep(
     _ = env.soc
     _ = env.devices
     carry = CalCarry(
-        env.context, frequency_tracker=FrequencyTracker(plan.predictor.make_predictor())
+        env.context,
+        seed_flux=plan.seed_flux,
+        frequency_tracker=FrequencyTracker(plan.predictor.make_predictor()),
     )
     modes: tuple[Literal["excited", "ground"], ...] = (
         ("excited", "ground") if plan.measure_mode == "both" else (plan.measure_mode,)
