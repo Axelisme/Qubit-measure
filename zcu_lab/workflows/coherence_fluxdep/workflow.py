@@ -8,9 +8,7 @@ from typing import Literal
 from matplotlib.figure import Figure
 from matplotlib.ticker import MaxNLocator
 from pydantic import BaseModel, ConfigDict, Field, model_validator
-from zcu_tools.experiment.scope import Scope
 from zcu_tools.experiment.workflows import (
-    Failed,
     Live,
     WorkflowEnv,
     workflow,
@@ -18,38 +16,25 @@ from zcu_tools.experiment.workflows import (
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2.modules import PulseCfg
 
-from zcu_lab.v2.singleshot.ge.core import GE_Exp
-from zcu_lab.workflows.coherence_fluxdep.measurements import (
-    EchoResult,
+from zcu_lab.workflows.coherence_fluxdep.history import (
     LifetimeHistory,
     LifetimeKind,
-    LifetimeResult,
-    RamseyResult,
-    history_guess,
     lifetime_guess,
-    measure_echo,
+)
+from zcu_lab.workflows.coherence_fluxdep.pulses import calibrated_pulses
+from zcu_lab.workflows.coherence_fluxdep.samples import append_point_sample
+from zcu_lab.workflows.coherence_fluxdep.singleshot import SingleshotTunables
+from zcu_lab.workflows.coherence_fluxdep.stages.calibration import calibrate_point
+from zcu_lab.workflows.coherence_fluxdep.stages.echo import EchoResult, measure_echo
+from zcu_lab.workflows.coherence_fluxdep.stages.ge import SingleshotResult, measure_ge
+from zcu_lab.workflows.coherence_fluxdep.stages.ramsey import (
+    RamseyResult,
     measure_ramsey,
 )
-from zcu_lab.workflows.coherence_fluxdep.pulses import (
-    calibrated_pulses,
-)
-from zcu_lab.workflows.coherence_fluxdep.samples import append_point_sample
-from zcu_lab.workflows.coherence_fluxdep.singleshot import (
-    SingleshotInputs,
-    SingleshotResult,
-    SingleshotTunables,
-    singleshot_cfg,
-    singleshot_skip_reason,
-)
-from zcu_lab.workflows.coherence_fluxdep.stages.calibration import calibrate_point
 from zcu_lab.workflows.coherence_fluxdep.stages.t1 import T1Result, measure_t1
+from zcu_lab.workflows.coherence_fluxdep.stages.t2_support import T2Guess
 from zcu_lab.workflows.coherence_fluxdep.t1 import T1Plan, T1Tunables
-from zcu_lab.workflows.coherence_fluxdep.t2 import (
-    T2EchoTunables,
-    T2RamseyTunables,
-    t2echo_cfg,
-    t2ramsey_cfg,
-)
+from zcu_lab.workflows.coherence_fluxdep.t2 import T2EchoTunables, T2RamseyTunables
 from zcu_lab.workflows.common.calibration import (
     CalCarry,
     Calibrated,
@@ -65,13 +50,10 @@ from zcu_lab.workflows.common.calibration import (
 )
 from zcu_lab.workflows.common.devices import set_flux
 from zcu_lab.workflows.common.frequency_tracking import FrequencyModel, FrequencyTracker
-from zcu_lab.workflows.common.gain import GainClamp
-from zcu_lab.workflows.common.saving import save_native
 from zcu_lab.workflows.common.stages import StageEnv
 from zcu_lab.workflows.common.summary import (
     RunSummary,
     SummaryAccumulator,
-    observe_operation,
 )
 from zcu_lab.workflows.common.summary_points import coherence_summary_point
 
@@ -152,8 +134,7 @@ class CoherencePoint(BaseModel):
     existence/completeness guarantee and are never inferred from effect order.
     calibration_sources names each consumer's pulse producer and fallback use;
     readout_source identifies the retained readout producer or fixed host seed.
-    gain_clamped maps T2/GE stages to changed DAC gains (before/after).
-    T1 stores its changes in t1.gain_clamped.
+    Each lifetime and GE result stores its own gain_clamped DAC changes.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -169,7 +150,6 @@ class CoherencePoint(BaseModel):
     t1: T1Result | None = None
     t2ramsey: RamseyResult | None = None
     t2echo: EchoResult | None = None
-    gain_clamped: dict[str, list[GainClamp]] = Field(default_factory=dict)
     status: Literal["collecting", "completed", "skipped"] = "collecting"
 
 
@@ -232,80 +212,6 @@ def draw_summaries(
             )
 
 
-def _append(
-    history: LifetimeHistory, flux: float, result: T1Result | LifetimeResult
-) -> None:
-    """Keep only accepted lifetime values in this lifetime's delay-grid history."""
-    if result.status == "accepted":
-        if result.lifetime_us is None or result.error_us is None:
-            raise ValueError("Accepted lifetime requires microseconds and error")
-        history.append((flux, result.lifetime_us, result.error_us))
-
-
-async def run_singleshot_stage(
-    iteration: Scope,
-    plan: CoherencePlan,
-    tun: SingleshotTunables,
-    point_record: CoherencePoint,
-    inputs: SingleshotInputs,
-    summary: SummaryAccumulator | None = None,
-) -> float | None:
-    """Gate, acquire and save raw GE, returning the last acquired flux setpoint.
-
-    Call only when plan.measure_singleshot is true, after calibration/readout.
-    inputs captures current calibration, last GE flux and T1-derived relaxation.
-    Skip unaccepted Rabi or insufficient spacing. Save every Completed as
-    singleshot-ge.h5, including partial; partial is failed/reason=partial.
-    Failed acquisition has no file and does not advance spacing history.
-    Neither fit nor workflow plotting runs. Record this point as the NOW pi
-    producer even when pi2 is untrusted. Update point_record before checking
-    iteration cancellation. Unexpected writer/acquisition errors propagate.
-    """
-    if iteration.cancelled:
-        return inputs.last_flux
-    if point_record.rabi is None:
-        raise ValueError("Singleshot stage requires this point's Rabi result")
-    reason = singleshot_skip_reason(
-        point_record.rabi, tun, point_record.flux, inputs.last_flux
-    )
-    if reason is not None:
-        point_record.singleshot = SingleshotResult("skipped", reason, None)
-        return inputs.last_flux
-    if inputs.cal is None:
-        raise ValueError("Eligible singleshot requires current accepted calibration")
-    point_record.calibration_sources["singleshot"] = CalibrationSource(
-        need="now",
-        source_index=point_record.index,
-        source_flux=point_record.flux,
-        fallback=False,
-    )
-    cfg = singleshot_cfg(
-        plan,
-        tun,
-        inputs.cal,
-        relax_delay=inputs.relax_delay,
-        gain_clamped=point_record.gain_clamped.setdefault("singleshot", []),
-    )
-    ge = await iteration.run(GE_Exp().run, cfg, name="singleshot GE")
-    observe_operation(summary, ge)
-    if isinstance(ge, Failed):
-        point_record.singleshot = SingleshotResult("failed", ge.reason, None)
-        return inputs.last_flux
-    save_native(
-        ge,
-        iteration.dir / "singleshot-ge.h5",
-        spec=GE_Exp.AXES_SPEC,
-        snapshot=plan.snapshot,
-        identity=iteration.identity,
-    )
-    point_record.singleshot = SingleshotResult(
-        "failed" if ge.partial_result else "measured",
-        "partial" if ge.partial_result else None,
-        "singleshot-ge.h5",
-    )
-    return point_record.flux
-
-
 @workflow(
     "coherence_fluxdep", "Calibrate and measure independent lifetimes versus flux."
 )
@@ -362,11 +268,10 @@ async def coherence_fluxdep(  # noqa: C901, PLR0912, PLR0915  # tolerated: workf
             env.pbar("flux points", total=len(plan.fluxes)).set_progress(index)
             draw_summaries(env.plots, summaries, committed_points=index)
             point_record.singleshot = SingleshotResult(
-                "skipped",
-                "Not reached (point cancelled or interrupted)"
+                status="skipped",
+                reason="Not reached (point cancelled or interrupted)"
                 if plan.measure_singleshot
                 else "Singleshot disabled",
-                None,
             )
             await set_flux(
                 iteration, plan.flux_dev, point_record.flux, unit=plan.flux_unit
@@ -378,7 +283,7 @@ async def coherence_fluxdep(  # noqa: C901, PLR0912, PLR0915  # tolerated: workf
                 )
                 continue
             estimate = (
-                history_guess(t1_by_flux[0][1], t1_by_flux[1:])
+                lifetime_guess(t1_by_flux[0][1], t1_by_flux[1:])
                 if t1_by_flux
                 else tun.current.t1.guess_us
             )
@@ -417,25 +322,47 @@ async def coherence_fluxdep(  # noqa: C901, PLR0912, PLR0915  # tolerated: workf
             point_record.readout_source = calibration_source(
                 carry.readout_source, index
             )
-            # Optionally collect raw GE after readout, before any lifetime.
-            if plan.measure_singleshot:
-                last_ge_flux = await run_singleshot_stage(
-                    iteration,
-                    plan,
-                    tun.current.singleshot,
-                    point_record,
-                    SingleshotInputs(
-                        now_cal,
-                        last_ge_flux,
-                        tun.current.t1.relax_factor
-                        * history_guess(tun.current.t1.guess_us, t1_by_flux),
-                    ),
-                    summary=summary,
-                )
+            pulses = calibrated_pulses(plan, now_cal)
+            # GE eligibility and spacing history belong to the point loop.
+            if plan.measure_singleshot and not iteration.cancelled:
+                if point_record.rabi is None:
+                    raise ValueError(
+                        "Singleshot stage requires this point's Rabi result"
+                    )
+                ge_reason = None
+                if point_record.rabi.status != "accepted":
+                    ge_reason = "Requires this point's accepted Rabi"
+                elif (
+                    last_ge_flux is not None
+                    and abs(flux - last_ge_flux) < tun.current.singleshot.min_spacing
+                ):
+                    ge_reason = "Minimum singleshot flux spacing"
+                if ge_reason is not None:
+                    point_record.singleshot = SingleshotResult(
+                        status="skipped", reason=ge_reason
+                    )
+                else:
+                    if pulses is None:
+                        raise ValueError(
+                            "Eligible singleshot requires current accepted calibration"
+                        )
+                    point_record.calibration_sources["singleshot"] = CalibrationSource(
+                        need="now", source_index=index, source_flux=flux, fallback=False
+                    )
+                    point_record.singleshot = await measure_ge(
+                        iteration,
+                        stage_env,
+                        pulses,
+                        tun.current.singleshot,
+                        relax_delay_us=tun.current.t1.relax_factor
+                        * lifetime_guess(tun.current.t1.guess_us, t1_by_flux),
+                    )
+                    # Every Completed, including partial, advances GE spacing.
+                    if point_record.singleshot.file is not None:
+                        last_ge_flux = flux
             if iteration.cancelled:
                 point_record.status = "skipped"
                 continue
-            pulses = calibrated_pulses(plan, now_cal)
             if pulses is None:
                 # T1, Ramsey and Echo all drive this point's pi; record each enabled skip.
                 if plan.measure_t1:
@@ -489,37 +416,41 @@ async def coherence_fluxdep(  # noqa: C901, PLR0912, PLR0915  # tolerated: workf
                 point_record.status = "completed"
                 directory = iteration.dir
                 continue
+            pulses = calibrated_pulses(plan, cal)
+            assert pulses is not None
             # Prefer current accepted T1; failed/disabled T1 uses its EWMA/seed.
             t1_estimate = (
                 point_record.t1.lifetime_us
                 if point_record.t1 is not None
                 and point_record.t1.status == "accepted"
                 and point_record.t1.lifetime_us is not None
-                else history_guess(tun.current.t1.guess_us, t1_by_flux)
+                else lifetime_guess(tun.current.t1.guess_us, t1_by_flux)
             )
             # Measure Ramsey dephasing with its own grid and detuning policy.
             if plan.measure_t2ramsey:
                 point_record.calibration_sources["t2ramsey"] = CalibrationSource(
                     need="now", source_index=index, source_flux=flux, fallback=False
                 )
-                point_record.t2ramsey = await measure_ramsey(
+                ramsey_result = await measure_ramsey(
                     iteration,
-                    t2ramsey_cfg(
-                        plan,
-                        tun.current.t2ramsey,
-                        cal,
-                        history_guess(tun.current.t2ramsey.guess_us, t2ramsey_by_flux),
-                        t1_estimate_us=t1_estimate,
-                        gain_clamped=point_record.gain_clamped.setdefault(
-                            "t2ramsey", []
+                    stage_env,
+                    pulses,
+                    tun.current.t2ramsey,
+                    points=plan.points,
+                    guess=T2Guess(
+                        lifetime_us=lifetime_guess(
+                            tun.current.t2ramsey.guess_us, t2ramsey_by_flux
                         ),
+                        t1_us=t1_estimate,
                     ),
-                    tun=tun.current.t2ramsey,
-                    snapshot=plan.snapshot,
-                    plots=env.plots,
-                    summary=summary,
                 )
-                _append(t2ramsey_by_flux, flux, point_record.t2ramsey)
+                point_record.t2ramsey = ramsey_result
+                if ramsey_result.status == "accepted":
+                    assert ramsey_result.lifetime_us is not None
+                    assert ramsey_result.error_us is not None
+                    t2ramsey_by_flux.append(
+                        (flux, ramsey_result.lifetime_us, ramsey_result.error_us)
+                    )
                 if iteration.cancelled:
                     point_record.status = "skipped"
                     continue
@@ -528,22 +459,26 @@ async def coherence_fluxdep(  # noqa: C901, PLR0912, PLR0915  # tolerated: workf
                 point_record.calibration_sources["t2echo"] = CalibrationSource(
                     need="now", source_index=index, source_flux=flux, fallback=False
                 )
-                point_record.t2echo = await measure_echo(
+                echo_result = await measure_echo(
                     iteration,
-                    t2echo_cfg(
-                        plan,
-                        tun.current.t2echo,
-                        cal,
-                        history_guess(tun.current.t2echo.guess_us, t2echo_by_flux),
-                        t1_estimate_us=t1_estimate,
-                        gain_clamped=point_record.gain_clamped.setdefault("t2echo", []),
+                    stage_env,
+                    pulses,
+                    tun.current.t2echo,
+                    points=plan.points,
+                    guess=T2Guess(
+                        lifetime_us=lifetime_guess(
+                            tun.current.t2echo.guess_us, t2echo_by_flux
+                        ),
+                        t1_us=t1_estimate,
                     ),
-                    tun=tun.current.t2echo,
-                    snapshot=plan.snapshot,
-                    plots=env.plots,
-                    summary=summary,
                 )
-                _append(t2echo_by_flux, flux, point_record.t2echo)
+                point_record.t2echo = echo_result
+                if echo_result.status == "accepted":
+                    assert echo_result.lifetime_us is not None
+                    assert echo_result.error_us is not None
+                    t2echo_by_flux.append(
+                        (flux, echo_result.lifetime_us, echo_result.error_us)
+                    )
                 if iteration.cancelled:
                     point_record.status = "skipped"
                     continue

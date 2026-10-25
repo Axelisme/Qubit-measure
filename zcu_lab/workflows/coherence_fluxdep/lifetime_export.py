@@ -8,7 +8,8 @@ from zcu_tools.experiment.workflows.export import load_trace
 from zcu_lab.v2.twotone.time_domain.t1.core import T1Exp
 from zcu_lab.v2.twotone.time_domain.t2echo.core import T2EchoExp
 from zcu_lab.v2.twotone.time_domain.t2ramsey.core import T2RamseyExp
-from zcu_lab.workflows.coherence_fluxdep.measurements import EchoResult, RamseyResult
+from zcu_lab.workflows.coherence_fluxdep.stages.echo import EchoResult
+from zcu_lab.workflows.coherence_fluxdep.stages.ramsey import RamseyResult
 from zcu_lab.workflows.coherence_fluxdep.stages.t1 import T1Result
 
 
