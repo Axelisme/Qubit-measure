@@ -218,7 +218,7 @@ class CalibrationTunablesForm(FrequencyTunablesForm):
             ro_acquire_retry=self.ro_acquire_retry,
             frequency_mode=self.frequency_mode,
             coarse_gain=self.coarse_gain,
-            coarse_span_factor=self.coarse_span_factor,
+            coarse_span_mhz=self.coarse_span_mhz,
             fine_gain=self.fine_gain,
             fine_span_mhz=self.fine_span_mhz,
             peak_min_prominence=self.peak_min_prominence,

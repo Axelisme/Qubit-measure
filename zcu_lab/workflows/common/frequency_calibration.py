@@ -92,7 +92,9 @@ def _plan_frequency_scan(
     span = (
         (tun.fine_span_mhz or tun.span_mhz)
         if stage == "fine"
-        else tun.span_mhz * widen * (tun.coarse_span_factor if stage == "coarse" else 1)
+        else tun.coarse_span_mhz * widen
+        if stage == "coarse"
+        else tun.span_mhz * widen
     )
     offset = 0.0 if stage == "fine" else tun.detune_center_mhz
     filename = (

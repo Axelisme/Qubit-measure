@@ -83,12 +83,12 @@ Point 的 calibration_sources 記 consumer、need=now、source_index、source_fl
 完整擷取記 measured，Schedule failure 記 failed 且沒有檔名，partial 記 failed／partial 並保留檔名。未走到此 stage 的點記 skipped／not reached，歷史 record 缺欄位時為 None。
 三個 lifetime 欄位未量測或未到達時是 None，包含關閉的項目。開啟但失敗、拒絕或 skipped 時保存具名結果與原因。這是 2026-10-25 的格式切換；沒有真實舊資料，不支援舊 measurements 格式讀取。
 Frequency 預設 `frequency_mode="two_step"`。粗掃使用 probe pulse gain，
-span 為 `span_mhz * coarse_span_factor`，預設倍率 3。可用 `coarse_gain` 覆寫粗掃 gain。
+寬度為 `coarse_span_mhz * widen`，預設 100 MHz，widening 時乘上 `qf_widen` 的倍率。可用 `coarse_gain` 覆寫粗掃 gain。
 粗掃先選 predictor 加 IDW 中心最近的候選，其餘依 prominence 降序。
 每點最多試 `max_candidates` 個候選，預設 3。重用同次粗掃資料隔離各峰做局部擬合。
 局部擬合失敗或 truncated 會換下一候選。沒有可用粗峰時才沿 `qf_widen` 擴窗，仍受候選總數限制。
 每個可用粗峰以其擬合中心細掃一次，不再套 detune offset。
-細掃 span 預設為 `span_mhz`，可用 `fine_span_mhz` 覆寫。
+細掃 span 預設為 `span_mhz`（30 MHz），可用 `fine_span_mhz` 覆寫。
 細掃 gain 預設為自適應 gain 的一半，且不超過粗掃 gain 的一半，可用 `fine_gain` 覆寫。
 只有細掃結果進入頻率接受門檻、IDW、可信歷史與線寬回饋。
 細掃沒有候選，或最強候選中心離該粗峰的擬合中心超過該粗峰的半 prominence 寬度，會拒絕該粗峰。

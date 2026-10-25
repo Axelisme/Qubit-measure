@@ -58,7 +58,7 @@ class FrequencyTunables(BaseModel):
 
     detune_center_mhz offsets the window relative to the physical prediction;
     span_mhz*qf_widen gives the single scan width. two_step widens only the
-    coarse span_mhz*coarse_span_factor survey; fine_span_mhz defaults to span_mhz.
+    coarse_span_mhz survey (100 MHz by default); fine_span_mhz defaults to span_mhz.
     Coarse uses the pulse gain unless overridden. Fine defaults to half adaptive
     gain, capped at half coarse gain. Only the fine linewidth updates feedback.
     detune_center_mhz applies to coarse/single, not to the recentered fine scan.
@@ -74,8 +74,10 @@ class FrequencyTunables(BaseModel):
         gt=0,
         description="Coarse probe gain; None uses the probe pulse gain",
     )
-    coarse_span_factor: float = Field(
-        default=3.0, gt=0, description="Coarse span / span_mhz before widening"
+    coarse_span_mhz: float = Field(
+        default=100.0,
+        gt=0,
+        description="Two-step coarse span in MHz; multiplied by widen during widening",
     )
     fine_gain: Gain | None = Field(
         default=None,
