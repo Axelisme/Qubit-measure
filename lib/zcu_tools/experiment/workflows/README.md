@@ -112,6 +112,10 @@ Lab saver 將 Completed、歷史 snapshot、identity 與 spec.tag 交給 record_
 Native run_id 是 `<identity.run_id>-<facts.iteration:06d>-<facts.attempt>`。
 Completed.partial_result 決定 complete 或 stopped，不用 facts.stopped 代替。
 
+獨立轉換工具共用 `export.load_trace` 讀具名 native reference，`export.write_outputs` 只寫 Labber。
+Coherence 的 samples 由 sample table owner 追加。Lab 工具依呼叫者提供的目的地決定輸出，未提供目的地時在寫入前拒絕。
+Merged 輸出依使用者 2026-10-25 裁定移除，見 [ADR-0062](../../../../docs/adr/0062-experiment-workflow.md#獨立-workflow-轉換工具)。
+
 ## Facts 與讀取
 
 每次 executor attempt 追加 operation_finished event。

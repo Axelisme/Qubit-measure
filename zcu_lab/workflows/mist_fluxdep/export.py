@@ -1,4 +1,4 @@
-"""Independent MIST run conversion to merged native and Labber, not samples."""
+"""Independent MIST run conversion to Labber, not samples."""
 
 import argparse
 from dataclasses import dataclass
@@ -18,7 +18,6 @@ from zcu_tools.experiment.native_persistence import PreparedRunData
 from zcu_tools.experiment.workflows.export import (
     FluxdepExportOutput,
     load_trace,
-    validate_destinations,
     write_outputs,
 )
 from zcu_tools.experiment.workflows.saved_run import (
@@ -35,7 +34,7 @@ from zcu_lab.workflows.mist_fluxdep.workflow import MISTPlan, MISTPoint
 class MISTExportReport:
     """Report raw MIST export results so callers can identify missing science inputs.
 
-    outputs lists each selected native/Labber writer result, including path,
+    outputs lists the selected Labber writer result, including path,
     status and failure reason. missing_records remains an empty tuple because
     saved_run only returns committed records, without reconstructing missing ones.
     """
@@ -147,24 +146,23 @@ def prepare_export(
 def export_run(
     run: Path,
     *,
-    outputs: tuple[str, ...] = ("merged",),
     database: Path | None = None,
     mode: Literal["excited", "ground"] | None = None,
 ) -> MISTExportReport:
     """Export raw MIST response across flux and gain for offline analysis.
 
-    run is the metadata directory. Select merged and/or labber; samples and all
-    other selections reject. Labber requires explicit --database before any
-    write. Merged replaces data_root/merged.h5 with no external destination.
-    mode selects excited/ground; None selects ground only for a ground-only plan.
-    Exporting both modes requires separate calls and retaining each output before
-    the next call replaces merged.h5.
+    run is the metadata directory. Providing database writes Labber; omitting
+    it raises before any write. Samples is not supported. mode selects
+    excited/ground; None selects ground for a ground-only plan and excited
+    otherwise. Exporting both modes requires separate calls, each writing a new
+    Labber file.
     Fixed manifest and each record.json provide input, not journal or leftover
     files. Missing records are not reconstructed or listed; malformed inputs
     name their source.
     Prepare errors allocate nothing; writers return independent typed failures.
     """
-    validate_destinations(outputs, {"merged", "labber"}, result=None, database=database)
+    if database is None:
+        raise ValueError("Provide --database for Labber")
     manifest = read_manifest(run, "mist_fluxdep")
     try:
         plan = MISTPlan.model_validate(manifest.plan)
@@ -178,8 +176,7 @@ def export_run(
         manifest,
         prepared,
         plan.snapshot,
-        merged="merged" in outputs,
-        database=database if "labber" in outputs else None,
+        database=database,
     )
     return MISTExportReport(outputs_written, ())
 
@@ -189,23 +186,17 @@ def main(argv: list[str] | None = None) -> int:
 
     Return 1 on an isolated writer failure and 0 when all writers succeed.
 
-    argv omits the executable. Select --merged and/or --labber. --database is
-    necessary only for Labber. Unsupported --samples is an argparse error.
+    argv omits the executable. --database writes Labber and is required.
     Malformed inputs raise; writer results are printed.
     """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("run", type=Path)
-    parser.add_argument("--merged", action="store_true")
-    parser.add_argument("--labber", action="store_true")
     parser.add_argument("--database", type=Path)
     parser.add_argument("--mode", choices=("excited", "ground"))
     args = parser.parse_args(argv)
-    outputs = tuple(name for name in ("merged", "labber") if getattr(args, name))
-    if not outputs:
-        parser.error("Select --merged and/or --labber")
-    report = export_run(
-        args.run, outputs=outputs, database=args.database, mode=args.mode
-    )
+    if args.database is None:
+        parser.error("Provide --database for Labber")
+    report = export_run(args.run, database=args.database, mode=args.mode)
     for source in report.missing_records:
         print(f"Missing record: {source}")
     for out in report.outputs:

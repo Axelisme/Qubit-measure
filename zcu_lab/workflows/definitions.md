@@ -213,11 +213,13 @@ Conversion 的科學型別與輸入驗證留在此 package，不在框架建立 
 
 ## 獨立 run 轉換
 
-`coherence_fluxdep.export.export_run` 支援 merged、Labber 與 samples，`mist_fluxdep.export.export_run` 只支援 merged、Labber。
+`coherence_fluxdep.export.export_run` 支援 Labber 與 samples，`mist_fluxdep.export.export_run` 只支援 Labber。
+函式收到 `database` 就寫 Labber，Coherence 收到 `result` 就追加 samples。兩個目的地都給就都寫，未給任何目的地就 raise ValueError。
 兩個模組提供同 process 的 `main(argv)`，也能以 `python -m zcu_lab.workflows.coherence_fluxdep.export` 或 `python -m zcu_lab.workflows.mist_fluxdep.export` 執行。
-傳入 run 的 metadata 目錄並明選 `--merged`、`--labber` 或 Coherence 的 `--samples`。
-Samples 需要明填 `--result <entry result>`，Labber 需要 `--database <Database>`。Merged-only 不需外部目的地。
-工具在任何寫入前驗所選 flags 及共同輸入。Merged 覆寫 manifest data_root 的 merged.h5，Labber 每次在日期樹取新檔。
+傳入 run 的 metadata 目錄。CLI 給 `--database <Database>` 就寫 Labber，Coherence 給 `--result <entry result>` 就追加 samples。
+不另選格式旗標。沒有任何目的地是 CLI error。
+工具在任何寫入前驗共同輸入。Labber 每次在日期樹取新檔。
+Merged 輸出依使用者 2026-10-25 裁定移除，見 [ADR-0062](../../docs/adr/0062-experiment-workflow.md#獨立-workflow-轉換工具)。
 各 writer 回報自己的 path/status/error。未配置的 Labber path 為 None，已配置的失敗保留 path，不自動重試或寫 ledger。
 
 工具讀固定 manifest，再用 `saved_run.read_records(run, CoherencePoint)` 或 MISTPoint 讀整個 run 的 typed commit list。

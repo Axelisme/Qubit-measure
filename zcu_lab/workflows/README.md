@@ -10,6 +10,8 @@
 - `overnight_mux/`：按固定間隔先同時量所有 participant 的 T1，再同時量 Hahn echo。Echo 等待時間取本輪接受 T1 的最大值，不設 flux、不做校準。
 
 每個目錄有 `workflow.py` 與 `form.py`；前兩項另有可直接執行的 `export.py`。
+提供 `--database` 就寫 Labber，Coherence 另可提供 `--result` 追加 samples，兩者都有就都寫。
+未提供目的地時報錯，不另選格式旗標，也不寫 merged 檔案。
 `common/` 放多個 workflow 共用的實驗步驟與表單 helper。
 `registry.py` 依上述順序配對 workflow 與表單，交給 scripts 注入 lib 宿主。
 
