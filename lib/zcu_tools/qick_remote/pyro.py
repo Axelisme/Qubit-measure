@@ -93,6 +93,16 @@ def start_server(
     daemon.requestLoop()  # this will run forever until interrupted
 
 
+def release_soc_proxy(soc: Any) -> None:
+    """Close the Pyro connection held by a SoC proxy from make_soc_proxy.
+
+    soc must be the proxy make_soc_proxy returned. The socket closes at once;
+    the caller drops the proxy afterwards, because a later call on it would make
+    Pyro reconnect. Pyro and socket errors propagate to the caller.
+    """
+    soc._pyroRelease()
+
+
 def make_soc_proxy(
     ns_host: str,
     ns_port: int,

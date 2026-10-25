@@ -130,7 +130,7 @@ facet 不複製驗型別或狀態規則。這維持 [[0066]] 的執行與終局�
 
 ## 動態資源與儀器 adapters
 
-`SoCConnectionService` 在 owner thread install／uninstall board/config，走 SOC_CONNECT gate，Run 或 connect 中拒絕。Idle 時可替換，uninstall 發布 soc=None。`is_mock` 由 SoC 自述，缺旗標時為 False，GUI 只轉發，不藉此選擇模擬模式。SoC 仍由 caller 擁有，service 不假設或呼叫通用 close 方法。
+`SoCConnectionService` 在 owner thread install／uninstall board/config，走 SOC_CONNECT gate，Run 或 connect 中拒絕。Idle 時可替換，uninstall 發布 soc=None。`is_mock` 由 SoC 自述，缺旗標時為 False，GUI 只轉發，不藉此選擇模擬模式。Caller 安裝的 SoC 仍由 caller 擁有，service 不假設或呼叫通用 close 方法；service 經 connect 自己建立的連線在替換或 uninstall 發布後釋放，見 [[0064]]。
 
 `DeviceService.register_device(name, driver)` 接受已建好的 BaseDevice，讀取 info 並成功登錄後才移轉 GUI close 責任與發布 cache。Live 同名、Run、同名 mutation 或 info／registry 失敗不移轉候選 driver，caller 仍須清理。Idle MEMORY_ONLY row 可替換，保留 remember。這些操作沿用既有 rename、同 address 與單 driver 單名稱規則，見 [[0076]]。
 

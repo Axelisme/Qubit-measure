@@ -856,20 +856,22 @@ class Controller(SessionControllerMixin):
         Owner-only. timeout_ms bounds the normal drain; TimeoutError propagates
         without callbacks or hardware cleanup, allowing a later retry. Each
         callback/driver failure is logged and isolated. Successful repeated calls
-        do not repeat callbacks or driver close attempts. SoC remains caller-owned.
+        do not repeat callbacks or driver close attempts. A caller-installed SoC
+        remains caller-owned; a service-connected board is released.
         """
         self.close(timeout_ms)
         self._services.startup.close_callbacks()
         self.close_hardware()
 
     def close_hardware(self) -> None:
-        """Close managed drivers once, then unpublish the caller-owned SoC.
+        """Close managed drivers once, then unpublish the installed SoC.
 
         Call on the Qt owner thread only after successful close() drain and any
         caller on-close callbacks. Every driver gets one attempt; successful rows
         become MEMORY_ONLY and failed rows stay CONNECTED with error. Aggregate
         close errors are logged, not raised, so they cannot block GUI teardown.
-        The SoC has no close contract. Its creator still owns external cleanup.
+        Unpublishing releases a board the connection service itself connected;
+        a caller-installed SoC stays with its creator for external cleanup.
         Repeated calls do not retry failed driver closes or emit duplicate facts.
         """
         if self._hardware_close_attempted:

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import dataclasses
 import logging
+import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -59,7 +60,9 @@ class SoCConnectionService:
     """Owns SoC connect lifecycle, delegating async work to OperationRunner.
 
     Async terminal outcomes are published as typed EventBus facts on the owner
-    thread. Remote connects run via the injected executor.
+    thread. Remote connects run via the injected executor. A board this service
+    connected through make_soc_proxy is released when it is replaced or
+    uninstalled; boards installed by callers stay with their creators.
     """
 
     def __init__(
@@ -101,8 +104,9 @@ class SoCConnectionService:
 
         Call on the session owner thread. Replace any installed pair, clear the
         remote endpoint, bump the SoC version and publish SOC_CHANGED. Reject
-        Run or connect conflicts through the SOC_CONNECT gate. Neither the old
-        nor new board is closed; their creator owns external resource cleanup.
+        Run or connect conflicts through the SOC_CONNECT gate. The new board is
+        never closed by this service; its creator owns cleanup. An old board this
+        service connected is released after the new pair is published.
         """
         self._replace_soc(soc, soccfg)
 
@@ -110,8 +114,9 @@ class SoCConnectionService:
         """Clear the board/configuration and endpoint on the session owner thread.
 
         Publish SOC_CHANGED with None handles and bump the SoC version, even
-        when already empty. Reject Run/connect conflicts. Do not close the
-        removed board; resource cleanup remains with its creator.
+        when already empty. Reject Run/connect conflicts. A removed board this
+        service connected is released after publication, with INFO log lines
+        before and after; a caller-installed board stays with its creator.
         """
         self._replace_soc(None, None)
 
@@ -295,6 +300,8 @@ class SoCConnectionService:
     ) -> None:
         is_mock = bool(getattr(soc, "is_mock", False))
         logger.info("SoC changed: connected=%s mock=%s", soc is not None, is_mock)
+        previous = self._state.session_env.soc
+        previous_request = self._connected_request
         new_ctx = dataclasses.replace(self._state.session_env, soc=soc, soccfg=soccfg)
         self._state.set_context(new_ctx)
         self._connected_request = req
@@ -307,6 +314,34 @@ class SoCConnectionService:
         self._bus.emit(
             SocChangedPayload(soc=soc, soccfg=soccfg, is_mock=is_mock),
         )
+        # Release after publication so no subscriber still holds the old board.
+        if (
+            previous_request is not None
+            and previous is not None
+            and previous is not soc
+        ):
+            _release_connected(previous, previous_request)
+
+
+def _release_connected(soc: SocHandle, req: ConnectRemoteRequest) -> None:
+    """Close a board connection this service created, logging start and duration.
+
+    A failed close is logged with its traceback and does not stop the caller's
+    replacement or GUI teardown; the board is already unpublished.
+    """
+    from zcu_tools.qick_remote import release_soc_proxy
+
+    logger.info("Releasing SoC connection %s:%s", req.ip, req.port)
+    started = time.monotonic()
+    try:
+        release_soc_proxy(soc)
+    except Exception:
+        logger.exception("Releasing SoC connection %s:%s failed", req.ip, req.port)
+        return
+    elapsed_ms = (time.monotonic() - started) * 1000
+    logger.info(
+        "Released SoC connection %s:%s in %.0f ms", req.ip, req.port, elapsed_ms
+    )
 
 
 def _format_error(exc: Exception) -> str:

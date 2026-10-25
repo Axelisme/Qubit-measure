@@ -49,7 +49,8 @@ def real_bg(qapp):
 
 
 @pytest.fixture(autouse=True)
-def offline_remote(monkeypatch):
+def released_boards(monkeypatch) -> list[object]:
+    """Stand in for the Pyro boundary: offline proxies and a release recorder."""
     import zcu_tools.qick_remote as remote
     from zcu_tools.experiment.simulation import white_noise
 
@@ -57,7 +58,10 @@ def offline_remote(monkeypatch):
         env = white_noise()
         return env.soc, env.soccfg
 
+    released: list[object] = []
     monkeypatch.setattr(remote, "make_soc_proxy", proxy)
+    monkeypatch.setattr(remote, "release_soc_proxy", released.append)
+    return released
 
 
 # ---------------------------------------------------------------------------
@@ -303,6 +307,48 @@ def test_runtime_soc_replacement_and_uninstall_forward_board_identity(monkeypatc
     svc.connect_sync(ConnectRemoteRequest(ip="192.0.2.2", port=8888))
     assert svc.has_soc() is True
     assert svc.is_mock_soc() is True
+
+
+def test_service_releases_only_the_boards_it_connected(monkeypatch, released_boards):
+    import zcu_tools.qick_remote as remote
+
+    class Board:
+        def get_cfg(self) -> dict[str, object]:
+            return {}
+
+    state = _make_state()
+    svc, _background, _handles = _make_svc(state=state, bus=EventBus())
+    first, second, local = Board(), Board(), Board()
+    config = MagicMock()
+    boards = iter([first, second])
+    monkeypatch.setattr(remote, "make_soc_proxy", lambda *_: (next(boards), config))
+
+    svc.connect_sync(ConnectRemoteRequest(ip="192.0.2.1", port=8888))
+    svc.connect_sync(ConnectRemoteRequest(ip="192.0.2.2", port=8888))
+    assert released_boards == [first]
+
+    svc.install_soc(local, config)
+    assert released_boards == [first, second]
+
+    svc.uninstall_soc()
+    assert released_boards == [first, second]
+
+
+def test_failed_release_is_logged_and_uninstall_completes(monkeypatch, caplog):
+    import zcu_tools.qick_remote as remote
+
+    def broken_release(_soc: object) -> None:
+        raise ConnectionResetError("board went away")
+
+    monkeypatch.setattr(remote, "release_soc_proxy", broken_release)
+    state = _make_state()
+    svc, _background, _handles = _make_svc(state=state, bus=EventBus())
+    svc.connect_sync(ConnectRemoteRequest(ip="192.0.2.1", port=8888))
+
+    svc.uninstall_soc()
+
+    assert svc.has_soc() is False
+    assert "Releasing SoC connection 192.0.2.1:8888 failed" in caplog.text
 
 
 @pytest.mark.parametrize("busy", ["run", "connect"])

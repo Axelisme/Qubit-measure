@@ -54,7 +54,7 @@ Setup 與每個 point 各自保存 alias。選 point 載入其 `points/<label>/a
 
 腳本用 `ctx.on_close(fn)` 登記無參數收尾。正常關窗與 MCP `app.shutdown` 都先停止 admission、取消及 drain 工作，再在 owner thread 反序執行 callbacks 一次，最後關閉 GUI 管理的 drivers 並卸載 SoC。Drain 逾時不消耗 callbacks、不提前關硬體，可重試關閉。單一 callback 失敗記 log 並繼續後續清理。Callback 可使用同步 facets，不可等候 owner delivery 或提交新背景工作。強制 kill 不保證執行。
 
-SoC 由 caller 擁有，不假設通用 close 方法。Device 只有成功 register 後才移轉 GUI close 責任，拒絕的 driver 仍由 caller 清理。逐台 close 與 adapter 邊界見 [[0067]]，operation drain 見 [[0066]]，檔案保存權威見 [[0063]]。預設腳本的逐項失敗呈現與一般未捕捉 startup 錯誤不同，EventOrigin 責任界線見 [[0068]]。
+Caller 安裝的 SoC 由 caller 擁有，不假設通用 close 方法。GUI 連線服務經 `make_soc_proxy` 自己建立的板子連線由它釋放：被替換或 uninstall 時呼叫 `release_soc_proxy`，前後各記一行 log，失敗記 log 後繼續。使用者於 2026-10-25 問「為什麼是先關log記錄再確定連線結束啊？我以為通常是反過來」，看過提議後裁定：「那你直接做吧，我赶时间，你可以直接坐在 main 上面。」Device 只有成功 register 後才移轉 GUI close 責任，拒絕的 driver 仍由 caller 清理。逐台 close 與 adapter 邊界見 [[0067]]，operation drain 見 [[0066]]，檔案保存權威見 [[0063]]。預設腳本的逐項失敗呈現與一般未捕捉 startup 錯誤不同，EventOrigin 責任界線見 [[0068]]。
 
 ## 邊界與核實
 
