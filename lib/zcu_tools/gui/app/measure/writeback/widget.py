@@ -34,7 +34,7 @@ from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 
 from .edit_dialogs import WritebackEditDialogs, is_scalar_value, module_changes
 from .foregrounds import ThemedForegrounds
-from .items import ModuleWriteback, ParameterWriteback, SampleWriteback, WritebackItem
+from .items import ModuleWriteback, ParameterWriteback, RecordWriteback, WritebackItem
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.controller import Controller
@@ -140,19 +140,16 @@ def _full_value(value: Any) -> str:
     return repr(value) if _is_number(value) else _bounded_summary(value)
 
 
-def _sample_summary(item: SampleWriteback, *, compact: bool) -> str:
-    """List every sample field without truncating strings or nested JSON."""
+def _record_summary(item: RecordWriteback, *, compact: bool) -> str:
+    """List every record field without truncating strings or nested JSON."""
     fields: list[str] = []
-    for key, value in item.proposed_value.items():
+    for key, value in item.record.items():
         if isinstance(value, str):
             text = value
         elif _is_number(value):
             text = _compact_value(value) if compact else _full_value(value)
         else:
             text = json.dumps(value, ensure_ascii=False)
-        unit = item.proposed_value.get("dev_unit")
-        if key == "dev_value" and isinstance(unit, str) and unit:
-            text += f" {unit}"
         fields.append(f"{key}={text}")
     return "\n".join(fields)
 
@@ -422,10 +419,10 @@ class WritebackWidget(QWidget):
         and follows proposed stderr once. Missing current has no unit label;
         unit=None adds no whitespace. Empty items clear the view. Items remain
         the persistent draft objects so checkbox and Edit commands use the same
-        stable identities. Sample rows identify the component with a sample suffix,
-        show current as "entry sample", and list every proposed JSON field with
-        device units after dev_value. Sample Copy preserves the complete JSON;
-        samples have no Edit action.
+        stable identities. Record rows identify the component with a record suffix,
+        show current as "entry record", and list every proposed JSON field with
+        device units after dev_value. Record Copy preserves the complete JSON;
+        records have no Edit action.
         Local module editing may retain invalid State input. Its row shows proposed as
         "Invalid configuration" and current/path as "Unavailable (invalid
         configuration)", while preserving selection and updating unapplied
@@ -455,7 +452,7 @@ class WritebackWidget(QWidget):
         shared Form result, retaining open local errors. Invalid module rows keep
         selection and Edit but show Invalid configuration with unavailable current
         value/path. Read valid items through the service's single-item preview;
-        parameter/sample facts are unchanged. Rebuild rows without closing dialogs
+        parameter/record facts are unchanged. Rebuild rows without closing dialogs
         or modifying drafts/library. unavailable_reasons follow the rows.
         Form access, target/source and I/O failures propagate; no preview values
         are fabricated and the bulk preview contract is not changed.
@@ -599,8 +596,8 @@ class WritebackWidget(QWidget):
         proposed_label.setSizePolicy(
             QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred
         )
-        proposed_label.setWordWrap(isinstance(item, SampleWriteback))
-        if isinstance(item, SampleWriteback):
+        proposed_label.setWordWrap(isinstance(item, RecordWriteback))
+        if isinstance(item, RecordWriteback):
             proposed_label.setTextFormat(Qt.TextFormat.PlainText)
         table = None
         if is_matrix:
@@ -615,7 +612,7 @@ class WritebackWidget(QWidget):
             button.setFixedSize(56, 26)
             button.clicked.connect(lambda _=False, it=item: self._edit_item(it))
             return button
-        if isinstance(item, SampleWriteback) or (
+        if isinstance(item, RecordWriteback) or (
             isinstance(item, ParameterWriteback)
             and not is_scalar_value(self._values[item.session_id].proposed)
         ):
@@ -711,8 +708,8 @@ class WritebackWidget(QWidget):
     ) -> None:
         applied = self._applied_states.get(item.session_id, False)
         target = (
-            f"{item.target_name} · sample"
-            if isinstance(item, SampleWriteback)
+            f"{item.target_name} · record"
+            if isinstance(item, RecordWriteback)
             else item.target_name
         )
         checkbox.setText(target if applied else f"{target}*")
@@ -732,8 +729,8 @@ class WritebackWidget(QWidget):
         if item.session_id in self._invalid_modules:
             return "Unavailable (invalid configuration)"
         values = self._values[item.session_id]
-        if isinstance(item, SampleWriteback):
-            return "entry sample"
+        if isinstance(item, RecordWriteback):
+            return "entry record"
         if isinstance(item, ModuleWriteback):
             if not compact:
                 return self._module_tooltip(item)
@@ -752,8 +749,8 @@ class WritebackWidget(QWidget):
         if item.session_id in self._invalid_modules:
             return "Invalid configuration"
         values = self._values[item.session_id]
-        if isinstance(item, SampleWriteback):
-            return _sample_summary(item, compact=compact)
+        if isinstance(item, RecordWriteback):
+            return _record_summary(item, compact=compact)
         if isinstance(item, ModuleWriteback):
             if not compact:
                 return self._module_tooltip(item)

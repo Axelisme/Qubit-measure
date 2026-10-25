@@ -16,12 +16,13 @@ from zcu_tools.notebook.analysis.fit_tools import (
     predict_f01_mhz,
 )
 from zcu_tools.resources.qubit_params import QubitParams
-from zcu_tools.resources.sample_table import (
+from zcu_tools.resources.record_table import (
     DeviceValueUnit,
-    JsonlSampleTable,
-    SampleFluxFrame,
-    resolve_sample_flux,
-    validate_sample_table_v2,
+    JsonlRecordTable,
+    RecordFluxFrame,
+    project_device_coordinates,
+    resolve_record_flux,
+    validate_record_table_v2,
 )
 
 from .models import (
@@ -45,14 +46,17 @@ _REQUIRED_COLUMNS = [
 def load_t2_curve_context(
     *,
     result_dir: str,
-    samples_filename: str = "samples.jsonl",
+    device_name: str,
+    samples_filename: str = "records.jsonl",
     image_dir: str | None = None,
     default_bare_rf: float = 5.0,
     preview_rows: int = 10,
 ) -> T2CurveContext:
     """Load fluxdep/dispersive params and latest JSONL rows from result_dir.
 
-    samples_filename is relative to result_dir and defaults to samples.jsonl;
+    device_name selects devices[device_name].value/value_unit; missing facts
+    fail without flat-field fallback. samples_filename is relative to
+    result_dir and defaults to records.jsonl;
     rows require freq_mhz, t1_us, t1_err_us, t2e_us and t2e_err_us. Create
     image_dir (default result_dir/t2_curve) and return rows with a preview of
     preview_rows rows. default_bare_rf is in GHz for dispersive input loading.
@@ -68,7 +72,10 @@ def load_t2_curve_context(
     if dispersive_fit is None:
         raise RuntimeError("params.json needs a dispersive section with g and bare_rf.")
 
-    samples_df = JsonlSampleTable(os.path.join(result_dir, samples_filename)).read()
+    samples_df = project_device_coordinates(
+        JsonlRecordTable(os.path.join(result_dir, samples_filename)).read(),
+        device_name=device_name,
+    )
     _validate_required_columns(samples_df)
     params = fit_inputs.params
     params_table = pd.DataFrame(
@@ -109,10 +116,10 @@ def calibrate_t2_flux(
     fallback_frame_unit: DeviceValueUnit = "A",
 ) -> T2FluxCalibration:
     samples_df = context.samples_df
-    fallback_frame = SampleFluxFrame(
+    fallback_frame = RecordFluxFrame(
         fallback_frame_unit, context.flux_int, context.flux_period
     )
-    resolution = resolve_sample_flux(
+    resolution = resolve_record_flux(
         samples_df,
         fallback_frame=fallback_frame,
     )
@@ -135,7 +142,7 @@ def calibrate_t2_flux(
     }
     summary_table = pd.DataFrame(
         [
-            ("samples.jsonl rows", str(len(samples_df))),
+            ("records.jsonl rows", str(len(samples_df))),
             ("explicit flux rows", str(source_counts["explicit"])),
             ("row-frame flux rows", str(source_counts["row-frame"])),
             ("fallback-frame flux rows", str(source_counts["fallback-frame"])),
@@ -228,7 +235,7 @@ def prepare_t2_dephasing_data(
 
 # tolerated: Notebook documents probe controls and shared fit-policy keywords explicitly.
 def _validate_required_columns(samples_df: pd.DataFrame) -> None:
-    validate_sample_table_v2(samples_df, allow_empty=True)
+    validate_record_table_v2(samples_df, allow_empty=True)
     missing_columns = [
         name for name in _REQUIRED_COLUMNS if name not in samples_df.columns
     ]

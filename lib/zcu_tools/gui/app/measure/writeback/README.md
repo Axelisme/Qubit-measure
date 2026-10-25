@@ -1,10 +1,10 @@
 # `gui.app.measure.writeback`
 
-**Last updated:** 2026-10-23
+**Last updated:** 2026-10-25
 
 **讀者：** framework-dev。寫回提案、review widget 與逐項 Apply 契約。
 
-本模組擁有 parameter、module 與 sample 的 proposal、draft、service、control 與 Qt review widget。
+本模組擁有 parameter、module 與 record 的 proposal、draft、service、control 與 Qt review widget。
 `items.py` 定義 adapter 的可變 proposals；`contracts.py` 定義 owner 的 edit、preview 與 submission records。
 `service.py` 保留 draft 生命週期、ID 檢查與寫入執行，也繼續匯出既有公開型別。
 
@@ -15,22 +15,27 @@ Adapter 可省略不合適的候選，或以 proposal 的 `selected=False` 保�
 Service 將 proposal 的初選與 note 複製到 draft。GUI 在目的地下面顯示 note，RPC preview 也回傳同一段文字。
 人工可改勾選並 Apply。Edit、retarget 與 Apply 保留 note，不重新判斷品質；人工勾選不表示品質合格。
 
-## Sample 列
+## Record 列
 
-Sample 的目標欄顯示 `<元件名> · sample`。未 Apply 時保留共用的 `*` 標記，成功後移除。
-Current 欄顯示 `entry sample`。Proposed 欄與 tooltip 逐行列出全部 `key=value`，保留字串與巢狀 JSON 的完整內容。
+Record 的目標欄顯示 `<元件名> · record`。未 Apply 時保留共用的 `*` 標記，成功後移除。
+Current 欄顯示 `entry record`。Proposed 欄與 tooltip 逐行列出全部 `key=value`，保留字串與巢狀 JSON 的完整內容。
 每個 key 與值的前綴可見。長值可能被欄寬裁切，tooltip 與 Copy 仍保留完整內容。
-`dev_value` 後面附上 `dev_unit`，並保留獨立的 `dev_unit` 欄位。其他欄位與 `run_id` 依 proposal 呈現，不轉換單位。
-Copy 將完整 JSON 放入剪貼簿。Sample 沒有 Edit 動作，也不開啟編輯對話框。
+Widget 將每個欄位當作一般 JSON 呈現，不識別裝置或單位。
+Copy 將完整 JSON 放入剪貼簿。Record 沒有 Edit 動作，也不開啟編輯對話框。
 
-Service 從固定 Run／Load 來源補入 sample 座標。Widget 只呈現既有 proposal，不解析裝置 alias，也不改變資料型別或持久化流程。
+`RecordWriteback(target_name, description, record=...)` 提供 adapter 組裝的 JSON object。
+框架不解析欄位、不補座標，也不因缺裝置資料而省略 proposal。
+Append owner 只加入既有的 `run_id`、`point`、`at` 與 `source` provenance 信封。
+格式由 adapter 間的 policy 決定，見 [lab authoring 的 Record policy](../../../../../../zcu_lab/v2/measure-authoring.md#record-policy)。
+記錄放在 `records/components/<target>.jsonl`，事件放在 `records/ledger.jsonl`。
+Wire kind、session prefix 與 written key 分別為 `record`、`record-<n>` 與 `records`，不讀舊名稱或路徑。
 
 ## Apply
 
 `WritebackService` 從 draft 的固定 Run／Load capture 解析選定提案與 module Form，
 再交給 context owner。全部提案通過輸入驗證後，共用 executor 先追加一筆 accepted
-ledger event，再依序提交 point 參數組、library 組與逐筆 Sample，組內保留提案順序。
-Parameter 與 library 各用一次單檔交易，組內任一項無效整組不寫，Sample 各列追加樣本。
+ledger event，再依序提交 point 參數組、library 組與逐筆 Record，組內保留提案順序。
+Parameter 與 library 各用一次單檔交易，組內任一項無效整組不寫，Record 各列追加樣本。
 第一個失敗會停止後組，保留 accepted event 與已提交組，並標記已成功的 draft 列。
 Ledger append 失敗時不提交任何列。Apply 不提供跨列 rollback 或自動 retry。
 

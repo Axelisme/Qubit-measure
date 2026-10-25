@@ -36,10 +36,12 @@ import pandas as pd
 import zcu_tools.notebook.analysis.plot as zp
 from zcu_tools.notebook.analysis.fluxdep.utils import FreqFluxDependVisualizer
 from zcu_tools.resources.qubit_params import QubitParams
-from zcu_tools.resources.sample_table.schema import (
-    SampleFluxFrame,
-    resolve_sample_flux,
-    validate_sample_table_v2,
+from zcu_tools.resources.record_table import (
+    JsonlRecordTable,
+    project_device_coordinates,
+    RecordFluxFrame,
+    resolve_record_flux,
+    validate_record_table_v2,
 )
 from zcu_tools.simulate.fluxonium import calculate_energy_vs_flx
 ```
@@ -66,7 +68,7 @@ params = fit.params
 # is a current source, "A" — never inferred from column names or magnitudes.
 # This same caller-declared frame also resolves sample rows that carry no
 # explicit flux and no row frame (see the Load Sample Points cell).
-frame = SampleFluxFrame(
+frame = RecordFluxFrame(
     dev_unit="A",
     flux_int=fit.flux_half - 0.5 * fit.flux_period,
     flux_period=fit.flux_period,
@@ -101,20 +103,21 @@ spectrum_data = None
 
 ```python
 # loading points
-loadpath = f"../../result/{qub_name}/samples.csv"
-
-freqs_df = pd.read_csv(loadpath)
+loadpath = f"../../result/{qub_name}/records/components/Q4.jsonl"
+device_name = "bias_device"  # Select a captured Run device.
+freqs_df = JsonlRecordTable(loadpath).read()
+analysis_frame = project_device_coordinates(freqs_df, device_name=device_name)
 # v2 contract: legacy coordinate tables (e.g. "calibrated mA") fail here
 # before any plotting. The shared resolver returns per-row flux with
 # explicit -> row-frame precedence; rows without either fall back to the
 # fit-calibration frame declared above, and rows that still cannot be
 # resolved fail with their indexes.
-validate_sample_table_v2(freqs_df)
-resolution = resolve_sample_flux(freqs_df, fallback_frame=frame)
+validate_record_table_v2(analysis_frame)
+resolution = resolve_record_flux(analysis_frame, fallback_frame=frame)
 s_flxs = resolution.values  # dimensionless flux
-s_fpts = np.array(freqs_df["Freq (MHz)"].values) * 1e-3  # GHz
-s_T1s = np.array(freqs_df["T1 (us)"].values)
-s_T1errs = np.array(freqs_df["T1err (us)"].values)
+s_fpts = np.array(freqs_df["freq_mhz"].values) * 1e-3  # GHz
+s_T1s = np.array(freqs_df["t1_us"].values)
+s_T1errs = np.array(freqs_df["t1_err_us"].values)
 
 # sort by flux
 s_flxs, s_fpts, s_T1s, s_T1errs = tuple(
@@ -190,7 +193,7 @@ v_allows = {
 fig = (
     FreqFluxDependVisualizer()
     .plot_simulation_lines(flxs, energies, v_allows)
-    .plot_sample_points(freqs_df, fallback_frame=frame)
+    .plot_sample_points(freqs_df, device_name=device_name, fallback_frame=frame)
     .plot_constant_freq(v_allows["r_f"], "r_f")
     .plot_constant_freq(v_allows["sample_f"], "sample_f")
     .plot_constant_freq(

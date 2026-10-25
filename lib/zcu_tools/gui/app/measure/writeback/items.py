@@ -1,4 +1,4 @@
-"""Mutable parameter, module and sample proposals supplied by adapters."""
+"""Mutable parameter, module and record proposals supplied by adapters."""
 
 from __future__ import annotations
 
@@ -31,7 +31,7 @@ class WritebackItem(ABC):
     stderr: float | None = field(default=None, kw_only=True)
     element: ElementIdentity | None = field(default=None, kw_only=True)
     # ``target_name`` is the apply destination name (point parameter / library
-    # module / sample component). It is mutable: agent/UI
+    # module / record component). It is mutable: agent/UI
     # may retarget the writeback before applying.
     target_name: str
     description: str
@@ -67,16 +67,15 @@ class ModuleWriteback(WritebackItem):
 
 
 @dataclass
-class SampleWriteback(WritebackItem):
-    """Propose producer-defined JSON fields for target_name, a concrete component.
+class RecordWriteback(WritebackItem):
+    """Append adapter-owned JSON record to target_name, a concrete component.
 
-    Only adapters whose Run keeps the coordinate device fixed provide this proposal.
-    coordinate_device declares the captured device alias; None omits this Sample.
-    WritebackService adds dev_value/dev_unit from that alias in the Run's fixed
-    parameters and device snapshot, replacing those fields if supplied here. Missing captured
-    device facts omit this item with a public reason. The sample can be selected
-    independently; it needs no cfg schema or editor session.
+    record is detached and passed unchanged to the append owner, apart from its
+    run_id/point/at/source provenance envelope. The framework does not interpret
+    fields or select coordinate devices. Adapters document their shared format
+    policy in lab authoring documentation. Review fields remain independent.
+    IDs and wire receipt kinds use ``record``. The append owner stores rows in
+    records/components/<target_name>.jsonl, separate from the event ledger.
     """
 
-    proposed_value: JsonObject
-    coordinate_device: str | None = field(default=None, kw_only=True)
+    record: JsonObject

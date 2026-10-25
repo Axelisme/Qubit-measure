@@ -61,8 +61,9 @@ figure_paths = {}
 
 ```python
 ctx = zt1.load_t1_curve_context(
+    device_name="bias_device",  # Replace with a device name from records.devices.
     result_dir="../../result/Q12_2D[7]/Q4",
-    samples_filename="samples.csv",
+    samples_filename="records.jsonl",
     image_dir="../../result/Q12_2D[7]/Q4/t1_curve2",
 )
 ```

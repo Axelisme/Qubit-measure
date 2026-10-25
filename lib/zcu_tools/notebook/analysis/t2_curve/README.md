@@ -4,7 +4,7 @@
 
 **讀者：** lab-author。Echo T2 資料準備、rate model 與分析呈現契約。
 
-Sample loading 使用 `JsonlSampleTable.read()`，預設讀取 `samples.jsonl`，每個 run_id 取最後一行。分析欄位使用 `freq_mhz`、`t1_us`、`t1_err_us`、`t2e_us`、`t2e_err_us` 與 `t2r_us`。資料缺 flux 或 row frame 時，由呼叫端提供同單位的 fallback frame。
+Record loading 使用 `JsonlRecordTable.read()`，預設讀取 `records.jsonl`，每個 run_id 取最後一行。分析欄位使用 `freq_mhz`、`t1_us`、`t1_err_us`、`t2e_us`、`t2e_err_us` 與 `t2r_us`。資料缺 flux 或 row frame 時，由呼叫端提供同單位的 fallback frame。
 
 Fluxonium echo T2 vs. flux 的分析工具：把實測 `T2e` 先扣除 relaxation bound `1/(2*T1)` 後，以 rate model 同時擬合 first-order flux noise 與 readout thermal-photon shot noise。
 
@@ -31,7 +31,7 @@ Fluxonium echo T2 vs. flux 的分析工具：把實測 `T2e` 先扣除 relaxatio
 
 `models.py` 共用各 stage 的 records 與預設值。`preparation.py` 負責資料載入、flux 校正、window selection 與逐 row 診斷。`presentation.py` 負責繪圖、保存與表格顯示。`workflow.py` 保留單機制 probe、combined fit、channel curves 與一鍵編排。各 owner 以 records 交接，既有 package 與 workflow 逐步 API 不變。
 
-- Notebook 使用逐步 API：`load_t2_curve_context(...)` → `calibrate_t2_flux(...)` → `prepare_t2_dephasing_data(...)` → 單機制 probe → `fit_t2_curve(...)` → `build_t2_channel_curves(...)`。`calibrate_t2_flux()` 以 `resolve_sample_flux`（explicit → row-frame → caller-declared fallback）取得 normalized flux；同時以 positional boolean masks（`T2FluxCalibration.t2e_mask` / `t2r_mask`，長度等於 `samples_df`）記錄 T2e/T2r selection，row identity 不依賴 DataFrame index labels，duplicate labels 不會擴增 selection。
+- Notebook 使用逐步 API：`load_t2_curve_context(...)` → `calibrate_t2_flux(...)` → `prepare_t2_dephasing_data(...)` → 單機制 probe → `fit_t2_curve(...)` → `build_t2_channel_curves(...)`。`calibrate_t2_flux()` 以 `resolve_record_flux`（explicit → row-frame → caller-declared fallback）取得 normalized flux；同時以 positional boolean masks（`T2FluxCalibration.t2e_mask` / `t2r_mask`，長度等於 `samples_df`）記錄 T2e/T2r selection，row identity 不依賴 DataFrame index labels，duplicate labels 不會擴增 selection。
 - `plot_t2_flux_calibration(data)` 將 fit window 內每個 sample 的 raw flux 與 f01-corrected flux 畫在同一列，供檢查 half-flux 附近是否發生不合理 branch jump。
 - `analyze_flux_noise_limit(...)`：在可選 fixed `n_th` 下做 flux-noise-only probe，回傳 `A_phi_init`、`A_phi_fit`、pointwise `A_phi(flux)` 與 summary table；fit residual 可使用 `MeasurementErrorPolicy` 與 `FluxResidualWeighting`。
 - `analyze_photon_shot_noise_limit(...)`：在可選 fixed `A_phi` 下做 photon-shot-noise probe；預設用 pointwise minimum 作為 `n_th_init`，因為 photon-only fit/平均值會把 non-sweet-spot flux noise 吃進 `n_th` 而高估。`n_th_fit` 仍保留為診斷值；fit residual 使用和 combined fit 相同的 weighting 設定。
@@ -60,3 +60,5 @@ Fluxonium echo T2 vs. flux 的分析工具：把實測 `T2e` 先扣除 relaxatio
 6. 用 `build_t2_channel_curves(...)` 與 `plot_t2_channel_analysis(...)` 分別畫 pure flux-noise、pure photon-shot-noise、`2*T1` 與三者合併的 effective T2。
 
 Notebook 的每個 stage 保留用戶要調的參數與一個 step-level helper call，函數定義由模組提供。
+
+Record JSONL 載入必須提供 `device_name`，從 `devices[device_name]` 投影 value/value_unit。缺所選裝置時 fail-fast，不讀舊 flat 欄位作 fallback。`T2CurveAnalysisConfig` 也明示同一選擇；後續 calibration 與 preparation 使用投影後的分析 frame。

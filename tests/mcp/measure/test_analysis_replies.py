@@ -170,8 +170,8 @@ def test_analysis_captures_all_owner_writeback_without_live_queries(
             },
             {
                 "id": "candidate-note",
-                "kind": "sample",
-                "target_name": "sample",
+                "kind": "record",
+                "target_name": "record",
                 "proposed": {"t1": 27.5, "source": "reanalysis"},
                 "current": None,
                 "selected": True,
@@ -213,8 +213,8 @@ def test_analysis_captures_all_owner_writeback_without_live_queries(
         },
         {
             "id": "candidate-note",
-            "kind": "sample",
-            "target": "sample",
+            "kind": "record",
+            "target": "record",
             "resolved_target": None,
             "proposed": {"t1": 27.5, "source": "reanalysis"},
             "current": None,

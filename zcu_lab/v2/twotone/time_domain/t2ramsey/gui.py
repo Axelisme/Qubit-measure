@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Mapping, Sequence
+from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TypeAlias
@@ -15,7 +16,7 @@ from zcu_tools.gui.app.measure.adapter import (
     Analysis,
     AnalyzeRequest,
     ParameterWriteback,
-    SampleWriteback,
+    RecordWriteback,
     WritebackItem,
     WritebackRequest,
 )
@@ -97,10 +98,18 @@ def _T2Ramsey_get_writeback_items(
     roles. With a capture, also propose t2r_us/t2r_err_us for the Run's
     resolved $qubit; an unbound alias raises RoleResolutionError. Without
     a capture, retain parameter proposals only so loaded data can still be
-    analyzed. The service adds bias coordinates or omits the sample with a
-    public reason. This Run leaves devices fixed; no live calibration lookup,
-    device access or write occurs here.
+    analyzed. The adapter copies all Run devices into its record. Missing
+    metadata or snapshot logs "no device snapshot" and omits only the record.
+    No live calibration lookup, device access or write occurs here.
     """
+    metadata = req.run_result.metadata
+    devices = (
+        None
+        if metadata is None or metadata.device_snapshot is None
+        else deepcopy(dict(metadata.device_snapshot))
+    )
+    if devices is None:
+        logging.warning("no device snapshot")
     result = req.analyze_result
     items: list[WritebackItem] = [
         ParameterWriteback(
@@ -132,13 +141,17 @@ def _T2Ramsey_get_writeback_items(
         )
 
     parameters = req.ctx.parameters
-    if parameters is not None:
+    if parameters is not None and metadata is not None and devices is not None:
         items.append(
-            SampleWriteback(
+            RecordWriteback(
                 target_name=parameters.resolve_path("$qubit"),
-                description="T2 Ramsey sample at the captured bias",
-                coordinate_device="$qubit.flux_source",
-                proposed_value={
+                description="T2 Ramsey record at the captured bias",
+                record={
+                    "devices": {name: deepcopy(info) for name, info in devices.items()},
+                    "run": {
+                        "run_id": metadata.run_id,
+                        "experiment": metadata.experiment,
+                    },
                     "t2r_us": result.t2r,
                     "t2r_err_us": result.t2r_err,
                 },

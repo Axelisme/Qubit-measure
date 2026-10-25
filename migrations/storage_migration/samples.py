@@ -4,8 +4,8 @@ from dataclasses import replace
 from pathlib import Path
 
 from zcu_tools.resources.entry import ResultEntry
-from zcu_tools.resources.entry.storage import bind_sample_table
-from zcu_tools.resources.sample_table import JsonlSampleTable
+from zcu_tools.resources.entry.storage import bind_record_table
+from zcu_tools.resources.record_table import JsonlRecordTable
 
 from migrations.sample_csv import plan_sample_csv
 
@@ -23,7 +23,7 @@ def convert_samples(
     identity stays located pending. The CSV owner alone interprets columns,
     units and rows using independent operator declarations. Invalid rows stay
     pending at the owner's source path/row/reason, with a complete byte-identical
-    copy at entry/samples.csv; valid rows publish once to entry.samples(component), through a
+    copy at entry/samples.csv; valid rows publish once to entry.records(component), through a
     prepared JSONL temp and the same hash/recovery protocol as other artifacts.
     Unsupported cells retain original strings, with collisions nested according
     to the CSV plan. preserved_sample_fields reports source cells and actual
@@ -66,9 +66,9 @@ def convert_samples(
         )
         return
     target = (
-        entry.samples(names[0]).path
+        entry.records(names[0]).path
         if entry is not None and not session.dry_run
-        else bind_sample_table(
+        else bind_record_table(
             session.manifest.report.destination.result_path, names[0]
         ).path
     )
@@ -110,7 +110,7 @@ def convert_samples(
         return
 
     def build(path: Path) -> None:
-        table = JsonlSampleTable(path)
+        table = JsonlRecordTable(path)
         for sample in plan.rows:
             table.append(
                 run_id=sample.run_id,

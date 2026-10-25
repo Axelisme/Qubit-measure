@@ -4,7 +4,7 @@
 
 **讀者：** lab-author。通量頻譜的擬合、資料處理與互動標註工具。
 
-`FreqFluxDependVisualizer.plot_sample_points()` 接受 JSONL reader 的 DataFrame，以 `freq_mhz` 換算 GHz，再由共用 resolver 解析 flux。它不讀檔，也不對舊量測欄位名加 alias。
+`FreqFluxDependVisualizer.plot_sample_points(..., device_name=...)` 接受 record JSONL reader 的 DataFrame，先投影指定裝置的 `devices` 設定，再以 `freq_mhz` 換算 GHz，再由共用 resolver 解析 flux。它不讀檔，也不對舊量測欄位名加 alias。
 
 本模塊提供 Fluxonium 通量依賴光譜（flux-dependent spectrum）的擬合、資料處理、
 與互動式標註工具。搭配 [`notebook_md/analysis/fluxdep_fit.md`](../../../../../notebook_md/analysis/fluxdep_fit.md) 使用。
@@ -126,7 +126,7 @@ measure app 的 `FluxPickState`/plugin 共用數值計算，但 notebook 不建�
 - `FreqFluxDependVisualizer`：追加
   - `plot_background(spectrums)`：2D 熱圖底圖（多個 spectrum 疊加）
   - `plot_simulation_lines(fluxs, energies, transitions)`：疊加擬合出的躍遷線
-  - `plot_points(fluxs, freqs, **kw)` / `plot_sample_points(sample_table, *, fallback_frame=None)`：散點；sample points 必須是 v2 SampleTable（`validate_sample_table_v2`），flux 由 shared resolver 以 `explicit → row-frame → fallback-frame` precedence 取得，legacy coordinate（如 `calibrated mA`）與 unresolved rows 在繪圖前明確失敗
+  - `plot_points(fluxs, freqs, **kw)` / `plot_sample_points(record_table, *, device_name=..., fallback_frame=None)`：散點；sample points 必須是 v2 RecordTable（`validate_record_table_v2`），flux 由 shared resolver 以 `explicit → row-frame → fallback-frame` precedence 取得，legacy coordinate（如 `calibrated mA`）與 unresolved rows 在繪圖前明確失敗
   - `plot_constant_freq(freq, name)`：水平參考線（例如 readout 頻率）
   - `auto_derive_limits()`：依所有已加入的資料自動決定 x/y 範圍
 

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import logging
 from collections.abc import Sequence
+from copy import deepcopy
 from pathlib import Path
 from typing import TYPE_CHECKING, TypeAlias
 
@@ -12,7 +14,7 @@ from zcu_tools.gui.app.measure.adapter import (
     Analysis,
     AnalyzeRequest,
     ParameterWriteback,
-    SampleWriteback,
+    RecordWriteback,
     WritebackItem,
     WritebackRequest,
 )
@@ -71,16 +73,24 @@ def _T1_analyze(
 def _T1_get_writeback_items(
     req: WritebackRequest[T1RunResult, T1Analysis],
 ) -> Sequence[WritebackItem]:
-    """Propose fitted T1 parameters and a captured-component sample.
+    """Propose fitted T1 parameters and a captured-component record.
 
-    req supplies the source result and fixed Run context. Sample fields use
+    req supplies the source result and fixed Run context. Record fields use
     us and target the Run's resolved $qubit, never the live selection. Without
     a parameter capture, retain parameter proposals only so loaded data can
     still be analyzed; Apply rejects the missing capture. Unbound $qubit
-    with a capture raises RoleResolutionError. WritebackService supplies
-    bias coordinates or omits the sample with its existing public reason.
+    with a capture raises RoleResolutionError. The adapter copies all Run
+    devices into its record. Missing metadata or snapshot logs "no device snapshot" and omits only the record.
     No write or device access occurs here; this Run leaves devices fixed.
     """
+    metadata = req.run_result.metadata
+    devices = (
+        None
+        if metadata is None or metadata.device_snapshot is None
+        else deepcopy(dict(metadata.device_snapshot))
+    )
+    if devices is None:
+        logging.warning("no device snapshot")
     result = req.analyze_result
     items: list[WritebackItem] = [
         ParameterWriteback(
@@ -91,13 +101,17 @@ def _T1_get_writeback_items(
         ),
     ]
     parameters = req.ctx.parameters
-    if parameters is not None:
+    if parameters is not None and metadata is not None and devices is not None:
         items.append(
-            SampleWriteback(
+            RecordWriteback(
                 target_name=parameters.resolve_path("$qubit"),
-                description="T1 sample at the captured bias",
-                coordinate_device="$qubit.flux_source",
-                proposed_value={
+                description="T1 record at the captured bias",
+                record={
+                    "devices": {name: deepcopy(info) for name, info in devices.items()},
+                    "run": {
+                        "run_id": metadata.run_id,
+                        "experiment": metadata.experiment,
+                    },
                     "t1_us": result.t1,
                     "t1_err_us": result.t1_err,
                 },

@@ -16,7 +16,7 @@ from zcu_tools.gui.session.context_control import ContextControlPort
 from zcu_tools.gui.session.context_types import CommandOrigin
 from zcu_tools.gui.session.library_entry import ModuleEntryForm
 from zcu_tools.gui.session.types import ParameterContext
-from zcu_tools.resources.entry import RoleResolutionError, document_unit
+from zcu_tools.resources.entry import document_unit
 from zcu_tools.resources.entry import writeback as concrete
 from zcu_tools.resources.entry.ledger_models import AcceptedWrite, JsonObject
 
@@ -26,7 +26,7 @@ from .contracts import WritebackEdit as WritebackEdit
 from .contracts import WritebackSelection as WritebackSelection
 from .contracts import WritebackValues as WritebackValues
 from .contracts import WritebackWritten as WritebackWritten
-from .items import ModuleWriteback, ParameterWriteback, SampleWriteback, WritebackItem
+from .items import ModuleWriteback, ParameterWriteback, RecordWriteback, WritebackItem
 from .values import applied_values, destination_path, read_destination_value
 
 logger = logging.getLogger(__name__)
@@ -39,48 +39,8 @@ _GUI_ORIGIN = CommandOrigin("gui")
 _KIND_PREFIX = {
     ParameterWriteback: "param",
     ModuleWriteback: "ml",
-    SampleWriteback: "sample",
+    RecordWriteback: "record",
 }
-
-
-def _sample_fields(
-    fields: JsonObject,
-    parameters: ParameterContext | None,
-    device_snapshot: Mapping[str, JsonObject] | None,
-    device_alias: str | None,
-) -> JsonObject:
-    """Bind automatic GUI coordinates once, or explain why no sample is offered."""
-    if device_alias is None:
-        raise FailedPreconditionError(
-            "Sample writeback requires an adapter-declared device alias"
-        )
-    if parameters is None:
-        raise FailedPreconditionError(
-            f"Sample writeback requires a Run {device_alias} binding"
-        )
-    try:
-        device_name = parameters.value(device_alias)
-    except RoleResolutionError as exc:
-        raise FailedPreconditionError(
-            f"Sample writeback requires {device_alias}: {exc}"
-        ) from exc
-    if not isinstance(device_name, str) or not device_name:
-        raise FailedPreconditionError(
-            f"Sample writeback requires a Run {device_alias} name"
-        )
-    if device_snapshot is None or device_name not in device_snapshot:
-        raise FailedPreconditionError(f"Run snapshot has no device {device_name!r}")
-    device = device_snapshot[device_name]
-    value, unit = device.get("value"), device.get("value_unit")
-    if not isinstance(value, (int, float)) or isinstance(value, bool):
-        raise FailedPreconditionError(
-            f"Run device {device_name!r} has no numeric value"
-        )
-    if unit not in ("A", "V", "native"):
-        raise FailedPreconditionError(
-            f"Run device {device_name!r} has no usable value_unit"
-        )
-    return copy.deepcopy(fields) | {"dev_value": value, "dev_unit": unit}
 
 
 @dataclass
@@ -163,7 +123,7 @@ class WritebackDraft:
 
     @property
     def unavailable_reasons(self) -> tuple[str, ...]:
-        """Reasons for omitted sample proposals, fixed when the draft was created."""
+        """Draft diagnostics; opaque record content never creates a reason."""
         return self._unavailable_reasons
 
     @property
@@ -342,13 +302,10 @@ class WritebackService:
         It stays fixed through Save, selection changes, edits and application.
         Application copies it into accepted evidence and library provenance.
         device_snapshot maps Run-fixed device names to their JSON settings; None
-        means no device evidence. Each Sample declares coordinate_device, a
-        device alias path ("$name"); None omits that proposal. Samples require
-        run_id and that alias resolving to a nonempty device name in the
-        captured snapshot with value/value_unit. Alias errors and missing facts
-        omit only those proposals
-        and appear in draft.unavailable_reasons. Sample fields are detached and
-        automatic device coordinates replace any producer-supplied coordinates.
+        means no device evidence. Records are detached adapter-owned JSON;
+        this service neither reads device facts nor adds coordinate fields.
+        The append owner requires run_id and supplies only the provenance
+        envelope (run_id/point/at/source). Record format follows adapter policy.
         """
         if not experiment_name.strip():
             raise InvalidInputError("experiment_name must be nonempty")
@@ -362,21 +319,6 @@ class WritebackService:
         unavailable_reasons: list[str] = []
         for raw_item in proposals:
             item = self._copy_item(raw_item)
-            if isinstance(item, SampleWriteback):
-                try:
-                    if run_id is None or not run_id.strip():
-                        raise FailedPreconditionError(
-                            "Sample writeback requires a captured run_id"
-                        )
-                    item.proposed_value = _sample_fields(
-                        item.proposed_value,
-                        parameters,
-                        device_snapshot,
-                        item.coordinate_device,
-                    )
-                except FailedPreconditionError as exc:
-                    unavailable_reasons.append(f"{item.target_name}: {exc}")
-                    continue
             prefix = self._kind_prefix(item)
             item.session_id = self._next_session_id(entries, prefix)
             entry = _DraftEntry(item)
@@ -427,8 +369,8 @@ class WritebackService:
         values: dict[str, WritebackValues] = {}
         for item in items:
             path = destination_path(item, parameters)
-            if isinstance(item, SampleWriteback):
-                proposed = item.proposed_value
+            if isinstance(item, RecordWriteback):
+                proposed = item.record
             elif isinstance(item, ParameterWriteback):
                 proposed = AcceptedWrite.model_validate(
                     {"path": path, "value": item.proposed_value}
@@ -586,7 +528,7 @@ class WritebackService:
         written: dict[str, list[str]] = {
             "parameter": [],
             "ml_modules": [],
-            "samples": [],
+            "records": [],
         }
         if not selected_entries:
             return _DraftApplication((), written)
@@ -595,10 +537,10 @@ class WritebackService:
         items: list[concrete.WritebackItem] = []
         for entry in selected_entries:
             item = entry.item
-            if isinstance(item, SampleWriteback):
+            if isinstance(item, RecordWriteback):
                 path = item.target_name
-                items.append(concrete.SampleWriteback(path, item.proposed_value))
-                written["samples"].append(path)
+                items.append(concrete.RecordWriteback(path, item.record))
+                written["records"].append(path)
             elif isinstance(item, ParameterWriteback):
                 path = parameters.resolve_path(item.target_name)
                 write = AcceptedWrite.model_validate(
@@ -900,9 +842,9 @@ class WritebackService:
     ) -> None:
         """Capture display-only summaries from the creation context."""
         item = entry.item
-        if isinstance(item, SampleWriteback):
-            entry.current_summary = "entry sample"
-            entry.proposed_summary = self._format_value_summary(item.proposed_value)
+        if isinstance(item, RecordWriteback):
+            entry.current_summary = "entry record"
+            entry.proposed_summary = self._format_value_summary(item.record)
         elif isinstance(item, ParameterWriteback):
             current = (
                 None if parameters is None else parameters.lookup(item.target_name)

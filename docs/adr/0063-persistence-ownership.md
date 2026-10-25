@@ -6,7 +6,7 @@ status: accepted
 
 ## 脈絡
 
-App memento、Experiment Data File、workflow run artifact、`params.json`、SampleTable 和 waveform asset 都會落盤，但保存目的不同。以檔案格式統一它們，會讓通用讀寫層決定量測語意、完成條件或使用者路徑政策。本決策依保存目的分配權威，不建立統一的 persistence service。格式、欄位和各類資料的操作細節由各 owner 維護。
+App memento、Experiment Data File、workflow run artifact、`params.json`、RecordTable 和 waveform asset 都會落盤，但保存目的不同。以檔案格式統一它們，會讓通用讀寫層決定量測語意、完成條件或使用者路徑政策。本決策依保存目的分配權威，不建立統一的 persistence service。格式、欄位和各類資料的操作細節由各 owner 維護。
 
 ## 決策
 
@@ -19,7 +19,12 @@ App memento、Experiment Data File、workflow run artifact、`params.json`、Sam
 - 參數容器由 `resources.entry` 組合條目、setup 範本與獨立工作點。值與 opaque metadata 共用一份文件，setup／point 重用 `resources.parameter_metadata` 的 2.0 header 與 metadata 讀寫，以及 `resources.parameter_fields` 的 value staging；DocumentStore 擁有單檔衝突與原子提交，不換算數值。Entry 不產生、解釋或驗證參數 metadata，clone 原樣複製；library 來源記錄與本條目 ledger 引用驗證仍由 library owner 擁有。Accepted executor 對參數只提交 caller 提供的 metadata。GUI context owner 與 Notebook 經公開 capability 使用 entry。GUI proposal 留在 frontend，Apply 才轉成 resources concrete items。兩者共用 accepted executor，resources 不 import frontend 或 experiment，由 C8 分層與 C9 無循環 contract 約束。
 - 使用者於 2026-10-13 裁決：「可以改metadata」。新參數容器寫 `format_version: "2.0"`，只讀 major 2，保留同 major 的 forward-minor 契約。入口直接拒絕舊 major 或任何含 `provenance` 旁表的文件，錯誤含路徑、讀到版本與期望版本 2.0。不雙讀、不附轉換工具，由使用者自行修改既有文件。這項參數格式變更不改 generic DocumentStore、ModuleLibrary 或其他成果的版本契約。
 - Setup 與每個 point 各自的 authored alias 表由 `resources.entry` 保存為獨立的 `aliases.yaml`，不是 memento 或 ledger。ContextService 擁有有序表的語法與 Apply 時機，resources 擁有檔案表示、建立時複製及單檔原子替換。MCP 的單次 aliases／target 覆寫不保存它。
-- SampleTable v2 是跨 producer／consumer 的座標交換契約。`resources.sample_table.schema` 擁有座標、單位及解析語意；條目樣本使用 append-only JSONL，讀取取每個 run_id 最後一整行，CSV 只作匯出。舊 CSV reader 留在 root `migrations/` 供離線轉換，runtime 不作 fallback。
+- `RecordWriteback` 只 append adapter 組裝的任意 JSON object，不選座標裝置、不注入 `dev_value/dev_unit`，也不因裝置資料缺失而省略 proposal。框架只補 `run_id`、`point`、`at` 與 `source` provenance 信封。格式由 adapter 間的 policy 決定，見 [lab authoring 的 Record policy](../../zcu_lab/v2/measure-authoring.md#record-policy)。元件記錄放在 `records/components/<target>.jsonl`，事件 ledger 維持 `records/ledger.jsonl`，附件維持 `records/<event UUID>.json`，兩個命名空間不共用行格式。
+- `resources.record_table` 擁有 append-only JSONL，每個 run_id 只讀最後一整行，CSV 只作匯出。`project_device_coordinates(..., device_name=...)` 將 caller 指定的裝置投影為分析 frame，再套用 opt-in flat v2 座標與 flux 解析。不猜裝置，不讀舊 flat 欄位作投影 fallback。Runtime 不讀舊名稱或 `samples/` 路徑。
+
+使用者 2026-10-25：「我認為框架應該對SampleWriteback保持中立無知，可能可以叫RecordWriteback也說不定，行為就是append一個格式不拘的json到紀錄的jsonl中，格式由adapter間的隱式policy決定，資訊也尤其組裝，當然文檔與註解要寫這個policy好讓人維護」。
+同日確認完整改名：「我認為sample可以遷移到新名字，稱現在還沒有真實測量的時間遷是最安全的」。
+Wire kind、written key 與 session prefix 使用 `record`、`records` 與 `record-<n>`。舊 API 名稱不保留。
 - Waveform asset 擁有播放 arrays、reference time axis 和 duration。Core waveform_format 驗證 samples 與編解碼 NPZ，只驗 recipe JSON 語法。Resources 管理 formula 語意、命名與實體 I/O。ModuleLibrary Spec 只保存 asset key。Native arb cfg 保存 key 與必填本機絕對 path，不另存播放長度或 provider。Program/sim 讀 path 的 samples，在完整 asset duration 取樣，不解讀 formula，也不查 global DB。
 
 ### 設定快照與 acquired 事實
@@ -167,18 +172,18 @@ Autofluxdep artifact 建立失敗不啟動 run；canonical row write／flush／j
 
 Experiment writer 寫 caller 指定的 exact path。Labber 拒絕既有目的地；native 預設也拒絕，只有明確 replace=True 才用同目錄 temp、關檔後 atomic replace，失敗清 temp 並保留舊目的地。SaveLayout 的 Labber suffix 只避讓當時已存在的檔案，不是跨程序 filename reservation；collision 由上層回報該輸出失敗，不隱藏 retry。單檔 replace 與 ledger append 不是跨檔交易，也不保證掉電恢復。Run identity 由 run-scoped metadata 記錄，不由可讀 slug 或檔名猜測。Workflow manifest 連結 metadata root 和 heavy-data root，不把 exports 當另一份原始權威。
 
-Normal runtime 只接受各自契約指定的格式，不猜測 legacy shape／unit；版本必須與 artifact kind 一起判斷，合法 streaming v1 不因數字小於 one-shot v2 而視為同類 legacy。Experiment 的舊 converter 和 GUI fallback 已退休。SampleTable legacy 資料只能由 caller 明確呼叫 pure DataFrame conversion；此函式不自動改寫 CSV。QubitParams 的 project identity migration 由其 owner 管理，不因本 ADR 授權寫入使用者資料，也不建立跨資料類型的共用 migration layer。
+Normal runtime 只接受各自契約指定的格式，不猜測 legacy shape／unit；版本必須與 artifact kind 一起判斷，合法 streaming v1 不因數字小於 one-shot v2 而視為同類 legacy。Experiment 的舊 converter 和 GUI fallback 已退休。既有 pure DataFrame conversion 只產生分析 frame，不是 raw-record loader，不補造 `devices`，也不自動改寫 CSV。QubitParams 的 project identity migration 由其 owner 管理，不因本 ADR 授權寫入使用者資料，也不建立跨資料類型的共用 migration layer。
 
 ### 共享資料與引用
 
 `params.json` 的 QubitParams 與工作點的 `Q1.params` 是獨立資料，不自動同步。QubitParams 的 caller 以 typed 語意方法讀寫；更新一個 section 保留其它已知和未知 section。Timestamp 只表示 section 修改時間，不是 dependency provenance 或自動失效。單一 typed module 不等於跨程序互斥，也不代表 mtime 同步可解決多 writer 衝突。
 
-SampleTable v2 明示 `dev_value` 的 A／V base unit，flux 與 row frame 由獨立欄位表示。Flux 解析依 explicit、row-frame、fallback-frame 順序，並標明每列來源；fallback frame 必須與該列 unit 一致。自描述 unit 不保證缺少 flux／frame 的列能不靠外部輸入算出 flux。分析用 correction／alignment 不默默寫回原始樣品資料，也不自動修正 explicit flux。Autofluxdep export 用 run 建立時的 unit snapshot，不以 export 當下的 live device state 重讀舊結果。
+Opt-in flat v2 分析 frame 明示 `dev_value` 與 `dev_unit`，單位為 A、V 或 native，flux 與 row frame 由獨立欄位表示。原始 record 不要求這些欄位。Flux 解析依 explicit、row-frame、fallback-frame 順序，並標明每列來源；fallback frame 必須與該列 unit 一致。自描述 unit 不保證缺少 flux／frame 的列能不靠外部輸入算出 flux。分析用 correction／alignment 不默默寫回原始樣品資料，也不自動修正 explicit flux。Autofluxdep export 用 run 建立時的 unit snapshot，不以 export 當下的 live device state 重讀舊結果。
 
-2026-10-21 註：autofluxdep 已移除，上一段最後一句只保留舊 export 的歷史契約。現行 SampleTable 座標與單位契約見 [sample_table owner](../../lib/zcu_tools/resources/sample_table/README.md)。
+2026-10-21 註：autofluxdep 已移除，上一段最後一句只保留舊 export 的歷史契約。現行 RecordTable 座標與單位契約見 [record_table owner](../../lib/zcu_tools/resources/record_table/README.md)。
 
 Asset repository 的 rename／delete 只處理資產，不掃描或改寫 ModuleLibrary 的 nested references。舊 key 可能因此成為 dangling reference；使用端解析缺失資產時明確失敗，由 caller／使用者修正引用。這避免 repository 反向理解 experiment cfg，也避免跨 owner 批次寫入。Capture-bound assets.path_for 驗 key 與檔存在，不載入 samples。Native cfg 的 path 以本機絕對路徑與 POSIX separators 序列化。Data.h5 不附帶 NPZ。移動 asset 或跨 OS 後，caller 須明確重定位 path；讀量測 arrays 不需要重播。覆寫同 path 會改變之後播放的 bytes。本決策不引入 asset versioning、copy-on-run、packaging 或自動引用遷移。
 
 ## 後果
 
-維護者先找保存對象的 owner，再查其就地格式契約：[`datafile`](../../lib/zcu_tools/datafile/README.md)、[`experiment`](../../lib/zcu_tools/experiment/README.md)、[`QubitParams`](../../lib/zcu_tools/resources/qubit_params.md)、[`parameter entry`](../../lib/zcu_tools/resources/entry/README.md)、[`SampleTable`](../../lib/zcu_tools/resources/sample_table/README.md)、[`waveform assets`](../../lib/zcu_tools/resources/waveform_assets.md)、[`program waveform`](../../lib/zcu_tools/program/v2/README.md) 與 [main GUI](../../lib/zcu_tools/gui/app/measure/README.md)。本 ADR 不保證多檔 all-or-nothing、crash safety、多 writer 協調、autosave、resume、browser 或任何使用者資料遷移。
+維護者先找保存對象的 owner，再查其就地格式契約：[`datafile`](../../lib/zcu_tools/datafile/README.md)、[`experiment`](../../lib/zcu_tools/experiment/README.md)、[`QubitParams`](../../lib/zcu_tools/resources/qubit_params.md)、[`parameter entry`](../../lib/zcu_tools/resources/entry/README.md)、[`RecordTable`](../../lib/zcu_tools/resources/record_table/README.md)、[`waveform assets`](../../lib/zcu_tools/resources/waveform_assets.md)、[`program waveform`](../../lib/zcu_tools/program/v2/README.md) 與 [main GUI](../../lib/zcu_tools/gui/app/measure/README.md)。本 ADR 不保證多檔 all-or-nothing、crash safety、多 writer 協調、autosave、resume、browser 或任何使用者資料遷移。

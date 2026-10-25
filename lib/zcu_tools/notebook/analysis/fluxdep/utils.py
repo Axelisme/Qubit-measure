@@ -13,17 +13,18 @@ from zcu_tools.analysis.fluxdep.models import (
     TransitionDict,
     energy2transition,
 )
-from zcu_tools.resources.sample_table.schema import (
-    SAMPLE_COORDINATE_COLUMNS,
-    SampleFluxFrame,
-    resolve_sample_flux,
-    validate_sample_table_v2,
+from zcu_tools.resources.record_table import (
+    RECORD_COORDINATE_COLUMNS,
+    RecordFluxFrame,
+    project_device_coordinates,
+    resolve_record_flux,
+    validate_record_table_v2,
 )
 
 from .processing import cast2real_and_norm
 
 # Coordinate and measurement columns never shown in sample-point hover labels.
-_PLOT_EXCLUDED_COLUMNS = frozenset((*SAMPLE_COORDINATE_COLUMNS, "freq_mhz"))
+_PLOT_EXCLUDED_COLUMNS = frozenset((*RECORD_COORDINATE_COLUMNS, "freq_mhz"))
 
 
 def derive_bound(
@@ -187,23 +188,26 @@ class FreqFluxDependVisualizer(FluxDependVisualizer):
 
     def plot_sample_points(
         self,
-        sample_table: pd.DataFrame,
+        record_table: pd.DataFrame,
         *,
-        fallback_frame: SampleFluxFrame | None = None,
+        device_name: str,
+        fallback_frame: RecordFluxFrame | None = None,
     ) -> Self:
         """Plot v2 sample rows at their resolved flux.
 
-        The table must satisfy the flat v2 coordinate contract
-        (``validate_sample_table_v2``); per-row flux comes from the shared
+        device_name selects devices[device_name].value/value_unit; missing
+        facts fail without using legacy flat input fields. The projected table
+        must satisfy ``validate_record_table_v2``; per-row flux comes from the shared
         resolver with ``explicit -> row-frame -> fallback-frame`` precedence.
         Rows without explicit flux, a row frame or a matching fallback frame
         fail fast with their indexes before anything is plotted, and legacy
         coordinate columns (e.g. ``calibrated mA``) are rejected outright.
         """
-        validate_sample_table_v2(sample_table)
-        resolution = resolve_sample_flux(sample_table, fallback_frame=fallback_frame)
+        record_table = project_device_coordinates(record_table, device_name=device_name)
+        validate_record_table_v2(record_table)
+        resolution = resolve_record_flux(record_table, fallback_frame=fallback_frame)
         xs = resolution.values
-        ys = np.asarray(sample_table["freq_mhz"]) * 1e-3  # GHz
+        ys = np.asarray(record_table["freq_mhz"]) * 1e-3  # GHz
         labels = [
             ", ".join(
                 [
@@ -212,7 +216,7 @@ class FreqFluxDependVisualizer(FluxDependVisualizer):
                     if key not in _PLOT_EXCLUDED_COLUMNS
                 ]
             )
-            for _, row in sample_table.iterrows()
+            for _, row in record_table.iterrows()
         ]
         self.plot_points(xs, ys, opacity=0.5, hovertext=labels)
 
