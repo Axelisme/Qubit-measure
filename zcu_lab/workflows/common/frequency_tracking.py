@@ -18,6 +18,7 @@ from zcu_tools.simulate.fluxonium.physical_fit import (
 from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
 
 from zcu_lab.workflows.common.feedback import IdwEstimator
+from zcu_lab.workflows.common.gain import GainClamp, clamp_gain
 
 
 class FrequencyModel(BaseModel):
@@ -283,11 +284,25 @@ class FrequencyTracker:
             )
         return center
 
-    def probe_gain(self, initial_gain: float, tun: FrequencyTunables) -> float:
-        """Use the spectroscopy pulse gain initially/in fixed mode, else track linewidth."""
+    def probe_gain(
+        self,
+        initial_gain: float,
+        tun: FrequencyTunables,
+        *,
+        gain_clamped: list[GainClamp] | None = None,
+    ) -> float:
+        """Use pulse gain initially/in fixed mode, else track linewidth up to drive_gain_cap.
+
+        Clip to DAC limits; optionally record changed gains in gain_clamped.
+        """
         if tun.drive_gain_mode == "fixed" or self.qfw_factor is None:
-            return initial_gain
-        return min(tun.drive_gain_cap, tun.target_kappa / self.qfw_factor)
+            return clamp_gain(initial_gain, "probe.initial", gain_clamped)
+        return clamp_gain(
+            tun.target_kappa / self.qfw_factor,
+            "probe.adaptive",
+            gain_clamped,
+            upper=tun.drive_gain_cap,
+        )
 
     def finish_point(
         self,
@@ -313,13 +328,19 @@ class FrequencyTracker:
             )
 
     def observe_linewidth(self, index: int, width_mhz: float, gain: float) -> None:
-        """Smooth trusted FWHM/gain with previous weight 0.7**gap; require gain > 0."""
+        """Smooth trusted FWHM/gain with previous weight 0.7**gap; require gain > 0.
+
+        Limit each update to half/twice the previous factor, so adaptive gain
+        changes by at most x2 or /2. The first trusted width seeds feedback.
+        Do not impose a minimum linewidth-to-sample-spacing threshold.
+        """
         if gain <= 0:
             raise ValueError("Trusted linewidth requires a positive probe gain")
         factor = width_mhz / gain
         if self.qfw_factor is not None:
             weight = 0.7 ** max(1, index - self.last_linewidth_index)
             factor = (1 - weight) * factor + weight * self.qfw_factor
+            factor = min(2 * self.qfw_factor, max(self.qfw_factor / 2, factor))
         self.qfw_factor = factor
         self.last_linewidth_index = index
 

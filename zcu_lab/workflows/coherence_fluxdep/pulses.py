@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from zcu_tools.program.v2.modules import PulseCfg, PulseReadoutCfg
 
 from zcu_lab.workflows.coherence_fluxdep.t1 import T1Plan
-from zcu_lab.workflows.common.calibration import Calibrated, apply_readout_calibration
+from zcu_lab.workflows.common.calibration import Calibrated
 
 
 @dataclass(frozen=True)
@@ -14,7 +14,8 @@ class CalibratedPulses:
 
     pi uses this point's accepted frequency, duration and gain, with the plan's
     routing/waveform. readout uses the accepted or retained readout calibration.
-    No pi/2 is needed for T1. Consumers must copy pulses before changing them.
+    No pi/2 is needed for T1. Gains retain the requested values; the native cfg
+    builder owns clipping and its diagnostics. Consumers copy before changing.
     """
 
     pi: PulseCfg
@@ -36,5 +37,6 @@ def calibrated_pulses(plan: T1Plan, cal: Calibrated | None) -> CalibratedPulses 
     if cal.drive_gain is not None:
         pi.set_param("gain", cal.drive_gain)
     readout = plan.readout.model_copy(deep=True)
-    apply_readout_calibration(readout, cal)
+    readout.set_param("freq", cal.readout_freq_mhz)
+    readout.set_param("gain", cal.readout_gain)
     return CalibratedPulses(pi=pi, readout=readout)

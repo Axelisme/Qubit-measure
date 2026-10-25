@@ -35,6 +35,7 @@ from zcu_lab.workflows.common.frequency_diagnostics import (
     selected_peak_diagnostics,
 )
 from zcu_lab.workflows.common.frequency_tracking import FrequencyTracker, trusted_curve
+from zcu_lab.workflows.common.gain import GainClamp
 from zcu_lab.workflows.common.saving import save_native
 from zcu_lab.workflows.common.summary import observe_operation
 
@@ -96,15 +97,17 @@ def observe_frequency_linewidth(
 def frequency_probe_gains(
     inputs: CalibrationInputs,
     tracker: FrequencyTracker,
+    gain_clamped: list[GainClamp] | None = None,
 ) -> tuple[float, float, float]:
     """Return coarse, fine and legacy single gains for the captured tunables.
 
     Coarse defaults to the pulse gain. Fine defaults to half the adaptive gain,
     capped at half coarse gain. Explicit coarse/fine values override defaults.
+    gain_clamped optionally records adaptive requests truncated by the cap.
     """
     tun = inputs.tun
     initial = float(inputs.probe_pulse.gain)
-    adaptive = tracker.probe_gain(initial, tun)
+    adaptive = tracker.probe_gain(initial, tun, gain_clamped=gain_clamped)
     coarse = tun.coarse_gain if tun.coarse_gain is not None else initial
     fine = tun.fine_gain if tun.fine_gain is not None else 0.5 * min(adaptive, coarse)
     return coarse, fine, adaptive

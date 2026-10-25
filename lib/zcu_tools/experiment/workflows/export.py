@@ -11,11 +11,10 @@ from zcu_tools.datafile import (
     LabberPayload,
     encode_labber_comment,
     load,
-    save,
     write_labber,
 )
 from zcu_tools.experiment.axes_spec import AxesSpec, GroupedAxesSpec
-from zcu_tools.experiment.metadata import RunMetadata, RunSnapshot
+from zcu_tools.experiment.metadata import RunSnapshot
 from zcu_tools.experiment.native_persistence import (
     PreparedRunData,
     metadata_from_container,
@@ -33,12 +32,12 @@ logger = logging.getLogger(__name__)
 class FluxdepExportOutput:
     """One selected writer attempt: exact path, saved/failed status and diagnosis.
 
-    format selects native data_h5 or Labber; status is saved or failed.
+    format is labber; status is saved or failed.
     Only allocation failure has path=None. A writer failure retains its path.
     Saved outputs have error=None; failed outputs have a nonempty diagnostic.
     """
 
-    format: Literal["data_h5", "labber"]
+    format: Literal["labber"]
     path: Path | None
     status: Literal["saved", "failed"]
     error: str | None
@@ -93,45 +92,17 @@ def write_outputs(
     prepared: PreparedRunData,
     snapshot: RunSnapshot,
     *,
-    merged: bool,
     database: Path | None,
 ) -> tuple[FluxdepExportOutput, ...]:
     """Write selected outputs independently, without ledger or run mutations.
 
-    merged replaces data_root/merged.h5 atomically. Non-None database explicitly
-    requests a fresh SaveLayout Labber date-tree path. Science preparation and
+    Non-None database explicitly requests a fresh SaveLayout Labber date-tree
+    path. None requests no output. Science preparation and
     destination preflight belong to the caller and must precede this function.
     Allocation/writer exceptions become typed failed outputs, preserving known
-    paths. Native run_id rejection is not repaired and does not block Labber.
+    paths.
     """
     outputs: list[FluxdepExportOutput] = []
-    if merged:
-        path = manifest.roots.data_root / "merged.h5"
-        try:
-            metadata = RunMetadata(
-                run_id=manifest.identity.run_id,
-                experiment=manifest.workflow,
-                started_at=manifest.started_at.isoformat(),
-                finished_at=None
-                if manifest.ended_at is None
-                else manifest.ended_at.isoformat(),
-                completion="complete"
-                if manifest.lifecycle == "done"
-                else "stopped"
-                if manifest.lifecycle == "cancelled"
-                else "partial",
-                snapshot=snapshot,
-                provenance=manifest.identity.provenance,
-            )
-            save(path, prepared.to_container(metadata), replace=True)
-            outputs.append(FluxdepExportOutput("data_h5", path, "saved", None))
-        except Exception as error:
-            logger.exception("Native merged output failed: %s", path)
-            outputs.append(
-                FluxdepExportOutput(
-                    "data_h5", path, "failed", f"{type(error).__name__}: {error}"
-                )
-            )
     if database is not None:
         path = None
         try:
@@ -146,7 +117,7 @@ def write_outputs(
             output = next(
                 item
                 for item in layout.outputs(
-                    ArtifactKey(section="workflow", name="merged", member="data")
+                    ArtifactKey(section="workflow", name="export", member="data")
                 )
                 if item.format == "labber"
             )
@@ -172,27 +143,3 @@ def write_outputs(
                 )
             )
     return tuple(outputs)
-
-
-def validate_destinations(
-    outputs: tuple[str, ...],
-    supported: set[str],
-    *,
-    result: Path | None,
-    database: Path | None,
-) -> None:
-    """Reject unknown/empty/duplicate selections or missing selected destinations.
-
-    This preflight performs no writes and never requires unused destinations.
-    Merged needs neither run-external path. Samples needs result, Labber database.
-    """
-    if (
-        not outputs
-        or len(outputs) != len(set(outputs))
-        or not set(outputs) <= supported
-    ):
-        raise ValueError(f"Select unique outputs from {sorted(supported)}")
-    if "samples" in outputs and result is None:
-        raise ValueError("samples requires --result")
-    if "labber" in outputs and database is None:
-        raise ValueError("labber requires --database")

@@ -27,6 +27,7 @@ from zcu_lab.workflows.common.analysis import (
     lifetime_rejection,
 )
 from zcu_lab.workflows.common.calibration_results import StageStatus
+from zcu_lab.workflows.common.gain import GainClamp, clamp_gain
 from zcu_lab.workflows.common.gates import Gate, gate
 from zcu_lab.workflows.common.stages import NativeOutput, StageEnv, acquire_saved
 
@@ -43,6 +44,8 @@ class T1Result:
     None for T1 and preserves the existing record shape.
     models records both diagnostic fits, or is empty before primary-fit success.
     gates records named comparisons after primary-fit success, otherwise empty.
+    gain_clamped records this stage's truncated DAC requests, including failures
+    returned after cfg construction; it is stored here, not in the point map.
     Rejection reasons start with lifetime-quality diagnostics, then list failed
     gates with actual values, failed comparisons and thresholds.
     Partial saves raw then returns rejected/stopped without fitting. Expected
@@ -59,11 +62,12 @@ class T1Result:
     detune_mhz: float | None = None
     models: tuple[LifetimeModelRecord, ...] = ()
     gates: tuple[Gate, ...] = ()
+    gain_clamped: tuple[GainClamp, ...] = ()
 
 
 def _cfg(
     pulses: CalibratedPulses, settings: T1Tunables, *, points: int, guess_us: float
-) -> T1Cfg:
+) -> tuple[T1Cfg, tuple[GainClamp, ...]]:
     if not math.isfinite(guess_us) or guess_us <= 0:
         raise ValueError("T1 lifetime guess must be positive and finite")
     stop = (
@@ -79,15 +83,23 @@ def _cfg(
         if settings.relax_mode == "auto"
         else settings.relax_delay_us
     )
-    return T1Cfg(
+    gain_clamped: list[GainClamp] = []
+    pi = pulses.pi.model_copy(deep=True)
+    pi.set_param("gain", clamp_gain(float(pi.gain), "pi", gain_clamped))
+    readout = pulses.readout.model_copy(deep=True)
+    readout.set_param(
+        "gain",
+        clamp_gain(float(readout.gain), "readout", gain_clamped, lower=0.0),
+    )
+    cfg = T1Cfg(
         reps=settings.reps,
         rounds=settings.rounds,
         acquire_retry=settings.acquire_retry,
         earlystop_snr=settings.earlystop_snr,
         relax_delay=relax,
         uniform=settings.uniform,
-        pi_pulse=pulses.pi.model_copy(deep=True),
-        readout=pulses.readout.model_copy(deep=True),
+        pi_pulse=pi,
+        readout=readout,
         length=SweepCfg(
             start=settings.sweep_start_us,
             stop=stop,
@@ -95,6 +107,7 @@ def _cfg(
             step=(stop - settings.sweep_start_us) / (points - 1),
         ),
     )
+    return cfg, tuple(gain_clamped)
 
 
 def _plot(plots: Plots) -> LinePlot:
@@ -157,7 +170,7 @@ async def measure_t1(
     primary fit controls acceptance. Rejection reasons retain lifetime_rejection
     first, followed by each failed numeric gate. No point record or history is modified.
     """
-    cfg = _cfg(pulses, settings, points=points, guess_us=guess_us)
+    cfg, gain_clamped = _cfg(pulses, settings, points=points, guess_us=guess_us)
     plot = _plot(env.plots)
     acquisition = await acquire_saved(
         scope,
@@ -172,11 +185,17 @@ async def measure_t1(
             status="rejected" if acquisition.status == "partial" else "failed",
             reason=acquisition.reason,
             file=acquisition.file,
+            gain_clamped=gain_clamped,
         )
     plot.update(acquisition.result.times, acquisition.result.signals.real)
     fit = analyze_t1(acquisition.result)
     if isinstance(fit, Failed):
-        return T1Result(status="failed", reason=fit.reason, file=acquisition.file)
+        return T1Result(
+            status="failed",
+            reason=fit.reason,
+            file=acquisition.file,
+            gain_clamped=gain_clamped,
+        )
 
     gates = (
         gate("positive_lifetime_us", ">", 0, fit.lifetime_us),
@@ -239,6 +258,7 @@ async def measure_t1(
             file=acquisition.file,
             models=comparison.records,
             gates=gates,
+            gain_clamped=gain_clamped,
         )
     return T1Result(
         status="accepted",
@@ -247,4 +267,5 @@ async def measure_t1(
         file=acquisition.file,
         models=comparison.records,
         gates=gates,
+        gain_clamped=gain_clamped,
     )

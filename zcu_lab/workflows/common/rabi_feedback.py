@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from typing import Literal
 
 from zcu_lab.workflows.common.feedback import LogStepController
+from zcu_lab.workflows.common.gain import GainClamp, clamp_gain
 
 
 @dataclass
@@ -32,7 +33,12 @@ class RabiDriveFeedback:
     )
 
     def select_gain(
-        self, seed_product: float, target_pi_us: float, *, m_ratio: float | None = None
+        self,
+        seed_product: float,
+        target_pi_us: float,
+        *,
+        m_ratio: float | None = None,
+        gain_clamped: list[GainClamp] | None = None,
     ) -> float:
         """Return a gain in (0, 1] from a positive seed product and target in us.
 
@@ -45,14 +51,18 @@ class RabiDriveFeedback:
         A too-slow proposal is a lower bound for base; a too-fast proposal is an
         upper bound. This prevents aging from reversing trusted rejection feedback.
         Invalid positive inputs raise ValueError before selecting a gain.
+        gain_clamped optionally collects any before/after DAC limiting.
         """
         if not all(math.isfinite(x) and x > 0 for x in (seed_product, target_pi_us)):
             raise ValueError("Rabi seed product and target must be positive and finite")
         product = seed_product if self.pi_product is None else self.pi_product
         if m_ratio is not None and (not math.isfinite(m_ratio) or m_ratio <= 0):
             raise ValueError("Rabi matrix-element ratio must be positive and finite")
-        base = min(
-            1.0, product / (1.2 * target_pi_us) / (1.0 if m_ratio is None else m_ratio)
+        base = clamp_gain(
+            product / (1.2 * target_pi_us) / (1.0 if m_ratio is None else m_ratio),
+            "rabi.base",
+            gain_clamped,
+            lower=float.fromhex("0x1p-1022"),
         )
         latest = self.controller.latest()
         if latest is not None:
@@ -62,7 +72,9 @@ class RabiDriveFeedback:
                 base = min(base, latest.value)
             base *= math.exp(latest.confidence * math.log(latest.value / base))
         # Keep a strictly positive representable gain without imposing a new .01 floor.
-        return min(1.0, max(float.fromhex("0x1p-1022"), base))
+        return clamp_gain(
+            base, "rabi.drive", gain_clamped, lower=float.fromhex("0x1p-1022")
+        )
 
     def observe_too_fast(self, pi_us: float, gain: float, target_pi_us: float) -> None:
         """Propose a lower gain from a quality-trusted rejected fast fit.
