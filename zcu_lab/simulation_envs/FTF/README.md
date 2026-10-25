@@ -2,7 +2,7 @@
 
 **讀者：** operator、lab-author、agent。準備 FTF 模擬參數與 entry，並從 GUI 或 Notebook 啟動模擬環境。
 
-**Last updated:** 2026-10-23，mux group mixer 與頂層 time_of_fly
+**Last updated:** 2026-10-25，mux group mixer 與頂層 time_of_fly
 
 既有 entry 把 resonator 與 mux group 的 `ext.time_of_fly` 搬到頂層 `time_of_fly`。程式不自動搬移。
 
@@ -22,7 +22,7 @@ cp zcu_lab/simulation_envs/FTF/default.yaml zcu_lab/simulation_envs/FTF/ftf.yaml
 
 ```bash
 mkdir -p /absolute/new-ftf-project
-uv run --directory . --no-sync -- python scripts/run_measure_gui.py \
+uv run --directory . --no-sync -- python scripts/app/run_measure_gui.py \
   --project-root /absolute/new-ftf-project \
   --script zcu_lab/simulation_envs/FTF/startup.py
 ```

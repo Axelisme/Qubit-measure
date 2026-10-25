@@ -9,7 +9,7 @@
 在 repo root 執行：
 
 ```bash
-uv run --directory . --no-sync -- python scripts/run_measure_gui.py \
+uv run --directory . --no-sync -- python scripts/app/run_measure_gui.py \
   --script zcu_lab/kickstart/six_fluxonium/startup.py
 ```
 

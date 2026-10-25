@@ -1,9 +1,9 @@
 """Launcher for the fluxdep analysis GUI.
 
 Examples:
-    uv run python run_fluxdep_gui.py                          # opens control socket on port 8766
-    uv run python run_fluxdep_gui.py --no-control             # disable the remote-control socket
-    uv run python run_fluxdep_gui.py --project-root .. --entry cooldown --component Q1
+    uv run python scripts/app/run_fluxdep_gui.py                          # opens control socket on port 8766
+    uv run python scripts/app/run_fluxdep_gui.py --no-control             # disable the remote-control socket
+    uv run python scripts/app/run_fluxdep_gui.py --project-root .. --entry cooldown --component Q1
 """
 
 from __future__ import annotations
@@ -21,8 +21,8 @@ from zcu_tools.gui.launcher import (
     runtime_options_from_args,
 )
 
-# Repo root: this script lives in scripts/, so its parent is the root.
-PROJECT_ROOT = Path(__file__).parent.parent
+# Repo root: this script lives two directories below it, in scripts/app/.
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
 def _parse_args(argv: list[str]) -> argparse.Namespace:
@@ -46,10 +46,7 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(sys.argv[1:] if argv is None else argv)
-    # Anchor default result/database paths at the repo root (this script lives in
-    # scripts/, so its parent is the repo root) rather than cwd — a .bat launcher
-    # does `cd /d "%~dp0"` into scripts/, which would otherwise scope defaults
-    # under scripts/.
+    # Anchor default result/database paths at the repo root, not cwd.
     project_root = str(PROJECT_ROOT)
 
     from zcu_tools.gui.app.fluxdep.app import FluxDepGuiBehavior

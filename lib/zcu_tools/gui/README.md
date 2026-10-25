@@ -1,6 +1,6 @@
 # `zcu_tools.gui` — GUI framework cheat-sheet
 
-**Last updated:** 2026-10-24
+**Last updated:** 2026-10-25
 
 **讀者：** framework-dev。共用 GUI 層、app 邊界與生命週期速查。
 
@@ -111,7 +111,7 @@ exit-code handling. Apps expose a fixed `GuiRuntimeBehavior.spec` class variable
 for static process contract and implement `assemble(control)` for app-local
 controller/window/adapter wiring. Launch-time CLI values stay in
 `GuiLaunchOptions` and behavior constructor arguments. App modules expose
-behavior classes; standalone `scripts/run_*_gui.py` launchers are the process
+behavior classes; standalone `scripts/app/run_*_gui.py` launchers are the process
 entrypoints and call `launch_gui_runtime(...)` directly.
 
 The runtime seam deliberately stops above remote method/domain/session policy:
@@ -243,7 +243,7 @@ state.
 ## Logging (`logging_setup.py`)
 
 `logging_setup.setup_gui_logging` is the single place that decides *how* every
-GUI entry point configures logging. All four `scripts/run_*_gui.py` launchers and
+GUI entry point configures logging. All three `scripts/app/run_*_gui.py` launchers and
 the measure MCP server (`mcp/measure/server.py:main`) call it instead of each
 rolling their own handler set.
 

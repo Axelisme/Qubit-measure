@@ -20,8 +20,8 @@ def test_launch_forwards_entry_context_to_gui(tmp_path, monkeypatch):
             return 2
 
     monkeypatch.setattr(subprocess, "Popen", ExitedProcess)
-    script = tmp_path / "scripts" / "run_dispersive_gui.py"
-    script.parent.mkdir()
+    script = tmp_path / "scripts" / "app" / "run_dispersive_gui.py"
+    script.parent.mkdir(parents=True)
     script.write_text("# synthetic launch target\n")
     config = MCPBridgeConfig(
         tool_prefix="dispersive_",

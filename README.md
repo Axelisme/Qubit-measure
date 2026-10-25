@@ -4,7 +4,7 @@
 
 ZCU-Tools 是 ZCU216/QICK 的量子量測工具集。工作站執行量測 GUI、Notebook、分析與模擬；ZCU 板端提供 QICK Pyro server。連接硬體前，先確認板端環境與資產版本。
 
-**Last updated:** 2026-10-22
+**Last updated:** 2026-10-25
 
 ## 執行環境
 
@@ -14,7 +14,7 @@ ZCU-Tools 是 ZCU216/QICK 的量子量測工具集。工作站執行量測 GUI�
 工作站在目標 worktree 安裝所需 profile；例如量測 GUI 使用 `uv sync --directory <worktree> --extra gui`。`client` extra 會從 upstream Git 安裝 QICK。其他環境要求依 [repo 操作指引](CLAUDE.md) 和 [腳本入口](scripts/README.md) 確認。
 
 ```bash
-uv run --directory <worktree> --no-sync -- python scripts/run_measure_gui.py
+uv run --directory <worktree> --no-sync -- python scripts/app/run_measure_gui.py
 ```
 
 板端以其 Python 3.8 啟動 [`scripts/start_server.py`](scripts/README.md#gui-與板端-server) 或 [`scripts/start_server.ipynb`](scripts/start_server.ipynb)；需要 repo-root 的 [`bitfiles/`](bitfiles/README.md) 與 `lib/`，不能用上述工作站命令代跑。其餘使用者 GUI 與資料處理入口，以及網路和資料寫入副作用，見 [scripts/README.md](scripts/README.md)。Workflow 在 measure GUI 的 Workflow tabs 執行，與 Experiment tabs 共用 session 與 RUN lease。離線驗證使用同一 measure GUI 與合成註冊清單。

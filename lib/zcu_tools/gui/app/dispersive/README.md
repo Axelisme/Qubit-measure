@@ -1,12 +1,12 @@
 # Dispersive-shift analysis GUI
 
-**Last updated:** 2026-10-23
+**Last updated:** 2026-10-25
 
 **讀者：** framework-dev、operator。開啟 entry、選 predictor 與匯出色散擬合的流程及 owner。
 
 ## Entry and predictor
 
-以 `scripts/run_dispersive_gui.py --project-root <root> --entry <entry> --component <name>`
+以 `scripts/app/run_dispersive_gui.py --project-root <root> --entry <entry> --component <name>`
 啟動。省略 entry 時，在 GUI 的 Entry 對話框選擇。
 省略 component 時，以 setup 的 qubit alias 預選。Alias 缺失或錯誤時，使用者必須明示選擇。
 
