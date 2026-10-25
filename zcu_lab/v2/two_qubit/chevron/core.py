@@ -86,7 +86,7 @@ class ChevronExp(Experiment[RabiScanResult, ChevronCfg]):
             )
             for frequency in frequencies
         ]
-        if len(drives) != len(frequencies) or not np.all(np.isfinite(frequencies)):
+        if not np.all(np.isfinite(frequencies)):
             raise ValueError("Each finite coordinate requires one explicit drive pair")
         cfg = config.model_copy(deep=True, update={"rounds": 1})
         durations = sweep2array(cfg.duration)
@@ -123,13 +123,12 @@ class ChevronExp(Experiment[RabiScanResult, ChevronCfg]):
                         initial_delay=duration_step.cfg.initial_delay,
                         relax_delay=duration_step.cfg.relax_delay,
                     )
-                    m = cfg
-                    builder.add_pulse("prepare_f1", m.x180_f1)
-                    builder.add_pulse("prepare_f2", m.x180_f2)
+                    builder.add_pulse("prepare_f1", cfg.x180_f1)
+                    builder.add_pulse("prepare_f2", cfg.x180_f2)
                     builder.add(dual_line_drive(drive, frequency=float(drive.f1.freq)))
-                    builder.add_pulse("contrast_f1", m.x180_f1)
-                    builder.add_pulse("contrast_f2", m.x180_f2)
-                    builder.add(MuxReadout("readout", m.readout))
+                    builder.add_pulse("contrast_f1", cfg.x180_f1)
+                    builder.add_pulse("contrast_f2", cfg.x180_f2)
+                    builder.add(MuxReadout("readout", cfg.readout))
                     prog = builder.build()
                     for _, round_step in duration_step.repeat("round", config.rounds):
                         _ = round_step.prog_builder(

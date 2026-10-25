@@ -85,7 +85,7 @@ class ConstructivePhaseExp(Experiment[RabiScanResult, ConstructivePhaseCfg]):
             )
             for phase in phases
         ]
-        if len(drives) != len(phases) or not np.all(np.isfinite(phases)):
+        if not np.all(np.isfinite(phases)):
             raise ValueError("Each finite coordinate requires one explicit drive pair")
         cfg = config.model_copy(deep=True, update={"rounds": 1})
         durations = sweep2array(cfg.duration)
@@ -122,13 +122,12 @@ class ConstructivePhaseExp(Experiment[RabiScanResult, ConstructivePhaseCfg]):
                         initial_delay=duration_step.cfg.initial_delay,
                         relax_delay=duration_step.cfg.relax_delay,
                     )
-                    m = cfg
-                    builder.add_pulse("prepare_f1", m.x180_f1)
-                    builder.add_pulse("prepare_f2", m.x180_f2)
+                    builder.add_pulse("prepare_f1", cfg.x180_f1)
+                    builder.add_pulse("prepare_f2", cfg.x180_f2)
                     builder.add(dual_line_drive(drive, frequency=float(drive.f1.freq)))
-                    builder.add_pulse("contrast_f1", m.x180_f1)
-                    builder.add_pulse("contrast_f2", m.x180_f2)
-                    builder.add(MuxReadout("readout", m.readout))
+                    builder.add_pulse("contrast_f1", cfg.x180_f1)
+                    builder.add_pulse("contrast_f2", cfg.x180_f2)
+                    builder.add(MuxReadout("readout", cfg.readout))
                     prog = builder.build()
                     for _, round_step in duration_step.repeat("round", config.rounds):
                         _ = round_step.prog_builder(
