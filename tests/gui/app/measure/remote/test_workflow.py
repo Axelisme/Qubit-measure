@@ -21,8 +21,10 @@ from zcu_tools.gui.app.measure.state import State
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.form import FormModel
 from zcu_tools.gui.form_adapter import ModuleInputField
+from zcu_tools.gui.remote.errors import RemoteError
 from zcu_tools.gui.remote.rpc_endpoint import ClientLink
 from zcu_tools.gui.session.context_types import PointUseRequest
+from zcu_tools.mcp.measure.session import GuiRpcError
 from zcu_tools.resources.entry import ResultEntry
 
 from tests.gui._qt_waits import qt_until
@@ -244,6 +246,80 @@ def test_mcp_status_question_envelope_and_answer_share_native_operation(
         )
     finally:
         client.context.session.close()
+
+
+@pytest.fixture(params=[False, True], ids=["rpc", "mcp"])
+def workflow_start_call(workflow_rpc, tmp_path, request):
+    _, rpc = workflow_rpc
+
+    def respond(method, params):
+        reply = rpc.call(method, params)
+        if not reply["ok"]:
+            error = reply["error"]
+            raise RemoteError(
+                error["code"],
+                error["message"],
+                reason=error.get("reason"),
+                data=error.get("data"),
+            )
+        return reply["result"]
+
+    client = make_client(tmp_path, respond) if request.param else None
+    call = respond if client is None else client.call
+    method = "workflow.start" if client is None else "workflow_start"
+    try:
+        yield lambda params: call(method, params)
+    finally:
+        if client is not None:
+            client.context.session.close()
+
+
+@pytest.mark.parametrize(
+    "run_id",
+    [
+        "q1-parity-51-20261025",
+        RUN_ID.upper(),
+        RUN_ID[:-1],
+        RUN_ID + "0",
+        "g" * 32,
+        RUN_ID + "-000000-1",
+        RUN_ID + "\n",
+    ],
+    ids=[
+        "label",
+        "uppercase",
+        "short",
+        "long",
+        "nonhex",
+        "operation",
+        "newline",
+    ],
+)
+def test_invalid_run_id_is_input_error_without_operation(
+    workflow_rpc, workflow_start_call, run_id
+):
+    _, rpc = workflow_rpc
+    tab = result(rpc, "workflow.open", name="synthetic")["tab_id"]
+    before = result(rpc, "workflow.status")
+    operations = result(rpc, "operation.active")
+    with pytest.raises((RemoteError, GuiRpcError)) as rejected:
+        workflow_start_call({"tab_id": tab, "run_id": run_id})
+    assert rejected.value.code == "invalid_params"
+    assert "run_id" in str(rejected.value)
+    assert "32 lowercase hexadecimal characters" in str(rejected.value)
+    assert "[0-9a-f]{32}" in str(rejected.value)
+    assert result(rpc, "operation.active") == operations == {"operations": []}
+    assert result(rpc, "workflow.status") == before
+
+
+def test_empty_run_id_keeps_nonempty_admission_error(workflow_rpc, workflow_start_call):
+    _, rpc = workflow_rpc
+    tab = result(rpc, "workflow.open", name="synthetic")["tab_id"]
+    with pytest.raises((RemoteError, GuiRpcError)) as rejected:
+        workflow_start_call({"tab_id": tab, "run_id": ""})
+    assert rejected.value.code == "invalid_params"
+    assert "'run_id' must be non-empty" in str(rejected.value)
+    assert result(rpc, "operation.active") == {"operations": []}
 
 
 def test_workflow_scoped_cancel_uses_native_host_and_preserves_stop(workflow_rpc):
