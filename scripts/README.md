@@ -1,6 +1,6 @@
 # Scripts
 
-**Last updated:** 2026-10-22
+**Last updated:** 2026-10-25
 
 **讀者：** operator。工作站 GUI、板端 server 與資料工具的啟動方式。
 
@@ -12,9 +12,9 @@
 
 ## GUI 與板端 server
 
-- `run_measure_gui.py`：工作站 Python 3.13 GUI profile 的主要量測 GUI。Workflow tabs 與 Experiment tabs 共用這個入口及 session，切換只改 GUI 呈現。啟動後在背景執行選定的 `startup(ctx)`，預設在 repo `logs/gui/measure/` 建立 session log。遠端控制預設只接受本機連線，允許外部連線的選項會擴大網路曝露範圍。`--clean` 以空白 session 開啟，略過全部啟動腳本。未給 `--script` 時使用框架的 `lib/zcu_tools/gui/app/measure/default_startup.py`；給了就只跑指定腳本，且不能與 `--clean` 並用。量測 GUI 可透過 QICK 連接硬體。入口見 `run_measure_gui.py`，GUI 責任見 [gui README](../lib/zcu_tools/gui/README.md)。
-- `run_fluxdep_gui.py`、`run_dispersive_gui.py`：工作站 Python 3.13 GUI profile，分別啟動 fluxonium flux-dependence 與 dispersive-shift 分析 GUI。可輸入 chip、qubit、結果目錄與資料庫路徑。遠端控制預設 port 為 8766、8767，未指定 port 且預設值已占用時會選用臨時 port。分析與存檔由各自 app 執行。見 [fluxdep](../lib/zcu_tools/gui/app/fluxdep/README.md) 與 [dispersive](../lib/zcu_tools/gui/app/dispersive/README.md)。
-- 三個 GUI 的 `.bat` 檔會先切換至腳本目錄，使用 `uv run --extra gui` 啟動相應 Python 檔。
+- `app/run_measure_gui.py`：工作站 Python 3.13 GUI profile 的主要量測 GUI。Workflow tabs 與 Experiment tabs 共用這個入口及 session，切換只改 GUI 呈現。啟動後在背景執行選定的 `startup(ctx)`，預設在 repo `logs/gui/measure/` 建立 session log。遠端控制預設只接受本機連線，允許外部連線的選項會擴大網路曝露範圍。`--clean` 以空白 session 開啟，略過全部啟動腳本。未給 `--script` 時使用框架的 `lib/zcu_tools/gui/app/measure/default_startup.py`；給了就只跑指定腳本，且不能與 `--clean` 並用。量測 GUI 可透過 QICK 連接硬體。入口見 `app/run_measure_gui.py`，GUI 責任見 [gui README](../lib/zcu_tools/gui/README.md)。
+- `app/run_fluxdep_gui.py`、`app/run_dispersive_gui.py`：工作站 Python 3.13 GUI profile，分別啟動 fluxonium flux-dependence 與 dispersive-shift 分析 GUI。可輸入 chip、qubit、結果目錄與資料庫路徑。遠端控制預設 port 為 8766、8767，未指定 port 且預設值已占用時會選用臨時 port。分析與存檔由各自 app 執行。見 [fluxdep](../lib/zcu_tools/gui/app/fluxdep/README.md) 與 [dispersive](../lib/zcu_tools/gui/app/dispersive/README.md)。
+- 三個 GUI 的 `.bat` 檔放在 `app/`，會先切換至 repo root，使用 `uv run --directory . --extra gui -- python scripts/app/<name>.py` 啟動相應 Python 檔。
 - `start_server.py`、`start_server.ipynb`：ZCU 板端 PYNQ Python 3.8 啟動 QICK Pyro nameserver 與 proxy server。Python 腳本接收 daemon port、nameserver port、SoC 版本與網卡；板端環境須能 import repo-root [`bitfiles`](../bitfiles/README.md) 與 [`zcu_tools.qick_remote`](../lib/zcu_tools/qick_remote/README.md)，會開網路服務並連接板端 SoC；板端需自行安裝或放置 QICK。板端部署、啟動與資產版本相容性**待核實**，尚未在硬體上測試。請使用板端 PYNQ Python 執行。
 
 ## 量測 GUI 啟動腳本
@@ -25,7 +25,7 @@
 ```bash
 cp zcu_lab/simulation_envs/FTF/default.yaml zcu_lab/simulation_envs/FTF/ftf.yaml
 mkdir -p /absolute/new-ftf-project
-uv run --directory . --no-sync -- python scripts/run_measure_gui.py \
+uv run --directory . --no-sync -- python scripts/app/run_measure_gui.py \
   --project-root /absolute/new-ftf-project \
   --script zcu_lab/simulation_envs/FTF/startup.py
 ```

@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from scripts.run_measure_gui import main
+from scripts.app.run_measure_gui import main
 
 
 @pytest.mark.parametrize("kind", ["relative", "missing", "file", "empty", "nul"])

@@ -214,8 +214,8 @@ def launch_bridge(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> tuple[McpBridge, _ChildStderr, Mock, Mock]:
     config = _config(tmp_path)
-    script = tmp_path / "scripts" / config.run_script_name
-    script.parent.mkdir()
+    script = tmp_path / "scripts" / "app" / config.run_script_name
+    script.parent.mkdir(parents=True)
     script.touch()
     bridge = McpBridge(config)
     proc = MagicMock(pid=4242)
@@ -281,8 +281,8 @@ def test_launch_reports_early_exit_without_connecting(
 def test_launched_child_can_fill_stderr_after_parent_returns(tmp_path: Path) -> None:
     """A real child must not stall when startup warnings exceed pipe capacity."""
     config = _config(tmp_path)
-    script = tmp_path / "scripts" / config.run_script_name
-    script.parent.mkdir()
+    script = tmp_path / "scripts" / "app" / config.run_script_name
+    script.parent.mkdir(parents=True)
     script.write_text(
         "import socket, sys\n"
         "from pathlib import Path\n"

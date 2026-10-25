@@ -8,7 +8,7 @@ analysis method tool is generated 1:1 from the wire-method contract table
 (``METHOD_SPECS``, all pure queries — the user drives the GUI); the agent-facing
 lifecycle tools (``dispersive_launch`` / ``dispersive_connect`` /
 ``dispersive_disconnect``) are built by the shared read-only factory and fork
-``scripts/run_dispersive_gui.py``.
+``scripts/app/run_dispersive_gui.py``.
 
 The whole server body (``send_gui_rpc``, the lifecycle tools, cleanup, the stdio
 loop) lives in :func:`zcu_tools.mcp.core.readonly_server.build_readonly_server`;
@@ -119,7 +119,7 @@ def build_server(config: MCPBridgeConfig, repo_root: Path) -> ReadonlyServer:
     """Assemble read-only queries and entry-aware GUI launch tools.
 
     config supplies transport identity, port and caller-owned log/PID paths.
-    repo_root locates scripts/run_dispersive_gui.py and defaults project_root.
+    repo_root locates scripts/app/run_dispersive_gui.py and defaults project_root.
     Construction does not launch or connect. Launch accepts project_root, entry
     and optional component, forwards them to the GUI CLI and propagates bridge
     process/transport failures. Invalid argument types raise ValueError.

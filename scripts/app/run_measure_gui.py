@@ -1,13 +1,13 @@
 """Launcher for the v2 GUI.
 
 Examples:
-    uv run python run_measure_gui.py                          # default file logging; opens control socket on port 8765
-    uv run python run_measure_gui.py --no-log                 # no file log
-    uv run python run_measure_gui.py --clean                  # skip all startup scripts
-    uv run python run_measure_gui.py --script startup.py      # run only this trusted startup(ctx)
-    uv run python run_measure_gui.py --no-control             # disable the remote-control socket entirely
-    uv run python run_measure_gui.py --control-port 0         # start remote control on an ephemeral loopback port
-    uv run python run_measure_gui.py --control-port 8765 --control-token <hex>
+    uv run python scripts/app/run_measure_gui.py                          # default file logging; opens control socket on port 8765
+    uv run python scripts/app/run_measure_gui.py --no-log                 # no file log
+    uv run python scripts/app/run_measure_gui.py --clean                  # skip all startup scripts
+    uv run python scripts/app/run_measure_gui.py --script startup.py      # run only this trusted startup(ctx)
+    uv run python scripts/app/run_measure_gui.py --no-control             # disable the remote-control socket entirely
+    uv run python scripts/app/run_measure_gui.py --control-port 0         # start remote control on an ephemeral loopback port
+    uv run python scripts/app/run_measure_gui.py --control-port 8765 --control-token <hex>
 """
 
 from __future__ import annotations
@@ -28,7 +28,7 @@ if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.services.workflow_control import WorkflowControlFacet
 
 # Code, catalogs and logs stay anchored at the repo, not the data project.
-REPO_ROOT = Path(__file__).resolve().parent.parent
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 def _existing_project_root(value: str) -> Path:

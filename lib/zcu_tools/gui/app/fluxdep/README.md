@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.fluxdep` flux-dependence analysis GUI
 
-**Last updated:** 2026-10-24
+**Last updated:** 2026-10-25
 
 **讀者：** framework-dev。通量頻譜分析 GUI 的狀態、互動與搜尋分工。
 
@@ -61,7 +61,7 @@ Export params… 寫 `predictors/<component>.json`，再更新 setup 宣告的 E
 view；RemoteControlAdapter 是 agent 的命令與觀測入口。它與 GUI 共用
 Controller owners。
 
-- [`app.py`](app.py) 只做 controller/window/adapter wiring；程序入口位於 `scripts/run_fluxdep_gui.py`。
+- [`app.py`](app.py) 只做 controller/window/adapter wiring；程序入口位於 `scripts/app/run_fluxdep_gui.py`。
 - [`state.py`](state.py)： `FluxDepState`（領域容器）。
 - [`analysis_project`](../analysis_project/README.md)：與 dispersive 共用的 entry/component 開啟、qubit alias 預設、kind 驗證、選擇 dialog 與 CLI。
 - [`services/`](services/)： 薄包裝純運算，mutate State。
@@ -146,5 +146,5 @@ Export 保持 State 原狀。失敗保留已成功的輸出，後續清理由 ca
 
 ## Entry points
 
-- `scripts/run_fluxdep_gui.py`，啟動（`--control-port` 開 RPC 給 agent/MCP）。
+- `scripts/app/run_fluxdep_gui.py`，啟動（`--control-port` 開 RPC 給 agent/MCP）。
 - `.mcp.json` 註冊 `fluxdep-gui` MCP server。Agent 流程入口是 [run-fluxdep-gui skill](../../../../../.agents/skills/run-fluxdep-gui/SKILL.md)，工具命令與參數由 MCP descriptions 說明；module README 不擁有操作流程。

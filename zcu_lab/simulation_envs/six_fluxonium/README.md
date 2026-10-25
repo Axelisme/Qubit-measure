@@ -2,7 +2,7 @@
 
 **Readers:** operator, lab-author. Start six independent fluxonium models and prepare mux measurements without hardware.
 
-**Last updated:** 2026-10-23, six local DC lines and shared coil.
+**Last updated:** 2026-10-25, six local DC lines and shared coil.
 
 For existing entries, move resonator and mux-group `ext.time_of_fly` to top-level `time_of_fly`. The loader does not migrate it.
 
@@ -44,7 +44,7 @@ separate convergence checks. Carriers at or above 30 MHz keep the existing route
 From the checkout root, launch the measure GUI with this trusted script:
 
 ```bash
-uv run --directory . --no-sync -- python scripts/run_measure_gui.py \
+uv run --directory . --no-sync -- python scripts/app/run_measure_gui.py \
   --script zcu_lab/simulation_envs/six_fluxonium/startup.py
 ```
 
