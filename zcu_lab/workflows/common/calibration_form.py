@@ -51,10 +51,10 @@ class CalibrationTunablesForm(FrequencyTunablesForm):
         description="Completed-round trace SNR threshold; None disables early stop",
     )
     ro_reps: Annotated[int, Display(label="Readout averages")] = Field(
-        default=1000, ge=1, description="Readout averages"
+        default=100, ge=1, description="Readout averages"
     )
     ro_rounds: Annotated[int, Display(label="Readout rounds")] = Field(
-        default=10, ge=1, description="Readout averaging rounds"
+        default=1, ge=1, description="Readout averaging rounds"
     )
     ro_acquire_retry: int = Field(
         default=3, ge=0, description="Retries after a transient acquisition failure"
