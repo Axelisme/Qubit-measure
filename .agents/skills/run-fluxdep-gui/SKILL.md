@@ -13,8 +13,12 @@ description: 透過 fluxdep-gui MCP 對既有 flux spectra 做聯合分析，判
 
 ## 開始與恢復
 
-1. 確認分析目標、原始資料路徑、search database 與輸出目錄，缺少會影響下一步的資訊時問使用者。知識庫不可用時標示缺口，依下列最小判準繼續可判斷的工作。初始化留給使用者另行安排。完成條件是下一步的資料、授權與目的地已明確。
-2. 第一次操作前讀 MCP server instructions。用 `fluxdep_connect` 接既有 GUI，需要新 GUI 且使用者授權時才 `fluxdep_launch`。回覆包含專案、每張譜的階段與草稿、fit freshness 及 control。恢復時以 GUI 現況為準。完成條件是說得出每張譜停在哪個決策點及下一步，並核對寫入是否由本連線持有控制權。
+1. 確認分析目標、原始資料路徑、search database、`project_root`、既有 entry 與 fluxonium component。Entry 位於 `project_root/result/<entry>`，不以 chip/qubit 兩級目錄定位。缺少會影響下一步的資訊時問使用者。知識庫不可用時標示缺口，依下列最小判準繼續可判斷的工作。初始化留給使用者另行安排。完成條件是下一步的資料、授權與目的地已明確。
+2. 第一次操作前讀 MCP server instructions。用 `fluxdep_connect` 接既有 GUI，需要新 GUI 且使用者授權時才 `fluxdep_launch`。兩者的 `project` 輸入例如 `{"project_root":"<root>","entry":"<entry>","component":"<component>"}`，省略 component 時解析 setup 的 qubit alias。Connect 不傳 project 時只查目前目標。回覆的 `project` 包含 entry、component、result_root、result_path 與 predictors_path，另有每張譜的階段與草稿、fit freshness 及 control。恢復時核對目前目標與 paths，以 GUI 現況為準。完成條件是說得出每張譜停在哪個決策點及下一步，並核對寫入是否由本連線持有控制權。
+
+GUI 的 EntryDialog 列出全部合法 component，有效 qubit alias 只作預選。Alias 缺失或錯誤時保留空選擇並顯示原因，使用者明選後才可確認，不自選第一個，也不補 alias。入口或 component 缺失、kind 不符時會報錯，不提供舊目錄或 params.json fallback。開啟目標不執行 Database Save。選擇契約見 [Analysis entry selection](../../../lib/zcu_tools/gui/app/analysis_project/README.md)。
+
+原生 RPC `project.info` 提供相同目標與路徑投影。MCP 沒有獨立的 project_info／project_setup 工具，透過 connect 回覆核對即可。工具表見 [Fluxdep MCP](../../../lib/zcu_tools/mcp/fluxdep/README.md#tool-inventory)。
 
 ## 決策點
 
@@ -30,7 +34,7 @@ description: 透過 fluxdep-gui MCP 對既有 flux spectra 做聯合分析，判
 
 ### J3 採樣
 
-用 `fluxdep_sample` 選可辨認的線，onetone 調 threshold，twotone 沿線 stroke、調 settings，畫錯用 undo。判準是每條可辨認的線都有點，雜點留給 J6。只用來定週期的譜可略過採樣；twotone 重新採樣從空遮罩開始。完成條件是 finish 圖上點覆蓋目標線，採完後用 `fluxdep_export_spectrums` 存 checkpoint。Restore 用 `fluxdep_spectrum_load_processed`，同名衝突會整批拒絕，checkpoint 不保存 Filter 遮罩。
+用 `fluxdep_sample` 選可辨認的線，onetone 調 threshold，twotone 沿線 stroke、調 settings，畫錯用 undo。判準是每條可辨認的線都有點，雜點留給 J6。只用來定週期的譜可略過採樣；twotone 重新採樣從空遮罩開始。完成條件是 finish 圖上點覆蓋目標線，採完後用 `fluxdep_export_spectrums` 存 checkpoint，預設位置是 entry 的 `fluxdep/spectrums.hdf5`，核對回覆的實際路徑。Restore 用 `fluxdep_spectrum_load_processed`，同名衝突會整批拒絕，checkpoint 不保存 Filter 遮罩。
 
 ### J4 躍遷假設與 search
 
@@ -46,10 +50,14 @@ description: 透過 fluxdep-gui MCP 對既有 flux spectra 做聯合分析，判
 
 ## 匯出與記錄
 
-接受且未過期後，用 `fluxdep_fit_export_params` 寫 params.json 給 dispersive。過期時先重跑 fit，再驗收與匯出。
+接受且未過期後，呼叫 `fluxdep_fit_export_params()`。它依序寫入 entry 的 `predictors/<component>.json`、更新 setup 已宣告欄位，再追加 analysis ledger，不接受任意 savepath override。過期時先重跑 fit，再驗收與匯出。
 
-把目標、資料來源、對齊值、接受的參數與殘差、實際輸出、剩餘不確定性及下一步寫進任務的 `.agent_state` 記錄。完成條件是輸出已確認，或未完成原因與接續步驟有記錄。
+核對並保存 export receipt 的 `savepath`、`component`、`analysis_id` 與 `alignment_from`。`alignment_from` 是實際用於校正的第一張已對齊譜，包含零點譜，不是 alignment 繼承來源。匯出契約見 [Fit and recorded evidence](../../../lib/zcu_tools/mcp/fluxdep/README.md#fit-and-recorded-evidence)。
+
+Dispersive 讀取同 entry 的 predictors 檔，不再讀 params.json。它的 MCP 保持唯讀，launch 使用 project_root／entry／component，project.info 提供目標、paths 與選取 predictor。操作與查詢契約見 [Dispersive](../../../lib/zcu_tools/gui/app/dispersive/README.md#remote-and-mcp)。
+
+把目標、資料來源、對齊值、接受的參數與殘差、實際輸出與 export receipt、剩餘不確定性及下一步寫進任務的 `.agent_state` 記錄。完成條件是輸出已確認，或未完成原因與接續步驟有記錄。
 
 ## 使用者接手與失敗
 
-同時只有控制權 holder 能寫入。使用者接手、命令被拒或回覆未確認時，用 `fluxdep_spectrum_list` 讀階段、Filter 與 fit 現況，需要看譜時用 snapshot。Timeout、斷線或圖像失敗可能發生在發布之後，先核對現況再決定，不自動重送。Disconnect 保留 GUI。完成條件是下一步依目前 GUI 狀態與有效控制權決定，而非舊記錄或舊圖。
+同時只有控制權 holder 能寫入。使用者接手、命令被拒或回覆未確認時，用 `fluxdep_spectrum_list` 讀階段、Filter 與 fit 現況，需要看譜時用 snapshot。Timeout、斷線或圖像失敗可能發生在發布之後，先核對現況再決定，不自動重送。Predictor、setup、ledger 沒有跨檔 rollback，匯出失敗可能保留成功前綴。匯出失敗或回覆未確認時，依已確認的 entry paths 查核 predictor、setup 與 ledger，記錄已寫入及未知部分，不自動重送。Disconnect 保留 GUI。完成條件是下一步依目前 GUI 狀態與有效控制權決定，而非舊記錄或舊圖。

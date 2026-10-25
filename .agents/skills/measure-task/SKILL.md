@@ -44,13 +44,13 @@ description: 量測或分析任務的推進與裁定。接到新任務、恢復�
 
 ## 4. 執行並留下證據
 
-量測：操作 GUI、啟動量測或核對 live operation 前，讀 [Run measure GUI](../run-measure-gui/SKILL.md)，由它處理 MCP 入口、現況核對與操作控制。
+量測：操作 GUI、啟動量測、核對 live operation，或編輯量測 point 的參數、library、aliases 前，讀 [Run measure GUI](../run-measure-gui/SKILL.md)。由它處理 MCP 入口、現況核對與操作控制。Point 檔案即使用原生檔案工具編輯，仍須 holder 與 reload admission，不屬於離線分析分支。
 
 離線分析：使用既有資料與分析腳本，保留輸入、方法及產物引用。執行環境依 repo 的 MEASUREMENT 規則；分析分支依 Analysis reference。
 
 按 Round 的持久化時機記錄執行。核對操作狀態及 artifact 的實際保存結果，將失敗或未知留在紀錄。
 
-完成條件：round 能追溯本次輸入、執行與產物，或指出失敗／未知、已確認範圍及待確認事項。
+完成條件：round 能追溯本次輸入、執行與產物。修改 point 檔案時，記錄路徑與 reload 回覆或 watcher 已安裝的 revision 證據。未通過驗證的磁碟候選列為待確認，不當作已生效參數。失敗／未知須記錄已確認範圍及待確認事項。
 
 ## 5. 裁定結果
 
