@@ -14,10 +14,10 @@ from zcu_tools.notebook.analysis.fit_tools import (
     FluxResidualWeighting,
     MeasurementErrorPolicy,
 )
-from zcu_tools.resources.sample_table import (
+from zcu_tools.resources.record_table import (
     DeviceValueUnit,
-    SampleFluxFrame,
-    SampleFluxResolution,
+    RecordFluxFrame,
+    RecordFluxResolution,
 )
 
 from .base import (
@@ -135,6 +135,7 @@ class T1CurveAnalysisConfig:
     """Controls for the fixed Notebook T1 workflow.
 
     result_dir owns params/samples; image_dir defaults to its t1_curve folder.
+    device_name selects the recorded device explicitly.
     samples_filename selects JSONL; fallback_frame_unit declares A, V or native.
     analysis_flux_range and max_abs_flux_correction use normalized flux.
     correct_flux_from_f01_enabled controls derived-row correction.
@@ -149,9 +150,10 @@ class T1CurveAnalysisConfig:
     """
 
     result_dir: str
+    device_name: str
     analysis_flux_range: tuple[float, float] = (0.0, 1.0)
     image_dir: str | None = None
-    samples_filename: str = "samples.jsonl"
+    samples_filename: str = "records.jsonl"
     fallback_frame_unit: DeviceValueUnit = "A"
     max_abs_flux_correction: float = 0.03
     correct_flux_from_f01_enabled: bool = True
@@ -232,8 +234,8 @@ class T1FluxCalibration:
     """
 
     context: T1CurveContext
-    resolution: SampleFluxResolution
-    fallback_frame: SampleFluxFrame | None
+    resolution: RecordFluxResolution
+    fallback_frame: RecordFluxFrame | None
     t1_df: pd.DataFrame
     freq_rows: pd.DataFrame
     summary_table: pd.DataFrame

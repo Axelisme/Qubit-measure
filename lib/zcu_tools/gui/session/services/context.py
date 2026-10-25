@@ -560,20 +560,20 @@ class ContextService:
             storage=capture_point_storage(point),
         )
 
-    def read_sample(
+    def read_record(
         self, target: ContextTarget, component: str, run_id: str
     ) -> JsonObject | None:
-        """Read one run's latest entry JSONL sample without changing selection.
+        """Read one run's latest entry JSONL record without changing selection.
 
         target validates the opened entry identity, rejecting cross-entry targets;
-        no point selection or point-file read is required. Sample history itself
+        no point selection or point-file read is required. Record history itself
         belongs to the entry, independent of point. The
-        sample owner returns a detached complete JSON row or None if absent.
+        record owner returns a detached complete JSON row or None if absent.
         Invalid component/run_id, corrupt history and I/O errors propagate. No
         dataframe projection, context publication or refresh is performed here.
         """
         self._owner.assert_owner()
-        return self._require_write_target(target).samples(component).latest(run_id)
+        return self._require_write_target(target).records(component).latest(run_id)
 
     def apply_writeback(
         self,
@@ -588,12 +588,12 @@ class ContextService:
         ResultEntry.use_point validates its label, existence and point document;
         ValueError/FileNotFoundError and other load errors propagate before
         append. The executor appends accepted, then commits one point group,
-        one library group and individual samples, preserving each group's order.
+        one library group and individual records, preserving each group's order.
         Parameter/library setters require a currently selected point and
         commit the captured point's files, not the selected point's files when
-        different. Samples need no selection and append to entry JSONL with the
+        different. Records need no selection and append to entry JSONL with the
         captured point label. Thus a direct call without selection may append
-        accepted and then fail at a parameter/library item; sample-only can
+        accepted and then fail at a parameter/library item; record-only can
         succeed. Application GuardService admission rejects missing selection
         before calling this entry point.
         Each successful point/library group installs and publishes once.

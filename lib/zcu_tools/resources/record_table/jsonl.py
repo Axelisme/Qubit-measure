@@ -1,4 +1,4 @@
-"""Append-only, entry-bound sample rows; CSV is only an export format."""
+"""Append-only, entry-bound record rows; CSV is only an export format."""
 
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -15,7 +15,7 @@ from pydantic import (
 )
 
 
-class _SampleRecord(BaseModel):
+class _RecordRow(BaseModel):
     model_config = ConfigDict(extra="allow", strict=True, allow_inf_nan=False)
 
     __pydantic_extra__: dict[str, JsonValue] = Field(init=False)
@@ -32,8 +32,8 @@ class _SampleRecord(BaseModel):
         return value
 
 
-class JsonlSampleTable:
-    """Store sample history at an exact UTF-8 JSONL path.
+class JsonlRecordTable:
+    """Store record history at an exact UTF-8 JSONL path.
 
     Each row has a nonempty run_id, nullable point, UTC at and nonempty source.
     All other fields, including optional dev_value and dev_unit, are JSON values
@@ -78,7 +78,7 @@ class JsonlSampleTable:
         Invalid metadata or non-JSON fields fail before touching the file.
         Existing rows are never rewritten, even for an already-present run_id.
         """
-        record = _SampleRecord(
+        record = _RecordRow(
             run_id=run_id,
             point=point,
             at=datetime.now(timezone.utc) if at is None else at,
@@ -91,7 +91,7 @@ class JsonlSampleTable:
             stream.write(encoded)
         return record.model_dump(mode="json")
 
-    def _latest_records(self) -> dict[str, _SampleRecord]:
+    def _latest_records(self) -> dict[str, _RecordRow]:
         """Return last whole validated rows per run_id in file-occurrence order.
 
         An absent file returns an empty mapping. Invalid rows raise ValueError
@@ -103,13 +103,13 @@ class JsonlSampleTable:
             if self._path.is_symlink():
                 raise
             return {}
-        latest: dict[str, _SampleRecord] = {}
+        latest: dict[str, _RecordRow] = {}
         with stream:
             for number, line in enumerate(stream, start=1):
                 try:
                     if not line.endswith("\n"):
                         raise ValueError("incomplete tail: expected LF")
-                    record = _SampleRecord.model_validate_json(line)
+                    record = _RecordRow.model_validate_json(line)
                 except ValueError as exc:
                     raise ValueError(f"{self._path}:{number}: {exc}") from exc
                 # Replace the whole row and keep the last occurrences' file order.
@@ -158,7 +158,7 @@ class JsonlSampleTable:
             and self._path.exists()
             and destination.samefile(self._path)
         ):
-            raise ValueError(f"{destination}: CSV export cannot replace sample history")
+            raise ValueError(f"{destination}: CSV export cannot replace record history")
         frame = self.read()
         with destination.open(
             "w" if overwrite else "x", encoding="utf-8", newline=""

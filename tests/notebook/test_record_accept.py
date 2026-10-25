@@ -1,4 +1,4 @@
-"""Sample acceptance through real Notebook runs and entry storage owners."""
+"""Record acceptance through real Notebook runs and entry storage owners."""
 
 import json
 from datetime import datetime, timedelta
@@ -51,7 +51,7 @@ def saved(point: PointView) -> SavedRun[SavingCfg, SavingResult]:
     ],
     ids=["caller-device-fields", "without-device-fields"],
 )
-def test_accept_samples_preserves_fields_and_shares_parameter_event(
+def test_accept_records_preserves_fields_and_shares_parameter_event(
     entry: ResultEntry,
     point: PointView,
     saved: SavedRun[SavingCfg, SavingResult],
@@ -59,7 +59,7 @@ def test_accept_samples_preserves_fields_and_shares_parameter_event(
 ) -> None:
     before = len(entry.ledger.events())
     event_id = saved.accept(
-        parameter={"general.description": "accepted"}, samples={"Q1": fields}
+        parameter={"general.description": "accepted"}, records={"Q1": fields}
     )
     assert len(entry.ledger.events()) == before + 1
     event = entry.ledger.get(event_id).event
@@ -69,7 +69,7 @@ def test_accept_samples_preserves_fields_and_shares_parameter_event(
     assert event.payload.run_id == saved.run_id
     assert event.payload.writes[0].value == "accepted"
     assert event.payload.writes[1].value == fields
-    frame = entry.samples("Q1").read()
+    frame = entry.records("Q1").read()
     assert len(frame) == 1
     row = frame.iloc[0].to_dict()
     assert row == fields | {
@@ -87,32 +87,32 @@ def test_accept_samples_preserves_fields_and_shares_parameter_event(
 def test_reaccept_appends_history_and_reads_last_whole_row(
     entry: ResultEntry, saved: SavedRun[SavingCfg, SavingResult]
 ) -> None:
-    first_id = saved.accept(samples={"Q1": {"t1_us": 20.09, "dev_value": 1.2}})
-    path = entry.result_path / "samples" / "Q1.jsonl"
+    first_id = saved.accept(records={"Q1": {"t1_us": 20.09, "dev_value": 1.2}})
+    path = entry.result_path / "records" / "components" / "Q1.jsonl"
     first_bytes = path.read_bytes()
-    second_id = saved.accept(samples={"Q1": {"t1_us": 31.7}})
+    second_id = saved.accept(records={"Q1": {"t1_us": 31.7}})
     assert second_id != first_id
     assert path.read_bytes().startswith(first_bytes)
     rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
     assert len(rows) == 2
     assert [row["source"] for row in rows] == [first_id, second_id]
     assert [row["run_id"] for row in rows] == [saved.run_id, saved.run_id]
-    latest = entry.samples("Q1").read()
+    latest = entry.records("Q1").read()
     assert len(latest) == 1
     assert latest.iloc[0].to_dict() == rows[-1]
     assert latest.iloc[0]["t1_us"] == 31.7
 
 
-def test_sample_failure_keeps_prior_parameter_and_sample_and_stops(
+def test_record_failure_keeps_prior_parameter_and_record_and_stops(
     entry: ResultEntry, point: PointView, saved: SavedRun[SavingCfg, SavingResult]
 ) -> None:
-    blocked = entry.result_path / "samples" / "blocked.jsonl"
+    blocked = entry.result_path / "records" / "components" / "blocked.jsonl"
     blocked.mkdir(parents=True)
     before = len(entry.ledger.events())
     with pytest.raises(writeback.WritebackApplyError) as caught:
         saved.accept(
             parameter={"general.description": "retained"},
-            samples={
+            records={
                 "Q1": {"t1_us": 20.09},
                 "blocked": {"t1_us": 21.0},
                 "Q2": {"t1_us": 22.0},
@@ -126,17 +126,17 @@ def test_sample_failure_keeps_prior_parameter_and_sample_and_stops(
     assert isinstance(caught.value.__cause__, DIRECTORY_OPEN_ERROR)
     point.refresh()
     assert point.description == "retained"
-    assert entry.samples("Q1").read().iloc[0]["source"] == event.id
-    assert entry.samples("Q2").read().empty
+    assert entry.records("Q1").read().iloc[0]["source"] == event.id
+    assert entry.records("Q2").read().empty
 
 
-def test_parameter_failure_does_not_reach_samples(
+def test_parameter_failure_does_not_reach_records(
     entry: ResultEntry, point: PointView, saved: SavedRun[SavingCfg, SavingResult]
 ) -> None:
     before = len(entry.ledger.events())
     with pytest.raises(writeback.WritebackApplyError) as caught:
         saved.accept(
-            parameter={"general.description": 42}, samples={"Q1": {"t1_us": 20.09}}
+            parameter={"general.description": 42}, records={"Q1": {"t1_us": 20.09}}
         )
     assert len(entry.ledger.events()) == before + 1
     assert entry.ledger.events()[-1].kind == "accepted"
@@ -146,4 +146,4 @@ def test_parameter_failure_does_not_reach_samples(
     assert "description" in str(caught.value.__cause__)
     point.refresh()
     assert point.description == "original"
-    assert entry.samples("Q1").read().empty
+    assert entry.records("Q1").read().empty

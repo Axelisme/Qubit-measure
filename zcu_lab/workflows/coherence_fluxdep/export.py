@@ -26,7 +26,7 @@ from zcu_tools.experiment.workflows.saved_run import (
     read_manifest,
     read_records,
 )
-from zcu_tools.resources.entry.storage import bind_sample_table
+from zcu_tools.resources.entry.storage import bind_record_table
 
 from zcu_lab.workflows.coherence_fluxdep.lifetime_export import load_lifetime_trace
 from zcu_lab.workflows.coherence_fluxdep.measurements import (
@@ -35,7 +35,7 @@ from zcu_lab.workflows.coherence_fluxdep.measurements import (
 )
 from zcu_lab.workflows.coherence_fluxdep.samples import (
     SampleExportReport,
-    append_samples,
+    append_records,
     prepare_samples,
 )
 from zcu_lab.workflows.coherence_fluxdep.workflow import CoherencePlan, CoherencePoint
@@ -251,7 +251,7 @@ def export_run(
         qubit = plan.snapshot.roles["qubit"]
         if not isinstance(qubit, str):
             raise ValueError("Sample export requires one qubit name, not an alias list")
-        table = bind_sample_table(result, qubit)
+        table = bind_record_table(result, qubit)
     written = (
         ()
         if prepared is None
@@ -266,7 +266,7 @@ def export_run(
     samples = (
         None
         if table is None
-        else append_samples(
+        else append_records(
             manifest.identity.run_id, rows=rows, table=table, point=plan.snapshot.point
         )
     )

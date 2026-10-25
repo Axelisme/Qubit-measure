@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Sequence
+from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TypeAlias
@@ -18,7 +20,7 @@ from zcu_tools.gui.app.measure.adapter import (
     Analysis,
     AnalyzeRequest,
     ParameterWriteback,
-    SampleWriteback,
+    RecordWriteback,
     WritebackItem,
     WritebackRequest,
 )
@@ -115,6 +117,14 @@ def _get_writeback_items(
     produce no calibration items. Pulse proposals copy source cfg only, never
     current library values. This method neither writes nor applies proposals.
     """
+    metadata = req.run_result.metadata
+    devices = (
+        None
+        if metadata is None or metadata.device_snapshot is None
+        else deepcopy(dict(metadata.device_snapshot))
+    )
+    if devices is None:
+        logging.warning("no device snapshot")
     snapshot = req.run_result.cfg
     names = None if snapshot is None else tuple(t.name for t in snapshot.tones)
     qubits = captured_qubits(req.ctx.parameters, names)
@@ -138,14 +148,26 @@ def _get_writeback_items(
                     proposed_value=fit.t1,
                     stderr=fit.t1_err,
                 ),
-                SampleWriteback(
-                    target_name=qubit,
-                    description="T1 sample at captured bias",
-                    coordinate_device="$mux.flux_source",
-                    proposed_value={"t1_us": fit.t1, "t1_err_us": fit.t1_err},
-                ),
             ]
         )
+        if metadata is not None and devices is not None:
+            row_items.append(
+                RecordWriteback(
+                    target_name=qubit,
+                    description="T1 record at captured bias",
+                    record={
+                        "devices": {
+                            name: deepcopy(info) for name, info in devices.items()
+                        },
+                        "run": {
+                            "run_id": metadata.run_id,
+                            "experiment": metadata.experiment,
+                        },
+                        "t1_us": fit.t1,
+                        "t1_err_us": fit.t1_err,
+                    },
+                )
+            )
         for item in row_items:
             item.element = ElementIdentity(index=outcome.index, name=qubit)
         items.extend(row_items)

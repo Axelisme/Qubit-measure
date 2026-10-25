@@ -1025,6 +1025,6 @@ def test_accept_rejects_empty_writeback_before_ledger(
     with pytest.raises(ValueError, match="nonempty"):
         saved.accept()
     with pytest.raises(ValueError, match="nonempty"):
-        saved.accept(parameter={}, module={}, waveform={}, samples={})
+        saved.accept(parameter={}, module={}, waveform={}, records={})
     assert ledger.events() == before
     assert point.description == "save-time context"

@@ -115,8 +115,12 @@ fig.update_layout(
 )
 
 best_params = zd.annotate_best_point(fig, result_table)
+from zcu_tools.resources.record_table import JsonlRecordTable
+
 zd.add_real_sample(
-    fig, "Q12_2D[2]/Q4", noise_channels=noise_channels, Temp=Temp, flx=flx
+    fig, "Q12_2D[2]/Q4", noise_channels=noise_channels, Temp=Temp, flux=flx,
+    samples=JsonlRecordTable("../../result/Q12_2D[2]/Q4/records/components/Q4.jsonl"),
+    device_name="bias_device",  # Select a captured Run device.
 )
 
 fig.show()

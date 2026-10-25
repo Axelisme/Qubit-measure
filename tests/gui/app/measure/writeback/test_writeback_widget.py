@@ -32,7 +32,7 @@ from zcu_tools.gui.app.measure.adapter import (
 )
 from zcu_tools.gui.app.measure.writeback import (
     ParameterWriteback,
-    SampleWriteback,
+    RecordWriteback,
     WritebackItem,
     WritebackValues,
 )
@@ -591,10 +591,10 @@ def sample_row(
     qapp: QApplication, tmp_path: Path, request: pytest.FixtureRequest
 ) -> Generator[tuple[ComponentDriver, str]]:
     pane, width, applied = request.param
-    item = SampleWriteback(
+    item = RecordWriteback(
         "Q1",
         "Captured sample",
-        proposed_value={
+        record={
             "freq_mhz": 1250.0,
             "dev_value": 0.00125,
             "dev_unit": "A",
@@ -602,7 +602,7 @@ def sample_row(
             "fit": {"accepted": True},
         },
     )
-    item.session_id = "sample-1"
+    item.session_id = "record-1"
     ctrl = MagicMock()
     applied_states = {item.session_id: applied}
     ctrl.writeback_control.get_writeback_applied_for_pane.return_value = applied_states
@@ -618,7 +618,7 @@ def sample_row(
             item.session_id: WritebackValues(
                 actual_path="Q1",
                 current={"freq_mhz": 1100.0},
-                proposed=item.proposed_value,
+                proposed=item.record,
                 unit=None,
             )
         },
@@ -636,7 +636,7 @@ def sample_row(
         driver.screenshot(tmp_path / "01-overview.png")
         driver.select_tab("Writeback")
         driver.screenshot(tmp_path / "02-sample-row.png")
-        yield driver, "Q1 · sample" if applied else "Q1 · sample*"
+        yield driver, "Q1 · record" if applied else "Q1 · record*"
     finally:
         host.close()
         host.deleteLater()
@@ -652,7 +652,7 @@ def test_sample_row_names_component_and_preserves_applied_marker(sample_row) -> 
 def test_sample_row_current_is_entry_sample(sample_row) -> None:
     driver, _ = sample_row
     current = driver.observe(object_name="writebackCurrent")
-    assert current.text == current.tooltip == "entry sample"
+    assert current.text == current.tooltip == "entry record"
 
 
 def test_sample_proposal_lists_every_field_in_label_and_tooltip(sample_row) -> None:
@@ -660,7 +660,7 @@ def test_sample_proposal_lists_every_field_in_label_and_tooltip(sample_row) -> N
     proposed = driver.observe(object_name="writebackProposed")
     expected = {
         "freq_mhz=1250.0",
-        "dev_value=0.00125 A",
+        "dev_value=0.00125",
         "dev_unit=A",
         "run_id=run-20261020-1234567890123456789012345678901234567890",
         'fit={"accepted": true}',

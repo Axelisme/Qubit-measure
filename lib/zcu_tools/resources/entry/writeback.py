@@ -34,7 +34,7 @@ from .ledger_models import (
 )
 from .points import PointView
 from .provenance import Provenance
-from .storage import PointStorageBinding, bind_sample_table
+from .storage import PointStorageBinding, bind_record_table
 from .views import document_value, snapshot
 
 if TYPE_CHECKING:
@@ -88,8 +88,8 @@ class WaveformWriteback:
 
 
 @dataclass(frozen=True)
-class SampleWriteback:
-    """One component's producer-defined JSON fields for an accepted sample.
+class RecordWriteback:
+    """One component's producer-defined JSON fields for an accepted record.
 
     component is a concrete safe single path segment, not a role alias. value
     is a dict of measurement fields, including optional device values and units.
@@ -106,7 +106,7 @@ class SampleWriteback:
 
 
 type WritebackItem = (
-    ParameterWriteback | ModuleWriteback | WaveformWriteback | SampleWriteback
+    ParameterWriteback | ModuleWriteback | WaveformWriteback | RecordWriteback
 )
 
 
@@ -131,12 +131,12 @@ def _require_named_spec(value: object) -> None:
         raise TypeError("library writeback requires a named Spec, not a raw mapping")
 
 
-def _normalize_sample_value(value: object) -> object:
+def _normalize_record_value(value: object) -> object:
     """Copy JSON containers, projecting numpy numbers without coercing other values."""
     if isinstance(value, dict):
-        return {key: _normalize_sample_value(item) for key, item in value.items()}
+        return {key: _normalize_record_value(item) for key, item in value.items()}
     if isinstance(value, list):
-        return [_normalize_sample_value(item) for item in value]
+        return [_normalize_record_value(item) for item in value]
     return normalize_numpy_scalar(value)
 
 
@@ -152,9 +152,9 @@ def _accepted_write(item: WritebackItem) -> AcceptedWrite:
             raise ValueError("stderr must be finite and non-negative, or None")
     if isinstance(item, ParameterWriteback):
         return AcceptedWrite.model_validate({"path": item.path, "value": item.value})
-    if isinstance(item, SampleWriteback):
+    if isinstance(item, RecordWriteback):
         fields = TypeAdapter(JsonObject).validate_python(
-            _normalize_sample_value(item.value)
+            _normalize_record_value(item.value)
         )
         return AcceptedWrite(path=item.component, value=fields)
     _require_named_spec(item.value)
@@ -199,9 +199,9 @@ class CommittedWrite:
     """One confirmed item at its concrete path, detached at commit time.
 
     index is this item's zero-based position in the supplied apply_writeback
-    tuple, not its commit position. path is a point path, library key or sample
+    tuple, not its commit position. path is a point path, library key or record
     component and need not be unique. value is the owner's actual working-unit
-    value, including sample metadata.
+    value, including record metadata.
     It never borrows a proposal or a later destination snapshot.
     """
 
@@ -215,9 +215,9 @@ class WritebackResult:
     """One accepted event and detached items in document commit order.
 
     event_id identifies the single accepted ledger event. committed contains
-    point items, then library items, then samples, preserving supplied order
+    point items, then library items, then records, preserving supplied order
     within each group. On failure it includes only fully committed groups (each
-    sample is a group). Each item's index identifies its supplied position.
+    record is a group). Each item's index identifies its supplied position.
     """
 
     event_id: str
@@ -253,9 +253,9 @@ class WritebackTarget(Protocol):
     after that command's validation so later overwrites do not alter receipts.
     Values are returned only after the entire batch commits. ParameterUpdate
     and LibraryUpdate describe value, metadata and source contracts.
-    Publication belongs to the context owner, not this protocol or executor. append_sample accepts a
+    Publication belongs to the context owner, not this protocol or executor. append_record accepts a
     safe component segment, producer fields and separate accepted run_id/UTC
-    at/event source; it records this target's point label through the sample owner.
+    at/event source; it records this target's point label through the record owner.
     """
 
     entry_id: str
@@ -268,7 +268,7 @@ class WritebackTarget(Protocol):
     def set_modules(
         self, updates: tuple[LibraryUpdate, ...]
     ) -> tuple[YamlMap, ...]: ...
-    def append_sample(
+    def append_record(
         self,
         component: str,
         fields: JsonObject,
@@ -342,7 +342,7 @@ class PointWritebackTarget:
 
     Construction does no I/O. The caller supplies matching captured capabilities.
     Library opening is lazy; owner key/family/source/conflict errors propagate.
-    Each setter commits one file; sample rows append through the sample owner.
+    Each setter commits one file; record rows append through the record owner.
     """
 
     def __init__(self, point: PointView, storage: PointStorageBinding) -> None:
@@ -400,7 +400,7 @@ class PointWritebackTarget:
             raise ValueError("library updates must be nonempty")
         return commit_library_updates(self._library(), updates)
 
-    def append_sample(
+    def append_record(
         self,
         component: str,
         fields: JsonObject,
@@ -409,29 +409,29 @@ class PointWritebackTarget:
         at: datetime,
         source: str,
     ) -> JsonObject:
-        """Append and return the sample owner's complete committed row."""
-        return bind_sample_table(self._storage.result_path, component).append(
+        """Append and return the record owner's complete committed row."""
+        return bind_record_table(self._storage.result_path, component).append(
             run_id=run_id, point=self.point, at=at, source=source, **fields
         )
 
 
-def _append_accepted_sample(
+def _append_accepted_record(
     target: WritebackTarget,
     write: AcceptedWrite,
     evidence: WritebackEvidence,
     event: LedgerEvent,
 ) -> JsonObject:
-    """Pass normalized producer fields and accepted coordinates to the sample owner."""
+    """Pass normalized producer fields and accepted coordinates to the record owner."""
     if evidence.run_id is None:
-        raise ValueError("sample writeback requires a run_id")
+        raise ValueError("record writeback requires a run_id")
     if not isinstance(write.value, dict):
-        raise TypeError("accepted sample fields must be a JSON object")
+        raise TypeError("accepted record fields must be a JSON object")
     fields = {
         key: value
         for key, value in write.value.items()
         if key not in {"run_id", "point", "at", "source"}
     }
-    return target.append_sample(
+    return target.append_record(
         write.path,
         fields,
         run_id=evidence.run_id,
@@ -446,23 +446,23 @@ def apply_writeback(
     target: WritebackTarget,
     evidence: WritebackEvidence,
 ) -> WritebackResult:
-    """Validate values, append accepted, then commit point/library/sample groups.
+    """Validate values, append accepted, then commit point/library/record groups.
 
     target binds the destination and its entry ledger; callers resolve roles
     before this entry. Nonempty items, strict JSON/Spec values, parameter
-    metadata representation, finite nonnegative library stderr, kind and sample
-    run_id are validated before append. Sample dict/list values first normalize
+    metadata representation, finite nonnegative library stderr, kind and record
+    run_id are validated before append. Record dict/list values first normalize
     numpy floating/integer scalars to Python numbers without mutating producers;
     non-finite results and other non-JSON values remain invalid. Target owners
     validate paths, schema, sources and transactions within each group draft. Parameters commit the
     caller's metadata unchanged, or keep existing metadata when it is None; no
     event, source or time is added to it. Library items receive the accepted
-    Provenance. Samples receive run_id, saved point, UTC at and accepted source;
+    Provenance. Records receive run_id, saved point, UTC at and accepted source;
     producer device fields are preserved, not inferred. Return WritebackResult
     with the accepted event ID and each owner's confirmed committed value.
 
     Accepted payload writes retain supplied order. Committed results instead
-    follow point group, library group, then individual samples; supplied order
+    follow point group, library group, then individual records; supplied order
     is preserved within each group. Each CommittedWrite.index maps back to the
     supplied tuple even when paths repeat. Point and library each use one edit;
     a failing item leaves its entire group unwritten. Receipts capture each
@@ -478,10 +478,10 @@ def apply_writeback(
     kind = TypeAdapter(str).validate_python(evidence.kind, strict=True)
     if not kind.strip():
         raise ValueError("writeback kind must be nonempty")
-    if any(isinstance(item, SampleWriteback) for item in items) and (
+    if any(isinstance(item, RecordWriteback) for item in items) and (
         evidence.run_id is None or not evidence.run_id.strip()
     ):
-        raise ValueError("sample writeback requires a nonempty run_id")
+        raise ValueError("record writeback requires a nonempty run_id")
     writes = tuple(_accepted_write(item) for item in items)
     event = LedgerEvent(
         id=str(uuid4()),
@@ -498,13 +498,13 @@ def apply_writeback(
     parameter_indices: list[int] = []
     library: list[LibraryUpdate] = []
     library_indices: list[int] = []
-    sample_indices: list[int] = []
+    record_indices: list[int] = []
     for index, (item, write) in enumerate(zip(items, writes, strict=True)):
         if isinstance(item, ParameterWriteback):
             parameters.append(ParameterUpdate(write.path, write.value, item.metadata))
             parameter_indices.append(index)
-        elif isinstance(item, SampleWriteback):
-            sample_indices.append(index)
+        elif isinstance(item, RecordWriteback):
+            record_indices.append(index)
         else:
             library.append(
                 LibraryUpdate(
@@ -534,9 +534,9 @@ def apply_writeback(
                 CommittedWrite(index, writes[index].path, deepcopy(value))
                 for index, value in zip(library_indices, library_values, strict=True)
             )
-        for index in sample_indices:
+        for index in record_indices:
             write = writes[index]
-            value = _append_accepted_sample(target, write, evidence, event)
+            value = _append_accepted_record(target, write, evidence, event)
             committed.append(CommittedWrite(index, write.path, deepcopy(value)))
     except Exception as exc:
         raise WritebackApplyError(WritebackResult(event.id, tuple(committed))) from exc

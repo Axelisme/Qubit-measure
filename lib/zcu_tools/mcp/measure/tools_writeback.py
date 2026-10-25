@@ -53,6 +53,8 @@ def build_writeback_tools(ctx: MeasureToolContext) -> ToolTable:
                 "(finished|failed|unknown), completed ([{stage,written}]), skipped and "
                 "not_started. Failed replies also include failed_stage, error "
                 "({code,reason,message}) and failed_stage_may_have_partial_writes. "
+                "Record candidates use kind=record, record-<n> IDs and written.records. "
+                "Their JSON fields are adapter-owned; no coordinate is added. "
                 "Only GUI-confirmed writes count as completed. The failed stage is "
                 "separate from not_started. Each attempted pane has an owner submission_id "
                 "in submissions; recovery queries the latest tab.writeback_receipt. "

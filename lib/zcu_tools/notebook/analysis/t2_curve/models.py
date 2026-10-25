@@ -15,10 +15,10 @@ from zcu_tools.notebook.analysis.fit_tools import (
     MeasurementErrorPolicy,
 )
 from zcu_tools.resources.qubit_params import T1CurveFit
-from zcu_tools.resources.sample_table import (
+from zcu_tools.resources.record_table import (
     DeviceValueUnit,
-    SampleFluxFrame,
-    SampleFluxResolution,
+    RecordFluxFrame,
+    RecordFluxResolution,
 )
 
 from .base import T2ChannelCurves
@@ -35,11 +35,14 @@ DEFAULT_THERMAL_PROBE_N_TH = (0.0, 1e-4, 3e-4, 1e-3, 3e-3, 1e-2)
 
 @dataclass(frozen=True, slots=True)
 class T2CurveAnalysisConfig:
+    """Workflow inputs; device_name selects the recorded Run coordinate device."""
+
     result_dir: str
+    device_name: str
     analysis_flux_range: tuple[float, float] = (0.49, 0.53)
     readout_kappa_over_2pi_mhz: float = 14.75412896809815
     image_dir: str | None = None
-    samples_filename: str = "samples.jsonl"
+    samples_filename: str = "records.jsonl"
     default_bare_rf: float = 5.0
     t_flux_count: int = 1000
     fallback_frame_unit: DeviceValueUnit = "A"
@@ -114,8 +117,8 @@ class T2FluxCalibration:
     """
 
     context: T2CurveContext
-    resolution: SampleFluxResolution
-    fallback_frame: SampleFluxFrame | None
+    resolution: RecordFluxResolution
+    fallback_frame: RecordFluxFrame | None
     t2e_df: pd.DataFrame
     t2r_df: pd.DataFrame
     t2e_mask: NDArray[np.bool_]

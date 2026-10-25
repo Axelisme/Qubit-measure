@@ -119,11 +119,10 @@ def test_sample_write_receipt_reads_latest_jsonl_before_and_after_at_fixed_point
     )
     draft = service.create_draft(
         [
-            proposals.SampleWriteback(
+            proposals.RecordWriteback(
                 "Q1",
-                "sample",
-                proposed_value={"t1_us": 20.09},
-                coordinate_device="$flux_dev",
+                "record",
+                record={"t1_us": 20.09},
             )
         ],
         parameters=context.read_context(),
@@ -134,15 +133,15 @@ def test_sample_write_receipt_reads_latest_jsonl_before_and_after_at_fixed_point
     entry.new_point("b")
     context.use_point(PointUseRequest("b"))
     harness = WritebackHarness(context, service, draft)
-    params = {"tab_id": "tab", "subtab_id": "analysis", "write": [{"id": "sample-1"}]}
+    params = {"tab_id": "tab", "subtab_id": "analysis", "write": [{"id": "record-1"}]}
     first = dispatch_handler(harness, "tab.writeback_write", params)
-    row = entry.samples("Q1").latest("run-fixed")
+    row = entry.records("Q1").latest("run-fixed")
     assert row is not None
     assert first == {
         "written": [
             {
-                "id": "sample-1",
-                "kind": "sample",
+                "id": "record-1",
+                "kind": "record",
                 "target": "Q1",
                 "before": None,
                 "after": row,
@@ -151,23 +150,21 @@ def test_sample_write_receipt_reads_latest_jsonl_before_and_after_at_fixed_point
     }
     assert row == {
         "t1_us": 20.09,
-        "dev_value": 0.00125,
-        "dev_unit": "A",
         "run_id": "run-fixed",
         "point": "a",
         "at": row["at"],
         "source": entry.ledger.events()[-1].id,
     }
-    entry.samples("Q1").append(run_id="run-fixed", point="a", t1_us=35.0)
-    latest = entry.samples("Q1").latest("run-fixed")
+    entry.records("Q1").append(run_id="run-fixed", point="a", t1_us=35.0)
+    latest = entry.records("Q1").latest("run-fixed")
     second = dispatch_handler(harness, "tab.writeback_write", params)
-    updated = entry.samples("Q1").latest("run-fixed")
+    updated = entry.records("Q1").latest("run-fixed")
     assert updated is not None
     assert second == {
         "written": [
             {
-                "id": "sample-1",
-                "kind": "sample",
+                "id": "record-1",
+                "kind": "record",
                 "target": "Q1",
                 "before": latest,
                 "after": updated,
@@ -182,10 +179,10 @@ def test_sample_write_receipt_reads_latest_jsonl_before_and_after_at_fixed_point
     assert context.read_context().target == SavedPoint(
         entry_id=entry.entry_id, point="b"
     )
-    assert service.get_all_applied(draft) == {"sample-1": True}
+    assert service.get_all_applied(draft) == {"record-1": True}
 
 
-def test_sample_preview_selection_and_apply_use_run_device_snapshot(
+def test_record_preview_selection_and_apply_preserve_adapter_json(
     tmp_path: Path,
 ) -> None:
     entry, context = context_at(tmp_path)
@@ -199,11 +196,10 @@ def test_sample_preview_selection_and_apply_use_run_device_snapshot(
             proposals.ParameterWriteback(
                 "general.description", "skip", proposed_value="unselected"
             ),
-            proposals.SampleWriteback(
+            proposals.RecordWriteback(
                 "Q1",
-                "sample",
-                proposed_value={"t1_us": 20.09},
-                coordinate_device="$flux_dev",
+                "record",
+                record={"t1_us": 20.09},
             ),
         ],
         parameters=capture,
@@ -217,7 +213,7 @@ def test_sample_preview_selection_and_apply_use_run_device_snapshot(
     harness = WritebackHarness(context, service, draft)
     params = {"tab_id": "tab", "subtab_id": "analysis"}
     preview = dispatch_handler(harness, "tab.writeback_preview", params)
-    expected = {"t1_us": 20.09, "dev_value": 0.00125, "dev_unit": "A"}
+    expected = {"t1_us": 20.09}
     expected_preview = [
         {
             "id": "param-1",
@@ -232,10 +228,10 @@ def test_sample_preview_selection_and_apply_use_run_device_snapshot(
             "proposed": "unselected",
         },
         {
-            "id": "sample-1",
-            "kind": "sample",
+            "id": "record-1",
+            "kind": "record",
             "target_name": "Q1",
-            "description": "sample",
+            "description": "record",
             "selected": True,
             "proposed_value": expected,
             "actual_path": "Q1",
@@ -248,12 +244,12 @@ def test_sample_preview_selection_and_apply_use_run_device_snapshot(
     assert preview["items"] == expected_preview
     service.edit_draft(draft, "param-1", selected=False)
     receipt = dispatch_handler(
-        harness, "tab.writeback_write", params | {"write": [{"id": "sample-1"}]}
+        harness, "tab.writeback_write", params | {"write": [{"id": "record-1"}]}
     )
     written = TypeAdapter(list[dict[str, object]]).validate_python(receipt["written"])
-    assert [item["id"] for item in written] == ["sample-1"]
+    assert [item["id"] for item in written] == ["record-1"]
     assert entry.use_point("a").description is None
-    row = entry.samples("Q1").read().iloc[0].to_dict()
+    row = entry.records("Q1").read().iloc[0].to_dict()
     event = entry.ledger.events()[-1]
     assert datetime.fromisoformat(row["at"]) == datetime.fromisoformat(event.at)
     assert row == expected | {
@@ -265,7 +261,7 @@ def test_sample_preview_selection_and_apply_use_run_device_snapshot(
     assert context.read_context().target == SavedPoint(
         entry_id=entry.entry_id, point="b"
     )
-    assert service.get_all_applied(draft) == {"param-1": False, "sample-1": True}
+    assert service.get_all_applied(draft) == {"param-1": False, "record-1": True}
     assert dispatch_handler(harness, "tab.writeback_preview", params)["items"] == [
         expected_preview[0] | {"selected": False},
         expected_preview[1] | {"current": row},
