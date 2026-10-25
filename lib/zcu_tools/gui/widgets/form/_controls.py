@@ -240,7 +240,8 @@ class FieldRow:
 
     field is the displayed FieldView; widget/layout own its Qt row. label is
     the left-aligned title at the start of the header; its parent sets one
-    width for a model level's labels so their controls share a left edge.
+    width for a model level's scalar labels so their controls share a left edge.
+    Section titles keep their natural width so selectors use the remaining space.
     On a model row with rows to fold (every model row except a disabled
     nullable one) label is the bold fold title form.fold.<path>: a fold
     mark, then the field label, folding group on a click, or on Space,
@@ -258,8 +259,9 @@ class FieldRow:
     nullable models without options; group hosts model children, including
     the selected option's field rows, in its layout rows (both None for
     other rows, and for a disabled nullable model, which draws no box).
-    The unit label comes right after the label and the row's input,
-    dropdown or Enabled box, if any. value is a public-named label, hidden
+    unit is a label after a scalar input, including an empty placeholder for
+    unitless values. The editor aligns unit widths within each level. Sections
+    have unit=None and show no unit. value is a public-named label, hidden
     while empty, showing only an Expression-mode resolved value. Errors tint
     the input or name label and lead the row tooltip, without adding height.
     The coloured widget carries the boolean formError property.
@@ -327,15 +329,17 @@ class FieldRow:
         self.label = self._build_label(header)
         self._sync_field_commands(editable=True)
         self._build_control(header)
-        if field.unit:
-            header.addWidget(_tight_label(field.unit, self.widget))
+        self.unit: QLabel | None = None
+        if not field.section:
+            self.unit = _tight_label(field.unit, self.widget)
+            header.addWidget(self.unit)
         self.value = QLabel(self.widget)
         make_label_selectable(self.value)
         self.value.setObjectName(self._name("value"))
         self.value.hide()
         header.addWidget(self.value)
         if field.kind in ("model", "elements") and field.options is None:
-            # Keep the Enabled box and unit beside the title instead of
+            # Keep the Enabled box beside the title instead of
             # stretching them.
             header.addStretch()
         self._input_style = self.input.styleSheet() if self.input is not None else ""
@@ -920,6 +924,7 @@ class GroupBlock:
             "form.group." + ".".join(str(part) for part in (*path, name))
         )
         layout = QVBoxLayout(self.widget)
+        self.layout = layout
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(_HEADER_SPACING)
         header = QHBoxLayout()

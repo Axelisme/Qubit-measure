@@ -65,7 +65,7 @@ class PowerDepCfg(ConfigBase):
         float | None,
         AfterValidator(_positive_snr_or_none),
         FieldMeta(
-            label="Early-stop SNR (blank/None disables)",
+            label="Early-stop SNR",
             description="Positive SNR threshold; leave blank (None) to disable early stopping.",
             decimals=3,
         ),

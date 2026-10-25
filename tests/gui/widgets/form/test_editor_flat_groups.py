@@ -70,7 +70,7 @@ def test_single_sweep_group_merges_title_and_preserves_commands_and_paths(
     driver = host(form.default_input(FormEnv()))
     driver.screenshot(tmp_path / "01-flat-single-axis.png")
     assert driver.observe(object_name="form.fold.scan_window").text == (
-        EXPANDED + "Sweep · Frequency (MHz)"
+        EXPANDED + "Sweep · Frequency"
     )
     assert (
         driver.observe(object_name="form.fold.group.Modules").text == FOLDED + "Modules"
@@ -85,7 +85,7 @@ def test_single_sweep_group_merges_title_and_preserves_commands_and_paths(
     assert driver.observe(object_name="form.input.scan_window.center").text == "16.0"
     assert driver.observe(object_name="form.input.scan_window.span").text == "8.0"
     assert driver.observe(object_name="form.fold.scan_window").text == (
-        EXPANDED + "Sweep · Frequency (MHz)"
+        EXPANDED + "Sweep · Frequency"
     )
     driver.click(object_name="form.fold.group.Modules")
     driver.screenshot(tmp_path / "04-modules-group-open.png")
@@ -101,7 +101,7 @@ def test_single_sweep_group_merges_title_and_preserves_commands_and_paths(
     )
     assert driver.observe(object_name="form.input.drive.level").visible
     assert driver.observe(object_name="form.fold.scan_window").text == (
-        FOLDED + "Sweep · Frequency (MHz)"
+        FOLDED + "Sweep · Frequency"
     )
     assert not driver.observe(object_name="form.input.scan_window.center").visible
 
