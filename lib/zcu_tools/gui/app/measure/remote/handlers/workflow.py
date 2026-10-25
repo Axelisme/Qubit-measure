@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Literal
 
 from pydantic import JsonValue, TypeAdapter, ValidationError
 
+from zcu_tools.experiment.metadata import validate_workflow_run_id
 from zcu_tools.experiment.workflows import (
     Actor,
     InvalidRunState,
@@ -175,9 +176,16 @@ def h_workflow_status(
 def h_workflow_start(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:
-    """Submit params.tab_id/run_id and optional plan/tunables batches; return pending operation_id."""
-    control = adapter.workflow_control
+    """Submit tab_id/run_id and optional batches; return pending operation_id.
+
+    Reject run_id outside [0-9a-f]{32} as invalid_params before entering the owner.
+    """
     tab_id, run_id = str(params["tab_id"]), str(params["run_id"])
+    try:
+        validate_workflow_run_id(run_id)
+    except ValueError as exc:
+        raise RemoteError(ErrorCode.INVALID_PARAMS, str(exc)) from exc
+    control = adapter.workflow_control
     _tab(control, tab_id)
     with _workflow_errors():
         operation = _valid(
