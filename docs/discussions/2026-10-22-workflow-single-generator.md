@@ -97,4 +97,4 @@ Pause 的另一選項「只在下一個 yield 邊界生效」否決：長 acquis
 
 ## 後記（2026-10-22）
 
-同日稍後再簡化三項：取消的交付一律 `Completed(result, partial_result=True)`，沒有 `Failed("cancelled")`，`Failed` 的唯一判準是「目標結果沒拿到但系統仍可信」；`env.run` 只收建好的 cfg，`env.call(fn)` 是唯一原語；作者面改為 `async def`／`await`，asyncio 只當排程器、取消仍靠 scope token（原型 `prototype/async-protocol` @ 8dc5df757，八個情境通過）。使用者的理由：原生 Python 語法比框架自定的 yield 協定易上手。本文標題與正文中的「generator」在作者面已改為 coroutine，語義不變。
+同日稍後再簡化三項：取消的交付一律 `Completed(result, partial_result=True)`，沒有 `Failed("cancelled")`，`Failed` 的唯一判準是「目標結果沒拿到但系統仍可信」；`env.run` 只收建好的 cfg，`env.call(fn)` 是唯一原語；作者面改為 `async def`／`await`，asyncio 只當排程器、取消仍靠 scope token（一次性原型的八個情境通過，涵蓋取消與子 scope 繼承、Pause 後重跑不重複交付、Ask 與 worker finally、非預期錯誤使 run 失敗、預期失敗作為資料、關閉時清空 loop 與 executor、drain 中 Stop 不被 Pause 復活、三輪示範 workflow；原型是本機分支，未入庫，2026-10-25 刪除）。使用者的理由：原生 Python 語法比框架自定的 yield 協定易上手。本文標題與正文中的「generator」在作者面已改為 coroutine，語義不變。
