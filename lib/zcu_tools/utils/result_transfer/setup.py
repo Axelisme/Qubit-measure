@@ -230,12 +230,14 @@ def run_setup(
                 "Google Drive's shared OAuth client is retiring in 2026; use your project's client if required.",
                 flush=True,
             )
-            if no_browser or not webbrowser.open(login_url):
-                print(
-                    "Open this private setup link locally; do not share it:\n"
-                    + login_url,
-                    flush=True,
-                )
+            # Always print the link so any local browser can be used for login.
+            print(
+                "Open this private setup link in a browser on this computer; do not share it:\n"
+                + login_url,
+                flush=True,
+            )
+            if not no_browser:
+                webbrowser.open(login_url)
             while True:
                 try:
                     input(

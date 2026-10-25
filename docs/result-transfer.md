@@ -16,7 +16,7 @@ uv run --directory . --no-sync -- python scripts/transfer_results.py setup
 Windows、macOS、Linux 使用相同的 Python 入口與命令，不需要 shell wrapper。
 需要先完成專案原有的 Python／uv 環境設定。
 
-1. 首次啟動會下載並核對固定版 rclone，之後開啟官方 Web GUI。
+1. 首次啟動會下載並核對固定版 rclone，之後在終端機印出一個私人 setup 網址，並嘗試用預設瀏覽器開啟官方 Web GUI。想用其他瀏覽器登入時，把印出的網址貼到該瀏覽器即可；加 `--no-browser` 則只印網址、不自動開啟。網址含本機登入憑證，不要分享。
 2. 在 **Remotes → Add New Remote** 選 **Google Drive**，例如取名 `lab-drive`，
    依瀏覽器登入與同意畫面完成授權。已連結的帳號可直接重用。
 3. 進入 **Explorer**，點選左側該 remote，逐層進入要用的**雲端父資料夾**，按 **Refresh**。
