@@ -250,7 +250,16 @@ def fit_gauss_decay(
     NDArray[np.float64],
     tuple[tuple[float, float, float, float], NDArray[np.float64]],
 ]:
-    """return [t2g, t2gerr, fit_signals, (pOpt, pCov)]"""
+    """Fit baseline + amplitude*exp(-0.5*((x-center)/sigma)**2).
+
+    xs/real_signals are matching coordinates and observations. fit_params
+    initializes offset, amplitude, center, sigma; non-None fixedparams fixes
+    those values. The center is free by default. For a decay envelope centered
+    at zero use fixedparams=(None, None, 0.0, None), giving exp(-(x/T)**2).
+    Return T=sqrt(2)*sigma, its stderr in x units, the curve at xs and
+    (parameters, covariance). Numeric nonconvergence raises AnalysisFailed;
+    invalid input/bounds raise ValueError. No acceptance decision occurs.
+    """
     pOpt, pCov = fit_gauss(
         xs, real_signals, fitparams=fit_params, fixedparams=fixedparams
     )

@@ -70,6 +70,13 @@ class T1TunablesForm(FormModel):
         Field(default=1.0, ge=0)
     )
     uniform: Annotated[bool, Display(label="Uniform (linear) sweep")] = True
+    max_model_window_factor: Annotated[float, Display(label="Model window factor")] = (
+        Field(
+            default=2.0,
+            gt=0,
+            description="Diagnostic lifetime / maximum fitted delay upper bound; no feedback change",
+        )
+    )
     min_lifetime_points: Annotated[int, Display(label="Min lifetime points")] = Field(
         default=5,
         ge=1,
@@ -114,6 +121,7 @@ class T1TunablesForm(FormModel):
         failures propagate after invalid direct edits.
         """
         return T1Tunables(
+            max_model_window_factor=self.max_model_window_factor,
             min_lifetime_points=self.min_lifetime_points,
             reps=self.reps,
             rounds=self.rounds,

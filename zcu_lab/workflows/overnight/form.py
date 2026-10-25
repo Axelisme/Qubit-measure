@@ -207,6 +207,13 @@ class OvernightTunablesForm(FormModel):
     relax_min_us: Annotated[float, Display(label="Relax minimum", unit="µs")] = Field(
         default=1.0, ge=0, description="Relaxation lower bound in us"
     )
+    max_model_window_factor: Annotated[float, Display(label="Model window factor")] = (
+        Field(
+            default=2.0,
+            gt=0,
+            description="Diagnostic lifetime / maximum fitted delay upper bound; no feedback change",
+        )
+    )
     min_lifetime_points: Annotated[int, Display(label="Min lifetime points")] = Field(
         default=5,
         ge=1,
@@ -222,6 +229,7 @@ class OvernightTunablesForm(FormModel):
     def to_cfg(self) -> OvernightTunables:
         """Convert validated ordinary knobs; no source, hardware or expression parsing."""
         return OvernightTunables(
+            max_model_window_factor=self.max_model_window_factor,
             uniform=self.uniform,
             min_lifetime_points=self.min_lifetime_points,
             reps=self.reps,

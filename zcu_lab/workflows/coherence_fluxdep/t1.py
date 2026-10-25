@@ -115,6 +115,11 @@ class T1Tunables(BaseModel):
         default=True,
         description="Linear sampling; false selects exponential delay spacing",
     )
+    max_model_window_factor: float = Field(
+        default=2.0,
+        gt=0,
+        description="Diagnostic lifetime / maximum fitted delay upper bound; no feedback change",
+    )
     min_lifetime_points: int = Field(
         default=5,
         ge=1,

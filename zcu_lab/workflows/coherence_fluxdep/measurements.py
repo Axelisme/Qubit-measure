@@ -6,13 +6,17 @@ from typing import Literal
 
 import numpy as np
 from matplotlib.figure import Figure
-from numpy.typing import NDArray
 from zcu_tools.experiment.metadata import RunSnapshot
 from zcu_tools.experiment.scope import Scope
 from zcu_tools.experiment.workflows import Failed
 from zcu_tools.plotting.plots import Plots
 
 from zcu_lab.v2.support import LinePlot, live_line
+from zcu_lab.v2.support.lifetime_models import (
+    LifetimeComparison,
+    LifetimeModelRecord,
+    draw_lifetime_comparison,
+)
 from zcu_lab.v2.twotone.time_domain.t1.core import T1Cfg, T1Exp
 from zcu_lab.v2.twotone.time_domain.t2echo.core import T2EchoCfg, T2EchoExp
 from zcu_lab.v2.twotone.time_domain.t2ramsey.core import T2RamseyCfg
@@ -23,7 +27,13 @@ from zcu_lab.workflows.coherence_fluxdep.analysis import (
 )
 from zcu_lab.workflows.coherence_fluxdep.saving import save_t2ramsey
 from zcu_lab.workflows.coherence_fluxdep.t1 import T1Tunables
-from zcu_lab.workflows.common.analysis import DecayFit, analyze_t1, lifetime_rejection
+from zcu_lab.workflows.coherence_fluxdep.t2 import T2EchoTunables
+from zcu_lab.workflows.common.analysis import (
+    DecayFit,
+    analyze_t1,
+    compare_decay_fit,
+    lifetime_rejection,
+)
 from zcu_lab.workflows.common.calibration import StageStatus
 from zcu_lab.workflows.common.saving import save_native
 
@@ -49,6 +59,8 @@ class LifetimeResult:
     adapter/writer/plot exceptions propagate, not a status.
     detune_mhz is accepted Ramsey's physical frequency offset after subtracting
     the artificial phase ramp, or None for other/nonaccepted measurements.
+    models records both diagnostic fits, including discarded/failed alternatives,
+    but is empty on partial, dependency/acquisition or primary-fit failure.
     """
 
     kind: LifetimeKind
@@ -58,6 +70,7 @@ class LifetimeResult:
     error_us: float | None
     file: str | None
     detune_mhz: float | None = None
+    models: tuple[LifetimeModelRecord, ...] = ()
 
 
 def history_guess(initial_us: float, history: LifetimeHistory) -> float:
@@ -107,7 +120,7 @@ def _finish(
     plots: Plots,
     kind: LifetimeKind,
     fit: DecayFit,
-    times: NDArray[np.float64],
+    comparison: LifetimeComparison,
     reason: str | None,
 ) -> LifetimeResult:
     filename = f"{kind}.h5"
@@ -116,8 +129,8 @@ def _finish(
         ax = figure.axes[1]
         # Replace raw I with the observations in the fit's projection.
         ax.clear()
-        ax.plot(times, fit.observed, ".", label="observed")
-        ax.plot(times, fit.fitted, label="fit")
+        ax.plot(fit.times, fit.observed, ".", label="observed")
+        draw_lifetime_comparison(ax, fit.times, comparison)
         ax.set(
             xlabel="Time (us)",
             ylabel="Signal (projected)" if kind == "t1" else "Normalized signal",
@@ -130,9 +143,17 @@ def _finish(
 
     plots.draw(kind, overlay)
     if reason is not None:
-        return LifetimeResult(kind, "rejected", reason, None, None, filename)
+        return LifetimeResult(
+            kind, "rejected", reason, None, None, filename, models=comparison.records
+        )
     return LifetimeResult(
-        kind, "accepted", None, fit.lifetime_us, fit.error_us, filename
+        kind,
+        "accepted",
+        None,
+        fit.lifetime_us,
+        fit.error_us,
+        filename,
+        models=comparison.records,
     )
 
 
@@ -197,14 +218,17 @@ async def measure_t1(
         )
         or reason
     )
-    return _finish(plots, "t1", fit, outcome.value.result.times, reason)
+    comparison = compare_decay_fit(
+        fit, t1=True, max_window_factor=tun.max_model_window_factor
+    )
+    return _finish(plots, "t1", fit, comparison, reason)
 
 
 async def measure_ramsey(
     scope: Scope,
     cfg: T2RamseyCfg,
     *,
-    min_lifetime_points: int,
+    tun: T2EchoTunables,
     snapshot: RunSnapshot,
     directory: Path,
     plots: Plots,
@@ -252,8 +276,10 @@ async def measure_ramsey(
         plots,
         "t2ramsey",
         fit,
-        outcome.value.result.times,
-        _t2_rejection(fit, min_lifetime_points),
+        compare_decay_fit(
+            fit, t1=False, fringe=True, max_window_factor=tun.max_model_window_factor
+        ),
+        _t2_rejection(fit, tun.min_lifetime_points),
     )
     return replace(
         result, detune_mhz=fit.detune_mhz if result.status == "accepted" else None
@@ -264,7 +290,7 @@ async def measure_echo(
     scope: Scope,
     cfg: T2EchoCfg,
     *,
-    min_lifetime_points: int,
+    tun: T2EchoTunables,
     snapshot: RunSnapshot,
     directory: Path,
     plots: Plots,
@@ -307,6 +333,11 @@ async def measure_echo(
         plots,
         "t2echo",
         fit,
-        outcome.value.result.times,
-        _t2_rejection(fit, min_lifetime_points),
+        compare_decay_fit(
+            fit,
+            t1=False,
+            fringe=cfg.detune != 0.0,
+            max_window_factor=tun.max_model_window_factor,
+        ),
+        _t2_rejection(fit, tun.min_lifetime_points),
     )

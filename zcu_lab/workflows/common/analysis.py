@@ -14,6 +14,11 @@ from zcu_tools.analysis.fitting import (
 from zcu_tools.experiment import AnalysisFailed
 from zcu_tools.experiment.workflows import Failed
 
+from zcu_lab.v2.support.lifetime_models import (
+    LifetimeComparison,
+    LifetimeCurve,
+    compare_lifetime_models,
+)
 from zcu_lab.v2.twotone.time_domain.t1.core import T1Result, t1_signal2real
 
 
@@ -36,6 +41,33 @@ class DecayFit:
     fitted: NDArray[np.float64]
     quality: FitQuality
     times: NDArray[np.float64]
+
+
+def compare_decay_fit(
+    fit: DecayFit, *, t1: bool, fringe: bool = False, max_window_factor: float
+) -> LifetimeComparison:
+    """Record the existing fit and the alternative without changing acceptance.
+
+    fit holds the primary's us delays, projected observations and diagnostics.
+    t1 selects dual decay; otherwise compare with Gaussian, retaining fringes
+    when fringe=True. max_window_factor bounds recorded diagnostic lifetimes
+    relative to the maximum acquired delay. Secondary failures stay in records.
+    """
+    primary = LifetimeCurve(
+        "exponential_fringe" if fringe else "exponential",
+        (fit.lifetime_us,),
+        (fit.error_us,),
+        fit.fitted,
+        fit.quality,
+        5 if fringe else 3,
+    )
+    return compare_lifetime_models(
+        fit.times,
+        fit.observed,
+        primary,
+        max_window_factor=max_window_factor,
+        t1=t1,
+    )
 
 
 def lifetime_rejection(
