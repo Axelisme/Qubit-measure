@@ -18,6 +18,7 @@ from zcu_tools.experiment.workflows import (
     workflow,
 )
 from zcu_tools.plotting.plots import Plots
+from zcu_tools.program.v2.modules import PulseCfg
 
 from zcu_lab.v2.singleshot.ge.core import GE_Exp
 from zcu_lab.v2.twotone.time_domain.t1.core import T1Cfg
@@ -71,6 +72,8 @@ from zcu_lab.workflows.common.saving import save_native
 class CoherencePlan(T1Plan):
     """Choose flux points and lifetimes to map relaxation and dephasing.
 
+    probe_pulse supplies independent spectroscopy waveform/gain, while the
+    inherited qub_pulse remains the Rabi and downstream pi drive.
     Inherited fields retain T1Plan's explicit unit, resolved native routing and
     delay resolution. measure_t1/measure_t2ramsey/measure_t2echo are fixed bools,
     default true. At least one must be true; all false raises before acquisition.
@@ -79,6 +82,9 @@ class CoherencePlan(T1Plan):
     GE shots after calibration and before lifetimes, without fitting.
     """
 
+    probe_pulse: PulseCfg = Field(
+        description="Independent spectroscopy pulse with its own waveform and initial gain"
+    )
     predictor: FrequencyModel = Field(
         description="Captured fluxonium model and device affine map"
     )
@@ -467,6 +473,7 @@ async def run_calibration_stages(
     )
     captured = CalibrationInputs(
         qub_pulse=plan.qub_pulse,
+        probe_pulse=plan.probe_pulse,
         readout=plan.readout,
         tun=tun.current.cal,
         snapshot=plan.snapshot,
