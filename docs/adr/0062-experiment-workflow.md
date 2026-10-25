@@ -81,7 +81,7 @@ Run 結束後，host 另在背景讀取一次已連線儀器，由 State owner �
 
 輸出由目的地決定，不另設 outputs 選單或格式旗標。Coherence 收到 --result 就追加 samples，收到 --database 就寫 Labber，兩者都有就都寫。MIST 只收 --database 寫 Labber。未提供任何目的地時，函式與 CLI 都在入口拒絕。共同資料在任何寫入前先驗。Labber 使用既有 independent layout，在 SaveLayout 的新日期樹路徑保存。各 allocation/writer failure 分別回報，未配置 Labber path 為 None，已配置的失敗保留 path。不寫 ledger 或自動重試。
 
-Coherence 的每個 enabled/measured kind 各有 Signal/Time Flux×Index 與 Flux-only lifetime，保留各自 actual delay，不 union、rounding 或插值。Rejected fit 保留 raw 與 NaN lifetime，disabled 不產 channel。MIST 保留 actual gain inner-first Signal 與 Flux-only Success，actual gain mismatch 拒絕。Samples 每點最多一行，有 accepted frequency 或任一 lifetime 就寫，只含接受值的 MHz/us 欄位。座標來自該點最後 Completed acquisition 的固定 native snapshot，按 frequency→Rabi→readout→T1→Ramsey→Echo，包含 calibration 與 rejected fit。全部 rows 先驗，owner 的 prefix/count/cause 與 latest-wins 不改。
+Coherence 的每個 enabled/measured kind 各有 Signal/Time Flux×Index 與 Flux-only lifetime，保留各自 actual delay，不 union、rounding 或插值。Rejected fit 保留 raw 與 NaN lifetime，disabled 不產 channel。MIST 保留 actual gain inner-first Signal 與 Flux-only Success。匯出以保存的 actual gains 為真相，不與請求的 plan grid 比較；各點 actual gain grid 必須完全相同，不同時指名兩點與值並拒絕。Samples 每點最多一行，有 accepted frequency 或任一 lifetime 就寫，只含接受值的 MHz/us 欄位。座標來自該點最後 Completed acquisition 的固定 native snapshot，按 frequency→Rabi→readout→T1→Ramsey→Echo，包含 calibration 與 rejected fit。全部 rows 先驗，owner 的 prefix/count/cause 與 latest-wins 不改。
 
 科學型別留在 zcu_lab，framework export-only carriers 與 frontend binding/helpers 退役。依賴方向由 C8、C12、C16、C18 及 workflow-export-science-no-frontends contract 保護。該 contract 包含兩個工具、shared input/Labber helpers 與 samples producer。Datafile 擁有檔案格式，sample table 擁有追加與 latest-wins，工具不重做 HDF5 編碼。保存分工沿 [[0063]]。
 

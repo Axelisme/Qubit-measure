@@ -11,6 +11,7 @@ from zcu_tools.datafile import (
     Container,
     ContainerAttrs,
     LabberMetadata,
+    LabberPayload,
     Variable,
 )
 from zcu_tools.experiment.metadata import CfgSnapshot
@@ -43,6 +44,21 @@ class MISTExportReport:
     missing_records: tuple[Path, ...]
 
 
+def _validate_gain_grid(
+    traces: dict[int, LabberPayload], index: int, trace: LabberPayload
+) -> None:
+    """Require this trace to match the first earlier acquisition, when present."""
+    if not traces:
+        return
+    first_index, first_trace = next(iter(traces.items()))
+    if not np.array_equal(trace.axes[0].values, first_trace.axes[0].values):
+        raise ValueError(
+            f"MIST actual gain grids differ: point {first_index} "
+            f"{first_trace.axes[0].values.tolist()} versus "
+            f"point {index} {trace.axes[0].values.tolist()}"
+        )
+
+
 def prepare_export(
     plan: MISTPlan,
     points: tuple[SavedRecord[MISTPoint], ...],
@@ -56,7 +72,10 @@ def prepare_export(
     value. Complete and stopped native acquisitions are accepted; other completion
     states reject.
 
-    Return Flux×actualgain Signal and Flux-only Success (1 or NaN).
+    Return Flux×actualgain Signal and Flux-only Success (1 or NaN). The gain
+    axis comes from saved acquisitions, not the requested plan. All acquired
+    points must have exactly the same actual gain grid; mismatches raise a
+    source-named error listing both point indexes and their gain values.
     mode selects a preparation; None selects ground for a ground-only plan and
     excited otherwise. Historical single-trace records retain their native file.
 
@@ -73,12 +92,10 @@ def prepare_export(
     )
     if plan.measure_mode != "both" and mode != plan.measure_mode:
         raise ValueError(f"Preparation {mode!r} was not requested by the MIST plan")
-    gains = np.linspace(plan.gain_start, plan.gain_stop, plan.gain_points)
     fluxes = np.array(plan.fluxes)
-    signal = np.full((len(fluxes), len(gains)), complex(np.nan, np.nan))
     success = np.full(len(fluxes), np.nan)
     seen: set[int] = set()
-    usable = False
+    traces: dict[int, LabberPayload] = {}
     for saved in points:
         point = saved.record
         try:
@@ -108,16 +125,18 @@ def prepare_export(
                 PowerDepExp.AXES_SPEC,
                 allow_stopped=True,
             )
-            if not np.array_equal(trace.axes[0].values, gains):
-                raise ValueError("MIST gain grid differs from the fixed plan")
-            usable = True
-            signal[point.index] = trace.z
+            _validate_gain_grid(traces, point.index, trace)
+            traces[point.index] = trace
             if completed:
                 success[point.index] = 1.0
         except ValueError as error:
             raise ValueError(f"{saved.record_path}: {error}") from error
-    if not usable:
+    if not traces:
         raise ValueError("No usable committed MIST acquisition")
+    gains = next(iter(traces.values())).axes[0].values
+    signal = np.full((len(fluxes), len(gains)), complex(np.nan, np.nan))
+    for index, trace in traces.items():
+        signal[index] = trace.z
     flux_axis = Axis("Flux", plan.flux_unit, fluxes)
     return PreparedRunData(
         Container(

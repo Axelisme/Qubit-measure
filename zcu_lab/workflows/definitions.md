@@ -228,7 +228,9 @@ Merged 輸出依使用者 2026-10-25 裁定移除，見 [ADR-0062](../../docs/ad
 壞資料指名 source，不讀 journal、掃 native 候選或重抓目前 GUI。
 Coherence 各已量 lifetime 分別輸出 Signal/Time Flux×Index 與 Flux-only lifetime，保留各自 actual delay。
 Disabled 項目沒有 channel，rejected fit 保留 raw 與 NaN lifetime，不 union、插值或重 fit。
-MIST 保留 actual gain inner-first 的 Signal 及 Flux-only Success，grid 不同就拒絕。
+MIST 使用保存的 actual gain 作為 inner-first Signal 軸，另寫 Flux-only Success。
+所有已取得 trace 的 actual gain grid 必須完全相同，否則拒絕並列出兩點的 index 與值。
+Plan gain grid 是請求，不拿它與 QICK 量化後的實際值比較。
 
 Coherence samples 每點最多一行，有 accepted frequency 或任一 lifetime 才寫。
 僅寫接受值，欄位沿 freq_mhz 與 t1/t2r/t2e_us、對應 err_us，未接受欄位省略。
