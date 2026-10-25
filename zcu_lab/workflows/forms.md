@@ -23,7 +23,7 @@ All false 回 consuming-field error，不提交 acquisition。Disabled lifetime 
 `CalibrationTunablesForm` 的 `rabi_mode` 預設 `len_then_amp`，可改 `amp_only` 或 `len_only`。MIST 與 Coherence 共用這份子表單。
 `amp_gain_max` 預設 1，控制 amp-only 上限；`amp_gain_half_width` 預設 0.2，控制後續 gain 追蹤半寬。
 `amp_min_gain` 預設 0.0001，`amp_max_window_fraction` 預設 0.9，控制 gain 接受範圍。Amp 與 Len 共用 Rabi 誤差、RMS residual 與 MAE ratio knobs。
-`target_pi_length_us` 是 Len feedback 的目標，也是 amp-only 的固定長度；空白時用 captured host seed。
+`target_pi_length_us` 是 Len feedback 的目標，也是 amp-only 的固定長度；空白時取 min(captured host seed π, rabi_min_stop_us / rabi_stop_factor)。
 Amp 使用同一份 Rabi averages、rounds、acquire_retry、earlystop_snr 與 relaxation knobs。已開始的 acquisition 不受後續表單修改影響。
 
 `CoherenceTunablesForm` 含共用 `cal` 與獨立 `singleshot`、`t1`、`t2ramsey`、`t2echo`，不把 plan flags 放進 tunables。

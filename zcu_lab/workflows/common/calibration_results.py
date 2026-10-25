@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 from typing import Literal
 
+from zcu_tools.program.v2 import SweepCfg
 from zcu_tools.simulate.fluxonium.physical_fit import FluxoniumModelSnapshot
 
 from zcu_lab.workflows.common.frequency_tracking import RecoveryAttempt
@@ -80,6 +81,12 @@ class RabiResult:
     amp stores gain-stage diagnostics/native reference, None when not run.
     len_status records the first-stage status when Amp follows Len. file keeps
     the Len native reference in combined mode, otherwise the only Rabi file.
+    too_slow_pi_length_us records a quality-trusted rejected fit above 90% of
+    the measured maximum duration; auto mode uses it only to raise gain.
+    target_pi_length_us is the resolved setpoint in us. requested_sweep and
+    planned_sweep are the original and clock-planned length grids in us.
+    Planned is None if acquisition failed before returning a native record;
+    all three are None on dependency skip.
     """
 
     status: StageStatus
@@ -93,6 +100,10 @@ class RabiResult:
     pi2_drive_gain: float | None = None
     amp: AmpCalibrationResult | None = None
     len_status: StageStatus | None = None
+    too_slow_pi_length_us: float | None = None
+    target_pi_length_us: float | None = None
+    requested_sweep: SweepCfg | None = None
+    planned_sweep: SweepCfg | None = None
 
 
 @dataclass(frozen=True)

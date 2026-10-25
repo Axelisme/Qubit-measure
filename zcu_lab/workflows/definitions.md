@@ -42,12 +42,12 @@ Pi2 使用所選 Rabi 模式的 fitted pulse，不取 pi duration 或 gain 除�
 | 模式 | 掃描與下游 pulse |
 | --- | --- |
 | `len_then_amp` | 先接受 LenRabi，再固定其 π 長度掃 gain，範圍 0 到 min\(1, 2.5 × 本次 Len gain\)。下游 π 與 π/2 用該長度及 Amp 各自 fitted gain。Amp 未接受時，本點 Rabi 不接受。 |
-| `amp_only` | 不跑 LenRabi。固定 `target_pi_length_us`，未填時用 host seed。首次掃 0 到 `amp_gain_max`，之後以上次 accepted Amp π gain 為中心掃 ±`amp_gain_half_width`，限於 0 到上限。 |
+| `amp_only` | 不跑 LenRabi。固定 `target_pi_length_us`，未填時取 min(host seed π, rabi_min_stop_us / rabi_stop_factor)。首次掃 0 到 `amp_gain_max`，之後以上次 accepted Amp π gain 為中心掃 ±`amp_gain_half_width`，限於 0 到上限。 |
 | `len_only` | 保留 Length-Rabi 的 gain 回饋、長度掃描及 fitted π/π2 duration。 |
 
 Amp 共用 `max_rabi_rel_err`、`max_fit_residual` 與 `rabi_max_mean_residual_ratio`。π gain 至少為 `amp_min_gain`，且不超過 `amp_max_window_fraction × 實際掃描上限`。
 預設最小 gain 為 0.0001，窗比例 0.9，amp-only 上限 1，追蹤半寬 0.2。
-π/2 gain 必須有限且至少為最小 gain，否則只接受 π，不產生新的 π/π2 pair。
+π/2 gain 必須有限且至少為最小 gain，固定長度也須至少 0.03 µs，否則只接受 π，不產生新的 π/π2 pair。
 `RabiResult.amp` 保留 gain fit、誤差、固定長度與 `amp-rabi.h5` 引用，拒絕 fit 也保留診斷。
 Combined 模式的 `file` 仍指 `rabi.h5`，`len_status` 記 Len 的接受狀態。Amp-only 的 `file` 指 `amp-rabi.h5`。
 Amp 的 partial raw 先保存，不擬合、不更新 carry。下游 NOW／LATEST 的規則不變。
