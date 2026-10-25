@@ -8,7 +8,7 @@ from ..base import BaseProgressBar, ProgressTotal, ProgressValue
 
 
 class TQDMProgressBar(BaseProgressBar):
-    """tqdm bar with a readable description even when display is disabled.
+    """tqdm display with readable progress state even when display is disabled.
 
     Initial descriptions are returned unchanged. ``set_description`` appends
     tqdm's ``": "`` suffix to nonempty descriptions, regardless of display state.
@@ -22,16 +22,20 @@ class TQDMProgressBar(BaseProgressBar):
         **kwargs,
     ) -> None:
         self.pbar = tqdm(iterable, desc, *args, **kwargs)
+        # Disabled tqdm skips counter updates; progress belongs to this adapter.
+        self._n: ProgressValue = self.pbar.n
         # Disabled tqdm skips description initialization before returning.
         self.pbar.desc = desc or ""
 
     def update(self, value: ProgressValue = 1) -> None:
+        self._n += value
         self.pbar.update(value)
 
     def set_progress(self, value: ProgressValue) -> None:
-        self.pbar.update(value - self.pbar.n)
+        self.update(value - self._n)
 
     def reset(self) -> None:
+        self._n = 0
         self.pbar.reset()
 
     def refresh(self) -> None:
@@ -53,7 +57,7 @@ class TQDMProgressBar(BaseProgressBar):
 
     @property
     def n(self) -> ProgressValue:
-        return self.pbar.n
+        return self._n
 
     @property
     def desc(self) -> str:
