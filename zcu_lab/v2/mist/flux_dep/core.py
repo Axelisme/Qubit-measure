@@ -6,7 +6,7 @@ from typing import Annotated, ClassVar, Literal
 
 import numpy as np
 from numpy.typing import NDArray
-from zcu_tools.cfg_model import ConfigBase, FieldMeta
+from zcu_tools.cfg_model import ConfigBase, DeviceName, FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment, config
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
@@ -74,7 +74,7 @@ class FluxDepCfg(ConfigBase):
     probe_pulse: Pulse.Cfg
     readout: Readout.Cfg
     flux_dev: Annotated[
-        str,
+        DeviceName,
         FieldMeta(
             label="Flux device",
             description="Connected flux device driven by the sweep.",

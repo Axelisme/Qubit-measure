@@ -3,16 +3,17 @@
 from typing import Literal
 
 from pydantic import Field
+from zcu_tools.cfg_model import DeviceName
 
 from .base import BuiltinComponent, Flux, Frequency, PumpPower
 
 
 class JpaSchema(BuiltinComponent):
-    flux_source: str | None = Field(
+    flux_source: DeviceName | None = Field(
         default=None,
         description="DC device name for this JPA's flux bias; None leaves the form device blank.",
     )
-    rf_source: str | None = Field(
+    rf_source: DeviceName | None = Field(
         default=None,
         description="RF device name for this JPA's pump; None leaves the form device blank.",
     )

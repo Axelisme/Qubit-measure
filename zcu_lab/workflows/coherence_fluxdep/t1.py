@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+from zcu_tools.cfg_model import DeviceName
 from zcu_tools.experiment.metadata import RunSnapshot
 from zcu_tools.program.v2 import SweepCfg
 from zcu_tools.program.v2.modules import PulseCfg, PulseReadoutCfg
@@ -42,7 +43,7 @@ class T1Plan(BaseModel):
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
-    flux_dev: str = Field(min_length=1, description="Connected flux device name")
+    flux_dev: DeviceName = Field(min_length=1, description="Connected flux device name")
     flux_unit: Literal["A", "V", "native"] = Field(
         description="Explicit setpoint unit: A, V or native (Fake); no conversion"
     )

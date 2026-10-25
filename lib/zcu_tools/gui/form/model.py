@@ -136,6 +136,18 @@ class InputCommand:
 
 
 @dataclass(frozen=True)
+class InputSuggestions:
+    """Non-validating scalar options with a transient list/text presentation.
+
+    options reads only the host's fixed capture and returns ordered suggestions.
+    Nullable annotations also list None. The field still accepts unlisted values. FormState exposes toggle_text as a
+    display-only command; the mode is never part of input or serialized cfg.
+    """
+
+    options: Callable[[FormEnv], tuple[Option, ...]]
+
+
+@dataclass(frozen=True)
 class InputConverter:
     """One field's selection conversion, declared in metadata or converters(env).
 
@@ -621,6 +633,7 @@ class FormState[F: FormModel]:
         self._selections = base.selections
         self._base_selections = base.selections
         self._callbacks: list[Callable[[], None]] = []
+        self._text_fields: set[FormWritePath] = set()
 
     @property
     def input(self) -> FormInput[F]:
@@ -743,8 +756,41 @@ class FormState[F: FormModel]:
         input/base or notify subscribers.
         """
         from ._describe import describe
+        from ._presentation import present
 
-        return describe(self._model, self._data, path, env, self._selections)
+        return present(
+            describe(self._model, self._data, path, env, self._selections),
+            self._text_fields,
+        )
+
+    def run_presentation_command(
+        self, path: FormWritePath, name: str, env: FormEnv
+    ) -> bool:
+        """Handle a declared display action, returning False for data commands.
+
+        Hosts with a separate data-command preparer call this inside their usual
+        mutation guard, before preparing replacements. toggle_text switches a
+        suggestion field's dropdown/text mode and notifies subscribers once.
+        Input, base, selections, validation and dirty state remain unchanged.
+        Mode lives only in this state, survives refresh, and resets on reset().
+        Unknown/inactive paths and unavailable toggle_text raise the same errors
+        as run_command. Other names return False without inspecting the field.
+        """
+        if name != "toggle_text":
+            return False
+        target = self.describe(path, env).target
+        if target is None or not any(item.name == name for item in target.commands):
+            raise FormCommandError(f"Unavailable field command {name!r} at {path!r}")
+        if path in self._text_fields:
+            self._text_fields.remove(path)
+        else:
+            self._text_fields.add(path)
+        for callback in tuple(self._callbacks):
+            try:
+                callback()
+            except Exception:
+                _logger.exception("Form state subscriber failed")
+        return True
 
     def run_command(self, path: FormWritePath, name: str, env: FormEnv) -> None:
         """Execute a declared field action or a selected option's named action.
@@ -768,7 +814,8 @@ class FormState[F: FormModel]:
         """
         from ._commands import prepare_command
 
-        self._install(prepare_command(self.input, path, name, env))
+        if not self.run_presentation_command(path, name, env):
+            self._install(prepare_command(self.input, path, name, env))
 
     def _install(self, candidate: FormInput[F]) -> None:
         if self.input.same_as(candidate):
@@ -851,7 +898,12 @@ class FormState[F: FormModel]:
         if base.model is not self._model:
             raise ValueError("Cannot reset to a different form model class")
         data = base.data
-        changed = not self.input.same_as(base) or not self.base.same_as(base)
+        changed = (
+            bool(self._text_fields)
+            or not self.input.same_as(base)
+            or not self.base.same_as(base)
+        )
+        self._text_fields.clear()
         self._data = data
         self._base = base.data
         self._selections = base.selections

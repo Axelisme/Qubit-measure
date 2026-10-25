@@ -10,6 +10,7 @@ from pydantic import (
     field_validator,
     model_validator,
 )
+from zcu_tools.cfg_model import DeviceName
 from zcu_tools.resources.entry.schema import validate_component_name
 
 from .base import BuiltinComponent, Flux
@@ -102,7 +103,7 @@ class MuxGroupSchema(BuiltinComponent):
         description="Optional distinct qubit names, aligned with the full resonators list.",
     )
 
-    flux_source: str | None = Field(
+    flux_source: DeviceName | None = Field(
         default=None, description="Device name supplying the global coil bias."
     )
     coil_flux: dict[str, CoilFluxCalibration] = Field(

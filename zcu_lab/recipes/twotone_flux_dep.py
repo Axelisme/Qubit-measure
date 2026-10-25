@@ -1,6 +1,7 @@
 """Qubit frequency/flux map and interactive flux calibration."""
 
 from pydantic import Field
+from zcu_tools.cfg_model import DeviceName
 from zcu_tools.gui.app.measure.interactive_flux_pick import FluxPickResult
 from zcu_tools.mcp.measure.recipe_api import (
     KEEP,
@@ -33,7 +34,7 @@ class TwotoneFluxDepInputs(RecipeInputs):
         KEEP,
         description="Fixed qubit-drive pulse amplitude in native gain units; omission retains the Form value; null clears/disables it.",
     )
-    flux_device: str = Field(
+    flux_device: DeviceName = Field(
         description="Registered flux-device name; read only its cached snapshot, without connecting."
     )
     flux_unit: str = Field(

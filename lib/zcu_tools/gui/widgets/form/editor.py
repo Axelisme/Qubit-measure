@@ -533,6 +533,8 @@ class FormEditor[F: FormModel](QWidget):
 
     def _retire(self, widget: QWidget) -> None:
         # Retire names immediately, but let an emitting Qt control finish.
+        # An orphan awaiting deleteLater must not commit on a later focus-out.
+        widget.setEnabled(False)
         focused = QApplication.focusWidget()
         if focused is not None and widget.isAncestorOf(focused):
             # Replacing a branch must not commit text from the retiring row.

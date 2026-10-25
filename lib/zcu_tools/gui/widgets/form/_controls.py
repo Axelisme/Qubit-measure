@@ -327,6 +327,7 @@ class FieldRow:
         self.label = self._build_label(header)
         self._sync_field_commands(editable=True)
         self._build_control(header)
+        self._sync_field_commands(editable=True)
         if field.unit:
             header.addWidget(_tight_label(field.unit, self.widget))
         self.value = QLabel(self.widget)
@@ -517,6 +518,8 @@ class FieldRow:
         ]:
             for action in self._field_actions:
                 self.label.removeAction(action)
+                if self.input is not None:
+                    self.input.removeAction(action)
                 action.setObjectName("")
                 action.deleteLater()
             self._field_actions = []
@@ -530,6 +533,8 @@ class FieldRow:
             self.label.setContextMenuPolicy(Qt.ContextMenuPolicy.ActionsContextMenu)
         for action in self._field_actions:
             action.setEnabled(editable)
+            if self.input is not None:
+                self.input.addAction(action)
 
     def _build_control(self, header: QHBoxLayout) -> None:
         """Build the input or navigation control selected by this row's metadata."""
@@ -616,6 +621,10 @@ class FieldRow:
 
     def _command_triggered(self, name: str) -> None:
         if not self._displaying:
+            # A context menu does not cause ordinary focus-loss submission.
+            # Commit visible scalar text before a command can replace its row.
+            if isinstance(self.input, QLineEdit):
+                self._input_changed()
             self._command(self.field.path, name)
 
     def _write(self, value: JsonValue) -> None:
@@ -640,6 +649,11 @@ class FieldRow:
         header.addWidget(widget)
         if self.field.expression and isinstance(widget, QLineEdit):
             self.mode = self._build_mode(widget)
+        elif self._field_actions and isinstance(widget, QLineEdit):
+            widget.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+            widget.customContextMenuRequested.connect(
+                lambda pos: _show_text_menu(widget, self._field_actions, pos)
+            )
         # Shared text policy commits on idle/Enter/focus loss; a checkbox
         # commits each toggle.
         connect_committed_value_widget(widget, self._input_changed)
@@ -654,7 +668,9 @@ class FieldRow:
         # Keep the text field's standard menu; mode follows it.
         widget.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         widget.customContextMenuRequested.connect(
-            lambda pos: _show_text_menu(widget, [mode, *self._commands], pos)
+            lambda pos: _show_text_menu(
+                widget, [mode, *self._field_actions, *self._commands], pos
+            )
         )
         return mode
 
