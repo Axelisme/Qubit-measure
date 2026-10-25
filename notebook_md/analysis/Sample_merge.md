@@ -34,7 +34,7 @@ only read the canonical `samples.csv` produced here.
 
 Sources must be flat v2 CSVs (`dev_value` / `dev_unit`, optional `flux` /
 `flux_int` / `flux_period`). Legacy `calibrated mA` / `Flux` tables must be
-converted explicitly with `zcu_tools.resources.sample_table.migrate_sample_table_v2` and
+converted explicitly with `zcu_tools.resources.record_table.migrate_record_table_v2` and
 saved to a distinct v2 CSV before merging. No migration CLI ships with this
 repo; the merge never guesses units or integer flux branches.
 
@@ -78,7 +78,7 @@ target_frame = zfit.FluxFrame.from_result_dir(
 
 # Sources
 
-Each source is a v2 CSV. `fallback_frame` resolves migrated rows that carry
+Each source is adapter record JSONL. Set device_name to a captured device name; missing device facts fail without a flat-column fallback. `fallback_frame` resolves migrated rows that carry
 neither explicit `flux` nor a row frame. `integer_flux_offset` aligns a source
 to an equivalent integer flux branch (e.g. `-0.5` -> `+1` to match `0.5`); the
 merge never infers a branch on its own.
@@ -86,11 +86,13 @@ merge never infers a branch on its own.
 ```python
 sources = (
     zfit.SampleSource(
-        path=f"{target_result_dir}/samples1.csv",
+        device_name="bias_device",  # Select a captured device explicitly.
+        path=f"{target_result_dir}/records1.jsonl",
         label="samples1",
     ),
     zfit.SampleSource(
-        path=f"{target_result_dir}/samples2.csv",
+        device_name="bias_device",  # Select a captured device explicitly.
+        path=f"{target_result_dir}/records2.jsonl",
         label="samples2",
         integer_flux_offset=1,
         fit_batch_flux_offset=True,
@@ -98,7 +100,8 @@ sources = (
         max_abs_batch_flux_offset=0.03,
     ),
     zfit.SampleSource(
-        path=f"{target_result_dir}/samples3.csv",
+        device_name="bias_device",  # Select a captured device explicitly.
+        path=f"{target_result_dir}/records3.jsonl",
         label="samples3",
         fallback_frame=zfit.FluxFrame.from_result_dir(
             "../../result/2DQ12/Q4",
@@ -135,6 +138,10 @@ plt.show()
 ```
 
 # Write Output
+
+The output is an analysis artifact, not raw adapter records. Original devices
+remain source evidence and are not rewritten to match target-frame coordinates.
+Do not feed this output back into raw-record APIs.
 
 The output path is caller-owned and must never overwrite a source CSV; the
 write helpers refuse to do so.

@@ -439,6 +439,7 @@ def run_t1_curve_analysis(
 ) -> T1CurveAnalysisResult:
     context = load_t1_curve_context(
         result_dir=config.result_dir,
+        device_name=config.device_name,
         samples_filename=config.samples_filename,
         image_dir=config.image_dir,
     )

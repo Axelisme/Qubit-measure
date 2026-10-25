@@ -4,7 +4,7 @@
 
 **讀者：** lab-author。T1 資料準備、噪聲模型擬合與分析呈現契約。
 
-Sample loading 使用 `JsonlSampleTable.read()`，預設讀取 `samples.jsonl`，每個 run_id 取最後一行。分析欄位使用 `freq_mhz`、`t1_us` 與 `t1_err_us`。資料缺 flux 或 row frame 時，由呼叫端提供同單位的 fallback frame。
+Record loading 使用 `JsonlRecordTable.read()`，預設讀取 `records.jsonl`，每個 run_id 取最後一行。分析欄位使用 `freq_mhz`、`t1_us` 與 `t1_err_us`。資料缺 flux 或 row frame 時，由呼叫端提供同單位的 fallback frame。
 
 Fluxonium T1 vs. flux 的分析工具：從實測 T1 資料反推各噪聲通道的品質因子 (Q) / 準粒子密度 (x_qp)，並與理論 T1 曲線比對作圖。
 
@@ -59,7 +59,7 @@ Fluxonium T1 vs. flux 的分析工具：從實測 T1 資料反推各噪聲通道
 - `workflow.py` 持有 combined fit、channel curves、結果收集、顯式 writeback 與一鍵編排。Package 與 workflow 直接 re-export 原有 stage 介面。
 - `base.py` 保留共用作圖與溫度工具，並持有跨 stage 的 omega window、正值解析與參數格式化。
 
-- `load_t1_curve_context()` / `calibrate_t1_flux()` / `prepare_t1_curve_data()` 封裝 sample loading、v2 flux resolution（explicit → row-frame → caller-declared fallback）、f01-based flux correction（derived rows 且 observed f01 finite 才執行）、integer branch alignment、T1/T1err 單位轉換與 fit-window filtering。以 `resolve_sample_flux` 取得 normalized flux；`freq_mhz` 為 null 的行仍可由 resolved flux 進入 analysis，missing observed f01 改用 model 在該 flux 預測的 f01。load 階段只讀 fluxdep fit 的 fluxonium 參數與 flux alignment；notebook-facing 參數用 us/ns 註明，低階 fit 一律吃 ns。
+- `load_t1_curve_context()` / `calibrate_t1_flux()` / `prepare_t1_curve_data()` 封裝 sample loading、v2 flux resolution（explicit → row-frame → caller-declared fallback）、f01-based flux correction（derived rows 且 observed f01 finite 才執行）、integer branch alignment、T1/T1err 單位轉換與 fit-window filtering。以 `resolve_record_flux` 取得 normalized flux；`freq_mhz` 為 null 的行仍可由 resolved flux 進入 analysis，missing observed f01 改用 model 在該 flux 預測的 f01。load 階段只讀 fluxdep fit 的 fluxonium 參數與 flux alignment；notebook-facing 參數用 us/ns 註明，低階 fit 一律吃 ns。
 - `plot_t1_flux_calibration(data)` 將每個 retained sample 的 raw flux 與 f01-corrected flux 畫在對應 f01 frequency 高度，供檢查 half-flux 附近是否發生不合理 branch jump。
 - `PurcellEffectParams(kappa_ghz, bare_rf, g)` 是 optional Purcell 設定本身的完整值容器；三個欄位都必填且必須為正 finite GHz。`kappa_ghz=0.001` 表示 1 MHz linewidth，不是 decay rate κ。`load_t1_purcell_params(context, kappa_ghz=...)` 會從 `params.json` 的 `dispersive` section 解析 `bare_rf/g`，目前 `kappa_ghz` 仍由 notebook 明確輸入。
 - `calculate_purcell_t1_limit()` 使用原 frequency-selected a†／a bath，分別對 e→g 與 g→e rates 做 resonator thermal average，回傳 equilibrium `T1=1/(Γeg+Γge)`，單位 ns。逐項 probe、combined fit 與 channel curves 都使用此 total rate。
@@ -98,7 +98,7 @@ Fluxonium T1 vs. flux 的分析工具：從實測 T1 資料反推各噪聲通道
 
 ## 典型使用流程
 
-1. 從 sample 表以 `resolve_sample_flux` 取得 normalized flux、f01 頻率、T1 與 T1err；用 `calibrate_t1_flux()` 取得 resolution provenance，再用 `prepare_t1_curve_data()` 產生 integer-aligned、f01-corrected flux 軸，並用 `plot_t1_flux_calibration()` 檢查校正前後位置。
+1. 從 sample 表以 `resolve_record_flux` 取得 normalized flux、f01 頻率、T1 與 T1err；用 `calibrate_t1_flux()` 取得 resolution provenance，再用 `prepare_t1_curve_data()` 產生 integer-aligned、f01-corrected flux 軸，並用 `plot_t1_flux_calibration()` 檢查校正前後位置。
 2. 在 fit window 設定 `MeasurementErrorPolicy` 與 `FluxResidualWeighting`；預設保留 `T1err=NaN` 的點並在 fit 內補值。
 3. 視需要建立 `PurcellEffectParams`，並用 Purcell 可行性估計 `Temp` 上限；此設定同時傳給逐項 probe、combined fit 與 channel curves。
 4. 依序跑 capacitive、quasiparticle、inductive probe，檢查每個機制的 pointwise Q 與單機制 T1 上限。
@@ -120,3 +120,5 @@ measured T1 路徑直接使用量測值。
 - 所有 `*_vs_omega` 的「Q」是 `T1 · dipole` 的直接乘積；若 dipole 定義改（例如用 `sin(φ/2)` vs `n̂`），同一 T1 會得到不同 Q。
 - `plot_t1_with_sample` 的 `other_noise_options` 以 `**kwargs` 傳給 `calculate_eff_t1_vs_flux_fast`（fast 版接受 `i`/`j`/`cutoff`/`qub_dim` 與 per-channel 選項；**fast 版固定 `total=True`，傳 `total=False` 或任何不支援的 kwarg 會 raise `UnsupportedNoiseOptionError`（不靜默丟棄）**——要 `total=False` 得用舊 scqubits `_with` 版）。
 - `Qqp` 的 `calc_qp_oper` 和其他 Q 通道不同：需要自己先算 `sin(φ/2)` 矩陣元，不能直接丟 `n_elements` / `phi_elements`。
+
+Record JSONL 載入必須提供 `device_name`，從 `devices[device_name]` 投影 value/value_unit。缺所選裝置時 fail-fast，不讀舊 flat 欄位作 fallback。`T1CurveAnalysisConfig` 也明示同一選擇；後續 calibration 與 preparation 使用投影後的分析 frame。

@@ -15,11 +15,12 @@ from numpy.typing import NDArray
 from tqdm.auto import tqdm
 
 from zcu_tools.resources.qubit_params import QubitParams
-from zcu_tools.resources.sample_table import (
-    JsonlSampleTable,
-    SampleFluxFrame,
-    resolve_sample_flux,
-    validate_sample_table_v2,
+from zcu_tools.resources.record_table import (
+    JsonlRecordTable,
+    RecordFluxFrame,
+    project_device_coordinates,
+    resolve_record_flux,
+    validate_record_table_v2,
 )
 from zcu_tools.simulate.fluxonium import calculate_chi_sweep
 from zcu_tools.simulate.fluxonium.branch.floquet import calc_ge_snr
@@ -429,16 +430,19 @@ def add_real_sample(  # noqa: PLR0913
     flux: float = 0.5,
     rf_w: float = 7e-3,
     max_photon: int = 70,
-    fallback_frame: SampleFluxFrame | None = None,
+    fallback_frame: RecordFluxFrame | None = None,
     *,
-    samples: JsonlSampleTable,
+    samples: JsonlRecordTable,
+    device_name: str,
 ) -> None:
     """Overlay measured and predicted T1 at the requested operating flux.
 
     fig receives a measured marker, a prediction and their connecting line.
     result_dir supplies params.json with project, fluxdep and dispersive fits.
-    samples is the caller-bound history, such as entry.samples(component);
-    no sample path is inferred from result_dir. Select the latest row nearest
+    samples is the caller-bound history, such as entry.records(component).
+    device_name explicitly selects devices[device_name].value/value_unit;
+    missing facts fail without using flat input fields. No record path is
+    inferred from result_dir. Select the latest row nearest
     flux after resolving v2 coordinates, using fallback_frame only when needed.
     Temp is in kelvin, rf_w in GHz, and max_photon bounds the SNR calculation.
     noise_channels supplies scqubits T1 channel names and options. Sample schema,
@@ -460,9 +464,9 @@ def add_real_sample(  # noqa: PLR0913
     # load freq data; the v2 table must resolve flux for every row (explicit
     # flux, row frame or the caller-declared fallback frame), and legacy
     # coordinate columns (e.g. "calibrated mA") fail before any comparison.
-    freq_df = samples.read()
-    validate_sample_table_v2(freq_df)
-    resolution = resolve_sample_flux(freq_df, fallback_frame=fallback_frame)
+    freq_df = project_device_coordinates(samples.read(), device_name=device_name)
+    validate_record_table_v2(freq_df)
+    resolution = resolve_record_flux(freq_df, fallback_frame=fallback_frame)
     idx = int(np.argmin(np.abs(resolution.values - flux)))
     t1 = freq_df["t1_us"].iloc[idx]
 

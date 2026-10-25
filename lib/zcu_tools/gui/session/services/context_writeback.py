@@ -38,9 +38,9 @@ class ContextWritebackTarget:
     nothing. Same-entry nonselected destinations stay unselected. Methods must
     run on context's owner thread; thread violations propagate.
 
-    append_sample delegates validation and append-only storage to the bound
-    entry's JsonlSampleTable. No method appends an accepted event itself or
-    provides a transaction across parameter, library and sample files.
+    append_record delegates validation and append-only storage to the bound
+    entry's JsonlRecordTable. No method appends an accepted event itself or
+    provides a transaction across parameter, library and record files.
     """
 
     def __init__(
@@ -74,7 +74,7 @@ class ContextWritebackTarget:
         """
         return self._context.set_modules(self._target, updates)
 
-    def append_sample(
+    def append_record(
         self,
         component: str,
         fields: JsonObject,
@@ -83,7 +83,7 @@ class ContextWritebackTarget:
         at: datetime,
         source: str,
     ) -> JsonObject:
-        """Append a sample to component and return its detached complete JSON row.
+        """Append a record to component and return its detached complete JSON row.
 
         component is a safe single path segment. fields contains finite JSON
         measurements in caller units, without the reserved run_id, point, at or
@@ -94,6 +94,6 @@ class ContextWritebackTarget:
         unchanged, including earlier rows with the same run_id. An append is not
         transactional with other files and an I/O failure may leave a partial row.
         """
-        return self._entry.samples(component).append(
+        return self._entry.records(component).append(
             run_id=run_id, point=self.point, at=at, source=source, **fields
         )

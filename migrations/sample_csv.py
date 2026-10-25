@@ -11,16 +11,16 @@ import pandas as pd
 from pydantic import JsonValue
 from zcu_tools.datafile import JsonObject, json_values_equal
 from zcu_tools.resources.entry import ResultEntry
-from zcu_tools.resources.sample_table import (
-    SAMPLE_COORDINATE_COLUMNS,
+from zcu_tools.resources.record_table import (
+    RECORD_COORDINATE_COLUMNS,
     LegacyDeviceValueUnit,
-    migrate_sample_table_v2,
-    validate_sample_table_v2,
+    migrate_record_table_v2,
+    validate_record_table_v2,
 )
 
 from migrations.comparison import ExistingItem, MigrationDifference, MigrationInputError
 
-# Evidence: notebook_md/single_qubit.md's sample_table.add_sample producer.
+# Evidence: notebook_md/single_qubit.md's record_table.add_sample producer.
 # Units are already microseconds / MHz; only names change here.
 _MEASUREMENT_NAMES = {
     "Freq (MHz)": "freq_mhz",
@@ -79,7 +79,7 @@ class MigrationReport:
 
     converted_rows counts newly appended rows; identical synthetic keys skip.
     pending_rows lists omitted data rows in input order, with their reasons.
-    output_path is the entry-bound samples/<component>.jsonl destination; it
+    output_path is the entry-bound records/components/<component>.jsonl destination; it
     need not exist when nothing was converted. preserved_fields locates raw
     unsupported fields in appended rows, distinct from converted measurements.
     skipped lists verified identical synthetic keys without appending history.
@@ -136,16 +136,16 @@ def _convert_row(
     frame = pd.DataFrame([row]).replace("", None)
     coordinates: set[str]
     if "dev_value" in row or "dev_unit" in row:
-        coordinates = set(SAMPLE_COORDINATE_COLUMNS)
-        validate_sample_table_v2(frame)
+        coordinates = set(RECORD_COORDINATE_COLUMNS)
+        validate_record_table_v2(frame)
     else:
         if dev_value_column is None or source_unit is None:
             raise ValueError(
                 "legacy CSV requires explicit dev_value_column and source_unit"
             )
-        coordinates = {*SAMPLE_COORDINATE_COLUMNS, dev_value_column}
+        coordinates = {*RECORD_COORDINATE_COLUMNS, dev_value_column}
         # The schema owner alone defines scaling and coordinate validation.
-        frame = migrate_sample_table_v2(
+        frame = migrate_record_table_v2(
             frame,
             dev_value_column=dev_value_column,
             dev_value_unit=source_unit,
@@ -174,7 +174,7 @@ def _convert_row(
         )
     if legacy_fields:
         fields["legacy_fields"] = legacy_fields
-    for column in SAMPLE_COORDINATE_COLUMNS:
+    for column in RECORD_COORDINATE_COLUMNS:
         if column in ("dev_value", "dev_unit") or column not in frame.columns:
             continue
         value = frame[column].iloc[0]
@@ -328,7 +328,7 @@ def convert_sample_csv(
     this is not a general history merge or a change to table owner semantics.
     """
     paths = [Path(source) for source in sources]
-    table = entry.samples(component)
+    table = entry.records(component)
     output = table.path
     for path in paths:
         if output.exists() and path.exists() and path.samefile(output):

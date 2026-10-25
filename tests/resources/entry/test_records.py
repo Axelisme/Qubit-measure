@@ -1,4 +1,4 @@
-"""Entry-bound sample history, latest-per-run reads and explicit CSV exports."""
+"""Entry-bound record history, latest-per-run reads and explicit CSV exports."""
 
 import json
 from collections.abc import Callable
@@ -13,26 +13,38 @@ from zcu_tools.resources.entry import ResultEntry
 from tests._filesystem import symlink_or_skip
 
 
-def test_samples_append_preserves_history_and_reads_last_complete_row(
+def test_component_record_binding_cannot_alias_the_event_ledger(
     entry: ResultEntry,
 ) -> None:
-    samples = entry.samples("Q1")
-    assert samples.read().empty
-    path = entry.result_path / "samples" / "Q1.jsonl"
+    symlink_or_skip(
+        entry.result_path / "records" / "components",
+        entry.result_path / "records",
+        target_is_directory=True,
+    )
+    with pytest.raises(ValueError, match="records escape"):
+        entry.records("ledger")
+
+
+def test_records_append_preserves_history_and_reads_last_complete_row(
+    entry: ResultEntry,
+) -> None:
+    records = entry.records("Q1")
+    assert records.read().empty
+    path = entry.result_path / "records" / "components" / "Q1.jsonl"
     assert not path.exists()
 
-    samples.append(
+    records.append(
         run_id="run-a", dev_value=0.001, dev_unit="A", point="bias", t1_us=20.0
     )
     first_bytes = path.read_bytes()
-    samples.append(
+    records.append(
         run_id="run-b",
         dev_value=0.2,
         dev_unit="V",
         freq_mhz=5000.0,
         fit={"label": "合成", "values": [1, 2]},
     )
-    samples.append(
+    records.append(
         run_id="run-a", dev_value=0.002, dev_unit="A", point="bias", t2r_us=35.0
     )
 
@@ -58,104 +70,104 @@ def test_samples_append_preserves_history_and_reads_last_complete_row(
         assert datetime.fromisoformat(row["at"]).utcoffset() == timedelta(0)
     assert rows[1]["point"] is None
 
-    latest = entry.samples("Q1").read().set_index("run_id")
+    latest = entry.records("Q1").read().set_index("run_id")
     assert set(latest.index) == {"run-a", "run-b"}
     assert latest.loc["run-a", "t2r_us"] == 35.0
     assert latest.loc["run-a", "dev_value"] == 0.002
     assert "t1_us" not in latest.columns  # last line replaces, not merges, the row
     assert latest.loc["run-b", "fit"] == {"label": "合成", "values": [1, 2]}
-    assert entry.samples("Q2").read().empty
+    assert entry.records("Q2").read().empty
 
 
-def test_samples_support_workflow_source_and_native_device_unit(
+def test_records_support_workflow_source_and_native_device_unit(
     entry: ResultEntry,
 ) -> None:
-    samples = entry.samples("Q1")
-    samples.append(
+    records = entry.records("Q1")
+    records.append(
         run_id="workflow-run",
         dev_value=12.0,
         dev_unit="native",
         source="workflow:workflow-run",
         t1_us=40.0,
     )
-    row = samples.read().iloc[0]
+    row = records.read().iloc[0]
     assert row["source"] == "workflow:workflow-run"
     assert row["dev_unit"] == "native"
     assert row["dev_value"] == 12.0
 
 
-def test_samples_support_accepted_event_source(entry: ResultEntry) -> None:
-    samples = entry.samples("Q1")
-    samples.append(
+def test_records_support_accepted_event_source(entry: ResultEntry) -> None:
+    records = entry.records("Q1")
+    records.append(
         run_id="run-a", dev_value=1.0, dev_unit="V", source="accepted-event-id"
     )
-    assert samples.read().iloc[0]["source"] == "accepted-event-id"
+    assert records.read().iloc[0]["source"] == "accepted-event-id"
 
 
-def test_samples_reject_missing_run_id_without_writing(entry: ResultEntry) -> None:
-    samples = entry.samples("Q1")
+def test_records_reject_missing_run_id_without_writing(entry: ResultEntry) -> None:
+    records = entry.records("Q1")
     # Widen the callable only to exercise runtime rejection of invalid calls.
-    append: Callable[..., dict[str, JsonValue]] = samples.append
+    append: Callable[..., dict[str, JsonValue]] = records.append
     with pytest.raises(TypeError, match="run_id"):
         append(dev_value=1.0, dev_unit="A")
-    assert not (entry.result_path / "samples" / "Q1.jsonl").exists()
+    assert not (entry.result_path / "records" / "components" / "Q1.jsonl").exists()
 
 
-def test_samples_reject_empty_run_id_without_writing(entry: ResultEntry) -> None:
-    samples = entry.samples("Q1")
+def test_records_reject_empty_run_id_without_writing(entry: ResultEntry) -> None:
+    records = entry.records("Q1")
     with pytest.raises(ValueError, match="run_id"):
-        samples.append(run_id="", dev_value=1.0, dev_unit="A")
-    assert samples.read().empty
+        records.append(run_id="", dev_value=1.0, dev_unit="A")
+    assert records.read().empty
 
 
-def test_samples_export_csv_requires_explicit_overwrite(
+def test_records_export_csv_requires_explicit_overwrite(
     entry: ResultEntry, tmp_path: Path
 ) -> None:
-    samples = entry.samples("Q1")
-    samples.append(
+    records = entry.records("Q1")
+    records.append(
         run_id="run-a", dev_value=1.0, dev_unit="V", point="bias", t1_us=15.0
     )
-    samples.append(
+    records.append(
         run_id="run-a", dev_value=2.0, dev_unit="V", point="bias", t1_us=25.0
     )
     destination = tmp_path / "export.csv"
     destination.write_text("keep me\n", encoding="utf-8")
     with pytest.raises(FileExistsError, match="export.csv"):
-        samples.export_csv(destination)
+        records.export_csv(destination)
     assert destination.read_text(encoding="utf-8") == "keep me\n"
-    samples.export_csv(destination, overwrite=True)
+    records.export_csv(destination, overwrite=True)
     exported = pd.read_csv(destination)
-    pd.testing.assert_frame_equal(exported, samples.read())
+    pd.testing.assert_frame_equal(exported, records.read())
     new_destination = tmp_path / "fresh.csv"
-    samples.export_csv(new_destination)
-    pd.testing.assert_frame_equal(pd.read_csv(new_destination), samples.read())
+    records.export_csv(new_destination)
+    pd.testing.assert_frame_equal(pd.read_csv(new_destination), records.read())
 
 
 @pytest.mark.parametrize("kind", ["canonical", "symlink", "hardlink"])
 @pytest.mark.parametrize("overwrite", [False, True])
-def test_samples_export_rejects_own_history_without_changing_bytes(
+def test_records_export_rejects_own_history_without_changing_bytes(
     entry: ResultEntry, tmp_path: Path, kind: str, overwrite: bool
 ) -> None:
-    samples = entry.samples("Q1")
-    samples.append(run_id="run-a", dev_value=1.0, dev_unit="A", t1_us=15.0)
-    source = entry.result_path / "samples" / "Q1.jsonl"
+    records = entry.records("Q1")
+    records.append(run_id="run-a", dev_value=1.0, dev_unit="A", t1_us=15.0)
+    source = entry.result_path / "records" / "components" / "Q1.jsonl"
     original = source.read_bytes()
     destination = source
     if kind == "symlink":
-        destination = tmp_path / "sample-link.csv"
+        destination = tmp_path / "record-link.csv"
         symlink_or_skip(destination, source)
     elif kind == "hardlink":
-        destination = tmp_path / "sample-hardlink.csv"
+        destination = tmp_path / "record-hardlink.csv"
         destination.hardlink_to(source)
-    with pytest.raises(ValueError, match="sample history"):
-        samples.export_csv(destination, overwrite=overwrite)
+    with pytest.raises(ValueError, match="record history"):
+        records.export_csv(destination, overwrite=overwrite)
     assert source.read_bytes() == original
-    assert samples.read().iloc[0]["t1_us"] == 15.0
+    assert records.read().iloc[0]["t1_us"] == 15.0
 
 
 @pytest.mark.parametrize("component", ["", "..", "../Q1", "Q1/Q2", "Q1\\Q2", "C:\\Q1"])
-def test_samples_reject_unsafe_component_paths(
+def test_records_reject_unsafe_component_paths(
     entry: ResultEntry, component: str
 ) -> None:
     with pytest.raises(ValueError, match="component"):
-        entry.samples(component)
+        entry.records(component)

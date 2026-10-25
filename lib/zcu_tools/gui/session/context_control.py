@@ -109,10 +109,10 @@ class ContextControlPort(Protocol):
         """
         ...
 
-    def read_sample(
+    def read_record(
         self, target: ContextTarget, component: str, run_id: str
     ) -> JsonObject | None:
-        """Read the latest entry sample for a run through the sample owner.
+        """Read the latest entry record for a run through the record owner.
 
         No selection/publication changes occur. Target admission, unsafe names,
         invalid run_id, corrupt history and I/O failures propagate. A missing row
@@ -130,7 +130,7 @@ class ContextControlPort(Protocol):
         """Accept at the fixed target through the context owner and shared loop.
 
         Nonempty writes require a captured SavedPoint in the opened entry.
-        SavedPoint parameter/library values persist and samples append to entry
+        SavedPoint parameter/library values persist and records append to entry
         JSONL. Successful prefix writes publish before later failures. Item failure raises
         WritebackApplyError with the event ID, committed values, applied count and original
         cause. Target admission and ledger append errors propagate unchanged.
@@ -338,11 +338,11 @@ class ContextControlFacet(ContextControlPort):
         """Read a captured target using ContextControlPort's current-value policy."""
         return self._context.read_target(target, roles=roles)
 
-    def read_sample(
+    def read_record(
         self, target: ContextTarget, component: str, run_id: str
     ) -> JsonObject | None:
         """Use the context owner's entry JSONL read contract."""
-        return self._context.read_sample(target, component, run_id)
+        return self._context.read_record(target, component, run_id)
 
     def apply_writeback(
         self,

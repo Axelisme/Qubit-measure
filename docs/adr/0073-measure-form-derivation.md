@@ -203,8 +203,12 @@ Core 用 `flux_dev: str` 等具名欄位取代 `dev: Mapping[str, str]`。
 Alias 表選擇實驗元件，不再用 `flux_dev`、`coupler_flux_dev` 或 `jpa_rf_dev` 列選裝置。
 新 entry 範本只保存元件焦點 aliases，既有 point 的 aliases.yaml 不遷移。
 `resonator` 元件 alias 與既有 readout 推導不變。
-Sample writeback 從固定 Run／Load capture 的元件來源欄位讀名稱，再取該次 device snapshot 的座標。
-缺來源時只省略 Sample proposal 並記 unavailable reason。
+Record writeback 不宣告座標裝置。框架只 append adapter 的 JSON，不解析或補入裝置欄位。
+Lab adapters 依 [Record policy](../../zcu_lab/v2/measure-authoring.md#record-policy) 自行組裝完整 Run device snapshot、分析純量與來源。
+Mux 同時保留 global coil 與各 local 線；分析 caller 明示使用哪台裝置作座標。
+
+使用者 2026-10-25：「2mux版的比較複雜，有兩個flux儀器都可能貢獻，我的想法是，兩個儀器都紀錄，其餘都同意」。
+其後裁定框架保持中立，只 append adapter 組裝的 JSON，見 [[0063]]。
 
 使用者 2026-10-23：「我認為flux_dev應該是由qubit/resonator推導，而不是意圖，因為沒有對象是以device為目標的」。
 

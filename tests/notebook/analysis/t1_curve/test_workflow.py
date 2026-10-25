@@ -26,10 +26,10 @@ from zcu_tools.notebook.analysis.t1_curve import (
     prepare_t1_curve_data,
     subtract_relaxation_limit,
 )
-from zcu_tools.resources.sample_table import (
-    SampleFluxFrame,
-    SampleTableV2Error,
-    resolve_sample_flux,
+from zcu_tools.resources.record_table import (
+    RecordFluxFrame,
+    RecordTableV2Error,
+    resolve_record_flux,
 )
 
 
@@ -54,16 +54,17 @@ def test_load_t1_curve_context_reads_params_and_samples(tmp_path) -> None:
             "point": [None],
             "at": ["2026-10-10T00:00:00Z"],
             "source": ["manual"],
-            "dev_value": [0.0],
-            "dev_unit": ["A"],
+            "devices": [{"bias": {"value": 0.0, "value_unit": "A"}}],
             "flux_int": [0.5],
             "flux_period": [1.0],
             "freq_mhz": [350.0],
             "t1_us": [40.0],
         }
-    ).to_json(tmp_path / "samples.jsonl", orient="records", lines=True)
+    ).to_json(tmp_path / "records.jsonl", orient="records", lines=True)
 
-    ctx = load_t1_curve_context(result_dir=str(tmp_path), preview_rows=1)
+    ctx = load_t1_curve_context(
+        device_name="bias", result_dir=str(tmp_path), preview_rows=1
+    )
 
     assert ctx.params == pytest.approx((3.4, 0.9, 0.6))
     assert ctx.flux_period == pytest.approx(1.0)
@@ -97,16 +98,17 @@ def test_load_t1_purcell_params_reads_dispersive_bare_rf_and_g(tmp_path) -> None
             "point": [None],
             "at": ["2026-10-10T00:00:00Z"],
             "source": ["manual"],
-            "dev_value": [0.0],
-            "dev_unit": ["A"],
+            "devices": [{"bias": {"value": 0.0, "value_unit": "A"}}],
             "flux_int": [0.5],
             "flux_period": [1.0],
             "freq_mhz": [350.0],
             "t1_us": [40.0],
         }
-    ).to_json(tmp_path / "samples.jsonl", orient="records", lines=True)
+    ).to_json(tmp_path / "records.jsonl", orient="records", lines=True)
 
-    ctx = load_t1_curve_context(result_dir=str(tmp_path), preview_rows=1)
+    ctx = load_t1_curve_context(
+        device_name="bias", result_dir=str(tmp_path), preview_rows=1
+    )
     purcell = load_t1_purcell_params(ctx, kappa_ghz=14.8e-3)
 
     assert purcell.kappa_ghz == pytest.approx(14.8e-3)
@@ -363,13 +365,13 @@ def test_build_t1_channel_curves_uses_uniform_flux_grid() -> None:
 
 def _synthetic_calibration(samples: pd.DataFrame) -> T1FluxCalibration:
     context = _synthetic_context(samples)
-    resolution = resolve_sample_flux(
-        samples, fallback_frame=SampleFluxFrame("A", 0.5, 1.0)
+    resolution = resolve_record_flux(
+        samples, fallback_frame=RecordFluxFrame("A", 0.5, 1.0)
     )
     return T1FluxCalibration(
         context=context,
         resolution=resolution,
-        fallback_frame=SampleFluxFrame("A", 0.5, 1.0),
+        fallback_frame=RecordFluxFrame("A", 0.5, 1.0),
         t1_df=samples,
         freq_rows=samples,
         summary_table=pd.DataFrame(),
@@ -380,7 +382,7 @@ def _synthetic_context(samples: pd.DataFrame) -> T1CurveContext:
     return T1CurveContext(
         result_dir="/tmp/result",
         image_dir="/tmp/result/t1_curve",
-        samples_filename="samples.jsonl",
+        samples_filename="records.jsonl",
         params=(3.4, 0.9, 0.6),
         flux_half=0.0,
         flux_int=0.5,
@@ -468,7 +470,7 @@ def test_t1_unresolved_flux_rows_fail_fast() -> None:
     )
     context = _synthetic_context(samples)
 
-    with pytest.raises(SampleTableV2Error, match="unable to resolve flux"):
+    with pytest.raises(RecordTableV2Error, match="unable to resolve flux"):
         calibrate_t1_flux(context, fallback_frame_unit="A")
 
 

@@ -321,9 +321,8 @@ Key 使用原生結果欄位名，recipe／workflow 依這些欄位讀取，不�
 Converter 將非有限數值轉為 null，Live RPC 的 `invalid` 列出路徑。
 保存文件只含 pane、parameters、summary，不保存 invalid；重開存檔只看得到 null。
 
-`SampleWriteback(..., coordinate_device="$qubit.flux_source")` 在 proposal 原地宣告座標來源；
-mux 使用 `"$mux.flux_source"`。Writeback owner 只以固定 parameters 與 Run device snapshot 解析，
-缺證據時保留 unavailable 原因，不查 live 裝置。
+`RecordWriteback(..., record=...)` 只提出 adapter 組裝的 JSON object。
+框架不解析內容或補座標。格式由 adapter 間的 policy 決定，見 [Record policy](#record-policy)。
 
 完整 callback 簽名見 [adapter hooks](../../lib/zcu_tools/gui/app/measure/adapter/hooks.py)。
 兩個 flux_dep adapters 共用 Qt-free flux_pick_plugin 與 Qt-only flux_pick_frontend，
@@ -353,6 +352,32 @@ cfg 校正值，由各 adapter 呼叫 core，再把同次 cfg 與純 Result 配�
 `singleshot/len_rabi`在analysis pane提供`decay: bool`，預設啟用衰減包絡；
 此選擇不屬於量測cfg，不改變len Rabi的raw-IQ acquisition。
 `singleshot/amp_rabi`共用Len Rabi的raw-IQ joint fit，固定無衰減／零相位，提供Initial State與相同的IQ校準writeback。
+
+## Record policy
+
+T1、T2Echo、T2Ramsey、TwoTone frequency 與對應的四個 mux adapter 共用下列記錄格式。
+每筆 `record` 包含：
+
+- `devices` 是 Run 開始前的完整 `metadata.device_snapshot` 深拷貝，必須為 dict。
+  裝置名稱與全部設定原樣保存，包含 global coil、各 qubit 的 local 線與 RF 裝置。
+  DC 裝置保留 `value`／`value_unit`，RF 裝置保留 `freq_Hz`／`power_dBm`，不壓成單一值。
+- 分析純量沿原有名稱與單位，例如 `freq_mhz`、`t1_us`、`t2e_us`、`t2r_us` 與對應誤差。
+- `run` 包含來源 `run_id` 與 `experiment`，兩者都取自同一次 RunMetadata。
+  Append owner 另補 `run_id`、`point`、`at` 與 accepted event 的 `source` 信封。
+
+Adapter 只讀 `req.run_result.metadata`，不查目前 alias 或 live 裝置。
+缺 metadata 或 `device_snapshot is None` 時，adapter 記 `logging.warning("no device snapshot")` 並省略 record proposal。
+其他 parameter/module proposals 保留。空 dict 表示已知沒有連線裝置，照實記錄。
+記錄 append 到 `entry.records(target)` 的 `records/components/<target>.jsonl`。
+這個目錄與 `records/ledger.jsonl` 的事件信封分開，不讀舊 samples 路徑。
+
+讀取端明示 `device_name`，由 `resources.record_table.project_device_coordinates` 將
+`devices[device_name].value/value_unit` 投影成分析用的 `dev_value/dev_unit`。
+缺所選裝置、值或單位時 fail-fast，不猜第一台裝置，也不讀舊 flat 欄位當作 fallback。
+投影不改 JSONL。選一台裝置不代表合成了多條線的物理 flux；多裝置換算仍由分析 caller 決定。
+
+使用者 2026-10-25：「2mux版的比較複雜，有兩個flux儀器都可能貢獻，我的想法是，兩個儀器都紀錄，其餘都同意」。
+其後裁定：「我認為框架應該對SampleWriteback保持中立無知，可能可以叫RecordWriteback也說不定，行為就是append一個格式不拘的json到紀錄的jsonl中，格式由adapter間的隱式policy決定，資訊也尤其組裝，當然文檔與註解要寫這個policy好讓人維護」。
 
 ## Operator guide 格式
 

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Sequence
+from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TypeAlias
@@ -18,7 +20,7 @@ from zcu_tools.gui.app.measure.adapter import (
     Analysis,
     AnalyzeRequest,
     ParameterWriteback,
-    SampleWriteback,
+    RecordWriteback,
     WritebackItem,
     WritebackRequest,
 )
@@ -106,7 +108,7 @@ def _analyze(
 def _get_writeback_items(
     req: WritebackRequest[MuxFreqRunResult, MuxFreqAnalyzeResult],
 ) -> Sequence[WritebackItem]:
-    """Propose frequency, linewidth and bias-sample updates for successful fits.
+    """Propose frequency, linewidth and bias-record updates for successful fits.
 
     req supplies measured spectra, fit results and their original qubit
     mapping. Missing mapping returns no proposals; mismatched names raise.
@@ -114,6 +116,14 @@ def _get_writeback_items(
     using the Run/Load destinations rather than the current Form selection.
     """
     # Use the measured qubit mapping, not a later Form or alias selection.
+    metadata = req.run_result.metadata
+    devices = (
+        None
+        if metadata is None or metadata.device_snapshot is None
+        else deepcopy(dict(metadata.device_snapshot))
+    )
+    if devices is None:
+        logging.warning("no device snapshot")
     snapshot = req.run_result.cfg
     names = None if snapshot is None else tuple(t.name for t in snapshot.tones)
     qubits = captured_qubits(req.ctx.parameters, names)
@@ -141,17 +151,26 @@ def _get_writeback_items(
                     description="Qubit linewidth FWHM (MHz)",
                     proposed_value=outcome.fwhm,
                 ),
-                SampleWriteback(
+            ]
+        )
+        if metadata is not None and devices is not None:
+            row_items.append(
+                RecordWriteback(
                     target_name=qubit,
-                    description="Qubit frequency sample at captured bias",
-                    coordinate_device="$mux.flux_source",
-                    proposed_value={
+                    description="Qubit frequency record at captured bias",
+                    record={
+                        "devices": {
+                            name: deepcopy(info) for name, info in devices.items()
+                        },
+                        "run": {
+                            "run_id": metadata.run_id,
+                            "experiment": metadata.experiment,
+                        },
                         "freq_mhz": outcome.freq,
                         "freq_err_mhz": outcome.freq_err,
                     },
-                ),
-            ]
-        )
+                )
+            )
         for item in row_items:
             item.element = ElementIdentity(index=outcome.index, name=qubit)
         items.extend(row_items)

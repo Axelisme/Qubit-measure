@@ -1,7 +1,7 @@
 """Flux-first SampleMerge: merge v2 JSONL samples into one authoritative target frame.
 
-Each source is a flat v2 JSONL (``validate_sample_table_v2``). Per-row flux is
-resolved through the shared provenance SSOT ``resolve_sample_flux`` (explicit
+Each source is a flat v2 JSONL (``validate_record_table_v2``). Per-row flux is
+resolved through the shared provenance SSOT ``resolve_record_flux`` (explicit
 ``flux`` -> row ``flux_int``/``flux_period`` frame -> caller-declared
 ``fallback_frame``), shifted by the caller's explicit integer branch offset,
 optionally corrected by one small batch offset fitted against the target f01
@@ -30,19 +30,20 @@ from scipy.optimize import minimize_scalar
 from zcu_tools.resources.qubit_params import (
     QubitParams,
 )
-from zcu_tools.resources.sample_table import (
+from zcu_tools.resources.record_table import (
     DEV_UNIT_COLUMN,
     DEV_VALUE_COLUMN,
     FLUX_COLUMN,
     FLUX_INT_COLUMN,
     FLUX_PERIOD_COLUMN,
-    SAMPLE_COORDINATE_COLUMNS,
+    RECORD_COORDINATE_COLUMNS,
     DeviceValueUnit,
-    JsonlSampleTable,
-    SampleFluxFrame,
-    SampleFluxResolution,
-    resolve_sample_flux,
-    validate_sample_table_v2,
+    JsonlRecordTable,
+    RecordFluxFrame,
+    RecordFluxResolution,
+    project_device_coordinates,
+    resolve_record_flux,
+    validate_record_table_v2,
 )
 
 from .flux import predict_f01_mhz
@@ -73,7 +74,7 @@ class FluxFrame:
     flux_int: float
     flux_period: float
     label: str
-    _sample_frame: SampleFluxFrame = field(init=False, repr=False, compare=False)
+    _sample_frame: RecordFluxFrame = field(init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         if (
@@ -92,7 +93,7 @@ class FluxFrame:
         object.__setattr__(
             self,
             "_sample_frame",
-            SampleFluxFrame(self.dev_unit, self.flux_int, self.flux_period),
+            RecordFluxFrame(self.dev_unit, self.flux_int, self.flux_period),
         )
 
     @classmethod
@@ -145,7 +146,10 @@ class FluxFrame:
 
 @dataclass(frozen=True, slots=True)
 class SampleSource:
-    """One v2 sample JSONL feeding the merge.
+    """One adapter record JSONL feeding the merge.
+
+    device_name explicitly selects devices[device_name].value/value_unit before
+    flat v2 analysis. Missing device facts fail without a flat-value fallback.
 
     ``fallback_frame`` resolves migrated rows that carry neither explicit
     ``flux`` nor a row frame (its unit must match the row ``dev_unit``).
@@ -156,6 +160,7 @@ class SampleSource:
     """
 
     path: str | Path
+    device_name: str
     label: str | None = None
     fallback_frame: FluxFrame | None = None
     integer_flux_offset: int = 0
@@ -221,7 +226,7 @@ class _MergedSource:
 
     source: SampleSource
     raw: pd.DataFrame
-    resolution: SampleFluxResolution
+    resolution: RecordFluxResolution
     flux_final: NDArray[np.float64]
     dev_values: NDArray[np.float64]
     batch: BatchFluxOffsetResult
@@ -235,12 +240,15 @@ def merge_sample_sources(
     """Merge v2 sample tables into one authoritative ``target_frame``.
 
     The pipeline per source is: resolve flux with shared provenance
-    (``resolve_sample_flux``) -> apply the caller-declared
+    (``resolve_record_flux``) -> apply the caller-declared
     ``integer_flux_offset`` -> optionally fit one small batch offset against
     the target f01 model -> map to the target frame's ``dev_value``. Units and
     integer branches are never inferred; unresolved rows fail fast with their
     indexes. Source JSONL files are never modified.
 
+    The output is an analysis artifact, not an adapter record input. Original
+    devices remain source evidence, not target-frame coordinates; writing the
+    output does not make it eligible for re-import through raw-record APIs.
     The returned ``merged`` table is a complete flat v2 coordinate
     (``flux``, ``dev_value``, ``dev_unit``, ``flux_int``, ``flux_period``)
     followed by the caller-owned measurement columns. Per-row provenance and
@@ -254,9 +262,11 @@ def merge_sample_sources(
 
     for source in tuple(sources):
         source_path = Path(source.path)
-        raw = JsonlSampleTable(source_path).read()
-        validate_sample_table_v2(raw, allow_empty=True)
-        resolution = resolve_sample_flux(
+        raw = project_device_coordinates(
+            JsonlRecordTable(source_path).read(), device_name=source.device_name
+        )
+        validate_record_table_v2(raw, allow_empty=True)
+        resolution = resolve_record_flux(
             raw,
             fallback_frame=_as_sample_frame(source.fallback_frame),
         )
@@ -400,10 +410,10 @@ def plot_sample_merge_f01_diagnostics(
     return fig, (ax_curve, ax_residual)
 
 
-def _as_sample_frame(frame: FluxFrame | None) -> SampleFluxFrame | None:
+def _as_sample_frame(frame: FluxFrame | None) -> RecordFluxFrame | None:
     if frame is None:
         return None
-    return SampleFluxFrame(frame.dev_unit, frame.flux_int, frame.flux_period)
+    return RecordFluxFrame(frame.dev_unit, frame.flux_int, frame.flux_period)
 
 
 def _fit_batch_offset(
@@ -508,7 +518,7 @@ def _make_output_table(
         }
     )
     measurement_columns = [
-        column for column in raw.columns if column not in SAMPLE_COORDINATE_COLUMNS
+        column for column in raw.columns if column not in RECORD_COORDINATE_COLUMNS
     ]
     for column in measurement_columns:
         output[column] = raw[column].to_numpy()

@@ -26,11 +26,11 @@ from zcu_tools.notebook.analysis.t2_curve import (
     prepare_t2_dephasing_data,
     thermal_photon_gamma_phi_per_us,
 )
-from zcu_tools.resources.sample_table import (
-    SampleFluxFrame,
-    SampleFluxResolution,
-    SampleTableV2Error,
-    resolve_sample_flux,
+from zcu_tools.resources.record_table import (
+    RecordFluxFrame,
+    RecordFluxResolution,
+    RecordTableV2Error,
+    resolve_record_flux,
 )
 
 _KAPPA_OVER_2PI_MHZ = 14.754
@@ -70,7 +70,7 @@ def test_make_t2_fit_init_can_select_partial_mechanisms() -> None:
 
 
 def test_t2_curve_analysis_config_defaults_match_weighted_fit_contract() -> None:
-    config = T2CurveAnalysisConfig(result_dir="/tmp/result")
+    config = T2CurveAnalysisConfig(device_name="bias", result_dir="/tmp/result")
 
     assert config.use_weighted_points_only is False
     assert config.T1_error_policy.fallback_error == pytest.approx(1.0)
@@ -446,7 +446,7 @@ def test_t2_unresolved_flux_rows_fail_fast() -> None:
         available_columns=tuple(samples.columns),
     )
 
-    with pytest.raises(SampleTableV2Error, match="unable to resolve flux"):
+    with pytest.raises(RecordTableV2Error, match="unable to resolve flux"):
         calibrate_t2_flux(context, fallback_frame_unit="A")
 
 
@@ -642,11 +642,11 @@ def _synthetic_dephasing_data(
     )
     calibration = T2FluxCalibration(
         context=context,
-        resolution=SampleFluxResolution(
+        resolution=RecordFluxResolution(
             values=np.asarray(fluxs, dtype=np.float64),
             sources=("row-frame",) * len(fluxs),
         ),
-        fallback_frame=SampleFluxFrame("A", 0.5, 1.0),
+        fallback_frame=RecordFluxFrame("A", 0.5, 1.0),
         t2e_df=pd.DataFrame(),
         t2r_df=pd.DataFrame(),
         t2e_mask=np.zeros(0, dtype=bool),
@@ -723,13 +723,13 @@ def _synthetic_calibration(samples: pd.DataFrame) -> T2FluxCalibration:
         samples_preview=samples,
         available_columns=tuple(samples.columns),
     )
-    resolution = resolve_sample_flux(
-        samples, fallback_frame=SampleFluxFrame("A", 0.5, 1.0)
+    resolution = resolve_record_flux(
+        samples, fallback_frame=RecordFluxFrame("A", 0.5, 1.0)
     )
     return T2FluxCalibration(
         context=context,
         resolution=resolution,
-        fallback_frame=SampleFluxFrame("A", 0.5, 1.0),
+        fallback_frame=RecordFluxFrame("A", 0.5, 1.0),
         t2e_df=samples,
         t2r_df=pd.DataFrame(),
         t2e_mask=np.ones(len(samples), dtype=bool),

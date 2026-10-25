@@ -19,14 +19,14 @@ from zcu_tools.notebook.analysis.fit_tools import (
     write_merged_samples,
     write_sample_merge_report,
 )
-from zcu_tools.resources.sample_table import (
+from zcu_tools.resources.record_table import (
     DEV_UNIT_COLUMN,
     DEV_VALUE_COLUMN,
     FLUX_COLUMN,
     FLUX_INT_COLUMN,
     FLUX_PERIOD_COLUMN,
-    SAMPLE_COORDINATE_COLUMNS,
-    SampleTableV2Error,
+    RECORD_COORDINATE_COLUMNS,
+    RecordTableV2Error,
 )
 
 
@@ -57,8 +57,10 @@ def _write_v2_jsonl(
     measurements: Mapping[str, Sequence[object] | NDArray[np.float64]] | None = None,
 ) -> Path:
     frame: dict[str, object] = {
-        DEV_VALUE_COLUMN: list(dev_values),
-        DEV_UNIT_COLUMN: [dev_unit] * len(dev_values),
+        "devices": [
+            {"bias": {"value": float(value), "value_unit": dev_unit}}
+            for value in dev_values
+        ],
     }
     if flux is not None:
         frame[FLUX_COLUMN] = np.asarray(flux, dtype=np.float64).tolist()
@@ -193,7 +195,7 @@ def test_merge_requires_exactly_one_target_identity(tmp_path: Path) -> None:
         dev_unit="A",
         flux=np.array([0.5, 0.55]),
     )
-    sources = (SampleSource(path=source_path, label="s"),)
+    sources = (SampleSource(device_name="bias", path=source_path, label="s"),)
 
     with pytest.raises(TypeError):
         # tolerated: Verify omission of the required target_frame is rejected.
@@ -229,12 +231,14 @@ def test_merge_explicit_flux_provenance_and_target_output(tmp_path: Path) -> Non
 
     result = merge_sample_sources(
         target_frame=target,
-        sources=(SampleSource(path=source_path, label="source_batch"),),
+        sources=(
+            SampleSource(device_name="bias", path=source_path, label="source_batch"),
+        ),
     )
 
     merged = result.merged
-    assert list(merged.columns[: len(SAMPLE_COORDINATE_COLUMNS)]) == list(
-        SAMPLE_COORDINATE_COLUMNS
+    assert list(merged.columns[: len(RECORD_COORDINATE_COLUMNS)]) == list(
+        RECORD_COORDINATE_COLUMNS
     )
     np.testing.assert_allclose(merged[FLUX_COLUMN], fluxs)
     np.testing.assert_allclose(merged[DEV_VALUE_COLUMN], source_values)
@@ -280,7 +284,9 @@ def test_merge_row_frame_provenance(tmp_path: Path) -> None:
 
     result = merge_sample_sources(
         target_frame=target,
-        sources=(SampleSource(path=source_path, label="row_batch"),),
+        sources=(
+            SampleSource(device_name="bias", path=source_path, label="row_batch"),
+        ),
     )
 
     np.testing.assert_allclose(result.merged[FLUX_COLUMN], fluxs)
@@ -314,7 +320,12 @@ def test_merge_fallback_frame_provenance(tmp_path: Path) -> None:
     result = merge_sample_sources(
         target_frame=target,
         sources=(
-            SampleSource(path=source_path, label="migrated", fallback_frame=fallback),
+            SampleSource(
+                device_name="bias",
+                path=source_path,
+                label="migrated",
+                fallback_frame=fallback,
+            ),
         ),
     )
 
@@ -341,10 +352,14 @@ def test_merge_fallback_frame_unit_mismatch_fails(tmp_path: Path) -> None:
         dev_unit="V",
     )
 
-    with pytest.raises(SampleTableV2Error, match="unable to resolve flux"):
+    with pytest.raises(RecordTableV2Error, match="unable to resolve flux"):
         merge_sample_sources(
             target_frame=target,
-            sources=(SampleSource(path=source_path, fallback_frame=fallback),),
+            sources=(
+                SampleSource(
+                    device_name="bias", path=source_path, fallback_frame=fallback
+                ),
+            ),
         )
 
 
@@ -357,10 +372,10 @@ def test_merge_unresolved_rows_fail_with_indexes(tmp_path: Path) -> None:
         flux=np.array([0.5, np.nan, np.nan]),
     )
 
-    with pytest.raises(SampleTableV2Error, match=r"row\(s\) \[1, 2\]"):
+    with pytest.raises(RecordTableV2Error, match=r"row\(s\) \[1, 2\]"):
         merge_sample_sources(
             target_frame=target,
-            sources=(SampleSource(path=source_path),),
+            sources=(SampleSource(device_name="bias", path=source_path),),
         )
 
 
@@ -372,10 +387,10 @@ def test_merge_rejects_legacy_columns(tmp_path: Path) -> None:
         dev_unit="A",
         measurements={"calibrated mA": [1.0, 2.0], "freq_mhz": [410.0, 430.0]},
     )
-    with pytest.raises(SampleTableV2Error, match="calibrated mA"):
+    with pytest.raises(RecordTableV2Error, match="calibrated mA"):
         merge_sample_sources(
             target_frame=target,
-            sources=(SampleSource(path=legacy_path),),
+            sources=(SampleSource(device_name="bias", path=legacy_path),),
         )
 
     flux_alias_path = _write_v2_jsonl(
@@ -384,10 +399,10 @@ def test_merge_rejects_legacy_columns(tmp_path: Path) -> None:
         dev_unit="A",
         measurements={"Flux": [0.5, 0.55]},
     )
-    with pytest.raises(SampleTableV2Error, match="Flux"):
+    with pytest.raises(RecordTableV2Error, match="Flux"):
         merge_sample_sources(
             target_frame=target,
-            sources=(SampleSource(path=flux_alias_path),),
+            sources=(SampleSource(device_name="bias", path=flux_alias_path),),
         )
 
 
@@ -431,8 +446,8 @@ def test_merge_a_and_v_sources_into_one_target_frame(tmp_path: Path) -> None:
     result = merge_sample_sources(
         target_frame=target,
         sources=(
-            SampleSource(path=a_path, label="a_source"),
-            SampleSource(path=v_path, label="v_source"),
+            SampleSource(device_name="bias", path=a_path, label="a_source"),
+            SampleSource(device_name="bias", path=v_path, label="v_source"),
         ),
     )
 
@@ -487,10 +502,18 @@ def test_integer_flux_offset_aligns_equivalent_branches(tmp_path: Path) -> None:
     result = merge_sample_sources(
         target_frame=target,
         sources=(
-            SampleSource(path=zero_path, label="zero"),
-            SampleSource(path=minus_half_path, label="plus_one", integer_flux_offset=1),
+            SampleSource(device_name="bias", path=zero_path, label="zero"),
             SampleSource(
-                path=plus_half_path, label="minus_one", integer_flux_offset=-1
+                device_name="bias",
+                path=minus_half_path,
+                label="plus_one",
+                integer_flux_offset=1,
+            ),
+            SampleSource(
+                device_name="bias",
+                path=plus_half_path,
+                label="minus_one",
+                integer_flux_offset=-1,
             ),
         ),
     )
@@ -525,7 +548,9 @@ def test_merge_does_not_guess_integer_branch_without_offset(tmp_path: Path) -> N
 
     result = merge_sample_sources(
         target_frame=target,
-        sources=(SampleSource(path=minus_half_path, label="no_offset"),),
+        sources=(
+            SampleSource(device_name="bias", path=minus_half_path, label="no_offset"),
+        ),
     )
 
     # No caller-declared offset: the resolved -0.5 branch is preserved as-is.
@@ -542,7 +567,7 @@ def test_integer_flux_offset_must_be_an_int(tmp_path: Path) -> None:
     )
     with pytest.raises(ValueError, match="integer_flux_offset must be an int"):
         # tolerated: Reject float offsets even when numerically integral.
-        SampleSource(path=source_path, integer_flux_offset=1.0)  # pyright: ignore[reportArgumentType]
+        SampleSource(device_name="bias", path=source_path, integer_flux_offset=1.0)  # pyright: ignore[reportArgumentType]
 
 
 def test_merge_fits_one_batch_flux_offset_against_target_model(tmp_path: Path) -> None:
@@ -566,6 +591,7 @@ def test_merge_fits_one_batch_flux_offset_against_target_model(tmp_path: Path) -
         target_frame=target,
         sources=(
             SampleSource(
+                device_name="bias",
                 path=source_path,
                 label="batch",
                 fit_batch_flux_offset=True,
@@ -591,6 +617,7 @@ def test_sample_source_rejects_manual_flux_offset(tmp_path: Path) -> None:
     """The unapproved manual offset field is not part of the Interface."""
     with pytest.raises(TypeError):
         SampleSource(
+            device_name="bias",
             path=str(tmp_path / "samples.csv"),
             label="manual",
             # tolerated: Verify the removed manual_flux_offset argument is rejected.
@@ -622,6 +649,7 @@ def test_batch_fit_cannot_shift_flux_across_integer_branch(tmp_path: Path) -> No
         target_frame=target,
         sources=(
             SampleSource(
+                device_name="bias",
                 path=source_path,
                 label="branch",
                 integer_flux_offset=0,
@@ -657,7 +685,7 @@ def test_write_merged_samples_never_overwrites_a_source_csv(
     )
     result = merge_sample_sources(
         target_frame=target,
-        sources=(SampleSource(path=source_path, label="s"),),
+        sources=(SampleSource(device_name="bias", path=source_path, label="s"),),
     )
     original_bytes = source_path.read_bytes()
 
@@ -698,7 +726,7 @@ def test_write_guards_protect_zero_row_jsonl_sources(
 
     result = merge_sample_sources(
         target_frame=target,
-        sources=(SampleSource(path=source_path, label="empty"),),
+        sources=(SampleSource(device_name="bias", path=source_path, label="empty"),),
     )
     assert len(result.merged) == 0
     assert list(result.summary_table["path"]) == [str(source_path.resolve())]
