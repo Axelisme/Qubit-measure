@@ -1,6 +1,6 @@
 # `zcu_tools.experiment` — 實驗層
 
-**Last updated:** 2026-10-24
+**Last updated:** 2026-10-25
 
 **讀者：** framework-dev。實驗介面、Run 資料、持久化映射與裝置操作邊界。
 
@@ -78,6 +78,8 @@ common-origin carrier phases to pulse-local phases. Environment planners supply
 physical models, evolution and sampling.
 
 ## 實驗介面與資料
+
+`RunMetadata.run_id` 與 `validate_run_id` 共用三種身分格式：單次實驗的 timestamp＋id6、workflow root 的 32 位小寫 hex，以及 root 加六位 iteration／正整數 attempt 的 workflow operation。合併輸出 `merged.h5` 代表整個 workflow，使用未加後綴的 root，時間與 completion 來自 manifest。非法格式仍拒絕，身分契約見 [ADR-0063](../../../docs/adr/0063-persistence-ownership.md#run-輸出位置與-writer-權責)。
 
 `artifacts.AnalysisDocument` 擁有 analysis JSON 信封。`to_doc()` 回傳可放進通用容器 `docs/analysis` 的有限 JSON object，容器不解釋其鍵。既有 artifact encoder 仍產 `analysis/<pane>.json`，不改 SaveLayout 或 ledger。選用 AnalysisDocument 時不載入 artifact saver。
 
