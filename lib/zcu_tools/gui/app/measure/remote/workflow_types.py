@@ -17,13 +17,33 @@ class EncodedRecordReply(TypedDict):
     error: str | None
 
 
+class AcquisitionReply(TypedDict):
+    """One observed acquisition, in native completion order.
+
+    requested_rounds is the configured positive count. completed_rounds counts
+    completed rounds in the final producer attempt, not discarded retries.
+    attempts counts producer calls, including failures; zero means no call.
+    early_stopped records a data-condition stop before requested_rounds.
+    stop_value is its finite scalar in caller-defined units, or None when absent.
+    """
+
+    requested_rounds: int
+    completed_rounds: int
+    attempts: int
+    early_stopped: bool
+    stop_value: float | None
+
+
 class OperationReply(TypedDict):
     """One native attempt; UTC timestamps are ISO text, snapshot is JSON or None.
 
     kind identifies the operation helper; attempt counts actual executor starts
     within this commit scope. iteration counts successful commit scopes from one,
     independently of directory allocation. stopped is the completion-time token
-    bit. outcome/reason retain native delivery classification.
+    bit. outcome/reason retain native delivery classification. name is the
+    caller's label, or None when unnamed or unrecorded. acquisitions retains
+    observed acquisitions in completion order, including retries and failures;
+    an empty list means none were recorded.
     """
 
     kind: OperationKind
@@ -35,6 +55,8 @@ class OperationReply(TypedDict):
     outcome: OperationOutcome
     reason: str | None
     stopped: bool
+    name: str | None
+    acquisitions: list[AcquisitionReply]
 
 
 class RecordReply(TypedDict):
@@ -125,6 +147,17 @@ def project_operation(operation: OperationFacts) -> OperationReply:
         "outcome": operation.outcome,
         "reason": operation.reason,
         "stopped": operation.stopped,
+        "name": operation.name,
+        "acquisitions": [
+            {
+                "requested_rounds": acquisition.requested_rounds,
+                "completed_rounds": acquisition.completed_rounds,
+                "attempts": acquisition.attempts,
+                "early_stopped": acquisition.early_stopped,
+                "stop_value": acquisition.stop_value,
+            }
+            for acquisition in operation.acquisitions
+        ],
     }
 
 
