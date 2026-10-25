@@ -6,6 +6,20 @@
 
 `singleshot_rabi` 提供 raw-IQ sweep 的 pooled PCA、joint population fitting 與 circle-classification calibration。它接收純數值，回傳 physical parameters、population arrays 與 optimizer diagnostics。Cfg 讀取與繪圖由實驗 caller 負責。Pulse length 與 gain 使用相同 coordinate 契約，gain caller 明確關閉 decay。
 
+## Peak candidates
+
+`detect_peaks(detune, signal, *, min_prominence=0.2, min_distance=0.0)`
+接收同形狀、有限的 float64 一維座標與正向投影訊號。座標須嚴格單調，至少兩點。
+`min_prominence` 是訊號 ptp 的比例，`min_distance` 使用座標單位。
+結果是依 prominence 降序排列的 `PeakCandidate` 列表。
+每個候選提供取樣中心、原訊號高度、半 prominence 寬度與 prominence。
+平坦訊號回傳空列表，無效輸入 raise ValueError，不修改輸入。
+
+端點背景使用窗內最小值。若半高交點落在窗外，候選保留 `truncated=True`，
+寬度只記窗內可觀察部分，不外推完整線寬。
+工具不選主峰、不擬合模型，也不決定候選能否用於校準。
+負向特徵須由 caller 先翻轉。Caller 決定投影方式、候選選擇、局部擬合與接受門檻。
+
 ## fitting helpers
 
 Cosine 與 damped-cosine fitting 在 optimizer 內不限制 phase 的週期表示，輸出才轉到

@@ -2,7 +2,7 @@
 
 **Readers:** operator, agent. Two-tone qubit spectroscopy: drives a qubit probe tone while reading out the resonator, sweeps the drive frequency, and fits the qubit response (Lorentzian or sinc) to extract the qubit transition frequency and its linewidth. Runs on real hardware. In first bring-up, run it after onetone/flux_dep has found `$qubit.flux_int` and onetone/freq has re-calibrated the resonator at that flux.
 
-**Last updated:** 2026-10-21
+**Last updated:** 2026-10-25
 
 After changing the parameter source, use Reset to recapture initial values. Refresh only updates sources and choices while preserving authored inputs; Reset can overwrite unsaved inputs.
 
@@ -13,6 +13,21 @@ Open and Reset fill editable starting values from captured calibration. The freq
 ## Module slots
 
 The drive starts with a fresh 'qub_probe' constant pulse for spectroscopy. Readout uses the `$qubit.module.readout` slot captured at Open/Reset; an unset slot, missing module or unbound alias uses a fresh 'readout' template with a constant waveform. That fallback still needs its required parameter sources. Reset uses the optional `$qubit.module.reset` slot; an unset slot, missing module or unbound alias leaves it disabled and Valid. Init Pulse stays disabled.
+
+## Peak selection
+
+Analysis lists all candidates in `peaks`, ordered by prominence.
+Set `expected_center_mhz` to fit the nearest candidate. Leave it blank to fit the
+most prominent candidate. `min_prominence` defaults to 0.2 of projected signal
+peak-to-peak, and `min_distance_mhz` defaults to zero.
+Analysis fits the selected interval bounded halfway to neighbouring candidates.
+The Lorentzian fit starts from the detected positive peak's center and width.
+This avoids treating a broad peak's local median as background and fitting a dip.
+Dotted gray lines mark other candidates; the red line marks the fitted center.
+Candidate center and width are sampled estimates, not fitted frequency or FWHM.
+`truncated=True` means the scan clips a half-prominence crossing.
+Widen or recenter that scan before using its linewidth.
+No detected candidate produces an analysis failure, not a frequency estimate.
 
 ## Typical writeback
 
