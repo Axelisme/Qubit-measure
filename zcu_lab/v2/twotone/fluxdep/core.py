@@ -6,7 +6,7 @@ from typing import Annotated, ClassVar, Literal
 
 import numpy as np
 from numpy.typing import NDArray
-from zcu_tools.cfg_model import ConfigBase, FieldMeta
+from zcu_tools.cfg_model import ConfigBase, DeviceName, FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.v2.runtime.program_builder import AcquireOptions
@@ -64,7 +64,7 @@ class FreqFluxCfg(ConfigBase):
     qub_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Probe Pulse")]
     readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
     flux_dev: Annotated[
-        str,
+        DeviceName,
         FieldMeta(
             label="Flux Device",
             description="Name of the connected flux-bias device driven by the sweep.",

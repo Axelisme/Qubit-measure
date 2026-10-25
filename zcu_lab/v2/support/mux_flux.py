@@ -8,7 +8,7 @@ from typing import Annotated, Literal
 import numpy as np
 from numpy.typing import NDArray
 from pydantic import Field, StrictInt, model_validator
-from zcu_tools.cfg_model import ConfigBase, FieldMeta
+from zcu_tools.cfg_model import ConfigBase, DeviceName, FieldMeta
 from zcu_tools.experiment import (
     GroupedAxesSpec,
     GroupedLoadData,
@@ -79,7 +79,7 @@ class FluxLineCfg(FluxIdentityCfg):
     lines by point index, using the shared flux_expts, not a Cartesian product.
     """
 
-    flux_dev: str = Field(min_length=1)
+    flux_dev: DeviceName = Field(min_length=1)
     sweep: ToneRangeCfg | None = None
 
     def require_sweep(self) -> ToneRangeCfg:
@@ -196,7 +196,7 @@ class GlobalFluxCfg[S: (MuxFrequencyOffsetCfg, FluxFrequencyCfg)](
 ):
     """One global coil source and one finite native-unit flux sweep."""
 
-    flux_dev: str = Field(min_length=1)
+    flux_dev: DeviceName = Field(min_length=1)
     flux: SweepCfg
 
     @model_validator(mode="after")

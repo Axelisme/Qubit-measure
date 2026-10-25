@@ -9,7 +9,7 @@ from typing import Annotated, ClassVar, Literal, Self
 import numpy as np
 from numpy.typing import NDArray
 from pydantic import Field, model_validator
-from zcu_tools.cfg_model import ConfigBase, FieldMeta
+from zcu_tools.cfg_model import ConfigBase, DeviceName, FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
@@ -113,7 +113,7 @@ class IdleZZCfg(ConfigBase):
     ]
     delay: Annotated[SweepCfg, FieldMeta(label="Delay", unit="us")]
     dc_device: Annotated[
-        str | None,
+        DeviceName | None,
         FieldMeta(
             label="Coupler DC source",
             description="Direct device name; None disables the DC sweep.",

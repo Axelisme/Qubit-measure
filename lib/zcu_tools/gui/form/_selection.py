@@ -20,6 +20,7 @@ from ._structure import (
     list_model,
     model_types,
 )
+from ._suggestions import field_suggestions
 from .model import (
     FormEnv,
     FormModel,
@@ -109,11 +110,22 @@ def _option_path(model: type[BaseModel], path: FormPath) -> bool:
 def _local_options(
     model: type[BaseModel], env: FormEnv
 ) -> Mapping[FormPath, tuple[Option, ...]]:
+    suggestions: dict[FormPath, tuple[Option, ...]] = {}
+    for name, info in model.model_fields.items():
+        declaration = field_suggestions(info)
+        if declaration is None:
+            continue
+        options = declaration.options(env)
+        if type(None) in alternatives(info.annotation) and not any(
+            option.matches(None) for option in options
+        ):
+            options = (Option("None", None), *options)
+        suggestions[(name,)] = options
     declared = model.options(env) if issubclass(model, FormModel) else {}
     for path in declared:
         if not _option_path(model, path):
             raise ValueError(f"Unknown option field path: {path!r}")
-    return declared
+    return {**suggestions, **declared}
 
 
 def _automatic_options(

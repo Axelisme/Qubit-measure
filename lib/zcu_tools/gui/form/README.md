@@ -70,6 +70,8 @@ Editor 與 MCP 讀同一份 description options，照 label 列選項，透過�
 
 `FormState.prepare_write(batch, env)` 回 detached `FormInput`，完成與 write 相同的結構及來源 admission，不安裝、不通知。`install_input(candidate)` 只接受同 model，並重新執行宣告 admission，保留 base，內容改變才通知一次。Host 先 guard，再 prepare，再 install。候選只限同一 owner turn、current input 與 env 使用，不能跨 await、Reset 或 guard 邊界保存，也不是授權或 revision token。普通 `write` 使用同一流程。
 
+`InputSuggestions(options)` 宣告不驗證的純量建議值，provider 只讀固定 FormEnv，顯示與選取沿用 options，不使用 choices。清單外 raw 值仍由原 annotation 驗證。`FormState.run_command(path, "toggle_text", env)` 切換下拉與文字呈現，description 的 label 在 Edit as text 與 Choose from list 間切換。模式只存在 FormState，不寫 input、selections、dirty state 或保存格式。訂閱者收到一次呈現通知。Editor refresh 保留模式，FormState.reset 或宿主建立新 state 時回預設下拉。使用獨立資料命令 preparer 的宿主，先在既有 mutation guard 內呼叫 `run_presentation_command`，回 False 時才準備資料命令。
+
 FormEnv 借用 host 捕捉的 ParameterContext、library 與 detached `BaseDeviceInfo` snapshots（含 custom driver info）。共用工具只讀裝置名稱；需要特定 driver 欄位的表單自己用 `isinstance` 收窄。沒有 parameter capture 時仍可編輯 ordinary input 與純數學 expression；參數引用失敗會落在消費欄位的 error path。工具不寫來源、不 refresh 或 poll。領域來源 hook 可以讀固定 Spec；to_cfg 的 materialization 與 range 展開歸具體表單。
 
 FormState 的 subscriber 在 input 安裝後同步執行。個別 subscriber 故障記錄 traceback，不回滾 input，也不阻止後續 subscriber 或 host publication。Host 的 mutation guard 涵蓋安裝、editor subscriber 與 resource publication，同一通知期間可讀不可重入 mutation。

@@ -18,7 +18,12 @@ from zcu_tools.gui.form import (
     Option,
     field_error,
 )
-from zcu_tools.gui.form_adapter import ModuleInput, ModuleInputField, SweepInput
+from zcu_tools.gui.form_adapter import (
+    DeviceName,
+    ModuleInput,
+    ModuleInputField,
+    SweepInput,
+)
 from zcu_tools.program.v2.modules import ModuleCfgFactory as NativeModuleCfgFactory
 from zcu_tools.program.v2.modules import PulseCfg
 from zcu_tools.program.v2.modules.reset import (
@@ -71,7 +76,7 @@ class MISTPlanForm(FormModel):
     predictor: Annotated[FrequencyModelForm, Display(label="Fluxonium predictor")] = (
         Field(description="Captured physical model and native flux mapping")
     )
-    flux_dev: Annotated[str, Display(label="Flux device")] = Field(
+    flux_dev: Annotated[DeviceName, Display(label="Flux device")] = Field(
         min_length=1, description="Connected flux driver name"
     )
     flux_unit: Annotated[Literal["A", "V", "native"], Display(label="Flux unit")] = (

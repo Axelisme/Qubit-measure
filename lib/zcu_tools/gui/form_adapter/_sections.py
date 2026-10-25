@@ -45,6 +45,7 @@ from ._modules import (
 from ._seeds import persistent_input
 from ._types import annotated_type, branch_metadata, union_type
 from ._types import members as _members
+from .device_name import device_suggestions
 from .fixed_elements import FixedElementsForm
 from .log_points import (
     ExplicitIntegerPoints,
@@ -163,6 +164,9 @@ def _check_position_seed(node: FormNode, path: FormWritePath) -> None:
 
 def _field_info(info: FieldInfo) -> FieldInfo:
     result = deepcopy(info)
+    suggestions = device_suggestions(info)
+    if suggestions is not None:
+        result.metadata.append(suggestions)
     display = field_display(info)
     if SweepCfg in _members(info.annotation):
         display = (display or Display()).overlay(Display(decimals=None, selector=False))

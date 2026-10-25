@@ -60,6 +60,8 @@ T1、T2Echo、T2Ramsey、AmpRabi、LenRabi 與 GE 的 summary 包含 core-owned 
 - Reload experiments 會重建 concrete adapters 及 family helpers，但保留 framework `Adapter` 與 `support/measure/`。
   修改這些共用基礎層需重啟 app；concrete module import 不得有硬體或背景工作副作用。
 
+儀器名稱欄位使用 `from zcu_tools.cfg_model import DeviceName`，例如 `flux_dev: DeviceName` 或 `dc_device: DeviceName | None`。`FieldMeta` 仍提供 label 與 description。Form adapter 自動列出 Open／Reset 時捕捉的儀器名稱，不使用 choices 驗證 membership，清單外字串仍可提交。預設顯示下拉，欄位右鍵的 Edit as text／Choose from list 共用 `tab.run_cfg_command(tab_id, path, "toggle_text")`。切換保留目前值，模式不寫 cfg 或保存。Reset 及重建 FormState 的 Refresh sources 回預設下拉。手寫 workflow FormModel 改從 `zcu_tools.gui.form_adapter` import `DeviceName`，由 alias 附加同一 provider。Component 名稱與 library key 不使用此標記。
+
 ## 共用 lifecycle hooks
 
 作者宣告四種 frozen、keyword-only 值。完整簽名見

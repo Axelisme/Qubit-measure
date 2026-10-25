@@ -7,6 +7,7 @@ from typing import Literal
 
 import numpy as np
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+from zcu_tools.cfg_model import DeviceName
 from zcu_tools.experiment.metadata import RunSnapshot
 from zcu_tools.program.v2 import SweepCfg
 from zcu_tools.program.v2.modules import PulseCfg, PulseReadoutCfg
@@ -36,7 +37,7 @@ class T2Plan(BaseModel):
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
-    flux_dev: str = Field(min_length=1)
+    flux_dev: DeviceName = Field(min_length=1)
     flux_unit: Literal["A", "V", "native"]
     fluxes: tuple[float, ...]
     points: int = Field(default=51, ge=5)

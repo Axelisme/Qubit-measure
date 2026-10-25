@@ -8,7 +8,7 @@ import numpy as np
 from matplotlib.axes import Axes
 from numpy.typing import NDArray
 from pydantic import Field
-from zcu_tools.cfg_model import ConfigBase, FieldMeta
+from zcu_tools.cfg_model import ConfigBase, DeviceName, FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment, config
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
@@ -54,7 +54,7 @@ class FreqCfg(ConfigBase):
         ),
     ] = 1.0
     jpa_rf_dev: Annotated[
-        str | None,
+        DeviceName | None,
         FieldMeta(
             label="JPA RF device",
             description="Connected RF device name; None skips RF control.",
