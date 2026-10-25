@@ -22,13 +22,14 @@ from zcu_lab.v2.twotone.time_domain.t1.core import T1Cfg, T1Exp
 from zcu_lab.v2.twotone.time_domain.t2echo.core import T2EchoCfg, T2EchoExp
 from zcu_lab.workflows.common.analysis import DecayFit, analyze_t1, lifetime_rejection
 from zcu_lab.workflows.common.devices import set_flux
+from zcu_lab.workflows.common.relaxation import echo_relaxation
 from zcu_lab.workflows.common.saving import save_native
 from zcu_lab.workflows.overnight.analysis import analyze_t2echo
 from zcu_lab.workflows.overnight.trend import draw_overnight_trend
 
 
 class OvernightPlan(BaseModel):
-    """Monitor T1 and Echo drift at fixed flux without calibration or fit feedback.
+    """Monitor T1 and Echo drift at fixed flux without calibration.
 
     flux_dev names the connected driver; required flux_unit is A, V or native
     (Fake), with no conversion. flux is its absolute setpoint. outer_rounds counts
@@ -61,15 +62,17 @@ class OvernightPlan(BaseModel):
 
 
 class OvernightTunables(BaseModel):
-    """Resolve lifetime drift using fixed timing, averaging and fit acceptance.
+    """Set fixed delay grids, T1-based relaxation, averaging and fit acceptance.
 
     uniform selects the native T1 linear delay sweep; False concentrates delays
     within the same start/stop window around the decay. Echo is unchanged.
     reps/rounds are native acquisition averages, not outer monitoring rounds.
     t1_guess_us/t2_guess_us are positive delay estimates in microseconds.
-    sweep_factor times each guess gives its grid endpoint; relax_factor times
-    that guess gives its relaxation delay. No accepted fit changes any timing,
-    drive or readout. max_rel_err and max_fit_residual are strict dimensionless
+    sweep_factor times each guess gives its grid endpoint. T1 relax uses
+    relax_factor times t1_guess_us. Echo relax uses the accepted T1 from
+    this round, falling back to t1_guess_us. Both delays are floored at
+    relax_min_us. Fits do not change grids, drive or readout.
+    max_rel_err and max_fit_residual are strict dimensionless
     upper bounds on error/lifetime and normalized residual RMS; rejected fits
     keep raw data but omit accepted lifetime/error scalars. min_lifetime_points
     defaults to 5 fitted delays within [0, lifetime], including endpoints.
@@ -106,7 +109,10 @@ class OvernightTunables(BaseModel):
         default=4.0, gt=0, description="Grid endpoint / timing guess"
     )
     relax_factor: float = Field(
-        default=5.0, gt=0, description="Relaxation delay / timing guess"
+        default=5.0, gt=0, description="Relaxation delay / T1 estimate"
+    )
+    relax_min_us: float = Field(
+        default=1.0, ge=0, description="Relaxation lower bound in us"
     )
     min_lifetime_points: int = Field(
         default=5,
@@ -122,7 +128,7 @@ class OvernightTunables(BaseModel):
 
 
 class OvernightPoint(BaseModel):
-    """Summarize one T1/Echo pair to monitor lifetime drift without feedback.
+    """Summarize one T1/Echo pair and its T1-based Echo relaxation.
 
     round_index is zero-based; scheduled_start/actual_start are aware UTC
     wall-clock times. actual_start remains None until the wait completes.
@@ -133,7 +139,9 @@ class OvernightPoint(BaseModel):
     expected fitting failure diagnosis. Unexpected exceptions stop the run
     after finally commits the collected fields. t1_file/t2_file are relative
     native filenames for each completed member, or None after native failure;
-    rejected fits retain their raw acquisition filenames.
+    rejected fits retain their raw acquisition filenames. echo_relax_delay_us
+    is the Echo cfg relaxation in us; echo_t1_source is accepted_t1 for this
+    round's accepted T1, otherwise guess. Both stay None until Echo cfg setup.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -150,6 +158,8 @@ class OvernightPoint(BaseModel):
     t2_reason: str | None = None
     t1_file: str | None = None
     t2_file: str | None = None
+    echo_relax_delay_us: float | None = None
+    echo_t1_source: Literal["accepted_t1", "guess"] | None = None
     status: Literal["collecting", "completed", "skipped"] = "collecting"
 
 
@@ -256,7 +266,10 @@ async def overnight[C](
 ) -> None:
     """Acquire T1 then zero-detune Echo at fixed flux, committing complete pairs.
 
-    No calibration, context read or lifetime feedback occurs. A native Failed
+    Echo relax uses this round's accepted T1, or t1_guess_us if unavailable,
+    times relax_factor and floored at relax_min_us. T1 relax uses the same
+    floor with t1_guess_us. Fits do not alter grids, pulses, or later rounds.
+    No calibration or context read occurs. A native Failed
     outcome is recorded per member; the other member is still attempted.
     Completed members save before analysis. Partial records stopped without
     fitting; expected fitting failures record their reason without estimates.
@@ -313,7 +326,10 @@ async def overnight[C](
                 rounds=tun.current.rounds,
                 acquire_retry=tun.current.t1_acquire_retry,
                 earlystop_snr=tun.current.t1_earlystop_snr,
-                relax_delay=tun.current.relax_factor * tun.current.t1_guess_us,
+                relax_delay=max(
+                    tun.current.relax_min_us,
+                    tun.current.relax_factor * tun.current.t1_guess_us,
+                ),
                 pi_pulse=plan.qub_pulse,
                 readout=plan.readout,
                 length=SweepCfg(
@@ -328,13 +344,21 @@ async def overnight[C](
             ):
                 continue
             # Acquire zero-detune Echo even if the T1 member failed.
+            point_record.echo_relax_delay_us, point_record.echo_t1_source = (
+                echo_relaxation(
+                    (point_record.t1_us,),
+                    t1_guess_us=tun.current.t1_guess_us,
+                    relax_factor=tun.current.relax_factor,
+                    relax_min_us=tun.current.relax_min_us,
+                )
+            )
             t2_stop = tun.current.sweep_factor * tun.current.t2_guess_us
             t2_cfg = T2EchoCfg(
                 reps=tun.current.reps,
                 rounds=tun.current.rounds,
                 acquire_retry=tun.current.t2_acquire_retry,
                 earlystop_snr=tun.current.t2_earlystop_snr,
-                relax_delay=tun.current.relax_factor * tun.current.t2_guess_us,
+                relax_delay=point_record.echo_relax_delay_us,
                 pi_pulse=plan.qub_pulse,
                 pi2_pulse=plan.qub_pulse.with_updates(gain=plan.qub_pulse.gain / 2),
                 readout=plan.readout,

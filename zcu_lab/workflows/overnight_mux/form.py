@@ -226,10 +226,12 @@ class OvernightMuxTunablesForm(FormModel):
     Enter the longest qubit's T1/Echo guesses for the shared grids. uniform
     controls T1 sampling only; Echo retains its linear delay grid.
     reps/rounds average each native member, not monitoring pairs. Guesses are in
-    microseconds; sweep/relax factors multiply their fixed timing. Dimensionless
+    microseconds; sweep_factor fixes each grid. Both relax delays have a
+    relax_min_us floor. T1 uses relax_factor*t1_guess_us. Echo uses this round's
+    largest accepted participant T1, or t1_guess_us if none accepted.
     min_lifetime_points defaults to 5 acquired fitted delays in [0, lifetime].
-    Invalid quality rejects too. Fit thresholds accept summaries; no fit changes cfg. Expressions
-    stay in FormInput, while this model and native conversion carry ordinary values.
+    Invalid quality rejects too. Fits change only Echo relax, not grids or pulses.
+    Expressions stay in FormInput; native conversion carries ordinary values.
     """
 
     uniform: Annotated[bool, Display(label="Uniform (linear) sweep")] = Field(
@@ -266,7 +268,10 @@ class OvernightMuxTunablesForm(FormModel):
         default=4.0, gt=0, description="Delay endpoint / timing guess"
     )
     relax_factor: Annotated[float, Display(label="Relax factor")] = Field(
-        default=5.0, gt=0, description="Relaxation delay / timing guess"
+        default=5.0, gt=0, description="Relaxation delay / T1 estimate"
+    )
+    relax_min_us: Annotated[float, Display(label="Relax minimum", unit="µs")] = Field(
+        default=1.0, ge=0, description="Relaxation lower bound in us"
     )
     min_lifetime_points: Annotated[int, Display(label="Min lifetime points")] = Field(
         default=5,
@@ -295,6 +300,7 @@ class OvernightMuxTunablesForm(FormModel):
             t2_guess_us=self.t2_guess_us,
             sweep_factor=self.sweep_factor,
             relax_factor=self.relax_factor,
+            relax_min_us=self.relax_min_us,
             max_rel_err=self.max_rel_err,
             max_fit_residual=self.max_fit_residual,
         )

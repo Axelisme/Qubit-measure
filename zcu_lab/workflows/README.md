@@ -6,8 +6,8 @@
 
 - `coherence_fluxdep/`：逐個 flux 點校準，可選擇保存 singleshot GE 原始資料，再量測 T1、Ramsey 與 Hahn echo。
 - `mist_fluxdep/`：逐個 flux 點校準並掃描 MIST disturbance gain。
-- `overnight/`：在固定 flux 下按固定間隔量測 T1 與 Hahn echo，不做 feedback。
-- `overnight_mux/`：按固定間隔先同時量所有 participant 的 T1，再同時量 Hahn echo，不設 flux、不做校準或 feedback。
+- `overnight/`：在固定 flux 下按固定間隔量測 T1 與 Hahn echo，Echo 等待時間取本輪接受的 T1。
+- `overnight_mux/`：按固定間隔先同時量所有 participant 的 T1，再同時量 Hahn echo。Echo 等待時間取本輪接受 T1 的最大值，不設 flux、不做校準。
 
 每個目錄有 `workflow.py` 與 `form.py`；前兩項另有可直接執行的 `export.py`。
 `common/` 放多個 workflow 共用的實驗步驟與表單 helper。

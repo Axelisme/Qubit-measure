@@ -1,4 +1,4 @@
-"""Monitor simultaneous T1 and Hahn echo without flux changes or feedback."""
+"""Monitor simultaneous T1 and Hahn echo with T1-based recovery delays."""
 
 from datetime import UTC, datetime, timedelta
 from typing import Literal
@@ -11,6 +11,7 @@ from zcu_tools.program.v2.modules import MuxReadoutCfg, PulseCfg
 
 from zcu_lab.v2.mux.t1.core import MuxT1Cfg, MuxT1Exp, MuxT1ToneCfg
 from zcu_lab.v2.mux.t2echo.core import MuxEchoToneCfg, MuxT2EchoCfg, MuxT2EchoExp
+from zcu_lab.workflows.common.relaxation import echo_relaxation
 from zcu_lab.workflows.overnight_mux.analysis import record_echo, record_t1
 from zcu_lab.workflows.overnight_mux.trend import draw_overnight_mux_trend
 
@@ -49,16 +50,18 @@ class OvernightMuxPlan(BaseModel):
 
 
 class OvernightMuxTunables(BaseModel):
-    """Resolve lifetime drift using fixed timing, averaging and fit acceptance.
+    """Set fixed delay grids, T1-based relaxation, averaging and fit acceptance.
 
     uniform selects T1's linear delay grid; False concentrates delays within
     the same start/stop window. Echo always keeps its linear grid.
     reps/rounds are native acquisition averages, not outer monitoring rounds.
     t1_guess_us/t2_guess_us are positive longest-qubit delay estimates in
     microseconds. All participants share each member's delay grid.
-    sweep_factor times each guess gives its grid endpoint; relax_factor times
-    that guess gives its relaxation delay. No accepted fit changes any timing,
-    drive or readout. max_rel_err and max_fit_residual are strict dimensionless
+    sweep_factor times each guess gives its grid endpoint. T1 relax uses
+    relax_factor times t1_guess_us. Echo relax uses the largest accepted T1
+    among this round's participants, falling back to t1_guess_us. Both delays
+    are floored at relax_min_us. Fits do not change grids, drive or readout.
+    max_rel_err and max_fit_residual are strict dimensionless
     upper bounds on error/lifetime and normalized residual RMS; rejected fits
     keep raw data but omit accepted lifetime/error scalars. min_lifetime_points
     defaults to 5 fitted delays within [0, lifetime], including endpoints.
@@ -95,7 +98,10 @@ class OvernightMuxTunables(BaseModel):
         default=4.0, gt=0, description="Grid endpoint / timing guess"
     )
     relax_factor: float = Field(
-        default=5.0, gt=0, description="Relaxation delay / timing guess"
+        default=5.0, gt=0, description="Relaxation delay / T1 estimate"
+    )
+    relax_min_us: float = Field(
+        default=1.0, ge=0, description="Relaxation lower bound in us"
     )
     min_lifetime_points: int = Field(
         default=5,
@@ -135,6 +141,9 @@ class OvernightMuxPoint(BaseModel):
     failure, retained on partial/rejected fits. status stays collecting on an
     unexpected exception, skipped on iteration cancellation, completed otherwise
     (including fit/native failures). Finally commits already collected fields.
+    echo_relax_delay_us is the shared Echo cfg relaxation in us. echo_t1_source
+    is accepted_t1 for this round's largest accepted participant T1, otherwise
+    guess. Both stay None until Echo cfg setup.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -144,6 +153,8 @@ class OvernightMuxPoint(BaseModel):
     status: Literal["collecting", "completed", "skipped"] = "collecting"
     t1_file: str | None = None
     t2_file: str | None = None
+    echo_relax_delay_us: float | None = None
+    echo_t1_source: Literal["accepted_t1", "guess"] | None = None
     qubits: list[OvernightMuxQubit]
 
 
@@ -154,9 +165,12 @@ async def overnight_mux[C](
     """Measure all participants' T1, then all participants' zero-detune Echo.
 
     Averaging, T1 sampling and acceptance follow overnight. Enter the longest
-    qubit's T1/Echo guesses for their shared timing windows. No flux setup, context
-    read, calibration or fit feedback occurs. Save Completed raw before fitting;
-    partial results are not fitted. Native/fit failures do not skip Echo.
+    qubit's T1/Echo guesses for their shared timing windows. Echo relax uses the
+    largest accepted participant T1 from this round, otherwise t1_guess_us,
+    times relax_factor and floored at relax_min_us. T1 relax uses the same
+    floor with t1_guess_us. Fits do not alter grids, pulses, or later rounds.
+    No flux setup, context read or calibration occurs. Save Completed raw before
+    fitting; partial results are not fitted. Native/fit failures do not skip Echo.
     Iteration cancellation skips remaining work; Stop/errors propagate after
     finally commits collected fields. Pause retains local progress. Pair starts
     follow max(now, previous completed pair's actual start + interval), matching
@@ -199,7 +213,10 @@ async def overnight_mux[C](
                 rounds=tun.current.rounds,
                 acquire_retry=tun.current.t1_acquire_retry,
                 earlystop_snr=tun.current.t1_earlystop_snr,
-                relax_delay=tun.current.relax_factor * tun.current.t1_guess_us,
+                relax_delay=max(
+                    tun.current.relax_min_us,
+                    tun.current.relax_factor * tun.current.t1_guess_us,
+                ),
                 reset=plan.reset,
                 readout=plan.readout,
                 tones=[MuxT1ToneCfg(name=t.name, drive=t.drive) for t in plan.tones],
@@ -216,13 +233,21 @@ async def overnight_mux[C](
             if iteration.cancelled:
                 point_record.status = "skipped"
                 continue
+            point_record.echo_relax_delay_us, point_record.echo_t1_source = (
+                echo_relaxation(
+                    (q.t1_us for q in point_record.qubits),
+                    t1_guess_us=tun.current.t1_guess_us,
+                    relax_factor=tun.current.relax_factor,
+                    relax_min_us=tun.current.relax_min_us,
+                )
+            )
             t2_stop = tun.current.sweep_factor * tun.current.t2_guess_us
             t2_cfg = MuxT2EchoCfg(
                 reps=tun.current.reps,
                 rounds=tun.current.rounds,
                 acquire_retry=tun.current.t2_acquire_retry,
                 earlystop_snr=tun.current.t2_earlystop_snr,
-                relax_delay=tun.current.relax_factor * tun.current.t2_guess_us,
+                relax_delay=point_record.echo_relax_delay_us,
                 reset=plan.reset,
                 readout=plan.readout,
                 tones=[

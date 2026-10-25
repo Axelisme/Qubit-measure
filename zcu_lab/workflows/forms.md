@@ -31,7 +31,9 @@ Null、非數字或 ≤0 的 referenced value 讓 guess_us 留空，result 只�
 
 `MISTPlanForm` 另要求固定 gain start/stop/points 與 disturbance pulse，reset 可明確省略；gain 不放 tunables。
 measure_mode 預設 excited，可選 ground 或 both。to_cfg 從固定 capture 的 $qubit.t1 取微秒 T1 存入 plan.t1_us，無值時為 None。MIST relax 有 T1 用 5*T1，沒有則用 tunables 的 relax_factor*guess_us。
-Overnight forms 保留固定 pair、interval 與沒有 feedback 的原契約。
+Overnight forms 保留固定 pair 與 interval。
+`relax_factor` 乘 T1 估計，不乘 Echo guess。T1 member 用 `t1_guess_us`；Echo 優先用本輪剛接受的 T1，未接受時用 `t1_guess_us`。
+兩個 member 的等待時間都不低於 `relax_min_us`（預設 1 µs，允許 0），表單以 µs 顯示並傳入 tunables。Fit 不改 delay grid、pulse 或 readout。
 `OvernightTunablesForm.uniform` 的標籤是 Uniform (linear) sweep，預設 true。設 false 只改 T1 在同一視窗內的 delay 分布，不改 Echo。
 `OvernightMuxPlanForm` 使用手寫 FormModel 與 ModuleInputField，提供 mux readout、nullable reset、完整 tone model list 與 participants 原始索引。
 每個 tone 分別選已校準的 x180 drive 與 x90 pi2_pulse，不從半 gain 推導。
@@ -39,6 +41,7 @@ Fresh defaults 從固定 capture 的 `$mux.qubits` 建立完整名稱順序；`$
 已選 tone 的 x180/x90 與 mux readout/reset 只引用現存 module slot。缺 pulse/readout 留待使用者填入，不建立替代 module；reset 可保留 None。
 表單沒有 flux 欄位。`OvernightMuxTunablesForm` 沿用 overnight 的欄位與意義，包含預設 true 的 `uniform`。關閉時只改 T1 的共用 delay 分布，Echo 不變。
 兩個 guess 分別填最長 qubit 的 T1 與 Echo，供所有 participants 共用各 member 的 delay grid。
+Mux Echo relax 使用本輪已接受 participant T1 的最大值；全部未接受時才用 `t1_guess_us`。`relax_min_us` 與單 qubit 表單相同。
 四個附件共用 measure headless form owner 與 FormEditor，不建立獨立 workflows Window 或第二份 session。
 附件只負責 Start/forms/native run，沒有 export/sample binding。
 Saved run conversion 由 coherence_fluxdep.export 與 mist_fluxdep.export 獨立工具負責，GUI/RPC/MCP 不提供匯出入口。
