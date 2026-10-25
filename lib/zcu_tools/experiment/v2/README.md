@@ -1,6 +1,6 @@
 # `zcu_tools.experiment.v2`
 
-**Last updated:** 2026-10-21
+**Last updated:** 2026-10-25
 
 **讀者：** framework-dev。實驗 runtime、硬體量化與共用工具入口。
 
@@ -17,6 +17,11 @@
 Time sweep 座標使用 QICK 自身的 start/span 量化與 signed step 計算；scalar time 則使用
 所選 clock 的最近 cycle。不能用同一個 floor 近似兩者，否則 start 會偏一個 cycle，
 負向 sweep 的座標還可能錯誤地越過終點。這個計算不取得硬體連線。
+
+`utils.time_sweep.plan_time_sweep` 在編譯前規劃時間窗，與上述觀測契約分開。
+它把步長向上取到整數 cycle，減少點數，終點與要求值相差小於一個規劃後的步長。
+Caller 把回傳的 SweepCfg 同時交給 compiler 與座標 preview，並自行保留原始要求值。
+不足兩個有效點時直接失敗，不產生縮成單點的掃描。
 
 Frequency scalar 與 sweep 也使用 QICK 自身的 signed DDS conversion，沒有 half-register
 偏移。Absolute RF 的 caller 必須提供 `mixer_freq`，先使用量化 mixer offset 再換算 DDS；

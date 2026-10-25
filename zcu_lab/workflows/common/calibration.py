@@ -67,6 +67,7 @@ from zcu_lab.workflows.common.frequency_tracking import (
     trusted_curve,
 )
 from zcu_lab.workflows.common.rabi_feedback import RabiDriveFeedback
+from zcu_lab.workflows.common.rabi_measurement import measure_planned_rabi
 from zcu_lab.workflows.common.readout_analysis import accepted_readout_optimum
 from zcu_lab.workflows.common.saving import save_native
 
@@ -145,7 +146,7 @@ class CalibrationTunables(FrequencyTunables):
     target_pi_length_us: float | None = Field(
         default=None,
         gt=0,
-        description="Pi-duration setpoint in us; None uses the host pi seed",
+        description="Pi setpoint in us; None uses min(seed pi, Rabi stop floor / stop factor)",
     )
     rabi_min_start_us: float = Field(
         default=0.05, ge=0, description="Minimum Rabi sweep start in us"
@@ -264,11 +265,14 @@ class CalCarry:
     Widening replaces the current point's frequency row. Pause preserves this carry;
     only explicit point commits persist reports. There are no stage checkpoints.
     frequency_tracker owns the run-local physical overlay, IDW and linewidth
-    feedback. cur_m is |<0|n|1>| and m_ratio is relative to the first flux point;
-    both are None before prediction (ratio also None for a zero reference).
+    feedback. seed_flux is the seed pulse's calibration setpoint in the plan's
+    flux unit; None disables matrix-element feed-forward. cur_m is |<0|n|1>|,
+    and m_ratio is relative to that seed setpoint, never the first scan point.
+    Both are None before prediction; ratio is also None for a zero reference.
     """
 
     seed: Calibrated
+    seed_flux: float | None = field(default=None, kw_only=True)
     last: Calibrated | None = None
     f01_by_flux: list[tuple[float, float]] = field(default_factory=list)
     frequency_traces: list[CalibrationTrace] = field(default_factory=list)
@@ -440,7 +444,7 @@ async def calibrate_frequency(
     tracker = carry.frequency_tracker
     if tracker is None:
         raise ValueError("Frequency calibration requires a captured physical predictor")
-    hint = tracker.begin_point(flux)
+    hint = tracker.begin_point(flux, seed_flux=carry.seed_flux)
     predictor_model = tracker.model_snapshot()
     carry.cur_m, carry.m_ratio = tracker.cur_m, tracker.m_ratio
     gain = tracker.probe_gain(float(inputs.probe_pulse.gain), inputs.tun)
@@ -561,9 +565,10 @@ async def calibrate_rabi(
     finite historical smoothed us. Relaxation uses the Rabi auto/fixed knobs.
     inputs supplies captured modules/policy. Auto gain blends pi-product prediction
     with confidence-aged log feedback; fixed mode retains template gain. Sweep
-    endpoints honor physical floors. Only accepted fits update pi/product feedback.
-    Quality-trusted fits below .03 us remain rejected but propose a lower auto
-    gain, without changing the usable pulse. inputs.snapshot is the fixed historical entry/point state
+    endpoints cover prior and target pi durations, then use a clock-planned grid.
+    Only accepted fits update the usable pi product. Quality-trusted fits below
+    .03 us or above 90% of measured maximum remain rejected but propose lower
+    or higher auto gain, without changing the usable pulse. inputs.snapshot is the fixed historical entry/point state
     used to save rabi.h5 after Completed, including rejected fits. point_index
     must be a nonnegative integer (not bool), the zero-based flux index; invalid
     indexes raise ValueError at entry. The title shows its flux setpoint. Lengths
@@ -594,7 +599,10 @@ async def calibrate_rabi(
     drive.set_param("freq", f01)
     gain = float(drive.gain)
     target_pi_us = (
-        carry.seed.pi_length_us
+        min(
+            carry.seed.pi_length_us,
+            inputs.tun.rabi_min_stop_us / inputs.tun.rabi_stop_factor,
+        )
         if inputs.tun.target_pi_length_us is None
         else inputs.tun.target_pi_length_us
     )
@@ -602,6 +610,7 @@ async def calibrate_rabi(
         gain = carry.rabi_drive.select_gain(
             carry.seed.pi_length_us * float(inputs.qub_pulse.gain),
             target_pi_us,
+            m_ratio=carry.m_ratio,
         )
         drive.set_param("gain", gain)
     ro = inputs.readout.model_copy(deep=True)
@@ -610,7 +619,9 @@ async def calibrate_rabi(
         inputs.tun.rabi_min_start_us, inputs.tun.rabi_start_factor * prior.pi_length_us
     )
     stop = max(
-        inputs.tun.rabi_min_stop_us, inputs.tun.rabi_stop_factor * prior.pi_length_us
+        inputs.tun.rabi_min_stop_us,
+        inputs.tun.rabi_stop_factor * prior.pi_length_us,
+        inputs.tun.rabi_stop_factor * target_pi_us,
     )
     cfg = LenRabiCfg(
         reps=inputs.tun.rabi_reps,
@@ -634,9 +645,25 @@ async def calibrate_rabi(
             step=(stop - start) / (inputs.tun.rabi_points - 1),
         ),
     )
-    outcome = await scope.run(LenRabiExp().run, cfg, name="Rabi")
+    outcome = await scope.run(measure_planned_rabi, cfg, name="Rabi")
+    diagnostics = RabiResult(
+        "failed",
+        None,
+        f01,
+        None,
+        None,
+        None,
+        gain,
+        target_pi_length_us=target_pi_us,
+        requested_sweep=cfg.length,
+        planned_sweep=(
+            None
+            if isinstance(outcome, Failed) or outcome.value.cfg is None
+            else outcome.value.cfg.length
+        ),
+    )
     if isinstance(outcome, Failed):
-        return RabiResult("failed", outcome.reason, f01, None, None, None, gain)
+        return replace(diagnostics, reason=outcome.reason)
     # Save before fitting, so rejected fits retain their native trace.
     save_native(
         outcome,
@@ -646,7 +673,7 @@ async def calibrate_rabi(
         identity=scope.identity,
     )
     if outcome.partial_result:
-        return RabiResult("rejected", "stopped", f01, None, None, "rabi.h5", gain)
+        return replace(diagnostics, status="rejected", reason="stopped", file="rabi.h5")
     result = outcome.value.result
     fit = analyze_len_rabi(result)
     trace = CalibrationTrace(
@@ -663,11 +690,11 @@ async def calibrate_rabi(
             flux_unit=inputs.flux_unit,
             directory=inputs.directory,
         )
-        return RabiResult("failed", fit.reason, f01, None, None, "rabi.h5", gain)
+        return replace(diagnostics, reason=fit.reason, file="rabi.h5")
     residual = fit.quality.normalized_residual_rms
     quality_trusted = (
         math.isfinite(fit.pi_length_us)
-        and 0 < fit.pi_length_us <= 0.9 * float(np.max(result.lengths))
+        and fit.pi_length_us > 0
         and trusted_curve(
             fit.observed, fit.fitted, inputs.tun.rabi_max_mean_residual_ratio
         )
@@ -678,7 +705,10 @@ async def calibrate_rabi(
         and residual < inputs.tun.max_fit_residual
     )
     too_fast = quality_trusted and fit.pi_length_us < 0.03
-    accepted = quality_trusted and not too_fast
+    too_slow = quality_trusted and fit.pi_length_us > 0.9 * float(
+        np.max(result.lengths)
+    )
+    accepted = quality_trusted and not too_fast and not too_slow
     carry.rabi_traces[-1] = replace(
         trace,
         observed=fit.observed,
@@ -689,21 +719,31 @@ async def calibrate_rabi(
         plots, carry.rabi_traces, flux_unit=inputs.flux_unit, directory=inputs.directory
     )
     if not accepted:
-        if too_fast and inputs.tun.rabi_drive_gain_mode == "auto_pi_product":
-            carry.rabi_drive.observe_too_fast(
-                fit.pi_length_us, gain, max(target_pi_us, 0.03)
-            )
-        return RabiResult(
-            "rejected",
+        if inputs.tun.rabi_drive_gain_mode == "auto_pi_product":
+            if too_fast:
+                carry.rabi_drive.observe_too_fast(
+                    fit.pi_length_us, gain, max(target_pi_us, 0.03)
+                )
+            elif too_slow:
+                carry.rabi_drive.observe_too_slow(
+                    fit.pi_length_us,
+                    gain,
+                    min(target_pi_us, 0.9 * float(np.max(result.lengths))),
+                )
+        reason = (
             "π shorter than minimum trusted length"
             if too_fast
-            else "Rabi fit rejected",
-            f01,
-            None,
-            None,
-            "rabi.h5",
-            gain,
+            else "π exceeds 90% of measured sweep maximum"
+            if too_slow
+            else "Rabi fit rejected"
+        )
+        return replace(
+            diagnostics,
+            status="rejected",
+            reason=reason,
+            file="rabi.h5",
             too_fast_pi_length_us=fit.pi_length_us if too_fast else None,
+            too_slow_pi_length_us=fit.pi_length_us if too_slow else None,
         )
     carry.rabi_drive.observe(
         inputs.point_index,
@@ -724,7 +764,13 @@ async def calibrate_rabi(
         prior.readout_gain,
         drive_gain=gain,
     )
-    return RabiResult("accepted", None, f01, fit.pi_length_us, pi2, "rabi.h5", gain)
+    return replace(
+        diagnostics,
+        status="accepted",
+        pi_length_us=fit.pi_length_us,
+        pi2_length_us=pi2,
+        file="rabi.h5",
+    )
 
 
 def readout_due(point_index: int, tun: CalibrationTunables) -> bool:
