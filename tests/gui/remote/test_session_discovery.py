@@ -175,7 +175,7 @@ def _bridge_config(app_slug: str, default_port: int):
         server_instructions="",
         pid_file=Path("/tmp/_unused.pid"),
         log_file=Path("/tmp/_unused.log"),
-        run_script_name=f"run_{app_slug}_gui.py",
+        gui_module=f"synthetic.{app_slug}",
     )
 
 

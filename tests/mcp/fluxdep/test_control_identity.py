@@ -95,7 +95,7 @@ def control_server(
         server_instructions="",
         pid_file=tmp_path / "gui.pid",
         log_file=tmp_path / "gui.log",
-        run_script_name="run_fluxdep_gui.py",
+        gui_module="synthetic.fluxdep",
     )
     bridge = RouteBridge(config, harness)
     server = build_fluxdep_server(config, tmp_path, bridge=bridge)

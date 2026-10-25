@@ -328,20 +328,6 @@ or promise to stop hardware. There are no subscribed MCP events: read snapshots 
 for hardware safety, task policy and measurement workflow.
 """
 
-_CONFIG = MCPBridgeConfig(
-    app_name="gui",
-    app_slug="measure",
-    tool_prefix="",
-    default_port=8765,
-    mcp_version=MCP_VERSION,
-    wire_version=MCP_WIRE_VERSION,
-    server_display_name="qubit-measure-control",
-    server_instructions=_SERVER_INSTRUCTIONS,
-    pid_file=Path(gettempdir()) / "zcu_tools_gui.pid",
-    log_file=Path(gettempdir()) / "zcu_tools_gui_debug.log",
-    run_script_name="run_measure_gui.py",
-)
-
 
 def _setup_logging() -> None:
     from zcu_tools.gui.logging_setup import setup_gui_logging
@@ -354,32 +340,46 @@ def _setup_logging() -> None:
     )
 
 
-def main(*, recipes: Sequence[RecipeDeclaration]) -> None:
+def main(*, recipes: Sequence[RecipeDeclaration], gui_module: str) -> None:
     """Run the stdio server with explicitly supplied async declarations.
 
+    gui_module is the caller's Python module launched from the repository root.
     recipes is the composition root's immutable declaration sequence. Invalid
     definitions fail during session assembly, before GUI operations. On EOF/error,
     disconnect and drain session workers/PNGs; do not close the GUI or hardware.
     """
     from zcu_tools.mcp.core.stdio_server import StdioLoopHooks, run_stdio_loop
 
+    config = MCPBridgeConfig(
+        app_name="gui",
+        app_slug="measure",
+        tool_prefix="",
+        default_port=8765,
+        mcp_version=MCP_VERSION,
+        wire_version=MCP_WIRE_VERSION,
+        server_display_name="qubit-measure-control",
+        server_instructions=_SERVER_INSTRUCTIONS,
+        pid_file=Path(gettempdir()) / "zcu_tools_gui.pid",
+        log_file=Path(gettempdir()) / "zcu_tools_gui_debug.log",
+        gui_module=gui_module,
+    )
     session = MeasureMcpSession(
-        _CONFIG,
+        config,
         recipes=recipes,
         resolve_connect_port=resolve_connect_port,
         port_is_open=port_is_open,
     )
-    bridge = McpBridge(_CONFIG)
+    bridge = McpBridge(config)
     session.attach_bridge(bridge)
     context = MeasureToolContext(
-        config=_CONFIG,
+        config=config,
         session=session,
         resolve_connect_port=resolve_connect_port,
     )
 
     try:
         run_stdio_loop(
-            _CONFIG,
+            config,
             build_measure_tools(context, recipes=recipes),
             hooks=StdioLoopHooks(
                 on_start=_setup_logging,

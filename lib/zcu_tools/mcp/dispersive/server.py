@@ -8,7 +8,7 @@ analysis method tool is generated 1:1 from the wire-method contract table
 (``METHOD_SPECS``, all pure queries — the user drives the GUI); the agent-facing
 lifecycle tools (``dispersive_launch`` / ``dispersive_connect`` /
 ``dispersive_disconnect``) are built by the shared read-only factory and fork
-``scripts/app/run_dispersive_gui.py``.
+the caller-supplied Python module.
 
 The whole server body (``send_gui_rpc``, the lifecycle tools, cleanup, the stdio
 loop) lives in :func:`zcu_tools.mcp.core.readonly_server.build_readonly_server`;
@@ -37,8 +37,6 @@ _BOOTSTRAP["bootstrap_standalone_server"](
     ),
 )
 
-# NOTE: absolute imports (NOT relative) — this module is launched as a script
-# (``python .../server.py`` per .mcp.json), so it has no parent package.
 # tolerated: Method contracts need standalone lib setup and qtpy preflight first.
 from zcu_tools.gui.app.dispersive.remote.method_specs import (  # noqa: E402
     METHOD_SPECS,
@@ -100,26 +98,12 @@ A failed call always raises; the read tools are idempotent, so retrying a read i
 safe.
 """
 
-_CONFIG = MCPBridgeConfig(
-    app_name="dispersive",
-    app_slug="dispersive",
-    tool_prefix="dispersive_",
-    default_port=8767,
-    mcp_version=MCP_VERSION,
-    wire_version=MCP_WIRE_VERSION,
-    server_display_name="dispersive-fit-gui-control",
-    server_instructions=_SERVER_INSTRUCTIONS,
-    pid_file=Path(gettempdir()) / "zcu_tools_dispersive_gui.pid",
-    log_file=Path(gettempdir()) / "zcu_tools_dispersive_gui_debug.log",
-    run_script_name="run_dispersive_gui.py",
-)
-
 
 def build_server(config: MCPBridgeConfig, repo_root: Path) -> ReadonlyServer:
     """Assemble read-only queries and entry-aware GUI launch tools.
 
     config supplies transport identity, port and caller-owned log/PID paths.
-    repo_root locates scripts/app/run_dispersive_gui.py and defaults project_root.
+    repo_root is the GUI module's working directory and default project_root.
     Construction does not launch or connect. Launch accepts project_root, entry
     and optional component, forwards them to the GUI CLI and propagates bridge
     process/transport failures. Invalid argument types raise ValueError.
@@ -175,15 +159,24 @@ def build_server(config: MCPBridgeConfig, repo_root: Path) -> ReadonlyServer:
     return server
 
 
-# lib/zcu_tools/mcp/dispersive -> repo root
-_SERVER = build_server(_CONFIG, Path(__file__).parents[4])
+def main(*, gui_module: str) -> None:
+    """Run stdio tools; launch the caller's Python module only on tool request.
 
-# Module-level aliases preserved for tests that patch the bridge / inspect tools.
-_BRIDGE = _SERVER.bridge
-send_gui_rpc = _SERVER.send_gui_rpc
-TOOLS = _SERVER.tools
-main = _SERVER.main
-
-
-if __name__ == "__main__":
-    main()
+    gui_module must be importable from the repository root with python -m.
+    EOF disconnects without closing the GUI or controlling hardware.
+    """
+    config = MCPBridgeConfig(
+        app_name="dispersive",
+        app_slug="dispersive",
+        tool_prefix="dispersive_",
+        default_port=8767,
+        mcp_version=MCP_VERSION,
+        wire_version=MCP_WIRE_VERSION,
+        server_display_name="dispersive-fit-gui-control",
+        server_instructions=_SERVER_INSTRUCTIONS,
+        pid_file=Path(gettempdir()) / "zcu_tools_dispersive_gui.pid",
+        log_file=Path(gettempdir()) / "zcu_tools_dispersive_gui_debug.log",
+        gui_module=gui_module,
+    )
+    server = build_server(config, Path(__file__).resolve().parents[4])
+    server.main()

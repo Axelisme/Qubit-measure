@@ -21,7 +21,7 @@ This notebook uses the F1-SQUID-F2 environment with a finite charge-drive pulse,
 
 Copy `zcu_lab/simulation_envs/FTF/default.yaml` to `ftf.yaml` in the same directory before running. Run from the repository root, or supply an absolute YAML path below. This Notebook calls the public `ftf(...)` builder directly. It reserves two host CPUs and enables background numeric warmup.
 
-For the GUI, use `scripts/app/run_measure_gui.py --script zcu_lab/simulation_envs/FTF/startup.py`. That trusted startup script uses one worker without warmup and installs resources through the GUI facets. See the [FTF startup instructions](../zcu_lab/simulation_envs/FTF/README.md) for project setup. Changing YAML requires restarting the GUI or rebuilding the Notebook environment. A bias change through the existing device controls does not reload YAML.
+For the GUI, use `uv run --directory . --no-sync -- python -m apps.measure --script zcu_lab/simulation_envs/FTF/startup.py`. That trusted startup script uses one worker without warmup and installs resources through the GUI facets. See the [FTF startup instructions](../zcu_lab/simulation_envs/FTF/README.md) for project setup. Changing YAML requires restarting the GUI or rebuilding the Notebook environment. A bias change through the existing device controls does not reload YAML.
 
 ```python
 import os

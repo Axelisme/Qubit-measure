@@ -18,7 +18,7 @@ FTF 的 [startup.py](../kickstart/FTF/startup.py) 第一次會建立 `FTF` entry
 
 ```bash
 mkdir -p /absolute/my-ftf-project
-uv run --directory . --no-sync -- python scripts/app/run_measure_gui.py \
+uv run --directory . --no-sync -- python -m apps.measure \
   --project-root /absolute/my-ftf-project \
   --script zcu_lab/kickstart/FTF/startup.py
 ```

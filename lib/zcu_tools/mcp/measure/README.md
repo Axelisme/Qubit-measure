@@ -1,10 +1,12 @@
 # `zcu_tools/mcp/measure/`
 
-**Last updated:** 2026-10-24
+**Last updated:** 2026-10-25
 
 **讀者：** agent。量測 MCP 的啟動、表單、operation 與寫回契約。
 
 Measure MCP 透過 GUI 的 loopback remote socket 操作同一份 GUI 狀態。GUI core 不 import MCP。GUI `RemoteMethodEntry` 擁有 wire schema、exposure、readonly 與 operation policy。MCP 每次連線讀取 live `rpc.catalog`，不複製 policy 表，也不依 catalog 動態建立 tools。
+
+MCP 組合根 `mcp_servers/measure.py` 注入 `gui_module="apps.measure"`。Bridge 在 repo root 以目前 interpreter 執行 `python -m apps.measure`，不依賴 `scripts/`。
 
 ## Startup scripts
 

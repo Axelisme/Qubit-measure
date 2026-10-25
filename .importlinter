@@ -13,6 +13,7 @@ root_packages =
     zcu_lab
     migrations
     mcp_servers
+    apps
     scripts
 include_external_packages = True
 
@@ -23,6 +24,15 @@ source_modules =
     zcu_tools
 forbidden_modules =
     scripts
+
+# ADR-0068/0072: composition roots inject framework and lab definitions.
+[importlinter:contract:composition-roots-above-framework-and-lab]
+name = Composition roots sit above framework and lab definitions
+type = layers
+layers =
+    apps : mcp_servers
+    zcu_lab
+    zcu_tools
 
 # ADR-0080: datafile can be imported without any other framework package.
 [importlinter:contract:datafile-standalone]

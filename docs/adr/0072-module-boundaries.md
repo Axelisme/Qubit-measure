@@ -35,6 +35,7 @@ status: accepted
 | `gui` | 各 GUI app 的框架 | 具體實驗的 adapter |
 | `notebook` | Notebook 特化的工具集合 | 通用分析；具體實驗 |
 | `mcp` | 各 MCP 的框架 | 具體 recipe |
+| `apps`、`mcp_servers`（repo 根目錄） | GUI 與 MCP 的組合根，注入 lab 定義與 GUI module 名稱 | framework 與 lab 的可重用實作 |
 | `zcu_lab`（repo 根目錄） | 具體實驗、recipes 與其 gui、notebook 附件 | 離線遷移的對照與宣告（放 `migrations/`） |
 
 放置新程式碼時，先找最貼近的類別；所有類別都不合，才放 `utils`。
@@ -75,7 +76,7 @@ Fluxdep 所需非均勻背景由自己的私有 renderer 擁有，不依賴 lab 
 2. 實驗框架：`experiment`
 3. 前端框架：`gui`、`notebook`、`mcp`
 4. 使用者套件：`zcu_lab`
-5. 組合根：使用者入口在 `scripts/`，agent MCP 入口在 `mcp_servers/`
+5. 組合根：GUI 在 `apps/`，agent MCP 在 `mcp_servers/`，使用者薄殼在 `scripts/`。`apps` 與 `mcp_servers` 同層且互不 import，皆可依賴 `zcu_lab` 與 `zcu_tools`。MCP 以注入的 module 字串啟動 GUI，不 import GUI 組合根。使用者在 2026-10-25 選擇「乙」的問題脈絡與決策見 [[0068]]。
 
 `scripts/` 的每個 Python 檔案都是可獨立執行的使用者入口，不放被其他入口依賴的實作套件。
 可重用實作放在 `lib/zcu_tools/`，依上表定位；rclone 外部資料夾傳輸不屬於量測資料檔格式或實驗容器，
@@ -257,7 +258,9 @@ Notebook 的既有 params.json handoff 仍由 resources.qubit_params 擁有，�
 | C19 | `forbidden` | `core` 在 repo 內只依賴 `utils` |
 | C21 | `forbidden` | `zcu_tools` 不反向依賴使用者入口 `scripts` |
 
-`zcu_tools`、`zcu_lab`、離線 `migrations` 與 repo 的 `mcp_servers`、`scripts` 都是 import-linter 的 root packages。只為離線遷移存在的程式與對照表放在 `migrations/`，`zcu_lab` 與 `zcu_tools` 不 import 它，遷移完成後可整個刪除。使用者於 2026-10-14 裁定：「我自己會預期，我遷移完後刪除migrations就可以了」。組合根顯式注入 measure registry、workflow 註冊清單與 MCP recipes，framework 不反向載入使用者定義。Tests 的 lab 獨立性由 review 檢查 import，必要時以 grep `zcu_lab` 輔助，不新增 tests import contract。
+`composition-roots-above-framework-and-lab` 的 `layers` contract 約束 `apps : mcp_servers` > `zcu_lab` > `zcu_tools`。Lab 與 framework 不反向 import 任一組合根，不新增 `ignore_imports`。
+
+`zcu_tools`、`zcu_lab`、離線 `migrations` 與 repo 的 `apps`、`mcp_servers`、`scripts` 都是 import-linter 的 root packages。只為離線遷移存在的程式與對照表放在 `migrations/`，`zcu_lab` 與 `zcu_tools` 不 import 它，遷移完成後可整個刪除。使用者於 2026-10-14 裁定：「我自己會預期，我遷移完後刪除migrations就可以了」。組合根顯式注入 measure registry、workflow 註冊清單與 MCP recipes，framework 不反向載入使用者定義。Tests 的 lab 獨立性由 review 檢查 import，必要時以 grep `zcu_lab` 輔助，不新增 tests import contract。
 
 債務以確切的 module 對逐條列在 `ignore_imports`，不用萬用字元，每組註解寫明「債務，由誰移除」。`ignore_imports` 只減不增。
 

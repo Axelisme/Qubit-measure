@@ -12,6 +12,8 @@ status: accepted
 
 ## 決策
 
+Repo root 的 `apps/measure.py`、`apps/fluxdep.py`、`apps/dispersive.py` 各提供 `main(argv)` 組合根。`scripts/app/` 只委派該函式；MCP 由組合根注入 module 名稱啟動，見 [[0068]]。
+
 Launcher 擁有 CLI 解析與程序入口，把每次啟動的選項交給 shared runtime。`gui.launcher` 提供共用的 CLI 轉換；app 不透過 CLI parser 組裝 domain services。
 
 App 宣告固定的 process requirements，並提供 app-specific composition。`gui.runtime` 協調共用的 logging、Qt application、rendering 初始化、remote adapter 啟停與程序返回碼。App 組裝 controller、window、domain services 與自己的 remote adapter。Runtime 不決定 remote method、guard 或 app state。

@@ -15,7 +15,7 @@ def main() -> None:
     its session and disconnects, without closing the GUI or hardware.
     """
     register_all(component_registry)
-    run_measure_mcp(recipes=RECIPES)
+    run_measure_mcp(recipes=RECIPES, gui_module="apps.measure")
 
 
 if __name__ == "__main__":
