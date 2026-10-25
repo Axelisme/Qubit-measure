@@ -70,6 +70,12 @@ Workflow 的兩側目錄都使用 `workflows/<workflow名>_<run_id>/`，保留�
 
 RunMetadata 的 run_id、時間、completion、RunSnapshot 與 SoftwareProvenance 是 caller 提供的歷史事實。
 
+`RunMetadata.run_id` 與 `validate_run_id` 接受三種 ASCII 身分：單次實驗的 `[0-9]{8}T[0-9]{6}Z-[a-z0-9]{6}`、workflow root 的 `[0-9a-f]{32}`，以及 workflow operation 的 `[0-9a-f]{32}-[0-9]{6}-[1-9][0-9]*`。Operation 保留完整 root、六位 iteration 與不帶前導零的正整數 attempt。其他格式仍拒絕。
+
+合併輸出 `merged.h5` 以 workflow root run id 為 RunMetadata 身分，不加 operation 後綴、不重造身分。Experiment 欄位使用 manifest.workflow，開始與結束時間來自 manifest。Completion 依 manifest.lifecycle 映射為 done → complete、cancelled → stopped，其餘為 partial，表示整個 workflow 的狀態，不代表單次 acquisition。
+
+使用者於 2026-10-25 回覆「A」，所回覆的問題是「merged.h5 代表整個 workflow run，RunMetadata 是否也接受 workflow root id」。本裁決擴充原先只接受單次實驗與 workflow operation 的 metadata 身分契約。
+
 新檔由 [[0080]] 的 zcu.container 3.0 保存，實驗欄位進入 docs/metadata。`started_at` 接受 UTC ISO 字串或 None，`completion` 接受 complete、partial、stopped 或 unknown。None 與 unknown 表示缺少歷史證據，不從檔案時間、檔名或 run_id 補造。正常量測路徑仍必填開始時間，只產生已知完成狀態。
 
 Reader 只接受 zcu.container major 3。同 major 的 forward minor 與未知內容在 load、修改、save 往返時保留，不降版。舊 native 2.x 不再支援。使用者於 2026-10-24 裁定不支援的舊資料 Load 失敗即可，因此移除舊 reader 與批次升級工具。實驗欄位是否合法仍由 experiment 的文件 schema 驗證。
