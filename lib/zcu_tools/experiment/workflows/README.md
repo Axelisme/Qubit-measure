@@ -109,10 +109,12 @@ Encoder 將非有限值轉 null。只有作者 record/summary 序列化可降級
 Saver 錯誤沿作者例外路徑傳播。Pause 或 Stop 不回滾檔案，框架不追蹤或刪除作者檔案。
 Lab saver 將 Completed、歷史 snapshot、identity 與 spec.tag 交給 record_with_metadata。
 此函式將 RunMetadata 裝入 RunRecord.metadata，保存入口只接 record，native 輸出通用 Container。
-單次 operation 的 native run_id 是 `<identity.run_id>-<facts.iteration:06d>-<facts.attempt>`。
+Native run_id 是 `<identity.run_id>-<facts.iteration:06d>-<facts.attempt>`。
 Completed.partial_result 決定 complete 或 stopped，不用 facts.stopped 代替。
 
-合併匯出的 `merged.h5` 以整個 workflow 為身分，RunMetadata.run_id 使用 manifest 的 32 位小寫 hex root，不加 operation 後綴。時間與 completion 來自 manifest，不代表單次 acquisition。共用 writer 仍拒絕非法 ID，並保留其他輸出的獨立成功或失敗，見 [ADR-0063](../../../../docs/adr/0063-persistence-ownership.md#run-輸出位置與-writer-權責)。
+獨立轉換工具共用 `export.load_trace` 讀具名 native reference，`export.write_outputs` 只寫 Labber。
+Coherence 的 samples 由 sample table owner 追加。Lab 工具依呼叫者提供的目的地決定輸出，未提供目的地時在寫入前拒絕。
+Merged 輸出依使用者 2026-10-25 裁定移除，見 [ADR-0062](../../../../docs/adr/0062-experiment-workflow.md#獨立-workflow-轉換工具)。
 
 ## Facts 與讀取
 

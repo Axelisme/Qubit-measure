@@ -213,11 +213,13 @@ Conversion 的科學型別與輸入驗證留在此 package，不在框架建立 
 
 ## 獨立 run 轉換
 
-`coherence_fluxdep.export.export_run` 支援 merged、Labber 與 samples，`mist_fluxdep.export.export_run` 只支援 merged、Labber。
+`coherence_fluxdep.export.export_run` 支援 Labber 與 samples，`mist_fluxdep.export.export_run` 只支援 Labber。
+函式收到 `database` 就寫 Labber，Coherence 收到 `result` 就追加 samples。兩個目的地都給就都寫，未給任何目的地就 raise ValueError。
 兩個模組提供同 process 的 `main(argv)`，也能以 `python -m zcu_lab.workflows.coherence_fluxdep.export` 或 `python -m zcu_lab.workflows.mist_fluxdep.export` 執行。
-傳入 run 的 metadata 目錄並明選 `--merged`、`--labber` 或 Coherence 的 `--samples`。
-Samples 需要明填 `--result <entry result>`，Labber 需要 `--database <Database>`。Merged-only 不需外部目的地。
-工具在任何寫入前驗所選 flags 及共同輸入。Merged 覆寫 manifest data_root 的 merged.h5，Labber 每次在日期樹取新檔。
+傳入 run 的 metadata 目錄。CLI 給 `--database <Database>` 就寫 Labber，Coherence 給 `--result <entry result>` 就追加 samples。
+不另選格式旗標。沒有任何目的地是 CLI error。
+工具在任何寫入前驗共同輸入。Labber 每次在日期樹取新檔。
+Merged 輸出依使用者 2026-10-25 裁定移除，見 [ADR-0062](../../docs/adr/0062-experiment-workflow.md#獨立-workflow-轉換工具)。
 各 writer 回報自己的 path/status/error。未配置的 Labber path 為 None，已配置的失敗保留 path，不自動重試或寫 ledger。
 
 工具讀固定 manifest，再用 `saved_run.read_records(run, CoherencePoint)` 或 MISTPoint 讀整個 run 的 typed commit list。
@@ -226,7 +228,9 @@ Samples 需要明填 `--result <entry result>`，Labber 需要 `--database <Data
 壞資料指名 source，不讀 journal、掃 native 候選或重抓目前 GUI。
 Coherence 各已量 lifetime 分別輸出 Signal/Time Flux×Index 與 Flux-only lifetime，保留各自 actual delay。
 Disabled 項目沒有 channel，rejected fit 保留 raw 與 NaN lifetime，不 union、插值或重 fit。
-MIST 保留 actual gain inner-first 的 Signal 及 Flux-only Success，grid 不同就拒絕。
+MIST 使用保存的 actual gain 作為 inner-first Signal 軸，另寫 Flux-only Success。
+所有已取得 trace 的 actual gain grid 必須完全相同，否則拒絕並列出兩點的 index 與值。
+Plan gain grid 是請求，不拿它與 QICK 量化後的實際值比較。
 
 Coherence samples 每點最多一行，有 accepted frequency 或任一 lifetime 才寫。
 僅寫接受值，欄位沿 freq_mhz 與 t1/t2r/t2e_us、對應 err_us，未接受欄位省略。

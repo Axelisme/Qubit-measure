@@ -73,15 +73,17 @@ Run 結束後，host 另在背景讀取一次已連線儀器，由 State owner �
 
 使用者在 2026-10-12 裁定：「我希望B，現有實作邏輯能直接轉成匯出工具嗎？」及「A還有這個export_run應該是綁在每個不同的workflow下的小工具，因為每種workflow的輸出格式可以不同」。各 workflow 的輸出格式不同，因此轉換工具由各 workflow 擁有，不交給 live GUI run 或通用 dispatcher。
 
-轉換 saved run 不需要 live GUI run。各 workflow 提供自己的小工具，GUI／RPC／MCP 不再提供匯出入口。Coherence 工具支援 merged、Labber、samples；MIST 工具支援 merged、Labber 並拒絕 samples。Overnight 沒有本次要求的輸出，不新增空工具。每個工具提供可 import 的函式與 humble main(argv)，不建立通用 export_run dispatcher。
+轉換 saved run 不需要 live GUI run。各 workflow 提供自己的小工具，GUI／RPC／MCP 不再提供匯出入口。Coherence 工具支援 Labber、samples；MIST 工具只支援 Labber 並拒絕 samples。Overnight 沒有本次要求的輸出，不新增空工具。每個工具提供可 import 的函式與 humble main(argv)，不建立通用 export_run dispatcher。
 
-工具在 zcu_lab 讀固定 manifest 與每輪 record.json，只消費結構完整的 committed point，再讀 point 的具名 native reference。缺摘要列出每輪路徑，malformed／identity mismatch／缺檔指名 source。工具不讀 journal、不從檔名掃描或 leftover 檔建立提交點。這不是 crash resume，也不新增 framework reader 或保存保證。Shared typed envelope/native writer helpers 集中 Coherence 與 MIST 兩個使用者的輸入與失敗隔離，不做 registry 或 live Engine adapter。
+工具在 zcu_lab 讀固定 manifest 與每輪 record.json，只消費結構完整的 committed point，再讀 point 的具名 native reference。缺摘要列出每輪路徑，malformed／identity mismatch／缺檔指名 source。工具不讀 journal、不從檔名掃描或 leftover 檔建立提交點。這不是 crash resume，也不新增 framework reader 或保存保證。Shared typed envelope/Labber writer helpers 集中 Coherence 與 MIST 兩個使用者的輸入與失敗隔離，不做 registry 或 live Engine adapter。
 
-Run 外目的地由呼叫者明填 --result／--database。所選 flags 的必要參數與共同資料在任何寫入前先驗，merged-only 不要求外部目的地。Native 覆寫 manifest data_root/merged.h5；Labber 使用同一 payload 與既有 independent layout，在 SaveLayout 的新日期樹路徑保存。各 allocation/writer failure 分別回報，未配置 Labber path 為 None，已配置的失敗保留 path。Native run_id 不合法就回報原 writer error，不重造身分、不抹掉其他成功輸出，也不寫 ledger或自動重試。
+使用者在 2026-10-25 裁定：「我好像沒有用merge的需求」。Workflow 轉換工具移除覆寫 `data_root/merged.h5` 的 merged 輸出，保留 Labber 與 Coherence samples。RunMetadata 的 run_id 契約不為 workflow root 放寬，單次 acquisition 的 native 保存不變。
 
-Coherence 的每個 enabled/measured kind 各有 Signal/Time Flux×Index 與 Flux-only lifetime，保留各自 actual delay，不 union、rounding 或插值。Rejected fit 保留 raw 與 NaN lifetime，disabled 不產 channel。MIST 保留 actual gain inner-first Signal 與 Flux-only Success，actual gain mismatch 拒絕。Samples 每點最多一行，有 accepted frequency 或任一 lifetime 就寫，只含接受值的 MHz/us 欄位。座標來自該點最後 Completed acquisition 的固定 native snapshot，按 frequency→Rabi→readout→T1→Ramsey→Echo，包含 calibration 與 rejected fit。全部 rows 先驗，owner 的 prefix/count/cause 與 latest-wins 不改。
+輸出由目的地決定，不另設 outputs 選單或格式旗標。Coherence 收到 --result 就追加 samples，收到 --database 就寫 Labber，兩者都有就都寫。MIST 只收 --database 寫 Labber。未提供任何目的地時，函式與 CLI 都在入口拒絕。共同資料在任何寫入前先驗。Labber 使用既有 independent layout，在 SaveLayout 的新日期樹路徑保存。各 allocation/writer failure 分別回報，未配置 Labber path 為 None，已配置的失敗保留 path。不寫 ledger 或自動重試。
 
-科學型別留在 zcu_lab，framework export-only carriers 與 frontend binding/helpers 退役。依賴方向由 C8、C12、C16、C18 及 workflow-export-science-no-frontends contract 保護。該 contract 包含兩個工具、shared input/native helpers 與 samples producer。Datafile 擁有檔案格式，sample table 擁有追加與 latest-wins，工具不重做 HDF5 編碼。保存分工沿 [[0063]]。
+Coherence 的每個 enabled/measured kind 各有 Signal/Time Flux×Index 與 Flux-only lifetime，保留各自 actual delay，不 union、rounding 或插值。Rejected fit 保留 raw 與 NaN lifetime，disabled 不產 channel。MIST 保留 actual gain inner-first Signal 與 Flux-only Success。匯出以保存的 actual gains 為真相，不與請求的 plan grid 比較；各點 actual gain grid 必須完全相同，不同時指名兩點與值並拒絕。Samples 每點最多一行，有 accepted frequency 或任一 lifetime 就寫，只含接受值的 MHz/us 欄位。座標來自該點最後 Completed acquisition 的固定 native snapshot，按 frequency→Rabi→readout→T1→Ramsey→Echo，包含 calibration 與 rejected fit。全部 rows 先驗，owner 的 prefix/count/cause 與 latest-wins 不改。
+
+科學型別留在 zcu_lab，framework export-only carriers 與 frontend binding/helpers 退役。依賴方向由 C8、C12、C16、C18 及 workflow-export-science-no-frontends contract 保護。該 contract 包含兩個工具、shared input/Labber helpers 與 samples producer。Datafile 擁有檔案格式，sample table 擁有追加與 latest-wins，工具不重做 HDF5 編碼。保存分工沿 [[0063]]。
 
 ## Iteration 目錄與保存責任
 

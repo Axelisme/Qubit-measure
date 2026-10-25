@@ -1,4 +1,4 @@
-"""Independent Coherence run conversion: samples, merged native and Labber."""
+"""Independent Coherence run conversion: samples and Labber."""
 
 import argparse
 from dataclasses import dataclass
@@ -18,7 +18,6 @@ from zcu_tools.experiment.metadata import CfgSnapshot
 from zcu_tools.experiment.native_persistence import PreparedRunData
 from zcu_tools.experiment.workflows.export import (
     FluxdepExportOutput,
-    validate_destinations,
     write_outputs,
 )
 from zcu_tools.experiment.workflows.saved_run import (
@@ -46,8 +45,8 @@ class CoherenceExportReport:
     """This call's writer receipts and optional samples receipt.
 
     missing_records remains an empty tuple: saved_run only returns committed
-    records and does not reconstruct missing ones. outputs retains independent
-    selected native/Labber failures.
+    records and does not reconstruct missing ones. outputs retains the selected
+    Labber writer result, including path, status and failure reason.
     Samples I/O failure raises SampleExportError with successful prefix instead.
     """
 
@@ -212,24 +211,22 @@ def prepare_export(
 def export_run(
     run: Path,
     *,
-    outputs: tuple[str, ...] = ("merged",),
     result: Path | None = None,
     database: Path | None = None,
 ) -> CoherenceExportReport:
     """Convert one saved coherence_fluxdep run without a GUI, engine or hardware.
 
-    run is its exact metadata directory. outputs selects unique samples/merged/
-    labber. Samples requires explicit entry result; Labber explicit Database;
-    merged needs neither. Missing destinations reject before ANY write. Fixed
+    run is its exact metadata directory. Providing database writes Labber;
+    providing result appends samples to that entry Result directory. Providing
+    both writes both outputs; providing neither raises before any write. Fixed
     manifest identity/plan/roots/times and structured iteration records provide
     input; absent records are not reconstructed or listed. Malformed
     input/native data raises source-named errors before output allocation. Prepare
     ALL selected data/rows first. Writers fail independently; samples append
     retains prefix/count/cause and latest-wins through its existing owner.
     """
-    validate_destinations(
-        outputs, {"samples", "merged", "labber"}, result=result, database=database
-    )
+    if result is None and database is None:
+        raise ValueError("Provide --result for samples and/or --database for Labber")
     manifest = read_manifest(run, "coherence_fluxdep")
     try:
         plan = CoherencePlan.model_validate(manifest.plan)
@@ -240,14 +237,12 @@ def export_run(
     points = _points(run, plan)
     rows = (
         prepare_samples(manifest.identity.run_id, plan, points)
-        if "samples" in outputs
+        if result is not None
         else ()
     )
-    prepared = (
-        prepare_export(plan, points) if {"merged", "labber"} & set(outputs) else None
-    )
+    prepared = prepare_export(plan, points) if database is not None else None
     table = None
-    if "samples" in outputs and result is not None:
+    if result is not None:
         qubit = plan.snapshot.roles["qubit"]
         if not isinstance(qubit, str):
             raise ValueError("Sample export requires one qubit name, not an alias list")
@@ -259,8 +254,7 @@ def export_run(
             manifest,
             prepared,
             plan.snapshot,
-            merged="merged" in outputs,
-            database=database if "labber" in outputs else None,
+            database=database,
         )
     )
     samples = (
@@ -276,25 +270,18 @@ def export_run(
 def main(argv: list[str] | None = None) -> int:
     """CLI shell over export_run; print writer and samples results.
 
-    argv omits the executable name. Select --samples/--merged/--labber explicitly;
-    no selection is a CLI error. --result/--database are required only when used.
+    argv omits the executable name. --database writes Labber; --result appends
+    samples. Provide both to write both outputs. No destination is a CLI error.
     Return 1 on isolated writer failure, 0 otherwise; input/append errors raise.
     """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("run", type=Path)
-    for output in ("merged", "labber", "samples"):
-        parser.add_argument("--" + output, action="store_true")
     parser.add_argument("--result", type=Path)
     parser.add_argument("--database", type=Path)
     args = parser.parse_args(argv)
-    outputs = tuple(
-        name for name in ("merged", "labber", "samples") if getattr(args, name)
-    )
-    if not outputs:
-        parser.error("Select --merged, --labber or --samples")
-    report = export_run(
-        args.run, outputs=outputs, result=args.result, database=args.database
-    )
+    if args.result is None and args.database is None:
+        parser.error("Provide --result for samples and/or --database for Labber")
+    report = export_run(args.run, result=args.result, database=args.database)
     for source in report.missing_records:
         print(f"Missing record: {source}")
     for out in report.outputs:
