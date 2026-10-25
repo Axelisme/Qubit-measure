@@ -468,7 +468,10 @@ class FormEditor[F: FormModel](QWidget):
         """Idempotently unsubscribe, disable the view and discard local text.
 
         Do not reset, close or submit caller-owned state. Later publications do
-        not update this view. The QWidget may still be destroyed normally.
+        not update this view. Queued scalar commits become no-ops, including
+        commits from retired rows awaiting Qt deletion. A host write callback
+        may detach the editor; that commit will not redraw it afterwards.
+        The QWidget may still be destroyed normally.
         """
         if self._state is None:
             return
@@ -712,8 +715,11 @@ class FormEditor[F: FormModel](QWidget):
     def _write(
         self, path: FormWritePath, batch: Mapping[FormWritePath, JsonValue]
     ) -> None:
-        """Install batch from the row at path, or keep it local if rejected."""
-        state = self._require_state()
+        """Install a row batch, ignoring callbacks after its editor detached."""
+        # Retired rows can outlive their editor in Qt's event queue.
+        state = self._state
+        if state is None:
+            return
         publication = self._publication_count
         self._local.pop(path, None)
         try:
@@ -733,7 +739,7 @@ class FormEditor[F: FormModel](QWidget):
             self._local[path] = self._rows[path].rejected_input(message)
         # A changed write already rendered synchronously in the subscriber.
         # Unchanged/rejected writes still need to update view-local errors.
-        if self._publication_count == publication:
+        if self._state is not None and self._publication_count == publication:
             self._publish()
 
     def _select(self, path: FormWritePath, selection: JsonValue) -> None:
