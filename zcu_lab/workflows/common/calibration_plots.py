@@ -119,7 +119,7 @@ def draw_frequency(
         trace.legend()
 
     plots.draw(name, draw)
-    plots.save(name, directory / "qubit-freq.png")
+    plots.save(name, directory / "qubit-freq.png", figsize=(12.8, 9.6))
 
 
 def draw_rabi(
@@ -167,7 +167,7 @@ def draw_rabi(
         trace.legend()
 
     plots.draw(name, draw)
-    plots.save(name, directory / "len-rabi.png")
+    plots.save(name, directory / "len-rabi.png", figsize=(12.8, 4.8))
 
 
 def draw_readout(
