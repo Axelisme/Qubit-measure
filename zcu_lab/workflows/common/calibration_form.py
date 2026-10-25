@@ -79,7 +79,7 @@ class CalibrationTunablesForm(FrequencyTunablesForm):
             default=0.3,
             gt=0,
             le=1,
-            description="Strict pi-error/pi-duration upper bound",
+            description="Strict pi-error/pi-coordinate upper bound (duration or gain)",
         )
     )
     rabi_max_mean_residual_ratio: float = Field(

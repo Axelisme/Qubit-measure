@@ -50,7 +50,10 @@ class CalibrationTunables(FrequencyTunables):
         default=0.3, gt=0, le=1, description="Strict center-error/FWHM upper bound"
     )
     max_rabi_rel_err: float = Field(
-        default=0.3, gt=0, le=1, description="Strict pi-error/pi-duration upper bound"
+        default=0.3,
+        gt=0,
+        le=1,
+        description="Strict pi-error/pi-coordinate upper bound (duration or gain)",
     )
     rabi_max_mean_residual_ratio: float = Field(
         default=0.1,
