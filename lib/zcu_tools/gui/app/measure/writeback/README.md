@@ -8,6 +8,16 @@
 `items.py` 定義 adapter 的可變 proposals；`contracts.py` 定義 owner 的 edit、preview 與 submission records。
 `service.py` 保留 draft 生命週期、ID 檢查與寫入執行，也繼續匯出既有公開型別。
 
+## Dialog lifetime
+
+The ledger owns a LifetimeScope and retires all open scalar/module editors when
+its host calls `detach()`. ExpTabWidget registers that cleanup for Analysis and
+Post-Analysis. Each dialog closes its own scope before completion. Module-form
+subscriptions and editor callbacks are removed before the tab's Qt children are
+deleted. Owner retirement discards pending input and does not commit Apply-as.
+Normal Done retains its existing name-commit policy. No destroyed closure owns
+form cleanup.
+
 ## Initial selection and notes
 
 Adapter 可省略不合適的候選，或以 proposal 的 `selected=False` 保留候選但不預選。

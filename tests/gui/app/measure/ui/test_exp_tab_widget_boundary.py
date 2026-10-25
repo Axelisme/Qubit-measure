@@ -413,6 +413,34 @@ def test_exp_tab_detach_preserves_resource_for_later_views(
     assert other.cfg_invalid_reason() is None
 
 
+def test_detached_tab_disables_commands_and_ignores_late_layout_timer(
+    main_window_control_factory, qapp, monkeypatch, tmp_path
+):
+    from qtpy.QtCore import QTimer
+
+    callbacks = []
+    monkeypatch.setattr(QTimer, "singleShot", lambda _delay, fn: callbacks.append(fn))
+    ctrl = editor_wiring_ctrl(main_window_control_factory)
+    actions = _RecordingTabActions()
+    tab = ExpTabWidget(
+        "tab-1", ctrl, AdapterCapabilities(analysis=AnalysisMode.FIT, load_data=True)
+    )
+    tab.attach(make_tab_snapshot("tab-1"), actions)
+    tab.resize(1000, 700)
+    tab.show()
+    qapp.processEvents()
+    driver = ComponentDriver(tab)
+    driver.screenshot(tmp_path / "01-active-tab.png")
+    tab.detach()
+    driver.screenshot(tmp_path / "02-detached-tab.png")
+    assert not driver.observe(text="Run").enabled
+    tab.detach()
+    tab.deleteLater()
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    for callback in callbacks:
+        callback()
+
+
 def test_exp_tab_buttons_dispatch_public_tab_actions(main_window_control_factory, qapp):
     import dataclasses
 

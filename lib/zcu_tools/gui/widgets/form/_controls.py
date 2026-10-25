@@ -29,6 +29,7 @@ from qtpy.QtWidgets import (
 
 from zcu_tools.core.complex_codec import decode_complex, encode_complex
 from zcu_tools.gui.form import FormOptionDescription, FormValue, FormWritePath
+from zcu_tools.gui.lifetime import LifetimeScope
 from zcu_tools.gui.widgets import ERROR_RED_LIGHT, error_colour, mixed_colour
 from zcu_tools.gui.widgets.form.value_widgets import (
     FIELD_INPUT_MIN_WIDTH,
@@ -312,6 +313,7 @@ class FieldRow:
         self._local: LocalText | None = None
         self._error = ""
         self.widget = QWidget(parent)
+        self._scope = LifetimeScope(self.widget)
         self.widget.setObjectName(self._name("row"))
         # Installed on this row's dropdowns and checkboxes; display sets it.
         self._block = _UserInputBlock(self.widget)
@@ -353,6 +355,10 @@ class FieldRow:
         self._tooltip = "\n".join(filter(None, (field.description, hint)))
         self.set_error("")
 
+    def close(self) -> None:
+        """Retire row callbacks, timers and filters before deleting its widget."""
+        self._scope.close()
+
     def set_completion_candidates(self, candidates: tuple[str, ...]) -> None:
         """Pass captured $alias and one-level field names to this row's text input.
 
@@ -370,7 +376,7 @@ class FieldRow:
         A leaf or disabled model has no fold signal and does nothing.
         """
         if isinstance(self.label, FoldTitle):
-            self.label.fold_changed.connect(callback)
+            self._scope.connect(self.label.fold_changed, callback)
 
     def connect_pick(self, callback: Callable[[], None]) -> None:
         """Call callback after the user picks another element, if this is a picker row.
@@ -527,7 +533,9 @@ class FieldRow:
             for item in listed:
                 action = QAction(item.label, self.label)
                 action.setObjectName(f"{self._name('command')}.{item.name}")
-                action.triggered.connect(partial(self._command_triggered, item.name))
+                self._scope.connect(
+                    action.triggered, partial(self._command_triggered, item.name)
+                )
                 self.label.addAction(action)
                 self._field_actions.append(action)
         if listed:
@@ -556,7 +564,7 @@ class FieldRow:
         self.enabled.setObjectName(self._name("enabled"))
         self.enabled.installEventFilter(self._block)
         header.addWidget(self.enabled)
-        self.enabled.toggled.connect(self._activate)
+        self._scope.connect(self.enabled.toggled, self._activate)
 
     def _build_options(self, header: QHBoxLayout) -> None:
         # Not editable: the GUI picks a listed option, while wire writes may
@@ -568,7 +576,7 @@ class FieldRow:
         widget.installEventFilter(self._block)
         # The right-click menu lists the selected option's command actions.
         widget.setContextMenuPolicy(Qt.ContextMenuPolicy.ActionsContextMenu)
-        widget.currentIndexChanged.connect(self._option_chosen)
+        self._scope.connect(widget.currentIndexChanged, self._option_chosen)
         self.input = widget
         header.addWidget(widget)
 
@@ -578,7 +586,7 @@ class FieldRow:
         widget = QComboBox(self.widget)
         widget.setObjectName(self._name("picker"))
         widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        widget.currentIndexChanged.connect(self._pick_changed)
+        self._scope.connect(widget.currentIndexChanged, self._pick_changed)
         self.picker = widget
         header.addWidget(widget)
 
@@ -646,19 +654,20 @@ class FieldRow:
             self.mode = self._build_mode(widget)
         # Shared text policy commits on idle/Enter/focus loss; a checkbox
         # commits each toggle.
-        connect_committed_value_widget(widget, self._input_changed)
+        connect_committed_value_widget(widget, self._input_changed, scope=self._scope)
 
     def _build_mode(self, widget: QLineEdit) -> QAction:
         """Return the Expression action, listed on widget and after its menu."""
         mode = QAction("Expression", self.widget)
         mode.setObjectName(self._name("mode"))
         mode.setCheckable(True)
-        mode.triggered.connect(self._mode_changed)
+        self._scope.connect(mode.triggered, self._mode_changed)
         widget.addAction(mode)
         # Keep the text field's standard menu; mode follows it.
         widget.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        widget.customContextMenuRequested.connect(
-            lambda pos: _show_text_menu(widget, [mode, *self._commands], pos)
+        self._scope.connect(
+            widget.customContextMenuRequested,
+            lambda pos: _show_text_menu(widget, [mode, *self._commands], pos),
         )
         return mode
 
@@ -850,7 +859,9 @@ class FieldRow:
             for item, (name, _) in zip(listed, wanted, strict=True):
                 action = QAction(item.label, widget)
                 action.setObjectName(name)
-                action.triggered.connect(partial(self._command_triggered, item.name))
+                self._scope.connect(
+                    action.triggered, partial(self._command_triggered, item.name)
+                )
                 widget.addAction(action)
                 self._commands.append(action)
         for action in self._commands:
@@ -920,6 +931,7 @@ class GroupBlock:
         """
         self.members = members
         self.widget = QWidget(parent)
+        self._scope = LifetimeScope(self.widget)
         self.widget.setObjectName(
             "form.group." + ".".join(str(part) for part in (*path, name))
         )
@@ -937,7 +949,7 @@ class GroupBlock:
             name="form.fold.group." + ".".join(str(part) for part in (*path, name)),
             expanded=False,
         )
-        self.label.fold_changed.connect(toggled)
+        self._scope.connect(self.label.fold_changed, toggled)
         header.addWidget(self.label)
         layout.addWidget(self.body)
         self._errors_note = QLabel(GROUP_ERRORS_NOTE, self.widget)
@@ -945,6 +957,10 @@ class GroupBlock:
         header.addWidget(self._errors_note)
         # Keep the errors note beside the title instead of stretching it.
         header.addStretch()
+
+    def close(self) -> None:
+        """Retire group fold callbacks before deleting its widget."""
+        self._scope.close()
 
     def set_has_errors(self, *, has_errors: bool) -> None:
         """Show the header's errors note when has_errors, else hide it.

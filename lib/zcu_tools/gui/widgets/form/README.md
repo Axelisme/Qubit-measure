@@ -22,7 +22,7 @@ Model-list 的 `form.picker.<path>` 依 Core 的 elements 列出「index: name�
 
 Host 必須同時傳入 `write=`、`select=` 與 `run_command=`，或全部省略。三者分別接收 parsed input batch、typed path 與 option.value、typed path 與 command 名稱，並使用同一 guard。Dropdown 只呼叫 select，不以值寫入觸發 converter。Editor 不另寫 state。Host 以 `WriteRejected(message)` 拒絕時，文字保留且顯示訊息；dropdown、checkbox 與 Enabled 回到已發布值。各 mutation 路徑都處理明確的 `FormConversionError` 或 `FormInputRejected`。來源拒絕的 `PydanticCustomError` 也顯示為欄位錯誤，不送到 Qt 的 unhandled exception。失敗時顯示 row tooltip，selector 回到已提交的 selection，不重跑 write 或 converter，也不發布 mutation。每個 row 有 `form.row.<canonical path>` objectName，可定位該列及其拒絕原因。其他例外照常拋出。沒有 callback 時，editor 直接呼叫 FormState 的 write、select 與 run_command。
 
-`set_editing_enabled(enabled=False)` 保持表單可讀，不停用整個 widget。文字可選取與複製，fold titles 可展開、折疊與捲動；寫入與 commands 不可用。唯讀時第一次展開的 controls 也遵守這項限制。`refresh(env)` 使用新 capture 重讀已建層的 descriptions，不沿用舊 choices 或 active branch。Detach 與 close 只解除訂閱，不關閉 caller 的 state。
+`set_editing_enabled(enabled=False)` 保持表單可讀，不停用整個 widget。文字可選取與複製，fold titles 可展開、折疊與捲動；寫入與 commands 不可用。唯讀時第一次展開的 controls 也遵守這項限制。`refresh(env)` 使用新 capture 重讀已建層的 descriptions，不沿用舊 choices 或 active branch。Detach 與 close 關閉 editor 的 LifetimeScope，先停用回呼，再解除訂閱、row timer 與 eventFilter，最後停用 controls 並丟棄 local text。換 row 前也先關閉 row 的 scope。這些動作不提交文字，不關閉 caller 的 state。
 
 欄位錯誤不增加 row 高度。Direct 文字與 dropdown 以目前 palette 的 Base 混合淡紅底色，checkbox 與 model section 的名稱標紅。Expression 保留原底色，改以紅色邊框標示錯誤。帶色控制項或名稱標籤的 `formError` property 反映錯誤狀態，tooltip 先顯示錯誤再保留說明。錯誤消失時還原顏色與 tooltip；form-wide error label 與 group 的 Contains errors 提示仍保留。Expression 的求值結果以 `= ` 前綴顯示，字串用 JSON 引號。Direct 數值的 authored input 與 preview value 不同時，旁邊以 `Effective: ` 明示有效值；相同時不重複顯示。Step 不整除後的 stop／center／span 使用這條路徑，Qt 不重做採樣公式。
 

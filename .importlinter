@@ -66,6 +66,22 @@ source_modules =
 forbidden_modules =
     zcu_lab.components
 
+# ADR-0067: callback retirement is a shared GUI mechanism, not domain policy.
+[importlinter:contract:gui-lifetime-no-domain]
+name = GUI lifetime mechanism does not depend on domain or application owners
+type = forbidden
+source_modules =
+    zcu_tools.gui.lifetime
+forbidden_modules =
+    zcu_tools.gui.app
+    zcu_tools.gui.session
+    zcu_tools.gui.form
+    zcu_tools.gui.form_adapter
+    zcu_tools.gui.interactive
+    zcu_tools.gui.plotting
+    zcu_tools.experiment
+    zcu_tools.mcp
+
 # Pydantic input tools may reuse Qt-free leaves, never host or execution policy.
 [importlinter:contract:form-core-no-ui-policy]
 name = Pydantic form core is Qt-free and has no host policy
@@ -166,6 +182,7 @@ source_modules =
     zcu_tools.gui.event_bus
     zcu_tools.gui.expected_error
     zcu_tools.gui.logging_setup
+    zcu_tools.gui.lifetime
     zcu_tools.gui.owner
     zcu_tools.gui.version_table
     zcu_tools.gui.app.measure

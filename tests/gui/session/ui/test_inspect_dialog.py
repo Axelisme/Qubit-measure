@@ -32,6 +32,7 @@ from zcu_tools.gui.form_adapter import module_form
 from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_control import ContextControlFacet
 from zcu_tools.gui.session.context_types import PointUseRequest
+from zcu_tools.gui.session.events import ContextSwitchedPayload
 from zcu_tools.gui.session.hardware_gate import RunBlocksHardwareGate
 from zcu_tools.gui.session.library_entry import open_library_entry
 from zcu_tools.gui.session.operation_handles import OperationHandles
@@ -473,6 +474,36 @@ def test_switching_with_unsaved_changes_prompts_and_discard_loads_next(
     assert float(_child(dialog, QLineEdit, "form.input.length").text()) == 0.1
     assert _status(dialog) == "Saved"
     assert _library(session).document() == before
+
+
+def test_escape_retires_inspect_before_late_context_broadcast(
+    session: _Session, qapp: QApplication, tmp_path: Path
+) -> None:
+    presenter = RecordingDialogPresenter()
+    dialog = _open(session, presenter)
+    dialog.resize(1100, 760)
+    driver = ComponentDriver(dialog)
+    driver.expand_tree(("modules", "Q1", "pulses", "pi"), object_name="inspect.library")
+    assert driver.observe(object_name="inspect.entry.name").text == PULSE
+    driver.enter_text(object_name="form.input.gain", value="0.8", commit=False)
+    driver.screenshot(tmp_path / "01-pending-inspect.png")
+    # Reject removes the form synchronously. Target a surviving dialog control
+    # so the real key release is not sent to the retired input.
+    driver.press_key(Qt.Key.Key_Escape, text="Close")
+    assert not driver.visible().widgets
+    session.bus.emit(ContextSwitchedPayload(binding_id=None, sources=None))
+    # Use an actual new view to observe that rejecting the old editor saved nothing.
+    replacement = _open(session, presenter)
+    replacement.resize(1100, 760)
+    other = ComponentDriver(replacement)
+    other.expand_tree(("modules", "Q1", "pulses", "pi"), object_name="inspect.library")
+    other.screenshot(tmp_path / "02-reopened-inspect.png")
+    assert other.observe(object_name="form.input.gain").text == "0.25"
+    dialog.deleteLater()
+    qapp.processEvents()
+    session.bus.emit(ContextSwitchedPayload(binding_id=None, sources=None))
+    other.screenshot(tmp_path / "03-after-late-broadcast.png")
+    assert other.observe(object_name="inspect.entry.name").text == PULSE
 
 
 def test_dirty_close_requires_an_explicit_decision(session: _Session) -> None:

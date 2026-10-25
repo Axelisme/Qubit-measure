@@ -37,6 +37,7 @@ from qtpy.QtWidgets import (
 )
 
 from zcu_tools.gui.expected_error import ExpectedError, FailedPreconditionError
+from zcu_tools.gui.lifetime import LifetimeScope
 from zcu_tools.gui.session.context_types import LibraryChange
 from zcu_tools.gui.session.events import (
     ContextSwitchedPayload,
@@ -177,7 +178,9 @@ class InspectDialog(QDialog):
         self._selected: _EntryKey | None = None
         self._entry: ModuleEntryForm | WaveformEntryForm | None = None
         self._editor: FormEditor[FormModel] | None = None
-        self._unsubscribe_state: Callable[[], None] | None = None
+        self._scope = LifetimeScope(self)
+        self._entry_scope = LifetimeScope(self)
+        self._scope.add_cleanup(self._close_entry)
         # The library the tree was last built from; a different one reopens.
         self._library: LibrarySnapshot | None = None
         # A publication arrived while Unsaved or during Apply; rebuild later.
@@ -200,13 +203,26 @@ class InspectDialog(QDialog):
         self._tabs.addTab(self._aliases, "Aliases")
         layout.addWidget(self._tabs)
 
-        bus.subscribe(ContextSwitchedPayload, self._on_bus_refresh)
-        bus.subscribe(MdChangedPayload, self._on_bus_refresh)
-        bus.subscribe(MlChangedPayload, self._on_bus_refresh)
-        bus.subscribe(PointFileChangedPayload, self._on_file_changed)
-        self._bus_subs_active = True
-        self.finished.connect(self._on_finished)
-        self.destroyed.connect(self._cleanup_bus_subscriptions)
+        self._scope.add_cleanup(
+            bus.subscribe(
+                ContextSwitchedPayload, self._scope.callback(self._on_bus_refresh)
+            ).unsubscribe
+        )
+        self._scope.add_cleanup(
+            bus.subscribe(
+                MdChangedPayload, self._scope.callback(self._on_bus_refresh)
+            ).unsubscribe
+        )
+        self._scope.add_cleanup(
+            bus.subscribe(
+                MlChangedPayload, self._scope.callback(self._on_bus_refresh)
+            ).unsubscribe
+        )
+        self._scope.add_cleanup(
+            bus.subscribe(
+                PointFileChangedPayload, self._scope.callback(self._on_file_changed)
+            ).unsubscribe
+        )
         self.refresh()
 
     # ------------------------------------------------------------------
@@ -219,13 +235,15 @@ class InspectDialog(QDialog):
         toolbar.addWidget(self._status_label)
         toolbar.addStretch()
         self._arb_waveform_btn = QPushButton("Arb Waveforms…")
-        self._arb_waveform_btn.clicked.connect(self._on_arb_waveforms_clicked)
+        self._scope.connect(
+            self._arb_waveform_btn.clicked, self._on_arb_waveforms_clicked
+        )
         toolbar.addWidget(self._arb_waveform_btn)
         refresh_btn = QPushButton("Refresh")
-        refresh_btn.clicked.connect(self.refresh)
+        self._scope.connect(refresh_btn.clicked, self.refresh)
         toolbar.addWidget(refresh_btn)
         close_btn = QPushButton("Close")
-        close_btn.clicked.connect(self.close)
+        self._scope.connect(close_btn.clicked, lambda: self.close())
         toolbar.addWidget(close_btn)
         return toolbar
 
@@ -257,7 +275,7 @@ class InspectDialog(QDialog):
         self._tree.setHeaderHidden(True)
         self._tree.setRootIsDecorated(True)
         self._tree.setSelectionMode(QTreeWidget.SelectionMode.SingleSelection)
-        self._tree.currentItemChanged.connect(self._on_item_changed)
+        self._scope.connect(self._tree.currentItemChanged, self._on_item_changed)
         self._library_filter = TreeFilter(
             self._tree, object_name="inspect.library.filter", default_expanded=True
         )
@@ -271,8 +289,8 @@ class InspectDialog(QDialog):
         row.addWidget(self._delete_btn)
         row.addStretch()
         left_layout.addLayout(row)
-        self._new_btn.clicked.connect(self._on_new_clicked)
-        self._delete_btn.clicked.connect(self._on_delete_clicked)
+        self._scope.connect(self._new_btn.clicked, self._on_new_clicked)
+        self._scope.connect(self._delete_btn.clicked, self._on_delete_clicked)
         return left
 
     def _build_entry_panel(self) -> QWidget:
@@ -301,9 +319,9 @@ class InspectDialog(QDialog):
         self._scroll.setObjectName("inspect.entry.scroll")
         self._scroll.setWidgetResizable(True)
         right_layout.addWidget(self._scroll, stretch=1)
-        self._name_edit.textChanged.connect(self._update_controls)
-        self._revert_btn.clicked.connect(self._on_revert_clicked)
-        self._apply_btn.clicked.connect(self._on_apply_clicked)
+        self._scope.connect(self._name_edit.textChanged, self._update_controls)
+        self._scope.connect(self._revert_btn.clicked, self._on_revert_clicked)
+        self._scope.connect(self._apply_btn.clicked, self._on_apply_clicked)
         return right
 
     # ------------------------------------------------------------------
@@ -480,23 +498,24 @@ class InspectDialog(QDialog):
             return
         editor = FormEditor(entry.state, entry.env)
         editor.set_editing_enabled(enabled=not self._read_only)
-        editor.validity_changed.connect(self._update_controls)
+        self._entry_scope.add_cleanup(editor.detach)
+        self._entry_scope.connect(editor.validity_changed, self._update_controls)
         # setWidget deletes the previous form, so folds and scroll start fresh.
         self._scroll.setWidget(editor)
         self._entry = entry
         self._library_revision = self._library_sync.capture()
         self._editor = editor
-        self._unsubscribe_state = entry.state.subscribe(self._update_controls)
+        self._entry_scope.add_cleanup(
+            entry.state.subscribe(self._entry_scope.callback(self._update_controls))
+        )
         self._name_edit.blockSignals(True)
         self._name_edit.setText(name)
         self._name_edit.blockSignals(False)
 
     def _close_entry(self) -> None:
-        if self._unsubscribe_state is not None:
-            self._unsubscribe_state()
-            self._unsubscribe_state = None
+        self._entry_scope.close()
+        self._entry_scope = LifetimeScope(self)
         if self._editor is not None:
-            self._editor.detach()
             self._editor = None
             self._scroll.setWidget(QWidget())
         self._entry = None
@@ -650,7 +669,9 @@ class InspectDialog(QDialog):
             parent=self,
         )
         dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
-        dialog.finished.connect(lambda _result: self._on_new_finished(dialog))
+        self._scope.connect(
+            dialog.finished, lambda _result: self._on_new_finished(dialog)
+        )
         self._new_dialog = dialog
         dialog.open()
 
@@ -685,18 +706,10 @@ class InspectDialog(QDialog):
         del payload
         self.refresh()
 
-    def _cleanup_bus_subscriptions(self, *_args: object) -> None:
-        if not self._bus_subs_active:
-            return
-        self._bus.unsubscribe(ContextSwitchedPayload, self._on_bus_refresh)
-        self._bus.unsubscribe(MdChangedPayload, self._on_bus_refresh)
-        self._bus.unsubscribe(MlChangedPayload, self._on_bus_refresh)
-        self._bus.unsubscribe(PointFileChangedPayload, self._on_file_changed)
-        self._bus_subs_active = False
-
-    def _on_finished(self, *_args: object) -> None:
-        self._close_entry()
-        self._cleanup_bus_subscriptions()
+    def done(self, a0: int) -> None:
+        """Retire editor and bus callbacks before any accepted/rejected finish."""
+        self._scope.close()
+        super().done(a0)
 
     def _resolve_unsaved_aliases(self) -> bool:
         """Settle an Unsaved alias draft; True when closing may continue."""

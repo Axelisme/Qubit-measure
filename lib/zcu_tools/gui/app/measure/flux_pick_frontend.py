@@ -80,7 +80,6 @@ class FluxPickFrontend[R: FluxPickResult](InteractiveFrontend):
         self._picker.show_state(state)
         self._committed = state
         self._preview_active = False
-        self._retired = False
         self._read_only = False
         self._alignment_busy = False
 
@@ -92,15 +91,15 @@ class FluxPickFrontend[R: FluxPickResult](InteractiveFrontend):
         self._info.setWordWrap(True)
         self._conjugate = QCheckBox("Conjugate Line")
         self._conjugate.setChecked(state.conjugate)
-        self._conjugate.toggled.connect(self._set_conjugate)
+        self._scope.connect(self._conjugate.toggled, self._set_conjugate)
         self._align = QPushButton("Auto Align")
-        self._align.clicked.connect(self._auto_align)
+        self._scope.connect(self._align.clicked, self._auto_align)
         self._swap = QPushButton("Swap Lines")
-        self._swap.clicked.connect(self._swap_lines)
+        self._scope.connect(self._swap.clicked, self._swap_lines)
         self._done = QPushButton("Done")
-        self._done.clicked.connect(self._finish)
+        self._scope.connect(self._done.clicked, self._finish)
         self._cancel = QPushButton("Cancel")
-        self._cancel.clicked.connect(self._cancel_analysis)
+        self._scope.connect(self._cancel.clicked, self._cancel_analysis)
         for widget in (self._conjugate, self._align, self._swap, self._info):
             buttons.addWidget(widget)
         buttons.addStretch(1)
@@ -109,12 +108,26 @@ class FluxPickFrontend[R: FluxPickResult](InteractiveFrontend):
         root = QHBoxLayout(self)
         root.addWidget(self._canvas, stretch=1)
         root.addWidget(controls)
-        self._canvas.installEventFilter(self)
-        self._canvas.mpl_connect("button_press_event", self._on_press)
-        self._canvas.mpl_connect("motion_notify_event", self._on_move)
-        self._unsubscribe = session.subscribe(self._on_committed)
-        self._unsubscribe_alignment = plugin.subscribe_alignment(self._on_alignment)
+        self._connect_interaction()
+        self._scope.add_cleanup(
+            session.subscribe(self._scope.callback(self._on_committed))
+        )
+        self._scope.add_cleanup(
+            plugin.subscribe_alignment(self._scope.callback(self._on_alignment))
+        )
+        self._scope.add_cleanup(self._retire_controls)
         self._canvas.draw_idle()
+
+    def _connect_interaction(self) -> None:
+        self._scope.install_event_filter(self._canvas, self._on_canvas_event)
+        press = self._canvas.mpl_connect(
+            "button_press_event", self._scope.callback(self._on_press)
+        )
+        self._scope.add_cleanup(lambda: self._canvas.mpl_disconnect(press))
+        move = self._canvas.mpl_connect(
+            "motion_notify_event", self._scope.callback(self._on_move)
+        )
+        self._scope.add_cleanup(lambda: self._canvas.mpl_disconnect(move))
 
     def set_read_only(self, *, read_only: bool) -> None:
         """Set command/pointer editing permission without blocking figure viewing.
@@ -125,9 +138,9 @@ class FluxPickFrontend[R: FluxPickResult](InteractiveFrontend):
         if read_only:
             self.cancel_preview()
         for widget in (self._conjugate, self._swap, self._done, self._cancel):
-            widget.setEnabled(not read_only and not self._retired)
+            widget.setEnabled(not read_only and not self._scope.closed)
         self._align.setEnabled(
-            not read_only and not self._retired and not self._alignment_busy
+            not read_only and not self._scope.closed and not self._alignment_busy
         )
 
     @property
@@ -138,7 +151,7 @@ class FluxPickFrontend[R: FluxPickResult](InteractiveFrontend):
     @property
     def preview_active(self) -> bool:
         """Report an uncommitted pointer preview on a non-retired frontend."""
-        return self._preview_active and not self._retired
+        return self._preview_active and not self._scope.closed
 
     def _repaint(self) -> None:
         self._info.setText(self._picker.info_text())
@@ -154,16 +167,16 @@ class FluxPickFrontend[R: FluxPickResult](InteractiveFrontend):
         self._repaint()
 
     def _on_committed(self) -> None:
-        if not self._retired:
+        if not self._scope.closed:
             self._show_committed(self._session.snapshot())
 
     def cancel_preview(self) -> None:
         """Restore latest committed session state; do nothing after teardown."""
-        if not self._retired:
+        if not self._scope.closed:
             self._show_committed(self._session.snapshot())
 
     def _on_press(self, event: MouseEvent) -> None:
-        if self._read_only or self._retired or event.button != MouseButton.LEFT:
+        if self._read_only or self._scope.closed or event.button != MouseButton.LEFT:
             return
         role = self._picker.selected_role
         if role is None:
@@ -196,7 +209,7 @@ class FluxPickFrontend[R: FluxPickResult](InteractiveFrontend):
     def _on_move(self, event: MouseEvent) -> None:
         if (
             self._read_only
-            or self._retired
+            or self._scope.closed
             or not self._picker.is_main_axes(event.inaxes)
         ):
             return
@@ -213,16 +226,16 @@ class FluxPickFrontend[R: FluxPickResult](InteractiveFrontend):
 
     # tolerated: Qt toggled(bool) delivers the checked state positionally.
     def _set_conjugate(self, enabled: bool) -> None:  # noqa: FBT001
-        if not self._read_only and not self._retired:
+        if not self._read_only and not self._scope.closed:
             self._plugin.actions.conjugate.execute(self._session, enabled)
 
     def _swap_lines(self) -> None:
-        if not self._read_only and not self._retired:
+        if not self._read_only and not self._scope.closed:
             self._plugin.actions.swap.execute(self._session, None)
 
     # tolerated: Shared alignment subscriptions deliver positional busy/error values.
     def _on_alignment(self, busy: bool, error: str | None) -> None:  # noqa: FBT001
-        if self._retired:
+        if self._scope.closed:
             return
         self._alignment_busy = busy
         self._align.setEnabled(not self._read_only and not busy)
@@ -230,7 +243,7 @@ class FluxPickFrontend[R: FluxPickResult](InteractiveFrontend):
             self._info.setText(error)
 
     def _auto_align(self) -> None:
-        if self._read_only or self._retired:
+        if self._read_only or self._scope.closed:
             return
         try:
             self._plugin.start_alignment(self._session)
@@ -241,7 +254,7 @@ class FluxPickFrontend[R: FluxPickResult](InteractiveFrontend):
             self._info.setText(str(exc))
 
     def _finish(self) -> None:
-        if self._read_only or self._retired:
+        if self._read_only or self._scope.closed:
             return
         self.cancel_preview()
         try:
@@ -253,21 +266,12 @@ class FluxPickFrontend[R: FluxPickResult](InteractiveFrontend):
             self.teardown()
 
     def _cancel_analysis(self) -> None:
-        if not self._read_only and not self._retired:
+        if not self._read_only and not self._scope.closed:
             self.cancel_preview()
             self._request_cancel()
             self.teardown()
 
-    def teardown(self) -> None:
-        """Idempotently retire controls/subscriptions and discard pointer preview.
-
-        Does not finish/cancel the service-owned session or destroy saved figures."""
-        if self._retired:
-            return
-        self._retired = True
-        self._canvas.removeEventFilter(self)
-        self._unsubscribe()
-        self._unsubscribe_alignment()
+    def _retire_controls(self) -> None:
         self._picker.show_state(self._committed)
         for widget in (
             self._conjugate,
@@ -278,8 +282,8 @@ class FluxPickFrontend[R: FluxPickResult](InteractiveFrontend):
         ):
             widget.setEnabled(False)
 
-    def eventFilter(self, a0: QObject | None, a1: QEvent | None) -> bool:
-        """Discard preview on canvas focus loss/Esc; delegate other Qt events.
+    def _on_canvas_event(self, a0: QObject | None, a1: QEvent | None) -> bool:
+        """Discard preview on canvas focus loss/Esc; leave other Qt events unconsumed.
 
         a0 is the watched object and a1 the Qt event, either may be None. Returns
         True only when Escape is consumed. Must run on the Qt owner thread."""
@@ -293,7 +297,7 @@ class FluxPickFrontend[R: FluxPickResult](InteractiveFrontend):
                 if key_event.key() == Qt.Key.Key_Escape:
                     self.cancel_preview()
                     return True
-        return super().eventFilter(a0, a1)
+        return False
 
     def hideEvent(self, a0: QHideEvent | None) -> None:
         """Discard local preview and forward the optional Qt hide event to QWidget."""

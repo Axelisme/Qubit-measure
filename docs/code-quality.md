@@ -68,6 +68,20 @@ Interface 有下列限制時，在其文件集中說明，不要求每個函式�
 - 執行緒要求、呼叫順序、資源所有權與釋放責任。
 - 失敗、取消、部分完成的結果，以及呼叫者需要區分的例外。
 
+### GUI 回呼與拆除
+
+GUI 元件對 owner 的回呼、訂閱、timer、eventFilter 與 matplotlib 連線一律經
+`gui.lifetime.LifetimeScope` 登記。Qt signal 使用 `scope.connect`，其他回呼使用
+`scope.callback`，eventFilter 使用 `scope.install_event_filter`，退訂與資源釋放使用
+`scope.add_cleanup`。可替換的 editor 或 row
+使用自己的 scope，替換前先關閉。
+
+拆除入口只呼叫 `scope.close()`，不在各個 callback 散放 deleted／RuntimeError 防禦。
+Scope 先讓 callback 失效，再逆序釋放。清理失敗會拋出並保留未完成項供重試。
+成功返回前不可刪除 children。Owner 的業務關閉許可必須先取得，被拒時不關 scope。
+Qt parent 直接刪除 C++ child 的後備檢查集中在 scope，不取代顯式 close。
+不把捕捉 owner 的 closure 接到 `destroyed` signal。
+
 ### 既有容忍項先嘗試修除，理由留在原地
 
 新程式碼不新增 `cast` 或 suppression，不放寬型別配合錯誤。以下例外只適用於已明確授權清洗的既有項目，不能推廣到新程式碼。

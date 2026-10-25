@@ -7,7 +7,8 @@ from types import TracebackType
 
 import pytest
 from pydantic import JsonValue
-from qtpy.QtWidgets import QApplication, QLabel, QVBoxLayout, QWidget
+from qtpy.QtCore import Qt
+from qtpy.QtWidgets import QApplication, QLabel, QPushButton, QVBoxLayout, QWidget
 from zcu_tools.gui.form import FormEnv, FormModel, FormState, FormWritePath
 from zcu_tools.gui.widgets.form import FormEditor
 
@@ -63,6 +64,54 @@ def detaching_host(
     editor.deleteLater()
     replacement.deleteLater()
     qapp.processEvents()
+
+
+@pytest.mark.parametrize("pending", ["7", "invalid"])
+def test_focus_loss_from_host_detach_discards_pending_text(
+    qapp: QApplication, tmp_path: Path, pending: str
+) -> None:
+    env = FormEnv()
+    state = FormState(AmountForm.default_input(env))
+    host = QWidget()
+    layout = QVBoxLayout(host)
+    status = QLabel("No commits", host)
+    status.setObjectName("lifetime.status")
+
+    def write(batch: Mapping[FormWritePath, JsonValue]) -> None:
+        state.write(batch, env)
+        status.setText("Committed")
+
+    editor = FormEditor(
+        state,
+        env,
+        write=write,
+        select=lambda path, value: state.select(path, value, env),
+        run_command=lambda path, name: state.run_command(path, name, env),
+    )
+    detach = QPushButton("Detach", host)
+    # The host retires its form before disabling it causes FocusOut.
+    detach.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+    detach.clicked.connect(editor.detach)
+    layout.addWidget(editor)
+    layout.addWidget(detach)
+    layout.addWidget(status)
+    host.resize(700, 300)
+    host.show()
+    host.activateWindow()
+    qapp.processEvents()
+    driver = ComponentDriver(host)
+    try:
+        driver.enter_text(object_name="form.input.amount", value=pending, commit=False)
+        driver.screenshot(tmp_path / "01-pending-text.png")
+        driver.click("Detach")
+        driver.screenshot(tmp_path / "02-after-focus-out.png")
+        assert not driver.observe(object_name="form.input.amount").enabled
+        assert driver.observe(object_name="lifetime.status").text == "No commits"
+    finally:
+        editor.detach()
+        host.close()
+        host.deleteLater()
+        qapp.processEvents()
 
 
 def test_host_detach_during_commit_leaves_the_replacement_usable(
