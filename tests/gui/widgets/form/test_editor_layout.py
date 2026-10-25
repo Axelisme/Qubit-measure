@@ -7,9 +7,10 @@ from typing import Annotated, Literal
 import pytest
 from pydantic import BaseModel, Field
 from qtpy.QtWidgets import QApplication
-from zcu_tools.gui.form import Display, FormEnv, FormModel, FormState
+from zcu_tools.gui.form import Display, FormEnv, FormState
 from zcu_tools.gui.widgets.form import FormEditor
 
+from tests.gui._form_converters import RebuildingForm
 from tests.gui._observations import WidgetObservation
 from tests.gui._user_input import ComponentDriver
 
@@ -31,7 +32,9 @@ class Reference(BaseModel):
     kind: Literal["Library"] = "Library"
 
 
-class LayoutForm(FormModel):
+class LayoutForm(RebuildingForm):
+    branch_models = {("readout",): (Inline, Reference)}
+
     repetitions: Annotated[
         int, Display(label="Acquisition repetitions (per software round)")
     ] = 1000
@@ -109,6 +112,9 @@ def test_value_rows_share_a_unit_column_but_section_titles_have_no_units(
     # Units belong beside each value, never in the section header band.
     title = bounds(driver.observe(object_name="form.fold.frequency"))
     start = bounds(driver.observe(object_name="form.input.frequency.start"))
+    # Initial rendering must not squash a nested input below a normal text row.
+    normal_height = bounds(driver.observe(object_name="form.input.repetitions"))[3]
+    assert start[3] >= normal_height
     units = [item for item in driver.visible().widgets if item.text == "MHz"]
     assert all(item.bounds is not None and item.bounds[1] > title[1] for item in units)
     assert len(units) == 4

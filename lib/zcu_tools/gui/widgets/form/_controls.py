@@ -924,6 +924,7 @@ class GroupBlock:
             "form.group." + ".".join(str(part) for part in (*path, name))
         )
         layout = QVBoxLayout(self.widget)
+        self.layout = layout
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(_HEADER_SPACING)
         header = QHBoxLayout()

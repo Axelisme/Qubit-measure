@@ -590,7 +590,10 @@ class FormEditor[F: FormModel](QWidget):
                 # Group membership is already in this layer's metadata. No
                 # model description is queried until its own body is expanded.
                 self._sync_rows(body, tuple(members), data, preview, redraw=redraw)
+                # Hidden wrappers may still cache hints from their empty bodies.
+                block.layout.invalidate()
         _order_widgets(level, shown)
+        level.layout.invalidate()
 
     def _sync_rows(
         self,
@@ -652,6 +655,8 @@ class FormEditor[F: FormModel](QWidget):
                 row.display(field, local, editable=self._editing_enabled)
                 row.set_completion_candidates(self._completion_names)
             self._sync_children(level, row, data, preview, redraw=redraw)
+            row.layout.invalidate()
+        level.layout.invalidate()
         _align_scalar_columns(list(level.rows.values()))
 
     def _remember_initial_fold(
