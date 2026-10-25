@@ -173,20 +173,16 @@ def test_teardown_summary_identifies_live_non_daemon_thread(
 class _RecordingWatchdog:
     def __init__(self) -> None:
         self.requests: list[tuple[float, bool, TextIO]] = []
-        self.cancelled = False
 
     def dump_traceback_later(
         self, timeout: float, *, file: TextIO, exit: bool = False
     ) -> None:
         self.requests.append((timeout, exit, file))
 
-    def cancel_dump_traceback_later(self) -> None:
-        self.cancelled = True
-
 
 @pytest.mark.parametrize("to_file", [True, False], ids=["log-file", "stderr"])
-def test_runtime_arms_exit_watchdog_and_cleans_empty_stack_file(
-    qapp, tmp_path: Path, to_file: bool
+def test_runtime_arms_exit_watchdog_with_session_log_or_stderr(
+    qapp, tmp_path: Path, to_file: bool, capsys: pytest.CaptureFixture[str]
 ) -> None:
     from qtpy.QtCore import QTimer
 
@@ -200,34 +196,45 @@ def test_runtime_arms_exit_watchdog_and_cleans_empty_stack_file(
         timeout, exits_process, output = watchdog.requests[0]
         assert timeout == 9
         assert exits_process is False
-        if to_file:
-            assert Path(output.name) == tmp_path / "session.log.exit-stacks.txt"
+        assert not output.closed
+        if log_file is not None:
+            assert Path(output.name) == log_file
             assert output.fileno() >= 0
+            header = log_file.read_text()
         else:
             assert output is sys.stderr
-        assert not output.closed
+            header = capsys.readouterr().err
+        assert "GUI exit watchdog armed" in header
+        assert "9 seconds" in header
     finally:
-        diagnostics.close()
-    assert watchdog.cancelled
-    assert output.closed is to_file
-    assert not (tmp_path / "session.log.exit-stacks.txt").exists()
+        # The recorder owns the injected output, just as faulthandler does.
+        for _, _, output in watchdog.requests:
+            if to_file:
+                output.close()
 
 
-def test_exit_diagnostics_preserves_nonempty_stacks(tmp_path: Path) -> None:
+def test_exit_diagnostics_appends_stacks_without_replacing_session_log(
+    tmp_path: Path,
+) -> None:
+    log_file = tmp_path / "session.log"
+    log_file.write_text("normal GUI teardown\n")
     watchdog = _RecordingWatchdog()
-    diagnostics = GuiExitDiagnostics(tmp_path / "session.log", watchdog=watchdog)
+    GuiExitDiagnostics(log_file, watchdog=watchdog).arm()
+    timeout, exits_process, output = watchdog.requests[0]
     try:
-        diagnostics.arm()
-        timeout, exits_process, output = watchdog.requests[0]
         assert timeout == 5
         assert exits_process is False
+        assert log_file.read_text().startswith("normal GUI teardown\n")
+        # Even if repositioned, the append fd must not overwrite session events.
+        output.seek(0)
         output.write("diagnostic stack output\n")
+        output.flush()
+        content = log_file.read_text()
+        assert content.startswith("normal GUI teardown\n")
+        assert "GUI exit watchdog armed" in content
+        assert content.endswith("diagnostic stack output\n")
     finally:
-        diagnostics.close()
-    diagnostics.close()
-    assert (
-        tmp_path / "session.log.exit-stacks.txt"
-    ).read_text() == "diagnostic stack output\n"
+        output.close()
 
 
 class _Signal:

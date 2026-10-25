@@ -8,7 +8,6 @@ runtime contract plus app-specific assembly/lifecycle behavior.
 
 from __future__ import annotations
 
-import atexit
 import faulthandler
 import logging
 import sys
@@ -50,26 +49,22 @@ class GuiLaunchOptions:
 
 
 class ExitWatchdog(Protocol):
-    """Faulthandler-compatible process watchdog; file must remain open until cancel."""
+    """Faulthandler-compatible watchdog retaining its output until process exit."""
 
     def dump_traceback_later(
         self, timeout: float, *, file: TextIO, exit: bool = False
     ) -> None:
-        """Schedule one all-thread Python stack dump after timeout seconds."""
-        ...
-
-    def cancel_dump_traceback_later(self) -> None:
-        """Cancel the pending dump, waiting for any in-progress dump to finish."""
+        """Schedule one all-thread dump, keeping file referenced until finalization."""
         ...
 
 
 class GuiExitDiagnostics:
-    """Own a post-teardown stack watchdog and its fd-backed output.
+    """Append a post-teardown watchdog header and delayed stacks to the GUI log.
 
-    log_file is the GUI log path, or None to use borrowed stderr. timeout is
-    positive seconds. watchdog defaults to the process-global faulthandler;
-    callers must not use another dump_traceback_later watchdog concurrently.
-    arm() registers atexit cleanup; close() may perform that cleanup explicitly.
+    log_file is the GUI log path, or None to use stderr. timeout is positive
+    seconds. watchdog defaults to the process-global faulthandler and retains
+    the separately opened output until process finalization. Do not close that
+    output or install another delayed dump while exit diagnostics are active.
     Diagnostic I/O failures are logged without changing the GUI exit result.
     """
 
@@ -82,61 +77,39 @@ class GuiExitDiagnostics:
     ) -> None:
         if timeout <= 0:
             raise ValueError("exit diagnostic timeout must be positive")
-        self._stack_path = (
-            Path(f"{log_file}.exit-stacks.txt") if log_file is not None else None
-        )
+        self._log_file = log_file
         self._timeout = timeout
         self._watchdog = watchdog
-        self._file: TextIO | None = None
         self._armed = False
 
     def arm(self) -> None:
-        """Arm once, retaining the output fd through Python's thread shutdown.
+        """Arm once, leaving the watchdog active through interpreter teardown.
 
-        threading._shutdown joins non-daemon threads before atexit callbacks.
-        Cleanup there therefore leaves the watchdog active during those joins.
+        threading._shutdown runs before atexit, then module/GC finalization may
+        block in object destructors. Do not cancel at atexit. CPython's
+        faulthandler retains the file object until its own finalization, so the
+        independent append fd survives logging.shutdown closing its handlers.
         """
         if self._armed:
             return
+        output = sys.stderr
         try:
-            if self._stack_path is not None:
-                self._file = self._stack_path.open("w", encoding="utf-8")
-            self._watchdog.dump_traceback_later(
-                self._timeout,
-                file=self._file if self._file is not None else sys.stderr,
-                exit=False,
+            if self._log_file is not None:
+                output = self._log_file.open("a", encoding="utf-8")
+            output.write(
+                "\n=== GUI exit watchdog armed; Python stacks follow if still "
+                f"running after {self._timeout:g} seconds ===\n"
             )
+            output.flush()
+            self._watchdog.dump_traceback_later(self._timeout, file=output, exit=False)
         except (OSError, ValueError, RuntimeError):
+            if output is not sys.stderr:
+                output.close()
             logging.getLogger(__name__).warning(
                 "Could not arm GUI exit-stack watchdog", exc_info=True
             )
-            self.close()
             return
         self._armed = True
-        atexit.register(self.close)
-
-    def close(self) -> None:
-        """Cancel before closing the owned fd; delete only empty stack output.
-
-        Nonempty dumps remain for reporting. stderr is never closed.
-        Repeated close calls have no effect.
-        """
-        atexit.unregister(self.close)
-        if self._armed:
-            self._watchdog.cancel_dump_traceback_later()
-            self._armed = False
-        if self._file is None:
-            return
-        try:
-            self._file.close()
-            if self._stack_path is not None and self._stack_path.stat().st_size == 0:
-                self._stack_path.unlink()
-        except OSError:
-            logging.getLogger(__name__).warning(
-                "Could not clean GUI exit-stack output", exc_info=True
-            )
-        finally:
-            self._file = None
 
 
 class GuiWindow(Protocol):
