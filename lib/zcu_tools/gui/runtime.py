@@ -8,11 +8,14 @@ runtime contract plus app-specific assembly/lifecycle behavior.
 
 from __future__ import annotations
 
+import faulthandler
+import logging
 import sys
+import threading
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar, Protocol, TypeVar
+from typing import TYPE_CHECKING, Any, ClassVar, Protocol, TextIO, TypeVar
 
 from zcu_tools.gui.logging_setup import setup_gui_logging
 from zcu_tools.gui.remote.rpc_endpoint import ControlOptions
@@ -43,6 +46,70 @@ class GuiLaunchOptions:
     control_token: str | None = None
     control_allow_external: bool = False
     no_control: bool = False
+
+
+class ExitWatchdog(Protocol):
+    """Faulthandler-compatible watchdog retaining its output until process exit."""
+
+    def dump_traceback_later(
+        self, timeout: float, *, file: TextIO, exit: bool = False
+    ) -> None:
+        """Schedule one all-thread dump, keeping file referenced until finalization."""
+        ...
+
+
+class GuiExitDiagnostics:
+    """Append a post-teardown watchdog header and delayed stacks to the GUI log.
+
+    log_file is the GUI log path, or None to use stderr. timeout is positive
+    seconds. watchdog defaults to the process-global faulthandler and retains
+    the separately opened output until process finalization. Do not close that
+    output or install another delayed dump while exit diagnostics are active.
+    Diagnostic I/O failures are logged without changing the GUI exit result.
+    """
+
+    def __init__(
+        self,
+        log_file: Path | None,
+        *,
+        timeout: float = 5,
+        watchdog: ExitWatchdog = faulthandler,
+    ) -> None:
+        if timeout <= 0:
+            raise ValueError("exit diagnostic timeout must be positive")
+        self._log_file = log_file
+        self._timeout = timeout
+        self._watchdog = watchdog
+        self._armed = False
+
+    def arm(self) -> None:
+        """Arm once, leaving the watchdog active through interpreter teardown.
+
+        threading._shutdown runs before atexit, then module/GC finalization may
+        block in object destructors. Do not cancel at atexit. CPython's
+        faulthandler retains the file object until its own finalization, so the
+        independent append fd survives logging.shutdown closing its handlers.
+        """
+        if self._armed:
+            return
+        output = sys.stderr
+        try:
+            if self._log_file is not None:
+                output = self._log_file.open("a", encoding="utf-8")
+            output.write(
+                "\n=== GUI exit watchdog armed; Python stacks follow if still "
+                f"running after {self._timeout:g} seconds ===\n"
+            )
+            output.flush()
+            self._watchdog.dump_traceback_later(self._timeout, file=output, exit=False)
+        except (OSError, ValueError, RuntimeError):
+            if output is not sys.stderr:
+                output.close()
+            logging.getLogger(__name__).warning(
+                "Could not arm GUI exit-stack watchdog", exc_info=True
+            )
+            return
+        self._armed = True
 
 
 class GuiWindow(Protocol):
@@ -125,7 +192,7 @@ def launch_gui_runtime(
     Logging, construction and runtime failures propagate to the caller.
     """
     spec = behavior_cls.spec
-    setup_gui_logging(
+    log_file = setup_gui_logging(
         app_name=spec.app_name,
         log_root=options.log_root,
         to_file=options.to_file,
@@ -135,13 +202,23 @@ def launch_gui_runtime(
     )
     control = build_control_options(spec, options)
     behavior = behavior_cls(*args, **kwargs)
-    return run_gui_runtime(behavior, control)
+    return run_gui_runtime(
+        behavior, control, exit_diagnostics=GuiExitDiagnostics(log_file)
+    )
 
 
 def run_gui_runtime(
-    behavior: GuiRuntimeBehavior, control: ControlOptions | None
+    behavior: GuiRuntimeBehavior,
+    control: ControlOptions | None,
+    *,
+    exit_diagnostics: GuiExitDiagnostics | None = None,
 ) -> int:
-    """Run an already-instantiated GUI behavior on the Qt event loop."""
+    """Run behavior on Qt, then log live threads after app-owned resources close.
+
+    exit_diagnostics optionally arms a process-exit watchdog after close;
+    None records only the thread summary. The launcher supplies diagnostics
+    using the resolved GUI log path.
+    """
     app = _get_or_create_qapplication()
     _initialize_rendering(app)
 
@@ -167,6 +244,15 @@ def run_gui_runtime(
         # Runs after admission/drain on success and on every startup failure.
         # A close failure retains the original exception as its context.
         behavior.close(assembly)
+        threads = "; ".join(
+            f"name={thread.name!r} daemon={thread.daemon} ident={thread.ident}"
+            for thread in threading.enumerate()
+        )
+        logging.getLogger(__name__).info(
+            "GUI teardown complete; live Python threads: %s", threads
+        )
+        if exit_diagnostics is not None:
+            exit_diagnostics.arm()
 
 
 def _validate_control_assembly(
@@ -228,6 +314,8 @@ def _get_or_create_qapplication() -> QApplication:
 
 __all__ = [
     "ControlAdapter",
+    "ExitWatchdog",
+    "GuiExitDiagnostics",
     "GuiAssembly",
     "GuiLaunchOptions",
     "GuiRuntimeBehavior",
