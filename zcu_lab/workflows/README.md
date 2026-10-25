@@ -89,14 +89,21 @@ Probe gain 從這個 pulse 的 gain 起跑，再依線寬自適應；每次 atte
 Readout 在 cadence 到期且有 LATEST accepted pi pulse 時更新。未到期保留上一張圖，不在目前 point 另存 `readout.png`。
 校準圖顯示完整但未通過接受門檻的 fit，分析失敗時只顯示 raw I。Partial 不更新 heatmap 或 fit。
 Coherence 的 decay 使用 Result.times/signals，觀測值與 fit 使用同一投影。未通過門檻的 fit 標示 rejected，不進 lifetime history。
-Coherence、overnight 與 overnight_mux 拒絕 quality.invalid 非空的 lifetime fit，原因保留診斷內容。
+Coherence、overnight 與 overnight_mux 每次主模型擬合成功後，同時記錄兩種 lifetime 模型。
+T1 比較含 baseline 的單指數與雙指數。Ramsey／Echo 比較指數與固定零中心的高斯包絡，條紋資料保留各自的 cosine。
+Coherence 的 `measurements[].models`、overnight 的 `t1_models/t2_models`、overnight_mux 各 qubit 的同名欄位記錄 lifetime、誤差、residual RMS、quality 與 BIC。雙指數依長、短順序記兩個 lifetime。
+兩條可用曲線都畫出模型名稱與狀態。副模型擬合失敗時記 `failed` 與原因，不畫假曲線。
+非有限、非正 lifetime、負誤差、誤差大於值、quality.invalid 或超過 `max_model_window_factor * max(fitted delays)` 時，診斷標記 `discarded` 並保留原因。倍數預設 2，可在各 lifetime tunable 調整；非有限數值存 null。
+BIC 使用同一組觀測點與自由參數數量，只供比較。接受值、relax、歷史與歷史圖仍只看原有主模型，副模型與診斷 discarded 不改接受規則。
+主模型失敗時維持原有 failed 路徑，不嘗試副模型。Partial 仍不擬合。
+Coherence、overnight 與 overnight_mux 拒絕 quality.invalid 非空的主 lifetime fit，原因保留診斷內容。
 `min_lifetime_points` 預設為 5，只計入實際用於擬合且落在 `0 <= delay <= lifetime` 的 delay，不平移時間原點。
 每個 point 提交後更新上方 accepted history，保存含上下兩個 panel 的 `<kind>-decay.png`，不另存 summary PNG。
 MIST 的 measure_mode 可選 excited、ground 或 both，預設 excited。Ground 不加 pi preparation。Both 在每個 flux 點量兩種，分別保存 native 與 PNG。
 MIST 的 gain-<mode>.png 使用 Result 的實際 gains/signals；map-<mode>.png 使用保留的 traces，扣中位數背景並截斷於 3σ。
 `cal.rabi_mode` 預設 `len_then_amp`，先由 LenRabi 找 π 長度，再以 AmpRabi 的 π/π2 gain 建立下游 pulse。`amp_only` 固定目標長度只掃 gain，`len_only` 保留長度校準。範圍與接受門檻見 [definitions](definitions.md#獨立校準與-point)。
 T1 的 pi 依賴為 NOW；Ramsey、Echo、MIST 與 readout 可用 LATEST。Point 的 calibration_sources 記回退與來源點。
-這些保存不讀 operation 圖、不改 native raw／export 格式，也不更動科學序列。Overnight 的圖維持原樣。
+這些保存不讀 operation 圖、不改 native raw／export 格式，也不更動科學序列。Overnight 的趨勢圖維持原樣，新增的 model comparison 圖不自動保存。
 
 Pause 保留等待中的 await。若 Pause 中斷 operation 並產生 partial result，框架丟棄該次結果，
 Resume 後以同一 request 與原 capture 重試。自然完成的完整結果會等到 Resume 才交付，不重跑。

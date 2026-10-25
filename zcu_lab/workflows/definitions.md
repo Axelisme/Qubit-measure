@@ -23,14 +23,20 @@ Schedule failure 不更新間距基準，Completed partial 仍更新。預設間
 每種 preparation 預設 100000 shots，是暫定模擬值。
 GE 使用本點 fitted pi pulse 與接受或保留的合法 readout，relax delay 使用 T1 的 relax_factor × 該點 history-based guess，即使 T1 關閉也沿用此公式。
 每個 Completed GE 保存 `singleshot-ge.h5`，partial 也先保存。Workflow 不呼叫 GE analyze，不做分類、擬合或 workflow 結果圖。Core 的 operation 即時圖保留。
-三份 lifetime history 只收各自接受值，delay grid 保留 alpha=0.5 的 EWMA 與各自初始 guess。
-T1 的 relax delay 沿它的 delay guess。T2 的 relax delay 仍是 relax_factor × 自己的初始 guess，不用本點 T1 改寫。
+主模型有擬合結果時，每個 lifetime 都記兩種模型。T1 記含 baseline 的單指數與雙指數，T2 記指數與零中心高斯包絡；有條紋時兩者都帶 cosine。
+`measurements[].models` 記各模型的 lifetime、誤差、residual RMS、quality、BIC 與狀態，圖上疊加兩條可用曲線。
+只有原有主模型參與接受、relax 與歷史。BIC 不選接受模型，副模型不改下游值。
+非有限、非正 lifetime、誤差大於值、負誤差、quality.invalid 或 lifetime 超過 `max_model_window_factor * max(fitted delays)` 時，模型診斷記 `discarded` 與原因。倍數預設 2，三種 lifetime 各自可調。
+有限但 discarded 的值仍保留，非有限值存 null。副模型失敗只記 failed/reason；主模型失敗不嘗試副模型，partial 不擬合。
+三份 lifetime history 只收各自原有主模型的接受值，delay grid 保留 alpha=0.5 的 EWMA 與各自初始 guess。
+T1 的 relax delay 沿它的 delay guess。T2 的 auto relax 優先用本點接受的主模型 T1，其次 T1 EWMA，無歷史用 t1.guess_us，再套 relax_factor 與 relax_min_us。Fixed relax 使用明填值。
 Rabi／readout 的 relax delay 是最近 accepted T1 的五倍；尚無 accepted T1 或 T1 關閉時，用合法 T1 guess。
 例如 T1 關閉且 guess=50 µs，兩個校準 stage 等待 250 µs，不補量 T1。
 
 Ramsey 的 detune_ratio 是有限 fringes/step 值，無論 plan 開關都驗證，預設 0.05。
 Requested detune 為 ratio/length_step；公開 acquisition result 保留原生量化後的 actual detune。
-Echo detune 為零。兩者使用原有 fringe／whole-trace decay fit，拒絕超過兩倍最大 delay 或 mean absolute error 超過 0.1 倍 fit peak-to-peak 的值。
+Echo 的 detune_ratio 預設 0.1，零選純 decay，非零選 fringe；requested detune 同樣是 ratio/length_step。
+兩者仍以原有 fringe／whole-trace decay 作主模型，拒絕超過兩倍最大 delay 或 mean absolute error 超過 0.1 倍 fit peak-to-peak 的值。
 T1 保留原有 relative error 與 normalized residual RMS 門檻。
 Pi2 使用所選 Rabi 模式的 fitted pulse，不取 pi duration 或 gain 除以二。Len 模式使用 phase-aware fitted duration 與相同 gain。Amp 模式使用相同固定長度與獨立 fitted pi/2 gain。
 `coherence_fluxdep.t1`、`coherence_fluxdep.t2` 提供 native cfg 科學 helper。其純資料 plan/point carrier 仍有既有 conversion caller，不代表 standalone workflow 入口。
@@ -72,7 +78,24 @@ Point 的 calibration_sources 記 consumer、need、source_index、source_flux �
 `singleshot` 保留 measured／skipped／failed、reason 與相對 native 檔名。未開、Rabi 未接受、間距不足或取消皆記 skipped 原因。
 完整擷取記 measured，Schedule failure 記 failed 且沒有檔名，partial 記 failed／partial 並保留檔名。未走到此 stage 的點記 skipped／not reached，歷史 record 缺欄位時為 None。
 Tuple 按 T1、Ramsey、Echo 排序，每個 kind 最多一個結果；開啟但失敗／拒絕／skipped 的項目有原因，關閉的項目沒有 placeholder。
-Frequency widening 保存每個 Completed attempt 的引用，fit 拒絕也保留 native raw。
+Frequency 預設 `frequency_mode="two_step"`。粗掃使用 probe pulse gain，
+span 為 `span_mhz * coarse_span_factor`，預設倍率 3。可用 `coarse_gain` 覆寫粗掃 gain。
+粗掃以 predictor 加 IDW 的中心選最近候選，再隔離其他峰做局部擬合。
+粗掃失敗或主峰為 truncated 時，才沿 `qf_widen` 擴窗重掃。
+粗掃成功後，以擬合中心細掃一次，不再套 detune offset。
+細掃 span 預設為 `span_mhz`，可用 `fine_span_mhz` 覆寫。
+細掃 gain 預設為自適應 gain 的一半，且不超過粗掃 gain 的一半，可用 `fine_gain` 覆寫。
+只有細掃結果進入頻率接受門檻、IDW、可信歷史與線寬回饋。
+細掃失敗不退回粗掃，整點失敗才觸發 recovery 判斷。
+`frequency_mode="single"` 保留原有整窗擬合、gain 與 widening。
+
+`peak_min_prominence` 是投影訊號 ptp 比例，預設 0.2。
+`peak_min_distance_mhz` 是候選最小間距，預設 0 MHz。
+每點 Frequency result 的 `scans` 保存 coarse、fine 或 single 階段、
+檔名、gain、span、實際中心、全部候選、選定候選及擬合中心。
+候選的 `truncated` 表示窗內無法觀察完整半 prominence 寬度。
+兩步檔名含 coarse 或 fine，single 維持 frequency-NN.h5。
+Frequency 保存每個 Completed attempt 的引用，fit 拒絕也保留 native raw。
 Schedule Failed／skipped stage 沒有偽造檔名。分析失敗仍保留先保存的 Completed 檔名。工具按 point 的用途欄位讀檔，不掃目錄或猜 effect 次序。
 這讓 frequency 接受而 Rabi 失敗的點仍保留部分科學證據。
 
@@ -83,7 +106,7 @@ Pause 中斷目前 operation，Resume 重試同一 request；已完成的校準�
 量測間若 iteration.cancelled，補 status="skipped" 再 continue，只跳過目前點。Helper 以 return 退出該點。
 根 Stop 在 async operation 或 Ask raise ScriptCancelled。Finally 提交已有成果，不改 status，例外繼續向上傳播。
 分析 helper 對非有限 measured IQ 回 Failed(reason)，不填值或 mask。Native fitter 的具名 AnalysisFailed 與訊息恰為 `array must not contain infs or NaNs` 的 scipy ValueError 也轉 Failed。Caller 記 status=failed 並保留 raw 檔名。
-Shape、grid、detune、cfg 與其他程式錯誤仍 raise。其他 warning 沿原政策處理。完整資料的投影、fit 選擇、接受門檻與 history 政策不變。
+Shape、grid、detune、cfg 與其他程式錯誤仍 raise。其他 warning 沿原政策處理。投影與接受門檻不變。兩步掃描只讓細掃結果更新 history，single 保留原整窗擬合。
 沒有 stage checkpoint、原始檔 reader、檔案追蹤或 rollback 保證。Unexpected adapter、fit、writer 或 plot 例外停止 run，不改標為正常失敗。
 
 ## MIST 與 overnight
@@ -122,6 +145,8 @@ Plan 保存完整 mux readout 順序、participants 原始索引、每個 tone �
 Mux tunables 與 overnight 的欄位及意義相同。`uniform` 預設 true，只控制 T1 的取樣分布，所有 participants 共用同一條 delay grid。
 設 false 時使用 native mux T1 的非均勻 cycle table，Echo 仍為線性。兩個 guess 請分別填最長的 T1 與 Echo。
 Native mux 分析逐 tone 擬合，再各自套 overnight 的 relative-error 與 normalized-residual 門檻。
+Overnight 與 mux 沿用 Coherence 的雙模型診斷，分別保存在 point 與每個 qubit 的 `t1_models/t2_models`。
+T1 的副模型為雙指數，零 detune Echo 的副模型為零中心高斯；圖上兩條曲線都標示。`max_model_window_factor` 只控制診斷 discarded，不改接受值、Echo relax 或趨勢圖。
 每輪保存兩個 native 檔名、排程與實際 UTC 開始時間、status，以及每個 participant 的名稱、T1/Echo 接受值、誤差與原因。
 `overnight_mux_trend` 的 T1/Echo panels 各為每個 qubit 畫一條線，缺值留 gap。單輪範圍、更新時機與不自動保存的契約同 overnight。
 

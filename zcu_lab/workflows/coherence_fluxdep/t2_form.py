@@ -62,6 +62,13 @@ class T2EchoTunablesForm(FormModel):
     relax_min_us: Annotated[float, Display(label="Auto relax minimum", unit="µs")] = (
         Field(default=1.0, ge=0)
     )
+    max_model_window_factor: Annotated[float, Display(label="Model window factor")] = (
+        Field(
+            default=2.0,
+            gt=0,
+            description="Diagnostic lifetime / maximum fitted delay upper bound; no feedback change",
+        )
+    )
     min_lifetime_points: Annotated[int, Display(label="Min lifetime points")] = Field(
         default=5,
         ge=1,
@@ -77,6 +84,7 @@ class T2EchoTunablesForm(FormModel):
     def to_cfg(self) -> T2EchoTunables:
         """Copy ordinary values; native validation rejects invalid timing windows."""
         return T2EchoTunables(
+            max_model_window_factor=self.max_model_window_factor,
             min_lifetime_points=self.min_lifetime_points,
             reps=self.reps,
             rounds=self.rounds,
@@ -106,6 +114,7 @@ class T2RamseyTunablesForm(T2EchoTunablesForm):
     def to_cfg(self) -> T2RamseyTunables:
         """Copy ordinary values, retaining the Ramsey detune ratio."""
         return T2RamseyTunables(
+            max_model_window_factor=self.max_model_window_factor,
             min_lifetime_points=self.min_lifetime_points,
             reps=self.reps,
             rounds=self.rounds,

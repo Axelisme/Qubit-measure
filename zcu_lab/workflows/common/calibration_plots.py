@@ -13,6 +13,9 @@ from numpy.typing import NDArray
 from zcu_tools.experiment.v2.utils import estimate_snr
 from zcu_tools.plotting.plots import Plots
 
+from zcu_lab.v2.twotone.freq.core import qubfreq_signal2real
+from zcu_lab.workflows.common.calibration_analysis import FrequencyFit
+
 
 @dataclass(frozen=True)
 class CalibrationTrace:
@@ -40,6 +43,30 @@ def retain_trace(rows: list[CalibrationTrace], trace: CalibrationTrace) -> None:
         rows[-1] = trace
     else:
         rows.append(trace)
+
+
+def retain_frequency_fit(
+    rows: list[CalibrationTrace],
+    fit: FrequencyFit,
+    index: int,
+    flux: float,
+    hint: float,
+) -> None:
+    """Keep the full spectrum with a local fit overlay and fitted detune marker."""
+    result = fit.source
+    retain_trace(
+        rows,
+        CalibrationTrace(
+            index,
+            flux,
+            result.freqs - hint,
+            qubfreq_signal2real(result.signals),
+            fitted=np.interp(
+                result.freqs, fit.freqs, fit.fitted, left=np.nan, right=np.nan
+            ),
+            accepted=fit.frequency_mhz - hint,
+        ),
+    )
 
 
 def _edges(centres: NDArray[np.float64]) -> NDArray[np.float64]:

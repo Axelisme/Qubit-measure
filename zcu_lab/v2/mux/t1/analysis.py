@@ -15,6 +15,12 @@ from zcu_tools.analysis.fitting import (
 )
 from zcu_tools.plotting.plots import Plots
 
+from zcu_lab.v2.support.lifetime_models import (
+    LifetimeComparison,
+    LifetimeCurve,
+    compare_lifetime_models,
+    draw_lifetime_comparison,
+)
 from zcu_lab.v2.support.mux import MuxFitFailure
 from zcu_lab.v2.twotone.time_domain.t1.core import (
     T1Analysis,
@@ -31,11 +37,14 @@ class MuxT1Fit:
     """Original full-tone index and existing single-qubit T1 numerical analysis.
 
     fit holds t1/t1_err in us, optional second decay component in us and the
-    existing fit quality mapping under 'fit'. It owns no figures or source cfg.
+    existing fit quality mapping under 'fit'. comparison records the primary
+    and dual model in single-exponential mode, or None in explicit dual mode.
+    It owns no figures or source cfg.
     """
 
     index: int
     fit: T1Analysis
+    comparison: LifetimeComparison | None = None
 
 
 def _validate_result(result: MuxT1Result) -> None:
@@ -60,7 +69,11 @@ def _validate_result(result: MuxT1Result) -> None:
 
 
 def analyze_t1(
-    result: MuxT1Result, options: T1AnalyzeOptions, *, plots: Plots
+    result: MuxT1Result,
+    options: T1AnalyzeOptions,
+    *,
+    plots: Plots,
+    max_model_window_factor: float = 2.0,
 ) -> tuple[MuxT1Fit | MuxFitFailure, ...]:
     """Fit each IQ row against shared requested us after skip/finite filtering.
 
@@ -71,7 +84,10 @@ def analyze_t1(
     fitters and quality consume only acquired points. Numeric failures return
     indexed MuxFitFailure reasons; plotting and resource errors propagate.
     plots owns fit_i, independent of duplicate readout labels; caller
-    finishes/releases figures. No cfg or hardware is read.
+    finishes/releases figures. In single mode, also fit/record/plot the dual
+    model without replacing fit.t1. max_model_window_factor (default 2) marks
+    diagnostic times above factor*max(xs) as discarded. Secondary numerical
+    failures stay in comparison. No cfg or hardware is read.
     """
     _validate_result(result)
     times, indices, signals = result.times, result.tone_indices, result.signals
@@ -97,13 +113,18 @@ def analyze_t1(
                     xs, real
                 )
                 names = ("y0", "yscale1", "decay_time1", "yscale2", "decay_time2")
-                estimates = (t1, err, t1b, errb)
             else:
                 t1, err, fitted, (params, covariance) = fit_decay(xs, real)
                 names = ("y0", "yscale", "decay_time")
                 t1b, errb = None, None
-                estimates = (t1, err)
-            if not np.all(np.isfinite(estimates)):
+            if not np.all(
+                np.isfinite(
+                    np.asarray(
+                        (t1, err, t1b, errb) if options.dual_exp else (t1, err),
+                        dtype=np.float64,
+                    )
+                )
+            ):
                 raise ValueError("T1 fit returned nonfinite estimates")
             quality = compute_fit_quality(
                 real,
@@ -112,8 +133,20 @@ def analyze_t1(
                 covariance,
                 decay_bounds=decay_time_bounds(xs),
             )
-            fit = T1Analysis(float(t1), float(err), t1b, errb, {"fit": quality})
-            outcome = MuxT1Fit(index, fit)
+            comparison = None
+            if not options.dual_exp:
+                comparison = compare_lifetime_models(
+                    xs,
+                    real,
+                    LifetimeCurve("exponential", (t1,), (err,), fitted, quality, 3),
+                    max_window_factor=max_model_window_factor,
+                    t1=True,
+                )
+            outcome = MuxT1Fit(
+                index,
+                T1Analysis(float(t1), float(err), t1b, errb, {"fit": quality}),
+                comparison,
+            )
         except (
             AnalysisFailed,
             ValueError,
@@ -127,7 +160,10 @@ def analyze_t1(
         else:
             outcomes.append(outcome)
             ax.plot(xs, real, "o", label="measured")
-            ax.plot(xs, fitted, label=f"T1={t1:.4g} ± {err:.2g} us")
+            if outcome.comparison is not None:
+                draw_lifetime_comparison(ax, xs, outcome.comparison)
+            else:
+                ax.plot(xs, fitted, label=f"T1={t1:.4g} ± {err:.2g} us")
             if options.dual_exp:
                 ax.set_title(f"Second decay: {t1b:.4g} ± {errb:.2g} us")
         ax.legend()

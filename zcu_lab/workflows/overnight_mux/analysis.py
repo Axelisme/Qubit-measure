@@ -87,7 +87,10 @@ def record_t1(
     fit_plots = plots.fork()
     try:
         fits = MuxT1Exp().analyze(
-            record.value, MuxT1Exp.Options(skip=0, dual_exp=False), plots=fit_plots
+            record.value,
+            MuxT1Exp.Options(skip=0, dual_exp=False),
+            plots=fit_plots,
+            max_model_window_factor=tun.max_model_window_factor,
         )
     finally:
         fit_plots.finish(present=False)
@@ -98,6 +101,9 @@ def record_t1(
         if isinstance(fit, MuxFitFailure):
             qubit.t1_reason = fit.reason
         else:
+            qubit.t1_models = (
+                fit.comparison.records if fit.comparison is not None else ()
+            )
             quality = (
                 fit.fit.fit_quality["fit"] if fit.fit.fit_quality is not None else None
             )
@@ -146,7 +152,10 @@ def record_echo(
     fit_plots = plots.fork()
     try:
         fits = MuxT2EchoExp().analyze(
-            record.value, MuxT2EchoExp.Options(fit_method="decay"), plots=fit_plots
+            record.value,
+            MuxT2EchoExp.Options(fit_method="decay"),
+            plots=fit_plots,
+            max_model_window_factor=tun.max_model_window_factor,
         )
     finally:
         fit_plots.finish(present=False)
@@ -157,6 +166,9 @@ def record_echo(
         if isinstance(fit, MuxFitFailure):
             qubit.t2_reason = fit.reason
         else:
+            qubit.t2_models = (
+                fit.comparison.records if fit.comparison is not None else ()
+            )
             qubit.t2_us, qubit.t2_error_us, qubit.t2_reason = _summary(
                 fit.t2,
                 fit.t2_err,

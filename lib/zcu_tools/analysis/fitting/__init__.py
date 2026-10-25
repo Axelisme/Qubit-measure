@@ -26,7 +26,9 @@ from .decay import (
     fit_gauss_decay,
     fit_ge_decay,
 )
+from .gaussian_fringe import fit_gauss_decay_fringe
 from .multi_decay import fit_transition_rates
+from .peaks import PeakCandidate, detect_peaks
 from .quality import FitQuality, QualityIssue, compute_fit_quality, decay_time_bounds
 from .qubfreq import fit_qubit_freq
 from .rabi import fit_rabi

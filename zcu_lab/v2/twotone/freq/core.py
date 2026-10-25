@@ -7,7 +7,7 @@ from typing import Annotated, ClassVar, Literal
 import numpy as np
 from numpy.typing import NDArray
 from pydantic import Field
-from zcu_tools.analysis.fitting import fit_qubit_freq
+from zcu_tools.analysis.fitting import PeakCandidate
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment, config
 from zcu_tools.experiment.context import RunContext
@@ -21,6 +21,8 @@ from zcu_tools.program.v2 import Pulse, Readout, Reset, SweepCfg, sweep2param
 from zcu_tools.utils.process import minus_background, rotate2real
 
 from zcu_lab.v2.support import live_line
+from zcu_lab.v2.twotone.freq.analysis import FreqAnalyzeOptions as FreqAnalyzeOptions
+from zcu_lab.v2.twotone.freq.analysis import fit_spectrum
 
 
 @dataclass(frozen=True)
@@ -118,17 +120,14 @@ class FreqCfg(ConfigBase):
 
 
 @dataclass(frozen=True)
-class FreqAnalyzeOptions:
-    model_type: Annotated[Literal["lor", "sinc"], FieldMeta(label="Model type")] = "lor"
-    plot_fit: Annotated[bool, FieldMeta(label="Plot fit")] = True
-
-
-@dataclass(frozen=True)
 class FreqAnalysis:
+    """Fitted MHz center/FWHM/errors and all prominence-sorted peak candidates."""
+
     freq: float
     freq_err: float
     fwhm: float
     fwhm_err: float
+    peaks: tuple[PeakCandidate, ...] = ()
 
 
 class FreqExp(Experiment[FreqResult, FreqCfg]):
@@ -221,7 +220,10 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
         ``lor`` uses background-subtracted magnitude; ``sinc`` uses a signed
         principal-axis projection to preserve sidelobes. Unlike Run's magnitude
         preview, the plotted observations follow the selected analysis model.
-        Ignore unacquired NaN points. Return transition frequency, FWHM and
+        Ignore unacquired NaN points. Select the nearest expected center or the
+        most prominent candidate, fit only its interval between neighbouring
+        candidates, and mark the other candidates. Return all candidates,
+        transition frequency, FWHM and
         their fit uncertainties in MHz, and publish the spectrum as ``fit``.
         The source cfg may be None; only the acquired data enter the fit.
         Invalid projection inputs raise ValueError; fitting/plotting errors and
@@ -239,17 +241,22 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
 
         real_signals = qubfreq_signal2real(signals, model_type=options.model_type)
 
-        # fit_qubit_freq computes both fit uncertainties; surface them so the GUI
-        # summary carries freq_err / fwhm_err (the figure title already shows them).
-        freq, freq_err, fwhm, fwhm_err, y_fit, _ = fit_qubit_freq(
-            freqs, real_signals, options.model_type
-        )
+        fit = fit_spectrum(freqs, real_signals, options)
+        freq, freq_err, fwhm, fwhm_err = fit.freq, fit.freq_err, fit.fwhm, fit.fwhm_err
 
         fig, ax = plots.subplots("fit", figsize=config.figsize)
 
         ax.plot(freqs, real_signals, label="signal", marker="o", markersize=3)
+        for peak in fit.peaks:
+            if peak != fit.selected_peak:
+                ax.axvline(
+                    peak.center,
+                    color="gray",
+                    ls=":",
+                    label=f"candidate {peak.center:.5g} MHz",
+                )
         if options.plot_fit:
-            ax.plot(freqs, y_fit, label=f"fit, FWHM={fwhm:.1g} MHz")
+            ax.plot(fit.freqs, fit.fitted, label=f"fit, FWHM={fwhm:.1g} MHz")
             label = f"f_q = {freq:.5g} ± {freq_err:.1g} MHz"
             ax.axvline(freq, color="r", ls="--", label=label)
         ax.set_xlabel("Frequency (MHz)")
@@ -259,4 +266,4 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
 
         fig.tight_layout()
 
-        return FreqAnalysis(freq, freq_err, fwhm, fwhm_err)
+        return FreqAnalysis(freq, freq_err, fwhm, fwhm_err, fit.peaks)

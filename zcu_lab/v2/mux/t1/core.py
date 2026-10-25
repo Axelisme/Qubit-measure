@@ -415,12 +415,22 @@ class MuxT1Exp(Experiment[MuxT1Result, MuxT1Cfg]):
         options: T1AnalyzeOptions,
         *,
         plots: Plots,
+        max_model_window_factor: float = 2.0,
     ) -> tuple[MuxT1Fit | MuxFitFailure, ...]:
         """Fit each saved IQ row against its recorded delays to estimate T1 in us.
 
         source is a Run/Load record; its cfg may be absent. options selects
         initial points to skip and single or dual exponential decay. Return
         per-tone fits with uncertainties and quality, or indexed fit failures;
-        invalid axes/options raise. Draw each decay in plots as fit_i.
+        invalid axes/options raise. Single-exponential mode also records and
+        draws a dual-exponential comparison; the primary T1 is unchanged.
+        max_model_window_factor (default 2) marks diagnostic lifetimes above
+        this multiple of max fitted delay as discarded. See fit.comparison
+        for both records and numerical secondary failures. Draw fits as fit_i.
         """
-        return analyze_t1(source.result, options, plots=plots)
+        return analyze_t1(
+            source.result,
+            options,
+            plots=plots,
+            max_model_window_factor=max_model_window_factor,
+        )

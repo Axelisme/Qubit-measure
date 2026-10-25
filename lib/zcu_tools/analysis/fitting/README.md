@@ -6,6 +6,20 @@
 
 `singleshot_rabi` 提供 raw-IQ sweep 的 pooled PCA、joint population fitting 與 circle-classification calibration。它接收純數值，回傳 physical parameters、population arrays 與 optimizer diagnostics。Cfg 讀取與繪圖由實驗 caller 負責。Pulse length 與 gain 使用相同 coordinate 契約，gain caller 明確關閉 decay。
 
+## Peak candidates
+
+`detect_peaks(detune, signal, *, min_prominence=0.2, min_distance=0.0)`
+接收同形狀、有限的 float64 一維座標與正向投影訊號。座標須嚴格單調，至少兩點。
+`min_prominence` 是訊號 ptp 的比例，`min_distance` 使用座標單位。
+結果是依 prominence 降序排列的 `PeakCandidate` 列表。
+每個候選提供取樣中心、原訊號高度、半 prominence 寬度與 prominence。
+平坦訊號回傳空列表，無效輸入 raise ValueError，不修改輸入。
+
+端點背景使用窗內最小值。若半高交點落在窗外，候選保留 `truncated=True`，
+寬度只記窗內可觀察部分，不外推完整線寬。
+工具不選主峰、不擬合模型，也不決定候選能否用於校準。
+負向特徵須由 caller 先翻轉。Caller 決定投影方式、候選選擇、局部擬合與接受門檻。
+
 ## fitting helpers
 
 Cosine 與 damped-cosine fitting 在 optimizer 內不限制 phase 的週期表示，輸出才轉到
@@ -17,6 +31,11 @@ Cosine 與 damped-cosine fitting 在 optimizer 內不限制 phase 的週期表�
 `compute_fit_quality` 使用實際 optimizer observations、同座標的 model values、具名參數與 covariance，回傳 `FitQuality`。三個 array 參數必須已是 float64，缺失 covariance 可用 None。它計算未 clamp 的 r2、以 observations peak-to-peak 正規化的 residual RMS，以及具名參數相對誤差。已知不可估欄位為 None，`invalid` 保留欄位路徑與直接原因。Covariance 缺失、對角非有限、自由參數 stderr 為零或非有限，以及預測範圍小於 observations 範圍的 1e-8，都會留下 invalid 診斷，不改三項指標的數值。只有非對角非有限時，marginal errors 仍可用。Caller 以 `fixed_parameters` 明列刻意固定的參數，owner 不對它們的 stderr 或 relative error 加 invalid，但保留原數值。Mux fringe 固定 phase 時傳入該名稱，純 decay 不傳固定的 fringe 參數。dtype、形狀或名稱誤用直接 ValueError。Calibration 與 accept 的有效性仍由 caller 決定。
 
 `fit_decay`、`fit_dual_decay` 與 `fit_decay_fringe` 將自由衰減時間限制在 `decay_time_bounds` 的區間。下限為第一個正 delay 與最小正取樣間距的較小者，上限為十倍掃描窗長。固定參數不被裁切。Caller 將同一區間傳入 `compute_fit_quality(..., decay_bounds=...)`；時間貼界或越界時，`invalid` 的原因列出參數名稱、擬合值、lower／upper bound 與端點值，並保留「窗口內無法解析衰減時間」。Mux T1、Echo 與 Ramsey summary 沿用 owner 的原因，不重做判斷。其他模型不啟用這組界限。
+
+`fit_gauss_decay_fringe` 擬合 `baseline + A*exp(-(t/T)**2)*cos(2*pi*(f*t + phase/360))`。
+包絡中心固定零，回傳的 T 是 1/e time，不是 sigma；頻率使用 delay 的反單位。
+自由 T 沿用 `decay_time_bounds`，支援明填初值與固定參數，數值失敗 raise `AnalysisFailed`。
+無條紋的 `fit_gauss_decay` 保留原有可漂移中心契約；caller 可用 `fixedparams=(None, None, 0.0, None)` 固定中心零，其 T 為 `sqrt(2)*sigma`。
 
 `assess_fringe_sampling` 以實際擬合的 delay 座標、擬合頻率及可選的已知頻率下界回傳
 `FringeSamplingQuality`。它用排序去重後的最大 delay gap 計算每週期點數；至少十點且
