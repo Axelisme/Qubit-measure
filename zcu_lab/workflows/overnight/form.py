@@ -28,7 +28,7 @@ from zcu_lab.workflows.overnight.workflow import OvernightPlan, OvernightTunable
 
 
 class OvernightPlanForm(FormModel):
-    """Select fixed-flux T1/Echo pairs to monitor lifetime drift without feedback.
+    """Select fixed-flux T1/Echo pairs with calibrated pulses and fixed grids.
 
     flux_dev defaults to the captured $qubit.flux_source device name
     when input is built, or stays unfilled without one; flux_unit is required
@@ -112,7 +112,7 @@ class OvernightPlanForm(FormModel):
         historical entry/point/roles. Missing references, wrong families and
         materialization ValueErrors return consuming-field FormErrors; asset I/O
         and native plan validation errors propagate. No capture, live read,
-        calibration, complete acquisition cfg or fit feedback occurs. Fixed arb
+        calibration or acquisition occurs. Fixed arb
         drive is supported because this workflow never changes pulse duration.
         """
         context = env.library.validation_context() if env.library is not None else None
@@ -160,10 +160,12 @@ class OvernightTunablesForm(FormModel):
     """Set averaging and acceptance bounds to resolve fixed-flux lifetime drift.
 
     reps/rounds average each native member, not monitoring pairs. Guesses are in
-    microseconds; sweep/relax factors multiply their fixed timing. Dimensionless
+    microseconds; sweep_factor fixes each grid. Both relax delays have a
+    relax_min_us floor. T1 uses relax_factor*t1_guess_us. Echo uses this round's
+    accepted T1, or t1_guess_us if none accepted.
     min_lifetime_points defaults to 5 acquired fitted delays in [0, lifetime].
-    Invalid quality rejects too. Fit thresholds accept summaries; no fit changes cfg. Expressions
-    stay in FormInput, while this model and native conversion carry ordinary values.
+    Invalid quality rejects too. Fits change only Echo relax, not grids or pulses.
+    Expressions stay in FormInput; native conversion carries ordinary values.
     """
 
     uniform: Annotated[bool, Display(label="Uniform (linear) sweep")] = Field(
@@ -200,7 +202,10 @@ class OvernightTunablesForm(FormModel):
         default=4.0, gt=0, description="Delay endpoint / timing guess"
     )
     relax_factor: Annotated[float, Display(label="Relax factor")] = Field(
-        default=5.0, gt=0, description="Relaxation delay / timing guess"
+        default=5.0, gt=0, description="Relaxation delay / T1 estimate"
+    )
+    relax_min_us: Annotated[float, Display(label="Relax minimum", unit="µs")] = Field(
+        default=1.0, ge=0, description="Relaxation lower bound in us"
     )
     min_lifetime_points: Annotated[int, Display(label="Min lifetime points")] = Field(
         default=5,
@@ -229,6 +234,7 @@ class OvernightTunablesForm(FormModel):
             t2_guess_us=self.t2_guess_us,
             sweep_factor=self.sweep_factor,
             relax_factor=self.relax_factor,
+            relax_min_us=self.relax_min_us,
             max_rel_err=self.max_rel_err,
             max_fit_residual=self.max_fit_residual,
         )

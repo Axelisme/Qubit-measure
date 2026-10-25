@@ -81,7 +81,11 @@ Raw IQ 保存為 mist-excited.h5、mist-ground.h5。Partial 也先保存，再�
 Map 使用 native 實際 gain 與有單位的 flux sample centres，不用 requested extent 或 flux index 替代。
 Export 的 --mode excited/ground 選要匯出的 preparation；預設選 ground-only plan 的 ground，其餘選 excited。
 
-`overnight` 維持固定 flux、有限 T1→Hahn-echo pair、固定開始間隔與無 feedback。
+`overnight` 維持固定 flux、有限 T1→Hahn-echo pair 與固定開始間隔。
+T1 relax 為 `max(relax_min_us, relax_factor*t1_guess_us)`。
+Echo relax 為 `max(relax_min_us, relax_factor*T1估計)`，優先使用同一輪剛接受的 T1，未接受時用 `t1_guess_us`，不沿用前輪 fit。
+`relax_min_us` 預設 1 µs，允許 0。兩個 delay grid 仍由 `sweep_factor` 乘各自 guess 決定，fit 不改 pulse、readout 或後續輪次的 guess。
+Point 的 `echo_relax_delay_us` 記 Echo cfg 實際使用的等待時間，`echo_t1_source` 記 `accepted_t1` 或 `guess`。尚未建立 Echo cfg 時兩欄為 None。
 Tunables 的 `uniform` 預設 true，控制 T1 的線性 delay sweep。設 false 時，native T1 在同一 start/stop 視窗內把 delay 集中在衰減段，Echo 不變。
 它不呼校準，不讀 context，也不因 Coherence 合併增加 calibration。
 每個 Completed member 先保存 raw，partial 不擬合並記原有原因。預期 fit failure 記 reason 且 lifetime/error 為 None。
@@ -96,7 +100,8 @@ Pause 保留 pair 的區域進度，Resume 繼續等待中的 operation；Stop �
 沒有自動保存或從 run 目錄重開趨勢圖。保存責任見 ADR-0062。
 
 `overnight_mux` 保留 overnight 的有限 pair、開始間隔、不追趕排程、取消與 finally commit。
-每輪先用 `MuxT1Exp` 同時量所有 participants，再用 `MuxT2EchoExp` 同時量 Echo。它不設定 flux、不校準，也不做 feedback。
+每輪先用 `MuxT1Exp` 同時量所有 participants，再用 `MuxT2EchoExp` 同時量 Echo。它不設定 flux，也不校準。
+Echo 的共用 relax 取同一輪 participants 已接受 T1 的最大值乘 `relax_factor`，沒有接受值時用 `t1_guess_us`。兩個 member 套用相同的 `relax_min_us` 下限，來源與實際等待時間保存在 point 的同名欄位。
 Plan 保存完整 mux readout 順序、participants 原始索引、每個 tone 的已校準 x180 與獨立 x90、可省略的共用 reset，以及歷史 snapshot。
 Mux tunables 與 overnight 的欄位及意義相同。`uniform` 預設 true，只控制 T1 的取樣分布，所有 participants 共用同一條 delay grid。
 設 false 時使用 native mux T1 的非均勻 cycle table，Echo 仍為線性。兩個 guess 請分別填最長的 T1 與 Echo。
