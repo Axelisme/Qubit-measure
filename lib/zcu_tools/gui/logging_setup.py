@@ -1,7 +1,7 @@
 """Shared GUI logging setup (Phase 157).
 
-One place that decides *how* every GUI entry point (the three ``scripts/app/run_*_gui``
-launchers) and the measure MCP server configure file logging, so a new sibling
+One place that decides *how* every GUI entry point (the three repo-root ``apps``
+composition roots) and the measure MCP server configure file logging, so a new sibling
 namespace is never silently left out of the log again.
 
 Design decisions baked in here:

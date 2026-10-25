@@ -6,7 +6,7 @@
 
 ## Entry and predictor
 
-以 `scripts/app/run_dispersive_gui.py --project-root <root> --entry <entry> --component <name>`
+以 `python -m apps.dispersive --project-root <root> --entry <entry> --component <name>`
 啟動。省略 entry 時，在 GUI 的 Entry 對話框選擇。
 省略 component 時，以 setup 的 qubit alias 預選。Alias 缺失或錯誤時，使用者必須明示選擇。
 
@@ -69,7 +69,7 @@ Worker 只回傳資料。Owner-thread on_done 記錄 state 並畫圖。
 [remote README](remote/README.md) 記錄查詢契約。
 Agent 只觀測，GUI 使用者負責 load、preprocess、tune、export。
 預設 port 為 8767。Dispersive 的 WIRE=6、GUI=8，與 measure 版本獨立。
-MCP server 位於 `zcu_tools.mcp.dispersive.server`。
-`dispersive_launch` 使用 project_root、entry、component 啟動腳本。
+MCP 組合根位於 `mcp_servers/dispersive.py`，stdio 實作位於 `zcu_tools.mcp.dispersive.server`。
+`dispersive_launch` 使用 project_root、entry、component 啟動組合根注入的 `apps.dispersive` module。
 `dispersive_project_info` 回傳 entry/component 路徑與已選的 predictor 檔名，未選時為 null。
 MCP 不提供 load、preprocess、tune 或 export 的 mutation tools。

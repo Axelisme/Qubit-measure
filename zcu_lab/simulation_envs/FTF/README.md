@@ -22,7 +22,7 @@ cp zcu_lab/simulation_envs/FTF/default.yaml zcu_lab/simulation_envs/FTF/ftf.yaml
 
 ```bash
 mkdir -p /absolute/new-ftf-project
-uv run --directory . --no-sync -- python scripts/app/run_measure_gui.py \
+uv run --directory . --no-sync -- python -m apps.measure \
   --project-root /absolute/new-ftf-project \
   --script zcu_lab/simulation_envs/FTF/startup.py
 ```

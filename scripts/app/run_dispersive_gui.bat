@@ -1,4 +1,4 @@
 @echo off
 cd /d "%~dp0..\.."
-uv run --directory . --extra gui -- python scripts/app/run_dispersive_gui.py
+uv run --directory . --extra gui -- python -m apps.dispersive
 pause

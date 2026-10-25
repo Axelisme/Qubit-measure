@@ -74,23 +74,25 @@ follow publication; do not automatically replay. auto_align and fluxdep_fit wait
 terminal without an overall limit; this stdio server handles one call at a time.
 """
 
-_CONFIG = MCPBridgeConfig(
-    app_name="fluxdep",
-    app_slug="fluxdep",
-    tool_prefix="fluxdep_",
-    default_port=8766,
-    mcp_version=MCP_VERSION,
-    wire_version=MCP_WIRE_VERSION,
-    server_display_name="fluxdep-gui-control",
-    server_instructions=_SERVER_INSTRUCTIONS,
-    pid_file=Path(gettempdir()) / "zcu_tools_fluxdep_gui.pid",
-    log_file=Path(gettempdir()) / "zcu_tools_fluxdep_gui_debug.log",
-    run_script_name="run_fluxdep_gui.py",
-)
 
-_SERVER = build_fluxdep_server(_CONFIG, repo_root=Path(__file__).parents[4])
-TOOLS = _SERVER.tools
-main = _SERVER.main
+def main(*, gui_module: str) -> None:
+    """Run stdio tools; launch the caller's Python module only on tool request.
 
-if __name__ == "__main__":
-    main()
+    gui_module must be importable from the repository root with python -m.
+    EOF disconnects without closing the GUI or controlling hardware.
+    """
+    config = MCPBridgeConfig(
+        app_name="fluxdep",
+        app_slug="fluxdep",
+        tool_prefix="fluxdep_",
+        default_port=8766,
+        mcp_version=MCP_VERSION,
+        wire_version=MCP_WIRE_VERSION,
+        server_display_name="fluxdep-gui-control",
+        server_instructions=_SERVER_INSTRUCTIONS,
+        pid_file=Path(gettempdir()) / "zcu_tools_fluxdep_gui.pid",
+        log_file=Path(gettempdir()) / "zcu_tools_fluxdep_gui_debug.log",
+        gui_module=gui_module,
+    )
+    server = build_fluxdep_server(config, repo_root=Path(__file__).resolve().parents[4])
+    server.main()

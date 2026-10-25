@@ -16,7 +16,7 @@ or diagnostics.
     receives event-push lines (the reader otherwise drops them).
   - :class:`MCPBridgeConfig` extends
     :class:`~zcu_tools.mcp.core.stdio_server.McpServerConfig` with the GUI-bridge
-    launch knobs (name / port / versions / pid+log file names / run-script name).
+    launch knobs (name / port / versions / pid+log file names / Python module name).
     Tool generation and the MCP stdio loop live in
     :mod:`zcu_tools.mcp.core.stdio_server`.
 
@@ -62,7 +62,7 @@ logger = logging.getLogger(__name__)
 class MCPBridgeConfig(McpServerConfig):
     """A :class:`McpServerConfig` plus the knobs an :class:`McpBridge` needs to
     fork and talk to a live GUI subprocess: the control port, the wire/mcp version
-    for the handshake, and the pid / log / run-script paths.
+    for the handshake, PID/log paths and caller-supplied Python module.
     """
 
     app_name: str
@@ -71,7 +71,7 @@ class MCPBridgeConfig(McpServerConfig):
     wire_version: int
     pid_file: Path
     log_file: Path
-    run_script_name: str
+    gui_module: str  # Importable module executed with python -m from repo_root.
     # The session-discovery slug the GUI advertises under (e.g. "measure"); shared
     # with the GUI writer. Distinct from app_name (measure's app_name is "gui").
     app_slug: str = ""
@@ -616,9 +616,10 @@ class McpBridge:
     ) -> str:
         """Fork the GUI subprocess on ``port``, wait until ready, maybe connect.
 
-        ``repo_root`` anchors ``scripts/app/<run_script_name>``. ``extra_args`` are
-        appended to the launch command (apps that need extra flags). The GUI's
-        stderr goes to ``config.stderr_file``, truncated on each launch; an
+        ``repo_root`` is the child working directory. ``config.gui_module`` is
+        executed with the current Python interpreter using ``-m``. ``extra_args``
+        are appended unchanged to its CLI. Missing modules fail at child startup.
+        The GUI's stderr goes to ``config.stderr_file``, truncated on each launch; an
         ``OSError`` from opening that file aborts the launch.
         """
         cfg = self.config
@@ -626,10 +627,6 @@ class McpBridge:
             return f"GUI already running (pid={self._proc.pid})."
 
         python = sys.executable
-        run_gui = repo_root / "scripts" / "app" / cfg.run_script_name
-        if not run_gui.exists():
-            raise FileNotFoundError(f"{cfg.run_script_name} not found at {run_gui}")
-
         if port_is_open(port):
             raise RuntimeError(
                 f"Port {port} is already in use — a GUI is likely already running "
@@ -639,7 +636,8 @@ class McpBridge:
 
         cmd = [
             str(python),
-            str(run_gui),
+            "-m",
+            cfg.gui_module,
             "--control-port",
             str(port),
             "--log-file",

@@ -44,7 +44,7 @@ separate convergence checks. Carriers at or above 30 MHz keep the existing route
 From the checkout root, launch the measure GUI with this trusted script:
 
 ```bash
-uv run --directory . --no-sync -- python scripts/app/run_measure_gui.py \
+uv run --directory . --no-sync -- python -m apps.measure \
   --script zcu_lab/simulation_envs/six_fluxonium/startup.py
 ```
 

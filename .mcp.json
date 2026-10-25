@@ -20,7 +20,7 @@
         "--extra",
         "gui",
         "python",
-        "lib/zcu_tools/mcp/fluxdep/server.py"
+        "mcp_servers/fluxdep.py"
       ],
       "env": {}
     },
@@ -32,7 +32,7 @@
         "--extra",
         "gui",
         "python",
-        "lib/zcu_tools/mcp/dispersive/server.py"
+        "mcp_servers/dispersive.py"
       ],
       "env": {}
     }

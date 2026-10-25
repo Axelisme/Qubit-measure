@@ -490,7 +490,7 @@ def mcp_client(
         wire_version=WIRE_VERSION,
         pid_file=tmp_path / "unused.pid",
         log_file=tmp_path / "unused.log",
-        run_script_name="run_measure_gui.py",
+        gui_module="synthetic.measure",
     )
 
     def resolver(config: MCPBridgeConfig, requested: int | None) -> int:

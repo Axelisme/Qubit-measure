@@ -6,6 +6,7 @@ import json
 import os
 import socket
 import subprocess
+import sys
 from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import suppress
@@ -38,7 +39,7 @@ def _config(tmp_path: Path) -> MCPBridgeConfig:
         wire_version=1,
         pid_file=tmp_path / "test_gui.pid",
         log_file=tmp_path / "test_gui.log",
-        run_script_name="run_test_gui.py",
+        gui_module="synthetic.gui",
     )
 
 
@@ -199,9 +200,12 @@ class _ChildStderr:
     def __init__(self, proc: MagicMock) -> None:
         self.proc = proc
         self.output = b""
+        self.command: list[str] = []
+        self.cwd: str | None = None
 
     def __call__(self, cmd: list[str], **kwargs: Any) -> MagicMock:
-        del cmd
+        self.command = cmd
+        self.cwd = kwargs["cwd"]
         stderr = kwargs["stderr"]
         if stderr in (None, subprocess.PIPE):
             raise AssertionError(f"GUI stderr must go to a file, got {stderr!r}")
@@ -214,9 +218,6 @@ def launch_bridge(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> tuple[McpBridge, _ChildStderr, Mock, Mock]:
     config = _config(tmp_path)
-    script = tmp_path / "scripts" / "app" / config.run_script_name
-    script.parent.mkdir(parents=True)
-    script.touch()
     bridge = McpBridge(config)
     proc = MagicMock(pid=4242)
     proc.poll.return_value = None
@@ -227,6 +228,32 @@ def launch_bridge(
     monkeypatch.setattr("zcu_tools.mcp.core.bridge.port_is_open", probe)
     monkeypatch.setattr(bridge, "connect", connect)
     return bridge, child, probe, connect
+
+
+def test_launch_runs_injected_module_with_cli_and_repo_cwd(launch_bridge, tmp_path):
+    bridge, child, _, _ = launch_bridge
+    bridge.launch(
+        tmp_path,
+        18765,
+        "credential",
+        auto_connect=False,
+        extra_args=["--clean", "--project-root", "/data/project"],
+    )
+    assert child.command == [
+        sys.executable,
+        "-m",
+        "synthetic.gui",
+        "--control-port",
+        "18765",
+        "--log-file",
+        str(bridge.config.log_file),
+        "--control-token",
+        "credential",
+        "--clean",
+        "--project-root",
+        "/data/project",
+    ]
+    assert child.cwd == str(tmp_path)
 
 
 @pytest.mark.parametrize("auto_connect", [False, True])
@@ -281,9 +308,10 @@ def test_launch_reports_early_exit_without_connecting(
 def test_launched_child_can_fill_stderr_after_parent_returns(tmp_path: Path) -> None:
     """A real child must not stall when startup warnings exceed pipe capacity."""
     config = _config(tmp_path)
-    script = tmp_path / "scripts" / "app" / config.run_script_name
-    script.parent.mkdir(parents=True)
-    script.write_text(
+    module = tmp_path / "synthetic"
+    module.mkdir()
+    (module / "__init__.py").touch()
+    (module / "gui.py").write_text(
         "import socket, sys\n"
         "from pathlib import Path\n"
         "port = int(sys.argv[sys.argv.index('--control-port') + 1])\n"

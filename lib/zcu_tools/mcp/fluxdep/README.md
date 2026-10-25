@@ -1,12 +1,14 @@
 # Fluxdep MCP control
 
-**Last updated:** 2026-10-23
+**Last updated:** 2026-10-25
 
 **讀者：** agent。Fluxdep MCP 的控制流程、工具與診斷契約。
 
 Fluxdep MCP composes native GUI RPCs into handwritten agent decision tools over
 one shared bridge. It is an independent, optional L3 cross-experiment analysis
 app, not part of Measure or Workflows.
+
+Repo 的 `mcp_servers/fluxdep.py` 將 `gui_module="apps.fluxdep"` 注入 stdio server。Bridge 在 repo root 以目前 interpreter 執行 `python -m apps.fluxdep`。GUI 組合根註冊 lab components，lib 不 import lab 或 apps。
 
 ## Design
 

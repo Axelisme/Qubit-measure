@@ -20,9 +20,6 @@ def test_launch_forwards_entry_context_to_gui(tmp_path, monkeypatch):
             return 2
 
     monkeypatch.setattr(subprocess, "Popen", ExitedProcess)
-    script = tmp_path / "scripts" / "app" / "run_dispersive_gui.py"
-    script.parent.mkdir(parents=True)
-    script.write_text("# synthetic launch target\n")
     config = MCPBridgeConfig(
         tool_prefix="dispersive_",
         server_display_name="test",
@@ -34,7 +31,7 @@ def test_launch_forwards_entry_context_to_gui(tmp_path, monkeypatch):
         wire_version=5,
         pid_file=tmp_path / "pid",
         log_file=tmp_path / "gui.log",
-        run_script_name=script.name,
+        gui_module="synthetic.dispersive",
     )
     app = server.build_server(config, tmp_path)
     with pytest.raises(RuntimeError, match="process exited during startup"):
@@ -48,7 +45,7 @@ def test_launch_forwards_entry_context_to_gui(tmp_path, monkeypatch):
             }
         )
     assert len(commands) == 1
-    assert commands[0][1] == str(script)
+    assert commands[0][1:3] == ["-m", "synthetic.dispersive"]
     assert commands[0][-6:] == [
         "--project-root",
         str(tmp_path / "project"),

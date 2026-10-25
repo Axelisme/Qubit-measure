@@ -22,7 +22,7 @@
         "--no-sync",
         "--",
         "python",
-        "lib/zcu_tools/mcp/fluxdep/server.py"
+        "mcp_servers/fluxdep.py"
       ],
       "exposure": "deferred"
     },
@@ -35,7 +35,7 @@
         "--no-sync",
         "--",
         "python",
-        "lib/zcu_tools/mcp/dispersive/server.py"
+        "mcp_servers/dispersive.py"
       ],
       "exposure": "deferred"
     }

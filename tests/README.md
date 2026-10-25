@@ -12,7 +12,7 @@
    有不同且穩定的責任時，可以拆成另一個 `test_*.py`，不按 ticket、phase 或 part 切檔。
    `T1` 等名稱也可能是真實物理量，依情境判讀，不靠字面判為 ticket 名。
 2. 目錄依 owning module，沿用 [AGENTS.md](../AGENTS.md) 的路徑對應：`tests/scripts/`、
-   `tests/tools/`、`tests/mcp_servers/` 和 `tests/migrations/` 對應 repo root 同名目錄，其餘框架測試對應 `lib/zcu_tools/` 下的模組。
+   `tests/tools/`、`tests/apps/`、`tests/mcp_servers/`、`tests/migrations/` 和 `tests/zcu_lab/` 對應 repo root 同名目錄，其餘框架測試對應 `lib/zcu_tools/` 下的模組。
    `contract`、`parity` 是既有保留段，該段以下豁免，但前綴仍須對應；不因新案例建立新的豁免目錄。
    跨模組契約放在擁有整合行為的模組目錄，不按每個參與模組複製案例。
    Notebook 專用且已抽離的 helper 仍在其模組路徑驗證介面，不必提升為通用工具。
