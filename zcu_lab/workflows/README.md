@@ -61,6 +61,9 @@ Saver 收 Completed、歷史 snapshot 與 scope.identity，不重新捕捉 evide
 Pane/MCP 以 operation/<name> 顯示目前 attempt，workflow 圖名不能用 operation/ 前綴。
 
 Operation 圖只作即時呈現。保存 PNG 要從 completed.value.result 重畫到 workflow 圖，再用 env.plots.save。
+保存尺寸不隨 GUI tile 改變。單面板為 640×480，frequency 為 1280×960，Rabi 為 1280×480，
+coherence lifetime 為 640×960。保存時沿用 constrained layout，未設定 layout 的圖套 tight layout。
+Overnight 與 overnight_mux 只保存 native 資料，不自動保存 PNG。
 Coherence 與 MIST 共用三張校準圖，每個完成的 flux 點保留一列掃描資料，僅供本次 run 畫圖。
 Frequency widening 以最後一次完整 attempt 取代該點的一列。Heatmap 各列保留自己的實際掃描座標，不把變動的掃描範圍當成同一個 grid。
 

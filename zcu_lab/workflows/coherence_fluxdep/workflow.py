@@ -185,7 +185,7 @@ def _summary(
 
     plots.draw(kind, draw)
     if directory is not None:
-        plots.save(kind, directory / f"{kind}-decay.png")
+        plots.save(kind, directory / f"{kind}-decay.png", figsize=(6.4, 9.6))
 
 
 def draw_summaries(

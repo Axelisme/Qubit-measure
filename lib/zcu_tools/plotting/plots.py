@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from copy import copy
 from pathlib import Path
 from typing import Protocol, TypeVar
 
+from matplotlib import rc_context
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 
@@ -170,7 +172,14 @@ class Plots(FigureCollection):
 
         self._host.call(draw_frame)
 
-    def save(self, name: str, path: str | Path) -> None:
+    def save(
+        self,
+        name: str,
+        path: str | Path,
+        *,
+        figsize: tuple[float, float] = (6.4, 4.8),
+        dpi: float = 100,
+    ) -> None:
         """Save an existing named figure on the host owner without refreshing.
 
         Execution is synchronous on the host owner thread and blocks the calling
@@ -178,13 +187,62 @@ class Plots(FigureCollection):
         GUI thread; expensive rendering can freeze the interface. This method
         invokes no callback and does not refresh. Saving does not restore
         artists removed by an earlier draw callback.
-        Use native Figure.savefig defaults and infer format from path. Saving is
-        allowed before or after finish. Parent directories are not created and
-        existing files follow native savefig overwrite behavior. Unknown names
+        figsize gives positive finite output dimensions in inches; dpi is the
+        positive finite output resolution. Defaults produce a 640 x 480 PNG,
+        independently of display size and savefig.bbox settings.
+        Preserve an existing layout engine, or use tight layout when absent.
+        Restore display size, layout and axes positions even if saving raises.
+        Infer format from path. Saving is allowed before or after finish.
+        Parent directories are not created. Existing files follow native savefig
+        overwrite behavior. Unknown names
         raise KeyError; host, rendering and I/O errors propagate.
         """
         figure = self[name]
-        self._host.call(lambda: figure.savefig(path))
+
+        def save_figure() -> None:
+            original_width, original_height = figure.get_size_inches()
+            original_layout = figure.get_layout_engine()
+            original_subplots = copy(figure.subplotpars)
+            positions = [
+                (
+                    axis,
+                    axis.get_position(original=True).frozen(),
+                    axis.get_position().frozen(),
+                    axis.get_in_layout(),
+                )
+                for axis in figure.axes
+            ]
+            with rc_context(
+                {
+                    "savefig.bbox": None,
+                    "figure.autolayout": False,
+                    "figure.constrained_layout.use": False,
+                }
+            ):
+                try:
+                    figure.set_size_inches(*figsize, forward=False)
+                    if original_layout is None:
+                        figure.set_layout_engine("tight")
+                    figure.savefig(path, dpi=dpi)
+                finally:
+                    figure.set_size_inches(
+                        float(original_width), float(original_height), forward=False
+                    )
+                    figure.set_layout_engine(original_layout)
+                    figure.subplotpars.update(
+                        left=original_subplots.left,
+                        right=original_subplots.right,
+                        bottom=original_subplots.bottom,
+                        top=original_subplots.top,
+                        wspace=original_subplots.wspace,
+                        hspace=original_subplots.hspace,
+                    )
+                    for axis, original, active, in_layout in positions:
+                        axis.set_position(original, which="original")
+                        axis.set_position(active, which="active")
+                        axis.set_in_layout(in_layout)
+
+        self._host.call(save_figure)
 
     def refresh(self, name: str) -> None:
         """Refresh a complete live frame after a batch of typed updates."""

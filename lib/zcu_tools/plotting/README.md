@@ -1,6 +1,6 @@
 # `zcu_tools.plotting` — 圖管理與 owner 更新
 
-**Last updated:** 2026-10-24
+**Last updated:** 2026-10-25
 
 **讀者：** framework-dev。具名原生圖、通用更新 handle 與診斷圖的分工。
 
@@ -27,7 +27,10 @@ checker，可回傳自己的 handle。既有 axes 必須屬於具名圖且尚未
 後續 draw 共用同一 presentation。Callback 失敗直接傳遞，不呈現、不 refresh，也不回滾。
 Caller 不得保留 active artists 供 worker 直接修改。Callback 可以清除 axes 或重建 layout，
 既有作者 handle 如何處理被移除的 artists，由該 callback 的契約決定。
-`save(name, path)` 在 owner 執行原生 savefig，不 refresh，finish 前後皆可用。
+`save(name, path, *, figsize=(6.4, 4.8), dpi=100)` 在 owner 以固定輸出尺寸保存，
+不沿用 GUI canvas 大小，預設 PNG 為 640×480。多面板由 caller 明列較大的 figsize。
+保存時沿用既有 layout engine，沒有 engine 時套 tight layout。保存成功或失敗都還原
+顯示尺寸、layout 與 axes 位置。不 refresh，finish 前後皆可用。
 
 ## 通用即時更新
 
