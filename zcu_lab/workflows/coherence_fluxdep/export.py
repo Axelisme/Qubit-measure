@@ -27,16 +27,15 @@ from zcu_tools.experiment.workflows.saved_run import (
 )
 from zcu_tools.resources.entry.storage import bind_record_table
 
+from zcu_lab.workflows.coherence_fluxdep.history import LifetimeKind
 from zcu_lab.workflows.coherence_fluxdep.lifetime_export import load_lifetime_trace
-from zcu_lab.workflows.coherence_fluxdep.measurements import (
-    LifetimeKind,
-    LifetimeResult,
-)
 from zcu_lab.workflows.coherence_fluxdep.samples import (
     SampleExportReport,
     append_records,
     prepare_samples,
 )
+from zcu_lab.workflows.coherence_fluxdep.stages.echo import EchoResult
+from zcu_lab.workflows.coherence_fluxdep.stages.ramsey import RamseyResult
 from zcu_lab.workflows.coherence_fluxdep.stages.t1 import T1Result
 from zcu_lab.workflows.coherence_fluxdep.workflow import CoherencePlan, CoherencePoint
 
@@ -56,7 +55,7 @@ class CoherenceExportReport:
     missing_records: tuple[Path, ...]
 
 
-def _validate_lifetime_evidence(item: T1Result | LifetimeResult) -> None:
+def _validate_lifetime_evidence(item: T1Result | RamseyResult | EchoResult) -> None:
     """Reject inconsistent completion files or accepted lifetime/error scalars."""
     if (item.status in {"accepted", "rejected"}) != (item.file is not None):
         raise ValueError(

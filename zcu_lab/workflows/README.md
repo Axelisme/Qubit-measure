@@ -75,6 +75,9 @@ Cfg 是位置參數，context 是 keyword-only。不要複製 core 的 pulse 序
 一趟開始建可變的 Pydantic point_record，未填欄位為 None。每個結果到了再填。
 Coherence 用 t1、t2ramsey、t2echo 三個欄位保存 lifetime，不再使用 measurements 列表。未量測或未到達的欄位為 None，讀取端不提供舊列表格式轉換。
 Coherence 的 calibrate_point 是校準複合 stage，內部依序呼叫 frequency、Rabi（依模式含 AmpRabi）、readout 的單實驗 helper，再回傳 PointCalibrationResult。主迴圈填各校準欄位，接著量 GE 與 lifetimes。
+T1、Ramsey、Echo 與 GE 的單實驗 helper 位於 `coherence_fluxdep/stages/`。各 stage 接收 `StageEnv`、本點已校準 pulses、自己的 settings 與本點 timing，不接收整份 plan 或 point record。
+Ramsey 與 Echo 各自回傳獨立的 frozen Result，記錄原有接受門檻的 `gates`。各 lifetime 與 GE 的 DAC 截斷值保存在自己的 `gain_clamped`，不重複寫入 point map。
+主迴圈填結果、更新各自的 accepted history，並以 `history.lifetime_guess` 計算 alpha=0.5 EWMA。T2 的 relax 另收本點 accepted T1，否則用 T1 EWMA／seed。
 校準遇到 unexpected exception 時不回傳 aggregate。Run 失敗，point 只保留主迴圈已填的欄位；已存的 native raw 仍在磁碟。Expected failed/rejected 正常回傳，不受影響。
 主 body 用 try/finally，只在 finally 同步呼叫 `iteration.commit(point_record)` 一次，不加 await。
 量測間若 iteration.cancelled，補 status="skipped" 再 continue，下一點仍可執行。
@@ -118,7 +121,7 @@ Frequency widening 以最後一次完整 attempt 取代該點的一列。Heatmap
 | `mist/<mode>/vs_flux` | 各 preparation 的背景扣除及 3σ 截斷 map。 | `map-<mode>.png` |
 
 Coherence 的 `measure_singleshot` 預設關閉。打開後，GE 在 readout 校準之後、lifetimes 之前執行。
-GE 要求本點 Rabi 已接受。`singleshot` 子表單控制 flux 最小間距與每種 preparation 的 shots。
+GE 要求本點 Rabi 已接受。主迴圈判斷資格與最小間距，呼叫 `stages.ge.measure_ge` 後填 `singleshot`；每個已保存 Completed（含 partial）更新最後 GE flux。`singleshot` 子表單控制 flux 最小間距與每種 preparation 的 shots。
 預設是暫定模擬值：間距 0、shots 100000。GE 只保存 `singleshot-ge.h5`，不擬合、不新增 workflow 圖；core 的 operation 即時圖照常。
 
 Coherence 與 MIST 的 frequency stage 使用獨立 `probe_pulse`，保留它的 waveform 與長度，頻率由 tracker 的掃描設定。

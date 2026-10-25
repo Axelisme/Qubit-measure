@@ -77,8 +77,8 @@ T1、GE、readout 與 excited MIST 要求本點 accepted π；Ramsey／Echo 另�
 缺少本點 pulse 時，該 consumer 記 skipped 並寫明依賴。本點 π/2 不可信時，不阻擋只需 π 的 consumer。
 Point 的 calibration_sources 記 consumer、need=now、source_index、source_flux 與 fallback=False。readout_source 另記沿用的 readout 校準來源，source_index=None 代表固定 host seed。
 
-`CoherencePoint` 保存 frequency、rabi、readout、singleshot，以及獨立的 t1、t2ramsey、t2echo 欄位。T1Result 是獨立型別；RamseyResult、EchoResult 暫時沿用共同欄位的具名版本。
-T1 的 cfg builder 截斷 π/readout 的 DAC gain，將 before/after 記在 t1.gain_clamped，不再寫 point 的 gain_clamped["t1"]。T2/GE 暫時沿用 point-level gain_clamped map。
+`CoherencePoint` 保存 frequency、rabi、readout、singleshot，以及獨立的 t1、t2ramsey、t2echo 欄位。T1Result、RamseyResult 與 EchoResult 各自是獨立型別。
+各 lifetime 與 GE 的 cfg builder 截斷 DAC gain，將 before/after 保存在自己的 result.gain_clamped。CoherencePoint 不另存 point-level gain_clamped map。Ramsey／Echo 的 gates 記錄原有接受比較，reason 列出未通過的項目。
 `singleshot` 保留 measured／skipped／failed、reason 與相對 native 檔名。未開、Rabi 未接受、間距不足或取消皆記 skipped 原因。
 完整擷取記 measured，Schedule failure 記 failed 且沒有檔名，partial 記 failed／partial 並保留檔名。未走到此 stage 的點記 skipped／not reached，歷史 record 缺欄位時為 None。
 三個 lifetime 欄位未量測或未到達時是 None，包含關閉的項目。開啟但失敗、拒絕或 skipped 時保存具名結果與原因。這是 2026-10-25 的格式切換；沒有真實舊資料，不支援舊 measurements 格式讀取。

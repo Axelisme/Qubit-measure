@@ -1,10 +1,10 @@
 """Science policies for named workflows; importing starts no experiment."""
 
-from zcu_lab.workflows.coherence_fluxdep.measurements import LifetimeResult
+from zcu_lab.workflows.coherence_fluxdep.stages.echo import EchoResult
+from zcu_lab.workflows.coherence_fluxdep.stages.ge import SingleshotResult
+from zcu_lab.workflows.coherence_fluxdep.stages.ramsey import RamseyResult
 from zcu_lab.workflows.coherence_fluxdep.t2 import (
     T2EchoTunables,
-    T2Plan,
-    T2Point,
     T2RamseyTunables,
 )
 from zcu_lab.workflows.coherence_fluxdep.workflow import (

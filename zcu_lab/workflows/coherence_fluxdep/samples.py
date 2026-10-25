@@ -27,7 +27,7 @@ from zcu_lab.workflows.common.samples import (
 )
 
 if TYPE_CHECKING:
-    from zcu_lab.workflows.coherence_fluxdep.singleshot import SingleshotResult
+    from zcu_lab.workflows.coherence_fluxdep.stages.ge import SingleshotResult
     from zcu_lab.workflows.coherence_fluxdep.workflow import (
         CoherencePlan,
         CoherencePoint,
