@@ -34,6 +34,7 @@ Timing 在所有 group resonators 都有有效 `kappa`，且 group 有 `time_of_
 
 任一 resonator 的 `kappa` 缺失或 null，`trig_offset` 與 `length` 留空必填，不使用其餘成員的子集推導。
 Group 的 `time_of_fly` 缺失或 null，`trig_offset` 與 `length` 留空必填。
+`readout/mux:blank` 本身不預填 `trig_offset`，缺少推導來源時不會退回 0。
 上述缺值情境仍填入 `ro_length = 1.0 us`。
 已設的 kappa 須為有限正數，mixer 頻率須為有限數，group time_of_fly 須為有限非負數。
 無效的已設來源會讓 Open／Reset 報錯。

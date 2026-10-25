@@ -12,7 +12,11 @@ mechanics：analysis carriers、writeback helpers 與跨實驗的 context utilit
 `mux_forms.py` 集中八個 mux Forms 的 readout 初值，以及七個 qubit Forms 的固定名稱與 recovery 初值。
 Qubit Forms 先要求完整 qubit/resonator 綁定。缺 readout slot 時從 group resonators 產生清單，每個 resonator 一個槽位。
 Group tones 的 freq 取捕捉的 resonator.freq，label 初值為 resonator 名稱。缺 slot 時，gen_ch 取 `$mux.wiring.gen_ch`，第 i 個 tone 的 ro_ch 取 `$mux.wiring.ro_ch[i]`，gain 填 0.1。gen_ch、mixer_freq 與 freq 使用 Expr 初值。各 tone 的 ro_ch 是從固定 capture 的 group.wiring.ro_ch[i] 取出的整數初值，scalar Expr 不支援 indexing。操作員仍須確認通道與振幅。
-`mux_readout_initial` 有 captured readout 時回傳 Slot ref，使用 library 完整 tones 與 scalar 設定。沒有時以 `readout/mux:blank` Template 的 scalar 初值為來源，再加 group tones 與 group wiring。Blank 的 mixer_freq 從 `$mux.mixer_freq` 取初值，缺失或 null 時留空必填，不依賴 tone 頻率或 kappa。length 與 ro_length 保持必填且未填，不猜時長。
+`mux_readout_initial` 有 captured readout 時回傳 Slot ref，使用 library 完整 tones 與 scalar 設定。
+沒有時以 `readout/mux:blank` Template 的 scalar 初值為來源，再加 group tones 與 group wiring。
+Blank 的 mixer_freq 從 `$mux.mixer_freq` 取初值，缺失或 null 時留空必填，不依賴 tone 頻率或 kappa。
+length、ro_length 與 trig_offset 保持必填且未填，不猜時長或以 0 代替 trigger timing。
+未選 wait_for_ringup 時，即使 group 有 time_of_fly 也不推導 timing。
 `mux/onetone` 以 `wait_for_ringup=True` 選擇副本加 group tones，並啟用 timing 初值。
 有 captured readout 時，helper 從固定 capture 取完整 group 已設成員的最小 kappa，在來源 trig_offset 上加五倍 ringup 等待。
 此路徑忽略缺 leaf 或 null 的 kappa。全未設時不加等待，trig_offset 保留來源值。

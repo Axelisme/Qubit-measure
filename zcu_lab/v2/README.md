@@ -104,7 +104,9 @@ Module 可整組引用或 inline 編輯，tones 使用 picker 逐項編輯。
 七個 mux qubit Forms 有 readout slot 時引用 library，完整 tones 與 scalar 設定取自該模組。
 缺 slot 時從 blank mux 範本加 group tones，填入 resonator 校準頻率與名稱 label。
 Gen_ch 取 `$mux.wiring.gen_ch`，各 tone 的 ro_ch 取 `$mux.wiring.ro_ch[i]`，順序與 group resonators 相同，gain 填 0.1。
-Pulse length 與 ro_length 留空必填，頻率缺失或無效時也留空必填。
+Pulse length、ro_length 與 trig_offset 留空必填。
+即使 group 有 time_of_fly，也不替 qubit Forms 推導 timing。
+頻率缺失或無效時也留空必填。
 `mux/onetone` 有 readout slot 時使用副本，以 group tones 與 ringup timing 作初值。
 Ringup-copy 路徑保留既有初值：tone gain 為 0.1，ro_ch 按 group 順序從 0 起算。
 Mux onetone 缺 slot 時仍使用 blank 範本，ADC window 固定填入 1.0 us，不依賴 kappa 或 time_of_fly。
@@ -114,7 +116,7 @@ Trigger 取 `$mux.time_of_fly` 加五倍 ringup 時間，pulse 長度取 trigger
 上述缺值情境仍保留 1.0 us 的 ADC window。
 Readout 欄位說明列來源與未經裝置確認的限制，Run 仍執行 capability 檢查。
 Label 可編輯且可重複，不當 identity。固定槽位只限制增刪，不防止整列表交換值。
-Library 的 `readout/mux:blank` 不預填必需的通道、gain 或時長。Mux Forms 的 fallback 透過 typed model-list seeds 加入 tones。
+Library 的 `readout/mux:blank` 不預填必需的通道、gain、時長或 trig_offset，不以 0 代替未校準的 trigger timing。Mux Forms 的 fallback 透過 typed model-list seeds 加入 tones。
 九個 FTF Forms 有 readout slot 時同樣引用 library。八張缺 slot 時提供 blank mux 範本，rb 缺 slot 時保持 Invalid。
 操作員必須確認通道與功率；範本不是硬體安全預設。
 
