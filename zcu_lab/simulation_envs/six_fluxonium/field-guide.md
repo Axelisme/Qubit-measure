@@ -233,7 +233,17 @@ entry resonator frequency uses MHz. Qubit `freq` remains null until measured.
 | Q5 | 6.0 | 0.8 | 0.5 | R5 | 7.40 |
 | Q6 | 4.2 | 1.2 | 0.9 | R6 | 7.50 |
 
-Each qubit uses q_cap 1e6, q_ind 1e8, xqp 2e-7 and aphi 2e-6 at 0.05 K.
+Each qubit's `chip.qubit` block also holds the loss and noise inputs below.
+The values are in `default.yaml`.
+
+| Field | Meaning | Unit |
+| --- | --- | --- |
+| `q_cap` | Constant Q of capacitive (dielectric) loss | Dimensionless |
+| `q_ind` | Constant Q of inductive loss | Dimensionless |
+| `xqp` | Quasiparticle fraction | Dimensionless |
+| `aphi` | 1/f flux-noise amplitude of this loop | Phi0/sqrt(Hz) |
+
+`temperature_k`, next to `chip.qubit`, is the bath temperature in K.
 Each resonator uses external linewidth 1.0 MHz and internal linewidth 0.1 MHz,
 both kappa divided by 2*pi. The full-charge coupling coefficient is 0.03 GHz.
 There is no qubit-qubit coupling or crosstalk matrix. All six circuits respond
