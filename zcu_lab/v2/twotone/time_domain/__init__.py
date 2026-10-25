@@ -1,12 +1,16 @@
 from zcu_lab.v2.twotone.time_domain.cpmg.core import CPMG_Cfg, CPMG_Exp
 from zcu_lab.v2.twotone.time_domain.t1.core import (
-    ScanT1WithToneAnalysis,
-    ScanT1WithToneCfg,
-    ScanT1WithToneExp,
     T1Analysis,
     T1AnalyzeOptions,
     T1Cfg,
     T1Exp,
+)
+from zcu_lab.v2.twotone.time_domain.t1.scan_t1_with_tone import (
+    ScanT1WithToneAnalysis,
+    ScanT1WithToneCfg,
+    ScanT1WithToneExp,
+)
+from zcu_lab.v2.twotone.time_domain.t1.t1_with_tone import (
     T1WithToneAnalyzeOptions,
     T1WithToneCfg,
     T1WithToneExp,

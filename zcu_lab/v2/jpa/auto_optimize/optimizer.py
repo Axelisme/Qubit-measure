@@ -707,34 +707,6 @@ class JPAOptimizer:
         self._phase = value
 
     # Compatibility properties for external access
-    @property
-    def phase1_budget(self) -> int:
-        return self.budget.phase1
-
-    @property
-    def remaining_budget(self) -> int:
-        return self.budget.remaining
-
-    @property
-    def num_flux_points(self) -> int:
-        return len(self.phase1.flux_grid)
-
-    @property
-    def budget_per_flux(self) -> int:
-        return self.budget.per_flux_slice
-
-    @property
-    def flux_best(self) -> dict[float, tuple[float, float, float]]:
-        return self.data.flux_best
-
-    @property
-    def history_X(self) -> list[list[float]]:
-        return self.data.history_X
-
-    @property
-    def history_y(self) -> list[float]:
-        return self.data.history_y
-
     def next_params(self, i: int, last_snr: float | None) -> Point3D | None:
         """
         Get the next parameter set to evaluate.
