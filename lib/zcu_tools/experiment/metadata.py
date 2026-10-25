@@ -25,7 +25,7 @@ from zcu_tools.resources.entry.aliases import AliasValue
 _WORKFLOW_RUN_ID_PATTERN = r"[0-9a-f]{32}"
 _RUN_ID_PATTERN = (
     rf"^(?:[0-9]{{8}}T[0-9]{{6}}Z-[a-z0-9]{{6}}|"
-    rf"{_WORKFLOW_RUN_ID_PATTERN}(?:-[0-9]{{6}}-[1-9][0-9]*)?)$"
+    rf"{_WORKFLOW_RUN_ID_PATTERN}-[0-9]{{6}}-[1-9][0-9]*)$"
 )
 
 
@@ -88,14 +88,12 @@ class SoftwareProvenance:
 class RunMetadata(BaseModel):
     """Historical identity and acquisition facts stored in docs/metadata.
 
-    run_id must fully match one of three ASCII grammars:
-    experiment [0-9]{8}T[0-9]{6}Z-[a-z0-9]{6}, workflow root [0-9a-f]{32},
-    or workflow operation [0-9a-f]{32}-[0-9]{6}-[1-9][0-9]*. The operation
-    keeps the complete root, six-digit iteration and positive attempt without
-    leading zeros. A merged workflow output uses the root unchanged, with
-    timestamps and completion from the manifest, not a single acquisition.
+    run_id must fully match one of two ASCII grammars:
+    experiment [0-9]{8}T[0-9]{6}Z-[a-z0-9]{6}, or workflow operation
+    [0-9a-f]{32}-[0-9]{6}-[1-9][0-9]*. The latter keeps the complete workflow
+    root, six-digit iteration and positive attempt without leading zeros.
     These grammars do not validate calendar semantics.
-    experiment is the declaration's tag or merged output's workflow name.
+    experiment is the declaration's tag.
     started_at/finished_at are UTC ISO timestamps or None for absent evidence.
     completion is complete, partial, stopped or unknown, not a save status.
     snapshot is captured entry state; provenance is software/host evidence.
@@ -173,19 +171,18 @@ def validate_workflow_run_id(run_id: str) -> None:
 
 
 def validate_run_id(run_id: str) -> None:
-    """Accept an experiment, workflow root or workflow operation ID.
+    """Accept exactly one of the experiment or workflow operation ID grammars.
 
     run_id must fully match [0-9]{8}T[0-9]{6}Z-[a-z0-9]{6} for an experiment,
-    [0-9a-f]{32} for a workflow root used by merged outputs, or
-    [0-9a-f]{32}-[0-9]{6}-[1-9][0-9]* for a workflow operation. The operation
-    preserves its lowercase hex root, six-digit iteration and positive attempt
-    without leading zeros. No calendar semantics are inferred.
+    or [0-9a-f]{32}-[0-9]{6}-[1-9][0-9]* for a workflow operation. The workflow
+    form preserves its lowercase hex root, six-digit iteration and positive
+    attempt without leading zeros. No calendar semantics are inferred.
     Return None for valid strings without changing them. Invalid strings raise
     ValueError naming run_id; nonstrings raise TypeError.
     """
     if re.fullmatch(_RUN_ID_PATTERN, run_id) is None:
         raise ValueError(
             "/: run_id must be an experiment timestamp with six-character identity "
-            "or a workflow's 32-character lowercase hex root, optionally followed "
-            "by a six-digit iteration and positive attempt without leading zeros"
+            "or a workflow's 32-character lowercase hex root, six-digit iteration "
+            "and positive attempt without leading zeros"
         )

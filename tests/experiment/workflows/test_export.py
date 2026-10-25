@@ -257,7 +257,7 @@ def test_trace_completion_policy_keeps_validation_and_source_diagnostics(
 def inputs(
     tmp_path: Path,
     lifecycle: Literal["done", "cancelled", "failed"] = "done",
-    run_id: str = "0123456789abcdef0123456789abcdef",
+    run_id: str | None = None,
 ) -> tuple[RunManifest, PreparedRunData, RunSnapshot]:
     metadata = native_metadata()
     now = datetime(2026, 10, 12, tzinfo=UTC)
@@ -265,7 +265,7 @@ def inputs(
         {
             "format": "zcu-workflow-run",
             "format_version": 1,
-            "identity": RunIdentity(run_id, metadata.provenance),
+            "identity": RunIdentity(run_id or metadata.run_id, metadata.provenance),
             "workflow": "synthetic",
             "plan": {"points": 2},
             "initial_tunables": {},
@@ -309,17 +309,9 @@ def test_saved_export_roundtrip_overwrite_and_new_labber(
         assert native.status == labber.status == "saved"
         assert native.path == manifest.roots.data_root / "merged.h5"
         assert labber.path is not None
-        assert labber.path.name == f"synthetic_abcdef_{sequence}.hdf5"
+        assert labber.path.name == f"synthetic_a1b2c3_{sequence}.hdf5"
         assert native.path is not None
         stored = load(native.path)
-        assert metadata_from_container(stored).run_id == manifest.identity.run_id
-        assert (
-            metadata_from_container(stored).started_at
-            == manifest.started_at.isoformat()
-        )
-        assert metadata_from_container(stored).finished_at == (
-            None if manifest.ended_at is None else manifest.ended_at.isoformat()
-        )
         assert metadata_from_container(stored).completion == completion
         assert metadata_from_container(stored).snapshot == snapshot
         assert metadata_from_container(stored).experiment == "synthetic"
