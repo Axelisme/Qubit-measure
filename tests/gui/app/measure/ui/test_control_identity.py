@@ -726,8 +726,7 @@ def test_unsaved_tab_close_confirmation_accept_and_cancel(control_ui, qapp, deci
 
 
 @pytest.mark.parametrize("control_ui", ["qt"], indirect=True)
-@pytest.mark.parametrize("decision", ["local", "cancel"])
-def test_inspect_dirty_save_and_cancel(control_ui, qapp, decision):
+def test_inspect_rename_applies_on_enter_and_closes_without_prompt(control_ui, qapp):
     ui = control_ui
     capture = ui.controller.context_control.read_context()
     ui.controller.context_control.set_waveform(
@@ -744,31 +743,14 @@ def test_inspect_dirty_save_and_cancel(control_ui, qapp, decision):
         ("waveforms", "Q1", "waveforms", "pulse"), object_name="inspect.library"
     )
     assert driver.observe(object_name="inspect.entry.name").text == "Q1.waveforms.pulse"
-    name = inspect.findChild(QLineEdit, "inspect.entry.name")
-    assert name is not None
-    name.setText("Q1.waveforms.renamed")
 
-    def choose(prompt: QMessageBox) -> None:
-        selected = prompt.button(
-            QMessageBox.StandardButton.Cancel
-            if decision == "cancel"
-            else QMessageBox.StandardButton.Save
-        )
-        assert selected is not None and selected.isEnabled()
-        selected.click()
+    driver.enter_text(value="Q1.waveforms.renamed", object_name="inspect.entry.name")
 
-    modal_action(qapp, inspect.close, [(QMessageBox, choose)])
-    assert (
-        "Q1.waveforms.pulse"
-        in ui.controller.context_control.read_context().library.waveform_keys()
-    ) is (decision != "local")
-    assert (
-        "Q1.waveforms.renamed"
-        in ui.controller.context_control.read_context().library.waveform_keys()
-    ) is (decision == "local")
-    if DialogName.INSPECT in ui.window.list_open_dialogs():
-        name.setText("Q1.waveforms.pulse")
-        assert inspect.close()
+    keys = ui.controller.context_control.read_context().library.waveform_keys()
+    assert "Q1.waveforms.renamed" in keys
+    assert "Q1.waveforms.pulse" not in keys
+    assert inspect.close()
+    assert DialogName.INSPECT not in ui.window.list_open_dialogs()
 
 
 @pytest.mark.parametrize("stage", ["selection", "file-chooser"])
