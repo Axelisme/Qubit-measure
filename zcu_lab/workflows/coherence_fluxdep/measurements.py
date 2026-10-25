@@ -70,6 +70,36 @@ class LifetimeResult:
     models: tuple[LifetimeModelRecord, ...] = ()
 
 
+@dataclass(frozen=True, kw_only=True)
+class RamseyResult(LifetimeResult):
+    """Ramsey outcome with kind=t2ramsey and optional values defaulting to None.
+
+    Status, reason, microsecond values, native file, detune and models retain
+    LifetimeResult's meanings. Use keywords to record an enabled stage's skip.
+    """
+
+    kind: Literal["t2ramsey"] = "t2ramsey"
+    reason: str | None = None
+    lifetime_us: float | None = None
+    error_us: float | None = None
+    file: str | None = None
+
+
+@dataclass(frozen=True, kw_only=True)
+class EchoResult(LifetimeResult):
+    """Echo outcome with kind=t2echo and optional values defaulting to None.
+
+    Status, reason, microsecond values, native file and models retain
+    LifetimeResult's meanings. Use keywords to record an enabled stage's skip.
+    """
+
+    kind: Literal["t2echo"] = "t2echo"
+    reason: str | None = None
+    lifetime_us: float | None = None
+    error_us: float | None = None
+    file: str | None = None
+
+
 def lifetime_guess(initial_us: float, history: LifetimeHistory) -> float:
     """Return this lifetime's existing alpha=.5 delay-grid EWMA in microseconds.
 
