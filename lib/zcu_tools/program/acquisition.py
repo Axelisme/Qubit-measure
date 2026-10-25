@@ -229,7 +229,7 @@ class EarlyStopMixin(TypedAcquireMixin):
 
     def _finish_accumulated_round(self, cancel_flag: CancelFlagProtocol) -> bool:
         # Mirrors the "accumulated" branch of qick's AcquireMixin.finish_round
-        # (qick 0.2.418, qick/qick_asm.py) with cancel_flag checks injected.
+        # (qick 0.2.436, qick/qick_asm.py) with cancel_flag checks injected.
         # qick's loop has no early-exit seam (its `while` only checks
         # `count < total_count`), so the copy is deliberate. On QICK upgrades,
         # manually compare AcquireMixin.finish_round and port relevant changes.
