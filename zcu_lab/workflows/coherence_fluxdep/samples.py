@@ -1,201 +1,209 @@
-"""Coherence accepted scalars and actual last-Completed device coordinates."""
+"""One record row per committed flux point, including rejected/skipped stages."""
 
-from dataclasses import dataclass
-from math import isfinite
+from __future__ import annotations
+
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-from pydantic import BaseModel, ConfigDict, Field, JsonValue
-from zcu_tools.datafile import load
-from zcu_tools.experiment.native_persistence import metadata_from_container
-from zcu_tools.experiment.workflows.export import load_trace
-from zcu_tools.experiment.workflows.saved_run import SavedRecord, native_path
-from zcu_tools.resources.record_table import JsonlRecordTable
+from pydantic import JsonValue
+from zcu_tools.datafile import JsonObject
+from zcu_tools.experiment.workflows.saved_run import SavedRecord
 
-from zcu_lab.v2.singleshot.ge.core import GE_Exp
-from zcu_lab.v2.twotone.freq.core import FreqExp
-from zcu_lab.v2.twotone.rabi.len_rabi.core import LenRabiExp
-from zcu_lab.v2.twotone.ro_optimize.freq_gain.core import FreqGainExp
-from zcu_lab.workflows.coherence_fluxdep.lifetime_export import load_lifetime_trace
-from zcu_lab.workflows.coherence_fluxdep.workflow import CoherencePlan, CoherencePoint
+from zcu_lab.workflows.common.samples import (
+    SampleExportError as SampleExportError,
+)
+from zcu_lab.workflows.common.samples import (
+    SampleExportReport as SampleExportReport,
+)
+from zcu_lab.workflows.common.samples import (
+    SampleRow,
+    append_sample,
+    lifetime_fields,
+    native_devices,
+    sample_row,
+)
+from zcu_lab.workflows.common.samples import (
+    append_records as append_records,
+)
 
-
-class SampleField(BaseModel):
-    """Producer-defined finite JSON field, never owner metadata."""
-
-    model_config = ConfigDict(
-        frozen=True, extra="forbid", strict=True, allow_inf_nan=False
+if TYPE_CHECKING:
+    from zcu_lab.workflows.coherence_fluxdep.singleshot import SingleshotResult
+    from zcu_lab.workflows.coherence_fluxdep.workflow import (
+        CoherencePlan,
+        CoherencePoint,
     )
-    name: str = Field(min_length=1)
-    value: JsonValue
-
-    def model_post_init(self, _context: object) -> None:
-        if self.name in {"run_id", "point", "at", "source"}:
-            raise ValueError("Sample field cannot replace owner metadata")
-
-
-@dataclass(frozen=True)
-class SampleRow:
-    """One sample: workflow run/index key and uniquely named validated fields."""
-
-    key: str
-    fields: tuple[SampleField, ...]
-
-    def __post_init__(self) -> None:
-        if not self.key or len({f.name for f in self.fields}) != len(self.fields):
-            raise ValueError("Sample key must be nonempty and field names unique")
+    from zcu_lab.workflows.common.calibration_results import (
+        FrequencyResult,
+        RabiResult,
+        ReadoutResult,
+    )
 
 
-class SampleExportError(RuntimeError):
-    """I/O failure retains written_count prefix and original cause/__cause__."""
-
-    def __init__(self, written_count: int, cause: OSError) -> None:
-        self.written_count = written_count
-        self.cause = cause
-        super().__init__(f"Sample export failed after {written_count} rows: {cause}")
-
-
-@dataclass(frozen=True)
-class SampleExportReport:
-    """Successful append receipt: workflow identity, this-call count and owner path."""
-
-    run_id: str
-    written_count: int
-    path: Path
-
-
-def append_records(
-    run_id: str,
-    *,
-    rows: tuple[SampleRow, ...],
-    table: JsonlRecordTable,
-    point: str | None,
-) -> SampleExportReport:
-    """Append an entirely prepared batch, retaining prefix/count/cause on OSError.
-
-    table is the explicitly bound result/component owner. point is the historical
-    plan point. Retry appends every row; owner reads latest complete row per key.
-    All rows must already be validated. No ledger/accept event or rollback occurs.
-    """
-    if not run_id:
-        raise ValueError("Sample export requires a run_id")
-    written = 0
-    for row in rows:
-        try:
-            table.append(
-                run_id=row.key,
-                point=point,
-                source=f"workflow:{run_id}",
-                at=None,
-                **{field.name: field.value for field in row.fields},
-            )
-        except OSError as cause:
-            raise SampleExportError(written, cause) from cause
-        written += 1
-    return SampleExportReport(run_id, written, table.path)
-
-
-def _positive(value: float | None, name: str) -> float:
-    if value is None or not isfinite(value) or value <= 0:
-        raise ValueError(f"Accepted {name} must be finite and positive")
-    return value
-
-
-def _last_completed(saved: SavedRecord[CoherencePoint]) -> str:
-    point = saved.record
-    references: list[str] = []
-    # Validate every explicit reference, not just the snapshot chosen for the row.
-    for file in point.frequency.files if point.frequency is not None else ():
-        load_trace(saved.directory, file, FreqExp.AXES_SPEC)
-        references.append(file)
-    if point.rabi is not None and point.rabi.file is not None:
-        load_trace(saved.directory, point.rabi.file, LenRabiExp.AXES_SPEC)
-        references.append(point.rabi.file)
-    if point.readout is not None and point.readout.file is not None:
-        load_trace(saved.directory, point.readout.file, FreqGainExp.AXES_SPEC)
-        references.append(point.readout.file)
-    if point.singleshot is not None and point.singleshot.file is not None:
-        load_trace(
-            saved.directory, point.singleshot.file, GE_Exp.AXES_SPEC, allow_stopped=True
+def _native_files(point: CoherencePoint) -> tuple[str, ...]:
+    files = list(point.frequency.files if point.frequency else ())
+    if point.rabi is not None:
+        files.extend(
+            f
+            for f in (point.rabi.file, point.rabi.amp.file if point.rabi.amp else None)
+            if f
         )
-        references.append(point.singleshot.file)
+    if point.readout and point.readout.file:
+        files.append(point.readout.file)
+    if point.singleshot and point.singleshot.file:
+        files.append(point.singleshot.file)
     for item in (point.t1, point.t2ramsey, point.t2echo):
-        if item is not None and item.file is not None:
-            load_lifetime_trace(saved.directory, item)
-            references.append(item.file)
-    if not references:
-        raise ValueError(
-            f"{saved.record_path}: Accepted sample requires a Completed acquisition"
+        if item and item.file:
+            files.append(item.file)
+    return tuple(files)
+
+
+def _frequency_fields(result: FrequencyResult | None) -> JsonObject:
+    fields: JsonObject = {
+        "status": result.status if result else "skipped",
+        "reason": result.reason if result else "not attempted",
+        "freq_mhz": None,
+        "err_mhz": None,
+        "fwhm_mhz": None,
+        "probe_gain": None,
+    }
+    if result is None or result.status != "accepted":
+        return fields
+    fields["freq_mhz"] = result.frequency_mhz
+    if result.probe_gains:
+        fields["probe_gain"] = result.probe_gains[-1]
+    if result.scans:
+        diagnostics = result.scans[-1].diagnostics
+        fields["err_mhz"] = diagnostics.center_error_mhz
+        fields["fwhm_mhz"] = diagnostics.fwhm_mhz
+    return fields
+
+
+def _rabi_mode(result: RabiResult | None) -> str | None:
+    # Describe the saved stages, not an unrecorded requested mode.
+    if result is None:
+        return None
+    if result.amp is not None:
+        return "len_then_amp" if result.len_status else "amp_only"
+    return "len_only" if result.file else None
+
+
+def _rabi_fields(result: RabiResult | None, amp: JsonValue) -> JsonObject:
+    fields: JsonObject = {
+        "status": result.status if result else "skipped",
+        "reason": result.reason if result else "not attempted",
+        "mode": _rabi_mode(result),
+        "amp": amp,
+        "pi_len_us": None,
+        "pi_gain": None,
+        "pi2_len_us": None,
+        "pi2_gain": None,
+    }
+    if result is None or result.status != "accepted":
+        return fields
+    fields["pi_len_us"] = result.pi_length_us
+    fields["pi_gain"] = result.drive_gain
+    fields["pi2_len_us"] = result.pi2_length_us
+    if result.pi2_length_us is not None:
+        fields["pi2_gain"] = (
+            result.pi2_drive_gain
+            if result.pi2_drive_gain is not None
+            else result.drive_gain
         )
-    return references[-1]
+    return fields
 
 
-def _coordinate(
-    saved: SavedRecord[CoherencePoint], device: str
-) -> tuple[SampleField, SampleField]:
-    path = native_path(saved.directory, _last_completed(saved))
-    snapshot = metadata_from_container(load(path)).device_snapshot
-    if snapshot is None or device not in snapshot:
-        raise ValueError(f"{path}: Native snapshot lacks flux device {device}")
-    value, unit = snapshot[device].get("value"), snapshot[device].get("value_unit")
-    if (
-        isinstance(value, bool)
-        or not isinstance(value, (int, float))
-        or not isfinite(value)
+def _readout_fields(result: ReadoutResult | None) -> JsonObject:
+    fields: JsonObject = {
+        "status": result.status if result else "skipped",
+        "reason": result.reason if result else "not attempted",
+        "freq_mhz": None,
+        "gain": None,
+    }
+    if result is not None and result.status == "accepted":
+        fields["freq_mhz"] = result.frequency_mhz
+        fields["gain"] = result.gain
+    return fields
+
+
+def _singleshot_fields(result: SingleshotResult | None) -> JsonObject:
+    if result is None:
+        return {
+            "status": "skipped",
+            "reason": "disabled or not attempted",
+            "file": None,
+        }
+    return {"status": result.status, "reason": result.reason, "file": result.file}
+
+
+def point_sample(
+    run_id: str, plan: CoherencePlan, point: CoherencePoint, directory: Path
+) -> SampleRow:
+    """Prepare one live/offline row from the point and its explicit native files.
+
+    Only accepted primary values are included. The last saved acquisition supplies
+    all devices; no acquisition means null, not a live or plan snapshot. Flux
+    records the commanded setpoint separately. Missing stages are skipped with a
+    reason. Models preserve both fit diagnostics, including secondary lifetimes.
+    Rabi mode describes saved stages, or null when no Rabi acquisition is recorded.
+    """
+    encoded = point.model_dump(mode="json")
+    fields: JsonObject = {
+        "index": point.index,
+        "status": point.status,
+        "flux": {"device": plan.flux_dev, "value": point.flux, "unit": plan.flux_unit},
+        "devices": native_devices(directory, _native_files(point)),
+        "frequency": _frequency_fields(point.frequency),
+        "rabi": _rabi_fields(
+            point.rabi, encoded["rabi"]["amp"] if point.rabi else None
+        ),
+        "readout": _readout_fields(point.readout),
+        "singleshot": _singleshot_fields(point.singleshot),
+    }
+    # Point's JSON preserves dataclass model diagnostics without another mirror schema.
+    for name, item in (
+        ("t1", point.t1),
+        ("t2ramsey", point.t2ramsey),
+        ("t2echo", point.t2echo),
     ):
-        raise ValueError(f"{path}: Device value must be finite real")
-    if not isinstance(unit, str) or not unit:
-        raise ValueError(f"{path}: Device value_unit must be nonempty")
-    return SampleField(name="dev_value", value=value), SampleField(
-        name="dev_unit", value=unit
+        models = encoded[name]["models"] if item is not None else []
+        fields[name] = lifetime_fields(
+            item.status if item else "skipped",
+            item.reason if item else "disabled or not attempted",
+            item.lifetime_us if item else None,
+            item.error_us if item else None,
+            models,
+            detune_mhz=item.detune_mhz if item else None,
+        )
+    return sample_row(f"{run_id}/{point.index}", fields)
+
+
+def append_point_sample(
+    run_id: str, plan: CoherencePlan, point: CoherencePoint, directory: Path
+) -> None:
+    """Append immediately after commit; no entry destination means no auto write.
+
+    Append errors propagate after the point is already committed. Offline
+    --result can replay it using the same point_sample projection and stable key.
+    """
+    if plan.result_path is None:
+        return
+    qubit = plan.snapshot.roles["qubit"]
+    if not isinstance(qubit, str):
+        raise ValueError("Sample export requires one qubit name")
+    append_sample(
+        plan.result_path,
+        qubit,
+        run_id,
+        plan.snapshot.point,
+        point_sample(run_id, plan, point, directory),
     )
 
 
 def prepare_samples(
     run_id: str, plan: CoherencePlan, points: tuple[SavedRecord[CoherencePoint], ...]
 ) -> tuple[SampleRow, ...]:
-    """Prepare at most one row per point: accepted frequency OR any lifetime.
+    """Prepare every committed point with exactly the live sample projection.
 
-    Only accepted values appear in MHz/us fields (t1, t2r, t2e). Calibration
-    success is not a row gate. Coordinates preserve last Completed native device
-    value/unit in frequency→Rabi→readout→GE→T1→Ramsey→Echo order, including rejected
-    fits. No plan/live/alias substitution or fitting occurs. Validate the whole
-    batch before returning; malformed scalars/references/snapshots raise with
-    their record/native source and nothing is appended.
+    Validate the whole batch before writing; native input failures propagate.
     """
-    rows: list[SampleRow] = []
-    for saved in points:
-        point = saved.record
-        fields: list[SampleField] = []
-        try:
-            if point.frequency is not None and point.frequency.status == "accepted":
-                fields.append(
-                    SampleField(
-                        name="freq_mhz",
-                        value=_positive(point.frequency.frequency_mhz, "frequency"),
-                    )
-                )
-            for item in (point.t1, point.t2ramsey, point.t2echo):
-                if item is None or item.status != "accepted":
-                    continue
-                quantity = {"t1": "t1", "t2ramsey": "t2r", "t2echo": "t2e"}[item.kind]
-                value = _positive(item.lifetime_us, quantity)
-                if (
-                    item.error_us is None
-                    or not isfinite(item.error_us)
-                    or item.error_us < 0
-                ):
-                    raise ValueError(
-                        f"Accepted {quantity} error must be finite/nonnegative"
-                    )
-                fields.extend(
-                    (
-                        SampleField(name=quantity + "_us", value=value),
-                        SampleField(name=quantity + "_err_us", value=item.error_us),
-                    )
-                )
-            if fields:
-                fields.extend(_coordinate(saved, plan.flux_dev))
-                rows.append(SampleRow(f"{run_id}/{point.index}", tuple(fields)))
-        except ValueError as error:
-            raise ValueError(f"{saved.record_path}: {error}") from error
-    return tuple(rows)
+    return tuple(point_sample(run_id, plan, p.record, p.directory) for p in points)

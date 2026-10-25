@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from math import isfinite
+from pathlib import Path
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -40,6 +41,7 @@ from zcu_lab.workflows.common.saving import save_native
 from zcu_lab.workflows.common.summary import RunSummary, SummaryAccumulator
 from zcu_lab.workflows.common.summary_points import overnight_summary_point
 from zcu_lab.workflows.overnight.analysis import analyze_t2echo
+from zcu_lab.workflows.overnight.samples import append_point_sample
 from zcu_lab.workflows.overnight.trend import draw_overnight_trend
 
 
@@ -74,6 +76,10 @@ class OvernightPlan(BaseModel):
     qub_pulse: PulseCfg = Field(description="Fixed calibrated pi drive")
     readout: PulseReadoutCfg = Field(description="Fixed pulse-backed readout")
     snapshot: RunSnapshot = Field(description="Historical host capture")
+    result_path: Path | None = Field(
+        default=None,
+        description="Exact entry Result path captured at Start. None means no entry (e.g. headless); skip auto samples and use offline --result later.",
+    )
 
 
 class OvernightTunables(BaseModel):
@@ -359,7 +365,9 @@ async def overnight[C](
     Completed members save before analysis. Partial records stopped without
     fitting; expected fitting failures record their reason without estimates.
     Neither fit/native failure skips the next member. Iteration cancellation
-    skips it, while finally still commits the collected pair fields.
+    skips it, while finally still commits the collected pair fields, then appends
+    a sample to the captured entry when result_path is set. Append failures
+    propagate without undoing the committed pair or earlier rows.
     Unexpected acquisition/fit/plot/save/device errors propagate. Each pair starts
     at max(now, previous actual start + interval), without catch-up bursts.
     Pause resumes the pending operation; it does not freeze wall time.
@@ -481,6 +489,7 @@ async def overnight[C](
             )
         finally:
             iteration.commit(point_record)
+            append_point_sample(env.identity.run_id, plan, point_record, iteration.dir)
             summary.points.append(overnight_summary_point(point_record, qubit_name))
     env.pbar("overnight rounds", total=plan.outer_rounds).set_progress(
         plan.outer_rounds

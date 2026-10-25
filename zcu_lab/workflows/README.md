@@ -9,13 +9,45 @@
 - `overnight/`：在固定 flux 下按固定間隔量測 T1 與 Hahn echo，Echo 等待時間取本輪接受的 T1。
 - `overnight_mux/`：按固定間隔先同時量所有 participant 的 T1，再同時量 Hahn echo。Echo 等待時間取本輪接受 T1 的最大值，不設 flux、不做校準。
 
-每個目錄有 `workflow.py` 與 `form.py`；前兩項另有可直接執行的 `export.py`。
-提供 `--database` 就寫 Labber，Coherence 另可提供 `--result` 追加 samples，兩者都有就都寫。
+每個目錄有 `workflow.py`、`form.py` 與可獨立執行的 `export.py`。
+Coherence、overnight 與 overnight_mux 在每點 commit 後立即追加 sample，不自動寫 Labber。
+表位於該 run 所屬 entry 的 `Result/records/components/<qubit>.jsonl`，與 GUI RecordWriteback 共用。
+Coherence 與 MIST 的工具提供 `--database` 就寫 Labber。Coherence 另可提供 `--result` 追加 samples，兩者都有就都寫。
+Overnight 與 overnight_mux 的工具只收 `--result`，用與自動寫入相同的組法重新匯出。
 未提供目的地時報錯，不另選格式旗標，也不寫 merged 檔案。
-`common/` 放多個 workflow 共用的實驗步驟與表單 helper。
+`common/` 放多個 workflow 共用的實驗步驟、表單 helper 與 record append。
 `registry.py` 依上述順序配對 workflow 與表單，交給 scripts 注入 lib 宿主。
 
 科學流程與保存契約見 [definitions](definitions.md)，表單與宿主接線見 [forms](forms.md)。
+
+## 每點 sample 與重新匯出
+
+Coherence 每個 flux 點一列。Overnight 每輪一列，mux 每輪每個 participant 一列。
+被拒、跳過、Stop 或例外中止的已提交點也會寫入。Commit 成功後才 append，兩者不是原子交易。
+Append 失敗會停止 run，已提交的 point 與先前的 rows 保留。可用手動工具補寫。
+表單在 Start 從固定 capture 取得 exact entry Result 路徑，放在 plan 的 `result_path`，manifest 也保存此絕對路徑。
+Headless plan 可保留 `result_path=None`，表示沒有所屬 entry，不自動寫 sample，之後可用 `--result` 補寫。
+
+Coherence 的欄位是 `flux`、`devices`、`frequency`、`rabi`、`readout`、`t1`、`t2ramsey`、`t2echo` 與 `singleshot`。
+各 stage 保留 status 與 reason。主量測值只在 accepted 時填入，其他情況為 null。
+Frequency 保存 MHz、誤差、FWHM 與 probe gain，Rabi 保存模式、π／π2 長度與 gain，另保留 AmpRabi 診斷。
+Rabi 的 mode 依已保存的 Len／Amp 階段判定，沒有 Rabi raw 時為 null，不推測未執行的模式。
+Lifetime 保存 µs、誤差、detune 與兩個 model 的診斷，包含雙指數的第二個時間常數。
+GE 的相對檔名位於 `singleshot.file`，相對於該點的 native 目錄。
+Overnight 類保存 `t1`、`t2echo`、該輪 UTC 排程／開始時間、raw 檔名、Echo relax 來源與 `settings` 中固定的 drive/readout。
+Mux 沒有 commanded flux，`flux` 為 null。`devices` 保留最後一份已保存 acquisition 的完整儀器 snapshot，沒有 acquisition 時為 null，不重新讀儀器。
+Coherence snapshot 順序為 frequency、LenRabi、AmpRabi、readout、GE、T1、Ramsey、Echo，包含 rejected 或 partial raw。
+Overnight 類用 T1、Echo 順序。`flux` 與儀器 snapshot 分開，前者記 commanded setpoint，後者記實際讀值。
+
+```bash
+python -m zcu_lab.workflows.coherence_fluxdep.export <run metadata dir> --result <entry Result dir>
+python -m zcu_lab.workflows.overnight.export <run metadata dir> --result <entry Result dir>
+python -m zcu_lab.workflows.overnight_mux.export <run metadata dir> --result <entry Result dir>
+```
+
+手動工具明確使用 `--result`，不使用 manifest 的舊目的路徑。可用來把離線搬移的 run 寫入新 entry。
+Coherence key 是 `<run_id>/<index>`，overnight 類是 `<run_id>/round/<round_index>`。Mux 的每個 component 表有自己的相同 key。
+重新匯出會再 append 一列，table owner 以 key 做整列 latest-wins。科學欄位一致，`at` 是每次 append 的 UTC 時間。
 
 ## 撰寫 async workflow
 

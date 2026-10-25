@@ -153,6 +153,9 @@ class OvernightPlanForm(FormModel):
             qub_pulse=drive,
             readout=readout,
             snapshot=snapshot,
+            result_path=env.parameters.capture_storage().result_path
+            if env.parameters
+            else None,
         )
 
 
