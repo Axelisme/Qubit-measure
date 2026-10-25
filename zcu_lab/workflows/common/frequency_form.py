@@ -56,6 +56,17 @@ class FrequencyTunablesForm(FormModel):
         default=0.0, description="Detune window offset (MHz)"
     )
     qf_points: int = Field(default=201, ge=2, description="Spectroscopy sample count")
+    frequency_edge_margin: float = Field(
+        default=0.1,
+        ge=0,
+        lt=0.5,
+        description="Minimum fitted-center distance from either edge as a scan-span fraction",
+    )
+    linewidth_max_mean_residual_ratio: float = Field(
+        default=0.1,
+        gt=0,
+        description="Strict mean absolute residual/fit-range bound for linewidth feedback",
+    )
     drive_gain_mode: Literal["adaptive", "fixed"] = "adaptive"
     target_kappa: float = Field(default=6.5, gt=0, description="Target linewidth (MHz)")
     drive_gain_cap: float = Field(

@@ -82,6 +82,11 @@ class CalibrationTunablesForm(FrequencyTunablesForm):
             description="Strict pi-error/pi-duration upper bound",
         )
     )
+    rabi_max_mean_residual_ratio: float = Field(
+        default=0.1,
+        gt=0,
+        description="Strict mean absolute Rabi residual/fit-range upper bound",
+    )
     max_fit_residual: Annotated[float, Display(label="Max fit residual")] = Field(
         default=0.2,
         gt=0,
@@ -186,6 +191,9 @@ class CalibrationTunablesForm(FrequencyTunablesForm):
             qf_widen=self.qf_widen,
             detune_center_mhz=self.detune_center_mhz,
             qf_points=self.qf_points,
+            frequency_edge_margin=self.frequency_edge_margin,
+            linewidth_max_mean_residual_ratio=self.linewidth_max_mean_residual_ratio,
+            rabi_max_mean_residual_ratio=self.rabi_max_mean_residual_ratio,
             drive_gain_mode=self.drive_gain_mode,
             target_kappa=self.target_kappa,
             drive_gain_cap=self.drive_gain_cap,

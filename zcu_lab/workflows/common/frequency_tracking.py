@@ -71,6 +71,17 @@ class FrequencyTunables(BaseModel):
         min_length=1,
         description="Ordered spectroscopy span multipliers",
     )
+    frequency_edge_margin: float = Field(
+        default=0.1,
+        ge=0,
+        lt=0.5,
+        description="Minimum fitted-center distance from either edge as a scan-span fraction",
+    )
+    linewidth_max_mean_residual_ratio: float = Field(
+        default=0.1,
+        gt=0,
+        description="Strict mean absolute residual/fit-range bound for linewidth feedback",
+    )
     drive_gain_mode: Literal["adaptive", "fixed"] = "adaptive"
     target_kappa: float = Field(default=6.5, gt=0, description="Target linewidth (MHz)")
     drive_gain_cap: float = Field(
@@ -83,16 +94,23 @@ class FrequencyTunables(BaseModel):
 class RecoveryAttempt:
     """Last recovery diagnostic: trigger, verdict, sample count and MHz errors.
 
-    NaN metrics mean no fit/candidate was available, not a successful recovery.
-    fit contains the original/fitted parameter snapshots when fitting ran.
+    trigger is first_fail or first_success_after_fail. n_points counts the
+    selected fit points, or zero when fewer than ten trusted points exist.
+    base/fitted hold EJ, EC, EL (GHz), device affine map and flux bias before
+    and after fitting; fitted is None if no candidate exists. RMS values and
+    center_shift_mhz are None when unavailable, never evidence of success.
+    accepted means the candidate passed all gates and replaced the predictor.
     """
 
-    trigger: str
+    trigger: Literal["first_fail", "first_success_after_fail"]
     accepted: bool
     reason: str
     n_points: int
-    fit: FluxoniumLocalFitResult | None = None
-    center_shift_mhz: float = math.nan
+    base: FluxoniumModelSnapshot
+    fitted: FluxoniumModelSnapshot | None = None
+    base_rms_mhz: float | None = None
+    fitted_rms_mhz: float | None = None
+    center_shift_mhz: float | None = None
 
 
 def select_fit_points(
@@ -168,6 +186,7 @@ class FrequencyTracker:
     )
     history: list[tuple[float, float]] = field(default_factory=list)
     fail_streak: int = 0
+    # Current point only: begin_point clears this so later records cannot repeat it.
     last_recovery: RecoveryAttempt | None = None
     cur_m: float | None = None
     m_ratio: float | None = None
@@ -175,8 +194,18 @@ class FrequencyTracker:
     qfw_factor: float | None = None
     last_linewidth_index: int = 0
 
+    def model_snapshot(self) -> FluxoniumModelSnapshot:
+        """Capture the current EJ/EC/EL (GHz), DC affine map and flux bias."""
+        return FluxoniumModelSnapshot(
+            self.predictor.params,
+            self.predictor.flux_half,
+            self.predictor.flux_period,
+            self.predictor.flux_bias,
+        )
+
     def begin_point(self, flux: float) -> float:
-        """Return MHz center with decaying spatial correction; publish matrix element."""
+        """Clear point recovery; return corrected MHz center and publish matrix element."""
+        self.last_recovery = None
         base = float(self.predictor.predict_freq(flux))
         self.cur_m = float(self.predictor.predict_matrix_element(flux))
         if self.first_m is None:
@@ -232,45 +261,50 @@ class FrequencyTracker:
         self.qfw_factor = factor
         self.last_linewidth_index = index
 
-    def _recover(self, flux: float, trigger: str) -> bool:
+    def _recover(
+        self, flux: float, trigger: Literal["first_fail", "first_success_after_fail"]
+    ) -> bool:
+        base = self.model_snapshot()
         points = select_fit_points(self.history)
         if not points:
             self.last_recovery = RecoveryAttempt(
-                trigger, False, "not enough trusted history", 0
+                trigger, False, "not enough trusted history", 0, base
             )
             return False
-        base = FluxoniumModelSnapshot(
-            self.predictor.params,
-            self.predictor.flux_half,
-            self.predictor.flux_period,
-            self.predictor.flux_bias,
-        )
         fit = fit_local_fluxonium_model(base, points)
         candidate = fit.predictor
         shift = math.nan
         reason = fit.reason
-        if fit.accepted and fit.fitted is not None and candidate is not None:
+        if fit.fitted is not None and candidate is not None:
             shift = abs(
                 float(candidate.predict_freq(flux))
                 - float(self.predictor.predict_freq(flux))
             )
-            reason = _recovery_rejection(fit, shift)
-        if reason != "accepted" or candidate is None:
-            self.last_recovery = RecoveryAttempt(
-                trigger, False, reason, len(points), fit, shift
-            )
-            return False
-        residuals = [(x, y - float(candidate.predict_freq(x))) for x, y in points]
+            if fit.accepted:
+                reason = _recovery_rejection(fit, shift)
+        residuals = (
+            [(x, y - float(candidate.predict_freq(x))) for x, y in points]
+            if reason == "accepted" and candidate is not None
+            else []
+        )
         if any(not math.isfinite(value) for _, value in residuals):
-            self.last_recovery = RecoveryAttempt(
-                trigger, False, "reseed residual is not finite", len(points), fit, shift
-            )
+            reason = "reseed residual is not finite"
+        accepted = reason == "accepted" and candidate is not None
+        self.last_recovery = RecoveryAttempt(
+            trigger,
+            accepted,
+            reason,
+            len(points),
+            fit.base,
+            fit.fitted,
+            fit.base_rms_mhz if math.isfinite(fit.base_rms_mhz) else None,
+            fit.fitted_rms_mhz if math.isfinite(fit.fitted_rms_mhz) else None,
+            shift if math.isfinite(shift) else None,
+        )
+        if not accepted or candidate is None:
             return False
         self.residuals.replace_observations(residuals)
         self.predictor = candidate
-        self.last_recovery = RecoveryAttempt(
-            trigger, True, "accepted", len(points), fit, shift
-        )
         return True
 
 
