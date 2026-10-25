@@ -238,7 +238,7 @@ def dependency_skips(
             "skipped",
             "Requires this point's accepted pi pulse (NOW)"
             if kind == "t1"
-            else "Requires a latest accepted pi/pi2 pulse",
+            else "Requires this point's accepted pi/pi2 pulse (NOW)",
             None,
             None,
             None,
@@ -433,7 +433,7 @@ async def run_readout_stage(
     carry: CalCarry,
     estimate: float,
 ) -> bool:
-    """Scan readout on cadence with LATEST pi, then check point cancellation."""
+    """Scan readout on cadence with this point\'s pi, then check cancellation."""
     assert point_record.rabi is not None
     if readout_due(inputs.point_index, inputs.tun):
         point_record.readout = await calibrate_readout(
@@ -452,9 +452,12 @@ async def run_readout_stage(
             None,
             None,
         )
-    if point_record.readout.status != "skipped" and carry.pi_source is not None:
-        point_record.calibration_sources["readout"] = calibration_source(
-            carry.pi_source, inputs.point_index
+    if point_record.readout.status != "skipped":
+        point_record.calibration_sources["readout"] = CalibrationSource(
+            need="now",
+            source_index=inputs.point_index,
+            source_flux=inputs.flux,
+            fallback=False,
         )
     if iteration.cancelled:
         point_record.status = "skipped"
@@ -615,8 +618,8 @@ async def coherence_fluxdep(
     requires accepted Rabi and absolute flux distance >= singleshot.min_spacing
     from the last Completed GE, including partial. GE saves raw only and uses
     T1's history-based relax timing. Rabi frequency is NOW; T1/GE require this
-    point's accepted pi, independent of pi2 trust. Ramsey/Echo use latest
-    accepted pi/pi2, with producer coordinates in calibration_sources.
+    point's accepted pi, independent of pi2 trust. Ramsey/Echo require this
+    point's accepted pi/pi2, with producer coordinates in calibration_sources.
     Nonaccepted readout retains legal prior values.
     Save each completed trace before fitting and commit one CoherencePoint per
     setpoint. Each accepted lifetime updates only its own delay-grid history.
@@ -657,15 +660,9 @@ async def coherence_fluxdep(
                 point_record,
                 CalibrationStageHistory(carry, t1_by_flux, summary),
             )
-            # T1/GE resolve NOW pi independently of T2 LATEST pi/pi2.
+            # Every pulse consumer requires current Rabi; only T2 needs pi2.
             now_cal = current_pi_calibration(point_record.rabi, carry)
-            cal = (
-                current_point_calibration(
-                    point_record.rabi, carry, point_index=index, flux=flux
-                )
-                if point_record.rabi is not None
-                else None
-            )
+            cal = current_point_calibration(point_record.rabi, carry)
             point_record.readout_source = calibration_source(
                 carry.readout_source, index
             )
@@ -706,7 +703,7 @@ async def coherence_fluxdep(
                 _append(t1_by_flux, flux, point_record.measurements[-1])
                 if skip:
                     continue
-            # Missing LATEST pair skips only T2; T1 was independently resolved.
+            # Missing current pi/pi2 skips only T2; T1 needs only current pi.
             if cal is None:
                 point_record.measurements += dependency_skips(plan, include_t1=False)
             else:
@@ -738,7 +735,12 @@ async def coherence_fluxdep(
                         env.plots,
                         inputs=T2StageInputs(
                             snapshot=plan.snapshot,
-                            source=calibration_source(carry.pi_source, index),
+                            source=CalibrationSource(
+                                need="now",
+                                source_index=index,
+                                source_flux=flux,
+                                fallback=False,
+                            ),
                             tun=tun.current.t2ramsey,
                             summary=summary,
                         ),
@@ -761,7 +763,12 @@ async def coherence_fluxdep(
                         env.plots,
                         inputs=T2StageInputs(
                             snapshot=plan.snapshot,
-                            source=calibration_source(carry.pi_source, index),
+                            source=CalibrationSource(
+                                need="now",
+                                source_index=index,
+                                source_flux=flux,
+                                fallback=False,
+                            ),
                             tun=tun.current.t2echo,
                             summary=summary,
                         ),

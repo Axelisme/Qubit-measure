@@ -37,7 +37,7 @@ from zcu_lab.workflows.common.calibration import (
     calibrate_rabi,
     calibrate_readout,
     calibration_source,
-    current_point_calibration,
+    current_pi_calibration,
     readout_due,
 )
 from zcu_lab.workflows.common.calibration_results import StageStatus
@@ -290,7 +290,7 @@ async def run_readout_stage(
     carry: CalCarry,
     estimate: float,
 ) -> bool:
-    """Scan readout on cadence with LATEST pi, then check point cancellation."""
+    """Scan readout on cadence with this point\'s pi, then check cancellation."""
     assert point_record.rabi is not None
     if readout_due(inputs.point_index, inputs.tun):
         point_record.readout = await calibrate_readout(
@@ -309,9 +309,12 @@ async def run_readout_stage(
             None,
             None,
         )
-    if point_record.readout.status != "skipped" and carry.pi_source is not None:
-        point_record.calibration_sources["readout"] = calibration_source(
-            carry.pi_source, inputs.point_index
+    if point_record.readout.status != "skipped":
+        point_record.calibration_sources["readout"] = CalibrationSource(
+            need="now",
+            source_index=inputs.point_index,
+            source_flux=inputs.flux,
+            fallback=False,
         )
     if iteration.cancelled:
         point_record.status = "skipped"
@@ -484,9 +487,7 @@ async def mist_fluxdep(
             ):
                 continue
             assert point_record.rabi is not None
-            cal = current_point_calibration(
-                point_record.rabi, carry, point_index=index, flux=flux
-            )
+            cal = current_pi_calibration(point_record.rabi, carry)
             point_record.readout_source = calibration_source(
                 carry.readout_source, index
             )
@@ -497,11 +498,11 @@ async def mist_fluxdep(
                     trace.reason = "stopped"
                     continue
                 if mode == "excited" and cal is None:
-                    trace.reason = "Requires a latest accepted pi pulse"
+                    trace.reason = "Requires this point's accepted pi pulse (NOW)"
                     continue
                 if mode == "excited":
-                    point_record.calibration_sources[mode] = calibration_source(
-                        carry.pi_source, index
+                    point_record.calibration_sources[mode] = CalibrationSource(
+                        need="now", source_index=index, source_flux=flux, fallback=False
                     )
                 cfg = mist_cfg(
                     plan, tun.current, cal or carry.last or carry.seed, mode=mode

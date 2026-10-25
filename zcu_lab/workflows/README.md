@@ -85,9 +85,12 @@ GE 要求本點 Rabi 已接受。`singleshot` 子表單控制 flux 最小間距�
 Coherence 與 MIST 的 frequency stage 使用獨立 `probe_pulse`，保留它的 waveform 與長度，頻率由 tracker 的掃描設定。
 Probe gain 從這個 pulse 的 gain 起跑，再依線寬自適應；每次 attempt 的實際值保存在 `frequency.probe_gains`。
 `qub_pulse` 只供 Rabi 與下游 pi preparation，不作 spectroscopy probe。
+每次 frequency scan 的 `diagnostics` 保存 fitted center／error、FWHM、peak／trace SNR、normalized RMS 與 MAE/fit ptp。
+`gates` 逐項記名稱、比較、門檻、實際值與 pass/fail。Coarse 只供候選定位，最終接受 gates 標記 `applied=false`。
+沒有擬合結果的欄位為 null，失敗原因記在 `fit_failure`。每個局部 coarse 候選另記於 `coarse_candidate_diagnostics`。
 新表單先引用 captured `$qubit.pulses.qub_probe`。沒有該 entry 時，從 captured `$qubit.module.x180` 複製 inline，設 freq 0 MHz、gain 0.1、長度 5 µs；x180 也缺時留待填入。
 
-Readout 在 cadence 到期且有 LATEST accepted pi pulse 時更新。未到期保留上一張圖，不在目前 point 另存 `readout.png`。
+Readout 在 cadence 到期且本點 Rabi accepted 時，用本點 π 更新。不接受本點 π 就跳過該次，不順延 cadence。未到期保留上一張圖，不在目前 point 另存 `readout.png`。
 校準圖顯示完整但未通過接受門檻的 fit，分析失敗時只顯示 raw I。Partial 不更新 heatmap 或 fit。
 Coherence 的 decay 使用 Result.times/signals，觀測值與 fit 使用同一投影。未通過門檻的 fit 標示 rejected，不進 lifetime history。
 Coherence、overnight 與 overnight_mux 每次主模型擬合成功後，同時記錄兩種 lifetime 模型。
@@ -103,7 +106,7 @@ Coherence、overnight 與 overnight_mux 拒絕 quality.invalid 非空的主 life
 MIST 的 measure_mode 可選 excited、ground 或 both，預設 excited。Ground 不加 pi preparation。Both 在每個 flux 點量兩種，分別保存 native 與 PNG。
 MIST 的 gain-<mode>.png 使用 Result 的實際 gains/signals；map-<mode>.png 使用保留的 traces，扣中位數背景並截斷於 3σ。
 `cal.rabi_mode` 預設 `len_then_amp`，先由 LenRabi 找 π 長度，再以 AmpRabi 的 π/π2 gain 建立下游 pulse。`amp_only` 固定目標長度只掃 gain，`len_only` 保留長度校準。範圍與接受門檻見 [definitions](definitions.md#獨立校準與-point)。
-T1 的 pi 依賴為 NOW；Ramsey、Echo、MIST 與 readout 可用 LATEST。Point 的 calibration_sources 記回退與來源點。
+所有用到 π 的下游都要求本點 accepted π，Ramsey／Echo 另要求本點可信 π/π2 pair。Readout 與 excited MIST 只要求 π。Ground MIST 不加 π，不受 Rabi 接受狀態限制。Point 的 calibration_sources 記本點 pulse 來源；readout_source 另記保留的 readout 校準來源。
 這些保存不讀 operation 圖、不改 native raw／export 格式，也不更動科學序列。Overnight 的趨勢圖維持原樣，新增的 model comparison 圖不自動保存。
 
 Pause 保留等待中的 await。若 Pause 中斷 operation 並產生 partial result，框架丟棄該次結果，
@@ -122,7 +125,7 @@ NaN／infinity IQ 與 fitter 明示的不收斂轉 Failed。結構、cfg 與其�
 ## Run 摘要
 
 `summary.json` 是框架 encoded record 信封，`value` 是 workflow return 的摘要。
-摘要包含各 stage 的 accepted／rejected／skipped／failed 次數、拒絕與跳過原因分布，以及可取得的平均／最大耗時（秒）。
+摘要包含各 stage 的 accepted／rejected／skipped／failed 次數、拒絕、跳過與失敗原因分布，以及可取得的平均／最大耗時（秒）。
 它也記錄計畫、已提交、完成與跳過點數、已提交 flux setpoints 的範圍與單位、physical recovery 嘗試數、early stop 與 acquire attempts > 1 的 acquisition 次數。
 完成點是 `status=completed`，即使某些 stage 被拒絕或失敗也計入。關閉的 stage 不計數。
 Overnight 與 overnight_mux 另列每個 qubit 的 T1／Echo 接受數、平均與母體標準差（µs）。

@@ -56,7 +56,7 @@ Amp 共用 `max_rabi_rel_err`、`max_fit_residual` 與 `rabi_max_mean_residual_r
 π/2 gain 必須有限且至少為最小 gain，固定長度也須至少 0.03 µs，否則只接受 π，不產生新的 π/π2 pair。
 `RabiResult.amp` 保留 gain fit、誤差、固定長度與 `amp-rabi.h5` 引用，拒絕 fit 也保留診斷。
 Combined 模式的 `file` 仍指 `rabi.h5`，`len_status` 記 Len 的接受狀態。Amp-only 的 `file` 指 `amp-rabi.h5`。
-Amp 的 partial raw 先保存，不擬合、不更新 carry。下游 NOW／LATEST 的規則不變。
+Amp 的 partial raw 先保存，不擬合、不更新 carry。下游只接受本點產生的 π；需要 π/2 時也必須來自本點。
 `Calibrated.drive_gain` 與 `pi_length_us` 一起定義 π。`CalibratedPi2.pi2_drive_gain` 與 `pi2_length_us` 一起定義 π/2，gain 為 None 時沿用 π gain。
 
 `calibrate_frequency`、`calibrate_rabi`、`calibrate_readout` 可分別用 await 呼叫。
@@ -67,12 +67,13 @@ Rabi 與下游仍複製 `qub_pulse`，不受 probe 長度或 gain 影響。Frequ
 Helper 收 Scope，需要 workflow 圖時明收 plots: Plots，不另收 env。
 三個 stage 各回 frozen 具名結果，保留 status、reason、accepted scalar 與自己的 immutable native 檔名。
 Frequency 在接受時立即更新 frequency history；Rabi 只在本點 frequency 接受後執行，接受時更新 pi/pi2。
-Readout 用最近 accepted pi pulse 與其配對頻率。兩個 caller 共用 `readout_due(point_index, tun)`，依零基 flux index % ro_every == 0 掃描。
-Index 0 自然先掃。失敗／拒絕不增加掃描，也不改下一個 due index。
+Readout 用本點 accepted π 與其配對頻率，不要求 π/2。兩個 caller 共用 `readout_due(point_index, tun)`，依零基 flux index % ro_every == 0 掃描。
+Index 0 自然先掃。到期但本點 Rabi 未接受就 skipped，不順延到下一點。失敗／拒絕不增加掃描，也不改下一個 due index。
 Readout 非接受時保留合法 seed／prior accepted readout，仍可量 lifetime 或 MIST。
-Rabi 的頻率與 T1 的 pi pulse 要求 NOW，只接受本點產出。Ramsey、Echo、MIST 與 readout 使用 LATEST，可借最近 accepted pi/pi2，沒有跨點步數上限。
-回退保留產出 pi pulse 時的配對頻率，不用本點 spectroscopy 頻率重新調諧舊脈衝。
-Point 的 calibration_sources 記 consumer、need、source_index、source_flux 與 fallback。readout_source 記沿用的 readout 來源，source_index=None 代表固定 host seed。
+Rabi 的頻率與所有下游 π pulse 都要求 NOW，只接受本點產出，不借前點 pulse。
+T1、GE、readout 與 excited MIST 要求本點 accepted π；Ramsey／Echo 另要求本點可信 π/π2 pair。Ground MIST 不加 π，無須本點 Rabi accepted。
+缺少本點 pulse 時，該 consumer 記 skipped 並寫明依賴。本點 π/2 不可信時，不阻擋只需 π 的 consumer。
+Point 的 calibration_sources 記 consumer、need=now、source_index、source_flux 與 fallback=False。readout_source 另記沿用的 readout 校準來源，source_index=None 代表固定 host seed。
 
 `CoherencePoint` 保存 frequency、rabi、readout、singleshot 與 enabled `measurements` tuple。
 `singleshot` 保留 measured／skipped／failed、reason 與相對 native 檔名。未開、Rabi 未接受、間距不足或取消皆記 skipped 原因。
@@ -100,6 +101,12 @@ span 為 `span_mhz * coarse_span_factor`，預設倍率 3。可用 `coarse_gain`
 降低 SNR 或寬度門檻會同時增加弱峰與雜訊候選。這些統計門檻不保證排除所有雜訊。
 每點 Frequency result 的 `scans` 保存 coarse、fine 或 single 階段、
 檔名、gain、span、實際中心、全部候選、選定候選及擬合中心。
+每次 scan 的 `diagnostics` 記 fitted_center_mhz、center_error_mhz、fwhm_mhz、peak_snr、trace_snr、normalized_rms 與 mae_over_fit_ptp。
+Peak SNR 取選定候選相對 median 的高度 SNR。Trace SNR 用完整投影 trace 的 Savitzky-Golay estimator；它是診斷值，不增加接受門檻。
+`gates` 記名稱、comparison、threshold、actual、passed 與 applied。非有限或未取得的 actual 為 null，該比較不通過；尚未執行的 fit gate 不虛造結果。
+選定候選記 SNR 與 truncation gate。Coarse 另記局部 fit interval 上下界，最終接受 gates 只供診斷，標記 applied=false。
+Fine 與 single 記正中心、窗內中心上下界、正 FWHM、非負 center error、error/FWHM、normalized RMS 與 MAE/fit ptp 的既有門檻。Fine 另記最強候選是否存在及其中心到粗峰的距離上限。
+每個試過的局部粗峰診斷保存在 `coarse_candidate_diagnostics`，以 selected_peak_center_mhz 對應候選。Failed／partial acquisition 不擬合，保留 fit_failure，無法取得的數值為 null。這些紀錄不參與接受判斷。
 `candidate_attempts` 逐一保存試過的粗峰、粗掃檔名、局部擬合中心、細掃檔名與 rejection_reason。
 拒絕原因包含沒有細峰、超出粗峰寬度、截斷、擬合失敗與品質 gate；只有接受的候選沒有拒絕原因。
 候選的 `truncated` 表示窗內無法觀察完整半 prominence 寬度。
@@ -177,7 +184,7 @@ Coherence lifetime 與 calibration 沿用原有 status。完整 singleshot 的 m
 Overnight 與 mux member 的 status 直接在結果產生處填寫：接受值為 accepted、完整 fit 未過門檻或 partial 為 rejected、Schedule／預期 fit failure 為 failed、未執行為 skipped。
 MIST trace 完整 success 為 accepted、partial 為 rejected、Schedule failure 為 failed、依賴不足或未執行為 skipped。
 MIST both 每點計兩個 preparation 結果；mux 每點按 participant 計 T1／Echo。副模型診斷不計為另一個 stage，也不改主模型的狀態。
-各 stage 的 rejected_reasons、skipped_reasons 按原始 reason 字串計數，不分類或改寫原因。
+各 stage 的 rejected_reasons、skipped_reasons、failed_reasons 按原始 reason 字串計數，不分類或改寫原因。
 
 `duration.mean_s/max_s` 先加總同一 point、同一 stage 的 operations 秒數，再算平均與最大值。只有有時間的 point 參與平均。
 Frequency 包含該點所有 delivered coarse／fine／widening scans，MIST 包含兩種 preparation。Mux 計一次共用 acquisition 時間，不乘 participant 數。
