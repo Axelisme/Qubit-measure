@@ -7,13 +7,13 @@ from zcu_tools.analysis.fitting import compute_fit_quality
 from zcu_tools.analysis.fitting.quality import FitQuality
 from zcu_tools.plotting.plots import Plots
 
-from .._rabi_scan import (
+from .._rabi_analysis import (
     RabiAnalysis,
-    RabiScanResult,
     ReturnData,
     fit_duration_rates,
     plot_duration_rates,
 )
+from .._rabi_scan import RabiScanResult
 
 
 @dataclass(frozen=True)

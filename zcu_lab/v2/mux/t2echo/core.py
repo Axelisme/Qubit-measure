@@ -1,134 +1,24 @@
 """Measure mux Hahn Echo coherence with simultaneous pulses and shared waits.
 
-Technical reference for lab authors and framework developers.
+Reset, join the x90 pulses, wait half the requested total delay, join the x180
+pulses, wait the other half, join the final x90 pulses, then read out together.
+Shorter pulses wait for the longest branch at each stage; native pre/post
+delays stay unchanged. The final x90 phase includes each tone's detune.
 
-`MuxT2EchoExp.run(config, *, context)` measures Hahn Echo on selected qubits in
-one program with independent drives and a common mux readout. It does not create
-a Form, recipe, catalog entry or writeback proposal.
+Return original tone indices (K,), requested total delays (P,) in us and mean
+complex IQ (K,P), plus actual detunes and source frequencies in MHz. Missing
+rounds leave IQ NaN. Analyze each tone with decay or fringe fits, omitting the
+original first point. Zero source detune forces decay. Report T2E/error in us,
+fringe rate/error in MHz, fit quality or a per-tone numerical failure.
 
-## Configuration and timing
-
-`participants` is a nonempty, unique list of original indices in the complete `tones` list.
-`[2, 0]` selects Q3 then Q1, retaining that execution/data order.
-Only participants require valid drives on independent generators. Inactive
-drives may be None. Every tone retains its name and readout identity; count
-and order match the fixed capture.
-
-Import `MuxT2EchoCfg`, `MuxT2EchoExp` and `MuxEchoToneCfg` from
-`zcu_lab.v2.mux.t2echo`. Supply common `MuxDriveModuleCfg` with optional reset
-and full readout, a full ordered `tones` list, and `delay: SweepCfg` in us.
-
-Each tone contains fixed `name`, required `drive` for x90, required `pi_pulse`
-for x180, and `detune` in MHz. Both pulses are required only for participants.
-A tone's two pulses use the same generator, but may have different waveform,
-carrier, gain and phase. Active tones use independent generators, distinct from
-readout. All pulse parameters must be fixed and finite. Delay bounds must be
-finite and nonnegative. There is only one delay range and one set of shared
-reps/rounds/initial_delay/relax_delay. Time fields use us.
-The caller resolves component identities and tone/qubit bindings.
-
-The sequence is:
-
-1. Common reset.
-2. Join of first x90 pulses.
-3. Common half of requested total delay.
-4. Join of x180 pulses.
-5. Common half of requested total delay.
-6. Join of final x90 pulses.
-7. Active mux readout after the longest final stage.
-
-All branches start at the same stage origin. Native pre/post delays remain
-unchanged. Each half-delay starts after the longest preceding stage, not after
-each branch's own pulse. With zero pre/post delays, a short pulse waits an extra
-fixed `max_len - len_i` at that stage. This can change amplitude and constant
-phase, including the balance of the two echo intervals. Analysis still fits the
-common requested total delay. It does not fit an inferred per-tone actual delay.
-Native clock differences of a few ticks remain. The core does not end-align, pad,
-double-compile or alter the simulator.
-
-The final x90 phase uses each source phase and its own nominal detune times the
-shared total-delay parameter. Existing owners quantize pulse, phase and time.
-`actual_detune(..., time_scaler=0.5)` preserves the single-qubit two-half-delay
-convention. Its estimate keeps native phase wrapping, including for signed
-detunes. It is not automatically a signed unwrapped correction.
-
-## Run and analysis
-
-```python
-from zcu_tools.experiment.records import RunRecord
-from zcu_lab.v2.mux.t2echo import MuxT2EchoExp
-
-core = MuxT2EchoExp()
-result = core.run(cfg, context=context)
-context.scope.stop.raise_if_error()
-source = RunRecord(cfg=cfg, result=result)
-outcomes = core.analyze(
-    source, core.Options(fit_method="fringe", fit_phase=True), plots=analysis_plots
-)
-```
-
-RunContext supplies compatible soc/soccfg, a fresh StopSignal and caller-owned
-Plots. The caller finishes/releases plots and cleans up devices. Run does not
-save files or retain a previous source.
-
-`MuxCoherenceResult` contains original active `tone_indices (K,)`, requested total
-`times (P,)` in us, complex average `signals (K,P)` in ADC-length-normalized a.u.,
-`actual_detunes (K,)` and x90 `source_frequencies (K,)` in MHz. Full pulse cfg and
-inactive tones remain in the source record. A nonzero detune with no positive
-rounded delay can produce NaN actual detune. Save/load and analysis preserve that
-owner output and its diagnostics, without guessing zero or nominal detune.
-
-The hardware sweeps delay and averages reps/rounds. Cancellation preserves the
-mean of completed rounds over the whole sweep; no completed round leaves IQ NaN.
-Call `raise_if_error()` before success, then inspect `is_set()` for cancellation.
-Acquisition failures retain their cause even with partial IQ. Validation, build
-and native conversion errors propagate directly.
-
-Analysis accepts explicit RunRecord, including cfg=None. Options reuse
-`T2EchoAnalyzeOptions`: fit_method defaults to decay. Fringe requires nonzero
-source detune: use cfg when present, otherwise finite saved actual detune.
-Zero detune forces decay even when fringe was requested. Unknown detune fails
-fringe analysis with a source diagnostic; explicit decay remains available.
-The original first point is omitted before per-tone missing-IQ filtering.
-Fixed fringe phase is zero; fit_phase=True frees it. Decay ignores fit_phase.
-Fringe needs six remaining points and decay four. The existing fitters and
-FitQuality own the numerical model and diagnostics.
-
-Each original index returns `MuxCoherenceFit` with T2E/error in us, fringe
-rate/error in MHz, selected model and quality, or `MuxFitFailure` with its reason.
-A failed tone does not remove another tone's analysis. Bad source contracts
-raise instead of becoming numerical fit failures. Figure names
-`measurement_i` and `fit_i` use original indices, not possibly duplicate labels.
-Small or poorly calibrated scans may fit numerically without supporting a useful
-coherence estimate.
-
-## Native source persistence
-
-`save_run(source, path, metadata=...)` saves the full cfg, shared requested delay,
-original indices, IQ and per-tone actual detune/source frequency metadata.
-Disk units are seconds/Hz; memory units are us/MHz.
-`save_run` writes only native data and returns None. `save(source, path)` is
-the separate Labber export. The grouped axes spec declares the Labber
-`independent` layout. Both formats preserve IQ on the delay/tone grid and detune
-and source frequency on the tone-only grid. The Labber writer follows this
-declaration without an automatic grid fallback, broadcasting per-tone values
-or splitting files.
-For multi-output saving and per-output SaveReport status/errors, see
-`save_artifacts` in lib/zcu_tools/experiment/README.md, section "實驗介面與資料".
-Recipe completion alone does not prove that every output saved.
-`load_run(path)` restores the source without reading a current cfg or Form.
-The caller sets complete/partial/stopped from the run outcome.
-
-This core makes no calibration proposal. A later caller can use a usable Echo
-fit for T2E, independently of unavailable detune. NaN actual detune must never be
-replaced by a guessed frequency correction.
+Timing, detune and persistence details: zcu_lab/v2/mux/t2echo/guide.md.
+RunContext, stop and plot ownership: lib/zcu_tools/experiment/v2/runtime/README.md.
+RunRecord and save/load contracts: lib/zcu_tools/experiment/README.md.
 """
 
 from __future__ import annotations
 
-from collections.abc import Sequence
 from dataclasses import replace
-from functools import partial
 from typing import Annotated, ClassVar
 
 import numpy as np
@@ -146,7 +36,6 @@ from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     Delay,
-    ModularProgramV2,
     Pulse,
     ResetCfg,
     SweepCfg,
@@ -165,7 +54,7 @@ from zcu_lab.v2.support.lifetime_models import (
     compare_lifetime_models,
     draw_lifetime_comparison,
 )
-from zcu_lab.v2.support.mux import MuxFitFailure
+from zcu_lab.v2.support.mux import MuxFitFailure, averaged_mux_signal
 from zcu_lab.v2.support.mux_coherence import (
     MuxCoherenceResult,
     MuxCoherenceToneCfg,
@@ -280,17 +169,6 @@ class MuxT2EchoCfg(ConfigBase):
         return self
 
 
-def _averaged_signal(
-    prog: ModularProgramV2, acquired: Sequence[NDArray[np.float64]]
-) -> NDArray[np.complex128]:
-    for module in prog.modules:
-        if isinstance(module, MuxReadout) and module.name == "readout":
-            iq = module.collect_iq(prog, acquired, read_index=0)
-            # Readout returns (delay, tone, I/Q); results keep tone rows.
-            return (iq[..., 0] + 1j * iq[..., 1]).T
-    raise ValueError("Coherence program is missing its named MuxReadout")
-
-
 class MuxT2EchoExp(Experiment[MuxCoherenceResult, MuxT2EchoCfg]):
     """Measure and fit each participating qubit's Hahn Echo decay or fringes."""
 
@@ -402,7 +280,7 @@ class MuxT2EchoExp(Experiment[MuxCoherenceResult, MuxT2EchoCfg]):
             prog = builder.build()
             _ = builder.run_program(
                 prog,
-                raw2signal_fn=partial(_averaged_signal, prog),
+                raw2signal_fn=lambda raw: averaged_mux_signal(prog, raw).T,
                 rounds=cfg.rounds,
                 options=AcquireOptions(
                     retry=cfg.acquire_retry,

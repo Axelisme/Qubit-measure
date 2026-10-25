@@ -29,13 +29,15 @@ from .core import (
     AcStarkAnalyzeOptions,
     AcStarkCfg,
     AcStarkExp,
+    AcStarkResult,
+)
+from .form import make_form, make_ramsey_form
+from .ramsey_core import (
     AcStarkRamseyAnalyzeOptions,
     AcStarkRamseyCfg,
     AcStarkRamseyExp,
     AcStarkRamseyResult,
-    AcStarkResult,
 )
-from .form import make_form, make_ramsey_form
 
 AcStarkRunResult: TypeAlias = RunRecord[AcStarkCfg, AcStarkResult]
 

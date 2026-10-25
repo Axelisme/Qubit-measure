@@ -9,7 +9,6 @@ from matplotlib.axes import Axes
 from matplotlib.image import NonUniformImage
 from numpy.typing import NDArray
 from pydantic import field_serializer
-from zcu_tools.analysis.fitting import fitlor
 from zcu_tools.analysis.singleshot import (
     calc_populations,
     correct_populations,
@@ -26,6 +25,7 @@ from zcu_tools.program.v2 import GainSweep, Pulse, Readout, Reset, SweepCfg, swe
 from zcu_tools.utils.process import minus_background
 
 from zcu_lab.v2.support import live_heatmap, live_line
+from zcu_lab.v2.support.resonance import get_resonance_freq
 
 
 def _default_population_states() -> NDArray[np.int64]:
@@ -40,33 +40,6 @@ class AcStarkResult:
     population_states: NDArray[np.int64] = field(
         default_factory=_default_population_states
     )
-
-
-def get_resonance_freq(
-    xs: NDArray[np.float64],
-    freqs: NDArray[np.float64],
-    populations: NDArray[np.float64],
-) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
-    s_xs = []
-    s_freqs = []
-
-    prev_freq = np.nan
-    for x, pop in zip(xs, populations, strict=False):
-        if np.any(np.isnan(pop)):
-            continue
-
-        param, _ = fitlor(freqs, pop)
-        curr_freq = param[3]
-
-        if abs(curr_freq - prev_freq) > 0.1 * (freqs[-1] - freqs[0]):
-            continue
-
-        prev_freq = curr_freq
-
-        s_xs.append(x)
-        s_freqs.append(curr_freq)
-
-    return np.array(s_xs), np.array(s_freqs)
 
 
 class AcStarkCfg(ConfigBase):

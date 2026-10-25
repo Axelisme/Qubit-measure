@@ -78,7 +78,12 @@ longest branch. Pre/post delays stay as configured.
 Shorter pulses add fixed waits that can change amplitude, phase and echo-interval
 balance. Analysis uses the common requested total delay.
 The final x90 phase includes each tone's detune times that total delay.
-Native timing can differ by a few ticks.
+Native timing can differ by a few ticks. With zero pre/post delays, each short
+pulse waits an extra `max_len - len_i` at its stage. The core does not end-align
+or pad pulses, compile a second timing program, or fit an inferred per-tone delay.
+`actual_detune(..., time_scaler=0.5)` uses the single-qubit half-delay convention.
+Its estimate retains native phase wrapping, including for signed detunes; it is
+not a signed unwrapped correction.
 
 Fit method defaults to decay. Zero source detune forces decay, even if fringe
 is selected. Select fringe for nonzero source detune to fit an oscillation;
@@ -159,6 +164,18 @@ Analyze and preview only calculate results. Each candidate needs its own selecti
 Native and Labber outputs preserve IQ on the delay/tone grid and detune/source
 frequency on the tone-only grid. Check that both outputs report `saved`.
 Inspect each output's error when saving fails.
+
+For core callers, `MuxCoherenceResult` stores original `tone_indices (K,)`,
+requested total `times (P,)` in us, `signals (K,P)` in ADC-length-normalized units,
+and `actual_detunes (K,)` / x90 `source_frequencies (K,)` in MHz.
+A nonzero detune without any positive rounded delay can yield NaN actual detune.
+Do not replace it with zero or nominal detune, or infer a frequency correction.
+Full source cfg retains inactive tones. Native disk units are seconds and Hz.
+The grouped Labber declaration keeps detune and source frequency on the tone-only
+grid, without broadcasting or splitting files.
+Framework [run records and persistence](../../../../lib/zcu_tools/experiment/README.md)
+and [runtime lifecycle](../../../../lib/zcu_tools/experiment/v2/runtime/README.md)
+cover stop errors, completed-round averaging and caller-owned plots.
 
 ## Drafts and MCP inputs
 

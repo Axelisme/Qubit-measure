@@ -12,7 +12,8 @@ from zcu_tools.gui.app.measure.adapter import (
 )
 from zcu_tools.plotting.plots import Plots
 
-from .._rabi_scan import RabiAnalysis, RabiScanResult
+from .._rabi_analysis import RabiAnalysis
+from .._rabi_scan import RabiScanResult
 from .core import ChevronCfg, ChevronExp
 from .form import make_form
 

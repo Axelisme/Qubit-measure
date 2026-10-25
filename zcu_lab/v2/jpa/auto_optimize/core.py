@@ -11,7 +11,6 @@ from mpl_toolkits.mplot3d import Axes3D
 from numpy.typing import NDArray
 from pydantic import Field
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.datafile import LabberPayload
 from zcu_tools.experiment import (
     Experiment,
     GroupedAxesSpec,
@@ -136,12 +135,6 @@ JPA_AUTO_GROUPED_VARIABLES = (
     JPA_AUTO_PHASE_VARIABLE,
     JPA_AUTO_SNR_VARIABLE,
 )
-
-
-def jpa_auto_result_to_grouped_payloads(
-    result: JPAOptimizeResult,
-) -> dict[str, LabberPayload]:
-    return JPA_AUTO_GROUPED_AXES_SPEC.payloads_from_result(result)
 
 
 def _validate_jpa_auto_arrays(
