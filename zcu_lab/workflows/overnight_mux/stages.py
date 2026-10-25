@@ -7,9 +7,10 @@ from numpy.typing import NDArray
 from zcu_tools.analysis.fitting import FitQuality
 from zcu_tools.experiment.scope import Scope
 from zcu_tools.experiment.workflows import Failed
+from zcu_tools.program.v2 import SweepCfg
 
-from zcu_lab.v2.mux.t1.core import MuxT1Cfg, MuxT1Exp
-from zcu_lab.v2.mux.t2echo.core import MuxT2EchoCfg, MuxT2EchoExp
+from zcu_lab.v2.mux.t1.core import MuxT1Cfg, MuxT1Exp, MuxT1ToneCfg
+from zcu_lab.v2.mux.t2echo.core import MuxEchoToneCfg, MuxT2EchoCfg, MuxT2EchoExp
 from zcu_lab.v2.support.lifetime_models import LifetimeModelRecord
 from zcu_lab.v2.support.mux import MuxFitFailure
 from zcu_lab.workflows.common.analysis import lifetime_rejection
@@ -18,6 +19,7 @@ from zcu_lab.workflows.common.gates import Gate, gate
 from zcu_lab.workflows.common.saving import save_native
 from zcu_lab.workflows.common.stages import StageEnv
 from zcu_lab.workflows.common.summary import observe_operation
+from zcu_lab.workflows.overnight_mux.pulses import FixedMuxPulses
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -33,6 +35,57 @@ class FitSettings:
     max_fit_residual: float
     min_lifetime_points: int
     max_model_window_factor: float
+
+
+@dataclass(frozen=True, kw_only=True)
+class T1Settings(FitSettings):
+    """Mux T1 averaging, shared delay policy and inherited fit acceptance bounds.
+
+    reps/rounds are native acquisition averages. acquire_retry counts transient
+    retries; earlystop_snr is the active tones' minimum completed-round SNR, or
+    None to disable. uniform selects linear delays, otherwise the core
+    concentrates the same window. sweep_factor times guess_us sets its endpoint.
+    Relaxation is max(relax_min_us, relax_factor*guess_us), in us.
+    """
+
+    reps: int
+    rounds: int
+    acquire_retry: int
+    earlystop_snr: float | None
+    uniform: bool
+    sweep_factor: float
+    relax_factor: float
+    relax_min_us: float
+
+
+@dataclass(frozen=True, kw_only=True)
+class EchoSettings(FitSettings):
+    """Mux Echo averaging, shared sweep factor and inherited fit bounds.
+
+    reps/rounds are native acquisition averages. acquire_retry counts transient
+    retries; earlystop_snr is the active tones' minimum completed-round SNR, or
+    None to disable. sweep_factor times the Echo guess sets its linear endpoint.
+    The main loop resolves shared relaxation separately in EchoTiming.
+    """
+
+    reps: int
+    rounds: int
+    acquire_retry: int
+    earlystop_snr: float | None
+    sweep_factor: float
+
+
+@dataclass(frozen=True, kw_only=True)
+class EchoTiming:
+    """This round's longest-qubit Echo guess and resolved relaxation, in us.
+
+    guess_us sets the shared sweep endpoint through EchoSettings.sweep_factor.
+    relax_delay_us is the main loop's max-accepted-T1-or-fallback decision after
+    applying its relaxation factor and floor. The stage does not re-decide it.
+    """
+
+    guess_us: float
+    relax_delay_us: float
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -132,18 +185,40 @@ def _acceptance(
     return reason, gates
 
 
-async def run_mux_t1_stage(
-    scope: Scope, env: StageEnv, cfg: MuxT1Cfg, settings: FitSettings
+async def measure_mux_t1(
+    scope: Scope,
+    env: StageEnv,
+    pulses: FixedMuxPulses,
+    settings: T1Settings,
+    *,
+    points: int,
+    guess_us: float,
 ) -> MuxT1StageResult:
-    """Acquire fixed mux T1 cfg, save raw and fit each participant independently.
+    """Build mux T1 from fixed pulses, save raw and fit participants independently.
 
-    cfg supplies full tone order, participant indices, delay grid and averaging.
-    settings supplies fit gates and model diagnostics. env supplies workflow
-    plots, historical save identity and summary observation. Failed/partial
-    acquisitions return an outcome for every participant; expected per-tone fit
-    failures leave other fits available. Unexpected errors propagate. No point
-    record, cancellation state or accepted history is changed.
+    pulses supplies full tone order, calibrated pi drives, readout, participant
+    indices and optional reset. settings controls averaging, delay policy and fit
+    gates. points is the shared delay count, at least five; guess_us is the
+    positive longest-qubit estimate in us. The sweep ends at sweep_factor*guess_us;
+    relaxation is max(relax_min_us, relax_factor*guess_us). Inputs remain unchanged.
+    env supplies plots, save identity and summary observation. Failed/partial
+    acquisitions return outcomes for every participant; expected per-tone fit
+    failures leave others available. Other errors propagate. No point/history changes.
     """
+    stop = settings.sweep_factor * guess_us
+    cfg = MuxT1Cfg(
+        uniform=settings.uniform,
+        reps=settings.reps,
+        rounds=settings.rounds,
+        acquire_retry=settings.acquire_retry,
+        earlystop_snr=settings.earlystop_snr,
+        relax_delay=max(settings.relax_min_us, settings.relax_factor * guess_us),
+        reset=pulses.reset,
+        readout=pulses.readout,
+        tones=[MuxT1ToneCfg(name=t.name, drive=t.drive) for t in pulses.tones],
+        participants=list(pulses.participants),
+        delays=SweepCfg(start=0.0, stop=stop, expts=points, step=stop / (points - 1)),
+    )
     record = await scope.run(MuxT1Exp().run, cfg, name="Mux T1")
     observe_operation(env.summary, record)
     if isinstance(record, Failed):
@@ -212,15 +287,41 @@ async def run_mux_t1_stage(
     return MuxT1StageResult(file="t1.h5", qubits=tuple(qubits))
 
 
-async def run_mux_echo_stage(
-    scope: Scope, env: StageEnv, cfg: MuxT2EchoCfg, settings: FitSettings
+async def measure_mux_echo(
+    scope: Scope,
+    env: StageEnv,
+    pulses: FixedMuxPulses,
+    settings: EchoSettings,
+    *,
+    points: int,
+    timing: EchoTiming,
 ) -> MuxEchoStageResult:
-    """Acquire fixed mux Echo cfg, save raw and fit zero-detune participant decays.
+    """Build zero-detune mux Echo from fixed pi/pi2 pulses, save raw, fit and gate.
 
-    Inputs and failure semantics match run_mux_t1_stage. Echo omits the first
-    delay sample before fitting and applying gates. Each result retains its
-    original tone index; no point record or accepted history is changed.
+    pulses supplies full tone order, calibrated drives, readout, participants and
+    optional reset. settings controls averaging, sweep factor and acceptance.
+    points is the shared delay count, at least five. timing supplies the Echo
+    guess and the main loop's resolved relaxation in us. The sweep ends at
+    sweep_factor*timing.guess_us. Inputs and failure semantics otherwise match
+    measure_mux_t1. Echo omits the first delay before fitting. No point record
+    or history is changed; unexpected errors propagate.
     """
+    stop = settings.sweep_factor * timing.guess_us
+    cfg = MuxT2EchoCfg(
+        reps=settings.reps,
+        rounds=settings.rounds,
+        acquire_retry=settings.acquire_retry,
+        earlystop_snr=settings.earlystop_snr,
+        relax_delay=timing.relax_delay_us,
+        reset=pulses.reset,
+        readout=pulses.readout,
+        tones=[
+            MuxEchoToneCfg(name=t.name, drive=t.pi2_pulse, pi_pulse=t.drive, detune=0.0)
+            for t in pulses.tones
+        ],
+        participants=list(pulses.participants),
+        delay=SweepCfg(start=0.0, stop=stop, expts=points, step=stop / (points - 1)),
+    )
     record = await scope.run(MuxT2EchoExp().run, cfg, name="Mux Echo")
     observe_operation(env.summary, record)
     if isinstance(record, Failed):

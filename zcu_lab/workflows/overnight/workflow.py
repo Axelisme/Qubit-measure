@@ -13,21 +13,25 @@ from zcu_tools.experiment.workflows import (
     WorkflowEnv,
     workflow,
 )
-from zcu_tools.program.v2 import SweepCfg
 from zcu_tools.program.v2.modules import PulseCfg, PulseReadoutCfg
 
 from zcu_lab.v2.support.lifetime_models import LifetimeModelRecord
-from zcu_lab.v2.twotone.time_domain.t1.core import T1Cfg
-from zcu_lab.v2.twotone.time_domain.t2echo.core import T2EchoCfg
 from zcu_lab.workflows.common.calibration_results import StageStatus
 from zcu_lab.workflows.common.devices import set_flux
-from zcu_lab.workflows.common.gain import GainClamp, clamp_gain
+from zcu_lab.workflows.common.gain import GainClamp
 from zcu_lab.workflows.common.relaxation import echo_relaxation
 from zcu_lab.workflows.common.stages import StageEnv
 from zcu_lab.workflows.common.summary import RunSummary, SummaryAccumulator
 from zcu_lab.workflows.common.summary_points import overnight_summary_point
+from zcu_lab.workflows.overnight.pulses import FixedPulses
 from zcu_lab.workflows.overnight.samples import append_point_sample
-from zcu_lab.workflows.overnight.stages import FitSettings, run_echo_stage, run_t1_stage
+from zcu_lab.workflows.overnight.stages import (
+    EchoSettings,
+    EchoTiming,
+    T1Settings,
+    measure_echo,
+    measure_t1,
+)
 from zcu_lab.workflows.overnight.trend import draw_overnight_trend
 
 
@@ -218,6 +222,7 @@ async def overnight[C](  # noqa: PLR0915  # tolerated: workflow flow reads top t
     _ = env.devices
     summary = SummaryAccumulator(plan.outer_rounds, plan.flux_unit)
     stage_env = StageEnv(plots=env.plots, snapshot=plan.snapshot, summary=summary)
+    pulses = FixedPulses(pi=plan.qub_pulse, readout=plan.readout)
     qubit_role = plan.snapshot.roles.get("qubit")
     qubit_name = qubit_role if isinstance(qubit_role, str) else None
     last_actual_start: datetime | None = None
@@ -255,36 +260,26 @@ async def overnight[C](  # noqa: PLR0915  # tolerated: workflow flow reads top t
                 continue
             # Acquire and save T1 before fitting its scalar summary.
             current = tun.current
-            t1_stop = current.sweep_factor * current.t1_guess_us
-            t1_cfg = T1Cfg(
-                uniform=current.uniform,
-                reps=current.reps,
-                rounds=current.rounds,
-                acquire_retry=current.t1_acquire_retry,
-                earlystop_snr=current.t1_earlystop_snr,
-                relax_delay=max(
-                    current.relax_min_us,
-                    current.relax_factor * current.t1_guess_us,
-                ),
-                pi_pulse=plan.qub_pulse,
-                readout=plan.readout,
-                length=SweepCfg(
-                    start=0.0,
-                    stop=t1_stop,
-                    expts=plan.points,
-                    step=t1_stop / (plan.points - 1),
-                ),
-            )
-            t1 = await run_t1_stage(
+            t1 = await measure_t1(
                 iteration,
                 stage_env,
-                t1_cfg,
-                FitSettings(
+                pulses,
+                T1Settings(
+                    uniform=current.uniform,
+                    reps=current.reps,
+                    rounds=current.rounds,
+                    acquire_retry=current.t1_acquire_retry,
+                    earlystop_snr=current.t1_earlystop_snr,
+                    sweep_factor=current.sweep_factor,
+                    relax_factor=current.relax_factor,
+                    relax_min_us=current.relax_min_us,
                     max_rel_err=current.max_rel_err,
                     max_fit_residual=current.max_fit_residual,
                     min_lifetime_points=current.min_lifetime_points,
                     max_model_window_factor=current.max_model_window_factor,
                 ),
+                points=plan.points,
+                guess_us=current.t1_guess_us,
             )
             point_record.t1_status = t1.status
             point_record.t1_us = t1.lifetime_us
@@ -305,36 +300,25 @@ async def overnight[C](  # noqa: PLR0915  # tolerated: workflow flow reads top t
                     relax_min_us=current.relax_min_us,
                 )
             )
-            t2_stop = current.sweep_factor * current.t2_guess_us
-            t2_cfg = T2EchoCfg(
-                reps=current.reps,
-                rounds=current.rounds,
-                acquire_retry=current.t2_acquire_retry,
-                earlystop_snr=current.t2_earlystop_snr,
-                relax_delay=point_record.echo_relax_delay_us,
-                pi_pulse=plan.qub_pulse,
-                pi2_pulse=plan.qub_pulse.with_updates(
-                    gain=clamp_gain(
-                        plan.qub_pulse.gain / 2, "echo.pi2", point_record.gain_clamped
-                    )
-                ),
-                readout=plan.readout,
-                length=SweepCfg(
-                    start=0.0,
-                    stop=t2_stop,
-                    expts=plan.points,
-                    step=t2_stop / (plan.points - 1),
-                ),
-            )
-            echo = await run_echo_stage(
+            echo = await measure_echo(
                 iteration,
                 stage_env,
-                t2_cfg,
-                FitSettings(
+                pulses,
+                EchoSettings(
+                    reps=current.reps,
+                    rounds=current.rounds,
+                    acquire_retry=current.t2_acquire_retry,
+                    earlystop_snr=current.t2_earlystop_snr,
+                    sweep_factor=current.sweep_factor,
                     max_rel_err=current.max_rel_err,
                     max_fit_residual=current.max_fit_residual,
                     min_lifetime_points=current.min_lifetime_points,
                     max_model_window_factor=current.max_model_window_factor,
+                ),
+                points=plan.points,
+                timing=EchoTiming(
+                    guess_us=current.t2_guess_us,
+                    relax_delay_us=point_record.echo_relax_delay_us,
                 ),
             )
             point_record.t2_status = echo.status
@@ -343,6 +327,7 @@ async def overnight[C](  # noqa: PLR0915  # tolerated: workflow flow reads top t
             point_record.t2_reason = echo.reason
             point_record.t2_models = echo.models
             point_record.t2_file = echo.file
+            point_record.gain_clamped.extend(echo.gain_clamped)
             point_record.status = "skipped" if iteration.cancelled else "completed"
             last_actual_start = actual
             trend_points += (point_record,)

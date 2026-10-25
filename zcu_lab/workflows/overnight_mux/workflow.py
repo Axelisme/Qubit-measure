@@ -7,34 +7,25 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 from zcu_tools.experiment.metadata import RunSnapshot
 from zcu_tools.experiment.workflows import Live, WorkflowEnv, workflow
-from zcu_tools.program.v2 import ResetCfg, SweepCfg
-from zcu_tools.program.v2.modules import MuxReadoutCfg, PulseCfg
+from zcu_tools.program.v2 import ResetCfg
+from zcu_tools.program.v2.modules import MuxReadoutCfg
 
-from zcu_lab.v2.mux.t1.core import MuxT1Cfg, MuxT1ToneCfg
-from zcu_lab.v2.mux.t2echo.core import MuxEchoToneCfg, MuxT2EchoCfg
 from zcu_lab.v2.support.lifetime_models import LifetimeModelRecord
 from zcu_lab.workflows.common.calibration_results import StageStatus
 from zcu_lab.workflows.common.relaxation import echo_relaxation
 from zcu_lab.workflows.common.stages import StageEnv
 from zcu_lab.workflows.common.summary import RunSummary, SummaryAccumulator
 from zcu_lab.workflows.common.summary_points import mux_summary_point
+from zcu_lab.workflows.overnight_mux.pulses import FixedMuxPulses, OvernightMuxTone
 from zcu_lab.workflows.overnight_mux.samples import append_point_samples
 from zcu_lab.workflows.overnight_mux.stages import (
-    FitSettings,
-    run_mux_echo_stage,
-    run_mux_t1_stage,
+    EchoSettings,
+    EchoTiming,
+    T1Settings,
+    measure_mux_echo,
+    measure_mux_t1,
 )
 from zcu_lab.workflows.overnight_mux.trend import draw_overnight_mux_trend
-
-
-class OvernightMuxTone(MuxT1ToneCfg):
-    """Original readout position: name, x180 drive and independent x90 pulse.
-
-    Both pulses are required for participants by the native cores. Inactive
-    positions may leave either pulse None. No pulse is inferred or calibrated.
-    """
-
-    pi2_pulse: PulseCfg | None = None
 
 
 class OvernightMuxPlan(BaseModel):
@@ -210,6 +201,12 @@ async def overnight_mux[C](  # noqa: PLR0915  # tolerated: workflow flow reads t
     """
     summary = SummaryAccumulator(plan.outer_rounds)
     stage_env = StageEnv(plots=env.plots, snapshot=plan.snapshot, summary=summary)
+    pulses = FixedMuxPulses(
+        tones=tuple(plan.tones),
+        readout=plan.readout,
+        participants=tuple(plan.participants),
+        reset=plan.reset,
+    )
     last_actual_start: datetime | None = None
     trend_points: tuple[OvernightMuxPoint, ...] = ()
     for round_index, iteration in zip(
@@ -241,38 +238,26 @@ async def overnight_mux[C](  # noqa: PLR0915  # tolerated: workflow flow reads t
             actual = datetime.now(UTC)
             point_record.actual_start = actual
             current = tun.current
-            t1_stop = current.sweep_factor * current.t1_guess_us
-            t1_cfg = MuxT1Cfg(
-                uniform=current.uniform,
-                reps=current.reps,
-                rounds=current.rounds,
-                acquire_retry=current.t1_acquire_retry,
-                earlystop_snr=current.t1_earlystop_snr,
-                relax_delay=max(
-                    current.relax_min_us,
-                    current.relax_factor * current.t1_guess_us,
-                ),
-                reset=plan.reset,
-                readout=plan.readout,
-                tones=[MuxT1ToneCfg(name=t.name, drive=t.drive) for t in plan.tones],
-                participants=plan.participants,
-                delays=SweepCfg(
-                    start=0.0,
-                    stop=t1_stop,
-                    expts=plan.points,
-                    step=t1_stop / (plan.points - 1),
-                ),
-            )
-            t1 = await run_mux_t1_stage(
+            t1 = await measure_mux_t1(
                 iteration,
                 stage_env,
-                t1_cfg,
-                FitSettings(
+                pulses,
+                T1Settings(
+                    uniform=current.uniform,
+                    reps=current.reps,
+                    rounds=current.rounds,
+                    acquire_retry=current.t1_acquire_retry,
+                    earlystop_snr=current.t1_earlystop_snr,
+                    sweep_factor=current.sweep_factor,
+                    relax_factor=current.relax_factor,
+                    relax_min_us=current.relax_min_us,
                     max_rel_err=current.max_rel_err,
                     max_fit_residual=current.max_fit_residual,
                     min_lifetime_points=current.min_lifetime_points,
                     max_model_window_factor=current.max_model_window_factor,
                 ),
+                points=plan.points,
+                guess_us=current.t1_guess_us,
             )
             point_record.t1_file = t1.file
             qubits = dict(zip(plan.participants, point_record.qubits, strict=True))
@@ -295,38 +280,25 @@ async def overnight_mux[C](  # noqa: PLR0915  # tolerated: workflow flow reads t
                     relax_min_us=current.relax_min_us,
                 )
             )
-            t2_stop = current.sweep_factor * current.t2_guess_us
-            t2_cfg = MuxT2EchoCfg(
-                reps=current.reps,
-                rounds=current.rounds,
-                acquire_retry=current.t2_acquire_retry,
-                earlystop_snr=current.t2_earlystop_snr,
-                relax_delay=point_record.echo_relax_delay_us,
-                reset=plan.reset,
-                readout=plan.readout,
-                tones=[
-                    MuxEchoToneCfg(
-                        name=t.name, drive=t.pi2_pulse, pi_pulse=t.drive, detune=0.0
-                    )
-                    for t in plan.tones
-                ],
-                participants=plan.participants,
-                delay=SweepCfg(
-                    start=0.0,
-                    stop=t2_stop,
-                    expts=plan.points,
-                    step=t2_stop / (plan.points - 1),
-                ),
-            )
-            echo = await run_mux_echo_stage(
+            echo = await measure_mux_echo(
                 iteration,
                 stage_env,
-                t2_cfg,
-                FitSettings(
+                pulses,
+                EchoSettings(
+                    reps=current.reps,
+                    rounds=current.rounds,
+                    acquire_retry=current.t2_acquire_retry,
+                    earlystop_snr=current.t2_earlystop_snr,
+                    sweep_factor=current.sweep_factor,
                     max_rel_err=current.max_rel_err,
                     max_fit_residual=current.max_fit_residual,
                     min_lifetime_points=current.min_lifetime_points,
                     max_model_window_factor=current.max_model_window_factor,
+                ),
+                points=plan.points,
+                timing=EchoTiming(
+                    guess_us=current.t2_guess_us,
+                    relax_delay_us=point_record.echo_relax_delay_us,
                 ),
             )
             point_record.t2_file = echo.file

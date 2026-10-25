@@ -1,10 +1,11 @@
-"""Fixed-cfg overnight acquisitions, native saving and lifetime acceptance."""
+"""Build overnight experiments from fixed pulses, settings and lifetime guesses."""
 
 from dataclasses import dataclass
 
 import numpy as np
 from zcu_tools.experiment.scope import Scope
 from zcu_tools.experiment.workflows import Failed
+from zcu_tools.program.v2 import SweepCfg
 
 from zcu_lab.v2.support.lifetime_models import (
     LifetimeModelRecord,
@@ -19,9 +20,11 @@ from zcu_lab.workflows.common.analysis import (
     lifetime_rejection,
 )
 from zcu_lab.workflows.common.calibration_results import StageStatus
+from zcu_lab.workflows.common.gain import GainClamp, clamp_gain
 from zcu_lab.workflows.common.gates import Gate, gate
 from zcu_lab.workflows.common.stages import NativeOutput, StageEnv, acquire_saved
 from zcu_lab.workflows.overnight.analysis import analyze_t2echo
+from zcu_lab.workflows.overnight.pulses import FixedPulses
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -37,6 +40,57 @@ class FitSettings:
     max_fit_residual: float
     min_lifetime_points: int
     max_model_window_factor: float
+
+
+@dataclass(frozen=True, kw_only=True)
+class T1Settings(FitSettings):
+    """T1 averaging, delay policy and inherited fit acceptance bounds.
+
+    reps/rounds are native acquisition averages. acquire_retry counts transient
+    retries; earlystop_snr is a completed-round threshold, or None to disable.
+    uniform selects linear delays, otherwise the core concentrates the same
+    window. sweep_factor times guess_us gives its endpoint. relax_factor times
+    guess_us gives relaxation, floored at relax_min_us. Delays are in us.
+    """
+
+    reps: int
+    rounds: int
+    acquire_retry: int
+    earlystop_snr: float | None
+    uniform: bool
+    sweep_factor: float
+    relax_factor: float
+    relax_min_us: float
+
+
+@dataclass(frozen=True, kw_only=True)
+class EchoSettings(FitSettings):
+    """Echo averaging, sweep factor and inherited fit acceptance bounds.
+
+    reps/rounds are native acquisition averages. acquire_retry counts transient
+    retries; earlystop_snr is a completed-round threshold, or None to disable.
+    sweep_factor times the Echo guess gives its linear delay endpoint in us.
+    The main loop resolves relaxation separately in EchoTiming.
+    """
+
+    reps: int
+    rounds: int
+    acquire_retry: int
+    earlystop_snr: float | None
+    sweep_factor: float
+
+
+@dataclass(frozen=True, kw_only=True)
+class EchoTiming:
+    """This round's positive Echo guess and resolved relaxation, both in us.
+
+    guess_us sets the sweep endpoint through EchoSettings.sweep_factor.
+    relax_delay_us is the main loop's accepted-T1-or-fallback decision after
+    applying its relaxation factor and floor. The stage does not re-decide it.
+    """
+
+    guess_us: float
+    relax_delay_us: float
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -63,6 +117,8 @@ class T1Result:
 class EchoResult:
     """Echo status and accepted lifetime/error in us, absent unless accepted.
 
+    gain_clamped records truncated pi/2 gain requests during cfg construction.
+
     reason is None on acceptance, stopped on partial, otherwise the failure or
     failed gates. file references saved Completed raw, including partials and
     rejected fits; Failed acquisitions have no file. models holds both diagnostic
@@ -77,6 +133,7 @@ class EchoResult:
     file: str | None = None
     models: tuple[LifetimeModelRecord, ...] = ()
     gates: tuple[Gate, ...] = ()
+    gain_clamped: tuple[GainClamp, ...] = ()
 
 
 def _acceptance(
@@ -121,16 +178,37 @@ def _acceptance(
     return reason, gates
 
 
-async def run_t1_stage(
-    scope: Scope, env: StageEnv, cfg: T1Cfg, settings: FitSettings
+async def measure_t1(
+    scope: Scope,
+    env: StageEnv,
+    pulses: FixedPulses,
+    settings: T1Settings,
+    *,
+    points: int,
+    guess_us: float,
 ) -> T1Result:
-    """Acquire the fixed T1 cfg, save t1.h5, fit and apply captured settings.
+    """Build and acquire T1 from fixed pulses, save t1.h5, fit and gate.
 
-    cfg supplies calibrated pulses, delay grid and averaging without feedback.
-    env supplies plots, historical save identity and summary observation. Partial
-    returns rejected/stopped without fitting; acquisition/expected fit failure
-    returns failed. No point record or history is changed. Other errors propagate.
+    pulses supplies the plan's calibrated pi/readout. settings controls averaging,
+    delay policy and acceptance. points is the delay count, at least five;
+    guess_us is the positive lifetime estimate in us. The sweep ends at
+    sweep_factor*guess_us; relaxation is max(relax_min_us, relax_factor*guess_us).
+    Inputs remain unchanged. env supplies plots, save identity and summary.
+    Partial returns rejected/stopped without fitting; acquisition/expected fit
+    failure returns failed. Other errors propagate. No point or history changes.
     """
+    stop = settings.sweep_factor * guess_us
+    cfg = T1Cfg(
+        uniform=settings.uniform,
+        reps=settings.reps,
+        rounds=settings.rounds,
+        acquire_retry=settings.acquire_retry,
+        earlystop_snr=settings.earlystop_snr,
+        relax_delay=max(settings.relax_min_us, settings.relax_factor * guess_us),
+        pi_pulse=pulses.pi,
+        readout=pulses.readout,
+        length=SweepCfg(start=0.0, stop=stop, expts=points, step=stop / (points - 1)),
+    )
     acquisition = await acquire_saved(
         scope,
         env,
@@ -166,17 +244,40 @@ async def run_t1_stage(
     )
 
 
-async def run_echo_stage(
-    scope: Scope, env: StageEnv, cfg: T2EchoCfg, settings: FitSettings
+async def measure_echo(
+    scope: Scope,
+    env: StageEnv,
+    pulses: FixedPulses,
+    settings: EchoSettings,
+    *,
+    points: int,
+    timing: EchoTiming,
 ) -> EchoResult:
-    """Acquire the fixed zero-detune Echo cfg, save t2echo.h5, fit and gate.
+    """Build zero-detune Echo from fixed pulses, save t2echo.h5, fit and gate.
 
-    cfg supplies calibrated pulses, delay grid, relaxation and averaging. settings
-    supplies captured acceptance and model diagnostics; env supplies mechanical
-    services. Partial returns rejected/stopped without fitting. Acquisition or
-    expected fit failure returns failed; other errors propagate. This stage does
-    not change the point record, cancellation status or history.
+    pulses supplies pi/readout; pi/2 uses half the pi gain through clamp_gain.
+    settings controls averaging, sweep factor, acceptance and model diagnostics.
+    points is the delay count, at least five. timing supplies the Echo guess and
+    the main loop's resolved relaxation in us. The sweep ends at
+    sweep_factor*timing.guess_us. env supplies mechanical services. Partial
+    returns rejected/stopped without fitting; acquisition/expected fit failure
+    returns failed. Other errors propagate. No point or history is changed.
     """
+    gain_clamped: list[GainClamp] = []
+    stop = settings.sweep_factor * timing.guess_us
+    cfg = T2EchoCfg(
+        reps=settings.reps,
+        rounds=settings.rounds,
+        acquire_retry=settings.acquire_retry,
+        earlystop_snr=settings.earlystop_snr,
+        relax_delay=timing.relax_delay_us,
+        pi_pulse=pulses.pi,
+        pi2_pulse=pulses.pi.with_updates(
+            gain=clamp_gain(pulses.pi.gain / 2, "echo.pi2", gain_clamped)
+        ),
+        readout=pulses.readout,
+        length=SweepCfg(start=0.0, stop=stop, expts=points, step=stop / (points - 1)),
+    )
     acquisition = await acquire_saved(
         scope,
         env,
@@ -190,10 +291,16 @@ async def run_echo_stage(
             status="rejected" if acquisition.status == "partial" else "failed",
             reason=acquisition.reason,
             file=acquisition.file,
+            gain_clamped=tuple(gain_clamped),
         )
     fit = analyze_t2echo(acquisition.result)
     if isinstance(fit, Failed):
-        return EchoResult(status="failed", reason=fit.reason, file=acquisition.file)
+        return EchoResult(
+            status="failed",
+            reason=fit.reason,
+            file=acquisition.file,
+            gain_clamped=tuple(gain_clamped),
+        )
     comparison = compare_decay_fit(
         fit, t1=False, max_window_factor=settings.max_model_window_factor
     )
@@ -209,4 +316,5 @@ async def run_echo_stage(
         file=acquisition.file,
         models=comparison.records,
         gates=gates,
+        gain_clamped=tuple(gain_clamped),
     )
