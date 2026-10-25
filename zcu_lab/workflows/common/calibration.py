@@ -17,9 +17,6 @@ from zcu_tools.program.v2 import SweepCfg
 from zcu_tools.program.v2.modules import PulseCfg, PulseReadoutCfg, ReadoutCfg
 from zcu_tools.utils.process import SmoothingOptions, smooth_signal_nd
 
-from zcu_lab.v2.twotone.freq.core import (
-    FreqCfg,
-)
 from zcu_lab.v2.twotone.rabi.len_rabi.core import (
     LenRabiCfg,
     LenRabiExp,
@@ -43,18 +40,12 @@ from zcu_lab.workflows.common.calibration_analysis import (
 )
 from zcu_lab.workflows.common.calibration_plots import (
     CalibrationTrace,
-    draw_frequency,
     draw_rabi,
     draw_readout,
-    retain_frequency_fit,
     retain_trace,
 )
 from zcu_lab.workflows.common.calibration_results import (
     FrequencyResult as FrequencyResult,
-)
-from zcu_lab.workflows.common.calibration_results import (
-    FrequencyScan,
-    StageStatus,
 )
 from zcu_lab.workflows.common.calibration_results import (
     RabiResult as RabiResult,
@@ -62,6 +53,7 @@ from zcu_lab.workflows.common.calibration_results import (
 from zcu_lab.workflows.common.calibration_results import (
     ReadoutResult as ReadoutResult,
 )
+from zcu_lab.workflows.common.calibration_results import StageStatus as StageStatus
 from zcu_lab.workflows.common.calibration_tunables import (
     CalibrationTunables as CalibrationTunables,
 )
@@ -71,11 +63,8 @@ from zcu_lab.workflows.common.calibration_types import (
 from zcu_lab.workflows.common.calibration_types import (
     CalibratedPi2 as CalibratedPi2,
 )
-from zcu_lab.workflows.common.frequency_scan import (
-    accept_frequency_fit,
-    frequency_probe_gains,
-    measure_frequency_scan,
-    observe_frequency_linewidth,
+from zcu_lab.workflows.common.frequency_calibration import (
+    calibrate_frequency as calibrate_frequency,
 )
 from zcu_lab.workflows.common.frequency_tracking import (
     FrequencyTracker,
@@ -85,6 +74,7 @@ from zcu_lab.workflows.common.rabi_feedback import RabiDriveFeedback
 from zcu_lab.workflows.common.rabi_measurement import measure_planned_rabi
 from zcu_lab.workflows.common.readout_analysis import accepted_readout_optimum
 from zcu_lab.workflows.common.saving import save_native
+from zcu_lab.workflows.common.summary import SummaryAccumulator, observe_operation
 
 
 @dataclass
@@ -153,7 +143,8 @@ class CalibrationInputs:
     snapshot is the fixed historical entry/point/role state used by all three
     native saves, not a live source. directory is the allocated commit directory.
     Coherence and MIST reuse fixed modules/snapshot/directory across stages,
-    replacing tun from tun.current.cal before each stage. A stage does not
+    replacing tun from tun.current.cal before each stage. summary optionally
+    collects delivered operation facts for the normal-return report. A stage does not
     recapture sources or refresh its own policy during acquisition.
     flux/flux_unit label the current point's history rows in device coordinates.
     """
@@ -167,6 +158,7 @@ class CalibrationInputs:
     point_index: int
     flux: float
     flux_unit: str
+    summary: SummaryAccumulator | None = None
 
 
 def apply_readout_calibration(readout: ReadoutCfg, cal: Calibrated) -> None:
@@ -186,203 +178,6 @@ def _validate_calibration_inputs(flux: float, t1_estimate_us: float) -> None:
         raise ValueError("T1 estimate must be positive and finite")
     if not math.isfinite(flux):
         raise ValueError("Calibration flux must be finite")
-
-
-def _frequency_cfg(
-    inputs: CalibrationInputs,
-    prior: Calibrated,
-    center: float,
-    gain: float,
-    span: float,
-    offset: float = 0.0,
-) -> FreqCfg:
-    drive = inputs.probe_pulse.model_copy(deep=True)
-    drive.set_param("gain", gain)
-    ro = inputs.readout.model_copy(deep=True)
-    apply_readout_calibration(ro, prior)
-    return FreqCfg(
-        reps=inputs.tun.qf_reps,
-        rounds=inputs.tun.qf_rounds,
-        acquire_retry=inputs.tun.qf_acquire_retry,
-        earlystop_snr=inputs.tun.qf_earlystop_snr,
-        relax_delay=1.0,
-        qub_pulse=drive,
-        readout=ro,
-        freq=SweepCfg(
-            start=center + offset - span / 2,
-            stop=center + offset + span / 2,
-            expts=inputs.tun.qf_points,
-            step=span / (inputs.tun.qf_points - 1),
-        ),
-    )
-
-
-async def calibrate_frequency(
-    scope: Scope,
-    *,
-    plots: Plots,
-    inputs: CalibrationInputs,
-    flux: float,
-    carry: CalCarry,
-) -> FrequencyResult:
-    """Locate f01 with a coarse survey followed by a lower-power fine scan.
-
-    two_step selects the candidate nearest the physical-plus-IDW center, isolates
-    it from neighbouring peaks and recenters the fine scan on the coarse fit.
-    Only coarse failures use qf_widen. A truncated coarse peak must be rescanned.
-    Fine results alone enter acceptance, IDW, recovery history and linewidth
-    feedback. single retains whole-window fitting and the original widening.
-    Save every Completed attempt before analysis, including partial results.
-    scans records each stage's actual gain/span/file and all candidates.
-    Partial results do not enter fitting or feedback. Invalid flux raises before
-    acquisition; unexpected acquisition, writer and analysis errors propagate.
-    """
-    if not math.isfinite(flux):
-        raise ValueError("Calibration flux must be finite")
-    prior = carry.seed if carry.last is None else carry.last
-    tracker = carry.frequency_tracker
-    if tracker is None:
-        raise ValueError("Frequency calibration requires a captured physical predictor")
-    hint = tracker.begin_point(flux, seed_flux=carry.seed_flux)
-    predictor_model = tracker.model_snapshot()
-    carry.cur_m, carry.m_ratio = tracker.cur_m, tracker.m_ratio
-    tun = inputs.tun
-    coarse_gain, fine_gain, adaptive_gain = frequency_probe_gains(inputs, tracker)
-    first_stage: Literal["coarse", "fine", "single"] = (
-        "coarse" if tun.frequency_mode == "two_step" else "single"
-    )
-    pending: list[tuple[Literal["coarse", "fine", "single"], float]] = [
-        (first_stage, widen) for widen in tun.qf_widen
-    ]
-    center = hint
-    scans: list[FrequencyScan] = []
-    status: StageStatus = "rejected"
-    reason = "No accepted frequency fit"
-    while pending:
-        stage, widen = pending.pop(0)
-        if scope.cancelled:
-            return FrequencyResult(
-                "skipped",
-                "Point cancelled",
-                None,
-                tuple(scan.file for scan in scans if scan.file is not None),
-                tuple(scan.gain for scan in scans),
-                hint,
-                predictor_model,
-                tracker.last_recovery,
-                tuple(scans),
-            )
-        gain = (
-            coarse_gain
-            if stage == "coarse"
-            else fine_gain
-            if stage == "fine"
-            else adaptive_gain
-        )
-        span = (
-            (tun.fine_span_mhz or tun.span_mhz)
-            if stage == "fine"
-            else tun.span_mhz
-            * widen
-            * (tun.coarse_span_factor if stage == "coarse" else 1)
-        )
-        cfg = _frequency_cfg(
-            inputs,
-            prior,
-            center,
-            gain,
-            span,
-            0.0 if stage == "fine" else tun.detune_center_mhz,
-        )
-        filename = (
-            f"frequency-{len(scans) + 1:02d}.h5"
-            if stage == "single"
-            else f"frequency-{stage}-{len(scans) + 1:02d}.h5"
-        )
-        scan, fit = await measure_frequency_scan(
-            scope,
-            cfg,
-            FrequencyScan(
-                stage,
-                filename,
-                gain,
-                span,
-                center + (0.0 if stage == "fine" else tun.detune_center_mhz),
-            ),
-            inputs,
-        )
-        scans.append(scan)
-        if isinstance(fit, Failed):
-            status = (
-                "rejected"
-                if fit.reason in ("stopped", "Selected peak is truncated")
-                else "failed"
-            )
-            reason = fit.reason
-            continue
-        result = fit.source
-        retain_frequency_fit(
-            carry.frequency_traces, fit, inputs.point_index, flux, hint
-        )
-        draw_frequency(
-            plots,
-            carry.frequency_traces,
-            carry.f01_by_flux,
-            flux_unit=inputs.flux_unit,
-            directory=inputs.directory,
-        )
-        if stage == "coarse":
-            if not math.isfinite(fit.frequency_mhz) or not float(
-                np.min(fit.freqs)
-            ) <= fit.frequency_mhz <= float(np.max(fit.freqs)):
-                status, reason = (
-                    "rejected",
-                    "Coarse fitted center is outside its candidate interval",
-                )
-                continue
-            center = fit.frequency_mhz
-            # Drop unused coarse widening rungs. A fine failure ends this point.
-            pending = [("fine", 1.0)]
-            continue
-        if accept_frequency_fit(fit, result, tun):
-            carry.last = replace(prior, f01_mhz=fit.frequency_mhz)
-            carry.f01_by_flux.append((flux, fit.frequency_mhz))
-            tracker.finish_point(flux, fit.frequency_mhz, tun=tun)
-            observe_frequency_linewidth(
-                tracker, fit, result, gain, inputs.point_index, tun
-            )
-            draw_frequency(
-                plots,
-                carry.frequency_traces,
-                carry.f01_by_flux,
-                flux_unit=inputs.flux_unit,
-                directory=inputs.directory,
-            )
-            return FrequencyResult(
-                "accepted",
-                None,
-                fit.frequency_mhz,
-                tuple(scan.file for scan in scans if scan.file is not None),
-                tuple(scan.gain for scan in scans),
-                hint,
-                predictor_model,
-                tracker.last_recovery,
-                tuple(scans),
-            )
-        status, reason = "rejected", "No accepted frequency fit"
-    if reason != "stopped":
-        tracker.finish_point(flux, None, tun=tun)
-    return FrequencyResult(
-        status,
-        reason,
-        None,
-        tuple(scan.file for scan in scans if scan.file is not None),
-        tuple(scan.gain for scan in scans),
-        hint,
-        predictor_model,
-        tracker.last_recovery,
-        tuple(scans),
-    )
 
 
 async def calibrate_rabi(
@@ -542,6 +337,7 @@ async def calibrate_len_rabi(
         ),
     )
     outcome = await scope.run(measure_planned_rabi, cfg, name="Rabi")
+    observe_operation(inputs.summary, outcome)
     diagnostics = RabiResult(
         "failed",
         None,
@@ -752,6 +548,7 @@ async def calibrate_readout(
         ),
     )
     outcome = await scope.run(FreqGainExp().run, cfg, name="readout")
+    observe_operation(inputs.summary, outcome)
     if isinstance(outcome, Failed):
         return ReadoutResult("failed", outcome.reason, None, None, None)
     # Save the landscape and choose its best point meeting the SNR threshold.

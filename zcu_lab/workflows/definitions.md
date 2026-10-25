@@ -80,19 +80,28 @@ Point 的 calibration_sources 記 consumer、need、source_index、source_flux �
 Tuple 按 T1、Ramsey、Echo 排序，每個 kind 最多一個結果；開啟但失敗／拒絕／skipped 的項目有原因，關閉的項目沒有 placeholder。
 Frequency 預設 `frequency_mode="two_step"`。粗掃使用 probe pulse gain，
 span 為 `span_mhz * coarse_span_factor`，預設倍率 3。可用 `coarse_gain` 覆寫粗掃 gain。
-粗掃以 predictor 加 IDW 的中心選最近候選，再隔離其他峰做局部擬合。
-粗掃失敗或主峰為 truncated 時，才沿 `qf_widen` 擴窗重掃。
-粗掃成功後，以擬合中心細掃一次，不再套 detune offset。
+粗掃先選 predictor 加 IDW 中心最近的候選，其餘依 prominence 降序。
+每點最多試 `max_candidates` 個候選，預設 3。重用同次粗掃資料隔離各峰做局部擬合。
+局部擬合失敗或 truncated 會換下一候選。沒有可用粗峰時才沿 `qf_widen` 擴窗，仍受候選總數限制。
+每個可用粗峰以其擬合中心細掃一次，不再套 detune offset。
 細掃 span 預設為 `span_mhz`，可用 `fine_span_mhz` 覆寫。
 細掃 gain 預設為自適應 gain 的一半，且不超過粗掃 gain 的一半，可用 `fine_gain` 覆寫。
 只有細掃結果進入頻率接受門檻、IDW、可信歷史與線寬回饋。
-細掃失敗不退回粗掃，整點失敗才觸發 recovery 判斷。
+細掃沒有候選，或最強候選中心離該粗峰的擬合中心超過該粗峰的半 prominence 寬度，會拒絕該粗峰。
+細掃擬合失敗或未通過既有品質 gate 也換下一候選。不增加每次掃描點數或 rounds。
+細掃失敗不退回粗掃，候選都失敗才觸發整點的 recovery 判斷。
 `frequency_mode="single"` 保留原有整窗擬合、gain 與 widening。
 
 `peak_min_prominence` 是投影訊號 ptp 比例，預設 0.2。
 `peak_min_distance_mhz` 是候選最小間距，預設 0 MHz。
+`peak_min_snr` 預設 5，prominence 與峰高相對 median 都須至少為此倍數的雜訊 σ。
+σ 由一階差分 MAD 換算。候選的 `snr` 是峰高相對 median 除以 σ，不是 prominence/σ。
+`peak_min_width_samples` 預設 3，是半 prominence 的窗內可觀察取樣間隔數。
+降低 SNR 或寬度門檻會同時增加弱峰與雜訊候選。這些統計門檻不保證排除所有雜訊。
 每點 Frequency result 的 `scans` 保存 coarse、fine 或 single 階段、
 檔名、gain、span、實際中心、全部候選、選定候選及擬合中心。
+`candidate_attempts` 逐一保存試過的粗峰、粗掃檔名、局部擬合中心、細掃檔名與 rejection_reason。
+拒絕原因包含沒有細峰、超出粗峰寬度、截斷、擬合失敗與品質 gate；只有接受的候選沒有拒絕原因。
 候選的 `truncated` 表示窗內無法觀察完整半 prominence 寬度。
 兩步檔名含 coarse 或 fine，single 維持 frequency-NN.h5。
 Frequency 保存每個 Completed attempt 的引用，fit 拒絕也保留 native raw。
@@ -149,6 +158,36 @@ Overnight 與 mux 沿用 Coherence 的雙模型診斷，分別保存在 point �
 T1 的副模型為雙指數，零 detune Echo 的副模型為零中心高斯；圖上兩條曲線都標示。`max_model_window_factor` 只控制診斷 discarded，不改接受值、Echo relax 或趨勢圖。
 每輪保存兩個 native 檔名、排程與實際 UTC 開始時間、status，以及每個 participant 的名稱、T1/Echo 接受值、誤差與原因。
 `overnight_mux_trend` 的 T1/Echo panels 各為每個 qubit 畫一條線，缺值留 gap。單輪範圍、更新時機與不自動保存的契約同 overnight。
+
+## Run 摘要
+
+四個 workflow 正常結束時 return `common.summary.RunSummary`。框架只在 done 時把它寫到 metadata root 的 `summary.json`，不增加 point commit。
+檔案使用框架 encoded record 信封，摘要在 `value`。讀取可用 `saved_run.read_summary(metadata_root)`；`workflow_records`／RPC 不回傳這份檔案。
+Stop、未處理的 acquisition／analysis／writer 錯誤都會中止 return，因此沒有 `summary.json`。Finally 的部分 point commits 仍保留，不是完整 run 摘要。
+
+摘要只從本次 run 的 point payload 與 delivered Completed facts 累計，不讀磁碟、raw 檔或重新擬合。
+`planned_points` 是 flux 點數或 outer_rounds。`committed_points` 包括所有提交點，`completed_points` 只計 status=completed，`skipped_points` 計 status=skipped。
+Stage 的拒絕或失敗不會扣除 completed_points。
+`flux_range` 記已提交 point 的 flux setpoints 最小、最大值與 plan 單位；空 run 或不設 flux 的 mux 省略此欄。
+`physical_recoveries` 計 frequency.recovery 非 None 的 point，包含被拒絕的 physical refit 嘗試。
+
+`stages` 按 frequency、Rabi、readout 與啟用的 singleshot／T1／Ramsey／Echo／MIST 彙整 accepted、rejected、skipped、failed。
+Amp Rabi 若執行則獨立列出。未走到的啟用 stage 算 skipped／not reached，關閉的 stage 不列入。
+Coherence lifetime 與 calibration 沿用原有 status。完整 singleshot 的 measured 對應 accepted，partial 仍按 point 的 failed 計數。
+Overnight 與 mux member 的 status 直接在結果產生處填寫：接受值為 accepted、完整 fit 未過門檻或 partial 為 rejected、Schedule／預期 fit failure 為 failed、未執行為 skipped。
+MIST trace 完整 success 為 accepted、partial 為 rejected、Schedule failure 為 failed、依賴不足或未執行為 skipped。
+MIST both 每點計兩個 preparation 結果；mux 每點按 participant 計 T1／Echo。副模型診斷不計為另一個 stage，也不改主模型的狀態。
+各 stage 的 rejected_reasons、skipped_reasons 按原始 reason 字串計數，不分類或改寫原因。
+
+`duration.mean_s/max_s` 先加總同一 point、同一 stage 的 operations 秒數，再算平均與最大值。只有有時間的 point 參與平均。
+Frequency 包含該點所有 delivered coarse／fine／widening scans，MIST 包含兩種 preparation。Mux 計一次共用 acquisition 時間，不乘 participant 數。
+只計 delivered Completed（含 partial），不包含 Failed 或 Pause discarded attempts；缺少時間就省略 duration。
+`early_stops` 計 acquisition facts 的 early_stopped=True 次數，`acquire_retries` 計 attempts>1 次數，不是額外 acquire 次數的總和。
+這兩項也只涵蓋 delivered Completed facts。完整 Failed／Pause attempts 留在 point 信封與 journal，不在此摘要重建。
+
+`qubits` 只在 overnight／overnight_mux 列出，各 qubit 的 t1／echo 記 accepted、mean_us、std_us。
+平均與母體標準差只取原有主模型的接受值，不混入 rejected／failed 或副模型值。單筆標準差為 0，零筆省略平均與標準差。
+單 qubit overnight 的 name 取 snapshot.roles 的單一 qubit 字串，缺失或非單一名稱時為 null，不從 pulse channel 猜。Mux 使用 plan participant 的原有名稱。
 
 ## Native、裝置與前端邊界
 

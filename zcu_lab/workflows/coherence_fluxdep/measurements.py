@@ -1,7 +1,6 @@
 """Concrete lifetime acquisition, acceptance and independent delay histories."""
 
 from dataclasses import dataclass, replace
-from pathlib import Path
 from typing import Literal
 
 import numpy as np
@@ -36,6 +35,7 @@ from zcu_lab.workflows.common.analysis import (
 )
 from zcu_lab.workflows.common.calibration import StageStatus
 from zcu_lab.workflows.common.saving import save_native
+from zcu_lab.workflows.common.summary import SummaryAccumulator, observe_operation
 
 type LifetimeKind = Literal["t1", "t2ramsey", "t2echo"]
 
@@ -163,14 +163,15 @@ async def measure_t1(
     *,
     tun: T1Tunables,
     snapshot: RunSnapshot,
-    directory: Path,
     plots: Plots,
+    summary: SummaryAccumulator | None = None,
 ) -> LifetimeResult:
     """Measure energy relaxation to estimate T1 independently of dephasing.
 
     plan supplies fixed routing/grid resolution/snapshot, tun supplies native
     averaging/timing/fit gates, and cal is this point's accepted frequency/pi
-    with retained legal readout. directory is this point's allocated commit path.
+    with retained legal readout. Raw data saves in scope.dir. summary optionally
+    collects delivered operation facts for the normal-return report.
     Save precedes fit, so rejected fits retain raw.
     Partial saves then returns rejected/stopped without fitting. Schedule failures
     return failed without a file; expected fit failures return failed with the raw
@@ -179,12 +180,13 @@ async def measure_t1(
     # Acquire this lifetime on its own delay grid, with a live trace.
     plot = _plot(plots, "t1")
     outcome = await scope.run(T1Exp().run, cfg, name="T1")
+    observe_operation(summary, outcome)
     if isinstance(outcome, Failed):
         return LifetimeResult("t1", "failed", outcome.reason, None, None, None)
     # Save every completed trace before plotting or analyzing it.
     save_native(
         outcome,
-        directory / "t1.h5",
+        scope.dir / "t1.h5",
         spec=T1Exp.AXES_SPEC,
         snapshot=snapshot,
         identity=scope.identity,
@@ -230,16 +232,16 @@ async def measure_ramsey(
     *,
     tun: T2EchoTunables,
     snapshot: RunSnapshot,
-    directory: Path,
     plots: Plots,
+    summary: SummaryAccumulator | None = None,
 ) -> LifetimeResult:
     """Measure Ramsey fringes to estimate dephasing without an echo pulse.
 
     plan supplies fixed routing, grid resolution and historical snapshot; tun
     supplies averaging, timing and detuning. cal contains this point's accepted
     frequency/pi/pi2 and retained legal readout. guess_us is this lifetime's
-    positive microsecond delay estimate. directory is this point's allocated
-    commit path. Partial saves then returns rejected/stopped without fitting.
+    positive microsecond delay estimate. raw data saves in scope.dir.
+    summary optionally collects delivered facts. Partial saves then returns rejected/stopped without fitting.
     Schedule failures return failed without a file; expected fit failures return
     failed with the raw filename. Unexpected errors propagate. History updates
     belong to the caller. Fitted pi2 is not pi/2.
@@ -253,12 +255,13 @@ async def measure_ramsey(
     # Acquire this lifetime on its own delay grid, with a live trace.
     plot = _plot(plots, "t2ramsey")
     outcome = await scope.run(run_t2ramsey, cfg, name="Ramsey")
+    observe_operation(summary, outcome)
     if isinstance(outcome, Failed):
         return LifetimeResult("t2ramsey", "failed", outcome.reason, None, None, None)
     # Save every completed trace before plotting or analyzing it.
     save_t2ramsey(
         outcome,
-        directory / "t2ramsey.h5",
+        scope.dir / "t2ramsey.h5",
         snapshot=snapshot,
         identity=scope.identity,
     )
@@ -292,16 +295,16 @@ async def measure_echo(
     *,
     tun: T2EchoTunables,
     snapshot: RunSnapshot,
-    directory: Path,
     plots: Plots,
+    summary: SummaryAccumulator | None = None,
 ) -> LifetimeResult:
     """Measure Hahn-echo decay to estimate coherence after refocusing slow noise.
 
     plan supplies fixed routing, grid resolution and historical snapshot; tun
     supplies averaging and T1-derived or fixed relaxation timing. cal contains
     this point's accepted frequency/pi/pi2 and retained legal readout. guess_us is Echo's
-    positive microsecond delay estimate. directory is this point's allocated
-    commit path. Partial saves then returns rejected/stopped without fitting.
+    positive microsecond delay estimate. raw data saves in scope.dir.
+    summary optionally collects delivered facts. Partial saves then returns rejected/stopped without fitting.
     Schedule failures return failed without a file; expected fit failures return
     failed with the raw filename. Unexpected errors propagate.
     min_lifetime_points requires that many fitted delays in [0, lifetime],
@@ -313,12 +316,13 @@ async def measure_echo(
     # Acquire this lifetime on its own delay grid, with a live trace.
     plot = _plot(plots, "t2echo")
     outcome = await scope.run(T2EchoExp().run, cfg, name="Echo")
+    observe_operation(summary, outcome)
     if isinstance(outcome, Failed):
         return LifetimeResult("t2echo", "failed", outcome.reason, None, None, None)
     # Save every completed trace before plotting or analyzing it.
     save_native(
         outcome,
-        directory / "t2echo.h5",
+        scope.dir / "t2echo.h5",
         spec=T2EchoExp.AXES_SPEC,
         snapshot=snapshot,
         identity=scope.identity,

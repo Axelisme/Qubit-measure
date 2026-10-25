@@ -32,6 +32,7 @@ from zcu_lab.workflows.common.calibration_results import (
 )
 from zcu_lab.workflows.common.frequency_tracking import trusted_curve
 from zcu_lab.workflows.common.saving import save_native
+from zcu_lab.workflows.common.summary import observe_operation
 
 if TYPE_CHECKING:
     from zcu_lab.workflows.common.calibration import CalCarry, CalibrationInputs
@@ -152,6 +153,7 @@ async def calibrate_amp_rabi(
         ),
     )
     outcome = await scope.run(AmpRabiExp().run, cfg, name="AmpRabi")
+    observe_operation(inputs.summary, outcome)
     amp = AmpCalibrationResult("failed", None, length)
     accepted_gain = None
     pi2_gain = None

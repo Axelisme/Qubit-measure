@@ -67,6 +67,12 @@ from zcu_lab.workflows.common.calibration import (
 from zcu_lab.workflows.common.devices import set_flux
 from zcu_lab.workflows.common.frequency_tracking import FrequencyModel, FrequencyTracker
 from zcu_lab.workflows.common.saving import save_native
+from zcu_lab.workflows.common.summary import (
+    RunSummary,
+    SummaryAccumulator,
+    observe_operation,
+)
+from zcu_lab.workflows.common.summary_points import coherence_summary_point
 
 
 class CoherencePlan(T1Plan):
@@ -250,14 +256,22 @@ def _append(history: LifetimeHistory, flux: float, result: LifetimeResult) -> No
         history.append((flux, result.lifetime_us, result.error_us))
 
 
+@dataclass(frozen=True)
+class T1StageInputs:
+    """Historical save identity, captured T1 gates and optional run report."""
+
+    snapshot: RunSnapshot
+    tun: T1Tunables
+    summary: SummaryAccumulator | None = None
+
+
 async def run_t1_stage(
     iteration: Scope,
     cfg: T1Cfg | None,
     point_record: CoherencePoint,
     plots: Plots,
     *,
-    snapshot: RunSnapshot,
-    tun: T1Tunables,
+    inputs: T1StageInputs,
 ) -> bool:
     """Use cfg from current_pi_calibration, independent of pi2 trust.
 
@@ -290,10 +304,10 @@ async def run_t1_stage(
     t1 = await measure_t1(
         iteration,
         cfg,
-        tun=tun,
-        snapshot=snapshot,
-        directory=iteration.dir,
+        tun=inputs.tun,
+        snapshot=inputs.snapshot,
         plots=plots,
+        summary=inputs.summary,
     )
     point_record.measurements += (t1,)
     if iteration.cancelled:
@@ -314,6 +328,7 @@ class T2StageInputs:
     snapshot: RunSnapshot
     source: CalibrationSource
     tun: T2EchoTunables
+    summary: SummaryAccumulator | None = None
 
 
 async def run_ramsey_stage(
@@ -331,8 +346,8 @@ async def run_ramsey_stage(
         cfg,
         tun=inputs.tun,
         snapshot=inputs.snapshot,
-        directory=iteration.dir,
         plots=plots,
+        summary=inputs.summary,
     )
     point_record.measurements += (ramsey,)
     if iteration.cancelled:
@@ -355,8 +370,8 @@ async def run_echo_stage(
         cfg,
         tun=inputs.tun,
         snapshot=inputs.snapshot,
-        directory=iteration.dir,
         plots=plots,
+        summary=inputs.summary,
     )
     point_record.measurements += (echo,)
     if iteration.cancelled:
@@ -457,6 +472,7 @@ class CalibrationStageHistory:
 
     carry: CalCarry
     t1_by_flux: LifetimeHistory
+    summary: SummaryAccumulator | None = None
 
 
 async def run_calibration_stages(
@@ -502,6 +518,7 @@ async def run_calibration_stages(
         point_index=point_record.index,
         flux=point_record.flux,
         flux_unit=plan.flux_unit,
+        summary=history.summary,
     )
     if await run_frequency_stage(
         iteration, captured, point_record, plots, carry=history.carry
@@ -532,6 +549,7 @@ async def run_singleshot_stage(
     tun: SingleshotTunables,
     point_record: CoherencePoint,
     inputs: SingleshotInputs,
+    summary: SummaryAccumulator | None = None,
 ) -> float | None:
     """Gate, acquire and save raw GE, returning the last acquired flux setpoint.
 
@@ -564,6 +582,7 @@ async def run_singleshot_stage(
     )
     cfg = singleshot_cfg(plan, tun, inputs.cal, relax_delay=inputs.relax_delay)
     ge = await iteration.run(GE_Exp().run, cfg, name="singleshot GE")
+    observe_operation(summary, ge)
     if isinstance(ge, Failed):
         point_record.singleshot = SingleshotResult("failed", ge.reason, None)
         return inputs.last_flux
@@ -589,7 +608,7 @@ async def coherence_fluxdep(
     env: WorkflowEnv[Calibrated],
     plan: CoherencePlan,
     tun: Live[CoherenceTunables],
-) -> None:
+) -> RunSummary:
     """Measure coherence versus flux with independent lifetime histories.
 
     Await calibration, optional raw GE, then enabled T1, Ramsey and Echo. GE
@@ -606,8 +625,7 @@ async def coherence_fluxdep(
     To revisit past points, start a new run with a sliced plan and seed local
     history from the previous run using the saved_run reader.
     """
-    _ = env.soc
-    _ = env.devices
+    summary = SummaryAccumulator(len(plan.fluxes), plan.flux_unit)
     carry = CalCarry(
         env.context,
         seed_flux=plan.seed_flux,
@@ -637,7 +655,7 @@ async def coherence_fluxdep(
                 tun,
                 env.plots,
                 point_record,
-                CalibrationStageHistory(carry, t1_by_flux),
+                CalibrationStageHistory(carry, t1_by_flux, summary),
             )
             # T1/GE resolve NOW pi independently of T2 LATEST pi/pi2.
             now_cal = current_pi_calibration(point_record.rabi, carry)
@@ -664,6 +682,7 @@ async def coherence_fluxdep(
                         tun.current.t1.relax_factor
                         * history_guess(tun.current.t1.guess_us, t1_by_flux),
                     ),
+                    summary=summary,
                 )
             if iteration.cancelled:
                 point_record.status = "skipped"
@@ -682,8 +701,7 @@ async def coherence_fluxdep(
                     else None,
                     point_record,
                     env.plots,
-                    snapshot=plan.snapshot,
-                    tun=tun.current.t1,
+                    inputs=T1StageInputs(plan.snapshot, tun.current.t1, summary),
                 )
                 _append(t1_by_flux, flux, point_record.measurements[-1])
                 if skip:
@@ -722,6 +740,7 @@ async def coherence_fluxdep(
                             snapshot=plan.snapshot,
                             source=calibration_source(carry.pi_source, index),
                             tun=tun.current.t2ramsey,
+                            summary=summary,
                         ),
                     )
                     _append(t2ramsey_by_flux, flux, point_record.measurements[-1])
@@ -744,6 +763,7 @@ async def coherence_fluxdep(
                             snapshot=plan.snapshot,
                             source=calibration_source(carry.pi_source, index),
                             tun=tun.current.t2echo,
+                            summary=summary,
                         ),
                     )
                     _append(t2echo_by_flux, flux, point_record.measurements[-1])
@@ -753,6 +773,7 @@ async def coherence_fluxdep(
             directory = iteration.dir
         finally:
             iteration.commit(point_record)
+            summary.points.append(coherence_summary_point(point_record, plan))
             draw_summaries(
                 env.plots,
                 summaries,
@@ -763,3 +784,4 @@ async def coherence_fluxdep(
     draw_summaries(
         env.plots, summaries, committed_points=len(plan.fluxes), directory=directory
     )
+    return summary.finish()

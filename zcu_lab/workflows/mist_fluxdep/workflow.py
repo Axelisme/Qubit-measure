@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Literal
 
@@ -40,8 +40,11 @@ from zcu_lab.workflows.common.calibration import (
     current_point_calibration,
     readout_due,
 )
+from zcu_lab.workflows.common.calibration_results import StageStatus
 from zcu_lab.workflows.common.devices import set_flux
 from zcu_lab.workflows.common.frequency_tracking import FrequencyModel, FrequencyTracker
+from zcu_lab.workflows.common.summary import RunSummary, SummaryAccumulator
+from zcu_lab.workflows.common.summary_points import mist_summary_point
 from zcu_lab.workflows.mist_fluxdep.acquire import run_mist
 from zcu_lab.workflows.mist_fluxdep.analysis import (
     mist_fluxdep_signal2real,
@@ -124,6 +127,10 @@ class MISTTunables(BaseModel):
 class MISTTrace(BaseModel):
     """One preparation's outcome; gain_file retains raw IQ even for partial stops."""
 
+    status: StageStatus = Field(
+        default="skipped",
+        description="Accepted complete trace, rejected partial, failed acquisition, or dependency/unvisited skip",
+    )
     success: bool = False
     reason: str | None = None
     gain_file: str | None = None
@@ -339,13 +346,21 @@ def draw_mist_map(
     plots.draw(f"mist/{mode}/vs_flux", draw)
 
 
+@dataclass(frozen=True)
+class MISTStageInputs:
+    """Captured preparation plan and run-local delivered-facts report."""
+
+    plan: MISTPlan
+    summary: SummaryAccumulator
+
+
 async def run_mist_stage(
     iteration: Scope,
     cfg: PowerDepCfg,
     point: MISTPoint,
     plots: Plots,
     *,
-    plan: MISTPlan,
+    inputs: MISTStageInputs,
     mode: Literal["excited", "ground"],
 ) -> PowerDepResult | None:
     """Acquire one preparation, save every Completed raw trace, and draw complete IQ.
@@ -354,24 +369,28 @@ async def run_mist_stage(
     return None without a map row. Complete traces return actual rounded axes.
     """
     trace = point.traces[mode]
-    point.relax_source = "captured_t1" if plan.t1_us is not None else "guess"
+    point.relax_source = "captured_t1" if inputs.plan.t1_us is not None else "guess"
     point.relax_delay_us = cfg.relax_delay
     outcome = await iteration.run(run_mist, cfg, name=f"MIST {mode}")
+    inputs.summary.observe(outcome)
     if isinstance(outcome, Failed):
+        trace.status = "failed"
         trace.reason = outcome.reason
         return None
     trace.gain_file = f"mist-{mode}.h5"
     save_mist(
         outcome,
         iteration.dir / trace.gain_file,
-        snapshot=plan.snapshot,
+        snapshot=inputs.plan.snapshot,
         identity=iteration.identity,
     )
     if outcome.partial_result:
+        trace.status = "rejected"
         trace.reason = "stopped"
         return None
     result = outcome.value.result
     _save_gain(plots, result, iteration.dir, mode)
+    trace.status = "accepted"
     trace.success, trace.reason = True, None
     return result
 
@@ -379,7 +398,7 @@ async def run_mist_stage(
 @workflow("mist_fluxdep", "Calibrate and acquire MIST gain traces versus flux.")
 async def mist_fluxdep(
     env: WorkflowEnv[Calibrated], plan: MISTPlan, tun: Live[MISTTunables]
-) -> None:
+) -> RunSummary:
     """Calibrate and acquire a fixed gain trace at each absolute flux setpoint.
 
     Excited preparation uses latest accepted pi; ground omits preparation.
@@ -395,8 +414,7 @@ async def mist_fluxdep(
     To revisit past points, start a new run with a sliced plan and seed local
     history from the previous run using the saved_run reader.
     """
-    _ = env.soc
-    _ = env.devices
+    summary = SummaryAccumulator(len(plan.fluxes), plan.flux_unit)
     carry = CalCarry(
         env.context,
         seed_flux=plan.seed_flux,
@@ -415,7 +433,11 @@ async def mist_fluxdep(
     for index, (flux, iteration) in enumerate(
         zip(plan.fluxes, env.iterations(), strict=False)
     ):
-        point_record = MISTPoint(index=index, flux=flux)
+        point_record = MISTPoint(
+            index=index,
+            flux=flux,
+            traces={mode: MISTTrace(reason="not reached") for mode in modes},
+        )
         try:
             d = iteration.dir
             env.pbar("flux points", total=len(plan.fluxes)).set_progress(index)
@@ -436,6 +458,7 @@ async def mist_fluxdep(
                 point_index=index,
                 flux=flux,
                 flux_unit=plan.flux_unit,
+                summary=summary,
             )
             # Locate frequency, calibrate pulses, then refresh readout on cadence.
             if (
@@ -484,7 +507,12 @@ async def mist_fluxdep(
                     plan, tun.current, cal or carry.last or carry.seed, mode=mode
                 )
                 result = await run_mist_stage(
-                    iteration, cfg, point_record, env.plots, plan=plan, mode=mode
+                    iteration,
+                    cfg,
+                    point_record,
+                    env.plots,
+                    inputs=MISTStageInputs(plan, summary),
+                    mode=mode,
                 )
                 if result is None:
                     continue
@@ -508,4 +536,6 @@ async def mist_fluxdep(
             point_record.status = "skipped" if iteration.cancelled else "completed"
         finally:
             iteration.commit(point_record)
+            summary.points.append(mist_summary_point(point_record))
     env.pbar("flux points", total=len(plan.fluxes)).set_progress(len(plan.fluxes))
+    return summary.finish()
