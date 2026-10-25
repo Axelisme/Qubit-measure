@@ -20,7 +20,7 @@ from zcu_lab.workflows.common.calibration import (
 )
 
 
-@dataclass(frozen=True)
+@dataclass
 class PointCalibrationResult:
     """Results reached in this point's calibration, without point-record mutation.
 
@@ -57,44 +57,43 @@ async def calibrate_point(
     Expected failures/rejections return normal results. Unexpected exceptions
     propagate without returning an aggregate: frequency success then a Rabi bug
     leaves frequency's saved h5 on disk, but not in the caller's point record.
+    The result is created and accumulated locally, never passed in by a caller.
     This function never receives or changes point_record.
     """
+    result = PointCalibrationResult()
     if scope.cancelled:
-        return PointCalibrationResult()
-    frequency = await calibrate_frequency(
+        return result
+    result.frequency = await calibrate_frequency(
         scope, plots=plots, inputs=inputs, flux=inputs.flux, carry=carry
     )
     if scope.cancelled:
-        return PointCalibrationResult(frequency=frequency)
-    rabi = await calibrate_rabi(
+        return result
+    result.rabi = await calibrate_rabi(
         scope,
         plots=plots,
         inputs=replace(inputs, tun=settings.current),
-        frequency=frequency,
+        frequency=result.frequency,
         carry=carry,
         t1_estimate_us=t1_estimate_us,
     )
     if scope.cancelled:
-        return PointCalibrationResult(frequency=frequency, rabi=rabi)
+        return result
     readout_settings = settings.current
     if not readout_due(inputs.point_index, readout_settings):
-        return PointCalibrationResult(
-            frequency=frequency,
-            rabi=rabi,
-            readout=ReadoutResult(
-                status="skipped",
-                reason="Readout flux-point cadence",
-                frequency_mhz=None,
-                gain=None,
-                file=None,
-            ),
+        result.readout = ReadoutResult(
+            status="skipped",
+            reason="Readout flux-point cadence",
+            frequency_mhz=None,
+            gain=None,
+            file=None,
         )
-    readout = await calibrate_readout(
+        return result
+    result.readout = await calibrate_readout(
         scope,
         plots=plots,
         inputs=replace(inputs, tun=readout_settings),
-        rabi=rabi,
+        rabi=result.rabi,
         carry=carry,
         t1_estimate_us=t1_estimate_us,
     )
-    return PointCalibrationResult(frequency=frequency, rabi=rabi, readout=readout)
+    return result
