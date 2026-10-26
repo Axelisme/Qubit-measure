@@ -57,6 +57,24 @@ class PulseReadoutCfg(AbsReadoutCfg):
         """Capture this cfg as a named, blocking QICK readout module."""
         return PulseReadout(name, self)
 
+    def nominal_duration_us(self) -> float:
+        """Return scalar readout completion time in us without clock rounding.
+
+        Timing fields and waveform length must be finite nonnegative scalar us.
+        Return the later of ADC trigger + window and generator pre-delay +
+        waveform length + post-delay. No program, initialization or hardware is
+        needed, and this cfg is unchanged. This is nominal timing, not the
+        clock-rounded blocking duration returned by PulseReadout.total_length.
+        Non-scalar timing raises TypeError during float conversion; waveform
+        length lookup errors (for example an unreadable arb asset) propagate.
+        """
+        return max(
+            float(self.trig_offset) + float(self.ro_length),
+            float(self.pre_delay)
+            + float(self.waveform.length)
+            + float(self.post_delay),
+        )
+
     def to_pulse_cfg(self) -> PulseCfg:
         """Return a fresh outer PulseCfg containing only generator settings.
 

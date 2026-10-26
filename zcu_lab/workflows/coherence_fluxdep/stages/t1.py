@@ -7,8 +7,10 @@ from typing import Literal
 import numpy as np
 from matplotlib.figure import Figure
 from zcu_tools.experiment.scope import Scope
+from zcu_tools.experiment.v2.utils.t1_sampling import t1_delay_axis
 from zcu_tools.experiment.workflows import Failed
 from zcu_tools.plotting.plots import Plots
+from zcu_tools.program import shot_time_s
 from zcu_tools.program.v2 import SweepCfg
 
 from zcu_lab.v2.support import LinePlot, live_line
@@ -108,6 +110,48 @@ def _cfg(
         ),
     )
     return cfg, tuple(gain_clamped)
+
+
+def estimate_t1_time_s(
+    pulses: CalibratedPulses, settings: T1Tunables, *, points: int, guess_us: float
+) -> float:
+    """Return nominal T1 shot seconds for pi → delay → readout.
+
+    pulses supplies scalar pi/readout modules (pi2 unused), with timing in us.
+    settings supplies averaging, uniform/nonuniform sampling and auto/fixed
+    sweep/relax rules. points is the delay count, at least two. guess_us is a
+    positive finite T1 estimate in us, supplied by the caller, not read from
+    history. Auto sweep is clamped to the configured bounds; auto relax uses
+    its factor and floor. Fixed modes use their explicit us values.
+    Count full rounds without retries, early stop, frequency widening or multiple
+    candidates. Exclude overhead/flux ramp and clock rounding; inputs unchanged.
+    Invalid cfg, guesses or timing raise ValueError; non-scalar timing raises
+    TypeError. The caller decides whether this stage is enabled.
+    """
+    if type(points) is not int or points < 2:
+        raise ValueError("Delay points must be a built-in integer of at least two")
+    cfg, _ = _cfg(pulses, settings, points=points, guess_us=guess_us)
+    delays_us = (
+        t1_delay_axis(
+            start=cfg.length.start,
+            stop=cfg.length.stop,
+            expts=cfg.length.expts,
+            uniform=cfg.uniform,
+            model_t1=0.2 * cfg.length.stop,
+        )
+        if isinstance(cfg.length, SweepCfg)
+        else np.asarray(cfg.length)
+    )
+    pi = cfg.pi_pulse
+    pulse_us = float(pi.pre_delay) + float(pi.waveform.length) + float(pi.post_delay)
+    ro = pulses.readout
+    readout_us = ro.nominal_duration_us()
+    return shot_time_s(
+        rounds=cfg.rounds,
+        reps=cfg.reps,
+        shot_lengths_us=delays_us + pulse_us + readout_us,
+        relax_delay_us=cfg.relax_delay,
+    )
 
 
 def _plot(plots: Plots) -> LinePlot:

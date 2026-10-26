@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Literal
 
 from zcu_tools.experiment.scope import Scope
 from zcu_tools.experiment.workflows import Failed
+from zcu_tools.program import shot_time_s
 from zcu_tools.program.v2 import SweepCfg
 
 from zcu_lab.v2.twotone.freq.core import FreqCfg, FreqResult
@@ -68,6 +69,43 @@ def _frequency_cfg(
             expts=tun.qf_points,
             step=span / (tun.qf_points - 1),
         ),
+    )
+
+
+def estimate_frequency_time_s(
+    pulses: CalibrationPulses, settings: CalibrationTunables
+) -> float:
+    """Return nominal spectroscopy shot seconds without acquiring or reading history.
+
+    pulses supplies a scalar probe and retained pulse readout, with lengths and
+    pre/post/trigger/ADC delays in us. settings supplies qf_points, reps, rounds
+    and frequency_mode. single counts one scan; two_step counts one coarse and
+    one fine scan. Frequency spans/gains do not affect duration. Use full rounds,
+    no retries, early stop, widening or multiple candidates. Exclude acquisition
+    overhead and flux ramp; hardware clock rounding is not modeled.
+    Inputs are unchanged. Invalid cfg/timing raises ValueError; non-scalar module
+    timing raises TypeError. The caller decides whether this stage is enabled.
+    """
+    cfg = _frequency_cfg(
+        pulses,
+        settings,
+        float(pulses.probe.freq),
+        float(pulses.probe.gain),
+        settings.span_mhz,
+    )
+    probe_us = (
+        float(cfg.qub_pulse.pre_delay)
+        + float(cfg.qub_pulse.waveform.length)
+        + float(cfg.qub_pulse.post_delay)
+    )
+    ro = pulses.readout
+    readout_us = ro.nominal_duration_us()
+    scans = 2 if settings.frequency_mode == "two_step" else 1
+    return scans * shot_time_s(
+        rounds=cfg.rounds,
+        reps=cfg.reps,
+        shot_lengths_us=[probe_us + readout_us] * cfg.freq.expts,
+        relax_delay_us=cfg.relax_delay,
     )
 
 

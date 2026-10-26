@@ -1,6 +1,6 @@
 # program/v2/modules — semantic program modules
 
-**Last updated:** 2026-10-24
+**Last updated:** 2026-10-26
 
 **讀者：** framework-dev。語意 program modules 的角色、組裝與邊界。
 
@@ -48,6 +48,9 @@ semantic `freq` configures both channels. `PulseReadout` declares and schedules
 the ADC itself, sends configuration at the module start, triggers at
 `trig_offset`, and plays the generator at `pre_delay`. Blocking covers both the
 ADC window and generator playback including `post_delay`, with clock rounding.
+`PulseReadoutCfg.nominal_duration_us()` returns the scalar completion time without
+clock rounding or program initialization. It covers the later ADC/generator end
+for offline shot-time estimates; it does not replace runtime blocking timing.
 
 `Pulse` takes optional runtime `ro_ch` for QICK frequency matching. That channel
 is not a cfg field. `PulseRegistry` includes it in hardware-definition identity,

@@ -10,6 +10,7 @@ from numpy.typing import NDArray
 from zcu_tools.analysis.fitting import FitQuality, compute_fit_quality, fit_rabi
 from zcu_tools.experiment.scope import Scope
 from zcu_tools.experiment.workflows import Failed
+from zcu_tools.program import shot_time_s
 from zcu_tools.program.v2 import SweepCfg
 
 from zcu_lab.v2.twotone.rabi.amp_rabi.core import (
@@ -96,6 +97,46 @@ def _accepted(fit: AmpFit, stop: float, tun: CalibrationTunables) -> bool:
     )
 
 
+def estimate_amp_rabi_time_s(
+    pulses: CalibrationPulses,
+    settings: CalibrationTunables,
+    *,
+    pi_length_us: float,
+    guess_us: float,
+) -> float:
+    """Return nominal AmpRabi shot seconds, or zero in len_only mode.
+
+    pulses supplies scalar drive pre/post delays and retained readout timing in
+    us. pi_length_us is the positive finite fixed waveform duration: the current
+    LenRabi pi in len_then_amp, or the resolved target in amp_only. settings
+    supplies rabi_points, reps/rounds and auto/fixed relaxation. guess_us is a
+    positive finite caller-supplied T1 in us; auto relax applies its factor/floor,
+    fixed uses rabi_relax_delay_us. No history is read. Gain windows do not change
+    shot duration. Count full rounds without retries, early stop, frequency
+    widening or multiple candidates. Exclude overhead/flux ramp and clock
+    rounding. Inputs unchanged. Invalid counts/timing raise ValueError;
+    non-scalar module timing raises TypeError. Caller decides point eligibility.
+    """
+    if settings.rabi_mode == "len_only":
+        return 0.0
+    if any(not math.isfinite(x) or x <= 0 for x in (pi_length_us, guess_us)):
+        raise ValueError("AmpRabi pi duration and T1 guess must be positive and finite")
+    drive = pulses.qub.model_copy(deep=True)
+    drive.set_param("length", pi_length_us)
+    pulse_us = (
+        float(drive.pre_delay) + float(drive.waveform.length) + float(drive.post_delay)
+    )
+    ro = pulses.readout
+    readout_us = ro.nominal_duration_us()
+    relax_us = settings.resolve_rabi_relax_us(guess_us)
+    return shot_time_s(
+        rounds=settings.rabi_rounds,
+        reps=settings.rabi_reps,
+        shot_lengths_us=[pulse_us + readout_us] * settings.rabi_points,
+        relax_delay_us=relax_us,
+    )
+
+
 async def calibrate_amp_rabi(
     scope: Scope,
     env: StageEnv,
@@ -147,9 +188,7 @@ async def calibrate_amp_rabi(
         rounds=tun.rabi_rounds,
         acquire_retry=tun.rabi_acquire_retry,
         earlystop_snr=tun.rabi_earlystop_snr,
-        relax_delay=max(tun.rabi_relax_min_us, tun.rabi_relax_factor * guess.relax_us)
-        if tun.rabi_relax_mode == "auto"
-        else tun.rabi_relax_delay_us,
+        relax_delay=tun.resolve_rabi_relax_us(guess.relax_us),
         qub_pulse=drive,
         readout=ro,
         gain=SweepCfg(
