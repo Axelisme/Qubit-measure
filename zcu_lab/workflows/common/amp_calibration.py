@@ -10,6 +10,7 @@ from numpy.typing import NDArray
 from zcu_tools.analysis.fitting import FitQuality, compute_fit_quality, fit_rabi
 from zcu_tools.experiment.scope import Scope
 from zcu_tools.experiment.workflows import Failed
+from zcu_tools.program import shot_time_s
 from zcu_tools.program.v2 import SweepCfg
 
 from zcu_lab.v2.twotone.rabi.amp_rabi.core import (
@@ -93,6 +94,53 @@ def _accepted(fit: AmpFit, stop: float, tun: CalibrationTunables) -> bool:
         and residual is not None
         and residual < tun.max_fit_residual
         and trusted_curve(fit.observed, fit.fitted, tun.rabi_max_mean_residual_ratio)
+    )
+
+
+def estimate_amp_rabi_time_s(
+    pulses: CalibrationPulses,
+    settings: CalibrationTunables,
+    *,
+    pi_length_us: float,
+    guess_us: float,
+) -> float:
+    """Return nominal AmpRabi shot seconds, or zero in len_only mode.
+
+    pulses supplies scalar drive pre/post delays and retained readout timing in
+    us. pi_length_us is the positive finite fixed waveform duration: the current
+    LenRabi pi in len_then_amp, or the resolved target in amp_only. settings
+    supplies rabi_points, reps/rounds and auto/fixed relaxation. guess_us is a
+    positive finite caller-supplied T1 in us; auto relax applies its factor/floor,
+    fixed uses rabi_relax_delay_us. No history is read. Gain windows do not change
+    shot duration. Count full rounds without retries, early stop, frequency
+    widening or multiple candidates. Exclude overhead/flux ramp and clock
+    rounding. Inputs unchanged. Invalid counts/timing raise ValueError;
+    non-scalar module timing raises TypeError. Caller decides point eligibility.
+    """
+    if settings.rabi_mode == "len_only":
+        return 0.0
+    if any(not math.isfinite(x) or x <= 0 for x in (pi_length_us, guess_us)):
+        raise ValueError("AmpRabi pi duration and T1 guess must be positive and finite")
+    drive = pulses.qub.model_copy(deep=True)
+    drive.set_param("length", pi_length_us)
+    pulse_us = (
+        float(drive.pre_delay) + float(drive.waveform.length) + float(drive.post_delay)
+    )
+    ro = pulses.readout
+    readout_us = max(
+        float(ro.trig_offset) + float(ro.ro_length),
+        float(ro.pre_delay) + float(ro.waveform.length) + float(ro.post_delay),
+    )
+    relax_us = (
+        max(settings.rabi_relax_min_us, settings.rabi_relax_factor * guess_us)
+        if settings.rabi_relax_mode == "auto"
+        else settings.rabi_relax_delay_us
+    )
+    return shot_time_s(
+        rounds=settings.rabi_rounds,
+        reps=settings.rabi_reps,
+        shot_lengths_us=[pulse_us + readout_us] * settings.rabi_points,
+        relax_delay_us=relax_us,
     )
 
 

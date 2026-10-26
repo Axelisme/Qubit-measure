@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 from zcu_tools.experiment.scope import Scope
+from zcu_tools.program import shot_time_s
 
 from zcu_lab.v2.singleshot.ge.core import GE_Cfg, GE_Exp
 from zcu_lab.workflows.coherence_fluxdep.pulses import CalibratedPulses
@@ -28,6 +29,35 @@ class SingleshotResult:
     reason: str | None = None
     file: str | None = None
     gain_clamped: tuple[GainClamp, ...] = ()
+
+
+def estimate_ge_time_s(
+    pulses: CalibratedPulses, settings: SingleshotTunables, *, relax_delay_us: float
+) -> float:
+    """Return nominal GE shot seconds for equal probe-off/on preparations.
+
+    pulses supplies scalar pi and retained readout modules, with timing in us;
+    pi2 is unused. settings.shots counts shots per preparation; min_spacing is
+    the caller's eligibility rule and does not change this per-stage estimate.
+    relax_delay_us is the caller's nonnegative finite wait in us, normally the
+    workflow's T1 relax_factor times its explicit T1 guess. No history is read.
+    Count one full round per preparation, without retries, early stop, frequency
+    widening or multiple candidates. Exclude overhead/flux ramp and clock
+    rounding; inputs unchanged. Invalid counts/timing raise ValueError;
+    non-scalar module timing raises TypeError. Caller decides whether GE runs.
+    """
+    pi, ro = pulses.pi, pulses.readout
+    pulse_us = float(pi.pre_delay) + float(pi.waveform.length) + float(pi.post_delay)
+    readout_us = max(
+        float(ro.trig_offset) + float(ro.ro_length),
+        float(ro.pre_delay) + float(ro.waveform.length) + float(ro.post_delay),
+    )
+    return shot_time_s(
+        rounds=1,
+        reps=settings.shots,
+        shot_lengths_us=[readout_us, pulse_us + readout_us],
+        relax_delay_us=relax_delay_us,
+    )
 
 
 async def measure_ge(

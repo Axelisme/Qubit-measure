@@ -3,8 +3,10 @@
 from dataclasses import dataclass
 from typing import Literal
 
+import numpy as np
 from zcu_tools.experiment.scope import Scope
 from zcu_tools.experiment.workflows import Failed
+from zcu_tools.program import shot_time_s
 
 from zcu_lab.v2.support.lifetime_models import LifetimeModelRecord
 from zcu_lab.v2.twotone.time_domain.t2echo.core import T2EchoCfg, T2EchoExp
@@ -87,6 +89,48 @@ def _cfg(
         readout=readout,
         length=sweep,
     ), tuple(gain_clamped)
+
+
+def estimate_echo_time_s(
+    pulses: CalibratedPulses, settings: T2EchoTunables, *, points: int, guess: T2Guess
+) -> float:
+    """Return nominal pi/2 → half-delay → pi → half-delay → pi/2 shot seconds.
+
+    pulses supplies scalar pi, pi2 and readout modules, with timing in us; pi2
+    is required. settings supplies averaging and auto/fixed sweep/relax rules.
+    points is the total-delay count, at least two. guess.lifetime_us sets the
+    auto sweep end (capped by max_length_us); guess.t1_us sets automatic relax
+    with its factor/floor. Both estimates must be positive finite us, supplied
+    by the caller, not read from history. Fixed modes use explicit us values.
+    Detuning changes phase, not timing. Count full rounds without retries, early
+    stop, frequency widening or multiple candidates. Exclude overhead/flux ramp
+    and clock rounding. Inputs are unchanged. Invalid cfg, guesses, missing pi2
+    or timing raise ValueError; non-scalar module timing raises TypeError.
+    The caller decides whether this stage is enabled.
+    """
+    if type(points) is not int or points < 2:
+        raise ValueError("Delay points must be a built-in integer of at least two")
+    cfg, _ = _cfg(pulses, settings, points=points, guess=guess)
+    pi, pi2 = cfg.pi_pulse, cfg.pi2_pulse
+    pulse_us = (
+        float(pi.pre_delay)
+        + float(pi.waveform.length)
+        + float(pi.post_delay)
+        + 2
+        * (float(pi2.pre_delay) + float(pi2.waveform.length) + float(pi2.post_delay))
+    )
+    ro = pulses.readout
+    readout_us = max(
+        float(ro.trig_offset) + float(ro.ro_length),
+        float(ro.pre_delay) + float(ro.waveform.length) + float(ro.post_delay),
+    )
+    delays_us = np.linspace(cfg.length.start, cfg.length.stop, cfg.length.expts)
+    return shot_time_s(
+        rounds=cfg.rounds,
+        reps=cfg.reps,
+        shot_lengths_us=delays_us + pulse_us + readout_us,
+        relax_delay_us=cfg.relax_delay,
+    )
 
 
 async def measure_echo(

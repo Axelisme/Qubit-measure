@@ -8,8 +8,11 @@ from typing import Literal
 
 import numpy as np
 from pydantic import BaseModel
+from qick import QickConfig
 from zcu_tools.experiment.scope import Scope
+from zcu_tools.experiment.v2.utils.time_sweep import plan_time_sweep
 from zcu_tools.experiment.workflows import Failed
+from zcu_tools.program import shot_time_s
 from zcu_tools.program.v2 import SweepCfg
 from zcu_tools.program.v2.modules import ReadoutCfg
 from zcu_tools.utils.process import SmoothingOptions, smooth_signal_nd
@@ -216,6 +219,80 @@ async def calibrate_rabi(
     )
     return replace(
         amp_result, length_record=result.length_record, len_trace=result.len_trace
+    )
+
+
+def estimate_len_rabi_time_s(
+    pulses: CalibrationPulses,
+    settings: CalibrationTunables,
+    *,
+    soccfg: QickConfig,
+    guess: RabiGuess,
+) -> float:
+    """Return nominal Length-Rabi shot seconds, or zero in amp_only mode.
+
+    pulses supplies scalar drive delays and retained readout timing in us.
+    settings supplies rabi_points, averaging and sweep/relax rules. soccfg is
+    the offline QICK compile configuration, used to plan the same clock-aligned
+    grid as acquisition; no board connection occurs. guess.prior_pi_us and
+    target_pi_us are positive finite pi durations in us defining the sweep
+    bounds with the configured floors/factors. guess.relax_us is the caller's
+    positive finite T1 us for auto relaxation with its factor/floor. Fixed relax
+    uses rabi_relax_delay_us. Other guess fields do not affect shot duration.
+    No history is read. Count full rounds without retries, early stop, frequency
+    widening or multiple candidates. Exclude overhead/flux ramp; pulse blocking
+    clock rounding is not modeled. Inputs are unchanged. Invalid timing, an arb
+    drive or an unplannable grid raise ValueError; non-scalar timing raises
+    TypeError. Caller supplies current-point frequency acceptance separately.
+    """
+    if settings.rabi_mode == "amp_only":
+        return 0.0
+    _validate_calibration_inputs(0.0, guess.relax_us)
+    if any(
+        not math.isfinite(x) or x <= 0 for x in (guess.prior_pi_us, guess.target_pi_us)
+    ):
+        raise ValueError("Rabi pi duration guesses must be positive and finite")
+    if pulses.qub.waveform.style == "arb":
+        raise ValueError("Len Rabi cannot sweep an arb waveform's asset-derived length")
+    start = max(
+        settings.rabi_min_start_us, settings.rabi_start_factor * guess.prior_pi_us
+    )
+    stop = max(
+        settings.rabi_min_stop_us,
+        settings.rabi_stop_factor * guess.prior_pi_us,
+        settings.rabi_stop_factor * guess.target_pi_us,
+    )
+    sweep = plan_time_sweep(
+        SweepCfg(
+            start=start,
+            stop=stop,
+            expts=settings.rabi_points,
+            step=(stop - start) / (settings.rabi_points - 1),
+        ),
+        soccfg,
+        gen_ch=pulses.qub.ch,
+    )
+    drive = pulses.qub
+    pulse_us = (
+        np.linspace(sweep.start, sweep.stop, sweep.expts)
+        + float(drive.pre_delay)
+        + float(drive.post_delay)
+    )
+    ro = pulses.readout
+    readout_us = max(
+        float(ro.trig_offset) + float(ro.ro_length),
+        float(ro.pre_delay) + float(ro.waveform.length) + float(ro.post_delay),
+    )
+    relax_us = (
+        max(settings.rabi_relax_min_us, settings.rabi_relax_factor * guess.relax_us)
+        if settings.rabi_relax_mode == "auto"
+        else settings.rabi_relax_delay_us
+    )
+    return shot_time_s(
+        rounds=settings.rabi_rounds,
+        reps=settings.rabi_reps,
+        shot_lengths_us=pulse_us + readout_us,
+        relax_delay_us=relax_us,
     )
 
 
@@ -452,6 +529,48 @@ def readout_due(point_index: int, tun: CalibrationTunables) -> bool:
     return tun.optimize_readout and point_index % tun.ro_every == 0
 
 
+READOUT_FREQ_POINTS = 51
+READOUT_GAIN_POINTS = 31
+
+
+def estimate_readout_time_s(
+    pulses: ReadoutPulses, settings: CalibrationTunables, *, guess_us: float
+) -> float:
+    """Return nominal readout-optimization shot seconds for a complete landscape.
+
+    pulses supplies the calibrated scalar pi and retained readout, with timing
+    in us. settings supplies ro_reps/rounds and auto/fixed relaxation. guess_us
+    is positive finite T1 us supplied by the caller, not read from history.
+    Auto relax applies ro_relax_factor and ro_relax_min_us; fixed uses
+    ro_relax_delay_us. Count both equally weighted pi-off/on preparations at
+    every frequency/gain pair. Search widths and skew penalty affect the
+    landscape, not duration. Caller applies optimize_readout and ro_every.
+    Use full rounds without retries, early stop, frequency widening or multiple
+    candidates. Exclude overhead/flux ramp and clock rounding; inputs unchanged.
+    Invalid guess/counts/timing raise ValueError; non-scalar timing raises
+    TypeError. Return float seconds even when the landscape would be rejected.
+    """
+    _validate_calibration_inputs(0.0, guess_us)
+    pi, ro = pulses.pi, pulses.readout
+    pulse_us = float(pi.pre_delay) + float(pi.waveform.length) + float(pi.post_delay)
+    readout_us = max(
+        float(ro.trig_offset) + float(ro.ro_length),
+        float(ro.pre_delay) + float(ro.waveform.length) + float(ro.post_delay),
+    )
+    relax_us = (
+        max(settings.ro_relax_min_us, settings.ro_relax_factor * guess_us)
+        if settings.ro_relax_mode == "auto"
+        else settings.ro_relax_delay_us
+    )
+    return shot_time_s(
+        rounds=settings.ro_rounds,
+        reps=settings.ro_reps,
+        shot_lengths_us=[readout_us, readout_us + pulse_us]
+        * (READOUT_FREQ_POINTS * READOUT_GAIN_POINTS),
+        relax_delay_us=relax_us,
+    )
+
+
 async def calibrate_readout(
     scope: Scope,
     env: StageEnv,
@@ -510,14 +629,14 @@ async def calibrate_readout(
         freq=SweepCfg(
             start=float(pulses.readout.freq) - settings.ro_freq_half_width_mhz,
             stop=float(pulses.readout.freq) + settings.ro_freq_half_width_mhz,
-            expts=51,
-            step=2 * settings.ro_freq_half_width_mhz / 50,
+            expts=READOUT_FREQ_POINTS,
+            step=2 * settings.ro_freq_half_width_mhz / (READOUT_FREQ_POINTS - 1),
         ),
         gain=SweepCfg(
             start=gain_start,
             stop=gain_stop,
-            expts=31,
-            step=(gain_stop - gain_start) / 30,
+            expts=READOUT_GAIN_POINTS,
+            step=(gain_stop - gain_start) / (READOUT_GAIN_POINTS - 1),
         ),
     )
     outcome = await scope.run(FreqGainExp().run, cfg, name="readout")
