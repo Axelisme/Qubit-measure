@@ -1,6 +1,6 @@
 # zcu_tools.datafile
 
-**Last updated:** 2026-10-24，移除退役持久化入口
+**Last updated:** 2026-10-27
 
 **讀者：** framework-dev。讀寫通用 HDF5 容器，或獨立轉出 Labber。
 
@@ -84,7 +84,9 @@ Experiment 擁有 run 型別與 cfg 驗證。Artifacts 擁有 analysis JSON 信�
 
 Labber codec 與容器核心分開。`write_labber(path, container, *, metadata=None, grouped_layout="common")`
 只消費 vars，不解釋 docs 或 groups。Caller 以 `LabberMetadata` 明傳 comment、tags、project、user、creation_time。
-需要 cfg comment envelope 時，由 caller 使用 `encode_labber_comment`。
+需要 cfg comment envelope 時，由 caller 使用 `encode_labber_comment(values, comment, snapshot=...)`。
+Snapshot 是可選 JSON object；experiment saver 傳入歷史 point 與 roles，與 cfg 並列。
+Codec 只驗有限 JSON，不解讀 snapshot keys，不改 Container 或 wire version。
 
 Labber 至少需要一個 real step axis。單一 var 寫 single log，多個 vars 預設要求 common grid。
 明示 `grouped_layout="independent"` 時，各 rank-1/2 var 寫自己的 root／Log_N。

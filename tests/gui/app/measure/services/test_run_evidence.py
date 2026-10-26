@@ -16,7 +16,6 @@ from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.datafile import load
 from zcu_tools.device import FakeDevice, FakeDeviceInfo
 from zcu_tools.experiment.acquisition import new_run_id
-from zcu_tools.experiment.acquisition_facts import AcquisitionFacts
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.metadata import CfgSnapshot, RunSnapshot, SoftwareProvenance
 from zcu_tools.experiment.native_persistence import metadata_from_container
@@ -72,28 +71,6 @@ def _provenance() -> SoftwareProvenance:
         soc_fingerprint="cached-config",
         hostname="test-host",
     )
-
-
-def test_run_metadata_retains_completed_acquisition_observations() -> None:
-    state, tab_id, adapter = make_state()
-    facts = AcquisitionFacts(8, 2, 2, True, 12.5)
-
-    def acquire(cfg: ConfigBase, *, context: RunContext):
-        context.scope.stop.record_acquisition(facts)
-        return RunRecord(cfg=cfg, result=SampleResult(np.array([1.0])))
-
-    adapter.run.side_effect = acquire
-    inputs = replace(
-        make_inputs(state, tab_id, adapter),
-        snapshot=_run_snapshot(),
-        experiment_tag="test/native",
-    )
-    service, _gate, background, _handles = make_run_service(state)
-    service.start_run(inputs, plots=make_plots())
-    background.run_work()
-    metadata = require_record(state.get_tab(tab_id).run).metadata
-    assert metadata is not None
-    assert metadata.acquisitions == (facts,)
 
 
 @pytest.mark.parametrize("stopped", [False, True])

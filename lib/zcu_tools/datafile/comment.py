@@ -11,9 +11,16 @@ _CFG_JSON = TypeAdapter(JsonObject)
 _TEXT = TypeAdapter(str | None)
 
 
-def encode_labber_comment(values: JsonObject, comment: str | None = None) -> str:
+def encode_labber_comment(
+    values: JsonObject,
+    comment: str | None = None,
+    *,
+    snapshot: JsonObject | None = None,
+) -> str:
     """Encode cfg values and optional user text with a local creation timestamp.
 
+    snapshot optionally carries the producer's point and roles beside cfg.
+    Validate it as finite JSON without interpreting its keys.
     Preserve the cfg/comment/timestamp JSON envelope and formatted local time
     YYYY-MM-DD HH:MM:SS. Invalid JSON values or non-string comment raise
     ValueError. This timestamp is formatting time, not run start/completion.
@@ -21,6 +28,8 @@ def encode_labber_comment(values: JsonObject, comment: str | None = None) -> str
     cfg = _CFG_JSON.validate_python(values, strict=True)
     comment = _TEXT.validate_python(comment, strict=True)
     envelope: JsonObject = {"cfg": cfg}
+    if snapshot is not None:
+        envelope["snapshot"] = _CFG_JSON.validate_python(snapshot, strict=True)
     if comment is not None:
         envelope["comment"] = comment
     envelope["timestamp"] = time.strftime("%Y-%m-%d %H:%M:%S")

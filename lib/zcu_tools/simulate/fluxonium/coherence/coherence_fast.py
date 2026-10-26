@@ -206,7 +206,7 @@ def calculate_eff_t1_vs_flux_fast(  # noqa: PLR0913
     params: tuple[float, float, float],
     fluxs: NDArray[np.float64],
     noise_channels: Sequence[NoiseChannel],
-    Temp: float,
+    Temp: float | NDArray[np.float64],
     cutoff: int = 40,
     qub_dim: int = 20,
     i: int = 1,
@@ -219,7 +219,11 @@ def calculate_eff_t1_vs_flux_fast(  # noqa: PLR0913
     requested ``noise_channels`` as ``1/T1_eff = sum_k 1/T1_k`` and returns
     ``1 / total_rate`` in physical ns. Each spectral rate already includes its
     angular-frequency conversion (ADR-0071). ``params=(EJ, EC, EL)`` are GHz.
-    ``fluxs`` must be a 1D array of shape ``(N,)`` in Φ/Φ₀, and ``Temp`` is K.
+    ``fluxs`` must be a 1D array of shape ``(N,)`` in Φ/Φ₀. ``Temp`` is K,
+    either a nonnegative finite scalar or a positive finite 1D array of shape
+    ``(N,)``. Invalid temperatures raise ValueError before the eigensolve.
+    Array temperatures preserve per-channel scalar/callable/array options;
+    callable spectra receive the full omega grid and one scalar K at a time.
     The output has shape ``(N,)`` and preserves the input flux order.
     ``cutoff``/``qub_dim`` select oscillator basis/retained levels.
 
@@ -242,6 +246,7 @@ def calculate_eff_t1_vs_flux_fast(  # noqa: PLR0913
 
     EJ, EC, EL = params
     fluxs = np.asarray(fluxs, dtype=np.float64)
+    _validate_temperature(Temp, fluxs.shape)
 
     # Flux-independent native operators — built once and memoised across calls that
     # share (params, cutoff, qub_dim) (see _t1_operators).
@@ -301,11 +306,41 @@ def calculate_eff_t1_vs_flux_fast(  # noqa: PLR0913
     }
     total = np.zeros(n, dtype=np.float64)
     for op_key, sfunc in chans:
-        s = sfunc(omega, Temp) + sfunc(-omega, Temp)  # (N,)
-        total += matelem2[op_key] * np.real(s)
+        total += matelem2[op_key] * _equilibrium_spectrum(sfunc, omega, Temp)
 
     out = np.where(total != 0.0, 1 / total, np.inf)
     return out.astype(np.float64, copy=False)
+
+
+def _validate_temperature(
+    temperature: float | NDArray[np.float64], shape: tuple[int, ...]
+) -> None:
+    if isinstance(temperature, np.ndarray):
+        if temperature.ndim != 1 or temperature.shape != shape:
+            raise ValueError("Temp array must be 1D with the same shape as fluxs")
+        if np.any(~np.isfinite(temperature)) or np.any(temperature <= 0):
+            raise ValueError("Temp array must be finite and positive")
+    elif not np.isfinite(temperature) or temperature < 0:
+        raise ValueError("Temp scalar must be finite and nonnegative")
+
+
+def _equilibrium_spectrum(
+    spectrum: SpectralDensity,
+    omega: NDArray[np.float64],
+    temperature: float | NDArray[np.float64],
+) -> NDArray[np.float64]:
+    if not isinstance(temperature, np.ndarray):
+        return np.asarray(
+            np.real(spectrum(omega, temperature) + spectrum(-omega, temperature)),
+            dtype=np.float64,
+        )
+    rates = np.empty_like(omega)
+    for value in np.unique(temperature):
+        mask = temperature == value
+        # Keep the full omega grid so per-channel array options stay row-aligned.
+        evaluated = spectrum(omega, float(value)) + spectrum(-omega, float(value))
+        rates[mask] = np.real(evaluated)[mask]
+    return rates
 
 
 # tolerated: Public scalar T1 preserves the sweep's basis and transition keywords.

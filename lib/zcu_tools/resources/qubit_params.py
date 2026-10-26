@@ -187,6 +187,32 @@ class DispersiveFit:
         return section
 
 
+class DispersiveFitView:
+    """Detached read view of a dispersive JSON section.
+
+    section must contain finite g (coupling) and bare_rf (bare resonator
+    frequency) in GHz. Unknown fields are ignored. timestamp validates only
+    when accessed. Invalid or missing used fields raise QubitParamsError
+    naming the field. This view does not write files; DispersiveFit remains
+    the write payload.
+    """
+
+    def __init__(self, section: Mapping[str, object]) -> None:
+        self._section = deepcopy(dict(section))
+        self.g = _coerce_float(
+            _require_key(section, "g", path="dispersive"), path="dispersive.g"
+        )
+        self.bare_rf = _coerce_float(
+            _require_key(section, "bare_rf", path="dispersive"),
+            path="dispersive.bare_rf",
+        )
+
+    @property
+    def timestamp(self) -> str | None:
+        """Return the optional timestamp; fail if present but not a nonempty string."""
+        return _optional_timestamp(self._section, path="dispersive")
+
+
 @dataclass(frozen=True)
 class DispersiveFitInputs:
     params: tuple[float, float, float]
@@ -737,7 +763,13 @@ class QubitParams:
         self._data["fluxdep_fit"] = _with_current_timestamp(fit.to_json_section())
         self._store()
 
-    def get_dispersive_fit(self) -> DispersiveFit | None:
+    def get_dispersive_fit(self) -> DispersiveFitView | None:
+        """Refresh and read g and bare_rf in GHz, or None for an absent section.
+
+        The returned detached view checks timestamp only when accessed.
+        Missing/invalid g or bare_rf raise QubitParamsError naming the field;
+        file errors propagate as for get_fluxdep_fit.
+        """
         self._refresh_existing()
         raw = self._data.get("dispersive")
         if raw is None:
@@ -851,19 +883,8 @@ class QubitParams:
         return FluxDepFitView(_mapping(raw, path="fluxdep_fit"))
 
     @staticmethod
-    def _parse_dispersive_fit(raw: object) -> DispersiveFit:
-        section = _mapping(raw, path="dispersive")
-        return DispersiveFit(
-            g=_coerce_float(
-                _require_key(section, "g", path="dispersive"),
-                path="dispersive.g",
-            ),
-            bare_rf=_coerce_float(
-                _require_key(section, "bare_rf", path="dispersive"),
-                path="dispersive.bare_rf",
-            ),
-            timestamp=_optional_timestamp(section, path="dispersive"),
-        )
+    def _parse_dispersive_fit(raw: object) -> DispersiveFitView:
+        return DispersiveFitView(_mapping(raw, path="dispersive"))
 
     @staticmethod
     def _parse_t1_curve_fit(raw: object) -> T1CurveFit:
@@ -882,6 +903,7 @@ __all__ = [
     "UNKNOWN_RESONATOR_NAME",
     "DispersiveFit",
     "DispersiveFitInputs",
+    "DispersiveFitView",
     "FluxDepFit",
     "FluxDepFitView",
     "FluxoniumModelParams",

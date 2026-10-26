@@ -203,7 +203,9 @@ def _save_data(
                     metadata=replace(
                         member.data.labber_metadata,
                         comment=encode_labber_comment(
-                            member.data.cfg.values, member.data.labber_metadata.comment
+                            member.data.cfg.values,
+                            member.data.labber_metadata.comment,
+                            snapshot=metadata.snapshot.to_labber_snapshot(),
                         ),
                     ),
                     grouped_layout=member.data.labber_layout,

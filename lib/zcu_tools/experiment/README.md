@@ -1,6 +1,6 @@
 # `zcu_tools.experiment` — 實驗層
 
-**Last updated:** 2026-10-26
+**Last updated:** 2026-10-27
 
 **讀者：** framework-dev。實驗介面、Run 資料、持久化映射與裝置操作邊界。
 
@@ -86,7 +86,8 @@ physical models, evolution and sampling.
 - `native_persistence.py` 的 `prepare_run_data` 將明確 RunRecord/spec 映射為 `PreparedRunData`，持有 SI `Container`、`CfgSnapshot`、原始 `LabberMetadata` 與 Labber layout。準備不做 I/O，也不要求 metadata 或 Labber common grid。`to_container(record.metadata)` 驗證 metadata，再加入 `docs/cfg={values,cfg_type,schema_version}` 與 `docs/metadata`。Metadata 以 `model_dump(mode="json")` 序列化，load 以 `TypeAdapter(RunMetadata)` 驗證。非法文件的錯誤指出來源檔。`save_run` 只收 record，不另收 metadata；缺 metadata 即拒絕。`load_run_with_metadata` 回 record，`load_run` 保留 record／snapshot tuple。
 - `native_persistence.read_run_metadata(path)` 用 datafile 的 `read_doc` 只讀歷史 metadata，不載 vars 或 cfg，也不回退到全檔 load。saved-runs 清單與 load 對話框可取得 typed `RunMetadata`，不受壞 vars 阻礙。缺文件 raise 指名來源的 `KeyError`，非法文件或 metadata raise 指名來源的 `ValueError`。已載 Container 的 Load、export 與 samples 使用 `metadata_from_container(container)`，不重讀檔案。兩個入口與 restore 共用 RunMetadata 驗證；Container 入口缺失或非法時 raise 指名 `/docs/metadata` 的 `ValueError`，caller 在轉譯錯誤時附來源路徑。
 - 公開 `restore_run(container, spec=...)` 不做 I/O。它先核對 metadata/tag 與宣告的 variables、axes、units、dtype、shape，再重建 Result 與 typed cfg。`VariableSpec.variable_from_result`／`loaded_from_variable` 負責 Result 與 `datafile.Variable` 的映射。Container axes 按 NumPy 維度順序，spec 與 loaded axes 為 inner-first，數值陣列不 transpose。GUI、Notebook 與 native load 共用 `restore_run`。合法 cfg envelope 的 type、schema major 或 concrete validation 不相容時，record.cfg=None，`RestoredRun.cfg_issue` 與 `CfgUnavailableWarning` 說明同一原因。缺 cfg 或非法 envelope 仍拒絕。Record 保留 metadata；unknown vars/docs/groups 與 raw cfg 由原 Container 保真，不塞進 typed record。
-- `artifacts` 的 `save_artifacts(artifacts, *, record, ...)` 編排一次保存。它只取 `record.metadata`，缺失或非法時在寫檔前拒絕。正規資料寫入 `Database/<name>/runs/<experiment>_<run_id>/data.h5`，run_id 保留完整值。Run 圖片與窗格 JSON 共用此目錄；Result 的 point／全域圖片副本為 `<experiment>_<run_id>_<圖名>.png`。實驗名中的 `/` 轉 `_`。`SaveLayout` 只計算路徑，writer 在首次 Save 建立所需 Database 目錄，entry create／open 不建立它。Labber 維持日期樹內的 `<experiment>_<id6>_<序號>.hdf5`，每次另產新檔。同 run 重存覆寫 native、PNG 與窗格 JSON，不覆寫 Labber。
+- `artifacts` 的 `save_artifacts(artifacts, *, record, ...)` 編排一次保存。它只取 `record.metadata`，缺失或非法時在寫檔前拒絕。`SaveLayout` 原樣使用 caller 的 stem，native 為 `runs/<stem>/data.h5`，Run 圖片與窗格 JSON 共用該目錄。Result 的 point／全域圖片副本為 `<stem>_<圖名>.png`。Writer 在首次 Save 建立 Database 目錄，entry create／open 不建立它。Labber 日期樹內初始名為 `<stem>.hdf5`，只有碰撞時才取 numeric suffix。Comment 在 cfg 旁保存歷史 snapshot.point 與 snapshot.roles。同 stem 重存覆寫 native、PNG 與窗格 JSON，不覆寫 Labber。
+- `AxesSpec.save_stem` 與 `GroupedAxesSpec.save_stem` 接收 `SaveContext`，預設用 dotted frontend name、hyphen-joined roles 與完整 run_id 組名。GUI adapter 可在自己的 spec 覆寫；Notebook 沿 core spec 使用同一 hook。框架傳完整 name／run_id、point、roles、可用 cfg values 與 saved_at，不在 hook 的結果後方補字。
 
   固定 DataItem 共用同一 PreparedRunData，FigureItem 交原生 Figure，AnalysisItem 交 AnalysisDocument。框架每項編碼一次，對等路徑共用 bytes。DataItem.from_run 將 typed record 的準備錯誤保留為該項目的失敗，不假造 cfg；GUI producer hook 的準備錯誤也交給同一保存流程。輸出與編碼失敗各自隔離，每次呼叫回傳最新 SaveReport 並追加 saved 事件。Ledger 失敗直接傳播，已寫檔案保留，不重跑整筆保存或 rollback。原子替換只對 Windows 短暫 sharing／lock violation 重試約 0.5 秒。共用核心不依賴 GUI 或 Qt，由 artifacts-core-no-ui import contract 約束。Notebook 以 `Experiment[Result, Cfg]` 保留 cfg／Result 配對，並將 `AXES_SPEC` 交給外部存讀函式。
 - `acquisition.py` 集中 adapter 的 `AcquisitionEvidence`、UTC run identity 與兩種 capture。
@@ -98,12 +99,9 @@ physical models, evolution and sampling.
 - `context.py` 的 `RunContext` 提供單次 run 的 soc、soccfg、具名 devices、plots 與 scope。名稱到 driver 的對應在建立時固定，driver 仍由 caller 管理。RunContext 不提供儀器 setters；core 以 `context.devices[cfg.dev[role]]` 取得 driver，再使用實驗層 helper。每次 run 建立新 context、plots 與 Scope。GUI／Notebook 使用 run 根，workflow 使用 operation child；硬體 handle 可重用，不把上一輪停止或錯誤狀態帶入下一輪。核心不管理前端 last_result 或呈現資源生命週期。Workflow 的每次 env.run attempt 也建立新的 RunContext 與 operation Plots，使用和 workflow 趨勢圖相同的 presentation host；返回或失敗先 finish，Pause retry 使用新集合。Workflow 層 env.plots 跨 commit 保留，生命週期見 [workflows README](workflows/README.md#ask-與顯示)。
 - `axes_spec.py` 用 `AxesSpec` 描述軸與資料 channel。zcu_lab 以 `AxesSpec.Axis`、`AxesSpec.Z` 宣告子規格；獨立的 `Axis`、`ZSpec` 名稱仍可使用。這些規格描述 Result 欄位如何對應檔案中的軸與資料 channel。`AxesSpec` 在宣告時核對 Result 的資料欄位，不要求 Result 包含 cfg。軸以 inner-first 排列；保存時套用宣告的單位比例，載入時還原成 Result 欄位。Native cfg snapshot 載入時由宣告的 cfg 型別驗證；Labber 匯出另以 comment envelope 保存 cfg。`save_labber` 使用 caller 指定的路徑，不替 caller 選檔名。對包含多個 Data Variable 的單一 Result，`GroupedAxesSpec`／`VariableSpec` 描述 variable 與欄位的映射，由 typed builder 重建純 Result；Grouped 與 single 都透過 `save_labber(record, path, spec=...)` 匯出，cfg 缺失時拒絕。`labber_layout` 預設 common，要求共同 grid；明確宣告 independent 時，各 variable 保留自己的 1D／2D axes。單檔 save 與 artifact 保存都遵守這項宣告，不自動切換，也不改 native 格式。Grouped native load 由 `load_run_with_metadata` 與 single 共用 restore，不從 Labber reconstruction 讀回。通用檔案格式與讀寫由 [datafile](../datafile/README.md) 負責；保存權責另見 [ADR-0063](../../../docs/adr/0063-persistence-ownership.md)。
 
-`AcquisitionFacts.simulated_physical_s` 記模擬 acquisition 的硬體 shot 秒數。
-它累加所有 execute 已返回的 round，包含重試丟棄的 round，不受 pacing 的 `time_scale` 影響。
-它不包含 flux ramp／settle 或 compile／upload 開銷。
-真實 acquisition 保留 None，不執行模擬計時函式。
-Run metadata、workflow journal／record 與 RPC 序列化在 None 時省略此 key。
-歷史 acquisition 缺 key 時讀成 None，不從 cfg 推算。
+`RunMetadata` 與 workflow operation 只記各自邊界的事實，不要求作者使用特定 acquisition 寫法。
+舊文件的 `acquisitions` key 在載入時忽略，讀取不轉換或寫回檔案。
+ProgramBuilder 的 retry 與 data-driven early stop 改由日誌提供診斷。
 
 ## Cfg 與父層支援
 

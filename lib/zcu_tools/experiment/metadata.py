@@ -19,7 +19,6 @@ from pydantic import (
 )
 
 from zcu_tools.datafile import JsonObject
-from zcu_tools.experiment.acquisition_facts import AcquisitionFacts
 from zcu_tools.resources.entry.aliases import AliasValue
 
 _WORKFLOW_RUN_ID_PATTERN = r"[0-9a-f]{32}"
@@ -61,6 +60,16 @@ class RunSnapshot:
         PlainSerializer(dict, return_type=dict[str, AliasValue]),
     ]
 
+    def to_labber_snapshot(self) -> JsonObject:
+        """Return historical point and roles for a portable Labber comment.
+
+        Omit entry_id; native metadata retains the complete snapshot.
+        Do not refresh aliases or resolve names from current entry state.
+        """
+        return TypeAdapter(JsonObject).validate_python(
+            {"point": self.point, "roles": dict(self.roles)}, strict=True
+        )
+
 
 @dataclass(frozen=True, kw_only=True)
 class SoftwareProvenance:
@@ -86,7 +95,7 @@ class SoftwareProvenance:
 
 
 class RunMetadata(BaseModel):
-    """Historical identity and acquisition facts stored in docs/metadata.
+    """Historical identity and run-boundary evidence stored in docs/metadata.
 
     run_id must fully match one of two ASCII grammars:
     experiment [0-9]{8}T[0-9]{6}Z-[a-z0-9]{6}, or workflow operation
@@ -99,9 +108,6 @@ class RunMetadata(BaseModel):
     snapshot is captured entry state; provenance is software/host evidence.
     device_snapshot maps connected device names to finite JSON settings; None
     means unrecorded and {} means no connected devices.
-    acquisitions contains ordered program acquisition observations, including
-    retries and data-driven stopping. Historical documents without it read as
-    an empty tuple; no rounds are inferred from configuration.
     The envelope is frozen; nested mappings remain mutable. Save revalidates
     even unchecked model_copy updates. Unknown doc fields are not projected into
     the live model; Container retains them for lossless rewrites.
@@ -125,7 +131,6 @@ class RunMetadata(BaseModel):
         ]
         | None
     ) = None
-    acquisitions: tuple[AcquisitionFacts, ...] = ()
 
     @field_validator("started_at", "finished_at")
     @classmethod

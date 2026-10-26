@@ -2,7 +2,7 @@
 
 **讀者：** lab-author。查找各量測 workflow 的科學流程、表單與註冊入口。
 
-**Last updated:** 2026-10-25
+**Last updated:** 2026-10-27
 
 - `coherence_fluxdep/`：逐個 flux 點校準，可選擇保存 singleshot GE 原始資料，再量測 T1、Ramsey 與 Hahn echo。
 - `mist_fluxdep/`：逐個 flux 點校準並掃描 MIST disturbance gain。
@@ -94,13 +94,12 @@ Stage 遇到 unexpected exception 不回傳部分結果，point 只保留主迴�
 根 env.commit 寫 data root，也只能提交一次。Commit 不經 pause gate，取消 finally 可保存已有成果。
 Reader 走 nested 樹依 commit_seq 排序，不依目錄名排序。
 
-每個 point 的 `record.json` 在 `operations[]` 信封保存各 stage 的 `name` 與 `acquisitions[]`。
+每個 point 的 `record.json` 在 `operations[]` 信封保存各 stage 的 `name`、時間與 outcome。
 `coherence_fluxdep`、`mist_fluxdep`、`overnight` 與 `overnight_mux` 都走這條路徑，不在 point payload 複製欄位。
-每筆 acquisition 記 `requested_rounds`、最後一次 attempt 的 `completed_rounds`、實際 acquire 呼叫數 `attempts`、`early_stopped` 與 `stop_value`。
 Readout 優化預設 `reps=100`、`rounds=1`。其餘 workflow 量測 stage 預設 `reps=1000`、`rounds=10`，包括共用 spectroscopy、LenRabi、AmpRabi 與 MIST。Singleshot 的 shots 不變。
 Early-stop SNR 留空（None）即關閉。Spectroscopy 預設 50，LenRabi／AmpRabi 預設 30，Coherence lifetime、overnight 與 overnight_mux 的 T1／Echo 預設 20.0。Readout 優化與 MIST 沒有 early stop，分別預設完成 1 輪與 10 輪。
-SNR 提前停止時 `stop_value` 是停止當下的 SNR，mux 是 active tones 的最小 SNR。非有限 SNR 存 None，early_stopped 仍保留 True。
-Failed stage 的已觀察 attempts 也保留。Native `docs/metadata.acquisitions` 使用同一資料，舊記錄缺少欄位時讀成空 tuple。
+Builder 在 SNR 提前停止時以 info 記錄 stop value 與完成 rounds，mux 的值是 active tones 的最小 SNR。非有限值記 None。
+每次 acquire retry 以 warning 記錄原因與下一次 attempt number。舊檔的 `acquisitions` key 在載入時忽略，不轉換或寫回。
 
 `Completed.value` 是 core 的 RunRecord。`Completed.facts` 是同時寫入 journal 與信封的 operation 事實。
 Iteration 序號取自 iteration 物件，不取成功 commit 數，跳過未提交點也不重用序號。
@@ -174,14 +173,15 @@ NaN／infinity IQ 與 fitter 明示的不收斂轉 Failed。結構、cfg 與其�
 
 `summary.json` 是框架 encoded record 信封，`value` 是 workflow return 的摘要。
 摘要包含各 stage 的 accepted／rejected／skipped／failed 次數、拒絕、跳過與失敗原因分布，以及可取得的平均／最大耗時（秒）。
-它也記錄計畫、已提交、完成與跳過點數、已提交 flux setpoints 的範圍與單位、physical recovery 嘗試數、early stop 與 acquire attempts > 1 的 acquisition 次數。
+它也記錄計畫、已提交、完成與跳過點數，以及 physical recovery 嘗試數。
+已提交 flux setpoints 另記範圍與單位。
 完成點是 `status=completed`，即使某些 stage 被拒絕或失敗也計入。關閉的 stage 不計數。
 Overnight 與 overnight_mux 另列每個 qubit 的 T1／Echo 接受數、平均與母體標準差（µs）。
 單筆接受值的標準差是 0，沒有接受值時省略平均與標準差。單 qubit 名稱來自 snapshot 的 qubit role，未知時是 null，不從 channel 猜名稱。
 
 耗時先加總每點同 stage 的 delivered Completed operations，再算平均與最大。
 MIST both 的兩種 preparation 共用 MIST 耗時；mux 不依 participant 數重複計時。
-Failed 沒有可交付 facts，Pause 丟棄的 attempts 也不交給作者，因此它們不計入耗時或 acquisition 統計。
+Failed 沒有可交付 facts，Pause 丟棄的 attempts 也不交給作者，因此它們不計入耗時統計。
 沒有可用時間時省略 duration 欄位。完整的 attempt 事實仍保存在 point 信封與 journal。
 
 Stop 或錯誤中止時 workflow 沒有 return，框架不產生摘要，即使 finally 已提交部分 point。

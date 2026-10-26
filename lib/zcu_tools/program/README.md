@@ -1,6 +1,6 @@
 # `zcu_tools.program` — QICK integration
 
-**Last updated:** 2026-10-26
+**Last updated:** 2026-10-27
 
 **讀者：** framework-dev。QICK 整合、程式建構與 acquisition 依賴速查。
 
@@ -15,7 +15,7 @@
 `shot_time_s(rounds=..., reps=..., shot_lengths_us=..., relax_delay_us=...)`
 從各 sweep 點的 shot 長度與共同 relax 計算完整 acquisition 的 shot 秒數。
 輸入時間單位為 µs，rounds 與 reps 為正整數；不計 acquisition 固定開銷與 flux ramp。
-模擬 binding 的 pacing 與 `simulated_physical_s` 使用同一個公式。
+模擬 binding 的 pacing 使用同一個公式，不累計 acquisition 的硬體總時間。
 
 ## 主要依賴面
 

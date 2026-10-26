@@ -206,8 +206,7 @@ def _convert_run(
     layout = SaveLayout(
         result_path=destination.result_path,
         database_path=destination.database_path,
-        run_id=assignment.run_id,
-        experiment=legacy.experiment,
+        stem=legacy.experiment.replace("/", "_") + "_" + assignment.run_id,
         point=legacy.snapshot.point,
         saved_at=assignment.assigned_at,
     )

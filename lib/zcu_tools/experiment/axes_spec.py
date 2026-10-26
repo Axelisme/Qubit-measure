@@ -29,6 +29,7 @@ from zcu_tools.datafile import (
     Variable,
     cast_labber_values,
 )
+from zcu_tools.resources.entry import SaveContext, default_save_stem
 
 __all__ = [
     "Axis",
@@ -97,6 +98,10 @@ class AxesSpec(Generic[T_Result, T_Config]):
     save exports Labber; native load/save_run/load_run consume this same spec.
     zcu_lab declares child specs through ``AxesSpec.Axis`` and ``AxesSpec.Z``;
     the standalone Axis and ZSpec names remain available.
+    save_stem receives captured SaveContext and returns an exact filename stem.
+    The default joins dotted frontend name, ordered role names and full run_id.
+    Frontends append no prefix or ID. Invalid stems fail SaveLayout validation;
+    callback failures propagate to the save caller.
     """
 
     Axis = Axis
@@ -111,6 +116,7 @@ class AxesSpec(Generic[T_Result, T_Config]):
         "data"
     )  # stable single-variable identity
     cfg_schema_version: str = "1.0"  # declaration-owned cfg major.minor
+    save_stem: Callable[[SaveContext], str] = default_save_stem
 
     def __post_init__(self) -> None:
         _validate_cfg_schema_version(self.cfg_schema_version)
@@ -427,6 +433,10 @@ class GroupedAxesSpec(Generic[T_Result, T_Config]):
     variable's own axes and supports one or two dimensions per variable.
     There is no automatic layout fallback. Native persistence permits different
     grids regardless of the Labber layout.
+    save_stem receives captured SaveContext and returns an exact filename stem.
+    The default joins dotted frontend name, ordered role names and full run_id.
+    Frontends append no prefix or ID. Invalid stems fail SaveLayout validation;
+    callback failures propagate to the save caller.
     """
 
     variables: tuple[VariableSpec, ...]
@@ -437,6 +447,7 @@ class GroupedAxesSpec(Generic[T_Result, T_Config]):
     result_validator: Callable[[T_Result], None] | None = None
     cfg_schema_version: str = "1.0"  # declaration-owned cfg major.minor
     labber_layout: Literal["common", "independent"] = "common"
+    save_stem: Callable[[SaveContext], str] = default_save_stem
 
     def __post_init__(self) -> None:
         _validate_cfg_schema_version(self.cfg_schema_version)

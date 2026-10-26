@@ -1,11 +1,10 @@
 """Native workflow facts projected without lifecycle or Form policy."""
 
-from typing import Literal, NotRequired, TypedDict
+from typing import Literal, TypedDict
 
 from pydantic import JsonValue
 
 from zcu_tools.datafile import JsonObject
-from zcu_tools.experiment.acquisition_facts import AcquisitionFacts
 from zcu_tools.experiment.workflows import CommittedRecord, OperationFacts, RunStatus
 from zcu_tools.experiment.workflows.models import OperationKind, OperationOutcome
 
@@ -18,27 +17,6 @@ class EncodedRecordReply(TypedDict):
     error: str | None
 
 
-class AcquisitionReply(TypedDict):
-    """One observed acquisition, in native completion order.
-
-    requested_rounds is the configured positive count. completed_rounds counts
-    completed rounds in the final producer attempt, not discarded retries.
-    attempts counts producer calls, including failures; zero means no call.
-    early_stopped records a data-condition stop before requested_rounds.
-    stop_value is its finite scalar in caller-defined units, or None when absent.
-    simulated_physical_s is optional simulated shot time in seconds, including
-    executed retries and excluding flux ramp/settle and compile/upload overhead.
-    Non-simulation acquisitions omit it.
-    """
-
-    requested_rounds: int
-    completed_rounds: int
-    attempts: int
-    early_stopped: bool
-    stop_value: float | None
-    simulated_physical_s: NotRequired[float]
-
-
 class OperationReply(TypedDict):
     """One native attempt; UTC timestamps are ISO text, snapshot is JSON or None.
 
@@ -46,9 +24,7 @@ class OperationReply(TypedDict):
     within this commit scope. iteration counts successful commit scopes from one,
     independently of directory allocation. stopped is the completion-time token
     bit. outcome/reason retain native delivery classification. name is the
-    caller's label, or None when unnamed or unrecorded. acquisitions retains
-    observed acquisitions in completion order, including retries and failures;
-    an empty list means none were recorded.
+    caller's label, or None when unnamed or unrecorded.
     """
 
     kind: OperationKind
@@ -61,7 +37,6 @@ class OperationReply(TypedDict):
     reason: str | None
     stopped: bool
     name: str | None
-    acquisitions: list[AcquisitionReply]
 
 
 class RecordReply(TypedDict):
@@ -138,19 +113,6 @@ def project_record(record: CommittedRecord) -> RecordReply:
     }
 
 
-def _project_acquisition(acquisition: AcquisitionFacts) -> AcquisitionReply:
-    reply: AcquisitionReply = {
-        "requested_rounds": acquisition.requested_rounds,
-        "completed_rounds": acquisition.completed_rounds,
-        "attempts": acquisition.attempts,
-        "early_stopped": acquisition.early_stopped,
-        "stop_value": acquisition.stop_value,
-    }
-    if acquisition.simulated_physical_s is not None:
-        reply["simulated_physical_s"] = acquisition.simulated_physical_s
-    return reply
-
-
 def project_operation(operation: OperationFacts) -> OperationReply:
     """Project one detached native attempt without reading devices or files."""
     return {
@@ -166,9 +128,6 @@ def project_operation(operation: OperationFacts) -> OperationReply:
         "reason": operation.reason,
         "stopped": operation.stopped,
         "name": operation.name,
-        "acquisitions": [
-            _project_acquisition(acquisition) for acquisition in operation.acquisitions
-        ],
     }
 
 
