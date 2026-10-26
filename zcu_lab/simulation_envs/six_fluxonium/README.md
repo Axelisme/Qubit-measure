@@ -49,7 +49,7 @@ uv run --directory . --no-sync -- python -m apps.measure \
 ```
 
 For an agent's offline acceptance run, set `QT_QPA_PLATFORM=offscreen` before
-launch and follow the repository's heavy-slot and memory limits. Use
+launch. Use
 `--no-control` to disable the remote socket when no MCP session is needed.
 Pass `--project-root <existing-directory>` and set `ZCU_TOOLS_CACHE_DIR` to a
 separate absolute cache path to avoid reopening another session's entry or

@@ -1,6 +1,6 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-10-24
+**Last updated:** 2026-10-26（pytest 平行改用 `-n auto`，不再經 agent 協調腳本）
 
 **讀者：** framework-dev、agent。查閱測試的 owner、fixture、執行方式與搬遷驗收契約。
 
@@ -82,11 +82,10 @@ ticket 內只跑受影響選集。只有變更觸及 `lib/zcu_tools/simulate/` �
 `-m sim` 或包含 sim 的受影響選集跑模擬測試。`-m` 會取代預設過濾，
 若仍要排除慢測試，明寫 `-m "sim and not slow"`。
 
-少數 targeted tests 直接用 `-n 0`。跨多檔的 pytest 經共用重工作佇列，最多使用兩個 worker：
+少數 targeted tests 直接用 `-n 0`。跨多檔的 pytest 以 xdist 平行，worker 數依機器核心數決定：
 
 ```bash
-<repo>/.agent_state/resource-coordination/heavy-slot.sh 900 \
-  uv run --directory <worktree> --no-sync -- pytest <affected-paths> -n 2
+uv run --directory <worktree> --no-sync -- pytest <affected-paths> -n auto
 ```
 
 task 進 land review 前才跑全樹驗證。依變更範圍選擇 marker expression，兩種都包含 slow：
@@ -95,9 +94,8 @@ task 進 land review 前才跑全樹驗證。依變更範圍選擇 marker expres
 - 改到 `lib/zcu_tools/simulate/`，用 `-m ""`，包含所有測試。
 
 ```bash
-<repo>/.agent_state/resource-coordination/heavy-slot.sh 3000 \
-  uv run --directory <worktree> --no-sync -- \
-  pytest -n 2 --dist=worksteal -m "not sim" --durations=25
+uv run --directory <worktree> --no-sync -- \
+  pytest -n auto --dist=worksteal -m "not sim" --durations=25
 # 若改到 lib/zcu_tools/simulate/，將上面的 -m "not sim" 換成 -m ""。
 ```
 
