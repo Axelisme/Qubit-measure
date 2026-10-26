@@ -41,6 +41,26 @@ Native 寫 `runs/<stem>/data.h5`，Labber 寫日期樹內的 `<stem>.hdf5`。只
 
 `SavedRun.accept(parameter=..., module=..., waveform=..., records=...)` 共用 entry 的寫回流程。Parameter 接受普通點分路徑的工作單位 JSON／complex 值，可用 `(value, metadata)` 以 mapping 整份替換該路徑的 opaque metadata，例如 `{"stderr": 0.8}`。只給 value 時保留既有 metadata；舊 `(value, float)` 形狀報錯。Module 與 waveform 接受 library key 到具名持久 Spec 的 mapping，不接受 raw dict。各類至少一個非空。Records 是具體元件名到 JSON 欄位 dict 的 mapping。流程補上 run_id、point、at、accepted source 與 component。Component 取自 records mapping 中該筆資料綁定的具體元件名，不由 Notebook 推測或計算。Caller 提供的 dev 或其他儀器欄位原樣保留，缺 dev 也成功，資料一致性由 caller 保證。Notebook 不捕捉 alias，也不從 live device、cfg 或 snapshot 推論樣本值。Parameter／library 的 role 首段沿保存時固定的映射展開，records 不解析角色。Accepted 事件與 library provenance 的 kind 自動使用該 run 的實驗名稱。
 
+Record 的校準欄位由 caller 在量測前捕捉。接受時明傳當時的副本，不重新讀目前 point。
+以下例子的 `parameters` 是作者建立本次 cfg 時使用的固定 ParameterContext，`point` 是保存目的地。
+`qubit` 使用具體元件名，不傳角色名稱。
+
+```python
+from zcu_lab.v2.support.flux import qubit_flux_frame
+from zcu_lab.v2.support.measure.record_frame import captured_qubit_flux
+
+qubit = parameters.resolve_path("$qubit")
+frame = qubit_flux_frame(captured_qubit_flux(parameters, qubit))
+source = exp.run(cfg)
+saved = exp.save_run(point, source=source)
+# Analyze source and obtain t1_us. Later point edits do not change frame.
+saved.accept(records={qubit: {"t1_us": t1_us, "flux_frame": frame}})
+```
+
+這兩個 helper 是 lab 的選用慣例，框架不 import lab，也不解讀 `flux_frame`。
+作者有自己的 flux 定義時，直接傳入自己捕捉的 JSON 欄位。Mux 逐 participant 捕捉各自 qubit 的 frame。
+`SavedRun.accept` 不從 live point、alias、cfg 或 devices 推測校準。
+
 流程先追加一筆 typed accepted 事件，再依目的地文件分組提交。Parameter 為 point 一組，module 與 waveform 共用 library 一組，records 逐筆提交。提交順序為 point、library、records，組內保留各 mapping 的迭代順序。Point 與 library 各使用一次 edit，任一項無效整組不寫，並停止後組。`WritebackApplyError` 保留 accepted `event_id`、已成功組的項目數 `applied`、逐項實際值的 `result.committed` 與原始 `__cause__`。已成功組及事件保留，不提供跨文件回復、retry 或恢復流程。單項 parameter／library setter 仍可獨立使用，accept 的整組提交不逐項呼叫它們。Ledger append 失敗在寫入值之前，錯誤原樣傳播。成功回傳 event ID。後續 adapter run 或保存其他 point 不改這個 handle 的 point、roles 與 run_id。GUI 使用同一 executor，proposal 與 applied 狀態仍由 GUI 管理。
 
 Caller 明確提供 Notebook 自己的 bindings，RoleView 保留顯式 kind／via 契約。
