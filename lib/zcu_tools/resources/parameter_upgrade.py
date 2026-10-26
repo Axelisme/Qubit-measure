@@ -17,6 +17,7 @@ from ruamel.yaml import YAML, YAMLError
 from zcu_tools.format_version import YamlMap
 from zcu_tools.resources.document_store import DocumentValue, FieldPath
 from zcu_tools.resources.parameter_schema import ParameterSchemaPolicy
+from zcu_tools.resources.record_table.upgrade import upgrade_record_files
 from zcu_tools.utils import atomic_replace
 
 
@@ -258,28 +259,48 @@ def _upgrade_file(
         return UpgradeResult(source, "rejected", backup_path=backup, error=str(error))
 
 
-def main(argv: Sequence[str] | None = None, *, plan: UpgradePlan) -> int:
-    """Run a caller-configured upgrade CLI in process; return 0 or 1.
+def main(argv: Sequence[str] | None = None, *, plan: UpgradePlan | None = None) -> int:
+    """Run explicit component or record upgrades in process; return 0 or 1.
 
-    argv supplies one or more exact component YAML paths and optional --apply;
-    None reads process arguments. Shell globs may select multiple point files.
-    Default dry-run prints per-file/field differences without writes. --apply
-    prints backup paths before successful replacement reports. Rejected files
-    include failed checks and do not stop siblings; any rejection returns 1.
-    Argparse help/usage raises SystemExit as usual. No lab modules are imported.
+    argv selects exact paths, --scope components (default) or records, and optional
+    --apply; None reads process arguments. Components require a caller-owned plan.
+    Records require --device-name, an operator declaration, and do not use plan.
+    Default dry-run prints file/field or line classifications without writes.
+    Apply reports original-bytes backups. Rejected files do not stop siblings;
+    any rejection returns 1. Invalid CLI inputs raise argparse SystemExit(2).
+    No lab modules are imported, no versions or device names are inferred.
     """
     parser = argparse.ArgumentParser(
-        description="Upgrade component YAML (default: dry-run)"
+        description="Upgrade component YAML or record JSONL (default: dry-run)"
     )
     parser.add_argument(
-        "paths", nargs="+", type=Path, help="exact YAML paths; shell globs accepted"
+        "paths", nargs="+", type=Path, help="exact source paths; shell globs accepted"
     )
     parser.add_argument(
         "--apply", action="store_true", help="back up then replace valid documents"
     )
+    parser.add_argument(
+        "--scope", choices=("components", "records"), default="components"
+    )
+    parser.add_argument(
+        "--device-name",
+        help="operator-declared device for old record values (not inferred)",
+    )
     options = parser.parse_args(argv)
     paths = TypeAdapter(list[Path]).validate_python(options.paths)
     apply = TypeAdapter(bool).validate_python(options.apply)
+    device_name = TypeAdapter(str | None).validate_python(options.device_name)
+    if options.scope == "records":
+        if device_name is None:
+            parser.error("--scope records requires --device-name")
+        try:
+            return _record_cli(paths, device_name=device_name, apply=apply)
+        except ValueError as error:
+            parser.error(str(error))
+    if device_name is not None:
+        parser.error("--device-name is only valid with --scope records")
+    if plan is None:
+        parser.error("component scope requires a caller-configured upgrade plan")
     results = upgrade_files(
         tuple(UpgradeSource(path) for path in paths), plan=plan, apply=apply
     )
@@ -291,6 +312,22 @@ def main(argv: Sequence[str] | None = None, *, plan: UpgradePlan) -> int:
             before = repr(change.before.value) if change.before.present else "<missing>"
             after = repr(change.after.value) if change.after.present else "<missing>"
             print(f"  {change.path!r}: {before} -> {after}")
+        if result.error is not None:
+            print(f"  failed checks: {result.error}")
+    return int(any(result.status == "rejected" for result in results))
+
+
+def _record_cli(paths: Sequence[Path], *, device_name: str, apply: bool) -> int:
+    results = upgrade_record_files(paths, device_name=device_name, apply=apply)
+    print(f"operator-declared device: {device_name!r} (not inferred)")
+    for result in results:
+        if result.backup_path is not None:
+            print(f"{result.path}: backup: {result.backup_path}")
+        print(f"{result.path}: {result.status}")
+        for row in result.rows:
+            print(f"  line {row.line_number}: {row.classification}")
+            if row.error is not None:
+                print(f"    failed checks: {row.error}")
         if result.error is not None:
             print(f"  failed checks: {result.error}")
     return int(any(result.status == "rejected" for result in results))

@@ -26,7 +26,7 @@
 
 JSONL 沒有獨立版本標頭。新 writer 每列都帶非空字串 `component`。缺此欄的舊列仍可用 `read()` 與 `latest()` 讀取，reader 不從 binding 或檔名補值。歷史檔可以同時包含新舊列；判讀以列為單位，不能以檔名或某一列推斷整檔格式。
 
-不提供舊 records 的補寫或遷移工具，也不重寫既有歷史。這項變更不新增 flux frame 或參數 schema 規則。既有 CSV 遷移工具寫新列時也帶 binding 的 component；來源同名欄位保存在 `legacy_fields.component`，不當作元件身分。
+不補寫舊 records 的 component。另有 [operator 宣告 device 歸屬的明確升級](../record-device-upgrades.md)，只轉換完整的舊值 pair，不合成 component 或 flux frame。Component 信封這項變更本身不新增 flux frame 或參數 schema 規則。既有 CSV 遷移工具寫新列時也帶 binding 的 component；來源同名欄位保存在 `legacy_fields.component`，不當作元件身分。
 
 ## 相關契約
 

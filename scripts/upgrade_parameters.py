@@ -1,4 +1,4 @@
-"""Upgrade lab component YAML explicitly; defaults to read-only dry-run."""
+"""Upgrade component YAML or operator-declared record devices; dry-run by default."""
 
 from zcu_tools.resources.entry import component_registry
 from zcu_tools.resources.parameter_upgrade import main

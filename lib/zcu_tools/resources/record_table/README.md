@@ -12,6 +12,12 @@
 
 `export_csv(path, overwrite=False)` 匯出最新列的資料欄位；既有目的檔預設拒絕覆寫。自身來源 JSONL 永遠拒絕作為目的地，包含 symlink 或 hardlink，不因 overwrite 放行；只保護自身 source，不掃描其他檔案。JSONL 與 CSV 匯出不提供跨檔交易、多 writer 協調或 crash recovery。舊 CSV 的讀取與轉換由 root `migrations/` 提供，不作 JSONL 的 fallback。
 
+## 明確的歷史升級（`upgrade.py`）
+
+`upgrade_record_files(paths, device_name=..., apply=False)` 是舊 `dev_value/dev_unit` pair 的明確升級接縫。名稱由 operator 宣告，重用 `cfg_model.validate_device_name`，不從 setup 或路徑推測。它按實體行回傳具名 `RecordRowUpgrade` 分類與 `RecordUpgradeResult` 檔案結果，不經 `read()` 的最新列去重，也不經 append。只檢查舊 pair 與目標 named pair，保留其他 device entry、metadata、未知 payload、列順序與重複 run_id。目標 metadata-only entry 可合入 pair；任一舊欄位與目標 pair 欄位共存則拒絕，不覆寫。
+
+Dry-run 不寫檔。Apply 在 record owner 內取得 upgrade sidecar lock、重讀、備份原 bytes，再原子替換。任一 partial/corrupt 列拒絕整檔並列行號，其他檔繼續。合法新列原 bytes 保留；已升級檔重跑跳過。一般 append 不參與這把 upgrade lock，operator 必須先停止 concurrent writers。它不合成 frame/component，不增加 record 版本，也不更改 component schema_version。完整分類、CLI、備份還原與改名規則見 [操作指南](../../../../docs/record-device-upgrades.md)。
+
 ## 裝置投影（`projection.py`）
 
 投影與 `flux_from_frame` 的 `device_name`、使用中的 row-frame keys 共用 `cfg_model.validate_device_name`。
