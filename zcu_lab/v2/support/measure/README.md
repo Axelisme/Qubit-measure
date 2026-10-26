@@ -60,6 +60,10 @@ helper 留在群組內 `_shared.py`。
 `zcu_tools.gui.form_adapter`。持久範本表由 `zcu_lab.templates.TEMPLATES` 擁有，
 組合根注入 Registry 與 Library 新建選單。不再維護 builder、Seed wrapper 或角色 default 表。
 
+`record_frame.captured_qubit_flux` 從固定 Run／Start parameter capture 複製具名 qubit 的 flux 區塊。
+GUI record writers 與 workflow Plan 接線共用這個查詢。缺 capture 或非 qubit 會報錯，不以空區塊代替；有 qubit 但尚未校準才回空 mapping。
+Record 的 JSON 副本由無 GUI 的 `support.flux.qubit_flux_frame` 產生。這些 helper 不讀目前 point 或裝置。
+
 `mux_bindings` 擁有固定 ParameterContext 的 qubit／resonator 對應驗證。
 Onetone 的缺 qubits bring-up 政策與 qubit 實驗的完整綁定要求分開，兩者不讀 live 來源。
 Group model 仍擁有長度與重複 qubit 的結構規則。
@@ -114,6 +118,20 @@ def make_form(ctx: FormContext) -> Form[TwoQubitCfg]:
     # Enforce this caller's required group, qubits and F1/F2 here.
     return Form(TwoQubitCfg, tree={})
 ```
+
+## Flux form defaults
+
+`flux_defaults.qubit_flux_initial_values` 供 onetone、twotone 與 MIST flux_dep 使用。
+它經 Form 的 `initial_values` 接縫讀固定 FormEnv，預設 device 保持 qubit.flux_source。
+`captured_flux_seed` 檢查 frame 與 selected device 都在這次 Form 的 device 選項中。
+名稱規則委派共用 owner，三欄一致性與實際 half／integer 委派 `support.flux`。
+其他 contributor 的值與 selected device 單位只取 detached DC device info，不查 setup catalog 或 live driver。
+缺 source 或 selected calibration 時，必填範圍留空；已設的無效名稱、缺 device 或矛盾 frame 直接報錯。
+Onetone／twotone 將實際 integer→half 範圍向兩側各擴 10%，MIST 不擴。
+`mux_flux_forms` 對 local 線逐 Q 使用同一路徑，global 線依 $mux.flux_source 合併各 Q 的實際區間。
+Local devices 必須使用同一 native unit，不做單位換算。
+Mux picker 初線也讀各 Q 的新 flux 區塊，以 Run snapshot 的 contributors 算實際 half／integer。
+Recipes 的 flux_* inputs、reports 與 picker updates 是獨立 API，不是 component 舊欄位。
 
 ## Fluxdep writeback
 
