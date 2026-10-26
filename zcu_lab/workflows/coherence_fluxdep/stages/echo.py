@@ -120,10 +120,7 @@ def estimate_echo_time_s(
         * (float(pi2.pre_delay) + float(pi2.waveform.length) + float(pi2.post_delay))
     )
     ro = pulses.readout
-    readout_us = max(
-        float(ro.trig_offset) + float(ro.ro_length),
-        float(ro.pre_delay) + float(ro.waveform.length) + float(ro.post_delay),
-    )
+    readout_us = ro.nominal_duration_us()
     delays_us = np.linspace(cfg.length.start, cfg.length.stop, cfg.length.expts)
     return shot_time_s(
         rounds=cfg.rounds,

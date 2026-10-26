@@ -156,6 +156,34 @@ class CalibrationTunables(FrequencyTunables):
         default=0.0, ge=0, description="Readout IQ skewness score penalty"
     )
 
+    def resolve_rabi_relax_us(self, guess_us: float) -> float:
+        """Return Len/Amp Rabi relaxation in us without changing these knobs.
+
+        guess_us is the caller-validated positive finite T1 in us. Auto mode
+        uses the larger of its scaled guess and floor; fixed mode ignores the
+        guess and returns rabi_relax_delay_us. No history lookup or acquisition
+        occurs. This calculation adds no validation or failure translation.
+        """
+        return (
+            max(self.rabi_relax_min_us, self.rabi_relax_factor * guess_us)
+            if self.rabi_relax_mode == "auto"
+            else self.rabi_relax_delay_us
+        )
+
+    def resolve_readout_relax_us(self, guess_us: float) -> float:
+        """Return readout optimization relaxation in us, leaving knobs unchanged.
+
+        guess_us is the caller-validated positive finite T1 in us. Auto mode
+        uses the larger of its scaled guess and floor; fixed mode ignores the
+        guess and returns ro_relax_delay_us. No history lookup or acquisition
+        occurs. This calculation adds no validation or failure translation.
+        """
+        return (
+            max(self.ro_relax_min_us, self.ro_relax_factor * guess_us)
+            if self.ro_relax_mode == "auto"
+            else self.ro_relax_delay_us
+        )
+
     def resolve_target_pi_length_us(self, seed_pi_length_us: float) -> float:
         """Return the explicit target, or min(host seed, stop floor / stop factor).
 

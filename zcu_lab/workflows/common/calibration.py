@@ -222,6 +222,24 @@ async def calibrate_rabi(
     )
 
 
+def _len_rabi_sweep(settings: CalibrationTunables, guess: RabiGuess) -> SweepCfg:
+    """Build the requested us grid spanning the prior and target pi durations."""
+    start = max(
+        settings.rabi_min_start_us, settings.rabi_start_factor * guess.prior_pi_us
+    )
+    stop = max(
+        settings.rabi_min_stop_us,
+        settings.rabi_stop_factor * guess.prior_pi_us,
+        settings.rabi_stop_factor * guess.target_pi_us,
+    )
+    return SweepCfg(
+        start=start,
+        stop=stop,
+        expts=settings.rabi_points,
+        step=(stop - start) / (settings.rabi_points - 1),
+    )
+
+
 def estimate_len_rabi_time_s(
     pulses: CalibrationPulses,
     settings: CalibrationTunables,
@@ -254,21 +272,8 @@ def estimate_len_rabi_time_s(
         raise ValueError("Rabi pi duration guesses must be positive and finite")
     if pulses.qub.waveform.style == "arb":
         raise ValueError("Len Rabi cannot sweep an arb waveform's asset-derived length")
-    start = max(
-        settings.rabi_min_start_us, settings.rabi_start_factor * guess.prior_pi_us
-    )
-    stop = max(
-        settings.rabi_min_stop_us,
-        settings.rabi_stop_factor * guess.prior_pi_us,
-        settings.rabi_stop_factor * guess.target_pi_us,
-    )
     sweep = plan_time_sweep(
-        SweepCfg(
-            start=start,
-            stop=stop,
-            expts=settings.rabi_points,
-            step=(stop - start) / (settings.rabi_points - 1),
-        ),
+        _len_rabi_sweep(settings, guess),
         soccfg,
         gen_ch=pulses.qub.ch,
     )
@@ -279,15 +284,8 @@ def estimate_len_rabi_time_s(
         + float(drive.post_delay)
     )
     ro = pulses.readout
-    readout_us = max(
-        float(ro.trig_offset) + float(ro.ro_length),
-        float(ro.pre_delay) + float(ro.waveform.length) + float(ro.post_delay),
-    )
-    relax_us = (
-        max(settings.rabi_relax_min_us, settings.rabi_relax_factor * guess.relax_us)
-        if settings.rabi_relax_mode == "auto"
-        else settings.rabi_relax_delay_us
-    )
+    readout_us = ro.nominal_duration_us()
+    relax_us = settings.resolve_rabi_relax_us(guess.relax_us)
     return shot_time_s(
         rounds=settings.rabi_rounds,
         reps=settings.rabi_reps,
@@ -359,35 +357,15 @@ async def calibrate_len_rabi(
     drive.set_param("gain", gain)
     ro = pulses.readout.model_copy(deep=True)
     ro.set_param("gain", clamp_gain(float(ro.gain), "readout", gain_clamped, lower=0.0))
-    start = max(
-        settings.rabi_min_start_us, settings.rabi_start_factor * guess.prior_pi_us
-    )
-    stop = max(
-        settings.rabi_min_stop_us,
-        settings.rabi_stop_factor * guess.prior_pi_us,
-        settings.rabi_stop_factor * target_pi_us,
-    )
     cfg = LenRabiCfg(
         reps=settings.rabi_reps,
         rounds=settings.rabi_rounds,
         acquire_retry=settings.rabi_acquire_retry,
         earlystop_snr=settings.rabi_earlystop_snr,
-        relax_delay=(
-            max(
-                settings.rabi_relax_min_us,
-                settings.rabi_relax_factor * guess.relax_us,
-            )
-            if settings.rabi_relax_mode == "auto"
-            else settings.rabi_relax_delay_us
-        ),
+        relax_delay=settings.resolve_rabi_relax_us(guess.relax_us),
         qub_pulse=drive,
         readout=ro,
-        length=SweepCfg(
-            start=start,
-            stop=stop,
-            expts=settings.rabi_points,
-            step=(stop - start) / (settings.rabi_points - 1),
-        ),
+        length=_len_rabi_sweep(settings, guess),
     )
     outcome = await scope.run(measure_planned_rabi, cfg, name="Rabi")
     observe_operation(env.summary, outcome)
@@ -553,15 +531,8 @@ def estimate_readout_time_s(
     _validate_calibration_inputs(0.0, guess_us)
     pi, ro = pulses.pi, pulses.readout
     pulse_us = float(pi.pre_delay) + float(pi.waveform.length) + float(pi.post_delay)
-    readout_us = max(
-        float(ro.trig_offset) + float(ro.ro_length),
-        float(ro.pre_delay) + float(ro.waveform.length) + float(ro.post_delay),
-    )
-    relax_us = (
-        max(settings.ro_relax_min_us, settings.ro_relax_factor * guess_us)
-        if settings.ro_relax_mode == "auto"
-        else settings.ro_relax_delay_us
-    )
+    readout_us = ro.nominal_duration_us()
+    relax_us = settings.resolve_readout_relax_us(guess_us)
     return shot_time_s(
         rounds=settings.ro_rounds,
         reps=settings.ro_reps,
@@ -618,11 +589,7 @@ async def calibrate_readout(
         reps=settings.ro_reps,
         rounds=settings.ro_rounds,
         acquire_retry=settings.ro_acquire_retry,
-        relax_delay=(
-            max(settings.ro_relax_min_us, settings.ro_relax_factor * guess_us)
-            if settings.ro_relax_mode == "auto"
-            else settings.ro_relax_delay_us
-        ),
+        relax_delay=settings.resolve_readout_relax_us(guess_us),
         skew_penalty=settings.ro_skew_penalty,
         qub_pulse=drive,
         readout=ro,

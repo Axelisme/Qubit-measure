@@ -127,15 +127,8 @@ def estimate_amp_rabi_time_s(
         float(drive.pre_delay) + float(drive.waveform.length) + float(drive.post_delay)
     )
     ro = pulses.readout
-    readout_us = max(
-        float(ro.trig_offset) + float(ro.ro_length),
-        float(ro.pre_delay) + float(ro.waveform.length) + float(ro.post_delay),
-    )
-    relax_us = (
-        max(settings.rabi_relax_min_us, settings.rabi_relax_factor * guess_us)
-        if settings.rabi_relax_mode == "auto"
-        else settings.rabi_relax_delay_us
-    )
+    readout_us = ro.nominal_duration_us()
+    relax_us = settings.resolve_rabi_relax_us(guess_us)
     return shot_time_s(
         rounds=settings.rabi_rounds,
         reps=settings.rabi_reps,
@@ -195,9 +188,7 @@ async def calibrate_amp_rabi(
         rounds=tun.rabi_rounds,
         acquire_retry=tun.rabi_acquire_retry,
         earlystop_snr=tun.rabi_earlystop_snr,
-        relax_delay=max(tun.rabi_relax_min_us, tun.rabi_relax_factor * guess.relax_us)
-        if tun.rabi_relax_mode == "auto"
-        else tun.rabi_relax_delay_us,
+        relax_delay=tun.resolve_rabi_relax_us(guess.relax_us),
         qub_pulse=drive,
         readout=ro,
         gain=SweepCfg(

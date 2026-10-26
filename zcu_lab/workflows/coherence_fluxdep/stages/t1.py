@@ -145,10 +145,7 @@ def estimate_t1_time_s(
     pi = cfg.pi_pulse
     pulse_us = float(pi.pre_delay) + float(pi.waveform.length) + float(pi.post_delay)
     ro = pulses.readout
-    readout_us = max(
-        float(ro.trig_offset) + float(ro.ro_length),
-        float(ro.pre_delay) + float(ro.waveform.length) + float(ro.post_delay),
-    )
+    readout_us = ro.nominal_duration_us()
     return shot_time_s(
         rounds=cfg.rounds,
         reps=cfg.reps,

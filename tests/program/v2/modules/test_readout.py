@@ -40,6 +40,23 @@ def test_readout_cfg_namespace_dispatches_nested_pulse():
     assert isinstance(Readout("readout", modules.readout), PulseReadout)
 
 
+@pytest.mark.parametrize(
+    "length,ro_length,expected_us",
+    [(0.5, 2.0, 2.4), (3.0, 0.5, 3.5), (0.0, 0.0, 0.5)],
+)
+def test_nominal_duration_covers_adc_and_generator_without_clock_rounding(
+    length: float, ro_length: float, expected_us: float
+) -> None:
+    cfg = _make_pulse_ro_cfg(ch=2, ro_ch=1)
+    cfg.set_param("length", length)
+    cfg.ro_length = ro_length
+    cfg.pre_delay = 0.25
+    cfg.post_delay = 0.25
+    cfg.trig_offset = 0.4
+
+    assert cfg.nominal_duration_us() == pytest.approx(expected_us)
+
+
 class TestReadoutFactory:
     def test_dispatch_pulse(self):
         ro = Readout("ro", _make_pulse_ro_cfg())

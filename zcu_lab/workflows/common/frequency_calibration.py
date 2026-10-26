@@ -99,10 +99,7 @@ def estimate_frequency_time_s(
         + float(cfg.qub_pulse.post_delay)
     )
     ro = pulses.readout
-    readout_us = max(
-        float(ro.trig_offset) + float(ro.ro_length),
-        float(ro.pre_delay) + float(ro.waveform.length) + float(ro.post_delay),
-    )
+    readout_us = ro.nominal_duration_us()
     scans = 2 if settings.frequency_mode == "two_step" else 1
     return scans * shot_time_s(
         rounds=cfg.rounds,
