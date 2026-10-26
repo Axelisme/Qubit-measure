@@ -45,8 +45,8 @@ Fluxonium echo T2 vs. flux 的分析工具：把實測 `T2e` 先扣除 relaxatio
 
 - `T2FitParams(A_phi=None, n_th=None)`：fit 初值與結果容器；只有非 `None` 的參數會納入模型，語義與 `t1_curve.T1FitParams` 的 white-list 一致。
 - `fit_t2_noise_params(T1s, T2s, domega_dflux, chi_over_2pi_mhz, *, kappa_over_2pi_mhz, init, bounds=None, fixed=(), T1errs=None, T2errs=None, residual_mode="gamma", progress=False, ...)`：用 log-parameter least-squares 擬合 active `A_phi` 與/或 `n_th`。預設 residual 是純退相干率 `Gamma_phi`，其中 `Gamma_phi_obs = 1/T2 - 1/(2*T1)`，若提供 error 會傳播成 rate 權重。
-- `T2FitResult.correlation` 提供按 `free` 排序的 natural-log covariance、correlation、Jacobian rank 與 column-normalized 條件數。固定與未啟用參數不進矩陣。沒有自由參數或矩陣分解失敗時為 `None`。Covariance 與既有 stderr 使用相同的 optimizer-cost reduced χ² 縮放。
-- Combined fit 後，notebook 從 `fit_result.correlation` 取診斷，直接呼叫 `fit_tools.find_weak_parameters(...)`、`plot_fit_correlation(...)` 與 `make_weak_parameter_table(...)`。共用規則以 |correlation| > 0.95 或 σ(ln p) > 1 標出弱參數；沒有矩陣時不畫熱圖，弱參數表為空。
+- `T2FitResult.correlation` 提供按 `free` 排序的 natural-log covariance、correlation、Jacobian rank 與 column-normalized 條件數。固定與未啟用參數不進矩陣。沒有自由參數、Jacobian 或 cost 非有限、矩陣分解失敗時為 `None`，自由參數的 stderr 為 inf。Covariance 使用 optimizer-cost reduced χ² 縮放，stderr 等於參數值乘以 log covariance 對角線開根號。零欄或在 column-normalized SVD 被截掉方向上有分量的參數，其 variance 與 stderr 為 inf、correlation 列與欄為 NaN。很小但獨立的非零欄保留有限且可能很大的 variance。
+- Combined fit 後，notebook 從 `fit_result.correlation` 取診斷，直接呼叫 `fit_tools.find_weak_parameters(...)`、`plot_fit_correlation(...)` 與 `make_weak_parameter_table(...)`。共用規則以 |correlation| > 0.95 或 σ(ln p) > 1 標出弱參數。σ(ln p) = inf 的理由會說明資料不約束此參數；沒有矩陣時不畫熱圖，弱參數表為空。
 - `fixed=("n_th",)` 表示 photon channel 仍在模型中、但固定 `n_th`；若不想納入 photon shot noise，建立 `T2FitParams` 時不要提供 `n_th`。
 - `flux_noise_gamma_phi_per_us(A_phi, domega_dflux)`：從 `simulate.dephasing` 重新匯出同一純公式，回傳 first-order 1/f flux-noise echo rate。數值 owner 同時支援 FTF joint dephasing，不反向 import Notebook。
 - `thermal_photon_gamma_phi_per_us(n_th, kappa_over_2pi_mhz, chi_over_2pi_mhz)`：從 `simulate.dephasing` 重新匯出同一純公式，回傳 PRX Appendix A15 readout photon shot-noise rate。Chi 使用完整兩態 pull 差，不在新 owner 改變倍率。

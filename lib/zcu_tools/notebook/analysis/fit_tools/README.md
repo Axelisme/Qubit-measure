@@ -40,13 +40,17 @@
 
 `identifiability.py` 擁有 `FitCorrelation` 與 `WeakParameter`。
 `calculate_fit_correlation(...)` 保留按自由參數順序排列的完整 natural-log covariance。
-它與 fit stderr 使用相同的 pseudoinverse 及 optimizer-cost reduced χ² 縮放。
+它以 column-normalized Jacobian 的 SVD 計算 covariance，再轉回 natural-log 參數座標，並乘上 optimizer-cost reduced χ²。
+Rank 與被截掉方向的判定使用同一個相對容差：float64 epsilon 乘以 Jacobian 的最大維度。
+這避免先形成 JᵀJ 而平方條件數，也保留欄縮放下的 rank。
 Correlation 由未縮放矩陣正規化，cost 為 0 時仍保留相關資訊。
-Rank 描述 Jacobian，條件數則先將 Jacobian 各欄正規化成單位長度。
+零欄或在被截掉方向上有分量的參數，其 covariance 對角為 inf，correlation 列與欄為 NaN，fit stderr 為 inf。
+很小但獨立的非零欄仍有有限且可能很大的 variance，不因幅度小而截掉。
+秩不足時條件數為 inf；Jacobian 或 cost 非有限時回傳 None，fit 的自由參數 stderr 為 inf。
 
 `find_weak_parameters(...)` 擁有共用規則：|correlation| > 0.95 或 σ(ln p) > 1。
 `CORRELATION_THRESHOLD` 與 `LOG_STD_THRESHOLD` 定義這兩個門檻。
-函式回傳每個弱參數及全部理由，理由包含觀察值。沒有矩陣時回傳空 tuple。
+函式回傳每個弱參數及全部理由，理由包含觀察值。σ(ln p) = inf 仍依第二條規則標弱，並說明資料不約束此參數。沒有矩陣時回傳空 tuple。
 `identifiability_presentation.py` 的 `plot_fit_correlation(...)` 回傳標數值的熱圖，圖上標明 covariance 位於 log 參數空間。
 `make_weak_parameter_table(...)` 回傳參數與原因表。T1/T2 notebook 直接呼叫這些共用函式。
 

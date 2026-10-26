@@ -106,6 +106,35 @@ def test_negligible_photon_channel_is_flagged_by_log_uncertainty() -> None:
     assert any("sigma(ln n_th)" in reason for reason in photon.reasons)
 
 
+@pytest.mark.parametrize("photon_truth", [1e-8, 1e-11])
+def test_vanishing_photon_channel_does_not_flag_measured_flux_noise(
+    photon_truth: float,
+) -> None:
+    T1s, T2s, sensitivity, chi = _synthetic_samples(
+        T2FitParams(A_phi=2.4e-6, n_th=photon_truth)
+    )
+    result = fit_t2_noise_params(
+        T1s,
+        T2s * (1 + 0.02 * np.sin(np.arange(T2s.size))),
+        sensitivity,
+        chi,
+        kappa_over_2pi_mhz=_KAPPA_OVER_2PI_MHZ,
+        init=T2FitParams(A_phi=2e-6, n_th=photon_truth),
+        bounds={"n_th": (1e-14, 0.1)},
+    )
+    assert result.success
+    assert result.params.n_th is not None
+    assert result.params.n_th < 1e-12
+    info = result.correlation
+    assert info is not None
+    assert [entry.parameter for entry in find_weak_parameters(info)] == ["n_th"]
+    if photon_truth == 1e-8:
+        assert result.stderr.n_th == np.inf
+        assert info.covariance[1, 1] == np.inf
+        assert np.all(np.isnan(info.correlation[1, :]))
+        assert np.all(np.isnan(info.correlation[:, 1]))
+
+
 def test_nearly_degenerate_channels_report_strong_correlation() -> None:
     sensitivity = np.linspace(9_900.0, 10_100.0, 30)
     chi = np.full(30, 3.0)
