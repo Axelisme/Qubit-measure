@@ -1,6 +1,6 @@
 # `zcu_tools.notebook`
 
-**Last updated:** 2026-10-24
+**Last updated:** 2026-10-27
 
 **讀者：** lab-author。Notebook 實驗入口、互動分析與支援模組導覽。
 
@@ -47,7 +47,7 @@ GUI／MCP 的 temporary aliases 或 target 不改這個保存 handle。
 - [`adapter.py`](adapter.py)：共用環境綁定、每實驗 records 與操作收尾。每次 run 新建 RunContext、Plots 與 run 根 Scope，同步分析另建 Plots。入口借用 drivers，不管理其連線生命週期。
 - [fluxdep](analysis/fluxdep/README.md)：通量依賴光譜的資料處理、擬合、圖表與互動選點。`fitting.py` 保留 `fit_spectrum` 與組合搜尋、診斷圖的 `search_in_database` 入口；數值搜尋由 analysis 擁有。
 - [t1_curve](analysis/t1_curve/README.md) 與 [t2_curve](analysis/t2_curve/README.md)：各自保留 Notebook 的曲線分析、擬合與分階段工作流程。模型選擇與保存條件見各自的 README。
-- [fit_tools](analysis/fit_tools/README.md)：提供 Notebook 分析專用的校正、資料接合、loss、weights 與溫度模型。
+- [fit_tools](analysis/fit_tools/README.md)：提供 Notebook 分析專用的校正、資料接合、loss、weights 與溫度模型。多 device 儀器值第二軸重用 `analysis.flux` 的純數學，作者明示其他 device 的當下值。
 - [design](analysis/design/README.md)：評估模型參數、設計需求與候選組合，並分析 HFSS sweep 資料。
 - [mist](analysis/mist/tool.py)：提供能量摺疊、不連續處理與碰撞遮罩的計算工具。
 - [circuit_design](circuit_design/README.md)：提供 Qiskit Metal 電路幾何元件；相關 Notebook 展示電路建構及設計檔輸出。
