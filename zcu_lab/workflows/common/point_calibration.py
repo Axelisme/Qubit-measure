@@ -55,6 +55,22 @@ class PointCalibrationResult:
     readout: ReadoutResult | None = None
 
 
+def _apply_readout_policy(carry: CalCarry, tun: CalibrationTunables) -> None:
+    """Restore seed readout scalars/source when optimization is disabled.
+
+    Preserve accepted frequency and Rabi history, including after a live switch
+    from enabled to disabled. Downstream consumers then use the seed readout.
+    """
+    if not tun.optimize_readout:
+        if carry.last is not None:
+            carry.last = replace(
+                carry.last,
+                readout_freq_mhz=carry.seed.readout_freq_mhz,
+                readout_gain=carry.seed.readout_gain,
+            )
+        carry.readout_source = None
+
+
 def _retained_readout(pulses: CalibrationPulses, carry: CalCarry) -> PulseReadoutCfg:
     """Copy the plan's readout with the latest accepted (or seed) freq and gain."""
     prior = carry.seed if carry.last is None else carry.last
@@ -204,6 +220,8 @@ async def calibrate_point(
     Rabi delegates len_only, amp_only or len_then_amp to calibrate_rabi,
     including AmpRabi where selected. Readout runs on cadence with this point's
     pi, otherwise it returns skipped without postponing its cadence.
+    With optimize_readout=False, all stages and downstream consumers use seed
+    readout scalars, even after a live switch; no readout scan runs.
     Cancellation returns results already reached, with later fields None.
     Expected failures/rejections return normal results. Unexpected exceptions
     propagate without returning an aggregate: frequency success then a Rabi bug
@@ -218,11 +236,13 @@ async def calibrate_point(
     tracker = carry.frequency_tracker
     if tracker is None:
         raise ValueError("Frequency calibration requires a captured physical predictor")
+    tun = settings.current
+    _apply_readout_policy(carry, tun)
     frequency = await calibrate_frequency(
         scope,
         env,
         replace(pulses, readout=_retained_readout(pulses, carry)),
-        settings.current,
+        tun,
         guess=FrequencyGuess(point=point, seed_flux=carry.seed_flux),
         tracker=tracker,
     )
@@ -231,6 +251,7 @@ async def calibrate_point(
     if scope.cancelled:
         return result
     tun = settings.current
+    _apply_readout_policy(carry, tun)
     rabi = await calibrate_rabi(
         scope,
         env,
@@ -257,8 +278,13 @@ async def calibrate_point(
     if scope.cancelled:
         return result
     tun = settings.current
+    _apply_readout_policy(carry, tun)
     if not readout_due(point.index, tun):
-        result.readout = _skipped_readout("Readout flux-point cadence")
+        result.readout = _skipped_readout(
+            "Readout flux-point cadence"
+            if tun.optimize_readout
+            else "Readout optimization disabled; using seed readout"
+        )
         return result
     pi = current_pi_calibration(rabi.record, carry)
     if pi is None:

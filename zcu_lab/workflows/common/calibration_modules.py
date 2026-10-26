@@ -10,10 +10,10 @@ ro_ch. Flat PulseReadoutCfg.ro_ch stays required input.
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Annotated, Literal
 
 import numpy as np
-from pydantic import JsonValue
+from pydantic import Field, FiniteFloat, JsonValue
 from zcu_tools.cfg_model import (
     ModuleCfgFactory,
     ModuleSpec,
@@ -23,13 +23,26 @@ from zcu_tools.cfg_model import (
 from zcu_tools.device.fake import FakeDeviceInfo
 from zcu_tools.device.yoko import YOKOGS200Info
 from zcu_tools.gui.form import (
+    Display,
+    FormCommandContext,
+    FormCommandSnapshot,
+    FormConversionError,
+    FormConversionResult,
     FormEnv,
     FormErrors,
+    FormModel,
     FormPath,
+    InputConverter,
+    InputDefault,
 )
+from zcu_tools.gui.form.commands import ReadonlyFormInput
 from zcu_tools.gui.form_adapter import (
+    CenterSpan,
+    LinRange,
     ModuleInput,
     ModuleInputField,
+    StepCenter,
+    StepRange,
     SweepInput,
     module_form,
 )
@@ -243,12 +256,60 @@ def calibration_choices(env: FormEnv) -> Mapping[FormPath, tuple[JsonValue, ...]
     }
 
 
-def expand_fluxes(fluxes: SweepInput) -> tuple[float, ...]:
-    """Expand a validated linear range using its exact start/stop/n count.
+class FluxList(FormModel):
+    """Explicit absolute device setpoints, visited in the supplied list order.
+
+    kind selects list input. values contains at least one finite setpoint in
+    the plan's flux_unit. Reverse passes and repeated setpoints are allowed.
+    """
+
+    kind: Annotated[Literal["list"], Display(hidden=True)] = "list"
+    values: tuple[FiniteFloat, ...] = Field(
+        min_length=1,
+        description="Absolute device setpoints in flux_unit; run visits points in list order, including reversals and repeats",
+    )
+
+
+def _select_flux_input(
+    old: FormCommandSnapshot,
+    selection: ReadonlyFormInput,
+    _context: FormCommandContext,
+) -> FormConversionResult:
+    models = {
+        model.model_fields["kind"].default: model
+        for model in (LinRange, CenterSpan, StepRange, StepCenter, FluxList)
+    }
+    if not isinstance(selection, Mapping) or selection.get("kind") not in models:
+        raise FormConversionError("Select a flux sweep or explicit list")
+    model = models[selection["kind"]]
+    raw = old.copy_input()
+    data = (
+        {key: value for key, value in raw.items() if key in model.model_fields}
+        if isinstance(raw, dict)
+        else {}
+    )
+    data["kind"] = model.model_fields["kind"].default
+    return FormConversionResult(model, data)
+
+
+FluxInput = Annotated[
+    SweepInput | FluxList,
+    Field(discriminator="kind"),
+    Display(selector=True),
+    InputDefault(lambda: {"kind": "linrange"}),
+    InputConverter(_select_flux_input),
+]
+"""Linear sweep or explicit flux list; selection keeps shared raw fields only."""
+
+
+def expand_fluxes(fluxes: SweepInput | FluxList) -> tuple[float, ...]:
+    """Return an explicit list or expand a validated linear start/stop/n range.
 
     Descending and repeated setpoints keep their order. No unit conversion,
     hardware lookup or sorting occurs.
     """
+    if isinstance(fluxes, FluxList):
+        return fluxes.values
     return tuple(
         float(value) for value in np.linspace(fluxes.start, fluxes.stop, fluxes.n)
     )

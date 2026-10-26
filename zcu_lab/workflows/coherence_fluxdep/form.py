@@ -17,7 +17,7 @@ from zcu_tools.gui.form import (
     Option,
     field_error,
 )
-from zcu_tools.gui.form_adapter import DeviceName, SweepInput
+from zcu_tools.gui.form_adapter import DeviceName
 
 from zcu_lab.workflows.coherence_fluxdep.singleshot_form import SingleshotTunablesForm
 from zcu_lab.workflows.coherence_fluxdep.t1_form import T1TunablesForm
@@ -34,6 +34,7 @@ from zcu_lab.workflows.common.calibration_modules import (
     DRIVE_MODULE_FIELD,
     READOUT_MODULE_FIELD,
     DriveModuleInput,
+    FluxInput,
     ReadoutModuleInput,
     calibration_choices,
     calibration_defaults,
@@ -127,8 +128,8 @@ class CoherencePlanForm(FormModel):
             description="Seed pulse calibration setpoint in Flux unit; blank disables matrix feed-forward. Confirm the value and unit before starting.",
         )
     )
-    fluxes: Annotated[SweepInput, Display(label="Fluxes")] = Field(
-        description="Ordered absolute device setpoints"
+    fluxes: Annotated[FluxInput, Display(label="Fluxes")] = Field(
+        description="Absolute device setpoints in flux_unit; sweep or explicit list visited in list order, including reversals and repeats",
     )
     pi_length_us: Annotated[float, Display(label="Pi length", unit="µs")] = Field(
         gt=0,

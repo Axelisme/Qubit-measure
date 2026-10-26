@@ -70,8 +70,14 @@ class CalibrationTunables(FrequencyTunables):
     min_readout_snr: float = Field(
         default=5.0, gt=0, description="Inclusive minimum readout SNR"
     )
+    optimize_readout: bool = Field(
+        default=True,
+        description="Scan readout on cadence; False skips all readout optimization and uses the seed readout unchanged at every point",
+    )
     ro_every: int = Field(
-        default=5, ge=1, description="Flux-point readout scan cadence"
+        default=5,
+        ge=1,
+        description="Readout scan cadence in flux points when optimization is enabled; index zero is due",
     )
     rabi_start_factor: float = Field(
         default=0.1, gt=0, description="Sweep start divided by prior pi duration"
