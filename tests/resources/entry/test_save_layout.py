@@ -25,15 +25,13 @@ SAVED_AT = datetime(2026, 10, 6, 0, 30, tzinfo=timezone(timedelta(hours=8)))
 def layout(
     tmp_path: Path,
     *,
-    run_id: str = "opaque_run%id",
+    stem: str = "Synthetic_Experiment_opaque_run%id",
     point: str | None = None,
-    experiment: str = "Synthetic/Experiment",
 ) -> SaveLayout:
     return SaveLayout(
         result_path=tmp_path / "results" / "entry",
         database_path=tmp_path / "Database" / "entry",
-        run_id=run_id,
-        experiment=experiment,
+        stem=stem,
         point=point,
         saved_at=SAVED_AT,
     )
@@ -61,7 +59,7 @@ def tree_bytes(root: Path) -> dict[Path, bytes]:
                 ),
                 (
                     "labber",
-                    "Database/entry/Labber/2026/10/Data_1006/Synthetic_Experiment_run%id_1.hdf5",
+                    "Database/entry/Labber/2026/10/Data_1006/Synthetic_Experiment_opaque_run%id.hdf5",
                 ),
             ),
         ),
@@ -75,7 +73,7 @@ def tree_bytes(root: Path) -> dict[Path, bytes]:
                 ),
                 (
                     "labber",
-                    "Database/entry/Labber/2026/10/Data_1006/Synthetic_Experiment_run%id_1.hdf5",
+                    "Database/entry/Labber/2026/10/Data_1006/Synthetic_Experiment_opaque_run%id.hdf5",
                 ),
             ),
         ),
@@ -281,49 +279,21 @@ def test_analysis_member_identity_shares_destination_across_artifacts(
     assert list(tmp_path.iterdir()) == []
 
 
-@pytest.mark.parametrize(
-    ("run_id", "initial_name", "second_name", "third_name"),
-    [
-        (
-            "20261019T120000Z-a1b2c3",
-            "Synthetic_Experiment_a1b2c3_1.hdf5",
-            "Synthetic_Experiment_a1b2c3_2.hdf5",
-            "Synthetic_Experiment_a1b2c3_3.hdf5",
-        ),
-        (
-            "opaque_1",
-            "Synthetic_Experiment_aque_1_1.hdf5",
-            "Synthetic_Experiment_aque_1_2.hdf5",
-            "Synthetic_Experiment_aque_1_3.hdf5",
-        ),
-        (
-            "名稱",
-            "Synthetic_Experiment_名稱_1.hdf5",
-            "Synthetic_Experiment_名稱_2.hdf5",
-            "Synthetic_Experiment_名稱_3.hdf5",
-        ),
-    ],
-)
+@pytest.mark.parametrize("stem", ["custom_Q1+Q2", "with spaces", "名稱"])
 def test_labber_avoids_existing_files_but_does_not_reserve(
-    tmp_path: Path, run_id: str, initial_name: str, second_name: str, third_name: str
+    tmp_path: Path, stem: str
 ) -> None:
-    save_layout = layout(tmp_path, run_id=run_id)
+    save_layout = layout(tmp_path, stem=stem)
     key = ArtifactKey("run", "data", "data")
     folder = tmp_path / "Database/entry/Labber/2026/10/Data_1006"
-    assert save_layout.outputs(key)[1] == Output("labber", folder / initial_name)
+    assert save_layout.outputs(key)[1] == Output("labber", folder / f"{stem}.hdf5")
     folder.mkdir(parents=True)
-    (folder / initial_name).write_bytes(b"first")
-    (folder / second_name).write_bytes(b"second")
+    (folder / f"{stem}.hdf5").write_bytes(b"first")
+    (folder / f"{stem}_1.hdf5").write_bytes(b"second")
     before = tree_bytes(tmp_path)
     expected = (
-        Output(
-            "data_h5",
-            tmp_path
-            / "Database/entry/runs"
-            / f"Synthetic_Experiment_{run_id}"
-            / "data.h5",
-        ),
-        Output("labber", folder / third_name),
+        Output("data_h5", tmp_path / "Database/entry/runs" / stem / "data.h5"),
+        Output("labber", folder / f"{stem}_2.hdf5"),
     )
     assert save_layout.outputs(key) == expected
     assert save_layout.outputs(key) == expected
@@ -354,8 +324,7 @@ def test_relative_roots_become_absolute_without_requiring_entry_directories(
     save_layout = SaveLayout(
         result_path=Path("results/entry"),
         database_path=Path("Database/entry"),
-        run_id="no-meaning",
-        experiment="Synthetic/Experiment",
+        stem="Synthetic_Experiment_no-meaning",
         point=None,
         saved_at=SAVED_AT,
     )
@@ -367,7 +336,7 @@ def test_relative_roots_become_absolute_without_requiring_entry_directories(
         Output(
             "labber",
             tmp_path
-            / "Database/entry/Labber/2026/10/Data_1006/Synthetic_Experiment_eaning_1.hdf5",
+            / "Database/entry/Labber/2026/10/Data_1006/Synthetic_Experiment_no-meaning.hdf5",
         ),
     )
     assert list(tmp_path.iterdir()) == []
@@ -387,18 +356,7 @@ UNSAFE = [
 ]
 
 
-@pytest.mark.parametrize(
-    "experiment", ["", ".", "..", "bad\\name", "bad\x00name", "C:drive"]
-)
-def test_layout_rejects_unsafe_experiment_names(
-    tmp_path: Path, experiment: str
-) -> None:
-    with pytest.raises(ValueError, match="experiment"):
-        layout(tmp_path, experiment=experiment)
-    assert list(tmp_path.iterdir()) == []
-
-
-@pytest.mark.parametrize("field", ["run_id", "point"])
+@pytest.mark.parametrize("field", ["stem", "point"])
 @pytest.mark.parametrize("value", UNSAFE)
 def test_layout_rejects_unsafe_segments_at_construction(
     tmp_path: Path, field: str, value: str
@@ -407,7 +365,7 @@ def test_layout_rejects_unsafe_segments_at_construction(
     with pytest.raises(ValueError, match=field):
         layout(
             tmp_path,
-            run_id=value if field == "run_id" else "run",
+            stem=value if field == "stem" else "run",
             point=value if field == "point" else None,
         )
     assert tree_bytes(tmp_path) == before
@@ -538,8 +496,7 @@ def test_naive_save_time_is_rejected_without_publishing(tmp_path: Path) -> None:
         SaveLayout(
             result_path=tmp_path / "results",
             database_path=tmp_path / "Database",
-            run_id="run",
-            experiment="Synthetic/Experiment",
+            stem="Synthetic_Experiment_run",
             point=None,
             saved_at=datetime(2026, 10, 6, 2, 0),
         )
@@ -559,8 +516,7 @@ def test_result_entry_exposes_readonly_exact_paths_for_layout(
     save_layout = SaveLayout(
         result_path=entry.result_path,
         database_path=entry.database_path,
-        run_id="run",
-        experiment="Synthetic/Experiment",
+        stem="Synthetic_Experiment_run",
         point=None,
         saved_at=SAVED_AT,
     )

@@ -107,8 +107,7 @@ def test_multiple_artifact_titles_retain_names(saving_view) -> None:
     layout = SaveLayout(
         result_path=storage.result_path,
         database_path=storage.database_path,
-        run_id=session.metadata.run_id,
-        experiment="saving",
+        stem=f"saving_{session.metadata.run_id}",
         point=storage.point,
         saved_at=datetime(2026, 10, 8, tzinfo=timezone.utc),
     )

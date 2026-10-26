@@ -6,7 +6,7 @@ import logging
 import math
 from collections.abc import Sequence
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TypeAlias
 
@@ -27,6 +27,7 @@ from zcu_tools.gui.session.types import SessionEnv
 from zcu_tools.plotting.plots import Plots
 
 from zcu_lab.v2.support.measure.mux_results import captured_qubits
+from zcu_lab.v2.support.measure.mux_save_names import mux_save_stem
 from zcu_lab.v2.support.mux import MuxFitFailure
 from zcu_lab.v2.support.mux_coherence import MuxCoherenceResult
 from zcu_lab.v2.support.mux_coherence_analysis import MuxCoherenceFit
@@ -206,7 +207,7 @@ def run(
 
 
 DEFINITION = Adapter(
-    spec=MuxT2RamseyExp.AXES_SPEC,
+    spec=replace(MuxT2RamseyExp.AXES_SPEC, save_stem=mux_save_stem),
     make_form=make_form,
     run=run,
     guide=Path(__file__).with_name("guide.md"),

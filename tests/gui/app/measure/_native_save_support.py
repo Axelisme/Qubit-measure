@@ -135,9 +135,8 @@ class NativeSaveSession:
     @property
     def native_data_path(self) -> Path:
         """Return this fixture's canonical native destination, even before Save."""
-        experiment = self.state.get_tab("tab").adapter_name.replace("/", "_")
-        run_name = f"{experiment}_{self.metadata.run_id}"
-        return self.entry.database_path / "runs" / run_name / "data.h5"
+        sections = self.state.get_artifact_snapshots("tab")
+        return sections[0].artifacts[0].members[0].outputs[0].path
 
     def capture_parameters(
         self, aliases: Mapping[str, str] | None

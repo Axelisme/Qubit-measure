@@ -1,6 +1,6 @@
 # `zcu_tools.notebook`
 
-**Last updated:** 2026-10-24
+**Last updated:** 2026-10-27
 
 **讀者：** lab-author。Notebook 實驗入口、互動分析與支援模組導覽。
 
@@ -31,6 +31,11 @@ Caller 從實驗類別建立 options，例如 `T1Exp.Options(...)` 或 `GE_Exp.P
 `load(Path(...))` 透過 `load_run_with_metadata(path, spec=core.AXES_SPEC)` 讀取與 GUI 相同的 `data.h5`，回傳 `RunRecord`。Single 與 grouped 資料共用 restore；歷史 cfg 不相容時保留有效資料、回傳 cfg=None 並發出 `CfgUnavailableWarning`。成功載入會清除目前分析與 acquisition evidence，失敗保留舊成果。只有 Labber 的舊資料必須先用既有 `migrations/` 工具離線轉成 native，不提供執行期 fallback。本機單檔 `save` 仍是明示的 Labber 匯出，不與 `load` 構成格式對稱。
 
 `save_run(ctx, source=record, ...)` 是綁定 PointView 的 run 保存入口，與本機單檔 `save` 分開。Source 必須是此 adapter 最近成功 run 返回的同一 record。入口從 bound point 捕捉 cached context 與 storage capability，量測身分、時間與 provenance 沿 adapter 的 acquisition evidence。可選的 RoleView 必須來自同一 point，省略代表沒有角色對應。入口保存正規 `data.h5`、Labber 衍生輸出、具名 PNG／副本及窗格 JSON。`SavedRun.save()` 明確重存同一 run，固定輸出覆寫，Labber 每次取新檔；後續 adapter 操作不使此 handle 失效。
+
+Run 命名沿 core.AXES_SPEC 的 `save_stem(SaveContext) -> str`。Caller 可在自己的 spec 指定 callback，框架不補任何名稱。
+Context 包含 tag、run_id、point、roles、cfg values 與帶 timezone 的 saved_at。預設 stem 為 dotted tag、hyphen-joined roles 與完整 run_id，例如 `twotone.time_domain.t1_Q1-R1_20261027T120000Z-a1b2c3`。
+Native 寫 `runs/<stem>/data.h5`，Labber 寫日期樹內的 `<stem>.hdf5`。只有 Labber 碰撞才加 numeric suffix；native 同名仍覆寫。
+每次保存都呼叫 callback，自訂名若依保存時間改變，也會改變 native 目的地。Labber comment 同時保存歷史 snapshot.point 與 snapshot.roles。
 
 `SavedRun.report` 與 `paths` 只表示最新一次保存結果。輸出或編碼失敗時，`PartialSaveError` 保留同一 SavedRun 及 report，caller 修正內容後可明確再存。Ledger 失敗直接傳播，不轉成 PartialSaveError，也不自動 retry。Figures／analysis 為 None 時保留上一組，空 mapping／tuple 清除該組。Run 身分、量測時間與 captured context 不因重存改變。
 

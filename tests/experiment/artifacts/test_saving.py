@@ -1,5 +1,6 @@
 """Shared saving through typed artifacts, real writers and a real entry ledger."""
 
+import json
 from dataclasses import replace
 from datetime import UTC, datetime
 from io import BytesIO
@@ -7,6 +8,7 @@ from pathlib import Path
 from typing import Literal
 from uuid import UUID
 
+import h5py
 import numpy as np
 import pytest
 from matplotlib.figure import Figure
@@ -63,8 +65,7 @@ def storage(tmp_path: Path) -> tuple[RunMetadata, SaveLayout, RecordsLedger]:
     layout = SaveLayout(
         result_path=entry.result_path,
         database_path=entry.database_path,
-        run_id=metadata.run_id,
-        experiment="Synthetic/Experiment",
+        stem=f"Synthetic_Experiment_{metadata.run_id}",
         point="sweet",
         saved_at=datetime.now(UTC),
     )
@@ -142,6 +143,12 @@ def test_all_outputs_share_content_context_and_one_saved_event(
     )
     assert analysis == run / "analysis/analysis.json"
     assert analysis.is_file()
+    with h5py.File(labber, "r") as file:
+        comment = json.loads(str(file.attrs["comment"]))
+    assert comment["snapshot"] == {
+        "point": metadata.snapshot.point,
+        "roles": dict(metadata.snapshot.roles),
+    }
     loaded = load(native)
     assert loaded.docs["metadata"] == metadata.model_dump(mode="json")
     assert loaded.docs["cfg"]["values"] == {"dev": None, "gain": 2.0}

@@ -29,7 +29,7 @@ from zcu_tools.gui.app.measure.events.tab import (
 from zcu_tools.gui.app.measure.figure_export import render_save_figure_png
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.context_types import CommandOrigin
-from zcu_tools.resources.entry import ArtifactKey, SaveLayout
+from zcu_tools.resources.entry import ArtifactKey, SaveContext, SaveLayout
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.state import State
@@ -146,13 +146,23 @@ class SaveService:
                 f"does not match result source entry_id={storage.entry_id!r}, "
                 f"point={storage.point!r}; load with the matching historical entry."
             )
+        saved_at = datetime.now().astimezone()
+        stem = tab.adapter.save_stem(
+            SaveContext(
+                name=tab.adapter_name,
+                run_id=metadata.run_id,
+                point=history.point,
+                roles=history.roles,
+                cfg=None if record.cfg is None else record.cfg.model_dump(mode="json"),
+                saved_at=saved_at,
+            )
+        )
         layout = SaveLayout(
             result_path=storage.result_path,
             database_path=storage.database_path,
-            run_id=metadata.run_id,
-            experiment=tab.adapter_name,
+            stem=stem,
             point=history.point,
-            saved_at=datetime.now().astimezone(),
+            saved_at=saved_at,
         )
         annotation = tab.save.comment if comment is None else comment
         captured: list[SaveArtifact] = []

@@ -102,10 +102,6 @@ class SimulationBinding:
         last_request: Most recently installed AcquireRequest, or None before any
             request is installed. A failure before installation may leave the
             preceding request here. It is not cleared by begin or end.
-        simulated_physical_s: Cumulative shot time in seconds of rounds whose
-            execute returned, across this binding's lifetime. Includes rounds
-            discarded by retries or later validation/cancellation, independent
-            of time_scale. Excludes flux ramp/settle and compile/upload overhead.
         rounds: Tuple of RoundRequest inputs captured since the latest successful
             begin, in execution order. Empty before any round snapshot succeeds.
             A backend failure leaves its captured input here, so this is not a
@@ -183,7 +179,6 @@ class SimulationBinding:
         )
         self.last_request: AcquireRequest | None = None
         self.rounds: tuple[RoundRequest, ...] = ()
-        self.simulated_physical_s = 0.0
         self._sequence = 0
         self._admission = Lock()
 
@@ -263,9 +258,8 @@ class SimulationBinding:
         then calls execute once. Validates the mode/result type and returns the
         borrowed result; the adapter validates channel layouts and copies arrays.
         Callback exceptions propagate. Snapshot failure appends nothing; execute
-        failure leaves the captured input in rounds. Every execute return adds
-        unscaled shot seconds to simulated_physical_s before result validation;
-        an execute exception adds nothing. A mode/result mismatch raises ValueError.
+        failure leaves the captured input in rounds.
+        A mode/result mismatch raises ValueError.
         It does not normalize, average, round signals or
         update last_request. Successful calls wait for their scaled physical target,
         including snapshot and execute time. Slow rounds do not wait; zero
@@ -279,15 +273,13 @@ class SimulationBinding:
         )
         self.rounds += (round_request,)
         result = self.execute(round_request)
-        physical_s = _physical_round_s(request)
-        self.simulated_physical_s += physical_s
         if not (
             (request.mode == "integrated" and isinstance(result, IntegratedRound))
             or (request.mode == "decimated" and isinstance(result, RoundSignals))
         ):
             raise ValueError(f"backend result does not match {request.mode} mode")
         if self._time_scale > 0:
-            target = self._time_scale * physical_s
+            target = self._time_scale * _physical_round_s(request)
             remaining = target - (time.monotonic() - started)
             wait_cancel = cancel if pacing_cancel is None else pacing_cancel
             if wait_cancel is None:

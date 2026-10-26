@@ -75,16 +75,11 @@ def test_shot_overrun_restarts_all_rounds_without_opt_in_retry(
     assert result is not None
     np.testing.assert_allclose(result, 5 - 5j)
     np.testing.assert_allclose(buffer.array, 5 - 5j)
-    acquisition = sched.outcome.acquisitions[0]
-    assert acquisition.attempts == 2
-    assert acquisition.simulated_physical_s is None
-    assert acquisition.completed_rounds == 2
-    assert acquisition.retry_reasons == ("shot_overrun",)
-    assert not acquisition.early_stopped
     warnings = [r for r in caplog.records if r.levelname == "WARNING"]
     assert len(warnings) == 1
     assert "expected_shots=3, received_shots=1, chunk_shots=3" in warnings[0].message
     assert "round_index=1" in warnings[0].message
+    assert "attempt 2" in warnings[0].message
     raw = program.get_raw()
     assert raw is not None
     np.testing.assert_array_equal(
@@ -101,13 +96,9 @@ def test_repeated_shot_overrun_exhausts_default_retry_and_discards_failed_data(
     with Schedule(_cfg(), buffer, scope=Scope("run")) as sched:
         result = sched.prog_builder(soc, "unused").run_program(program, rounds=2)
 
-    acquisition = sched.outcome.acquisitions[0]
-    assert acquisition.attempts == 2
-    assert acquisition.retry_reasons == ("shot_overrun",)
     assert sched.outcome.status == "failed"
     assert isinstance(sched.outcome.exception, AcquisitionContractError)
     assert sched.stop.error is not None
-    assert not acquisition.early_stopped
     assert result is not None
     assert np.isnan(result)
     assert np.isnan(buffer.array)
@@ -146,7 +137,9 @@ def test_data_stop_keeps_first_completed_round_and_cancels_later_rounds(
     decimated: bool,
     rounds: int,
     stop_value: float,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
+    caplog.set_level("INFO", logger="zcu_tools.experiment.v2.runtime.program_builder")
     result = None
     produced_rounds: list[int] = []
     checked_signals: list[NDArray[np.float64]] = []
@@ -220,20 +213,22 @@ def test_data_stop_keeps_first_completed_round_and_cancels_later_rounds(
 
     assert result is not None
     assert produced_rounds == [1]
-    acquisition = sched.outcome.acquisitions[0]
-    assert acquisition.requested_rounds == rounds
-    assert acquisition.completed_rounds == 1
-    assert acquisition.attempts == 1
-    assert acquisition.early_stopped is (rounds > 1)
-    expected_value = stop_value if rounds > 1 and np.isfinite(stop_value) else None
-    assert acquisition.stop_value == expected_value
-    assert run_stop.acquisitions == sched.outcome.acquisitions
+    expected_value = stop_value if np.isfinite(stop_value) else None
+    stops = [record for record in caplog.records if record.levelname == "INFO"]
+    if rounds > 1:
+        assert len(stops) == 1
+        assert "completed rounds 1" in stops[0].message
+        assert f"stop value {expected_value}" in stops[0].message
+    else:
+        assert stops == []
     np.testing.assert_allclose(checked_signals, [[1.0]])
     np.testing.assert_allclose(result, [1.0])
     np.testing.assert_allclose(signals_buffer.array, [1.0])
 
 
-def test_build_and_acquire_retries_acquire_on_the_same_program():
+def test_build_and_acquire_retries_acquire_on_the_same_program(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     result = None
     FlakyBuildProgram.instances.clear()
     signals_buffer = SignalBuffer((1,), dtype=np.float64)
@@ -247,18 +242,16 @@ def test_build_and_acquire_retries_acquire_on_the_same_program():
             )
         )
         assert sched.outcome.status == "completed"
-        acquisition = sched.outcome.acquisitions[0]
-        assert acquisition.requested_rounds == 1
-        assert acquisition.completed_rounds == 1
-        assert acquisition.attempts == 2
-        assert acquisition.early_stopped is False
-        assert acquisition.stop_value is None
 
     assert result is not None
     assert np.allclose(result, [4.0])
     assert np.allclose(signals_buffer.array, [4.0])
     assert len(FlakyBuildProgram.instances) == 1
     assert FlakyBuildProgram.instances[0].acquire_count == 2
+    warnings = [record for record in caplog.records if record.levelname == "WARNING"]
+    assert len(warnings) == 1
+    assert "RuntimeError" in warnings[0].message
+    assert "attempt 2" in warnings[0].message
 
 
 def test_build_and_acquire_retry_clears_shared_failure_cause():

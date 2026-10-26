@@ -18,7 +18,6 @@ from zcu_tools.core.script_protocol import Answer, Question
 from zcu_tools.datafile import JsonObject
 from zcu_tools.device import BaseDeviceInfo
 from zcu_tools.experiment.acquisition import capture_device_snapshot
-from zcu_tools.experiment.acquisition_facts import AcquisitionFacts
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.operations import RunFunction
 from zcu_tools.experiment.records import RunRecord
@@ -56,7 +55,6 @@ class _Attempt:
     device_snapshot: Mapping[str, JsonObject] | None = None
     stopped: bool = False
     name: str | None = None
-    acquisitions: tuple[AcquisitionFacts, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -339,7 +337,6 @@ class WorkflowEnv[C](Scope):
                 return Failed(error.reason)
             return _Value(value)
         finally:
-            attempt.acquisitions = ctx.scope.stop.acquisitions
             attempt.stopped = ctx.scope.stop.is_set()
             attempt.finished_at = self._ports.clock.now()
 
@@ -362,7 +359,6 @@ class WorkflowEnv[C](Scope):
             reason=reason,
             stopped=attempt.stopped,
             name=attempt.name,
-            acquisitions=attempt.acquisitions,
         )
         self._hooks.operation_finished(scope, facts)
         return facts
