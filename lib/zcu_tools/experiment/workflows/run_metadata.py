@@ -37,6 +37,5 @@ def record_with_metadata[Cfg: ConfigBase, Result](
         snapshot=snapshot,
         provenance=identity.provenance,
         device_snapshot=facts.device_snapshot,
-        acquisitions=facts.acquisitions,
     )
     return replace(completed.value, metadata=metadata)

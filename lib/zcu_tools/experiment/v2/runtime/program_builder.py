@@ -14,7 +14,7 @@ import numpy as np
 from numpy.typing import NDArray
 from typing_extensions import TypeVar
 
-from zcu_tools.experiment.acquisition_facts import AcquisitionFacts, StopDecision
+from zcu_tools.experiment.acquisition_facts import StopDecision
 from zcu_tools.experiment.v2.runtime.acquire_cancel import AcquireCancelFlag
 from zcu_tools.program.acquisition import (
     AcquisitionContractError,
@@ -32,7 +32,6 @@ from zcu_tools.program.v2 import (
     SweepCfg,
 )
 from zcu_tools.program.v2.modules.base import ModuleGroup, as_modules
-from zcu_tools.program.v2.simulation import SimulationSoc
 from zcu_tools.progress_bar import BaseProgressBar, make_pbar
 
 if TYPE_CHECKING:
@@ -175,7 +174,9 @@ class AcquireOptions:
     runs after each completed round is converted and written to the buffer.
     Returning True or StopDecision(met=True) requests acquire-local cancellation
     before the next round. StopDecision additionally supplies a scalar observation
-    retained in acquisition facts if finite and acquisition actually ends early.
+    logged if finite and acquisition actually ends early. Each retry logs its
+    reason and next attempt number at warning level; early stops log the stop
+    value and completed rounds at info level.
     """
 
     retry: int = 0
@@ -187,13 +188,10 @@ class AcquireOptions:
 
 @dataclass
 class _AcquireProgress:
-    requested_rounds: int
     pbar: BaseProgressBar
     attempts: int = 0
     completed_rounds: int = 0
     decision: bool | StopDecision = False
-    succeeded: bool = False
-    retry_reasons: tuple[str, ...] = ()
 
     def retry_after(
         self,
@@ -209,28 +207,22 @@ class _AcquireProgress:
         if self.attempts > retry_limit:
             return False
         reason = "shot_overrun" if overrun else type(error).__name__
-        self.retry_reasons += (reason,)
-        if overrun:
-            logger.warning("Retrying acquisition after shot overrun: %s", error)
+        logger.warning(
+            "Retrying acquisition, attempt %s after %s: %s",
+            self.attempts + 1,
+            reason,
+            error,
+        )
         return True
 
-    def facts(self, simulated_physical_s: float | None = None) -> AcquisitionFacts:
-        early = (
-            self.succeeded
-            and bool(self.decision)
-            and self.completed_rounds < self.requested_rounds
-        )
+    def log_early_stop(self, requested_rounds: int) -> None:
+        if not self.decision or self.completed_rounds >= requested_rounds:
+            return
         value = self.decision.value if isinstance(self.decision, StopDecision) else None
-        return AcquisitionFacts(
-            requested_rounds=self.requested_rounds,
-            completed_rounds=self.completed_rounds,
-            attempts=self.attempts,
-            early_stopped=early,
-            retry_reasons=self.retry_reasons,
-            simulated_physical_s=simulated_physical_s,
-            stop_value=value
-            if early and value is not None and isfinite(value)
-            else None,
+        logger.info(
+            "Acquisition stopped early: stop value %s, completed rounds %s",
+            value if value is not None and isfinite(value) else None,
+            self.completed_rounds,
         )
 
 
@@ -467,12 +459,7 @@ class ProgramBuilder(ModuleFacade, Generic[ProgramT]):
             leave=self._resolve_progress_leave(progress_leave=options.progress_leave),
             disable=rounds == 1,
         )
-        observation = _AcquireProgress(rounds, pbar)
-        physical_start = (
-            self._soc.binding.simulated_physical_s
-            if isinstance(self._soc, SimulationSoc)
-            else 0.0
-        )
+        observation = _AcquireProgress(pbar)
         try:
             for _ in range(max(retry, 1) + 1):
                 if self._schedule.check_stop_requested():
@@ -481,7 +468,6 @@ class ProgramBuilder(ModuleFacade, Generic[ProgramT]):
                 observation.attempts += 1
                 observation.completed_rounds = 0
                 observation.decision = False
-                observation.succeeded = False
                 try:
                     raw = self._acquire_once(
                         acquire=acquire,
@@ -515,18 +501,11 @@ class ProgramBuilder(ModuleFacade, Generic[ProgramT]):
 
                 pbar.set_progress(rounds)
                 slot.set(signal_fn(raw))
+                observation.log_early_stop(rounds)
                 break
         except KeyboardInterrupt as exc:
             self._schedule.mark_interrupted(exc)
         finally:
-            simulated_physical_s = (
-                self._soc.binding.simulated_physical_s - physical_start
-                if isinstance(self._soc, SimulationSoc)
-                else None
-            )
-            self._schedule.stop.record_acquisition(
-                observation.facts(simulated_physical_s)
-            )
             pbar.close()
 
         return slot.view
@@ -595,7 +574,6 @@ class ProgramBuilder(ModuleFacade, Generic[ProgramT]):
                 raise
             if token.is_set():
                 raise _AcquireStopped
-            observation.succeeded = True
             return raw
         finally:
             scope.release()

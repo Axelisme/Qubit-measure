@@ -1,6 +1,6 @@
 # `zcu_tools.experiment` — 實驗層
 
-**Last updated:** 2026-10-26
+**Last updated:** 2026-10-27
 
 **讀者：** framework-dev。實驗介面、Run 資料、持久化映射與裝置操作邊界。
 
@@ -98,12 +98,9 @@ physical models, evolution and sampling.
 - `context.py` 的 `RunContext` 提供單次 run 的 soc、soccfg、具名 devices、plots 與 scope。名稱到 driver 的對應在建立時固定，driver 仍由 caller 管理。RunContext 不提供儀器 setters；core 以 `context.devices[cfg.dev[role]]` 取得 driver，再使用實驗層 helper。每次 run 建立新 context、plots 與 Scope。GUI／Notebook 使用 run 根，workflow 使用 operation child；硬體 handle 可重用，不把上一輪停止或錯誤狀態帶入下一輪。核心不管理前端 last_result 或呈現資源生命週期。Workflow 的每次 env.run attempt 也建立新的 RunContext 與 operation Plots，使用和 workflow 趨勢圖相同的 presentation host；返回或失敗先 finish，Pause retry 使用新集合。Workflow 層 env.plots 跨 commit 保留，生命週期見 [workflows README](workflows/README.md#ask-與顯示)。
 - `axes_spec.py` 用 `AxesSpec` 描述軸與資料 channel。zcu_lab 以 `AxesSpec.Axis`、`AxesSpec.Z` 宣告子規格；獨立的 `Axis`、`ZSpec` 名稱仍可使用。這些規格描述 Result 欄位如何對應檔案中的軸與資料 channel。`AxesSpec` 在宣告時核對 Result 的資料欄位，不要求 Result 包含 cfg。軸以 inner-first 排列；保存時套用宣告的單位比例，載入時還原成 Result 欄位。Native cfg snapshot 載入時由宣告的 cfg 型別驗證；Labber 匯出另以 comment envelope 保存 cfg。`save_labber` 使用 caller 指定的路徑，不替 caller 選檔名。對包含多個 Data Variable 的單一 Result，`GroupedAxesSpec`／`VariableSpec` 描述 variable 與欄位的映射，由 typed builder 重建純 Result；Grouped 與 single 都透過 `save_labber(record, path, spec=...)` 匯出，cfg 缺失時拒絕。`labber_layout` 預設 common，要求共同 grid；明確宣告 independent 時，各 variable 保留自己的 1D／2D axes。單檔 save 與 artifact 保存都遵守這項宣告，不自動切換，也不改 native 格式。Grouped native load 由 `load_run_with_metadata` 與 single 共用 restore，不從 Labber reconstruction 讀回。通用檔案格式與讀寫由 [datafile](../datafile/README.md) 負責；保存權責另見 [ADR-0063](../../../docs/adr/0063-persistence-ownership.md)。
 
-`AcquisitionFacts.simulated_physical_s` 記模擬 acquisition 的硬體 shot 秒數。
-它累加所有 execute 已返回的 round，包含重試丟棄的 round，不受 pacing 的 `time_scale` 影響。
-它不包含 flux ramp／settle 或 compile／upload 開銷。
-真實 acquisition 保留 None，不執行模擬計時函式。
-Run metadata、workflow journal／record 與 RPC 序列化在 None 時省略此 key。
-歷史 acquisition 缺 key 時讀成 None，不從 cfg 推算。
+`RunMetadata` 與 workflow operation 只記各自邊界的事實，不要求作者使用特定 acquisition 寫法。
+舊文件的 `acquisitions` key 在載入時忽略，讀取不轉換或寫回檔案。
+ProgramBuilder 的 retry 與 data-driven early stop 改由日誌提供診斷。
 
 ## Cfg 與父層支援
 

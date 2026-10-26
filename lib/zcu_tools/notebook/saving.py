@@ -119,7 +119,6 @@ class SavedRun(Generic[CfgT, ResultT]):
             ),
             provenance=deepcopy(acquisition.provenance),
             device_snapshot=deepcopy(acquisition.device_snapshot),
-            acquisitions=acquisition.acquisitions,
         )
         self._record = replace(source, metadata=metadata)
         self._figures: dict[str, Figure] = {}

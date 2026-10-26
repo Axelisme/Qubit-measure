@@ -1,6 +1,6 @@
 # `experiment.workflows` 具名 async workflow
 
-**Last updated:** 2026-10-26
+**Last updated:** 2026-10-27
 
 **讀者：** framework-dev、lab-author。查閱 workflow 宣告、Scope、控制、operation 事實與 record 保存。
 
@@ -119,17 +119,10 @@ Merged 輸出依使用者 2026-10-25 裁定移除，見 [ADR-0062](../../../../d
 ## Facts 與讀取
 
 每次 executor attempt 追加 operation_finished event。
-OperationFacts 保存 kind、iteration、attempt、started_at、finished_at、device_snapshot、outcome、reason、stopped、name 與 acquisitions。
+OperationFacts 保存 kind、iteration、attempt、started_at、finished_at、device_snapshot、outcome、reason、stopped 與 name。
 Name 是作者傳給 run／call 的 operation label，未命名或舊記錄為 None。
-Acquisitions 是依完成順序排列的 AcquisitionFacts，包含 requested_rounds、completed_rounds、attempts、early_stopped 與 stop_value。
-Completed rounds 只計最後一次 producer attempt，attempts 計實際 acquire 呼叫數，與 OperationFacts.attempt 的 operation 序號不同。
-`simulated_physical_s` 記所有 attempt 中 execute 已返回的 round 所佔硬體 shot 秒數，不受模擬 pacing 影響。
-它排除 flux ramp／settle 與 compile／upload 開銷。
-真實 acquisition 為 None，journal、record 與 run metadata 省略此 key；歷史 acquisition 缺 key 時讀成 None。
-Early stopped 表示 data condition 在設定 rounds 前正常結束。Stop value 是條件命中時的有限 scalar，沒有提前停止、未提供或非有限時為 None。
-Failed、raised 與 Pause discarded operations 也保留已觀察的 acquisitions。沒有 program acquisition 或舊記錄沒有欄位時讀成空 tuple。
-在每個 point 的 record.json 看 `operations[].name` 與 `operations[].acquisitions`，即可按 stage 核對 rounds 與 retry。
-`record_with_metadata` 把同一組 acquisitions 放進 native `docs/metadata.acquisitions`，不重讀 cfg 或儀器。
+舊 journal 與 record 的 `acquisitions` key 在載入時忽略，不轉換或寫回。
+ProgramBuilder 的 acquire retry 與 data-driven early stop 由日誌記錄，不由 operation 推斷。
 Kind 是 run、call、setup_device 或 wait_until。Iteration 取自最近 iteration 物件的 birth sequence，沒有 iteration 時為零。
 Attempt 在該 iteration 中從一開始，包含 Pause retries，不隨 commit 重置。
 Stopped 是完成時 operation 自己的 bit，partial_result 另含 descendant 取消。
