@@ -383,8 +383,8 @@ def _validate_data(  # noqa: PLR0913
         raise ValueError("T2s must be finite and positive")
     if not np.all(np.isfinite(domega_arr)):
         raise ValueError("domega_dflux must be finite")
-    if not np.all(np.isfinite(chi_arr)) or np.any(chi_arr <= 0.0):
-        raise ValueError("chi_over_2pi_mhz must be finite and positive")
+    if not np.all(np.isfinite(chi_arr)) or np.any(chi_arr < 0.0):
+        raise ValueError("chi_over_2pi_mhz must be finite and nonnegative")
 
     fluxs_arr = _validate_fluxs(fluxs, T1s_arr.shape)
     flux_weights = build_flux_residual_weights(

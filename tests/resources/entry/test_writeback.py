@@ -265,6 +265,7 @@ def test_record_numpy_producer_values_reach_ledger_and_record_history(
     assert row is not None
     assert datetime.fromisoformat(str(row["at"])) == datetime.fromisoformat(event.at)
     assert row == expected | {
+        "component": "Q1",
         "run_id": "run-1",
         "point": "a",
         "at": row["at"],

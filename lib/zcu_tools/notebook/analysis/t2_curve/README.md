@@ -1,12 +1,12 @@
 # `t2_curve` 模塊重點文檔
 
-**Last updated:** 2026-10-26
+**Last updated:** 2026-10-27
 
 **讀者：** lab-author。Echo T2 資料準備、rate model 與分析呈現契約。
 
-Record loading 使用 `JsonlRecordTable.read()`，預設讀取 `records.jsonl`，每個 run_id 取最後一行。分析欄位使用 `freq_mhz`、`t1_us`、`t1_err_us`、`t2e_us`、`t2e_err_us` 與 `t2r_us`。資料缺 flux 或 row frame 時，由呼叫端提供同單位的 fallback frame。
+Load stage 讀 `samples.csv` 的 `t1_us`、`t2e_us`，並接收作者提供的 `fluxs` 陣列。每個 flux 按 CSV 列順序對應一筆量測。CSV 不必有 `flux`，即使有也不使用；缺頻率、誤差與 Ramsey lifetime 時補 NaN。未用欄位與 metadata 不影響分析。
 
-Fluxonium echo T2 vs. flux 的分析工具：把實測 `T2e` 先扣除 relaxation bound `1/(2*T1)` 後，以 rate model 同時擬合 first-order flux noise 與 readout thermal-photon shot noise。
+Fluxonium echo T2 vs. flux 的分析工具：把實測 `T2e` 先扣除 relaxation bound `1/(2*T1)` 後，以 rate model 擬合 first-order flux noise 與可選的 readout thermal-photon shot noise。`params.json` 缺 `dispersive` 時，`T2CurveContext.photon_shot_noise_enabled` 為 False，photon probe 回傳 None，combined fit 的 `n_th` 為 None。結果表與 notebook 輸出註明 photon 通道停用，不產生 photon probe 圖。
 
 ## 單位慣例
 
@@ -29,16 +29,16 @@ Fluxonium echo T2 vs. flux 的分析工具：把實測 `T2e` 先扣除 relaxatio
 
 ### Staged T2 workflow
 
-`models.py` 共用各 stage 的 records 與預設值。`preparation.py` 負責資料載入、flux 校正、window selection 與逐 row 診斷。`presentation.py` 負責繪圖、保存與表格顯示。`workflow.py` 保留單機制 probe、combined fit、channel curves 與一鍵編排。各 owner 以 records 交接，既有 package 與 workflow 逐步 API 不變。
+`models.py` 共用各 stage 的 records 與預設值。`preparation.py` 負責 CSV 載入、作者 flux 的 row selection、integer alignment 與 window selection。`presentation.py` 負責繪圖、保存與表格顯示。`workflow.py` 保留單機制 probe、combined fit、channel curves 與一鍵編排。
 
-- Notebook 使用逐步 API：`load_t2_curve_context(...)` → `calibrate_t2_flux(...)` → `prepare_t2_dephasing_data(...)` → 單機制 probe → `fit_t2_curve(...)` → `build_t2_channel_curves(...)`。`calibrate_t2_flux()` 以 `resolve_record_flux`（explicit → row-frame → caller-declared fallback）取得 normalized flux；同時以 positional boolean masks（`T2FluxCalibration.t2e_mask` / `t2r_mask`，長度等於 `samples_df`）記錄 T2e/T2r selection，row identity 不依賴 DataFrame index labels，duplicate labels 不會擴增 selection。
-- `plot_t2_flux_calibration(data)` 將 fit window 內每個 sample 的 raw flux 與 f01-corrected flux 畫在同一列，供檢查 half-flux 附近是否發生不合理 branch jump。
+- Notebook 使用逐步 API：`load_t2_curve_context(result_dir=..., fluxs=...)` → `calibrate_t2_flux(ctx)` → `prepare_t2_dephasing_data(cal)` → 單機制 probe → `fit_t2_curve(...)` → `build_t2_channel_curves(...)`。Row selection 以 positional boolean masks 記錄 T2e/T2r，duplicate DataFrame labels 不擴增 selection。作者的 flux 在 stage 內只做 integer alignment，不做 f01 correction。
+- `plot_t2_flux_calibration(data)` 顯示作者 flux 到 integer-aligned flux 的變化。Stage 不記錄或推定作者先前的校正歷史。
 - `analyze_flux_noise_limit(...)`：在可選 fixed `n_th` 下做 flux-noise-only probe，回傳 `A_phi_init`、`A_phi_fit`、pointwise `A_phi(flux)` 與 summary table；fit residual 可使用 `MeasurementErrorPolicy` 與 `FluxResidualWeighting`。
 - `analyze_photon_shot_noise_limit(...)`：在可選 fixed `A_phi` 下做 photon-shot-noise probe；預設用 pointwise minimum 作為 `n_th_init`，因為 photon-only fit/平均值會把 non-sweet-spot flux noise 吃進 `n_th` 而高估。`n_th_fit` 仍保留為診斷值；fit residual 使用和 combined fit 相同的 weighting 設定。
 - `make_t2_fit_init(...)`：用單機制 probe 結果組出 combined fit 初值；photon channel 使用 `n_th_init`，不是 photon-only `n_th_fit`。`active_mechanisms=("flux_noise",)` 或 `("photon_shot_noise",)` 可只納入部分機制。
 - `fit_t2_curve(...)`：只使用 fit window 內的實際 sample。`T2e err = NaN` 的點由 `MeasurementErrorPolicy(nan_policy="bin_median")` 補 effective error；`FluxResidualWeighting(mode="equal_flux_bin", ...)` 配合預設 `loss="linear"`，讓每個 occupied flux bin 對 least-squares loss 的總權重一致，避免 sample-dense 區域主導結果。
 - `mechanisms_to_fixed_params(...)`：把 notebook 面向使用者的 `fixed_mechanisms` 轉成 fit layer 的 `fixed=("A_phi", "n_th")` 語義；固定代表該 channel 留在模型中但不擬合。
-- `prepare_t2_dephasing_data(...)` 的 branch coverage 與 dephasing summary 對 T2e/T2r 各自記錄 resolution provenance（explicit / row-frame / fallback-frame counts）、observed/model f01 與 exact correction skipped reasons；`freq_mhz=null` 的 row 保留 raw coordinate，以 model f01 驗證 frequency reachability。`T2DephasingAnalysis.t2r_diagnostics`（型別 `T2RowDiagnostics`，由 `t2_curve` facade 匯出）提供逐 row 診斷：每個 resolved T2r row 依 `samples_df` positional order 一個 entry，含穩定 positional `sample_indexes`、in-window 狀態、flux source、observed/model/used f01（null-observed row 的 model f01 直接有限可查）、raw/corrected/aligned flux、integer shift、correction-applied flag 與 exact skip reason。
+- `prepare_t2_dephasing_data(...)` 的 branch coverage 與 summary 記錄 observed/model f01、integer shifts 與 window selection。`T2DephasingAnalysis.t2r_diagnostics` 保留每個 finite Ramsey 列的 positional sample index、作者與對齊 flux、in-window 狀態及 observed/model/used f01。缺 observed f01 時使用對齊位置的 model f01。
 - `run_t2_curve_analysis(config, display_fn=None)` 保留為薄 wrapper，供需要一鍵重跑時使用；互動式 notebook 優先用逐步 API。
 
 ### `fit.py` — joint pure-dephasing fit
@@ -54,7 +54,7 @@ Fluxonium echo T2 vs. flux 的分析工具：把實測 `T2e` 先扣除 relaxatio
 
 ## 典型使用流程
 
-1. 用和 [`notebook_md/analysis/T1_curve.md`](../../../../../notebook_md/analysis/T1_curve.md) 相同的 f01 correction 取得 sample flux（derived rows、observed f01 finite 才校正；missing f01 用 model 頻率），再做 analysis-local integer alignment，並用 flux calibration plot 檢查 raw/corrected flux 是否只做就近校準。
+1. 用 `pd.read_csv` 讀量測表，自行建立 flux 或呼叫 `flux_from_frame`。選用 `correct_flux_from_f01` 時，先明確校正，再傳入 load stage。缺整欄頻率傳 None，逐值缺頻率用 NaN，校正工具以 model f01 補值並回報自身結果。
 2. 選定 T2 fit window，例如 `0.49 <= flux <= 0.53`，並設定 `MeasurementErrorPolicy` / `FluxResidualWeighting`。
 3. 對 fit sample 計算 `domega/dflux` 與 dispersive `chi/2pi`；`NaN` error 留在 fit window 中，由 fit layer 補 effective error。
 4. 先用 `analyze_flux_noise_limit(...)` 與 `analyze_photon_shot_noise_limit(...)` 分別看單機制上限/初值。
@@ -63,4 +63,4 @@ Fluxonium echo T2 vs. flux 的分析工具：把實測 `T2e` 先扣除 relaxatio
 
 Notebook 的每個 stage 保留用戶要調的參數與一個 step-level helper call，函數定義由模組提供。
 
-Record JSONL 載入必須提供 `device_name`，從 `devices[device_name]` 投影 value/value_unit。缺所選裝置時 fail-fast，不讀舊 flat 欄位作 fallback。`T2CurveAnalysisConfig` 也明示同一選擇；後續 calibration 與 preparation 使用投影後的分析 frame。
+模型只需 EJ／EC／EL；缺 dispersive 時 photon channel 關閉。Normalized-flux 圖不要求 device frame。需要儀器值軸時，作者另呼叫 `fit_tools.add_device_axis(ax, frame, device_name=...)`。作者可自行建立 flux，或先呼叫 `resources.record_table.flux_from_frame`。Loader 不解析 frame、不投影裝置、不做 f01 校正。`fluxs` 必須為一維、列數相同且值有限，否則 load stage 拋出指出問題的 `ValueError`。

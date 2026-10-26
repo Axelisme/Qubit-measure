@@ -14,11 +14,6 @@ from zcu_tools.notebook.analysis.fit_tools import (
     FluxResidualWeighting,
     MeasurementErrorPolicy,
 )
-from zcu_tools.resources.record_table import (
-    DeviceValueUnit,
-    RecordFluxFrame,
-    RecordFluxResolution,
-)
 
 from .base import (
     DEFAULT_TEMP_LOWER_BOUND,
@@ -135,10 +130,9 @@ class T1CurveAnalysisConfig:
     """Controls for the fixed Notebook T1 workflow.
 
     result_dir owns params/samples; image_dir defaults to its t1_curve folder.
-    device_name selects the recorded device explicitly.
-    samples_filename selects JSONL; fallback_frame_unit declares A, V or native.
-    analysis_flux_range and max_abs_flux_correction use normalized flux.
-    correct_flux_from_f01_enabled controls derived-row correction.
+    samples_filename selects a CSV. fluxs is a finite 1D normalized Phi0 array
+    with one value per CSV row, in row order. CSV coordinates are ignored.
+    analysis_flux_range selects an integer-aligned normalized-flux window.
     max_rel_t1_err/use_weighted_points_only select fit rows; T1_error_policy
     resolves ns errors and flux_weighting controls residual weighting.
     Temp/probe_Temp_bounds/fit_Temp_override use K; purcell supplies GHz inputs.
@@ -150,13 +144,10 @@ class T1CurveAnalysisConfig:
     """
 
     result_dir: str
-    device_name: str
+    fluxs: NDArray[np.float64]
     analysis_flux_range: tuple[float, float] = (0.0, 1.0)
     image_dir: str | None = None
-    samples_filename: str = "records.jsonl"
-    fallback_frame_unit: DeviceValueUnit = "A"
-    max_abs_flux_correction: float = 0.03
-    correct_flux_from_f01_enabled: bool = True
+    samples_filename: str = "samples.csv"
     max_rel_t1_err: float = 0.25
     use_weighted_points_only: bool = False
     T1_error_policy: MeasurementErrorPolicy = field(
@@ -203,8 +194,8 @@ class T1CurveContext:
     """Loaded sample and fluxonium inputs shared by Notebook stages.
 
     result_dir/image_dir/samples_filename locate the inputs and figure outputs.
-    params is (EJ, EC, EL) in GHz. flux_half/flux_int/flux_period describe the
-    device-coordinate alignment used for fallback resolution and plot axes.
+    params is (EJ, EC, EL) in GHz. No device frame is required.
+    fluxs is the author's finite normalized Phi0 array, one per source row.
     samples_df contains source rows; params_table is the parameter display;
     samples_preview contains the requested initial rows and available_columns
     lists the source column names in order.
@@ -214,10 +205,8 @@ class T1CurveContext:
     image_dir: str
     samples_filename: str
     params: tuple[float, float, float]
-    flux_half: float
-    flux_int: float
-    flux_period: float
     samples_df: pd.DataFrame
+    fluxs: NDArray[np.float64]
     params_table: pd.DataFrame
     samples_preview: pd.DataFrame
     available_columns: tuple[str, ...]
@@ -225,17 +214,14 @@ class T1CurveContext:
 
 @dataclass(frozen=True, slots=True)
 class T1FluxCalibration:
-    """Row-preserving sample flux resolution before f01 correction.
+    """Row selections using the author flux in context.
 
-    context owns source rows and alignment. resolution retains each row's
-    normalized flux and provenance; fallback_frame records the declared device
-    frame, or None. t1_df/freq_rows are finite T1/f01 subsets of the source frame.
-    summary_table records counts and frame information for Notebook display.
+    context owns source rows and the row-aligned normalized flux array.
+    t1_df/freq_rows are finite T1/f01 subsets of the source frame.
+    summary_table records source and selected row counts for Notebook display.
     """
 
     context: T1CurveContext
-    resolution: RecordFluxResolution
-    fallback_frame: RecordFluxFrame | None
     t1_df: pd.DataFrame
     freq_rows: pd.DataFrame
     summary_table: pd.DataFrame
@@ -245,11 +231,10 @@ class T1FluxCalibration:
 class T1CurveData:
     """Aligned sample arrays with a common, sorted row axis.
 
-    fluxs is normalized analysis flux; raw_fluxs precedes correction/alignment.
-    integer_shifts is the integer branch adjustment. flux_sources holds explicit,
-    row-frame or fallback-frame provenance. f01_mhz is measured/model frequency
-    in MHz; f01_measured distinguishes those sources. f01_correction_applied,
-    flux_corrections and correction_skipped_reason record correction outcomes.
+    fluxs is normalized analysis flux; raw_fluxs is the author's input before
+    integer alignment. integer_shifts is the integer branch adjustment.
+    f01_mhz is observed/model frequency in MHz; f01_measured is True for observed
+    frequencies. These records do not describe the author's preprocessing.
     T1_ns/T1err_ns are relaxation times/errors in ns (errors may be NaN);
     omegas is angular frequency in rad/ns derived from f01_mhz.
     """
@@ -257,12 +242,8 @@ class T1CurveData:
     fluxs: NDArray[np.float64]
     raw_fluxs: NDArray[np.float64]
     integer_shifts: NDArray[np.float64]
-    flux_sources: tuple[str, ...]
     f01_mhz: NDArray[np.float64]
     f01_measured: NDArray[np.bool_]
-    f01_correction_applied: NDArray[np.bool_]
-    flux_corrections: NDArray[np.float64]
-    correction_skipped_reason: tuple[str, ...]
     T1_ns: NDArray[np.float64]
     T1err_ns: NDArray[np.float64]
     omegas: NDArray[np.float64]
@@ -272,17 +253,16 @@ class T1CurveData:
 class T1PreparedData:
     """Sample and fit subsets produced by the preparation stage.
 
-    calibration retains source resolution. analysis_flux_range and
-    max_abs_flux_correction use normalized flux; max_rel_t1_err and
+    calibration retains source selections. analysis_flux_range uses normalized
+    flux; max_rel_t1_err and
     use_weighted_points_only record error filtering. sample contains retained
     window rows and fit contains its error-filtered subset, both in ns/rad/ns.
     kept_rows/source_rows count window/source T1 rows. summary_table describes
-    provenance, correction and filtering without changing source identities.
+    observed/model f01, alignment and filtering without changing source identities.
     """
 
     calibration: T1FluxCalibration
     analysis_flux_range: tuple[float, float]
-    max_abs_flux_correction: float
     max_rel_t1_err: float
     use_weighted_points_only: bool
     sample: T1CurveData

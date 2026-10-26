@@ -1,7 +1,7 @@
 """Append-only JSON records and opt-in flat v2 analysis coordinates."""
 
 from .jsonl import JsonlRecordTable
-from .projection import project_device_coordinates
+from .projection import flux_from_frame, project_device_coordinates
 from .schema import (
     DEV_UNIT_COLUMN,
     DEV_VALUE_COLUMN,
@@ -24,6 +24,7 @@ from .schema import (
 __all__ = [
     "JsonlRecordTable",
     "project_device_coordinates",
+    "flux_from_frame",
     "DEV_UNIT_COLUMN",
     "DEV_VALUE_COLUMN",
     "FLUX_COLUMN",

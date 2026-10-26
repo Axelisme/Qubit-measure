@@ -273,9 +273,9 @@ def test_unknown_csv_collisions_use_lossless_nested_fields_and_literal_report_ke
     source = tmp_path / "collision.csv"
     source.write_text(
         "dev_value,dev_unit,T1 (us),Tcomment,t1_us,tcomment,run_id,point,source,at,"
-        "legacy_fields,extra.with.dot\n"
+        "component,legacy_fields,extra.with.dot\n"
         "0.1,V,50,known, 001 ,raw text,original id,old point,old source,old time,"
-        "original container,literal\n",
+        "old component,original container,literal\n",
         encoding="utf-8",
     )
     original = source.read_bytes()
@@ -302,6 +302,7 @@ def test_unknown_csv_collisions_use_lossless_nested_fields_and_literal_report_ke
         "point": "old point",
         "source": "old source",
         "at": "old time",
+        "component": "old component",
         "legacy_fields": "original container",
     }
     assert row["extra.with.dot"] == "literal"
@@ -312,6 +313,7 @@ def test_unknown_csv_collisions_use_lossless_nested_fields_and_literal_report_ke
         ("legacy_fields", "point"),
         ("legacy_fields", "source"),
         ("legacy_fields", "at"),
+        ("legacy_fields", "component"),
         ("legacy_fields", "legacy_fields"),
         ("extra.with.dot",),
     ]

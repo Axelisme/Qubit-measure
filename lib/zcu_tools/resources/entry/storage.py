@@ -42,7 +42,8 @@ def bind_record_table(result_path: Path, component: str) -> JsonlRecordTable:
     """Bind entry record history without reading schemas, ledger or files.
 
     result_path is the exact entry Result directory, not its parent root.
-    component is a safe single path segment, never a role alias. Rows live at
+    component is a safe single path segment, never a role alias, and is bound
+    into every appended row's component envelope field. Rows live at
     records/components/<component>.jsonl. Unsafe names or symlinks escaping the entry raise
     ValueError. The returned owner handles append, latest-row read and export.
     """
@@ -51,7 +52,7 @@ def bind_record_table(result_path: Path, component: str) -> JsonlRecordTable:
     record_root = result_path.resolve() / "records" / "components"
     if not path.resolve().is_relative_to(record_root):
         raise ValueError(f"{path}: records escape their component namespace")
-    return JsonlRecordTable(path)
+    return JsonlRecordTable(path, component=component)
 
 
 def capture_point_storage(

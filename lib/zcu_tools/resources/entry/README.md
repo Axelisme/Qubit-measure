@@ -76,7 +76,7 @@ Setup 與 point 文件使用 `format: zcu.parameter-container`、`format_version
 
 ## 樣本歷史
 
-`ResultEntry.records(component)` 以安全單一路徑段綁定 `records/components/<component>.jsonl`，不讀元件 schema、不解析角色，也不建立檔案。`JsonlRecordTable` 擁有只追加的行、每個 run 的最新整行讀取與明示 CSV 匯出；欄位、來源與失敗契約見 [record table owner](../record_table/README.md)。
+`ResultEntry.records(component)` 以安全單一路徑段綁定 `records/components/<component>.jsonl`，不讀元件 schema、不解析角色，也不建立檔案。綁定的 component 由 append 寫進每列信封，不從 producer 欄位取值。`JsonlRecordTable` 擁有只追加的行、每個 run 的最新整行讀取與明示 CSV 匯出；欄位、來源與失敗契約見 [record table owner](../record_table/README.md)。
 
 ## Records ledger
 

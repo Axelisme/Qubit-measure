@@ -110,7 +110,7 @@ def convert_samples(
         return
 
     def build(path: Path) -> None:
-        table = JsonlRecordTable(path)
+        table = JsonlRecordTable(path, component=names[0])
         for sample in plan.rows:
             table.append(
                 run_id=sample.run_id,

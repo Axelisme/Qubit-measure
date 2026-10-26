@@ -287,7 +287,8 @@ class ResultEntry:
     def records(self, component: str) -> JsonlRecordTable:
         """Bind this component's append-only record history without touching disk.
 
-        component is a safe single path segment, not a role alias. Rows live at
+        component is a safe single path segment, not a role alias. The table
+        stamps it into every appended row's component field. Rows live at
         result_path/records/components/<component>.jsonl; no component schema or ledger is
         read. Unsafe names and symlinks escaping this entry raise ValueError.
         The returned table owns append, latest-per-run read and CSV export.
