@@ -41,6 +41,11 @@ from IPython.display import display
 
 %autoreload 2
 import zcu_tools.notebook.analysis.t2_curve as zt2
+from zcu_tools.notebook.analysis.fit_tools import (
+    find_weak_parameters,
+    make_weak_parameter_table,
+    plot_fit_correlation,
+)
 ```
 
 # Project
@@ -277,6 +282,28 @@ print(
     "effective flux bins =",
     f"{combined_fit.fit_result.flux_weights.effective_observation_count:g}",
 )
+```
+
+# Identifiability
+
+Covariance uses natural-log free parameters in `fit_result.free` order.
+The table flags |correlation| > 0.95 or σ(ln p) > 1 and lists each reason.
+Fixed and inactive parameters are not in the matrix.
+
+```python
+correlation = combined_fit.fit_result.correlation
+if correlation is None:
+    print("No correlation matrix is available.")
+else:
+    print("Jacobian rank =", correlation.rank)
+    print("Column-normalized condition number =", correlation.condition_number)
+    fig, _ = plot_fit_correlation(correlation)
+    figure_paths["correlation"] = zt2.save_t2_curve_figure(
+        fig, ctx, "T2_correlation.png", bbox_inches="tight"
+    )
+
+weak_parameters = find_weak_parameters(correlation)
+display(make_weak_parameter_table(weak_parameters))
 ```
 
 # Channel Curves

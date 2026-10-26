@@ -10,10 +10,12 @@ from scipy.optimize import OptimizeResult, least_squares
 
 from zcu_tools.notebook.analysis.fit_tools import (
     ErrorResolutionResult,
+    FitCorrelation,
     FluxResidualWeighting,
     FluxResidualWeights,
     MeasurementErrorPolicy,
     build_flux_residual_weights,
+    calculate_fit_correlation,
     least_squares_cost,
     reduced_chi2_from_cost,
     resolve_measurement_errors,
@@ -81,6 +83,9 @@ class T1FitResult:
     optimizer_result: OptimizeResult | None
     T1_error_resolution: ErrorResolutionResult | None = None
     flux_weights: FluxResidualWeights = field(default_factory=_default_flux_weights)
+    # Free natural-log parameter covariance/correlation and Jacobian geometry;
+    # None when all parameters are fixed or covariance cannot be computed.
+    correlation: FitCorrelation | None = None
 
 
 # tolerated: Public fit keywords separate whitelist init, error policy and solver controls.
@@ -229,12 +234,17 @@ def fit_t1_noise_params(  # noqa: PLR0913
         residual_mode=residual_mode,
     )
     cost = least_squares_cost(residuals)
+    correlation = calculate_fit_correlation(
+        np.asarray(opt.jac, dtype=np.float64),
+        float(opt.cost),
+        data.flux_weights.effective_observation_count,
+        free_names,
+    )
     stderr = _estimate_stderr(
-        opt,
+        correlation,
         fit_values,
         active_names,
         free_names,
-        data.flux_weights.effective_observation_count,
     )
 
     return T1FitResult(
@@ -253,6 +263,7 @@ def fit_t1_noise_params(  # noqa: PLR0913
         success=bool(opt.success),
         message=str(opt.message),
         optimizer_result=opt,
+        correlation=correlation,
     )
 
 
@@ -465,28 +476,19 @@ def _nan_as_unweighted(values: NDArray[np.float64]) -> NDArray[np.float64]:
 
 
 def _estimate_stderr(
-    opt: OptimizeResult,
+    correlation: FitCorrelation | None,
     fit_values: Mapping[ParameterName, float],
     active_names: tuple[ParameterName, ...],
     free_names: tuple[ParameterName, ...],
-    observation_count: float,
 ) -> T1FitParams:
     stderr_values: dict[ParameterName, float] = {name: 0.0 for name in active_names}
-    n_free = len(free_names)
-    if n_free == 0:
-        return _values_to_params(stderr_values)
-
-    try:
-        jac = np.asarray(opt.jac, dtype=np.float64)
-        cov_log = np.linalg.pinv(jac.T @ jac)
-        cov_log *= reduced_chi2_from_cost(float(opt.cost), observation_count, n_free)
-        log_stderr = np.sqrt(np.maximum(np.diag(cov_log), 0.0))
-        for name, value in zip(free_names, log_stderr, strict=True):
-            stderr_values[name] = fit_values[name] * float(value)
-    # tolerated: Covariance backend/conversion failures keep the fit with infinite free stderr.
-    except Exception:  # noqa: BLE001
+    if correlation is None:
         for name in free_names:
             stderr_values[name] = np.inf
+    else:
+        log_stderr = np.sqrt(np.maximum(np.diag(correlation.covariance), 0.0))
+        for name, value in zip(free_names, log_stderr, strict=True):
+            stderr_values[name] = fit_values[name] * float(value)
 
     return _values_to_params(stderr_values)
 

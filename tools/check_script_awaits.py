@@ -4,6 +4,8 @@ This is an AST guardrail, not a type checker: framework receivers use the litera
 names env/tab/session/scope/iteration. Assignment aliases, dynamic dispatch and wrappers are not
 tracked. Direct imports (including relative imports) resolve against definitions,
 so an external callable is never accepted just for looking like a lab helper.
+A name a lab module only re-exports through its own import is followed to the
+module it came from, until it reaches a definition or leaves the lab tree.
 """
 
 from __future__ import annotations
@@ -73,17 +75,36 @@ def _imported_target(name: str, bindings: Mapping[str, str]) -> str:
     return bindings.get(head, head) + (separator + rest if separator else "")
 
 
+def _is_definition(
+    name: str, definitions: set[str], module_bindings: Mapping[str, Mapping[str, str]]
+) -> bool:
+    seen: set[str] = set()
+    while name not in definitions and name not in seen:
+        seen.add(name)
+        module, _, attribute = name.rpartition(".")
+        target = module_bindings.get(module, {}).get(attribute)
+        if target is None:
+            return False
+        name = target
+    return name in definitions
+
+
 def _forbidden(name: str) -> bool:
     return name.split(".")[0] == "asyncio" or name.split(".")[-1] in _FORBIDDEN
 
 
 class _AwaitChecker(ast.NodeVisitor):
     def __init__(
-        self, path: str, bindings: Mapping[str, str], definitions: set[str]
+        self,
+        path: str,
+        bindings: Mapping[str, str],
+        definitions: set[str],
+        module_bindings: Mapping[str, Mapping[str, str]],
     ) -> None:
         self.path = path
         self.bindings = bindings
         self.definitions = definitions
+        self.module_bindings = module_bindings
         self.scope = [_module_name(path)]
         self.async_depth = 0
         self.violations: list[Violation] = []
@@ -141,7 +162,7 @@ class _AwaitChecker(ast.NodeVisitor):
         if separator and head in _RECEIVERS:
             return True
         if head in self.bindings:
-            return resolved in self.definitions
+            return _is_definition(resolved, self.definitions, self.module_bindings)
         return any(
             f"{'.'.join(self.scope[:depth])}.{name}" in self.definitions
             for depth in range(len(self.scope), 0, -1)
@@ -153,7 +174,7 @@ def check_sources(sources: Mapping[str, str]) -> tuple[Violation, ...]:
 
     Every async function is checked, whether decorated, called or unused. Await
     accepts env/tab/session/scope/iteration calls or statically resolved lab function definitions,
-    whether defined with def or async def. Within async functions, direct asyncio
+    whether defined with def or async def, including names re-exported by lab imports. Within async functions, direct asyncio
     calls and create_task/gather/wait_for/TaskGroup are rejected even without await.
     Other async contexts and iterators are not banned.
     Non-lab paths are ignored. SyntaxError propagates; source is never executed.
@@ -167,9 +188,14 @@ def check_sources(sources: Mapping[str, str]) -> tuple[Violation, ...]:
     definitions: set[str] = set()
     for path, tree in trees.items():
         definitions.update(_definitions(tree, _module_name(path)))
+    module_bindings = {
+        _module_name(path): _bindings(tree, path) for path, tree in trees.items()
+    }
     violations: list[Violation] = []
     for path, tree in trees.items():
-        checker = _AwaitChecker(path, _bindings(tree, path), definitions)
+        checker = _AwaitChecker(
+            path, module_bindings[_module_name(path)], definitions, module_bindings
+        )
         checker.visit(tree)
         violations.extend(checker.violations)
     return tuple(
