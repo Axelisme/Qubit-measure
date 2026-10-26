@@ -38,6 +38,12 @@ uv run --directory /absolute/checkout --no-sync -- python scripts/upgrade_parame
 
 關閉使用這份文件的工作階段，保留失敗後的文件作比對。將輸出所列 `.bak` 複製回原 YAML 路徑，再重新開啟或明確 reload。備份保留原版，因此目前 runtime 可能仍要求 upgrade。不要把還原當成已完成升級。
 
+## 同一 CLI 的 record 範圍
+
+`--scope records --device-name <name>` 逐列處理 JSONL 歷史，不使用 component 版本鏈。名稱由 operator 宣告，不從 setup 或歷史內容推測。工具將完整的舊 `dev_value/dev_unit` 移入具名 `devices`，保留所有歷史行與未涉 payload，不補 frame/component。單檔有部分或腐敗列就整檔拒絕，其他檔案繼續。
+
+四類形狀、dry-run／apply、備份還原、舊 flat-frame 的 caller fallback，以及改名改接線流程見 [Record device 升級指南](record-device-upgrades.md)。Record 範圍不改本頁的目前 component 版本或 lab 升級步驟。
+
 ## Lab-author 契約
 
 `zcu_lab.components.parameter_upgrades` 宣告目前版本與 `parameter_upgrade_plan()`。`register_all` 將具名 `ParameterSchemaPolicy` 與 models 一起交給既有 ComponentRegistry。未配置 policy 時，框架拒絕建立或讀取 component 文件。
