@@ -115,6 +115,20 @@ def make_form(ctx: FormContext) -> Form[TwoQubitCfg]:
     return Form(TwoQubitCfg, tree={})
 ```
 
+## Flux form defaults
+
+`flux_defaults.qubit_flux_initial_values` 供 onetone、twotone 與 MIST flux_dep 使用。
+它經 Form 的 `initial_values` 接縫讀固定 FormEnv，預設 device 保持 qubit.flux_source。
+`captured_flux_seed` 檢查 frame 與 selected device 都在這次 Form 的 device 選項中。
+名稱規則委派共用 owner，三欄一致性與實際 half／integer 委派 `support.flux`。
+其他 contributor 的值與 selected device 單位只取 detached DC device info，不查 setup catalog 或 live driver。
+缺 source 或 selected calibration 時，必填範圍留空；已設的無效名稱、缺 device 或矛盾 frame 直接報錯。
+Onetone／twotone 將實際 integer→half 範圍向兩側各擴 10%，MIST 不擴。
+`mux_flux_forms` 對 local 線逐 Q 使用同一路徑，global 線依 $mux.flux_source 合併各 Q 的實際區間。
+Local devices 必須使用同一 native unit，不做單位換算。
+Mux picker 初線也讀各 Q 的新 flux 區塊，以 Run snapshot 的 contributors 算實際 half／integer。
+Recipes 的 flux_* inputs、reports 與 picker updates 是獨立 API，不是 component 舊欄位。
+
 ## Fluxdep writeback
 
 `writeback_helpers.fluxdep_writeback_items` 組裝 onetone、twotone 與 mux local／global 的校準 proposals。

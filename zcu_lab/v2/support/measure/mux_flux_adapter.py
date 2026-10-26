@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 import numpy as np
 from pydantic import BaseModel
 from zcu_tools.analysis.fluxdep.line_state import FluxPickInputs, FluxPickState
+from zcu_tools.cfg_model import validate_device_name
 from zcu_tools.core.element import ElementIdentity
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
@@ -24,9 +25,9 @@ from zcu_tools.gui.app.measure.interactive_flux_pick import FluxPickResult
 from zcu_tools.gui.session.types import SessionEnv
 from zcu_tools.plotting.plots import Plots
 
+from zcu_lab.components.qubit import QubitBaseSchema
 from zcu_lab.v2.mux.onetone.core import MuxFrequencyOffsetCfg
-from zcu_lab.v2.support.measure.ctx_helpers import optional_parameter_float
-from zcu_lab.v2.support.measure.mux_bindings import require_mux_group
+from zcu_lab.v2.support.flux import device_flux_points, qubit_flux_frame
 from zcu_lab.v2.support.measure.mux_results import captured_qubits
 from zcu_lab.v2.support.measure.writeback_helpers import fluxdep_writeback_items
 from zcu_lab.v2.support.mux_flux import (
@@ -166,16 +167,27 @@ def _initial_lines[C: MuxFluxCfg](
     parameters, cfg = req.parameters, req.run_result.cfg
     if parameters is None or cfg is None:
         return None, None
-    if isinstance(cfg, GlobalFluxCfg):
-        group = require_mux_group(parameters)
-        calibration = group.coil_flux.get(cfg.tones[tone].name)
-        return (
-            (None, None) if calibration is None else (calibration.half, calibration.int)
-        )
     name = cfg.tones[tone].name
-    return optional_parameter_float(
-        parameters, f"{name}.flux_half"
-    ), optional_parameter_float(parameters, f"{name}.flux_int")
+    component = parameters.document().components.get(name)
+    if not isinstance(component, QubitBaseSchema):
+        raise ValueError(f"{name!r}: flux picking requires a qubit component")
+    device = (
+        cfg.flux_dev if isinstance(cfg, GlobalFluxCfg) else cfg.tones[tone].flux_dev
+    )
+    validate_device_name(device)
+    qubit_flux_frame(component.flux)
+    if device not in component.flux:
+        return None, None
+    metadata = req.run_result.metadata
+    snapshot = None if metadata is None else metadata.device_snapshot
+    values: dict[str, float] = {}
+    for contributor in component.flux:
+        info = None if snapshot is None else snapshot.get(contributor)
+        value = None if info is None else info.get("value")
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            values[contributor] = value
+    points = device_flux_points(component.flux, device, values)
+    return points.half, points.integer
 
 
 def get_writeback_items[C: MuxFluxCfg](

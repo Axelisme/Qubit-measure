@@ -1,9 +1,18 @@
 """Captured DC ranges and spectroscopy defaults for the four mux flux forms."""
 
+from functools import partial
+
+from pydantic import JsonValue
 from zcu_tools.cfg_model import Expr, FieldMeta, FormNode, Hidden, Range, Slot, Template
+from zcu_tools.gui.form import FormEnv
 from zcu_tools.gui.form_adapter import FixedElements, Form, FormContext
 
 from zcu_lab.v2.mux.onetone.core import MuxFrequencyOffsetCfg
+from zcu_lab.v2.support.measure.flux_defaults import (
+    captured_flux_seed,
+    captured_qubit,
+    flux_bounds,
+)
 from zcu_lab.v2.support.measure.mux_bindings import require_mux_group
 from zcu_lab.v2.support.measure.mux_forms import (
     captured_mux_names,
@@ -34,14 +43,14 @@ def make_flux_form[
     cfg_type selects the concrete core; local/twotone select its DC/frequency
     policies. Order is participants, DC identities, modules, frequency/DC
     scans, averaging, timing. Missing calibration leaves required bounds blank.
-    Local bounds are per-Q Expr seeds; global bounds are a captured union.
+    Local bounds use each Q's actual device coordinates; global bounds are
+    their union on the captured group source. Units come from device infos.
     Refs retain stored settings; generated defaults describe their source paths.
     Only fixed-constant fallbacks are marked uncalibrated. Refresh preserves
     inputs and seed capture.
     """
     names = captured_mux_names(ctx)
     participants = captured_mux_participants(ctx, names)
-    group = require_mux_group(ctx.parameters)
     readout = mux_readout_initial(ctx, wait_for_ringup=not twotone)
     tree: dict[str, FormNode] = {
         "participants": list[FormNode](participants),
@@ -51,7 +60,6 @@ def make_flux_form[
         "rounds": 10,
         "relax_delay": 1.0,
         "initial_delay": 1.0,
-        "flux_unit": "A",
         "settle": 0.1,
     }
     fixed = [
@@ -64,7 +72,6 @@ def make_flux_form[
         ("relax_delay", "Fixed 1.0 us recovery delay candidate"),
         ("initial_delay", "Fixed 1.0 us initial delay candidate"),
         ("settle", "Fixed 0.1 s DC settling candidate; confirm for each driver"),
-        ("flux_unit", "Initial A native-unit selection; must match connected drivers"),
     ):
         metadata[(field,)] = seed_metadata(description, fallback=True)
     metadata[("readout",)] = FieldMeta(
@@ -130,13 +137,7 @@ def make_flux_form[
             [
                 {
                     "name": name,
-                    "flux_dev": captured_flux_source(ctx, f"{name}.flux_source"),
-                    "sweep": {
-                        "start": Expr(
-                            f"1.1 * {name}.flux_int - 0.1 * {name}.flux_half"
-                        ),
-                        "stop": Expr(f"1.1 * {name}.flux_half - 0.1 * {name}.flux_int"),
-                    },
+                    "sweep": {"start": None, "stop": None},
                 }
                 for name in names
             ],
@@ -153,24 +154,18 @@ def make_flux_form[
             )
             for endpoint in ("start", "stop"):
                 metadata[("tones", index, "sweep", endpoint)] = seed_metadata(
-                    f"From {name}.flux_int and {name}.flux_half; own DC line in flux_unit, required when missing"
+                    f"Actual half/integer from captured {name}.flux on its flux_source, accounting for other device biases; native device unit"
                 )
     else:
         fixed.append(FixedElements(("tones",), "name", ("participants",)))
         tree["tones"] = [{"name": name} for name in names]
-        tree["flux_dev"] = group.flux_source
         metadata[("flux_dev",)] = FieldMeta(
             description="Device name captured from $mux.flux_source"
         )
-        calibrations = [group.coil_flux.get(name) for name in names]
-        start, stop = global_flux_interval(
-            [None if value is None else value.int for value in calibrations],
-            [None if value is None else value.half for value in calibrations],
-        )
-        tree["flux"] = Range(start, stop, expts=101)
+        tree["flux"] = Range(None, None, expts=101)
         for endpoint in ("start", "stop"):
             metadata[("flux", endpoint)] = seed_metadata(
-                "Union of captured $mux.coil_flux.<qubit>.int/half intervals for $mux.qubits in flux_unit; missing calibration requires input"
+                "Union of actual half/integer intervals from each qubit.flux on $mux.flux_source, accounting for captured other device biases; native device unit"
             )
         metadata[("flux", "n")] = seed_metadata(
             "Shared 101-point global DC scan candidate", fallback=True
@@ -178,6 +173,12 @@ def make_flux_form[
     return Form(
         cfg_type,
         tree,
+        initial_values=partial(
+            mux_flux_initial_values,
+            names=tuple(names),
+            participants=tuple(participants),
+            local=local,
+        ),
         fixed_elements=tuple(fixed),
         field_order=(
             "participants",
@@ -196,28 +197,67 @@ def make_flux_form[
     ).with_seed_metadata(metadata)
 
 
-def captured_flux_source(ctx: FormContext, path: str) -> str | None:
-    """Detach a captured device-name string; absent sources leave input blank.
+def mux_flux_initial_values(
+    env: FormEnv,
+    *,
+    names: tuple[str, ...],
+    participants: tuple[int | str, ...],
+    local: bool,
+) -> dict[str, JsonValue]:
+    """Seed mux DC identities, units and actual ranges from the fixed Form env.
 
-    ctx is the Open/Reset source and path a concrete qubit flux_source field.
-    Scalar Expr is numeric, so device names must be captured as literals.
-    Invalid set names raise ValueError; source lookup errors propagate.
+    names is the full captured Q order; participants contains original selected
+    indices. Local scans use each Q's flux_source and leave nonparticipant
+    sweeps disabled. Global scans use $mux.flux_source and the union of Q
+    intervals. Missing calibration leaves endpoints blank. Local devices must
+    share one native unit. Invalid names, nonmember devices and frame/source
+    failures propagate from captured_flux_seed without I/O or fallback.
     """
-    if ctx.parameters is None:
-        raise ValueError("Flux forms require a parameter capture")
-    source = ctx.parameters.lookup_point(path)
-    if not source.present or source.value is None:
-        return None
-    if not isinstance(source.value, str) or not source.value.strip():
-        raise ValueError(f"{path} must name a DC device")
-    return source.value
+    group = require_mux_group(env.parameters)
+    seeds = [
+        captured_flux_seed(
+            env,
+            name,
+            captured_qubit(env, name).flux_source if local else group.flux_source,
+        )
+        for name in names
+    ]
+    units = {seed.unit for seed in seeds if seed.unit is not None}
+    if len(units) > 1:
+        raise ValueError(
+            f"Mux flux devices must share one native unit: {[(seed.device, seed.unit) for seed in seeds]!r}"
+        )
+    unit = next(iter(units)) if units else None
+    if local:
+        tones: list[JsonValue] = []
+        for index, (name, seed) in enumerate(zip(names, seeds, strict=True)):
+            start, stop = flux_bounds(seed.points, 0.1)
+            tones.append(
+                {
+                    "name": name,
+                    "flux_dev": seed.device,
+                    "sweep": {"start": start, "stop": stop}
+                    if index in participants
+                    else None,
+                }
+            )
+        return {"tones": tones, "flux_unit": unit}
+    start, stop = global_flux_interval(
+        [None if seed.points is None else seed.points.integer for seed in seeds],
+        [None if seed.points is None else seed.points.half for seed in seeds],
+    )
+    return {
+        "flux_dev": group.flux_source,
+        "flux_unit": unit,
+        "flux": {"kind": "linrange", "start": start, "stop": stop, "n": 101},
+    }
 
 
 def global_flux_interval(
     integers: list[float | None] | None,
     halves: list[float | None] | None,
 ) -> tuple[float | None, float | None]:
-    """Return the union of captured selected coil intervals, or two blanks.
+    """Return the union of actual selected-device intervals, or two blanks.
 
     Both lists must align to the same selected qubits. Any absent calibration
     leaves both endpoints unfilled. Inputs are validated component fields.

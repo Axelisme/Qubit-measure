@@ -5,6 +5,7 @@ from zcu_tools.gui.form_adapter import Form, FormContext
 
 from zcu_lab.v2.onetone._form_shared import initial_readout_timing
 from zcu_lab.v2.onetone.flux_dep.core import FluxDepCfg
+from zcu_lab.v2.support.measure.flux_defaults import qubit_flux_initial_values
 from zcu_lab.v2.support.measure.seed_metadata import (
     pulse_readout_seed_metadata,
 )
@@ -13,15 +14,9 @@ from zcu_lab.v2.support.measure.seed_metadata import (
 def make_form(ctx: FormContext) -> Form[FluxDepCfg]:
     """Build starting values and shape from the captured source availability."""
     timing = initial_readout_timing(ctx)
-    flux_source = (
-        ctx.parameters.lookup_point("$qubit.flux_source").value
-        if ctx.parameters is not None
-        else None
-    )
-    if flux_source is not None and not isinstance(flux_source, str):
-        raise ValueError("$qubit.flux_source must name a device")
     return Form(
         FluxDepCfg,
+        initial_values=qubit_flux_initial_values,
         field_order=(
             "reset",
             "readout",
@@ -45,16 +40,10 @@ def make_form(ctx: FormContext) -> Form[FluxDepCfg]:
                     **timing,
                 },
             ),
-            "flux_dev": flux_source,
-            "flux_unit": "A",
             "freq": Range.around(
                 "$resonator.freq", "1.0 * $resonator.kappa", expts=101
             ),
-            "flux": Range(
-                "1.1 * $qubit.flux_int - 0.1 * $qubit.flux_half",
-                "1.1 * $qubit.flux_half - 0.1 * $qubit.flux_int",
-                expts=101,
-            ),
+            "flux": Range(None, None, expts=101),
             "relax_delay": 1.0,
             "reps": 1000,
             "rounds": 10,
