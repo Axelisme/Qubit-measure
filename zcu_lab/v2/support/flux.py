@@ -1,7 +1,7 @@
 """Qubit flux blocks and linear device coordinates, without GUI or device I/O."""
 
 from collections.abc import Collection, Mapping
-from math import copysign, isclose
+from math import copysign
 
 from zcu_tools.analysis.flux import (
     DeviceFluxFrame,
@@ -30,12 +30,7 @@ def qubit_flux_frame(
     result: dict[str, dict[str, float]] = {}
     for name, calibration in flux.items():
         validate_device_name(name)
-        if not isclose(
-            abs(calibration.integer - calibration.half), abs(calibration.period) / 2
-        ):
-            raise ValueError(
-                f"device {name!r} half/integer separation must be abs(period)/2"
-            )
+        calibration.validate_spacing(name)
         result[name] = {
             "half": calibration.half,
             "integer": calibration.integer,

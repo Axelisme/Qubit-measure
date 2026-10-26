@@ -2,7 +2,6 @@
 
 from copy import deepcopy
 from dataclasses import dataclass
-from math import isclose
 from pathlib import Path
 from typing import Literal
 
@@ -41,7 +40,7 @@ class _PartialFlux(ValueError):
     """An incomplete calibration or mixed old/new document needs manual repair."""
 
 
-def _calibration(raw: YamlMap, path: str, *, legacy: bool) -> YamlMap:
+def _calibration(raw: YamlMap, path: str, *, device_name: str, legacy: bool) -> YamlMap:
     keys = ("half", "int", "period") if legacy else ("half", "integer", "period")
     unknown = raw.keys() - set(keys)
     if unknown:
@@ -52,15 +51,9 @@ def _calibration(raw: YamlMap, path: str, *, legacy: bool) -> YamlMap:
     renamed: YamlMap = dict(zip(("half", "integer", "period"), values, strict=True))
     try:
         model = QubitFluxCalibration.model_validate(renamed)
+        model.validate_spacing(device_name)
     except ValueError as error:
         raise ValueError(f"{path}: {error}") from error
-    if not isclose(
-        abs(model.integer - model.half),
-        abs(model.period) / 2,
-        rel_tol=1e-9,
-        abs_tol=1e-12,
-    ):
-        raise ValueError(f"{path}: require |integer - half| = |period| / 2")
     return renamed
 
 
@@ -166,15 +159,16 @@ def _convert_local(components: dict[str, YamlMap], name: str, fields: YamlMap) -
         validate_device_name(device)
         if not isinstance(raw, dict):
             raise ValueError(f"{path}.flux.{device}: expected calibration mapping")
-        _calibration(raw, f"{path}.flux.{device}", legacy=False)
+        _calibration(raw, f"{path}.flux.{device}", device_name=device, legacy=False)
     raw_local: YamlMap = {
         "half": fields.get("flux_half"),
         "int": fields.get("flux_int"),
         "period": fields.get("flux_period"),
     }
     if any(value is not None for value in raw_local.values()):
-        calibration = _calibration(raw_local, path, legacy=True)
-        _add_flux(components, name, _source(fields, path), calibration)
+        device = _source(fields, path)
+        calibration = _calibration(raw_local, path, device_name=device, legacy=True)
+        _add_flux(components, name, device, calibration)
     for key in _LOCAL:
         fields.pop(key, None)
     fields.setdefault("flux", {})
@@ -198,8 +192,9 @@ def _convert_mux(components: dict[str, YamlMap], name: str, fields: YamlMap) -> 
             raise ValueError(f"{path}: key must name a qubit in this mux group")
         if not isinstance(raw, dict):
             raise ValueError(f"{path}: expected calibration mapping")
-        calibration = _calibration(raw, path, legacy=True)
-        _add_flux(components, qubit, _source(fields, f"components.{name}"), calibration)
+        device = _source(fields, f"components.{name}")
+        calibration = _calibration(raw, path, device_name=device, legacy=True)
+        _add_flux(components, qubit, device, calibration)
 
 
 def _shape(components: dict[str, YamlMap], version: object) -> None:

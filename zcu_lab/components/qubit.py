@@ -1,5 +1,6 @@
 """Shared qubit fields and channel wiring."""
 
+from math import isclose
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -52,6 +53,25 @@ class QubitFluxCalibration(BaseModel):
         allow_inf_nan=False,
         description="Signed nonzero device bias span per flux quantum.",
     )
+
+    def validate_spacing(self, device_name: str) -> None:
+        """Check this calibration's half/integer spacing when it is used.
+
+        device_name labels the device in errors; the caller validates its name
+        and membership separately. Return None without changing the calibration.
+        Raise ValueError naming the device unless abs(integer-half) matches
+        abs(period)/2 with relative tolerance 1e-9 and absolute tolerance 0.
+        Loading a calibration does not call this method.
+        """
+        if not isclose(
+            abs(self.integer - self.half),
+            abs(self.period) / 2,
+            rel_tol=1e-9,
+            abs_tol=0.0,
+        ):
+            raise ValueError(
+                f"device {device_name!r} half/integer separation must be abs(period)/2"
+            )
 
     @field_validator("period")
     @classmethod

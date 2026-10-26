@@ -27,7 +27,10 @@ Qubit 的 `flux` 預設為 `{}`，以 device 名稱對應 `QubitFluxCalibration`
 每筆必填有限的 `half`、`integer` 與非零 `period`，使用該 device 的原生單位。
 其他 contributing devices 都停在各自 integer 時，這兩個 bias 分別是 half／integer 參考點。
 `period` 可為負，表示增加 bias 會減少 flux。
-載入保留三欄，`support/flux.py` 在使用時檢查 `abs(integer-half) = abs(period)/2`，失敗指出 device。
+載入保留三欄，不檢查 spacing。
+`QubitFluxCalibration.validate_spacing(device_name)` 在使用時檢查 `abs(integer-half) = abs(period)/2`，失敗以 `ValueError` 指出 device。
+檢查使用 relative tolerance `1e-9`、absolute tolerance `0`，不改寫校準值。
+`support/flux.py` 與離線升級共用此方法，升級不接受 runtime 會拒絕的 spacing。
 Helper 重用共用 device 名稱驗證，不改寫有效名稱。
 這是新增欄位，目前仍使用 schema version 1，舊 flux 欄位與 mux `coil_flux` 暫時保留。
 
