@@ -4,7 +4,10 @@
 
 ## Files and wiring
 
-`default.yaml` uses `zcu.single-fluxonium` version 1.
+The tracked `default.yaml` template uses `zcu.single-fluxonium` version 1.
+Copy it to the untracked `single_fluxonium.yaml` beside the startup script and edit
+that working copy. Startup reads `single_fluxonium.yaml` and fails if it is missing;
+the [startup instructions](README.md#trusted-startup) give the first-use copy command.
 `entry-template.yaml` uses `zcu.entry-template` version 1.0.
 Q1 uses microwave generator 1 and fast-flux generator 2.
 R1 uses readout generator 0 and ADC 0.

@@ -2,12 +2,28 @@
 
 **Readers:** operator, lab-author. Start an offline single-fluxonium environment and supply a one-point twotone input.
 
+**Last updated:** 2026-10-26, per-user simulation settings.
+
 This environment has one fluxonium, one DC source, one microwave line,
 one fast-flux line and one readout cavity. It has no coupler, second qubit or mux.
-`default.yaml` contains physical settings. `entry-template.yaml` contains working
-components, wiring and aliases. Neither supplies a calibrated pulse library.
+`default.yaml` is the tracked physical-settings template. Each user edits
+`single_fluxonium.yaml`, an untracked working copy beside the startup script.
+`entry-template.yaml` contains working components, wiring and aliases. Neither
+the physical settings nor the entry template supplies a calibrated pulse library.
 
 ## Trusted startup
+
+On first use, copy the tracked template from the checkout root:
+
+```bash
+cp zcu_lab/simulation_envs/single_fluxonium/default.yaml zcu_lab/simulation_envs/single_fluxonium/single_fluxonium.yaml
+```
+
+Startup reads `single_fluxonium.yaml` beside the script, not `default.yaml`.
+If the working copy is missing, startup raises `FileNotFoundError` before
+creating an entry. The error names the absolute path and gives the copy command.
+It does not fall back to the template. Edit the working copy for local settings;
+restart the GUI to load those changes.
 
 Use this trusted script with the measure GUI's normal launch interface:
 
