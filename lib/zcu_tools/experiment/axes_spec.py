@@ -99,7 +99,7 @@ class AxesSpec(Generic[T_Result, T_Config]):
     zcu_lab declares child specs through ``AxesSpec.Axis`` and ``AxesSpec.Z``;
     the standalone Axis and ZSpec names remain available.
     save_stem receives captured SaveContext and returns an exact filename stem.
-    The default joins dotted frontend name, ordered role names and run_id tail.
+    The default joins dotted frontend name, ordered role names and full run_id.
     Frontends append no prefix or ID. Invalid stems fail SaveLayout validation;
     callback failures propagate to the save caller.
     """
@@ -434,7 +434,7 @@ class GroupedAxesSpec(Generic[T_Result, T_Config]):
     There is no automatic layout fallback. Native persistence permits different
     grids regardless of the Labber layout.
     save_stem receives captured SaveContext and returns an exact filename stem.
-    The default joins dotted frontend name, ordered role names and run_id tail.
+    The default joins dotted frontend name, ordered role names and full run_id.
     Frontends append no prefix or ID. Invalid stems fail SaveLayout validation;
     callback failures propagate to the save caller.
     """

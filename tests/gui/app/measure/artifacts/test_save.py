@@ -125,6 +125,35 @@ def test_custom_mux_stem_is_verbatim_in_both_save_paths(
     assert native.status == labber.status == "saved"
 
 
+def test_default_stems_keep_distinct_runs_with_the_same_id_tail_separate(
+    native_session: NativeSaveSession,
+) -> None:
+    session = native_session
+    tab = session.state.get_tab("tab")
+    source = require_record(tab.run)
+    run_ids = ("20261008T000000Z-a1b2c3", "20261009T000000Z-a1b2c3")
+    paths: list[tuple[Path, Path]] = []
+    for run_id in run_ids:
+        metadata = session.metadata.model_copy(
+            update={
+                "run_id": run_id,
+                "snapshot": replace(
+                    session.metadata.snapshot, roles={"qubit": "Q1", "resonator": "R1"}
+                ),
+            }
+        )
+        session.state.update_tab_result(
+            "tab", replace(source, metadata=metadata), parameters=tab.run.parameters
+        )
+        native, labber = session.save().outputs
+        assert native.status == labber.status == "saved"
+        paths.append((native.output.path, labber.output.path))
+    assert paths[0][0] != paths[1][0]
+    assert paths[0][1] != paths[1][1]
+    assert metadata_from_container(load(paths[0][0])).run_id == run_ids[0]
+    assert metadata_from_container(load(paths[1][0])).run_id == run_ids[1]
+
+
 def test_data_save_writes_both_formats_and_resave_keeps_run_identity(
     native_session: NativeSaveSession,
 ) -> None:
@@ -132,18 +161,19 @@ def test_data_save_writes_both_formats_and_resave_keeps_run_identity(
     assert session.state.get_tab("tab").run.confirmed_run_id is None
     planned = session.state.get_artifact_snapshots("tab")
     assert (
-        planned[0].artifacts[0].members[0].outputs[1].path.name == "saving_a1b2c3.hdf5"
+        planned[0].artifacts[0].members[0].outputs[1].path.name
+        == "saving_20261008T000000Z-a1b2c3.hdf5"
     )
     first = session.save()
     assert session.state.get_tab("tab").run.confirmed_run_id == first.run_id
     native, labber = first.outputs
     assert native.status == labber.status == "saved"
-    assert labber.output.path.name == "saving_a1b2c3.hdf5"
+    assert labber.output.path.name == "saving_20261008T000000Z-a1b2c3.hdf5"
     assert (
         native.output.path
         == session.entry.database_path
         / "runs"
-        / f"saving_{session.metadata.run_id[-6:]}"
+        / f"saving_{session.metadata.run_id}"
         / "data.h5"
     )
     stored = load(native.output.path)
@@ -155,7 +185,7 @@ def test_data_save_writes_both_formats_and_resave_keeps_run_identity(
     second = session.save(origin=CommandOrigin("mcp"))
     assert second.run_id == first.run_id
     assert second.outputs[0].output.path == native.output.path
-    assert second.outputs[1].output.path.name == "saving_a1b2c3_1.hdf5"
+    assert second.outputs[1].output.path.name == "saving_20261008T000000Z-a1b2c3_1.hdf5"
     events = session.entry.ledger.events()
     assert len(events) == 2
     assert [event.origin for event in events] == ["gui", "mcp"]
@@ -175,7 +205,7 @@ def test_each_output_failure_preserves_the_other_and_reports_both(
         path = (
             session.entry.database_path
             / "runs"
-            / f"saving_{session.metadata.run_id[-6:]}"
+            / f"saving_{session.metadata.run_id}"
             / "data.h5"
         )
         path.mkdir(parents=True)
@@ -796,7 +826,7 @@ def test_initial_all_failed_save_does_not_confirm_run_identity(
     native_path = (
         session.entry.database_path
         / "runs"
-        / f"saving_{session.metadata.run_id[-6:]}"
+        / f"saving_{session.metadata.run_id}"
         / "data.h5"
     )
     native_path.mkdir(parents=True)

@@ -293,7 +293,9 @@ def test_saved_export_roundtrip_and_new_labber(
         assert labber.status == "saved" and labber.error is None
         assert labber.path is not None
         suffix = "" if sequence == 1 else "_1"
-        assert labber.path.name == f"synthetic_Q1_a1b2c3{suffix}.hdf5"
+        assert (
+            labber.path.name == f"synthetic_Q1_{manifest.identity.run_id}{suffix}.hdf5"
+        )
         restored = load_grouped_labber_data(str(labber.path))
         for name, variable in prepared.container.vars.items():
             np.testing.assert_array_equal(

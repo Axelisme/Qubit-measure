@@ -20,13 +20,13 @@ def _participant_stem(context: SaveContext, tones: JsonValue, *, field: str) -> 
         names.append(name)
     if not names:
         return default_save_stem(context)
-    return f"{context.name.replace('/', '.')}_{'+'.join(names)}_{context.run_id[-6:]}"
+    return f"{context.name.replace('/', '.')}_{'+'.join(names)}_{context.run_id}"
 
 
 def mux_save_stem(context: SaveContext) -> str:
     """List participating qubits from cfg.tones[].name in participants order.
 
-    Join names with + and append the run_id tail after the dotted adapter path.
+    Join names with + and append the complete run_id after the dotted adapter path.
     Missing cfg or names uses default role naming; never read live context.
     Onetone readout-only scans use mux_readout_save_stem instead.
     """
@@ -37,6 +37,7 @@ def mux_save_stem(context: SaveContext) -> str:
 def mux_readout_save_stem(context: SaveContext) -> str:
     """List onetone participants by cfg.readout.tones[].label, joined with +.
 
+    Append the complete run_id after the dotted adapter path and labels.
     Readout-only scans may have no qubits, so use resonator labels rather than
     inventing qubit names. Missing cfg or labels uses default role naming.
     Other mux adapters use mux_save_stem for qubit names. Never read live context.

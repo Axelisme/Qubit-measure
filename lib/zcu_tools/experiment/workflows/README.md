@@ -114,7 +114,7 @@ Completed.partial_result 決定 complete 或 stopped，不用 facts.stopped 代�
 
 獨立轉換工具共用 `export.load_trace` 讀具名 native reference，`export.write_outputs` 只寫 Labber。
 `write_outputs(..., save_stem=...)` 把 workflow name、完整 run_id、point、roles、cfg values 與 saved_at 放入共用 SaveContext。
-預設 callback 產生 dotted workflow name、hyphen-joined roles 與 id6 的 stem。Caller 可完全替換 callback，框架不補名稱。
+預設 callback 產生 dotted workflow name、hyphen-joined roles 與完整 run_id 的 stem。Caller 可完全替換 callback，框架不補名稱。
 Labber 寫日期樹內的 `<stem>.hdf5`，只有初始目的已存在時才沿用 suffix helper。Comment 在 cfg 旁帶歷史 snapshot.point 與 snapshot.roles。
 Workflow 自己的雙側 root 與 raw operation 檔名不變。
 Coherence 的 samples 由 sample table owner 追加。Lab 工具依呼叫者提供的目的地決定輸出，未提供目的地時在寫入前拒絕。

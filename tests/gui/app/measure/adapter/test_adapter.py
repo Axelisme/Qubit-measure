@@ -18,7 +18,7 @@ from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from tests.gui._adapter_fakes import DummyAdapter, DummyResult
 
 
-def test_default_save_stem_carries_adapter_roles_and_run_tail() -> None:
+def test_default_save_stem_carries_adapter_roles_and_full_run_id() -> None:
     from datetime import UTC, datetime
 
     from zcu_tools.resources.entry import SaveContext
@@ -32,7 +32,9 @@ def test_default_save_stem_carries_adapter_roles_and_run_tail() -> None:
         cfg={"gain": 0.2},
         saved_at=datetime(2026, 10, 27, tzinfo=UTC),
     )
-    assert adapter.save_stem(context) == "twotone.time_domain.t1_Q1-R1_a1b2c3"
+    assert adapter.save_stem(context) == (
+        "twotone.time_domain.t1_Q1-R1_20261027T120000Z-a1b2c3"
+    )
 
 
 def test_require_soc_handles_is_framework_request_validation() -> None:

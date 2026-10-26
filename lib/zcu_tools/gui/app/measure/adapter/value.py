@@ -222,7 +222,7 @@ class Adapter(
     Form/run callback failures propagate to the calling owner.
     save_stem receives SaveContext and returns an exact filename stem; the host
     adds no prefix or run_id. The default joins the dotted adapter name,
-    ordered role values with hyphens and the last six run_id characters.
+    ordered role values with hyphens and the complete run_id.
     Invalid stems fail SaveLayout validation; callback failures propagate.
 
     guide is a required Markdown Path or None, read only by guide(). analysis
@@ -274,7 +274,7 @@ class Adapter(
         """Return this adapter's spec.save_stem(context) unchanged.
 
         context contains the full adapter path and historical run facts. The
-        default uses dotted name, hyphen-joined roles and run_id tail. Customize
+        default uses dotted name, hyphen-joined roles and the full run_id. Customize
         by supplying a spec with another save_stem callable. Callback failures
         propagate; SaveLayout validates the returned stem before writing.
         """

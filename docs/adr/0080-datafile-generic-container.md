@@ -69,7 +69,7 @@ Fluxdep database reader 由 `gui.app.fluxdep.database` 擁有。`analysis_docume
 
 存檔 callback 接收 SaveContext 的名稱、run_id、point、roles、cfg values 與 saved_at，回傳 stem。SaveLayout 使用 `runs/<stem>/` 與日期樹內的 `<stem>.hdf5`，不另加 run_id。只有 Labber 初始目的已存在時才用既有 suffix helper。Native 保留明確 replace=True 的同路徑覆寫。完整 run_id 仍保存在 metadata，不從檔名猜測。
 
-使用者於 2026-10-27 裁決：「Q-L3我的想法是adapter決定怎麼生成名字，可以有預設實現。」並要求：「run_id也是由adapter行數補上，請你遵守框架不做多餘行為的設計理念，將可能需要的資訊作為參數傳給save_stem。」預設以 dotted adapter／tag／workflow name、roles 與 id6 組名，自訂 callback 可以完全替換。歷史形狀與辨識方式見 [存檔歷程](../storage-format-history/2026-10-27-labber-identity.md)。
+使用者於 2026-10-27 裁決：「Q-L3我的想法是adapter決定怎麼生成名字，可以有預設實現。」並要求：「run_id也是由adapter行數補上，請你遵守框架不做多餘行為的設計理念，將可能需要的資訊作為參數傳給save_stem。」預設以 dotted adapter／tag／workflow name、roles 與完整 run_id 組名，自訂 callback 可以完全替換。歷史形狀與辨識方式見 [存檔歷程](../storage-format-history/2026-10-27-labber-identity.md)。
 
 ## 後果
 

@@ -39,7 +39,7 @@ Recovery 採完整名稱清單中最大的五倍 T1；沿用既有 missing／inv
 Rabi pulse 初值與 T1 尺度 helper 可用明確 qubit 名稱，單 qubit caller 仍預設 `$qubit`。
 
 `mux_save_names.py` 提供 mux adapter 的存檔 callback。GUI 以 `replace(core.AXES_SPEC, save_stem=...)` 建自己的 spec，不改 core 原宣告。
-`mux_save_stem` 從 cfg.participants 依原索引順序取 cfg.tones[].name，以 `+` 連接 qubits，接在 dotted adapter path 與 id6 之間。
+`mux_save_stem` 從 cfg.participants 依原索引順序取 cfg.tones[].name，以 `+` 連接 qubits，接在 dotted adapter path 與完整 run_id 之間。
 Readout-only onetone 的 `mux_readout_save_stem` 改取 cfg.readout.tones[].label，列 resonators，不捏造 qubit 名。
 缺 cfg 或名字時，兩者都回預設 roles 命名。不讀目前 group、Form 或 live context。
 

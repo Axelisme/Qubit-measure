@@ -207,7 +207,7 @@ Templates use caller-authored `Template.bindings`.
 
 `Adapter.save_stem(context)` delegates to the adapter's spec.save_stem callback.
 SaveContext carries the full adapter path, run_id, historical point/roles, available cfg values and saved-at time.
-The default stem joins the dotted adapter path, hyphen-joined role values and run_id tail, for example `twotone.time_domain.t1_Q1-R1_a1b2c3`.
+The default stem joins the dotted adapter path, hyphen-joined role values and full run_id, for example `twotone.time_domain.t1_Q1-R1_20261027T120000Z-a1b2c3`.
 An adapter can pass its own spec with a different callback. Save uses the returned stem verbatim for `runs/<stem>/` and the Labber date tree's `<stem>.hdf5`.
 Only an existing Labber name triggers numeric suffix selection. Native same-path replacement stays unchanged.
 Labber comments carry snapshot.point and snapshot.roles beside cfg. Figure-only result browsing links successful saved output paths to acquired facts, not directory-name suffixes.

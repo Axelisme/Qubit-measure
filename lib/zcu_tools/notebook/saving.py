@@ -95,7 +95,7 @@ class SavedRun(Generic[CfgT, ResultT]):
         persistence mapping. roles must be resolved from the same bound entry,
         point and storage roots as ctx; another handle of that point is valid.
         spec.save_stem receives SaveContext on every save and returns the exact stem.
-        The default joins dotted spec.tag, role names and run_id tail with underscores.
+        The default joins dotted spec.tag, role names and full run_id with underscores.
         Invalid stems raise ValueError; callback failures propagate.
         None records no roles. Wrong role origins raise ValueError before any
         output or event. Snapshot only cached context and prepare typed data.

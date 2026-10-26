@@ -112,7 +112,7 @@ Accepted 不要求前序事件或 run。Producer 先 append accepted，再提交
 
 Run 目錄為 `Database/<name>/runs/<stem>/`。Data 回傳其中的 data.h5 與當地日期樹 `Labber/YYYY/MM/Data_MMDD/<stem>.hdf5`。只有 Labber 初始目的已存在時才交既有 helper 取 numeric suffix，不作跨程序原子保留。
 
-`SaveContext` 提供命名所需的 frontend name、run_id、point、roles、cfg values 與 saved_at。`default_save_stem` 將名稱中的 `/` 轉 `.`，依序接 hyphen-joined role values 與 run_id 後六碼，各段以 `_` 分隔。Role list 按順序攤平，無 roles 時省略該段。命名 callback 由 caller 選擇，SaveLayout 不呼叫它。
+`SaveContext` 提供命名所需的 frontend name、run_id、point、roles、cfg values 與 saved_at。`default_save_stem` 將名稱中的 `/` 轉 `.`，依序接 hyphen-joined role values 與完整 run_id，各段以 `_` 分隔。Role list 按順序攤平，無 roles 時省略該段。命名 callback 由 caller 選擇，SaveLayout 不呼叫它。
 
 Figure 回傳 run 的 `figures/<圖名>.png` 與 Result 的 point 或全域 figures 副本，副本名為 `<stem>_<圖名>.png`。Analysis 回傳 `runs/<stem>/analysis/<member_name>.json`。`Output` 提供 writer format 與絕對 exact path。Labber suffix 重用 datafile helper，只避讓既有檔案，不原子保留。其他 paths 固定，上層保存流程擁有 replacement 與失敗隔離。
 

@@ -33,7 +33,7 @@ Caller 從實驗類別建立 options，例如 `T1Exp.Options(...)` 或 `GE_Exp.P
 `save_run(ctx, source=record, ...)` 是綁定 PointView 的 run 保存入口，與本機單檔 `save` 分開。Source 必須是此 adapter 最近成功 run 返回的同一 record。入口從 bound point 捕捉 cached context 與 storage capability，量測身分、時間與 provenance 沿 adapter 的 acquisition evidence。可選的 RoleView 必須來自同一 point，省略代表沒有角色對應。入口保存正規 `data.h5`、Labber 衍生輸出、具名 PNG／副本及窗格 JSON。`SavedRun.save()` 明確重存同一 run，固定輸出覆寫，Labber 每次取新檔；後續 adapter 操作不使此 handle 失效。
 
 Run 命名沿 core.AXES_SPEC 的 `save_stem(SaveContext) -> str`。Caller 可在自己的 spec 指定 callback，框架不補任何名稱。
-Context 包含 tag、run_id、point、roles、cfg values 與帶 timezone 的 saved_at。預設 stem 為 dotted tag、hyphen-joined roles 與 run_id 後六碼，例如 `twotone.time_domain.t1_Q1-R1_a1b2c3`。
+Context 包含 tag、run_id、point、roles、cfg values 與帶 timezone 的 saved_at。預設 stem 為 dotted tag、hyphen-joined roles 與完整 run_id，例如 `twotone.time_domain.t1_Q1-R1_20261027T120000Z-a1b2c3`。
 Native 寫 `runs/<stem>/data.h5`，Labber 寫日期樹內的 `<stem>.hdf5`。只有 Labber 碰撞才加 numeric suffix；native 同名仍覆寫。
 每次保存都呼叫 callback，自訂名若依保存時間改變，也會改變 native 目的地。Labber comment 同時保存歷史 snapshot.point 與 snapshot.roles。
 

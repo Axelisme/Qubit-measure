@@ -60,7 +60,7 @@ Entry 只由 `result/<name>/` 構成。`resources.entry.ResultEntry` 提供條�
 
 GUI 的 `Adapter.save_stem(context)` 委派自己的 `AxesSpec.save_stem` 或 `GroupedAxesSpec.save_stem`。Adapter 可用自己的 spec 覆寫，不改核心的原 spec。Notebook 沿 core spec 的同一 callback；workflow 的 `write_outputs(..., save_stem=...)` 由 caller 提供 callback。這些入口共用 `SaveContext`，包含完整 adapter path／tag／workflow name、完整 run_id、歷史 point、解析後 roles、可用 cfg values 與保存時間。缺 cfg 時傳 None，不讀 live context 補值。
 
-預設 callback 將名稱中的 `/` 轉成 `.`，接上依 mapping 順序以 `-` 連接的 role values，再接 run_id 後六碼，各段以 `_` 連接。Role list 按原順序攤平，未綁名稱不加入。沒有 roles 時省略該段。例如 `twotone.time_domain.t1_Q1-R1_a1b2c3`。Mux adapters 依 cfg participants 原索引順序以 `+` 列參與 qubits，例如 `mux.t1_Q1+Q2+Q3_a1b2c3`。Readout-only onetone 列 resonator labels，缺 cfg 名稱時回預設 role 命名，不猜 qubit 身分。
+預設 callback 將名稱中的 `/` 轉成 `.`，接上依 mapping 順序以 `-` 連接的 role values，再接完整 run_id，各段以 `_` 連接。Role list 按原順序攤平，未綁名稱不加入。沒有 roles 時省略該段。例如 `twotone.time_domain.t1_Q1-R1_20261027T120000Z-a1b2c3`。Mux adapters 依 cfg participants 原索引順序以 `+` 列參與 qubits，例如 `mux.t1_Q1+Q2+Q3_20261027T120000Z-a1b2c3`。Readout-only onetone 列 resonator labels，缺 cfg 名稱時回預設 role 命名，不猜 qubit 身分。
 
 Native run 目錄為 `Database/<name>/runs/<stem>/`。再次 Save 的 callback 回傳相同 stem 時，更新其中的 `data.h5`、具名圖片與 `analysis/<pane>.json`。圖片另有 Result point／全域 figures 副本，檔名為 `<stem>_<圖名>.png`。Native 同名目的仍由 saver 明確 replace=True 原子覆寫，不加避讓規則。自訂 callback 若依保存時間改名，後續保存會寫到另一個目錄。
 
@@ -69,6 +69,8 @@ Labber 初始路徑為 `Database/<name>/Labber/YYYY/MM/Data_MMDD/<stem>.hdf5`。
 Labber comment 在 cfg 旁保存 `snapshot: {point, roles}`，保留原 comment 與 timestamp。這讓檔案離開 entry 後仍帶目標身分。Reader 忽略不支援的 envelope keys，不要求歷史檔補 snapshot。不升 wire 或 Container 版本，不搬動舊輸出。格式演進與辨識方式見 [存檔歷程](../storage-format-history/2026-10-27-labber-identity.md)。
 
 使用者於 2026-10-27 裁決：「Q-L1-a+b，名字也許要有adapter」；「Q-L3我的想法是adapter決定怎麼生成名字，可以有預設實現。」同日要求：「run_id也是由adapter行數補上，請你遵守框架不做多餘行為的設計理念，將可能需要的資訊作為參數傳給save_stem。」框架只使用 callback 的結果，不在後方再補 run_id。
+
+2026-10-27 合併前檢查將預設與 mux callback 改為保留完整 run_id。只取後六碼會讓不同 acquisition 共用 native stem，而 replace=True 原本只用於同一 run 重存。保留完整 run_id 避免這項資料覆寫退化，SaveLayout 與 writer 不補救或改寫 callback 的結果。自訂 callback 仍自行決定名稱，但須避免不同 run 共用 stem。
 
 這項裁決取代單次 run 與 Labber 的固定 experiment／run_id 命名。2026-10-19 的實驗名加 id6 與 2026-10-20 的完整 run_id 前綴規則不再適用這兩種輸出。離線 migration 仍明確提供原有 native stem，不改名舊 Labber 檔。
 

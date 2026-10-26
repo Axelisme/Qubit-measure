@@ -108,7 +108,7 @@ def write_outputs(
     destination preflight belong to the caller and must precede this function.
     save_stem receives the workflow name and captured SaveContext; the result
     is used verbatim. The default joins dotted workflow name, ordered roles
-    and run_id tail. Invalid stems and callback errors are allocation failures.
+    and full run_id. Invalid stems and callback errors are allocation failures.
     Allocation/writer exceptions become typed failed outputs, preserving known
     paths.
     """

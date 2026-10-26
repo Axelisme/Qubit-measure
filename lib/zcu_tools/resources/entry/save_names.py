@@ -33,7 +33,7 @@ class SaveContext:
 
 
 def default_save_stem(context: SaveContext) -> str:
-    """Join dotted name, ordered role names and the run_id's last six characters.
+    """Join dotted name, ordered role names and the complete run_id.
 
     Flatten ordered role lists in place, join names with hyphens, and omit
     the role token when no names are bound. Do not add collision suffixes.
@@ -48,5 +48,5 @@ def default_save_stem(context: SaveContext) -> str:
     parts = [context.name.replace("/", ".")]
     if names:
         parts.append("-".join(names))
-    parts.append(context.run_id[-6:])
+    parts.append(context.run_id)
     return "_".join(parts)

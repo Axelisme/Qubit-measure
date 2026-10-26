@@ -45,22 +45,24 @@ Native 的 docs/metadata.snapshot 已有 entry_id、point 與 roles，這次不�
 
 GUI Adapter.save_stem 委派 adapter 自己 spec 上的 callback。Notebook 沿 core spec 的相同欄位，workflow export 由 caller 傳 callback。三者都收到 SaveContext，含前端完整名稱、完整 run_id、歷史 point、解析後 roles、可用 cfg values 與 saved_at。框架使用回傳的 stem，不另補前綴或 run_id。
 
-預設 stem 將名稱中的 `/` 轉 `.`，接 role values 與 run_id 後六碼，各段用 `_` 分隔。Role values 按 mapping 順序以 `-` 連接，清單按原順序攤平，空值省略。沒有角色時不產生角色段。相同範例現在寫成：
+預設 stem 將名稱中的 `/` 轉 `.`，接 role values 與完整 run_id，各段用 `_` 分隔。Role values 按 mapping 順序以 `-` 連接，清單按原順序攤平，空值省略。沒有角色時不產生角色段。相同範例現在寫成：
 
 ```text
-Labber/2026/10/Data_1027/twotone.time_domain.t1_Q1-R1_a1b2c3.hdf5
-runs/twotone.time_domain.t1_Q1-R1_a1b2c3/data.h5
+Labber/2026/10/Data_1027/twotone.time_domain.t1_Q1-R1_20261027T120000Z-a1b2c3.hdf5
+runs/twotone.time_domain.t1_Q1-R1_20261027T120000Z-a1b2c3/data.h5
 ```
 
-Mux callback 依 cfg.participants 的原始索引順序列 qubits，例如 `mux.t1_Q1+Q2+Q3_a1b2c3`。Readout-only onetone 沒有完整 qubit 身分，因此列 readout labels，例如 `mux.onetone_R1+R2_a1b2c3`。缺 cfg 或名字時使用預設 roles 命名，不讀 live context 補值。
+Mux callback 依 cfg.participants 的原始索引順序列 qubits，例如 `mux.t1_Q1+Q2+Q3_20261027T120000Z-a1b2c3`。Readout-only onetone 沒有完整 qubit 身分，因此列 readout labels，例如 `mux.onetone_R1+R2_20261027T120000Z-a1b2c3`。缺 cfg 或名字時使用預設 roles 命名，不讀 live context 補值。
 
-Labber 初始名字已存在時，仍沿用 numeric suffix helper。例如上述初始檔已存在，下次選 `twotone.time_domain.t1_Q1-R1_a1b2c3_1.hdf5`。Helper 不作跨程序原子保留。Native 同名仍由 saver 以 replace=True 原子覆寫，不加避讓。自訂 callback 若每次回傳不同 stem，native 保存目錄也會跟著變。
+Labber 初始名字已存在時，仍沿用 numeric suffix helper。例如上述初始檔已存在，下次選 `twotone.time_domain.t1_Q1-R1_20261027T120000Z-a1b2c3_1.hdf5`。Helper 不作跨程序原子保留。Native 同名仍由 saver 以 replace=True 原子覆寫，不加避讓。自訂 callback 若每次回傳不同 stem，native 保存目錄也會跟著變。
 
 ## 為什麼改
 
 檔名只有實驗名稱與 id6，無法讓操作者分辨 Q1、Q2 或 resonator。單 qubit Labber comment 又缺少名稱，移出 entry 後就失去目標身分。現在 comment 帶歷史身分，預設檔名也讓人直接辨識目標。
 
 實驗作者決定哪些資訊進檔名，框架只提供組名所需的事實。使用者於 2026-10-27 裁決：「Q-L3我的想法是adapter決定怎麼生成名字，可以有預設實現。」並要求：「run_id也是由adapter行數補上，請你遵守框架不做多餘行為的設計理念，將可能需要的資訊作為參數傳給save_stem。」因此自訂 callback 的結果可以完全不含 run_id。
+
+2026-10-27 合併前檢查發現，初版預設只取 id6 會讓不同 run 共用 native stem。Writer 的 replace=True 因而可能覆寫另一份 acquisition，而不只是重存同一 run。預設與 mux callback 因此保留完整 run_id。框架仍不改寫 callback 的結果，自訂 callback 必須避免不同 run 共用 stem。
 
 Results browser 不再靠目錄的完整 run_id 尾碼識別 figure-only run。它先讀 native metadata；沒有可讀 metadata 時，用 saved event 的成功 output exact path 找 acquired 事實。沒有這些證據時保留 unknown，不猜 id6。
 
