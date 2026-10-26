@@ -101,6 +101,79 @@ class FluxDepFit:
         return section
 
 
+class FluxDepFitView:
+    """Detached read view of a fluxdep_fit JSON section.
+
+    section must contain params.EJ, EC and EL in GHz as finite numbers.
+    EJ, EC and EL expose Josephson, charging and inductive energies respectively.
+    Unknown fields are ignored. Calibration properties validate only when
+    accessed and raise QubitParamsError naming a missing or invalid field.
+    This view does not write files; FluxDepFit remains the write payload.
+    """
+
+    def __init__(self, section: Mapping[str, object]) -> None:
+        self._section = deepcopy(dict(section))
+        params = _mapping(
+            _require_key(section, "params", path="fluxdep_fit"),
+            path="fluxdep_fit.params",
+        )
+        self.EJ = _coerce_float(
+            _require_key(params, "EJ", path="fluxdep_fit.params"),
+            path="fluxdep_fit.params.EJ",
+        )
+        self.EC = _coerce_float(
+            _require_key(params, "EC", path="fluxdep_fit.params"),
+            path="fluxdep_fit.params.EC",
+        )
+        self.EL = _coerce_float(
+            _require_key(params, "EL", path="fluxdep_fit.params"),
+            path="fluxdep_fit.params.EL",
+        )
+
+    @property
+    def params(self) -> tuple[float, float, float]:
+        """Return (EJ, EC, EL) in GHz."""
+        return (self.EJ, self.EC, self.EL)
+
+    def _calibration_value(self, name: str) -> float:
+        return _coerce_float(
+            _require_key(self._section, name, path="fluxdep_fit"),
+            path=f"fluxdep_fit.{name}",
+        )
+
+    @property
+    def flux_half(self) -> float:
+        """Return the half-flux device value; fail if missing or non-finite."""
+        return self._calibration_value("flux_half")
+
+    @property
+    def flux_int(self) -> float:
+        """Return the integer-flux device value; fail if missing or non-finite."""
+        return self._calibration_value("flux_int")
+
+    @property
+    def flux_period(self) -> float:
+        """Return the device span per flux quantum; fail if missing or non-finite."""
+        return self._calibration_value("flux_period")
+
+    @property
+    def plot_transitions(self) -> Mapping[str, object]:
+        """Return transition settings; fail if missing or not a JSON object."""
+        return deepcopy(
+            dict(
+                _mapping(
+                    _require_key(self._section, "plot_transitions", path="fluxdep_fit"),
+                    path="fluxdep_fit.plot_transitions",
+                )
+            )
+        )
+
+    @property
+    def timestamp(self) -> str | None:
+        """Return the optional timestamp; fail if present but not a nonempty string."""
+        return _optional_timestamp(self._section, path="fluxdep_fit")
+
+
 @dataclass(frozen=True)
 class DispersiveFit:
     g: float
@@ -381,64 +454,6 @@ def _require_key(raw: Mapping[str, Any], key: str, *, path: str) -> object:
         ) from exc
 
 
-def _parse_nullable_float(raw: object, *, path: str) -> float | None:
-    if raw is None:
-        return None
-    return _coerce_float(raw, path=path)
-
-
-def _parse_optional_bool(raw: object, *, path: str) -> bool | None:
-    if raw is None:
-        return None
-    if isinstance(raw, bool):
-        return raw
-    raise QubitParamsError(
-        f"{path} must be a boolean or null",
-        reason_code="params_value_invalid",
-    )
-
-
-def _parse_optional_int(raw: object, *, path: str) -> int | None:
-    if raw is None:
-        return None
-    if isinstance(raw, bool) or not isinstance(raw, int):
-        raise QubitParamsError(
-            f"{path} must be an integer or null",
-            reason_code="params_value_invalid",
-        )
-    return raw
-
-
-def _parse_optional_string(raw: object, *, path: str) -> str | None:
-    if raw is None:
-        return None
-    if isinstance(raw, str):
-        return raw
-    raise QubitParamsError(
-        f"{path} must be a string or null",
-        reason_code="params_value_invalid",
-    )
-
-
-def _parse_string_tuple(raw: object, *, path: str) -> tuple[str, ...]:
-    if raw is None:
-        return ()
-    if not isinstance(raw, list | tuple):
-        raise QubitParamsError(
-            f"{path} must be an array of strings",
-            reason_code="params_value_invalid",
-        )
-    values: list[str] = []
-    for index, value in enumerate(raw):
-        if not isinstance(value, str):
-            raise QubitParamsError(
-                f"{path}[{index}] must be a string",
-                reason_code="params_value_invalid",
-            )
-        values.append(value)
-    return tuple(values)
-
-
 def _validate_t1_curve_fit_names(
     names: tuple[str, ...], *, path: str, active_param_names: tuple[str, ...]
 ) -> None:
@@ -513,64 +528,6 @@ def _parse_t1_curve_fit_params(raw: object, *, path: str) -> T1CurveFitParams:
             reason_code="params_value_invalid",
         )
     return params
-
-
-def _parse_t1_curve_fit_uncertainty(
-    raw: object,
-    *,
-    path: str,
-    active_param_names: tuple[str, ...],
-) -> T1CurveFitUncertainty:
-    section = _mapping(raw, path=path)
-    unknown = set(section) - set(_T1_CURVE_FIT_PARAM_NAMES)
-    if unknown:
-        raise QubitParamsError(
-            f"{path} contains unknown T1 fit parameter(s): {sorted(unknown)}",
-            reason_code="params_value_invalid",
-        )
-    inactive = set(section) - set(active_param_names)
-    if inactive:
-        raise QubitParamsError(
-            f"{path} contains inactive T1 fit parameter(s): {sorted(inactive)}",
-            reason_code="params_value_invalid",
-        )
-    return T1CurveFitUncertainty(
-        Q_cap=_parse_nullable_float(section.get("Q_cap"), path=f"{path}.Q_cap"),
-        x_qp=_parse_nullable_float(section.get("x_qp"), path=f"{path}.x_qp"),
-        Q_ind=_parse_nullable_float(section.get("Q_ind"), path=f"{path}.Q_ind"),
-        Temp=_parse_nullable_float(section.get("Temp"), path=f"{path}.Temp"),
-    )
-
-
-def _parse_t1_curve_bounds(
-    raw: object,
-    *,
-    path: str,
-    active_param_names: tuple[str, ...],
-) -> dict[str, tuple[float, float]]:
-    section = _mapping(raw, path=path)
-    bounds: dict[str, tuple[float, float]] = {}
-    for name, raw_bound in section.items():
-        if name not in _T1_CURVE_FIT_PARAM_NAMES:
-            raise QubitParamsError(
-                f"{path}.{name} is not a known T1 fit parameter",
-                reason_code="params_value_invalid",
-            )
-        if name not in active_param_names:
-            raise QubitParamsError(
-                f"{path}.{name} is not an active T1 fit parameter",
-                reason_code="params_value_invalid",
-            )
-        if not isinstance(raw_bound, list | tuple) or len(raw_bound) != 2:
-            raise QubitParamsError(
-                f"{path}.{name} must be a two-number array",
-                reason_code="params_value_invalid",
-            )
-        bounds[name] = (
-            _coerce_float(raw_bound[0], path=f"{path}.{name}[0]"),
-            _coerce_float(raw_bound[1], path=f"{path}.{name}[1]"),
-        )
-    return bounds
 
 
 def _canonical_project_from_raw(raw: Mapping[str, Any]) -> ParamsProject | None:
@@ -749,14 +706,24 @@ class QubitParams:
         self.ensure_project(project)
         return project
 
-    def get_fluxdep_fit(self) -> FluxDepFit | None:
+    def get_fluxdep_fit(self) -> FluxDepFitView | None:
+        """Refresh and read model energies, or return None for an absent section.
+
+        Only params.EJ/EC/EL are required here. Calibration is checked by the
+        returned view on access. File and model-value errors propagate.
+        """
         self._refresh_existing()
         raw = self._data.get("fluxdep_fit")
         if raw is None:
             return None
         return self._parse_fluxdep_fit(raw)
 
-    def require_fluxdep_fit(self) -> FluxDepFit:
+    def require_fluxdep_fit(self) -> FluxDepFitView:
+        """Read model energies; raise QubitParamsError if section or energies are missing.
+
+        Calibration fields remain unchecked until accessed on the returned view.
+        File errors propagate as for get_fluxdep_fit.
+        """
         fit = self.get_fluxdep_fit()
         if fit is None:
             raise QubitParamsError(
@@ -779,11 +746,18 @@ class QubitParams:
 
     def set_dispersive_fit(self, fit: DispersiveFit) -> None:
         self._refresh_before_write(require_existing=True)
-        self.require_fluxdep_fit()
+        self._validate_fluxdep_for_write()
         self._data["dispersive"] = _with_current_timestamp(fit.to_json_section())
         self._store()
 
     def get_t1_curve_fit(self) -> T1CurveFit | None:
+        """Refresh and read T1 parameter values, or None for an absent section.
+
+        Ignore all fit metadata, including stderr, bounds and fixed/free.
+        The returned payload contains only params; metadata fields keep their
+        dataclass defaults. Missing/invalid params raise QubitParamsError;
+        file errors propagate.
+        """
         self._refresh_existing()
         raw = self._data.get("t1_curve_fit")
         if raw is None:
@@ -791,6 +765,11 @@ class QubitParams:
         return self._parse_t1_curve_fit(raw)
 
     def require_t1_curve_fit(self) -> T1CurveFit:
+        """Read T1 parameter values, ignoring metadata as in get_t1_curve_fit.
+
+        Raise QubitParamsError if the section or required params are missing
+        or invalid. File errors propagate.
+        """
         fit = self.get_t1_curve_fit()
         if fit is None:
             raise QubitParamsError(
@@ -801,13 +780,20 @@ class QubitParams:
 
     def set_t1_curve_fit(self, fit: T1CurveFit) -> None:
         self._refresh_before_write(require_existing=True)
-        self.require_fluxdep_fit()
+        self._validate_fluxdep_for_write()
         self._data["t1_curve_fit"] = _with_current_timestamp(fit.to_json_section())
         self._store()
 
     def require_fluxonium_model(
         self, *, flux_bias: float = 0.0
     ) -> FluxoniumModelParams:
+        """Read energies and device calibration for a model at flux_bias.
+
+        flux_bias is an additive device-value offset in the same unit as
+        flux_half and flux_period. Require both calibration fields in addition
+        to model energies; missing or invalid
+        fields raise QubitParamsError naming the field. File errors propagate.
+        """
         fit = self.require_fluxdep_fit()
         return FluxoniumModelParams(
             EJ=fit.EJ,
@@ -821,6 +807,13 @@ class QubitParams:
     def require_dispersive_inputs(
         self, *, default_bare_rf: float
     ) -> DispersiveFitInputs:
+        """Read energies, device calibration and a bare resonator seed in GHz.
+
+        Require flux_half, flux_int and flux_period. Prefer dispersive.bare_rf;
+        otherwise require plot_transitions and use its r_f, or default_bare_rf
+        when that key is absent. Missing/invalid used fields raise
+        QubitParamsError naming the field. File errors propagate.
+        """
         fit = self.require_fluxdep_fit()
         dispersive = self.get_dispersive_fit()
         if dispersive is not None:
@@ -840,44 +833,22 @@ class QubitParams:
             bare_rf_seed=bare_rf_seed,
         )
 
+    def _validate_fluxdep_for_write(self) -> None:
+        # Writes retain the complete-section prerequisites used before reads
+        # became field-local. Missing plot settings still mean an empty mapping.
+        self.require_fluxdep_fit()
+        section = _mapping(self._data["fluxdep_fit"], path="fluxdep_fit")
+        for name in ("flux_half", "flux_int", "flux_period"):
+            _coerce_float(
+                _require_key(section, name, path="fluxdep_fit"),
+                path=f"fluxdep_fit.{name}",
+            )
+        _mapping(section.get("plot_transitions") or {}, path="plot_transitions")
+        _optional_timestamp(section, path="fluxdep_fit")
+
     @staticmethod
-    def _parse_fluxdep_fit(raw: object) -> FluxDepFit:
-        section = _mapping(raw, path="fluxdep_fit")
-        params = _mapping(
-            _require_key(section, "params", path="fluxdep_fit"),
-            path="fluxdep_fit.params",
-        )
-        transitions = section.get("plot_transitions") or {}
-        return FluxDepFit(
-            EJ=_coerce_float(
-                _require_key(params, "EJ", path="fluxdep_fit.params"),
-                path="fluxdep_fit.params.EJ",
-            ),
-            EC=_coerce_float(
-                _require_key(params, "EC", path="fluxdep_fit.params"),
-                path="fluxdep_fit.params.EC",
-            ),
-            EL=_coerce_float(
-                _require_key(params, "EL", path="fluxdep_fit.params"),
-                path="fluxdep_fit.params.EL",
-            ),
-            flux_half=_coerce_float(
-                _require_key(section, "flux_half", path="fluxdep_fit"),
-                path="fluxdep_fit.flux_half",
-            ),
-            flux_int=_coerce_float(
-                _require_key(section, "flux_int", path="fluxdep_fit"),
-                path="fluxdep_fit.flux_int",
-            ),
-            flux_period=_coerce_float(
-                _require_key(section, "flux_period", path="fluxdep_fit"),
-                path="fluxdep_fit.flux_period",
-            ),
-            plot_transitions=deepcopy(
-                dict(_mapping(transitions, path="plot_transitions"))
-            ),
-            timestamp=_optional_timestamp(section, path="fluxdep_fit"),
-        )
+    def _parse_fluxdep_fit(raw: object) -> FluxDepFitView:
+        return FluxDepFitView(_mapping(raw, path="fluxdep_fit"))
 
     @staticmethod
     def _parse_dispersive_fit(raw: object) -> DispersiveFit:
@@ -897,80 +868,11 @@ class QubitParams:
     @staticmethod
     def _parse_t1_curve_fit(raw: object) -> T1CurveFit:
         section = _mapping(raw, path="t1_curve_fit")
-        params = _parse_t1_curve_fit_params(
-            _require_key(section, "params", path="t1_curve_fit"),
-            path="t1_curve_fit.params",
-        )
-        active_param_names = params.active_param_names
-        fixed = _parse_string_tuple(section.get("fixed", ()), path="t1_curve_fit.fixed")
-        free = _parse_string_tuple(section.get("free", ()), path="t1_curve_fit.free")
-        _validate_t1_curve_fit_names(
-            fixed, path="t1_curve_fit.fixed", active_param_names=active_param_names
-        )
-        _validate_t1_curve_fit_names(
-            free, path="t1_curve_fit.free", active_param_names=active_param_names
-        )
-        init = (
-            _parse_t1_curve_fit_params(
-                section["init"],
-                path="t1_curve_fit.init",
-            )
-            if "init" in section
-            else None
-        )
-        if init is not None:
-            _validate_t1_curve_fit_init(
-                init,
-                active_noise_names=params.active_noise_names,
-                path="t1_curve_fit.init",
-            )
-        bounds = (
-            _parse_t1_curve_bounds(
-                section["bounds"],
-                path="t1_curve_fit.bounds",
-                active_param_names=active_param_names,
-            )
-            if "bounds" in section
-            else {}
-        )
         return T1CurveFit(
-            params=params,
-            stderr=(
-                _parse_t1_curve_fit_uncertainty(
-                    section["stderr"],
-                    path="t1_curve_fit.stderr",
-                    active_param_names=active_param_names,
-                )
-                if "stderr" in section
-                else None
-            ),
-            fixed=fixed,
-            free=free,
-            cost=_parse_nullable_float(section.get("cost"), path="t1_curve_fit.cost"),
-            reduced_chi2=_parse_nullable_float(
-                section.get("reduced_chi2"),
-                path="t1_curve_fit.reduced_chi2",
-            ),
-            success=_parse_optional_bool(
-                section.get("success"),
-                path="t1_curve_fit.success",
-            ),
-            message=_parse_optional_string(
-                section.get("message"),
-                path="t1_curve_fit.message",
-            ),
-            residual_mode=_parse_optional_string(
-                section.get("residual_mode"),
-                path="t1_curve_fit.residual_mode",
-            ),
-            loss=_parse_optional_string(section.get("loss"), path="t1_curve_fit.loss"),
-            max_nfev=_parse_optional_int(
-                section.get("max_nfev"),
-                path="t1_curve_fit.max_nfev",
-            ),
-            init=init,
-            bounds=bounds,
-            timestamp=_optional_timestamp(section, path="t1_curve_fit"),
+            params=_parse_t1_curve_fit_params(
+                _require_key(section, "params", path="t1_curve_fit"),
+                path="t1_curve_fit.params",
+            )
         )
 
 
@@ -981,6 +883,7 @@ __all__ = [
     "DispersiveFit",
     "DispersiveFitInputs",
     "FluxDepFit",
+    "FluxDepFitView",
     "FluxoniumModelParams",
     "ParamsProject",
     "QubitParams",
