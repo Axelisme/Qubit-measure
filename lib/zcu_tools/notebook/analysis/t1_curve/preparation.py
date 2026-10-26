@@ -18,12 +18,7 @@ from zcu_tools.resources.qubit_params import (
     QubitParams,
 )
 from zcu_tools.resources.record_table import (
-    DeviceValueUnit,
-    JsonlRecordTable,
-    RecordFluxFrame,
-    project_device_coordinates,
-    resolve_record_flux,
-    validate_record_table_v2,
+    RecordFluxResolution,
 )
 
 from .models import (
@@ -34,25 +29,24 @@ from .models import (
 )
 from .utils import freq2omega
 
-_REQUIRED_COLUMNS = ("freq_mhz", "t1_us")
+_REQUIRED_COLUMNS = ("flux", "t1_us")
 
 
 def load_t1_curve_context(
     *,
     result_dir: str,
-    device_name: str,
-    samples_filename: str = "records.jsonl",
+    samples_filename: str = "samples.csv",
     image_dir: str | None = None,
     preview_rows: int = 10,
 ) -> T1CurveContext:
-    """Load fluxdep params and latest JSONL sample rows from result_dir.
+    """Load params.json and CSV samples from result_dir.
 
-    device_name selects devices[device_name].value/value_unit; missing facts
-    fail without flat-field fallback. samples_filename is relative to
-    result_dir and defaults to records.jsonl;
-    required measurements are freq_mhz and t1_us. Create image_dir (default
-    result_dir/t1_curve) and return params, rows and preview_rows preview rows.
-    Missing params, invalid JSONL or missing required columns fail fast.
+    samples_filename is relative to result_dir, or an absolute CSV path.
+    Require numeric flux (normalized Phi0) and t1_us; missing freq_mhz and
+    t1_err_us become NaN. Ignore unused columns. Create image_dir (default
+    result_dir/t1_curve) and return inputs with preview_rows initial rows.
+    Missing files/parameters, missing required columns or nonnumeric used
+    values raise with the file or column name.
     """
     resolved_image_dir = image_dir or os.path.join(result_dir, "t1_curve")
     os.makedirs(result_dir, exist_ok=True)
@@ -60,10 +54,7 @@ def load_t1_curve_context(
 
     params_file = QubitParams(os.path.join(result_dir, "params.json"), readonly=True)
     fit_inputs = params_file.require_fluxdep_fit()
-    samples_df = project_device_coordinates(
-        JsonlRecordTable(os.path.join(result_dir, samples_filename)).read(),
-        device_name=device_name,
-    )
+    samples_df = pd.read_csv(os.path.join(result_dir, samples_filename))
     _validate_required_columns(samples_df)
 
     params = fit_inputs.params
@@ -94,27 +85,19 @@ def load_t1_curve_context(
     )
 
 
-def calibrate_t1_flux(
-    context: T1CurveContext,
-    *,
-    fallback_frame_unit: DeviceValueUnit = "A",
-) -> T1FluxCalibration:
-    """Resolve sample flux and record provenance without correcting rows.
+def calibrate_t1_flux(context: T1CurveContext) -> T1FluxCalibration:
+    """Select finite T1/f01 rows from loaded normalized CSV coordinates.
 
-    context contains the loaded sample frame and dimensionless flux alignment.
-    fallback_frame_unit declares the device-value unit (A, V or native) used
-    with that alignment. Return row-aligned resolution, finite measurement
-    subsets and a summary. Invalid or unresolved sample coordinates raise the
-    sample-table validation error; source row order is retained.
+    Return row-aligned flux and a count summary without correcting coordinates
+    or mutating context. Missing/nonnumeric used columns raise ValueError.
+    Nonfinite flux raises ValueError because no device-frame fallback exists.
     """
-    samples_df = context.samples_df
-    fallback_frame = RecordFluxFrame(
-        fallback_frame_unit, context.flux_int, context.flux_period
-    )
-    resolution = resolve_record_flux(
-        samples_df,
-        fallback_frame=fallback_frame,
-    )
+    samples_df = context.samples_df.copy()
+    _validate_required_columns(samples_df)
+    fluxs = _float_column(samples_df, "flux")
+    if not np.all(np.isfinite(fluxs)):
+        raise ValueError("samples.csv flux must be finite")
+    resolution = RecordFluxResolution(values=fluxs, sources=("explicit",) * len(fluxs))
     t1_values = _float_column(samples_df, "t1_us")
     t1_mask = np.isfinite(t1_values)
     freq_values = _float_column(samples_df, "freq_mhz")
@@ -127,11 +110,10 @@ def calibrate_t1_flux(
     }
     summary_table = pd.DataFrame(
         [
-            ("records.jsonl rows", str(len(samples_df))),
+            ("samples.csv rows", str(len(samples_df))),
             ("explicit flux rows", str(source_counts["explicit"])),
             ("row-frame flux rows", str(source_counts["row-frame"])),
             ("fallback-frame flux rows", str(source_counts["fallback-frame"])),
-            ("fallback frame unit", fallback_frame.dev_unit),
             ("finite f01 rows", str(len(freq_rows))),
             ("finite T1 rows", str(len(t1_df))),
         ],
@@ -140,7 +122,6 @@ def calibrate_t1_flux(
     return T1FluxCalibration(
         context=context,
         resolution=resolution,
-        fallback_frame=fallback_frame,
         t1_df=t1_df,
         freq_rows=freq_rows,
         summary_table=summary_table,
@@ -204,12 +185,18 @@ def prepare_t1_curve_data(
 
 
 def _validate_required_columns(samples_df: pd.DataFrame) -> None:
-    validate_record_table_v2(samples_df, allow_empty=True)
     missing = [
         column for column in _REQUIRED_COLUMNS if column not in samples_df.columns
     ]
     if missing:
-        raise ValueError(f"records.jsonl missing required columns: {missing}")
+        raise ValueError(f"samples.csv missing required columns: {missing}")
+    for column in (*_REQUIRED_COLUMNS, "freq_mhz", "t1_err_us"):
+        if column not in samples_df.columns:
+            samples_df[column] = np.nan
+        try:
+            samples_df[column] = pd.to_numeric(samples_df[column], errors="raise")
+        except (ValueError, TypeError) as exc:
+            raise ValueError(f"samples.csv column {column} must be numeric") from exc
 
 
 def _float_column(frame: pd.DataFrame, column: str) -> NDArray[np.float64]:
@@ -259,10 +246,7 @@ def _prepare_t1_data(
             )
         candidate_fluxs = correction.corrected_fluxs
         accepted = correction.accepted
-        for index, source in enumerate(row_sources):
-            if source == "explicit":
-                reasons.append("explicit_flux")
-                continue
+        for index in range(len(row_sources)):
             if not f01_measured[index]:
                 reasons.append("missing_f01")
                 continue

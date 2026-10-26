@@ -439,14 +439,10 @@ def run_t1_curve_analysis(
 ) -> T1CurveAnalysisResult:
     context = load_t1_curve_context(
         result_dir=config.result_dir,
-        device_name=config.device_name,
         samples_filename=config.samples_filename,
         image_dir=config.image_dir,
     )
-    calibration = calibrate_t1_flux(
-        context,
-        fallback_frame_unit=config.fallback_frame_unit,
-    )
+    calibration = calibrate_t1_flux(context)
     data = prepare_t1_curve_data(
         calibration,
         analysis_flux_range=config.analysis_flux_range,

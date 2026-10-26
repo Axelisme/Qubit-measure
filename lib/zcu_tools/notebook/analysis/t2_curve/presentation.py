@@ -269,7 +269,7 @@ def save_t2_curve_figure(  # noqa: PLR0913
 
 def save_t2_standard_figures(
     flux_probe: T2FluxNoiseProbe,
-    photon_probe: T2PhotonShotNoiseProbe,
+    photon_probe: T2PhotonShotNoiseProbe | None,
     channel_analysis: T2ChannelAnalysis,
     *,
     config: T2CurveAnalysisConfig,
@@ -295,7 +295,14 @@ def save_t2_standard_figures(
             "Gamma_phi_vs_flux_sensitivity.png",
             None,
         ),
-        "photon_shot_noise_probe": (
+        "channel_overlay": (
+            plot_t2_channel_analysis(channel_analysis)[0],
+            "T2e_flux_noise_fit.png",
+            "tight",
+        ),
+    }
+    if photon_probe is not None:
+        figures["photon_shot_noise_probe"] = (
             plot_photon_shot_noise_probe(
                 photon_probe,
                 n_th_range=config.thermal_n_th_range,
@@ -303,18 +310,10 @@ def save_t2_standard_figures(
             )[0],
             "T2e_thermal_photon_limit.png",
             None,
-        ),
-        "n_th_vs_flux": (
-            plot_nth_limit_vs_flux(photon_probe)[0],
-            "n_th_vs_flux.png",
-            None,
-        ),
-        "channel_overlay": (
-            plot_t2_channel_analysis(channel_analysis)[0],
-            "T2e_flux_noise_fit.png",
-            "tight",
-        ),
-    }
+        )
+        figures["n_th_vs_flux"] = (
+            plot_nth_limit_vs_flux(photon_probe)[0], "n_th_vs_flux.png", None
+        )
     paths: dict[str, str] = {}
     for name, (fig, filename, bbox_inches) in figures.items():
         path = os.path.join(context.image_dir, filename)
@@ -346,6 +345,8 @@ def emit_t2_curve_outputs(
         print("flux_period =", result.context.flux_period)
         print("bare_rf =", result.context.bare_rf, "GHz")
         print("g =", result.context.g, "GHz")
+        if not result.context.photon_shot_noise_enabled:
+            print("photon shot noise disabled: missing dispersive inputs")
         print(
             "readout kappa/2pi =",
             result.combined_fit.readout_kappa_over_2pi_mhz,
@@ -363,7 +364,8 @@ def emit_t2_curve_outputs(
         if not result.data.half_preview.empty:
             display_fn(result.data.half_preview)
         display_fn(result.flux_probe.summary_table)
-        display_fn(result.photon_probe.summary_table)
-        display_fn(result.photon_probe.thermal_limit_table)
+        if result.photon_probe is not None:
+            display_fn(result.photon_probe.summary_table)
+            display_fn(result.photon_probe.thermal_limit_table)
         display_fn(result.combined_fit.params_table)
         display_fn(result.summary_table)

@@ -15,8 +15,6 @@ from zcu_tools.notebook.analysis.fit_tools import (
     MeasurementErrorPolicy,
 )
 from zcu_tools.resources.record_table import (
-    DeviceValueUnit,
-    RecordFluxFrame,
     RecordFluxResolution,
 )
 
@@ -150,11 +148,9 @@ class T1CurveAnalysisConfig:
     """
 
     result_dir: str
-    device_name: str
     analysis_flux_range: tuple[float, float] = (0.0, 1.0)
     image_dir: str | None = None
-    samples_filename: str = "records.jsonl"
-    fallback_frame_unit: DeviceValueUnit = "A"
+    samples_filename: str = "samples.csv"
     max_abs_flux_correction: float = 0.03
     correct_flux_from_f01_enabled: bool = True
     max_rel_t1_err: float = 0.25
@@ -235,7 +231,6 @@ class T1FluxCalibration:
 
     context: T1CurveContext
     resolution: RecordFluxResolution
-    fallback_frame: RecordFluxFrame | None
     t1_df: pd.DataFrame
     freq_rows: pd.DataFrame
     summary_table: pd.DataFrame

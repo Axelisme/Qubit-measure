@@ -16,8 +16,6 @@ from zcu_tools.notebook.analysis.fit_tools import (
 )
 from zcu_tools.resources.qubit_params import T1CurveFit
 from zcu_tools.resources.record_table import (
-    DeviceValueUnit,
-    RecordFluxFrame,
     RecordFluxResolution,
 )
 
@@ -35,17 +33,20 @@ DEFAULT_THERMAL_PROBE_N_TH = (0.0, 1e-4, 3e-4, 1e-3, 3e-3, 1e-2)
 
 @dataclass(frozen=True, slots=True)
 class T2CurveAnalysisConfig:
-    """Workflow inputs; device_name selects the recorded Run coordinate device."""
+    """CSV/params paths and fit/plot controls for the staged echo analysis.
+
+    Missing dispersive inputs disable photon shot noise regardless of requested
+    active/fixed mechanisms. Flux windows use normalized Phi0; lifetimes and
+    error policies use us; readout linewidth uses MHz.
+    """
 
     result_dir: str
-    device_name: str
     analysis_flux_range: tuple[float, float] = (0.49, 0.53)
     readout_kappa_over_2pi_mhz: float = 14.75412896809815
     image_dir: str | None = None
-    samples_filename: str = "records.jsonl"
+    samples_filename: str = "samples.csv"
     default_bare_rf: float = 5.0
     t_flux_count: int = 1000
-    fallback_frame_unit: DeviceValueUnit = "A"
     max_abs_flux_correction: float = 0.03
     correct_flux_from_f01_enabled: bool = True
     max_rel_t2e_err: float = 0.5
@@ -90,6 +91,14 @@ class T2CurveAnalysisConfig:
 
 @dataclass(frozen=True, slots=True)
 class T2CurveContext:
+    """Loaded CSV and fluxonium inputs.
+
+    Paths locate source/output files; params=(EJ, EC, EL) uses GHz. Flux frame
+    values support plot axes. bare_rf/g are GHz or None when dispersive is
+    absent. samples_df/preview retain CSV rows; params_table lists loaded
+    inputs; available_columns lists the normalized analysis columns.
+    """
+
     result_dir: str
     image_dir: str
     samples_filename: str
@@ -97,13 +106,18 @@ class T2CurveContext:
     flux_half: float
     flux_int: float
     flux_period: float
-    bare_rf: float
-    g: float
+    bare_rf: float | None
+    g: float | None
     samples_df: pd.DataFrame
     t1_curve_fit: T1CurveFit | None
     params_table: pd.DataFrame
     samples_preview: pd.DataFrame
     available_columns: tuple[str, ...]
+
+    @property
+    def photon_shot_noise_enabled(self) -> bool:
+        """Whether dispersive bare_rf and g enable the photon channel."""
+        return self.bare_rf is not None and self.g is not None
 
 
 @dataclass(frozen=True, slots=True)
@@ -118,7 +132,6 @@ class T2FluxCalibration:
 
     context: T2CurveContext
     resolution: RecordFluxResolution
-    fallback_frame: RecordFluxFrame | None
     t2e_df: pd.DataFrame
     t2r_df: pd.DataFrame
     t2e_mask: NDArray[np.bool_]
@@ -282,7 +295,7 @@ class T2CurveAnalysisResult:
     calibration: T2FluxCalibration
     data: T2DephasingAnalysis
     flux_probe: T2FluxNoiseProbe
-    photon_probe: T2PhotonShotNoiseProbe
+    photon_probe: T2PhotonShotNoiseProbe | None
     combined_fit: T2CombinedFit
     channel_analysis: T2ChannelAnalysis
     summary_table: pd.DataFrame

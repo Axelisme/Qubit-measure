@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import numpy as np
 import pandas as pd
@@ -252,7 +252,15 @@ def analyze_photon_shot_noise_limit(  # noqa: PLR0913
     loss: str = "linear",
     max_nfev: int | None = 10000,
     progress: bool = False,
-) -> T2PhotonShotNoiseProbe:
+) -> T2PhotonShotNoiseProbe | None:
+    """Probe photon noise using us lifetimes and MHz readout linewidth.
+
+    Return None when data lacks dispersive inputs, disabling this channel.
+    Otherwise infer n_th with the chosen statistic, bounds and residual/error
+    policies. Invalid fit inputs or no positive photon estimate raise ValueError.
+    """
+    if not data.calibration.context.photon_shot_noise_enabled:
+        return None
     domega_dflux, chi_over_2pi_mhz = _fit_model_axes(data)
     gamma_flux = (
         flux_noise_gamma_phi_per_us(float(assumed_A_phi), domega_dflux)
@@ -440,6 +448,10 @@ def fit_t2_curve(  # noqa: PLR0913
     T2_error_policy: MeasurementErrorPolicy | None = None,
     flux_weighting: FluxResidualWeighting | None = None,
 ) -> T2CombinedFit:
+    if not data.calibration.context.photon_shot_noise_enabled:
+        init = replace(init, n_th=None)
+        fixed = tuple(name for name in fixed if name != "n_th")
+        bounds = None if bounds is None else {name: value for name, value in bounds.items() if name != "n_th"}
     fit_arrays = _combined_fit_arrays(data)
     domega_dflux, chi_over_2pi_mhz = _fit_model_axes(data, fit_arrays.fluxs)
     fit_result = fit_t2_noise_params(
@@ -521,9 +533,7 @@ def build_t2_channel_curves(
         params=context.params,
         fit_result=combined_fit.fit_result,
         kappa_over_2pi_mhz=combined_fit.readout_kappa_over_2pi_mhz,
-        chi_over_2pi_mhz=dispersive_chi01_over_2pi_mhz(
-            context.params, grid_fluxs, context.bare_rf, context.g
-        ),
+        chi_over_2pi_mhz=_fit_model_axes(data, grid_fluxs)[1],
         domega_dflux=predict_domega_dflux(context.params, grid_fluxs),
         t1_curve_fit=t1_curve_fit,
         fit_fluxs=combined_fit.fit_fluxs,
@@ -558,7 +568,7 @@ def collect_t2_curve_result(  # noqa: PLR0913
     calibration: T2FluxCalibration,
     data: T2DephasingAnalysis,
     flux_probe: T2FluxNoiseProbe,
-    photon_probe: T2PhotonShotNoiseProbe,
+    photon_probe: T2PhotonShotNoiseProbe | None,
     combined_fit: T2CombinedFit,
     channel_analysis: T2ChannelAnalysis,
     figure_paths: Mapping[str, str] | None = None,
@@ -568,7 +578,12 @@ def collect_t2_curve_result(  # noqa: PLR0913
             _stage_table("load", calibration.summary_table),
             _stage_table("dephasing", data.summary_table),
             _stage_table("flux_probe", flux_probe.summary_table),
-            _stage_table("photon_probe", photon_probe.summary_table),
+            _stage_table("photon_probe", photon_probe.summary_table)
+            if photon_probe is not None
+            else _stage_table("photon_probe", pd.DataFrame(
+                [("photon shot noise", "disabled: missing dispersive")],
+                columns=["metric", "value"],
+            )),
             _stage_table("combined_fit", combined_fit.summary_table),
             _stage_table("channel_curves", channel_analysis.summary_table),
         ],
@@ -594,15 +609,11 @@ def run_t2_curve_analysis(
 ) -> T2CurveAnalysisResult:
     context = load_t2_curve_context(
         result_dir=config.result_dir,
-        device_name=config.device_name,
         samples_filename=config.samples_filename,
         image_dir=config.image_dir,
         default_bare_rf=config.default_bare_rf,
     )
-    calibration = calibrate_t2_flux(
-        context,
-        fallback_frame_unit=config.fallback_frame_unit,
-    )
+    calibration = calibrate_t2_flux(context)
     data = prepare_t2_dephasing_data(
         calibration,
         analysis_flux_range=config.analysis_flux_range,
@@ -638,7 +649,10 @@ def run_t2_curve_analysis(
         progress=config.progress,
     )
     fit_init = make_t2_fit_init(
-        active_mechanisms=config.active_mechanisms,
+        active_mechanisms=tuple(
+            mechanism for mechanism in config.active_mechanisms
+            if mechanism != "photon_shot_noise" or context.photon_shot_noise_enabled
+        ),
         flux_probe=flux_probe,
         photon_probe=photon_probe,
         A_phi=config.fit_A_phi_init,
@@ -699,6 +713,8 @@ def _thermal_estimate(
     sample, fit = data.sample, data.fit
     context = data.calibration.context
     params, bare_rf, g = context.params, context.bare_rf, context.g
+    if bare_rf is None or g is None:
+        raise ValueError("photon shot noise requires dispersive bare_rf and g")
     half_sample_idx = int(np.nanargmin(np.abs(sample.fluxs - 0.5)))
     half_flux = float(sample.fluxs[half_sample_idx])
     half_T1_us = float(sample.T1_us[half_sample_idx])
@@ -771,7 +787,8 @@ def _fit_model_axes(
         predict_domega_dflux(context.params, resolved_fluxs),
         dispersive_chi01_over_2pi_mhz(
             context.params, resolved_fluxs, context.bare_rf, context.g
-        ),
+        ) if context.bare_rf is not None and context.g is not None
+        else np.zeros_like(resolved_fluxs),
     )
 
 

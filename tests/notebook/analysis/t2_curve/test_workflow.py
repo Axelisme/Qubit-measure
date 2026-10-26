@@ -27,10 +27,7 @@ from zcu_tools.notebook.analysis.t2_curve import (
     thermal_photon_gamma_phi_per_us,
 )
 from zcu_tools.resources.record_table import (
-    RecordFluxFrame,
     RecordFluxResolution,
-    RecordTableV2Error,
-    resolve_record_flux,
 )
 
 _KAPPA_OVER_2PI_MHZ = 14.754
@@ -69,23 +66,13 @@ def test_make_t2_fit_init_can_select_partial_mechanisms() -> None:
     assert mechanisms_to_fixed_params(("photon_shot_noise",)) == ("n_th",)
 
 
-def test_t2_curve_analysis_config_defaults_match_weighted_fit_contract() -> None:
-    config = T2CurveAnalysisConfig(device_name="bias", result_dir="/tmp/result")
-
-    assert config.use_weighted_points_only is False
-    assert config.T1_error_policy.fallback_error == pytest.approx(1.0)
-    assert config.loss == "linear"
-    assert config.correct_flux_from_f01_enabled is True
 
 
 def test_prepare_t2_dephasing_data_default_keeps_nan_error_points() -> None:
     fluxs = np.array([0.5, 0.51], dtype=np.float64)
     samples = pd.DataFrame(
         {
-            "dev_value": [0.0, 0.01],
-            "dev_unit": ["A", "A"],
-            "flux_int": [0.5, 0.5],
-            "flux_period": [1.0, 1.0],
+            "flux": [-0.5, -0.49],
             "freq_mhz": [350.0, 360.0],
             "t1_us": [60.0, 61.0],
             "t1_err_us": [0.5, 0.5],
@@ -170,14 +157,10 @@ def test_plot_t2_flux_calibration_shows_provenance_categories() -> None:
 
 @pytest.fixture
 def null_frequency_analysis() -> T2DephasingAnalysis:
-    """Fresh public analysis with explicit, row-frame and fallback T2e/T2r rows."""
+    """Fresh analysis with echo/Ramsey rows spanning integer branches."""
     samples = pd.DataFrame(
         {
-            "dev_value": [0.0, 0.0, 0.01, 0.0, 0.0, 0.01],
-            "dev_unit": ["A", "A", "A", "A", "A", "A"],
-            "flux": [0.5, np.nan, np.nan, 0.5, np.nan, np.nan],
-            "flux_int": [np.nan, 0.5, np.nan, np.nan, 0.5, np.nan],
-            "flux_period": [np.nan, 1.0, np.nan, np.nan, 1.0, np.nan],
+            "flux": [0.5, -0.5, -0.49, 0.5, -0.5, -0.49],
             "freq_mhz": [np.nan] * 6,
             "t1_us": [60.0, 61.0, 62.0, 63.0, 64.0, 65.0],
             "t1_err_us": [0.5, 0.5, 0.5, 0.5, 0.5, 0.5],
@@ -200,9 +183,9 @@ def test_null_frequency_rows_reach_the_fit_window(
     assert len(data.calibration.t2r_df) == 3
     assert len(data.fit.T2e_us) == 3
     assert not np.any(data.window.f01_measured)
-    assert data.window.flux_sources == ("explicit", "row-frame", "fallback-frame")
+    assert data.window.flux_sources == ("explicit",) * 3
     assert data.window.correction_skipped_reason == (
-        "explicit_flux",
+        "missing_f01",
         "missing_f01",
         "missing_f01",
     )
@@ -223,14 +206,14 @@ def test_null_frequency_t2r_diagnostics_preserve_row_identity(
     assert isinstance(diag, T2RowDiagnostics)
     assert diag.sample_indexes.tolist() == [3, 4, 5]
     assert diag.in_window.tolist() == [True, True, True]
-    assert diag.flux_sources == ("explicit", "row-frame", "fallback-frame")
+    assert diag.flux_sources == ("explicit",) * 3
     np.testing.assert_allclose(diag.raw_fluxs, [0.5, -0.5, -0.49])
     np.testing.assert_allclose(diag.corrected_fluxs, [0.5, -0.5, -0.49])
     np.testing.assert_allclose(diag.aligned_fluxs, [0.5, 0.5, 0.51])
     assert diag.integer_shifts.tolist() == [0.0, 1.0, 1.0]
     assert not np.any(diag.correction_applied)
     assert diag.correction_skipped_reason == (
-        "explicit_flux",
+        "missing_f01",
         "missing_f01",
         "missing_f01",
     )
@@ -260,9 +243,9 @@ def test_null_frequency_coverage_and_summary_match_row_diagnostics(
 
     # Per-subset provenance must distinguish explicit / row-frame / fallback.
     for coverage in (coverage_t2e, coverage_t2r):
-        assert coverage["n_explicit"] == 1
-        assert coverage["n_row_frame"] == 1
-        assert coverage["n_fallback_frame"] == 1
+        assert coverage["n_explicit"] == 3
+        assert coverage["n_row_frame"] == 0
+        assert coverage["n_fallback_frame"] == 0
 
     # Null freq_mhz rows keep raw coordinates, align into the window, and
     # every one of them reaches a finite model f01 at its aligned flux.
@@ -277,8 +260,8 @@ def test_null_frequency_coverage_and_summary_match_row_diagnostics(
     # Correction-skip reasons are exact per subset, not a collapsed boolean.
     for coverage in (coverage_t2e, coverage_t2r):
         assert coverage["skipped"] == 3
-        assert coverage["skipped_explicit_flux"] == 1
-        assert coverage["skipped_missing_f01"] == 2
+        assert coverage["skipped_explicit_flux"] == 0
+        assert coverage["skipped_missing_f01"] == 3
         assert coverage["skipped_rejected"] == 0
         assert coverage["skipped_disabled"] == 0
 
@@ -306,7 +289,7 @@ def test_null_frequency_coverage_and_summary_match_row_diagnostics(
             summary["metric"] == "T2r flux sources (explicit/row/fallback)",
             "value",
         ].iloc[0]
-        == "1/1/1"
+        == "3/0/0"
     )
     assert (
         summary.loc[
@@ -318,7 +301,7 @@ def test_null_frequency_coverage_and_summary_match_row_diagnostics(
         summary.loc[
             summary["metric"] == "T2r f01 correction skipped reasons", "value"
         ].iloc[0]
-        == "explicit_flux=1 missing_f01=2"
+        == "missing_f01=3"
     )
     assert (
         summary.loc[summary["metric"] == "T2r integer shifts", "value"].iloc[0]
@@ -333,11 +316,7 @@ def test_duplicate_index_labels_keep_positional_row_identity() -> None:
     # reconstruction would turn the one-row T2r selection into two rows.
     samples = pd.DataFrame(
         {
-            "dev_value": [0.0, 0.0, 0.01],
-            "dev_unit": ["A", "A", "A"],
-            "flux": [0.5, np.nan, np.nan],
-            "flux_int": [np.nan, 0.5, np.nan],
-            "flux_period": [np.nan, 1.0, np.nan],
+            "flux": [0.5, -0.5, -0.49],
             "freq_mhz": [np.nan] * 3,
             "t1_us": [60.0, 61.0, 62.0],
             "t1_err_us": [0.5, 0.5, 0.5],
@@ -367,7 +346,7 @@ def test_duplicate_index_labels_keep_positional_row_identity() -> None:
     assert np.all(np.isfinite(diag.f01_model_mhz))
     np.testing.assert_allclose(diag.f01_used_mhz, diag.f01_model_mhz)
     assert not np.any(diag.correction_applied)
-    assert diag.correction_skipped_reason == ("explicit_flux",)
+    assert diag.correction_skipped_reason == ("missing_f01",)
 
     coverage_t2r = data.branch_coverage.loc[
         data.branch_coverage["subset"] == "T2r rows"
@@ -376,7 +355,7 @@ def test_duplicate_index_labels_keep_positional_row_identity() -> None:
     assert coverage_t2r["n_explicit"] == 1
     assert coverage_t2r["n_row_frame"] == 0
     assert coverage_t2r["skipped"] == 1
-    assert coverage_t2r["skipped_explicit_flux"] == 1
+    assert coverage_t2r["skipped_missing_f01"] == 1
     summary = data.summary_table
     assert summary.loc[summary["metric"] == "window T2r rows", "value"].iloc[0] == "1/1"
 
@@ -386,78 +365,19 @@ def test_duplicate_index_labels_keep_positional_row_identity() -> None:
         data.branch_coverage["subset"] == "T2e rows"
     ].iloc[0]
     assert coverage_t2e["n_in_flux_window"] == 1
-    assert coverage_t2e["n_row_frame"] == 1
+    assert coverage_t2e["n_explicit"] == 1
     assert coverage_t2e["skipped_missing_f01"] == 1
     assert len(data.half_preview) == 1
 
 
-def test_t2_calibration_reports_resolution_provenance() -> None:
-    samples = pd.DataFrame(
-        {
-            "dev_value": [0.0, 0.0, 0.01],
-            "dev_unit": ["A", "A", "A"],
-            "flux": [0.5, np.nan, np.nan],
-            "flux_int": [np.nan, 0.5, np.nan],
-            "flux_period": [np.nan, 1.0, np.nan],
-            "freq_mhz": [350.0, 351.0, 352.0],
-            "t1_us": [60.0, 61.0, 62.0],
-            "t1_err_us": [0.5, 0.5, 0.5],
-            "t2e_us": [30.0, 28.0, 26.0],
-            "t2e_err_us": [0.2, 0.2, 0.2],
-        }
-    )
-    cal = calibrate_t2_flux(_synthetic_calibration(samples).context)
-
-    assert cal.resolution.sources == (
-        "explicit",
-        "row-frame",
-        "fallback-frame",
-    )
-    np.testing.assert_allclose(cal.resolution.values, [0.5, -0.5, -0.49])
-    assert not hasattr(cal, "current_scale")
 
 
-def test_t2_unresolved_flux_rows_fail_fast() -> None:
-    samples = pd.DataFrame(
-        {
-            "dev_value": [0.0, 0.01],
-            "dev_unit": ["V", "V"],
-            "freq_mhz": [np.nan, np.nan],
-            "t1_us": [60.0, 61.0],
-            "t1_err_us": [0.5, 0.5],
-            "t2e_us": [30.0, 28.0],
-            "t2e_err_us": [0.2, 0.2],
-        }
-    )
-    context = T2CurveContext(
-        result_dir="/tmp/result",
-        image_dir="/tmp/result/t2_curve",
-        samples_filename="samples.jsonl",
-        params=(3.4, 0.9, 0.6),
-        flux_half=0.0,
-        flux_int=0.5,
-        flux_period=1.0,
-        bare_rf=5.8,
-        g=0.07,
-        samples_df=samples,
-        t1_curve_fit=None,
-        params_table=pd.DataFrame(),
-        samples_preview=samples,
-        available_columns=tuple(samples.columns),
-    )
-
-    with pytest.raises(RecordTableV2Error, match="unable to resolve flux"):
-        calibrate_t2_flux(context, fallback_frame_unit="A")
 
 
 def test_t2_integer_equivalent_branches_align_to_same_flux() -> None:
     samples = pd.DataFrame(
         {
-            "dev_value": [0.0, 0.0],
-            "dev_unit": ["A", "A"],
-            "flux": [0.5, np.nan],
-            "flux_int": [np.nan, 0.5],
-            "flux_period": [np.nan, 1.0],
+            "flux": [0.5, -0.5],
             "freq_mhz": [350.0, 351.0],
             "t1_us": [60.0, 61.0],
             "t1_err_us": [0.5, 0.5],
@@ -519,42 +439,12 @@ def test_t2_integer_equivalent_branches_align_to_same_flux() -> None:
     assert shifts_row["value"].iloc[0] == "k=0:1 k=1:1"
 
 
-def test_t2_explicit_rows_are_not_auto_corrected() -> None:
-    samples = pd.DataFrame(
-        {
-            "dev_value": [0.0, 0.01],
-            "dev_unit": ["A", "A"],
-            "flux": [0.5, np.nan],
-            "flux_int": [np.nan, 0.5],
-            "flux_period": [np.nan, 1.0],
-            "freq_mhz": [350.0, 351.0],
-            "t1_us": [60.0, 61.0],
-            "t1_err_us": [0.5, 0.5],
-            "t2e_us": [30.0, 28.0],
-            "t2e_err_us": [0.2, 0.2],
-        }
-    )
-    samples["freq_mhz"] = predict_f01_mhz((3.4, 0.9, 0.6), np.array([0.51, -0.488]))
-    calibration = _synthetic_calibration(samples)
-
-    data = prepare_t2_dephasing_data(calibration, analysis_flux_range=(0.49, 0.53))
-
-    assert data.window.flux_sources == ("explicit", "row-frame")
-    np.testing.assert_array_equal(data.window.f01_correction_applied, [False, True])
-    np.testing.assert_allclose(data.window.raw_fluxs, [0.5, -0.49])
-    np.testing.assert_allclose(data.window.flux_corrections, [0.0, 0.002], atol=1e-5)
-    np.testing.assert_allclose(data.window.fluxs, [0.5, 0.512], atol=1e-5)
-    assert data.window.correction_skipped_reason == ("explicit_flux", "")
 
 
 def test_t2_correction_disabled_preserves_raw_flux_and_reports_disabled() -> None:
     samples = pd.DataFrame(
         {
-            "dev_value": [0.0, 0.0],
-            "dev_unit": ["A", "A"],
-            "flux": [0.5, np.nan],
-            "flux_int": [np.nan, 0.5],
-            "flux_period": [np.nan, 1.0],
+            "flux": [0.5, -0.5],
             "freq_mhz": [350.0, 351.0],
             "t1_us": [60.0, 61.0],
             "t1_err_us": [0.5, 0.5],
@@ -627,7 +517,7 @@ def _synthetic_dephasing_data(
     context = T2CurveContext(
         result_dir="/tmp/result",
         image_dir="/tmp/result/t2_curve",
-        samples_filename="samples.jsonl",
+        samples_filename="samples.csv",
         params=(3.4, 0.9, 0.6),
         flux_half=0.5,
         flux_int=0.0,
@@ -646,7 +536,6 @@ def _synthetic_dephasing_data(
             values=np.asarray(fluxs, dtype=np.float64),
             sources=("row-frame",) * len(fluxs),
         ),
-        fallback_frame=RecordFluxFrame("A", 0.5, 1.0),
         t2e_df=pd.DataFrame(),
         t2r_df=pd.DataFrame(),
         t2e_mask=np.zeros(0, dtype=bool),
@@ -710,7 +599,7 @@ def _synthetic_calibration(samples: pd.DataFrame) -> T2FluxCalibration:
     context = T2CurveContext(
         result_dir="/tmp/result",
         image_dir="/tmp/result/t2_curve",
-        samples_filename="samples.jsonl",
+        samples_filename="samples.csv",
         params=(3.4, 0.9, 0.6),
         flux_half=0.0,
         flux_int=0.5,
@@ -723,13 +612,13 @@ def _synthetic_calibration(samples: pd.DataFrame) -> T2FluxCalibration:
         samples_preview=samples,
         available_columns=tuple(samples.columns),
     )
-    resolution = resolve_record_flux(
-        samples, fallback_frame=RecordFluxFrame("A", 0.5, 1.0)
+    resolution = RecordFluxResolution(
+        values=samples["flux"].to_numpy(dtype=np.float64),
+        sources=("explicit",) * len(samples),
     )
     return T2FluxCalibration(
         context=context,
         resolution=resolution,
-        fallback_frame=RecordFluxFrame("A", 0.5, 1.0),
         t2e_df=samples,
         t2r_df=pd.DataFrame(),
         t2e_mask=np.ones(len(samples), dtype=bool),

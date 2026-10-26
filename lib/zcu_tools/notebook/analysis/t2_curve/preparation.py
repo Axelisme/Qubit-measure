@@ -17,12 +17,7 @@ from zcu_tools.notebook.analysis.fit_tools import (
 )
 from zcu_tools.resources.qubit_params import QubitParams
 from zcu_tools.resources.record_table import (
-    DeviceValueUnit,
-    JsonlRecordTable,
-    RecordFluxFrame,
-    project_device_coordinates,
-    resolve_record_flux,
-    validate_record_table_v2,
+    RecordFluxResolution,
 )
 
 from .models import (
@@ -34,48 +29,38 @@ from .models import (
     T2WindowData,
 )
 
-_REQUIRED_COLUMNS = [
-    "freq_mhz",
-    "t1_us",
-    "t1_err_us",
-    "t2e_us",
-    "t2e_err_us",
-]
+_REQUIRED_COLUMNS = ("flux", "t1_us", "t2e_us")
 
 
 def load_t2_curve_context(
     *,
     result_dir: str,
-    device_name: str,
-    samples_filename: str = "records.jsonl",
+    samples_filename: str = "samples.csv",
     image_dir: str | None = None,
     default_bare_rf: float = 5.0,
     preview_rows: int = 10,
 ) -> T2CurveContext:
-    """Load fluxdep/dispersive params and latest JSONL rows from result_dir.
+    """Load params.json and CSV samples from result_dir.
 
-    device_name selects devices[device_name].value/value_unit; missing facts
-    fail without flat-field fallback. samples_filename is relative to
-    result_dir and defaults to records.jsonl;
-    rows require freq_mhz, t1_us, t1_err_us, t2e_us and t2e_err_us. Create
-    image_dir (default result_dir/t2_curve) and return rows with a preview of
-    preview_rows rows. default_bare_rf is in GHz for dispersive input loading.
-    Missing params, invalid JSONL or missing required columns fail fast.
+    samples_filename is relative to result_dir or an absolute CSV path.
+    Require numeric normalized flux, t1_us and t2e_us. Missing freq_mhz,
+    lifetime errors and Ramsey lifetime become NaN; ignore unused columns.
+    Create image_dir (default result_dir/t2_curve), returning preview_rows
+    initial rows. default_bare_rf is the GHz dispersive fallback frequency.
+    Missing files/parameters, required columns or nonnumeric used values raise
+    with the file or column name.
     """
     resolved_image_dir = image_dir or os.path.join(result_dir, "t2_curve")
     os.makedirs(result_dir, exist_ok=True)
     os.makedirs(resolved_image_dir, exist_ok=True)
 
     params_file = QubitParams(os.path.join(result_dir, "params.json"), readonly=True)
-    fit_inputs = params_file.require_dispersive_inputs(default_bare_rf=default_bare_rf)
+    fit_inputs = params_file.require_fluxdep_fit()
     dispersive_fit = params_file.get_dispersive_fit()
-    if dispersive_fit is None:
-        raise RuntimeError("params.json needs a dispersive section with g and bare_rf.")
+    bare_rf = dispersive_fit.bare_rf if dispersive_fit is not None else None
+    g = dispersive_fit.g if dispersive_fit is not None else None
 
-    samples_df = project_device_coordinates(
-        JsonlRecordTable(os.path.join(result_dir, samples_filename)).read(),
-        device_name=device_name,
-    )
+    samples_df = pd.read_csv(os.path.join(result_dir, samples_filename))
     _validate_required_columns(samples_df)
     params = fit_inputs.params
     params_table = pd.DataFrame(
@@ -86,8 +71,8 @@ def load_t2_curve_context(
             ("flux_half", fit_inputs.flux_half),
             ("flux_int", fit_inputs.flux_int),
             ("flux_period", fit_inputs.flux_period),
-            ("bare_rf (GHz)", dispersive_fit.bare_rf),
-            ("g (GHz)", dispersive_fit.g),
+            ("bare_rf (GHz)", bare_rf),
+            ("g (GHz)", g),
         ],
         columns=["parameter", "value"],
     )
@@ -100,8 +85,8 @@ def load_t2_curve_context(
         flux_half=fit_inputs.flux_half,
         flux_int=fit_inputs.flux_int,
         flux_period=fit_inputs.flux_period,
-        bare_rf=dispersive_fit.bare_rf,
-        g=dispersive_fit.g,
+        bare_rf=bare_rf,
+        g=g,
         samples_df=samples_df,
         t1_curve_fit=params_file.get_t1_curve_fit(),
         params_table=params_table,
@@ -110,19 +95,19 @@ def load_t2_curve_context(
     )
 
 
-def calibrate_t2_flux(
-    context: T2CurveContext,
-    *,
-    fallback_frame_unit: DeviceValueUnit = "A",
-) -> T2FluxCalibration:
-    samples_df = context.samples_df
-    fallback_frame = RecordFluxFrame(
-        fallback_frame_unit, context.flux_int, context.flux_period
-    )
-    resolution = resolve_record_flux(
-        samples_df,
-        fallback_frame=fallback_frame,
-    )
+def calibrate_t2_flux(context: T2CurveContext) -> T2FluxCalibration:
+    """Select finite echo/Ramsey rows from normalized CSV flux coordinates.
+
+    Return positional row masks, uncorrected flux and a count summary without
+    mutating context. Missing/nonnumeric used columns or nonfinite flux raise
+    ValueError; no device-coordinate fallback is performed.
+    """
+    samples_df = context.samples_df.copy()
+    _validate_required_columns(samples_df)
+    fluxs = _float_column(samples_df, "flux")
+    if not np.all(np.isfinite(fluxs)):
+        raise ValueError("samples.csv flux must be finite")
+    resolution = RecordFluxResolution(values=fluxs, sources=("explicit",) * len(fluxs))
     t2e_values = _float_column(samples_df, "t2e_us")
     t2e_mask = np.isfinite(t2e_values)
     t2e_df = samples_df.loc[t2e_mask].copy()
@@ -142,11 +127,10 @@ def calibrate_t2_flux(
     }
     summary_table = pd.DataFrame(
         [
-            ("records.jsonl rows", str(len(samples_df))),
+            ("samples.csv rows", str(len(samples_df))),
             ("explicit flux rows", str(source_counts["explicit"])),
             ("row-frame flux rows", str(source_counts["row-frame"])),
             ("fallback-frame flux rows", str(source_counts["fallback-frame"])),
-            ("fallback frame unit", fallback_frame.dev_unit),
             ("finite f01 rows", str(len(freq_rows))),
             ("finite T2e rows", str(len(t2e_df))),
             ("finite T2r rows", str(len(t2r_df))),
@@ -156,7 +140,6 @@ def calibrate_t2_flux(
     return T2FluxCalibration(
         context=context,
         resolution=resolution,
-        fallback_frame=fallback_frame,
         t2e_df=t2e_df,
         t2r_df=t2r_df,
         t2e_mask=t2e_mask.copy(),
@@ -235,15 +218,23 @@ def prepare_t2_dephasing_data(
 
 # tolerated: Notebook documents probe controls and shared fit-policy keywords explicitly.
 def _validate_required_columns(samples_df: pd.DataFrame) -> None:
-    validate_record_table_v2(samples_df, allow_empty=True)
     missing_columns = [
         name for name in _REQUIRED_COLUMNS if name not in samples_df.columns
     ]
     if missing_columns:
-        raise KeyError(f"Missing required sample columns: {missing_columns}")
+        raise ValueError(f"samples.csv missing required columns: {missing_columns}")
+    for column in (*_REQUIRED_COLUMNS, "freq_mhz", "t1_err_us", "t2e_err_us", "t2r_us", "t2r_err_us"):
+        if column not in samples_df.columns:
+            samples_df[column] = np.nan
+        try:
+            samples_df[column] = pd.to_numeric(samples_df[column], errors="raise")
+        except (ValueError, TypeError) as exc:
+            raise ValueError(f"samples.csv column {column} must be numeric") from exc
 
 
 def _float_column(frame: pd.DataFrame, column: str) -> NDArray[np.float64]:
+    if column not in frame.columns:
+        return np.full(len(frame), np.nan, dtype=np.float64)
     return np.asarray(frame[column], dtype=np.float64)
 
 
@@ -289,10 +280,7 @@ def _resolve_analysis_frame(
                 )
             candidate_fluxs = correction.corrected_fluxs
             accepted = correction.accepted
-            for index, source in enumerate(row_sources):
-                if source == "explicit":
-                    reasons.append("explicit_flux")
-                    continue
+            for index in range(len(row_sources)):
                 if not f01_measured[index]:
                     reasons.append("missing_f01")
                     continue
@@ -303,10 +291,7 @@ def _resolve_analysis_frame(
                 else:
                     reasons.append("rejected")
         else:
-            reasons.extend(
-                "explicit_flux" if source == "explicit" else "missing_f01"
-                for source in row_sources
-            )
+            reasons.extend("missing_f01" for _ in row_sources)
     else:
         reasons.extend("disabled" for _ in row_sources)
     aligned_fluxs, shifts, in_window = align_flux_to_window(
