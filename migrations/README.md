@@ -2,6 +2,18 @@
 
 **讀者：** framework-dev、agent。查閱離線轉換工具的公開 API、格式契約與內部規格入口。
 
+## 資料狀態 → 工具 → 結果
+
+| 資料狀態 | 工具與操作說明 | 結果 |
+| --- | --- | --- |
+| 舊 `result/<chip>/<qubit>`／Database | [`migrate_storage`](../docs/storage-migration.md) | Native entry、原文保全、備份與 pending 報告 |
+| Native 舊 component YAML 或未標版文件 | 長期 [`upgrade_parameters.py`](../docs/flux-migration.md)，預設 dry-run | 完整分類後 v1→v2，不補 records；runtime 1 期間只驗副本 |
+| 舊樣本 CSV | [`sample_csv`](#sample-csv--jsonl) | JSONL 樣本歷史，保留來源 CSV |
+| Record 舊 `dev_value/dev_unit` | 同一長期 CLI 的 [`--scope records --device-name`](../docs/record-device-upgrades.md) | Operator 宣告的 `devices.<name>` 值，不合成 frame/component |
+| Device 改名或改接線 | [人工改名／重校準流程](../docs/record-device-upgrades.md#改名與改接線) | Component 更新，歷史 record 名稱與 frame 不變 |
+
+Component 的 [版本與備份語意](../docs/parameter-upgrades.md) 與一次性舊 repo 匯入分開。Runtime 仍為 1 時，shipped v2 storage mapping 只供接線 review，實際匯入等 runtime 升 2 後驗收。
+
 支援的檔案與格式就轉換，不支援的就原樣保留。欄位也一樣，未知欄位以原名原值留在新容器，報告區分已轉換與原樣保留。Pending 僅用於支援項目缺必要證據而無法轉換，原文仍須可見。非法輸入與安全衝突仍須回報，不當成成功。
 
 本目錄提供使用者明確執行的舊資料轉換。正常量測 runtime 不 import migrations。工具不操作硬體，也不替使用者選擇來源檔或推論單位。

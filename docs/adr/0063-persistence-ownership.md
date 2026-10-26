@@ -174,6 +174,8 @@ Runtime 只接受目前版本。缺版或版本不同時，讀取處列出文件
 
 `resources.parameter_upgrade` 擁有通用鏈與 YAML I/O。Caller 提供完整舊格式分類、每版完整驗證及純函式步驟。未標版文件只有在 operator 明確 upgrade，且完整分類確認後才視為 v1。Runner 驗證每步輸出正好是下一版，current 文件也先驗證再跳過。預設 dry-run 不建檔或鎖，逐文件、逐欄位列出差異。Apply 用 DocumentStore 的同名 sidecar lock，重讀、完整驗證、exclusive byte backup、sibling temporary 與 atomic replace。失敗保留原檔與已完成的備份，其餘文件照常處理。這不是多檔或掉電交易。
 
+Lab 的 component flux 純轉換由長期升級步驟與一次性 `storage_mapping` 共用。Migrations 透過 caller 的完整文件 batch callback 在 current schema 驗證前轉換 seed／value，不先發布舊格式再升級。框架不解讀 lab 欄位。離線 YAML 沒有 device catalog，只驗共用名稱語法，device 存在性留在使用處檢查。`migrations → zcu_lab.components` 是 caller 指向定義者的邊，C14、C16、C20 保護反向隔離，不限制 caller 載入。
+
 Lab 擁有目前版本、步驟與真實舊文件形狀。`scripts/upgrade_parameters.py` 只組合 lab plan 與通用 main。長期鏈不依賴可刪除的 `migrations/`，後者仍只做舊 repo 匯入。C14、C16 禁止 lib 反向 import lab；C20、C21 禁止 lib 依賴 migrations 或 scripts。Caller 注入取代反向載入。
 
 2026-10-27 記錄使用者採用升級鏈的原因：「每次改component都會讓舊資料不支援很頭痛」，並對整份文件版本與通用 runner／lab steps 的建議回覆「12採用建議」。框架測試在公開 runner、讀寫與 main 接縫注入合成步驟，不 import lab；真實 lab 步驟以離線樣本驗收。

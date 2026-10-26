@@ -1,6 +1,6 @@
 # Components
 
-**Last updated:** 2026-10-27，component 文件版本與明確升級入口
+**Last updated:** 2026-10-27，離線 flux v1→v2 與 runtime 版本分開
 
 **讀者：** lab-author、agent。查詢 component kind、角色與字串引用。
 
@@ -19,7 +19,7 @@
 
 `register_all` 同時註冊 `parameter_upgrades.PARAMETER_SCHEMA_POLICY`，目前為 `schema_version: 1`。Setup、point 與 entry template 都使用這個整份文件版本，容器版本不變。結構變更的版本宣告、完整舊格式分類與純函式步驟由本 package 擁有。通用執行與 I/O 由 resources 擁有，見 [ADR-0063](../../docs/adr/0063-persistence-ownership.md#component-文件版本與明確升級)。
 
-長期入口是 `scripts/upgrade_parameters.py`。目前 plan 有零個結構步驟，只驗證並跳過已標版的 current 文件。完整 lab 舊格式分類尚未提供時，入口明確拒絕未標版文件，說明無法確認來源版本，不把它當成腐敗或默認 v1。完成分類與對應步驟後才接受這類文件，不能要求 operator 手改標頭。操作與這項中間階段限制見 [升級命令](../../docs/parameter-upgrades.md)。
+長期入口是 `scripts/upgrade_parameters.py`。`parameter_upgrade_plan()` 保留完整分類與 flux v1→v2 純步驟，未標版文件只在分類成功後視為 v1。離線 target 為 2、runtime 仍為 1，過渡期只在副本驗收，v2 產物待 runtime 升 2 才能載入。`flux_upgrade.py` 擁有四類分類、local／mux 共用轉換與 source 名稱語法檢查，不做 I/O 或 device catalog 查詢。`storage_mapping` 經中性完整文件 batch callback 重用轉換，長期步驟不依賴 migrations。四類形狀、參考點假設與手動修復見 [flux 升級指南](../../docs/flux-migration.md)，runner 操作見 [升級命令](../../docs/parameter-upgrades.md)。
 
 ## Qubit flux frame
 

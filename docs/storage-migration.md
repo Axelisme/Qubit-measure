@@ -2,9 +2,13 @@
 
 **讀者：** operator、agent。使用離線 CLI 將一個舊 qubit 的 result／Database 遷移到新 entry，核對報告並處理重跑。
 
-**Last updated:** 2026-10-21
+**Last updated:** 2026-10-27，component flux batch 轉換接線
 
 本指南處理 `result/<chip>/<qubit>/` 與 `Database/<chip>/<qubit>/`。工具轉換支援的格式，將未支援的檔案與未知欄位原樣保留。報告以 `preserved` 表示原樣保全，以 pending 定位缺少必要轉換證據的支援項目。非法輸入與安全衝突會使操作失敗。
+
+先依 [資料狀態對照表](../migrations/README.md) 選入口。Native 舊 component 不再走本工具，使用 [flux v1→v2 升級](flux-migration.md)。Record 的舊值歸屬使用同一長期 CLI 的 [record 範圍](record-device-upgrades.md)。
+
+Shipped mapping 共用 lab 的純 flux 轉換，seed／完整 value group 先轉換，再交目前 schema 驗證，不先發布舊文件再升級。現在 runtime 為 1、mapping 輸出為 2，真正匯入須等 runtime 升 2 後才執行。目前只 review 接線與驗收合成同版 schema。來源沒有可用的明示 `flux_source` 時，不猜名稱，校準組保留原文並列 pending。操作者要根據接線證據請 lab-author 在 mapping 明填來源，不能從單位推出裝置名。
 
 內部欄位對照與 publication 契約見 [storage migration 規格](../migrations/storage_migration/README.md)。獨立 CSV converter 的 API 與 CLI 見 [migrations README](../migrations/README.md#sample-csv--jsonl)。
 

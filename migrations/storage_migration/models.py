@@ -1,6 +1,6 @@
 """Typed inputs and durable state for explicit, offline storage migration."""
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from pathlib import Path
@@ -10,6 +10,7 @@ from uuid import UUID
 from pydantic import JsonValue
 from zcu_tools.datafile import JsonObject
 from zcu_tools.experiment.metadata import CfgSnapshot, SoftwareProvenance
+from zcu_tools.resources.parameter_upgrade import ParameterDocument
 
 from migrations.comparison import ExistingItem
 from migrations.comparison import MigrationDifference as MigrationDifference
@@ -84,6 +85,12 @@ class MigrationMapping:
     Labber tags or callback lookup identities, and is not a runtime alias.
     module_rules declares deferred flat module names in reference priority order.
     The composition root registers the seeds' kinds with entry before use.
+    parameter_transform optionally converts detached complete seed/value batches
+    before current-schema validation. It receives/returns ParameterDocument and
+    must preserve unrelated fields, perform no I/O and raise ValueError for
+    unsupported input. None keeps current seeds/rules unchanged. Seed failure
+    aborts before seeding; a failed value group is pending with original values
+    preserved. Change mapping_version when changing this callback's semantics.
     """
 
     mapping_version: str
@@ -93,6 +100,7 @@ class MigrationMapping:
     data_schemas: Mapping[tuple[str, str], tuple[LegacyVariableSchema, ...]]
     module_rules: tuple[ModuleRule, ...] = ()
     native_tags: Mapping[tuple[str, str], str] = field(default_factory=dict)
+    parameter_transform: Callable[[ParameterDocument], ParameterDocument] | None = None
 
 
 @dataclass(frozen=True, kw_only=True)

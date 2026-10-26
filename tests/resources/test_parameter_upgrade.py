@@ -1,6 +1,7 @@
 """Synthetic upgrades through the public pure runner and offline CLI seams."""
 
 from copy import deepcopy
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -207,6 +208,18 @@ def test_cli_isolates_corrupt_and_partial_documents_and_defaults_to_dry_run(
     )
     assert main([str(good), "--apply"], plan=rename_plan) == 0
     assert "skipped" in capsys.readouterr().out
+
+
+def test_component_cli_prints_caller_assumptions_before_file_results(
+    tmp_path: Path, rename_plan: UpgradePlan, capsys: pytest.CaptureFixture[str]
+) -> None:
+    path = tmp_path / "point.yaml"
+    path.write_text("old: 7\n", encoding="utf-8")
+    plan = replace(rename_plan, notes=("Reference points are assumed; recalibrate.",))
+    assert main([str(path)], plan=plan) == 0
+    lines = capsys.readouterr().out.splitlines()
+    assert lines[0] == "Reference points are assumed; recalibrate."
+    assert f"{path}: dry-run" in lines
 
 
 def test_file_runner_carries_source_context_across_fresh_step_outputs(

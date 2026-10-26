@@ -9,13 +9,15 @@ or evaluated, and no definitions are registered on import.
 from collections.abc import Mapping
 from typing import Literal
 
+from zcu_tools.resources.parameter_upgrade import ParameterDocument
+
 from migrations.legacy_labber import LegacyVariableSchema
 from migrations.storage_migration import KeyRule, MigrationMapping, ModuleRule
 
 # Explicit legacy mappings preserve working units and fixed roots. Changes to rules, seeds,
 # roles or native declarations require new revisions for both kind profiles.
 # Never reuse a revision across profiles: resume compares this exact identity.
-_KIND_REVISIONS = {"qubit/fluxonium": "1.20", "qubit/transmon": "1.21"}
+_KIND_REVISIONS = {"qubit/fluxonium": "1.22", "qubit/transmon": "1.23"}
 
 _VALUE_PATHS = (
     ("r_f", "R1.freq"),
@@ -127,6 +129,14 @@ _MODULE_NAMES = (
 )
 
 
+def _convert_parameter_batch(document: ParameterDocument) -> ParameterDocument:
+    # Keep lab imports at execution, not declaration: synthetic framework callers
+    # replace this callback and never load concrete lab models.
+    from zcu_lab.components.flux_upgrade import convert_storage_flux_batch
+
+    return convert_storage_flux_batch(document)
+
+
 def build_mapping(
     *,
     qubit_kind: Literal["qubit/fluxonium", "qubit/transmon"],
@@ -201,6 +211,7 @@ def build_mapping(
     )
     return MigrationMapping(
         mapping_version=_KIND_REVISIONS[qubit_kind],
+        parameter_transform=_convert_parameter_batch,
         components={
             "R1": {"kind": "resonator"},
             "Q1": {"kind": qubit_kind, "resonator": "R1", "ext": {"readout_cal": {}}},

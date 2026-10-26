@@ -4,6 +4,8 @@
 
 ## 範圍與 operator 宣告
 
+資料狀態與其他工具見 [遷移對照表](../migrations/README.md)。Native component 的四類分類、手動補完與還原見 [flux 升級指南](flux-migration.md)，舊 repo 匯入見 [storage migration](storage-migration.md)。這些操作不推測歷史 frame。
+
 Record 歷史位於 `result/<entry>/records/components/<component>.jsonl`。同一檔案可以混有新舊形狀，必須逐列判讀。JSONL 沒有獨立 header 或 row version。
 
 舊 `dev_value`／`dev_unit` 沒有記錄 device 名稱。工具不從檔名、component、setup、單位或目前接線推測名稱。Operator 必須先確認該批舊值來自哪個 device，再用 `--device-name` 宣告。若不同歷史列來自不同 device，不能把整檔都宣告為同一名稱。先保留原檔，按可靠的量測紀錄人工釐清歸屬。

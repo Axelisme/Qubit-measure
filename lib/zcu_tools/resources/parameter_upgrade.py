@@ -63,12 +63,15 @@ class UpgradePlan:
     classify_legacy(document) returns True only after full unversioned-v1 shape
     classification; False or ValueError rejects corrupt/partial input. Runtime
     readers never call it. Callbacks are pure and receive detached data.
+    notes lists caller-owned operator warnings printed before component results,
+    for example assumptions or a temporary runtime/upgrade-target mismatch.
     """
 
     policy: ParameterSchemaPolicy
     steps: tuple[UpgradeStep, ...]
     validate: Callable[[ParameterDocument, int], None]
     classify_legacy: Callable[[ParameterDocument], bool]
+    notes: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.steps:
@@ -301,6 +304,8 @@ def main(argv: Sequence[str] | None = None, *, plan: UpgradePlan | None = None) 
         parser.error("--device-name is only valid with --scope records")
     if plan is None:
         parser.error("component scope requires a caller-configured upgrade plan")
+    for note in plan.notes:
+        print(note)
     results = upgrade_files(
         tuple(UpgradeSource(path) for path in paths), plan=plan, apply=apply
     )

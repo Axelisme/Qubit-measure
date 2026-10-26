@@ -1,6 +1,6 @@
 # `migrations.storage_migration` 離線遷移
 
-**Last updated:** 2026-10-22
+**Last updated:** 2026-10-27，完整參數 batch 的 caller 轉換接縫
 
 **讀者：** framework-dev、agent。維護離線遷移的來源 mapping、owner 接縫與可續跑 publication。
 
@@ -52,6 +52,14 @@
 - `preservation.py` 在首次備份及 entry 建立前預檢所有原樣目的，resume 在 checkpoint／report 寫入前再檢查。新格式保留檔／目錄、來源路由互撞、目的既有檔及祖先／後代佔用都會列出來源與目的並停止。不覆寫、不改名、不認領任意既有檔。只有同 manifest 的發布且 hash 一致才可重用；prepared publication 的既有復原協定不變。
 
 ## Setup 與 point mapping
+
+### 完整 batch 與目前 schema 驗證
+
+`MigrationMapping.parameter_transform` 是可選的純 `ParameterDocument → ParameterDocument` callback。`prepare_parameter_batch` 先將 seed 或整組 values 疊到完整 raw 文件，再呼叫轉換，最後以目前 `SetupDocument`／`PointDocument.model_validate` 驗證，才建立 `EditView`。來源欄位可以不屬於目前 component schema，不需要讓 reader 接受歷史格式。Seed 在 `_seed_components` 與 dry-run setup 共用此接縫，value group 在 `_flux_units._stage_group` 共用它。Seed 失敗停止；group 失敗按既有 pending 規則保留原文，不提交該組。
+
+Shipped `storage_mapping` 在 callback 執行時才載入 lab 的 `convert_storage_flux_batch`。它與長期 v1→v2 步驟共用 lab 的純轉換。框架測試替換 callback，僅使用合成同版 schema，不依賴 lab。Mapping revision 同時變更，避免舊 manifest 認領不同轉換規則。
+
+目前 runtime 1 不接受 callback 的 v2 產物。實際 shipped 匯入在 runtime 升 2 後驗收；這個過渡不新增 reader compatibility。下表的舊 flux logical paths 是組裝 batch 的歷史路徑，成功轉換後以 qubit `flux.<明示來源>` 為目的，不發布舊版參數文件。沒有明示來源的校準組保留原文並列 pending，不猜 device。操作與四類形狀見 [flux 升級指南](../../docs/flux-migration.md)。
 
 ### Meta 欄位對照
 
