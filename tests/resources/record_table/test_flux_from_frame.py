@@ -13,6 +13,63 @@ from zcu_tools.resources.record_table import (
 )
 
 
+@pytest.mark.parametrize("name", ["bias.local", "", " \t "])
+def test_flux_rejects_invalid_selected_device_name_even_with_explicit_flux(
+    name: str,
+) -> None:
+    with pytest.raises(ValueError, match="(?i)device.name"):
+        flux_from_frame(pd.DataFrame({"flux": [0.5]}), device_name=name)
+
+
+@pytest.mark.parametrize("name", ["bias.local", "", " \t "])
+@pytest.mark.parametrize("flatten", [False, True])
+def test_flux_rejects_invalid_used_row_frame_names(name: str, flatten: bool) -> None:
+    rows = [
+        {
+            "devices": {name: {"value": 3}},
+            "flux_frame": {name: {"integer": 1, "period": 4}},
+        }
+    ]
+    table = pd.json_normalize(rows) if flatten else pd.DataFrame(rows)
+    table.index = ["sample"]
+    with pytest.raises(ValueError, match="sample.*(?i:device name)"):
+        flux_from_frame(table, device_name="bias")
+
+
+@pytest.mark.parametrize("name", [" Bias ", "bias", "BIAS", "偏壓", "bias．local"])
+@pytest.mark.parametrize("flatten", [False, True])
+def test_flux_preserves_names_for_row_frame_and_single_or_multi_fallback(
+    name: str, flatten: bool
+) -> None:
+    rows = [
+        {
+            "devices": {
+                name: {"value": 3, "value_unit": "V"},
+                "coil": {"value": 3, "value_unit": "A"},
+            },
+            "flux_frame": {
+                name: {"integer": 1, "period": 4},
+                "coil": {"integer": 2, "period": -4},
+            },
+        },
+        {
+            "devices": {
+                name: {"value": 3, "value_unit": "V"},
+                "coil": {"value": 2, "value_unit": "A"},
+            }
+        },
+    ]
+    table = pd.json_normalize(rows) if flatten else pd.DataFrame(rows)
+    multi = FluxFrame(
+        {name: DeviceFluxFrame(1, 4, "V"), "coil": DeviceFluxFrame(2, -4, "A")}
+    )
+    for fallback in (RecordFluxFrame("V", 1, 4), multi):
+        np.testing.assert_allclose(
+            flux_from_frame(table, device_name=name, fallback_frame=fallback),
+            [0.25, 0.5],
+        )
+
+
 @pytest.mark.parametrize("flatten", [False, True])
 def test_flux_uses_explicit_then_row_frame_then_named_fallback(flatten: bool) -> None:
     rows = [

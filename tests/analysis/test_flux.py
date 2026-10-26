@@ -48,6 +48,12 @@ def test_flux_rejects_missing_or_invalid_contributing_device(
         flux_from_device_values(FluxFrame({"bias": DeviceFluxFrame(1, 4)}), values)
 
 
+@pytest.mark.parametrize("name", ["bias.local", "", " \t "])
+def test_frame_rejects_invalid_device_names(name: str) -> None:
+    with pytest.raises(ValueError, match="(?i)device name"):
+        FluxFrame({name: DeviceFluxFrame(1, 4)})
+
+
 def test_frame_snapshots_nonempty_named_devices() -> None:
     devices = {"bias": DeviceFluxFrame(1, 4)}
     frame = FluxFrame(devices)
@@ -55,8 +61,6 @@ def test_frame_snapshots_nonempty_named_devices() -> None:
     assert flux_from_device_values(frame, {"bias": 3}) == pytest.approx(0.5)
     with pytest.raises(ValueError, match="nonempty"):
         FluxFrame({})
-    with pytest.raises(ValueError, match="name"):
-        FluxFrame({"": DeviceFluxFrame(1, 4)})
     with pytest.raises(ValueError, match="unit"):
         DeviceFluxFrame(1, 4, "")
 
@@ -97,6 +101,25 @@ def test_actual_points_account_for_current_other_device_values(
         values={"coil": coil_value},
     )
     assert (result.integer, result.half) == pytest.approx(expected)
+
+
+@pytest.mark.parametrize("convert", [actual_flux_points, reference_flux_points])
+@pytest.mark.parametrize("name", ["bias.local", "", " \t "])
+def test_point_conversion_rejects_invalid_device_name(convert, name: str) -> None:
+    frame = FluxFrame({"bias": DeviceFluxFrame(1, 4)})
+    with pytest.raises(ValueError, match="(?i)device name"):
+        convert(DeviceFluxPoint(1, -1), device_name=name, frame=frame, values={})
+
+
+@pytest.mark.parametrize("name", [" Bias ", "bias", "BIAS", "偏壓", "bias．local"])
+@pytest.mark.parametrize("convert", [actual_flux_points, reference_flux_points])
+def test_flux_math_preserves_valid_device_names(convert, name: str) -> None:
+    frame = FluxFrame({name: DeviceFluxFrame(1, 4), "coil": DeviceFluxFrame(2, -4)})
+    assert list(frame.devices) == [name, "coil"]
+    assert flux_from_device_values(frame, {name: 3, "coil": 2}) == 0.5
+    assert convert(
+        DeviceFluxPoint(1, -1), device_name=name, frame=frame, values={"coil": 2}
+    ) == DeviceFluxPoint(1, -1)
 
 
 @pytest.mark.parametrize("convert", [actual_flux_points, reference_flux_points])

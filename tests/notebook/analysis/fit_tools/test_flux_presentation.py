@@ -8,6 +8,47 @@ from zcu_tools.analysis.flux import DeviceFluxFrame, FluxFrame
 from zcu_tools.resources.record_table import DeviceValueUnit, RecordFluxFrame
 
 
+@pytest.mark.parametrize("name", ["bias.local", "", " \t "])
+@pytest.mark.parametrize("single", [True, False])
+def test_device_axis_rejects_invalid_device_name(name: str, single: bool) -> None:
+    frame = (
+        RecordFluxFrame("V", 1, 4)
+        if single
+        else FluxFrame({"bias": DeviceFluxFrame(1, 4, "V")})
+    )
+    fig, ax = plt.subplots()
+    try:
+        with pytest.raises(ValueError, match="(?i)device name"):
+            fit_tools.add_device_axis(ax, frame, device_name=name)
+    finally:
+        plt.close(fig)
+
+
+@pytest.mark.parametrize("name", [" Bias ", "bias", "BIAS", "偏壓", "bias．local"])
+@pytest.mark.parametrize("single", [True, False])
+def test_device_axis_preserves_valid_name_and_uses_its_calibration(
+    name: str, single: bool
+) -> None:
+    frame = (
+        RecordFluxFrame("V", 1, 4)
+        if single
+        else FluxFrame(
+            {name: DeviceFluxFrame(1, 4, "V"), "coil": DeviceFluxFrame(2, -4, "A")}
+        )
+    )
+    fig, ax = plt.subplots()
+    try:
+        secondary = fit_tools.add_device_axis(
+            ax, frame, device_name=name, values={"coil": 2}
+        )
+        assert secondary.get_xlabel() == f"{name} (V)"
+        np.testing.assert_allclose(
+            secondary.xaxis.get_transform().transform([1, 3]), [0, 0.5]
+        )
+    finally:
+        plt.close(fig)
+
+
 @pytest.mark.parametrize("unit", ["A", "V", "native"])
 def test_device_axis_tracks_flux_limits_in_the_declared_unit(
     unit: DeviceValueUnit,

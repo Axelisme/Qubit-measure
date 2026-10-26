@@ -12,6 +12,7 @@ from zcu_tools.analysis.flux import (
     FluxFrame,
     actual_flux_points,
 )
+from zcu_tools.cfg_model import validate_device_name
 from zcu_tools.resources.record_table import RecordFluxFrame
 
 
@@ -25,7 +26,8 @@ def add_device_axis(
     """Add a top device-value axis to a normalized-Phi0 x axis.
 
     frame is a pure-analysis FluxFrame, or an explicit single-device
-    RecordFluxFrame. device_name selects and labels the device as "name (unit)".
+    RecordFluxFrame. device_name must be nonblank without ASCII dots; valid names
+    are preserved and select/label the device as "name (unit)".
     values supplies every OTHER frame device's current finite real value in
     its declared unit; the selected value is unused. Omit values for a
     single-device frame. No device selection or unit conversion is inferred.
@@ -35,9 +37,10 @@ def add_device_axis(
     other devices' current flux contribution. Parent data/limits are unchanged;
     showing, drawing and saving remain the caller's responsibility.
 
-    ValueError names an unknown selected device or missing/invalid used value.
+    ValueError names an invalid/unknown device or missing/invalid used value.
     Invalid frame fields fail at construction. Matplotlib errors propagate.
     """
+    validate_device_name(device_name)
     if isinstance(frame, RecordFluxFrame):
         frame = FluxFrame(
             {

@@ -31,6 +31,8 @@
 函式呼叫 `analysis.flux.actual_flux_points` 算出選定 device 當下的 integer，再以其 signed period 建立正反轉換。
 缺其他 device 的值會報錯，不假設它停在 integer。
 單 device 可以省略 `values`。
+單／多 device 的 `device_name` 都共用 `cfg_model.validate_device_name`。
+它拒絕 ASCII 點號、空字串與全空白，有效名稱原樣用於查找與軸標。
 
 第二軸使用選定 device 宣告的原生單位，不換成 milli 單位。
 回傳的 Matplotlib SecondaryAxis 隨主軸 limits 更新，也支持負 period。

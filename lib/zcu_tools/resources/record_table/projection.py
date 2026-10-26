@@ -11,6 +11,7 @@ from zcu_tools.analysis.flux import (
     FluxFrame,
     flux_from_device_values,
 )
+from zcu_tools.cfg_model import validate_device_name
 
 from .schema import RecordFluxFrame, resolve_record_flux
 
@@ -20,7 +21,8 @@ def project_device_coordinates(
 ) -> pd.DataFrame:
     """Project devices[device_name] into isolated dev_value/dev_unit columns.
 
-    device_name must be nonempty. Rows without explicit finite flux require a
+    device_name must be nonblank without ASCII dots; valid names are unchanged.
+    Invalid names raise ValueError. Rows without explicit finite flux require a
     finite numeric device value; failures name devices[device_name].value and
     the row index. Explicit flux rows may omit device facts, yielding NaN for
     their source dev_value. Units are copied when strings, otherwise None;
@@ -30,8 +32,7 @@ def project_device_coordinates(
     without a nested devices object (as in a flattened record CSV).
     No other device or legacy flat coordinate is used as fallback.
     """
-    if not device_name.strip():
-        raise ValueError("device_name must be nonempty")
+    validate_device_name(device_name)
     values: list[float] = []
     units: list[str | None] = []
     for index, row in records.iterrows():
@@ -86,19 +87,20 @@ def flux_from_frame(
     flux_frame.<device>.* cell in that row; all-null device fields mean absent.
     Flattening cannot distinguish absent devices from originally all-null ones.
 
-    device_name is a nonempty name selecting ONLY the device used by a
-    RecordFluxFrame fallback. A FluxFrame fallback uses all its named devices
+    device_name must be nonblank without ASCII dots and is preserved unchanged.
+    It selects ONLY the device used by a RecordFluxFrame fallback.
+    A FluxFrame fallback uses all its named devices
     and requires each recorded value_unit to equal its declared unit. Neither
     fallback converts units or reads files. Flat flux_int/flux_period columns
     are not row frames; resolve_record_flux retains its independent v2 API.
 
+    Invalid device_name raises ValueError even for empty/explicit-only tables.
     ValueError names the row and missing/invalid used field, including partial
     frames and missing device values; invalid used frames never fall back.
     Valid explicit flux ignores unused frame/device fields. Empty tables return
     an empty float array. No input table, JSONL or calibration is changed.
     """
-    if not device_name.strip():
-        raise ValueError("device_name must be nonempty")
+    validate_device_name(device_name)
     values = np.empty(len(table), dtype=np.float64)
     for position, (index, row) in enumerate(table.iterrows()):
         single = table.iloc[position : position + 1]

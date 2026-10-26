@@ -5,6 +5,24 @@ import pytest
 from zcu_tools.resources.record_table import project_device_coordinates
 
 
+@pytest.mark.parametrize("name", ["bias.local", "", " \t "])
+def test_projection_rejects_invalid_device_names_even_with_explicit_flux(
+    name: str,
+) -> None:
+    with pytest.raises(ValueError, match="(?i)device.name"):
+        project_device_coordinates(pd.DataFrame({"flux": [0.5]}), device_name=name)
+
+
+@pytest.mark.parametrize("name", [" Bias ", "bias", "BIAS", "偏壓", "bias．local"])
+@pytest.mark.parametrize("flatten", [False, True])
+def test_projection_uses_valid_device_names_unchanged(name: str, flatten: bool) -> None:
+    rows = [{"devices": {name: {"value": 3, "value_unit": "V"}}}]
+    table = pd.json_normalize(rows) if flatten else pd.DataFrame(rows)
+    projected = project_device_coordinates(table, device_name=name)
+    assert projected["dev_value"].tolist() == [3]
+    assert projected["dev_unit"].tolist() == ["V"]
+
+
 def test_projection_selects_the_named_device_and_preserves_records() -> None:
     records = pd.DataFrame(
         {

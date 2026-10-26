@@ -14,6 +14,9 @@
 
 ## 裝置投影（`projection.py`）
 
+投影與 `flux_from_frame` 的 `device_name`、使用中的 row-frame keys 共用 `cfg_model.validate_device_name`。
+它拒絕 ASCII 點號、空字串與全空白，保留有效名稱的前後空白、大小寫與 Unicode。
+
 `project_device_coordinates(records, device_name=...)` 依 caller 指定的名稱讀取每列 `devices[device_name]` 的 `value` 與 `value_unit`。
 它回傳分析用的 `dev_value/dev_unit` 欄位，保留其他內容、row index 與順序，不改來源表或 JSONL。
 沒有 explicit finite flux 的列需要所選裝置的有限非 boolean 數值，缺失時錯誤列出 `devices[name].value` 與 row index。已有 explicit flux 時，缺裝置值以 NaN 表示，不阻擋解析。`value_unit` 是字串時原樣傳遞，否則投影為 None；只有 fallback frame 解析時才檢查單位是否匹配。

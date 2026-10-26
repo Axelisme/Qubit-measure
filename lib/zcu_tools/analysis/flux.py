@@ -6,6 +6,8 @@ from math import isclose, isfinite
 from numbers import Real
 from types import MappingProxyType
 
+from zcu_tools.cfg_model import validate_device_name
+
 
 @dataclass(frozen=True)
 class DeviceFluxFrame:
@@ -33,7 +35,8 @@ class DeviceFluxFrame:
 class FluxFrame:
     """Nonempty mapping of device names to their independent linear frames.
 
-    devices keys are nonempty instrument names; values are DeviceFluxFrame.
+    devices keys are nonblank instrument names without ASCII dots; values are
+    DeviceFluxFrame. Valid names are preserved, including surrounding spaces.
     Each device can use its own native unit and signed period. Construction
     snapshots the mapping. Invalid keys/values or an empty frame raise
     ValueError. All contributing devices must be supplied when evaluating flux.
@@ -45,7 +48,7 @@ class FluxFrame:
         if not self.devices:
             raise ValueError("devices must be nonempty")
         for name, device in self.devices.items():
-            _require_nonempty_name(name, field="device name")
+            validate_device_name(name)
             _require_device_frame(device, name)
         object.__setattr__(self, "devices", MappingProxyType(dict(self.devices)))
 
@@ -99,7 +102,8 @@ def reference_flux_points(
     Add selected signed period times the other devices'
     flux contribution to both points. values requires every OTHER frame
     device, in its declared unit; the selected device value is not used.
-    Inputs stay unchanged. ValueError names an unknown selected device,
+    device_name must be nonblank without ASCII dots; valid names are unchanged.
+    Inputs stay unchanged. ValueError names an invalid/unknown selected device,
     missing/invalid used values, or a pair not separated by abs(period)/2.
     """
     device = _selected_frame(frame, device_name)
@@ -124,7 +128,8 @@ def actual_flux_points(
     period times the other devices' flux contribution from both points.
     values requires every OTHER frame device in its declared unit; selected
     device values and extra devices are ignored. Inputs are unchanged.
-    ValueError names unknown device, missing/invalid used values, or a pair
+    device_name must be nonblank without ASCII dots; valid names are unchanged.
+    ValueError names invalid/unknown device, missing/invalid used values, or a pair
     not separated by abs(period)/2.
     """
     device = _selected_frame(frame, device_name)
@@ -145,6 +150,7 @@ def _require_half_period(
 
 
 def _selected_frame(frame: FluxFrame, name: str) -> DeviceFluxFrame:
+    validate_device_name(name)
     if name not in frame.devices:
         raise ValueError(f"unknown frame device {name!r}")
     return frame.devices[name]

@@ -23,6 +23,8 @@ Experiment 公開同一型別，GUI analyze work 經分類後才讓 recipe 交�
 `DeviceFluxFrame(integer, period, unit="native")` 描述一台儀器在其他 device 都停在 integer 時的參考點。
 Period 是每 Phi0 的 signed 儀器值差，必須有限且非零。
 `FluxFrame(devices)` 保存非空的 device 名稱到具名 frame 的 mapping。
+Device keys 與數學入口的 `device_name` 共用 `cfg_model.validate_device_name`。
+它拒絕 ASCII 點號、空字串與全空白，其餘名稱原樣保留。
 各 device 使用自己的原生單位，工具不換算單位。
 
 `flux_from_device_values(frame, values)` 計算 `Σ(value - integer) / period`。
