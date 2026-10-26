@@ -127,7 +127,7 @@ def test_get_all_devices_is_an_independent_mapping(manager: DeviceManager) -> No
     assert manager.get_device("flux") is device
 
 
-@pytest.mark.parametrize("name", ["ok", "", " Coil/A-1 ", "線圈", "coil．left"])
+@pytest.mark.parametrize("name", ["ok", " Coil/A-1 ", "線圈", "coil．left"])
 def test_register_device_preserves_other_names(
     manager: DeviceManager, name: str
 ) -> None:
@@ -139,8 +139,10 @@ def test_register_device_preserves_other_names(
     assert manager.get_device(name) is dev
 
 
-@pytest.mark.parametrize("name", ["coil.left", ".coil", "coil.", "."])
-def test_register_device_rejects_dots_without_registry_change_or_io(
+@pytest.mark.parametrize(
+    "name", ["coil.left", ".coil", "coil.", ".", "", " ", "\t\n", "\u00a0\u3000"]
+)
+def test_register_device_rejects_invalid_names_without_registry_change_or_io(
     manager: DeviceManager, name: str
 ) -> None:
     original = SnapshotDevice()
@@ -148,7 +150,7 @@ def test_register_device_rejects_dots_without_registry_change_or_io(
     candidate = SnapshotDevice()
     before = manager.get_all_devices()
 
-    with pytest.raises(ValueError, match=re.escape(name)):
+    with pytest.raises(ValueError, match=re.escape(repr(name))):
         manager.register_device(name, candidate)
 
     assert manager.get_all_devices() == before
