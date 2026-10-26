@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime
+from functools import partial
 
 import pytest
 from zcu_tools.resources.qubit_params import (
@@ -35,6 +36,34 @@ def _assert_timestamp(value: object) -> str:
     parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
     assert parsed.tzinfo is not None
     return value
+
+
+@pytest.mark.parametrize(
+    "field_name", ["flux_half", "flux_int", "flux_period", "plot_transitions"]
+)
+def test_fluxdep_fit_reads_model_before_requiring_calibration(
+    tmp_path, field_name
+) -> None:
+    path = tmp_path / "params.json"
+    path.write_text(
+        json.dumps(
+            {
+                "fluxdep_fit": {
+                    "params": {"EJ": 4.0, "EC": 1.0, "EL": 0.5, "old": None},
+                    "old_metadata": [None],
+                    "timestamp": {"old": "format"},
+                },
+                "unrelated": None,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    fit = QubitParams(path).require_fluxdep_fit()
+
+    assert fit.params == (4.0, 1.0, 0.5)
+    with pytest.raises(QubitParamsError, match=rf"fluxdep_fit\.{field_name}"):
+        getattr(fit, field_name)
 
 
 def test_ensure_project_creates_canonical_identity(tmp_path) -> None:
@@ -229,42 +258,30 @@ def test_set_t1_curve_fit_preserves_independent_sections_and_round_trips(
     assert raw["t1_curve_fit"]["stderr"]["Q_ind"] is None
     assert raw["t1_curve_fit"]["stderr"]["Temp"] is None
 
-    assert QubitParams(path).require_t1_curve_fit() == T1CurveFit(
-        params=T1CurveFitParams(
-            Temp=0.055,
-            Q_cap=7.2e5,
-            x_qp=1.8e-6,
-            Q_ind=2.4e7,
-        ),
-        stderr=T1CurveFitUncertainty(
-            Q_cap=1.1e4,
-            x_qp=2.0e-8,
-            Q_ind=None,
-            Temp=None,
-        ),
-        fixed=("Q_ind",),
-        free=("Q_cap", "x_qp", "Temp"),
-        cost=1.25,
-        reduced_chi2=0.42,
-        success=True,
-        message="converged",
-        residual_mode="log",
-        loss="soft_l1",
-        max_nfev=200,
-        init=T1CurveFitParams(
-            Temp=0.08,
-            Q_cap=5.0e5,
-            x_qp=2.5e-6,
-            Q_ind=2.4e7,
-        ),
-        bounds={
-            "Q_cap": (1.0e4, 1.0e8),
-            "x_qp": (1.0e-9, 1.0e-3),
-            "Q_ind": (1.0e5, 1.0e10),
-            "Temp": (10e-3, 300e-3),
-        },
-        timestamp=timestamp,
+    assert QubitParams(path).require_t1_curve_fit().params == T1CurveFitParams(
+        Temp=0.055, Q_cap=7.2e5, x_qp=1.8e-6, Q_ind=2.4e7
     )
+    assert raw["t1_curve_fit"] == {
+        "params": {"Temp": 0.055, "Q_cap": 7.2e5, "x_qp": 1.8e-6, "Q_ind": 2.4e7},
+        "stderr": {"Q_cap": 1.1e4, "x_qp": 2.0e-8, "Q_ind": None, "Temp": None},
+        "fixed": ["Q_ind"],
+        "free": ["Q_cap", "x_qp", "Temp"],
+        "cost": 1.25,
+        "reduced_chi2": 0.42,
+        "success": True,
+        "message": "converged",
+        "residual_mode": "log",
+        "loss": "soft_l1",
+        "max_nfev": 200,
+        "init": {"Temp": 0.08, "Q_cap": 5.0e5, "x_qp": 2.5e-6, "Q_ind": 2.4e7},
+        "bounds": {
+            "Q_cap": [1.0e4, 1.0e8],
+            "x_qp": [1.0e-9, 1.0e-3],
+            "Q_ind": [1.0e5, 1.0e10],
+            "Temp": [10e-3, 300e-3],
+        },
+        "timestamp": timestamp,
+    }
 
 
 def test_set_t1_curve_fit_round_trips_partial_noise_whitelist(tmp_path) -> None:
@@ -315,38 +332,98 @@ def test_set_t1_curve_fit_round_trips_partial_noise_whitelist(tmp_path) -> None:
     assert "Q_ind" not in section["init"]
     assert "Q_ind" not in section["bounds"]
 
-    assert QubitParams(path).require_t1_curve_fit() == T1CurveFit(
-        params=T1CurveFitParams(
-            Temp=0.055,
-            Q_cap=7.2e5,
-            x_qp=1.8e-6,
-        ),
-        stderr=T1CurveFitUncertainty(
-            Q_cap=1.1e4,
-            x_qp=2.0e-8,
-            Temp=0.0,
-        ),
-        fixed=("Temp",),
-        free=("Q_cap", "x_qp"),
-        cost=1.25,
-        reduced_chi2=0.42,
-        success=True,
-        message="converged",
-        residual_mode="log",
-        loss="soft_l1",
-        max_nfev=200,
-        init=T1CurveFitParams(
-            Temp=0.08,
-            Q_cap=5.0e5,
-            x_qp=2.5e-6,
-        ),
-        bounds={
-            "Q_cap": (1.0e4, 1.0e8),
-            "x_qp": (1.0e-9, 1.0e-3),
-            "Temp": (10e-3, 300e-3),
-        },
-        timestamp=timestamp,
+    assert QubitParams(path).require_t1_curve_fit().params == T1CurveFitParams(
+        Temp=0.055, Q_cap=7.2e5, x_qp=1.8e-6
     )
+    assert section == {
+        "params": {"Temp": 0.055, "Q_cap": 7.2e5, "x_qp": 1.8e-6},
+        "stderr": {"Q_cap": 1.1e4, "x_qp": 2.0e-8, "Temp": 0.0},
+        "fixed": ["Temp"],
+        "free": ["Q_cap", "x_qp"],
+        "cost": 1.25,
+        "reduced_chi2": 0.42,
+        "success": True,
+        "message": "converged",
+        "residual_mode": "log",
+        "loss": "soft_l1",
+        "max_nfev": 200,
+        "init": {"Temp": 0.08, "Q_cap": 5.0e5, "x_qp": 2.5e-6},
+        "bounds": {
+            "Q_cap": [1.0e4, 1.0e8],
+            "x_qp": [1.0e-9, 1.0e-3],
+            "Temp": [10e-3, 300e-3],
+        },
+        "timestamp": timestamp,
+    }
+
+
+@pytest.mark.parametrize(
+    "metadata_name",
+    [
+        "stderr",
+        "bounds",
+        "fixed",
+        "free",
+        "init",
+        "cost",
+        "reduced_chi2",
+        "success",
+        "message",
+        "residual_mode",
+        "loss",
+        "max_nfev",
+        "timestamp",
+    ],
+)
+def test_t1_curve_fit_reads_parameter_values_without_metadata_validation(
+    tmp_path, metadata_name
+) -> None:
+    path = tmp_path / "params.json"
+    path.write_text(
+        json.dumps(
+            {
+                "t1_curve_fit": {
+                    "params": {"Temp": 0.055, "Q_cap": 7.2e5, "old": None},
+                    metadata_name: {"old": [None, "format"]},
+                    "unknown_metadata": None,
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    fit = QubitParams(path).require_t1_curve_fit()
+
+    assert fit.params == T1CurveFitParams(Temp=0.055, Q_cap=7.2e5)
+
+
+@pytest.mark.parametrize("writer", ["dispersive", "t1_curve_fit"])
+@pytest.mark.parametrize(
+    "field_name",
+    ["flux_half", "flux_int", "flux_period", "plot_transitions", "timestamp"],
+)
+def test_fit_writes_still_validate_existing_fluxdep_section(
+    tmp_path, writer, field_name
+) -> None:
+    path = tmp_path / "params.json"
+    section = _fit().to_json_section()
+    section[field_name] = [None]
+    path.write_text(json.dumps({"fluxdep_fit": section}), encoding="utf-8")
+    params = QubitParams(path)
+    before = path.read_bytes()
+
+    if writer == "dispersive":
+        write = partial(params.set_dispersive_fit, DispersiveFit(g=0.068, bare_rf=5.35))
+    else:
+        write = partial(
+            params.set_t1_curve_fit,
+            T1CurveFit(params=T1CurveFitParams(Temp=0.055, Q_cap=7.2e5)),
+        )
+
+    with pytest.raises(QubitParamsError, match=field_name):
+        write()
+
+    assert path.read_bytes() == before
 
 
 def test_t1_curve_fit_missing_and_orphan_writes_fast_fail(tmp_path) -> None:
