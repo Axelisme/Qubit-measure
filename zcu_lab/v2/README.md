@@ -1,6 +1,6 @@
 # v2 experiments
 
-**Last updated:** 2026-10-25，native 分析摘要與 mux/onetone core 分工
+**Last updated:** 2026-10-27，native 分析摘要、mux/onetone core 分工與 flux helpers
 
 **讀者：** lab-author、agent。查找實驗的檔案分工、作者契約與各家族入口。
 
