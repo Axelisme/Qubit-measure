@@ -363,15 +363,27 @@ T1、T2Echo、T2Ramsey、TwoTone frequency 與對應的四個 mux adapter 共用
 - `devices` 是 Run 開始前的完整 `metadata.device_snapshot` 深拷貝，必須為 dict。
   裝置名稱與全部設定原樣保存，包含 global coil、各 qubit 的 local 線與 RF 裝置。
   DC 裝置保留 `value`／`value_unit`，RF 裝置保留 `freq_Hz`／`power_dBm`，不壓成單一值。
+- `flux_frame` 複製這次量測所用 qubit 的 `flux` 區塊，以 device 名稱為鍵，每項保存原生單位的 `half`、`integer`、有正負號的 `period`。
+  GUI adapter 在 Analyze 建立 proposal 時，從該 Run 的 `req.ctx.parameters` 取 qubit 區塊，呼叫 `qubit_flux_frame` 取得獨立副本。
+  Mux 依原始 tone index 找到 participant qubit，各自保存自己的 frame，不使用 mux group 或另一顆 qubit 的校準。
+  空區塊表示該次來源沒有校準，不代表缺少 parameter capture。
 - 分析純量沿原有名稱與單位，例如 `freq_mhz`、`t1_us`、`t2e_us`、`t2r_us` 與對應誤差。
 - `run` 包含來源 `run_id` 與 `experiment`，兩者都取自同一次 RunMetadata。
   Append owner 另補 `run_id`、`point`、`at` 與 accepted event 的 `source` 信封。
 
-Adapter 只讀 `req.run_result.metadata`，不查目前 alias 或 live 裝置。
+Adapter 的儀器值只讀 `req.run_result.metadata`，frame 只讀同次 Run 的固定 parameter capture。
+不查目前 alias、目前 point 或 live 裝置。接受 proposal 時不重讀 frame，量測後改校準不改舊 Run 的 record。
 缺 metadata 或 `device_snapshot is None` 時，adapter 記 `logging.warning("no device snapshot")` 並省略 record proposal。
 其他 parameter/module proposals 保留。空 dict 表示已知沒有連線裝置，照實記錄。
 記錄 append 到 `entry.records(target)` 的 `records/components/<target>.jsonl`。
 這個目錄與 `records/ledger.jsonl` 的事件信封分開，不讀舊 samples 路徑。
+
+Coherence、overnight 與 overnight_mux 在 Start 的固定 `env.parameters` 捕捉 frame，與該次使用的 pulses 一起存入 Plan。
+逐點 append 與離線重匯出只讀 Plan。Mux 的 Plan 按固定 qubit 名稱存 frame，不按 participant 的排列位置配對。
+Headless caller 必須提供量測時的 frame，不能以空 mapping 代替缺失 capture。缺必要 frame 的舊 workflow manifest 會在載入 Plan 時報 validation error。
+Notebook 作者在量測前捕捉 frame，接受時經既有 `SavedRun.accept(records={qubit: {"flux_frame": frame, ...}})` 明傳。
+框架不認得 lab 的 qubit／flux 格式，也不自動從 point 補 frame。
+作者若有自己的 flux 定義，可以自行組裝 `flux_frame`，不必使用 lab helper；仍須保存量測時的定義與值。
 
 讀取端明示 `device_name`，由 `resources.record_table.project_device_coordinates` 將
 `devices[device_name].value/value_unit` 投影成分析用的 `dev_value/dev_unit`。

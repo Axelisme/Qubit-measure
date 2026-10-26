@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
+from pydantic import TypeAdapter
 from zcu_tools.device import DeviceManager
 from zcu_tools.notebook import NotebookAdapter, SavedRun
 from zcu_tools.plotting.plots import NonPresentingHost
@@ -13,6 +14,8 @@ from zcu_tools.resources.entry import (
     JsonObject,
     PointView,
     ResultEntry,
+    document_value,
+    snapshot,
     writeback,
 )
 
@@ -83,6 +86,43 @@ def test_accept_records_preserves_fields_and_shares_parameter_event(
     assert datetime.fromisoformat(row["at"]).utcoffset() == timedelta(0)
     point.refresh()
     assert point.description == "accepted"
+
+
+def test_accept_uses_caller_frame_captured_before_point_changes(
+    entry: ResultEntry, point: PointView
+) -> None:
+    # Keep the caller-defined frame in opaque ext, without a lab schema.
+    with point.edit() as draft:
+        draft.set(
+            "general.ext.calibration",
+            {
+                "local": {"half": 1.0, "integer": 2.0, "period": -2.0},
+                "global": {"half": 3.0, "integer": 5.0, "period": 4.0},
+            },
+        )
+    frame = TypeAdapter(JsonObject).validate_python(
+        snapshot(point).general.ext["calibration"]
+    )
+    exp = NotebookAdapter(
+        soc=object(),
+        soccfg=object(),
+        device_manager=DeviceManager(),
+        host=NonPresentingHost(),
+    )(SavingCore())
+    source = exp.run(SavingCfg())
+    saved = exp.save_run(point, source=source)
+    with point.edit() as draft:
+        draft.set("general.ext.calibration.local.integer", 99.0)
+    saved.accept(records={"Q1": {"t1_us": 20.09, "flux_frame": frame}})
+
+    row = entry.records("Q1").read().iloc[0]
+    assert row["flux_frame"] == {
+        "local": {"half": 1.0, "integer": 2.0, "period": -2.0},
+        "global": {"half": 3.0, "integer": 5.0, "period": 4.0},
+    }
+    assert (
+        document_value(snapshot(point), "general.ext.calibration.local.integer") == 99.0
+    )
 
 
 def test_reaccept_appends_history_and_reads_last_whole_row(

@@ -19,6 +19,7 @@ from zcu_tools.gui.form_adapter import DeviceName
 from zcu_tools.program.v2.modules import ModuleCfgFactory as NativeModuleCfgFactory
 from zcu_tools.program.v2.modules import PulseCfg, PulseReadoutCfg
 
+from zcu_lab.v2.support.measure.record_frame import captured_qubit_flux
 from zcu_lab.workflows.common.calibration_modules import (
     DRIVE_MODULE_FIELD,
     READOUT_MODULE_FIELD,
@@ -154,6 +155,7 @@ class OvernightPlanForm(FormModel):
             qub_pulse=drive,
             readout=readout,
             snapshot=snapshot,
+            flux_frame=captured_qubit_flux(env.parameters),
             result_path=env.parameters.capture_storage().result_path
             if env.parameters
             else None,
