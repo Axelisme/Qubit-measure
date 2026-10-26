@@ -63,7 +63,7 @@ report = convert_sample_csv(
 
 v2 CSV 已有 `dev_value` 和 `dev_unit`，不需提供 legacy 參數。舊格式必須明填來源欄位與 A／mA／V／mV；標題的單位文字不作推論。座標驗證與縮放重用 sample table owner。已知 measurement 欄位改名並保留原工作單位，空量測值寫 null。未知欄位以原名原字串保存在 JSONL 根層，空字串與空白也不改，不猜數字或改名。例如 `comment=Manual Added` 不改成 `Tcomment`。非法座標或量測值、缺少必要單位宣告的列仍不寫入，報告列出位置與原因。
 
-原欄名若碰到 `run_id`、`point`、`source`、`at` 或 canonical 量測名稱，原名原字串寫進該列的 `legacy_fields` mapping，不覆寫 converter 產生的值。來源本身的 `legacy_fields` 欄也存在 mapping 的同名 key。例如 `T1 (us)` 轉成數字 `t1_us`，原欄 `t1_us` 則存到 `legacy_fields["t1_us"]`。
+原欄名若碰到 `run_id`、`point`、`source`、`at`、`component` 或 canonical 量測名稱，原名原字串寫進該列的 `legacy_fields` mapping，不覆寫 converter 產生的值。來源本身的 `legacy_fields` 欄也存在 mapping 的同名 key。例如 `T1 (us)` 轉成數字 `t1_us`，原欄 `t1_us` 則存到 `legacy_fields["t1_us"]`。
 
 每筆 `PreservedCsvField` 記錄來源檔、從 1 起算且不含 header 的資料列號、原欄名與原值、synthetic run_id，以及 `destination_keys`。目的以 literal JSON keys 序列表示，`("extra.with.dot",)` 是根層的一個 key，`("legacy_fields", "t1_us")` 才是兩層位置。它只表示原樣保留，不宣稱已理解欄位語意。Storage migration 的 `preserved_sample_fields` 另附每筆欄位的 JSONL `output_path`，dry-run、正式報告與 manifest 都保留這份資訊。
 

@@ -1,6 +1,6 @@
 # `zcu_tools.resources.record_table` — component records
 
-**Last updated:** 2026-10-25
+**Last updated:** 2026-10-27
 
 **讀者：** framework-dev。JSONL 樣本歷史、CSV 匯出與 v2 座標協定。
 
@@ -8,7 +8,7 @@
 
 `ResultEntry.records(component)` 回傳 `JsonlRecordTable`，綁定 `result/<name>/records/components/<component>.jsonl`。唯讀 `path` 提供該表 exact bound JSONL 路徑，供 caller 報告目的地或檢查同檔。綁定與查詢路徑只操作記憶體。JSONL 是只追加的樣本歷史；`read()` 回傳每個 `run_id` 最後一整行的 DataFrame，不合併舊行欄位。不存在的檔案回空表，損壞行則回報檔名與行號，不跳過。
 
-`append` 要求 `run_id`，成功後回傳當筆已序列化的隔離 JSON row，含 run_id、point、at、source 與 producer 欄位，不再讀回檔案。`dev_value`、`dev_unit` 與其他欄位皆由 producer 選填，保留原值與 caller 單位，不檢查 dev 存在或換算單位。`point` 可為空，`at` 預設由儲存層填 UTC，也可明示 accepted 事件的 UTC 時間。`source` 預設 manual，也可由 caller 提供 accepted 事件 ID 或 `workflow:<run_id>`。Producer 欄位可以保存巢狀 JSON。儲存層不計算 flux 座標，不讀 ledger 或元件 schema；下游查詢與 v2 驗證自行處理缺值。
+`append` 要求 `run_id`，成功後回傳當筆已序列化的隔離 JSON row，含 component、run_id、point、at、source 與 producer 欄位，不再讀回檔案。`component` 取自 table binding，producer 同名欄位不能覆寫它。直接使用 `JsonlRecordTable(path, component=...)` 時必須明示非空元件名，不從檔名推論；省略 component 只供讀取與匯出，append 會在寫檔前報 ValueError。舊列缺 component 仍可讀，不補值或改寫。`dev_value`、`dev_unit` 與其他欄位皆由 producer 選填，保留原值與 caller 單位，不檢查 dev 存在或換算單位。`point` 可為空，`at` 預設由儲存層填 UTC，也可明示 accepted 事件的 UTC 時間。`source` 預設 manual，也可由 caller 提供 accepted 事件 ID 或 `workflow:<run_id>`。Producer 欄位可以保存巢狀 JSON。儲存層不計算 flux 座標，不讀 ledger 或元件 schema；下游查詢與 v2 驗證自行處理缺值。
 
 `export_csv(path, overwrite=False)` 匯出最新列的資料欄位；既有目的檔預設拒絕覆寫。自身來源 JSONL 永遠拒絕作為目的地，包含 symlink 或 hardlink，不因 overwrite 放行；只保護自身 source，不掃描其他檔案。JSONL 與 CSV 匯出不提供跨檔交易、多 writer 協調或 crash recovery。舊 CSV 的讀取與轉換由 root `migrations/` 提供，不作 JSONL 的 fallback。
 

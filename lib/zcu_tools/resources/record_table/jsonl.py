@@ -35,7 +35,8 @@ class _RecordRow(BaseModel):
 class JsonlRecordTable:
     """Store record history at an exact UTF-8 JSONL path.
 
-    Each row has a nonempty run_id, nullable point, UTC at and nonempty source.
+    New rows have a bound component, nonempty run_id, nullable point, UTC at
+    and nonempty source. Old rows without component remain readable unchanged.
     All other fields, including optional dev_value and dev_unit, are JSON values
     declared by the producer; this store neither names nor derives quantities
     and does not validate device units.
@@ -45,9 +46,17 @@ class JsonlRecordTable:
     transaction, concurrent-writer coordination or crash recovery guarantee.
     """
 
-    def __init__(self, path: str | Path) -> None:
-        """Bind an exact caller-selected JSONL file without reading or writing it."""
+    def __init__(self, path: str | Path, *, component: str | None = None) -> None:
+        """Bind an exact JSONL path without I/O, optionally enabling append.
+
+        component is the concrete component name, not a role or inferred filename.
+        None binds for reading/export only. Append requires a nonempty component.
+        A non-string component raises ValueError; path conversion errors propagate.
+        """
         self._path = Path(path)
+        self._component = TypeAdapter(str | None).validate_python(
+            component, strict=True
+        )
 
     @property
     def path(self) -> Path:
@@ -75,9 +84,14 @@ class JsonlRecordTable:
         reference. at is an aware UTC timestamp, or None to generate UTC now.
         fields carries producer-defined JSON measurements, including nested
         values and optional device fields, preserved without unit conversion.
-        Invalid metadata or non-JSON fields fail before touching the file.
+        component always comes from this table's binding, overriding a same-named
+        producer field. An absent/empty bound component raises ValueError before
+        writing. Invalid metadata or non-JSON fields also fail before touching the file.
         Existing rows are never rewritten, even for an already-present run_id.
         """
+        if not self._component:
+            raise ValueError("append requires a nonempty bound component")
+        fields["component"] = self._component
         record = _RecordRow(
             run_id=run_id,
             point=point,
@@ -120,7 +134,8 @@ class JsonlRecordTable:
     def read(self) -> pd.DataFrame:
         """Return each run's last whole JSONL row in last-occurrence order.
 
-        Absent history returns an empty frame. Invalid rows, including corrupt
+        Absent history returns an empty frame. Missing component in old rows is
+        left absent, not inferred from this binding or path. Invalid rows, including corrupt
         tails, raise ValueError with path/line; I/O failures propagate.
         """
         return pd.DataFrame(
@@ -133,6 +148,7 @@ class JsonlRecordTable:
         run_id is a nonempty acquisition key. Validate the whole history like
         read(), never skip corrupt siblings or tails. Returned fields are detached,
         including JSON timestamp, nullable point, source and producer fields.
+        Old rows without component keep it absent; no name is inferred.
         Missing history returns None; validation and I/O failures propagate.
         """
         run_id = TypeAdapter(str).validate_python(run_id, strict=True)

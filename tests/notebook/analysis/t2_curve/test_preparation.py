@@ -13,7 +13,7 @@ def test_load_t2_records_uses_device_snapshot_coordinates(tmp_path: Path) -> Non
         FluxDepFit(EJ=4, EC=1, EL=1, flux_half=0.5, flux_int=0, flux_period=1)
     )
     params.set_dispersive_fit(DispersiveFit(g=0.1, bare_rf=7))
-    JsonlRecordTable(tmp_path / "records.jsonl").append(
+    JsonlRecordTable(tmp_path / "records.jsonl", component="Q1").append(
         run_id="run",
         devices={"bias": {"value": 0.25, "value_unit": "A"}},
         freq_mhz=4000,

@@ -9,6 +9,7 @@ import pandas as pd
 import pytest
 from pydantic import JsonValue
 from zcu_tools.resources.entry import ResultEntry
+from zcu_tools.resources.record_table import JsonlRecordTable
 
 from tests._filesystem import symlink_or_skip
 
@@ -77,6 +78,57 @@ def test_records_append_preserves_history_and_reads_last_complete_row(
     assert "t1_us" not in latest.columns  # last line replaces, not merges, the row
     assert latest.loc["run-b", "fit"] == {"label": "合成", "values": [1, 2]}
     assert entry.records("Q2").read().empty
+
+
+@pytest.mark.parametrize("component", ["Q1", "Q2"])
+def test_append_records_carries_bound_component(
+    entry: ResultEntry, component: str
+) -> None:
+    records = entry.records(component)
+    row = records.append(run_id="run-a", component="producer-name", t1_us=20.0)
+
+    assert row["component"] == component
+    assert entry.records(component).latest("run-a") == row
+    assert entry.records(component).read()["component"].tolist() == [component]
+
+
+def test_old_records_without_component_remain_readable(entry: ResultEntry) -> None:
+    records = entry.records("Q1")
+    legacy = {
+        "run_id": "old-run",
+        "point": None,
+        "at": "2020-01-01T00:00:00Z",
+        "source": "manual",
+        "t1_us": 10.0,
+    }
+    records.path.parent.mkdir(parents=True, exist_ok=True)
+    records.path.write_text(json.dumps(legacy) + "\n", encoding="utf-8")
+    original = records.path.read_bytes()
+
+    assert records.latest("old-run") == legacy
+    assert records.read().to_dict(orient="records") == [legacy]
+    assert JsonlRecordTable(records.path).latest("old-run") == legacy
+    assert records.path.read_bytes() == original
+
+
+def test_explicit_component_does_not_depend_on_jsonl_filename(tmp_path: Path) -> None:
+    path = tmp_path / "unrelated-temporary-name.jsonl"
+    records = JsonlRecordTable(path, component="Q2")
+    row = records.append(run_id="run-a", t1_us=30.0)
+
+    assert row["component"] == "Q2"
+    assert JsonlRecordTable(path).latest("run-a") == row
+
+
+@pytest.mark.parametrize("component", [None, ""])
+def test_append_without_bound_component_fails_before_writing(
+    tmp_path: Path, component: str | None
+) -> None:
+    records = JsonlRecordTable(tmp_path / "Q1.jsonl", component=component)
+    assert records.read().empty
+    with pytest.raises(ValueError, match="nonempty bound component"):
+        records.append(run_id="run-a", component="producer-name")
+    assert not records.path.exists()
 
 
 def test_records_support_workflow_source_and_native_device_unit(

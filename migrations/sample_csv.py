@@ -34,7 +34,9 @@ _MEASUREMENT_NAMES = {
     "date": "date",
 }
 _TEXT_COLUMNS = frozenset({"Tcomment", "date"})
-_RESERVED_FIELDS = frozenset({"run_id", "point", "source", "at", "legacy_fields"})
+_RESERVED_FIELDS = frozenset(
+    {"run_id", "point", "source", "at", "component", "legacy_fields"}
+)
 
 
 @dataclass(frozen=True)
@@ -301,7 +303,8 @@ def convert_sample_csv(
 ) -> MigrationReport:
     """Append synthetic samples from one or more operator-selected CSV files.
 
-    entry is an already-open ResultEntry; component selects its sample table.
+    entry is an already-open ResultEntry; component selects its sample table
+    and stamps the row envelope. A source component column stays in legacy_fields.
     v2 CSVs provide dev_value/dev_unit directly (A/V/native), without scaling.
     For legacy CSVs, explicitly declare dev_value_column and source_unit
     (A/mA/V/mV); neither is inferred from a header. Unmapped legacy coordinate columns require operator review.
@@ -357,6 +360,7 @@ def convert_sample_csv(
             "dev_value": sample.dev_value,
             "dev_unit": sample.dev_unit,
             **sample.fields,
+            "component": component,
         }
         if json_values_equal(existing, expected):
             skipped.append(
