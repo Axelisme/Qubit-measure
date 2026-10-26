@@ -176,6 +176,59 @@ def test_imported_module_helpers_resolve_to_their_definitions() -> None:
     assert check_script_awaits.check_sources(sources) == ()
 
 
+_CALLER = "from zcu_lab.facade import step\nasync def run(env):\n    await step(env)\n"
+_STEP = "async def step(env):\n    await env.run(cfg)\n"
+
+
+@pytest.mark.parametrize(
+    "reexport",
+    [
+        "from zcu_lab.impl import step as step\n",
+        "from .impl import step\n",
+    ],
+)
+def test_reexported_lab_helpers_resolve_to_their_definitions(reexport: str) -> None:
+    sources = {
+        "zcu_lab/demo.py": _CALLER,
+        "zcu_lab/facade.py": reexport,
+        "zcu_lab/impl.py": _STEP,
+    }
+
+    assert check_script_awaits.check_sources(sources) == ()
+
+
+def test_chained_reexports_resolve_to_their_definitions() -> None:
+    sources = {
+        "zcu_lab/demo.py": _CALLER,
+        "zcu_lab/facade.py": "from zcu_lab.middle import step as step\n",
+        "zcu_lab/middle.py": "from zcu_lab.impl import step as step\n",
+        "zcu_lab/impl.py": _STEP,
+    }
+
+    assert check_script_awaits.check_sources(sources) == ()
+
+
+def test_reexports_of_external_callables_stay_rejected() -> None:
+    sources = {
+        "zcu_lab/demo.py": _CALLER,
+        "zcu_lab/facade.py": "from external import step as step\n",
+    }
+
+    violations = check_script_awaits.check_sources(sources)
+
+    assert [(v.path, v.line) for v in violations] == [("zcu_lab/demo.py", 3)]
+
+
+def test_circular_reexports_terminate_as_rejections() -> None:
+    sources = {
+        "zcu_lab/demo.py": _CALLER.replace("facade", "a"),
+        "zcu_lab/a.py": "from zcu_lab.b import step as step\n",
+        "zcu_lab/b.py": "from zcu_lab.a import step as step\n",
+    }
+
+    assert len(check_script_awaits.check_sources(sources)) == 1
+
+
 def test_cli_checks_fixture_sources_and_reports_rejections(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

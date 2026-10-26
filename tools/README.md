@@ -109,6 +109,7 @@ Status 模式也列目前違規數。
 Await 目標必須是 env／scope／iteration／tab／session 呼叫，或解析到 lab 內定義的函式呼叫。
 目標函式可用 def 或 async def 定義，工具不推導回傳型別。
 工具解析直接的絕對／相對 import，不因外部函式名稱像 helper 就放行。
+Lab 模組只以自己的 import 轉匯出的名稱（例如 `from x import f as f`）會沿 import 追到定義；追到 lab 以外或循環則拒絕。
 Helper 的 async def 本文也受檢查，未被呼叫的 async def 亦在選集，不識別 decorator 或做 reachability。
 在 async def 內，明列 asyncio.*、create_task、gather、wait_for、TaskGroup 的直接 Call 不論有無 await 都拒絕，
 包含未 await 的 create_task 與 async with TaskGroup()。
@@ -116,7 +117,7 @@ Helper 的 async def 本文也受檢查，未被呼叫的 async def 亦在選集
 
 這是 ADR-0075 的漸進式 AST guardrail，不是 type checker 或 sandbox。
 框架 receiver 以 env／scope／iteration／tab／session 字面名稱辨認，不驗證其 runtime 型別。
-Assignment aliases、動態分派、包裝與轉匯出不追蹤，可能造成漏報或拒絕合法 helper。
+Assignment aliases、動態分派與包裝不追蹤，可能造成漏報或拒絕合法 helper。
 出現實際失敗類別再擴充，不藉此新增作者排程 API。
 同 process 合成 source／fixture 驗證在 `tests/tools/test_check_script_awaits.py`。
 
