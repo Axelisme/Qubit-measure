@@ -132,6 +132,7 @@ class _ParameterDocument(BaseModel):
 
     format: str
     format_version: str
+    schema_version: int = Field(strict=True, ge=1)
     components: dict[str, ComponentSchema] = Field(default_factory=dict)
     metadata: dict[str, YamlMap] = Field(default_factory=dict)
 
@@ -155,6 +156,9 @@ class _ParameterDocument(BaseModel):
         if isinstance(obj, Mapping):
             document = TypeAdapter(YamlMap).validate_python(obj)
             is_forward_minor(document, source=cls._source)
+            component_registry.require_schema_policy().require_current(
+                document, source=cls._source
+            )
             components = TypeAdapter(dict[str, YamlMap]).validate_python(
                 document.get("components", {})
             )
@@ -203,7 +207,12 @@ class _ParameterDocument(BaseModel):
 
 
 class SetupDocument(_ParameterDocument):
-    """Entry identity and complete component template in working units."""
+    """Entry identity and complete component template in working units.
+
+    schema_version is the caller policy's current whole-component version,
+    distinct from the container format_version. Missing or noncurrent versions
+    fail at model_validate with a path and upgrade command, before kind lookup.
+    """
 
     general: SetupGeneral
 
@@ -212,6 +221,9 @@ class PointDocument(_ParameterDocument):
     """One complete, independent point document in working units.
 
     format and format_version are the parameter-container header, written as 2.0.
+    schema_version is the strict positive integer from the caller's registered
+    ParameterSchemaPolicy, independent of that container version. Runtime reads
+    require the current version and never classify or upgrade legacy documents.
     The store validates header compatibility. Values remain in working units;
     general is point-local.
     components maps public identifiers to original registered ComponentSchema models,

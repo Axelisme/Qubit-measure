@@ -1,6 +1,6 @@
 # Components
 
-**Last updated:** 2026-10-24，JPA 裝置來源與元件推導
+**Last updated:** 2026-10-27，component 文件版本與明確升級入口
 
 **讀者：** lab-author、agent。查詢 component kind、角色與字串引用。
 
@@ -14,6 +14,12 @@
 | `amplifier/jpa` | JPA pump frequency、power、flux bias 校準及可空的 flux_source／rf_source 裝置名稱。 | `jpa/*` 的表單與 writeback。 |
 | `qubit/fluxonium` | 共用 qubit 校準加上 EJ、EC、EL。 | `twotone/*` 與其他讀 qubit 校準的表單；mux／FTF 表單也可經 group 讀取。 |
 | `qubit/transmon` | 共用 qubit 校準加上 EJmax、EC、無因次 d。 | 讀 qubit 校準的表單；FTF 可將它綁為 coupler。 |
+
+## Component 文件版本
+
+`register_all` 同時註冊 `parameter_upgrades.PARAMETER_SCHEMA_POLICY`，目前為 `schema_version: 1`。Setup、point 與 entry template 都使用這個整份文件版本，容器版本不變。結構變更的版本宣告、完整舊格式分類與純函式步驟由本 package 擁有。通用執行與 I/O 由 resources 擁有，見 [ADR-0063](../../docs/adr/0063-persistence-ownership.md#component-文件版本與明確升級)。
+
+長期入口是 `scripts/upgrade_parameters.py`。目前 plan 有零個結構步驟，只驗證並跳過已標版的 current 文件。完整 lab 舊格式分類尚未提供時，入口明確拒絕未標版文件，說明無法確認來源版本，不把它當成腐敗或默認 v1。完成分類與對應步驟後才接受這類文件，不能要求 operator 手改標頭。操作與這項中間階段限制見 [升級命令](../../docs/parameter-upgrades.md)。
 
 ## Wiring
 

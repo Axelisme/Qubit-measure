@@ -146,7 +146,7 @@ Format 與 format_version 只描述容器結構。檔頭不符或 major 不同�
 
 任何 minor 都由元件定義者的 model 決定 defaults、validators 與舊寫法演進。Forbid 拒絕未知欄位，ignore 丟棄它們，allow 保留並公開它們；ignore 丟棄的欄位在非空 commit 時移除。
 
-框架不提供版本遷移鏈或相容 loader。Entry 不為值寫入或格式轉換產生 metadata。
+框架不提供 runtime 相容 loader。Component 文件有獨立的版本與明確執行的升級鏈，見下節。Entry 不為值寫入或格式轉換產生 metadata。
 
 Experiment persistence 使用 inner-first axes；disk payload 由 Result-native shape 對應，save／load 不要求 caller 補 transpose。物理單位由 experiment mapping 明示；不能為未定義物理量的 scalar 捏造 A／V。Data Variable 是結果語意，state／phase 等離散座標仍是 axis。正規 data.h5 的各 Data Variable 可以使用不同 grid，共用一份結果身分與 metadata。Labber 預設的 canonical one-shot grouped 輸出要求共同 grid 與明確 variable-to-channel mapping。必需 variables 由 experiment 決定，不由 generic writer 猜測。異質 streaming workflow 有獨立 layout 與 completeness 規則，不能因同為 HDF5 就視為同類檔案。
 
@@ -155,6 +155,18 @@ Grid 不同的 grouped 實驗可由 spec 明確宣告 independent Labber layout�
 結構完整、量測完成與持久提交不同。Complete Experiment Result 指所需 variables 齊全，不保證所有預定測點完成。Operation stopped／failed 不單獨決定已提交資料能否分析。Autofluxdep 在 node 正常返回、patch 驗證後提交 row；mid-node exception 不把半列視為 committed。已取得 measurement 而 fit／provide 失敗時，保留 raw measurement 並分別標示提供結果的狀態；skip 以 audit event 表示，不以 NaN 推斷。Node-row 與 flux-level commit 是不同進度；partial／stopped／failed run 仍可保有先前已提交的 evidence。Terminal exports／reports 取用 committed journal evidence，不能反向覆寫 canonical row。
 
 2026-10-21 註：autofluxdep 已移除，上一段的 node-row、flux-level commit 與 terminal export 規則是歷史記錄。現行 workflow 的提交與保存邊界見 [ADR-0062](0062-experiment-workflow.md)，不把舊 node 契約套到新 engine。
+
+### Component 文件版本與明確升級
+
+每份存 component 參數的 setup、point 與 entry template 都有 `schema_version: N`。它描述整份 component schema，不取代容器的 format／format_version。Lab 與 component models 一起在既有 ComponentRegistry 註冊具名 ParameterSchemaPolicy，提供目前版本與 upgrade 命令。未配置就失敗，lib 不預設 lab 版本，也不把 policy 參數散到 ResultEntry／open／create／template。
+
+Runtime 只接受目前版本。缺版或版本不同時，讀取處列出文件版本、目前版本與可執行的 upgrade 命令，不推測、不改檔。優先新增有預設值的欄位，結構變更才增加一個 vN→vN+1 純函式步驟。
+
+`resources.parameter_upgrade` 擁有通用鏈與 YAML I/O。Caller 提供完整舊格式分類、每版完整驗證及純函式步驟。未標版文件只有在 operator 明確 upgrade，且完整分類確認後才視為 v1。Runner 驗證每步輸出正好是下一版，current 文件也先驗證再跳過。預設 dry-run 不建檔或鎖，逐文件、逐欄位列出差異。Apply 用 DocumentStore 的同名 sidecar lock，重讀、完整驗證、exclusive byte backup、sibling temporary 與 atomic replace。失敗保留原檔與已完成的備份，其餘文件照常處理。這不是多檔或掉電交易。
+
+Lab 擁有目前版本、步驟與真實舊文件形狀。`scripts/upgrade_parameters.py` 只組合 lab plan 與通用 main。長期鏈不依賴可刪除的 `migrations/`，後者仍只做舊 repo 匯入。C14、C16 禁止 lib 反向 import lab；C20、C21 禁止 lib 依賴 migrations 或 scripts。Caller 注入取代反向載入。
+
+2026-10-27 記錄使用者採用升級鏈的原因：「每次改component都會讓舊資料不支援很頭痛」，並對整份文件版本與通用 runner／lab steps 的建議回覆「12採用建議」。框架測試在公開 runner、讀寫與 main 接縫注入合成步驟，不 import lab；真實 lab 步驟以離線樣本驗收。
 
 ### 失敗、路徑與遷移邊界
 

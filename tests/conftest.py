@@ -53,6 +53,26 @@ def pytest_configure(config: pytest.Config) -> None:
     config.add_cleanup(directory.cleanup)
 
 
+@pytest.fixture(scope="module", autouse=True)
+def synthetic_parameter_schema_policy():
+    """Bootstrap the framework suite with a synthetic version, restoring state.
+
+    Entry users span GUI, notebook, MCP and resources. Individual tests may
+    install another policy but must restore it before leaving their own scope.
+    """
+    from zcu_tools.resources.entry import component_registry
+    from zcu_tools.resources.parameter_schema import ParameterSchemaPolicy
+
+    before = component_registry.schema_policy
+    policy = ParameterSchemaPolicy(1, ("synthetic-upgrade",))
+    component_registry.configure_schema(policy)
+    try:
+        yield
+        assert component_registry.schema_policy == policy, "schema policy polluter"
+    finally:
+        component_registry.configure_schema(before)
+
+
 @pytest.fixture(scope="session", autouse=True, name="_owned_tempfile_root")
 def fixture_owned_tempfile_root(tmp_path_factory, request):
     """Keep bare tempfile calls inside this process's pytest-owned lifetime."""

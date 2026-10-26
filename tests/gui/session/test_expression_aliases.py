@@ -18,6 +18,7 @@ def _point() -> PointDocument:
     return PointDocument.model_construct(
         format="zcu.parameter-container",
         format_version="2.0",
+        schema_version=1,
         general=PointGeneral(created_at="2026-10-09T00:00:00Z", ext={"offset": 2.0}),
         components={
             "Q1": NumericComponent(kind="expression/test", rate=4.0),

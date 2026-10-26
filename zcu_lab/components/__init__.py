@@ -18,6 +18,7 @@ from .base import (
 from .fluxonium import QubitSchema
 from .jpa import JpaSchema
 from .mux import CoilFluxCalibration, MuxGroupSchema, MuxWiringSchema
+from .parameter_upgrades import PARAMETER_SCHEMA_POLICY
 from .qubit import QubitBaseSchema, QubitWiringSchema
 from .resonator import ResonatorSchema
 from .transmon import TransmonSchema
@@ -44,7 +45,13 @@ __all__ = [
 
 
 def register_all(registry: ComponentRegistry) -> None:
-    """Register definitions into the caller's registry; duplicates fail normally."""
+    """Register lab models, roles and whole-document schema policy.
+
+    Bootstrap once on an empty registry; duplicate model names fail normally.
+    The policy declares version 1 and the explicit offline upgrade command.
+    Registration performs no file I/O and never upgrades saved parameters.
+    """
+    registry.configure_schema(PARAMETER_SCHEMA_POLICY)
     registry.register("resonator", ResonatorSchema)
     registry.register("group/mux", MuxGroupSchema)
     registry.register("device/current_source", BuiltinComponent)

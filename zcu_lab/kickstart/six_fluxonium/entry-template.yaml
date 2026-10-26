@@ -2,6 +2,7 @@
 # No calibrated module library or pulse sequence is supplied.
 format: zcu.entry-template
 format_version: "1.0"
+schema_version: 1
 components:
   Q1:
     kind: qubit/fluxonium

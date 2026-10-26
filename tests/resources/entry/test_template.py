@@ -12,6 +12,7 @@ def template_document() -> YamlMap:
     return {
         "format": "zcu.entry-template",
         "format_version": "1.0",
+        "schema_version": 1,
         "components": {
             "D1": {"kind": "fake/drive/a", "rate": 123.0, "sense": "S1"},
             "S1": {"kind": "fake/sensor", "rate": 456.0},

@@ -6,6 +6,8 @@ from difflib import get_close_matches
 from fnmatch import fnmatchcase
 from pathlib import Path
 
+from zcu_tools.resources.parameter_schema import ParameterSchemaPolicy
+
 from .errors import UnknownKindError
 from .schema import ComponentSchema
 
@@ -116,6 +118,31 @@ class ComponentRegistry:
     def __init__(self) -> None:
         self._models: dict[str, type[ComponentSchema]] = {}
         self.roles = RoleRegistry()
+        self._schema_policy: ParameterSchemaPolicy | None = None
+
+    @property
+    def schema_policy(self) -> ParameterSchemaPolicy | None:
+        """Return the configured version policy, or None before caller bootstrap."""
+        return self._schema_policy
+
+    def configure_schema(self, policy: ParameterSchemaPolicy | None) -> None:
+        """Install the caller policy; None explicitly clears it for teardown.
+
+        Configure before opening/creating component documents. Changing policy
+        does not rewrite existing handles or files; subsequent validation uses
+        the new policy. Model registration remains independent.
+        """
+        self._schema_policy = policy
+
+    def require_schema_policy(self) -> ParameterSchemaPolicy:
+        """Return the caller policy, or raise RuntimeError before document I/O.
+
+        There is no framework default version. The composition root must install
+        the policy alongside models before using runtime component documents.
+        """
+        if self._schema_policy is None:
+            raise RuntimeError("ComponentRegistry schema policy is not configured")
+        return self._schema_policy
 
     def register(self, kind: str, model: type[ComponentSchema]) -> None:
         """Register a unique kind and a ComponentSchema subclass.

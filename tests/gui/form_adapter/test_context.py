@@ -60,6 +60,7 @@ def parameters(*, faults: tuple[ContextSourceFault, ...] = ()) -> ParameterConte
             {
                 "format": "zcu.parameter-container",
                 "format_version": "2.0",
+                "schema_version": 1,
                 "general": {"created_at": "2026-10-14T00:00:00Z"},
                 "components": {
                     "Q1": {

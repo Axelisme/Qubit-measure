@@ -694,6 +694,9 @@ class ResultEntry:
         Schema/I/O failures propagate and remove only directories created by this
         call, retaining caller roots. No cross-file/power-loss guarantee is made.
         """
+        from .registry import component_registry
+
+        policy = component_registry.require_schema_policy()
         if identity is None:
             identity = EntryIdentity(
                 entry_id=uuid4(), created_at=datetime.now(timezone.utc)
@@ -706,6 +709,7 @@ class ResultEntry:
             (result_path / "points").mkdir()
             document = {
                 "format": PARAMETER_FORMAT,
+                "schema_version": policy.current_version,
                 "format_version": f"{PARAMETER_VERSION.major}.{PARAMETER_VERSION.minor}",
                 "general": {
                     "entry_id": str(identity.entry_id),

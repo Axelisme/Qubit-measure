@@ -9,6 +9,7 @@ from ruamel.yaml import YAML
 from zcu_tools.format_version import FormatVersion, YamlMap, validate_header
 
 from .aliases import EntryAliases, parse_entry_aliases
+from .registry import component_registry
 from .schema import ComponentSchema, PointDocument
 
 
@@ -29,7 +30,10 @@ class EntryTemplate:
 def load_entry_template(source: Path) -> EntryTemplate:
     """Read a zcu.entry-template 1.x YAML with components and an alias document.
 
-    The caller must register component models before calling. Components use
+    The caller must register component models and a schema policy before calling.
+    schema_version must equal that policy's current_version; missing/noncurrent
+    versions raise ValueError with an upgrade command, without writing.
+    Components use
     the same names, kind lookup and original model validation as point files.
     aliases is a nested complete zcu.aliases 1.x document, not resolved names.
     Reject bad headers, missing sections, kinds, fields and non-string alias
@@ -45,6 +49,7 @@ def load_entry_template(source: Path) -> EntryTemplate:
         supported_version=FormatVersion(1, 0),
         source=source,
     )
+    component_registry.require_schema_policy().require_current(document, source=source)
     for section in ("components", "aliases"):
         if section not in document:
             raise ValueError(f"{source}: missing {section} section")
