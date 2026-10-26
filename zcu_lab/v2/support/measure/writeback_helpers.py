@@ -1,5 +1,6 @@
 """Shared pulse-readout proposal mechanics and existing DPM calibration policy.
 
+Fluxdep proposals pair reference calibration with raw-fit Run records.
 Reset finishers live in their adapters and materialize the Run-tested cfg
 without reading calibration values from the capture.
 """
@@ -7,17 +8,25 @@ without reading calibration values from the capture.
 from __future__ import annotations
 
 import math
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
+from copy import deepcopy
 from typing import TYPE_CHECKING, Any, Protocol
 
-from zcu_tools.cfg_model import module_spec_from_raw
+from zcu_tools.cfg_model import ConfigBase, module_spec_from_raw
+from zcu_tools.core.element import ElementIdentity
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     ModuleWriteback,
     ParameterWriteback,
+    RecordWriteback,
     WritebackItem,
+    WritebackRequest,
 )
+from zcu_tools.gui.app.measure.interactive_flux_pick import FluxPickResult
 from zcu_tools.program.v2.modules import AbsModuleCfg, PulseReadoutCfg
 
+from zcu_lab.components.qubit import QubitBaseSchema, QubitFluxCalibration
+from zcu_lab.v2.support.flux import qubit_flux_frame, reference_device_flux_points
 from zcu_lab.v2.support.measure.ctx_helpers import optional_parameter_float
 
 if TYPE_CHECKING:
@@ -165,3 +174,89 @@ def readout_dpm_writeback_items(
             )
         )
     return items
+
+
+def fluxdep_writeback_items[C: ConfigBase, R, A: FluxPickResult](
+    req: WritebackRequest[RunRecord[C, R], A],
+    *,
+    device_name: str,
+    qubit: str = "$qubit",
+    swept_devices: Collection[str] = (),
+    element: ElementIdentity | None = None,
+) -> list[WritebackItem]:
+    """Propose one device's reference calibration and its raw fitted record.
+
+    req carries the Analyze-time Run parameter capture and RunMetadata. qubit
+    is a concrete name or captured alias; device_name is the scanned cfg device.
+    swept_devices lists all simultaneously scanned devices, including other
+    participants. element optionally labels the original mux tone/Q.
+    Return no items without a parameter capture. Missing Run device snapshot,
+    a non-qubit target, invalid calibration, missing/invalid fixed contributor
+    bias, or another swept contributor raises ValueError with target/device
+    context. Alias and source failures propagate.
+
+    Only flux.<device_name> is proposed, using the fitted period magnitude and
+    stored direction, initially positive. The ordinary record stores raw native
+    half/integer/positive period, device, the complete connected-device snapshot,
+    and the original captured flux_frame, never the new calibration. Neither
+    inputs nor live parameters/devices are read or changed at acceptance.
+    """
+    parameters = req.ctx.parameters
+    if parameters is None:
+        return []
+    target = parameters.resolve_path(qubit)
+    component = parameters.document().components.get(target)
+    if not isinstance(component, QubitBaseSchema):
+        raise ValueError(f"{target!r}: flux writeback requires a qubit component")
+    metadata = req.run_result.metadata
+    if metadata is None or metadata.device_snapshot is None:
+        raise ValueError(f"{target!r}: flux writeback requires a Run device snapshot")
+    devices = deepcopy(dict(metadata.device_snapshot))
+    values: dict[str, float] = {}
+    for name in component.flux:
+        if name == device_name:
+            continue
+        info = devices.get(name)
+        value = None if info is None else info.get("value")
+        # Translate only numeric JSON settings; the math owner rejects missing
+        # or nonfinite contributor values and names the offending device.
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            values[name] = value
+    picked = req.analyze_result
+    try:
+        fitted = QubitFluxCalibration(
+            half=picked.flx_half,
+            integer=picked.flx_int,
+            period=abs(picked.flx_period),
+        )
+        frame = qubit_flux_frame(component.flux)
+        reference = reference_device_flux_points(
+            component.flux, device_name, fitted, values, swept_devices=swept_devices
+        )
+    except ValueError as error:
+        raise ValueError(f"{target!r}: {error}") from error
+    return [
+        ParameterWriteback(
+            target_name=f"{target}.flux.{device_name}",
+            description="Reference half/integer and signed period (native DC units)",
+            proposed_value=reference.model_dump(mode="json"),
+            element=element,
+        ),
+        RecordWriteback(
+            target_name=target,
+            description="Raw flux calibration with Run frame and device snapshot",
+            record={
+                "device": device_name,
+                "half": fitted.half,
+                "integer": fitted.integer,
+                "period": fitted.period,
+                "devices": {name: deepcopy(info) for name, info in devices.items()},
+                "flux_frame": {
+                    name: {key: value for key, value in calibration.items()}
+                    for name, calibration in frame.items()
+                },
+                "run": {"run_id": metadata.run_id, "experiment": metadata.experiment},
+            },
+            element=element,
+        ),
+    ]

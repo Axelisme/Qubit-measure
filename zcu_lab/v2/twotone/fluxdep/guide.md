@@ -16,7 +16,7 @@ Readout uses the qubit.module.readout slot captured at Open/Reset, or a fresh re
 
 ## Typical writeback
 
-After the run, the user drags two lines on the 2D map to mark the half-flux and integer-flux sweet spots, then clicks Done. The result writes back 'qubit.flux_half', 'qubit.flux_int' and 'qubit.flux_period' (= 2·|flx_int − flx_half|) as a calibration preview. Picking relies on user/agent judgement from the measured map. Apply a preview that replaces the earlier onetone/flux_dep calibration only after confirming the map is trustworthy.
+After the run, the user drags two lines on the 2D map to mark the half-flux and integer-flux sweet spots, then clicks Done. The preview proposes the source qubit's `flux.<cfg.flux_dev>` entry. It converts the picked half/integer to the other contributors' integer references using their Run-start snapshot biases. The period uses the new magnitude and stored sign, initially positive. Other device entries stay unchanged. An ordinary record accompanies the point update with raw picked half/integer/positive period, scanned device, complete connected-device Run snapshot and the original Run parameter frame. Missing Run capture yields no proposals; missing Run snapshot blocks calibration. Accept both proposals after review. Acceptance does not read live devices or current parameters. Picking relies on user/agent judgement from the measured map. Apply a preview that replaces the earlier onetone/flux_dep calibration only after confirming the map is trustworthy.
 
 ## Recommended
 

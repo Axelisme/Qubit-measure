@@ -141,7 +141,12 @@ half-to-integer separation. The summary includes the original index and Q name.
 
 Review the resulting proposals before applying Writeback. Destinations use the
 Run/Load capture, not the current form or aliases.
-Only that Q's calibration under the captured group's `coil_flux` mapping is proposed. Other Q records are preserved, including updates made by earlier analyses of this same Run.
+Only that Q's `flux.<scanned device>` entry is proposed. The key is the actual `cfg.flux_dev` name, not a reserved `coil` alias.
+The proposal converts the picked half/integer back to the other contributors' integer references, using their Run-start snapshot biases.
+It updates the period magnitude and preserves its stored sign. A first calibration uses positive direction.
+Other device entries and Qs are preserved.
+The accompanying ordinary record stores the raw picked half/integer/positive period, scanned device, complete connected-device Run snapshot and original Run parameter frame.
+Accept both proposals to keep the calibration and its measurement record. Missing Run device evidence blocks calibration; acceptance never reads live devices or current parameters.
 Repeat Analyze and Writeback for each acquired participant. Cancel produces no
 new calibration. Missing historical cfg prevents identity-dependent analysis;
 missing parameter capture permits picking but yields no writeback proposals.

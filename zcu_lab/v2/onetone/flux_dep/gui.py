@@ -13,7 +13,6 @@ from zcu_tools.gui.app.measure.adapter import (
     Adapter,
     AnalyzeRequest,
     Interactive,
-    ParameterWriteback,
     WritebackItem,
     WritebackRequest,
 )
@@ -32,6 +31,7 @@ from zcu_tools.plotting.plots import Plots
 from zcu_lab.v2.onetone.flux_dep.core import FluxDepCfg, FluxDepExp, FluxDepResult
 from zcu_lab.v2.onetone.flux_dep.form import make_form
 from zcu_lab.v2.support.measure.ctx_helpers import optional_parameter_float
+from zcu_lab.v2.support.measure.writeback_helpers import fluxdep_writeback_items
 
 OneToneFluxDepRunResult: TypeAlias = RunRecord[FluxDepCfg, FluxDepResult]
 
@@ -67,24 +67,11 @@ def _make_interactive_plugin(
 def _get_writeback_items(
     req: WritebackRequest[OneToneFluxDepRunResult, FluxPickResult],
 ) -> Sequence[WritebackItem]:
-    result = req.analyze_result
-    return [
-        ParameterWriteback(
-            target_name="$qubit.flux_half",
-            description="Half-flux (Φ₀/2) sweet-spot device value",
-            proposed_value=result.flx_half,
-        ),
-        ParameterWriteback(
-            target_name="$qubit.flux_int",
-            description="Integer-flux sweet-spot device value",
-            proposed_value=result.flx_int,
-        ),
-        ParameterWriteback(
-            target_name="$qubit.flux_period",
-            description="Flux period (device units) = 2·|flx_int − flx_half|",
-            proposed_value=result.flx_period,
-        ),
-    ]
+    """Propose reference calibration and a raw-fit record from this Run only."""
+    cfg = req.run_result.cfg
+    if cfg is None:
+        return []
+    return fluxdep_writeback_items(req, device_name=cfg.flux_dev)
 
 
 def run(

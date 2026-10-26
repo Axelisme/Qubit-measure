@@ -115,6 +115,20 @@ def make_form(ctx: FormContext) -> Form[TwoQubitCfg]:
     return Form(TwoQubitCfg, tree={})
 ```
 
+## Fluxdep writeback
+
+`writeback_helpers.fluxdep_writeback_items` 組裝 onetone、twotone 與 mux local／global 的校準 proposals。
+它只提 `<qubit>.flux.<device>` 的完整 entry，其他 contributors 保留。
+Frame 來自 Analyze 時的 Run ctx.parameters，contributors 的 bias 來自 RunMetadata.device_snapshot。
+新的 period 大小配 stored 方向，首次校準使用正方向。另一個同 Run 被掃 contributor 會令該 Q 寫回失敗。
+缺 Run snapshot 不能換算，不以 live device 補值。Snapshot 只代表全部已連線裝置，不代表完整 setup catalog。
+
+同次 ordinary RecordWriteback 的 `device` 是實際被掃名稱，`half`、`integer` 與正的 `period` 是原始擬合值，使用該 device 的 native unit。
+`devices` 保存完整 Run snapshot，包含非 contributing RF 與 DC 裝置。
+`flux_frame` 是 Run capture 的原校準，空 frame 也原樣保存，不混入本次結果。
+`run` 保存來源 run_id 與 experiment。Append owner 補 provenance 與 component 信封。
+Point proposal 才保存換算後參考點，record 不重複保存它。接受時不讀目前 point、alias 或儀器。
+
 ## 其他 measure helpers
 
 `singleshot_shared.py` 從 AnalyzeRequest 的固定 Run ParameterContext 讀取分類、chi/kappa

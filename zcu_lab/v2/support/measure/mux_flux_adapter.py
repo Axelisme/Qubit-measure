@@ -12,7 +12,6 @@ from zcu_tools.core.element import ElementIdentity
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     AnalyzeRequest,
-    ParameterWriteback,
     WritebackItem,
     WritebackRequest,
 )
@@ -29,6 +28,7 @@ from zcu_lab.v2.mux.onetone.core import MuxFrequencyOffsetCfg
 from zcu_lab.v2.support.measure.ctx_helpers import optional_parameter_float
 from zcu_lab.v2.support.measure.mux_bindings import require_mux_group
 from zcu_lab.v2.support.measure.mux_results import captured_qubits
+from zcu_lab.v2.support.measure.writeback_helpers import fluxdep_writeback_items
 from zcu_lab.v2.support.mux_flux import (
     FluxFrequencyCfg,
     GlobalFluxCfg,
@@ -183,10 +183,12 @@ def get_writeback_items[C: MuxFluxCfg](
 ) -> Sequence[WritebackItem]:
     """Propose only this analysis's Q calibration using the Run capture.
 
-    Missing capture yields no proposals. Identity mismatches raise instead
-    of guessing a target. Global proposes one complete Q calibration record,
-    creating it in an empty mapping without replacing other Q records.
-    Local proposals target the selected Q's three scalar fields.
+    Missing capture or cfg yields no proposals. Identity mismatches raise
+    instead of guessing a target. Both scan types propose only the selected
+    device entry in qubit.flux and an ordinary raw-fit record. Global uses the
+    actual cfg.flux_dev name, not a reserved coil alias. Local rejects another
+    simultaneously scanned participant device if it contributes to this Q.
+    Conversion and record evidence use only Run parameters and device snapshot.
     """
     cfg, picked = req.run_result.cfg, req.analyze_result
     if cfg is None:
@@ -201,31 +203,17 @@ def get_writeback_items[C: MuxFluxCfg](
         raise ValueError("Picked tone/Q identity does not match the Run capture")
     identity = ElementIdentity(index=picked.tone, name=picked.qubit)
     if isinstance(cfg, GlobalFluxCfg):
-        parameters = req.ctx.parameters
-        if parameters is None:
-            return []
-        return [
-            ParameterWriteback(
-                target_name=f"{parameters.resolve_path('$mux')}.coil_flux.{picked.qubit}",
-                description=f"{picked.qubit} coil calibration (native DC units)",
-                proposed_value={
-                    "half": picked.flx_half,
-                    "int": picked.flx_int,
-                    "period": picked.flx_period,
-                },
-                element=identity,
-            )
-        ]
-    return [
-        ParameterWriteback(
-            target_name=f"{picked.qubit}.flux_{name}",
-            description=description,
-            proposed_value=value,
+        return fluxdep_writeback_items(
+            req,
+            qubit=picked.qubit,
+            device_name=cfg.flux_dev,
+            swept_devices=(cfg.flux_dev,),
             element=identity,
         )
-        for name, description, value in (
-            ("half", "Half-flux DC device value", picked.flx_half),
-            ("int", "Integer-flux DC device value", picked.flx_int),
-            ("period", "DC device flux period", picked.flx_period),
-        )
-    ]
+    return fluxdep_writeback_items(
+        req,
+        qubit=picked.qubit,
+        device_name=cfg.tones[picked.tone].flux_dev,
+        swept_devices=tuple(cfg.tones[index].flux_dev for index in cfg.participants),
+        element=identity,
+    )
