@@ -1,6 +1,6 @@
 # `gui.app.measure.remote`
 
-**Last updated:** 2026-10-25
+**Last updated:** 2026-10-26
 
 **讀者：** framework-dev。量測 GUI 的 RPC 方法、控制權與來源投影契約。
 
@@ -39,6 +39,15 @@ live at `records/components/<target>.jsonl`; the event ledger stays at `records/
 Shared transport primitives live in [`zcu_tools.gui.remote`](../../../remote/README.md): NDJSON framing,
 typed request/reply/error envelope, socket endpoint, owner-scheduler dispatch, and
 router scaffolding. Typed envelopes live in [`gui.remote.wire`](../../../remote/wire.py).
+
+## Workflow acquisition facts
+
+Wire version 124 adds optional `simulated_physical_s` to each operation acquisition
+in workflow records. It reports simulated hardware shot seconds across executed
+retry rounds, independent of pacing. It excludes flux ramp/settle and compile/upload
+overhead. Non-simulation acquisitions omit the key. MCP receives the same projection.
+Wire-contract changes bump both versions, so this field advances `WIRE_VERSION`
+to 124 and `GUI_VERSION` to 157 under the rule in `wire_version.py`.
 
 ## Saved results
 

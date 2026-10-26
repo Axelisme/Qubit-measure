@@ -1,10 +1,11 @@
 """Native workflow facts projected without lifecycle or Form policy."""
 
-from typing import Literal, TypedDict
+from typing import Literal, NotRequired, TypedDict
 
 from pydantic import JsonValue
 
 from zcu_tools.datafile import JsonObject
+from zcu_tools.experiment.acquisition_facts import AcquisitionFacts
 from zcu_tools.experiment.workflows import CommittedRecord, OperationFacts, RunStatus
 from zcu_tools.experiment.workflows.models import OperationKind, OperationOutcome
 
@@ -25,6 +26,9 @@ class AcquisitionReply(TypedDict):
     attempts counts producer calls, including failures; zero means no call.
     early_stopped records a data-condition stop before requested_rounds.
     stop_value is its finite scalar in caller-defined units, or None when absent.
+    simulated_physical_s is optional simulated shot time in seconds, including
+    executed retries and excluding flux ramp/settle and compile/upload overhead.
+    Non-simulation acquisitions omit it.
     """
 
     requested_rounds: int
@@ -32,6 +36,7 @@ class AcquisitionReply(TypedDict):
     attempts: int
     early_stopped: bool
     stop_value: float | None
+    simulated_physical_s: NotRequired[float]
 
 
 class OperationReply(TypedDict):
@@ -133,6 +138,19 @@ def project_record(record: CommittedRecord) -> RecordReply:
     }
 
 
+def _project_acquisition(acquisition: AcquisitionFacts) -> AcquisitionReply:
+    reply: AcquisitionReply = {
+        "requested_rounds": acquisition.requested_rounds,
+        "completed_rounds": acquisition.completed_rounds,
+        "attempts": acquisition.attempts,
+        "early_stopped": acquisition.early_stopped,
+        "stop_value": acquisition.stop_value,
+    }
+    if acquisition.simulated_physical_s is not None:
+        reply["simulated_physical_s"] = acquisition.simulated_physical_s
+    return reply
+
+
 def project_operation(operation: OperationFacts) -> OperationReply:
     """Project one detached native attempt without reading devices or files."""
     return {
@@ -149,14 +167,7 @@ def project_operation(operation: OperationFacts) -> OperationReply:
         "stopped": operation.stopped,
         "name": operation.name,
         "acquisitions": [
-            {
-                "requested_rounds": acquisition.requested_rounds,
-                "completed_rounds": acquisition.completed_rounds,
-                "attempts": acquisition.attempts,
-                "early_stopped": acquisition.early_stopped,
-                "stop_value": acquisition.stop_value,
-            }
-            for acquisition in operation.acquisitions
+            _project_acquisition(acquisition) for acquisition in operation.acquisitions
         ],
     }
 

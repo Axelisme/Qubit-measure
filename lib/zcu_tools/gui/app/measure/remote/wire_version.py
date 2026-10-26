@@ -17,8 +17,9 @@ from __future__ import annotations
 # Writeback receipts, validated recipe batches, all-tone diagnostics and analysis recovery.
 # value.read identifies unregistered sources with a structured reason and path.
 # Record writeback uses record IDs/kinds and written.records; no sample aliases.
-WIRE_VERSION = 123
+# Workflow acquisition replies include optional simulated physical shot seconds.
+WIRE_VERSION = 124
 
 # Bump for meaningful GUI code changes that need a reload signal.
 # Wire-contract changes bump both versions.
-GUI_VERSION = 156
+GUI_VERSION = 157

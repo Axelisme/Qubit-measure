@@ -77,6 +77,7 @@ def test_shot_overrun_restarts_all_rounds_without_opt_in_retry(
     np.testing.assert_allclose(buffer.array, 5 - 5j)
     acquisition = sched.outcome.acquisitions[0]
     assert acquisition.attempts == 2
+    assert acquisition.simulated_physical_s is None
     assert acquisition.completed_rounds == 2
     assert acquisition.retry_reasons == ("shot_overrun",)
     assert not acquisition.early_stopped

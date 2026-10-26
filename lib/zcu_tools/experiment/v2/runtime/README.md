@@ -1,6 +1,6 @@
 # `zcu_tools.experiment.v2.runtime` — experiment runtime
 
-**Last updated:** 2026-10-25
+**Last updated:** 2026-10-26
 
 **讀者：** framework-dev。Schedule、buffer、program acquire、停止與重試契約。
 
@@ -152,6 +152,9 @@ with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
 - `Schedule.outcome.acquisitions` 按完成順序列出每次 program acquisition 的 `AcquisitionFacts`。
   `requested_rounds` 是傳給 producer 的 rounds，`completed_rounds` 是最後一次 attempt 的已完成 round hook 數，不累加失敗 retry 的資料。
   `attempts` 是實際 producer 呼叫次數，包含失敗；停止使 producer 未被呼叫時為零。
+  `simulated_physical_s` 是模擬 acquisition 的硬體 shot 秒數，包含所有 attempt 中 execute 已返回的 round。
+  它與 pacing 共用 duration 公式，不受 `time_scale` 影響，排除 flux ramp／settle 與 compile／upload 開銷。
+  Builder 只在 `SimulationSoc` 分支讀取 binding 的累計值差；真實 acquisition 為 None，不呼叫模擬函式。
   `retry_reasons` 按實際重試順序記錄原因，shot 超量為 `shot_overrun`，其他錯誤為 exception class name；最後一次失敗沒有重試時不追加原因。
   `early_stopped` 只在 data condition 讓最後一次 attempt 在設定 rounds 前正常結束時為 True，external stop、failure 與最後一輪才命中都不是 early stop。
   `stop_value` 保留條件命中時的有限 scalar，單位與意義由 caller 定義。沒有提前停止、條件沒提供數值或數值非有限時為 None。
