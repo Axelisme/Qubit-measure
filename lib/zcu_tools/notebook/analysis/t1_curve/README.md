@@ -1,6 +1,6 @@
 # `t1_curve` 模塊重點文檔
 
-**Last updated:** 2026-10-21
+**Last updated:** 2026-10-26
 
 **讀者：** lab-author。T1 資料準備、噪聲模型擬合與分析呈現契約。
 
@@ -46,6 +46,7 @@ Fluxonium T1 vs. flux 的分析工具：從實測 T1 資料反推各噪聲通道
 - `fixed=("Q_ind",)` 代表 inductive channel 仍在模型中、只是固定 `Q_ind`；若要完全不考慮 inductive loss，建立 `T1FitParams` 時不要提供 `Q_ind`。
 - 預設 residual 是 log T1；若提供 `T1errs`，finite positive error 會轉成權重。`T1_error_policy` 可用 shared `MeasurementErrorPolicy` 決定 `NaN` error 如何補值；`flux_weighting` 可用 shared `FluxResidualWeighting(mode="equal_flux_bin")` 讓不同 flux bin 對 residual cost 有一致權重。
 - `success=True` 只表示 SciPy optimizer 達到終止條件；是否可信要看 residual、`reduced_chi2`、stderr 與參數是否貼近 bounds。固定參數的 stderr 回報為 0，代表未估計而不是物理不確定度為 0；inactive noise params 的 result / stderr 為 `None`。
+- `T1FitResult.correlation` 使用 `fit_tools.FitCorrelation`，保留依 `free` 順序排列的 natural-log covariance、correlation、Jacobian rank 與 column-normalized condition number。stderr 從同一個 covariance 導出。固定與未啟用參數不進矩陣；沒有自由參數或無法計算時為 `None`。Notebook 在 combined fit 後直接呼叫 `fit_tools` 的弱參數規則、熱圖與理由表，不寫入 `params.json`。
 - `t1_curve_fit.py` 是明確的 public module name；`fit.py` 保留為既有 import path，兩者 export 同一組 API。
 - notebook 若要把 all-in-one fit 結果交給後續模擬，使用 `QubitParams.set_t1_curve_fit(T1CurveFit(...))` 寫入 `params.json` 的 `t1_curve_fit` section。這個 section 只放 active noise params、stderr、fixed/free、bounds 與 fit metadata；省略的 noise key 表示該 channel 未納入模型。sample arrays、residual arrays 與 dense model curve 留在 notebook 輸出或資料檔。
 
