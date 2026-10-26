@@ -48,8 +48,7 @@ def with_artifacts(snapshot: TabSnapshot) -> TabSnapshot:
     layout = SaveLayout(
         result_path=Path(".pytest-tmp/view-artifacts/Result"),
         database_path=Path(".pytest-tmp/view-artifacts/Database"),
-        run_id="view-specimen",
-        experiment="synthetic",
+        stem="synthetic_view-specimen",
         point="p",
         saved_at=datetime(2026, 10, 8, tzinfo=timezone.utc),
     )

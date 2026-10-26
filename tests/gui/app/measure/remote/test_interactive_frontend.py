@@ -257,7 +257,7 @@ def test_mcp_interactive_uses_mounted_plugin_and_original_operation(
             assert {Path(output.path).parent for output in png_outputs} == {
                 storage.database_path
                 / "runs"
-                / f"synthetic_magnitude_{source.run_id}"
+                / f"synthetic.magnitude_Q1-R1_{source.run_id}"
                 / "figures",
                 storage.result_path / "points" / source.snapshot.point / "figures",
             }
@@ -453,7 +453,7 @@ def test_mcp_done_writeback_save_and_close_share_the_gui_result(
         assert {Path(output.path).parent for output in png_outputs} == {
             storage.database_path
             / "runs"
-            / f"synthetic_magnitude_{source.run_id}"
+            / f"synthetic.magnitude_Q1-R1_{source.run_id}"
             / "figures",
             storage.result_path / "points" / source.snapshot.point / "figures",
         }

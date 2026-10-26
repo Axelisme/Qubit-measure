@@ -60,6 +60,16 @@ class RunSnapshot:
         PlainSerializer(dict, return_type=dict[str, AliasValue]),
     ]
 
+    def to_labber_snapshot(self) -> JsonObject:
+        """Return historical point and roles for a portable Labber comment.
+
+        Omit entry_id; native metadata retains the complete snapshot.
+        Do not refresh aliases or resolve names from current entry state.
+        """
+        return TypeAdapter(JsonObject).validate_python(
+            {"point": self.point, "roles": dict(self.roles)}, strict=True
+        )
+
 
 @dataclass(frozen=True, kw_only=True)
 class SoftwareProvenance:

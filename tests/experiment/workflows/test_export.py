@@ -292,7 +292,10 @@ def test_saved_export_roundtrip_and_new_labber(
     for sequence, (labber,) in enumerate(attempts, start=1):
         assert labber.status == "saved" and labber.error is None
         assert labber.path is not None
-        assert labber.path.name == f"synthetic_a1b2c3_{sequence}.hdf5"
+        suffix = "" if sequence == 1 else "_1"
+        assert (
+            labber.path.name == f"synthetic_Q1_{manifest.identity.run_id}{suffix}.hdf5"
+        )
         restored = load_grouped_labber_data(str(labber.path))
         for name, variable in prepared.container.vars.items():
             np.testing.assert_array_equal(
@@ -320,3 +323,30 @@ def test_labber_allocation_failure_keeps_unallocated_path(tmp_path: Path):
     (labber,) = write_outputs(manifest, prepared, snapshot, database=database)
     assert labber.status == "failed" and labber.path is None and labber.error
     assert list(outside.iterdir()) == []
+
+
+def test_export_uses_caller_stem_and_embeds_snapshot(tmp_path: Path) -> None:
+    import json
+
+    import h5py
+    from zcu_tools.resources.entry import SaveContext
+
+    manifest, prepared, snapshot = inputs(tmp_path)
+    contexts: list[SaveContext] = []
+
+    def stem(context: SaveContext) -> str:
+        contexts.append(context)
+        return "workflow_Q1+Q2_exact"
+
+    (output,) = write_outputs(
+        manifest, prepared, snapshot, database=tmp_path / "database", save_stem=stem
+    )
+    assert output.status == "saved"
+    assert output.path is not None
+    assert output.path.name == "workflow_Q1+Q2_exact.hdf5"
+    with h5py.File(output.path, "r") as file:
+        comment = json.loads(str(file.attrs["comment"]))
+    assert comment["snapshot"] == {"point": "sweet", "roles": {"qubit": "Q1"}}
+    assert contexts[0].name == "synthetic"
+    assert contexts[0].run_id == manifest.identity.run_id
+    assert contexts[0].cfg == prepared.cfg.values

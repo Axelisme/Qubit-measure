@@ -1,7 +1,7 @@
 """Measure attachment for common-offset mux spectroscopy."""
 
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Literal, TypeAlias
 
@@ -34,6 +34,7 @@ from zcu_lab.v2.mux.onetone.core import (
 )
 from zcu_lab.v2.mux.onetone.form import make_form
 from zcu_lab.v2.onetone.freq.gui import OneToneFreqAnalyzeParams
+from zcu_lab.v2.support.measure.mux_save_names import mux_readout_save_stem
 from zcu_lab.v2.support.resonator import route_matched_delay
 
 MuxOnetoneRunResult: TypeAlias = RunRecord[MuxOnetoneCfg, MuxOnetoneResult]
@@ -268,7 +269,7 @@ def run(
 
 
 DEFINITION = Adapter(
-    spec=MuxOnetoneExp.AXES_SPEC,
+    spec=replace(MuxOnetoneExp.AXES_SPEC, save_stem=mux_readout_save_stem),
     make_form=make_form,
     run=run,
     guide=Path(__file__).with_name("guide.md"),

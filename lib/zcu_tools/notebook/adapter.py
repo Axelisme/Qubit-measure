@@ -281,6 +281,10 @@ class NotebookExperiment(Generic[CoreT]):
         acquired/saved events. Named figures create PNGs/copies, analysis supplies
         JSON-safe pane results, and comment remains raw user text. A returned SavedRun can
         explicitly rewrite the same run after later adapter operations.
+        core.AXES_SPEC.save_stem receives captured SaveContext on each save.
+        Its result is used verbatim. The default joins dotted tag, roles and
+        the complete run_id.
+        Callback failures or invalid stems propagate; no prefix is appended.
         PartialSaveError retains that handle and latest output report; ledger
         errors propagate directly. Do not retry or guess a historical source.
         """

@@ -12,6 +12,8 @@ from zcu_tools.resources.entry import (
     AcquiredPayload,
     LedgerEvent,
     ResultEntry,
+    SavedOutput,
+    SavedPayload,
     SaveLayout,
 )
 
@@ -37,8 +39,7 @@ def _layout(root: Path, entry: str, experiment: str, run_id: str) -> SaveLayout:
     return SaveLayout(
         result_path=root / "result" / entry,
         database_path=root / "Database" / entry,
-        run_id=run_id,
-        experiment=experiment,
+        stem=experiment.replace("/", "_") + "_" + run_id,
         point=None,
         saved_at=datetime(2026, 10, 23, tzinfo=timezone.utc),
     )
@@ -92,6 +93,30 @@ def _acquired(entry: ResultEntry, run_id: str, point: str) -> None:
     )
 
 
+def _saved_figure(entry: ResultEntry, run: Path, run_id: str) -> None:
+    entry.ledger.append(
+        LedgerEvent(
+            id=str(uuid4()),
+            entry_id=entry.entry_id,
+            kind="saved",
+            at=_AT,
+            origin="notebook",
+            payload=SavedPayload(
+                run_id=run_id,
+                outputs=(
+                    SavedOutput(
+                        artifact="results",
+                        member="figure",
+                        format="png",
+                        path=str(run / "figures/readout.png"),
+                        status="saved",
+                    ),
+                ),
+            ),
+        )
+    )
+
+
 @pytest.fixture
 def project(tmp_path: Path) -> Path:
     for name in ("alpha", "beta"):
@@ -112,6 +137,7 @@ def project(tmp_path: Path) -> Path:
             _native(run, entry, run_id, point)
             if run_id == _RUN1:
                 _acquired(entry, run_id, point)
+                _saved_figure(entry, run, run_id)
     orphan = _layout(tmp_path, "orphan", "unknown", _RUN3).run_path
     (orphan / "figures").mkdir(parents=True)
     (orphan / "figures" / "only.png").write_bytes(b"orphan PNG")
@@ -229,19 +255,23 @@ def test_figure_only_acquisition_uses_ledger_identity(project: Path) -> None:
 
 
 @pytest.mark.parametrize("native_state", ["missing", "unreadable"])
-def test_acquired_identity_matches_full_run_id_when_adapter_differs(
+def test_custom_stem_figure_only_identity_uses_exact_saved_path(
     project: Path, native_state: str
 ) -> None:
     original = _layout(project, "alpha", "mux/readout", _RUN1).run_path
-    renamed = _layout(project, "alpha", "saving", _RUN1).run_path
+    renamed = original.with_name("custom_Q1+Q2")
     original.rename(renamed)
+    entry = ResultEntry.open(
+        "alpha", result_root=project / "result", database_root=project / "Database"
+    )
+    _saved_figure(entry, renamed, _RUN1)
     data = renamed / "data.h5"
     if native_state == "missing":
         data.unlink()
     else:
         data.write_bytes(b"broken native data")
-    # A partial or merely similar suffix must not inherit the acquisition.
-    lookalike = renamed.with_name(f"saving_prefix{_RUN1}")
+    # Even a complete run_id suffix cannot establish identity without saved evidence.
+    lookalike = renamed.with_name(f"saving_{_RUN1}")
     lookalike.mkdir()
     index = scan_results(project, entries=("alpha",))
     run = index.get_run(f"alpha/{renamed.name}")

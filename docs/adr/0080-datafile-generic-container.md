@@ -6,6 +6,8 @@ related: [0063, 0072]
 
 # datafile：通用容器格式與獨立介面
 
+**Last updated:** 2026-10-27
+
 ## 脈絡
 
 `datafile` 原本同時擁有通用的變數／軸模型與一整組實驗語義：native `data.h5` 2.1 的根屬性是 run_id、experiment tag、時間與 completion，`/context` 放 entry、point、roles，`/device` 放 device snapshot，`/provenance` 放軟體版本；`RunMetadata`、`RunSnapshot`、`SoftwareProvenance` 都定義在 datafile 內。分析結果則走另一個獨立的 JSON 檔（`zcu.analysis-result` 1.0），因為 `data.h5` 的槽位是為量測 run 設計的，cfg 對分析結果沒有意義。另有 `fluxdep_database.py` 這種實驗專用 reader 放在 datafile。
@@ -60,6 +62,14 @@ Fluxdep database reader 由 `gui.app.fluxdep.database` 擁有。`analysis_docume
 - `experiment`：擁有 `RunMetadata`（pydantic）與 cfg 的具名型別，save 時 `model_dump(mode="json")` 成 doc、load 時 `TypeAdapter` 驗回（[[0063]] 的 `axes_spec` mapping 不變，只是輸出目標從 `ExperimentPayload` 改為 `vars`）。`RunRecord.metadata` 承載它。`native_persistence.read_run_metadata(path)` 用 read_doc 只讀 metadata；`metadata_from_container(container)` 驗證已載入的 Container。兩者共用同一個 RunMetadata 驗證函式，宿主不重做驗證，也不為取得已載 metadata 再開檔。
 - GUI、notebook、workflow 的宿主：只傳 `RunRecord`，不再另傳 metadata；載入對話框等需要 run_id、point、experiment 的地方讀 experiment 層的型別。Results browser 的唯讀歷史展示依 [[0067]] 直接讀保存文件，不套用當前實驗 schema；真正 Load 仍走 experiment 驗證。
 - 遷移工具：`migrations/` 讀舊 Labber，輸出新容器。歷史 Labber comment 與 Instrument config 解碼只在 migrations。
+
+### 衍生輸出的身分與命名
+
+2026-10-27 的保存裁決由 [[0063]] 擁有。GUI／Notebook run 保存與 workflow Labber export 在 comment 的 cfg 旁加入 `snapshot: {point, roles}`。Datafile 的 encoder 只驗有限 JSON，不解析目標身分。既有 reader 不要求 snapshot，未知 keys 不改變 cfg 的解讀。這不改 Container 3.0、Labber 結構或 remote wire version。
+
+存檔 callback 接收 SaveContext 的名稱、run_id、point、roles、cfg values 與 saved_at，回傳 stem。SaveLayout 使用 `runs/<stem>/` 與日期樹內的 `<stem>.hdf5`，不另加 run_id。只有 Labber 初始目的已存在時才用既有 suffix helper。Native 保留明確 replace=True 的同路徑覆寫。完整 run_id 仍保存在 metadata，不從檔名猜測。
+
+使用者於 2026-10-27 裁決：「Q-L3我的想法是adapter決定怎麼生成名字，可以有預設實現。」並要求：「run_id也是由adapter行數補上，請你遵守框架不做多餘行為的設計理念，將可能需要的資訊作為參數傳給save_stem。」預設以 dotted adapter／tag／workflow name、roles 與完整 run_id 組名，自訂 callback 可以完全替換。歷史形狀與辨識方式見 [存檔歷程](../storage-format-history/2026-10-27-labber-identity.md)。
 
 ## 後果
 
