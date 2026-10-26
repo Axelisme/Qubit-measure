@@ -54,12 +54,15 @@ from .preparation import (
     prepare_t2_dephasing_data,
 )
 from .presentation import (
+    make_t2_weak_parameter_table,
     plot_flux_noise_probe,
     plot_nth_limit_vs_flux,
     plot_photon_shot_noise_probe,
     plot_t2_channel_analysis,
+    plot_t2_correlation,
     plot_t2_dephasing_data,
     plot_t2_flux_calibration,
+    plot_t2_profile,
     save_t2_curve_figure,
 )
 from .workflow import (
@@ -75,6 +78,9 @@ from .workflow import (
 )
 
 __all__ = [
+    "plot_t2_correlation",
+    "plot_t2_profile",
+    "make_t2_weak_parameter_table",
     "MechanismName",
     "MechanismOrParamName",
     "ParameterName",

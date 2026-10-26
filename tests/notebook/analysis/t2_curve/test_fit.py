@@ -46,6 +46,54 @@ def test_fit_t2_noise_params_recovers_joint_parameters() -> None:
     np.testing.assert_allclose(result.residuals, 0.0, atol=1e-8)
 
 
+def test_joint_fit_reports_log_covariance_in_free_order() -> None:
+    T1s, T2s, sensitivity, chi = _synthetic_samples(
+        T2FitParams(A_phi=2.4e-6, n_th=6e-3)
+    )
+    result = fit_t2_noise_params(
+        T1s,
+        T2s * (1 + 0.005 * np.sin(np.arange(T2s.size))),
+        sensitivity,
+        chi,
+        kappa_over_2pi_mhz=_KAPPA_OVER_2PI_MHZ,
+        init=T2FitParams(A_phi=2e-6, n_th=5e-3),
+    )
+
+    info = result.correlation
+    assert info is not None
+    assert info.parameter_names == result.free
+    np.testing.assert_allclose(info.covariance, info.covariance.T)
+    np.testing.assert_allclose(np.diag(info.correlation), 1)
+    np.testing.assert_allclose(
+        np.sqrt(np.diag(info.covariance)) * [result.params.A_phi, result.params.n_th],
+        np.asarray([result.stderr.A_phi, result.stderr.n_th], dtype=np.float64),
+    )
+    assert info.rank == 2
+    assert np.isfinite(info.condition_number)
+
+
+def test_nearly_degenerate_channels_report_strong_correlation() -> None:
+    sensitivity = np.linspace(9_900.0, 10_100.0, 30)
+    chi = np.full(30, 3.0)
+    T1s = np.full(30, 60.0)
+    gamma = flux_noise_gamma_phi_per_us(2.4e-6, sensitivity)
+    gamma += thermal_photon_gamma_phi_per_us(
+        0.006,
+        kappa_over_2pi_mhz=_KAPPA_OVER_2PI_MHZ,
+        chi_over_2pi_mhz=chi,
+    )
+    result = fit_t2_noise_params(
+        T1s,
+        1 / (1 / (2 * T1s) + gamma),
+        sensitivity,
+        chi,
+        kappa_over_2pi_mhz=_KAPPA_OVER_2PI_MHZ,
+        init=T2FitParams(A_phi=2e-6, n_th=0.005),
+    )
+    assert result.correlation is not None
+    assert abs(result.correlation.correlation[0, 1]) > 0.95
+
+
 def test_fit_t2_noise_params_keeps_fixed_values() -> None:
     true_params = T2FitParams(A_phi=2.4e-6, n_th=6.0e-3)
     T1s, T2s, domega_dflux, chi = _synthetic_samples(true_params)
@@ -64,6 +112,8 @@ def test_fit_t2_noise_params_keeps_fixed_values() -> None:
     assert result.free == ("A_phi",)
     assert result.params.n_th == true_params.n_th
     assert result.stderr.n_th == 0.0
+    assert result.correlation is not None
+    assert result.correlation.parameter_names == ("A_phi",)
     assert result.params.A_phi == pytest.approx(true_params.A_phi, rel=1e-6)
 
 
@@ -85,6 +135,7 @@ def test_fit_t2_noise_params_allows_zero_model_dephasing() -> None:
     )
 
     assert result.success
+    assert result.correlation is None
     assert result.gamma_phi_flux[0] == 0.0
     assert np.all(np.isfinite(result.residuals))
     assert np.max(np.abs(result.residuals)) < 1.0

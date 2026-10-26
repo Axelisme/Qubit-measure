@@ -3,11 +3,22 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Sequence
 
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
+
+from zcu_tools.notebook.analysis.fit_tools import (
+    FitCorrelation,
+    ParameterProfile,
+    WeakParameter,
+    make_weak_parameter_table,
+    plot_fit_correlation,
+    plot_parameter_profile,
+)
 
 from .base import (
     plot_flux_noise_sensitivity,
@@ -26,6 +37,27 @@ from .models import (
     T2FluxNoiseProbe,
     T2PhotonShotNoiseProbe,
 )
+
+
+def plot_t2_profile(profile: ParameterProfile) -> tuple[Figure, Axes]:
+    """Plot a T2 parameter profile, with A_phi in µΦ0/√Hz."""
+    return plot_parameter_profile(
+        profile,
+        label="A_phi (µΦ0/√Hz)" if profile.parameter == "A_phi" else profile.parameter,
+        scale=1e6 if profile.parameter == "A_phi" else 1.0,
+    )
+
+
+def make_t2_weak_parameter_table(weak: Sequence[WeakParameter]) -> pd.DataFrame:
+    """Return the weak T2 parameter names and their correlation/profile reasons."""
+    return make_weak_parameter_table(weak)
+
+
+def plot_t2_correlation(info: FitCorrelation) -> tuple[Figure, Axes]:
+    """Plot log-parameter correlation with T2 physical-unit labels."""
+    return plot_fit_correlation(
+        info, labels={"A_phi": "A_phi (µΦ0/√Hz)", "n_th": "n_th"}
+    )
 
 
 def plot_t2_dephasing_data(data: T2DephasingAnalysis) -> tuple[Figure, Axes]:

@@ -1,6 +1,6 @@
 # `fit_tools` 模塊重點文檔
 
-**Last updated:** 2026-10-21
+**Last updated:** 2026-10-26
 
 **讀者：** lab-author。T1／T2 共用的座標校正、樣本合併與 residual 工具。
 
@@ -35,6 +35,20 @@
 
 - `least_squares_cost(residuals)` 回傳 `0.5 * sum(residuals**2)`。
 - `reduced_chi2_from_cost(cost, observation_count, free_parameter_count)` 用 effective observation count 計算 reduced chi2；flux-bin 平衡時 observation count 是 occupied bin 數，而不是 sample 數。
+
+### Identifiability diagnostics
+
+`identifiability.py` owns `FitCorrelation`, `ParameterProfile` and `WeakParameter`.
+`calculate_fit_correlation(...)` keeps the complete natural-log covariance in free-parameter order.
+It uses the same pseudoinverse and optimizer-cost reduced χ² scale as fit stderr.
+Correlation normalizes the unscaled covariance, so zero cost does not erase correlation.
+Rank describes the Jacobian. The condition number uses unit-norm Jacobian columns.
+
+`find_weak_parameters(...)` owns the shared rule: |correlation| > 0.95 or an open profile side.
+The module defines both the correlation threshold and the Δχ² = 1 profile threshold.
+A missing matrix or an omitted profile provides no evidence of weakness.
+`identifiability_presentation.py` returns annotated figures and a reasons table.
+Callers supply physical labels and display-unit scales; the shared tools do not interpret T1/T2 parameter names.
 
 ### `effective_temperature.py` — attenuator-chain thermal noise
 

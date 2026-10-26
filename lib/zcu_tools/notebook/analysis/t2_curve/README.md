@@ -1,6 +1,6 @@
 # `t2_curve` 模塊重點文檔
 
-**Last updated:** 2026-10-21
+**Last updated:** 2026-10-26
 
 **讀者：** lab-author。Echo T2 資料準備、rate model 與分析呈現契約。
 
@@ -45,6 +45,8 @@ Fluxonium echo T2 vs. flux 的分析工具：把實測 `T2e` 先扣除 relaxatio
 
 - `T2FitParams(A_phi=None, n_th=None)`：fit 初值與結果容器；只有非 `None` 的參數會納入模型，語義與 `t1_curve.T1FitParams` 的 white-list 一致。
 - `fit_t2_noise_params(T1s, T2s, domega_dflux, chi_over_2pi_mhz, *, kappa_over_2pi_mhz, init, bounds=None, fixed=(), T1errs=None, T2errs=None, residual_mode="gamma", progress=False, ...)`：用 log-parameter least-squares 擬合 active `A_phi` 與/或 `n_th`。預設 residual 是純退相干率 `Gamma_phi`，其中 `Gamma_phi_obs = 1/T2 - 1/(2*T1)`，若提供 error 會傳播成 rate 權重。
+- `T2FitResult.correlation` 提供按 `free` 排序的 natural-log covariance、correlation、Jacobian rank 與 column-normalized 條件數。固定與未啟用參數不進矩陣。沒有自由參數或矩陣分解失敗時為 `None`。Covariance 與既有 stderr 使用相同的 optimizer-cost reduced χ² 縮放。
+- `plot_t2_correlation(...)` 與 `plot_t2_profile(...)` 回傳圖，`make_t2_weak_parameter_table(...)` 回傳原因表。A_phi 圖軸使用 µΦ0/√Hz；圖上標明 covariance 位於 natural-log 參數空間。共用數學、弱參數規則與圖表由 `fit_tools` 擁有。
 - `fixed=("n_th",)` 表示 photon channel 仍在模型中、但固定 `n_th`；若不想納入 photon shot noise，建立 `T2FitParams` 時不要提供 `n_th`。
 - `flux_noise_gamma_phi_per_us(A_phi, domega_dflux)`：從 `simulate.dephasing` 重新匯出同一純公式，回傳 first-order 1/f flux-noise echo rate。數值 owner 同時支援 FTF joint dephasing，不反向 import Notebook。
 - `thermal_photon_gamma_phi_per_us(n_th, kappa_over_2pi_mhz, chi_over_2pi_mhz)`：從 `simulate.dephasing` 重新匯出同一純公式，回傳 PRX Appendix A15 readout photon shot-noise rate。Chi 使用完整兩態 pull 差，不在新 owner 改變倍率。
