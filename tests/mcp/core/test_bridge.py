@@ -11,8 +11,8 @@ from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import suppress
 from pathlib import Path
-from queue import Queue
-from threading import Event
+from queue import Empty, Queue
+from threading import Event, Thread, current_thread
 from typing import Any
 from unittest.mock import MagicMock, Mock
 
@@ -342,6 +342,69 @@ def test_launched_child_can_fill_stderr_after_parent_returns(tmp_path: Path) -> 
     finally:
         if bridge.launched_gui:
             bridge.stop()
+
+
+@pytest.mark.requires_loopback
+@pytest.mark.skipif(os.name == "nt", reason="POSIX child-reaping observation")
+@pytest.mark.parametrize("replacement_pid", [None, 9999])
+def test_self_exit_is_reaped_without_another_bridge_call(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, replacement_pid: int | None
+) -> None:
+    config = _config(tmp_path)
+    module = tmp_path / "synthetic"
+    module.mkdir()
+    (module / "__init__.py").touch()
+    (module / "gui.py").write_text(
+        "import socket, sys\n"
+        "port = int(sys.argv[sys.argv.index('--control-port') + 1])\n"
+        "with socket.socket() as server:\n"
+        "    server.bind(('127.0.0.1', port))\n"
+        "    server.listen()\n"
+        "    server.settimeout(10)\n"
+        "    while True:\n"
+        "        with server.accept()[0] as peer:\n"
+        "            peer.settimeout(10)\n"
+        "            if peer.recv(4) == b'exit': break\n",
+        encoding="utf8",
+    )
+    waiters: Queue[Thread] = Queue()
+
+    class ObservedProcess(subprocess.Popen[bytes]):
+        def wait(self, timeout: float | None = None) -> int:
+            waiters.put(current_thread())
+            return super().wait(timeout=timeout)
+
+    monkeypatch.setattr(subprocess, "Popen", ObservedProcess)
+    bridge = McpBridge(config)
+    waiter: Thread | None = None
+    try:
+        port = _find_free_port()
+        bridge.launch(tmp_path, port, auto_connect=False)
+        pid = int(config.pid_file.read_text())
+        if replacement_pid is not None:
+            config.pid_file.write_text(str(replacement_pid))
+        with socket.create_connection(("127.0.0.1", port), timeout=5) as peer:
+            peer.sendall(b"exit")
+        # The child exits after release; its automatic waiter must finish too.
+        try:
+            waiter = waiters.get(timeout=5)
+        except Empty:
+            pytest.fail("No automatic waiter reaped the self-exiting GUI child")
+        waiter.join(timeout=5)
+        assert not waiter.is_alive(), "Automatic child reaping did not finish"
+        # Check before any bridge call, since launched_gui/stop can also reap.
+        with pytest.raises(ChildProcessError):
+            os.waitpid(pid, os.WNOHANG)
+        if replacement_pid is None:
+            assert not config.pid_file.exists()
+        else:
+            assert config.pid_file.read_text() == str(replacement_pid)
+        assert not bridge.launched_gui
+    finally:
+        if bridge.launched_gui:
+            bridge.stop()
+        if waiter is not None:
+            waiter.join(timeout=5)
 
 
 def test_launch_timeout_retains_process_without_claiming_connection(
