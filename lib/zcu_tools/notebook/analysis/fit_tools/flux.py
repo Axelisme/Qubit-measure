@@ -16,7 +16,9 @@ class F01FluxCorrectionResult:
 
     Fluxes are dimensionless normalized coordinates; no device-value frame is
     implied, so corrected device values are deliberately absent (they are only
-    defined when exactly one frame is known).
+    defined when exactly one frame is known). raw_fluxs is author input;
+    corrected_fluxs keeps raw values for rejected rows. accepted marks solves
+    inside the correction threshold, including model-frequency fallback rows.
     """
 
     raw_fluxs: NDArray[np.float64]
@@ -25,10 +27,12 @@ class F01FluxCorrectionResult:
 
     @property
     def applied_flux_corrections(self) -> NDArray[np.float64]:
+        """Applied normalized-flux changes, zero for rejected rows."""
         return self.corrected_fluxs - self.raw_fluxs
 
     @property
     def skipped_count(self) -> int:
+        """Number of rejected or unconverged frequency solves."""
         return int(np.count_nonzero(~self.accepted))
 
 
@@ -111,7 +115,7 @@ def _solve_f01_candidate_flux(
 
 def correct_flux_from_f01(
     raw_fluxs: NDArray[np.float64],
-    f01_freqs_ghz: NDArray[np.float64],
+    f01_freqs_ghz: NDArray[np.float64] | None,
     params: tuple[float, float, float],
     *,
     max_abs_flux_correction: float = 0.03,
@@ -119,21 +123,27 @@ def correct_flux_from_f01(
     """Correct normalized flux using observed f01 frequencies.
 
     ``raw_fluxs`` are dimensionless normalized flux coordinates; ``f01_freqs_ghz``
-    are the observed f01 in GHz. The MHz-based fluxonium predictor is fed an
-    explicit GHz -> MHz conversion. For every row the closest periodic or
-    mirror-equivalent model-flux branch to the raw flux is selected (the tie rule
-    is deterministic: periodic wins at an exact distance tie). Rows whose branch
+    are the observed f01 in GHz, with one value per flux. None means the whole
+    frequency column is missing; None or NaN entries use the model f01 at the
+    supplied flux. The MHz-based predictor receives an explicit GHz -> MHz
+    conversion. Each row uses the periodic or mirror-equivalent model branch
+    closest to raw flux. Periodic wins at an exact distance tie. Rows whose branch
     correction exceeds ``max_abs_flux_correction`` keep their raw flux, and rows
     whose frequency solve does not converge produce no candidate and are
     likewise left unacceptable (they may still carry an integer branch shift
-    after analysis-local alignment).
+    after analysis-local alignment). Neither input is mutated. Invalid array
+    shapes or a negative/nonfinite threshold raise ValueError.
     """
 
     if not np.isfinite(max_abs_flux_correction) or max_abs_flux_correction < 0.0:
         raise ValueError("max_abs_flux_correction must be a finite non-negative value")
 
     raw_arr = np.asarray(raw_fluxs, dtype=np.float64)
-    freq_arr = np.asarray(f01_freqs_ghz, dtype=np.float64)
+    freq_arr = (
+        np.full_like(raw_arr, np.nan)
+        if f01_freqs_ghz is None
+        else np.asarray(f01_freqs_ghz, dtype=np.float64)
+    )
     if raw_arr.shape != freq_arr.shape:
         raise ValueError("raw_fluxs and f01_freqs_ghz must have the same shape")
     if raw_arr.ndim != 1:
@@ -141,6 +151,8 @@ def correct_flux_from_f01(
 
     # The predictor consumes MHz; convert explicitly before the per-row solve.
     freq_mhz = 1e3 * freq_arr
+    missing = np.isnan(freq_mhz)
+    freq_mhz[missing] = predict_f01_mhz(params, raw_arr[missing])
     direct_candidates = np.asarray(
         [
             _solve_f01_candidate_flux(

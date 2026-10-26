@@ -17,6 +17,7 @@ from .flux import (
     predict_domega_dflux,
     predict_f01_mhz,
 )
+from .flux_presentation import add_device_axis
 from .identifiability import (
     CORRELATION_THRESHOLD,
     LOG_STD_THRESHOLD,
@@ -31,15 +32,9 @@ from .identifiability_presentation import (
 )
 from .loss import least_squares_cost, reduced_chi2_from_cost
 from .sample_merge import (
-    BatchFluxOffsetObjective,
-    BatchFluxOffsetResult,
-    FluxFrame,
     SampleMergeResult,
-    SampleSource,
     merge_sample_sources,
-    plot_sample_merge_f01_diagnostics,
     write_merged_samples,
-    write_sample_merge_report,
 )
 from .weights import (
     ErrorNanPolicy,
@@ -65,15 +60,12 @@ __all__ = [
     "ErrorResolutionResult",
     "F01FluxCorrectionResult",
     "align_flux_to_window",
-    "BatchFluxOffsetResult",
-    "BatchFluxOffsetObjective",
-    "FluxFrame",
+    "add_device_axis",
     "FluxResidualWeighting",
     "FluxResidualWeights",
     "FluxWeightingMode",
     "MeasurementErrorPolicy",
     "SampleMergeResult",
-    "SampleSource",
     "ThermalAttenuatorStage",
     "ThermalChainResult",
     "ThermalProbeResult",
@@ -87,12 +79,10 @@ __all__ = [
     "merge_sample_sources",
     "plot_effective_temperature_vs_frequency",
     "plot_thermal_chain_psd",
-    "plot_sample_merge_f01_diagnostics",
     "predict_domega_dflux",
     "predict_f01_mhz",
     "reduced_chi2_from_cost",
     "resolve_measurement_errors",
     "thermal_psd_log10_v2_per_hz",
     "write_merged_samples",
-    "write_sample_merge_report",
 ]

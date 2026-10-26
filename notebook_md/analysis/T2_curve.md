@@ -37,11 +37,19 @@ Model:
 ```python
 %load_ext autoreload
 
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
 from IPython.display import display
+from zcu_tools.resources.qubit_params import QubitParams
+from zcu_tools.resources.record_table import RecordFluxFrame, flux_from_frame
 
 %autoreload 2
 import zcu_tools.notebook.analysis.t2_curve as zt2
 from zcu_tools.notebook.analysis.fit_tools import (
+    add_device_axis,
+    correct_flux_from_f01,
     find_weak_parameters,
     make_weak_parameter_table,
     plot_fit_correlation,
@@ -53,51 +61,101 @@ from zcu_tools.notebook.analysis.fit_tools import (
 ```python
 chip_name = "Q12_2D[7]"
 qub_name = "Q4"
-
 result_dir = f"../../result/{chip_name}/{qub_name}"
-samples_filename = "records.jsonl"
-image_dir = None  # None: use result_dir/t2_curve.
-default_bare_rf = 5.0
-
+samples_filename = "samples.csv"
+image_dir = None
 figure_paths = {}
 ```
 
+# Read samples and choose flux
+
+The author reads the CSV and supplies one normalized flux value per row.
+`flux_from_frame` is an independent option for reconstructing flux from the
+selected device's dotted columns. To use another coordinate source, replace
+that call with your own row-aligned array.
+
 ```python
-ctx = zt2.load_t2_curve_context(
-    device_name="bias_device",  # Replace with a device name from records.devices.
-    result_dir=result_dir,
-    samples_filename=samples_filename,
-    image_dir=image_dir,
-    default_bare_rf=default_bare_rf,
+samples = pd.read_csv(Path(result_dir) / samples_filename)
+params = QubitParams(Path(result_dir) / "params.json", readonly=True).require_fluxdep_fit()
+
+fallback_frame = None
+# For rows without a frame, explicitly choose the unit and frame:
+# fallback_frame = RecordFluxFrame(
+#     dev_unit="A", flux_int=params.flux_int, flux_period=params.flux_period
+# )
+fluxs = flux_from_frame(
+    samples, device_name="bias_device", fallback_frame=fallback_frame
 )
 ```
 
+# Optional f01 correction
+
+Choose whether to correct before analysis. Missing observed frequencies use
+model f01 at the supplied flux. This tool reports its own corrections;
+analysis stages do not infer this preprocessing history.
+
 ```python
+apply_f01_correction = False
+max_abs_flux_correction = 0.03
+
+if apply_f01_correction:
+    observed_ghz = (
+        1e-3 * samples["freq_mhz"].to_numpy(dtype=np.float64)
+        if "freq_mhz" in samples.columns else None
+    )
+    correction = correct_flux_from_f01(
+        fluxs, observed_ghz, params.params,
+        max_abs_flux_correction=max_abs_flux_correction,
+    )
+    display(pd.DataFrame({
+        "author flux": correction.raw_fluxs,
+        "corrected flux": correction.corrected_fluxs,
+        "accepted": correction.accepted,
+        "applied correction": correction.applied_flux_corrections,
+    }))
+    fluxs = correction.corrected_fluxs
+```
+
+# Load analysis inputs
+
+```python
+ctx = zt2.load_t2_curve_context(
+    result_dir=result_dir,
+    samples_filename=samples_filename,
+    fluxs=fluxs,
+    image_dir=image_dir,
+)
 display(ctx.params_table)
 display(ctx.samples_preview)
 ```
 
-# Flux Resolution (v2)
+# Optional device-value axis
+
+Normalized-flux plots do not need a device frame. Enable this only when you
+want a second axis in the chosen device's A, V or native unit. The frame maps
+zero flux to `flux_int`; it does not choose a device or read hardware.
 
 ```python
-cal = zt2.calibrate_t2_flux(
-    ctx,
-    fallback_frame_unit="A",  # params.json fluxdep_fit frame declared in A
-)
+show_device_axis = False
+device_axis_name = "bias_device"
+device_axis_frame = None
+if show_device_axis:
+    device_axis_frame = RecordFluxFrame(
+        dev_unit="A", flux_int=params.flux_int, flux_period=params.flux_period
+    )
 ```
 
+# Select measurement rows
+
 ```python
-print(f"explicit flux rows = {sum(s == 'explicit' for s in cal.resolution.sources)}")
-print(f"row-frame flux rows = {sum(s == 'row-frame' for s in cal.resolution.sources)}")
-print(f"fallback-frame flux rows = {sum(s == 'fallback-frame' for s in cal.resolution.sources)}")
-print(f"finite f01 rows = {len(cal.freq_rows)}")
+cal = zt2.calibrate_t2_flux(ctx)
+display(cal.summary_table)
 ```
 
 # Fit Window
 
 ```python
 analysis_flux_range = (0.49, 0.53)
-max_abs_flux_correction = 0.03
 max_rel_t2e_err = 0.5
 use_weighted_points_only = False
 
@@ -121,7 +179,6 @@ flux_weighting = zt2.FluxResidualWeighting(
 data = zt2.prepare_t2_dephasing_data(
     cal,
     analysis_flux_range=analysis_flux_range,
-    max_abs_flux_correction=max_abs_flux_correction,
     max_rel_t2e_err=max_rel_t2e_err,
     use_weighted_points_only=use_weighted_points_only,
 )
@@ -133,12 +190,14 @@ figure_paths["flux_calibration"] = zt2.save_t2_curve_figure(
     fig, ctx, "flux_calibration.png"
 )
 
-fig, _ = zt2.plot_t2_dephasing_data(data)
+fig, ax = zt2.plot_t2_dephasing_data(data)
+if device_axis_frame is not None:
+    add_device_axis(ax, device_axis_frame, device_name=device_axis_name)
 figure_paths["t2e_vs_flux"] = zt2.save_t2_curve_figure(fig, ctx, "T2e_vs_flux.png")
 ```
 
 ```python
-display(data.summary_table)  # prepared frequency-source and branch-shift diagnostics
+display(data.summary_table)  # observed/model f01 and integer branch shifts
 ```
 
 # Flux-Noise-Only Probe
@@ -212,23 +271,29 @@ photon_probe = zt2.analyze_photon_shot_noise_limit(
 ```
 
 ```python
-print(f"n_th probe = {photon_probe.n_th_init:.3e}")
-print(f"n_th photon-only fit = {photon_probe.n_th_fit:.3e}")
-print(f"half-flux equivalent n_th = {photon_probe.thermal.half_equivalent_n_th:.3e}")
+if photon_probe is None:
+    print("photon shot noise disabled: missing dispersive inputs")
+else:
+    print(f"n_th probe = {photon_probe.n_th_init:.3e}")
+    print(f"n_th photon-only fit = {photon_probe.n_th_fit:.3e}")
+    print(f"half-flux equivalent n_th = {photon_probe.thermal.half_equivalent_n_th:.3e}")
 
-fig, _ = zt2.plot_photon_shot_noise_probe(photon_probe)
-figure_paths["photon_shot_noise_probe"] = zt2.save_t2_curve_figure(
-    fig, ctx, "T2e_thermal_photon_limit.png"
-)
+    fig, _ = zt2.plot_photon_shot_noise_probe(photon_probe)
+    figure_paths["photon_shot_noise_probe"] = zt2.save_t2_curve_figure(
+        fig, ctx, "T2e_thermal_photon_limit.png"
+    )
 
-fig, _ = zt2.plot_nth_limit_vs_flux(photon_probe)
-figure_paths["n_th_vs_flux"] = zt2.save_t2_curve_figure(fig, ctx, "n_th_vs_flux.png")
+    fig, _ = zt2.plot_nth_limit_vs_flux(photon_probe)
+    figure_paths["n_th_vs_flux"] = zt2.save_t2_curve_figure(fig, ctx, "n_th_vs_flux.png")
 ```
 
 # Combined Fit
 
 ```python
-active_mechanisms = ("flux_noise", "photon_shot_noise")
+active_mechanisms = (
+    ("flux_noise", "photon_shot_noise")
+    if ctx.photon_shot_noise_enabled else ("flux_noise",)
+)
 fixed_mechanisms = ()
 
 fit_A_phi_override = None
@@ -324,7 +389,9 @@ channel_analysis = zt2.build_t2_channel_curves(
 ```
 
 ```python
-fig, _ = zt2.plot_t2_channel_analysis(channel_analysis)
+fig, ax = zt2.plot_t2_channel_analysis(channel_analysis)
+if device_axis_frame is not None:
+    add_device_axis(ax, device_axis_frame, device_name=device_axis_name)
 figure_paths["channel_overlay"] = zt2.save_t2_curve_figure(
     fig, ctx, "T2e_flux_noise_fit.png", bbox_inches="tight"
 )

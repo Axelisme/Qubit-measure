@@ -6,6 +6,7 @@ import pytest
 from zcu_tools.notebook.analysis.t1_curve.base import (
     find_proper_Temp,
     plot_eff_t1_with_sample,
+    plot_sample_t1,
 )
 
 
@@ -23,14 +24,31 @@ def test_find_proper_temp_passes_scalar_candidate_to_callback() -> None:
     assert isinstance(result, float)
 
 
+@pytest.mark.parametrize("with_model", [False, True])
+def test_t1_plotters_use_normalized_sample_flux(with_model: bool) -> None:
+    fluxs = np.array([0.2, 0.4, 0.6])
+    times = np.array([40_000.0, 42_000.0, 41_000.0])
+    errors = np.array([400.0, 400.0, 400.0])
+    fig, ax = (
+        plot_eff_t1_with_sample(fluxs, times, errors, times, fluxs)
+        if with_model
+        else plot_sample_t1(fluxs, times, errors)
+    )
+    try:
+        np.testing.assert_allclose(
+            np.asarray(ax.get_lines()[0].get_xdata(), dtype=np.float64), fluxs
+        )
+        assert ax.get_ylim()[0] > 0
+    finally:
+        plt.close(fig)
+
+
 def test_plot_eff_t1_with_sample_draws_component_limits() -> None:
     fig, ax = plot_eff_t1_with_sample(
         np.array([-1.0, 0.0, 1.0], dtype=np.float64),
         np.array([8.0, 10.0, 9.0], dtype=np.float64),
         np.array([0.5, 0.6, 0.5], dtype=np.float64),
         np.array([7.0, 8.0, 7.5], dtype=np.float64),
-        flux_half=0.0,
-        flux_period=2.0,
         t_fluxs=np.array([0.0, 0.5, 1.0], dtype=np.float64),
         component_t1s={
             "capacitive": np.array([20.0, 21.0, 22.0], dtype=np.float64),
@@ -67,8 +85,6 @@ def test_plot_eff_t1_with_sample_keeps_sample_ylim_with_large_component() -> Non
         np.array([8.0, 10.0, 9.0], dtype=np.float64),
         np.array([0.5, 0.6, 0.5], dtype=np.float64),
         np.array([7.0, 8.0, 7.5], dtype=np.float64),
-        flux_half=0.0,
-        flux_period=2.0,
         t_fluxs=np.array([0.0, 0.5, 1.0], dtype=np.float64),
         component_t1s={
             "Purcell": np.array([1000.0, 1100.0, 1200.0], dtype=np.float64),
@@ -92,8 +108,6 @@ def test_plot_eff_t1_with_sample_rejects_component_shape_mismatch() -> None:
             np.array([8.0, 10.0, 9.0], dtype=np.float64),
             np.array([0.5, 0.6, 0.5], dtype=np.float64),
             np.array([7.0, 8.0, 7.5], dtype=np.float64),
-            flux_half=0.0,
-            flux_period=2.0,
             t_fluxs=np.array([0.0, 0.5, 1.0], dtype=np.float64),
             component_t1s={"bad": np.array([20.0, 21.0], dtype=np.float64)},
         )
@@ -106,8 +120,6 @@ def test_plot_eff_t1_with_sample_rejects_band_shape_mismatch() -> None:
             np.array([8.0, 10.0, 9.0], dtype=np.float64),
             np.array([0.5, 0.6, 0.5], dtype=np.float64),
             np.array([7.0, 8.0, 7.5], dtype=np.float64),
-            flux_half=0.0,
-            flux_period=2.0,
             t_fluxs=np.array([0.0, 0.5, 1.0], dtype=np.float64),
             component_bands={
                 "bad": (

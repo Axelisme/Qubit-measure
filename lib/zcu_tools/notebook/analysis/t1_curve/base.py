@@ -183,40 +183,29 @@ def plot_t1_vs_elements(
     return fig, ax
 
 
-# tolerated: The sample plot keeps device calibration and axis controls in its documented API.
-def plot_sample_t1(  # noqa: PLR0913
-    s_dev_values: NDArray[np.float64],
+def plot_sample_t1(
+    s_fluxs: NDArray[np.float64],
     s_T1s: NDArray[np.float64],
     s_T1errs: NDArray[np.float64],
-    flux_half: float,
-    flux_period: float,
-    xlabel: str = "Current (mA)",
-    *,
-    show_value_axis: bool = False,
 ) -> tuple[Figure, Axes]:
-    """T1s: ns"""
+    """Plot T1 measurements against normalized flux.
+
+    s_fluxs is a 1D normalized Phi0 coordinate array. s_T1s/s_T1errs are
+    matching ns lifetimes/errors; NaN errors are allowed. Return a new
+    Figure/Axes without showing or saving. Matplotlib rejects incompatible
+    array shapes and invalid errors. Device axes are added separately by the
+    author with add_device_axis.
+    """
     fig, ax = plt.subplots(constrained_layout=True, figsize=(8, 4))
 
-    s_fluxs = np.asarray(
-        value2flux(s_dev_values, flux_half, flux_period), dtype=np.float64
-    )
+    s_fluxs = np.asarray(s_fluxs, dtype=np.float64)
 
-    ax.errorbar(s_fluxs, s_T1s, yerr=s_T1errs, fmt=".", label="Current")
+    ax.errorbar(s_fluxs, s_T1s, yerr=s_T1errs, fmt=".", label="T1")
 
     ax.grid()
     ax.set_xlabel(r"$\phi_{ext}/\phi_0$", fontsize=14)
     ax.set_ylabel(r"$T_1$ (ns)", fontsize=14)
     ax.set_yscale("log")
-
-    if show_value_axis:
-        ax2 = ax.secondary_xaxis(
-            "top",
-            functions=(
-                lambda values: flux2value(np.asarray(values), flux_half, flux_period),
-                lambda values: value2flux(np.asarray(values), flux_half, flux_period),
-            ),
-        )
-        ax2.set_xlabel(xlabel, fontsize=14)
 
     return fig, ax
 
@@ -292,27 +281,32 @@ def plot_t1_with_sample(  # noqa: PLR0913
     return fig, ax
 
 
-# tolerated: Notebook and test callers use positional samples and separate component/axis keywords.
+# tolerated: Notebook callers use positional samples and separate component/annotation keywords.
 def plot_eff_t1_with_sample(  # noqa: PLR0913
-    s_dev_values: NDArray[np.float64],
+    s_fluxs: NDArray[np.float64],
     s_T1s: NDArray[np.float64],
     s_T1errs: NDArray[np.float64],
     t1_effs: NDArray[np.float64],
-    flux_half: float,
-    flux_period: float,
     t_fluxs: NDArray[np.float64],
     *,
     label: str = r"$t_1^{eff}$",
     title: str | None = None,
-    xlabel: str = "Current (mA)",
     component_t1s: Mapping[str, NDArray[np.float64]] | None = None,
     component_bands: (
         Mapping[str, tuple[NDArray[np.float64], NDArray[np.float64]]] | None
     ) = None,
     parameter_text: str | None = None,
-    show_value_axis: bool = False,
 ) -> tuple[Figure, Axes]:
-    """T1s: ns"""
+    """Plot normalized-flux T1 samples and a dense model curve.
+
+    s_fluxs/s_T1s/s_T1errs share a 1D sample axis, with normalized Phi0 and ns
+    units. t1_effs/t_fluxs share a dense model axis in ns/normalized Phi0.
+    component_t1s adds named ns curves; component_bands adds named lower/upper
+    ns arrays on t_fluxs. label/title name the effective curve/figure;
+    parameter_text places a summary beside the axes. Return a new Figure/Axes
+    without showing or saving. Mismatched dense/component shapes raise
+    ValueError; invalid sample errors/shapes propagate from Matplotlib.
+    """
     fig, ax = plt.subplots(constrained_layout=True, figsize=(8, 4))
     if title is not None:
         fig.suptitle(title)
@@ -322,9 +316,7 @@ def plot_eff_t1_with_sample(  # noqa: PLR0913
     if t1_effs.shape != t_fluxs.shape:
         raise ValueError("t1_effs must have the same shape as t_fluxs")
 
-    s_fluxs = np.asarray(
-        value2flux(s_dev_values, flux_half, flux_period), dtype=np.float64
-    )
+    s_fluxs = np.asarray(s_fluxs, dtype=np.float64)
     ax.errorbar(
         s_fluxs,
         s_T1s,
@@ -414,16 +406,6 @@ def plot_eff_t1_with_sample(  # noqa: PLR0913
             ),
             clip_on=False,
         )
-
-    if show_value_axis:
-        ax2 = ax.secondary_xaxis(
-            "top",
-            functions=(
-                lambda values: flux2value(np.asarray(values), flux_half, flux_period),
-                lambda values: value2flux(np.asarray(values), flux_half, flux_period),
-            ),
-        )
-        ax2.set_xlabel(xlabel, fontsize=14)
 
     return fig, ax
 
