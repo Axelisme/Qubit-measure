@@ -32,6 +32,20 @@ class _RecordRow(BaseModel):
         return value
 
 
+def _check_flatten_columns(record: dict[str, JsonValue]) -> None:
+    """Reject distinct leaf paths that flatten to the same dotted column."""
+    pending = list(record.items())
+    columns: set[str] = set()
+    while pending:
+        column, value = pending.pop()
+        if isinstance(value, dict):
+            pending.extend((f"{column}.{key}", item) for key, item in value.items())
+        elif column in columns:
+            raise ValueError(f"Colliding flattened column {column!r}")
+        else:
+            columns.add(column)
+
+
 class JsonlRecordTable:
     """Store record history at an exact UTF-8 JSONL path.
 
@@ -128,11 +142,20 @@ class JsonlRecordTable:
         metadata are preserved without schema validation. Corrupt tails or invalid
         run_id raise ValueError with path/line; I/O failures propagate.
         With flatten=True, nested object keys become dot-separated columns
-        (devices.bias.value); lists remain cell values. The default keeps
-        nested JSON objects as cells. Neither form changes the source history.
+        (devices.bias.value); lists remain cell values. Distinct source paths
+        colliding in one dotted column raise ValueError with path, zero-based
+        output row, run_id and column. The default keeps nested JSON objects as
+        cells, including dotted keys. Neither form changes the source history.
         """
         rows = list(self._latest_records().values())
         if flatten:
+            for index, row in enumerate(rows):
+                try:
+                    _check_flatten_columns(row)
+                except ValueError as exc:
+                    raise ValueError(
+                        f"{self._path}: row {index} (run_id={row['run_id']!r}): {exc}"
+                    ) from exc
             return pd.json_normalize(rows)
         return pd.DataFrame(rows)
 

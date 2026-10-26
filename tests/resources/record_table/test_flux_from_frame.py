@@ -1,9 +1,15 @@
 """Author-selected device coordinates from record tables and their dotted CSVs."""
 
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 import pytest
-from zcu_tools.resources.record_table import RecordFluxFrame, flux_from_frame
+from zcu_tools.resources.record_table import (
+    JsonlRecordTable,
+    RecordFluxFrame,
+    flux_from_frame,
+)
 
 
 @pytest.mark.parametrize("flatten", [False, True])
@@ -29,6 +35,24 @@ def test_flux_uses_explicit_then_row_frame_then_named_fallback(flatten: bool) ->
     )
 
     np.testing.assert_allclose(flux, [0.8, 0.5, 0.25])
+    pd.testing.assert_frame_equal(table, original)
+
+
+@pytest.mark.parametrize("flatten", [False, True])
+def test_flux_from_record_read_handles_null_and_populated_devices(
+    tmp_path: Path, flatten: bool
+) -> None:
+    path = tmp_path / "records.jsonl"
+    path.write_text(
+        '{"run_id":"explicit","flux":0.7,"devices":null}\n'
+        '{"run_id":"frame","devices":{"bias":{"value":0.9,"value_unit":"V"}},'
+        '"flux_int":0.1,"flux_period":0.8}\n',
+        encoding="utf-8",
+    )
+    table = JsonlRecordTable(path).read(flatten=flatten)
+    original = table.copy(deep=True)
+
+    np.testing.assert_allclose(flux_from_frame(table, device_name="bias"), [0.7, 1.0])
     pd.testing.assert_frame_equal(table, original)
 
 

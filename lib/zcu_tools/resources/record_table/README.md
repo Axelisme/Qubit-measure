@@ -6,7 +6,7 @@
 
 ## 條目樣本（`jsonl.py`）
 
-`ResultEntry.records(component)` 回傳 `JsonlRecordTable`，綁定 `result/<name>/records/components/<component>.jsonl`。唯讀 `path` 提供該表 exact bound JSONL 路徑，供 caller 報告目的地或檢查同檔。綁定與查詢路徑只操作記憶體。JSONL 是只追加的樣本歷史；`read()` 回傳每個 `run_id` 最後一整行的 DataFrame，不合併舊行欄位。不存在的檔案回空表。讀取只檢查 JSON object 與選取最新列所需的非空字串 `run_id`；其他欄位、NaN 與時間等 metadata 原樣保留，不套寫入 schema。JSON 語法損壞、缺 run_id 或未完成的尾行回報檔名與行號，不跳過。`latest(run_id)` 共用同一讀取路徑，只回傳指定 run 的最新整行。`read(flatten=True)` 將巢狀物件鍵串成點號欄名，例如 `devices.bias.value`；list 保留為 cell 值。預設 `read()` 仍保留 nested cells。兩者都不改寫來源。
+`ResultEntry.records(component)` 回傳 `JsonlRecordTable`，綁定 `result/<name>/records/components/<component>.jsonl`。唯讀 `path` 提供該表 exact bound JSONL 路徑，供 caller 報告目的地或檢查同檔。綁定與查詢路徑只操作記憶體。JSONL 是只追加的樣本歷史；`read()` 回傳每個 `run_id` 最後一整行的 DataFrame，不合併舊行欄位。不存在的檔案回空表。讀取只檢查 JSON object 與選取最新列所需的非空字串 `run_id`；其他欄位、NaN 與時間等 metadata 原樣保留，不套寫入 schema。JSON 語法損壞、缺 run_id 或未完成的尾行回報檔名與行號，不跳過。`latest(run_id)` 共用同一讀取路徑，只回傳指定 run 的最新整行。`read(flatten=True)` 將巢狀物件鍵串成點號欄名，例如 `devices.bias.value`；list 保留為 cell 值。同一列的不同來源路徑若產生相同點號欄名，會拋出 ValueError，指出來源檔、從零起算的輸出列、run_id 與衝突欄名。沒有衝突的點號鍵照常保留。預設 `read()` 仍保留 nested cells 與原始點號鍵，不要求攤平。兩者都不改寫來源。
 
 `append` 要求 `run_id`，成功後回傳當筆已序列化的隔離 JSON row，含 run_id、point、at、source 與 producer 欄位，不再讀回檔案。`dev_value`、`dev_unit` 與其他欄位皆由 producer 選填，保留原值與 caller 單位，不檢查 dev 存在或換算單位。`point` 可為空，`at` 預設由儲存層填 UTC，也可明示 accepted 事件的 UTC 時間。`source` 預設 manual，也可由 caller 提供 accepted 事件 ID 或 `workflow:<run_id>`。Producer 欄位可以保存巢狀 JSON。儲存層不計算 flux 座標，不讀 ledger 或元件 schema；下游查詢與 v2 驗證自行處理缺值。
 
@@ -17,7 +17,7 @@
 `project_device_coordinates(records, device_name=...)` 依 caller 指定的名稱讀取每列 `devices[device_name]` 的 `value` 與 `value_unit`。
 它回傳分析用的 `dev_value/dev_unit` 欄位，保留其他內容、row index 與順序，不改來源表或 JSONL。
 沒有 explicit finite flux 的列需要所選裝置的有限非 boolean 數值，缺失時錯誤列出 `devices[name].value` 與 row index。已有 explicit flux 時，缺裝置值以 NaN 表示，不阻擋解析。`value_unit` 是字串時原樣傳遞，否則投影為 None；只有 fallback frame 解析時才檢查單位是否匹配。
-沒有 nested `devices` 欄時，它讀取同一 record 攤平後的 `devices.<device_name>.value/value_unit` 欄位。它不猜第一台裝置，不從舊 flat 欄位 fallback，也不合成多裝置的 flux。
+該列的 `devices` 不是 nested object 時，它讀取同一 record 攤平後的 `devices.<device_name>.value/value_unit` 欄位。它不猜第一台裝置，不從舊 flat 欄位 fallback，也不合成多裝置的 flux。
 這是 opt-in 讀取工具，JSONL append 不呼叫它。Producer 的記錄格式見 [Record policy](../../../../zcu_lab/v2/measure-authoring.md#record-policy)。
 
 ## 作者 flux 換算

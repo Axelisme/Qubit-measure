@@ -20,8 +20,8 @@ def project_device_coordinates(
     their source dev_value. Units are copied when strings, otherwise None;
     resolve_record_flux checks a unit only when using a fallback frame.
     Other fields, row order and index are preserved, and the input is unchanged.
-    Dotted columns devices.<device_name>.value/value_unit are accepted when
-    there is no nested devices column (as in a flattened record CSV).
+    Dotted columns devices.<device_name>.value/value_unit are accepted for rows
+    without a nested devices object (as in a flattened record CSV).
     No other device or legacy flat coordinate is used as fallback.
     """
     if not device_name.strip():
@@ -33,7 +33,7 @@ def project_device_coordinates(
         device: object = devices.get(device_name) if isinstance(devices, dict) else None
         value: object = device.get("value") if isinstance(device, dict) else None
         unit: object = device.get("value_unit") if isinstance(device, dict) else None
-        if "devices" not in records:
+        if not isinstance(devices, dict):
             value = row.get(f"devices.{device_name}.value")
             unit = row.get(f"devices.{device_name}.value_unit")
         usable_value = (
