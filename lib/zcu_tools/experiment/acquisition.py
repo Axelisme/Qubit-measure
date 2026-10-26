@@ -20,7 +20,6 @@ from pydantic import TypeAdapter
 
 from zcu_tools.datafile import JsonObject
 from zcu_tools.device import DeviceMapping
-from zcu_tools.experiment.acquisition_facts import AcquisitionFacts
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.metadata import SoftwareProvenance
 from zcu_tools.program.v2.simulation import SimulationSoc
@@ -41,8 +40,7 @@ class AcquisitionEvidence:
     holds detached pre-acquisition driver settings keyed by connected name. None
     means unrecorded legacy evidence; {} means the Run had no devices. Snapshot
     mappings are copied on construction, including when acquisition_for returns
-    a detached evidence copy. acquisitions contains ordered program observations
-    from the completed run; historical evidence defaults to an empty tuple.
+    a detached evidence copy.
     Later sweeps and Save never refresh these values.
     """
 
@@ -52,7 +50,6 @@ class AcquisitionEvidence:
     completion: Literal["complete", "stopped"]
     provenance: SoftwareProvenance
     device_snapshot: Mapping[str, JsonObject] | None = None
-    acquisitions: tuple[AcquisitionFacts, ...] = ()
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "device_snapshot", deepcopy(self.device_snapshot))

@@ -15,7 +15,7 @@ import zcu_tools.experiment as experiment
 from pydantic import TypeAdapter
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.datafile import DataVariable, JsonObject, load, save
-from zcu_tools.experiment.acquisition_facts import AcquisitionFacts
+from zcu_tools.experiment.native_persistence import read_run_metadata
 
 
 def historical_metadata(
@@ -200,17 +200,11 @@ def test_native_round_trip_keeps_record_metadata_and_container_docs(
     )
 
 
-@pytest.mark.parametrize("seconds", [None, 0.0, 94.0])
-def test_native_acquisition_shot_time_round_trips_and_omits_absence(
-    tmp_path: Path, seconds: float | None
+@pytest.mark.parametrize("legacy_value", [[], [{"requested_rounds": 10}], "legacy"])
+def test_native_load_ignores_retired_metadata_without_rewriting(
+    tmp_path: Path, legacy_value: object
 ) -> None:
-    metadata = historical_metadata().model_copy(
-        update={
-            "acquisitions": (
-                AcquisitionFacts(10, 10, 1, False, simulated_physical_s=seconds),
-            )
-        }
-    )
+    metadata = historical_metadata()
     record = experiment.RunRecord(
         ConfigBase(), Signal(np.array([4000.0]), np.array([1j])), metadata=metadata
     )
@@ -218,28 +212,19 @@ def test_native_acquisition_shot_time_round_trips_and_omits_absence(
     experiment.save_run(record, path, spec=declaration())
     container = load(path)
     document = container.docs["metadata"]
-    acquisitions = TypeAdapter(list[JsonObject]).validate_python(
-        document["acquisitions"]
-    )
-    acquisition = acquisitions[0]
-    if seconds is None:
-        assert "simulated_physical_s" not in acquisition
-    else:
-        assert acquisition["simulated_physical_s"] == seconds
-    restored = experiment.load_run_with_metadata(path, spec=declaration())
-    assert restored.metadata == metadata
-
-    # A historical acquisition without this field remains readable.
-    acquisition.pop("simulated_physical_s", None)
-    document["acquisitions"] = [dict(item) for item in acquisitions]
+    document["acquisitions"] = TypeAdapter(JsonObject).validate_python(
+        {"value": legacy_value}
+    )["value"]
     save(
         path,
         replace(container, docs={**container.docs, "metadata": document}),
         replace=True,
     )
-    historical = experiment.load_run_with_metadata(path, spec=declaration()).metadata
-    assert historical is not None
-    assert historical.acquisitions[0].simulated_physical_s is None
+    before = path.read_bytes()
+    restored = experiment.load_run_with_metadata(path, spec=declaration())
+    assert restored.metadata == metadata
+    assert read_run_metadata(path) == metadata
+    assert path.read_bytes() == before
 
 
 def test_native_save_requires_record_metadata(tmp_path: Path) -> None:

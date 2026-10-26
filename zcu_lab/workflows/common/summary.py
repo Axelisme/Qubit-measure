@@ -88,9 +88,7 @@ class RunSummary(BaseModel):
 
     Completed points have status=completed, including rejected/failed stages.
     Committed points also include skipped points. Recovery counts attempted
-    physical refits. Acquisition counters count facts with early_stopped or
-    attempts>1, not rounds or the number of extra attempts. Delivered facts only
-    are counted: Failed operations and Pause-discarded attempts are unavailable.
+    physical refits. Stage durations use delivered operation facts only.
     Mux has no flux range because it does not set flux.
     """
 
@@ -100,8 +98,6 @@ class RunSummary(BaseModel):
     skipped_points: int
     flux_range: FluxRange | None = Field(default=None, exclude_if=lambda v: v is None)
     physical_recoveries: int
-    early_stops: int
-    acquire_retries: int
     stages: tuple[StageSummary, ...]
     qubits: tuple[QubitSummary, ...] = ()
 
@@ -234,7 +230,7 @@ class SummaryAccumulator:
             self.operations.append(outcome.facts)
 
     def finish(self) -> RunSummary:
-        """Return point totals, delivered acquisition counts and population statistics."""
+        """Return point totals, stage durations and population statistics."""
         stages = _stage_totals(self.points)
         _add_durations(stages, self.operations)
         fluxes = [point.flux for point in self.points if point.flux is not None]
@@ -243,7 +239,6 @@ class SummaryAccumulator:
             flux_range = FluxRange(
                 minimum=min(fluxes), maximum=max(fluxes), unit=self.flux_unit
             )
-        acquisitions = [a for op in self.operations for a in op.acquisitions]
         return RunSummary(
             planned_points=self.planned_points,
             committed_points=len(self.points),
@@ -251,8 +246,6 @@ class SummaryAccumulator:
             skipped_points=sum(p.status == "skipped" for p in self.points),
             flux_range=flux_range,
             physical_recoveries=sum(p.physical_recoveries for p in self.points),
-            early_stops=sum(a.early_stopped for a in acquisitions),
-            acquire_retries=sum(a.attempts > 1 for a in acquisitions),
             stages=tuple(stages.values()),
             qubits=_qubit_totals(self.points),
         )

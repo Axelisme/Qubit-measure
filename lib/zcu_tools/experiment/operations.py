@@ -9,7 +9,6 @@ from typing import TYPE_CHECKING, Literal, Protocol
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.datafile import JsonObject
-from zcu_tools.experiment.acquisition_facts import AcquisitionFacts
 from zcu_tools.experiment.metadata import SoftwareProvenance
 
 if TYPE_CHECKING:
@@ -99,9 +98,7 @@ class OperationFacts:
     stopped is the operation token's completion-time stop bit, including failed,
     raised and discarded attempts; it is not inferred from later run state.
     name is the caller-supplied operation label, or None when unnamed or absent
-    in historical records. acquisitions lists observed program acquisitions in
-    completion order, including failed/retried calls; it is empty for operations
-    with none and for historical records without these observations.
+    in historical records. Readers ignore unknown historical fields.
     """
 
     kind: OperationKind
@@ -114,4 +111,3 @@ class OperationFacts:
     reason: str | None
     stopped: bool
     name: str | None = None
-    acquisitions: tuple[AcquisitionFacts, ...] = ()

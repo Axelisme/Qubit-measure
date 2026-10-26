@@ -424,7 +424,6 @@ class RunService:
                     update={
                         "finished_at": finished_at.isoformat(),
                         "completion": completion,
-                        "acquisitions": stop_signal.acquisitions,
                     }
                 )
                 return replace(result, metadata=metadata)

@@ -5,8 +5,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal, TypeAlias
 
-from zcu_tools.experiment.acquisition_facts import AcquisitionFacts
-
 RunStatus: TypeAlias = Literal["completed", "stopped", "interrupted", "failed"]
 
 
@@ -17,8 +15,6 @@ class ScheduleOutcome:
     status is completed, stopped, interrupted, or failed. reason is None for
     completion, otherwise a human-readable explanation of that status.
     exception is the original captured cause, or None when none was observed.
-    acquisitions lists program calls in completion order, including failed calls
-    and their retry counts. An empty tuple means no acquisition was observed.
     A stopped outcome may retain an acquire/build Exception caught after stop
     was requested; its status/reason and StopSignal.error remain cancellation,
     and no retry follows. The first such cause is retained even if the schedule
@@ -30,7 +26,6 @@ class ScheduleOutcome:
     status: RunStatus = "completed"
     reason: str | None = None
     exception: BaseException | None = None
-    acquisitions: tuple[AcquisitionFacts, ...] = ()
 
     @property
     def is_partial(self) -> bool:

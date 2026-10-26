@@ -187,7 +187,6 @@ class NotebookExperiment(Generic[CoreT]):
                 ),
                 provenance=provenance,
                 device_snapshot=device_snapshot,
-                acquisitions=context.scope.stop.acquisitions,
             )
             plots.finish()
             record = RunRecord(cfg=retained_cfg, result=result)
