@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Literal
@@ -379,31 +380,98 @@ def test_merge_unresolved_rows_fail_with_indexes(tmp_path: Path) -> None:
         )
 
 
-def test_merge_rejects_legacy_columns(tmp_path: Path) -> None:
+def test_merge_ignores_unused_fields_and_exports_the_same_target_coordinates(
+    tmp_path: Path,
+) -> None:
     target = _target_frame()
-    legacy_path = _write_v2_jsonl(
-        tmp_path / "legacy.jsonl",
-        dev_values=np.array([1.0, 2.0]),
-        dev_unit="A",
-        measurements={"calibrated mA": [1.0, 2.0], "freq_mhz": [410.0, 430.0]},
+    source_path = tmp_path / "source.jsonl"
+    rows = [
+        {"run_id": "explicit", "flux": 0.5, "flux_int": "unused", "t1_us": 80},
+        {
+            "run_id": "row-frame",
+            "devices": {"bias": {"value": 3, "value_unit": "arbitrary"}},
+            "flux_int": 1,
+            "flux_period": 4,
+            "t1_us": 70,
+        },
+        {
+            "run_id": "fallback",
+            "devices": {"bias": {"value": 0, "value_unit": "A"}},
+            "t1_us": 60,
+        },
+    ]
+    source_path.write_text(
+        "".join(
+            json.dumps(
+                row
+                | {
+                    "unused": float("nan"),
+                    "at": "2026-10-10T12:00:00+08:00",
+                    "metadata": {"future": [1, None]},
+                    "Flux": 99,
+                }
+            )
+            + "\n"
+            for row in rows
+        ),
+        encoding="utf-8",
     )
-    with pytest.raises(RecordTableV2Error, match="calibrated mA"):
+    original = source_path.read_bytes()
+
+    result = merge_sample_sources(
+        target_frame=target,
+        sources=(
+            SampleSource(
+                device_name="bias",
+                path=source_path,
+                fallback_frame=_target_frame(flux_int=-1, flux_period=2),
+            ),
+        ),
+    )
+    output = tmp_path / "samples.csv"
+    write_merged_samples(result, output)
+
+    exported = pd.read_csv(output)
+    assert list(exported.columns[:5]) == list(RECORD_COORDINATE_COLUMNS)
+    np.testing.assert_allclose(exported["flux"], [0.5, 0.5, 0.5])
+    np.testing.assert_allclose(exported["dev_value"], [1.15, 1.15, 1.15])
+    assert exported["t1_us"].tolist() == [80, 70, 60]
+    np.testing.assert_array_equal(exported["unused"], [np.nan, np.nan, np.nan])
+    assert result.diagnostics["flux_source"].tolist() == [
+        "explicit",
+        "row-frame",
+        "fallback-frame",
+    ]
+    assert source_path.read_bytes() == original
+
+
+@pytest.mark.parametrize(
+    ("fields", "missing_field"),
+    [
+        ({"flux_int": 0, "flux_period": 2}, "devices['bias'].value"),
+        (
+            {
+                "devices": {"bias": {"value": 1, "value_unit": "A"}},
+                "Flux": 0.5,
+                "calibrated mA": 1,
+            },
+            "flux_int/flux_period",
+        ),
+    ],
+)
+def test_merge_missing_used_fields_names_source_and_field(
+    tmp_path: Path, fields: dict[str, object], missing_field: str
+) -> None:
+    path = tmp_path / "missing-field.jsonl"
+    path.write_text(json.dumps({"run_id": "a"} | fields) + "\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match=re.escape(str(path))) as error:
         merge_sample_sources(
-            target_frame=target,
-            sources=(SampleSource(device_name="bias", path=legacy_path),),
+            target_frame=_target_frame(),
+            sources=(SampleSource(device_name="bias", path=path),),
         )
 
-    flux_alias_path = _write_v2_jsonl(
-        tmp_path / "legacy_flux.jsonl",
-        dev_values=np.array([1.0, 2.0]),
-        dev_unit="A",
-        measurements={"Flux": [0.5, 0.55]},
-    )
-    with pytest.raises(RecordTableV2Error, match="Flux"):
-        merge_sample_sources(
-            target_frame=target,
-            sources=(SampleSource(device_name="bias", path=flux_alias_path),),
-        )
+    assert missing_field in str(error.value)
 
 
 def test_merge_a_and_v_sources_into_one_target_frame(tmp_path: Path) -> None:

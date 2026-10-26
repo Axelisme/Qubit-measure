@@ -26,17 +26,26 @@ jupyter:
 
 # Sample Merge
 
-**Readers:** operator, lab-author. Merge sample files with explicit flux frames into the canonical CSV used by the T1 and T2 notebooks.
+**Readers:** operator, lab-author. Merge record JSONL into the canonical `samples.csv` used by the T1 and T2 notebooks.
 
 Run this notebook before `T1_curve.md` / `T2_curve.md` when raw sample files come
 from different source flux frames or device units. The curve notebooks should
 only read the canonical `samples.csv` produced here.
 
-Sources must be flat v2 CSVs (`dev_value` / `dev_unit`, optional `flux` /
-`flux_int` / `flux_period`). Legacy `calibrated mA` / `Flux` tables must be
-converted explicitly with `zcu_tools.resources.record_table.migrate_record_table_v2` and
-saved to a distinct v2 CSV before merging. No migration CLI ships with this
-repo; the merge never guesses units or integer flux branches.
+Sources are record JSONL histories, with the last whole row kept for each
+`run_id`. Each row uses explicit `flux`, or the selected
+`devices[device_name].value` with `flux_int` / `flux_period` or a declared
+`fallback_frame`. Only fallback resolution needs a matching device `value_unit`.
+Unused NaN, extra fields and metadata do not block merging. Missing required
+fields report the source file and field names. The output remains a flat
+`samples.csv` with target coordinates followed by the source measurement fields.
+
+For legacy `calibrated mA` / `Flux` CSVs, follow the formal
+[Sample CSV → JSONL migration procedure](../../migrations/README.md#sample-csv--jsonl)
+with explicit source units and column mapping. The merge does not read CSV,
+recognize legacy aliases, infer units or supply missing device facts. Before
+merging migrated rows, check that each row has explicit `flux` or the selected
+device value and a usable frame.
 
 # Import
 
@@ -78,7 +87,9 @@ target_frame = zfit.FluxFrame.from_result_dir(
 
 # Sources
 
-Each source is adapter record JSONL. Set device_name to a captured device name; missing device facts fail without a flat-column fallback. `fallback_frame` resolves migrated rows that carry
+Each source is record JSONL. Set `device_name` to the captured device used for
+rows without explicit `flux`; missing required device values fail without a
+flat-column fallback. `fallback_frame` resolves rows that carry
 neither explicit `flux` nor a row frame. `integer_flux_offset` aligns a source
 to an equivalent integer flux branch (e.g. `-0.5` -> `+1` to match `0.5`); the
 merge never infers a branch on its own.

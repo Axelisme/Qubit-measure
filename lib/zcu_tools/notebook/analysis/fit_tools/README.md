@@ -1,6 +1,6 @@
 # `fit_tools` 模塊重點文檔
 
-**Last updated:** 2026-10-26
+**Last updated:** 2026-10-27
 
 **讀者：** lab-author。T1／T2 共用的座標校正、樣本合併與 residual 工具。
 
@@ -17,11 +17,11 @@
 
 ### `sample_merge.py` — flux-first v2 SampleMerge
 
-來源是 adapter record JSONL，caller 必須以 `device_name` 指定 `devices` 中的座標裝置，不使用舊 flat 欄位作輸入 fallback。每個 run_id 取最後一行。量測欄位使用 `freq_mhz`、`t1_us` 等 snake_case 名稱，CSV 只作合併結果與 report 的匯出。
+來源是 record JSONL，caller 以 `device_name` 指定沒有 explicit flux 時要使用的座標裝置，不使用舊 flat 欄位作輸入 fallback。每個 run_id 取最後一整行。只檢查實際用到的座標，未用 NaN、額外欄位與 metadata 不阻擋合併。量測欄位使用 `freq_mhz`、`t1_us` 等 snake_case 名稱。輸出的 `samples.csv` 是曲線分析輸入，report 另行匯出。
 
 - `FluxFrame(params, dev_unit, flux_int, flux_period, label)`：analysis affine flux frame。construction 驗證 A/V/native `dev_unit`、finite `flux_int` 與 positive finite `flux_period`，f01 model `params` 必須是三個 finite float；`flux_from_dev_value()` / `dev_value_from_flux()` 提供 scalar/array round trip（`(dev_value - flux_int) / flux_period`）。`from_result_dir(result_dir, *, dev_unit, label=None)` 從 `params.json` 的 `fluxdep_fit` 讀 `(EJ, EC, EL)` 與 `flux_int` / `flux_period`；`dev_unit` 必填，因為 persisted params 沒有 unit metadata。
-- `SampleSource(path, device_name=..., label=..., fallback_frame=..., integer_flux_offset=0, fit_batch_flux_offset=..., batch_flux_offset_objective=..., batch_flux_offset_range=..., max_abs_batch_flux_offset=..., f01_fit_scale_mhz=...)` 以 `JsonlRecordTable.read()` 讀取 JSONL 最新 rows，再驗證 v2 座標（`validate_record_table_v2`）。`fallback_frame` 供缺 row frame 的 migrated rows 解析 flux；`integer_flux_offset` 是 caller-declared integer branch 對齊，merge 不猜測 unit 或 integer branch。branch 對齊後的唯一非整數調整是 bounded batch fit（`max_abs_batch_flux_offset` 限定）。
-- `merge_sample_sources(*, target_frame, sources)`：唯一 authoritative target identity。pipeline：`resolve_record_flux`（explicit → row frame → fallback frame，共用 provenance SSOT）→ caller `integer_flux_offset` → optional small batch offset（對 target f01 model 擬合單一 `delta_flux`；`batch_flux_offset_objective` 可選 `soft_l1`、`median_abs`、`mean_abs`、`rms`）→ target frame `dev_value`。輸出完整 flat v2 coordinate：adjusted `flux` 與 target `dev_value` / `dev_unit` / `flux_int` / `flux_period`，加上 caller-owned measurement columns，欄名保持原樣。diagnostics 逐 row 記錄 resolution `sources` provenance，並明示 integer offset、batch correction 與 target frame；A-source 與 V-source 先轉到同一 target frame，再比較校準後座標。unresolved rows / legacy tables 在 mutation 前 fast-fail。
+- `SampleSource(path, device_name=..., label=..., fallback_frame=..., integer_flux_offset=0, fit_batch_flux_offset=..., batch_flux_offset_objective=..., batch_flux_offset_range=..., max_abs_batch_flux_offset=..., f01_fit_scale_mhz=...)` 以 `JsonlRecordTable.read()` 讀取 JSONL 最新 rows，不做整表 v2 驗證。缺必要欄位時錯誤指出來源檔與欄名。`fallback_frame` 供缺 row frame 的 migrated rows 解析 flux；`integer_flux_offset` 是 caller-declared integer branch 對齊，merge 不猜測 unit 或 integer branch。branch 對齊後的唯一非整數調整是 bounded batch fit（`max_abs_batch_flux_offset` 限定）。
+- `merge_sample_sources(*, target_frame, sources)`：唯一 authoritative target identity。pipeline：`resolve_record_flux`（explicit → row frame → fallback frame，共用 provenance SSOT）→ caller `integer_flux_offset` → optional small batch offset（對 target f01 model 擬合單一 `delta_flux`；`batch_flux_offset_objective` 可選 `soft_l1`、`median_abs`、`mean_abs`、`rms`）→ target frame `dev_value`。輸出完整 flat v2 coordinate：adjusted `flux` 與 target `dev_value` / `dev_unit` / `flux_int` / `flux_period`，加上 caller-owned measurement columns，欄名保持原樣。diagnostics 逐 row 記錄 resolution `sources` provenance，並明示 integer offset、batch correction 與 target frame；A-source 與 V-source 先轉到同一 target frame，再比較校準後座標。無法解析的 rows 在寫出前報錯。未知與舊欄位不作 alias，只沿用原名傳遞。
 - `write_merged_samples(...)` / `write_sample_merge_report(...)` 分別寫乾淨的 `samples.csv` 與診斷 report；兩者都拒絕覆寫任何 merge source JSONL。`plot_sample_merge_f01_diagnostics(...)` 用 target model 檢查合併後 f01 residual。
 
 ### `weights.py` — residual weighting

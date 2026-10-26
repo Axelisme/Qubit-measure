@@ -384,68 +384,78 @@ def _require_row_frames(records: pd.DataFrame) -> None:
         )
 
 
+def _optional_row_coordinate(row: pd.DataFrame, column: str) -> float | None:
+    """Read one numeric cell only when its coordinate branch needs it."""
+    if column not in row:
+        return None
+    value = float(_coerce_numeric_column(row, column)[0])
+    if np.isnan(value):
+        return None
+    if not np.isfinite(value):
+        raise RecordTableV2Error(
+            f"{column} must be finite at row(s) {row.index.tolist()}",
+            reason="non_finite_coordinate",
+            data={"column": column},
+        )
+    return value
+
+
 def resolve_record_flux(
     records: pd.DataFrame,
     *,
     fallback_frame: RecordFluxFrame | None = None,
 ) -> RecordFluxResolution:
-    """Resolve per-row flux with ``explicit -> row-frame -> fallback-frame`` precedence.
+    """Resolve flux using explicit -> row-frame -> fallback-frame precedence.
 
-    ``sources`` is the closed per-row provenance; ``explicit_mask`` is derived
-    only from it. Rows that cannot be resolved (and fallback rows whose unit does
-    not match the row ``dev_unit``) fail fast with their indexes.
+    Only coordinates used by each row are checked. Explicit flux needs no
+    device facts or row frame. A complete row frame needs finite dev_value and
+    positive flux_period, but no unit conversion. Fallback needs dev_value and
+    dev_unit matching fallback_frame. Unknown and legacy fields are ignored,
+    never aliased. Missing/unusable coordinates raise RecordTableV2Error naming
+    fields and row indexes. The input table is not modified; empty tables resolve
+    to empty values and provenance.
     """
-    validate_record_table_v2(records, allow_empty=True)
-    if records.empty:
-        return RecordFluxResolution(values=np.empty(0, dtype=np.float64), sources=())
-    dev_values = _coerce_numeric_column(records, DEV_VALUE_COLUMN)
-    dev_units = records[DEV_UNIT_COLUMN].astype(str).to_numpy()
-    flux_values = (
-        _coerce_numeric_column(records, FLUX_COLUMN)
-        if FLUX_COLUMN in records.columns
-        else None
-    )
-    int_values = (
-        _coerce_numeric_column(records, FLUX_INT_COLUMN)
-        if FLUX_INT_COLUMN in records.columns
-        else None
-    )
-    period_values = (
-        _coerce_numeric_column(records, FLUX_PERIOD_COLUMN)
-        if FLUX_PERIOD_COLUMN in records.columns
-        else None
-    )
-    row_count = len(records)
-    values = np.empty(row_count, dtype=np.float64)
+    values = np.empty(len(records), dtype=np.float64)
     sources: list[RecordFluxSource] = []
     unresolved: list[int] = []
-    for index in range(row_count):
-        if flux_values is not None and not np.isnan(flux_values[index]):
-            values[index] = flux_values[index]
+    for index in range(len(records)):
+        row = records.iloc[index : index + 1]
+        flux = _optional_row_coordinate(row, FLUX_COLUMN)
+        if flux is not None:
+            values[index] = flux
             sources.append("explicit")
             continue
-        if (
-            int_values is not None
-            and period_values is not None
-            and not np.isnan(int_values[index])
-            and not np.isnan(period_values[index])
-        ):
-            values[index] = (dev_values[index] - int_values[index]) / period_values[
-                index
-            ]
+        flux_int = flux_period = None
+        if FLUX_INT_COLUMN in row and FLUX_PERIOD_COLUMN in row:
+            frame_cells = row[[FLUX_INT_COLUMN, FLUX_PERIOD_COLUMN]]
+            if not frame_cells.isna().to_numpy().any():
+                flux_int = _optional_row_coordinate(row, FLUX_INT_COLUMN)
+                flux_period = _optional_row_coordinate(row, FLUX_PERIOD_COLUMN)
+        dev_value = _optional_row_coordinate(row, DEV_VALUE_COLUMN)
+        if flux_int is not None and flux_period is not None and dev_value is not None:
+            if flux_period <= 0:
+                raise RecordTableV2Error(
+                    f"flux_period must be positive at row(s) {row.index.tolist()}",
+                    reason="invalid_flux_period",
+                )
+            values[index] = (dev_value - flux_int) / flux_period
             sources.append("row-frame")
             continue
-        if fallback_frame is not None and fallback_frame.dev_unit == dev_units[index]:
-            values[index] = (
-                dev_values[index] - fallback_frame.flux_int
-            ) / fallback_frame.flux_period
+        if (
+            fallback_frame is not None
+            and DEV_UNIT_COLUMN in row
+            and row[DEV_UNIT_COLUMN].iloc[0] == fallback_frame.dev_unit
+            and dev_value is not None
+        ):
+            values[index] = fallback_frame.flux_from_dev_value(dev_value)
             sources.append("fallback-frame")
             continue
         unresolved.append(index)
     if unresolved:
         raise RecordTableV2Error(
-            f"unable to resolve flux for row(s) {unresolved}: no explicit flux, "
-            "no row frame, and no matching fallback frame",
+            f"unable to resolve flux for row(s) {unresolved}: need flux, or "
+            "dev_value with flux_int/flux_period, or dev_value/dev_unit "
+            "with a matching fallback frame",
             reason="unresolved_flux",
             data={"indexes": unresolved},
         )

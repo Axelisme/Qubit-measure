@@ -1,6 +1,7 @@
-"""Flux-first SampleMerge: merge v2 JSONL samples into one authoritative target frame.
+"""Flux-first SampleMerge: merge record JSONL into one authoritative target frame.
 
-Each source is a flat v2 JSONL (``validate_record_table_v2``). Per-row flux is
+Each source is record JSONL; only coordinates used by each row are checked.
+Unused fields and metadata remain opaque. Per-row flux is
 resolved through the shared provenance SSOT ``resolve_record_flux`` (explicit
 ``flux`` -> row ``flux_int``/``flux_period`` frame -> caller-declared
 ``fallback_frame``), shifted by the caller's explicit integer branch offset,
@@ -41,9 +42,9 @@ from zcu_tools.resources.record_table import (
     JsonlRecordTable,
     RecordFluxFrame,
     RecordFluxResolution,
+    RecordTableV2Error,
     project_device_coordinates,
     resolve_record_flux,
-    validate_record_table_v2,
 )
 
 from .flux import predict_f01_mhz
@@ -148,8 +149,10 @@ class FluxFrame:
 class SampleSource:
     """One adapter record JSONL feeding the merge.
 
-    device_name explicitly selects devices[device_name].value/value_unit before
-    flat v2 analysis. Missing device facts fail without a flat-value fallback.
+    ``path`` selects the JSONL history. ``device_name`` selects the captured
+    devices[device_name].value when explicit flux is absent; value_unit is used
+    only by fallback_frame. Missing required facts fail without a legacy flat
+    fallback. ``label`` names the source in reports, defaulting to the file stem.
 
     ``fallback_frame`` resolves migrated rows that carry neither explicit
     ``flux`` nor a row frame (its unit must match the row ``dev_unit``).
@@ -237,14 +240,17 @@ def merge_sample_sources(
     target_frame: FluxFrame,
     sources: Iterable[SampleSource],
 ) -> SampleMergeResult:
-    """Merge v2 sample tables into one authoritative ``target_frame``.
+    """Merge record JSONL ``sources`` into the authoritative ``target_frame``.
 
     The pipeline per source is: resolve flux with shared provenance
     (``resolve_record_flux``) -> apply the caller-declared
     ``integer_flux_offset`` -> optionally fit one small batch offset against
     the target f01 model -> map to the target frame's ``dev_value``. Units and
-    integer branches are never inferred; unresolved rows fail fast with their
-    indexes. Source JSONL files are never modified.
+    integer branches are never inferred. Only used coordinates are checked;
+    unknown fields, unused NaN and metadata do not trigger whole-row validation.
+    Missing/unusable required fields raise ValueError with source path, field
+    names and row indexes. RecordTableV2Error retains coordinate error details.
+    An empty sources iterable raises ValueError. Source JSONL is never modified.
 
     The output is an analysis artifact, not an adapter record input. Original
     devices remain source evidence, not target-frame coordinates; writing the
@@ -262,14 +268,20 @@ def merge_sample_sources(
 
     for source in tuple(sources):
         source_path = Path(source.path)
-        raw = project_device_coordinates(
-            JsonlRecordTable(source_path).read(), device_name=source.device_name
-        )
-        validate_record_table_v2(raw, allow_empty=True)
-        resolution = resolve_record_flux(
-            raw,
-            fallback_frame=_as_sample_frame(source.fallback_frame),
-        )
+        try:
+            raw = project_device_coordinates(
+                JsonlRecordTable(source_path).read(), device_name=source.device_name
+            )
+            resolution = resolve_record_flux(
+                raw,
+                fallback_frame=_as_sample_frame(source.fallback_frame),
+            )
+        except RecordTableV2Error as exc:
+            raise RecordTableV2Error(
+                f"{source_path}: {exc}", reason=exc.reason, data=exc.data
+            ) from exc
+        except ValueError as exc:
+            raise ValueError(f"{source_path}: {exc}") from exc
         flux_resolved = resolution.values
         flux_shifted = flux_resolved + float(source.integer_flux_offset)
         f01_mhz = (
