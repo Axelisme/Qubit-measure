@@ -660,6 +660,7 @@ def test_saved_point_samples_persist_and_replace_latest_run_row(
     row = session.entry.records("Q1").read().iloc[0].to_dict()
     assert datetime.fromisoformat(row["at"]) == datetime.fromisoformat(event.at)
     expected = {
+        "component": "Q1",
         "t1_us": 20.09,
         "dev_value": 0.125,
         "dev_unit": "native",
@@ -687,6 +688,7 @@ def test_saved_point_samples_persist_and_replace_latest_run_row(
     assert session.control.read_record(
         session.control.read_context().target, "Q1", "run-1"
     ) == {
+        "component": "Q1",
         "t1_us": 31.7,
         "run_id": "run-1",
         "point": "a",
