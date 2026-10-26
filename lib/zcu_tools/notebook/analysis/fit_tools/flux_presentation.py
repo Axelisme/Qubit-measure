@@ -1,40 +1,70 @@
 """Optional device-value axes for author-composed normalized-flux plots."""
 
+from collections.abc import Mapping
+
 import numpy as np
 from matplotlib.axes import Axes
 from matplotlib.axes._secondary_axes import SecondaryAxis
 
+from zcu_tools.analysis.flux import (
+    DeviceFluxFrame,
+    DeviceFluxPoint,
+    FluxFrame,
+    actual_flux_points,
+)
 from zcu_tools.resources.record_table import RecordFluxFrame
 
 
 def add_device_axis(
     ax: Axes,
-    frame: RecordFluxFrame,
+    frame: RecordFluxFrame | FluxFrame,
     *,
     device_name: str,
+    values: Mapping[str, float] | None = None,
 ) -> SecondaryAxis:
-    """Add a top device-value axis to an existing normalized-flux x axis.
+    """Add a top device-value axis to a normalized-Phi0 x axis.
 
-    ax must use normalized Phi0 on x. frame is the author's selected single
-    device frame: flux_int is its zero-flux value, flux_period is the positive
-    value span per Phi0, and dev_unit is A, V or native. Values stay in that
-    declared unit; no milli-unit scaling or device selection is inferred.
-    device_name labels the secondary axis as "name (unit)".
+    frame is a pure-analysis FluxFrame, or an explicit single-device
+    RecordFluxFrame. device_name selects and labels the device as "name (unit)".
+    values supplies every OTHER frame device's current finite real value in
+    its declared unit; the selected value is unused. Omit values for a
+    single-device frame. No device selection or unit conversion is inferred.
 
-    Return Matplotlib's SecondaryAxis for further author styling. It tracks
-    parent limits using frame.dev_value_from_flux and its inverse. The parent
-    data/limits are unchanged; showing, drawing and saving remain the caller's
-    responsibility. Invalid frame values fail at RecordFluxFrame construction;
-    Matplotlib axis/transform errors propagate.
+    Return Matplotlib's SecondaryAxis. It tracks parent limits in both
+    directions using the selected signed period and integer shifted for the
+    other devices' current flux contribution. Parent data/limits are unchanged;
+    showing, drawing and saving remain the caller's responsibility.
+
+    ValueError names an unknown selected device or missing/invalid used value.
+    Invalid frame fields fail at construction. Matplotlib errors propagate.
     """
+    if isinstance(frame, RecordFluxFrame):
+        frame = FluxFrame(
+            {
+                device_name: DeviceFluxFrame(
+                    frame.flux_int, frame.flux_period, frame.dev_unit
+                )
+            }
+        )
+    if device_name not in frame.devices:
+        raise ValueError(f"unknown frame device {device_name!r}")
+    device = frame.devices[device_name]
+    points = actual_flux_points(
+        DeviceFluxPoint(device.integer, device.integer + device.period / 2),
+        device_name=device_name,
+        frame=frame,
+        values={} if values is None else values,
+    )
     secondary = ax.secondary_xaxis(
         "top",
         functions=(
-            lambda flux: frame.dev_value_from_flux(np.asarray(flux, dtype=np.float64)),
-            lambda value: frame.flux_from_dev_value(
-                np.asarray(value, dtype=np.float64)
+            lambda flux: (
+                np.asarray(flux, dtype=np.float64) * device.period + points.integer
+            ),
+            lambda value: (
+                (np.asarray(value, dtype=np.float64) - points.integer) / device.period
             ),
         ),
     )
-    secondary.set_xlabel(f"{device_name} ({frame.dev_unit})")
+    secondary.set_xlabel(f"{device_name} ({device.unit})")
     return secondary

@@ -22,19 +22,45 @@
 
 ## 作者 flux 換算
 
-`from zcu_tools.resources.record_table import flux_from_frame, RecordFluxFrame` 提供獨立的換算入口：
+`flux_from_frame(table, device_name=..., fallback_frame=...)` 回傳同列序的 NumPy flux 陣列，不改表或記錄。
+`table` 是 `JsonlRecordTable.read()` 的 nested table，或 `pd.read_csv` 讀出的 dotted table。
+每列依序使用 explicit flux、row frame、caller 提供的 fallback。
+有效 explicit flux 不檢查未用 frame 或 device。
+
+Row frame 是 `flux_frame.<device>.integer/period`，對應 `devices.<device>.value`。
+每個 device 都貢獻 `(value - integer) / period`，period 可以是負值。
+Row frame 不檢查單位，因為記錄值已使用該 device 校準的原生單位。
+缺值、部分 frame、非數值或零 period 都報錯，指出 row label 與欄位，不退回 fallback。
+
+Nested 輸入以 frame keys 判斷該列的 device 集合。
+Dotted 輸入以該列任一 `flux_frame.<device>.*` 非 null 欄位判斷。
+全 null 的 device 視為 absent，讓不同 device 集合的歷史可以串接。
+攤平會失去 membership 資訊，無法分辨原本 absent 與原本有 key 但欄位全 null 的 device。
+需要檢查這類腐敗 frame 時，使用 nested 輸入。
+
+多 device fallback 使用純分析型別：
 
 ```python
-flux = flux_from_frame(
-    table,
-    device_name="bias",
-    fallback_frame=RecordFluxFrame(dev_unit="V", flux_int=0.1, flux_period=0.8),
-)
+from zcu_tools.analysis.flux import DeviceFluxFrame, FluxFrame
+from zcu_tools.resources.record_table import flux_from_frame
+
+frame = FluxFrame({
+    "bias": DeviceFluxFrame(integer=0.1, period=0.8, unit="V"),
+    "coil": DeviceFluxFrame(integer=0.0, period=-0.4, unit="A"),
+})
+flux = flux_from_frame(table, device_name="bias", fallback_frame=frame)
 ```
 
-`table` 是 `JsonlRecordTable.read()` 的 nested table，或 `pd.read_csv` 讀出的 dotted table。函式呼叫裝置投影，再交給 `resolve_record_flux`，回傳同列序的 NumPy flux 陣列，不改表或記錄。優先序是 explicit flux、row frame、caller 提供的 fallback frame。有效 explicit flux 不檢查未用 frame。Fallback 可省略，只在兩個 row-frame 值都缺時使用，且要求所選裝置單位相同。不完整 row frame 的錯誤指出 row label 與缺少欄名。
+Fallback 只由 caller 提供，只在該列沒有 row frame 時使用。
+多 device fallback 要求每台儀器的 `value_unit` 與其 `DeviceFluxFrame.unit` 相同。
+缺單位或不一致就報錯，不換算單位，也不自動讀 `params.json`。
 
-`RecordFluxFrame` 只保存 A/V/native 單位、零點 `flux_int` 與正 period `flux_period`，不帶模型。換算為 `(value - flux_int) / flux_period`，不換單位。Caller 自己讀檔並建立這個具名資料；工具不接受 frame path，也不處理多來源 frame 格式。未知與舊欄位不作 alias。
+既有 `RecordFluxFrame(dev_unit, flux_int, flux_period)` 保留為明確的單 device fallback。
+它只支持 A/V/native 與正 period，`device_name` 選擇它使用的儀器。
+多 device row frame 與 fallback 依自己的 keys 計算，`device_name` 不會過濾其貢獻。
+`flux_from_frame` 不再解讀舊 flat `flux_int/flux_period` row-frame。
+舊列沒有 explicit flux 時，作者須明確提供 fallback。
+獨立 v2 API 的 flat frame 契約不變，見下節與 [格式歷程](../../../../docs/storage-format-history/flux-frame.md)。
 
 ## RecordTable v2 分析 frame（`schema.py`）
 

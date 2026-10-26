@@ -5,3 +5,4 @@
 | 格式變更 | 辨識方式 | 舊資料處理 |
 | --- | --- | --- |
 | [Record component 信封](record-component.md) | JSONL 列含 `component` | 舊列照常讀取，不補寫 |
+| [Record flux frame](flux-frame.md) | 每列含 `flux_frame.<device>.integer/period` | 沒有 explicit flux 或新 frame 時，作者明確提供 fallback |

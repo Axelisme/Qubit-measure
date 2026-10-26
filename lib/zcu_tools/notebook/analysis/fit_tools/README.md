@@ -25,12 +25,17 @@
 
 ### `flux_presentation.py` — author-selected device axis
 
-`add_device_axis(ax, frame, device_name=...)` 在任意 normalized-flux 橫軸圖加上方儀器值軸。
-`frame` 是既有 `resources.record_table.RecordFluxFrame`。
-`flux_int` 是 zero-flux 的儀器值，`flux_period` 是每 Phi0 的儀器值差。
-第二軸使用 frame 宣告的 A、V 或 native，不換成 milli 單位。
-函式重用 frame 的正反轉換，回傳 Matplotlib SecondaryAxis，並隨主軸 limits 更新。
-作者選擇 device 名稱與 frame；不加第二軸時，T1/T2 繪圖只需要 normalized flux。
+`add_device_axis(ax, frame, device_name=..., values=...)` 在 normalized-flux 橫軸圖加上方儀器值軸。
+`frame` 接受 `analysis.flux.FluxFrame`，或明確的單 device `resources.record_table.RecordFluxFrame`。
+多 device 時，`values` 必須提供其他 frame device 的當下儀器值。
+函式呼叫 `analysis.flux.actual_flux_points` 算出選定 device 當下的 integer，再以其 signed period 建立正反轉換。
+缺其他 device 的值會報錯，不假設它停在 integer。
+單 device 可以省略 `values`。
+
+第二軸使用選定 device 宣告的原生單位，不換成 milli 單位。
+回傳的 Matplotlib SecondaryAxis 隨主軸 limits 更新，也支持負 period。
+作者選擇 device、frame 與當下值；不加第二軸時，T1/T2 繪圖只需要 normalized flux。
+通用 flux 數學的型別與契約見 [analysis README](../../../analysis/README.md#多-device-flux-座標)。
 
 ### `weights.py` — residual weighting
 
