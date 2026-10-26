@@ -17,6 +17,11 @@ def test_fit_export_returns_only_gui_receipt_without_other_reads(
         "alignment_from": "empty-first-aligned",
         "component": "Q2",
         "analysis_id": "analysis-uuid",
+        "flux_writeback": {
+            "status": "skipped",
+            "device": "bias",
+            "reason": "Missing other device values; use fluxdep measurement writeback.",
+        },
     }
     client.transport.replies.append(
         GuiResponse(result={**receipt, "unprojected": [1, 2, 3]})

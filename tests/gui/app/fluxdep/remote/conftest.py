@@ -8,13 +8,14 @@ from pathlib import Path
 import pytest
 from zcu_tools.gui.app.fluxdep.controller import Controller
 
+from tests.gui.app.fluxdep._components import skip_calibration
 from tests.gui.app.fluxdep.remote._route_harness import RouteHarness, copy_sources
 
 
 @pytest.fixture
 def route_harness(tmp_path: Path) -> Iterator[RouteHarness]:
     """Create an independent owner-turn adapter with native project-root paths."""
-    harness = RouteHarness.create(str(tmp_path))
+    harness = RouteHarness.create(str(tmp_path), export_planner=skip_calibration)
     yield harness
     harness.close()
 

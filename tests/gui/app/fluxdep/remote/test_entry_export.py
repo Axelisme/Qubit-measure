@@ -104,6 +104,11 @@ def test_entry_alias_target_exports_predictor_setup_and_analysis_record(
     }
     assert components["Q1"].model_dump()["EJ"] is None
     assert exported["result"]["component"] == "Q2"
+    assert exported["result"]["flux_writeback"] == {
+        "status": "skipped",
+        "device": None,
+        "reason": "Synthetic target has no calibration. Use fluxdep measurement writeback.",
+    }
     record_id = exported["result"]["analysis_id"]
     assert isinstance(record_id, str)
     event = analysis_entry.ledger.get(record_id)

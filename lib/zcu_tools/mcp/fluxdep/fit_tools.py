@@ -160,6 +160,7 @@ def build_fit_tools(bridge: McpBridge) -> ToolTable:
                     "alignment_from",
                     "component",
                     "analysis_id",
+                    "flux_writeback",
                 )
             }
         )

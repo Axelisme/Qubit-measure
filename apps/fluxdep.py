@@ -54,6 +54,7 @@ def main(argv: list[str] | None = None) -> int:
     from zcu_tools.resources.entry import component_registry
 
     from zcu_lab.components import register_all
+    from zcu_lab.fluxdep_export import plan_fluxdep_export
 
     register_all(component_registry)
     from zcu_tools.gui.runtime import launch_gui_runtime
@@ -63,6 +64,7 @@ def main(argv: list[str] | None = None) -> int:
         runtime_options_from_args(args, log_root=PROJECT_ROOT),
         project=analysis_target_from_args(args, project_root=project_root),
         project_root=args.project_root or project_root,
+        export_planner=plan_fluxdep_export,
     )
 
 
