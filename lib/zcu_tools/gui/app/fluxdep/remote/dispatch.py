@@ -500,6 +500,11 @@ def _h_fit_export_params(
         "alignment_from": receipt.alignment_from,
         "component": receipt.component,
         "analysis_id": receipt.analysis_id,
+        "flux_writeback": {
+            "status": receipt.flux_writeback.status,
+            "device": receipt.flux_writeback.device,
+            "reason": receipt.flux_writeback.reason,
+        },
     }
 
 

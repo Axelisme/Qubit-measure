@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.fluxdep.remote` — Fluxdep driving adapter
 
-**Last updated:** 2026-10-24
+**Last updated:** 2026-10-27
 
 **讀者：** framework-dev。Fluxdep RPC 的控制權、方法宣告與結果投影契約。
 
@@ -71,8 +71,13 @@ component must be a fluxonium qubit. `project.info` returns entry, component and
 Result paths, with null fields before opening. The Database binding is unused.
 `fit.export_params` accepts no path override. It writes the selected component
 predictor, declared setup fields and analysis ledger, then returns savepath,
-params, alignment_from, component and analysis_id. Failure preserves the
-successful write prefix without rollback. Spectrum list/snapshot and
+params, alignment_from, component, analysis_id and flux_writeback.
+flux_writeback has status written/skipped, the intended device or null, and a
+skip reason or null. It is the same native planner outcome shown in the GUI.
+The app submits the injected planner's component-relative fields, not a
+framework interpretation of lab flux schema. Missing planner or rejected
+calibration fails before output. Failure preserves the successful write prefix
+without rollback. Spectrum list/snapshot and
 selection snapshot report unfinished drafts separately from published data.
 `spectrum.list` reports each published loaded/aligned/sampled stage and the count
 excluded by that spectrum's published Filter mask. Completed empty spectra remain

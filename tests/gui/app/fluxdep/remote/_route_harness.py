@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 from typing import Literal, NotRequired, TypeAlias, TypedDict, TypeVar
 
 from zcu_tools.gui.app.fluxdep.controller import Controller
+from zcu_tools.gui.app.fluxdep.export_plan import ExportPlanner
 from zcu_tools.gui.app.fluxdep.remote.service import (
     ControlOptions,
     RemoteControlAdapter,
@@ -101,6 +102,7 @@ class RouteHarness:
         project_root: str,
         *,
         interactive_background: BackgroundSubmitter | None = None,
+        export_planner: ExportPlanner | None = None,
     ) -> RouteHarness:
         """Build an inert adapter and State rooted at project_root; open no socket."""
         scheduler = ImmediateOwnerScheduler()
@@ -110,6 +112,8 @@ class RouteHarness:
             interactive_owner=scheduler,
             interactive_background=interactive_background,
         )
+        if export_planner is not None:
+            ctrl.configure_export(export_planner)
         service = RemoteControlAdapter(
             ctrl, ControlOptions(port=0), owner_scheduler=scheduler
         )

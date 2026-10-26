@@ -1,6 +1,6 @@
 # Fluxdep MCP control
 
-**Last updated:** 2026-10-25
+**Last updated:** 2026-10-27
 
 **讀者：** agent。Fluxdep MCP 的控制流程、工具與診斷契約。
 
@@ -181,6 +181,11 @@ and records analysis in its ledger. No arbitrary path override is accepted.
 The reply contains `savepath`, full-precision GHz `params` with EJ/EC/EL,
 `component`, `analysis_id`, and `alignment_from`, the actual first aligned
 spectrum used for calibration, including zero-point spectra. This is the export source, not alignment inheritance provenance.
+`flux_writeback` preserves the GUI planner's status, intended device and skip
+reason. A skipped component calibration does not mean the predictor or energies
+were skipped. The reason tells the operator when measurement writeback needs
+the swept device and other devices' acquisition-time values. MCP does not read
+component fields, infer a frame or change predictor/reference-anchor formats.
 MCP projects the native receipt without reading fit/spectrum state again, rounding
 params, inferring the source or requesting an image. The GUI refuses stale fits
 with `fit_stale` before I/O. Native readiness, control and I/O failures propagate

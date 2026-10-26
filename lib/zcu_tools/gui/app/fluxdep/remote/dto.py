@@ -447,6 +447,19 @@ class SpectrumsExportedReply(TypedDict):
     filepath: str
 
 
+class FluxWritebackReply(TypedDict):
+    """Component calibration result from the injected export planner.
+
+    status is written or skipped. Written has a nonblank device and null reason.
+    Skipped may name the intended device and has an explanation with the next
+    operator action. Values are projected unchanged from the native receipt.
+    """
+
+    status: Literal["written", "skipped"]
+    device: str | None
+    reason: str | None
+
+
 class ParamsExportedReply(TypedDict):
     """Successful native merge output, captured by the GUI export owner.
 
@@ -459,6 +472,7 @@ class ParamsExportedReply(TypedDict):
     alignment_from: str
     component: str
     analysis_id: str
+    flux_writeback: FluxWritebackReply
 
 
 class OperationOutcomeReply(TypedDict):
