@@ -1,6 +1,6 @@
 # Device Note for `zcu_tools/device`
 
-**Last updated:** 2026-10-21
+**Last updated:** 2026-10-27
 
 **讀者：** framework-dev。儀器 driver、DeviceManager、並發與安全限制速查。
 
@@ -52,6 +52,10 @@ DeviceInfo = Union[
 ---
 
 ## DeviceManager 單名稱登記
+
+`register_device` 拒絕含 `.` 的名稱，拋出指出名稱的 `ValueError`，registry 不變且不做儀器 I/O。點號用於 component 路徑與 record 攤平欄名的分隔。其他名稱原樣保留，包括空字串，不查 setup 或連線狀態。
+
+名稱規則由 `cfg_model.validate_device_name` 擁有，與 `DeviceName` 型別驗證共用。`device.manager → cfg_model` 依賴穩定值型別層，符合 ADR-0072。Import contracts C8 允許同層使用，C9 禁止循環，C11 禁止 cfg_model 反向依賴 device；不需要忽略規則。
 
 同一個 driver 在一個 `DeviceManager` 中只接受一個名字。`register_device` 遇到已用其他名字登記的同一實例時拋出 `ValueError`，registry 保留原狀。同名登記仍發出 warning 並覆寫該名稱，可以登記原 driver 或另一個 driver。不同名稱可以各自登記不同 driver。
 
@@ -155,7 +159,7 @@ predictor device-value flow 把非 numeric input 當作有效硬體值。
 
 | API | 用途 |
 | --- | ---- |
-| `register_device(name, device)` | 登記 `BaseDevice` 實例；同一 driver 只接受一個名字，拒絕正在 close 的 driver，同名仍 warn 並覆寫 |
+| `register_device(name, device)` | 登記 `BaseDevice` 實例；拒絕含點號名稱，同一 driver 只接受一個名字，拒絕正在 close 的 driver，同名仍 warn 並覆寫 |
 | `drop_device(name, *, ignore_error=False)` | 移除 registry entry（不 close） |
 | `get_device(name)` | 取得；找不到 `ValueError` |
 | `get_all_devices()` | 回傳整個 dict |
