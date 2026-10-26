@@ -95,6 +95,7 @@ def fit_t1_noise_params(  # noqa: PLR0913
     params: tuple[float, float, float],
     *,
     init: T1FitParams,
+    fixed_temperatures: NDArray[np.float64] | None = None,
     bounds: FitBounds | None = None,
     fixed: Iterable[str] = (),
     T1errs: NDArray[np.float64] | None = None,
@@ -119,12 +120,22 @@ def fit_t1_noise_params(  # noqa: PLR0913
     in ns, and ``params`` is ``(EJ, EC, EL)`` in GHz. ``Temp`` is always required;
     ``Q_cap``, ``x_qp``, and ``Q_ind`` are white-listed by providing non-``None``
     values in ``init``.
+
+    ``fixed_temperatures`` optionally supplies one fixed positive finite K value
+    per sample, in flux order. It replaces the intrinsic model's scalar Temp and
+    automatically fixes Temp (no temperature covariance row). ``params.Temp``
+    retains ``init.Temp`` for the extra-rate callback; it is not a summary of the
+    profile. The callback owns any independent temperature assignment. The array
+    must be 1D with the same shape as T1s; invalid input raises ValueError before
+    any model evaluation. Global Temp remains fit-able when the array is absent.
     """
     data = _validate_data(fluxs, T1s, T1errs, T1_error_policy, flux_weighting)
     if residual_mode not in ("log", "linear"):
         raise ValueError("residual_mode must be 'log' or 'linear'")
     active_names = _active_parameter_names(init)
-    fixed_names = _validate_fixed(fixed, active_names)
+    fixed_names = _validate_fixed(
+        fixed, active_names, fixed_temperatures, data.T1s.shape
+    )
     free_names: tuple[ParameterName, ...] = tuple(
         name for name in active_names if name not in fixed_names
     )
@@ -142,7 +153,7 @@ def fit_t1_noise_params(  # noqa: PLR0913
             params,
             data.fluxs,
             noise_channels,
-            current.Temp,
+            current.Temp if fixed_temperatures is None else fixed_temperatures,
             cutoff=cutoff,
             qub_dim=qub_dim,
             i=i,
@@ -332,6 +343,18 @@ def _validate_data(
     )
 
 
+def _validate_fixed_temperatures(
+    temperatures: NDArray[np.float64] | None, shape: tuple[int, ...]
+) -> None:
+    if temperatures is None:
+        return
+    values = np.asarray(temperatures, dtype=np.float64)
+    if values.ndim != 1 or values.shape != shape:
+        raise ValueError("fixed_temperatures must be 1D with the same shape as T1s")
+    if np.any(~np.isfinite(values)) or np.any(values <= 0):
+        raise ValueError("fixed_temperatures must be finite and positive")
+
+
 def _active_parameter_names(init: T1FitParams) -> tuple[ParameterName, ...]:
     active_names: list[ParameterName] = []
     for name in _PARAMETER_NAMES:
@@ -343,8 +366,12 @@ def _active_parameter_names(init: T1FitParams) -> tuple[ParameterName, ...]:
 
 
 def _validate_fixed(
-    fixed: Iterable[str], active_names: tuple[ParameterName, ...]
+    fixed: Iterable[str],
+    active_names: tuple[ParameterName, ...],
+    fixed_temperatures: NDArray[np.float64] | None,
+    sample_shape: tuple[int, ...],
 ) -> tuple[ParameterName, ...]:
+    _validate_fixed_temperatures(fixed_temperatures, sample_shape)
     fixed_list = list(fixed)
     if len(set(fixed_list)) != len(fixed_list):
         raise ValueError("fixed contains duplicate parameter names")
@@ -354,7 +381,11 @@ def _validate_fixed(
     inactive = set(fixed_list) - set(active_names)
     if inactive:
         raise ValueError(f"fixed contains inactive parameter(s): {sorted(inactive)}")
-    return tuple(name for name in active_names if name in fixed_list)
+    return tuple(
+        name
+        for name in active_names
+        if name in fixed_list or (name == "Temp" and fixed_temperatures is not None)
+    )
 
 
 def _validate_bounds(

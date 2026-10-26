@@ -139,6 +139,107 @@ def test_nearly_degenerate_channels_report_strong_correlation() -> None:
     ]
 
 
+def test_constant_temperature_profile_matches_fixed_scalar_fit() -> None:
+    init = T1FitParams(Q_cap=8e5, x_qp=1.5e-6, Q_ind=3e7, Temp=0.06)
+    fluxs, T1s = _identifiability_samples(init)
+    observed = T1s * (1 + 0.005 * np.sin(np.arange(T1s.size)))
+    scalar = fit_t1_noise_params(
+        fluxs, observed, _PARAMS, init=init, fixed=("Temp",), max_nfev=5
+    )
+    profile = fit_t1_noise_params(
+        fluxs,
+        observed,
+        _PARAMS,
+        init=init,
+        fixed_temperatures=np.full_like(fluxs, init.Temp),
+        max_nfev=5,
+    )
+
+    assert profile.success == scalar.success
+    assert profile.params == scalar.params
+    assert profile.stderr == scalar.stderr
+    assert profile.fixed == scalar.fixed == ("Temp",)
+    assert profile.free == scalar.free == ("Q_cap", "x_qp", "Q_ind")
+    np.testing.assert_allclose(profile.model_T1s, scalar.model_T1s)
+    np.testing.assert_allclose(profile.residuals, scalar.residuals)
+    assert profile.cost == pytest.approx(scalar.cost)
+    assert profile.reduced_chi2 == pytest.approx(scalar.reduced_chi2)
+    assert profile.correlation is not None and scalar.correlation is not None
+    assert profile.correlation.parameter_names == profile.free
+    np.testing.assert_allclose(
+        profile.correlation.covariance, scalar.correlation.covariance
+    )
+    np.testing.assert_allclose(
+        profile.correlation.correlation, scalar.correlation.correlation
+    )
+    assert find_weak_parameters(profile.correlation) == find_weak_parameters(
+        scalar.correlation
+    )
+
+
+@pytest.mark.parametrize(
+    "temperatures",
+    [
+        np.array([0.06]),
+        np.full((2, 2), 0.06),
+        np.array([0.06, np.nan]),
+        np.array([0.06, np.inf]),
+        np.array([0.06, 0.0]),
+        np.array([0.06, -0.01]),
+    ],
+)
+def test_fixed_temperatures_fail_fast_at_fit_entry(
+    temperatures: NDArray[np.float64],
+) -> None:
+    with pytest.raises(ValueError, match="fixed_temperatures"):
+        fit_t1_noise_params(
+            np.array([0.2, 0.4]),
+            np.ones(2),
+            _PARAMS,
+            init=T1FitParams(Q_cap=8e5, Temp=0.06),
+            fixed_temperatures=temperatures,
+            fixed=("Q_cap",),
+        )
+
+
+def test_varying_temperature_profile_changes_model_and_recovers_loss() -> None:
+    fluxs = np.array([0.15, 0.3, 0.4, 0.49])
+    temperatures = np.array([0.03, 0.05, 0.09, 0.15])
+    channels = [("t1_capacitive", {"Q_cap": 8e5})]
+    # Independent per-point scalar calls are the profile reference.
+    observed = np.array(
+        [
+            calculate_eff_t1_vs_flux_fast(
+                _PARAMS, np.array([flux]), channels, float(temp)
+            )[0]
+            for flux, temp in zip(fluxs, temperatures, strict=True)
+        ]
+    )
+    init = T1FitParams(Q_cap=4e5, Temp=0.06)
+    fitted = fit_t1_noise_params(
+        fluxs,
+        observed,
+        _PARAMS,
+        init=init,
+        fixed_temperatures=temperatures,
+    )
+    scalar = fit_t1_noise_params(
+        fluxs,
+        observed,
+        _PARAMS,
+        init=T1FitParams(Q_cap=8e5, Temp=0.06),
+        fixed=("Q_cap", "Temp"),
+    )
+
+    assert fitted.success
+    assert fitted.params.Q_cap == pytest.approx(8e5, rel=1e-6)
+    np.testing.assert_allclose(fitted.model_T1s, observed, rtol=1e-6)
+    assert not np.allclose(fitted.model_T1s, scalar.model_T1s, rtol=0.01)
+    assert fitted.correlation is not None
+    assert fitted.correlation.parameter_names == ("Q_cap",)
+    assert find_weak_parameters(fitted.correlation) == ()
+
+
 def test_fit_t1_noise_params_keeps_fixed_values() -> None:
     true_params = T1FitParams(Q_cap=8e5, x_qp=1.5e-6, Q_ind=3e7, Temp=0.06)
     fluxs = _sample_fluxs()

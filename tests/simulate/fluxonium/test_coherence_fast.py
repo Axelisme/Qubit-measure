@@ -15,6 +15,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 import scqubits.settings as scq_settings
+from numpy.typing import NDArray
 from zcu_tools.simulate.fluxonium import (
     UnsupportedNoiseChannelError,
     UnsupportedNoiseOptionError,
@@ -155,6 +156,39 @@ def test_per_channel_unknown_option_raises():
         calculate_eff_t1_vs_flux_fast(
             _PARAMS, _FLUXS, [("t1_capacitive", {"M": 400.0})], _TEMP
         )
+
+
+@pytest.mark.parametrize(
+    "temperatures",
+    [
+        np.array([0.05]),
+        np.full((2, 2), 0.05),
+        np.array([0.05, np.nan]),
+        np.array([0.05, 0.0]),
+        np.array([0.05, -0.01]),
+    ],
+)
+def test_temperature_profile_is_validated(temperatures: NDArray[np.float64]) -> None:
+    with pytest.raises(ValueError, match="Temp"):
+        calculate_eff_t1_vs_flux_fast(
+            PARAMS[0], np.array([0.2, 0.4]), ["t1_capacitive"], temperatures
+        )
+
+
+@pytest.mark.parametrize("channel", CHANNELS)
+def test_temperature_profile_matches_pointwise_scalar(channel: str) -> None:
+    fluxs = np.array([0.1, 0.3, 0.49])
+    temperatures = np.array([0.02, 0.06, 0.15])
+    profile = calculate_eff_t1_vs_flux_fast(PARAMS[0], fluxs, [channel], temperatures)
+    reference = np.array(
+        [
+            calculate_eff_t1_vs_flux_fast(
+                PARAMS[0], np.array([flux]), [channel], float(temp)
+            )[0]
+            for flux, temp in zip(fluxs, temperatures, strict=True)
+        ]
+    )
+    np.testing.assert_allclose(profile, reference, rtol=1e-12)
 
 
 def test_empty_fluxs_returns_empty():
