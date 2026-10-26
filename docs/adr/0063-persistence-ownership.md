@@ -4,6 +4,8 @@ status: accepted
 
 # Persistence：保存權威與資料契約
 
+**Last updated:** 2026-10-27
+
 ## 脈絡
 
 App memento、Experiment Data File、workflow run artifact、`params.json`、RecordTable 和 waveform asset 都會落盤，但保存目的不同。以檔案格式統一它們，會讓通用讀寫層決定量測語意、完成條件或使用者路徑政策。本決策依保存目的分配權威，不建立統一的 persistence service。格式、欄位和各類資料的操作細節由各 owner 維護。
@@ -54,17 +56,23 @@ Entry 只由 `result/<name>/` 構成。`resources.entry.ResultEntry` 提供條�
 
 使用者於 2026-10-20 裁決：「甲，簡單的機制加一致的規則比非預期的兼容邏輯好維護與使用，同樣名字的Database會混雜屬於有意不處理的設計。」對改名裁決：「改名時Database不動，Database是輸出位置，不是什麼要綁定的目錄」。
 
-`SaveLayout` 根據這些 paths、前端啟動實驗的名稱、run_id、保存時間與 artifact key 計算各格式的 exact outputs。它不建立目錄或寫檔，也不從舊的日期目錄猜 entry。C8 分層與 C9 無循環 contract 涵蓋 experiment 使用 datafile／resources 的方向。
+`SaveLayout` 接收 exact entry paths、caller 產生的 stem、point 與保存時間，再按 artifact key 計算 exact outputs。它不建立目錄或寫檔，不補前綴或 run_id，也不正規化 stem。Stem 必須是安全的單一路徑段，非法值直接拒絕。C8 分層與 C9 無循環 contract 涵蓋 experiment 使用 datafile／resources 的方向。
 
-新 run 保存契約把資料夾綁定一次 acquisition。第一次 Save 才建立 `Database/<name>/runs/<experiment>_<run_id>/`，名稱保留完整 run_id。再次 Save 使用同一 run_id，更新其中的 `data.h5`、具名圖片與 `analysis/<pane>.json`。圖片另有 Result 的 point／全域 figures 副本，檔名為 `<experiment>_<run_id>_<圖名>.png`。對等 paths 使用同一份 bytes。
+GUI 的 `Adapter.save_stem(context)` 委派自己的 `AxesSpec.save_stem` 或 `GroupedAxesSpec.save_stem`。Adapter 可用自己的 spec 覆寫，不改核心的原 spec。Notebook 沿 core spec 的同一 callback；workflow 的 `write_outputs(..., save_stem=...)` 由 caller 提供 callback。這些入口共用 `SaveContext`，包含完整 adapter path／tag／workflow name、完整 run_id、歷史 point、解析後 roles、可用 cfg values 與保存時間。缺 cfg 時傳 None，不讀 live context 補值。
 
-Labber 每次 Save 都在 `Database/<name>/Labber/YYYY/MM/Data_MMDD/` 取 `<experiment>_<id6>_<序號>.hdf5` 新檔名。實驗名中的 `/` 轉 `_`，id6 是 run_id 的後六碼。序號從 1 起避讓既有檔案，一個 run 可以對應多個 Labber 檔。只量測不存檔時，acquired 事件不建立 run 資料夾。保存不改 acquisition 的開始、結束或完成狀態。
+預設 callback 將名稱中的 `/` 轉成 `.`，接上依 mapping 順序以 `-` 連接的 role values，再接 run_id 後六碼，各段以 `_` 連接。Role list 按原順序攤平，未綁名稱不加入。沒有 roles 時省略該段。例如 `twotone.time_domain.t1_Q1-R1_a1b2c3`。Mux adapters 依 cfg participants 原索引順序以 `+` 列參與 qubits，例如 `mux.t1_Q1+Q2+Q3_a1b2c3`。Readout-only onetone 列 resonator labels，缺 cfg 名稱時回預設 role 命名，不猜 qubit 身分。
 
-使用者於 2026-10-19 表示：「Labber的檔名是run_id對人太不友善了，應該要有實驗名比較好，id可能取後6位用於grep」，並裁決「採用建議」。實驗名使用各前端啟動名稱，GUI 用 adapter 名稱，workflow 用 manifest.workflow，Notebook 用 spec.tag。Migration 傳入 legacy.experiment 計算 native 位置，不重命名舊 Labber 檔。
+Native run 目錄為 `Database/<name>/runs/<stem>/`。再次 Save 的 callback 回傳相同 stem 時，更新其中的 `data.h5`、具名圖片與 `analysis/<pane>.json`。圖片另有 Result point／全域 figures 副本，檔名為 `<stem>_<圖名>.png`。Native 同名目的仍由 saver 明確 replace=True 原子覆寫，不加避讓規則。自訂 callback 若依保存時間改名，後續保存會寫到另一個目錄。
 
-Workflow 的兩側目錄都使用 `workflows/<workflow名>_<run_id>/`，保留完整 run_id。Workflow 名中的 `/` 同樣轉 `_`。Result 保存 manifest／journal，Database 保存 acquisition 與圖，iteration 位於其 `iter/` 下。可讀前綴不取代 metadata 中的 run 身分，也不引入額外的身分側檔或新的序號避讓規則。
+Labber 初始路徑為 `Database/<name>/Labber/YYYY/MM/Data_MMDD/<stem>.hdf5`。只有初始名字已存在才沿用既有 numeric suffix helper。Helper 不作跨程序原子保留。每次 Save 可以產生另一個 Labber 檔，不改 acquisition 時間或完成狀態。只量測不存檔時，acquired 事件不建立 run 目錄。
 
-使用者於 2026-10-20 提出：「不然名字包含完整run_id，但前綴也有實驗名讓用戶看？」並以「2可以 4可以」確認完整 run_id 前綴命名與後續遷移範圍。對 Result 圖片與 workflow 套用相同規則回覆：「3」。Labber 維持原有 id6 加序號的檔名，遷移工具與消費端改用新版面，不新增舊路徑相容邏輯。
+Labber comment 在 cfg 旁保存 `snapshot: {point, roles}`，保留原 comment 與 timestamp。這讓檔案離開 entry 後仍帶目標身分。Reader 忽略不支援的 envelope keys，不要求歷史檔補 snapshot。不升 wire 或 Container 版本，不搬動舊輸出。格式演進與辨識方式見 [存檔歷程](../storage-format-history/2026-10-27-labber-identity.md)。
+
+使用者於 2026-10-27 裁決：「Q-L1-a+b，名字也許要有adapter」；「Q-L3我的想法是adapter決定怎麼生成名字，可以有預設實現。」同日要求：「run_id也是由adapter行數補上，請你遵守框架不做多餘行為的設計理念，將可能需要的資訊作為參數傳給save_stem。」框架只使用 callback 的結果，不在後方再補 run_id。
+
+這項裁決取代單次 run 與 Labber 的固定 experiment／run_id 命名。2026-10-19 的實驗名加 id6 與 2026-10-20 的完整 run_id 前綴規則不再適用這兩種輸出。離線 migration 仍明確提供原有 native stem，不改名舊 Labber 檔。
+
+Workflow 本身的兩側目錄維持 `workflows/<workflow名>_<run_id>/`，保留完整 run_id，workflow 名中的 `/` 轉 `_`。Result 保存 manifest／journal，Database 保存 acquisition 與圖，iteration 位於其 `iter/` 下。此處不是 workflow 的 Labber export，沒有套用 save_stem。
 
 `experiment.native_persistence.prepare_run_data` 從 typed RunRecord 與 axes spec 建立同一份 SI／離散 payload 和 cfg snapshot。Native 與 Labber writers 分別消費它，不先寫 native 再讀回轉成 Labber，也不互相呼叫。Datafile writer 只處理自己的格式與 caller 指定的目的地，不選路徑、不擷取 live context、不決定 batch。`experiment.artifacts` 的共用保存編排負責 artifact 選集、輸出順序與逐輸出失敗隔離，一個 writer 失敗不阻擋其他輸出。
 

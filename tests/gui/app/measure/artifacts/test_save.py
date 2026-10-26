@@ -15,7 +15,7 @@ from zcu_tools.datafile import Container, load
 from zcu_tools.experiment import RunRecord
 from zcu_tools.experiment.artifacts import ArtifactRef
 from zcu_tools.experiment.native_persistence import metadata_from_container
-from zcu_tools.gui.app.measure.adapter import SessionEnv
+from zcu_tools.gui.app.measure.adapter import Adapter, SessionEnv
 from zcu_tools.gui.app.measure.artifacts import (
     ArtifactSectionSnapshot,
     SaveStatus,
@@ -89,6 +89,42 @@ def test_data_preparation_failure_reports_outputs_and_saves_other_artifacts(
     assert session.entry.ledger.events()[-1].kind == "saved"
 
 
+def test_custom_mux_stem_is_verbatim_in_both_save_paths(
+    native_session: NativeSaveSession,
+) -> None:
+    from zcu_tools.resources.entry import SaveContext
+
+    session = native_session
+    tab = session.state.get_tab("tab")
+    original = tab.adapter
+    contexts: list[SaveContext] = []
+
+    def mux_stem(context: SaveContext) -> str:
+        contexts.append(context)
+        return "mux.t1_Q1+Q2_custom"
+
+    tab.adapter = Adapter(
+        spec=replace(original.spec, save_stem=mux_stem),
+        make_form=original.make_form,
+        run=original.run,
+        guide=None,
+    )
+    report = session.save()
+    native, labber = report.outputs
+    assert native.output.path == (
+        session.entry.database_path / "runs/mux.t1_Q1+Q2_custom/data.h5"
+    )
+    assert labber.output.path.name == "mux.t1_Q1+Q2_custom.hdf5"
+    context = contexts[-1]
+    assert context.name == "saving"
+    assert context.run_id == session.metadata.run_id
+    assert context.point == "p"
+    assert context.roles == session.metadata.snapshot.roles
+    assert context.cfg == {"dev": None, "gain": 1.0}
+    assert context.saved_at.utcoffset() is not None
+    assert native.status == labber.status == "saved"
+
+
 def test_data_save_writes_both_formats_and_resave_keeps_run_identity(
     native_session: NativeSaveSession,
 ) -> None:
@@ -96,19 +132,18 @@ def test_data_save_writes_both_formats_and_resave_keeps_run_identity(
     assert session.state.get_tab("tab").run.confirmed_run_id is None
     planned = session.state.get_artifact_snapshots("tab")
     assert (
-        planned[0].artifacts[0].members[0].outputs[1].path.name
-        == "saving_a1b2c3_1.hdf5"
+        planned[0].artifacts[0].members[0].outputs[1].path.name == "saving_a1b2c3.hdf5"
     )
     first = session.save()
     assert session.state.get_tab("tab").run.confirmed_run_id == first.run_id
     native, labber = first.outputs
     assert native.status == labber.status == "saved"
-    assert labber.output.path.name == "saving_a1b2c3_1.hdf5"
+    assert labber.output.path.name == "saving_a1b2c3.hdf5"
     assert (
         native.output.path
         == session.entry.database_path
         / "runs"
-        / f"saving_{session.metadata.run_id}"
+        / f"saving_{session.metadata.run_id[-6:]}"
         / "data.h5"
     )
     stored = load(native.output.path)
@@ -120,7 +155,7 @@ def test_data_save_writes_both_formats_and_resave_keeps_run_identity(
     second = session.save(origin=CommandOrigin("mcp"))
     assert second.run_id == first.run_id
     assert second.outputs[0].output.path == native.output.path
-    assert second.outputs[1].output.path.name == "saving_a1b2c3_2.hdf5"
+    assert second.outputs[1].output.path.name == "saving_a1b2c3_1.hdf5"
     events = session.entry.ledger.events()
     assert len(events) == 2
     assert [event.origin for event in events] == ["gui", "mcp"]
@@ -140,7 +175,7 @@ def test_each_output_failure_preserves_the_other_and_reports_both(
         path = (
             session.entry.database_path
             / "runs"
-            / f"saving_{session.metadata.run_id}"
+            / f"saving_{session.metadata.run_id[-6:]}"
             / "data.h5"
         )
         path.mkdir(parents=True)
@@ -761,7 +796,7 @@ def test_initial_all_failed_save_does_not_confirm_run_identity(
     native_path = (
         session.entry.database_path
         / "runs"
-        / f"saving_{session.metadata.run_id}"
+        / f"saving_{session.metadata.run_id[-6:]}"
         / "data.h5"
     )
     native_path.mkdir(parents=True)

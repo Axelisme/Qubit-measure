@@ -18,6 +18,23 @@ from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from tests.gui._adapter_fakes import DummyAdapter, DummyResult
 
 
+def test_default_save_stem_carries_adapter_roles_and_run_tail() -> None:
+    from datetime import UTC, datetime
+
+    from zcu_tools.resources.entry import SaveContext
+
+    adapter = _make_concrete_adapter()
+    context = SaveContext(
+        name="twotone/time_domain/t1",
+        run_id="20261027T120000Z-a1b2c3",
+        point="sweet",
+        roles={"qubit": "Q1", "resonator": "R1"},
+        cfg={"gain": 0.2},
+        saved_at=datetime(2026, 10, 27, tzinfo=UTC),
+    )
+    assert adapter.save_stem(context) == "twotone.time_domain.t1_Q1-R1_a1b2c3"
+
+
 def test_require_soc_handles_is_framework_request_validation() -> None:
     from zcu_tools.gui.app.measure.adapter import RunRequest
 

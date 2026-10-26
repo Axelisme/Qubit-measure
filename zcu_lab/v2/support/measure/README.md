@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-24，mux 原生分析結果與 JSON consumers
+**Last updated:** 2026-10-27
 
 # Measure domain support
 
@@ -37,6 +37,11 @@ Label 不是 identity。這些初值不保證硬體安全，操作員仍須核�
 所有元素共用宣告，不把逐位置 lock 套成共同限制。Participants 是完整 tones 的原始索引清單。Open／Reset 先選定 participants，再由 `mux_tone_initials` 保留參與 tone 的 drive、Echo pi_pulse 與逐 tone sweep 初值，其餘填 None。欄位仍可編輯。一般 participants 編輯不呼叫初始化，移出的 tone 保值，新加入且仍為 None 的值由 native cfg 顯示「填入 …」錯誤。Readout 身分與 local flux_dev 全 tone 必填。GE 的可選 init_pulse 保持既有驗證，不列入 active 必填集合。
 Recovery 採完整名稱清單中最大的五倍 T1；沿用既有 missing／invalid 政策，不重讀來源。
 Rabi pulse 初值與 T1 尺度 helper 可用明確 qubit 名稱，單 qubit caller 仍預設 `$qubit`。
+
+`mux_save_names.py` 提供 mux adapter 的存檔 callback。GUI 以 `replace(core.AXES_SPEC, save_stem=...)` 建自己的 spec，不改 core 原宣告。
+`mux_save_stem` 從 cfg.participants 依原索引順序取 cfg.tones[].name，以 `+` 連接 qubits，接在 dotted adapter path 與 id6 之間。
+Readout-only onetone 的 `mux_readout_save_stem` 改取 cfg.readout.tones[].label，列 resonators，不捏造 qubit 名。
+缺 cfg 或名字時，兩者都回預設 roles 命名。不讀目前 group、Form 或 live context。
 
 `mux_results.py` 集中七個 mux qubit adapters 的固定來源身分核對與共用 JSON consumer 型別。目的地只來自同次 Run／Load capture；缺 capture 不產生 proposal。來源 cfg 有完整名稱時，必須與捕捉的完整 qubits 相同。分析結果的 `names` 只取來源 cfg，缺 cfg 時保留 None，不讀目前 Form 或 library。
 分析結果保留原生 `outcomes`、`index` 與失敗的 `reason`，不建立 position/name/element 投影。

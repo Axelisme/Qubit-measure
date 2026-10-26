@@ -99,8 +99,7 @@ def snapshot(tmp_path: Path) -> tuple[ArtifactTracker, TabSnapshot]:
     layout = SaveLayout(
         result_path=tmp_path / "Result",
         database_path=tmp_path / "Database",
-        run_id="20261008T000000Z-a1b2c3",
-        experiment="synthetic",
+        stem="synthetic_20261008T000000Z-a1b2c3",
         point="p",
         saved_at=datetime(2026, 10, 8, tzinfo=timezone.utc),
     )

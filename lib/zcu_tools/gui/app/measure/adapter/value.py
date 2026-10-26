@@ -18,7 +18,7 @@ from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.gui.session.types import SessionEnv
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.resources.entry import ArtifactKey
+from zcu_tools.resources.entry import ArtifactKey, SaveContext
 
 from ..summary import summarize_analysis
 from ..writeback import WritebackItem
@@ -220,6 +220,10 @@ class Adapter(
     context) adapts that input and returns RunRecord with the actual experiment
     cfg and result. The host attaches evidence without replacing cfg or result.
     Form/run callback failures propagate to the calling owner.
+    save_stem receives SaveContext and returns an exact filename stem; the host
+    adds no prefix or run_id. The default joins the dotted adapter name,
+    ordered role values with hyphens and the last six run_id characters.
+    Invalid stems fail SaveLayout validation; callback failures propagate.
 
     guide is a required Markdown Path or None, read only by guide(). analysis
     is Analysis, Interactive or None, selecting one primary mode or none.
@@ -265,6 +269,16 @@ class Adapter(
         object.__setattr__(self, "_guide", guide)
         object.__setattr__(self, "analysis", analysis)
         object.__setattr__(self, "post_analysis", post_analysis)
+
+    def save_stem(self, context: SaveContext) -> str:
+        """Return this adapter's spec.save_stem(context) unchanged.
+
+        context contains the full adapter path and historical run facts. The
+        default uses dotted name, hyphen-joined roles and run_id tail. Customize
+        by supplying a spec with another save_stem callable. Callback failures
+        propagate; SaveLayout validates the returned stem before writing.
+        """
+        return self.spec.save_stem(context)
 
     @property
     def capabilities(self) -> AdapterCapabilities:

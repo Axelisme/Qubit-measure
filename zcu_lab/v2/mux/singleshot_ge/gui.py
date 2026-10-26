@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TypeAlias
 
@@ -38,6 +38,7 @@ from zcu_lab.v2.support.measure.mux_results import (
     MuxSummaryTone,
     captured_qubits,
 )
+from zcu_lab.v2.support.measure.mux_save_names import mux_save_stem
 from zcu_lab.v2.support.mux import MuxFitFailure
 
 from .analysis import (
@@ -259,7 +260,7 @@ def run(cfg: MuxGECfg, *, context: RunContext) -> RunRecord[MuxGECfg, MuxGEResul
 
 
 DEFINITION = Adapter(
-    spec=MuxGEExp.AXES_SPEC,
+    spec=replace(MuxGEExp.AXES_SPEC, save_stem=mux_save_stem),
     make_form=make_form,
     run=run,
     guide=Path(__file__).with_name("guide.md"),

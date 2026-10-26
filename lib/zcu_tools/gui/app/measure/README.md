@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure`
 
-**Last updated:** 2026-10-25
+**Last updated:** 2026-10-27
 
 **讀者：** framework-dev。量測 GUI 的組裝、分頁與 Run／Load／Save 分工。
 
@@ -204,6 +204,13 @@ tabs are not retried after later source selection. Its on-close callback capture
 then-current state. Aliases are not in that cache. Selecting a point loads its
 `points/<label>/aliases.yaml`; Inspect Apply saves that point's table.
 Templates use caller-authored `Template.bindings`.
+
+`Adapter.save_stem(context)` delegates to the adapter's spec.save_stem callback.
+SaveContext carries the full adapter path, run_id, historical point/roles, available cfg values and saved-at time.
+The default stem joins the dotted adapter path, hyphen-joined role values and run_id tail, for example `twotone.time_domain.t1_Q1-R1_a1b2c3`.
+An adapter can pass its own spec with a different callback. Save uses the returned stem verbatim for `runs/<stem>/` and the Labber date tree's `<stem>.hdf5`.
+Only an existing Labber name triggers numeric suffix selection. Native same-path replacement stays unchanged.
+Labber comments carry snapshot.point and snapshot.roles beside cfg. Figure-only result browsing links successful saved output paths to acquired facts, not directory-name suffixes.
 
 User experiment adapters import `gui.app.measure` contracts. The framework
 receives their catalogs by injection and never imports the user package.

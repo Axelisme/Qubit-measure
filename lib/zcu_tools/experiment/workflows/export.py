@@ -1,6 +1,7 @@
 """Experiment-independent saved workflow trace loading and output writers."""
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -20,7 +21,12 @@ from zcu_tools.experiment.native_persistence import (
     metadata_from_container,
     restore_run,
 )
-from zcu_tools.resources.entry import ArtifactKey, SaveLayout
+from zcu_tools.resources.entry import (
+    ArtifactKey,
+    SaveContext,
+    SaveLayout,
+    default_save_stem,
+)
 
 from .artifacts import RunManifest
 from .saved_run import native_path
@@ -93,12 +99,16 @@ def write_outputs(
     snapshot: RunSnapshot,
     *,
     database: Path | None,
+    save_stem: Callable[[SaveContext], str] = default_save_stem,
 ) -> tuple[FluxdepExportOutput, ...]:
     """Write selected outputs independently, without ledger or run mutations.
 
     Non-None database explicitly requests a fresh SaveLayout Labber date-tree
     path. None requests no output. Science preparation and
     destination preflight belong to the caller and must precede this function.
+    save_stem receives the workflow name and captured SaveContext; the result
+    is used verbatim. The default joins dotted workflow name, ordered roles
+    and run_id tail. Invalid stems and callback errors are allocation failures.
     Allocation/writer exceptions become typed failed outputs, preserving known
     paths.
     """
@@ -106,13 +116,23 @@ def write_outputs(
     if database is not None:
         path = None
         try:
+            saved_at = datetime.now(UTC)
+            stem = save_stem(
+                SaveContext(
+                    name=manifest.workflow,
+                    run_id=manifest.identity.run_id,
+                    point=snapshot.point,
+                    roles=snapshot.roles,
+                    cfg=prepared.cfg.values,
+                    saved_at=saved_at,
+                )
+            )
             layout = SaveLayout(
                 result_path=manifest.roots.metadata_root,
                 database_path=database,
-                run_id=manifest.identity.run_id,
-                experiment=manifest.workflow,
+                stem=stem,
                 point=snapshot.point,
-                saved_at=datetime.now(UTC),
+                saved_at=saved_at,
             )
             output = next(
                 item
@@ -129,7 +149,9 @@ def write_outputs(
                 metadata=replace(
                     prepared.labber_metadata,
                     comment=encode_labber_comment(
-                        prepared.cfg.values, prepared.labber_metadata.comment
+                        prepared.cfg.values,
+                        prepared.labber_metadata.comment,
+                        snapshot=snapshot.to_labber_snapshot(),
                     ),
                 ),
                 grouped_layout=prepared.labber_layout,

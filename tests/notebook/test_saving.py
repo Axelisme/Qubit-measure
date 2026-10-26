@@ -425,7 +425,7 @@ def test_save_and_resave_use_host_local_labber_date(
         )
         labber_paths.append(labber)
         assert labber.is_file()
-        assert labber.name == f"test_saving_{acquisition.run_id[-6:]}_1.hdf5"
+        assert labber.name == f"test.saving_{acquisition.run_id[-6:]}.hdf5"
         assert (
             labber.relative_to(tmp_path / "Database" / "entry" / "Labber").parts[:3]
             == expected
@@ -467,7 +467,7 @@ def test_partial_error_retains_handle_and_explicit_resave_reuses_directory(
     source = exp.run(SavingCfg())
     run_id = exp.acquisition_for(source).run_id
     blocker = (
-        tmp_path / "Database" / "entry" / "runs" / f"test_saving_{run_id}" / "figures"
+        tmp_path / "Database/entry/runs" / f"test.saving_{run_id[-6:]}" / "figures"
     )
     blocker.parent.mkdir(parents=True)
     blocker.write_text("block run PNGs")
@@ -609,7 +609,7 @@ def test_ledger_append_failure_propagates_after_files_are_written(
         / "Database"
         / "entry"
         / "runs"
-        / f"test_saving_{exp.acquisition_for(source).run_id}"
+        / f"test.saving_{exp.acquisition_for(source).run_id[-6:]}"
         / "data.h5"
     )
     assert (

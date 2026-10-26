@@ -108,7 +108,7 @@ def workflow_roots(
 class SaveLayout:
     """Calculate run and member destinations without publishing files or directories.
 
-    Experiment names prefix run directories, Result figure copies and Labber exports.
+    Caller stems name run directories, Result figure copies and Labber exports.
     Fixed run/figure/JSON destinations may already exist; callers own replacement.
     Labber names are selected by checking
     existing files, not atomically reserved. Each instance tracks figure paths;
@@ -122,31 +122,27 @@ class SaveLayout:
         *,
         result_path: Path,
         database_path: Path,
-        run_id: str,
-        experiment: str,
+        stem: str,
         point: str | None,
         saved_at: datetime,
     ) -> None:
-        """Bind exact entry paths, experiment name and opaque run/point identities.
+        """Bind exact entry paths, caller stem and optional point identity.
 
         result_path and database_path resolve to absolute entry directories, not
-        parent roots; they need not exist. experiment is the frontend's launch
-        name, with slash replaced by underscore for all destinations. The result,
-        run_id and non-None point must be nonempty single components without dot
+        parent roots; they need not exist. stem is used verbatim, without any
+        prefix, run_id or normalization. stem and non-None point must be
+        nonempty single components without dot
         traversal, slash/backslash, NUL or POSIX/Windows anchors. saved_at must be
         timezone-aware; its local date selects the Labber date tree. Invalid
         names, identities or time raise ValueError before filesystem lookup.
         """
-        experiment = experiment.replace("/", "_")
-        validate_path_segment(experiment, field="experiment")
-        validate_path_segment(run_id, field="run_id")
+        validate_path_segment(stem, field="stem")
         if point is not None:
             validate_path_segment(point, field="point")
         _aware_time(saved_at, field="saved_at")
         self._result_path = result_path.resolve()
         self._database_path = database_path.resolve()
-        self._run_id = run_id
-        self._experiment = experiment
+        self._stem = stem
         self._point = point
         self._saved_at = saved_at
         self._figure_keys: dict[Path, ArtifactKey] = {}
@@ -155,22 +151,21 @@ class SaveLayout:
     def run_path(self) -> Path:
         """Return the exact absolute Database run directory without file creation.
 
-        The launch experiment prefix and complete run_id follow the same layout
+        The caller's exact stem follows the same layout
         as outputs(). A symlink escaping the Database entry raises ValueError.
         """
         return _checked_path(
             self._database_path,
-            Path("runs") / f"{self._experiment}_{self._run_id}",
+            Path("runs") / self._stem,
         )
 
     def outputs(self, key: ArtifactKey) -> tuple[Output, ...]:
         """Return ordered destinations for one ArtifactKey without writing them.
 
-        Data returns canonical data_h5 then <experiment>_<run_id last six>_N.hdf5
-        in the Labber date tree, starting at N=1 and skipping existing files.
-        Run IDs shorter than six characters are kept whole. Multiple data
-        artifacts share runs/<experiment>_<complete run_id>/data.h5. Figure returns
-        run PNG then point/global <experiment>_<complete run_id>_<figure>.png copy.
+        Data returns runs/<stem>/data.h5 then <stem>.hdf5 in the Labber date
+        tree. Only an existing Labber path triggers the numeric suffix search.
+        Multiple data artifacts share the native path. Figure returns run PNG
+        then point/global <stem>_<figure>.png copy.
         Analysis returns analysis/<member_name>.json in the same run directory;
         section/name do not affect that destination. Producers supply their pane
         as member_name.
@@ -191,10 +186,14 @@ class SaveLayout:
                 / f"{local.year:04d}"
                 / f"{local.month:02d}"
                 / f"Data_{local.month:02d}{local.day:02d}"
-                / f"{self._experiment}_{self._run_id[-6:]}_1.hdf5"
+                / f"{self._stem}.hdf5"
             )
             initial = _checked_path(self._database_path, labber)
-            labber_path = Path(reserve_labber_filepath(str(initial)))
+            labber_path = (
+                Path(reserve_labber_filepath(str(initial)))
+                if initial.exists()
+                else initial
+            )
             # The suffix search may select a different existing symlink path.
             labber_path = _checked_path(self._database_path, labber_path)
             return Output("data_h5", data_path), Output("labber", labber_path)

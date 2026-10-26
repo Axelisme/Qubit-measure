@@ -42,6 +42,7 @@ from zcu_tools.resources.entry import (
     PointWritebackTarget,
     RecordWriteback,
     RoleView,
+    SaveContext,
     SaveLayout,
     WaveformWriteback,
     WritebackEvidence,
@@ -59,7 +60,7 @@ ResultT = TypeVar("ResultT")
 class PartialSaveError(Exception, Generic[CfgT, ResultT]):
     """A latest-call output failure with its original SavedRun and report.
 
-    run retains the captured context, run directory and content for an explicit
+    run retains the captured context, naming callback and content for an explicit
     subsequent save. report lists this call's successes/failures. There is no
     automatic retry. Ledger failures propagate separately as their original error.
     """
@@ -93,11 +94,15 @@ class SavedRun(Generic[CfgT, ResultT]):
         and acquisition is acquisition_for(source). spec is the core's declared
         persistence mapping. roles must be resolved from the same bound entry,
         point and storage roots as ctx; another handle of that point is valid.
+        spec.save_stem receives SaveContext on every save and returns the exact stem.
+        The default joins dotted spec.tag, role names and run_id tail with underscores.
+        Invalid stems raise ValueError; callback failures propagate.
         None records no roles. Wrong role origins raise ValueError before any
         output or event. Snapshot only cached context and prepare typed data.
         Do not create run folders or append events until save. Invalid
         source/spec becomes failed data outputs; bound storage errors propagate.
         """
+        self._save_stem = spec.save_stem
         self._data = DataItem.from_run(
             ArtifactKey("run", "measurement_data", "data"),
             source,
@@ -196,13 +201,27 @@ class SavedRun(Generic[CfgT, ResultT]):
                 )
             )
             self._acquired = True
+        saved_at = datetime.now(UTC).astimezone()
+        stem = self._save_stem(
+            SaveContext(
+                name=self._metadata.experiment,
+                run_id=self.run_id,
+                point=self._metadata.snapshot.point,
+                roles=self._metadata.snapshot.roles,
+                cfg=(
+                    None
+                    if self._record.cfg is None
+                    else self._record.cfg.model_dump(mode="json")
+                ),
+                saved_at=saved_at,
+            )
+        )
         layout = SaveLayout(
             result_path=self._storage.result_path,
             database_path=self._storage.database_path,
-            run_id=self.run_id,
-            experiment=self._metadata.experiment,
+            stem=stem,
             point=self._storage.point,
-            saved_at=datetime.now(UTC).astimezone(),
+            saved_at=saved_at,
         )
         self._report = save_artifacts(
             artifacts,
