@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-import warnings
 from dataclasses import dataclass
 
 import numpy as np
@@ -12,13 +11,9 @@ from numpy.typing import NDArray
 
 from zcu_tools.notebook.analysis.fit_tools import (
     align_flux_to_window,
-    correct_flux_from_f01,
     predict_f01_mhz,
 )
 from zcu_tools.resources.qubit_params import QubitParams
-from zcu_tools.resources.record_table import (
-    RecordFluxResolution,
-)
 
 from .models import (
     T2CurveContext,
@@ -29,26 +24,28 @@ from .models import (
     T2WindowData,
 )
 
-_REQUIRED_COLUMNS = ("flux", "t1_us", "t2e_us")
+_REQUIRED_COLUMNS = ("t1_us", "t2e_us")
 
 
 def load_t2_curve_context(
     *,
     result_dir: str,
+    fluxs: NDArray[np.float64],
     samples_filename: str = "samples.csv",
     image_dir: str | None = None,
-    default_bare_rf: float = 5.0,
     preview_rows: int = 10,
 ) -> T2CurveContext:
     """Load params.json and CSV samples from result_dir.
 
     samples_filename is relative to result_dir or an absolute CSV path.
-    Require numeric normalized flux, t1_us and t2e_us. Missing freq_mhz,
+    fluxs supplies one normalized Phi0 coordinate per CSV row, in row order.
+    CSV flux/frame columns are ignored. Require numeric t1_us and t2e_us. Missing freq_mhz,
     lifetime errors and Ramsey lifetime become NaN; ignore unused columns.
     Create image_dir (default result_dir/t2_curve), returning preview_rows
-    initial rows. default_bare_rf is the GHz dispersive fallback frequency.
+    initial rows. Missing dispersive inputs disable photon shot noise.
     Missing files/parameters, required columns or nonnumeric used values raise
-    with the file or column name.
+    with the file or column name. Non-1D, nonfinite or wrong-length fluxs raise
+    ValueError before any analysis.
     """
     resolved_image_dir = image_dir or os.path.join(result_dir, "t2_curve")
     os.makedirs(result_dir, exist_ok=True)
@@ -62,15 +59,19 @@ def load_t2_curve_context(
 
     samples_df = pd.read_csv(os.path.join(result_dir, samples_filename))
     _validate_required_columns(samples_df)
+    author_fluxs = np.asarray(fluxs, dtype=np.float64).copy()
+    if author_fluxs.ndim != 1:
+        raise ValueError("fluxs must be a one-dimensional array")
+    if len(author_fluxs) != len(samples_df):
+        raise ValueError("fluxs must contain one value per samples.csv row")
+    if not np.all(np.isfinite(author_fluxs)):
+        raise ValueError("fluxs must contain finite values for every row")
     params = fit_inputs.params
     params_table = pd.DataFrame(
         [
             ("EJ (GHz)", params[0]),
             ("EC (GHz)", params[1]),
             ("EL (GHz)", params[2]),
-            ("flux_half", fit_inputs.flux_half),
-            ("flux_int", fit_inputs.flux_int),
-            ("flux_period", fit_inputs.flux_period),
             ("bare_rf (GHz)", bare_rf),
             ("g (GHz)", g),
         ],
@@ -82,12 +83,10 @@ def load_t2_curve_context(
         image_dir=resolved_image_dir,
         samples_filename=samples_filename,
         params=params,
-        flux_half=fit_inputs.flux_half,
-        flux_int=fit_inputs.flux_int,
-        flux_period=fit_inputs.flux_period,
         bare_rf=bare_rf,
         g=g,
         samples_df=samples_df,
+        fluxs=author_fluxs,
         t1_curve_fit=params_file.get_t1_curve_fit(),
         params_table=params_table,
         samples_preview=samples_df.head(preview_rows),
@@ -96,18 +95,17 @@ def load_t2_curve_context(
 
 
 def calibrate_t2_flux(context: T2CurveContext) -> T2FluxCalibration:
-    """Select finite echo/Ramsey rows from normalized CSV flux coordinates.
+    """Select finite echo/Ramsey rows from author-supplied flux coordinates.
 
-    Return positional row masks, uncorrected flux and a count summary without
+    Return positional row masks and a count summary without
     mutating context. Missing/nonnumeric used columns or nonfinite flux raise
     ValueError; no device-coordinate fallback is performed.
     """
     samples_df = context.samples_df.copy()
     _validate_required_columns(samples_df)
-    fluxs = _float_column(samples_df, "flux")
+    fluxs = context.fluxs
     if not np.all(np.isfinite(fluxs)):
-        raise ValueError("samples.csv flux must be finite")
-    resolution = RecordFluxResolution(values=fluxs, sources=("explicit",) * len(fluxs))
+        raise ValueError("author fluxs must be finite")
     t2e_values = _float_column(samples_df, "t2e_us")
     t2e_mask = np.isfinite(t2e_values)
     t2e_df = samples_df.loc[t2e_mask].copy()
@@ -121,16 +119,9 @@ def calibrate_t2_flux(context: T2CurveContext) -> T2FluxCalibration:
 
     freq_mask = np.isfinite(_float_column(samples_df, "freq_mhz"))
     freq_rows = samples_df.loc[freq_mask].copy()
-    source_counts = {
-        source: sum(1 for item in resolution.sources if item == source)
-        for source in ("explicit", "row-frame", "fallback-frame")
-    }
     summary_table = pd.DataFrame(
         [
             ("samples.csv rows", str(len(samples_df))),
-            ("explicit flux rows", str(source_counts["explicit"])),
-            ("row-frame flux rows", str(source_counts["row-frame"])),
-            ("fallback-frame flux rows", str(source_counts["fallback-frame"])),
             ("finite f01 rows", str(len(freq_rows))),
             ("finite T2e rows", str(len(t2e_df))),
             ("finite T2r rows", str(len(t2r_df))),
@@ -139,7 +130,6 @@ def calibrate_t2_flux(context: T2CurveContext) -> T2FluxCalibration:
     )
     return T2FluxCalibration(
         context=context,
-        resolution=resolution,
         t2e_df=t2e_df,
         t2r_df=t2r_df,
         t2e_mask=t2e_mask.copy(),
@@ -153,35 +143,35 @@ def prepare_t2_dephasing_data(
     calibration: T2FluxCalibration,
     *,
     analysis_flux_range: tuple[float, float] = (0.49, 0.53),
-    max_abs_flux_correction: float = 0.03,
-    correct_flux_from_f01_enabled: bool = True,
     max_rel_t2e_err: float = 0.5,
     use_weighted_points_only: bool = False,
 ) -> T2DephasingAnalysis:
+    """Align author flux to a window and derive echo pure-dephasing data.
+
+    calibration supplies row-aligned normalized flux and measured lifetimes in
+    us. analysis_flux_range selects the window after integer-period alignment.
+    max_rel_t2e_err limits positive relative echo errors; missing errors remain
+    NaN unless use_weighted_points_only drops them. Return sorted sample/fit
+    subsets, positional Ramsey diagnostics and selection summaries without
+    correcting flux or mutating calibration. Invalid windows or no remaining
+    positive-dephasing fit rows raise ValueError.
+    """
     window = _prepare_window_data(
         calibration,
         analysis_flux_range=analysis_flux_range,
-        max_abs_flux_correction=max_abs_flux_correction,
-        correct_flux_from_f01_enabled=correct_flux_from_f01_enabled,
     )
     t2r_diagnostics = _t2r_diagnostics(
         calibration,
         analysis_flux_range=analysis_flux_range,
-        max_abs_flux_correction=max_abs_flux_correction,
-        correct_flux_from_f01_enabled=correct_flux_from_f01_enabled,
     )
     branch_coverage = _branch_coverage_table(
         calibration,
         t2r_diagnostics=t2r_diagnostics,
         analysis_flux_range=analysis_flux_range,
-        max_abs_flux_correction=max_abs_flux_correction,
-        correct_flux_from_f01_enabled=correct_flux_from_f01_enabled,
     )
     half_preview = _half_preview_table(
         calibration,
         analysis_flux_range=analysis_flux_range,
-        max_abs_flux_correction=max_abs_flux_correction,
-        correct_flux_from_f01_enabled=correct_flux_from_f01_enabled,
     )
     sample, fit = _derive_dephasing(
         window,
@@ -203,7 +193,6 @@ def prepare_t2_dephasing_data(
     return T2DephasingAnalysis(
         calibration=calibration,
         analysis_flux_range=analysis_flux_range,
-        max_abs_flux_correction=max_abs_flux_correction,
         max_rel_t2e_err=max_rel_t2e_err,
         use_weighted_points_only=use_weighted_points_only,
         window=window,
@@ -216,7 +205,6 @@ def prepare_t2_dephasing_data(
     )
 
 
-# tolerated: Notebook documents probe controls and shared fit-policy keywords explicitly.
 def _validate_required_columns(samples_df: pd.DataFrame) -> None:
     missing_columns = [
         name for name in _REQUIRED_COLUMNS if name not in samples_df.columns
@@ -229,7 +217,6 @@ def _validate_required_columns(samples_df: pd.DataFrame) -> None:
         "t1_err_us",
         "t2e_err_us",
         "t2r_us",
-        "t2r_err_us",
     ):
         if column not in samples_df.columns:
             samples_df[column] = np.nan
@@ -248,14 +235,10 @@ def _float_column(frame: pd.DataFrame, column: str) -> NDArray[np.float64]:
 @dataclass(frozen=True, slots=True)
 class _ResolvedFrame:
     raw_fluxs: NDArray[np.float64]
-    corrected_fluxs: NDArray[np.float64]
     aligned_fluxs: NDArray[np.float64]
     shifts: NDArray[np.float64]
     in_window: NDArray[np.bool_]
     f01_measured: NDArray[np.bool_]
-    f01_correction_applied: NDArray[np.bool_]
-    correction_skipped_reason: tuple[str, ...]
-    flux_sources: tuple[str, ...]
 
 
 def _resolve_analysis_frame(
@@ -263,57 +246,20 @@ def _resolve_analysis_frame(
     row_mask: NDArray[np.bool_],
     *,
     analysis_flux_range: tuple[float, float],
-    max_abs_flux_correction: float,
-    correct_flux_from_f01_enabled: bool = True,
 ) -> _ResolvedFrame:
     samples_df = calibration.context.samples_df
-    resolution = calibration.resolution
-    raw_fluxs = np.asarray(resolution.values[row_mask], dtype=np.float64)
-    row_sources = tuple(resolution.sources[index] for index in np.flatnonzero(row_mask))
+    raw_fluxs = np.asarray(calibration.context.fluxs[row_mask], dtype=np.float64)
     f01_observed = _float_column(samples_df, "freq_mhz")[row_mask]
     f01_measured = np.isfinite(f01_observed)
-    corrected_fluxs = np.asarray(raw_fluxs, dtype=np.float64).copy()
-    applied = np.zeros(len(raw_fluxs), dtype=bool)
-    reasons: list[str] = []
-    if correct_flux_from_f01_enabled:
-        if np.any(f01_measured):
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore", RuntimeWarning)
-                correction = correct_flux_from_f01(
-                    raw_fluxs,
-                    1e-3 * f01_observed,
-                    calibration.context.params,
-                    max_abs_flux_correction=max_abs_flux_correction,
-                )
-            candidate_fluxs = correction.corrected_fluxs
-            accepted = correction.accepted
-            for index in range(len(row_sources)):
-                if not f01_measured[index]:
-                    reasons.append("missing_f01")
-                    continue
-                if accepted[index]:
-                    corrected_fluxs[index] = candidate_fluxs[index]
-                    applied[index] = True
-                    reasons.append("")
-                else:
-                    reasons.append("rejected")
-        else:
-            reasons.extend("missing_f01" for _ in row_sources)
-    else:
-        reasons.extend("disabled" for _ in row_sources)
     aligned_fluxs, shifts, in_window = align_flux_to_window(
-        corrected_fluxs, analysis_flux_range
+        raw_fluxs, analysis_flux_range
     )
     return _ResolvedFrame(
         raw_fluxs=raw_fluxs,
-        corrected_fluxs=corrected_fluxs,
         aligned_fluxs=aligned_fluxs,
         shifts=shifts,
         in_window=in_window,
         f01_measured=f01_measured,
-        f01_correction_applied=applied,
-        correction_skipped_reason=tuple(reasons),
-        flux_sources=row_sources,
     )
 
 
@@ -321,8 +267,6 @@ def _prepare_window_data(
     calibration: T2FluxCalibration,
     *,
     analysis_flux_range: tuple[float, float],
-    max_abs_flux_correction: float,
-    correct_flux_from_f01_enabled: bool = True,
 ) -> T2WindowData:
     samples_df = calibration.context.samples_df
     t2e_values = _float_column(samples_df, "t2e_us")
@@ -333,8 +277,6 @@ def _prepare_window_data(
         calibration,
         valid_t2e,
         analysis_flux_range=analysis_flux_range,
-        max_abs_flux_correction=max_abs_flux_correction,
-        correct_flux_from_f01_enabled=correct_flux_from_f01_enabled,
     )
     order = np.argsort(resolved.aligned_fluxs[resolved.in_window])
 
@@ -353,16 +295,8 @@ def _prepare_window_data(
         fluxs=take(resolved.aligned_fluxs),
         raw_fluxs=take(resolved.raw_fluxs),
         integer_shifts=take(resolved.shifts),
-        flux_sources=tuple(
-            take(np.asarray(resolved.flux_sources, dtype=object)).tolist()
-        ),
         f01_mhz=f01_used,
         f01_measured=measured_taken,
-        f01_correction_applied=take(resolved.f01_correction_applied),
-        flux_corrections=take(resolved.corrected_fluxs - resolved.raw_fluxs),
-        correction_skipped_reason=tuple(
-            take(np.asarray(resolved.correction_skipped_reason, dtype=object)).tolist()
-        ),
         T2e_us=take(_float_column(samples_df, "t2e_us")[valid_t2e]),
         T2e_err_us=take(_float_column(samples_df, "t2e_err_us")[valid_t2e]),
         T1_us=take(_float_column(samples_df, "t1_us")[valid_t2e]),
@@ -439,15 +373,13 @@ def _t2r_diagnostics(
     calibration: T2FluxCalibration,
     *,
     analysis_flux_range: tuple[float, float],
-    max_abs_flux_correction: float,
-    correct_flux_from_f01_enabled: bool = True,
 ) -> T2RowDiagnostics:
     """Build per-row T2r diagnostics from one resolved T2r frame.
 
     Entries follow deterministic ``samples_df`` positional row order (one entry
-    per resolved T2r row); ``sample_indexes`` preserves the stable positional
+    per finite T2r row); ``sample_indexes`` preserves the stable positional
     identity of each source-table row. Model f01 is predicted at the aligned
-    analysis flux, so null-observed explicit/derived rows keep a directly
+    analysis flux, so rows without observed f01 keep a directly
     inspectable finite model frequency.
     """
     samples_df = calibration.context.samples_df
@@ -458,25 +390,19 @@ def _t2r_diagnostics(
         calibration,
         row_mask,
         analysis_flux_range=analysis_flux_range,
-        max_abs_flux_correction=max_abs_flux_correction,
-        correct_flux_from_f01_enabled=correct_flux_from_f01_enabled,
     )
     f01_observed = _float_column(samples_df, "freq_mhz")[row_mask]
     f01_model = predict_f01_mhz(calibration.context.params, resolved.aligned_fluxs)
     return T2RowDiagnostics(
         sample_indexes=np.flatnonzero(row_mask).astype(np.int64),
         in_window=resolved.in_window,
-        flux_sources=resolved.flux_sources,
         f01_observed_mhz=f01_observed,
         f01_model_mhz=f01_model,
         f01_used_mhz=np.where(resolved.f01_measured, f01_observed, f01_model),
         f01_measured=resolved.f01_measured,
         raw_fluxs=resolved.raw_fluxs,
-        corrected_fluxs=resolved.corrected_fluxs,
         aligned_fluxs=resolved.aligned_fluxs,
         integer_shifts=resolved.shifts,
-        correction_applied=resolved.f01_correction_applied,
-        correction_skipped_reason=resolved.correction_skipped_reason,
     )
 
 
@@ -484,17 +410,13 @@ def _empty_t2r_diagnostics() -> T2RowDiagnostics:
     return T2RowDiagnostics(
         sample_indexes=np.empty(0, dtype=np.int64),
         in_window=np.empty(0, dtype=bool),
-        flux_sources=(),
         f01_observed_mhz=np.empty(0, dtype=np.float64),
         f01_model_mhz=np.empty(0, dtype=np.float64),
         f01_used_mhz=np.empty(0, dtype=np.float64),
         f01_measured=np.empty(0, dtype=bool),
         raw_fluxs=np.empty(0, dtype=np.float64),
-        corrected_fluxs=np.empty(0, dtype=np.float64),
         aligned_fluxs=np.empty(0, dtype=np.float64),
         integer_shifts=np.empty(0, dtype=np.float64),
-        correction_applied=np.empty(0, dtype=bool),
-        correction_skipped_reason=(),
     )
 
 
@@ -503,8 +425,6 @@ def _branch_coverage_table(
     *,
     t2r_diagnostics: T2RowDiagnostics,
     analysis_flux_range: tuple[float, float],
-    max_abs_flux_correction: float,
-    correct_flux_from_f01_enabled: bool = True,
 ) -> pd.DataFrame:
     rows = [
         _coverage_row(
@@ -512,8 +432,6 @@ def _branch_coverage_table(
             calibration,
             calibration.t2e_mask,
             analysis_flux_range=analysis_flux_range,
-            max_abs_flux_correction=max_abs_flux_correction,
-            correct_flux_from_f01_enabled=correct_flux_from_f01_enabled,
         ),
         _coverage_row_from_diagnostics("T2r rows", t2r_diagnostics),
     ]
@@ -526,8 +444,6 @@ def _coverage_row(
     row_mask: NDArray[np.bool_],
     *,
     analysis_flux_range: tuple[float, float],
-    max_abs_flux_correction: float,
-    correct_flux_from_f01_enabled: bool = True,
 ) -> dict[str, object]:
     if not np.any(row_mask):
         return _empty_coverage_row(label)
@@ -535,8 +451,6 @@ def _coverage_row(
         calibration,
         row_mask,
         analysis_flux_range=analysis_flux_range,
-        max_abs_flux_correction=max_abs_flux_correction,
-        correct_flux_from_f01_enabled=correct_flux_from_f01_enabled,
     )
     return _coverage_columns(
         label,
@@ -554,14 +468,10 @@ def _coverage_row_from_diagnostics(
         return _empty_coverage_row(label)
     resolved = _ResolvedFrame(
         raw_fluxs=diagnostics.raw_fluxs,
-        corrected_fluxs=diagnostics.corrected_fluxs,
         aligned_fluxs=diagnostics.aligned_fluxs,
         shifts=diagnostics.integer_shifts,
         in_window=diagnostics.in_window,
         f01_measured=diagnostics.f01_measured,
-        f01_correction_applied=diagnostics.correction_applied,
-        correction_skipped_reason=diagnostics.correction_skipped_reason,
-        flux_sources=diagnostics.flux_sources,
     )
     return _coverage_columns(label, resolved, np.isfinite(diagnostics.f01_model_mhz))
 
@@ -572,53 +482,18 @@ def _coverage_columns(
     model_f01_finite: NDArray[np.bool_],
 ) -> dict[str, object]:
     raw_fluxs = resolved.raw_fluxs
-    corrected_fluxs = resolved.corrected_fluxs
     aligned_fluxs = resolved.aligned_fluxs
     shifts = resolved.shifts
     in_window = resolved.in_window
     f01_measured = resolved.f01_measured
-    correction_applied = resolved.f01_correction_applied
-    correction_skipped_reason = resolved.correction_skipped_reason
-    flux_sources = resolved.flux_sources
     shifts_in_window = shifts[in_window]
-    source_counts = {
-        source: sum(1 for item in flux_sources if item == source)
-        for source in ("explicit", "row-frame", "fallback-frame")
-    }
-    skip_counts = {
-        reason: sum(1 for item in correction_skipped_reason if item == reason)
-        for reason in ("explicit_flux", "missing_f01", "rejected", "disabled")
-    }
     return {
         "subset": label,
-        "n_explicit": source_counts["explicit"],
-        "n_row_frame": source_counts["row-frame"],
-        "n_fallback_frame": source_counts["fallback-frame"],
         "n_with_f01": int(np.count_nonzero(f01_measured)),
         "n_model_f01": int(np.count_nonzero(~f01_measured & model_f01_finite)),
         "n_in_flux_window": int(np.count_nonzero(in_window)),
-        "accepted": int(np.count_nonzero(correction_applied)),
-        "skipped": int(
-            np.count_nonzero(
-                np.asarray([bool(reason) for reason in correction_skipped_reason])
-            )
-        ),
-        "skipped_explicit_flux": skip_counts["explicit_flux"],
-        "skipped_missing_f01": skip_counts["missing_f01"],
-        "skipped_rejected": skip_counts["rejected"],
-        "skipped_disabled": skip_counts["disabled"],
         "raw_min_flux": float(np.nanmin(raw_fluxs)),
         "raw_max_flux": float(np.nanmax(raw_fluxs)),
-        "corr_min_flux": (
-            np.nan
-            if not np.any(in_window)
-            else float(np.nanmin(corrected_fluxs[in_window]))
-        ),
-        "corr_max_flux": (
-            np.nan
-            if not np.any(in_window)
-            else float(np.nanmax(corrected_fluxs[in_window]))
-        ),
         "aligned_min_flux": (
             np.nan
             if not np.any(in_window)
@@ -647,22 +522,11 @@ def _coverage_columns(
 def _empty_coverage_row(label: str) -> dict[str, object]:
     return {
         "subset": label,
-        "n_explicit": 0,
-        "n_row_frame": 0,
-        "n_fallback_frame": 0,
         "n_with_f01": 0,
         "n_model_f01": 0,
         "n_in_flux_window": 0,
-        "accepted": 0,
-        "skipped": 0,
-        "skipped_explicit_flux": 0,
-        "skipped_missing_f01": 0,
-        "skipped_rejected": 0,
-        "skipped_disabled": 0,
         "raw_min_flux": np.nan,
         "raw_max_flux": np.nan,
-        "corr_min_flux": np.nan,
-        "corr_max_flux": np.nan,
         "aligned_min_flux": np.nan,
         "aligned_max_flux": np.nan,
         "window_below_half_flux": 0,
@@ -678,8 +542,6 @@ def _half_preview_table(
     calibration: T2FluxCalibration,
     *,
     analysis_flux_range: tuple[float, float],
-    max_abs_flux_correction: float,
-    correct_flux_from_f01_enabled: bool = True,
 ) -> pd.DataFrame:
     samples_df = calibration.context.samples_df
     row_mask = calibration.t2e_mask
@@ -689,8 +551,6 @@ def _half_preview_table(
         calibration,
         row_mask,
         analysis_flux_range=analysis_flux_range,
-        max_abs_flux_correction=max_abs_flux_correction,
-        correct_flux_from_f01_enabled=correct_flux_from_f01_enabled,
     )
     frame = calibration.t2e_df
     preview_columns = [
@@ -705,7 +565,6 @@ def _half_preview_table(
     ]
     preview = frame.loc[:, preview_columns].copy()
     preview["raw flux"] = resolved.raw_fluxs
-    preview["f01-corrected flux"] = resolved.corrected_fluxs
     preview["aligned flux"] = resolved.aligned_fluxs
     preview["in window"] = resolved.in_window
     preview["integer shift"] = resolved.shifts
@@ -722,40 +581,18 @@ def _diagnostic_rows(
     prefix: str,
     data: T2WindowData | T2RowDiagnostics,
 ) -> list[tuple[str, str]]:
-    """Summarize the selected window rows, preserving provenance and shift order."""
+    """Summarize observed/model f01 and integer shifts in the selected window."""
     if isinstance(data, T2WindowData):
-        sources = data.flux_sources
         f01_measured = data.f01_measured
-        correction_skipped_reason = data.correction_skipped_reason
         integer_shifts = data.integer_shifts
         model_f01_finite = np.isfinite(data.f01_mhz) & ~data.f01_measured
     else:
         in_window = data.in_window
-        sources = tuple(
-            source
-            for source, keep in zip(data.flux_sources, in_window, strict=True)
-            if keep
-        )
         f01_measured = data.f01_measured[in_window]
-        correction_skipped_reason = tuple(
-            reason
-            for reason, keep in zip(
-                data.correction_skipped_reason, in_window, strict=True
-            )
-            if keep
-        )
         integer_shifts = data.integer_shifts[in_window]
         model_f01_finite = np.isfinite(data.f01_model_mhz[in_window])
-    source_counts = {
-        source: sum(1 for item in sources if item == source)
-        for source in ("explicit", "row-frame", "fallback-frame")
-    }
     observed_count = int(np.count_nonzero(f01_measured))
     model_count = int(np.count_nonzero(~f01_measured & model_f01_finite))
-    skip_reasons: dict[str, int] = {}
-    for reason in correction_skipped_reason:
-        if reason:
-            skip_reasons[reason] = skip_reasons.get(reason, 0) + 1
     shift_counts: dict[str, int] = {}
     for shift in integer_shifts:
         key = f"{int(round(float(shift)))}"
@@ -767,22 +604,11 @@ def _diagnostic_rows(
     )
     label = f"{prefix} " if prefix else ""
     return [
-        (
-            f"{label}flux sources (explicit/row/fallback)",
-            f"{source_counts['explicit']}/{source_counts['row-frame']}/"
-            f"{source_counts['fallback-frame']}",
-        ),
         (f"{label}f01 source (observed/model)", f"{observed_count}/{model_count}"),
-        (
-            f"{label}f01 correction skipped reasons",
-            " ".join(f"{reason}={count}" for reason, count in skip_reasons.items())
-            or "none",
-        ),
         (f"{label}integer shifts", shift_summary),
     ]
 
 
-# tolerated: One preparation caller supplies pre-result stages and selection diagnostics.
 def _dephasing_summary_table(  # noqa: PLR0913
     *,
     window: T2WindowData,

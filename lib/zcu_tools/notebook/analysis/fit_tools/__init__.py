@@ -17,6 +17,7 @@ from .flux import (
     predict_domega_dflux,
     predict_f01_mhz,
 )
+from .flux_presentation import add_device_axis
 from .identifiability import (
     CORRELATION_THRESHOLD,
     LOG_STD_THRESHOLD,
@@ -65,6 +66,7 @@ __all__ = [
     "ErrorResolutionResult",
     "F01FluxCorrectionResult",
     "align_flux_to_window",
+    "add_device_axis",
     "BatchFluxOffsetResult",
     "BatchFluxOffsetObjective",
     "FluxFrame",

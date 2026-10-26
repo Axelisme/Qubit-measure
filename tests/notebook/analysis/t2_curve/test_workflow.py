@@ -3,8 +3,6 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 import pytest
-import zcu_tools.notebook.analysis.t2_curve.workflow as workflow
-from matplotlib import pyplot as plt
 from numpy.typing import NDArray
 from zcu_tools.notebook.analysis.t2_curve import (
     FluxResidualWeighting,
@@ -23,9 +21,6 @@ from zcu_tools.notebook.analysis.t2_curve import (
     mechanisms_to_fixed_params,
     prepare_t2_dephasing_data,
     thermal_photon_gamma_phi_per_us,
-)
-from zcu_tools.resources.record_table import (
-    RecordFluxResolution,
 )
 
 _KAPPA_OVER_2PI_MHZ = 14.754
@@ -81,74 +76,16 @@ def test_prepare_t2_dephasing_data_default_keeps_nan_error_points() -> None:
     data = prepare_t2_dephasing_data(
         calibration,
         analysis_flux_range=(0.49, 0.52),
-        correct_flux_from_f01_enabled=False,
     )
 
     assert len(data.fit.T2e_us) == 2
     assert np.isnan(data.fit.T2e_err_us[0])
     np.testing.assert_allclose(data.window.raw_fluxs, [-0.5, -0.49])
     np.testing.assert_allclose(data.window.fluxs, fluxs)
-    np.testing.assert_allclose(data.window.flux_corrections, [0.0, 0.0])
     # No T2r rows resolved: the public row-diagnostics object is present and
     # empty rather than absent.
     assert isinstance(data.t2r_diagnostics, T2RowDiagnostics)
     assert data.t2r_diagnostics.sample_indexes.shape == (0,)
-    assert data.t2r_diagnostics.flux_sources == ()
-
-
-def test_plot_t2_flux_calibration_shows_provenance_categories() -> None:
-    data, _, _ = _synthetic_dephasing_data(2.4e-6, 3.0e-3)
-    window = T2WindowData(
-        fluxs=np.array([0.490, 0.500, 0.510, 0.520, 0.495], dtype=np.float64),
-        raw_fluxs=np.array([0.488, 0.500, 0.510, 0.520, 0.495], dtype=np.float64),
-        integer_shifts=np.zeros(5, dtype=np.float64),
-        flux_sources=("row-frame", "explicit", "row-frame", "row-frame", "row-frame"),
-        f01_mhz=data.window.f01_mhz[:5],
-        f01_measured=np.array([True, True, False, True, True], dtype=bool),
-        f01_correction_applied=np.array([True, False, False, False, False], dtype=bool),
-        flux_corrections=np.array([0.002, 0.0, 0.0, 0.0, 0.0], dtype=np.float64),
-        correction_skipped_reason=(
-            "",
-            "explicit_flux",
-            "missing_f01",
-            "disabled",
-            "rejected",
-        ),
-        T2e_us=data.window.T2e_us[:5],
-        T2e_err_us=data.window.T2e_err_us[:5],
-        T1_us=data.window.T1_us[:5],
-        T1_err_us=data.window.T1_err_us[:5],
-        kept_rows=5,
-        source_rows=5,
-    )
-    data = T2DephasingAnalysis(
-        calibration=data.calibration,
-        analysis_flux_range=data.analysis_flux_range,
-        max_abs_flux_correction=data.max_abs_flux_correction,
-        max_rel_t2e_err=data.max_rel_t2e_err,
-        use_weighted_points_only=data.use_weighted_points_only,
-        window=window,
-        sample=data.sample,
-        fit=data.fit,
-        branch_coverage=data.branch_coverage,
-        half_preview=data.half_preview,
-        summary_table=data.summary_table,
-        t2r_diagnostics=_empty_t2r_diagnostics(),
-    )
-
-    fig, ax = workflow.plot_t2_flux_calibration(data)
-
-    labels = {collection.get_label() for collection in ax.collections}
-    assert "raw flux" in labels
-    assert "f01 corrected flux" in labels
-    assert "explicit flux (uncorrected)" in labels
-    assert "missing f01 (model freq)" in labels
-    assert "correction disabled" in labels
-    assert "kept raw (rejected)" in labels
-    assert "integer aligned flux" in labels
-    # One f01-correction segment and one branch-alignment segment per row.
-    assert len(ax.lines) == 2 * len(window.fluxs)
-    plt.close(fig)
 
 
 @pytest.fixture
@@ -179,12 +116,6 @@ def test_null_frequency_rows_reach_the_fit_window(
     assert len(data.calibration.t2r_df) == 3
     assert len(data.fit.T2e_us) == 3
     assert not np.any(data.window.f01_measured)
-    assert data.window.flux_sources == ("explicit",) * 3
-    assert data.window.correction_skipped_reason == (
-        "missing_f01",
-        "missing_f01",
-        "missing_f01",
-    )
     assert np.all(np.isfinite(data.window.f01_mhz))
     np.testing.assert_allclose(np.sort(data.window.raw_fluxs), [-0.5, -0.49, 0.5])
     np.testing.assert_allclose(np.sort(data.window.fluxs), [0.5, 0.5, 0.51])
@@ -195,24 +126,15 @@ def test_null_frequency_t2r_diagnostics_preserve_row_identity(
 ) -> None:
     data = null_frequency_analysis
     # Row-level T2r diagnostics expose every resolved row in deterministic
-    # samples_df positional order: stable position, raw/corrected/aligned
-    # coordinates, model-frequency reachability, observed-vs-model source,
-    # integer shift, applied flag and exact correction-skip reasons.
+    # samples_df positional order: stable position, author/aligned coordinates,
+    # model-frequency reachability, observed/model source and integer shift.
     diag = data.t2r_diagnostics
     assert isinstance(diag, T2RowDiagnostics)
     assert diag.sample_indexes.tolist() == [3, 4, 5]
     assert diag.in_window.tolist() == [True, True, True]
-    assert diag.flux_sources == ("explicit",) * 3
     np.testing.assert_allclose(diag.raw_fluxs, [0.5, -0.5, -0.49])
-    np.testing.assert_allclose(diag.corrected_fluxs, [0.5, -0.5, -0.49])
     np.testing.assert_allclose(diag.aligned_fluxs, [0.5, 0.5, 0.51])
     assert diag.integer_shifts.tolist() == [0.0, 1.0, 1.0]
-    assert not np.any(diag.correction_applied)
-    assert diag.correction_skipped_reason == (
-        "missing_f01",
-        "missing_f01",
-        "missing_f01",
-    )
     # Null-observed rows carry a directly inspectable finite model f01 and use
     # it as the f01 source.
     assert not np.any(diag.f01_measured)
@@ -237,12 +159,6 @@ def test_null_frequency_coverage_and_summary_match_row_diagnostics(
     assert coverage_t2e["window_shifted_rows"] == 2
     assert coverage_t2r["window_shifted_rows"] == 2
 
-    # Per-subset provenance must distinguish explicit / row-frame / fallback.
-    for coverage in (coverage_t2e, coverage_t2r):
-        assert coverage["n_explicit"] == 3
-        assert coverage["n_row_frame"] == 0
-        assert coverage["n_fallback_frame"] == 0
-
     # Null freq_mhz rows keep raw coordinates, align into the window, and
     # every one of them reaches a finite model f01 at its aligned flux.
     for coverage in (coverage_t2e, coverage_t2r):
@@ -253,28 +169,16 @@ def test_null_frequency_coverage_and_summary_match_row_diagnostics(
         assert coverage["aligned_min_flux"] == pytest.approx(0.5)
         assert coverage["aligned_max_flux"] == pytest.approx(0.51)
 
-    # Correction-skip reasons are exact per subset, not a collapsed boolean.
-    for coverage in (coverage_t2e, coverage_t2r):
-        assert coverage["skipped"] == 3
-        assert coverage["skipped_explicit_flux"] == 0
-        assert coverage["skipped_missing_f01"] == 3
-        assert coverage["skipped_rejected"] == 0
-        assert coverage["skipped_disabled"] == 0
-
     # Coverage and summary aggregates derive from the row-level object.
     assert coverage_t2r["n_in_flux_window"] == int(np.count_nonzero(diag.in_window))
     assert coverage_t2r["n_model_f01"] == int(
         np.count_nonzero(~diag.f01_measured & np.isfinite(diag.f01_model_mhz))
     )
-    assert coverage_t2r["skipped_explicit_flux"] == sum(
-        1 for reason in diag.correction_skipped_reason if reason == "explicit_flux"
-    )
     assert coverage_t2r["window_shifted_rows"] == int(
         np.count_nonzero(diag.integer_shifts[diag.in_window] != 0.0)
     )
 
-    # Dephasing summary reports T2r provenance, observed/model f01 and exact
-    # skip reasons instead of T2e-only diagnostics.
+    # Dephasing summary reports T2r observed/model f01 and integer shifts.
     summary = data.summary_table
     assert (
         summary.loc[summary["metric"] == "window T2r rows", "value"].iloc[0]
@@ -282,22 +186,9 @@ def test_null_frequency_coverage_and_summary_match_row_diagnostics(
     )
     assert (
         summary.loc[
-            summary["metric"] == "T2r flux sources (explicit/row/fallback)",
-            "value",
-        ].iloc[0]
-        == "3/0/0"
-    )
-    assert (
-        summary.loc[
             summary["metric"] == "T2r f01 source (observed/model)", "value"
         ].iloc[0]
         == "0/3"
-    )
-    assert (
-        summary.loc[
-            summary["metric"] == "T2r f01 correction skipped reasons", "value"
-        ].iloc[0]
-        == "missing_f01=3"
     )
     assert (
         summary.loc[summary["metric"] == "T2r integer shifts", "value"].iloc[0]
@@ -308,7 +199,7 @@ def test_null_frequency_coverage_and_summary_match_row_diagnostics(
 def test_duplicate_index_labels_keep_positional_row_identity() -> None:
     # Duplicate DataFrame labels must not multiply row identity: T2r is finite
     # only at position 0, and the T2e row lives at the other duplicate-label
-    # position (1); position 2 is a fallback row. Label-based membership
+    # position (1); position 2 has no finite lifetime. Label-based membership
     # reconstruction would turn the one-row T2r selection into two rows.
     samples = pd.DataFrame(
         {
@@ -333,25 +224,17 @@ def test_duplicate_index_labels_keep_positional_row_identity() -> None:
     assert diag.sample_indexes.tolist() == [0]
     assert len(diag.raw_fluxs) == 1
     assert diag.in_window.tolist() == [True]
-    assert diag.flux_sources == ("explicit",)
     np.testing.assert_allclose(diag.raw_fluxs, [0.5])
-    np.testing.assert_allclose(diag.corrected_fluxs, [0.5])
     np.testing.assert_allclose(diag.aligned_fluxs, [0.5])
     assert diag.integer_shifts.tolist() == [0.0]
     assert not np.any(diag.f01_measured)
     assert np.all(np.isfinite(diag.f01_model_mhz))
     np.testing.assert_allclose(diag.f01_used_mhz, diag.f01_model_mhz)
-    assert not np.any(diag.correction_applied)
-    assert diag.correction_skipped_reason == ("missing_f01",)
 
     coverage_t2r = data.branch_coverage.loc[
         data.branch_coverage["subset"] == "T2r rows"
     ].iloc[0]
     assert coverage_t2r["n_in_flux_window"] == 1
-    assert coverage_t2r["n_explicit"] == 1
-    assert coverage_t2r["n_row_frame"] == 0
-    assert coverage_t2r["skipped"] == 1
-    assert coverage_t2r["skipped_missing_f01"] == 1
     summary = data.summary_table
     assert summary.loc[summary["metric"] == "window T2r rows", "value"].iloc[0] == "1/1"
 
@@ -361,8 +244,6 @@ def test_duplicate_index_labels_keep_positional_row_identity() -> None:
         data.branch_coverage["subset"] == "T2e rows"
     ].iloc[0]
     assert coverage_t2e["n_in_flux_window"] == 1
-    assert coverage_t2e["n_explicit"] == 1
-    assert coverage_t2e["skipped_missing_f01"] == 1
     assert len(data.half_preview) == 1
 
 
@@ -382,7 +263,6 @@ def test_t2_integer_equivalent_branches_align_to_same_flux() -> None:
     data = prepare_t2_dephasing_data(
         calibration,
         analysis_flux_range=(0.49, 0.53),
-        correct_flux_from_f01_enabled=False,
     )
 
     np.testing.assert_allclose(data.window.fluxs, [0.5, 0.5])
@@ -390,13 +270,11 @@ def test_t2_integer_equivalent_branches_align_to_same_flux() -> None:
     np.testing.assert_allclose(data.window.integer_shifts, [0.0, 1.0])
 
     # Coverage window/half classification must use the aligned analysis flux, so
-    # the shifted derived row lands at half flux with the explicit 0.5 row.
+    # the shifted author coordinate lands at half flux with the 0.5 row.
     coverage = data.branch_coverage.loc[
         data.branch_coverage["subset"] == "T2e rows"
     ].iloc[0]
     assert coverage["n_in_flux_window"] == 2
-    assert coverage["corr_min_flux"] == pytest.approx(-0.5)
-    assert coverage["corr_max_flux"] == pytest.approx(0.5)
     assert coverage["aligned_min_flux"] == pytest.approx(0.5)
     assert coverage["aligned_max_flux"] == pytest.approx(0.5)
     assert coverage["window_below_half_flux"] == 0
@@ -406,7 +284,7 @@ def test_t2_integer_equivalent_branches_align_to_same_flux() -> None:
     assert coverage["window_shift_min"] == pytest.approx(0.0)
     assert coverage["window_shift_max"] == pytest.approx(1.0)
 
-    # Half preview must keep both aligned rows (explicit 0.5 and shifted -0.5).
+    # Half preview must keep both author rows after integer alignment.
     assert len(data.half_preview) == 2
     np.testing.assert_allclose(
         data.half_preview["aligned flux"].to_numpy(dtype=np.float64),
@@ -418,7 +296,6 @@ def test_t2_integer_equivalent_branches_align_to_same_flux() -> None:
     )
     assert set(data.half_preview.columns) >= {
         "raw flux",
-        "f01-corrected flux",
         "aligned flux",
         "in window",
         "integer shift",
@@ -429,45 +306,6 @@ def test_t2_integer_equivalent_branches_align_to_same_flux() -> None:
         data.summary_table["metric"] == "integer shifts"
     ]
     assert shifts_row["value"].iloc[0] == "k=0:1 k=1:1"
-
-
-def test_t2_correction_disabled_preserves_raw_flux_and_reports_disabled() -> None:
-    samples = pd.DataFrame(
-        {
-            "flux": [0.5, -0.5],
-            "freq_mhz": [350.0, 351.0],
-            "t1_us": [60.0, 61.0],
-            "t1_err_us": [0.5, 0.5],
-            "t2e_us": [30.0, 28.0],
-            "t2e_err_us": [0.2, 0.2],
-        }
-    )
-    calibration = _synthetic_calibration(samples)
-
-    data = prepare_t2_dephasing_data(
-        calibration,
-        analysis_flux_range=(0.49, 0.53),
-        correct_flux_from_f01_enabled=False,
-    )
-
-    assert not np.any(data.window.f01_correction_applied)
-    np.testing.assert_allclose(data.window.flux_corrections, [0.0, 0.0])
-    np.testing.assert_allclose(data.window.raw_fluxs, [0.5, -0.5])
-    np.testing.assert_allclose(data.window.fluxs, [0.5, 0.5])
-    np.testing.assert_allclose(data.window.integer_shifts, [0.0, 1.0])
-    assert data.window.correction_skipped_reason == ("disabled", "disabled")
-    assert (
-        data.summary_table.loc[
-            data.summary_table["metric"] == "f01 correction skipped reasons",
-            "value",
-        ].iloc[0]
-        == "disabled=2"
-    )
-    coverage = data.branch_coverage.loc[
-        data.branch_coverage["subset"] == "T2e rows"
-    ].iloc[0]
-    assert coverage["accepted"] == 0
-    assert coverage["skipped"] == 2
 
 
 def _synthetic_dephasing_data(
@@ -509,12 +347,10 @@ def _synthetic_dephasing_data(
         image_dir="/tmp/result/t2_curve",
         samples_filename="samples.csv",
         params=(3.4, 0.9, 0.6),
-        flux_half=0.5,
-        flux_int=0.0,
-        flux_period=1.0,
         bare_rf=5.8,
         g=0.07,
         samples_df=pd.DataFrame(),
+        fluxs=np.empty(0, dtype=np.float64),
         t1_curve_fit=None,
         params_table=pd.DataFrame(),
         samples_preview=pd.DataFrame(),
@@ -522,10 +358,6 @@ def _synthetic_dephasing_data(
     )
     calibration = T2FluxCalibration(
         context=context,
-        resolution=RecordFluxResolution(
-            values=np.asarray(fluxs, dtype=np.float64),
-            sources=("row-frame",) * len(fluxs),
-        ),
         t2e_df=pd.DataFrame(),
         t2r_df=pd.DataFrame(),
         t2e_mask=np.zeros(0, dtype=bool),
@@ -537,12 +369,8 @@ def _synthetic_dephasing_data(
         fluxs=fluxs,
         raw_fluxs=fluxs,
         integer_shifts=np.zeros_like(fluxs),
-        flux_sources=("row-frame",) * len(fluxs),
         f01_mhz=np.full_like(fluxs, 350.0),
         f01_measured=np.ones_like(fluxs, dtype=bool),
-        f01_correction_applied=np.ones_like(fluxs, dtype=bool),
-        flux_corrections=np.zeros_like(fluxs),
-        correction_skipped_reason=("",) * len(fluxs),
         T2e_us=T2e_us,
         T2e_err_us=T2e_err_us,
         T1_us=T1_us,
@@ -553,7 +381,6 @@ def _synthetic_dephasing_data(
     data = T2DephasingAnalysis(
         calibration=calibration,
         analysis_flux_range=(0.49, 0.53),
-        max_abs_flux_correction=0.03,
         max_rel_t2e_err=0.5,
         use_weighted_points_only=True,
         window=window,
@@ -571,17 +398,13 @@ def _empty_t2r_diagnostics() -> T2RowDiagnostics:
     return T2RowDiagnostics(
         sample_indexes=np.empty(0, dtype=np.int64),
         in_window=np.empty(0, dtype=bool),
-        flux_sources=(),
         f01_observed_mhz=np.empty(0, dtype=np.float64),
         f01_model_mhz=np.empty(0, dtype=np.float64),
         f01_used_mhz=np.empty(0, dtype=np.float64),
         f01_measured=np.empty(0, dtype=bool),
         raw_fluxs=np.empty(0, dtype=np.float64),
-        corrected_fluxs=np.empty(0, dtype=np.float64),
         aligned_fluxs=np.empty(0, dtype=np.float64),
         integer_shifts=np.empty(0, dtype=np.float64),
-        correction_applied=np.empty(0, dtype=bool),
-        correction_skipped_reason=(),
     )
 
 
@@ -591,24 +414,17 @@ def _synthetic_calibration(samples: pd.DataFrame) -> T2FluxCalibration:
         image_dir="/tmp/result/t2_curve",
         samples_filename="samples.csv",
         params=(3.4, 0.9, 0.6),
-        flux_half=0.0,
-        flux_int=0.5,
-        flux_period=1.0,
         bare_rf=5.8,
         g=0.07,
         samples_df=samples,
+        fluxs=samples["flux"].to_numpy(dtype=np.float64),
         t1_curve_fit=None,
         params_table=pd.DataFrame(),
         samples_preview=samples,
         available_columns=tuple(samples.columns),
     )
-    resolution = RecordFluxResolution(
-        values=samples["flux"].to_numpy(dtype=np.float64),
-        sources=("explicit",) * len(samples),
-    )
     return T2FluxCalibration(
         context=context,
-        resolution=resolution,
         t2e_df=samples,
         t2r_df=pd.DataFrame(),
         t2e_mask=np.ones(len(samples), dtype=bool),

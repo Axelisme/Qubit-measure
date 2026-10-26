@@ -439,6 +439,7 @@ def run_t1_curve_analysis(
 ) -> T1CurveAnalysisResult:
     context = load_t1_curve_context(
         result_dir=config.result_dir,
+        fluxs=config.fluxs,
         samples_filename=config.samples_filename,
         image_dir=config.image_dir,
     )
@@ -446,10 +447,8 @@ def run_t1_curve_analysis(
     data = prepare_t1_curve_data(
         calibration,
         analysis_flux_range=config.analysis_flux_range,
-        max_abs_flux_correction=config.max_abs_flux_correction,
         max_rel_t1_err=config.max_rel_t1_err,
         use_weighted_points_only=config.use_weighted_points_only,
-        correct_flux_from_f01_enabled=config.correct_flux_from_f01_enabled,
     )
     cap_probe = (
         analyze_t1_capacitive_limit(

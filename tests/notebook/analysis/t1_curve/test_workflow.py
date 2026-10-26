@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import pytest
@@ -24,9 +23,6 @@ from zcu_tools.notebook.analysis.t1_curve import (
     mechanisms_to_fixed_params,
     prepare_t1_curve_data,
     subtract_relaxation_limit,
-)
-from zcu_tools.resources.record_table import (
-    RecordFluxResolution,
 )
 
 
@@ -59,10 +55,11 @@ def test_load_t1_curve_context_reads_params_and_samples(tmp_path) -> None:
         }
     ).to_csv(tmp_path / "samples.csv", index=False)
 
-    ctx = load_t1_curve_context(result_dir=str(tmp_path), preview_rows=1)
+    ctx = load_t1_curve_context(
+        result_dir=str(tmp_path), fluxs=np.array([0.5]), preview_rows=1
+    )
 
     assert ctx.params == pytest.approx((3.4, 0.9, 0.6))
-    assert ctx.flux_period == pytest.approx(1.0)
     assert "bare_rf (GHz)" not in set(ctx.params_table["parameter"])
     assert "g (GHz)" not in set(ctx.params_table["parameter"])
     assert len(ctx.samples_preview) == 1
@@ -101,7 +98,9 @@ def test_load_t1_purcell_params_reads_dispersive_bare_rf_and_g(tmp_path) -> None
         }
     ).to_csv(tmp_path / "samples.csv", index=False)
 
-    ctx = load_t1_curve_context(result_dir=str(tmp_path), preview_rows=1)
+    ctx = load_t1_curve_context(
+        result_dir=str(tmp_path), fluxs=np.array([0.5]), preview_rows=1
+    )
     purcell = load_t1_purcell_params(ctx, kappa_ghz=14.8e-3)
 
     assert purcell.kappa_ghz == pytest.approx(14.8e-3)
@@ -109,7 +108,7 @@ def test_load_t1_purcell_params_reads_dispersive_bare_rf_and_g(tmp_path) -> None
     assert purcell.g == pytest.approx(0.07390631094081157)
 
 
-def test_calibrate_t1_flux_filters_finite_rows_and_records_provenance() -> None:
+def test_calibrate_t1_flux_selects_finite_measurement_rows() -> None:
     samples = pd.DataFrame(
         {
             "flux": [-0.5, -0.49, -0.48],
@@ -123,8 +122,7 @@ def test_calibrate_t1_flux_filters_finite_rows_and_records_provenance() -> None:
 
     assert len(cal.freq_rows) == 3
     assert len(cal.t1_df) == 2
-    assert cal.resolution.sources == ("explicit", "explicit", "explicit")
-    np.testing.assert_allclose(cal.resolution.values, [-0.5, -0.49, -0.48])
+    np.testing.assert_allclose(cal.context.fluxs, [-0.5, -0.49, -0.48])
 
 
 def test_prepare_t1_curve_data_default_keeps_nan_error_points() -> None:
@@ -141,13 +139,11 @@ def test_prepare_t1_curve_data_default_keeps_nan_error_points() -> None:
     data = prepare_t1_curve_data(
         calibration,
         analysis_flux_range=(0.49, 0.52),
-        correct_flux_from_f01_enabled=False,
     )
     weighted_only = prepare_t1_curve_data(
         calibration,
         analysis_flux_range=(0.49, 0.52),
         use_weighted_points_only=True,
-        correct_flux_from_f01_enabled=False,
     )
 
     assert len(data.fit.T1_ns) == 2
@@ -272,41 +268,6 @@ def test_t1_parameter_text_shows_only_active_noise_params_and_temp() -> None:
     assert "Purcell kappa" not in text
 
 
-def test_plot_t1_flux_calibration_shows_provenance_categories() -> None:
-    data = _synthetic_prepared_data()
-    sample = replace(
-        data.sample,
-        raw_fluxs=np.array([0.488, 0.500, 0.514], dtype=np.float64),
-        fluxs=np.array([0.490, 0.500, 0.510], dtype=np.float64),
-        f01_measured=np.array([True, True, False], dtype=bool),
-        f01_correction_applied=np.array([True, False, False]),
-        flux_corrections=np.array([0.002, 0.000, 0.000], dtype=np.float64),
-        flux_sources=("row-frame", "explicit", "row-frame"),
-        correction_skipped_reason=("", "explicit_flux", "missing_f01"),
-    )
-    data = replace(data, sample=sample)
-
-    fig, ax = workflow.plot_t1_flux_calibration(data)
-
-    labels = {collection.get_label() for collection in ax.collections}
-    assert "raw flux" in labels
-    assert "f01 corrected flux" in labels
-    assert "explicit flux (uncorrected)" in labels
-    assert "missing f01 (model freq)" in labels
-    assert "integer aligned flux" in labels
-    # One f01-correction segment and one branch-alignment segment per row.
-    assert len(ax.lines) == 2 * len(sample.fluxs)
-    assert ax.get_ylabel() == "f01 frequency (MHz)"
-    for index, f01_mhz in enumerate(sample.f01_mhz):
-        raw_flux, aligned_flux = ax.lines[2 * index], ax.lines[2 * index + 1]
-        for line in (raw_flux, aligned_flux):
-            np.testing.assert_allclose(
-                np.asarray(line.get_ydata(), dtype=np.float64),
-                [f01_mhz, f01_mhz],
-            )
-    plt.close(fig)
-
-
 def test_build_t1_channel_curves_uses_uniform_flux_grid() -> None:
     data = _synthetic_prepared_data()
     fit_result = T1FitResult(
@@ -351,13 +312,8 @@ def test_build_t1_channel_curves_uses_uniform_flux_grid() -> None:
 
 def _synthetic_calibration(samples: pd.DataFrame) -> T1FluxCalibration:
     context = _synthetic_context(samples)
-    resolution = RecordFluxResolution(
-        values=samples["flux"].to_numpy(dtype=np.float64),
-        sources=("explicit",) * len(samples),
-    )
     return T1FluxCalibration(
         context=context,
-        resolution=resolution,
         t1_df=samples,
         freq_rows=samples,
         summary_table=pd.DataFrame(),
@@ -370,10 +326,8 @@ def _synthetic_context(samples: pd.DataFrame) -> T1CurveContext:
         image_dir="/tmp/result/t1_curve",
         samples_filename="samples.csv",
         params=(3.4, 0.9, 0.6),
-        flux_half=0.0,
-        flux_int=0.5,
-        flux_period=1.0,
         samples_df=samples,
+        fluxs=samples["flux"].to_numpy(dtype=np.float64),
         params_table=pd.DataFrame(),
         samples_preview=samples,
         available_columns=tuple(samples.columns),
@@ -386,12 +340,8 @@ def _synthetic_prepared_data() -> T1PreparedData:
         fluxs=fluxs,
         raw_fluxs=fluxs,
         integer_shifts=np.zeros(3, dtype=np.float64),
-        flux_sources=("row-frame", "row-frame", "row-frame"),
         f01_mhz=np.array([350.0, 360.0, 370.0], dtype=np.float64),
         f01_measured=np.ones(3, dtype=bool),
-        f01_correction_applied=np.ones(3, dtype=bool),
-        flux_corrections=np.zeros(3, dtype=np.float64),
-        correction_skipped_reason=("", "", ""),
         T1_ns=np.array([40_000.0, 42_000.0, 41_000.0], dtype=np.float64),
         T1err_ns=np.array([500.0, np.nan, 600.0], dtype=np.float64),
         omegas=np.array([2.0, 3.0, 4.0], dtype=np.float64),
@@ -408,7 +358,6 @@ def _synthetic_prepared_data() -> T1PreparedData:
     return T1PreparedData(
         calibration=calibration,
         analysis_flux_range=(0.49, 0.51),
-        max_abs_flux_correction=0.03,
         max_rel_t1_err=0.25,
         use_weighted_points_only=False,
         sample=curve,
@@ -434,9 +383,6 @@ def test_t1_rows_with_null_freq_reach_analysis_with_model_f01() -> None:
 
     assert len(data.fit.T1_ns) == 3
     assert not np.any(data.sample.f01_measured)
-    assert set(data.sample.correction_skipped_reason) == {
-        "missing_f01",
-    }
     assert np.all(np.isfinite(data.sample.f01_mhz))
     np.testing.assert_allclose(
         np.asarray(data.sample.fluxs), [0.5, 0.5, 0.51], atol=1e-9
@@ -457,10 +403,9 @@ def test_t1_integer_equivalent_branches_align_to_same_flux() -> None:
     data = prepare_t1_curve_data(
         calibration,
         analysis_flux_range=(0.49, 0.53),
-        correct_flux_from_f01_enabled=False,
     )
 
-    # Explicit 0.5 and row-frame-derived -0.5 land on the same aligned branch.
+    # Author coordinates on different integer branches align to the same window.
     np.testing.assert_allclose(data.sample.fluxs, [0.5, 0.5])
     np.testing.assert_allclose(data.sample.raw_fluxs, [0.5, -0.5])
     np.testing.assert_allclose(data.sample.integer_shifts, [0.0, 1.0])
@@ -490,35 +435,3 @@ def test_t1_invalid_analysis_window_fails_fast() -> None:
         prepare_t1_curve_data(calibration, analysis_flux_range=(0.0, 1.5))
     with pytest.raises(ValueError, match="finite"):
         prepare_t1_curve_data(calibration, analysis_flux_range=(np.nan, 0.6))
-
-
-def test_t1_correction_disabled_preserves_raw_flux_and_reports_disabled() -> None:
-    samples = pd.DataFrame(
-        {
-            "flux": [0.5, -0.5],
-            "freq_mhz": [350.0, 351.0],
-            "t1_us": [40.0, 42.0],
-            "t1_err_us": [0.5, 0.5],
-        }
-    )
-    calibration = _synthetic_calibration(samples)
-
-    data = prepare_t1_curve_data(
-        calibration,
-        analysis_flux_range=(0.49, 0.53),
-        correct_flux_from_f01_enabled=False,
-    )
-
-    assert not np.any(data.sample.f01_correction_applied)
-    np.testing.assert_allclose(data.sample.flux_corrections, [0.0, 0.0])
-    np.testing.assert_allclose(data.sample.raw_fluxs, [0.5, -0.5])
-    np.testing.assert_allclose(data.sample.fluxs, [0.5, 0.5])
-    np.testing.assert_allclose(data.sample.integer_shifts, [0.0, 1.0])
-    assert data.sample.correction_skipped_reason == ("disabled", "disabled")
-    assert (
-        data.summary_table.loc[
-            data.summary_table["metric"] == "f01 correction skipped reasons",
-            "value",
-        ].iloc[0]
-        == "disabled=2"
-    )

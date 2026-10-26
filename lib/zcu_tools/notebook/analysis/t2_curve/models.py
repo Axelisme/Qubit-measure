@@ -15,9 +15,6 @@ from zcu_tools.notebook.analysis.fit_tools import (
     MeasurementErrorPolicy,
 )
 from zcu_tools.resources.qubit_params import T1CurveFit
-from zcu_tools.resources.record_table import (
-    RecordFluxResolution,
-)
 
 from .base import T2ChannelCurves
 from .fit import ParameterName, ResidualMode, T2FitParams, T2FitResult
@@ -37,18 +34,19 @@ class T2CurveAnalysisConfig:
 
     Missing dispersive inputs disable photon shot noise regardless of requested
     active/fixed mechanisms. Flux windows use normalized Phi0; lifetimes and
-    error policies use us; readout linewidth uses MHz.
+    error policies use us; readout linewidth uses MHz. fluxs is a finite 1D
+    normalized Phi0 array, one value per CSV row in row order. samples_filename
+    selects the CSV inside result_dir or an absolute path. Stages do not correct
+    flux or infer any preprocessing the author performed.
     """
 
     result_dir: str
+    fluxs: NDArray[np.float64]
     analysis_flux_range: tuple[float, float] = (0.49, 0.53)
     readout_kappa_over_2pi_mhz: float = 14.75412896809815
     image_dir: str | None = None
     samples_filename: str = "samples.csv"
-    default_bare_rf: float = 5.0
     t_flux_count: int = 1000
-    max_abs_flux_correction: float = 0.03
-    correct_flux_from_f01_enabled: bool = True
     max_rel_t2e_err: float = 0.5
     use_weighted_points_only: bool = False
     T1_error_policy: MeasurementErrorPolicy = field(
@@ -93,22 +91,21 @@ class T2CurveAnalysisConfig:
 class T2CurveContext:
     """Loaded CSV and fluxonium inputs.
 
-    Paths locate source/output files; params=(EJ, EC, EL) uses GHz. Flux frame
-    values support plot axes. bare_rf/g are GHz or None when dispersive is
+    Paths locate source/output files; params=(EJ, EC, EL) uses GHz.
+    bare_rf/g are GHz or None when dispersive is
     absent. samples_df/preview retain CSV rows; params_table lists loaded
-    inputs; available_columns lists the normalized analysis columns.
+    inputs; available_columns lists the normalized analysis columns. fluxs is
+    the author's finite normalized Phi0 array, one value per source row.
     """
 
     result_dir: str
     image_dir: str
     samples_filename: str
     params: tuple[float, float, float]
-    flux_half: float
-    flux_int: float
-    flux_period: float
     bare_rf: float | None
     g: float | None
     samples_df: pd.DataFrame
+    fluxs: NDArray[np.float64]
     t1_curve_fit: T1CurveFit | None
     params_table: pd.DataFrame
     samples_preview: pd.DataFrame
@@ -122,7 +119,11 @@ class T2CurveContext:
 
 @dataclass(frozen=True, slots=True)
 class T2FluxCalibration:
-    """Calibrated T2 sample selection.
+    """T2 row selections using the author flux array in context.
+
+    context owns source rows and normalized flux. t2e_df/t2r_df are the finite
+    lifetime subsets; freq_rows contains finite observed f01 rows. summary_table
+    reports the source and selected row counts.
 
     ``t2e_mask`` / ``t2r_mask`` are positional boolean masks with length
     exactly ``len(context.samples_df)``; they are the authoritative T2e/T2r
@@ -131,7 +132,6 @@ class T2FluxCalibration:
     """
 
     context: T2CurveContext
-    resolution: RecordFluxResolution
     t2e_df: pd.DataFrame
     t2r_df: pd.DataFrame
     t2e_mask: NDArray[np.bool_]
@@ -155,15 +155,20 @@ class T2CurveData:
 
 @dataclass(frozen=True, slots=True)
 class T2WindowData:
+    """Echo rows sorted by integer-aligned normalized flux.
+
+    fluxs is the aligned coordinate, raw_fluxs is author input, and integer_shifts
+    gives the added number of periods. f01_mhz uses observed MHz where finite,
+    otherwise model MHz; f01_measured distinguishes them. T1_us/T2e_us and their
+    *_err_us arrays use us; missing errors are NaN. kept_rows/source_rows count
+    in-window/eligible echo rows. All arrays share the sorted row axis.
+    """
+
     fluxs: NDArray[np.float64]
     raw_fluxs: NDArray[np.float64]
     integer_shifts: NDArray[np.float64]
-    flux_sources: tuple[str, ...]
     f01_mhz: NDArray[np.float64]
     f01_measured: NDArray[np.bool_]
-    f01_correction_applied: NDArray[np.bool_]
-    flux_corrections: NDArray[np.float64]
-    correction_skipped_reason: tuple[str, ...]
     T2e_us: NDArray[np.float64]
     T2e_err_us: NDArray[np.float64]
     T1_us: NDArray[np.float64]
@@ -178,29 +183,40 @@ class T2RowDiagnostics:
 
     ``sample_indexes`` holds positional row indexes into ``samples_df`` (not
     DataFrame labels), so duplicate labels cannot be ambiguous. Entries follow
-    deterministic ``samples_df`` row order, one entry per resolved T2r row.
+    deterministic ``samples_df`` row order, one entry per finite T2r row.
+    in_window marks the selected flux window. raw_fluxs is author normalized
+    Phi0 input; aligned_fluxs adds integer_shifts periods. f01_observed_mhz
+    preserves measured MHz or NaN; f01_model_mhz predicts at aligned_fluxs.
+    f01_used_mhz chooses finite observed f01, otherwise model f01; f01_measured
+    is True for observed values. No author preprocessing history is inferred.
     """
 
     sample_indexes: NDArray[np.int64]
     in_window: NDArray[np.bool_]
-    flux_sources: tuple[str, ...]
     f01_observed_mhz: NDArray[np.float64]
     f01_model_mhz: NDArray[np.float64]
     f01_used_mhz: NDArray[np.float64]
     f01_measured: NDArray[np.bool_]
     raw_fluxs: NDArray[np.float64]
-    corrected_fluxs: NDArray[np.float64]
     aligned_fluxs: NDArray[np.float64]
     integer_shifts: NDArray[np.float64]
-    correction_applied: NDArray[np.bool_]
-    correction_skipped_reason: tuple[str, ...]
 
 
 @dataclass(frozen=True, slots=True)
 class T2DephasingAnalysis:
+    """Prepared echo subsets and diagnostics.
+
+    calibration retains row selections. analysis_flux_range is normalized Phi0;
+    max_rel_t2e_err/use_weighted_points_only record error filters. window holds
+    eligible in-window echo rows; sample keeps positive T1/T2e and fit also
+    requires positive pure-dephasing rate and accepted errors. branch_coverage
+    counts echo/Ramsey window selection, model f01 and integer shifts;
+    half_preview contains rows aligned at half flux. summary_table summarizes
+    fit selection. t2r_diagnostics preserves Ramsey source-row positions.
+    """
+
     calibration: T2FluxCalibration
     analysis_flux_range: tuple[float, float]
-    max_abs_flux_correction: float
     max_rel_t2e_err: float
     use_weighted_points_only: bool
     window: T2WindowData

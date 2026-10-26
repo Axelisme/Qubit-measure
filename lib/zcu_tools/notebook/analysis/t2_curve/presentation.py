@@ -40,131 +40,46 @@ def plot_t2_dephasing_data(data: T2DephasingAnalysis) -> tuple[Figure, Axes]:
 
 
 def plot_t2_flux_calibration(data: T2DephasingAnalysis) -> tuple[Figure, Axes]:
+    """Plot author flux and integer-aligned flux without inferring prior correction.
+
+    data supplies prepared rows and a normalized analysis window. Return a
+    new Figure/Axes without showing or saving. Empty data raises ValueError.
+    Vertical positions are sample positions in the prepared window.
+    """
     window = data.window
     if len(window.fluxs) == 0:
         raise ValueError("No T2 samples are available for flux calibration plotting")
 
-    raw_fluxs = np.asarray(window.raw_fluxs, dtype=np.float64)
-    corrected_fluxs = raw_fluxs + np.asarray(window.flux_corrections, dtype=np.float64)
-    aligned_fluxs = np.asarray(window.fluxs, dtype=np.float64)
-    corrected_mask = window.f01_correction_applied
-    sources = np.asarray(window.flux_sources, dtype=object)
-    reasons = np.asarray(window.correction_skipped_reason, dtype=object)
-    not_corrected = ~corrected_mask
-    explicit_mask = not_corrected & (sources == "explicit")
-    missing_mask = not_corrected & (reasons == "missing_f01") & ~window.f01_measured
-    disabled_mask = not_corrected & (reasons == "disabled")
-    rejected_mask = not_corrected & ~explicit_mask & ~missing_mask & ~disabled_mask
+    raw_fluxs = window.raw_fluxs
+    aligned_fluxs = window.fluxs
     y_positions = np.arange(len(aligned_fluxs), dtype=np.float64)
     fig_height = float(np.clip(1.8 + 0.18 * len(aligned_fluxs), 3.0, 8.0))
     fig, ax = plt.subplots(figsize=(7.2, fig_height))
     lower, upper = data.analysis_flux_range
     ax.axvspan(lower, upper, color="tab:green", alpha=0.08, label="analysis window")
-
-    for y_position, raw_flux, corrected_flux, aligned_flux, is_corrected in zip(
-        y_positions,
-        raw_fluxs,
-        corrected_fluxs,
-        aligned_fluxs,
-        corrected_mask,
-        strict=True,
-    ):
-        line_color = "tab:blue" if is_corrected else "tab:gray"
-        # Stage 1: raw -> f01-corrected (pre-alignment).
-        ax.plot(
-            [raw_flux, corrected_flux],
-            [y_position, y_position],
-            color=line_color,
-            alpha=0.55,
-            linewidth=1.0,
-        )
-        # Stage 2: f01-corrected -> integer-aligned (final analysis flux).
-        ax.plot(
-            [corrected_flux, aligned_flux],
-            [y_position, y_position],
-            color="tab:green",
-            alpha=0.55,
-            linewidth=1.0,
-            linestyle=":",
-        )
-
+    for y, raw, aligned in zip(y_positions, raw_fluxs, aligned_fluxs, strict=True):
+        ax.plot([raw, aligned], [y, y], color="tab:green", alpha=0.55, linestyle=":")
     ax.scatter(
         raw_fluxs,
         y_positions,
         marker="o",
         facecolors="none",
         edgecolors="tab:gray",
-        s=34,
-        label="raw flux",
-        zorder=3,
+        label="author flux",
     )
-    if np.any(corrected_mask):
-        ax.scatter(
-            corrected_fluxs[corrected_mask],
-            y_positions[corrected_mask],
-            marker="o",
-            color="tab:blue",
-            s=20,
-            label="f01 corrected flux",
-            zorder=4,
-        )
-    if np.any(explicit_mask):
-        ax.scatter(
-            corrected_fluxs[explicit_mask],
-            y_positions[explicit_mask],
-            marker="o",
-            color="tab:purple",
-            s=20,
-            label="explicit flux (uncorrected)",
-            zorder=4,
-        )
-    if np.any(missing_mask):
-        ax.scatter(
-            corrected_fluxs[missing_mask],
-            y_positions[missing_mask],
-            marker="s",
-            color="tab:cyan",
-            s=24,
-            label="missing f01 (model freq)",
-            zorder=4,
-        )
-    if np.any(disabled_mask):
-        ax.scatter(
-            corrected_fluxs[disabled_mask],
-            y_positions[disabled_mask],
-            marker="^",
-            color="tab:brown",
-            s=30,
-            label="correction disabled",
-            zorder=4,
-        )
-    if np.any(rejected_mask):
-        ax.scatter(
-            corrected_fluxs[rejected_mask],
-            y_positions[rejected_mask],
-            marker="x",
-            color="tab:orange",
-            s=38,
-            label="kept raw (rejected)",
-            zorder=4,
-        )
     ax.scatter(
         aligned_fluxs,
         y_positions,
         marker="D",
         facecolors="none",
         edgecolors="tab:green",
-        s=28,
         label="integer aligned flux",
-        zorder=5,
     )
-
     ax.set_xlabel(r"Flux quanta ($\Phi_{ext}/\Phi_0$)")
     ax.set_ylabel("sample index")
-    ax.set_title("f01 flux correction and branch alignment")
-    ax.set_ylim(-0.5, len(aligned_fluxs) - 0.5)
+    ax.set_title("Author flux and integer branch alignment")
     ax.grid(axis="x", alpha=0.25)
-    ax.legend(loc="best")
+    ax.legend(loc="best", fontsize="small")
     return fig, ax
 
 
@@ -344,8 +259,6 @@ def emit_t2_curve_outputs(
     """
     if verbose:
         print("params =", result.context.params, "GHz")
-        print("flux_half =", result.context.flux_half)
-        print("flux_period =", result.context.flux_period)
         print("bare_rf =", result.context.bare_rf, "GHz")
         print("g =", result.context.g, "GHz")
         if not result.context.photon_shot_noise_enabled:

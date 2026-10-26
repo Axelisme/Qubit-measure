@@ -616,16 +616,14 @@ def run_t2_curve_analysis(
 ) -> T2CurveAnalysisResult:
     context = load_t2_curve_context(
         result_dir=config.result_dir,
+        fluxs=config.fluxs,
         samples_filename=config.samples_filename,
         image_dir=config.image_dir,
-        default_bare_rf=config.default_bare_rf,
     )
     calibration = calibrate_t2_flux(context)
     data = prepare_t2_dephasing_data(
         calibration,
         analysis_flux_range=config.analysis_flux_range,
-        max_abs_flux_correction=config.max_abs_flux_correction,
-        correct_flux_from_f01_enabled=config.correct_flux_from_f01_enabled,
         max_rel_t2e_err=config.max_rel_t2e_err,
         use_weighted_points_only=config.use_weighted_points_only,
     )

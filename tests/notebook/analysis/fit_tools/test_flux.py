@@ -75,18 +75,21 @@ def test_correct_flux_from_f01_rejects_negative_threshold() -> None:
         )
 
 
-def test_correct_flux_from_f01_missing_frequency_keeps_raw_flux() -> None:
+@pytest.mark.parametrize("missing_column", [True, False])
+def test_correct_flux_from_f01_missing_frequency_uses_model(
+    missing_column: bool,
+) -> None:
     result = correct_flux_from_f01(
-        np.array([0.5], dtype=np.float64),
-        np.array([np.nan], dtype=np.float64),
+        np.array([0.51, -0.49], dtype=np.float64),
+        None if missing_column else np.array([np.nan, np.nan], dtype=np.float64),
         (3.0, 1.0, 0.5),
     )
 
-    np.testing.assert_allclose(result.raw_fluxs, [0.5])
-    np.testing.assert_allclose(result.corrected_fluxs, [0.5])
-    np.testing.assert_array_equal(result.accepted, [False])
-    np.testing.assert_allclose(result.applied_flux_corrections, [0.0])
-    assert result.skipped_count == 1
+    np.testing.assert_allclose(result.raw_fluxs, [0.51, -0.49])
+    np.testing.assert_allclose(result.corrected_fluxs, [0.51, -0.49], atol=1e-5)
+    np.testing.assert_array_equal(result.accepted, [True, True])
+    np.testing.assert_allclose(result.applied_flux_corrections, [0.0, 0.0], atol=1e-5)
+    assert result.skipped_count == 0
 
 
 def test_correct_flux_from_f01_rejects_unreachable_frequencies() -> None:
