@@ -24,149 +24,100 @@ jupyter:
     version: 3.13.undefined
 ---
 
-# Sample Merge
+# Sample merge
 
-**Readers:** operator, lab-author. Merge record JSONL into the canonical `samples.csv` used by the T1 and T2 notebooks.
+**Readers:** operator, lab-author. Flatten record JSONL histories into a CSV for curve analysis.
 
-Run this notebook before `T1_curve.md` / `T2_curve.md` when raw sample files come
-from different source flux frames or device units. The curve notebooks should
-only read the canonical `samples.csv` produced here.
+Each source keeps the last whole row per `run_id`. The merge concatenates those
+rows in source order and joins nested object keys with dots. For example,
+`devices.bias_device.value` holds the captured device value.
+The merge preserves source values. It does not calculate flux, require physical
+fields, apply corrections or select a target frame. Extra metadata and unused
+NaN values do not block the merge.
 
-Sources are record JSONL histories, with the last whole row kept for each
-`run_id`. Each row uses explicit `flux`, or the selected
-`devices[device_name].value` with `flux_int` / `flux_period` or a declared
-`fallback_frame`. Only fallback resolution needs a matching device `value_unit`.
-Unused NaN, extra fields and metadata do not block merging. Missing required
-fields report the source file and field names. The output remains a flat
-`samples.csv` with target coordinates followed by the source measurement fields.
+For old CSV files, use the formal
+[Sample CSV → JSONL migration procedure](../../migrations/README.md#sample-csv--jsonl).
+Declare source units and column mappings there. This notebook only reads JSONL
+and does not interpret old field aliases.
 
-For legacy `calibrated mA` / `Flux` CSVs, follow the formal
-[Sample CSV → JSONL migration procedure](../../migrations/README.md#sample-csv--jsonl)
-with explicit source units and column mapping. The merge does not read CSV,
-recognize legacy aliases, infer units or supply missing device facts. Before
-merging migrated rows, check that each row has explicit `flux` or the selected
-device value and a usable frame.
-
-# Import
+# Imports
 
 ```python
 %load_ext autoreload
 
 from pathlib import Path
 
-import matplotlib.pyplot as plt
+import pandas as pd
 from IPython.display import display
 
 %autoreload 2
-import zcu_tools.notebook.analysis.fit_tools as zfit
-```
-
-# Project
-
-```python
-target_result_dir = "../../result/Q12_2D[7]/Q4"
-
-samples_output = f"{target_result_dir}/samples.csv"
-report_output = f"{target_result_dir}/samples_merge_report.csv"
-figure_output = f"{target_result_dir}/samples_merge_f01_diagnostics.png"
-```
-
-# Target frame
-
-The target frame is the single authoritative merge identity. `dev_unit` is the
-target device's A/V unit (current source -> `"A"`, voltage source -> `"V"`); the
-persisted params carry no unit metadata, so it is declared here explicitly.
-
-```python
-target_frame = zfit.FluxFrame.from_result_dir(
-    target_result_dir,
-    dev_unit="A",
-    label="Q4 target",
+from zcu_tools.notebook.analysis.fit_tools import (
+    merge_sample_sources,
+    write_merged_samples,
 )
+from zcu_tools.resources.record_table import RecordFluxFrame, flux_from_frame
 ```
 
-# Sources
+# Sources and output
 
-Each source is record JSONL. Set `device_name` to the captured device used for
-rows without explicit `flux`; missing required device values fail without a
-flat-column fallback. `fallback_frame` resolves rows that carry
-neither explicit `flux` nor a row frame. `integer_flux_offset` aligns a source
-to an equivalent integer flux branch (e.g. `-0.5` -> `+1` to match `0.5`); the
-merge never infers a branch on its own.
+The output directory only selects where to write the CSV. It supplies no model
+or calibration to the merge.
 
 ```python
+result_dir = Path("../../result/Q12_2D[7]/Q4")
 sources = (
-    zfit.SampleSource(
-        device_name="bias_device",  # Select a captured device explicitly.
-        path=f"{target_result_dir}/records1.jsonl",
-        label="samples1",
-    ),
-    zfit.SampleSource(
-        device_name="bias_device",  # Select a captured device explicitly.
-        path=f"{target_result_dir}/records2.jsonl",
-        label="samples2",
-        integer_flux_offset=1,
-        fit_batch_flux_offset=True,
-        batch_flux_offset_objective="soft_l1",
-        max_abs_batch_flux_offset=0.03,
-    ),
-    zfit.SampleSource(
-        device_name="bias_device",  # Select a captured device explicitly.
-        path=f"{target_result_dir}/records3.jsonl",
-        label="samples3",
-        fallback_frame=zfit.FluxFrame.from_result_dir(
-            "../../result/2DQ12/Q4",
-            dev_unit="A",
-            label="2DQ12/Q4 migrated",
-        ),
-        fit_batch_flux_offset=True,
-        batch_flux_offset_objective="soft_l1",
-        max_abs_batch_flux_offset=0.03,
-    ),
+    result_dir / "records1.jsonl",
+    result_dir / "records2.jsonl",
 )
+samples_output = result_dir / "samples.csv"
 ```
 
-# Merge
+# Merge and write
+
+`write_merged_samples` creates the output directory and replaces an existing
+output CSV. It refuses to overwrite any source JSONL, including empty sources.
 
 ```python
-merge = zfit.merge_sample_sources(
-    target_frame=target_frame,
-    sources=sources,
-)
-```
-
-```python
-display(merge.summary_table)
+merge = merge_sample_sources(sources=sources)
 display(merge.merged.head(10))
-```
 
-# Diagnostics
-
-```python
-fig, _ = zfit.plot_sample_merge_f01_diagnostics(merge)
-fig.savefig(figure_output, dpi=160, bbox_inches="tight")
-plt.show()
-```
-
-# Write Output
-
-The output is an analysis artifact, not raw adapter records. Original devices
-remain source evidence and are not rewritten to match target-frame coordinates.
-Do not feed this output back into raw-record APIs.
-
-The output path is caller-owned and must never overwrite a source CSV; the
-write helpers refuse to do so.
-
-```python
-source_paths = {str(Path(source.path).resolve()) for source in sources}
-assert str(Path(samples_output).resolve()) not in source_paths, (
-    "output path must not overwrite a source CSV"
-)
-
-samples_path = zfit.write_merged_samples(merge, samples_output)
-report_path = zfit.write_sample_merge_report(merge, report_output)
-
+samples_path = write_merged_samples(merge, samples_output)
 print(f"samples.csv = {samples_path}")
-print(f"merge report = {report_path}")
-print(f"diagnostic figure = {figure_output}")
 ```
+
+# Author-selected flux for analysis
+
+Flux conversion is a separate step. Copy the examples below into T1 or T2
+analysis and uncomment the call you need, or build your own flux array.
+Pass that array to the analysis loader in the same row order. These examples
+do not run during merging, so records without physical fields can still merge.
+The helper does not change the table or CSV.
+
+Set `device_name` to the captured device whose values define flux. The helper
+uses finite explicit `flux` first. Otherwise it uses
+`devices.<device_name>.value` with the row's `flux_int` and `flux_period`.
+A row with only one frame value fails with its row label and missing field.
+A valid explicit flux ignores unused frame fields.
+
+```python
+# samples = pd.read_csv(samples_path)
+# flux = flux_from_frame(samples, device_name="bias_device")
+# display(pd.DataFrame({"flux": flux}))
+```
+
+If rows lack both frame values and explicit flux, pass a named frame yourself.
+The following example declares volts, a zero-flux value of 0.1 V and a period
+of 0.8 V. Replace those numbers with your calibration. If calibration lives in
+a file, read it before constructing `RecordFluxFrame`; the helper accepts frame
+data, not a path. Fallback requires the selected device's `value_unit` to match.
+No unit conversion occurs.
+
+```python
+# Use this call instead of the one above when a fallback is needed.
+# fallback = RecordFluxFrame(dev_unit="V", flux_int=0.1, flux_period=0.8)
+# flux = flux_from_frame(samples, device_name="bias_device", fallback_frame=fallback)
+```
+
+Call the separate f01 correction tool if your analysis needs it, then pass the
+chosen flux array to T1 or T2. Neither merging nor loading chooses a correction
+for you.

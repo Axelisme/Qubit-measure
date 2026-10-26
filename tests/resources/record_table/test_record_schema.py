@@ -448,19 +448,6 @@ def test_resolve_checks_only_coordinates_used_by_each_row() -> None:
     assert resolved.sources == ("explicit", "row-frame", "fallback-frame")
 
 
-def test_resolve_fallback_ignores_an_incomplete_unused_row_frame() -> None:
-    records = pd.DataFrame(
-        {"dev_value": [3.0], "dev_unit": ["V"], "flux_int": ["unused"]}
-    )
-
-    resolved = resolve_record_flux(
-        records, fallback_frame=RecordFluxFrame("V", 1.0, 4.0)
-    )
-
-    np.testing.assert_allclose(resolved.values, [0.5])
-    assert resolved.sources == ("fallback-frame",)
-
-
 def test_resolve_explicit_flux_wins_over_row_frame() -> None:
     records = pd.DataFrame(
         {

@@ -15,14 +15,13 @@
 - `correct_flux_from_f01(raw_fluxs, f01_freqs_ghz, params, *, max_abs_flux_correction=0.03)`：以實測 f01 校正 dimensionless normalized flux；`f01_freqs_ghz` 明確以 GHz 輸入，內部先轉成 MHz 再呼叫 MHz-based predictor。校正候選會先展開 periodic / mirror equivalent flux branch，再選離 raw flux 最近者；tie 規則 deterministic（等距時 periodic 獲勝）。超過 `max_abs_flux_correction` 的行拒絕並保留 raw flux。回傳 `F01FluxCorrectionResult` 只有 raw/corrected flux、accepted mask 與 applied correction。explicit flux 視為已校準，由 caller 決定是否套用此校正。
 - `align_flux_to_window(fluxs, analysis_flux_range)`：analysis-local integer-period alignment。window 必須 finite、strictly increasing 且 width `<= 1.0`；每一 flux 選離 window midpoint 最近的 `flux + k`（`k ∈ ℤ`）branch，等距 tie 選較小的 resulting flux。回傳 aligned flux、integer shift 與 alignment 後的 in-window mask；width 超過一個 period 直接 fail。
 
-### `sample_merge.py` — flux-first v2 SampleMerge
+### `sample_merge.py` — record flattening and concatenation
 
-來源是 record JSONL，caller 以 `device_name` 指定沒有 explicit flux 時要使用的座標裝置，不使用舊 flat 欄位作輸入 fallback。每個 run_id 取最後一整行。只檢查實際用到的座標，未用 NaN、額外欄位與 metadata 不阻擋合併。量測欄位使用 `freq_mhz`、`t1_us` 等 snake_case 名稱。輸出的 `samples.csv` 是曲線分析輸入，report 另行匯出。
+`merge_sample_sources(sources=[path1, path2])` 只匯整 record JSONL。它使用 resources 的 `JsonlRecordTable.read(flatten=True)`，每個 run_id 取最後一整行。巢狀物件攤成點號欄名，例如 `devices.bias.value`，再依來源順序串接。來源值保留，不解釋舊欄位別名。缺量測、裝置或 frame 欄位、未用 NaN 與額外 metadata 都不阻擋匯整。
 
-- `FluxFrame(params, dev_unit, flux_int, flux_period, label)`：analysis affine flux frame。construction 驗證 A/V/native `dev_unit`、finite `flux_int` 與 positive finite `flux_period`，f01 model `params` 必須是三個 finite float；`flux_from_dev_value()` / `dev_value_from_flux()` 提供 scalar/array round trip（`(dev_value - flux_int) / flux_period`）。`from_result_dir(result_dir, *, dev_unit, label=None)` 從 `params.json` 的 `fluxdep_fit` 讀 `(EJ, EC, EL)` 與 `flux_int` / `flux_period`；`dev_unit` 必填，因為 persisted params 沒有 unit metadata。
-- `SampleSource(path, device_name=..., label=..., fallback_frame=..., integer_flux_offset=0, fit_batch_flux_offset=..., batch_flux_offset_objective=..., batch_flux_offset_range=..., max_abs_batch_flux_offset=..., f01_fit_scale_mhz=...)` 以 `JsonlRecordTable.read()` 讀取 JSONL 最新 rows，不做整表 v2 驗證。缺必要欄位時錯誤指出來源檔與欄名。`fallback_frame` 供缺 row frame 的 migrated rows 解析 flux；`integer_flux_offset` 是 caller-declared integer branch 對齊，merge 不猜測 unit 或 integer branch。branch 對齊後的唯一非整數調整是 bounded batch fit（`max_abs_batch_flux_offset` 限定）。
-- `merge_sample_sources(*, target_frame, sources)`：唯一 authoritative target identity。pipeline：`resolve_record_flux`（explicit → row frame → fallback frame，共用 provenance SSOT）→ caller `integer_flux_offset` → optional small batch offset（對 target f01 model 擬合單一 `delta_flux`；`batch_flux_offset_objective` 可選 `soft_l1`、`median_abs`、`mean_abs`、`rms`）→ target frame `dev_value`。輸出完整 flat v2 coordinate：adjusted `flux` 與 target `dev_value` / `dev_unit` / `flux_int` / `flux_period`，加上 caller-owned measurement columns，欄名保持原樣。diagnostics 逐 row 記錄 resolution `sources` provenance，並明示 integer offset、batch correction 與 target frame；A-source 與 V-source 先轉到同一 target frame，再比較校準後座標。無法解析的 rows 在寫出前報錯。未知與舊欄位不作 alias，只沿用原名傳遞。
-- `write_merged_samples(...)` / `write_sample_merge_report(...)` 分別寫乾淨的 `samples.csv` 與診斷 report；兩者都拒絕覆寫任何 merge source JSONL。`plot_sample_merge_f01_diagnostics(...)` 用 target model 檢查合併後 f01 residual。
+回傳 `SampleMergeResult`。`merged` 是攤平後的 DataFrame，`source_paths` 保存所有來源的絕對路徑，包含空檔。`write_merged_samples(result, path)` 將表寫成 CSV，建立缺少的父目錄，並拒絕覆寫來源 JSONL。它可以替換既有的輸出 CSV。
+
+匯整不算 flux、不收 fallback frame，也不做 integer offset、batch f01 fit 或 target-frame 映射。作者另外呼叫 resources 的 [`flux_from_frame`](../../../resources/record_table/README.md#作者-flux-換算)，或自行建立 flux 陣列，再決定是否呼叫 f01 校正。Notebook 組裝示例見 [Sample_merge](../../../../../notebook_md/analysis/Sample_merge.md)。
 
 ### `weights.py` — residual weighting
 
@@ -65,6 +64,6 @@ Correlation 由未縮放矩陣正規化，cost 為 0 時仍保留相關資訊。
 
 - 公共模組處理資料軸、sample canonicalization、誤差與 residual 權重。`Q_cap`、`A_phi`、`n_th` 等物理參數由 T1/T2 模型解讀。
 - T1/T2 各自負責把物理模型轉成 residual，然後呼叫這裡的 helper 做 shared weighting。
-- JSONL 樣本合併與 target-frame 映射屬於 `sample_merge.py`；[`notebook_md/analysis/T1_curve.md`](../../../../../notebook_md/analysis/T1_curve.md) / [`notebook_md/analysis/T2_curve.md`](../../../../../notebook_md/analysis/T2_curve.md) 只讀已 canonicalized 的 sample 表，再做 analysis-window 內的小範圍 point-wise f01 correction。
+- `sample_merge.py` 只匯整 JSONL 成 CSV。T1/T2 notebook 讀 CSV，作者明確建立 flux，再把陣列交給分析 loader。Flux 換算與 f01 校正不隱藏在匯整或 loader 裡。
 
-SampleMerge 的輸出是分析產物，不是 adapter 原始記錄。`merged` 與 `write_merged_samples` 保存 target frame 的 flat 座標，原始 `devices` 只作來源證據。輸出不支援重新餵回 raw-record 入口；不改寫 Run snapshot 來表示分析校正。
+SampleMerge 的 CSV 是分析輸入，不是 adapter 原始記錄。匯整只攤平欄名，不改寫來源 JSONL 或 Run snapshot。

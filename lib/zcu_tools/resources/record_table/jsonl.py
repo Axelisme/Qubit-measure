@@ -120,15 +120,21 @@ class JsonlRecordTable:
                 latest[run_id] = record
         return latest
 
-    def read(self) -> pd.DataFrame:
+    def read(self, *, flatten: bool = False) -> pd.DataFrame:
         """Return each run's last whole JSONL row in last-occurrence order.
 
         Absent history returns an empty frame. Only JSON object syntax and the
         nonempty run_id needed for grouping are checked. Unused fields, NaN and
         metadata are preserved without schema validation. Corrupt tails or invalid
         run_id raise ValueError with path/line; I/O failures propagate.
+        With flatten=True, nested object keys become dot-separated columns
+        (devices.bias.value); lists remain cell values. The default keeps
+        nested JSON objects as cells. Neither form changes the source history.
         """
-        return pd.DataFrame(self._latest_records().values())
+        rows = list(self._latest_records().values())
+        if flatten:
+            return pd.json_normalize(rows)
+        return pd.DataFrame(rows)
 
     def latest(self, run_id: str) -> dict[str, JsonValue] | None:
         """Read one run's latest complete JSON row, or None if absent.

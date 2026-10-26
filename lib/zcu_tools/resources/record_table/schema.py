@@ -409,8 +409,9 @@ def resolve_record_flux(
 
     Only coordinates used by each row are checked. Explicit flux needs no
     device facts or row frame. A complete row frame needs finite dev_value and
-    positive flux_period, but no unit conversion. Fallback needs dev_value and
-    dev_unit matching fallback_frame. Unknown and legacy fields are ignored,
+    positive flux_period, but no unit conversion. Only one non-null row-frame
+    value raises an error naming the row and missing field; it cannot use
+    fallback. Fallback needs dev_value and dev_unit matching fallback_frame. Unknown and legacy fields are ignored,
     never aliased. Missing/unusable coordinates raise RecordTableV2Error naming
     fields and row indexes. The input table is not modified; empty tables resolve
     to empty values and provenance.
@@ -425,12 +426,19 @@ def resolve_record_flux(
             values[index] = flux
             sources.append("explicit")
             continue
-        flux_int = flux_period = None
-        if FLUX_INT_COLUMN in row and FLUX_PERIOD_COLUMN in row:
-            frame_cells = row[[FLUX_INT_COLUMN, FLUX_PERIOD_COLUMN]]
-            if not frame_cells.isna().to_numpy().any():
-                flux_int = _optional_row_coordinate(row, FLUX_INT_COLUMN)
-                flux_period = _optional_row_coordinate(row, FLUX_PERIOD_COLUMN)
+        has_int = FLUX_INT_COLUMN in row and not row[FLUX_INT_COLUMN].isna().iloc[0]
+        has_period = (
+            FLUX_PERIOD_COLUMN in row and not row[FLUX_PERIOD_COLUMN].isna().iloc[0]
+        )
+        if has_int != has_period:
+            missing = FLUX_PERIOD_COLUMN if has_int else FLUX_INT_COLUMN
+            raise RecordTableV2Error(
+                f"missing {missing} in row frame at row(s) {row.index.tolist()}",
+                reason="incomplete_row_frame",
+                data={"column": missing, "indexes": row.index.tolist()},
+            )
+        flux_int = _optional_row_coordinate(row, FLUX_INT_COLUMN)
+        flux_period = _optional_row_coordinate(row, FLUX_PERIOD_COLUMN)
         dev_value = _optional_row_coordinate(row, DEV_VALUE_COLUMN)
         if flux_int is not None and flux_period is not None and dev_value is not None:
             if flux_period <= 0:
