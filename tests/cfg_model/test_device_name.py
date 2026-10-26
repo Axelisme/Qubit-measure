@@ -6,7 +6,6 @@ from zcu_tools.cfg_model import (
     ConfigBase,
     DeviceName,
     is_device_name,
-    validate_device_name,
 )
 
 
@@ -15,19 +14,21 @@ class DeviceCfg(ConfigBase):
     optional: DeviceName | None = None
 
 
-@pytest.mark.parametrize("name", ["coil.left", ".coil", "coil.", "."])
+@pytest.mark.parametrize(
+    "name", ["coil.left", ".coil", "coil.", ".", "", " ", "\t\n", "\u00a0\u3000"]
+)
 @pytest.mark.parametrize("field", ["required", "optional"])
-def test_device_name_rejects_dots_in_required_and_nullable_fields(
+def test_device_name_rejects_invalid_names_in_required_and_nullable_fields(
     name: str, field: str
 ) -> None:
     with pytest.raises(ValidationError) as failure:
         DeviceCfg.model_validate({"required": "coil", field: name})
 
-    assert name in str(failure.value)
+    assert repr(name) in str(failure.value)
     assert failure.value.errors()[0]["loc"] == (field,)
 
 
-@pytest.mark.parametrize("name", ["coil", "", " Coil/A-1 ", "線圈", "coil．left"])
+@pytest.mark.parametrize("name", ["coil", " Coil/A-1 ", "線圈", "coil．left"])
 def test_device_name_keeps_other_strings_nullable_marker_and_serialization(
     name: str,
 ) -> None:
@@ -35,7 +36,6 @@ def test_device_name_keeps_other_strings_nullable_marker_and_serialization(
     assert cfg.model_dump(mode="json") == {"required": name, "optional": name}
     assert DeviceCfg.model_validate_json(cfg.model_dump_json()) == cfg
     assert DeviceCfg(required=name).optional is None
-    assert validate_device_name(name) == name
     assert is_device_name(DeviceCfg.model_fields["required"])
     assert is_device_name(DeviceCfg.model_fields["optional"])
     adapter = TypeAdapter(DeviceName)

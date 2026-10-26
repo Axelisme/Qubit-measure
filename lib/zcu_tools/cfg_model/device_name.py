@@ -13,11 +13,14 @@ class DeviceNameHint:
 
 
 def validate_device_name(name: str) -> str:
-    """Return name unchanged, or raise ValueError naming it if it contains a dot.
+    """Return name unchanged, or raise ValueError identifying an invalid name.
 
-    Dots separate component paths and flattened record fields. All other string
-    names, including empty strings, remain valid. This performs no lookup or I/O.
+    Names must be nonblank and contain no ASCII dot, which separates component
+    paths and flattened record fields. All other strings remain valid, including
+    surrounding whitespace. This performs no lookup, trimming, or I/O.
     """
+    if not name.strip():
+        raise ValueError(f"Device name {name!r} must not be empty or whitespace-only")
     if "." in name:
         raise ValueError(f"Device name {name!r} must not contain '.'")
     return name
