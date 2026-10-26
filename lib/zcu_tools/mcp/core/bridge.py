@@ -32,6 +32,7 @@ Threading:
   - Reader thread (per :class:`McpBridge`): the only reader of the GUI socket;
     parses NDJSON lines into RPC replies (delivered to the matching waiter) or
     event pushes (handed to ``on_event``, or dropped if None).
+  - Reaper thread (per launched GUI): waits for child exit without another MCP call.
 """
 
 from __future__ import annotations
@@ -666,10 +667,18 @@ class McpBridge:
                     stderr=stderr,
                     start_new_session=True,
                 )
-        self._write_pid_file(self._proc.pid)
+        proc = self._proc
+        self._write_pid_file(proc.pid)
+        # Reap self-exiting GUIs even when no further MCP call polls the child.
+        threading.Thread(
+            target=self._reap_gui,
+            args=(proc,),
+            name=f"mcp-{cfg.app_name}-reaper-{proc.pid}",
+            daemon=True,
+        ).start()
 
-        ready = self._wait_for_launch(self._proc, port)
-        pid = self._proc.pid
+        ready = self._wait_for_launch(proc, port)
+        pid = proc.pid
         if not ready:
             return (
                 f"GUI launched (pid={pid}) but port {port} not yet reachable — "
@@ -685,6 +694,13 @@ class McpBridge:
                 + log_note
             )
         return f"GUI launched (pid={pid}) and listening on port {port}." + log_note
+
+    def _reap_gui(self, proc: subprocess.Popen[bytes]) -> None:
+        proc.wait()
+        # PID-file bookkeeping is best-effort, just like writing it at launch.
+        with suppress(OSError):
+            if self._read_pid_file() == proc.pid:
+                self._clear_pid_file()
 
     def _wait_for_launch(self, proc: subprocess.Popen[bytes], port: int) -> bool:
         """Wait for readiness, reporting an early process exit with its stderr tail."""
