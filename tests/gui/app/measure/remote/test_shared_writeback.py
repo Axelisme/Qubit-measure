@@ -149,6 +149,7 @@ def test_sample_write_receipt_reads_latest_jsonl_before_and_after_at_fixed_point
         ]
     }
     assert row == {
+        "component": "Q1",
         "t1_us": 20.09,
         "run_id": "run-fixed",
         "point": "a",
@@ -253,6 +254,7 @@ def test_record_preview_selection_and_apply_preserve_adapter_json(
     event = entry.ledger.events()[-1]
     assert datetime.fromisoformat(row["at"]) == datetime.fromisoformat(event.at)
     assert row == expected | {
+        "component": "Q1",
         "run_id": "run-fixed",
         "point": "a",
         "at": row["at"],
