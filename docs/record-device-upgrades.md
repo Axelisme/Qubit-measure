@@ -131,11 +131,13 @@ Fallback 只適用於沒有新 row frame 的列，且 device 單位必須匹配�
 
 以下操作適用於已使用具名 `flux` 的 component。它們不屬於 record upgrade，也沒有批次改名工具。
 
-Device 改名時，只將 component 的 `flux.<old-name>` key 改成 `flux.<new-name>`，保留該 entry 的校準值。不要用整份資料的文字搜尋取代去改歷史。
+Device 改名時，將 component 的 `flux.<old-name>` key 改成 `flux.<new-name>`，保留該 entry 的校準值。若 qubit 的 `flux_source` 仍指向舊名，同步改為新名，因為 form 用它選預設 device。不要用整份資料的文字搜尋取代去改歷史。
 
 改接線會改變 device 到 qubit 的關係。刪除該 component 的 `flux.<device>` entry，再重新執行對應的 fluxdep 校準。不要把舊校準當成新接線的校準。只刪受影響的 entry，保留其他 device 的校準。
 
-手動修改目前 session 使用的文件後，透過 MCP `context.reload` 重新載入並驗證。若 setup 不含該 device，helper 或 form 會在使用處指出名稱。Reload 失敗時先修正來源，不繼續用舊畫面的值量測。
+手動修改目前 session 使用的文件後，透過 MCP `context.reload` 重新載入並驗證。Reload 失敗時先修正來源，不繼續用舊畫面的值量測。
+
+Flux 使用處依各自持有的 device 資料檢查，不要求完整 setup 名單。Record 與 writeback 換算使用 Run snapshot，frame 用到但 snapshot 缺值的 device 會指名報錯。Form 對照既有 device 選項，`flux_from_frame` 對照該列 `devices`，缺少使用到的 device 時指出名稱。
 
 歷史 records 保留當時的名稱與 frame，不跟著改名、不批次改寫。分析可以保留不同歷史名稱，按每列當時的 frame 換算；沒有新 frame 的舊列仍由 caller 明示 fallback。
 
