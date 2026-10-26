@@ -5,6 +5,8 @@ import warnings
 from collections.abc import Iterable, Mapping
 from typing import TYPE_CHECKING, Any
 
+from zcu_tools.cfg_model import validate_device_name
+
 from .base import BaseDevice, DeviceActivity
 
 if TYPE_CHECKING:
@@ -56,12 +58,13 @@ class DeviceManager:
         """Register a driver under its only name in this manager.
 
         Raise ``TypeError`` for a non-``BaseDevice`` input and ``ValueError``
-        if this driver is already registered under a different name. Raise
+        if name contains a dot or this driver is already registered under a
+        different name. Invalid-name errors include the rejected name. Raise
         ``DeviceCloseInProgressError`` if a manager close API holds a claim
         on this driver, even after its original name was dropped or replaced.
         Otherwise, reusing a name warns and overwrites its entry, including
         for the same driver. Rejections leave the registry unchanged.
-        Names are used unchanged, including an empty string. Registration
+        Valid names are used unchanged, including an empty string. Registration
         performs no device I/O. The manager coordinates the driver's lifetime;
         retrieval only borrows the registered object.
         """
@@ -72,6 +75,7 @@ class DeviceManager:
                 f"got {type(device).__name__}"
             )
 
+        validate_device_name(name)
         with self._lock:
             if id(device) in self._close_claims:
                 raise DeviceCloseInProgressError((name,))
