@@ -13,6 +13,9 @@ GUI／MCP 只支援 `coherence_fluxdep`、`mist_fluxdep`、`overnight`。不提�
 Readout 優化預設 `reps=100`、`rounds=1`，其餘 workflow 量測與共用校準預設 `reps=1000`、`rounds=10`。Early-stop SNR 留空（None）關閉，不改變每輪的 reps。Spectroscopy 門檻預設 50，LenRabi／AmpRabi 預設 30，Coherence lifetime、overnight 與 overnight_mux 的 T1／Echo 預設 20.0。Readout 優化與 MIST 沒有此欄位，分別預設完整執行 1 輪與 10 輪。Singleshot shots 不受此預設影響。
 
 `CoherencePlan` 固定 flux setpoints、明填的 flux_unit、resolved drive/readout modules、delay points 與 historical RunSnapshot。
+Plan 表單的 `fluxes` 可選既有四種線性 sweep，或 `{"kind": "list", "values": [0.2, -0.1, 0.2]}`。
+List 至少一點，每個值須有限，代表 `flux_unit` 下的絕對裝置 setpoint。Run 按清單順序逐點執行，不排序或去重，允許反向掃描與重複點。
+GUI 在 Fluxes 下拉選 list，再以 JSON 編輯 Values。切換輸入分支只保留共有欄位，不將任意清單重新取樣成線性 sweep。
 `measure_t1`、`measure_t2ramsey`、`measure_t2echo` 預設 true，至少開啟一項。全關在 acquisition 前拒絕。
 每點先設 flux，再依 frequency、Rabi、readout、可選 singleshot GE、T1、Ramsey、Echo 順序執行。
 關閉的 lifetime 不量、不保存，對應的 point 欄位保留 None。
@@ -69,9 +72,11 @@ Rabi 與下游仍複製 `qub_pulse`，不受 probe 長度或 gain 影響。Frequ
 Helper 收 Scope 與 `StageEnv`；frequency 與 Rabi 另明收各自的回饋控制器（tracker、rabi_drive），不收整個 `CalCarry`。
 三個 stage 各回 frozen 具名結果，保留 status、reason、accepted scalar 與自己的 immutable native 檔名。
 Frequency 接受後，calibrate_point 立即更新 frequency history；Rabi 只在本點 frequency 接受後執行，接受時同樣由 calibrate_point 更新 pi/pi2。
-Readout 用本點 accepted π 與其配對頻率，不要求 π/2。兩個 caller 共用 `readout_due(point_index, tun)`，依零基 flux index % ro_every == 0 掃描。
-Index 0 自然先掃。到期但本點 Rabi 未接受就 skipped，不順延到下一點。失敗／拒絕不增加掃描，也不改下一個 due index。
-Readout 非接受時保留合法 seed／prior accepted readout，仍可量 lifetime 或 MIST。
+Readout 用本點 accepted π 與其配對頻率，不要求 π/2。共用 `cal.optimize_readout` 預設 true，兩個 caller 共用 `readout_due(point_index, tun)`，依零基 flux index % ro_every == 0 掃描。
+啟用時 index 0 自然先掃。到期但本點 Rabi 未接受就 skipped，不順延到下一點。失敗／拒絕不增加掃描，也不改下一個 due index。
+`cal.optimize_readout=false` 完全略過 readout 優化，包含 index 0。每點的校準、lifetime 與 MIST 都使用原 seed readout，readout_source 指向 host seed。
+執行中關閉時，從下一個校準 stage 邊界恢復 seed readout 的 frequency/gain，保留 frequency 與 Rabi 歷史。重新啟用後仍按原 flux index cadence 決定是否掃描。`ro_every` 無論開關都須至少 1。
+啟用 readout 優化但未接受時保留合法 seed／prior accepted readout，仍可量 lifetime 或 MIST。
 Rabi 的頻率與所有下游 π pulse 都要求 NOW，只接受本點產出，不借前點 pulse。
 T1、GE、readout 與 excited MIST 要求本點 accepted π；Ramsey／Echo 另要求本點可信 π/π2 pair。Ground MIST 不加 π，無須本點 Rabi accepted。
 缺少本點 pulse 時，該 consumer 記 skipped 並寫明依賴。本點 π/2 不可信時，不阻擋只需 π 的 consumer。

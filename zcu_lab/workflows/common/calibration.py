@@ -441,14 +441,15 @@ async def calibrate_len_rabi(
 def readout_due(point_index: int, tun: CalibrationTunables) -> bool:
     """Return whether this zero-based flux point scans readout.
 
-    The rule is point_index % tun.ro_every == 0; index zero naturally scans.
+    Disabled optimize_readout always returns False, including at index zero.
+    Otherwise the rule is point_index % tun.ro_every == 0; index zero scans.
     Failed/rejected prior scans do not change the cadence or cause extra scans.
     The caller retains legal seed/prior readout on cadence skips and checks this
     point's current-pi dependency separately. Negative indexes raise ValueError.
     """
     if point_index < 0:
         raise ValueError("Readout point index must be nonnegative")
-    return point_index % tun.ro_every == 0
+    return tun.optimize_readout and point_index % tun.ro_every == 0
 
 
 async def calibrate_readout(

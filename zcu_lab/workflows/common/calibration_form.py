@@ -97,9 +97,17 @@ class CalibrationTunablesForm(FrequencyTunablesForm):
     min_readout_snr: Annotated[float, Display(label="Min readout SNR")] = Field(
         default=5.0, gt=0, description="Inclusive minimum readout SNR"
     )
+    optimize_readout: Annotated[bool, Display(label="Optimize readout")] = Field(
+        default=True,
+        description="Scan readout on cadence; False skips all readout optimization and uses the seed readout unchanged at every point",
+    )
     ro_every: Annotated[
         int, Display(label="Readout scan interval", unit="flux points")
-    ] = Field(default=5, ge=1, description="Flux-point readout scan cadence")
+    ] = Field(
+        default=5,
+        ge=1,
+        description="Readout scan cadence in flux points when optimization is enabled; index zero is due",
+    )
     rabi_start_factor: Annotated[float, Display(label="Rabi start factor")] = Field(
         default=0.1, gt=0, description="Sweep start divided by prior pi duration"
     )
@@ -241,6 +249,7 @@ class CalibrationTunablesForm(FrequencyTunablesForm):
             max_rabi_rel_err=self.max_rabi_rel_err,
             max_fit_residual=self.max_fit_residual,
             min_readout_snr=self.min_readout_snr,
+            optimize_readout=self.optimize_readout,
             ro_every=self.ro_every,
             rabi_start_factor=self.rabi_start_factor,
             rabi_stop_factor=self.rabi_stop_factor,
