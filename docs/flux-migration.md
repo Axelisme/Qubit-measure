@@ -6,7 +6,7 @@
 
 長期入口是 `scripts/upgrade_parameters.py`。它處理 native `setup.yaml`、`points/<label>/point.yaml` 與 entry template，預設 dry-run。它不操作儀器。
 
-目前離線升級目標為 `schema_version: 2`，runtime 仍為 1。**這個過渡階段只在副本操作。** Runtime 1 不能讀升級後的 v2 文件。Runtime 移除舊欄位並升為 2 後，才安排正式資料升級。不要手改版本標頭避開檢查。
+目前 runtime 與離線升級目標都是 `schema_version: 2`。Runtime 不再讀舊 component flux 欄位。先在副本核對轉換，再安排正式資料升級。不要手改版本標頭避開檢查。
 
 不同資料使用不同入口，先看 [資料狀態對照表](../migrations/README.md)。舊 result／Database 先走 [storage migration](storage-migration.md)。舊 record 的 `dev_value/dev_unit` 走同一 CLI 的 [record 範圍](record-device-upgrades.md)，由 operator 明示 device 名稱。Component 升級不補寫舊 record 的 `flux_frame` 或 `component`。
 
@@ -118,7 +118,7 @@ flux:
 
 ## Dry-run、備份與 apply
 
-先複製整個 entry 到明確的離線工作目錄。停止會寫入這些文件的工作階段。在 runtime 仍為 1 時，下列路徑只能指向副本：
+先複製整個 entry 到明確的離線工作目錄。停止會寫入這些文件的工作階段。下列範例路徑指向副本，確認結果後才對正式文件執行：
 
 ```bash
 uv run --directory /absolute/checkout --no-sync -- python scripts/upgrade_parameters.py \

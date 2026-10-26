@@ -27,7 +27,7 @@ from zcu_tools.gui.app.measure.interactive_flux_pick import (
     FluxPickResult,
 )
 
-from zcu_lab.v2.support.measure.ctx_helpers import optional_parameter_float
+from zcu_lab.v2.support.measure.ctx_helpers import flux_pick_initial_points
 from zcu_lab.v2.support.measure.writeback_helpers import fluxdep_writeback_items
 from zcu_lab.v2.twotone.fluxdep.core import FreqFluxCfg, FreqFluxExp, FreqFluxResult
 
@@ -50,28 +50,27 @@ def _FluxDep_make_interactive_plugin(
 ) -> FluxPickPlugin[FluxPickResult]:
     """Build a phase-aware picker from the fixed Run/Load result source.
 
-    req.parameters=None or absent/null $qubit.flux_half/flux_int uses the
-    line owner's defaults. A supplied capture resolves those paths using
-    its fixed aliases; scalar, alias and source failures propagate. No live
-    context or legacy md/ml is read. plots receives the pick figure on Done.
+    Initial lines use the scanned device's new flux entry and other
+    contributors' Run snapshot values. Missing capture/cfg or calibration
+    leaves the line owner's defaults. Invalid capture or contributors fail.
+    No live context is read. plots receives the pick figure on Done.
     """
     result = req.run_result.result
     inputs = FluxPickInputs(result.signals, result.values, result.freqs * 1e-3)
-    parameters = req.parameters
-    flux_half = (
+    cfg, metadata = req.run_result.cfg, req.run_result.metadata
+    points = (
         None
-        if parameters is None
-        else optional_parameter_float(parameters, "$qubit.flux_half")
-    )
-    flux_int = (
-        None
-        if parameters is None
-        else optional_parameter_float(parameters, "$qubit.flux_int")
+        if cfg is None
+        else flux_pick_initial_points(
+            req.parameters,
+            cfg.flux_dev,
+            None if metadata is None else metadata.device_snapshot,
+        )
     )
     return make_flux_pick_plugin(
         inputs,
-        flux_half=flux_half,
-        flux_int=flux_int,
+        flux_half=None if points is None else points.half,
+        flux_int=None if points is None else points.integer,
         force_magnitude=False,
         plots=plots,
         result_builder=render_flux_pick,

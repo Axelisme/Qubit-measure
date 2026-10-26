@@ -52,7 +52,7 @@ Attach 不重跑腳本；在 attach 傳 script 會報錯。自訂 script 取代�
 再指定該處的 startup。範本與設定按 startup 檔案位置定位，不跟隨 shell cwd。
 要改 entry、point 或 tab 名稱，編輯自己的 startup 副本。
 
-模擬用 `entry-template.yaml` 省略 qubit energies，但預填 `ftf.yaml` 的 resonator 頻率 7190／7080 MHz、總 linewidth 1.1 MHz 與 DC 線校準。這些值標為 simulated-truth，不是量測結果。DC 校準使用各迴路的 offset 與主線係數，其他 sources 固定為零；不使用 `design` 猜值。Qubit 頻率隨 bias 改變，範本保留 null，不推算頻譜。量測前仍須填入有效的 qubit 頻率與其他輸入，範本不提供 module library。[Kickstart 範本](../../kickstart/FTF/entry-template.yaml) 用於從接線開始的走查。若修改工作副本的物理值或接線，也要調整 entry 範本或已建立的 entry。
+模擬用 `entry-template.yaml` 省略 qubit energies，但預填 `ftf.yaml` 的 resonator 頻率 7190／7080 MHz、總 linewidth 1.1 MHz 與 DC 線校準。這些值標為 simulated-truth，不是量測結果。DC 校準以 `schema_version: 2` 的 qubit `flux.<device>.{half, integer, period}` 保存，使用各迴路的 offset 與主線係數，其他 sources 固定為零；不使用 `design` 猜值。既有 v1 entry 須先用[長期升級入口](../../../docs/parameter-upgrades.md)轉換，startup 不自動升級。獨立 `design`／predictor 的 `flux_half` 等欄位不變。Qubit 頻率隨 bias 改變，範本保留 null，不推算頻譜。量測前仍須填入有效的 qubit 頻率與其他輸入，範本不提供 module library。[Kickstart 範本](../../kickstart/FTF/entry-template.yaml) 用於從接線開始的走查。若修改工作副本的物理值或接線，也要調整 entry 範本或已建立的 entry。
 
 Startup 腳本建好初始 alias。`mux` 指向 MG12，mux 表單透過 `$mux` 讀取同序的 qubits 與 resonators。
 MG12 的 `mixer_freq: 7135` 是 mux LO 初值，缺值時 mixer 留空必填，不由 tone 頻率或 κ 推算。

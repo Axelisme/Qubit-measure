@@ -29,9 +29,9 @@ Local 的 key 來自 qubit 的 `flux_source`。Global 的 key 來自 mux group �
 
 長期入口是 `scripts/upgrade_parameters.py`，由 resources runner 執行 lab 的純 v1→v2 步驟。未標版文件只有通過完整舊格式分類後才視為 v1。Partial／corrupt 不寫入，其餘文件繼續。預設 dry-run，apply 前保存原 bytes 備份，合法 v2 重跑跳過。
 
-本次先交付離線 target 2，runtime 仍為 1。過渡期間只在副本驗收，runtime 1 不能讀 v2 產物。Runtime 升 2 必須與移除舊欄位一起交付。讀取端不自動升級，也不增加 v1 相容讀取。
+Runtime 與升級目標都是 2。Runtime 升 2 與移除舊欄位、更新模擬範本在同一個 commit 交付，避免形狀與版本錯配。讀取端不自動升級，也不增加 v1 相容讀取。
 
-舊 repo 的 `storage_mapping` 共用相同純轉換，完整 seed／value batch 先轉成 v2，才交目前 schema 驗證與 publication，不先發布 v1 再升級。真正的 v2 匯入在 runtime 升 2 後驗收。長期升級鏈不 import `migrations/`，刪除一次性匯入工具不會刪掉歷史步驟。
+舊 repo 的 `storage_mapping` 共用相同純轉換，完整 seed／value batch 先轉成 v2，才交目前 schema 驗證與 publication，不先發布 v1 再升級。匯入使用實際的 v2 component schema 驗證。長期升級鏈不 import `migrations/`，刪除一次性匯入工具不會刪掉歷史步驟。
 
 離線文件沒有 device catalog。工具只驗名稱語法，不驗 device 存在性。未知 device 在 GUI 打開 point 等使用處檢查並報名。
 

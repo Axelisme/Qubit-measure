@@ -8,7 +8,7 @@
 
 GUI／MCP 只讀 lab 宣告的目前版本。缺版或不同版本會在讀取處報錯，列出來源路徑、文件版本、目前版本與 upgrade 命令。讀取不改檔。不要為了消除錯誤手改版本標頭。
 
-目前 lab runtime 宣告版本 1，離線升級鏈已提供 flux v1→v2，目標為 2。這個過渡階段只在副本驗收，runtime 1 不能讀 v2 產物。Runtime 移除舊欄位並升為 2 後，才對正式資料安排升級。已是 v2 的文件先完整驗證，再顯示 `skipped`。未標版文件只有通過完整舊格式分類後才視為 v1，不需要 operator 補標頭。四類範例、缺來源的手動處理與參考點假設見 [flux 升級指南](flux-migration.md)。
+目前 lab runtime 與升級鏈目標都是 `schema_version: 2`，提供 flux v1→v2 步驟。Runtime 已移除舊 component flux 欄位，只接受 v2。先在副本核對 dry-run 與備份，再安排正式資料升級。已是 v2 的文件先完整驗證，再顯示 `skipped`。未標版文件只有通過完整舊格式分類後才視為 v1，不需要 operator 補標頭。四類範例、缺來源的手動處理與參考點假設見 [flux 升級指南](flux-migration.md)。
 
 ## 預覽與套用
 

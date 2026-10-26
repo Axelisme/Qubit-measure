@@ -9,9 +9,8 @@ from zcu_tools.resources.parameter_upgrade import (
 
 from .flux_upgrade import classify_flux_document, convert_flux_v1_to_v2
 
-# Runtime promotion belongs with removal of the retired component fields.
 PARAMETER_SCHEMA_POLICY = ParameterSchemaPolicy(
-    current_version=1,
+    current_version=2,
     upgrade_command=(
         "uv",
         "run",
@@ -42,18 +41,16 @@ def parameter_upgrade_plan() -> UpgradePlan:
 
     Bootstrap component models with register_all before executing this plan.
     Unmarked documents are accepted only after complete legacy classification.
-    The offline target is 2 while runtime stays at 1 until its retired fields are
-    removed. During that transition, operate on copies only: output v2 cannot be
-    loaded by runtime v1. Building the plan does not perform I/O or registration.
+    The target matches the runtime policy. Building the plan does not perform
+    I/O or registration. Runtime loading never executes this plan.
     """
     return UpgradePlan(
-        policy=ParameterSchemaPolicy(2, PARAMETER_SCHEMA_POLICY.upgrade_command),
+        policy=PARAMETER_SCHEMA_POLICY,
         steps=(UpgradeStep(1, convert_flux_v1_to_v2),),
         validate=_validate,
         classify_legacy=_classify_legacy,
         notes=(
             "Reference points are assumed; recalibrate with all other contributing devices at their integer references.",
-            f"Offline target is 2; runtime is {PARAMETER_SCHEMA_POLICY.current_version}. If runtime is 1, use copies only; it cannot load v2 output.",
             "Device name syntax is checked, not device existence. Check names when opening the point in the GUI.",
         ),
     )

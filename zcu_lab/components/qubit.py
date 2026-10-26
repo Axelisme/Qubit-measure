@@ -1,12 +1,11 @@
 """Shared qubit fields and channel wiring."""
 
 from math import isclose
-from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from zcu_tools.cfg_model import DeviceName
 
-from .base import BuiltinComponent, Duration, Flux, Frequency, reject_null_channel
+from .base import BuiltinComponent, Duration, Frequency, reject_null_channel
 
 
 class QubitWiringSchema(BaseModel):
@@ -97,22 +96,6 @@ class QubitBaseSchema(BuiltinComponent):
     flux: dict[str, QubitFluxCalibration] = Field(
         default_factory=dict,
         description="Per-device reference half/integer biases and signed periods.",
-    )
-    # These calibrations belong to this qubit's own DC line, in flux_unit.
-    flux_half: Flux = Field(
-        default=None,
-        description="Own DC line bias at half a flux quantum, in flux_unit.",
-    )
-    flux_period: Flux = Field(
-        default=None,
-        description="Own DC line bias span of one flux quantum, in flux_unit.",
-    )
-    flux_int: Flux = Field(
-        default=None,
-        description="Own DC line bias at an integer flux quantum, in flux_unit.",
-    )
-    flux_unit: Literal["A", "V"] | None = Field(
-        default=None, description="Unit of this qubit's own DC line bias: A or V."
     )
     resonator: str | None = Field(
         default=None, description="Name of the readout resonator component."

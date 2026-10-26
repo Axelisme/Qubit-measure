@@ -369,7 +369,7 @@ T1、T2Echo、T2Ramsey、TwoTone frequency 與對應的四個 mux adapter 共用
   空區塊表示該次來源沒有校準，不代表缺少 parameter capture。
 - 分析純量沿原有名稱與單位，例如 `freq_mhz`、`t1_us`、`t2e_us`、`t2r_us` 與對應誤差。
 - `run` 包含來源 `run_id` 與 `experiment`，兩者都取自同一次 RunMetadata。
-  Append owner 另補 `run_id`、`point`、`at` 與 accepted event 的 `source` 信封。
+  Append owner 另補 `component`、`run_id`、`point`、`at` 與 accepted event 的 `source` 信封。
 
 Adapter 的儀器值只讀 `req.run_result.metadata`，frame 只讀同次 Run 的固定 parameter capture。
 不查目前 alias、目前 point 或 live 裝置。接受 proposal 時不重讀 frame，量測後改校準不改舊 Run 的 record。
@@ -385,10 +385,18 @@ Notebook 作者在量測前捕捉 frame，接受時經既有 `SavedRun.accept(re
 框架不認得 lab 的 qubit／flux 格式，也不自動從 point 補 frame。
 作者若有自己的 flux 定義，可以自行組裝 `flux_frame`，不必使用 lab helper；仍須保存量測時的定義與值。
 
-讀取端明示 `device_name`，由 `resources.record_table.project_device_coordinates` 將
-`devices[device_name].value/value_unit` 投影成分析用的 `dev_value/dev_unit`。
-缺所選裝置、值或單位時 fail-fast，不猜第一台裝置，也不讀舊 flat 欄位當作 fallback。
-投影不改 JSONL。選一台裝置不代表合成了多條線的物理 flux；多裝置換算仍由分析 caller 決定。
+Fluxdep 接受時透過一般 record writeback 保存原始擬合 half、integer、正的 period 與被掃 device。
+Point proposal 才保存換回參考點的校準，其他 contributors 不變。
+參考點與版本邊界見 [ADR-0082](../../docs/adr/0082-component-flux-frame.md)。
+
+分析 caller 可用 `resources.record_table.flux_from_frame`，逐列依 explicit flux、新 row-frame、caller fallback 換算。
+Row-frame 使用該列全部 contributing devices 與 signed periods。
+Nested frame 依 keys 判斷 membership，dotted CSV 依該列每個 device 任一非 null frame 欄位判斷。
+全 null 視為不存在；攤平無法區分不存在與原本有 key 但欄位全 null。
+缺用到的值或校準時報錯，不猜第一台 device，也不退回 fallback。
+只帶舊 flat frame 且沒有 explicit flux 的列，作者須確認單位後明傳 fallback。
+需要單線座標時，`project_device_coordinates` 投影成 `dev_value/dev_unit`，不代表合成了多線 flux。
+兩個工具都不改 JSONL。
 
 使用者 2026-10-25：「2mux版的比較複雜，有兩個flux儀器都可能貢獻，我的想法是，兩個儀器都紀錄，其餘都同意」。
 其後裁定：「我認為框架應該對SampleWriteback保持中立無知，可能可以叫RecordWriteback也說不定，行為就是append一個格式不拘的json到紀錄的jsonl中，格式由adapter間的隱式policy決定，資訊也尤其組裝，當然文檔與註解要寫這個policy好讓人維護」。

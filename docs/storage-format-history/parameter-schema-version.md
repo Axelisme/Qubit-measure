@@ -33,6 +33,6 @@ Runtime 只接受目前版本，缺版或不同版本時列出來源、文件版
 
 長期入口是 `scripts/upgrade_parameters.py`，預設逐文件、逐欄位 dry-run。`--apply` 先完整備份再原子替換，失敗隔離到單一文件。Current 文件先驗證再跳過，重跑不重寫。
 
-未標版文件不能在 runtime 猜成 v1。只有明確 upgrade，且 lab 的完整舊格式分類確認後，runner 才視為 v1。目前 lab 版本為 1、零個結構步驟，完整 lab 分類尚未接上。現階段命令明確拒絕未標版文件，不改標頭、不把無法分類冒充已證實腐敗。第一個結構步驟交付時需補齊分類，並在結構切換同 commit 宣告對應版本。
+未標版文件不能在 runtime 猜成 v1。只有明確 upgrade，且 lab 的完整舊格式分類確認後，runner 才視為 v1。Lab 目前為版本 2，保留完整分類與第一個結構步驟 v1→v2，見 [component flux 歷程](component-flux.md)。上面的 `schema_version: 1` 是引入版本欄位時的形狀，不是目前 runtime 版本。
 
 操作、輸出、備份還原與 callback 契約見 [參數文件升級](../parameter-upgrades.md)。跨模組邊界見 [ADR-0063](../adr/0063-persistence-ownership.md#component-文件版本與明確升級)。長期鏈不依賴可刪除的 migrations，舊 repo 匯入仍由 caller 直接產生目前版本。

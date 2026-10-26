@@ -152,6 +152,8 @@ Point proposal 才保存換算後參考點，record 不重複保存它。接受�
 `singleshot_shared.py` 從 AnalyzeRequest 的固定 Run ParameterContext 讀取分類、chi/kappa
 與可選分析校準。缺 capture 明示失敗；可選 leaf 缺少或 null 時交給 core 的既有預設。
 
+`ctx_helpers.flux_pick_initial_points` 供 scalar onetone／twotone picker 使用。它以實際 cfg.flux_dev、Run capture 的新 flux 區塊與 Run snapshot 算初線，不讀舊 component scalar，也不取目前 live 值。缺 selected 校準才留 picker 預設，無效 contributor 直接報名失敗。
+
 Measure flux picker 的 plugin、frontend 與結果 carrier 位於 `zcu_tools.gui.app.measure`。Adapter 從固定 Run capture 讀初始參數，交 FluxPickInputs 與普通數值。Lib 不讀具體 Result 或 ctx_helpers。兩個 adapter 保留各自的 magnitude-only 政策，共用原有 kernel／plugin。
 
 `mux_flux_adapter.MuxFluxPickParams` 以原始 `tone` index 選 participant，不把 acquisition row 重編號。

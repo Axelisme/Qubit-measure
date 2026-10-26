@@ -13,7 +13,7 @@
 新 row-frame 以 device 名稱為鍵。儀器值與校準使用各 device 的原生單位：
 
 ```json
-{"run_id":"run-b","devices":{"bias":{"value":0.5,"value_unit":"V"},"coil":{"value":0.1,"value_unit":"A"}},"flux_frame":{"bias":{"integer":0.1,"half":0.5,"period":0.8},"coil":{"integer":0.0,"half":-0.2,"period":-0.4}}}
+{"run_id":"run-b","component":"Q1","devices":{"bias":{"value":0.5,"value_unit":"V"},"coil":{"value":0.1,"value_unit":"A"}},"flux_frame":{"bias":{"integer":0.1,"half":0.5,"period":0.8},"coil":{"integer":0.0,"half":-0.2,"period":-0.4}}}
 ```
 
 CSV 攤平後的校準欄位是 `flux_frame.bias.integer`、`flux_frame.bias.period` 與其他 device 的對應欄位。
@@ -28,6 +28,14 @@ Frame 記錄每台儀器自己的 integer 參考點與 signed period。
 分析以 `Σ(value - integer) / period` 計算總 flux，負 period 表示反向貢獻。
 
 Record 沒有獨立的版本標頭。
+Lab adapters 在 Analyze 從同次 Run 的 parameter capture 複製 flux 區塊，devices 來自 Run 開始時的 snapshot。
+Workflow 使用該次 Plan 捕捉的 frame，Notebook 作者在量測前捕捉後經 accept 明傳。
+Append owner 另加 component 信封，見 [component 歷程](record-component.md)。
+接受時不重讀目前 point，也不以新校準覆蓋這列 frame。
+
+Fluxdep 接受時同樣 append 一列 ordinary record，額外保存被掃 device 與原始擬合 half、integer、正的 period。
+Point proposal 才保存換回參考點的校準，record 不另存換算後的值。
+範例原始擬合欄位為 `"device":"bias","half":0.5,"integer":0.1,"period":0.8`，devices 與 flux_frame 仍保存該 Run 的原快照。
 每列是否有新 row-frame，以 `flux_frame` 判斷。
 Nested 輸入以 frame keys 判斷 device membership。
 Dotted 輸入以該列該 device 任一 frame 欄位非 null 判斷。
@@ -65,4 +73,5 @@ flux = flux_from_frame(
 ## 相關契約
 
 - [Record table owner](../../lib/zcu_tools/resources/record_table/README.md#作者-flux-換算) 定義 nested、dotted 與 fallback 行為。
+- [ADR-0082](../adr/0082-component-flux-frame.md) 定義參考點、writeback 與版本邊界。
 - [Analysis owner](../../lib/zcu_tools/analysis/README.md#多-device-flux-座標) 定義純數學與具名型別。

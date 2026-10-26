@@ -370,9 +370,9 @@ readout_count = max(pulse ADC, all mux receivers if configured) + 1
 
 | 用途 | FTF YAML | Entry 欄位或引用 |
 | --- | --- | --- |
-| F1 live DC | `dc_bias.sources.f1_bias`，`unit: A` | `Q1.flux_source: f1_bias`，`Q1.flux_unit: A` |
-| Coupler live DC | `dc_bias.sources.coupler_bias`，`unit: A` | `coupler.flux_source: coupler_bias`，`coupler.flux_unit: A` |
-| F2 live DC | `dc_bias.sources.f2_bias`，`unit: A` | `Q2.flux_source: f2_bias`，`Q2.flux_unit: A` |
+| F1 live DC | `dc_bias.sources.f1_bias`，`unit: A` | `Q1.flux_source: f1_bias`，校準在 `Q1.flux.f1_bias`，原生單位 A |
+| Coupler live DC | `dc_bias.sources.coupler_bias`，`unit: A` | `coupler.flux_source: coupler_bias`，校準在 `coupler.flux.coupler_bias`，原生單位 A |
+| F2 live DC | `dc_bias.sources.f2_bias`，`unit: A` | `Q2.flux_source: f2_bias`，校準在 `Q2.flux.f2_bias`，原生單位 A |
 | F1 charge line | `drive_lines.f1_charge.gen_ch: 2` | `Q1.wiring.ch: 2` |
 | F2 charge line | `drive_lines.f2_charge.gen_ch: 3` | `Q2.wiring.ch: 3` |
 | Pulse readout drive | `readout.drive.gen_ch: 0` | `R1.wiring.ch: 0`、`R2.wiring.ch: 0` |

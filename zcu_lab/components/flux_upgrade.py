@@ -284,18 +284,54 @@ def convert_flux_v1_to_v2(document: ParameterDocument) -> ParameterDocument:
     return result
 
 
+def _replace_storage_calibrations(components: dict[str, YamlMap]) -> None:
+    # Derive the whole incoming batch first: a local/mux collision must fail
+    # before removing any inherited entries, never become last-writer-wins.
+    incoming = deepcopy(components)
+    for fields in incoming.values():
+        if str(fields.get("kind", "")).startswith("qubit/"):
+            fields.pop("flux", None)
+    _convert_components(incoming)
+    for name, fields in incoming.items():
+        replacements = fields.get("flux")
+        if not isinstance(replacements, dict) or not replacements:
+            continue
+        inherited = components[name].get("flux", {})
+        if not isinstance(inherited, dict):
+            raise ValueError(f"components.{name}.flux: expected mapping")
+        for device in replacements:
+            if device in inherited:
+                raw = inherited[device]
+                if not isinstance(raw, dict):
+                    raise ValueError(
+                        f"components.{name}.flux.{device}: expected mapping"
+                    )
+                _calibration(
+                    raw,
+                    f"components.{name}.flux.{device}",
+                    device_name=device,
+                    legacy=False,
+                )
+                del inherited[device]
+
+
 def convert_storage_flux_batch(document: ParameterDocument) -> ParameterDocument:
     """Convert a complete legacy-import seed/value batch before current validation.
 
     The storage caller may overlay historical fields onto a current seed. This
     batch is not a user-authored half-migrated document. Validate/convert all
     supplied calibrations using the same pure conversion as the retained step.
-    Reject conflicts or missing explicit sources instead of overwriting them.
+    A complete valid historical calibration with an explicit source replaces
+    the same device's inherited seed calibration once, before conversion; other
+    device entries stay unchanged. Conflicts within the incoming local/mux batch,
+    partial calibrations, invalid names/spacing and missing sources still fail.
+    Native upgrade classification is unchanged and rejects mixed documents.
     The migration owner isolates failed groups as pending and preserves raw input.
-    Output is v2; runtime v1 cannot read it. No I/O or runtime policy change occurs.
+    Output is v2. No I/O or runtime policy change occurs.
     """
     result = deepcopy(document)
     components = _COMPONENTS.validate_python(result.data["components"], strict=True)
+    _replace_storage_calibrations(components)
     _convert_components(components)
     _validate_container(document, components)
     result.data["components"] = {name: fields for name, fields in components.items()}

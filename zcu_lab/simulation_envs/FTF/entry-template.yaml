@@ -1,21 +1,19 @@
 # Entry working values for the illustrative ftf.yaml model; no module library.
 # simulated-truth: DC calibrations use offset_phi0 and each loop's own source
-# coefficient, with all other sources at zero: int=-offset/coefficient,
+# coefficient, with all other sources at zero: integer=-offset/coefficient,
 # period=1/coefficient, half=(0.5-offset)/coefficient. Units: A.
 # Resonator freq/kappa and route TOF come from readout settings, not measurements.
 format: zcu.entry-template
 format_version: "1.0"
-schema_version: 1
+schema_version: 2
 components:
   Q1:
     kind: qubit/fluxonium
     freq: null # Bias-dependent; not given by the physical settings.
     resonator: R1
     flux_source: f1_bias
-    flux_unit: A
-    flux_half: 0.00015600624024961015
-    flux_period: 0.0078003120124804995
-    flux_int: -0.00374414976599064
+    flux:
+      f1_bias: {half: 0.00015600624024961015, integer: -0.00374414976599064, period: 0.0078003120124804995}
     wiring:
       ch: 2
   Q2:
@@ -23,20 +21,16 @@ components:
     freq: null
     resonator: R2
     flux_source: f2_bias
-    flux_unit: A
-    flux_half: 0.00008196721311475417
-    flux_period: 0.00819672131147541
-    flux_int: -0.0040163934426229505
+    flux:
+      f2_bias: {half: 0.00008196721311475417, integer: -0.0040163934426229505, period: 0.00819672131147541}
     wiring:
       ch: 3 # F2 charge line; coupler crosstalk is real 0.01 GHz/gain.
   coupler:
     kind: qubit/transmon
     freq: null
     flux_source: coupler_bias
-    flux_unit: A
-    flux_half: 0.0024
-    flux_period: 0.008
-    flux_int: -0.0016
+    flux:
+      coupler_bias: {half: 0.0024, integer: -0.0016, period: 0.008}
   R1:
     kind: resonator
     freq: 7190.0 # MHz; readout.resonators.r1.frequency_ghz * 1000.

@@ -30,7 +30,7 @@ from zcu_tools.plotting.plots import Plots
 
 from zcu_lab.v2.onetone.flux_dep.core import FluxDepCfg, FluxDepExp, FluxDepResult
 from zcu_lab.v2.onetone.flux_dep.form import make_form
-from zcu_lab.v2.support.measure.ctx_helpers import optional_parameter_float
+from zcu_lab.v2.support.measure.ctx_helpers import flux_pick_initial_points
 from zcu_lab.v2.support.measure.writeback_helpers import fluxdep_writeback_items
 
 OneToneFluxDepRunResult: TypeAlias = RunRecord[FluxDepCfg, FluxDepResult]
@@ -43,21 +43,20 @@ def _make_interactive_plugin(
 ) -> FluxPickPlugin[FluxPickResult]:
     result = req.run_result.result
     inputs = FluxPickInputs(result.signals, result.values, result.freqs * 1e-3)
-    parameters = req.parameters
-    flux_half = (
+    cfg, metadata = req.run_result.cfg, req.run_result.metadata
+    points = (
         None
-        if parameters is None
-        else optional_parameter_float(parameters, "$qubit.flux_half")
-    )
-    flux_int = (
-        None
-        if parameters is None
-        else optional_parameter_float(parameters, "$qubit.flux_int")
+        if cfg is None
+        else flux_pick_initial_points(
+            req.parameters,
+            cfg.flux_dev,
+            None if metadata is None else metadata.device_snapshot,
+        )
     )
     return make_flux_pick_plugin(
         inputs,
-        flux_half=flux_half,
-        flux_int=flux_int,
+        flux_half=None if points is None else points.half,
+        flux_int=None if points is None else points.integer,
         force_magnitude=True,
         plots=plots,
         result_builder=render_flux_pick,

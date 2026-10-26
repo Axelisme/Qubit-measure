@@ -16,6 +16,9 @@ Coherence 與 MIST 的工具提供 `--database` 就寫 Labber。Coherence 另可
 Overnight 與 overnight_mux 的工具只收 `--result`，用與自動寫入相同的組法重新匯出。
 未提供目的地時報錯，不另選格式旗標，也不寫 merged 檔案。
 `common/` 放多個 workflow 共用的實驗步驟、表單 helper 與 record append。
+`calibration_modules.calibration_defaults` 從 qubit.flux_source 選擇 detached DC device，原生單位與 seed_flux 都取該次 Form capture 的 device info。
+`FrequencyModelForm.defaults` 保留 EJ／EC／EL expressions。它從選定 source 的新 flux entry 與 detached 其他 device 值換算 actual half，保留 signed period。
+缺來源或選定校準時，half／period 保持必填空白。Frame 錯誤指出 device。這只改初值，FrequencyModel 的單 device affine 公式與欄位不變。
 `registry.py` 依上述順序配對 workflow 與表單，交給 scripts 注入 lib 宿主。
 
 科學流程與保存契約見 [definitions](definitions.md)，表單與宿主接線見 [forms](forms.md)。

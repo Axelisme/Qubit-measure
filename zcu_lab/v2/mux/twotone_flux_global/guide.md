@@ -23,9 +23,10 @@ edits and captures sources again.
   selects which full-list position to edit.
 - `flux_dev` starts from the captured group `flux_source`.
 - `flux` is one native-unit sweep shared by all participants, initially 101 points.
-  Open/Reset starts with all Qs selected. It reads each Q's `coil_flux` half/int
-  calibration from the captured group and takes the union of the expanded
-  half-to-integer intervals. Any missing half/int leaves both endpoints blank.
+  Open/Reset starts with all Qs selected. It reads each Q's `flux.<group.flux_source>`
+  calibration and shifts references for other contributors' detached device values.
+  It takes the union of expanded actual half-to-integer intervals.
+  Missing selected calibration leaves both endpoints blank; invalid contributors raise an error.
   Changing participants later does not recompute these starting values.
 - `settle` is the wait in seconds after all DC writes at each flux point.
 - `modules` contains the optional common reset and full mux readout.

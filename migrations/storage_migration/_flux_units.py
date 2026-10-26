@@ -155,10 +155,14 @@ def _converted_updates(
     is_point: bool,
 ) -> list[tuple[str, YamlValue]]:
     before = _MAP.validate_python(
-        snapshot(view).model_dump(mode="python", serialize_as_any=True)
+        snapshot(view).model_dump(
+            mode="python", serialize_as_any=True, exclude_unset=True
+        )
     )
     raw = _MAP.validate_python(
-        snapshot(candidate).model_dump(mode="python", serialize_as_any=True)
+        snapshot(candidate).model_dump(
+            mode="python", serialize_as_any=True, exclude_unset=True
+        )
     )
     converted = prepare_parameter_batch(
         ParameterDocument(raw, Path("point.yaml" if is_point else "setup.yaml")),
@@ -166,7 +170,7 @@ def _converted_updates(
         values=tuple(ParameterValue(path, value) for path, value in updates),
     )
     after = _MAP.validate_python(
-        converted.model_dump(mode="python", serialize_as_any=True)
+        converted.model_dump(mode="python", serialize_as_any=True, exclude_unset=True)
     )
     changes: list[tuple[str, YamlValue]] = []
     for section in ("general", "components"):
