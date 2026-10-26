@@ -6,12 +6,14 @@ driver gates without a real VISA session.
 
 from __future__ import annotations
 
+import re
 import threading
 from typing import Any, cast
 
 import pytest
 from zcu_tools.device import DeviceManager, FakeDevice, FakeDeviceInfo
 
+from ._snapshot_fakes import SnapshotDevice
 from ._threads import DeviceThreads
 
 # ---------------------------------------------------------------------------
@@ -125,12 +127,35 @@ def test_get_all_devices_is_an_independent_mapping(manager: DeviceManager) -> No
     assert manager.get_device("flux") is device
 
 
-def test_register_device_accepts_base_device(manager: DeviceManager) -> None:
+@pytest.mark.parametrize("name", ["ok", " Coil/A-1 ", "線圈", "coil．left"])
+def test_register_device_preserves_other_names(
+    manager: DeviceManager, name: str
+) -> None:
     dev = FakeDevice(fast_mode=True)
 
-    manager.register_device("ok", dev)
+    manager.register_device(name, dev)
 
-    assert manager.get_device("ok") is dev
+    assert manager.get_all_devices() == {name: dev}
+    assert manager.get_device(name) is dev
+
+
+@pytest.mark.parametrize(
+    "name", ["coil.left", ".coil", "coil.", ".", "", " ", "\t\n", "\u00a0\u3000"]
+)
+def test_register_device_rejects_invalid_names_without_registry_change_or_io(
+    manager: DeviceManager, name: str
+) -> None:
+    original = SnapshotDevice()
+    manager.register_device("coil", original)
+    candidate = SnapshotDevice()
+    before = manager.get_all_devices()
+
+    with pytest.raises(ValueError, match=re.escape(repr(name))):
+        manager.register_device(name, candidate)
+
+    assert manager.get_all_devices() == before
+    assert original.events == []
+    assert candidate.events == []
 
 
 def test_get_all_info_returns_correct_snapshot(manager: DeviceManager) -> None:

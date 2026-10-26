@@ -6,7 +6,12 @@ from .dependencies import (
     ModuleResolver,
     WaveformAssetInfo,
 )
-from .device_name import DeviceName, DeviceNameHint, is_device_name
+from .device_name import (
+    DeviceName,
+    DeviceNameHint,
+    is_device_name,
+    validate_device_name,
+)
 from .field_meta import FieldMeta, get_field_meta
 from .form_nodes import FormNode, Hidden, LogPoints, Range
 from .gain import Gain, GainParam, validate_gain
@@ -87,6 +92,7 @@ __all__ = [
     "DeviceName",
     "DeviceNameHint",
     "is_device_name",
+    "validate_device_name",
     "FieldMeta",
     "get_field_meta",
     "CfgValidationContext",
