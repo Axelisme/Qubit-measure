@@ -6,11 +6,9 @@ import pytest
 import zcu_tools.notebook.analysis.t2_curve.workflow as workflow
 from matplotlib import pyplot as plt
 from numpy.typing import NDArray
-from zcu_tools.notebook.analysis.fit_tools import predict_f01_mhz
 from zcu_tools.notebook.analysis.t2_curve import (
     FluxResidualWeighting,
     MeasurementErrorPolicy,
-    T2CurveAnalysisConfig,
     T2CurveContext,
     T2CurveData,
     T2DephasingAnalysis,
@@ -64,8 +62,6 @@ def test_make_t2_fit_init_can_select_partial_mechanisms() -> None:
     assert init == T2FitParams(A_phi=2.0e-6, n_th=None)
     assert mechanisms_to_fixed_params(("flux_noise",)) == ("A_phi",)
     assert mechanisms_to_fixed_params(("photon_shot_noise",)) == ("n_th",)
-
-
 
 
 def test_prepare_t2_dephasing_data_default_keeps_nan_error_points() -> None:
@@ -370,10 +366,6 @@ def test_duplicate_index_labels_keep_positional_row_identity() -> None:
     assert len(data.half_preview) == 1
 
 
-
-
-
-
 def test_t2_integer_equivalent_branches_align_to_same_flux() -> None:
     samples = pd.DataFrame(
         {
@@ -437,8 +429,6 @@ def test_t2_integer_equivalent_branches_align_to_same_flux() -> None:
         data.summary_table["metric"] == "integer shifts"
     ]
     assert shifts_row["value"].iloc[0] == "k=0:1 k=1:1"
-
-
 
 
 def test_t2_correction_disabled_preserves_raw_flux_and_reports_disabled() -> None:

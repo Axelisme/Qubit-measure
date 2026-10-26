@@ -43,9 +43,9 @@ def test_csv_flux_is_the_initial_coordinate_for_f01_correction(
     sample_dir: Path, enabled: bool
 ) -> None:
     observed = predict_f01_mhz((3.4, 0.9, 0.6), np.array([0.53]))
-    pd.DataFrame(
-        {"flux": [0.52], "freq_mhz": observed, "t1_us": [40]}
-    ).to_csv(sample_dir / "samples.csv", index=False)
+    pd.DataFrame({"flux": [0.52], "freq_mhz": observed, "t1_us": [40]}).to_csv(
+        sample_dir / "samples.csv", index=False
+    )
     context = load_t1_curve_context(result_dir=str(sample_dir))
     data = prepare_t1_curve_data(
         calibrate_t1_flux(context),
@@ -54,5 +54,7 @@ def test_csv_flux_is_the_initial_coordinate_for_f01_correction(
     )
     coordinates = data.sample
     np.testing.assert_allclose(coordinates.raw_fluxs, [0.52])
-    np.testing.assert_allclose(coordinates.fluxs, [0.53 if enabled else 0.52], atol=1e-5)
+    np.testing.assert_allclose(
+        coordinates.fluxs, [0.53 if enabled else 0.52], atol=1e-5
+    )
     assert coordinates.f01_correction_applied.tolist() == [enabled]

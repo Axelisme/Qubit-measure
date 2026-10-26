@@ -451,7 +451,11 @@ def fit_t2_curve(  # noqa: PLR0913
     if not data.calibration.context.photon_shot_noise_enabled:
         init = replace(init, n_th=None)
         fixed = tuple(name for name in fixed if name != "n_th")
-        bounds = None if bounds is None else {name: value for name, value in bounds.items() if name != "n_th"}
+        bounds = (
+            None
+            if bounds is None
+            else {name: value for name, value in bounds.items() if name != "n_th"}
+        )
     fit_arrays = _combined_fit_arrays(data)
     domega_dflux, chi_over_2pi_mhz = _fit_model_axes(data, fit_arrays.fluxs)
     fit_result = fit_t2_noise_params(
@@ -580,10 +584,13 @@ def collect_t2_curve_result(  # noqa: PLR0913
             _stage_table("flux_probe", flux_probe.summary_table),
             _stage_table("photon_probe", photon_probe.summary_table)
             if photon_probe is not None
-            else _stage_table("photon_probe", pd.DataFrame(
-                [("photon shot noise", "disabled: missing dispersive")],
-                columns=["metric", "value"],
-            )),
+            else _stage_table(
+                "photon_probe",
+                pd.DataFrame(
+                    [("photon shot noise", "disabled: missing dispersive")],
+                    columns=["metric", "value"],
+                ),
+            ),
             _stage_table("combined_fit", combined_fit.summary_table),
             _stage_table("channel_curves", channel_analysis.summary_table),
         ],
@@ -650,7 +657,8 @@ def run_t2_curve_analysis(
     )
     fit_init = make_t2_fit_init(
         active_mechanisms=tuple(
-            mechanism for mechanism in config.active_mechanisms
+            mechanism
+            for mechanism in config.active_mechanisms
             if mechanism != "photon_shot_noise" or context.photon_shot_noise_enabled
         ),
         flux_probe=flux_probe,
@@ -787,7 +795,8 @@ def _fit_model_axes(
         predict_domega_dflux(context.params, resolved_fluxs),
         dispersive_chi01_over_2pi_mhz(
             context.params, resolved_fluxs, context.bare_rf, context.g
-        ) if context.bare_rf is not None and context.g is not None
+        )
+        if context.bare_rf is not None and context.g is not None
         else np.zeros_like(resolved_fluxs),
     )
 

@@ -291,6 +291,15 @@ class T2ChannelAnalysis:
 
 @dataclass(frozen=True, slots=True)
 class T2CurveAnalysisResult:
+    """Staged echo-analysis results and figure paths.
+
+    context/calibration/data retain loaded inputs and selected samples.
+    flux_probe/combined_fit/channel_analysis contain fits and channel curves.
+    photon_probe is None when dispersive inputs are absent; summary_table
+    includes that disabled-channel reason. figure_paths maps saved plot names
+    to paths, and is empty when figures were not saved.
+    """
+
     context: T2CurveContext
     calibration: T2FluxCalibration
     data: T2DephasingAnalysis

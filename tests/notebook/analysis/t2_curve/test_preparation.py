@@ -57,7 +57,9 @@ def test_csv_flux_is_the_initial_coordinate_for_f01_correction(
     )
     coordinates = data.window
     np.testing.assert_allclose(coordinates.raw_fluxs, [0.52])
-    np.testing.assert_allclose(coordinates.fluxs, [0.53 if enabled else 0.52], atol=1e-5)
+    np.testing.assert_allclose(
+        coordinates.fluxs, [0.53 if enabled else 0.52], atol=1e-5
+    )
     assert coordinates.f01_correction_applied.tolist() == [enabled]
 
 

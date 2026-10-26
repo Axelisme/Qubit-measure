@@ -223,7 +223,14 @@ def _validate_required_columns(samples_df: pd.DataFrame) -> None:
     ]
     if missing_columns:
         raise ValueError(f"samples.csv missing required columns: {missing_columns}")
-    for column in (*_REQUIRED_COLUMNS, "freq_mhz", "t1_err_us", "t2e_err_us", "t2r_us", "t2r_err_us"):
+    for column in (
+        *_REQUIRED_COLUMNS,
+        "freq_mhz",
+        "t1_err_us",
+        "t2e_err_us",
+        "t2r_us",
+        "t2r_err_us",
+    ):
         if column not in samples_df.columns:
             samples_df[column] = np.nan
         try:

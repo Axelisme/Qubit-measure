@@ -274,10 +274,10 @@ def save_t2_standard_figures(
     *,
     config: T2CurveAnalysisConfig,
 ) -> dict[str, str]:
-    """Render the six standard figures from completed probe/channel records.
+    """Render standard figures, omitting photon figures when photon_probe is None.
 
     Config controls the thermal-photon axis and saving/showing. Create all
-    figures in the standard order, then save (160 dpi), show and close each
+    available figures, then save (160 dpi), show and close each
     figure in that order. Return paths only for figures actually saved under
     the records' context image_dir. Plot/save/display failures propagate.
     """
@@ -312,7 +312,9 @@ def save_t2_standard_figures(
             None,
         )
         figures["n_th_vs_flux"] = (
-            plot_nth_limit_vs_flux(photon_probe)[0], "n_th_vs_flux.png", None
+            plot_nth_limit_vs_flux(photon_probe)[0],
+            "n_th_vs_flux.png",
+            None,
         )
     paths: dict[str, str] = {}
     for name, (fig, filename, bbox_inches) in figures.items():
@@ -337,7 +339,8 @@ def emit_t2_curve_outputs(
 
     Print only when verbose. Display tables only when tables is true and
     display_fn is provided; omit an empty half-flux preview. The callback
-    accepts each DataFrame as one object. Output/callback failures propagate.
+    accepts each DataFrame as one object. Omit unavailable photon probe tables
+    and print the disabled-channel reason. Output/callback failures propagate.
     """
     if verbose:
         print("params =", result.context.params, "GHz")

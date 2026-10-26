@@ -212,23 +212,29 @@ photon_probe = zt2.analyze_photon_shot_noise_limit(
 ```
 
 ```python
-print(f"n_th probe = {photon_probe.n_th_init:.3e}")
-print(f"n_th photon-only fit = {photon_probe.n_th_fit:.3e}")
-print(f"half-flux equivalent n_th = {photon_probe.thermal.half_equivalent_n_th:.3e}")
+if photon_probe is None:
+    print("photon shot noise disabled: missing dispersive inputs")
+else:
+    print(f"n_th probe = {photon_probe.n_th_init:.3e}")
+    print(f"n_th photon-only fit = {photon_probe.n_th_fit:.3e}")
+    print(f"half-flux equivalent n_th = {photon_probe.thermal.half_equivalent_n_th:.3e}")
 
-fig, _ = zt2.plot_photon_shot_noise_probe(photon_probe)
-figure_paths["photon_shot_noise_probe"] = zt2.save_t2_curve_figure(
-    fig, ctx, "T2e_thermal_photon_limit.png"
-)
+    fig, _ = zt2.plot_photon_shot_noise_probe(photon_probe)
+    figure_paths["photon_shot_noise_probe"] = zt2.save_t2_curve_figure(
+        fig, ctx, "T2e_thermal_photon_limit.png"
+    )
 
-fig, _ = zt2.plot_nth_limit_vs_flux(photon_probe)
-figure_paths["n_th_vs_flux"] = zt2.save_t2_curve_figure(fig, ctx, "n_th_vs_flux.png")
+    fig, _ = zt2.plot_nth_limit_vs_flux(photon_probe)
+    figure_paths["n_th_vs_flux"] = zt2.save_t2_curve_figure(fig, ctx, "n_th_vs_flux.png")
 ```
 
 # Combined Fit
 
 ```python
-active_mechanisms = ("flux_noise", "photon_shot_noise")
+active_mechanisms = (
+    ("flux_noise", "photon_shot_noise")
+    if ctx.photon_shot_noise_enabled else ("flux_noise",)
+)
 fixed_mechanisms = ()
 
 fit_A_phi_override = None

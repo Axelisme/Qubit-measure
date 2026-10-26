@@ -6,7 +6,7 @@
 
 Record loading 使用 `JsonlRecordTable.read()`，預設讀取 `records.jsonl`，每個 run_id 取最後一行。分析欄位使用 `freq_mhz`、`t1_us`、`t1_err_us`、`t2e_us`、`t2e_err_us` 與 `t2r_us`。資料缺 flux 或 row frame 時，由呼叫端提供同單位的 fallback frame。
 
-Fluxonium echo T2 vs. flux 的分析工具：把實測 `T2e` 先扣除 relaxation bound `1/(2*T1)` 後，以 rate model 同時擬合 first-order flux noise 與 readout thermal-photon shot noise。
+Fluxonium echo T2 vs. flux 的分析工具：把實測 `T2e` 先扣除 relaxation bound `1/(2*T1)` 後，以 rate model 擬合 first-order flux noise 與可選的 readout thermal-photon shot noise。`params.json` 缺 `dispersive` 時，`T2CurveContext.photon_shot_noise_enabled` 為 False，photon probe 回傳 None，combined fit 的 `n_th` 為 None。結果表與 notebook 輸出註明 photon 通道停用，不產生 photon probe 圖。
 
 ## 單位慣例
 

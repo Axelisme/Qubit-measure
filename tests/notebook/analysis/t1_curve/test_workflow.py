@@ -7,7 +7,6 @@ import numpy as np
 import pandas as pd
 import pytest
 import zcu_tools.notebook.analysis.t1_curve.workflow as workflow
-from zcu_tools.notebook.analysis.fit_tools import predict_f01_mhz
 from zcu_tools.notebook.analysis.t1_curve import (
     T1CurveContext,
     T1CurveData,
@@ -60,9 +59,7 @@ def test_load_t1_curve_context_reads_params_and_samples(tmp_path) -> None:
         }
     ).to_csv(tmp_path / "samples.csv", index=False)
 
-    ctx = load_t1_curve_context(
-        result_dir=str(tmp_path), preview_rows=1
-    )
+    ctx = load_t1_curve_context(result_dir=str(tmp_path), preview_rows=1)
 
     assert ctx.params == pytest.approx((3.4, 0.9, 0.6))
     assert ctx.flux_period == pytest.approx(1.0)
@@ -104,9 +101,7 @@ def test_load_t1_purcell_params_reads_dispersive_bare_rf_and_g(tmp_path) -> None
         }
     ).to_csv(tmp_path / "samples.csv", index=False)
 
-    ctx = load_t1_curve_context(
-        result_dir=str(tmp_path), preview_rows=1
-    )
+    ctx = load_t1_curve_context(result_dir=str(tmp_path), preview_rows=1)
     purcell = load_t1_purcell_params(ctx, kappa_ghz=14.8e-3)
 
     assert purcell.kappa_ghz == pytest.approx(14.8e-3)
@@ -424,10 +419,6 @@ def _synthetic_prepared_data() -> T1PreparedData:
     )
 
 
-
-
-
-
 def test_t1_rows_with_null_freq_reach_analysis_with_model_f01() -> None:
     samples = pd.DataFrame(
         {
@@ -450,8 +441,6 @@ def test_t1_rows_with_null_freq_reach_analysis_with_model_f01() -> None:
     np.testing.assert_allclose(
         np.asarray(data.sample.fluxs), [0.5, 0.5, 0.51], atol=1e-9
     )
-
-
 
 
 def test_t1_integer_equivalent_branches_align_to_same_flux() -> None:
