@@ -177,6 +177,36 @@ def test_constant_temperature_profile_matches_fixed_scalar_fit() -> None:
     )
 
 
+def test_fixed_temperature_profile_keeps_independent_callback_reference() -> None:
+    fluxs = np.array([0.15, 0.3, 0.4, 0.49])
+    init = T1FitParams(Q_cap=8e5, Temp=0.06)
+    # The intrinsic bath is isothermal, but differs from the extra-rate reference.
+    intrinsic_T1s = calculate_eff_t1_vs_flux_fast(
+        _PARAMS, fluxs, [("t1_capacitive", {"Q_cap": 8e5})], 0.08
+    )
+    observed = 1.0 / (1.0 / intrinsic_T1s + 6e-6)
+    callback_temperatures: list[float] = []
+
+    def extra_rate(current: T1FitParams) -> NDArray[np.float64]:
+        callback_temperatures.append(current.Temp)
+        return np.full_like(fluxs, current.Temp * 1e-4)
+
+    result = fit_t1_noise_params(
+        fluxs,
+        observed,
+        _PARAMS,
+        init=init,
+        fixed=("Q_cap",),
+        fixed_temperatures=np.full_like(fluxs, 0.08),
+        extra_relaxation_rate_fn=extra_rate,
+    )
+
+    assert result.success
+    assert result.params.Temp == 0.06
+    assert callback_temperatures and set(callback_temperatures) == {0.06}
+    np.testing.assert_allclose(result.model_T1s, observed, rtol=1e-10)
+
+
 @pytest.mark.parametrize(
     "temperatures",
     [

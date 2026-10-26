@@ -139,6 +139,26 @@ def test_set_fluxdep_fit_preserves_independent_dispersive_and_stamps_section(
     assert QubitParams(path).require_fluxdep_fit().timestamp == timestamp
 
 
+@pytest.mark.parametrize("timestamp", [{}, None, ""])
+def test_dispersive_fit_reads_values_before_validating_timestamp(
+    tmp_path, timestamp: object
+) -> None:
+    path = tmp_path / "params.json"
+    path.write_text(
+        json.dumps(
+            {"dispersive": {"g": 0.068, "bare_rf": 5.35, "timestamp": timestamp}}
+        ),
+        encoding="utf-8",
+    )
+
+    fit = QubitParams(path).get_dispersive_fit()
+
+    assert fit is not None
+    assert (fit.g, fit.bare_rf) == (0.068, 5.35)
+    with pytest.raises(QubitParamsError, match=r"dispersive\.timestamp"):
+        _ = fit.timestamp
+
+
 def test_set_dispersive_fit_preserves_fluxdep_fit(tmp_path) -> None:
     path = tmp_path / "params.json"
     params = QubitParams(path)
@@ -152,11 +172,9 @@ def test_set_dispersive_fit_preserves_fluxdep_fit(tmp_path) -> None:
     assert raw["dispersive"]["bare_rf"] == 5.35
     timestamp = _assert_timestamp(raw["dispersive"]["timestamp"])
     assert QubitParams(path).require_fluxdep_fit().timestamp is not None
-    assert QubitParams(path).get_dispersive_fit() == DispersiveFit(
-        g=0.068,
-        bare_rf=5.35,
-        timestamp=timestamp,
-    )
+    fit = QubitParams(path).get_dispersive_fit()
+    assert fit is not None
+    assert (fit.g, fit.bare_rf, fit.timestamp) == (0.068, 5.35, timestamp)
     assert raw["fluxdep_fit"]["flux_period"] == 2.0
 
 
