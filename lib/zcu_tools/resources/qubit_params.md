@@ -28,6 +28,8 @@
 
 **讀取按欄位檢查**：`get_fluxdep_fit()` 與 `require_fluxdep_fit()` 只要求 `params.EJ`、`EC`、`EL`。`FluxDepFitView` 保留讀取當時的 section 副本。`flux_half`、`flux_int`、`flux_period`、`plot_transitions` 在 caller 存取時才檢查；缺少或格式錯誤時拋出 `QubitParamsError`，訊息指出欄名。未使用的欄位與未知欄位不影響模型參數讀取。`timestamp` 同樣在存取時檢查，缺少時回傳 `None`。
 
+`get_dispersive_fit()` 要求 finite 的 `g` 與 `bare_rf`（GHz），回傳 `DispersiveFitView`，缺 section 時回傳 `None`。View 保留讀取時的 section 副本，只在存取 `timestamp` 時驗證；缺 timestamp 時回傳 `None`，已提供但不是非空字串時拋出指出 `dispersive.timestamp` 的 `QubitParamsError`。未使用的 metadata 不影響 coupling 與 resonator frequency 讀取。`DispersiveFit` 仍是寫入 payload。
+
 `get_t1_curve_fit()` 與 `require_t1_curve_fit()` 只投影 `params`，不讀取或驗證 stderr、bounds、fixed／free、init 與其他 metadata。回傳的 `T1CurveFit` 只有參數值，metadata 欄位維持型別的預設值，不代表來源 metadata。`FluxDepFit` 與 `T1CurveFit` 的寫入 payload、metadata 驗證及 schema 版本寫出維持不變。`set_dispersive_fit()` 與 `set_t1_curve_fit()` 仍要求既有 fluxdep section 的完整校準欄位。
 
 **未知 section preservation**：typed 寫入只更新自己的 section，其它未知 section 會保留。`to_raw()` / `replace_raw()` / `update_raw()` 保留為低階原始資料操作；caller 應使用 typed 方法。

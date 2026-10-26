@@ -13,6 +13,7 @@ from zcu_tools.resources.entry import (
     AcquiredPayload,
     LedgerEvent,
     ResultEntry,
+    SavedPayload,
     validate_path_segment,
 )
 from zcu_tools.resources.entry.aliases import AliasValue
@@ -144,8 +145,8 @@ def scan_results(
     None selects all Database entries; entries limits to safe single-segment
     names (invalid names raise ValueError). Missing roots produce no runs.
     Inspect run directories even without native data; no ledger-only acquisitions
-    are listed. Without readable native metadata, match acquired events by the
-    complete _<run_id> directory suffix, regardless of the adapter name prefix.
+    are listed. Without readable native metadata, match acquired events through
+    successful saved events' exact member paths, never directory-name suffixes.
     Preserve unknown identities rather than guessing experiment or time from names.
     Isolate malformed native/doc files in ResultRun.issues. Ledger/schema errors
     propagate. Escaping symlinks raise ValueError. Never create files or locks.
@@ -168,11 +169,19 @@ def scan_results(
         run_root = _inside(entry_path / "runs", entry_path / "runs")
         if not run_root.exists():
             continue
-        acquisitions = _acquisitions(root, entry)
+        events = ResultEntry.read_events_snapshot(entry, result_root=root / "result")
+        acquisitions = _acquisitions(events)
+        saved_outputs = {
+            Path(output.path): event.payload.run_id
+            for event in events
+            if isinstance(event.payload, SavedPayload)
+            for output in event.payload.outputs
+            if output.status == "saved"
+        }
         for path in sorted(run_root.iterdir()):
             if path.is_dir():
                 _checked_run(root, entry, path)
-                runs.append(_scan_run(entry, path, acquisitions))
+                runs.append(_scan_run(entry, path, acquisitions, saved_outputs))
     return ResultsIndex(root, tuple(runs))
 
 
@@ -206,8 +215,7 @@ def _read_json(path: Path) -> JsonObject:
         raise ValueError(f"{path}: {error}") from error
 
 
-def _acquisitions(project: Path, entry: str) -> Mapping[str, LedgerEvent]:
-    events = ResultEntry.read_events_snapshot(entry, result_root=project / "result")
+def _acquisitions(events: tuple[LedgerEvent, ...]) -> Mapping[str, LedgerEvent]:
     by_id: dict[str, LedgerEvent] = {}
     for event in events:
         if isinstance(event.payload, AcquiredPayload):
@@ -252,7 +260,10 @@ def _search_documents(
 
 
 def _scan_run(
-    entry: str, path: Path, acquisitions: Mapping[str, LedgerEvent]
+    entry: str,
+    path: Path,
+    acquisitions: Mapping[str, LedgerEvent],
+    saved_outputs: Mapping[Path, str],
 ) -> ResultRun:
     data_path = _inside(path, path / "data.h5")
     data = data_path if data_path.is_file() else None
@@ -262,9 +273,9 @@ def _scan_run(
     metadata = _metadata(data, issues)
     event = next(
         (
-            event
-            for run_id, event in acquisitions.items()
-            if path.name.endswith(f"_{run_id}")
+            acquisitions[saved_outputs[member]]
+            for member in (data_path, *figures, *analysis)
+            if member in saved_outputs and saved_outputs[member] in acquisitions
         ),
         None,
     )

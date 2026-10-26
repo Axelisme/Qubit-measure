@@ -128,6 +128,7 @@ def test_record_append_preserves_adapter_json_without_coordinate_policy(session)
     rows = entry.records("Q1").read().to_dict(orient="records")
     assert len(rows) == 1
     assert rows[0] == record | {
+        "component": "Q1",
         "run_id": "record-run",
         "point": "a",
         "at": rows[0]["at"],

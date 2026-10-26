@@ -32,9 +32,14 @@ Caller 從實驗類別建立 options，例如 `T1Exp.Options(...)` 或 `GE_Exp.P
 
 `save_run(ctx, source=record, ...)` 是綁定 PointView 的 run 保存入口，與本機單檔 `save` 分開。Source 必須是此 adapter 最近成功 run 返回的同一 record。入口從 bound point 捕捉 cached context 與 storage capability，量測身分、時間與 provenance 沿 adapter 的 acquisition evidence。可選的 RoleView 必須來自同一 point，省略代表沒有角色對應。入口保存正規 `data.h5`、Labber 衍生輸出、具名 PNG／副本及窗格 JSON。`SavedRun.save()` 明確重存同一 run，固定輸出覆寫，Labber 每次取新檔；後續 adapter 操作不使此 handle 失效。
 
+Run 命名沿 core.AXES_SPEC 的 `save_stem(SaveContext) -> str`。Caller 可在自己的 spec 指定 callback，框架不補任何名稱。
+Context 包含 tag、run_id、point、roles、cfg values 與帶 timezone 的 saved_at。預設 stem 為 dotted tag、hyphen-joined roles 與完整 run_id，例如 `twotone.time_domain.t1_Q1-R1_20261027T120000Z-a1b2c3`。
+Native 寫 `runs/<stem>/data.h5`，Labber 寫日期樹內的 `<stem>.hdf5`。只有 Labber 碰撞才加 numeric suffix；native 同名仍覆寫。
+每次保存都呼叫 callback，自訂名若依保存時間改變，也會改變 native 目的地。Labber comment 同時保存歷史 snapshot.point 與 snapshot.roles。
+
 `SavedRun.report` 與 `paths` 只表示最新一次保存結果。輸出或編碼失敗時，`PartialSaveError` 保留同一 SavedRun 及 report，caller 修正內容後可明確再存。Ledger 失敗直接傳播，不轉成 PartialSaveError，也不自動 retry。Figures／analysis 為 None 時保留上一組，空 mapping／tuple 清除該組。Run 身分、量測時間與 captured context 不因重存改變。
 
-`SavedRun.accept(parameter=..., module=..., waveform=..., records=...)` 共用 entry 的寫回流程。Parameter 接受普通點分路徑的工作單位 JSON／complex 值，可用 `(value, metadata)` 以 mapping 整份替換該路徑的 opaque metadata，例如 `{"stderr": 0.8}`。只給 value 時保留既有 metadata；舊 `(value, float)` 形狀報錯。Module 與 waveform 接受 library key 到具名持久 Spec 的 mapping，不接受 raw dict。各類至少一個非空。Records 是具體元件名到 JSON 欄位 dict；流程只補 run_id、point、at 與 accepted source。Caller 提供的 dev 或其他儀器欄位原樣保留，缺 dev 也成功，資料一致性由 caller 保證。Notebook 不捕捉 alias，也不從 live device、cfg 或 snapshot 推論樣本值。Parameter／library 的 role 首段沿保存時固定的映射展開，records 不解析角色。Accepted 事件與 library provenance 的 kind 自動使用該 run 的實驗名稱。
+`SavedRun.accept(parameter=..., module=..., waveform=..., records=...)` 共用 entry 的寫回流程。Parameter 接受普通點分路徑的工作單位 JSON／complex 值，可用 `(value, metadata)` 以 mapping 整份替換該路徑的 opaque metadata，例如 `{"stderr": 0.8}`。只給 value 時保留既有 metadata；舊 `(value, float)` 形狀報錯。Module 與 waveform 接受 library key 到具名持久 Spec 的 mapping，不接受 raw dict。各類至少一個非空。Records 是具體元件名到 JSON 欄位 dict 的 mapping。流程補上 run_id、point、at、accepted source 與 component。Component 取自 records mapping 中該筆資料綁定的具體元件名，不由 Notebook 推測或計算。Caller 提供的 dev 或其他儀器欄位原樣保留，缺 dev 也成功，資料一致性由 caller 保證。Notebook 不捕捉 alias，也不從 live device、cfg 或 snapshot 推論樣本值。Parameter／library 的 role 首段沿保存時固定的映射展開，records 不解析角色。Accepted 事件與 library provenance 的 kind 自動使用該 run 的實驗名稱。
 
 流程先追加一筆 typed accepted 事件，再依目的地文件分組提交。Parameter 為 point 一組，module 與 waveform 共用 library 一組，records 逐筆提交。提交順序為 point、library、records，組內保留各 mapping 的迭代順序。Point 與 library 各使用一次 edit，任一項無效整組不寫，並停止後組。`WritebackApplyError` 保留 accepted `event_id`、已成功組的項目數 `applied`、逐項實際值的 `result.committed` 與原始 `__cause__`。已成功組及事件保留，不提供跨文件回復、retry 或恢復流程。單項 parameter／library setter 仍可獨立使用，accept 的整組提交不逐項呼叫它們。Ledger append 失敗在寫入值之前，錯誤原樣傳播。成功回傳 event ID。後續 adapter run 或保存其他 point 不改這個 handle 的 point、roles 與 run_id。GUI 使用同一 executor，proposal 與 applied 狀態仍由 GUI 管理。
 

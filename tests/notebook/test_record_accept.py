@@ -73,6 +73,7 @@ def test_accept_records_preserves_fields_and_shares_parameter_event(
     assert len(frame) == 1
     row = frame.iloc[0].to_dict()
     assert row == fields | {
+        "component": "Q1",
         "run_id": saved.run_id,
         "point": "sweet",
         "at": row["at"],

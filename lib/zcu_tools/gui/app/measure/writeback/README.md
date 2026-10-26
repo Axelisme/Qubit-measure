@@ -1,6 +1,6 @@
 # `gui.app.measure.writeback`
 
-**Last updated:** 2026-10-25
+**Last updated:** 2026-10-27
 
 **讀者：** framework-dev。寫回提案、review widget 與逐項 Apply 契約。
 
@@ -35,7 +35,8 @@ Copy 將完整 JSON 放入剪貼簿。Record 沒有 Edit 動作，也不開啟�
 
 `RecordWriteback(target_name, description, record=...)` 提供 adapter 組裝的 JSON object。
 框架不解析欄位、不補座標，也不因缺裝置資料而省略 proposal。
-Append owner 只加入既有的 `run_id`、`point`、`at` 與 `source` provenance 信封。
+Append owner 加入 `component`、`run_id`、`point`、`at` 與 `source` provenance 信封。
+`component` 由 table 的具體 component binding 提供，producer 同名欄位不能覆寫它。
 格式由 adapter 間的 policy 決定，見 [lab authoring 的 Record policy](../../../../../../zcu_lab/v2/measure-authoring.md#record-policy)。
 記錄放在 `records/components/<target>.jsonl`，事件放在 `records/ledger.jsonl`。
 Wire kind、session prefix 與 written key 分別為 `record`、`record-<n>` 與 `records`，不讀舊名稱或路徑。

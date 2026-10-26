@@ -34,7 +34,12 @@ from zcu_tools.gui.session.types import ParameterContext, SessionEnv
 from zcu_tools.gui.version_table import (
     VersionTable as VersionTable,
 )
-from zcu_tools.resources.entry import ArtifactKey, PointStorageBinding, SaveLayout
+from zcu_tools.resources.entry import (
+    ArtifactKey,
+    PointStorageBinding,
+    SaveContext,
+    SaveLayout,
+)
 
 from .adapter import (
     T_AnalyzeParams,
@@ -384,7 +389,7 @@ class State(SessionState):
         """
         self._assert_owner()
         tab = self.tabs[tab_id]
-        layout = self._save_layout(pane, experiment=tab.adapter_name)
+        layout = self._save_layout(pane, tab=tab)
         artifacts = ArtifactTracker()
         if pane.result is not None and layout is not None:
             artifacts.replace_section(
@@ -525,7 +530,7 @@ class State(SessionState):
             analysis=State._retired_analysis(tab.analysis),
             post_analysis=State._retired_analysis(tab.post_analysis),
         )
-        layout = self._save_layout(tab.run, experiment=tab.adapter_name)
+        layout = self._save_layout(tab.run, tab=tab)
         if layout is not None:
             tab.artifacts.replace_section(
                 "analysis",
@@ -621,7 +626,7 @@ class State(SessionState):
         retired = RetiredPaneResources(
             post_analysis=State._retired_analysis(tab.post_analysis),
         )
-        layout = self._save_layout(tab.run, experiment=tab.adapter_name)
+        layout = self._save_layout(tab.run, tab=tab)
         if layout is not None:
             tab.artifacts.replace_section(
                 "post_analysis",
@@ -725,19 +730,36 @@ class State(SessionState):
         return self.get_tab(tab_id).artifacts.snapshot()
 
     @staticmethod
-    def _save_layout(run: RunPaneState, *, experiment: str) -> SaveLayout | None:
+    def _save_layout(
+        run: RunPaneState, *, tab: Session[Any, Any, Any, Any]
+    ) -> SaveLayout | None:
         """Plan against this result's source, never tab birth or live selection."""
         metadata = None if run.result is None else run.result.metadata
         storage = run.storage
         if metadata is None or storage is None:
             return None
+        saved_at = datetime.now().astimezone()
+        record = run.result
+        stem = tab.adapter.save_stem(
+            SaveContext(
+                name=tab.adapter_name,
+                run_id=metadata.run_id,
+                point=metadata.snapshot.point,
+                roles=metadata.snapshot.roles,
+                cfg=(
+                    None
+                    if record is None or record.cfg is None
+                    else record.cfg.model_dump(mode="json")
+                ),
+                saved_at=saved_at,
+            )
+        )
         return SaveLayout(
             result_path=storage.result_path,
             database_path=storage.database_path,
-            run_id=metadata.run_id,
-            experiment=experiment,
+            stem=stem,
             point=metadata.snapshot.point,
-            saved_at=datetime.now().astimezone(),
+            saved_at=saved_at,
         )
 
     @staticmethod

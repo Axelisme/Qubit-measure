@@ -102,8 +102,7 @@ def test_storage_retains_entry_point_description_and_roles_after_switch(
     layout = SaveLayout(
         result_path=storage.result_path,
         database_path=storage.database_path,
-        run_id="run-a",
-        experiment="synthetic",
+        stem="synthetic_run-a",
         point=storage.point,
         saved_at=datetime(2026, 10, 8, tzinfo=timezone.utc),
     )

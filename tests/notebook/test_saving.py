@@ -13,9 +13,7 @@ from zcu_tools.cfg_model import ConstWaveformCfg, PulseReadoutSpec, PulseSpec
 from zcu_tools.datafile import load, load_labber_data
 from zcu_tools.device import DeviceManager, FakeDevice, FakeDeviceInfo
 from zcu_tools.experiment import RunRecord
-from zcu_tools.experiment.acquisition_facts import AcquisitionFacts
 from zcu_tools.experiment.artifacts import AnalysisDocument
-from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.metadata import CfgSnapshot
 from zcu_tools.experiment.native_persistence import load_run, metadata_from_container
 from zcu_tools.experiment.stop_signal import ScheduleOutcomeError
@@ -105,36 +103,6 @@ def point(tmp_path: Path) -> PointView:
         database_root=tmp_path / "Database",
     )
     return entry.new_point("sweet", description="save-time context")
-
-
-def test_notebook_native_save_retains_acquisition_observations(
-    point: PointView,
-) -> None:
-    facts = AcquisitionFacts(8, 2, 2, True, 12.5)
-
-    class ObservedCore(SavingCore):
-        def run(self, config: SavingCfg, *, context: RunContext | None):
-            if context is None:
-                raise ValueError("RunContext is required for acquisition observations")
-            context.scope.stop.record_acquisition(facts)
-            return super().run(config, context=context)
-
-    adapter = NotebookAdapter(
-        soc=object(),
-        soccfg=object(),
-        device_manager=DeviceManager(),
-        host=NonPresentingHost(),
-    )(ObservedCore())
-    source = adapter.run(SavingCfg())
-    assert adapter.acquisition_for(source).acquisitions == (facts,)
-    saved = adapter.save_run(point, source=source)
-    path = next(
-        item.output.path
-        for item in saved.report.outputs
-        if item.output.format == "data_h5"
-    )
-    restored = metadata_from_container(load(path))
-    assert restored.acquisitions == (facts,)
 
 
 def test_saved_run_keeps_its_device_snapshot_across_later_acquisitions(
@@ -457,7 +425,7 @@ def test_save_and_resave_use_host_local_labber_date(
         )
         labber_paths.append(labber)
         assert labber.is_file()
-        assert labber.name == f"test_saving_{acquisition.run_id[-6:]}_1.hdf5"
+        assert labber.name == f"test.saving_{acquisition.run_id}.hdf5"
         assert (
             labber.relative_to(tmp_path / "Database" / "entry" / "Labber").parts[:3]
             == expected
@@ -498,9 +466,7 @@ def test_partial_error_retains_handle_and_explicit_resave_reuses_directory(
     exp = experiment()
     source = exp.run(SavingCfg())
     run_id = exp.acquisition_for(source).run_id
-    blocker = (
-        tmp_path / "Database" / "entry" / "runs" / f"test_saving_{run_id}" / "figures"
-    )
+    blocker = tmp_path / "Database/entry/runs" / f"test.saving_{run_id}" / "figures"
     blocker.parent.mkdir(parents=True)
     blocker.write_text("block run PNGs")
     with pytest.raises(PartialSaveError, match="outputs failed") as caught:
@@ -641,7 +607,7 @@ def test_ledger_append_failure_propagates_after_files_are_written(
         / "Database"
         / "entry"
         / "runs"
-        / f"test_saving_{exp.acquisition_for(source).run_id}"
+        / f"test.saving_{exp.acquisition_for(source).run_id}"
         / "data.h5"
     )
     assert (

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TypeAlias
 
@@ -29,6 +29,7 @@ from zcu_lab.v2.support.measure.mux_results import (
     MuxSummaryTone,
     captured_qubits,
 )
+from zcu_lab.v2.support.measure.mux_save_names import mux_save_stem
 from zcu_lab.v2.support.measure.writeback_helpers import module_writeback
 from zcu_lab.v2.support.mux import MuxFitFailure, MuxSweepResult
 from zcu_lab.v2.twotone.rabi.len_rabi.core import LenRabiAnalyzeOptions
@@ -191,7 +192,7 @@ def run(
 
 
 DEFINITION = Adapter(
-    spec=MuxLenRabiExp.AXES_SPEC,
+    spec=replace(MuxLenRabiExp.AXES_SPEC, save_stem=mux_save_stem),
     make_form=make_form,
     run=run,
     guide=Path(__file__).with_name("guide.md"),

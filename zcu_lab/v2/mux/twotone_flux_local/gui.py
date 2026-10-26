@@ -1,3 +1,4 @@
+from dataclasses import replace
 from functools import partial
 from pathlib import Path
 
@@ -11,6 +12,7 @@ from zcu_lab.v2.support.measure.mux_flux_adapter import (
     get_writeback_items,
     make_interactive_plugin,
 )
+from zcu_lab.v2.support.measure.mux_save_names import mux_save_stem
 from zcu_lab.v2.support.mux_flux import MuxFluxResult
 
 from .core import TwotoneFluxLocalCfg, TwotoneFluxLocalExp
@@ -25,7 +27,7 @@ def run(
 
 
 DEFINITION = Adapter(
-    spec=TwotoneFluxLocalExp.AXES_SPEC,
+    spec=replace(TwotoneFluxLocalExp.AXES_SPEC, save_stem=mux_save_stem),
     make_form=make_form,
     run=run,
     guide=Path(__file__).with_name("guide.md"),
