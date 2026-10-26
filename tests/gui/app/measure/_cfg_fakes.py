@@ -38,6 +38,7 @@ def parameter_capture(
             {
                 "format": "zcu.parameter-container",
                 "format_version": "2.0",
+                "schema_version": 1,
                 "general": {"created_at": "2026-10-08T00:00:00Z", "ext": values},
                 "components": {
                     name: component.model_dump(mode="python", exclude_unset=True)

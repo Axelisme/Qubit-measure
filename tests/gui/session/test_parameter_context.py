@@ -53,6 +53,7 @@ def source() -> Generator[tuple[PointDocument, LibrarySnapshot]]:
         document = PointDocument(
             format="zcu.parameter-container",
             format_version="2.0",
+            schema_version=1,
             general=PointGeneral(
                 entry_id="00000000-0000-0000-0000-000000000001",
                 created_at="2026-10-09T00:00:00Z",

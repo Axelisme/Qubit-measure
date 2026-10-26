@@ -126,7 +126,11 @@ Model 的 before validator 可把舊欄位改成新欄位。Setup／point 的 op
 
 Format 與 format_version 只描述容器結構。檔頭不符或 major 不同時拒絕載入。較新 2.x minor 保留容器層的未知欄位與 metadata 內容，不覆寫元件或 nested model 的 extra 策略。任何 minor 都由原 model 驗證完整元件 input：forbid 拒絕未知欄位，ignore 丟棄它們，allow 保留並公開它們。Ignore 丟棄的欄位在非空 commit 時移除。元件的 defaults、validators 與舊寫法演進由定義者決定，不綁容器版本號。非法元件在 load、refresh 與 commit 驗證時失敗，不發布新的值、metadata 或快照。
 
-容器層剩餘未知欄位的 serialization 位置若不再是 mapping，或 key 已被 serializer 佔用，直接 raise，不猜重塑後的位置。框架不提供版本遷移鏈或相容 loader；離線資料轉換由 caller 明確執行獨立工具。
+容器層剩餘未知欄位的 serialization 位置若不再是 mapping，或 key 已被 serializer 佔用，直接 raise，不猜重塑後的位置。
+
+Setup、point 與 entry template 另有整份文件的 `schema_version: N`，不取代 `format_version`。Caller 與 models 一起呼叫 `component_registry.configure_schema(ParameterSchemaPolicy(current_version, upgrade_command))`。未配置時拒絕使用，不採框架預設版本。讀取、refresh 與 commit 只接受目前版本，缺版或不同版本的錯誤列出來源、文件版本、目前版本與 upgrade 命令，不改檔。`create` 寫 caller 的目前版本，seed／clone 複製已驗證來源的版本。`read_identity` 仍只讀歷史身分，不解析 component schema。
+
+優先加有預設值的欄位，不為新增 optional 欄位升版。結構變更才新增純函式步驟。`resources.parameter_upgrade` 擁有通用升級鏈、逐檔 dry-run、備份與 apply；lab 擁有版本、完整分類與步驟。它不是 runtime 相容 loader，也不依賴可刪的 migrations。公開型別與 callback 契約見該模組 docstring，設計依據見 ADR-0063。
 
 List 是整欄衝突與通知單位。等長編輯按位置保留未改資料。Resize 保留 typed base／draft 的最長相等前綴，替換後綴不沿用舊位置的 future keys。框架不推測元素身分。
 

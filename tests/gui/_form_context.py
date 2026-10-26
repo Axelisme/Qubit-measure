@@ -15,6 +15,7 @@ def captured_ext_env(**ext: JsonValue) -> FormEnv:
             point=PointDocument(
                 format="zcu.parameter-container",
                 format_version="2.0",
+                schema_version=1,
                 general=PointGeneral(created_at="2026-10-08T00:00:00Z", ext=ext),
             ),
             library=LibrarySnapshot(

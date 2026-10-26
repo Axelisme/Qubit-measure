@@ -77,6 +77,7 @@ def point() -> PointDocument:
     return PointDocument.model_construct(
         format="zcu.parameter-container",
         format_version="2.0",
+        schema_version=1,
         general=PointGeneral(created_at="2026-10-09T00:00:00Z"),
         components={
             "Q1": LinkedComponent(kind="qubit/test", frequency=4.0, partner="R1"),
