@@ -4,7 +4,10 @@
 
 ## Files and components
 
-`default.yaml` uses `zcu.six-fluxonium` version 1.
+The tracked `default.yaml` template uses `zcu.six-fluxonium` version 1.
+Copy it to the untracked `six_fluxonium.yaml` beside the startup script and edit
+that working copy. Startup reads `six_fluxonium.yaml` and fails if it is missing;
+the [startup instructions](README.md#trusted-startup) give the first-use copy command.
 `entry-template.yaml` uses `zcu.entry-template` version 1.0.
 The template creates Q1 through Q6, R1 through R6, local current sources
 `Q1_bias` through `Q6_bias`, shared `coil_bias` and group `MG123456`.
@@ -70,7 +73,7 @@ At 30 MHz and above, dispatch keeps the existing RWA/Floquet/Dyson/T6 order.
 ## Cache residency budgets
 
 Set the environment's cache allowances in the top-level `numerics` section of
-`default.yaml`, not in `qubits.Q1..Q6.numerics`.
+`six_fluxonium.yaml`, not in `qubits.Q1..Q6.numerics`.
 
 | Field | Default | Scope |
 | --- | --- | --- |

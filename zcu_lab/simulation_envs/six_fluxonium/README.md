@@ -2,7 +2,7 @@
 
 **Readers:** operator, lab-author. Start six independent fluxonium models and prepare mux measurements without hardware.
 
-**Last updated:** 2026-10-25, six local DC lines and shared coil.
+**Last updated:** 2026-10-26, per-user simulation settings.
 
 For existing entries, move resonator and mux-group `ext.time_of_fly` to top-level `time_of_fly`. The loader does not migrate it.
 
@@ -15,8 +15,10 @@ There are no fast-flux lines. One mux generator drives all six readout tones.
 A separate pulse generator and ADC handle single-tone scans. The environment
 has no coupler, qubit-qubit interaction or crosstalk matrix.
 
-`default.yaml` holds physical settings. `entry-template.yaml` holds working
-components, wiring and aliases. Neither file supplies calibrated pulses or a
+`default.yaml` is the tracked physical-settings template. Each user edits
+`six_fluxonium.yaml`, an untracked working copy beside the startup script.
+`entry-template.yaml` holds working components, wiring and aliases. Neither
+the physical settings nor the entry template supplies calibrated pulses or a
 module library. The [settings guide](field-guide.md) records units and model limits.
 
 Top-level `numerics` assigns the whole environment 768 MiB prepare, 64 MiB
@@ -41,7 +43,19 @@ separate convergence checks. Carriers at or above 30 MHz keep the existing route
 
 ## Trusted startup
 
-From the checkout root, launch the measure GUI with this trusted script:
+On first use, copy the tracked template from the checkout root:
+
+```bash
+cp zcu_lab/simulation_envs/six_fluxonium/default.yaml zcu_lab/simulation_envs/six_fluxonium/six_fluxonium.yaml
+```
+
+Startup reads `six_fluxonium.yaml` beside the script, not `default.yaml`.
+If the working copy is missing, startup raises `FileNotFoundError` before
+creating an entry. The error names the absolute path and gives the copy command.
+It does not fall back to the template. Edit the working copy for local settings;
+restart the GUI to load those changes.
+
+Launch the measure GUI with this trusted script:
 
 ```bash
 uv run --directory . --no-sync -- python -m apps.measure \
