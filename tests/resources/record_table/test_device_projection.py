@@ -29,6 +29,30 @@ def test_projection_selects_the_named_device_and_preserves_records() -> None:
 
 
 @pytest.mark.parametrize(
+    ("record", "expected_value", "expected_unit"),
+    [
+        ({"flux": 0.5, "devices": None}, None, None),
+        (
+            {"devices": {"bias": {"value": 1}}, "flux_int": 0, "flux_period": 2},
+            1,
+            None,
+        ),
+        ({"devices": {"bias": {"value": 1, "value_unit": "raw"}}}, 1, "raw"),
+    ],
+)
+def test_projection_checks_only_device_facts_needed_for_flux(
+    record: dict[str, object], expected_value: float | None, expected_unit: str | None
+) -> None:
+    projected = project_device_coordinates(pd.DataFrame([record]), device_name="bias")
+
+    if expected_value is None:
+        assert pd.isna(projected.loc[0, "dev_value"])
+    else:
+        assert projected.loc[0, "dev_value"] == expected_value
+    assert projected.loc[0, "dev_unit"] == expected_unit
+
+
+@pytest.mark.parametrize(
     "devices",
     [
         None,
@@ -36,8 +60,6 @@ def test_projection_selects_the_named_device_and_preserves_records() -> None:
         {"bias": {}},
         {"bias": {"value": True, "value_unit": "A"}},
         {"bias": {"value": float("nan"), "value_unit": "A"}},
-        {"bias": {"value": 1, "value_unit": "mA"}},
-        {"bias": {"value": 1}},
     ],
 )
 def test_projection_rejects_missing_or_unusable_selected_device(

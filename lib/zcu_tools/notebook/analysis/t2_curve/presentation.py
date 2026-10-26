@@ -40,131 +40,46 @@ def plot_t2_dephasing_data(data: T2DephasingAnalysis) -> tuple[Figure, Axes]:
 
 
 def plot_t2_flux_calibration(data: T2DephasingAnalysis) -> tuple[Figure, Axes]:
+    """Plot author flux and integer-aligned flux without inferring prior correction.
+
+    data supplies prepared rows and a normalized analysis window. Return a
+    new Figure/Axes without showing or saving. Empty data raises ValueError.
+    Vertical positions are sample positions in the prepared window.
+    """
     window = data.window
     if len(window.fluxs) == 0:
         raise ValueError("No T2 samples are available for flux calibration plotting")
 
-    raw_fluxs = np.asarray(window.raw_fluxs, dtype=np.float64)
-    corrected_fluxs = raw_fluxs + np.asarray(window.flux_corrections, dtype=np.float64)
-    aligned_fluxs = np.asarray(window.fluxs, dtype=np.float64)
-    corrected_mask = window.f01_correction_applied
-    sources = np.asarray(window.flux_sources, dtype=object)
-    reasons = np.asarray(window.correction_skipped_reason, dtype=object)
-    not_corrected = ~corrected_mask
-    explicit_mask = not_corrected & (sources == "explicit")
-    missing_mask = not_corrected & (reasons == "missing_f01") & ~window.f01_measured
-    disabled_mask = not_corrected & (reasons == "disabled")
-    rejected_mask = not_corrected & ~explicit_mask & ~missing_mask & ~disabled_mask
+    raw_fluxs = window.raw_fluxs
+    aligned_fluxs = window.fluxs
     y_positions = np.arange(len(aligned_fluxs), dtype=np.float64)
     fig_height = float(np.clip(1.8 + 0.18 * len(aligned_fluxs), 3.0, 8.0))
     fig, ax = plt.subplots(figsize=(7.2, fig_height))
     lower, upper = data.analysis_flux_range
     ax.axvspan(lower, upper, color="tab:green", alpha=0.08, label="analysis window")
-
-    for y_position, raw_flux, corrected_flux, aligned_flux, is_corrected in zip(
-        y_positions,
-        raw_fluxs,
-        corrected_fluxs,
-        aligned_fluxs,
-        corrected_mask,
-        strict=True,
-    ):
-        line_color = "tab:blue" if is_corrected else "tab:gray"
-        # Stage 1: raw -> f01-corrected (pre-alignment).
-        ax.plot(
-            [raw_flux, corrected_flux],
-            [y_position, y_position],
-            color=line_color,
-            alpha=0.55,
-            linewidth=1.0,
-        )
-        # Stage 2: f01-corrected -> integer-aligned (final analysis flux).
-        ax.plot(
-            [corrected_flux, aligned_flux],
-            [y_position, y_position],
-            color="tab:green",
-            alpha=0.55,
-            linewidth=1.0,
-            linestyle=":",
-        )
-
+    for y, raw, aligned in zip(y_positions, raw_fluxs, aligned_fluxs, strict=True):
+        ax.plot([raw, aligned], [y, y], color="tab:green", alpha=0.55, linestyle=":")
     ax.scatter(
         raw_fluxs,
         y_positions,
         marker="o",
         facecolors="none",
         edgecolors="tab:gray",
-        s=34,
-        label="raw flux",
-        zorder=3,
+        label="author flux",
     )
-    if np.any(corrected_mask):
-        ax.scatter(
-            corrected_fluxs[corrected_mask],
-            y_positions[corrected_mask],
-            marker="o",
-            color="tab:blue",
-            s=20,
-            label="f01 corrected flux",
-            zorder=4,
-        )
-    if np.any(explicit_mask):
-        ax.scatter(
-            corrected_fluxs[explicit_mask],
-            y_positions[explicit_mask],
-            marker="o",
-            color="tab:purple",
-            s=20,
-            label="explicit flux (uncorrected)",
-            zorder=4,
-        )
-    if np.any(missing_mask):
-        ax.scatter(
-            corrected_fluxs[missing_mask],
-            y_positions[missing_mask],
-            marker="s",
-            color="tab:cyan",
-            s=24,
-            label="missing f01 (model freq)",
-            zorder=4,
-        )
-    if np.any(disabled_mask):
-        ax.scatter(
-            corrected_fluxs[disabled_mask],
-            y_positions[disabled_mask],
-            marker="^",
-            color="tab:brown",
-            s=30,
-            label="correction disabled",
-            zorder=4,
-        )
-    if np.any(rejected_mask):
-        ax.scatter(
-            corrected_fluxs[rejected_mask],
-            y_positions[rejected_mask],
-            marker="x",
-            color="tab:orange",
-            s=38,
-            label="kept raw (rejected)",
-            zorder=4,
-        )
     ax.scatter(
         aligned_fluxs,
         y_positions,
         marker="D",
         facecolors="none",
         edgecolors="tab:green",
-        s=28,
         label="integer aligned flux",
-        zorder=5,
     )
-
     ax.set_xlabel(r"Flux quanta ($\Phi_{ext}/\Phi_0$)")
     ax.set_ylabel("sample index")
-    ax.set_title("f01 flux correction and branch alignment")
-    ax.set_ylim(-0.5, len(aligned_fluxs) - 0.5)
+    ax.set_title("Author flux and integer branch alignment")
     ax.grid(axis="x", alpha=0.25)
-    ax.legend(loc="best")
+    ax.legend(loc="best", fontsize="small")
     return fig, ax
 
 
@@ -269,15 +184,15 @@ def save_t2_curve_figure(  # noqa: PLR0913
 
 def save_t2_standard_figures(
     flux_probe: T2FluxNoiseProbe,
-    photon_probe: T2PhotonShotNoiseProbe,
+    photon_probe: T2PhotonShotNoiseProbe | None,
     channel_analysis: T2ChannelAnalysis,
     *,
     config: T2CurveAnalysisConfig,
 ) -> dict[str, str]:
-    """Render the six standard figures from completed probe/channel records.
+    """Render standard figures, omitting photon figures when photon_probe is None.
 
     Config controls the thermal-photon axis and saving/showing. Create all
-    figures in the standard order, then save (160 dpi), show and close each
+    available figures, then save (160 dpi), show and close each
     figure in that order. Return paths only for figures actually saved under
     the records' context image_dir. Plot/save/display failures propagate.
     """
@@ -295,7 +210,14 @@ def save_t2_standard_figures(
             "Gamma_phi_vs_flux_sensitivity.png",
             None,
         ),
-        "photon_shot_noise_probe": (
+        "channel_overlay": (
+            plot_t2_channel_analysis(channel_analysis)[0],
+            "T2e_flux_noise_fit.png",
+            "tight",
+        ),
+    }
+    if photon_probe is not None:
+        figures["photon_shot_noise_probe"] = (
             plot_photon_shot_noise_probe(
                 photon_probe,
                 n_th_range=config.thermal_n_th_range,
@@ -303,18 +225,12 @@ def save_t2_standard_figures(
             )[0],
             "T2e_thermal_photon_limit.png",
             None,
-        ),
-        "n_th_vs_flux": (
+        )
+        figures["n_th_vs_flux"] = (
             plot_nth_limit_vs_flux(photon_probe)[0],
             "n_th_vs_flux.png",
             None,
-        ),
-        "channel_overlay": (
-            plot_t2_channel_analysis(channel_analysis)[0],
-            "T2e_flux_noise_fit.png",
-            "tight",
-        ),
-    }
+        )
     paths: dict[str, str] = {}
     for name, (fig, filename, bbox_inches) in figures.items():
         path = os.path.join(context.image_dir, filename)
@@ -338,14 +254,15 @@ def emit_t2_curve_outputs(
 
     Print only when verbose. Display tables only when tables is true and
     display_fn is provided; omit an empty half-flux preview. The callback
-    accepts each DataFrame as one object. Output/callback failures propagate.
+    accepts each DataFrame as one object. Omit unavailable photon probe tables
+    and print the disabled-channel reason. Output/callback failures propagate.
     """
     if verbose:
         print("params =", result.context.params, "GHz")
-        print("flux_half =", result.context.flux_half)
-        print("flux_period =", result.context.flux_period)
         print("bare_rf =", result.context.bare_rf, "GHz")
         print("g =", result.context.g, "GHz")
+        if not result.context.photon_shot_noise_enabled:
+            print("photon shot noise disabled: missing dispersive inputs")
         print(
             "readout kappa/2pi =",
             result.combined_fit.readout_kappa_over_2pi_mhz,
@@ -363,7 +280,8 @@ def emit_t2_curve_outputs(
         if not result.data.half_preview.empty:
             display_fn(result.data.half_preview)
         display_fn(result.flux_probe.summary_table)
-        display_fn(result.photon_probe.summary_table)
-        display_fn(result.photon_probe.thermal_limit_table)
+        if result.photon_probe is not None:
+            display_fn(result.photon_probe.summary_table)
+            display_fn(result.photon_probe.thermal_limit_table)
         display_fn(result.combined_fit.params_table)
         display_fn(result.summary_table)

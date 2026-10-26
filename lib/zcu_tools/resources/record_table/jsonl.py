@@ -32,14 +32,29 @@ class _RecordRow(BaseModel):
         return value
 
 
+def _check_flatten_columns(record: dict[str, JsonValue]) -> None:
+    """Reject distinct leaf paths that flatten to the same dotted column."""
+    pending = list(record.items())
+    columns: set[str] = set()
+    while pending:
+        column, value = pending.pop()
+        if isinstance(value, dict):
+            pending.extend((f"{column}.{key}", item) for key, item in value.items())
+        elif column in columns:
+            raise ValueError(f"Colliding flattened column {column!r}")
+        else:
+            columns.add(column)
+
+
 class JsonlRecordTable:
     """Store record history at an exact UTF-8 JSONL path.
 
-    New rows have a bound component, nonempty run_id, nullable point, UTC at
-    and nonempty source. Old rows without component remain readable unchanged.
-    All other fields, including optional dev_value and dev_unit, are JSON values
-    declared by the producer; this store neither names nor derives quantities
-    and does not validate device units.
+    Append requires a bound component, nonempty run_id, nullable point, UTC at,
+    nonempty source and finite JSON producer fields. The bound component cannot
+    be overridden by producer fields; an absent/empty binding rejects append.
+    Read only requires the nonempty run_id used to select each run's latest row;
+    other fields remain opaque. Old rows without component remain unchanged.
+    This store neither derives quantities nor validates device units.
     Read returns the last complete row for each run_id, not a field-wise merge.
     No files are created until append. I/O and validation failures propagate;
     incomplete/corrupt lines are never silently skipped. There is no multi-file
@@ -105,8 +120,8 @@ class JsonlRecordTable:
             stream.write(encoded)
         return record.model_dump(mode="json")
 
-    def _latest_records(self) -> dict[str, _RecordRow]:
-        """Return last whole validated rows per run_id in file-occurrence order.
+    def _latest_records(self) -> dict[str, dict[str, JsonValue]]:
+        """Return last whole JSON rows per run_id in file-occurrence order.
 
         An absent file returns an empty mapping. Invalid rows raise ValueError
         naming path and line; other I/O errors propagate. Nested JSON remains nested.
@@ -117,45 +132,63 @@ class JsonlRecordTable:
             if self._path.is_symlink():
                 raise
             return {}
-        latest: dict[str, _RecordRow] = {}
+        latest: dict[str, dict[str, JsonValue]] = {}
         with stream:
             for number, line in enumerate(stream, start=1):
                 try:
                     if not line.endswith("\n"):
                         raise ValueError("incomplete tail: expected LF")
-                    record = _RecordRow.model_validate_json(line)
+                    record = TypeAdapter(dict[str, JsonValue]).validate_json(line)
+                    run_id = record.get("run_id")
+                    if not isinstance(run_id, str) or not run_id:
+                        raise ValueError("run_id must be a nonempty string")
                 except ValueError as exc:
                     raise ValueError(f"{self._path}:{number}: {exc}") from exc
                 # Replace the whole row and keep the last occurrences' file order.
-                latest.pop(record.run_id, None)
-                latest[record.run_id] = record
+                latest.pop(run_id, None)
+                latest[run_id] = record
         return latest
 
-    def read(self) -> pd.DataFrame:
+    def read(self, *, flatten: bool = False) -> pd.DataFrame:
         """Return each run's last whole JSONL row in last-occurrence order.
 
-        Absent history returns an empty frame. Missing component in old rows is
-        left absent, not inferred from this binding or path. Invalid rows, including corrupt
-        tails, raise ValueError with path/line; I/O failures propagate.
+        Absent history returns an empty frame. Only JSON object syntax and the
+        nonempty run_id needed for grouping are checked. Unused fields, NaN and
+        metadata are preserved without schema validation. Missing component in
+        old rows is left absent, not inferred from this binding or path.
+        Corrupt tails or invalid run_id raise ValueError with path/line;
+        I/O failures propagate.
+        With flatten=True, nested object keys become dot-separated columns
+        (devices.bias.value); lists remain cell values. Distinct source paths
+        colliding in one dotted column raise ValueError with path, zero-based
+        output row, run_id and column. The default keeps nested JSON objects as
+        cells, including dotted keys. Neither form changes the source history.
         """
-        return pd.DataFrame(
-            [row.model_dump(mode="json") for row in self._latest_records().values()]
-        )
+        rows = list(self._latest_records().values())
+        if flatten:
+            for index, row in enumerate(rows):
+                try:
+                    _check_flatten_columns(row)
+                except ValueError as exc:
+                    raise ValueError(
+                        f"{self._path}: row {index} (run_id={row['run_id']!r}): {exc}"
+                    ) from exc
+            return pd.json_normalize(rows)
+        return pd.DataFrame(rows)
 
     def latest(self, run_id: str) -> dict[str, JsonValue] | None:
         """Read one run's latest complete JSON row, or None if absent.
 
         run_id is a nonempty acquisition key. Validate the whole history like
-        read(), never skip corrupt siblings or tails. Returned fields are detached,
-        including JSON timestamp, nullable point, source and producer fields.
+        read(), checking only JSON objects and run_id, never skipping corrupt
+        siblings or tails. Returned fields are detached and otherwise opaque.
         Old rows without component keep it absent; no name is inferred.
         Missing history returns None; validation and I/O failures propagate.
         """
         run_id = TypeAdapter(str).validate_python(run_id, strict=True)
         if not run_id:
             raise ValueError("run_id must be nonempty")
-        record = self._latest_records().get(run_id)
-        return None if record is None else record.model_dump(mode="json")
+        return self._latest_records().get(run_id)
 
     def export_csv(self, path: str | Path, *, overwrite: bool = False) -> None:
         """Export latest rows to an exact CSV path without a pandas index.
