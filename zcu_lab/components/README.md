@@ -21,6 +21,16 @@
 
 長期入口是 `scripts/upgrade_parameters.py`。目前 plan 有零個結構步驟，只驗證並跳過已標版的 current 文件。完整 lab 舊格式分類尚未提供時，入口明確拒絕未標版文件，說明無法確認來源版本，不把它當成腐敗或默認 v1。完成分類與對應步驟後才接受這類文件，不能要求 operator 手改標頭。操作與這項中間階段限制見 [升級命令](../../docs/parameter-upgrades.md)。
 
+## Qubit flux frame
+
+Qubit 的 `flux` 預設為 `{}`，以 device 名稱對應 `QubitFluxCalibration`。
+每筆必填有限的 `half`、`integer` 與非零 `period`，使用該 device 的原生單位。
+其他 contributing devices 都停在各自 integer 時，這兩個 bias 分別是 half／integer 參考點。
+`period` 可為負，表示增加 bias 會減少 flux。
+載入保留三欄，`support/flux.py` 在使用時檢查 `abs(integer-half) = abs(period)/2`，失敗指出 device。
+Helper 重用共用 device 名稱驗證，不改寫有效名稱。
+這是新增欄位，目前仍使用 schema version 1，舊 flux 欄位與 mux `coil_flux` 暫時保留。
+
 ## Wiring
 
 `BuiltinComponent` 只提供 `ext`、`module` 與未知欄位 migration。Wiring 由各 kind 宣告，不從基底繼承。

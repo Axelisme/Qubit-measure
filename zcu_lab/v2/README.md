@@ -201,6 +201,18 @@ Amp Rabi 取消保留已完成點與當點 completed-round 平均，未寫入 IQ
 Caller 先呼叫 RunContext.scope.stop.raise_if_error()，不把 failure 的 partial data 報為成功。
 Numeric core 不保存 writeback destination，也不發 proposal。
 
+## Qubit flux helpers
+
+無 GUI 的 `support/flux.py` 接受 qubit 的具名 `flux` 校準區塊，不讀檔或操作儀器。
+`qubit_flux_frame(flux)` 驗證名稱與三欄間距，回傳獨立的 half／integer／period mapping。
+空區塊可複製，但不能用來算實際掃描端點。
+`device_flux_points(flux, device_name, values)` 委派共用分析數學，以其他 contributing devices 的當下值算實際 half／integer。
+`reference_device_flux_points` 以原始擬合點、新 period 大小與原方向換回參考點。
+首次校準採正方向。它只回傳選定 device 的校準，不改其他 entries。
+若 frame 含另一條同次被掃的線，reference helper 拒絕換算並指出 device，因為 Run snapshot 不能代表固定 bias。
+換算缺少其他 contributing device 的值時也指名失敗，不猜值或讀 setup catalog。
+各 caller 明確選擇 point frame 與 device values 的來源及取值時點。
+
 ## 實驗角色與 device 操作
 
 `support/device.py` 擁有儀器角色 helpers，供實驗 core 與 workflow 使用。DeviceInfo 是資訊，不再提供 set_flux／set_freq／set_power／set_output 控制命令。Device 層只提供儀器本身的操作，不知道 flux 或 RF 角色；實驗層選 driver、明示單位與操作用途。

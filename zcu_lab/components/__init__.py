@@ -19,7 +19,7 @@ from .fluxonium import QubitSchema
 from .jpa import JpaSchema
 from .mux import CoilFluxCalibration, MuxGroupSchema, MuxWiringSchema
 from .parameter_upgrades import PARAMETER_SCHEMA_POLICY
-from .qubit import QubitBaseSchema, QubitWiringSchema
+from .qubit import QubitBaseSchema, QubitFluxCalibration, QubitWiringSchema
 from .resonator import ResonatorSchema
 from .transmon import TransmonSchema
 
@@ -35,6 +35,7 @@ __all__ = [
     "MuxWiringSchema",
     "PumpPower",
     "QubitBaseSchema",
+    "QubitFluxCalibration",
     "QubitSchema",
     "QubitWiringSchema",
     "ResonatorSchema",

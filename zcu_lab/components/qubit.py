@@ -25,6 +25,43 @@ class QubitWiringSchema(BaseModel):
     )
 
 
+class QubitFluxCalibration(BaseModel):
+    """One DC device's reference points in its native instrument unit.
+
+    half and integer are finite biases with all other contributing devices at
+    their integer references. period is the finite nonzero signed bias span
+    per flux quantum; negative reverses the flux direction. Missing or invalid
+    fields fail model validation. The flux helpers check half/integer spacing
+    when using the calibration, not while loading the component.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    half: float = Field(
+        strict=True,
+        allow_inf_nan=False,
+        description="Half-flux reference bias in this device's native unit.",
+    )
+    integer: float = Field(
+        strict=True,
+        allow_inf_nan=False,
+        description="Integer-flux reference bias in this device's native unit.",
+    )
+    period: float = Field(
+        strict=True,
+        allow_inf_nan=False,
+        description="Signed nonzero device bias span per flux quantum.",
+    )
+
+    @field_validator("period")
+    @classmethod
+    def require_nonzero_period(cls, value: float) -> float:
+        """Reject a zero period after finite numeric field validation."""
+        if value == 0:
+            raise ValueError("period must be nonzero")
+        return value
+
+
 class QubitBaseSchema(BuiltinComponent):
     """Fields shared by every qubit kind; physics energies belong to subclasses."""
 
@@ -37,6 +74,10 @@ class QubitBaseSchema(BuiltinComponent):
     t1: Duration = Field(default=None, description="Energy relaxation time T1.")
     t2r: Duration = Field(default=None, description="Ramsey dephasing time T2*.")
     t2e: Duration = Field(default=None, description="Echo dephasing time T2E.")
+    flux: dict[str, QubitFluxCalibration] = Field(
+        default_factory=dict,
+        description="Per-device reference half/integer biases and signed periods.",
+    )
     # These calibrations belong to this qubit's own DC line, in flux_unit.
     flux_half: Flux = Field(
         default=None,
