@@ -7,6 +7,7 @@ import pytest
 import zcu_tools.notebook.analysis.t1_curve.fit as fit_mod
 import zcu_tools.notebook.analysis.t1_curve.t1_curve_fit as public_fit_mod
 from numpy.typing import NDArray
+from zcu_tools.notebook.analysis.fit_tools import find_weak_parameters
 from zcu_tools.notebook.analysis.t1_curve import (
     FluxResidualWeighting,
     MeasurementErrorPolicy,
@@ -25,6 +26,117 @@ def test_t1_curve_fit_module_exports_public_api() -> None:
 
 def _sample_fluxs() -> NDArray[np.float64]:
     return np.linspace(0.08, 0.92, 18, dtype=np.float64)
+
+
+def _identifiability_samples(
+    init: T1FitParams, flux_range: tuple[float, float] = (0.08, 0.49)
+) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+    fluxs = np.linspace(*flux_range, 8, dtype=np.float64)
+    T1s = calculate_eff_t1_vs_flux_fast(
+        _PARAMS, fluxs, _noise_channels(init), init.Temp
+    )
+    return fluxs, T1s
+
+
+def test_joint_fit_reports_log_covariance_in_free_order() -> None:
+    init = T1FitParams(Q_cap=8e5, x_qp=1.5e-6, Q_ind=3e7, Temp=0.06)
+    fluxs, T1s = _identifiability_samples(init)
+    result = fit_t1_noise_params(
+        fluxs,
+        T1s * (1 + 0.005 * np.sin(np.arange(T1s.size))),
+        _PARAMS,
+        init=init,
+        max_nfev=5,
+    )
+
+    info = result.correlation
+    assert info is not None
+    assert info.parameter_names == result.free == ("Q_cap", "x_qp", "Q_ind", "Temp")
+    assert info.covariance.shape == info.correlation.shape == (4, 4)
+    np.testing.assert_allclose(info.covariance, info.covariance.T)
+    np.testing.assert_allclose(np.diag(info.correlation), 1)
+    np.testing.assert_allclose(
+        np.sqrt(np.diag(info.covariance))
+        * np.asarray(
+            [
+                result.params.Q_cap,
+                result.params.x_qp,
+                result.params.Q_ind,
+                result.params.Temp,
+            ],
+            dtype=np.float64,
+        ),
+        np.asarray(
+            [
+                result.stderr.Q_cap,
+                result.stderr.x_qp,
+                result.stderr.Q_ind,
+                result.stderr.Temp,
+            ],
+            dtype=np.float64,
+        ),
+    )
+    assert info.reduced_chi2 == pytest.approx(result.reduced_chi2)
+    assert info.rank == 4
+    assert np.isfinite(info.condition_number)
+
+
+def test_negligible_inductive_channel_is_flagged_by_log_uncertainty() -> None:
+    init = T1FitParams(Q_cap=8e5, Q_ind=1e10, Temp=0.06)
+    fluxs, T1s = _identifiability_samples(init)
+    cap_only = calculate_eff_t1_vs_flux_fast(
+        _PARAMS, fluxs, [("t1_capacitive", {"Q_cap": 8e5})], init.Temp
+    )
+    # The inductive contribution stays below the synthetic measurement scatter.
+    np.testing.assert_allclose(T1s, cap_only, rtol=0.003)
+    result = fit_t1_noise_params(
+        fluxs,
+        T1s * (1 + 0.02 * np.sin(np.arange(T1s.size))),
+        _PARAMS,
+        init=init,
+        fixed=("Q_cap", "Temp"),
+        bounds={"Q_ind": (1e9, 1e11)},
+    )
+
+    info = result.correlation
+    assert info is not None
+    assert info.parameter_names == ("Q_ind",)
+    log_std = np.sqrt(info.covariance[0, 0])
+    assert np.isfinite(log_std) and log_std > 1
+    weak = find_weak_parameters(info)
+    assert [entry.parameter for entry in weak] == ["Q_ind"]
+    assert any("sigma(ln Q_ind)" in reason for reason in weak[0].reasons)
+
+
+def test_well_constrained_capacitive_parameter_is_not_weak() -> None:
+    init = T1FitParams(Q_cap=8e5, Temp=0.06)
+    fluxs, T1s = _identifiability_samples(init)
+    result = fit_t1_noise_params(
+        fluxs,
+        T1s * (1 + 0.001 * np.sin(np.arange(T1s.size))),
+        _PARAMS,
+        init=init,
+        fixed=("Temp",),
+    )
+
+    assert result.correlation is not None
+    # Fixed Temp and inactive Q_ind/x_qp have no rows or columns.
+    assert result.correlation.parameter_names == ("Q_cap",)
+    assert result.correlation.covariance.shape == (1, 1)
+    assert find_weak_parameters(result.correlation) == ()
+
+
+def test_nearly_degenerate_channels_report_strong_correlation() -> None:
+    init = T1FitParams(Q_cap=8e5, x_qp=1.5e-6, Temp=0.06)
+    fluxs, T1s = _identifiability_samples(init, flux_range=(0.2, 0.21))
+    result = fit_t1_noise_params(fluxs, T1s, _PARAMS, init=init, fixed=("Temp",))
+
+    assert result.correlation is not None
+    assert abs(result.correlation.correlation[0, 1]) > 0.95
+    assert [entry.parameter for entry in find_weak_parameters(result.correlation)] == [
+        "Q_cap",
+        "x_qp",
+    ]
 
 
 def test_fit_t1_noise_params_keeps_fixed_values() -> None:
@@ -48,6 +160,8 @@ def test_fit_t1_noise_params_keeps_fixed_values() -> None:
     assert result.params.Temp == true_params.Temp
     assert result.stderr.Q_ind == 0.0
     assert result.stderr.Temp == 0.0
+    assert result.correlation is not None
+    assert result.correlation.parameter_names == ("Q_cap", "x_qp")
 
 
 def test_fit_t1_noise_params_all_fixed_skips_optimizer() -> None:
@@ -65,6 +179,7 @@ def test_fit_t1_noise_params_all_fixed_skips_optimizer() -> None:
         fixed=("Q_cap", "x_qp", "Q_ind", "Temp"),
     )
 
+    assert result.correlation is None
     assert result.optimizer_result is None
     assert result.success
     assert result.message == "all parameters fixed"
@@ -87,6 +202,7 @@ def test_t1_fit_result_constructor_accepts_base_public_signature() -> None:
         optimizer_result=None,
     )
 
+    assert result.correlation is None
     assert result.T1_error_resolution is None
     assert result.flux_weights.effective_observation_count == 0.0
 
