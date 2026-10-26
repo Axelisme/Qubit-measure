@@ -32,6 +32,7 @@ from zcu_tools.program.v2 import (
     SweepCfg,
 )
 from zcu_tools.program.v2.modules.base import ModuleGroup, as_modules
+from zcu_tools.program.v2.simulation import SimulationSoc
 from zcu_tools.progress_bar import BaseProgressBar, make_pbar
 
 if TYPE_CHECKING:
@@ -213,7 +214,7 @@ class _AcquireProgress:
             logger.warning("Retrying acquisition after shot overrun: %s", error)
         return True
 
-    def facts(self) -> AcquisitionFacts:
+    def facts(self, simulated_physical_s: float | None = None) -> AcquisitionFacts:
         early = (
             self.succeeded
             and bool(self.decision)
@@ -226,6 +227,7 @@ class _AcquireProgress:
             attempts=self.attempts,
             early_stopped=early,
             retry_reasons=self.retry_reasons,
+            simulated_physical_s=simulated_physical_s,
             stop_value=value
             if early and value is not None and isfinite(value)
             else None,
@@ -466,6 +468,11 @@ class ProgramBuilder(ModuleFacade, Generic[ProgramT]):
             disable=rounds == 1,
         )
         observation = _AcquireProgress(rounds, pbar)
+        physical_start = (
+            self._soc.binding.simulated_physical_s
+            if isinstance(self._soc, SimulationSoc)
+            else 0.0
+        )
         try:
             for _ in range(max(retry, 1) + 1):
                 if self._schedule.check_stop_requested():
@@ -512,7 +519,14 @@ class ProgramBuilder(ModuleFacade, Generic[ProgramT]):
         except KeyboardInterrupt as exc:
             self._schedule.mark_interrupted(exc)
         finally:
-            self._schedule.stop.record_acquisition(observation.facts())
+            simulated_physical_s = (
+                self._soc.binding.simulated_physical_s - physical_start
+                if isinstance(self._soc, SimulationSoc)
+                else None
+            )
+            self._schedule.stop.record_acquisition(
+                observation.facts(simulated_physical_s)
+            )
             pbar.close()
 
         return slot.view

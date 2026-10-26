@@ -3,13 +3,43 @@
 from dataclasses import replace
 from datetime import UTC, datetime
 
+import pytest
 from zcu_tools.experiment.acquisition_facts import AcquisitionFacts
 from zcu_tools.experiment.workflows import (
     CommittedRecord,
     EncodedRecord,
     OperationFacts,
 )
-from zcu_tools.gui.app.measure.remote.workflow_types import project_record
+from zcu_tools.gui.app.measure.remote.workflow_types import (
+    project_operation,
+    project_record,
+)
+
+
+@pytest.mark.parametrize("seconds", [None, 0.0, 94.0])
+def test_operation_reply_keeps_simulated_shot_time_and_omits_absence(
+    seconds: float | None,
+) -> None:
+    timestamp = datetime(2026, 10, 25, tzinfo=UTC)
+    operation = OperationFacts(
+        kind="run",
+        iteration=1,
+        attempt=1,
+        started_at=timestamp,
+        finished_at=timestamp,
+        device_snapshot=None,
+        outcome="completed",
+        reason=None,
+        stopped=False,
+        acquisitions=(
+            AcquisitionFacts(10, 10, 1, False, simulated_physical_s=seconds),
+        ),
+    )
+    acquisition = project_operation(operation)["acquisitions"][0]
+    if seconds is None:
+        assert "simulated_physical_s" not in acquisition
+    else:
+        assert acquisition.get("simulated_physical_s") == seconds
 
 
 def test_record_reply_preserves_operation_names_and_ordered_acquisitions() -> None:

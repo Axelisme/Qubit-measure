@@ -1,6 +1,6 @@
 # `experiment.workflows` 具名 async workflow
 
-**Last updated:** 2026-10-25
+**Last updated:** 2026-10-26
 
 **讀者：** framework-dev、lab-author。查閱 workflow 宣告、Scope、控制、operation 事實與 record 保存。
 
@@ -123,6 +123,9 @@ OperationFacts 保存 kind、iteration、attempt、started_at、finished_at、de
 Name 是作者傳給 run／call 的 operation label，未命名或舊記錄為 None。
 Acquisitions 是依完成順序排列的 AcquisitionFacts，包含 requested_rounds、completed_rounds、attempts、early_stopped 與 stop_value。
 Completed rounds 只計最後一次 producer attempt，attempts 計實際 acquire 呼叫數，與 OperationFacts.attempt 的 operation 序號不同。
+`simulated_physical_s` 記所有 attempt 中 execute 已返回的 round 所佔硬體 shot 秒數，不受模擬 pacing 影響。
+它排除 flux ramp／settle 與 compile／upload 開銷。
+真實 acquisition 為 None，journal、record 與 run metadata 省略此 key；歷史 acquisition 缺 key 時讀成 None。
 Early stopped 表示 data condition 在設定 rounds 前正常結束。Stop value 是條件命中時的有限 scalar，沒有提前停止、未提供或非有限時為 None。
 Failed、raised 與 Pause discarded operations 也保留已觀察的 acquisitions。沒有 program acquisition 或舊記錄沒有欄位時讀成空 tuple。
 在每個 point 的 record.json 看 `operations[].name` 與 `operations[].acquisitions`，即可按 stage 核對 rounds 與 retry。

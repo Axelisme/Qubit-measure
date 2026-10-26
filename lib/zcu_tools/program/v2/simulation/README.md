@@ -1,6 +1,6 @@
 # Explicit acquisition environments
 
-**Last updated:** 2026-10-24, physical-time pacing
+**Last updated:** 2026-10-26, simulated physical shot time
 
 **讀者：** framework-dev。模擬 acquisition 的 request、round 與 raw source 契約。
 
@@ -27,6 +27,13 @@ builder owns this policy, not the GUI. For a 2 us timeline with zero relaxation,
 100 reps and 10 rounds target 2 ms total. For 25 points averaging 20 us plus
 500 us relaxation, 100 reps target 1.3 s per round. Actual wall time can exceed
 the target when numeric work dominates.
+The same unscaled duration accumulates in `SimulationBinding.simulated_physical_s`
+whenever round execution returns, even with zero pacing. ProgramBuilder records
+this acquisition's counter difference in `AcquisitionFacts.simulated_physical_s`,
+including executed rounds discarded by retries or later validation/cancellation.
+An execute call that raises adds no time. The value excludes flux ramp/settle
+and compile/upload overhead. For 31 T1 points averaging 53 us plus 250 us
+relaxation, 1000 reps and 10 rounds occupy about 94 physical seconds.
 `SimulationBinding(..., callbacks=SimulationCallbacks(on_end=callback))` optionally observes each admitted
 acquire after all software rounds, including partial or failed acquisitions.
 The callback receives captured `RoundRequest` records and admitted wall seconds,

@@ -1,6 +1,9 @@
 """Generic observations from program acquisition and data-stop decisions."""
 
 from dataclasses import dataclass
+from typing import Annotated
+
+from pydantic import Field
 
 
 @dataclass(frozen=True)
@@ -35,6 +38,10 @@ class AcquisitionFacts:
     retry_reasons lists actual retries in order: "shot_overrun" for transport
     excess shots, otherwise the producer exception's class name. Empty means
     no retry; the final failure is not a retry reason.
+    simulated_physical_s is simulated shot time in seconds for all rounds whose
+    execute returned, including discarded retries, independent of pacing scale.
+    None means a non-simulation acquisition. It excludes flux ramp/settle time
+    and compile/upload overhead.
     """
 
     requested_rounds: int
@@ -43,3 +50,6 @@ class AcquisitionFacts:
     early_stopped: bool
     stop_value: float | None = None
     retry_reasons: tuple[str, ...] = ()
+    simulated_physical_s: Annotated[
+        float | None, Field(exclude_if=lambda value: value is None)
+    ] = None

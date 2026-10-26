@@ -1,5 +1,6 @@
 """Completed exposes the attempt facts shared by journal and commit readers."""
 
+import json
 from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Literal
@@ -8,10 +9,12 @@ import numpy as np
 import pytest
 from numpy.typing import NDArray
 from pydantic import TypeAdapter
+from zcu_tools.datafile import JsonObject
 from zcu_tools.device import FakeDevice, FakeDeviceInfo
-from zcu_tools.experiment.acquisition_facts import StopDecision
+from zcu_tools.experiment.acquisition_facts import AcquisitionFacts, StopDecision
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.scope import Scope
+from zcu_tools.experiment.script_host import CallContext
 from zcu_tools.experiment.v2.runtime import AcquireOptions, Schedule, SignalBuffer
 from zcu_tools.experiment.workflows import (
     Completed,
@@ -108,6 +111,45 @@ def test_acquisition_facts_reach_each_named_stage_including_failures(rig: Rig) -
     assert failure.attempts == 2
     assert not failure.early_stopped
     assert failure.stop_value is None
+
+
+@pytest.mark.parametrize("seconds", [None, 0.0, 94.0])
+def test_shot_time_serializes_in_journal_and_committed_records(
+    rig: Rig, seconds: float | None
+) -> None:
+    facts = AcquisitionFacts(10, 10, 1, False, simulated_physical_s=seconds)
+
+    def observe(ctx: CallContext) -> None:
+        ctx.scope.stop.record_acquisition(facts)
+
+    async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
+        for iteration in env.iterations():
+            await iteration.call(observe)
+            iteration.commit(Point(value=1))
+            break
+
+    rig.start(script)
+    final = rig.engine.execute("run")
+    assert final.lifecycle == "done", final.reason
+    record = saved_run.read_records(rig.paths.metadata_root, Point)[0]
+    assert record.operations[0].acquisitions == (facts,)
+    envelope = json.loads(record.record_path.read_text())
+    events = [event for event in rig.events() if event["kind"] == "operation_finished"]
+    for payload in (envelope["operations"][0], events[0]["operation"]):
+        operation = TypeAdapter(JsonObject).validate_python(payload)
+        acquisition = TypeAdapter(list[JsonObject]).validate_python(
+            operation["acquisitions"]
+        )[0]
+        if seconds is None:
+            assert "simulated_physical_s" not in acquisition
+        else:
+            assert acquisition["simulated_physical_s"] == seconds
+
+    # Reading an older record does not infer shot time from its other facts.
+    envelope["operations"][0]["acquisitions"][0].pop("simulated_physical_s", None)
+    record.record_path.write_text(json.dumps(envelope))
+    historical = saved_run.read_records(rig.paths.metadata_root, Point)[0]
+    assert historical.operations[0].acquisitions[0].simulated_physical_s is None
 
 
 @pytest.mark.parametrize("kind", ["call", "run", "setup_device", "wait_until"])
