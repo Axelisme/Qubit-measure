@@ -4,12 +4,13 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from zcu_tools.experiment.metadata import RunSnapshot
 from zcu_tools.experiment.workflows import Live, WorkflowEnv, workflow
 from zcu_tools.program.v2 import ResetCfg
 from zcu_tools.program.v2.modules import MuxReadoutCfg
 
+from zcu_lab.components.qubit import QubitFluxCalibration
 from zcu_lab.v2.support.lifetime_models import LifetimeModelRecord
 from zcu_lab.workflows.common.calibration_results import StageStatus
 from zcu_lab.workflows.common.relaxation import echo_relaxation
@@ -31,6 +32,9 @@ from zcu_lab.workflows.overnight_mux.trend import draw_overnight_mux_trend
 class OvernightMuxPlan(BaseModel):
     """Fixed mux pulses and finite monitoring schedule; no flux setting.
 
+    flux_frames maps each participant's fixed qubit name to its Start-captured
+    device calibration block in native units, fixed across rounds and exports.
+    An empty block means that qubit had no calibration; missing names are invalid.
     tones/readout retain the complete original readout order. participants
     selects original indices in acquisition order. Each selected tone supplies
     calibrated x180 drive and x90 pi2_pulse on its own generator. reset is the
@@ -49,10 +53,21 @@ class OvernightMuxPlan(BaseModel):
     start_interval_s: float = Field(gt=0, description="Actual start spacing, seconds")
     points: int = Field(default=51, ge=5, description="Common delay samples per member")
     snapshot: RunSnapshot
+    flux_frames: dict[str, dict[str, QubitFluxCalibration]] = Field(
+        description="Start-captured flux blocks keyed by participant qubit name; empty blocks mean no calibration"
+    )
     result_path: Path | None = Field(
         default=None,
         description="Exact entry Result path captured at Start. None means no entry (e.g. headless); skip auto samples and use offline --result later.",
     )
+
+    @model_validator(mode="after")
+    def require_participant_frames(self) -> "OvernightMuxPlan":
+        """Reject absent participant frames before acquisition; empty blocks are valid."""
+        for index, tone in enumerate(self.tones):
+            if index in self.participants and tone.name not in self.flux_frames:
+                raise ValueError(f"{tone.name!r}: missing captured flux frame")
+        return self
 
 
 class OvernightMuxTunables(BaseModel):

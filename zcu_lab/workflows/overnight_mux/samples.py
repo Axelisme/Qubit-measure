@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from zcu_lab.v2.support.flux import qubit_flux_frame
 from zcu_lab.workflows.common.samples import (
     SampleRow,
     append_sample,
@@ -45,6 +46,12 @@ def point_samples(
                 if point.actual_start
                 else None,
                 "flux": None,
+                "flux_frame": {
+                    name: dict(calibration)
+                    for name, calibration in qubit_flux_frame(
+                        plan.flux_frames[qubit.name]
+                    ).items()
+                },
                 "devices": devices,
                 "t1_file": point.t1_file,
                 "t2echo_file": point.t2_file,

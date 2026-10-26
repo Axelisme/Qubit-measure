@@ -19,6 +19,7 @@ from zcu_tools.gui.form import (
 )
 from zcu_tools.gui.form_adapter import DeviceName
 
+from zcu_lab.v2.support.measure.record_frame import captured_qubit_flux
 from zcu_lab.workflows.coherence_fluxdep.singleshot_form import SingleshotTunablesForm
 from zcu_lab.workflows.coherence_fluxdep.t1_form import T1TunablesForm
 from zcu_lab.workflows.coherence_fluxdep.t2_form import (
@@ -250,6 +251,7 @@ class CoherencePlanForm(FormModel):
             probe_pulse=modules.probe_pulse,
             readout=modules.readout,
             snapshot=snapshot,
+            flux_frame=captured_qubit_flux(env.parameters),
             result_path=env.parameters.capture_storage().result_path
             if env.parameters
             else None,

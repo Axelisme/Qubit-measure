@@ -20,6 +20,7 @@ from zcu_tools.gui.session.parameters import ModuleSlotError, ParameterContext
 from zcu_tools.program.v2.modules import ModuleCfgFactory as NativeModuleCfgFactory
 from zcu_tools.resources.entry import RoleResolutionError
 
+from zcu_lab.v2.support.measure.record_frame import captured_qubit_flux
 from zcu_lab.workflows.overnight_mux.workflow import (
     OvernightMuxPlan,
     OvernightMuxTunables,
@@ -216,6 +217,12 @@ class OvernightMuxPlanForm(FormModel):
                 "start_interval_s": self.start_interval_s,
                 "points": self.points,
                 "snapshot": snapshot,
+                "flux_frames": {
+                    self.tones[index].name: captured_qubit_flux(
+                        env.parameters, self.tones[index].name
+                    )
+                    for index in self.participants
+                },
                 "result_path": env.parameters.capture_storage().result_path
                 if env.parameters
                 else None,

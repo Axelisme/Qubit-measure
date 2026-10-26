@@ -60,6 +60,10 @@ helper 留在群組內 `_shared.py`。
 `zcu_tools.gui.form_adapter`。持久範本表由 `zcu_lab.templates.TEMPLATES` 擁有，
 組合根注入 Registry 與 Library 新建選單。不再維護 builder、Seed wrapper 或角色 default 表。
 
+`record_frame.captured_qubit_flux` 從固定 Run／Start parameter capture 複製具名 qubit 的 flux 區塊。
+GUI record writers 與 workflow Plan 接線共用這個查詢。缺 capture 或非 qubit 會報錯，不以空區塊代替；有 qubit 但尚未校準才回空 mapping。
+Record 的 JSON 副本由無 GUI 的 `support.flux.qubit_flux_frame` 產生。這些 helper 不讀目前 point 或裝置。
+
 `mux_bindings` 擁有固定 ParameterContext 的 qubit／resonator 對應驗證。
 Onetone 的缺 qubits bring-up 政策與 qubit 實驗的完整綁定要求分開，兩者不讀 live 來源。
 Group model 仍擁有長度與重複 qubit 的結構規則。

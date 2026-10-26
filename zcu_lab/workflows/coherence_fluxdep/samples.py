@@ -9,6 +9,7 @@ from pydantic import JsonValue
 from zcu_tools.datafile import JsonObject
 from zcu_tools.experiment.workflows.saved_run import SavedRecord
 
+from zcu_lab.v2.support.flux import qubit_flux_frame
 from zcu_lab.workflows.common.samples import (
     SampleExportError as SampleExportError,
 )
@@ -151,6 +152,10 @@ def point_sample(
         "index": point.index,
         "status": point.status,
         "flux": {"device": plan.flux_dev, "value": point.flux, "unit": plan.flux_unit},
+        "flux_frame": {
+            name: dict(calibration)
+            for name, calibration in qubit_flux_frame(plan.flux_frame).items()
+        },
         "devices": native_devices(directory, _native_files(point)),
         "frequency": _frequency_fields(point.frequency),
         "rabi": _rabi_fields(

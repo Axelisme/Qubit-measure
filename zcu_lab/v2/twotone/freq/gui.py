@@ -21,6 +21,8 @@ from zcu_tools.gui.app.measure.adapter import (
 from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.plotting.plots import Plots
 
+from zcu_lab.v2.support.flux import qubit_flux_frame
+from zcu_lab.v2.support.measure.record_frame import captured_qubit_flux
 from zcu_lab.v2.twotone.freq.core import (
     FreqAnalysis,
     FreqAnalyzeOptions,
@@ -99,12 +101,16 @@ def _Freq_get_writeback_items(
     ]
     parameters = req.ctx.parameters
     if parameters is not None and metadata is not None and devices is not None:
+        frame = qubit_flux_frame(captured_qubit_flux(parameters))
         items.append(
             RecordWriteback(
                 target_name=parameters.resolve_path("$qubit"),
                 description="Qubit frequency record at the captured bias",
                 record={
                     "devices": {name: deepcopy(info) for name, info in devices.items()},
+                    "flux_frame": {
+                        name: dict(calibration) for name, calibration in frame.items()
+                    },
                     "run": {
                         "run_id": metadata.run_id,
                         "experiment": metadata.experiment,

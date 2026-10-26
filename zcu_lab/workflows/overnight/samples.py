@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 from zcu_tools.datafile import JsonObject
 
+from zcu_lab.v2.support.flux import qubit_flux_frame
 from zcu_lab.workflows.common.samples import (
     SampleRow,
     append_sample,
@@ -63,6 +64,10 @@ def point_sample(
                 "device": plan.flux_dev,
                 "value": point.flux,
                 "unit": plan.flux_unit,
+            },
+            "flux_frame": {
+                name: dict(calibration)
+                for name, calibration in qubit_flux_frame(plan.flux_frame).items()
             },
             "devices": native_devices(
                 directory, tuple(f for f in (point.t1_file, point.t2_file) if f)
