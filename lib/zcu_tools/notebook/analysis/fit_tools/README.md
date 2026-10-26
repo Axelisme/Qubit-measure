@@ -38,17 +38,17 @@
 
 ### Identifiability diagnostics
 
-`identifiability.py` owns `FitCorrelation`, `ParameterProfile` and `WeakParameter`.
-`calculate_fit_correlation(...)` keeps the complete natural-log covariance in free-parameter order.
-It uses the same pseudoinverse and optimizer-cost reduced χ² scale as fit stderr.
-Correlation normalizes the unscaled covariance, so zero cost does not erase correlation.
-Rank describes the Jacobian. The condition number uses unit-norm Jacobian columns.
+`identifiability.py` 擁有 `FitCorrelation` 與 `WeakParameter`。
+`calculate_fit_correlation(...)` 保留按自由參數順序排列的完整 natural-log covariance。
+它與 fit stderr 使用相同的 pseudoinverse 及 optimizer-cost reduced χ² 縮放。
+Correlation 由未縮放矩陣正規化，cost 為 0 時仍保留相關資訊。
+Rank 描述 Jacobian，條件數則先將 Jacobian 各欄正規化成單位長度。
 
-`find_weak_parameters(...)` owns the shared rule: |correlation| > 0.95 or an open profile side.
-The module defines both the correlation threshold and the Δχ² = 1 profile threshold.
-A missing matrix or an omitted profile provides no evidence of weakness.
-`identifiability_presentation.py` returns annotated figures and a reasons table.
-Callers supply physical labels and display-unit scales; the shared tools do not interpret T1/T2 parameter names.
+`find_weak_parameters(...)` 擁有共用規則：|correlation| > 0.95 或 σ(ln p) > 1。
+`CORRELATION_THRESHOLD` 與 `LOG_STD_THRESHOLD` 定義這兩個門檻。
+函式回傳每個弱參數及全部理由，理由包含觀察值。沒有矩陣時回傳空 tuple。
+`identifiability_presentation.py` 的 `plot_fit_correlation(...)` 回傳標數值的熱圖，圖上標明 covariance 位於 log 參數空間。
+`make_weak_parameter_table(...)` 回傳參數與原因表。T1/T2 notebook 直接呼叫這些共用函式。
 
 ### `effective_temperature.py` — attenuator-chain thermal noise
 

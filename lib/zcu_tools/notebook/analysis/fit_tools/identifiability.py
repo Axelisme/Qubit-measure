@@ -1,10 +1,8 @@
-"""Log-parameter uncertainty and profile diagnostics shared by curve fits."""
+"""Log-parameter uncertainty diagnostics shared by curve fits."""
 
 from __future__ import annotations
 
-from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Literal
 
 import numpy as np
 from numpy.typing import NDArray
@@ -12,7 +10,7 @@ from numpy.typing import NDArray
 from .loss import reduced_chi2_from_cost
 
 CORRELATION_THRESHOLD = 0.95
-PROFILE_DELTA_CHI2_THRESHOLD = 1.0
+LOG_STD_THRESHOLD = 1.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -26,7 +24,7 @@ class FitCorrelation:
     condition_number: Condition number after unit-norm column scaling; inf
         for rank-deficient geometry or a zero column.
     reduced_chi2: Optimizer objective times two divided by effective degrees
-        of freedom (at least one); also the profile objective scale.
+        of freedom (at least one).
     """
 
     parameter_names: tuple[str, ...]
@@ -38,36 +36,8 @@ class FitCorrelation:
 
 
 @dataclass(frozen=True, slots=True)
-class ParameterProfile:
-    """One-dimensional profile in physical parameter units.
-
-    parameter: Free parameter being scanned.
-    values: Ascending positive scan grid, including best_value.
-    delta_chi2: Twice the optimizer cost increase divided by the original
-        covariance's reduced chi-squared, one entry per grid point.
-    best_value: Original fitted value, in physical units.
-    bounds: Original physical lower/upper fit bounds (upper may be inf).
-    interval: Lower/upper crossings at delta chi-squared = 1; None if absent.
-    lower_unbounded, upper_unbounded: True when that side has no crossing.
-    lower_reason, upper_reason: None for a crossing, otherwise "bound" or
-        "scan range", naming the edge reached without a crossing.
-    """
-
-    parameter: str
-    values: NDArray[np.float64]
-    delta_chi2: NDArray[np.float64]
-    best_value: float
-    bounds: tuple[float, float]
-    interval: tuple[float | None, float | None]
-    lower_unbounded: bool
-    upper_unbounded: bool
-    lower_reason: Literal["bound", "scan range"] | None
-    upper_reason: Literal["bound", "scan range"] | None
-
-
-@dataclass(frozen=True, slots=True)
 class WeakParameter:
-    """A parameter name and all correlation/profile reasons for flagging it."""
+    """A parameter name and all covariance/correlation reasons for flagging it."""
 
     parameter: str
     reasons: tuple[str, ...]
@@ -75,13 +45,12 @@ class WeakParameter:
 
 def find_weak_parameters(
     correlation: FitCorrelation | None,
-    profiles: Sequence[ParameterProfile],
 ) -> tuple[WeakParameter, ...]:
-    """Flag |r| > CORRELATION_THRESHOLD or either open profile side.
+    """Flag |r| > CORRELATION_THRESHOLD or sigma(ln p) > LOG_STD_THRESHOLD.
 
-    Return one entry per weak parameter with all reasons. Correlation order
-    comes first, followed by profile-only names. Missing matrices and omitted
-    profiles provide no evidence and do not themselves imply weakness.
+    Return each weak parameter with all reasons, in matrix order. Log-space
+    standard deviations are square roots of the scaled covariance diagonal.
+    Reasons include the observed values. None returns an empty tuple.
     """
     reasons: dict[str, list[str]] = {}
     if correlation is not None:
@@ -90,18 +59,14 @@ def find_weak_parameters(
                 value = float(correlation.correlation[row, col])
                 if row != col and abs(value) > CORRELATION_THRESHOLD:
                     reasons.setdefault(name, []).append(
-                        f"|correlation| with {other} = {abs(value):.3f} > "
+                        f"|correlation| with {other} = {abs(value)} > "
                         f"{CORRELATION_THRESHOLD}"
                     )
-    for profile in profiles:
-        if profile.lower_unbounded:
-            reasons.setdefault(profile.parameter, []).append(
-                f"lower profile unbounded ({profile.lower_reason})"
-            )
-        if profile.upper_unbounded:
-            reasons.setdefault(profile.parameter, []).append(
-                f"upper profile unbounded ({profile.upper_reason})"
-            )
+            log_std = float(np.sqrt(correlation.covariance[row, row]))
+            if log_std > LOG_STD_THRESHOLD:
+                reasons.setdefault(name, []).append(
+                    f"sigma(ln {name}) = {log_std} > {LOG_STD_THRESHOLD}"
+                )
     return tuple(WeakParameter(name, tuple(why)) for name, why in reasons.items())
 
 

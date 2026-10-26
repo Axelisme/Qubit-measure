@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 import zcu_tools.notebook.analysis.t2_curve.t2_curve_fit as public_fit_mod
 from numpy.typing import NDArray
+from zcu_tools.notebook.analysis.fit_tools import find_weak_parameters
 from zcu_tools.notebook.analysis.t2_curve import (
     FluxResidualWeighting,
     MeasurementErrorPolicy,
@@ -72,6 +73,39 @@ def test_joint_fit_reports_log_covariance_in_free_order() -> None:
     assert np.isfinite(info.condition_number)
 
 
+def test_well_constrained_free_parameter_is_not_weak() -> None:
+    T1s, T2s, sensitivity, chi = _synthetic_samples(T2FitParams(A_phi=2.4e-6))
+    result = fit_t2_noise_params(
+        T1s,
+        T2s * (1 + 0.001 * np.sin(np.arange(T2s.size))),
+        sensitivity,
+        chi,
+        kappa_over_2pi_mhz=_KAPPA_OVER_2PI_MHZ,
+        init=T2FitParams(A_phi=2e-6),
+    )
+    assert result.correlation is not None
+    assert result.correlation.parameter_names == ("A_phi",)
+    assert find_weak_parameters(result.correlation) == ()
+
+
+def test_negligible_photon_channel_is_flagged_by_log_uncertainty() -> None:
+    T1s, T2s, sensitivity, chi = _synthetic_samples(
+        T2FitParams(A_phi=2.4e-6, n_th=1e-5)
+    )
+    result = fit_t2_noise_params(
+        T1s,
+        T2s * (1 + 0.02 * np.sin(np.arange(T2s.size))),
+        sensitivity,
+        chi,
+        kappa_over_2pi_mhz=_KAPPA_OVER_2PI_MHZ,
+        init=T2FitParams(A_phi=2e-6, n_th=1e-5),
+        bounds={"n_th": (1e-8, 0.1)},
+    )
+    weak = find_weak_parameters(result.correlation)
+    photon = next(entry for entry in weak if entry.parameter == "n_th")
+    assert any("sigma(ln n_th)" in reason for reason in photon.reasons)
+
+
 def test_nearly_degenerate_channels_report_strong_correlation() -> None:
     sensitivity = np.linspace(9_900.0, 10_100.0, 30)
     chi = np.full(30, 3.0)
@@ -92,6 +126,10 @@ def test_nearly_degenerate_channels_report_strong_correlation() -> None:
     )
     assert result.correlation is not None
     assert abs(result.correlation.correlation[0, 1]) > 0.95
+    assert [entry.parameter for entry in find_weak_parameters(result.correlation)] == [
+        "A_phi",
+        "n_th",
+    ]
 
 
 def test_fit_t2_noise_params_keeps_fixed_values() -> None:
