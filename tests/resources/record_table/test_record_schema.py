@@ -427,6 +427,27 @@ def test_flux_frames_reject_non_real_numeric_values(value: object) -> None:
 # Check record-table resolution for criterion A2.
 
 
+def test_resolve_checks_only_coordinates_used_by_each_row() -> None:
+    records = pd.DataFrame(
+        {
+            "flux": [0.5, None, None],
+            "dev_value": ["unused", 3.0, 4.0],
+            "dev_unit": [None, "arbitrary", "V"],
+            "flux_int": ["unused", 1.0, None],
+            "flux_period": [-1.0, 4.0, None],
+            "Flux": [99.0, 99.0, 99.0],
+            "extra": [np.nan, np.nan, np.nan],
+        }
+    )
+
+    resolved = resolve_record_flux(
+        records, fallback_frame=RecordFluxFrame("V", 2.0, 4.0)
+    )
+
+    np.testing.assert_allclose(resolved.values, [0.5, 0.5, 0.5])
+    assert resolved.sources == ("explicit", "row-frame", "fallback-frame")
+
+
 def test_resolve_explicit_flux_wins_over_row_frame() -> None:
     records = pd.DataFrame(
         {
