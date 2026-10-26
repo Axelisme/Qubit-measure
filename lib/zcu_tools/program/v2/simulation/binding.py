@@ -19,20 +19,21 @@ from zcu_tools.core.simulation import (
     RoundRequest,
     RoundSignals,
 )
+from zcu_tools.program.shot_time import shot_time_s
 
 from ._envelope_pool import EnvelopePool
 from .result import IntegratedRound
 
 
 def _physical_round_s(request: AcquireRequest) -> float:
-    return (
-        request.reps
-        * sum(
-            float(np.sum(template.duration_us))
-            + len(template.points) * request.relax_delay_us
-            for template in request.templates
+    return sum(
+        shot_time_s(
+            rounds=1,
+            reps=request.reps,
+            shot_lengths_us=template.duration_us,
+            relax_delay_us=request.relax_delay_us,
         )
-        * 1e-6
+        for template in request.templates
     )
 
 

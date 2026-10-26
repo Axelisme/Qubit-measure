@@ -1,6 +1,6 @@
 # `zcu_tools.program` — QICK integration
 
-**Last updated:** 2026-10-24
+**Last updated:** 2026-10-26
 
 **讀者：** framework-dev。QICK 整合、程式建構與 acquisition 依賴速查。
 
@@ -9,6 +9,13 @@
 ## Program 層定位
 
 `acquisition.py` 擴充 QICK 的 `AcquireMixin`，負責 acquisition 的型別封裝、追蹤、提前停止與 round hook。`v2/base.py` 定義 v2 program 基底 `MyProgramV2`；它使用這些 acquisition mixin，但負責的是 v2 program 結構，兩者不是同一種 base。
+
+## Shot time
+
+`shot_time_s(rounds=..., reps=..., shot_lengths_us=..., relax_delay_us=...)`
+從各 sweep 點的 shot 長度與共同 relax 計算完整 acquisition 的 shot 秒數。
+輸入時間單位為 µs，rounds 與 reps 為正整數；不計 acquisition 固定開銷與 flux ramp。
+模擬 binding 的 pacing 與 `simulated_physical_s` 使用同一個公式。
 
 ## 主要依賴面
 

@@ -13,7 +13,8 @@ releases admission and propagates; the environment callback owns any optional
 startup-compilation fallback. External timers must wait at the environment's
 ready interface before starting if startup time should be excluded.
 `SimulationBinding(..., time_scale=0.0)` optionally paces each round to
-`time_scale × reps × Σ(point timeline duration_us + relax_delay_us) × 1e-6` seconds.
+`time_scale × program.shot_time_s(rounds=1, ...)` seconds, passing each
+structural template's point durations and the acquire's reps and relaxation.
 Timeline durations include readout, pre/post delays and pending ADC activity;
 structural templates cover every scan point once. The binding subtracts snapshot
 and execution wall time, then sleeps only for a positive remainder. Failures do
