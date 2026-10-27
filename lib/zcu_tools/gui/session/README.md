@@ -1,6 +1,6 @@
 # gui/session/ — 量測 session core
 
-**Last updated:** 2026-10-27
+**Last updated:** 2026-10-28
 
 **讀者：** framework-dev。Session 層的資源綁定、operation 與共用對話框分工。
 
@@ -105,9 +105,10 @@ session/
     ├── soc_dialog.py — SocDialog 以 SocControlPort 提供 IP、Port、Connect、連線狀態與 soccfg 瀏覽。每次 explicit show 從 session cache 預填 connection preferences 並同步連線狀態與 soccfg，Disconnected 時清除舊內容；可見期間由 SocChanged 更新
     ├── setup_dialog.py — SetupDialog 由上到下為 Result entry、Working points 清單與兩列的 New working point；拉高視窗只增加清單高度。New entry／Open 與 point Switch／Create 都交既有 owner。Working points 清單顯示 description，Create 明確提交 Label、Clone from 與 Description。Track device 只用 cached value＋unit 建議可修改的 Label，不讀硬體、不綁裝置。Clone from 的 `(empty)` 表示新 point 使用 setup seed 與空 library。Reopen 使用 cached queries，不切 binding、不連硬體
     ├── device_dialog.py  — 設備管理；吃 `DeviceControlPort` + 獨立 parameter provider，eval mode apply-time resolve 不污染 device facet；專屬 panel 由 device adapter 建立並按需保留；host 可切 `set_read_only(read_only=True)` 進 inspection mode：Add/Drop/Apply/Reconnect/Stop 與 panel edit controls 禁用，Refresh、selection、poll、Close 保持可用；dialog-scoped + selection-scoped QTimer（1s）對當前選取 device 呼 `try_poll_device_info`，結果經 DEVICE_CHANGED 流回並保留目前選取；timer 僅可見+有選取時跑，hide/close/無選取即停（不常駐、不全 device 輪詢）
-    ├── predictor_dialog.py — Independent fluxonium or SQUID transmon trials, frequency curves (matrix curves only for models that provide them) and local Calibrate. Calibration displays actual MHz and clamped from the shared model result; it changes only dialog bias/cache, never a component. No Apply or session model. Device values and frequency expressions remain optional inputs.
+    ├── predictor_dialog.py — Detached energy/frame trials and local Calibrate. Calibration adds the shared result's Phi0 correction to the current offset and displays actual MHz/clamped. Save as writes v2; other edits never write the source or a component.
     ├── predictor_parameters.py — PredictorParameterEditor：持有 model／nullable 參數控件、已知欄位與 live lock，以及顯式 file 預填。完整替換以同步 callback 通知 dialog，保留立即刷新與 cache 保存次序及例外傳遞。
-    ├── predictor_curves.py — PredictorCurveTabs：持有三張 canvas、toolbars、matrix tab capability 與跨圖 marker／highlight／xlim 協調。以明確 params 查詢原 predictor facet，不保留另一份物理模型。
+    ├── predictor_flux.py — PredictorFluxEditor：檔案決定儀器列、signed periods 與各台單位，操作者編輯 offset／native 值並單選橫軸。缺 cache 的值留白，查詢時指名拒絕。
+    ├── predictor_curves.py — PredictorCurveTabs：持有三張 canvas、toolbars、matrix capability 與跨圖 marker／highlight／xlim。CurveCoordinates 明示 frame、橫軸與固定儀器值；以公開 Service requests 查詢，不保留物理模型。
     ├── predictor_canvas.py — PredictorCurveCanvas：f_ij 曲線 over device value（雙 x 軸 flux/value）+ 可拖動 flux 垂線（方案 B：marker 不折、出窗平移）；支援多條 transition 同時 highlight；host 可關閉 marker interaction 讓 live view 只由外部 value 驅動；主線程同步繪圖不需 marshal
     ├── inspect_dialog.py — InspectDialog：各 host 共用的 Inspect。Parameters 是元件樹。Modules 使用固定 capture 的 FormEditor，在 Enter、一般 focus loss、改下拉或勾選時，以一次 replace 保存 Name 與有效 Spec；本頁停用文字 idle commit。成功保留表單與焦點，失敗顯示 inline error 並保留輸入。Aliases 由 AliasPanel 編輯。切換條目、point 或關閉不詢問，直接丟棄未提交輸入。三頁沒有 revert 或 undo。New 使用共用 NewEntryDialog。唯讀鎖住輸入，仍可讀取、捲動與折疊
     ├── new_entry_dialog.py — NewEntryDialog：Inspect 的 New。每次選範本讀一次 capture，從 cfg_model 的 TemplateDef.placeholder_names() 讀取佔位符名稱，以該 point 的同名 alias 解析目標綁定，再用 new_library_entry 建新 State 與 FormEditor。缺少或未解析的 alias 逐名顯示，停用 Create；切換範本可恢復。欄位、折疊與捲動回範本初始；只保留使用者打過的 Name，未打時建議 default_name 並在同 family 內加 _2、_3 去重。Create 經 apply_library_change put，被拒時經 presenter 報錯並留在對話框
@@ -227,6 +228,6 @@ Dialog 持有 cache、device 訂閱、tracked table、calibration 與持續隱�
 `simulate.fluxonium.predict.FluxoniumParams` 與 `simulate.transmon.TransmonParams` 保存可未知的具名物理輸入，missing() 指出缺項。
 齊全且有效才建立中性 query model。Service 不持有 installed model，不讀 dialog。
 PredictorService 透過 ContextControlPort 取得 ResultEntry 擁有的 predictors_path。list_files 列出當前 entry 的 predictors/*.json 檔名，load_file 只接受含 .json 的單一檔名，拒絕絕對路徑與路徑片段。resources.predictor_file 擁有 JSON 格式與驗證。未開 entry 時清單為空，load_file 拒絕；開 entry 後不必選工作點就能載入。格式與檔案錯誤向 caller 傳遞，不以預設參數代替。
-Dialog 選檔後按 Load 才預填本地 trial。Refresh files 保留仍存在的選取，不載入參數。沒有檔案時顯示開 entry 或新增 predictor 檔案的提示。選取與重開視窗不改 trial，載入後可手動修改。校準式預設空白。參數欄位留空代表 None，載入 null 也留空，欄位仍可直接編輯。非法文字顯示具名欄位錯誤並擋計算，完整且有效才計算。查詢與 Calibrate 不寫元件、來源檔案或版本。
+Dialog 選檔後按 Load 才預填本地 energy/frame trial。每台儀器的值由 device cache 帶入，缺值留白，操作者可改。預設橫軸為檔案第一台儀器，不讀 component。Refresh files 保留選取但不載入；沒有檔案時提示開 entry 或新增檔案。重開視窗不覆寫手動值。能量旁標 GHz，d 無因次；儀器值各用檔內單位，offset 用 Φ0。校準式預設空白。能量留空代表 None，非法文字顯示具名錯誤。查詢與 Calibrate 不寫元件、來源檔案或版本，只有 Save as 明確寫出指定 v2 檔。
 模型選單有 Fluxonium 與 SQUID transmon，各自顯示自己的能量欄位，flux 欄位共用。載入檔案會依其 model 選模型。Fluxonium 顯示頻率與 |n|、|phi| 曲線。Transmon 沒有矩陣元素能力，只顯示頻率曲線。
-Measure registry 啟用獨立 predictor.json user cache。Dialog 持有 versioned PredictorSnapshot 與 SingleFileCaretaker，保存 model 與 nullable params。可解析的編輯與關閉會保存，非法文字草稿不覆寫上次 cache；重建 dialog 還原。Standalone callers 以 enable_parameter_cache(cache_dir=...) 明確啟用與隔離 cache，啟用時立即還原。Cache decode failure 回空 trial 並顯示錯誤，不讀寫 component DocumentStore。
+Measure registry 啟用獨立 predictor.json user cache。Dialog 的 PredictorSnapshot v2 保存 model、nullable 能量、可選 flux frame、已知 native 值與所選軸。SingleFileCaretaker 在可解析編輯與關閉時保存，非法草稿不覆寫上次 cache。Standalone caller 用 enable_parameter_cache(cache_dir=...) 啟用隔離 cache，立即還原。舊版或無效 cache 回空 trial 並顯示錯誤，不遷移、不讀寫 component DocumentStore。

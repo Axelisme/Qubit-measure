@@ -12,7 +12,7 @@ prefill. No operation installs a model or writes a component or source file.
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
@@ -24,8 +24,8 @@ from qtpy.QtCore import QTimer, Signal  # pyright: ignore[reportPrivateImportUsa
 from qtpy.QtGui import QCloseEvent, QShowEvent
 from qtpy.QtWidgets import (
     QAbstractItemView,
-    QComboBox,
     QDialog,
+    QFileDialog,
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
@@ -41,18 +41,28 @@ from qtpy.QtWidgets import (
 )
 
 from zcu_tools.gui.expected_error import FailedPreconditionError
+from zcu_tools.gui.lifetime import LifetimeScope
 from zcu_tools.gui.session.persistence import PersistenceError, SingleFileCaretaker
-from zcu_tools.gui.session.state import DeviceStatus
 from zcu_tools.gui.session.ui.eval_field import EvalNumericField
 from zcu_tools.gui.session.ui.predictor_cache import (
     PredictorSnapshot,
     PredictorSnapshotCodec,
 )
-from zcu_tools.gui.session.ui.predictor_curves import PredictorCurveTabs
+from zcu_tools.gui.session.ui.predictor_curves import (
+    CurveCoordinates,
+    PredictorCurveTabs,
+)
+from zcu_tools.gui.session.ui.predictor_flux import PredictorFluxEditor
 from zcu_tools.gui.session.ui.predictor_parameters import PredictorParameterEditor
 from zcu_tools.gui.widgets import error_colour, set_foreground, success_colour
 from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 from zcu_tools.gui.widgets.spinbox import TrimDoubleSpinBox
+from zcu_tools.resources.predictor_file import (
+    PredictorFile,
+    PredictorFlux,
+    PredictorSource,
+    save_predictor_file,
+)
 from zcu_tools.simulate.parameters import ModelParams
 from zcu_tools.simulate.predictor import (
     CalibrationResult,
@@ -60,9 +70,7 @@ from zcu_tools.simulate.predictor import (
 )
 
 if TYPE_CHECKING:
-    from zcu_tools.device.base import BaseDeviceInfo
     from zcu_tools.gui.session.device_control import DeviceControlPort
-    from zcu_tools.gui.session.events import DeviceChangedPayload
     from zcu_tools.gui.session.parameters import ParameterContext
     from zcu_tools.gui.session.predictor_control import PredictorControlPort
 
@@ -144,6 +152,7 @@ class PredictorDialog(QDialog):
         params: ModelParams | None = None,
     ) -> None:
         super().__init__(parent)
+        self._scope = LifetimeScope(self)
         self._pred = predictor
         self._dev = device
         self._parameter_provider = parameter_provider or (lambda: None)
@@ -176,8 +185,14 @@ class PredictorDialog(QDialog):
             on_edited=self._on_parameters_changed,
             on_replaced=self._on_parameters_replaced,
             on_status=lambda message, error: self._set_status(message, error=error),
+            on_flux_loaded=self._load_flux,
         )
         controls_layout.addWidget(self._parameter_editor)
+        self._flux_editor = PredictorFluxEditor(
+            self._scope.callback(self._on_parameters_changed)
+        )
+        self._scope.add_cleanup(self._flux_editor.retire_callbacks)
+        controls_layout.addWidget(self._flux_editor)
 
         controls_layout.addWidget(self._build_transition_group(), stretch=1)
 
@@ -185,6 +200,7 @@ class PredictorDialog(QDialog):
 
         # ── status label ──────────────────────────────────────────────────
         self._status_label = QLabel("")
+        self._status_label.setWordWrap(True)
         make_label_selectable(self._status_label)
         self._status_label.setObjectName("predictor_status")
         controls_layout.addWidget(self._status_label)
@@ -210,14 +226,6 @@ class PredictorDialog(QDialog):
 
         self._initialize_trial(params)
 
-        self._unsubscribe_device_changed: Callable[[], None] | None = (
-            device.on_device_changed(self._on_device_changed)
-            if device is not None
-            else None
-        )
-        self.finished.connect(self._cleanup_subscriptions)
-        self.destroyed.connect(self._cleanup_subscriptions)
-
     def _build_transition_group(self) -> QGroupBox:
         # ── Tracked transitions group (predict controls + table + remove) ──
         transitions_group = QGroupBox("Tracked transitions")
@@ -230,6 +238,7 @@ class PredictorDialog(QDialog):
         # 4-column table: Transition | f (MHz) | |n| | |phi|
         # Multi-row selection enabled; individual delete buttons are gone.
         self._table = QTableWidget(0, 4)
+        self._table.setObjectName("predictor_transitions")
         self._table.setHorizontalHeaderLabels(["Transition", "f (MHz)", "|n|", "|phi|"])
         header = self._table.horizontalHeader()
         if header is not None:
@@ -249,48 +258,16 @@ class PredictorDialog(QDialog):
         return transitions_group
 
     def _build_value_controls(self) -> QHBoxLayout:
-        # Controls above the table.  Keep device value/device selector and
-        # transition-add controls on separate rows so long device names do not
-        # force the whole left column wider than the plot area needs.
-        self._value_controls_row = QHBoxLayout()
-
-        self._value_controls_row.addWidget(QLabel("Device value:"))
+        row = QHBoxLayout()
+        row.addWidget(QLabel("Axis value:"))
         self._predict_value_spin = TrimDoubleSpinBox()
+        self._predict_value_spin.setObjectName("predictor_axis_value")
         self._predict_value_spin.setRange(-1e6, 1e6)
         self._predict_value_spin.setDecimals(6)
-        self._predict_value_spin.setValue(0.0)
         self._predict_value_spin.valueChanged.connect(self._on_spinbox_changed)
-        self._value_controls_row.addWidget(self._predict_value_spin)
-
-        self._device_combo: QComboBox | None = None
-        self._device_refresh_btn: QPushButton | None = None
-        self._device_read_btn: QPushButton | None = None
-        if self._dev is not None:
-            device_combo = QComboBox()
-            device_combo.setMinimumWidth(160)
-            device_combo.setMinimumContentsLength(16)
-            device_combo.setSizeAdjustPolicy(
-                QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
-            )
-            device_combo.currentIndexChanged.connect(self._on_device_selection_changed)
-            self._value_controls_row.addWidget(device_combo)
-            self._device_combo = device_combo
-
-            device_refresh_btn = QPushButton("↻")
-            device_refresh_btn.setFixedWidth(28)
-            device_refresh_btn.setToolTip("Refresh device list and cached value")
-            device_refresh_btn.clicked.connect(self._on_refresh_devices_clicked)
-            self._value_controls_row.addWidget(device_refresh_btn)
-            self._device_refresh_btn = device_refresh_btn
-
-            device_read_btn = QPushButton("Use")
-            device_read_btn.setToolTip("Read selected device value")
-            device_read_btn.clicked.connect(self._on_read_device_clicked)
-            self._value_controls_row.addWidget(device_read_btn)
-            self._device_read_btn = device_read_btn
-
-        self._value_controls_row.addStretch()
-        return self._value_controls_row
+        row.addWidget(self._predict_value_spin)
+        row.addStretch()
+        return row
 
     def _build_transition_controls(self) -> QHBoxLayout:
         self._transition_controls_row = QHBoxLayout()
@@ -313,7 +290,7 @@ class PredictorDialog(QDialog):
         return self._transition_controls_row
 
     def _build_calibration_group(self) -> QGroupBox:
-        # ── Calibration: measured frequency -> predictor flux_bias ────────
+        # ── Calibration: measured frequency -> local offset correction ────────
         calibration_group = QGroupBox("Calibration")
         calibration_form = QFormLayout(calibration_group)
         self._calibration_freq_field = EvalNumericField(
@@ -322,6 +299,7 @@ class PredictorDialog(QDialog):
             decimals=6,
             parameter_provider=self._parameter_provider,
         )
+        self._calibration_freq_field.set_input_name("predictor_calibration_frequency")
         self._calibration_freq_field.load_expression(
             _DEFAULT_CALIBRATION_EXPR, direct_fallback=0.0
         )
@@ -346,6 +324,9 @@ class PredictorDialog(QDialog):
         remove_layout.addWidget(self._remove_btn)
         action_row.addWidget(remove_region)
         action_row.addStretch()
+        self._save_as_btn = QPushButton("Save as…")
+        self._scope.connect(self._save_as_btn.clicked, self._on_save_as_clicked)
+        action_row.addWidget(self._save_as_btn)
         close_btn = QPushButton("Close")
         close_btn.clicked.connect(self._on_close_requested)
         action_row.addWidget(close_btn)
@@ -363,7 +344,6 @@ class PredictorDialog(QDialog):
 
         # Populate table from default transitions before loading predictor.
         self._rebuild_table()
-        self._refresh_device_selector()
 
         self._parameter_timer = QTimer(self)
         self._parameter_timer.setSingleShot(True)
@@ -379,7 +359,7 @@ class PredictorDialog(QDialog):
         self._curve_tabs.currentChanged.connect(self._emit_state_changed)
 
     def parameters(self) -> ModelParams:
-        """Return the selected model's local trial: GHz energies and native affine inputs.
+        """Return the selected model's local GHz energy/asymmetry trial.
 
         Blank fields return None. Nonnumeric or nonfinite text raises a named
         PredictorInputError. No source/session read or write occurs.
@@ -396,6 +376,37 @@ class PredictorDialog(QDialog):
         """
         self._parameter_editor.set_parameters(params)
 
+    def flux(self) -> PredictorFlux:
+        """Return the detached trial frame; missing/invalid frame raises PredictorInputError."""
+        return self._flux_editor.flux()
+
+    def device_values(self) -> dict[str, float]:
+        """Return all native trial values; missing/invalid values raise a named error."""
+        return self._flux_editor.device_values()
+
+    def set_flux(
+        self, flux: PredictorFlux, device_values: Mapping[str, float] | None = None
+    ) -> None:
+        """Replace the local frame and native values, defaulting to device cache.
+
+        Missing cached devices stay blank and block computation. The first file
+        device becomes the axis. No hardware read or source write occurs.
+        """
+        if device_values is None:
+            self._load_flux(flux)
+        else:
+            self._flux_editor.set_flux(flux, device_values)
+        self._on_parameters_replaced()
+
+    def _load_flux(self, flux: PredictorFlux) -> None:
+        values: dict[str, float] = {}
+        if self._dev is not None:
+            for name in flux.period:
+                value = self._dev.get_cached_device_value(name)
+                if value is not None:
+                    values[name] = value
+        self._flux_editor.set_flux(flux, values)
+
     def selected_file(self) -> str | None:
         """Return the selected entry filename, or None; selection alone never loads."""
         return self._parameter_editor.selected_file()
@@ -407,6 +418,34 @@ class PredictorDialog(QDialog):
         control propagate without changing the trial. The source is never written.
         """
         self._parameter_editor.load_file(filename)
+
+    def save_as(self, destination: Path) -> None:
+        """Write the current energy/frame trial as a v2 predictor at destination.
+
+        Device values and axis selection are display inputs, not file fields.
+        Provenance is unknown for this local trial. Invalid trial text or I/O
+        failures propagate; no component or source file is implicitly updated.
+        """
+        params = self.parameters()
+        save_predictor_file(
+            destination,
+            PredictorFile(
+                params.model, params, self.flux(), PredictorSource(None, None)
+            ),
+        )
+
+    def _on_save_as_clicked(self) -> None:
+        filename, _filter = QFileDialog.getSaveFileName(
+            self, "Save predictor as", "", "Predictor JSON (*.json)"
+        )
+        if not filename:
+            return
+        try:
+            self.save_as(Path(filename))
+        except (OSError, ValueError) as exc:
+            self._set_status(str(exc), error=True)
+            return
+        self._set_status(f"Saved predictor: {filename}")
 
     def enable_parameter_cache(self, *, cache_dir: Path | None = None) -> None:
         """Restore and enable versioned user-cache persistence for this trial.
@@ -436,16 +475,31 @@ class PredictorDialog(QDialog):
     def capture_persisted_state(self) -> PredictorSnapshot:
         """Capture detached model/params for user cache, not component storage."""
         params = self.parameters()
-        return PredictorSnapshot(model=params.model, params=params)
+        flux = self.flux() if self._flux_editor.has_frame() else None
+        return PredictorSnapshot(
+            model=params.model,
+            params=params,
+            flux=flux.to_dict() if flux is not None else None,
+            device_values=self._flux_editor.known_device_values(),
+            axis_device=self._flux_editor.axis_device()
+            if flux is not None and flux.period
+            else None,
+        )
 
     def restore_persisted_state(self, state: PredictorSnapshot) -> None:
         """Restore a validated cache snapshot into editable local fields only."""
+        self._flux_editor.set_flux(
+            PredictorFlux.from_mapping(state.flux) if state.flux is not None else None,
+            state.device_values,
+        )
+        if state.axis_device is not None:
+            self._flux_editor.set_axis_device(state.axis_device)
         self.set_parameters(state.params)
 
     def _save_parameters(self) -> None:
         if self._caretaker is not None:
             try:
-                self.parameters()
+                self.capture_persisted_state()
             except PredictorInputError:
                 # Invalid drafts stay editable; keep the last serializable cache.
                 return
@@ -457,6 +511,8 @@ class PredictorDialog(QDialog):
     def _on_parameters_replaced(self) -> None:
         """Settle one programmatic trial replacement synchronously; failures propagate."""
         self._parameter_timer.stop()
+        self._set_status("")
+        self._sync_axis_marker()
         self._refresh_curves()
         self._sync_calibration_button()
         self._save_parameters()
@@ -464,6 +520,7 @@ class PredictorDialog(QDialog):
     def _on_parameters_changed(self) -> None:
         """Clear stale results and save a valid user edit before scheduling refresh."""
         self._parameter_timer.stop()
+        self._sync_axis_marker()
         self._clear_predictor_display()
         self._sync_calibration_button()
         try:
@@ -478,33 +535,37 @@ class PredictorDialog(QDialog):
         self._save_parameters()
         self._parameter_timer.start()
 
-    def predict_frequency(
-        self, value: float, transition: tuple[int, int] = (0, 1)
-    ) -> float:
-        """Return MHz from the current trial at a native device value; invalid inputs raise."""
+    def predict_frequency(self, transition: tuple[int, int] = (0, 1)) -> float:
+        """Return MHz at all current native trial values; invalid inputs raise."""
         from zcu_tools.gui.session.services.predictor import PredictFreqRequest
 
         return self._pred.predict_freq(
-            self.parameters(), PredictFreqRequest(value, transition)
+            self.parameters(),
+            PredictFreqRequest(
+                self.flux().to_frame(), self.device_values(), transition
+            ),
         )
 
     def calibrate(
-        self, value: float, frequency_mhz: float, transition: tuple[int, int] = (0, 1)
-    ) -> float:
-        """Compute candidate native bias and update only this dialog's bias field.
+        self, frequency_mhz: float, transition: tuple[int, int] = (0, 1)
+    ) -> CalibrationResult:
+        """Add a measured transition's Phi0 correction to the current local offset.
 
-        Inputs are the measured native value, MHz frequency and increasing level
-        pair. Displays actual MHz and clamped status from the model result.
-        Validation/numerical failures propagate without edits. No source is written.
+        frequency_mhz is measured MHz; transition is an increasing level pair.
+        All current native device values and the current frame enter the query.
+        Return correction, actual MHz and clamped. Failures leave inputs unchanged.
+        Neither the component nor the source predictor file is written.
         """
-        from zcu_tools.gui.session.services.predictor import CalibrateFluxBiasRequest
+        from zcu_tools.gui.session.services.predictor import CalibrateOffsetRequest
 
-        result = self._pred.calibrate_flux_bias(
+        result = self._pred.calibrate_offset(
             self.parameters(),
-            CalibrateFluxBiasRequest(value, frequency_mhz, transition),
+            CalibrateOffsetRequest(
+                self.flux().to_frame(), self.device_values(), frequency_mhz, transition
+            ),
         )
         self._display_calibration(result)
-        return result.flux_bias
+        return result
 
     def capture_state(self) -> PredictorDialogState:
         """Return the persistent UI state only; live marker/device/cache state is excluded."""
@@ -540,6 +601,7 @@ class PredictorDialog(QDialog):
         if self._persistent_on_close:
             self.hide()
             return
+        self._scope.close()
         super().reject()
 
     def closeEvent(self, a0: QCloseEvent | None) -> None:
@@ -551,6 +613,7 @@ class PredictorDialog(QDialog):
                 a0.ignore()
             self.hide()
             return
+        self._scope.close()
         super().closeEvent(a0)
 
     def showEvent(self, a0: QShowEvent | None) -> None:
@@ -560,20 +623,13 @@ class PredictorDialog(QDialog):
                 return
 
         self._sync_calibration_button()
+        self._sync_axis_marker()
+        self._curve_tabs.set_marker(self._predict_value_spin.value())
+        self._update_value_columns()
         if self._live_mode:
-            self._set_predict_value(
-                self._predict_value_spin.value(), update_status=False
-            )
             self._set_status("Live predictor view", error=False)
             return
-        self._refresh_device_selector()
         self._parameter_editor.refresh_files()
-        selected = self._selected_device_name()
-        if selected is not None:
-            self._apply_cached_device_value(selected)
-            self._request_live_device_refresh(selected)
-            return
-        self._set_predict_value(self._predict_value_spin.value(), update_status=False)
 
     def _on_close_requested(self) -> None:
         self.reject()
@@ -614,11 +670,8 @@ class PredictorDialog(QDialog):
             self._calibration_freq_field,
         ):
             widget.setEnabled(enabled)
-        if self._device_combo is not None:
-            self._device_combo.setEnabled(enabled)
-        if self._device_refresh_btn is not None:
-            self._device_refresh_btn.setEnabled(enabled)
-        self._update_device_buttons()
+        self._flux_editor.setEnabled(enabled)
+        self._save_as_btn.setEnabled(enabled)
         self._sync_calibration_button()
         self._curve_tabs.set_interaction_enabled(enabled=enabled)
 
@@ -630,60 +683,8 @@ class PredictorDialog(QDialog):
     # Device-value selector helpers
     # ------------------------------------------------------------------
 
-    @staticmethod
-    def _extract_numeric_info_value(info: BaseDeviceInfo | None) -> float | None:
-        if info is None:
-            return None
-        raw = getattr(info, "value", None)
-        if isinstance(raw, bool) or not isinstance(raw, (int, float)):
-            return None
-        return float(raw)
-
-    def _selected_device_name(self) -> str | None:
-        combo = self._device_combo
-        if combo is None:
-            return None
-        data = combo.currentData()
-        return data if isinstance(data, str) and data else None
-
-    def _update_device_buttons(self) -> None:
-        selected = (not self._live_mode) and self._selected_device_name() is not None
-        if self._device_read_btn is not None:
-            self._device_read_btn.setEnabled(selected)
-
-    def _refresh_device_selector(self) -> None:
-        if self._dev is None or self._device_combo is None:
-            return
-
-        combo = self._device_combo
-        current_name = self._selected_device_name()
-        combo.blockSignals(True)
-        combo.clear()
-        combo.addItem("(none)", userData=None)
-        try:
-            entries = self._dev.list_devices()
-            for entry in entries:
-                if entry.status != DeviceStatus.CONNECTED.value:
-                    continue
-                value = self._dev.get_cached_device_value(entry.name)
-                if value is None:
-                    continue
-                unit = self._dev.get_device_unit(entry.name)
-                unit_suffix = f" ({unit})" if unit and unit != "none" else ""
-                combo.addItem(
-                    f"{entry.name}  [{entry.type_name}]{unit_suffix}",
-                    userData=entry.name,
-                )
-        # tolerated: Device query ports have open failure sets; show status and restore combo signal delivery.
-        except Exception as exc:  # noqa: BLE001
-            self._set_status(f"Failed to refresh device list: {exc}", error=True)
-        finally:
-            idx = combo.findData(current_name) if current_name is not None else 0
-            combo.setCurrentIndex(idx if idx >= 0 else 0)
-            combo.blockSignals(False)
-            self._update_device_buttons()
-
     def _set_predict_value(self, value: float, *, update_status: bool = True) -> None:
+        self._set_axis_input(value)
         self._predict_value_spin.blockSignals(True)
         self._predict_value_spin.setValue(value)
         self._predict_value_spin.blockSignals(False)
@@ -692,80 +693,6 @@ class PredictorDialog(QDialog):
         self._update_value_columns()
         if update_status:
             self._set_status(f"Device value: {self._predict_value_spin.value():.6g}")
-
-    def _apply_cached_device_value(self, name: str) -> bool:
-        if self._dev is None:
-            return False
-        value = self._dev.get_cached_device_value(name)
-        if value is None:
-            self._set_status(f"No cached device value for {name!r}.", error=True)
-            return False
-        self._set_predict_value(value, update_status=False)
-        self._set_status(f"Cached device value from {name}: {value:.6g}", error=False)
-        return True
-
-    def _request_live_device_refresh(self, name: str) -> None:
-        if self._dev is None:
-            return
-        try:
-            if not self._dev.try_poll_device_info(name):
-                self._set_status(
-                    f"Skipped refresh for {name!r}: a run is active.",
-                    error=False,
-                )
-        # tolerated: Refresh admission/provider failures must become status text, not escape the Qt callback.
-        except Exception as exc:  # noqa: BLE001
-            self._set_status(f"Failed to refresh {name!r}: {exc}", error=True)
-
-    def _on_refresh_devices_clicked(self) -> None:
-        if self._live_mode:
-            self._set_status("Live mode controls the device value.", error=False)
-            return
-        self._refresh_device_selector()
-        selected = self._selected_device_name()
-        if selected is None:
-            self._set_predict_value(
-                self._predict_value_spin.value(), update_status=False
-            )
-            return
-        self._apply_cached_device_value(selected)
-        self._request_live_device_refresh(selected)
-
-    def _on_read_device_clicked(self) -> None:
-        if self._live_mode:
-            self._set_status("Live mode controls the device value.", error=False)
-            return
-        if self._dev is None:
-            return
-        selected = self._selected_device_name()
-        if selected is None:
-            self._set_status("Select a device first.", error=True)
-            return
-        try:
-            info = self._dev.get_device_info(selected)
-        # tolerated: Driver read failures have no closed exception set; report status without replacing the value.
-        except Exception as exc:  # noqa: BLE001
-            self._set_status(f"Failed to read {selected!r}: {exc}", error=True)
-            return
-        value = self._extract_numeric_info_value(info)
-        if value is None:
-            self._set_status(f"Device {selected!r} has no numeric value.", error=True)
-            return
-        self._set_predict_value(value, update_status=False)
-        self._set_status(f"Read device value from {selected}: {value:.6g}", error=False)
-
-    def _on_device_selection_changed(self, _index: int) -> None:
-        self._update_device_buttons()
-        if self._live_mode:
-            return
-        selected = self._selected_device_name()
-        if selected is None:
-            self._set_predict_value(
-                self._predict_value_spin.value(), update_status=False
-            )
-            return
-        self._apply_cached_device_value(selected)
-        self._request_live_device_refresh(selected)
 
     # ------------------------------------------------------------------
     # Table helpers
@@ -867,6 +794,8 @@ class PredictorDialog(QDialog):
             return ("Live mode keeps calibration read-only.", False)
         try:
             self.parameters().build_predictor()
+            self.flux()
+            self.device_values()
         except PredictorInputError as exc:
             return (str(exc), True)
         selected = self._selected_transitions()
@@ -889,34 +818,22 @@ class PredictorDialog(QDialog):
             self._set_status(reason, error=is_error)
             self._sync_calibration_button()
             return
-        from zcu_tools.gui.session.services.predictor import CalibrateFluxBiasRequest
-
         frequency_mhz = self._resolve_calibration_frequency_mhz()
         if frequency_mhz is None:
-            self._sync_calibration_button()
             return
-        selected = self._selected_transitions()
-        req = CalibrateFluxBiasRequest(
-            value=self._predict_value_spin.value(),
-            frequency_mhz=frequency_mhz,
-            transition=selected[0],
-        )
         try:
-            result = self._pred.calibrate_flux_bias(self.parameters(), req)
+            self.calibrate(frequency_mhz, self._selected_transitions()[0])
         except PredictorInputError as exc:
             self._set_status(str(exc), error=True)
-            return
         except Exception as exc:
             logger.exception("predictor calibration failed")
             self._set_status(str(exc), error=True)
-            return
-        self._display_calibration(result)
-        logger.info("PredictorDialog: calibrated flux bias %r", req)
 
     def _display_calibration(self, result: CalibrationResult) -> None:
-        self._parameter_editor.set_flux_bias(result.flux_bias)
+        self._flux_editor.set_offset(self.flux().offset + result.offset_correction)
         self._set_status(
-            f"Calibrated flux_bias={result.flux_bias:.6g}; "
+            f"Calibrated offset={self.flux().offset:.6g} Φ0 "
+            f"(correction {result.offset_correction:+.6g} Φ0); "
             f"{result.frequency_mhz:.6g} MHz; clamped={str(result.clamped).lower()}",
             error=False,
         )
@@ -940,7 +857,9 @@ class PredictorDialog(QDialog):
                 try:
                     freq = self._pred.predict_freq(
                         self.parameters(),
-                        PredictFreqRequest(value=marker_value, transition=transition),
+                        PredictFreqRequest(
+                            self.flux().to_frame(), self.device_values(), transition
+                        ),
                     )
                     freq_text = f"{freq:.4f}"
                 except (FailedPreconditionError, PredictorInputError):
@@ -986,6 +905,9 @@ class PredictorDialog(QDialog):
             mat_result = self._pred.predict_matrix_element_curve(
                 self.parameters(),
                 PredictMatrixCurveRequest(
+                    frame=self.flux().to_frame(),
+                    axis_device=self._flux_editor.axis_device(),
+                    device_values=self.device_values(),
                     values=np.array([value], dtype=np.float64),
                     transitions=(transition,),
                     operator=operator,
@@ -1001,11 +923,23 @@ class PredictorDialog(QDialog):
 
     def _refresh_curves(self) -> None:
         """Refresh the curve view, then settle table values only after successful rendering."""
+        try:
+            coordinates = CurveCoordinates(
+                self.flux().to_frame(),
+                self._flux_editor.axis_device(),
+                self.device_values(),
+            )
+            params = self.parameters()
+        except PredictorInputError as exc:
+            self._clear_predictor_display()
+            self._set_status(str(exc), error=True)
+            return
         if self._curve_tabs.refresh_curves(
-            self.parameters(),
+            params,
             tuple(self._tracked),
             self._selected_highlights(),
             self._predict_value_spin.value(),
+            coordinates=coordinates,
         ):
             self._update_value_columns()
 
@@ -1081,10 +1015,28 @@ class PredictorDialog(QDialog):
     # Spinbox / canvas bidirectional coupling
     # ------------------------------------------------------------------
 
+    def _set_axis_input(self, value: float) -> None:
+        try:
+            name = self._flux_editor.axis_device()
+        except PredictorInputError:
+            return
+        self._flux_editor.set_device_value(name, value, notify=False)
+
+    def _sync_axis_marker(self) -> None:
+        try:
+            name = self._flux_editor.axis_device()
+            value = self.device_values()[name]
+        except PredictorInputError:
+            return
+        self._predict_value_spin.blockSignals(True)
+        self._predict_value_spin.setValue(value)
+        self._predict_value_spin.blockSignals(False)
+
     def _on_spinbox_changed(self, value: float) -> None:
         """Spinbox changed → move all canvas markers; schedule debounced column update."""
         if self._live_mode:
             return
+        self._set_axis_input(value)
         self._curve_tabs.set_marker(value)
         self._debounce_timer.start()
 
@@ -1099,6 +1051,7 @@ class PredictorDialog(QDialog):
         """
         if self._live_mode:
             return
+        self._set_axis_input(value)
         self._predict_value_spin.blockSignals(True)
         self._predict_value_spin.setValue(value)
         self._predict_value_spin.blockSignals(False)
@@ -1109,6 +1062,7 @@ class PredictorDialog(QDialog):
         """Marker locked (second click) → final immediate recompute of the columns."""
         if self._live_mode:
             return
+        self._set_axis_input(value)
         self._predict_value_spin.blockSignals(True)
         self._predict_value_spin.setValue(value)
         self._predict_value_spin.blockSignals(False)
@@ -1122,29 +1076,6 @@ class PredictorDialog(QDialog):
         highlights = self._selected_highlights()
         self._curve_tabs.set_highlights(highlights)
         self._sync_calibration_button()
-
-    # ------------------------------------------------------------------
-    # Bus subscription
-    # ------------------------------------------------------------------
-
-    def _cleanup_subscriptions(self, *_args: object) -> None:
-        unsubscribe_device = self._unsubscribe_device_changed
-        if unsubscribe_device is not None:
-            self._unsubscribe_device_changed = None
-            unsubscribe_device()
-
-    def _on_device_changed(self, payload: DeviceChangedPayload) -> None:
-        if not self.isVisible():
-            return
-        if self._live_mode:
-            return
-        before = self._selected_device_name()
-        self._refresh_device_selector()
-        selected = self._selected_device_name()
-        if selected is None:
-            return
-        if payload.name is None or payload.name == selected or before != selected:
-            self._apply_cached_device_value(selected)
 
     # ------------------------------------------------------------------
     # Status helper
