@@ -7,6 +7,7 @@ from pydantic import Field, field_validator, model_validator
 from zcu_tools.resources.simulation_schema import Finite, Index, Name, Positive, Values
 from zcu_tools.resources.single_fluxonium.schema import (
     Chip,
+    CoherenceDrift,
     DriveLine,
     Numerics,
     Readout,
@@ -67,6 +68,8 @@ class SixFluxoniumQubit(Values):
     dc_bias: local driver and both current-to-flux calibrations. drive_line: microwave
     calibration. readout: bare cavity, incident-field and ADC calibrations.
     numerics: truncation, solver and seed/pacing choices, as on single settings.
+    drift: optional independent log-OU losses; None/omitted disables drift.
+    Selected losses must be positive; sigma is ln(loss), tau_s is seconds.
     """
 
     format: Literal["zcu.single-fluxonium"]
@@ -76,6 +79,13 @@ class SixFluxoniumQubit(Values):
     drive_line: DriveLine
     readout: Readout
     numerics: Numerics
+    drift: CoherenceDrift | None = None
+
+    @model_validator(mode="after")
+    def _drift_losses(self) -> Self:
+        if self.drift is not None:
+            self.drift.validate_losses(self.chip.qubit)
+        return self
 
     @field_validator("version", mode="before")
     @classmethod

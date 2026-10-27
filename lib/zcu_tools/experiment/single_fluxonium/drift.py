@@ -67,6 +67,10 @@ class CoherenceDrift:
     seed (None chooses fresh entropy for a standalone source). truth_log selects
     a JSONL file, or None for ~/.local/state/zcu-tools/simulation/
     single-fluxonium/<session>/truth.jsonl. No file exists until sample succeeds.
+    qubit optionally names a stable circuit identity, included in each truth row
+    and the drift stream namespace without consuming sampling RNG. None keeps
+    the standalone single stream unchanged. session optionally supplies an
+    environment-owned UUID for a shared log; None creates a new UUID.
     I/O errors propagate. Call methods synchronously from the source owner.
     """
 
@@ -76,9 +80,13 @@ class CoherenceDrift:
         *,
         seed: int | None,
         truth_log: Path | None,
+        qubit: str | None = None,
+        session: str | None = None,
     ) -> None:
         self.settings = settings
-        self.session = uuid4().hex
+        self.session = uuid4().hex if session is None else session
+        self._qubit = qubit
+        namespace = () if qubit is None else tuple(qubit.encode("utf-8"))
         self.path = (
             truth_log
             if truth_log is not None
@@ -110,7 +118,9 @@ class CoherenceDrift:
                     sigma=parameter.sigma,
                     tau_s=parameter.tau_s,
                     rng=np.random.default_rng(
-                        np.random.SeedSequence(root, spawn_key=(0x44524946, index))
+                        np.random.SeedSequence(
+                            root, spawn_key=(0x44524946, *namespace, index)
+                        )
                     ),
                 )
 
@@ -140,6 +150,8 @@ class CoherenceDrift:
             "xqp": qubit.xqp,
             "aphi": qubit.aphi,
         }
+        if self._qubit is not None:
+            record["qubit"] = self._qubit
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self.path.open("a", encoding="utf-8") as stream:
             stream.write(json.dumps(record, allow_nan=False) + "\n")

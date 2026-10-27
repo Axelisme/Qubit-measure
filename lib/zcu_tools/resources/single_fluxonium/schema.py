@@ -219,6 +219,21 @@ class CoherenceDrift(Values):
     xqp: DriftParameter | None = None
     aphi: DriftParameter | None = None
 
+    def validate_losses(self, qubit: Fluxonium) -> None:
+        """Require positive configured losses for selected OU targets.
+
+        qubit supplies dimensionless q_cap/xqp and aphi in Phi0/sqrt(Hz).
+        No values are mutated or resources created. Disabled/null or zero selected losses
+        raise ValueError with a drift.<parameter> diagnostic.
+        """
+        for name, process, value in (
+            ("q_cap", self.q_cap, qubit.q_cap),
+            ("xqp", self.xqp, qubit.xqp),
+            ("aphi", self.aphi, qubit.aphi),
+        ):
+            if process is not None and (value is None or value <= 0):
+                raise ValueError(f"drift.{name}: requires a positive chip.qubit.{name}")
+
 
 class SingleFluxoniumSettings(Values):
     """Complete immutable single-fluxonium v1 physical/configuration snapshot.
@@ -251,16 +266,7 @@ class SingleFluxoniumSettings(Values):
     @model_validator(mode="after")
     def _drift_losses(self) -> Self:
         if self.drift is not None:
-            qubit = self.chip.qubit
-            for name, process, value in (
-                ("q_cap", self.drift.q_cap, qubit.q_cap),
-                ("xqp", self.drift.xqp, qubit.xqp),
-                ("aphi", self.drift.aphi, qubit.aphi),
-            ):
-                if process is not None and (value is None or value <= 0):
-                    raise ValueError(
-                        f"drift.{name}: requires a positive chip.qubit.{name}"
-                    )
+            self.drift.validate_losses(self.chip.qubit)
         return self
 
     @field_validator("version", mode="before")

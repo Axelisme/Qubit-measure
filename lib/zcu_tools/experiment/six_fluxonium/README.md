@@ -1,6 +1,6 @@
 # Six independent fluxonium cavities
 
-**Last updated:** 2026-10-24, physical-time pacing
+**Last updated:** 2026-10-27, independent coherence drift
 
 **Readers:** framework-dev, lab-author. Build and acquire six independent cavities through the normal simulation SoC.
 
@@ -73,6 +73,40 @@ Q1's seed selects the environment root stream. The largest per-qubit
 `numerics.time_scale` multiplies the round's physical duration, computed from reps
 and every point's timeline plus relaxation. All six default to 1.0 (physical
 time); all must be zero to disable waiting. Stop interrupts pacing at 10 ms checkpoints.
+
+## Independent coherence drift
+
+Each `qubits.Q1..Q6.drift` section accepts the single-fluxonium log-OU settings.
+For example, `qubits.Q2.drift.q_cap: {sigma: 0.15, tau_s: 3600.0}` varies only
+Q2's capacitive quality factor. Sigma is the stationary standard deviation of
+ln(loss); tau_s is correlation time in seconds. Selected YAML losses must be
+positive. Omit a parameter to keep it constant, or omit/null the section to
+disable that qubit's drift. Drift-off preserves the existing sampling streams.
+
+The environment derives separate drift streams from its Q1 root seed and stable
+Q1..Q6 identities, regardless of YAML mapping order or ADC routing. Per-qubit
+seeds do not override that root. Each environment starts at the YAML losses.
+Admission samples every enabled qubit at the same simulated time, before request
+construction. All points, routed receivers and software rounds then use that
+acquisition's frozen losses. The public `SixFluxoniumSource.sources` tuple follows
+Q1..Q6 order and exposes the effective settings sent to each physical source.
+
+One `SimulationClock` serves the environment and all six sources. Only the outer
+binding credits a completed round's unscaled physical duration, once per round.
+The credit is `max(0, physical seconds - elapsed wall seconds)`, including pacing
+in elapsed time. Idle wall time advances naturally. Zero time scale skips waiting
+without losing physical time. Cancelled or failed rounds add no credit.
+Builder `clock=SimulationClock(monotonic=...)` injects wall seconds for offline use.
+
+Enabled qubits append one truth row each per acquisition to
+`~/.local/state/zcu-tools/simulation/six-fluxonium/<session>/truth.jsonl`.
+Builder `truth_log=Path(...)` selects another file. Rows include the shared session,
+`qubit` identity, `sim_now` in seconds, UTC `wall_time`, and effective losses.
+Truth I/O errors propagate at admission. No truth enters Run, GUI, MCP or Labber
+metadata. Drift-off writes nothing. A new environment resets its clock offset and
+drift state. Equal roots and acquisition time sequences reconstruct each qubit's
+trajectory; six-fluxonium does not provide private acquisition replay.
+Single-fluxonium's pulse-only private replay contract is unchanged.
 
 ## Bounded statistics
 
