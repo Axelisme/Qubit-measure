@@ -81,6 +81,9 @@ def test_numeric_model_receiver_and_policy_are_exact_keys(change):
         ("ripple_phase_rad", 0.3),
         ("slope_db_per_ghz", -3.0),
         ("pivot_ghz", 7.0),
+        ("extra_ripples", (adc.BackgroundRipple(0.04, 44.0),)),
+        ("roughness", adc.BackgroundRoughness(0.02, 50.0, 82)),
+        ("band_edges", adc.BackgroundBandEdges(low=adc.BackgroundBandEdge(6.5, 20.0))),
     ],
 )
 def test_background_parameters_are_exact_receiver_cache_keys(field, value):

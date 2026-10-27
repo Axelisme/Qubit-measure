@@ -2,7 +2,7 @@
 
 **Readers:** operator, lab-author. Start six independent fluxonium models and prepare mux measurements without hardware.
 
-**Last updated:** 2026-10-27, shared single-fluxonium physics and component schema v2.
+**Last updated:** 2026-10-27, component schema v3 and fixed multiplicative readout background.
 
 For existing entries, move resonator and mux-group `ext.time_of_fly` to top-level `time_of_fly`. The loader does not migrate it.
 
@@ -20,6 +20,15 @@ has no coupler, qubit-qubit interaction or crosstalk matrix.
 `entry-template.yaml` holds working components, wiring and aliases. Neither
 the physical settings nor the entry template supplies calibrated pulses or a
 module library. The [settings guide](field-guide.md) records units and model limits.
+
+The template background now multiplies 68/44/308 MHz waves, 2% complex RMS
+roughness, a -4 dB/GHz slope and a 3.7 GHz low-frequency edge. Existing working
+copies do not update automatically. Copy the template's `background.extra_ripples`,
+`roughness` and `band_edges` into each receiver in your working YAML, update the
+legacy ripple/slope values too, then restart the environment. `roughness.seed`
+fixes the line shape independently of the measurement-noise `numerics.seed`.
+See the [ADC background contract](../../../lib/zcu_tools/simulate/adc/README.md)
+for field definitions and reproducibility limits.
 
 Top-level `numerics` assigns the whole environment 768 MiB prepare, 64 MiB
 result-memo and 4 MiB routing cache budgets, divided across six sources.
@@ -100,16 +109,19 @@ Q1 through Q6, R1 through R6, local current-source components `Q1_bias` through
 `Q6_bias`, shared `coil_bias` and the `MG123456` mux group. Each Qi references
 Ri and its own `Qi_bias`. The group references `coil_bias`. Aliases bind `mux`
 to `MG123456`, `qubit` to `Q1` and `resonator` to `$qubit.resonator`.
-Scalar flux forms read `$qubit.flux_source` on Open/Reset without a device alias.
-The template uses `schema_version: 2`. Each qubit owns
-`flux.Qn_bias` and `flux.coil_bias`, with `half`, `integer` and signed `period`.
-The local integer is its physical offset; the coil integer is its coil offset.
-Each half is integer plus half the corresponding period. All currents use A.
-Together these integers give zero total reduced flux.
+Scalar flux forms read `$qubit.flux_dev` on Open/Reset without a device alias.
+The template uses `schema_version: 3`. Each qubit owns `flux.offset` in Phi0
+and `flux.period.Qn_bias` / `flux.period.coil_bias` in A/Phi0.
+Component offset is `-local_offset/local_period - coil_offset/coil_period`,
+using the physical current offsets from the environment YAML. For Q1 it is 0.5.
+These physical YAML input fields remain current offsets in A, not component
+flux offsets. Missing device values contribute zero without deleting periods.
 These simulated-truth values are not measurement results. Resonators seed total
 linewidth 1.1 MHz and pulse-route flight time 0.4 us from their physical settings.
-Fluxdep writeback updates only the scanned entry, such as `Q1.flux.coil_bias`,
-and appends a raw-fit record with the Run's original frame.
+Measurement fluxdep writeback proposes the scanned device's signed period and
+the scanned qubit's offset, such as `Q1.flux.period.coil_bias` and
+`Q1.flux.offset`. You can accept each item independently.
+It appends a raw-fit record with the Run's original frame.
 Existing v1 entries require the explicit [upgrade command](../../../docs/parameter-upgrades.md).
 Startup never upgrades saved entries.
 

@@ -296,6 +296,12 @@ def _flat_key(
         encoded = text.encode("utf-8")
         parts.extend((pack("!Q", len(encoded)), encoded))
     receiver = model.receiver
+    # Frozen numeric records have lossless scalar reprs; spectral arrays are
+    # derived from roughness parameters and deliberately excluded from repr.
+    background = repr(
+        (receiver.extra_ripples, receiver.roughness, receiver.band_edges)
+    ).encode("ascii")
+    parts.extend((pack("!Q", len(background)), background))
     parts.append(
         pack(
             "!12d",

@@ -106,12 +106,12 @@ def _seed_predictors(
         component = template.components.get(name)
         if not isinstance(component, QubitSchema):
             raise ValueError(f"design.{name}: no fluxonium qubit in entry-template")
-        if component.flux_source is None:
-            raise ValueError(f"design.{name}: entry-template qubit has no flux_source")
-        info = devices.get_info(component.flux_source)
+        if component.flux_dev is None:
+            raise ValueError(f"design.{name}: entry-template qubit has no flux_dev")
+        info = devices.get_info(component.flux_dev)
         if not isinstance(info, FakeDeviceInfo) or info.value_unit != design.flux_unit:
             raise ValueError(
-                f"design.{name}.flux_unit: must match device {component.flux_source}"
+                f"design.{name}.flux_unit: must match device {component.flux_dev}"
             )
         predictors[name] = PredictorFile(
             model="fluxonium",

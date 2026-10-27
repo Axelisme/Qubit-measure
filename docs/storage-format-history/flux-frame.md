@@ -1,77 +1,75 @@
 # Record flux frame
 
-**讀者：** operator、lab-author、framework-dev、agent。辨識多 device record frame 與分析時的 fallback 規則。
+**讀者：** operator、lab-author、framework-dev、agent。辨識歷史與現行 record frame，選擇分析 fallback 並處理缺值。
 
-## 改前與改後
+## 歷史形狀
 
-單 device 分析曾使用 flat row-frame：
+早期單儀器 flat row-frame：
 
 ```json
 {"run_id":"run-a","devices":{"bias":{"value":0.5,"value_unit":"V"}},"flux_int":0.1,"flux_period":0.8}
 ```
 
-新 row-frame 以 device 名稱為鍵。儀器值與校準使用各 device 的原生單位：
+Main v2 的 component 模型產生每台儀器自己的參考點：
 
 ```json
 {"run_id":"run-b","component":"Q1","devices":{"bias":{"value":0.5,"value_unit":"V"},"coil":{"value":0.1,"value_unit":"A"}},"flux_frame":{"bias":{"integer":0.1,"half":0.5,"period":0.8},"coil":{"integer":0.0,"half":-0.2,"period":-0.4}}}
 ```
 
-CSV 攤平後的校準欄位是 `flux_frame.bias.integer`、`flux_frame.bias.period` 與其他 device 的對應欄位。
-儀器值在 `devices.bias.value` 與 `devices.coil.value`。
-新例子的 flux 是 0.25 Phi0，包含 bias 的 0.5 與 coil 的 -0.25。
+歷史 v2 公式為 `Σ(value - integer) / period`，所有儀器停在各自 integer 時 flux 為零。
+上例為 0.25 Φ0。這是歷史形狀，不是目前 reader 支援的 row frame。
+Component 升級不重寫這些 records。
 
-## 原因與辨識
+## 現行 v3 frame
 
-多條儀器線可能同時影響一顆 qubit。
-Frame 記錄每台儀器自己的 integer 參考點與 signed period。
-所有 device 都停在各自 integer 時，flux 是零。
-分析以 `Σ(value - integer) / period` 計算總 flux，負 period 表示反向貢獻。
+Record 沒有獨立版本標頭，現行 frame 複製 component 的 `{offset, period}`：
 
-Record 沒有獨立的版本標頭。
-Lab adapters 在 Analyze 從同次 Run 的 parameter capture 複製 flux 區塊，devices 來自 Run 開始時的 snapshot。
-Workflow 使用該次 Plan 捕捉的 frame，Notebook 作者在量測前捕捉後經 accept 明傳。
-Append owner 另加 component 信封，見 [component 歷程](record-component.md)。
-接受時不重讀目前 point，也不以新校準覆蓋這列 frame。
-
-Fluxdep 接受時同樣 append 一列 ordinary record，額外保存被掃 device 與原始擬合 half、integer、正的 period。
-Point proposal 才保存換回參考點的校準，record 不另存換算後的值。
-範例原始擬合欄位為 `"device":"bias","half":0.5,"integer":0.1,"period":0.8`，devices 與 flux_frame 仍保存該 Run 的原快照。
-每列是否有新 row-frame，以 `flux_frame` 判斷。
-Nested 輸入以 frame keys 判斷 device membership。
-Dotted 輸入以該列該 device 任一 frame 欄位非 null 判斷。
-全 null 代表該列沒有該 device。
-攤平無法區分原本沒有 device 與原本有 key 但欄位全 null，檢查後者須保留 nested 輸入。
-
-## 舊資料與讀取規則
-
-`flux_from_frame` 每列依序使用 explicit flux、新 row-frame、caller fallback。
-有效 explicit flux 不檢查未用 frame。
-使用 row-frame 時，缺 contributing device 的值、integer 或 period 都報錯並指出列與欄位。
-它不忽略部分 frame，也不退回 fallback。
-
-`flux_from_frame` 不再解讀舊 flat `flux_int/flux_period` row-frame。
-只帶舊 flat frame 的列若沒有 explicit flux，作者須把該 frame 作 caller fallback 傳入：
-
-```python
-from zcu_tools.resources.record_table import RecordFluxFrame, flux_from_frame
-
-flux = flux_from_frame(
-    table,
-    device_name="bias",
-    fallback_frame=RecordFluxFrame(dev_unit="V", flux_int=0.1, flux_period=0.8),
-)
+```json
+{"run_id":"run-c","component":"Q1","devices":{"bias":{"value":0.5,"value_unit":"V"},"coil":{"value":0.1,"value_unit":"A"}},"flux_frame":{"offset":-0.125,"period":{"bias":0.8,"coil":-0.4}}}
 ```
 
-多 device fallback 使用 `analysis.flux.FluxFrame`。
-每台儀器的 record `value_unit` 必須與 caller 宣告的單位相同。
-工具不換單位，不自動讀 `params.json`，也不推斷舊欄位別名。
+公式為 `offset + Σ value / period`，上例仍為 0.25 Φ0。
+CSV 校準欄位是 `flux_frame.offset`、`flux_frame.period.bias`、`flux_frame.period.coil`。
+儀器值在 `devices.bias.value` 與 `devices.coil.value`，各用原生單位。
+未校準 frame 為 `{offset: null, period: {}}`。
 
-舊 records 不補寫或自動遷移。
-獨立 `resolve_record_flux`、`validate_record_table_v2` 與 v2 遷移入口仍保留其 flat 座標契約。
-此處只變更 `flux_from_frame` 的 row-frame 讀取格式。
+Lab adapters 使用同次 Run 的 parameter capture，devices 來自 Run-start snapshot。
+Workflow 使用該次 Plan 捕捉的 frame。Notebook 作者量測前捕捉後經 accept 明傳。
+Append owner 加 [component 信封](record-component.md)。接受時不重讀目前 point，也不以新校準覆蓋原 frame。
+Fluxdep record 另存被掃 device、原始 half、integer 與正的 period，這些是擬合點，不是 component 欄位。
+Point writeback 才分開提 signed period 與 offset。
+
+## 逐列分析與缺值
+
+`flux_from_frame` 依序使用 explicit flux、現行 row frame、caller fallback。
+有效 explicit flux 不檢查未用 frame。使用 row frame 時，缺 offset 報錯並指出列與欄位，不退回 fallback。
+有 period 但缺 device value 的儀器不貢獻，period 保留。
+Nested 可區分缺 key 與明寫 NaN，後者以及 inf、bool 都報錯。
+Dotted device value／period 的 NaN cell 視為缺席，inf、bool 仍報錯。
+攤平無法區分缺 key 與明寫 NaN，只有 nested 保證拒絕明寫 NaN，不新增 presence 欄位。
+
+## 舊資料與 fallback
+
+Reader 不自動解讀歷史 flat 或 v2 per-device frame，也不自動寫回升級。
+沒有現行 row frame 的列可由作者確認歷史校準與單位後明傳 fallback：
+
+```python
+from zcu_tools.analysis.flux import DevicePeriod, FluxFrame
+from zcu_tools.resources.record_table import flux_from_frame
+
+frame = FluxFrame(offset=-0.125, devices={"bias": DevicePeriod(0.8, unit="V")})
+flux = flux_from_frame(table, fallback_frame=frame)
+```
+
+Fallback 統一用新 `FluxFrame`，單儀器與多儀器同型別。有值儀器的 record 單位必須與 caller 宣告相同。
+已有但不合法的 frame 不會被 fallback 遮蓋。歷史 per-device frame 應先在分析副本明確轉換，不能直接加 fallback 繞過。
+不換單位、不讀目前 component 猜歷史校準，也不推斷舊欄位別名。
+Standalone `resolve_record_flux`／`validate_record_table_v2` 保留既有 flat row schema，fallback 改用恰有一台儀器的新 `FluxFrame`。
+0 台或多台均報錯並說明台數。這個 standalone v2 與 component schema v3 是不同版本線。
 
 ## 相關契約
 
 - [Record table owner](../../lib/zcu_tools/resources/record_table/README.md#作者-flux-換算) 定義 nested、dotted 與 fallback 行為。
-- [ADR-0082](../adr/0082-component-flux-frame.md) 定義參考點、writeback 與版本邊界。
+- [ADR-0082](../adr/0082-component-flux-frame.md) 定義 writeback 與版本邊界。
 - [Analysis owner](../../lib/zcu_tools/analysis/README.md#多-device-flux-座標) 定義純數學與具名型別。
+- [Component v3 歷程](component-flux-v3.md) 定義升級公式與 half 分支。

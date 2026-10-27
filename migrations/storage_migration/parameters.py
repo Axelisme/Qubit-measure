@@ -42,7 +42,13 @@ from .params_json import convert_params_json
 from .paths import contained_path, validate_segment
 from .points import create_point
 from .samples import convert_samples
-from .state import MigrationSession, clear_pending, record_key_mapping, record_pending
+from .state import (
+    MigrationSession,
+    clear_pending,
+    record_key_mapping,
+    record_parameter_notes,
+    record_pending,
+)
 
 _YAML_VALUE = TypeAdapter(YamlValue)
 _YAML_MAP = TypeAdapter(YamlMap)
@@ -60,7 +66,10 @@ def _seed_components(
         ParameterDocument(data, entry.result_path / "setup.yaml"),
         transform=mapping.parameter_transform,
     )
-    for name, seed in seeded_document.components.items():
+    record_parameter_notes(
+        session, entry.result_path / "setup.yaml", seeded_document.notes
+    )
+    for name, seed in seeded_document.document.components.items():
         fields = _YAML_MAP.validate_python(
             seed.model_dump(mode="python", exclude_unset=True)
         )
@@ -572,24 +581,28 @@ def convert_parameters(
     convert_params_json(session, entry, mapping)
     dry_setup = None
     if session.dry_run:
-        dry_setup = EditView(
-            prepare_parameter_batch(
-                ParameterDocument(
-                    {
-                        "format": "zcu.parameter-container",
-                        "format_version": "2.0",
-                        "schema_version": component_registry.require_schema_policy().current_version,
-                        "general": {
-                            "entry_id": str(session.manifest.identity.entry_id),
-                            "created_at": datetime.now(timezone.utc).isoformat(),
-                        },
-                        "components": _YAML_MAP.validate_python(mapping.components),
+        prepared = prepare_parameter_batch(
+            ParameterDocument(
+                {
+                    "format": "zcu.parameter-container",
+                    "format_version": "2.0",
+                    "schema_version": component_registry.require_schema_policy().current_version,
+                    "general": {
+                        "entry_id": str(session.manifest.identity.entry_id),
+                        "created_at": datetime.now(timezone.utc).isoformat(),
                     },
-                    session.manifest.report.destination.result_path / "setup.yaml",
-                ),
-                transform=mapping.parameter_transform,
-            )
+                    "components": _YAML_MAP.validate_python(mapping.components),
+                },
+                session.manifest.report.destination.result_path / "setup.yaml",
+            ),
+            transform=mapping.parameter_transform,
         )
+        record_parameter_notes(
+            session,
+            session.manifest.report.destination.result_path / "setup.yaml",
+            prepared.notes,
+        )
+        dry_setup = EditView(prepared.document)
     for candidate in _context_directories(source_root):
         _convert_context(session, entry, mapping, candidate, dry_setup)
     convert_samples(session, entry, mapping)

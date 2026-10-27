@@ -43,7 +43,8 @@ import numpy as np
 import pandas as pd
 from IPython.display import display
 from zcu_tools.resources.qubit_params import QubitParams
-from zcu_tools.resources.record_table import RecordFluxFrame, flux_from_frame
+from zcu_tools.analysis.flux import DevicePeriod, FluxFrame
+from zcu_tools.resources.record_table import flux_from_frame
 
 %autoreload 2
 import zcu_tools.notebook.analysis.t2_curve as zt2
@@ -71,7 +72,7 @@ figure_paths = {}
 
 The author reads the CSV and supplies one normalized flux value per row.
 `flux_from_frame` is an independent option for reconstructing flux from the
-selected device's dotted columns. To use another coordinate source, replace
+record's dotted offset, periods and device values. To use another coordinate source, replace
 that call with your own row-aligned array.
 
 ```python
@@ -80,11 +81,12 @@ params = QubitParams(Path(result_dir) / "params.json", readonly=True).require_fl
 
 fallback_frame = None
 # For rows without a frame, explicitly choose the unit and frame:
-# fallback_frame = RecordFluxFrame(
-#     dev_unit="A", flux_int=params.flux_int, flux_period=params.flux_period
+# fallback_frame = FluxFrame(
+#     offset=-params.flux_int / params.flux_period,
+#     devices={"bias_device": DevicePeriod(params.flux_period, "A")},
 # )
 fluxs = flux_from_frame(
-    samples, device_name="bias_device", fallback_frame=fallback_frame
+    samples, fallback_frame=fallback_frame
 )
 ```
 
@@ -140,8 +142,9 @@ show_device_axis = False
 device_axis_name = "bias_device"
 device_axis_frame = None
 if show_device_axis:
-    device_axis_frame = RecordFluxFrame(
-        dev_unit="A", flux_int=params.flux_int, flux_period=params.flux_period
+    device_axis_frame = FluxFrame(
+        offset=-params.flux_int / params.flux_period,
+        devices={device_axis_name: DevicePeriod(params.flux_period, "A")},
     )
 ```
 

@@ -9,9 +9,9 @@ from .base import BuiltinComponent, Flux, Frequency, PumpPower
 
 
 class JpaSchema(BuiltinComponent):
-    flux_source: DeviceName | None = Field(
+    flux_dev: DeviceName | None = Field(
         default=None,
-        description="DC device name for this JPA's flux bias; None leaves the form device blank.",
+        description="Primary (default) flux control device; not part of the flux calculation and need not have a flux calibration. None leaves the form device blank.",
     )
     rf_source: DeviceName | None = Field(
         default=None,

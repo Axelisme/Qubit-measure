@@ -4,7 +4,7 @@
 
 ## Parameter sources
 
-Uses the resonator and jpa (`amplifier/jpa`) aliases. Bounds use `$resonator.freq`, `$resonator.kappa` and `$jpa.flux`. Opening or resetting the form reads the required JPA flux device from `$jpa.flux_source`; a missing source leaves it empty and marks the form Invalid. The direct device name remains editable. `flux_unit` starts as A, and the device receives the entered values unchanged. The qubit alias supplies an optional reset module.
+Uses the resonator and jpa (`amplifier/jpa`) aliases. Bounds use `$resonator.freq`, `$resonator.kappa` and `$jpa.flux`. Opening or resetting the form reads the required JPA flux device from `$jpa.flux_dev`; a missing source leaves it empty and marks the form Invalid. The direct device name remains editable. `flux_unit` starts as A, and the device receives the entered values unchanged. The qubit alias supplies an optional reset module.
 
 ## Module slots
 

@@ -7,7 +7,7 @@
 | 資料狀態 | 工具與操作說明 | 結果 |
 | --- | --- | --- |
 | 舊 `result/<chip>/<qubit>`／Database | [`migrate_storage`](../docs/storage-migration.md) | Native entry、原文保全、備份與 pending 報告 |
-| Native 舊 component YAML 或未標版文件 | 長期 [`upgrade_parameters.py`](../docs/flux-migration.md)，預設 dry-run | 完整分類後 v1→v2，不補 records；先在副本核對 |
+| Native 舊 component YAML 或未標版文件 | 長期 [`upgrade_parameters.py`](../docs/flux-migration.md)，預設 dry-run | 完整分類後 v1→v2→v3，不補 records；先在副本核對 |
 | 舊樣本 CSV | [`sample_csv`](#sample-csv--jsonl) | JSONL 樣本歷史，保留來源 CSV |
 | Record 舊 `dev_value/dev_unit` | 同一長期 CLI 的 [`--scope records --device-name`](../docs/record-device-upgrades.md) | Operator 宣告的 `devices.<name>` 值，不合成 frame/component |
 | Device 改名或改接線 | [人工改名／重校準流程](../docs/record-device-upgrades.md#改名與改接線) | Component 更新，歷史 record 名稱與 frame 不變 |

@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
 from typing import cast
 
 import numpy as np
 import pandas as pd
 import pytest
-from numpy.typing import NDArray
+from zcu_tools.analysis.flux import DevicePeriod, FluxFrame
 from zcu_tools.resources.record_table import (
     DEV_UNIT_COLUMN,
     DEV_VALUE_COLUMN,
@@ -19,12 +18,30 @@ from zcu_tools.resources.record_table import (
     DeviceValueUnit,
     LegacyDeviceValueUnit,
     LegacyRecordFluxFrame,
-    RecordFluxFrame,
     RecordTableV2Error,
     migrate_record_table_v2,
     resolve_record_flux,
     validate_record_table_v2,
 )
+
+
+@pytest.mark.parametrize("count", [0, 2])
+def test_flat_fallback_requires_exactly_one_device(count: int) -> None:
+    fallback = FluxFrame(0.5, {f"bias{i}": DevicePeriod(4, "V") for i in range(count)})
+    records = pd.DataFrame({"dev_value": [1.0], "dev_unit": ["V"]})
+    validate_record_table_v2(records)
+    with pytest.raises(ValueError, match=rf"exactly one.*{count}"):
+        resolve_record_flux(records, fallback_frame=fallback)
+
+
+def test_flat_fallback_uses_offset_and_signed_period() -> None:
+    records = pd.DataFrame({"dev_value": [3.0], "dev_unit": ["V"]})
+    validate_record_table_v2(records)
+    result = resolve_record_flux(
+        records, fallback_frame=FluxFrame(1.5, {"bias": DevicePeriod(-4, "V")})
+    )
+    np.testing.assert_allclose(result.values, [0.75])
+    assert result.sources == ("fallback-frame",)
 
 
 def _assert_reason(exc: RecordTableV2Error, reason: str) -> None:
@@ -89,7 +106,7 @@ def test_native_coordinates_resolve_with_declared_frame(mode: str) -> None:
         records[FLUX_INT_COLUMN] = [1.0]
         records[FLUX_PERIOD_COLUMN] = [4.0]
     else:
-        fallback = RecordFluxFrame("native", flux_int=1.0, flux_period=4.0)
+        fallback = FluxFrame(-0.25, {"bias": DevicePeriod(4.0, "native")})
 
     validate_record_table_v2(records)
     resolution = resolve_record_flux(records, fallback_frame=fallback)
@@ -106,7 +123,7 @@ def test_native_coordinates_require_matching_frame(
     fallback = (
         None
         if fallback_unit is None
-        else RecordFluxFrame(fallback_unit, flux_int=1.0, flux_period=4.0)
+        else FluxFrame(-0.25, {"bias": DevicePeriod(4.0, fallback_unit)})
     )
 
     validate_record_table_v2(records)
@@ -301,85 +318,6 @@ def test_validate_empty_table_modes() -> None:
 # Check record-table frames for criterion A1.
 
 
-def test_record_flux_frame_rejects_invalid_frames() -> None:
-    with pytest.raises(RecordTableV2Error) as exc:
-        RecordFluxFrame(
-            # tolerated(cast): Bypass A/V/native typing to test runtime rejection of mA.
-            dev_unit=cast(DeviceValueUnit, "mA"),
-            flux_int=0.0,
-            flux_period=1.0,
-        )
-    _assert_reason(exc.value, "invalid_unit")
-    with pytest.raises(RecordTableV2Error) as exc:
-        RecordFluxFrame(dev_unit="A", flux_int=np.nan, flux_period=1.0)
-    _assert_reason(exc.value, "non_finite_value")
-    with pytest.raises(RecordTableV2Error) as exc:
-        RecordFluxFrame(dev_unit="A", flux_int=0.0, flux_period=0.0)
-    _assert_reason(exc.value, "invalid_period")
-    with pytest.raises(RecordTableV2Error) as exc:
-        RecordFluxFrame(dev_unit="A", flux_int=0.0, flux_period=np.inf)
-    assert exc.value.reason in ("invalid_period", "non_finite_value")
-
-
-def test_record_flux_frame_round_trip_scalar_and_array() -> None:
-    frame = RecordFluxFrame(dev_unit="A", flux_int=-0.001, flux_period=0.0246)
-    flux = frame.flux_from_dev_value(0.0113)
-    assert flux == pytest.approx((0.0113 + 0.001) / 0.0246)
-    assert frame.dev_value_from_flux(flux) == pytest.approx(0.0113)
-    values = np.array([-0.007, 0.002])
-    fluxs = frame.flux_from_dev_value(values)
-    np.testing.assert_allclose(fluxs, (values + 0.001) / 0.0246)
-    np.testing.assert_allclose(frame.dev_value_from_flux(fluxs), values)
-
-
-@pytest.mark.filterwarnings("error")
-@pytest.mark.parametrize(
-    "value",
-    [
-        pytest.param(datetime(2020, 1, 1), id="python-datetime"),
-        pytest.param(timedelta(days=1), id="python-timedelta"),
-        pytest.param(True, id="python-boolean"),
-        pytest.param(1 + 2j, id="python-complex"),
-        pytest.param(np.datetime64("2020-01-01"), id="numpy-datetime"),
-        pytest.param(np.timedelta64(1, "D"), id="numpy-timedelta"),
-        pytest.param(np.bool_(True), id="numpy-boolean"),
-        pytest.param(np.complex128(1 + 2j), id="numpy-complex"),
-    ],
-)
-def test_record_flux_frame_rejects_non_real_scalar_conversion_input(
-    value: object,
-) -> None:
-    frame = RecordFluxFrame(dev_unit="A", flux_int=0.0, flux_period=1.0)
-    # tolerated(cast): Numeric overloads exclude these datetime/timedelta/bool/complex scalars.
-    invalid = cast(float, value)
-    for convert in (frame.flux_from_dev_value, frame.dev_value_from_flux):
-        with pytest.raises(RecordTableV2Error) as exc:
-            convert(invalid)
-        _assert_reason(exc.value, "non_numeric_coordinate")
-
-
-@pytest.mark.filterwarnings("error")
-@pytest.mark.parametrize(
-    "values",
-    [
-        pytest.param(np.array(["2020-01-01"], dtype="datetime64[D]"), id="datetime"),
-        pytest.param(np.array([1], dtype="timedelta64[D]"), id="timedelta"),
-        pytest.param(np.array([True], dtype=np.bool_), id="boolean"),
-        pytest.param(np.array([1 + 2j], dtype=np.complex128), id="complex"),
-    ],
-)
-def test_record_flux_frame_rejects_non_real_array_conversion_input(
-    values: object,
-) -> None:
-    frame = RecordFluxFrame(dev_unit="A", flux_int=0.0, flux_period=1.0)
-    # tolerated(cast): Float64 overloads exclude these datetime/timedelta/bool/complex arrays.
-    invalid = cast(NDArray[np.float64], values)
-    for convert in (frame.flux_from_dev_value, frame.dev_value_from_flux):
-        with pytest.raises(RecordTableV2Error) as exc:
-            convert(invalid)
-        _assert_reason(exc.value, "non_numeric_coordinate")
-
-
 def test_legacy_record_flux_frame_rejects_invalid_frames() -> None:
     with pytest.raises(RecordTableV2Error) as exc:
         LegacyRecordFluxFrame(
@@ -410,12 +348,6 @@ def test_flux_frames_reject_non_real_numeric_values(value: object) -> None:
     # tolerated(cast): Float frame fields exclude these timestamp/timedelta/bool/complex values.
     invalid = cast(float, value)
     with pytest.raises(RecordTableV2Error) as exc:
-        RecordFluxFrame(dev_unit="A", flux_int=invalid, flux_period=1.0)
-    _assert_reason(exc.value, "non_numeric_coordinate")
-    with pytest.raises(RecordTableV2Error) as exc:
-        RecordFluxFrame(dev_unit="A", flux_int=0.0, flux_period=invalid)
-    _assert_reason(exc.value, "non_numeric_coordinate")
-    with pytest.raises(RecordTableV2Error) as exc:
         LegacyRecordFluxFrame(dev_unit="mA", flux_int=invalid, flux_period=1.0)
     _assert_reason(exc.value, "non_numeric_coordinate")
     with pytest.raises(RecordTableV2Error) as exc:
@@ -441,7 +373,7 @@ def test_resolve_checks_only_coordinates_used_by_each_row() -> None:
     )
 
     resolved = resolve_record_flux(
-        records, fallback_frame=RecordFluxFrame("V", 2.0, 4.0)
+        records, fallback_frame=FluxFrame(-0.5, {"bias": DevicePeriod(4.0, "V")})
     )
 
     np.testing.assert_allclose(resolved.values, [0.5, 0.5, 0.5])
@@ -487,7 +419,7 @@ def test_resolve_fallback_frame_derivation() -> None:
             DEV_UNIT_COLUMN: ["A"],
         }
     )
-    fallback = RecordFluxFrame(dev_unit="A", flux_int=-0.001, flux_period=0.0246)
+    fallback = FluxFrame(0.04065040650406504, {"bias": DevicePeriod(0.0246, "A")})
     resolution = resolve_record_flux(records, fallback_frame=fallback)
     assert resolution.sources == ("fallback-frame",)
     np.testing.assert_allclose(resolution.values, [(0.0113 + 0.001) / 0.0246])
@@ -504,7 +436,7 @@ def test_resolve_precedence_closed_provenance_combined() -> None:
             FLUX_PERIOD_COLUMN: [np.nan, 2.0, np.nan, np.nan],
         }
     )
-    fallback = RecordFluxFrame(dev_unit="A", flux_int=1.0, flux_period=4.0)
+    fallback = FluxFrame(-0.25, {"bias": DevicePeriod(4.0, "A")})
     resolution = resolve_record_flux(records, fallback_frame=fallback)
     np.testing.assert_allclose(resolution.values, [0.5, 0.5, 0.5, 0.25])
     assert resolution.sources == (
@@ -523,7 +455,7 @@ def test_resolve_fallback_unit_mismatch_fails() -> None:
             DEV_UNIT_COLUMN: ["A"],
         }
     )
-    fallback = RecordFluxFrame(dev_unit="V", flux_int=0.0, flux_period=0.05)
+    fallback = FluxFrame(0, {"bias": DevicePeriod(0.05, "V")})
     with pytest.raises(RecordTableV2Error) as exc:
         resolve_record_flux(records, fallback_frame=fallback)
     _assert_reason(exc.value, "unresolved_flux")
@@ -551,7 +483,7 @@ def test_resolve_mixed_units_with_matching_fallback() -> None:
             DEV_UNIT_COLUMN: ["A", "V"],
         }
     )
-    fallback = RecordFluxFrame(dev_unit="A", flux_int=0.0, flux_period=2.0)
+    fallback = FluxFrame(0, {"bias": DevicePeriod(2.0, "A")})
     # Row 1 (V) has no matching fallback -> unresolved.
     with pytest.raises(RecordTableV2Error) as exc:
         resolve_record_flux(records, fallback_frame=fallback)

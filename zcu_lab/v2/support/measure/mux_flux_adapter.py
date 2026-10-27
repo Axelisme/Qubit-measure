@@ -29,7 +29,6 @@ from zcu_lab.components.qubit import QubitBaseSchema
 from zcu_lab.v2.mux.onetone.core import MuxFrequencyOffsetCfg
 from zcu_lab.v2.support.flux import (
     device_flux_points,
-    qubit_flux_frame,
     snapshot_numeric_values,
 )
 from zcu_lab.v2.support.measure.mux_results import captured_qubits
@@ -179,12 +178,11 @@ def _initial_lines[C: MuxFluxCfg](
         cfg.flux_dev if isinstance(cfg, GlobalFluxCfg) else cfg.tones[tone].flux_dev
     )
     validate_device_name(device)
-    qubit_flux_frame(component.flux)
-    if device not in component.flux:
+    if component.flux.offset is None or device not in component.flux.period:
         return None, None
     metadata = req.run_result.metadata
     snapshot = None if metadata is None else metadata.device_snapshot
-    values = snapshot_numeric_values(snapshot, component.flux)
+    values = snapshot_numeric_values(snapshot, component.flux.period)
     points = device_flux_points(component.flux, device, values)
     return points.half, points.integer
 
@@ -196,9 +194,9 @@ def get_writeback_items[C: MuxFluxCfg](
 
     Missing capture or cfg yields no proposals. Identity mismatches raise
     instead of guessing a target. Both scan types propose only the selected
-    device entry in qubit.flux and an ordinary raw-fit record. Global uses the
-    actual cfg.flux_dev name, not a reserved coil alias. Local rejects another
-    simultaneously scanned participant device if it contributes to this Q.
+    signed period in qubit.flux.period, qubit.flux.offset and a raw-fit record. Global
+    uses the actual cfg.flux_dev name, not a reserved coil alias. Simultaneous
+    local scans still calibrate each participant using other Run-start biases.
     Conversion and record evidence use only Run parameters and device snapshot.
     """
     cfg, picked = req.run_result.cfg, req.analyze_result
@@ -218,13 +216,11 @@ def get_writeback_items[C: MuxFluxCfg](
             req,
             qubit=picked.qubit,
             device_name=cfg.flux_dev,
-            swept_devices=(cfg.flux_dev,),
             element=identity,
         )
     return fluxdep_writeback_items(
         req,
         qubit=picked.qubit,
         device_name=cfg.tones[picked.tone].flux_dev,
-        swept_devices=tuple(cfg.tones[index].flux_dev for index in cfg.participants),
         element=identity,
     )

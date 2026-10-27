@@ -89,6 +89,60 @@ class ComplexCoefficient(Values):
     imag: Finite
 
 
+class BackgroundRipple(Values):
+    """depth: finite reflected amplitude [0,1); period_mhz: positive MHz.
+
+    phase_deg: finite phase in degrees, default zero. Multiplies other ripples.
+    """
+
+    depth: Annotated[Finite, Field(ge=0, lt=1)]
+    period_mhz: Positive
+    phase_deg: Finite = 0.0
+
+
+class BackgroundRoughness(Values):
+    """amplitude: nonnegative complex RMS of the multiplicative perturbation.
+
+    correlation_mhz: positive frequency separation for e^-1 correlation.
+    seed: nonnegative fixed line-shape seed, default 0; independent of noise seed.
+    """
+
+    amplitude: Nonnegative
+    correlation_mhz: Positive
+    seed: Index = 0
+
+
+class BackgroundBandEdge(Values):
+    """corner_ghz: finite absolute band corner; rolloff_db_per_ghz: positive.
+
+    Attenuation grows linearly in dB with distance outside the passband.
+    """
+
+    corner_ghz: Finite
+    rolloff_db_per_ghz: Positive
+
+
+class BackgroundBandEdges(Values):
+    """low/high: optional band corners; omitted sides have no attenuation.
+
+    When both are present low.corner_ghz must be below high.corner_ghz.
+    """
+
+    low: BackgroundBandEdge | None = None
+    high: BackgroundBandEdge | None = None
+
+    @model_validator(mode="after")
+    def ordered(self) -> Self:
+        """Reject reversed or zero-width passbands, naming the high corner."""
+        if (
+            self.low is not None
+            and self.high is not None
+            and self.low.corner_ghz >= self.high.corner_ghz
+        ):
+            raise ValueError("high.corner_ghz: must be above low.corner_ghz")
+        return self
+
+
 class ReceiverBackground(Values):
     """Fixed complex transmission background, applied per absolute carrier.
 
@@ -97,7 +151,10 @@ class ReceiverBackground(Values):
     ripple_phase_deg: finite standing-wave phase in degrees, default zero.
     slope_db_per_ghz: finite amplitude slope in dB/GHz, default zero.
     pivot_ghz: finite absolute GHz where the slope factor is unity, default zero.
-    Zero depth and slope give a flat unity background at every frequency.
+    extra_ripples: multiplicative standing waves, default empty.
+    roughness: optional fixed complex random field, default disabled.
+    band_edges: optional continuous attenuation outside low/high corners.
+    With these omitted, zero depth and slope give unity at every frequency.
     """
 
     ripple_depth: Annotated[Finite, Field(ge=0, lt=1)] = 0.0
@@ -105,6 +162,9 @@ class ReceiverBackground(Values):
     ripple_phase_deg: Finite = 0.0
     slope_db_per_ghz: Finite = 0.0
     pivot_ghz: Finite = 0.0
+    extra_ripples: tuple[BackgroundRipple, ...] = ()
+    roughness: BackgroundRoughness | None = None
+    band_edges: BackgroundBandEdges | None = None
 
 
 class Receiver(Values):

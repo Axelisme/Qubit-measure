@@ -1,6 +1,6 @@
 """Shared pulse-readout proposal mechanics and existing DPM calibration policy.
 
-Fluxdep proposals pair reference calibration with raw-fit Run records.
+Fluxdep proposals pair signed period and offset calibration with raw-fit Run records.
 Reset finishers live in their adapters and materialize the Run-tested cfg
 without reading calibration values from the capture.
 """
@@ -8,10 +8,11 @@ without reading calibration values from the capture.
 from __future__ import annotations
 
 import math
-from collections.abc import Collection, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from copy import deepcopy
 from typing import TYPE_CHECKING, Any, Protocol
 
+from zcu_tools.analysis.flux import DevicePeriod, offset_for_flux
 from zcu_tools.cfg_model import ConfigBase, module_spec_from_raw
 from zcu_tools.core.element import ElementIdentity
 from zcu_tools.experiment.records import RunRecord
@@ -28,7 +29,6 @@ from zcu_tools.program.v2.modules import AbsModuleCfg, PulseReadoutCfg
 from zcu_lab.components.qubit import QubitBaseSchema, QubitFluxCalibration
 from zcu_lab.v2.support.flux import (
     record_flux_frame,
-    reference_device_flux_points,
     snapshot_numeric_values,
 )
 from zcu_lab.v2.support.measure.ctx_helpers import optional_parameter_float
@@ -185,24 +185,26 @@ def fluxdep_writeback_items[C: ConfigBase, R, A: FluxPickResult](
     *,
     device_name: str,
     qubit: str = "$qubit",
-    swept_devices: Collection[str] = (),
     element: ElementIdentity | None = None,
 ) -> list[WritebackItem]:
-    """Propose one device's reference calibration and its raw fitted record.
+    """Propose a signed device period, qubit offset and raw fitted record.
 
     req carries the Analyze-time Run parameter capture and RunMetadata. qubit
     is a concrete name or captured alias; device_name is the scanned cfg device.
-    swept_devices lists all simultaneously scanned devices, including other
-    participants. element optionally labels the original mux tone/Q.
+    element optionally labels the original mux tone/Q.
     Return no items without a parameter capture. Missing Run device snapshot,
-    a non-qubit target, invalid calibration, missing/invalid fixed contributor
-    bias, or another swept contributor raises ValueError with target/device
-    context. Every captured frame device, including the scanned device, must
-    also have a finite non-bool snapshot value for its record. Alias and source
-    failures propagate.
+    a non-qubit target, invalid calibration or present invalid contributor bias
+    raises ValueError with target/device context. Missing device values contribute
+    zero. Simultaneous scans do not prevent independent period calibration.
+    Alias and source failures propagate.
 
-    Only flux.<device_name> is proposed, using the fitted period magnitude and
-    stored direction, initially positive. The ordinary record stores raw native
+    flux.period.<device_name> uses the fitted magnitude and stored direction,
+    initially positive. flux.offset is selected by default and places the fitted
+    half at flux 0.5, subtracting other calibrated devices' Run-start biases.
+    Its note lists each present other bias, native unit and flux contribution,
+    including zero; without other biases the note is None. The scanned device's
+    Run-start value is replaced by the fitted half, never counted twice.
+    The ordinary record stores raw native
     half/integer/positive period, device, the complete connected-device snapshot,
     and the original captured flux_frame, never the new calibration. Neither
     inputs nor live parameters/devices are read or changed at acceptance.
@@ -218,9 +220,6 @@ def fluxdep_writeback_items[C: ConfigBase, R, A: FluxPickResult](
     if metadata is None or metadata.device_snapshot is None:
         raise ValueError(f"{target!r}: flux writeback requires a Run device snapshot")
     devices = deepcopy(dict(metadata.device_snapshot))
-    values = snapshot_numeric_values(
-        devices, (name for name in component.flux if name != device_name)
-    )
     picked = req.analyze_result
     try:
         fitted = QubitFluxCalibration(
@@ -229,16 +228,38 @@ def fluxdep_writeback_items[C: ConfigBase, R, A: FluxPickResult](
             period=abs(picked.flx_period),
         )
         frame = record_flux_frame(component.flux, devices)
-        reference = reference_device_flux_points(
-            component.flux, device_name, fitted, values, swept_devices=swept_devices
+        previous_period = component.flux.period.get(device_name, 1.0)
+        period = math.copysign(fitted.period, previous_period)
+        periods = {
+            name: DevicePeriod(value)
+            for name, value in {**component.flux.period, device_name: period}.items()
+        }
+        values = snapshot_numeric_values(devices, periods)
+        offset = offset_for_flux(
+            periods, {**values, device_name: fitted.half}, flux=0.5
         )
+        contributions = [
+            f"{name} Run-start value = {value:.6g} "
+            f"{devices[name].get('value_unit', 'native')} → "
+            f"{value / periods[name].period:.6g} Φ0"
+            for name, value in values.items()
+            if name != device_name
+        ]
     except ValueError as error:
         raise ValueError(f"{target!r}: {error}") from error
     return [
         ParameterWriteback(
-            target_name=f"{target}.flux.{device_name}",
-            description="Reference half/integer and signed period (native DC units)",
-            proposed_value=reference.model_dump(mode="json"),
+            target_name=f"{target}.flux.period.{device_name}",
+            description="Signed period (native DC units per flux quantum)",
+            proposed_value=period,
+            element=element,
+        ),
+        ParameterWriteback(
+            target_name=f"{target}.flux.offset",
+            description="Zero-output flux offset (flux quanta)",
+            proposed_value=offset,
+            selected=True,
+            note="; ".join(contributions) or None,
             element=element,
         ),
         RecordWriteback(
@@ -250,10 +271,7 @@ def fluxdep_writeback_items[C: ConfigBase, R, A: FluxPickResult](
                 "integer": fitted.integer,
                 "period": fitted.period,
                 "devices": {name: deepcopy(info) for name, info in devices.items()},
-                "flux_frame": {
-                    name: {key: value for key, value in calibration.items()}
-                    for name, calibration in frame.items()
-                },
+                "flux_frame": frame,
                 "run": {"run_id": metadata.run_id, "experiment": metadata.experiment},
             },
             element=element,

@@ -29,8 +29,8 @@ def point_samples(
     Component names come from each recorded qubit. Shared T1/Echo raw references
     and timestamps identify the round. No commanded flux exists; callers can
     select any coordinate device from devices without guessing a flux source.
-    A present snapshot must supply finite, non-bool values for every participant
-    frame device; otherwise ValueError names it before any row is appended.
+    Missing device values contribute zero. Present invalid values raise
+    ValueError naming the device before any row is appended.
     """
     devices = native_devices(
         directory, tuple(f for f in (point.t1_file, point.t2_file) if f)
@@ -48,12 +48,7 @@ def point_samples(
                 if point.actual_start
                 else None,
                 "flux": None,
-                "flux_frame": {
-                    name: dict(calibration)
-                    for name, calibration in record_flux_frame(
-                        plan.flux_frames[qubit.name], devices
-                    ).items()
-                },
+                "flux_frame": record_flux_frame(plan.flux_frames[qubit.name], devices),
                 "devices": None
                 if devices is None
                 else {name: dict(info) for name, info in devices.items()},
