@@ -22,6 +22,8 @@ from zcu_tools.resources.waveform_assets import (
 )
 
 from tests.gui._dialog_fakes import RecordingDialogPresenter
+from tests.gui._qt_waits import qt_until
+from tests.gui._user_input import ComponentDriver
 
 from ._waveform_timer import PreviewClock
 
@@ -659,6 +661,44 @@ def test_save_button_persists_without_remote_png(
         dialogs.assert_no_unexpected_messages()
     finally:
         dialog.close()
+
+
+def test_preview_and_close_remain_visible_when_window_shrinks(tmp_path: Path) -> None:
+    dialog = ArbWaveformDialog(_FakeController())
+    dialog.show()
+    driver = ComponentDriver(dialog)
+    try:
+        driver.screenshot(tmp_path / "01-open.png")
+        driver.click("Refresh")
+        driver.screenshot(tmp_path / "02-refresh.png")
+        qt_until(
+            lambda: bool(driver.plots().axes[0].visible_curves),
+            label="waveform preview",
+        )
+
+        for step, (width, height) in enumerate(((1100, 700), (980, 560)), 3):
+            driver.resize_window(width, height)
+            driver.screenshot(tmp_path / f"{step:02}-{width}x{height}.png")
+            size = driver.window_size()
+            assert size.width() <= width
+            assert size.height() <= height
+            close = driver.observe("Close")
+            assert close.enabled and close.fully_visible
+            assert driver.plots().axes[0].visible_curves >= 3
+            assert all(
+                bounds.canvas_left
+                <= bounds.ylabel_left
+                < bounds.ylabel_right
+                <= bounds.axes_left
+                < bounds.canvas_right
+                for bounds in driver.plot_label_bounds()
+            )
+
+        driver.click("Close")
+        assert driver.dialogs() == ()
+    finally:
+        dialog.close()
+        dialog.deleteLater()
 
 
 def test_empty_assets_hint_tracks_refresh(entry_waveform_dialog) -> None:
