@@ -194,7 +194,7 @@ def analyze_t1_mechanism_limit(
         else Temp
     )
     purcell_correction = (
-        _subtract_purcell_from_fit_data(data, purcell, temp)
+        _subtract_purcell_from_fit_data(data, purcell, purcell.resolve_Temp(temp))
         if purcell is not None
         else None
     )
@@ -396,7 +396,9 @@ def _fit_mechanism_temperature(
 
     def calc_Q_fn(candidate_Temp: float) -> NDArray[np.float64]:
         purcell_correction = (
-            _subtract_purcell_from_fit_data(data, purcell, candidate_Temp)
+            _subtract_purcell_from_fit_data(
+                data, purcell, purcell.resolve_Temp(candidate_Temp)
+            )
             if purcell is not None
             else None
         )

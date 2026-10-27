@@ -63,6 +63,7 @@ def plot_purcell_Temp_upper_bound(
     to the analysis window. Return a new Figure/Axes without showing or saving.
     Fewer than two points or invalid Purcell calculation inputs raise ValueError.
     The dense curve is calculated before creating the figure.
+    Temperature is determined by Temp; this function does not read purcell.Temp.
     """
     if t_flux_count < 2:
         raise ValueError("t_flux_count must be at least 2")
@@ -305,7 +306,7 @@ def plot_t1_mechanism_limit(
             context,
             t_fluxs,
             resolved_purcell,
-            Temp=probe.temperature,
+            Temp=resolved_purcell.resolve_Temp(probe.temperature),
         )
         combined_curves = {
             key: combine_t1_limits(value, purcell_T1s)

@@ -74,11 +74,15 @@ CURVE_LABELS: dict[MechanismName, str] = {
 
 @dataclass(frozen=True, slots=True)
 class PurcellEffectParams:
-    """Positive, finite GHz inputs for the two-level Purcell equilibrium model.
+    """Resonator inputs and optional temperature for the 0↔1 Purcell model.
 
     kappa_ghz is the resonator linewidth kappa_rate/(2*pi), not a decay rate;
     0.001 means 1 MHz and the kernel uses 2*pi*kappa_ghz in ns^-1.
     bare_rf is the bare resonator frequency; g is its charge-mode coupling.
+    All three resonator inputs must be positive, finite values in GHz.
+    Temp is the fixed Purcell bath temperature in K, positive and finite when
+    supplied. None shares the qubit temperature in fits, probes and curves.
+    Invalid resonator inputs or a non-None invalid Temp raise ValueError.
     The kernel thermally averages each qubit direction over resonator photons
     and returns equilibrium T1=1/(Gamma_eg+Gamma_ge) for 0↔1 only.
     It excludes leakage to higher qubit states.
@@ -87,6 +91,7 @@ class PurcellEffectParams:
     kappa_ghz: float
     bare_rf: float
     g: float
+    Temp: float | None = None
 
     def __post_init__(self) -> None:
         if not np.isfinite(self.kappa_ghz) or self.kappa_ghz <= 0.0:
@@ -95,6 +100,16 @@ class PurcellEffectParams:
             raise ValueError("bare_rf must be positive and finite")
         if not np.isfinite(self.g) or self.g <= 0.0:
             raise ValueError("g must be positive and finite")
+        if self.Temp is not None and (not np.isfinite(self.Temp) or self.Temp <= 0.0):
+            raise ValueError("Temp must be positive and finite")
+
+    def resolve_Temp(self, qubit_Temp: float) -> float:
+        """Return the fixed bath Temp in K, or qubit_Temp in K when unset.
+
+        qubit_Temp is the caller's positive finite qubit temperature. This
+        method selects the temperature without modifying or validating it.
+        """
+        return qubit_Temp if self.Temp is None else self.Temp
 
 
 @dataclass(frozen=True, slots=True)
