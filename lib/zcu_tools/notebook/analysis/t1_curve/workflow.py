@@ -316,7 +316,7 @@ def build_t1_channel_curves(
             context,
             grid_fluxs,
             resolved_purcell,
-            Temp=fit_params.Temp,
+            Temp=resolved_purcell.resolve_Temp(fit_params.Temp),
         )
         component_t1s = {**component_t1s, "Purcell": purcell_T1s}
         display_T1s = combine_t1_limits(mechanism_T1s, purcell_T1s)
@@ -553,7 +553,7 @@ def _purcell_rate_fn(
             data.calibration.context,
             data.fit.fluxs,
             purcell,
-            Temp=float(params.Temp),
+            Temp=purcell.resolve_Temp(float(params.Temp)),
         )
         return relaxation_rates_from_t1(
             purcell_T1s,
@@ -573,6 +573,10 @@ def _purcell_fit_summary_rows(
         ("Purcell kappa (GHz)", f"{purcell.kappa_ghz:.6g}"),
         ("Purcell bare_rf (GHz)", f"{purcell.bare_rf:.6g}"),
         ("Purcell g (GHz)", f"{purcell.g:.6g}"),
+        (
+            "Purcell Temp (K)",
+            "shared with qubit Temp" if purcell.Temp is None else f"{purcell.Temp:.6g}",
+        ),
     ]
 
 

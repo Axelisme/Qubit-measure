@@ -37,10 +37,13 @@ def load_t1_purcell_params(
     context: T1CurveContext,
     *,
     kappa_ghz: float,
+    Temp: float | None = None,
 ) -> PurcellEffectParams:
     """Read bare_rf and g in GHz from context.result_dir/params.json.
 
     kappa_ghz is the positive finite linewidth kappa_rate/(2*pi) in GHz.
+    Temp fixes the Purcell bath temperature in K (positive and finite), or
+    shares the qubit temperature when None. It is not read from params.json.
     Return validated resonator inputs. Missing dispersive data raises
     RuntimeError; invalid values raise ValueError and file errors propagate.
     """
@@ -54,6 +57,7 @@ def load_t1_purcell_params(
         kappa_ghz=kappa_ghz,
         bare_rf=dispersive_fit.bare_rf,
         g=dispersive_fit.g,
+        Temp=Temp,
     )
 
 
@@ -68,6 +72,7 @@ def calculate_purcell_t1_limit(
 
     context supplies fluxonium energies in GHz; purcell supplies GHz resonator
     inputs. Temp must be positive and finite in K, otherwise raise ValueError.
+    Temperature is determined by Temp; this function does not read purcell.Temp.
     The result has the same shape and order as fluxs. Its reciprocal is the
     Gamma_eg+Gamma_ge contribution used by fitting and channel curves.
     """
@@ -113,6 +118,7 @@ def estimate_purcell_Temp_upper_bound(
     supplies resonator GHz inputs. Temp_range is a positive finite K bracket,
     tolerance is a positive finite log-margin tolerance and max_iter is a
     positive bisection budget. progress controls only the outer search display.
+    Temperature is searched within Temp_range; this function does not read purcell.Temp.
     Return a feasible temperature, or raise ValueError for invalid controls,
     missing positive fit data, invalid calculated limits or an infeasible floor.
 

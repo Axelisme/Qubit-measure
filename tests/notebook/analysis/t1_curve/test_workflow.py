@@ -2,11 +2,13 @@ from __future__ import annotations
 
 from dataclasses import replace
 
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import pytest
 import zcu_tools.notebook.analysis.t1_curve.workflow as workflow
 from zcu_tools.notebook.analysis.t1_curve import (
+    PurcellEffectParams,
     T1CurveContext,
     T1CurveData,
     T1FitParams,
@@ -16,14 +18,32 @@ from zcu_tools.notebook.analysis.t1_curve import (
     T1PreparedData,
     analyze_t1_mechanism_limit,
     build_t1_channel_curves,
+    calculate_purcell_t1_limit,
     calibrate_t1_flux,
+    fit_t1_curve,
     load_t1_curve_context,
     load_t1_purcell_params,
     make_t1_fit_init,
     mechanisms_to_fixed_params,
+    plot_t1_mechanism_limit,
     prepare_t1_curve_data,
     subtract_relaxation_limit,
 )
+
+
+@pytest.mark.parametrize("Temp", [0.0, -0.01, np.nan, np.inf, -np.inf])
+def test_purcell_params_reject_invalid_temperature(Temp: float) -> None:
+    with pytest.raises(ValueError, match="Temp must be positive and finite"):
+        PurcellEffectParams(kappa_ghz=0.001, bare_rf=7.2, g=0.03, Temp=Temp)
+
+
+@pytest.mark.parametrize("Temp, expected", [(None, 0.04), (0.08, 0.08)])
+def test_purcell_params_resolve_own_or_qubit_temperature(
+    Temp: float | None, expected: float
+) -> None:
+    purcell = PurcellEffectParams(kappa_ghz=0.001, bare_rf=7.2, g=0.03, Temp=Temp)
+
+    assert purcell.resolve_Temp(0.04) == expected
 
 
 def test_load_t1_curve_context_reads_params_and_samples(tmp_path) -> None:
@@ -65,7 +85,8 @@ def test_load_t1_curve_context_reads_params_and_samples(tmp_path) -> None:
     assert len(ctx.samples_preview) == 1
 
 
-def test_load_t1_purcell_params_reads_dispersive_bare_rf_and_g(tmp_path) -> None:
+@pytest.mark.parametrize("Temp", [None, 0.08])
+def test_load_t1_purcell_params_reads_dispersive_bare_rf_and_g(tmp_path, Temp) -> None:
     (tmp_path / "params.json").write_text(
         """
 {
@@ -101,11 +122,12 @@ def test_load_t1_purcell_params_reads_dispersive_bare_rf_and_g(tmp_path) -> None
     ctx = load_t1_curve_context(
         result_dir=str(tmp_path), fluxs=np.array([0.5]), preview_rows=1
     )
-    purcell = load_t1_purcell_params(ctx, kappa_ghz=14.8e-3)
+    purcell = load_t1_purcell_params(ctx, kappa_ghz=14.8e-3, Temp=Temp)
 
     assert purcell.kappa_ghz == pytest.approx(14.8e-3)
     assert purcell.bare_rf == pytest.approx(5.793127423605109)
     assert purcell.g == pytest.approx(0.07390631094081157)
+    assert purcell.Temp == Temp
 
 
 def test_calibrate_t1_flux_selects_finite_measurement_rows() -> None:
@@ -230,6 +252,86 @@ def test_mechanism_options_use_statistic_and_reject_empty_window(
         )
 
 
+@pytest.mark.parametrize("purcell_Temp", [None, 0.08])
+@pytest.mark.parametrize("fit_temperature", [False, True])
+def test_mechanism_probe_subtracts_resolved_purcell_temperature(
+    purcell_Temp: float | None, fit_temperature: bool
+) -> None:
+    data = _synthetic_prepared_data()
+    intrinsic_probe = analyze_t1_mechanism_limit(
+        data, mechanism="capacitive", options=T1MechanismOptions(Temp=0.04)
+    )
+    intrinsic_T1 = 7e5 * np.array([1.01, 0.99, 1.01]) / intrinsic_probe.dipoles
+    purcell = PurcellEffectParams(kappa_ghz=0.1, bare_rf=7.2, g=0.03, Temp=purcell_Temp)
+    bath_T1 = calculate_purcell_t1_limit(
+        data.calibration.context,
+        data.fit.fluxs,
+        purcell,
+        Temp=0.04 if purcell_Temp is None else purcell_Temp,
+    )
+    observed = replace(data.fit, T1_ns=1.0 / (1.0 / intrinsic_T1 + 1.0 / bath_T1))
+    measured = replace(data, fit=observed, sample=observed)
+    options = T1MechanismOptions(
+        Temp=0.05 if fit_temperature else 0.04,
+        purcell=purcell,
+        fit_temperature=fit_temperature,
+        Temp_bounds=(0.02, 0.1),
+    )
+
+    probe = analyze_t1_mechanism_limit(
+        measured, mechanism="capacitive", options=options
+    )
+
+    expected_bath = calculate_purcell_t1_limit(
+        data.calibration.context,
+        data.fit.fluxs,
+        purcell,
+        Temp=probe.temperature if purcell_Temp is None else purcell_Temp,
+    )
+    np.testing.assert_allclose(probe.pointwise_table["Purcell T1 (ns)"], expected_bath)
+    if purcell_Temp is not None:
+        corrected = replace(data, fit=replace(data.fit, T1_ns=intrinsic_T1))
+        expected_probe = analyze_t1_mechanism_limit(
+            corrected,
+            mechanism="capacitive",
+            options=replace(options, purcell=None),
+        )
+        assert probe.temperature == pytest.approx(expected_probe.temperature, abs=1e-6)
+        np.testing.assert_allclose(probe.q_values, expected_probe.q_values, rtol=1e-5)
+
+
+@pytest.mark.parametrize("purcell_Temp", [None, 0.08])
+def test_mechanism_plot_uses_resolved_purcell_temperature(
+    purcell_Temp: float | None,
+) -> None:
+    data = _synthetic_prepared_data()
+    purcell = PurcellEffectParams(
+        kappa_ghz=0.001, bare_rf=7.2, g=0.03, Temp=purcell_Temp
+    )
+    probe = analyze_t1_mechanism_limit(
+        data,
+        mechanism="capacitive",
+        options=T1MechanismOptions(Temp=0.04, purcell=purcell),
+    )
+
+    fig, ax = plot_t1_mechanism_limit(probe, t_flux_count=3)
+
+    try:
+        line = next(line for line in ax.lines if line.get_label() == "Purcell")
+        fluxs = np.asarray(line.get_xdata(), dtype=np.float64)
+        expected = calculate_purcell_t1_limit(
+            data.calibration.context,
+            fluxs,
+            purcell,
+            Temp=0.04 if purcell_Temp is None else purcell_Temp,
+        )
+        np.testing.assert_allclose(
+            np.asarray(line.get_ydata(), dtype=np.float64), expected
+        )
+    finally:
+        plt.close(fig)
+
+
 def test_subtract_relaxation_limit_uses_rate_domain() -> None:
     observed_T1s = np.array([40_000.0, 50_000.0], dtype=np.float64)
     observed_T1errs = np.array([500.0, np.nan], dtype=np.float64)
@@ -266,6 +368,75 @@ def test_t1_parameter_text_shows_only_active_noise_params_and_temp() -> None:
     assert "Temp" in text
     assert "reduced chi2" not in text
     assert "Purcell kappa" not in text
+
+
+@pytest.mark.parametrize(
+    "purcell_Temp, expected", [(None, "shared with qubit Temp"), (0.08, "0.08")]
+)
+def test_fit_curve_summary_reports_purcell_temperature(
+    purcell_Temp: float | None, expected: str
+) -> None:
+    combined = fit_t1_curve(
+        _synthetic_prepared_data(),
+        init=T1FitParams(Q_cap=7e5, Temp=0.03),
+        fixed=("Q_cap", "Temp"),
+        purcell=PurcellEffectParams(
+            kappa_ghz=0.001, bare_rf=7.2, g=0.03, Temp=purcell_Temp
+        ),
+    )
+
+    summary = combined.summary_table.set_index("metric")["value"]
+    assert summary["Purcell Temp (K)"] == expected
+
+
+@pytest.mark.parametrize("purcell_Temp", [None, 0.08])
+def test_fit_curve_uses_resolved_purcell_temperature(
+    purcell_Temp: float | None,
+) -> None:
+    data = _synthetic_prepared_data()
+    init = T1FitParams(Q_cap=7e5, Temp=0.03)
+    purcell = PurcellEffectParams(
+        kappa_ghz=0.001, bare_rf=7.2, g=0.03, Temp=purcell_Temp
+    )
+    intrinsic = fit_t1_curve(data, init=init, fixed=("Q_cap", "Temp"))
+    combined = fit_t1_curve(data, init=init, fixed=("Q_cap", "Temp"), purcell=purcell)
+    purcell_T1 = calculate_purcell_t1_limit(
+        data.calibration.context,
+        data.fit.fluxs,
+        purcell,
+        Temp=0.03 if purcell_Temp is None else purcell_Temp,
+    )
+
+    expected = 1.0 / (1.0 / intrinsic.fit_result.model_T1s + 1.0 / purcell_T1)
+    np.testing.assert_allclose(combined.fit_result.model_T1s, expected, rtol=1e-10)
+
+
+@pytest.mark.parametrize("purcell_Temp", [None, 0.08])
+@pytest.mark.parametrize("qubit_Temp", [0.03, 0.06])
+def test_channel_curves_use_resolved_purcell_temperature(
+    purcell_Temp: float | None, qubit_Temp: float
+) -> None:
+    data = _synthetic_prepared_data()
+    purcell = PurcellEffectParams(
+        kappa_ghz=0.001, bare_rf=7.2, g=0.03, Temp=purcell_Temp
+    )
+    combined = fit_t1_curve(
+        data,
+        init=T1FitParams(Q_cap=7e5, Temp=qubit_Temp),
+        fixed=("Q_cap", "Temp"),
+        purcell=purcell,
+    )
+
+    analysis = build_t1_channel_curves(combined, t_flux_count=3)
+
+    expected = calculate_purcell_t1_limit(
+        data.calibration.context,
+        analysis.curves.fluxs,
+        purcell,
+        Temp=qubit_Temp if purcell_Temp is None else purcell_Temp,
+    )
+    assert analysis.curves.purcell_T1_ns is not None
+    np.testing.assert_allclose(analysis.curves.purcell_T1_ns, expected)
 
 
 def test_build_t1_channel_curves_uses_uniform_flux_grid() -> None:
