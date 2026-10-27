@@ -6,18 +6,28 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, TypeAlias
 
+import numpy as np
 from pydantic import BaseModel, Field
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     Adapter,
-    Analysis,
     AnalyzeRequest,
+    Interactive,
     ParameterWriteback,
     WritebackItem,
     WritebackRequest,
 )
 from zcu_tools.gui.app.measure.adapter.analyze_params import ParamMeta
+from zcu_tools.gui.app.measure.range_find_frontend import (
+    draw_range_find,
+    make_range_find_frontend,
+)
+from zcu_tools.gui.app.measure.range_find_plugin import (
+    DipSelection,
+    RangeFindPlugin,
+    RangeFindState,
+)
 from zcu_tools.gui.session.types import SessionEnv
 from zcu_tools.plotting.plots import Plots
 
@@ -27,7 +37,6 @@ from .core import (
     RangeFindExp,
     RangeFindOptions,
     RangeFindResult,
-    ResonatorDip,
 )
 from .form import make_form, resonator_frequencies
 
@@ -36,9 +45,10 @@ RangeFindRun: TypeAlias = RunRecord[RangeFindCfg, RangeFindResult]
 
 @dataclass
 class RangeFindParams:
-    """Enter frequency-ordered resonator names as a JSON list for coarse analysis.
+    """Seed the interactive guess and available labels from a JSON name list.
 
     resonators is JSON text such as '["R2", "R1"]', or '[]' for unnamed discovery.
+    Names initially pair in frequency order; the picker can reassign them freely.
     min_separation is positive finite MHz, default 1 MHz as in core Options.
     smoothing_sigma is Gaussian sigma in samples, default zero. prominence_factor
     is the noise multiplier, default five. max_fwhm limits width in MHz, default 25.
@@ -99,10 +109,13 @@ class ResonatorDipSummary(BaseModel):
 
 
 class RangeFindSummary(BaseModel):
-    """Decode native dip results and captured identity/writeback limitations."""
+    """Decode accepted dips, final picker state and captured writeback limitations."""
 
     dips: list[ResonatorDipSummary] = Field(
         description="Dips in ascending frequency order."
+    )
+    selection: RangeFindState = Field(
+        description="Final numerical controls, candidates and selected points with component assignments."
     )
     writable: list[str] = Field(description="Names present in the analysis capture.")
     diagnostic: str | None = Field(
@@ -115,10 +128,12 @@ class RangeFindSummary(BaseModel):
 
 @dataclass
 class RangeFindAnalysis:
-    """Frequency-ordered dips and captured writeback eligibility.
+    """Accepted frequency-ordered dips, final state and writeback eligibility.
 
+    selection retains the final controls, selected samples and component mapping.
     dips contains optional name, absolute MHz, magnitude prominence depth,
     half-prominence FWHM in MHz and depth / FWHM score in a.u./MHz.
+    Manual points outside the current candidates have null depth/FWHM/score.
     Unnamed discovery has no writable names or identity diagnostic.
     writable contains only names present in the analysis capture. diagnostic
     explains omitted frequency proposals; None means every dip is writable.
@@ -127,7 +142,8 @@ class RangeFindAnalysis:
     means that ordering has a finite captured frequency basis, not proven identity.
     """
 
-    dips: tuple[ResonatorDip, ...]
+    dips: tuple[ResonatorDipSummary, ...]
+    selection: RangeFindState
     writable: tuple[str, ...]
     diagnostic: str | None
     identity_diagnostic: str | None
@@ -143,33 +159,67 @@ def _get_analyze_params(result: RangeFindRun, ctx: SessionEnv) -> RangeFindParam
     return RangeFindParams()
 
 
-def _analyze(
-    req: AnalyzeRequest[RangeFindRun, RangeFindParams],
-    *,
-    plots: Plots,
-) -> RangeFindAnalysis:
-    """Discover unnamed dips, or find all requested named dips without partial success.
+def _make_interactive_plugin(
+    req: AnalyzeRequest[RangeFindRun, RangeFindParams], *, plots: Plots
+) -> RangeFindPlugin[RangeFindAnalysis]:
+    """Seed one picker from captured IQ and Analyze controls, publishing only on Done.
 
-    req supplies raw IQ, options and the fixed Run/Load parameter capture.
-    Empty names return ordered dips without proposals or identity claims.
-    plots receives the annotated fit. Missing capture/components still allow pure
-    calculation but omit their proposals and explain why in the summary.
-    Only finite, strictly ascending captured frequencies establish name order.
-    Otherwise summary and proposals flag unconfirmed pairing without blocking
-    analysis or reordering names. Set but invalid captured frequencies, invalid
-    curves/options and insufficient dips raise ValueError.
+    Names supply the available component labels and initial frequency-order pairing.
+    The shared static finder supplies the initial guess. Invalid curves/options
+    raise ValueError; an empty guess stays editable for manual selection.
+    Final controls and assignments, not the initial form, determine saved results
+    and writeback. Cancel leaves the previous accepted result unchanged.
     """
     options = req.analyze_params.to_options()
-    dips = RangeFindExp().analyze(req.run_result, options, plots=plots)
-    if not options.resonators:
-        return RangeFindAnalysis(dips, (), None, None)
+    result = req.run_result.result
+
+    def build_result(state: RangeFindState) -> RangeFindAnalysis:
+        analysis = _build_analysis(req, state)
+        plots.subplots("fit", nrows=1, figsize=(9, 4.5))
+        plots.draw(
+            "fit",
+            lambda figure: draw_range_find(
+                figure, plugin.freqs, plugin.magnitude, state
+            ),
+        )
+        return analysis
+
+    plugin = RangeFindPlugin(
+        np.asarray(result.freqs, dtype=np.float64),
+        np.abs(np.asarray(result.signals, dtype=np.complex128)),
+        components=tuple(options.resonators),
+        options=options.to_dip_options(),
+        build_result=build_result,
+    )
+    return plugin
+
+
+def _summarize_dip(dip: DipSelection) -> ResonatorDipSummary:
+    """Keep measured MHz and optional candidate metrics without inventing a fit."""
+    return ResonatorDipSummary(
+        name=dip.component,
+        freq=dip.freq,
+        depth=None if dip.estimate is None else dip.estimate.depth,
+        fwhm=None if dip.estimate is None else dip.estimate.fwhm,
+        score=None if dip.estimate is None else dip.estimate.score,
+    )
+
+
+def _build_analysis(
+    req: AnalyzeRequest[RangeFindRun, RangeFindParams], state: RangeFindState
+) -> RangeFindAnalysis:
+    """Project accepted selections and resolve eligibility from the fixed capture."""
+    dips = tuple(_summarize_dip(dip) for dip in state.selected)
+    names = [dip.name for dip in dips if dip.name is not None]
+    if not names:
+        return RangeFindAnalysis(dips, state, (), None, None)
     components = (
         req.parameters.document().components if req.parameters is not None else {}
     )
     frequencies = (
         resonator_frequencies(
             req.parameters,
-            [name for name in options.resonators if name in components],
+            [name for name in names if name in components],
         )
         if req.parameters is not None
         else None
@@ -177,7 +227,7 @@ def _analyze(
     identity_diagnostic = (
         "dip 與元件身分配對待確認"
         if frequencies is None
-        or len(frequencies) != len(options.resonators)
+        or len(frequencies) != len(names)
         or any(
             left >= right
             for left, right in zip(frequencies, frequencies[1:], strict=False)
@@ -187,6 +237,7 @@ def _analyze(
     if req.parameters is None:
         return RangeFindAnalysis(
             dips,
+            state,
             (),
             "No Run/Load parameter capture; no frequency proposals",
             identity_diagnostic,
@@ -205,7 +256,9 @@ def _analyze(
         if missing
         else None
     )
-    return RangeFindAnalysis(dips, tuple(writable), diagnostic, identity_diagnostic)
+    return RangeFindAnalysis(
+        dips, state, tuple(writable), diagnostic, identity_diagnostic
+    )
 
 
 def _get_writeback_items(
@@ -224,7 +277,12 @@ def _get_writeback_items(
         ParameterWriteback(
             target_name=f"{dip.name}.freq",
             description=(
-                f"Coarse dip frequency (MHz), depth {dip.depth:.6g} a.u."
+                "Coarse dip frequency (MHz)"
+                + (
+                    f", depth {dip.depth:.6g} a.u."
+                    if dip.depth is not None
+                    else ", manual sample"
+                )
                 + (
                     f"; {req.analyze_result.identity_diagnostic}"
                     if req.analyze_result.identity_diagnostic is not None
@@ -250,8 +308,9 @@ DEFINITION = Adapter(
     make_form=make_form,
     run=run,
     guide=Path(__file__).with_name("guide.md"),
-    analysis=Analysis(
-        fn=_analyze,
+    analysis=Interactive(
+        plugin=_make_interactive_plugin,
+        frontend=make_range_find_frontend,
         options=_get_analyze_params,
         writeback=_get_writeback_items,
     ),
