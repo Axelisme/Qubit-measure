@@ -1,6 +1,6 @@
 # `zcu_tools.analysis` 模塊重點文檔
 
-**Last updated:** 2026-10-27
+**Last updated:** 2026-10-28
 
 **讀者：** framework-dev。分析核心、純數值工具與前端 adapter 的分工速查。
 
@@ -12,6 +12,14 @@ fluxdep 的互動 line picker，也不要求 QICK。
 
 `spectrum.py` 提供兩個分析 GUI 共用的原始頻譜資料型別，以及 Hz→GHz 與座標遞增排序。
 其中 `fluxs` 是座標軸，不是 flux 校正參數。
+
+`dips.py` 的 `find_spectrum_dips(freqs, magnitude, options)` 接受 MHz 與 magnitude，
+以兩端中位數直線去背景，回傳依 depth / FWHM 降冪排列的 `SpectrumDip`。
+`DipFinderOptions` 預設不平滑、prominence 雜訊倍率 5、FWHM 上限 25 MHz、
+最小間距 1 MHz，`max_dips=None` 保留全部符合條件的谷。
+FWHM 使用半 prominence 的插值寬度，至少為谷兩側頻率步進的平均。
+函式先剔除過寬的谷，再依分數貪婪套用間距與數量上限。
+它不命名元件、不讀寫資料，也不畫圖。
 
 `failure.AnalysisFailed` 表示數值 owner 已辨識的無法產出分析結果，與任意程式錯誤分開。
 Experiment 公開同一型別，GUI analyze work 經分類後才讓 recipe 交付 failed 值。
@@ -37,6 +45,12 @@ Boolean 不算數值。無效 offset、period、unit 或使用中的值會拋出
 三個入口都將沒有值的儀器視為不貢獻，忽略未校準的額外儀器。
 投影不使用選定儀器的當下值。輸入保持不變。
 Record 到這些型別的轉換由 resources 負責，Notebook 副軸使用同一投影入口。
+
+`require_matching_device_unit(device_name, actual_unit, expected_unit)` 集中儀器單位的精確比對。
+缺單位以 None 表示，視為 native；native 只等於 native，mA 與 A 不換算。
+不符時 ValueError 指名儀器與兩個單位。Caller 先選出真正用於換算的值，
+再傳入單位字串；本函式不讀 snapshot 或依賴 device。
+Fluxdep native 載入與 dispersive 投影共用此規則。
 
 ## 子模組
 

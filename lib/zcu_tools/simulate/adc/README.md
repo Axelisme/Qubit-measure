@@ -118,7 +118,7 @@ its perturbation. In YAML the same nested fields live under each receiver's
 `background`; `extra_ripples` uses a list of records with `depth`, `period_mhz`
 and optional `phase_deg`. FTF and single-fluxonium use the shared schema;
 six-fluxonium delegates each cavity to single-fluxonium. Format/version do not
-change. Their tracked `default.yaml` templates enable 68/44/308 MHz waves,
+change. Their tracked `default.yaml` templates enable 68/44/308/52.6 MHz waves,
 2% complex RMS roughness, a -4 dB/GHz slope and a 3.7 GHz low corner. Existing
 untracked working copies do not change. Add these fields to your working YAML
 and restart the environment to see the new background.

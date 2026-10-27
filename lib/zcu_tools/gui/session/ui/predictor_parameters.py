@@ -28,6 +28,7 @@ from zcu_tools.simulate.transmon import TransmonParams
 
 if TYPE_CHECKING:
     from zcu_tools.gui.session.predictor_control import PredictorControlPort
+    from zcu_tools.resources.predictor_file import PredictorFlux
 
 logger = logging.getLogger(__name__)
 
@@ -38,9 +39,6 @@ _DEFAULT_EL = 1.0
 _DEFAULT_EJMAX = 20.0
 _DEFAULT_TRANSMON_EC = 0.25
 _DEFAULT_ASYMMETRY = 0.0
-_DEFAULT_FLUX_HALF = 0.0
-_DEFAULT_FLUX_PERIOD = 0.005
-_DEFAULT_FLUX_BIAS = 0.0
 
 
 class PredictorParameterEditor(QGroupBox):
@@ -53,7 +51,8 @@ class PredictorParameterEditor(QGroupBox):
     runs once after a whole set_parameters/prefill, with field reentry suppressed.
     The caller owns refresh/debounce/cache ordering in those callbacks. Their
     failures propagate for programmatic calls, including file prefill.
-    on_status receives (message, is_error).
+    on_status receives (message, is_error). on_flux_loaded, when supplied, installs
+    the detached file frame before its energy parameters are replaced.
     """
 
     def __init__(
@@ -63,12 +62,14 @@ class PredictorParameterEditor(QGroupBox):
         on_edited: Callable[[], None],
         on_replaced: Callable[[], None],
         on_status: Callable[[str, bool], None],
+        on_flux_loaded: Callable[[PredictorFlux], None] | None = None,
     ) -> None:
         super().__init__("Model params")
         self._pred = predictor
         self._on_edited = on_edited
         self._on_replaced = on_replaced
         self._on_status = on_status
+        self._on_flux_loaded = on_flux_loaded
         self._live_mode = False
         self._updating_parameters = False
         self._parameter_fields: dict[QLineEdit, str] = {}
@@ -78,23 +79,22 @@ class PredictorParameterEditor(QGroupBox):
             field.textChanged.connect(self._on_parameters_changed)
 
     def _build_controls(self) -> None:
-        # ── Model params (editable EJ/EC/EL/flux anchors/flux_bias) ───────
+        # Detached energy inputs; the flux frame is a separate trial.
         # File loading only prefills independent trial parameters.
         model_form = QFormLayout(self)
 
         self._add_model_sources(model_form)
 
-        # Energies use GHz; flux anchors and bias use device-value units. Plain
-        # text preserves finite float precision and blank unknowns. The params
-        # classes own physical validation.
+        # Plain text preserves finite precision and blank unknowns.
+        # The parameter classes own physical validation.
         self._ej_field = self._make_param_field(_DEFAULT_EJ)
         self._ec_field = self._make_param_field(_DEFAULT_EC)
         self._el_field = self._make_param_field(_DEFAULT_EL)
         self._fluxonium_energies_label = QLabel("Energies:")
         self._fluxonium_energies_row = self._make_param_row(
-            ("EJ", self._ej_field),
-            ("EC", self._ec_field),
-            ("EL", self._el_field),
+            ("EJ (GHz)", self._ej_field),
+            ("EC (GHz)", self._ec_field),
+            ("EL (GHz)", self._el_field),
         )
         self._ec_field.setObjectName("predictor_input_fluxonium_EC")
         model_form.addRow(self._fluxonium_energies_label, self._fluxonium_energies_row)
@@ -104,26 +104,14 @@ class PredictorParameterEditor(QGroupBox):
         self._asymmetry_field = self._make_param_field(_DEFAULT_ASYMMETRY)
         self._transmon_energies_label = QLabel("Energies:")
         self._transmon_energies_row = self._make_param_row(
-            ("EJmax", self._ejmax_field),
-            ("EC", self._transmon_ec_field),
+            ("EJmax (GHz)", self._ejmax_field),
+            ("EC (GHz)", self._transmon_ec_field),
             ("d", self._asymmetry_field),
         )
         self._transmon_ec_field.setObjectName("predictor_input_transmon_EC")
         model_form.addRow(self._transmon_energies_label, self._transmon_energies_row)
         self._model_combo.currentIndexChanged.connect(self._sync_model_rows)
         self._sync_model_rows()
-        self._flux_half_field = self._make_param_field(_DEFAULT_FLUX_HALF)
-        self._flux_period_field = self._make_param_field(_DEFAULT_FLUX_PERIOD)
-        # flux_bias lives here (was in the old "Load predictor" group).
-        self._flux_bias_field = self._make_param_field(_DEFAULT_FLUX_BIAS)
-        model_form.addRow(
-            "Flux:",
-            self._make_param_row(
-                ("half", self._flux_half_field),
-                ("period", self._flux_period_field),
-                ("bias", self._flux_bias_field),
-            ),
-        )
 
     def _add_model_sources(self, model_form: QFormLayout) -> None:
         self._model_combo = QComboBox()
@@ -150,29 +138,22 @@ class PredictorParameterEditor(QGroupBox):
         model_form.addRow(self._file_hint)
 
     def parameters(self) -> ModelParams:
-        """Return the selected model's local trial: GHz energies and native affine inputs.
+        """Return the selected model's local GHz energy/asymmetry trial.
 
         Blank fields return None. Nonnumeric or nonfinite text raises a named
         PredictorInputError. No source/session read or write occurs.
         Invalid physical values are rejected only when queried.
         """
-        affine = (
-            self._parameter_value(self._flux_half_field),
-            self._parameter_value(self._flux_period_field),
-            self._parameter_value(self._flux_bias_field),
-        )
         if self._model_combo.currentData() == "transmon":
             return TransmonParams(
                 self._parameter_value(self._ejmax_field),
                 self._parameter_value(self._transmon_ec_field),
                 self._parameter_value(self._asymmetry_field),
-                *affine,
             )
         return FluxoniumParams(
             self._parameter_value(self._ej_field),
             self._parameter_value(self._ec_field),
             self._parameter_value(self._el_field),
-            *affine,
         )
 
     def set_parameters(self, params: ModelParams) -> None:
@@ -198,12 +179,7 @@ class PredictorParameterEditor(QGroupBox):
                     (self._ec_field, params.EC),
                     (self._el_field, params.EL),
                 )
-            for field, value in (
-                *energies,
-                (self._flux_half_field, params.flux_half),
-                (self._flux_period_field, params.flux_period),
-                (self._flux_bias_field, params.flux_bias),
-            ):
+            for field, value in energies:
                 field.setEnabled(not self._live_mode)
                 field.setText("" if value is None else repr(value))
         finally:
@@ -232,6 +208,8 @@ class PredictorParameterEditor(QGroupBox):
         if name is None:
             raise FailedPreconditionError("No predictor file selected")
         predictor = self._pred.load_file(name)
+        if self._on_flux_loaded is not None:
+            self._on_flux_loaded(predictor.flux)
         self.set_parameters(predictor.params)
         index = self._file_combo.findText(name)
         if index >= 0:
@@ -295,13 +273,6 @@ class PredictorParameterEditor(QGroupBox):
         else:
             self._set_status("Loaded predictor file into local trial", error=False)
 
-    def set_flux_bias(self, value: float) -> None:
-        """Replace native bias text, notifying on_edited if its text changes.
-
-        repr preserves the full float precision; parameter reads reject nonfinite input.
-        """
-        self._flux_bias_field.setText(repr(value))
-
     def set_live_mode(self, *, enabled: bool) -> None:
         """Lock/unlock all model and file controls, retaining nullable inputs."""
         self._live_mode = enabled
@@ -324,12 +295,8 @@ class PredictorParameterEditor(QGroupBox):
         row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(6)
         for label, field in pairs:
-            field.setObjectName(f"predictor_input_{label}")
-            name = {
-                "half": "flux_half",
-                "period": "flux_period",
-                "bias": "flux_bias",
-            }.get(label, label)
+            name = label.split()[0]
+            field.setObjectName(f"predictor_input_{name}")
             self._parameter_fields[field] = name
             field.setPlaceholderText("unknown")
             field.setToolTip("Leave blank for unknown.")

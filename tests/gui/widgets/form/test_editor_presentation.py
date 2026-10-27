@@ -2,6 +2,7 @@
 
 import re
 from collections.abc import Iterator
+from pathlib import Path
 from typing import Literal, Self
 
 import pytest
@@ -23,6 +24,7 @@ from zcu_tools.gui.widgets.form import FormEditor
 from zcu_tools.resources.context.library import LibrarySnapshot, ModuleLibraryDocument
 from zcu_tools.resources.entry.schema import PointDocument, PointGeneral
 
+from tests.gui._user_input import ComponentDriver
 from tests.gui.widgets.form._field_errors import error_widget, field_error, row_tooltip
 from tests.gui.widgets.form._sections import expand_sections
 from tests.gui.widgets.form._text_input import commit_text
@@ -293,22 +295,28 @@ def test_each_model_level_aligns_its_controls_on_one_label_column(
     )
 
 
-def test_field_error_keeps_row_height_and_following_input_position(
+def test_invalid_text_explains_the_error_inline_and_in_the_summary_then_clears(
     editor: tuple[FormEditor[PresentationForm], FormState[PresentationForm]],
     qapp: QApplication,
+    tmp_path: Path,
 ) -> None:
     view, state = editor
-    lay_out(view, qapp)
-    text = child(view, QLineEdit, "form.input.count")
-    following = child(view, QComboBox, "form.input.unit")
-    before = rect(view, text), rect(view, following), view.sizeHint()
-    commit_text(text, "-")
-    lay_out(view, qapp)
-    assert field_error(view, "count")
-    assert (rect(view, text), rect(view, following), view.sizeHint()) == before
-    commit_text(text, "4")
+    view.resize(1100, 700)
+    view.show()
+    qapp.processEvents()
+    driver = ComponentDriver(view)
+    driver.enter_text(object_name="form.input.count", value="-")
+    driver.screenshot(tmp_path / "invalid-count.png")
+    inline = driver.observe(object_name="form.error.count")
+    summary = driver.observe(object_name="form.error.summary")
+    assert inline.visible and inline.text
+    assert summary.visible and inline.text in summary.text and "count" in summary.text
+
+    driver.enter_text(object_name="form.input.count", value="4")
+    driver.screenshot(tmp_path / "corrected-count.png")
     assert state.input.data["count"] == 4
-    assert not field_error(view, "count")
+    assert not driver.observe(object_name="form.error.count").visible
+    assert not driver.observe(object_name="form.error.summary").visible
 
 
 @pytest.mark.parametrize("dark", [False, True], ids=["light", "dark"])
@@ -427,7 +435,7 @@ def test_expression_errors_keep_the_mode_tint_and_add_a_red_border(
 
 @pytest.mark.parametrize("dark", [False, True], ids=["light", "dark"])
 @pytest.mark.parametrize("path", ["unit", "amount"], ids=["dropdown", "expression"])
-def test_error_background_is_painted_without_changing_row_height(
+def test_error_background_is_painted_in_the_current_mode(
     editor: tuple[FormEditor[PresentationForm], FormState[PresentationForm]],
     qapp: QApplication,
     dark: bool,
@@ -459,11 +467,6 @@ def test_error_background_is_painted_without_changing_row_height(
         )
 
     normal = interior()
-    geometry = (
-        control.height(),
-        child(view, QLineEdit, "form.input.after").y(),
-        view.sizeHint().height(),
-    )
     if path == "amount":
         commit_text(child(view, QLineEdit, f"form.input.{path}"), "absent_name")
     else:
@@ -478,8 +481,3 @@ def test_error_background_is_painted_without_changing_row_height(
     else:
         assert invalid.red() - invalid.green() > normal.red() - normal.green()
         assert invalid.red() - invalid.blue() > normal.red() - normal.blue()
-    assert (
-        control.height(),
-        child(view, QLineEdit, "form.input.after").y(),
-        view.sizeHint().height(),
-    ) == geometry

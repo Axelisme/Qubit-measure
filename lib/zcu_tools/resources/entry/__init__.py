@@ -32,6 +32,7 @@ from .result_entry import (
     EntryIdentity,
     ResultEntry,
     entry_component_paths,
+    entry_predictor_paths,
     rename_entry,
 )
 from .roles import RoleView, role_registry

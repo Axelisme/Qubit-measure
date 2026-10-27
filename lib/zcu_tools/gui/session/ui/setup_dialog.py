@@ -26,6 +26,7 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
+from zcu_tools.gui.lifetime import LifetimeScope
 from zcu_tools.gui.session.context_types import (
     CommandOrigin,
     EntryInfo,
@@ -136,6 +137,10 @@ class SetupDialog(QDialog):
         root_layout.addWidget(self._build_entry_group())
         root_layout.addWidget(self._build_point_list(), stretch=1)
         root_layout.addWidget(self._build_new_point_group())
+        QWidget.setTabOrder(self._label_edit, self._description_edit)
+        QWidget.setTabOrder(self._description_edit, self._clone_combo)
+        QWidget.setTabOrder(self._clone_combo, self._device_combo)
+        QWidget.setTabOrder(self._device_combo, self._new_ctx_btn)
 
         # ── Close button ─────────────────────────────────────────────────
         btn_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
@@ -144,6 +149,10 @@ class SetupDialog(QDialog):
         self._project_status = _wrapping_label("setup_status")
         root_layout.addWidget(self._project_status)
         root_layout.addWidget(btn_box)
+
+        for button in self.findChildren(QPushButton):
+            button.setAutoDefault(False)
+        self._connect_keyboard_actions()
 
         # initialise
         self._refresh_entries()
@@ -174,6 +183,7 @@ class SetupDialog(QDialog):
         self._entry_combo.setMinimumWidth(160)
         entry_row.addWidget(self._entry_combo, stretch=1)
         refresh_entries_btn = QPushButton("↻")
+        refresh_entries_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         refresh_entries_btn.setFixedWidth(28)
         refresh_entries_btn.setToolTip("Refresh result entries")
         refresh_entries_btn.clicked.connect(
@@ -237,6 +247,7 @@ class SetupDialog(QDialog):
         self._device_combo.currentTextChanged.connect(self._on_device_changed)
         device_row.addWidget(self._device_combo)
         refresh_dev_btn = QPushButton("↻")
+        refresh_dev_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         refresh_dev_btn.setFixedWidth(28)
         refresh_dev_btn.setToolTip("Refresh device list")
         refresh_dev_btn.clicked.connect(self._refresh_device_list)
@@ -272,6 +283,21 @@ class SetupDialog(QDialog):
         self._new_ctx_btn.clicked.connect(self._on_new_ctx_clicked)
         new_form.addWidget(self._new_ctx_btn, 1, 4)
         return new_group
+
+    def _connect_keyboard_actions(self) -> None:
+        self._input_scope = LifetimeScope(self)
+        self._input_scope.connect(
+            self._ctx_list.itemDoubleClicked, lambda: self._switch_btn.click()
+        )
+        for field in (self._label_edit, self._description_edit):
+            self._input_scope.connect(
+                field.returnPressed, lambda: self._new_ctx_btn.click()
+            )
+
+    def done(self, a0: int) -> None:
+        """Retire keyboard callbacks before finishing; showing again rebinds them."""
+        self._input_scope.close()
+        super().done(a0)
 
     def set_read_only(self, *, read_only: bool) -> None:
         """Gate entry and point edits while preserving browsing and Close.
@@ -323,6 +349,8 @@ class SetupDialog(QDialog):
             super().showEvent(a0)
             if a0.spontaneous():
                 return
+        if self._input_scope.closed:
+            self._connect_keyboard_actions()
         self._refresh_entries()
         self._prefill_from_preferences()
         self._refresh_context_list()

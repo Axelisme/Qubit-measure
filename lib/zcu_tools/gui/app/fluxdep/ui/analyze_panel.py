@@ -871,8 +871,13 @@ class AnalyzePanelWidget(QWidget):
             if outcome.status == "skipped"
             else f"Flux calibration written: {outcome.device}."
         )
-        self._status.setText(f"Exported → {receipt.savepath}\n{calibration}")
-        self._status.setToolTip(receipt.savepath)
+        predictor = (
+            f"Predictor skipped: {receipt.predictor_writeback.reason}"
+            if receipt.predictor_writeback.status == "skipped"
+            else f"Predictor written → {receipt.savepath}"
+        )
+        self._status.setText(f"{predictor}\n{calibration}")
+        self._status.setToolTip(receipt.savepath or "")
 
     def _show_message(self, title: str, message: str) -> None:
         from qtpy.QtWidgets import QMessageBox

@@ -28,9 +28,14 @@ from qtpy.QtWidgets import (
 )
 
 from zcu_tools.core.complex_codec import decode_complex, encode_complex
-from zcu_tools.gui.form import FormOptionDescription, FormValue, FormWritePath
+from zcu_tools.gui.form import FormOptionDescription, FormPath, FormValue, FormWritePath
 from zcu_tools.gui.lifetime import LifetimeScope
-from zcu_tools.gui.widgets import ERROR_RED_LIGHT, error_colour, mixed_colour
+from zcu_tools.gui.widgets import (
+    ERROR_RED_LIGHT,
+    error_colour,
+    mixed_colour,
+    set_foreground,
+)
 from zcu_tools.gui.widgets.form.value_widgets import (
     FIELD_INPUT_MIN_WIDTH,
     connect_committed_value_widget,
@@ -236,6 +241,16 @@ class RowActions:
     select: Callable[[FormWritePath, JsonValue], None]
 
 
+def make_error_label(parent: QWidget, name: str) -> QLabel:
+    """Create a hidden, selectable, wrapping diagnostic label with object name name."""
+    label = QLabel(parent)
+    label.setObjectName(name)
+    label.setWordWrap(True)
+    make_label_selectable(label)
+    label.hide()
+    return label
+
+
 class FieldRow:
     """Keep one described row stable while publication values change.
 
@@ -264,7 +279,7 @@ class FieldRow:
     unitless values. The editor aligns unit widths within each level. Sections
     have unit=None and show no unit. value is a public-named label, hidden
     while empty, showing only an Expression-mode resolved value. Errors tint
-    the input or name label and lead the row tooltip, without adding height.
+    the input or name label, lead the row tooltip and appear below the control.
     The coloured widget carries the boolean formError property.
     These controls never own or evaluate form state.
     Typed text is written after 500 ms idle, on Enter or ordinary focus loss,
@@ -336,11 +351,7 @@ class FieldRow:
         if not field.section:
             self.unit = _tight_label(field.unit, self.widget)
             header.addWidget(self.unit)
-        self.value = QLabel(self.widget)
-        make_label_selectable(self.value)
-        self.value.setObjectName(self._name("value"))
-        self.value.hide()
-        header.addWidget(self.value)
+        self._build_feedback(header)
         if field.kind in ("model", "elements") and field.options is None:
             # Keep the Enabled box beside the title instead of
             # stretching them.
@@ -355,6 +366,15 @@ class FieldRow:
         hint = _MODE_HINT if self.mode is not None else ""
         self._tooltip = "\n".join(filter(None, (field.description, hint)))
         self.set_error("")
+
+    def _build_feedback(self, header: QHBoxLayout) -> None:
+        self.value = QLabel(self.widget)
+        make_label_selectable(self.value)
+        self.value.setObjectName(self._name("value"))
+        self.value.hide()
+        header.addWidget(self.value)
+        self._error_label = make_error_label(self.widget, self._name("error"))
+        self.layout.addWidget(self._error_label)
 
     def set_idle_commit(self, *, enabled: bool) -> None:
         """Enable or cancel text idle commits without changing pending text."""
@@ -433,9 +453,12 @@ class FieldRow:
         """Mark the input or name label; lead the row tooltip with text.
 
         Empty text restores the normal mode colours and description/hint.
-        No error label or extra layout space is added.
+        Nonempty text also shows a selectable inline label below the control.
         """
         self._error = text
+        self._error_label.setText(text)
+        self._error_label.setVisible(bool(text))
+        set_foreground(self._error_label, error_colour(self.widget))
         self.widget.setToolTip("\n\n".join(filter(None, (text, self._tooltip))))
         self._restyle_input()
 
@@ -938,7 +961,7 @@ class GroupBlock:
     fold mark, then the group name, folding body on a click, or on Space,
     Return or Enter while it has Tab focus; the editor
     puts it in the level's label column. A GROUP_ERRORS_NOTE label follows
-    it, hidden until set_has_errors(True). body is a QGroupBox, hidden while
+    it, naming invalid descendants passed to set_errors. body is a QGroupBox, hidden while
     folded, whose layout rows takes the member rows; members are their paths
     in order. The block owns no form state.
     """
@@ -992,11 +1015,16 @@ class GroupBlock:
         """Retire group fold callbacks before deleting its widget."""
         self._scope.close()
 
-    def set_has_errors(self, *, has_errors: bool) -> None:
-        """Show the header's errors note when has_errors, else hide it.
+    def set_errors(self, paths: tuple[FormPath, ...]) -> None:
+        """Name invalid descendant paths in the header, without changing its fold.
 
-        The fold does not change: a folded group stays folded.
+        Empty paths hides the note. Paths use canonical form field names.
         """
-        colour = error_colour(self.widget)
-        self._errors_note.setStyleSheet(f"QLabel {{ color: {colour.name()}; }}")
-        self._errors_note.setVisible(has_errors)
+        names = ", ".join(".".join(str(part) for part in path) for path in paths)
+        self._errors_note.setText(
+            f"{GROUP_ERRORS_NOTE}: {names}" if names else GROUP_ERRORS_NOTE
+        )
+        self._errors_note.setWordWrap(True)
+        make_label_selectable(self._errors_note)
+        set_foreground(self._errors_note, error_colour(self.widget))
+        self._errors_note.setVisible(bool(paths))

@@ -5,6 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import MagicMock
 
+import pytest
+from qtpy.QtCore import Qt
 from qtpy.QtWidgets import (
     QApplication,
     QGroupBox,
@@ -34,6 +36,31 @@ def _make_ctrl() -> MagicMock:
     ctrl.get_soccfg.return_value = None
     ctrl.get_bus.return_value = BaseEventBus()
     return ctrl
+
+
+@pytest.mark.parametrize("field", ["soc_ip", "qt_spinbox_lineedit"])
+def test_enter_submits_connection_once(
+    qapp: QApplication, field: str, tmp_path: Path
+) -> None:
+    ctrl = _make_ctrl()
+    dialog = SocDialog(ctrl)
+    try:
+        dialog.show()
+        dialog.activateWindow()
+        qapp.processEvents()
+        driver = ComponentDriver(dialog)
+        driver.enter_text(value="10.2.3.4", object_name="soc_ip", commit=False)
+        driver.press_key(Qt.Key.Key_Return, object_name=field)
+        driver.press_key(Qt.Key.Key_Return, object_name=field)
+        driver.screenshot(tmp_path / f"soc-enter-{field}.png")
+        ctrl.start_connect.assert_called_once_with(
+            ConnectRemoteRequest(ip="10.2.3.4", port=8887)
+        )
+        assert not driver.observe("Connect").enabled
+    finally:
+        dialog.reject()
+        dialog.deleteLater()
+        qapp.processEvents()
 
 
 def soc_button(dialog: SocDialog, text: str) -> QPushButton:

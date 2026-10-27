@@ -20,11 +20,30 @@ class PointsData(TypedDict):
     freqs: NDArray[np.float64]
 
 
+class DeviceSnapshotValue(TypedDict):
+    """One device's fixed native value and its nonempty unit at acquisition."""
+
+    value: float
+    unit: str
+
+
 class SpectrumResult(TypedDict):
+    """Processed spectrum with its acquisition-specific affine flux mapping.
+
+    offset is reduced flux at zero scanned-device value, including all fixed
+    devices and flux jumps. period is the signed nonzero native span per Φ0.
+    device names the scanned instrument; unit describes its native axis.
+    spectrum and points retain their stored arrays, including reduced fluxs.
+    type optionally identifies the picker. device_snapshot optionally preserves
+    acquisition values, never additional contributions to this affine mapping.
+    """
+
     type: NotRequired[str]
-    flux_half: float
-    flux_int: float
-    flux_period: float
+    offset: float
+    period: float
+    device: str
+    unit: str
+    device_snapshot: NotRequired[dict[str, DeviceSnapshotValue]]
     spectrum: SpectrumData
     points: PointsData
 

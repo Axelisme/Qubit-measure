@@ -21,7 +21,11 @@ from typing import Literal
 import numpy as np
 from numpy.typing import NDArray
 
-from zcu_tools.analysis.fluxdep.models import PointsData, TransitionDict
+from zcu_tools.analysis.fluxdep.models import (
+    DeviceSnapshotValue,
+    PointsData,
+    TransitionDict,
+)
 from zcu_tools.analysis.fluxdep.search import DatabaseSearchResult, ParamBounds
 from zcu_tools.analysis.spectrum import SpectrumData
 from zcu_tools.gui.app.analysis_project.entry import AnalysisTarget
@@ -133,6 +137,9 @@ class SpectrumEntry:
     same units. flux_half/flux_int are native device positions of half/integer
     flux; flux_period is the device span of one flux quantum. aligned means
     alignment is committed; alignment_seeded means the scalars can seed a picker.
+    device/unit identify the scanned axis (unnamed_device/native for external
+    files). device_snapshot preserves optional acquisition values and units;
+    these never add to the per-spectrum affine alignment.
     """
 
     name: str
@@ -142,6 +149,9 @@ class SpectrumEntry:
     flux_half: float = 0.0
     flux_int: float = 0.0
     flux_period: float = 1.0
+    device: str = "unnamed_device"
+    unit: str = "native"
+    device_snapshot: dict[str, DeviceSnapshotValue] | None = None
     aligned: bool = False
     points_completed: bool = False  # A result was committed, including zero points.
     # True when flux_half/int are a meaningful initial guess (inherited from

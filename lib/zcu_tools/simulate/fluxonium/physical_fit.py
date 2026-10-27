@@ -16,12 +16,15 @@ from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
 
 @dataclass(frozen=True)
 class FluxoniumModelSnapshot:
-    """Immutable parameters needed to reconstruct a FluxoniumPredictor."""
+    """Immutable energies in GHz and additive reduced-flux correction in Phi0.
+
+    params contains positive finite EJ/EC/EL. offset_correction is finite and
+    added to input reduced phi before querying the reconstructed numeric model.
+    Invalid energies or correction raise ValueError.
+    """
 
     params: tuple[float, float, float]
-    flux_half: float
-    flux_period: float
-    flux_bias: float
+    offset_correction: float = 0.0
 
     def __post_init__(self) -> None:
         params = tuple(float(value) for value in self.params)
@@ -29,28 +32,24 @@ class FluxoniumModelSnapshot:
             raise ValueError("Fluxonium model params must be a 3-tuple")
         if any(not math.isfinite(value) or value <= 0.0 for value in params):
             raise ValueError("Fluxonium model params must be positive and finite")
-        flux_half = _finite("flux_half", self.flux_half)
-        flux_period = _finite("flux_period", self.flux_period)
-        if flux_period == 0.0:
-            raise ValueError("Fluxonium model flux_period must be non-zero")
-        flux_bias = _finite("flux_bias", self.flux_bias)
+        correction = _finite("offset_correction", self.offset_correction)
         object.__setattr__(self, "params", params)
-        object.__setattr__(self, "flux_half", flux_half)
-        object.__setattr__(self, "flux_period", flux_period)
-        object.__setattr__(self, "flux_bias", flux_bias)
+        object.__setattr__(self, "offset_correction", correction)
 
     def make_predictor(self) -> FluxoniumPredictor:
-        return FluxoniumPredictor(
-            self.params,
-            self.flux_half,
-            self.flux_period,
-            self.flux_bias,
-        )
+        """Restore an independent numeric model; queries take phi + correction."""
+        return FluxoniumPredictor(self.params)
 
 
 @dataclass(frozen=True)
 class FluxoniumLocalFitResult:
-    """Result of a bounded local physical-model fit."""
+    """Bounded local fit in reduced flux, with residual RMS in MHz.
+
+    accepted/reason describe solver success or rejection. base is unchanged;
+    fitted and predictor are None on rejection. On success predictor contains
+    fitted energies only; add fitted.offset_correction (Phi0) to query phi.
+    n_points counts measured pairs. RMS may be NaN when unavailable.
+    """
 
     accepted: bool
     reason: str
@@ -69,12 +68,16 @@ def fit_local_fluxonium_model(
     weights: Iterable[float] | None = None,
     transition: tuple[int, int] = (0, 1),
     param_relative_span: float = 0.25,
-    flux_bias_period_fraction: float = 0.10,
+    offset_correction_span: float = 0.10,
 ) -> FluxoniumLocalFitResult:
-    """Fit ``(EJ, EC, EL, flux_bias)`` near ``base`` without mutating it.
+    """Fit energies (GHz) and additive phi correction (Phi0) without mutation.
 
-    Optimization failures are returned as rejected results. Invalid caller inputs
-    fail fast because a rejected fit would hide a broken run configuration.
+    measured_points contains (reduced phi, frequency MHz), before base's
+    correction. weights are positive finite per-point weights. Energies vary
+    by param_relative_span; correction varies by offset_correction_span Phi0
+    around base. Successful snapshots restore the same corrected curve.
+    Fewer than four points or solver failures return rejected results. Invalid
+    points, weights or bounds raise ValueError; no native device map is used.
     """
 
     fluxes, freqs, weight_array = _validated_points(measured_points, weights)
@@ -91,16 +94,14 @@ def fit_local_fluxonium_model(
     lower, upper = _bounds(
         base,
         param_relative_span=param_relative_span,
-        flux_bias_period_fraction=flux_bias_period_fraction,
+        offset_correction_span=offset_correction_span,
     )
-    initial = np.asarray((*base.params, base.flux_bias), dtype=np.float64)
+    initial = np.asarray((*base.params, base.offset_correction), dtype=np.float64)
 
     def residual(vector: NDArray[np.float64]) -> NDArray[np.float64]:
         snapshot = FluxoniumModelSnapshot(
             params=(float(vector[0]), float(vector[1]), float(vector[2])),
-            flux_half=base.flux_half,
-            flux_period=base.flux_period,
-            flux_bias=float(vector[3]),
+            offset_correction=float(vector[3]),
         )
         return (
             np.sqrt(weight_array) * (_predict(snapshot, fluxes, transition) - freqs)
@@ -129,9 +130,7 @@ def fit_local_fluxonium_model(
 
     fitted = FluxoniumModelSnapshot(
         params=(float(result.x[0]), float(result.x[1]), float(result.x[2])),
-        flux_half=base.flux_half,
-        flux_period=base.flux_period,
-        flux_bias=float(result.x[3]),
+        offset_correction=float(result.x[3]),
     )
     fitted_pred = _predict(fitted, fluxes, transition)
     fitted_rms = _weighted_rms(fitted_pred - freqs, weight_array)
@@ -194,7 +193,10 @@ def _predict(
 ) -> NDArray[np.float64]:
     predictor = snapshot.make_predictor()
     return np.asarray(
-        predictor.predict_freq(np.asarray(fluxes, dtype=np.float64), transition)
+        predictor.predict_freq(
+            np.asarray(fluxes, dtype=np.float64) + snapshot.offset_correction,
+            transition,
+        )
     )
 
 
@@ -210,27 +212,26 @@ def _bounds(
     base: FluxoniumModelSnapshot,
     *,
     param_relative_span: float,
-    flux_bias_period_fraction: float,
+    offset_correction_span: float,
 ) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
     span = _positive_finite("param_relative_span", param_relative_span)
-    bias_fraction = _positive_finite(
-        "flux_bias_period_fraction", flux_bias_period_fraction
+    correction_window = _positive_finite(
+        "offset_correction_span", offset_correction_span
     )
     if span >= 1.0:
         raise ValueError("Fluxonium fit param_relative_span must be < 1")
     params = np.asarray(base.params, dtype=np.float64)
-    bias_window = abs(base.flux_period) * bias_fraction
     lower = np.asarray(
         (
             *(params * (1.0 - span)),
-            base.flux_bias - bias_window,
+            base.offset_correction - correction_window,
         ),
         dtype=np.float64,
     )
     upper = np.asarray(
         (
             *(params * (1.0 + span)),
-            base.flux_bias + bias_window,
+            base.offset_correction + correction_window,
         ),
         dtype=np.float64,
     )

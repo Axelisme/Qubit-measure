@@ -43,6 +43,8 @@ class CurveView:
     """Monotone affine map from device values to reduced flux Phi/Phi0."""
     flux_to_value: Callable[[float], float]
     """Inverse affine map to device values; preserves NumPy broadcasting."""
+    value_label: str = "Device value"
+    """Native horizontal axis caption, including the selected instrument unit."""
     highlights: tuple[tuple[int, int], ...] = ()
     """From/to level-index pairs; empty means no highlighted transition."""
     flux_window: tuple[float, float] = (0.4, 1.1)
@@ -236,7 +238,7 @@ class PredictorCurveCanvas(QWidget):
         # No unit on the device-value axis: the bound device is not necessarily a
         # current source. The secondary top axis below carries the reduced flux
         # Φ/Φ₀ (a genuinely different physical quantity, not a relabel).
-        ax.set_xlabel("Device value")
+        ax.set_xlabel(view.value_label)
         ax.set_ylabel(ylabel)
         ax.legend(fontsize=8, loc="best")
 

@@ -206,6 +206,20 @@ validation; remote only projects errors and numeric replies. No point, component
 alias, dialog state or cache participates. Inline inputs require no entry.
 Queries and calibration candidates never write predictor files.
 
+Inline `params` contains model and energies/asymmetry only. Inline prediction and
+calibration also require top-level `flux={offset, period, unit}`. Filename sources
+use recorded flux and reject a separate flux argument. `resources.PredictorFlux`
+owns v2 mapping validation and detached JSON projection. `predictor.info` returns
+`{model, params, missing, flux}`; inline info may omit flux and receive null.
+Missing lists energy/asymmetry fields only.
+
+Predict and calibrate require `device_values` for every flux device, in its
+recorded native unit. Missing devices are named errors, never filled from cache
+or hardware. The service projects these coordinates through `analysis.flux`.
+Calibrate returns `{offset_correction, frequency_mhz, clamped}`. The caller adds
+the Phi0 correction to its current offset; actual MHz and clamping come from the
+numerical model. No old scalar device-value or bias fields are accepted.
+
 Invalid filenames/content return `invalid_params/invalid_predictor_file`.
 Unreadable files return `precondition_failed/predictor_file_unavailable`; no entry
 returns `precondition_failed/no_entry`. Source conflicts and numeric

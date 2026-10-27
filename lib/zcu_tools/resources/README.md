@@ -1,13 +1,13 @@
 # `zcu_tools.resources` experiment work resources
 
-**Last updated:** 2026-10-27
+**Last updated:** 2026-10-28
 
 **讀者：** framework-dev。實驗資源的 scope、讀寫與持久化 owner 導覽。
 
 `resources/` 組織實驗工作資源的命名、讀寫與交換。資料檔格式與讀寫由 [datafile](../datafile/README.md) 擁有。
 
 - [`context/`](context/README.md) 管理 point-local typed ModuleLibrary。
-- `predictor_file.py` 擁有 `zcu.predictor` v1 JSON 的具名讀寫。它依模型名稱使用 simulate 的 nullable 參數型別，驗證欄名、有限數值與來源 metadata。`validate_predictor_file(PredictorFile)` 提供不做 I/O 的候選驗證，與 load/save 共用表示規則，供 dry-run 使用。完整性與物理約束由 `params.build_predictor()` 驗證。它不讀 component、alias 或舊 `params.json`。
+- `predictor_file.py` 擁有 `zcu.predictor` v2 JSON 的具名讀寫。`PredictorFile.params` 只含 simulate 的 nullable 能量／asymmetry，`PredictorFile.flux` 是 `PredictorFlux(offset, period, unit)`。`PredictorFlux.from_mapping` 解碼與檔案相同的 offset／period／unit 格式，`to_dict()` 回傳 detached typed JSON 欄位。RPC 與檔案共用此 decoder，不另建驗證。Flux 透過 `to_frame()` 複用 `analysis.flux.FluxFrame` 與 `DevicePeriod` 的驗證，不在 resources 重寫仿射數學。此 resources→analysis 依賴沿用 C8 分層與 C9 無循環 contract。`encode_predictor_document` 驗證並回傳 detached `PredictorDocument`，供 save、validate 與離線 migration baseline 共用 v2 表示，不讓 caller 序列化 frozen mappings。`validate_predictor_file` 與 load/save 共用表示規則，不建數值模型。完整性與物理約束由 `params.build_predictor()` 驗證。V1 只透過純函式 `upgrade_predictor_document` 轉為 v2，runtime 拒讀並列出升級命令。`predictor_upgrade.py` 擁有明確升級的逐檔預覽、備份及替換。格式與還原見 [Predictor v2](../../../docs/storage-format-history/predictor-v2.md)。它不讀 component、alias 或舊 `params.json`。
 - `simulation_replay.py` owns opt-in private FTF and single-fluxonium input JSON, content integrity,
   atomic file I/O and acquire/round reference resolution. It retains detached
   waveform samples and settings, not measured I/Q. Template arrays use explicit
@@ -23,7 +23,7 @@
 - [`waveform_assets.py`](waveform_assets.py) 是 qubit-scoped arbitrary waveform asset 的公開入口。每個 Database instance 持有固定 root，capture capability 固定原目錄但每次讀現在 bytes；沒有全域 repository 選擇器。core.waveform_format 負責 NPZ samples codec；內部 data、formula 與 NPZ 模組分別負責 payload／preview、formula 語意／rendering 與實體 I/O；格式、方法與約束見 [waveform_assets.md](waveform_assets.md)。
 - [`document_store.py`](document_store.py) 提供 typed YAML 的記憶體快照、單檔樂觀交易與跨程序鎖。公開 `DocumentRevision(path, revision)` 記錄絕對路徑與已安裝原始 bytes 的 SHA-256。`DocumentStore` 與 `ModuleLibrary` 的 `document_revision` 屬性，以及 entry 的 `document_revision(view)` 函式都不重新讀檔。提交或 refresh 成功才更新版本，失敗保留舊版本。Entry、point-local ModuleLibrary 與 GUI／MCP 參數操作使用它。
 - [`entry/`](entry/README.md) 組合條目身分、setup 範本與獨立完整的 point。每個視圖綁自己的 DocumentStore，建立 point 時複製 seed。
-- `parameter_schema.py` 擁有 caller 注入的 `ParameterSchemaPolicy`。`parameter_upgrade.py` 提供具名文件、線性純函式升級鏈與 `main(argv, *, plan)`，預設 dry-run。Component CLI 接受檔案或 entry 目錄，目錄的 component 文件由 entry owner 列舉。Policy 的版本錯誤列出 Preview 與含 `--apply` 的 Apply 指令，目標由 caller 傳入，預設是來源檔。Lib 只讀版本、驗證連續性與管理單檔備份／replace，不知道 lab 欄位。完整舊格式分類、逐版本驗證與步驟由 caller 提供，未標版只在明確 upgrade 且分類成功後視為 v1。Runtime 讀取從不改檔。`UpgradePlan.notes` 列出整體操作警告；每份 `ParameterDocument.notes` 隨轉換傳到 `UpgradeResult.notes`，CLI 在該檔結果下呈現。Notes 不寫入 YAML，runner 不解析 caller 的欄位或診斷內容。
+- `parameter_schema.py` 擁有 caller 注入的 `ParameterSchemaPolicy`。`parameter_upgrade.py` 提供具名文件、線性純函式升級鏈與 `main(argv, *, plan)`，預設 dry-run。Component CLI 接受檔案或 entry 目錄，目錄的 component 文件與 predictor JSON 由 entry owner 列舉。Predictor 檔案走獨立的 v1→v2 owner，不使用 component schema plan。Policy 的版本錯誤列出 Preview 與含 `--apply` 的 Apply 指令，目標由 caller 傳入，預設是來源檔。Lib 只讀版本、驗證連續性與管理單檔備份／replace，不知道 lab 欄位。完整舊格式分類、逐版本驗證與步驟由 caller 提供，未標版只在明確 upgrade 且分類成功後視為 v1。Runtime 讀取從不改檔。`UpgradePlan.notes` 列出整體操作警告；每份 `ParameterDocument.notes` 隨轉換傳到 `UpgradeResult.notes`，CLI 在該檔結果下呈現。Notes 不寫入 YAML，runner 不解析 caller 的欄位或診斷內容。
 
 樣本歷史使用 JSONL，舊 CSV 的離線讀取與轉換由 root [`migrations/`](../../../migrations/README.md) 提供。
 

@@ -17,6 +17,7 @@ from .manager import (
 )
 from .mg3692 import AnritsuMG3692, AnritsuMG3692Info
 from .sgs100a import RohdeSchwarzSGS100A, RohdeSchwarzSGS100AInfo
+from .snapshot import DeviceScalar, snapshot_scalar_values
 from .yoko import YOKOGS200, YOKOGS200Info
 
 DeviceInfo: TypeAlias = (
@@ -44,6 +45,9 @@ __all__ = [
     "FakeDeviceInfo",
     "AnritsuMG3692",
     "AnritsuMG3692Info",
+    # historical scalar values
+    "DeviceScalar",
+    "snapshot_scalar_values",
     # other
     "DeviceInfo",
 ]

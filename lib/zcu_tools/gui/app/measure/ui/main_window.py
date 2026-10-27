@@ -309,6 +309,7 @@ class MainWindow(QMainWindow):
         if self._delete_scheduled:
             return
         self._delete_scheduled = True
+        self._toolbar.dispose()
         self.dispose_control_watches()
         super().deleteLater()
 

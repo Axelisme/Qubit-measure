@@ -21,9 +21,12 @@ import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 
+from zcu_tools.analysis.flux import ComponentFluxContext
 from zcu_tools.analysis.fluxdep.models import TransitionDict
 from zcu_tools.analysis.fluxdep.search import DatabaseSearchResult, ParamBounds
 from zcu_tools.gui.app.analysis_project.entry import AnalysisTarget
+from zcu_tools.gui.app.analysis_project.flux import ComponentFluxProvider
+from zcu_tools.gui.app.analysis_project.native import NativeSpectrumSelection
 from zcu_tools.gui.app.fluxdep.event_bus import (
     ActiveSpectrumChangedPayload,
     EventBus,
@@ -200,12 +203,37 @@ class Controller(BaseController[FluxDepState, EventBus]):
         inherit_from: str | None = None,
         *,
         transpose_axes: bool = False,
+        selection: NativeSpectrumSelection | None = None,
     ) -> str:
+        """Load a raw spectrum with explicit native variable/axis/device selection.
+
+        Labber keeps its transpose option and unnamed_device identity. Native
+        selections and metadata are validated before any State publication.
+        """
         name = self._load.load_spectrum(
-            filepath, spec_type, inherit_from, transpose_axes=transpose_axes
+            filepath,
+            spec_type,
+            inherit_from,
+            transpose_axes=transpose_axes,
+            selection=selection,
         )
         self._emit(SpectrumAddedPayload(name=name))
         return name
+
+    def configure_flux_context(self, provider: ComponentFluxProvider) -> None:
+        """Inject the lab projection for loads, queries and predictor exports.
+
+        Replaces the stateless load service and export provider, preserving spectra.
+        """
+        self._load = LoadService(self.state, flux_context_provider=provider)
+        self._fit.configure_flux_context(provider)
+
+    def flux_context(self) -> ComponentFluxContext | None:
+        """Return the opened target's injected calibration; errors name component/kind.
+
+        None means no target; a context whose frame is None means uncalibrated.
+        """
+        return self._load.flux_context()
 
     def load_processed_spectrums(self, filepath: str) -> list[str]:
         """Restore a processed spectrums.hdf5 (aligned + selected spectra)."""
@@ -535,9 +563,10 @@ class Controller(BaseController[FluxDepState, EventBus]):
         """
         self._fit.configure_export(planner)
 
-    def export_params(self) -> str:
+    def export_params(self) -> str | None:
         """Export to the selected entry/component and return the predictor path.
 
+        None means predictor skipped, not setup/ledger skipped.
         Same owner-thread, validation and partial-failure contract as
         export_params_receipt.
         """
@@ -548,7 +577,8 @@ class Controller(BaseController[FluxDepState, EventBus]):
 
         Requires an opened entry/component, fresh fit and aligned source. Uses
         the first aligned spectrum, even with zero sampled points. Receipt holds
-        predictor path, GHz params, calibration source, component and analysis ID.
+        optional predictor path, independent predictor/component outcomes, GHz
+        params, calibration source, component and analysis ID.
         Files are committed sequentially; I/O/schema failure preserves successful
         prefix without retry or rollback. State observations remain unchanged.
         """

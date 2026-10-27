@@ -262,7 +262,7 @@ async def coherence_fluxdep(  # noqa: C901, PLR0912, PLR0915  # tolerated: workf
     carry = CalCarry(
         env.context,
         seed_flux=plan.seed_flux,
-        frequency_tracker=FrequencyTracker(plan.predictor.make_predictor()),
+        frequency_tracker=FrequencyTracker(plan.predictor),
     )
     last_ge_flux: float | None = None
     t1_by_flux: LifetimeHistory = []
