@@ -80,6 +80,25 @@ def _entry_path(root: str | Path, name: str, *, new_destination: bool = False) -
     return path
 
 
+def entry_component_paths(entry_root: Path) -> tuple[Path, ...]:
+    """List setup then sorted point YAML paths without parsing component schemas.
+
+    entry_root is the exact Result entry directory. A setup.yaml file identifies
+    an entry, as in ResultEntry.list_names; otherwise raise ValueError. Include
+    every existing points/*/point.yaml file, even without module_cfg.yaml.
+    Missing points/ means no points. Do not read YAML or create files or locks.
+    """
+    setup = entry_root / "setup.yaml"
+    if not entry_root.is_dir() or not setup.is_file():
+        raise ValueError(f"{entry_root}: not an entry directory; expected setup.yaml")
+    return (
+        setup,
+        *sorted(
+            path for path in entry_root.glob("points/*/point.yaml") if path.is_file()
+        ),
+    )
+
+
 def rename_entry(old: str, new: str, *, result_root: str | Path) -> None:
     """Rename only result_root/old to result_root/new without rewriting contents.
 
@@ -121,6 +140,7 @@ class ResultEntry:
         # Bind diagnostics to this handle without shared mutable model context.
         class EntrySetupDocument(SetupDocument):
             _source = source
+            _upgrade_target = result_path
 
         try:
             self._setup_store = DocumentStore[SetupDocument](
@@ -587,6 +607,7 @@ class ResultEntry:
     def _point_store(self, source: Path) -> DocumentStore[PointDocument]:
         class EntryPointDocument(PointDocument):
             _source = source
+            _upgrade_target = self._result_path
 
         try:
             return DocumentStore[PointDocument](

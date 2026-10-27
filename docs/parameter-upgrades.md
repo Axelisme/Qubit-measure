@@ -6,17 +6,17 @@
 
 `setup.yaml`、每個 `points/<label>/point.yaml` 與 entry template 都有整份文件的 `schema_version: N`。它描述 component schema。`format` 與 `format_version` 仍描述 YAML 容器，兩種版本不互相代替。
 
-GUI／MCP 只讀 lab 宣告的目前版本。缺版或不同版本會在讀取處報錯，列出來源路徑、文件版本、目前版本與 upgrade 命令。讀取不改檔。不要為了消除錯誤手改版本標頭。
+GUI／MCP 只讀 lab 宣告的目前版本。缺版或不同版本會在讀取處報錯，列出來源路徑、文件版本與目前版本。`Preview:` 一行預覽差異，`Apply:` 一行含 `--apply`，備份後改檔。Setup 或 point 的兩行指令都以整個 entry 目錄為目標，entry template 則以該檔案為目標。指令會 quote 含空白的路徑，可直接複製執行。讀取不改檔。不要為了消除錯誤手改版本標頭。
 
 目前 lab runtime 與升級鏈目標都是 `schema_version: 2`，提供 flux v1→v2 步驟。Runtime 已移除舊 component flux 欄位，只接受 v2。先在副本核對 dry-run 與備份，再安排正式資料升級。已是 v2 的文件先完整驗證，再顯示 `skipped`。未標版文件只有通過完整舊格式分類後才視為 v1，不需要 operator 補標頭。四類範例、缺來源的手動處理與參考點假設見 [flux 升級指南](flux-migration.md)。
 
 ## 預覽與套用
 
-從 checkout root 執行，使用該 worktree 的 interpreter。給一個或多個明確 YAML 路徑，shell glob 可選多個 point。
+從 checkout root 執行，使用該 worktree 的 interpreter。給 entry 目錄即可選取 `setup.yaml` 與所有 `points/*/point.yaml`，不必先開啟 entry 或補版本。目錄須含 `setup.yaml`，否則 CLI 報錯。也可混合傳入多個 entry 目錄與明確 YAML 檔案路徑，或用 shell glob 選取檔案。
 
 ```bash
 uv run --directory /absolute/checkout --no-sync -- python scripts/upgrade_parameters.py \
-  /data/result/device/setup.yaml /data/result/device/points/*/point.yaml
+  /data/result/device
 ```
 
 預設是 `dry-run`。輸出按完整檔案路徑列出結果，point 路徑含 label。每筆欄位差異顯示 literal key tuple、原值與新值，`<missing>` 與 explicit null 不同。Dry-run 不建檔、不建鎖、不備份。
@@ -25,7 +25,7 @@ uv run --directory /absolute/checkout --no-sync -- python scripts/upgrade_parame
 
 ```bash
 uv run --directory /absolute/checkout --no-sync -- python scripts/upgrade_parameters.py \
-  /data/result/device/setup.yaml /data/result/device/points/*/point.yaml --apply
+  /data/result/device --apply
 ```
 
 每份合法候選先取得同名 `.lock`，鎖最多等待 5 秒。Runner 在鎖內重讀來源並驗證整條鏈，再用獨立檔名保存完整原 bytes。備份路徑是原檔名加唯一識別碼與 `.bak`。備份成功才以同目錄 temporary 檔原子替換來源。輸出列出備份路徑與 `applied`，替換失敗也保留並列出已完成的備份。

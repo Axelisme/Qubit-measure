@@ -129,6 +129,7 @@ class _ParameterDocument(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
     _source: ClassVar[Path] = Path("setup.yaml")
+    _upgrade_target: ClassVar[Path | None] = None
 
     format: str
     format_version: str
@@ -157,7 +158,7 @@ class _ParameterDocument(BaseModel):
             document = TypeAdapter(YamlMap).validate_python(obj)
             is_forward_minor(document, source=cls._source)
             component_registry.require_schema_policy().require_current(
-                document, source=cls._source
+                document, source=cls._source, upgrade_target=cls._upgrade_target
             )
             components = TypeAdapter(dict[str, YamlMap]).validate_python(
                 document.get("components", {})

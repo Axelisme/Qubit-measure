@@ -23,7 +23,7 @@
 - [`waveform_assets.py`](waveform_assets.py) 是 qubit-scoped arbitrary waveform asset 的公開入口。每個 Database instance 持有固定 root，capture capability 固定原目錄但每次讀現在 bytes；沒有全域 repository 選擇器。core.waveform_format 負責 NPZ samples codec；內部 data、formula 與 NPZ 模組分別負責 payload／preview、formula 語意／rendering 與實體 I/O；格式、方法與約束見 [waveform_assets.md](waveform_assets.md)。
 - [`document_store.py`](document_store.py) 提供 typed YAML 的記憶體快照、單檔樂觀交易與跨程序鎖。公開 `DocumentRevision(path, revision)` 記錄絕對路徑與已安裝原始 bytes 的 SHA-256。`DocumentStore` 與 `ModuleLibrary` 的 `document_revision` 屬性，以及 entry 的 `document_revision(view)` 函式都不重新讀檔。提交或 refresh 成功才更新版本，失敗保留舊版本。Entry、point-local ModuleLibrary 與 GUI／MCP 參數操作使用它。
 - [`entry/`](entry/README.md) 組合條目身分、setup 範本與獨立完整的 point。每個視圖綁自己的 DocumentStore，建立 point 時複製 seed。
-- `parameter_schema.py` 擁有 caller 注入的 `ParameterSchemaPolicy`。`parameter_upgrade.py` 提供具名文件、線性純函式升級鏈與 `main(argv, *, plan)`，預設 dry-run。Lib 只讀版本、驗證連續性與管理單檔備份／replace，不知道 lab 欄位。完整舊格式分類、逐版本驗證與步驟由 caller 提供，未標版只在明確 upgrade 且分類成功後視為 v1。Runtime 讀取從不改檔。`UpgradePlan.notes` 讓 caller 在 component CLI 結果前列出參考點假設等操作警告，不將 lab 語意放入 runner。
+- `parameter_schema.py` 擁有 caller 注入的 `ParameterSchemaPolicy`。`parameter_upgrade.py` 提供具名文件、線性純函式升級鏈與 `main(argv, *, plan)`，預設 dry-run。Component CLI 接受檔案或 entry 目錄，目錄的 component 文件由 entry owner 列舉。Policy 的版本錯誤列出 Preview 與含 `--apply` 的 Apply 指令，目標由 caller 傳入，預設是來源檔。Lib 只讀版本、驗證連續性與管理單檔備份／replace，不知道 lab 欄位。完整舊格式分類、逐版本驗證與步驟由 caller 提供，未標版只在明確 upgrade 且分類成功後視為 v1。Runtime 讀取從不改檔。`UpgradePlan.notes` 讓 caller 在 component CLI 結果前列出參考點假設等操作警告，不將 lab 語意放入 runner。
 
 樣本歷史使用 JSONL，舊 CSV 的離線讀取與轉換由 root [`migrations/`](../../../migrations/README.md) 提供。
 
