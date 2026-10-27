@@ -111,9 +111,7 @@ def _T1_get_writeback_items(
                 description="T1 record at the captured bias",
                 record={
                     "devices": {name: deepcopy(info) for name, info in devices.items()},
-                    "flux_frame": {
-                        name: dict(calibration) for name, calibration in frame.items()
-                    },
+                    "flux_frame": frame,
                     "run": {
                         "run_id": metadata.run_id,
                         "experiment": metadata.experiment,

@@ -21,12 +21,24 @@ class ParameterValue:
     value: YamlValue
 
 
+@dataclass(frozen=True)
+class PreparedParameterBatch:
+    """Validated document and caller diagnostics from one complete conversion.
+
+    document is ready for EditView. notes are opaque operator messages; the
+    migration owner attaches the actual destination path when reporting them.
+    """
+
+    document: SetupDocument | PointDocument
+    notes: tuple[str, ...]
+
+
 def prepare_parameter_batch(
     document: ParameterDocument,
     *,
     transform: Callable[[ParameterDocument], ParameterDocument] | None,
     values: Sequence[ParameterValue] = (),
-) -> SetupDocument | PointDocument:
+) -> PreparedParameterBatch:
     """Convert a detached full seed/value batch and validate the current schema.
 
     document contains a complete parameter-container mapping, including general,
@@ -35,7 +47,7 @@ def prepare_parameter_batch(
     or None for an already current batch. It must preserve unrelated fields and
     must not perform I/O. Validate only its output, so historical fields need
     not be accepted by current component models. Return a detached typed model
-    ready for EditView. values overlays logical fields on the raw document before
+    in PreparedParameterBatch with caller notes. values overlays logical fields before
     conversion, including historical paths absent from the current schema.
     Callback/schema errors propagate before publication;
     neither the input nor registries are changed.
@@ -62,4 +74,5 @@ def prepare_parameter_batch(
         and document.source_path.name == "setup.yaml"
         else PointDocument
     )
-    return model.model_validate(deepcopy(candidate.data))
+    validated = model.model_validate(deepcopy(candidate.data))
+    return PreparedParameterBatch(validated, candidate.notes)

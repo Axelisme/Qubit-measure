@@ -7,6 +7,12 @@ import numpy as np
 from zcu_tools.resources.ftf import FTFSettings
 from zcu_tools.resources.ftf.schema import Receiver
 from zcu_tools.resources.simulation_schema import ReceiverBackground
+from zcu_tools.simulate.adc import (
+    BackgroundBandEdge,
+    BackgroundBandEdges,
+    BackgroundRipple,
+    BackgroundRoughness,
+)
 
 
 @dataclass(frozen=True)
@@ -25,6 +31,9 @@ class FTFReceiverConfig:
     pivot_ghz: finite absolute GHz where the slope factor is unity, default zero.
         These five scalars describe fixed transmission before receiver gain/phase;
         zero depth and slope give unity without changing physical cavities.
+    extra_ripples: immutable multiplicative waves in MHz/degrees, default empty.
+    roughness: optional fixed complex field, including its independent seed.
+    band_edges: optional low/high GHz corners with positive dB/GHz attenuation.
     All numeric values must be finite. Invalid calibration raises ValueError.
     """
 
@@ -39,6 +48,9 @@ class FTFReceiverConfig:
     ripple_phase_deg: float = 0.0
     slope_db_per_ghz: float = 0.0
     pivot_ghz: float = 0.0
+    extra_ripples: tuple[BackgroundRipple, ...] = ()
+    roughness: BackgroundRoughness | None = None
+    band_edges: BackgroundBandEdges | None = None
 
     def __post_init__(self) -> None:
         ReceiverBackground(
@@ -147,6 +159,33 @@ def _receiver_configuration(adc: Receiver) -> FTFReceiverConfig:
         ripple_phase_deg=adc.background.ripple_phase_deg,
         slope_db_per_ghz=adc.background.slope_db_per_ghz,
         pivot_ghz=adc.background.pivot_ghz,
+        extra_ripples=tuple(
+            BackgroundRipple(w.depth, w.period_mhz, w.phase_deg)
+            for w in adc.background.extra_ripples
+        ),
+        roughness=None
+        if adc.background.roughness is None
+        else BackgroundRoughness(
+            adc.background.roughness.amplitude,
+            adc.background.roughness.correlation_mhz,
+            adc.background.roughness.seed,
+        ),
+        band_edges=None
+        if adc.background.band_edges is None
+        else BackgroundBandEdges(
+            low=None
+            if adc.background.band_edges.low is None
+            else BackgroundBandEdge(
+                adc.background.band_edges.low.corner_ghz,
+                adc.background.band_edges.low.rolloff_db_per_ghz,
+            ),
+            high=None
+            if adc.background.band_edges.high is None
+            else BackgroundBandEdge(
+                adc.background.band_edges.high.corner_ghz,
+                adc.background.band_edges.high.rolloff_db_per_ghz,
+            ),
+        ),
     )
 
 

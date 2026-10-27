@@ -91,6 +91,26 @@ def test_runner_orders_steps_and_preserves_caller_input() -> None:
     assert calls == [1, 2]
 
 
+def test_cli_reports_conversion_notes_outside_yaml_payload(
+    tmp_path: Path, rename_plan: UpgradePlan, capsys: pytest.CaptureFixture[str]
+) -> None:
+    def transform(document: ParameterDocument) -> ParameterDocument:
+        converted = rename_plan.steps[0].transform(document)
+        return replace(converted, notes=("new: rename the declared placeholder",))
+
+    plan = replace(rename_plan, steps=(UpgradeStep(1, transform),))
+    path = tmp_path / "point.yaml"
+    path.write_text("schema_version: 1\nold: 7\n", encoding="utf-8")
+    assert main([str(path)], plan=plan) == 0
+    assert "new: rename the declared placeholder" in capsys.readouterr().out
+    assert upgrade_document(
+        ParameterDocument({"schema_version": 1, "old": 7}), plan=plan
+    ).data == {
+        "schema_version": 2,
+        "new": 7,
+    }
+
+
 def test_unversioned_document_requires_complete_caller_classification() -> None:
     def classify(document: ParameterDocument) -> bool:
         return document.data == {"old": 7}

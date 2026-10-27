@@ -51,18 +51,19 @@ Alias 缺失或錯誤時，OK 保持停用，直到使用者明示選擇。
 
 Export params… 寫 `predictors/<component>.json`，再更新 setup 宣告的 EJ／EC／EL
 與注入 planner 提出的校準欄位，最後追加 analysis ledger。
-`export_plan.ExportPlanner` 接收 detached component 與 aligned native integer／half，
+`export_plan.ExportPlanner` 接收 detached component 與 app owner 的 `AlignmentPublication`，包含 aligned native integer／half／period，
 回傳 component-relative scalar writes 及 `flux_writeback`。未接 planner 時，export 在輸出前拒絕。
 Framework 不解讀 lab 的 flux 區塊，也不取得 device 值。
 
 `apps.fluxdep` 注入 [`zcu_lab.fluxdep_export`](../../../../../zcu_lab/fluxdep_export.py) 的規則。
-只有 component 的 `flux` 恰含 `flux_source` 一個 device 時，才更新
-`flux.<flux_source>.{half, integer, period}`，保留既有 period 方向，更新其大小。
-缺來源、空 frame、名稱不匹配或多 contributor 時不寫 component flux。
-EJ／EC／EL、predictor 與 ledger 仍匯出，GUI status 與 RPC／MCP receipt 的
-`flux_writeback` 明示 skipped、目標 device 與原因。多 contributor 校準需要被掃 device
-及其他 device 在採集時的值，operator 應使用 fluxdep 量測 writeback。
-無效名稱與不一致的校準在 planner 拒絕，不猜 device 或補值。
+有 `flux_dev` 時只更新 `flux.period.<flux_dev>` 的大小，保留原方向，首次使用正方向。
+單儀器、多儀器、空 period mapping 與 offset=null 都不改 component offset，其他 periods 也保留。
+Operator 必須確認 `flux_dev` 是這批資料的被掃儀器，app 不從 snapshot 推測來源。
+缺 `flux_dev` 時跳過 period，但 EJ／EC／EL、predictor 與 ledger 仍匯出。
+GUI status 與 RPC／MCP 的 `flux_writeback` receipt 維持 written／skipped、目標 device 與原因，不新增 partial。
+資料可能經歷 flux jump，app 對齊不代表目前 component offset。
+只有量測 fluxdep writeback 會另提預設勾選的 offset，扣除其他儀器在 Run snapshot 的貢獻。
+無效名稱或擬合點在 planner 拒絕，不猜 device 或補值。
 
 Predictor 的 `zcu.predictor` v1 格式與 `flux_half／flux_period／flux_bias` 模型座標不變。
 Spectrum 的 reference anchors 與 processed checkpoint 也不是 component flux frame。

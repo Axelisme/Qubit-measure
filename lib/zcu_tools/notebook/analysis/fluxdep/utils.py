@@ -8,6 +8,7 @@ import pandas as pd
 import plotly.graph_objects as go
 from numpy.typing import NDArray
 
+from zcu_tools.analysis.flux import FluxFrame
 from zcu_tools.analysis.fluxdep.models import (
     SpectrumResult,
     TransitionDict,
@@ -15,7 +16,6 @@ from zcu_tools.analysis.fluxdep.models import (
 )
 from zcu_tools.resources.record_table import (
     RECORD_COORDINATE_COLUMNS,
-    RecordFluxFrame,
     project_device_coordinates,
     resolve_record_flux,
     validate_record_table_v2,
@@ -191,7 +191,7 @@ class FreqFluxDependVisualizer(FluxDependVisualizer):
         record_table: pd.DataFrame,
         *,
         device_name: str,
-        fallback_frame: RecordFluxFrame | None = None,
+        fallback_frame: FluxFrame | None = None,
     ) -> Self:
         """Plot v2 sample rows at their resolved flux.
 

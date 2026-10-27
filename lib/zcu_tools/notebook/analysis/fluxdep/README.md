@@ -1,6 +1,6 @@
 # fluxdep 模塊重點文檔
 
-**Last updated:** 2026-10-21
+**Last updated:** 2026-10-27
 
 **讀者：** lab-author。通量頻譜的擬合、資料處理與互動標註工具。
 
@@ -121,6 +121,8 @@ measure app 的 `FluxPickState`/plugin 共用數值計算，但 notebook 不建�
 ## 可視化工具（`utils.py`）
 
 `plotly` 建構 figure 的 builder-pattern 類別（每個方法回傳 `self`）：
+
+Sample points 的 caller fallback 使用 `analysis.flux.FluxFrame`，且必須恰有一台儀器，單位與該列 `dev_unit` 相同。
 
 - `FluxDependVisualizer`：基底類別，負責加次要 x 軸（`flux` ↔ `dev_value` 雙軸顯示）。
 - `FreqFluxDependVisualizer`：追加

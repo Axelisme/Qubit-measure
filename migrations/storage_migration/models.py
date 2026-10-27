@@ -413,6 +413,8 @@ class MigrationReport:
     destination: MigrationDestination
     entry_id: UUID
     part: MigrationPart
+    notes: tuple[str, ...] = ()
+    """Located caller-owned parameter conversion diagnostics, including next actions."""
     key_mappings: tuple[KeyMappingItem, ...] = ()
     converted_files: tuple[FileMigrationItem, ...] = ()
     moved_labber_files: tuple[FileMigrationItem, ...] = ()

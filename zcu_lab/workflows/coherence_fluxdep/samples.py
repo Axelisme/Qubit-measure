@@ -146,8 +146,8 @@ def point_sample(
     records the commanded setpoint separately. Missing stages are skipped with a
     reason. Models preserve both fit diagnostics, including secondary lifetimes.
     Rabi mode describes saved stages, or null when no Rabi acquisition is recorded.
-    A present snapshot must supply finite, non-bool values for every captured
-    frame device; otherwise ValueError names it before any row is appended.
+    Missing device values contribute zero. Present invalid values raise
+    ValueError naming the device before any row is appended.
     """
     encoded = point.model_dump(mode="json")
     devices = native_devices(directory, _native_files(point))
@@ -155,10 +155,7 @@ def point_sample(
         "index": point.index,
         "status": point.status,
         "flux": {"device": plan.flux_dev, "value": point.flux, "unit": plan.flux_unit},
-        "flux_frame": {
-            name: dict(calibration)
-            for name, calibration in record_flux_frame(plan.flux_frame, devices).items()
-        },
+        "flux_frame": record_flux_frame(plan.flux_frame, devices),
         "devices": None
         if devices is None
         else {name: dict(info) for name, info in devices.items()},

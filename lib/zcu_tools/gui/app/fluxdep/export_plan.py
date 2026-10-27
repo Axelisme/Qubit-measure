@@ -4,8 +4,9 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Literal
 
-from zcu_tools.analysis.flux import DeviceFluxPoint
 from zcu_tools.resources.entry.schema import ComponentSchema
+
+from .state import AlignmentPublication
 
 
 @dataclass(frozen=True)
@@ -51,4 +52,4 @@ class ComponentExportPlan:
     flux_writeback: FluxWritebackReceipt
 
 
-ExportPlanner = Callable[[ComponentSchema, DeviceFluxPoint], ComponentExportPlan]
+ExportPlanner = Callable[[ComponentSchema, AlignmentPublication], ComponentExportPlan]

@@ -2,6 +2,9 @@
 
 **讀者：** operator、lab-author、framework-dev、agent。辨識 component flux 格式，查找轉換範圍與參考點假設。
 
+本頁保留 main v2 的格式與當時升級方式，以下「新」指 v2。
+目前 runtime 為 v3，現行鏈與 coil 中立化規則見 [v3 歷程](component-flux-v3.md)。
+
 ## 改前與改後
 
 `schema_version: 1` 的 qubit 保存 `flux_half`、`flux_int`、`flux_period` 與 `flux_unit`。Mux group 另存 `coil_flux.<qubit>.half/int/period`。

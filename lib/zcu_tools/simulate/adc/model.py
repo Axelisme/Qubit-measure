@@ -18,6 +18,119 @@ def readonly_array(value: RealArray, name: str) -> RealArray:
 
 
 @dataclass(frozen=True)
+class BackgroundRipple:
+    """One multiplicative wave: depth in [0,1), positive period_mhz, phase_deg.
+
+    All values must be finite; invalid input raises ValueError naming the field.
+    """
+
+    depth: float
+    period_mhz: float
+    phase_deg: float = 0.0
+
+    def __post_init__(self) -> None:
+        if not np.isfinite(self.depth) or not 0 <= self.depth < 1:
+            raise ValueError("extra_ripples.depth must be finite and in [0,1)")
+        if not np.isfinite(self.period_mhz) or self.period_mhz <= 0:
+            raise ValueError("extra_ripples.period_mhz must be finite and positive")
+        if not np.isfinite(self.phase_deg):
+            raise ValueError("extra_ripples.phase_deg must be finite")
+
+
+@dataclass(frozen=True)
+class BackgroundRoughness:
+    """Fixed line shape with nonnegative complex RMS amplitude.
+
+    correlation_mhz: finite positive e^-1 correlation separation in MHz.
+    seed: nonnegative integer, default 0, independent of acquisition noise.
+    A finite spectral approximation has ensemble correlation exp(-(df/corr)^2).
+    Invalid parameters raise ValueError naming the field. No global RNG is used.
+    """
+
+    amplitude: float
+    correlation_mhz: float
+    seed: int = 0
+    _wave_numbers: RealArray = field(init=False, repr=False, compare=False)
+    _phases: RealArray = field(init=False, repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        if not np.isfinite(self.amplitude) or self.amplitude < 0:
+            raise ValueError("roughness.amplitude must be finite and nonnegative")
+        if not np.isfinite(self.correlation_mhz) or self.correlation_mhz <= 0:
+            raise ValueError("roughness.correlation_mhz must be finite and positive")
+        if type(self.seed) is not int or self.seed < 0:
+            raise ValueError("roughness.seed must be a nonnegative integer")
+        rng = np.random.Generator(
+            np.random.PCG64(np.random.SeedSequence(self.seed, spawn_key=(0x424743,)))
+        )
+        # The Gaussian spectral width gives an e^-1 frequency correlation length.
+        object.__setattr__(
+            self,
+            "_wave_numbers",
+            readonly_array(rng.normal(0, np.sqrt(2), 512), "roughness wave numbers"),
+        )
+        object.__setattr__(
+            self,
+            "_phases",
+            readonly_array(rng.uniform(0, 2 * np.pi, 512), "roughness phases"),
+        )
+
+    def factor(self, frequency_ghz: float) -> complex:
+        """Return 1 + the complex perturbation at finite absolute GHz.
+
+        Equal seed/parameters/frequency produce identical values independent of
+        query history or grid density. Nonfinite frequency raises ValueError.
+        """
+        if not np.isfinite(frequency_ghz):
+            raise ValueError("roughness frequency_ghz must be finite")
+        phase = self._wave_numbers * (frequency_ghz * 1000 / self.correlation_mhz)
+        return complex(
+            1
+            + self.amplitude
+            / np.sqrt(512)
+            * np.sum(np.exp(1j * (phase + self._phases)))
+        )
+
+
+@dataclass(frozen=True)
+class BackgroundBandEdge:
+    """Finite corner_ghz and positive finite rolloff_db_per_ghz outside the band.
+
+    Invalid values raise ValueError naming the field. The corner has unity gain.
+    """
+
+    corner_ghz: float
+    rolloff_db_per_ghz: float
+
+    def __post_init__(self) -> None:
+        if not np.isfinite(self.corner_ghz):
+            raise ValueError("band_edges.corner_ghz must be finite")
+        if not np.isfinite(self.rolloff_db_per_ghz) or self.rolloff_db_per_ghz <= 0:
+            raise ValueError(
+                "band_edges.rolloff_db_per_ghz must be finite and positive"
+            )
+
+
+@dataclass(frozen=True)
+class BackgroundBandEdges:
+    """Optional low/high edges; omitted sides do not attenuate.
+
+    When both exist, low.corner_ghz < high.corner_ghz or ValueError is raised.
+    """
+
+    low: BackgroundBandEdge | None = None
+    high: BackgroundBandEdge | None = None
+
+    def __post_init__(self) -> None:
+        if (
+            self.low is not None
+            and self.high is not None
+            and self.low.corner_ghz >= self.high.corner_ghz
+        ):
+            raise ValueError("band_edges.high.corner_ghz must be above low.corner_ghz")
+
+
+@dataclass(frozen=True)
 class Receiver:
     """Single receiver calibration, applied after physical line response.
 
@@ -36,6 +149,9 @@ class Receiver:
     pivot_ghz: finite absolute GHz where the slope factor is unity, default zero.
         background(f) multiplies microwave IQ per incident carrier before
         gain/phase, without changing cavity dynamics, offset or noise.
+    extra_ripples: additional multiplicative standing waves, default empty.
+    roughness: optional smooth fixed complex field, default disabled (None).
+    band_edges: optional continuous out-of-band attenuation, default disabled.
     offset: owned read-only (2,) [I,Q] ADC sample units, added once per sample.
     noise_covariance: owned read-only symmetric positive-semidefinite (2,2) I/Q
         covariance in ADC sample units squared, per sample. Degenerate and zero
@@ -56,6 +172,9 @@ class Receiver:
     ripple_phase_rad: float = 0.0
     slope_db_per_ghz: float = 0.0
     pivot_ghz: float = 0.0
+    extra_ripples: tuple[BackgroundRipple, ...] = ()
+    roughness: BackgroundRoughness | None = None
+    band_edges: BackgroundBandEdges | None = None
 
     def background(self, frequency_ghz: float) -> complex:
         """Return the complex microwave-IQ background at an absolute carrier GHz.
@@ -63,6 +182,8 @@ class Receiver:
         B(f) = 10**(slope_db_per_ghz*(f-pivot_ghz)/20)
                * (1 + ripple_depth*exp(i*(2*pi*f/ripple_period_ghz
                                          + ripple_phase_rad))).
+        Additional waves, fixed roughness and out-of-band attenuation multiply
+        this result. Their omitted defaults preserve the legacy value exactly.
         The slope term, not the complete ripple, is unity at the pivot.
         Defaults give B(f)=1. Nonfinite frequency raises ValueError.
         """
@@ -76,7 +197,30 @@ class Receiver:
                 + self.ripple_phase_rad
             )
         )
-        return complex(slope * ripple)
+        result = complex(slope * ripple)
+        for wave in self.extra_ripples:
+            result *= 1 + wave.depth * np.exp(
+                1j
+                * (
+                    2 * np.pi * frequency_ghz * 1000 / wave.period_mhz
+                    + np.deg2rad(wave.phase_deg)
+                )
+            )
+        if self.roughness is not None and self.roughness.amplitude:
+            result *= self.roughness.factor(frequency_ghz)
+        if self.band_edges is not None:
+            attenuation_db = 0.0
+            low, high = self.band_edges.low, self.band_edges.high
+            if low is not None:
+                attenuation_db += low.rolloff_db_per_ghz * max(
+                    0.0, low.corner_ghz - frequency_ghz
+                )
+            if high is not None:
+                attenuation_db += high.rolloff_db_per_ghz * max(
+                    0.0, frequency_ghz - high.corner_ghz
+                )
+            result *= 10 ** (-attenuation_db / 20)
+        return complex(result)
 
     def __post_init__(self) -> None:
         for name in (
@@ -213,6 +357,9 @@ def readout_model_key(model: ReadoutModel) -> tuple[object, ...]:
         receiver.ripple_phase_rad,
         receiver.slope_db_per_ghz,
         receiver.pivot_ghz,
+        receiver.extra_ripples,
+        receiver.roughness,
+        receiver.band_edges,
         receiver.offset.tobytes(),
         receiver.noise_covariance.tobytes(),
     )

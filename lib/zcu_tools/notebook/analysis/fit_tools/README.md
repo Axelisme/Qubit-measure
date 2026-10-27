@@ -26,18 +26,16 @@
 ### `flux_presentation.py` — author-selected device axis
 
 `add_device_axis(ax, frame, device_name=..., values=...)` 在 normalized-flux 橫軸圖加上方儀器值軸。
-`frame` 接受 `analysis.flux.FluxFrame`，或明確的單 device `resources.record_table.RecordFluxFrame`。
-多 device 時，`values` 必須提供其他 frame device 的當下儀器值。
-函式呼叫 `analysis.flux.actual_flux_points` 算出選定 device 當下的 integer，再以其 signed period 建立正反轉換。
-缺其他 device 的值會報錯，不假設它停在 integer。
-單 device 可以省略 `values`。
-單／多 device 的 `device_name` 都共用 `cfg_model.validate_device_name`。
-它拒絕 ASCII 點號、空字串與全空白，有效名稱原樣用於查找與軸標。
+`frame` 只收 `analysis.flux.FluxFrame`，單儀器與多儀器共用此型別。
+函式以 `device_value_at_flux(..., flux=0)` 求選定儀器的 integer，再以其 signed period 建立雙向轉換。
+`values` 固定其他儀器的原生值，沒有值的儀器不貢獻；單儀器可省略。
+Boolean、NaN 與 inf 等使用中無效值會報錯並指名儀器。
 
-第二軸使用選定 device 宣告的原生單位，不換成 milli 單位。
+`device_name` 共用 `cfg_model.validate_device_name`，拒絕 ASCII 點號、空字串與全空白。
+有效名稱原樣用於查找與軸標。副軸使用選定儀器宣告的原生單位，不轉成 milli 單位。
 回傳的 Matplotlib SecondaryAxis 隨主軸 limits 更新，也支持負 period。
-作者選擇 device、frame 與當下值；不加第二軸時，T1/T2 繪圖只需要 normalized flux。
-通用 flux 數學的型別與契約見 [analysis README](../../../analysis/README.md#多-device-flux-座標)。
+作者選擇儀器、frame 與當下值；T1/T2 主軸仍只需要 normalized flux。
+數學型別與契約見 [analysis README](../../../analysis/README.md#多-device-flux-座標)。
 
 ### `weights.py` — residual weighting
 

@@ -14,6 +14,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 from plotly.graph_objects import Figure
+from zcu_tools.analysis.flux import DevicePeriod, FluxFrame
 from zcu_tools.notebook.analysis.design import search as S
 from zcu_tools.resources.qubit_params import (
     DispersiveFit,
@@ -23,7 +24,6 @@ from zcu_tools.resources.qubit_params import (
 )
 from zcu_tools.resources.record_table import (
     JsonlRecordTable,
-    RecordFluxFrame,
     RecordTableV2Error,
 )
 
@@ -135,7 +135,7 @@ def test_fallback_frame_unit_mismatch_is_unresolved(
             Temp=0.05,
             device_name="bias",
             samples=samples,
-            fallback_frame=RecordFluxFrame("V", flux_int=0.0, flux_period=1.0),
+            fallback_frame=FluxFrame(0, {"bias": DevicePeriod(1.0, "V")}),
         )
 
 

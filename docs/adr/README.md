@@ -44,7 +44,7 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 
 ## Persistence
 
-- [0082 — Component flux frame 與明確升級](0082-component-flux-frame.md)：多 device integer 參考點、signed period、fluxdep 原始 record 與參考點 writeback、逐列分析、component runtime v2 與 lib runner／lab steps 邊界。
+- [0082 — Component flux frame 與明確升級](0082-component-flux-frame.md)：Offset＋signed periods、flux_dev 預設儀器、量測 period／offset 分項 writeback 與 app period-only export、逐列分析缺值、runtime v3 與保留 v1→v2→v3 升級鏈。
 
 - [0080 — datafile 通用容器格式與獨立介面](0080-datafile-generic-container.md)：容器只認 `vars`（陣列加具名軸）、`docs`（有限 JSON）、`groups`（opaque 子樹保真）三種表示法與根屬性 format／format_version／producer／kind；cfg、metadata、analysis 只是生產者命名慣例；API save／load／read_doc／inspect；datafile 不 import 其他 package，由 datafile-standalone contract 檢查；save/load 共用含 ContainerAttrs 的 Container，只接受 zcu.container major 3。
 - [0063 — Persistence 保存權威與資料契約](0063-persistence-ownership.md)：區分各保存對象的 owner、完整性、失敗與引用邊界，以及 alias 工作焦點的有序名稱清單。Container 3.0 的實驗文件由 experiment 擁有，保留未知歷史時間與完成狀態；datafile 只讀 Container major 3，同 major 保真寫回不降 minor。data.h5 擁有 cfg 正本，Results browser 唯讀檢視不改變 Load 不回填的邊界；ledger acquired 只記事實且讀取忽略未知欄位；Entry 只由 Result 構成，Database 首次 Save 才建立且改名不搬舊輸出。Run／圖片與 Labber 使用 caller save_stem 的原樣結果，預設帶 dotted 前端名稱、roles 與完整 run_id；Labber comment 帶 point／roles snapshot；雙側 workflow root 保留完整 run_id；experiment.artifacts 編排固定項目與失敗，datafile 擁有格式；library 讀取可在同鎖內先備份再清理壞條目。 Component 文件另有 caller 註冊的 schema_version policy，runtime 只讀目前版本，resources 提供明確執行的通用升級鏈，lab 提供完整分類與純函式步驟。

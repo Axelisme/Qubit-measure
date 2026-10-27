@@ -181,11 +181,14 @@ and records analysis in its ledger. No arbitrary path override is accepted.
 The reply contains `savepath`, full-precision GHz `params` with EJ/EC/EL,
 `component`, `analysis_id`, and `alignment_from`, the actual first aligned
 spectrum used for calibration, including zero-point spectra. This is the export source, not alignment inheritance provenance.
-`flux_writeback` preserves the GUI planner's status, intended device and skip
-reason. A skipped component calibration does not mean the predictor or energies
-were skipped. The reason tells the operator when measurement writeback needs
-the swept device and other devices' acquisition-time values. MCP does not read
-component fields, infer a frame or change predictor/reference-anchor formats.
+`flux_writeback` preserves the GUI planner's written/skipped status, intended
+device and skip reason. No partial status is added. The lab planner updates only
+the selected `flux_dev` period, retaining its sign, and never component offset,
+even with one device or offset=null. Check that `flux_dev` names the swept device.
+A missing `flux_dev` skips period, not predictor or energies. Measurement fluxdep
+writeback is a separate operation with a default-selected offset item and notes
+for other devices' Run-snapshot contributions. MCP does not read component fields,
+infer a frame or change predictor v1/reference-anchor formats.
 MCP projects the native receipt without reading fit/spectrum state again, rounding
 params, inferring the source or requesting an image. The GUI refuses stale fits
 with `fit_stale` before I/O. Native readiness, control and I/O failures propagate

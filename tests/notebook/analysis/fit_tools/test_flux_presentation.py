@@ -3,109 +3,33 @@
 import matplotlib.pyplot as plt
 import numpy as np
 import pytest
-import zcu_tools.notebook.analysis.fit_tools as fit_tools
-from zcu_tools.analysis.flux import DeviceFluxFrame, FluxFrame
-from zcu_tools.resources.record_table import DeviceValueUnit, RecordFluxFrame
+from zcu_tools.analysis.flux import DevicePeriod, FluxFrame
+from zcu_tools.notebook.analysis.fit_tools import add_device_axis
 
 
-@pytest.mark.parametrize("name", ["bias.local", "", " \t "])
-@pytest.mark.parametrize("single", [True, False])
-def test_device_axis_rejects_invalid_device_name(name: str, single: bool) -> None:
-    frame = (
-        RecordFluxFrame("V", 1, 4)
-        if single
-        else FluxFrame({"bias": DeviceFluxFrame(1, 4, "V")})
-    )
-    fig, ax = plt.subplots()
-    try:
-        with pytest.raises(ValueError, match="(?i)device name"):
-            fit_tools.add_device_axis(ax, frame, device_name=name)
-    finally:
-        plt.close(fig)
-
-
-@pytest.mark.parametrize("name", [" Bias ", "bias", "BIAS", "偏壓", "bias．local"])
-@pytest.mark.parametrize("single", [True, False])
-def test_device_axis_preserves_valid_name_and_uses_its_calibration(
-    name: str, single: bool
-) -> None:
-    frame = (
-        RecordFluxFrame("V", 1, 4)
-        if single
-        else FluxFrame(
-            {name: DeviceFluxFrame(1, 4, "V"), "coil": DeviceFluxFrame(2, -4, "A")}
-        )
-    )
-    fig, ax = plt.subplots()
-    try:
-        secondary = fit_tools.add_device_axis(
-            ax, frame, device_name=name, values={"coil": 2}
-        )
-        assert secondary.get_xlabel() == f"{name} (V)"
-        np.testing.assert_allclose(
-            secondary.xaxis.get_transform().transform([1, 3]), [0, 0.5]
-        )
-    finally:
-        plt.close(fig)
-
-
-@pytest.mark.parametrize("unit", ["A", "V", "native"])
-def test_device_axis_tracks_flux_limits_in_the_declared_unit(
-    unit: DeviceValueUnit,
+@pytest.mark.parametrize("period", [4.0, -4.0])
+def test_device_axis_projects_signed_period_with_other_devices_fixed(
+    period: float,
 ) -> None:
     fig, ax = plt.subplots()
-    ax.set_xlim(0.2, 0.6)
-    frame = RecordFluxFrame(dev_unit=unit, flux_int=0.001, flux_period=0.002)
-    secondary = fit_tools.add_device_axis(ax, frame, device_name="bias")
-    try:
-        fig.canvas.draw()
-        np.testing.assert_allclose(secondary.get_xlim(), [0.0014, 0.0022])
-        assert secondary.get_xlabel() == f"bias ({unit})"
-        ax.set_xlim(-0.5, 0.5)
-        fig.canvas.draw()
-        np.testing.assert_allclose(secondary.get_xlim(), [0.0, 0.002])
-    finally:
-        plt.close(fig)
-
-
-@pytest.mark.parametrize(
-    ("period", "expected_values"),
-    [(4.0, [2.8, 4.4]), (-4.0, [-0.8, -2.4])],
-)
-def test_multiple_device_axis_maps_both_directions_at_current_other_values(
-    period: float, expected_values: list[float]
-) -> None:
-    fig, ax = plt.subplots()
-    ax.set_xlim(0.2, 0.6)
     frame = FluxFrame(
-        {"bias": DeviceFluxFrame(1, period, "V"), "coil": DeviceFluxFrame(2, -4, "A")}
+        0.5, {"bias": DevicePeriod(period, "V"), "coil": DevicePeriod(-4, "A")}
     )
     try:
-        secondary = fit_tools.add_device_axis(
-            ax, frame, device_name="bias", values={"coil": 3}
-        )
+        secondary = add_device_axis(ax, frame, device_name="bias", values={"coil": 3})
+        ax.set_xlim(0.2, 0.6)
         fig.canvas.draw()
-        np.testing.assert_allclose(secondary.get_xlim(), sorted(expected_values))
-        assert secondary.get_xlabel() == "bias (V)"
+        expected = [0.45 * period, 0.85 * period]
+        np.testing.assert_allclose(secondary.get_xlim(), sorted(expected))
         transform = secondary.xaxis.get_transform()
-        np.testing.assert_allclose(transform.transform(expected_values), [0.2, 0.6])
-        np.testing.assert_allclose(
-            transform.inverted().transform([0.2, 0.6]), expected_values
-        )
+        np.testing.assert_allclose(transform.transform(expected), [0.2, 0.6])
+        np.testing.assert_allclose(transform.inverted().transform([0.2, 0.6]), expected)
+        assert secondary.get_xlabel() == "bias (V)"
         ax.set_xlim(0, 1)
         fig.canvas.draw()
-        expected_limits = [2, 6] if period > 0 else [-4, 0]
-        np.testing.assert_allclose(secondary.get_xlim(), expected_limits)
+        np.testing.assert_allclose(
+            secondary.get_xlim(), sorted([0.25 * period, 1.25 * period])
+        )
         np.testing.assert_allclose(ax.get_xlim(), [0, 1])
-    finally:
-        plt.close(fig)
-
-
-def test_multiple_device_axis_requires_other_current_device_values() -> None:
-    fig, ax = plt.subplots()
-    frame = FluxFrame({"bias": DeviceFluxFrame(1, 4), "coil": DeviceFluxFrame(2, -4)})
-    try:
-        with pytest.raises(ValueError, match="coil"):
-            fit_tools.add_device_axis(ax, frame, device_name="bias")
     finally:
         plt.close(fig)

@@ -64,13 +64,13 @@ FTF raw IQ 保存完整 tones 與 shots。Complex128 IQ 的陣列大小約為 `�
 
 ## 分別準備 F1 與 F2，實驗 0a
 
-既有單 qubit 表單使用 `qubit` 與 `resonator` aliases。先把 `qubit` 綁到 F1，`resonator` 綁到它的 readout resonator，完成下列步驟。DC 掃描在 Open／Reset 從 `$qubit.flux_source` 取得可覆寫的裝置名稱。再改綁 F2，重新 Open／Reset，重做同一套步驟。每次 preview 都核對實際 component，避免把 F1 的結果套到 F2。
+既有單 qubit 表單使用 `qubit` 與 `resonator` aliases。先把 `qubit` 綁到 F1，`resonator` 綁到它的 readout resonator，完成下列步驟。DC 掃描在 Open／Reset 從 `$qubit.flux_dev` 取得可覆寫的裝置名稱。再改綁 F2，重新 Open／Reset，重做同一套步驟。每次 preview 都核對實際 component，避免把 F1 的結果套到 F2。
 
 | 次序與既有指南 | 要觀察的圖與判讀 | 可接受的校準與 preview |
 | --- | --- | --- |
 | 1. [Lookback](../lookback/guide.md) | 看 decimated ADC trace 的 baseline、訊號到達與完整 pulse。窗口要涵蓋訊號，並區分 baseline ripple 與到達點。 | 檢查 arrival time，接受後寫到捕捉的 `resonator.time_of_fly`。 |
 | 2. [Resonator spectroscopy](../onetone/freq/guide.md) | 用 linear sampling 看 resonance dip、complex response 與 fit，確認掃描跨過共振且 linewidth 可辨識。 | Preview `resonator.freq`、`kappa`、`ext.theta0`。有 pulse-readout source 時可提 `resonator.readout.readout_rf`。Electrical delay 寫回需可辨識的 branch 或可信 prior。 |
-| 3. [Resonator/DC map](../onetone/flux_dep/guide.md) | 看 DC source value × frequency 熱圖。從實測 map 拖線標 half-flux 與 integer-flux，按 Done。訊號太小時先縮頻窗、檢查 SNR。 | Preview `qubit.flux_half`、`flux_int` 及 `flux_period = 2 × abs(flux_int − flux_half)`。Picker 的初始線只是初值。確認 `flux_dev` 與 `flux_unit`，使用 source 的原單位。 |
+| 3. [Resonator/DC map](../onetone/flux_dep/guide.md) | 看 DC source value × frequency 熱圖。從實測 map 拖線標 half-flux 與 integer-flux，按 Done。訊號太小時先縮頻窗、檢查 SNR。 | 分項 preview `qubit.flux.period.<device>` 與預設勾選的 `qubit.flux.offset`。Period 大小為兩條擬合線距離的兩倍，保留原方向。Offset 扣除其他儀器的 Run snapshot 貢獻，note 列值與扣除項。Picker 的初始線只是初值。確認 `flux_dev` 與 `flux_unit`，使用 source 的原單位。 |
 | 4. 選定 DC 工作點後重跑 [resonator spectroscopy](../onetone/freq/guide.md) | 首次 bring-up 通常移到已辨識的 integer-flux 點，再看此處 resonance。選其他工作點時也須在該設定重校 readout。 | 人工設定並記錄 DC source values，再審閱新的 readout 頻率、linewidth 與 module proposal。Apply flux 位置校準與移動 source 是兩個獨立操作。 |
 | 5. [Qubit spectroscopy](../twotone/freq/guide.md) | 在確認的 passband 寬掃找 qubit feature，再窄掃看 Lorentzian／sinc fit。確認峰可辨識且屬於目標躍遷。 | Preview `qubit.freq`、`qubit.kappa`。x180/x90 pulse 另由 Rabi 校準。 |
 | 6. [Amplitude Rabi](../twotone/rabi/amp_rabi/guide.md) 或 [length Rabi](../twotone/rabi/len_rabi/guide.md) | 在已量得的 qubit 頻率固定 length 掃 gain，或固定 gain 掃 length。圖中需看得到振盪週期；只見斜率時先調範圍。 | Preview 來源 pulse 的 π／π/2 結果。Pulse 寫到 `qubit.pulses.pi_amp`／`pi2_amp`，`qubit.module.x180`／`x90` 是獨立 slot rows。核對 frequency、generator、waveform 與 gain／length，再勾選。 |
