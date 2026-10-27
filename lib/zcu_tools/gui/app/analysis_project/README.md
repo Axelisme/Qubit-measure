@@ -2,7 +2,7 @@
 
 **Last updated:** 2026-10-27
 
-**讀者：** framework-dev、agent。兩個分析 GUI 共用的 entry/component 開啟與選擇接口。
+**讀者：** framework-dev、agent。兩個分析 GUI 共用的 entry/component 選擇與 native 光譜載入接口。
 
 `entry.AnalysisEntry.open(project_root, entry)` 只開 entry 並列合法 components，不解析 alias。
 沒有合法 component 時報錯。`.select(component=None)` 選目標，None 才解析 qubit alias。
@@ -33,6 +33,14 @@ Component 沒有 entry 時報錯。兩個 scripts 組合根負責註冊 lab sche
 這個入口要求已開 target。未注入或 provider 拒絕時，錯誤指名 component 與 kind。
 `frame=None` 表示 offset 尚未校準，不補零值 frame。Context 提供儀器選項、預設名稱與顯示單位。
 組合根注入 lab provider，framework 不解讀 lab schema 的欄位。
+
+`native.read_spectrum_source` 按檔案 header 讀取 Container 或 LabberData。
+宣告為 native 的檔案不在失敗後改讀 Labber。Container 保留同一來源的陣列與 metadata。
+`NativeSpectrumSelection` 明示 variable、device_axis 與 device，不讀實驗 cfg。
+`native_dialog.NativeSpectrumDialog` 提供變數／軸預選、儀器選擇與預覽。
+Caller 經 `NativeDeviceChoices` 傳入儀器單位、預設名稱與可見錯誤。
+共用 dialog 不取得 component 或 predictor。Fluxdep 自己保留 Type、Inherit 與 alignment overlay。
+Dispersive 以所選 predictor 提供儀器清單，fluxdep 以注入的 component context 提供。
 
 這個 owner 不提供 chip/qubit project、result-scope 掃描或 params.json CLI。
 Notebook 的既有 params.json owner 不屬於此 package，兩個分析 app 不使用它。

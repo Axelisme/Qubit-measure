@@ -3,6 +3,7 @@
 from pathlib import Path
 
 from pydantic import TypeAdapter
+from zcu_tools.analysis.flux import DevicePeriod, offset_for_flux
 from zcu_tools.device import DeviceManager
 from zcu_tools.device.fake import FakeDeviceInfo
 from zcu_tools.experiment.ftf import ftf
@@ -18,6 +19,7 @@ from zcu_tools.resources.ftf import load_ftf
 from zcu_tools.resources.ftf.schema import FTFSettings
 from zcu_tools.resources.predictor_file import (
     PredictorFile,
+    PredictorFlux,
     PredictorSource,
     save_predictor_file,
 )
@@ -119,11 +121,20 @@ def _seed_predictors(
                 EJ=design.ej_ghz,
                 EC=design.ec_ghz,
                 EL=design.el_ghz,
-                flux_half=design.flux_half,
-                flux_period=design.flux_period,
-                flux_bias=design.flux_bias,
             ),
-            flux_unit=design.flux_unit,
+            flux=PredictorFlux(
+                offset=offset_for_flux(
+                    {
+                        component.flux_dev: DevicePeriod(
+                            design.flux_period, design.flux_unit
+                        )
+                    },
+                    {component.flux_dev: design.flux_half - design.flux_bias},
+                    flux=0.5,
+                ),
+                period={component.flux_dev: design.flux_period},
+                unit={component.flux_dev: design.flux_unit},
+            ),
             source=PredictorSource(run_id=None, created_at=None),
         )
     directory = ctx.context.calls.call(ctx.context.control.get_predictors_path)

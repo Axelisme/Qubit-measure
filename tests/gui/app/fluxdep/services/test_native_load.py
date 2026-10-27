@@ -9,11 +9,12 @@ import pytest
 from zcu_tools.analysis.flux import ComponentFluxContext, DevicePeriod, FluxFrame
 from zcu_tools.analysis.fluxdep.io import load_spectrums
 from zcu_tools.datafile import load, save
+from zcu_tools.gui.app.analysis_project.native import NativeSpectrumSelection
 from zcu_tools.gui.app.fluxdep.services.export import ExportService
-from zcu_tools.gui.app.fluxdep.services.load import LoadService, NativeSpectrumSelection
+from zcu_tools.gui.app.fluxdep.services.load import LoadService
 from zcu_tools.gui.app.fluxdep.state import FluxDepState
 
-from tests.gui.app.fluxdep._native import native_spectrum_file
+from tests.gui.app.analysis_project._native import native_spectrum_file
 
 
 def test_native_target_uses_injected_context_and_device_owner_snapshot(

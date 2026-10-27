@@ -22,6 +22,7 @@ from numpy.typing import NDArray
 
 from zcu_tools.analysis.dispersive.models import PreprocessResult
 from zcu_tools.gui.app.analysis_project.entry import AnalysisTarget
+from zcu_tools.gui.app.analysis_project.native import NativeSpectrumSelection
 from zcu_tools.gui.app.dispersive.event_bus import (
     DispFitChangedPayload,
     EventBus,
@@ -82,8 +83,17 @@ class Controller(BaseController[DispersiveState, EventBus]):
 
     # --- load ------------------------------------------------------------
 
-    def load_onetone(self, filepath: str, *, transpose_axes: bool = False) -> str:
-        name = self._load.load_onetone(filepath, transpose_axes=transpose_axes)
+    def load_onetone(
+        self,
+        filepath: str,
+        *,
+        transpose_axes: bool = False,
+        selection: NativeSpectrumSelection | None = None,
+    ) -> str:
+        """Load the exact source using explicit native choices or Labber transpose."""
+        name = self._load.load_onetone(
+            filepath, transpose_axes=transpose_axes, selection=selection
+        )
         self._invalidate_predictor()
         self._emit(OnetoneLoadedPayload(name=name))
         return name

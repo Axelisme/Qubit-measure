@@ -33,6 +33,11 @@ or seed bare_rf from saved artifacts. It does not read params.json.
 The [dispersive GUI](../../lib/zcu_tools/gui/app/dispersive/README.md) owns the interactive workflow;
 its MCP interface remains read-only.
 
+This manual data-loading example has no acquisition snapshot. Select a v2 predictor
+with exactly one device. Its recorded flux frame supplies the historical offset,
+signed period and unit; the current component calibration does not change this alignment.
+The GUI supports native files with explicit variable/axis/device selection and snapshots.
+
 ```python
 %load_ext autoreload
 from pathlib import Path
@@ -54,7 +59,7 @@ from zcu_tools.resources.dispersive_file import (
     DispersiveFile, DispersiveParams, load_dispersive_file, save_dispersive_file,
 )
 from zcu_tools.simulate.fluxonium.predict import FluxoniumParams
-from zcu_tools.simulate import value2flux
+from zcu_tools.analysis.flux import device_value_at_flux, flux_from_device_values
 from zcu_tools.simulate.fluxonium import calculate_dispersive_vs_flux
 from zcu_tools.notebook.analysis.plot import plot_dispersive_shift
 from zcu_tools.analysis.fitting.resonance import (
@@ -99,10 +104,13 @@ prior = (
 )
 
 params = predictor.params
-# value2flux below uses effective device coordinates, including stored bias.
-flux_half = predictor.flux_half - predictor.flux_bias
-flux_period = predictor.flux_period
-flux_int = flux_half + 0.5 * flux_period
+frame = predictor_file.flux.to_frame()
+if len(frame.devices) != 1:
+    raise ValueError(f"No snapshot: select a predictor with exactly one device, got {list(frame.devices)}")
+device = next(iter(frame.devices))
+flux_half = device_value_at_flux(frame, {}, device_name=device, flux=0.5)
+flux_int = device_value_at_flux(frame, {}, device_name=device, flux=1.0)
+flux_period = frame.devices[device].period
 
 print("params = ", params, " GHz")
 print("flux_half = ", flux_half)
@@ -126,7 +134,9 @@ spectrum = onetone_run.result
 sp_dev_values = spectrum.values
 sp_freqs = spectrum.freqs * 1e-3  # MHz to GHz
 sp_signals = spectrum.signals
-sp_fluxs = value2flux(sp_dev_values, flux_half, flux_period)
+sp_fluxs = np.array([
+    flux_from_device_values(frame, {device: float(value)}) for value in sp_dev_values
+])
 ```
 
 ```python

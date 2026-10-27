@@ -2,7 +2,7 @@
 
 **讀者：** operator、lab-author、agent。準備 FTF 模擬參數與 entry，並從 GUI 或 Notebook 啟動模擬環境。
 
-**Last updated:** 2026-10-27, fixed multiplicative readout background.
+**Last updated:** 2026-10-27, predictor v2 startup.
 
 既有 entry 把 resonator 與 mux group 的 `ext.time_of_fly` 搬到頂層 `time_of_fly`。程式不自動搬移。
 
@@ -60,7 +60,7 @@ Attach 不重跑腳本；在 attach 傳 script 會報錯。自訂 script 取代�
 再指定該處的 startup。範本與設定按 startup 檔案位置定位，不跟隨 shell cwd。
 要改 entry、point 或 tab 名稱，編輯自己的 startup 副本。
 
-模擬用 `entry-template.yaml` 省略 qubit energies，但預填 `ftf.yaml` 的 resonator 頻率 7190／7080 MHz、總 linewidth 1.1 MHz 與 DC 線校準。這些值標為 simulated-truth，不是量測結果。DC 校準以 `schema_version: 3` 的 qubit `flux: {offset, period}` 保存。Offset 是零輸出時的 Φ0，各主線 period 是係數的倒數，單位為原生儀器單位／Φ0。不使用 `design` 猜值。既有 v1／v2 entry 須先用[長期升級入口](../../../docs/parameter-upgrades.md)轉換，startup 不自動升級。獨立 `design`／predictor 的 `flux_half` 等欄位不變。Qubit 頻率隨 bias 改變，範本保留 null，不推算頻譜。量測前仍須填入有效的 qubit 頻率與其他輸入，範本不提供 module library。[Kickstart 範本](../../kickstart/FTF/entry-template.yaml) 用於從接線開始的走查。若修改工作副本的物理值或接線，也要調整 entry 範本或已建立的 entry。
+模擬用 `entry-template.yaml` 省略 qubit energies，但預填 `ftf.yaml` 的 resonator 頻率 7190／7080 MHz、總 linewidth 1.1 MHz 與 DC 線校準。這些值標為 simulated-truth，不是量測結果。DC 校準以 `schema_version: 3` 的 qubit `flux: {offset, period}` 保存。Offset 是零輸出時的 Φ0，各主線 period 是係數的倒數，單位為原生儀器單位／Φ0。不使用 `design` 猜值。既有 v1／v2 entry 須先用[長期升級入口](../../../docs/parameter-upgrades.md)轉換，startup 不自動升級。獨立 `design` 的 `flux_half` 等欄位不變，startup 將它們換算成 predictor v2 的 flux frame。Qubit 頻率隨 bias 改變，範本保留 null，不推算頻譜。量測前仍須填入有效的 qubit 頻率與其他輸入，範本不提供 module library。[Kickstart 範本](../../kickstart/FTF/entry-template.yaml) 用於從接線開始的走查。若修改工作副本的物理值或接線，也要調整 entry 範本或已建立的 entry。
 
 Startup 腳本建好初始 alias。`mux` 指向 MG12，mux 表單透過 `$mux` 讀取同序的 qubits 與 resonators。
 MG12 的 `mixer_freq: 7135` 是 mux LO 初值，缺值時 mixer 留空必填，不由 tone 頻率或 κ 推算。
@@ -81,14 +81,16 @@ Startup 以 entry-template 的 qubit 名稱驗證 design，並檢查 `flux_unit`
 `flux_dev` 的 device 單位一致。未知 qubit 或單位不符會報錯。
 Startup 經 resources 的 `save_predictor_file` 建立 entry 的 `predictors/Q1.json`、
 `predictors/Q2.json`，只寫缺失的檔案。既有 predictor 與手動調整保留不變。
-標稱值一對一交給 predictor，不從物理模型或 DC 校準推算或補值，也不填入 entry 的頻率。
+能量交給 predictor v2 的 `params`。Startup 以 `offset = 0.5 + (flux_bias - flux_half) / flux_period`
+換算設計對齊，寫入 `flux.offset`，不做 mod 1。`flux.period` 與 `flux.unit` 以 template 的實際 `flux_dev`
+為鍵，保留 signed period 與原生單位。它不讀目前 component 校準，也不從物理模型補值或填入 entry 頻率。
 
 省略 `design` 或填 `design: {}` 時，環境照常啟動，不建立 predictor。
 狀態列會顯示「design 未提供，未建立 predictor」。既有檔案不會刪除。
 提供的每筆若缺欄位，`ftf()` 載入時會指出欄位路徑，例如 `design.Q1.flux_period`。
 
 MCP 先呼叫 `predictor.list_files` 發現檔案，再使用
-`predictor.predict(filename="Q1.json", device_value=1.2e-3)` 取得標稱頻率。
+`predictor.predict(filename="Q1.json", device_values={"f1_bias": 1.2e-3})` 取得標稱頻率。
 樣板的 device 原生單位是 A，這個輸入表示 1.2 mA。初猜仍須由量測驗證。
 
 ## 工作副本與調參
