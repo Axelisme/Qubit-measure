@@ -8,6 +8,7 @@ from zcu_tools.analysis.flux import (
     actual_flux_points,
     flux_from_device_values,
     reference_flux_points,
+    validate_flux_spacing,
 )
 
 
@@ -139,6 +140,31 @@ def test_point_conversion_single_device_and_missing_other_values(convert) -> Non
     frame = FluxFrame({"bias": DeviceFluxFrame(1, 4), "coil": DeviceFluxFrame(2, -4)})
     with pytest.raises(ValueError, match="coil"):
         convert(reference, device_name="bias", frame=frame, values={})
+
+
+@pytest.mark.parametrize(
+    ("half", "period"),
+    [(2.0, 4.0), (-2.0, -4.0), (1e-200, -2e-200), (1 + 5e-10, 2.0)],
+)
+def test_spacing_accepts_either_branch_signed_tiny_and_relative_roundoff(
+    half: float, period: float
+) -> None:
+    assert (
+        validate_flux_spacing(
+            DeviceFluxPoint(0, half), DeviceFluxFrame(0, period), "bias"
+        )
+        is None
+    )
+
+
+@pytest.mark.parametrize(("half", "period"), [(1 + 2e-9, 2.0), (2e-200, -2e-200)])
+def test_spacing_rejects_relative_mismatch_without_absolute_floor(
+    half: float, period: float
+) -> None:
+    with pytest.raises(ValueError, match="bias.*half/integer"):
+        validate_flux_spacing(
+            DeviceFluxPoint(0, half), DeviceFluxFrame(0, period), "bias"
+        )
 
 
 @pytest.mark.parametrize("bad", [True, float("inf"), float("nan"), 1j, "1"])

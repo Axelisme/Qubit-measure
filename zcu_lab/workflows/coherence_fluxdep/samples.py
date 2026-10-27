@@ -9,7 +9,7 @@ from pydantic import JsonValue
 from zcu_tools.datafile import JsonObject
 from zcu_tools.experiment.workflows.saved_run import SavedRecord
 
-from zcu_lab.v2.support.flux import qubit_flux_frame
+from zcu_lab.v2.support.flux import record_flux_frame
 from zcu_lab.workflows.common.samples import (
     SampleExportError as SampleExportError,
 )
@@ -146,17 +146,22 @@ def point_sample(
     records the commanded setpoint separately. Missing stages are skipped with a
     reason. Models preserve both fit diagnostics, including secondary lifetimes.
     Rabi mode describes saved stages, or null when no Rabi acquisition is recorded.
+    A present snapshot must supply finite, non-bool values for every captured
+    frame device; otherwise ValueError names it before any row is appended.
     """
     encoded = point.model_dump(mode="json")
+    devices = native_devices(directory, _native_files(point))
     fields: JsonObject = {
         "index": point.index,
         "status": point.status,
         "flux": {"device": plan.flux_dev, "value": point.flux, "unit": plan.flux_unit},
         "flux_frame": {
             name: dict(calibration)
-            for name, calibration in qubit_flux_frame(plan.flux_frame).items()
+            for name, calibration in record_flux_frame(plan.flux_frame, devices).items()
         },
-        "devices": native_devices(directory, _native_files(point)),
+        "devices": None
+        if devices is None
+        else {name: dict(info) for name, info in devices.items()},
         "frequency": _frequency_fields(point.frequency),
         "rabi": _rabi_fields(
             point.rabi, encoded["rabi"]["amp"] if point.rabi else None

@@ -46,18 +46,28 @@ Record 的校準欄位由 caller 在量測前捕捉。接受時明傳當時的�
 `qubit` 使用具體元件名，不傳角色名稱。
 
 ```python
-from zcu_lab.v2.support.flux import qubit_flux_frame
+from copy import deepcopy
+
+from zcu_lab.v2.support.flux import record_flux_frame
 from zcu_lab.v2.support.measure.record_frame import captured_qubit_flux
 
 qubit = parameters.resolve_path("$qubit")
-frame = qubit_flux_frame(captured_qubit_flux(parameters, qubit))
+captured_flux = captured_qubit_flux(parameters, qubit)
 source = exp.run(cfg)
 saved = exp.save_run(point, source=source)
-# Analyze source and obtain t1_us. Later point edits do not change frame.
-saved.accept(records={qubit: {"t1_us": t1_us, "flux_frame": frame}})
+# Analyze source and obtain t1_us. Later point edits do not change captured_flux.
+metadata = source.metadata
+if metadata is not None and metadata.device_snapshot is not None:
+    devices = deepcopy(dict(metadata.device_snapshot))
+    frame = record_flux_frame(captured_flux, devices)
+    saved.accept(records={qubit: {
+        "t1_us": t1_us, "flux_frame": frame, "devices": devices,
+    }})
 ```
 
 這兩個 helper 是 lab 的選用慣例，框架不 import lab，也不解讀 `flux_frame`。
+`record_flux_frame` 要求同次 snapshot 中每個 frame device 都有有限、非 bool 的 numeric value，缺少或無效時以 `ValueError` 指名 device。
+空 frame 合法。缺 snapshot 時，上例保留 raw Save 而不組 record；不讀 setup、live 值或目前 point。
 作者有自己的 flux 定義時，直接傳入自己捕捉的 JSON 欄位。Mux 逐 participant 捕捉各自 qubit 的 frame。
 `SavedRun.accept` 不從 live point、alias、cfg 或 devices 推測校準。
 

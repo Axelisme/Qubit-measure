@@ -67,7 +67,13 @@ Flux frame 來自 Analyze 時該 Run 的固定 parameter capture，不混入本�
 
 Lab Record Policy 要求 T1、T2、frequency、fluxdep 與 workflow records 保存 `flux_frame`。
 Notebook 作者在量測前捕捉 frame，經既有 `SavedRun.accept(records=...)` 明傳。
-Lab helper 複製 qubit flux 區塊，作者也可組裝自己的定義。
+Lab helper `record_flux_frame` 將捕捉的 qubit flux 區塊與同次 Run snapshot 配對，作者也可組裝自己的定義。
+Snapshot 存在時，非空 frame 的每個 device 都須有有限、非 bool 的 numeric value。
+缺值或無效時，lab writer 在組 proposal 時以 `ValueError` 指名 device，不查 setup 或 live 值。
+空 frame 合法。整個 snapshot 缺席時，一般 GUI adapter 省略 record，workflow 保留 `devices=null`。
+Fluxdep writeback 仍因無法換算而報錯。原始 Save 不受此檢查限制。
+Notebook 作者在 Run 後組 records 前做相同核對，缺 snapshot 不組 record。
+這項既有 use-site 契約的補齊為 advisor 裁定，Review: pending。
 Framework append owner 加 `component` 信封，不定義 flux 物理意義。
 
 `flux_from_frame` 逐列依 explicit flux、新 row-frame、caller fallback 的順序換算。

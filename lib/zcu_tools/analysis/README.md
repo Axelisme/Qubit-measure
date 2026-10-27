@@ -38,7 +38,8 @@ Caller 在 frame 的 selected device 填本次擬合的 period 大小與保留�
 函式對兩個點都加上 selected period 乘以其他 device 的 flux 貢獻。
 `actual_flux_points(reference, ...)` 減去同一平移量，得到其他 device 停在當下值時的掃描點。
 兩個入口只要求其他 device 的當下值，不讀被掃 device 的值。
-它們檢查點對的間距為 `abs(period) / 2`，允許 half 在 integer 任一側。
+它們委派 `validate_flux_spacing(points, device, name)` 檢查點對間距為 `abs(period) / 2`，允許 half 在 integer 任一側。
+這個公開純數學入口共用 relative tolerance `1e-9`、absolute tolerance `0`，lab calibration 的使用處也委派它。
 
 Record 轉成這些具名輸入的責任留在 resources。
 Notebook 的第二軸也呼叫同一數學入口。

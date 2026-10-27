@@ -26,7 +26,11 @@ from zcu_tools.gui.app.measure.interactive_flux_pick import FluxPickResult
 from zcu_tools.program.v2.modules import AbsModuleCfg, PulseReadoutCfg
 
 from zcu_lab.components.qubit import QubitBaseSchema, QubitFluxCalibration
-from zcu_lab.v2.support.flux import qubit_flux_frame, reference_device_flux_points
+from zcu_lab.v2.support.flux import (
+    record_flux_frame,
+    reference_device_flux_points,
+    snapshot_numeric_values,
+)
 from zcu_lab.v2.support.measure.ctx_helpers import optional_parameter_float
 
 if TYPE_CHECKING:
@@ -193,7 +197,9 @@ def fluxdep_writeback_items[C: ConfigBase, R, A: FluxPickResult](
     Return no items without a parameter capture. Missing Run device snapshot,
     a non-qubit target, invalid calibration, missing/invalid fixed contributor
     bias, or another swept contributor raises ValueError with target/device
-    context. Alias and source failures propagate.
+    context. Every captured frame device, including the scanned device, must
+    also have a finite non-bool snapshot value for its record. Alias and source
+    failures propagate.
 
     Only flux.<device_name> is proposed, using the fitted period magnitude and
     stored direction, initially positive. The ordinary record stores raw native
@@ -212,16 +218,9 @@ def fluxdep_writeback_items[C: ConfigBase, R, A: FluxPickResult](
     if metadata is None or metadata.device_snapshot is None:
         raise ValueError(f"{target!r}: flux writeback requires a Run device snapshot")
     devices = deepcopy(dict(metadata.device_snapshot))
-    values: dict[str, float] = {}
-    for name in component.flux:
-        if name == device_name:
-            continue
-        info = devices.get(name)
-        value = None if info is None else info.get("value")
-        # Translate only numeric JSON settings; the math owner rejects missing
-        # or nonfinite contributor values and names the offending device.
-        if isinstance(value, (int, float)) and not isinstance(value, bool):
-            values[name] = value
+    values = snapshot_numeric_values(
+        devices, (name for name in component.flux if name != device_name)
+    )
     picked = req.analyze_result
     try:
         fitted = QubitFluxCalibration(
@@ -229,7 +228,7 @@ def fluxdep_writeback_items[C: ConfigBase, R, A: FluxPickResult](
             integer=picked.flx_int,
             period=abs(picked.flx_period),
         )
-        frame = qubit_flux_frame(component.flux)
+        frame = record_flux_frame(component.flux, devices)
         reference = reference_device_flux_points(
             component.flux, device_name, fitted, values, swept_devices=swept_devices
         )

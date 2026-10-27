@@ -62,7 +62,10 @@ helper 留在群組內 `_shared.py`。
 
 `record_frame.captured_qubit_flux` 從固定 Run／Start parameter capture 複製具名 qubit 的 flux 區塊。
 GUI record writers 與 workflow Plan 接線共用這個查詢。缺 capture 或非 qubit 會報錯，不以空區塊代替；有 qubit 但尚未校準才回空 mapping。
-Record 的 JSON 副本由無 GUI 的 `support.flux.qubit_flux_frame` 產生。這些 helper 不讀目前 point 或裝置。
+`support.flux.qubit_flux_frame` 只複製校準。Record writers 用 `record_flux_frame(flux, snapshot)` 將固定 frame 與同次 Run snapshot 配對。
+非空 frame 的每個 device 都須有有限、非 bool 數值，缺少或無效時在 proposal 產生處以 `ValueError` 指名 device。
+空 frame 合法，整個 snapshot 缺席時保留各 writer 原有政策。這些 helper 不讀目前 point、setup catalog 或裝置。
+`support.flux.snapshot_numeric_values(snapshot, names)` 集中 numeric 非 bool 的機械提取，picker 與 writeback caller 仍決定目標及 contributors。
 
 `mux_bindings` 擁有固定 ParameterContext 的 qubit／resonator 對應驗證。
 Onetone 的缺 qubits bring-up 政策與 qubit 實驗的完整綁定要求分開，兩者不讀 live 來源。

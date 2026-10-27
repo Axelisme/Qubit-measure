@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 from zcu_tools.datafile import JsonObject
 
-from zcu_lab.v2.support.flux import qubit_flux_frame
+from zcu_lab.v2.support.flux import record_flux_frame
 from zcu_lab.workflows.common.samples import (
     SampleRow,
     append_sample,
@@ -50,7 +50,12 @@ def point_sample(
 
     Devices come from the final saved T1/Echo acquisition, or null if neither
     completed. Flux is the commanded setpoint. Primary rejected values stay null.
+    A present snapshot must supply finite, non-bool values for every captured
+    frame device; otherwise ValueError names it before any row is appended.
     """
+    devices = native_devices(
+        directory, tuple(f for f in (point.t1_file, point.t2_file) if f)
+    )
     fields = pair_fields(point)
     fields.update(
         {
@@ -67,11 +72,13 @@ def point_sample(
             },
             "flux_frame": {
                 name: dict(calibration)
-                for name, calibration in qubit_flux_frame(plan.flux_frame).items()
+                for name, calibration in record_flux_frame(
+                    plan.flux_frame, devices
+                ).items()
             },
-            "devices": native_devices(
-                directory, tuple(f for f in (point.t1_file, point.t2_file) if f)
-            ),
+            "devices": None
+            if devices is None
+            else {name: dict(info) for name, info in devices.items()},
             "t1_file": point.t1_file,
             "t2echo_file": point.t2_file,
             "echo_relax_delay_us": point.echo_relax_delay_us,

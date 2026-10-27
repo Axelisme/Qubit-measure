@@ -20,7 +20,7 @@ from zcu_tools.gui.app.measure.adapter import (
 )
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.v2.support.flux import qubit_flux_frame
+from zcu_lab.v2.support.flux import record_flux_frame
 from zcu_lab.v2.support.measure.record_frame import captured_qubit_flux
 from zcu_lab.v2.twotone.time_domain.t1.core import (
     T1Analysis,
@@ -104,7 +104,7 @@ def _T1_get_writeback_items(
     ]
     parameters = req.ctx.parameters
     if parameters is not None and metadata is not None and devices is not None:
-        frame = qubit_flux_frame(captured_qubit_flux(parameters))
+        frame = record_flux_frame(captured_qubit_flux(parameters), devices)
         items.append(
             RecordWriteback(
                 target_name=parameters.resolve_path("$qubit"),

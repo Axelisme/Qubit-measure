@@ -1,8 +1,11 @@
 """Shared qubit fields and channel wiring."""
 
-from math import isclose
-
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+from zcu_tools.analysis.flux import (
+    DeviceFluxFrame,
+    DeviceFluxPoint,
+    validate_flux_spacing,
+)
 from zcu_tools.cfg_model import DeviceName
 
 from .base import BuiltinComponent, Duration, Frequency, reject_null_channel
@@ -62,15 +65,11 @@ class QubitFluxCalibration(BaseModel):
         abs(period)/2 with relative tolerance 1e-9 and absolute tolerance 0.
         Loading a calibration does not call this method.
         """
-        if not isclose(
-            abs(self.integer - self.half),
-            abs(self.period) / 2,
-            rel_tol=1e-9,
-            abs_tol=0.0,
-        ):
-            raise ValueError(
-                f"device {device_name!r} half/integer separation must be abs(period)/2"
-            )
+        validate_flux_spacing(
+            DeviceFluxPoint(integer=self.integer, half=self.half),
+            DeviceFluxFrame(integer=self.integer, period=self.period),
+            device_name,
+        )
 
     @field_validator("period")
     @classmethod

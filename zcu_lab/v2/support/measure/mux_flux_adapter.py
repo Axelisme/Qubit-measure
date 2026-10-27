@@ -27,7 +27,11 @@ from zcu_tools.plotting.plots import Plots
 
 from zcu_lab.components.qubit import QubitBaseSchema
 from zcu_lab.v2.mux.onetone.core import MuxFrequencyOffsetCfg
-from zcu_lab.v2.support.flux import device_flux_points, qubit_flux_frame
+from zcu_lab.v2.support.flux import (
+    device_flux_points,
+    qubit_flux_frame,
+    snapshot_numeric_values,
+)
 from zcu_lab.v2.support.measure.mux_results import captured_qubits
 from zcu_lab.v2.support.measure.writeback_helpers import fluxdep_writeback_items
 from zcu_lab.v2.support.mux_flux import (
@@ -180,12 +184,7 @@ def _initial_lines[C: MuxFluxCfg](
         return None, None
     metadata = req.run_result.metadata
     snapshot = None if metadata is None else metadata.device_snapshot
-    values: dict[str, float] = {}
-    for contributor in component.flux:
-        info = None if snapshot is None else snapshot.get(contributor)
-        value = None if info is None else info.get("value")
-        if isinstance(value, (int, float)) and not isinstance(value, bool):
-            values[contributor] = value
+    values = snapshot_numeric_values(snapshot, component.flux)
     points = device_flux_points(component.flux, device, values)
     return points.half, points.integer
 

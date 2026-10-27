@@ -1,7 +1,7 @@
 """Qubit flux blocks and linear device coordinates, without GUI or device I/O."""
 
-from collections.abc import Collection, Mapping
-from math import copysign
+from collections.abc import Collection, Iterable, Mapping
+from math import copysign, isfinite
 
 from zcu_tools.analysis.flux import (
     DeviceFluxFrame,
@@ -11,6 +11,7 @@ from zcu_tools.analysis.flux import (
     reference_flux_points,
 )
 from zcu_tools.cfg_model import validate_device_name
+from zcu_tools.datafile import JsonObject
 
 from zcu_lab.components.qubit import QubitFluxCalibration
 
@@ -37,6 +38,54 @@ def qubit_flux_frame(
             "period": calibration.period,
         }
     return result
+
+
+def snapshot_numeric_values(
+    snapshot: Mapping[str, JsonObject] | None, names: Iterable[str]
+) -> dict[str, float]:
+    """Project selected Run snapshot value fields without reading devices.
+
+    names selects the required device settings; extra settings are ignored.
+    Return a new mapping of numeric, non-bool JSON values. Missing/non-numeric
+    values are omitted; nonfinite numbers remain for the using math/record
+    contract to reject with device context. None acts as an absent snapshot.
+    Inputs stay unchanged. This mechanical projection does not validate frame
+    membership, choose contributors or decide whether records may be written.
+    """
+    values: dict[str, float] = {}
+    for name in names:
+        info = None if snapshot is None else snapshot.get(name)
+        value = None if info is None else info.get("value")
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            values[name] = value
+    return values
+
+
+def record_flux_frame(
+    flux: Mapping[str, QubitFluxCalibration],
+    snapshot: Mapping[str, JsonObject] | None,
+) -> dict[str, dict[str, float]]:
+    """Copy Run-captured calibrations paired with that Run's device values.
+
+    flux is the qubit block captured before measurement; snapshot is the same
+    Run's complete device settings, in native units. Return a detached frame
+    with signed periods. For a present snapshot, every frame device must have
+    a finite, non-bool numeric value or ValueError names it at record proposal
+    time. Empty flux is legal. None skips membership validation so callers keep
+    their existing no-snapshot policy (omit ordinary GUI records, retain workflow
+    null). Fluxdep callers still require a snapshot before conversion.
+    Calibration/name failures propagate from qubit_flux_frame. No inputs are
+    changed; no setup catalog, live devices, current point or history is read.
+    """
+    frame = qubit_flux_frame(flux)
+    if snapshot is not None:
+        values = snapshot_numeric_values(snapshot, frame)
+        for name in frame:
+            if name not in values or not isfinite(values[name]):
+                raise ValueError(
+                    f"device {name!r} requires a finite non-bool Run snapshot value"
+                )
+    return frame
 
 
 def device_flux_points(

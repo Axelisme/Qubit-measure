@@ -29,7 +29,7 @@ Qubit 的 `flux` 預設為 `{}`，以 device 名稱對應 `QubitFluxCalibration`
 `period` 可為負，表示增加 bias 會減少 flux。
 載入保留三欄，不檢查 spacing。
 `QubitFluxCalibration.validate_spacing(device_name)` 在使用時檢查 `abs(integer-half) = abs(period)/2`，失敗以 `ValueError` 指出 device。
-檢查使用 relative tolerance `1e-9`、absolute tolerance `0`，不改寫校準值。
+此方法委派 `analysis.flux.validate_flux_spacing`，共用 relative tolerance `1e-9`、absolute tolerance `0`，不改寫校準值。
 `support/flux.py` 與離線升級共用此方法，升級不接受 runtime 會拒絕的 spacing。
 Helper 重用共用 device 名稱驗證，不改寫有效名稱。
 Schema version 2 只保留這個 flux 區塊，qubit 舊四欄與 mux `coil_flux` 已移除。參考點、writeback 與 record 慣例見 [ADR-0082](../../docs/adr/0082-component-flux-frame.md)。

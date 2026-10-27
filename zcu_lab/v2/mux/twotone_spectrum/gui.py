@@ -27,7 +27,7 @@ from zcu_tools.gui.app.measure.adapter import (
 from zcu_tools.gui.session.types import SessionEnv
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.v2.support.flux import qubit_flux_frame
+from zcu_lab.v2.support.flux import record_flux_frame
 from zcu_lab.v2.support.measure.mux_results import (
     MuxSummaryFailure,
     MuxSummaryTone,
@@ -157,7 +157,9 @@ def _get_writeback_items(
             ]
         )
         if metadata is not None and devices is not None:
-            frame = qubit_flux_frame(captured_qubit_flux(req.ctx.parameters, qubit))
+            frame = record_flux_frame(
+                captured_qubit_flux(req.ctx.parameters, qubit), devices
+            )
             row_items.append(
                 RecordWriteback(
                     target_name=qubit,

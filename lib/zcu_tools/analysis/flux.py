@@ -107,7 +107,7 @@ def reference_flux_points(
     missing/invalid used values, or a pair not separated by abs(period)/2.
     """
     device = _selected_frame(frame, device_name)
-    _require_half_period(fitted, device, device_name)
+    validate_flux_spacing(fitted, device, device_name)
     shift = device.period * flux_from_device_values(
         frame, {**values, device_name: device.integer}
     )
@@ -133,17 +133,31 @@ def actual_flux_points(
     not separated by abs(period)/2.
     """
     device = _selected_frame(frame, device_name)
-    _require_half_period(reference, device, device_name)
+    validate_flux_spacing(reference, device, device_name)
     shift = device.period * flux_from_device_values(
         frame, {**values, device_name: device.integer}
     )
     return DeviceFluxPoint(reference.integer - shift, reference.half - shift)
 
 
-def _require_half_period(
+def validate_flux_spacing(
     points: DeviceFluxPoint, device: DeviceFluxFrame, name: str
 ) -> None:
-    if not isclose(abs(points.integer - points.half), abs(device.period) / 2):
+    """Check a native-unit point pair against a device's signed period.
+
+    points and device must use the same instrument unit. name labels the device
+    in errors; callers validate its syntax and membership separately. Return
+    None without changing inputs when abs(integer-half) equals abs(period)/2,
+    allowing either half branch and period sign. Relative tolerance is 1e-9;
+    absolute tolerance is zero, including tiny periods. Otherwise raise
+    ValueError naming the device. No component or record data is read.
+    """
+    if not isclose(
+        abs(points.integer - points.half),
+        abs(device.period) / 2,
+        rel_tol=1e-9,
+        abs_tol=0.0,
+    ):
         raise ValueError(
             f"device {name!r} half/integer separation must be abs(period)/2"
         )

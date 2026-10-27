@@ -11,7 +11,11 @@ from zcu_tools.cfg_model import validate_device_name
 from zcu_tools.datafile import JsonObject
 
 from zcu_lab.components.qubit import QubitBaseSchema
-from zcu_lab.v2.support.flux import device_flux_points, qubit_flux_frame
+from zcu_lab.v2.support.flux import (
+    device_flux_points,
+    qubit_flux_frame,
+    snapshot_numeric_values,
+)
 
 if TYPE_CHECKING:
     from zcu_tools.gui.session.parameters import ParameterContext
@@ -63,12 +67,7 @@ def flux_pick_initial_points(
     qubit_flux_frame(component.flux)
     if device_name not in component.flux:
         return None
-    values: dict[str, float] = {}
-    for name in component.flux:
-        info = None if snapshot is None else snapshot.get(name)
-        value = None if info is None else info.get("value")
-        if isinstance(value, (int, float)) and not isinstance(value, bool):
-            values[name] = value
+    values = snapshot_numeric_values(snapshot, component.flux)
     return device_flux_points(component.flux, device_name, values)
 
 
