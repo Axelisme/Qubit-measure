@@ -16,8 +16,9 @@ from ruamel.yaml import YAML, YAMLError
 
 from zcu_tools.format_version import YamlMap
 from zcu_tools.resources.document_store import DocumentValue, FieldPath
-from zcu_tools.resources.entry import entry_component_paths
+from zcu_tools.resources.entry import entry_component_paths, entry_predictor_paths
 from zcu_tools.resources.parameter_schema import ParameterSchemaPolicy
+from zcu_tools.resources.predictor_upgrade import upgrade_predictor_files
 from zcu_tools.resources.record_table.upgrade import upgrade_record_files
 from zcu_tools.utils import atomic_replace
 
@@ -276,7 +277,8 @@ def main(argv: Sequence[str] | None = None, *, plan: UpgradePlan | None = None) 
 
     argv selects file paths, --scope components (default) or records, and optional
     --apply; None reads process arguments. Components also accept entry directories,
-    expanded by the entry owner to setup and all point YAML files without parsing.
+    expanded by the entry owner to setup, all point YAML files and predictors/*.json.
+    Predictor v1-to-v2 uses the resources owner, separately from the component plan.
     Non-entry directories raise argparse SystemExit(2). Components require a
     caller-owned plan. Records accept only exact files, require --device-name,
     an operator declaration, and do not use plan.
@@ -321,6 +323,12 @@ def main(argv: Sequence[str] | None = None, *, plan: UpgradePlan | None = None) 
         parser.error("component scope requires a caller-configured upgrade plan")
     try:
         sources = _component_sources(paths)
+        predictor_paths = tuple(
+            predictor
+            for path in paths
+            if path.is_dir()
+            for predictor in entry_predictor_paths(path)
+        )
     except ValueError as error:
         parser.error(str(error))
     for note in plan.notes:
@@ -328,7 +336,27 @@ def main(argv: Sequence[str] | None = None, *, plan: UpgradePlan | None = None) 
     results = upgrade_files(sources, plan=plan, apply=apply)
     for result in results:
         _print_upgrade_result(result)
-    return int(any(result.status == "rejected" for result in results))
+    predictor_rejected = _predictor_cli(predictor_paths, apply=apply)
+    return int(
+        any(result.status == "rejected" for result in results) or predictor_rejected
+    )
+
+
+def _predictor_cli(paths: Sequence[Path], *, apply: bool) -> bool:
+    results = upgrade_predictor_files(paths, apply=apply)
+    for result in results:
+        if result.backup_path is not None:
+            print(f"{result.path}: backup: {result.backup_path}")
+        print(f"{result.path}: {result.status}")
+        if result.candidate is not None and result.status != "skipped":
+            flux = result.candidate.flux
+            print(f"  version: 1 -> 2; flux.offset: {flux.offset!r}")
+            print(
+                f"  flux.period: {dict(flux.period)!r}; flux.unit: {dict(flux.unit)!r}"
+            )
+        if result.error is not None:
+            print(f"  failed checks: {result.error}")
+    return any(result.status == "rejected" for result in results)
 
 
 def _print_upgrade_result(result: UpgradeResult) -> None:

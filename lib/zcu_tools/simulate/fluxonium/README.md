@@ -1,6 +1,6 @@
 # `simulate/fluxonium` 模塊重點文檔
 
-**Last updated:** 2026-10-27，逐點固定溫度 T1
+**Last updated:** 2026-10-27，逐點固定溫度 T1 與 reduced-flux predictor
 
 **讀者：** framework-dev。Fluxonium 能譜、色散與 predictor 的數值工具。
 
@@ -90,32 +90,37 @@ Purcell helper 轉成 κ/(2π) GHz。Purcell 只作用於 0↔1，以 detailed b
 Prediction policy 由本模組擁有。GUI/session/notebook adapter 使用 engine，不各自重寫 fallback 或 cache identity。
 
 - `PredictionResolution(qub_dim, qub_cutoff, res_dim)` — typed Hilbert-space resolution;GUI adapter 固定用 app default,notebook/tests 可注入。
-- `FluxAffineMap` — value↔flux affine 的單一實作,`flux_period == 0` fast-fail。
+- 所有 query 直接收 reduced flux φ，單位 Phi0。儀器座標換算只在 `analysis.flux`，engine 不保存仿射參數。
 - `FluxoniumPrediction.predict_dispersive(...)` — 包 fast path + scqubits fallback,回傳 `DispersivePredictionResult(lines, backend)`;`used_fallback` 是輕量 provenance,GUI normal path 不需 catch `DressedLabelingError`；只在 fast dressed labeling 失敗時 fallback，scqubits 或輸入錯誤仍傳給 caller。
 - `FluxoniumPrediction.bind_flux_axis(fluxs)` — 建 `FluxoniumPredictionSession`,axis copy 由 engine 持有,cache key 只含 `(g, bare_rf, return_dim)`;controller 在 params/axis 變化時重建 session。
-- `predict_frequencies_mhz` / `predict_matrix_elements` — session predictor dialog 的批次曲線 helper,共用 engine affine 與一次 sweep 多 transition 的計算。
+- `predict_frequencies_mhz` / `predict_matrix_elements` — session predictor dialog 的批次曲線 helper,在同一個 reduced-flux grid 上以一次 sweep 計算多 transition。
 
 ### `predict.py` — `FluxoniumParams` 與 `FluxoniumPredictor`
 
-SQUID transmon 的 `TransmonParams` 與 `TransmonPredictor` 在 `simulate/transmon/`，共用 `simulate.predictor` 的中性 query 契約與 `FluxAffineMap`；`simulate.parameters` 列出前端可選的模型名稱。
+SQUID transmon 的 `TransmonParams` 與 `TransmonPredictor` 在 `simulate/transmon/`，
+共用 `simulate.predictor` 的中性 query 契約。`simulate.parameters` 列出可選模型名稱。
 
-FluxoniumParams 是可未知的具名輸入。EJ／EC／EL 用 GHz，flux_half／flux_period／flux_bias 用 native device units。missing() 列缺項；build_predictor() 只接受完整且有效的輸入，每次建立独立 model，不寫來源。from_mapping() 解析具名數值，省略或 null 保持未知，拒絕未知欄位、bool、非數字及非有限值。to_dict() 回具名的 detached FluxoniumParameterValues，保留 None。Wire adapters 使用這兩個公開介面，不自行推斷參數內部形狀。
+`FluxoniumParams` 只含 EJ／EC／EL，單位 GHz。省略或 null 保持未知。
+`from_mapping()` 拒絕未知欄位、bool、非數字與非有限值。`to_dict()` 回 detached
+`FluxoniumParameterValues`，保留 None。`missing()` 列缺項，
+`build_predictor()` 只接受完整且有效的能量，每次建立獨立模型，不改來源。
 
-應用層預測器,連接實驗電流/電壓值與理論模型。
-
-- 建構: `(params, flux_half, flux_period, flux_bias)`。讀檔由 `resources.predictor_file.load_predictor_file` 處理，caller 再呼叫 `params.build_predictor()`。`params.json` 資料先經離線遷移成 predictor 檔，再交給此入口讀取。
-- 座標轉換: `value_to_flux` / `flux_to_value` 委派 `FluxAffineMap`,使用
-  `flux = (value + bias − flux_half)/flux_period + 0.5`。
-- `predict_freq(cur_value, transition=(0,1))` — 回傳 **MHz**;輸入支援 scalar 或 array。scalar/array 都委派到 `FluxoniumPrediction.predict_frequencies_mhz` 的批次路徑，不保留共享 mutable `Fluxonium` instance；reverse transition 仍回傳帶符號頻差。
-- `predict_matrix_element(cur_value, transition, operator="n"|"phi")` — 回傳 `|⟨i|O|j⟩|`。scalar/array 都委派到 `FluxoniumPrediction.predict_matrix_elements`；facade 仍只支援含 level 0,1 的 transition，level≥2 以 `ValueError` fast-fail，高 level 支援屬功能擴充另案。
-- `calculate_bias(cur_value, cur_freq, transition)` —
-  以自身的精確頻譜反解，回 `simulate.predictor.CalibrationResult(flux_bias, frequency_mhz, clamped)`。
-  枚舉所有根與週期／鏡像等價 bias，選 `|bias|` 最小者，不依目前 bias 選根。
-  不可達目標回全域最近的實際頻率，clamped=true，同距選最小 `|bias|`。
-  可達時 clamped=false。無效輸入拒絕，數值失敗傳遞，不警告後保留原值。
-  共享 solver 的分支掃描、極值細化與容差見 [transmon 數值政策](../transmon/README.md#calibration)。
-- `update_bias(flux_bias)` — 就地更新 bias。
-- `clone()` — 返回同參數的新實例(不共享 `Fluxonium` state)。
+- 建構 `FluxoniumPredictor((EJ, EC, EL))`。讀檔由
+  `resources.predictor_file.load_predictor_file` 處理；numeric model 不讀 storage。
+- `predict_freq(cur_flux, transition=(0,1))` 回 MHz，輸入支援 scalar 或 array。
+  兩者都委派到 engine 的批次路徑。Reverse transition 保留帶符號頻差。
+- `predict_matrix_element(cur_flux, transition, operator="n"|"phi")`
+  回絕對矩陣元，scalar／array 都委派到 engine。這個 facade 只支援 level 0、1，
+  高 level 以 ValueError 拒絕。Batch `predict_matrix_elements` 支援更高 level。
+- `calculate_offset_correction(cur_flux, cur_freq, transition)` 以精確頻譜反解。
+  cur_flux 含 caller 的目前 offset，cur_freq 是量到的 MHz。
+  回 `CalibrationResult(offset_correction, frequency_mhz, clamped)`，
+  correction 是應加到目前 offset 的 Phi0 修正量，不是儀器偏壓。
+  枚舉所有根與週期／鏡像等價解，選絕對值最小的修正量。
+  不可達目標回全域最近的實際頻率，clamped=true，同距選最小絕對修正量。
+  可達時 clamped=false。無效輸入拒絕，數值失敗傳遞。
+  分支掃描與容差見 [transmon 數值政策](../transmon/README.md#calibration)。
+- `clone()` 建立能量相同的新實例。修改 clone 的 params 不影響原實例。
 
 ### `branch/` — 額外模擬
 
@@ -157,6 +162,7 @@ floquet 效能要點(design search 的 snr stage 主成本即在此):
 ```python
 from pathlib import Path
 
+from zcu_tools.analysis.flux import flux_from_device_values
 from zcu_tools.resources.predictor_file import load_predictor_file
 from zcu_tools.simulate.fluxonium import (
     calculate_energy_vs_flux,
@@ -171,12 +177,14 @@ t1 = calculate_eff_t1_vs_flux(fluxs, noise_channels, T, params)
 
 predictor_file = load_predictor_file(Path("result/Q1/predictors/default.json"))
 predictor = predictor_file.params.build_predictor()
-f01 = predictor.predict_freq(current_value)                    # MHz
+frame = predictor_file.flux.to_frame()
+phi = flux_from_device_values(frame, device_values)
+f01 = predictor.predict_freq(phi)                              # MHz
 ```
 
 ## 效能 / 數值注意事項
 
 - 能譜/矩陣元計算成本隨 `cutoff`, `evals_count`, `res_dim × qub_dim` 顯著上升;預設值已在準確度與速度間取平衡,調整前先確認。
-- `calculate_energy_vs_flux` 的去重邏輯 **只對 `fluxs % 1` 後落在 [0, 0.5] 的範圍有效**;若需要跨週期非對稱量(如電流偏移),請使用 `FluxoniumPredictor` 處理座標。
+- `calculate_energy_vs_flux` 的去重邏輯 **只對 `fluxs % 1` 後落在 [0, 0.5] 的範圍有效**;若需要跨週期非對稱量(如電流偏移),先用 `analysis.flux` 換算儀器座標，predictor 只收 reduced flux。
 - sweep 類函式透過 `scq_settings.scq_progress(progress=progress)` 暫時切換 `scq_settings.PROGRESSBAR_DISABLED`,可藉 `progress=False` 靜音；中途例外會還原全域設定。
 - `_with` 變體能大幅降低批次呼叫成本 — 優先使用。
