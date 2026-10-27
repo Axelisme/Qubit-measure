@@ -68,6 +68,6 @@ aliases:
 
 Open 或 Reset 會讀取 alias 指向的元件，將成功求值的初值存成 direct 數字。改 alias 後，既有 input 不會自動改值。Reset 才重新計算初值，缺必要來源時欄位保持未填且 Invalid。
 
-Qubit 的 `resonator` 欄位填 resonator 元件名稱，`flux_source` 填供應 flux bias 的名稱，resonator 的 `amplifier` 填 amplifier 元件名稱。這些欄位存普通字串，不存 `$role.field`。完整對照見 [字串引用表](../components/README.md#角色與引用)。
+Qubit 的 `resonator` 欄位填 resonator 元件名稱，`flux_dev` 填供應 flux bias 的名稱，resonator 的 `amplifier` 填 amplifier 元件名稱。這些欄位存普通字串，不存 `$role.field`。完整對照見 [字串引用表](../components/README.md#角色與引用)。
 
-例如 `qubit: Q1` 之後的 `resonator: $qubit.resonator`，會讀出 Q1 的 resonator 名稱。GUI softlink 只能引用前面的 alias 列，不會自動沿 RoleSpec 推論。Flux 表單在 Open／Reset 從 `$qubit.flux_source` 等元件欄位取得裝置名稱，alias 表只選元件焦點。Source 名稱不保證 entry 內有同名 component；實驗仍須取得已連線 driver 才能操作裝置。
+例如 `qubit: Q1` 之後的 `resonator: $qubit.resonator`，會讀出 Q1 的 resonator 名稱。GUI softlink 只能引用前面的 alias 列，不會自動沿 RoleSpec 推論。Flux 表單在 Open／Reset 從 `$qubit.flux_dev` 等元件欄位取得裝置名稱，alias 表只選元件焦點。Source 名稱不保證 entry 內有同名 component；實驗仍須取得已連線 driver 才能操作裝置。

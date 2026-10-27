@@ -93,7 +93,7 @@ Linear 輸出 homophasal=None。Homophasal 的必要參數由固定 capture 提�
 由 runtime 在硬體量化前配置 delay；格點 collision 提示擴大 span 或減少 points，不靜默減點。
 
 Core 用具名裝置欄位，例如 flux_dev、jpa_flux_dev。Form 在 Open／Reset 從
-$qubit.flux_source、$mux.flux_source 或 JPA 的 flux_source／rf_source 取得可覆寫的 direct 名稱。
+$qubit.flux_dev、$mux.flux_dev 或 JPA 的 flux_dev／rf_source 取得可覆寫的 direct 名稱。
 缺來源留空，必填欄位報錯。Core 只以 context.devices 查 driver。Flux_unit 獨立保存，recipe 不改單位政策。
 
 ## 表單設計與預演
@@ -607,7 +607,7 @@ tab creation 與 remote adapter listing（`view.adapter_list`）因此直接列�
 | 5 | `jpa/flux_onetone` | flux × readout frequency 2D survey（`analysis=NONE`，無 writeback） |
 | 6 | `jpa/check` | pump off/on 比較診斷（figure-only analysis，無 writeback） |
 
-JPA 表單從 `$jpa.rf_source` 與 `$jpa.flux_source` 取得 `jpa_rf_dev` 與
+JPA 表單從 `$jpa.rf_source` 與 `$jpa.flux_dev` 取得 `jpa_rf_dev` 與
 `jpa_flux_dev` 的 direct 初值，使用者可覆寫。Core 以具名欄位從 context.devices
 取得 driver，RF 操作使用 `set_freq`／`set_power`／`set_output`，flux 操作使用 `set_flux`。六個 adapter 都顯式暴露 `reps`、
 `rounds`、`relax_delay`。`reps / rounds` 維持原值，`freq` / `flux` /

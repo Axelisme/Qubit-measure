@@ -15,7 +15,7 @@ components:
     EL: 1.0
     freq: null # Measure the bias-dependent transition before excitation.
     resonator: R1
-    flux_source: Q1_bias
+    flux_dev: Q1_bias
     flux:
       Q1_bias: {half: 0.0, integer: -0.001, period: 0.002}
       coil_bias: {half: 0.005, integer: 0.0, period: 0.01}
@@ -36,7 +36,7 @@ components:
     EL: 0.8
     freq: null # Measure the bias-dependent transition before excitation.
     resonator: R2
-    flux_source: Q2_bias
+    flux_dev: Q2_bias
     flux:
       Q2_bias: {half: 0.000125, integer: -0.001125, period: 0.0025}
       coil_bias: {half: 0.00625, integer: 0.0, period: 0.0125}
@@ -57,7 +57,7 @@ components:
     EL: 0.6
     freq: null # Measure the bias-dependent transition before excitation.
     resonator: R3
-    flux_source: Q3_bias
+    flux_dev: Q3_bias
     flux:
       Q3_bias: {half: -0.00009, integer: -0.00099, period: 0.0018}
       coil_bias: {half: 0.004166666666666667, integer: 0.0, period: 0.008333333333333333}
@@ -78,7 +78,7 @@ components:
     EL: 1.2
     freq: null # Measure the bias-dependent transition before excitation.
     resonator: R4
-    flux_source: Q4_bias
+    flux_dev: Q4_bias
     flux:
       Q4_bias: {half: 0.00022, integer: -0.00088, period: 0.0022}
       coil_bias: {half: 0.005555555555555556, integer: 0.0, period: 0.011111111111111112}
@@ -99,7 +99,7 @@ components:
     EL: 0.5
     freq: null # Measure the bias-dependent transition before excitation.
     resonator: R5
-    flux_source: Q5_bias
+    flux_dev: Q5_bias
     flux:
       Q5_bias: {half: -0.00028, integer: -0.00168, period: 0.0028}
       coil_bias: {half: 0.004545454545454545, integer: 0.0, period: 0.00909090909090909}
@@ -120,7 +120,7 @@ components:
     EL: 0.9
     freq: null # Measure the bias-dependent transition before excitation.
     resonator: R6
-    flux_source: Q6_bias
+    flux_dev: Q6_bias
     flux:
       Q6_bias: {half: 0.0, integer: -0.0015, period: 0.003}
       coil_bias: {half: 0.007142857142857143, integer: 0.0, period: 0.014285714285714285}
@@ -154,7 +154,7 @@ components:
     time_of_fly: 0.4 # us; mux route, separate from resonator pulse routes.
     resonators: [R1, R2, R3, R4, R5, R6]
     qubits: [Q1, Q2, Q3, Q4, Q5, Q6]
-    flux_source: coil_bias
+    flux_dev: coil_bias
     wiring:
       gen_ch: 0
       ro_ch: [0, 1, 2, 3, 4, 5]

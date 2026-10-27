@@ -8,7 +8,7 @@ Bind alias `mux` to a `group/mux` component. The group must name matching
 ordered qubits and resonators. Tone index i always refers to that full group
 position, even when participants are reordered or omitted.
 
-Each qubit's `flux_source` names its own connected DC driver. All local sources must be distinct.
+Each qubit's `flux_dev` names its own connected DC driver. All local sources must be distinct.
 Choose `flux_unit` to match the driver's stored native unit. No unit conversion,
 mode change or output enabling occurs. Confirm limits, wiring, power and output
 before running on hardware.
@@ -21,7 +21,7 @@ edits and captures sources again.
 
 - `participants` selects original tone indices in acquisition order. The tone picker only
   selects which full-list position to edit.
-- `tones[i].flux_dev` starts from that Q's captured `flux_source`.
+- `tones[i].flux_dev` starts from that Q's captured `flux_dev`.
 - Each `tones[i].sweep` has independent native-unit Start and Stop.
   `flux_expts` is the one point count shared by all local lines, initially 101.
   Lines advance together by point index, not as a Cartesian product.

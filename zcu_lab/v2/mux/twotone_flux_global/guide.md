@@ -8,7 +8,7 @@ Bind alias `mux` to a `group/mux` component. The group must name matching
 ordered qubits and resonators. Tone index i always refers to that full group
 position, even when participants are reordered or omitted.
 
-The group's `flux_source` names the connected coil driver.
+The group's `flux_dev` names the connected coil driver.
 Choose `flux_unit` to match the driver's stored native unit. No unit conversion,
 mode change or output enabling occurs. Confirm limits, wiring, power and output
 before running on hardware.
@@ -21,9 +21,9 @@ edits and captures sources again.
 
 - `participants` selects original tone indices in acquisition order. The tone picker only
   selects which full-list position to edit.
-- `flux_dev` starts from the captured group `flux_source`.
+- `flux_dev` starts from the captured group `flux_dev`.
 - `flux` is one native-unit sweep shared by all participants, initially 101 points.
-  Open/Reset starts with all Qs selected. It reads each Q's `flux.<group.flux_source>`
+  Open/Reset starts with all Qs selected. It reads each Q's `flux.<group.flux_dev>`
   calibration and shifts references for other contributors' detached device values.
   It takes the union of expanded actual half-to-integer intervals.
   Missing selected calibration leaves both endpoints blank; invalid contributors raise an error.

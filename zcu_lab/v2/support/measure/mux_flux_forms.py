@@ -150,22 +150,22 @@ def make_flux_form[
         )
         for index, name in enumerate(names):
             metadata[("tones", index, "flux_dev")] = FieldMeta(
-                description=f"Device name captured from {name}.flux_source"
+                description=f"Device name captured from {name}.flux_dev"
             )
             for endpoint in ("start", "stop"):
                 metadata[("tones", index, "sweep", endpoint)] = seed_metadata(
-                    f"Actual half/integer from captured {name}.flux on its flux_source, accounting for other device biases; native device unit"
+                    f"Actual half/integer from captured {name}.flux on its flux_dev, accounting for other device biases; native device unit"
                 )
     else:
         fixed.append(FixedElements(("tones",), "name", ("participants",)))
         tree["tones"] = [{"name": name} for name in names]
         metadata[("flux_dev",)] = FieldMeta(
-            description="Device name captured from $mux.flux_source"
+            description="Device name captured from $mux.flux_dev"
         )
         tree["flux"] = Range(None, None, expts=101)
         for endpoint in ("start", "stop"):
             metadata[("flux", endpoint)] = seed_metadata(
-                "Union of actual half/integer intervals from each qubit.flux on $mux.flux_source, accounting for captured other device biases; native device unit"
+                "Union of actual half/integer intervals from each qubit.flux on $mux.flux_dev, accounting for captured other device biases; native device unit"
             )
         metadata[("flux", "n")] = seed_metadata(
             "Shared 101-point global DC scan candidate", fallback=True
@@ -207,8 +207,8 @@ def mux_flux_initial_values(
     """Seed mux DC identities, units and actual ranges from the fixed Form env.
 
     names is the full captured Q order; participants contains original selected
-    indices. Local scans use each Q's flux_source and leave nonparticipant
-    sweeps disabled. Global scans use $mux.flux_source and the union of Q
+    indices. Local scans use each Q's flux_dev and leave nonparticipant
+    sweeps disabled. Global scans use $mux.flux_dev and the union of Q
     intervals. Missing calibration leaves endpoints blank. Local devices must
     share one native unit. Invalid names, nonmember devices and frame/source
     failures propagate from captured_flux_seed without I/O or fallback.
@@ -218,7 +218,7 @@ def mux_flux_initial_values(
         captured_flux_seed(
             env,
             name,
-            captured_qubit(env, name).flux_source if local else group.flux_source,
+            captured_qubit(env, name).flux_dev if local else group.flux_dev,
         )
         for name in names
     ]
@@ -247,7 +247,7 @@ def mux_flux_initial_values(
         [None if seed.points is None else seed.points.half for seed in seeds],
     )
     return {
-        "flux_dev": group.flux_source,
+        "flux_dev": group.flux_dev,
         "flux_unit": unit,
         "flux": {"kind": "linrange", "start": start, "stop": stop, "n": 101},
     }

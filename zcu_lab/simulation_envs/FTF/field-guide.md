@@ -134,7 +134,7 @@ numerics: # Basis sizes, solver accuracy and root RNG seed.
 | 欄位 | 意義與單位 | 合法內容 |
 | --- | --- | --- |
 | `ej_ghz`、`ec_ghz`、`el_ghz` | 標稱 Josephson、charging、inductive energies，GHz | 有限正值 |
-| `flux_unit` | 該 qubit 的 `flux_source` device 原生單位 | `A` 或 `V`，須與 device 一致 |
+| `flux_unit` | 該 qubit 的 `flux_dev` device 原生單位 | `A` 或 `V`，須與 device 一致 |
 | `flux_half` | 零 bias 時半磁通量子對應的 device value，單位同 `flux_unit` | 有限數 |
 | `flux_period` | 每個磁通量子的 signed device-value 差，單位同 `flux_unit` | 有限非零數，可為負 |
 | `flux_bias` | 加到 device value 的標稱偏移修正，單位同 `flux_unit` | 有限數，無修正也須明填 `0` |
@@ -370,9 +370,9 @@ readout_count = max(pulse ADC, all mux receivers if configured) + 1
 
 | 用途 | FTF YAML | Entry 欄位或引用 |
 | --- | --- | --- |
-| F1 live DC | `dc_bias.sources.f1_bias`，`unit: A` | `Q1.flux_source: f1_bias`，校準在 `Q1.flux.f1_bias`，原生單位 A |
-| Coupler live DC | `dc_bias.sources.coupler_bias`，`unit: A` | `coupler.flux_source: coupler_bias`，校準在 `coupler.flux.coupler_bias`，原生單位 A |
-| F2 live DC | `dc_bias.sources.f2_bias`，`unit: A` | `Q2.flux_source: f2_bias`，校準在 `Q2.flux.f2_bias`，原生單位 A |
+| F1 live DC | `dc_bias.sources.f1_bias`，`unit: A` | `Q1.flux_dev: f1_bias`，校準在 `Q1.flux.f1_bias`，原生單位 A |
+| Coupler live DC | `dc_bias.sources.coupler_bias`，`unit: A` | `coupler.flux_dev: coupler_bias`，校準在 `coupler.flux.coupler_bias`，原生單位 A |
+| F2 live DC | `dc_bias.sources.f2_bias`，`unit: A` | `Q2.flux_dev: f2_bias`，校準在 `Q2.flux.f2_bias`，原生單位 A |
 | F1 charge line | `drive_lines.f1_charge.gen_ch: 2` | `Q1.wiring.ch: 2` |
 | F2 charge line | `drive_lines.f2_charge.gen_ch: 3` | `Q2.wiring.ch: 3` |
 | Pulse readout drive | `readout.drive.gen_ch: 0` | `R1.wiring.ch: 0`、`R2.wiring.ch: 0` |
@@ -395,7 +395,7 @@ Mux onetone 缺 slot 時，trigger 候選是 `$mux.time_of_fly + 5/(2π·min κ)
 3. Open 或 Reset `mux/twotone_spectrum` 時，Readout 沿 `$mux.module.readout` 引用完整模組。缺 slot 時使用 blank 模組加 group tones，通道來自 MG12 wiring，gain 為 0.1；其餘必填輸入仍須補齊。量測前另填有效 qubit frequency 與 drive／sweep 輸入。
 4. Open 或 Reset `mux/onetone` 時，有 slot 會複製模組 scalar 設定，但按 group 重新產生 tones，沿既有路徑設 `ro_ch` 初值 0／1。缺 slot 則從 MG12 wiring 補 1／2，gain 為 0.1。每次都要核對 R1→1、R2→2，必要時修正，再確認 frequency、gain 與 timing。有 slot 的副本不沿用 library tones 的通道；Run 前的手動修改不會更新 library。
 
-Coupler 有靜態 DC source，但沒有 `lo_flux_ch` 綁定。不要因為看到 `coupler.flux_source` 就替它填快速 flux channel。兩條 charge line 的 coupler 串擾係數仍會作用於模型中的 coupler，與 entry 是否有獨立 coupler pulse channel 是不同的事。
+Coupler 有靜態 DC source，但沒有 `lo_flux_ch` 綁定。不要因為看到 `coupler.flux_dev` 就替它填快速 flux channel。兩條 charge line 的 coupler 串擾係數仍會作用於模型中的 coupler，與 entry 是否有獨立 coupler pulse channel 是不同的事。
 
 FTF YAML 和 entry 是兩份獨立文件，loader 不自動互改或互相比對。修改 source 名稱、unit、gen_ch 或 ro_ch 時，必須同步修改使用中的 entry 引用與 wiring。
 

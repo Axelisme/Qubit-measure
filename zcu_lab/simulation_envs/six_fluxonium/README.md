@@ -79,7 +79,7 @@ Q1 through Q6, R1 through R6, local current-source components `Q1_bias` through
 `Q6_bias`, shared `coil_bias` and the `MG123456` mux group. Each Qi references
 Ri and its own `Qi_bias`. The group references `coil_bias`. Aliases bind `mux`
 to `MG123456`, `qubit` to `Q1` and `resonator` to `$qubit.resonator`.
-Scalar flux forms read `$qubit.flux_source` on Open/Reset without a device alias.
+Scalar flux forms read `$qubit.flux_dev` on Open/Reset without a device alias.
 The template uses `schema_version: 2`. Each qubit owns
 `flux.Qn_bias` and `flux.coil_bias`, with `half`, `integer` and signed `period`.
 The local integer is its physical offset; the coil integer is its coil offset.

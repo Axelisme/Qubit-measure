@@ -12,7 +12,7 @@ the [startup instructions](README.md#trusted-startup) give the first-use copy co
 The template creates Q1 through Q6, R1 through R6, local current sources
 `Q1_bias` through `Q6_bias`, shared `coil_bias` and group `MG123456`.
 Each qubit references its own local source. The group references `coil_bias`.
-Scalar flux forms read `$qubit.flux_source` on Open/Reset; no device alias is needed.
+Scalar flux forms read `$qubit.flux_dev` on Open/Reset; no device alias is needed.
 Tone i follows the group's
 ordered resonator list R1 through R6 and its corresponding qubit list Q1 through Q6.
 Group ADC wiring follows the same order. Resonator single-tone wiring is a

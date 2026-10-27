@@ -11,7 +11,7 @@ components:
     kind: qubit/fluxonium
     freq: null # Bias-dependent; not given by the physical settings.
     resonator: R1
-    flux_source: f1_bias
+    flux_dev: f1_bias
     flux:
       f1_bias: {half: 0.00015600624024961015, integer: -0.00374414976599064, period: 0.0078003120124804995}
     wiring:
@@ -20,7 +20,7 @@ components:
     kind: qubit/fluxonium
     freq: null
     resonator: R2
-    flux_source: f2_bias
+    flux_dev: f2_bias
     flux:
       f2_bias: {half: 0.00008196721311475417, integer: -0.0040163934426229505, period: 0.00819672131147541}
     wiring:
@@ -28,7 +28,7 @@ components:
   coupler:
     kind: qubit/transmon
     freq: null
-    flux_source: coupler_bias
+    flux_dev: coupler_bias
     flux:
       coupler_bias: {half: 0.0024, integer: -0.0016, period: 0.008}
   R1:

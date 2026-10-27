@@ -14,11 +14,11 @@
 
 | 舊欄位 | 新欄位 |
 | --- | --- |
-| Qubit 的 `flux_half`、`flux_int`、`flux_period` | `flux.<qubit.flux_source>.half`、`integer`、`period` |
-| Mux group 的 `coil_flux.<qubit>.half/int/period` | 該 qubit 的 `flux.<mux_group.flux_source>.half/integer/period` |
+| Qubit 的 `flux_half`、`flux_int`、`flux_period` | `flux.<qubit.flux_dev>.half`、`integer`、`period` |
+| Mux group 的 `coil_flux.<qubit>.half/int/period` | 該 qubit 的 `flux.<mux_group.flux_dev>.half/integer/period` |
 | Qubit 的 `flux_unit` | 移除，使用時取 device info 的原生單位 |
 
-`flux_source` 保留。Key 是實際 device 名稱，不固定為 `coil`。Mux 的來源若叫 `global_bias`，目標就是 `flux.global_bias`。數字不換單位、不推測方向，負 `period` 也原樣保留。
+v1 的 `flux_source` 改名為 v2 的 `flux_dev`，值原樣保留。Qubit、mux 與 JPA 都使用這個新欄位。它指定主要（預設）控制儀器，不參與 φ 計算，也不必有 flux 校準。Key 是實際 device 名稱，不固定為 `coil`。Mux 的來源若叫 `global_bias`，目標就是 `flux.global_bias`。數字不換單位、不推測方向，負 `period` 也原樣保留。
 
 舊校準沒有保存其他線當時的 bias。轉換把其他 contributing devices 位於各自 integer 當作參考點，這是**假設**，不是重建出的量測事實。報告會提醒重新校準。正式量測前，用 fluxdep 在已知其他線 bias 的條件下更新 frame。
 
@@ -74,13 +74,13 @@ schema_version: 2
 components:
   Q1:
     kind: qubit/fluxonium
-    flux_source: local_bias
+    flux_dev: local_bias
     flux:
       local_bias: {half: 0.5, integer: 0.1, period: 0.8}
       global_bias: {half: -0.2, integer: 0.0, period: -0.4}
   MG:
     kind: group/mux
-    flux_source: global_bias
+    flux_dev: global_bias
     # resonators、qubits、wiring 保留，coil_flux 已移除。
 ```
 
@@ -109,7 +109,7 @@ flux:
 把 legacy 範例的 `flux_int` 改成 `0.2`，會違反 `|integer − half| = |period| / 2`。以下情形也會被拒絕：
 
 - 數字是 NaN、infinity、boolean，或 period 為零。
-- `flux_source: bad.name`，或有校準卻沒有可用的明示來源。
+- v1 的 `flux_source: bad.name`，或有校準卻沒有可用的明示來源。
 - `coil_flux.Q2` 出現，但 mux 的 `qubits` 沒有 Q2，或 Q2 不是文件內的 qubit。
 - 多個 local／mux 校準要寫入同一 qubit 的同一 device entry。
 - 缺少必要容器、kind、aliases 或 component 欄位。
@@ -144,6 +144,6 @@ uv run --directory /absolute/checkout --no-sync -- python scripts/upgrade_parame
 
 還原時先停止 writers，另外保存目前文件與診斷。把報告所列 `<原檔名>.<唯一識別碼>.bak` 複製回原 YAML 路徑，核對 bytes，再 reopen 或 reload。備份是原版本，runtime 2 可能仍要求升級。還原只恢復文件，不代表完成升級。
 
-Device 改名時改 component 的 `flux_source` 與 `flux.<device>` key。改接線時刪除受影響 entry，再做 fluxdep。歷史 records 保留當時名稱與 frame，不批次改名。完整流程見 [改名與改接線](record-device-upgrades.md#改名與改接線)。
+Device 改名時改 component 的 `flux_dev` 與 `flux.<device>` key。改接線時刪除受影響 entry，再做 fluxdep。歷史 records 保留當時名稱與 frame，不批次改名。完整流程見 [改名與改接線](record-device-upgrades.md#改名與改接線)。
 
 版本、鎖與失敗語意見 [通用升級指南](parameter-upgrades.md)。格式辨識見 [component flux 格式歷程](storage-format-history/component-flux.md)。

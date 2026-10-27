@@ -109,13 +109,13 @@ def qubit_flux_initial_values(
 ) -> dict[str, JsonValue]:
     """Seed the selected $qubit DC device/unit and 101-point actual flux range.
 
-    The default device remains $qubit.flux_source. margin expands the range by
+    The default device remains $qubit.flux_dev. margin expands the range by
     the given fraction of half/integer separation. Missing calibration leaves
     required endpoints blank. Invalid names, nonmember devices, source faults
     and invalid frames propagate from captured_flux_seed. No live reads occur.
     """
     qubit = captured_qubit(env, "$qubit")
-    seed = captured_flux_seed(env, "$qubit", qubit.flux_source)
+    seed = captured_flux_seed(env, "$qubit", qubit.flux_dev)
     return {
         "flux_dev": seed.device,
         "flux_unit": seed.unit,

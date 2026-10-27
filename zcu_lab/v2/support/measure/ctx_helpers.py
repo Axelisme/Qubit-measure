@@ -49,7 +49,7 @@ def flux_pick_initial_points(
 ) -> DeviceFluxPoint | None:
     """Return scalar picker's half/integer lines from the fixed Run capture.
 
-    device_name is the acquired cfg's scanned device, not flux_source.
+    device_name is the acquired cfg's scanned device, not flux_dev.
     snapshot is the Run's native device settings; only other contributors'
     numeric values are used. No capture or no selected calibration returns
     None, leaving the picker owner's defaults. Invalid names, non-qubit target,

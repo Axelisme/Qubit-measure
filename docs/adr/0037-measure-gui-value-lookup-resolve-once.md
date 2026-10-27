@@ -26,7 +26,7 @@ Cached device values 供 defaults 和 resolve-once 輸入使用，不是 Run 的
 
 參數讀取使用 `ParameterContext` 的 point／library 固定投影。`$qubit.freq` 是 alias 路徑，`Q1.freq` 是具體元件路徑。`$qubit.module.x180.waveform.length` 先沿 point 的 module slot 找 library，再讀 module leaf。Alias 的 authored links 只沿這份 capture 求值，不讀目前 session。
 
-裸 `$alias` 回傳固定表解析後的名稱字串，例如 `$qubit` 得到 `Q1`。Alias 容器可保存元件或 device 名稱，不在 capture 或 preview 預查名稱可用性。實驗室表單以元件為焦點，裝置初值讀取 `$qubit.flux_source` 等元件欄位，不要求 device alias，見 [[0073]]。缺列或未綁定時指名失敗，不代用同名元件、舊解析值或靜態名稱。名稱不接受數值算術或字串插值。
+裸 `$alias` 回傳固定表解析後的名稱字串，例如 `$qubit` 得到 `Q1`。Alias 容器可保存元件或 device 名稱，不在 capture 或 preview 預查名稱可用性。實驗室表單以元件為焦點，裝置初值讀取 `$qubit.flux_dev` 等元件欄位，不要求 device alias，見 [[0073]]。缺列或未綁定時指名失敗，不代用同名元件、舊解析值或靜態名稱。名稱不接受數值算術或字串插值。
 
 Form input 以顯式 `{expr: text}` 保存 expression，普通字串保持 literal。只有文字欄位可用 Expression，下拉與勾選欄位沒有這個模式。求值沿宿主的固定 FormEnv，不讀後來的全域來源。Measure Run 使用目前有效的 Form result；Library Apply 將結果數字寫進持久 Spec，不保存 expression。
 

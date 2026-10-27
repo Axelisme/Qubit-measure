@@ -20,7 +20,7 @@ def plan_fluxdep_export(
 
     component is a detached lab fluxonium projection. points holds fitted native
     integer/half positions from the standalone app. Only a frame containing
-    exactly flux_source is writable without other-device values. Preserve its
+    exactly flux_dev is writable without other-device values. Preserve its
     period sign and update the magnitude from the fitted separation. Return
     component-relative scalar paths, without modifying the projection or files.
 
@@ -33,16 +33,16 @@ def plan_fluxdep_export(
     if not isinstance(component, QubitSchema):
         raise ValueError("fluxdep export requires a lab fluxonium component")
     qubit_flux_frame(component.flux)
-    source = component.flux_source
+    source = component.flux_dev
     if source is not None:
         validate_device_name(source)
     if source is None:
-        reason = "flux_source is not configured."
+        reason = "flux_dev is not configured."
     elif not component.flux:
         reason = "The component flux frame is empty."
     elif set(component.flux) != {source}:
         reason = (
-            "The flux frame is not limited to flux_source; standalone alignment "
+            "The flux frame is not limited to flux_dev; standalone alignment "
             "does not identify the swept device or other devices' values at acquisition."
         )
     else:

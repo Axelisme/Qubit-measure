@@ -4,7 +4,7 @@
 
 ## Parameter sources
 
-Uses the qubit (`qubit/*`), resonator and jpa (`amplifier/jpa`) aliases. Search bounds use `$jpa.flux`, `$jpa.pump_freq` and `$jpa.pump_power`. Opening or resetting the form reads the required JPA flux device from `$jpa.flux_source` and the RF default from `$jpa.rf_source`. Both direct names remain editable. A missing flux or RF source leaves its field empty and marks the form Invalid. Select the connected RF device in the form. `flux_unit` starts as A, and the device receives the entered values unchanged. Missing required aliases or calibration marks the form Invalid.
+Uses the qubit (`qubit/*`), resonator and jpa (`amplifier/jpa`) aliases. Search bounds use `$jpa.flux`, `$jpa.pump_freq` and `$jpa.pump_power`. Opening or resetting the form reads the required JPA flux device from `$jpa.flux_dev` and the RF default from `$jpa.rf_source`. Both direct names remain editable. A missing flux or RF source leaves its field empty and marks the form Invalid. Select the connected RF device in the form. `flux_unit` starts as A, and the device receives the entered values unchanged. Missing required aliases or calibration marks the form Invalid.
 
 Relax delay starts at 1*T1 using the parameters captured when you open or reset the form. T1 must be a finite positive real number; Boolean values count as invalid. Missing/null T1 or an unavailable parameter snapshot gives a 30 us initial delay. An invalid stored T1 leaves the required wait field empty, and parameter-source failures report an error. Edit the delay in the form as needed; the stored T1 stays unchanged.
 

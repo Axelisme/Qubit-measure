@@ -124,7 +124,7 @@ Component 的 module slot 指向下游實驗要使用的模組，不用來為每
 ### Mux group 是實驗室的 component 定義
 
 `zcu_lab.components.MuxGroupSchema` 宣告 `group/mux`，沿既有 ComponentRegistry 註冊。
-它保存必填的 `resonators`，含 1 至 8 個有序名稱，以及選填的 `qubits`、`flux_source`、`mixer_freq`、`time_of_fly`、mux wiring（文件層可未知，表單／Run 才必填）和一般 module／ext。
+它保存必填的 `resonators`，含 1 至 8 個有序名稱，以及選填的 `qubits`、`flux_dev`、`mixer_freq`、`time_of_fly`、mux wiring（文件層可未知，表單／Run 才必填）和一般 module／ext。
 `mixer_freq` 是有限的 mux generator LO 設定值，單位 MHz；None 表示未知。無 readout slot 的 mux Form 從 `$mux.mixer_freq` 取初值，缺值留空必填，不由 tone 頻率或 κ 推算。
 Mux group 與 resonator 各自宣告頂層 `time_of_fly`，保存各自量測路徑的有限非負 flight time，單位 µs；None 表示尚未量測。不從 ext 讀取，也不自動搬移既有 entry。
 Mux onetone 的無 slot trigger 初值為 `$mux.time_of_fly + 5/(2π·min κ)`，group TOF 或任一 κ 缺值時，trigger 與 pulse length 留空必填。Resonator 的 pulse 路徑 TOF 不供 mux 使用。
@@ -139,7 +139,7 @@ Group 自己擁有 readout module，重排 resonators 不改 owner。
 使用者於 2026-10-18 裁定：「或是改寫mux_group這個原件的欄位吧，qubits分resonators」。
 對 resonators 必填、qubits 選填並逐項檢查，以及改名不留相容層的細節，裁定：「12都同意」。
 
-Qubit 的 `flux.<device>.{half, integer, period}` 保存 local、global coil 與其他 contributors 的同時參考校準，見 [[0082]]。Mux group 的 `flux_source` 只保存 global coil 的 device 名稱，不要求提供 qubits，也不保存各 qubit 的校準。Global fluxdep 按實際被掃 device 更新 `<qubit>.flux.<device>`，同時 append 原始擬合 record。保存沿用 [[0063]] 的單文件 mapping-leaf 合併與交易，不擴充 framework。
+Qubit 的 `flux.<device>.{half, integer, period}` 保存 local、global coil 與其他 contributors 的同時參考校準，見 [[0082]]。Mux group 的 `flux_dev` 只保存 global coil 的 device 名稱，不要求提供 qubits，也不保存各 qubit 的校準。Global fluxdep 按實際被掃 device 更新 `<qubit>.flux.<device>`，同時 append 原始擬合 record。保存沿用 [[0063]] 的單文件 mapping-leaf 合併與交易，不擴充 framework。
 
 Model 驗證名稱、qubits 與 resonators 等長及重複 qubit。
 提供 qubits 時，lab Form 在 Open／Reset 以固定 ParameterContext 檢查兩邊 component 存在與 kind，

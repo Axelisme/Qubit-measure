@@ -16,7 +16,7 @@ class FrequencyModelForm(FormModel):
     """Choose fluxonium energies (GHz) and the plan's native device affine map.
 
     Defaults use the fixed $qubit capture and detached device values. The
-    selected flux_source half accounts for other contributors; its period
+    selected flux_dev half accounts for other contributors; its period
     stays signed. Missing source/calibration leaves coordinates required.
     Invalid frames raise named errors. flux_bias defaults to zero; explicit
     values can replace every captured value before Start.
@@ -37,7 +37,7 @@ class FrequencyModelForm(FormModel):
             for name in ("EJ", "EC", "EL"):
                 data[name] = {"expr": f"$qubit.{name}"}
             qubit = captured_qubit(env, "$qubit")
-            source = qubit.flux_source
+            source = qubit.flux_dev
             seed = captured_flux_seed(env, "$qubit", source)
             if seed.points is not None and source is not None:
                 data["flux_half"] = seed.points.half
