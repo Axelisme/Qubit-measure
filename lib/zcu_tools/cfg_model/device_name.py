@@ -1,8 +1,9 @@
-"""Front-end-neutral instrument-name annotation, with ordinary string validation."""
+"""Front-end-neutral instrument names and their no-dot validation rule."""
 
 from dataclasses import dataclass
 from typing import Annotated, TypeAliasType, get_args
 
+from pydantic import AfterValidator
 from pydantic.fields import FieldInfo
 
 
@@ -11,8 +12,22 @@ class DeviceNameHint:
     """Mark a string as an instrument name, without lookup or validation."""
 
 
-DeviceName = Annotated[str, DeviceNameHint()]
-"""An instrument name stored and validated as an unrestricted ordinary string."""
+def validate_device_name(name: str) -> str:
+    """Return name unchanged, or raise ValueError identifying an invalid name.
+
+    Names must be nonblank and contain no ASCII dot, which separates component
+    paths and flattened record fields. All other strings remain valid, including
+    surrounding whitespace. This performs no lookup, trimming, or I/O.
+    """
+    if not name.strip():
+        raise ValueError(f"Device name {name!r} must not be empty or whitespace-only")
+    if "." in name:
+        raise ValueError(f"Device name {name!r} must not contain '.'")
+    return name
+
+
+DeviceName = Annotated[str, DeviceNameHint(), AfterValidator(validate_device_name)]
+"""An instrument-name string without dots; no lookup or serialization changes."""
 
 
 def is_device_name(info: FieldInfo) -> bool:

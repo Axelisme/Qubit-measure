@@ -16,6 +16,7 @@ from zcu_tools.experiment.workflows import (
 )
 from zcu_tools.program.v2.modules import PulseCfg, PulseReadoutCfg
 
+from zcu_lab.components.qubit import QubitFluxCalibration
 from zcu_lab.v2.support.lifetime_models import LifetimeModelRecord
 from zcu_lab.workflows.common.calibration_results import StageStatus
 from zcu_lab.workflows.common.devices import set_flux
@@ -39,6 +40,8 @@ from zcu_lab.workflows.overnight.trend import draw_overnight_trend
 class OvernightPlan(BaseModel):
     """Monitor T1 and Echo drift at fixed flux without calibration.
 
+    flux_frame is the qubit's Start-captured device calibration block in native
+    units, fixed across rounds and exports. {} means this source has no calibration.
     flux_dev names the connected driver; required flux_unit is A, V or native
     (Fake), with no conversion. flux is its absolute setpoint. outer_rounds counts
     complete T1/Echo pairs; start_interval_s is the positive wall-clock spacing
@@ -67,6 +70,9 @@ class OvernightPlan(BaseModel):
     qub_pulse: PulseCfg = Field(description="Fixed calibrated pi drive")
     readout: PulseReadoutCfg = Field(description="Fixed pulse-backed readout")
     snapshot: RunSnapshot = Field(description="Historical host capture")
+    flux_frame: dict[str, QubitFluxCalibration] = Field(
+        description="Start-captured qubit flux block in native device units; empty means no calibration"
+    )
     result_path: Path | None = Field(
         default=None,
         description="Exact entry Result path captured at Start. None means no entry (e.g. headless); skip auto samples and use offline --result later.",

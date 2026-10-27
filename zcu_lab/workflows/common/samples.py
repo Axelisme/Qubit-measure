@@ -1,9 +1,10 @@
 """Lab-owned record rows shared by live workflows and offline re-export."""
 
+from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict, Field, JsonValue, TypeAdapter
+from pydantic import BaseModel, ConfigDict, Field, JsonValue
 from zcu_tools.datafile import JsonObject, load
 from zcu_tools.experiment.native_persistence import metadata_from_container
 from zcu_tools.experiment.workflows.saved_run import native_path
@@ -101,17 +102,23 @@ def sample_row(key: str, fields: JsonObject) -> SampleRow:
     )
 
 
-def native_devices(directory: Path, files: tuple[str, ...]) -> JsonValue:
+def native_devices(
+    directory: Path, files: tuple[str, ...]
+) -> dict[str, JsonObject] | None:
     """Copy the last saved acquisition's complete device snapshot, or null.
 
     files follow scientific acquisition order, including rejected/partial traces.
     Explicit references are checked through the native owner, never inferred by
     scanning. Missing/malformed native files raise; no live capture substitutes.
     """
-    devices: JsonValue = None
+    devices: dict[str, JsonObject] | None = None
     for file in files:
         metadata = metadata_from_container(load(native_path(directory, file)))
-        devices = TypeAdapter(JsonValue).validate_python(metadata.device_snapshot)
+        devices = (
+            None
+            if metadata.device_snapshot is None
+            else deepcopy(dict(metadata.device_snapshot))
+        )
     return devices
 
 

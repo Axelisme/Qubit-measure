@@ -99,6 +99,7 @@ def test_document_minor_never_relaxes_original_model_validation(
         document: YamlMap = {
             "format": "zcu.parameter-container",
             "format_version": f"2.{minor}",
+            "schema_version": 1,
             "general": general,
             "components": {"S1": fields},
         }

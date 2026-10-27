@@ -1,11 +1,12 @@
 # Entry working values and wiring, separate from physical simulation settings.
 # No module library or pulse sequence is supplied.
 # simulated-truth: default.yaml dc_bias offsets/periods in A, per line's own
-# contribution: int=offset, half=offset+period/2. Other lines are excluded.
-# coil_flux uses coil_offset/coil_period, not the qubit's local calibration.
+# reference: integer=offset, half=offset+period/2 for local and coil devices.
+# All devices at their integer references give zero total reduced flux.
 # Resonator kappa and route TOF come from readout settings, not measurements.
 format: zcu.entry-template
 format_version: "1.0"
+schema_version: 2
 components:
   Q1:
     kind: qubit/fluxonium
@@ -15,10 +16,9 @@ components:
     freq: null # Measure the bias-dependent transition before excitation.
     resonator: R1
     flux_source: Q1_bias
-    flux_unit: A
-    flux_half: 0.0
-    flux_period: 0.002
-    flux_int: -0.001
+    flux:
+      Q1_bias: {half: 0.0, integer: -0.001, period: 0.002}
+      coil_bias: {half: 0.005, integer: 0.0, period: 0.01}
     wiring:
       ch: 1
   R1:
@@ -37,10 +37,9 @@ components:
     freq: null # Measure the bias-dependent transition before excitation.
     resonator: R2
     flux_source: Q2_bias
-    flux_unit: A
-    flux_half: 0.000125
-    flux_period: 0.0025
-    flux_int: -0.001125
+    flux:
+      Q2_bias: {half: 0.000125, integer: -0.001125, period: 0.0025}
+      coil_bias: {half: 0.00625, integer: 0.0, period: 0.0125}
     wiring:
       ch: 2
   R2:
@@ -59,10 +58,9 @@ components:
     freq: null # Measure the bias-dependent transition before excitation.
     resonator: R3
     flux_source: Q3_bias
-    flux_unit: A
-    flux_half: -0.00009
-    flux_period: 0.0018
-    flux_int: -0.00099
+    flux:
+      Q3_bias: {half: -0.00009, integer: -0.00099, period: 0.0018}
+      coil_bias: {half: 0.004166666666666667, integer: 0.0, period: 0.008333333333333333}
     wiring:
       ch: 3
   R3:
@@ -81,10 +79,9 @@ components:
     freq: null # Measure the bias-dependent transition before excitation.
     resonator: R4
     flux_source: Q4_bias
-    flux_unit: A
-    flux_half: 0.00022
-    flux_period: 0.0022
-    flux_int: -0.00088
+    flux:
+      Q4_bias: {half: 0.00022, integer: -0.00088, period: 0.0022}
+      coil_bias: {half: 0.005555555555555556, integer: 0.0, period: 0.011111111111111112}
     wiring:
       ch: 4
   R4:
@@ -103,10 +100,9 @@ components:
     freq: null # Measure the bias-dependent transition before excitation.
     resonator: R5
     flux_source: Q5_bias
-    flux_unit: A
-    flux_half: -0.00028
-    flux_period: 0.0028
-    flux_int: -0.00168
+    flux:
+      Q5_bias: {half: -0.00028, integer: -0.00168, period: 0.0028}
+      coil_bias: {half: 0.004545454545454545, integer: 0.0, period: 0.00909090909090909}
     wiring:
       ch: 5
   R5:
@@ -125,10 +121,9 @@ components:
     freq: null # Measure the bias-dependent transition before excitation.
     resonator: R6
     flux_source: Q6_bias
-    flux_unit: A
-    flux_half: 0.0
-    flux_period: 0.003
-    flux_int: -0.0015
+    flux:
+      Q6_bias: {half: 0.0, integer: -0.0015, period: 0.003}
+      coil_bias: {half: 0.007142857142857143, integer: 0.0, period: 0.014285714285714285}
     wiring:
       ch: 6
   R6:
@@ -160,13 +155,6 @@ components:
     resonators: [R1, R2, R3, R4, R5, R6]
     qubits: [Q1, Q2, Q3, Q4, Q5, Q6]
     flux_source: coil_bias
-    coil_flux: # simulated-truth, A; each coil contribution, excluding local bias.
-      Q1: {half: 0.005, period: 0.01, int: 0.0}
-      Q2: {half: 0.00625, period: 0.0125, int: 0.0}
-      Q3: {half: 0.004166666666666667, period: 0.008333333333333333, int: 0.0}
-      Q4: {half: 0.005555555555555556, period: 0.011111111111111112, int: 0.0}
-      Q5: {half: 0.004545454545454545, period: 0.00909090909090909, int: 0.0}
-      Q6: {half: 0.007142857142857143, period: 0.014285714285714285, int: 0.0}
     wiring:
       gen_ch: 0
       ro_ch: [0, 1, 2, 3, 4, 5]

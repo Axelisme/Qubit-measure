@@ -34,6 +34,7 @@ from zcu_tools.gui.app.fluxdep.event_bus import (
     SpectrumChangedPayload,
     SpectrumRemovedPayload,
 )
+from zcu_tools.gui.app.fluxdep.export_plan import ExportPlanner
 from zcu_tools.gui.app.fluxdep.interactive import (
     ActiveInteractiveContext,
     FluxDepInteractiveOwner,
@@ -522,6 +523,17 @@ class Controller(BaseController[FluxDepState, EventBus]):
         )
         self.record_search_result(result, inputs)
         return result
+
+    def configure_export(self, planner: ExportPlanner) -> None:
+        """Bind the lab's export policy on the Controller's owner thread.
+
+        Composition calls this after construction and before creating views or
+        remote adapters. Replaces any previous policy. The callback supplies
+        calibration writes and a receipt from detached setup/native positions;
+        its failures propagate before export output. Raises RuntimeError
+        off-owner. Until configured, export rejects with export_planner_missing.
+        """
+        self._fit.configure_export(planner)
 
     def export_params(self) -> str:
         """Export to the selected entry/component and return the predictor path.

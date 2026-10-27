@@ -5,16 +5,19 @@ from pathlib import Path
 
 from pydantic import TypeAdapter
 from zcu_tools.datafile import JsonObject
-from zcu_tools.resources.document_store import YamlValue
+from zcu_tools.resources.document_store import YamlMap, YamlValue
 from zcu_tools.resources.entry import EditView, document_value, snapshot
+from zcu_tools.resources.parameter_upgrade import ParameterDocument
 
 from ._meta_info import preserve_meta_field
 from .evidence import has_legacy_expression
 from .models import KeyMappingItem, KeyRule, MigrationMapping
+from .parameter_batch import ParameterValue, prepare_parameter_batch
 from .state import MigrationSession, clear_pending, record_key_mapping, record_pending
 
 _JSON = TypeAdapter(JsonObject)
 _YAML = TypeAdapter(YamlValue)
+_MAP = TypeAdapter(YamlMap)
 _UNIT_KEYS = ("flux_unit", "jpa_flux_unit")
 
 
@@ -143,14 +146,65 @@ def _clear_value(view: EditView, path: str) -> tuple[str, YamlValue]:
     return path, None
 
 
+def _converted_updates(
+    view: EditView,
+    candidate: EditView,
+    updates: list[tuple[str, YamlValue]],
+    mapping: MigrationMapping,
+    *,
+    is_point: bool,
+) -> list[tuple[str, YamlValue]]:
+    before = _MAP.validate_python(
+        snapshot(view).model_dump(
+            mode="python", serialize_as_any=True, exclude_unset=True
+        )
+    )
+    raw = _MAP.validate_python(
+        snapshot(candidate).model_dump(
+            mode="python", serialize_as_any=True, exclude_unset=True
+        )
+    )
+    converted = prepare_parameter_batch(
+        ParameterDocument(raw, Path("point.yaml" if is_point else "setup.yaml")),
+        transform=mapping.parameter_transform,
+        values=tuple(ParameterValue(path, value) for path, value in updates),
+    )
+    after = _MAP.validate_python(
+        converted.model_dump(mode="python", serialize_as_any=True, exclude_unset=True)
+    )
+    changes: list[tuple[str, YamlValue]] = []
+    for section in ("general", "components"):
+        old_section, new_section = before[section], after[section]
+        if not isinstance(old_section, dict) or not isinstance(new_section, dict):
+            raise ValueError(f"{section}: expected mapping")
+        if section == "general":
+            changes.extend(
+                (f"general.{key}", value)
+                for key, value in new_section.items()
+                if old_section.get(key) != value
+            )
+        else:
+            for name, fields in new_section.items():
+                old_fields = old_section.get(name)
+                if not isinstance(fields, dict) or not isinstance(old_fields, dict):
+                    raise ValueError(f"{name}: conversion cannot add/remove components")
+                changes.extend(
+                    (f"{name}.{key}", value)
+                    for key, value in fields.items()
+                    if old_fields.get(key) != value
+                )
+    return changes
+
+
 def _stage_group(
     view: EditView,
-    rules: list[KeyRule],
+    mapping: MigrationMapping,
     unit_rule: KeyRule,
     units: ResolvedFluxUnits,
     *,
     is_point: bool,
 ) -> tuple[list[tuple[str, YamlValue]], list[str]]:
+    rules = [rule for rule in mapping.rules if unit_rule.old_key in rule.requires_keys]
     candidate = EditView(snapshot(view))
     updates: list[tuple[str, YamlValue]] = []
     cleared: list[str] = []
@@ -181,8 +235,8 @@ def _stage_group(
         if rule.target_path is None:
             raise ValueError(f"{rule.old_key}: missing flux destination")
         accepted = _YAML.validate_python(value, strict=True)
-        candidate.set(rule.target_path, accepted)
         updates.append((rule.target_path, accepted))
+    updates = _converted_updates(view, candidate, updates, mapping, is_point=is_point)
     return updates, cleared
 
 
@@ -219,7 +273,7 @@ def apply_flux_groups(
         if error is None:
             try:
                 updates, cleared = _stage_group(
-                    view, rules, unit_rule, units, is_point=is_point
+                    view, mapping, unit_rule, units, is_point=is_point
                 )
             except ValueError as exc:
                 # Isolate owner-invalid legacy groups; accepted unrelated values remain usable.

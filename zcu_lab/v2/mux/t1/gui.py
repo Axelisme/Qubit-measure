@@ -27,12 +27,14 @@ from zcu_tools.gui.app.measure.adapter import (
 from zcu_tools.gui.session.types import SessionEnv
 from zcu_tools.plotting.plots import Plots
 
+from zcu_lab.v2.support.flux import record_flux_frame
 from zcu_lab.v2.support.measure.mux_results import (
     MuxSummaryFailure,
     MuxSummaryTone,
     captured_qubits,
 )
 from zcu_lab.v2.support.measure.mux_save_names import mux_save_stem
+from zcu_lab.v2.support.measure.record_frame import captured_qubit_flux
 from zcu_lab.v2.support.mux import MuxFitFailure
 from zcu_lab.v2.twotone.time_domain.t1.core import T1AnalyzeOptions
 
@@ -152,6 +154,9 @@ def _get_writeback_items(
             ]
         )
         if metadata is not None and devices is not None:
+            frame = record_flux_frame(
+                captured_qubit_flux(req.ctx.parameters, qubit), devices
+            )
             row_items.append(
                 RecordWriteback(
                     target_name=qubit,
@@ -159,6 +164,10 @@ def _get_writeback_items(
                     record={
                         "devices": {
                             name: deepcopy(info) for name, info in devices.items()
+                        },
+                        "flux_frame": {
+                            name: dict(calibration)
+                            for name, calibration in frame.items()
                         },
                         "run": {
                             "run_id": metadata.run_id,

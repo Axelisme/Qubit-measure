@@ -21,7 +21,7 @@ App memento、Experiment Data File、workflow run artifact、`params.json`、Rec
 - 參數容器由 `resources.entry` 組合條目、setup 範本與獨立工作點。值與 opaque metadata 共用一份文件，setup／point 重用 `resources.parameter_metadata` 的 2.0 header 與 metadata 讀寫，以及 `resources.parameter_fields` 的 value staging；DocumentStore 擁有單檔衝突與原子提交，不換算數值。Entry 不產生、解釋或驗證參數 metadata，clone 原樣複製；library 來源記錄與本條目 ledger 引用驗證仍由 library owner 擁有。Accepted executor 對參數只提交 caller 提供的 metadata。GUI context owner 與 Notebook 經公開 capability 使用 entry。GUI proposal 留在 frontend，Apply 才轉成 resources concrete items。兩者共用 accepted executor，resources 不 import frontend 或 experiment，由 C8 分層與 C9 無循環 contract 約束。
 - 使用者於 2026-10-13 裁決：「可以改metadata」。新參數容器寫 `format_version: "2.0"`，只讀 major 2，保留同 major 的 forward-minor 契約。入口直接拒絕舊 major 或任何含 `provenance` 旁表的文件，錯誤含路徑、讀到版本與期望版本 2.0。不雙讀、不附轉換工具，由使用者自行修改既有文件。這項參數格式變更不改 generic DocumentStore、ModuleLibrary 或其他成果的版本契約。
 - Setup 與每個 point 各自的 authored alias 表由 `resources.entry` 保存為獨立的 `aliases.yaml`，不是 memento 或 ledger。ContextService 擁有有序表的語法與 Apply 時機，resources 擁有檔案表示、建立時複製及單檔原子替換。MCP 的單次 aliases／target 覆寫不保存它。
-- `RecordWriteback` 只 append adapter 組裝的任意 JSON object，不選座標裝置、不注入 `dev_value/dev_unit`，也不因裝置資料缺失而省略 proposal。框架只補 `run_id`、`point`、`at` 與 `source` provenance 信封。格式由 adapter 間的 policy 決定，見 [lab authoring 的 Record policy](../../zcu_lab/v2/measure-authoring.md#record-policy)。元件記錄放在 `records/components/<target>.jsonl`，事件 ledger 維持 `records/ledger.jsonl`，附件維持 `records/<event UUID>.json`，兩個命名空間不共用行格式。
+- `RecordWriteback` 只 append adapter 組裝的任意 JSON object，不選座標裝置、不注入 `dev_value/dev_unit`，也不因裝置資料缺失而省略 proposal。框架只補 `component`、`run_id`、`point`、`at` 與 `source` provenance 信封。`component` 來自明示的 table binding，producer 同名欄位不能覆寫它；舊列缺此欄仍可讀，不補寫。格式由 adapter 間的 policy 決定，見 [lab authoring 的 Record policy](../../zcu_lab/v2/measure-authoring.md#record-policy)。元件記錄放在 `records/components/<target>.jsonl`，事件 ledger 維持 `records/ledger.jsonl`，附件維持 `records/<event UUID>.json`，兩個命名空間不共用行格式。
 - `resources.record_table` 擁有 append-only JSONL，每個 run_id 只讀最後一整行，CSV 只作匯出。`project_device_coordinates(..., device_name=...)` 將 caller 指定的裝置投影為分析 frame，再套用 opt-in flat v2 座標與 flux 解析。不猜裝置，不讀舊 flat 欄位作投影 fallback。Runtime 不讀舊名稱或 `samples/` 路徑。
 
 使用者 2026-10-25：「我認為框架應該對SampleWriteback保持中立無知，可能可以叫RecordWriteback也說不定，行為就是append一個格式不拘的json到紀錄的jsonl中，格式由adapter間的隱式policy決定，資訊也尤其組裝，當然文檔與註解要寫這個policy好讓人維護」。
@@ -156,7 +156,7 @@ Format 與 format_version 只描述容器結構。檔頭不符或 major 不同�
 
 任何 minor 都由元件定義者的 model 決定 defaults、validators 與舊寫法演進。Forbid 拒絕未知欄位，ignore 丟棄它們，allow 保留並公開它們；ignore 丟棄的欄位在非空 commit 時移除。
 
-框架不提供版本遷移鏈或相容 loader。Entry 不為值寫入或格式轉換產生 metadata。
+框架不提供 runtime 相容 loader。Component 文件有獨立的版本與明確執行的升級鏈，見下節。Entry 不為值寫入或格式轉換產生 metadata。
 
 Experiment persistence 使用 inner-first axes；disk payload 由 Result-native shape 對應，save／load 不要求 caller 補 transpose。物理單位由 experiment mapping 明示；不能為未定義物理量的 scalar 捏造 A／V。Data Variable 是結果語意，state／phase 等離散座標仍是 axis。正規 data.h5 的各 Data Variable 可以使用不同 grid，共用一份結果身分與 metadata。Labber 預設的 canonical one-shot grouped 輸出要求共同 grid 與明確 variable-to-channel mapping。必需 variables 由 experiment 決定，不由 generic writer 猜測。異質 streaming workflow 有獨立 layout 與 completeness 規則，不能因同為 HDF5 就視為同類檔案。
 
@@ -165,6 +165,20 @@ Grid 不同的 grouped 實驗可由 spec 明確宣告 independent Labber layout�
 結構完整、量測完成與持久提交不同。Complete Experiment Result 指所需 variables 齊全，不保證所有預定測點完成。Operation stopped／failed 不單獨決定已提交資料能否分析。Autofluxdep 在 node 正常返回、patch 驗證後提交 row；mid-node exception 不把半列視為 committed。已取得 measurement 而 fit／provide 失敗時，保留 raw measurement 並分別標示提供結果的狀態；skip 以 audit event 表示，不以 NaN 推斷。Node-row 與 flux-level commit 是不同進度；partial／stopped／failed run 仍可保有先前已提交的 evidence。Terminal exports／reports 取用 committed journal evidence，不能反向覆寫 canonical row。
 
 2026-10-21 註：autofluxdep 已移除，上一段的 node-row、flux-level commit 與 terminal export 規則是歷史記錄。現行 workflow 的提交與保存邊界見 [ADR-0062](0062-experiment-workflow.md)，不把舊 node 契約套到新 engine。
+
+### Component 文件版本與明確升級
+
+每份存 component 參數的 setup、point 與 entry template 都有 `schema_version: N`。它描述整份 component schema，不取代容器的 format／format_version。Lab 與 component models 一起在既有 ComponentRegistry 註冊具名 ParameterSchemaPolicy，提供目前版本與 upgrade 命令。未配置就失敗，lib 不預設 lab 版本，也不把 policy 參數散到 ResultEntry／open／create／template。
+
+Runtime 只接受目前版本。缺版或版本不同時，讀取處列出文件版本、目前版本與可執行的 upgrade 命令，不推測、不改檔。優先新增有預設值的欄位，結構變更才增加一個 vN→vN+1 純函式步驟。
+
+`resources.parameter_upgrade` 擁有通用鏈與 YAML I/O。Caller 提供完整舊格式分類、每版完整驗證及純函式步驟。未標版文件只有在 operator 明確 upgrade，且完整分類確認後才視為 v1。Runner 驗證每步輸出正好是下一版，current 文件也先驗證再跳過。預設 dry-run 不建檔或鎖，逐文件、逐欄位列出差異。Apply 用 DocumentStore 的同名 sidecar lock，重讀、完整驗證、exclusive byte backup、sibling temporary 與 atomic replace。失敗保留原檔與已完成的備份，其餘文件照常處理。這不是多檔或掉電交易。
+
+Lab 的 component flux 純轉換由長期升級步驟與一次性 `storage_mapping` 共用。Migrations 透過 caller 的完整文件 batch callback 在 current schema 驗證前轉換 seed／value，不先發布舊格式再升級。框架不解讀 lab 欄位。離線 YAML 沒有 device catalog，只驗共用名稱語法，device 存在性留在使用處檢查。`migrations → zcu_lab.components` 是 caller 指向定義者的邊，C14、C16、C20 保護反向隔離，不限制 caller 載入。
+
+Lab 擁有目前版本、步驟與真實舊文件形狀。`scripts/upgrade_parameters.py` 只組合 lab plan 與通用 main。長期鏈不依賴可刪除的 `migrations/`，後者仍只做舊 repo 匯入。C14、C16 禁止 lib 反向 import lab；C20、C21 禁止 lib 依賴 migrations 或 scripts。Caller 注入取代反向載入。
+
+2026-10-27 記錄使用者採用升級鏈的原因：「每次改component都會讓舊資料不支援很頭痛」，並對整份文件版本與通用 runner／lab steps 的建議回覆「12採用建議」。框架測試在公開 runner、讀寫與 main 接縫注入合成步驟，不 import lab；真實 lab 步驟以離線樣本驗收。
 
 ### 失敗、路徑與遷移邊界
 

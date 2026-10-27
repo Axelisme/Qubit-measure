@@ -16,6 +16,9 @@ Coherence 與 MIST 的工具提供 `--database` 就寫 Labber。Coherence 另可
 Overnight 與 overnight_mux 的工具只收 `--result`，用與自動寫入相同的組法重新匯出。
 未提供目的地時報錯，不另選格式旗標，也不寫 merged 檔案。
 `common/` 放多個 workflow 共用的實驗步驟、表單 helper 與 record append。
+`calibration_modules.calibration_defaults` 從 qubit.flux_source 選擇 detached DC device，原生單位與 seed_flux 都取該次 Form capture 的 device info。
+`FrequencyModelForm.defaults` 保留 EJ／EC／EL expressions。它從選定 source 的新 flux entry 與 detached 其他 device 值換算 actual half，保留 signed period。
+缺來源或選定校準時，half／period 保持必填空白。Frame 錯誤指出 device。這只改初值，FrequencyModel 的單 device affine 公式與欄位不變。
 `registry.py` 依上述順序配對 workflow 與表單，交給 scripts 注入 lib 宿主。
 
 科學流程與保存契約見 [definitions](definitions.md)，表單與宿主接線見 [forms](forms.md)。
@@ -29,6 +32,11 @@ Append 失敗會停止 run，已提交的 point 與先前的 rows 保留。可�
 Headless plan 可保留 `result_path=None`，表示沒有所屬 entry，不自動寫 sample，之後可用 `--result` 補寫。
 
 Coherence 的欄位是 `flux`、`devices`、`frequency`、`rabi`、`readout`、`t1`、`t2ramsey`、`t2echo` 與 `singleshot`。
+三個 record writer 都保存 `flux_frame`，來源是 Start 固定 parameter capture 中的 qubit `flux` 區塊。
+Plan 保存該次量測使用的 frame，append 與重匯出不讀目前 point。Mux 按 qubit 名稱保存並取回每個 participant 的 frame。
+組 row 時，`record_flux_frame` 以最後一份 acquisition 的 snapshot 核對每個 frame device 都有有限、非 bool 數值。
+缺值或無效時以 `ValueError` 指名 device，在 append 前停止。空 frame 合法；沒有 acquisition 或 snapshot 時保留 `devices=null`，不補 live 值。
+Headless caller 必須明傳量測時的 frame，空區塊只表示該次來源沒有校準。缺必要 frame 欄位的舊 manifest 在載入 Plan 時報 validation error，不補造 frame。
 各 stage 保留 status 與 reason。主量測值只在 accepted 時填入，其他情況為 null。
 Frequency 保存 MHz、誤差、FWHM 與 probe gain，Rabi 保存模式、π／π2 長度與 gain，另保留 AmpRabi 診斷。
 Rabi 的 mode 依已保存的 Len／Amp 階段判定，沒有 Rabi raw 時為 null，不推測未執行的模式。

@@ -16,6 +16,7 @@ from zcu_tools.experiment.workflows import (
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2.modules import PulseCfg
 
+from zcu_lab.components.qubit import QubitFluxCalibration
 from zcu_lab.workflows.coherence_fluxdep.history import (
     LifetimeHistory,
     LifetimeKind,
@@ -65,6 +66,9 @@ from zcu_lab.workflows.common.summary_points import coherence_summary_point
 class CoherencePlan(T1Plan):
     """Choose flux points and lifetimes to map relaxation and dephasing.
 
+    flux_frame is the qubit's Start-captured device calibration block in native
+    units. It remains fixed for all points and record exports; {} means this
+    source has no calibration, never a missing capture.
     seed_flux is the seed pulse's calibration setpoint in flux_unit; None
     disables matrix-element feed-forward. probe_pulse supplies independent
     spectroscopy waveform/gain, while the
@@ -77,6 +81,9 @@ class CoherencePlan(T1Plan):
     GE shots after calibration and before lifetimes, without fitting.
     """
 
+    flux_frame: dict[str, QubitFluxCalibration] = Field(
+        description="Start-captured qubit flux block in native device units; empty means no calibration"
+    )
     seed_flux: float | None = Field(
         default=None,
         description="Seed pulse calibration flux in flux_unit; None disables matrix feed-forward",

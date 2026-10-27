@@ -25,6 +25,7 @@ from dataclasses import dataclass
 import numpy as np
 from numpy.typing import NDArray
 
+from zcu_tools.analysis.flux import DeviceFluxPoint
 from zcu_tools.analysis.fluxdep.models import TransitionDict
 from zcu_tools.analysis.fluxdep.search import (
     DatabaseSearchResult,
@@ -37,6 +38,7 @@ from zcu_tools.analysis.fluxdep.search_models import (
     validate_transition_levels,
 )
 from zcu_tools.gui.app.analysis_project.entry import require_target
+from zcu_tools.gui.app.fluxdep.export_plan import ExportPlanner, FluxWritebackReceipt
 from zcu_tools.gui.app.fluxdep.state import (
     FluxDepState,
     PipelineStage,
@@ -66,7 +68,9 @@ class FitExportReceipt:
 
     savepath is the successful output path. params is (EJ, EC, EL) in GHz,
     preserving full precision. alignment_from names the actual calibration's
-    first aligned spectrum, including an empty sampled spectrum.
+    first aligned spectrum, including an empty sampled spectrum. component and
+    analysis_id identify the setup target and appended ledger event.
+    flux_writeback reports the injected component calibration policy's outcome.
     """
 
     savepath: str
@@ -74,6 +78,7 @@ class FitExportReceipt:
     alignment_from: str
     component: str
     analysis_id: str
+    flux_writeback: FluxWritebackReceipt
 
 
 @dataclass(frozen=True)
@@ -103,6 +108,19 @@ class FitService:
 
     def __init__(self, state: FluxDepState) -> None:
         self._state = state
+        self._export_planner: ExportPlanner | None = None
+
+    def configure_export(self, planner: ExportPlanner) -> None:
+        """Bind the component calibration policy on State's owner thread.
+
+        Composition calls this before exposing the service to callers. The
+        callback receives detached setup and native reference positions at each
+        export; its errors propagate before output. Replaces any prior policy.
+        Raises RuntimeError off-owner. Without configuration, export fails with
+        export_planner_missing before output; other operations remain available.
+        """
+        self._state.assert_owner_thread()
+        self._export_planner = planner
 
     # --- inputs ----------------------------------------------------------
 
@@ -265,8 +283,11 @@ class FitService:
         Uses the opened entry and selected fluxonium component. Calibration is
         the first aligned spectrum, including zero-point sources. Predictor bias
         is zero because the fitted alignment has no additive correction; unknown
-        unit and source remain null. Only declared setup fields are changed.
-        Missing fit, stale inputs, missing alignment or no entry fail before I/O.
+        unit and source remain null. Declared EJ/EC/EL and the injected planner's
+        component-relative calibration fields are changed. The planner receives
+        the setup projection and native integer/half positions before any output.
+        Missing fit, stale inputs, missing alignment, no entry or an unconfigured
+        planner fail before output I/O. Planner errors also precede output I/O.
         Writes are sequential, not a cross-file transaction. I/O/schema failure
         preserves the successful prefix and returns no receipt. No retry/rollback.
         """
@@ -295,6 +316,14 @@ class FitService:
         target = require_target(self._state.project)
         target.resource.setup.refresh()
         model = snapshot(target.resource.setup).components[target.component]
+        if self._export_planner is None:
+            raise FailedPreconditionError(
+                "Component export planner is not configured",
+                reason_code="export_planner_missing",
+            )
+        plan = self._export_planner(
+            model, DeviceFluxPoint(integer=aligned.flux_int, half=aligned.flux_half)
+        )
         EJ, EC, EL = fit.params
         predictor = PredictorFile(
             model="fluxonium",
@@ -315,14 +344,13 @@ class FitService:
             "EJ": EJ,
             "EC": EC,
             "EL": EL,
-            "flux_half": aligned.flux_half,
-            "flux_int": aligned.flux_int,
-            "flux_period": aligned.flux_period,
         }
         with target.resource.setup.edit() as draft:
             for field, value in values.items():
                 if field in type(model).model_fields:
                     draft.set(f"{target.component}.{field}", value)
+            for field, value in plan.fields.items():
+                draft.set(f"{target.component}.{field}", value)
         analysis_id = target.resource.record_analysis(
             "fluxdep",
             run_ids=[],
@@ -341,4 +369,5 @@ class FitService:
             aligned.name,
             target.component,
             analysis_id,
+            plan.flux_writeback,
         )

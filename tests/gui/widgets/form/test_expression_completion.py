@@ -54,6 +54,7 @@ def capture(alias: str = "qubit") -> CountingContext:
         point=PointDocument.model_construct(
             format="zcu.parameter-container",
             format_version="2.0",
+            schema_version=1,
             general=PointGeneral(created_at="2026-10-20T00:00:00Z"),
             components={"Q1": Qubit(kind="completion/test")},
         ),

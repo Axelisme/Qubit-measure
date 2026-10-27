@@ -49,9 +49,11 @@ def _check_flatten_columns(record: dict[str, JsonValue]) -> None:
 class JsonlRecordTable:
     """Store record history at an exact UTF-8 JSONL path.
 
-    Append requires a nonempty run_id, nullable point, UTC at and nonempty
-    source, and finite JSON producer fields. Read only requires the nonempty
-    run_id used to select each run's latest row; other fields remain opaque.
+    Append requires a bound component, nonempty run_id, nullable point, UTC at,
+    nonempty source and finite JSON producer fields. The bound component cannot
+    be overridden by producer fields; an absent/empty binding rejects append.
+    Read only requires the nonempty run_id used to select each run's latest row;
+    other fields remain opaque. Old rows without component remain unchanged.
     This store neither derives quantities nor validates device units.
     Read returns the last complete row for each run_id, not a field-wise merge.
     No files are created until append. I/O and validation failures propagate;
@@ -59,9 +61,17 @@ class JsonlRecordTable:
     transaction, concurrent-writer coordination or crash recovery guarantee.
     """
 
-    def __init__(self, path: str | Path) -> None:
-        """Bind an exact caller-selected JSONL file without reading or writing it."""
+    def __init__(self, path: str | Path, *, component: str | None = None) -> None:
+        """Bind an exact JSONL path without I/O, optionally enabling append.
+
+        component is the concrete component name, not a role or inferred filename.
+        None binds for reading/export only. Append requires a nonempty component.
+        A non-string component raises ValueError; path conversion errors propagate.
+        """
         self._path = Path(path)
+        self._component = TypeAdapter(str | None).validate_python(
+            component, strict=True
+        )
 
     @property
     def path(self) -> Path:
@@ -89,9 +99,14 @@ class JsonlRecordTable:
         reference. at is an aware UTC timestamp, or None to generate UTC now.
         fields carries producer-defined JSON measurements, including nested
         values and optional device fields, preserved without unit conversion.
-        Invalid metadata or non-JSON fields fail before touching the file.
+        component always comes from this table's binding, overriding a same-named
+        producer field. An absent/empty bound component raises ValueError before
+        writing. Invalid metadata or non-JSON fields also fail before touching the file.
         Existing rows are never rewritten, even for an already-present run_id.
         """
+        if not self._component:
+            raise ValueError("append requires a nonempty bound component")
+        fields["component"] = self._component
         record = _RecordRow(
             run_id=run_id,
             point=point,
@@ -139,8 +154,10 @@ class JsonlRecordTable:
 
         Absent history returns an empty frame. Only JSON object syntax and the
         nonempty run_id needed for grouping are checked. Unused fields, NaN and
-        metadata are preserved without schema validation. Corrupt tails or invalid
-        run_id raise ValueError with path/line; I/O failures propagate.
+        metadata are preserved without schema validation. Missing component in
+        old rows is left absent, not inferred from this binding or path.
+        Corrupt tails or invalid run_id raise ValueError with path/line;
+        I/O failures propagate.
         With flatten=True, nested object keys become dot-separated columns
         (devices.bias.value); lists remain cell values. Distinct source paths
         colliding in one dotted column raise ValueError with path, zero-based
@@ -165,6 +182,7 @@ class JsonlRecordTable:
         run_id is a nonempty acquisition key. Validate the whole history like
         read(), checking only JSON objects and run_id, never skipping corrupt
         siblings or tails. Returned fields are detached and otherwise opaque.
+        Old rows without component keep it absent; no name is inferred.
         Missing history returns None; validation and I/O failures propagate.
         """
         run_id = TypeAdapter(str).validate_python(run_id, strict=True)

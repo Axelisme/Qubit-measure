@@ -2,7 +2,7 @@
 
 **Readers:** operator, lab-author. Start six independent fluxonium models and prepare mux measurements without hardware.
 
-**Last updated:** 2026-10-26, per-user simulation settings.
+**Last updated:** 2026-10-27, component schema v2.
 
 For existing entries, move resonator and mux-group `ext.time_of_fly` to top-level `time_of_fly`. The loader does not migrate it.
 
@@ -80,15 +80,17 @@ Q1 through Q6, R1 through R6, local current-source components `Q1_bias` through
 Ri and its own `Qi_bias`. The group references `coil_bias`. Aliases bind `mux`
 to `MG123456`, `qubit` to `Q1` and `resonator` to `$qubit.resonator`.
 Scalar flux forms read `$qubit.flux_source` on Open/Reset without a device alias.
-The template seeds `coil_flux` for all six qubits from `default.yaml` as
-simulated-truth, in A: `int=coil_offset`, `period=coil_period`, and
-`half=coil_offset+coil_period/2`. Each record describes the coil contribution
-alone, excluding the local line's background flux. Qubit `flux_half`,
-`flux_period` and `flux_int` use the same rule with local `offset` and `period`.
-These values are not measurement results. Resonators seed total linewidth
-1.1 MHz and pulse-route flight time 0.4 us from their physical readout settings.
-After measurement, replace a record at a path such as `MG123456.coil_flux.Q1`
-without replacing other qubits' calibrations. Keys must belong to the group's qubits.
+The template uses `schema_version: 2`. Each qubit owns
+`flux.Qn_bias` and `flux.coil_bias`, with `half`, `integer` and signed `period`.
+The local integer is its physical offset; the coil integer is its coil offset.
+Each half is integer plus half the corresponding period. All currents use A.
+Together these integers give zero total reduced flux.
+These simulated-truth values are not measurement results. Resonators seed total
+linewidth 1.1 MHz and pulse-route flight time 0.4 us from their physical settings.
+Fluxdep writeback updates only the scanned entry, such as `Q1.flux.coil_bias`,
+and appends a raw-fit record with the Run's original frame.
+Existing v1 entries require the explicit [upgrade command](../../../docs/parameter-upgrades.md).
+Startup never upgrades saved entries.
 
 The script installs a mock SoC and seven DC FakeDevices with fixed unit A. It reads files
 beside the script rather than relative to the shell cwd. Startup does not acquire,

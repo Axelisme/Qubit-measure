@@ -287,7 +287,8 @@ class ResultEntry:
     def records(self, component: str) -> JsonlRecordTable:
         """Bind this component's append-only record history without touching disk.
 
-        component is a safe single path segment, not a role alias. Rows live at
+        component is a safe single path segment, not a role alias. The table
+        stamps it into every appended row's component field. Rows live at
         result_path/records/components/<component>.jsonl; no component schema or ledger is
         read. Unsafe names and symlinks escaping this entry raise ValueError.
         The returned table owns append, latest-per-run read and CSV export.
@@ -694,6 +695,9 @@ class ResultEntry:
         Schema/I/O failures propagate and remove only directories created by this
         call, retaining caller roots. No cross-file/power-loss guarantee is made.
         """
+        from .registry import component_registry
+
+        policy = component_registry.require_schema_policy()
         if identity is None:
             identity = EntryIdentity(
                 entry_id=uuid4(), created_at=datetime.now(timezone.utc)
@@ -706,6 +710,7 @@ class ResultEntry:
             (result_path / "points").mkdir()
             document = {
                 "format": PARAMETER_FORMAT,
+                "schema_version": policy.current_version,
                 "format_version": f"{PARAMETER_VERSION.major}.{PARAMETER_VERSION.minor}",
                 "general": {
                     "entry_id": str(identity.entry_id),

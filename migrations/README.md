@@ -2,6 +2,18 @@
 
 **讀者：** framework-dev、agent。查閱離線轉換工具的公開 API、格式契約與內部規格入口。
 
+## 資料狀態 → 工具 → 結果
+
+| 資料狀態 | 工具與操作說明 | 結果 |
+| --- | --- | --- |
+| 舊 `result/<chip>/<qubit>`／Database | [`migrate_storage`](../docs/storage-migration.md) | Native entry、原文保全、備份與 pending 報告 |
+| Native 舊 component YAML 或未標版文件 | 長期 [`upgrade_parameters.py`](../docs/flux-migration.md)，預設 dry-run | 完整分類後 v1→v2，不補 records；先在副本核對 |
+| 舊樣本 CSV | [`sample_csv`](#sample-csv--jsonl) | JSONL 樣本歷史，保留來源 CSV |
+| Record 舊 `dev_value/dev_unit` | 同一長期 CLI 的 [`--scope records --device-name`](../docs/record-device-upgrades.md) | Operator 宣告的 `devices.<name>` 值，不合成 frame/component |
+| Device 改名或改接線 | [人工改名／重校準流程](../docs/record-device-upgrades.md#改名與改接線) | Component 更新，歷史 record 名稱與 frame 不變 |
+
+Component 的 [版本與備份語意](../docs/parameter-upgrades.md) 與一次性舊 repo 匯入分開。Runtime 與 shipped storage mapping 都使用 v2。完整 seed／value batch 在目前 schema 驗證前轉換，直接發布 v2。
+
 支援的檔案與格式就轉換，不支援的就原樣保留。欄位也一樣，未知欄位以原名原值留在新容器，報告區分已轉換與原樣保留。Pending 僅用於支援項目缺必要證據而無法轉換，原文仍須可見。非法輸入與安全衝突仍須回報，不當成成功。
 
 本目錄提供使用者明確執行的舊資料轉換。正常量測 runtime 不 import migrations。工具不操作硬體，也不替使用者選擇來源檔或推論單位。
@@ -63,7 +75,7 @@ report = convert_sample_csv(
 
 v2 CSV 已有 `dev_value` 和 `dev_unit`，不需提供 legacy 參數。舊格式必須明填來源欄位與 A／mA／V／mV；標題的單位文字不作推論。座標驗證與縮放重用 sample table owner。已知 measurement 欄位改名並保留原工作單位，空量測值寫 null。未知欄位以原名原字串保存在 JSONL 根層，空字串與空白也不改，不猜數字或改名。例如 `comment=Manual Added` 不改成 `Tcomment`。非法座標或量測值、缺少必要單位宣告的列仍不寫入，報告列出位置與原因。
 
-原欄名若碰到 `run_id`、`point`、`source`、`at` 或 canonical 量測名稱，原名原字串寫進該列的 `legacy_fields` mapping，不覆寫 converter 產生的值。來源本身的 `legacy_fields` 欄也存在 mapping 的同名 key。例如 `T1 (us)` 轉成數字 `t1_us`，原欄 `t1_us` 則存到 `legacy_fields["t1_us"]`。
+原欄名若碰到 `run_id`、`point`、`source`、`at`、`component` 或 canonical 量測名稱，原名原字串寫進該列的 `legacy_fields` mapping，不覆寫 converter 產生的值。來源本身的 `legacy_fields` 欄也存在 mapping 的同名 key。例如 `T1 (us)` 轉成數字 `t1_us`，原欄 `t1_us` 則存到 `legacy_fields["t1_us"]`。
 
 每筆 `PreservedCsvField` 記錄來源檔、從 1 起算且不含 header 的資料列號、原欄名與原值、synthetic run_id，以及 `destination_keys`。目的以 literal JSON keys 序列表示，`("extra.with.dot",)` 是根層的一個 key，`("legacy_fields", "t1_us")` 才是兩層位置。它只表示原樣保留，不宣稱已理解欄位語意。Storage migration 的 `preserved_sample_fields` 另附每筆欄位的 JSONL `output_path`，dry-run、正式報告與 manifest 都保留這份資訊。
 

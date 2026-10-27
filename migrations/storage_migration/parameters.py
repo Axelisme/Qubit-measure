@@ -15,6 +15,7 @@ from zcu_tools.resources.entry import (
     EditView,
     ResultEntry,
     SetupView,
+    component_registry,
     document_value,
     snapshot,
 )
@@ -23,6 +24,7 @@ from zcu_tools.resources.entry.schema import (
     PARAMETER_VERSION,
     SetupDocument,
 )
+from zcu_tools.resources.parameter_upgrade import ParameterDocument
 
 from ._flux_units import apply_flux_groups, resolve_flux_units
 from ._meta_info import preserve_meta_field
@@ -35,6 +37,7 @@ from .models import (
     KeyRule,
     MigrationMapping,
 )
+from .parameter_batch import prepare_parameter_batch
 from .params_json import convert_params_json
 from .paths import contained_path, validate_segment
 from .points import create_point
@@ -49,8 +52,18 @@ _JSON = TypeAdapter(JsonObject)
 def _seed_components(
     session: MigrationSession, entry: ResultEntry, mapping: MigrationMapping
 ) -> None:
-    for name, seed in mapping.components.items():
-        fields = _YAML_MAP.validate_python(seed, strict=True)
+    data = _YAML_MAP.validate_python(
+        snapshot(entry.setup).model_dump(mode="python", serialize_as_any=True)
+    )
+    data["components"] = _YAML_MAP.validate_python(mapping.components)
+    seeded_document = prepare_parameter_batch(
+        ParameterDocument(data, entry.result_path / "setup.yaml"),
+        transform=mapping.parameter_transform,
+    )
+    for name, seed in seeded_document.components.items():
+        fields = _YAML_MAP.validate_python(
+            seed.model_dump(mode="python", exclude_unset=True)
+        )
         kind = fields.pop("kind", None)
         if not isinstance(kind, str):
             raise MigrationInputError(f"{name}: seed requires kind")
@@ -560,16 +573,21 @@ def convert_parameters(
     dry_setup = None
     if session.dry_run:
         dry_setup = EditView(
-            SetupDocument.model_validate(
-                {
-                    "format": "zcu.parameter-container",
-                    "format_version": "2.0",
-                    "general": {
-                        "entry_id": str(session.manifest.identity.entry_id),
-                        "created_at": datetime.now(timezone.utc).isoformat(),
+            prepare_parameter_batch(
+                ParameterDocument(
+                    {
+                        "format": "zcu.parameter-container",
+                        "format_version": "2.0",
+                        "schema_version": component_registry.require_schema_policy().current_version,
+                        "general": {
+                            "entry_id": str(session.manifest.identity.entry_id),
+                            "created_at": datetime.now(timezone.utc).isoformat(),
+                        },
+                        "components": _YAML_MAP.validate_python(mapping.components),
                     },
-                    "components": dict(mapping.components),
-                }
+                    session.manifest.report.destination.result_path / "setup.yaml",
+                ),
+                transform=mapping.parameter_transform,
             )
         )
     for candidate in _context_directories(source_root):

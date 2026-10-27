@@ -124,8 +124,8 @@ center using its period rule. Review its actual committed state.
 3. With a readout slot, confirm its captured contents and remaining errors.
    Onetone copies group tones and applies ringup timing; twotone keeps the slot.
    Slot existence does not prove complete drives, frequency bounds or DC bounds.
-   Local bounds derive from each Q's captured flux_int/flux_half. Global bounds
-   use the captured union of all initial participants' coil intervals. Missing
+   Local bounds derive from each Q's captured flux mapping and other devices' detached values. Global bounds
+   use the union of all initial participants' actual intervals for the group's flux_source. Missing
    calibration keeps endpoints required. Selection changes do not recompute seeds.
 4. For an agent recipe, pass explicit missing inputs in the shapes above.
    `needs_parameters` includes owner paths and reasons. Fix those fields rather
@@ -161,10 +161,7 @@ or finish analysis.
 Review each proposal's original index, Q and destination. Respond with selected
 items or decline. The recipe applies only those selected IDs and reports
 `writeback_applied` from the owner receipt, not from accepted alone.
-Global analysis proposes one complete `MG.coil_flux.<Q>` record containing
-`half`, `period`, `int`. It can create that Q in an empty mapping and preserves
-other Q records. Local analysis proposes that Q's `flux_half`, `flux_period`,
-`flux_int` scalars. Destinations use Run capture, never current aliases.
+Both global and local analysis propose one complete `<Q>.flux.<scanned device>` entry containing reference `half`, `integer` and signed `period`. Global uses cfg.flux_dev; local uses that Q's selected device. Other entries stay unchanged. Each analysis also proposes an ordinary raw-fit record with devices and the original Run frame. Destinations use Run capture, never current aliases.
 
 The report retains completed Q rows in participant order, original index, Q,
 native flux_half/flux_integer/flux_period and per-Q writeback_applied.

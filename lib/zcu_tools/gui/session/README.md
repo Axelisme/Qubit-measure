@@ -1,6 +1,6 @@
 # gui/session/ — 量測 session core
 
-**Last updated:** 2026-10-25
+**Last updated:** 2026-10-27
 
 **讀者：** framework-dev。Session 層的資源綁定、operation 與共用對話框分工。
 
@@ -217,6 +217,11 @@ from these markers. The selected-device value poller keeps its independent lifet
 Run、WB 與目前 point 的 Inspect Set 都要求先選取或建立工作點。GUI 停用操作並提示下一步，application 入口以 failed precondition 拒絕。WB 的 selection 只允許開始命令，不替換候選的 captured SavedPoint 目的地。同 entry 選取另一個 point 後仍寫原 point；跨 entry 仍拒絕。Setup template 編輯獨立於目前 point，不修改既有 point。
 
 ## 獨立 predictor
+
+`zcu.predictor` v1 的 `flux_half／flux_period／flux_bias` 是單一模型的 affine 座標，
+不是 component 的 `flux.<device>` 校準。Service、dialog 與 predictor RPC 不從 component
+或 alias 取得 frame，也不合成多 device 值。Device 訂閱只提供所選模型的 native 輸入值。
+Component flux 格式變更不改 predictor 檔案版本或這些參數的意義。
 
 Dialog 持有 cache、device 訂閱、tracked table、calibration 與持續隱藏／重開的生命週期。兩個具體 child QWidget 分別持有參數編輯與曲線互動的 controls 和局部 state。子元件不取得整個 dialog，也不讀其他 owner 的私有狀態。Programmatic 預填同步完成整批編輯，再由 dialog 停止參數 timer、立即刷新、同步 calibration 並保存一次。User edit 則先清舊結果、同步狀態及保存，再啟動 150ms debounce。
 

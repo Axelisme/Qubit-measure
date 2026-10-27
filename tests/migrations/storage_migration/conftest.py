@@ -170,6 +170,7 @@ def metadata_mapping(analysis_mapping: MigrationMapping) -> MigrationMapping:
     )
     return replace(
         concrete,
+        parameter_transform=None,
         components={
             "Q1": {"kind": "qubit/migration_analysis"},
             "R1": {"kind": "resonator/migration_analysis"},

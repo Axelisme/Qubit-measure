@@ -858,15 +858,21 @@ class AnalyzePanelWidget(QWidget):
 
     def _on_export(self) -> None:
         try:
-            path = self._ctrl.export_params()
+            receipt = self._ctrl.export_params_receipt()
         # tolerated: Isolate arbitrary export failures and show failed Qt status.
         except Exception as exc:  # noqa: BLE001
             self._status.setText("Export failed.")
             self._status.setToolTip("")
             self._show_message("Export failed", friendly_fit_message("Export", exc))
             return
-        self._status.setText(f"Exported → {path}")
-        self._status.setToolTip(path)
+        outcome = receipt.flux_writeback
+        calibration = (
+            f"Flux calibration skipped: {outcome.reason}"
+            if outcome.status == "skipped"
+            else f"Flux calibration written: {outcome.device}."
+        )
+        self._status.setText(f"Exported → {receipt.savepath}\n{calibration}")
+        self._status.setToolTip(receipt.savepath)
 
     def _show_message(self, title: str, message: str) -> None:
         from qtpy.QtWidgets import QMessageBox

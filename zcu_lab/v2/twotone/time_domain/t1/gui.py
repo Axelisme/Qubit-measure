@@ -20,6 +20,8 @@ from zcu_tools.gui.app.measure.adapter import (
 )
 from zcu_tools.plotting.plots import Plots
 
+from zcu_lab.v2.support.flux import record_flux_frame
+from zcu_lab.v2.support.measure.record_frame import captured_qubit_flux
 from zcu_lab.v2.twotone.time_domain.t1.core import (
     T1Analysis,
     T1AnalyzeOptions,
@@ -102,12 +104,16 @@ def _T1_get_writeback_items(
     ]
     parameters = req.ctx.parameters
     if parameters is not None and metadata is not None and devices is not None:
+        frame = record_flux_frame(captured_qubit_flux(parameters), devices)
         items.append(
             RecordWriteback(
                 target_name=parameters.resolve_path("$qubit"),
                 description="T1 record at the captured bias",
                 record={
                     "devices": {name: deepcopy(info) for name, info in devices.items()},
+                    "flux_frame": {
+                        name: dict(calibration) for name, calibration in frame.items()
+                    },
                     "run": {
                         "run_id": metadata.run_id,
                         "experiment": metadata.experiment,

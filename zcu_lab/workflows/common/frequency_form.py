@@ -8,15 +8,18 @@ from pydantic import Field, JsonValue, model_validator
 from zcu_tools.cfg_model import Gain
 from zcu_tools.gui.form import Display, FormEnv, FormModel, field_error
 
+from zcu_lab.v2.support.measure.flux_defaults import captured_flux_seed, captured_qubit
 from zcu_lab.workflows.common.frequency_tracking import FrequencyModel
 
 
 class FrequencyModelForm(FormModel):
     """Choose fluxonium energies (GHz) and the plan's native device affine map.
 
-    Defaults use only the fixed $qubit parameter capture. Missing calibrations
-    stay required; flux_bias defaults to zero because the point has no bias
-    field. Explicit values can replace every captured value before Start.
+    Defaults use the fixed $qubit capture and detached device values. The
+    selected flux_source half accounts for other contributors; its period
+    stays signed. Missing source/calibration leaves coordinates required.
+    Invalid frames raise named errors. flux_bias defaults to zero; explicit
+    values can replace every captured value before Start.
     """
 
     EJ: float = Field(gt=0, description="Josephson energy (GHz)")
@@ -31,8 +34,14 @@ class FrequencyModelForm(FormModel):
         """Seed complete numeric calibrations from the fixed capture, never live I/O."""
         data = super().defaults(env)
         if env.parameters is not None:
-            for name in ("EJ", "EC", "EL", "flux_half", "flux_period"):
+            for name in ("EJ", "EC", "EL"):
                 data[name] = {"expr": f"$qubit.{name}"}
+            qubit = captured_qubit(env, "$qubit")
+            source = qubit.flux_source
+            seed = captured_flux_seed(env, "$qubit", source)
+            if seed.points is not None and source is not None:
+                data["flux_half"] = seed.points.half
+                data["flux_period"] = qubit.flux[source].period
         return data
 
     @model_validator(mode="after")

@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.fluxdep` flux-dependence analysis GUI
 
-**Last updated:** 2026-10-25
+**Last updated:** 2026-10-27
 
 **讀者：** framework-dev。通量頻譜分析 GUI 的狀態、互動與搜尋分工。
 
@@ -50,7 +50,22 @@ Alias 缺失或錯誤時，OK 保持停用，直到使用者明示選擇。
 不建立新條目，不讀舊兩級目錄或 params.json。啟動腳本註冊 lab component schema，框架不 import lab。
 
 Export params… 寫 `predictors/<component>.json`，再更新 setup 宣告的 EJ／EC／EL
-與 flux 欄位，最後追加 analysis ledger。未宣告的 flux 欄位只留在 predictor。
+與注入 planner 提出的校準欄位，最後追加 analysis ledger。
+`export_plan.ExportPlanner` 接收 detached component 與 aligned native integer／half，
+回傳 component-relative scalar writes 及 `flux_writeback`。未接 planner 時，export 在輸出前拒絕。
+Framework 不解讀 lab 的 flux 區塊，也不取得 device 值。
+
+`apps.fluxdep` 注入 [`zcu_lab.fluxdep_export`](../../../../../zcu_lab/fluxdep_export.py) 的規則。
+只有 component 的 `flux` 恰含 `flux_source` 一個 device 時，才更新
+`flux.<flux_source>.{half, integer, period}`，保留既有 period 方向，更新其大小。
+缺來源、空 frame、名稱不匹配或多 contributor 時不寫 component flux。
+EJ／EC／EL、predictor 與 ledger 仍匯出，GUI status 與 RPC／MCP receipt 的
+`flux_writeback` 明示 skipped、目標 device 與原因。多 contributor 校準需要被掃 device
+及其他 device 在採集時的值，operator 應使用 fluxdep 量測 writeback。
+無效名稱與不一致的校準在 planner 拒絕，不猜 device 或補值。
+
+Predictor 的 `zcu.predictor` v1 格式與 `flux_half／flux_period／flux_bias` 模型座標不變。
+Spectrum 的 reference anchors 與 processed checkpoint 也不是 component flux frame。
 沒有來源 run 時 source.run_id 是 null。校正取第一張已對齊的 spectrum，包含零點來源。
 這些檔案依序寫入，不提供跨檔 rollback。中間 spectrum 集合預設寫到
 `<entry>/fluxdep/spectrums.hdf5`。分析不呼叫 Database Save。

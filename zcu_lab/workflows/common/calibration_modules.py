@@ -184,8 +184,8 @@ def calibration_defaults(
 
     data is caller-owned and changed in place. flux_dev is a direct, editable
     name from $qubit.flux_source; absent sources leave it required and blank.
-    flux_unit comes from $qubit.flux_unit. seed_flux uses the captured flux
-    device value only when its value_unit matches that unit; otherwise None.
+    flux_unit and seed_flux use the selected device's detached native unit
+    and value. Without a captured DC device both remain required and blank.
     This is an editable starting guess, not proof of the pulse's calibration
     location. Users must confirm it and its unit before starting.
     pi_length_us uses the captured x180 length when available. probe_pulse
@@ -203,16 +203,13 @@ def calibration_defaults(
         return data
     try:
         data["flux_dev"] = env.parameters.lookup_point("$qubit.flux_source").value
-        data["flux_unit"] = env.parameters.lookup_point("$qubit.flux_unit").value
     except RoleResolutionError as error:
         if error.reason not in {"Alias is not bound", "Unknown alias"}:
             raise
     device_name = data["flux_dev"]
     device = env.devices.get(device_name) if isinstance(device_name, str) else None
-    if (
-        isinstance(device, (FakeDeviceInfo, YOKOGS200Info))
-        and device.value_unit == data["flux_unit"]
-    ):
+    if isinstance(device, (FakeDeviceInfo, YOKOGS200Info)):
+        data["flux_unit"] = device.value_unit
         data["seed_flux"] = device.value
     try:
         path = env.parameters.resolve_path("$qubit.module.x180.waveform.length")

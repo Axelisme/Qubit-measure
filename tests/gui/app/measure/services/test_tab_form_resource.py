@@ -151,6 +151,7 @@ def captured_env(amount: float) -> FormEnv:
         point=PointDocument(
             format="zcu.parameter-container",
             format_version="1.0",
+            schema_version=1,
             general=PointGeneral(
                 created_at="2026-10-13T00:00:00Z", ext={"amount": amount}
             ),
@@ -197,6 +198,7 @@ def factory_env(amount: float, *, library: LibrarySnapshot | None = None) -> For
         {
             "format": "zcu.parameter-container",
             "format_version": "2.0",
+            "schema_version": 1,
             "components": {"Q1": {"kind": "factory/shape"}},
             "general": {
                 "created_at": "2026-10-14T00:00:00Z",

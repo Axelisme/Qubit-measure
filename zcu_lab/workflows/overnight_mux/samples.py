@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from zcu_lab.v2.support.flux import record_flux_frame
 from zcu_lab.workflows.common.samples import (
     SampleRow,
     append_sample,
@@ -28,6 +29,8 @@ def point_samples(
     Component names come from each recorded qubit. Shared T1/Echo raw references
     and timestamps identify the round. No commanded flux exists; callers can
     select any coordinate device from devices without guessing a flux source.
+    A present snapshot must supply finite, non-bool values for every participant
+    frame device; otherwise ValueError names it before any row is appended.
     """
     devices = native_devices(
         directory, tuple(f for f in (point.t1_file, point.t2_file) if f)
@@ -45,7 +48,15 @@ def point_samples(
                 if point.actual_start
                 else None,
                 "flux": None,
-                "devices": devices,
+                "flux_frame": {
+                    name: dict(calibration)
+                    for name, calibration in record_flux_frame(
+                        plan.flux_frames[qubit.name], devices
+                    ).items()
+                },
+                "devices": None
+                if devices is None
+                else {name: dict(info) for name, info in devices.items()},
                 "t1_file": point.t1_file,
                 "t2echo_file": point.t2_file,
                 "echo_relax_delay_us": point.echo_relax_delay_us,

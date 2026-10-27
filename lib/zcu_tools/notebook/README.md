@@ -39,7 +39,37 @@ Native 寫 `runs/<stem>/data.h5`，Labber 寫日期樹內的 `<stem>.hdf5`。只
 
 `SavedRun.report` 與 `paths` 只表示最新一次保存結果。輸出或編碼失敗時，`PartialSaveError` 保留同一 SavedRun 及 report，caller 修正內容後可明確再存。Ledger 失敗直接傳播，不轉成 PartialSaveError，也不自動 retry。Figures／analysis 為 None 時保留上一組，空 mapping／tuple 清除該組。Run 身分、量測時間與 captured context 不因重存改變。
 
-`SavedRun.accept(parameter=..., module=..., waveform=..., records=...)` 共用 entry 的寫回流程。Parameter 接受普通點分路徑的工作單位 JSON／complex 值，可用 `(value, metadata)` 以 mapping 整份替換該路徑的 opaque metadata，例如 `{"stderr": 0.8}`。只給 value 時保留既有 metadata；舊 `(value, float)` 形狀報錯。Module 與 waveform 接受 library key 到具名持久 Spec 的 mapping，不接受 raw dict。各類至少一個非空。Records 是具體元件名到 JSON 欄位 dict；流程只補 run_id、point、at 與 accepted source。Caller 提供的 dev 或其他儀器欄位原樣保留，缺 dev 也成功，資料一致性由 caller 保證。Notebook 不捕捉 alias，也不從 live device、cfg 或 snapshot 推論樣本值。Parameter／library 的 role 首段沿保存時固定的映射展開，records 不解析角色。Accepted 事件與 library provenance 的 kind 自動使用該 run 的實驗名稱。
+`SavedRun.accept(parameter=..., module=..., waveform=..., records=...)` 共用 entry 的寫回流程。Parameter 接受普通點分路徑的工作單位 JSON／complex 值，可用 `(value, metadata)` 以 mapping 整份替換該路徑的 opaque metadata，例如 `{"stderr": 0.8}`。只給 value 時保留既有 metadata；舊 `(value, float)` 形狀報錯。Module 與 waveform 接受 library key 到具名持久 Spec 的 mapping，不接受 raw dict。各類至少一個非空。Records 是具體元件名到 JSON 欄位 dict 的 mapping。流程補上 run_id、point、at、accepted source 與 component。Component 取自 records mapping 中該筆資料綁定的具體元件名，不由 Notebook 推測或計算。Caller 提供的 dev 或其他儀器欄位原樣保留，缺 dev 也成功，資料一致性由 caller 保證。Notebook 不捕捉 alias，也不從 live device、cfg 或 snapshot 推論樣本值。Parameter／library 的 role 首段沿保存時固定的映射展開，records 不解析角色。Accepted 事件與 library provenance 的 kind 自動使用該 run 的實驗名稱。
+
+Record 的校準欄位由 caller 在量測前捕捉。接受時明傳當時的副本，不重新讀目前 point。
+以下例子的 `parameters` 是作者建立本次 cfg 時使用的固定 ParameterContext，`point` 是保存目的地。
+`qubit` 使用具體元件名，不傳角色名稱。
+
+```python
+from copy import deepcopy
+
+from zcu_lab.v2.support.flux import record_flux_frame
+from zcu_lab.v2.support.measure.record_frame import captured_qubit_flux
+
+qubit = parameters.resolve_path("$qubit")
+captured_flux = captured_qubit_flux(parameters, qubit)
+source = exp.run(cfg)
+saved = exp.save_run(point, source=source)
+# Analyze source and obtain t1_us. Later point edits do not change captured_flux.
+metadata = source.metadata
+if metadata is not None and metadata.device_snapshot is not None:
+    devices = deepcopy(dict(metadata.device_snapshot))
+    frame = record_flux_frame(captured_flux, devices)
+    saved.accept(records={qubit: {
+        "t1_us": t1_us, "flux_frame": frame, "devices": devices,
+    }})
+```
+
+這兩個 helper 是 lab 的選用慣例，框架不 import lab，也不解讀 `flux_frame`。
+`record_flux_frame` 要求同次 snapshot 中每個 frame device 都有有限、非 bool 的 numeric value，缺少或無效時以 `ValueError` 指名 device。
+空 frame 合法。缺 snapshot 時，上例保留 raw Save 而不組 record；不讀 setup、live 值或目前 point。
+作者有自己的 flux 定義時，直接傳入自己捕捉的 JSON 欄位。Mux 逐 participant 捕捉各自 qubit 的 frame。
+`SavedRun.accept` 不從 live point、alias、cfg 或 devices 推測校準。
 
 流程先追加一筆 typed accepted 事件，再依目的地文件分組提交。Parameter 為 point 一組，module 與 waveform 共用 library 一組，records 逐筆提交。提交順序為 point、library、records，組內保留各 mapping 的迭代順序。Point 與 library 各使用一次 edit，任一項無效整組不寫，並停止後組。`WritebackApplyError` 保留 accepted `event_id`、已成功組的項目數 `applied`、逐項實際值的 `result.committed` 與原始 `__cause__`。已成功組及事件保留，不提供跨文件回復、retry 或恢復流程。單項 parameter／library setter 仍可獨立使用，accept 的整組提交不逐項呼叫它們。Ledger append 失敗在寫入值之前，錯誤原樣傳播。成功回傳 event ID。後續 adapter run 或保存其他 point 不改這個 handle 的 point、roles 與 run_id。GUI 使用同一 executor，proposal 與 applied 狀態仍由 GUI 管理。
 
@@ -52,7 +82,7 @@ GUI／MCP 的 temporary aliases 或 target 不改這個保存 handle。
 - [`adapter.py`](adapter.py)：共用環境綁定、每實驗 records 與操作收尾。每次 run 新建 RunContext、Plots 與 run 根 Scope，同步分析另建 Plots。入口借用 drivers，不管理其連線生命週期。
 - [fluxdep](analysis/fluxdep/README.md)：通量依賴光譜的資料處理、擬合、圖表與互動選點。`fitting.py` 保留 `fit_spectrum` 與組合搜尋、診斷圖的 `search_in_database` 入口；數值搜尋由 analysis 擁有。
 - [t1_curve](analysis/t1_curve/README.md) 與 [t2_curve](analysis/t2_curve/README.md)：各自保留 Notebook 的曲線分析、擬合與分階段工作流程。模型選擇與保存條件見各自的 README。
-- [fit_tools](analysis/fit_tools/README.md)：提供 Notebook 分析專用的校正、資料接合、loss、weights 與溫度模型。
+- [fit_tools](analysis/fit_tools/README.md)：提供 Notebook 分析專用的校正、資料接合、loss、weights 與溫度模型。多 device 儀器值第二軸重用 `analysis.flux` 的純數學，作者明示其他 device 的當下值。
 - [design](analysis/design/README.md)：評估模型參數、設計需求與候選組合，並分析 HFSS sweep 資料。
 - [mist](analysis/mist/tool.py)：提供能量摺疊、不連續處理與碰撞遮罩的計算工具。
 - [circuit_design](circuit_design/README.md)：提供 Qiskit Metal 電路幾何元件；相關 Notebook 展示電路建構及設計檔輸出。

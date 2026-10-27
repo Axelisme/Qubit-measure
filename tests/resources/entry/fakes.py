@@ -11,6 +11,7 @@ from zcu_tools.resources.entry import (
     role_registry,
 )
 from zcu_tools.resources.entry.registry import RoleRegistry
+from zcu_tools.resources.parameter_schema import ParameterSchemaPolicy
 
 type Number = Annotated[float | None, Field(strict=True, allow_inf_nan=False)]
 
@@ -107,6 +108,9 @@ class Profiled(ComponentSchema):
 
 
 def register_fakes() -> None:
+    component_registry.configure_schema(
+        ParameterSchemaPolicy(1, ("synthetic-upgrade",))
+    )
     component_registry.register("fake/sensor", Sensor)
     component_registry.register("fake/drive/a", Driver)
     component_registry.register("fake/drive/b", Driver)
@@ -131,6 +135,7 @@ type RegistryState = tuple[
     tuple[str, ...],
     tuple[str, ...],
     RoleRegistry,
+    ParameterSchemaPolicy | None,
 ]
 
 
@@ -144,11 +149,13 @@ def registry_state() -> RegistryState:
         role_registry.shorthand,
         role_registry.focus_kinds,
         component_registry.roles,
+        component_registry.schema_policy,
     )
 
 
 def restore_registry(state: RegistryState) -> None:
-    components, roles, shorthand, focus_kinds, bound_roles = state
+    components, roles, shorthand, focus_kinds, bound_roles, policy = state
+    component_registry.configure_schema(policy)
     component_registry.roles = bound_roles
     for kind in component_registry.kinds():
         component_registry.unregister(kind)

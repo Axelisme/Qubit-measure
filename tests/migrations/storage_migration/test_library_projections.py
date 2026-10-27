@@ -77,7 +77,10 @@ def projection_registry_guard(request: pytest.FixtureRequest) -> Generator[None]
 
 @pytest.fixture
 def default_mapping() -> MigrationMapping:
-    return build_mapping(qubit_kind="qubit/fluxonium", data_schemas={}, native_tags={})
+    return replace(
+        build_mapping(qubit_kind="qubit/fluxonium", data_schemas={}, native_tags={}),
+        parameter_transform=None,
+    )
 
 
 def _convert(request: MigrationRequest, mapping: MigrationMapping) -> MigrationReport:

@@ -2,8 +2,20 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from math import isfinite
 from typing import TYPE_CHECKING
+
+from zcu_tools.analysis.flux import DeviceFluxPoint
+from zcu_tools.cfg_model import validate_device_name
+from zcu_tools.datafile import JsonObject
+
+from zcu_lab.components.qubit import QubitBaseSchema
+from zcu_lab.v2.support.flux import (
+    device_flux_points,
+    qubit_flux_frame,
+    snapshot_numeric_values,
+)
 
 if TYPE_CHECKING:
     from zcu_tools.gui.session.parameters import ParameterContext
@@ -28,6 +40,35 @@ def optional_parameter_float(parameters: ParameterContext, path: str) -> float |
     if not isfinite(value):
         raise ValueError(f"Parameter must be finite: {path!r}")
     return float(value)
+
+
+def flux_pick_initial_points(
+    parameters: ParameterContext | None,
+    device_name: str,
+    snapshot: Mapping[str, JsonObject] | None,
+) -> DeviceFluxPoint | None:
+    """Return scalar picker's half/integer lines from the fixed Run capture.
+
+    device_name is the acquired cfg's scanned device, not flux_source.
+    snapshot is the Run's native device settings; only other contributors'
+    numeric values are used. No capture or no selected calibration returns
+    None, leaving the picker owner's defaults. Invalid names, non-qubit target,
+    inconsistent calibration or missing/invalid contributor values raise
+    ValueError naming the device or target. Alias/source errors propagate.
+    No live state or files are read and no inputs are changed.
+    """
+    validate_device_name(device_name)
+    if parameters is None:
+        return None
+    target = parameters.resolve_path("$qubit")
+    component = parameters.document().components.get(target)
+    if not isinstance(component, QubitBaseSchema):
+        raise ValueError(f"{target!r}: flux picking requires a qubit component")
+    qubit_flux_frame(component.flux)
+    if device_name not in component.flux:
+        return None
+    values = snapshot_numeric_values(snapshot, component.flux)
+    return device_flux_points(component.flux, device_name, values)
 
 
 def t1_initial_time(

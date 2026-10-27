@@ -363,20 +363,44 @@ T1、T2Echo、T2Ramsey、TwoTone frequency 與對應的四個 mux adapter 共用
 - `devices` 是 Run 開始前的完整 `metadata.device_snapshot` 深拷貝，必須為 dict。
   裝置名稱與全部設定原樣保存，包含 global coil、各 qubit 的 local 線與 RF 裝置。
   DC 裝置保留 `value`／`value_unit`，RF 裝置保留 `freq_Hz`／`power_dBm`，不壓成單一值。
+- `flux_frame` 複製這次量測所用 qubit 的 `flux` 區塊，以 device 名稱為鍵，每項保存原生單位的 `half`、`integer`、有正負號的 `period`。
+  GUI adapter 在 Analyze 建立 proposal 時，從該 Run 的 `req.ctx.parameters` 取 qubit 區塊，呼叫 `record_flux_frame(flux, devices)` 取得獨立副本並核對同次 Run snapshot。
+  Mux 依原始 tone index 找到 participant qubit，各自保存自己的 frame，不使用 mux group 或另一顆 qubit 的校準。
+  空區塊表示該次來源沒有校準，不代表缺少 parameter capture。
 - 分析純量沿原有名稱與單位，例如 `freq_mhz`、`t1_us`、`t2e_us`、`t2r_us` 與對應誤差。
 - `run` 包含來源 `run_id` 與 `experiment`，兩者都取自同一次 RunMetadata。
-  Append owner 另補 `run_id`、`point`、`at` 與 accepted event 的 `source` 信封。
+  Append owner 另補 `component`、`run_id`、`point`、`at` 與 accepted event 的 `source` 信封。
 
-Adapter 只讀 `req.run_result.metadata`，不查目前 alias 或 live 裝置。
+Adapter 的儀器值只讀 `req.run_result.metadata`，frame 只讀同次 Run 的固定 parameter capture。
+不查目前 alias、目前 point 或 live 裝置。接受 proposal 時不重讀 frame，量測後改校準不改舊 Run 的 record。
 缺 metadata 或 `device_snapshot is None` 時，adapter 記 `logging.warning("no device snapshot")` 並省略 record proposal。
-其他 parameter/module proposals 保留。空 dict 表示已知沒有連線裝置，照實記錄。
+其他 parameter/module proposals 保留。空 dict 表示已知沒有連線裝置，只能配對空 frame。
+Snapshot 存在時，每個 frame device 都須有有限、非 bool 的 numeric `value`。缺少或無效時，writer 在產生 record proposal 時以 `ValueError` 指名 device。
+此檢查不查 setup、不讀 live 值，也不限制原始量測 Save。空 frame 合法。這項既有 use-site 契約的補齊為 advisor 裁定，Review: pending。
 記錄 append 到 `entry.records(target)` 的 `records/components/<target>.jsonl`。
 這個目錄與 `records/ledger.jsonl` 的事件信封分開，不讀舊 samples 路徑。
 
-讀取端明示 `device_name`，由 `resources.record_table.project_device_coordinates` 將
-`devices[device_name].value/value_unit` 投影成分析用的 `dev_value/dev_unit`。
-缺所選裝置、值或單位時 fail-fast，不猜第一台裝置，也不讀舊 flat 欄位當作 fallback。
-投影不改 JSONL。選一台裝置不代表合成了多條線的物理 flux；多裝置換算仍由分析 caller 決定。
+Coherence、overnight 與 overnight_mux 在 Start 的固定 `env.parameters` 捕捉 frame，與該次使用的 pulses 一起存入 Plan。
+逐點 append 與離線重匯出只讀 Plan。Mux 的 Plan 按固定 qubit 名稱存 frame，不按 participant 的排列位置配對。
+Headless caller 必須提供量測時的 frame，不能以空 mapping 代替缺失 capture。缺必要 frame 的舊 workflow manifest 會在載入 Plan 時報 validation error。
+Workflow 以最後一份 acquisition 的 snapshot 核對 frame；沒有 acquisition 或 snapshot 時保留 `devices=null` 的既有政策。
+Notebook 作者在量測前捕捉 flux 區塊，Run 後以 `record_flux_frame(captured_flux, source.metadata.device_snapshot)` 核對同次值。
+Snapshot 缺席時不組 record；原始量測仍可 Save。接受時經既有 `SavedRun.accept(records={qubit: {"flux_frame": frame, "devices": devices, ...}})` 明傳。
+框架不認得 lab 的 qubit／flux 格式，也不自動從 point 補 frame。
+作者若有自己的 flux 定義，可以自行組裝 `flux_frame`，不必使用 lab helper；仍須保存量測時的定義與值。
+
+Fluxdep 接受時透過一般 record writeback 保存原始擬合 half、integer、正的 period 與被掃 device。
+Point proposal 才保存換回參考點的校準，其他 contributors 不變。
+參考點與版本邊界見 [ADR-0082](../../docs/adr/0082-component-flux-frame.md)。
+
+分析 caller 可用 `resources.record_table.flux_from_frame`，逐列依 explicit flux、新 row-frame、caller fallback 換算。
+Row-frame 使用該列全部 contributing devices 與 signed periods。
+Nested frame 依 keys 判斷 membership，dotted CSV 依該列每個 device 任一非 null frame 欄位判斷。
+全 null 視為不存在；攤平無法區分不存在與原本有 key 但欄位全 null。
+缺用到的值或校準時報錯，不猜第一台 device，也不退回 fallback。
+只帶舊 flat frame 且沒有 explicit flux 的列，作者須確認單位後明傳 fallback。
+需要單線座標時，`project_device_coordinates` 投影成 `dev_value/dev_unit`，不代表合成了多線 flux。
+兩個工具都不改 JSONL。
 
 使用者 2026-10-25：「2mux版的比較複雜，有兩個flux儀器都可能貢獻，我的想法是，兩個儀器都紀錄，其餘都同意」。
 其後裁定：「我認為框架應該對SampleWriteback保持中立無知，可能可以叫RecordWriteback也說不定，行為就是append一個格式不拘的json到紀錄的jsonl中，格式由adapter間的隱式policy決定，資訊也尤其組裝，當然文檔與註解要寫這個policy好讓人維護」。

@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from typing import TypeVar
 
 from zcu_tools.gui.app.fluxdep.controller import Controller
+from zcu_tools.gui.app.fluxdep.export_plan import ExportPlanner
 from zcu_tools.gui.app.fluxdep.remote.service import (
     ControlOptions,
     RemoteControlAdapter,
@@ -70,8 +71,13 @@ class PumpedRouteHarness(RouteHarness):
         state: FluxDepState | None = None,
         *,
         interactive_background: BackgroundSubmitter | None = None,
+        export_planner: ExportPlanner | None = None,
     ) -> PumpedRouteHarness:
-        """Compose an inert adapter and real search runtime; open no socket."""
+        """Compose an inert adapter and real search runtime; open no socket.
+
+        Configure the controller with export_planner when supplied, as in the
+        base harness. None leaves export unconfigured.
+        """
         owner = ManualOwnerScheduler()
         background = ThreadPoolBackgroundExecutor(owner, max_pool_workers=1)
         ctrl = Controller(
@@ -83,6 +89,8 @@ class PumpedRouteHarness(RouteHarness):
                 background, ProgressService(QueuedProgress(owner))
             ),
         )
+        if export_planner is not None:
+            ctrl.configure_export(export_planner)
         service = RemoteControlAdapter(
             ctrl, ControlOptions(port=0), owner_scheduler=owner
         )
