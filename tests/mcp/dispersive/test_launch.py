@@ -1,23 +1,30 @@
 """Public dispersive MCP assembly forwards entry launch inputs to the process."""
 
 import subprocess
+import threading
 
 import pytest
 from zcu_tools.mcp.core.bridge import MCPBridgeConfig
 from zcu_tools.mcp.dispersive import server
 
 
+@pytest.mark.filterwarnings("error::pytest.PytestUnhandledThreadExceptionWarning")
 def test_launch_forwards_entry_context_to_gui(tmp_path, monkeypatch):
     commands: list[list[str]] = []
+    threads_before: set[threading.Thread] = set()
 
     class ExitedProcess:
         pid = 99999999
 
         def __init__(self, command: list[str], **_kwargs: object):
             commands.append(command)
+            threads_before.update(threading.enumerate())
 
         def poll(self) -> int:
             return 2
+
+        def wait(self) -> int:
+            return self.poll()
 
     monkeypatch.setattr(subprocess, "Popen", ExitedProcess)
     config = MCPBridgeConfig(
@@ -34,16 +41,22 @@ def test_launch_forwards_entry_context_to_gui(tmp_path, monkeypatch):
         gui_module="synthetic.dispersive",
     )
     app = server.build_server(config, tmp_path)
-    with pytest.raises(RuntimeError, match="process exited during startup"):
-        app.tools["dispersive_launch"]["handler"](
-            {
-                "project_root": str(tmp_path / "project"),
-                "entry": "synthetic",
-                "component": "q1",
-                "port": 0,
-                "auto_connect": False,
-            }
-        )
+    try:
+        with pytest.raises(RuntimeError, match="process exited during startup"):
+            app.tools["dispersive_launch"]["handler"](
+                {
+                    "project_root": str(tmp_path / "project"),
+                    "entry": "synthetic",
+                    "component": "q1",
+                    "port": 0,
+                    "auto_connect": False,
+                }
+            )
+    finally:
+        # The child has exited, so its reaper must finish; timeout only guards hangs.
+        for thread in set(threading.enumerate()) - threads_before:
+            thread.join(timeout=30)
+            assert not thread.is_alive(), "GUI reaper did not finish"
     assert len(commands) == 1
     assert commands[0][1:3] == ["-m", "synthetic.dispersive"]
     assert commands[0][-6:] == [
