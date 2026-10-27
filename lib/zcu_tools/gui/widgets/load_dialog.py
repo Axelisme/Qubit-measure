@@ -2,16 +2,16 @@
 
 Both analysis GUIs load an hdf5 spectrum behind a modal dialog that reads the file
 best-effort and shows a signal-amplitude preview so the user can judge the axis
-orientation (a "Transpose axes" toggle flips the preview's x/y). Only the *load*
+orientation (an axis-mapping dropdown swaps the preview's x/y). Only the *load*
 applies the chosen ``transpose_axes`` flag, so State always stores the canonical
 (x=flux, y=freq) layout.
 
-This base owns the shared mechanics — the file row + Browse, the transpose toggle,
+This base owns the shared mechanics — the editable file row + Browse, the axis-mapping dropdown,
 the best-effort read, the preview canvas + render, and OK-gated-until-a-file. App
 extras are added via these hooks:
 
 * ``_build_options(opt_row)`` — populate the option row (the subclass decides where
-  the shared ``self._transpose_btn`` sits and adds any extra widgets, e.g. a Type
+  the shared ``self._axis_combo`` sits and adds any extra widgets, e.g. a Type
   combo or an "Inherit from" combo).
 * ``result_request()`` (abstract) — build the app's own request object from the
   shared fields (``self._filepath`` / ``self._transpose``) plus the extra widgets.
@@ -31,7 +31,9 @@ import numpy as np
 from matplotlib.axes import Axes
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
+from qtpy.QtGui import QCloseEvent
 from qtpy.QtWidgets import (
+    QComboBox,
     QDialog,
     QDialogButtonBox,
     QFileDialog,
@@ -44,6 +46,7 @@ from qtpy.QtWidgets import (
 )
 
 from zcu_tools.datafile import load_labber_data
+from zcu_tools.gui.lifetime import LifetimeScope
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +70,7 @@ class LoadDataDialog(QDialog):
         start_dir: str = "",
     ) -> None:
         super().__init__(parent)
+        self._scope = LifetimeScope(self)
         self.setWindowTitle(window_title)
         self.resize(640, 480)
         self._file_placeholder = file_placeholder
@@ -92,21 +96,21 @@ class LoadDataDialog(QDialog):
         # File row.
         file_row = QHBoxLayout()
         self._file_edit = QLineEdit()
-        self._file_edit.setReadOnly(True)
+        self._file_edit.setObjectName("load.file")
+        self._scope.connect(self._file_edit.editingFinished, self._commit_filepath)
         self._file_edit.setPlaceholderText(self._file_placeholder)
         browse = QPushButton("Browse…")
-        browse.clicked.connect(self._on_browse)
+        self._scope.connect(browse.clicked, self._on_browse)
         file_row.addWidget(QLabel("File:"))
         file_row.addWidget(self._file_edit, stretch=1)
         file_row.addWidget(browse)
         content.addLayout(file_row)
 
-        # Option row — the shared transpose toggle plus the subclass's extras. The
-        # button is created here (wired to the shared state) but placed by the
-        # subclass, which owns the row's layout.
-        self._transpose_btn = QPushButton("Transpose axes")
-        self._transpose_btn.setCheckable(True)
-        self._transpose_btn.toggled.connect(self._on_transpose_toggled)
+        # Subclasses place the shared mapping control alongside their own options.
+        self._axis_combo = QComboBox()
+        self._axis_combo.setObjectName("load.axes")
+        self._axis_combo.addItems(["X=Flux, Y=Frequency", "X=Frequency, Y=Flux"])
+        self._scope.connect(self._axis_combo.currentIndexChanged, self._on_axes_changed)
         opt_row = QHBoxLayout()
         self._build_options(opt_row)
         content.addLayout(opt_row)
@@ -123,9 +127,10 @@ class LoadDataDialog(QDialog):
         self._ok_button = self._write_buttons.button(QDialogButtonBox.StandardButton.Ok)
         if self._ok_button is not None:
             self._ok_button.setEnabled(False)  # no file chosen yet
-        self._write_buttons.accepted.connect(self.accept)
+        self._scope.connect(self._write_buttons.accepted, lambda: self.accept())
         cancel = QDialogButtonBox(QDialogButtonBox.StandardButton.Cancel)
-        cancel.rejected.connect(self.reject)
+        self._scope.connect(cancel.rejected, lambda: self.reject())
+        self._scope.connect(self.finished, self._scope.close)
         buttons = QHBoxLayout()
         buttons.addStretch()
         buttons.addWidget(self._write_buttons)
@@ -133,7 +138,7 @@ class LoadDataDialog(QDialog):
         root.addLayout(buttons)
 
     def _build_options(self, opt_row: QHBoxLayout) -> None:
-        """Populate the option row. Subclasses add ``self._transpose_btn`` (and any
+        """Populate the option row. Subclasses add ``self._axis_combo`` (and any
         extra option widgets) in whatever order/layout the app wants."""
         raise NotImplementedError
 
@@ -157,16 +162,26 @@ class LoadDataDialog(QDialog):
         )
         if not filepath:
             return
-        self._filepath = filepath
         self._file_edit.setText(filepath)
+        self._commit_filepath()
+
+    def _commit_filepath(self) -> None:
+        filepath = self._file_edit.text().strip()
+        if filepath == self._filepath:
+            return
+        self._filepath = filepath
         if self._ok_button is not None:
-            self._ok_button.setEnabled(True)
-        self._raw = self._read_source(filepath)
+            self._ok_button.setEnabled(bool(filepath))
+        self._raw = self._read_source(filepath) if filepath else None
         self._render_preview()
 
-    # tolerated: QPushButton.toggled emits its checked bool positionally.
-    def _on_transpose_toggled(self, checked: bool) -> None:  # noqa: FBT001
-        self._transpose = checked
+    def closeEvent(self, a0: QCloseEvent | None) -> None:
+        """Retire input callbacks before closing the dialog."""
+        self._scope.close()
+        super().closeEvent(a0)
+
+    def _on_axes_changed(self, index: int) -> None:
+        self._transpose = index == 1
         self._render_preview()
 
     def _read_source(

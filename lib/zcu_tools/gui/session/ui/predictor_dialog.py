@@ -594,6 +594,15 @@ class PredictorDialog(QDialog):
             return
         self.state_changed.emit()
 
+    def done(self, a0: int) -> None:
+        """Retire calibration callbacks at terminal teardown, not hide/reopen.
+
+        Repeated cleanup is safe. Failures propagate for retry before finishing
+        or permitting Qt child deletion.
+        """
+        self._calibration_freq_field.dispose()
+        super().done(a0)
+
     def reject(self) -> None:
         self._save_parameters()
         self._parameter_timer.stop()

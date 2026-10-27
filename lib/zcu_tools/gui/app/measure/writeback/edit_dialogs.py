@@ -357,11 +357,7 @@ class _ModuleDialog(_EditDialog):
         self._path = self.context_label("")
         self.foregrounds.set(self._path, secondary_colour)
         layout.addWidget(self._path)
-        hint = self.context_label(
-            "Changes go to the writeback draft at once.\nThe library is only written by Apply Selected."
-        )
-        self.foregrounds.set(hint, secondary_colour)
-        layout.addWidget(hint)
+        layout.addWidget(self._draft_hint())
         name_row = QFormLayout()
         name_row.setFieldGrowthPolicy(
             QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow
@@ -399,6 +395,17 @@ class _ModuleDialog(_EditDialog):
         layout.addLayout(buttons)
         self.scope.connect(self._name.editingFinished, self._commit_name)
         self.scope.connect(editor.errors_changed, self._refresh_errors)
+
+    def _draft_hint(self) -> QLabel:
+        hint = self.context_label(
+            "Changes go to the writeback draft at once.\nThe library is only written by Apply Selected."
+        )
+        hint.setObjectName("writebackDraftHint")
+        hint.setStyleSheet(
+            "QLabel#writebackDraftHint { background: palette(alternate-base); "
+            "border: 1px solid palette(mid); border-radius: 4px; padding: 8px; }"
+        )
+        return hint
 
     def _commit_name(self) -> bool:
         text = self._name.text().strip()

@@ -52,18 +52,28 @@ def test_preview_axis_labels_follow_transpose_and_restore(
     driver.screenshot(tmp_path / "original.png")
     original = driver.plots().axes[0]
     assert (original.xlabel, original.ylabel) == ("Device value (flux)", "Frequency")
+    assert original.xlim == pytest.approx((-5.0, 5.0))
+    assert original.ylim == pytest.approx((5e9, 6e9))
 
-    driver.click("Transpose axes")
+    driver.choose_option("X=Flux, Y=Frequency", value="X=Frequency, Y=Flux")
     driver.screenshot(tmp_path / "transposed.png")
     transposed = driver.plots().axes[0]
     assert (transposed.xlabel, transposed.ylabel) == (
         "Frequency",
         "Device value (flux)",
     )
+    assert transposed.xlim == pytest.approx(original.ylim)
+    assert transposed.ylim == pytest.approx(original.xlim)
 
-    driver.click("Transpose axes")
+    driver.choose_option("X=Frequency, Y=Flux", value="X=Flux, Y=Frequency")
     driver.screenshot(tmp_path / "restored.png")
-    assert driver.plots().axes[0] == original
+    restored = driver.plots().axes[0]
+    # Restore the displayed content, not tight_layout's floating-point pixel bounds.
+    assert (restored.xlabel, restored.ylabel) == (original.xlabel, original.ylabel)
+    assert restored.visible_curves == original.visible_curves
+    assert restored.annotations == original.annotations
+    assert restored.xlim == pytest.approx(original.xlim)
+    assert restored.ylim == pytest.approx(original.ylim)
 
 
 @pytest.fixture
@@ -134,7 +144,7 @@ def test_inherit_dropdown_lists_loaded_names(dialog):
     assert inherit.currentData() is None
 
 
-def test_result_request_reflects_choices(dialog, spectrum_hdf5, monkeypatch):
+def test_result_request_reflects_choices(dialog, qapp, spectrum_hdf5, monkeypatch):
     filepath = spectrum_hdf5[0]
     monkeypatch.setattr(QFileDialog, "getOpenFileName", lambda *a, **kw: (filepath, ""))
     buttons = dialog.findChildren(QPushButton)
@@ -143,7 +153,11 @@ def test_result_request_reflects_choices(dialog, spectrum_hdf5, monkeypatch):
         combo.setCurrentText(
             "TwoTone" if combo.findText("TwoTone") >= 0 else "existing.hdf5"
         )
-    next(b for b in buttons if b.isCheckable()).click()
+    dialog.show()
+    qapp.processEvents()
+    ComponentDriver(dialog).choose_option(
+        "X=Flux, Y=Frequency", value="X=Frequency, Y=Flux"
+    )
 
     req = dialog.result_request()
     assert req is not None

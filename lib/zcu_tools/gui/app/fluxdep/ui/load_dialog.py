@@ -67,13 +67,15 @@ class LoadSpectrumDialog(NativeSpectrumDialog):
         self._type = QComboBox()
         self._type.addItems(["OneTone", "TwoTone"])
         row.addWidget(self._type)
-        row.addWidget(self._transpose_btn)
+        row.addWidget(self._axis_combo)
         row.addWidget(QLabel("Inherit from:"))
         self._inherit = QComboBox()
         self._inherit.addItem("(none)", userData=None)
         for name in self._inherit_sources:
             self._inherit.addItem(name, userData=name)
-        self._scope.connect(self._inherit.currentIndexChanged, self._render_preview)
+        self._scope.connect(
+            self._inherit.currentIndexChanged, lambda _index: self._render_preview()
+        )
         row.addWidget(self._inherit, stretch=1)
 
     def _draw_preview_overlay(self, ax: Axes) -> None:

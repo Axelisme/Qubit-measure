@@ -94,12 +94,12 @@ def test_native_unique_preselection_and_ambiguous_manual_selection(qapp, tmp_pat
     qapp.processEvents()
     driver = ComponentDriver(dialog)
     try:
-        driver.click("Transpose axes")
+        driver.select_combo("X=Frequency, Y=Flux", object_name="load.axes")
         driver.screenshot(tmp_path / "before-native.png")
         driver.choose_file("Browse…", unique, evidence=tmp_path / "unique-chooser.png")
         driver.screenshot(tmp_path / "unique.png")
-        assert not driver.observe("Transpose axes").checked
-        assert not driver.observe("Transpose axes").enabled
+        assert driver.observe(object_name="load.axes").text == "X=Flux, Y=Frequency"
+        assert not driver.observe(object_name="load.axes").enabled
         assert driver.observe(object_name="native_variable").text == "signal"
         assert driver.observe(object_name="native_device_axis").text == "bias"
         assert driver.observe(object_name="native_device").text == "unnamed_device"

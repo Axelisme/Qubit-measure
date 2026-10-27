@@ -101,25 +101,58 @@ def toolbar_ui(qapp):
     host = _RecordingToolbarHost()
     toolbar = MainWindowToolbar(host, parent=parent)
     parent.setLayout(toolbar.layout)
+    parent.resize(1100, 100)
     parent.show()
     try:
         yield toolbar, host, ComponentDriver(parent)
     finally:
+        toolbar.dispose()
         parent.deleteLater()
         qapp.processEvents()
+
+
+def test_promoted_tools_fold_and_restore_without_changing_commands(
+    toolbar_ui, tmp_path
+):
+    toolbar, host, driver = toolbar_ui
+    driver.resize_window(1100, 700)
+    driver.screenshot(tmp_path / "01-wide.png")
+    driver.click("Predictor…")
+    driver.screenshot(tmp_path / "02-predictor.png")
+    driver.click("Results browser…")
+    driver.screenshot(tmp_path / "03-results.png")
+    toolbar.set_writable(writable=False)
+    driver.resize_window(620, 300)
+    driver.screenshot(tmp_path / "04-narrow.png")
+    driver.select_menu("More ▾", ("Predictor…",))
+    driver.screenshot(tmp_path / "05-folded-predictor.png")
+    driver.select_menu("More ▾", ("Results browser…",))
+    driver.screenshot(tmp_path / "06-folded-results.png")
+    driver.resize_window(1100, 700)
+    driver.screenshot(tmp_path / "07-restored.png")
+    driver.click("Predictor…")
+    driver.click("Results browser…")
+    driver.screenshot(tmp_path / "08-restored-actions.png")
+    assert host.opened == [DialogName.PREDICTOR] * 3
+    assert host.commands == ["results"] * 3
 
 
 def test_toolbar_dialog_buttons_and_more_menu_route_commands(
     toolbar_ui, tmp_path
 ) -> None:
     _, host, driver = toolbar_ui
-    for caption in ("Setup…", "SoC…", "Devices…", "Inspect…"):
+    for caption in (
+        "Setup…",
+        "SoC…",
+        "Devices…",
+        "Inspect…",
+        "Predictor…",
+        "Results browser…",
+    ):
         driver.click(caption)
     for caption in (
         "Reload experiments",
         "Workflow tabs",
-        "Predictor…",
-        "Results browser…",
     ):
         driver.select_menu("More ▾", (caption,))
     driver.screenshot(tmp_path / "toolbar.png")
@@ -130,7 +163,7 @@ def test_toolbar_dialog_buttons_and_more_menu_route_commands(
         DialogName.INSPECT,
         DialogName.PREDICTOR,
     ]
-    assert host.commands == ["reload", "workflow", "results"]
+    assert host.commands == ["results", "reload", "workflow"]
 
 
 @pytest.mark.parametrize("writable", [True, False])
@@ -144,27 +177,24 @@ def test_more_menu_projects_recovery_and_write_gates(
     )
     toolbar.set_writable(writable=writable)
     driver.screenshot(tmp_path / "toolbar.png")
-    assert tuple(
-        w.text for w in driver.visible().widgets if w.kind == "QPushButton"
-    ) == ("New Tab ▾", "Setup…", "SoC…", "Devices…", "Inspect…", "More ▾")
     actions = driver.menu_actions("More ▾", evidence=tmp_path / "more-expanded.png")
     reload = "Retry reload" if retry_catalog else "Reload experiments"
     expected = [reload]
     if skipped_count:
         expected.append("Retry skipped tabs (2)")
-    expected.extend(("Workflow tabs", "Predictor…", "Results browser…"))
+    expected.append("Workflow tabs")
     assert [a.text for a in actions] == expected
     assert [a.enabled for a in actions] == (
-        [writable] * (2 if skipped_count else 1) + [True, True, True]
+        [writable] * (2 if skipped_count else 1) + [True]
     )
     assert driver.observe(object_name="main.more").enabled
     assert driver.observe("New Tab ▾").enabled == writable
     driver.select_menu("More ▾", (reload,))
     if skipped_count:
         driver.select_menu("More ▾", ("Retry skipped tabs (2)",))
-    driver.select_menu("More ▾", ("Predictor…",))
+    driver.click("Predictor…")
     driver.select_menu("More ▾", ("Workflow tabs",))
-    driver.select_menu("More ▾", ("Results browser…",))
+    driver.click("Results browser…")
     expected_commands = (
         (["reload", "retry"] if skipped_count else ["reload"]) if writable else []
     )
@@ -176,8 +206,6 @@ def test_more_menu_projects_recovery_and_write_gates(
     assert tuple(a.text for a in restored) == (
         "Reload experiments",
         "Workflow tabs",
-        "Predictor…",
-        "Results browser…",
     )
     assert all(a.enabled for a in restored)
 

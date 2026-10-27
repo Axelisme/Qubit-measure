@@ -26,6 +26,7 @@ from qtpy.QtWidgets import (
 )
 
 from zcu_tools.gui.expected_error import ExpectedError
+from zcu_tools.gui.lifetime import LifetimeScope
 from zcu_tools.gui.session.device_models import (
     ConnectDeviceRequest,
     DeviceSnapshot,
@@ -47,6 +48,11 @@ from zcu_tools.gui.widgets import (
     secondary_colour,
     set_foreground,
     success_colour,
+)
+from zcu_tools.gui.widgets.dialog_presenter import (
+    DestructiveConfirmation,
+    DialogPresenter,
+    QtDialogPresenter,
 )
 from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 
@@ -115,8 +121,17 @@ class DeviceDialog(QDialog):
         parent: QWidget | None = None,
         *,
         before_stop: Callable[[], None] | None = None,
+        dialog_presenter: DialogPresenter | None = None,
     ) -> None:
+        """Build the device view over cached control and parameter queries.
+
+        before_stop may reclaim local control before stopping hardware.
+        dialog_presenter replaces Qt confirmation presentation for offline callers;
+        omitted uses a non-blocking Qt destructive confirmation with Cancel default.
+        """
         super().__init__(parent)
+        self._action_scope = LifetimeScope(self)
+        self._presenter = dialog_presenter or QtDialogPresenter()
         self._before_stop = before_stop
         self._dev = device
         self._parameter_provider = parameter_provider
@@ -179,6 +194,18 @@ class DeviceDialog(QDialog):
         # Phase C: subscribe progress for every device already setting up (the
         # dialog may open mid-setup, possibly with several concurrent setups).
         self._sync_progress_subscriptions()
+        for button in self.findChildren(QPushButton):
+            button.setAutoDefault(False)
+        self._connect_keyboard_actions()
+
+    def _connect_keyboard_actions(self) -> None:
+        for field in (self._name_edit, self._addr_edit):
+            self._action_scope.connect(
+                field.returnPressed, lambda: self._add_btn.click()
+            )
+        self._action_scope.connect(
+            self._rename_edit.returnPressed, lambda: self._rename_btn.click()
+        )
 
     def _build_device_list(self) -> QWidget:
         # --- Left side: List + Management ---
@@ -196,7 +223,7 @@ class DeviceDialog(QDialog):
         left_layout.addWidget(self._list, stretch=1)
         # Drop acts on the selected list row, so it sits directly under the list.
         self._drop_btn = QPushButton("Drop")
-        self._drop_btn.setStyleSheet("QPushButton:enabled { color: red; }")
+        set_foreground(self._drop_btn, error_colour(self))
         self._drop_btn.clicked.connect(self._on_forget_clicked)
         drop_row = QHBoxLayout()
         drop_row.addWidget(self._drop_btn)
@@ -268,7 +295,7 @@ class DeviceDialog(QDialog):
         self._apply_btn.clicked.connect(self._on_apply_or_stop_clicked)
 
         close_btn = QPushButton("Close")
-        close_btn.clicked.connect(self.accept)
+        close_btn.clicked.connect(self.reject)
 
         btn_row.addStretch()
         btn_row.addWidget(self._refresh_btn)
@@ -296,8 +323,23 @@ class DeviceDialog(QDialog):
 
     # --- live-value poller (dialog-scoped + selection-scoped) ----------------
 
+    def done(self, a0: int) -> None:
+        """Retire owned panel callbacks and pending decisions before finishing.
+
+        This is terminal, unlike hide/reopen. Repeated cleanup is safe. Failures
+        propagate for retry without finishing or permitting child deletion.
+        """
+        self._action_scope.close()
+        for panel in self._device_panels.values():
+            if isinstance(panel, DevicePanelProtocol):
+                panel.dispose()
+        super().done(a0)
+
     def showEvent(self, a0: Any) -> None:
         super().showEvent(a0)
+        if self._action_scope.closed:
+            self._action_scope = LifetimeScope(self)
+            self._connect_keyboard_actions()
         self._update_poll_timer()
         self._refresh_activity_markers()
         if self._event_subs_active:
@@ -551,6 +593,7 @@ class DeviceDialog(QDialog):
         # OWN in-flight mutation (a busy device, incl. setting up) but not with a
         # different device's setup. So: enable iff the selected device is idle.
         self._drop_btn.setEnabled(not self._read_only and not is_busy)
+        set_foreground(self._drop_btn, error_colour(self))
         self._drop_btn.setText("Forget" if is_memory else "Drop")
 
         can_rename = not self._read_only and is_memory
@@ -658,12 +701,47 @@ class DeviceDialog(QDialog):
         if item is None:
             return
         name = item.data(Qt.ItemDataRole.UserRole)
-        if self._dev.is_memory_device(name):
-            # Remove from memory entirely — won't appear after restart
-            self._dev.forget_device(name)
-        else:
-            # Disconnect only — keep as a remembered device so it reappears as gray on next launch
-            self._dev.start_disconnect_device(DisconnectDeviceRequest(name=name))
+        snapshot = self._dev.get_device_snapshot(name)
+        if snapshot is None or snapshot.status not in {
+            DeviceStatus.CONNECTED,
+            DeviceStatus.MEMORY_ONLY,
+        }:
+            return
+        memory = snapshot.status is DeviceStatus.MEMORY_ONLY
+        action = "Forget" if memory else "Drop"
+        consequence = (
+            "Remove this device from remembered devices."
+            if memory
+            else "Disconnect this device and keep it remembered."
+        )
+
+        def decide(*, accepted: bool) -> None:
+            if not accepted or self._read_only or self._selected_device_name() != name:
+                return
+            current = self._dev.get_device_snapshot(name)
+            if current is None or current.status is not snapshot.status:
+                return
+            try:
+                if memory:
+                    self._dev.forget_device(name)
+                else:
+                    self._dev.start_disconnect_device(
+                        DisconnectDeviceRequest(name=name)
+                    )
+            except ExpectedError as exc:
+                self._show_error(str(exc))
+
+        self._presenter.destructive_confirm(
+            self,
+            DestructiveConfirmation(
+                title=f"{action} device?",
+                message=f'{action} device "{name}"? {consequence}',
+                action_text=action,
+            ),
+            on_decision=self._action_scope.callback(
+                lambda accepted: decide(accepted=accepted)
+            ),
+        )
 
     def _on_refresh_clicked(self) -> None:
         item = self._list.currentItem()

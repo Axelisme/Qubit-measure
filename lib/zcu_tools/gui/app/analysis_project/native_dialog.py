@@ -95,8 +95,8 @@ class NativeSpectrumDialog(LoadDataDialog):
         self._scope.connect(self._device.currentIndexChanged, self._show_device_unit)
 
     def _build_source_options(self, row: QHBoxLayout) -> None:
-        """Place the Labber transpose toggle; subclasses may add domain options."""
-        row.addWidget(self._transpose_btn)
+        """Place the Labber axis mapping; subclasses may add domain options."""
+        row.addWidget(self._axis_combo)
 
     def _read_source(
         self, filepath: str
@@ -114,7 +114,7 @@ class NativeSpectrumDialog(LoadDataDialog):
                 self._variable,
                 self._device_axis,
                 self._device,
-                self._transpose_btn,
+                self._axis_combo,
             ):
                 control.setEnabled(False)
             self._unit_label.setText("native")
@@ -126,9 +126,9 @@ class NativeSpectrumDialog(LoadDataDialog):
         self._variable.setEnabled(native)
         self._device_axis.setEnabled(native)
         self._device.setEnabled(native)
-        self._transpose_btn.setEnabled(not native)
+        self._axis_combo.setEnabled(not native)
         if native:
-            self._transpose_btn.setChecked(False)
+            self._axis_combo.setCurrentIndex(0)
         self._variable.blockSignals(True)
         self._variable.clear()
         self._device.clear()

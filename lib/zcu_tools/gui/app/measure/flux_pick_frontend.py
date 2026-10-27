@@ -86,6 +86,12 @@ class FluxPickFrontend[R: FluxPickResult](InteractiveFrontend):
         controls = QWidget(self)
         buttons = QVBoxLayout(controls)
         controls.setFixedWidth(200)
+        hint = QLabel(
+            "Left-click near a line to select it. Move to preview, then click "
+            "to place it. Press Esc to cancel the preview."
+        )
+        hint.setWordWrap(True)
+        buttons.addWidget(hint)
         self._info = QLabel(self._picker.info_text())
         make_label_selectable(self._info)
         self._info.setWordWrap(True)
