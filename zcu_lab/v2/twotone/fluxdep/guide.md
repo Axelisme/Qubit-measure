@@ -1,6 +1,8 @@
 ## Behavior
 
-**Readers:** operator, agent. Two-tone qubit flux dependence: a 2D scan stepping an external flux device (outer) against the qubit-drive frequency (inner), reading out the resonator at each point, to map the qubit spectrum versus flux (the Fluxonium flux-dispersion arcs). Runs on real hardware and needs a connected flux device. Extract points interactively from the GUI map. Run only after readout and qubit spectroscopy are credible.
+**Readers:** operator, agent. Map two-tone qubit spectra versus DC bias, pick sweet spots and review period/offset writeback.
+
+The outer sweep steps the external flux device; the inner sweep changes drive frequency and reads out the resonator. Hardware runs need a connected SoC and flux device. Confirm readout and qubit spectroscopy before mapping flux.
 
 **Last updated:** 2026-10-21
 
@@ -16,11 +18,13 @@ Readout uses the qubit.module.readout slot captured at Open/Reset, or a fresh re
 
 ## Typical writeback
 
-After the run, the user drags two lines on the 2D map to mark the half-flux and integer-flux sweet spots, then clicks Done. The preview proposes the source qubit's `flux.<cfg.flux_dev>` entry. It converts the picked half/integer to the other contributors' integer references using their Run-start snapshot biases. The period uses the new magnitude and stored sign, initially positive. Other device entries stay unchanged. An ordinary record accompanies the point update with raw picked half/integer/positive period, scanned device, complete connected-device Run snapshot and the original Run parameter frame. Missing Run capture yields no proposals; missing Run snapshot blocks calibration. Accept both proposals after review. Acceptance does not read live devices or current parameters. Picking relies on user/agent judgement from the measured map. Apply a preview that replaces the earlier onetone/flux_dep calibration only after confirming the map is trustworthy.
+After the run, the user drags two lines on the 2D map to mark the half-flux and integer-flux sweet spots, then clicks Done. The preview separately proposes `flux.period.<cfg.flux_dev>` and a default-selected `flux.offset`. Period updates its magnitude and preserves its sign, initially positive.
+
+Offset uses `0.5 - half_fit / period_s - Σ V_o / period_o`, with other values from the Run-start snapshot. The swept value is replaced by half_fit once. The note lists other present calibrated devices' values and contributions, including zero values. Missing device values contribute zero, and other periods stay unchanged. An ordinary record stores raw picked half/integer/positive period, scanned device, complete Run snapshot and original `{offset, period}` frame. Missing Run capture yields no proposals; missing the whole snapshot blocks calibration. Review period, offset and record items separately; period can be accepted without offset. Acceptance does not read live devices or current parameters. Picking relies on user/agent judgement from the measured map. Apply a preview that replaces the earlier onetone/flux_dep calibration only after confirming the map is trustworthy.
 
 ## Recommended
 
-Use after onetone/flux_dep has established the flux period and twotone/freq has found 'qubit.freq'. Calibrated readout and a verified qubit-drive window are prerequisites; otherwise the arc is usually invisible. Default sweep: flux has 101 points between the selected device's actual integer and half, padded by 10% on each side. Picker initial lines use that device's Run-captured flux entry and other contributors' Run-start snapshot values. Frequency has 1001 points and blank endpoints for the operator to fill. For a later model survey use a wide flux range and a broad frequency window at moderate drive gain to capture the full arc, then narrow both. For consecutive flux sweeps, reverse the sweep direction (swap start/stop) on the next run so the flux source need not ramp back across the full range first. Inspect the 2D map with gui_tab_get_figure (subtab_id='run'). Confirm 'flux_dev' points at a connected device before running.
+Use after onetone/flux_dep has established the flux period and twotone/freq has found 'qubit.freq'. Calibrated readout and a verified qubit-drive window are prerequisites; otherwise the arc is usually invisible. Default sweep: flux has 101 points between the selected device's actual integer and half, padded by 10% on each side. Picker initial lines project the Run-captured `{offset, period}` model onto that device with other devices' Run-start values. Missing other values contribute zero. Frequency has 1001 points and blank endpoints for the operator to fill. For a later model survey use a wide flux range and a broad frequency window at moderate drive gain to capture the full arc, then narrow both. For consecutive flux sweeps, reverse the sweep direction (swap start/stop) on the next run so the flux source need not ramp back across the full range first. Inspect the 2D map with gui_tab_get_figure (subtab_id='run'). Confirm 'flux_dev' points at a connected device before running.
 
 ## MCP recipe
 

@@ -6,9 +6,13 @@
 
 本指南處理 `result/<chip>/<qubit>/` 與 `Database/<chip>/<qubit>/`。工具轉換支援的格式，將未支援的檔案與未知欄位原樣保留。報告以 `preserved` 表示原樣保全，以 pending 定位缺少必要轉換證據的支援項目。非法輸入與安全衝突會使操作失敗。
 
-先依 [資料狀態對照表](../migrations/README.md) 選入口。Native 舊 component 不再走本工具，使用 [flux v1→v2 升級](flux-migration.md)。Record 的舊值歸屬使用同一長期 CLI 的 [record 範圍](record-device-upgrades.md)。
+先依 [資料狀態對照表](../migrations/README.md) 選入口。Native 舊 component 不再走本工具，使用 [flux v1→v2→v3 升級](flux-migration.md)。Record 的舊值歸屬使用同一長期 CLI 的 [record 範圍](record-device-upgrades.md)。
 
-Shipped mapping 共用 lab 的純 flux 轉換，seed／完整 value group 先轉換，再交目前 schema 驗證，不先發布舊文件再升級。Runtime 與 mapping 輸出現在都是 `schema_version: 2`，匯入直接以目前 component schema 驗證。v1 來源的 `flux_source` 輸出為 v2 的 `flux_dev`。來源沒有可用的明示 v1 `flux_source` 時，不猜名稱，校準組保留原文並列 pending。操作者要根據接線證據請 lab-author 在 mapping 明填來源，不能從單位推出裝置名。
+Shipped mapping 共用 lab 的純 flux 轉換。每個完整 seed／value batch 先轉換，再以目前 `schema_version: 3` 驗證與發布，不先發布舊文件。現行校準為 `{offset, period}`，v1 自己的線保留 half 分支，coil 只保留 signed period，原 half／int 列報告。
+
+每批與最終的 `flux_dev` 只保留明示來源，包含完整 overlay 中有效的 setup／mapping 繼承來源。無明示來源時留空，不從單位、live device 或佔位名稱猜測。缺名 local／coil 分別保留 `period.unnamed_device`／`period.unnamed_coil`，報告逐實際目的位置提醒改名，不因缺名列 pending。原資料明示的 `unnamed_*` 照明示處理。
+
+Offset 每批按 v1 結構角色重算，自己的線優先，其次唯一 coil，否則 null。經 v2 中間形狀時也不靠佔位 `flux_source` 判斷角色，不新增 finalizer。Point 完整有效且明示來源的校準取代繼承 offset 與該儀器 period，其他 periods 保留。同批撞鍵、partial、非法名稱、數值與 spacing 仍拒絕。詳見 [flux 升級指南](flux-migration.md#storage-匯入的來源與覆寫)。
 
 內部欄位對照與 publication 契約見 [storage migration 規格](../migrations/storage_migration/README.md)。獨立 CSV converter 的 API 與 CLI 見 [migrations README](../migrations/README.md#sample-csv--jsonl)。
 

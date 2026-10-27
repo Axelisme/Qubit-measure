@@ -139,7 +139,7 @@ Group 自己擁有 readout module，重排 resonators 不改 owner。
 使用者於 2026-10-18 裁定：「或是改寫mux_group這個原件的欄位吧，qubits分resonators」。
 對 resonators 必填、qubits 選填並逐項檢查，以及改名不留相容層的細節，裁定：「12都同意」。
 
-Qubit 的 `flux.<device>.{half, integer, period}` 保存 local、global coil 與其他 contributors 的同時參考校準，見 [[0082]]。Mux group 的 `flux_dev` 只保存 global coil 的 device 名稱，不要求提供 qubits，也不保存各 qubit 的校準。Global fluxdep 按實際被掃 device 更新 `<qubit>.flux.<device>`，同時 append 原始擬合 record。保存沿用 [[0063]] 的單文件 mapping-leaf 合併與交易，不擴充 framework。
+Qubit 的 `flux: {offset, period: {<device>: ...}}` 保存零輸出時的 flux 與各儀器 signed periods，見 [[0082]]。Mux group 的 `flux_dev` 只保存預設 global coil 名稱，不要求提供 qubits，也不保存各 qubit 的校準。Global fluxdep 分開提出 `<qubit>.flux.period.<device>` 與預設勾選的 `<qubit>.flux.offset`，同時 append 原始擬合 record。保存沿用 [[0063]] 的單文件 mapping-leaf 合併與交易，不擴充 framework。
 
 Model 驗證名稱、qubits 與 resonators 等長及重複 qubit。
 提供 qubits 時，lab Form 在 Open／Reset 以固定 ParameterContext 檢查兩邊 component 存在與 kind，

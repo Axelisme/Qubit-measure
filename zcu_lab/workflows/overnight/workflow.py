@@ -71,7 +71,7 @@ class OvernightPlan(BaseModel):
     readout: PulseReadoutCfg = Field(description="Fixed pulse-backed readout")
     snapshot: RunSnapshot = Field(description="Historical host capture")
     flux_frame: QubitFluxSchema = Field(
-        description="Start-captured qubit flux block in native device units; empty means no calibration"
+        description="Start-captured {offset, period} block; offset is in Phi0, null means uncalibrated; each signed period uses device-native units per Phi0"
     )
     result_path: Path | None = Field(
         default=None,

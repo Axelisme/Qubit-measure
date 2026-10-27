@@ -108,38 +108,42 @@ cp /data/result/sample/records/components/Q1.jsonl.<唯一識別碼>.bak \
 
 ## 舊 flat frame 的 explicit fallback
 
-值改成具名不代表補回了歷史 frame。新的 `flux_from_frame` 依序選 explicit `flux`、新的 `flux_frame.<device>.integer/period`、caller fallback。它不自動讀舊 flat `flux_int`／`flux_period`。
+值改成具名不代表補回了歷史 frame。`flux_from_frame` 依序選 explicit `flux`、現行 `flux_frame: {offset, period}`、caller fallback。它不自動讀歷史 flat `flux_int`／`flux_period` 或 v2 per-device half／integer frame。已有但不合法的 frame 不能用 fallback 遮蓋，須先在分析副本明確轉換。
 
 若舊列沒有 explicit flux，caller 必須確認當時的 frame 與單位，然後明示 fallback。例如已完成 device 歸屬轉換，而且這批資料的值與 frame 都用 V：
 
 ```python
-from zcu_tools.resources.record_table import (
-    JsonlRecordTable,
-    RecordFluxFrame,
-    flux_from_frame,
-)
+from zcu_tools.analysis.flux import DevicePeriod, FluxFrame
+from zcu_tools.resources.record_table import JsonlRecordTable, flux_from_frame
 
 records = JsonlRecordTable("/data/result/sample/records/components/Q1.jsonl").read()
 flux = flux_from_frame(
     records,
-    device_name="yoko_q1",
-    fallback_frame=RecordFluxFrame(dev_unit="V", flux_int=0.1, flux_period=0.8),
+    fallback_frame=FluxFrame(
+        offset=-0.125,
+        devices={"yoko_q1": DevicePeriod(period=0.8, unit="V")},
+    ),
 )
 ```
 
-Fallback 只適用於沒有新 row frame 的列，且 device 單位必須匹配。不同歷史時段的 frame 不同時，caller 應分開選取資料並傳入各自確認的 fallback，不能套用目前 component 校準取代歷史。工具保留舊 flat 欄位，但不把它們包裝成新 frame。單 device `RecordFluxFrame` 的單位是 A、V 或 native；若原始值用 mA，caller 必須先明確做分析副本的單位換算，不能只改單位標籤。
+範例將已確認的歷史 integer=0.1、period=0.8 轉成 offset=-0.1/0.8=-0.125。
+Fallback 統一用新 `FluxFrame`，只適用於沒有 row frame 的列。有值儀器的單位必須匹配，不做單位換算。不同時段應分開選取資料，傳入各自確認的 fallback，不能拿目前 component 校準取代歷史。
+
+Standalone `resolve_record_flux`／`validate_record_table_v2` 的 flat `dev_value`／`dev_unit` row schema 不變。其 fallback 也改為新 `FluxFrame`，但必須恰有一台儀器，0 台或多台會報錯並說明台數。Standalone 的單位仍是 A、V 或 native；若原始值用 mA，先明確換算分析副本，不能只改單位標籤。
+
+現行 row frame 缺 offset 時報錯並指出列與欄位。有 period 但缺 device value 時不貢獻。Nested 明寫 NaN、inf、bool 都拒絕；dotted value／period NaN cell 視為缺席，inf／bool 仍拒絕。攤平後無法區分缺 key 與明寫 NaN，只有 nested 保證拒絕明寫 NaN。
 
 ## 改名與改接線
 
 以下操作適用於已使用具名 `flux` 的 component。它們不屬於 record upgrade，也沒有批次改名工具。
 
-Device 改名時，將 component 的 `flux.<old-name>` key 改成 `flux.<new-name>`，保留該 entry 的校準值。若 qubit 的 `flux_dev` 仍指向舊名，同步改為新名，因為 form 用它選預設 device。不要用整份資料的文字搜尋取代去改歷史。
+Device 改名時，將 component 的 `flux.period.<old-name>` key 改成 `flux.period.<new-name>`，保留 signed period 與 offset。若 qubit 的 `flux_dev` 仍指向舊名，同步改為新名，因為 form 用它選預設 device。不要用整份資料的文字搜尋取代去改歷史。
 
-改接線會改變 device 到 qubit 的關係。刪除該 component 的 `flux.<device>` entry，再重新執行對應的 fluxdep 校準。不要把舊校準當成新接線的校準。只刪受影響的 entry，保留其他 device 的校準。
+改接線會改變 device 到 qubit 的關係。刪除該 component 的 `flux.period.<device>`，再重新執行對應的 fluxdep 校準。不要把舊 period 當成新接線的校準。其他 periods 保留，並重新核對 offset。
 
 手動修改目前 session 使用的文件後，透過 MCP `context.reload` 重新載入並驗證。Reload 失敗時先修正來源，不繼續用舊畫面的值量測。
 
-Flux 使用處依各自持有的 device 資料檢查，不要求完整 setup 名單。Record 與 writeback 換算使用 Run snapshot，frame 用到但 snapshot 缺值的 device 會指名報錯。Form 對照既有 device 選項，`flux_from_frame` 對照該列 `devices`，缺少使用到的 device 時指出名稱。
+Flux 使用處依各自持有的 device 資料檢查，不要求完整 setup 名單。Record 與量測 writeback 使用 Run snapshot，form 使用 detached 值，分析使用該列 `devices`。有 period 但缺當下值的儀器一律不貢獻，period 保留；明寫無效值仍指名報錯，dotted NaN 例外依上節處理。缺 offset 或選定 period 時，form 的掃描範圍留空必填。
 
 歷史 records 保留當時的名稱與 frame，不跟著改名、不批次改寫。分析可以保留不同歷史名稱，按每列當時的 frame 換算；沒有新 frame 的舊列仍由 caller 明示 fallback。
 

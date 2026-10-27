@@ -2,7 +2,7 @@
 
 **Readers:** operator, lab-author. Start six independent fluxonium models and prepare mux measurements without hardware.
 
-**Last updated:** 2026-10-27, component schema v2.
+**Last updated:** 2026-10-27, component schema v3.
 
 For existing entries, move resonator and mux-group `ext.time_of_fly` to top-level `time_of_fly`. The loader does not migrate it.
 
@@ -80,10 +80,12 @@ Q1 through Q6, R1 through R6, local current-source components `Q1_bias` through
 Ri and its own `Qi_bias`. The group references `coil_bias`. Aliases bind `mux`
 to `MG123456`, `qubit` to `Q1` and `resonator` to `$qubit.resonator`.
 Scalar flux forms read `$qubit.flux_dev` on Open/Reset without a device alias.
-The template uses `schema_version: 2`. Each qubit owns
-`flux.Qn_bias` and `flux.coil_bias`, with `half`, `integer` and signed `period`.
-The local integer is its physical offset; the coil integer is its coil offset.
-Each half is integer plus half the corresponding period. All currents use A.
+The template uses `schema_version: 3`. Each qubit owns `flux.offset` in Phi0
+and `flux.period.Qn_bias` / `flux.period.coil_bias` in A/Phi0.
+Component offset is `-local_offset/local_period - coil_offset/coil_period`,
+using the physical current offsets from the environment YAML. For Q1 it is 0.5.
+These physical YAML input fields remain current offsets in A, not component
+flux offsets. Missing device values contribute zero without deleting periods.
 Together these integers give zero total reduced flux.
 These simulated-truth values are not measurement results. Resonators seed total
 linewidth 1.1 MHz and pulse-route flight time 0.4 us from their physical settings.

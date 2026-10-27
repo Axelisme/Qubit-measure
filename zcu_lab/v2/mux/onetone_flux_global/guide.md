@@ -23,8 +23,10 @@ edits and captures sources again.
   selects which full-list position to edit.
 - `flux_dev` starts from the captured group `flux_dev`.
 - `flux` is one native-unit sweep shared by all participants, initially 101 points.
-  Open/Reset starts with all Qs selected. It reads each Q's `flux.<group.flux_dev>`
-  calibration and shifts references for other contributors' detached device values.
+  Open/Reset starts with all Qs selected. It projects each Q's `{offset, period}`
+  onto the group's `flux_dev`, using other devices' detached values.
+  Missing other device values contribute zero; missing offset or selected period
+  leaves the required endpoints blank.
   It takes the union of expanded actual half-to-integer intervals.
   Missing selected calibration leaves both endpoints blank; invalid contributors raise an error.
   Changing participants later does not recompute these starting values.
@@ -142,12 +144,20 @@ half-to-integer separation. The summary includes the original index and Q name.
 
 Review the resulting proposals before applying Writeback. Destinations use the
 Run/Load capture, not the current form or aliases.
-Only that Q's `flux.<scanned device>` entry is proposed. The key is the actual `cfg.flux_dev` name, not a reserved `coil` alias.
-The proposal converts the picked half/integer back to the other contributors' integer references, using their Run-start snapshot biases.
-It updates the period magnitude and preserves its stored sign. A first calibration uses positive direction.
-Other device entries and Qs are preserved.
+The proposals separately update that Q's `flux.period.<scanned device>` and
+`flux.offset`. The device is the actual `cfg.flux_dev`, not a reserved `coil` alias.
+Period updates its magnitude and preserves its sign, initially positive.
+The default-selected offset uses `0.5 - half_fit / period_s - Σ V_o / period_o`.
+Other values come from the Run-start snapshot; the swept value is replaced by
+half_fit once. The note lists other present calibrated devices' values and
+contributions, including zero values. Missing devices contribute zero and retain
+their periods. Other periods and Qs are preserved. Simultaneous scans do not
+block the proposal; the experiment author must judge that calibration.
 The accompanying ordinary record stores the raw picked half/integer/positive period, scanned device, complete connected-device Run snapshot and original Run parameter frame.
-Accept both proposals to keep the calibration and its measurement record. Missing Run device evidence blocks calibration; acceptance never reads live devices or current parameters.
+Review the period, offset and record items separately. Accepting period does not
+require accepting offset. A missing whole Run snapshot blocks calibration;
+missing individual device values contribute zero. Acceptance never reads live
+devices or current parameters.
 Repeat Analyze and Writeback for each acquired participant. Cancel produces no
 new calibration. Missing historical cfg prevents identity-dependent analysis;
 missing parameter capture permits picking but yields no writeback proposals.

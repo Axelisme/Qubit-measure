@@ -1,149 +1,172 @@
-# Component flux v1→v2 升級
+# Component flux 升級至 v3
 
-**讀者：** operator、lab-author、agent。判讀舊 flux 校準，預覽升級、修復被拒文件，並從備份還原。
+**讀者：** operator、lab-author、agent。預覽 v1→v2→v3 轉換，修復被拒文件，核對缺名診斷與重新校準。
 
 ## 先確認版本與資料範圍
 
-長期入口是 `scripts/upgrade_parameters.py`。它處理 native `setup.yaml`、`points/<label>/point.yaml` 與 entry template，預設 dry-run。它不操作儀器。
+長期入口是 `scripts/upgrade_parameters.py`，處理 native `setup.yaml`、`points/<label>/point.yaml` 與 entry template，預設 dry-run，不操作儀器。
+Runtime 與升級目標都是 `schema_version: 3`。Runtime 不讀舊 component 形狀，不自動升級。
+先在副本核對轉換，不要手改版本標頭避開檢查。
 
-目前 runtime 與離線升級目標都是 `schema_version: 2`。Runtime 不再讀舊 component flux 欄位。先在副本核對轉換，再安排正式資料升級。不要手改版本標頭避開檢查。
+先看 [資料狀態對照表](../migrations/README.md)。舊 result／Database 走 [storage migration](storage-migration.md)。
+舊 record `dev_value/dev_unit` 走同一 CLI 的 [record 範圍](record-device-upgrades.md)，由 operator 宣告 device 名稱。
+Component 升級不補寫舊 record 的 `flux_frame` 或 `component`。
 
-不同資料使用不同入口，先看 [資料狀態對照表](../migrations/README.md)。舊 result／Database 先走 [storage migration](storage-migration.md)。舊 record 的 `dev_value/dev_unit` 走同一 CLI 的 [record 範圍](record-device-upgrades.md)，由 operator 明示 device 名稱。Component 升級不補寫舊 record 的 `flux_frame` 或 `component`。
-
-## 欄位怎麼變
-
-| 舊欄位 | 新欄位 |
-| --- | --- |
-| Qubit 的 `flux_half`、`flux_int`、`flux_period` | `flux.<qubit.flux_dev>.half`、`integer`、`period` |
-| Mux group 的 `coil_flux.<qubit>.half/int/period` | 該 qubit 的 `flux.<mux_group.flux_dev>.half/integer/period` |
-| Qubit 的 `flux_unit` | 移除，使用時取 device info 的原生單位 |
-
-v1 的 `flux_source` 改名為 v2 的 `flux_dev`，值原樣保留。Qubit、mux 與 JPA 都使用這個新欄位。它指定主要（預設）控制儀器，不參與 φ 計算，也不必有 flux 校準。Key 是實際 device 名稱，不固定為 `coil`。Mux 的來源若叫 `global_bias`，目標就是 `flux.global_bias`。數字不換單位、不推測方向，負 `period` 也原樣保留。
-
-舊校準沒有保存其他線當時的 bias。轉換把其他 contributing devices 位於各自 integer 當作參考點，這是**假設**，不是重建出的量測事實。報告會提醒重新校準。正式量測前，用 fluxdep 在已知其他線 bias 的條件下更新 frame。
-
-離線只驗 device 名稱語法，不含 ASCII `.`，也不能是空字串或全空白。合法名稱不 trim。文件沒有 device catalog，因此升級成功不代表 device 存在或已接線。未知名稱要到 GUI 打開 point 的表單等使用處才會發現。核對選項、接線與 Run snapshot，再量測。
-
-## 四類形狀
-
-以下是合成 point，數字使用各 device 的原生單位。範例沒有來自真實量測的資料。
-
-### Legacy，完整舊格式
+## 現行模型
 
 ```yaml
-format: zcu.parameter-container
-format_version: "2.0"
-schema_version: 1
-general:
-  created_at: "2025-01-01T00:00:00Z"
-components:
-  Q1:
-    kind: qubit/fluxonium
-    EJ: 4.0
-    EC: 1.0
-    EL: 0.8
-    resonator: R1
-    flux_source: local_bias
-    flux_unit: V
-    flux_half: 0.5
-    flux_int: 0.1
-    flux_period: 0.8
-  R1:
-    kind: resonator
-    wiring: {ch: 0, ro_ch: 0}
-  MG:
-    kind: group/mux
-    wiring: {}
-    resonators: [R1]
-    qubits: [Q1]
-    flux_source: global_bias
-    coil_flux:
-      Q1: {half: -0.2, int: 0.0, period: -0.4}
-```
-
-工具檢查整份容器、aliases、註冊的 component 與校準。未標 `schema_version` 的文件只有通過完整舊格式分類後才視為 v1，不需要 operator 先補標頭。沒有任何校準值的舊 qubit 可以轉成 `flux: {}`，不憑空補數字。
-
-上例 dry-run 列出 local 與 mux 的欄位搬移、舊欄位刪除與版本變更。`setup.yaml` 還需要合法的 `general.entry_id`。Entry template 使用自己的 `zcu.entry-template` header 與完整 aliases 文件，不加 point general。
-
-### Current，完整新格式
-
-上例成功轉換後，保留 R1、其他 qubit 欄位與 mux 綁定，flux 部分變成：
-
-```yaml
-schema_version: 2
+schema_version: 3
 components:
   Q1:
     kind: qubit/fluxonium
     flux_dev: local_bias
     flux:
-      local_bias: {half: 0.5, integer: 0.1, period: 0.8}
-      global_bias: {half: -0.2, integer: 0.0, period: -0.4}
-  MG:
-    kind: group/mux
-    flux_dev: global_bias
-    # resonators、qubits、wiring 保留，coil_flux 已移除。
+      offset: -0.125
+      period: {local_bias: 0.8, global_bias: -0.4}
 ```
 
-這是變更欄位的節錄，不是可獨立載入的完整文件。Current 文件仍要通過完整驗證，成功後顯示 `skipped`，不重寫、不再備份。
+這是相關欄位節錄，不是完整可載入文件。
+公式為 `φ = offset + Σ V_d／period_d`。Offset 是所有儀器輸出 0 時的 flux，單位 Φ0，不做 mod 1。
+Period 使用該 device 原生單位／Φ0，可帶負號。當下沒有值的儀器不貢獻，period 保留。
+未校準形狀為 `flux: {offset: null, period: {}}`。
+Qubit、mux、JPA 的 `flux_dev` 是主要／預設控制儀器，不參與公式，也不必有校準。
 
-### Partial，移到一半
+## 保留 v1→v2→v3 升級鏈
 
-例如在完整 legacy 文件的 Q1 加入以下區塊，但仍保留 `flux_half/int/period` 或 mux `coil_flux`：
+### V1 歷史輸入與 v2 中間形狀
+
+V1 qubit 使用 `flux_half`、`flux_int`、`flux_period`、`flux_unit`，來源為 `flux_source`。
+Mux 另有 `coil_flux.<qubit>.half/int/period`。
+自己的線保留現行數值轉換，在 v2 成為 `flux.<device>.{half, integer, period}`。
+Coil 只保留 signed period，在 v2 寫 integer 0、half = period／2，原 half／int 列在報告。
+下一步不會把已捨棄的 coil offset 貢獻加回來。
+工具不換單位、不推測方向，原 spacing 檢查 `|integer − half| = |period| / 2` 不變。
+
+Native 單檔依下列順序選 v2 主要儀器：
+
+1. Qubit 自己的線。
+2. V1 `flux_source` 指名的 coil。
+3. 唯一 coil。
+4. 多 coil 未指名時不填來源。
+
+最後一種使 v3 offset=null，但全部 signed periods 保留。
+報告列出每個來源與原校準的候選 offset，提醒重新校準。
+Flux jump 可能使候選 offset 不一致，不因此判腐敗。候選相同也不代表可任選來源。
+缺名 local 用 `unnamed_device`，缺名 coil 用 `unnamed_coil`，兩筆可同時保留。
+Native 自己的線用 `flux_source: unnamed_device` 指名，最終改為 `flux_dev`。
+
+### Main v2 輸入到 v3
+
+V2 保留每台儀器 `{half, integer, period}` 與 `flux_source`。
+其參考條件是其他儀器停在各自 integer，見 [歷史 v2](storage-format-history/component-flux.md)。
+V2→v3 以 `flux_source` 為主要儀器，有對應 entry 時：
+
+```text
+offset = 0.5 - half_main / period_main - sum_other(integer[o] / period[o])
+```
+
+公式保留主要儀器存下的 half 分支，不做 mod 1。
+例如：
 
 ```yaml
+# 歷史 v2 節錄
+schema_version: 2
+flux_source: Q1_bias
 flux:
-  local_bias: {half: 0.5, integer: 0.1, period: 0.8}
+  Q1_bias: {half: 0.0, integer: -0.001, period: 0.002}
+  coil_bias: {half: 0.005, integer: 0.0, period: 0.01}
 ```
 
-整份文件混有舊校準與新 entries，會被拒絕。`schema_version: 2` 仍帶舊欄位、舊文件只有新 entries，或一筆校準缺少任一數字，也屬 partial。工具不選權威值、不覆蓋已有 entry。
+對應 v3：
 
-先另存原檔。若有完整 v1 備份，建議還原後重跑工具。沒有備份時，逐顆 qubit、逐個 mux 查原始校準紀錄，選擇下列一條路：
+```yaml
+schema_version: 3
+flux_dev: Q1_bias
+flux:
+  offset: 0.5
+  period: {Q1_bias: 0.002, coil_bias: 0.01}
+```
 
-1. 還原完整 v1 形狀，移除已核對的重複新 entries，保留所有舊校準，再跑 dry-run。
-2. 人工完成整份 v2。把每筆已確認的 local 與 mux 校準放入實際 device key，將 `int` 改為 `integer`，移除所有被取代的欄位。整份核對後才標 2，再用同一命令驗證，應顯示 `skipped`。
+沒有 `flux_source` 或主要儀器缺 entry 時 offset=null，仍照抄全部 periods，包含正負號。
+`flux: {}` 轉為 `{offset: null, period: {}}`。
+此步才將 qubit、mux、JPA 的 `flux_source` 改名為 `flux_dev`。
+歷史步驟不刪除，也不把 v2 重新定義成 v3。
 
-未知校準不能填零湊齊。確認沒有可保留的校準時，可以明確刪除該筆未完成校準，留下空 `flux` 後重新量測。這會放棄那筆舊校準，須由 operator 決定。
+## Storage 匯入的來源與覆寫
 
-### Corrupt，檢查不通過或沒有可用來源
+舊 repo 的 `migrate_storage` 共用轉換，但分批匯入有獨立的來源規則。
+每批與最終輸出的 `flux_dev` 都只來自明示來源，沒有時留空，form device 留空必填。
+明示來源包含完整 overlay 中有效的 setup／mapping 繼承來源，不要求 point 本批重複宣告。
+不從單位、校準 entry、live device 或佔位名稱猜來源。
+原資料明示的 `unnamed_*` 名稱仍照明示處理，不按字串全域排除。
 
-把 legacy 範例的 `flux_int` 改成 `0.2`，會違反 `|integer − half| = |period| / 2`。以下情形也會被拒絕：
+每批 offset 按完整 overlay 的 v1 結構角色重算。
+Qubit 自身欄位是自己的線，mux `coil_flux` 是 coil。順序為自己的線、唯一 coil、否則 null。
+若經 v2 再升 v3，主線身分仍取 v1 結構角色，不靠自動佔位 `flux_source`。
+無明示來源的 local／coil periods 分別保留在 `unnamed_device`／`unnamed_coil`。
+不新增 finalizer，也不讓自動佔位成為後續批次的來源。
 
-- 數字是 NaN、infinity、boolean，或 period 為零。
-- v1 的 `flux_source: bad.name`，或有校準卻沒有可用的明示來源。
-- `coil_flux.Q2` 出現，但 mux 的 `qubits` 沒有 Q2，或 Q2 不是文件內的 qubit。
-- 多個 local／mux 校準要寫入同一 qubit 的同一 device entry。
-- 缺少必要容器、kind、aliases 或 component 欄位。
+Point 這批有完整、有效且明示來源的校準時，取代繼承 offset 與該儀器 period，其他 periods 保留。
+同批 local／mux 撞鍵、partial、非法名稱、數值與 spacing 仍拒絕，不改為最後寫入者勝出。
 
-診斷列出文件路徑與未通過的檢查。Point 路徑含 label，使用 API 也可明填 `UpgradeSource.point`。先按原始紀錄補正來源名稱、mux membership 或校準數字，不從單位或檔名猜 device。Mux 來源缺失時，工具不猜 `coil`，整份文件不寫入。修正後重跑 dry-run，確認拒絕原因消失。
+## 核對分類與診斷
+
+未標版文件只有通過完整 v1 分類後才視為 v1。
+Current v3 仍須完整驗證，成功顯示 `skipped`，不改寫或再次備份。
+
+Partial 包含混合版本、只搬一半欄位或校準缺任一數字。
+工具不選權威值、不用零湊齊。先保存原檔，優先還原完整 v1 或 v2 備份後重跑。
+沒有備份時，依原始量測紀錄修復整份文件與版本，再 dry-run。
+無法確認的校準可由 operator 決定放棄，留下 v3 未校準形狀，再重新量測。
+
+Corrupt 包含 NaN、infinity、boolean、零 period、非法 device 名稱、spacing 錯誤、mux membership 錯誤或同 device 撞鍵。
+缺來源名稱本身不再拒絕，使用佔位並提醒改名。
+Upgrade CLI 與 `migrate_storage` 都逐實際目的位置報告 `unnamed_device`／`unnamed_coil`，不只列一次樣板路徑。
+
+離線只驗 device 名稱語法，拒絕 ASCII `.`、空字串與全空白，不 trim 合法名稱。
+升級不查 device catalog，成功不代表 device 已存在或接線。
+改名前若沒有當下值，該佔位 period 不貢獻。依接線證據改名，不從單位推測。
 
 ## Dry-run、備份與 apply
 
-先複製整個 entry 到明確的離線工作目錄。停止會寫入這些文件的工作階段。下列範例路徑指向副本，確認結果後才對正式文件執行：
+先複製整個 entry 到離線目錄，停止會寫這些文件的工作階段。
+範例先指向副本：
 
 ```bash
 uv run --directory /absolute/checkout --no-sync -- python scripts/upgrade_parameters.py \
   /offline-copy/setup.yaml /offline-copy/points/*/point.yaml
 ```
 
-預設不建檔、不建鎖、不備份。報告按文件列出 `dry-run`、`skipped` 或 `rejected`，再列出 literal field paths 的前後值。Partial／corrupt 出現在 `failed checks` 中，其餘文件繼續。任何拒絕使命令回傳 1，全成功或跳過回傳 0。
+Dry-run 不建檔、不建鎖、不備份。
+報告逐文件列 `dry-run`、`skipped` 或 `rejected`，再列欄位前後值與 diagnostics。
+核對各目的位置、signed periods、offset 分支、dropped coil 值、未知欄位與重校提醒。
+任何拒絕回傳 1，全成功或跳過回傳 0，其餘文件不因單一拒絕停止。
 
-逐份核對來源名稱、正負 period、未知欄位與未涉資料是否保留。確認授權及範圍後才加 `--apply`：
+確認授權及範圍後才加 `--apply`：
 
 ```bash
 uv run --directory /absolute/checkout --no-sync -- python scripts/upgrade_parameters.py \
   /offline-copy/setup.yaml /offline-copy/points/*/point.yaml --apply
 ```
 
-每份合法候選在同名 `.lock` 下重讀，先建原 bytes 的唯一 `.bak`，再用同目錄 temporary 檔原子替換。報告列出備份路徑。Partial／corrupt 不備份、不替換。若備份後替換失敗，已完成的備份仍保留。這不是跨文件交易，也不保證掉電時整批一致。
+每份合法候選在同名 `.lock` 下重讀，先建原 bytes 的唯一 `.bak`，再以同目錄 temporary 檔原子替換。
+報告列出備份。Partial／corrupt 不備份、不替換。備份後替換失敗仍保留備份。
+這不是跨文件交易，也不保證掉電時整批一致。重跑時合法 v3 全部顯示 `skipped`。
 
-再次執行同一命令，合法 v2 文件應全部顯示 `skipped`。若尚有拒絕，保留輸出，修復那些文件再重跑，已完成的文件不再改寫。
+## 驗證、重新校準與還原
 
-## 驗證與還原
+重新開啟副本或明確 `context.reload`，打開使用該 point 的表單，確認 device 選項與必填空白。
+舊資料沒有其他線當時的 bias，轉換不是重建量測事實。
+Coil 的舊 half／int 已捨棄，正式量測前以 fluxdep 重新校準。
 
-核對所有 qubit 的 `flux` keys、三欄一致性、mux 對應與保留欄位。升級不驗 device 存在性。等 runtime 為 2 後，重新開啟副本或明確 `context.reload`，在 GUI 打開使用該 point 的表單，確認 device 選項及缺名診斷。重新校準前不要把假設的多 device 參考點當成實測值。
+量測 writeback 可獨立接受 signed period 與預設勾選的 offset。
+Offset 扣除其他有 period 且有 Run snapshot 值的儀器貢獻，note 也列出值為 0 者。
+被掃儀器以擬合 half 覆蓋 snapshot 舊值一次。缺席儀器不貢獻、不列 note。
+獨立 app Export params 只更新 EJ／EC／EL 與選定 period，一律保留 component offset。
+兩者不是同一個校準入口，receipt 仍為 written／skipped。
 
-還原時先停止 writers，另外保存目前文件與診斷。把報告所列 `<原檔名>.<唯一識別碼>.bak` 複製回原 YAML 路徑，核對 bytes，再 reopen 或 reload。備份是原版本，runtime 2 可能仍要求升級。還原只恢復文件，不代表完成升級。
-
-Device 改名時改 component 的 `flux_dev` 與 `flux.<device>` key。改接線時刪除受影響 entry，再做 fluxdep。歷史 records 保留當時名稱與 frame，不批次改名。完整流程見 [改名與改接線](record-device-upgrades.md#改名與改接線)。
-
-版本、鎖與失敗語意見 [通用升級指南](parameter-upgrades.md)。格式辨識見 [component flux 格式歷程](storage-format-history/component-flux.md)。
+還原前停止 writers，另存目前文件與診斷。
+將報告所列 `<原檔名>.<唯一識別碼>.bak` 複製回 YAML 原路徑，核對 bytes，再 reopen 或 reload。
+備份仍是原版本，runtime 3 可能要求升級。還原只恢復文件，不代表完成升級。
+Device 改名與改接線見 [record 指南](record-device-upgrades.md#改名與改接線)，歷史 records 不批次改名。
+版本、鎖與失敗語意見 [通用升級指南](parameter-upgrades.md)。

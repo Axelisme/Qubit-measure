@@ -54,7 +54,7 @@ class OvernightMuxPlan(BaseModel):
     points: int = Field(default=51, ge=5, description="Common delay samples per member")
     snapshot: RunSnapshot
     flux_frames: dict[str, QubitFluxSchema] = Field(
-        description="Start-captured flux blocks keyed by participant qubit name; empty blocks mean no calibration"
+        description="Start-captured {offset, period} blocks by qubit name; offset is in Phi0, null means uncalibrated; each signed period uses device-native units per Phi0"
     )
     result_path: Path | None = Field(
         default=None,
@@ -63,7 +63,7 @@ class OvernightMuxPlan(BaseModel):
 
     @model_validator(mode="after")
     def require_participant_frames(self) -> "OvernightMuxPlan":
-        """Reject absent participant frames before acquisition; empty blocks are valid."""
+        """Reject absent participant frames; offset=null is a valid uncalibrated frame."""
         for index, tone in enumerate(self.tones):
             if index in self.participants and tone.name not in self.flux_frames:
                 raise ValueError(f"{tone.name!r}: missing captured flux frame")

@@ -59,9 +59,15 @@
 
 Callback 的 `ParameterDocument.notes` 是不寫入 YAML 的操作提醒。`prepare_parameter_batch` 回傳 `PreparedParameterBatch(document, notes)`，seed 與 value-group caller 將成功批次的 notes 附上實際 setup／point 目的路徑，去除同位置的重複訊息，存入 `MigrationReport.notes`。Dry-run 與正式報告使用同一路徑。Migration owner 不解析訊息中的實驗欄位。
 
-Shipped `storage_mapping` 在 callback 執行時才載入 lab 的 `convert_storage_flux_batch`。它與長期 v1→v2 步驟共用 lab 的純轉換。框架測試替換 callback，僅使用合成同版 schema，不依賴 lab。Mapping revision 同時變更，避免舊 manifest 認領不同轉換規則。
+Shipped `storage_mapping` 在 callback 執行時才載入 lab 的 `convert_storage_flux_batch`。它與長期 v1→v2→v3 升級鏈共用 lab 的純轉換。框架測試替換 callback，僅使用合成同版 schema，不依賴 lab。Mapping revision 同時變更，避免舊 manifest 認領不同轉換規則。
 
-Runtime 與 callback 產物都是 v2，不新增 reader compatibility。下表的舊 flux logical paths 是組裝 batch 的歷史路徑，成功轉換後以 qubit `flux.<明示來源>` 為目的，不發布舊版參數文件。Lab storage-only callback 允許完整有效、明示來源的 point 歷史校準取代同 device 的 setup 繼承校準，其他 entries 保留。它先驗整批再一次性處理，同批衝突或部分校準仍拒絕；native 升級分類不變。這是 advisor 裁定，Review: pending，framework 不解讀這些欄位。沒有明示來源的校準組保留原文並列 pending，不猜 device。操作與四類形狀見 [flux 升級指南](../../docs/flux-migration.md)。
+Runtime 與 callback 產物都是 v3，不新增 reader compatibility。下表舊 flux logical paths 是組裝 batch 的歷史輸入，轉換後保存 qubit `{offset, period}`，不發布舊版文件。
+
+Storage 每批與最終的 `flux_dev` 都只保留明示來源，包含完整 overlay 中有效的 setup／mapping 繼承來源，否則留空。不從單位、live device 或校準 entry 猜來源。缺名 local／coil 分別保留 `period.unnamed_device`／`period.unnamed_coil`，不因此列 pending。Diagnostics 逐實際目的位置提醒改名。原資料明示的 `unnamed_*` 仍照明示處理。
+
+Offset 每批依 v1 結構角色重算，自己的線優先，其次唯一 coil，否則 null。若經 v2 再升 v3，也由 v1 結構角色提供主線身分，不靠佔位名稱。Coil 在 v2 中立化為 integer 0、half = period／2，只保留 signed period，原 half／int 進報告。不新增 finalizer 或 provenance API。
+
+完整有效且明示來源的 point 校準取代繼承 offset 與該儀器 period，其他 periods 保留。先驗整批，同批撞鍵、partial、非法名稱、數值與 spacing 仍拒絕。框架只呈現 callback 的中立 diagnostics，不解讀 lab flux 欄位。操作見 [flux 升級指南](../../docs/flux-migration.md)。
 
 ### Meta 欄位對照
 

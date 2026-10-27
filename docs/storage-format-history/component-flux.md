@@ -2,6 +2,9 @@
 
 **讀者：** operator、lab-author、framework-dev、agent。辨識 component flux 格式，查找轉換範圍與參考點假設。
 
+本頁保留 main v2 的格式與當時升級方式，以下「新」指 v2。
+目前 runtime 為 v3，現行鏈與 coil 中立化規則見 [v3 歷程](component-flux-v3.md)。
+
 ## 改前與改後
 
 `schema_version: 1` 的 qubit 保存 `flux_half`、`flux_int`、`flux_period` 與 `flux_unit`。Mux group 另存 `coil_flux.<qubit>.half/int/period`。
@@ -9,13 +12,13 @@
 `schema_version: 2` 將兩種校準合併在 qubit 的 `flux`，以實際 device 名稱為 key：
 
 ```yaml
-flux_dev: local_bias
+flux_source: local_bias
 flux:
   local_bias: {half: 0.5, integer: 0.1, period: 0.8}
   global_bias: {half: -0.2, integer: 0.0, period: -0.4}
 ```
 
-Local 的 key 來自 v1 qubit 的 `flux_source`。Global 的 key 來自 v1 mux group 明示的 `flux_source`，不固定叫 `coil`。轉換移除 qubit 的四個舊欄位與 mux 的 `coil_flux`。Qubit、mux 與 JPA 的 v1 `flux_source` 都改名為 v2 `flux_dev`，值原樣保留。各數字保留原工作單位，使用時單位取 device info。YAML 容器的 `format_version` 不變。
+Local 的 key 來自 qubit 的 `flux_source`。Global 的 key 來自 mux group 明示的 `flux_source`，不固定叫 `coil`。轉換移除 qubit 的四個舊欄位與 mux 的 `coil_flux`，保留兩處 `flux_source`。各數字保留原工作單位，使用時單位取 device info。YAML 容器的 `format_version` 不變。
 
 每個 entry 的 `half`、`integer`、`period` 都是有限數字，period 非零。三欄須滿足 `|integer − half| = |period| / 2`。負 period 表示增加 bias 使 flux 減少。
 

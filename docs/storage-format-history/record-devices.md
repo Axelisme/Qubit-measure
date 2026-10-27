@@ -28,6 +28,6 @@ Apply 先保存原 bytes 備份，再原子替換。列順序、重複 run_id、
 
 ## Flux 與歷史名稱
 
-新的 `flux_from_frame` 只把 `flux_frame.<device>.integer/period` 當 row frame，不自動解讀舊 flat `flux_int/flux_period`。只有舊 flat frame 且沒有 explicit flux 的列，需要 caller 確認單位並把 frame 明示為 fallback。具名值的升級不合成歷史校準。
+現行 `flux_from_frame` 使用 `flux_frame: {offset, period: {<device>: ...}}`，不自動解讀歷史 flat `flux_int/flux_period` 或 v2 per-device frame。只有舊 flat frame 且沒有 explicit flux 的列，需要 caller 確認歷史校準與單位，再以新 `FluxFrame` 明示 fallback。已有 v2 per-device frame 須先在分析副本明確轉換。具名值的升級不合成歷史校準。
 
 Device 改名或改接線不批次改寫歷史 records。歷史保留當時的名稱與 frame；目前 component 的處理與完整操作例子見 [Record 升級與改名改接線](../record-device-upgrades.md)。Component 版本鏈另見 [參數文件升級](../parameter-upgrades.md)。

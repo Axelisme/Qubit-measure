@@ -136,8 +136,8 @@ Onetone 的 `frequency.df` 是共用 MHz offset；twotone 的 `frequency.tones` 
 Guide 說明 kickstart、已有頻率、已有 readout slot 與 recipe 的起手步驟，以及 Open／Reset／Refresh 的差異。
 `participants` 保存 Q 名與執行順序，tone index 始終是完整 group 的原始序號。
 Stop 保留已完成的 flux 點，未完成點留 NaN。Analyze 每次用原始 `tone` index 選一個 participant，
-沿既有 half／integer line picker 校準。Local 與 global 都只提該 Q 的 `flux.<被掃 device>` 校準，
-不覆蓋其他 device 或 Q。Global 使用 cfg.flux_dev 的實際名稱，不把 coil 當別名。
+沿既有 half／integer line picker 校準。Local 與 global 分開提出該 Q 的 `flux.period.<被掃 device>` 與預設勾選的 `flux.offset`，
+不覆蓋其他 periods 或 Q。Global 使用 cfg.flux_dev 的實際名稱，不把 coil 當別名。
 目的地只取 Run／Load capture。四個 guide 列出初值與操作路徑。
 Native 保存 tone-major 三維 IQ 與各 tone 的 DC／MHz 座標。Labber 不支援這種三維獨立 grid，
 Save 以各 output 的 status 回報其失敗，不影響成功保存的 native 資料。

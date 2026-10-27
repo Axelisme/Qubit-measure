@@ -161,7 +161,23 @@ or finish analysis.
 Review each proposal's original index, Q and destination. Respond with selected
 items or decline. The recipe applies only those selected IDs and reports
 `writeback_applied` from the owner receipt, not from accepted alone.
-Both global and local analysis propose one complete `<Q>.flux.<scanned device>` entry containing reference `half`, `integer` and signed `period`. Global uses cfg.flux_dev; local uses that Q's selected device. Other entries stay unchanged. Each analysis also proposes an ordinary raw-fit record with devices and the original Run frame. Destinations use Run capture, never current aliases.
+Both global and local analysis propose `<Q>.flux.period.<scanned device>` and
+a separate, default-selected `<Q>.flux.offset`. Global uses cfg.flux_dev; local
+uses that Q's selected device. Period updates its magnitude and keeps its sign,
+initially positive. Offset uses `0.5 - half_fit / period_s - Σ V_o / period_o`.
+Other values come from the Run snapshot; the swept value is replaced by half_fit
+once. Missing devices contribute zero and keep their periods. The offset note
+lists every other present calibrated device's value and contribution, including
+zero values. Other periods stay unchanged. Each analysis also proposes an
+ordinary raw-fit record with devices and the original `{offset, period}` Run
+frame. Destinations use Run capture, never current aliases.
+
+The half/integer recipe inputs and report fields are native picker positions,
+not component schema fields. Component v3 stores `flux: {offset, period}` and
+uses `flux_dev` only as the default control device. Missing offset or selected
+period leaves required sweep bounds blank. A missing default device leaves the
+device field required. Independent app Export params writes energies and period
+only; it never writes component offset.
 
 The report retains completed Q rows in participant order, original index, Q,
 native flux_half/flux_integer/flux_period and per-Q writeback_applied.

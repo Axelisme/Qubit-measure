@@ -82,7 +82,7 @@ class CoherencePlan(T1Plan):
     """
 
     flux_frame: QubitFluxSchema = Field(
-        description="Start-captured qubit flux block in native device units; empty means no calibration"
+        description="Start-captured {offset, period} block; offset is in Phi0, null means uncalibrated; each signed period uses device-native units per Phi0"
     )
     seed_flux: float | None = Field(
         default=None,
