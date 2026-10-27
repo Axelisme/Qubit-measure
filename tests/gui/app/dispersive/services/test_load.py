@@ -40,7 +40,7 @@ def test_load_onetone_writes_entry_in_ghz(onetone_hdf5):
 
 
 def test_load_onetone_derives_flux_from_recorded_predictor(onetone_hdf5):
-    path, dev_values, _freqs, _signals = onetone_hdf5
+    path, _dev_values, _freqs, _signals = onetone_hdf5
     st = DispersiveState()
     st.set_fit_inputs(_inputs())
 

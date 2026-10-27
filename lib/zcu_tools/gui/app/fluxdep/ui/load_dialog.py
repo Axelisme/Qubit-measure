@@ -62,19 +62,19 @@ class LoadSpectrumDialog(NativeSpectrumDialog):
         )
         super().__init__(choices, parent, start_dir)
 
-    def _build_source_options(self, basic: QHBoxLayout) -> None:
-        basic.addWidget(QLabel("Type:"))
+    def _build_source_options(self, row: QHBoxLayout) -> None:
+        row.addWidget(QLabel("Type:"))
         self._type = QComboBox()
         self._type.addItems(["OneTone", "TwoTone"])
-        basic.addWidget(self._type)
-        basic.addWidget(self._transpose_btn)
-        basic.addWidget(QLabel("Inherit from:"))
+        row.addWidget(self._type)
+        row.addWidget(self._transpose_btn)
+        row.addWidget(QLabel("Inherit from:"))
         self._inherit = QComboBox()
         self._inherit.addItem("(none)", userData=None)
         for name in self._inherit_sources:
             self._inherit.addItem(name, userData=name)
         self._scope.connect(self._inherit.currentIndexChanged, self._render_preview)
-        basic.addWidget(self._inherit, stretch=1)
+        row.addWidget(self._inherit, stretch=1)
 
     def _draw_preview_overlay(self, ax: Axes) -> None:
         """Draw the chosen inherit source's half/integer lines, as its picker does.

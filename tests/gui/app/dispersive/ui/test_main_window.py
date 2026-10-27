@@ -17,7 +17,7 @@ def test_main_window_builds_with_pipeline_panel(qapp):
 
 
 def test_predictor_and_native_load_are_driven_through_visible_controls(
-    qapp, analysis_target, tmp_path
+    qapp, analysis_target, tmp_path, monkeypatch
 ):
     from dataclasses import replace
 
@@ -40,7 +40,11 @@ def test_predictor_and_native_load_are_driven_through_visible_controls(
             flux=PredictorFlux(1.25, {"bias": -0.002}, {"bias": "A"}),
         ),
     )
-    native_path = native_spectrum_file(tmp_path / "native.h5", {})
+    database = tmp_path / "Database"
+    database.mkdir()
+    native_path = native_spectrum_file(database / "native.h5", {})
+    # Keep real chooser input relative: absolute hidden parent paths are unsupported.
+    monkeypatch.chdir(database)
     window = MainWindow(Controller(DispersiveState(analysis_target)))
     window.show()
     qapp.processEvents()
@@ -67,7 +71,9 @@ def test_predictor_and_native_load_are_driven_through_visible_controls(
         driver.click("Load one-tone…")
         driver.screenshot(tmp_path / "source-dialog.png")
         driver.choose_file(
-            "Browse…", native_path, evidence=tmp_path / "source-chooser.png"
+            "Browse…",
+            native_path.relative_to(database),
+            evidence=tmp_path / "source-chooser.png",
         )
         driver.screenshot(tmp_path / "source-selected.png")
         assert driver.observe(object_name="native_device").text == "bias"
