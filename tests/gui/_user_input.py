@@ -95,6 +95,26 @@ def mouse_click(widget: QWidget, at: QPoint) -> None:
         )
 
 
+def mouse_double_click(widget: QWidget, at: QPoint) -> None:
+    """Send left click, double-click and release events at widget coordinates."""
+    mouse_click(widget, at)
+    for kind, buttons in (
+        (QEvent.Type.MouseButtonDblClick, Qt.MouseButton.LeftButton),
+        (QEvent.Type.MouseButtonRelease, Qt.MouseButton.NoButton),
+    ):
+        QApplication.sendEvent(
+            widget,
+            QMouseEvent(
+                kind,
+                QPointF(at),
+                QPointF(widget.mapToGlobal(at)),
+                Qt.MouseButton.LeftButton,
+                buttons,
+                Qt.KeyboardModifier.NoModifier,
+            ),
+        )
+
+
 def _display_text(widget: QWidget) -> str:
     if isinstance(widget, (QAbstractButton, QLabel, QLineEdit, QDateTimeEdit)):
         return widget.text()
@@ -328,6 +348,25 @@ class ComponentDriver:
 
     def select_list_row(self, text: str) -> None:
         """Click the unique visible row with this exact rendered caption."""
+        listing, item = self._visible_list_row(text)
+        viewport = listing.viewport()
+        assert viewport is not None
+        mouse_click(viewport, listing.visualItemRect(item).center())
+
+    def double_click_list_row(self, text: str) -> None:
+        """Double-click the unique visible, enabled list row with exact caption.
+
+        Raise LookupError for missing, ambiguous or clipped rows. Send real mouse
+        events to the viewport and process their resulting Qt events.
+        """
+        listing, item = self._visible_list_row(text)
+        viewport = listing.viewport()
+        assert viewport is not None
+        at = listing.visualItemRect(item).center()
+        mouse_double_click(viewport, at)
+        QApplication.processEvents()
+
+    def _visible_list_row(self, text: str) -> tuple[QListWidget, QListWidgetItem]:
         matches: list[tuple[QListWidget, QListWidgetItem]] = []
         for listing in self._window.findChildren(QListWidget):
             if not self._can_interact(listing):
@@ -342,10 +381,7 @@ class ComponentDriver:
                     and viewport.rect().contains(listing.visualItemRect(item))
                 ):
                     matches.append((listing, item))
-        listing, item = _unique(text, matches, [i.text() for _, i in matches])
-        viewport = listing.viewport()
-        assert viewport is not None
-        mouse_click(viewport, listing.visualItemRect(item).center())
+        return _unique(text, matches, [i.text() for _, i in matches])
 
     def table_rows(self, *, object_name: str) -> tuple[TableRowObservation, ...]:
         """Observe rows intersecting the named QTableWidget viewport."""
@@ -748,23 +784,10 @@ class ComponentDriver:
                 point = style.subElementRect(
                     QStyle.SubElement.SE_CheckBoxIndicator, option, widget
                 ).center()
-            mouse_click(widget, point)
             if double_click:
-                for kind, buttons in (
-                    (QEvent.Type.MouseButtonDblClick, Qt.MouseButton.LeftButton),
-                    (QEvent.Type.MouseButtonRelease, Qt.MouseButton.NoButton),
-                ):
-                    QApplication.sendEvent(
-                        widget,
-                        QMouseEvent(
-                            kind,
-                            QPointF(point),
-                            QPointF(widget.mapToGlobal(point)),
-                            Qt.MouseButton.LeftButton,
-                            buttons,
-                            Qt.KeyboardModifier.NoModifier,
-                        ),
-                    )
+                mouse_double_click(widget, point)
+            else:
+                mouse_click(widget, point)
         QApplication.processEvents()
 
     def drag_splitter(self, delta: int, *, object_name: str) -> None:

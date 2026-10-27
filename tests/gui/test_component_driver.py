@@ -14,6 +14,7 @@ from PyQt6.QtWidgets import (
     QFormLayout,
     QLabel,
     QLineEdit,
+    QListWidget,
     QMainWindow,
     QMenu,
     QPushButton,
@@ -68,6 +69,34 @@ def surface(qapp) -> Generator[QMainWindow]:
     yield window
     window.deleteLater()
     qapp.processEvents()
+
+
+def test_list_double_click_activates_only_unique_visible_enabled_rows(
+    surface, qapp
+) -> None:
+    listing = QListWidget(surface)
+    listing.setGeometry(10, 80, 220, 90)
+    listing.addItems(["Ready", "Duplicate row", "Duplicate row"] + ["Below fold"] * 10)
+    activated = QLabel("Not activated", surface)
+    activated.setObjectName("activation")
+    activated.setGeometry(240, 80, 200, 30)
+    listing.itemDoubleClicked.connect(lambda item: activated.setText(item.text()))
+    listing.show()
+    activated.show()
+    qapp.processEvents()
+    driver = _user_input.ComponentDriver(surface)
+    driver.double_click_list_row("Ready")
+    assert driver.observe(object_name="activation").text == "Ready"
+    for caption in ("Duplicate row", "Below fold", "Missing"):
+        with pytest.raises(LookupError):
+            driver.double_click_list_row(caption)
+    listing.setEnabled(False)
+    with pytest.raises(LookupError):
+        driver.double_click_list_row("Ready")
+    listing.hide()
+    with pytest.raises(LookupError):
+        driver.double_click_list_row("Ready")
+    assert driver.observe(object_name="activation").text == "Ready"
 
 
 def test_lookup_reports_missing_and_ambiguous_candidates(surface) -> None:
