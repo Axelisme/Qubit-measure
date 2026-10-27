@@ -1,5 +1,6 @@
 """Independent FTF loop losses, frozen at acquisition admission."""
 
+import math
 from pathlib import Path
 from uuid import uuid4
 
@@ -27,6 +28,7 @@ class FTFCoherenceDrift:
         if drift is None:
             raise ValueError("FTF coherence drift requires enabled settings")
         self._settings = settings
+        self._time: float | None = None
         self._session = uuid4().hex
         self._path = (
             truth_log
@@ -86,6 +88,11 @@ class FTFCoherenceDrift:
         coupler q_ind/xqp are null. Returned settings disable drift for replay.
         Backward/nonfinite time raises ValueError; truth-log I/O errors propagate.
         """
+        if not math.isfinite(sim_now) or (
+            self._time is not None and sim_now < self._time
+        ):
+            raise ValueError("time must be finite and nondecreasing")
+        self._time = sim_now
         updates = {
             loop: {name: process.sample(sim_now) for name, process in processes.items()}
             for loop, processes in self._processes.items()

@@ -11,6 +11,7 @@ from threadpoolctl import threadpool_limits
 from zcu_tools.core.simulation import RoundSignals
 from zcu_tools.device import DeviceManager
 from zcu_tools.experiment.ftf import FTFAcquisitionOptions, FTFSource, ftf
+from zcu_tools.experiment.ftf.drift import FTFCoherenceDrift
 from zcu_tools.program.v2.simulation import SimulationClock
 from zcu_tools.resources.ftf import parse_ftf
 
@@ -63,6 +64,33 @@ def source_at(configuration, now, truth):
         yield source
     finally:
         source.close()
+
+
+@pytest.mark.parametrize("selected_losses", [False, True], ids=["empty", "selected"])
+@pytest.mark.parametrize(
+    "invalid_time",
+    [99.0, float("nan"), float("inf"), float("-inf")],
+    ids=["backward", "nan", "positive-infinity", "negative-infinity"],
+)
+def test_sample_rejects_invalid_time_without_appending_truth(
+    tmp_path: Path, selected_losses: bool, invalid_time: float
+):
+    document = drift_settings().model_dump(mode="json")
+    if not selected_losses:
+        document["drift"] = {}
+    truth = tmp_path / "truth.jsonl"
+    drift = FTFCoherenceDrift(parse_ftf(document), seed=123, truth_log=truth)
+    drift.sample(100.0)
+    previous_truth = truth.read_bytes()
+
+    with pytest.raises(ValueError, match=r".+"):
+        drift.sample(invalid_time)
+
+    assert truth.read_bytes() == previous_truth
+    drift.sample(100.0)
+    drift.sample(101.0)
+    rows = [json.loads(line) for line in truth.read_text().splitlines()]
+    assert [row["sim_now"] for row in rows] == [100.0] * 6 + [101.0] * 3
 
 
 def test_loop_streams_rebuild_from_seed_and_time_and_log_nullable_squid_losses(
