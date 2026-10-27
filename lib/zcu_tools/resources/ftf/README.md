@@ -1,8 +1,8 @@
 # FTF YAML values
 
-**Last updated:** 2026-10-24, physical-time pacing
-
 **讀者：** framework-dev。FTF YAML schema、單位與欄位診斷契約。
+
+**Last updated:** 2026-10-27, drift configuration and runtime ownership
 
 `load_ftf(path)` 一次讀取 UTF-8 YAML，`parse_ftf(document)` 驗證記憶體中的文件。兩者回傳 immutable `FTFSettings`。本模組擁有 schema、單位與欄位路徑診斷，不依賴 `simulate`、`device` 或 `program`，也不建立裝置或決定物理適用性。
 
@@ -10,11 +10,31 @@
 
 使用者填表與 entry 接線請讀 [FTF YAML v2 欄位指南](../../../../zcu_lab/simulation_envs/FTF/field-guide.md)。欄位型別與省略語意的程式契約在 [schema.py](schema.py)。[環境 README](../../../../zcu_lab/simulation_envs/FTF/README.md) 提供工作副本與 GUI／Notebook 入口。
 
-文件使用 `format: zcu.ftf`、整數 `version: 2`。`chip` 描述物理值，`dc_bias` 合併具名電源與校準，`drive_lines` 綁定 charge 或小訊號 flux drive lines，`readout` 分開 drive、物理 resonators 與 ADC，`numerics` 集中截斷與 solver。所有迴路 map 必填 `f1`、`coupler`、`f2`，key 指受作用的迴路，不是額外線路。
+文件使用 `format: zcu.ftf`、整數 `version: 2`。`chip` 描述物理值，`dc_bias` 合併具名電源與校準，`drive_lines` 綁定 charge 或小訊號 flux drive lines，`readout` 分開 drive、物理 resonators 與 ADC，`numerics` 集中截斷與 solver。接線與校準的迴路 map 必填 `f1`、`coupler`、`f2`，key 指受作用的迴路，不是額外線路。`drift` 的迴路則為選填。
+
+省略 `drift` 或設為 `null` 會關閉跨 acquisition 漂移。
+啟用時，`FTFDrift` 的選填 `f1`、`coupler`、`f2` 各自指定獨立 log-OU 過程。
+F1／F2 共用 `resources.single_fluxonium.schema.CoherenceDrift` 的 `q_cap`、`xqp`、`aphi`。
+Coupler 使用 `SquidDrift`，只接受 `q_cap`、`aphi`，拒絕 `q_ind` 與 `xqp`。
+每個選取的 chip 損耗必須為正，不能選擇 `null` 或零損耗。
+共用 `DriftParameter` 的 `sigma` 是 ln(loss) 穩態標準差，必須有限且非負。
+`tau_s` 是有限正秒數。Log mean 是 `ln(chip 初值)`，不是線性平均值。
+省略或設為 `null` 的迴路或損耗保持不變，`q_ind` 不漂移。
+
+第一次 acquisition 使用 chip 初值，後續 begin 依 simulated seconds 更新。
+整次 points／rounds 固定使用當次值。Schema 只驗證漂移參數與正損耗前提，不建立時鐘或寫檔。
+環境級 `SimulationClock`、獨立 stream、真值 log 與 I/O 失敗語意由
+[FTF runtime](../../experiment/ftf/README.md#acquisition-clock-and-loss-drift) 擁有。
+預設路徑為 `~/.local/state/zcu-tools/simulation/ftf/<session>/truth.jsonl`。
+每次啟用漂移的 begin 寫三行，coupler 的 `q_ind`／`xqp` 為 `null`。
+Private replay 保存當次 effective settings，`drift=None`，不依賴時鐘。
+這些檔案不進一般 Run／GUI／MCP metadata。
+啟用步驟與註解範例見 [Drift 指南](../../../../zcu_lab/simulation_envs/FTF/field-guide.md#drift跨-acquisition-損耗漂移)。
+`drift` 只屬於 FTF 環境設定，不屬於 entry。
 
 可省略的 `design` map 以 entry qubit 名稱保存完整的獨立標稱值，不從 `chip` 或 `dc_bias` 補值。每筆必填正值 `ej_ghz/ec_ghz/el_ghz`、A/V `flux_unit`、有限的 `flux_half/flux_bias` 與有限非零 signed `flux_period`。缺欄位在載入時報 `design.<qubit>.<field>`。省略或空 map 表示沒有設計初猜。Startup 負責依 entry-template 驗證 qubit 名稱與 device 單位，再交 predictor 檔案 owner 保存；schema 不建立 predictor 或讀 entry。
 
-`numerics.time_scale` 是有限非負的物理時間倍率。省略為 1.0，0.1 為十倍速，0 關閉補等。每 round 的目標秒數為 `time_scale × reps × Σ(各點 timeline 長度 + relax_delay) × 1e-6`，長度與 delay 使用 us。Binding 扣掉計算耗時，只等待正餘量，Stop 可中斷等待。Builder 提供 `ftf(..., time_scale=0)` 覆寫，無須改寫 YAML。舊欄位 `min_round_duration_s` 會報錯並指出新名稱。
+`numerics.time_scale` 是有限非負的物理時間倍率。省略為 1.0，0.1 為十倍速，0 關閉補等。每 round 的目標秒數為 `time_scale × reps × Σ(各點 timeline 長度 + relax_delay) × 1e-6`，長度與 delay 使用 us。Binding 扣掉計算耗時，只等待正餘量，Stop 可中斷等待。成功 round 仍向共用時鐘補入 unscaled physical duration 的正差額，所以 `time_scale=0` 不會停止漂移時間；閒置時間也照常推進。Builder 提供 `ftf(..., time_scale=0)` 覆寫，無須改寫 YAML。舊欄位 `min_round_duration_s` 會報錯並指出新名稱。
 
 `numerics.telemetry.enabled` 省略為 `true`，記錄每次 acquire 的路由彙總。`numerics.telemetry.directory` 省略或 `null` 時，由環境選擇 project root 下的 `.sim_telemetry/`。明確相對路徑在環境建立時解析。公開方法 `settings.with_telemetry(enabled=False)` 回傳關閉記錄的設定副本，供 `ftf(settings.with_telemetry(enabled=False))` 使用。`directory=Path(...)` 可指定另一個目錄，省略則保留原設定。此方法只建立記憶體中的設定副本，原設定保持不變。欄位、50 MiB 輪替與 warning 語意見 [FTF runtime](../../experiment/ftf/README.md#routing-telemetry)。
 

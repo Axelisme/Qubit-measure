@@ -25,6 +25,7 @@ from zcu_tools.program.v2.simulation import (
     IntegratedRound,
     SimulationBinding,
     SimulationCallbacks,
+    SimulationClock,
     SimulationSoc,
     SimulationTiming,
 )
@@ -48,7 +49,9 @@ from zcu_tools.simulate.evolution import (
     batch_populations,
 )
 
+from .acquisition import FTFAcquisitionOptions
 from .cavity import CavityEvolutionOptions, evolve_plans
+from .drift import FTFCoherenceDrift
 from .preparation import EnvelopeEncoder, PreparationCache, preparation_key
 from .readout import FTFReadoutConfig, readout_configuration
 from .replay import BACKEND_VERSION, replay_versions
@@ -180,9 +183,11 @@ class FTFAcquire:
             save_replay(
                 owner.private_replay,
                 ReplayAcquire(
-                    settings=owner.settings, request=acquire, versions=replay_versions()
+                    settings=owner.effective_settings,
+                    request=acquire,
+                    versions=replay_versions(),
                 ),
-                snapshot,
+                replace(snapshot, model_identity=owner.identity),
                 index,
             )
         return result
@@ -234,7 +239,11 @@ class FTFAcquire:
         facts = owner.model_facts(snapshot)
         plans = tuple(
             plan_template(
-                owner.settings, snapshot, template, readout=owner.readout, facts=facts
+                owner.effective_settings,
+                snapshot,
+                template,
+                readout=owner.readout,
+                facts=facts,
             )
             for template in acquire.templates
         )
@@ -242,7 +251,7 @@ class FTFAcquire:
             owner.engine,
             plans,
             facts,
-            owner.settings,
+            owner.effective_settings,
             options=CavityEvolutionOptions(key, owner.telemetry is not None, cancel),
         )
         if owner.telemetry is not None:
@@ -349,9 +358,10 @@ class FTFSource:
     identities whose live values are read by snapshot, even after session
     disconnects or registry renames. engine optionally supplies a configured numerical
     executor; this source takes ownership, including close(). Without it, use
-    workers=1 and a 4 MiB routing-facts allowance. private_replay is an optional absolute
-    author-only input archive directory; None performs no replay I/O. readout
-    optionally supplies detached author capabilities, otherwise adapts settings.
+    workers=1 and a 4 MiB routing-facts allowance. acquisition.private_replay
+    selects an optional absolute author-only input archive directory; None performs
+    no replay I/O. readout optionally supplies detached author capabilities,
+    otherwise adapts settings.
     Replay rejects overrides that cannot be reconstructed from those settings.
 
     open_acquire drops the previous session's preparation references. execute
@@ -385,6 +395,13 @@ class FTFSource:
     Enabled sources collect calling-thread routing CPU and expose finish_acquire
     for the binding completion callback. None (default) creates no directory,
     reads no telemetry CPU clocks, and retains no routing reports.
+    acquisition supplies FTFAcquisitionOptions for the environment clock and
+    private truth/replay paths; None uses its defaults. acquisition.clock=None
+    creates a clock. begin_acquire freezes losses once per acquisition.
+    acquisition.truth_log optionally selects
+    the private JSONL path; None uses ~/.local/state/zcu-tools/simulation/ftf/
+    <session>/truth.jsonl. Enabled drift writes one row per loop per begin and log
+    I/O errors propagate. Disabled drift creates no file or drift RNG streams.
     Calls are synchronous, serialized by SimulationBinding, not thread-safe.
     """
 
@@ -394,10 +411,12 @@ class FTFSource:
         devices: DeviceManager,
         *,
         engine: Engine | None = None,
-        private_replay: Path | None = None,
+        acquisition: FTFAcquisitionOptions | None = None,
         readout: FTFReadoutConfig | None = None,
         telemetry: RoutingTelemetry | None = None,
     ) -> None:
+        options = FTFAcquisitionOptions() if acquisition is None else acquisition
+        private_replay = options.private_replay
         if private_replay is not None and not private_replay.is_absolute():
             raise ValueError("private replay requires an explicit absolute root")
         self.readout = readout_configuration(settings) if readout is None else readout
@@ -411,7 +430,11 @@ class FTFSource:
         self.devices = devices
         # The physical source survives session disconnects and registry renames.
         self._source_devices = devices.get_all_devices()
-        self.identity = sha256(settings.model_dump_json().encode()).hexdigest()
+        self._effective_settings = settings
+        self._clock = SimulationClock() if options.clock is None else options.clock
+        self._truth_log = options.truth_log
+        self._drift: FTFCoherenceDrift | None = None
+        self._pending_acquire = False
         self.private_replay = private_replay
         self.telemetry = telemetry
         self.engine = Engine(1) if engine is None else engine
@@ -422,6 +445,50 @@ class FTFSource:
         self.envelope_encoder = EnvelopeEncoder()
         self._preparation_engine = self.engine
         self._closed = False
+
+    @property
+    def effective_settings(self) -> FTFSettings:
+        """Current frozen losses, with drift disabled after an enabled begin.
+
+        Before begin, returns configured settings. Disabled drift follows the
+        source's settings unchanged, including author updates between acquires.
+        """
+        return (
+            self.settings if self.settings.drift is None else self._effective_settings
+        )
+
+    @property
+    def identity(self) -> str:
+        """SHA256 of the current effective settings, used by round snapshots."""
+        return sha256(self.effective_settings.model_dump_json().encode()).hexdigest()
+
+    def begin_acquire(self, *, seed: int | None = None) -> None:
+        """Freeze f1/coupler/f2 losses at the shared clock's current seconds.
+
+        seed supplies the binding root seed on first use; None uses numerics.seed
+        (or fresh entropy). Subsequent calls keep those streams and start a new
+        acquisition even without a request. All points/rounds share the values.
+        Enabled drift writes three private truth rows and invalidates physical
+        facts plus complete preparations. Disabled drift draws no RNG and
+        writes nothing. Closed sources raise RuntimeError; log I/O errors propagate.
+        """
+        if self._closed:
+            raise RuntimeError("FTF source is closed")
+        if self._session is not None:
+            self._session.invalidate()
+        if self.settings.drift is not None:
+            if self._drift is None:
+                self._drift = FTFCoherenceDrift(
+                    self.settings,
+                    seed=self.settings.numerics.seed if seed is None else seed,
+                    truth_log=self._truth_log,
+                )
+            self._effective_settings = self._drift.sample(self._clock.now())
+            if self._facts is not None:
+                self._facts.source.close()
+            self._facts = None
+            self.preparation_cache.clear()
+        self._pending_acquire = True
 
     def model_facts(self, snapshot: EnvironmentSnapshot) -> FTFModelFacts:
         """Return physical inputs for this full snapshot/settings/numeric key.
@@ -435,12 +502,14 @@ class FTFSource:
         if self.engine is not self._preparation_engine:
             self.preparation_cache.clear()
             self._preparation_engine = self.engine
-        if self._facts is None or not self._facts.matches(self.settings, snapshot):
+        if self._facts is None or not self._facts.matches(
+            self.effective_settings, snapshot
+        ):
             self.preparation_cache.clear()
             if self._facts is not None:
                 self._facts.source.close()
             self._facts = None
-            self._facts = FTFModelFacts(self.settings, snapshot)
+            self._facts = FTFModelFacts(self.effective_settings, snapshot)
         return self._facts
 
     def snapshot(self) -> EnvironmentSnapshot:
@@ -491,6 +560,9 @@ class FTFSource:
                 if np.any(event.active)
             },
         )
+        if not self._pending_acquire:
+            self.begin_acquire(seed=request.root_seed)
+        self._pending_acquire = False
         if self._session is not None:
             self._session.invalidate()
         self._session = FTFAcquire(self, request)
@@ -546,10 +618,21 @@ class FTFSource:
         self.engine.close()
 
 
+def _routing_telemetry(settings: FTFSettings) -> RoutingTelemetry | None:
+    """Resolve the YAML routing-log policy without changing acquisition options."""
+    policy = settings.numerics.telemetry
+    if not policy.enabled:
+        return None
+    directory = policy.directory
+    if directory is None:
+        directory = Path(__file__).resolve().parents[4] / ".sim_telemetry"
+    return RoutingTelemetry(directory.absolute())
+
+
 def ftf(
     configuration: FTFSettings | str | Path,
     *,
-    private_replay: Path | None = None,
+    acquisition: FTFAcquisitionOptions | None = None,
     workers: int = 1,
     warmup: bool | EnvironmentWarmup = False,
     time_scale: float | None = None,
@@ -563,7 +646,7 @@ def ftf(
     indices plus one; mux uses its own generator and receiver profile. One environment
     supports separate pulse and mux acquires without reconfiguration. Channels never
     accept arbitrary firmware overrides. Host receives no model truth.
-    private_replay explicitly enables author-only checked input archives at an
+    acquisition.private_replay explicitly enables author-only checked input archives at an
     absolute directory. Replay recomputes with checked numeric and RNG versions;
     no U table or exact density record is consulted. One engine persists across
     acquires, using workers (default 1) as its sole parallel width.
@@ -588,6 +671,14 @@ def ftf(
     <project root>/.sim_telemetry. Relative paths resolve at startup.
     Each admitted acquire writes one bounded JSONL summary;
     persistence errors warn once without changing acquisition or RNG results.
+    acquisition supplies FTFAcquisitionOptions; None uses its defaults.
+    acquisition.clock optionally injects one SimulationClock shared by admission
+    and round duration accounting; None creates an environment clock. Successful rounds
+    credit unscaled physical seconds not spent on the wall clock, even with
+    time_scale=0. acquisition.truth_log optionally selects the private drift JSONL file;
+    None uses ~/.local/state/zcu-tools/simulation/ftf/<session>/truth.jsonl.
+    Enabled drift freezes losses and writes three loop rows before each request;
+    I/O errors propagate. Disabled drift creates no truth log or drift RNG stream.
     """
     settings = (
         parse_ftf(configuration)
@@ -609,17 +700,14 @@ def ftf(
                 ),
                 progress=False,
             )
-        telemetry = None
-        if settings.numerics.telemetry.enabled:
-            directory = settings.numerics.telemetry.directory
-            if directory is None:
-                directory = Path(__file__).resolve().parents[4] / ".sim_telemetry"
-            telemetry = RoutingTelemetry(directory.absolute())
+        telemetry = _routing_telemetry(settings)
+        options = FTFAcquisitionOptions() if acquisition is None else acquisition
+        sim_clock = SimulationClock() if options.clock is None else options.clock
         coordinator = FTFSource(
             settings,
             devices,
             engine=Engine(workers),
-            private_replay=private_replay,
+            acquisition=replace(options, clock=sim_clock),
             telemetry=telemetry,
         )
         readout = coordinator.readout
@@ -655,10 +743,12 @@ def ftf(
             timing=SimulationTiming(
                 time_scale=(
                     settings.numerics.time_scale if time_scale is None else time_scale
-                )
+                ),
+                clock=sim_clock,
             ),
             callbacks=SimulationCallbacks(
                 wait_ready=None if preparation is None else preparation.wait_ready,
+                on_begin=lambda: coordinator.begin_acquire(seed=binding.root_seed),
                 on_end=coordinator.finish_acquire
                 if coordinator.telemetry is not None
                 else None,

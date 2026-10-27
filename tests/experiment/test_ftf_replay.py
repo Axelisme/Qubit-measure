@@ -7,13 +7,13 @@ import numpy as np
 import pytest
 from zcu_tools.core.simulation import RoundRequest
 from zcu_tools.device import DeviceManager
-from zcu_tools.experiment.ftf import FTFSource, ftf, replay_round
+from zcu_tools.experiment.ftf import FTFAcquisitionOptions, FTFSource, ftf, replay_round
 from zcu_tools.program.v2 import ModularProgramV2
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
-from zcu_tools.program.v2.simulation import IntegratedRound
+from zcu_tools.program.v2.simulation import IntegratedRound, SimulationClock
 from zcu_tools.resources.ftf import parse_ftf
-from zcu_tools.resources.simulation_replay import replay_paths
+from zcu_tools.resources.simulation_replay import read_replay, replay_paths
 
 from tests.resources._ftf_data import ftf_document
 
@@ -27,7 +27,7 @@ def test_replay_retains_round_raw_after_source_release(tmp_path: Path, mode):
     source = FTFSource(
         settings().with_telemetry(enabled=False),
         DeviceManager(),
-        private_replay=tmp_path / "archive",
+        acquisition=FTFAcquisitionOptions(private_replay=tmp_path / "archive"),
     )
     acquire = request(mode)
     try:
@@ -77,6 +77,77 @@ def test_replay_retains_round_raw_after_source_release(tmp_path: Path, mode):
         )
 
 
+def test_replay_freezes_drifted_settings_and_identity_without_clock(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from tests.experiment._ftf_templates import request, settings, snapshot
+
+    document = settings().model_dump(mode="json")
+    for loop in ("f1", "coupler", "f2"):
+        document["chip"][loop]["q_cap"] = 1e6
+    document["drift"] = {
+        loop: {"q_cap": {"sigma": 0.3, "tau_s": 10.0}}
+        for loop in ("f1", "coupler", "f2")
+    }
+    configuration = parse_ftf(document).with_telemetry(enabled=False)
+    now = [100.0]
+    archive = tmp_path / "archive"
+    source = FTFSource(
+        configuration,
+        DeviceManager(),
+        acquisition=FTFAcquisitionOptions(
+            clock=SimulationClock(monotonic=lambda: now[0]),
+            truth_log=tmp_path / "truth.jsonl",
+            private_replay=archive,
+        ),
+    )
+    acquire = request()
+    caller_snapshot = snapshot()
+    try:
+        source.begin_acquire(seed=acquire.root_seed)
+        now[0] += 10.0
+        source.begin_acquire(seed=acquire.root_seed)
+        effective = source.effective_settings
+        identity = source.identity
+        assert effective.chip != configuration.chip
+        result = source.open_acquire(acquire).sample_round(caller_snapshot, 2)
+        if not isinstance(result, IntegratedRound):
+            raise AssertionError("integrated acquisition must retain raw shots")
+        expected_raw = result.raw.materialize(acquire.reps, acquire.avg_level)
+        archived_round = replay_paths(archive)[0]
+        saved = read_replay(archived_round)
+        assert saved.acquire.settings == effective
+        assert saved.acquire.settings.drift is None
+        assert saved.round.snapshot == replace(caller_snapshot, model_identity=identity)
+        assert caller_snapshot == snapshot()
+        now[0] += 1000.0
+        source.begin_acquire(seed=acquire.root_seed)
+        assert source.identity != identity
+    finally:
+        source.close()
+
+    def unavailable_clock(clock: SimulationClock) -> float:
+        raise AssertionError("private replay must not read the acquisition clock")
+
+    # The clock is an external boundary, not part of the replay calculation.
+    monkeypatch.setattr(SimulationClock, "now", unavailable_clock)
+    replayed = replay_round(archived_round)
+    if not isinstance(replayed, IntegratedRound):
+        raise AssertionError("integrated replay must retain raw shots")
+    np.testing.assert_array_equal(
+        replayed.statistics.state_counts, result.statistics.state_counts
+    )
+    for actual, expected in zip(
+        replayed.statistics.channels, result.statistics.channels, strict=True
+    ):
+        assert actual.channel == expected.channel
+        np.testing.assert_array_equal(actual.sums, expected.sums)
+    replayed_raw = replayed.raw.materialize(acquire.reps, acquire.avg_level)
+    assert replayed_raw.keys() == expected_raw.keys()
+    for channel, values in expected_raw.items():
+        np.testing.assert_array_equal(replayed_raw[channel], values)
+
+
 @pytest.mark.parametrize(
     "backend",
     [
@@ -101,7 +172,10 @@ def test_replay_rejects_archive_from_obsolete_numeric_backend(
     )
 
     archive = tmp_path / "current"
-    env = ftf(parse_ftf(ftf_document()), private_replay=archive)
+    env = ftf(
+        parse_ftf(ftf_document()),
+        acquisition=FTFAcquisitionOptions(private_replay=archive),
+    )
     try:
         program = ModularProgramV2(
             env.soccfg,
@@ -149,7 +223,11 @@ def test_replay_recomputes_statistics_without_numeric_records(tmp_path: Path) ->
         snapshot,
     )
 
-    source = FTFSource(settings(), DeviceManager(), private_replay=tmp_path / "archive")
+    source = FTFSource(
+        settings(),
+        DeviceManager(),
+        acquisition=FTFAcquisitionOptions(private_replay=tmp_path / "archive"),
+    )
     try:
         expected = expect_statistics(
             source.execute(

@@ -32,6 +32,7 @@ from zcu_tools.resources.simulation_schema import (
     Solver,
     Values,
 )
+from zcu_tools.resources.single_fluxonium.schema import CoherenceDrift, DriftParameter
 
 LoopValue = TypeVar("LoopValue")
 
@@ -398,6 +399,47 @@ class Numerics(RoundPacing):
     telemetry: TelemetrySettings = Field(default_factory=TelemetrySettings)
 
 
+class SquidDrift(Values):
+    """Optional independent log-OU targets for the SQUID coupler.
+
+    q_cap selects dimensionless capacitive quality factor; aphi selects flux-noise
+    amplitude in Phi0/sqrt(Hz). Each selected chip loss must be positive.
+    None leaves that loss constant. q_ind and xqp are not SQUID channels and fail
+    validation as unknown fields. sigma/tau_s use DriftParameter's log/second units.
+    """
+
+    q_cap: DriftParameter | None = None
+    aphi: DriftParameter | None = None
+
+    def validate_losses(self, coupler: Squid) -> None:
+        """Reject nonpositive selected SQUID losses without mutating coupler.
+
+        coupler supplies dimensionless q_cap and aphi in Phi0/sqrt(Hz).
+        ValueError names drift.coupler.<target> for disabled/null or zero losses.
+        """
+        for name, process, value in (
+            ("q_cap", self.q_cap, coupler.q_cap),
+            ("aphi", self.aphi, coupler.aphi),
+        ):
+            if process is not None and (value is None or value <= 0):
+                raise ValueError(
+                    f"drift.coupler.{name}: requires positive chip.coupler.{name}"
+                )
+
+
+class FTFDrift(Values):
+    """Independent acquisition-frozen loss processes for the three FTF loops.
+
+    f1/f2 select fluxonium q_cap, xqp and aphi processes; coupler selects SQUID
+    q_cap and aphi only. None disables that loop. Omitted targets remain constant.
+    Each process starts at its positive configured chip loss on first acquisition.
+    """
+
+    f1: CoherenceDrift | None = None
+    coupler: SquidDrift | None = None
+    f2: CoherenceDrift | None = None
+
+
 class FTFSettings(Values):
     """Complete FTF v2 domain snapshot, not a generic environment DSL.
 
@@ -409,12 +451,15 @@ class FTFSettings(Values):
     names to complete independent predictor guesses; omitted/empty creates none.
     Channel counts derive from maximum configured indices plus one. Unknown
     fields, including large-amplitude flux controls and v1 aliases, are rejected.
+    drift optionally enables independent acquisition-frozen log-loss OU processes
+    for f1/coupler/f2; None disables all drift without changing sampling streams.
     No model truth enters ordinary GUI/MCP metadata.
     """
 
     format: Literal["zcu.ftf"]
     version: Literal[2]
     chip: Chip
+    drift: FTFDrift | None = None
     design: SourceMap[FluxoniumDesign] = Field(
         default_factory=dict, validate_default=True
     )
@@ -424,6 +469,27 @@ class FTFSettings(Values):
     )
     readout: Readout
     numerics: Numerics
+
+    @model_validator(mode="after")
+    def drift_losses(self) -> Self:
+        """Validate selected positive chip losses; errors identify the FTF loop."""
+        if self.drift is not None:
+            for name, drift, circuit in (
+                ("f1", self.drift.f1, self.chip.f1),
+                ("f2", self.drift.f2, self.chip.f2),
+            ):
+                if drift is not None:
+                    try:
+                        drift.validate_losses(circuit)
+                    except ValueError as error:
+                        raise ValueError(
+                            str(error)
+                            .replace("drift.", f"drift.{name}.")
+                            .replace("chip.qubit", f"chip.{name}")
+                        ) from error
+            if self.drift.coupler is not None:
+                self.drift.coupler.validate_losses(self.chip.coupler)
+        return self
 
     def with_telemetry(self, *, enabled: bool, directory: Path | None = None) -> Self:
         """Return a detached settings copy with an explicit local logging policy.

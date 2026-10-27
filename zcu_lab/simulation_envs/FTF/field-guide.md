@@ -1,8 +1,8 @@
 # FTF YAML v2 欄位指南
 
-**Last updated:** 2026-10-22，獨立 design 頻率初猜
-
 **讀者：** lab-author、framework-dev、agent。依 YAML 欄位、單位與模型限制設定 FTF 環境並對照 entry 接線。
+
+**Last updated:** 2026-10-27，三迴路 drift、SimulationClock 與私有真值記錄
 
 本指南對照 [default.yaml](default.yaml) 與 [entry-template.yaml](entry-template.yaml)。啟動方式見 [環境 README](README.md)。所有可接受的 YAML 欄位都列在下文；欄位驗證由 [resources.ftf](../../../lib/zcu_tools/resources/ftf/README.md) 負責，實際組裝與演化限制見 [FTF 契約](../../../lib/zcu_tools/experiment/ftf/README.md)。
 
@@ -13,6 +13,7 @@
 - [先分清楚設定用途](#先分清楚設定用途)
 - [文件結構與共通規則](#文件結構與共通規則)
 - [Chip：物理電路與耦合](#chip物理電路與耦合)
+- [Drift：跨 acquisition 損耗漂移](#drift跨-acquisition-損耗漂移)
 - [Design：設計初猜](#design設計初猜)
 - [DC bias：live 電源與靜態磁通掃描](#dc-biaslive-電源與靜態磁通掃描)
 - [Drive lines：charge 與小訊號 flux 校準](#drive-linescharge-與小訊號-flux-校準)
@@ -25,6 +26,7 @@
 
 - `chip` 描述 F1、coupler、F2 的物理參數。Flux noise 與耗散也是物理模型的一部分。
 - `dc_bias`、`drive_lines`、`readout` 描述 live DC 電源、charge/flux 接線與讀出訊號路徑。DC 電源設定靜態磁通工作點，drive line 透過所選 operator 驅動迴路。
+- 可選的 `drift` 讓 `chip` 損耗在不同 acquisition 之間漂移，同一次 acquisition 內固定。它不放在 entry 內。
 - 可選的 `design` 保存環境作者填的設計初猜，與物理真值分開，不參與模擬演化。
 - `numerics` 決定基底維度、系統保留維度、solver 精度與亂數種子。它不描述晶片性質。
 
@@ -39,6 +41,7 @@ format: zcu.ftf
 version: 2
 chip: # Physical circuits and couplings.
   # ...
+drift: null # Optional acquisition-frozen loss drift; omitted/null disables it.
 design: # Optional independent predictor guesses, keyed by entry qubit name.
   # ...
 dc_bias: # Static offsets and live DC devices.
@@ -58,6 +61,7 @@ numerics: # Basis sizes, solver accuracy and root RNG seed.
 | `format` | 格式識別字串，只接受 `zcu.ftf`，無單位 | 必填 |
 | `version` | 格式版本，只接受整數 `2`，無單位 | 必填；v1 不相容，字串 `"2"` 也不接受 |
 | `chip` | 物理電路 record，見下一節 | 必填 |
+| `drift` | 選填的 `f1`、`coupler`、`f2` 損耗漂移 record，見 [Drift](#drift跨-acquisition-損耗漂移) | 省略或 `null` 關閉 |
 | `design` | entry qubit 名稱到完整標稱值的 map | 可省略或填 `{}`，不建立 predictor；不可填 `null` |
 | `dc_bias` | 靜態磁通 offset 與具名電源 record | 必填 |
 | `drive_lines` | 名稱到 charge/flux drive line 的 map | 可省略或填 `{}`，都停用 drive 控制；不可填 `null` |
@@ -66,7 +70,7 @@ numerics: # Basis sizes, solver accuracy and root RNG seed.
 
 `dc_bias.sources` 與 `drive_lines` 的 map key 是非空字串名稱。前者成為 live device 名稱，後者識別微波線，兩類名稱不可重複。`f1_bias`、`coupler_bias`、`f2_bias`、`f1_charge`、`f2_charge` 是樣板選用的名稱，不是新增的 YAML 欄位。
 
-所有三迴路 map 都必須含 `f1`、`coupler`、`f2`，沒有作用也要明寫零。這三個 key 指受影響的迴路，不是另外三條線。各 map 的單位由外層欄位決定：
+下表的接線與校準 map 都必須含 `f1`、`coupler`、`f2`，沒有作用也要明寫零。`drift` 不受此規則限制，可以只選部分迴路。這三個 key 指受影響的迴路，不是另外三條線。各 map 的單位由外層欄位決定：
 
 | Map 路徑 | 每個迴路的內容 | 必填／省略語意 |
 | --- | --- | --- |
@@ -124,6 +128,45 @@ numerics: # Basis sizes, solver accuracy and root RNG seed.
 | `temperature_k` | 共通 bath temperature | 有限數，K，≥ 0 | 必填 |
 
 耦合係數乘 `n_i * n_j` 的完整 charge operators，沒有依工作點的 `n01` 再正規化。填入 transition-level 的 g01 而不換算，會改變模型。
+
+## Drift：跨 acquisition 損耗漂移
+
+`default.yaml` 的頂層 `drift` 範例預設全部註解，不改變既有數值結果或取樣亂數。
+要啟用時，先複製為工作副本 `ftf.yaml`，確認每個選取的 `chip.<loop>.<target>` 都大於 0，
+再取消該區塊的註解並重啟環境。`q_cap: null` 或 `xqp`／`aphi` 為 0 的停用損耗不能直接選來漂移，載入時會報欄位路徑。
+Entry 與 kickstart 範本不保存 `drift`。
+
+| 迴路 record | 可選損耗 | 保持常數的損耗 |
+| --- | --- | --- |
+| `drift.f1`、`drift.f2` | `q_cap`、`xqp`、`aphi` | `q_ind`，以及未選取的損耗 |
+| `drift.coupler` | `q_cap`、`aphi` | 未選取的損耗；`q_ind`、`xqp` 不是 SQUID 欄位，填入會報錯 |
+
+每個選取的損耗填一筆 `{sigma: 0.1, tau_s: 300.0}`，兩欄皆必填。
+`sigma` 是 ln(loss) 的穩態標準差，無因次，須為有限非負數。
+`tau_s` 是相關時間，單位秒，須為有限正數。上例表示 log 標準差 0.1、相關時間 300 秒，不是 T1 或 T2。
+Log-OU 的 log mean 是 `ln(chip 初值)`，不是線性損耗的平均值。
+
+省略 `drift` 或設為 `null` 會關閉漂移。省略某個迴路、某個損耗或將它設為 `null`，只讓該項保持常數。
+F1、coupler、F2 各自使用由 root seed 與迴路鍵派生的獨立 log-OU stream，不做共模漂移。
+第一次 acquisition 使用 YAML 的 chip 初值。後續在 acquisition begin 依經過的 simulated seconds 更新，
+整次 acquisition 的所有 points 與 rounds 共用同一組有效值，藉此改變模型的 T1／T2。
+同一 seed 還需要相同的 simulated time 序列，才能重建同一漂移序列。
+
+每個環境共用一個 `SimulationClock`。它使用 monotonic wall seconds 加不遞減 offset。
+每個成功 round 補入 `max(0, unscaled physical seconds - elapsed wall seconds)`。
+Elapsed wall seconds 包含 snapshot、計算與補等耗時，失敗或取消的 round 不補入差額。
+`numerics.time_scale: 0` 只關閉補等，不停止 simulated physical time；acquisition 之間閒置也會推進時間。
+重啟環境會建立新 session，從 chip 初值開始，不接續舊漂移。
+
+啟用漂移後，每次 begin 都在 `~/.local/state/zcu-tools/simulation/ftf/<session>/truth.jsonl` 附加三行。
+`qubit` 依序為 `f1`、`coupler`、`f2`，記錄 session UUID、simulated seconds、UTC wall time 與有效損耗。
+Coupler 的 `q_ind`、`xqp` 為 JSON `null`。關閉漂移不寫真值 log；寫檔錯誤會傳出，並非 warning 後繼續。
+
+若要改 log 位置或保存 private replay，使用 `ftf(..., acquisition=FTFAcquisitionOptions(...))`，
+不在 YAML 或 entry 加路徑。Replay 保存當次有效設定，`drift=None`，重播不依賴時鐘或原 YAML。
+真值與 replay 檔案不進一般 Run／GUI／MCP metadata，路徑與保留期限由呼叫者管理。
+參數與 replay 格式見 [acquisition 契約](../../../lib/zcu_tools/experiment/ftf/README.md#acquisition-clock-and-loss-drift)
+及 [private replay](../../../lib/zcu_tools/experiment/ftf/README.md#private-replay)。
 
 ## Design：設計初猜
 

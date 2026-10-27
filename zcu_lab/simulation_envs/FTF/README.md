@@ -2,7 +2,7 @@
 
 **讀者：** operator、lab-author、agent。準備 FTF 模擬參數與 entry，並從 GUI 或 Notebook 啟動模擬環境。
 
-**Last updated:** 2026-10-28, predictor v2 startup and evolve-local preparation.
+**Last updated:** 2026-10-28，三迴路漂移、真值 log、predictor v2 startup 與 evolve-local preparation
 
 既有 entry 把 resonator 與 mux group 的 `ext.time_of_fly` 搬到頂層 `time_of_fly`。程式不自動搬移。
 
@@ -105,6 +105,33 @@ FTF 的 flux drive 只在 DC 附近線性化，不建構大振幅 fast-flux cont
 
 [Notebook 範例](../../../notebook_md/single_qubit.md) 呼叫同一個公開 `ftf(...)` builder。成功回傳後，Notebook 負責關閉傳回的 device manager。Startup 在交付前登記 `on_close`。成功登記的 driver 由 GUI 關閉，環境 manager 在 runtime 只借用它們；callback 先移除這些借用，再關閉尚未交付的 driver。Startup 中途失敗仍保留 callback。完整組裝與數值限制見 [FTF 契約](../../../lib/zcu_tools/experiment/ftf/README.md)。
 
+## 啟用跨 acquisition 漂移
+
+`default.yaml` 的頂層 `drift` 範例預設註解，省略或 `drift: null` 都關閉漂移。
+要啟用時，在工作副本 `ftf.yaml` 取消該區塊註解，再重啟環境。
+先確認所選的 `chip` 損耗都大於 0，不能對 `q_cap: null` 或值為 0 的 `xqp`／`aphi` 啟用漂移。
+F1／F2 可選 `q_cap`、`xqp`、`aphi`；coupler 只有 `q_cap`、`aphi`，`q_ind` 不漂移。
+`sigma` 是 ln(loss) 的穩態標準差，`tau_s` 是正秒數。省略某個迴路或損耗只讓該項保持常數。
+欄位限制與單位見 [Drift 指南](field-guide.md#drift跨-acquisition-損耗漂移)。這些設定不寫入 entry，kickstart 範本也不變。
+
+三個迴路各自使用獨立 log-OU stream。第一次 acquisition 使用 YAML chip 初值，
+後續每次 begin 按 simulated time 更新，整次 acquisition 的 points 與 rounds 共用同一組有效值。
+環境級 `SimulationClock` 使用 monotonic wall seconds 加不遞減 offset。
+每個成功 round 補足未經 `time_scale` 縮放的 physical duration 與 wall 耗時之間的正差額。
+所以 `time_scale=0` 仍推進 simulated physical time，兩次 acquisition 間的閒置時間也計入。
+重啟環境會建立新 session，不接續先前的漂移；同一 seed 只有在相同時間序列下才有相同漂移。
+
+啟用漂移後，每次 begin 在 `~/.local/state/zcu-tools/simulation/ftf/<session>/truth.jsonl`
+附加三行，`qubit` 分別為 `f1`、`coupler`、`f2`。每行記錄 session、simulated seconds、UTC wall time
+與當次損耗，coupler 的 `q_ind`／`xqp` 是 JSON `null`。
+關閉漂移不建立 truth log。寫檔失敗會讓 acquisition 報錯，不套用 routing telemetry 的 warning 政策。
+
+`FTFAcquisitionOptions` 從 `zcu_tools.experiment.ftf` 匯入，以 `acquisition=` 傳給 `ftf` 或 `FTFSource`。
+`clock` 可注入環境專用時鐘，`truth_log` 可指定另一個 `Path`，相對路徑以 cwd 解析。
+`truth_log=None` 使用上面的預設位置。`private_replay` 另選絕對 archive root，省略則不保存 replay。
+檔案含模型真值，不進一般 Run／GUI／MCP metadata。呼叫者負責路徑與檔案保留期限。
+完整參數見 [acquisition 契約](../../../lib/zcu_tools/experiment/ftf/README.md#acquisition-clock-and-loss-drift)。
+
 ## 演化與重播
 
 FTF 預設使用分段引擎的快速算法。GUI startup 明確傳 `workers=1, warmup=False`，不啟動數值預編譯。Notebook 明確傳 `workers=max(1, (os.cpu_count() or 1) - 2), warmup=True`，保留兩核並在建立環境後啟動單一背景 worker 預編譯常用數值路徑。核心數未知時使用 1 個 worker，八核主機使用 6 個 Notebook workers。公開 `ftf()` 的預設是 `workers=1, warmup=False`；`workers` 必須為正整數。
@@ -115,4 +142,4 @@ FTF 預設使用分段引擎的快速算法。GUI startup 明確傳 `workers=1, 
 
 整個 evolve 期間 native BLAS 限為 1 個執行緒。重疊的 evolve 共用 process 層級的 reference count，第一個進入時設限，最後一個離開時還原。其他程式碼不要在 evolve 期間自行更改 threadpoolctl 限制。沒有演化工作、只有一條 timeline 或只有 1 個 worker 時，不開 joblib pool。模型與 caller-owned 完整 preparation 只保留在記憶體，Engine 的數值 preparation 限一次 evolve。不需要離線建庫或 GPU，也不保存 exact density records。
 
-Builder 可用 `ftf(..., private_replay=absolute_directory)` 保存私有輸入。`replay_round(round_path)` 在相同數值、RNG 與相依套件版本下重算一個 round，不讀取演化資料庫。私有檔案含模型真值，不放入一般 Run metadata。
+從 `zcu_tools.experiment.ftf` 匯入 `FTFAcquisitionOptions`，再用 `ftf(..., acquisition=FTFAcquisitionOptions(private_replay=absolute_directory))` 保存私有輸入。同一模組的 `replay_round(round_path)` 在相同數值、RNG 與相依套件版本下重算一個已保存的 round，不讀取演化資料庫。Archive 保存當次 effective settings，`drift=None`，因此重播不依賴時鐘，也不再抽漂移。Model identity 保存在既有的 round snapshot；重播不需要目前 YAML 或較早的 rounds。私有檔案含模型真值，不放入一般 Run／GUI／MCP metadata。
