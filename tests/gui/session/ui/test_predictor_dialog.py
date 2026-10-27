@@ -351,13 +351,13 @@ def test_persistent_predictor_hide_reopen_keeps_callbacks_until_done(qapp, tmp_p
     )
     opener.clicked.connect(dialog.show)
     expression_name = "predictor_calibration_frequency_expression"
+    edit = dialog.findChild(QLineEdit, expression_name)
+    assert edit is not None
     field = next(
         field
         for field in dialog.findChildren(EvalNumericField)
-        if field.findChild(QLineEdit, expression_name) is not None
+        if edit in field.findChildren(QLineEdit)
     )
-    edit = field.findChild(QLineEdit, expression_name)
-    assert edit is not None
     changes: list[None] = []
     field.raw_changed.connect(lambda: changes.append(None))
     ui = ComponentDriver(host)
