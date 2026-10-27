@@ -266,6 +266,9 @@ def plan_template(
             ripple_phase_rad=float(np.deg2rad(adc.ripple_phase_deg)),
             slope_db_per_ghz=adc.slope_db_per_ghz,
             pivot_ghz=adc.pivot_ghz,
+            extra_ripples=adc.extra_ripples,
+            roughness=adc.roughness,
+            band_edges=adc.band_edges,
         )
         model = replace(
             physical,

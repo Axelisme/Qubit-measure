@@ -10,6 +10,92 @@ from zcu_tools.core.simulation import SamplingIdentity
 from zcu_tools.simulate import adc
 
 
+def test_omitted_extensions_preserve_legacy_background_point_for_point():
+    receiver = adc.Receiver(
+        ripple_depth=0.1,
+        ripple_period_ghz=0.03,
+        ripple_phase_rad=0.2,
+        slope_db_per_ghz=-3.0,
+        pivot_ghz=7.0,
+    )
+    # Public Receiver outputs captured before extensions were introduced.
+    frequencies = [3.0, 3.7, 4.0, 5.123, 6.0, 7.0, 7.999, 8.0]
+    expected = [
+        4.371243237793394 + 0.07909168515859787j,
+        2.919106036133453 + 0.23427710591151926j,
+        2.6317817497892504 + 0.2112174768916775j,
+        1.9696466184099253 - 0.1824177079301592j,
+        1.5509756283658223 + 0.028062788871317537j,
+        0.9337914023657933 + 0.07494278884130023j,
+        0.6722034760790544 - 0.060994106777068825j,
+        0.6854344817494145 - 0.06712014295247457j,
+    ]
+    np.testing.assert_array_equal(
+        [receiver.background(f) for f in frequencies], expected
+    )
+    disabled = replace(
+        receiver,
+        extra_ripples=(),
+        roughness=adc.BackgroundRoughness(0.0, 50.0),
+        band_edges=adc.BackgroundBandEdges(),
+    )
+    np.testing.assert_array_equal(
+        [disabled.background(f) for f in frequencies], expected
+    )
+
+
+def test_band_edges_attenuate_only_outside_corners_continuously():
+    assert adc.Receiver(band_edges=None).background(6.0) == 1.0
+    receiver = adc.Receiver(
+        band_edges=adc.BackgroundBandEdges(
+            low=adc.BackgroundBandEdge(3.7, 20.0),
+            high=adc.BackgroundBandEdge(8.0, 40.0),
+        )
+    )
+    assert_allclose(receiver.background(3.2), 10**-0.5)
+    assert_allclose(receiver.background(8.5), 0.1)
+    assert receiver.background(6.0) == 1.0
+    for corner in (3.7, 8.0):
+        assert receiver.background(corner) == 1.0
+        assert_allclose(receiver.background(corner - 1e-9), 1.0, atol=1e-8)
+        assert_allclose(receiver.background(corner + 1e-9), 1.0, atol=1e-8)
+
+
+def test_roughness_is_a_reproducible_smooth_complex_field():
+    assert adc.Receiver(roughness=None).background(6.0) == 1.0
+    shape = adc.BackgroundRoughness(amplitude=0.02, correlation_mhz=50.0, seed=82)
+    receiver = adc.Receiver(roughness=shape)
+    frequencies = np.linspace(4.0, 8.0, 4001)
+    values = np.array([receiver.background(float(f)) for f in frequencies])
+    replay = adc.Receiver(roughness=shape)
+    subset = frequencies[::200][::-1]
+    assert np.array_equal(
+        [replay.background(float(f)) for f in subset], values[::200][::-1]
+    )
+    assert (
+        adc.Receiver(roughness=replace(shape, seed=83)).background(6.0) != values[2000]
+    )
+    perturbation = values - 1
+    assert 0.016 < np.sqrt(np.mean(abs(perturbation) ** 2)) < 0.024
+    correlation = np.mean(perturbation[:-50] * perturbation[50:].conj()).real
+    correlation /= np.mean(abs(perturbation) ** 2)
+    assert 0.25 < correlation < 0.5  # e^-1 at 50 MHz, with finite-band variance.
+    short_steps = np.mean(abs(np.diff(perturbation)) ** 2)
+    assert short_steps < 0.01 * np.mean(abs(perturbation) ** 2)
+
+
+def test_extra_ripples_multiply_the_primary_standing_wave():
+    flat = adc.Receiver(extra_ripples=())
+    assert flat.background(1.0) == 1.0
+    receiver = adc.Receiver(
+        ripple_depth=0.1,
+        ripple_period_ghz=1.0,
+        extra_ripples=(adc.BackgroundRipple(0.2, 2000.0, 90.0),),
+    )
+    # At 1 GHz the primary is 1.1 and the second is 1-0.2j.
+    assert_allclose(receiver.background(1.0), 1.1 - 0.22j, atol=1e-15)
+
+
 def test_receiver_background_has_flat_default_db_slope_and_complex_ripple():
     assert hasattr(adc.Receiver, "background"), "receiver must expose B(f)"
     assert_allclose(adc.Receiver().background(7.123), 1.0)
@@ -77,6 +163,9 @@ def test_background_weights_each_absolute_carrier_before_offset(path, envelope):
         ripple_depth=0.2,
         ripple_period_ghz=0.04,
         ripple_phase_rad=np.pi / 2,
+        extra_ripples=(adc.BackgroundRipple(0.04, 44.0, 15.0),),
+        roughness=adc.BackgroundRoughness(0.02, 50.0, 82),
+        band_edges=adc.BackgroundBandEdges(high=adc.BackgroundBandEdge(5.9, 20.0)),
     )
 
     def observe(current, incident):
@@ -110,10 +199,10 @@ def test_background_weights_each_absolute_carrier_before_offset(path, envelope):
 
     first = observe(model, pulses[:1])
     second = observe(model, pulses[1:])
-    # Worked ripple factors: 150 periods at 6 GHz; another quarter at 6.01.
-    expected = (first[..., 0] + 1j * first[..., 1]) * (1 + 0.2j) + (
+    # Each absolute carrier gets its own fixed background before superposition.
+    expected = (first[..., 0] + 1j * first[..., 1]) * receiver.background(6.0) + (
         second[..., 0] + 1j * second[..., 1]
-    ) * 0.8
+    ) * receiver.background(6.01)
     expected *= 1.7 * np.exp(0.3j)
     count = len(grid.times_ns) if path == "integrated" else 1
     expected += count * (0.4 - 0.2j)

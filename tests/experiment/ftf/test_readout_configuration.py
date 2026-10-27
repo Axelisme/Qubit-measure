@@ -7,6 +7,13 @@ from zcu_tools.experiment import ftf as ftf_module
 from zcu_tools.experiment.ftf.preparation import preparation_key
 from zcu_tools.experiment.ftf.readout import readout_configuration
 from zcu_tools.resources.ftf import parse_ftf
+from zcu_tools.resources.simulation_schema import ReceiverBackground
+from zcu_tools.simulate.adc import (
+    BackgroundBandEdge,
+    BackgroundBandEdges,
+    BackgroundRipple,
+    BackgroundRoughness,
+)
 
 from tests.experiment._ftf_templates import request
 from tests.resources._ftf_data import dual_readout_document, ftf_document
@@ -51,6 +58,35 @@ def test_readout_configuration_preserves_both_paths_and_all_calibrations() -> No
         ),
     )
     assert config.pulse == readout_configuration(parse_ftf(ftf_document())).pulse
+
+
+def test_readout_configuration_preserves_optional_background_for_both_paths() -> None:
+    document = dual_readout_document()
+    background = ReceiverBackground.model_validate(
+        {
+            "extra_ripples": [{"depth": 0.04, "period_mhz": 44.0}],
+            "roughness": {"amplitude": 0.02, "correlation_mhz": 50.0, "seed": 82},
+            "band_edges": {"low": {"corner_ghz": 3.7, "rolloff_db_per_ghz": 30.0}},
+        }
+    )
+    readout = document["readout"]
+    assert isinstance(readout, dict)
+    readout["adc"]["background"] = background.model_dump()
+    for receiver in readout["mux"]["adc"]:
+        receiver["background"] = background.model_dump()
+    config = readout_configuration(parse_ftf(document))
+    assert config.mux is not None
+    for receiver in (config.pulse, *config.mux.receivers):
+        assert receiver.extra_ripples == (BackgroundRipple(0.04, 44.0),)
+        assert receiver.roughness == BackgroundRoughness(0.02, 50.0, 82)
+        assert receiver.band_edges == BackgroundBandEdges(
+            low=BackgroundBandEdge(3.7, 30.0)
+        )
+    key = preparation_key(request(), config)
+    assert key == preparation_key(request(), readout_configuration(parse_ftf(document)))
+    assert key != preparation_key(
+        request(), readout_configuration(parse_ftf(ftf_document()))
+    )
 
 
 def test_readout_configuration_preserves_background_for_pulse_and_mux() -> None:

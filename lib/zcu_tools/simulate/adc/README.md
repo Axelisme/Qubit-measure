@@ -1,6 +1,6 @@
 # ADC probability and readout contracts
 
-**Last updated:** 2026-10-24, receiver transmission background
+**Last updated:** 2026-10-27, multiplicative background and fixed line roughness
 
 **讀者：** framework-dev。ADC 機率、讀出訊號與 interval moment 契約。
 
@@ -87,12 +87,49 @@ It never evaluates the background at the ADC demodulation or rotating-reference
 frequency. The slope factor is unity at `pivot_ghz`; the complete background
 need not be unity there when ripple is nonzero. Zero depth and slope give unity
 at every frequency. Depth is in `[0,1)`, period is positive, and all five
-parameters must be finite. Raw paths, conditional traces and integrated sums
+parameters must be finite. Optional extensions multiply this legacy background:
+
+- `extra_ripples` is a sequence of `BackgroundRipple(depth, period_mhz, phase_deg)`.
+  Each contributes `1 + depth*exp(i*(2*pi*f*1000/period_mhz + phase_deg*pi/180))`.
+  Depth must be finite in `[0,1)`, period finite and positive, and phase finite.
+- `roughness=BackgroundRoughness(amplitude, correlation_mhz, seed=0)` contributes
+  `1 + z(f)`. Amplitude is the finite nonnegative complex RMS `sqrt(E[abs(z)**2])`,
+  not the RMS of each quadrature or of `abs(B)`. Correlation is a finite positive
+  frequency separation in MHz where the ensemble correlation falls to `e^-1`.
+  The field approximates `exp(-(df/correlation_mhz)**2)` correlation with 512
+  Gaussian-distributed spectral modes and independent uniform phases.
+  Finite-band RMS and correlation fluctuate around these ensemble definitions.
+  A local PCG64 stream uses `SeedSequence(seed, spawn_key=(0x424743,))`.
+  The nonnegative integer `roughness.seed` fixes the line shape independently
+  of `numerics.seed`, acquire identities and receiver noise. Equal settings,
+  seed and absolute frequency return identical values regardless of scan order,
+  spacing or point count. Global RNG state is unchanged. Reproduction assumes
+  matching NumPy and numeric implementation versions.
+- `band_edges=BackgroundBandEdges(low=..., high=...)` accepts either or both
+  `BackgroundBandEdge(corner_ghz, rolloff_db_per_ghz)` values. Corners must be
+  finite, rolloffs finite and positive, and the low corner below the high corner.
+  Outside each corner the attenuation grows linearly in dB with frequency
+  distance. Inside the band it is zero. Amplitude is continuous at each corner;
+  its derivative may change there. Omitted sides do not attenuate.
+
+The extensions default to an empty tuple, `None` and `None`. Omitting them
+preserves the legacy result point for point. Zero roughness amplitude disables
+its perturbation. In YAML the same nested fields live under each receiver's
+`background`; `extra_ripples` uses a list of records with `depth`, `period_mhz`
+and optional `phase_deg`. FTF and single-fluxonium use the shared schema;
+six-fluxonium delegates each cavity to single-fluxonium. Format/version do not
+change. Their tracked `default.yaml` templates enable 68/44/308 MHz waves,
+2% complex RMS roughness, a -4 dB/GHz slope and a 3.7 GHz low corner. Existing
+untracked working copies do not change. Add these fields to your working YAML
+and restart the environment to see the new background.
+
+Raw paths, conditional traces and integrated sums
 share this convention, including shaped and simultaneous carriers. Linear
 propagation permits weighting private ADC carrier amplitudes by `conj(B(f))`
 before field superposition and final conjugation. This does not change physical
 `cavity_fields`, photon averages, Stark shifts or backaction. Both readout and
-flat cavity-average cache keys include all five background parameters.
+flat cavity-average cache keys include the legacy parameters and every optional
+background record, including the fixed roughness seed.
 
 `Receiver.time_of_flight_ns` is one finite nonnegative total line delay, default
 zero. The solver evaluates the physical output at t−τ and restores the rotating
