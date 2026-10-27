@@ -13,7 +13,13 @@ from ._meta_info import preserve_meta_field
 from .evidence import has_legacy_expression
 from .models import KeyMappingItem, KeyRule, MigrationMapping
 from .parameter_batch import ParameterValue, prepare_parameter_batch
-from .state import MigrationSession, clear_pending, record_key_mapping, record_pending
+from .state import (
+    MigrationSession,
+    clear_pending,
+    record_key_mapping,
+    record_parameter_notes,
+    record_pending,
+)
 
 _JSON = TypeAdapter(JsonObject)
 _YAML = TypeAdapter(YamlValue)
@@ -153,7 +159,7 @@ def _converted_updates(
     mapping: MigrationMapping,
     *,
     is_point: bool,
-) -> list[tuple[str, YamlValue]]:
+) -> tuple[list[tuple[str, YamlValue]], tuple[str, ...]]:
     before = _MAP.validate_python(
         snapshot(view).model_dump(
             mode="python", serialize_as_any=True, exclude_unset=True
@@ -170,7 +176,9 @@ def _converted_updates(
         values=tuple(ParameterValue(path, value) for path, value in updates),
     )
     after = _MAP.validate_python(
-        converted.model_dump(mode="python", serialize_as_any=True, exclude_unset=True)
+        converted.document.model_dump(
+            mode="python", serialize_as_any=True, exclude_unset=True
+        )
     )
     changes: list[tuple[str, YamlValue]] = []
     for section in ("general", "components"):
@@ -193,7 +201,7 @@ def _converted_updates(
                     for key, value in fields.items()
                     if old_fields.get(key) != value
                 )
-    return changes
+    return changes, converted.notes
 
 
 def _stage_group(
@@ -203,7 +211,7 @@ def _stage_group(
     units: ResolvedFluxUnits,
     *,
     is_point: bool,
-) -> tuple[list[tuple[str, YamlValue]], list[str]]:
+) -> tuple[list[tuple[str, YamlValue]], list[str], tuple[str, ...]]:
     rules = [rule for rule in mapping.rules if unit_rule.old_key in rule.requires_keys]
     candidate = EditView(snapshot(view))
     updates: list[tuple[str, YamlValue]] = []
@@ -236,8 +244,10 @@ def _stage_group(
             raise ValueError(f"{rule.old_key}: missing flux destination")
         accepted = _YAML.validate_python(value, strict=True)
         updates.append((rule.target_path, accepted))
-    updates = _converted_updates(view, candidate, updates, mapping, is_point=is_point)
-    return updates, cleared
+    updates, notes = _converted_updates(
+        view, candidate, updates, mapping, is_point=is_point
+    )
+    return updates, cleared, notes
 
 
 def apply_flux_groups(
@@ -272,7 +282,7 @@ def apply_flux_groups(
         error = units.blocked.get(key)
         if error is None:
             try:
-                updates, cleared = _stage_group(
+                updates, cleared, notes = _stage_group(
                     view, mapping, unit_rule, units, is_point=is_point
                 )
             except ValueError as exc:
@@ -283,6 +293,7 @@ def apply_flux_groups(
                     view.set(path, value)
                 for path in cleared:
                     view.set_meta(path, {})
+                record_parameter_notes(session, target, notes)
         for rule in present:
             destination_keys = None
             reason = error or units.reasons[key]

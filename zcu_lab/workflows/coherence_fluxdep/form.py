@@ -101,7 +101,7 @@ class CoherencePlanForm(FormModel):
     """Start-time setpoints and independent probe, pi drive and readout selections.
 
     flux_dev is the resolved host device name; new input defaults to a literal
-    read from $qubit.flux_source in the fixed parameter capture. Required flux_unit declares A, V or native.
+    read from $qubit.flux_dev in the fixed parameter capture. Required flux_unit declares A, V or native.
     fluxes contain absolute values in that coordinate; no conversion occurs.
     points >= 5 controls runtime T1 delay resolution. qub_pulse selects the
     Rabi/pi drive; probe_pulse selects independent spectroscopy waveform/gain.
@@ -169,7 +169,7 @@ class CoherencePlanForm(FormModel):
     def defaults(cls, env: FormEnv) -> dict[str, JsonValue]:
         """Prefill the captured device name and x180 pi estimate.
 
-        Read $qubit.flux_source for new defaults and keep the name literal.
+        Read $qubit.flux_dev for new defaults and keep the name literal.
         Missing captures, unbound qubits or absent sources leave flux_dev
         unfilled and required. Device membership is checked only when used.
         On initial input only, resolve $qubit.module.x180.waveform.length in

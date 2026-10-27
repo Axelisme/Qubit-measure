@@ -48,11 +48,11 @@ numeric warmup or real hardware access occurs during startup.
 A new entry contains Q1 as `qubit/fluxonium`, R1 as `resonator`, and `flux_bias`
 as `device/current_source`. Q1 uses generators 1 and 2. R1 uses generator 0 and
 ADC 0. Aliases are `qubit: Q1` and `resonator: $qubit.resonator`.
-Flux forms read `$qubit.flux_source` on Open/Reset without a device alias.
-The template seeds simulated-truth from
-`default.yaml`: Q1's `flux.flux_bias` has `half: 0`, `period: 0.01` and
-`integer: -0.005` in A. The component template uses `schema_version: 2`.
-Existing v1 documents require the explicit [upgrade command](../../../docs/parameter-upgrades.md);
+Flux forms read `$qubit.flux_dev` on Open/Reset without a device alias.
+The template seeds simulated-truth from `default.yaml`: Q1 has
+`flux: {offset: 0.5, period: {flux_bias: 0.01}}`, with offset in Phi0 and period
+in A/Phi0. The component template uses `schema_version: 3`.
+Existing v1/v2 documents require the explicit [upgrade command](../../../docs/parameter-upgrades.md);
 startup never upgrades saved entries. R1 has total linewidth 1.1 MHz and pulse-route flight
 time 0.4 us. These values are not measurement results. This environment has
 no mux route, global coil or readout amplifier component.

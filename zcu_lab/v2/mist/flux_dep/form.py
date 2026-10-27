@@ -14,7 +14,7 @@ from .core import FluxDepCfg
 def make_form(ctx: FormContext) -> Form[FluxDepCfg]:
     """Seed optional preparation, resonator probe, readout and native flux sweep.
 
-    Missing flux_source/calibration leave required fields invalid. Open/Reset
+    Missing flux_dev/calibration leave required fields invalid. Open/Reset
     captures sources; editing and Run do not refresh them or connect devices.
     """
     return Form(

@@ -1,7 +1,7 @@
 """Flat RecordTable v2 coordinate contract: schema, validation, resolution, migration.
 
 Producers and consumers that opt into the v2 contract share the coordinate
-names, affine ``RecordFluxFrame``,
+names, pure-analysis ``FluxFrame`` fallbacks,
 ``validate_record_table_v2`` and ``resolve_record_flux`` from this module. The
 explicit legacy-unit migration seam (``migrate_record_table_v2`` with
 ``LegacyRecordFluxFrame``) is the only supported path for legacy A/mA/V/mV tables;
@@ -12,11 +12,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, timedelta
-from typing import Literal, overload
+from typing import Literal
 
 import numpy as np
 import pandas as pd
 from numpy.typing import NDArray
+
+from zcu_tools.analysis.flux import FluxFrame, flux_from_device_values
 
 DeviceValueUnit = Literal["A", "V", "native"]
 LegacyDeviceValueUnit = Literal["A", "mA", "V", "mV"]
@@ -84,104 +86,6 @@ def _require_real_frame_value(value: object, *, field: str) -> None:
             reason="non_numeric_coordinate",
             data={"field": field},
         )
-
-
-def _coerce_real_numeric_input(value: object, *, field: str) -> NDArray[np.float64]:
-    try:
-        source = np.asarray(value)
-    except (TypeError, ValueError, OverflowError) as exc:
-        raise RecordTableV2Error(
-            f"{field} must contain real numeric values: {exc}",
-            reason="non_numeric_coordinate",
-            data={"field": field},
-        ) from exc
-
-    non_real_indexes = [
-        index for index, item in enumerate(source.flat) if _is_non_real_coordinate(item)
-    ]
-    if non_real_indexes:
-        raise RecordTableV2Error(
-            f"{field} must contain real numeric values; found non-real coordinate "
-            f"type at flattened index(es) {non_real_indexes}",
-            reason="non_numeric_coordinate",
-            data={"field": field, "indexes": non_real_indexes},
-        )
-
-    try:
-        return np.asarray(source, dtype=np.float64)
-    except (TypeError, ValueError, OverflowError) as exc:
-        raise RecordTableV2Error(
-            f"{field} must contain real numeric values: {exc}",
-            reason="non_numeric_coordinate",
-            data={"field": field},
-        ) from exc
-
-
-@dataclass(frozen=True, slots=True)
-class RecordFluxFrame:
-    """Device-value affine frame mapping A/V/native ``dev_value`` to flux.
-
-    dev_unit declares the raw value unit (A, V or native); flux_int is the
-    zero-flux device value and flux_period is the positive device-value span
-    per flux quantum. Native values have no implied physical unit conversion."""
-
-    dev_unit: DeviceValueUnit
-    flux_int: float
-    flux_period: float
-
-    def __post_init__(self) -> None:
-        if self.dev_unit not in _DEVICE_VALUE_UNITS:
-            raise RecordTableV2Error(
-                f"unsupported device unit {self.dev_unit!r}; expected 'A', 'V' or 'native'",
-                reason="invalid_unit",
-                data={"unit": self.dev_unit},
-            )
-        _require_real_frame_value(self.flux_int, field="flux_int")
-        _require_real_frame_value(self.flux_period, field="flux_period")
-        if not np.isfinite(self.flux_int):
-            raise RecordTableV2Error(
-                f"flux_int must be finite, got {self.flux_int!r}",
-                reason="non_finite_value",
-                data={"field": "flux_int"},
-            )
-        if not np.isfinite(self.flux_period) or self.flux_period <= 0:
-            raise RecordTableV2Error(
-                f"flux_period must be finite and > 0, got {self.flux_period!r}",
-                reason="invalid_period",
-                data={"field": "flux_period"},
-            )
-
-    @overload
-    def flux_from_dev_value(self, value: float) -> float: ...
-
-    @overload
-    def flux_from_dev_value(
-        self, value: NDArray[np.float64]
-    ) -> NDArray[np.float64]: ...
-
-    def flux_from_dev_value(
-        self, value: float | NDArray[np.float64]
-    ) -> float | NDArray[np.float64]:
-        arr = _coerce_real_numeric_input(value, field="value")
-        result = (arr - self.flux_int) / self.flux_period
-        if arr.ndim == 0:
-            return float(result)
-        return result
-
-    @overload
-    def dev_value_from_flux(self, flux: float) -> float: ...
-
-    @overload
-    def dev_value_from_flux(self, flux: NDArray[np.float64]) -> NDArray[np.float64]: ...
-
-    def dev_value_from_flux(
-        self, flux: float | NDArray[np.float64]
-    ) -> float | NDArray[np.float64]:
-        arr = _coerce_real_numeric_input(flux, field="flux")
-        result = arr * self.flux_period + self.flux_int
-        if arr.ndim == 0:
-            return float(result)
-        return result
 
 
 RecordFluxSource = Literal["explicit", "row-frame", "fallback-frame"]
@@ -403,7 +307,7 @@ def _optional_row_coordinate(row: pd.DataFrame, column: str) -> float | None:
 def resolve_record_flux(
     records: pd.DataFrame,
     *,
-    fallback_frame: RecordFluxFrame | None = None,
+    fallback_frame: FluxFrame | None = None,
 ) -> RecordFluxResolution:
     """Resolve flux using explicit -> row-frame -> fallback-frame precedence.
 
@@ -411,11 +315,25 @@ def resolve_record_flux(
     device facts or row frame. A complete row frame needs finite dev_value and
     positive flux_period, but no unit conversion. Only one non-null row-frame
     value raises an error naming the row and missing field; it cannot use
-    fallback. Fallback needs dev_value and dev_unit matching fallback_frame. Unknown and legacy fields are ignored,
+    fallback. A provided FluxFrame fallback must have exactly one device, even
+    for empty or explicit-only tables; errors report the device count. Fallback
+    needs dev_value and dev_unit matching that device's declared native unit.
+    Unknown and legacy fields are ignored,
     never aliased. Missing/unusable coordinates raise RecordTableV2Error naming
     fields and row indexes. The input table is not modified; empty tables resolve
     to empty values and provenance.
     """
+    if fallback_frame is not None and len(fallback_frame.devices) != 1:
+        raise RecordTableV2Error(
+            f"flat fallback requires exactly one device; got {len(fallback_frame.devices)}",
+            reason="invalid_fallback_device_count",
+            data={"count": len(fallback_frame.devices)},
+        )
+    fallback_device = (
+        next(iter(fallback_frame.devices.items()))
+        if fallback_frame is not None
+        else None
+    )
     values = np.empty(len(records), dtype=np.float64)
     sources: list[RecordFluxSource] = []
     unresolved: list[int] = []
@@ -451,11 +369,14 @@ def resolve_record_flux(
             continue
         if (
             fallback_frame is not None
+            and fallback_device is not None
             and DEV_UNIT_COLUMN in row
-            and row[DEV_UNIT_COLUMN].iloc[0] == fallback_frame.dev_unit
+            and row[DEV_UNIT_COLUMN].iloc[0] == fallback_device[1].unit
             and dev_value is not None
         ):
-            values[index] = fallback_frame.flux_from_dev_value(dev_value)
+            values[index] = flux_from_device_values(
+                fallback_frame, {fallback_device[0]: dev_value}
+            )
             sources.append("fallback-frame")
             continue
         unresolved.append(index)

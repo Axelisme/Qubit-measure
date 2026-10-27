@@ -14,10 +14,10 @@ from joblib import Parallel, delayed
 from numpy.typing import NDArray
 from tqdm.auto import tqdm
 
+from zcu_tools.analysis.flux import FluxFrame
 from zcu_tools.resources.qubit_params import QubitParams
 from zcu_tools.resources.record_table import (
     JsonlRecordTable,
-    RecordFluxFrame,
     project_device_coordinates,
     resolve_record_flux,
     validate_record_table_v2,
@@ -430,7 +430,7 @@ def add_real_sample(  # noqa: PLR0913
     flux: float = 0.5,
     rf_w: float = 7e-3,
     max_photon: int = 70,
-    fallback_frame: RecordFluxFrame | None = None,
+    fallback_frame: FluxFrame | None = None,
     *,
     samples: JsonlRecordTable,
     device_name: str,

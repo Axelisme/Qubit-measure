@@ -149,9 +149,7 @@ def _T2Echo_get_writeback_items(
                 description="T2 Echo record at the captured bias",
                 record={
                     "devices": {name: deepcopy(info) for name, info in devices.items()},
-                    "flux_frame": {
-                        name: dict(calibration) for name, calibration in frame.items()
-                    },
+                    "flux_frame": frame,
                     "run": {
                         "run_id": metadata.run_id,
                         "experiment": metadata.experiment,

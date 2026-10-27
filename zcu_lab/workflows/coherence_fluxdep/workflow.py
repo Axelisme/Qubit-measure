@@ -16,7 +16,7 @@ from zcu_tools.experiment.workflows import (
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2.modules import PulseCfg
 
-from zcu_lab.components.qubit import QubitFluxCalibration
+from zcu_lab.components.qubit import QubitFluxSchema
 from zcu_lab.workflows.coherence_fluxdep.history import (
     LifetimeHistory,
     LifetimeKind,
@@ -81,8 +81,8 @@ class CoherencePlan(T1Plan):
     GE shots after calibration and before lifetimes, without fitting.
     """
 
-    flux_frame: dict[str, QubitFluxCalibration] = Field(
-        description="Start-captured qubit flux block in native device units; empty means no calibration"
+    flux_frame: QubitFluxSchema = Field(
+        description="Start-captured {offset, period} block; offset is in Phi0, null means uncalibrated; each signed period uses device-native units per Phi0"
     )
     seed_flux: float | None = Field(
         default=None,

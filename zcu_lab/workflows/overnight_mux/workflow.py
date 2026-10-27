@@ -10,7 +10,7 @@ from zcu_tools.experiment.workflows import Live, WorkflowEnv, workflow
 from zcu_tools.program.v2 import ResetCfg
 from zcu_tools.program.v2.modules import MuxReadoutCfg
 
-from zcu_lab.components.qubit import QubitFluxCalibration
+from zcu_lab.components.qubit import QubitFluxSchema
 from zcu_lab.v2.support.lifetime_models import LifetimeModelRecord
 from zcu_lab.workflows.common.calibration_results import StageStatus
 from zcu_lab.workflows.common.relaxation import echo_relaxation
@@ -53,8 +53,8 @@ class OvernightMuxPlan(BaseModel):
     start_interval_s: float = Field(gt=0, description="Actual start spacing, seconds")
     points: int = Field(default=51, ge=5, description="Common delay samples per member")
     snapshot: RunSnapshot
-    flux_frames: dict[str, dict[str, QubitFluxCalibration]] = Field(
-        description="Start-captured flux blocks keyed by participant qubit name; empty blocks mean no calibration"
+    flux_frames: dict[str, QubitFluxSchema] = Field(
+        description="Start-captured {offset, period} blocks by qubit name; offset is in Phi0, null means uncalibrated; each signed period uses device-native units per Phi0"
     )
     result_path: Path | None = Field(
         default=None,
@@ -63,7 +63,7 @@ class OvernightMuxPlan(BaseModel):
 
     @model_validator(mode="after")
     def require_participant_frames(self) -> "OvernightMuxPlan":
-        """Reject absent participant frames before acquisition; empty blocks are valid."""
+        """Reject absent participant frames; offset=null is a valid uncalibrated frame."""
         for index, tone in enumerate(self.tones):
             if index in self.participants and tone.name not in self.flux_frames:
                 raise ValueError(f"{tone.name!r}: missing captured flux frame")

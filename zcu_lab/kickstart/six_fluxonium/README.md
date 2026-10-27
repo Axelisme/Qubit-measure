@@ -39,10 +39,10 @@ Entry 已存在時，腳本只重開並選取 `initial`，保留元件與 aliase
 | Q1–Q6 局部 DC flux | 無 | 各自的 `Q1_bias`–`Q6_bias` 線 |
 | MG123456 global coil | 無 | `coil_bias`，作用於六顆 qubit |
 
-每顆 Qi 引用同序號 Ri，`flux_source` 指向自己的 `Qi_bias`。
-Mux group 的 `flux_source` 指向 `coil_bias`。
+每顆 Qi 引用同序號 Ri，`flux_dev` 指向自己的 `Qi_bias`。
+Mux group 的 `flux_dev` 指向 `coil_bias`。
 局部線用來調整對應 qubit 的工作點，global coil 用來調整六顆 qubit 的工作點。
-Scalar flux 表單在 Open／Reset 從 `$qubit.flux_source` 取得局部線名稱，不需要 flux 裝置 alias，也不指向 global coil。
+Scalar flux 表單在 Open／Reset 從 `$qubit.flux_dev` 取得局部線名稱，不需要 flux 裝置 alias，也不指向 global coil。
 `qubit` alias 只選 scalar 表單的目標，不改變 mux group 的六顆順序。
 Mux 表單從 group wiring 取得 generator 與各 tone ADC，不從 resonator 的 pulse wiring 取得。
 
@@ -53,10 +53,10 @@ Q1–Q6 的 EJ／EC／EL 使用 GHz，R1–R6 名目頻率為 7000、7100、7200
 這些數值都是示意，量測後填入實測值。
 Group 的 `mixer_freq: 7250` MHz 是示意 LO 設定，使用前須確認硬體 LO 設定並更新。
 六顆 qubit 的 `freq` 與 resonator、mux group 的 `time_of_fly` 全部保留 null。
-Component 範本使用 `schema_version: 2`。每顆 qubit 的 `flux` 初始為 `{}`，不預填校準。
-Global coil 來源仍是 group 的 `flux_source: coil_bias`。
-校準後，writeback 向該 qubit 的 `flux.<實際被掃device>` 寫入完整的 `half/integer/period`，不替換其他 entries。
-例如 `Q1.flux.coil_bias` 使用 coil device 的原生單位，三欄都必填有限數字，period 非零且可帶負號。
+Component 範本使用 `schema_version: 3`。每顆 qubit 的 `flux` 初始為 `{offset: null, period: {}}`，不預填校準。
+Global coil 來源仍是 group 的 `flux_dev: coil_bias`。
+校準後，writeback 分開提出 `flux.period.<實際被掃device>` 與預設勾選的 `flux.offset`，不替換其他 periods。
+例如 `Q1.flux.period.coil_bias` 使用 coil 原生單位／Φ0，有限、非零且可帶負號。Offset 以 Φ0 表示，扣除其他有 period 且 snapshot 有值的儀器貢獻，note 列出值與扣除項。
 同次接受會另 append 一列原始擬合 record，保存 Run 的 devices 與原校準 frame。
 舊 entry 須先經[長期升級入口](../../../docs/parameter-upgrades.md)轉換，startup 不自動升級。
 

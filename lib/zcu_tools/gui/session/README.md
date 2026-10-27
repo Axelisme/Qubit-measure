@@ -219,7 +219,7 @@ Run、WB 與目前 point 的 Inspect Set 都要求先選取或建立工作點。
 ## 獨立 predictor
 
 `zcu.predictor` v1 的 `flux_half／flux_period／flux_bias` 是單一模型的 affine 座標，
-不是 component 的 `flux.<device>` 校準。Service、dialog 與 predictor RPC 不從 component
+不是 component 的 `flux: {offset, period}` 校準。Service、dialog 與 predictor RPC 不從 component
 或 alias 取得 frame，也不合成多 device 值。Device 訂閱只提供所選模型的 native 輸入值。
 Component flux 格式變更不改 predictor 檔案版本或這些參數的意義。
 
