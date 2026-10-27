@@ -337,7 +337,6 @@ class T6Kernel:
         ]
         return _pack(entries)
 
-
     def guard_prepared(
         self,
         table: SegmentTable,

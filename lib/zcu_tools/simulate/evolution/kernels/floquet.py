@@ -602,8 +602,6 @@ class FloquetKernel:
         """Return validity for two constant tones, never reading initial density."""
         return self.guard_prepared(table, rows, context).accepted
 
-
-
     def guard_prepared(
         self,
         table: SegmentTable,

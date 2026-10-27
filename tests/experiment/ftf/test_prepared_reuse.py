@@ -422,9 +422,7 @@ def test_preparation_hits_reemit_accuracy_warning_and_keep_numeric_identity():
             return result
 
     kernels = tuple(ExceedingIdle() if k.name == "t4" else k for k in REGISTRY)
-    source = FTFSource(
-        settings(), DeviceManager(), engine=Engine(1, kernels=kernels)
-    )
+    source = FTFSource(settings(), DeviceManager(), engine=Engine(1, kernels=kernels))
     try:
         with pytest.warns(RuntimeWarning, match="segment accuracy check exceeded"):
             draw(source)

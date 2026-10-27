@@ -182,9 +182,7 @@ def test_constant_singleton_avoids_unamortized_product_build():
 
 
 @pytest.mark.parametrize("workers", [1, 2])
-def test_rejected_unique_common_keys_preserve_shared_fallback_preparation(
-    workers
-):
+def test_rejected_unique_common_keys_preserve_shared_fallback_preparation(workers):
     # Six levels make the cold common price competitive even without key reuse.
     # Identity kernels isolate fallback sharing from numerical admission policy.
     zero = np.zeros((6, 6), dtype=np.complex128)
@@ -226,9 +224,7 @@ def test_rejected_unique_common_keys_preserve_shared_fallback_preparation(
 
     common = RejectedCommon()
     fallback_kernel = RecordingKernel("multitone_rwa")
-    with closing(
-        Engine(workers, kernels=(common, fallback_kernel))
-    ) as engine:
+    with closing(Engine(workers, kernels=(common, fallback_kernel))) as engine:
         result = run(engine, source, timeline)
     assert result.paths.segments_by_kernel == {"multitone_rwa": 4}
     assert common.admission_rows == 4

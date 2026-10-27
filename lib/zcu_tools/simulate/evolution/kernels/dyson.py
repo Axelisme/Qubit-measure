@@ -843,7 +843,6 @@ class DysonKernel:
             tuple(_prepare_model(table.model(source, row)) for row in rows)
         )
 
-
     def guard_prepared(
         self,
         table: SegmentTable,

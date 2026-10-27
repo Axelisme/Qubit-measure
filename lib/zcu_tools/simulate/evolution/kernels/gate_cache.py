@@ -225,7 +225,6 @@ class GateCacheKernel:
             array.setflags(write=False)
         return _GatePrepared(*arrays)
 
-
     def guard_prepared(
         self,
         table: SegmentTable,

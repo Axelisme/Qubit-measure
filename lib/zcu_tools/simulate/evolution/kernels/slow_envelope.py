@@ -146,7 +146,6 @@ class SlowEnvelopeKernel:
             channels.append(_Channel(u, p, c))
         return _Prepared(tuple(channels))
 
-
     def guard_prepared(
         self, table: SegmentTable, rows: NDArray[np.int64], context: KernelContext
     ) -> None:

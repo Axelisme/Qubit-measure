@@ -230,7 +230,6 @@ class DOP853Kernel:
         ]
         return prepare_models(models)
 
-
     def guard_prepared(
         self,
         table: SegmentTable,

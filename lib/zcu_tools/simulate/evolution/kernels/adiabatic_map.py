@@ -239,7 +239,6 @@ class AdiabaticMapKernel:
         factors.setflags(write=False)
         return _Prepared(factors)
 
-
     def guard_prepared(
         self, table: SegmentTable, rows: NDArray[np.int64], context: KernelContext
     ) -> None:

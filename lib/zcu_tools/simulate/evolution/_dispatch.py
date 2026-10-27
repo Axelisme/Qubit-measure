@@ -622,6 +622,4 @@ def classify(
     deferred rows without a nested pool, retaining guard products for apply.
     Both modes use the same acquire-wide cost plan and numerical guards.
     """
-    return _Classifier(
-        geometry, kernels, context, pool, selection
-    ).classify()
+    return _Classifier(geometry, kernels, context, pool, selection).classify()

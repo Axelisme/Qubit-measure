@@ -890,7 +890,6 @@ class FloquetPeriodKernel:
             entries.append(_prepare_entry(model, _Tone(port, frequency, gain), context))
         return _Periods(tuple(entries))
 
-
     def guard_prepared(
         self,
         table: SegmentTable,

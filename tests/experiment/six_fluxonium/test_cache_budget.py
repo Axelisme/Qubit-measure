@@ -35,9 +35,7 @@ def backend(**limits: int):
 @pytest.mark.parametrize(("total", "retained"), [(6000, False), (600_000, True)])
 def test_routing_budget_is_divided_and_never_authorizes_another_source(total, retained):
     key = b"complete-caller-content" * 100
-    with backend(
-        routing_cache_bytes=total
-    ) as owner:
+    with backend(routing_cache_bytes=total) as owner:
         for single in owner.sources:
             src = source()
             single.engine.evolve(src, (batch(1),), cancel=Event(), reuse_key=key)

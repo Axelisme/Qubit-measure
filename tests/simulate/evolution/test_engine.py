@@ -645,9 +645,7 @@ def test_shared_dyson_is_bitwise_chunk_independent_and_source_local():
     outputs = []
     for workers, chunks in ((1, 1), (1, 3), (2, 1), (2, 4)):
         with closing(
-            Engine(
-                workers, kernels=(DysonKernel(), T4()), chunks_per_worker=chunks
-            )
+            Engine(workers, kernels=(DysonKernel(), T4()), chunks_per_worker=chunks)
         ) as engine:
             result = engine.evolve(src, (b,), cancel=Event())
             changed = engine.evolve(other, (b,), cancel=Event())

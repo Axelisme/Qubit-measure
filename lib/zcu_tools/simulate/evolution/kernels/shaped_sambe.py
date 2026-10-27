@@ -429,7 +429,6 @@ class ShapedSambeKernel:
             convergence,
         ), convergence
 
-
     def guard_prepared(
         self,
         table: SegmentTable,

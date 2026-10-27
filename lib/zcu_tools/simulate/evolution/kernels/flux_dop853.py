@@ -194,7 +194,6 @@ class FluxDOP853Kernel:
             raise ValueError("flux expansion loop exceeds waveform width")
         return _Prepared(source, _pack_expansion(expansion), len(keys))
 
-
     def guard_prepared(
         self,
         table: SegmentTable,

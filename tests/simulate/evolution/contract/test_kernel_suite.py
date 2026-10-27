@@ -87,7 +87,6 @@ class DemoKernel:
             )
         )
 
-
     def guard_prepared(self, table, rows, context: KernelContext) -> None:
         """Keep the ordinary guard path for this test collaborator."""
         source, budget = context.source, context.budget

@@ -105,7 +105,9 @@ def _build_facts(
         slow_envelope_segments_per_period=settings.numerics.slow_envelope_segments_per_period,
     )
     try:
-        return SingleFluxoniumFacts(model, source, readout_model(settings, model, source))
+        return SingleFluxoniumFacts(
+            model, source, readout_model(settings, model, source)
+        )
     except Exception:
         source.close()
         raise
@@ -223,11 +225,7 @@ class SingleFluxoniumSource:
         self._drift: CoherenceDrift | None = None
         self._effective_settings = settings
         self._pending_acquire = False
-        self.engine = (
-            Engine(workers=1)
-            if runtime.engine is None
-            else runtime.engine
-        )
+        self.engine = Engine(workers=1) if runtime.engine is None else runtime.engine
         self._prepared: SingleFluxoniumPreparation | None = None
         self._session: SingleFluxoniumAcquire | None = None
         self._source_device = devices.get_all_devices().get(

@@ -189,7 +189,6 @@ class PeriodTableKernel:
             )
         return PeriodPrepared(tuple(entries))
 
-
     def guard_prepared(
         self,
         table: SegmentTable,

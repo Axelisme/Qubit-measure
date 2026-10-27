@@ -116,7 +116,6 @@ class T4:
         coherence.setflags(write=False)
         return _Static(population, coherence)
 
-
     def guard_prepared(
         self,
         table: SegmentTable,
