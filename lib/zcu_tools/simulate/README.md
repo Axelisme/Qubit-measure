@@ -1,8 +1,8 @@
 # Numeric simulation tools
 
-**Last updated:** 2026-10-23，Numba 工具 import 與 basic 工具邊界
+**Last updated:** 2026-10-27 (UTC)，演化 preparation lifetime
 
-**讀者：** framework-dev。查閱數值模擬的責任邊界、快取契約與效能證據入口。
+**讀者：** framework-dev、agent。查閱數值模擬的責任邊界、快取契約與效能證據入口。
 
 `evolution` and `adc` are independent numeric tools. Neither imports QICK,
 DeviceManager, resources, GUI, YAML or an environment. The existing fluxonium
@@ -90,7 +90,7 @@ removes them; importing a Numba tool does not prune them.
 
 Existing `cache=True` dispatchers can load machine code on a later launch with
 matching sources, versions and signatures. This does not persist physical
-results, density matrices or noisy IQ. Engine model/prepare/result caches remain
+results, density matrices or noisy IQ. ModelSource models and caller-retained preparations remain
 process-local and retain their existing lifetimes. ADC raw-path dispatchers with
 `cache=False` still compile in each process. No solver, kernel or precision
 policy changes.
@@ -184,7 +184,7 @@ owns shared numeric nearest-even int64 conversion and shot-axis layout. Program
 owns the RawShots protocol, channel declaration order and acquisition normalization.
 Core statistics remain pure data. Deferred raw does no work during mean draws;
 its full CTMC paths use a separate stream and are not shifted to direct totals. [`evolution`](evolution/README.md) uses the segment engine's fast
-algorithms by default and retains prepared data in memory. It does not read or
+algorithms by default and shares prepared data within one evolve. It does not read or
 write an offline U-table library or persistent density records. Private replay
 recomputes from archived inputs under matching numeric and RNG versions.
 

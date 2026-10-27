@@ -87,9 +87,6 @@ class DemoKernel:
             )
         )
 
-    def admit_prepared(self, prepared, table, rows, context) -> None:
-        """Decline cached-domain admission in this synthetic collaborator."""
-        del prepared, table, rows, context
 
     def guard_prepared(self, table, rows, context: KernelContext) -> None:
         """Keep the ordinary guard path for this test collaborator."""

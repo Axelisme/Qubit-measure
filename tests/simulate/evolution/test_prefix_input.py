@@ -79,7 +79,7 @@ def batch():
 
 def engine(kernel):
     return Engine(
-        1, 100000, kernels=tuple(kernel if k.name == "dyson" else k for k in REGISTRY)
+        1, kernels=tuple(kernel if k.name == "dyson" else k for k in REGISTRY)
     )
 
 
@@ -151,7 +151,7 @@ def test_plateau_routing_preserves_reusable_dyson_inputs(history):
         expected = {"floquet_period": 2, "dyson": 2, "t4": 2}
     # Isolate period/Dyson input reuse from the constant single-tone RWA route.
     kernels = tuple(k for k in REGISTRY if k.name != "single_tone_rwa")
-    with closing(Engine(1, 100000, kernels=kernels)) as solver:
+    with closing(Engine(1, kernels=kernels)) as solver:
         result = solver.evolve(src, (b,), cancel=Event())
     assert result.paths.segments_by_kernel == expected
 
@@ -164,7 +164,7 @@ def test_distinct_long_plateau_retains_dyson():
     )
     b = replace(b, end_ns=np.full(2, 10004.0))
     b = replace(b, tracks=(pre, probe))
-    with closing(Engine(1, 100000)) as solver:
+    with closing(Engine(1)) as solver:
         result = solver.evolve(src, (b,), cancel=Event())
     assert result.paths.segments_by_kernel == {"floquet_period": 2, "dyson": 2, "t4": 2}
 
@@ -297,7 +297,7 @@ def test_nested_shared_prefixes_use_their_own_known_input():
     )
     replacements = {k.name: k for k in (kernel, NestedPeriod(), NestedIdle())}
     with closing(
-        Engine(1, 100000, kernels=tuple(replacements.get(k.name, k) for k in REGISTRY))
+        Engine(1, kernels=tuple(replacements.get(k.name, k) for k in REGISTRY))
     ) as solver:
         result = solver.evolve(src, (b,), cancel=Event())
     inputs = {float(start): rho for start, rho in applications}

@@ -114,7 +114,7 @@ def test_engine_reuses_guard_preparations_once_per_key(
     )
     counted = CountingFloquet()
     rejected_direct = RecordingKernel("dop853", accepts=False)
-    with closing(Engine(1, 0, kernels=(counted, rejected_direct))) as engine:
+    with closing(Engine(1, kernels=(counted, rejected_direct))) as engine:
         actual = engine.evolve(case.source, (batch,), cancel=Event())
         assert actual.paths.segments_by_kernel == {"floquet": count}
         assert len(counted.prepared_keys) == len(set(counted.prepared_keys)) == 1

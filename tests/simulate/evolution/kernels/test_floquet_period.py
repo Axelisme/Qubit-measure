@@ -172,7 +172,6 @@ def test_engine_dispatches_rejected_dyson_rows_to_hilbert_period() -> None:
     timeline = replace(batch(2, duration=0.6), tracks=(pulse, later))
     engine = Engine(
         1,
-        100000,
         kernels=(
             RecordingKernel("dyson", accepts=False),
             FloquetPeriodKernel(),
@@ -204,7 +203,7 @@ def test_engine_dispatches_low_carrier_strong_and_unknown_inputs() -> None:
     )
     later = replace(pulse, start_ns=np.full(1, 8.7), phase_rad=np.full(1, 5.9))
     result = run(
-        Engine(1, 100000),
+        Engine(1),
         source,
         (replace(batch(1, duration=17.4), tracks=(pulse, later)),),
     )
@@ -213,7 +212,7 @@ def test_engine_dispatches_low_carrier_strong_and_unknown_inputs() -> None:
 
     weak = replace(pulse, amplitude=np.full(1, 1e-7))
     result = run(
-        Engine(1, 100000),
+        Engine(1),
         source,
         (replace(batch(1, duration=8.7), tracks=(weak,)),),
     )

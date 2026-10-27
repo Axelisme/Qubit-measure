@@ -673,14 +673,6 @@ class CovariantGateKernel:
             a.setflags(write=False)
         return prepared
 
-    def admit_prepared(
-        self,
-        prepared: Prepared,
-        table: SegmentTable,
-        rows: NDArray[np.int64],
-        context: KernelContext,
-    ) -> None:
-        """No guard-built payload; ordinary guards always recheck current rows."""
 
     def guard_prepared(
         self, table: SegmentTable, rows: NDArray[np.int64], context: KernelContext

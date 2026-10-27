@@ -38,7 +38,7 @@ Kernel 擁有需要數值中間結果的 certificate，並向 dispatch 回報 ac
 Dispatch 合併每個 family 的唯讀 `RowPlan`。
 Scheduler 原樣傳遞 plan，以 `ApplyContext` 提供給 apply，不理解 plan 的數值內容。
 Apply 消費已完成的 admission 與 frame／chain 決策，不依當次 apply 子集重新分類。
-這些 plans 只活在一次 evolve，不進 model-only prepare LRU，也不留在 kernel state。
+這些 plans 只活在一次 evolve，也不留在 kernel state。
 
 ### 算法內聚，共用數值有單一 owner
 
@@ -61,6 +61,31 @@ Shaped/callable 路徑、末態場與主分支選擇不進 memo。
 跨 package 依賴方向沿用 [[0072]]，由 `.importlinter` 的 C8 分層、C9 無循環與
 C12 穩定工具不依賴有狀態模組檢查。本決策不新增依賴方向，也不放寬 ignore_imports。
 Package root 的對外入口規則由介面與 caller review 維持；上述 contracts 不檢查內部子模組的匯入路徑。
+
+### 損耗漂移下的結構與 preparation lifetime
+
+2026-10-27（UTC），advisor 的 before-accepted ruling：
+「保留 single 的 _models／_prepared 與 FTF acquire-local 的 CavityAverageCache；拆 _facts 為結構與 rates。」
+
+Single CPMG、six 與 FTF 的代表性 acquisition 在指定三層都沒有同次命中。
+這不是所有 workload 的普遍命中率宣稱。刪除 Engine 的 `prepare_cache`、
+`result_memo` 與 source 的 `readout_cache`。Engine 不保留跨 evolve 的 prepare
+payload 或 exact result，source 不保留跨 preparation 的 ADC solver。
+未漂移的 FTF 重複 acquisition 若需要重算，接受這個代價。
+
+Single 的完整 ModelSource models 與 caller-owned preparation 仍可重用。
+`simulate.fluxonium.SingleFluxoniumModel` 擁有損耗無關的 Hamiltonian 投影、
+eigensystem 與 dressed readout frequencies。Experiment 只組合 owner 的結果。
+損耗改變時，source 保留結構，關閉舊 ModelSource 並清除完整 preparation，
+再依本次 acquisition 的固定 losses 建立 rates。溫度、DC、truncation 或其他
+結構依賴改變時，source 丟棄結構。Dissipative propagator、density 與完整
+preparation 不得跨不同 losses 重用。
+
+Engine 的 routing-facts cache 只驗證 caller-owned preparation 的當前 route。
+它保留 inventory 與 pricing facts，不保留數值傳播結果。
+FTF 的 complete preparation LRU、envelope fingerprints 與上述 acquire-local
+`CavityAverageCache` 不屬於已刪三層。抽樣 RNG、raw 與 replay 的契約不變。
+依賴方向仍由 C8、C9、C12、C19 保護，沒有新增 package edge 或例外。
 
 ### Integrated raw 由環境生成，介面由 program 擁有
 
@@ -87,7 +112,7 @@ ADC 和 white_noise 各自生成完整 raw，包含物理訊號、receiver noise
 每次跳躍沿用原有腔場，不重設 vacuum。
 直接平均維持 conditional moments 和既有 RNG stream，不做逐 shot 工作。
 Raw 和直接平均只要求期望一致，不平移 raw 以匹配有限 shots 的平均 realization。
-Prepare cache 只存 noiseless inputs，不存 noisy shots 或 round identity。
+Caller 保留的完整 preparation 只存 noiseless inputs，不存 noisy shots 或 round identity。
 
 ## 取捨
 

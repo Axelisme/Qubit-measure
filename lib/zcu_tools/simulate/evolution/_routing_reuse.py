@@ -98,18 +98,6 @@ class RoutingReuse:
         self.entries: OrderedDict[bytes, tuple[RoutingSnapshot, int]] = OrderedDict()
         self.resident_bytes = 0
 
-    def remember_independent(
-        self, key: bytes | None, source: ModelSource, budget: float, content: bytes
-    ) -> None:
-        # A raw-input result hit has no cumulative candidates. No geometry or
-        # policy facts are needed to validate the caller's independent result.
-        self.add(
-            key,
-            RoutingSnapshot(
-                ref(source), budget, content, (), (), (), (), (), frozenset()
-            ),
-        )
-
     def snapshot(
         self, key: bytes | None, table: SegmentTable, context: KernelContext
     ) -> RoutingSnapshot | None:

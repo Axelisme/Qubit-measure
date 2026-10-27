@@ -266,7 +266,7 @@ def _multitone(name: str) -> None:
 
 
 def _evolve(source: ModelSource, batch: TimelineBatch, *, budget: float = 1e-3) -> None:
-    engine = Engine(1, 0)
+    engine = Engine(1)
     try:
         engine.evolve(source, (batch,), budget=budget, cancel=Event())
     finally:
@@ -290,7 +290,7 @@ def _floquet_probe_windows() -> None:
         np.zeros((2, 2)),
     )
     source = ModelSource(np.diag([0.8, 0.2]).astype(complex), lambda _: model)
-    engine = Engine(1, 8_000_000)
+    engine = Engine(1)
     try:
         for shift in (0.0, 0.004):
             batch = _batch(
@@ -409,7 +409,7 @@ def _joint_gate() -> None:
     companion = replace(
         batch.tracks[0], frequency_ghz=np.full(24, 2.0), phase_rad=np.full(24, 0.71)
     )
-    engine = Engine(1, 0)
+    engine = Engine(1)
     try:
         engine.evolve(
             _source(),

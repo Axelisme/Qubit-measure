@@ -1,8 +1,8 @@
 # Six independent fluxonium cavities
 
-**Last updated:** 2026-10-27, independent coherence drift
+**Last updated:** 2026-10-27 (UTC), routing-only residency allowance
 
-**Readers:** framework-dev, lab-author. Build and acquire six independent cavities through the normal simulation SoC.
+**Readers:** framework-dev, lab-author, agent. Build and acquire six independent cavities through the normal simulation SoC.
 
 `six_fluxonium(configuration)` accepts `SixFluxoniumSettings` or a YAML path and
 returns `SimulationEnvironment`. The builder creates seven addressed FakeDevices
@@ -29,24 +29,17 @@ noiseless ADC inputs after later acquisitions and backend close.
 
 ## Cache budgets
 
-Top-level `numerics` sets residency caps in bytes for the whole environment.
-The demo's `default.yaml` sets `prepare_cache_bytes` to 768 MiB,
-`result_memo_bytes` to 64 MiB and `routing_cache_bytes` to 4 MiB.
-Each of the six independent Engines receives one sixth of each total, rounded
-down, giving each Engine 128 MiB for prepare. At most five bytes per total
-remain unused.
-Prepare and memo keys include the complete physical model identity and numeric
-budget. Routing reuse also requires the same source instance.
+Top-level `numerics.routing_cache_bytes` sets the environment-wide routing-facts
+allowance, default 4 MiB. Each Engine receives one sixth, rounded down, with at
+most five bytes unused. Zero disables routing retention. The value is a
+nonnegative integer without a fixed upper bound. Routing reuse also requires
+the same source instance.
 
-`adc_cache_bytes` defaults to 8 MiB per source and is not divided.
-The demo settings therefore allow at most 884 MiB of cache residency across six
-sources, including estimated metadata. Zero disables the corresponding cache.
-All fields accept nonnegative integers, with no fixed upper bound.
-Oversized products still compute but do not remain resident. Cache eviction
-changes repeated work, not physical inputs, results or random streams.
-Models, active preparations, scratch and GUI/native allocations are outside
-these caps. They are not a process RSS limit.
-The single-fluxonium environment keeps its original per-source defaults.
+Engine numerical preparations and ADC solvers are local to their current work.
+Single sources retain loss-independent structure and their complete preparation
+under the [single-source lifetime contract](../single_fluxonium/README.md#reuse-and-lifetime).
+Models, complete preparations, scratch and GUI/native allocations are outside
+the routing cap. It is not a process RSS limit.
 
 ## Routing and acquisition
 

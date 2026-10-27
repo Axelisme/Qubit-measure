@@ -1,8 +1,8 @@
 # FTF environment composition
 
-**Last updated:** 2026-10-24, physical-time pacing
+**Last updated:** 2026-10-27 (UTC), evolve-local preparations and conditional solvers
 
-**讀者：** lab-author。FTF 環境的組裝、數值接線與 acquisition 設定。
+**讀者：** lab-author、framework-dev、agent。FTF 環境的組裝、數值接線與 acquisition 設定。
 
 `ftf(path_or_settings, *, workers=1, warmup=False)` builds the same `SimulationEnvironment` for GUI startup
 and Notebook callers. It creates fixed-unit V/A `FakeDevice` sources in one
@@ -22,7 +22,7 @@ builder with an explicit YAML path. Neither caller uses an environment wrapper.
 - [Routing telemetry](#routing-telemetry)
 - [Numeric source](#numeric-source)
   - [Workers and engine budget](#workers-and-engine-budget)
-  - [Physical facts and readout cache](#physical-facts-and-readout-cache)
+  - [Physical facts and conditional readout](#physical-facts-and-conditional-readout)
 - [Startup preparation](#startup-preparation)
 - [Acquisition and numeric composition](#acquisition-and-numeric-composition)
   - [Preparation reuse](#preparation-reuse)
@@ -105,9 +105,9 @@ class-retained driver, preserving V/A units and current values.
 ### Workers and engine budget
 
 The segment engine's fast algorithms are the default numeric path.
-One source owns one `Engine`, whose 2 GiB resident/pending prepare budget survives across
-acquires. This shared byte budget counts retained model-only payload arrays, not total
-process memory; workspaces, active references and ADC allocations remain separate.
+One source owns one `Engine` with a 4 MiB routing-facts allowance.
+Numerical preparations live within one evolve. The source's complete preparation
+LRU remains separate from Engine and does not retain noisy outputs.
 The keyword `workers` selects the engine's sole parallel width; direct callers
 use one worker by default. GUI startup explicitly uses `workers=1`.
 The Notebook example selects `max(1, (os.cpu_count() or 1) - 2)` workers,
@@ -118,25 +118,22 @@ process-level reference count: the first sets the limit and the last restores
 it. Do not independently change threadpoolctl limits while an evolve is active.
 Empty work, one timeline, and `workers=1` run serially without a joblib pool.
 Other calls own a threading pool only during `evolve`; no idle pool survives.
-`FTFSource.close()` clears preparations, model-source cumulative gate usage and the engine cache. Dropping the
+`FTFSource.close()` clears preparations, model-source cumulative gate usage and the engine's routing facts. Dropping the
 environment also releases this in-memory state; no disk cache is involved.
 
-### Physical facts and readout cache
+### Physical facts and conditional readout
 
 The source retains at most one snapshot's `FTFModelFacts` across acquires.
 The exact key includes full settings, the entire snapshot and backend/numeric
 revisions. Facts own the joint projection, Gibbs/source, DC eigen/bath memo and
-neutral readout model. All templates share these physical inputs. Evolved densities remain acquire/template data. A source also owns an 8 MiB
-`ReadoutCache` for ADC solvers, ConstantLine facts and exact conditional responses.
-Full numeric model, receiver and solver tolerances select a canonical immutable
-model and solver. Existing pulse/grid keys preserve absolute starts, carrier
-phases, demodulation and opaque callback identity. Different T1 readout starts
-reuse physical facts but compute their own sums. Every round still samples IQ.
-The byte limit counts keys, traces, nested line caches and whole allocations held
-by array views. Oversized solvers are evicted whole after the response returns.
-A changed physical-facts key clears readout residents, including on settings,
-snapshot or numeric revision changes. Close clears them too. No projected
-operators, rates or readout response cross flux points.
+neutral readout model. All templates share these physical inputs.
+Evolved densities remain acquire/template data. Each preparation constructs
+`ConditionalReadout` for its current numeric model, receiver and tolerances.
+The complete preparation LRU retains conditional sums, not the ADC solver.
+Pulse/grid timing, carrier phases, demodulation and opaque callback identity
+keep their existing meanings. Every round still samples IQ.
+Settings, snapshot or numeric changes replace physical facts and invalidate
+complete preparations. No projected operators or rates cross flux points.
 
 ## Startup preparation
 
@@ -211,8 +208,8 @@ software rounds remain one preparation. The public
 `source.preparation_cache` reports cumulative `builds`, `hits` and `resident_bytes`.
 Its `max_bytes` can be adjusted between calls; zero disables residency. The budget
 counts Python containers/keys and whole ndarray allocations, including bases of
-views. Active/caller references are separate from resident budgets. Bounded ADC
-solvers and exact contents also remain source-owned. A separate source-owned
+views. Active/caller references are separate from resident budgets.
+Conditional ADC solvers are request-local. A separate source-owned
 32 MiB `envelope_encoder` retains a domain-separated SHA256 fingerprint for each
 resident immutable `PulseEnvelope`. The full binary content (types, dtypes,
 shapes, sample times and complex values) is hashed once on a miss. Each outer key
@@ -375,9 +372,9 @@ Discrete sample covariance is PSD/dt_ns using the ADC output rate. Receiver gain
 does not scale noise. Integrated acquisition returns `IntegratedRound` with pure
 `RoundStatistics` and an ADC-owned RawShots source. Counts remain shared across
 all ADCs/reads, with separate direct totals. ADC retains noiseless model/pulse/grid
-inputs for delayed raw; no shot paths or noisy outputs enter prepare caches.
+inputs for delayed raw; no shot paths or noisy outputs enter retained preparations.
 The raw source retains its round's physical inputs and sampling identity after
-later rounds, prepare-cache eviction and `FTFSource.close()`. A program getter
+later rounds, preparation eviction and `FTFSource.close()`. A program getter
 uses that source without capturing devices or rerunning evolution/readout
 preparation. It cannot switch to another program's more recent round.
 The same physical inputs feed ADC's required batch-based trace interface in

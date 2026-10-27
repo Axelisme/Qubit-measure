@@ -54,17 +54,14 @@ from ..kernel import (
     Prepared,
     RowPlan,
     SegmentTable,
-    prepared_key_indices,
 )
 from ..secular import SecularModel
-from ..workplan import FactKey
 from . import _floquet_k0
 from . import _floquet_sidebands as sb
 from ._floquet_policy import (
     MAX_PHASE_SAMPLES,
     MAX_SAMPLING_RATIO,
     phase_sample_count,
-    probe_bin_center,
 )
 from ._secular import coherence_decay
 
@@ -119,55 +116,6 @@ class _Prepared:
     @property
     def nbytes(self) -> int:
         return self.keys.nbytes + sum(entry.nbytes for entry in self.entries)
-
-
-@dataclass(frozen=True)
-class _Certificates:
-    values: tuple[tuple[int, sb.Certificate], ...]
-
-
-def _extend_entry(
-    entry: _Entry, parameters: NDArray[np.float64], context: KernelContext
-) -> _Entry:
-    """Union missing complete-bin certificates without copying the cached frame."""
-    frame = entry.sidebands
-    if frame is None:
-        # Legacy-only frames did not retain Fourier candidates. Reconstructing
-        # them from rotations would change rounding, so retain the normal miss.
-        return entry
-    _, eligible = _admission(entry, parameters, context.budget)
-    bins = {(port, certificate.center) for port, certificate in frame.certificates}
-    missing = np.array(
-        [
-            use and (int(p[-1]), float(probe_bin_center(p[3]))) not in bins
-            for p, use in zip(parameters, eligible, strict=True)
-        ],
-        dtype=bool,
-    )
-    if not missing.any():
-        return entry
-    parameters = parameters[missing]
-    # Every caller uses the complete table inventory, not its worker subset.
-    # Publish only small new certificates: WorkPlan copies facts on publication.
-    fact = FactKey(
-        ("floquet-certificates", id(entry), context.budget, parameters.tobytes()),
-        _Certificates,
-    )
-    extra = context.work_plan.fact(
-        fact,
-        lambda: _Certificates(
-            sb.prepare(
-                frame, entry.lam, entry.modes, entry.inverse, parameters
-            ).certificates
-        ),
-    )
-    certificates = tuple(
-        sorted(
-            frame.certificates + extra.values,
-            key=lambda pair: (pair[0], pair[1].center),
-        )
-    )
-    return replace(entry, sidebands=replace(frame, certificates=certificates))
 
 
 @dataclass(frozen=True)
@@ -654,91 +602,7 @@ class FloquetKernel:
         """Return validity for two constant tones, never reading initial density."""
         return self.guard_prepared(table, rows, context).accepted
 
-    def extend_prepared(
-        self,
-        prepared: Prepared,
-        table: SegmentTable,
-        context: KernelContext,
-    ) -> _Prepared:
-        """Extend cached frames to this complete table's missing probe bins exactly.
 
-        The caller must supply a payload from the same whole source, budget and
-        kernel revision. Only keys already in the payload participate. Existing
-        certificates and large frame arrays are borrowed unchanged; new immutable
-        certificates use the original calculation. Concurrent calls single-flight
-        new certificates through this evolve's WorkPlan and use the same full-table
-        union, independent of worker completion order. No row admission is retained.
-        A fully covered payload is returned unchanged. Legacy-only frames lacking
-        Fourier candidates remain unchanged and use the ordinary domain miss.
-        A different family's payload raises TypeError.
-        """
-        if not isinstance(prepared, _Prepared):
-            raise TypeError("Floquet requires its own prepared payload")
-        rows = np.arange(len(table.timeline), dtype=np.int64)
-        rows = rows[_candidate_positions(table, rows)]
-        keys = self.prepare_keys(table, rows, context)
-        parameters = _parameters(table, rows)
-        entries = tuple(
-            _extend_entry(entry, parameters[keys == key], context)
-            for key, entry in zip(prepared.keys, prepared.entries, strict=True)
-        )
-        if all(a is b for a, b in zip(entries, prepared.entries, strict=True)):
-            return prepared
-        return _Prepared(entries, prepared.keys)
-
-    def admit_prepared(
-        self,
-        prepared: Prepared,
-        table: SegmentTable,
-        rows: NDArray[np.int64],
-        context: KernelContext,
-    ) -> GuardResult | None:
-        """Readmit current rows only if all needed probe-bin certificates exist.
-
-        A missing frame key or any required (probe port, 2 MHz bin) returns None.
-        Otherwise use only immutable frame data to produce fresh row decisions
-        and plans, including complete rejection. No frame or certificate is built.
-        """
-        if not isinstance(prepared, _Prepared):
-            raise TypeError("Floquet requires its own prepared payload")
-        accepted = np.zeros(len(rows), dtype=bool)
-        positions = _candidate_positions(table, rows)
-        if not len(positions):
-            return GuardResult(accepted)
-        selected = rows[positions]
-        keys = self.prepare_keys(table, selected, context)
-        indices = prepared_key_indices(prepared.keys, keys)
-        if indices is None:
-            return None
-        parameters = _parameters(table, selected)
-        admissions: dict[int, FloquetAdmission] = {}
-        for index, entry in enumerate(prepared.entries):
-            members = np.array(
-                [i for i, key in enumerate(keys) if indices[key.tobytes()] == index],
-                dtype=np.int64,
-            )
-            if not len(members):
-                continue
-            _, eligible = _admission(entry, parameters[members], context.budget)
-            if eligible.any():
-                if entry.sidebands is None:
-                    return None
-                bins = {(port, c.center) for port, c in entry.sidebands.certificates}
-                if any(
-                    (int(p[-1]), float(probe_bin_center(p[3]))) not in bins
-                    for p in parameters[members[eligible]]
-                ):
-                    return None
-            passed, plans = _entry_admission(
-                entry, parameters[members], selected[members], context.budget
-            )
-            accepted[positions[members]] = passed
-            admissions.update(plans)
-        return GuardResult(
-            accepted,
-            (GuardPreparation(prepared.keys, prepared),),
-            FloquetPlan(admissions),
-        )
 
     def guard_prepared(
         self,

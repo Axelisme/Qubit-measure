@@ -50,7 +50,7 @@ def test_undriven_motion_has_its_own_domain_without_changing_driven_routes():
         original.model,
         FluxExpansion(np.diag([0.0, 0.1, 0.4]).astype(complex), ()),
     )
-    result = run(Engine(1, 0, kernels=kernels), src, (fixed, moving, plateau, driven))
+    result = run(Engine(1, kernels=kernels), src, (fixed, moving, plateau, driven))
     assert result.paths.segments_by_kernel == {
         "t4": 1,
         "adiabatic_map": 1,
@@ -130,12 +130,12 @@ def silent_track(duration):
     )
 
 
-def evolve(src, timeline, *, reference=False, cache_bytes=0):
+def evolve(src, timeline, *, reference=False):
     if reference:
         timeline = replace(
             timeline, tracks=(*timeline.tracks, silent_track(float(timeline.end_ns[0])))
         )
-    engine = Engine(1, cache_bytes)
+    engine = Engine(1)
     try:
         return engine.evolve(src, (timeline,), budget=1e-6, cancel=Event())
     finally:
@@ -167,7 +167,7 @@ def test_ramp_partition_and_quantized_bath_gauges_do_not_add_t5_projections():
             np.array([[0], [333], [667]]),
         ),
     )
-    actual = evolve(src, split, cache_bytes=100000)
+    actual = evolve(src, split)
     unsplit = evolve(src, timeline)
     np.testing.assert_allclose(actual.densities, unsplit.densities, atol=2e-6, rtol=0)
     assert actual.paths.segments_by_kernel == {"adiabatic_map": 3}

@@ -49,10 +49,7 @@ def test_per_qubit_drift_accepts_positive_losses_and_rejects_disabled_targets():
 @pytest.mark.parametrize(
     "field",
     [
-        "prepare_cache_bytes",
-        "result_memo_bytes",
         "routing_cache_bytes",
-        "adc_cache_bytes",
     ],
 )
 @pytest.mark.parametrize("value", [-1, True, 1.5, "1024"])

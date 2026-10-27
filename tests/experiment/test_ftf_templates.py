@@ -74,7 +74,7 @@ def test_template_engine_paths_match_strict_secular_reference(
         ),
     )
     plan = ftf.plan_template(settings(), snapshot(), tiny)
-    engine = Engine(1, 1_000_000)
+    engine = Engine(1)
     try:
         actual = engine.evolve(plan.source, (plan.batch,), cancel=Event())
     finally:
@@ -138,7 +138,7 @@ def test_readout_ignores_controls_after_start_and_rejects_multiple_terminal_puls
     )
     overlap = replace(base, events=(*base.events, extra))
     plans = [ftf.plan_template(settings(), snapshot(), t) for t in (base, overlap)]
-    engine = Engine(1, 1_000_000)
+    engine = Engine(1)
     try:
         results = [engine.evolve(p.source, (p.batch,), cancel=Event()) for p in plans]
     finally:

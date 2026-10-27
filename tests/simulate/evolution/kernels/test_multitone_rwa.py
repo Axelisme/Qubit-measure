@@ -100,7 +100,7 @@ def test_disconnected_drive_blocks_keep_full_bath_and_coherences(duration, coher
         closing(
             ModelSource(initial, lambda level: replace(model, level=level))
         ) as source,
-        closing(Engine(1, 1000000)) as engine,
+        closing(Engine(1)) as engine,
     ):
         result = engine.evolve(source, (batch,), cancel=Event())
     assert result.paths.segments_by_kernel == {"multitone_rwa": 1}
@@ -171,7 +171,7 @@ def timeline(kind: str = "smooth", tones: int = 2) -> TimelineBatch:
 
 def test_smooth_multiple_drives_route_with_explicit_admission():
     routes = {}
-    with closing(Engine(1, 1000000)) as engine:
+    with closing(Engine(1)) as engine:
         for kind in ("smooth", "complex", "rough", "dc"):
             result = engine.evolve(model_source(), (timeline(kind),), cancel=Event())
             routes[kind] = dict(result.paths.segments_by_kernel)
@@ -548,9 +548,9 @@ def test_same_port_constant_pair_retains_original_two_tone_routing(port):
         ),
     )
     original_kernels = tuple(k for k in REGISTRY if k.name != "multitone_rwa")
-    with closing(Engine(1, 1000000, kernels=original_kernels)) as engine:
+    with closing(Engine(1, kernels=original_kernels)) as engine:
         original = engine.evolve(source, (batch,), cancel=Event())
-    with closing(Engine(1, 1000000)) as engine:
+    with closing(Engine(1)) as engine:
         result = engine.evolve(source, (batch,), cancel=Event())
     assert set(original.paths.segments_by_kernel) & {"floquet", "dop853"}
     assert result.paths.segments_by_kernel == original.paths.segments_by_kernel
@@ -560,7 +560,7 @@ def test_same_port_constant_pair_retains_original_two_tone_routing(port):
 def test_same_port_sampled_pair_keeps_joint_rwa():
     batch = timeline()
     batch = replace(batch, tracks=tuple(replace(t, port="a") for t in batch.tracks))
-    with closing(Engine(1, 1000000)) as engine:
+    with closing(Engine(1)) as engine:
         result = engine.evolve(model_source(), (batch,), cancel=Event())
     assert result.paths.segments_by_kernel == {"t4": 1, "multitone_rwa": 1}
 
@@ -584,7 +584,7 @@ def test_close_carriers_keep_joint_interference_and_coherent_density(
         ),
     )
     source = model_source()
-    with closing(Engine(1, 1000000)) as engine:
+    with closing(Engine(1)) as engine:
         actual = engine.evolve(source, (batch,), cancel=Event())
         expected = engine.evolve(source, (batch,), budget=1e-7, cancel=Event())
     assert actual.paths.segments_by_kernel == {"t4": 1, "multitone_rwa": 1}
@@ -596,11 +596,11 @@ def test_close_carriers_keep_joint_interference_and_coherent_density(
 
 def test_constant_pair_uses_joint_rwa_and_preserves_coherent_joint_input():
     source, batch = constant_pair()
-    with closing(Engine(1, 1000000)) as engine:
+    with closing(Engine(1)) as engine:
         result = engine.evolve(source, (batch,), cancel=Event())
     assert result.paths.segments_by_kernel == {"multitone_rwa": 1}
     # A tight-budget Engine must retain full-drive dynamics as the reference.
-    with closing(Engine(1, 1000000)) as engine:
+    with closing(Engine(1)) as engine:
         reference_result = engine.evolve(source, (batch,), budget=1e-7, cancel=Event())
     np.testing.assert_allclose(
         result.densities, reference_result.densities, atol=0.01, rtol=0
@@ -614,14 +614,14 @@ def test_constant_combination_resonance_restores_contributing_edges(offsets):
     _, risky = constant_pair(offsets)
     # The effective channel is unsafe to omit, but its four-state retained
     # graph fits. Restoring its paths must keep the full-drive joint dynamics.
-    with closing(Engine(1, 1000000)) as engine:
+    with closing(Engine(1)) as engine:
         admitted = engine.evolve(source, (safe,), cancel=Event())
         rejected = engine.evolve(source, (risky,), cancel=Event())
     assert (admitted.paths.segments_by_kernel, rejected.paths.segments_by_kernel) == (
         {"multitone_rwa": 1},
         {"multitone_rwa": 1},
     )
-    with closing(Engine(1, 1000000)) as engine:
+    with closing(Engine(1)) as engine:
         expected = engine.evolve(source, (risky,), budget=1e-7, cancel=Event())
     np.testing.assert_allclose(
         rejected.densities, expected.densities, atol=0.01, rtol=0
@@ -873,7 +873,7 @@ def test_retained_only_phase_does_not_reject_long_rows():
     for domain in ("constant", "same_port", "sampled"):
         for phase in (0.05, 0.07, 1.0):
             source, batch = phase_proxy_pair(phase, domain=domain)
-            with closing(Engine(1, 1000000)) as engine:
+            with closing(Engine(1)) as engine:
                 result = engine.evolve(source, (batch,), cancel=Event())
             routes[domain, phase] = "multitone_rwa" in result.paths.segments_by_kernel
             if domain == "same_port":
@@ -881,7 +881,7 @@ def test_retained_only_phase_does_not_reject_long_rows():
                 original_kernels = tuple(
                     k for k in REGISTRY if k.name != "multitone_rwa"
                 )
-                with closing(Engine(1, 1000000, kernels=original_kernels)) as engine:
+                with closing(Engine(1, kernels=original_kernels)) as engine:
                     original = engine.evolve(source, (batch,), cancel=Event())
                 assert (
                     result.paths.segments_by_kernel == original.paths.segments_by_kernel

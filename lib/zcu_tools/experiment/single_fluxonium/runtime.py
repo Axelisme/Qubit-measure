@@ -35,7 +35,6 @@ from zcu_tools.resources.single_fluxonium import (
 from zcu_tools.resources.single_fluxonium.schema import SingleFluxoniumSettings
 from zcu_tools.simulate.adc import (
     PreparedRawShots,
-    ReadoutCache,
     ReadoutModel,
     normalize_populations,
 )
@@ -76,18 +75,24 @@ class SingleFluxoniumFacts:
     readout: ReadoutModel
 
 
-def _build_facts(
+def _build_structure(
     settings: SingleFluxoniumSettings, snapshot: EnvironmentSnapshot
-) -> SingleFluxoniumFacts:
+) -> SingleFluxoniumModel:
     qubit = settings.chip.qubit
     truncation = settings.numerics.truncation
-    model = SingleFluxoniumModel(
+    return SingleFluxoniumModel(
         (qubit.ej_ghz, qubit.ec_ghz, qubit.el_ghz),
         dc_flux(settings, snapshot),
         cutoff=truncation.native_cutoff,
         retained_levels=truncation.levels,
         temperature_k=settings.chip.temperature_k,
     )
+
+
+def _build_facts(
+    settings: SingleFluxoniumSettings, model: SingleFluxoniumModel
+) -> SingleFluxoniumFacts:
+    qubit = settings.chip.qubit
     coefficient = settings.drive_line.charge_drive_ghz_per_gain
     charge = model.charge_operator()
     drive = DriveSource(
@@ -99,7 +104,11 @@ def _build_facts(
         resonator=dispersive_resonator(settings),
         slow_envelope_segments_per_period=settings.numerics.slow_envelope_segments_per_period,
     )
-    return SingleFluxoniumFacts(model, source, readout_model(settings, model, source))
+    try:
+        return SingleFluxoniumFacts(model, source, readout_model(settings, model, source))
+    except Exception:
+        source.close()
+        raise
 
 
 def _template_digest(template: TimelineTemplate) -> bytes:
@@ -143,9 +152,7 @@ class SingleFluxoniumRuntimeOptions:
     """Execution resources selected at source construction, not during acquisition.
 
     engine: fresh exclusive Engine transferred to the source, closed by close().
-        None creates 256 MiB prepare, 64 MiB result and 4 MiB routing residency.
-    readout_cache_bytes: nonnegative ADC residency bytes, default 8 MiB; zero
-        disables retention. Source owns/closes its cache; this is not a RAM cap.
+        None creates an Engine with 4 MiB routing-facts residency.
     clock: shared environment SimulationClock; source never closes/resets it.
         None creates a standalone clock. All qubits in an environment can share it.
     truth_log: private JSONL file path, or None for a fresh session directory
@@ -154,7 +161,6 @@ class SingleFluxoniumRuntimeOptions:
     """
 
     engine: Engine | None = None
-    readout_cache_bytes: int = 8 * 1024**2
     clock: SimulationClock | None = None
     truth_log: Path | None = None
 
@@ -166,15 +172,17 @@ class SingleFluxoniumSource:
     devices: caller-owned manager with the named startup DC driver, retained as
         .devices. Snapshot retains that driver's identity across registry removal
         or renaming; no real device is opened and no value is reset here.
-    Only latest full settings/snapshot/backend/numeric/dependency key is resident.
+    Full facts use the latest settings/snapshot/backend/numeric/dependency key.
+    Loss-independent structure uses a separate key excluding losses and drift.
     Plan keys additionally hash every borrowed control/readout array and complete
     waveform samples/times, never array or template identity. Cache hits return
     unchanged detached plans; consumers must not modify them. No RNG or measured
-    outputs are cached. Failed builds drop previous residents. close releases
+    outputs are cached. Failed builds drop full facts and preparation. close releases
     cached model/plan state but never closes caller-owned devices.
-    Direct callers must serialize all methods. One Engine owns numeric caches,
-    one ReadoutCache owns ADC responses, and one complete preparation survives
-    across acquires. No noisy result or sampling identity enters these caches.
+    Direct callers must serialize all methods. One Engine owns routing facts,
+    and one complete preparation survives across acquires. Loss-independent
+    projection/eigensystems survive loss changes; full models and preparations
+    do not. No noisy result or sampling identity enters retained preparations.
     readout_kind selects one terminal pulse or coherent mux tones on the same
     physical cavity. It does not add receivers, coupling or hardware routes.
     runtime selects execution resources through SingleFluxoniumRuntimeOptions;
@@ -215,9 +223,8 @@ class SingleFluxoniumSource:
         self._drift: CoherenceDrift | None = None
         self._effective_settings = settings
         self._pending_acquire = False
-        self.readout_cache = ReadoutCache(runtime.readout_cache_bytes)
         self.engine = (
-            Engine(workers=1, cache_bytes=256 * 1024**2)
+            Engine(workers=1)
             if runtime.engine is None
             else runtime.engine
         )
@@ -226,6 +233,8 @@ class SingleFluxoniumSource:
         self._source_device = devices.get_all_devices().get(
             settings.dc_bias.source.name
         )
+        self._structure: SingleFluxoniumModel | None = None
+        self._structure_key: bytes | None = None
         self._facts: SingleFluxoniumFacts | None = None
         self._facts_key: (
             tuple[str, EnvironmentSnapshot, tuple[tuple[str, str], ...]] | None
@@ -297,13 +306,14 @@ class SingleFluxoniumSource:
         return snapshot
 
     def model_facts(self, snapshot: EnvironmentSnapshot) -> SingleFluxoniumFacts:
-        """Return lazy fixed-DC model/source for this full snapshot and settings.
+        """Return current-loss models with reusable loss-independent structure.
 
         snapshot follows snapshot()'s native-value contract, including limits.
-        Equal keys reuse facts; changed settings, snapshot or replay/numeric
-        versions clear both caches before rebuilding. Numeric/model errors
-        propagate without retaining a failed build. No density evolution, ADC
-        response solve or random sampling runs. RuntimeError follows close; invalid DC raises ValueError.
+        Loss changes discard full models, plans and preparation, but retain the
+        fixed-DC projection and eigensystems. Other settings, DC values or numeric
+        revisions discard structure too. Failed builds retain no partial facts.
+        No density evolution, ADC response solve or random sampling runs.
+        RuntimeError follows close; invalid DC raises ValueError.
         """
         self._require_open()
         key = (
@@ -311,9 +321,32 @@ class SingleFluxoniumSource:
             snapshot,
             replay.replay_versions(),
         )
+        structure_key = sha256(
+            repr(
+                (
+                    self.effective_settings.model_dump_json(
+                        exclude={
+                            "chip": {"qubit": {"q_cap", "q_ind", "xqp", "aphi"}},
+                            "drift": True,
+                        }
+                    ),
+                    snapshot.version,
+                    snapshot.values,
+                    key[2],
+                )
+            ).encode()
+        ).digest()
+        if self._structure_key != structure_key:
+            self._clear()
+            self._structure = None
+            self._structure_key = None
+            self._structure = _build_structure(self.effective_settings, snapshot)
+            self._structure_key = structure_key
         if self._facts is None or self._facts_key != key:
             self._clear()
-            self._facts = _build_facts(self.effective_settings, snapshot)
+            if self._structure is None:
+                raise RuntimeError("single-fluxonium structure is unavailable")
+            self._facts = _build_facts(self.effective_settings, self._structure)
             self._facts_key = key
         return self._facts
 
@@ -368,7 +401,7 @@ class SingleFluxoniumSource:
         Complete template bytes, layout, settings, snapshot and numeric versions
         key a single resident. Evolution alone segments the complete timelines.
         ADC normalization is the sole probability repair. Errors clear partial
-        preparations and ADC responses; they propagate without a result.
+        preparations; they propagate without a result.
         cancel is checked between evolution chunks; None disables cancellation.
         """
         self._require_open()
@@ -421,7 +454,7 @@ class SingleFluxoniumSource:
             )
             probabilities.setflags(write=False)
             channel, batch = prepare_readout(
-                self.settings, facts.readout, plans, request, self.readout_cache
+                self.settings, facts.readout, plans, request
             )
             raw = PreparedRawShots(
                 probabilities,
@@ -436,7 +469,6 @@ class SingleFluxoniumSource:
             return self._prepared
         except Exception:
             self._prepared = None
-            self.readout_cache.clear()
             raise
 
     def open_acquire(self, request: AcquireRequest) -> SingleFluxoniumAcquire:
@@ -482,7 +514,6 @@ class SingleFluxoniumSource:
         if self._facts is not None:
             self._facts.source.close()
         self._prepared = None
-        self.readout_cache.clear()
         self._facts = None
         self._facts_key = None
         self._plan = None
@@ -497,6 +528,8 @@ class SingleFluxoniumSource:
         if self._session is not None:
             self._session.invalidate()
         self._clear()
+        self._structure = None
+        self._structure_key = None
         self.engine.close()
         self._closed = True
 

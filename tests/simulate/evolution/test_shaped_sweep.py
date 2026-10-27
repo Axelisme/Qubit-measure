@@ -63,8 +63,8 @@ def test_single_use_ramps_use_spectral_periods_and_match_direct_evolution(
         FluxSchedule(np.arange(3), np.zeros(2), np.zeros((2, 1), dtype=np.int64)),
         np.full(2, duration),
     )
-    engine = Engine(1, 0)
-    direct = Engine(1, 0, kernels=(DOP853Kernel(),))
+    engine = Engine(1)
+    direct = Engine(1, kernels=(DOP853Kernel(),))
     try:
         actual = engine.evolve(source, (batch,), cancel=Event())
         # A complex two-tone description exercises the ordinary direct branch
@@ -130,14 +130,14 @@ def test_different_duration_ramps_match_independent_preparations(
             durations[indices],
         )
 
-    engine = Engine(1, 0)
+    engine = Engine(1)
     try:
         joint = engine.evolve(source, (batch(np.arange(2)),), cancel=Event())
     finally:
         engine.close()
     independent = []
     for point in range(2):
-        engine = Engine(1, 0)
+        engine = Engine(1)
         try:
             result = engine.evolve(source, (batch(np.array([point])),), cancel=Event())
         finally:
@@ -202,8 +202,8 @@ def test_smooth_complex_envelopes_use_sambe_and_match_dop(
         FluxSchedule(np.arange(4), np.zeros(3), np.zeros((3, 1), dtype=np.int64)),
         np.full(3, duration),
     )
-    engine = Engine(1, 0)
-    direct = Engine(1, 0, kernels=(DOP853Kernel(),))
+    engine = Engine(1)
+    direct = Engine(1, kernels=(DOP853Kernel(),))
     try:
         actual = engine.evolve(source, (batch,), cancel=Event())
         expected = direct.evolve(source, (batch,), budget=1e-7, cancel=Event())
@@ -252,8 +252,8 @@ def test_complex_fractional_tail_preserves_quadrature(frequency: float) -> None:
         FluxSchedule(np.arange(2), np.zeros(1), np.zeros((1, 1), dtype=np.int64)),
         np.full(1, duration),
     )
-    engine = Engine(1, 0)
-    direct = Engine(1, 0, kernels=(DOP853Kernel(),))
+    engine = Engine(1)
+    direct = Engine(1, kernels=(DOP853Kernel(),))
     try:
         actual = engine.evolve(source, (batch,), cancel=Event())
         expected = direct.evolve(source, (batch,), budget=1e-7, cancel=Event())
@@ -264,55 +264,3 @@ def test_complex_fractional_tail_preserves_quadrature(frequency: float) -> None:
     np.testing.assert_allclose(actual.densities, expected.densities, atol=1e-3, rtol=0)
 
 
-def test_real_and_complex_ramps_keep_their_resolution_across_cache_hits() -> None:
-    """A rotated envelope cannot borrow the real ramp's coarser preparation."""
-    x = np.array([[0, 0.04], [0.04, 0]], dtype=complex)
-    model = SecularModel(
-        (0,),
-        "rotated-ramp-cache",
-        np.array([0.0, 0.3]),
-        np.eye(2, dtype=complex),
-        (SecularDrive("drive", x, np.zeros_like(x)),),
-        np.zeros((2, 2)),
-        np.zeros((2, 2)),
-    )
-    source = ModelSource(np.array([[0.6, 0.2j], [-0.2j, 0.4]]), lambda _: model)
-    duration = 64.7
-
-    def batch(rotation: complex) -> TimelineBatch:
-        envelope = EnvelopeSpec(
-            "sampled",
-            np.array([-1.0, 1.0], dtype=np.complex128) * rotation,
-            np.array([0.0, duration]),
-        )
-        track = DriveTrack(
-            "drive",
-            np.zeros(1),
-            np.full(1, duration),
-            np.full(1, 0.3),
-            np.full(1, 0.73),
-            np.full(1, 0.3),
-            (envelope,),
-            np.zeros(1, dtype=np.int64),
-            np.ones(1, dtype=bool),
-        )
-        return TimelineBatch(
-            np.arange(1),
-            (track,),
-            FluxSchedule(np.arange(2), np.zeros(1), np.zeros((1, 1), dtype=np.int64)),
-            np.full(1, duration),
-        )
-
-    engine = Engine(1, 64 * 1024**2)
-    uncached = Engine(1, 0)
-    try:
-        for rotation in (1.0, 1.0j, 1.0, 1.0j):
-            actual = engine.evolve(source, (batch(rotation),), cancel=Event())
-            expected = uncached.evolve(source, (batch(rotation),), cancel=Event())
-            assert actual.paths.segments_by_kernel == {"shaped_sambe": 1}
-            np.testing.assert_allclose(
-                actual.densities, expected.densities, atol=1e-12, rtol=0
-            )
-    finally:
-        engine.close()
-        uncached.close()

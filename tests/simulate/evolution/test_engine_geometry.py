@@ -42,7 +42,7 @@ def test_geometry_preserves_track_order_mux_plateaus_and_flux_levels():
         flux=FluxSchedule(np.array([0, 2]), np.array([0.0, 8.0]), np.array([[0], [1]])),
     )
     kernels = tuple(RecordingKernel(k.name) for k in REGISTRY)
-    result = run(Engine(1, 0, kernels=kernels), src, (timeline,))
+    result = run(Engine(1, kernels=kernels), src, (timeline,))
     observations = {
         float(table.start_ns[row]): (table, int(row), kernel.name)
         for kernel in kernels
@@ -124,7 +124,7 @@ def test_equal_waveform_copies_keep_physical_rows_across_batches(times, values):
             )
         )
     kernels = tuple(RecordingKernel(k.name) for k in REGISTRY)
-    result = run(Engine(1, 0, kernels=kernels), src, tuple(batches))
+    result = run(Engine(1, kernels=kernels), src, tuple(batches))
     observations = {
         (int(table.timeline[row]), float(table.start_ns[row])): (table, int(row))
         for kernel in kernels
@@ -183,7 +183,7 @@ def test_waveform_time_and_complex_samples_remain_distinct_in_one_acquire():
     )
     direct = RecordingKernel("dop853")
     src = source()
-    result = run(Engine(1, 0, kernels=(direct,)), src, timelines)
+    result = run(Engine(1, kernels=(direct,)), src, timelines)
     for table, rows, _ in direct.calls:
         for row in rows:
             expected = envelopes[table.timeline[row]]
@@ -201,7 +201,7 @@ def test_active_unknown_port_raises_value_error():
         tracks=(replace(track(1, EnvelopeSpec("constant")), port="absent"),),
     )
     with (
-        closing(Engine(1, 0, kernels=(RecordingKernel("t6"),))) as engine,
+        closing(Engine(1, kernels=(RecordingKernel("t6"),))) as engine,
         pytest.raises(ValueError, match="absent"),
     ):
         engine.evolve(source(), (timeline,), cancel=Event())
@@ -232,7 +232,7 @@ def test_flux_basis_changes_and_readout_truncation():
         ),
         tracks=(replace(track(1, EnvelopeSpec("constant"), start=20), port="absent"),),
     )
-    result = run(Engine(1, 1000, kernels=(T4(),)), src, (b,))
+    result = run(Engine(1, kernels=(T4(),)), src, (b,))
     np.testing.assert_allclose(result.densities[0], src.initial_density, atol=1e-14)
     assert result.paths.segments_by_kernel == {"t4": 2}
 
@@ -245,7 +245,6 @@ def test_flat_top_split_phase_offset_and_small_plateau():
     result = run(
         Engine(
             1,
-            1000,
             kernels=(
                 direct,
                 RecordingKernel("dyson", accepts=False),
@@ -270,7 +269,7 @@ def test_flat_top_split_phase_offset_and_small_plateau():
     short = replace(envelope, sample_ns=np.array([0.0, 2.0, 11.0, 14.0]))
     k = RecordingKernel("dop853")
     result = run(
-        Engine(1, 0, kernels=(k,)),
+        Engine(1, kernels=(k,)),
         source(),
         (replace(batch(1, duration=14), tracks=(track(1, short, duration=14),)),),
     )
@@ -303,7 +302,6 @@ def test_pulse_support_ends_at_its_absolute_event(kind):
     result = run(
         Engine(
             1,
-            0,
             kernels=(
                 idle,
                 direct,
@@ -345,7 +343,6 @@ def test_plateau_support_uses_absolute_events(
     result = run(
         Engine(
             1,
-            0,
             kernels=(
                 RecordingKernel("t4"),
                 direct,

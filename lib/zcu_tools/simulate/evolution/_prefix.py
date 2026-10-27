@@ -10,9 +10,7 @@ from zcu_tools.core.simulation import CancellationQuery
 from ._dispatch import classify
 from ._parallel import Executor
 from ._planning import Geometry
-from ._resident import ResidentAdmission
 from ._schedule import Schedule
-from .cache import PrepareCache
 from .engine import Cancelled
 from .kernel import Kernel, KernelContext, SegmentTable
 from .secular import FluxWaveform
@@ -149,16 +147,14 @@ class PrefixResolver:
         kernels: Mapping[str, Kernel],
         context: KernelContext,
         cancel: CancellationQuery,
-        resident: ResidentAdmission,
     ):
         self.geometry = geometry
         self.kernels = kernels
         self.context = context
         self.cancel = cancel
-        self.resident = resident
 
-    def resolve(self, cache: PrepareCache, pool: Executor, chunks: int) -> Geometry:
-        """Resolve nested groups in time order, never storing inputs in the LRU."""
+    def resolve(self, pool: Executor, chunks: int) -> Geometry:
+        """Resolve nested groups in time order with evolve-local input ownership."""
         geometry, kernels, cancel = self.geometry, self.kernels, self.cancel
         context = self.context
         source = context.source
@@ -191,11 +187,11 @@ class PrefixResolver:
             table = replace(table, prefix_inputs=inputs)
             geometry = replace(geometry, table=table, prefix_paths=paths)
             prefix = _representative(geometry, first, row)
-            dispatch = classify(prefix, kernels, context, admission=self.resident)
+            dispatch = classify(prefix, kernels, context)
             schedule = Schedule(
-                prefix, dispatch, context, cancel, self.resident, initial
+                prefix, dispatch, context, cancel, initial
             )
-            result = schedule.run(kernels, cache, pool, chunks)
+            result = schedule.run(kernels, pool, chunks)
             inputs[group] = result.densities[0]
             paths[group] = result.paths
         return replace(

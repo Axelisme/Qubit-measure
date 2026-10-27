@@ -1,8 +1,8 @@
 # Single-fluxonium acquisition
 
-**Last updated:** 2026-10-27, acquisition coherence drift
+**Last updated:** 2026-10-27 (UTC), loss-independent structure and acquisition preparation
 
-**Readers:** framework-dev, lab-author. Compose complete fluxonium timelines with one physical readout cavity.
+**Readers:** framework-dev, lab-author, agent. Compose complete fluxonium timelines with one physical readout cavity.
 
 `single_fluxonium(path_or_settings, *, private_replay=None)` returns the normal
 `SimulationEnvironment`. It creates one fixed-unit DC FakeDevice, a mock SoC,
@@ -115,16 +115,24 @@ injection point for offline callers.
 `open_acquire(request)` invalidates the preceding session. `sample_round` and
 `execute` propagate numeric, ADC and replay errors without partial results.
 Invalidated sessions and closed sources raise `RuntimeError`. Direct callers
-serialize source methods. `close()` clears model, plan, engine and ADC caches,
+serialize source methods. `close()` clears structure, models, plans and routing facts,
 invalidates the session and leaves caller-owned drivers untouched.
 
-A standalone source keeps the original 256 MiB prepare, 64 MiB exact-result,
-4 MiB routing and 8 MiB ADC limits. Composing environments pass execution resources through immutable
-`SingleFluxoniumRuntimeOptions(engine=..., readout_cache_bytes=...)`; the source takes
-exclusive ownership and closes both caches. The six-cavity environment uses
-this entry point to divide its environment-wide evolution budgets.
+A standalone source uses an Engine with 4 MiB of routing facts.
+Composing environments pass an exclusive Engine through immutable
+`SingleFluxoniumRuntimeOptions(engine=...)`. The source closes that Engine.
+The six-cavity environment divides its environment-wide routing allowance
+through this entry point. ADC solvers live only for the current preparation.
 
-One physical generation and one complete noiseless preparation remain resident.
+The source retains one loss-independent structural generation and one complete
+noiseless preparation. The structural key excludes q_cap, q_ind, xqp, aphi and
+drift configuration, but includes all other settings, DC values and numeric
+versions. The physics owner retains the Hamiltonian projection, eigensystems
+and dressed readout frequencies. Loss changes close the old ModelSource and
+discard full models, plans and preparation. Rates are rebuilt from the current
+acquisition's frozen losses. Temperature, DC, truncation or other structural
+settings changes discard structure too. No dissipative propagator or density
+survives a loss change through this reuse. See [ADR-0078](../../../../docs/adr/0078-evolution-module-boundary.md).
 Keys include settings, the full snapshot, numeric/dependency versions, layout,
 all borrowed control/readout arrays and every waveform sample/time. Buffers are
 reread on each lookup. Evolution validates reuse against its own routing policy.

@@ -100,7 +100,7 @@ def batch(
 def evolve(
     source: ModelSource, timeline: TimelineBatch, *, path: str | None = None
 ) -> Matrix:
-    engine = Engine(1, 1_000_000)
+    engine = Engine(1)
     try:
         result = engine.evolve(source, (timeline,), cancel=Event())
         if path is not None:

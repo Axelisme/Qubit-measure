@@ -16,7 +16,6 @@ from ..kernel import (
     KernelContext,
     Prepared,
     SegmentTable,
-    prepared_key_indices,
 )
 from ..secular import SecularModel
 from ..workplan import FactKey, RampFamilyPlan, WorkPlan
@@ -430,29 +429,6 @@ class ShapedSambeKernel:
             convergence,
         ), convergence
 
-    def admit_prepared(
-        self,
-        prepared: Prepared,
-        table: SegmentTable,
-        rows: NDArray[np.int64],
-        context: KernelContext,
-    ) -> GuardResult | None:
-        """Reuse key-covered convergence data and recheck current row eligibility.
-
-        Keys include duration, bound, slope and complex motion class; stored errors
-        cover the complete spectral domain. Missing keys return None; eligibility
-        rejection returns a decision without rebuilding periods.
-        """
-        if not isinstance(prepared, _Data):
-            raise TypeError("shaped_sambe requires its own prepared payload")
-        keys = self.prepare_keys(table, rows, context)
-        indices = prepared_key_indices(prepared.keys, keys)
-        if indices is None:
-            return None
-        inverse = np.array([indices[key.tobytes()] for key in keys], dtype=np.int64)
-        accepted = self._eligible(table, rows, context)
-        accepted &= prepared.errors[inverse] <= context.budget / 2
-        return GuardResult(accepted, (GuardPreparation(prepared.keys, prepared),))
 
     def guard_prepared(
         self,

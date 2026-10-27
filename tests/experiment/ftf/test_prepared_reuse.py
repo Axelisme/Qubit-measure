@@ -275,7 +275,6 @@ def test_equal_content_acquires_skip_adc_preparation_and_keep_streams_exact():
         second_delivery = draw(source, later)
         assert isinstance(second_delivery, IntegratedRound)
         second = expect_statistics(second_delivery)
-        assert source.readout_cache.hits == 0, "equal content must skip ADC preparation"
         assert source.preparation_cache.builds == 1
         assert source.preparation_cache.hits == 1
         expected_delivery = draw(reference, later)
@@ -358,7 +357,7 @@ def test_changed_preparation_inputs_miss(change, monkeypatch):
             from zcu_tools.simulate.evolution import Engine
 
             cleanup.callback(source.engine.close)
-            source.engine = Engine(1, 1024**2)
+            source.engine = Engine(1)
         elif change == "mode":
             acquire = request("decimated")
         elif change == "layout":
@@ -402,7 +401,6 @@ def test_lru_budget_close_and_failed_preparation_release_residents():
         with pytest.raises(ValueError, match="readout"):
             draw(source, invalid)
         assert cache.resident_bytes == 0
-        assert source.readout_cache.resident_bytes == 0
         draw(source)
         source.close()
         assert cache.resident_bytes == 0
@@ -425,7 +423,7 @@ def test_preparation_hits_reemit_accuracy_warning_and_keep_numeric_identity():
 
     kernels = tuple(ExceedingIdle() if k.name == "t4" else k for k in REGISTRY)
     source = FTFSource(
-        settings(), DeviceManager(), engine=Engine(1, 1024**2, kernels=kernels)
+        settings(), DeviceManager(), engine=Engine(1, kernels=kernels)
     )
     try:
         with pytest.warns(RuntimeWarning, match="segment accuracy check exceeded"):

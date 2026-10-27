@@ -202,7 +202,7 @@ def test_graph_fact_hits_do_not_skip_strength_phase_or_budget_admission():
 
 def test_constant_resonant_probe_uses_block_family():
     src = source_for([0.0, 0.3, 0.91], [[0, 0.01, 0], [0.01, 0, 0.002], [0, 0.002, 0]])
-    with closing(Engine(1, 1000000)) as engine:
+    with closing(Engine(1)) as engine:
         result = engine.evolve(src, (batch_for(table_for()),), cancel=Event())
     assert result.paths.segments_by_kernel == {"single_tone_rwa": 1}
     # The independent oracle only needs full lab DOP853 evolution, not JIT
@@ -346,9 +346,9 @@ def test_omitted_resonances_decline_and_retain_original_route(kind):
         table, np.array([0]), KernelContext(src, 0.001, WorkPlan())
     ).tolist() == [False]
     original = tuple(k for k in REGISTRY if k.name != kernel.name)
-    with closing(Engine(1, 1000000, kernels=original)) as engine:
+    with closing(Engine(1, kernels=original)) as engine:
         expected = engine.evolve(src, (batch_for(table),), cancel=Event())
-    with closing(Engine(1, 1000000)) as engine:
+    with closing(Engine(1)) as engine:
         result = engine.evolve(src, (batch_for(table),), cancel=Event())
     assert result.paths.segments_by_kernel == expected.paths.segments_by_kernel
     np.testing.assert_array_equal(result.densities, expected.densities)
@@ -362,10 +362,10 @@ def test_unomittable_single_photon_is_retained_beyond_initial_window(detuning):
     assert kernel.guard(
         table, np.array([0]), KernelContext(src, 0.001, WorkPlan())
     ).tolist() == [True]
-    with closing(Engine(1, 1000000)) as engine:
+    with closing(Engine(1)) as engine:
         result = engine.evolve(src, (batch_for(table),), cancel=Event())
     assert result.paths.segments_by_kernel == {"single_tone_rwa": 1}
-    with closing(Engine(1, 1000000)) as engine:
+    with closing(Engine(1)) as engine:
         reference = engine.evolve(src, (batch_for(table),), budget=1e-7, cancel=Event())
     np.testing.assert_allclose(
         result.densities, reference.densities, atol=0.002, rtol=0
@@ -379,10 +379,10 @@ def test_unomittable_two_photon_path_restores_its_first_order_edges():
     assert kernel.guard(
         table, np.array([0]), KernelContext(src, 0.001, WorkPlan())
     ).tolist() == [True]
-    with closing(Engine(1, 1000000)) as engine:
+    with closing(Engine(1)) as engine:
         result = engine.evolve(src, (batch_for(table),), cancel=Event())
     assert result.paths.segments_by_kernel == {"single_tone_rwa": 1}
-    with closing(Engine(1, 1000000)) as engine:
+    with closing(Engine(1)) as engine:
         reference = engine.evolve(src, (batch_for(table),), budget=1e-7, cancel=Event())
     np.testing.assert_allclose(
         result.densities, reference.densities, atol=0.002, rtol=0
@@ -450,9 +450,9 @@ def test_restored_graph_over_block_limit_keeps_original_route():
         table, np.array([0]), KernelContext(src, 0.001, WorkPlan())
     ).tolist() == [False]
     original = tuple(k for k in REGISTRY if k.name != kernel.name)
-    with closing(Engine(1, 1000000, kernels=original)) as engine:
+    with closing(Engine(1, kernels=original)) as engine:
         expected = engine.evolve(src, (batch_for(table),), cancel=Event())
-    with closing(Engine(1, 1000000)) as engine:
+    with closing(Engine(1)) as engine:
         result = engine.evolve(src, (batch_for(table),), cancel=Event())
     assert result.paths.segments_by_kernel == expected.paths.segments_by_kernel
     np.testing.assert_array_equal(result.densities, expected.densities)

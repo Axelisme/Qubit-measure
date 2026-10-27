@@ -225,15 +225,6 @@ class GateCacheKernel:
             array.setflags(write=False)
         return _GatePrepared(*arrays)
 
-    def admit_prepared(
-        self,
-        prepared: Prepared,
-        table: SegmentTable,
-        rows: NDArray[np.int64],
-        context: KernelContext,
-    ) -> None:
-        """Decline cached-domain admission; use the ordinary guard build path."""
-        del prepared, table, rows, context
 
     def guard_prepared(
         self,
