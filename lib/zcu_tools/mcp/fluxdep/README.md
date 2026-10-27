@@ -1,6 +1,6 @@
 # Fluxdep MCP control
 
-**Last updated:** 2026-10-27
+**Last updated:** 2026-10-28
 
 **讀者：** agent。Fluxdep MCP 的控制流程、工具與診斷契約。
 
@@ -187,8 +187,16 @@ the selected `flux_dev` period, retaining its sign, and never component offset,
 even with one device or offset=null. Check that `flux_dev` names the swept device.
 A missing `flux_dev` skips period, not predictor or energies. Measurement fluxdep
 writeback is a separate operation with a default-selected offset item and notes
-for other devices' Run-snapshot contributions. MCP does not read component fields,
-infer a frame or change predictor v1/reference-anchor formats.
+for other devices' Run-snapshot contributions. MCP does not read component fields or infer a frame.
+`predictor_writeback` independently reports whether the dataset predictor v2 was
+written. Its period mapping starts with the explicit scanned device, whose
+period is the positive fitted span; other signed periods come from the component.
+Offset uses the spectrum's acquisition scalars and fitted half, never the scanned
+snapshot value again. Missing other scalars contribute zero; invalid used values
+fail before output. Uncalibrated context, unknown source device or no whole
+snapshot for multiple devices skip the predictor with savepath=null. A matching
+single-device source needs no snapshot. Skips still write component energies,
+P1 period and ledger, and leave any existing predictor unchanged.
 MCP projects the native receipt without reading fit/spectrum state again, rounding
 params, inferring the source or requesting an image. The GUI refuses stale fits
 with `fit_stale` before I/O. Native readiness, control and I/O failures propagate

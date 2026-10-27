@@ -25,6 +25,7 @@ from dataclasses import dataclass
 import numpy as np
 from numpy.typing import NDArray
 
+from zcu_tools.analysis.flux import ComponentFluxContext, DevicePeriod, offset_for_flux
 from zcu_tools.analysis.fluxdep.models import TransitionDict
 from zcu_tools.analysis.fluxdep.search import (
     DatabaseSearchResult,
@@ -37,12 +38,17 @@ from zcu_tools.analysis.fluxdep.search_models import (
     validate_transition_levels,
 )
 from zcu_tools.gui.app.analysis_project.entry import require_target
+from zcu_tools.gui.app.analysis_project.flux import (
+    ComponentFluxProvider,
+    component_flux_context,
+)
 from zcu_tools.gui.app.fluxdep.export_plan import ExportPlanner, FluxWritebackReceipt
 from zcu_tools.gui.app.fluxdep.state import (
     AlignmentPublication,
     FluxDepState,
     PipelineStage,
     SearchRenderFrame,
+    SpectrumEntry,
     transitions_with_freqs,
 )
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
@@ -50,6 +56,7 @@ from zcu_tools.progress_bar import BaseProgressBar, use_pbar_factory
 from zcu_tools.resources.entry import snapshot
 from zcu_tools.resources.predictor_file import (
     PredictorFile,
+    PredictorFlux,
     PredictorSource,
     save_predictor_file,
 )
@@ -66,19 +73,21 @@ PbarFactory = Callable[..., BaseProgressBar]
 class FitExportReceipt:
     """Successful native export captured in one owner-thread call.
 
-    savepath is the successful output path. params is (EJ, EC, EL) in GHz,
-    preserving full precision. alignment_from names the actual calibration's
+    savepath is the successful predictor path, or None when predictor is skipped.
+    params is (EJ, EC, EL) in GHz, preserving full precision. alignment_from names the actual calibration's
     first aligned spectrum, including an empty sampled spectrum. component and
     analysis_id identify the setup target and appended ledger event.
     flux_writeback reports the injected component calibration policy's outcome.
+    predictor_writeback independently reports the dataset predictor outcome.
     """
 
-    savepath: str
+    savepath: str | None
     params: tuple[float, float, float]
     alignment_from: str
     component: str
     analysis_id: str
     flux_writeback: FluxWritebackReceipt
+    predictor_writeback: FluxWritebackReceipt
 
 
 @dataclass(frozen=True)
@@ -103,12 +112,76 @@ class SearchInput:
     render_frame: SearchRenderFrame
 
 
+def _predictor_flux(
+    context: ComponentFluxContext, aligned: SpectrumEntry
+) -> tuple[PredictorFlux | None, FluxWritebackReceipt]:
+    frame = context.frame
+    if frame is None:
+        return None, FluxWritebackReceipt(
+            "skipped",
+            aligned.device,
+            "Component offset is uncalibrated. Calibrate the component before exporting a predictor.",
+        )
+    if aligned.device not in frame.devices:
+        return None, FluxWritebackReceipt(
+            "skipped",
+            aligned.device,
+            f"Spectrum device {aligned.device!r} is not in component flux periods. "
+            "Load a spectrum with the matching device identity.",
+        )
+    if aligned.device_snapshot is None and len(frame.devices) != 1:
+        return None, FluxWritebackReceipt(
+            "skipped",
+            aligned.device,
+            "No device snapshot for a multi-device component. Load native data with an acquisition snapshot.",
+        )
+
+    # Dataset alignment is positive; component P1 direction applies only to setup.
+    devices = {
+        aligned.device: DevicePeriod(
+            2 * abs(aligned.flux_int - aligned.flux_half), aligned.unit
+        )
+    }
+    devices.update(
+        {
+            name: device
+            for name, device in frame.devices.items()
+            if name != aligned.device
+        }
+    )
+    # These are already owner-projected scalars, not raw driver Info settings.
+    values = {
+        name: scalar["value"]
+        for name, scalar in (aligned.device_snapshot or {}).items()
+        if name in devices and name != aligned.device
+    }
+    values[aligned.device] = aligned.flux_half
+    return (
+        PredictorFlux(
+            offset_for_flux(devices, values, flux=0.5),
+            {name: device.period for name, device in devices.items()},
+            {name: device.unit for name, device in devices.items()},
+        ),
+        FluxWritebackReceipt("written", aligned.device, None),
+    )
+
+
 class FitService:
     """Database-search fit over the selected cross-spectrum point cloud."""
 
     def __init__(self, state: FluxDepState) -> None:
         self._state = state
         self._export_planner: ExportPlanner | None = None
+        self._flux_context_provider: ComponentFluxProvider | None = None
+
+    def configure_flux_context(self, provider: ComponentFluxProvider) -> None:
+        """Bind the caller's component flux projection for subsequent exports.
+
+        Replaces any prior provider on the owner thread. Exports use its periods
+        and units without interpreting component fields or reading live devices.
+        """
+        self._state.assert_owner_thread()
+        self._flux_context_provider = provider
 
     def configure_export(self, planner: ExportPlanner) -> None:
         """Bind the component calibration policy on State's owner thread.
@@ -270,9 +343,10 @@ class FitService:
 
     # --- export ----------------------------------------------------------
 
-    def export_params(self) -> str:
+    def export_params(self) -> str | None:
         """Return the predictor path after export_params_receipt completes.
 
+        Returns None when the predictor is skipped; setup and ledger still write.
         Uses the same setup/ledger writes and partial-failure contract.
         """
         return self.export_params_receipt().savepath
@@ -281,10 +355,18 @@ class FitService:
         """Write predictor JSON, declared setup fields, then analysis evidence.
 
         Uses the opened entry and selected fluxonium component. Calibration is
-        the first aligned spectrum, including zero-point sources. Predictor bias
-        is zero because the fitted alignment has no additive correction; unknown
-        unit and source remain null. Declared EJ/EC/EL and the injected planner's
-        component-relative calibration fields are changed. The planner receives
+        the first aligned spectrum, including zero-point sources. Predictor v2
+        uses its explicit device and positive fitted period, other component
+        periods with their signs, and owner-projected acquisition scalars to
+        infer offset at half flux. The scanned snapshot value is ignored; absent
+        other scalars contribute zero. An invalid used value raises ValueError
+        naming the device before output. Missing/rejected context providers also
+        fail before output. Unknown device, uncalibrated frame or absent whole
+        snapshot with multiple devices skip the predictor with savepath=None and
+        an independent predictor_writeback receipt, leaving existing files alone.
+        Declared EJ/EC/EL and the injected planner's component-relative calibration
+        fields still write on a skip; component offset policy is unchanged.
+        The planner receives
         the setup projection and native integer/half positions before any output.
         Missing fit, stale inputs, missing alignment, no entry or an unconfigured
         planner fail before output I/O. Planner errors also precede output I/O.
@@ -330,22 +412,20 @@ class FitService:
                 inherited_from=aligned.inherited_from,
             ),
         )
+        context = component_flux_context(target, self._flux_context_provider)
+        flux, predictor_writeback = _predictor_flux(context, aligned)
         EJ, EC, EL = fit.params
-        predictor = PredictorFile(
-            model="fluxonium",
-            params=FluxoniumParams(
-                EJ=EJ,
-                EC=EC,
-                EL=EL,
-                flux_half=aligned.flux_half,
-                flux_period=aligned.flux_period,
-                flux_bias=0.0,
-            ),
-            flux_unit=None,
-            source=PredictorSource(run_id=None, created_at=None),
-        )
-        target.predictor_path.parent.mkdir(parents=True, exist_ok=True)
-        save_predictor_file(target.predictor_path, predictor)
+        savepath = None
+        if flux is not None:
+            predictor = PredictorFile(
+                model="fluxonium",
+                params=FluxoniumParams(EJ=EJ, EC=EC, EL=EL),
+                flux=flux,
+                source=PredictorSource(run_id=None, created_at=None),
+            )
+            target.predictor_path.parent.mkdir(parents=True, exist_ok=True)
+            save_predictor_file(target.predictor_path, predictor)
+            savepath = str(target.predictor_path)
         values = {
             "EJ": EJ,
             "EC": EC,
@@ -362,7 +442,7 @@ class FitService:
             run_ids=[],
             summary={
                 "component": target.component,
-                "predictor": str(target.predictor_path),
+                "predictor": savepath,
                 "EJ": EJ,
                 "EC": EC,
                 "EL": EL,
@@ -370,10 +450,11 @@ class FitService:
             },
         )
         return FitExportReceipt(
-            str(target.predictor_path),
+            savepath,
             fit.params,
             aligned.name,
             target.component,
             analysis_id,
             plan.flux_writeback,
+            predictor_writeback,
         )

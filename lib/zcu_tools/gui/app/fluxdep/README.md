@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.fluxdep` flux-dependence analysis GUI
 
-**Last updated:** 2026-10-27
+**Last updated:** 2026-10-28
 
 **讀者：** framework-dev。通量頻譜分析 GUI 的狀態、互動與搜尋分工。
 
@@ -53,20 +53,30 @@ Export params… 寫 `predictors/<component>.json`，再更新 setup 宣告的 E
 與注入 planner 提出的校準欄位，最後追加 analysis ledger。
 `export_plan.ExportPlanner` 接收 detached component 與 app owner 的 `AlignmentPublication`，包含 aligned native integer／half／period，
 回傳 component-relative scalar writes 及 `flux_writeback`。未接 planner 時，export 在輸出前拒絕。
-Framework 不解讀 lab 的 flux 區塊，也不取得 device 值。
+Framework 經注入的 ComponentFluxContext 取得 frame，不解讀 lab 的 flux 區塊。
+Snapshot scalar 在載入時由 device owner 投影，export 不讀 live device。
 
 `apps.fluxdep` 注入 [`zcu_lab.fluxdep_export`](../../../../../zcu_lab/fluxdep_export.py) 的規則。
 有 `flux_dev` 時只更新 `flux.period.<flux_dev>` 的大小，保留原方向，首次使用正方向。
 單儀器、多儀器、空 period mapping 與 offset=null 都不改 component offset，其他 periods 也保留。
 Operator 必須確認 `flux_dev` 是這批資料的被掃儀器，app 不從 snapshot 推測來源。
 缺 `flux_dev` 時跳過 period，但 EJ／EC／EL、predictor 與 ledger 仍匯出。
-GUI status 與 RPC／MCP 的 `flux_writeback` receipt 維持 written／skipped、目標 device 與原因，不新增 partial。
+GUI status 與 RPC／MCP 的 `flux_writeback` 只描述 component P1。
+獨立的 `predictor_writeback` 描述 predictor，兩者均為 written／skipped、目標 device 與原因，不新增 partial。
 資料可能經歷 flux jump，app 對齊不代表目前 component offset。
 只有量測 fluxdep writeback 會另提預設勾選的 offset，扣除其他儀器在 Run snapshot 的貢獻。
 無效名稱或擬合點在 planner 拒絕，不猜 device 或補值。
 
-Predictor 的 `zcu.predictor` v1 格式與 `flux_half／flux_period／flux_bias` 模型座標不變。
-Spectrum 的 reference anchors 與 processed checkpoint 也不是 component flux frame。
+Predictor 寫 `zcu.predictor` v2，params 只有 EJ／EC／EL。
+`flux.period` 第一台是光譜明示的被掃儀器，period 取 `2*abs(integer-half)` 正值。
+其他 periods 與符號抄 component frame，不套 P1 的被掃方向規則。
+`offset = 0.5 - half / fitted_period - Σ(other_value / other_period)`。
+被掃儀器只用 half，不重加 snapshot 值；snapshot 缺席的其他儀器貢獻為 0，在場無效則報錯指名。
+整份 snapshot 未記錄時，只有來源名稱吻合的單儀器 component 可寫 predictor。
+來源名稱不在 component periods、frame=None 未校準或多儀器缺整份 snapshot 時，不寫 predictor。
+此時 savepath 為 null，predictor_writeback 為 skipped，component energies／P1 period 與 ledger 仍寫入。
+已存在的 predictor 不刪除、不覆寫；不可把舊檔當成本次輸出。
+Processed checkpoint 的單儀器 offset 已含當時其他儀器的貢獻，與 predictor 的零輸出 offset 不同。
 沒有來源 run 時 source.run_id 是 null。校正取第一張已對齊的 spectrum，包含零點來源。
 這些檔案依序寫入，不提供跨檔 rollback。中間 spectrum 集合預設寫到
 `<entry>/fluxdep/spectrums.hdf5`。分析不呼叫 Database Save。

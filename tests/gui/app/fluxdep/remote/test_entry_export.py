@@ -1,10 +1,13 @@
 """Entry/component selection and predictor writeback through the native RPC seam."""
 
 from collections.abc import Iterator
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
 import pytest
+from zcu_tools.analysis.flux import ComponentFluxContext
+from zcu_tools.gui.app.analysis_project.entry import AnalysisTarget
 from zcu_tools.gui.app.fluxdep.state import SpectrumEntry
 from zcu_tools.gui.remote.errors import RemoteError
 from zcu_tools.resources.entry import ResultEntry, component_registry, snapshot
@@ -12,7 +15,8 @@ from zcu_tools.resources.entry.aliases import EntryAliases
 from zcu_tools.resources.entry.schema import ComponentSchema
 from zcu_tools.resources.predictor_file import load_predictor_file
 
-from tests.gui.app.fluxdep._components import SyntheticFluxonium
+from tests.gui.app.fluxdep._components import SyntheticFluxonium, synthetic_flux_context
+from tests.gui.app.fluxdep._export import aligned_export_state
 from tests.gui.app.fluxdep.remote._route_harness import RouteHarness
 
 
@@ -36,6 +40,7 @@ def analysis_entry(tmp_path: Path) -> Iterator[ResultEntry]:
 def test_entry_alias_target_exports_predictor_setup_and_analysis_record(
     route_harness: RouteHarness, analysis_entry: ResultEntry
 ) -> None:
+    route_harness.ctrl.configure_flux_context(synthetic_flux_context)
     client = route_harness.client()
     try:
         opened = route_harness.request(
@@ -89,10 +94,9 @@ def test_entry_alias_target_exports_predictor_setup_and_analysis_record(
         "EJ": 5.123456789,
         "EC": 1.2,
         "EL": 0.4,
-        "flux_half": 0.7,
-        "flux_period": 2.0,
-        "flux_bias": 0.0,
     }
+    assert predictor.flux.offset == pytest.approx(0.15)
+    assert predictor.flux.period == {"unnamed_device": 2.0}
     assert predictor.source.run_id is None
     analysis_entry.setup.refresh()
     components = snapshot(analysis_entry.setup).components
@@ -109,10 +113,58 @@ def test_entry_alias_target_exports_predictor_setup_and_analysis_record(
         "device": None,
         "reason": "Synthetic target has no calibration. Use fluxdep measurement writeback.",
     }
+    assert exported["result"]["predictor_writeback"] == {
+        "status": "written",
+        "device": "unnamed_device",
+        "reason": None,
+    }
     record_id = exported["result"]["analysis_id"]
     assert isinstance(record_id, str)
     event = analysis_entry.ledger.get(record_id)
     assert event.event.kind == "analyzed"
+
+
+def test_skipped_predictor_projects_null_path_and_both_receipts(
+    route_harness: RouteHarness, analysis_entry: ResultEntry
+) -> None:
+    target = AnalysisTarget.open(
+        analysis_entry.result_path.parent.parent, "synthetic", "Q2"
+    )
+    route_harness.ctrl.configure_flux_context(
+        lambda _model: ComponentFluxContext(None, None, {})
+    )
+    client = route_harness.client()
+    opened = route_harness.request(
+        client,
+        "project.setup",
+        project_root=str(analysis_entry.result_path.parent.parent),
+        entry="synthetic",
+        component="Q2",
+    )
+    assert opened["ok"], opened
+    route_harness.ctrl.state.put_spectrum(
+        replace(
+            aligned_export_state(target).get_spectrum("aligned"),
+            filter_mask=None,
+            brush_mask=None,
+        )
+    )
+    route_harness.ctrl.state.set_fit_result((5.0, 1.2, 0.4))
+
+    exported = route_harness.request(client, "fit.export_params")
+
+    assert exported["ok"], exported
+    assert exported["result"]["savepath"] is None
+    assert exported["result"]["predictor_writeback"] == {
+        "status": "skipped",
+        "device": "unnamed_device",
+        "reason": "Component offset is uncalibrated. Calibrate the component before exporting a predictor.",
+    }
+    assert exported["result"]["flux_writeback"] == {
+        "status": "skipped",
+        "device": None,
+        "reason": "Synthetic target has no calibration. Use fluxdep measurement writeback.",
+    }
 
 
 @pytest.mark.parametrize(

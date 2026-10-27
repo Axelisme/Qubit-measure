@@ -220,11 +220,12 @@ class Controller(BaseController[FluxDepState, EventBus]):
         return name
 
     def configure_flux_context(self, provider: ComponentFluxProvider) -> None:
-        """Inject the lab's component projection for subsequent loads and queries.
+        """Inject the lab projection for loads, queries and predictor exports.
 
-        This replaces only the stateless load service, preserving all spectra.
+        Replaces the stateless load service and export provider, preserving spectra.
         """
         self._load = LoadService(self.state, flux_context_provider=provider)
+        self._fit.configure_flux_context(provider)
 
     def flux_context(self) -> ComponentFluxContext | None:
         """Return the opened target's injected calibration; errors name component/kind.
@@ -561,9 +562,10 @@ class Controller(BaseController[FluxDepState, EventBus]):
         """
         self._fit.configure_export(planner)
 
-    def export_params(self) -> str:
+    def export_params(self) -> str | None:
         """Export to the selected entry/component and return the predictor path.
 
+        None means predictor skipped, not setup/ledger skipped.
         Same owner-thread, validation and partial-failure contract as
         export_params_receipt.
         """
@@ -574,7 +576,8 @@ class Controller(BaseController[FluxDepState, EventBus]):
 
         Requires an opened entry/component, fresh fit and aligned source. Uses
         the first aligned spectrum, even with zero sampled points. Receipt holds
-        predictor path, GHz params, calibration source, component and analysis ID.
+        optional predictor path, independent predictor/component outcomes, GHz
+        params, calibration source, component and analysis ID.
         Files are committed sequentially; I/O/schema failure preserves successful
         prefix without retry or rollback. State observations remain unchanged.
         """

@@ -23,6 +23,11 @@ App 仍以 half／integer 線對齊。
 讀取以 `device_value_at_flux` 投影 φ=0.5 與 φ=0 還原兩線。
 兩線可能與舊檔相差一個週期，光譜與點位的 flux 陣列不變。
 
+Fluxdep app 另寫 predictor v2 時，以明示 device 當第一台儀器。
+被掃 period 取擬合正值 `2*abs(integer-half)`，其他儀器 periods 抄 component 並保留符號。
+這不改變 component P1 的被掃 period 保留原方向規則，也不改寫 checkpoint 內保存的 signed period。
+Predictor offset 扣除其他 snapshot 儀器的貢獻，被掃儀器只取 half，不重加 snapshot。
+
 ## 明確升級
 
 Reader 只接受 v2。舊檔會報錯並列出升級命令。

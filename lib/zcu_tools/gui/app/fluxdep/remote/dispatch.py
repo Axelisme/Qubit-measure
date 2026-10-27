@@ -516,6 +516,11 @@ def _h_fit_export_params(
         "alignment_from": receipt.alignment_from,
         "component": receipt.component,
         "analysis_id": receipt.analysis_id,
+        "predictor_writeback": {
+            "status": receipt.predictor_writeback.status,
+            "device": receipt.predictor_writeback.device,
+            "reason": receipt.predictor_writeback.reason,
+        },
         "flux_writeback": {
             "status": receipt.flux_writeback.status,
             "device": receipt.flux_writeback.device,

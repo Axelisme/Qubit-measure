@@ -448,7 +448,7 @@ class SpectrumsExportedReply(TypedDict):
 
 
 class FluxWritebackReply(TypedDict):
-    """Component calibration result from the injected export planner.
+    """Independent component calibration or dataset predictor export outcome.
 
     status is written or skipped. Written has a nonblank device and null reason.
     Skipped may name the intended device and has an explanation with the next
@@ -463,16 +463,19 @@ class FluxWritebackReply(TypedDict):
 class ParamsExportedReply(TypedDict):
     """Successful native merge output, captured by the GUI export owner.
 
-    savepath is the actual output path. params preserves full-precision EJ/EC/EL
+    savepath is the actual predictor path, or null when predictor is skipped.
+    predictor_writeback explains that outcome, separately from flux_writeback's
+    component calibration policy. params preserves full-precision EJ/EC/EL
     in GHz. alignment_from is the first aligned spectrum used for calibration.
     """
 
-    savepath: str
+    savepath: str | None
     params: FitParametersReply
     alignment_from: str
     component: str
     analysis_id: str
     flux_writeback: FluxWritebackReply
+    predictor_writeback: FluxWritebackReply
 
 
 class OperationOutcomeReply(TypedDict):
