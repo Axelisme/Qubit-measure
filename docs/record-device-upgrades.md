@@ -133,7 +133,7 @@ Fallback 只適用於沒有新 row frame 的列，且 device 單位必須匹配�
 
 以下操作適用於已使用具名 `flux` 的 component。它們不屬於 record upgrade，也沒有批次改名工具。
 
-Device 改名時，將 component 的 `flux.<old-name>` key 改成 `flux.<new-name>`，保留該 entry 的校準值。若 qubit 的 `flux_source` 仍指向舊名，同步改為新名，因為 form 用它選預設 device。不要用整份資料的文字搜尋取代去改歷史。
+Device 改名時，將 component 的 `flux.<old-name>` key 改成 `flux.<new-name>`，保留該 entry 的校準值。若 qubit 的 `flux_dev` 仍指向舊名，同步改為新名，因為 form 用它選預設 device。不要用整份資料的文字搜尋取代去改歷史。
 
 改接線會改變 device 到 qubit 的關係。刪除該 component 的 `flux.<device>` entry，再重新執行對應的 fluxdep 校準。不要把舊校準當成新接線的校準。只刪受影響的 entry，保留其他 device 的校準。
 

@@ -11,7 +11,7 @@ components:
     EL: 0.80
     freq: null # Bias-dependent; not given by the physical settings.
     resonator: R1
-    flux_source: f1_bias
+    flux_dev: f1_bias
     flux: {}
     wiring:
       ch: 2
@@ -22,7 +22,7 @@ components:
     EL: 0.59
     freq: null
     resonator: R2
-    flux_source: f2_bias
+    flux_dev: f2_bias
     flux: {}
     wiring:
       ch: 3 # F2 charge line; coupler crosstalk is real 0.01 GHz/gain.
@@ -32,7 +32,7 @@ components:
     EC: 0.32
     d: 0.58536585
     freq: null
-    flux_source: coupler_bias
+    flux_dev: coupler_bias
     flux: {}
   R1:
     kind: resonator

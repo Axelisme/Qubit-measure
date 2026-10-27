@@ -14,7 +14,7 @@ components:
     EL: 1.0
     freq: null # Bias-dependent; this is not a frequency calibration.
     resonator: R1
-    flux_source: flux_bias
+    flux_dev: flux_bias
     flux:
       flux_bias: {half: 0.0, integer: -0.005, period: 0.01}
     wiring:

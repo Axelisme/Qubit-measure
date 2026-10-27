@@ -196,8 +196,8 @@ Session、startup 與 FormEnv 不提供模板綁定預設值。模板展開不�
 Core 用 `flux_dev: str` 等具名欄位取代 `dev: Mapping[str, str]`。
 可選裝置使用 `str | None`。Core 不認得 alias 或 session，透過
 `context.devices[cfg.flux_dev]` 取得 driver。Form 在 Open／Reset 從實驗對象的
-來源欄位讀取 direct 裝置名稱，單 qubit 用 `$qubit.flux_source`，mux 全域線圈用
-`$mux.flux_source`，JPA 用 `$jpa.flux_source` 與 `$jpa.rf_source`。
+來源欄位讀取 direct 裝置名稱，單 qubit 用 `$qubit.flux_dev`，mux 全域線圈用
+`$mux.flux_dev`，JPA 用 `$jpa.flux_dev` 與 `$jpa.rf_source`。
 初值可覆寫，既有 input 不隨 alias 表或元件參數更新。
 缺來源時欄位留空，必填欄位由表單報錯，可選欄位保留 None 的原有語意。
 不使用靜態裝置 fallback，也不從 cache 推測裝置。

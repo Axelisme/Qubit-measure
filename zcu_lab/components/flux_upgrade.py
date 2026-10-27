@@ -58,15 +58,15 @@ def _calibration(raw: YamlMap, path: str, *, device_name: str, legacy: bool) -> 
 
 
 def _source(fields: YamlMap, path: str) -> str:
-    source = fields.get("flux_source")
+    source = fields.get("flux_dev")
     if not isinstance(source, str) or not source.strip():
         raise ValueError(
-            f"{path}.flux_source: manual repair required; no usable explicit device name, cannot guess"
+            f"{path}.flux_dev: manual repair required; no usable explicit device name, cannot guess"
         )
     try:
         validate_device_name(source)
     except ValueError as error:
-        raise ValueError(f"{path}.flux_source: {error}") from error
+        raise ValueError(f"{path}.flux_dev: {error}") from error
     return source
 
 
@@ -137,7 +137,12 @@ def _convert_components(components: dict[str, YamlMap]) -> None:
         kind = fields.get("kind")
         if not isinstance(kind, str):
             raise ValueError(f"{path}.kind: required string")
-        if fields.get("flux_source") is not None:
+        # v1 named the default control device flux_source.
+        if "flux_source" in fields:
+            if "flux_dev" in fields:
+                raise _PartialFlux(f"{path}: mixes v1 flux_source and v2 flux_dev")
+            fields["flux_dev"] = fields.pop("flux_source")
+        if fields.get("flux_dev") is not None:
             _source(fields, path)
         if not kind.startswith("qubit/"):
             continue
@@ -202,6 +207,7 @@ def _shape(components: dict[str, YamlMap], version: object) -> None:
     new_values = False
     old_fields = False
     for fields in components.values():
+        old_fields |= "flux_source" in fields
         kind = str(fields.get("kind", ""))
         if kind.startswith("qubit/"):
             old_fields |= any(key in fields for key in _LOCAL)
@@ -265,7 +271,8 @@ def classify_flux_document(document: ParameterDocument) -> FluxClassification:
 def convert_flux_v1_to_v2(document: ParameterDocument) -> ParameterDocument:
     """Return a detached v2 document from completely classified v1/unmarked data.
 
-    Preserve unrelated fields, flux_source and original working-unit numbers.
+    Rename v1 flux_source to flux_dev, preserving its value, unrelated fields
+    and original working-unit numbers.
     Move local and mux calibrations to qubit flux entries keyed by their explicit
     source device. Remove replaced fields; never synthesize a record or a frame.
     Missing source, partial/corrupt input or non-v1 data raises located ValueError.

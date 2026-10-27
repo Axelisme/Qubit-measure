@@ -56,8 +56,8 @@ Export params… 寫 `predictors/<component>.json`，再更新 setup 宣告的 E
 Framework 不解讀 lab 的 flux 區塊，也不取得 device 值。
 
 `apps.fluxdep` 注入 [`zcu_lab.fluxdep_export`](../../../../../zcu_lab/fluxdep_export.py) 的規則。
-只有 component 的 `flux` 恰含 `flux_source` 一個 device 時，才更新
-`flux.<flux_source>.{half, integer, period}`，保留既有 period 方向，更新其大小。
+只有 component 的 `flux` 恰含 `flux_dev` 一個 device 時，才更新
+`flux.<flux_dev>.{half, integer, period}`，保留既有 period 方向，更新其大小。
 缺來源、空 frame、名稱不匹配或多 contributor 時不寫 component flux。
 EJ／EC／EL、predictor 與 ledger 仍匯出，GUI status 與 RPC／MCP receipt 的
 `flux_writeback` 明示 skipped、目標 device 與原因。多 contributor 校準需要被掃 device

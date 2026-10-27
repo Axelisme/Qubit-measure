@@ -9,13 +9,13 @@ from zcu_lab.v2.support.measure.ctx_helpers import t1_initial_time
 
 def make_form(ctx: FormContext) -> Form[JPAOptCfg]:
     """Build starting values and shape from the captured source availability."""
-    flux_source = (
-        ctx.parameters.lookup_point("$jpa.flux_source").value
+    flux_dev = (
+        ctx.parameters.lookup_point("$jpa.flux_dev").value
         if ctx.parameters is not None
         else None
     )
-    if flux_source is not None and not isinstance(flux_source, str):
-        raise ValueError("$jpa.flux_source must name a device")
+    if flux_dev is not None and not isinstance(flux_dev, str):
+        raise ValueError("$jpa.flux_dev must name a device")
     rf_source = (
         ctx.parameters.lookup_point("$jpa.rf_source").value
         if ctx.parameters is not None
@@ -34,7 +34,7 @@ def make_form(ctx: FormContext) -> Form[JPAOptCfg]:
             if ctx.has("$resonator.module.readout")
             else Template("readout", bindings={"resonator": "$resonator"}),
             "jpa_rf_dev": rf_source,
-            "jpa_flux_dev": flux_source,
+            "jpa_flux_dev": flux_dev,
             "flux_unit": "A",
             "jpa_flux": Range.around("$jpa.flux", 0.005, expts=101),
             "jpa_freq": Range(

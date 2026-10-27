@@ -29,8 +29,8 @@ phi = sum((value[d] - integer[d]) / period[d])
 
 每個 half 與 integer 的距離須為 `abs(period)/2`。
 載入檢查數值形狀，使用處檢查三欄 spacing 並指出 device。
-Qubit 保留 `flux_source` 作表單預設掃描來源，不再保存舊四個 scalar flux 欄位。
-Mux group 保留自己的 `flux_source`，各 qubit 自己保存對該 device 的校準，不再有 `coil_flux`。
+Qubit 保留 `flux_dev` 作表單預設掃描來源，不再保存舊四個 scalar flux 欄位。
+Mux group 保留自己的 `flux_dev`，各 qubit 自己保存對該 device 的校準，不再有 `coil_flux`。
 `coil` 不是保留別名，mapping key 一律是實際 device 名稱。
 
 使用者於 2026-10-27 指定：「ref_flux就不用了，固定就好。我反而考慮flux.<device>.{half/integer/period}這種格式。」
@@ -121,7 +121,7 @@ Native 升級仍拒絕混合文件。這個 storage-only 覆寫語意為 advisor
 Lab helper 負責 component 到數學型別的轉換，Measure proposal 組裝留在 lab measure support。
 獨立 predictor 模型與 fluxdep app reference anchors 的同名欄位保留原語義、格式與版本。
 Runtime PredictorService、predictor 檔與 fluxdep app anchors 的多 device 輸入不在這個改版範圍。
-Workflow FrequencyModelForm 的初值仍需移除 component 舊欄位讀取。它按 flux_source 選新 entry，
+Workflow FrequencyModelForm 的初值仍需移除 component 舊欄位讀取。它按 flux_dev 選新 entry，
 以 Form capture 的其他 device 值換算 actual half，保留該 entry 的 signed period。
 缺來源或校準時保持必填空白，frame 錯誤保留 device 名稱。EJ／EC／EL 的初值不變。
 FrequencyModel 的欄位與單 device affine 行為不變。這個初值範圍釐清為 advisor 裁定，Review: pending。

@@ -10,8 +10,8 @@
 | --- | --- | --- |
 | `resonator` | Readout resonator 的頻率、linewidth 與 wiring。 | `onetone/*`、`twotone/*`、`jpa/*` 與 mux tone 初值。 |
 | `group/mux` | 1 至 8 個有序 resonators 與可選、等長且不重複的 qubits，擁有 mux wiring、module 槽與 global coil 來源。 | `mux/*` 與 `two_qubit/*` 的表單。 |
-| `device/current_source` | Flux bias 來源的 component 記錄，只有共用 ext、module，沒有 wiring。 | 不代替 driver；flux 表單從實驗元件的 flux_source 取得裝置初值，Run 使用選定的已連線 driver。 |
-| `amplifier/jpa` | JPA pump frequency、power、flux bias 校準及可空的 flux_source／rf_source 裝置名稱。 | `jpa/*` 的表單與 writeback。 |
+| `device/current_source` | Flux bias 來源的 component 記錄，只有共用 ext、module，沒有 wiring。 | 不代替 driver；flux 表單從實驗元件的 flux_dev 取得裝置初值，Run 使用選定的已連線 driver。 |
+| `amplifier/jpa` | JPA pump frequency、power、flux bias 校準及可空的 flux_dev／rf_source 裝置名稱。 | `jpa/*` 的表單與 writeback。 |
 | `qubit/fluxonium` | 共用 qubit 校準加上 EJ、EC、EL。 | `twotone/*` 與其他讀 qubit 校準的表單；mux／FTF 表單也可經 group 讀取。 |
 | `qubit/transmon` | 共用 qubit 校準加上 EJmax、EC、無因次 d。 | 讀 qubit 校準的表單；FTF 可將它綁為 coupler。 |
 
@@ -43,7 +43,7 @@ Schema version 2 只保留這個 flux 區塊，qubit 舊四欄與 mux `coil_flux
 | `resonator` | `ch`、`ro_ch` | 單 tone generator 與 ADC。 |
 | `qubit/fluxonium`、`qubit/transmon` | `ch`、`lo_flux_ch` | Drive generator 與 local flux channel，由 `QubitBaseSchema` 宣告。 |
 | `group/mux` | `gen_ch`、`ro_ch` 列表 | Mux generator 與逐 tone ADC，`ro_ch[i]` 對應 `resonators[i]`，長度必須相同。 |
-| `amplifier/jpa`、`device/current_source` | 無 | 表單從元件的 flux_source／rf_source 推導裝置名稱，再使用選定的已連線 driver，不讀 component channel。 |
+| `amplifier/jpa`、`device/current_source` | 無 | 表單從元件的 flux_dev／rf_source 推導裝置名稱，再使用選定的已連線 driver，不讀 component channel。 |
 
 Mux wiring 不從各 resonator 的單 tone wiring 推導。FTF 的 R1／R2 使用 pulse ADC0，MG12 則使用 mux ADC1／ADC2。
 
@@ -56,12 +56,14 @@ Mux generator 未知時可省略 `gen_ch` 或填 null，但 group 必須提供 w
 | 字串欄位 | 填入的名稱 |
 | --- | --- |
 | Qubit `resonator` | Readout resonator 元件，例如 `R1`，kind 為 `resonator`。 |
-| Qubit `flux_source` | 自己的 DC 線 device 名稱，例如 `Q1_bias`，不代表已連線。 |
-| Mux group `flux_source` | Global coil 的 device 名稱，例如 `coil_bias`，不受 qubits 是否提供影響，不代表已連線。 |
-| JPA `flux_source` | JPA bias 的 DC device 名稱，可為 null，不代表已連線。 |
+| Qubit `flux_dev` | 自己的 DC 線 device 名稱，例如 `Q1_bias`，不代表已連線。 |
+| Mux group `flux_dev` | Global coil 的 device 名稱，例如 `coil_bias`，不受 qubits 是否提供影響，不代表已連線。 |
+| JPA `flux_dev` | JPA bias 的 DC device 名稱，可為 null，不代表已連線。 |
 | JPA `rf_source` | JPA pump 的 RF device 名稱，可為 null，不代表已連線。 |
 | Resonator `amplifier` | Readout amplifier 元件，例如 `J1`，內建 kind 為 `amplifier/jpa`。 |
 
-Qubit 的 `flux` 保存自己的 local、global coil 與其他 contributor 校準。Mux group 只保存 `flux_source`，不另擁有 qubit 校準。`wiring.lo_flux_ch` 仍是 fast-flux 通道，不是 DC device。
+三種元件的 `flux_dev` 都是 flux 的主要（預設）控制儀器，不參與 φ 計算，也不必出現在 flux 校準中。Form 在 Open／Reset 取此欄位作可覆寫的裝置初值，null 使裝置欄位留空。
+
+Qubit 的 `flux` 保存自己的 local、global coil 與其他 contributor 校準。Mux group 只保存 `flux_dev`，不另擁有 qubit 校準。`wiring.lo_flux_ch` 仍是 fast-flux 通道，不是 DC device。
 
 這些字串不在載入時預檢整張引用圖；解析時才查目標。單位見 [component 欄位單位](../README.md#component-欄位單位)，共用欄位與 ext 政策見 [component 教學](../tutorial/01-components.md#1-宣告欄位)，registry 與 field specs 契約見 [元件與定義](../../lib/zcu_tools/resources/entry/README.md#元件與定義)。

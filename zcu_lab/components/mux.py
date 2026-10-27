@@ -43,7 +43,7 @@ class MuxGroupSchema(BuiltinComponent):
     never changes this group's inherited module slots or ext ownership.
     time_of_fly stores this mux route's measured flight time in us, or None
     until known. Resonator pulse-route flight times are separate.
-    flux_source names the global coil device, or None until assigned.
+    flux_dev names the global coil device, or None until assigned.
     Each qubit owns its per-device flux calibrations, including this coil.
     """
 
@@ -75,8 +75,9 @@ class MuxGroupSchema(BuiltinComponent):
         description="Optional distinct qubit names, aligned with the full resonators list.",
     )
 
-    flux_source: DeviceName | None = Field(
-        default=None, description="Device name supplying the global coil bias."
+    flux_dev: DeviceName | None = Field(
+        default=None,
+        description="Primary (default) flux control device; not part of the flux calculation and need not have a flux calibration. None leaves the form device blank.",
     )
 
     @field_validator("resonators", "qubits")

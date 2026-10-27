@@ -76,8 +76,8 @@ the missing or extra original positions before acquisition.
 
 `flux_unit` optionally labels A, V or native. Omission keeps the label; null clears it.
 The device owner checks it against each selected source. No values are rescaled.
-Global source identity starts at the captured `$mux.flux_source`; local sources
-start at each captured `Q.flux_source`. Use overrides for intentional device,
+Global source identity starts at the captured `$mux.flux_dev`; local sources
+start at each captured `Q.flux_dev`. Use overrides for intentional device,
 averaging or timing edits. There is no nested `spectrum` cfg.
 
 For example, a three-Q group can scan Q3 then Q1 with this onetone global input.
@@ -125,7 +125,7 @@ center using its period rule. Review its actual committed state.
    Onetone copies group tones and applies ringup timing; twotone keeps the slot.
    Slot existence does not prove complete drives, frequency bounds or DC bounds.
    Local bounds derive from each Q's captured flux mapping and other devices' detached values. Global bounds
-   use the union of all initial participants' actual intervals for the group's flux_source. Missing
+   use the union of all initial participants' actual intervals for the group's flux_dev. Missing
    calibration keeps endpoints required. Selection changes do not recompute seeds.
 4. For an agent recipe, pass explicit missing inputs in the shapes above.
    `needs_parameters` includes owner paths and reasons. Fix those fields rather

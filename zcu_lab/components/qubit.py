@@ -100,6 +100,7 @@ class QubitBaseSchema(BuiltinComponent):
     resonator: str | None = Field(
         default=None, description="Name of the readout resonator component."
     )
-    flux_source: DeviceName | None = Field(
-        default=None, description="Device name supplying this qubit's own DC line bias."
+    flux_dev: DeviceName | None = Field(
+        default=None,
+        description="Primary (default) flux control device; not part of the flux calculation and need not have a flux calibration. None leaves the form device blank.",
     )
