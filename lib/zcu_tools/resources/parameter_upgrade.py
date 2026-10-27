@@ -35,6 +35,8 @@ class ParameterDocument:
 
     data: YamlMap
     source_path: Path | None = None
+    notes: tuple[str, ...] = ()
+    """Caller-owned conversion diagnostics; not part of the YAML payload."""
 
 
 @dataclass(frozen=True)
@@ -114,7 +116,9 @@ def upgrade_document(
         if step is None:
             raise ValueError(f"missing upgrade step v{version} -> v{version + 1}")
         transformed = step.transform(deepcopy(candidate))
-        candidate = ParameterDocument(deepcopy(transformed.data), document.source_path)
+        candidate = ParameterDocument(
+            deepcopy(transformed.data), document.source_path, transformed.notes
+        )
         next_version = candidate.data.get("schema_version")
         if type(next_version) is not int or next_version != version + 1:
             raise ValueError(
@@ -169,6 +173,8 @@ class UpgradeResult:
     changes: tuple[UpgradeChange, ...] = ()
     backup_path: Path | None = None
     error: str | None = None
+    notes: tuple[str, ...] = ()
+    """Caller conversion messages, separate from persisted YAML values."""
 
 
 def upgrade_files(
@@ -249,15 +255,17 @@ def _upgrade_file(
             candidate = upgrade_document(document, plan=plan)
             changes = _field_changes(document.data, candidate.data)
             if not changes:
-                return UpgradeResult(source, "skipped")
+                return UpgradeResult(source, "skipped", notes=candidate.notes)
             if not apply:
-                return UpgradeResult(source, "dry-run", changes)
+                return UpgradeResult(source, "dry-run", changes, notes=candidate.notes)
             backup_candidate = path.with_name(f"{path.name}.{uuid4().hex}.bak")
             with backup_candidate.open("xb") as stream:
                 stream.write(original)
             backup = backup_candidate
             _replace_yaml(path, candidate.data)
-            return UpgradeResult(source, "applied", changes, backup)
+            return UpgradeResult(
+                source, "applied", changes, backup, notes=candidate.notes
+            )
     except (OSError, ValueError, YAMLError, Timeout) as error:
         return UpgradeResult(source, "rejected", backup_path=backup, error=str(error))
 
@@ -313,6 +321,8 @@ def main(argv: Sequence[str] | None = None, *, plan: UpgradePlan | None = None) 
         if result.backup_path is not None:
             print(f"{result.source.path}: backup: {result.backup_path}")
         print(f"{result.source.path}: {result.status}")
+        for note in result.notes:
+            print(f"  {note}")
         for change in result.changes:
             before = repr(change.before.value) if change.before.present else "<missing>"
             after = repr(change.after.value) if change.after.present else "<missing>"

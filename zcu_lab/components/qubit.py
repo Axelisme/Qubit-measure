@@ -1,6 +1,7 @@
 """Shared qubit fields and channel wiring."""
 
 from math import isclose
+from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from zcu_tools.cfg_model import DeviceName
@@ -26,13 +27,11 @@ class QubitWiringSchema(BaseModel):
 
 
 class QubitFluxCalibration(BaseModel):
-    """One DC device's reference points in its native instrument unit.
+    """Projected or fitted DC coordinates, not a stored component flux block.
 
-    half and integer are finite biases with all other contributing devices at
-    their integer references. period is the finite nonzero signed bias span
-    per flux quantum; negative reverses the flux direction. Missing or invalid
-    fields fail model validation. The flux helpers check half/integer spacing
-    when using the calibration, not while loading the component.
+    half and integer are finite native biases for flux 0.5 and 0, respectively.
+    period is the finite nonzero signed bias span per flux quantum. Callers of
+    historical conversion validate spacing before accepting a calibration.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -81,6 +80,39 @@ class QubitFluxCalibration(BaseModel):
         return value
 
 
+class QubitFluxSchema(BaseModel):
+    """Reduced flux at zero bias plus independent signed device periods.
+
+    offset is in flux quanta, or None until calibrated. period maps instrument
+    names to finite nonzero native bias spans per flux quantum. A device without
+    a current value contributes zero without losing its stored period.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    offset: float | None = Field(
+        default=None,
+        strict=True,
+        allow_inf_nan=False,
+        description="Reduced flux with every device at zero; None until calibrated.",
+    )
+    period: dict[
+        DeviceName, Annotated[float, Field(strict=True, allow_inf_nan=False)]
+    ] = Field(
+        default_factory=dict,
+        description="Signed nonzero native bias span per flux quantum, by device.",
+    )
+
+    @field_validator("period")
+    @classmethod
+    def require_nonzero_periods(cls, values: dict[str, float]) -> dict[str, float]:
+        """Reject a zero period and identify its instrument."""
+        for name, value in values.items():
+            if value == 0:
+                raise ValueError(f"device {name!r}: period must be nonzero")
+        return values
+
+
 class QubitBaseSchema(BuiltinComponent):
     """Fields shared by every qubit kind; physics energies belong to subclasses."""
 
@@ -93,9 +125,9 @@ class QubitBaseSchema(BuiltinComponent):
     t1: Duration = Field(default=None, description="Energy relaxation time T1.")
     t2r: Duration = Field(default=None, description="Ramsey dephasing time T2*.")
     t2e: Duration = Field(default=None, description="Echo dephasing time T2E.")
-    flux: dict[str, QubitFluxCalibration] = Field(
-        default_factory=dict,
-        description="Per-device reference half/integer biases and signed periods.",
+    flux: QubitFluxSchema = Field(
+        default_factory=QubitFluxSchema,
+        description="Zero-bias reduced flux offset and signed per-device periods.",
     )
     resonator: str | None = Field(
         default=None, description="Name of the readout resonator component."

@@ -9,7 +9,7 @@ from zcu_tools.device.yoko import YOKOGS200Info
 from zcu_tools.gui.form import FormEnv
 
 from zcu_lab.components.qubit import QubitBaseSchema, QubitFluxCalibration
-from zcu_lab.v2.support.flux import device_flux_points, qubit_flux_frame
+from zcu_lab.v2.support.flux import device_flux_points
 
 
 @dataclass(frozen=True)
@@ -30,17 +30,13 @@ def captured_flux_seed(env: FormEnv, qubit: str, device_name: str | None) -> Flu
     qubit is a concrete component name or captured alias. device_name is its
     chosen local or global DC source, never a reserved coil alias. Missing
     source or selected calibration leaves required coordinates blank. Every
-    frame device and selected source must have a valid shared name and belong
-    to env.devices. Values and units come only from detached DC device infos.
-    Non-qubits, unavailable DC infos, missing contributors or inconsistent
+    selected source must belong to env.devices. Absent contributors count as
+    zero. Values and units come only from detached DC device infos.
+    Non-qubits, unavailable DC infos or inconsistent
     frames raise ValueError naming the component/device. No catalog or live
     driver is consulted; input objects are not changed.
     """
     component = captured_qubit(env, qubit)
-    qubit_flux_frame(component.flux)
-    for name in component.flux:
-        if name not in env.devices:
-            raise ValueError(f"Frame device {name!r} is not in the Form device options")
     if device_name is None:
         return FluxSeed(None, None, None)
     validate_device_name(device_name)
@@ -49,11 +45,11 @@ def captured_flux_seed(env: FormEnv, qubit: str, device_name: str | None) -> Flu
     info = env.devices[device_name]
     if not isinstance(info, (FakeDeviceInfo, YOKOGS200Info)):
         raise ValueError(f"Device {device_name!r} has no captured DC value/unit")
-    if device_name not in component.flux:
+    if component.flux.offset is None or device_name not in component.flux.period:
         return FluxSeed(device_name, info.value_unit, None)
     values: dict[str, float] = {}
-    for name in component.flux:
-        if name == device_name:
+    for name in component.flux.period:
+        if name == device_name or name not in env.devices:
             continue
         contributor = env.devices[name]
         if not isinstance(contributor, (FakeDeviceInfo, YOKOGS200Info)):

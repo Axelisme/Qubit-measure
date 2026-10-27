@@ -1,185 +1,84 @@
 """Qubit flux blocks and linear device coordinates, without GUI or device I/O."""
 
-from collections.abc import Collection, Iterable, Mapping
-from math import copysign, isfinite
+from collections.abc import Iterable, Mapping
+from math import isfinite
 
-from zcu_tools.analysis.flux import (
-    DevicePeriod,
-    FluxFrame,
-    device_value_at_flux,
-    flux_from_device_values,
-)
-from zcu_tools.cfg_model import validate_device_name
+from zcu_tools.analysis.flux import DevicePeriod, FluxFrame, device_value_at_flux
 from zcu_tools.datafile import JsonObject
 
-from zcu_lab.components.qubit import QubitFluxCalibration
+from zcu_lab.components.qubit import QubitFluxCalibration, QubitFluxSchema
 
 
-def qubit_flux_frame(
-    flux: Mapping[str, QubitFluxCalibration],
-) -> dict[str, dict[str, float]]:
-    """Copy a qubit's flux block into a detached record-ready mapping.
+def qubit_flux_frame(flux: QubitFluxSchema) -> JsonObject:
+    """Copy the captured component offset/period block for a record.
 
-    flux contains device-keyed component calibrations in native device units.
-    Return half/integer/period for every entry, preserving signed periods and
-    valid names unchanged. An empty block returns {}. Invalid device names or
-    abs(integer-half) != abs(period)/2 raise ValueError naming the device.
-    This pure copy does not read point files, check a setup catalog or obtain
-    device values; the caller chooses which point snapshot to copy and when.
+    Return a detached JSON mapping, including a null uncalibrated offset and all
+    signed periods. No files, device values or current parameters are read.
     """
-    result: dict[str, dict[str, float]] = {}
-    for name, calibration in flux.items():
-        validate_device_name(name)
-        calibration.validate_spacing(name)
-        result[name] = {
-            "half": calibration.half,
-            "integer": calibration.integer,
-            "period": calibration.period,
-        }
-    return result
+    return flux.model_dump(mode="json")
 
 
 def snapshot_numeric_values(
     snapshot: Mapping[str, JsonObject] | None, names: Iterable[str]
 ) -> dict[str, float]:
-    """Project selected Run snapshot value fields without reading devices.
+    """Read finite native biases from selected Run snapshot entries.
 
-    names selects the required device settings; extra settings are ignored.
-    Return a new mapping of numeric, non-bool JSON values. Missing/non-numeric
-    values are omitted; nonfinite numbers remain for the using math/record
-    contract to reject with device context. None acts as an absent snapshot.
-    Inputs stay unchanged. This mechanical projection does not validate frame
-    membership, choose contributors or decide whether records may be written.
+    Missing devices or missing value keys contribute nothing. An explicitly
+    supplied nonnumeric, bool or nonfinite value raises ValueError naming its
+    device. Extra snapshot entries are ignored. No hardware is read.
     """
     values: dict[str, float] = {}
     for name in names:
         info = None if snapshot is None else snapshot.get(name)
-        value = None if info is None else info.get("value")
-        if isinstance(value, (int, float)) and not isinstance(value, bool):
-            values[name] = value
+        if info is None or "value" not in info:
+            continue
+        value = info["value"]
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not isfinite(value)
+        ):
+            raise ValueError(
+                f"device {name!r} requires a finite non-bool Run snapshot value"
+            )
+        values[name] = value
     return values
 
 
 def record_flux_frame(
-    flux: Mapping[str, QubitFluxCalibration],
+    flux: QubitFluxSchema,
     snapshot: Mapping[str, JsonObject] | None,
-) -> dict[str, dict[str, float]]:
-    """Copy Run-captured calibrations paired with that Run's device values.
+) -> JsonObject:
+    """Copy the Run-captured offset/period block with its original calibration.
 
-    flux is the qubit block captured before measurement; snapshot is the same
-    Run's complete device settings, in native units. Return a detached frame
-    with signed periods. For a present snapshot, every frame device must have
-    a finite, non-bool numeric value or ValueError names it at record proposal
-    time. Empty flux is legal. None skips membership validation so callers keep
-    their existing no-snapshot policy (omit ordinary GUI records, retain workflow
-    null). Fluxdep callers still require a snapshot before conversion.
-    Calibration/name failures propagate from qubit_flux_frame. No inputs are
-    changed; no setup catalog, live devices, current point or history is read.
+    Missing snapshot values contribute zero and do not remove stored periods.
+    Present invalid values raise ValueError naming the device. None keeps the
+    caller's no-snapshot policy. No live values or current point are read.
     """
-    frame = qubit_flux_frame(flux)
-    if snapshot is not None:
-        values = snapshot_numeric_values(snapshot, frame)
-        for name in frame:
-            if name not in values or not isfinite(values[name]):
-                raise ValueError(
-                    f"device {name!r} requires a finite non-bool Run snapshot value"
-                )
-    return frame
+    snapshot_numeric_values(snapshot, flux.period)
+    return qubit_flux_frame(flux)
 
 
 def device_flux_points(
-    flux: Mapping[str, QubitFluxCalibration],
+    flux: QubitFluxSchema,
     device_name: str,
     values: Mapping[str, float],
 ) -> QubitFluxCalibration:
-    """Return a device's actual integer/half at other devices' current biases.
+    """Project flux 0 and 0.5 onto one device at other devices' captured biases.
 
-    flux is the qubit's reference block; values supplies each OTHER contributing
-    device's finite bias in its native unit. The selected value and extra values
-    are ignored. No units are converted, inputs changed or hardware read.
-    Invalid/unknown device names, inconsistent calibration spacing and missing
-    or invalid contributing values raise ValueError naming the device. Empty
-    flux is not a usable calibration and raises ValueError.
+    Missing other biases contribute zero. offset must be calibrated and the
+    selected device must have a period. The math owner rejects invalid names
+    and used values with device context. Return native half/integer coordinates
+    and the stored signed period; no inputs change and no devices are read.
     """
-    frame = _math_frame(flux)
-    validate_device_name(device_name)
-    if device_name not in flux:
-        raise ValueError(f"unknown frame device {device_name!r}")
-    calibration = flux[device_name]
-    for name in flux:
-        if name != device_name and name not in values:
-            raise ValueError(f"missing device value for {name!r}")
-    # Keep the stored half branch until components switch to offset/period.
-    half_flux = (calibration.half - calibration.integer) / calibration.period
+    if flux.offset is None:
+        raise ValueError("flux.offset is not calibrated")
+    frame = FluxFrame(
+        offset=flux.offset,
+        devices={name: DevicePeriod(period) for name, period in flux.period.items()},
+    )
     return QubitFluxCalibration(
         integer=device_value_at_flux(frame, values, device_name=device_name, flux=0.0),
-        half=device_value_at_flux(
-            frame, values, device_name=device_name, flux=half_flux
-        ),
-        period=calibration.period,
-    )
-
-
-def reference_device_flux_points(
-    flux: Mapping[str, QubitFluxCalibration],
-    device_name: str,
-    fitted: QubitFluxCalibration,
-    values: Mapping[str, float],
-    *,
-    swept_devices: Collection[str] = (),
-) -> QubitFluxCalibration:
-    """Translate raw fitted points back to fixed contributors' integer references.
-
-    flux is the qubit's reference block. fitted contains the raw half/integer
-    and fitted period magnitude in the scanned device's native unit. Use that
-    NEW magnitude with the stored direction, or positive direction for a first
-    calibration. values supplies OTHER contributors' finite native biases from
-    the Run snapshot. Return only the selected device's reference calibration;
-    the caller writes it without replacing other entries. Inputs stay unchanged.
-
-    swept_devices names all devices swept in this Run. A different swept device
-    in this qubit's frame raises ValueError naming it: its snapshot cannot stand
-    in for a fixed bias. Invalid device names, inconsistent spacing,
-    and missing/invalid used values also raise ValueError naming the device.
-    Empty stored flux supports first calibration; no device I/O occurs.
-    """
-    validate_device_name(device_name)
-    qubit_flux_frame(flux)
-    for name in swept_devices:
-        validate_device_name(name)
-        if name != device_name and name in flux:
-            raise ValueError(
-                f"device {name!r} contributes to this qubit and is swept in the same "
-                "Run; reference conversion requires fixed other devices"
-            )
-    previous = flux.get(device_name)
-    period = copysign(abs(fitted.period), 1 if previous is None else previous.period)
-    selected = QubitFluxCalibration(
-        half=fitted.half, integer=fitted.integer, period=period
-    )
-    # Replace only the selected math frame: the old magnitude must not set the shift.
-    frame = _math_frame({**flux, device_name: selected})
-    for name in flux:
-        if name != device_name and name not in values:
-            raise ValueError(f"missing device value for {name!r}")
-    shift = period * flux_from_device_values(
-        frame, {**values, device_name: fitted.integer}
-    )
-    return QubitFluxCalibration(
-        half=fitted.half + shift, integer=fitted.integer + shift, period=period
-    )
-
-
-def _math_frame(flux: Mapping[str, QubitFluxCalibration]) -> FluxFrame:
-    block = qubit_flux_frame(flux)
-    # Temporary bridge until the component schema switches to offset/period.
-    return FluxFrame(
-        offset=-sum(
-            calibration["integer"] / calibration["period"]
-            for calibration in block.values()
-        ),
-        devices={
-            name: DevicePeriod(calibration["period"])
-            for name, calibration in block.items()
-        },
+        half=device_value_at_flux(frame, values, device_name=device_name, flux=0.5),
+        period=flux.period[device_name],
     )

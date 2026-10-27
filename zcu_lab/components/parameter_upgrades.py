@@ -50,7 +50,7 @@ def parameter_upgrade_plan() -> UpgradePlan:
         validate=_validate,
         classify_legacy=_classify_legacy,
         notes=(
-            "Reference points are assumed; recalibrate with all other contributing devices at their integer references.",
-            "Device name syntax is checked, not device existence. Check names when opening the point in the GUI.",
+            "Offset is derived from local half/period; coil half/integer references are dropped when a local calibration exists.",
+            "Rename every reported unnamed_device/unnamed_coil location to the actual device name. Device existence is not checked.",
         ),
     )

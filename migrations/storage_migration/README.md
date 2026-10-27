@@ -1,6 +1,6 @@
 # `migrations.storage_migration` 離線遷移
 
-**Last updated:** 2026-10-27，完整參數 batch 的 caller 轉換接縫
+**Last updated:** 2026-10-27，完整參數 batch 與 caller diagnostics
 
 **讀者：** framework-dev、agent。維護離線遷移的來源 mapping、owner 接縫與可續跑 publication。
 
@@ -56,6 +56,8 @@
 ### 完整 batch 與目前 schema 驗證
 
 `MigrationMapping.parameter_transform` 是可選的純 `ParameterDocument → ParameterDocument` callback。`prepare_parameter_batch` 先將 seed 或整組 values 疊到完整 raw 文件，再呼叫轉換，最後以目前 `SetupDocument`／`PointDocument.model_validate` 驗證，才建立 `EditView`。來源欄位可以不屬於目前 component schema，不需要讓 reader 接受歷史格式。Batch projection 保留 unset 與顯式 null 的區別，不把未填的 optional 欄位變成 null，也不丟掉明填 null。Seed 在 `_seed_components` 與 dry-run setup 共用此接縫，value group 在 `_flux_units._stage_group` 共用它。Seed 失敗停止；group 失敗按既有 pending 規則保留原文，不提交該組。
+
+Callback 的 `ParameterDocument.notes` 是不寫入 YAML 的操作提醒。`prepare_parameter_batch` 回傳 `PreparedParameterBatch(document, notes)`，seed 與 value-group caller 將成功批次的 notes 附上實際 setup／point 目的路徑，去除同位置的重複訊息，存入 `MigrationReport.notes`。Dry-run 與正式報告使用同一路徑。Migration owner 不解析訊息中的實驗欄位。
 
 Shipped `storage_mapping` 在 callback 執行時才載入 lab 的 `convert_storage_flux_batch`。它與長期 v1→v2 步驟共用 lab 的純轉換。框架測試替換 callback，僅使用合成同版 schema，不依賴 lab。Mapping revision 同時變更，避免舊 manifest 認領不同轉換規則。
 

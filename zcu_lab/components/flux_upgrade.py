@@ -1,7 +1,7 @@
 """Retained, pure component flux v1 to v2 conversion, without file I/O."""
 
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Literal
 
@@ -17,7 +17,7 @@ from zcu_tools.resources.entry.schema import (
 from zcu_tools.resources.parameter_metadata import validate_parameter_header
 from zcu_tools.resources.parameter_upgrade import ParameterDocument
 
-from .qubit import QubitFluxCalibration
+from .qubit import QubitFluxCalibration, QubitFluxSchema
 
 _LOCAL = ("flux_half", "flux_int", "flux_period", "flux_unit")
 _COMPONENTS = TypeAdapter(dict[str, YamlMap])
@@ -59,10 +59,8 @@ def _calibration(raw: YamlMap, path: str, *, device_name: str, legacy: bool) -> 
 
 def _source(fields: YamlMap, path: str) -> str:
     source = fields.get("flux_dev")
-    if not isinstance(source, str) or not source.strip():
-        raise ValueError(
-            f"{path}.flux_dev: manual repair required; no usable explicit device name, cannot guess"
-        )
+    if not isinstance(source, str):
+        raise ValueError(f"{path}.flux_dev: expected a device name")
     try:
         validate_device_name(source)
     except ValueError as error:
@@ -117,69 +115,88 @@ def _validate_container(
     PointDocument.validate_components(current)
 
 
-def _add_flux(
-    components: dict[str, YamlMap], qubit: str, device: str, calibration: YamlMap
-) -> None:
-    fields = components[qubit]
-    flux = fields.setdefault("flux", {})
-    if not isinstance(flux, dict):
-        raise ValueError(f"components.{qubit}.flux: expected mapping")
-    if device in flux:
-        raise ValueError(
-            f"components.{qubit}.flux.{device}: conflicting local/mux calibration; manual repair required"
-        )
-    flux[device] = calibration
+@dataclass
+class _FluxConversion:
+    """One qubit's current frame plus incoming legacy calibration evidence."""
+
+    frame: QubitFluxSchema
+    local_calibrated: bool
+    incoming: set[str] = field(default_factory=set)
+    coil_offsets: dict[str, float] = field(default_factory=dict)
 
 
-def _convert_components(components: dict[str, YamlMap]) -> None:
+def _convert_components(components: dict[str, YamlMap]) -> tuple[str, ...]:
+    conversions: dict[str, _FluxConversion] = {}
+    notes: list[str] = []
     for name, fields in components.items():
         path = f"components.{name}"
         kind = fields.get("kind")
         if not isinstance(kind, str):
             raise ValueError(f"{path}.kind: required string")
-        # v1 named the default control device flux_source.
         if "flux_source" in fields:
             if "flux_dev" in fields:
                 raise _PartialFlux(f"{path}: mixes v1 flux_source and v2 flux_dev")
             fields["flux_dev"] = fields.pop("flux_source")
         if fields.get("flux_dev") is not None:
             _source(fields, path)
-        if not kind.startswith("qubit/"):
-            continue
-        _convert_local(components, name, fields)
+        if kind.startswith("qubit/"):
+            frame = QubitFluxSchema.model_validate(fields.get("flux", {}))
+            local = _convert_local(name, fields, frame)
+            conversion = _FluxConversion(frame, local)
+            if local:
+                conversion.incoming.add(_source(fields, path))
+            conversions[name] = conversion
     for name, fields in components.items():
-        if fields.get("kind") != "group/mux":
-            continue
-        _convert_mux(components, name, fields)
+        if fields.get("kind") == "group/mux":
+            _convert_mux(name, fields, conversions, notes)
+    for name, conversion in conversions.items():
+        _select_offset(name, components[name], conversion, notes)
+        components[name]["flux"] = _COMPONENTS.validate_python(
+            {name: conversion.frame.model_dump(mode="python")}
+        )[name]
+        notes.extend(_placeholder_notes(name, components[name], conversion.frame))
+    return tuple(notes)
 
 
-def _convert_local(components: dict[str, YamlMap], name: str, fields: YamlMap) -> None:
+def _placeholder_notes(name: str, fields: YamlMap, frame: QubitFluxSchema) -> list[str]:
+    paths = []
+    if fields.get("flux_dev") == "unnamed_device":
+        paths.append(f"components.{name}.flux_dev")
+    for device in ("unnamed_device", "unnamed_coil"):
+        if device in frame.period:
+            paths.append(f"components.{name}.flux.period.{device}")
+    return [f"{path}: placeholder; rename to the actual device name." for path in paths]
+
+
+def _convert_local(name: str, fields: YamlMap, frame: QubitFluxSchema) -> bool:
     path = f"components.{name}"
     if fields.get("flux_unit") not in (None, "A", "V"):
         raise ValueError(f"{path}.flux_unit: expected A, V or null")
-    flux = fields.get("flux", {})
-    if not isinstance(flux, dict):
-        raise ValueError(f"{path}.flux: expected mapping")
-    for device, raw in flux.items():
-        validate_device_name(device)
-        if not isinstance(raw, dict):
-            raise ValueError(f"{path}.flux.{device}: expected calibration mapping")
-        _calibration(raw, f"{path}.flux.{device}", device_name=device, legacy=False)
     raw_local: YamlMap = {
         "half": fields.get("flux_half"),
         "int": fields.get("flux_int"),
         "period": fields.get("flux_period"),
     }
-    if any(value is not None for value in raw_local.values()):
+    calibrated = any(value is not None for value in raw_local.values())
+    if calibrated:
+        if fields.get("flux_dev") is None:
+            fields["flux_dev"] = "unnamed_device"
         device = _source(fields, path)
-        calibration = _calibration(raw_local, path, device_name=device, legacy=True)
-        _add_flux(components, name, device, calibration)
+        raw = _calibration(raw_local, path, device_name=device, legacy=True)
+        points = QubitFluxCalibration.model_validate(raw)
+        frame.offset = 0.5 - points.half / points.period
+        frame.period[device] = points.period
     for key in _LOCAL:
         fields.pop(key, None)
-    fields.setdefault("flux", {})
+    return calibrated
 
 
-def _convert_mux(components: dict[str, YamlMap], name: str, fields: YamlMap) -> None:
+def _convert_mux(
+    name: str,
+    fields: YamlMap,
+    conversions: dict[str, _FluxConversion],
+    notes: list[str],
+) -> None:
     coil = fields.pop("coil_flux", {})
     if not isinstance(coil, dict):
         raise ValueError(f"components.{name}.coil_flux: expected mapping")
@@ -188,18 +205,49 @@ def _convert_mux(components: dict[str, YamlMap], name: str, fields: YamlMap) -> 
         raise ValueError(f"components.{name}.qubits: expected list")
     for qubit, raw in coil.items():
         path = f"components.{name}.coil_flux.{qubit}"
-        target = components.get(qubit)
-        if (
-            qubit not in qubits
-            or target is None
-            or not str(target.get("kind", "")).startswith("qubit/")
-        ):
+        if qubit not in qubits or qubit not in conversions:
             raise ValueError(f"{path}: key must name a qubit in this mux group")
         if not isinstance(raw, dict):
             raise ValueError(f"{path}: expected calibration mapping")
-        device = _source(fields, f"components.{name}")
-        calibration = _calibration(raw, path, device_name=device, legacy=True)
-        _add_flux(components, qubit, device, calibration)
+        device = (
+            "unnamed_coil"
+            if fields.get("flux_dev") is None
+            else _source(fields, f"components.{name}")
+        )
+        points = QubitFluxCalibration.model_validate(
+            _calibration(raw, path, device_name=device, legacy=True)
+        )
+        conversion = conversions[qubit]
+        if device in conversion.incoming:
+            raise ValueError(
+                f"{path}: conflicting local/mux calibration for {device!r}"
+            )
+        conversion.incoming.add(device)
+        conversion.frame.period[device] = points.period
+        candidate = 0.5 - points.half / points.period
+        conversion.coil_offsets[device] = candidate
+        notes.append(f"{path}: candidate offset={candidate!r} from device {device!r}.")
+        notes.append(
+            f"{path}: dropped half={points.half!r}, int={points.integer!r}; retained period at components.{qubit}.flux.period.{device}."
+        )
+
+
+def _select_offset(
+    name: str, fields: YamlMap, conversion: _FluxConversion, notes: list[str]
+) -> None:
+    if conversion.local_calibrated or not conversion.coil_offsets:
+        return
+    source = fields.get("flux_dev")
+    if isinstance(source, str) and source in conversion.coil_offsets:
+        conversion.frame.offset = conversion.coil_offsets[source]
+    elif len(conversion.coil_offsets) == 1:
+        conversion.frame.offset = next(iter(conversion.coil_offsets.values()))
+    else:
+        conversion.frame.offset = None
+        notes.append(
+            f"components.{name}.flux.offset: multiple coils without a designated source; "
+            "left null. Recalibrate offset; all device periods are retained."
+        )
 
 
 def _shape(components: dict[str, YamlMap], version: object) -> None:
@@ -212,7 +260,10 @@ def _shape(components: dict[str, YamlMap], version: object) -> None:
         if kind.startswith("qubit/"):
             old_fields |= any(key in fields for key in _LOCAL)
             old_values |= any(fields.get(key) is not None for key in _LOCAL[:3])
-            new_values |= bool(fields.get("flux"))
+            flux = fields.get("flux")
+            new_values |= isinstance(flux, dict) and (
+                flux.get("offset") is not None or bool(flux.get("period"))
+            )
         if kind == "group/mux":
             old_fields |= "coil_flux" in fields
             old_values |= bool(fields.get("coil_flux"))
@@ -235,7 +286,8 @@ def classify_flux_document(document: ParameterDocument) -> FluxClassification:
 
     Check container/aliases, all registered components, calibration completeness,
     finite numbers, half/integer spacing, mux membership and device name syntax.
-    Missing source names require manual repair, never a guessed device. Unknown
+    Missing names receive distinct local/coil placeholders. Present illegal names
+    remain corrupt. Unknown
     device existence is not checked: no catalog is present in these documents.
     Caller must bootstrap component models before calling. Invalid data returns
     partial/corrupt with source and failed checks instead of raising ValueError.
@@ -263,7 +315,7 @@ def classify_flux_document(document: ParameterDocument) -> FluxClassification:
     return FluxClassification(
         "legacy",
         (
-            "Converted reference points are assumed; recalibrate with the other contributing devices at their integer references.",
+            "Offset is derived from the qubit local half/period, or coil half/period when no local calibration exists.",
         ),
     )
 
@@ -273,9 +325,10 @@ def convert_flux_v1_to_v2(document: ParameterDocument) -> ParameterDocument:
 
     Rename v1 flux_source to flux_dev, preserving its value, unrelated fields
     and original working-unit numbers.
-    Move local and mux calibrations to qubit flux entries keyed by their explicit
-    source device. Remove replaced fields; never synthesize a record or a frame.
-    Missing source, partial/corrupt input or non-v1 data raises located ValueError.
+    Derive offset from local half/period (coil only when local is absent), keep
+    signed device periods and report dropped coil reference points. Missing names
+    receive distinct placeholders with located rename notes. Never create records.
+    Partial/corrupt input or non-v1 data raises located ValueError.
     No I/O, registration, unit inference or device existence check occurs.
     """
     classification = classify_flux_document(document)
@@ -285,41 +338,10 @@ def convert_flux_v1_to_v2(document: ParameterDocument) -> ParameterDocument:
         )
     result = deepcopy(document)
     components = _COMPONENTS.validate_python(result.data["components"], strict=True)
-    _convert_components(components)
+    result = replace(result, notes=_convert_components(components))
     result.data["components"] = {name: fields for name, fields in components.items()}
     result.data["schema_version"] = 2
     return result
-
-
-def _replace_storage_calibrations(components: dict[str, YamlMap]) -> None:
-    # Derive the whole incoming batch first: a local/mux collision must fail
-    # before removing any inherited entries, never become last-writer-wins.
-    incoming = deepcopy(components)
-    for fields in incoming.values():
-        if str(fields.get("kind", "")).startswith("qubit/"):
-            fields.pop("flux", None)
-    _convert_components(incoming)
-    for name, fields in incoming.items():
-        replacements = fields.get("flux")
-        if not isinstance(replacements, dict) or not replacements:
-            continue
-        inherited = components[name].get("flux", {})
-        if not isinstance(inherited, dict):
-            raise ValueError(f"components.{name}.flux: expected mapping")
-        for device in replacements:
-            if device in inherited:
-                raw = inherited[device]
-                if not isinstance(raw, dict):
-                    raise ValueError(
-                        f"components.{name}.flux.{device}: expected mapping"
-                    )
-                _calibration(
-                    raw,
-                    f"components.{name}.flux.{device}",
-                    device_name=device,
-                    legacy=False,
-                )
-                del inherited[device]
 
 
 def convert_storage_flux_batch(document: ParameterDocument) -> ParameterDocument:
@@ -330,16 +352,17 @@ def convert_storage_flux_batch(document: ParameterDocument) -> ParameterDocument
     supplied calibrations using the same pure conversion as the retained step.
     A complete valid historical calibration with an explicit source replaces
     the same device's inherited seed calibration once, before conversion; other
-    device entries stay unchanged. Conflicts within the incoming local/mux batch,
-    partial calibrations, invalid names/spacing and missing sources still fail.
+    periods stay unchanged. A source explicitly declared in the complete overlay
+    includes setup/mapping inheritance; missing names receive placeholders.
+    Conflicts within the incoming local/mux batch, partial calibrations and invalid
+    names/spacing still fail.
     Native upgrade classification is unchanged and rejects mixed documents.
     The migration owner isolates failed groups as pending and preserves raw input.
     Output is v2. No I/O or runtime policy change occurs.
     """
     result = deepcopy(document)
     components = _COMPONENTS.validate_python(result.data["components"], strict=True)
-    _replace_storage_calibrations(components)
-    _convert_components(components)
+    result = replace(result, notes=_convert_components(components))
     _validate_container(document, components)
     result.data["components"] = {name: fields for name, fields in components.items()}
     result.data["schema_version"] = 2

@@ -107,6 +107,44 @@ def test_value_batch_converts_whole_group_before_current_validation(
         assert document_value(setup, "general.ext.unit") == "V"
 
 
+@pytest.mark.parametrize("dry_run", [False, True])
+def test_conversion_notes_reach_report_for_seed_setup_and_point_batches(
+    request_data: MigrationRequest, mapping: MigrationMapping, dry_run: bool
+) -> None:
+    def transform(document: ParameterDocument) -> ParameterDocument:
+        return replace(document, notes=("C1.frequency: check the declared source",))
+
+    mapping = replace(
+        mapping,
+        parameter_transform=transform,
+        rules=(
+            KeyRule(
+                old_key="flux_unit",
+                target_path="general.ext.unit",
+                action="value",
+                reason="Synthetic unit",
+            ),
+            KeyRule(
+                old_key="value",
+                target_path="C1.frequency",
+                action="value",
+                requires_keys=("flux_unit",),
+                reason="Synthetic coordinate",
+            ),
+        ),
+    )
+    request_data = replace(request_data, dry_run=dry_run)
+    write_meta(request_data, "", {"flux_unit": "V", "value": 4.0})
+    write_meta(request_data, "exps/point-a", {"flux_unit": "V", "value": 5.0})
+    report = migrate(request_data, mapping)
+    destination = request_data.results_root / request_data.name
+    assert set(report.notes) == {
+        f"{destination / 'setup.yaml'}: C1.frequency: check the declared source",
+        f"{destination / 'points/point-a/point.yaml'}: C1.frequency: check the declared source",
+    }
+    assert report.pending == ()
+
+
 class OptionalSettingProbe(SyntheticProbe):
     """Synthetic schema allowing omitted settings but rejecting explicit null."""
 

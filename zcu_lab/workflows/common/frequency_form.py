@@ -41,7 +41,7 @@ class FrequencyModelForm(FormModel):
             seed = captured_flux_seed(env, "$qubit", source)
             if seed.points is not None and source is not None:
                 data["flux_half"] = seed.points.half
-                data["flux_period"] = qubit.flux[source].period
+                data["flux_period"] = qubit.flux.period[source]
         return data
 
     @model_validator(mode="after")
