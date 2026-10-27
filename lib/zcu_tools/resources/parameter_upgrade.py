@@ -16,6 +16,7 @@ from ruamel.yaml import YAML, YAMLError
 
 from zcu_tools.format_version import YamlMap
 from zcu_tools.resources.document_store import DocumentValue, FieldPath
+from zcu_tools.resources.entry import entry_component_paths
 from zcu_tools.resources.parameter_schema import ParameterSchemaPolicy
 from zcu_tools.resources.record_table.upgrade import upgrade_record_files
 from zcu_tools.utils import atomic_replace
@@ -265,9 +266,12 @@ def _upgrade_file(
 def main(argv: Sequence[str] | None = None, *, plan: UpgradePlan | None = None) -> int:
     """Run explicit component or record upgrades in process; return 0 or 1.
 
-    argv selects exact paths, --scope components (default) or records, and optional
-    --apply; None reads process arguments. Components require a caller-owned plan.
-    Records require --device-name, an operator declaration, and do not use plan.
+    argv selects file paths, --scope components (default) or records, and optional
+    --apply; None reads process arguments. Components also accept entry directories,
+    expanded by the entry owner to setup and all point YAML files without parsing.
+    Non-entry directories raise argparse SystemExit(2). Components require a
+    caller-owned plan. Records accept only exact files, require --device-name,
+    an operator declaration, and do not use plan.
     Default dry-run prints file/field or line classifications without writes.
     Apply reports original-bytes backups. Rejected files do not stop siblings;
     any rejection returns 1. Invalid CLI inputs raise argparse SystemExit(2).
@@ -277,7 +281,10 @@ def main(argv: Sequence[str] | None = None, *, plan: UpgradePlan | None = None) 
         description="Upgrade component YAML or record JSONL (default: dry-run)"
     )
     parser.add_argument(
-        "paths", nargs="+", type=Path, help="exact source paths; shell globs accepted"
+        "paths",
+        nargs="+",
+        type=Path,
+        help="source files or entry directories (components only); shell globs accepted",
     )
     parser.add_argument(
         "--apply", action="store_true", help="back up then replace valid documents"
@@ -304,11 +311,13 @@ def main(argv: Sequence[str] | None = None, *, plan: UpgradePlan | None = None) 
         parser.error("--device-name is only valid with --scope records")
     if plan is None:
         parser.error("component scope requires a caller-configured upgrade plan")
+    try:
+        sources = _component_sources(paths)
+    except ValueError as error:
+        parser.error(str(error))
     for note in plan.notes:
         print(note)
-    results = upgrade_files(
-        tuple(UpgradeSource(path) for path in paths), plan=plan, apply=apply
-    )
+    results = upgrade_files(sources, plan=plan, apply=apply)
     for result in results:
         if result.backup_path is not None:
             print(f"{result.source.path}: backup: {result.backup_path}")
@@ -320,6 +329,18 @@ def main(argv: Sequence[str] | None = None, *, plan: UpgradePlan | None = None) 
         if result.error is not None:
             print(f"  failed checks: {result.error}")
     return int(any(result.status == "rejected" for result in results))
+
+
+def _component_sources(paths: Sequence[Path]) -> tuple[UpgradeSource, ...]:
+    sources: list[UpgradeSource] = []
+    for path in paths:
+        if path.is_dir():
+            sources.extend(
+                UpgradeSource(source) for source in entry_component_paths(path)
+            )
+        else:
+            sources.append(UpgradeSource(path))
+    return tuple(sources)
 
 
 def _record_cli(paths: Sequence[Path], *, device_name: str, apply: bool) -> int:
