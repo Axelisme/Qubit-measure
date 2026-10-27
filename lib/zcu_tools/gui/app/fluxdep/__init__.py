@@ -1,14 +1,11 @@
-"""fluxdep-gui — a standalone Qt GUI for fluxonium flux-dependence fitting.
+"""Standalone fluxonium flux-dependence analysis GUI.
 
-An optional analysis tool, fully independent of the measure-gui (``zcu_tools.gui``)
-package: its own state / services / interactive widgets / MCP server / skill.
-The two share no runtime coupling — common scaffolding (version table, NDJSON-TCP
-RPC mechanism, mpl/progress backends) is *copied and rewritten* here rather than
-imported, so each app evolves independently until a shared core is later
-extracted under ``gui/app/{main,fluxdep}/`` (see .agent_state/plans/tool_gui/).
+The app owns its State, services, interaction policy and native remote adapter.
+Transport, events and plotting mechanisms use the shared GUI packages. Entry
+selection and native source/dialog mechanics belong to analysis_project.
 
-Pipeline (v1, the "front-half skeleton"): load an hdf5 spectrum → pick the half /
-integer flux lines → select spectral points → (accumulate several spectra) →
-cross-spectrum point filtering → export ``spectrums.hdf5``. Database search +
-scipy fit + result visualisation are deferred to v2.
+The pipeline loads spectra, aligns half/integer lines, samples and filters
+points, then searches a fluxonium database and presents diagnostics. Export
+saves spectrums v2 checkpoints and independently reports predictor v2 and
+component P1 outcomes while recording analysis in the entry ledger.
 """

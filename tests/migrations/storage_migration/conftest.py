@@ -156,6 +156,7 @@ def legacy_fit() -> JsonObject:
     return {
         "params": {"EJ": 6.27, "EC": 1.41, "EL": 0.8},
         "flux_half": 0.2,
+        "flux_bias": 0.0,
         "flux_int": -0.3,
         "flux_period": 1.0,
         "timestamp": "2020-07-07T16:30:00+08:00",

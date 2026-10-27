@@ -1,6 +1,6 @@
 # `migrations.storage_migration` 離線遷移
 
-**Last updated:** 2026-10-27，完整參數 batch 與 caller diagnostics
+**Last updated:** 2026-10-28，v2 predictor publication 與缺證據保全
 
 **讀者：** framework-dev、agent。維護離線遷移的來源 mapping、owner 接縫與可續跑 publication。
 
@@ -104,10 +104,9 @@ Dispersive JSON 經 [resources owner](../../lib/zcu_tools/resources/README.md) �
 | 舊值 | 正式欄位或處理 |
 | --- | --- |
 | `fluxdep_fit.params.EJ/EC/EL` | predictor `model=fluxonium`、`params.EJ/EC/EL`，GHz |
-| `fluxdep_fit.flux_half/flux_period` | predictor 同名 params，不換算 |
-| 舊 predictor 預設 | `params.flux_bias=0.0` |
+| `fluxdep_fit.flux_half/flux_period/flux_bias` | 由 predictor upgrade owner 轉為 v2 frame，保留 signed period；缺證據則 pending，不補零 |
 | `fluxdep_fit.flux_int` | alignment 原文留 `legacy_params` |
-| 更早根 `params.EJ/EC/EL`、`half flux`、`period` | predictor energies、`flux_half`、`flux_period` |
+| 更早根 `params.EJ/EC/EL`、`half flux`、`period`、`flux_bias` | predictor energies 與 v2 frame，沿相同完整仿射證據規則 |
 | `dispersive.g/bare_rf` | dispersive 同名 params，GHz |
 | `fluxdep_fit.plot_transitions` 或舊 `allows` | dispersive `params.plot_transitions`，原 annotations 保真 |
 | `t1_curve_fit` 的 fit 欄位 | T1 params，保留 active／null／缺項差異 |
@@ -119,7 +118,7 @@ T1 的 fit 欄位包括 `params`、`stderr`、`bounds`、`fixed`、`free`、`cos
 
 - `fluxdep_fit` 寫入 entry 的 `predictors/<component名>.json`，不寫 component fit 欄位，也不複製到 points。Converter 使用 `resources.predictor_file` 的 `PredictorFile`／`PredictorSource` 與 simulate 的 nullable Params。Dry-run 走 owner 的 pure validation，不建立暫存檔。正式寫入先建 parent directory，再由 `save_predictor_file` 執行原子 I/O。未完成的 parameters resume 經 `load_predictor_file` 驗證格式並比較 typed 值，numeric 省略與 null 都表示未知，不按 JSON 排版比較。完整性與物理限制仍交給 build_predictor。
 
-- 舊 EJ/EC/EL fit 寫 `model=fluxonium`、`flux_bias=0.0`，`flux_int` 只作 alignment，不寫 predictor。歷史根層 `params.EJ/EC/EL`、`half flux`、`period` 分別投影到 predictor 的 energies、`flux_half`、`flux_period`。根層的 name、project、schema 等 metadata 不改名，留在 `legacy_params`。`fluxdep_fit.params` 有 EJ 或 EL 時，extra key 不阻斷已支援參數，extra 原名原值留 ext。只有 EC 加陌生 key 或只有陌生 key 時不建立 predictor，報告標不支援模型並原樣保留，不列 pending。未定義的明示 model 仍 pending，不推論模型。predictor 單位只讀 params 根層或 fit 的明示 `flux_unit`。兩處都沒有時才可用 `assume_flux_unit`，報告標「假設單位」。未提供假設，或明示值衝突、不合法時，單位寫 null 並列 pending。meta_info 不能作 predictor 單位證據，也不換算數字。`source.run_id` 固定 null；`source.created_at` 由公開 `proven_created_at` 重用 `resources.analysis_source.AnalysisSource` 驗證，只接受有效的 `YYYY-MM-DDTHH:MM[:SS[.ffffff]]` 加 `Z` 或 `±HH:MM`，小數秒為一至六位，接受時保留原文。其他形式或無效日期時間回傳 None，寫 null 並列 pending。這三個 nullable 欄位仍必須存在；報告保留備份內原文定位。
+- 舊 EJ/EC/EL fit 寫 `model=fluxonium`，`flux_int` 只作 alignment，不寫 predictor。歷史根層 `params.EJ/EC/EL`、`half flux`、`period`、`flux_bias` 與 section fit 共用 `upgrade_predictor_document`。完整 half／period／bias 才產生 v2 frame，offset 為 `0.5 + (bias-half)/period`；缺項、非法值或零 period 都不發布 predictor，原文保留並列 pending。未記名儀器使用 `unnamed_device`。根層的 name、project、schema 等 metadata 不改名，留在 `legacy_params`。`fluxdep_fit.params` 有 EJ 或 EL 時，extra key 不阻斷已支援參數，extra 原名原值留 ext。只有 EC 加陌生 key 或只有陌生 key 時不建立 predictor，報告標不支援模型並原樣保留，不列 pending。未定義的明示 model 仍 pending，不推論模型。predictor 單位只讀 params 根層或 fit 的明示 `flux_unit`。兩處都沒有時才可用 `assume_flux_unit`，報告標「假設單位」。缺單位或明示 null 沿 upgrade owner 使用 `native`；非空單位字串原樣保存。明示值衝突或格式非法時不發布 predictor，保留原文並列 pending。meta_info 不能作 predictor 單位證據，也不換算數字。`source.run_id` 固定 null；`source.created_at` 由公開 `proven_created_at` 重用 `resources.analysis_source.AnalysisSource` 驗證，只接受有效的 `YYYY-MM-DDTHH:MM[:SS[.ffffff]]` 加 `Z` 或 `±HH:MM`，小數秒為一至六位，接受時保留原文。其他形式或無效日期時間回傳 None，寫 null 並列 pending。Source 的兩個 nullable 欄位仍必須存在；報告保留備份內原文定位。
 
 - `dispersive` 與 `fluxdep_fit.plot_transitions` 經 resources owner 寫入 entry 的 `dispersive/<component名>.json`，`t1_curve_fit` 寫入 `t1_curve/<component名>.json`。只有 transition seed 時也產生 dispersive 檔，不補 g 或 bare_rf。兩檔保留缺項、null 與 active T1 名稱的差異，source 時間只採各自 section 的 timestamp；只有根層 allows 時採根層 timestamp。時間沿用上述窄形式與原文保真規則。無法驗證的內容保持 located pending，未轉原文、未知欄位與未採用的 metadata 留在 setup ext 並由 points 繼承。未知欄位不阻斷可支援的正式輸出，也不因保全原文就列 pending。所有重跑都經 owner load 比對固定 baseline 的欄位存在性與內容。完成後的合法編輯也列 typed 差異，不覆寫、不當成相同。Dry-run 列出相同檔案但不寫入。
 
@@ -149,15 +148,15 @@ T1 的 fit 欄位包括 `params`、`stderr`、`bounds`、`fixed`、`free`、`cos
 
 | 舊位置 | 正式位置／公式 |
 | --- | --- |
-| `mA_c`、`period` | `flux_half`、`flux_period` |
-| `mA_c`、`period` | `flux_int = mA_c + 0.5 * period` |
+| `mA_c`、`period` | v2 group attrs `offset = 0.5 - mA_c / period`、`period` 原值 |
+| 未記錄的儀器身分／單位 | v2 attrs `device=unnamed_device`、`unit=native` |
 | `spectrum/mAs`、`points/mAs` | 同 section 的 `dev_values` |
 | `spectrum/fpts`、`points/fpts` | 同 section 的 `freqs`，不做 Hz→GHz 換算 |
 | section 的 `mAs`、group 的 `mA_c/period` | `fluxs = (mAs - mA_c) / period + 0.5` |
 | `spectrum/data` | `spectrum/signals`，device-major 軸向 |
 | 字串 group attr `type` | 正式同名 attr，保持原字串 |
 
-- `data/fluxdep/spectrums.hdf5` 是支援的 processed collection，不走 generic raw copy。Legacy 解析只在 `processed_spectrums.py`。正式結果經既有 `analysis.fluxdep.io.dump_spectrums`／`load_spectrums` 寫讀到新 entry 同相對位置，不在 migration 複製 owner layout。`mA_c/period` 對應 `flux_half/flux_period`，`mAs/fpts/data` 對應 `dev_values/freqs/signals`。`flux_int=mA_c+0.5*period`，`fluxs=(mAs-mA_c)/period+0.5`，不因數值量級換單位。兩種舊 signal 軸向以非平方 shape 與歷史 processing 規則唯一判定，frequency-major 轉置為 device-major；平方且無版本證據則保留原文並列 located pending。中繼 `flx_half/int/period` 依歷史改名，已存 `fluxs` 不重算。Group 名、陣列數值與 dtype 不變，字串 `type` 原樣交給 owner，不推定 OneTone／TwoTone。
+- `data/fluxdep/spectrums.hdf5` 是支援的 processed collection，不走 generic raw copy。Legacy 解析只在 `processed_spectrums.py`。正式結果經既有 `analysis.fluxdep.io.dump_spectrums`／`load_spectrums` 寫讀到新 entry 同相對位置，不在 migration 複製 owner layout。`mA_c/period` 透過公開 flux 反解換成 v2 的 offset／period，`mAs/fpts/data` 對應 `dev_values/freqs/signals`。`fluxs=(mAs-mA_c)/period+0.5`，不因數值量級換單位。兩種舊 signal 軸向以非平方 shape 與歷史 processing 規則唯一判定，frequency-major 轉置為 device-major；平方且無版本證據則保留原文並列 located pending。中繼 `flx_half/int/period` 依同一公式轉 v2，已存 `fluxs` 不重算；多餘的原 integer dataset 保留在 companion。Group 名、陣列數值與 dtype 不變，字串 `type` 原樣交給 owner，不推定 OneTone／TwoTone。
 
 - Processed 未轉 datasets／attrs 留在 `data/fluxdep/spectrums.legacy.hdf5`，保留原 hierarchy、值與 dtype。已轉 dataset 只有 attrs 時，在 companion 建同路徑的 metadata-only group，不重存其 data。空的未知 group 也保留。Companion 由 migrations 擁有，runtime 不讀，不是正式 spectrum 格式。`key_mappings` 用 typed `action="preserved"`、literal `source_keys/destination_keys`、`new_path=None` 定位。Attribute row 的 display key 以 `attribute:` 開頭，literal keys 是 object path 加原 attr 名。未知原文不列 pending，真正缺少必要轉換證據才列 pending。正式與 companion 分別走 `spectrums`／`spectrums_legacy` publication，保留 prepared/published、hash 與 resume。Preflight 一次保護兩個目的，拒絕同名來源路由、既有未認領檔或 hash 改變；沒有剩餘原文就不建 companion。Dry-run 只列相同轉換／保留計畫，不寫檔。
 

@@ -1,59 +1,53 @@
-"""LoadOnetoneDialog — pick a one-tone hdf5 + axis orientation with a live preview.
-
-dispersive loads a single one-tone spectrum, so it just reuses the shared
-``LoadDataDialog`` base (file row + Browse, transpose toggle, best-effort read,
-preview) with no extra options. The chosen ``transpose_axes`` flag is passed to the
-Controller only on Load, so State always stores the canonical (x=flux, y=freq)
-layout.
-"""
+"""One-tone source selection over the shared native/Labber chooser."""
 
 from __future__ import annotations
 
 from typing import NamedTuple
 
-from qtpy.QtWidgets import (
-    QHBoxLayout,
-    QLabel,
-    QWidget,
-)
+from qtpy.QtWidgets import QWidget
 
-from zcu_tools.gui.widgets.load_dialog import LoadDataDialog
+from zcu_tools.gui.app.analysis_project.native import NativeSpectrumSelection
+from zcu_tools.gui.app.analysis_project.native_dialog import (
+    NativeDeviceChoices,
+    NativeSpectrumDialog,
+)
 
 
 class LoadOnetoneRequest(NamedTuple):
+    """Exact source path, Labber-only transpose and explicit native selection."""
+
     filepath: str
     transpose_axes: bool
+    selection: NativeSpectrumSelection | None = None
 
 
-class LoadOnetoneDialog(LoadDataDialog):
-    """Modal dialog returning a LoadOnetoneRequest (or None on cancel)."""
+class LoadOnetoneDialog(NativeSpectrumDialog):
+    """Offer predictor-provided devices without reading a predictor or component."""
 
-    def __init__(self, parent: QWidget | None = None, start_dir: str = "") -> None:
-        super().__init__(
-            window_title="Load one-tone spectrum",
-            file_placeholder="Choose a one-tone hdf5…",
-            browse_caption="Load one-tone",
-            no_preview_text="No preview\n(choose a 2D one-tone file)",
-            parent=parent,
-            start_dir=start_dir,
-        )
+    def __init__(
+        self,
+        parent: QWidget | None = None,
+        start_dir: str = "",
+        *,
+        choices: NativeDeviceChoices | None = None,
+    ) -> None:
+        """Preview one-tone sources with caller-supplied predictor device choices.
 
-    # --- construction ----------------------------------------------------
-
-    def _build_options(self, opt_row: QHBoxLayout) -> None:
-        # Just the transpose toggle plus a hint — no type / inherit.
-        opt_row.addWidget(self._transpose_btn)
-        opt_row.addWidget(
-            QLabel("(toggle if the preview shows frequency on x instead of flux)")
-        )
-        opt_row.addStretch(1)
-
-    # --- result ----------------------------------------------------------
+        Without choices native inputs can only be unnamed_device. start_dir
+        controls Browse; it never chooses a file or infers an instrument.
+        """
+        super().__init__(choices or NativeDeviceChoices({}), parent, start_dir)
+        self.setWindowTitle("Load one-tone spectrum")
 
     def result_request(self) -> LoadOnetoneRequest | None:
-        """The chosen LoadOnetoneRequest, or None if no file was selected."""
+        """Return explicit source choices, or None without path/required fields."""
         if not self._filepath:
             return None
+        selection = self.native_selection()
+        if self.is_native_source and selection is None:
+            return None
         return LoadOnetoneRequest(
-            filepath=self._filepath, transpose_axes=self._transpose
+            self._filepath,
+            self._transpose if not self.is_native_source else False,
+            selection,
         )

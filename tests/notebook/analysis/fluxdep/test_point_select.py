@@ -12,9 +12,10 @@ def _spectrum_result() -> SpectrumResult:
     fluxs = np.array([0.0, 0.5, 1.0], dtype=np.float64)
     freqs = np.array([4.0, 4.5, 5.0], dtype=np.float64)
     return {
-        "flux_half": 0.0,
-        "flux_int": 1.0,
-        "flux_period": 2.0,
+        "offset": 0.5,
+        "period": 2.0,
+        "device": "unnamed_device",
+        "unit": "native",
         "spectrum": {
             "dev_values": fluxs,
             "fluxs": fluxs,

@@ -99,6 +99,28 @@ def entry_component_paths(entry_root: Path) -> tuple[Path, ...]:
     )
 
 
+def entry_predictor_paths(entry_root: Path) -> tuple[Path, ...]:
+    """List sorted predictors/*.json in an existing Result entry without parsing.
+
+    setup.yaml identifies an entry, as for entry_component_paths. A missing
+    predictors directory yields no paths. Reject a symlink escaping the entry
+    with ValueError; do not read documents or create directories or locks.
+    """
+    entry_component_paths(entry_root)
+    root = entry_root.resolve()
+    paths = tuple(
+        sorted(
+            path
+            for path in (entry_root / "predictors").glob("*.json")
+            if path.is_file()
+        )
+    )
+    for path in paths:
+        if not path.resolve().is_relative_to(root):
+            raise ValueError(f"{path}: predictor escapes entry")
+    return paths
+
+
 def rename_entry(old: str, new: str, *, result_root: str | Path) -> None:
     """Rename only result_root/old to result_root/new without rewriting contents.
 

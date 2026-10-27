@@ -42,7 +42,9 @@ Entry 已存在時直接重開並選 `initial`，不覆寫。它使用一個 wor
 
 ## 資料作業
 
-- `upgrade_parameters.py`：長期 component YAML 與 record JSONL 升級入口。預設 component 範圍逐欄位 dry-run；`--scope records --device-name <name>` 由 operator 宣告舊值的 device 歸屬，逐列報四類形狀。兩者皆由 `--apply` 先備份原 bytes 再替換，不依賴 migrations。Component 版本、未標版分類的限制與還原見 [參數文件升級](../docs/parameter-upgrades.md)；record 保留範圍、flat-frame fallback 與改名改接線見 [Record device 升級](../docs/record-device-upgrades.md)。
+- `upgrade_spectrums.py`：逐檔升級 processed spectrum HDF5 為 v2。預設列出 offset／period／device／unit 的變更，不寫檔；`--apply` 先備份原 bytes 再替換。見 [格式歷程](../docs/storage-format-history/fluxdep-spectrums-v2.md)。
+
+- `upgrade_parameters.py`：長期 component YAML、entry predictor JSON 與 record JSONL 升級入口。Entry 目錄會一併預覽／升級 `predictors/*.json` 的 v1→v2，規則與還原見 [Predictor v2](../docs/storage-format-history/predictor-v2.md)。預設 component 範圍逐欄位 dry-run；`--scope records --device-name <name>` 由 operator 宣告舊值的 device 歸屬，逐列報四類形狀。兩者皆由 `--apply` 先備份原 bytes 再替換，不依賴 migrations。Component 版本、未標版分類的限制與還原見 [參數文件升級](../docs/parameter-upgrades.md)；record 保留範圍、flat-frame fallback 與改名改接線見 [Record device 升級](../docs/record-device-upgrades.md)。
 
 - `transfer_results.py`：結果傳輸入口。首次 `setup` 用官方 rclone GUI 授權、瀏覽雲端父資料夾、按 Refresh，再回終端機核對路徑並按 Enter 保存；之後 `upload <name>`／`download <name>` 直接走非互動 CLI，agent 可透過 Bash 使用。固定版 rclone 自動下載並驗證，`status --json`、`--dry-run`、`--all`、多 entry 與跨平台命令見 [結果傳輸教學](../docs/result-transfer.md)。本地根目錄統一為 checkout 的 `result/`，傳輸命令明填 `--local-root`，使用 copy 保留目的地多出的檔案。Google 共用 OAuth client 有 2026 停用警告；實際帳號授權與其他桌面平台仍待驗證。
 - `sync.py`：**用途待確認**。觀察到 `md2nb` 在 `notebook_md/` 到 `notebook/` 間同步，`nb2md` 反向同步；使用 Jupytext、Git 與工作站環境。會建立或覆寫對應檔案，`md2nb` 不同步時可互動詢問，`nb2md` 直接覆寫。未確認此流程是否仍為正式的 notebook 發布程序。

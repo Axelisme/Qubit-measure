@@ -23,6 +23,7 @@ from zcu_tools.gui.app.analysis_project.entry import (
     AnalysisTarget,
 )
 from zcu_tools.gui.expected_error import InvalidInputError
+from zcu_tools.gui.lifetime import LifetimeScope
 from zcu_tools.resources.entry import RoleResolutionError
 
 logger = logging.getLogger(__name__)
@@ -45,6 +46,7 @@ class EntryDialog(QDialog):
         project_root: str | Path,
     ) -> None:
         super().__init__(parent)
+        self._scope = LifetimeScope(self)
         self.setWindowTitle("Analysis entry")
         self.resize(620, 250)
         self._opened: AnalysisEntry | None = None
@@ -59,7 +61,7 @@ class EntryDialog(QDialog):
         self._root = QLineEdit(str(current_root))
         self._root.setObjectName("analysisProjectRoot")
         browse = QPushButton("Browse…")
-        browse.clicked.connect(self._browse)
+        self._scope.connect(browse.clicked, self._browse)
         row = QHBoxLayout()
         row.addWidget(self._root)
         row.addWidget(browse)
@@ -69,10 +71,10 @@ class EntryDialog(QDialog):
         self._entry.setEditable(True)
         form.addRow("Entry", self._entry)
         refresh = QPushButton("Refresh entries")
-        refresh.clicked.connect(self._refresh_entries)
+        self._scope.connect(refresh.clicked, self._refresh_entries)
         form.addRow(refresh)
         self._open_button = QPushButton("Open entry")
-        self._open_button.clicked.connect(self._open_entry)
+        self._scope.connect(self._open_button.clicked, self._open_entry)
         form.addRow(self._open_button)
         self._component = QComboBox()
         self._component.setObjectName("analysisComponent")
@@ -80,14 +82,15 @@ class EntryDialog(QDialog):
         self._error = QLabel()
         self._error.setWordWrap(True)
         root.addWidget(self._error)
-        self._write_buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok)
-        self._write_buttons.accepted.connect(self.accept)
-        cancel = QDialogButtonBox(QDialogButtonBox.StandardButton.Cancel)
-        cancel.rejected.connect(self.reject)
-        buttons = QHBoxLayout()
-        buttons.addWidget(self._write_buttons)
-        buttons.addWidget(cancel)
-        root.addLayout(buttons)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        ok = buttons.button(QDialogButtonBox.StandardButton.Ok)
+        assert ok is not None
+        self._ok = ok
+        self._scope.connect(buttons.accepted, lambda: self.accept())
+        self._scope.connect(buttons.rejected, lambda: self.reject())
+        root.addWidget(buttons)
         self._connect_inputs()
         self._refresh_entries()
         if target is not None:
@@ -97,9 +100,14 @@ class EntryDialog(QDialog):
         self._update_ok()
 
     def _connect_inputs(self) -> None:
-        self._root.textChanged.connect(self._invalidate)
-        self._entry.currentTextChanged.connect(self._invalidate)
-        self._component.currentTextChanged.connect(self._update_ok)
+        self._scope.connect(self._root.textChanged, self._invalidate)
+        self._scope.connect(self._entry.currentTextChanged, self._invalidate)
+        self._scope.connect(self._component.currentTextChanged, self._update_ok)
+
+    def done(self, a0: int) -> None:
+        """Retire input callbacks before accepting or cancelling the selection."""
+        self._scope.close()
+        super().done(a0)
 
     def set_writable(self, *, writable: bool) -> None:
         """Gate entry editing and OK while leaving Cancel available."""
@@ -121,7 +129,7 @@ class EntryDialog(QDialog):
 
     def _update_ok(self) -> None:
         selected = self._opened is not None and bool(self._component.currentText())
-        self._write_buttons.setEnabled(self._writable and selected)
+        self._ok.setEnabled(self._writable and selected)
         if selected:
             self._error.clear()
 

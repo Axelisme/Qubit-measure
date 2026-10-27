@@ -6,50 +6,16 @@ import os
 from functools import partial
 from pathlib import Path
 
-import numpy as np
 import pytest
 from qtpy.QtCore import QTimer
 from zcu_tools.gui.session.predictor_control import PredictorControlFacet
-from zcu_tools.gui.session.services.predictor import (
-    PredictCurveRequest,
-    PredictCurveResult,
-    PredictFreqRequest,
-    PredictMatrixCurveRequest,
-    PredictMatrixCurveResult,
-    PredictorService,
-)
 from zcu_tools.gui.session.ui.predictor_dialog import PredictorDialog
+from zcu_tools.resources.predictor_file import PredictorFlux
 from zcu_tools.simulate.fluxonium.predict import FluxoniumParams
-from zcu_tools.simulate.predictor import PredictorParams
 
 from tests.gui._qt_waits import qt_until
 from tests.gui._user_input import ComponentDriver
-
-
-class SyntheticCurves(PredictorService):
-    """Supply deterministic visible curves without numerical solvers or devices."""
-
-    def predict_freq_curve(
-        self, params: PredictorParams, req: PredictCurveRequest
-    ) -> PredictCurveResult:
-        labels = tuple(f"{frm}→{to}" for frm, to in req.transitions)
-        series = np.array(
-            [1000 * (to - frm) + 100 * req.values for frm, to in req.transitions]
-        )
-        return PredictCurveResult(labels, req.values, req.values, series)
-
-    def predict_matrix_element_curve(
-        self, params: PredictorParams, req: PredictMatrixCurveRequest
-    ) -> PredictMatrixCurveResult:
-        labels = tuple(f"{frm}→{to}" for frm, to in req.transitions)
-        scale = 0.1 if req.operator == "n" else 0.2
-        series = np.array(
-            [scale * (to - frm) + 0.01 * req.values for frm, to in req.transitions]
-        )
-        return PredictMatrixCurveResult(labels, req.values, req.values, series)
-
-    def predict_freq(self, params: PredictorParams, req: PredictFreqRequest) -> float:
-        return 1000 * (req.transition[1] - req.transition[0]) + 100 * req.value
+from tests.gui.session.ui._predictor_support import SyntheticCurves
 
 
 @pytest.fixture
@@ -63,8 +29,9 @@ def predictor_ui(qapp, monkeypatch: pytest.MonkeyPatch, request):
     monkeypatch.setattr(QTimer, "setInterval", immediate_debounce)
     dialog = PredictorDialog(
         PredictorControlFacet(SyntheticCurves()),
-        params=FluxoniumParams(4.0, 1.0, 1.0, 0.0, 1.0, 0.0),
+        params=FluxoniumParams(4.0, 1.0, 1.0),
     )
+    dialog.set_flux(PredictorFlux(0.0, {"coil": 1.0}, {"coil": "A"}), {"coil": 0.0})
     if getattr(request, "param", False):
         dialog.set_live_mode(enabled=True)
     dialog.show()

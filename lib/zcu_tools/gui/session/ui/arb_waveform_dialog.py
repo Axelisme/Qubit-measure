@@ -68,7 +68,7 @@ _PREVIEW_DEBOUNCE_MS = 250
 class _PreviewCanvas(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self.figure = Figure(figsize=(7.0, 3.0), dpi=100)
+        self.figure = Figure(figsize=(7.0, 3.0), dpi=100, layout="constrained")
         self.canvas = FigureCanvasQTAgg(self.figure)
         self._ax = self.figure.subplots()
         self._time: NDArray[np.float64] | None = None
@@ -100,13 +100,12 @@ class _PreviewCanvas(QWidget):
         self._q_line = None
         self._abs_line = None
         self._ax.clear()
-        self._ax.set_xlabel("Time (us)")
+        self._ax.set_xlabel("Time (µs)")
         self._ax.set_ylabel("Normalized amplitude")
         self._ax.set_ylim(-1.05, 1.05)
         self._ax.grid(True, alpha=0.3)
         if message:
             self._ax.text(0.5, 0.5, message, transform=self._ax.transAxes, ha="center")
-        self.figure.tight_layout()
         self.canvas.draw_idle()
 
     def plot(self, data_key: str, data: ArbWaveformData, *, normalize: bool) -> None:
@@ -128,13 +127,12 @@ class _PreviewCanvas(QWidget):
             float(series.time[0]), color="black", linewidth=1.0
         )
         self._ax.set_title(data_key)
-        self._ax.set_xlabel("Time (us)")
+        self._ax.set_xlabel("Time (µs)")
         self._ax.set_ylabel("Normalized amplitude" if normalize else "Amplitude")
         self._ax.set_xlim(float(series.time[0]), float(series.time[-1]))
         self._ax.set_ylim(self._data_ylim(series.idata, series.qdata, series.abs_data))
         self._ax.grid(True, alpha=0.3)
         self._move_marker(float(series.time[0]), draw=False)
-        self.figure.tight_layout()
         self.canvas.draw_idle()
 
     @staticmethod
@@ -243,7 +241,7 @@ class ArbWaveformDialog(QDialog):
         self._preview_timer.timeout.connect(self._render_preview)
 
         self.setWindowTitle("Arbitrary Waveforms")
-        self.setMinimumSize(980, 720)
+        self.setMinimumSize(980, 560)
 
         root = QVBoxLayout(self)
         splitter = QSplitter(Qt.Orientation.Vertical)

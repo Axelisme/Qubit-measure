@@ -254,6 +254,7 @@ def test_module_commits_on_enter_not_while_typing(
     ui.screenshot(evidence / f"modules-03-{submit}.png")
     assert _pulse(session).gain == 0.5
     assert ui.observe(object_name="form.input.gain").text == "0.5"
+    assert ui.observe(object_name="inspect.saved").text.startswith("Saved")
 
 
 def test_module_dropdown_writes_immediately(session: _Session, tmp_path: Path) -> None:

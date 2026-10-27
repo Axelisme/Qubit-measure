@@ -737,6 +737,12 @@ class MainWindow(QMainWindow):
         from .load_dialog import LoadSpectrumDialog
         from .paths import raw_spectrum_dir
 
+        context_error = None
+        try:
+            flux_context = self._ctrl.flux_context()
+        except ValueError as error:
+            flux_context = None
+            context_error = str(error)
         dialog = LoadSpectrumDialog(
             {
                 name: (entry.flux_half, entry.flux_int)
@@ -745,6 +751,8 @@ class MainWindow(QMainWindow):
             },
             parent=self,
             start_dir=raw_spectrum_dir(self._ctrl.state.project),
+            flux_context=flux_context,
+            context_error=context_error,
         )
         # Non-blocking open() keeps the Qt event loop (and the read-only control
         # socket) responsive; the post-accept logic moves onto the accepted signal.
@@ -760,6 +768,7 @@ class MainWindow(QMainWindow):
                     req.spec_type,
                     inherit_from=req.inherit_from,
                     transpose_axes=req.transpose_axes,
+                    selection=req.selection,
                 )
                 self._ctrl.set_active_spectrum(name)
             except Exception as exc:

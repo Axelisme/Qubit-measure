@@ -68,9 +68,12 @@ def test_spectrum_export_roundtrips_native_data_and_leaves_observations_unchange
     for name, original in state.spectrums.items():
         restored = loaded[name]
         assert restored.get("type") == original.spec_type
-        assert restored["flux_half"] == original.flux_half
-        assert restored["flux_int"] == original.flux_int
-        assert restored["flux_period"] == original.flux_period
+        assert restored["offset"] == 0.5 - original.flux_half / original.flux_period
+        assert restored["period"] == original.flux_period
+        assert (restored["device"], restored["unit"]) == (
+            original.device,
+            original.unit,
+        )
         for key in ("dev_values", "fluxs", "freqs", "signals"):
             np.testing.assert_array_equal(restored["spectrum"][key], original.raw[key])
         for key in ("dev_values", "fluxs", "freqs"):
@@ -172,9 +175,9 @@ def test_native_hdf5_failure_keeps_the_successful_prefix_without_cleanup(
 ) -> None:
     state = route_harness.ctrl.state
     state.put_spectrum(_entry("first"))
-    # Opaque names may collide with native HDF5 datasets. The second group
-    # cannot replace the first spectrum's flux_half dataset.
-    state.put_spectrum(_entry("first/flux_half"))
+    # Opaque names may collide with native HDF5 groups. The second group
+    # cannot replace the first spectrum's spectrum group.
+    state.put_spectrum(_entry("first/spectrum"))
     client = route_harness.client()
     for read in ("project.info", "spectrum.list"):
         assert route_harness.request(client, read)["ok"]

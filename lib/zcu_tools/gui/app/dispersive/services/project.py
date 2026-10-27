@@ -88,9 +88,7 @@ class ProjectService:
         model = loaded.params.build_predictor()
         inputs = FluxoniumInputs(
             params=model.params,
-            flux_half=model.flux_half,
-            flux_bias=model.flux_bias,
-            flux_period=model.flux_period,
+            flux=loaded.flux,
             bare_rf_seed=_bare_rf_seed(target),
         )
         self._state.set_fit_inputs(inputs, predictor=predictor)

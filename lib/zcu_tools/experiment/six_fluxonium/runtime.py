@@ -125,8 +125,9 @@ class SixFluxoniumSource:
     to that circuit's physics preparation, including its routed receiver/flux.
     Each preparation receives the sum of local and coil
     reduced flux as a fixed offset, without changing single-source contracts.
-    settings.numerics provides environment-wide prepare/result/routing byte caps;
-    each source receives one sixth, rounded down. ADC bytes apply per source.
+    settings.numerics.routing_cache_bytes caps only environment-wide routing
+    facts; each source receives one sixth, rounded down. Retained models,
+    complete preparations and ADC numerical data are outside this cap.
     No joint Hilbert space or pulsed flux route is created. Call snapshot/execute
     only serially; close releases numeric resources but never caller devices.
     clock is an environment-owned monotonic clock in seconds, shared with every

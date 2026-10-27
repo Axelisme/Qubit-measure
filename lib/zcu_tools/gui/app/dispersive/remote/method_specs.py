@@ -29,7 +29,7 @@ METHOD_SPECS: dict[str, MethodSpec] = {
     "fit_inputs.info": MethodSpec(
         5.0,
         "Read selected predictor inputs: {has_inputs, "
-        "params:{EJ,EC,EL} or null, flux_half, flux_bias, flux_period, bare_rf_seed}.",
+        "params:{EJ,EC,EL} or null, flux:{offset,period,unit} or null, bare_rf_seed}.",
         readonly=True,
     ),
     # Preprocessing status

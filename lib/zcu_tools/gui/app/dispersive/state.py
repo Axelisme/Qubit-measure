@@ -31,6 +31,7 @@ from zcu_tools.gui.owner import OwnerThreadGuard
 from zcu_tools.gui.version_table import (
     VersionTable as VersionTable,  # (re-export)
 )
+from zcu_tools.resources.predictor_file import PredictorFlux
 
 logger = logging.getLogger(__name__)
 
@@ -49,16 +50,14 @@ class FluxoniumInputs:
     """Selected predictor parameters, dispersive's hard inputs.
 
     Produced by fluxdep-gui and read by dispersive (the cross-app handoff). The
-    fluxonium ``params`` = (EJ, EC, EL) GHz and the flux alignment drive the
+    fluxonium ``params`` = (EJ, EC, EL) GHz and the recorded ``flux`` drive the
     dispersive simulation; ``bare_rf_seed`` is the initial resonator frequency
     (sourced from a prior dispersive section, else the fit's ``r_f``, else
     ``DEFAULT_BARE_RF``).
     """
 
     params: tuple[float, float, float]  # (EJ, EC, EL) GHz
-    flux_half: float  # zero-bias half-flux device value, native units
-    flux_bias: float  # additive device-value correction, native units
-    flux_period: float  # signed device-value change per flux quantum
+    flux: PredictorFlux  # recorded offset in Phi0, signed periods and device units
     bare_rf_seed: float  # GHz
 
 
@@ -66,12 +65,16 @@ class FluxoniumInputs:
 class OnetoneEntry:
     """One loaded one-tone spectrum (the single dispersive input spectrum).
 
-    ``raw`` carries dev_values / fluxs (derived via the fit's alignment) /
-    freqs(GHz) / signals(complex 2D). dispersive loads exactly one of these.
+    ``raw`` carries device values, projected Phi0, GHz frequencies and complex
+    signals. ``device`` records the explicit source instrument or unnamed_device
+    for unrecorded snapshots/Labber. ``unit`` retains the native source axis unit.
+    Dispersive loads exactly one of these.
     """
 
     name: str
     raw: SpectrumData  # dev_values / fluxs / freqs(GHz) / signals(complex)
+    device: str = "unnamed_device"  # source identity, not an inferred alias
+    unit: str = "native"  # source instrument-axis unit, no automatic conversion
 
 
 @dataclass

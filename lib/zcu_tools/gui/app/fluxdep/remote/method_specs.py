@@ -61,11 +61,18 @@ METHOD_SPECS: dict[str, MethodSpec] = {
     ),
     "spectrum.load": MethodSpec(
         30.0,
-        "Load native raw data. The basename replaces an existing entry.",
+        "Load raw data. Native containers require explicit variable/device_axis; "
+        "device selects the injected component instrument (unnamed_device without target). "
+        "The basename replaces an existing entry.",
         params=(
             ParamSpec("filepath", JsonType.STRING),
             ParamSpec("spec_type", JsonType.STRING, enum=("OneTone", "TwoTone")),
             ParamSpec("inherit_from", JsonType.STRING, required=False),
+            ParamSpec("variable", JsonType.STRING, required=False),
+            ParamSpec("device_axis", JsonType.STRING, required=False),
+            ParamSpec(
+                "device", JsonType.STRING, required=False, default="unnamed_device"
+            ),
             ParamSpec(
                 "transpose_axes", JsonType.BOOLEAN, required=False, default=False
             ),

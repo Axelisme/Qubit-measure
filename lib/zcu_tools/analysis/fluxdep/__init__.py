@@ -20,6 +20,7 @@ from .line_state import (
     move_line,
     swap_lines,
 )
+from .native import NativeSpectrum, project_native_spectrum
 from .onetone import (
     detect_peaks,
     max_dispersion_freq_index,
@@ -42,6 +43,8 @@ from .selection import (
 from .stroke import BrushPoint, apply_mask_stroke, points_in_normalized_stroke
 
 __all__ = [
+    "NativeSpectrum",
+    "project_native_spectrum",
     "BrushPoint",
     "OneToneBackground",
     "apply_mask_stroke",

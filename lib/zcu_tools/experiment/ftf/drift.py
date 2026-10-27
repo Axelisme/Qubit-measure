@@ -5,8 +5,9 @@ from uuid import uuid4
 
 import numpy as np
 
-from zcu_tools.experiment.single_fluxonium.drift import LogOU, LossRow, write_truth
+from zcu_tools.experiment.single_fluxonium.drift import LossRow, write_truth
 from zcu_tools.resources.ftf import FTFSettings
+from zcu_tools.simulate.drift import LogOU
 
 
 class FTFCoherenceDrift:

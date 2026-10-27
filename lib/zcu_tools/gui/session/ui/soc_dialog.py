@@ -117,6 +117,7 @@ class SocDialog(QDialog):
         right_layout.addWidget(conn_group)
 
         self._connect_btn = QPushButton("Connect")
+        self._connect_btn.setDefault(True)
         self._connect_btn.clicked.connect(self._on_connect_clicked)
         right_layout.addWidget(self._connect_btn)
 

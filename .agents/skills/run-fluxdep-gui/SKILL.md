@@ -52,7 +52,11 @@ GUI 的 EntryDialog 列出全部合法 component，有效 qubit alias 只作預�
 
 接受且未過期後，呼叫 `fluxdep_fit_export_params()`。它依序寫入 entry 的 `predictors/<component>.json`、更新 setup 已宣告欄位，再追加 analysis ledger，不接受任意 savepath override。過期時先重跑 fit，再驗收與匯出。
 
-核對並保存 export receipt 的 `savepath`、`component`、`analysis_id` 與 `alignment_from`。`alignment_from` 是實際用於校正的第一張已對齊譜，包含零點譜，不是 alignment 繼承來源。匯出契約見 [Fit and recorded evidence](../../../lib/zcu_tools/mcp/fluxdep/README.md#fit-and-recorded-evidence)。
+核對並保存 export receipt 的 `savepath`、`component`、`analysis_id`、`alignment_from`、`flux_writeback` 與 `predictor_writeback`。
+`flux_writeback` 只描述 component 的 period-only P1，`predictor_writeback` 另報這批資料的 predictor v2 是否寫入。
+來源儀器不在 component periods、offset 未校準，或多儀器缺整份 acquisition snapshot 時，predictor skipped、savepath=null。
+單儀器仍須來源名稱吻合，不自動改名；先以明示儀器重新載入資料或補齊校準，再匯出。
+Skipped 不刪除或覆寫既有 predictor，setup／ledger 仍寫入，不把舊檔當成本次產物。`alignment_from` 是實際用於校正的第一張已對齊譜，包含零點譜，不是 alignment 繼承來源。匯出契約見 [Fit and recorded evidence](../../../lib/zcu_tools/mcp/fluxdep/README.md#fit-and-recorded-evidence)。
 
 Dispersive 讀取同 entry 的 predictors 檔，不再讀 params.json。它的 MCP 保持唯讀，launch 使用 project_root／entry／component，project.info 提供目標、paths 與選取 predictor。操作與查詢契約見 [Dispersive](../../../lib/zcu_tools/gui/app/dispersive/README.md#remote-and-mcp)。
 
