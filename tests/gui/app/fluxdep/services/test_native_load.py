@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 from zcu_tools.analysis.flux import ComponentFluxContext, DevicePeriod, FluxFrame
 from zcu_tools.analysis.fluxdep.io import load_spectrums
-from zcu_tools.datafile import load, save
+from zcu_tools.datafile import JsonObject, load, save
 from zcu_tools.gui.app.analysis_project.native import NativeSpectrumSelection
 from zcu_tools.gui.app.fluxdep.services.export import ExportService
 from zcu_tools.gui.app.fluxdep.services.load import LoadService
@@ -17,17 +17,8 @@ from zcu_tools.gui.app.fluxdep.state import FluxDepState
 from tests.gui.app.analysis_project._native import native_spectrum_file
 
 
-def test_native_target_uses_injected_context_and_device_owner_snapshot(
-    tmp_path, fluxonium_entry
-):
-    path = native_spectrum_file(
-        tmp_path / "data.h5",
-        {
-            "bias": {"value": 99.0, "value_unit": "A"},
-            "coil": {"value": 0.002, "value_unit": "A"},
-            "rf": {"freq_Hz": 1e9},
-        },
-    )
+@pytest.fixture
+def native_target(tmp_path, fluxonium_entry):
     from zcu_tools.gui.app.analysis_project.entry import AnalysisTarget
 
     state = FluxDepState(AnalysisTarget.open(tmp_path, "synthetic", "Q1"))
@@ -38,7 +29,84 @@ def test_native_target_uses_injected_context_and_device_owner_snapshot(
         "bias",
         {"bias": "A", "coil": "A"},
     )
+    return state, LoadService(state, flux_context_provider=lambda _component: context)
+
+
+@pytest.mark.parametrize("snapshot_unit", ["mA", "native", None])
+def test_other_snapshot_unit_mismatch_refuses_publication(
+    tmp_path, native_target, snapshot_unit
+):
+    scalar: JsonObject = {"value": 0.002}
+    if snapshot_unit is not None:
+        scalar["value_unit"] = snapshot_unit
+    path = native_spectrum_file(tmp_path / "mismatch.h5", {"coil": scalar})
+    state, service = native_target
+    with pytest.raises(ValueError, match=f"coil.*{snapshot_unit or 'native'}.*A"):
+        service.load_spectrum(
+            str(path),
+            "OneTone",
+            selection=NativeSpectrumSelection("signal", "bias", "bias"),
+        )
+    assert state.spectrums == {}
+
+
+@pytest.mark.parametrize("scalar", [{"value": True}, {}, {"value": "invalid"}])
+def test_scanned_snapshot_scalar_must_be_valid_for_storage(
+    tmp_path, native_target, scalar
+):
+    path = native_spectrum_file(tmp_path / "invalid-scanned.h5", {"bias": scalar})
+    state, service = native_target
+    with pytest.raises(ValueError, match="bias"):
+        service.load_spectrum(
+            str(path),
+            "OneTone",
+            selection=NativeSpectrumSelection("signal", "bias", "bias"),
+        )
+    assert state.spectrums == {}
+
+
+@pytest.mark.parametrize("snapshot", [None, {}])
+def test_named_context_preserves_absent_snapshot_scalars(
+    tmp_path, native_target, snapshot
+):
+    path = native_spectrum_file(tmp_path / "absent.h5", snapshot)
+    state, service = native_target
+    name = service.load_spectrum(
+        str(path),
+        "OneTone",
+        selection=NativeSpectrumSelection("signal", "bias", "bias"),
+    )
+    assert state.get_spectrum(name).device_snapshot == snapshot
+
+
+def test_uncalibrated_context_preserves_unused_snapshot_units(tmp_path, native_target):
+    path = native_spectrum_file(
+        tmp_path / "uncalibrated.h5",
+        {"coil": {"value": 0.002, "value_unit": "mA"}},
+    )
+    state, _service = native_target
+    context = ComponentFluxContext(None, "bias", {"bias": "A", "coil": "A"})
     service = LoadService(state, flux_context_provider=lambda _component: context)
+    name = service.load_spectrum(
+        str(path), "OneTone", selection=NativeSpectrumSelection("signal", "bias")
+    )
+    entry = state.get_spectrum(name)
+    assert entry.device == "unnamed_device"
+    assert entry.device_snapshot == {"coil": {"value": 0.002, "unit": "mA"}}
+
+
+def test_native_target_uses_injected_context_and_device_owner_snapshot(
+    tmp_path, native_target
+):
+    path = native_spectrum_file(
+        tmp_path / "data.h5",
+        {
+            "bias": {"value": 99.0, "value_unit": "mA"},
+            "coil": {"value": 0.002, "value_unit": "A"},
+            "rf": {"freq_Hz": 1e9},
+        },
+    )
+    state, service = native_target
     name = service.load_spectrum(
         str(path),
         "OneTone",
@@ -46,14 +114,16 @@ def test_native_target_uses_injected_context_and_device_owner_snapshot(
     )
     entry = state.get_spectrum(name)
     assert entry.device == "bias"
+    assert entry.unit == "A"
     assert entry.device_snapshot == {
-        "bias": {"value": 99.0, "unit": "A"},
+        "bias": {"value": 99.0, "unit": "mA"},
         "coil": {"value": 0.002, "unit": "A"},
     }
     output = ExportService(state).export_spectrums(str(tmp_path / "processed.hdf5"))
     restored = FluxDepState()
     LoadService(restored).load_processed_spectrums(output)
     assert restored.get_spectrum(name).device == "bias"
+    assert restored.get_spectrum(name).unit == "A"
     assert restored.get_spectrum(name).device_snapshot == entry.device_snapshot
 
 

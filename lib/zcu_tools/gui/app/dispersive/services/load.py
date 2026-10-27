@@ -13,7 +13,11 @@ from collections.abc import Mapping
 
 import numpy as np
 
-from zcu_tools.analysis.flux import FluxFrame, flux_from_device_values
+from zcu_tools.analysis.flux import (
+    FluxFrame,
+    flux_from_device_values,
+    require_matching_device_unit,
+)
 from zcu_tools.analysis.fluxdep import project_native_spectrum
 from zcu_tools.analysis.spectrum import SpectrumData, format_rawdata
 from zcu_tools.datafile import Container
@@ -43,11 +47,7 @@ def _other_device_values(
     )
     values: dict[str, float] = {}
     for name, scalar in scalars.items():
-        if scalar.unit != frame.devices[name].unit:
-            raise ValueError(
-                f"Device {name!r} snapshot unit {scalar.unit!r} does not match "
-                f"predictor unit {frame.devices[name].unit!r}"
-            )
+        require_matching_device_unit(name, scalar.unit, frame.devices[name].unit)
         values[name] = scalar.value
     return values
 

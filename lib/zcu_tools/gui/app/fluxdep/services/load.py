@@ -23,6 +23,7 @@ from zcu_tools.analysis.flux import (
     DevicePeriod,
     FluxFrame,
     device_value_at_flux,
+    require_matching_device_unit,
 )
 from zcu_tools.analysis.fluxdep import project_native_spectrum
 from zcu_tools.analysis.fluxdep.io import load_spectrums
@@ -111,7 +112,13 @@ class LoadService:
         selection is required for native Container inputs and explicitly names
         variable, device axis and instrument. Native axis units are retained;
         metadata comes from the same Container, and unrecorded snapshots stay
-        None. Only injected component context supplies legal named devices.
+        None. Saved scalars must be valid finite values, including the scanned
+        device. With a calibrated source frame, other recorded devices must
+        match context unit strings exactly. Mismatches raise ValueError naming
+        device and both units before state publication. The scanned snapshot
+        unit is retained without comparison; the spectrum unit comes from the
+        native axis. Missing scalars stay absent.
+        Only injected component context supplies legal named devices.
         Missing/rejecting providers permit only the explicit unnamed_device
         isolation choice, whose provider error the UI presents before submission.
         ``transpose_axes=True`` swaps only legacy Labber coordinates; it never
@@ -165,6 +172,16 @@ class LoadService:
                     scalars = snapshot_scalar_values(
                         snapshot, context.units if context is not None else [device]
                     )
+                    if (
+                        context is not None
+                        and context.frame is not None
+                        and device in context.frame.devices
+                    ):
+                        for name, scalar in scalars.items():
+                            if name != device:
+                                require_matching_device_unit(
+                                    name, scalar.unit, context.units.get(name)
+                                )
                     snapshots = {
                         name: DeviceSnapshotValue(value=value.value, unit=value.unit)
                         for name, value in scalars.items()

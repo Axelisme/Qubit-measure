@@ -1,6 +1,6 @@
 # `zcu_tools.analysis` 模塊重點文檔
 
-**Last updated:** 2026-10-27
+**Last updated:** 2026-10-28
 
 **讀者：** framework-dev。分析核心、純數值工具與前端 adapter 的分工速查。
 
@@ -37,6 +37,12 @@ Boolean 不算數值。無效 offset、period、unit 或使用中的值會拋出
 三個入口都將沒有值的儀器視為不貢獻，忽略未校準的額外儀器。
 投影不使用選定儀器的當下值。輸入保持不變。
 Record 到這些型別的轉換由 resources 負責，Notebook 副軸使用同一投影入口。
+
+`require_matching_device_unit(device_name, actual_unit, expected_unit)` 集中儀器單位的精確比對。
+缺單位以 None 表示，視為 native；native 只等於 native，mA 與 A 不換算。
+不符時 ValueError 指名儀器與兩個單位。Caller 先選出真正用於換算的值，
+再傳入單位字串；本函式不讀 snapshot 或依賴 device。
+Fluxdep native 載入與 dispersive 投影共用此規則。
 
 ## 子模組
 
