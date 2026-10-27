@@ -34,6 +34,24 @@ chip:
   g_f1_f2_ghz: 0.055
   temperature_k: 0.05
 
+# Optional acquisition-frozen drift. Uncomment to enable; omitted/null drift is off.
+# Every selected chip loss above must be positive, not null or zero.
+# sigma is the stationary standard deviation of ln(loss); tau_s is in seconds.
+# The first acquisition uses chip values; later acquisitions follow independent log-OU streams.
+# Omitted loops/targets stay constant. q_ind never drifts; coupler has no xqp.
+# drift:
+#   f1:
+#     q_cap: {sigma: 0.1, tau_s: 300.0}
+#     xqp: {sigma: 0.2, tau_s: 600.0}
+#     aphi: {sigma: 0.1, tau_s: 300.0}
+#   coupler:
+#     q_cap: {sigma: 0.1, tau_s: 300.0}
+#     aphi: {sigma: 0.1, tau_s: 300.0}
+#   f2:
+#     q_cap: {sigma: 0.1, tau_s: 300.0}
+#     xqp: {sigma: 0.2, tau_s: 600.0}
+#     aphi: {sigma: 0.1, tau_s: 300.0}
+
 # Author's design guesses, not simulator truth or calibrated measurement values.
 # Native flux-source units; all affine values are independent nominal inputs.
 design:

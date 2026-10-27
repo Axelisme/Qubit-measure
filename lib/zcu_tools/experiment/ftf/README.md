@@ -1,11 +1,11 @@
 # FTF environment composition
 
-**Last updated:** 2026-10-27, acquisition clock and independent loss drift
-
 **讀者：** lab-author。FTF 環境的組裝、數值接線與 acquisition 設定。
 
-`ftf(path_or_settings, *, workers=1, warmup=False)` builds the same `SimulationEnvironment` for GUI startup
-and Notebook callers. It creates fixed-unit V/A `FakeDevice` sources in one
+**Last updated:** 2026-10-27, drift clock accounting, truth logs and effective-settings replay
+
+`ftf(configuration, *, acquisition=None, workers=1, warmup=False, time_scale=None)`
+builds the same `SimulationEnvironment` for GUI startup and Notebook callers. It creates fixed-unit V/A `FakeDevice` sources in one
 `DeviceManager`, uses each source name as its explicit FakeDevice address,
 applies initial values at environment construction and binds the derived channel
 counts to the fixed mock QICK profile. The returned manager owns cleanup. A
@@ -21,6 +21,7 @@ builder with an explicit YAML path. Neither caller uses an environment wrapper.
 - [Round pacing](#round-pacing)
 - [Routing telemetry](#routing-telemetry)
 - [Numeric source](#numeric-source)
+  - [Acquisition clock and loss drift](#acquisition-clock-and-loss-drift)
   - [Workers and engine budget](#workers-and-engine-budget)
   - [Physical facts and readout cache](#physical-facts-and-readout-cache)
 - [Startup preparation](#startup-preparation)
@@ -106,13 +107,29 @@ class-retained driver, preserving V/A units and current values.
 
 `FTFAcquisitionOptions(clock=None, truth_log=None, private_replay=None)` selects
 one environment clock and private persistence paths. Pass it as `acquisition=` to
-`ftf` or `FTFSource`. An omitted clock creates one per environment. The builder
-shares it between acquisition admission and completed-round duration accounting.
-Even with `time_scale=0`, successful rounds advance unscaled simulated physical
-time. Waiting between acquisitions advances the wall-clock part naturally.
+`ftf` or `FTFSource`, not as separate builder/source keywords. An omitted clock
+creates one per environment. A caller-owned clock must not be shared between
+independent environments. The builder shares it between acquisition admission and
+completed-round duration accounting; no hardware clock is read or changed.
+
+`SimulationClock` returns monotonic wall seconds plus a nondecreasing offset.
+After each successful round it adds `max(0, physical_s - elapsed_s)` to the offset.
+`physical_s` is unscaled; `elapsed_s` includes snapshot, execution and pacing sleep.
+Failed or cancelled rounds add no credit. Even with `time_scale=0`, successful
+rounds account for unscaled simulated physical time. Idle time between acquisitions
+advances the wall-clock part naturally.
 
 Optional `settings.drift` freezes independent f1, coupler and f2 log-OU losses
-at `begin_acquire(seed=...)`. All points and rounds use those effective settings.
+at `begin_acquire(seed=...)`. Root seed and loop key derive separate streams.
+F1/f2 select q_cap, xqp and aphi; the coupler selects only q_cap and aphi.
+Every selected chip loss must be positive. `sigma` is the stationary standard
+deviation in ln(loss), with log mean ln(the configured chip loss). `tau_s` is the
+positive correlation time in seconds. The first acquisition uses chip initial
+values. Later begins transition by elapsed simulated seconds. All points and
+rounds use the same effective settings, with `drift=None`. Omitted or null loops
+and targets stay constant; q_ind never drifts. A seed alone does not fix the
+wall-clock time sequence. The commented YAML example and configuration limits
+are in the [Drift guide](../../../../zcu_lab/simulation_envs/FTF/field-guide.md#drift跨-acquisition-損耗漂移).
 Direct `open_acquire` callers need not call begin; open samples once when no
 admission is pending. A new begin invalidates the previous session. Enabled drift
 rebuilds physical facts and clears readout/preparation residents each acquisition.
@@ -120,11 +137,16 @@ Omitted/null drift leaves sampling streams and numerical outputs unchanged.
 
 Each enabled acquisition appends three loop rows to the private truth log.
 `truth_log=None` selects `~/.local/state/zcu-tools/simulation/ftf/<session>/truth.jsonl`.
-Rows include a session UUID, simulated seconds, UTC wall time, loop `qubit` key
-and effective q_cap/q_ind/xqp/aphi. The coupler has null q_ind/xqp.
-A new source creates a new session. Disabled drift writes nothing. Truth-log
-serialization and filesystem failures propagate before request construction.
-Routing telemetry remains a separate YAML-controlled policy.
+Each begin writes rows with `qubit` keys `f1`, `coupler`, `f2`, a session UUID,
+simulated seconds, UTC wall time and effective q_cap/q_ind/xqp/aphi.
+The coupler has JSON null q_ind/xqp. An explicit `truth_log=Path(...)` selects
+another file; relative paths resolve from cwd. Enabled drift creates parent
+directories and appends; callers own retention for both truth and replay paths.
+A new source or environment restart creates a new session starting at chip values.
+Disabled drift writes nothing. Truth-log serialization and filesystem failures
+propagate before request construction.
+Routing telemetry remains a separate YAML-controlled policy. Truth and replay
+files must not enter ordinary Run, GUI or MCP metadata.
 
 ### Workers and engine budget
 
@@ -429,8 +451,11 @@ memory. They need only agree with direct means in expectation, not realization.
 checked private input archives. Import `FTFAcquisitionOptions` from
 `zcu_tools.experiment.ftf`. Relative replay roots raise `ValueError`.
 `replay_round(round_path)` recomputes one round without drivers, earlier rounds,
-current YAML or numeric records. Backend, engine numeric version, RNG version and
-dependency versions must match. The stream policy is `PCG64/SeedSequence-v2`.
+current YAML or numeric records. Import it from `zcu_tools.experiment.ftf`.
+`ReplayAcquire.settings` stores that acquisition's effective settings with
+`drift=None`, so replay neither reads the simulation clock nor samples drift.
+`ReplayRound.snapshot.model_identity` stores the effective model identity.
+Backend, engine numeric version, RNG version and dependency versions must match. The stream policy is `PCG64/SeedSequence-v2`.
 The backend is `ftf-segment-v13`. Integrated raw and decimated traces resolve
 continuous CTMC jump times and cavity memory, with one physical path per shot
 shared across mux carriers, ADCs and windows. Archives from `ftf-segment-v12`
