@@ -119,5 +119,3 @@ def test_local_singletons_keep_shared_apply_waves_and_release_each_payload():
         assert idle.preparations == 8
         assert idle.peak <= workers
         assert idle.live == 0
-
-

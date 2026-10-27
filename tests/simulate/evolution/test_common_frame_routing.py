@@ -236,5 +236,3 @@ def test_rejected_unique_common_keys_preserve_shared_fallback_preparation(
     np.testing.assert_array_equal(
         result.densities, np.repeat(source.initial_density[None], 4, axis=0)
     )
-
-

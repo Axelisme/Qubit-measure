@@ -262,5 +262,3 @@ def test_complex_fractional_tail_preserves_quadrature(frequency: float) -> None:
         direct.close()
     assert actual.paths.segments_by_kernel == {"shaped_sambe": 1}
     np.testing.assert_allclose(actual.densities, expected.densities, atol=1e-3, rtol=0)
-
-
