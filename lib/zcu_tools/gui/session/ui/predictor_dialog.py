@@ -185,7 +185,7 @@ class PredictorDialog(QDialog):
             on_edited=self._on_parameters_changed,
             on_replaced=self._on_parameters_replaced,
             on_status=lambda message, error: self._set_status(message, error=error),
-            on_flux_loaded=self._load_flux,
+            on_flux_loaded=self._scope.callback(self._load_flux),
         )
         controls_layout.addWidget(self._parameter_editor)
         self._flux_editor = PredictorFluxEditor(
@@ -454,7 +454,9 @@ class PredictorDialog(QDialog):
         (platformdirs, with a temporary-directory fallback). An explicit directory
         isolates a caller's cache. The file is predictor.json, never a component
         DocumentStore. Enabling restores immediately, replacing current inputs;
-        subsequent edits and close save only local model/params via atomic replace.
+        subsequent edits and close atomically save local model, energy params,
+        flux frame, known native device_values and axis_device. Restore replaces
+        all five parts of the editable trial, not component storage.
         Read, version or data errors restore an empty trial and display an error.
         Save I/O errors leave the trial editable and display an error. Calling
         twice raises ValueError rather than silently changing the cache owner.
@@ -473,7 +475,11 @@ class PredictorDialog(QDialog):
             self._set_status(str(outcome.load_error), error=True)
 
     def capture_persisted_state(self) -> PredictorSnapshot:
-        """Capture detached model/params for user cache, not component storage."""
+        """Capture model, params, flux, device_values and axis_device for user cache.
+
+        Values are detached from component storage. Invalid editable inputs raise
+        PredictorInputError; blank device values are omitted.
+        """
         params = self.parameters()
         flux = self.flux() if self._flux_editor.has_frame() else None
         return PredictorSnapshot(
@@ -487,7 +493,11 @@ class PredictorDialog(QDialog):
         )
 
     def restore_persisted_state(self, state: PredictorSnapshot) -> None:
-        """Restore a validated cache snapshot into editable local fields only."""
+        """Restore cached model, params, flux, device_values and axis_device locally.
+
+        Missing flux clears the frame; missing device values remain blank. No
+        component storage or source predictor file is changed.
+        """
         self._flux_editor.set_flux(
             PredictorFlux.from_mapping(state.flux) if state.flux is not None else None,
             state.device_values,
@@ -595,11 +605,12 @@ class PredictorDialog(QDialog):
         self.state_changed.emit()
 
     def done(self, a0: int) -> None:
-        """Retire calibration callbacks at terminal teardown, not hide/reopen.
+        """Retire dialog and calibration callbacks at terminal teardown, not hide/reopen.
 
         Repeated cleanup is safe. Failures propagate for retry before finishing
         or permitting Qt child deletion.
         """
+        self._scope.close()
         self._calibration_freq_field.dispose()
         super().done(a0)
 

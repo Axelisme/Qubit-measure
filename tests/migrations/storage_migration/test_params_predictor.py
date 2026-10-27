@@ -73,6 +73,57 @@ def test_incomplete_affine_stays_pending_without_publishing_predictor(
 
 
 @pytest.mark.parametrize("dry_run", [True, False])
+@pytest.mark.parametrize(
+    ("values", "missing"),
+    [
+        ({"half flux": 0.2, "period": -2.0}, "flux_bias"),
+        ({"half flux": 0.2}, "flux_period"),
+        ({"period": -2.0}, "flux_half"),
+    ],
+)
+def test_partial_root_alignment_without_params_stays_pending_and_preserved(
+    request_data: MigrationRequest,
+    analysis_mapping: MigrationMapping,
+    dry_run: bool,
+    values: JsonObject,
+    missing: str,
+) -> None:
+    request = replace(request_data, dry_run=dry_run)
+    source = write_params(request, values)
+    original = source.read_bytes()
+    before = {
+        path: path.read_bytes()
+        for path in request.result_root.parent.rglob("*")
+        if path.is_file()
+    }
+    report = migrate(request, analysis_mapping)
+    assert any(
+        item.source == source and missing in item.reason for item in report.pending
+    )
+    assert not (
+        request.results_root / request.name / "predictors/Qlegacy.json"
+    ).exists()
+    assert source.read_bytes() == original
+    if dry_run:
+        assert {
+            path: path.read_bytes()
+            for path in request.result_root.parent.rglob("*")
+            if path.is_file()
+        } == before
+        assert not backup_path(request).exists()
+    else:
+        assert (
+            document_value(
+                snapshot(open_entry(request).setup), "Qlegacy.ext.legacy_params"
+            )
+            == values
+        )
+        assert (
+            backup_path(request) / "result/chip/qubit/params.json"
+        ).read_bytes() == original
+
+
+@pytest.mark.parametrize("dry_run", [True, False])
 @pytest.mark.parametrize("unit", [None, "mA"])
 def test_historical_top_level_fit_projects_exact_source_leaves(
     request_data: MigrationRequest,

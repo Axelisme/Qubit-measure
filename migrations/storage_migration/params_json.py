@@ -179,8 +179,9 @@ def _project_fit(
     ):
         fit = values
         prefix = ()
+    flux_fields = _FLUX_FIELDS if prefix else ("half flux", "period", "flux_bias")
     if not isinstance(fit, dict) or (
-        "params" not in fit and not any(field in fit for field in _FLUX_FIELDS)
+        "params" not in fit and not any(field in fit for field in flux_fields)
     ):
         return []
     target = (

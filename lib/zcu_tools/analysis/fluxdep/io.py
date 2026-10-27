@@ -62,11 +62,24 @@ def dump_spectrums(
     optional snapshots use scalar datasets with unit attributes. Invalid finite
     calibration or snapshot values raise ValueError before opening the file.
     mode follows h5py (default x refuses existing paths); parent directories are
-    created. I/O failures propagate and may leave a partially written file.
+    created. For a/r+, existing files must have the v2 format/version header;
+    otherwise ValueError names the upgrade command and leaves bytes unchanged.
+    Mode w explicitly overwrites existing files. Other I/O failures propagate and
+    may leave a partially written file.
     """
     for spectrum in spectrums.values():
         _validate_calibration(spectrum)
     os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+    if mode in ("a", "r+") and os.path.exists(path):
+        with h5.File(path, "r") as existing:
+            if (
+                existing.attrs.get("format") != "zcu.fluxdep-spectrums"
+                or existing.attrs.get("version") != 2
+            ):
+                raise ValueError(
+                    f"{path}: expected zcu.fluxdep-spectrums version 2; "
+                    f"upgrade with: python scripts/upgrade_spectrums.py {path!r} --apply"
+                )
     with h5.File(path, mode) as handle:
         handle.attrs["format"] = "zcu.fluxdep-spectrums"
         handle.attrs["version"] = 2

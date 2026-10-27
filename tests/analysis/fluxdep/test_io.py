@@ -80,6 +80,56 @@ def test_spectrum_collection_roundtrips_values_shapes_and_dtypes(
             assert restored.dtype == array.dtype
 
 
+@pytest.mark.parametrize("mode", ["a", "r+"])
+@pytest.mark.parametrize(
+    ("format_name", "version"),
+    [(None, None), ("zcu.fluxdep-spectrums", 1), ("other", 2)],
+)
+def test_non_overwriting_dump_rejects_unsupported_header_without_changes(
+    tmp_path, mode, format_name, version
+):
+    path = tmp_path / "existing.hdf5"
+    with h5py.File(path, "w") as handle:
+        if format_name is not None:
+            handle.attrs.update(format=format_name, version=version)
+        handle.create_group("legacy")
+    original = path.read_bytes()
+    with pytest.raises(ValueError, match="scripts/upgrade_spectrums.py"):
+        dump_spectrums(str(path), {}, mode=mode)
+    assert path.read_bytes() == original
+    dump_spectrums(str(path), {}, mode="w")
+    assert load_spectrums(str(path)) == {}
+
+
+@pytest.mark.parametrize("mode", ["a", "r+"])
+def test_v2_dump_can_append_a_spectrum(tmp_path, mode):
+    spectrum = SpectrumResult(
+        offset=0.2,
+        period=-2.0,
+        device="coil",
+        unit="A",
+        spectrum={
+            "dev_values": np.array([0.0]),
+            "fluxs": np.array([0.2]),
+            "freqs": np.array([4.0]),
+            "signals": np.array([[1j]]),
+        },
+        points={
+            "dev_values": np.array([]),
+            "fluxs": np.array([]),
+            "freqs": np.array([]),
+        },
+    )
+    path = str(tmp_path / "v2.hdf5")
+    dump_spectrums(path, {"first": spectrum}, mode="a")
+    dump_spectrums(path, {"second": spectrum}, mode=mode)
+    restored = load_spectrums(path)
+    assert set(restored) == {"first", "second"}
+    for result in restored.values():
+        assert result["period"] == -2.0
+        np.testing.assert_array_equal(result["spectrum"]["signals"], [[1j]])
+
+
 @pytest.mark.parametrize("version", [None, 1, 3])
 def test_unsupported_collection_requires_explicit_upgrade(tmp_path, version):
     path = tmp_path / "old.hdf5"

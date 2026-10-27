@@ -45,7 +45,9 @@ def test_parameter_editor_returns_energy_only_trial(qapp):
         on_status=lambda _message, _error: None,
     )
     try:
-        assert editor.parameters() == FluxoniumParams(EJ=4.0, EC=1.0, EL=1.0)
+        trial = FluxoniumParams(EJ=6.3, EC=None, EL=0.7)
+        editor.set_parameters(trial)
+        assert editor.parameters() == trial
     finally:
         editor.deleteLater()
 
@@ -392,7 +394,7 @@ def test_persistent_predictor_hide_reopen_keeps_callbacks_until_done(qapp, tmp_p
         provider.reset_mock()
         changes.clear()
         # Keep the C++ field alive: a deleted-owner guard cannot satisfy this.
-        edit.setText("3+3")
+        edit.textChanged.emit("3+3")
         provider.assert_not_called()
         assert changes == []
     finally:
@@ -400,6 +402,68 @@ def test_persistent_predictor_hide_reopen_keeps_callbacks_until_done(qapp, tmp_p
         host.close()
         host.deleteLater()
         qapp.processEvents()
+
+
+@pytest.mark.parametrize(
+    "source", ["predictor_offset", "predictor_value_coil", "predictor_axis_trim"]
+)
+def test_terminal_done_retires_flux_signals_but_hide_keeps_them(qapp, source):
+    dialog = _make_dialog(persistent_on_close=True)
+    dialog.set_flux(
+        PredictorFlux(0.2, {"coil": 2.0, "trim": -4.0}, {"coil": "A", "trim": "V"}),
+        {"coil": 0.3, "trim": -0.4},
+    )
+    if source == "predictor_axis_trim":
+        from qtpy.QtWidgets import QRadioButton
+
+        widget = dialog.findChild(QRadioButton, source)
+        assert widget is not None
+
+        def deliver():
+            widget.toggled.emit(True)
+    else:
+        widget = dialog.findChild(QLineEdit, source)
+        assert widget is not None
+
+        def deliver():
+            widget.textChanged.emit("0.3")
+
+    try:
+        dialog.reject()
+        dialog.set_live_mode(enabled=False, status="Host status")
+        deliver()
+        assert _status(dialog) != "Host status"
+        dialog.set_live_mode(enabled=False, status="Terminal status")
+        dialog.done(0)
+        deliver()
+        assert _status(dialog) == "Terminal status"
+    finally:
+        dialog.done(0)
+        dialog.deleteLater()
+
+
+def test_terminal_done_retires_file_flux_callback(qapp):
+    from zcu_tools.gui.session.ui.predictor_parameters import PredictorParameterEditor
+    from zcu_tools.resources.predictor_file import PredictorFile, PredictorSource
+
+    initial = PredictorFlux(0.2, {"coil": 2.0}, {"coil": "A"})
+    late = PredictorFlux(0.7, {"trim": -4.0}, {"trim": "V"})
+    control = MagicMock(wraps=PredictorControlFacet(PredictorService()))
+    control.load_file.return_value = PredictorFile(
+        "fluxonium", FluxoniumParams(), late, PredictorSource(None, None)
+    )
+    dialog = PredictorDialog(control, params=FluxoniumParams())
+    editor = dialog.findChild(PredictorParameterEditor)
+    assert editor is not None
+    try:
+        dialog.set_flux(initial, {"coil": 0.3})
+        dialog.done(0)
+        # Deliver the collaborator's public file callback, not a hidden UI click.
+        editor.load_file("late.json")
+        assert dialog.flux() == initial
+    finally:
+        dialog.done(0)
+        dialog.deleteLater()
 
 
 def test_predictor_dialog_capture_restore_state_roundtrip(qapp):
