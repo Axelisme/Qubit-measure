@@ -2,7 +2,7 @@
 
 **Readers:** operator, lab-author. Start an offline single-fluxonium environment and supply a one-point twotone input.
 
-**Last updated:** 2026-10-26, per-user simulation settings.
+**Last updated:** 2026-10-27, fixed multiplicative readout background.
 
 This environment has one fluxonium, one DC source, one microwave line,
 one fast-flux line and one readout cavity. It has no coupler, second qubit or mux.
@@ -10,6 +10,15 @@ one fast-flux line and one readout cavity. It has no coupler, second qubit or mu
 `single_fluxonium.yaml`, an untracked working copy beside the startup script.
 `entry-template.yaml` contains working components, wiring and aliases. Neither
 the physical settings nor the entry template supplies a calibrated pulse library.
+
+The template background now multiplies 68/44/308 MHz waves, 2% complex RMS
+roughness, a -4 dB/GHz slope and a 3.7 GHz low-frequency edge. Existing working
+copies do not update automatically. Copy the template's `background.extra_ripples`,
+`roughness` and `band_edges` into each receiver in your working YAML, update the
+legacy ripple/slope values too, then restart the environment. `roughness.seed`
+fixes the line shape independently of the measurement-noise `numerics.seed`.
+See the [ADC background contract](../../../lib/zcu_tools/simulate/adc/README.md)
+for field definitions and reproducibility limits.
 
 ## Trusted startup
 

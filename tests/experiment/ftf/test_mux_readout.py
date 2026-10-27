@@ -9,7 +9,13 @@ from zcu_tools.core.simulation import CancellationQuery
 from zcu_tools.device import DeviceManager
 from zcu_tools.experiment import ftf as ftf_module
 from zcu_tools.program.v2.simulation import IntegratedRound
-from zcu_tools.simulate.adc import ADC
+from zcu_tools.simulate.adc import (
+    ADC,
+    BackgroundBandEdge,
+    BackgroundBandEdges,
+    BackgroundRipple,
+    BackgroundRoughness,
+)
 from zcu_tools.simulate.evolution import (
     Engine,
     EvolutionResult,
@@ -56,6 +62,36 @@ def mux_template():
         samples=3,
     )
     return replace(base, events=(pulse, second), readouts=(first_window, second_window))
+
+
+@pytest.mark.parametrize("path", ["pulse", "mux"])
+def test_planner_applies_optional_background_to_every_receiver(path):
+    receiver = replace(
+        configuration().pulse,
+        extra_ripples=(BackgroundRipple(0.2, 2000.0, 90.0),),
+        roughness=BackgroundRoughness(0.02, 50.0, 82),
+        band_edges=BackgroundBandEdges(low=BackgroundBandEdge(6.5, 20.0)),
+    )
+    config = configuration()
+    assert config.mux is not None
+    config = replace(
+        config,
+        pulse=receiver,
+        mux=replace(
+            config.mux, receivers=tuple(replace(receiver, ro_ch=ch) for ch in (4, 1))
+        ),
+    )
+    plan = ftf_module.plan_template(
+        settings(),
+        snapshot(),
+        template() if path == "pulse" else mux_template(),
+        readout=config,
+    )
+    rough = BackgroundRoughness(0.02, 50.0, 82)
+    # At 6 GHz: wave=1+0.2j, edge=-10 dB, plus the fixed rough field.
+    expected = (1 + 0.2j) * 10**-0.5 * rough.factor(6.0)
+    for item in plan.readouts:
+        np.testing.assert_allclose(item.batch.model.receiver.background(6.0), expected)
 
 
 def test_mux_planning_keeps_every_incident_tone_and_independent_adc_grid():

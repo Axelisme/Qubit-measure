@@ -55,11 +55,17 @@ readout:
     phase_deg: 0.0
     time_of_flight_ns: 400.0
     background:
-      ripple_depth: 0.1
-      ripple_period_mhz: 30.0
+      ripple_depth: 0.05
+      ripple_period_mhz: 68.0
       ripple_phase_deg: 0.0
-      slope_db_per_ghz: -3.0
+      slope_db_per_ghz: -4.0
       pivot_ghz: 7.0
+      extra_ripples:
+        - {depth: 0.04, period_mhz: 44.0, phase_deg: 25.0}
+        - {depth: 0.03, period_mhz: 308.0, phase_deg: -40.0}
+      roughness: {amplitude: 0.02, correlation_mhz: 50.0, seed: 82}
+      band_edges:
+        low: {corner_ghz: 3.7, rolloff_db_per_ghz: 100.0}
     offset_adc: [0.0, 0.0]
     noise_psd_adc2_ns: [[1.0, 0.2], [0.2, 1.0]] # ADC^2*ns, two-sided PSD.
 

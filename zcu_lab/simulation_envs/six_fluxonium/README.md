@@ -2,7 +2,7 @@
 
 **Readers:** operator, lab-author. Start six independent fluxonium models and prepare mux measurements without hardware.
 
-**Last updated:** 2026-10-27, shared single-fluxonium physics and component schema v2.
+**Last updated:** 2026-10-27, fixed multiplicative readout background.
 
 For existing entries, move resonator and mux-group `ext.time_of_fly` to top-level `time_of_fly`. The loader does not migrate it.
 
@@ -20,6 +20,15 @@ has no coupler, qubit-qubit interaction or crosstalk matrix.
 `entry-template.yaml` holds working components, wiring and aliases. Neither
 the physical settings nor the entry template supplies calibrated pulses or a
 module library. The [settings guide](field-guide.md) records units and model limits.
+
+The template background now multiplies 68/44/308 MHz waves, 2% complex RMS
+roughness, a -4 dB/GHz slope and a 3.7 GHz low-frequency edge. Existing working
+copies do not update automatically. Copy the template's `background.extra_ripples`,
+`roughness` and `band_edges` into each receiver in your working YAML, update the
+legacy ripple/slope values too, then restart the environment. `roughness.seed`
+fixes the line shape independently of the measurement-noise `numerics.seed`.
+See the [ADC background contract](../../../lib/zcu_tools/simulate/adc/README.md)
+for field definitions and reproducibility limits.
 
 Top-level `numerics` assigns the whole environment 768 MiB prepare, 64 MiB
 result-memo and 4 MiB routing cache budgets, divided across six sources.
