@@ -5,9 +5,11 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 from qtpy.QtWidgets import (
+    QApplication,
     QFormLayout,
     QLabel,
     QListWidget,
+    QMessageBox,
     QPushButton,
     QStackedWidget,
     QWidget,
@@ -23,7 +25,16 @@ from zcu_tools.gui.session.events import (
 from zcu_tools.gui.session.state import DeviceStatus
 from zcu_tools.gui.session.ui.device_dialog import DeviceDialog
 
+from tests.gui._user_input import ComponentDriver
 from tests.gui.session.ui._parameter_fakes import make_parameters
+
+
+def confirm_device_action(action: str) -> None:
+    """Click the explicit action in the active Qt device confirmation."""
+    prompt = QApplication.activeModalWidget()
+    if not isinstance(prompt, QMessageBox):
+        raise AssertionError("Expected a visible device confirmation")
+    ComponentDriver(prompt).click(action)
 
 
 def device_list(dialog: DeviceDialog) -> QListWidget:

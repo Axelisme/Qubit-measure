@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import os
 from collections.abc import Generator
 from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
+from qtpy.QtCore import Qt
 from qtpy.QtWidgets import (
     QApplication,
     QComboBox,
@@ -107,6 +109,61 @@ def entry_selector(dialog: SetupDialog) -> QComboBox:
     combo = dialog.findChild(QComboBox, "result_entry")
     assert combo is not None
     return combo
+
+
+@pytest.mark.parametrize("field", ["point_label", "point_description"])
+def test_enter_creates_point_from_single_line_field(
+    entry_dialog: tuple[SetupDialog, Controller, State], field: str, tmp_path: Path
+) -> None:
+    dialog, _controller, _state = entry_dialog
+    driver = ComponentDriver(dialog)
+    driver.enter_text(value="bias-enter", object_name="point_label", commit=False)
+    driver.enter_text(
+        value="Created by keyboard", object_name="point_description", commit=False
+    )
+    driver.press_key(Qt.Key.Key_Return, object_name=field)
+    driver.screenshot(tmp_path / f"enter-{field}.png")
+    assert [row.text for row in driver.list_rows()] == ["● bias-enter"]
+    assert driver.observe(object_name="point_label").text == ""
+
+
+def test_double_click_switches_to_selected_point(
+    entry_dialog: tuple[SetupDialog, Controller, State], tmp_path: Path
+) -> None:
+    dialog, controller, _state = entry_dialog
+    for label in ("first", "second"):
+        controller.setup_control.new_point(
+            PointCreateRequest(label, "", CommandOrigin("gui"))
+        )
+    dialog.hide()
+    dialog.show()
+    driver = ComponentDriver(dialog)
+    driver.double_click_list_row("first")
+    driver.screenshot(tmp_path / "double-click.png")
+    assert [row.text for row in driver.list_rows()] == ["● first", "second"]
+
+
+def test_tab_visits_new_point_fields_in_reading_order(
+    entry_dialog: tuple[SetupDialog, Controller, State], tmp_path: Path
+) -> None:
+    dialog, _controller, _state = entry_dialog
+    driver = ComponentDriver(dialog)
+    dialog.activateWindow()
+    QApplication.processEvents()
+    for _ in range(20):
+        if driver.focused_input().object_name == "point_label":
+            break
+        driver.press_key(Qt.Key.Key_Tab)
+    assert driver.focused_input().object_name == "point_label"
+    for name in ("point_description", "clone_from", "track_device"):
+        driver.press_key(Qt.Key.Key_Tab)
+        driver.screenshot(
+            Path(os.environ.get("SESSION_DIALOG_EVIDENCE", str(tmp_path)))
+            / f"tab-{name}.png"
+        )
+        assert driver.focused_input().object_name == name, driver.focused_input()
+    driver.press_key(Qt.Key.Key_Tab)
+    assert driver.focused_input().text == "Create"
 
 
 def test_taller_dialog_gives_extra_height_only_to_point_list(
