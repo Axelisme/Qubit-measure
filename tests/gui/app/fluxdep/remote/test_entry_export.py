@@ -153,7 +153,7 @@ def test_skipped_predictor_projects_null_path_and_both_receipts(
 
     exported = route_harness.request(client, "fit.export_params")
 
-    assert exported["ok"], exported
+    assert "result" in exported, exported
     assert exported["result"]["savepath"] is None
     assert exported["result"]["predictor_writeback"] == {
         "status": "skipped",
@@ -200,7 +200,7 @@ def test_export_unit_failure_reaches_rpc_without_writing(
 
     exported = route_harness.request(client, "fit.export_params")
 
-    assert not exported["ok"]
+    assert "error" in exported, exported
     assert exported["error"]["code"] == "controller_error"
     message = exported["error"]["message"]
     assert "coil" in message
