@@ -10,6 +10,7 @@ from datetime import datetime
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 from types import MappingProxyType
+from typing import TypedDict
 
 from zcu_tools.analysis.flux import DevicePeriod, FluxFrame, offset_for_flux
 from zcu_tools.simulate.parameters import ModelName, ModelParams, params_class
@@ -33,6 +34,20 @@ class PredictorSource:
     created_at: str | None
 
 
+class PredictorFluxValues(TypedDict):
+    """Detached JSON representation of recorded flux coordinates.
+
+    offset is the finite zero-output flux in Phi0, without period folding.
+    period maps device names to signed finite nonzero native units per Phi0.
+    unit maps exactly the same device names to nonblank native unit strings.
+    Empty period/unit mappings describe constant flux.
+    """
+
+    offset: float
+    period: dict[str, float]
+    unit: dict[str, str]
+
+
 @dataclass(frozen=True)
 class PredictorFlux:
     """Recorded zero-output offset (Phi0) and signed device periods with units.
@@ -52,6 +67,24 @@ class PredictorFlux:
         self.to_frame()
         object.__setattr__(self, "period", MappingProxyType(dict(self.period)))
         object.__setattr__(self, "unit", MappingProxyType(dict(self.unit)))
+
+    @classmethod
+    def from_mapping(cls, value: Mapping[str, object]) -> PredictorFlux:
+        """Decode exact v2 offset/period/unit fields, snapshotting input mappings.
+
+        Nested period/unit values must be JSON objects. Missing/extra fields,
+        invalid names, nonfinite/bool/null numbers, zero periods, mismatched
+        device keys or blank units raise ValueError. No I/O or model building.
+        """
+        return _decode_flux(dict(value))
+
+    def to_dict(self) -> PredictorFluxValues:
+        """Return offset/period/unit with fresh mutable dictionaries and no I/O."""
+        return {
+            "offset": self.offset,
+            "period": dict(self.period),
+            "unit": dict(self.unit),
+        }
 
     def to_frame(self) -> FluxFrame:
         """Return a validated analysis frame; mismatched unit keys raise ValueError."""
@@ -267,11 +300,7 @@ def _document(predictor: PredictorFile) -> dict[str, object]:
         "version": 2,
         "model": predictor.model,
         "params": predictor.params.to_dict(),
-        "flux": {
-            "offset": predictor.flux.offset,
-            "period": dict(predictor.flux.period),
-            "unit": dict(predictor.flux.unit),
-        },
+        "flux": predictor.flux.to_dict(),
         "source": {
             "run_id": predictor.source.run_id,
             "created_at": predictor.source.created_at,

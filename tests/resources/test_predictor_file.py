@@ -461,6 +461,33 @@ def test_load_rejects_invalid_flux_frame(
         load_predictor_file(write_document(tmp_path / "bad.json", document))
 
 
+@pytest.mark.parametrize(
+    "invalid",
+    [
+        {},
+        {"offset": 0, "period": {}, "unit": {}, "extra": 1},
+        {"offset": True, "period": {}, "unit": {}},
+        {"offset": 0, "period": {"coil": 0}, "unit": {"coil": "A"}},
+        {"offset": 0, "period": {"coil": 2}, "unit": {}},
+    ],
+)
+def test_predictor_flux_public_decoder_rejects_invalid_shape(
+    invalid: dict[str, object],
+) -> None:
+    with pytest.raises(ValueError, match="flux|offset|period"):
+        PredictorFlux.from_mapping(invalid)
+
+
+def test_predictor_flux_public_mapping_roundtrip_is_detached() -> None:
+    document = {"offset": 0.25, "period": {"coil": -2.0}, "unit": {"coil": "A"}}
+    flux = PredictorFlux.from_mapping(document)
+    rendered = flux.to_dict()
+    assert rendered == document
+    rendered["period"]["coil"] = 9.0
+    rendered["unit"]["coil"] = "V"
+    assert flux.to_dict() == document
+
+
 def test_predictor_flux_snapshots_inputs_and_reuses_analysis_frame() -> None:
     from zcu_tools.analysis.flux import flux_from_device_values
 

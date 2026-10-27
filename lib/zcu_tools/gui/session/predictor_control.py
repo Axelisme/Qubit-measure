@@ -6,8 +6,7 @@ from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
     from zcu_tools.gui.session.services.predictor import (
-        CalibrateFluxBiasRequest,
-        CalibrateFluxBiasResult,
+        CalibrateOffsetRequest,
         PredictCurveRequest,
         PredictCurveResult,
         PredictFreqRequest,
@@ -16,7 +15,7 @@ if TYPE_CHECKING:
         PredictorService,
     )
     from zcu_tools.resources.predictor_file import PredictorFile
-    from zcu_tools.simulate.predictor import PredictorParams
+    from zcu_tools.simulate.predictor import CalibrationResult, PredictorParams
 
 
 class PredictorControlPort(Protocol):
@@ -38,10 +37,10 @@ class PredictorControlPort(Protocol):
         """Query explicit parameters for MHz; see PredictorService.predict_freq."""
         ...
 
-    def calibrate_flux_bias(
-        self, params: PredictorParams, req: CalibrateFluxBiasRequest
-    ) -> CalibrateFluxBiasResult:
-        """Return native bias, actual MHz and clamped status; see PredictorService.calibrate_flux_bias."""
+    def calibrate_offset(
+        self, params: PredictorParams, req: CalibrateOffsetRequest
+    ) -> CalibrationResult:
+        """Return additive Phi0 offset correction, actual MHz and clamped status; see PredictorService.calibrate_offset."""
         ...
 
     def predict_freq_curve(
@@ -75,11 +74,11 @@ class PredictorControlFacet:
         """Return MHz; see PredictorService.predict_freq."""
         return self._predictor.predict_freq(params, req)
 
-    def calibrate_flux_bias(
-        self, params: PredictorParams, req: CalibrateFluxBiasRequest
-    ) -> CalibrateFluxBiasResult:
-        """Return native bias, actual MHz and clamped status; see PredictorService.calibrate_flux_bias."""
-        return self._predictor.calibrate_flux_bias(params, req)
+    def calibrate_offset(
+        self, params: PredictorParams, req: CalibrateOffsetRequest
+    ) -> CalibrationResult:
+        """Return additive Phi0 offset correction, actual MHz and clamped status; see PredictorService.calibrate_offset."""
+        return self._predictor.calibrate_offset(params, req)
 
     def predict_freq_curve(
         self, params: PredictorParams, req: PredictCurveRequest

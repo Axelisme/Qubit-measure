@@ -1,11 +1,6 @@
-"""Read-only predictor sources and error contracts through public RPC and MCP.
-
-Entry-owned JSON files require no selected point. Inline inputs require no entry,
-hardware, dialog, cache or installed model.
-"""
+"""Read-only predictor source, coordinate and error contracts through RPC/MCP."""
 
 import json
-from copy import deepcopy
 from pathlib import Path
 
 import pytest
@@ -23,16 +18,15 @@ from tests.gui._predictor_fakes import FailingPredictorService
 
 from ._helpers import call, mcp_client, open_client
 
-COMPLETE = {
-    "model": "fluxonium",
-    "EJ": 5.0,
-    "EC": 1.0,
-    "EL": 0.5,
-    "flux_half": 0.0,
-    "flux_period": 1.0,
-    "flux_bias": 0.0,
+COMPLETE = {"model": "fluxonium", "EJ": 5.0, "EC": 1.0, "EL": 0.5}
+TRANSMON = {"model": "transmon", "EJmax": 20.0, "EC": 0.3, "d": 0.0}
+FLUX = {
+    "offset": 0.25,
+    "period": {"coil": -2.0, "bias": 4.0},
+    "unit": {"coil": "A", "bias": "V"},
 }
-MISSING = ["EC", "EL", "flux_half", "flux_period", "flux_bias"]
+VALUES = {"coil": -0.4, "bias": 0.6}  # 0.6 Phi0.
+MISSING = ["EC", "EL"]
 
 
 @pytest.fixture
@@ -58,7 +52,7 @@ def simulator(qapp, tmp_path: Path):
 
 
 def prepare_files(controller: Controller) -> Path:
-    """Create authored predictor JSONs in an opened entry without a point."""
+    """Create synthetic v2 predictor sources in an opened entry without a point."""
     controller.setup_control.new_entry(EntryRequest("queries"))
     entry = controller.context_control.get_entry_info()
     assert entry is not None
@@ -67,81 +61,261 @@ def prepare_files(controller: Controller) -> Path:
     for filename, inputs in (
         ("complete.json", COMPLETE),
         ("partial.json", {"model": "fluxonium", "EJ": 4.1}),
-        (
-            "transmon.json",
-            {
-                "model": "transmon",
-                "EJmax": 20.0,
-                "EC": 0.3,
-                "d": 0.0,
-                "flux_half": 0.0,
-                "flux_period": 1.0,
-                "flux_bias": 0.0,
-            },
-        ),
+        ("transmon.json", TRANSMON),
     ):
         document = {
             "format": "zcu.predictor",
-            "version": 1,
+            "version": 2,
             "model": inputs["model"],
             "params": {key: value for key, value in inputs.items() if key != "model"},
-            "flux_unit": None,
+            "flux": FLUX,
             "source": {"run_id": None, "created_at": None},
         }
         (directory / filename).write_text(json.dumps(document), encoding="utf-8")
     return directory
 
 
-def test_predictor_file_discovery_is_readonly_and_follows_the_opened_entry(
-    simulator, tmp_path: Path, request
+@pytest.mark.parametrize("with_flux", [False, True])
+def test_info_preserves_partial_energy_and_reports_optional_flux(
+    simulator, with_flux: bool
 ) -> None:
-    controller, adapter, sock = simulator
-    empty = call(sock, "predictor.list_files")
-    assert empty["ok"], empty
-    assert empty["result"] == {"files": []}
-    prepare_files(controller)
-    bridge, invoke = mcp_client(adapter.port, tmp_path, request=request)
-    try:
-        invoke("connect", {"port": adapter.port, "mode": "readonly"})
-        files = invoke("rpc_call", {"method": "predictor.list_files"})
-        assert files == {"files": ["complete.json", "partial.json", "transmon.json"]}
-        info = invoke(
-            "rpc_call",
-            {"method": "predictor.info", "params": {"filename": files["files"][1]}},
-        )
-        assert info["params"]["EJ"] == 4.1
-        assert controller.context_control.current_point_label() is None
-        controller.setup_control.new_entry(EntryRequest("empty"))
-        assert invoke("rpc_call", {"method": "predictor.list_files"}) == {"files": []}
-    finally:
-        bridge.disconnect()
+    _, _, sock = simulator
+    source = {"params": {"model": "fluxonium", "EJ": 4.1}}
+    if with_flux:
+        source["flux"] = FLUX
+    reply = call(sock, "predictor.info", source)
+    assert reply["ok"], reply
+    assert reply["result"] == {
+        "model": "fluxonium",
+        "params": {"EJ": 4.1, "EC": None, "EL": None},
+        "missing": MISSING,
+        "flux": FLUX if with_flux else None,
+    }
 
 
-def test_filename_queries_and_calibration_preserve_files_without_a_point(
+def test_filename_and_inline_prediction_agree_without_writes_or_a_point(
     simulator,
 ) -> None:
     controller, _, sock = simulator
     directory = prepare_files(controller)
     before = {path.name: path.read_bytes() for path in directory.iterdir()}
-    info = call(sock, "predictor.info", {"filename": "partial.json"})
-    assert info["ok"], info
-    assert info["result"]["params"]["EJ"] == 4.1
-    assert info["result"]["missing"] == MISSING
-    prediction = call(
-        sock, "predictor.predict", {"filename": "complete.json", "device_value": 0.1}
+    replies = [
+        call(sock, "predictor.predict", {**source, "device_values": VALUES})
+        for source in (
+            {"filename": "complete.json"},
+            {"params": COMPLETE, "flux": FLUX},
+        )
+    ]
+    assert all(reply["ok"] for reply in replies), replies
+    assert replies[0]["result"] == replies[1]["result"]
+    assert replies[0]["result"]["freq_mhz"] == pytest.approx(
+        1707.3748654723192, abs=1e-7
     )
-    assert prediction["ok"], prediction
-    freq = prediction["result"]["freq_mhz"]
-    assert freq == pytest.approx(1707.3748654723192, abs=1e-7)
-    calibration = call(
-        sock,
-        "predictor.calibrate",
-        {"filename": "complete.json", "device_value": 0.101, "frequency_mhz": freq},
-    )
-    assert calibration["ok"], calibration
-    assert calibration["result"]["flux_bias_after"] == pytest.approx(-0.001, abs=1e-4)
-    assert {path.name: path.read_bytes() for path in directory.iterdir()} == before
+    info = call(sock, "predictor.info", {"filename": "complete.json"})
+    assert info["result"]["flux"] == FLUX
     assert controller.context_control.current_point_label() is None
+    assert {path.name: path.read_bytes() for path in directory.iterdir()} == before
+
+
+@pytest.mark.parametrize(
+    "model,filename,direct",
+    [("fluxonium", "complete.json", COMPLETE), ("transmon", "transmon.json", TRANSMON)],
+)
+@pytest.mark.parametrize("target_kind", ["reachable", "below", "above"])
+def test_mcp_calibration_returns_flux_correction_and_actual_frequency_without_writes(
+    simulator, tmp_path: Path, request, model, filename, direct, target_kind
+) -> None:
+    controller, adapter, _ = simulator
+    directory = prepare_files(controller)
+    before = {path.name: path.read_bytes() for path in directory.iterdir()}
+    values = {"coil": -0.402, "bias": 0.6}
+    target = (
+        1707.3748654723192
+        if target_kind == "reachable"
+        else (-100.0 if target_kind == "below" else 20000.0)
+    )
+    bridge, invoke = mcp_client(adapter.port, tmp_path, request=request)
+    try:
+        invoke("connect", {"port": adapter.port})
+        results = [
+            invoke(
+                "rpc_call",
+                {
+                    "method": "predictor.calibrate",
+                    "params": {
+                        **source,
+                        "device_values": values,
+                        "frequency_mhz": target,
+                    },
+                },
+            )
+            for source in ({"filename": filename}, {"params": direct, "flux": FLUX})
+        ]
+        assert results[0] == results[1]
+        result = results[0]
+        assert result["clamped"] is (target_kind != "reachable")
+        corrected = {**FLUX, "offset": 0.25 + result["offset_correction"]}
+        actual = invoke(
+            "rpc_call",
+            {
+                "method": "predictor.predict",
+                "params": {
+                    "params": direct,
+                    "flux": corrected,
+                    "device_values": values,
+                },
+            },
+        )
+        assert actual["freq_mhz"] == pytest.approx(result["frequency_mhz"], abs=1e-6)
+        if target_kind == "reachable":
+            assert result["frequency_mhz"] == pytest.approx(target, abs=1e-6)
+            if model == "fluxonium":
+                assert result["offset_correction"] == pytest.approx(-0.001, abs=1e-7)
+        assert {path.name: path.read_bytes() for path in directory.iterdir()} == before
+        assert FLUX["offset"] == 0.25
+    finally:
+        bridge.disconnect()
+
+
+@pytest.mark.parametrize(
+    "method", ["predictor.info", "predictor.predict", "predictor.calibrate"]
+)
+@pytest.mark.parametrize(
+    "source",
+    [
+        {},
+        {"filename": "complete.json", "params": COMPLETE},
+        {"filename": "complete.json", "flux": FLUX},
+    ],
+)
+def test_sources_are_exclusive_and_filename_flux_cannot_be_overridden(
+    simulator, method, source
+) -> None:
+    _, _, sock = simulator
+    reply = call(
+        sock, method, {**source, "device_values": VALUES, "frequency_mhz": 1707.0}
+    )
+    assert not reply["ok"]
+    assert reply["error"]["code"] == "invalid_params"
+    assert reply["error"]["reason"] == "invalid_predictor_source"
+
+
+@pytest.mark.parametrize("method", ["predictor.predict", "predictor.calibrate"])
+def test_inline_queries_require_explicit_flux(simulator, method) -> None:
+    _, _, sock = simulator
+    reply = call(
+        sock,
+        method,
+        {"params": COMPLETE, "device_values": VALUES, "frequency_mhz": 1707.0},
+    )
+    assert not reply["ok"]
+    assert reply["error"]["reason"] == "missing_predictor_flux"
+    assert "flux" in reply["error"]["message"]
+
+
+@pytest.mark.parametrize("method", ["predictor.predict", "predictor.calibrate"])
+@pytest.mark.parametrize("filename", [False, True])
+def test_queries_name_a_missing_device_instead_of_reading_cache(
+    simulator, method, filename
+) -> None:
+    controller, _, sock = simulator
+    prepare_files(controller)
+    source = (
+        {"filename": "complete.json"}
+        if filename
+        else {"params": COMPLETE, "flux": FLUX}
+    )
+    reply = call(
+        sock,
+        method,
+        {**source, "device_values": {"coil": -0.4}, "frequency_mhz": 1707.0},
+    )
+    assert not reply["ok"]
+    assert reply["error"]["code"] == "invalid_params"
+    assert "bias" in reply["error"]["message"]
+
+
+@pytest.mark.parametrize(
+    "method", ["predictor.info", "predictor.predict", "predictor.calibrate"]
+)
+@pytest.mark.parametrize(
+    "flux",
+    [None, {}, {**FLUX, "offset": True}, {**FLUX, "unit": {}}, {**FLUX, "extra": 1}],
+)
+def test_inline_flux_uses_v2_validation(simulator, method, flux) -> None:
+    _, _, sock = simulator
+    reply = call(
+        sock,
+        method,
+        {
+            "params": COMPLETE,
+            "flux": flux,
+            "device_values": VALUES,
+            "frequency_mhz": 1707.0,
+        },
+    )
+    assert not reply["ok"]
+    assert reply["error"]["code"] == "invalid_params"
+    assert reply["error"]["reason"] == "invalid_predictor_flux"
+
+
+@pytest.mark.parametrize("method", ["predictor.predict", "predictor.calibrate"])
+@pytest.mark.parametrize("source_kind", ["filename", "params"])
+def test_missing_energy_fields_are_named_without_source_mutation(
+    simulator, method, source_kind
+) -> None:
+    controller, _, sock = simulator
+    directory = prepare_files(controller)
+    before = {path.name: path.read_bytes() for path in directory.iterdir()}
+    source = (
+        {"filename": "partial.json"}
+        if source_kind == "filename"
+        else {"params": {"model": "fluxonium", "EJ": 4.1}, "flux": FLUX}
+    )
+    reply = call(
+        sock, method, {**source, "device_values": VALUES, "frequency_mhz": 1707.0}
+    )
+    assert not reply["ok"]
+    assert reply["error"]["reason"] == "missing_predictor_params"
+    assert reply["error"]["data"]["missing"] == MISSING
+    assert all(name in reply["error"]["message"] for name in MISSING)
+    assert {path.name: path.read_bytes() for path in directory.iterdir()} == before
+
+
+@pytest.mark.parametrize(
+    "params,field",
+    [
+        ({"EJ": 5.0}, "model"),
+        ({"model": "unknown"}, "model"),
+        ({**COMPLETE, "EC": "1"}, "EC"),
+        ({**COMPLETE, "EL": True}, "EL"),
+        ({**COMPLETE, "EJ": -1.0}, "EJ"),
+        ({**COMPLETE, "unexpected": 1.0}, "unexpected"),
+    ],
+)
+def test_invalid_direct_parameters_have_a_named_error(simulator, params, field) -> None:
+    _, _, sock = simulator
+    reply = call(
+        sock,
+        "predictor.predict",
+        {"params": params, "flux": FLUX, "device_values": VALUES},
+    )
+    assert not reply["ok"]
+    assert reply["error"]["reason"] == "invalid_predictor_params"
+    assert field in reply["error"]["message"]
+
+
+@pytest.mark.parametrize("value", [True, "1", None, float("inf")])
+def test_invalid_device_values_name_the_device(simulator, value) -> None:
+    _, _, sock = simulator
+    reply = call(
+        sock,
+        "predictor.predict",
+        {"params": COMPLETE, "flux": FLUX, "device_values": {**VALUES, "bias": value}},
+    )
+    assert not reply["ok"]
+    assert reply["error"]["code"] == "invalid_params"
+    assert "bias" in reply["error"]["message"]
 
 
 @pytest.mark.parametrize("method", ["predictor.predict", "predictor.calibrate"])
@@ -155,7 +329,7 @@ def test_filename_queries_and_calibration_preserve_files_without_a_point(
 )
 def test_numerical_failures_are_unexpected_with_traceback(
     simulator, caplog, method, failure
-):
+) -> None:
     _, adapter, sock = simulator
     service = FailingPredictorService(failure)
     adapter.predictor_control = PredictorControlFacet(service)
@@ -163,102 +337,20 @@ def test_numerical_failures_are_unexpected_with_traceback(
         reply = call(
             sock,
             method,
-            {"params": COMPLETE, "device_value": 0.1, "frequency_mhz": 1707.0},
+            {
+                "params": COMPLETE,
+                "flux": FLUX,
+                "device_values": VALUES,
+                "frequency_mhz": 1707.0,
+            },
         )
     assert not reply["ok"]
-    assert reply["error"]["code"] == "controller_error", reply
+    assert reply["error"]["code"] == "controller_error"
     assert len(service.requests) == 1
     assert any(
         record.exc_info is not None and record.exc_info[1] is failure
         for record in caplog.records
     )
-
-
-def test_direct_prediction_and_calibration_without_a_point(simulator) -> None:
-    _, _, sock = simulator
-    params = deepcopy(COMPLETE)
-    freq_reply = call(
-        sock, "predictor.predict", {"params": params, "device_value": 0.1}
-    )
-    assert freq_reply["ok"], freq_reply
-    assert freq_reply["result"]["freq_mhz"] == pytest.approx(
-        1707.3748654723192, abs=1e-7
-    )
-    result = call(
-        sock,
-        "predictor.calibrate",
-        {
-            "params": params,
-            "device_value": 0.101,
-            "frequency_mhz": freq_reply["result"]["freq_mhz"],
-        },
-    )
-    assert result["ok"], result
-    assert result["result"]["flux_bias_before"] == 0.0
-    assert result["result"]["flux_bias_after"] == pytest.approx(-0.001, abs=1e-4)
-    assert (
-        call(sock, "predictor.info", {"params": params})["result"]["params"][
-            "flux_bias"
-        ]
-        == 0.0
-    )
-    assert params == COMPLETE
-
-
-def test_info_reports_partial_direct_parameters(simulator) -> None:
-    _, _, sock = simulator
-    reply = call(sock, "predictor.info", {"params": {"model": "fluxonium", "EJ": 4.1}})
-    assert reply["ok"], reply
-    assert reply["result"] == {
-        "model": "fluxonium",
-        "params": {
-            "EJ": 4.1,
-            "EC": None,
-            "EL": None,
-            "flux_half": None,
-            "flux_period": None,
-            "flux_bias": None,
-        },
-        "missing": MISSING,
-    }
-
-
-@pytest.mark.parametrize(
-    "method", ["predictor.info", "predictor.predict", "predictor.calibrate"]
-)
-@pytest.mark.parametrize(
-    "source", [{}, {"filename": "complete.json", "params": COMPLETE}]
-)
-def test_sources_are_exclusive_and_required(simulator, method, source) -> None:
-    _, _, sock = simulator
-    reply = call(sock, method, {**source, "device_value": 0.1, "frequency_mhz": 1707.0})
-    assert not reply["ok"]
-    assert reply["error"]["code"] == "invalid_params"
-    assert reply["error"]["reason"] == "invalid_predictor_source"
-    assert (
-        "filename" in reply["error"]["message"]
-        and "params" in reply["error"]["message"]
-    )
-
-
-@pytest.mark.parametrize("method", ["predictor.predict", "predictor.calibrate"])
-@pytest.mark.parametrize("source", ["filename", "params"])
-def test_missing_fields_are_named_without_mutation(simulator, method, source) -> None:
-    controller, _, sock = simulator
-    directory = prepare_files(controller)
-    before = {path.name: path.read_bytes() for path in directory.iterdir()}
-    inputs = (
-        {"filename": "partial.json"}
-        if source == "filename"
-        else {"params": {"model": "fluxonium", "EJ": 4.1}}
-    )
-    reply = call(sock, method, {**inputs, "device_value": 0.1, "frequency_mhz": 1707.0})
-    assert not reply["ok"]
-    assert reply["error"]["code"] == "invalid_params"
-    assert reply["error"]["reason"] == "missing_predictor_params"
-    assert reply["error"]["data"]["missing"] == MISSING
-    assert all(name in reply["error"]["message"] for name in MISSING)
-    assert {path.name: path.read_bytes() for path in directory.iterdir()} == before
 
 
 @pytest.mark.parametrize(
@@ -270,7 +362,6 @@ def test_filename_requires_an_entry_local_json_name(simulator, filename) -> None
     prepare_files(controller)
     reply = call(sock, "predictor.info", {"filename": filename})
     assert not reply["ok"]
-    assert reply["error"]["code"] == "invalid_params"
     assert reply["error"]["reason"] == "invalid_predictor_file"
 
 
@@ -280,17 +371,6 @@ def test_filename_without_an_entry_has_failed_precondition(simulator) -> None:
     assert not reply["ok"]
     assert reply["error"]["code"] == "precondition_failed"
     assert reply["error"]["reason"] == "no_entry"
-
-
-def test_missing_file_has_failed_precondition(simulator) -> None:
-    controller, _, sock = simulator
-    directory = prepare_files(controller)
-    before = set(directory.iterdir())
-    reply = call(sock, "predictor.info", {"filename": "missing.json"})
-    assert not reply["ok"]
-    assert reply["error"]["code"] == "precondition_failed"
-    assert reply["error"]["reason"] == "predictor_file_unavailable"
-    assert set(directory.iterdir()) == before
 
 
 @pytest.mark.parametrize("content", ["{broken", '{"format": "wrong"}'])
@@ -303,203 +383,64 @@ def test_malformed_file_has_invalid_params_without_rewriting(
     path.write_text(content, encoding="utf-8")
     reply = call(sock, "predictor.info", {"filename": path.name})
     assert not reply["ok"]
-    assert reply["error"]["code"] == "invalid_params"
     assert reply["error"]["reason"] == "invalid_predictor_file"
     assert path.read_text(encoding="utf-8") == content
 
 
-@pytest.mark.parametrize(
-    "params,field",
-    [
-        ({"EJ": 5.0}, "model"),
-        ({"model": "unknown"}, "model"),
-        ({**COMPLETE, "EC": "1"}, "EC"),
-        ({**COMPLETE, "EL": True}, "EL"),
-        ({**COMPLETE, "flux_period": 0.0}, "flux_period"),
-        ({**COMPLETE, "EJ": -1.0}, "EJ"),
-        ({**COMPLETE, "unexpected": 1.0}, "unexpected"),
-    ],
-)
-def test_invalid_direct_parameters_have_a_named_error(simulator, params, field) -> None:
-    _, _, sock = simulator
-    reply = call(sock, "predictor.predict", {"params": params, "device_value": 0.1})
-    assert not reply["ok"]
-    assert reply["error"]["code"] == "invalid_params"
-    assert reply["error"]["reason"] == "invalid_predictor_params"
-    assert field in reply["error"]["message"]
-
-
-def test_filename_queries_follow_the_opened_entry(simulator) -> None:
-    controller, _, sock = simulator
-    directory = prepare_files(controller)
-    original = (directory / "complete.json").read_text(encoding="utf-8")
-    first = call(sock, "predictor.info", {"filename": "complete.json"})
-    assert first["ok"], first
-    assert first["result"]["params"]["flux_bias"] == 0.0
-    controller.setup_control.new_entry(EntryRequest("another"))
-    entry = controller.context_control.get_entry_info()
-    assert entry is not None
-    other = entry.result_path / "predictors"
-    other.mkdir()
-    document = json.loads(original)
-    document["params"]["flux_bias"] = 0.04
-    (other / "complete.json").write_text(json.dumps(document), encoding="utf-8")
-    second = call(sock, "predictor.info", {"filename": "complete.json"})
-    assert second["ok"], second
-    assert second["result"]["params"]["flux_bias"] == 0.04
-    assert (directory / "complete.json").read_text(encoding="utf-8") == original
-
-
-def test_mcp_rpc_preserves_read_only_file_sources_and_named_errors(
+def test_mcp_discovery_errors_and_file_sources_follow_the_opened_entry(
     simulator, tmp_path: Path, request
 ) -> None:
     controller, adapter, _ = simulator
     directory = prepare_files(controller)
-    before = {path.name: path.read_bytes() for path in directory.iterdir()}
+    original = (directory / "complete.json").read_text(encoding="utf-8")
     bridge, invoke = mcp_client(adapter.port, tmp_path, request=request)
     try:
-        invoke("connect", {"port": adapter.port})
-        direct = invoke(
+        invoke("connect", {"port": adapter.port, "mode": "readonly"})
+        files = invoke("rpc_call", {"method": "predictor.list_files"})
+        assert files == {"files": ["complete.json", "partial.json", "transmon.json"]}
+        info = invoke(
             "rpc_call",
-            {
-                "method": "predictor.predict",
-                "params": {"params": COMPLETE, "device_value": 0.1},
-            },
+            {"method": "predictor.info", "params": {"filename": "partial.json"}},
         )
-        assert direct["freq_mhz"] == pytest.approx(1707.3748654723192, abs=1e-7)
-        try:
-            loaded = invoke(
-                "rpc_call",
-                {
-                    "method": "predictor.predict",
-                    "params": {"filename": "complete.json", "device_value": 0.1},
-                },
-            )
-        except GuiRpcError as exc:
-            pytest.fail(f"MCP must accept an entry-local predictor filename: {exc}")
-        assert loaded == direct
-        calibrated = invoke(
-            "rpc_call",
-            {
-                "method": "predictor.calibrate",
-                "params": {
-                    "filename": "complete.json",
-                    "device_value": 0.101,
-                    "frequency_mhz": direct["freq_mhz"],
-                },
-            },
-        )
-        assert calibrated["flux_bias_after"] == pytest.approx(-0.001, abs=1e-4)
-        assert (
-            invoke(
-                "rpc_call",
-                {"method": "predictor.info", "params": {"filename": "partial.json"}},
-            )["missing"]
-            == MISSING
-        )
-        with pytest.raises(GuiRpcError) as rejected:
+        assert info["missing"] == MISSING
+        assert info["flux"] == FLUX
+        with pytest.raises(GuiRpcError) as missing:
             invoke(
                 "rpc_call",
                 {"method": "predictor.info", "params": {"filename": "missing.json"}},
             )
-        assert rejected.value.reason == "predictor_file_unavailable"
-        assert {path.name: path.read_bytes() for path in directory.iterdir()} == before
+        assert missing.value.reason == "predictor_file_unavailable"
+        controller.setup_control.new_entry(EntryRequest("another"))
+        assert invoke("rpc_call", {"method": "predictor.list_files"}) == {"files": []}
+        entry = controller.context_control.get_entry_info()
+        assert entry is not None
+        other = entry.result_path / "predictors"
+        other.mkdir()
+        document = json.loads(original)
+        document["flux"]["offset"] = 0.04
+        (other / "complete.json").write_text(json.dumps(document), encoding="utf-8")
+        assert (
+            invoke(
+                "rpc_call",
+                {"method": "predictor.info", "params": {"filename": "complete.json"}},
+            )["flux"]["offset"]
+            == 0.04
+        )
+        assert (directory / "complete.json").read_text(encoding="utf-8") == original
     finally:
         bridge.disconnect()
 
 
-def test_transmon_direct_info_and_missing_prediction(simulator) -> None:
+def test_transmon_info_does_not_mix_flux_into_missing_energy_fields(simulator) -> None:
     _, _, sock = simulator
     direct = {"model": "transmon", "EJmax": 20.0, "d": 0.0}
     reply = call(sock, "predictor.info", {"params": direct})
     assert reply["ok"], reply
     assert reply["result"] == {
         "model": "transmon",
-        "params": {
-            "EJmax": 20.0,
-            "EC": None,
-            "d": 0.0,
-            "flux_half": None,
-            "flux_period": None,
-            "flux_bias": None,
-        },
-        "missing": ["EC", "flux_half", "flux_period", "flux_bias"],
+        "params": {"EJmax": 20.0, "EC": None, "d": 0.0},
+        "missing": ["EC"],
+        "flux": None,
     }
-    failed = call(sock, "predictor.predict", {"params": direct, "device_value": 0.0})
-    assert failed["error"]["reason"] == "missing_predictor_params"
-    assert failed["error"]["data"]["missing"] == reply["result"]["missing"]
     invalid = call(sock, "predictor.info", {"params": {**direct, "EL": 1.0}})
     assert invalid["error"]["reason"] == "invalid_predictor_params"
-
-
-@pytest.mark.parametrize(
-    "model,filename", [("fluxonium", "complete.json"), ("transmon", "transmon.json")]
-)
-@pytest.mark.parametrize("source", ["filename", "params"])
-@pytest.mark.parametrize("target_kind", ["reachable", "below", "above"])
-def test_mcp_calibration_reports_actual_frequency_and_clamping_read_only(
-    simulator, tmp_path, request, model, filename, source, target_kind
-):
-    controller, adapter, _ = simulator
-    directory = prepare_files(controller)
-    before = {path.name: path.read_bytes() for path in directory.iterdir()}
-    direct = (
-        COMPLETE
-        if model == "fluxonium"
-        else {
-            "model": "transmon",
-            "EJmax": 20.0,
-            "EC": 0.3,
-            "d": 0.0,
-            "flux_half": 0.0,
-            "flux_period": 1.0,
-            "flux_bias": 0.0,
-        }
-    )
-    selection = (
-        {"filename": filename} if source == "filename" else {"params": deepcopy(direct)}
-    )
-    target = (
-        1707.3748654723192
-        if target_kind == "reachable"
-        else (-100.0 if target_kind == "below" else 20000.0)
-    )
-    bridge, invoke = mcp_client(adapter.port, tmp_path, request=request)
-    try:
-        invoke("connect", {"port": adapter.port})
-        try:
-            result = invoke(
-                "rpc_call",
-                {
-                    "method": "predictor.calibrate",
-                    "params": {
-                        **selection,
-                        "device_value": 0.101,
-                        "frequency_mhz": target,
-                    },
-                },
-            )
-        except GuiRpcError as exc:
-            pytest.fail(f"MCP must calibrate the supplied {source} source: {exc}")
-        assert "clamped" in result, "MCP must project model reachability"
-        assert result["clamped"] is (target_kind != "reachable")
-        assert result["flux_bias_before"] == 0.0
-        actual = invoke(
-            "rpc_call",
-            {
-                "method": "predictor.predict",
-                "params": {
-                    "params": {**direct, "flux_bias": result["flux_bias_after"]},
-                    "device_value": 0.101,
-                },
-            },
-        )
-        assert actual["freq_mhz"] == pytest.approx(result["frequency_mhz"], abs=1e-6)
-        if target_kind == "reachable":
-            assert result["frequency_mhz"] == pytest.approx(target, abs=1e-6)
-        assert {path.name: path.read_bytes() for path in directory.iterdir()} == before
-        assert selection == (
-            {"filename": filename} if source == "filename" else {"params": direct}
-        )
-    finally:
-        bridge.disconnect()

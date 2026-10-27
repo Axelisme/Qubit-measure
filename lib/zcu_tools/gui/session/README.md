@@ -218,10 +218,9 @@ Run、WB 與目前 point 的 Inspect Set 都要求先選取或建立工作點。
 
 ## 獨立 predictor
 
-`zcu.predictor` v1 的 `flux_half／flux_period／flux_bias` 是單一模型的 affine 座標，
-不是 component 的 `flux: {offset, period}` 校準。Service、dialog 與 predictor RPC 不從 component
-或 alias 取得 frame，也不合成多 device 值。Device 訂閱只提供所選模型的 native 輸入值。
-Component flux 格式變更不改 predictor 檔案版本或這些參數的意義。
+`zcu.predictor` v2 的 `params` 只含能量／asymmetry，`flux` 保存 offset、各儀器 signed period 與 unit。Service 與 predictor RPC 以明確 frame 和每台 device_values 換成 reduced flux，再交 simulate 查詢，不從 component、alias、dialog 或 cache 補值。缺任何 frame 儀器都報錯指名。檔案的 flux 是該批數據的 alignment，不代表目前 component 校準。
+
+`PredictFreqRequest` 與 `CalibrateOffsetRequest` 帶 frame 與完整 device_values。`PredictCurveRequest`／`PredictMatrixCurveRequest` 另指定 axis_device、native values 與其他固定 device_values，掃描軸不需要當下值。Service 的 `calibrate_offset` 只回 additive Φ0 correction、actual MHz 與 clamped；caller 把 correction 加到目前 offset。Flux 數學由 `analysis.flux` 擁有，GUI→analysis 依賴沿用 C8／C9。
 
 Dialog 持有 cache、device 訂閱、tracked table、calibration 與持續隱藏／重開的生命週期。兩個具體 child QWidget 分別持有參數編輯與曲線互動的 controls 和局部 state。子元件不取得整個 dialog，也不讀其他 owner 的私有狀態。Programmatic 預填同步完成整批編輯，再由 dialog 停止參數 timer、立即刷新、同步 calibration 並保存一次。User edit 則先清舊結果、同步狀態及保存，再啟動 150ms debounce。
 

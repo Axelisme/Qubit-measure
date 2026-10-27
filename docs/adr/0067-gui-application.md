@@ -151,7 +151,7 @@ Session predictor service 透過 ContextControlPort 取得 ResultEntry 擁有的
 Dialog／remote 使用檔名或明確參數，不解讀 component 欄位，也不由 alias 選來源。
 Framework 不 import 使用者套件（C16）；simulate 不讀容器或檔案（C8、C9）。
 Dialog 擁有可手動修改的獨立 trial，不寫回元件或來源檔案。Service／remote 不讀 dialog。
-Calibrate 只計算候選 bias。Simulation coordinator 只組裝 SoC 與 devices。
+Service 與 RPC 接受明確 flux frame 和所有必要儀器值，不從其他 owner 補值。`analysis.flux` 擁有 native values 到 reduced flux 的換算，GUI→analysis 依賴由 C8／C9 約束。Calibrate 只計算可加到目前 offset 的 Φ0 correction，不寫來源。Simulation coordinator 只組裝 SoC 與 devices。
 
 使用者於 2026-10-20 裁定：「框架內支援的fluxonium/transmon是理論上的兩種qubit，有自己定義的參數，與用戶定義的component解偶」。
 檔案交接採用原話：「我認為還有一個最簡單的，不轉。讓fluxdep的工具寫preditor要用的格式檔，而不是component的欄位。」
