@@ -194,9 +194,9 @@ def get_writeback_items[C: MuxFluxCfg](
 
     Missing capture or cfg yields no proposals. Identity mismatches raise
     instead of guessing a target. Both scan types propose only the selected
-    signed period in qubit.flux.period and an ordinary raw-fit record. Global
+    signed period in qubit.flux.period, qubit.flux.offset and a raw-fit record. Global
     uses the actual cfg.flux_dev name, not a reserved coil alias. Simultaneous
-    local scans still calibrate each participant's independent period.
+    local scans still calibrate each participant using other Run-start biases.
     Conversion and record evidence use only Run parameters and device snapshot.
     """
     cfg, picked = req.run_result.cfg, req.analyze_result

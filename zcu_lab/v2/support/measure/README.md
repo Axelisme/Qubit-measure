@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-27
+**Last updated:** 2026-10-28
 
 # Measure domain support
 
@@ -139,16 +139,21 @@ Recipes 的 flux_* inputs、reports 與 picker updates 是獨立 API，不是 co
 ## Fluxdep writeback
 
 `writeback_helpers.fluxdep_writeback_items` 組裝 onetone、twotone 與 mux local／global 的校準 proposals。
-它只提 `<qubit>.flux.<device>` 的完整 entry，其他 contributors 保留。
-Frame 來自 Analyze 時的 Run ctx.parameters，contributors 的 bias 來自 RunMetadata.device_snapshot。
-新的 period 大小配 stored 方向，首次校準使用正方向。另一個同 Run 被掃 contributor 會令該 Q 寫回失敗。
+它分開提出 `<qubit>.flux.period.<device>` 與預設勾選的 `<qubit>.flux.offset`，保留其他儀器的 period。
+Frame 來自 Analyze 時的 Run ctx.parameters，bias 來自 RunMetadata.device_snapshot。
+新的 period 大小配 stored 方向，首次校準使用正方向。
+Offset 以本次擬合 half 對應 flux 0.5，扣除其他有 period 且 snapshot 有值的儀器貢獻。
+被掃儀器的擬合 half 取代其 Run-start 值，只計入一次。
+Note 列出每台其他儀器的名稱、Run-start 值、原生單位與 value／period 貢獻，包含值為 0 者。
+沒有其他儀器時 note 為 None。缺值不貢獻，也不列入 note；明寫無效值仍報錯。
+同 Run 同步掃描其他線不阻擋 proposal。
 缺 Run snapshot 不能換算，不以 live device 補值。Snapshot 只代表全部已連線裝置，不代表完整 setup catalog。
 
 同次 ordinary RecordWriteback 的 `device` 是實際被掃名稱，`half`、`integer` 與正的 `period` 是原始擬合值，使用該 device 的 native unit。
 `devices` 保存完整 Run snapshot，包含非 contributing RF 與 DC 裝置。
 `flux_frame` 是 Run capture 的原校準，空 frame 也原樣保存，不混入本次結果。
 `run` 保存來源 run_id 與 experiment。Append owner 補 provenance 與 component 信封。
-Point proposal 才保存換算後參考點，record 不重複保存它。接受時不讀目前 point、alias 或儀器。
+Point proposal 保存新的 period 與 offset，record 不重複保存它們。接受時不讀目前 point、alias 或儀器。
 
 ## 其他 measure helpers
 

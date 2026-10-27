@@ -1,6 +1,6 @@
 # v2 experiments
 
-**Last updated:** 2026-10-27，native 分析摘要、mux/onetone core 分工與 flux helpers
+**Last updated:** 2026-10-28，flux offset／period writeback
 
 **讀者：** lab-author、agent。查找實驗的檔案分工、作者契約與各家族入口。
 
@@ -205,17 +205,17 @@ Numeric core 不保存 writeback destination，也不發 proposal。
 ## Qubit flux helpers
 
 無 GUI 的 `support/flux.py` 接受 qubit 的具名 `flux` 校準區塊，不讀檔或操作儀器。
-`qubit_flux_frame(flux)` 驗證名稱與三欄間距，回傳獨立的 half／integer／period mapping。
-空區塊可複製，但不能用來算實際掃描端點。
-`device_flux_points(flux, device_name, values)` 委派共用投影，以其他 contributing devices 的當下值算實際 half／integer，回傳 `QubitFluxCalibration`。現行 component 仍使用參考點區塊，helper 暫以 `offset = -Σ integer / period` 轉成 `FluxFrame`，保留 half 的原分支。Component 切換 offset／period 時移除此轉換。
-`reference_device_flux_points` 以原始擬合點、新 period 大小與原方向換回參考點。
-首次校準採正方向。它只回傳選定 device 的校準，不改其他 entries。
-若 frame 含另一條同次被掃的線，reference helper 拒絕換算並指出 device，因為 Run snapshot 不能代表固定 bias。
-換算缺少其他 contributing device 的值時也指名失敗，不猜值或讀 setup catalog。
+`qubit_flux_frame(flux)` 複製 offset 與帶號 period mapping，包含尚未校準的 null offset。
+`device_flux_points(flux, device_name, values)` 委派共用投影，以其他儀器的值算實際 half／integer，回傳 `QubitFluxCalibration`。
+未校準 offset 或被選儀器沒有 period 時不能投影。其他儀器缺值視為 0，明寫無效值仍報錯。
 各 caller 明確選擇 point frame 與 device values 的來源及取值時點。
 Onetone、twotone 與四個 mux fluxdep adapter 在 Analyze 時呼叫
 `support/measure/writeback_helpers.fluxdep_writeback_items`。
-它以 Run 的 ctx.parameters 複製原 frame，以 RunMetadata.device_snapshot 的固定 contributors 換算 point 校準。
+它以 Run 的 ctx.parameters 複製原 frame，以 RunMetadata.device_snapshot 計算新的 offset。
+被掃儀器使用擬合 half 與新 period 大小，方向沿用原設定，首次校準採正方向。
+其他儀器保留 period，以 Run-start 值貢獻 flux；缺值視為 0。
+Helper 分開提出帶號 period 與預設勾選的 offset，並在 offset note 列出其他儀器的值、單位與貢獻。
+同 Run 同步掃描其他線不阻擋 proposal。
 同次提出 ordinary record，保存原始 fitted half／integer／正 period、被掃 device、完整 connected snapshot 與原 frame。
 接受時不重讀 point 或儀器，不把本次新校準放入 record frame。
 
