@@ -75,11 +75,14 @@ Mux twotone spectrum 的 relax_delay 初值固定為 1.0 µs，不取 captured T
 它與 `onetone/freq` linear 共用純 core cfg、頻率格點與繪圖 buffer。
 兩個 core 的 `run` 各自列出 reset → PulseReadout → declare_sweep → acquire 序列。
 Raw 是一維頻率與 complex IQ。
-分析名單只在 Analyze 參數，不進 cfg 或量測表單。名單預設空，先探索符合最小 MHz 間距的無名凹陷，
-依頻率升序回報 freq 與 depth，不提出寫回。先看圖，再於 Analyze 填入不重複的 resonator 名稱。
-分析去除直線 magnitude 背景；非空名單選取最顯著的 N 個凹陷，再依頻率升序配名稱。
-每個 capture 中存在的名稱只提議一列 `freq`，不提出 module、kappa 或 edelay。
-不足 N 個凹陷時整次分析失敗。操作與判讀見 [range find guide](onetone/range_find/guide.md)。
+單一 primary 入口為 Interactive，靜態找谷只提供初始猜測。預設不平滑，以 depth / FWHM 排序，
+剔除超過 25 MHz 的寬谷。分析名單只在 Analyze 參數，不進 cfg 或量測表單。
+名單預設空，探索無名凹陷；非空名單提供元件標籤，初始依頻率升序配對。
+Picker 可調五個找谷 controls、增刪選點與任意調整元件對應。按 Done 才提交最終結果，
+每個 capture 中存在的已指派名稱只提議一列 `freq`，不提出 module、kappa 或 edelay。
+最終 controls／選點／對應保存在分析 summary，parameters 仍是初始表單。
+Recipe 等待 agent 透過 `tab_interact` 確認並送出 done，才詢問 writeback。
+操作與判讀見 [range find guide](onetone/range_find/guide.md)。
 
 `mux/onetone` 使用 `readout/mux`，在每個 sweep 點對選定 tone 加上共同的名目頻率偏移。
 每條曲線透過原始 tone 序號對應完整 cfg，資料保存共同偏移軸、原始序號與二維 signals。
