@@ -74,7 +74,7 @@ def test_template_engine_paths_match_strict_secular_reference(
         ),
     )
     plan = ftf.plan_template(settings(), snapshot(), tiny)
-    engine = Engine(1, 1_000_000)
+    engine = Engine(1)
     try:
         actual = engine.evolve(plan.source, (plan.batch,), cancel=Event())
     finally:
@@ -138,7 +138,7 @@ def test_readout_ignores_controls_after_start_and_rejects_multiple_terminal_puls
     )
     overlap = replace(base, events=(*base.events, extra))
     plans = [ftf.plan_template(settings(), snapshot(), t) for t in (base, overlap)]
-    engine = Engine(1, 1_000_000)
+    engine = Engine(1)
     try:
         results = [engine.evolve(p.source, (p.batch,), cancel=Event()) for p in plans]
     finally:
@@ -223,7 +223,7 @@ def test_cavity_drive_must_not_cross_terminal_start_but_may_end_there() -> None:
 
 class CountingEngine(Engine):
     def __init__(self):
-        super().__init__(1, 1_000_000)
+        super().__init__(1)
         self.calls = 0
 
     def evolve(
@@ -276,7 +276,7 @@ class ResidualEngine(Engine):
     """Configured executor supplying controlled densities at the C3 boundary."""
 
     def __init__(self, populations):
-        super().__init__(1, 0)
+        super().__init__(1)
         self.populations = populations
 
     def evolve(

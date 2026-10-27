@@ -16,7 +16,12 @@ from zcu_tools.experiment.simulation import white_noise
 from zcu_tools.program.v2 import ModularProgramV2, make_mock_soccfg
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
-from zcu_tools.program.v2.simulation import SimulationBinding, SimulationSoc
+from zcu_tools.program.v2.simulation import (
+    SimulationBinding,
+    SimulationClock,
+    SimulationSoc,
+    SimulationTiming,
+)
 from zcu_tools.program.v2.simulation.frontend import build_request
 
 
@@ -64,13 +69,116 @@ def request_for(binding: SimulationBinding, sequence: int) -> AcquireRequest:
     )
 
 
+@pytest.mark.parametrize(
+    "physical_s, elapsed_s",
+    [
+        (-1.0, 1.0),
+        (float("nan"), 1.0),
+        (float("inf"), 1.0),
+        (float("-inf"), 1.0),
+        (3.0, -1.0),
+        (3.0, float("nan")),
+        (3.0, float("inf")),
+        (3.0, float("-inf")),
+    ],
+)
+def test_simulation_clock_rejects_invalid_durations_without_advancing(
+    physical_s: float, elapsed_s: float
+) -> None:
+    wall_clock = Clock()
+    sim_clock = SimulationClock(monotonic=wall_clock.monotonic)
+    sim_clock.complete_round(3.0, 1.0)
+    wall_clock.now = 10.0
+    before = sim_clock.now()
+
+    with pytest.raises(ValueError, match="finite and nonnegative"):
+        sim_clock.complete_round(physical_s, elapsed_s)
+
+    assert sim_clock.now() == before
+
+
+@pytest.mark.parametrize(
+    "scale, work", [(1.0, 0.02), (0.1, 0.002), (0.0, 0.02), (0.0, 0.3)]
+)
+def test_simulation_clock_preserves_physical_rounds_and_idle(clock: Clock, scale, work):
+    sim_clock = SimulationClock(monotonic=clock.monotonic)
+
+    def execute(_request):
+        clock.now += work
+        return RoundSignals(())
+
+    binding = SimulationBinding(
+        lambda: EnvironmentSnapshot("synthetic", "test", ()),
+        execute,
+        backend_version="test",
+        timing=SimulationTiming(time_scale=scale, clock=sim_clock),
+    )
+    sequence = binding.begin()
+    try:
+        request = request_for(binding, sequence)
+        binding.sample_round(request, 0)
+        assert sim_clock.now() == pytest.approx(max(0.2, work))
+        binding.sample_round(request, 1)
+        assert sim_clock.now() == pytest.approx(2 * max(0.2, work))
+    finally:
+        binding.end()
+    clock.now += 10
+    assert sim_clock.now() == pytest.approx(10 + 2 * max(0.2, work))
+
+
+@pytest.mark.parametrize("separate_pacing", [False, True])
+def test_simulation_clock_does_not_credit_cancelled_or_failed_rounds(
+    clock: Clock, separate_pacing
+):
+    from zcu_tools.program.v2.simulation import SimulationClock
+
+    sim_clock = SimulationClock(monotonic=clock.monotonic)
+    cancel = Event()
+
+    def execute(_request):
+        clock.now += 0.03
+        cancel.set()
+        return RoundSignals(())
+
+    binding = SimulationBinding(
+        lambda: EnvironmentSnapshot("synthetic", "test", ()),
+        execute,
+        backend_version="test",
+        timing=SimulationTiming(time_scale=0, clock=sim_clock),
+    )
+    binding.begin()
+    try:
+        binding.sample_round(
+            request_for(binding, 0),
+            0,
+            cancel=cancel,
+            pacing_cancel=Event() if separate_pacing else None,
+        )
+        assert sim_clock.now() == pytest.approx(0.03)
+    finally:
+        binding.end()
+
+    def fail(_request):
+        clock.now += 0.02
+        raise RuntimeError("numeric failure")
+
+    binding.execute = fail
+    binding.begin()
+    try:
+        with pytest.raises(RuntimeError, match="numeric failure"):
+            binding.sample_round(request_for(binding, 1), 0)
+        assert sim_clock.now() == pytest.approx(0.05)
+    finally:
+        binding.end()
+
+
 def test_physical_target_scales_with_reps_and_time_scale(clock: Clock):
     binding = SimulationBinding(
         lambda: EnvironmentSnapshot("synthetic", "test", ()),
         lambda _: RoundSignals(()),
         backend_version="test",
         seed=1,
-        time_scale=0.5,
+        timing=SimulationTiming(time_scale=0.5),
     )
     sequence = binding.begin()
     try:
@@ -95,7 +203,11 @@ def test_each_round_includes_snapshot_time_and_only_waits_for_remainder(clock: C
         return result
 
     binding = SimulationBinding(
-        snapshot, execute, backend_version="test", seed=1, time_scale=1
+        snapshot,
+        execute,
+        backend_version="test",
+        seed=1,
+        timing=SimulationTiming(time_scale=1),
     )
     sequence = binding.begin()
     try:
@@ -121,7 +233,7 @@ def test_compiled_timeline_includes_readout_delays_and_per_point_relaxation(
         lambda: EnvironmentSnapshot("synthetic", "test", ()),
         lambda _: RoundSignals(()),
         backend_version="test",
-        time_scale=1,
+        timing=SimulationTiming(time_scale=1),
     )
     program = ModularProgramV2(
         make_mock_soccfg(),
@@ -167,7 +279,7 @@ def test_stop_during_wait_returns_at_next_checkpoint(
         lambda: EnvironmentSnapshot("synthetic", "test", ()),
         lambda _: result,
         backend_version="test",
-        time_scale=1,
+        timing=SimulationTiming(time_scale=1),
     )
     sequence = binding.begin()
     try:
@@ -199,7 +311,7 @@ def test_decimated_stop_interrupts_wait_and_keeps_completed_trace(
         env.soc.binding.execute,
         backend_version="synthetic",
         seed=1,
-        time_scale=1,
+        timing=SimulationTiming(time_scale=1),
     )
     soc = SimulationSoc(env.soccfg, binding, routes=((0, 0),))
     program = ModularProgramV2(
@@ -247,7 +359,7 @@ def test_zero_scale_never_sleeps_or_reads_clock(monkeypatch: pytest.MonkeyPatch)
         lambda: EnvironmentSnapshot("synthetic", "test", ()),
         lambda _: RoundSignals(()),
         backend_version="test",
-        time_scale=0,
+        timing=SimulationTiming(time_scale=0),
     )
     sequence = binding.begin()
     try:
@@ -264,7 +376,7 @@ def test_backend_failure_propagates_without_waiting(clock: Clock):
         lambda: EnvironmentSnapshot("synthetic", "test", ()),
         fail,
         backend_version="test",
-        time_scale=1,
+        timing=SimulationTiming(time_scale=1),
     )
     sequence = binding.begin()
     try:
@@ -282,5 +394,5 @@ def test_binding_rejects_invalid_time_scale(scale: float):
             lambda: EnvironmentSnapshot("synthetic", "test", ()),
             lambda _: RoundSignals(()),
             backend_version="test",
-            time_scale=scale,
+            timing=SimulationTiming(time_scale=scale),
         )

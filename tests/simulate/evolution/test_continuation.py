@@ -59,7 +59,7 @@ def test_continuation_matches_one_shot_without_replaying_phase_or_envelope(shape
         segment_boundaries=((5.0, 10.0), (7.0, 12.0)),
     )
     spans = evolution.segment_spans(timeline)
-    with closing(evolution.Engine(1, 1024**2)) as engine:
+    with closing(evolution.Engine(1)) as engine:
         whole = engine.evolve(source, (timeline,), cancel=Event(), budget=1e-9)
         densities = np.tile(source.initial_density, (2, 1, 1))
         for step in range(max(map(len, spans))):
@@ -99,7 +99,7 @@ def test_continuation_omission_is_equivalent_and_memo_isolates_start_and_density
     )
     densities = np.tile(source.initial_density, (2, 1, 1))
     explicit = replace(timeline, start_ns=np.zeros(2), initial_densities=densities)
-    with closing(evolution.Engine(1, 1024**2)) as engine:
+    with closing(evolution.Engine(1)) as engine:
         omitted = engine.evolve(source, (timeline,), cancel=Event())
         given = engine.evolve(source, (explicit,), cancel=Event())
         np.testing.assert_allclose(omitted.densities, given.densities, atol=1e-12)
@@ -181,7 +181,7 @@ def test_continuation_end_boundary_returns_unchanged_owned_density():
     initial[0, 0, 0] = 0
     assert continued.initial_densities is not None
     assert not continued.initial_densities.flags.writeable
-    with closing(evolution.Engine(1, 1024**2)) as engine:
+    with closing(evolution.Engine(1)) as engine:
         result = engine.evolve(_source(), (continued,), cancel=Event())
     np.testing.assert_array_equal(result.densities, [[[0.7, 0.1j], [-0.1j, 0.3]]])
     assert not result.paths.segments_by_kernel

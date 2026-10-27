@@ -19,7 +19,7 @@ def _merge(parts):
 
 
 def test_engine_diagnostic_members_are_caller_ids_and_reuse_merges_directly():
-    with closing(evolution.Engine(1, 1024**2)) as engine:
+    with closing(evolution.Engine(1)) as engine:
         src = source()
         timeline = replace(batch(2), points=np.array([17, 4]))
         first = engine.evolve(src, (timeline,), cancel=Event(), telemetry=True)

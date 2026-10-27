@@ -108,7 +108,6 @@ def test_two_tone_wait_preserves_strict_frequency_at_short_and_long_times(
         closing(
             Engine(
                 1,
-                0,
                 kernels=(
                     T4(),
                     DOP853Kernel(),

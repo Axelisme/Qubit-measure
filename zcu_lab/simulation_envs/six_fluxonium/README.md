@@ -1,8 +1,8 @@
 # Six-fluxonium demo
 
-**Readers:** operator, lab-author. Start six independent fluxonium models and prepare mux measurements without hardware.
+**Readers:** operator, lab-author, agent. Start six independent fluxonium models and prepare mux measurements without hardware.
 
-**Last updated:** 2026-10-27, component schema v3 and fixed multiplicative readout background.
+**Last updated:** 2026-10-27 (UTC), routing-only residency allowance.
 
 For existing entries, move resonator and mux-group `ext.time_of_fly` to top-level `time_of_fly`. The loader does not migrate it.
 
@@ -31,17 +31,15 @@ fixes the line shape independently of the measurement-noise `numerics.seed`.
 See the [ADC background contract](../../../lib/zcu_tools/simulate/adc/README.md)
 for field definitions and reproducibility limits.
 
-Top-level `numerics` assigns the whole environment 768 MiB prepare, 64 MiB
-result-memo and 4 MiB routing cache budgets, divided across six sources.
-Each source receives 128 MiB for prepare and a separate 8 MiB ADC allowance.
-These are residency caps, not process RSS limits. The [cache budget measurements](field-guide.md#cache-budget-measurements)
-record a profiled old/new GUI peak reduction from 3239047168 to 2731724800 bytes.
-With the earlier 256 MiB total prepare setting, a reconciled candidate without
-the ownership profiler reached VmHWM 1559523328 bytes, below the 1.5 GiB
-reference target. Its paired Rabi and T1 warm wall ratios were 0.999809 and
-0.999689. The guide's [768 MiB recheck](field-guide.md#768-mib-prepare-recheck)
-records the current setting's higher RSS peak and unchanged numeric bytes.
-These observations do not attribute the remaining RSS to Qt.
+Top-level `numerics.routing_cache_bytes` assigns 4 MiB of routing facts across
+six sources, divided equally and rounded down. Engine preparations live within
+one evolve. Single sources retain loss-independent structure and complete
+preparations under their own lifetime rules. This allowance is not an RSS cap.
+Remove `prepare_cache_bytes`, `result_memo_bytes` and `adc_cache_bytes` from
+existing working YAML copies before restart. The loader rejects retired fields.
+The [cache budget measurements](field-guide.md#cache-budget-measurements)
+and [768 MiB recheck](field-guide.md#768-mib-prepare-recheck) describe the earlier
+design. They do not measure this removal.
 
 Single-tone plateaus with carrier magnitude below 30 MHz use `slow_envelope`
 instead of T6. It applies full-Hamiltonian midpoint exponentials with Strang

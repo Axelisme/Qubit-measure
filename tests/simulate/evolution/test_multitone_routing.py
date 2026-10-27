@@ -66,15 +66,9 @@ def retained_graph(*, dense: bool) -> tuple[ModelSource, TimelineBatch]:
 
 
 @pytest.mark.parametrize("dense, family", [(True, "dop853"), (False, "multitone_rwa")])
-def test_retained_graph_cost_selects_cheaper_route_independent_of_cache(dense, family):
-    histories = []
-    for cache_bytes in (0, 1_000_000):
-        source, batch = retained_graph(dense=dense)
-        with closing(Engine(1, cache_bytes)) as engine:
-            results = [
-                engine.evolve(source, (batch,), cancel=Event()) for _ in range(3)
-            ]
-        routes = [dict(result.paths.segments_by_kernel) for result in results]
-        assert routes == [{family: 1}] * 3
-        histories.append(routes)
-    assert histories[0] == histories[1]
+def test_retained_graph_cost_selects_cheaper_route(dense, family):
+    source, batch = retained_graph(dense=dense)
+    with closing(Engine(1)) as engine:
+        results = [engine.evolve(source, (batch,), cancel=Event()) for _ in range(3)]
+    routes = [dict(result.paths.segments_by_kernel) for result in results]
+    assert routes == [{family: 1}] * 3

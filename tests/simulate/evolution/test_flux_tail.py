@@ -97,7 +97,7 @@ def test_driven_tail_within_one_level_uses_continuous_hamiltonian():
         .y[:, -1]
         .reshape(3, 3)
     )
-    engine = Engine(1, 0)
+    engine = Engine(1)
     try:
         result = engine.evolve(source, (batch,), cancel=Event())
     finally:
@@ -183,7 +183,7 @@ def test_event_sides_preserve_density_at_boundary_and_after_short_plateaus():
     expected[:, 0, 1] = 0.5 * np.exp(2j * np.pi * area)
     expected[:, 1, 0] = expected[:, 0, 1].conj()
 
-    engine = Engine(1, 0)
+    engine = Engine(1)
     try:
         result = engine.evolve(source, (batch,), budget=1e-6, cancel=Event())
     finally:

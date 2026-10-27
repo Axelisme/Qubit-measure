@@ -29,41 +29,22 @@ def run(engine, source, timeline):
 
 def fallback(source, timeline, *, budget=0.01):
     with closing(
-        Engine(1, 0, kernels=tuple(k for k in REGISTRY if k.name != "common_frame"))
+        Engine(1, kernels=tuple(k for k in REGISTRY if k.name != "common_frame"))
     ) as engine:
         return engine.evolve(
             source, (timeline,), cancel=Event(), budget=budget, telemetry=True
         )
 
 
-def test_shared_constant_coefficients_build_once_and_recheck_apply_only_inputs():
+def test_shared_constant_coefficients_build_once_for_all_rows():
     source = model_source()
     timeline = batch([32, 48, 64, 80], gain=0.3)
-    with closing(Engine(1, 1_000_000)) as engine:
+    with closing(Engine(1)) as engine:
         first = run(engine, source, timeline)
         assert first.paths.segments_by_kernel == {"common_frame": 4}
         report = first.paths.routing["common_frame"]
         assert report.prepare_builds == 1
         assert report.admission_rows == 4
-        assert report.cache_hits == 0
-        # Phase is apply-only, but cannot reuse exact output or row admission.
-        changed = replace(
-            timeline,
-            tracks=tuple(
-                replace(t, phase_rad=t.phase_rad + 0.1) for t in timeline.tracks
-            ),
-        )
-        second = run(engine, source, changed)
-        assert second.paths.segments_by_kernel == {"common_frame": 4}
-        assert second.paths.routing["common_frame"].prepare_builds == 0
-        assert second.paths.routing["common_frame"].admission_rows == 4
-        assert second.paths.routing["common_frame"].cache_hits == 4
-        assert not np.array_equal(first.densities, second.densities)
-        repeated = run(engine, source, changed)
-        np.testing.assert_array_equal(second.densities, repeated.densities)
-        assert repeated.paths.routing["common_frame"].prepare_builds == 0
-        assert repeated.paths.routing["common_frame"].admission_rows == 0
-        assert repeated.paths.frontend_cpu_s == 0
         assert first.paths.frontend_cpu_s > 0
 
 
@@ -113,7 +94,7 @@ def test_constant_block_rwa_avoids_unprofitable_unique_common_builds(far, sample
             ),
         ),
     )
-    with closing(Engine(1, 0)) as engine:
+    with closing(Engine(1)) as engine:
         result = engine.evolve(
             source, (timeline,), cancel=Event(), budget=1e-3, telemetry=True
         )
@@ -127,7 +108,7 @@ def test_constant_block_rwa_avoids_unprofitable_unique_common_builds(far, sample
 
     # A genuinely amortized coefficient group must still be eligible. This is
     # cold selection with no resident cache, not a cache-warmth exception.
-    with closing(Engine(1, 0)) as engine:
+    with closing(Engine(1)) as engine:
         reused = run(engine, model_source(), batch([32] * 24, gain=0.3))
     assert reused.paths.segments_by_kernel == {"common_frame": 24}
     assert reused.paths.routing["common_frame"].prepare_builds == 1
@@ -136,7 +117,7 @@ def test_constant_block_rwa_avoids_unprofitable_unique_common_builds(far, sample
 
 def test_common_frame_selection_and_results_are_row_order_invariant():
     source = model_source()
-    with closing(Engine(1, 0)) as engine:
+    with closing(Engine(1)) as engine:
         forward = run(engine, source, batch([32, 48, 64, 80], gain=0.3))
         reverse = run(engine, source, batch([80, 64, 48, 32], gain=0.3))
     assert (
@@ -153,7 +134,7 @@ def test_rejected_build_cost_skips_indicator_evaluation_and_preserves_fallback(
 ):
     source = model_source()
     timeline = batch([32, 48, 64, 80], gain=gain, frequency=frequency)
-    with closing(Engine(1, 0)) as engine:
+    with closing(Engine(1)) as engine:
         result = run(engine, source, timeline)
     assert (
         getattr(
@@ -180,7 +161,7 @@ def test_attempted_common_frame_numerical_rejection_reuses_complete_fallback():
         timeline,
         tracks=tuple(replace(t, envelopes=(envelope,)) for t in timeline.tracks),
     )
-    with closing(Engine(1, 0)) as engine:
+    with closing(Engine(1)) as engine:
         result = run(engine, source, timeline)
     assert "common_frame" in result.paths.routing
     assert result.paths.routing["common_frame"].admission_rows == 4
@@ -193,17 +174,15 @@ def test_attempted_common_frame_numerical_rejection_reuses_complete_fallback():
 def test_constant_singleton_avoids_unamortized_product_build():
     source = model_source()
     timeline = batch([96], gain=0.6)
-    with closing(Engine(1, 0)) as engine:
+    with closing(Engine(1)) as engine:
         result = run(engine, source, timeline)
     original = fallback(source, timeline)
     assert result.paths.segments_by_kernel == original.paths.segments_by_kernel
     np.testing.assert_array_equal(result.densities, original.densities)
 
 
-@pytest.mark.parametrize("workers,cache_bytes", [(1, 0), (2, 1_000_000)])
-def test_rejected_unique_common_keys_preserve_shared_fallback_preparation(
-    workers, cache_bytes
-):
+@pytest.mark.parametrize("workers", [1, 2])
+def test_rejected_unique_common_keys_preserve_shared_fallback_preparation(workers):
     # Six levels make the cold common price competitive even without key reuse.
     # Identity kernels isolate fallback sharing from numerical admission policy.
     zero = np.zeros((6, 6), dtype=np.complex128)
@@ -245,9 +224,7 @@ def test_rejected_unique_common_keys_preserve_shared_fallback_preparation(
 
     common = RejectedCommon()
     fallback_kernel = RecordingKernel("multitone_rwa")
-    with closing(
-        Engine(workers, cache_bytes, kernels=(common, fallback_kernel))
-    ) as engine:
+    with closing(Engine(workers, kernels=(common, fallback_kernel))) as engine:
         result = run(engine, source, timeline)
     assert result.paths.segments_by_kernel == {"multitone_rwa": 4}
     assert common.admission_rows == 4
@@ -255,21 +232,3 @@ def test_rejected_unique_common_keys_preserve_shared_fallback_preparation(
     np.testing.assert_array_equal(
         result.densities, np.repeat(source.initial_density[None], 4, axis=0)
     )
-
-
-def test_oversize_products_stream_and_rebuild_without_changing_results():
-    source = model_source()
-    with closing(Engine(1, 128)) as engine:
-        first = run(engine, source, batch([32, 48, 64, 80], gain=0.3))
-        second = run(engine, source, batch([40, 56, 72, 88], gain=0.3))
-    assert (
-        first.paths.segments_by_kernel
-        == second.paths.segments_by_kernel
-        == {"common_frame": 4}
-    )
-    assert first.paths.routing["common_frame"].prepare_builds == 1
-    assert second.paths.routing["common_frame"].prepare_builds == 1
-    assert second.paths.routing["common_frame"].cache_hits == 0
-    with closing(Engine(1, 0)) as engine:
-        fresh = run(engine, source, batch([40, 56, 72, 88], gain=0.3))
-    np.testing.assert_array_equal(second.densities, fresh.densities)

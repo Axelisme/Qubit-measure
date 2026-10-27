@@ -48,7 +48,7 @@ def route(batches, *, workers=1, chunks=1, reject=None):
         for name in ("floquet", "dop853")
     )
     result = run(
-        Engine(workers, 0, chunks_per_worker=chunks, kernels=kernels), src, batches
+        Engine(workers, chunks_per_worker=chunks, kernels=kernels), src, batches
     )
     return result, attempts
 
@@ -88,7 +88,7 @@ def test_multitone_optional_families_are_independent(
     if optional is not None:
         kernels.insert(0, GuardRecorder(optional, attempts, accepts=accepts))
     src = source()
-    result = run(Engine(1, 0, kernels=kernels), src, (multitone_batch(shaped),))
+    result = run(Engine(1, kernels=kernels), src, (multitone_batch(shaped),))
     expected_attempts = [] if optional is None else [(optional, 20.0)]
     if expected == "dop853":
         expected_attempts.append(("dop853", 20.0))
@@ -105,7 +105,7 @@ def test_multitone_missing_terminal_keeps_required_family_error(optional):
     attempts = []
     kernels = tuple(GuardRecorder(name, attempts, accepts=False) for name in optional)
     with (
-        closing(Engine(1, 0, kernels=kernels)) as engine,
+        closing(Engine(1, kernels=kernels)) as engine,
         pytest.raises(
             RuntimeError,
             match=r"segment 0 \(timeline 0, start 0.0 ns\) requires kernel dop853",
@@ -179,7 +179,7 @@ def test_deferred_floquet_retains_shared_admissions_alongside_direct_plans(worke
     )
     floquet, dop853 = PlannedFloquet(), PlannedDirect()
     result = run(
-        Engine(workers, 0, kernels=(floquet, dop853, RecordingKernel("t4"))),
+        Engine(workers, kernels=(floquet, dop853, RecordingKernel("t4"))),
         ModelSource(
             np.eye(16, dtype=np.complex128) / 16, lambda level: synthetic_model(16)
         ),
@@ -254,6 +254,6 @@ def test_balanced_strong_distinct_ports_charge_cold_guard_work(workers):
         )
     attempts = []
     kernels = tuple(GuardRecorder(name, attempts) for name in ("floquet", "dop853"))
-    result = run(Engine(workers, 0, kernels=kernels), src, tuple(timelines))
+    result = run(Engine(workers, kernels=kernels), src, tuple(timelines))
     assert result.paths.segments_by_kernel == {"dop853": 11}
     assert attempts == [("dop853", 512.0)] * 11

@@ -1,7 +1,6 @@
 """Environment-owned snapshot/execution collaborators and per-call admission."""
 
 import logging
-import math
 import time
 import warnings
 from collections.abc import Callable
@@ -22,6 +21,7 @@ from zcu_tools.core.simulation import (
 from zcu_tools.program.shot_time import shot_time_s
 
 from ._envelope_pool import EnvelopePool
+from .clock import SimulationTiming
 from .result import IntegratedRound
 
 
@@ -69,11 +69,14 @@ class SimulationCallbacks:
         errors release admission and propagate. on_end: completed-acquire observer
         receiving all captured rounds and elapsed admitted wall seconds, including
         failed rounds/pacing. Its exceptions warn once, without masking execution
-        errors. Both default None and must not reenter acquisition.
+        errors. on_begin: no-argument preparation after wait_ready, before request
+        construction; errors release admission and propagate. All default None
+        and must not reenter acquisition.
     """
 
     wait_ready: Callable[[], object] | None = None
     on_end: Callable[[tuple[RoundRequest, ...], float], None] | None = None
+    on_begin: Callable[[], None] | None = None
 
 
 class SimulationBinding:
@@ -119,7 +122,7 @@ class SimulationBinding:
         backend_version: str,
         seed: int | None = None,
         callbacks: SimulationCallbacks | None = None,
-        time_scale: float = 0.0,
+        timing: SimulationTiming | None = None,
     ) -> None:
         """Bind synchronous environment callbacks and choose the root seed once.
 
@@ -134,13 +137,22 @@ class SimulationBinding:
         before consuming sequence or constructing requests. Its result is ignored;
         errors release admission and propagate. It must not reenter acquisition.
 
-        time_scale is a finite nonnegative physical-time multiplier. Each round
+        timing=None uses SimulationTiming's defaults. timing.time_scale is a
+        finite nonnegative physical-time multiplier. Each round
         targets time_scale * reps * sum(point body duration + relax_delay_us),
         converting timeline us to seconds. One follows physical time; 0.1 runs
-        ten times faster. Zero (default) disables pacing and clock reads. Snapshot
+        ten times faster. Zero (default) disables pacing. Without clock it also
+        skips round clock reads. Snapshot
         and execution consume this budget; failures never wait. With cancel,
         synchronous waits check is_set at intervals of at most 10 ms and return
         early so the acquisition adapter applies its existing Stop policy.
+
+        timing.clock optionally shares an environment-owned SimulationClock. Successful
+        rounds credit the unscaled physical duration minus actual elapsed seconds,
+        including pacing. Cancelled/failed rounds add no offset. None leaves
+        simulated time untracked. callbacks.on_begin optionally freezes environment
+        inputs after readiness and before request construction. Errors propagate
+        and release admission. It does not consume an acquire sequence on failure.
 
         callbacks.on_end optionally observes one completed admitted acquire, including
         failed/partial calls. It receives all captured rounds (possibly empty)
@@ -158,15 +170,16 @@ class SimulationBinding:
             isinstance(seed, bool) or type(seed) is not int or seed < 0
         ):
             raise ValueError("seed must be a nonnegative integer or None")
-        if not math.isfinite(time_scale) or time_scale < 0:
-            raise ValueError("time_scale must be finite and nonnegative")
         hooks = SimulationCallbacks() if callbacks is None else callbacks
         self._on_end = hooks.on_end
         self._observer_warned = False
         self._acquire_started = 0.0
-        self._time_scale = time_scale
+        policy = SimulationTiming() if timing is None else timing
+        self._time_scale = policy.time_scale
+        self._clock = policy.clock
         self.envelope_pool = EnvelopePool()
         self._wait_ready = hooks.wait_ready
+        self._on_begin = hooks.on_begin
         self.capture_snapshot = capture_snapshot
         self.execute = execute
         entropy = np.random.SeedSequence(seed).entropy
@@ -197,6 +210,8 @@ class SimulationBinding:
         try:
             if self._wait_ready is not None:
                 self._wait_ready()
+            if self._on_begin is not None:
+                self._on_begin()
         except BaseException:
             self._admission.release()
             raise
@@ -267,7 +282,9 @@ class SimulationBinding:
         within one 10 ms sleep interval and returns the borrowed result; the
         adapter applies its existing completed-round policy.
         """
-        started = time.monotonic() if self._time_scale > 0 else 0.0
+        timed = self._time_scale > 0 or self._clock is not None
+        now = time.monotonic if self._clock is None else self._clock.now
+        started = now() if timed else 0.0
         round_request = RoundRequest(
             request, self.capture_snapshot(), index, cancel=cancel
         )
@@ -280,7 +297,7 @@ class SimulationBinding:
             raise ValueError(f"backend result does not match {request.mode} mode")
         if self._time_scale > 0:
             target = self._time_scale * _physical_round_s(request)
-            remaining = target - (time.monotonic() - started)
+            remaining = target - (now() - started)
             wait_cancel = cancel if pacing_cancel is None else pacing_cancel
             if wait_cancel is None:
                 if remaining > 0:
@@ -288,5 +305,9 @@ class SimulationBinding:
             else:
                 while remaining > 0 and not wait_cancel.is_set():
                     time.sleep(min(remaining, 0.01))
-                    remaining = target - (time.monotonic() - started)
+                    remaining = target - (now() - started)
+        if self._clock is not None and not any(
+            query is not None and query.is_set() for query in (cancel, pacing_cancel)
+        ):
+            self._clock.complete_round(_physical_round_s(request), now() - started)
         return result

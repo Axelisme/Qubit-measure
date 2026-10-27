@@ -1,8 +1,8 @@
 # ADC probability and readout contracts
 
-**Last updated:** 2026-10-27, multiplicative background and fixed line roughness
+**Last updated:** 2026-10-27 (UTC), request-local conditional solvers
 
-**讀者：** framework-dev。ADC 機率、讀出訊號與 interval moment 契約。
+**讀者：** framework-dev、agent。ADC 機率、讀出訊號與 interval moment 契約。
 
 Importing `simulate.adc` initializes the shared simulator Numba cache policy
 before creating dispatchers, even if evolution has not been imported. ADC and
@@ -198,21 +198,11 @@ adjacent differences, this accounts for quantization at large absolute starts.
 Single samples are uniform. Direct sums reuse the exact-content cache across
 contents and batches. Trace requests retain a separate field cache.
 
-`ReadoutCache(max_bytes=8*1024**2)` optionally owns these solvers across caller
-requests. Its key includes the full model, receiver and rtol/atol. Equivalent
-models share one canonical immutable model. Content keys and numeric routes stay
-unchanged. It incrementally measures the retained ADC object graph after each response,
-including the accounting ledger, ConstantLine subcaches, keys, traces and full
-backing allocations of views. Numeric content entries only append, so the ledger
-visits new entries rather than rescanning earlier T1 starts. Opaque callbacks
-receive a full recount because their captures can change. It evicts oldest solvers whole until the byte budget fits. Returned arrays
-and active workspaces are outside that resident budget. Opaque callbacks remain
-identity-keyed and referenced; their attributes, closure cells and defaults count,
-but module globals and external resources do not. A failed response clears all
-residents. `clear()` releases solvers and callback references. `builds`, `hits`
-and `resident_bytes` report physical solver reuse and retained bytes. The owner
-must serialize calls and clear on physical snapshot or numeric revision changes.
-This cache performs no sampling and never retains noisy IQ.
+Create `ConditionalReadout(model, rtol=..., atol=...)` for the current preparation
+and call `responses(batch)`. Its internal exact-content reuse stays within that
+solver's lifetime. Sources do not retain ADC solvers across preparations.
+Caller-owned complete preparations may retain deterministic conditional sums.
+No solver cache stores noisy IQ.
 
 Unsupported direct sums fall back individually, including nonuniform grids
 and defective generators. Single-pulse trace requests retain their original
@@ -252,7 +242,7 @@ All ADC models must declare identical state labels and directional rates.
 Different receivers may deduplicate contents differently; point mappings select
 physical inputs independently without changing the common path.
 
-The source retains its inputs independently of later rounds and prepare-cache
+The source retains its inputs independently of later rounds and preparation
 eviction. Every call restarts its private PCG64 stream and returns fresh int64
 arrays, keyed by ADC channel with shape `(*loop_dims, reads, 2)`. It does not cache
 noisy results or adjust shots to independently drawn mean totals. Invalid reps,

@@ -1,8 +1,8 @@
 # Single-fluxonium acquisition
 
-**Last updated:** 2026-10-24, physical-time pacing
+**Last updated:** 2026-10-28 (UTC), numeric drift owner
 
-**Readers:** framework-dev, lab-author. Compose complete fluxonium timelines with one physical readout cavity.
+**Readers:** framework-dev, lab-author, agent. Compose complete fluxonium timelines with one physical readout cavity.
 
 `single_fluxonium(path_or_settings, *, private_replay=None)` returns the normal
 `SimulationEnvironment`. It creates one fixed-unit DC FakeDevice, a mock SoC,
@@ -43,7 +43,7 @@ when flux has not returned to DC.
 
 ## Physical and ADC composition
 
-`SingleFluxoniumSource(settings, devices, *, private_replay=None, readout_kind="pulse")` captures the
+`SingleFluxoniumSource(settings, devices, *, private_replay=None, readout_kind="pulse", runtime=SingleFluxoniumRuntimeOptions())` captures the
 startup driver object. `snapshot()` reads its current A/V value and checks the
 fixed unit and inclusive limits. Registry removal or renaming does not restore
 startup values. `model_facts(snapshot)` builds the retained projection, Gibbs
@@ -66,21 +66,77 @@ round hooks and Stop checkpoints. The binding paces each round to
 Integrated Stop is checked between evolution chunks and during pacing, discarding
 the interrupted round while retaining completed rounds. ADC sampling remains synchronous.
 
+## Coherence drift and simulated time
+
+`zcu_tools.simulate.drift.LogOU` owns the numeric log-OU transition and accepts
+only numeric parameters and an RNG. This environment's `drift.CoherenceDrift`
+composes loss streams, freezes acquisition settings and writes private truth.
+
+The optional top-level YAML `drift` section selects independent log-OU processes:
+
+```yaml
+drift:
+  q_cap: {sigma: 0.15, tau_s: 3600.0}
+  xqp: {sigma: 0.3, tau_s: 7200.0}
+  aphi: {sigma: 0.1, tau_s: 3600.0}
+```
+
+Omit `drift`, or set it to null, to keep constant losses and disable truth I/O.
+Each selected loss must be positive. Omit an individual parameter to keep it
+constant. `sigma` is the stationary standard deviation of ln(loss), and `tau_s`
+is correlation time in seconds. The stationary log mean is ln(the YAML loss),
+not a promise about its linear arithmetic mean. Every new environment starts
+at the YAML losses. The first acquisition fixes the OU time origin and uses
+those values. Later acquisitions use the exact transition over elapsed time.
+
+One environment owns one `SimulationClock`. Its time is monotonic wall seconds
+plus a nondecreasing offset. After each completed round, the clock adds
+`max(0, unscaled physical duration - actual wall duration)`. Actual duration
+includes snapshot, computation and pacing sleep. Cancelled or failed rounds add
+no offset. Idle wall time advances the clock. `time_scale=0` skips sleep without
+losing physical time. A new environment resets the offset to zero.
+
+The binding calls `begin_acquire` at admission, before request construction.
+`open_acquire` consumes that preparation without resampling. Standalone source
+callers can call `open_acquire` directly to sample once. All sweep points and
+rounds share the acquisition's effective losses, while live DC snapshots still
+refresh each round. Independent streams derived from the acquisition root seed
+do not consume ADC sampling randomness. Repeatability requires the same time
+sequence as well as the same root seed.
+
+Enabled drift writes one JSONL row per acquisition to
+`~/.local/state/zcu-tools/simulation/single-fluxonium/<session>/truth.jsonl`.
+Builder `truth_log=Path(...)` selects another file. Standalone sources use
+`runtime=SingleFluxoniumRuntimeOptions(clock=..., truth_log=...)`. Each row contains
+`session`, `sim_now` in seconds, UTC ISO `wall_time`, `q_cap`, `q_ind`, `xqp` and
+`aphi`. Session UUIDs distinguish restarts even when a caller reuses a file.
+I/O errors propagate. The log stays on the simulation side, outside Run, GUI,
+MCP and Labber metadata. `clock=SimulationClock(...)` provides a wall-clock
+injection point for offline callers.
+
 ## Reuse and lifetime
 
 `open_acquire(request)` invalidates the preceding session. `sample_round` and
 `execute` propagate numeric, ADC and replay errors without partial results.
 Invalidated sessions and closed sources raise `RuntimeError`. Direct callers
-serialize source methods. `close()` clears model, plan, engine and ADC caches,
+serialize source methods. `close()` clears structure, models, plans and routing facts,
 invalidates the session and leaves caller-owned drivers untouched.
 
-A standalone source keeps the original 256 MiB prepare, 64 MiB exact-result,
-4 MiB routing and 8 MiB ADC limits. Composing environments may pass a fresh
-`engine` and `readout_cache_bytes` to `SingleFluxoniumSource`; the source takes
-exclusive ownership and closes both caches. The six-cavity environment uses
-this entry point to divide its environment-wide evolution budgets.
+A standalone source uses an Engine with 4 MiB of routing facts.
+Composing environments pass an exclusive Engine through immutable
+`SingleFluxoniumRuntimeOptions(engine=...)`. The source closes that Engine.
+The six-cavity environment divides its environment-wide routing allowance
+through this entry point. ADC solvers live only for the current preparation.
 
-One physical generation and one complete noiseless preparation remain resident.
+The source retains one loss-independent structural generation and one complete
+noiseless preparation. The structural key excludes q_cap, q_ind, xqp, aphi and
+drift configuration, but includes all other settings, DC values and numeric
+versions. The physics owner retains the Hamiltonian projection, eigensystems
+and dressed readout frequencies. Loss changes close the old ModelSource and
+discard full models, plans and preparation. Rates are rebuilt from the current
+acquisition's frozen losses. Temperature, DC, truncation or other structural
+settings changes discard structure too. No dissipative propagator or density
+survives a loss change through this reuse. See [ADR-0078](../../../../docs/adr/0078-evolution-module-boundary.md).
 Keys include settings, the full snapshot, numeric/dependency versions, layout,
 all borrowed control/readout arrays and every waveform sample/time. Buffers are
 reread on each lookup. Evolution validates reuse against its own routing policy.
@@ -96,7 +152,9 @@ cache eviction or source close. Repeated materialization returns fresh arrays.
 
 Pass an explicit absolute `private_replay` directory to the builder or source.
 The resource owner archives detached settings, controls, envelopes, RNG identity
-and the selected snapshot. It stores no measured IQ. Call
+and the selected snapshot. With drift enabled, archived settings contain the
+acquisition's effective losses with drift disabled and a matching model identity.
+Replay never samples a new drift state or reads the live clock. It stores no measured IQ. Call
 `replay_round(round_json_path)` to recompute only that round without live devices.
 The single-fluxonium backend has its own version string. Private single-model replay supports pulse mode only; the constructor rejects mux mode with a replay root. Wrong settings backend,
 model identity, dependency versions or numeric references raise `ValueError`.

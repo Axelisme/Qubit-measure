@@ -992,16 +992,6 @@ class MultitoneRWAKernel:
         diagonal.setflags(write=False)
         return RWAPrepared(models, positive, negative, diagonal)
 
-    def admit_prepared(
-        self,
-        prepared: Prepared,
-        table: SegmentTable,
-        rows: NDArray[np.int64],
-        context: KernelContext,
-    ) -> None:
-        """Decline guard handoffs; admission is cheap and performs no preparation."""
-        del prepared, table, rows, context
-
     def guard_prepared(
         self, table: SegmentTable, rows: NDArray[np.int64], context: KernelContext
     ) -> None:

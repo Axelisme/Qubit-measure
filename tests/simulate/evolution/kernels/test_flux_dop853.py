@@ -287,7 +287,7 @@ def test_engine_flux_wiring_across_batches_and_no_drive_midpoint_budget():
         )
         for p in range(2)
     )
-    engine = evolution.Engine(1, 1000000)
+    engine = evolution.Engine(1)
     try:
         result = engine.evolve(case.source, batches, cancel=Event())
     finally:

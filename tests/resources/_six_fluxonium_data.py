@@ -32,6 +32,7 @@ class QubitDocument(TypedDict):
     drive_line: dict[str, object]
     readout: ReadoutDocument
     numerics: dict[str, object]
+    drift: dict[str, dict[str, float]] | None
 
 
 class SixDocument(TypedDict):
@@ -77,6 +78,7 @@ def six_document() -> SixDocument:
             drive_line=value["drive_line"],
             readout=value["readout"],
             numerics=value["numerics"],
+            drift=None,
         )
     return {
         "format": "zcu.six-fluxonium",

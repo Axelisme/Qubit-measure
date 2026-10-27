@@ -33,7 +33,7 @@ class ObservedEngine(Engine):
     """Delegate real evolution without keeping the physical model alive."""
 
     def __init__(self):
-        super().__init__(1, 1_000_000)
+        super().__init__(1)
         self.sources: list[weakref.ReferenceType[ModelSource]] = []
 
     def evolve(

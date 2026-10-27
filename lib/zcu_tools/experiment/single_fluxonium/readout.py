@@ -14,9 +14,9 @@ from zcu_tools.simulate.adc import (
     BackgroundRipple,
     BackgroundRoughness,
     ChannelReadout,
+    ConditionalReadout,
     ConditionalSums,
     ReadoutBatch,
-    ReadoutCache,
     ReadoutModel,
     Receiver,
 )
@@ -78,7 +78,6 @@ def prepare_readout(
     physical: ReadoutModel,
     plans: tuple[SingleFluxoniumPlan, ...],
     request: AcquireRequest,
-    cache: ReadoutCache,
 ) -> tuple[ChannelReadout, ReadoutBatch]:
     """Assemble one ADC's conditional sums and raw inputs for the whole request.
 
@@ -137,17 +136,18 @@ def prepare_readout(
     )
     reference = plans[0].readout.pulses[0][0].frequency_ghz
     model = replace(physical, receiver=receiver, reference_frequency_ghz=reference)
+    solver = ConditionalReadout(
+        model,
+        rtol=settings.numerics.solver.rtol,
+        atol=settings.numerics.solver.atol,
+    )
     pulses, grids, conditionals = [], [], []
     content_index = np.empty(prod(request.point_dims), dtype=np.int64)
     for plan in plans:
         content = plan.readout
         local = local_readout_pulses(content.pulses, reference)
         batch = ReadoutBatch(model, local, content.grids, content.inverse)
-        conditional = cache.responses(
-            batch,
-            rtol=settings.numerics.solver.rtol,
-            atol=settings.numerics.solver.atol,
-        )
+        conditional = solver.responses(batch)
         content_index[plan.batch.points] = len(pulses) + content.inverse
         pulses.extend(local)
         grids.extend(content.grids)

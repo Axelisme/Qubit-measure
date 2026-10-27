@@ -2,7 +2,7 @@
 
 **讀者：** operator、lab-author、agent。準備 FTF 模擬參數與 entry，並從 GUI 或 Notebook 啟動模擬環境。
 
-**Last updated:** 2026-10-27, predictor v2 startup.
+**Last updated:** 2026-10-28, predictor v2 startup and evolve-local preparation.
 
 既有 entry 把 resonator 與 mux group 的 `ext.time_of_fly` 搬到頂層 `time_of_fly`。程式不自動搬移。
 
@@ -111,8 +111,8 @@ FTF 預設使用分段引擎的快速算法。GUI startup 明確傳 `workers=1, 
 
 預編譯會占用 CPU 與記憶體，只把編譯時間與其他工作重疊，不縮短總編譯成本。同一個 process 內啟用 warmup 的環境共用同一個 future。
 
-啟用預編譯時，`env.warmup.status` 提供進度與錯誤。停用時 `env.warmup` 為 `None`。`env.wait_ready()` 等待完成；若要讓計時排除預編譯，先等 ready 再啟動計時。Acquire 也會自動等待，失敗則回到 on-demand 編譯。背景工作不抽樣、不切換正式 device bias，也不占用正式引擎的 prepare 快取。結束 process 時會等當前編譯完成，不強制中止 compiler。完整介面見 [FTF 契約](../../../lib/zcu_tools/experiment/ftf/README.md#startup-preparation)。
+啟用預編譯時，`env.warmup.status` 提供進度與錯誤。停用時 `env.warmup` 為 `None`。`env.wait_ready()` 等待完成；若要讓計時排除預編譯，先等 ready 再啟動計時。Acquire 也會自動等待，失敗則回到 on-demand 編譯。背景工作不抽樣、不切換正式 device bias，也不保留正式引擎的數值 preparation。結束 process 時會等當前編譯完成，不強制中止 compiler。完整介面見 [FTF 契約](../../../lib/zcu_tools/experiment/ftf/README.md#startup-preparation)。
 
-整個 evolve 期間 native BLAS 限為 1 個執行緒。重疊的 evolve 共用 process 層級的 reference count，第一個進入時設限，最後一個離開時還原。其他程式碼不要在 evolve 期間自行更改 threadpoolctl 限制。沒有演化工作、只有一條 timeline 或只有 1 個 worker 時，不開 joblib pool。模型與 prepare 快取只保留在記憶體，不需要離線建庫或 GPU，也不保存 exact density records。
+整個 evolve 期間 native BLAS 限為 1 個執行緒。重疊的 evolve 共用 process 層級的 reference count，第一個進入時設限，最後一個離開時還原。其他程式碼不要在 evolve 期間自行更改 threadpoolctl 限制。沒有演化工作、只有一條 timeline 或只有 1 個 worker 時，不開 joblib pool。模型與 caller-owned 完整 preparation 只保留在記憶體，Engine 的數值 preparation 限一次 evolve。不需要離線建庫或 GPU，也不保存 exact density records。
 
 Builder 可用 `ftf(..., private_replay=absolute_directory)` 保存私有輸入。`replay_round(round_path)` 在相同數值、RNG 與相依套件版本下重算一個 round，不讀取演化資料庫。私有檔案含模型真值，不放入一般 Run metadata。

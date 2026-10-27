@@ -6,7 +6,6 @@ opaque prepared payloads; the engine only sees their resident array byte size.
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from functools import cached_property
 from types import MappingProxyType
 from typing import Protocol, SupportsIndex
 
@@ -54,7 +53,7 @@ class SegmentTable:
     prefix_inputs: immutable group-ID to read-only DC density mapping. The
         engine computes these known inputs before dependent rows are classified.
         Workers adopt the latest saved input and skip its preceding rows.
-        These densities never enter model-only preparations or PrepareCache.
+        These densities never enter model-only preparations.
         Absent groups have no known input yet.
     Arrays own read-only copies. Invalid shapes/counts/indices raise ValueError.
     Adjacent rows of one timeline may be merged by DOP853 kernels into a
@@ -228,19 +227,15 @@ def prepared_key_indices(
 class Prepared(Protocol):
     """Opaque kernel payload, shared read-only by workers.
 
-    prepare and guard_prepared return state-independent data eligible for
-    PrepareCache under the ordinary shared-key rules. bind_input
-    may wrap it in an input-bound payload used only within one evolve call;
-    that wrapper never enters PrepareCache.
-    Each kernel defines its own concrete payload. nbytes counts resident array
-    bytes owned by the whole batch of prepared entries, not Python overhead,
-    models, solver workspaces or process RSS. It must be a nonnegative integer
-    and must not change while the payload resides in the engine's LRU cache.
+    prepare and guard_prepared return state-independent data for one evolve.
+    bind_input may wrap it in an input-bound payload for that same call.
+    Each kernel defines its concrete payload. nbytes counts owned array bytes,
+    not Python overhead, models, solver workspaces or process RSS.
     """
 
     @property
     def nbytes(self) -> int:
-        """Resident array bytes charged to the prepare cache for this payload."""
+        """Owned array bytes for this whole preparation."""
         ...
 
 
@@ -248,7 +243,7 @@ class RowPlan(Protocol):
     """Read-only per-row decisions dispatch made for one kernel family in one evolve.
 
     Indexed by SegmentTable row. Only the kernel family that produced it reads
-    it. It lives for one evolve and never enters PrepareCache or kernel state.
+    it. It lives for one evolve and never enters kernel state.
     """
 
 
@@ -304,19 +299,13 @@ class GuardPreparation:
     keys: read-only unique fixed-width prepare keys, in the payload's entry order.
     prepared: opaque read-only payload equivalent to prepare(keys, ...), with
         no density access. Keys may include rejected rows. Only accepted rows
-        receive apply bindings; fully rejected model-only domains may enter
-        low-priority resident storage for fresh guard admission on later calls.
+        receive apply bindings; fully rejected domains are released.
         No kernel may retain this record in its own state.
     Owns a read-only key copy; a non-vector/non-void key array raises ValueError.
     """
 
     keys: NDArray[np.void]
     prepared: Prepared
-
-    @cached_property
-    def nbytes(self) -> int:
-        """Array charge read once for transfer into whole-payload ownership."""
-        return self.prepared.nbytes
 
     def __post_init__(self) -> None:
         keys = self.keys.copy()
@@ -332,12 +321,11 @@ class GuardResult:
 
     accepted: read-only bool (len(rows),) mask identical to guard for the same arguments.
     preparations: disjoint key batches constructed with that call's source and
-        budget. Empty means no handoff. Accepted products use ordinary resident
-        admission; fully rejected products can only fill unused capacity and
-        yield to ordinary products. The accepted mask never enters the cache.
+        budget. Empty means no handoff. Only accepted consumers retain products.
+        The accepted mask is local to this evolve.
     plan: optional kernel-defined per-row numerical decisions for this call's
         accepted rows. Dispatch merges them into the family plan for apply.
-        They live only within this evolve and never enter PrepareCache.
+        They live only within this evolve.
     Owns a read-only mask copy; a non-vector/non-bool mask raises ValueError.
     """
 
@@ -356,7 +344,7 @@ class GuardResult:
 class Kernel(Protocol):
     """One stateless algorithm family; all persistent data lives in Prepared.
 
-    name: stable algorithm name for diagnostics and cache partitioning.
+    name: stable algorithm name for diagnostics and preparation grouping.
     guard_builds: True when guard_prepared builds and hands off validated model
         payloads. False families return None and use ordinary batched guards.
         The engine uses this declaration to defer local table builds; the
@@ -415,27 +403,9 @@ class Kernel(Protocol):
         The engine reuses returned preparations only for accepted rows with
         the same kernel, prepare key, source and budget in this evolve. They
         reach A-stage before input binding and are also reused for singleton
-        rows without cache admission. Shared-key batches follow normal LRU
-        rules; otherwise references expire with this evolve. No kernel state
+        rows. All references expire with this evolve. No kernel state
         or separate cross-evolve store is permitted. Failure semantics match
         guard/prepare, including RuntimeError on numerical failure.
-        """
-        ...
-
-    def admit_prepared(
-        self,
-        prepared: Prepared,
-        table: SegmentTable,
-        rows: NDArray[np.int64],
-        context: KernelContext,
-    ) -> GuardResult | None:
-        """Admit current rows using an existing immutable model-only payload.
-
-        Return None if the payload's domain does not cover every required row
-        product, so dispatch uses guard_prepared unchanged. Otherwise return
-        current row admissions and RowPlan, without building frames, periods or
-        certificates. Rejection is an accepted=False decision, not a domain miss.
-        Existing payloads never replace row-local numerical admission.
         """
         ...
 
@@ -447,9 +417,7 @@ class Kernel(Protocol):
         context shares immutable workload facts with guard and preparation.
         Keys include the model identity and exclude apply-only parameters;
         the exact algorithm determines which parameters belong in each half.
-        Resident inventory calls this before guard on structural candidates.
-        Numerically ineligible rows may use inventory-only identities disjoint
-        from preparable keys. Only guard-accepted rows reach prepare and apply.
+        Only guard-accepted rows reach prepare and apply.
         """
         ...
 
@@ -500,7 +468,7 @@ class Kernel(Protocol):
         A returned payload replaces prepared in apply for these rows, with
         key_index all zero. It must be immutable to workers and usable with
         arbitrary subsets/order (including empty rows) from this group. It
-        lives only for this evolve, never in PrepareCache or kernel state.
+        lives only for this evolve, never in kernel state.
         Numerical failure raises RuntimeError.
         """
         ...

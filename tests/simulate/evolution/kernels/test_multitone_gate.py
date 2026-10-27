@@ -97,14 +97,13 @@ def family():
 def test_repeated_pair_builds_once_and_reuses_across_phase_changes(
     conflict,
 ):
-    with closing(Engine(1, 1_000_000)) as engine:
+    with closing(Engine(1)) as engine:
         for phase in (0.0, 0.713):
             result = engine.evolve(source(conflict), (batch(phase),), cancel=Event())
             assert result.paths.segments_by_kernel.get("multitone_gate") == 24
             with closing(
                 Engine(
                     1,
-                    0,
                     kernels=tuple(k for k in REGISTRY if k.name != "multitone_gate"),
                 )
             ) as direct:
@@ -125,7 +124,7 @@ def test_repeated_pair_builds_once_and_reuses_across_phase_changes(
 @pytest.mark.parametrize("conflict,count", [(0.0004, 24), (0.0, 1)])
 def test_inconsistent_or_unamortized_pairs_keep_row_rwa(conflict, count):
     family()
-    with closing(Engine(1, 1_000_000)) as engine:
+    with closing(Engine(1)) as engine:
         result = engine.evolve(source(conflict), (batch(count=count),), cancel=Event())
     assert result.paths.segments_by_kernel.get("multitone_rwa") == count
     assert "multitone_gate" not in result.paths.segments_by_kernel

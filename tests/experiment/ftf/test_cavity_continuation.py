@@ -26,7 +26,7 @@ class ObservingEngine(Engine):
     """Delegate numerical evolution unchanged and observe its public boundary."""
 
     def __init__(self):
-        super().__init__(1, 8 * 1024**2)
+        super().__init__(1)
         self.calls: list[
             tuple[ModelSource, tuple[TimelineBatch, ...], EvolutionResult]
         ] = []

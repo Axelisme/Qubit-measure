@@ -5,6 +5,7 @@ from dataclasses import replace
 from hashlib import sha256
 from math import isfinite, prod
 from pathlib import Path
+from uuid import uuid4
 
 import numpy as np
 from numpy.typing import NDArray
@@ -20,12 +21,19 @@ from zcu_tools.core.simulation import (
 )
 from zcu_tools.device import DeviceManager, FakeDevice, FakeDeviceInfo
 from zcu_tools.experiment.simulation import SimulationEnvironment
-from zcu_tools.experiment.single_fluxonium import SingleFluxoniumSource
+from zcu_tools.experiment.single_fluxonium import (
+    SingleFluxoniumRuntimeOptions,
+    SingleFluxoniumSource,
+)
+from zcu_tools.experiment.single_fluxonium.drift import CoherenceDrift
 from zcu_tools.program.v2.mocksoc import make_mux_mock_soccfg
 from zcu_tools.program.v2.simulation import (
     IntegratedRound,
     SimulationBinding,
+    SimulationCallbacks,
+    SimulationClock,
     SimulationSoc,
+    SimulationTiming,
 )
 from zcu_tools.resources.single_fluxonium.schema import (
     DCBias,
@@ -112,16 +120,47 @@ class SixFluxoniumSource:
     settings: validated six-system material. devices: manager retaining seven
     addressed FakeDevices. This source retains those exact drivers. The six
     SingleFluxoniumSources keep independent oscillator/evolution/ADC caches and
-    physical parameters. Each preparation receives the sum of local and coil
+    physical parameters. The public sources tuple is ordered Q1..Q6, independent
+    of YAML mapping order. Each source exposes the effective settings last sent
+    to that circuit's physics preparation, including its routed receiver/flux.
+    Each preparation receives the sum of local and coil
     reduced flux as a fixed offset, without changing single-source contracts.
-    settings.numerics provides environment-wide prepare/result/routing byte caps;
-    each source receives one sixth, rounded down. ADC bytes apply per source.
+    settings.numerics.routing_cache_bytes caps only environment-wide routing
+    facts; each source receives one sixth, rounded down. Retained models,
+    complete preparations and ADC numerical data are outside this cap.
     No joint Hilbert space or pulsed flux route is created. Call snapshot/execute
     only serially; close releases numeric resources but never caller devices.
+    clock is an environment-owned monotonic clock in seconds, shared with every
+    source and the outer binding; None creates one. truth_log selects private
+    JSONL output for enabled qubits, or a fresh six-fluxonium session directory.
+    begin_acquire freezes losses once for every point/round; execute also admits
+    new standalone requests. Truth I/O failures propagate. No private replay is
+    provided. The caller retains device and injected clock ownership.
     """
 
-    def __init__(self, settings: SixFluxoniumSettings, devices: DeviceManager) -> None:
+    def __init__(
+        self,
+        settings: SixFluxoniumSettings,
+        devices: DeviceManager,
+        *,
+        clock: SimulationClock | None = None,
+        truth_log: Path | None = None,
+    ) -> None:
         self.settings = settings
+        self._clock = SimulationClock() if clock is None else clock
+        self._session = uuid4().hex
+        self._truth_log = (
+            truth_log
+            if truth_log is not None
+            else Path.home()
+            / ".local/state/zcu-tools/simulation/six-fluxonium"
+            / self._session
+            / "truth.jsonl"
+        )
+        self._drifts: tuple[CoherenceDrift | None, ...] | None = None
+        self._effective_settings = settings
+        self._request: AcquireRequest | None = None
+        self._pending_acquire = False
         self._dc_sources = (
             settings.dc_source,
             *(q.dc_bias.source for q in settings.qubits.ordered()),
@@ -144,18 +183,69 @@ class SixFluxoniumSource:
                 ),
                 devices,
                 readout_kind="mux",
-                engine=Engine(
-                    workers=1,
-                    cache_bytes=settings.numerics.prepare_cache_bytes // 6,
-                    result_memo_bytes=settings.numerics.result_memo_bytes // 6,
-                    routing_cache_bytes=settings.numerics.routing_cache_bytes // 6,
+                runtime=SingleFluxoniumRuntimeOptions(
+                    engine=Engine(
+                        workers=1,
+                        routing_cache_bytes=settings.numerics.routing_cache_bytes // 6,
+                    ),
+                    clock=self._clock,
                 ),
-                readout_cache_bytes=settings.numerics.adc_cache_bytes,
             )
             for index, qubit in enumerate(settings.qubits.ordered())
         )
         self._closed = False
         self._identity = sha256(settings.model_dump_json().encode()).hexdigest()
+
+    def begin_acquire(self, *, seed: int | None = None) -> None:
+        """Freeze each circuit's losses at one shared simulated time in seconds.
+
+        seed is the binding root seed; omitted uses Q1 numerics.seed (or fresh
+        entropy). Stable Q1..Q6 identities namespace independent drift streams.
+        Repeated calls start new acquisitions, even without a request. All
+        points, routed ADCs and rounds consume this frozen set. Closed sources
+        raise RuntimeError; truth-log I/O errors propagate before admission.
+        """
+        if self._closed:
+            raise RuntimeError("six-fluxonium source is closed")
+        if self._drifts is None:
+            root = self.settings.qubits.Q1.numerics.seed if seed is None else seed
+            if root is None and any(
+                qubit.drift is not None for qubit in self.settings.qubits.ordered()
+            ):
+                root = int(
+                    np.random.SeedSequence().generate_state(1, dtype=np.uint64)[0]
+                )
+            self._drifts = tuple(
+                CoherenceDrift(
+                    source.settings.model_copy(update={"drift": qubit.drift}),
+                    seed=root,
+                    truth_log=self._truth_log,
+                    qubit=f"Q{index + 1}",
+                    session=self._session,
+                )
+                if qubit.drift is not None
+                else None
+                for index, (qubit, source) in enumerate(
+                    zip(self.settings.qubits.ordered(), self.sources, strict=True)
+                )
+            )
+        if any(drift is not None for drift in self._drifts):
+            sim_now = self._clock.now()
+            qubits = {
+                f"Q{index + 1}": qubit.model_copy(
+                    update={"chip": drift.sample(sim_now).chip}
+                )
+                if drift is not None
+                else qubit
+                for index, (qubit, drift) in enumerate(
+                    zip(self.settings.qubits.ordered(), self._drifts, strict=True)
+                )
+            }
+            self._effective_settings = self.settings.model_copy(
+                update={"qubits": self.settings.qubits.model_copy(update=qubits)}
+            )
+        self._request = None
+        self._pending_acquire = True
 
     def snapshot(self) -> EnvironmentSnapshot:
         """Capture seven live A values with full settings identity, without reset.
@@ -214,7 +304,7 @@ class SixFluxoniumSource:
         count = len(group.points)
         for channel in group.channels:
             source.settings = _single_settings(
-                self.settings, group.cavity, channel, group.gen_ch, flux
+                self._effective_settings, group.cavity, channel, group.gen_ch, flux
             )
             snapshot = EnvironmentSnapshot(
                 "single-fluxonium-v1",
@@ -260,7 +350,9 @@ class SixFluxoniumSource:
         space; deferred raw retains detached ADC inputs beyond source close.
         Decimated companion raw comes from the same traces at the adapter.
         Invalid RNG/version/index or closed sources raise ValueError/RuntimeError.
-        Numeric/ADC failures propagate without partial results.
+        Numeric/ADC failures propagate without partial results. A new request
+        consumes pending begin_acquire values, or freezes losses itself when no
+        begin was called. Reusing that request across rounds never samples drift.
         """
         if self._closed:
             raise RuntimeError("six-fluxonium source is closed")
@@ -273,6 +365,11 @@ class SixFluxoniumSource:
             raise ValueError("round index must be a nonnegative integer")
         if request.rng_version != f"PCG64/SeedSequence-v2/numpy-{np.__version__}":
             raise ValueError("six-fluxonium RNG version mismatch")
+        if self._request is not request:
+            if not self._pending_acquire:
+                self.begin_acquire(seed=request.root_seed)
+            self._request = request
+            self._pending_acquire = False
         currents = self._currents(snapshot)
         groups = route_request(self.settings, request)
         rounds = []
@@ -359,6 +456,9 @@ class SixFluxoniumSource:
 
 def six_fluxonium(
     configuration: SixFluxoniumSettings | str | Path,
+    *,
+    clock: SimulationClock | None = None,
+    truth_log: Path | None = None,
 ) -> SimulationEnvironment:
     """Build seven DC FakeDevices, six independent models and a bound SoC.
 
@@ -369,7 +469,12 @@ def six_fluxonium(
     ADCs for transport admission; numeric routing keeps each control on its own
     circuit. Holes7..12 are unbound. Q1 seed selects the root RNG; pacing uses the
     maximum per-qubit floor. Pulse ADC6 uses Q1 receiver calibration.
-    YAML, wiring and construction failures propagate with cleanup failures.
+    clock optionally injects monotonic physical seconds; None creates one shared
+    environment clock. Only the outer binding completes physical rounds.
+    truth_log selects private JSONL output for enabled drift, defaulting to
+    ~/.local/state/zcu-tools/simulation/six-fluxonium/<session>/truth.jsonl.
+    Drift-off writes nothing. No truth enters public metadata.
+    YAML, wiring, truth I/O and construction failures propagate with cleanup failures.
     """
     settings = (
         parse_six_fluxonium(configuration)
@@ -395,14 +500,25 @@ def six_fluxonium(
                 ),
                 progress=False,
             )
-        source = SixFluxoniumSource(settings, devices)
+        sim_clock = SimulationClock() if clock is None else clock
+        source = SixFluxoniumSource(
+            settings, devices, clock=sim_clock, truth_log=truth_log
+        )
         soccfg = make_mux_mock_soccfg(14, 7, gen_ch=0, ro_chs=tuple(range(6)))
         binding = SimulationBinding(
             source.snapshot,
             source.execute,
             backend_version="six-fluxonium-v1",
             seed=settings.qubits.Q1.numerics.seed,
-            time_scale=max(q.numerics.time_scale for q in settings.qubits.ordered()),
+            timing=SimulationTiming(
+                time_scale=max(
+                    q.numerics.time_scale for q in settings.qubits.ordered()
+                ),
+                clock=sim_clock,
+            ),
+            callbacks=SimulationCallbacks(
+                on_begin=lambda: source.begin_acquire(seed=binding.root_seed)
+            ),
         )
         routes = (
             *((0, ch) for ch in range(6)),

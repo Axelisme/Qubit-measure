@@ -26,5 +26,5 @@ def test_low_frequency_plateau_uses_slow_envelope(frequency: float) -> None:
         frequency_ghz=np.array([frequency]),
     )
     timeline = replace(batch(1, duration=50.0), tracks=(pulse,))
-    result = run(Engine(1, 0, kernels=kernels), source(), (timeline,))
+    result = run(Engine(1, kernels=kernels), source(), (timeline,))
     assert result.paths.segments_by_kernel == {"slow_envelope": 1}

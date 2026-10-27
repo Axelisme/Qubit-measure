@@ -7,6 +7,7 @@ from pydantic import Field, field_validator, model_validator
 from zcu_tools.resources.simulation_schema import Finite, Index, Name, Positive, Values
 from zcu_tools.resources.single_fluxonium.schema import (
     Chip,
+    CoherenceDrift,
     DriveLine,
     Numerics,
     Readout,
@@ -67,6 +68,8 @@ class SixFluxoniumQubit(Values):
     dc_bias: local driver and both current-to-flux calibrations. drive_line: microwave
     calibration. readout: bare cavity, incident-field and ADC calibrations.
     numerics: truncation, solver and seed/pacing choices, as on single settings.
+    drift: optional independent log-OU losses; None/omitted disables drift.
+    Selected losses must be positive; sigma is ln(loss), tau_s is seconds.
     """
 
     format: Literal["zcu.single-fluxonium"]
@@ -76,6 +79,13 @@ class SixFluxoniumQubit(Values):
     drive_line: DriveLine
     readout: Readout
     numerics: Numerics
+    drift: CoherenceDrift | None = None
+
+    @model_validator(mode="after")
+    def _drift_losses(self) -> Self:
+        if self.drift is not None:
+            self.drift.validate_losses(self.chip.qubit)
+        return self
 
     @field_validator("version", mode="before")
     @classmethod
@@ -108,13 +118,9 @@ class SixFluxoniumNumerics(Values):
     """Environment cache allowances and midpoint subdivisions.
 
     Cache allowances are strict nonnegative integer byte counts.
-    prepare_cache_bytes: environment-wide prepare arrays and estimated metadata,
-        default 256 MiB. result_memo_bytes: environment-wide exact-result arrays
-        and metadata, default 64 MiB. routing_cache_bytes: environment-wide
-        routing facts and metadata, default 4 MiB. Each total is divided equally
-        between six independent sources, rounding down (at most five bytes unused).
-    adc_cache_bytes: allowance per source for deterministic ADC responses,
-        default 8 MiB, not divided. Zero disables the corresponding residency.
+    routing_cache_bytes: environment-wide routing facts and metadata, default
+        4 MiB, divided equally between six independent sources, rounding down
+        (at most five bytes unused). Zero disables routing-facts residency.
     No fixed upper bound is imposed. Negative/noninteger values fail validation.
     These allowances exclude active work, models and process RSS.
     slow_envelope_segments_per_period: strict positive integer midpoint
@@ -123,10 +129,7 @@ class SixFluxoniumNumerics(Values):
     """
 
     slow_envelope_segments_per_period: Annotated[int, Field(ge=1, strict=True)] = 20
-    prepare_cache_bytes: Index = 256 * 1024**2
-    result_memo_bytes: Index = 64 * 1024**2
     routing_cache_bytes: Index = 4 * 1024**2
-    adc_cache_bytes: Index = 8 * 1024**2
 
 
 class SixFluxoniumSettings(Values):

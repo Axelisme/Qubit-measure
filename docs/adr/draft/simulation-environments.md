@@ -93,9 +93,21 @@ FTF builder 明確選 V／A，flux helper 比對實際 driver 單位，不以預
 
 同一 acquire 的 program／layout 固定，已排定的 sweep／register／table 控制仍執行。不熱載入 YAML、不自動重編譯被改動的 cfg、不放寬外部 mutation gate。不同 flux rounds 的最終平均是混合條件平均，不自動形成 flux sweep，必須保留各 round 輸入以追溯。
 
-模型不承接前一 shot、round 或 acquire 的量子態。每 shot 從當下 DC、含耦合 H0 的共同溫度 Gibbs 態開始；T=0 使用基態。Reps 間 relax_delay 不造成殘留激發或 repetition-induced steady state，shot 內 idle 正常演化。主機等待不推進物理時間。
+模型不承接前一 shot、round 或 acquire 的量子態。每 shot 從當下 DC、含耦合 H0 的共同溫度 Gibbs 態開始；T=0 使用基態。Reps 間 relax_delay 不造成殘留激發或 repetition-induced steady state，shot 內 idle 正常演化。主機等待不延續量子態演化；single-fluxonium 的損耗漂移時鐘仍計入等待時間。
 
 2026-10-13，使用者接受限制：「2理論上希望能支援reps這層的relax_delay效應，但可能難度太大了，每個shot獨立是可以的。」對熱初態選擇「B，需要考慮Thermal population」，並對初態／耗散使用共同溫度選擇「B」。這不是不支援熱人口，也不是證明跨 shot 演化不可行。
+
+### Single-fluxonium 損耗漂移與模擬時鐘
+
+Single-fluxonium 的選填 YAML `drift` 區塊為 `q_cap`、`xqp`、`aphi` 各自指定 `sigma` 與 `tau_s`。省略或 null 關閉漂移。選取的損耗值必須為正。`sigma` 是 ln(loss) 的穩態標準差，`tau_s` 是秒制相關時間。Log 平均值為 ln(YAML 損耗值)。每個新環境從 YAML 損耗值開始，第一筆 acquisition 固定 OU 時間原點。後續取樣用任意時間差的精確 OU 轉移，不用固定步長積分。
+
+一個模擬環境共用一個 `SimulationClock`，時間等於 `time.monotonic()` 加只增不減的 offset。每個完成 round 增加 `max(0, 未乘 time_scale 的物理時長 - 實際牆鐘時長)`。牆鐘時長包含 snapshot、計算與 pacing sleep。取消或失敗的 round 不補 offset。Acquisition 間的等待由牆鐘自然計入。新環境重設 offset 為零。時鐘只在模擬側執行，真實 acquire 不接觸它，依 [[0072]]。
+
+`SimulationBinding.begin` 在 admission 後、request 建構前呼叫模擬端 preparation。`SingleFluxoniumSource.open_acquire` 消耗這份 preparation，不再次取樣。直接使用 Source 的 caller 則在 open 時取樣。整次 acquisition 的 sweep 與 rounds 共用有效損耗，DC 裝置值仍逐 round 捕捉。獨立 drift RNG 由 acquisition 根種子派生，不消耗既有 ADC 抽樣 stream。相同種子只在相同時間序列下重現軌跡。
+
+開啟漂移時，模擬端每次 acquisition 寫一行 JSONL。預設位置為 `~/.local/state/zcu-tools/simulation/single-fluxonium/<session>/truth.jsonl`，builder/source 的 `truth_log` 可指定其他檔案。每行包含 session UUID、秒制 `sim_now`、UTC ISO `wall_time`，以及 `q_cap`、`q_ind`、`xqp`、`aphi`。新環境產生新 session。關閉漂移不建立檔案。I/O 失敗向 caller 傳遞，不偽裝成成功。
+
+Private replay 保存當次有效 settings，覆蓋損耗並關閉 drift，snapshot 的模型 identity 與它一致。舊 acquisition 不因後續漂移或當前時鐘而改變。真值與 private replay 均不進 Run、GUI、MCP 或 Labber metadata。此交付不新增 six-fluxonium 的獨立漂移，也不精簡跨 acquisition 快取。
 
 ### Acquire 接線與末端讀出的裁決
 
@@ -224,15 +236,15 @@ Photon dephasing 使用 joint-state resonator pull 的完整差、total linewidt
 
 ### 分段引擎與重算式重播
 
-FTF acquire 預設使用 `simulate.evolution.Engine` 的快速分段算法。`experiment.ftf` 以模板陣列換算單位、取得 DC 模型，將一組 timeline 交給引擎。引擎切段、分類、去重，先建立共用 prepare，再以 joblib threading chunks 演化至 readout 起點。每個 `FTFSource` 持有一個引擎，跨 acquire 保留記憶體中的 prepare 快取。每次 evolve 自己建立及釋放 worker pool。
+FTF acquire 預設使用 `simulate.evolution.Engine` 的快速分段算法。`experiment.ftf` 以模板陣列換算單位、取得 DC 模型，將一組 timeline 交給引擎。引擎切段、分類、去重，先建立共用 prepare，再以 joblib threading chunks 演化至 readout 起點。每個 `FTFSource` 持有一個引擎，跨 acquire 只保留 routing facts，數值 preparation 限一次 evolve。每次 evolve 自己建立及釋放 worker pool。
 
-離線 Intel OpenCL 建表、U-table library、archive/reuse/validation 發布流程與 persistent exact density records 已移除。FTF 不需要數值資料庫路徑，也沒有 `build_database.py` 或 `gpu` extra。引擎內部的週期表與 gate prepare 只在記憶體中重用，不是磁碟建庫機制。Prepare-cache 預算不包含模型、solver、ADC、回傳 density 或仍被工作持有的資料，不是 process RAM 上限。
+離線 Intel OpenCL 建表、U-table library、archive/reuse/validation 發布流程與 persistent exact density records 已移除。FTF 不需要數值資料庫路徑，也沒有 `build_database.py` 或 `gpu` extra。引擎內部的週期表與 gate prepare 只在記憶體中重用，不是磁碟建庫機制。Routing-facts 預算不包含模型、solver、ADC、回傳 density 或仍被工作持有的資料，不是 process RAM 上限。
 
 每 round 仍捕捉當下 snapshot。同一 acquire 內，snapshot 與上一 round 相同時，組合層重用 density 與條件響應；抽樣身份仍隨 round 改變。Snapshot 改變則重新演化，不跨獨立 shot 承接量子態或隨機輸出。
 
 Private replay 保存模型設定、模板 request、snapshot 與抽樣身份。`replay_round(round_path)` 不讀取舊 density 或 U 表，而是在相同 backend、model、`SEGMENT_NUMERIC_VERSION`、RNG 與相依套件版本下重算。Manifest 不再釘住 record；舊 exact-record manifest 明確失敗，不靜默升級。私有輸入含模型真值，不進一般 Run/native/RPC metadata。
 
-數值 API、prepare 快取與記憶體歸算見 [evolution README](../../../lib/zcu_tools/simulate/evolution/README.md)。早期離線建庫方案只保留於[討論快照](../../discussions/2026-10-15-offline-propagator-library.md)，不再描述現行入口。依賴方向仍由 [[0072]] 的 C8、C9、C12 保護，沒有新增 simulate→resources／program／device 依賴。
+數值 API、preparation lifetime 與記憶體歸算見 [evolution README](../../../lib/zcu_tools/simulate/evolution/README.md)。早期離線建庫方案只保留於[討論快照](../../discussions/2026-10-15-offline-propagator-library.md)，不再描述現行入口。依賴方向仍由 [[0072]] 的 C8、C9、C12 保護，沒有新增 simulate→resources／program／device 依賴。
 
 ### 演化與 ADC 數值工具
 
@@ -246,7 +258,7 @@ Private replay 保存模型設定、模板 request、snapshot 與抽樣身份。
 
 2026-10-15，使用者裁決：「同意，我預期是：basis+density matrix -> population vector -> adc iq，每步由enviroment作者調用工具達成，這樣也能方便紀錄population演化成圖（可用於debug）」。隨後澄清：「我說演化有歧義，我是只沒變成iq的population」。因此 environment 作者可以保存或繪圖檢查 I/Q 生成前的 population，不因此新增時間 trajectory 或內部積分步輸出。繪圖不放入數值工具，診斷 population 不混入量測訊號格式。
 
-模型及 prepare 快取可重用，量子態不隱含承接上次呼叫。同一 timeline 內由引擎明確接續，跨 shot／round 不繼承。數值工具不自行猜測 round；resources 只保存私有重播輸入，不保存演化表或 density records。
+模型與 caller-owned 完整 preparation 可重用，Engine 不保留跨 evolve 的數值產品。量子態不隱含承接上次呼叫。同一 timeline 內由引擎明確接續，跨 shot／round 不繼承。數值工具不自行猜測 round；resources 只保存私有重播輸入，不保存演化表或 density records。
 
 依賴仍受 [[0072]] 的 C8 分層、C9 無循環及 C12 穩定工具不依賴有狀態能力模組約束。這不建立 simulate→program／resources 的新依賴，不放寬 ignore_imports；`program-simulation-entry` contract 限制一般 program 只依賴公開 mixin 入口，入口可委派 frontend 與 adapter。
 
@@ -302,7 +314,7 @@ Lookback／acquire_decimated 使用相同有限 pulse 與條件平均場，輸�
 | C2 round 結果 | `experiment.ftf` | 顯式組合演化、population 轉換與 ADC 的正規化工具，再產生 round 結果。program mixin 消費 `core.simulation` 的統計或訊號結果，負責 QICK buffer 轉換。 |
 | C3 引擎 API | `simulate.evolution` | `experiment.ftf` 呼叫演化入口，消費 readout 起點的量子態與路徑診斷。每次 evolve 回報最終 rows 的最大 trace 誤差，空輸入為零；只報告，不修正或套用 ADC 容差。 |
 | C4 模型 | `simulate.ftf` | `simulate.evolution` 消費模型與 secular 形式，不讀 YAML 或裝置。 |
-| C5 kernel | `simulate.evolution` 內部的 dispatch、排程與各 kernel | 依 [[0078]]，dispatch 擁有候選順序、builder、frame 與 chain；kernel 擁有數值 build、apply 與 certificate。Table-building guards 透過 `guard_prepared` 交還 acceptance 與 model-only payload，dispatch 將 Floquet admission 合併成 family `RowPlan`。排程以 `ApplyContext` 原樣傳給 apply，不重做分類。Plan 與 input-bound payload 只活在一次 evolve；model-only shared keys 才依 LRU 規則入快取。這是內部接縫，不是跨 package API。完整契約與數值 owner 見 [evolution README](../../../lib/zcu_tools/simulate/evolution/README.md)。 |
+| C5 kernel | `simulate.evolution` 內部的 dispatch、排程與各 kernel | 依 [[0078]]，dispatch 擁有候選順序、builder、frame 與 chain；kernel 擁有數值 build、apply 與 certificate。Table-building guards 透過 `guard_prepared` 交還 acceptance 與 model-only payload，dispatch 將 Floquet admission 合併成 family `RowPlan`。排程以 `ApplyContext` 原樣傳給 apply，不重做分類。Plan、input-bound payload 與 model-only shared preparations 都只活在一次 evolve。這是內部接縫，不是跨 package API。完整契約與數值 owner 見 [evolution README](../../../lib/zcu_tools/simulate/evolution/README.md)。 |
 | C6 readout 與統計 | `simulate.adc` | 擁有 1e-6 probability 容差及 `normalize_populations`。FTF 在 population 轉換後顯式呼叫一次：先驗證 finite、row sum 落在 float64 閉區間 [1−1e-6, 1+1e-6]、負值不低於 −1e-6，再將容差內負值歸零並逐 row 除總和。超界以 ValueError 回報拒絕 row 數，不回傳部分結果。sampling 只驗證非負值與相同 trace 容差，不做修補。FTF 消費條件響應與抽樣工具，組合成 C2 結果。 |
 
 ### Secular 形式由模型提供
@@ -321,7 +333,7 @@ Lookback／acquire_decimated 使用相同有限 pulse 與條件平均場，輸�
 
 - Program 提供具名環境 binding、Module timeline 與 request／signal 契約。FTF startup 腳本先建 entry／point，再組裝環境，透過一般 facets 安裝 SoC、逐一 register drivers，留給使用者從 New Tab 開實驗。GUI 不載入 environment，也不持有模擬啟動模式。模擬的 raw compile hooks 明確拒絕。
 - Resources 提供 FTF YAML schema 與 checked JSON private replay 容器。Experiment 組合環境及單 round 重播；重播用相同數值與 RNG 版本重算，不引用已保存的 density。
-- Evolution 提供預設快速分段算法及記憶體 prepare 快取。離線 U 表、Intel OpenCL、持久 exact records 及建庫入口已刪除。快取預算不是 process RAM 上限。
+- Evolution 提供預設快速分段算法及有界 routing facts。數值 preparation 只活在一次 evolve，見 [[0078]]。離線 U 表、Intel OpenCL、持久 exact records 及建庫入口已刪除。Routing 預算不是 process RAM 上限。
 - 舊 TLS、隱式白雜訊及雙模式 mock API 已移除，Notebook 使用新環境。沒有相容層。參數化 make_mock_soccfg 仍支援離線編譯。
 
 I/Q-only 練習在原版本已跑通 F1、F2，conditional Ramsey 只取得一點。驗收採「能跑起來」，不代表全 16 點完成或原精度達標。歷史正式 workload 的完整 acquire 成本為 cold 平均 2.864 秒／point、warm direct-record 平均 0.457 秒／point，不能稱平均 1 秒已達標。這些數字不能代表現行分段引擎。

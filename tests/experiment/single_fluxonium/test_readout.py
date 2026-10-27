@@ -6,7 +6,7 @@ from zcu_tools.core.simulation import AcquireRequest, ReadoutWindow
 from zcu_tools.experiment.single_fluxonium.readout import prepare_readout
 from zcu_tools.experiment.single_fluxonium.template import plan_template
 from zcu_tools.resources.single_fluxonium import parse_single_fluxonium
-from zcu_tools.simulate.adc import BackgroundRoughness, ReadoutCache, ReadoutModel
+from zcu_tools.simulate.adc import BackgroundRoughness, ReadoutModel
 
 from ._inputs import settings, snapshot, template
 
@@ -48,7 +48,7 @@ def test_preparation_uses_fixed_background_seed_independent_of_noise(noise_seed)
         np.zeros((1, 1)),
         mismatch_phase_rad=np.zeros(1),
     )
-    _, batch = prepare_readout(config, physical, (plan,), request, ReadoutCache())
+    _, batch = prepare_readout(config, physical, (plan,), request)
     # At 7 GHz the wave is 1-0.2j, and the low edge contributes -10 dB.
     expected = (1 - 0.2j) * 10**-0.5 * BackgroundRoughness(0.02, 50.0, 82).factor(7.0)
     np.testing.assert_allclose(batch.model.receiver.background(7.0), expected)

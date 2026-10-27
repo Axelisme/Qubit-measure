@@ -30,13 +30,26 @@ def test_parse_and_load_preserve_complete_independent_material(tmp_path: Path):
     assert loaded.model_dump()["qubits"]["Q1"]["chip"]["qubit"]["ej_ghz"] == 4
 
 
+def test_per_qubit_drift_accepts_positive_losses_and_rejects_disabled_targets():
+    document = six_document()
+    document["qubits"]["Q2"]["chip"]["qubit"]["xqp"] = 1e-7
+    document["qubits"]["Q2"] = {
+        **document["qubits"]["Q2"],
+        "drift": {"xqp": {"sigma": 0.3, "tau_s": 10.0}},
+    }
+    parsed = api.parse_six_fluxonium(document)
+    assert parsed.qubits.Q2.drift is not None
+    assert parsed.qubits.Q2.drift.xqp is not None
+    assert parsed.qubits.Q2.drift.xqp.tau_s == 10.0
+    document["qubits"]["Q2"]["chip"]["qubit"]["xqp"] = 0.0
+    with pytest.raises(ValueError, match=r"qubits.Q2.*drift.xqp.*positive"):
+        api.parse_six_fluxonium(document)
+
+
 @pytest.mark.parametrize(
     "field",
     [
-        "prepare_cache_bytes",
-        "result_memo_bytes",
         "routing_cache_bytes",
-        "adc_cache_bytes",
     ],
 )
 @pytest.mark.parametrize("value", [-1, True, 1.5, "1024"])

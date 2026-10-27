@@ -70,7 +70,7 @@ def evolve_train(
         "multitone_gate" if simultaneous else "single_tone_gate", local=local
     )
     options = {} if chunks is None else {"chunks_per_worker": chunks}
-    with closing(Engine(workers, 0, kernels=(idle, driven), **options)) as engine:
+    with closing(Engine(workers, kernels=(idle, driven), **options)) as engine:
         result = engine.evolve(
             source(), (gate_train(n, gates, simultaneous=simultaneous),), cancel=Event()
         )
@@ -113,7 +113,7 @@ def test_integrator_heavy_inventory_keeps_existing_chunk_strategy():
     observations = []
     for options in ({"chunks_per_worker": 6}, {}):
         idle, driven = RelaxingKernel("t4"), RelaxingKernel("multitone_rwa")
-        with closing(Engine(1, 0, kernels=(idle, driven), **options)) as engine:
+        with closing(Engine(1, kernels=(idle, driven), **options)) as engine:
             result = engine.evolve(
                 source(), (gate_train(21, simultaneous=True),), cancel=Event()
             )

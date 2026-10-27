@@ -86,7 +86,7 @@ def test_inventory_amortizes_once_but_small_inventory_stays_sambe_even_when_warm
         return original(*args, **kwargs)
 
     monkeypatch.setattr(scipy.integrate, "solve_ivp", observed)
-    with closing(Engine(1, 1_000_000)) as engine:
+    with closing(Engine(1)) as engine:
         cold_small = engine.evolve(source(), (batch(2),), cancel=Event())
         assert cold_small.paths.segments_by_kernel.get("shaped_sambe") == 2
         for phase in (0.0, 0.713):
@@ -101,7 +101,7 @@ def test_inventory_amortizes_once_but_small_inventory_stays_sambe_even_when_warm
 
 def test_source_history_amortizes_later_small_acquire_and_invalidates_old_memo():
     src = source()
-    with closing(Engine(1, 1_000_000)) as engine:
+    with closing(Engine(1)) as engine:
         small = batch(2)
         cold = engine.evolve(src, (small,), cancel=Event())
         assert cold.paths.segments_by_kernel.get("shaped_sambe") == 2
@@ -115,7 +115,7 @@ def test_source_acquire_order_has_same_routes_with_and_without_cache_retention()
     for retain in (True, False):
         src = source()
         run = []
-        with closing(Engine(1, 1_000_000)) as persistent:
+        with closing(Engine(1)) as persistent:
             for count, phase in ((160, 0.0), (2, 0.713), (2, 0.0)):
                 if retain:
                     result = persistent.evolve(
@@ -123,7 +123,7 @@ def test_source_acquire_order_has_same_routes_with_and_without_cache_retention()
                     )
                 else:
                     # Replacing the Engine releases both caches, not source history.
-                    with closing(Engine(1, 0)) as empty:
+                    with closing(Engine(1)) as empty:
                         result = empty.evolve(
                             src, (batch(count, phase),), cancel=Event()
                         )
@@ -135,7 +135,7 @@ def test_source_acquire_order_has_same_routes_with_and_without_cache_retention()
 
 def test_source_close_discards_usage_even_if_engine_preparations_survive():
     src = source()
-    with closing(Engine(1, 1_000_000)) as engine:
+    with closing(Engine(1)) as engine:
         engine.evolve(src, (batch(160),), cancel=Event())
         warm = engine.evolve(src, (batch(2),), cancel=Event())
         assert warm.paths.segments_by_kernel.get("single_tone_gate") == 2
@@ -145,7 +145,7 @@ def test_source_close_discards_usage_even_if_engine_preparations_survive():
 
 
 def test_compiled_cold_cost_admits_reference_inventory_but_not_small_inventory():
-    with closing(Engine(1, 1_000_000)) as engine:
+    with closing(Engine(1)) as engine:
         for phase in (0.0, 0.713):
             reference = engine.evolve(source(), (batch(160, phase),), cancel=Event())
             assert reference.paths.segments_by_kernel.get("single_tone_gate") == 160
@@ -496,7 +496,7 @@ def test_mixed_inventory_does_not_charge_rejected_gate_builds_to_usable_keys():
     gains = track.amplitude.copy()
     gains[-1] = 40.0  # Same carrier/shape domain, but outside numerical RWA admission.
     mixed = replace(original, tracks=(replace(track, amplitude=gains),))
-    with closing(Engine(1, 1_000_000)) as engine:
+    with closing(Engine(1)) as engine:
         result = engine.evolve(source(), (mixed,), cancel=Event())
         assert result.paths.segments_by_kernel.get("single_tone_gate") == 160
         assert sum(result.paths.segments_by_kernel.values()) == 321
@@ -532,9 +532,9 @@ def test_engine_covariant_density_is_bitwise_stable_under_point_permutation(work
         ),
         end_ns=original.end_ns[order],
     )
-    with closing(Engine(1, 0, chunks_per_worker=1)) as reference:
+    with closing(Engine(1, chunks_per_worker=1)) as reference:
         expected = reference.evolve(source(), (original,), cancel=Event())
-    with closing(Engine(workers, 0, chunks_per_worker=7)) as engine:
+    with closing(Engine(workers, chunks_per_worker=7)) as engine:
         actual = engine.evolve(source(), (permuted,), cancel=Event())
     assert actual.paths.segments_by_kernel == expected.paths.segments_by_kernel
     assert actual.paths.segments_by_kernel["single_tone_gate"] == 1024

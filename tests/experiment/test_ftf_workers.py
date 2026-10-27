@@ -20,9 +20,9 @@ def test_ftf_workers_reach_engine_and_preserve_small_acquire(monkeypatch):
     widths = []
 
     class ObservedEngine(Engine):
-        def __init__(self, workers, cache_bytes, **kwargs):
+        def __init__(self, workers, **kwargs):
             widths.append(workers)
-            super().__init__(workers, cache_bytes, **kwargs)
+            super().__init__(workers, **kwargs)
 
     monkeypatch.setattr(runtime, "Engine", ObservedEngine)
     settings = parse_ftf(ftf_document())

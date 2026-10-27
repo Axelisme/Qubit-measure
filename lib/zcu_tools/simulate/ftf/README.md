@@ -1,8 +1,8 @@
 # Fixed-coordinate FTF numerics
 
-**Last updated:** 2026-10-21, acquire-lifetime ADC memo
+**Last updated:** 2026-10-27 (UTC), evolve-local numerical preparations
 
-**讀者：** framework-dev。固定座標 FTF 數值模型、路由與快取契約。
+**讀者：** framework-dev、agent。固定座標 FTF 數值模型、路由與快取契約。
 
 `JointParameters` supplies F1/C/F2 numeric circuits and signed full-charge
 couplings in GHz. `JointModel` selects fixed local levels at DC, forms their
@@ -79,7 +79,7 @@ Levels are integer F1/C/F2 offsets from the round's absolute DC flux, with
 1e-3 Phi0 spacing. `model_source` wraps this builder in evolution's thread-safe
 cache with DC Gibbs density and an exact `flux_expansion`. Model identities
 include absolute DC, level, circuits, temperature, resonators and drive operators,
-so an engine can share its prepare cache across rounds without aliasing DC points.
+so retained source models and routing facts cannot alias different DC points.
 The collapse-operator and secular representations share the pure-rate calculation.
 
 `FluxTrack` carries one source slot across all template points in ns/GHz/rad.

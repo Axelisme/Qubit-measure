@@ -1,8 +1,8 @@
 # Segment evolution
 
-**Last updated:** 2026-10-23, independent result and routing byte caps, Numba import boundary
+**Last updated:** 2026-10-27 (UTC), evolve-local preparation and routing-facts ownership
 
-**讀者：** framework-dev。Segment evolution 的公開輸入、路由與數值邊界。
+**讀者：** framework-dev、agent。Segment evolution 的公開輸入、路由與數值邊界。
 
 `simulate.evolution` evolves numeric models to readout start. Callers use the
 package root; dispatch, kernels, scheduling and caching are internal.
@@ -43,9 +43,9 @@ The exports in [__init__.py](__init__.py) fall into these groups:
 | Explicit joint-Fock prototype | `JointFockRequest`, `JointFockDiagnostic`, `JointFockResult`, `joint_fock_spectrum` |
 | Shared RWA Hamiltonian coefficients | `RWACoefficients`, `rwa_coefficients`, `interaction_hamiltonian` |
 
-`Engine(workers, cache_bytes, *, kernels=None, chunks_per_worker=None,
-result_memo_bytes=None, routing_cache_bytes=None)` owns a prepare cache,
-a separate exact-result memo and routing facts. `evolve(source, batches, *, budget=1e-3, cancel=event)` consumes a
+`Engine(workers, *, kernels=None, chunks_per_worker=None,
+routing_cache_bytes=4*1024**2)` owns immutable routing facts.
+Numerical preparations live only within one evolve. `evolve(source, batches, *, budget=1e-3, cancel=event)` consumes a
 `ModelSource` and all `TimelineBatch` inputs for one acquire. `NumericModel` is a
 separate fixed-coordinate record, not an Engine input. Constructor and field
 contracts live with their types in [engine.py](engine.py), [secular.py](secular.py),
@@ -63,7 +63,7 @@ average external energy shifts and dephasing over these spans, then attach
 point-aligned `SegmentShift` values through `segment_shifts`. Each supplied span
 must match one queried span exactly; missing spans have zero shift. Shifts do
 not add boundaries, rotate bases or change physical `FluxLevel` values. Model,
-prepare, result and gate-usage identities include shift content. Without shifts,
+prepare and gate-usage identities include shift content. Without shifts,
 the original model source, initial state and reuse semantics remain unchanged.
 
 `TimelineBatch.start_ns` and `initial_densities` optionally continue each point
@@ -72,8 +72,7 @@ be zero or final-span boundaries no later than `end_ns`. The engine plans with
 the common origin and propagates only `[start_ns,end_ns]`, without replaying the
 prefix or restarting carrier phases and envelopes. The full boundary query
 still covers `[0,end_ns]`. Batch construction retains the existing density
-invariants without repair. Continuation inputs participate in result and
-acquire digests, not model-only prepare identities.
+invariants without repair. Continuation inputs participate in acquire digests, not model-only prepare identities.
 
 `PathDiagnostics.point_members` records each class's increasing unique caller
 point IDs. `merge_path_diagnostics(parts)` unions these memberships, sums work
@@ -133,21 +132,21 @@ Full-map accuracy and wall measurements are separate validation work.
 `Engine.evolve(..., telemetry=True)` adds immutable `FamilyRouting` values to
 `result.paths.routing`. The default is False, with no thread CPU clock reads and
 an empty mapping. Evolution never writes files. `paths.frontend_cpu_s` separately
-reports calling-thread geometry and WorkPlan CPU (zero on exact-result reuse).
+reports calling-thread geometry and WorkPlan CPU.
 Common-frame reports also count `prepare_builds` and `admission_rows`; other
 families currently leave these two instrumented-owner counters at zero. Telemetry does not change guards,
-routes, cache admission, densities or cancellation.
+routes, densities or cancellation.
 
 Each family reports logical segment `rows`, `prepare_cpu_s`, `apply_cpu_s`,
 `actual_cpu_s` (their sum), `cache_hits`, `rejected_rows`, `estimated_cost` and
 nullable `estimated_cpu_s`. Calling-thread CPU measures guards/certificates,
-prepare, cached admission, extension, input binding and apply, in the thread
+prepare, input binding and apply, in the thread
 performing each call. It excludes geometry, dispatch bookkeeping, ADC and I/O.
 Rejections count actual numerical guard refusals, not cost-based skips or planner
-feasibility probes. Cache hits count persistent preparation consumers once per
-physical segment; a shared prefix executes once although logical rows include
-all adopting timelines. Exact-result hits report logical rows as cache hits,
-with zero CPU, rejected rows and estimated work, never replayed timings.
+feasibility probes. A shared prefix executes once although logical rows include
+all adopting timelines. Caller-retained complete preparation hits report logical
+rows as `cache_hits`, with zero CPU, rejected rows and estimated work.
+Engine evolves always execute numerical work.
 
 `estimated_cost` uses **relative scheduling units**, not seconds. The existing
 constant two-tone plan supplies seconds estimates for selected Floquet/DOP853
@@ -182,7 +181,7 @@ tries the next candidate in the following graph.
 | Two constant tones | First try cold-priced `common_frame`. For remaining distinct ports, compare omission-expanded `multitone_rwa` with DOP853 using cold prepare, guard and apply estimates including retained dimension and restored oscillation frequencies. Unexpanded RWA stays first. Same-port and rejected rows retain the acquire-wide DOP853/Floquet cost order. |
 | Shaped two-tone or three-or-more-tone row | Two-tone rows first try cold-priced `common_frame`. Remaining rows try `multitone_gate`, then the cheaper cold-cost choice between omission-expanded `multitone_rwa` and `dop853`. Unexpanded RWA stays first. Ordinary RWA admits fixed-flux rows with acceptable omitted-channel estimates, smooth real envelopes and at least one sampled envelope, including close or equal carriers. Other rows retain the full-drive fallback. |
 
-Expanded-RWA preparation is amortized over the complete acquire and source-cumulative exact prepare-key usage, not resident cache warmth. Prefix and worker subsets borrow the same plan. Exact-result memoization includes the selected route. Source usage counts distinct acquire content's complete row inventories, not repeated identical playback.
+Expanded-RWA preparation is amortized over the complete acquire and source-cumulative exact prepare-key usage, not resident cache warmth. Prefix and worker subsets borrow the same plan. Source usage counts distinct acquire content's complete row inventories, not repeated identical playback.
 
 `slow_envelope` uses `ModelSource.slow_envelope_segments_per_period`, a strict
 positive integer with default 20. A row has `max(1, ceil(duration_ns/(T_ns/segments)))`
@@ -235,23 +234,12 @@ application and certificates that require their intermediate data.
 | `floquet_period` | The period guard admits a single constant tone at `abs(f) >= 0.03 GHz` when its secular split bound passes. Dispatch selects dense Hilbert DOP853 at `abs(f) >= 1 GHz`. Below that, it compares Sambe work with CF4 coarse/fine work. A declined Sambe certificate uses standalone CF4, not gain anchors. For CF4 keys, dispatch fixes gain anchors from the complete gain group. Constant-CF4 inventories with at least sixteen same-sign carriers and a magnitude ratio at most 1.01 can instead use four real carrier anchors at fixed gain. Gain groups take precedence, so a key never expands both axes. Carrier prediction interpolates interaction-picture prefixes, restores the target carrier's lab frame and checks the original nine coarse-grid probes. Rejection refines the already-built coarse grid; incompatible anchor grids build independently. Prepare keys and row admission do not change. |
 | `gate_cache` | Dispatch sends a key-aligned builder mask. Positive durations up to 30 ns first try six phase nodes with two independent probes; failed convergence uses sixteen nodes. Other keys directly use sixteen nodes. Both builders produce four closed-system subsegments with secular Strang dissipation and the same phase-Fourier representation. |
 | `period_table` and `shaped_sambe` | Ordinary period tables integrate frozen-envelope Hilbert periods; shaped Sambe uses finite-Hilbert-Fourier subperiods for smooth real or complex envelopes. Complex playback interpolates magnitude and adds the envelope angle to the advancing carrier phase. It uses a tighter envelope-motion bound; unresolved ramps and failed certificates retain fallback. Each family owns its guards and build. They share period playback and direct fractional tails. Ordinary period_table also supports DC locally; default Engine costs put terminal DOP853 first for DC. |
-| `floquet` | The guard builds a Stark frame and returns row admissions. Passing k=0 omission/convergence bounds selects modal second-order Dyson when probe limits pass, otherwise periodic k=0 propagation. After k=0 omission rejection, a passing calibrated finite-Fourier certificate selects retained-sideband integration. A cached sideband frame extends to missing probe bins without rebuilding the frame or existing certificates. Dispatch merges current-row admissions into one family plan. Apply does not repeat admission or construct sparse equations. |
+| `floquet` | The guard builds a Stark frame and returns row admissions. Passing k=0 omission/convergence bounds selects modal second-order Dyson when probe limits pass, otherwise periodic k=0 propagation. After k=0 omission rejection, a passing calibrated finite-Fourier certificate selects retained-sideband integration. Dispatch merges current-row admissions into one family plan. Apply does not repeat admission or construct sparse equations. |
 | `single_tone_gate` | Dispatch compares numerically admitted canonical-key builds and n-step playback against shared spectral-family Sambe construction, subperiod playback, phase contraction, polar iterations and fractional tails. It chooses the cheapest all-Sambe, mixed or all-gate cold plan. Estimates use joint dimension, duration, retained drive strength, shape motion, carrier frequency and actual subdivisions. The kernel requires exactly one smooth real sampled tone and shares iterative omission admission with ordinary multitone RWA, and phase-graph pruning and secular split admission with simultaneous gates. Sliced support, nonzero envelope offsets and final sample hold are allowed. Rejection retains Sambe. |
 | `multitone_gate` | Complete-inventory canonical reuse of at least 20 rows, shared real-envelope RWA admission, row-bounded sampled playback including slices and final hold, compatible dressed phase charges (or explicitly admitted weak-cycle pruning), and adaptive secular splitting with proxy at most 0.01. Builds n joint Hilbert propagators using the same `RWACoefficients.diagonal` final-mask-excluded shifts and `interaction_hamiltonian` as ordinary RWA, plays D-U-D, and restores the lab/DC endpoint frame. Rejection retains ordinary RWA. |
 | `single_tone_rwa` | Single constant rows follow the RWA-first or Dyson-first order in the decision table above and try a constant rotating-frame Lindbladian built from the shared retained graph, coefficient diagonal and full secular bath. All populations and within-component coherences form a real block of dimension at most 64. Cross-component coherences use small complex exponentials or scalar closed forms. Apply skips only exact-zero cross-block RHS, preserves arbitrary complex residuals and restores both phase endpoints. Admission shares the constant-only omission rule below, the 0.06 rad phase cap and explicit graph-pruning bound. Rejection follows that row's remaining candidates. |
 | `multitone_rwa` | Starts with joint-basis Fourier edges satisfying `abs(Ei-Ej±f) < 0.05 GHz`, restores channels with excessive omitted transfer or phase, obtains final-mask-excluded single-tone second-order shifts from `RWACoefficients.diagonal` and assembles them through `interaction_hamiltonian`, and integrates every tone in a row-local interaction picture with a 16 ns adaptive ceiling for dual constant rows and 4 ns otherwise. Sampled and dual constant admission share iterative omitted one/two-photon retention with single constant RWA, with separate residual-phase and real-block dimension limits. It restores Schrödinger coordinates at every endpoint. It keeps joint rates, dephasing and state ordering. This calibrated approximation does not certify exact RB fidelity. |
 | `dop853` and `flux_dop853` | Dispatch resolves complete chronological timeline routing, then assigns chain IDs to adjacent touching rows of the same direct family. Ordinary DOP853 uses the exact interaction picture for every independent row, retaining all tones and the full secular bath. Chains retain lab endpoints for row-model basis changes, with local relative error capped by the requested budget divided by the accumulated bare spectral phase; absolute error scales with it. This avoids bare GHz phase bias without tightening independent-row tolerances. These calibrated controls are not a global error certificate. Flux DOP853 has its own chain plan. |
-
-For the same whole source, budget and Stark key, moving a probe window reuses
-cached Fourier candidates. Before shared/deferred guards split, the caller
-computes only missing complete-bin certificates from the full table inventory.
-WorkPlan single-flights the small new certificate publication. The immutable
-union borrows the original frame arrays and existing certificates. Cache
-replacement charges the union once instead of retaining two whole-frame charges;
-active references to the old payload remain valid. Current phases, gains and
-durations still receive fresh admission and sparse plans. A legacy-only frame
-without Fourier candidates uses the ordinary rebuild if sidebands become needed,
-so no FFT reconstruction or approximate frame reuse changes rounding.
 
 Constant-tone period playback uses real-matrix binary powering of the complete
 secular `D/2 → UρU† → D/2` channel for unsubdivided 16-level rows with at least
@@ -259,7 +247,7 @@ secular `D/2 → UρU† → D/2` channel for unsubdivided 16-level rows with at
 residuals, but changes floating-point rounding. Shorter rows, other dimensions
 and subdivided playback retain sequential updates with reusable buffers.
 Fractional tails keep their existing endpoint and bath steps. Power matrices
-are worker-local scratch, not retained prepare-cache products.
+are worker-local scratch, not shared preparations.
 
 The single-tone mixed cold plan uses numerical gate admission before fixing costs.
 Other shaped and two-tone estimates are fixed before numerical guards.
@@ -470,7 +458,7 @@ does not certify the adiabatic approximation.
 - `RowPlan` holds read-only decisions indexed by global `SegmentTable` row for
   one family in one evolve. Floquet stores admissions and retained equations;
   the direct solvers store frame or chain decisions. Plans never enter
-  `PrepareCache` or persistent kernel state.
+  persistent kernel state.
 - `KernelContext(source, budget, work_plan)` supplies preparation, key and guard
   calls with one evolve owner. `ApplyContext(budget, plan, work_plan)` supplies the finite positive per-segment allowance
   and the family's plan. Floquet and both direct solvers require their own plan;
@@ -501,7 +489,7 @@ inside their timeline worker and retain the same handoff.
 `bind_input` can contract a common known input into an evolve-local read-only
 payload. Dyson uses it for source or shared-prefix inputs. Prefix resolution
 evolves one representative per identical prefix group in time order, including
-nested and driven prefixes. Bound payloads never enter the prepare cache.
+nested and driven prefixes. Bound payloads expire with the evolve.
 Returning `None` retains ordinary per-batch apply. Apply advances worker
 densities in place and returns a row-aligned boolean exceedance mask.
 
@@ -524,15 +512,14 @@ Constant RWA guards and preparation reuse graph topology and labels. Port quadra
 norms, packed models and full secular baths are also evolve-local facts. RWA uses
 the sum of quadrature norms; shaped admission uses their maximum. Fact hits never
 replace row-local fixed-flux, budget, strength, phase, omission, pruning or dimension
-checks. Resident constant-RWA payloads still own and charge their array copies.
+checks. Constant-RWA payloads own their array copies for this evolve.
 The shared facts include envelope peak/slope/real flags, period split rates, packed
-DOP853 samples, covariant gate admissions and small Floquet probe-bin certificate
-extensions. Gate admission facts use full canonical physics, budget and numerical
+DOP853 samples and covariant gate admissions. Gate admission facts use full canonical physics, budget and numerical
 policies. Each row still checks its own continuous flux support before borrowing an
 admission; only absolute start and covariant phase are omitted from the fact.
 Floquet consumes full Fourier averages during frame construction. Its compact
-frames and optional sideband candidates belong only to active preparations or
-budget-admitted cache ownership, never evolve-long facts. Model facts include the full
+frames and optional sideband candidates belong only to active preparations,
+never evolve-long facts. Model facts include the full
 physical coordinates in their identity. Table-indexed facts
 also include table identity, so renumbered prefix representatives cannot alias
 the complete table. DOP853 packing also distinguishes flux-inclusive samples.
@@ -555,8 +542,8 @@ candidate inventory, before numerical admission:
   harmonic cutoffs, amplitude nodes, spectral products and convergence tests.
 
 Resource handles distinguish planned inventory from incrementally admitted
-actual key builds. Gain anchors use single-flight immutable resources. Cache
-hits and rejected rows are not actual consumers. Caller-only groups seal before
+actual key builds. Gain anchors use single-flight immutable resources.
+Rejected rows are not actual consumers. Caller-only groups seal before
 building; the last actual handoff then releases the product. Groups with deferred
 consumers stay open until WorkPlan closes. Prefix preparation cannot seal a
 group needed by later timeline work. Gain and constant-CF4 carrier anchors share
@@ -577,109 +564,44 @@ facts and resource products. WorkPlan creates it lazily from published carrier
 records under its inventory lock. Prefix and timeline consumers share that one
 workspace; its own lock serializes tile construction. WorkPlan drops ownership
 at close, after workers drain. A closed plan rejects further workspace requests.
-Neither the kernel registry nor the resident cache retains this workspace.
+The kernel registry does not retain this workspace.
 
-### Cache-first and singleton admission
+### Evolve-local preparations and caller reuse
 
-`admit_prepared` returns current row decisions and a row plan without construction
-when the cached payload domain covers all required products. `None` means domain
-miss and retains the ordinary build path. Dispatch looks up resident guard
-products in the caller and passes strong references to deferred workers.
-Floquet reuses frames only when all needed probe bins are present. Shaped Sambe
-reuses key-covered convergence data. Both hooks recheck current rows without
-building numerical products. Rejection of every row is not a domain miss.
-
-The engine deduplicates prepare keys across an evolve. Keys used by distinct
+The engine deduplicates prepare keys across one evolve. Keys used by distinct
 timelines enter shared preparation. Local builders and repeated local keys stream
-one timeline at a time; single-use ordinary keys prepare at their apply wave.
-All classified keys, including singletons, can reuse the persistent LRU.
-Accepted guard products are reused even when only a subset of timelines accepts.
+one timeline at a time. Single-use ordinary keys prepare at their apply wave.
+Accepted guard products go directly to apply, even when only a subset of rows
+accepts. Fully rejected products have no consumers and are released.
+Input-bound payloads, densities and dissipative preparations never cross evolves
+through Engine storage.
 
-Before prefix evaluation or numerical guards, dispatch inventories every
-candidate family's prepare keys in the complete WorkPlan geometry. The caller
-keeps intersecting whole resident batches protected, including hits used only
-by a later prefix or suffix. Key and model/family indexes locate those hits
-without scanning historical residents. Other residents stay in the reclaimable
-LRU until capacity is needed. Array bytes and retention charges update only on
-admission and eviction. Each immutable payload wrapper measures its array charge
-once. Resident and pending allocations share one byte account across all prefix
-and timeline schedules.
+Callers retaining complete exact-content preparations pass
+`reuse_key=content_digest` to `evolve`, then call
+`Engine.reuse(source, content_digest, cancel=event)` before reuse.
+The caller invalidates on input, source, Engine or budget changes.
+Evolution retains immutable inventory and usage-independent pricing facts.
+It reprices current source usage without constructing geometry or a WorkPlan.
+Unchanged relevant key totals reuse the policy answer. Changed totals reselect
+actual keys and rows. True authorizes reuse. False records no usage and requires
+fresh evolve. A different source, eviction or disabled residency also returns
+False. FTF does not build geometry or duplicate algorithm cost rules.
 
-Workers offer model-only products through a locked collector. They never perform
-caller lookups or LRU touches; the collector may remove reclaimable stale
-ownership under its admission lock. An accepted offer reclaims pending failed guards and stale residents
-only when capacity is needed. Failed stale residents yield before ordinary LRU
-residents. An impossible or oversize offer leaves existing ownership unchanged
-and streams without retention. Current whole-batch hits cannot be evicted by
-worker offers. Capacity left idle preserves products for alternating experiments.
-Caller shared builds and exact domain extensions use the same account. Exact
-extensions replace their predecessor's whole charge; rejected extensions grow
-only into idle capacity and retain their low priority.
+The routing-facts LRU charges immutable Python records and scalars up to
+`routing_cache_bytes`, default 4 MiB. The cap is a nonnegative integer without
+a fixed upper bound. Zero disables retention. Weak references do not retain
+sources. Oversized facts compute without evicting existing entries.
+`close()` clears routing facts. Models, output densities, numerical scratch,
+active payloads, ADC preparation and Numba's compilation cache are separate.
+The byte cap is not a process RAM limit.
 
-After each schedule joins, the caller publishes pending products for later
-prefix/suffix lookups. After the evolve pool drains, it releases current protection as newer than
-surviving stale residents, even on failure or cancellation. This visits current
-hits and products only, not the historical stale inventory. Fully
-rejected guard handoffs stay separate from apply bindings and fill only idle
-capacity. Schedule consumes Dispatch's rejected handoff queue on offer, so declined
-or evicted products have no remaining Dispatch owner. Current row, probe-bin,
-domain and budget checks still run on every
-evolve. The unified account bounds retained arrays plus an estimated 4608 metadata bytes
-per whole allocation. The estimate covers Python/NumPy headers, keys and cache
-indexes, with headroom above the measured wide-scan mean of 3998 bytes. It does
-not bound transient builders, active nonretained/oversize bindings, input-bound
-data or process RSS. `PrepareCache.bytes` reports arrays only;
-`PrepareCache.charged_bytes` includes the metadata estimate used for admission.
-
-[PrepareCache](cache.py) namespaces whole model-only payload batches by family,
-whole-source model identity and budget. The zero-level identity must describe the
-entire source, including absolute DC flux and model parameters; row keys also
-include quantized levels. A cache hit never replaces the row's guard. Eviction
-releases cache ownership, not references already held by active work.
-
-Exact-input repeats without single-tone shaped gate candidates bypass geometry,
-planning and every kernel call because their routes do not depend on usage.
-Inventories with history-sensitive candidates choose cold costs from the
-source's distinct-content row inventories before exact-result memo lookup. Their memo key also includes selected gate keys, so a prior
-Sambe result cannot hide a later source-amortized gate decision. The
-Engine-local result LRU retains owned densities, points and diagnostics, not
-ADC or random samples. Its key covers the whole-source DC model identity,
-initial density, optional flux expansion, budget and complete batch content,
-including envelopes and continuous flux samples. Kernel collections and numerical
-implementations stay fixed for the Engine's process-local lifetime. Custom and
-production kernels must be deterministic and pure for identical inputs, as with
-prepare reuse. Returned copies cannot mutate memo entries. Cancellation still
-raises without a partial result, and cached exceedances still warn per call.
-
-Callers retaining exact-content preparations can pass `reuse_key=content_digest`
-to `evolve`, then call `Engine.reuse(source, content_digest, cancel=event)` before
-reusing that preparation. The caller invalidates on input/source/Engine/budget
-changes. Evolution retains only immutable inventory and usage-independent pricing
-facts derived from geometry. It reprices the current source usage without
-constructing geometry or a WorkPlan. The policy answer is memoized by the
-current inventory's relevant key totals; unchanged inputs reuse that answer,
-while changed totals still select actual keys and rows. True authorizes reuse;
-False records no
-usage and requires fresh evolve. Selections, not raw monotonic counters, decide
-reuse. A different source, eviction or disabled residency also returns False.
-FTF therefore never assembles Engine geometry or knows algorithm cost rules.
-
-The result LRU charges arrays and metadata up to `result_memo_bytes` in addition
-to the prepare budget. None selects `min(64 MiB, cache_bytes)`.
-A separate routing-facts LRU charges immutable Python records and scalars up to
-`routing_cache_bytes`. None selects `min(4 MiB, cache_bytes)`.
-Explicit caps are independent nonnegative integer byte allowances, without a
-fixed upper bound. Weak source references do not retain models. Oversize facts stream without evicting resident entries.
-A working set exceeding capacity falls back to normal evolve, never stale routes.
-Zero disables residency in that cache. With auxiliary caps omitted, a zero
-prepare budget still disables all three caches. `close()` clears them.
-All Engines include the same per-allocation metadata estimate in retention
-charges. FTF production uses a 2 GiB unified resident/pending budget for arrays
-and estimated metadata, plus at most 64 MiB for results and 4 MiB for routing
-facts. The resident-byte limit is not a process RAM cap. Models, output densities, solver scratch, WorkPlan products,
-active payload references and ADC preparations are separate allocations. The
-process peak acceptance limit is 3.8 billion bytes, leaving 5% below the decimal
-4 GB ceiling. Numba's compilation cache is independent of the prepare LRU.
+Engine prepare residency, exact-result memoization and source ADC solver
+residency are removed. Representative single CPMG, six-cavity and FTF
+acquisitions had zero hits in those layers within an acquisition.
+Recomputing across acquisitions avoids retaining loss-dependent products as
+losses drift. Single-source complete preparation and model reuse, and FTF's
+acquire-local `CavityAverageCache`, retain their separate lifetimes.
+See [ADR-0078](../../../../docs/adr/0078-evolution-module-boundary.md).
 
 ## Algorithm ownership and reuse
 
@@ -746,7 +668,7 @@ Cancellation is checked at chunk and preparation boundaries, and before return.
 Native BLAS stays at one thread throughout evolve. Overlapping engines share a
 process-level reference count and the last call restores the original limits;
 external threadpoolctl users must not change them during active evolves.
-`close()` waits for active work, clears the prepare cache and is idempotent.
+`close()` waits for active work, clears routing facts and is idempotent.
 
 `ModelSource` owns distinct acquire content's complete row inventories, separate
 from resident preparations and numerical guards. Each numerical input digest

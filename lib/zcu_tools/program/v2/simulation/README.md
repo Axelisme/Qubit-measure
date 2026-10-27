@@ -12,7 +12,7 @@ it before consuming the acquire sequence or constructing a request. Failure
 releases admission and propagates; the environment callback owns any optional
 startup-compilation fallback. External timers must wait at the environment's
 ready interface before starting if startup time should be excluded.
-`SimulationBinding(..., time_scale=0.0)` optionally paces each round to
+`SimulationBinding(..., timing=SimulationTiming(time_scale=0.0))` optionally paces each round to
 `time_scale × program.shot_time_s(rounds=1, ...)` seconds, passing each
 structural template's point durations and the acquire's reps and relaxation.
 Timeline durations include readout, pre/post delays and pending ADC activity;
@@ -22,7 +22,8 @@ not wait. With cancellation, waits check Stop at intervals of at most 10 ms; the
 integrated acquisition discards the interrupted round, while decimated
 acquisition keeps its completed trace and stops before the next round.
 A finite nonnegative `time_scale` of 1.0 follows physical time, 0.1 is ten times
-faster, and zero disables pacing and its clock reads. Generic bindings default
+faster, and zero disables pacing. Without an injected clock, zero also skips
+round clock reads. Generic bindings default
 to zero; FTF, single- and six-fluxonium environments default to 1.0. The environment
 builder owns this policy, not the GUI. For a 2 us timeline with zero relaxation,
 100 reps and 10 rounds target 2 ms total. For 25 points averaging 20 us plus
@@ -41,6 +42,18 @@ transport. Requested uploads still validate int16 envelope and weight dtypes;
 QICK retains first-compilation ownership. Hardware and decimated paths keep
 their original configuration. Classification, hooks, tracker, normalization,
 averaging and Stop still belong to that pipeline.
+
+`SimulationBinding(..., timing=SimulationTiming(clock=SimulationClock(...)))` optionally tracks physical
+time independently of pacing speed. One environment shares one clock. It adds
+`max(0, unscaled physical round seconds - elapsed wall seconds)` after each
+completed round, including pacing in elapsed time. Failed or cancelled rounds
+add nothing. Between rounds and acquisitions, wall time advances naturally.
+The clock's `monotonic` callable can supply synthetic wall seconds. Generic
+bindings do not create a clock; single-fluxonium environments own one.
+`SimulationCallbacks(on_begin=...)` runs after readiness and before request
+construction. Single-fluxonium uses it to freeze losses once per acquisition.
+Preparation failures propagate and release admission without consuming a sequence.
+Hardware acquisition does not call the binding or this clock.
 
 ## Build and own an environment
 

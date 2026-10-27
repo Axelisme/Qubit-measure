@@ -215,7 +215,7 @@ def test_engine_worker_and_chunk_partition_preserve_independent_density(
     results = []
     for workers, chunks in ((1, 1), (1, 3), (2, 1), (2, 4)):
         with closing(
-            Engine(workers, 0, chunks_per_worker=chunks, kernels=(DOP853Kernel(),))
+            Engine(workers, chunks_per_worker=chunks, kernels=(DOP853Kernel(),))
         ) as engine:
             results.append(engine.evolve(case.source, (workload,), cancel=Event()))
     for result in results:

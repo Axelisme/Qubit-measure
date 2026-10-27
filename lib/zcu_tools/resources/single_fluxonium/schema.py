@@ -197,6 +197,44 @@ class Numerics(RoundPacing):
     seed: Index | None = None
 
 
+class DriftParameter(Values):
+    """sigma: stationary standard deviation in ln(loss); tau_s: correlation seconds.
+
+    sigma is finite and nonnegative; tau_s is finite and strictly positive.
+    The log mean is ln(the positive configured loss), not its linear mean.
+    """
+
+    sigma: Nonnegative
+    tau_s: Positive
+
+
+class CoherenceDrift(Values):
+    """Independent optional log-OU processes; omitted parameters stay constant.
+
+    q_cap/xqp/aphi select their corresponding positive chip.qubit loss value.
+    Each process starts at that value on its first acquisition after startup.
+    """
+
+    q_cap: DriftParameter | None = None
+    xqp: DriftParameter | None = None
+    aphi: DriftParameter | None = None
+
+    def validate_losses(self, qubit: Fluxonium) -> None:
+        """Require positive configured losses for selected OU targets.
+
+        qubit supplies dimensionless q_cap/xqp and aphi in Phi0/sqrt(Hz).
+        No values are mutated or resources created. Disabled/null or zero selected losses
+        raise ValueError with a drift.<parameter> diagnostic.
+        """
+        for name, process, value in (
+            ("q_cap", self.q_cap, qubit.q_cap),
+            ("xqp", self.xqp, qubit.xqp),
+            ("aphi", self.aphi, qubit.aphi),
+        ):
+            if process is not None and (value is None or value <= 0):
+                raise ValueError(f"drift.{name}: requires a positive chip.qubit.{name}")
+
+
 class SingleFluxoniumSettings(Values):
     """Complete immutable single-fluxonium v1 physical/configuration snapshot.
 
@@ -205,7 +243,9 @@ class SingleFluxoniumSettings(Values):
     drive_line: one microwave line. flux_line: one large-amplitude fast-flux
     line, or None/omitted for a DC-only circuit with no pulsed flux route.
     readout: one pulse generator/cavity/ADC. numerics: explicit basis and
-    solver choices, optional seed/pacing. All sections except flux_line are required.
+    solver choices, optional seed/pacing. drift: optional per-loss log-OU sigma
+    and tau_s; None/omitted disables drift. Configured targets require positive
+    losses. All sections except flux_line and drift are required.
 
     Unknown fields, nonfinite numbers, colliding source names or generator
     indices are rejected. Counts derive from maximum bound channel index + 1;
@@ -221,6 +261,13 @@ class SingleFluxoniumSettings(Values):
     flux_line: FluxLine | None = None
     readout: Readout
     numerics: Numerics
+    drift: CoherenceDrift | None = None
+
+    @model_validator(mode="after")
+    def _drift_losses(self) -> Self:
+        if self.drift is not None:
+            self.drift.validate_losses(self.chip.qubit)
+        return self
 
     @field_validator("version", mode="before")
     @classmethod

@@ -358,16 +358,6 @@ class SingleToneRWAKernel:
             )
         )
 
-    def admit_prepared(
-        self,
-        prepared: Prepared,
-        table: SegmentTable,
-        rows: NDArray[np.int64],
-        context: KernelContext,
-    ) -> None:
-        """No guard preparation handoff; ordinary admission does not build."""
-        del prepared, table, rows, context
-
     def guard_prepared(
         self, table: SegmentTable, rows: NDArray[np.int64], context: KernelContext
     ) -> None:
