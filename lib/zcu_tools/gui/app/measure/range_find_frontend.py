@@ -4,13 +4,15 @@ from collections.abc import Callable
 
 import numpy as np
 from matplotlib.backend_bases import MouseButton, MouseEvent
+from matplotlib.backends.backend_qt import NavigationToolbar2QT
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
+from qtpy.QtGui import QResizeEvent
 from qtpy.QtWidgets import (
+    QBoxLayout,
     QComboBox,
     QFormLayout,
-    QHBoxLayout,
     QLabel,
     QLineEdit,
     QPushButton,
@@ -47,22 +49,26 @@ def draw_range_find(
     if state.candidates:
         x = [dip.freq for dip in state.candidates]
         ax.plot(x, np.interp(x, freqs, magnitude), "o", color="0.6", label="Candidates")
-    for index, dip in enumerate(state.selected):
+    for dip in state.selected:
         y = float(np.interp(dip.freq, freqs, magnitude))
-        name = dip.component if dip.component is not None else "unassigned"
         ax.plot(
             dip.freq,
             y,
             "*",
             color="crimson",
             markersize=12,
-            label=f"{index + 1}: {name} @ {dip.freq:g} MHz",
+            label=f"{dip.component} @ {dip.freq:g} MHz"
+            if dip.component is not None
+            else None,
         )
-        ax.annotate(name, (dip.freq, y), xytext=(6, 10), textcoords="offset points")
+        if dip.component is not None:
+            ax.annotate(
+                dip.component, (dip.freq, y), xytext=(6, 10), textcoords="offset points"
+            )
     ax.set_xlabel("Frequency (MHz)")
     ax.set_ylabel("Magnitude (a.u.)")
-    ax.legend(loc="upper right", fontsize="small")
-    figure.tight_layout()
+    ax.legend(loc="best", fontsize="small")
+    figure.set_layout_engine("constrained")
 
 
 class RangeFindFrontend[R](InteractiveFrontend):
@@ -93,10 +99,17 @@ class RangeFindFrontend[R](InteractiveFrontend):
         self._canvas = FigureCanvasQTAgg(self._figure)
         self._canvas.setObjectName("rangeFind.spectrum")
         self._fields: dict[str, QLineEdit] = {}
-        controls = self._make_controls()
-        root = QHBoxLayout(self)
-        root.addWidget(self._canvas, stretch=1)
-        root.addWidget(controls)
+        self._toolbar = NavigationToolbar2QT(self._canvas, self)
+        plot = QWidget(self)
+        plot_layout = QVBoxLayout(plot)
+        plot_layout.setContentsMargins(0, 0, 0, 0)
+        plot_layout.addWidget(self._toolbar)
+        plot_layout.addWidget(self._canvas, stretch=1)
+        self._controls = self._make_controls()
+        self._side_controls_width = self._controls.minimumSizeHint().width()
+        self._root = QBoxLayout(QBoxLayout.Direction.LeftToRight, self)
+        self._root.addWidget(plot, stretch=1)
+        self._root.addWidget(self._controls)
         connection = self._canvas.mpl_connect(
             "button_press_event", self._scope.callback(self._click)
         )
@@ -107,8 +120,13 @@ class RangeFindFrontend[R](InteractiveFrontend):
 
     def _make_controls(self) -> QWidget:
         controls = QWidget(self)
-        controls.setFixedWidth(280)
-        column = QVBoxLayout(controls)
+        controls.setMinimumWidth(280)
+        self._controls_layout = QBoxLayout(QBoxLayout.Direction.TopToBottom, controls)
+        column = QVBoxLayout()
+        column.setContentsMargins(0, 0, 0, 0)
+        self._controls_layout.addLayout(column)
+        actions = QVBoxLayout()
+        self._controls_layout.addLayout(actions)
         form = QFormLayout()
         for name, label in (
             ("smoothing_sigma", "Smoothing sigma (samples)"),
@@ -128,6 +146,8 @@ class RangeFindFrontend[R](InteractiveFrontend):
         self._component.setObjectName("rangeFind.component")
         self._component.addItem("Unassigned")
         self._component.addItems(list(self._plugin.components))
+        self._component.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
+        self._component.setMinimumWidth(self._component.sizeHint().width())
         form.addRow("Selected dip", self._selection)
         form.addRow("Component", self._component)
         column.addLayout(form)
@@ -135,23 +155,40 @@ class RangeFindFrontend[R](InteractiveFrontend):
         self._scope.connect(self._component.activated, self._assign)
         self._remove = QPushButton("Remove selected dip")
         self._scope.connect(self._remove.clicked, self._remove_selected)
-        column.addWidget(self._remove)
+        actions.addWidget(self._remove)
         hint = QLabel(
             "Click a star to remove it.\nClick elsewhere on the spectrum to add a sample.\nParameter edits replace manual selections."
         )
         hint.setWordWrap(True)
-        column.addWidget(hint)
+        actions.addWidget(hint)
         self._status = QLabel()
         self._status.setObjectName("rangeFind.status")
         self._status.setWordWrap(True)
-        column.addWidget(self._status)
-        column.addStretch()
+        actions.addWidget(self._status)
+        actions.addStretch()
         self._done, self._cancel = QPushButton("Done"), QPushButton("Cancel")
         self._scope.connect(self._done.clicked, self._finish)
         self._scope.connect(self._cancel.clicked, self._cancel_analysis)
-        column.addWidget(self._done)
-        column.addWidget(self._cancel)
+        actions.addWidget(self._done)
+        actions.addWidget(self._cancel)
         return controls
+
+    def resizeEvent(self, a0: QResizeEvent | None) -> None:
+        """Keep controls below the plot when a side column would leave <500 px."""
+        super().resizeEvent(a0)
+        margins = self._root.contentsMargins()
+        available = self.width() - margins.left() - margins.right()
+        below = available - self._side_controls_width - self._root.spacing() < 500
+        self._root.setDirection(
+            QBoxLayout.Direction.TopToBottom
+            if below
+            else QBoxLayout.Direction.LeftToRight
+        )
+        self._controls_layout.setDirection(
+            QBoxLayout.Direction.LeftToRight
+            if below
+            else QBoxLayout.Direction.TopToBottom
+        )
 
     @property
     def figure(self) -> Figure:
@@ -245,6 +282,7 @@ class RangeFindFrontend[R](InteractiveFrontend):
     def _click(self, event: MouseEvent) -> None:
         if (
             self._read_only
+            or self._toolbar.mode
             or event.button != MouseButton.LEFT
             or event.xdata is None
             or event.inaxes not in self._figure.axes

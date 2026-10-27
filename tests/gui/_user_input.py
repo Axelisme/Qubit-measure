@@ -106,6 +106,22 @@ def _display_text(widget: QWidget) -> str:
 
 
 def _caption_fits(widget: QWidget) -> bool:
+    if isinstance(widget, QComboBox):
+        option = QStyleOptionComboBox()
+        widget.initStyleOption(option)
+        style = widget.style()
+        if style is None:
+            raise RuntimeError("Combo box has no Qt style")
+        text_rect = style.subControlRect(
+            QStyle.ComplexControl.CC_ComboBox,
+            option,
+            QStyle.SubControl.SC_ComboBoxEditField,
+            widget,
+        )
+        return (
+            widget.fontMetrics().horizontalAdvance(widget.currentText())
+            <= text_rect.width()
+        )
     if isinstance(widget, QLabel) and widget.wordWrap():
         bounds = widget.fontMetrics().boundingRect(
             widget.contentsRect(), Qt.TextFlag.TextWordWrap, widget.text()
@@ -237,6 +253,51 @@ class ComponentDriver:
             target = self._window.childAt(point) or self._window
             if self._can_interact(target):
                 mouse_click(target, target.mapFromGlobal(QPoint(x, y)))
+        QApplication.processEvents()
+
+    def drag_at(self, start: tuple[int, int], end: tuple[int, int]) -> None:
+        """Drag between global logical points on one visible, enabled hit target.
+
+        Both endpoints must remain in that target. Covered or clipped targets
+        are not driven. Delivers a left press, move and release, then flushes Qt.
+        """
+        target = self._window.childAt(self._window.mapFromGlobal(QPoint(*start)))
+        if target is None or not self._can_interact(target):
+            return
+        if not target.visibleRegion().contains(target.mapFromGlobal(QPoint(*end))):
+            return
+        for kind, at, button, buttons in (
+            (
+                QEvent.Type.MouseButtonPress,
+                start,
+                Qt.MouseButton.LeftButton,
+                Qt.MouseButton.LeftButton,
+            ),
+            (
+                QEvent.Type.MouseMove,
+                end,
+                Qt.MouseButton.NoButton,
+                Qt.MouseButton.LeftButton,
+            ),
+            (
+                QEvent.Type.MouseButtonRelease,
+                end,
+                Qt.MouseButton.LeftButton,
+                Qt.MouseButton.NoButton,
+            ),
+        ):
+            screen = QPoint(*at)
+            QApplication.sendEvent(
+                target,
+                QMouseEvent(
+                    kind,
+                    QPointF(target.mapFromGlobal(screen)),
+                    QPointF(screen),
+                    button,
+                    buttons,
+                    Qt.KeyboardModifier.NoModifier,
+                ),
+            )
         QApplication.processEvents()
 
     def window_size(self) -> QSize:
@@ -1500,6 +1561,8 @@ class ComponentDriver:
                     .transformed(line.get_transform())
                     .intersects_bbox(axes.bbox, filled=False)
                 )
+                xmin, xmax = axes.get_xlim()
+                ymin, ymax = axes.get_ylim()
                 observed.append(
                     PlotAxesObservation(
                         axes.get_xlabel()
@@ -1509,6 +1572,22 @@ class ComponentDriver:
                         if axes.yaxis.get_visible() and axes.yaxis.label.get_visible()
                         else "",
                         curves,
+                        (float(xmin), float(xmax)),
+                        (float(ymin), float(ymax)),
+                        (
+                            canvas.mapToGlobal(QPoint()).x()
+                            + axes.bbox.x0 / canvas.device_pixel_ratio,
+                            canvas.mapToGlobal(QPoint()).y()
+                            + (canvas.figure.bbox.height - axes.bbox.y1)
+                            / canvas.device_pixel_ratio,
+                            axes.bbox.width / canvas.device_pixel_ratio,
+                            axes.bbox.height / canvas.device_pixel_ratio,
+                        ),
+                        tuple(
+                            t.get_text()
+                            for t in axes.texts
+                            if t.get_visible() and t.get_text()
+                        ),
                     )
                 )
         return PlotObservation(tuple(observed))

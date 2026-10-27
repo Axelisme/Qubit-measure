@@ -80,6 +80,7 @@ def make_plugin(
     *,
     plots: Plots,
     options: DipFinderOptions | None = None,
+    components: tuple[str, ...] = ("west", "east"),
 ) -> RangeFindPlugin[RangeFindState]:
     data = req.run_result.result
 
@@ -94,7 +95,7 @@ def make_plugin(
     return RangeFindPlugin(
         data.freqs,
         data.magnitude,
-        components=("west", "east"),
+        components=components,
         options=options if options is not None else DipFinderOptions(max_dips=2),
         build_result=build,
     )
@@ -121,6 +122,7 @@ RangeAdapter = Adapter(
 
 def _spectrum_record(
     parameters: ParameterContext,
+    data: SpectrumData | None = None,
 ) -> RunRecord[SpectrumCfg, SpectrumData]:
     storage = parameters.capture_storage()
     metadata = RunMetadata(
@@ -141,7 +143,9 @@ def _spectrum_record(
             hostname=None,
         ),
     )
-    return RunRecord(SpectrumCfg(), spectrum(), metadata=metadata)
+    return RunRecord(
+        SpectrumCfg(), spectrum() if data is None else data, metadata=metadata
+    )
 
 
 @dataclass
@@ -154,7 +158,12 @@ class RangeApplication:
 
 @contextmanager
 def range_application(
-    tmp_path: Path, qapp: QApplication, *, options: DipFinderOptions | None = None
+    tmp_path: Path,
+    qapp: QApplication,
+    *,
+    options: DipFinderOptions | None = None,
+    data: SpectrumData | None = None,
+    components: tuple[str, ...] = ("west", "east"),
 ) -> Generator[RangeApplication]:
     registry = Registry()
     adapter = Adapter(
@@ -163,7 +172,7 @@ def range_application(
         run=run,
         guide=None,
         analysis=Interactive(
-            plugin=partial(make_plugin, options=options),
+            plugin=partial(make_plugin, options=options, components=components),
             frontend=make_range_find_frontend,
             options=lambda source, env: PickerParams(),
         ),
@@ -179,7 +188,9 @@ def range_application(
     ctrl.add_view(window)
     tab_id = ctrl.tab_control.new_tab("spectrum")
     parameters = ctrl.context_control.read_context()
-    state.update_tab_result(tab_id, _spectrum_record(parameters), parameters=parameters)
+    state.update_tab_result(
+        tab_id, _spectrum_record(parameters, data), parameters=parameters
+    )
     state.update_tab_analyze_param_instance(tab_id, PickerParams())
     window.refresh_tab_analyze_form(tab_id)
     window.refresh_tab_interaction(tab_id)
