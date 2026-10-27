@@ -109,11 +109,13 @@ class _FluxConversion:
     """One v2 qubit frame and incoming v1 source-selection evidence."""
 
     frame: dict[str, QubitFluxCalibration] = field(default_factory=dict)
-    local_calibrated: bool = False
+    local_device: str | None = None
     coil_offsets: dict[str, float] = field(default_factory=dict)
 
 
-def _convert_components_v1(components: dict[str, YamlMap]) -> tuple[str, ...]:
+def _legacy_frames(
+    components: dict[str, YamlMap],
+) -> tuple[dict[str, _FluxConversion], list[str]]:
     conversions: dict[str, _FluxConversion] = {}
     notes: list[str] = []
     for name, fields in components.items():
@@ -125,13 +127,22 @@ def _convert_components_v1(components: dict[str, YamlMap]) -> tuple[str, ...]:
             _source(fields, path)
         if kind.startswith("qubit/"):
             conversion = _FluxConversion()
-            conversion.local_calibrated = _convert_local(name, fields, conversion.frame)
+            conversion.local_device = _convert_local(name, fields, conversion.frame)
             conversions[name] = conversion
     for name, fields in components.items():
         if fields.get("kind") == "group/mux":
             _convert_mux(name, fields, conversions, notes)
+    return conversions, notes
+
+
+def _convert_components_v1(components: dict[str, YamlMap]) -> tuple[str, ...]:
+    conversions, notes = _legacy_frames(components)
     for name, conversion in conversions.items():
-        _select_source(name, components[name], conversion, notes)
+        selected = _select_source(name, components[name], conversion, notes)
+        if selected is None:
+            components[name].pop("flux_source", None)
+        else:
+            components[name]["flux_source"] = selected
         components[name]["flux"] = {
             device: _COMPONENTS.validate_python(
                 {device: points.model_dump(mode="python")}
@@ -143,7 +154,7 @@ def _convert_components_v1(components: dict[str, YamlMap]) -> tuple[str, ...]:
 
 def _convert_local(
     name: str, fields: YamlMap, frame: dict[str, QubitFluxCalibration]
-) -> bool:
+) -> str | None:
     path = f"components.{name}"
     if fields.get("flux_unit") not in (None, "A", "V"):
         raise ValueError(f"{path}.flux_unit: expected A, V or null")
@@ -152,15 +163,17 @@ def _convert_local(
         "int": fields.get("flux_int"),
         "period": fields.get("flux_period"),
     }
-    calibrated = any(value is not None for value in raw.values())
-    if calibrated:
-        if fields.get("flux_source") is None:
-            fields["flux_source"] = "unnamed_device"
-        device = _source(fields, path)
+    device = None
+    if any(value is not None for value in raw.values()):
+        device = (
+            "unnamed_device"
+            if fields.get("flux_source") is None
+            else _source(fields, path)
+        )
         frame[device] = _calibration(raw, path, device_name=device)
     for key in _LOCAL:
         fields.pop(key, None)
-    return calibrated
+    return device
 
 
 def _convert_mux(
@@ -208,19 +221,21 @@ def _convert_mux(
 
 def _select_source(
     name: str, fields: YamlMap, conversion: _FluxConversion, notes: list[str]
-) -> None:
-    if conversion.local_calibrated or not conversion.coil_offsets:
-        return
+) -> str | None:
+    if conversion.local_device is not None:
+        return conversion.local_device
     source = fields.get("flux_source")
-    if isinstance(source, str) and source in conversion.coil_offsets:
-        return
+    if isinstance(source, str) and (
+        source in conversion.coil_offsets or not conversion.coil_offsets
+    ):
+        return source
     if len(conversion.coil_offsets) == 1:
-        fields["flux_source"] = next(iter(conversion.coil_offsets))
-    else:
-        fields.pop("flux_source", None)
+        return next(iter(conversion.coil_offsets))
+    if conversion.coil_offsets:
         notes.append(
             f"components.{name}.flux.offset: multiple coils without a designated source; left null. Recalibrate offset; all device periods are retained."
         )
+    return None
 
 
 def _v2_frame(raw: object, path: str) -> dict[str, QubitFluxCalibration]:
@@ -248,35 +263,43 @@ def _convert_components_v2(components: dict[str, YamlMap]) -> tuple[str, ...]:
             continue
         frame = _v2_frame(fields.get("flux", {}), f"components.{name}.flux")
         source = fields.get("flux_dev")
-        offset = None
-        if isinstance(source, str) and source in frame:
-            main = frame[source]
-            offset = (
-                0.5
-                - main.half / main.period
-                - sum(
-                    points.integer / points.period
-                    for device, points in frame.items()
-                    if device != source
-                )
-            )
-        current = QubitFluxSchema(
-            offset=offset,
-            period={device: points.period for device, points in frame.items()},
-        )
+        current = _frame_at_v3(frame, source if isinstance(source, str) else None)
         fields["flux"] = _COMPONENTS.validate_python(
             {name: current.model_dump(mode="python")}
         )[name]
-        paths = []
-        if source in ("unnamed_device", "unnamed_coil"):
-            paths.append(f"components.{name}.flux_dev")
-        for device in ("unnamed_device", "unnamed_coil"):
-            if device in current.period:
-                paths.append(f"components.{name}.flux.period.{device}")
-        notes.extend(
-            f"{path}: placeholder; rename to the actual device name." for path in paths
-        )
+        notes.extend(_placeholder_notes(name, fields, current))
     return tuple(notes)
+
+
+def _frame_at_v3(
+    frame: dict[str, QubitFluxCalibration], main_device: str | None
+) -> QubitFluxSchema:
+    offset = None
+    if main_device is not None and main_device in frame:
+        main = frame[main_device]
+        offset = (
+            0.5
+            - main.half / main.period
+            - sum(
+                points.integer / points.period
+                for device, points in frame.items()
+                if device != main_device
+            )
+        )
+    return QubitFluxSchema(
+        offset=offset,
+        period={device: points.period for device, points in frame.items()},
+    )
+
+
+def _placeholder_notes(name: str, fields: YamlMap, frame: QubitFluxSchema) -> list[str]:
+    paths = []
+    if fields.get("flux_dev") in ("unnamed_device", "unnamed_coil"):
+        paths.append(f"components.{name}.flux_dev")
+    for device in ("unnamed_device", "unnamed_coil"):
+        if device in frame.period:
+            paths.append(f"components.{name}.flux.period.{device}")
+    return [f"{path}: placeholder; rename to the actual device name." for path in paths]
 
 
 def _shape(components: dict[str, YamlMap], version: int) -> None:
@@ -395,7 +418,11 @@ def convert_storage_flux_batch(document: ParameterDocument) -> ParameterDocument
     Effective flux_source/flux_dev includes setup/mapping inheritance. Complete
     incoming calibration replaces offset and its device periods, retaining other
     inherited periods. No calibration retains the inherited frame unchanged.
-    Missing names get placeholders; invalid names/spacing, partial calibration
+    Only explicitly declared sources become flux_dev, including inherited names.
+    Missing names get distinct period placeholders, never an inferred flux_dev.
+    Offset uses structural local/coil roles, local first then a unique coil, with
+    neutral coil references. No phase or placeholder-name inference is needed.
+    Invalid names/spacing, partial calibration
     and same-batch device collisions fail. Native mixed documents remain rejected.
     No I/O occurs; the migration owner isolates failures and preserves raw input.
     """
@@ -411,17 +438,23 @@ def convert_storage_flux_batch(document: ParameterDocument) -> ParameterDocument
             fields["flux_source"] = fields.pop("flux_dev")
         if str(fields.get("kind", "")).startswith("qubit/"):
             inherited[name] = QubitFluxSchema.model_validate(fields.pop("flux", {}))
-    notes = _convert_components_v1(components)
-    notes += _convert_components_v2(components)
-    for name, previous in inherited.items():
+    conversions, notes = _legacy_frames(components)
+    for name, conversion in conversions.items():
         fields = components[name]
-        incoming = QubitFluxSchema.model_validate(fields["flux"])
-        if incoming.offset is not None:
+        main = _select_source(name, fields, conversion, notes)
+        incoming = _frame_at_v3(conversion.frame, main)
+        previous = inherited[name]
+        if conversion.frame:
             previous.offset = incoming.offset
         previous.period.update(incoming.period)
         fields["flux"] = _COMPONENTS.validate_python(
             {name: previous.model_dump(mode="python")}
         )[name]
+    for name, fields in components.items():
+        if "flux_source" in fields:
+            fields["flux_dev"] = fields.pop("flux_source")
+        if name in inherited:
+            notes.extend(_placeholder_notes(name, fields, inherited[name]))
     _validate_container(document, components)
     result = replace(result, notes=(*document.notes, *notes))
     result.data["components"] = dict(components)
