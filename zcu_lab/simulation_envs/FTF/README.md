@@ -2,7 +2,7 @@
 
 **讀者：** operator、lab-author、agent。準備 FTF 模擬參數與 entry，並從 GUI 或 Notebook 啟動模擬環境。
 
-**Last updated:** 2026-10-25，mux group mixer 與頂層 time_of_fly
+**Last updated:** 2026-10-27, fixed multiplicative readout background.
 
 既有 entry 把 resonator 與 mux group 的 `ext.time_of_fly` 搬到頂層 `time_of_fly`。程式不自動搬移。
 
@@ -15,6 +15,13 @@ cp zcu_lab/simulation_envs/FTF/default.yaml zcu_lab/simulation_envs/FTF/ftf.yaml
 ```
 
 缺少 `ftf.yaml` 時，`ftf(...)` 直接報錯。完整欄位、單位、合法範圍、三迴路映射與 entry 接線對照見 [FTF YAML v2 欄位指南](field-guide.md)。
+
+`default.yaml` 的背景現在使用 68／44／308 MHz 乘性駐波、2% 複數 RMS roughness、
+−4 dB/GHz 斜率與 3.7 GHz 低頻轉角。既有 `ftf.yaml` 不會自動更新。
+要看到新背景，請自行把樣板的 `background.extra_ripples`、`roughness` 與 `band_edges`
+補入工作副本的 pulse 及 mux receivers，並同步調整原有 ripple 與 slope，再重啟環境。
+`roughness.seed` 固定線路形狀，與量測雜訊的 `numerics.seed` 無關。
+欄位定義見 [ADC 背景契約](../../../lib/zcu_tools/simulate/adc/README.md)。
 
 ## 建立 entry 與啟動
 

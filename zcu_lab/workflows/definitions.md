@@ -2,7 +2,7 @@
 
 **讀者：** lab-author。查閱 coherence、MIST 與 overnight workflow 的校準、分析和保存契約。
 
-**Last updated:** 2026-10-25，MIST preparation 與依賴時態
+**Last updated:** 2026-10-27，coherence stage 硬體時間估計契約
 
 本 package 擁有具體 workflow 的 cfg 組裝、校準、分析、區域 history 與 point record。
 每個 workflow 是一個 async 函式。Engine 執行 await operations，記錄 tunables revision，並保存作者明確提交的 record。`registry.build_registry` 回傳 workflow 與表單的註冊清單，scripts 組合根將它交給 lib 宿主；import 不啟動量測。
@@ -45,6 +45,14 @@ Echo 的 detune_ratio 預設 0.1，零選純 decay，非零選 fringe；requeste
 T1 保留原有 relative error 與 normalized residual RMS 門檻。拒絕 reason 先保留 lifetime_rejection 的原因，再逐項列出失敗 gate 的名稱、實際值、失敗比較與門檻；無法取得的值標為 unavailable。
 Pi2 使用所選 Rabi 模式的 fitted pulse，不取 pi duration 或 gain 除以二。Len 模式使用 phase-aware fitted duration 與相同 gain。Amp 模式使用相同固定長度與獨立 fitted pi/2 gain。
 T1 的 native cfg 由 `coherence_fluxdep.stages.t1` 建立，T2 的 cfg 科學 helper 暫留 `coherence_fluxdep.t2`。純資料 plan/point carrier 不代表 standalone workflow 入口。
+
+### Coherence stage 硬體時間估計契約
+
+頻率、LenRabi、AmpRabi、T1、Echo、Ramsey、readout 優化與 singleshot GE 各有一個估計函式。函式與該 stage 的 cfg builder 放在同檔，讀同一組設定。Lifetime guess 由呼叫端傳入，估計函式不讀 history。每個函式回傳 `float` 秒數，一個 flux 點的總成本由呼叫端相加。
+
+估計只算 shot 時間，使用 [program 的 `shot_time_s` 契約](../../lib/zcu_tools/program/README.md#shot-time)，不另寫公式。它不計 acquire 固定開銷或 flux ramp。名義假設是執行滿 rounds，無重試、無 early stop，也不計頻率加寬或多候選的額外量測。因此估計值不是實際 wall time 的保證。
+
+2026-10-26，使用者對成本範圍裁決：「我想说 acquire 应该不是成本的主要成分。那就不考虑它存在好了。 Flas 的 ramp 也不是主要的， 也不考虑好了。」總結確認：「确认」。
 
 ## 獨立校準與 point
 

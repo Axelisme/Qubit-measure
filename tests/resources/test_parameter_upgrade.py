@@ -3,6 +3,7 @@
 from copy import deepcopy
 from dataclasses import replace
 from pathlib import Path
+from shlex import split
 
 import pytest
 from ruamel.yaml import YAML
@@ -17,6 +18,42 @@ from zcu_tools.resources.parameter_upgrade import (
     upgrade_document,
     upgrade_files,
 )
+
+
+def test_schema_hint_previews_and_applies_source_or_caller_target() -> None:
+    policy = ParameterSchemaPolicy(
+        2, ("uv", "run", "--no-sync", "--", "python", "scripts/upgrade_parameters.py")
+    )
+    source = Path("/data/entry with spaces/setup.yaml")
+    with pytest.raises(ValueError, match="schema_version missing") as error:
+        policy.require_current({}, source=source)
+    lines = str(error.value).splitlines()
+    assert lines[0] == f"{source}: schema_version missing; current 2."
+    assert lines[1].startswith("Preview: ")
+    assert lines[2].startswith("Apply: ")
+    assert split(lines[1].removeprefix("Preview: ")) == [
+        *policy.upgrade_command,
+        str(source),
+    ]
+    assert split(lines[2].removeprefix("Apply: ")) == [
+        *policy.upgrade_command,
+        str(source),
+        "--apply",
+    ]
+    assert lines[2].endswith("--apply")
+
+    with pytest.raises(ValueError, match="schema_version missing") as error:
+        policy.require_current({}, source=source, upgrade_target=source.parent)
+    lines = str(error.value).splitlines()
+    assert split(lines[1].removeprefix("Preview: ")) == [
+        *policy.upgrade_command,
+        str(source.parent),
+    ]
+    assert split(lines[2].removeprefix("Apply: ")) == [
+        *policy.upgrade_command,
+        str(source.parent),
+        "--apply",
+    ]
 
 
 def test_runner_orders_steps_and_preserves_caller_input() -> None:
@@ -228,6 +265,60 @@ def test_cli_isolates_corrupt_and_partial_documents_and_defaults_to_dry_run(
     )
     assert main([str(good), "--apply"], plan=rename_plan) == 0
     assert "skipped" in capsys.readouterr().out
+
+
+def test_component_cli_expands_entry_for_preview_and_apply(
+    tmp_path: Path, rename_plan: UpgradePlan, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = tmp_path / "entry with spaces"
+    sources = (
+        root / "setup.yaml",
+        root / "points" / "bias-a" / "point.yaml",
+        root / "points" / "bias-b" / "point.yaml",
+    )
+    original = b"old: 7\nkeep: untouched\n"
+    for path in sources:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(original)
+    unrelated = root / "points" / "bias-a" / "module_cfg.yaml"
+    unrelated.write_bytes(b"library: untouched\n")
+    before = set(root.rglob("*"))
+
+    assert main([str(root)], plan=rename_plan) == 0
+    preview = capsys.readouterr().out
+    assert [line for line in preview.splitlines() if line.endswith(": dry-run")] == [
+        f"{path}: dry-run" for path in sources
+    ]
+    assert set(root.rglob("*")) == before
+    assert all(path.read_bytes() == original for path in sources)
+
+    assert main([str(root), "--apply"], plan=rename_plan) == 0
+    output = capsys.readouterr().out
+    for path in sources:
+        assert f"{path}: applied" in output
+        assert YAML(typ="safe").load(path) == {
+            "schema_version": 2,
+            "new": 7,
+            "keep": "untouched",
+        }
+        backups = list(path.parent.glob(f"{path.name}.*.bak"))
+        assert len(backups) == 1
+        assert backups[0].read_bytes() == original
+        assert str(backups[0]) in output
+    assert unrelated.read_bytes() == b"library: untouched\n"
+
+
+def test_component_cli_rejects_non_entry_directory(
+    tmp_path: Path, rename_plan: UpgradePlan, capsys: pytest.CaptureFixture[str]
+) -> None:
+    with pytest.raises(SystemExit) as error:
+        main([str(tmp_path)], plan=rename_plan)
+    assert error.value.code == 2
+    diagnostic = capsys.readouterr().err
+    assert str(tmp_path) in diagnostic
+    assert "not an entry directory" in diagnostic
+    assert "setup.yaml" in diagnostic
+    assert list(tmp_path.iterdir()) == []
 
 
 def test_component_cli_prints_caller_assumptions_before_file_results(

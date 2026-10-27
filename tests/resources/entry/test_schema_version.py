@@ -1,5 +1,7 @@
 """Whole-document component versions at the public entry read/write seam."""
 
+from shlex import split
+
 import pytest
 from ruamel.yaml import YAML
 from zcu_tools.resources.entry import (
@@ -33,6 +35,38 @@ def test_runtime_rejects_missing_or_noncurrent_schema_without_writing(
     assert "current" in str(error.value)
     assert "upgrade" in str(error.value)
     assert path.read_bytes() == original
+
+
+@pytest.mark.parametrize("point", [None, "bias-a"])
+def test_runtime_hint_targets_whole_entry(
+    entry: ResultEntry, point: str | None
+) -> None:
+    if point is None:
+        path = entry.result_path / "setup.yaml"
+    else:
+        entry.new_point(point)
+        path = entry.result_path / "points" / point / "point.yaml"
+    yaml = YAML()
+    document = yaml.load(path)
+    document.pop("schema_version")
+    yaml.dump(document, path)
+
+    if point is None:
+        with pytest.raises(ValueError, match="schema_version missing") as error:
+            ResultEntry.open(
+                "entry",
+                result_root=entry.result_path.parent,
+                database_root=entry.database_path.parent,
+            )
+    else:
+        with pytest.raises(ValueError, match="schema_version missing") as error:
+            entry.use_point(point)
+    preview, apply = str(error.value).splitlines()[-2:]
+    assert split(preview.removeprefix("Preview: "))[-1] == str(entry.result_path)
+    assert split(apply.removeprefix("Apply: "))[-2:] == [
+        str(entry.result_path),
+        "--apply",
+    ]
 
 
 def test_create_edit_seed_and_clone_use_caller_schema_version(
@@ -72,6 +106,9 @@ def test_template_requires_current_version_before_component_parsing(
         encoding="utf-8",
     )
     original = path.read_bytes()
-    with pytest.raises(ValueError, match="schema_version missing"):
+    with pytest.raises(ValueError, match="schema_version missing") as error:
         load_entry_template(path)
+    preview, apply = str(error.value).splitlines()[-2:]
+    assert split(preview.removeprefix("Preview: "))[-1] == str(path)
+    assert split(apply.removeprefix("Apply: "))[-2:] == [str(path), "--apply"]
     assert path.read_bytes() == original

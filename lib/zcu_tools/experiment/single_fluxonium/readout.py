@@ -9,6 +9,10 @@ from zcu_tools.core.simulation import AcquireRequest
 from zcu_tools.experiment.readout_plan import local_readout_pulses
 from zcu_tools.resources.single_fluxonium import SingleFluxoniumSettings
 from zcu_tools.simulate.adc import (
+    BackgroundBandEdge,
+    BackgroundBandEdges,
+    BackgroundRipple,
+    BackgroundRoughness,
     ChannelReadout,
     ConditionalSums,
     ReadoutBatch,
@@ -103,6 +107,33 @@ def prepare_readout(
         ripple_phase_rad=float(np.deg2rad(adc.background.ripple_phase_deg)),
         slope_db_per_ghz=adc.background.slope_db_per_ghz,
         pivot_ghz=adc.background.pivot_ghz,
+        extra_ripples=tuple(
+            BackgroundRipple(w.depth, w.period_mhz, w.phase_deg)
+            for w in adc.background.extra_ripples
+        ),
+        roughness=None
+        if adc.background.roughness is None
+        else BackgroundRoughness(
+            adc.background.roughness.amplitude,
+            adc.background.roughness.correlation_mhz,
+            adc.background.roughness.seed,
+        ),
+        band_edges=None
+        if adc.background.band_edges is None
+        else BackgroundBandEdges(
+            low=None
+            if adc.background.band_edges.low is None
+            else BackgroundBandEdge(
+                adc.background.band_edges.low.corner_ghz,
+                adc.background.band_edges.low.rolloff_db_per_ghz,
+            ),
+            high=None
+            if adc.background.band_edges.high is None
+            else BackgroundBandEdge(
+                adc.background.band_edges.high.corner_ghz,
+                adc.background.band_edges.high.rolloff_db_per_ghz,
+            ),
+        ),
     )
     reference = plans[0].readout.pulses[0][0].frequency_ghz
     model = replace(physical, receiver=receiver, reference_frequency_ghz=reference)

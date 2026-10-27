@@ -44,6 +44,10 @@ FTF 範例先讀相鄰 `entry-template.yaml`，建立新 entry 與 setup compone
 
 FTF startup 呼叫 `ftf(Path(__file__).with_name("ftf.yaml"), workers=1, warmup=False)`，設定按 script 位置定位，不在啟動時做數值 warmup 或 acquire。Notebook 明示工作副本 YAML 路徑，以 `workers=max(1, (os.cpu_count() or 1) - 2), warmup=True` 保留兩核並啟動背景預編譯。指定檔缺失或無效直接報錯，不 fallback。公開 `ftf()` 預設只用一個 worker 且不預編譯，兩個 caller 各自明示成本政策。
 
+FTF、single_fluxonium 與 six_fluxonium 的 startup 都讀同目錄、不納入 Git 的工作副本，分別為 `ftf.yaml`、`single_fluxonium.yaml` 與 `six_fluxonium.yaml`。各環境的 `default.yaml` 是納入 Git 的樣板，不是 startup 的讀取來源。第一次使用先複製樣板；工作副本不存在時報錯並附上 `cp default.yaml <工作副本>` 指令，不退回樣板。2026-10-26，使用者對 single／six 比照 FTF 的方案確認：「亚某那个，我认同你采用你的方案」。
+
+使用者與 agent 調整模擬設定都修改 YAML 工作副本，不以程式覆寫參數取代操作。例如關閉 six_fluxonium 的 pacing，就把六顆 qubit 的 `numerics.time_scale` 設為 0，不為 `six_fluxonium()` 新增覆寫參數。FTF 既有的 `time_scale` 覆寫只供測試使用。2026-10-26，使用者裁決：「我觉得你就直接改 YAML 档就好了，这个 YAML 档就是让人调的。而且为什么是直接读 default？ 我以为应该是读类似 ftf.yaml 这样子的东西。我不知道为什么 ftf 会有一个控制参数来复写，我是不希望啊，我知道了啦，这个是拿来测试用的，如果测试需要的话那就算了，但你自己使用的话应该是用用户的角度，也就是修改 YAML 档才对。」
+
 Builder 回傳前失敗，由 builder 清理已建立資源。回傳成功後，腳本在第一個可能失敗的交付前登記 on_close，並只在 register 成功後記錄交給 GUI 的名稱。模擬資料來源繼續透過 environment manager 借用 drivers。Close callback 先從該 manager drop 已交付名稱而不 close，再關未交付 drivers，之後 GUI 才關自己接管的 drivers，避免雙關。未捕捉的腳本失敗保留已完成工作與 cleanup 登記，不回退正常模式或白雜訊。部分 close 失敗保留診斷，不宣稱清理成功，也不自動 retry。
 
 正常關閉遵守既有 operation／Run gate，先 drain 再反序執行 callbacks，最後關閉 GUI 管理的 drivers。Device 的同名 live 不被替換，記得但未連線列只由腳本明確 remember，不由 framework persistence 回填。這不新增通用交易框架。
@@ -134,6 +138,37 @@ Root seed 可指定或生成。各 acquire 使用獨立抽樣流，round／point
 
 Acquire 與 round 記錄可引用去重，但模型、waveform、設定內容必須保留且可解析，不能只留下可被覆寫的路徑。正常 GUI／MCP 只取得 I/Q、分析、控制值與公開 provenance；private truth／重播資料分開，不以模型真值幫操作者校準。這是介面界線，不是對本機檔案權限的 sandbox。
 
+### 固定讀出線背景
+
+FTF、single_fluxonium 與 six_fluxonium 共用 `simulate.adc.Receiver.background(f)`。
+`resources.simulation_schema` 驗證 YAML；experiment 只轉成 ADC 的具名數值 records。
+FTF detached author config 保存 ADC frozen dataclasses，preparation key 不依賴 YAML schema。
+數學只由 ADC 實作，不改 physical cavity fields、耗散、receiver offset 或 noise。
+
+既有 `ripple_*` 駐波與 dB/GHz 斜率保留。每個 receiver 的 `background` 可另填：
+
+- `extra_ripples` 列表，每筆為 `depth`、正值 `period_mhz` 與選填 `phase_deg`。
+  每筆駐波以 `1 + depth·exp(i·phase(f))` 與原背景相乘，depth 範圍為 `[0,1)`。
+- `roughness` 包含非負 `amplitude`、正值 `correlation_mhz` 與非負整數 `seed`。
+  它以 `1 + z(f)` 乘上背景。Amplitude 是複數 perturbation 的 RMS。
+  Correlation 是 ensemble 相關降至 `e^-1` 的頻距，頻率相關近似 Gaussian。
+  ADC 以獨立 PCG64 stream 產生固定頻譜，不逐掃描點抽亂數。
+  同一設定、seed 與頻率的值相同，不受點數、順序或 acquire 次數影響。
+  有限頻段的 RMS 與相關寬度會有統計起伏，不承諾跨 NumPy／數值版本 bit-exact。
+- `band_edges` 可填 `low` 或 `high`，每側為有限 `corner_ghz` 與正值 `rolloff_db_per_ghz`。
+  角外衰減隨距離以 dB 線性增加，角內不衰減。振幅在轉角連續，兩側都填時 low 必須低於 high。
+
+`roughness.seed` 預設 0，與 `numerics.seed` 無關。背景代表固定線路與接頭，
+不應隨 session 的量測雜訊改變。即使 `numerics.seed: null` 每次選不同雜訊 seed，
+背景仍固定；更換線路形狀時才改 `roughness.seed`。
+
+三個選填項預設分別為空列表、null 與 null，省略時逐點保留原數值。
+共用 schema 拒絕非法範圍與非有限值，錯誤包含欄位路徑。Format／version 不變。
+三份 `default.yaml` 樣板改用 68／44／308 MHz 駐波、2% 複數 RMS roughness、
+約 −4 dB/GHz 斜率與 3.7 GHz 低頻轉角。這些值模擬實測背景的尺度，不是線路校準。
+既有未納入 Git 的工作副本保持原樣，使用者需自行補上新欄位並重啟環境才看得到。
+完整公式與數值 seed 規則見 [ADC README](../../../lib/zcu_tools/simulate/adc/README.md)。
+
 ### 第一版模型組合與控制非理想
 
 2026-10-13，使用者對保留 arbitrary I/Q 與第一版模型組合回答：「你說目前把 arbitrary I/Q 轉成 abs(I+jQ)是目前的SimEngine嗎？確實不理想。採用建議」。FTF 在含耦合聯合空間演化，產生 coupler 調諧、混成、idle ZZ、conditional phase 與 leakage，不直接套理想 CZ。
@@ -141,6 +176,8 @@ Acquire 與 round 記錄可引用去重，但模型、waveform、設定內容必
 F1／F2 使用 Fluxonium，coupler 是真正 flux-dependent circuit。使用者選擇：「1A，就是要練習用實驗找工作點」。F1–C、F2–C 與 F1–F2 皆用完整 charge coupling；2026-10-14 使用者要求「可能要考慮非零的F1-F2 coupling」。g12=0 只表示關閉該項，非模型假設。
 
 控制包含 bias offset／gain、固定 flux 串擾、可含相位的 microwave 串擾、來源線 delay／一階低通。先來源線響應、後 loop 映射；同 shot 保留 tail，每個獨立 shot 從當下 DC 線路穩態開始。不建立任意 transfer-function framework，不丟失 envelope 符號、quadrature、carrier 或 phase。
+
+Six_fluxonium 的各 cavity 委託 `SingleFluxoniumSource`，與 single_fluxonium 共用 `SingleFluxoniumModel` 及包含 Purcell 的物理模型，不另寫一套六 qubit 損耗模型。多 qubit 拓樸、coil＋local 兩源與無快磁通等環境差異見 [six_fluxonium README](../../../zcu_lab/simulation_envs/six_fluxonium/README.md#physical-model-and-single-fluxonium-consistency)。比較前在各自的 YAML 工作副本對齊物理常數。2026-10-27，使用者要求「10a 選i，但請讓six_fluxonium的模擬與single_fluxonium一致」，並授權「six_fluxonium也是，你決定。」。確認兩者已共用物理核心後，使用者答覆「接受」，因此不改程式。
 
 ### Coupler 固定座標與固定演化基底
 
