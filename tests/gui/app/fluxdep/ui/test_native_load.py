@@ -5,12 +5,80 @@ from __future__ import annotations
 from dataclasses import replace
 
 import numpy as np
+import pytest
 from zcu_tools.analysis.flux import ComponentFluxContext, DevicePeriod, FluxFrame
 from zcu_tools.datafile import Axis, load, save
 from zcu_tools.gui.app.fluxdep.ui.load_dialog import LoadSpectrumDialog
 
 from tests.gui._user_input import ComponentDriver
 from tests.gui.app.fluxdep._native import native_spectrum_file
+
+
+@pytest.fixture
+def uncalibrated_native_dialog(qapp, tmp_path):
+    """Show native loading without a calibrated component frame."""
+    path = native_spectrum_file(tmp_path / "valid.h5", None)
+    context = ComponentFluxContext(None, "bias", {"bias": "A"})
+    dialog = LoadSpectrumDialog({}, start_dir=str(tmp_path), flux_context=context)
+    dialog.show()
+    qapp.processEvents()
+    driver = ComponentDriver(dialog)
+    try:
+        yield driver, path
+    finally:
+        driver.click("Cancel")
+        dialog.deleteLater()
+        qapp.processEvents()
+
+
+def test_native_uncalibrated_context_preserves_source_unit(
+    uncalibrated_native_dialog, tmp_path
+):
+    driver, path = uncalibrated_native_dialog
+    driver.screenshot(tmp_path / "initial.png")
+    driver.choose_file("Browse…", path, evidence=tmp_path / "chooser.png")
+    driver.screenshot(tmp_path / "uncalibrated.png")
+    assert driver.observe(object_name="native_device").text == "unnamed_device"
+    assert driver.observe("OK").enabled
+    assert any(
+        widget.kind == "QLabel" and widget.text == "A"
+        for widget in driver.visible().widgets
+    ), "The uncalibrated native source must display its A axis unit"
+
+
+def test_native_read_failure_disables_submission_and_recovers(
+    uncalibrated_native_dialog, tmp_path
+):
+    driver, valid = uncalibrated_native_dialog
+    broken = tmp_path / "broken.h5"
+    broken.write_bytes(b"not an HDF5 file")
+    driver.screenshot(tmp_path / "initial.png")
+    driver.choose_file("Browse…", valid, evidence=tmp_path / "valid-chooser.png")
+    driver.screenshot(tmp_path / "valid.png")
+    assert driver.observe("OK").enabled
+
+    driver.choose_file("Browse…", broken, evidence=tmp_path / "broken-chooser.png")
+    driver.screenshot(tmp_path / "broken.png")
+    error = driver.observe(object_name="native_input_error")
+    assert error.visible
+    assert "file signature" in error.text
+    assert not driver.observe("OK").enabled
+    for name in ("native_variable", "native_device_axis"):
+        control = driver.observe(object_name=name)
+        assert not control.enabled
+        assert control.text == ""
+    assert not driver.observe(object_name="native_device").enabled
+
+    driver.choose_file("Browse…", valid, evidence=tmp_path / "recovery-chooser.png")
+    driver.screenshot(tmp_path / "recovered.png")
+    assert driver.observe("OK").enabled
+    assert driver.observe(object_name="native_input_error").text == ""
+    assert driver.observe(object_name="native_variable").text == "signal"
+    assert driver.observe(object_name="native_variable").enabled
+    assert driver.observe(object_name="native_device_axis").text == "bias"
+    assert driver.observe(object_name="native_device_axis").enabled
+    assert driver.observe(object_name="native_device").text == "unnamed_device"
+    assert driver.observe("A").visible
 
 
 def test_native_unique_preselection_and_ambiguous_manual_selection(qapp, tmp_path):

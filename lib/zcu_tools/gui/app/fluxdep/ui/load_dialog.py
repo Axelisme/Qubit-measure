@@ -149,7 +149,21 @@ class LoadSpectrumDialog(LoadDataDialog):
         try:
             source = read_spectrum_source(filepath)
         except (OSError, ValueError, KeyError, TypeError) as error:
+            self._variable.clear()
+            self._device_axis.clear()
+            self._device.clear()
+            self._device.addItem("unnamed_device")
+            for control in (
+                self._variable,
+                self._device_axis,
+                self._device,
+                self._transpose_btn,
+            ):
+                control.setEnabled(False)
+            self._unit_label.setText("native")
             self._native_error.setText(str(error))
+            if self._ok_button is not None:
+                self._ok_button.setEnabled(False)
             return None
         native = isinstance(source, Container)
         self._variable.setEnabled(native)
@@ -242,7 +256,7 @@ class LoadSpectrumDialog(LoadDataDialog):
                     source, variable=variable, device_axis=axis
                 )
                 self._raw = (spectrum.signals, spectrum.dev_values, spectrum.freqs_mhz)
-                if self._flux_context is None:
+                if self._flux_context is None or self._flux_context.frame is None:
                     self._unit_label.setText(spectrum.unit)
                 valid = self._device.currentText() != "(choose device)"
                 message = "" if valid else message
