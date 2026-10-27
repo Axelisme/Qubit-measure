@@ -129,7 +129,7 @@ Record 範圍只按 operator 宣告轉換舊無名值，不補歷史 frame 或 c
 沿用 [[0072]] 的 lab→framework 方向。Flux 數學只收純 analysis 型別，不讀 component。
 Lab 負責 component 轉換、表單初值與 Measure proposal，三個數學入口統一處理正向、投影與反解。
 Workflow FrequencyModel 的欄位與單儀器 affine 行為不變，初值由 `flux_dev` 投影 half 與 signed period。
-Predictor v1、app reference anchors 與其檔案格式不變。App snapshot、多儀器 predictor 為後續工作。
+Predictor 檔使用 [v2](../storage-format-history/predictor-v2.md)，分開保存能量與 offset／period／unit。Resources 透過 analysis 的 FluxFrame／DevicePeriod 驗證與轉換，simulate 只收 reduced flux。Predictor 與 component 的 offset 各自記錄資料對齊與目前校準，不互相覆寫。App snapshot 與 reference anchors 的擴充不屬於 component 模型。
 
 沿用 `.importlinter` C14、C16，禁止 framework 反向載入 lab。
 C20、C21 禁止 framework 依賴 migrations 或 scripts，升級能力由 caller 注入。
