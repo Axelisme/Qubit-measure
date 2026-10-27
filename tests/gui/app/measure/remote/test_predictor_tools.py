@@ -80,7 +80,7 @@ def test_info_preserves_partial_energy_and_reports_optional_flux(
     simulator, with_flux: bool
 ) -> None:
     _, _, sock = simulator
-    source = {"params": {"model": "fluxonium", "EJ": 4.1}}
+    source: dict[str, object] = {"params": {"model": "fluxonium", "EJ": 4.1}}
     if with_flux:
         source["flux"] = FLUX
     reply = call(sock, "predictor.info", source)
