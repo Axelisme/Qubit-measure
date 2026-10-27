@@ -52,6 +52,38 @@ def test_parameter_editor_returns_energy_only_trial(qapp):
         editor.deleteLater()
 
 
+def test_flux_editor_formats_prefilled_and_updated_numeric_fields(qapp):
+    from zcu_tools.gui.session.ui.predictor_flux import PredictorFluxEditor
+
+    editor = PredictorFluxEditor(on_edited=lambda: None)
+    offset = editor.findChild(QLineEdit, "predictor_offset")
+    assert offset is not None
+    try:
+        editor.set_flux(
+            PredictorFlux(0.22999999999999998, {"coil": 2.0}, {"coil": "A"}),
+            {"coil": 0.22999999999999998},
+        )
+        native_value = editor.findChild(QLineEdit, "predictor_value_coil")
+        assert native_value is not None
+        assert (offset.text(), native_value.text()) == ("0.23", "0.23")
+
+        for value, expected in (
+            (0.1472990092, "0.1472990092"),
+            (0.123456789012345, "0.123456789012345"),
+            (1e-7, "1e-07"),
+            (0.22999999999999998, "0.23"),
+        ):
+            editor.set_offset(value)
+            editor.set_device_value("coil", value)
+            assert (offset.text(), native_value.text()) == (expected, expected)
+            assert editor.flux().offset == float(expected)
+            assert editor.device_values()["coil"] == float(expected)
+    finally:
+        editor.retire_callbacks()
+        editor.close()
+        editor.deleteLater()
+
+
 def test_dialog_loads_frame_and_every_cached_device_value(qapp):
     from zcu_tools.resources.predictor_file import (
         PredictorFile,
@@ -188,9 +220,9 @@ def test_live_marker_changes_only_the_selected_axis_value(qapp):
         dialog.deleteLater()
 
 
-def test_show_preserves_full_precision_native_values(qapp):
+def test_show_roundtrips_15_significant_digit_native_values_exactly(qapp):
     dialog = _make_dialog()
-    values = {"coil": 0.12345678901234567}
+    values = {"coil": 0.123456789012345}
     try:
         dialog.set_flux(PredictorFlux(0.2, {"coil": 2.0}, {"coil": "A"}), values)
         dialog.show()
