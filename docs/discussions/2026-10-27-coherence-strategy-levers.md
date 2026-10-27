@@ -70,3 +70,7 @@ Staircase 原本設想一個 `bayes_coherence` workflow：從帶誤差的先驗�
 - 正向模型與擬合器：`zcu_lab/workflows/coherence_fluxdep/`、`lib/zcu_tools/notebook/analysis/`（關聯矩陣與弱參數標示見 `fit_tools/README.md`）。
 - 現有非均勻 delay 取樣：`lib/zcu_tools/experiment/v2/utils/t1_sampling.py`。
 - 第 1–7 輪的 Monte Carlo 與 Fisher 解析原型、報告與圖為未入庫工作檔；本文數字取自各輪報告。
+
+## 後記（2026-10-27 深夜）
+
+第 8 輪端到端 MC（U、R-prior、R-interleaved）在執行中被暫停讓位給其他檢查，之後子程序結束而沒有產出報告；未重跑。使用者在第 7 輪後已選擇不做穩健 delay 設計（見結論第 3 點與 `measure_knowledge` 的 `coherence-fluxdep-route` 條目），第 8 輪只會改變討論的後記，不改變結論，因此不補跑。
