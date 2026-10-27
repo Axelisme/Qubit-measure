@@ -13,6 +13,14 @@ fluxdep 的互動 line picker，也不要求 QICK。
 `spectrum.py` 提供兩個分析 GUI 共用的原始頻譜資料型別，以及 Hz→GHz 與座標遞增排序。
 其中 `fluxs` 是座標軸，不是 flux 校正參數。
 
+`dips.py` 的 `find_spectrum_dips(freqs, magnitude, options)` 接受 MHz 與 magnitude，
+以兩端中位數直線去背景，回傳依 depth / FWHM 降冪排列的 `SpectrumDip`。
+`DipFinderOptions` 預設不平滑、prominence 雜訊倍率 5、FWHM 上限 25 MHz、
+最小間距 1 MHz，`max_dips=None` 保留全部符合條件的谷。
+FWHM 使用半 prominence 的插值寬度，至少為谷兩側頻率步進的平均。
+函式先剔除過寬的谷，再依分數貪婪套用間距與數量上限。
+它不命名元件、不讀寫資料，也不畫圖。
+
 `failure.AnalysisFailed` 表示數值 owner 已辨識的無法產出分析結果，與任意程式錯誤分開。
 Experiment 公開同一型別，GUI analyze work 經分類後才讓 recipe 交付 failed 值。
 分類範圍由各數值 owner 文件列明，不以 ValueError／RuntimeError 的文字猜測。

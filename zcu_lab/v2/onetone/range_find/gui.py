@@ -40,6 +40,8 @@ class RangeFindParams:
 
     resonators is JSON text such as '["R2", "R1"]', or '[]' for unnamed discovery.
     min_separation is positive finite MHz, default 1 MHz as in core Options.
+    smoothing_sigma is Gaussian sigma in samples, default zero. prominence_factor
+    is the noise multiplier, default five. max_fwhm limits width in MHz, default 25.
     to_options rejects invalid JSON and delegates the domain checks to core.
     """
 
@@ -47,6 +49,13 @@ class RangeFindParams:
     min_separation: Annotated[float, ParamMeta(label="Min separation (MHz)")] = (
         DEFAULT_MIN_SEPARATION_MHZ
     )
+    smoothing_sigma: Annotated[float, ParamMeta(label="Smoothing sigma (samples)")] = (
+        0.0
+    )
+    prominence_factor: Annotated[float, ParamMeta(label="Prominence noise factor")] = (
+        5.0
+    )
+    max_fwhm: Annotated[float, ParamMeta(label="Max FWHM (MHz)")] = 25.0
 
     def to_options(self) -> RangeFindOptions:
         """Parse JSON names and return validated core Options, or raise ValueError.
@@ -68,7 +77,13 @@ class RangeFindParams:
             if not isinstance(name, str):
                 raise ValueError("Resonators JSON list must contain only strings")
             names.append(name)
-        options = RangeFindOptions(names, self.min_separation)
+        options = RangeFindOptions(
+            resonators=names,
+            min_separation=self.min_separation,
+            smoothing_sigma=self.smoothing_sigma,
+            prominence_factor=self.prominence_factor,
+            max_fwhm=self.max_fwhm,
+        )
         options.validate()
         return options
 
@@ -79,6 +94,8 @@ class ResonatorDipSummary(BaseModel):
     name: str | None = Field(description="Analysis name, or null during discovery.")
     freq: float | None = Field(description="Absolute dip frequency in MHz.")
     depth: float | None = Field(description="Magnitude prominence depth in a.u.")
+    fwhm: float | None = Field(description="Half-prominence dip width in MHz.")
+    score: float | None = Field(description="Depth divided by FWHM in a.u./MHz.")
 
 
 class RangeFindSummary(BaseModel):
@@ -100,7 +117,8 @@ class RangeFindSummary(BaseModel):
 class RangeFindAnalysis:
     """Frequency-ordered dips and captured writeback eligibility.
 
-    dips contains optional name, absolute MHz and magnitude prominence depth.
+    dips contains optional name, absolute MHz, magnitude prominence depth,
+    half-prominence FWHM in MHz and depth / FWHM score in a.u./MHz.
     Unnamed discovery has no writable names or identity diagnostic.
     writable contains only names present in the analysis capture. diagnostic
     explains omitted frequency proposals; None means every dip is writable.

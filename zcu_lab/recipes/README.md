@@ -171,7 +171,7 @@ Recipe 可以串多個 adapter，宣告不另設單一 adapter mapping。
 | MCP tool | Adapter | 掃描與回報 |
 | --- | --- | --- |
 | `mux_onetone` | `mux/onetone` | `participants` 收完整 readout 的原始整數 index，依清單順序執行，不以名稱查位置。`df:{start,stop}` 是共同 MHz offset，`n` 是共用點數。回覆每 tone 的 index、name、freq、kappa、fit_quality 與 identity 診斷。 |
-| `onetone_range_find` | `onetone/range_find` | 必填絕對 MHz `freq:{start,stop}` 與 `n`，可選 `resonators` 只作 Analyze 命名，不進 acquisition cfg。省略保留分析名單，null 原樣交分析 owner，空清單做無名探索。只有明填非空名單才詢問寫回。回覆每 dip 的可選 name、freq、depth 與 `identity_diagnostic`。`min_separation` 是有限正數 MHz，預設 1 MHz，經同一 Analyze operation 更新 owner 的凹陷間距，不改 acquisition。 |
+| `onetone_range_find` | `onetone/range_find` | 必填絕對 MHz `freq:{start,stop}` 與 `n`，可選 `resonators` 只作 Analyze 命名，不進 acquisition cfg。省略保留分析名單，null 原樣交分析 owner，空清單做無名探索。只有明填非空名單才詢問寫回。回覆每 dip 的可選 name、freq、depth、fwhm、score 與 `identity_diagnostic`。初始不平滑、prominence 雜訊倍率 5、FWHM 上限 25 MHz，以 depth / FWHM 排序。`min_separation` 是有限正數 MHz，預設 1 MHz，經同一 Analyze operation 更新 owner 的凹陷間距，不改 acquisition。 |
 | `twotone_flux_dep` | `twotone/flux_dep` | 必填 drive 的 `center_mhz`、`span_mhz`、`freq_points` 及 native flux device、unit、端點、點數。互動 picker 完成後詢問寫回 qubit flux 校準。 |
 
 三者先 Run、Analyze，再依各 recipe 的條件詢問寫回，只接受回答選定的候選，最後 Save。

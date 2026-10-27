@@ -2,7 +2,7 @@
 
 **讀者：** operator、agent。從 GUI 或 MCP 大範圍掃 resonator 頻率，審閱凹陷與頻率寫回候選。
 
-`onetone/range_find` 以普通 pulse readout 的 generator 與 ADC 硬體掃頻，一次取得整條絕對 MHz 曲線。它先找出無名凹陷的粗略頻率。看圖並命名後，才提議各 resonator 的 `freq`。它不建立 readout module，也不估計 linewidth 或 electrical delay。
+`onetone/range_find` 以普通 pulse readout 的 generator 與 ADC 硬體掃頻，一次取得整條絕對 MHz 曲線。它先找出無名凹陷的粗略頻率。看圖並命名後，才提議各 resonator 的 `freq`。它不建立 readout module，也不擬合 resonator linewidth 或 electrical delay。找谷的 FWHM 只作候選篩選。
 
 修改 parameter source 後，按 Reset 才會重新取得初值。Refresh 只更新 source／choice，並保留已填輸入；Reset 可能覆蓋尚未儲存的輸入。
 
@@ -28,7 +28,7 @@ Stop 沿用 `onetone/freq` linear 的硬體掃頻語意，保留已完成 acquis
 
 ## Analyze 與判讀
 
-在 Analysis 檢查 Resonators (JSON) 與 Min separation。Run／Load 的名單初值都是 `[]`，不從 cfg、Form 或 alias 取名稱。先保留 `[]` 按 Analyze，看圖確認凹陷的位置、數量與間距。Summary 按頻率升冪列出無名凹陷的 freq／depth，name 為 null，不產生寫回候選。
+在 Analysis 檢查 Resonators (JSON)、Min separation、Smoothing sigma、Prominence noise factor 與 Max FWHM。Run／Load 的名單初值都是 `[]`，不從 cfg、Form 或 alias 取名稱。先保留 `[]` 按 Analyze，看圖確認凹陷的位置、數量與間距。Summary 按頻率升冪列出無名凹陷的 freq／depth／fwhm／score，name 為 null，不產生寫回候選。
 
 看圖後若要命名，在同一個 Analysis 輸入由低頻到高頻對應的 JSON 名單，例如 `["R2", "R1"]`，再按 Analyze。名稱必須是非空白且不重複的字串。選中的 dip 依頻率升冪與名稱配對，圖形本身不能證明 component 身分。無效 JSON 或名稱會拒絕 Analyze，不會自動換成空列表。
 
@@ -36,9 +36,11 @@ Analyze 以這次 JSON 名單逐項讀取固定 Run／Load capture 的 `<name>.f
 
 `min_separation` 是兩個選中凹陷間的最小 MHz 距離，必須為有限正數。預設 1 MHz。寬凹陷附近有多個細小結構時可提高；兩個 resonator 靠近時需減小並增加取樣點數。
 
-Analyze 用兩端各 10% 點的 magnitude 中位數連成直線背景，再以一個取樣點的 Gaussian sigma 平滑去背景曲線。候選 prominence 必須超過五倍相鄰差值的穩健雜訊估計，也須超過原始 magnitude 動態範圍的百萬分之一。分析依 prominence 由大到小選取，排除距離太近的候選。有名稱時選到名稱數量為止。`[]` 則保留所有符合間距的候選。掃描邊緣的最低點不算凹陷。曲線至少需要 11 個不同且有限的頻率點。
+Analyze 用兩端各 10% 點的 magnitude 中位數連成直線背景。`smoothing_sigma` 預設 0，不平滑，保留一至兩點寬的窄谷深度。大於 0 時使用 Gaussian sigma，單位是取樣點。`prominence_factor` 預設 5，候選 prominence 須超過此倍率乘以相鄰差值的穩健雜訊估計，也須超過原始 magnitude 動態範圍的百萬分之一。Sigma 與倍率必須是有限非負數。
 
-分析只顯示一張量測 magnitude 對絕對 MHz 的曲線圖。每個找到的凹陷以紅色星號標在量測曲線上，無名時旁邊標 Dip 1、Dip 2 等頻率順序編號，命名後顯示名稱。Legend 顯示編號或名稱、MHz 頻率與 depth，summary 逐列列出可選 name、freq 與 depth。編號只用於看圖，不是元件名稱。Depth 是去背景平滑曲線的 prominence，單位 a.u.，不是 linewidth 或擬合誤差。非線性背景、邊緣凹陷或低訊噪比可能影響選點，須看圖判讀。
+每個候選的 FWHM 是半 prominence 位置的插值寬度，至少為谷兩側頻率步進的平均。`max_fwhm` 預設 25 MHz，必須是有限正數。寬度超過上限的候選先剔除；過耦合共振較寬時可調大。其餘候選依 `score = depth / fwhm` 由大到小選取，再排除距離太近的候選。有名稱時選到名稱數量為止。`[]` 則保留所有符合寬度與間距的候選。掃描邊緣的最低點不算凹陷。曲線至少需要 11 個不同且有限的頻率點。
+
+分析只顯示一張量測 magnitude 對絕對 MHz 的曲線圖。每個找到的凹陷以紅色星號標在量測曲線上，無名時旁邊標 Dip 1、Dip 2 等頻率順序編號，命名後顯示名稱。Legend 顯示編號或名稱、MHz 頻率、depth、FWHM 與 score。Summary 逐列列出可選 name、freq、depth、fwhm 與 score。編號只用於看圖，不是元件名稱。Depth 是去背景曲線經選定平滑後的 prominence，單位 a.u.。FWHM 使用 MHz，score 使用 a.u./MHz。這些值不是擬合 linewidth 或擬合誤差。非線性背景、邊緣凹陷或低訊噪比可能影響選點，須看圖判讀。
 
 找到的凹陷少於名稱數量時，整次 Analyze 失敗，訊息列出找到與需要的數量，不產生部分 proposal。先檢查掃描範圍、點數、功率與名稱數量，再重跑或調整分析參數。不要替看不見的凹陷配名。
 
@@ -66,7 +68,8 @@ Recipe 不猜頻率初值。`target` 指定這次 Reset 的 resonator alias，`r
 例如 `min_separation: 5.0` 排除間距不足 5 MHz 的候選，不改 acquisition 的頻率點。
 Recipe 在同一個 Analyze operation 傳入有提供的名單與間距。省略不覆寫 GUI 分析值。
 非正數或非有限值在開 tab 前拒絕。間距過大而找不到指定數量的凹陷時，分析失敗且不詢問寫回。
-Run、Analyze 後回覆每個 dip 的可選 name（無名為 null）、freq、depth，以及 `identity_diagnostic`、`writeback_diagnostic`。
+Recipe 使用同一個找谷函式，初始不平滑、prominence 倍率 5、FWHM 上限 25 MHz，以 depth / FWHM 排序。重用 tab 時保留未提供的分析值。
+Run、Analyze 後回覆每個 dip 的可選 name（無名為 null）、freq、depth、fwhm、score，以及 `identity_diagnostic`、`writeback_diagnostic`。
 具名分析成功後 Recipe 詢問 writeback，只接受選定候選，略過不寫入。無名探索不詢問寫回。最後保存 raw data 與分析。
 
 ## Four starting situations
