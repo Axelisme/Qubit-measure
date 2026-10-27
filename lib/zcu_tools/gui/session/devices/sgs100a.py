@@ -59,6 +59,15 @@ class _SGS100APanel(QWidget):
         self._freq_field.load_direct(info.freq_Hz)
         self._power_field.load_direct(info.power_dBm)
 
+    def dispose(self) -> None:
+        """Retire field callbacks at terminal teardown, not on hide/reopen.
+
+        Repeated calls are safe; cleanup failures propagate for retry before
+        deleting Qt children. Success prevents further field callback delivery.
+        """
+        self._freq_field.dispose()
+        self._power_field.dispose()
+
     def reset_eval_fields(self) -> None:
         """Reset all eval-mode fields to direct mode (R3 device-switch guard)."""
         self._freq_field.reset_to_direct()

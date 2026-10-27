@@ -324,8 +324,15 @@ class DeviceDialog(QDialog):
     # --- live-value poller (dialog-scoped + selection-scoped) ----------------
 
     def done(self, a0: int) -> None:
-        """Invalidate pending removal decisions before finishing the dialog."""
+        """Retire owned panel callbacks and pending decisions before finishing.
+
+        This is terminal, unlike hide/reopen. Repeated cleanup is safe. Failures
+        propagate for retry without finishing or permitting child deletion.
+        """
         self._action_scope.close()
+        for panel in self._device_panels.values():
+            if isinstance(panel, DevicePanelProtocol):
+                panel.dispose()
         super().done(a0)
 
     def showEvent(self, a0: Any) -> None:

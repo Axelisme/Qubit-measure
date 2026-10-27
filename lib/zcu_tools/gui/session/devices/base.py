@@ -74,6 +74,15 @@ class DevicePanelProtocol(Protocol):
         """Return edited fields, retaining EvalRef values for Apply-time resolution."""
         ...
 
+    def dispose(self) -> None:
+        """Retire owned widget callbacks before terminal Qt child deletion.
+
+        Successful return prevents further delivery. Repeated calls are safe;
+        cleanup failures propagate and can be retried before deleting children.
+        Hiding/reopening the panel is not terminal and must not call dispose.
+        """
+        ...
+
     def reset_eval_fields(self) -> None:
         """Reset expressions to direct inputs before switching devices."""
         ...

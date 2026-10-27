@@ -14,6 +14,8 @@ from qtpy.QtWidgets import (
     QTableWidget,
     QTableWidgetSelectionRange,
     QTabWidget,
+    QVBoxLayout,
+    QWidget,
 )
 from zcu_tools.device.fake import FakeDeviceInfo
 from zcu_tools.gui.session.device_models import DeviceEntry
@@ -258,6 +260,61 @@ def test_predictor_dialog_persistent_reject_hides_without_finishing(qapp):
     assert not dialog.isVisible()
     finished.assert_not_called()
     unsubscribe.assert_not_called()
+
+
+def test_persistent_predictor_hide_reopen_keeps_callbacks_until_done(qapp, tmp_path):
+    from tests.gui._user_input import ComponentDriver
+
+    host = QWidget()
+    layout = QVBoxLayout(host)
+    opener = QPushButton("Open predictor")
+    layout.addWidget(opener)
+    provider = MagicMock(return_value=None)
+    dialog = _make_dialog(
+        parent=host, parameter_provider=provider, persistent_on_close=True
+    )
+    opener.clicked.connect(dialog.show)
+    field = dialog.findChild(EvalNumericField)
+    assert field is not None
+    edit = field.findChild(QLineEdit, "eval.expression")
+    assert edit is not None
+    changes: list[None] = []
+    field.raw_changed.connect(lambda: changes.append(None))
+    ui = ComponentDriver(host)
+    try:
+        host.show()
+        ui.click("Open predictor")
+        ui.screenshot(tmp_path / "01-open.png")
+        ui.enter_text(object_name="eval.expression", value="1+1", commit=False)
+        assert ui.observe(object_name="eval.preview").text == "= 2.0"
+        ui.screenshot(tmp_path / "02-expression.png")
+        ui.click("Close")
+        assert not ui.observe(object_name="eval.expression").visible
+        ui.screenshot(tmp_path / "03-hidden.png")
+        ui.click("Open predictor")
+        assert ui.text_input(object_name="eval.expression").text == "1+1"
+        ui.screenshot(tmp_path / "04-reopened.png")
+        provider.reset_mock()
+        changes.clear()
+        ui.enter_text(object_name="eval.expression", value="2+2", commit=False)
+        assert ui.observe(object_name="eval.preview").text == "= 4.0"
+        assert provider.called
+        assert changes
+        ui.screenshot(tmp_path / "05-reopened-edit.png")
+
+        dialog.done(0)
+        dialog.done(0)
+        provider.reset_mock()
+        changes.clear()
+        # Keep the C++ field alive: a deleted-owner guard cannot satisfy this.
+        edit.setText("3+3")
+        provider.assert_not_called()
+        assert changes == []
+    finally:
+        dialog.done(0)
+        host.close()
+        host.deleteLater()
+        qapp.processEvents()
 
 
 def test_predictor_dialog_capture_restore_state_roundtrip(qapp):

@@ -60,6 +60,15 @@ class _FakeDevicePanel(QWidget):
         self._value_field.load_direct(info.value)
         self._rampstep_field.load_direct(info.rampstep)
 
+    def dispose(self) -> None:
+        """Retire field callbacks at terminal teardown, not on hide/reopen.
+
+        Repeated calls are safe; cleanup failures propagate for retry before
+        deleting Qt children. Success prevents further field callback delivery.
+        """
+        self._value_field.dispose()
+        self._rampstep_field.dispose()
+
     def reset_eval_fields(self) -> None:
         """Reset all eval-mode fields to direct mode.
 

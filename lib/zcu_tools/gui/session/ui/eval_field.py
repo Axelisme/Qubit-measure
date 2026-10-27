@@ -131,9 +131,18 @@ class EvalNumericField(QWidget):
             self._line_edit.textChanged, lambda: self.raw_changed.emit()
         )
 
+    def dispose(self) -> None:
+        """Permanently retire callbacks before the owner deletes Qt children.
+
+        Successful return prevents further callback delivery. Repeated calls are
+        safe. Cleanup failures propagate and unfinished cleanup can be retried.
+        Hiding is not terminal: hide/reopen callers must not call dispose.
+        """
+        self._scope.close()
+
     def closeEvent(self, a0: QCloseEvent | None) -> None:
         """Retire callbacks before closing the numeric field."""
-        self._scope.close()
+        self.dispose()
         super().closeEvent(a0)
 
     def load_direct(self, value: float) -> None:
