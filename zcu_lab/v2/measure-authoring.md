@@ -2,12 +2,13 @@
 
 **讀者：** lab-author、framework-dev、agent。撰寫 Measure adapter、Form、recipe、operator guide 與校準 writeback。
 
-**Last updated:** 2026-10-25
+**Last updated:** 2026-10-27
 
 使用者入口見 [tutorial](../tutorial/README.md)。
 
 ## 目錄
 
+- [設計原則](#設計原則)
 - [目錄佈局](#目錄佈局)
 - [實驗重載](#實驗重載)
 - [Form 與固定來源](#form-與固定來源)
@@ -24,6 +25,12 @@
 `zcu_lab/v2/<實驗>/gui.py` 以具名參數宣告框架的 `Adapter(spec, make_form, run, guide, analysis=None, post_analysis=None)` 值，接上同資料夾的 core，供 `zcu_tools.gui.app.measure` 驅動。框架不 import 使用者套件，也不含實驗領域知識。
 
 ---
+
+## 設計原則
+
+實際量測的變數太多，不以通用流程或通用工具預先包辦，最多定慣例。分析步驟由作者決定，框架與 notebook 提供可組裝的小工具。遵守 KISS，一個工具做一件事，不替作者預先選分析順序或修正方式。客製化與避免強制流程的審查規則見[程式碼品質](../../docs/code-quality.md#zcu_lab-審查裁決)。
+
+2026-10-27，使用者裁決：「由於實際測量可能遇到的變數太多了，幾乎很難設計通用的流程與工具，最多只能寫一個慣例，但實際怎麼分析應該完全能照作者的想法解析，請你抱著這個想法設計工具。比如說每個工具都要小，遵守KISS原則，這樣才好組裝。」
 
 ## 目錄佈局
 

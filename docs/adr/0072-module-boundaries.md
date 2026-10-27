@@ -40,6 +40,12 @@ status: accepted
 
 放置新程式碼時，先找最貼近的類別；所有類別都不合，才放 `utils`。
 
+### 真實 acquire 與模擬邊界
+
+真實硬體的 acquire 路徑不執行任何模擬模組，包含 `simulate` 與 `program.v2.simulation` 的排程器。共用時間成本計算放在中性的 `program` 工具，不讓真實 acquire 為了估時走模擬排程。2026-10-26，使用者裁決：「我不太希望真实 acquire 还会走模拟的模块。」
+
+既有 `.importlinter` 的 `program-simulation-entry` contract 限制 program classes 直接依賴 simulation frontend、timeline 與 adapter internals，只能經模擬入口使用。這是依賴檢查，不是 runtime 隔離的完整保證；真實 acquire 不執行模擬模組仍須在審閱執行路徑時確認。不新增 contract。
+
 ### 實驗計算與 GUI 接線
 
 core.py 的 Experiment 擁有 run 與 analyze 的計算；gui.py 只接線、解析來源、決定 writeback 與 operator guide。
