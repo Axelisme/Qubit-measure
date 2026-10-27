@@ -45,7 +45,8 @@ import numpy as np
 import pandas as pd
 from IPython.display import display
 from zcu_tools.resources.qubit_params import QubitParams
-from zcu_tools.resources.record_table import RecordFluxFrame, flux_from_frame
+from zcu_tools.analysis.flux import DevicePeriod, FluxFrame
+from zcu_tools.resources.record_table import flux_from_frame
 from zcu_tools.simulate.fluxonium import calculate_eff_t1_vs_flux_fast
 
 %autoreload 2
@@ -69,11 +70,12 @@ samples = pd.read_csv(Path(result_dir) / samples_filename)
 params = QubitParams(Path(result_dir) / "params.json", readonly=True).require_fluxdep_fit()
 fallback_frame = None
 # Explicitly supply a frame only for rows that have none:
-# fallback_frame = RecordFluxFrame(
-#     dev_unit="A", flux_int=params.flux_int, flux_period=params.flux_period
+# fallback_frame = FluxFrame(
+#     offset=-params.flux_int / params.flux_period,
+#     devices={"bias_device": DevicePeriod(params.flux_period, "A")},
 # )
 fluxs = flux_from_frame(
-    samples, device_name="bias_device", fallback_frame=fallback_frame
+    samples, fallback_frame=fallback_frame
 )
 ```
 
@@ -143,8 +145,9 @@ show_device_axis = False
 device_axis_name = "bias_device"
 device_axis_frame = None
 if show_device_axis:
-    device_axis_frame = RecordFluxFrame(
-        dev_unit="A", flux_int=params.flux_int, flux_period=params.flux_period
+    device_axis_frame = FluxFrame(
+        offset=-params.flux_int / params.flux_period,
+        devices={device_axis_name: DevicePeriod(params.flux_period, "A")},
     )
 ```
 

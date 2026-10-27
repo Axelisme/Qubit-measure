@@ -25,7 +25,6 @@ from dataclasses import dataclass
 import numpy as np
 from numpy.typing import NDArray
 
-from zcu_tools.analysis.flux import DeviceFluxPoint
 from zcu_tools.analysis.fluxdep.models import TransitionDict
 from zcu_tools.analysis.fluxdep.search import (
     DatabaseSearchResult,
@@ -40,6 +39,7 @@ from zcu_tools.analysis.fluxdep.search_models import (
 from zcu_tools.gui.app.analysis_project.entry import require_target
 from zcu_tools.gui.app.fluxdep.export_plan import ExportPlanner, FluxWritebackReceipt
 from zcu_tools.gui.app.fluxdep.state import (
+    AlignmentPublication,
     FluxDepState,
     PipelineStage,
     SearchRenderFrame,
@@ -322,7 +322,13 @@ class FitService:
                 reason_code="export_planner_missing",
             )
         plan = self._export_planner(
-            model, DeviceFluxPoint(integer=aligned.flux_int, half=aligned.flux_half)
+            model,
+            AlignmentPublication(
+                flux_int=aligned.flux_int,
+                flux_half=aligned.flux_half,
+                flux_period=aligned.flux_period,
+                inherited_from=aligned.inherited_from,
+            ),
         )
         EJ, EC, EL = fit.params
         predictor = PredictorFile(

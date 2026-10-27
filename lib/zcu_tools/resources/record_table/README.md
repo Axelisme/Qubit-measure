@@ -20,7 +20,7 @@ Dry-run 不寫檔。Apply 在 record owner 內取得 upgrade sidecar lock、重�
 
 ## 裝置投影（`projection.py`）
 
-投影與 `flux_from_frame` 的 `device_name`、使用中的 row-frame keys 共用 `cfg_model.validate_device_name`。
+裝置投影的 `device_name` 與 flux row-frame keys 共用 `cfg_model.validate_device_name`。
 它拒絕 ASCII 點號、空字串與全空白，保留有效名稱的前後空白、大小寫與 Unicode。
 
 `project_device_coordinates(records, device_name=...)` 依 caller 指定的名稱讀取每列 `devices[device_name]` 的 `value` 與 `value_unit`。
@@ -31,45 +31,40 @@ Dry-run 不寫檔。Apply 在 record owner 內取得 upgrade sidecar lock、重�
 
 ## 作者 flux 換算
 
-`flux_from_frame(table, device_name=..., fallback_frame=...)` 回傳同列序的 NumPy flux 陣列，不改表或記錄。
-`table` 是 `JsonlRecordTable.read()` 的 nested table，或 `pd.read_csv` 讀出的 dotted table。
-每列依序使用 explicit flux、row frame、caller 提供的 fallback。
-有效 explicit flux 不檢查未用 frame 或 device。
+`flux_from_frame(table, fallback_frame=...)` 回傳同列序的 NumPy flux 陣列，不改表或記錄。
+`table` 接受 nested records 與 dotted CSV 欄位。
+每列依序使用 explicit flux、row frame、caller fallback。
+有效 explicit flux 不檢查未使用的 frame 或 device。
 
-Row frame 是 `flux_frame.<device>.integer/period`，對應 `devices.<device>.value`。
-每個 device 都貢獻 `(value - integer) / period`，period 可以是負值。
-Row frame 不檢查單位，因為記錄值已使用該 device 校準的原生單位。
-缺值、部分 frame、非數值或零 period 都報錯，指出 row label 與欄位，不退回 fallback。
+Row frame 為 `flux_frame: {offset, period: {<device>: ...}}`。
+它計算 `offset + Σ devices.<device>.value / flux_frame.period.<device>`，period 可帶負號。
+使用 row frame 時，缺 offset 會報錯並指出列與 `flux_frame.offset`，不退回 fallback。
+Row frame 不比對單位，因為值已使用該儀器校準的原生單位。
 
-Nested 輸入以 frame keys 判斷該列的 device 集合。
-Dotted 輸入以該列任一 `flux_frame.<device>.*` 非 null 欄位判斷。
-全 null 的 device 視為 absent，讓不同 device 集合的歷史可以串接。
-攤平會失去 membership 資訊，無法分辨原本 absent 與原本有 key 但欄位全 null 的 device。
-需要檢查這類腐敗 frame 時，使用 nested 輸入。
+Nested 的 period keys 決定儀器集合，缺 device value key 時不貢獻。
+Nested 明寫 NaN、inf 或 bool 都報錯。
+Dotted 輸入以非 null 的 `flux_frame.period.<device>` 決定每列儀器集合。
+Dotted 的 period 或 value cell 為 NaN 時，該儀器不貢獻；inf 與 bool 仍報錯。
+攤平後無法分辨缺 key 與原始 NaN，只有 nested 輸入保證拒絕明寫 NaN。
+需要檢查原始 NaN 的作者應使用 nested records。
 
-多 device fallback 使用純分析型別：
+Fallback 只收 `analysis.flux.FluxFrame`，單儀器與多儀器使用相同型別：
 
 ```python
-from zcu_tools.analysis.flux import DeviceFluxFrame, FluxFrame
+from zcu_tools.analysis.flux import DevicePeriod, FluxFrame
 from zcu_tools.resources.record_table import flux_from_frame
 
-frame = FluxFrame({
-    "bias": DeviceFluxFrame(integer=0.1, period=0.8, unit="V"),
-    "coil": DeviceFluxFrame(integer=0.0, period=-0.4, unit="A"),
+frame = FluxFrame(offset=-0.125, devices={
+    "bias": DevicePeriod(period=0.8, unit="V"),
+    "coil": DevicePeriod(period=-0.4, unit="A"),
 })
-flux = flux_from_frame(table, device_name="bias", fallback_frame=frame)
+flux = flux_from_frame(table, fallback_frame=frame)
 ```
 
-Fallback 只由 caller 提供，只在該列沒有 row frame 時使用。
-多 device fallback 要求每台儀器的 `value_unit` 與其 `DeviceFluxFrame.unit` 相同。
-缺單位或不一致就報錯，不換算單位，也不自動讀 `params.json`。
-
-既有 `RecordFluxFrame(dev_unit, flux_int, flux_period)` 保留為明確的單 device fallback。
-它只支持 A/V/native 與正 period，`device_name` 選擇它使用的儀器。
-多 device row frame 與 fallback 依自己的 keys 計算，`device_name` 不會過濾其貢獻。
-`flux_from_frame` 不再解讀舊 flat `flux_int/flux_period` row-frame。
-舊列沒有 explicit flux 時，作者須明確提供 fallback。
-獨立 v2 API 的 flat frame 契約不變，見下節與 [格式歷程](../../../../docs/storage-format-history/flux-frame.md)。
+Fallback 只在該列沒有 row frame 時使用。
+每個有值儀器的 `value_unit` 必須與 `DevicePeriod.unit` 相同，否則報錯。
+缺席儀器不需要單位。函式不換算單位、不讀參數檔，也不解讀舊 flat row frame。
+Standalone v2 的 flat row 契約與單儀器 fallback 限制見下節。
 
 ## RecordTable v2 分析 frame（`schema.py`）
 
@@ -77,6 +72,6 @@ v2 定義 flat coordinate 契約。JSONL 儲存層不固定量測欄位 schema�
 
 **驗證（`validate_record_table_v2`）**：`dev_value`/`dev_unit` 必填，unit 為 A/V/native；coordinate 只接受 real numeric（拒絕 datetime/timedelta、boolean、complex），required value 必須 finite；`flux` 可空、只接受有限值或 null；`flux_int`/`flux_period` 成對出現，每 row 兩者同為有限或同為 null，period 必須 > 0；拒絕 legacy 別名欄位（`calibrated mA`、`calibrated A`、`Flux`、`flux_bias`）、重複欄位與孤立 frame 欄位。
 
-**flux 解析（`resolve_record_flux`）**：closed per-row 來源順序 `explicit → row-frame → fallback-frame`，`sources` 為每 row 的權威來源、`explicit_mask` 只由 `sources` 推導；任一 row 無法解析即 fail-fast 列出 index。explicit flux 不要求裝置值或 frame。完整 row frame 只要求 finite `dev_value`、finite `flux_int` 與 positive finite `flux_period`，不限制未用的單位。沒有 explicit flux 時，只有一個非空 frame 欄位會報錯，訊息指出 row label 與缺少的欄名，不退回 fallback。兩個 frame 值都為空才可使用 fallback。只有 fallback frame 的單位必須與該 row 的 `dev_unit` 一致。未知與舊欄位不作 alias，也不觸發整表驗證。native 不隱含 A/V 換算；caller 的 frame 明示 native device value 到 flux 的映射。JSONL 寫入不計算 flux，notebook consumers 以 `JsonlRecordTable.read()` 取得最新 rows 後才解析座標。
+**flux 解析（`resolve_record_flux`）**：closed per-row 來源順序 `explicit → row-frame → fallback-frame`，`sources` 為每 row 的權威來源、`explicit_mask` 只由 `sources` 推導；任一 row 無法解析即 fail-fast 列出 index。explicit flux 不要求裝置值或 frame。完整 row frame 只要求 finite `dev_value`、finite `flux_int` 與 positive finite `flux_period`，不限制未用的單位。沒有 explicit flux 時，只有一個非空 frame 欄位會報錯，訊息指出 row label 與缺少的欄名，不退回 fallback。兩個 frame 值都為空才可使用 fallback。Caller fallback 改收 `analysis.flux.FluxFrame`，必須恰有一台儀器，否則報錯並說明台數。這項檢查也適用於空表與 explicit-only 表。只有 fallback 的單位必須與該 row 的 `dev_unit` 一致，換算使用 offset 與帶號 period。未知與舊欄位不作 alias，也不觸發整表驗證。native 不隱含 A/V 換算；caller 的 frame 明示 native device value 到 flux 的映射。JSONL 寫入不計算 flux，notebook consumers 以 `JsonlRecordTable.read()` 取得最新 rows 後才解析座標。
 
 **legacy 遷移（`migrate_record_table_v2`）**：caller 明確提供單一 A/mA/V/mV 來源單位，函式將 dev value 與宣告的 frame 縮放到 base A/V，回傳經驗證的 v2 DataFrame，不推論、不 alias，也不改寫輸入。離線的 [root migrations 工具](../../../../migrations/README.md) 提供公開轉換函式與 `python -m migrations` CLI。它明示改名有來源證據的舊量測欄位，重用這裡的座標轉換，並經 `ResultEntry.records(component)` 追加 JSONL。來源檔不變；無法確定的列不寫入，列入報告。工具不操作硬體，也不自行選擇真實資料。

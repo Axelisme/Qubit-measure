@@ -51,7 +51,7 @@ Alias 缺失或錯誤時，OK 保持停用，直到使用者明示選擇。
 
 Export params… 寫 `predictors/<component>.json`，再更新 setup 宣告的 EJ／EC／EL
 與注入 planner 提出的校準欄位，最後追加 analysis ledger。
-`export_plan.ExportPlanner` 接收 detached component 與 aligned native integer／half，
+`export_plan.ExportPlanner` 接收 detached component 與 app owner 的 `AlignmentPublication`，包含 aligned native integer／half／period，
 回傳 component-relative scalar writes 及 `flux_writeback`。未接 planner 時，export 在輸出前拒絕。
 Framework 不解讀 lab 的 flux 區塊，也不取得 device 值。
 

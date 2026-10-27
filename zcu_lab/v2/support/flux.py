@@ -4,11 +4,10 @@ from collections.abc import Collection, Iterable, Mapping
 from math import copysign, isfinite
 
 from zcu_tools.analysis.flux import (
-    DeviceFluxFrame,
-    DeviceFluxPoint,
+    DevicePeriod,
     FluxFrame,
-    actual_flux_points,
-    reference_flux_points,
+    device_value_at_flux,
+    flux_from_device_values,
 )
 from zcu_tools.cfg_model import validate_device_name
 from zcu_tools.datafile import JsonObject
@@ -92,7 +91,7 @@ def device_flux_points(
     flux: Mapping[str, QubitFluxCalibration],
     device_name: str,
     values: Mapping[str, float],
-) -> DeviceFluxPoint:
+) -> QubitFluxCalibration:
     """Return a device's actual integer/half at other devices' current biases.
 
     flux is the qubit's reference block; values supplies each OTHER contributing
@@ -107,11 +106,17 @@ def device_flux_points(
     if device_name not in flux:
         raise ValueError(f"unknown frame device {device_name!r}")
     calibration = flux[device_name]
-    return actual_flux_points(
-        DeviceFluxPoint(integer=calibration.integer, half=calibration.half),
-        device_name=device_name,
-        frame=frame,
-        values=values,
+    for name in flux:
+        if name != device_name and name not in values:
+            raise ValueError(f"missing device value for {name!r}")
+    # Keep the stored half branch until components switch to offset/period.
+    half_flux = (calibration.half - calibration.integer) / calibration.period
+    return QubitFluxCalibration(
+        integer=device_value_at_flux(frame, values, device_name=device_name, flux=0.0),
+        half=device_value_at_flux(
+            frame, values, device_name=device_name, flux=half_flux
+        ),
+        period=calibration.period,
     )
 
 
@@ -154,23 +159,27 @@ def reference_device_flux_points(
     )
     # Replace only the selected math frame: the old magnitude must not set the shift.
     frame = _math_frame({**flux, device_name: selected})
-    reference = reference_flux_points(
-        DeviceFluxPoint(integer=fitted.integer, half=fitted.half),
-        device_name=device_name,
-        frame=frame,
-        values=values,
+    for name in flux:
+        if name != device_name and name not in values:
+            raise ValueError(f"missing device value for {name!r}")
+    shift = period * flux_from_device_values(
+        frame, {**values, device_name: fitted.integer}
     )
     return QubitFluxCalibration(
-        half=reference.half, integer=reference.integer, period=period
+        half=fitted.half + shift, integer=fitted.integer + shift, period=period
     )
 
 
 def _math_frame(flux: Mapping[str, QubitFluxCalibration]) -> FluxFrame:
+    block = qubit_flux_frame(flux)
+    # Temporary bridge until the component schema switches to offset/period.
     return FluxFrame(
-        {
-            name: DeviceFluxFrame(
-                integer=calibration["integer"], period=calibration["period"]
-            )
-            for name, calibration in qubit_flux_frame(flux).items()
-        }
+        offset=-sum(
+            calibration["integer"] / calibration["period"]
+            for calibration in block.values()
+        ),
+        devices={
+            name: DevicePeriod(calibration["period"])
+            for name, calibration in block.items()
+        },
     )

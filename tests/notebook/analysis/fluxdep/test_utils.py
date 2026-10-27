@@ -14,9 +14,10 @@ import pandas as pd
 import pytest
 from numpy.typing import NDArray
 from plotly.graph_objects import Figure, Scatter
+from zcu_tools.analysis.flux import DevicePeriod, FluxFrame, device_value_at_flux
 from zcu_tools.analysis.fluxdep.models import TransitionDict
 from zcu_tools.notebook.analysis.fluxdep.utils import FreqFluxDependVisualizer
-from zcu_tools.resources.record_table import RecordFluxFrame, RecordTableV2Error
+from zcu_tools.resources.record_table import RecordTableV2Error
 
 
 def _sample_points_trace(fig: Figure) -> Scatter:
@@ -81,7 +82,9 @@ def test_device_records_plot_at_the_selected_coordinate() -> None:
     )
     vis = FreqFluxDependVisualizer()
     vis.plot_sample_points(
-        table, device_name="bias", fallback_frame=RecordFluxFrame("A", 0, 1)
+        table,
+        device_name="bias",
+        fallback_frame=FluxFrame(0, {"bias": DevicePeriod(1, "A")}),
     )
     trace = _sample_points_trace(vis.fig)
     np.testing.assert_allclose(_coordinates(trace.x), [0.25])
@@ -148,7 +151,7 @@ def test_fallback_frame_rows_plot_at_fallback_flux() -> None:
     vis.plot_sample_points(
         table,
         device_name="bias",
-        fallback_frame=RecordFluxFrame("A", flux_int=0.0, flux_period=1.0),
+        fallback_frame=FluxFrame(0, {"bias": DevicePeriod(1.0, "A")}),
     )
 
     trace = _sample_points_trace(vis.fig)
@@ -167,7 +170,7 @@ def test_mixed_provenance_rows_plot_together() -> None:
     vis.plot_sample_points(
         table,
         device_name="bias",
-        fallback_frame=RecordFluxFrame("A", flux_int=0.0, flux_period=1.0),
+        fallback_frame=FluxFrame(0, {"bias": DevicePeriod(1.0, "A")}),
     )
 
     trace = _sample_points_trace(vis.fig)
@@ -224,7 +227,7 @@ def test_fallback_frame_unit_mismatch_is_unresolved() -> None:
         vis.plot_sample_points(
             table,
             device_name="bias",
-            fallback_frame=RecordFluxFrame("V", flux_int=0.0, flux_period=1.0),
+            fallback_frame=FluxFrame(0, {"bias": DevicePeriod(1.0, "V")}),
         )
 
 
@@ -292,8 +295,13 @@ def test_plot_md_fluent_chain_smoke() -> None:
     """
     flxs = np.linspace(0.5, 1.0, 100)
     energies = np.zeros((len(flxs), 10))
-    frame = RecordFluxFrame("A", flux_int=0.0, flux_period=1.0)
-    dev_values = frame.dev_value_from_flux(flxs)
+    frame = FluxFrame(0, {"bias": DevicePeriod(1.0, "A")})
+    dev_values = np.array(
+        [
+            device_value_at_flux(frame, {}, device_name="bias", flux=float(value))
+            for value in flxs
+        ]
+    )
 
     v_allows: TransitionDict = {
         "transitions": [(0, 1), (1, 4), (4, 7), (7, 9), (1, 9)],

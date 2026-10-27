@@ -3,13 +3,12 @@
 from dataclasses import dataclass
 
 from pydantic import JsonValue
-from zcu_tools.analysis.flux import DeviceFluxPoint
 from zcu_tools.cfg_model import validate_device_name
 from zcu_tools.device.fake import FakeDeviceInfo
 from zcu_tools.device.yoko import YOKOGS200Info
 from zcu_tools.gui.form import FormEnv
 
-from zcu_lab.components.qubit import QubitBaseSchema
+from zcu_lab.components.qubit import QubitBaseSchema, QubitFluxCalibration
 from zcu_lab.v2.support.flux import device_flux_points, qubit_flux_frame
 
 
@@ -21,7 +20,7 @@ class FluxSeed:
     """Selected device name, or None when the component has no source."""
     unit: str | None
     """Native device-info label, or None without a selected source."""
-    points: DeviceFluxPoint | None
+    points: QubitFluxCalibration | None
     """Actual half/integer, or None when this device has no calibration."""
 
 
@@ -79,7 +78,7 @@ def captured_qubit(env: FormEnv, qubit: str) -> QubitBaseSchema:
     return component
 
 
-def flux_scan_seed(points: DeviceFluxPoint | None, margin: float) -> JsonValue:
+def flux_scan_seed(points: QubitFluxCalibration | None, margin: float) -> JsonValue:
     """Return a 101-point range input from integer to half, expanded by margin.
 
     margin is a fraction of their separation, normally 0 or 0.1. Missing points
@@ -91,7 +90,7 @@ def flux_scan_seed(points: DeviceFluxPoint | None, margin: float) -> JsonValue:
 
 
 def flux_bounds(
-    points: DeviceFluxPoint | None, margin: float
+    points: QubitFluxCalibration | None, margin: float
 ) -> tuple[float | None, float | None]:
     """Expand actual integer-to-half coordinates by a separation fraction.
 

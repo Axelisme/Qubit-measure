@@ -1,11 +1,11 @@
 """Lab component calibration policy injected into the standalone fluxdep app."""
 
-from zcu_tools.analysis.flux import DeviceFluxPoint
 from zcu_tools.cfg_model import validate_device_name
 from zcu_tools.gui.app.fluxdep.export_plan import (
     ComponentExportPlan,
     FluxWritebackReceipt,
 )
+from zcu_tools.gui.app.fluxdep.state import AlignmentPublication
 from zcu_tools.resources.entry.schema import ComponentSchema
 
 from zcu_lab.components.fluxonium import QubitSchema
@@ -14,7 +14,7 @@ from zcu_lab.v2.support.flux import qubit_flux_frame, reference_device_flux_poin
 
 
 def plan_fluxdep_export(
-    component: ComponentSchema, points: DeviceFluxPoint
+    component: ComponentSchema, points: AlignmentPublication
 ) -> ComponentExportPlan:
     """Plan setup flux calibration only for a single-device fluxonium frame.
 
@@ -47,9 +47,9 @@ def plan_fluxdep_export(
         )
     else:
         fitted = QubitFluxCalibration(
-            half=points.half,
-            integer=points.integer,
-            period=2.0 * abs(points.integer - points.half),
+            half=points.flux_half,
+            integer=points.flux_int,
+            period=2.0 * abs(points.flux_int - points.flux_half),
         )
         reference = reference_device_flux_points(component.flux, source, fitted, {})
         return ComponentExportPlan(

@@ -207,7 +207,7 @@ Numeric core 不保存 writeback destination，也不發 proposal。
 無 GUI 的 `support/flux.py` 接受 qubit 的具名 `flux` 校準區塊，不讀檔或操作儀器。
 `qubit_flux_frame(flux)` 驗證名稱與三欄間距，回傳獨立的 half／integer／period mapping。
 空區塊可複製，但不能用來算實際掃描端點。
-`device_flux_points(flux, device_name, values)` 委派共用分析數學，以其他 contributing devices 的當下值算實際 half／integer。
+`device_flux_points(flux, device_name, values)` 委派共用投影，以其他 contributing devices 的當下值算實際 half／integer，回傳 `QubitFluxCalibration`。現行 component 仍使用參考點區塊，helper 暫以 `offset = -Σ integer / period` 轉成 `FluxFrame`，保留 half 的原分支。Component 切換 offset／period 時移除此轉換。
 `reference_device_flux_points` 以原始擬合點、新 period 大小與原方向換回參考點。
 首次校準採正方向。它只回傳選定 device 的校準，不改其他 entries。
 若 frame 含另一條同次被掃的線，reference helper 拒絕換算並指出 device，因為 Run snapshot 不能代表固定 bias。

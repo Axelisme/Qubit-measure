@@ -4,13 +4,13 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
-from zcu_tools.analysis.flux import DeviceFluxPoint
 from zcu_tools.gui.app.analysis_project.entry import AnalysisTarget
 from zcu_tools.gui.app.fluxdep.export_plan import (
     ComponentExportPlan,
     FluxWritebackReceipt,
 )
 from zcu_tools.gui.app.fluxdep.services.fit import FitService
+from zcu_tools.gui.app.fluxdep.state import AlignmentPublication
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.resources.entry import ResultEntry, component_registry, snapshot
 from zcu_tools.resources.entry.schema import ComponentSchema
@@ -47,12 +47,14 @@ def test_export_applies_injected_calibration_and_retains_predictor_and_ledger(
 ) -> None:
     target = export_target
     state = aligned_export_state(target)
-    calls: list[tuple[str, DeviceFluxPoint]] = []
+    calls: list[tuple[str, AlignmentPublication]] = []
 
-    def plan(model: ComponentSchema, points: DeviceFluxPoint) -> ComponentExportPlan:
+    def plan(
+        model: ComponentSchema, points: AlignmentPublication
+    ) -> ComponentExportPlan:
         calls.append((model.kind, points))
         return ComponentExportPlan(
-            {"calibration": points.integer},
+            {"calibration": points.flux_int},
             FluxWritebackReceipt("written", "synthetic-bias", None),
         )
 
@@ -64,7 +66,12 @@ def test_export_applies_injected_calibration_and_retains_predictor_and_ledger(
         snapshot(target.resource.setup).components["Qcal"].model_dump()["calibration"]
         == 1.7
     )
-    assert calls == [("qubit/fluxonium/export", DeviceFluxPoint(integer=1.7, half=0.7))]
+    assert calls == [
+        (
+            "qubit/fluxonium/export",
+            AlignmentPublication(flux_int=1.7, flux_half=0.7, flux_period=2.0),
+        )
+    ]
     assert receipt.flux_writeback == FluxWritebackReceipt(
         "written", "synthetic-bias", None
     )
@@ -97,7 +104,7 @@ def test_export_policy_failure_precedes_output(
     export_target: AnalysisTarget, missing_planner: bool
 ) -> None:
     def reject(
-        _model: ComponentSchema, _points: DeviceFluxPoint
+        _model: ComponentSchema, _points: AlignmentPublication
     ) -> ComponentExportPlan:
         raise ValueError("invalid synthetic calibration")
 

@@ -55,7 +55,8 @@ from zcu_tools.notebook.analysis.fit_tools import (
     merge_sample_sources,
     write_merged_samples,
 )
-from zcu_tools.resources.record_table import RecordFluxFrame, flux_from_frame
+from zcu_tools.analysis.flux import DevicePeriod, FluxFrame
+from zcu_tools.resources.record_table import flux_from_frame
 ```
 
 # Sources and output
@@ -93,29 +94,31 @@ Pass that array to the analysis loader in the same row order. These examples
 do not run during merging, so records without physical fields can still merge.
 The helper does not change the table or CSV.
 
-Set `device_name` to the captured device whose values define flux. The helper
-uses finite explicit `flux` first. Otherwise it uses
-`devices.<device_name>.value` with the row's `flux_int` and `flux_period`.
-A row with only one frame value fails with its row label and missing field.
+The helper uses finite explicit `flux` first. Otherwise it adds the row's
+`flux_frame.offset` to each `devices.<device>.value / flux_frame.period.<device>`.
+A row frame without offset fails with its row label and missing field.
+Dotted NaN value or period cells mean that device is absent from the row.
+Flattening loses the distinction between a missing key and an explicit NaN.
+Only nested records guarantee rejection of explicit NaN; inf and bool still fail.
 A valid explicit flux ignores unused frame fields.
 
 ```python
 # samples = pd.read_csv(samples_path)
-# flux = flux_from_frame(samples, device_name="bias_device")
+# flux = flux_from_frame(samples)
 # display(pd.DataFrame({"flux": flux}))
 ```
 
-If rows lack both frame values and explicit flux, pass a named frame yourself.
-The following example declares volts, a zero-flux value of 0.1 V and a period
-of 0.8 V. Replace those numbers with your calibration. If calibration lives in
-a file, read it before constructing `RecordFluxFrame`; the helper accepts frame
-data, not a path. Fallback requires the selected device's `value_unit` to match.
-No unit conversion occurs.
+If rows lack a row frame and explicit flux, pass a named frame yourself.
+This example declares volts, a zero-flux value of 0.1 V and a period of 0.8 V.
+Those values give offset -0.125. Replace them with your calibration.
+If calibration lives in a file, read it before constructing `FluxFrame`.
+The helper accepts frame data, not a path.
+Fallback requires each present device's `value_unit` to match. No units are converted.
 
 ```python
 # Use this call instead of the one above when a fallback is needed.
-# fallback = RecordFluxFrame(dev_unit="V", flux_int=0.1, flux_period=0.8)
-# flux = flux_from_frame(samples, device_name="bias_device", fallback_frame=fallback)
+# fallback = FluxFrame(-0.125, {"bias_device": DevicePeriod(0.8, "V")})
+# flux = flux_from_frame(samples, fallback_frame=fallback)
 ```
 
 Call the separate f01 correction tool if your analysis needs it, then pass the

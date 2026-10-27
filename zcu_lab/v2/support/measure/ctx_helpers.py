@@ -6,11 +6,10 @@ from collections.abc import Mapping
 from math import isfinite
 from typing import TYPE_CHECKING
 
-from zcu_tools.analysis.flux import DeviceFluxPoint
 from zcu_tools.cfg_model import validate_device_name
 from zcu_tools.datafile import JsonObject
 
-from zcu_lab.components.qubit import QubitBaseSchema
+from zcu_lab.components.qubit import QubitBaseSchema, QubitFluxCalibration
 from zcu_lab.v2.support.flux import (
     device_flux_points,
     qubit_flux_frame,
@@ -46,7 +45,7 @@ def flux_pick_initial_points(
     parameters: ParameterContext | None,
     device_name: str,
     snapshot: Mapping[str, JsonObject] | None,
-) -> DeviceFluxPoint | None:
+) -> QubitFluxCalibration | None:
     """Return scalar picker's half/integer lines from the fixed Run capture.
 
     device_name is the acquired cfg's scanned device, not flux_source.
