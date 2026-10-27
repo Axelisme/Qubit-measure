@@ -11,10 +11,11 @@ from .state import AlignmentPublication
 
 @dataclass(frozen=True)
 class FluxWritebackReceipt:
-    """Component calibration outcome shared by GUI, RPC and MCP.
+    """Independent component or dataset export outcome shared by GUI/RPC/MCP.
 
-    status is 'written' when the plan supplies calibration fields, otherwise
-    'skipped'. device names the calibrated instrument for 'written', or the
+    status is 'written' when the component plan supplies calibration fields or
+    the dataset predictor is written, otherwise 'skipped'. Each outcome has its
+    own receipt. device names the calibrated or scanned instrument, or the
     intended instrument when known for 'skipped'. reason is None for 'written';
     'skipped' requires a nonblank explanation and the next operator action.
     Invalid status/field combinations raise ValueError at construction.

@@ -53,6 +53,7 @@ def main(argv: list[str] | None = None) -> int:
     from zcu_tools.gui.app.fluxdep.app import FluxDepGuiBehavior
     from zcu_tools.resources.entry import component_registry
 
+    from zcu_lab.component_flux import component_flux_context
     from zcu_lab.components import register_all
     from zcu_lab.fluxdep_export import plan_fluxdep_export
 
@@ -65,6 +66,7 @@ def main(argv: list[str] | None = None) -> int:
         project=analysis_target_from_args(args, project_root=project_root),
         project_root=args.project_root or project_root,
         export_planner=plan_fluxdep_export,
+        flux_context_provider=component_flux_context,
     )
 
 

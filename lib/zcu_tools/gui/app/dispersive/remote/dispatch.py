@@ -61,18 +61,14 @@ def _h_fit_inputs_info(
         return {
             "has_inputs": False,
             "params": None,
-            "flux_half": None,
-            "flux_bias": None,
-            "flux_period": None,
+            "flux": None,
             "bare_rf_seed": None,
         }
     ej, ec, el = inputs.params
     return {
         "has_inputs": True,
         "params": {"EJ": ej, "EC": ec, "EL": el},
-        "flux_half": inputs.flux_half,
-        "flux_bias": inputs.flux_bias,
-        "flux_period": inputs.flux_period,
+        "flux": inputs.flux.to_dict(),
         "bare_rf_seed": inputs.bare_rf_seed,
     }
 

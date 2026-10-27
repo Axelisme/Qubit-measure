@@ -15,10 +15,8 @@ from zcu_tools.resources.entry import (
     snapshot,
 )
 from zcu_tools.resources.predictor_file import (
-    PredictorFile,
-    PredictorSource,
     save_predictor_file,
-    validate_predictor_file,
+    upgrade_predictor_document,
 )
 from zcu_tools.simulate.fluxonium.predict import FluxoniumParams
 
@@ -32,7 +30,7 @@ from .state import MigrationSession, record_pending
 _JSON = TypeAdapter(JsonObject)
 _YAML = TypeAdapter(YamlValue)
 _ENERGIES = ("EJ", "EC", "EL")
-_FLUX_FIELDS = ("flux_half", "flux_period")
+_FLUX_FIELDS = ("flux_half", "flux_period", "flux_bias")
 
 
 @dataclass
@@ -85,24 +83,24 @@ def _setup_context(
 
 def _flux_unit(
     values: JsonObject, fit: JsonObject, assumed: str | None
-) -> tuple[str | None, str | None]:
+) -> tuple[JsonValue, str | None]:
     if "flux_unit" not in values and "flux_unit" not in fit and assumed is not None:
         return assumed, None
+    if "flux_unit" not in values and "flux_unit" not in fit:
+        return None, None
     root_unit, fit_unit = values.get("flux_unit"), fit.get("flux_unit")
     if "flux_unit" in values and "flux_unit" in fit and root_unit != fit_unit:
         return None, "params.json flux_unit and fluxdep_fit.flux_unit disagree"
     unit = root_unit if "flux_unit" in values else fit_unit
-    if not isinstance(unit, str) or unit not in ("A", "mA", "V", "mV"):
-        return None, "Missing or unsupported explicit flux_unit (A/mA/V/mV)"
     return unit, None
 
 
 def _project_model_params(
     source: Path, target: Path, fit: JsonObject, prefix: tuple[str, ...]
-) -> tuple[FluxoniumParams, list[KeyMappingItem]]:
+) -> tuple[JsonObject, list[KeyMappingItem]]:
     """Project supported numeric fields through the model owner, recording exact source subtrees."""
     energies = fit.get("params")
-    params: JsonObject = {"flux_bias": 0.0}
+    params: JsonObject = {}
     rows: list[KeyMappingItem] = []
     if energies == {}:
         rows.append(
@@ -119,7 +117,11 @@ def _project_model_params(
     flux_fields = (
         tuple((field, field) for field in _FLUX_FIELDS)
         if prefix
-        else (("half flux", "flux_half"), ("period", "flux_period"))
+        else (
+            ("half flux", "flux_half"),
+            ("period", "flux_period"),
+            ("flux_bias", "flux_bias"),
+        )
     )
     for source_field, field in (
         *((energy, energy) for energy in _ENERGIES),
@@ -131,7 +133,8 @@ def _project_model_params(
         value = container[source_field]
         reason = None
         try:
-            FluxoniumParams.from_mapping({field: value})
+            if field in _ENERGIES:
+                FluxoniumParams.from_mapping({field: value})
         except ValueError:
             reason = "Expected a finite numeric value or null; no expression evaluation or coercion"
         else:
@@ -147,12 +150,12 @@ def _project_model_params(
                 old_key=".".join(keys),
                 source_keys=keys,
                 new_file=target,
-                new_path=f"params.{field}",
+                new_path=f"params.{field}" if field in _ENERGIES else "flux",
                 action="pending" if reason else "value",
                 reason=reason or "Preserve legacy fluxonium parameter in native units",
             )
         )
-    return FluxoniumParams.from_mapping(params), rows
+    return params, rows
 
 
 def _unsupported_model_params(energies: JsonValue) -> bool:
@@ -176,7 +179,10 @@ def _project_fit(
     ):
         fit = values
         prefix = ()
-    if not isinstance(fit, dict):
+    flux_fields = _FLUX_FIELDS if prefix else ("half flux", "period", "flux_bias")
+    if not isinstance(fit, dict) or (
+        "params" not in fit and not any(field in fit for field in flux_fields)
+    ):
         return []
     target = (
         session.manifest.report.destination.result_path / "predictors" / f"{name}.json"
@@ -220,7 +226,7 @@ def _project_fit(
     timestamp_keys = (*prefix, "timestamp")
     timestamp_key = ".".join(timestamp_keys)
     for key, path, reason in (
-        (unit_key, "flux_unit", unit_error),
+        (unit_key, "flux.unit.unnamed_device", unit_error),
         (
             timestamp_key,
             "source.created_at",
@@ -236,11 +242,13 @@ def _project_fit(
                 new_file=target,
                 new_path=path,
                 action="pending" if reason else "value",
-                source_keys=unit_source_keys if path == "flux_unit" else timestamp_keys,
+                source_keys=unit_source_keys
+                if path.startswith("flux.unit")
+                else timestamp_keys,
                 reason=reason
                 or (
                     f"假設單位: {assumed}; operator supplied, no numeric conversion"
-                    if path == "flux_unit"
+                    if path.startswith("flux.unit")
                     and assumed is not None
                     and "flux_unit" not in values
                     and "flux_unit" not in fit
@@ -254,19 +262,29 @@ def _project_fit(
                 old_file=source,
                 old_key="fluxdep_fit.flux_unit",
                 new_file=target,
-                new_path="flux_unit",
+                new_path="flux.unit.unnamed_device",
                 source_keys=("fluxdep_fit", "flux_unit"),
                 action="value",
                 reason="Matching explicit fit unit shares the predictor unit destination",
             )
         )
-    predictor = PredictorFile(
-        model="fluxonium",
-        params=params,
-        flux_unit=unit,
-        source=PredictorSource(run_id=None, created_at=created_at),
-    )
-    validate_predictor_file(predictor)
+    try:
+        predictor = upgrade_predictor_document(
+            {
+                "format": "zcu.predictor",
+                "version": 1,
+                "model": "fluxonium",
+                "params": params,
+                "flux_unit": unit,
+                "source": {"run_id": None, "created_at": created_at},
+            }
+        )
+    except ValueError as exc:
+        reason = f"Cannot publish predictor: {exc}"
+        record_pending(session, source, ".".join((*prefix, "flux")), reason)
+        return [replace(row, action="pending", reason=reason) for row in rows]
+    if unit_error is not None:
+        return [replace(row, action="pending", reason=unit_error) for row in rows]
     if not session.dry_run:
         publish_document(
             session,
@@ -494,7 +512,10 @@ def convert_params_json(
     dry-run. mapping supplies seeds with exactly one qubit/* kind; otherwise the
     whole handoff stays pending. Call before points so they inherit raw residuals,
     then apply each context's meta_info normally. Legacy EJ/EC/EL fits use the
-    documented fluxonium model and zero bias; flux_int is alignment-only. An
+    documented fluxonium model; flux_int is alignment-only. Complete explicit
+    half/period/bias evidence is required by the predictor upgrade owner; missing
+    or invalid affine evidence stays pending without a predictor. Signed periods
+    are preserved and missing units use native. An
     explicit model is unsupported and stays pending. Earlier root params.EJ/EC/EL,
     half flux and period use the same predictor owner, without numeric conversion.
     EJ or EL identifies fluxonium even with extra parameters; only EC plus unknown
@@ -504,7 +525,7 @@ def convert_params_json(
     Unknown/invalid numbers
     remain unknown, with invalid values located in pending. Units only come from
     explicit root/fit flux_unit, or the declared assumption only when both keys
-    are absent. Otherwise missing/conflicting units become null and pending,
+    are absent. Explicit invalid/conflicting units remain pending without output,
     without conversion. Source run_id is unknown; only a timezone-aware ISO 8601
     timestamp supplies created_at. Preserve only unconverted source values in
     component.ext.legacy_params. Successful formal mappings remove their source

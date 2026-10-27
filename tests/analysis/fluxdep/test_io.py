@@ -12,9 +12,11 @@ def test_spectrum_collection_roundtrips_values_shapes_and_dtypes(
     tmp_path, include_type
 ):
     first = SpectrumResult(
-        flux_half=0.25,
-        flux_int=0.75,
-        flux_period=1.0,
+        offset=0.25,
+        period=1.0,
+        device="bias",
+        unit="A",
+        device_snapshot={"coil": {"value": 0.002, "unit": "A"}},
         spectrum={
             "dev_values": np.array([0.0, 1.0]),
             "fluxs": np.array([0.25, 0.75]),
@@ -28,9 +30,10 @@ def test_spectrum_collection_roundtrips_values_shapes_and_dtypes(
         },
     )
     second = SpectrumResult(
-        flux_half=-0.5,
-        flux_int=0.5,
-        flux_period=2.0,
+        offset=0.75,
+        period=-2.0,
+        device="unnamed_device",
+        unit="native",
         spectrum=first["spectrum"],
         points={
             "dev_values": np.array([0.0, 1.0]),
@@ -44,13 +47,23 @@ def test_spectrum_collection_roundtrips_values_shapes_and_dtypes(
     expected = {"first": first, "second": second}
     path = str(tmp_path / "spectrums.hdf5")
     dump_spectrums(path, expected)
+    with h5py.File(path, "r") as handle:
+        assert handle.attrs["format"] == "zcu.fluxdep-spectrums"
+        assert handle.attrs["version"] == 2
+        assert handle["first"].attrs["offset"] == 0.25
+        snapshot = handle["first/device_snapshot/coil"]
+        assert isinstance(snapshot, h5py.Dataset)
+        assert snapshot[()] == 0.002
+        assert snapshot.attrs["unit"] == "A"
     actual = load_spectrums(path)
     assert actual.keys() == expected.keys()
     for name, source in expected.items():
         result = actual[name]
-        assert result["flux_half"] == source["flux_half"]
-        assert result["flux_int"] == source["flux_int"]
-        assert result["flux_period"] == source["flux_period"]
+        assert result["offset"] == source["offset"]
+        assert result["period"] == source["period"]
+        assert result["device"] == source["device"]
+        assert result["unit"] == source["unit"]
+        assert result.get("device_snapshot") == source.get("device_snapshot")
         assert result.get("type") == source.get("type")
         pairs = (
             (result["spectrum"]["dev_values"], source["spectrum"]["dev_values"]),
@@ -67,17 +80,81 @@ def test_spectrum_collection_roundtrips_values_shapes_and_dtypes(
             assert restored.dtype == array.dtype
 
 
+@pytest.mark.parametrize("mode", ["a", "r+"])
+@pytest.mark.parametrize(
+    ("format_name", "version"),
+    [(None, None), ("zcu.fluxdep-spectrums", 1), ("other", 2)],
+)
+def test_non_overwriting_dump_rejects_unsupported_header_without_changes(
+    tmp_path, mode, format_name, version
+):
+    path = tmp_path / "existing.hdf5"
+    with h5py.File(path, "w") as handle:
+        if format_name is not None:
+            handle.attrs.update(format=format_name, version=version)
+        handle.create_group("legacy")
+    original = path.read_bytes()
+    with pytest.raises(ValueError, match="scripts/upgrade_spectrums.py"):
+        dump_spectrums(str(path), {}, mode=mode)
+    assert path.read_bytes() == original
+    dump_spectrums(str(path), {}, mode="w")
+    assert load_spectrums(str(path)) == {}
+
+
+@pytest.mark.parametrize("mode", ["a", "r+"])
+def test_v2_dump_can_append_a_spectrum(tmp_path, mode):
+    spectrum = SpectrumResult(
+        offset=0.2,
+        period=-2.0,
+        device="coil",
+        unit="A",
+        spectrum={
+            "dev_values": np.array([0.0]),
+            "fluxs": np.array([0.2]),
+            "freqs": np.array([4.0]),
+            "signals": np.array([[1j]]),
+        },
+        points={
+            "dev_values": np.array([]),
+            "fluxs": np.array([]),
+            "freqs": np.array([]),
+        },
+    )
+    path = str(tmp_path / "v2.hdf5")
+    dump_spectrums(path, {"first": spectrum}, mode="a")
+    dump_spectrums(path, {"second": spectrum}, mode=mode)
+    restored = load_spectrums(path)
+    assert set(restored) == {"first", "second"}
+    for result in restored.values():
+        assert result["period"] == -2.0
+        np.testing.assert_array_equal(result["spectrum"]["signals"], [[1j]])
+
+
+@pytest.mark.parametrize("version", [None, 1, 3])
+def test_unsupported_collection_requires_explicit_upgrade(tmp_path, version):
+    path = tmp_path / "old.hdf5"
+    with h5py.File(path, "w") as handle:
+        if version is not None:
+            handle.attrs.update(format="zcu.fluxdep-spectrums", version=version)
+    original = path.read_bytes()
+    with pytest.raises(ValueError, match="scripts/upgrade_spectrums.py"):
+        load_spectrums(str(path))
+    assert path.read_bytes() == original
+
+
 def test_load_spectrums_preserves_non_group_rejection(tmp_path):
     path = tmp_path / "raw.hdf5"
     with h5py.File(path, "w") as handle:
+        handle.attrs.update(format="zcu.fluxdep-spectrums", version=2)
         handle.create_dataset("raw", data=np.array([1.0]))
-    with pytest.raises(AssertionError):
+    with pytest.raises(TypeError, match="raw"):
         load_spectrums(str(path))
 
 
 def test_load_spectrums_preserves_missing_group_error(tmp_path):
     path = tmp_path / "incomplete.hdf5"
     with h5py.File(path, "w") as handle:
+        handle.attrs.update(format="zcu.fluxdep-spectrums", version=2)
         handle.create_group("entry")
     with pytest.raises(KeyError):
         load_spectrums(str(path))
@@ -86,9 +163,6 @@ def test_load_spectrums_preserves_missing_group_error(tmp_path):
 @pytest.mark.parametrize(
     "field",
     [
-        "flux_half",
-        "flux_int",
-        "flux_period",
         "spectrum/dev_values",
         "spectrum/fluxs",
         "spectrum/freqs",
@@ -104,9 +178,9 @@ def test_load_spectrums_rejects_non_dataset_fields_with_their_path(
 ):
     path = tmp_path / "wrong-kind.hdf5"
     with h5py.File(path, "w") as handle:
+        handle.attrs.update(format="zcu.fluxdep-spectrums", version=2)
         entry = handle.create_group("entry")
-        for calibration in ("flux_half", "flux_int", "flux_period"):
-            entry.create_dataset(calibration, data=1.0)
+        entry.attrs.update(offset=0.25, period=1.0, device="bias", unit="A")
         for group_name, fields in (
             ("spectrum", ("dev_values", "fluxs", "freqs", "signals")),
             ("points", ("dev_values", "fluxs", "freqs")),

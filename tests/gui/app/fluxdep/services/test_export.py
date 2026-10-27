@@ -39,10 +39,10 @@ def test_export_roundtrips_via_load_spectrums(spectrum_hdf5, tmp_path):
     loaded = load_spectrums(out)
     assert name in loaded
     result = loaded[name]
-    # The type field is optional in older collections. Current writers preserve
-    # it as a group attribute when supplied.
-    assert result["flux_half"] == 0.0
-    assert result["flux_period"] == 2.0
+    assert result["offset"] == 0.5
+    assert result["period"] == 2.0
+    assert result["device"] == "unnamed_device"
+    assert result["unit"] == "native"
     # points round-trip
     np.testing.assert_allclose(result["points"]["freqs"], [5.0, 5.5])
     # spectrum signals round-trip (shape preserved)

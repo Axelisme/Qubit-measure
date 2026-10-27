@@ -4,6 +4,7 @@ from typing import Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from zcu_tools.resources.predictor_file import PredictorFlux, PredictorFluxValues
 from zcu_tools.simulate.fluxonium.predict import FluxoniumParams
 from zcu_tools.simulate.parameters import ModelName, ModelParams, params_class
 
@@ -12,13 +13,18 @@ class PredictorSnapshot(BaseModel):
     """User trial in GHz/native units, including unknown inputs.
 
     version identifies the cache schema, model identifies the physics family,
-    and params is a detached trial. Invalid physics is allowed until computation.
+    and params is a detached energy trial. flux is the optional v2 frame;
+    device_values retains known native inputs, omitting unknowns. axis_device is
+    a loaded device or None. Invalid physics is allowed until computation.
     """
 
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
-    version: Literal[1] = 1
+    version: Literal[2] = 2
     model: ModelName = "fluxonium"
     params: ModelParams = Field(default_factory=FluxoniumParams)
+    flux: PredictorFluxValues | None = None
+    device_values: dict[str, float] = Field(default_factory=dict)
+    axis_device: str | None = None
 
     @model_validator(mode="before")
     @classmethod
@@ -34,6 +40,14 @@ class PredictorSnapshot(BaseModel):
 
     @model_validator(mode="after")
     def _params_match_model(self) -> Self:
+        if self.flux is not None:
+            frame = PredictorFlux.from_mapping(self.flux)
+            if self.axis_device is not None and self.axis_device not in frame.period:
+                raise ValueError("axis_device is not in flux.period")
+            if self.device_values.keys() - frame.period.keys():
+                raise ValueError("device_values contains an unknown flux device")
+        elif self.device_values or self.axis_device is not None:
+            raise ValueError("device values and axis require a flux frame")
         if self.params.model != self.model:
             raise ValueError(f"params do not belong to model {self.model!r}")
         return self

@@ -172,7 +172,7 @@ class LoadDataDialog(QDialog):
         self._filepath = filepath
         if self._ok_button is not None:
             self._ok_button.setEnabled(bool(filepath))
-        self._raw = self._read_best_effort(filepath) if filepath else None
+        self._raw = self._read_source(filepath) if filepath else None
         self._render_preview()
 
     def closeEvent(self, a0: QCloseEvent | None) -> None:
@@ -183,6 +183,16 @@ class LoadDataDialog(QDialog):
     def _on_axes_changed(self, index: int) -> None:
         self._transpose = index == 1
         self._render_preview()
+
+    def _read_source(
+        self, filepath: str
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray | None] | None:
+        """Read preview coordinates; subclasses may expose explicit input selection.
+
+        Return signals in device-major order, device values and optional frequency
+        values. Preview failures stay visible in the dialog, not in app State.
+        """
+        return self._read_best_effort(filepath)
 
     @staticmethod
     def _read_best_effort(

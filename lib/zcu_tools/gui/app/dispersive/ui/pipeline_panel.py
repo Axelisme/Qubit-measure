@@ -417,10 +417,13 @@ class PipelinePanelWidget(QWidget):
         inputs = self._ctrl.state.fit_inputs
         assert inputs is not None
         ej, ec, el = inputs.params
+        periods = ", ".join(
+            f"{name}: period={period:.4g} {inputs.flux.unit[name]}/Φ0"
+            for name, period in inputs.flux.period.items()
+        )
         self._inputs_label.setText(
             f"{path} · EJ/EC/EL = {ej:.3f}/{ec:.3f}/{el:.3f} GHz · "
-            f"half={inputs.flux_half:.4g} bias={inputs.flux_bias:.4g} "
-            f"period={inputs.flux_period:.4g} · "
+            f"offset={inputs.flux.offset:.4g} Φ0 · {periods} · "
             f"bare_rf seed={inputs.bare_rf_seed:.4f} GHz"
         )
         self._sync_enabled()
@@ -433,11 +436,22 @@ class PipelinePanelWidget(QWidget):
         # the ``accepted`` signal (it only fires on Accept; Reject runs nothing).
         from qtpy.QtCore import Qt
 
+        from zcu_tools.gui.app.analysis_project.native_dialog import NativeDeviceChoices
+
         from .load_dialog import LoadOnetoneDialog
         from .paths import raw_onetone_dir
 
         start = raw_onetone_dir(self._ctrl.get_project_root())
-        dialog = LoadOnetoneDialog(self, start_dir=start)
+        inputs = self._ctrl.state.fit_inputs
+        if inputs is None:
+            return
+        dialog = LoadOnetoneDialog(
+            self,
+            start_dir=start,
+            choices=NativeDeviceChoices(
+                inputs.flux.unit, next(iter(inputs.flux.period), None)
+            ),
+        )
         dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
 
         def _on_accepted() -> None:
@@ -446,7 +460,9 @@ class PipelinePanelWidget(QWidget):
                 return
             try:
                 name = self._ctrl.load_onetone(
-                    req.filepath, transpose_axes=req.transpose_axes
+                    req.filepath,
+                    transpose_axes=req.transpose_axes,
+                    selection=req.selection,
                 )
             # tolerated: Isolate arbitrary loader/provider failures from Qt.
             except Exception as exc:  # noqa: BLE001

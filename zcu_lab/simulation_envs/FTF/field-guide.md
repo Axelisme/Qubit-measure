@@ -141,14 +141,16 @@ numerics: # Basis sizes, solver accuracy and root RNG seed.
 
 Predictor 使用既有換算
 `Phi/Phi0 = (device_value + flux_bias - flux_half) / flux_period + 0.5`。
-Startup 不做換算，只把以上標稱值交給 `FluxoniumParams` 與 `PredictorFile`。
+Design schema 保留以上欄位。Startup 將能量交給 `FluxoniumParams`，其餘換成 predictor v2 的獨立 `flux`。
+`offset = 0.5 + (flux_bias - flux_half) / flux_period`，不做 mod 1。
+`period` 與 `unit` 以 entry-template 的實際 `flux_dev` 為鍵，不使用佔位名稱。
 它以 resources writer 建立 entry 的 `predictors/<qubit>.json`，不覆寫已有檔案。
 未知 qubit 或 device 單位不符在 startup 報錯，缺欄位在 `ftf()` 載入時報完整 field path。
 
 省略 `design` 或填空 map 不影響環境組裝。Startup 顯示
 「design 未提供，未建立 predictor」，不從真值建立 fallback，也不刪除舊檔。
 MCP 透過 `predictor.list_files` 找檔，再用 `predictor.predict` 查初猜。
-樣板的 `device_value=1.2e-3` 表示 1.2 mA，不是 reduced flux。
+樣板的 `device_values={"f1_bias": 1.2e-3}` 表示 f1_bias 輸出 1.2 mA，不是 reduced flux。
 
 ## DC bias：live 電源與靜態磁通掃描
 

@@ -9,6 +9,12 @@ from typing import Annotated, Literal
 import numpy as np
 from numpy.typing import NDArray
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+from zcu_tools.analysis.flux import (
+    DevicePeriod,
+    FluxFrame,
+    flux_from_device_values,
+    offset_for_flux,
+)
 from zcu_tools.cfg_model import Gain
 from zcu_tools.simulate.fluxonium.physical_fit import (
     FluxoniumLocalFitResult,
@@ -45,12 +51,20 @@ class FrequencyModel(BaseModel):
 
     def make_predictor(self) -> FluxoniumPredictor:
         """Build an independent predictor; energies use GHz, queries return MHz."""
-        return FluxoniumPredictor(
-            (self.EJ, self.EC, self.EL),
-            self.flux_half,
-            self.flux_period,
-            self.flux_bias,
+        return FluxoniumPredictor((self.EJ, self.EC, self.EL))
+
+    def reduced_flux(self, value: float) -> float:
+        """Project a native DC setpoint to phi, retaining the signed period.
+
+        dc is a local coordinate label, not a hardware device identity. No
+        unit conversion is performed: all alignment values use the same native unit.
+        """
+        devices = {"dc": DevicePeriod(self.flux_period)}
+        frame = FluxFrame(
+            offset_for_flux(devices, {"dc": self.flux_half - self.flux_bias}, flux=0.5),
+            devices,
         )
+        return flux_from_device_values(frame, {"dc": value})
 
 
 class FrequencyTunables(BaseModel):
@@ -231,7 +245,8 @@ class FrequencyTracker:
     overlay and reseeding residuals against that overlay.
     """
 
-    predictor: FluxoniumPredictor
+    model: FrequencyModel
+    predictor: FluxoniumPredictor = field(init=False)
     residuals: IdwEstimator = field(
         default_factory=lambda: IdwEstimator(k=10, epsilon=1e-4, decay_points=4.0)
     )
@@ -244,14 +259,12 @@ class FrequencyTracker:
     qfw_factor: float | None = None
     last_linewidth_index: int = 0
 
+    def __post_init__(self) -> None:
+        self.predictor = self.model.make_predictor()
+
     def model_snapshot(self) -> FluxoniumModelSnapshot:
-        """Capture the current EJ/EC/EL (GHz), DC affine map and flux bias."""
-        return FluxoniumModelSnapshot(
-            self.predictor.params,
-            self.predictor.flux_half,
-            self.predictor.flux_period,
-            self.predictor.flux_bias,
-        )
+        """Capture current energies; the lab model already includes accepted corrections."""
+        return FluxoniumModelSnapshot(self.predictor.params)
 
     def matrix_element_at(self, flux: float) -> float:
         """Return |<0|n|1>| at finite flux in the predictor's device coordinate.
@@ -262,7 +275,9 @@ class FrequencyTracker:
         """
         if not math.isfinite(flux):
             raise ValueError("Matrix-element flux must be finite")
-        return float(self.predictor.predict_matrix_element(flux))
+        return float(
+            self.predictor.predict_matrix_element(self.model.reduced_flux(flux))
+        )
 
     def begin_point(self, flux: float, *, seed_flux: float | None = None) -> float:
         """Clear recovery and return corrected MHz; publish the seed-relative matrix ratio.
@@ -272,7 +287,7 @@ class FrequencyTracker:
         silently uses the first point as the reference.
         """
         self.last_recovery = None
-        base = float(self.predictor.predict_freq(flux))
+        base = float(self.predictor.predict_freq(self.model.reduced_flux(flux)))
         self.cur_m = self.matrix_element_at(flux)
         seed_m = self.matrix_element_at(seed_flux) if seed_flux is not None else 0.0
         self.m_ratio = self.cur_m / seed_m if seed_m > 0 and self.cur_m > 0 else None
@@ -326,7 +341,9 @@ class FrequencyTracker:
         self.fail_streak = 0
         if not reseeded:
             self.residuals.observe(
-                flux, frequency_mhz - float(self.predictor.predict_freq(flux))
+                flux,
+                frequency_mhz
+                - float(self.predictor.predict_freq(self.model.reduced_flux(flux))),
             )
 
     def observe_linewidth(self, index: int, width_mhz: float, gain: float) -> None:
@@ -356,20 +373,37 @@ class FrequencyTracker:
                 trigger, False, "not enough trusted history", 0, base
             )
             return False
-        fit = fit_local_fluxonium_model(base, points)
+        fit = fit_local_fluxonium_model(
+            base, [(self.model.reduced_flux(x), y) for x, y in points]
+        )
         candidate = fit.predictor
         shift = math.nan
         reason = fit.reason
         if fit.fitted is not None and candidate is not None:
             shift = abs(
-                float(candidate.predict_freq(flux))
-                - float(self.predictor.predict_freq(flux))
+                float(
+                    candidate.predict_freq(
+                        self.model.reduced_flux(flux) + fit.fitted.offset_correction
+                    )
+                )
+                - float(self.predictor.predict_freq(self.model.reduced_flux(flux)))
             )
             if fit.accepted:
                 reason = _recovery_rejection(fit, shift)
         residuals = (
-            [(x, y - float(candidate.predict_freq(x))) for x, y in points]
-            if reason == "accepted" and candidate is not None
+            [
+                (
+                    x,
+                    y
+                    - float(
+                        candidate.predict_freq(
+                            self.model.reduced_flux(x) + fit.fitted.offset_correction
+                        )
+                    ),
+                )
+                for x, y in points
+            ]
+            if reason == "accepted" and candidate is not None and fit.fitted is not None
             else []
         )
         if any(not math.isfinite(value) for _, value in residuals):
@@ -386,8 +420,20 @@ class FrequencyTracker:
             fit.fitted_rms_mhz if math.isfinite(fit.fitted_rms_mhz) else None,
             shift if math.isfinite(shift) else None,
         )
-        if not accepted or candidate is None:
+        if not accepted or candidate is None or fit.fitted is None:
             return False
+        # phi = 0.5 + (value + bias - half) / signed period.
+        # A Phi0 correction therefore changes native bias by correction * period.
+        ej, ec, el = fit.fitted.params
+        self.model = self.model.model_copy(
+            update={
+                "EJ": ej,
+                "EC": ec,
+                "EL": el,
+                "flux_bias": self.model.flux_bias
+                + fit.fitted.offset_correction * self.model.flux_period,
+            }
+        )
         self.residuals.replace_observations(residuals)
         self.predictor = candidate
         return True

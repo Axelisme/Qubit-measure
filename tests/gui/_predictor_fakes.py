@@ -1,14 +1,13 @@
 """Typed numerical-failure collaborator for predictor RPC contracts."""
 
 from zcu_tools.gui.session.services.predictor import (
-    CalibrateFluxBiasRequest,
-    CalibrateFluxBiasResult,
+    CalibrateOffsetRequest,
     PredictCurveRequest,
     PredictCurveResult,
     PredictFreqRequest,
     PredictorService,
 )
-from zcu_tools.simulate.predictor import PredictorParams
+from zcu_tools.simulate.predictor import CalibrationResult, PredictorParams
 
 
 class FailingPredictorService(PredictorService):
@@ -18,7 +17,7 @@ class FailingPredictorService(PredictorService):
         super().__init__()
         self.error = error
         self.requests: list[
-            PredictFreqRequest | CalibrateFluxBiasRequest | PredictCurveRequest
+            PredictFreqRequest | CalibrateOffsetRequest | PredictCurveRequest
         ] = []
 
     def predict_freq_curve(
@@ -31,8 +30,8 @@ class FailingPredictorService(PredictorService):
         self.requests.append(req)
         raise self.error
 
-    def calibrate_flux_bias(
-        self, params: PredictorParams, req: CalibrateFluxBiasRequest
-    ) -> CalibrateFluxBiasResult:
+    def calibrate_offset(
+        self, params: PredictorParams, req: CalibrateOffsetRequest
+    ) -> CalibrationResult:
         self.requests.append(req)
         raise self.error

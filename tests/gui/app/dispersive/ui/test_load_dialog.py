@@ -4,12 +4,14 @@ from __future__ import annotations
 
 from qtpy.QtCore import Qt
 from qtpy.QtWidgets import QDialogButtonBox, QFileDialog, QPushButton
+from zcu_tools.gui.app.analysis_project.native_dialog import NativeDeviceChoices
 from zcu_tools.gui.app.dispersive.ui.load_dialog import (
     LoadOnetoneDialog,
     LoadOnetoneRequest,
 )
 
 from tests.gui._user_input import ComponentDriver
+from tests.gui.app.analysis_project._native import native_spectrum_file
 
 
 def _button(dialog: LoadOnetoneDialog, text: str) -> QPushButton:
@@ -90,3 +92,30 @@ def test_bad_preview_does_not_prevent_file_selection(qapp, tmp_path, monkeypatch
     dialog = LoadOnetoneDialog(start_dir="")
     _button(dialog, "Browse…").click()
     assert dialog.result_request() == LoadOnetoneRequest(bad, False)
+
+
+def test_native_choices_come_from_predictor_and_are_editable(qapp, tmp_path):
+    path = native_spectrum_file(tmp_path / "native.h5", {})
+    dialog = LoadOnetoneDialog(
+        start_dir=str(tmp_path),
+        choices=NativeDeviceChoices({"bias": "A", "coil": "V"}, default_device="bias"),
+    )
+    dialog.show()
+    qapp.processEvents()
+    driver = ComponentDriver(dialog)
+    try:
+        driver.screenshot(tmp_path / "before.png")
+        driver.choose_file("Browse…", path, evidence=tmp_path / "chooser.png")
+        driver.screenshot(tmp_path / "preselected.png")
+        assert driver.observe(object_name="native_variable").text == "signal"
+        assert driver.observe(object_name="native_device_axis").text == "bias"
+        assert driver.observe(object_name="native_device").text == "bias"
+        assert driver.observe("OK").enabled
+        driver.select_combo("coil", object_name="native_device")
+        driver.screenshot(tmp_path / "selected-coil.png")
+        assert driver.observe(object_name="native_device").text == "coil"
+        assert driver.observe("V").visible
+    finally:
+        driver.click("Cancel")
+        dialog.deleteLater()
+        qapp.processEvents()

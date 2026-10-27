@@ -7,12 +7,20 @@ from zcu_tools.mcp.core.rpc import GuiInvocationError
 from tests.mcp.fluxdep._support import Client, GuiError, GuiResponse
 
 
-@pytest.mark.parametrize("arguments", [{}])
+@pytest.mark.parametrize("predictor_written", [True, False])
 def test_fit_export_returns_only_gui_receipt_without_other_reads(
-    client: Client, arguments: dict[str, object]
+    client: Client, predictor_written: bool
 ) -> None:
+    arguments: dict[str, object] = {}
     receipt = {
-        "savepath": "/resolved/params.json",
+        "savepath": "/resolved/params.json" if predictor_written else None,
+        "predictor_writeback": {
+            "status": "written" if predictor_written else "skipped",
+            "device": "bias",
+            "reason": None
+            if predictor_written
+            else "No snapshot; load native data with a snapshot.",
+        },
         "params": {"EJ": 2.741234567, "EC": 1.420123456, "EL": 0.148123456},
         "alignment_from": "empty-first-aligned",
         "component": "Q2",

@@ -128,7 +128,13 @@ def _display_text(widget: QWidget) -> str:
 def _caption_fits(widget: QWidget) -> bool:
     if isinstance(widget, QComboBox):
         option = QStyleOptionComboBox()
-        widget.initStyleOption(option)
+        # Native dialog children cannot expose QComboBox's protected initializer.
+        option.initFrom(widget)
+        option.editable = widget.isEditable()
+        option.frame = widget.hasFrame()
+        option.currentText = widget.currentText()
+        option.currentIcon = widget.itemIcon(widget.currentIndex())
+        option.iconSize = widget.iconSize()
         style = widget.style()
         if style is None:
             raise RuntimeError("Combo box has no Qt style")

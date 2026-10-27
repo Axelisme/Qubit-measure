@@ -8,15 +8,18 @@ Computations never read a dialog, cache, component, alias or installed model.
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import dataclass
+from math import isfinite
 from typing import TYPE_CHECKING, TypedDict
 
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 from zcu_tools.gui.session.services.predictor import (
-    CalibrateFluxBiasRequest,
+    CalibrateOffsetRequest,
     PredictFreqRequest,
 )
-from zcu_tools.simulate.parameters import ModelParams, params_class
+from zcu_tools.resources.predictor_file import PredictorFlux, PredictorFluxValues
+from zcu_tools.simulate.parameters import ModelName, ModelParams, params_class
 from zcu_tools.simulate.predictor import PredictorInputError
 
 if TYPE_CHECKING:
@@ -33,6 +36,39 @@ class PredictorFilesReply(TypedDict):
     files: list[str]
 
 
+class PredictionReply(TypedDict):
+    """freq_mhz is the requested transition frequency in MHz."""
+
+    freq_mhz: float
+
+
+class OffsetCalibrationReply(TypedDict):
+    """Candidate calibration; no source is updated.
+
+    offset_correction is additive Phi0 for the caller's current offset.
+    frequency_mhz is the actual attained MHz. clamped is true only when the
+    target was unattainable; nearest-frequency ties use minimum correction.
+    """
+
+    offset_correction: float
+    frequency_mhz: float
+    clamped: bool
+
+
+class PredictorInfoReply(TypedDict):
+    """Independent input description without building a numerical model.
+
+    model is fluxonium or transmon. params holds that model's nullable GHz
+    energies/asymmetry. missing lists unknown energy/asymmetry fields in order.
+    flux is recorded or explicit coordinates, or None for inline info without flux.
+    """
+
+    model: ModelName
+    params: Mapping[str, object]
+    missing: list[str]
+    flux: PredictorFluxValues | None
+
+
 def h_predictor_list_files(
     adapter: RemoteControlAdapter, _params: Mapping[str, object]
 ) -> PredictorFilesReply:
@@ -46,9 +82,15 @@ def h_predictor_list_files(
     return {"files": list(adapter.predictor_control.list_files())}
 
 
+@dataclass(frozen=True)
+class _SourceInputs:
+    params: ModelParams
+    flux: PredictorFlux | None
+
+
 def _source_params(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
-) -> ModelParams:
+) -> _SourceInputs:
     filename, direct = params.get("filename"), params.get("params")
     if (filename is None) == (direct is None):
         raise RemoteError(
@@ -57,6 +99,12 @@ def _source_params(
             reason="invalid_predictor_source",
         )
     if filename is not None:
+        if "flux" in params:
+            raise RemoteError(
+                ErrorCode.INVALID_PARAMS,
+                "filename uses its recorded flux; do not supply flux",
+                reason="invalid_predictor_source",
+            )
         if not isinstance(filename, str):
             raise TypeError("Invalid validated predictor filename")
         try:
@@ -75,25 +123,40 @@ def _source_params(
                 str(exc),
                 reason="predictor_file_unavailable",
             ) from exc
-        return predictor_file.params
+        return _SourceInputs(predictor_file.params, predictor_file.flux)
     if not isinstance(direct, dict):
         raise TypeError("Invalid validated parameter object")
     model = direct.get("model")
     try:
-        return params_class(str(model)).from_mapping(
+        inputs = params_class(str(model)).from_mapping(
             {name: value for name, value in direct.items() if name != "model"}
         )
     except PredictorInputError as exc:
         raise RemoteError(
             ErrorCode.INVALID_PARAMS, str(exc), reason="invalid_predictor_params"
         ) from exc
+    return _SourceInputs(inputs, _inline_flux(params))
+
+
+def _inline_flux(params: Mapping[str, object]) -> PredictorFlux | None:
+    if "flux" not in params:
+        return None
+    value = params["flux"]
+    try:
+        if not isinstance(value, dict):
+            raise ValueError("flux must be an offset/period/unit object")
+        return PredictorFlux.from_mapping(value)
+    except ValueError as exc:
+        raise RemoteError(
+            ErrorCode.INVALID_PARAMS, str(exc), reason="invalid_predictor_flux"
+        ) from exc
 
 
 def _complete_params(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
-) -> ModelParams:
+) -> tuple[ModelParams, PredictorFlux]:
     inputs = _source_params(adapter, params)
-    missing = inputs.missing()
+    missing = inputs.params.missing()
     if missing:
         raise RemoteError(
             ErrorCode.INVALID_PARAMS,
@@ -101,30 +164,70 @@ def _complete_params(
             reason="missing_predictor_params",
             data={"missing": list(missing)},
         )
-    return inputs
+    if inputs.flux is None:
+        raise RemoteError(
+            ErrorCode.INVALID_PARAMS,
+            "Inline prediction/calibration requires flux",
+            reason="missing_predictor_flux",
+        )
+    return inputs.params, inputs.flux
+
+
+def _device_values(params: Mapping[str, object]) -> dict[str, float]:
+    values = params["device_values"]
+    if not isinstance(values, dict):
+        raise TypeError("Invalid validated device_values object")
+    decoded: dict[str, float] = {}
+    for name, value in values.items():
+        if (
+            not isinstance(name, str)
+            or isinstance(value, bool)
+            or not isinstance(value, (int, float))
+        ):
+            raise RemoteError(
+                ErrorCode.INVALID_PARAMS,
+                f"Invalid device {name!r} value: expected a finite number",
+                reason="invalid_predictor_params",
+            )
+        try:
+            number = float(value)
+        except OverflowError as exc:
+            raise RemoteError(
+                ErrorCode.INVALID_PARAMS,
+                f"Invalid device {name!r} value: expected a finite number",
+                reason="invalid_predictor_params",
+            ) from exc
+        if not isfinite(number):
+            raise RemoteError(
+                ErrorCode.INVALID_PARAMS,
+                f"Invalid device {name!r} value: expected a finite number",
+                reason="invalid_predictor_params",
+            )
+        decoded[name] = number
+    return decoded
 
 
 def h_predictor_predict(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
-) -> Mapping[str, object]:
-    """Return {freq_mhz} for one complete filename/params source at device_value.
+) -> PredictionReply:
+    """Return MHz for params with filename or inline energy params plus flux.
 
-    Device values use native units; energies use GHz; frequencies use MHz.
+    device_values supplies every frame device in its declared native unit.
+    from_level/to_level select nonnegative integer levels (default 0/1).
+    Missing devices are named errors, never read from hardware or cache.
+    Energies use GHz; frequencies use MHz.
     INVALID_PARAMS names source conflicts, missing fields or invalid inputs.
     No entry or unreadable files fail with PRECONDITION_FAILED. Queries leave
     files and supplied parameters unchanged.
     """
-    inputs = _complete_params(adapter, params)
-    value, frm, to = params["device_value"], params["from_level"], params["to_level"]
-    if (
-        not isinstance(value, (int, float))
-        or type(frm) is not int
-        or type(to) is not int
-    ):
+    inputs, flux = _complete_params(adapter, params)
+    values = _device_values(params)
+    frm, to = params["from_level"], params["to_level"]
+    if type(frm) is not int or type(to) is not int:
         raise TypeError("Invalid validated predictor request")
     try:
         frequency = adapter.predictor_control.predict_freq(
-            inputs, PredictFreqRequest(float(value), (frm, to))
+            inputs, PredictFreqRequest(flux.to_frame(), values, (frm, to))
         )
     except PredictorInputError as exc:
         raise RemoteError(
@@ -135,37 +238,39 @@ def h_predictor_predict(
 
 def h_predictor_calibrate(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
-) -> Mapping[str, object]:
-    """Return {flux_bias_before, flux_bias_after, frequency_mhz, clamped}.
+) -> OffsetCalibrationReply:
+    """Return additive Phi0 correction, actual MHz and reachability for params.
 
-    device_value is the measured native setpoint, frequency_mhz the measured MHz
-    frequency; from_level < to_level are nonnegative integers. Source/field
-    failures are INVALID_PARAMS. No entry or unreadable files fail with
-    PRECONDITION_FAILED. No file, dialog, hardware or cache writes occur.
-    The model selects smallest |bias|; unreachable targets clamp to the
-    nearest frequency. Numerical failures propagate without fallback.
+    Supply filename or inline energy params plus flux, device_values in every
+    frame device's native unit, measured frequency_mhz and nonnegative integer
+    from_level < to_level (default 0/1). Add offset_correction to the caller's
+    current offset. Source/field failures are INVALID_PARAMS. Missing entry or
+    unreadable files fail with PRECONDITION_FAILED. No source or state changes.
+    The model chooses the smallest absolute correction. Unreachable targets
+    clamp to nearest MHz; numerical failures propagate without fallback.
     """
-    inputs = _complete_params(adapter, params)
-    value, frequency = params["device_value"], params["frequency_mhz"]
+    inputs, flux = _complete_params(adapter, params)
+    values, frequency = _device_values(params), params["frequency_mhz"]
     frm, to = params["from_level"], params["to_level"]
     if (
-        not isinstance(value, (int, float))
-        or not isinstance(frequency, (int, float))
+        not isinstance(frequency, (int, float))
         or type(frm) is not int
         or type(to) is not int
     ):
         raise TypeError("Invalid validated calibration request")
     try:
-        result = adapter.predictor_control.calibrate_flux_bias(
-            inputs, CalibrateFluxBiasRequest(float(value), float(frequency), (frm, to))
+        result = adapter.predictor_control.calibrate_offset(
+            inputs,
+            CalibrateOffsetRequest(
+                flux.to_frame(), values, float(frequency), (frm, to)
+            ),
         )
     except PredictorInputError as exc:
         raise RemoteError(
             ErrorCode.INVALID_PARAMS, str(exc), reason="invalid_predictor_params"
         ) from exc
     return {
-        "flux_bias_before": inputs.flux_bias,
-        "flux_bias_after": result.flux_bias,
+        "offset_correction": result.offset_correction,
         "frequency_mhz": result.frequency_mhz,
         "clamped": result.clamped,
     }
@@ -173,11 +278,13 @@ def h_predictor_calibrate(
 
 def h_predictor_info(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
-) -> Mapping[str, object]:
-    """Return {model, params, missing} for one possibly incomplete source.
+) -> PredictorInfoReply:
+    """Return model, energy params, missing energy fields and flux for params.
 
-    model is fluxonium or transmon. Params retain null unknown fields in
-    GHz/native units. No model is built.
+    Supply exactly one filename or inline energy params source. Inline flux
+    is optional: omitted returns None, supplied is validated and returned.
+    Filename uses recorded flux and rejects an additional flux argument.
+    model is fluxonium or transmon; unknown energies stay null. No model is built.
     INVALID_PARAMS names source conflicts, invalid files or malformed direct
     inputs. No entry or unreadable files fail with PRECONDITION_FAILED.
     Filename sources read the opened entry without requiring a selected point.
@@ -185,7 +292,8 @@ def h_predictor_info(
     """
     inputs = _source_params(adapter, params)
     return {
-        "model": inputs.model,
-        "params": inputs.to_dict(),
-        "missing": list(inputs.missing()),
+        "model": inputs.params.model,
+        "params": inputs.params.to_dict(),
+        "missing": list(inputs.params.missing()),
+        "flux": inputs.flux.to_dict() if inputs.flux is not None else None,
     }

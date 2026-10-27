@@ -76,13 +76,6 @@ def test_canvas_render_curves_no_error(canvas):
     assert len(canvas.figure.get_axes()) > 0
 
 
-def test_canvas_primary_xaxis_label_device_value_no_unit(canvas):
-    """The primary x-axis is labelled 'Device value' with no Ampere/'(A)' unit."""
-    canvas.render_curves(**_make_render_kwargs())
-    ax = canvas.figure.axes[0]
-    assert ax.get_xlabel() == "Device value"
-
-
 def test_canvas_render_creates_four_curves(canvas):
     """render_curves must draw exactly four data lines (one per transition)."""
     canvas.render_curves(**_make_render_kwargs(n_transitions=4))

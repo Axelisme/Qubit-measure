@@ -145,6 +145,17 @@ class EvalNumericField(QWidget):
         self.dispose()
         super().closeEvent(a0)
 
+    def set_input_name(self, prefix: str) -> None:
+        """Name the direct and expression inputs for accessible component selection.
+
+        The line edits receive prefix_direct and prefix_expression respectively.
+        Hidden-mode inputs keep their identity when the user switches modes.
+        """
+        self._line_edit.setObjectName(f"{prefix}_expression")
+        line_edit = self._spin.lineEdit()
+        if line_edit is not None:
+            line_edit.setObjectName(f"{prefix}_direct")
+
     def load_direct(self, value: float) -> None:
         """Load a direct float value.
 
