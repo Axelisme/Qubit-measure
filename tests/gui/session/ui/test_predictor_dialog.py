@@ -366,7 +366,9 @@ def test_persistent_predictor_hide_reopen_keeps_callbacks_until_done(qapp, tmp_p
         host.show()
         ui.click("Open predictor")
         ui.screenshot(tmp_path / "01-open.png")
-        calibration_ui.enter_text(object_name=expression_name, value="1+1", commit=False)
+        calibration_ui.enter_text(
+            object_name=expression_name, value="1+1", commit=False
+        )
         assert calibration_ui.observe(object_name="eval.preview").text == "= 2.0"
         ui.screenshot(tmp_path / "02-expression.png")
         ui.click("Close")
@@ -377,7 +379,9 @@ def test_persistent_predictor_hide_reopen_keeps_callbacks_until_done(qapp, tmp_p
         ui.screenshot(tmp_path / "04-reopened.png")
         provider.reset_mock()
         changes.clear()
-        calibration_ui.enter_text(object_name=expression_name, value="2+2", commit=False)
+        calibration_ui.enter_text(
+            object_name=expression_name, value="2+2", commit=False
+        )
         assert calibration_ui.observe(object_name="eval.preview").text == "= 4.0"
         assert provider.called
         assert changes
