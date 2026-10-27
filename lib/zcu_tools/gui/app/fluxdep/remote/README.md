@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.fluxdep.remote` — Fluxdep driving adapter
 
-**Last updated:** 2026-10-27
+**Last updated:** 2026-10-28
 
 **讀者：** framework-dev。Fluxdep RPC 的控制權、方法宣告與結果投影契約。
 
@@ -71,12 +71,19 @@ component must be a fluxonium qubit. `project.info` returns entry, component and
 Result paths, with null fields before opening. The Database binding is unused.
 `fit.export_params` accepts no path override. It writes the selected component
 predictor, declared setup fields and analysis ledger, then returns savepath,
-params, alignment_from, component, analysis_id and flux_writeback.
-flux_writeback has status written/skipped, the intended device or null, and a
-skip reason or null. It is the same native planner outcome shown in the GUI.
+params, alignment_from, component, analysis_id, flux_writeback and predictor_writeback.
+Both outcomes have status written/skipped, the intended device or null, and a
+skip reason or null. flux_writeback describes component P1; predictor_writeback
+independently describes the dataset predictor v2 file. Skipped predictors have
+savepath=null and leave any existing predictor untouched. Setup/ledger still write.
+The GUI displays both outcomes. The app README documents device/snapshot skip rules.
 The app submits the injected planner's component-relative fields, not a
 framework interpretation of lab flux schema. Missing planner or rejected
-calibration fails before output. Failure preserves the successful write prefix
+calibration fails before output. Unit mismatches also fail before output and
+name the device and both units. Only used other snapshot scalars are checked;
+P1 checks the fitted axis against the planner receipt.device's context unit only
+for a written component receipt. No unit conversion is performed.
+Failure preserves the successful write prefix
 without rollback. Spectrum list/snapshot and
 selection snapshot report unfinished drafts separately from published data.
 `spectrum.list` reports each published loaded/aligned/sampled stage and the count

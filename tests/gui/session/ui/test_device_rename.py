@@ -26,6 +26,7 @@ from zcu_tools.gui.session.ui.device_dialog import DeviceDialog
 
 from tests.gui._qt_waits import qt_until
 from tests.gui._user_input import ComponentDriver
+from tests.gui.session.ui._device_dialog_support import confirm_device_action
 
 
 @pytest.fixture
@@ -140,6 +141,7 @@ def test_disconnected_device_can_be_renamed_and_reconnected(
     assert not ui.observe("Rename").enabled
     ui.screenshot(evidence / "10-reconnected.png")
     ui.click("Drop")
+    confirm_device_action("Drop")
     qt_until(
         lambda: any(
             row.text == "renamed (FakeDevice) [not connected]" for row in ui.list_rows()

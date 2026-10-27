@@ -105,6 +105,34 @@ def test_math_preserves_valid_names_and_snapshots_periods(name: str) -> None:
     assert flux.device_value_at_flux(frame, {}, device_name=name, flux=0.5) == 3
 
 
+@pytest.mark.parametrize(
+    ("actual", "expected", "matches"),
+    [
+        ("A", "A", True),
+        (None, None, True),
+        (None, "native", True),
+        ("native", None, True),
+        ("mA", "A", False),
+        (None, "A", False),
+        ("A", None, False),
+        ("native", "V", False),
+        ("a", "A", False),
+        (" A ", "A", False),
+    ],
+)
+def test_device_units_match_exactly_without_conversion(
+    actual: str | None, expected: str | None, matches: bool
+) -> None:
+    if matches:
+        assert flux.require_matching_device_unit("coil", actual, expected) is None
+    else:
+        with pytest.raises(ValueError, match="coil") as error:
+            flux.require_matching_device_unit("coil", actual, expected)
+        message = str(error.value)
+        assert repr(actual if actual is not None else "native") in message
+        assert repr(expected if expected is not None else "native") in message
+
+
 def test_constant_frame_and_unknown_projection() -> None:
     frame = flux.FluxFrame(1.5, {})
     assert flux.flux_from_device_values(frame, {}) == 1.5

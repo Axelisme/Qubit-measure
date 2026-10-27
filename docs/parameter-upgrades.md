@@ -14,12 +14,14 @@ GUI／MCP 只讀 lab 宣告的目前版本。缺版或不同版本會在讀取�
 
 ## 預覽與套用
 
-從 checkout root 執行，使用該 worktree 的 interpreter。給 entry 目錄即可選取 `setup.yaml` 與所有 `points/*/point.yaml`，不必先開啟 entry 或補版本。目錄須含 `setup.yaml`，否則 CLI 報錯。也可混合傳入多個 entry 目錄與明確 YAML 檔案路徑，或用 shell glob 選取檔案。
+從 checkout root 執行，使用該 worktree 的 interpreter。給 entry 目錄即可選取 `setup.yaml`、所有 `points/*/point.yaml` 與 `predictors/*.json`，不必先開啟 entry 或補版本。目錄須含 `setup.yaml`，否則 CLI 報錯。也可混合傳入多個 entry 目錄與明確 YAML 檔案路徑，或用 shell glob 選取檔案。
 
 ```bash
 uv run --directory /absolute/checkout --no-sync -- python scripts/upgrade_parameters.py \
   /data/result/device
 ```
+
+Predictor JSON 由獨立的 v1→v2 owner 驗證與轉換，不套用 component schema plan。報告列出 predictor 的版本、offset、period 與 unit。舊檔的佔位儀器名、單位預設與還原見 [Predictor v2](storage-format-history/predictor-v2.md)。
 
 預設是 `dry-run`。輸出按完整檔案路徑列出結果，point 路徑含 label。每筆欄位差異顯示 literal key tuple、原值與新值，`<missing>` 與 explicit null 不同。Dry-run 不建檔、不建鎖、不備份。
 

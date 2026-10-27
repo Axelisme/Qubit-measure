@@ -1,52 +1,50 @@
 # SQUID transmon simulation
 
-**Last updated:** 2026-10-21
+**Last updated:** 2026-10-27
 
 **讀者：** framework-dev。SQUID transmon predictor 的輸入、查詢與失敗契約。
 
-`TransmonParams` holds EJmax and EC in GHz, junction asymmetry d in [0, 1],
-and flux_half, flux_period, flux_bias in native device units. None means unknown.
-`missing()` lists unknown fields. `build_predictor()` rejects incomplete or
-invalid inputs with `simulate.predictor.PredictorInputError` (a ValueError leaf)
-and builds a fresh model. Frontends translate only that explicit input failure;
-ordinary ValueError, nonfinite computed spectra and solver failures retain their
-unexpected diagnostics. It never reads or changes a component.
+`TransmonParams` holds EJmax and EC in GHz and junction asymmetry d in [0, 1].
+None means unknown. `missing()` lists unknown fields. `build_predictor()` rejects
+incomplete or invalid inputs with `simulate.predictor.PredictorInputError`, a
+ValueError leaf, and builds a fresh model. Numeric parameters contain no device
+coordinates. Callers convert device values through `analysis.flux` before querying.
+The model never reads or changes a component or a file.
 
 ## Spectrum and queries
 
-`TransmonPredictor` uses `scqubits.TunableTransmon` at ng=0, with charge states
-n=-30..30. It diagonalizes H=4EC n²−EJ(Φ) cos(φ), where
-EJ(Φ)=EJmax sqrt(cos²(πΦ)+d² sin²(πΦ)). It does not use a large-EJ approximation.
+`TransmonPredictor((EJmax, EC, d))` uses `scqubits.TunableTransmon` at ng=0,
+with charge states n=-30..30. It diagonalizes H=4EC n²−EJ(φ) cos(phase), where
+EJ(φ)=EJmax sqrt(cos²(πφ)+d² sin²(πφ)). It does not use a large-EJ approximation.
 For d=0 at half flux, the spectrum is the free rotor E=4EC n², including the
 ±n degeneracies. d=1 gives a flux-independent spectrum.
 
-The affine is Φ=(value+flux_bias−flux_half)/flux_period+0.5. Period can have either
-sign but cannot be zero. Scalar `predict_freq` and batch
-`predict_frequencies_mhz` return MHz. Batch frequency rows follow the requested
-transitions, columns follow the supplied device values. Increasing or equal
-nonnegative integer levels through level 20 are supported. Matrix curves are
-not provided. All queries leave inputs and model parameters unchanged.
+Scalar `predict_freq(cur_flux)` and batch `predict_frequencies_mhz(fluxs, transitions)`
+take reduced flux in Phi0 and return MHz. The batch returns the input flux grid
+and frequency rows. Rows follow transitions, columns preserve input order and
+duplicates, including unwrapped flux. Increasing or equal nonnegative integer
+levels through level 20 are supported. Matrix curves are not provided.
+All queries leave inputs and parameters unchanged. Invalid queries raise
+PredictorInputError. Nonfinite computed spectra and numerical solver failures
+propagate without translation or fallback.
 
 ## Calibration
 
-`calculate_bias(value, frequency_mhz, transition)` returns the immutable
-`simulate.predictor.CalibrationResult`, with flux_bias, actual frequency_mhz and
-clamped. It requires increasing integer levels. Invalid input raises ValueError;
-numerical solver failures propagate. A successful query never installs the bias.
+`calculate_offset_correction(cur_flux, cur_freq, transition)` takes current
+reduced flux including the caller's offset, measured MHz, and increasing integer
+levels. It returns immutable `CalibrationResult(offset_correction, frequency_mhz, clamped)`.
+Add offset_correction, in Phi0, to the caller's current offset. The query installs
+nothing. Invalid inputs raise PredictorInputError; numerical failures propagate.
 
 Both transmon and fluxonium invert their own spectra. They select the smallest
-absolute bias across all roots and periodic/mirror equivalents, independent of
-the current bias. Unreachable targets return the closest attainable frequency
-and clamped=true. Equally close frequencies select the smallest absolute bias.
-Reachable targets return clamped=false. A constant spectrum selects zero bias.
+absolute correction across all roots and periodic/mirror equivalents relative
+to current flux. Unreachable targets return the closest attainable frequency
+and clamped=true. Equally close frequencies select the smallest absolute correction.
+Reachable targets return clamped=false. A constant spectrum selects zero correction.
 
 The shared solver samples 401 points across one half period to discover branches,
 then refines local extrema and brackets roots using exact spectrum evaluations.
 It includes interior extrema and tangential roots, without assuming a monotone
-half period. As with any finite branch-discovery grid, features narrower than the
-grid spacing can require higher numerical resolution. Frequency equality uses
-an absolute tolerance of 1e-7 MHz; root refinement uses 1e-13 flux quanta.
-
-Frontends consume this result without recalculating the fit. The dialog changes
-only its own bias/cache and displays actual MHz and clamped. MCP returns the
-same facts without writing the component or dialog.
+half period. Features narrower than the branch-discovery grid can require higher
+numerical resolution. Frequency equality uses an absolute tolerance of 1e-7 MHz;
+root refinement uses 1e-13 flux quanta.

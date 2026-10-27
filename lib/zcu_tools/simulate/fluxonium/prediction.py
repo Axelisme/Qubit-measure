@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from functools import lru_cache
 from typing import Literal
 
@@ -40,32 +40,6 @@ DEFAULT_PREDICTION_RESOLUTION = PredictionResolution()
 
 
 @dataclass(frozen=True, slots=True)
-class FluxAffineMap:
-    """Affine conversion between device values and normalized flux."""
-
-    flux_half: float
-    flux_period: float
-    flux_bias: float = 0.0
-
-    def __post_init__(self) -> None:
-        if self.flux_period == 0.0:
-            raise PredictorInputError(
-                "flux_period must be non-zero (value<->flux affine)"
-            )
-
-    def value_to_flux(self, value: float) -> float:
-        return (value + self.flux_bias - self.flux_half) / self.flux_period + 0.5
-
-    def values_to_flux(self, values: NDArray[np.float64]) -> NDArray[np.float64]:
-        arr = np.asarray(values, dtype=np.float64)
-        fluxs = (arr + self.flux_bias - self.flux_half) / self.flux_period + 0.5
-        return np.asarray(fluxs, dtype=np.float64)
-
-    def flux_to_value(self, flux: float) -> float:
-        return (flux - 0.5) * self.flux_period + self.flux_half - self.flux_bias
-
-
-@dataclass(frozen=True, slots=True)
 class DispersivePredictionResult:
     """Dispersive prediction lines plus lightweight backend provenance."""
 
@@ -80,7 +54,7 @@ class DispersivePredictionResult:
 class FluxoniumPrediction:
     """Production prediction engine for Fluxonium simulation policy.
 
-    The engine owns the value-to-flux affine, typed resolution, dispersive
+    The engine takes reduced flux in Phi0 and owns typed resolution, dispersive
     fast/scqubits fallback, fallback provenance, and construction of axis-bound
     cache sessions. GUI/session callers should adapt this class instead of
     reimplementing prediction policy.
@@ -90,9 +64,6 @@ class FluxoniumPrediction:
         self,
         params: tuple[float, float, float],
         *,
-        flux_half: float = 0.0,
-        flux_period: float = 1.0,
-        flux_bias: float = 0.0,
         resolution: PredictionResolution = DEFAULT_PREDICTION_RESOLUTION,
     ) -> None:
         if len(params) != 3:
@@ -102,41 +73,7 @@ class FluxoniumPrediction:
             float(params[1]),
             float(params[2]),
         )
-        self.affine = FluxAffineMap(flux_half, flux_period, flux_bias)
         self.resolution = resolution
-
-    @property
-    def flux_half(self) -> float:
-        return self.affine.flux_half
-
-    @flux_half.setter
-    def flux_half(self, new_flux_half: float) -> None:
-        self.affine = replace(self.affine, flux_half=new_flux_half)
-
-    @property
-    def flux_period(self) -> float:
-        return self.affine.flux_period
-
-    @flux_period.setter
-    def flux_period(self, new_flux_period: float) -> None:
-        self.affine = replace(self.affine, flux_period=new_flux_period)
-
-    @property
-    def flux_bias(self) -> float:
-        return self.affine.flux_bias
-
-    @flux_bias.setter
-    def flux_bias(self, new_flux_bias: float) -> None:
-        self.affine = replace(self.affine, flux_bias=new_flux_bias)
-
-    def value_to_flux(self, value: float) -> float:
-        return self.affine.value_to_flux(value)
-
-    def values_to_flux(self, values: NDArray[np.float64]) -> NDArray[np.float64]:
-        return self.affine.values_to_flux(values)
-
-    def flux_to_value(self, flux: float) -> float:
-        return self.affine.flux_to_value(flux)
 
     def bind_flux_axis(self, fluxs: NDArray[np.float64]) -> FluxoniumPredictionSession:
         return FluxoniumPredictionSession(self, fluxs)
@@ -184,15 +121,15 @@ class FluxoniumPrediction:
 
     def predict_frequencies_mhz(
         self,
-        values: NDArray[np.float64],
+        fluxs: NDArray[np.float64],
         transitions: tuple[tuple[int, int], ...],
         *,
         cutoff: int = 40,
     ) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
-        """Frequency curves for one value grid.
+        """Frequency curves for one finite 1-D reduced-flux grid in Phi0.
 
         Returns ``(fluxs, freqs_mhz)`` where ``freqs_mhz`` has shape
-        ``(n_transitions, n_values)``.
+        ``(n_transitions, n_fluxs)``.
         """
         _validate_transitions(transitions)
         if cutoff <= 0:
@@ -200,8 +137,7 @@ class FluxoniumPrediction:
 
         from zcu_tools.simulate.fluxonium import energies as energies_mod
 
-        value_arr = np.asarray(values, dtype=np.float64)
-        fluxs = self.values_to_flux(value_arr)
+        fluxs = _flux_array(fluxs)
         evals_count = max(to for _, to in transitions) + 5
         _, energies = energies_mod.calculate_energy_vs_flux(
             self.params, fluxs, cutoff=cutoff, evals_count=evals_count
@@ -215,21 +151,20 @@ class FluxoniumPrediction:
 
     def predict_matrix_elements(
         self,
-        values: NDArray[np.float64],
+        fluxs: NDArray[np.float64],
         transitions: tuple[tuple[int, int], ...],
         operator: MatrixOperator,
     ) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
-        """Matrix-element curves for one value grid.
+        """Matrix-element curves for one finite 1-D reduced-flux grid in Phi0.
 
         Returns ``(fluxs, magnitudes)`` where ``magnitudes`` has shape
-        ``(n_transitions, n_values)``.
+        ``(n_transitions, n_fluxs)``.
         """
         _validate_transitions(transitions)
 
         from zcu_tools.simulate.fluxonium import matrix_element as mat_mod
 
-        value_arr = np.asarray(values, dtype=np.float64)
-        fluxs = self.values_to_flux(value_arr)
+        fluxs = _flux_array(fluxs)
         return_dim = max(max(frm, to) for frm, to in transitions) + 1
         if operator == "n":
             _, opers = mat_mod.calculate_n_oper_vs_flux(
@@ -246,6 +181,13 @@ class FluxoniumPrediction:
         for frm, to in transitions:
             rows.append(np.abs(opers[:, frm, to]).astype(np.float64))
         return fluxs, np.stack(rows, axis=0)
+
+
+def _flux_array(fluxs: NDArray[np.float64]) -> NDArray[np.float64]:
+    arr = np.asarray(fluxs, dtype=np.float64)
+    if arr.ndim != 1 or not np.all(np.isfinite(arr)):
+        raise PredictorInputError("fluxs must be a finite 1-D array")
+    return arr
 
 
 class FluxoniumPredictionSession:

@@ -81,6 +81,54 @@ def _default_analyze_params(result: SampleRun, ctx: SessionEnv) -> SampleParams:
     return params
 
 
+@pytest.mark.parametrize("pane", ["analysis", "post_analysis"])
+def test_bulk_selection_updates_each_draft_and_apply_gate(qapp, tmp_path, pane):
+    ctrl = MagicMock()
+    items: list[WritebackItem] = [
+        ParameterWriteback("R1.freq", "Frequency", 6001.0),
+        ParameterWriteback("R1.kappa", "Width", 2.1),
+    ]
+    for item, identity in zip(items, ("freq", "width"), strict=True):
+        item.session_id = identity
+    widget = WritebackWidget(ctrl, tab_id="tab-1", pane=pane)
+    widget.populate(items, _parameter_values(items))
+
+    def project_selection(tab_id, pane, identity, *, selected):
+        next(item for item in items if item.session_id == identity).selected = selected
+        widget.populate(items, _parameter_values(items))
+
+    ctrl.writeback_control.set_writeback_item_for_pane.side_effect = project_selection
+    widget.resize(700, 400)
+    widget.show()
+    ui = ComponentDriver(widget)
+    ui.screenshot(tmp_path / "01-selected.png")
+    ui.click("None")
+    ui.screenshot(tmp_path / "02-none.png")
+    assert not ui.observe("Apply Selected").enabled
+    assert [
+        call.kwargs
+        for call in ctrl.writeback_control.set_writeback_item_for_pane.call_args_list
+    ] == [{"selected": False}, {"selected": False}]
+    ctrl.writeback_control.set_writeback_item_for_pane.reset_mock()
+    ui.click("All")
+    ui.screenshot(tmp_path / "03-all.png")
+    assert ui.observe("Apply Selected").enabled
+    assert {
+        call.args: call.kwargs
+        for call in ctrl.writeback_control.set_writeback_item_for_pane.call_args_list
+    } == {
+        ("tab-1", pane, "freq"): {"selected": True},
+        ("tab-1", pane, "width"): {"selected": True},
+    }
+    widget.setEnabled(False)
+    ui.click("None")
+    ui.screenshot(tmp_path / "04-read-only.png")
+    assert ctrl.writeback_control.set_writeback_item_for_pane.call_count == 2
+    widget.detach()
+    widget.deleteLater()
+    qapp.processEvents()
+
+
 def test_writeback_widget_lists_items_and_edit_buttons(qapp):
     ctx = _make_ctx()
     adapter = PairAdapter

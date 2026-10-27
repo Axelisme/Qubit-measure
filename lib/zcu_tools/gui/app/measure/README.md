@@ -73,6 +73,29 @@ documents retain only pane, parameters and the object summary; reopening saved
 results shows null without the live invalid list. A completed figures-only None
 result has an empty object summary. Before completion, RPC returns summary=null.
 
+## Spectrum range selection
+
+`range_find_plugin.RangeFindPlugin` captures numeric MHz/magnitude arrays and
+caller-supplied component labels. It uses `analysis.dips.find_spectrum_dips`
+for both the initial guess and parameter changes. Manual selection snaps to
+measured samples. Assigning a component to another dip clears its old assignment.
+Changing parameters replaces manual selections and retains assignments only at
+surviving frequencies. `max_dips` limits automatic selection, not manual edits.
+
+`RangeFindState.options` contains the final numerical controls.
+`RangeFindState.selected` contains frequency-ordered points with optional
+`component` and `estimate`. A manual point outside the current candidates has
+`estimate=None`. The adapter's terminal result builder must retain this state
+in its result if the analysis must be reproducible. The host saves that result
+under the historical analysis document's `summary`; its `parameters` field
+continues to describe the initial Analyze form. No live form or lab config is read.
+
+The Qt frontend and `tab_interact` use the same actions. Plugin commands are
+`set_parameters`, `add_dip`, `remove_dip` and `assign_dip`; the host owns `done`.
+The command schemas describe their arguments. Dip indices are zero based in
+current frequency order. Component null clears an assignment. No selections
+rejects Done without closing input.
+
 ## Owners
 
 - [`adapter/`](adapter/value.py)：四種定義值、typed callback hooks、request/result 與分析參數。
@@ -134,9 +157,10 @@ or disconnect the shared session. Native Ask answers and cancellation drain
 continue on the retained operation worker and lease, never on the UI loop.
 
 The toolbar keeps New Tab ▾ on the left and Setup…, SoC…, Devices…, Inspect…,
-and More ▾ on the right. More lists Reload experiments, Retry skipped tabs
-(only when recovery has skipped tabs), Workflow tabs / Experiment tabs,
-Predictor…, and Results browser… in that order. The tab switch names the family
+Predictor…, Results browser…, and More ▾ on the right. When space is short,
+Predictor and Results browser move into More. More lists Reload experiments,
+Retry skipped tabs (only when recovery has skipped tabs), and Workflow tabs /
+Experiment tabs before any folded tools. The tab switch names the family
 it will reveal. Catalog recovery changes Reload experiments to Retry reload.
 Remote control disables reload and retry while leaving the inspection and tab
 navigation entries available.

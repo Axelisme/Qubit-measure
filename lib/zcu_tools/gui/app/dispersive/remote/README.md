@@ -6,15 +6,16 @@
 
 `method_specs.py` 是 Qt-free wire 宣告。MCP 從該表產生查詢 tools，
 不 import Controller 或 UI。GUI adapter 經 shared RemoteControlServiceBase 處理傳輸，
-app-local dispatch 投影 state。WIRE_VERSION=6、GUI_VERSION=8。
+app-local dispatch 投影 state。WIRE_VERSION=7、GUI_VERSION=9。
 
 `project.info` 回傳 result_root、entry、component、result_path、predictors_path、
 dispersive_path 與 predictor。Predictor 是選取的 entry-local JSON 檔名。
 未開 entry 時全部為 null。已開 entry、尚未選 predictor 時只有 predictor 為 null。
 Identity/path 投影重用 analysis_project.target_payload。
 
-`fit_inputs.info` 回 has_inputs、params、flux_half、flux_bias、flux_period、bare_rf_seed。
-params 為 GHz 的 EJ/EC/EL。仿射參數使用 predictor 原生 device units。
+`fit_inputs.info` 回 has_inputs、params、flux、bare_rf_seed。
+params 為 GHz 的 EJ/EC/EL。Flux 為 predictor 檔的 `{offset, period, unit}`。
+Offset 使用 Φ0，period 與 unit 以儀器名稱為鍵，保留 signed periods 與原生單位。
 未載 inputs 時 has_inputs=false，其餘為 null。
 `preprocess.status` 回網格大小與 edelay。
 `fit.result` 回 has_result、g、bare_rf、res_dim，頻率為 GHz。

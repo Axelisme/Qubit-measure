@@ -36,7 +36,7 @@ from zcu_tools.mcp.core.bridge import MCPBridgeConfig  # noqa: E402
 # tolerated: Control assembly needs standalone lib setup and qtpy preflight first.
 from zcu_tools.mcp.fluxdep.assembly import build_fluxdep_server  # noqa: E402
 
-MCP_VERSION = 6  # native command domains and Filter parameter differences
+MCP_VERSION = 7  # independent dataset predictor and component export receipts
 
 _SERVER_INSTRUCTIONS = """\
 Drive Fluxdep flux-dependence analysis in the GUI the user also sees. No hardware
@@ -57,7 +57,10 @@ Tools express decision points; a stage command enters that spectrum's stage:
   recorded result. Stale, absent or quality-less results return no overlay.
 - fluxdep_filter: edit the joint cloud (J6), then rerun fit.
 - fluxdep_export_spectrums / fluxdep_spectrum_load_processed: checkpoint and restore
-  sampled spectra, without Filter masks. fluxdep_fit_export_params writes the selected entry/component predictor, setup and ledger.
+  sampled spectra, without Filter masks. fluxdep_fit_export_params writes setup and
+  ledger, and writes the selected entry/component predictor v2 when its offset is
+  determinable. Inspect independent predictor_writeback and flux_writeback receipts;
+  skipped predictor means savepath=null, not a new predictor file.
 
 Edits remain drafts until finish. Finish publishes and returns that stage's evidence
 image; other edits return counts, ranges and changes. Field changes are [before, after];

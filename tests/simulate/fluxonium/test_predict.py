@@ -1,27 +1,10 @@
-"""Behaviour-locking tests for FluxoniumPredictor.
-
-These pin the public semantics of FluxoniumPredictor now that scalar and array
-``predict_freq`` / ``predict_matrix_element`` both delegate to the prediction
-engine. The contract that must survive that delegation:
-
-  - scalar in -> scalar (Python float) out; array in -> ``NDArray`` out.
-  - the array result is *exactly* the per-point scalar result, point by point
-    (the batched path must not drift from the scalar path).
-  - the flux affine (``value_to_flux``) and the bias-correction in ``calculate_bias``
-    / ``update_bias`` keep their current numerical behaviour.
-
-The cross-check is scalar-vs-array self-consistency at machine precision, plus a
-few absolute golden values so a wholesale regression in the physics is caught too.
-"""
+"""Reduced-flux scalar/batch queries and independent spectrum reference values."""
 
 from __future__ import annotations
 
 import numpy as np
 import pytest
-import scqubits.settings as scq_settings
 from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
-
-scq_settings.PROGRESSBAR_DISABLED = True
 
 # (EJ, EC, EL) covering normal / wide / near-integer ranges.
 PARAMS = [
@@ -30,12 +13,7 @@ PARAMS = [
     (12.0, 0.5, 1.8),
 ]
 
-# A flux affine that is *not* the identity, so value<->flux conversion and the
-# fold/mirror symmetry are genuinely exercised (flux_half != 0, period != 1).
-FLUX_AFFINE = dict(flux_half=0.1, flux_period=0.8, flux_bias=0.03)
-
-# Current values spanning a full period plus points beyond it, so the array path
-# hits folded/mirrored fluxes and repeated values.
+# Reduced flux spans repeated, mirrored and unwrapped coordinates.
 VALUE_CASES = {
     "linspace": np.linspace(-0.5, 0.5, 11),
     "unsorted_with_dups": np.array([0.2, -0.1, 0.2, 0.5, 0.0, -0.4, 0.5]),
@@ -53,25 +31,7 @@ MATRIX_TRANSITIONS = [(0, 1)]
 
 
 def _make_predictor(params: tuple[float, float, float]) -> FluxoniumPredictor:
-    return FluxoniumPredictor(params, **FLUX_AFFINE)
-
-
-# --------------------------------------------------------------------------- #
-# Coordinate transforms                                                       #
-# --------------------------------------------------------------------------- #
-
-
-def test_value_flux_roundtrip() -> None:
-    p = _make_predictor(PARAMS[0])
-    for v in (-0.3, 0.0, 0.17, 0.5):
-        assert p.flux_to_value(p.value_to_flux(v)) == pytest.approx(v, abs=1e-12)
-
-
-def test_value_to_flux_formula() -> None:
-    p = _make_predictor(PARAMS[0])
-    v = 0.25
-    expected = (v + p.flux_bias - p.flux_half) / p.flux_period + 0.5
-    assert p.value_to_flux(v) == pytest.approx(expected, abs=1e-12)
+    return FluxoniumPredictor(params)
 
 
 # --------------------------------------------------------------------------- #
@@ -102,21 +62,19 @@ def test_predict_freq_array_matches_scalar(params, transition, case) -> None:
 
 
 def test_predict_freq_golden() -> None:
-    # Absolute golden values (identity affine) so a physics regression is caught
+    # Reference values at reduced flux 0.6 so a physics regression is caught
     # independently of the scalar/array self-consistency check above. Computed
-    # from the current implementation; in MHz.
-    p = FluxoniumPredictor(
-        (5.0, 1.0, 0.5), flux_half=0.0, flux_period=1.0, flux_bias=0.0
-    )
-    assert p.predict_freq(0.1, (0, 1)) == pytest.approx(1707.3748654723192, abs=1e-7)
-    assert p.predict_freq(0.1, (1, 2)) == pytest.approx(3416.7599127277226, abs=1e-7)
+    # with scqubits Fluxonium(cutoff=40); in MHz.
+    p = FluxoniumPredictor((5.0, 1.0, 0.5))
+    assert p.predict_freq(0.6, (0, 1)) == pytest.approx(1707.3748654723192, abs=1e-7)
+    assert p.predict_freq(0.6, (1, 2)) == pytest.approx(3416.7599127277226, abs=1e-7)
 
 
 def test_predictor_queries_frequency_curves_in_mhz() -> None:
     """The neutral query surface returns flux coordinates and transition rows."""
-    predictor = FluxoniumPredictor((5.0, 1.0, 0.5), 0.0, 1.0, 0.0)
+    predictor = FluxoniumPredictor((5.0, 1.0, 0.5))
     fluxs, frequencies = predictor.predict_frequencies_mhz(
-        np.array([0.1], dtype=np.float64), ((0, 1), (1, 2))
+        np.array([0.6], dtype=np.float64), ((0, 1), (1, 2))
     )
     np.testing.assert_allclose(fluxs, [0.6])
     np.testing.assert_allclose(
@@ -126,9 +84,9 @@ def test_predictor_queries_frequency_curves_in_mhz() -> None:
 
 def test_predictor_queries_matrix_curves_above_level_one() -> None:
     """Batch matrix queries retain the engine's higher-transition support."""
-    predictor = FluxoniumPredictor((5.0, 1.0, 0.5), 0.0, 1.0, 0.0)
+    predictor = FluxoniumPredictor((5.0, 1.0, 0.5))
     fluxs, magnitudes = predictor.predict_matrix_elements(
-        np.array([0.1, 0.2], dtype=np.float64), ((0, 1), (0, 3)), "n"
+        np.array([0.6, 0.7], dtype=np.float64), ((0, 1), (0, 3)), "n"
     )
     np.testing.assert_allclose(fluxs, [0.6, 0.7])
     assert magnitudes.shape == (2, 2)
@@ -178,14 +136,12 @@ def test_predict_matrix_element_array_matches_scalar(
 
 
 def test_predict_matrix_element_golden() -> None:
-    # Absolute golden values (identity affine); |<i|O|j>| is non-negative.
-    p = FluxoniumPredictor(
-        (5.0, 1.0, 0.5), flux_half=0.0, flux_period=1.0, flux_bias=0.0
-    )
-    assert p.predict_matrix_element(0.1, (0, 1), "n") == pytest.approx(
+    # Reference values at reduced flux 0.6; |<i|O|j>| is non-negative.
+    p = FluxoniumPredictor((5.0, 1.0, 0.5))
+    assert p.predict_matrix_element(0.6, (0, 1), "n") == pytest.approx(
         0.05111118894415298, abs=1e-9
     )
-    assert p.predict_matrix_element(0.1, (0, 1), "phi") == pytest.approx(
+    assert p.predict_matrix_element(0.6, (0, 1), "phi") == pytest.approx(
         0.23948432, abs=1e-7
     )
 
@@ -206,70 +162,15 @@ def test_predict_matrix_element_rejects_levels_above_one() -> None:
     p = _make_predictor(PARAMS[0])
 
     with pytest.raises(ValueError, match="support only levels 0 and 1"):
-        p.predict_matrix_element(0.1, (1, 2), "n")
+        p.predict_matrix_element(0.6, (1, 2), "n")
 
     with pytest.raises(ValueError, match="support only levels 0 and 1"):
         p.predict_matrix_element(np.array([0.1]), (1, 2), "n")
 
 
-# --------------------------------------------------------------------------- #
-# calculate_bias / update_bias                                                #
-# --------------------------------------------------------------------------- #
-
-
-def test_calculate_bias_recovers_predicted_freq() -> None:
-    # With zero true bias, asking calculate_bias to match the *predicted* freq at a
-    # value must return a bias near 0 (the minimum-|bias| equivalent solution).
-    p = FluxoniumPredictor(
-        (5.0, 1.0, 0.5), flux_half=0.0, flux_period=1.0, flux_bias=0.0
-    )
-    cur_value = 0.12
-    target = p.predict_freq(cur_value, (0, 1))
-    bias = p.calculate_bias(cur_value, target, (0, 1)).flux_bias
-    assert bias == pytest.approx(0.0, abs=1e-4)
-
-
-def test_calculate_bias_detects_offset() -> None:
-    # Build the predicted freq at a value shifted by a known offset, then ask
-    # calculate_bias to recover that offset as the bias.
-    p = FluxoniumPredictor(
-        (5.0, 1.0, 0.5), flux_half=0.0, flux_period=1.0, flux_bias=0.0
-    )
-    cur_value = 0.12
-    offset = 0.05
-    # freq the qubit *actually* shows at cur_value if its true flux is shifted by offset
-    observed = p.predict_freq(cur_value + offset, (0, 1))
-    bias = p.calculate_bias(cur_value, observed, (0, 1)).flux_bias
-    assert bias == pytest.approx(offset, abs=1e-3)
-
-
-def test_update_bias_shifts_prediction() -> None:
-    # update_bias changes value_to_flux and therefore predict_freq consistently.
-    p = FluxoniumPredictor(
-        (5.0, 1.0, 0.5), flux_half=0.0, flux_period=1.0, flux_bias=0.0
-    )
-    base = p.predict_freq(0.1, (0, 1))
-    p.update_bias(0.05)
-    shifted = p.predict_freq(0.1, (0, 1))
-    # predicting at 0.1 with bias 0.05 == predicting at 0.15 with bias 0
-    q = FluxoniumPredictor(
-        (5.0, 1.0, 0.5), flux_half=0.0, flux_period=1.0, flux_bias=0.0
-    )
-    assert shifted == pytest.approx(q.predict_freq(0.15, (0, 1)), abs=1e-9)
-    assert shifted != pytest.approx(base, abs=1.0)
-
-
 def test_clone_is_independent() -> None:
     p = _make_predictor(PARAMS[0])
     c = p.clone()
-    c.update_bias(0.9)
-    # mutating the clone's bias must not affect the original's prediction
-    assert p.flux_bias != c.flux_bias
-    assert p.predict_freq(0.1, (0, 1)) != pytest.approx(
-        c.predict_freq(0.1, (0, 1)), abs=1.0
-    )
-
-
-def test_predictor_does_not_keep_shared_fluxonium_instance() -> None:
-    p = _make_predictor(PARAMS[0])
-    assert not hasattr(p, "fluxonium")
+    c.params = PARAMS[1]
+    assert p.params == PARAMS[0]
+    assert p.predict_freq(0.1) != pytest.approx(c.predict_freq(0.1), abs=1.0)

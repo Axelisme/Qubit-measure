@@ -14,14 +14,13 @@ from zcu_tools.gui.app.dispersive.state import (
     OnetoneEntry,
 )
 from zcu_tools.gui.app.dispersive.ui.pipeline_panel import PipelinePanelWidget
+from zcu_tools.resources.predictor_file import PredictorFlux
 
 
 def _inputs() -> FluxoniumInputs:
     return FluxoniumInputs(
         params=(4.0, 1.0, 0.5),
-        flux_half=0.5,
-        flux_bias=0.0,
-        flux_period=2.0,
+        flux=PredictorFlux(0.25, {"bias": 2.0}, {"bias": "native"}),
         bare_rf_seed=5.3,
     )
 

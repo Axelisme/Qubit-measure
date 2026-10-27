@@ -1,11 +1,13 @@
-"""Public zcu.predictor v1 read/write contracts; no numerical model construction."""
+"""Public zcu.predictor v2 read/write contracts; no numerical model construction."""
 
 import json
 from pathlib import Path
 
 import pytest
+import zcu_tools.resources.predictor_file as predictor_codec
 from zcu_tools.resources.predictor_file import (
     PredictorFile,
+    PredictorFlux,
     PredictorSource,
     load_predictor_file,
     save_predictor_file,
@@ -16,21 +18,36 @@ from zcu_tools.simulate.parameters import ModelName, params_class
 from zcu_tools.simulate.transmon import TransmonParams
 
 
+def test_encode_document_is_detached_and_uses_the_save_representation(
+    tmp_path: Path,
+) -> None:
+    predictor = PredictorFile(
+        "fluxonium",
+        FluxoniumParams(EJ=5.0),
+        PredictorFlux(0.7, {"coil": -2.0}, {"coil": "A"}),
+        PredictorSource(None, None),
+    )
+    encoded = predictor_codec.encode_predictor_document(predictor)
+    path = tmp_path / "predictor.json"
+    save_predictor_file(path, predictor)
+    assert json.loads(path.read_text()) == encoded
+    encoded["flux"]["period"]["coil"] = 8.0
+    assert predictor.flux.period["coil"] == -2.0
+    assert load_predictor_file(path) == predictor
+
+
 @pytest.fixture
 def document() -> dict[str, object]:
     return {
         "format": "zcu.predictor",
-        "version": 1,
+        "version": 2,
         "model": "fluxonium",
         "params": {
             "EJ": 5.0,
             "EC": 1.0,
             "EL": 0.5,
-            "flux_half": 0.1,
-            "flux_period": -0.4,
-            "flux_bias": 0.0,
         },
-        "flux_unit": "mA",
+        "flux": {"offset": 0.25, "period": {"bias": -0.4}, "unit": {"bias": "mA"}},
         "source": {"run_id": "run-α", "created_at": "2026-10-20T12:34:56+08:00"},
     }
 
@@ -59,9 +76,6 @@ def save_or_validate(operation: str, path: Path, predictor: PredictorFile) -> No
                 "EJ": 5.0,
                 "EC": 1,
                 "EL": 0.5,
-                "flux_half": 0.1,
-                "flux_period": -0.4,
-                "flux_bias": 0,
             },
         ),
         (
@@ -70,15 +84,12 @@ def save_or_validate(operation: str, path: Path, predictor: PredictorFile) -> No
                 "EJmax": 20,
                 "EC": 0.3,
                 "d": 0.1,
-                "flux_half": 0,
-                "flux_period": 2,
-                "flux_bias": 0.2,
             },
         ),
         ("fluxonium", {"EJ": None}),
         ("transmon", {}),
-        ("fluxonium", {"EJ": -1, "flux_period": 0}),
-        ("transmon", {"EC": -1, "d": 2, "flux_period": 0}),
+        ("fluxonium", {"EJ": -1, "EC": 0}),
+        ("transmon", {"EC": -1, "d": 2}),
     ],
     ids=[
         "fluxonium",
@@ -101,7 +112,7 @@ def test_load_selects_numeric_type_without_completing_or_building_model(
     expected = PredictorFile(
         model=model,
         params=params_class(model).from_mapping(values),
-        flux_unit="mA",
+        flux=PredictorFlux(0.25, {"bias": -0.4}, {"bias": "mA"}),
         source=PredictorSource("run-α", "2026-10-20T12:34:56+08:00"),
     )
 
@@ -118,14 +129,16 @@ def test_load_preserves_unknown_metadata_and_timezone_text(
     timestamp: str | None,
 ) -> None:
     document.update(
-        flux_unit=None, params={}, source={"run_id": None, "created_at": timestamp}
+        flux={"offset": 0.0, "period": {}, "unit": {}},
+        params={},
+        source={"run_id": None, "created_at": timestamp},
     )
     path = write_document(tmp_path / "predictor.json", document)
 
     assert load_predictor_file(path) == PredictorFile(
         model="fluxonium",
         params=FluxoniumParams(),
-        flux_unit=None,
+        flux=PredictorFlux(0.0, {}, {}),
         source=PredictorSource(None, timestamp),
     )
 
@@ -165,7 +178,10 @@ def test_rejects_timestamp_outside_extended_shape(
             load_predictor_file(path)
     else:
         predictor = PredictorFile(
-            "fluxonium", FluxoniumParams(), None, PredictorSource(None, timestamp)
+            "fluxonium",
+            FluxoniumParams(),
+            PredictorFlux(0.0, {}, {}),
+            PredictorSource(None, timestamp),
         )
         with pytest.raises(ValueError, match="."):
             save_or_validate(operation, path, predictor)
@@ -197,7 +213,10 @@ def test_rejects_invalid_timestamp_values(
             load_predictor_file(path)
     else:
         predictor = PredictorFile(
-            "fluxonium", FluxoniumParams(), None, PredictorSource(None, timestamp)
+            "fluxonium",
+            FluxoniumParams(),
+            PredictorFlux(0.0, {}, {}),
+            PredictorSource(None, timestamp),
         )
         with pytest.raises(ValueError, match="."):
             save_or_validate(operation, path, predictor)
@@ -221,7 +240,10 @@ def test_timestamp_extended_shape_round_trips_verbatim(
 ) -> None:
     path = tmp_path / "predictor.json"
     predictor = PredictorFile(
-        "fluxonium", FluxoniumParams(), None, PredictorSource(None, timestamp)
+        "fluxonium",
+        FluxoniumParams(),
+        PredictorFlux(0.0, {}, {}),
+        PredictorSource(None, timestamp),
     )
     save_predictor_file(path, predictor)
 
@@ -236,7 +258,7 @@ def test_timestamp_extended_shape_round_trips_verbatim(
     "changes",
     [
         {"format": "other"},
-        {"version": 2},
+        {"version": 3},
         {"version": True},
         {"version": 1.0},
         {"version": "1"},
@@ -254,9 +276,9 @@ def test_timestamp_extended_shape_round_trips_verbatim(
         {"model": "transmon", "params": {"EJ": 1}},
         {"model": "transmon", "params": {"d": False}},
         {"model": "transmon", "params": {"EJmax": float("nan")}},
-        {"flux_unit": ""},
-        {"flux_unit": "  "},
-        {"flux_unit": 1},
+        {"flux": {"offset": 0, "period": {"bias": 1}, "unit": {"bias": ""}}},
+        {"flux": {"offset": 0, "period": {"bias": 1}, "unit": {"bias": "  "}}},
+        {"flux": {"offset": 0, "period": {"bias": 1}, "unit": {"bias": 1}}},
         {"source": None},
         {"source": []},
         {"source": {"run_id": "", "created_at": None}},
@@ -320,7 +342,7 @@ def test_load_rejects_invalid_envelope_metadata_and_parameters(
 
 
 @pytest.mark.parametrize(
-    "field", ["format", "version", "model", "params", "flux_unit", "source"]
+    "field", ["format", "version", "model", "params", "flux", "source"]
 )
 def test_load_requires_every_envelope_field(
     tmp_path: Path,
@@ -360,6 +382,170 @@ def test_load_rejects_non_object_or_malformed_json(
         load_predictor_file(path)
 
 
+def test_load_energy_only_v2_with_multiple_flux_sources(tmp_path: Path) -> None:
+    path = write_document(
+        tmp_path / "v2.json",
+        {
+            "format": "zcu.predictor",
+            "version": 2,
+            "model": "fluxonium",
+            "params": {"EJ": 5, "EC": 1, "EL": 0.5},
+            "flux": {
+                "offset": 0.25,
+                "period": {"bias": -2.0, "coil": 4.0},
+                "unit": {"bias": "mA", "coil": "A"},
+            },
+            "source": {"run_id": None, "created_at": None},
+        },
+    )
+    loaded = load_predictor_file(path)
+    assert loaded.params.to_dict() == {"EJ": 5, "EC": 1, "EL": 0.5}
+    assert loaded.flux.offset == 0.25
+    assert loaded.flux.period == {"bias": -2.0, "coil": 4.0}
+    save_predictor_file(path, loaded)
+    assert load_predictor_file(path) == loaded
+
+
+@pytest.mark.parametrize(
+    "model, energies",
+    [
+        ("fluxonium", {"EJ": 5, "EC": 1, "EL": 0.5}),
+        ("transmon", {"EJmax": 20, "EC": 0.3, "d": 0.1}),
+    ],
+)
+@pytest.mark.parametrize("unit", ["mA", None])
+def test_upgrade_v1_preserves_energy_and_unwrapped_alignment(
+    model: ModelName, energies: dict[str, float], unit: str | None
+) -> None:
+    from copy import deepcopy
+
+    from zcu_tools.resources import predictor_file
+
+    document = {
+        "format": "zcu.predictor",
+        "version": 1,
+        "model": model,
+        "params": {**energies, "flux_half": 0.3, "flux_period": -0.4, "flux_bias": 0.1},
+        "flux_unit": unit,
+        "source": {"run_id": None, "created_at": None},
+    }
+    before = deepcopy(document)
+    upgraded = predictor_file.upgrade_predictor_document(document)
+    assert upgraded.params.to_dict() == energies
+    assert upgraded.flux == PredictorFlux(
+        1.0, {"unnamed_device": -0.4}, {"unnamed_device": unit or "native"}
+    )
+    assert document == before
+
+
+def test_v1_reader_requires_explicit_upgrade(tmp_path: Path) -> None:
+    path = write_document(
+        tmp_path / "old.json",
+        {
+            "format": "zcu.predictor",
+            "version": 1,
+            "model": "fluxonium",
+            "params": {},
+            "flux_unit": None,
+            "source": {"run_id": None, "created_at": None},
+        },
+    )
+    with pytest.raises(ValueError, match="scripts/upgrade_parameters.py.*<entry>"):
+        load_predictor_file(path)
+
+
+@pytest.mark.parametrize(
+    "flux",
+    [
+        None,
+        {},
+        {"offset": None, "period": {}, "unit": {}},
+        {"offset": True, "period": {}, "unit": {}},
+        {"offset": float("inf"), "period": {}, "unit": {}},
+        {"offset": 0, "period": {"bias": 0}, "unit": {"bias": "A"}},
+        {"offset": 0, "period": {"bias": True}, "unit": {"bias": "A"}},
+        {"offset": 0, "period": {"bias": None}, "unit": {"bias": "A"}},
+        {"offset": 0, "period": {"bias": float("nan")}, "unit": {"bias": "A"}},
+        {"offset": 0, "period": {"bias": 1}, "unit": {}},
+        {"offset": 0, "period": {}, "unit": {"extra": "A"}},
+        {"offset": 0, "period": {"bad.name": 1}, "unit": {"bad.name": "A"}},
+        {"offset": 0, "period": {}, "unit": {}, "extra": 1},
+    ],
+)
+def test_load_rejects_invalid_flux_frame(
+    tmp_path: Path, document: dict[str, object], flux: object
+) -> None:
+    document["flux"] = flux
+    with pytest.raises(ValueError, match="flux|offset|period|[Dd]evice"):
+        load_predictor_file(write_document(tmp_path / "bad.json", document))
+
+
+@pytest.mark.parametrize(
+    "invalid",
+    [
+        {},
+        {"offset": 0, "period": {}, "unit": {}, "extra": 1},
+        {"offset": True, "period": {}, "unit": {}},
+        {"offset": 0, "period": {"coil": 0}, "unit": {"coil": "A"}},
+        {"offset": 0, "period": {"coil": 2}, "unit": {}},
+    ],
+)
+def test_predictor_flux_public_decoder_rejects_invalid_shape(
+    invalid: dict[str, object],
+) -> None:
+    with pytest.raises(ValueError, match="flux|offset|period"):
+        PredictorFlux.from_mapping(invalid)
+
+
+def test_predictor_flux_public_mapping_roundtrip_is_detached() -> None:
+    document = {"offset": 0.25, "period": {"coil": -2.0}, "unit": {"coil": "A"}}
+    flux = PredictorFlux.from_mapping(document)
+    rendered = flux.to_dict()
+    assert rendered == document
+    rendered["period"]["coil"] = 9.0
+    rendered["unit"]["coil"] = "V"
+    assert flux.to_dict() == document
+
+
+def test_predictor_flux_snapshots_inputs_and_reuses_analysis_frame() -> None:
+    from zcu_tools.analysis.flux import flux_from_device_values
+
+    periods, units = {"bias": -2.0}, {"bias": "A"}
+    flux = PredictorFlux(1.25, periods, units)
+    periods["bias"] = 5.0
+    units["bias"] = "V"
+    assert flux_from_device_values(flux.to_frame(), {"bias": 0.5}) == 1.0
+    assert flux.unit == {"bias": "A"}
+
+
+@pytest.mark.parametrize(
+    "affine",
+    [
+        {"flux_half": None, "flux_period": 1, "flux_bias": 0},
+        {"flux_half": 0, "flux_period": 0, "flux_bias": 0},
+        {"flux_half": 0, "flux_period": 1, "flux_bias": float("inf")},
+    ],
+)
+def test_upgrade_rejects_unusable_affine_without_mutating_input(
+    affine: dict[str, object],
+) -> None:
+    from copy import deepcopy
+
+    from zcu_tools.resources.predictor_file import upgrade_predictor_document
+
+    document = {
+        "format": "zcu.predictor",
+        "version": 1,
+        "model": "fluxonium",
+        "params": {"EJ": None, **affine},
+        "source": {"run_id": None, "created_at": None},
+    }
+    before = deepcopy(document)
+    with pytest.raises(ValueError, match="flux"):
+        upgrade_predictor_document(document)
+    assert document == before
+
+
 def test_load_missing_file_propagates_io_error(tmp_path: Path) -> None:
     with pytest.raises(FileNotFoundError):
         load_predictor_file(tmp_path / "missing.json")
@@ -370,12 +556,15 @@ def test_load_missing_file_propagates_io_error(tmp_path: Path) -> None:
     [
         PredictorFile(
             "fluxonium",
-            FluxoniumParams(EJ=5, flux_period=-2),
-            "mA",
+            FluxoniumParams(EJ=5),
+            PredictorFlux(0.25, {"bias": -0.4}, {"bias": "mA"}),
             PredictorSource("run-α", "2026-10-20T12:34:56+08:00"),
         ),
         PredictorFile(
-            "transmon", TransmonParams(EJmax=20, d=0), None, PredictorSource(None, None)
+            "transmon",
+            TransmonParams(EJmax=20, d=0),
+            PredictorFlux(0.0, {}, {}),
+            PredictorSource(None, None),
         ),
     ],
     ids=["fluxonium", "transmon"],
@@ -392,10 +581,14 @@ def test_save_writes_versioned_json_and_round_trips(
     encoded = json.loads(destination.read_text(encoding="utf-8"))
     assert encoded == {
         "format": "zcu.predictor",
-        "version": 1,
+        "version": 2,
         "model": predictor.model,
         "params": predictor.params.to_dict(),
-        "flux_unit": predictor.flux_unit,
+        "flux": {
+            "offset": predictor.flux.offset,
+            "period": dict(predictor.flux.period),
+            "unit": dict(predictor.flux.unit),
+        },
         "source": {
             "run_id": predictor.source.run_id,
             "created_at": predictor.source.created_at,
@@ -411,7 +604,10 @@ def test_rejects_mismatched_model_before_overwriting(
     destination = tmp_path / "predictor.json"
     destination.write_text("keep me", encoding="utf-8")
     predictor = PredictorFile(
-        "transmon", FluxoniumParams(), None, PredictorSource(None, None)
+        "transmon",
+        FluxoniumParams(),
+        PredictorFlux(0.0, {}, {}),
+        PredictorSource(None, None),
     )
 
     with pytest.raises(ValueError, match="model"):
@@ -425,7 +621,10 @@ def test_rejects_invalid_numeric_values_before_writing(
 ) -> None:
     destination = tmp_path / "predictor.json"
     predictor = PredictorFile(
-        "fluxonium", FluxoniumParams(EJ=float("nan")), None, PredictorSource(None, None)
+        "fluxonium",
+        FluxoniumParams(EJ=float("nan")),
+        PredictorFlux(0.0, {}, {}),
+        PredictorSource(None, None),
     )
 
     with pytest.raises(ValueError, match="EJ"):
@@ -438,14 +637,14 @@ def test_rejects_invalid_numeric_values_before_writing(
     [
         PredictorFile(
             "fluxonium",
-            FluxoniumParams(EC=-1, flux_period=0),
-            None,
+            FluxoniumParams(EC=-1),
+            PredictorFlux(0.0, {}, {}),
             PredictorSource(None, None),
         ),
         PredictorFile(
             "transmon",
-            TransmonParams(d=2, flux_period=0),
-            "mV",
+            TransmonParams(d=2),
+            PredictorFlux(0.0, {}, {}),
             PredictorSource("historical-run", "2026-10-20T12:34-03:30"),
         ),
     ],
@@ -467,7 +666,10 @@ def test_validate_accepts_partial_unphysical_inputs_without_mutation_or_io(
 def test_save_requires_existing_parent(tmp_path: Path) -> None:
     destination = tmp_path / "missing" / "predictor.json"
     predictor = PredictorFile(
-        "fluxonium", FluxoniumParams(), None, PredictorSource(None, None)
+        "fluxonium",
+        FluxoniumParams(),
+        PredictorFlux(0.0, {}, {}),
+        PredictorSource(None, None),
     )
 
     with pytest.raises(FileNotFoundError):

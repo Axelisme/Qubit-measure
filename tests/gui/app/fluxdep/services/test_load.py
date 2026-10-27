@@ -206,6 +206,41 @@ def test_inherited_load_marks_alignment_seeded(spectrum_hdf5):
 # --- processed reload ------------------------------------------------------
 
 
+def test_processed_projection_uses_affine_offset_without_counting_snapshot_twice(
+    tmp_path,
+):
+    from zcu_tools.analysis.fluxdep.io import dump_spectrums
+    from zcu_tools.analysis.fluxdep.models import SpectrumResult
+
+    empty = np.empty(0, dtype=np.float64)
+    result = SpectrumResult(
+        offset=0.75,
+        period=-2.0,
+        device="bias",
+        unit="A",
+        device_snapshot={
+            "bias": {"value": 99.0, "unit": "A"},
+            "coil": {"value": 0.002, "unit": "A"},
+        },
+        spectrum={
+            "dev_values": np.array([0.0, 1.0]),
+            "fluxs": np.array([0.75, 0.25]),
+            "freqs": np.array([4.0]),
+            "signals": np.array([[1j], [2j]]),
+        },
+        points={"dev_values": empty, "fluxs": empty, "freqs": empty},
+    )
+    path = str(tmp_path / "processed.hdf5")
+    dump_spectrums(path, {"scan": result})
+    state = FluxDepState()
+    LoadService(state).load_processed_spectrums(path)
+    entry = state.get_spectrum("scan")
+    assert (entry.flux_half, entry.flux_int, entry.flux_period) == (0.5, 1.5, -2.0)
+    assert (entry.device, entry.unit) == ("bias", "A")
+    assert entry.device_snapshot == result.get("device_snapshot")
+    np.testing.assert_array_equal(entry.raw["fluxs"], [0.75, 0.25])
+
+
 @pytest.mark.parametrize("empty", [False, True])
 def test_load_processed_roundtrip(spectrum_hdf5, tmp_path, empty):
     from zcu_tools.gui.app.fluxdep.services.alignment import (

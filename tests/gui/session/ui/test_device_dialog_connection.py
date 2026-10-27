@@ -25,7 +25,10 @@ from zcu_tools.gui.session.ui.device_dialog import DeviceDialog
 from tests.gui._qt_waits import qt_until
 from tests.gui._user_input import ComponentDriver
 from tests.gui.session.services._device_waits import DeviceWorkers
-from tests.gui.session.ui._device_dialog_support import make_device_control
+from tests.gui.session.ui._device_dialog_support import (
+    confirm_device_action,
+    make_device_control,
+)
 
 
 def test_add_type_menu_offers_only_hardware_drivers(qapp, tmp_path: Path):
@@ -154,6 +157,7 @@ def test_disconnect_shows_terminal_status_and_allows_reconnect(qapp, tmp_path: P
         assert ui.observe("Apply Changes").enabled
         ui.screenshot(evidence / "02-published-connected.png")
         ui.click("Drop")
+        confirm_device_action("Drop")
         # Close returns immediately. Reconnect becoming enabled proves the
         # disconnect terminal has reached the view, independently of its label.
         qt_until(

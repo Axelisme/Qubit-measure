@@ -44,7 +44,6 @@ from .predict import FluxoniumPredictor
 from .prediction import (
     DEFAULT_PREDICTION_RESOLUTION,
     DispersivePredictionResult,
-    FluxAffineMap,
     FluxoniumPrediction,
     FluxoniumPredictionSession,
     PredictionResolution,
@@ -90,7 +89,6 @@ __all__ = [
     # predict
     "DEFAULT_PREDICTION_RESOLUTION",
     "DispersivePredictionResult",
-    "FluxAffineMap",
     "FluxoniumPrediction",
     "FluxoniumPredictionSession",
     "PredictionResolution",

@@ -361,7 +361,7 @@ def test_native_analysis_is_identical_in_rpc_and_historical_document(
 def test_native_saved_analysis_is_visible_in_browser_and_comparison(
     host: Host, tmp_path: Path, qapp
 ) -> None:
-    # Public host setup produces the saved data; UI observations start at More.
+    # Public host setup produces saved data; UI observations start at the toolbar.
     token = host.invoke("tab.analyze")["operation_id"]
     host.wait(token)
     report = host.controller.save_control.save_artifacts(
@@ -386,7 +386,7 @@ def test_native_saved_analysis_is_visible_in_browser_and_comparison(
     evidence = Path(os.environ.get("NATIVE_BROWSER_EVIDENCE", str(tmp_path)))
     try:
         ui.screenshot(evidence / "01-main-window.png")
-        ui.select_menu("More ▾", ("Results browser…",))
+        ui.click("Results browser…")
         assert ui.observe(object_name="results.browser").visible
         ui.screenshot(evidence / "02-browser.png")
         branch = ("native",)

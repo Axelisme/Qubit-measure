@@ -40,7 +40,7 @@ def test_menu_opens_independent_results_window(
 ) -> None:
     ui = ComponentDriver(browser_host)
     assert "More ▾" in tuple(w.text for w in ui.visible().widgets)
-    ui.select_menu("More ▾", ("Results browser…",))
+    ui.click("Results browser…")
     assert ui.observe(object_name="results.browser").visible
     assert ui.observe(object_name="results.focus").text == "All results · 0 runs"
     ui.screenshot(tmp_path / "empty-browser.png")
@@ -617,7 +617,7 @@ def test_run_without_images_is_reachable_from_tree(
 ) -> None:
     (tmp_path / "Database" / "bare" / "runs" / "unknown").mkdir(parents=True)
     ui = ComponentDriver(browser_host)
-    ui.select_menu("More ▾", ("Results browser…",))
+    ui.click("Results browser…")
     path = ("bare",)
     for caption in (
         "Global / unknown",
@@ -651,7 +651,7 @@ def test_figure_only_run_explains_open_refusal(
     image.fill(Qt.GlobalColor.red)
     assert image.save(str(run / "figures" / "only.png"))
     ui = ComponentDriver(browser_host)
-    ui.select_menu("More ▾", ("Results browser…",))
+    ui.click("Results browser…")
     assert ui.observe(object_name="results.focus").text == "All results · 1 runs"
     assert "results.figure.0" in {w.object_name for w in ui.visible().widgets}
     ui.click(object_name="results.figure.0")
@@ -722,7 +722,7 @@ def test_new_analysis_tab_projects_the_same_load_source_reason(
     tmp_path: Path,
 ) -> None:
     ui, variant = load_browser
-    ui.select_menu("More ▾", ("Results browser…",))
+    ui.click("Results browser…")
     ui.click(object_name="results.figure.0")
     ui.click("Load into analysis tab")
     feedback = ui.observe(object_name="results.feedback").text
@@ -780,7 +780,7 @@ def identity_browser(
     window.show()
     qapp.processEvents()
     ui = ComponentDriver(window)
-    ui.select_menu("More ▾", ("Results browser…",))
+    ui.click("Results browser…")
     return ui
 
 
@@ -884,7 +884,7 @@ def test_ambiguous_tag_is_browsable_but_does_not_choose_an_adapter(
     window.show()
     qapp.processEvents()
     ui = ComponentDriver(window)
-    ui.select_menu("More ▾", ("Results browser…",))
+    ui.click("Results browser…")
     ui.click(object_name="results.figure.0")
     assert ("experiment", "test/saving") in {
         row.columns
@@ -912,7 +912,7 @@ def test_browser_keeps_existing_load_admission_and_failed_tab_cleanup(
     session, _ctrl, _window, _tab_id = live_ui
     if rejection == "tag":
         live_registry.register("test/saving", WrongTagAdapter)
-    ui.select_menu("More ▾", ("Results browser…",))
+    ui.click("Results browser…")
     if rejection == "format":
         # A file can change after indexing; Load, not the browser, admits bytes.
         session.native_data_path.write_bytes(b"not a native container")

@@ -4,7 +4,6 @@ import numpy as np
 import pytest
 from zcu_tools.simulate.fluxonium import calculate_energy_vs_flux
 from zcu_tools.simulate.fluxonium.prediction import (
-    FluxAffineMap,
     FluxoniumPrediction,
     PredictionResolution,
 )
@@ -17,20 +16,6 @@ def test_prediction_resolution_rejects_non_positive_values() -> None:
         PredictionResolution(qub_cutoff=-1)
     with pytest.raises(ValueError, match="res_dim"):
         PredictionResolution(res_dim=0)
-
-
-def test_flux_affine_roundtrip_and_array_mapping() -> None:
-    affine = FluxAffineMap(flux_half=0.1, flux_period=0.8, flux_bias=0.03)
-    values = np.array([-0.2, 0.0, 0.3], dtype=np.float64)
-
-    expected = (values + 0.03 - 0.1) / 0.8 + 0.5
-    np.testing.assert_allclose(affine.values_to_flux(values), expected)
-    assert affine.flux_to_value(affine.value_to_flux(0.25)) == pytest.approx(0.25)
-
-
-def test_flux_affine_rejects_zero_period() -> None:
-    with pytest.raises(ValueError, match="flux_period"):
-        FluxAffineMap(flux_half=0.0, flux_period=0.0)
 
 
 def test_predict_dispersive_uses_fast_backend_with_provenance() -> None:
@@ -66,17 +51,12 @@ def test_axis_bound_session_caches_by_slider_args_and_owns_axis() -> None:
         np.testing.assert_allclose(result.lines, expected.lines)
 
 
-def test_frequency_curves_use_engine_affine_and_mhz_units() -> None:
-    engine = FluxoniumPrediction(
-        (4.0, 1.0, 0.5),
-        flux_half=0.1,
-        flux_period=0.8,
-        flux_bias=0.03,
-    )
+def test_frequency_curves_use_reduced_flux_and_mhz_units() -> None:
+    engine = FluxoniumPrediction((4.0, 1.0, 0.5))
     values = np.array([-0.2, 0.0, 0.3], dtype=np.float64)
     fluxs, freqs = engine.predict_frequencies_mhz(values, ((0, 1), (1, 3)))
 
-    expected_fluxs = (values + 0.03 - 0.1) / 0.8 + 0.5
+    expected_fluxs = values
     _, energies = calculate_energy_vs_flux(
         (4.0, 1.0, 0.5), expected_fluxs, cutoff=40, evals_count=8
     )

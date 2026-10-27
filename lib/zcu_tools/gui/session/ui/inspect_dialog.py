@@ -24,6 +24,7 @@ from qtpy.QtGui import QFont, QKeyEvent
 from qtpy.QtWidgets import (
     QApplication,
     QDialog,
+    QDialogButtonBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -60,6 +61,7 @@ from zcu_tools.gui.session.ui.component_tree import ComponentTreeWidget
 from zcu_tools.gui.session.ui.new_entry_dialog import NewEntryDialog
 from zcu_tools.gui.session.ui.point_file_banner import PointFileBanner
 from zcu_tools.gui.session.ui.tree_filter import TreeFilter
+from zcu_tools.gui.widgets import set_foreground, success_colour
 from zcu_tools.gui.widgets.form import FormEditor
 
 if TYPE_CHECKING:
@@ -194,6 +196,15 @@ class InspectDialog(QDialog):
         self._tabs.addTab(self._build_modules_tab(), "Modules")
         self._tabs.addTab(self._aliases, "Aliases")
         layout.addWidget(self._tabs)
+        footer = QHBoxLayout()
+        self._saved_hint = QLabel()
+        self._saved_hint.setObjectName("inspect.saved")
+        set_foreground(self._saved_hint, success_colour(self))
+        footer.addWidget(self._saved_hint, stretch=1)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        self._scope.connect(buttons.rejected, lambda: self.close())
+        footer.addWidget(buttons)
+        layout.addLayout(footer)
 
         self._scope.add_cleanup(
             bus.subscribe(
@@ -236,9 +247,6 @@ class InspectDialog(QDialog):
         refresh_btn = QPushButton("Refresh")
         self._scope.connect(refresh_btn.clicked, self.refresh)
         toolbar.addWidget(refresh_btn)
-        close_btn = QPushButton("Close")
-        self._scope.connect(close_btn.clicked, lambda: self.close())
-        toolbar.addWidget(close_btn)
         return toolbar
 
     def _build_modules_tab(self) -> QWidget:
@@ -674,7 +682,11 @@ class InspectDialog(QDialog):
     def _on_bus_refresh(self, payload: SessionPayload) -> None:
         if isinstance(payload, ContextSwitchedPayload):
             self._close_entry()
+            self._saved_hint.clear()
         self.refresh()
+        if isinstance(payload, (MdChangedPayload, MlChangedPayload)):
+            set_foreground(self._saved_hint, success_colour(self))
+            self._saved_hint.setText(f"Saved at {datetime.now():%H:%M:%S}")
 
     def done(self, a0: int) -> None:
         """Retire editor and bus callbacks before any accepted/rejected finish."""

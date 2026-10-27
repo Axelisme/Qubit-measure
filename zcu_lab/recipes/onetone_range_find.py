@@ -1,4 +1,4 @@
-"""Wide absolute-frequency survey with optional dip naming after discovery."""
+"""Wide absolute-frequency survey with interactive confirmation before writeback."""
 
 import json
 from typing import Annotated
@@ -36,7 +36,7 @@ class OnetoneRangeFindInputs(RecipeInputs):
     )
     resonators: list[str] | None | Keep = Field(
         KEEP,
-        description="Optional Analyze names in ascending frequency order; omission retains the analysis names, an empty list discovers unnamed dips, and null is passed to the analysis owner. Names never enter acquisition cfg.",
+        description="Optional picker labels, initially paired in ascending frequency order and freely reassignable before Done. Omission retains analysis names, an empty list discovers unnamed dips, and null is passed to the analysis owner. Names never enter acquisition cfg.",
     )
     min_separation: (
         Annotated[float, Field(strict=True, gt=0, allow_inf_nan=False)] | None | Keep
@@ -72,17 +72,19 @@ class OnetoneRangeFindReport(RecipeReport):
 
 @recipe(
     "onetone_range_find",
-    description="Survey explicit absolute MHz bounds, discover unnamed dips or assign analysis names, and ask before frequency writeback.",
+    description="Survey explicit absolute MHz bounds, await agent confirmation with tab_interact done, then ask before frequency writeback.",
 )
 async def onetone_range_find(
     session: RecipeSession, inputs: OnetoneRangeFindInputs
 ) -> OnetoneRangeFindReport:
-    """Run onetone/range_find, Analyze, ask_writeback, accept selections, Save.
+    """Run, await interactive Done, ask_writeback, accept selections, then Save.
 
     freq and n are required. freq supplies absolute MHz bounds and n sets
     freq.expts, the shared acquisition sample count. Omitted resonators
     retains the analysis names; an empty list discovers unnamed dips. Supplied
-    names label dips in ascending frequency order through Analyze, not cfg.
+    names seed frequency-order pairing in Analyze, not cfg. The agent must
+    inspect or adjust the picker through tab_interact and send done before this
+    recipe asks about writeback. Final assignments may use any frequency order.
     A supplied min_separation is finite positive MHz and changes only analysis.
     Omission retains the owner's value, initially 1 MHz. Explicit null is passed
     to the analysis owner. Neither field changes the acquired frequency grid.
@@ -112,6 +114,7 @@ async def onetone_range_find(
         fit = await tab.analyze(
             "primary",
             result=RangeFindSummary,
+            interactive=True,
             updates={
                 "resonators": inputs.resonators
                 if inputs.resonators is None or isinstance(inputs.resonators, Keep)
@@ -121,13 +124,12 @@ async def onetone_range_find(
         )
         if fit.result is None:
             return OnetoneRangeFindReport(resonators=[], analysis_failure=fit.reason)
+        answer = await tab.ask_writeback()
         applied = False
-        if not isinstance(inputs.resonators, Keep) and inputs.resonators:
-            answer = await tab.ask_writeback()
-            if answer.accepted:
-                receipt = tab.accept_writeback(answer.items)
-                receipt.raise_for_error()
-                applied = bool(receipt.items)
+        if answer.accepted:
+            receipt = tab.accept_writeback(answer.items)
+            receipt.raise_for_error()
+            applied = bool(receipt.items)
         return OnetoneRangeFindReport(
             resonators=list(fit.result.dips),
             identity_diagnostic=fit.result.identity_diagnostic,

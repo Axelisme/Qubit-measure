@@ -1,14 +1,4 @@
-"""LoadSpectrumDialog — pick a file + type + axis orientation with a live preview.
-
-Adds fluxdep's extras (a Type combo and an "Inherit from" combo) onto the shared
-``LoadDataDialog`` base, which owns the file row + Browse, the transpose toggle, the
-best-effort read and the preview. ``inherit_from`` optionally seeds the new
-spectrum's flux alignment from an already-loaded one; while one is chosen the
-preview draws its half/integer lines, so the inherited alignment can be judged
-before loading. The chosen ``transpose_axes``
-flag is passed to the Controller only on Load, so State always stores the canonical
-(x=flux, y=freq) layout.
-"""
+"""Fluxdep Type/Inherit controls and alignment overlay over the shared chooser."""
 
 from __future__ import annotations
 
@@ -16,72 +6,77 @@ from collections.abc import Mapping
 from typing import NamedTuple
 
 from matplotlib.axes import Axes
-from qtpy.QtWidgets import (
-    QComboBox,
-    QHBoxLayout,
-    QLabel,
-    QWidget,
-)
+from qtpy.QtWidgets import QComboBox, QHBoxLayout, QLabel, QWidget
 
-from zcu_tools.analysis.fluxdep.line_picker import (
-    HALF_FLUX_COLOR,
-    INTEGER_FLUX_COLOR,
+from zcu_tools.analysis.flux import ComponentFluxContext
+from zcu_tools.analysis.fluxdep.line_picker import HALF_FLUX_COLOR, INTEGER_FLUX_COLOR
+from zcu_tools.gui.app.analysis_project.native import NativeSpectrumSelection
+from zcu_tools.gui.app.analysis_project.native_dialog import (
+    NativeDeviceChoices,
+    NativeSpectrumDialog,
 )
 from zcu_tools.gui.app.fluxdep.state import SpecType
-from zcu_tools.gui.widgets.load_dialog import LoadDataDialog
 
 
 class LoadRequest(NamedTuple):
+    """Exact source path, tooling type, optional alignment seed and native choice.
+
+    transpose_axes applies only to Labber. selection explicitly names native
+    variable, axis and device; inherit_from names a previously seeded spectrum.
+    """
+
     filepath: str
     spec_type: SpecType
     inherit_from: str | None
     transpose_axes: bool
+    selection: NativeSpectrumSelection | None
 
 
-class LoadSpectrumDialog(LoadDataDialog):
-    """Modal dialog returning a LoadRequest (or None on cancel)."""
+class LoadSpectrumDialog(NativeSpectrumDialog):
+    """Return a source request with fluxdep type and optional alignment inheritance."""
 
     def __init__(
         self,
         inherit_sources: Mapping[str, tuple[float, float]],
         parent: QWidget | None = None,
         start_dir: str = "",
+        *,
+        flux_context: ComponentFluxContext | None = None,
+        context_error: str | None = None,
     ) -> None:
-        """Build the dialog over the spectra a new one may inherit from.
+        """Offer seeded/aligned sources and caller-projected device options.
 
-        inherit_sources maps eligible aligned or seeded spectrum names, in list
-        order, to the (flux_half, flux_int) device positions it would seed; choosing it in
-        "Inherit from" draws those lines on the preview. start_dir is where
-        Browse opens.
+        inherit_sources maps names to half/integer positions for the preview.
+        flux_context supplies calibrated devices/default/units. Without a frame
+        only unnamed_device is available. context_error remains visible.
         """
         self._inherit_sources = dict(inherit_sources)
-        super().__init__(
-            window_title="Load spectrum",
-            file_placeholder="Choose a spectrum hdf5…",
-            browse_caption="Load spectrum",
-            no_preview_text="No preview\n(choose a 2D spectrum file)",
-            parent=parent,
-            start_dir=start_dir,
+        choices = NativeDeviceChoices(
+            units=flux_context.units
+            if flux_context is not None and flux_context.frame is not None
+            else {},
+            default_device=flux_context.default_device
+            if flux_context is not None
+            else None,
+            error=context_error,
         )
+        super().__init__(choices, parent, start_dir)
 
-    # --- construction ----------------------------------------------------
-
-    def _build_options(self, opt_row: QHBoxLayout) -> None:
-        # Type + transpose + inherit row.
-        opt_row.addWidget(QLabel("Type:"))
+    def _build_source_options(self, row: QHBoxLayout) -> None:
+        row.addWidget(QLabel("Type:"))
         self._type = QComboBox()
         self._type.addItems(["OneTone", "TwoTone"])
-        opt_row.addWidget(self._type)
-
-        opt_row.addWidget(self._transpose_btn)
-
-        opt_row.addWidget(QLabel("Inherit from:"))
+        row.addWidget(self._type)
+        row.addWidget(self._axis_combo)
+        row.addWidget(QLabel("Inherit from:"))
         self._inherit = QComboBox()
         self._inherit.addItem("(none)", userData=None)
-        for n in self._inherit_sources:
-            self._inherit.addItem(n, userData=n)
-        self._inherit.currentIndexChanged.connect(lambda _index: self._render_preview())
-        opt_row.addWidget(self._inherit, stretch=1)
+        for name in self._inherit_sources:
+            self._inherit.addItem(name, userData=name)
+        self._scope.connect(
+            self._inherit.currentIndexChanged, lambda _index: self._render_preview()
+        )
+        row.addWidget(self._inherit, stretch=1)
 
     def _draw_preview_overlay(self, ax: Axes) -> None:
         """Draw the chosen inherit source's half/integer lines, as its picker does.
@@ -105,19 +100,20 @@ class LoadSpectrumDialog(LoadDataDialog):
             ax.axvline(flux_int, color=INTEGER_FLUX_COLOR, linestyle="--", linewidth=1)
             ax.set_xlim(extent)
 
-    # --- result ----------------------------------------------------------
-
     def result_request(self) -> LoadRequest | None:
-        """The chosen LoadRequest, or None if no file was selected."""
+        """Return the chosen source/type/seed, or None without required fields."""
         if not self._filepath:
+            return None
+        selection = self.native_selection()
+        if self.is_native_source and selection is None:
             return None
         spec_type: SpecType = (
             "OneTone" if self._type.currentText() == "OneTone" else "TwoTone"
         )
-        inherit = self._inherit.currentData()
         return LoadRequest(
-            filepath=self._filepath,
-            spec_type=spec_type,
-            inherit_from=inherit,
-            transpose_axes=self._transpose,
+            self._filepath,
+            spec_type,
+            self._inherit.currentData(),
+            self._transpose if not self.is_native_source else False,
+            selection,
         )

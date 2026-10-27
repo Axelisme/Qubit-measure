@@ -21,8 +21,9 @@ has no coupler, qubit-qubit interaction or crosstalk matrix.
 the physical settings nor the entry template supplies calibrated pulses or a
 module library. The [settings guide](field-guide.md) records units and model limits.
 
-The template background now multiplies 68/44/308 MHz waves, 2% complex RMS
-roughness, a -4 dB/GHz slope and a 3.7 GHz low-frequency edge. Existing working
+The template background multiplies 68/44/308/52.6 MHz waves with respective
+depths 0.088/0.066/0.044/0.043, 2% complex RMS roughness, a -4 dB/GHz slope
+and a 3.7 GHz low-frequency edge. Existing working
 copies do not update automatically. Copy the template's `background.extra_ripples`,
 `roughness` and `band_edges` into each receiver in your working YAML, update the
 legacy ripple/slope values too, then restart the environment. `roughness.seed`

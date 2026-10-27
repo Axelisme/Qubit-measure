@@ -49,6 +49,32 @@ class FluxFrame:
         object.__setattr__(self, "devices", MappingProxyType(dict(self.devices)))
 
 
+@dataclass(frozen=True)
+class ComponentFluxContext:
+    """Caller-projected component calibration, default device and native units.
+
+    frame is None when the component offset is uncalibrated, never a zero-offset
+    substitute. default_device is the lab's optional preferred instrument; it
+    need not have calibration. units maps device names to nonempty units, with
+    exactly the frame.devices keys when a frame exists. Construction detaches
+    units and rejects invalid names/units or inconsistent keys with ValueError.
+    """
+
+    frame: FluxFrame | None
+    default_device: str | None
+    units: Mapping[str, str]
+
+    def __post_init__(self) -> None:
+        if self.default_device is not None:
+            validate_device_name(self.default_device)
+        for name, unit in self.units.items():
+            validate_device_name(name)
+            _require_unit(unit)
+        if self.frame is not None and self.units.keys() != self.frame.devices.keys():
+            raise ValueError("context units must have exactly the frame device keys")
+        object.__setattr__(self, "units", MappingProxyType(dict(self.units)))
+
+
 def flux_from_device_values(frame: FluxFrame, values: Mapping[str, float]) -> float:
     """Return offset + sum(value / period) in dimensionless Phi0.
 
@@ -102,6 +128,31 @@ def offset_for_flux(
     return _finite_value(flux, field="flux") - flux_from_device_values(
         FluxFrame(0.0, devices), values
     )
+
+
+def require_matching_device_unit(
+    device_name: str, actual_unit: str | None, expected_unit: str | None
+) -> None:
+    """Require exact unit strings for a named device; return None on a match.
+
+    device_name is a valid instrument name. actual_unit is the unit of a value
+    the caller will use; expected_unit is its declared frame/context unit.
+    Either unit may be None for an unrecorded unit, interpreted as "native".
+    Otherwise units must be nonblank strings. No conversion, trimming or case
+    folding is performed: "native" only matches "native", and "mA" differs
+    from "A". Invalid names/units raise ValueError; mismatches name the device
+    and both units. Callers select used values before calling this function.
+    """
+    validate_device_name(device_name)
+    actual = "native" if actual_unit is None else actual_unit
+    expected = "native" if expected_unit is None else expected_unit
+    _require_unit(actual)
+    _require_unit(expected)
+    if actual != expected:
+        raise ValueError(
+            f"Device {device_name!r} unit {actual!r} does not match "
+            f"expected unit {expected!r}"
+        )
 
 
 def _require_unit(value: object) -> None:

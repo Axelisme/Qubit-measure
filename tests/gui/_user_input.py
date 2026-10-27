@@ -95,6 +95,26 @@ def mouse_click(widget: QWidget, at: QPoint) -> None:
         )
 
 
+def mouse_double_click(widget: QWidget, at: QPoint) -> None:
+    """Send left click, double-click and release events at widget coordinates."""
+    mouse_click(widget, at)
+    for kind, buttons in (
+        (QEvent.Type.MouseButtonDblClick, Qt.MouseButton.LeftButton),
+        (QEvent.Type.MouseButtonRelease, Qt.MouseButton.NoButton),
+    ):
+        QApplication.sendEvent(
+            widget,
+            QMouseEvent(
+                kind,
+                QPointF(at),
+                QPointF(widget.mapToGlobal(at)),
+                Qt.MouseButton.LeftButton,
+                buttons,
+                Qt.KeyboardModifier.NoModifier,
+            ),
+        )
+
+
 def _display_text(widget: QWidget) -> str:
     if isinstance(widget, (QAbstractButton, QLabel, QLineEdit, QDateTimeEdit)):
         return widget.text()
@@ -106,6 +126,28 @@ def _display_text(widget: QWidget) -> str:
 
 
 def _caption_fits(widget: QWidget) -> bool:
+    if isinstance(widget, QComboBox):
+        option = QStyleOptionComboBox()
+        # Native dialog children cannot expose QComboBox's protected initializer.
+        option.initFrom(widget)
+        option.editable = widget.isEditable()
+        option.frame = widget.hasFrame()
+        option.currentText = widget.currentText()
+        option.currentIcon = widget.itemIcon(widget.currentIndex())
+        option.iconSize = widget.iconSize()
+        style = widget.style()
+        if style is None:
+            raise RuntimeError("Combo box has no Qt style")
+        text_rect = style.subControlRect(
+            QStyle.ComplexControl.CC_ComboBox,
+            option,
+            QStyle.SubControl.SC_ComboBoxEditField,
+            widget,
+        )
+        return (
+            widget.fontMetrics().horizontalAdvance(widget.currentText())
+            <= text_rect.width()
+        )
     if isinstance(widget, QLabel) and widget.wordWrap():
         bounds = widget.fontMetrics().boundingRect(
             widget.contentsRect(), Qt.TextFlag.TextWordWrap, widget.text()
@@ -239,6 +281,51 @@ class ComponentDriver:
                 mouse_click(target, target.mapFromGlobal(QPoint(x, y)))
         QApplication.processEvents()
 
+    def drag_at(self, start: tuple[int, int], end: tuple[int, int]) -> None:
+        """Drag between global logical points on one visible, enabled hit target.
+
+        Both endpoints must remain in that target. Covered or clipped targets
+        are not driven. Delivers a left press, move and release, then flushes Qt.
+        """
+        target = self._window.childAt(self._window.mapFromGlobal(QPoint(*start)))
+        if target is None or not self._can_interact(target):
+            return
+        if not target.visibleRegion().contains(target.mapFromGlobal(QPoint(*end))):
+            return
+        for kind, at, button, buttons in (
+            (
+                QEvent.Type.MouseButtonPress,
+                start,
+                Qt.MouseButton.LeftButton,
+                Qt.MouseButton.LeftButton,
+            ),
+            (
+                QEvent.Type.MouseMove,
+                end,
+                Qt.MouseButton.NoButton,
+                Qt.MouseButton.LeftButton,
+            ),
+            (
+                QEvent.Type.MouseButtonRelease,
+                end,
+                Qt.MouseButton.LeftButton,
+                Qt.MouseButton.NoButton,
+            ),
+        ):
+            screen = QPoint(*at)
+            QApplication.sendEvent(
+                target,
+                QMouseEvent(
+                    kind,
+                    QPointF(target.mapFromGlobal(screen)),
+                    QPointF(screen),
+                    button,
+                    buttons,
+                    Qt.KeyboardModifier.NoModifier,
+                ),
+            )
+        QApplication.processEvents()
+
     def window_size(self) -> QSize:
         """Read the shown window's client width/height in device-independent pixels.
 
@@ -328,6 +415,25 @@ class ComponentDriver:
 
     def select_list_row(self, text: str) -> None:
         """Click the unique visible row with this exact rendered caption."""
+        listing, item = self._visible_list_row(text)
+        viewport = listing.viewport()
+        assert viewport is not None
+        mouse_click(viewport, listing.visualItemRect(item).center())
+
+    def double_click_list_row(self, text: str) -> None:
+        """Double-click the unique visible, enabled list row with exact caption.
+
+        Raise LookupError for missing, ambiguous or clipped rows. Send real mouse
+        events to the viewport and process their resulting Qt events.
+        """
+        listing, item = self._visible_list_row(text)
+        viewport = listing.viewport()
+        assert viewport is not None
+        at = listing.visualItemRect(item).center()
+        mouse_double_click(viewport, at)
+        QApplication.processEvents()
+
+    def _visible_list_row(self, text: str) -> tuple[QListWidget, QListWidgetItem]:
         matches: list[tuple[QListWidget, QListWidgetItem]] = []
         for listing in self._window.findChildren(QListWidget):
             if not self._can_interact(listing):
@@ -342,10 +448,7 @@ class ComponentDriver:
                     and viewport.rect().contains(listing.visualItemRect(item))
                 ):
                     matches.append((listing, item))
-        listing, item = _unique(text, matches, [i.text() for _, i in matches])
-        viewport = listing.viewport()
-        assert viewport is not None
-        mouse_click(viewport, listing.visualItemRect(item).center())
+        return _unique(text, matches, [i.text() for _, i in matches])
 
     def table_rows(self, *, object_name: str) -> tuple[TableRowObservation, ...]:
         """Observe rows intersecting the named QTableWidget viewport."""
@@ -748,23 +851,10 @@ class ComponentDriver:
                 point = style.subElementRect(
                     QStyle.SubElement.SE_CheckBoxIndicator, option, widget
                 ).center()
-            mouse_click(widget, point)
             if double_click:
-                for kind, buttons in (
-                    (QEvent.Type.MouseButtonDblClick, Qt.MouseButton.LeftButton),
-                    (QEvent.Type.MouseButtonRelease, Qt.MouseButton.NoButton),
-                ):
-                    QApplication.sendEvent(
-                        widget,
-                        QMouseEvent(
-                            kind,
-                            QPointF(point),
-                            QPointF(widget.mapToGlobal(point)),
-                            Qt.MouseButton.LeftButton,
-                            buttons,
-                            Qt.KeyboardModifier.NoModifier,
-                        ),
-                    )
+                mouse_double_click(widget, point)
+            else:
+                mouse_click(widget, point)
         QApplication.processEvents()
 
     def drag_splitter(self, delta: int, *, object_name: str) -> None:
@@ -1500,6 +1590,8 @@ class ComponentDriver:
                     .transformed(line.get_transform())
                     .intersects_bbox(axes.bbox, filled=False)
                 )
+                xmin, xmax = axes.get_xlim()
+                ymin, ymax = axes.get_ylim()
                 observed.append(
                     PlotAxesObservation(
                         axes.get_xlabel()
@@ -1509,6 +1601,22 @@ class ComponentDriver:
                         if axes.yaxis.get_visible() and axes.yaxis.label.get_visible()
                         else "",
                         curves,
+                        (float(xmin), float(xmax)),
+                        (float(ymin), float(ymax)),
+                        (
+                            canvas.mapToGlobal(QPoint()).x()
+                            + axes.bbox.x0 / canvas.device_pixel_ratio,
+                            canvas.mapToGlobal(QPoint()).y()
+                            + (canvas.figure.bbox.height - axes.bbox.y1)
+                            / canvas.device_pixel_ratio,
+                            axes.bbox.width / canvas.device_pixel_ratio,
+                            axes.bbox.height / canvas.device_pixel_ratio,
+                        ),
+                        tuple(
+                            t.get_text()
+                            for t in axes.texts
+                            if t.get_visible() and t.get_text()
+                        ),
                     )
                 )
         return PlotObservation(tuple(observed))

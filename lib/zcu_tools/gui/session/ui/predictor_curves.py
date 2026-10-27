@@ -3,14 +3,17 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
 import numpy as np
 from matplotlib.backends.backend_qt import NavigationToolbar2QT
 from qtpy.QtWidgets import QTabWidget, QVBoxLayout, QWidget
 
+from zcu_tools.analysis.flux import FluxFrame, flux_from_device_values
 from zcu_tools.gui.expected_error import FailedPreconditionError
+from zcu_tools.gui.session.services.predictor import PredictMatrixCurveRequest
 from zcu_tools.gui.session.ui.predictor_canvas import CurveView, PredictorCurveCanvas
 from zcu_tools.simulate.parameters import ModelParams
 from zcu_tools.simulate.predictor import MatrixPredictor, PredictorInputError
@@ -22,6 +25,19 @@ logger = logging.getLogger(__name__)
 
 _DEFAULT_FLUX_WINDOW: tuple[float, float] = (0.4, 1.1)
 _CURVE_GRID_N = 200
+
+
+@dataclass(frozen=True)
+class CurveCoordinates:
+    """Native scan coordinates shared by the frequency and matrix plots.
+
+    frame holds Phi0 offset and signed native periods/units. axis_device names
+    one frame device. device_values fixes every other device in its native unit.
+    """
+
+    frame: FluxFrame
+    axis_device: str
+    device_values: Mapping[str, float]
 
 
 class PredictorCurveTabs(QTabWidget):
@@ -132,29 +148,14 @@ class PredictorCurveTabs(QTabWidget):
         for canvas in self._all_canvases:
             canvas.set_highlights(highlights)
 
-    def _make_affine(
-        self,
-        params: ModelParams,
-    ) -> tuple[Callable[[float], float] | None, Callable[[float], float] | None]:
-        """Return (value_to_flux, flux_to_value) closures or (None, None) if no predictor.
-
-        Mirrors FluxoniumPredictor.value_to_flux exactly:
-          flux = (value + flux_bias - flux_half) / flux_period + 0.5
-          value = (flux - 0.5) * flux_period + flux_half - flux_bias
-        """
-        try:
-            model = params.build_predictor()
-        except PredictorInputError:
-            return None, None
-        self._matrix_supported = isinstance(model, MatrixPredictor)
-        return model.value_to_flux, model.flux_to_value
-
     def refresh_curves(
         self,
         params: ModelParams,
         transitions: tuple[tuple[int, int], ...],
         highlights: tuple[tuple[int, int], ...],
         marker_value: float,
+        *,
+        coordinates: CurveCoordinates,
     ) -> bool:
         """Render queries for explicit trial inputs, transitions and highlighted rows.
 
@@ -174,15 +175,30 @@ class PredictorCurveTabs(QTabWidget):
                 canvas.clear()
             return False
 
-        value_to_flux, flux_to_value = self._make_affine(params)
-        if value_to_flux is None or flux_to_value is None:
+        try:
+            model = params.build_predictor()
+        except PredictorInputError as exc:
             self.clear_curves()
             self._on_clear_values()
-            try:
-                params.build_predictor()
-            except PredictorInputError as exc:
-                self._set_status(str(exc), error=True)
+            self._set_status(str(exc), error=True)
             return False
+        self._matrix_supported = isinstance(model, MatrixPredictor)
+        frame, axis, fixed = (
+            coordinates.frame,
+            coordinates.axis_device,
+            coordinates.device_values,
+        )
+
+        # Matplotlib secondary-axis transforms also supply NumPy arrays. Keep
+        # the transforms linear after the public flux owner projects the origin.
+        origin = flux_from_device_values(frame, {**fixed, axis: 0.0})
+        period = frame.devices[axis].period
+
+        def value_to_flux(value: float) -> float:
+            return origin + value / period
+
+        def flux_to_value(flux: float) -> float:
+            return (flux - origin) * period
 
         # Build value grid from the default flux window.
         v_lo = flux_to_value(_DEFAULT_FLUX_WINDOW[0])
@@ -197,13 +213,14 @@ class PredictorCurveTabs(QTabWidget):
             flux_window=_DEFAULT_FLUX_WINDOW,
             value_to_flux=value_to_flux,
             flux_to_value=flux_to_value,
+            value_label=f"{axis} ({frame.devices[axis].unit})",
         )
 
         # ── Frequency curves ──────────────────────────────────────────────
         try:
             freq_result = self._pred.predict_freq_curve(
                 params,
-                PredictCurveRequest(values=grid, transitions=tuple(transitions)),
+                PredictCurveRequest(frame, axis, grid, fixed, tuple(transitions)),
             )
             self._freq_canvas.render_curves(
                 values=freq_result.values,
@@ -231,10 +248,10 @@ class PredictorCurveTabs(QTabWidget):
         if self._matrix_supported and not all(
             self._render_matrix_curve(
                 params,
-                transitions,
-                operator,
+                PredictMatrixCurveRequest(
+                    frame, axis, grid, fixed, transitions, operator
+                ),
                 canvas,
-                grid,
                 view,
             )
             for operator, canvas in matrix_canvases
@@ -263,10 +280,8 @@ class PredictorCurveTabs(QTabWidget):
     def _render_matrix_curve(
         self,
         params: ModelParams,
-        transitions: tuple[tuple[int, int], ...],
-        operator: Literal["n", "phi"],
+        request: PredictMatrixCurveRequest,
         canvas: PredictorCurveCanvas,
-        grid: np.ndarray,
         view: CurveView,
     ) -> bool:
         """Compute+render one operator's matrix-element curve onto ``canvas``.
@@ -274,25 +289,17 @@ class PredictorCurveTabs(QTabWidget):
         Returns True on success; on an expected failure it sets the status and
         returns False so the caller can stop the refresh.
         """
-        from zcu_tools.gui.session.services.predictor import (
-            PredictMatrixCurveRequest,
-        )
-
         try:
             mat_result = self._pred.predict_matrix_element_curve(
                 params,
-                PredictMatrixCurveRequest(
-                    values=grid,
-                    transitions=transitions,
-                    operator=operator,
-                ),
+                request,
             )
         except (FailedPreconditionError, PredictorInputError) as exc:
             self._set_status(str(exc), error=True)
             return False
         except Exception as exc:
             logger.exception(
-                "predictor matrix curve refresh failed: operator=%s", operator
+                "predictor matrix curve refresh failed: operator=%s", request.operator
             )
             self._set_status(str(exc), error=True)
             return False
@@ -301,7 +308,7 @@ class PredictorCurveTabs(QTabWidget):
             values=mat_result.values,
             labels=mat_result.labels,
             series=mat_result.mags,
-            ylabel=f"|<i|{operator}|j>|",
+            ylabel=f"|<i|{request.operator}|j>|",
             view=view,
         )
         return True

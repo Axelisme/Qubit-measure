@@ -29,9 +29,9 @@ from zcu_tools.gui.form import (
 )
 from zcu_tools.gui.lifetime import LifetimeScope
 from zcu_tools.gui.session.context_types import ContextSourceUnavailableError
-from zcu_tools.gui.widgets.selectable_text import make_label_selectable
+from zcu_tools.gui.widgets import error_colour, set_foreground
 
-from ._controls import FieldRow, GroupBlock, LocalText, RowActions
+from ._controls import FieldRow, GroupBlock, LocalText, RowActions, make_error_label
 from ._fold import ROW_SPACING
 from ._view import FieldView, present_fields, project_field
 
@@ -217,7 +217,7 @@ class FormEditor[F: FormModel](QWidget):
     declaration order, with each group block at its first visible member's
     position. A group whose fields are all hidden has no block.
     While any of its rows (or their children) shows an error, the header
-    shows a "Contains errors" note; a folded group stays folded.
+    shows a "Contains errors" note naming invalid child paths; folds stay unchanged.
     Groups start folded except Sweep, whose member axes also start open. A
     sole nonnullable expandable Sweep member uses a combined title and keeps
     its canonical path, selector and commands. These hints use Display.group,
@@ -231,8 +231,10 @@ class FormEditor[F: FormModel](QWidget):
     Direct text inputs and dropdowns get a light-red Base tint; checkboxes and
     model sections get a red name label. An invalid Expression keeps its mode
     tint and gets a red border. The coloured widget has formError=True while
-    invalid, False otherwise. Errors add no row height. form.error displays
-    model-wide errors and is hidden while empty.
+    invalid, False otherwise. form.error.<path> shows selectable inline error text
+    below that row's control. form.error.summary shows the first error and its
+    canonical path at the bottom, including folded or hidden children. form.error
+    displays model-wide or otherwise unlocated errors. Empty labels are hidden.
     Mapping-key/index errors appear at their container field, except within a
     FixedList where the original index addresses each model element.
     Only current active, instantiated fields have input controls. Model and
@@ -361,11 +363,7 @@ class FormEditor[F: FormModel](QWidget):
         self._layout = QVBoxLayout(self)
         self._layout.setContentsMargins(0, 0, 0, 0)
         self._layout.setSpacing(ROW_SPACING)
-        self._root_error = QLabel(self)
-        make_label_selectable(self._root_error)
-        self._root_error.setObjectName("form.error")
-        self._root_error.setWordWrap(True)
-        self._root_error.hide()
+        self._root_error = make_error_label(self, "form.error")
         self._layout.addWidget(self._root_error)
         self._content = QWidget(self)
         self._layout.addWidget(self._content, stretch=1)
@@ -373,6 +371,8 @@ class FormEditor[F: FormModel](QWidget):
         content_layout.setContentsMargins(0, 0, 0, 0)
         content_layout.setSpacing(ROW_SPACING)
         content_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        self._summary = make_error_label(self, "form.error.summary")
+        self._layout.addWidget(self._summary)
         self._level = _Level((), self._content, content_layout)
         self._publication_count = 0
         self._publish()
@@ -867,6 +867,15 @@ class FormEditor[F: FormModel](QWidget):
     def _show_errors(self) -> None:
         errors = self.errors()
         messages = dict(errors.messages) if errors else {}
+        first = next(iter(messages.items()), None)
+        summary = ""
+        if first is not None:
+            path, message = first
+            location = ".".join(str(part) for part in path)
+            summary = f"{location}: {message}" if location else message
+        self._summary.setText(summary)
+        set_foreground(self._summary, error_colour(self))
+        self._summary.setVisible(bool(summary))
         self._root_error.setText(messages.pop((), ""))
         by_row: dict[FormWritePath, list[str]] = {}
         for path, message in messages.items():
@@ -886,11 +895,11 @@ class FormEditor[F: FormModel](QWidget):
             if path in self._local:
                 row.clear_value()
         for block in self._groups:
-            block.set_has_errors(
-                has_errors=any(
-                    path[: len(member)] == member
+            block.set_errors(
+                tuple(
+                    path
                     for path in (errors.messages if errors else {})
-                    for member in block.members
+                    if any(path[: len(member)] == member for member in block.members)
                 )
             )
         valid = errors is None

@@ -161,6 +161,7 @@ def build_fit_tools(bridge: McpBridge) -> ToolTable:
                     "component",
                     "analysis_id",
                     "flux_writeback",
+                    "predictor_writeback",
                 )
             }
         )
@@ -211,8 +212,10 @@ def build_fit_tools(bridge: McpBridge) -> ToolTable:
             "description": (
                 "Write predictors/<component>.json and declared setup fields in "
                 "the opened entry, then append an analysis ledger record. "
-                "Return the GUI's successful path, full-precision EJ/EC/EL GHz "
-                "and actual calibration source. Stale fits are refused by GUI "
+                "Return the predictor path (null when skipped), independent "
+                "predictor_writeback and component flux_writeback receipts, "
+                "full-precision EJ/EC/EL GHz and actual calibration source. "
+                "A skipped predictor leaves setup/ledger export available. Stale fits are refused by GUI "
                 "with fit_stale. Native readiness, control and I/O failures "
                 "propagate without retry, fallback or rollback."
             ),

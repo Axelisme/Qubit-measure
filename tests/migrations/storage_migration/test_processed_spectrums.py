@@ -76,9 +76,10 @@ def test_processed_spectrums_convert_axes_calibration_and_complex_values(
     actual = load_spectrums(str(target))
     assert list(actual) == ["scan.with.dots"]
     spectrum = actual["scan.with.dots"]
-    assert spectrum["flux_half"] == 2.0
-    assert spectrum["flux_int"] == 4.0
-    assert spectrum["flux_period"] == 4.0
+    assert spectrum["offset"] == 0.0
+    assert spectrum["period"] == 4.0
+    assert spectrum["device"] == "unnamed_device"
+    assert spectrum["unit"] == "native"
     assert spectrum.get("type") == "TwoTone"
     np.testing.assert_array_equal(spectrum["spectrum"]["dev_values"], [0.0, 4.0])
     np.testing.assert_array_equal(spectrum["spectrum"]["freqs"], [4.0, 5.0, 6.0])

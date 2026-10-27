@@ -19,6 +19,7 @@ from zcu_tools.gui.app.dispersive.state import (
     FluxoniumInputs,
     OnetoneEntry,
 )
+from zcu_tools.resources.predictor_file import PredictorFlux
 
 
 class _StubAdapter:
@@ -40,9 +41,7 @@ def _call(adapter: _StubAdapter, method: str) -> dict[str, object]:
 def _inputs() -> FluxoniumInputs:
     return FluxoniumInputs(
         params=(4.0, 1.0, 0.5),
-        flux_half=0.5,
-        flux_bias=0.0,
-        flux_period=2.0,
+        flux=PredictorFlux(0.25, {"bias": 2.0}, {"bias": "native"}),
         bare_rf_seed=5.3,
     )
 
@@ -89,12 +88,18 @@ def test_fit_inputs_info_none_then_loaded():
     adapter = _adapter(state)
     out = _call(adapter, "fit_inputs.info")
     assert out["has_inputs"] is False and out["params"] is None
+    assert out["flux"] is None
 
     state.set_fit_inputs(_inputs())
     out = _call(adapter, "fit_inputs.info")
     assert out["has_inputs"] is True
     assert out["params"] == {"EJ": 4.0, "EC": 1.0, "EL": 0.5}
     assert out["bare_rf_seed"] == 5.3
+    assert out["flux"] == {
+        "offset": 0.25,
+        "period": {"bias": 2.0},
+        "unit": {"bias": "native"},
+    }
 
 
 def test_preprocess_status_handler():

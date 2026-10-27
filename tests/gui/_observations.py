@@ -20,7 +20,7 @@ class WidgetObservation:
     object_name: str  # Stable objectName if provided by the UI, otherwise empty.
     tooltip: str  # Hover help; empty when hidden or without a tooltip.
     bounds: tuple[int, int, int, int] | None  # Visible screen x/y/width/height.
-    caption_fits: bool  # Visible button/label text fits its Qt contents rectangle.
+    caption_fits: bool  # Visible button/label/combo text fits its Qt text rectangle.
     checked: (
         bool | None
     )  # Visible checkable button state; None if hidden or not checkable.
@@ -135,6 +135,10 @@ class PlotAxesObservation:
     xlabel: str  # Horizontal label text; empty if the label or axis is hidden.
     ylabel: str  # Vertical label text; empty if the label or axis is hidden.
     visible_curves: int  # Nontransparent stroked line paths intersecting the axes.
+    xlim: tuple[float, float]  # Displayed horizontal data limits.
+    ylim: tuple[float, float]  # Displayed vertical data limits.
+    bounds: tuple[float, float, float, float]  # Global logical x/y/width/height.
+    annotations: tuple[str, ...]  # Visible nonempty text artists on these axes.
 
 
 @dataclass(frozen=True)
