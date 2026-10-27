@@ -2,6 +2,7 @@
 
 import json
 import math
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
@@ -9,6 +10,55 @@ from uuid import uuid4
 import numpy as np
 
 from zcu_tools.resources.single_fluxonium import SingleFluxoniumSettings
+
+
+@dataclass(frozen=True)
+class LossRow:
+    """One loop's effective losses for a private acquisition truth row.
+
+    q_cap/q_ind are positive dimensionless quality factors, or None for absent
+    channels. xqp is a nonnegative dimensionless quasiparticle fraction, or None
+    for a circuit without that channel. aphi is nonnegative Phi0/sqrt(Hz).
+    Values must be finite. Construction does not perform validation or I/O.
+    """
+
+    q_cap: float | None
+    q_ind: float | None
+    xqp: float | None
+    aphi: float
+
+
+def write_truth(
+    path: Path,
+    losses: LossRow,
+    *,
+    session: str,
+    sim_now: float,
+    qubit: str | None = None,
+) -> None:
+    """Append one JSONL acquisition row, creating parent directories as needed.
+
+    path selects a caller-owned private log. losses contains effective channel
+    values; session is the environment UUID, sim_now is finite simulated seconds,
+    and qubit is an optional stable loop key (None omits it for standalone single).
+    Rows add UTC ISO wall_time. Nonfinite numbers raise ValueError and filesystem
+    errors propagate; neither failure is hidden or retried.
+    """
+    record = {
+        "session": session,
+        "sim_now": sim_now,
+        "wall_time": datetime.now(timezone.utc).isoformat(),
+        "q_cap": losses.q_cap,
+        "q_ind": losses.q_ind,
+        "xqp": losses.xqp,
+        "aphi": losses.aphi,
+    }
+    if qubit is not None:
+        record["qubit"] = qubit
+    line = json.dumps(record, allow_nan=False) + "\n"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as stream:
+        stream.write(line)
 
 
 class LogOU:
@@ -141,18 +191,11 @@ class CoherenceDrift:
                 "drift": None,
             }
         )
-        record = {
-            "session": self.session,
-            "sim_now": sim_now,
-            "wall_time": datetime.now(timezone.utc).isoformat(),
-            "q_cap": qubit.q_cap,
-            "q_ind": qubit.q_ind,
-            "xqp": qubit.xqp,
-            "aphi": qubit.aphi,
-        }
-        if self._qubit is not None:
-            record["qubit"] = self._qubit
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        with self.path.open("a", encoding="utf-8") as stream:
-            stream.write(json.dumps(record, allow_nan=False) + "\n")
+        write_truth(
+            self.path,
+            LossRow(qubit.q_cap, qubit.q_ind, qubit.xqp, qubit.aphi),
+            session=self.session,
+            sim_now=sim_now,
+            qubit=self._qubit,
+        )
         return effective

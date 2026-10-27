@@ -4,10 +4,11 @@ import time
 
 import numpy as np
 import pytest
-from zcu_tools.experiment.ftf import ftf
+from zcu_tools.experiment.ftf import FTFAcquisitionOptions, ftf
 from zcu_tools.program.v2 import ModularProgramV2
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
+from zcu_tools.program.v2.simulation import SimulationClock
 from zcu_tools.resources.ftf import parse_ftf
 
 from tests.program.v2.simulation.support import raw_of
@@ -31,7 +32,12 @@ def test_default_paces_every_round_and_builder_zero_preserves_bitwise_results(
     monkeypatch.setattr(time, "sleep", sleep)
     # The synthetic settings omit pacing; the builder supplies physical time.
     settings = parse_ftf(ftf_document())
-    env = ftf(settings)
+    env = ftf(
+        settings,
+        acquisition=FTFAcquisitionOptions(
+            clock=SimulationClock(monotonic=lambda: now[0])
+        ),
+    )
     try:
         readout = PulseReadoutCfg(
             gen_ch=0,
@@ -51,7 +57,13 @@ def test_default_paces_every_round_and_builder_zero_preserves_bitwise_results(
         expected = acquire(env.soc, rounds=2, progress=False)
         expected_raw = raw_of(program)
         assert waits == pytest.approx([2.08e-6, 2.08e-6], abs=10e-9)
-        unpaced = ftf(settings, time_scale=0)
+        unpaced = ftf(
+            settings,
+            time_scale=0,
+            acquisition=FTFAcquisitionOptions(
+                clock=SimulationClock(monotonic=lambda: now[0])
+            ),
+        )
         try:
             actual = acquire(unpaced.soc, rounds=2, progress=False)
             assert waits == pytest.approx([2.08e-6, 2.08e-6], abs=10e-9)

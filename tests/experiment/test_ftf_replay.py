@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 from zcu_tools.core.simulation import RoundRequest
 from zcu_tools.device import DeviceManager
-from zcu_tools.experiment.ftf import FTFSource, ftf, replay_round
+from zcu_tools.experiment.ftf import FTFAcquisitionOptions, FTFSource, ftf, replay_round
 from zcu_tools.program.v2 import ModularProgramV2
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
@@ -27,7 +27,7 @@ def test_replay_retains_round_raw_after_source_release(tmp_path: Path, mode):
     source = FTFSource(
         settings().with_telemetry(enabled=False),
         DeviceManager(),
-        private_replay=tmp_path / "archive",
+        acquisition=FTFAcquisitionOptions(private_replay=tmp_path / "archive"),
     )
     acquire = request(mode)
     try:
@@ -102,7 +102,10 @@ def test_replay_rejects_archive_from_obsolete_numeric_backend(
     )
 
     archive = tmp_path / "current"
-    env = ftf(parse_ftf(ftf_document()), private_replay=archive)
+    env = ftf(
+        parse_ftf(ftf_document()),
+        acquisition=FTFAcquisitionOptions(private_replay=archive),
+    )
     try:
         program = ModularProgramV2(
             env.soccfg,
@@ -150,7 +153,11 @@ def test_replay_recomputes_statistics_without_numeric_records(tmp_path: Path) ->
         snapshot,
     )
 
-    source = FTFSource(settings(), DeviceManager(), private_replay=tmp_path / "archive")
+    source = FTFSource(
+        settings(),
+        DeviceManager(),
+        acquisition=FTFAcquisitionOptions(private_replay=tmp_path / "archive"),
+    )
     try:
         expected = expect_statistics(
             source.execute(

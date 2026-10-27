@@ -1,6 +1,6 @@
 # FTF YAML values
 
-**Last updated:** 2026-10-24, physical-time pacing
+**Last updated:** 2026-10-27, three-loop drift schema
 
 **讀者：** framework-dev。FTF YAML schema、單位與欄位診斷契約。
 
@@ -11,6 +11,8 @@
 使用者填表與 entry 接線請讀 [FTF YAML v2 欄位指南](../../../../zcu_lab/simulation_envs/FTF/field-guide.md)。欄位型別與省略語意的程式契約在 [schema.py](schema.py)。[環境 README](../../../../zcu_lab/simulation_envs/FTF/README.md) 提供工作副本與 GUI／Notebook 入口。
 
 文件使用 `format: zcu.ftf`、整數 `version: 2`。`chip` 描述物理值，`dc_bias` 合併具名電源與校準，`drive_lines` 綁定 charge 或小訊號 flux drive lines，`readout` 分開 drive、物理 resonators 與 ADC，`numerics` 集中截斷與 solver。所有迴路 map 必填 `f1`、`coupler`、`f2`，key 指受作用的迴路，不是額外線路。
+
+可省略或設為 `null` 的 `drift` 關閉跨 acquisition 漂移。啟用時，`FTFDrift` 的選填 `f1`、`coupler`、`f2` 各自指定獨立 log-OU 過程。F1／F2 共用 `resources.single_fluxonium.schema.CoherenceDrift` 的 `q_cap`、`xqp`、`aphi`。Coupler 使用 `SquidDrift`，只接受 `q_cap`、`aphi`，拒絕 `q_ind` 與 `xqp`。每個選取的 chip 損耗必須為正。共用 `DriftParameter` 的 `sigma` 是 ln(loss) 穩態標準差，必須有限且非負，`tau_s` 是有限正秒數。省略的迴路或損耗保持不變。時鐘、取樣與真值 log 由 [FTF runtime](../../experiment/ftf/README.md#acquisition-clock-and-loss-drift) 擁有。
 
 可省略的 `design` map 以 entry qubit 名稱保存完整的獨立標稱值，不從 `chip` 或 `dc_bias` 補值。每筆必填正值 `ej_ghz/ec_ghz/el_ghz`、A/V `flux_unit`、有限的 `flux_half/flux_bias` 與有限非零 signed `flux_period`。缺欄位在載入時報 `design.<qubit>.<field>`。省略或空 map 表示沒有設計初猜。Startup 負責依 entry-template 驗證 qubit 名稱與 device 單位，再交 predictor 檔案 owner 保存；schema 不建立 predictor 或讀 entry。
 

@@ -110,6 +110,13 @@ I/O errors propagate. The log stays on the simulation side, outside Run, GUI,
 MCP and Labber metadata. `clock=SimulationClock(...)` provides a wall-clock
 injection point for offline callers.
 
+`drift.LossRow` and `drift.write_truth` own the shared single/six/FTF JSONL format
+and append operation. The optional `qubit` key identifies a named circuit or FTF
+loop. Loss rows allow null q_ind/xqp for circuits without those channels; a
+standalone single source omits the qubit key. Each environment owns its session
+and path. The writer creates parent directories and propagates serialization
+and filesystem failures.
+
 ## Reuse and lifetime
 
 `open_acquire(request)` invalidates the preceding session. `sample_round` and

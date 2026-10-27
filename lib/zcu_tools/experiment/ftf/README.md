@@ -1,6 +1,6 @@
 # FTF environment composition
 
-**Last updated:** 2026-10-24, physical-time pacing
+**Last updated:** 2026-10-27, acquisition clock and independent loss drift
 
 **讀者：** lab-author。FTF 環境的組裝、數值接線與 acquisition 設定。
 
@@ -46,7 +46,7 @@ Startup preparation, program construction and round hooks are outside this
 budget. No GUI field is added; final plot-buffer flushing is unchanged.
 
 For profiling or benchmarking, call `ftf(path_or_settings, time_scale=0)`.
-This public override disables waiting and clock reads without changing numeric
+This public override disables waiting without changing numeric
 settings, RNG streams, density, readout or routes. Alternatively set
 `numerics.time_scale: 0` in the caller-owned YAML. With the default
 `time_scale=None`, the builder uses the YAML value. Wait for startup
@@ -101,6 +101,30 @@ limits without restoring startup values. Source identities survive session
 registry disconnects and name changes. Reconnection retrieves the original
 class-retained driver, preserving V/A units and current values.
 `execute` consumes detached templates.
+
+### Acquisition clock and loss drift
+
+`FTFAcquisitionOptions(clock=None, truth_log=None, private_replay=None)` selects
+one environment clock and private persistence paths. Pass it as `acquisition=` to
+`ftf` or `FTFSource`. An omitted clock creates one per environment. The builder
+shares it between acquisition admission and completed-round duration accounting.
+Even with `time_scale=0`, successful rounds advance unscaled simulated physical
+time. Waiting between acquisitions advances the wall-clock part naturally.
+
+Optional `settings.drift` freezes independent f1, coupler and f2 log-OU losses
+at `begin_acquire(seed=...)`. All points and rounds use those effective settings.
+Direct `open_acquire` callers need not call begin; open samples once when no
+admission is pending. A new begin invalidates the previous session. Enabled drift
+rebuilds physical facts and clears readout/preparation residents each acquisition.
+Omitted/null drift leaves sampling streams and numerical outputs unchanged.
+
+Each enabled acquisition appends three loop rows to the private truth log.
+`truth_log=None` selects `~/.local/state/zcu-tools/simulation/ftf/<session>/truth.jsonl`.
+Rows include a session UUID, simulated seconds, UTC wall time, loop `qubit` key
+and effective q_cap/q_ind/xqp/aphi. The coupler has null q_ind/xqp.
+A new source creates a new session. Disabled drift writes nothing. Truth-log
+serialization and filesystem failures propagate before request construction.
+Routing telemetry remains a separate YAML-controlled policy.
 
 ### Workers and engine budget
 
@@ -401,7 +425,9 @@ memory. They need only agree with direct means in expectation, not realization.
 
 ### Private replay
 
-`private_replay=absolute_directory` opts into checked private input archives.
+`acquisition=FTFAcquisitionOptions(private_replay=absolute_directory)` opts into
+checked private input archives. Import `FTFAcquisitionOptions` from
+`zcu_tools.experiment.ftf`. Relative replay roots raise `ValueError`.
 `replay_round(round_path)` recomputes one round without drivers, earlier rounds,
 current YAML or numeric records. Backend, engine numeric version, RNG version and
 dependency versions must match. The stream policy is `PCG64/SeedSequence-v2`.

@@ -9,6 +9,50 @@ from zcu_tools.resources.ftf import load_ftf, parse_ftf
 from tests.resources._ftf_data import dual_readout_document, ftf_document
 
 
+def test_three_loop_drift_parses_and_omitted_drift_is_disabled() -> None:
+    baseline = parse_ftf(ftf_document())
+    assert baseline.drift is None
+    parameter = {"sigma": 0.2, "tau_s": 10.0}
+    document = ftf_document() | {
+        "drift": {
+            "f1": {"q_cap": parameter},
+            "coupler": {"q_cap": parameter},
+            "f2": {"q_cap": parameter},
+        }
+    }
+    # Selected targets must have positive configured losses.
+    _set_field(document, "chip.f1.q_cap", 1e6)
+    _set_field(document, "chip.f2.q_cap", 1e6)
+    settings = parse_ftf(document)
+    assert settings.drift is not None
+    for drift in (settings.drift.f1, settings.drift.coupler, settings.drift.f2):
+        assert drift is not None and drift.q_cap is not None
+        assert drift.q_cap.sigma == 0.2
+        assert drift.q_cap.tau_s == 10.0
+    assert settings.chip == parse_ftf(document | {"drift": None}).chip
+
+
+@pytest.mark.parametrize(
+    "loop,target", [("f1", "q_cap"), ("f2", "xqp"), ("coupler", "aphi")]
+)
+def test_drift_requires_positive_selected_losses(loop: str, target: str) -> None:
+    document = ftf_document() | {
+        "drift": {loop: {target: {"sigma": 0.3, "tau_s": 5.0}}}
+    }
+    _set_field(document, f"chip.{loop}.{target}", None if target == "q_cap" else 0)
+    with pytest.raises(ValueError, match=rf"drift\.{loop}\.{target}.*positive"):
+        parse_ftf(document)
+
+
+@pytest.mark.parametrize("target", ["q_ind", "xqp"])
+def test_coupler_drift_rejects_fluxonium_only_channels(target: str) -> None:
+    with pytest.raises(ValueError, match=rf"drift\.coupler\.{target}"):
+        parse_ftf(
+            ftf_document()
+            | {"drift": {"coupler": {target: {"sigma": 0.1, "tau_s": 2.0}}}}
+        )
+
+
 def test_fixed_round_duration_reports_time_scale_migration():
     document = ftf_document()
     document["numerics"] = {
