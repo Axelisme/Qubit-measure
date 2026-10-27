@@ -3,6 +3,7 @@
 from collections.abc import Generator
 from contextlib import contextmanager
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
 
 import numpy as np
@@ -78,6 +79,7 @@ def make_plugin(
     req: AnalyzeRequest[RunRecord[SpectrumCfg, SpectrumData], PickerParams],
     *,
     plots: Plots,
+    options: DipFinderOptions | None = None,
 ) -> RangeFindPlugin[RangeFindState]:
     data = req.run_result.result
 
@@ -93,7 +95,7 @@ def make_plugin(
         data.freqs,
         data.magnitude,
         components=("west", "east"),
-        options=DipFinderOptions(max_dips=2),
+        options=options if options is not None else DipFinderOptions(max_dips=2),
         build_result=build,
     )
 
@@ -152,10 +154,21 @@ class RangeApplication:
 
 @contextmanager
 def range_application(
-    tmp_path: Path, qapp: QApplication
+    tmp_path: Path, qapp: QApplication, *, options: DipFinderOptions | None = None
 ) -> Generator[RangeApplication]:
     registry = Registry()
-    registry.register("spectrum", RangeAdapter)
+    adapter = Adapter(
+        spec=RangeAdapter.spec,
+        make_form=make_form,
+        run=run,
+        guide=None,
+        analysis=Interactive(
+            plugin=partial(make_plugin, options=options),
+            frontend=make_range_find_frontend,
+            options=lambda source, env: PickerParams(),
+        ),
+    )
+    registry.register("spectrum", adapter)
     state = State(SessionEnv(parameters=None, soc=None, soccfg=None))
     ctrl = Controller(state, registry, None, BaseEventBus(), project_root=str(tmp_path))
     ctrl.setup_control.new_entry(EntryRequest("synthetic"))

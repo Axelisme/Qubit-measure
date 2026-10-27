@@ -6,10 +6,12 @@ Set RANGE_FIND_SCREENSHOTS to retain per-step PNGs outside pytest tmp_path.
 
 import os
 from collections.abc import Iterator
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 from qtpy.QtWidgets import QApplication
+from zcu_tools.analysis.dips import DipFinderOptions
 
 from tests.gui._user_input import ComponentDriver
 from tests.gui.app.measure._range_find_adapter import range_application
@@ -88,6 +90,45 @@ def test_operator_clicks_to_add_remove_and_assigns_out_of_order(
     assert "1: east @ 5040 MHz" in ui.legends().texts
     assert "2: west @ 5070 MHz" in ui.legends().texts
     ui.screenshot(shots / "06-finished.png")
+
+
+@pytest.mark.parametrize(
+    ("name", "value"),
+    [
+        ("smoothing_sigma", 0.12345678901234566),
+        ("prominence_factor", 5.123456789012345),
+        ("max_fwhm", 25.123456789012344),
+        ("min_separation", 1.2345678901234567),
+    ],
+)
+def test_done_preserves_precise_controls_and_manual_selection(
+    qapp: QApplication, tmp_path: Path, name: str, value: float
+):
+    options = replace(DipFinderOptions(max_dips=2), **{name: value})
+    with range_application(tmp_path, qapp, options=options) as app:
+        ui = ComponentDriver(app.window)
+        shots = _shots(tmp_path, f"precision-{name}")
+        _start(ui, shots)
+        displayed_value = ui.observe(object_name=f"rangeFind.{name}").text
+        assert ui.observe(object_name="rangeFind.max_dips").text == "2"
+        ui.click("Remove selected dip")
+        assert "west" not in " ".join(ui.legends().texts)
+        ui.screenshot(shots / "02-remove.png")
+        ui.click_at(910, 400)
+        assert "1: unassigned @ 5040 MHz" in ui.legends().texts
+        ui.screenshot(shots / "03-add.png")
+        ui.select_combo("east", object_name="rangeFind.component")
+        assert "1: east @ 5040 MHz" in ui.legends().texts
+        ui.screenshot(shots / "04-assign-east.png")
+        ui.select_combo("5070 MHz", object_name="rangeFind.selection")
+        ui.select_combo("west", object_name="rangeFind.component")
+        assert "2: west @ 5070 MHz" in ui.legends().texts
+        ui.screenshot(shots / "05-assign-west.png")
+        ui.click("Done")
+        ui.screenshot(shots / "06-finished.png")
+        assert "1: east @ 5040 MHz" in ui.legends().texts
+        assert "2: west @ 5070 MHz" in ui.legends().texts
+        assert float(displayed_value) == value
 
 
 def test_invalid_controls_and_empty_selection_remain_editable_until_cancel(

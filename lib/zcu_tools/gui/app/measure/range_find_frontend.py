@@ -181,15 +181,15 @@ class RangeFindFrontend[R](InteractiveFrontend):
 
     def _refresh(self) -> None:
         state = self._session.snapshot()
-        values = (
-            state.options.smoothing_sigma,
-            state.options.prominence_factor,
-            state.options.max_fwhm,
-            state.options.min_separation,
-            state.options.max_dips or 0,
-        )
-        for field, value in zip(self._fields.values(), values, strict=True):
-            field.setText(f"{value:g}")
+        values = {
+            "smoothing_sigma": state.options.smoothing_sigma,
+            "prominence_factor": state.options.prominence_factor,
+            "max_fwhm": state.options.max_fwhm,
+            "min_separation": state.options.min_separation,
+            "max_dips": state.options.max_dips or 0,
+        }
+        for name, value in values.items():
+            self._fields[name].setText(str(value))
         previous = self._selection.currentIndex()
         self._selection.blockSignals(True)
         self._selection.clear()
