@@ -116,11 +116,12 @@ Component offset is `-local_offset/local_period - coil_offset/coil_period`,
 using the physical current offsets from the environment YAML. For Q1 it is 0.5.
 These physical YAML input fields remain current offsets in A, not component
 flux offsets. Missing device values contribute zero without deleting periods.
-Together these integers give zero total reduced flux.
 These simulated-truth values are not measurement results. Resonators seed total
 linewidth 1.1 MHz and pulse-route flight time 0.4 us from their physical settings.
-Fluxdep writeback updates only the scanned entry, such as `Q1.flux.coil_bias`,
-and appends a raw-fit record with the Run's original frame.
+Measurement fluxdep writeback proposes the scanned device's signed period and
+the scanned qubit's offset, such as `Q1.flux.period.coil_bias` and
+`Q1.flux.offset`. You can accept each item independently.
+It appends a raw-fit record with the Run's original frame.
 Existing v1 entries require the explicit [upgrade command](../../../docs/parameter-upgrades.md).
 Startup never upgrades saved entries.
 
