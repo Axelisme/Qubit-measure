@@ -6,15 +6,18 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from typing import Protocol
 
+from qtpy.QtCore import QEvent, QObject
 from qtpy.QtGui import QAction
 from qtpy.QtWidgets import (
     QHBoxLayout,
     QMenu,
     QPushButton,
+    QSizePolicy,
     QWidget,
 )
 
 from zcu_tools.gui.app.measure.remote.dialogs import DialogName
+from zcu_tools.gui.lifetime import LifetimeScope
 
 
 @dataclass(frozen=True)
@@ -62,13 +65,14 @@ class MainWindowToolbar:
     """Owns the top toolbar widgets and new-tab menu orchestration."""
 
     def __init__(self, host: MainWindowToolbarHost, *, parent: QWidget) -> None:
+        self._scope = LifetimeScope(parent)
         self._host = host
         self._parent = parent
         self._writable = True
         self._new_tab_menus: tuple[QMenu, ...] = ()
         self._layout = QHBoxLayout()
         self._new_tab_btn = QPushButton("New Tab ▾")
-        self._new_tab_btn.clicked.connect(self.show_new_tab_menu)
+        self._scope.connect(self._new_tab_btn.clicked, self.show_new_tab_menu)
         self._layout.addWidget(self._new_tab_btn)
         self._layout.addStretch()
         self._add_dialog_button("Setup…", DialogName.SETUP)
@@ -77,9 +81,54 @@ class MainWindowToolbar:
         self._add_dialog_button("Inspect…", DialogName.INSPECT)
         self._more_btn = QPushButton("More ▾")
         self._more_btn.setObjectName("main.more")
-        self._more_btn.clicked.connect(self._show_more_menu)
+        self._scope.connect(self._more_btn.clicked, self._show_more_menu)
         self._layout.addWidget(self._more_btn)
         self._build_more_menu()
+        self._promoted: list[tuple[QPushButton, QAction]] = []
+        for action in (self._predictor_action, self._results_action):
+            button = QPushButton(action.text())
+            button.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+            self._scope.connect(
+                button.clicked, lambda _checked=False, a=action: a.trigger()
+            )
+            button.setMaximumWidth(button.sizeHint().width())
+            self._layout.insertWidget(self._layout.count() - 1, button, stretch=1)
+            self._promoted.append((button, action))
+        self._scope.install_event_filter(parent, self._on_window_event)
+        self._refresh_overflow()
+
+    def dispose(self) -> None:
+        """Retire toolbar callbacks before the host deletes its Qt children."""
+        self._scope.close()
+
+    def _on_window_event(self, _owner: QObject | None, event: QEvent | None) -> bool:
+        if event is not None and event.type() in (
+            QEvent.Type.Resize,
+            QEvent.Type.Show,
+            QEvent.Type.FontChange,
+            QEvent.Type.StyleChange,
+        ):
+            self._refresh_overflow()
+        return False
+
+    def _refresh_overflow(self) -> None:
+        widgets = [
+            item.widget()
+            for index in range(self._layout.count())
+            if (item := self._layout.itemAt(index)) is not None
+            and item.widget() is not None
+        ]
+        margins = self._layout.contentsMargins()
+        required = (
+            sum(widget.sizeHint().width() for widget in widgets if widget is not None)
+            + max(0, len(widgets) - 1) * max(0, self._layout.spacing())
+            + margins.left()
+            + margins.right()
+        )
+        overflow = required > self._parent.width()
+        for button, action in self._promoted:
+            button.setVisible(not overflow)
+            action.setVisible(overflow)
 
     @property
     def layout(self) -> QHBoxLayout:
@@ -120,7 +169,7 @@ class MainWindowToolbar:
 
     def _add_dialog_button(self, label: str, name: DialogName) -> None:
         button = QPushButton(label)
-        button.clicked.connect(lambda _checked=False, n=name: self._host.open_dialog(n))
+        self._scope.connect(button.clicked, lambda: self._host.open_dialog(name))
         self._layout.addWidget(button)
 
     def _build_more_menu(self) -> None:
@@ -135,12 +184,12 @@ class MainWindowToolbar:
         self._workflow_action = self._add_more_action(
             "Workflow tabs", "workflow", self._host.toggle_workflows
         )
-        self._add_more_action(
+        self._predictor_action = self._add_more_action(
             "Predictor…",
             "predictor",
             lambda: self._host.open_dialog(DialogName.PREDICTOR),
         )
-        self._add_more_action(
+        self._results_action = self._add_more_action(
             "Results browser…", "results", self._host.open_results_browser
         )
 
@@ -149,7 +198,7 @@ class MainWindowToolbar:
     ) -> QAction:
         action = QAction(label, self._more_menu)
         action.setObjectName(f"main.more.{name}")
-        action.triggered.connect(callback)
+        self._scope.connect(action.triggered, callback)
         self._more_menu.addAction(action)
         return action
 

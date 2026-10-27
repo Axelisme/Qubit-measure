@@ -14,6 +14,7 @@ from qtpy.QtWidgets import (
     QLineEdit,
     QPushButton,
     QTableWidget,
+    QWidget,
 )
 from zcu_tools.gui.app.measure.adapter import AdapterCapabilities, AdapterGuide
 from zcu_tools.gui.app.measure.artifacts import SavedRunInfo
@@ -39,6 +40,19 @@ def rows(tmp_path: Path) -> tuple[SavedRunInfo, ...]:
         SavedRunInfo("r2", "p", "fit", "2026-10-09T02:00:00Z", tmp_path / "r2.h5"),
         SavedRunInfo("r3", "other", "scan", "2026-10-09T03:00:00Z", tmp_path / "r3.h5"),
     )
+
+
+@pytest.fixture
+def load_backdrop(qapp: QApplication) -> Iterator[QWidget]:
+    window = QWidget()
+    window.resize(1100, 700)
+    window.show()
+    qapp.processEvents()
+    try:
+        yield window
+    finally:
+        window.deleteLater()
+        qapp.processEvents()
 
 
 @pytest.fixture
@@ -155,6 +169,65 @@ def test_load_data_without_current_experiment_keeps_all(
     )
     ui.screenshot(tmp_path / "03-missing-cancelled.png")
     assert ui.dialogs() == ()
+
+
+def test_double_click_loads_the_visible_run(
+    qapp: QApplication,
+    rows: tuple[SavedRunInfo, ...],
+    tmp_path: Path,
+    load_backdrop: QWidget,
+) -> None:
+    dialog = RunLoadDialog(
+        rows, initial_point="p", start_directory="", parent=load_backdrop
+    )
+    dialog.show()
+    ui = ComponentDriver(dialog)
+    ui.resize_window(1100, 700)
+    ui.screenshot(tmp_path / "01-runs.png")
+    ui.select_table_row("r2", object_name="load_runs", double_click=True)
+    ComponentDriver(load_backdrop).screenshot(tmp_path / "02-loaded.png")
+    assert dialog.selected_path() == str(rows[1].data_path)
+    dialog.deleteLater()
+    qapp.processEvents()
+
+
+@pytest.mark.parametrize("selected", [True, False])
+def test_enter_in_time_filter_only_loads_selected_run(
+    qapp: QApplication,
+    rows: tuple[SavedRunInfo, ...],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    selected: bool,
+    load_backdrop: QWidget,
+) -> None:
+    opened_files: list[bool] = []
+
+    def choose_file(*args: object, **kwargs: object) -> tuple[str, str]:
+        opened_files.append(True)
+        return "", ""
+
+    monkeypatch.setattr(QFileDialog, "getOpenFileName", choose_file)
+    dialog = RunLoadDialog(
+        rows, initial_point="p", start_directory="", parent=load_backdrop
+    )
+    dialog.show()
+    ui = ComponentDriver(dialog)
+    ui.resize_window(1100, 700)
+    ui.screenshot(tmp_path / "01-filter.png")
+    if selected:
+        ui.select_table_row("r2", object_name="load_runs")
+        ui.screenshot(tmp_path / "02-selected.png")
+    ui.click(object_name="load_started_at")
+    ui.screenshot(tmp_path / "03-filter-focus.png")
+    ui.press_key(Qt.Key.Key_Return)
+    ComponentDriver(load_backdrop).screenshot(tmp_path / "04-enter.png")
+    assert not opened_files
+    assert dialog.selected_path() == (str(rows[1].data_path) if selected else None)
+    if not selected:
+        assert ui.observe(object_name="load_runs").visible
+    dialog.reject()
+    dialog.deleteLater()
+    qapp.processEvents()
 
 
 def test_dialog_filters_native_history_and_selects_file(
