@@ -44,7 +44,13 @@ class SimulationClock:
     def complete_round(self, physical_s: float, elapsed_s: float) -> None:
         """Credit max(0, physical_s - elapsed_s) after a completed round.
 
-        Both inputs are nonnegative seconds. elapsed_s includes snapshot,
-        execution and pacing sleep. Do not call for cancelled or failed rounds.
+        Both inputs must be finite, nonnegative seconds. elapsed_s includes
+        snapshot, execution and pacing sleep. Do not call for cancelled or
+        failed rounds. Invalid inputs raise ValueError without changing the
+        clock's offset; wall time continues to advance naturally.
         """
+        if not math.isfinite(physical_s) or physical_s < 0:
+            raise ValueError("physical_s must be finite and nonnegative")
+        if not math.isfinite(elapsed_s) or elapsed_s < 0:
+            raise ValueError("elapsed_s must be finite and nonnegative")
         self._offset_s += max(0.0, physical_s - elapsed_s)

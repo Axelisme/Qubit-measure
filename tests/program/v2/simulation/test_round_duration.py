@@ -18,6 +18,7 @@ from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.program.v2.simulation import (
     SimulationBinding,
+    SimulationClock,
     SimulationSoc,
     SimulationTiming,
 )
@@ -66,6 +67,34 @@ def request_for(binding: SimulationBinding, sequence: int) -> AcquireRequest:
             TimelineTemplate(np.array([1]), (), (), np.array([3000.0])),
         ),
     )
+
+
+@pytest.mark.parametrize(
+    "physical_s, elapsed_s",
+    [
+        (-1.0, 1.0),
+        (float("nan"), 1.0),
+        (float("inf"), 1.0),
+        (float("-inf"), 1.0),
+        (3.0, -1.0),
+        (3.0, float("nan")),
+        (3.0, float("inf")),
+        (3.0, float("-inf")),
+    ],
+)
+def test_simulation_clock_rejects_invalid_durations_without_advancing(
+    physical_s: float, elapsed_s: float
+) -> None:
+    wall_clock = Clock()
+    sim_clock = SimulationClock(monotonic=wall_clock.monotonic)
+    sim_clock.complete_round(3.0, 1.0)
+    wall_clock.now = 10.0
+    before = sim_clock.now()
+
+    with pytest.raises(ValueError):
+        sim_clock.complete_round(physical_s, elapsed_s)
+
+    assert sim_clock.now() == before
 
 
 @pytest.mark.parametrize(
