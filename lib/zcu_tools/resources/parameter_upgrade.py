@@ -327,18 +327,23 @@ def main(argv: Sequence[str] | None = None, *, plan: UpgradePlan | None = None) 
         print(note)
     results = upgrade_files(sources, plan=plan, apply=apply)
     for result in results:
-        if result.backup_path is not None:
-            print(f"{result.source.path}: backup: {result.backup_path}")
-        print(f"{result.source.path}: {result.status}")
-        for note in result.notes:
-            print(f"  {note}")
-        for change in result.changes:
-            before = repr(change.before.value) if change.before.present else "<missing>"
-            after = repr(change.after.value) if change.after.present else "<missing>"
-            print(f"  {change.path!r}: {before} -> {after}")
-        if result.error is not None:
-            print(f"  failed checks: {result.error}")
+        _print_upgrade_result(result)
     return int(any(result.status == "rejected" for result in results))
+
+
+def _print_upgrade_result(result: UpgradeResult) -> None:
+    """Print one file's backup, status, notes, field changes and failed checks."""
+    if result.backup_path is not None:
+        print(f"{result.source.path}: backup: {result.backup_path}")
+    print(f"{result.source.path}: {result.status}")
+    for note in result.notes:
+        print(f"  {note}")
+    for change in result.changes:
+        before = repr(change.before.value) if change.before.present else "<missing>"
+        after = repr(change.after.value) if change.after.present else "<missing>"
+        print(f"  {change.path!r}: {before} -> {after}")
+    if result.error is not None:
+        print(f"  failed checks: {result.error}")
 
 
 def _component_sources(paths: Sequence[Path]) -> tuple[UpgradeSource, ...]:
