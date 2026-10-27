@@ -327,7 +327,11 @@ def test_sweep_fluxes_edit_errors_and_lowering_match_experiment(plan_window, tmp
     _snapshot(driver, tmp_path, "09-lowered-sweep")
     workflow_axes = driver.plots().axes
     assert len(workflow_axes) == 1
-    assert workflow_axes[0].ylabel == "fluxes=[0.1, 0.2, 0.3]"
+    assert (
+        workflow_axes[0].xlabel,
+        workflow_axes[0].ylabel,
+        workflow_axes[0].visible_curves,
+    ) == ("Flux", "fluxes=[0.1, 0.2, 0.3]", 1)
     toggle_tab_family(driver)
     _snapshot(driver, tmp_path, "10-experiments")
     driver.select_menu("New Tab ▾", ("sweep-experiment",))
@@ -346,7 +350,23 @@ def test_sweep_fluxes_edit_errors_and_lowering_match_experiment(plan_window, tmp
         label="finite experiment run terminal delivery",
     )
     _snapshot(driver, tmp_path, "14-experiment-lowered-sweep")
-    assert driver.plots().axes == workflow_axes
+    experiment_axes = driver.plots().axes
+    assert len(experiment_axes) == 1
+    experiment, workflow = experiment_axes[0], workflow_axes[0]
+    # Content parity does not require equal global bounds in different panes.
+    assert (
+        experiment.xlabel,
+        experiment.ylabel,
+        experiment.visible_curves,
+        experiment.annotations,
+    ) == (
+        workflow.xlabel,
+        workflow.ylabel,
+        workflow.visible_curves,
+        workflow.annotations,
+    )
+    assert experiment.xlim == pytest.approx(workflow.xlim)
+    assert experiment.ylim == pytest.approx(workflow.ylim)
 
 
 def test_required_sweep_without_default_is_editable_like_experiment(
@@ -384,7 +404,11 @@ def test_required_sweep_without_default_is_editable_like_experiment(
     _snapshot(driver, tmp_path, "required-03-experiment-result")
     experiment_axes = driver.plots().axes
     assert len(experiment_axes) == 1
-    assert experiment_axes[0].ylabel == "fluxes=[0.1, 0.2, 0.3]"
+    assert (
+        experiment_axes[0].xlabel,
+        experiment_axes[0].ylabel,
+        experiment_axes[0].visible_curves,
+    ) == ("Flux", "fluxes=[0.1, 0.2, 0.3]", 1)
     _open(driver, tmp_path, "flux-sweep")
     _snapshot(driver, tmp_path, "required-04-workflow")
     assert any(
@@ -423,7 +447,23 @@ def test_required_sweep_without_default_is_editable_like_experiment(
     driver.click("Start")
     qt_until(lambda: _done(driver), label="required sweep workflow terminal delivery")
     _snapshot(driver, tmp_path, "required-07-workflow-result")
-    assert driver.plots().axes == experiment_axes
+    workflow_axes = driver.plots().axes
+    assert len(workflow_axes) == 1
+    experiment, workflow = experiment_axes[0], workflow_axes[0]
+    # Required sweeps share rendered content, not their host panes' pixel layout.
+    assert (
+        workflow.xlabel,
+        workflow.ylabel,
+        workflow.visible_curves,
+        workflow.annotations,
+    ) == (
+        experiment.xlabel,
+        experiment.ylabel,
+        experiment.visible_curves,
+        experiment.annotations,
+    )
+    assert workflow.xlim == pytest.approx(experiment.xlim)
+    assert workflow.ylim == pytest.approx(experiment.ylim)
 
 
 def test_workflow_figures_appear_and_release_on_replacement(plan_window, tmp_path):

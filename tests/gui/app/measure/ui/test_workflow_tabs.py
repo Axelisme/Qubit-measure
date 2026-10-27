@@ -233,8 +233,6 @@ def test_more_switch_labels_the_other_tab_family(workflow_window, tmp_path):
         assert tuple(a.text for a in actions) == (
             "Reload experiments",
             caption,
-            "Predictor…",
-            "Results browser…",
         )
         more = driver.observe(object_name="main.more")
         inspect = driver.observe("Inspect…")

@@ -40,6 +40,7 @@ from zcu_tools.gui.widgets import error_colour
 
 from tests.gui.session.ui._device_dialog_support import (
     apply_button,
+    confirm_device_action,
     connected_snapshot,
     device_entry,
     device_list,
@@ -175,6 +176,7 @@ def test_device_dialog_drop_device(qapp):
 
     # Drop disconnects but keeps startup memory
     _button(dialog, "Drop").click()
+    confirm_device_action("Drop")
     ctrl.start_disconnect_device.assert_called_once()
     (req,) = ctrl.start_disconnect_device.call_args.args
     assert isinstance(req, DisconnectDeviceRequest)
@@ -195,6 +197,7 @@ def test_device_dialog_forget_memory_device_dispatches_single_transaction(qapp):
     dialog = make_device_dialog(ctrl)
     device_list(dialog).setCurrentRow(0)
     _button(dialog, "Forget").click()
+    confirm_device_action("Forget")
 
     ctrl.forget_device.assert_called_once_with("remembered")
 

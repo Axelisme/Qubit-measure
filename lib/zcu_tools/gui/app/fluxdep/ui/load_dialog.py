@@ -1,7 +1,7 @@
 """LoadSpectrumDialog — pick a file + type + axis orientation with a live preview.
 
 Adds fluxdep's extras (a Type combo and an "Inherit from" combo) onto the shared
-``LoadDataDialog`` base, which owns the file row + Browse, the transpose toggle, the
+``LoadDataDialog`` base, which owns the editable file row + Browse, the axis-mapping dropdown, the
 best-effort read and the preview. ``inherit_from`` optionally seeds the new
 spectrum's flux alignment from an already-loaded one; while one is chosen the
 preview draws its half/integer lines, so the inherited alignment can be judged
@@ -73,14 +73,16 @@ class LoadSpectrumDialog(LoadDataDialog):
         self._type.addItems(["OneTone", "TwoTone"])
         opt_row.addWidget(self._type)
 
-        opt_row.addWidget(self._transpose_btn)
+        opt_row.addWidget(self._axis_combo)
 
         opt_row.addWidget(QLabel("Inherit from:"))
         self._inherit = QComboBox()
         self._inherit.addItem("(none)", userData=None)
         for n in self._inherit_sources:
             self._inherit.addItem(n, userData=n)
-        self._inherit.currentIndexChanged.connect(lambda _index: self._render_preview())
+        self._scope.connect(
+            self._inherit.currentIndexChanged, lambda _index: self._render_preview()
+        )
         opt_row.addWidget(self._inherit, stretch=1)
 
     def _draw_preview_overlay(self, ax: Axes) -> None:

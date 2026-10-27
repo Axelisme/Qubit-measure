@@ -103,7 +103,9 @@ def label_of(view: QWidget, path: str, text: str) -> QLabel:
 def error_note(view: QWidget, name: str) -> QLabel:
     """The block header's errors note of form.group.<name>, shown or not."""
     block = child(view, QWidget, f"form.group.{name}")
-    (note,) = [label for label in direct(block, QLabel) if label.text() == ERROR_NOTE]
+    (note,) = [
+        label for label in direct(block, QLabel) if label.text().startswith(ERROR_NOTE)
+    ]
     return note
 
 
@@ -160,6 +162,25 @@ class GroupForm(FormModel):
     secret: Annotated[float, Display(group="Hidden", hidden=True)] = 5.0
     kept: Annotated[float, Display(group="Partly", hidden=True)] = 6.0
     visible: Annotated[float, Display(group="Partly")] = 7.0
+
+
+def test_folded_group_names_the_invalid_child_and_keeps_summary_visible(
+    build: Build, qapp: QApplication, tmp_path: Path
+) -> None:
+    view, _ = build(GroupForm, None)
+    view.resize(1100, 700)
+    view.show()
+    qapp.processEvents()
+    driver = ComponentDriver(view)
+    driver.click(object_name="form.fold.group.Advanced")
+    driver.enter_text(object_name="form.input.first", value="invalid")
+    driver.screenshot(tmp_path / "group-invalid.png")
+    driver.click(object_name="form.fold.group.Advanced")
+    driver.screenshot(tmp_path / "group-folded-invalid.png")
+    assert not driver.observe(object_name="form.input.first").visible
+    note = error_note(view, "Advanced")
+    assert note.isVisible() and "first" in note.text()
+    assert "first" in driver.observe(object_name="form.error.summary").text
 
 
 @pytest.mark.parametrize("hidden", [False, True])

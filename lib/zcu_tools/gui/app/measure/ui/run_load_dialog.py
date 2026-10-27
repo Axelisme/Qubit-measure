@@ -19,6 +19,7 @@ from qtpy.QtWidgets import (
 )
 
 from zcu_tools.gui.app.measure.artifacts import SavedRunInfo
+from zcu_tools.gui.lifetime import LifetimeScope
 
 
 class RunLoadDialog(QDialog):
@@ -52,7 +53,8 @@ class RunLoadDialog(QDialog):
         super().__init__(parent)
         self._runs = runs
         self._interaction_finished = False
-        self.finished.connect(self._finish_interaction)
+        self._scope = LifetimeScope(self)
+        self._scope.connect(self.finished, self._finish_interaction)
         self._visible_runs: tuple[SavedRunInfo, ...] = ()
         self._start_directory = start_directory
         self._selected_path: str | None = None
@@ -83,17 +85,29 @@ class RunLoadDialog(QDialog):
         self._table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self._table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         layout.addWidget(self._table)
+        layout.addLayout(self._build_buttons())
+        self._scope.connect(self._point.currentIndexChanged, self._refresh)
+        self._scope.connect(self._experiment.currentIndexChanged, self._refresh)
+        self._scope.connect(self._time.textChanged, self._refresh)
+        self._scope.connect(self._table.itemSelectionChanged, self._selection_changed)
+        self._scope.connect(self._table.itemDoubleClicked, self._load_selected)
+        self._refresh()
+
+    def _build_buttons(self) -> QHBoxLayout:
         buttons = QHBoxLayout()
         file_button = QPushButton("File…")
         file_button.setObjectName("load_file")
-        file_button.clicked.connect(self._open_file)
+        file_button.setAutoDefault(False)
+        self._scope.connect(file_button.clicked, self._open_file)
         self._load = QPushButton("Load selected")
         self._load.setObjectName("load_selected")
         self._load.setEnabled(False)
-        self._load.clicked.connect(self._load_selected)
+        self._load.setDefault(True)
+        self._scope.connect(self._load.clicked, self._load_selected)
         cancel = QPushButton("Cancel")
         cancel.setObjectName("load_cancel")
-        cancel.clicked.connect(self.reject)
+        cancel.setAutoDefault(False)
+        self._scope.connect(cancel.clicked, lambda: self.reject())
         commands = QWidget()
         command_layout = QHBoxLayout(commands)
         command_layout.setContentsMargins(0, 0, 0, 0)
@@ -102,15 +116,11 @@ class RunLoadDialog(QDialog):
         command_layout.addWidget(self._load)
         buttons.addWidget(commands)
         buttons.addWidget(cancel)
-        layout.addLayout(buttons)
-        self._point.currentIndexChanged.connect(self._refresh)
-        self._experiment.currentIndexChanged.connect(self._refresh)
-        self._time.textChanged.connect(self._refresh)
-        self._table.itemSelectionChanged.connect(self._selection_changed)
-        self._refresh()
+        return buttons
 
     def _finish_interaction(self) -> None:
         self._interaction_finished = True
+        self._scope.close()
 
     def _build_filters(
         self, initial_point: str, initial_experiment: str
@@ -178,7 +188,7 @@ class RunLoadDialog(QDialog):
                 run.completion or "",
                 f"Metadata error: {run.metadata_error}"
                 if run.metadata_error
-                else str(run.data_path),
+                else run.data_path.name,
             )
             for column, value in enumerate(values):
                 item = QTableWidgetItem(value)

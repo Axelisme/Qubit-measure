@@ -157,9 +157,10 @@ or disconnect the shared session. Native Ask answers and cancellation drain
 continue on the retained operation worker and lease, never on the UI loop.
 
 The toolbar keeps New Tab ▾ on the left and Setup…, SoC…, Devices…, Inspect…,
-and More ▾ on the right. More lists Reload experiments, Retry skipped tabs
-(only when recovery has skipped tabs), Workflow tabs / Experiment tabs,
-Predictor…, and Results browser… in that order. The tab switch names the family
+Predictor…, Results browser…, and More ▾ on the right. When space is short,
+Predictor and Results browser move into More. More lists Reload experiments,
+Retry skipped tabs (only when recovery has skipped tabs), and Workflow tabs /
+Experiment tabs before any folded tools. The tab switch names the family
 it will reveal. Catalog recovery changes Reload experiments to Retry reload.
 Remote control disables reload and retry while leaving the inspection and tab
 navigation entries available.

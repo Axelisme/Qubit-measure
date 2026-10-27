@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any
 
 # tolerated: qtpy exposes Signal at runtime but its QtCore stub does not export it.
 from qtpy.QtCore import Qt, Signal  # pyright: ignore[reportPrivateImportUsage]
+from qtpy.QtGui import QCloseEvent
 from qtpy.QtWidgets import (
     QDoubleSpinBox,
     QHBoxLayout,
@@ -20,6 +21,7 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
+from zcu_tools.gui.lifetime import LifetimeScope
 from zcu_tools.gui.session.expression import (
     EvalRef,
     coerce_eval_result,
@@ -48,6 +50,8 @@ class EvalNumericField(QWidget):
     R3 compliance: load_direct() in eval mode updates the stored backing value without
     clobbering the user's expression, so 1-second poll repaints do not reset the field.
     raw_changed emits when the direct value, expression text, or input mode changes.
+    The persistent fx hint and input tooltips explain the right-click mode switch.
+    Public child names are eval.numeric, eval.expression, eval.preview and eval.mode.
     """
 
     raw_changed = Signal()
@@ -63,6 +67,7 @@ class EvalNumericField(QWidget):
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
+        self._scope = LifetimeScope(self)
         self._minimum = minimum
         self._maximum = maximum
         self._decimals = decimals
@@ -79,21 +84,30 @@ class EvalNumericField(QWidget):
         self._layout = layout
 
         # Direct-mode spinbox
+        hint = "Right-click to switch Direct / Expression mode. Expressions accept calculations and $alias paths."
         self._spin = TrimDoubleSpinBox()
+        self._spin.setObjectName("eval.numeric")
+        self._spin.setToolTip(hint)
         self._spin.setRange(minimum, maximum)
         self._spin.setDecimals(decimals)
         self._spin.setStepType(QDoubleSpinBox.StepType.AdaptiveDecimalStepType)
         layout.addWidget(self._spin, stretch=1)
         self._spin.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        self._spin.customContextMenuRequested.connect(
-            lambda pos: self._show_context_menu(self._spin, self._spin.mapToGlobal(pos))
+        self._scope.connect(
+            self._spin.customContextMenuRequested,
+            lambda pos: self._show_context_menu(
+                self._spin, self._spin.mapToGlobal(pos)
+            ),
         )
 
         # Eval-mode widgets (hidden until mode switch)
         self._line_edit = QLineEdit()
+        self._line_edit.setObjectName("eval.expression")
+        self._line_edit.setToolTip(hint)
         self._line_edit.setVisible(False)
         layout.addWidget(self._line_edit, stretch=1)
         self._ghost = QLabel()
+        self._ghost.setObjectName("eval.preview")
         font = self._ghost.font()
         font.setItalic(True)
         self._ghost.setFont(font)
@@ -101,14 +115,35 @@ class EvalNumericField(QWidget):
         self._ghost.setVisible(False)
         layout.addWidget(self._ghost)
         self._line_edit.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        self._line_edit.customContextMenuRequested.connect(
+        self._scope.connect(
+            self._line_edit.customContextMenuRequested,
             lambda pos: self._show_context_menu(
                 self._line_edit, self._line_edit.mapToGlobal(pos)
-            )
+            ),
         )
-        self._spin.valueChanged.connect(lambda _value: self.raw_changed.emit())
-        self._line_edit.textChanged.connect(self._sync_ghost)
-        self._line_edit.textChanged.connect(lambda _text: self.raw_changed.emit())
+        mode_hint = QLabel("fx")
+        mode_hint.setObjectName("eval.mode")
+        mode_hint.setToolTip(hint)
+        layout.addWidget(mode_hint)
+        self._scope.connect(self._spin.valueChanged, lambda: self.raw_changed.emit())
+        self._scope.connect(self._line_edit.textChanged, self._sync_ghost)
+        self._scope.connect(
+            self._line_edit.textChanged, lambda: self.raw_changed.emit()
+        )
+
+    def dispose(self) -> None:
+        """Permanently retire callbacks before the owner deletes Qt children.
+
+        Successful return prevents further callback delivery. Repeated calls are
+        safe. Cleanup failures propagate and unfinished cleanup can be retried.
+        Hiding is not terminal: hide/reopen callers must not call dispose.
+        """
+        self._scope.close()
+
+    def closeEvent(self, a0: QCloseEvent | None) -> None:
+        """Retire callbacks before closing the numeric field."""
+        self.dispose()
+        super().closeEvent(a0)
 
     def load_direct(self, value: float) -> None:
         """Load a direct float value.
@@ -265,11 +300,11 @@ class EvalNumericField(QWidget):
         if self._mode == "eval":
             action = menu.addAction("Use direct value")
             assert action is not None
-            action.triggered.connect(self._switch_to_direct)
+            self._scope.connect(action.triggered, self._switch_to_direct)
         else:
             action = menu.addAction("Use expression")
             assert action is not None
-            action.triggered.connect(self._switch_to_eval)
+            self._scope.connect(action.triggered, self._switch_to_eval)
         return menu
 
     def _show_context_menu(self, widget: QWidget, global_pos: Any) -> None:

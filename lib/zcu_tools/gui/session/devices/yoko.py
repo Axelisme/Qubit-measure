@@ -59,6 +59,14 @@ class _YOKOGS200Panel(QWidget):
         self._output_combo.setCurrentText(info.output)
         self._value_field.load_direct(info.value)
 
+    def dispose(self) -> None:
+        """Retire field callbacks at terminal teardown, not on hide/reopen.
+
+        Repeated calls are safe; cleanup failures propagate for retry before
+        deleting Qt children. Success prevents further field callback delivery.
+        """
+        self._value_field.dispose()
+
     def reset_eval_fields(self) -> None:
         """Reset all eval-mode fields to direct mode (R3 device-switch guard)."""
         self._value_field.reset_to_direct()
