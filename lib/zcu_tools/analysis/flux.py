@@ -130,6 +130,31 @@ def offset_for_flux(
     )
 
 
+def require_matching_device_unit(
+    device_name: str, actual_unit: str | None, expected_unit: str | None
+) -> None:
+    """Require exact unit strings for a named device; return None on a match.
+
+    device_name is a valid instrument name. actual_unit is the unit of a value
+    the caller will use; expected_unit is its declared frame/context unit.
+    Either unit may be None for an unrecorded unit, interpreted as "native".
+    Otherwise units must be nonblank strings. No conversion, trimming or case
+    folding is performed: "native" only matches "native", and "mA" differs
+    from "A". Invalid names/units raise ValueError; mismatches name the device
+    and both units. Callers select used values before calling this function.
+    """
+    validate_device_name(device_name)
+    actual = "native" if actual_unit is None else actual_unit
+    expected = "native" if expected_unit is None else expected_unit
+    _require_unit(actual)
+    _require_unit(expected)
+    if actual != expected:
+        raise ValueError(
+            f"Device {device_name!r} unit {actual!r} does not match "
+            f"expected unit {expected!r}"
+        )
+
+
 def _require_unit(value: object) -> None:
     if not isinstance(value, str) or not value.strip():
         raise ValueError("unit must be a nonempty string")

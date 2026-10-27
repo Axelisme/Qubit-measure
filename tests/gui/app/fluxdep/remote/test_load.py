@@ -27,7 +27,7 @@ SpectrumFile: TypeAlias = tuple[
 
 
 def test_native_rpc_forwards_explicit_variable_axis_and_device(route_harness, tmp_path):
-    from tests.gui.app.fluxdep._native import native_spectrum_file
+    from tests.gui.app.analysis_project._native import native_spectrum_file
 
     path = native_spectrum_file(tmp_path / "data.h5", {})
     client = route_harness.client()

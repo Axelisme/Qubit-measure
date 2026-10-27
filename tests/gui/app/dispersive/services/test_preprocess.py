@@ -13,6 +13,7 @@ from zcu_tools.gui.app.dispersive.state import (
     FluxoniumInputs,
     OnetoneEntry,
 )
+from zcu_tools.resources.predictor_file import PredictorFlux
 
 
 def _synthetic_onetone(n_flux=10, n_freq=60):
@@ -43,9 +44,7 @@ def test_service_compute_then_record_writes_state():
     st.set_fit_inputs(
         FluxoniumInputs(
             params=(4.0, 1.0, 0.5),
-            flux_half=0.5,
-            flux_bias=0.0,
-            flux_period=2.0,
+            flux=PredictorFlux(0.25, {"bias": 2.0}, {"bias": "native"}),
             bare_rf_seed=5.3,
         )
     )

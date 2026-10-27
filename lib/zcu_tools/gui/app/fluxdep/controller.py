@@ -26,6 +26,7 @@ from zcu_tools.analysis.fluxdep.models import TransitionDict
 from zcu_tools.analysis.fluxdep.search import DatabaseSearchResult, ParamBounds
 from zcu_tools.gui.app.analysis_project.entry import AnalysisTarget
 from zcu_tools.gui.app.analysis_project.flux import ComponentFluxProvider
+from zcu_tools.gui.app.analysis_project.native import NativeSpectrumSelection
 from zcu_tools.gui.app.fluxdep.event_bus import (
     ActiveSpectrumChangedPayload,
     EventBus,
@@ -51,7 +52,7 @@ from zcu_tools.gui.app.fluxdep.services.fit import (
     PbarFactory,
     SearchInput,
 )
-from zcu_tools.gui.app.fluxdep.services.load import LoadService, NativeSpectrumSelection
+from zcu_tools.gui.app.fluxdep.services.load import LoadService
 from zcu_tools.gui.app.fluxdep.services.store import SelectionService, SpectrumStore
 from zcu_tools.gui.app.fluxdep.services.viz import (
     FitDisplay,

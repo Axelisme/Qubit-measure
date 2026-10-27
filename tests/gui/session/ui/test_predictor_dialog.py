@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
+import pytest
 from qtpy.QtWidgets import (
     QComboBox,
     QDoubleSpinBox,
@@ -15,12 +16,8 @@ from qtpy.QtWidgets import (
     QTableWidgetSelectionRange,
     QTabWidget,
 )
-from zcu_tools.device.fake import FakeDeviceInfo
-from zcu_tools.gui.session.device_models import DeviceEntry
-from zcu_tools.gui.session.events import DeviceChangedPayload
 from zcu_tools.gui.session.predictor_control import PredictorControlFacet
 from zcu_tools.gui.session.services.predictor import PredictorService
-from zcu_tools.gui.session.state import DeviceStatus
 from zcu_tools.gui.session.ui.eval_field import EvalNumericField
 from zcu_tools.gui.session.ui.predictor_curves import PredictorCurveTabs
 from zcu_tools.gui.session.ui.predictor_dialog import (
@@ -28,7 +25,207 @@ from zcu_tools.gui.session.ui.predictor_dialog import (
     PredictorDialogState,
 )
 from zcu_tools.gui.widgets.spinbox import TrimDoubleSpinBox
+from zcu_tools.resources.predictor_file import PredictorFlux
 from zcu_tools.simulate.fluxonium.predict import FluxoniumParams
+
+from tests.gui.session.ui._predictor_support import (
+    make_device_control as _make_device_ctrl,
+)
+
+
+def test_parameter_editor_returns_energy_only_trial(qapp):
+    from zcu_tools.gui.session.ui.predictor_parameters import PredictorParameterEditor
+
+    editor = PredictorParameterEditor(
+        PredictorControlFacet(PredictorService()),
+        on_edited=lambda: None,
+        on_replaced=lambda: None,
+        on_status=lambda _message, _error: None,
+    )
+    try:
+        assert editor.parameters() == FluxoniumParams(EJ=4.0, EC=1.0, EL=1.0)
+    finally:
+        editor.deleteLater()
+
+
+def test_dialog_loads_frame_and_every_cached_device_value(qapp):
+    from zcu_tools.resources.predictor_file import (
+        PredictorFile,
+        PredictorFlux,
+        PredictorSource,
+    )
+
+    flux = PredictorFlux(0.2, {"coil": 2.0, "trim": -4.0}, {"coil": "A", "trim": "V"})
+    control = MagicMock(wraps=PredictorControlFacet(PredictorService()))
+    control.load_file.return_value = PredictorFile(
+        "fluxonium", FluxoniumParams(), flux, PredictorSource(None, None)
+    )
+    dialog = PredictorDialog(
+        control,
+        params=FluxoniumParams(),
+        device=_make_device_ctrl(cached={"coil": 0.3, "trim": -0.4}),
+    )
+    try:
+        dialog.load_file("two.json")
+        assert dialog.flux() == flux
+        assert dialog.device_values() == {"coil": 0.3, "trim": -0.4}
+    finally:
+        dialog.close()
+        dialog.deleteLater()
+
+
+def test_curve_tabs_project_all_devices_onto_selected_axis(qapp):
+    from zcu_tools.analysis.flux import DevicePeriod, FluxFrame
+    from zcu_tools.gui.session.ui.predictor_curves import CurveCoordinates
+    from zcu_tools.simulate.transmon import TransmonParams
+
+    from tests.gui._user_input import ComponentDriver
+
+    tabs = PredictorCurveTabs(
+        PredictorControlFacet(PredictorService()),
+        on_follow=lambda _value: None,
+        on_lock=lambda _value: None,
+        on_status=lambda _text, _error: None,
+        on_clear_values=lambda: None,
+        on_matrix_capability=lambda _supported: None,
+    )
+    try:
+        rendered = tabs.refresh_curves(
+            TransmonParams(20.0, 0.3, 0.1),
+            ((0, 1),),
+            (),
+            0.3,
+            coordinates=CurveCoordinates(
+                frame=FluxFrame(
+                    0.2,
+                    {"coil": DevicePeriod(2.0, "A"), "trim": DevicePeriod(-4.0, "V")},
+                ),
+                axis_device="coil",
+                device_values={"coil": 0.3, "trim": -0.4},
+            ),
+        )
+        tabs.show()
+        qapp.processEvents()
+        assert rendered
+        assert any(
+            axis.visible_curves > 0 for axis in ComponentDriver(tabs).plots().axes
+        )
+    finally:
+        tabs.close()
+        tabs.deleteLater()
+
+
+def test_calibrate_adds_phi0_correction_to_nonzero_local_offset(qapp):
+    from zcu_tools.resources.predictor_file import PredictorFlux
+    from zcu_tools.simulate.transmon import TransmonParams
+
+    params = TransmonParams(20.0, 0.3, 0.1)
+    dialog = PredictorDialog(PredictorControlFacet(PredictorService()), params=params)
+    try:
+        dialog.set_flux(
+            PredictorFlux(0.2, {"coil": 2.0, "trim": -4.0}, {"coil": "A", "trim": "V"}),
+            {"coil": 0.3, "trim": -0.4},
+        )
+        measured = params.build_predictor().predict_freq(0.48, (0, 1))
+        result = dialog.calibrate(measured)
+        assert result.offset_correction == pytest.approx(0.03, abs=1e-5)
+        assert dialog.flux().offset == pytest.approx(0.23, abs=1e-5)
+        assert dialog.predict_frequency() == pytest.approx(measured, abs=1e-3)
+        assert not result.clamped
+    finally:
+        dialog.close()
+        dialog.deleteLater()
+
+
+def test_cache_restores_frame_values_and_axis_with_energy_trial(qapp, tmp_path):
+    from zcu_tools.resources.predictor_file import PredictorFlux
+
+    from tests.gui._user_input import ComponentDriver
+
+    port = PredictorControlFacet(PredictorService())
+    flux = PredictorFlux(0.23, {"coil": 2.0, "trim": -4.0}, {"coil": "A", "trim": "V"})
+    dialog = PredictorDialog(port, params=FluxoniumParams())
+    try:
+        dialog.enable_parameter_cache(cache_dir=tmp_path)
+        dialog.set_flux(flux, {"coil": 0.3, "trim": -0.4})
+        dialog.show()
+        qapp.processEvents()
+        ComponentDriver(dialog).click(object_name="predictor_axis_trim")
+    finally:
+        dialog.close()
+    reopened = PredictorDialog(port, params=FluxoniumParams())
+    try:
+        reopened.enable_parameter_cache(cache_dir=tmp_path)
+        assert reopened.flux() == flux
+        assert reopened.device_values() == {"coil": 0.3, "trim": -0.4}
+        reopened.show()
+        qapp.processEvents()
+        assert (
+            ComponentDriver(reopened).observe(object_name="predictor_axis_trim").checked
+        )
+    finally:
+        reopened.close()
+        reopened.deleteLater()
+        dialog.deleteLater()
+
+
+def test_live_marker_changes_only_the_selected_axis_value(qapp):
+    dialog = _make_dialog()
+    try:
+        dialog.set_flux(
+            PredictorFlux(0.2, {"coil": 2.0, "trim": -4.0}, {"coil": "A", "trim": "V"}),
+            {"coil": 0.3, "trim": -0.4},
+        )
+        dialog.set_live_mode(enabled=True)
+        dialog.set_live_device_value(0.25)
+        assert dialog.device_values() == {"coil": 0.25, "trim": -0.4}
+    finally:
+        dialog.close()
+        dialog.deleteLater()
+
+
+def test_show_preserves_full_precision_native_values(qapp):
+    dialog = _make_dialog()
+    values = {"coil": 0.12345678901234567}
+    try:
+        dialog.set_flux(PredictorFlux(0.2, {"coil": 2.0}, {"coil": "A"}), values)
+        dialog.show()
+        qapp.processEvents()
+        assert dialog.device_values() == values
+    finally:
+        dialog.close()
+        dialog.deleteLater()
+
+
+def test_supplied_frame_clears_stale_missing_frame_status(qapp):
+    from zcu_tools.simulate.transmon import TransmonParams
+
+    dialog = PredictorDialog(
+        PredictorControlFacet(PredictorService()), params=TransmonParams(20.0, 0.3, 0.1)
+    )
+    try:
+        assert "flux frame" in _status(dialog)
+        dialog.set_flux(PredictorFlux(0.2, {"coil": 2.0}, {"coil": "A"}), {"coil": 0.3})
+        assert _status(dialog) == ""
+    finally:
+        dialog.close()
+        dialog.deleteLater()
+
+
+def test_empty_snapshot_replaces_a_previously_loaded_flux_frame(qapp):
+    from zcu_tools.gui.session.ui.predictor_cache import PredictorSnapshot
+    from zcu_tools.simulate.predictor import PredictorInputError
+
+    dialog = _make_dialog()
+    try:
+        dialog.set_flux(PredictorFlux(0.2, {"coil": 2.0}, {"coil": "A"}), {"coil": 0.3})
+        dialog.restore_persisted_state(PredictorSnapshot())
+        with pytest.raises(PredictorInputError, match="flux frame"):
+            dialog.flux()
+        assert dialog.device_values() == {}
+    finally:
+        dialog.close()
+        dialog.deleteLater()
 
 
 def _make_dialog(**kwargs) -> PredictorDialog:
@@ -36,26 +233,6 @@ def _make_dialog(**kwargs) -> PredictorDialog:
     return PredictorDialog(
         PredictorControlFacet(PredictorService()), params=FluxoniumParams(), **kwargs
     )
-
-
-def _make_device_ctrl(
-    *,
-    entries: list[DeviceEntry] | None = None,
-    cached: dict[str, float | None] | None = None,
-    units: dict[str, str] | None = None,
-    live: dict[str, FakeDeviceInfo | None] | None = None,
-) -> MagicMock:
-    ctrl = MagicMock()
-    value_cache = cached if cached is not None else {}
-    unit_map = units if units is not None else {}
-    live_map = live if live is not None else {}
-    ctrl.list_devices.return_value = list(entries or [])
-    ctrl.get_cached_device_value.side_effect = lambda name: value_cache.get(name)
-    ctrl.get_device_unit.side_effect = lambda name: unit_map.get(name, "none")
-    ctrl.get_device_info.side_effect = lambda name: live_map.get(name)
-    ctrl.try_poll_device_info.return_value = True
-    ctrl.on_device_changed.return_value = MagicMock(name="unsubscribe_device")
-    return ctrl
 
 
 def _table(dialog: PredictorDialog) -> QTableWidget:
@@ -72,12 +249,6 @@ def _status(dialog: PredictorDialog) -> str:
     label = dialog.findChild(QLabel, "predictor_status")
     assert label is not None
     return label.text()
-
-
-def _device_combo(dialog: PredictorDialog) -> QComboBox:
-    return next(
-        combo for combo in dialog.findChildren(QComboBox) if combo.findData("flux") >= 0
-    )
 
 
 def _value_spin(dialog: PredictorDialog) -> TrimDoubleSpinBox:
@@ -101,14 +272,13 @@ def test_live_mode_locks_model_and_transition_controls(qapp):
         assert all(
             not widget.isEnabled() for widget in dialog.findChildren(widget_type)
         )
-    for text in ("Load", "Refresh files", "Add", "Remove", "Calibrate", "Use"):
+    for text in ("Load", "Refresh files", "Add", "Remove", "Calibrate", "Save as…"):
         assert not _button(dialog, text).isEnabled()
 
     dialog.set_live_mode(enabled=False)
 
     assert _value_spin(dialog).isEnabled()
     assert _button(dialog, "Add").isEnabled()
-    assert not _button(dialog, "Use").isEnabled()
 
 
 def test_live_device_value_updates_read_only_control(qapp):
@@ -151,101 +321,8 @@ def test_predictor_dialog_default_tracked_count(qapp):
     assert _table(dialog).rowCount() == 5
 
 
-def test_predictor_dialog_optional_device_facet_no_controls(qapp):
-    dialog = _make_dialog()
-
-    assert all(button.text() != "Use" for button in dialog.findChildren(QPushButton))
-
-
-def test_predictor_dialog_device_selector_lists_connected_cached_values(qapp):
-    entries = [
-        DeviceEntry("flux", "YOKOGS200", DeviceStatus.CONNECTED.value),
-        DeviceEntry("fake", "FakeDevice", DeviceStatus.CONNECTED.value),
-        DeviceEntry("lo", "RohdeSchwarzSGS100A", DeviceStatus.CONNECTED.value),
-        DeviceEntry("memory", "FakeDevice", DeviceStatus.MEMORY_ONLY.value),
-        DeviceEntry("busy", "FakeDevice", DeviceStatus.SETTING_UP.value),
-    ]
-    device = _make_device_ctrl(
-        entries=entries,
-        cached={"flux": 0.1, "fake": 0.2, "lo": None, "memory": 0.3, "busy": 0.4},
-        units={"flux": "A"},
-    )
-    dialog = _make_dialog(device=device)
-
-    combo = _device_combo(dialog)
-    assert [combo.itemData(i) for i in range(combo.count())] == [None, "flux", "fake"]
-    assert "YOKOGS200" in combo.itemText(1)
-    assert "(A)" in combo.itemText(1)
-
-
-def test_predictor_dialog_read_selected_device_updates_value_immediately(qapp):
-    device = _make_device_ctrl(
-        entries=[DeviceEntry("flux", "FakeDevice", DeviceStatus.CONNECTED.value)],
-        cached={"flux": 0.1},
-        live={"flux": FakeDeviceInfo(address="none", value=0.456)},
-    )
-    dialog = _make_dialog(device=device)
-    combo = _device_combo(dialog)
-    combo.setCurrentIndex(combo.findData("flux"))
-
-    _button(dialog, "Use").click()
-
-    assert _value_spin(dialog).value() == 0.456
-    assert "Read device value from flux" in _status(dialog)
-    device.get_device_info.assert_called_with("flux")
-
-
-def test_predictor_dialog_show_refreshes_selected_cached_value(qapp):
-    cached: dict[str, float | None] = {"flux": 0.1}
-    device = _make_device_ctrl(
-        entries=[DeviceEntry("flux", "FakeDevice", DeviceStatus.CONNECTED.value)],
-        cached=cached,
-    )
-    dialog = _make_dialog(device=device)
-    combo = _device_combo(dialog)
-    combo.setCurrentIndex(combo.findData("flux"))
-    device.try_poll_device_info.reset_mock()
-    cached["flux"] = 0.3
-
-    dialog.show()
-    qapp.processEvents()
-    try:
-        assert _value_spin(dialog).value() == 0.3
-        device.try_poll_device_info.assert_called_with("flux")
-    finally:
-        dialog.close()
-
-
-def test_predictor_dialog_selected_device_changed_applies_cached_value(qapp):
-    cached: dict[str, float | None] = {"flux": 0.1, "other": 0.2}
-    device = _make_device_ctrl(
-        entries=[
-            DeviceEntry("flux", "FakeDevice", DeviceStatus.CONNECTED.value),
-            DeviceEntry("other", "FakeDevice", DeviceStatus.CONNECTED.value),
-        ],
-        cached=cached,
-    )
-    dialog = _make_dialog(device=device)
-    combo = _device_combo(dialog)
-    combo.setCurrentIndex(combo.findData("flux"))
-    on_changed = device.on_device_changed.call_args.args[0]
-    dialog.show()
-    qapp.processEvents()
-    try:
-        cached["other"] = 0.9
-        on_changed(DeviceChangedPayload(name="other"))
-        assert _value_spin(dialog).value() == 0.1
-
-        cached["flux"] = 0.7
-        on_changed(DeviceChangedPayload(name="flux"))
-        assert _value_spin(dialog).value() == 0.7
-    finally:
-        dialog.close()
-
-
 def test_predictor_dialog_persistent_reject_hides_without_finishing(qapp):
     device = _make_device_ctrl()
-    unsubscribe = device.on_device_changed.return_value
     dialog = _make_dialog(device=device, persistent_on_close=True)
     finished = MagicMock()
     dialog.finished.connect(finished)
@@ -257,7 +334,6 @@ def test_predictor_dialog_persistent_reject_hides_without_finishing(qapp):
 
     assert not dialog.isVisible()
     finished.assert_not_called()
-    unsubscribe.assert_not_called()
 
 
 def test_predictor_dialog_capture_restore_state_roundtrip(qapp):
@@ -418,6 +494,7 @@ def test_predictor_dialog_value_column_runtime_error_is_logged(qapp, caplog):
     # A query-port failure exercises UI recovery without replacing a successful kernel.
     ctrl.predict_freq.side_effect = RuntimeError("compute failed")
     dialog = PredictorDialog(ctrl, params=FluxoniumParams())
+    dialog.set_flux(PredictorFlux(0.2, {"coil": 1.0}, {"coil": "A"}), {"coil": 0.1})
 
     with caplog.at_level("ERROR"):
         dialog.set_live_device_value(0.1)
@@ -442,7 +519,8 @@ def test_predictor_dialog_predict_curve_error_shown_in_status(qapp):
     # The failing query is the collaborator boundary; no successful result is stubbed.
     ctrl.predict_freq_curve.side_effect = ValueError("oops")
 
-    dialog = PredictorDialog(ctrl, params=FluxoniumParams(4.0, 1.0, 1.0, 0.0, 1.0, 0.0))
+    dialog = PredictorDialog(ctrl, params=FluxoniumParams(4.0, 1.0, 1.0))
+    dialog.set_flux(PredictorFlux(0.2, {"coil": 1.0}, {"coil": "A"}), {"coil": 0.1})
 
     assert "oops" in _status(dialog)
 
