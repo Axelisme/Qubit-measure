@@ -1,6 +1,6 @@
 # Single-fluxonium acquisition
 
-**Last updated:** 2026-10-27 (UTC), loss-independent structure and acquisition preparation
+**Last updated:** 2026-10-28 (UTC), numeric drift owner
 
 **Readers:** framework-dev, lab-author, agent. Compose complete fluxonium timelines with one physical readout cavity.
 
@@ -67,6 +67,10 @@ Integrated Stop is checked between evolution chunks and during pacing, discardin
 the interrupted round while retaining completed rounds. ADC sampling remains synchronous.
 
 ## Coherence drift and simulated time
+
+`zcu_tools.simulate.drift.LogOU` owns the numeric log-OU transition and accepts
+only numeric parameters and an RNG. This environment's `drift.CoherenceDrift`
+composes loss streams, freezes acquisition settings and writes private truth.
 
 The optional top-level YAML `drift` section selects independent log-OU processes:
 

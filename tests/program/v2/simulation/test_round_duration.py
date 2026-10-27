@@ -101,11 +101,7 @@ def test_simulation_clock_rejects_invalid_durations_without_advancing(
     "scale, work", [(1.0, 0.02), (0.1, 0.002), (0.0, 0.02), (0.0, 0.3)]
 )
 def test_simulation_clock_preserves_physical_rounds_and_idle(clock: Clock, scale, work):
-    import zcu_tools.program.v2.simulation as simulation
-
-    clock_type = getattr(simulation, "SimulationClock", None)
-    assert clock_type is not None, "simulation must expose an environment-owned clock"
-    sim_clock = clock_type(monotonic=clock.monotonic)
+    sim_clock = SimulationClock(monotonic=clock.monotonic)
 
     def execute(_request):
         clock.now += work

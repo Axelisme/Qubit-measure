@@ -1,6 +1,6 @@
 # Six independent fluxonium cavities
 
-**Last updated:** 2026-10-27 (UTC), routing-only residency allowance
+**Last updated:** 2026-10-28 (UTC), routing-only residency allowance
 
 **Readers:** framework-dev, lab-author, agent. Build and acquire six independent cavities through the normal simulation SoC.
 

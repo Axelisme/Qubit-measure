@@ -1,12 +1,21 @@
 # Numeric simulation tools
 
-**Last updated:** 2026-10-27 (UTC)，演化 preparation lifetime
+**Last updated:** 2026-10-28 (UTC)，numeric drift owner
 
 **讀者：** framework-dev、agent。查閱數值模擬的責任邊界、快取契約與效能證據入口。
 
 `evolution` and `adc` are independent numeric tools. Neither imports QICK,
 DeviceManager, resources, GUI, YAML or an environment. The existing fluxonium
 prediction tools remain separate. ADR-0072 defines the package dependency rules.
+
+## Numeric parameter drift
+
+`zcu_tools.simulate.drift.LogOU` evolves a positive numeric parameter with exact
+log-OU transitions at caller-supplied seconds, using a caller-owned NumPy RNG.
+It does not read settings, clocks or files. Equal times consume no RNG. The
+first sample returns the reference value and sets the time origin.
+`experiment.single_fluxonium.drift.CoherenceDrift` composes loss streams and
+owns acquisition settings and private truth I/O.
 
 ## Measured performance and reproduction
 
