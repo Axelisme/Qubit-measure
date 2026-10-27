@@ -122,14 +122,15 @@ readout:
     phase_deg: 0.0
     time_of_flight_ns: 400.0 # Total line delay, including electronic-delay phase.
     background:
-      ripple_depth: 0.05
+      ripple_depth: 0.088
       ripple_period_mhz: 68.0
       ripple_phase_deg: 0.0
       slope_db_per_ghz: -4.0
       pivot_ghz: 7.0
       extra_ripples:
-        - {depth: 0.04, period_mhz: 44.0, phase_deg: 25.0}
-        - {depth: 0.03, period_mhz: 308.0, phase_deg: -40.0}
+        - {depth: 0.066, period_mhz: 44.0, phase_deg: 25.0}
+        - {depth: 0.044, period_mhz: 308.0, phase_deg: -40.0}
+        - {depth: 0.043, period_mhz: 52.6, phase_deg: 113.0}
       roughness: {amplitude: 0.02, correlation_mhz: 50.0, seed: 82}
       band_edges:
         low: {corner_ghz: 3.7, rolloff_db_per_ghz: 100.0}
@@ -145,14 +146,15 @@ readout:
         phase_deg: 0.0
         time_of_flight_ns: 400.0
         background:
-          ripple_depth: 0.05
+          ripple_depth: 0.088
           ripple_period_mhz: 68.0
           ripple_phase_deg: 0.0
           slope_db_per_ghz: -4.0
           pivot_ghz: 7.0
           extra_ripples:
-            - {depth: 0.04, period_mhz: 44.0, phase_deg: 25.0}
-            - {depth: 0.03, period_mhz: 308.0, phase_deg: -40.0}
+            - {depth: 0.066, period_mhz: 44.0, phase_deg: 25.0}
+            - {depth: 0.044, period_mhz: 308.0, phase_deg: -40.0}
+            - {depth: 0.043, period_mhz: 52.6, phase_deg: 113.0}
           roughness: {amplitude: 0.02, correlation_mhz: 50.0, seed: 82}
           band_edges:
             low: {corner_ghz: 3.7, rolloff_db_per_ghz: 100.0}
@@ -163,14 +165,15 @@ readout:
         phase_deg: 0.0
         time_of_flight_ns: 400.0
         background:
-          ripple_depth: 0.05
+          ripple_depth: 0.088
           ripple_period_mhz: 68.0
           ripple_phase_deg: 0.0
           slope_db_per_ghz: -4.0
           pivot_ghz: 7.0
           extra_ripples:
-            - {depth: 0.04, period_mhz: 44.0, phase_deg: 25.0}
-            - {depth: 0.03, period_mhz: 308.0, phase_deg: -40.0}
+            - {depth: 0.066, period_mhz: 44.0, phase_deg: 25.0}
+            - {depth: 0.044, period_mhz: 308.0, phase_deg: -40.0}
+            - {depth: 0.043, period_mhz: 52.6, phase_deg: 113.0}
           roughness: {amplitude: 0.02, correlation_mhz: 50.0, seed: 82}
           band_edges:
             low: {corner_ghz: 3.7, rolloff_db_per_ghz: 100.0}

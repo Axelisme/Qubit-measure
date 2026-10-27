@@ -16,7 +16,8 @@ cp zcu_lab/simulation_envs/FTF/default.yaml zcu_lab/simulation_envs/FTF/ftf.yaml
 
 缺少 `ftf.yaml` 時，`ftf(...)` 直接報錯。完整欄位、單位、合法範圍、三迴路映射與 entry 接線對照見 [FTF YAML v2 欄位指南](field-guide.md)。
 
-`default.yaml` 的背景現在使用 68／44／308 MHz 乘性駐波、2% 複數 RMS roughness、
+`default.yaml` 的背景使用 68／44／308／52.6 MHz 乘性駐波，深度依序為
+0.088／0.066／0.044／0.043，搭配 2% 複數 RMS roughness、
 −4 dB/GHz 斜率與 3.7 GHz 低頻轉角。既有 `ftf.yaml` 不會自動更新。
 要看到新背景，請自行把樣板的 `background.extra_ripples`、`roughness` 與 `band_edges`
 補入工作副本的 pulse 及 mux receivers，並同步調整原有 ripple 與 slope，再重啟環境。
