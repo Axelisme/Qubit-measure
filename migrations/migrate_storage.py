@@ -16,6 +16,7 @@ from migrations.experiment_declaration import MigrationExperiment
 from migrations.storage_mapping import build_mapping
 from migrations.storage_migration import (
     MigrationInputError,
+    MigrationMapping,
     MigrationRequest,
     load_run_evidence,
     migrate_storage,
@@ -66,6 +67,7 @@ def main(
     *,
     register_components: Callable[[ComponentRegistry], None] | None = None,
     experiments: Sequence[MigrationExperiment] | None = None,
+    mapping: MigrationMapping | None = None,
 ) -> int:
     """Migrate caller-selected offline roots with explicit kind and evidence.
 
@@ -77,6 +79,11 @@ def main(
     supplies fixed schema/validation declarations; None lazily selects all shipped
     declarations. Explicit empty declarations are valid for parameter-only/raw
     inputs, not a fallback for undeclared runs. No global table is changed.
+    mapping supplies the complete caller-owned conversion profile, including
+    seeds, rules and any parameter transform. None builds the shipped mapping
+    from --qubit-kind and the experiment declarations, retaining its lab callback.
+    An explicit mapping is used unchanged; --qubit-kind only selects the default
+    profile. The caller must register the supplied mapping's component kinds.
     Declaration validators preserve snapshot/raw input. Default CLI composition
     registers once in its fresh process. Dry-run
     creates no files and never invokes native validation or source removal.
@@ -116,24 +123,25 @@ def main(
                 ) from error
             declaration.validate_native(path)
 
-        # argparse owns choice validation; the branch preserves the literal type
-        # for the concrete profile rather than asserting an untyped Namespace.
-        kind = (
-            "qubit/fluxonium"
-            if args.qubit_kind == "qubit/fluxonium"
-            else "qubit/transmon"
-        )
-        mapping = build_mapping(
-            qubit_kind=kind,
-            data_schemas={
-                identity: item.schemas for identity, item in declarations.items()
-            },
-            native_tags={
-                identity: item.native_tag
-                for identity, item in declarations.items()
-                if item.source_tag != item.native_tag
-            },
-        )
+        if mapping is None:
+            # argparse owns choice validation; the branch preserves the literal
+            # type for the concrete profile without an untyped Namespace assertion.
+            kind = (
+                "qubit/fluxonium"
+                if args.qubit_kind == "qubit/fluxonium"
+                else "qubit/transmon"
+            )
+            mapping = build_mapping(
+                qubit_kind=kind,
+                data_schemas={
+                    identity: item.schemas for identity, item in declarations.items()
+                },
+                native_tags={
+                    identity: item.native_tag
+                    for identity, item in declarations.items()
+                    if item.source_tag != item.native_tag
+                },
+            )
         request = MigrationRequest(
             result_root=args.result_root,
             database_root=args.database_root,

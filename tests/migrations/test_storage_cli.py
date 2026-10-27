@@ -10,11 +10,12 @@ from zcu_tools.resources.document_store import YamlMap
 from zcu_tools.resources.entry import ComponentSchema, component_registry
 
 from migrations.migrate_storage import main
+from migrations.storage_migration import MigrationMapping
 from tests.resources.entry.fakes import registry_state
 
 
 class CliComponent(ComponentSchema):
-    """Synthetic storage-only component accepting the fixed mapping's seeds."""
+    """Synthetic storage-only component for the caller-supplied CLI mapping."""
 
     model_config = ConfigDict(extra="allow")
     ext: YamlMap = Field(default_factory=dict)
@@ -83,7 +84,18 @@ def tree(root: Path) -> dict[Path, tuple[bytes, int]]:
 
 
 def call(arguments: list[str]) -> int:
-    return main(arguments, register_components=lambda _registry: None, experiments=())
+    return main(
+        arguments,
+        register_components=lambda _registry: None,
+        experiments=(),
+        mapping=MigrationMapping(
+            mapping_version="1.0",
+            components={"Q1": {"kind": "qubit/fluxonium"}},
+            roles={"qubit": "Q1"},
+            rules=(),
+            data_schemas={},
+        ),
+    )
 
 
 @pytest.mark.parametrize("resume", [False, True])
