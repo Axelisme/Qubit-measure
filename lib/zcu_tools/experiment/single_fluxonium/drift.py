@@ -101,13 +101,13 @@ class CoherenceDrift:
         if drift is None:
             raise ValueError("coherence drift requires enabled settings")
         root = np.random.SeedSequence(seed).entropy
-        qubit = settings.chip.qubit
+        circuit = settings.chip.qubit
         self._processes: dict[str, LogOU] = {}
         for index, (name, value, parameter) in enumerate(
             (
-                ("q_cap", qubit.q_cap, drift.q_cap),
-                ("xqp", qubit.xqp, drift.xqp),
-                ("aphi", qubit.aphi, drift.aphi),
+                ("q_cap", circuit.q_cap, drift.q_cap),
+                ("xqp", circuit.xqp, drift.xqp),
+                ("aphi", circuit.aphi, drift.aphi),
             )
         ):
             if parameter is not None:
