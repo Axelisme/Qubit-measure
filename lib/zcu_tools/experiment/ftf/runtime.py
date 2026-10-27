@@ -26,6 +26,7 @@ from zcu_tools.program.v2.simulation import (
     SimulationBinding,
     SimulationCallbacks,
     SimulationSoc,
+    SimulationTiming,
 )
 from zcu_tools.resources.ftf import FTFSettings, load_ftf, parse_ftf
 from zcu_tools.resources.simulation_replay import ReplayAcquire, save_replay
@@ -656,8 +657,10 @@ def ftf(
             coordinator.execute,
             backend_version=BACKEND_VERSION,
             seed=settings.numerics.seed,
-            time_scale=(
-                settings.numerics.time_scale if time_scale is None else time_scale
+            timing=SimulationTiming(
+                time_scale=(
+                    settings.numerics.time_scale if time_scale is None else time_scale
+                )
             ),
             callbacks=SimulationCallbacks(
                 wait_ready=None if preparation is None else preparation.wait_ready,

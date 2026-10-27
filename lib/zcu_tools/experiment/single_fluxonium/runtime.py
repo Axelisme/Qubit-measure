@@ -23,7 +23,10 @@ from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 from zcu_tools.program.v2.simulation import (
     IntegratedRound,
     SimulationBinding,
+    SimulationCallbacks,
+    SimulationClock,
     SimulationSoc,
+    SimulationTiming,
 )
 from zcu_tools.resources.single_fluxonium import (
     load_single_fluxonium,
@@ -50,6 +53,7 @@ from zcu_tools.simulate.fluxonium import (
 
 from . import replay
 from .acquire import SingleFluxoniumAcquire, SingleFluxoniumPreparation
+from .drift import CoherenceDrift
 from .numeric import dc_flux
 from .readout import dispersive_resonator, prepare_readout, readout_model
 from .template import SingleFluxoniumPlan, plan_template
@@ -134,6 +138,27 @@ def _template_digest(template: TimelineTemplate) -> bytes:
     return digest.digest()
 
 
+@dataclass(frozen=True)
+class SingleFluxoniumRuntimeOptions:
+    """Execution resources selected at source construction, not during acquisition.
+
+    engine: fresh exclusive Engine transferred to the source, closed by close().
+        None creates 256 MiB prepare, 64 MiB result and 4 MiB routing residency.
+    readout_cache_bytes: nonnegative ADC residency bytes, default 8 MiB; zero
+        disables retention. Source owns/closes its cache; this is not a RAM cap.
+    clock: shared environment SimulationClock; source never closes/resets it.
+        None creates a standalone clock. All qubits in an environment can share it.
+    truth_log: private JSONL file path, or None for a fresh session directory
+        under ~/.local/state/zcu-tools/simulation/single-fluxonium. Only enabled
+        drift writes files. The source opens/closes each append; I/O errors propagate.
+    """
+
+    engine: Engine | None = None
+    readout_cache_bytes: int = 8 * 1024**2
+    clock: SimulationClock | None = None
+    truth_log: Path | None = None
+
+
 class SingleFluxoniumSource:
     """Synchronous source with one snapshot's facts and one template-plan cache.
 
@@ -152,15 +177,17 @@ class SingleFluxoniumSource:
     across acquires. No noisy result or sampling identity enters these caches.
     readout_kind selects one terminal pulse or coherent mux tones on the same
     physical cavity. It does not add receivers, coupling or hardware routes.
-    engine: optional fresh Engine whose exclusive ownership transfers to this
-    source; close() closes it. None creates the usual 256 MiB prepare engine,
-    64 MiB result memo and 4 MiB routing cache. Do not share an injected engine.
-    readout_cache_bytes: nonnegative integer ADC residency cap in bytes, default
-    8 MiB, with no fixed upper bound. Zero disables ADC retention; invalid values
-    raise ValueError. These caps do not bound scratch, models or process RSS.
+    runtime selects execution resources through SingleFluxoniumRuntimeOptions;
+    None uses that record's defaults.
+    An injected engine transfers exclusive ownership to this source; shared
+    clocks remain environment-owned. Its cache caps do not bound process RSS.
     private_replay optionally selects an explicit absolute author archive root;
     None disables I/O. Private single-model replay accepts pulse mode only;
-    combining mux mode with private_replay raises ValueError before acquisition. The caller owns devices, including after source close.
+    combining mux mode with private_replay raises ValueError before acquisition.
+    runtime.clock optionally supplies the environment's shared SimulationClock;
+    None creates a standalone clock. runtime.truth_log selects a private JSONL
+    file; None uses a fresh session directory. Only enabled drift writes truth.
+    The caller owns devices, including after source close.
     """
 
     def __init__(
@@ -170,8 +197,7 @@ class SingleFluxoniumSource:
         *,
         private_replay: Path | None = None,
         readout_kind: Literal["pulse", "mux"] = "pulse",
-        engine: Engine | None = None,
-        readout_cache_bytes: int = 8 * 1024**2,
+        runtime: SingleFluxoniumRuntimeOptions | None = None,
     ) -> None:
         if private_replay is not None and not private_replay.is_absolute():
             raise ValueError("private replay requires an explicit absolute root")
@@ -183,9 +209,17 @@ class SingleFluxoniumSource:
         self.settings = settings
         self.devices = devices
         self.private_replay = private_replay
-        self.readout_cache = ReadoutCache(readout_cache_bytes)
+        runtime = SingleFluxoniumRuntimeOptions() if runtime is None else runtime
+        self._clock = SimulationClock() if runtime.clock is None else runtime.clock
+        self._truth_log = runtime.truth_log
+        self._drift: CoherenceDrift | None = None
+        self._effective_settings = settings
+        self._pending_acquire = False
+        self.readout_cache = ReadoutCache(runtime.readout_cache_bytes)
         self.engine = (
-            Engine(workers=1, cache_bytes=256 * 1024**2) if engine is None else engine
+            Engine(workers=1, cache_bytes=256 * 1024**2)
+            if runtime.engine is None
+            else runtime.engine
         )
         self._prepared: SingleFluxoniumPreparation | None = None
         self._session: SingleFluxoniumAcquire | None = None
@@ -205,6 +239,41 @@ class SingleFluxoniumSource:
     def _require_open(self) -> None:
         if self._closed:
             raise RuntimeError("single-fluxonium source is closed")
+
+    @property
+    def effective_settings(self) -> SingleFluxoniumSettings:
+        """Current acquisition's frozen losses, or configured settings before begin.
+
+        Reassigning settings discards the old effective values immediately;
+        the next begin initializes drift from the new configuration. With drift
+        disabled, this returns settings unchanged. Replay archives this snapshot.
+        """
+        if self._drift is not None and self._drift.settings == self.settings:
+            return self._effective_settings
+        return self.settings
+
+    def begin_acquire(self, *, seed: int | None = None) -> None:
+        """Sample once at admission, before request construction or round snapshots.
+
+        The binding calls this with its root seed; direct callers may omit seed
+        to use numerics.seed. open_acquire consumes this pending preparation
+        without another sample/log row. Repeated begin calls start new
+        acquisitions, even if the prior call constructed no request. The clock
+        is shared by the environment; first drift use starts at YAML losses.
+        Errors, including truth-log I/O, propagate before a session is opened.
+        """
+        self._require_open()
+        if self._session is not None:
+            self._session.invalidate()
+        if self.settings.drift is not None:
+            if self._drift is None or self._drift.settings != self.settings:
+                self._drift = CoherenceDrift(
+                    self.settings,
+                    seed=self.settings.numerics.seed if seed is None else seed,
+                    truth_log=self._truth_log,
+                )
+            self._effective_settings = self._drift.sample(self._clock.now())
+        self._pending_acquire = True
 
     def snapshot(self) -> EnvironmentSnapshot:
         """Capture the bound driver's current value, not startup initial, in A/V.
@@ -237,10 +306,14 @@ class SingleFluxoniumSource:
         response solve or random sampling runs. RuntimeError follows close; invalid DC raises ValueError.
         """
         self._require_open()
-        key = (self.settings.model_dump_json(), snapshot, replay.replay_versions())
+        key = (
+            self.effective_settings.model_dump_json(),
+            snapshot,
+            replay.replay_versions(),
+        )
         if self._facts is None or self._facts_key != key:
             self._clear()
-            self._facts = _build_facts(self.settings, snapshot)
+            self._facts = _build_facts(self.effective_settings, snapshot)
             self._facts_key = key
         return self._facts
 
@@ -257,7 +330,7 @@ class SingleFluxoniumSource:
         """
         self._require_open()
         generation = (
-            self.settings.model_dump_json(),
+            self.effective_settings.model_dump_json(),
             snapshot,
             replay.replay_versions(),
         )
@@ -275,12 +348,12 @@ class SingleFluxoniumSource:
 
     @property
     def identity(self) -> str:
-        """SHA256 of current validated settings, used by snapshot and replay.
+        """SHA256 of current effective settings, used by snapshot and replay.
 
         Reassigning .settings changes this identity and invalidates preparation
         keys on the next call. The startup driver object remains unchanged.
         """
-        return sha256(self.settings.model_dump_json().encode()).hexdigest()
+        return sha256(self.effective_settings.model_dump_json().encode()).hexdigest()
 
     def prepare(
         self,
@@ -367,17 +440,23 @@ class SingleFluxoniumSource:
             raise
 
     def open_acquire(self, request: AcquireRequest) -> SingleFluxoniumAcquire:
-        """Start a request, invalidating the previous session without drawing RNG.
+        """Start a request, invalidating the previous session and freezing losses.
 
         Nonempty templates and the current PCG64 v2 stream version are required.
         Unsupported inputs raise ValueError before numeric execution. Closed
-        sources raise RuntimeError. The binding serializes calls and owns Stop.
+        sources raise RuntimeError. A pending begin_acquire is consumed exactly
+        once; otherwise this call samples drift and writes truth itself. All
+        sweep points and rounds share those losses; sampling RNG is independent.
+        The binding serializes calls and owns Stop.
         """
         self._require_open()
         if not request.templates:
             raise ValueError("single fluxonium requires timeline templates")
         if request.rng_version != f"PCG64/SeedSequence-v2/numpy-{np.__version__}":
             raise ValueError("single-fluxonium RNG version mismatch")
+        if not self._pending_acquire:
+            self.begin_acquire()
+        self._pending_acquire = False
         if self._session is not None:
             self._session.invalidate()
         self._session = SingleFluxoniumAcquire(self, request)
@@ -426,6 +505,8 @@ def single_fluxonium(
     configuration: SingleFluxoniumSettings | str | Path,
     *,
     private_replay: Path | None = None,
+    clock: SimulationClock | None = None,
+    truth_log: Path | None = None,
 ) -> SimulationEnvironment:
     """Assemble one DC driver and a bound mock SoC, without acquiring or warmup.
 
@@ -438,6 +519,10 @@ def single_fluxonium(
     windows; transport routes do not enable microwave/fast-flux readout physics.
     The backend evolves complete timelines and uses one physical ADC cavity.
     private_replay enables author-only detached round inputs at an absolute root.
+    clock optionally injects a shared monotonic physical clock, otherwise a new
+    clock is owned by this environment. truth_log selects a private JSONL file
+    for enabled drift, defaulting to a new session under ~/.local/state/
+    zcu-tools/simulation/single-fluxonium. No truth I/O occurs with drift off.
     Successful assembly is not MCP acceptance. No real hardware is opened.
     Invalid YAML/settings/profile/binding errors propagate. Builder failure closes
     its devices and preserves cleanup errors alongside the original failure.
@@ -463,7 +548,13 @@ def single_fluxonium(
             ),
             progress=False,
         )
-        source = SingleFluxoniumSource(settings, devices, private_replay=private_replay)
+        sim_clock = SimulationClock() if clock is None else clock
+        source = SingleFluxoniumSource(
+            settings,
+            devices,
+            private_replay=private_replay,
+            runtime=SingleFluxoniumRuntimeOptions(clock=sim_clock, truth_log=truth_log),
+        )
         gens = (
             settings.drive_line.gen_ch,
             settings.readout.drive.gen_ch,
@@ -476,7 +567,12 @@ def single_fluxonium(
             source.execute,
             backend_version=replay.BACKEND_VERSION,
             seed=settings.numerics.seed,
-            time_scale=settings.numerics.time_scale,
+            timing=SimulationTiming(
+                time_scale=settings.numerics.time_scale, clock=sim_clock
+            ),
+            callbacks=SimulationCallbacks(
+                on_begin=lambda: source.begin_acquire(seed=binding.root_seed)
+            ),
         )
         soc = SimulationSoc(soccfg, binding, routes=tuple((gen, adc) for gen in gens))
         return SimulationEnvironment(

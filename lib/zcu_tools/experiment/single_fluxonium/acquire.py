@@ -1,6 +1,6 @@
 """One single-fluxonium acquire lifetime and ADC-owned round sampling."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -130,11 +130,13 @@ class SingleFluxoniumAcquire:
             save_replay(
                 owner.private_replay,
                 ReplayAcquire(
-                    settings=owner.settings,
+                    settings=owner.effective_settings,
                     request=acquire,
                     versions=replay.replay_versions(),
                 ),
-                snapshot,
+                replace(snapshot, model_identity=owner.identity)
+                if owner.settings.drift is not None
+                else snapshot,
                 index,
             )
         return result

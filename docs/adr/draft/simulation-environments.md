@@ -93,9 +93,21 @@ FTF builder 明確選 V／A，flux helper 比對實際 driver 單位，不以預
 
 同一 acquire 的 program／layout 固定，已排定的 sweep／register／table 控制仍執行。不熱載入 YAML、不自動重編譯被改動的 cfg、不放寬外部 mutation gate。不同 flux rounds 的最終平均是混合條件平均，不自動形成 flux sweep，必須保留各 round 輸入以追溯。
 
-模型不承接前一 shot、round 或 acquire 的量子態。每 shot 從當下 DC、含耦合 H0 的共同溫度 Gibbs 態開始；T=0 使用基態。Reps 間 relax_delay 不造成殘留激發或 repetition-induced steady state，shot 內 idle 正常演化。主機等待不推進物理時間。
+模型不承接前一 shot、round 或 acquire 的量子態。每 shot 從當下 DC、含耦合 H0 的共同溫度 Gibbs 態開始；T=0 使用基態。Reps 間 relax_delay 不造成殘留激發或 repetition-induced steady state，shot 內 idle 正常演化。主機等待不延續量子態演化；single-fluxonium 的損耗漂移時鐘仍計入等待時間。
 
 2026-10-13，使用者接受限制：「2理論上希望能支援reps這層的relax_delay效應，但可能難度太大了，每個shot獨立是可以的。」對熱初態選擇「B，需要考慮Thermal population」，並對初態／耗散使用共同溫度選擇「B」。這不是不支援熱人口，也不是證明跨 shot 演化不可行。
+
+### Single-fluxonium 損耗漂移與模擬時鐘
+
+Single-fluxonium 的選填 YAML `drift` 區塊為 `q_cap`、`xqp`、`aphi` 各自指定 `sigma` 與 `tau_s`。省略或 null 關閉漂移。選取的損耗值必須為正。`sigma` 是 ln(loss) 的穩態標準差，`tau_s` 是秒制相關時間。Log 平均值為 ln(YAML 損耗值)。每個新環境從 YAML 損耗值開始，第一筆 acquisition 固定 OU 時間原點。後續取樣用任意時間差的精確 OU 轉移，不用固定步長積分。
+
+一個模擬環境共用一個 `SimulationClock`，時間等於 `time.monotonic()` 加只增不減的 offset。每個完成 round 增加 `max(0, 未乘 time_scale 的物理時長 - 實際牆鐘時長)`。牆鐘時長包含 snapshot、計算與 pacing sleep。取消或失敗的 round 不補 offset。Acquisition 間的等待由牆鐘自然計入。新環境重設 offset 為零。時鐘只在模擬側執行，真實 acquire 不接觸它，依 [[0072]]。
+
+`SimulationBinding.begin` 在 admission 後、request 建構前呼叫模擬端 preparation。`SingleFluxoniumSource.open_acquire` 消耗這份 preparation，不再次取樣。直接使用 Source 的 caller 則在 open 時取樣。整次 acquisition 的 sweep 與 rounds 共用有效損耗，DC 裝置值仍逐 round 捕捉。獨立 drift RNG 由 acquisition 根種子派生，不消耗既有 ADC 抽樣 stream。相同種子只在相同時間序列下重現軌跡。
+
+開啟漂移時，模擬端每次 acquisition 寫一行 JSONL。預設位置為 `~/.local/state/zcu-tools/simulation/single-fluxonium/<session>/truth.jsonl`，builder/source 的 `truth_log` 可指定其他檔案。每行包含 session UUID、秒制 `sim_now`、UTC ISO `wall_time`，以及 `q_cap`、`q_ind`、`xqp`、`aphi`。新環境產生新 session。關閉漂移不建立檔案。I/O 失敗向 caller 傳遞，不偽裝成成功。
+
+Private replay 保存當次有效 settings，覆蓋損耗並關閉 drift，snapshot 的模型 identity 與它一致。舊 acquisition 不因後續漂移或當前時鐘而改變。真值與 private replay 均不進 Run、GUI、MCP 或 Labber metadata。此交付不新增 six-fluxonium 的獨立漂移，也不精簡跨 acquisition 快取。
 
 ### Acquire 接線與末端讀出的裁決
 

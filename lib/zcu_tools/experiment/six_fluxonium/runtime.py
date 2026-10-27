@@ -20,12 +20,16 @@ from zcu_tools.core.simulation import (
 )
 from zcu_tools.device import DeviceManager, FakeDevice, FakeDeviceInfo
 from zcu_tools.experiment.simulation import SimulationEnvironment
-from zcu_tools.experiment.single_fluxonium import SingleFluxoniumSource
+from zcu_tools.experiment.single_fluxonium import (
+    SingleFluxoniumRuntimeOptions,
+    SingleFluxoniumSource,
+)
 from zcu_tools.program.v2.mocksoc import make_mux_mock_soccfg
 from zcu_tools.program.v2.simulation import (
     IntegratedRound,
     SimulationBinding,
     SimulationSoc,
+    SimulationTiming,
 )
 from zcu_tools.resources.single_fluxonium.schema import (
     DCBias,
@@ -144,13 +148,15 @@ class SixFluxoniumSource:
                 ),
                 devices,
                 readout_kind="mux",
-                engine=Engine(
-                    workers=1,
-                    cache_bytes=settings.numerics.prepare_cache_bytes // 6,
-                    result_memo_bytes=settings.numerics.result_memo_bytes // 6,
-                    routing_cache_bytes=settings.numerics.routing_cache_bytes // 6,
+                runtime=SingleFluxoniumRuntimeOptions(
+                    engine=Engine(
+                        workers=1,
+                        cache_bytes=settings.numerics.prepare_cache_bytes // 6,
+                        result_memo_bytes=settings.numerics.result_memo_bytes // 6,
+                        routing_cache_bytes=settings.numerics.routing_cache_bytes // 6,
+                    ),
+                    readout_cache_bytes=settings.numerics.adc_cache_bytes,
                 ),
-                readout_cache_bytes=settings.numerics.adc_cache_bytes,
             )
             for index, qubit in enumerate(settings.qubits.ordered())
         )
@@ -402,7 +408,9 @@ def six_fluxonium(
             source.execute,
             backend_version="six-fluxonium-v1",
             seed=settings.qubits.Q1.numerics.seed,
-            time_scale=max(q.numerics.time_scale for q in settings.qubits.ordered()),
+            timing=SimulationTiming(
+                time_scale=max(q.numerics.time_scale for q in settings.qubits.ordered())
+            ),
         )
         routes = (
             *((0, ch) for ch in range(6)),

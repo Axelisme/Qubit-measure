@@ -58,6 +58,29 @@ numerics:
 """
 
 
+def test_optional_drift_validates_log_ou_parameters_and_positive_loss():
+    document = yaml.safe_load(DOCUMENT)
+    document["chip"]["qubit"].update(q_cap=1e6, xqp=1e-7, aphi=1e-6)
+    document["drift"] = {"q_cap": {"sigma": 0.2, "tau_s": 3600.0}}
+    parsed = _parse(document)
+    assert parsed.model_dump(mode="json")["drift"]["q_cap"] == {
+        "sigma": 0.2,
+        "tau_s": 3600.0,
+    }
+    for invalid in ({"sigma": -0.1, "tau_s": 1.0}, {"sigma": 0.1, "tau_s": 0.0}):
+        document["drift"]["q_cap"] = invalid
+        with pytest.raises(ValueError, match="drift.q_cap"):
+            _parse(document)
+    document["drift"] = {"xqp": {"sigma": 0.2, "tau_s": 10.0}}
+    document["chip"]["qubit"]["xqp"] = 0.0
+    with pytest.raises(ValueError, match="drift.xqp.*positive"):
+        _parse(document)
+    document["drift"] = {"q_cap": {"sigma": 0.2, "tau_s": 10.0}}
+    document["chip"]["qubit"]["q_cap"] = None
+    with pytest.raises(ValueError, match="drift.q_cap.*positive"):
+        _parse(document)
+
+
 def test_fixed_round_duration_reports_time_scale_migration():
     document = yaml.safe_load(DOCUMENT)
     document["numerics"]["min_round_duration_s"] = 0.2
