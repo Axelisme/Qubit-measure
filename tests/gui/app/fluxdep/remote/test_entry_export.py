@@ -6,7 +6,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from zcu_tools.analysis.flux import ComponentFluxContext
+from zcu_tools.analysis.flux import ComponentFluxContext, DevicePeriod, FluxFrame
 from zcu_tools.gui.app.analysis_project.entry import AnalysisTarget
 from zcu_tools.gui.app.fluxdep.state import SpectrumEntry
 from zcu_tools.gui.remote.errors import RemoteError
@@ -165,6 +165,49 @@ def test_skipped_predictor_projects_null_path_and_both_receipts(
         "device": None,
         "reason": "Synthetic target has no calibration. Use fluxdep measurement writeback.",
     }
+
+
+def test_export_unit_failure_reaches_rpc_without_writing(
+    route_harness: RouteHarness, analysis_entry: ResultEntry
+) -> None:
+    target = AnalysisTarget.open(
+        analysis_entry.result_path.parent.parent, "synthetic", "Q2"
+    )
+    entry = replace(
+        aligned_export_state(target).get_spectrum("aligned"),
+        filter_mask=None,
+        brush_mask=None,
+        device_snapshot={"coil": {"value": 1.0, "unit": "mA"}},
+    )
+    context = ComponentFluxContext(
+        FluxFrame(
+            0.2, {"unnamed_device": DevicePeriod(8.0), "coil": DevicePeriod(4.0, "A")}
+        ),
+        "unnamed_device",
+        {"unnamed_device": "native", "coil": "A"},
+    )
+    route_harness.ctrl.configure_flux_context(lambda _model: context)
+    client = route_harness.client()
+    assert route_harness.request(
+        client,
+        "project.setup",
+        project_root=str(analysis_entry.result_path.parent.parent),
+        entry="synthetic",
+        component="Q2",
+    )["ok"]
+    route_harness.ctrl.state.put_spectrum(entry)
+    route_harness.ctrl.state.set_fit_result((5.0, 1.2, 0.4))
+
+    exported = route_harness.request(client, "fit.export_params")
+
+    assert not exported["ok"]
+    assert exported["error"]["code"] == "controller_error"
+    message = exported["error"]["message"]
+    assert "coil" in message
+    assert "'mA'" in message and "'A'" in message
+    assert not target.predictor_path.exists()
+    assert snapshot(analysis_entry.setup).components["Q2"].model_dump()["EJ"] == 9.0
+    assert analysis_entry.ledger.read_events_snapshot() == ()
 
 
 @pytest.mark.parametrize(

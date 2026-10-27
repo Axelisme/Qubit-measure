@@ -43,28 +43,34 @@ def export_target(fluxonium_entry: ResultEntry) -> Iterator[AnalysisTarget]:
         component_registry.unregister("qubit/fluxonium/export")
 
 
+@pytest.mark.parametrize("other_unit", ["V", "native"])
 @pytest.mark.parametrize("snapshot_kind", ["present", "missing_other", "empty"])
 def test_export_v2_uses_fitted_swept_period_and_other_snapshot_contribution(
     export_target: AnalysisTarget,
     snapshot_kind: str,
+    other_unit: str,
 ) -> None:
     state = aligned_export_state(export_target)
     entry = state.get_spectrum("aligned")
     entry.device = "swept"
-    entry.unit = "A"
+    # Component period is skipped, so the dataset may use a different axis unit.
+    entry.unit = "mA"
     entry.device_snapshot = {
-        "swept": {"value": 99.0, "unit": "A"},
+        # Swept and out-of-frame snapshot units are not used by the inverse.
+        "swept": {"value": 99.0, "unit": "V"},
+        "unrelated": {"value": 2.0, "unit": "Hz"},
     }
     if snapshot_kind == "present":
-        entry.device_snapshot["coil"] = {"value": 1.0, "unit": "V"}
+        entry.device_snapshot["coil"] = {"value": 1.0, "unit": other_unit}
     elif snapshot_kind == "empty":
         entry.device_snapshot = {}
     context = ComponentFluxContext(
         FluxFrame(
-            0.9, {"coil": DevicePeriod(-4.0, "V"), "swept": DevicePeriod(-8.0, "A")}
+            0.9,
+            {"coil": DevicePeriod(-4.0, other_unit), "swept": DevicePeriod(-8.0, "A")},
         ),
         "coil",
-        {"swept": "A", "coil": "V"},
+        {"swept": "A", "coil": other_unit},
     )
     service = FitService(state)
     service.configure_export(skip_calibration)
@@ -80,7 +86,7 @@ def test_export_v2_uses_fitted_swept_period_and_other_snapshot_contribution(
     assert predictor.flux.to_dict() == {
         "offset": pytest.approx(0.4 if snapshot_kind == "present" else 0.15),
         "period": {"swept": 2.0, "coil": -4.0},
-        "unit": {"swept": "A", "coil": "V"},
+        "unit": {"swept": "mA", "coil": other_unit},
     }
 
 
@@ -94,9 +100,12 @@ def test_predictor_skip_retains_component_plan_and_ledger(
     entry = state.get_spectrum("aligned")
     entry.device = {"unknown": "other", "unnamed": "unnamed_device"}.get(case, "swept")
     entry.unit = "A"
-    frame = FluxFrame(0.2, {"swept": DevicePeriod(-8.0, "A")})
-    if case == "missing_snapshot":
-        frame = FluxFrame(0.2, {**frame.devices, "coil": DevicePeriod(-4.0, "V")})
+    frame = FluxFrame(
+        0.2, {"swept": DevicePeriod(-8.0, "A"), "coil": DevicePeriod(-4.0, "V")}
+    )
+    if case != "missing_snapshot":
+        # No inverse is performed on these skip paths, so this unit is unused.
+        entry.device_snapshot = {"coil": {"value": 1.0, "unit": "mA"}}
     context = ComponentFluxContext(
         None if case == "uncalibrated" else frame,
         "swept",
@@ -155,6 +164,89 @@ def test_predictor_uses_positive_fitted_span_even_for_signed_restored_alignment(
     predictor = load_predictor_file(Path(receipt.savepath))
     assert predictor.flux.period == {"unnamed_device": 2.0}
     assert predictor.flux.offset == pytest.approx(0.15)
+
+
+@pytest.mark.parametrize(
+    ("actual_unit", "expected_unit"),
+    [("mA", "A"), ("native", "A"), ("A", "native")],
+)
+def test_used_snapshot_unit_mismatch_fails_before_export(
+    export_target: AnalysisTarget, actual_unit: str, expected_unit: str
+) -> None:
+    state = aligned_export_state(export_target)
+    entry = state.get_spectrum("aligned")
+    entry.device_snapshot = {"coil": {"value": 1.0, "unit": actual_unit}}
+    context = ComponentFluxContext(
+        FluxFrame(
+            0.2,
+            {
+                "unnamed_device": DevicePeriod(8.0),
+                "coil": DevicePeriod(-4.0, expected_unit),
+            },
+        ),
+        "unnamed_device",
+        {"unnamed_device": "native", "coil": expected_unit},
+    )
+    service = FitService(state)
+    service.configure_export(skip_calibration)
+    service.configure_flux_context(lambda _model: context)
+
+    with pytest.raises(ValueError, match=f"coil.*{actual_unit}.*{expected_unit}"):
+        service.export_params_receipt()
+
+    assert not export_target.predictor_path.exists()
+    assert (
+        snapshot(export_target.resource.setup).components["Qcal"].model_dump()["EJ"]
+        is None
+    )
+    assert export_target.resource.ledger.read_events_snapshot() == ()
+
+
+@pytest.mark.parametrize("calibrated", [True, False])
+@pytest.mark.parametrize(
+    ("axis_unit", "target_unit"),
+    [("mA", "A"), ("native", "A"), ("A", None)],
+)
+def test_component_period_rejects_axis_unit_mismatch_even_when_predictor_skips(
+    export_target: AnalysisTarget,
+    calibrated: bool,
+    axis_unit: str,
+    target_unit: str | None,
+) -> None:
+    state = aligned_export_state(export_target)
+    state.get_spectrum("aligned").unit = axis_unit
+    # The planner targets swept, not the spectrum's unnamed source.
+    context = ComponentFluxContext(
+        FluxFrame(0.2, {}) if calibrated else None,
+        "swept",
+        {},
+    )
+    if target_unit is not None:
+        context = ComponentFluxContext(
+            FluxFrame(0.2, {"swept": DevicePeriod(-8.0, target_unit)})
+            if calibrated
+            else None,
+            "swept",
+            {"swept": target_unit},
+        )
+    service = FitService(state)
+    service.configure_flux_context(lambda _model: context)
+    service.configure_export(
+        lambda _model, points: ComponentExportPlan(
+            {"calibration": -points.flux_period},
+            FluxWritebackReceipt("written", "swept", None),
+        )
+    )
+
+    with pytest.raises(
+        ValueError, match=f"swept.*{axis_unit}.*{target_unit or 'native'}"
+    ):
+        service.export_params_receipt()
+
+    model = snapshot(export_target.resource.setup).components["Qcal"].model_dump()
+    assert (model["calibration"], model["EJ"]) == (0.0, None)
+    assert not export_target.predictor_path.exists()
+    assert export_target.resource.ledger.read_events_snapshot() == ()
 
 
 @pytest.mark.parametrize("invalid", [float("nan"), float("inf")])

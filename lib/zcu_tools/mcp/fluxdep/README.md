@@ -185,16 +185,22 @@ spectrum used for calibration, including zero-point spectra. This is the export 
 device and skip reason. No partial status is added. The lab planner updates only
 the selected `flux_dev` period, retaining its sign, and never component offset,
 even with one device or offset=null. Check that `flux_dev` names the swept device.
-A missing `flux_dev` skips period, not predictor or energies. Measurement fluxdep
-writeback is a separate operation with a default-selected offset item and notes
+A missing `flux_dev` skips component period, not energies; predictor eligibility is independent.
+For a written component receipt, the fitted axis unit must exactly match the
+context unit for the planner's receipt.device. A missing unit key means native.
+A mismatch fails before output, naming the device and both units, without conversion.
+Measurement fluxdep writeback is a separate operation with a default-selected offset item and notes
 for other devices' Run-snapshot contributions. MCP does not read component fields or infer a frame.
 `predictor_writeback` independently reports whether the dataset predictor v2 was
 written. Its period mapping starts with the explicit scanned device, whose
 period is the positive fitted span; other signed periods come from the component.
 Offset uses the spectrum's acquisition scalars and fitted half, never the scanned
-snapshot value again. Missing other scalars contribute zero; invalid used values
-fail before output. Uncalibrated context, unknown source device or no whole
-snapshot for multiple devices skip the predictor with savepath=null. A matching
+snapshot value again. Only used other scalar units are checked against the frame;
+missing units mean native, which matches only native. Mismatches name the device
+and both units, with no conversion. Scanned snapshot units are not checked.
+Missing other scalars contribute zero; invalid used values fail before output.
+Uncalibrated context, unknown source device or no whole snapshot for multiple
+devices skip the predictor with savepath=null. A matching
 single-device source needs no snapshot. Skips still write component energies,
 P1 period and ledger, and leave any existing predictor unchanged.
 MCP projects the native receipt without reading fit/spectrum state again, rounding

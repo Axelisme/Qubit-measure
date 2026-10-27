@@ -27,6 +27,9 @@ Fluxdep app 另寫 predictor v2 時，以明示 device 當第一台儀器。
 被掃 period 取擬合正值 `2*abs(integer-half)`，其他儀器 periods 抄 component 並保留符號。
 這不改變 component P1 的被掃 period 保留原方向規則，也不改寫 checkpoint 內保存的 signed period。
 Predictor offset 扣除其他 snapshot 儀器的貢獻，被掃儀器只取 half，不重加 snapshot。
+被掃 unit 取掃描軸，snapshot 中該儀器的 unit 原樣保存，不與 frame 核對。
+反解使用的其他 scalar unit 與 frame unit 須精確相同，缺 unit 視為 native，不換算。
+Component P1 另核對掃描軸單位與 planner receipt.device 的 context unit，不符就拒絕輸出。
 
 ## 明確升級
 

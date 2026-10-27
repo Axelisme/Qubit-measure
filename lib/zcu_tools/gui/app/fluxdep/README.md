@@ -49,8 +49,8 @@ Dialog 列出全部合法 component，有效 qubit alias 只作預選。
 Alias 缺失或錯誤時，OK 保持停用，直到使用者明示選擇。
 不建立新條目，不讀舊兩級目錄或 params.json。啟動腳本註冊 lab component schema，框架不 import lab。
 
-Export params… 寫 `predictors/<component>.json`，再更新 setup 宣告的 EJ／EC／EL
-與注入 planner 提出的校準欄位，最後追加 analysis ledger。
+Export params… 先判定是否能寫 predictor v2。可寫時輸出 `predictors/<component>.json`。
+接著更新 setup 宣告的 EJ／EC／EL 與注入 planner 提出的校準欄位，最後追加 analysis ledger。
 `export_plan.ExportPlanner` 接收 detached component 與 app owner 的 `AlignmentPublication`，包含 aligned native integer／half／period，
 回傳 component-relative scalar writes 及 `flux_writeback`。未接 planner 時，export 在輸出前拒絕。
 Framework 經注入的 ComponentFluxContext 取得 frame，不解讀 lab 的 flux 區塊。
@@ -60,7 +60,11 @@ Snapshot scalar 在載入時由 device owner 投影，export 不讀 live device�
 有 `flux_dev` 時只更新 `flux.period.<flux_dev>` 的大小，保留原方向，首次使用正方向。
 單儀器、多儀器、空 period mapping 與 offset=null 都不改 component offset，其他 periods 也保留。
 Operator 必須確認 `flux_dev` 是這批資料的被掃儀器，app 不從 snapshot 推測來源。
-缺 `flux_dev` 時跳過 period，但 EJ／EC／EL、predictor 與 ledger 仍匯出。
+缺 `flux_dev` 時跳過 component period，但仍寫 EJ／EC／EL 與 ledger，predictor 另依來源與 snapshot 判定。
+P1 只在 component receipt 為 written 時核對單位。目標取 planner 的 receipt.device，
+將掃描軸單位與 context.units 中該儀器的單位精確比較，缺 key 視為 native。
+不符時在任何輸出前報錯，指名儀器與兩個單位，不換算、不解析 component 或 plan.fields。
+Predictor skipped 或 frame=None 不取消單位相符的合法 P1。
 GUI status 與 RPC／MCP 的 `flux_writeback` 只描述 component P1。
 獨立的 `predictor_writeback` 描述 predictor，兩者均為 written／skipped、目標 device 與原因，不新增 partial。
 資料可能經歷 flux jump，app 對齊不代表目前 component offset。
@@ -71,7 +75,10 @@ Predictor 寫 `zcu.predictor` v2，params 只有 EJ／EC／EL。
 `flux.period` 第一台是光譜明示的被掃儀器，period 取 `2*abs(integer-half)` 正值。
 其他 periods 與符號抄 component frame，不套 P1 的被掃方向規則。
 `offset = 0.5 - half / fitted_period - Σ(other_value / other_period)`。
-被掃儀器只用 half，不重加 snapshot 值；snapshot 缺席的其他儀器貢獻為 0，在場無效則報錯指名。
+被掃儀器的 period 與 unit 取掃描軸，只用 half，不重加 snapshot 值或核對其 snapshot unit。
+實際參與反解的其他 scalar unit 須與 frame unit 字串相同，缺 unit 視為 native，native 只等 native。
+`analysis.flux.require_matching_device_unit` 執行共用比對，不換算，錯誤指名儀器與兩個單位。
+Snapshot 缺席的其他儀器貢獻為 0，在場無效則報錯指名。不反解的 skip 路徑不核對未使用的 scalar unit。
 整份 snapshot 未記錄時，只有來源名稱吻合的單儀器 component 可寫 predictor。
 來源名稱不在 component periods、frame=None 未校準或多儀器缺整份 snapshot 時，不寫 predictor。
 此時 savepath 為 null，predictor_writeback 為 skipped，component energies／P1 period 與 ledger 仍寫入。
@@ -95,7 +102,7 @@ Controller owners。
   `zcu_tools.analysis.fluxdep` + `zcu_tools.analysis.spectrum`。
 - [`controller.py`](controller.py)： 命令 façade：持 State + EventBus + service，每動作 mutate
   State 後 emit 對應事件。service 保持純（不碰 bus），Controller 是協調層。
-  **無 measure 概念**（run/analyze/writeback/context/device/tab）。
+  不持有 measure 的 run、硬體 device manager 或多 tab 生命週期。
 - [`interactive.py`](interactive.py)： Qt-free `FluxDepInteractiveOwner` 每張譜保存一份 live 定線／OneTone／TwoTone context 與 Undo，跨譜 Filter 全域一份。GUI controls 與 RPC commands 共用 `gui.interactive` 的 Actions／Session。
   Active 只決定顯示。切換不退休草稿。
   Window close dispose 全部 contexts 並 quiesce runner；view detach 不終止 Session。
@@ -117,7 +124,10 @@ AnalyzePanel 是 **MainWindow 持有的單例**（第一次進 Fit 頁時建立�
 再向 device 的 `snapshot_scalar_values` 取得 context 指名的 scalar。它不解析 cfg 或 driver settings。
 缺 snapshot 保留 None，已記錄空 snapshot 保留空 mapping。
 
-`FluxDepGuiBehavior` 接受組合根注入的 `ComponentFluxProvider`，Controller 將它交給 load service。
+`FluxDepGuiBehavior` 接受組合根注入的 `ComponentFluxProvider`，Controller 同時交給 LoadService 與 FitService。
+共用 `analysis_project.native` 擁有 `NativeSpectrumSelection` 與 `read_spectrum_source`。
+共用 `analysis_project.native_dialog` 擁有 `NativeDeviceChoices` 與 `NativeSpectrumDialog`，
+不取得 component 或 predictor。Fluxdep 的 `ui.load_dialog.LoadSpectrumDialog` 只加 Type、Inherit 與 alignment overlay。
 Native dialog 與 RPC/MCP 都明示 variable、device_axis、device。Dialog 只在變數／頻率軸唯一時預選。
 有可用 context 時，儀器選項來自 frame.devices；無 target 或 provider 不可用時，只保留 unnamed_device。
 Provider 錯誤指名 component 與 kind，dialog 顯示錯誤，service 也記錄 placeholder 載入的原因。

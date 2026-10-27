@@ -25,7 +25,12 @@ from dataclasses import dataclass
 import numpy as np
 from numpy.typing import NDArray
 
-from zcu_tools.analysis.flux import ComponentFluxContext, DevicePeriod, offset_for_flux
+from zcu_tools.analysis.flux import (
+    ComponentFluxContext,
+    DevicePeriod,
+    offset_for_flux,
+    require_matching_device_unit,
+)
 from zcu_tools.analysis.fluxdep.models import TransitionDict
 from zcu_tools.analysis.fluxdep.search import (
     DatabaseSearchResult,
@@ -150,11 +155,11 @@ def _predictor_flux(
         }
     )
     # These are already owner-projected scalars, not raw driver Info settings.
-    values = {
-        name: scalar["value"]
-        for name, scalar in (aligned.device_snapshot or {}).items()
-        if name in devices and name != aligned.device
-    }
+    values: dict[str, float] = {}
+    for name, scalar in (aligned.device_snapshot or {}).items():
+        if name in devices and name != aligned.device:
+            require_matching_device_unit(name, scalar.get("unit"), devices[name].unit)
+            values[name] = scalar["value"]
     values[aligned.device] = aligned.flux_half
     return (
         PredictorFlux(
@@ -359,9 +364,14 @@ class FitService:
         uses its explicit device and positive fitted period, other component
         periods with their signs, and owner-projected acquisition scalars to
         infer offset at half flux. The scanned snapshot value is ignored; absent
-        other scalars contribute zero. An invalid used value raises ValueError
-        naming the device before output. Missing/rejected context providers also
-        fail before output. Unknown device, uncalibrated frame or absent whole
+        other scalars contribute zero. Used other scalar units must exactly match
+        their frame units; missing units mean native, without conversion. The
+        planner's written receipt names the P1 target; its context unit must match
+        the fitted axis unit, even if the predictor will skip or frame is None.
+        A skipped component receipt does not trigger this P1 unit check. Invalid
+        used values or mismatched units raise ValueError naming the device and,
+        for a mismatch, both units before output. Missing/rejected context
+        providers also fail before output. Unknown device, uncalibrated frame or absent whole
         snapshot with multiple devices skip the predictor with savepath=None and
         an independent predictor_writeback receipt, leaving existing files alone.
         Declared EJ/EC/EL and the injected planner's component-relative calibration
@@ -413,6 +423,11 @@ class FitService:
             ),
         )
         context = component_flux_context(target, self._flux_context_provider)
+        period_device = plan.flux_writeback.device
+        if plan.flux_writeback.status == "written" and period_device is not None:
+            require_matching_device_unit(
+                period_device, aligned.unit, context.units.get(period_device)
+            )
         flux, predictor_writeback = _predictor_flux(context, aligned)
         EJ, EC, EL = fit.params
         savepath = None

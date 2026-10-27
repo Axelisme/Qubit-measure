@@ -36,7 +36,9 @@ period 必須有限且非零，unit 必須是非空白字串。空的 period/uni
 Fluxdep app 匯出時，把光譜明示的被掃儀器放在 `flux.period` 第一位，供預設橫軸使用。
 被掃 period 取擬合正值 `2*abs(integer-half)`，其他儀器 period 保留 component 的符號。
 這與 component P1 保留被掃儀器原方向的規則分開。
-Offset 由 half 與其他儀器的 acquisition scalar 反解，不重加被掃 snapshot 值。
+被掃 unit 取掃描軸。Offset 由 half 與其他儀器的 acquisition scalar 反解，不重加被掃 snapshot 值。
+只比對反解使用的其他 scalar unit 與 frame unit，字串須精確相同，缺 unit 視為 native。
+Native 只等 native，不換算。錯誤指名儀器與兩個單位，被掃 snapshot unit 不核對。
 缺席的其他 scalar 貢獻為 0。缺整份 snapshot 時，只有名稱吻合的單儀器來源可匯出。
 未校準、來源名稱不吻合或多儀器缺整份 snapshot 時，不寫 predictor，receipt 為 skipped、savepath=null。
 Setup 與 ledger 仍寫入，既有 predictor 保持原樣。

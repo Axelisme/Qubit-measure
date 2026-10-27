@@ -79,7 +79,11 @@ savepath=null and leave any existing predictor untouched. Setup/ledger still wri
 The GUI displays both outcomes. The app README documents device/snapshot skip rules.
 The app submits the injected planner's component-relative fields, not a
 framework interpretation of lab flux schema. Missing planner or rejected
-calibration fails before output. Failure preserves the successful write prefix
+calibration fails before output. Unit mismatches also fail before output and
+name the device and both units. Only used other snapshot scalars are checked;
+P1 checks the fitted axis against the planner receipt.device's context unit only
+for a written component receipt. No unit conversion is performed.
+Failure preserves the successful write prefix
 without rollback. Spectrum list/snapshot and
 selection snapshot report unfinished drafts separately from published data.
 `spectrum.list` reports each published loaded/aligned/sampled stage and the count
