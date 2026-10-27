@@ -350,30 +350,35 @@ def test_persistent_predictor_hide_reopen_keeps_callbacks_until_done(qapp, tmp_p
         parent=host, parameter_provider=provider, persistent_on_close=True
     )
     opener.clicked.connect(dialog.show)
-    field = dialog.findChild(EvalNumericField)
-    assert field is not None
-    edit = field.findChild(QLineEdit, "eval.expression")
+    expression_name = "predictor_calibration_frequency_expression"
+    field = next(
+        field
+        for field in dialog.findChildren(EvalNumericField)
+        if field.findChild(QLineEdit, expression_name) is not None
+    )
+    edit = field.findChild(QLineEdit, expression_name)
     assert edit is not None
     changes: list[None] = []
     field.raw_changed.connect(lambda: changes.append(None))
     ui = ComponentDriver(host)
+    calibration_ui = ComponentDriver(field)
     try:
         host.show()
         ui.click("Open predictor")
         ui.screenshot(tmp_path / "01-open.png")
-        ui.enter_text(object_name="eval.expression", value="1+1", commit=False)
-        assert ui.observe(object_name="eval.preview").text == "= 2.0"
+        calibration_ui.enter_text(object_name=expression_name, value="1+1", commit=False)
+        assert calibration_ui.observe(object_name="eval.preview").text == "= 2.0"
         ui.screenshot(tmp_path / "02-expression.png")
         ui.click("Close")
-        assert not ui.observe(object_name="eval.expression").visible
+        assert not calibration_ui.observe(object_name=expression_name).visible
         ui.screenshot(tmp_path / "03-hidden.png")
         ui.click("Open predictor")
-        assert ui.text_input(object_name="eval.expression").text == "1+1"
+        assert calibration_ui.text_input(object_name=expression_name).text == "1+1"
         ui.screenshot(tmp_path / "04-reopened.png")
         provider.reset_mock()
         changes.clear()
-        ui.enter_text(object_name="eval.expression", value="2+2", commit=False)
-        assert ui.observe(object_name="eval.preview").text == "= 4.0"
+        calibration_ui.enter_text(object_name=expression_name, value="2+2", commit=False)
+        assert calibration_ui.observe(object_name="eval.preview").text == "= 4.0"
         assert provider.called
         assert changes
         ui.screenshot(tmp_path / "05-reopened-edit.png")
