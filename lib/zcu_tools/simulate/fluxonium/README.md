@@ -1,6 +1,6 @@
 # `simulate/fluxonium` 模塊重點文檔
 
-**Last updated:** 2026-10-27，逐點固定溫度 T1 與 reduced-flux predictor
+**Last updated:** 2026-10-28，reduced-flux local fit 與 snapshot
 
 **讀者：** framework-dev。Fluxonium 能譜、色散與 predictor 的數值工具。
 
@@ -121,6 +121,14 @@ SQUID transmon 的 `TransmonParams` 與 `TransmonPredictor` 在 `simulate/transm
   可達時 clamped=false。無效輸入拒絕，數值失敗傳遞。
   分支掃描與容差見 [transmon 數值政策](../transmon/README.md#calibration)。
 - `clone()` 建立能量相同的新實例。修改 clone 的 params 不影響原實例。
+
+### `physical_fit.py` — Reduced-flux local fit
+
+`FluxoniumModelSnapshot` 保存 GHz 能量與以 Φ0 計的 `offset_correction`。
+`fit_local_fluxonium_model` 的量測點是 `(φ, frequency_mhz)`，不接受儀器座標。
+擬合在目前能量與 correction 附近進行；`offset_correction_span` 是 Φ0 範圍。
+恢復 snapshot 後，先把 correction 加到輸入 φ，再查詢 `make_predictor()` 的數值模型。
+儀器 frame 與 correction 的 native bias 換算由 caller 經 `analysis.flux` 承擔。
 
 ### `branch/` — 額外模擬
 

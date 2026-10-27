@@ -423,7 +423,7 @@ async def mist_fluxdep(  # noqa: C901, PLR0912, PLR0915  # tolerated: workflow f
     carry = CalCarry(
         env.context,
         seed_flux=plan.seed_flux,
-        frequency_tracker=FrequencyTracker(plan.predictor.make_predictor()),
+        frequency_tracker=FrequencyTracker(plan.predictor),
     )
     modes: tuple[Literal["excited", "ground"], ...] = (
         ("excited", "ground") if plan.measure_mode == "both" else (plan.measure_mode,)

@@ -12,6 +12,7 @@ from zcu_tools.resources.dispersive_file import load_dispersive_file
 from zcu_tools.resources.entry import document_value, snapshot
 from zcu_tools.resources.predictor_file import (
     PredictorFile,
+    PredictorFlux,
     PredictorSource,
     load_predictor_file,
 )
@@ -41,6 +42,36 @@ from tests.migrations.storage_migration.params_support import (
 pytestmark = pytest.mark.usefixtures("analysis_kind")
 
 
+@pytest.mark.parametrize("missing", ["flux_half", "flux_period", "flux_bias"])
+def test_incomplete_affine_stays_pending_without_publishing_predictor(
+    request_data: MigrationRequest,
+    analysis_mapping: MigrationMapping,
+    missing: str,
+) -> None:
+    fit: JsonObject = {
+        "params": {"EJ": 6.0, "EC": 1.0, "EL": 0.8},
+        "flux_half": 0.2,
+        "flux_period": -2.0,
+        "flux_bias": 0.05,
+    }
+    fit.pop(missing)
+    source = write_params(request_data, {"fluxdep_fit": fit})
+    report = migrate(request_data, analysis_mapping)
+    assert any(
+        item.source == source and missing in item.reason for item in report.pending
+    )
+    assert not (
+        request_data.results_root / request_data.name / "predictors/Qlegacy.json"
+    ).exists()
+    assert (
+        document_value(
+            snapshot(open_entry(request_data).setup),
+            "Qlegacy.ext.legacy_params.fluxdep_fit",
+        )
+        == fit
+    )
+
+
 @pytest.mark.parametrize("dry_run", [True, False])
 @pytest.mark.parametrize("unit", [None, "mA"])
 def test_historical_top_level_fit_projects_exact_source_leaves(
@@ -53,7 +84,8 @@ def test_historical_top_level_fit_projects_exact_source_leaves(
     values: JsonObject = {
         "params": {"EJ": 6.27, "EC": 1.41, "EL": 0.8, "custom.energy": [3, None]},
         "half flux": 0.25,
-        "period": 1.5,
+        "period": -1.5,
+        "flux_bias": 0.1,
         "name": "historical author",
         "project": {"name": "old project"},
         "schema_version": "legacy",
@@ -72,12 +104,10 @@ def test_historical_top_level_fit_projects_exact_source_leaves(
     assert converted.get(("params", "EJ")) == "params.EJ"
     assert converted.get(("params", "EC")) == "params.EC"
     assert converted.get(("params", "EL")) == "params.EL"
-    assert converted.get(("half flux",)) == "params.flux_half"
-    assert converted.get(("period",)) == "params.flux_period"
+    assert converted.get(("half flux",)) == "flux"
+    assert converted.get(("period",)) == "flux"
     assert any(item.location == "timestamp" for item in report.pending)
-    assert any(item.location == "flux_unit" for item in report.pending) == (
-        unit is None
-    )
+    assert not any(item.location == "flux_unit" for item in report.pending)
     preserved = {
         row.source_keys: row.destination_keys
         for row in report.key_mappings
@@ -101,10 +131,10 @@ def test_historical_top_level_fit_projects_exact_source_leaves(
     predictor = load_migrated_predictor(request)
     assert predictor == PredictorFile(
         model="fluxonium",
-        params=FluxoniumParams(
-            EJ=6.27, EC=1.41, EL=0.8, flux_half=0.25, flux_period=1.5, flux_bias=0.0
+        params=FluxoniumParams(EJ=6.27, EC=1.41, EL=0.8),
+        flux=PredictorFlux(
+            0.6, {"unnamed_device": -1.5}, {"unnamed_device": unit or "native"}
         ),
-        flux_unit=unit,
         source=PredictorSource(None, None),
     )
     assert document_value(
@@ -139,7 +169,7 @@ def test_fluxonium_identifying_parameter_allows_unknown_siblings(
     )
     assert predictor.is_file(), "an extra key must not block supported fluxonium data"
     assert load_predictor_file(predictor).params == FluxoniumParams.from_mapping(
-        {energy_key: 0.8, "flux_half": 0.2, "flux_period": 1.0, "flux_bias": 0.0}
+        {energy_key: 0.8}
     )
     assert document_value(
         snapshot(open_entry(request_data).setup),
@@ -228,7 +258,7 @@ def test_newer_fit_wins_and_top_level_values_are_compared_by_source(
     source = write_params(request_data, values)
     report = migrate(request_data, analysis_mapping)
     assert load_migrated_predictor(request_data).params == FluxoniumParams(
-        EJ=6.27, EC=1.41, EL=0.8, flux_half=0.2, flux_period=1.0, flux_bias=0.0
+        EJ=6.27, EC=1.41, EL=0.8
     )
     assert document_value(
         snapshot(open_entry(request_data).setup), "Qlegacy.ext.legacy_params"
@@ -340,9 +370,9 @@ def test_assumed_unit_fills_only_missing_predictor_evidence(
     )
     write_params(request, {"fluxdep_fit": legacy_fit})
     report = migrate(request, analysis_mapping)
-    assert read_predictor(request)["flux_unit"] == "mA"
+    assert load_migrated_predictor(request).flux.unit == {"unnamed_device": "mA"}
     assert any(
-        row.new_path == "flux_unit" and "假設單位" in row.reason
+        row.new_path == "flux.unit.unnamed_device" and "假設單位" in row.reason
         for row in report.key_mappings
     )
     assert not any(item.location == "fluxdep_fit.flux_unit" for item in report.pending)
@@ -354,7 +384,7 @@ def test_assumed_unit_fills_only_missing_predictor_evidence(
         {"flux_unit": "V"},
         {"flux_unit": "A", "fluxdep_fit": {"flux_unit": "V"}},
         {"flux_unit": None},
-        {"flux_unit": "unsupported"},
+        {"flux_unit": " "},
     ],
 )
 def test_assumption_never_replaces_explicit_predictor_units(
@@ -371,10 +401,16 @@ def test_assumption_never_replaces_explicit_predictor_units(
     legacy_fit.update(TypeAdapter(JsonObject).validate_python(fit))
     values["fluxdep_fit"] = legacy_fit
     write_params(request, values)
-    migrate(request, analysis_mapping)
-    assert read_predictor(request)["flux_unit"] == (
-        "V" if values.get("flux_unit") == "V" else None
-    )
+    report = migrate(request, analysis_mapping)
+    if values.get("flux_unit") in ("V", None):
+        assert load_migrated_predictor(request).flux.unit == {
+            "unnamed_device": values.get("flux_unit") or "native"
+        }
+    else:
+        assert report.pending
+        assert not (
+            request.results_root / request.name / "predictors/Qlegacy.json"
+        ).exists()
 
 
 @pytest.mark.parametrize("root_unit,fit_unit", [("A", None), (None, "mA"), ("V", "V")])
@@ -399,11 +435,12 @@ def test_legacy_fit_publishes_named_entry_predictor_with_native_values(
             EJ=6.27,
             EC=1.41,
             EL=0.8,
-            flux_half=0.2,
-            flux_period=1.0,
-            flux_bias=0.0,
         ),
-        flux_unit=root_unit or fit_unit,
+        flux=PredictorFlux(
+            0.3,
+            {"unnamed_device": 1.0},
+            {"unnamed_device": root_unit or fit_unit or "native"},
+        ),
         source=PredictorSource(None, "2020-07-07T16:30:00+08:00"),
     )
     point = snapshot(open_entry(request_data).use_point("bias"))
@@ -415,9 +452,9 @@ def test_legacy_fit_publishes_named_entry_predictor_with_native_values(
 
 
 @pytest.mark.parametrize(
-    "units", [{}, {"flux_unit": "A", "fit_unit": "V"}, {"flux_unit": "unknown"}]
+    "units", [{}, {"flux_unit": "A", "fit_unit": "V"}, {"flux_unit": " "}]
 )
-def test_unknown_or_conflicting_units_publish_null_and_located_pending(
+def test_missing_units_use_native_but_explicit_conflicts_remain_pending(
     request_data: MigrationRequest,
     analysis_mapping: MigrationMapping,
     legacy_fit: JsonObject,
@@ -430,12 +467,18 @@ def test_unknown_or_conflicting_units_publish_null_and_located_pending(
         legacy_fit["flux_unit"] = units["fit_unit"]
     source = write_params(request_data, values)
     report = migrate(request_data, analysis_mapping)
-    assert read_predictor(request_data)["flux_unit"] is None
-    assert predictor_params(request_data)["flux_half"] == 0.2
-    assert any(
-        item.source == source and item.location == "fluxdep_fit.flux_unit"
-        for item in report.pending
-    )
+    if not units:
+        assert load_migrated_predictor(request_data).flux.unit == {
+            "unnamed_device": "native"
+        }
+    else:
+        assert not (
+            request_data.results_root / request_data.name / "predictors/Qlegacy.json"
+        ).exists()
+        assert any(
+            item.source == source and "flux_unit" in item.reason
+            for item in report.pending
+        )
 
 
 @pytest.mark.parametrize("timestamp", [None, "historical", "2020-07-07T16:30:00"])
@@ -483,7 +526,7 @@ def test_invalid_model_values_stay_pending_without_blocking_known_parameters(
     )
 
 
-def test_partial_fit_keeps_unknowns_without_enforcing_physical_constraints(
+def test_invalid_affine_preserves_partial_energies_without_publishing_predictor(
     request_data: MigrationRequest,
     analysis_mapping: MigrationMapping,
 ) -> None:
@@ -494,13 +537,18 @@ def test_partial_fit_keeps_unknowns_without_enforcing_physical_constraints(
             "fluxdep_fit": {"params": {"EC": -1.0, "EL": None}, "flux_period": 0.0},
         },
     )
-    migrate(request_data, analysis_mapping)
-    assert load_migrated_predictor(request_data) == PredictorFile(
-        model="fluxonium",
-        params=FluxoniumParams(EC=-1.0, flux_period=0.0, flux_bias=0.0),
-        flux_unit="A",
-        source=PredictorSource(None, None),
-    )
+    report = migrate(request_data, analysis_mapping)
+    assert report.pending
+    assert document_value(
+        snapshot(open_entry(request_data).setup),
+        "Qlegacy.ext.legacy_params.fluxdep_fit",
+    ) == {
+        "params": {"EC": -1.0, "EL": None},
+        "flux_period": 0.0,
+    }
+    assert not (
+        request_data.results_root / request_data.name / "predictors/Qlegacy.json"
+    ).exists()
 
 
 @pytest.mark.parametrize("model", ["fluxonium", "transmon", "unrecognized"])
@@ -600,8 +648,22 @@ def interrupted_predictor(
     [
         ("version", True),
         ("version", 1.0),
-        ("flux_period", True),
-        ("flux_bias", False),
+        (
+            "flux",
+            {
+                "offset": 0.3,
+                "period": {"unnamed_device": True},
+                "unit": {"unnamed_device": "mV"},
+            },
+        ),
+        (
+            "flux",
+            {
+                "offset": False,
+                "period": {"unnamed_device": 1.0},
+                "unit": {"unnamed_device": "mV"},
+            },
+        ),
         ("EJ", 9.0),
         ("params", {"unknown": 1}),
         ("model", "unknown"),
@@ -620,7 +682,7 @@ def test_unfinished_resume_rejects_changed_or_schema_invalid_predictor(
     value: JsonValue,
 ) -> None:
     document = read_predictor(request_data)
-    if field in ("version", "params", "model", "source", "extra"):
+    if field in ("version", "params", "model", "flux", "source", "extra"):
         document[field] = value
     else:
         params = predictor_params(request_data)
@@ -635,7 +697,14 @@ def test_unfinished_resume_rejects_changed_or_schema_invalid_predictor(
 
 @pytest.mark.parametrize(
     "legacy_fit",
-    [{"params": {"EC": -1.0, "EL": None}, "flux_period": 0.0}],
+    [
+        {
+            "params": {"EC": -1.0, "EL": None},
+            "flux_half": 0.2,
+            "flux_period": -1.0,
+            "flux_bias": 0.0,
+        }
+    ],
 )
 @pytest.mark.parametrize("unknown_representation", ["omitted", "null"])
 def test_unfinished_resume_compares_unknown_predictor_values_semantically(
@@ -673,7 +742,7 @@ def test_unfinished_resume_accepts_same_predictor_without_rewriting(
 ) -> None:
     document = read_predictor(request_data)
     params = predictor_params(request_data)
-    params["flux_period"] = 1
+    params["EC"] = 1.41
     document["params"] = params
     interrupted_predictor.write_text(
         json.dumps(document, sort_keys=True, separators=(",", ":")), encoding="utf-8"
@@ -681,7 +750,11 @@ def test_unfinished_resume_accepts_same_predictor_without_rewriting(
     before = interrupted_predictor.read_bytes()
     migrate(replace(request_data, resume=True), analysis_mapping)
     assert interrupted_predictor.read_bytes() == before
-    document["flux_unit"] = "V"
+    document["flux"] = {
+        "offset": 0.3,
+        "period": {"unnamed_device": 1.0},
+        "unit": {"unnamed_device": "V"},
+    }
     interrupted_predictor.write_text(json.dumps(document), encoding="utf-8")
     edited = interrupted_predictor.read_bytes()
     assert_difference(
@@ -725,7 +798,11 @@ def test_dry_run_predictor_plan_matches_apply_and_completed_resume_reports_edits
     assert actual.key_mappings == dry.key_mappings
     assert actual.pending == dry.pending
     edited = read_predictor(request_data)
-    edited["flux_unit"] = "V"
+    edited["flux"] = {
+        "offset": 0.3,
+        "period": {"unnamed_device": 1.0},
+        "unit": {"unnamed_device": "V"},
+    }
     predictor_path.write_text(json.dumps(edited), encoding="utf-8")
     before = predictor_path.read_bytes()
     assert_difference(

@@ -44,7 +44,12 @@ def test_completed_analysis_rerun_uses_typed_values_and_locates_legal_edits(
     kind: str,
 ) -> None:
     values = dict(analysis_sections)
-    values["fluxdep_fit"] = {"params": {"EJ": 8.0, "EC": 1.0, "EL": 0.5}}
+    values["fluxdep_fit"] = {
+        "params": {"EJ": 8.0, "EC": 1.0, "EL": 0.5},
+        "flux_half": 0.2,
+        "flux_period": -1.0,
+        "flux_bias": 0.0,
+    }
     write_params(request_data, values)
     report = migrate(request_data, analysis_mapping)
     target = report.destination.result_path / kind / "Qlegacy.json"

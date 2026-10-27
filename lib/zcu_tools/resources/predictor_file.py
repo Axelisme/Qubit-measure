@@ -13,8 +13,10 @@ from types import MappingProxyType
 from typing import TypedDict
 
 from zcu_tools.analysis.flux import DevicePeriod, FluxFrame, offset_for_flux
+from zcu_tools.simulate.fluxonium.predict import FluxoniumParameterValues
 from zcu_tools.simulate.parameters import ModelName, ModelParams, params_class
 from zcu_tools.simulate.predictor import parameter_number
+from zcu_tools.simulate.transmon.predict import TransmonParameterValues
 from zcu_tools.utils import atomic_replace
 
 
@@ -294,8 +296,41 @@ def load_predictor_file(path: Path) -> PredictorFile:
     return _decode(value)
 
 
-def _document(predictor: PredictorFile) -> dict[str, object]:
-    return {
+class PredictorSourceValues(TypedDict):
+    """Authored nullable run_id and timezone-aware created_at text, unchanged."""
+
+    run_id: str | None
+    created_at: str | None
+
+
+class PredictorDocument(TypedDict):
+    """Detached v2 wire envelope for JSON encoding or semantic comparison.
+
+    format/version identify zcu.predictor v2. model selects the matching numeric
+    params in GHz (d is dimensionless); None means unknown. flux records native
+    signed periods and Phi0 offset. source retains authored nullable provenance.
+    """
+
+    format: str
+    version: int
+    model: ModelName
+    params: FluxoniumParameterValues | TransmonParameterValues
+    flux: PredictorFluxValues
+    source: PredictorSourceValues
+
+
+def encode_predictor_document(predictor: PredictorFile) -> PredictorDocument:
+    """Validate and encode detached zcu.predictor v2 JSON values without I/O.
+
+    The result uses exactly the save representation, including null unknowns and
+    signed native periods. Mutating its nested mappings cannot change predictor.
+    Model/type disagreement, invalid metadata or numeric representation raises
+    ValueError before returning; incomplete/unphysical energies remain allowed.
+    No model is built and no coordinates or provenance are inferred.
+    """
+    if predictor.model != predictor.params.model:
+        raise ValueError("model and params type must agree")
+    document: PredictorDocument = {
         "format": "zcu.predictor",
         "version": 2,
         "model": predictor.model,
@@ -306,6 +341,8 @@ def _document(predictor: PredictorFile) -> dict[str, object]:
             "created_at": predictor.source.created_at,
         },
     }
+    _decode(document)
+    return document
 
 
 def validate_predictor_file(predictor: PredictorFile) -> None:
@@ -317,9 +354,7 @@ def validate_predictor_file(predictor: PredictorFile) -> None:
     The input is not mutated. This checks the candidate for dry-run callers;
     save_predictor_file repeats validation before writing.
     """
-    if predictor.model != predictor.params.model:
-        raise ValueError("model and params type must agree")
-    _decode(_document(predictor))
+    encode_predictor_document(predictor)
 
 
 def save_predictor_file(path: Path, predictor: PredictorFile) -> None:
@@ -333,8 +368,7 @@ def save_predictor_file(path: Path, predictor: PredictorFile) -> None:
     and removes the sibling temporary. There is no multiwriter merge, lock or
     power-loss guarantee.
     """
-    validate_predictor_file(predictor)
-    document = _document(predictor)
+    document = encode_predictor_document(predictor)
     encoded = json.dumps(document, ensure_ascii=False, allow_nan=False, indent=2) + "\n"
     temporary: Path | None = None
     try:

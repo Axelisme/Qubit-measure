@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 import pytest
+import zcu_tools.resources.predictor_file as predictor_codec
 from zcu_tools.resources.predictor_file import (
     PredictorFile,
     PredictorFlux,
@@ -15,6 +16,24 @@ from zcu_tools.resources.predictor_file import (
 from zcu_tools.simulate.fluxonium.predict import FluxoniumParams
 from zcu_tools.simulate.parameters import ModelName, params_class
 from zcu_tools.simulate.transmon import TransmonParams
+
+
+def test_encode_document_is_detached_and_uses_the_save_representation(
+    tmp_path: Path,
+) -> None:
+    predictor = PredictorFile(
+        "fluxonium",
+        FluxoniumParams(EJ=5.0),
+        PredictorFlux(0.7, {"coil": -2.0}, {"coil": "A"}),
+        PredictorSource(None, None),
+    )
+    encoded = predictor_codec.encode_predictor_document(predictor)
+    path = tmp_path / "predictor.json"
+    save_predictor_file(path, predictor)
+    assert json.loads(path.read_text()) == encoded
+    encoded["flux"]["period"]["coil"] = 8.0
+    assert predictor.flux.period["coil"] == -2.0
+    assert load_predictor_file(path) == predictor
 
 
 @pytest.fixture

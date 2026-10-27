@@ -392,7 +392,6 @@ def test_raw_params_preservation_is_typed_located_and_durable(
         )
     expected_pending = {
         "fluxdep_fit.params.EJ",
-        "fluxdep_fit.flux_unit",
         "fluxdep_fit.timestamp",
         "dispersive.timestamp",
     }
@@ -434,10 +433,8 @@ def test_raw_params_preservation_is_typed_located_and_durable(
             "project": values["project"],
         }
     predictor = load_migrated_predictor(request_data)
-    assert predictor.params == FluxoniumParams(
-        EC=1.41, EL=0.8, flux_half=0.2, flux_period=1.0, flux_bias=0.0
-    )
-    assert predictor.flux_unit is None
+    assert predictor.params == FluxoniumParams(EC=1.41, EL=0.8)
+    assert predictor.flux.unit == {"unnamed_device": "native"}
     assert predictor.source.created_at is None
     assert (
         load_dispersive_file(entry.dispersive_path / "Qlegacy.json").params.bare_rf
@@ -485,6 +482,7 @@ def test_formal_analysis_values_leave_only_unconverted_raw_leaves(
                 "params": {"EJ": 6.0, "EC": None, "EL": 0.8},
                 "flux_half": 0.2,
                 "flux_period": 1.0,
+                "flux_bias": 0.0,
                 "timestamp": timestamp,
                 "plot_transitions": {"r_f": 5.2, "literal.key": [1, None]},
             },
@@ -515,7 +513,7 @@ def test_formal_analysis_values_leave_only_unconverted_raw_leaves(
             "Converted source leaves must live only in formal analysis files; keep unknown leaves"
         )
     assert load_migrated_predictor(request_data).params == FluxoniumParams(
-        EJ=6.0, EL=0.8, flux_half=0.2, flux_period=1.0, flux_bias=0.0
+        EJ=6.0, EL=0.8
     )
     dispersive = load_dispersive_file(entry.dispersive_path / "Qlegacy.json")
     assert dispersive.params.g == 0.03
@@ -535,6 +533,9 @@ def test_formal_analysis_values_leave_only_unconverted_raw_leaves(
             {
                 "fluxdep_fit": {
                     "params": {},
+                    "flux_half": 0.2,
+                    "flux_period": 1.0,
+                    "flux_bias": 0.0,
                     "flux_unit": "A",
                     "timestamp": "2020-07-07T16:30:00+08:00",
                 }
@@ -569,7 +570,7 @@ def test_successful_empty_analysis_containers_are_not_preserved_twice(
         for row in report.key_mappings
     )
     if formal_kind == "predictors":
-        assert load_predictor_file(formal).params == FluxoniumParams(flux_bias=0.0)
+        assert load_predictor_file(formal).params == FluxoniumParams()
     elif formal_kind == "dispersive":
         assert load_dispersive_file(formal).params.model_dump(exclude_unset=True) == {}
     else:

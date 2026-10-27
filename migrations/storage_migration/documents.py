@@ -29,7 +29,10 @@ from zcu_tools.resources.entry.schema import (
     PointDocument,
     SetupDocument,
 )
-from zcu_tools.resources.predictor_file import PredictorFile, load_predictor_file
+from zcu_tools.resources.predictor_file import (
+    encode_predictor_document,
+    load_predictor_file,
+)
 
 from migrations.storage_migration.t1_curve_file import load_t1_curve_file
 
@@ -39,7 +42,6 @@ from .paths import contained_path, source_identity
 from .state import MigrationSession, overlay_known_fields
 
 _JSON = TypeAdapter(JsonObject)
-_PREDICTOR = TypeAdapter(PredictorFile)
 
 
 def document_value(path: Path, kind: DocumentKind) -> JsonObject:
@@ -50,6 +52,7 @@ def document_value(path: Path, kind: DocumentKind) -> JsonObject:
     cleanup. JSON owners define null/default and active-channel semantics.
     Invalid/unreadable documents propagate their schema or I/O errors.
     """
+    known: object
     if kind == "setup":
         known = (
             DocumentStore(
@@ -84,7 +87,7 @@ def document_value(path: Path, kind: DocumentKind) -> JsonObject:
             .model_dump(mode="json")
         )
     elif kind == "predictor":
-        known = _PREDICTOR.dump_python(load_predictor_file(path), mode="json")
+        known = encode_predictor_document(load_predictor_file(path))
     elif kind == "dispersive":
         known = load_dispersive_file(path).model_dump(mode="json", exclude_unset=True)
     else:
