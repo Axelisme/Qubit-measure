@@ -51,3 +51,7 @@
 
 - 2026-10-23 [Store 讀取效率與寫入慣例](2026-10-23-store-read-efficiency.md)：保留分組提交，以 ledger 增量讀與內容 hash 快照減少重複驗證；批次為原形、工作量測試與 owner handler 延遲 warning 分別保護交易邊界、工作量與現場診斷。
 - 2026-10-14 [量測成果 Artifact、設定快照與讀回的推導](2026-10-14-artifact-persistence.md)：設定快照正本只在 `data.h5`，Notebook 與 GUI 都讀它；Artifact 以項目種類擴充、格式由框架決定，讀回採資料優先、設定可缺；決策見 [ADR-0063](../adr/0063-persistence-ownership.md)／[0069](../adr/0069-experiment-core-and-frontends.md)／[0067](../adr/0067-gui-application.md)。
+
+## 量測策略
+
+- 2026-10-27 [T1/T2 over flux 量測策略：哪些機制有效](2026-10-27-coherence-strategy-levers.md)：自適應 flux 選點沒有增益；唯一有效的是每條曲線的穩健 delay 取樣（σ 約 0.73 倍）；不需新 workflow，建議在 `coherence_fluxdep` 加 delay 模式。
