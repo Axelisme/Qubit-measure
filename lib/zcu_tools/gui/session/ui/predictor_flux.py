@@ -17,6 +17,10 @@ from zcu_tools.resources.predictor_file import PredictorFlux
 from zcu_tools.simulate.predictor import PredictorInputError
 
 
+def _format_value(value: float) -> str:
+    return format(value, ".15g")
+
+
 class PredictorFluxEditor(QGroupBox):
     """Edit a recorded frame's offset and native device values without writes.
 
@@ -68,7 +72,7 @@ class PredictorFluxEditor(QGroupBox):
         self._axes.clear()
         self._recorded = flux
         self._offset.blockSignals(True)
-        self._offset.setText(repr(flux.offset) if flux is not None else "0.0")
+        self._offset.setText(_format_value(flux.offset) if flux is not None else "0.0")
         self._offset.blockSignals(False)
         if flux is None:
             self._layout.addWidget(
@@ -80,7 +84,7 @@ class PredictorFluxEditor(QGroupBox):
             axis.setObjectName(f"predictor_axis_{name}")
             axis.setToolTip("Use this instrument as the curve's horizontal axis")
             self._axis_group.addButton(axis)
-            field = QLineEdit("" if name not in values else repr(values[name]))
+            field = QLineEdit("" if name not in values else _format_value(values[name]))
             field.setObjectName(f"predictor_value_{name}")
             field.setPlaceholderText("enter value")
             self._layout.addWidget(axis, row, 0)
@@ -134,7 +138,7 @@ class PredictorFluxEditor(QGroupBox):
 
     def set_offset(self, offset: float) -> None:
         """Set local Phi0 offset text, notifying the owner on change."""
-        self._offset.setText(repr(offset))
+        self._offset.setText(_format_value(offset))
 
     def set_device_value(self, name: str, value: float, *, notify: bool = True) -> None:
         """Set one native value; notify=False only moves the marker without replotting.
@@ -145,7 +149,7 @@ class PredictorFluxEditor(QGroupBox):
         field = self._values[name]
         field.blockSignals(not notify)
         try:
-            field.setText(repr(value))
+            field.setText(_format_value(value))
         finally:
             field.blockSignals(False)
 
