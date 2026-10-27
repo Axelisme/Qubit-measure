@@ -68,9 +68,12 @@ def test_spectrum_export_roundtrips_native_data_and_leaves_observations_unchange
     for name, original in state.spectrums.items():
         restored = loaded[name]
         assert restored.get("type") == original.spec_type
-        assert restored["flux_half"] == original.flux_half
-        assert restored["flux_int"] == original.flux_int
-        assert restored["flux_period"] == original.flux_period
+        assert restored["offset"] == 0.5 - original.flux_half / original.flux_period
+        assert restored["period"] == original.flux_period
+        assert (restored["device"], restored["unit"]) == (
+            original.device,
+            original.unit,
+        )
         for key in ("dev_values", "fluxs", "freqs", "signals"):
             np.testing.assert_array_equal(restored["spectrum"][key], original.raw[key])
         for key in ("dev_values", "fluxs", "freqs"):

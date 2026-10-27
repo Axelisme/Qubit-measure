@@ -60,14 +60,18 @@ class ExportService:
         spectrums: dict[str, SpectrumResult] = {
             name: SpectrumResult(
                 type=entry.spec_type,
-                flux_half=entry.flux_half,
-                flux_int=entry.flux_int,
-                flux_period=entry.flux_period,
+                offset=0.5 - entry.flux_half / entry.flux_period,
+                period=entry.flux_period,
+                device=entry.device,
+                unit=entry.unit,
                 spectrum=entry.raw,
                 points=entry.points,
             )
             for name, entry in self._state.spectrums.items()
         }
+        for name, entry in self._state.spectrums.items():
+            if entry.device_snapshot is not None:
+                spectrums[name]["device_snapshot"] = entry.device_snapshot
         dump_spectrums(path, spectrums, mode=mode)
         logger.debug("export_spectrums: %d spectra -> %r", len(spectrums), path)
         return path

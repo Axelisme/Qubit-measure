@@ -102,7 +102,20 @@ AnalyzePanel 是 **MainWindow 持有的單例**（第一次進 Fit 頁時建立�
 
 ### 領域邊界：不碰 experiment.v2
 
-**不 import `experiment.v2`**（避免把 measure 實驗層拖進來）。
+不 import `experiment.v2`。Native 檔案經 analysis 的公開投影取得陣列與單位。
+`LoadService` 只從同一個 Container 的 metadata，經 `experiment.native_persistence` 解碼 acquisition snapshot，
+再向 device 的 `snapshot_scalar_values` 取得 context 指名的 scalar。它不解析 cfg 或 driver settings。
+缺 snapshot 保留 None，已記錄空 snapshot 保留空 mapping。
+
+`FluxDepGuiBehavior` 接受組合根注入的 `ComponentFluxProvider`，Controller 將它交給 load service。
+Native dialog 與 RPC/MCP 都明示 variable、device_axis、device。Dialog 只在變數／頻率軸唯一時預選。
+有可用 context 時，儀器選項來自 frame.devices；無 target 或 provider 不可用時，只保留 unnamed_device。
+Provider 錯誤指名 component 與 kind，dialog 顯示錯誤，service 也記錄 placeholder 載入的原因。
+外部 Labber 來源保留 unnamed_device/native，不使用 native 的身分選項。
+
+Processed collection 只讀寫 spectrums v2。每張譜保存 offset、signed period、儀器身分與選填 snapshot。
+Reload 從 offset/period 算回 half/integer 線，不再加入 snapshot 的儀器貢獻。
+舊 collection 須先用 `scripts/upgrade_spectrums.py` 升級。
 
 ### State 邊界（main-thread 不變式）
 

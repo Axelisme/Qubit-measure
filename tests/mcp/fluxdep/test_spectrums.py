@@ -79,6 +79,9 @@ def test_snapshot_and_load_return_ranges_and_native_evidence(
             "spec_type": "TwoTone",
             "inherit_from": "seed.hdf5",
             "transpose_axes": True,
+            "variable": "signal",
+            "device_axis": "bias",
+            "device": "coil",
         }
         if load
         else {"name": "raw.hdf5"}

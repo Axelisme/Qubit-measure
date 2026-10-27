@@ -12,6 +12,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
+from zcu_tools.gui.app.analysis_project.flux import ComponentFluxProvider
 from zcu_tools.gui.app.fluxdep.export_plan import ExportPlanner
 from zcu_tools.gui.runtime import (
     GuiAssembly,
@@ -36,6 +37,7 @@ class FluxDepGuiBehavior(GuiRuntimeBehavior):
         project: AnalysisTarget | None = None,
         project_root: str | None = None,
         export_planner: ExportPlanner | None = None,
+        flux_context_provider: ComponentFluxProvider | None = None,
     ) -> None:
         """Bind entry/path context and the lab's component export policy.
 
@@ -43,6 +45,7 @@ class FluxDepGuiBehavior(GuiRuntimeBehavior):
         When omitted, viewing/search remain available but export is refused.
         """
         self._export_planner = export_planner
+        self._flux_context_provider = flux_context_provider
         self._project = project
         self._project_root = project_root
 
@@ -83,6 +86,8 @@ class FluxDepGuiBehavior(GuiRuntimeBehavior):
             interactive_background=submit_interactive,
             search_runtime=FluxDepSearchRuntime(search_runner, search_progress),
         )
+        if self._flux_context_provider is not None:
+            ctrl.configure_flux_context(self._flux_context_provider)
         if self._export_planner is not None:
             ctrl.configure_export(self._export_planner)
         window = MainWindow(

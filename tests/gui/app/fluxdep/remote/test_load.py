@@ -26,6 +26,27 @@ SpectrumFile: TypeAlias = tuple[
 ]
 
 
+def test_native_rpc_forwards_explicit_variable_axis_and_device(route_harness, tmp_path):
+    from tests.gui.app.fluxdep._native import native_spectrum_file
+
+    path = native_spectrum_file(tmp_path / "data.h5", {})
+    client = route_harness.client()
+    reply = route_harness.request(
+        client,
+        "spectrum.load",
+        filepath=str(path),
+        spec_type="OneTone",
+        variable="signal",
+        device_axis="bias",
+        device="unnamed_device",
+    )
+    assert reply["ok"], reply
+    entry = route_harness.ctrl.state.get_spectrum("data.h5")
+    assert (entry.device, entry.unit) == ("unnamed_device", "A")
+    assert entry.device_snapshot == {}
+    np.testing.assert_array_equal(entry.raw["freqs"], [4, 5, 6])
+
+
 def _observe_sources(harness: RouteHarness, client: ClientLink) -> None:
     assert harness.request(client, "project.info")["ok"]
     assert harness.request(client, "spectrum.list")["ok"]

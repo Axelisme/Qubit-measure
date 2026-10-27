@@ -27,7 +27,8 @@ from __future__ import annotations
 # selection.interactive.open evidence reports that seed.
 # 10: project.setup opens an entry/component; fit.export_params writes predictor,
 # setup and analysis ledger and returns component/analysis_id.
-WIRE_VERSION = 10
+# 11: native spectrum.load explicitly selects variable, device_axis and device.
+WIRE_VERSION = 11
 
 # GUI code revision (see header). Bump on any meaningful GUI change you want a
 # stale-process check to flag; independent of WIRE_VERSION.
@@ -51,4 +52,5 @@ WIRE_VERSION = 10
 # 16: Filter Apply/Finish also publish the brush selection; a reopened Filter
 # starts from it, so an unchanged Finish reproduces the published kept mask.
 # 17: entry/component dialog and entry-scoped predictor/setup export.
-GUI_VERSION = 17
+# 18: native source selectors and acquisition snapshots; processed spectra v2.
+GUI_VERSION = 18

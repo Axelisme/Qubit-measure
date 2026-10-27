@@ -49,6 +49,32 @@ class FluxFrame:
         object.__setattr__(self, "devices", MappingProxyType(dict(self.devices)))
 
 
+@dataclass(frozen=True)
+class ComponentFluxContext:
+    """Caller-projected component calibration, default device and native units.
+
+    frame is None when the component offset is uncalibrated, never a zero-offset
+    substitute. default_device is the lab's optional preferred instrument; it
+    need not have calibration. units maps device names to nonempty units, with
+    exactly the frame.devices keys when a frame exists. Construction detaches
+    units and rejects invalid names/units or inconsistent keys with ValueError.
+    """
+
+    frame: FluxFrame | None
+    default_device: str | None
+    units: Mapping[str, str]
+
+    def __post_init__(self) -> None:
+        if self.default_device is not None:
+            validate_device_name(self.default_device)
+        for name, unit in self.units.items():
+            validate_device_name(name)
+            _require_unit(unit)
+        if self.frame is not None and self.units.keys() != self.frame.devices.keys():
+            raise ValueError("context units must have exactly the frame device keys")
+        object.__setattr__(self, "units", MappingProxyType(dict(self.units)))
+
+
 def flux_from_device_values(frame: FluxFrame, values: Mapping[str, float]) -> float:
     """Return offset + sum(value / period) in dimensionless Phi0.
 
