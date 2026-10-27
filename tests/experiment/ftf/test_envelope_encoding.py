@@ -153,7 +153,7 @@ class RecordingEngine(Engine):
     """Observe actual density outputs at the injected evolution boundary."""
 
     def __init__(self):
-        super().__init__(1, 1024**2)
+        super().__init__(1)
         self.density_bytes = b""
 
     def evolve(

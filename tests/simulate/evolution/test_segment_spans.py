@@ -108,7 +108,7 @@ def test_driven_shift_identities_do_not_alias_models_preparations_or_results():
     assert built_levels == [(0,)]
 
 
-def test_shifts_follow_exact_query_spans_with_zero_gaps_and_repeat_cache_hits():
+def test_shifts_follow_exact_query_spans_with_zero_gaps_and_repeat_density():
     query = evolution.segment_spans
     model = evolution.SecularModel(
         (0,),
@@ -143,9 +143,6 @@ def test_shifts_follow_exact_query_spans_with_zero_gaps_and_repeat_cache_hits():
         atol=1e-12,
     )
     np.testing.assert_array_equal(again.densities, first.densities)
-    assert sum(item.cache_hits for item in again.paths.routing.values()) == sum(
-        first.paths.segments_by_kernel.values()
-    )
     assert sum(first.paths.segments_by_kernel.values()) == sum(
         map(len, query(timeline))
     )

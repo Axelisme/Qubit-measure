@@ -223,7 +223,7 @@ def test_cavity_drive_must_not_cross_terminal_start_but_may_end_there() -> None:
 
 class CountingEngine(Engine):
     def __init__(self):
-        super().__init__(1, 1_000_000)
+        super().__init__(1)
         self.calls = 0
 
     def evolve(
@@ -276,7 +276,7 @@ class ResidualEngine(Engine):
     """Configured executor supplying controlled densities at the C3 boundary."""
 
     def __init__(self, populations):
-        super().__init__(1, 0)
+        super().__init__(1)
         self.populations = populations
 
     def evolve(
