@@ -7,10 +7,14 @@ from zcu_tools.resources.parameter_upgrade import (
     UpgradeStep,
 )
 
-from .flux_upgrade import classify_flux_document, convert_flux_v1_to_v2
+from .flux_upgrade import (
+    classify_flux_document,
+    convert_flux_v1_to_v2,
+    convert_flux_v2_to_v3,
+)
 
 PARAMETER_SCHEMA_POLICY = ParameterSchemaPolicy(
-    current_version=2,
+    current_version=3,
     upgrade_command=(
         "uv",
         "run",
@@ -24,8 +28,12 @@ PARAMETER_SCHEMA_POLICY = ParameterSchemaPolicy(
 
 def _validate(document: ParameterDocument, version: int) -> None:
     classification = classify_flux_document(document)
-    expected = "legacy" if version == 1 else "current"
-    if version not in (1, 2) or classification.status != expected:
+    expected = "legacy" if version in (1, 2) else "current"
+    if (
+        version not in (1, 2, 3)
+        or document.data.get("schema_version", 1) != version
+        or classification.status != expected
+    ):
         raise ValueError(
             f"{classification.status}: {'; '.join(classification.diagnostics)}"
         )
@@ -37,7 +45,7 @@ def _classify_legacy(document: ParameterDocument) -> bool:
 
 
 def parameter_upgrade_plan() -> UpgradePlan:
-    """Return retained v1 to v2 steps and full offline format classification.
+    """Return retained v1→v2→v3 steps and full offline format classification.
 
     Bootstrap component models with register_all before executing this plan.
     Unmarked documents are accepted only after complete legacy classification.
@@ -46,11 +54,15 @@ def parameter_upgrade_plan() -> UpgradePlan:
     """
     return UpgradePlan(
         policy=PARAMETER_SCHEMA_POLICY,
-        steps=(UpgradeStep(1, convert_flux_v1_to_v2),),
+        steps=(
+            UpgradeStep(1, convert_flux_v1_to_v2),
+            UpgradeStep(2, convert_flux_v2_to_v3),
+        ),
         validate=_validate,
         classify_legacy=_classify_legacy,
         notes=(
-            "Offset is derived from local half/period; coil half/integer references are dropped when a local calibration exists.",
+            "V1 coil half/integer references are reported, not retained. Recalibrate their offset contribution.",
+            "V2 offset preserves the main half branch and subtracts other devices at their integer references.",
             "Rename every reported unnamed_device/unnamed_coil location to the actual device name. Device existence is not checked.",
         ),
     )

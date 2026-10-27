@@ -1,6 +1,6 @@
 # Components
 
-**Last updated:** 2026-10-27，runtime v2 與多 device flux frame
+**Last updated:** 2026-10-27，runtime v3 與 retained v1→v2→v3 升級
 
 **讀者：** lab-author、agent。查詢 component kind、角色與字串引用。
 
@@ -17,22 +17,20 @@
 
 ## Component 文件版本
 
-`register_all` 同時註冊 `parameter_upgrades.PARAMETER_SCHEMA_POLICY`，目前為 `schema_version: 2`。Setup、point 與 entry template 都使用這個整份文件版本，容器版本不變。結構變更的版本宣告、完整舊格式分類與純函式步驟由本 package 擁有。通用執行與 I/O 由 resources 擁有，見 [ADR-0063](../../docs/adr/0063-persistence-ownership.md#component-文件版本與明確升級)。
+`register_all` 同時註冊 `parameter_upgrades.PARAMETER_SCHEMA_POLICY`，目前為 `schema_version: 3`。Setup、point 與 entry template 都使用這個整份文件版本，容器版本不變。結構變更的版本宣告、完整舊格式分類與純函式步驟由本 package 擁有。通用執行與 I/O 由 resources 擁有，見 [ADR-0063](../../docs/adr/0063-persistence-ownership.md#component-文件版本與明確升級)。
 
-長期入口是 `scripts/upgrade_parameters.py`。`parameter_upgrade_plan()` 保留完整分類與 flux v1→v2 純步驟，未標版文件只在分類成功後視為 v1。升級 target 與 runtime 都為 2。Runtime 不接受舊版，也不在載入時升級。`flux_upgrade.py` 擁有四類分類、local／mux 共用轉換與 source 名稱語法檢查，不做 I/O 或 device catalog 查詢。`storage_mapping` 經中性完整文件 batch callback 重用轉換。Storage-only 入口先驗整批歷史校準，再一次性取代同 device 的繼承 entry，保留其他 entries。同批衝突、部分或缺來源仍拒絕，native 混合文件分類不變。這是 advisor 裁定，Review: pending。長期步驟不依賴 migrations。四類形狀、參考點假設與手動修復見 [flux 升級指南](../../docs/flux-migration.md)，runner 操作見 [升級命令](../../docs/parameter-upgrades.md)。
+長期入口是 `scripts/upgrade_parameters.py`。`parameter_upgrade_plan()` 保留完整分類與 v1→v2→v3 純函式步驟。未標版文件只在完整 v1 分類成功後視為 v1。升級 target 與 runtime 都為 3。Runtime 不接受舊版，也不在載入時升級。`flux_upgrade.py` 驗證名稱語法與歷史校準，不做 I/O 或 device catalog 查詢。V2 保留每台儀器的 half／integer／period 與 `flux_source`。V2→v3 才改名為 `flux_dev`，並保留主儀器的 half 分支，扣除其他儀器的 integer／period，不做 mod 1。V1 coil 只保留 signed period，原 half／int 進報告；v2 中間值為 integer 0、half = period／2。\n\n`storage_mapping` 經中性完整文件 batch callback 重用轉換。完整有效的歷史校準取代繼承 offset 與同儀器 period，其他 period 保留。同批撞鍵、partial、非法名稱、數值與 spacing 仍拒絕。缺名產生不同的 `unnamed_device`／`unnamed_coil`，兩個入口逐目的位置提醒改名。Native 升級仍拒絕混版文件。長期步驟不依賴 migrations。版本形狀見 [flux 格式歷程](../../docs/storage-format-history/component-flux.md)，runner 操作見 [升級命令](../../docs/parameter-upgrades.md)。
 
 ## Qubit flux frame
 
-Qubit 的 `flux` 預設為 `{}`，以 device 名稱對應 `QubitFluxCalibration`。
-每筆必填有限的 `half`、`integer` 與非零 `period`，使用該 device 的原生單位。
-其他 contributing devices 都停在各自 integer 時，這兩個 bias 分別是 half／integer 參考點。
-`period` 可為負，表示增加 bias 會減少 flux。
-載入保留三欄，不檢查 spacing。
-`QubitFluxCalibration.validate_spacing(device_name)` 在使用時檢查 `abs(integer-half) = abs(period)/2`，失敗以 `ValueError` 指出 device。
-此方法以 `math.isclose` 檢查，relative tolerance 為 `1e-9`、absolute tolerance 為 `0`，不改寫校準值。
-`support/flux.py` 與離線升級共用此方法，升級不接受 runtime 會拒絕的 spacing。
-Helper 重用共用 device 名稱驗證，不改寫有效名稱。
-Schema version 2 只保留這個 flux 區塊，qubit 舊四欄與 mux `coil_flux` 已移除。參考點、writeback 與 record 慣例見 [ADR-0082](../../docs/adr/0082-component-flux-frame.md)。
+Qubit 的 `flux` 使用 `QubitFluxSchema`，預設為 `{offset: null, period: {}}`。
+`offset` 是所有儀器輸出為 0 時的 reduced flux，以 Φ0 為單位；null 表示尚未校準。
+`period` 以 device 名稱對應有限、非零的 signed period，使用各儀器原生單位／Φ0。
+負 period 表示增加 bias 會減少 flux。有 period 但當下沒有值的儀器不貢獻 flux，period 仍保留。
+正向計算與 half／integer 投影由 `analysis.flux` 提供。
+`QubitFluxCalibration` 只用於擬合點與歷史轉換，不是 runtime component 的儲存形狀。
+歷史步驟以 `validate_spacing(device_name)` 檢查 `abs(integer-half) = abs(period)/2`，失敗以 `ValueError` 指出 device。
+此檢查使用 relative tolerance `1e-9`、absolute tolerance `0`，不改寫校準值。
 
 ## Wiring
 

@@ -6,7 +6,7 @@
 # Resonator kappa and route TOF come from readout settings, not measurements.
 format: zcu.entry-template
 format_version: "1.0"
-schema_version: 2
+schema_version: 3
 components:
   Q1:
     kind: qubit/fluxonium

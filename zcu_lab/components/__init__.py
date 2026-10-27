@@ -54,7 +54,7 @@ def register_all(registry: ComponentRegistry) -> None:
     """Register lab models, roles and whole-document schema policy.
 
     Bootstrap once on an empty registry; duplicate model names fail normally.
-    The policy declares version 2 and the explicit offline upgrade command.
+    The policy declares version 3 and the explicit offline upgrade command.
     Registration performs no file I/O and never upgrades saved parameters.
     """
     registry.configure_schema(PARAMETER_SCHEMA_POLICY)
