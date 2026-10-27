@@ -77,6 +77,8 @@ Driver 在 `device_operation` 內記錄自己的兩項活動資訊。`DeviceActi
 
 GUI 在既有操作 lease 後、core 前，Notebook 在建立 caller-owned `RunContext` 後、core 前，各讀所有 connected drivers 一次。固定 snapshot 進入 `RunMetadata.device_snapshot`，Save 不刷新硬體。`DeviceManager.setup_devices` 與 GUI 手動設定仍是獨立的明確操作。
 
+`snapshot_scalar_values(snapshot, names)` 從歷史 Info JSON 讀指定儀器的 `value` 與 `value_unit`，回傳 `DeviceScalar(value, unit)`。它不讀硬體，不修改輸入。缺席的名稱不回傳；在場但缺 value、值為 bool 或非有限數字時，拋出指名儀器的 ValueError。缺單位使用 native，非法或空單位拒絕。呼叫端決定要讀哪些儀器與如何處理缺席值，不解析 driver settings。
+
 ## `BaseDeviceInfo`（`base.py:15`）
 
 Pydantic model，繼承 `ConfigBase`，所有子類型共用的基底欄位：

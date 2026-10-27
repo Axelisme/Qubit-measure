@@ -33,6 +33,7 @@ if TYPE_CHECKING:
 
 from zcu_tools.analysis.fluxdep.models import TransitionDict
 from zcu_tools.gui.app.analysis_project.entry import target_payload
+from zcu_tools.gui.app.fluxdep.services.load import NativeSpectrumSelection
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 from zcu_tools.gui.remote.method_spec import BoundMethod, build_method_registry
 from zcu_tools.plotting.fluxdep.spectrum import make_spectrum_figure
@@ -204,14 +205,29 @@ def _h_spectrum_load(
     spec_type = params["spec_type"]
     inherit_from = params["inherit_from"]
     transpose_axes = params["transpose_axes"]
+    variable = params["variable"]
+    device_axis = params["device_axis"]
+    device = params["device"]
     # ParamSpec validated types, enum and optional defaults.
     assert isinstance(filepath, str)
     assert isinstance(spec_type, str)
     assert spec_type == "OneTone" or spec_type == "TwoTone"
     assert inherit_from is None or isinstance(inherit_from, str)
     assert isinstance(transpose_axes, bool)
+    assert variable is None or isinstance(variable, str)
+    assert device_axis is None or isinstance(device_axis, str)
+    assert isinstance(device, str)
+    selection = (
+        NativeSpectrumSelection(variable, device_axis, device)
+        if variable is not None and device_axis is not None
+        else None
+    )
     name = adapter.ctrl.load_spectrum(
-        filepath, spec_type, inherit_from, transpose_axes=transpose_axes
+        filepath,
+        spec_type,
+        inherit_from,
+        transpose_axes=transpose_axes,
+        selection=selection,
     )
     return {"name": name}
 

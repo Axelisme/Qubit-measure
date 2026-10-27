@@ -21,9 +21,11 @@ import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 
+from zcu_tools.analysis.flux import ComponentFluxContext
 from zcu_tools.analysis.fluxdep.models import TransitionDict
 from zcu_tools.analysis.fluxdep.search import DatabaseSearchResult, ParamBounds
 from zcu_tools.gui.app.analysis_project.entry import AnalysisTarget
+from zcu_tools.gui.app.analysis_project.flux import ComponentFluxProvider
 from zcu_tools.gui.app.fluxdep.event_bus import (
     ActiveSpectrumChangedPayload,
     EventBus,
@@ -49,7 +51,7 @@ from zcu_tools.gui.app.fluxdep.services.fit import (
     PbarFactory,
     SearchInput,
 )
-from zcu_tools.gui.app.fluxdep.services.load import LoadService
+from zcu_tools.gui.app.fluxdep.services.load import LoadService, NativeSpectrumSelection
 from zcu_tools.gui.app.fluxdep.services.store import SelectionService, SpectrumStore
 from zcu_tools.gui.app.fluxdep.services.viz import (
     FitDisplay,
@@ -200,12 +202,36 @@ class Controller(BaseController[FluxDepState, EventBus]):
         inherit_from: str | None = None,
         *,
         transpose_axes: bool = False,
+        selection: NativeSpectrumSelection | None = None,
     ) -> str:
+        """Load a raw spectrum with explicit native variable/axis/device selection.
+
+        Labber keeps its transpose option and unnamed_device identity. Native
+        selections and metadata are validated before any State publication.
+        """
         name = self._load.load_spectrum(
-            filepath, spec_type, inherit_from, transpose_axes=transpose_axes
+            filepath,
+            spec_type,
+            inherit_from,
+            transpose_axes=transpose_axes,
+            selection=selection,
         )
         self._emit(SpectrumAddedPayload(name=name))
         return name
+
+    def configure_flux_context(self, provider: ComponentFluxProvider) -> None:
+        """Inject the lab's component projection for subsequent loads and queries.
+
+        This replaces only the stateless load service, preserving all spectra.
+        """
+        self._load = LoadService(self.state, flux_context_provider=provider)
+
+    def flux_context(self) -> ComponentFluxContext | None:
+        """Return the opened target's injected calibration; errors name component/kind.
+
+        None means no target; a context whose frame is None means uncalibrated.
+        """
+        return self._load.flux_context()
 
     def load_processed_spectrums(self, filepath: str) -> list[str]:
         """Restore a processed spectrums.hdf5 (aligned + selected spectra)."""

@@ -6,6 +6,7 @@ from pathlib import Path
 import h5py
 import numpy as np
 from numpy.typing import NDArray
+from zcu_tools.analysis.flux import DevicePeriod, offset_for_flux
 from zcu_tools.analysis.fluxdep.io import dump_spectrums, load_spectrums
 from zcu_tools.analysis.fluxdep.models import SpectrumResult
 
@@ -60,7 +61,6 @@ def _project_group(name: str, group: h5py.Group, plan: _Projection) -> None:
     half, period = _scalar(group, half_key), _scalar(group, period_key)
     if period <= 0:
         raise ValueError(f"{group.name}/{period_key}: positive period required")
-    integer = half + 0.5 * period if old_axes else _scalar(group, int_key)
     spectrum, points = group.get("spectrum"), group.get("points")
     if not isinstance(spectrum, h5py.Group) or not isinstance(points, h5py.Group):
         raise ValueError(f"{group.name}: spectrum and points groups required")
@@ -89,9 +89,12 @@ def _project_group(name: str, group: h5py.Group, plan: _Projection) -> None:
     if picked.shape != picked_freqs.shape:
         raise ValueError("Picked device/frequency axes must have matching lengths")
     result = SpectrumResult(
-        flux_half=half,
-        flux_int=integer,
-        flux_period=period,
+        offset=offset_for_flux(
+            {"unnamed_device": DevicePeriod(period)}, {"unnamed_device": half}, flux=0.5
+        ),
+        period=period,
+        device="unnamed_device",
+        unit="native",
         spectrum={
             "dev_values": dev,
             "freqs": freqs,
@@ -113,8 +116,8 @@ def _project_group(name: str, group: h5py.Group, plan: _Projection) -> None:
         result["type"] = metadata_type
         plan.attributes.add((name, "type"))
     consumed: dict[tuple[str, ...], tuple[str, ...]] = {
-        (name, half_key): (name, "flux_half"),
-        (name, period_key): (name, "flux_period"),
+        (name, half_key): (name, "offset"),
+        (name, period_key): (name, "period"),
         (name, "spectrum", dev_key): (name, "spectrum", "dev_values"),
         (name, "spectrum", freq_key): (name, "spectrum", "freqs"),
         (name, "spectrum", signal_key): (name, "spectrum", "signals"),
@@ -122,7 +125,9 @@ def _project_group(name: str, group: h5py.Group, plan: _Projection) -> None:
         (name, "points", freq_key): (name, "points", "freqs"),
     }
     if not old_axes:
-        consumed[(name, int_key)] = (name, "flux_int")
+        _scalar(
+            group, int_key
+        )  # Validate the redundant integer value; retain it in the companion.
         for section in ("spectrum", "points"):
             consumed[(name, section, "fluxs")] = (name, section, "fluxs")
     plan.results[name] = result
@@ -214,8 +219,10 @@ def convert_processed_spectrums(session: MigrationSession) -> None:
     session supplies verified legacy roots and publication ownership. Only the
     explicit data/fluxdep/spectrums.hdf5 route is recognized. Historical mA_c,
     period, mAs/fpts/data map without unit scaling; non-square shape uniquely
-    selects the two evidenced signal orders. Old fluxs and integer-flux values
-    use the documented historical formulas. Square old axes stay located pending.
+    selects the two evidenced signal orders. Old fluxs use the documented
+    historical formula; current calibration stores offset/period and explicit
+    unnamed_device/native placeholders. Redundant integer-flux source leaves
+    remain in the companion. Square old axes stay located pending.
     Formal output is written/read by fluxdep.io. Unmapped datasets and attributes
     retain hierarchy/values/dtypes in spectrums.legacy.hdf5; consumed datasets with
     attrs become metadata-only groups there. Runtime does not read the companion.
@@ -281,7 +288,7 @@ def _report_projection(
                 new_path="/".join(destination),
                 destination_keys=destination,
                 action="value",
-                reason="Historical processed-spectrum reader/writer mapping; signal order follows unique shape and historical axis rules; no numeric unit conversion",
+                reason="Current spectrum mapping: offset=0.5-half/period, signed period unchanged; signal order follows unique shape and historical axis rules; no numeric unit conversion",
             ),
         )
     for keys in plan.attributes:
@@ -299,24 +306,23 @@ def _report_projection(
             ),
         )
     for name in plan.results:
-        if (name, "mA_c") not in plan.datasets:
-            continue
-        for destination in (
-            (name, "flux_int"),
-            (name, "spectrum", "fluxs"),
-            (name, "points", "fluxs"),
-        ):
+        destinations: list[tuple[str, ...]] = [(name, "device"), (name, "unit")]
+        if (name, "mA_c") in plan.datasets:
+            destinations.extend(
+                [(name, "spectrum", "fluxs"), (name, "points", "fluxs")]
+            )
+        for destination in destinations:
             record_key_mapping(
                 session,
                 KeyMappingItem(
                     old_file=source,
                     old_key=f"derived:{destination!r}",
-                    source_keys=(name, "mA_c"),
+                    source_keys=(name,),
                     new_file=target,
                     new_path="/".join(destination),
                     destination_keys=destination,
                     action="value",
-                    reason="Historical derivation: flux_int=mA_c+0.5*period (187e2d75a); fluxs=(mAs-mA_c)/period+0.5 (8d08978c2); source mAs and period in the same group, no unit scaling",
+                    reason="Legacy identity is unrecorded: device=unnamed_device and unit=native; historical fluxs=(mAs-mA_c)/period+0.5 uses values from the same group without unit scaling",
                 ),
             )
     for keys, attribute in rows:

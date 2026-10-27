@@ -23,6 +23,9 @@ class SpectrumLoadArguments(TypedDict):
     spec_type: str
     inherit_from: NotRequired[str | None]
     transpose_axes: NotRequired[bool]
+    variable: NotRequired[str]
+    device_axis: NotRequired[str]
+    device: NotRequired[str]
 
 
 class CheckpointExportArguments(TypedDict):
@@ -142,6 +145,18 @@ def build_spectrum_tools(bridge: McpBridge) -> ToolTable:
                     "spec_type": {"type": "string", "enum": ["OneTone", "TwoTone"]},
                     "inherit_from": {"type": "string"},
                     "transpose_axes": {"type": "boolean", "default": False},
+                    "variable": {
+                        "type": "string",
+                        "description": "Required native Container variable name.",
+                    },
+                    "device_axis": {
+                        "type": "string",
+                        "description": "Required native variable device-axis name.",
+                    },
+                    "device": {
+                        "type": "string",
+                        "description": "Explicit instrument from the selected component; unnamed_device without target.",
+                    },
                 },
                 "required": ["filepath", "spec_type"],
             },

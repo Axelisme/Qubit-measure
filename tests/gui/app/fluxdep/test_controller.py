@@ -186,7 +186,7 @@ def test_full_pipeline_export_roundtrip(spectrum_hdf5, tmp_path):
 
     loaded = load_spectrums(resolved)
     assert name in loaded
-    assert loaded[name]["flux_period"] == 2.0
+    assert loaded[name]["period"] == 2.0
 
 
 # --- database-search fit (v2) ----------------------------------------------

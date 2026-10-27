@@ -4,6 +4,7 @@
 
 | 格式變更 | 辨識方式 | 舊資料處理 |
 | --- | --- | --- |
+| [Fluxdep spectrums v2](fluxdep-spectrums-v2.md) | HDF5 根 attrs `format=zcu.fluxdep-spectrums`、`version=2` | `scripts/upgrade_spectrums.py` 預設預覽，`--apply` 先備份再換算 |
 | [Record component 信封](record-component.md) | JSONL 列含 `component` | 舊列照常讀取，不補寫 |
 | [Record device 值歸屬](record-devices.md) | 逐列看 flat pair 或 `devices.<name>.value/value_unit` | 同一長期 upgrade CLI 由 operator 宣告名稱，不補 frame/component |
 | [Record flux frame](flux-frame.md) | 現行列含 `flux_frame.offset` 與 `flux_frame.period.<device>`，另列歷史 flat／per-device 形狀 | 舊 records 不重寫；作者確認校準後明確轉換分析副本或提供 fallback |

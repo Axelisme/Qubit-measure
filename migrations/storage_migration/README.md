@@ -149,15 +149,15 @@ T1 的 fit 欄位包括 `params`、`stderr`、`bounds`、`fixed`、`free`、`cos
 
 | 舊位置 | 正式位置／公式 |
 | --- | --- |
-| `mA_c`、`period` | `flux_half`、`flux_period` |
-| `mA_c`、`period` | `flux_int = mA_c + 0.5 * period` |
+| `mA_c`、`period` | v2 group attrs `offset = 0.5 - mA_c / period`、`period` 原值 |
+| 未記錄的儀器身分／單位 | v2 attrs `device=unnamed_device`、`unit=native` |
 | `spectrum/mAs`、`points/mAs` | 同 section 的 `dev_values` |
 | `spectrum/fpts`、`points/fpts` | 同 section 的 `freqs`，不做 Hz→GHz 換算 |
 | section 的 `mAs`、group 的 `mA_c/period` | `fluxs = (mAs - mA_c) / period + 0.5` |
 | `spectrum/data` | `spectrum/signals`，device-major 軸向 |
 | 字串 group attr `type` | 正式同名 attr，保持原字串 |
 
-- `data/fluxdep/spectrums.hdf5` 是支援的 processed collection，不走 generic raw copy。Legacy 解析只在 `processed_spectrums.py`。正式結果經既有 `analysis.fluxdep.io.dump_spectrums`／`load_spectrums` 寫讀到新 entry 同相對位置，不在 migration 複製 owner layout。`mA_c/period` 對應 `flux_half/flux_period`，`mAs/fpts/data` 對應 `dev_values/freqs/signals`。`flux_int=mA_c+0.5*period`，`fluxs=(mAs-mA_c)/period+0.5`，不因數值量級換單位。兩種舊 signal 軸向以非平方 shape 與歷史 processing 規則唯一判定，frequency-major 轉置為 device-major；平方且無版本證據則保留原文並列 located pending。中繼 `flx_half/int/period` 依歷史改名，已存 `fluxs` 不重算。Group 名、陣列數值與 dtype 不變，字串 `type` 原樣交給 owner，不推定 OneTone／TwoTone。
+- `data/fluxdep/spectrums.hdf5` 是支援的 processed collection，不走 generic raw copy。Legacy 解析只在 `processed_spectrums.py`。正式結果經既有 `analysis.fluxdep.io.dump_spectrums`／`load_spectrums` 寫讀到新 entry 同相對位置，不在 migration 複製 owner layout。`mA_c/period` 透過公開 flux 反解換成 v2 的 offset／period，`mAs/fpts/data` 對應 `dev_values/freqs/signals`。`fluxs=(mAs-mA_c)/period+0.5`，不因數值量級換單位。兩種舊 signal 軸向以非平方 shape 與歷史 processing 規則唯一判定，frequency-major 轉置為 device-major；平方且無版本證據則保留原文並列 located pending。中繼 `flx_half/int/period` 依同一公式轉 v2，已存 `fluxs` 不重算；多餘的原 integer dataset 保留在 companion。Group 名、陣列數值與 dtype 不變，字串 `type` 原樣交給 owner，不推定 OneTone／TwoTone。
 
 - Processed 未轉 datasets／attrs 留在 `data/fluxdep/spectrums.legacy.hdf5`，保留原 hierarchy、值與 dtype。已轉 dataset 只有 attrs 時，在 companion 建同路徑的 metadata-only group，不重存其 data。空的未知 group 也保留。Companion 由 migrations 擁有，runtime 不讀，不是正式 spectrum 格式。`key_mappings` 用 typed `action="preserved"`、literal `source_keys/destination_keys`、`new_path=None` 定位。Attribute row 的 display key 以 `attribute:` 開頭，literal keys 是 object path 加原 attr 名。未知原文不列 pending，真正缺少必要轉換證據才列 pending。正式與 companion 分別走 `spectrums`／`spectrums_legacy` publication，保留 prepared/published、hash 與 resume。Preflight 一次保護兩個目的，拒絕同名來源路由、既有未認領檔或 hash 改變；沒有剩餘原文就不建 companion。Dry-run 只列相同轉換／保留計畫，不寫檔。
 

@@ -161,13 +161,23 @@ class LoadDataDialog(QDialog):
         self._file_edit.setText(filepath)
         if self._ok_button is not None:
             self._ok_button.setEnabled(True)
-        self._raw = self._read_best_effort(filepath)
+        self._raw = self._read_source(filepath)
         self._render_preview()
 
     # tolerated: QPushButton.toggled emits its checked bool positionally.
     def _on_transpose_toggled(self, checked: bool) -> None:  # noqa: FBT001
         self._transpose = checked
         self._render_preview()
+
+    def _read_source(
+        self, filepath: str
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray | None] | None:
+        """Read preview coordinates; subclasses may expose explicit input selection.
+
+        Return signals in device-major order, device values and optional frequency
+        values. Preview failures stay visible in the dialog, not in app State.
+        """
+        return self._read_best_effort(filepath)
 
     @staticmethod
     def _read_best_effort(
