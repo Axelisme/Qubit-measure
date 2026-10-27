@@ -77,6 +77,11 @@ def test_mcp_edits_and_finish_preserve_final_controls_selection_and_mapping(
             assert changed["state"]["selected"][0]["freq"] == 5040
             assert changed["state"]["selected"][0]["component"] == "east"
             done = interact("done")
+            # Done waits at most 2s; pumping Qt lets this execution finish saving.
+            # The submitted completion must arrive; 30s is only a deadlock watchdog.
+            done = call_mcp_with_qt(
+                client.tools, "wait", {"execution": done["execution"], "timeout": 30}
+            )
             assert done["status"] == "finished", str(done)
             assert done["steps"]["analysis_save"]["primary"]["status"] == "saved"
             artifact = done["artifacts"]["analysis"]["results"]["members"][
