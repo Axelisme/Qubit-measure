@@ -12,6 +12,7 @@ from PyQt6.QtWidgets import (
     QDialog,
     QFileDialog,
     QFormLayout,
+    QInputDialog,
     QLabel,
     QLineEdit,
     QListWidget,
@@ -658,6 +659,37 @@ def test_file_chooser_valid_path_unavailable_opener_is_noop(
     assert clicked == []
     assert driver.dialogs() == ()
     assert not shot.exists()
+
+
+@pytest.mark.parametrize("editable", [False, True])
+@pytest.mark.parametrize(
+    ("caption", "fits"), [("One", True), ("A very long choice " * 12, False)]
+)
+def test_observe_native_dialog_combo_reports_caption_and_clipping(
+    qapp, tmp_path: Path, editable: bool, caption: str, fits: bool
+) -> None:
+    dialog = QInputDialog()
+    dialog.setWindowTitle("Native choice")
+    dialog.setComboBoxItems([caption])
+    dialog.setComboBoxEditable(editable)
+    # QInputDialog creates this child in C++, unlike a Python QComboBox fixture.
+    combo = dialog.findChild(QComboBox)
+    assert combo is not None
+    combo.setObjectName("native_choice")
+    combo.setFixedWidth(180)
+    try:
+        dialog.show()
+        qapp.processEvents()
+        driver = _user_input.ComponentDriver(dialog)
+        driver.screenshot(tmp_path / "native-choice.png")
+        observed = driver.observe(object_name="native_choice")
+        assert observed.visible
+        assert observed.text == caption
+        assert observed.caption_fits is fits
+    finally:
+        dialog.close()
+        dialog.deleteLater()
+        qapp.processEvents()
 
 
 @pytest.fixture
