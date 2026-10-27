@@ -44,6 +44,10 @@ FTF 範例先讀相鄰 `entry-template.yaml`，建立新 entry 與 setup compone
 
 FTF startup 呼叫 `ftf(Path(__file__).with_name("ftf.yaml"), workers=1, warmup=False)`，設定按 script 位置定位，不在啟動時做數值 warmup 或 acquire。Notebook 明示工作副本 YAML 路徑，以 `workers=max(1, (os.cpu_count() or 1) - 2), warmup=True` 保留兩核並啟動背景預編譯。指定檔缺失或無效直接報錯，不 fallback。公開 `ftf()` 預設只用一個 worker 且不預編譯，兩個 caller 各自明示成本政策。
 
+FTF、single_fluxonium 與 six_fluxonium 的 startup 都讀同目錄、不納入 Git 的工作副本，分別為 `ftf.yaml`、`single_fluxonium.yaml` 與 `six_fluxonium.yaml`。各環境的 `default.yaml` 是納入 Git 的樣板，不是 startup 的讀取來源。第一次使用先複製樣板；工作副本不存在時報錯並附上 `cp default.yaml <工作副本>` 指令，不退回樣板。2026-10-26，使用者對 single／six 比照 FTF 的方案確認：「亚某那个，我认同你采用你的方案」。
+
+使用者與 agent 調整模擬設定都修改 YAML 工作副本，不以程式覆寫參數取代操作。例如關閉 six_fluxonium 的 pacing，就把六顆 qubit 的 `numerics.time_scale` 設為 0，不為 `six_fluxonium()` 新增覆寫參數。FTF 既有的 `time_scale` 覆寫只供測試使用。2026-10-26，使用者裁決：「我觉得你就直接改 YAML 档就好了，这个 YAML 档就是让人调的。而且为什么是直接读 default？ 我以为应该是读类似 ftf.yaml 这样子的东西。我不知道为什么 ftf 会有一个控制参数来复写，我是不希望啊，我知道了啦，这个是拿来测试用的，如果测试需要的话那就算了，但你自己使用的话应该是用用户的角度，也就是修改 YAML 档才对。」
+
 Builder 回傳前失敗，由 builder 清理已建立資源。回傳成功後，腳本在第一個可能失敗的交付前登記 on_close，並只在 register 成功後記錄交給 GUI 的名稱。模擬資料來源繼續透過 environment manager 借用 drivers。Close callback 先從該 manager drop 已交付名稱而不 close，再關未交付 drivers，之後 GUI 才關自己接管的 drivers，避免雙關。未捕捉的腳本失敗保留已完成工作與 cleanup 登記，不回退正常模式或白雜訊。部分 close 失敗保留診斷，不宣稱清理成功，也不自動 retry。
 
 正常關閉遵守既有 operation／Run gate，先 drain 再反序執行 callbacks，最後關閉 GUI 管理的 drivers。Device 的同名 live 不被替換，記得但未連線列只由腳本明確 remember，不由 framework persistence 回填。這不新增通用交易框架。
@@ -141,6 +145,8 @@ Acquire 與 round 記錄可引用去重，但模型、waveform、設定內容必
 F1／F2 使用 Fluxonium，coupler 是真正 flux-dependent circuit。使用者選擇：「1A，就是要練習用實驗找工作點」。F1–C、F2–C 與 F1–F2 皆用完整 charge coupling；2026-10-14 使用者要求「可能要考慮非零的F1-F2 coupling」。g12=0 只表示關閉該項，非模型假設。
 
 控制包含 bias offset／gain、固定 flux 串擾、可含相位的 microwave 串擾、來源線 delay／一階低通。先來源線響應、後 loop 映射；同 shot 保留 tail，每個獨立 shot 從當下 DC 線路穩態開始。不建立任意 transfer-function framework，不丟失 envelope 符號、quadrature、carrier 或 phase。
+
+Six_fluxonium 的各 cavity 委託 `SingleFluxoniumSource`，與 single_fluxonium 共用 `SingleFluxoniumModel` 及包含 Purcell 的物理模型，不另寫一套六 qubit 損耗模型。多 qubit 拓樸、coil＋local 兩源與無快磁通等環境差異見 [six_fluxonium README](../../../zcu_lab/simulation_envs/six_fluxonium/README.md#physical-model-and-single-fluxonium-consistency)。比較前在各自的 YAML 工作副本對齊物理常數。2026-10-27，使用者要求「10a 選i，但請讓six_fluxonium的模擬與single_fluxonium一致」，並授權「six_fluxonium也是，你決定。」。確認兩者已共用物理核心後，使用者答覆「接受」，因此不改程式。
 
 ### Coupler 固定座標與固定演化基底
 

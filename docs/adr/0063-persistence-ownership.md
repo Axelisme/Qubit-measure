@@ -166,6 +166,16 @@ Grid 不同的 grouped 實驗可由 spec 明確宣告 independent Labber layout�
 
 2026-10-21 註：autofluxdep 已移除，上一段的 node-row、flux-level commit 與 terminal export 規則是歷史記錄。現行 workflow 的提交與保存邊界見 [ADR-0062](0062-experiment-workflow.md)，不把舊 node 契約套到新 engine。
 
+### 資料容器的讀取契約
+
+資料容器採 Tolerant Reader。載入時忽略不認得或舊格式的欄位，不因多出或缺少欄位報錯。容器可以不再讀取舊欄位，不必轉換或提供相容別名。只有實際使用某欄位時才檢查它是否存在、數值是否可用；缺失時在使用處報錯並指名欄位，或在該功能可選時關閉並註明原因。寫入端仍寫出完整、正確的格式。
+
+2026-10-26，使用者裁決：「我對這種資料容器的行為預期都是：可以不讀舊格式欄位，但不要因為少了欄位或多了欄位就報錯。」這是一般資料讀取的欄位容忍原則。既有容器 header／major、component `schema_version` 的拒讀規則與元件 model 驗證契約仍由各 owner 決定，不以此新增相容層。
+
+量測與擬合分階段。量測端只把資訊記錄成 JSONL，不預先決定分析需要的格式。分析時才按需處理、組合所需資訊。讀取工具與分析工具只檢查實際使用的欄位，不驗整份 schema、版本或與當下分析無關的欄位；上述 owner 的既有格式契約不因此放寬。
+
+2026-10-26，使用者說明原因：「所以我才希望將擬合與測量分開階段，因為你不會知道擬合需要什麼資訊，也不知道想要什麼格式，只要都記錄成jsonl，透過要分析時按需處理來組合需要的資訊。所以請你不要讓分析工具與讀取工具有非必要的格式檢查」
+
 ### Component 文件版本與明確升級
 
 每份存 component 參數的 setup、point 與 entry template 都有 `schema_version: N`。它描述整份 component schema，不取代容器的 format／format_version。Lab 與 component models 一起在既有 ComponentRegistry 註冊具名 ParameterSchemaPolicy，提供目前版本與 upgrade 命令。未配置就失敗，lib 不預設 lab 版本，也不把 policy 參數散到 ResultEntry／open／create／template。

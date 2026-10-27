@@ -2,7 +2,7 @@
 
 **Readers:** operator, lab-author. Start six independent fluxonium models and prepare mux measurements without hardware.
 
-**Last updated:** 2026-10-27, component schema v2.
+**Last updated:** 2026-10-27, shared single-fluxonium physics and component schema v2.
 
 For existing entries, move resonator and mux-group `ext.time_of_fly` to top-level `time_of_fly`. The loader does not migrate it.
 
@@ -40,6 +40,27 @@ positive integer subdivisions per period, default 20, for all six qubits.
 Dense-reference population tolerance is 1e-2; the 21-level Q1 calibration
 measured about 1e-4 or less. Stronger drives, longer pulses and coherences need
 separate convergence checks. Carriers at or above 30 MHz keep the existing route.
+
+## Physical model and single-fluxonium consistency
+
+`SixFluxoniumSource` delegates each cavity to `SingleFluxoniumSource`.
+Both environments use `SingleFluxoniumModel`, including Purcell relaxation
+for 0↔1 with detailed balance, capacitive, inductive and quasiparticle loss,
+flux 1/f and photon dephasing, secular master-equation evolution and ADC readout.
+Q1 has the same physical parameters as single_fluxonium. With matched settings,
+its downward Purcell rate at reduced flux 0.5 is the same in both environments.
+
+The differences are in the multi-qubit setup, not a separate physics model.
+Q2 through Q6 have their own EJ, EC, EL, resonator frequencies and zero-current
+flux. Each qubit receives coil and local DC contributions. There is no fast-flux
+`flux_line`; cavity routing and derived RNG streams account for multiple qubits.
+These differences do not change the shared physics used to validate coherence
+strategies that do not use fast flux.
+
+Before comparing runs, align physical constants in the two YAML working copies.
+Both templates use g = 30 MHz, κ = 1.1 MHz and `thermal_occupation: 0`.
+Those values do not define the validation range; edit the working copies for
+the comparison rather than changing the tracked templates.
 
 ## Trusted startup
 
