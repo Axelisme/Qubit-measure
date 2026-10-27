@@ -89,8 +89,11 @@ before/after；這是人工審查提示，不是自動判定設定變弱，也�
 
 ```bash
 uv run --no-sync -- python tools/check_pytest_collection.py
-uv run --no-sync -- pytest -n auto --dist=worksteal
+uv run --directory <worktree> --no-sync -- pytest -n auto --dist=worksteal \
+  --failure-log <per-task 目錄>/pytest-failures.jsonl
 ```
+
+全樹驗證的 marker 選擇與 failure log 路徑、用途見 [tests/README.md](../tests/README.md#執行測試套件)。
 
 `--dist=worksteal` 維持 command-level，因 parity intentionally disables pytest plugin autoload；
 不設定 pytest 全域預設，因此未帶旗標的 `pytest -n auto` 語意不變。

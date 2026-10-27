@@ -1,6 +1,6 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-10-26（pytest 平行改用 `-n auto`，不再經 agent 協調腳本）
+**Last updated:** 2026-10-27（全樹驗證即時記錄失敗節點）
 
 **讀者：** framework-dev、agent。查閱測試的 owner、fixture、執行方式與搬遷驗收契約。
 
@@ -95,9 +95,13 @@ task 進 land review 前才跑全樹驗證。依變更範圍選擇 marker expres
 
 ```bash
 uv run --directory <worktree> --no-sync -- \
-  pytest -n auto --dist=worksteal -m "not sim" --durations=25
+  pytest -n auto --dist=worksteal -m "not sim" --durations=25 \
+  --failure-log <per-task 目錄>/pytest-failures.jsonl
 # 若改到 lib/zcu_tools/simulate/，將上面的 -m "not sim" 換成 -m ""。
 ```
+
+Watchdog／timeout 中止 pytest 時不會印失敗摘要，junitxml／lastfailed 也只在 session 結束時寫出；此 JSONL 檔是中止後唯一能定位失敗節點的來源。
+先建立 `.agent_state/` 下的 per-task 目錄，再傳入檔案路徑，遵循 [CLAUDE.md 的暫存檔生命週期](../CLAUDE.md#暫存檔生命週期)；未給 `--failure-log` 時不寫檔。
 
 `tests/simulate/conftest.py` 在 collection 時為該目錄全部案例加上 `sim`，
 避免新測試檔漏標。其他目錄以 coverage per-test context 判定，只標記實際驅動

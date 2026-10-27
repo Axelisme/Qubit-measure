@@ -1,6 +1,8 @@
+import json
 import os
 import sys
 import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -35,14 +37,51 @@ if _LIB_PATH not in sys.path:
     sys.path.insert(0, _LIB_PATH)
 
 
+class _FailureLog:
+    """Append failed reports to a caller-owned path; propagate write failures."""
+
+    def __init__(self, path: Path) -> None:
+        self.path = path
+
+    def pytest_runtest_logreport(self, report: pytest.TestReport) -> None:
+        """Flush one JSONL record per failed setup, call, or teardown report."""
+        if not report.failed:
+            return
+        record = {
+            "nodeid": report.nodeid,
+            "when": report.when,
+            "outcome": report.outcome,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "traceback": report.longreprtext,
+        }
+        with self.path.open("a", encoding="utf-8") as stream:
+            stream.write(json.dumps(record) + "\n")
+            stream.flush()
+
+
+def pytest_addoption(parser: pytest.Parser) -> None:
+    """Add opt-in JSONL failure logging to the suite's pytest CLI."""
+    parser.addoption(
+        "--failure-log",
+        type=Path,
+        metavar="PATH",
+        help="Append failed test reports immediately to PATH as JSONL.",
+    )
+
+
 @pytest.hookimpl(tryfirst=True)
 def pytest_configure(config: pytest.Config) -> None:
-    """Register the context-directory guard and allocate an invocation-owned basetemp.
+    """Register session guards, optional failure logging, and an owned basetemp.
 
+    Only the controller (or serial session) logs failures, never xdist workers.
+    The log's parent must exist; write errors propagate when a report fails.
     The caller's basetemp wins when supplied. Xdist supplies each worker's
     basetemp beneath the controller's directory. Only the allocating
     controller (or serial session) owns cleanup.
     """
+    failure_log = config.getoption("--failure-log")
+    if failure_log is not None and not hasattr(config, "workerinput"):
+        config.pluginmanager.register(_FailureLog(failure_log), "failure-log")
     config.pluginmanager.register(ContextDirectoryGuard(), "context-directory-guard")
     if config.option.basetemp is not None:
         return
