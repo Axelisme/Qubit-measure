@@ -91,7 +91,7 @@ def test_simulation_clock_rejects_invalid_durations_without_advancing(
     wall_clock.now = 10.0
     before = sim_clock.now()
 
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="finite and nonnegative"):
         sim_clock.complete_round(physical_s, elapsed_s)
 
     assert sim_clock.now() == before
