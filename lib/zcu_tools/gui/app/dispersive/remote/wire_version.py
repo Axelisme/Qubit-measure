@@ -14,6 +14,6 @@ independently, so the constants live beside the app's own RemoteControlAdapter.
 
 from __future__ import annotations
 
-WIRE_VERSION = 6  # entry/component projection and predictor affine inputs
+WIRE_VERSION = 7  # predictor v2 recorded multi-device flux inputs
 
-GUI_VERSION = 8  # entry/predictor selection and component artifact export
+GUI_VERSION = 9  # explicit native selection and predictor-frame projection

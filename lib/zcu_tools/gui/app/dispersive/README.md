@@ -1,6 +1,6 @@
 # Dispersive-shift analysis GUI
 
-**Last updated:** 2026-10-25
+**Last updated:** 2026-10-27
 
 **讀者：** framework-dev、operator。開啟 entry、選 predictor 與匯出色散擬合的流程及 owner。
 
@@ -15,10 +15,11 @@
 Project root 下的 result/ 和 Database/ 分別是兩個 roots。分析不執行 Database Save。
 
 Load predictor 列出 entry.predictors_path 下的 JSON 檔名，只接受目錄內的檔案。
-`resources.predictor_file` 讀取 EJ/EC/EL 與 flux_half/flux_period/flux_bias。
-數值 owner 驗證完整性與物理約束。失敗不替換目前 inputs。
-Flux 使用仿射座標 `(device_value + flux_bias - flux_half) / flux_period + 0.5`。
-Flux period 可為負數。
+`resources.predictor_file` 只讀 v2，能量 EJ/EC/EL 與 `flux: {offset, period, unit}` 分開保存。
+數值 owner 驗證能量完整性與物理約束。缺 flux 或載入失敗不替換目前 inputs。
+投影只使用該 predictor 記錄的 frame，不讀目前 component 校準，也不注入 component flux provider。
+Flux 為 `offset + sum(value[d] / period[d])`，單位為 Φ0。Period 可為負數。
+舊 predictor 須先執行 `scripts/upgrade_parameters.py` 明確升級。
 
 Bare resonator frequency 初值依序取：
 1. dispersive/<component>.json 的 params.bare_rf。
@@ -34,8 +35,17 @@ median_rf 設初值。這兩項分別是 state seed 與畫面初值，不互相�
 
 流程為 predictor → one-tone → preprocess → tune → export。
 One-tone 檔可從任意位置選取，預設瀏覽 project_root/Database。
-Load dialog 顯示預覽，Transpose axes 決定載入時是否交換軸。
-State 永遠保存 canonical device-major signals，頻率由 Hz 轉 GHz。
+共用 `analysis_project` dialog 顯示預覽。Native 檔明示 variable、device_axis 與 device。
+變數與頻率軸唯一時 UI 預選，否則留空，操作者必須選擇。儀器清單與單位來自 predictor。
+Native 投影共用 `analysis.fluxdep.project_native_spectrum`，不推測 cfg 或 Container 布局。
+Transpose axes 只交換 Labber 軸，不覆蓋 native 選擇。
+State 保存 device-major signals 與 GHz 頻率。Native 頻率先經共用投影換成 MHz，再轉 GHz。
+
+Native metadata 來自同一個 Container。只有其他 predictor 儀器使用 device owner 的 snapshot scalar。
+缺席的儀器貢獻為 0，在場卻無效或單位不符時報錯指名。被掃儀器只取掃描軸，不再加 snapshot 值。
+整份 snapshot 未記錄時，包括 Labber 與歷史 native，predictor 必須恰有一台儀器。
+此時掃描軸代表唯一儀器，來源身分仍保存為 `unnamed_device`。多儀器缺 snapshot 時拒絕載入。
+非法 metadata 不當作缺席，來源儀器不在 predictor frame 也報錯。
 
 Tune 的 g slider 顯示 0–200 MHz，r_f slider 的 300 ticks 跨 preprocess 頻率範圍。
 Preprocess 後先顯示背景與 bare_rf 線。手動調 slider 或 Auto tune 都不代表接受結果。
@@ -68,7 +78,7 @@ Worker 只回傳資料。Owner-thread on_done 記錄 state 並畫圖。
 
 [remote README](remote/README.md) 記錄查詢契約。
 Agent 只觀測，GUI 使用者負責 load、preprocess、tune、export。
-預設 port 為 8767。Dispersive 的 WIRE=6、GUI=8，與 measure 版本獨立。
+預設 port 為 8767。Dispersive 的 WIRE=7、GUI=9，與 measure 版本獨立。
 MCP 組合根位於 `mcp_servers/dispersive.py`，stdio 實作位於 `zcu_tools.mcp.dispersive.server`。
 `dispersive_launch` 使用 project_root、entry、component 啟動組合根注入的 `apps.dispersive` module。
 `dispersive_project_info` 回傳 entry/component 路徑與已選的 predictor 檔名，未選時為 null。

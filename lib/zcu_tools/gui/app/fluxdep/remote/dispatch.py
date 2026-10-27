@@ -33,7 +33,7 @@ if TYPE_CHECKING:
 
 from zcu_tools.analysis.fluxdep.models import TransitionDict
 from zcu_tools.gui.app.analysis_project.entry import target_payload
-from zcu_tools.gui.app.fluxdep.services.load import NativeSpectrumSelection
+from zcu_tools.gui.app.analysis_project.native import NativeSpectrumSelection
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 from zcu_tools.gui.remote.method_spec import BoundMethod, build_method_registry
 from zcu_tools.plotting.fluxdep.spectrum import make_spectrum_figure

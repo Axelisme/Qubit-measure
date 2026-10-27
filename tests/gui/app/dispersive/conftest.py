@@ -9,6 +9,7 @@ from zcu_tools.resources.entry import ResultEntry, component_registry
 from zcu_tools.resources.entry.aliases import EntryAliases
 from zcu_tools.resources.predictor_file import (
     PredictorFile,
+    PredictorFlux,
     PredictorSource,
     save_predictor_file,
 )
@@ -88,11 +89,8 @@ def analysis_entry(tmp_path):
                     EJ=4.0,
                     EC=1.0,
                     EL=0.5,
-                    flux_half=0.5,
-                    flux_period=-2.0,
-                    flux_bias=0.25,
                 ),
-                flux_unit="V",
+                flux=PredictorFlux(0.625, {"bias": -2.0}, {"bias": "V"}),
                 source=PredictorSource(run_id="source-run", created_at=None),
             ),
         )

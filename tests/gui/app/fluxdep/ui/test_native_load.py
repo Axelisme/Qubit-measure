@@ -11,7 +11,7 @@ from zcu_tools.datafile import Axis, load, save
 from zcu_tools.gui.app.fluxdep.ui.load_dialog import LoadSpectrumDialog
 
 from tests.gui._user_input import ComponentDriver
-from tests.gui.app.fluxdep._native import native_spectrum_file
+from tests.gui.app.analysis_project._native import native_spectrum_file
 
 
 @pytest.fixture

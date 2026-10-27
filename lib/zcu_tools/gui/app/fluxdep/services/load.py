@@ -15,10 +15,7 @@ from __future__ import annotations
 
 import logging
 import os
-from dataclasses import dataclass
-from pathlib import Path
 
-import h5py
 import numpy as np
 
 from zcu_tools.analysis.flux import (
@@ -31,12 +28,16 @@ from zcu_tools.analysis.fluxdep import project_native_spectrum
 from zcu_tools.analysis.fluxdep.io import load_spectrums
 from zcu_tools.analysis.fluxdep.models import DeviceSnapshotValue, PointsData
 from zcu_tools.analysis.spectrum import SpectrumData, format_rawdata
-from zcu_tools.datafile import Container, LabberData, load, load_labber_data
+from zcu_tools.datafile import Container, LabberData
 from zcu_tools.device import snapshot_scalar_values
 from zcu_tools.experiment.native_persistence import metadata_from_container
 from zcu_tools.gui.app.analysis_project.flux import (
     ComponentFluxProvider,
     component_flux_context,
+)
+from zcu_tools.gui.app.analysis_project.native import (
+    NativeSpectrumSelection,
+    read_spectrum_source,
 )
 from zcu_tools.gui.app.fluxdep.state import (
     FluxDepState,
@@ -47,32 +48,6 @@ from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputEr
 from zcu_tools.simulate import value2flux
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass(frozen=True)
-class NativeSpectrumSelection:
-    """Explicit Container variable, its device-axis name and instrument identity.
-
-    variable names a 2-D complex variable. device_axis names its native bias
-    axis. device is the caller-selected component instrument, or unnamed_device
-    when no target/context is available. No cfg-derived identity is substituted.
-    """
-
-    variable: str
-    device_axis: str
-    device: str = "unnamed_device"
-
-
-def read_spectrum_source(filepath: str) -> Container | LabberData:
-    """Read an exact native Container or Labber log, using its declared header.
-
-    Native content and metadata stay together in one detached Container. A
-    declared container never falls back to a Labber parser after validation
-    failure. Unknown headers use the Labber reader; I/O errors propagate.
-    """
-    with h5py.File(filepath, "r") as handle:
-        native = handle.attrs.get("format") == "zcu.container"
-    return load(Path(filepath)) if native else load_labber_data(filepath)
 
 
 def transpose_spectrum_data(

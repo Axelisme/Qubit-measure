@@ -16,6 +16,7 @@ from zcu_tools.gui.app.dispersive.state import (
     OnetoneEntry,
     VersionTable,
 )
+from zcu_tools.resources.predictor_file import PredictorFlux
 
 
 def _make_onetone(name: str = "r1") -> OnetoneEntry:
@@ -44,9 +45,7 @@ def _make_preprocess(signature: tuple[object, ...] = ("a",)) -> PreprocessResult
 def _inputs(bare_rf: float = 5.3) -> FluxoniumInputs:
     return FluxoniumInputs(
         params=(4.0, 1.0, 0.5),
-        flux_half=0.5,
-        flux_bias=0.0,
-        flux_period=1.0,
+        flux=PredictorFlux(0.0, {"bias": 1.0}, {"bias": "native"}),
         bare_rf_seed=bare_rf,
     )
 
