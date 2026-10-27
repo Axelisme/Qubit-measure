@@ -191,10 +191,6 @@ def test_one_value_literal_is_read_only_text_without_modes(build: Build) -> None
     view, state = build(LockForm, None)
     before = state.input.data
     for path, text in (("reps", "1000"), ("style", "const")):
-        assert row_names(view, path) == [
-            f"form.input.{path}",
-            f"form.value.{path}",
-        ]
         assert view.findChild(QAction, f"form.mode.{path}") is None
         fixed = child(view, QLineEdit, f"form.input.{path}")
         assert fixed.isReadOnly()

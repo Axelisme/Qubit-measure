@@ -53,7 +53,7 @@ def test_preview_axis_labels_follow_transpose_and_restore(
     original = driver.plots().axes[0]
     assert (original.xlabel, original.ylabel) == ("Device value (flux)", "Frequency")
 
-    driver.click("Transpose axes")
+    driver.choose_option("X=Flux, Y=Frequency", value="X=Frequency, Y=Flux")
     driver.screenshot(tmp_path / "transposed.png")
     transposed = driver.plots().axes[0]
     assert (transposed.xlabel, transposed.ylabel) == (
@@ -61,7 +61,7 @@ def test_preview_axis_labels_follow_transpose_and_restore(
         "Device value (flux)",
     )
 
-    driver.click("Transpose axes")
+    driver.choose_option("X=Frequency, Y=Flux", value="X=Flux, Y=Frequency")
     driver.screenshot(tmp_path / "restored.png")
     assert driver.plots().axes[0] == original
 
@@ -134,7 +134,7 @@ def test_inherit_dropdown_lists_loaded_names(dialog):
     assert inherit.currentData() is None
 
 
-def test_result_request_reflects_choices(dialog, spectrum_hdf5, monkeypatch):
+def test_result_request_reflects_choices(dialog, qapp, spectrum_hdf5, monkeypatch):
     filepath = spectrum_hdf5[0]
     monkeypatch.setattr(QFileDialog, "getOpenFileName", lambda *a, **kw: (filepath, ""))
     buttons = dialog.findChildren(QPushButton)
@@ -143,7 +143,11 @@ def test_result_request_reflects_choices(dialog, spectrum_hdf5, monkeypatch):
         combo.setCurrentText(
             "TwoTone" if combo.findText("TwoTone") >= 0 else "existing.hdf5"
         )
-    next(b for b in buttons if b.isCheckable()).click()
+    dialog.show()
+    qapp.processEvents()
+    ComponentDriver(dialog).choose_option(
+        "X=Flux, Y=Frequency", value="X=Frequency, Y=Flux"
+    )
 
     req = dialog.result_request()
     assert req is not None

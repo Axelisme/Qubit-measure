@@ -1,7 +1,7 @@
 """LoadOnetoneDialog — pick a one-tone hdf5 + axis orientation with a live preview.
 
 dispersive loads a single one-tone spectrum, so it just reuses the shared
-``LoadDataDialog`` base (file row + Browse, transpose toggle, best-effort read,
+``LoadDataDialog`` base (editable file row + Browse, axis-mapping dropdown, best-effort read,
 preview) with no extra options. The chosen ``transpose_axes`` flag is passed to the
 Controller only on Load, so State always stores the canonical (x=flux, y=freq)
 layout.
@@ -13,7 +13,6 @@ from typing import NamedTuple
 
 from qtpy.QtWidgets import (
     QHBoxLayout,
-    QLabel,
     QWidget,
 )
 
@@ -41,11 +40,8 @@ class LoadOnetoneDialog(LoadDataDialog):
     # --- construction ----------------------------------------------------
 
     def _build_options(self, opt_row: QHBoxLayout) -> None:
-        # Just the transpose toggle plus a hint — no type / inherit.
-        opt_row.addWidget(self._transpose_btn)
-        opt_row.addWidget(
-            QLabel("(toggle if the preview shows frequency on x instead of flux)")
-        )
+        # No type / inherit options; the shared dropdown names both axes.
+        opt_row.addWidget(self._axis_combo)
         opt_row.addStretch(1)
 
     # --- result ----------------------------------------------------------
