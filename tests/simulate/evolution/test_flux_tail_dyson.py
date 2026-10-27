@@ -97,7 +97,6 @@ def evolve(src, b):
     with closing(
         Engine(
             1,
-            100000,
             kernels=(
                 T4(),
                 AdiabaticMapKernel(),
@@ -202,9 +201,7 @@ def test_distinct_repeated_tails_use_their_own_actual_input_with_pruning_budget(
     # contracted table. The same engine must not reuse another source's input.
     other = ModelSource(np.diag([0.0, 1.0, 0.0]).astype(complex), src.model)
     with closing(
-        Engine(
-            1, 100000, kernels=(T4(), DysonKernel(), FloquetPeriodKernel(), Fallback())
-        )
+        Engine(1, kernels=(T4(), DysonKernel(), FloquetPeriodKernel(), Fallback()))
     ) as engine:
         engine.evolve(src, (b,), cancel=Event())
         changed = engine.evolve(other, (b,), cancel=Event())

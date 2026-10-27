@@ -2,7 +2,6 @@
 
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
-from typing import Self
 
 import numpy as np
 from joblib import delayed
@@ -16,14 +15,12 @@ from ._multitone_dispatch import populate_multitone_inventory, populate_multiton
 from ._parallel import Executor
 from ._planning import Geometry
 from ._prepare_keys import group_keys
-from ._resident import ResidentAdmission
 from ._shaped_dispatch import (
     populate_single_gate_plan,
     preference,
     single_gate_preferred,
 )
 from ._two_tone_dispatch import direct_preferred
-from .cache import RESIDENT_METADATA_BYTES, PrepareCache, PreparedPayload
 from .engine import PathDiagnostics
 from .kernel import (
     GuardPreparation,
@@ -33,7 +30,7 @@ from .kernel import (
     RowPlan,
     SegmentTable,
 )
-from .kernels.floquet import FloquetKernel, FloquetPlan
+from .kernels.floquet import FloquetPlan
 from .kernels.floquet_period import MIN_FREQUENCY_GHZ
 from .kernels.gate_cache import GateCacheKernel
 from .kernels.multitone_gate import populate_gate_inventory
@@ -119,40 +116,6 @@ def _candidate_domains(geometry: Geometry) -> dict[str, _CandidateDomain]:
     }
 
 
-def resident_inventory(
-    geometry: Geometry,
-    kernels: Mapping[str, Kernel],
-    context: KernelContext,
-    cache: PrepareCache,
-) -> dict[tuple[str, str, float], set[bytes]]:
-    """Find all potentially borrowed resident keys before prefixes or guards.
-
-    Inventory covers every candidate in the complete WorkPlan geometry, not
-    just accepted rows or the current prefix. Only resident families need key
-    computation. Candidate membership never invokes a numerical guard and does
-    not change routing; whole-batch intersections remain eligible for borrowing.
-    """
-    table = geometry.table
-    zero = tuple(0 for _ in range(table.level.shape[1]))
-    identity = context.source.model(zero).identity
-    current = cache.families(identity, context.budget)
-    inventory = {}
-    if current:
-        domains = _candidate_domains(geometry)
-        for domain in domains.values():
-            mask, families = domain.mask, domain.families
-            rows = np.flatnonzero(mask)
-            if not len(rows):
-                continue
-            for name in families:
-                if name in current:
-                    keys = kernels[name].prepare_keys(table, rows, context)
-                    inventory.setdefault(
-                        (name, identity, context.budget), set()
-                    ).update(key.tobytes() for key in keys)
-    return inventory
-
-
 @dataclass(frozen=True)
 class ShapedPlan:
     """Acquire-wide shaped costs, fixed before any numerical guard.
@@ -175,7 +138,6 @@ class Selection:
     two_tone_direct: acquire-wide global-row preference, or None without two tones.
     names: caller-accepted family context for timeline-local frame planning.
     plans: caller-accepted decisions to retain in the timeline-local plan.
-    cached: caller-looked-up model-only payload references for worker admission.
     A selection disables further deferral and retains accepted guard products.
     """
 
@@ -185,7 +147,6 @@ class Selection:
     two_tone_direct: NDArray[np.bool_] | None = None
     names: NDArray[np.str_] | None = None
     plans: Mapping[str, RowPlan] = field(default_factory=dict)
-    cached: Mapping[str, tuple[PreparedPayload, ...]] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -205,18 +166,13 @@ class Dispatch:
     diagnostics: counts for decisions resolved so far, refreshed after workers join.
     costs: nonnegative scheduling estimates, including provisional deferred costs.
     preparations: accepted caller guard products, grouped by family.
-    rejected_preparations: model-only handoffs with no accepted rows, never apply
-        bindings. Caller shared guards cap these by spare resident capacity and
-        per-key quotas; Schedule consumes this mutable handoff queue when offering
-        them below actual consumers. Only admission retains unused products then.
     deferred: worker-owned row mask, or None when no rows need worker classification.
     shaped: fixed acquire-wide cost plan, or None when no shaped work exists.
     rejected: caller guard decisions to skip in worker-local fallback chains.
     two_tone_direct: global-row cost preference fixed before either two-tone guard;
         None when no constant two-tone candidates exist.
     plans: immutable family-owned global-row decisions passed unchanged to apply;
-        evolve-local plans never enter the model-only prepare cache.
-    cached: strong resident references passed to deferred workers without cache IO.
+        plans live only for this evolve.
     chain: global-row chain IDs; -1 for independent rows. A timeline worker
         replaces provisional decisions locally after its deferred guards finish.
     """
@@ -234,10 +190,6 @@ class Dispatch:
     plans: Mapping[str, RowPlan] = field(default_factory=dict)
     chain: NDArray[np.int64] = field(
         default_factory=lambda: np.empty(0, dtype=np.int64)
-    )
-    cached: Mapping[str, tuple[PreparedPayload, ...]] = field(default_factory=dict)
-    rejected_preparations: dict[str, tuple[GuardPreparation, ...]] = field(
-        default_factory=dict
     )
 
 
@@ -286,7 +238,7 @@ def prepare(
 ) -> Prepared:
     """Select a key-level builder and prepare an aligned batch of representatives.
 
-    Called at the scheduler's normal build point, after cache lookup. Gate keys
+    Called at the scheduler's normal build point. Gate keys
     with duration in (0, 30] ns try phase-adaptive preparation; all other gate
     keys use sixteen nodes. Failed phase probes fall back inside the numerical
     build. Other families use their ordinary prepare entry point unchanged.
@@ -302,36 +254,12 @@ def prepare(
         return kernel.prepare(keys, table, rows, context)
 
 
-class _GuardCacheHits(tuple[PreparedPayload, ...]):
-    """Caller-indexed hits, borrowed unchanged by shared and deferred guards.
-
-    Tuple contents retain the whole-payload references used by resident
-    admission. by_key lists payload positions in hit order, including overlaps
-    so a numerical domain miss can still try the next covering payload.
-    """
-
-    by_key: Mapping[bytes, tuple[int, ...]]
-
-    def __new__(cls, payloads: Iterable[PreparedPayload]) -> Self:
-        hits = super().__new__(cls, payloads)
-        positions: dict[bytes, list[int]] = {}
-        for index, payload in enumerate(hits):
-            for key in dict.fromkeys(payload.keys):
-                positions.setdefault(key, []).append(index)
-        hits.by_key = {key: tuple(indices) for key, indices in positions.items()}
-        return hits
-
-
-_EMPTY_GUARD_HITS = _GuardCacheHits(())
-
-
 @dataclass(frozen=True)
 class _Guarded:
     rows: NDArray[np.int64]
     rejected: NDArray[np.int64]
     preparations: tuple[GuardPreparation, ...]
     plan: RowPlan | None = None
-    rejected_preparations: tuple[GuardPreparation, ...] = ()
 
 
 def _guard_key(
@@ -340,7 +268,7 @@ def _guard_key(
     context: KernelContext,
     rows: NDArray[np.int64],
 ) -> _Guarded:
-    """Separate consumer handoffs from model-only products with no accepted row."""
+    """Keep guard products only when this call has accepted consumers."""
     with context.work_plan.routing.measure(kernel.name, "prepare"):
         result = kernel.guard_prepared(table, rows, context)
     if result is None:
@@ -355,68 +283,7 @@ def _guard_key(
         rows[~accepted],
         preparations,
         result.plan,
-        result.preparations if not len(selected) else (),
     )
-
-
-def _guard_cached(
-    kernel: Kernel,
-    table: SegmentTable,
-    context: KernelContext,
-    rows: NDArray[np.int64],
-    hits: _GuardCacheHits,
-    rejected_limit: int | None = None,
-) -> tuple[_Guarded, ...]:
-    """Admit covered cached rows without building; build only domain misses."""
-    remaining = np.ones(len(rows), dtype=bool)
-    keys = kernel.prepare_keys(table, rows, context) if hits else ()
-    positions: dict[int, list[int]] = {}
-    for position, key in enumerate(keys):
-        for index in hits.by_key.get(key.tobytes(), ()):
-            positions.setdefault(index, []).append(position)
-    results: list[_Guarded] = []
-    # Keep hit order between payloads and original row order within each call.
-    for index in sorted(positions):
-        covered = np.array(positions[index], dtype=np.int64)
-        covered = covered[remaining[covered]]
-        if not len(covered):
-            continue
-        selected = rows[covered]
-        with context.work_plan.routing.measure(kernel.name, "prepare"):
-            result = kernel.admit_prepared(
-                hits[index].prepared, table, selected, context
-            )
-        if result is None:
-            continue
-        remaining[covered] = False
-        accepted = result.accepted
-        context.work_plan.routing.hit(kernel.name, table, selected[accepted])
-        results.append(
-            _Guarded(
-                selected[accepted],
-                selected[~accepted],
-                result.preparations if accepted.any() else (),
-                result.plan,
-            )
-        )
-    if remaining.any():
-        built = _guard_key(kernel, table, context, rows[remaining])
-        if rejected_limit is not None and built.rejected_preparations:
-            retained: list[GuardPreparation] = []
-            for preparation in built.rejected_preparations:
-                charge = preparation.nbytes + RESIDENT_METADATA_BYTES
-                if charge <= rejected_limit:
-                    retained.append(preparation)
-                    rejected_limit -= charge
-            built = _Guarded(
-                built.rows,
-                built.rejected,
-                built.preparations,
-                built.plan,
-                tuple(retained),
-            )
-        results.append(built)
-    return tuple(results)
 
 
 def _unshared_driven_input(table: SegmentTable) -> NDArray[np.bool_]:
@@ -450,20 +317,7 @@ class _Classifier:
         context: KernelContext,
         pool: Executor | None = None,
         selection: Selection | None = None,
-        admission: ResidentAdmission | None = None,
     ):
-        self.admission = admission
-        self.cache = admission.cache if admission is not None else None
-        self.cached = (
-            {
-                name: hits
-                if isinstance(hits, _GuardCacheHits)
-                else _GuardCacheHits(hits)
-                for name, hits in selection.cached.items()
-            }
-            if selection is not None
-            else {}
-        )
         self.pool, self.selection = pool, selection
         self.geometry, self.kernels = geometry, kernels
         self.context = context
@@ -481,7 +335,6 @@ class _Classifier:
             selection.two_tone_direct if selection is not None else None
         )
         self.preparations: dict[str, list[GuardPreparation]] = {}
-        self.rejected_preparations: dict[str, list[GuardPreparation]] = {}
         self.rejected: dict[str, NDArray[np.bool_]] = {}
         self.guard_plans: dict[str, list[RowPlan]] = {}
         self.plans: dict[str, RowPlan] = {}
@@ -493,13 +346,7 @@ class _Classifier:
         if self.selection is not None:
             # This worker owns one timeline. A single batch lets the kernel
             # reuse call-local work across distinct prepare keys, then drop it.
-            return _guard_cached(
-                kernel,
-                self.table,
-                self.context,
-                rows,
-                self.cached.get(kernel.name, _EMPTY_GUARD_HITS),
-            )
+            return (_guard_key(kernel, self.table, self.context, rows),)
         groups = group_keys(kernel, self.table, rows, self.context)
         # A common refusal must reach the caller's complete legacy key groups.
         # Deferring a unique common key can otherwise split one shared Floquet
@@ -509,31 +356,6 @@ class _Classifier:
             if kernel.name == "common_frame"
             else groups.shared
         )
-        if self.cache is not None:
-            dc = self.source.model(tuple(0 for _ in range(self.table.level.shape[1])))
-            self.cached[kernel.name] = _GuardCacheHits(
-                self.cache.find(
-                    (kernel.name, dc.identity, self.budget),
-                    {key.tobytes() for key in groups.keys},
-                )
-            )
-        hits = self.cached.get(kernel.name, _EMPTY_GUARD_HITS)
-        if isinstance(kernel, FloquetKernel) and self.cache is not None and hits:
-            hits = self.extend_floquet_hits(kernel, hits)
-            self.cached[kernel.name] = hits
-        # Bound rejected handoffs even while pooled shared guards are returning.
-        # Equal per-key quotas deliberately decline large non-revisiting scans.
-        rejected_limit = (
-            max(
-                0,
-                self.cache.limit
-                - self.cache.charged_bytes
-                + self.cache.reclaimable_bytes,
-            )
-            // max(1, int(np.count_nonzero(caller_keys)))
-            if self.cache is not None
-            else 0
-        )
         local = rows[~caller_keys[groups.inverse]]
         self.deferred[local] = True
         if len(local):
@@ -542,54 +364,17 @@ class _Classifier:
             selected for index, selected in groups.selections() if caller_keys[index]
         )
         if self.pool is not None and np.count_nonzero(caller_keys) >= 8:
-            batches = self.pool(
-                delayed(_guard_cached)(
-                    kernel, self.table, self.context, selected, hits, rejected_limit
-                )
+            results = self.pool(
+                delayed(_guard_key)(kernel, self.table, self.context, selected)
                 for selected in selections
             )
-            results: list[_Guarded] = []
-            for batch in batches:
-                if batch is None:
-                    raise RuntimeError("guard job returned no decision")
-                results.extend(batch)
+            if any(result is None for result in results):
+                raise RuntimeError("guard job returned no decision")
             return results
         return (
-            result
+            _guard_key(kernel, self.table, self.context, selected)
             for selected in selections
-            for result in _guard_cached(
-                kernel, self.table, self.context, selected, hits, rejected_limit
-            )
         )
-
-    def extend_floquet_hits(
-        self, kernel: FloquetKernel, hits: _GuardCacheHits
-    ) -> _GuardCacheHits:
-        """Extend complete cached domains in the caller before workers borrow them.
-
-        Cache ownership is replaced, not added alongside the shared frame. The
-        full-table inventory makes later shared/deferred guards read-only, so
-        worker completion order cannot lose a concurrent bin extension.
-        """
-        if self.cache is None:
-            raise RuntimeError("Floquet extension requires caller cache ownership")
-        dc = self.source.model(tuple(0 for _ in range(self.table.level.shape[1])))
-        namespace = kernel.name, dc.identity, self.budget
-        extended: list[PreparedPayload] = []
-        for payload in hits:
-            with self.context.work_plan.routing.measure(kernel.name, "prepare"):
-                prepared = kernel.extend_prepared(
-                    payload.prepared, self.table, self.context
-                )
-            if prepared is payload.prepared:
-                extended.append(payload)
-                continue
-            replacement = PreparedPayload(prepared, payload.keys)
-            if self.admission is None:
-                raise RuntimeError("Floquet extension requires caller admission")
-            self.admission.replace(namespace, payload, replacement)
-            extended.append(replacement)
-        return _GuardCacheHits(extended)
 
     def try_kernel(self, kernel: Kernel, rows: NDArray[np.int64]) -> NDArray[np.int64]:
         """Batch cheap guards in the caller and never retry its rejected rows."""
@@ -617,10 +402,6 @@ class _Classifier:
                 )[result.rejected] = True
             if result.plan is not None:
                 self.guard_plans.setdefault(kernel.name, []).append(result.plan)
-            if result.rejected_preparations:
-                self.rejected_preparations.setdefault(kernel.name, []).extend(
-                    result.rejected_preparations
-                )
             if result.preparations:
                 self.preparations.setdefault(kernel.name, []).extend(
                     result.preparations
@@ -824,8 +605,6 @@ class _Classifier:
             self.two_tone_direct,
             self.plans,
             chain,
-            self.cached,
-            {name: tuple(items) for name, items in self.rejected_preparations.items()},
         )
 
 
@@ -835,8 +614,6 @@ def classify(
     context: KernelContext,
     pool: Executor | None = None,
     selection: Selection | None = None,
-    *,
-    admission: ResidentAdmission | None = None,
 ) -> Dispatch:
     """Guard shared candidates now and resolve local candidates in their worker.
 
@@ -844,11 +621,5 @@ def classify(
     Smaller shared selections stay serial. Selection resolves one timeline's
     deferred rows without a nested pool, retaining guard products for apply.
     Both modes use the same acquire-wide cost plan and numerical guards.
-    admission=None means this call does not look up resident payloads. Callers
-    supply the evolve-wide admission under their call lock. Deferred workers
-    borrow strong references through Selection.cached and never access the
-    resident cache themselves.
     """
-    return _Classifier(
-        geometry, kernels, context, pool, selection, admission
-    ).classify()
+    return _Classifier(geometry, kernels, context, pool, selection).classify()

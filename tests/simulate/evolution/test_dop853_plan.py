@@ -76,7 +76,7 @@ def test_mixed_frames_follow_timeline_not_workers_or_chunks():
         direct = ObservedDOP853()
         # No optional shaped families: every driven row uses the same terminal
         # numerical algorithm, so this isolates frame/chain scheduling.
-        engine = Engine(workers, 0, kernels=(direct, T4()), chunks_per_worker=chunks)
+        engine = Engine(workers, kernels=(direct, T4()), chunks_per_worker=chunks)
         try:
             outputs.append(
                 engine.evolve(source(), (timeline,), cancel=Event()).densities

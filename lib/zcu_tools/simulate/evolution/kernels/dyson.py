@@ -843,16 +843,6 @@ class DysonKernel:
             tuple(_prepare_model(table.model(source, row)) for row in rows)
         )
 
-    def admit_prepared(
-        self,
-        prepared: Prepared,
-        table: SegmentTable,
-        rows: NDArray[np.int64],
-        context: KernelContext,
-    ) -> None:
-        """Decline cached-domain admission; use the ordinary guard build path."""
-        del prepared, table, rows, context
-
     def guard_prepared(
         self,
         table: SegmentTable,

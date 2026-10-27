@@ -17,10 +17,10 @@ class FamilyRouting:
 
     rows: logical dispatched segments, including adopted shared prefixes.
     prepare_cpu_s: summed calling-thread CPU seconds in guards, preparation,
-        cached admission, extension and input binding (including rejected work).
+        and input binding (including rejected work).
     apply_cpu_s: summed calling-thread CPU seconds in kernel apply calls.
-    cache_hits: segment consumers served by persistent prepared or exact-result
-        caches. A shared prefix is measured once, not per adopting timeline.
+    cache_hits: logical segment consumers served by a caller-retained complete
+        preparation. Evolve itself always executes the numerical work.
     rejected_rows: rows actually rejected by this family's numerical guards;
         no threshold/reason detail and no cost-preference skips.
     estimated_cost: sum of relative scheduling units for executed segments.
@@ -29,7 +29,7 @@ class FamilyRouting:
     prepare_builds: coefficient products built by instrumented owners (currently
         common_frame); zero for families without product instrumentation.
     admission_rows: common-frame row indicator evaluations, excluding apply and
-        exact-result hits. Other families currently leave this count zero.
+        caller-preparation hits. Other families currently leave this count zero.
     CPU values exclude dispatch, geometry, ADC and I/O. All values are
     nonnegative; actual_cpu_s is the sum of the two measured phases.
     """
@@ -74,7 +74,6 @@ class RoutingCollector:
         self.enabled = enabled
         self._lock = Lock()
         self._totals: dict[str, _Totals] = {}
-        self._hits: dict[str, set[tuple[int, int]]] = {}
         self._expected: dict[tuple[str, int, int], float] = {}
         self._tables: dict[int, object] = {}
 
@@ -113,15 +112,6 @@ class RoutingCollector:
         if self.enabled and count:
             with self._lock:
                 self._totals.setdefault(name, _Totals()).rejected_rows += count
-
-    def hit(self, name: str, table: object, rows: NDArray[np.int64]) -> None:
-        """Count persistent prepared consumers once across admission and binding."""
-        if self.enabled:
-            with self._lock:
-                self._tables[id(table)] = table
-                self._hits.setdefault(name, set()).update(
-                    (id(table), int(row)) for row in rows
-                )
 
     def expect(
         self,
@@ -167,7 +157,6 @@ class RoutingCollector:
                 admission_rows=total.admission_rows,
                 prepare_cpu_s=total.prepare_cpu_s,
                 apply_cpu_s=total.apply_cpu_s,
-                cache_hits=len(self._hits.get(name, ())),
                 rejected_rows=total.rejected_rows,
                 estimated_cost=total.estimated_cost,
                 estimated_cpu_s=None

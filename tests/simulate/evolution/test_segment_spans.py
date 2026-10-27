@@ -57,7 +57,7 @@ def test_single_segment_constant_photons_matches_two_level_stark_solution():
     initial = np.full((2, 2), 0.5, dtype=complex)
     source = evolution.ModelSource(initial, lambda level: replace(model, level=level))
     timeline = replace(batch(1, duration=8), segment_shifts=((shift,),))
-    with closing(evolution.Engine(1, 1024**2)) as engine:
+    with closing(evolution.Engine(1)) as engine:
         result = engine.evolve(source, (timeline,), cancel=Event())
     expected = 0.5 * np.exp((2j * np.pi * 0.151 - 0.003) * 8)
     np.testing.assert_allclose(result.densities[0, 0, 1], expected, atol=1e-12)
@@ -88,7 +88,7 @@ def test_driven_shift_identities_do_not_alias_models_preparations_or_results():
         frequency_ghz=np.zeros(1),
     )
     timeline = replace(batch(1, duration=8), tracks=(tone,))
-    with closing(evolution.Engine(1, 1024**2)) as engine:
+    with closing(evolution.Engine(1)) as engine:
         for detuning in (0.0, 0.021, 0.037, 0.021):
             shifted = replace(
                 timeline,
@@ -108,7 +108,7 @@ def test_driven_shift_identities_do_not_alias_models_preparations_or_results():
     assert built_levels == [(0,)]
 
 
-def test_shifts_follow_exact_query_spans_with_zero_gaps_and_repeat_cache_hits():
+def test_shifts_follow_exact_query_spans_with_zero_gaps_and_repeat_density():
     query = evolution.segment_spans
     model = evolution.SecularModel(
         (0,),
@@ -129,7 +129,7 @@ def test_shifts_follow_exact_query_spans_with_zero_gaps_and_repeat_cache_hits():
     )
     shifted = replace(timeline, segment_shifts=shifts)
     assert query(shifted) == query(timeline)
-    with closing(evolution.Engine(1, 1024**2)) as engine:
+    with closing(evolution.Engine(1)) as engine:
         first = engine.evolve(
             source, (shifted,), cancel=Event(), reuse_key=b"shifted", telemetry=True
         )
@@ -143,9 +143,6 @@ def test_shifts_follow_exact_query_spans_with_zero_gaps_and_repeat_cache_hits():
         atol=1e-12,
     )
     np.testing.assert_array_equal(again.densities, first.densities)
-    assert sum(item.cache_hits for item in again.paths.routing.values()) == sum(
-        first.paths.segments_by_kernel.values()
-    )
     assert sum(first.paths.segments_by_kernel.values()) == sum(
         map(len, query(timeline))
     )
@@ -159,7 +156,7 @@ def test_gate_usage_inventory_distinguishes_shift_content_and_identical_repeats(
     )
     timeline = replace(batch(1, duration=8), tracks=(track(1, envelope, duration=8),))
     shift = evolution.SegmentShift(0, 8, np.arange(size) * 0.01, np.zeros((size, size)))
-    with closing(evolution.Engine(1, 1024**2)) as engine:
+    with closing(evolution.Engine(1)) as engine:
         engine.evolve(src, (timeline,), cancel=Event())
         unshifted = src.gate_usage
         assert unshifted
@@ -193,7 +190,7 @@ def test_shifted_energy_ordering_reports_context_without_reordering(excited_shif
         segment_boundaries=((2.0,),),
         segment_shifts=((shift,),),
     )
-    with closing(evolution.Engine(1, 1024**2)) as engine:
+    with closing(evolution.Engine(1)) as engine:
         if excited_shift < -0.1:
             with pytest.raises(
                 ValueError, match="point 17.*segment.*Stark.*ordering.*dispersive"

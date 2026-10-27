@@ -98,6 +98,8 @@ class SingleFluxoniumModel:
             params, dc_flux, cutoff=cutoff, evals_count=retained_levels
         )
         native = calculate_oscillator_operators(params, cutoff=cutoff)
+        self._eigensystems: dict[float, tuple[RealArray, ComplexArray]] = {}
+        self._readout_frequencies: dict[DispersiveResonator, RealArray] = {}
         self.params, self.dc_flux = params, dc_flux
         self.cutoff, self.retained_levels = cutoff, retained_levels
         self.temperature_k = temperature_k
@@ -147,7 +149,12 @@ class SingleFluxoniumModel:
         folding or extra phase convention is imposed on numpy.linalg.eigh.
         Invalid flux raises ValueError and eigensolver failures propagate.
         """
-        energy, vectors = np.linalg.eigh(self.hamiltonian(flux))
+        if not np.isfinite(flux):
+            raise ValueError("flux must be finite Phi/Phi0")
+        if flux not in self._eigensystems:
+            self._eigensystems[flux] = np.linalg.eigh(self.hamiltonian(flux))
+        cached_energy, cached_vectors = self._eigensystems[flux]
+        energy, vectors = cached_energy.copy(), cached_vectors.copy()
         energy.setflags(write=False)
         vectors.setflags(write=False)
         return energy, vectors
@@ -178,6 +185,8 @@ class SingleFluxoniumModel:
         raise DressedLabelingError; diagonalization failures propagate. Returns
         owned data, without populating ADC or modifying any model coordinates.
         """
+        if resonator in self._readout_frequencies:
+            return self._readout_frequencies[resonator].copy()
         values = calculate_dispersive_vs_flux_fast(
             self.params,
             np.array([self.dc_flux]),
@@ -188,7 +197,9 @@ class SingleFluxoniumModel:
             qub_cutoff=self.cutoff,
             return_dim=self.retained_levels,
         )
-        return np.array([value[0] for value in values])
+        frequencies = np.array([value[0] for value in values])
+        self._readout_frequencies[resonator] = frequencies
+        return frequencies.copy()
 
     def _rates(
         self,

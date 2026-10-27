@@ -515,99 +515,52 @@ class Cancelled(Exception):
 
 
 class Engine:
-    """Segment engine with inline or threaded execution and persistent prepare LRU.
+    """Segment engine with inline or threaded execution.
 
     workers: positive sole parallel width; kernels remain single-threaded.
-    cache_bytes: nonnegative unified resident/pending array and estimated metadata
-        byte limit (4608 metadata bytes per whole allocation), not a
-        process RAM cap. Active nonretained products and scratch are separate.
-        Zero disables prepare residency. No ADC/sampling is cached.
-    result_memo_bytes: optional nonnegative integer byte cap for exact results,
-        including metadata. None uses min(64 MiB, cache_bytes).
-    routing_cache_bytes: optional nonnegative integer byte cap for routing facts,
-        including metadata. None uses min(4 MiB, cache_bytes). Explicit auxiliary
-        caps are independent of cache_bytes, with no fixed upper bound. Zero
-        disables that cache. Invalid explicit caps raise ValueError.
-    kernels: optional algorithm collection replacing the production registry;
-        each stateless collaborator implements the internal Kernel contract and
-        has a unique name. Missing required names raise, never silently reroute.
-        Terminal families must cover their full dispatch domain: t4 handles all
-        no-tone rows and t6 all single constant-tone rows. If either terminal
-        guard rejects a dispatched row, evolve raises RuntimeError with
-        "no valid kernel". Shaped rows try gate_cache, period_table and dop853
-        in amortized-cost order; a guard rejection tries the next candidate.
-        Preparation and apply failures propagate without reclassification.
+    routing_cache_bytes: nonnegative integer byte cap for immutable routing
+        facts, including metadata. Defaults to 4 MiB; zero disables retention.
+        This is not a process RAM cap. Numerical preparations live only for
+        one evolve; caller-owned complete preparations may use reuse().
+    kernels: optional stateless internal Kernel collection replacing the
+        production registry. Names must be unique. Missing required names and
+        terminal guard rejections raise instead of silently rerouting.
     chunks_per_worker: optional positive fixed chunk multiplier. None selects
         timeline batching from the complete acquire inventory and keeps six
-        prepare chunks per worker. Explicit values fix both stages. Scheduling
-        never changes numerical admission or physics.
+        prepare chunks per worker. Scheduling does not change numerical admission.
 
-    The zero-level model identity names the entire ModelSource: all physical
-    parameters and absolute DC flux. Kernel keys include row flux levels.
-    Cache namespaces also include the error budget, so stricter requests cannot
-    reuse looser preparations. Calls on one instance serialize; close is
-    idempotent and waits for active work before clearing the cache. No worker
-    resource survives an evolve call. The prepare cache persists across evolve
-    calls; multi-timeline work opens and closes its own joblib threading pool.
-    Exact-input memo hits skip geometry only for inventories without cumulative
-    single-tone shaped gate or multitone candidates: their routes do not depend
-    on history.
-    Other inventories count distinct acquire content's complete row inventories
-    and select gate keys/multitone routes before memo lookup. Caller-owned
-    preparations can use reuse() to reprice retained immutable facts without
-    entering geometry, WorkPlan construction or numerical preparation.
-    Acquires sharing a source must serialize, including across Engine instances.
-    Empty work, a single timeline, and workers=1 run inline without a pool.
-    Native BLAS uses one thread throughout evolve, coordinated across engines.
-    The last overlapping evolve restores the original process-wide BLAS limits.
-    Kernels must be deterministic and pure for identical numerical inputs, both
-    for prepare reuse and exact-result memoization. The kernel collection and
-    numerical implementation are fixed for this Engine's process-local lifetime;
-    memo entries are never shared across Engines or persisted. Exact-input hits
-    bypass planning and all kernel calls, returning independent owned copies.
+    The zero-level model identity names the entire ModelSource, including all
+    physical parameters and absolute DC flux. Calls sharing a source serialize,
+    including across Engines. Caller-owned preparations must invalidate on any
+    input, source, budget or Engine change before asking reuse() to reprice
+    retained routing facts. No density, propagator, ADC or noisy output is kept
+    by Engine across evolves.
+    close is idempotent and waits for active work. Empty work, a single timeline
+    and workers=1 run inline. Other calls own a joblib threading pool only during
+    evolve. Native BLAS uses one thread throughout evolve, coordinated across
+    Engines; the last overlapping call restores the original process-wide limit.
     """
 
     def __init__(
         self,
         workers: int,
-        cache_bytes: int,
         *,
         kernels: Sequence[Kernel] | None = None,
         chunks_per_worker: int | None = None,
-        result_memo_bytes: int | None = None,
-        routing_cache_bytes: int | None = None,
+        routing_cache_bytes: int = 4 * 1024**2,
     ) -> None:
-        """Create the prepare cache; reject invalid sizes or duplicate kernel names."""
-        from ._result_memo import RESULT_MEMO_BYTES, ResultMemo
+        """Create routing-facts ownership; reject invalid sizes or duplicate names."""
         from ._routing_reuse import RoutingReuse
-        from .cache import PrepareCache
         from .kernels import REGISTRY
 
-        if (
-            workers < 1
-            or cache_bytes < 0
-            or (chunks_per_worker is not None and chunks_per_worker < 1)
-        ):
-            raise ValueError(
-                "workers/chunks must be positive and cache_bytes nonnegative"
-            )
+        if workers < 1 or (chunks_per_worker is not None and chunks_per_worker < 1):
+            raise ValueError("workers/chunks must be positive")
         collection = REGISTRY if kernels is None else kernels
         self._kernels = {kernel.name: kernel for kernel in collection}
         if len(self._kernels) != len(collection):
             raise ValueError("kernel names must be unique")
-        if result_memo_bytes is None:
-            result_memo_bytes = min(RESULT_MEMO_BYTES, cache_bytes)
-        if routing_cache_bytes is None:
-            routing_cache_bytes = min(4 * 1024**2, cache_bytes)
-        for name, limit in (
-            ("result_memo_bytes", result_memo_bytes),
-            ("routing_cache_bytes", routing_cache_bytes),
-        ):
-            if type(limit) is not int or limit < 0:
-                raise ValueError(f"{name} must be a nonnegative integer")
-        self._cache: PrepareCache = PrepareCache(cache_bytes)
-        self._memo = ResultMemo(result_memo_bytes)
-        self._memo_enabled = result_memo_bytes > 0
+        if type(routing_cache_bytes) is not int or routing_cache_bytes < 0:
+            raise ValueError("routing_cache_bytes must be a nonnegative integer")
         self._routing_reuse = RoutingReuse(routing_cache_bytes)
         self._chunks = workers * (6 if chunks_per_worker is None else chunks_per_worker)
         self._inventory_chunks = chunks_per_worker is None
@@ -663,7 +616,7 @@ class Engine:
         invalidate its retained result on any content, source, budget or Engine
         change; evolve does not verify the caller's digest. Registration does not
         change the numerical solve or its result. Facts use a separate LRU capped
-        at routing_cache_bytes (default min(4 MiB, cache_bytes)). Empty work,
+        at routing_cache_bytes (default 4 MiB). Empty work,
         disabled routing residency or oversized
         facts may leave no entry. A later reuse() returns False after eviction or
         a route change; the caller must then evolve the full acquire again.
@@ -683,11 +636,10 @@ class Engine:
         exceedances stay in the result's paths.exceeded_by_kernel and produce
         exactly one RuntimeWarning per call, without correction or retry.
         """
-        from ._dispatch import classify, create_work_plan, resident_inventory
+        from ._dispatch import classify, create_work_plan
+        from ._input_key import input_key
         from ._planning import plan
         from ._prefix import PrefixResolver
-        from ._resident import ResidentAdmission
-        from ._result_memo import input_key, route_key
         from ._schedule import Schedule
         from .kernel import KernelContext
 
@@ -702,16 +654,6 @@ class Engine:
                     PathDiagnostics(),
                 )
             content_key = input_key(source, batches, budget)
-            key = content_key if self._memo_enabled else None
-            if key is not None:
-                # Only inventories without cumulative gate candidates use the
-                # raw input key. Their routes are independent of source history.
-                cached = self._cached_result(key, cancel, telemetry=telemetry)
-                if cached is not None:
-                    self._routing_reuse.remember_independent(
-                        reuse_key, source, budget, content_key
-                    )
-                    return cached
             frontend_started = time.thread_time() if telemetry else 0.0
             geometry = plan(source, batches)
             workers = (
@@ -736,32 +678,15 @@ class Engine:
                 reuse_snapshot = self._routing_reuse.snapshot(
                     reuse_key, geometry.table, context
                 )
-                if key is not None:
-                    key = route_key(key, geometry.table, context)
-                    cached = self._cached_result(key, cancel, telemetry=telemetry)
-                    if cached is not None:
-                        self._routing_reuse.add(reuse_key, reuse_snapshot)
-                        return cached
                 kernels = self._kernels
-                inventory = resident_inventory(geometry, kernels, context, self._cache)
-                with (
-                    closing(ResidentAdmission(self._cache, inventory)) as resident,
-                    execution_pool(workers) as pool,
-                ):
+                with execution_pool(workers) as pool:
                     geometry = PrefixResolver(
-                        geometry, kernels, context, cancel, resident
-                    ).resolve(self._cache, pool, self._chunks)
-                    dispatch = classify(
-                        geometry,
-                        kernels,
-                        context,
-                        pool=pool,
-                        admission=resident,
-                    )
-                    schedule = Schedule(geometry, dispatch, context, cancel, resident)
+                        geometry, kernels, context, cancel
+                    ).resolve(pool, self._chunks)
+                    dispatch = classify(geometry, kernels, context, pool=pool)
+                    schedule = Schedule(geometry, dispatch, context, cancel)
                     result = schedule.run(
                         kernels,
-                        self._cache,
                         pool,
                         self._chunks,
                         timeline_workers=workers if self._inventory_chunks else None,
@@ -773,8 +698,6 @@ class Engine:
             if cancel.is_set():
                 raise Cancelled()
             result.paths.warn_exceeded(stacklevel=3)
-            if key is not None:
-                self._memo.add(key, result)
             self._routing_reuse.add(reuse_key, reuse_snapshot)
             return result
 
@@ -791,22 +714,9 @@ class Engine:
         if cancel.is_set():
             raise Cancelled()
 
-    def _cached_result(
-        self, key: bytes, cancel: CancellationQuery, *, telemetry: bool
-    ) -> EvolutionResult | None:
-        """Look up an exact result and preserve cancellation/warning semantics."""
-        cached = self._memo.find(key, telemetry=telemetry)
-        if cached is not None:
-            if cancel.is_set():
-                raise Cancelled()
-            cached.paths.warn_exceeded(stacklevel=3)
-        return cached
-
     def close(self) -> None:
-        """Wait for active work, clear the cache and reject later evolve calls; idempotent."""
+        """Wait for active work, clear routing facts and reject later evolves; idempotent."""
         with self._lock:
             if not self._closed:
                 self._closed = True
-                self._cache.clear()
-                self._memo.clear()
                 self._routing_reuse.clear()

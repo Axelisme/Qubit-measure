@@ -185,11 +185,8 @@ class SixFluxoniumSource:
                 runtime=SingleFluxoniumRuntimeOptions(
                     engine=Engine(
                         workers=1,
-                        cache_bytes=settings.numerics.prepare_cache_bytes // 6,
-                        result_memo_bytes=settings.numerics.result_memo_bytes // 6,
                         routing_cache_bytes=settings.numerics.routing_cache_bytes // 6,
                     ),
-                    readout_cache_bytes=settings.numerics.adc_cache_bytes,
                     clock=self._clock,
                 ),
             )

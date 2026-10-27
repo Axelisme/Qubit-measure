@@ -22,6 +22,12 @@ from ._engine import Payload, RecordingKernel, TimelineKernel, batch, run, sourc
 from .contract.kernel_suite import synthetic_model
 
 
+@pytest.mark.parametrize("value", [-1, True, 1.5, "1024"])
+def test_routing_cache_limit_rejects_invalid_bytes(value):
+    with pytest.raises(ValueError, match="routing_cache_bytes"):
+        Engine(1, routing_cache_bytes=value)
+
+
 def test_idle_reference_and_worker_chunk_batch_independence():
     from zcu_tools.simulate.evolution.kernels.t4 import T4
 
@@ -35,9 +41,9 @@ def test_idle_reference_and_worker_chunk_batch_independence():
         0,
         src.initial_density,
     )
-    a = run(Engine(1, 100000, chunks_per_worker=1), src, (b,))
+    a = run(Engine(1, chunks_per_worker=1), src, (b,))
     subsets = tuple(replace(batch(4), points=np.arange(i, i + 4)) for i in (0, 4, 8))
-    c = run(Engine(2, 0, chunks_per_worker=7), src, subsets)
+    c = run(Engine(2, chunks_per_worker=7), src, subsets)
     np.testing.assert_allclose(
         a.densities, np.repeat(expected[None], 12, axis=0), atol=1e-11
     )
@@ -68,7 +74,7 @@ def test_constant_decision_order_and_sequence_middle(expected):
             track(2, EnvelopeSpec("constant"), start=3),
         ),
     )
-    result = run(Engine(1, 0, kernels=kernels), source(), (b,))
+    result = run(Engine(1, kernels=kernels), source(), (b,))
     assert result.paths.segments_by_kernel == {expected: 4}
 
 
@@ -106,7 +112,7 @@ def test_sideband_selective_constant_tone_uses_periodic_propagation(
         phase_rad=np.array([0.37]),
     )
     result = run(
-        Engine(1, 100000, kernels=kernels),
+        Engine(1, kernels=kernels),
         src,
         (replace(batch(1, duration=30.0), tracks=(pulse,)),),
     )
@@ -136,12 +142,12 @@ def test_incomplete_terminal_family_fails_instead_of_rerouting(family, n):
         envelope = EnvelopeSpec("constant")
         b = replace(b, tracks=(track(n, envelope),))
     with pytest.raises(RuntimeError, match="no valid kernel for segment"):
-        run(Engine(1, 0, kernels=kernels), source(), (b,))
+        run(Engine(1, kernels=kernels), source(), (b,))
 
 
 def test_missing_kernel_names_segment_and_flux_overlap():
     b = replace(batch(1), tracks=(track(1, EnvelopeSpec("constant")),))
-    engine = Engine(1, 0, kernels=())
+    engine = Engine(1, kernels=())
     try:
         with pytest.raises(RuntimeError, match=r"(?s)(segment.*dyson|dyson.*segment)"):
             engine.evolve(source(), (b,), cancel=Event())
@@ -192,7 +198,7 @@ def test_guard_pool_preserves_dispatch_and_density_and_skips_small_key_sets():
                 batch(2 * count), tracks=(track(2 * count, EnvelopeSpec("constant")),)
             )
             result = run(
-                Engine(workers, 0, kernels=(kernel, RecordingKernel("floquet_period"))),
+                Engine(workers, kernels=(kernel, RecordingKernel("floquet_period"))),
                 source(),
                 (b,),
             )
@@ -282,7 +288,6 @@ def test_local_guard_tables_build_once_and_match_shared_guard_first_fallback(
         result = run(
             Engine(
                 workers,
-                0,
                 kernels=(
                     kernel,
                     TimelineKernel(
@@ -339,7 +344,7 @@ def test_deferred_guards_do_not_retry_caller_rejections():
         period = BuildingPeriod("floquet_period")
         rejecting = Rejecting()
         b = replace(batch(8), tracks=(track(8, EnvelopeSpec("constant")),))
-        result = run(Engine(workers, 0, kernels=(rejecting, period)), source(), (b,))
+        result = run(Engine(workers, kernels=(rejecting, period)), source(), (b,))
         assert result.paths.segments_by_kernel == {"floquet_period": 8}
         assert Counter(rejecting.guarded) == Counter(range(8))
         assert period.preparations == 8
@@ -348,7 +353,7 @@ def test_deferred_guards_do_not_retry_caller_rejections():
 def test_cancel_between_chunks_and_nonfinite_failure():
     cancel = Event()
     k = RecordingKernel("t4", cancel=cancel)
-    engine = Engine(1, 1000, kernels=(k,), chunks_per_worker=4)
+    engine = Engine(1, kernels=(k,), chunks_per_worker=4)
     try:
         with pytest.raises(Cancelled):
             engine.evolve(source(), (batch(),), cancel=cancel)
@@ -363,7 +368,7 @@ def test_cancel_between_chunks_and_nonfinite_failure():
             states[:] = np.nan
             return np.zeros(len(rows), dtype=np.bool_)
 
-    engine = Engine(1, 0, kernels=(Broken("t4"),))
+    engine = Engine(1, kernels=(Broken("t4"),))
     try:
         with pytest.raises(RuntimeError, match=r"(?s)(point.*segment|segment.*point)"):
             engine.evolve(source(), (batch(),), cancel=Event())
@@ -378,7 +383,7 @@ def test_dop853_adjacent_rows_are_one_chain():
         track(1, EnvelopeSpec("constant"), duration=1),
         track(1, EnvelopeSpec("constant"), start=1, duration=2),
     )
-    run(Engine(1, 0, kernels=(k,)), source(), (replace(batch(1), tracks=tracks),))
+    run(Engine(1, kernels=(k,)), source(), (replace(batch(1), tracks=tracks),))
     assert len(k.calls) == 1
     table, rows, _ = k.calls[0]
     assert table.start_ns[rows].tolist() == [0.0, 1.0]
@@ -404,7 +409,7 @@ def test_gibbs_constant_pulse_at_zero_uses_dyson_for_every_driven_row():
         amplitude=np.full(n, 0.002),
     )
     b = replace(batch(n, duration=9), tracks=(pulse,))
-    result = run(Engine(1, 100000), src, (b,))
+    result = run(Engine(1), src, (b,))
     assert result.paths.segments_by_kernel == {"dyson": n, "t4": n}
     assert result.paths.exceeded_by_kernel == {}
 
@@ -441,7 +446,7 @@ def test_preceding_idle_flux_uses_arbitrary_input_dyson_bound():
         tracks=(pulse,),
         flux=FluxSchedule(np.array([0, 2]), np.array([0.0, 1.0]), np.array([[1], [0]])),
     )
-    result = run(Engine(1, 100000), src, (b,))
+    result = run(Engine(1), src, (b,))
     assert result.paths.segments_by_kernel.get("dyson", 0) == 0
     assert result.paths.segments_by_kernel["t4"] == 1
     assert sum(result.paths.segments_by_kernel.values()) == 2
@@ -449,7 +454,7 @@ def test_preceding_idle_flux_uses_arbitrary_input_dyson_bound():
     direct = replace(
         batch(1, duration=1), tracks=(replace(pulse, start_ns=np.zeros(1)),)
     )
-    direct_result = run(Engine(1, 100000), src, (direct,))
+    direct_result = run(Engine(1), src, (direct,))
     assert direct_result.paths.segments_by_kernel == {"dyson": 1}
 
 
@@ -465,7 +470,7 @@ def test_exceeded_counts_warn_once_per_evolve_and_keep_results(chunks: int) -> N
             return (table.timeline[rows] % 2 == 0) & self.report
 
     kernels = (ReportingKernel("dyson"), ReportingKernel("t4"))
-    engine = Engine(1, 1000, kernels=kernels, chunks_per_worker=chunks)
+    engine = Engine(1, kernels=kernels, chunks_per_worker=chunks)
     src = source()
     b = replace(batch(6, duration=6), tracks=(track(6, EnvelopeSpec("constant")),))
     try:
@@ -558,7 +563,7 @@ def test_input_bound_payload_grouping_fallback_and_evolve_lifetime(decline):
     )
     from zcu_tools.simulate.evolution.kernels.t4 import T4
 
-    with closing(Engine(2, 100000, kernels=(k, T4()), chunks_per_worker=3)) as engine:
+    with closing(Engine(2, kernels=(k, T4()), chunks_per_worker=3)) as engine:
         first = engine.evolve(src, (b,), cancel=Event())
         assert len(k.groups) == 1, (
             "A-stage must bind all same-key source-input rows once"
@@ -570,7 +575,7 @@ def test_input_bound_payload_grouping_fallback_and_evolve_lifetime(decline):
             np.sort(k.groups[0][1]), np.sort(drive.duration_ns[:6])
         )
         assert all(ref() is None for ref in k.bound_refs), (
-            "bound payload must not enter PrepareCache"
+            "bound payload must be released when evolve returns"
         )
         second = engine.evolve(other, (b,), cancel=Event())
         assert len(k.groups) == 2
@@ -604,7 +609,7 @@ def test_guard_handoff_only_binds_repeated_keys():
     drive = replace(track(3, EnvelopeSpec("constant")), duration_ns=durations)
     b = replace(batch(3), tracks=(drive,), end_ns=durations)
     src = source()
-    with closing(Engine(1, 0, kernels=(k,))) as engine:
+    with closing(Engine(1, kernels=(k,))) as engine:
         result = engine.evolve(src, (b,), cancel=Event())
     assert len(k.groups) == 1, "guard-built singletons must bypass bind_input"
     np.testing.assert_array_equal(k.groups[0][1], [1.0, 1.0])
@@ -640,9 +645,7 @@ def test_shared_dyson_is_bitwise_chunk_independent_and_source_local():
     outputs = []
     for workers, chunks in ((1, 1), (1, 3), (2, 1), (2, 4)):
         with closing(
-            Engine(
-                workers, 100000, kernels=(DysonKernel(), T4()), chunks_per_worker=chunks
-            )
+            Engine(workers, kernels=(DysonKernel(), T4()), chunks_per_worker=chunks)
         ) as engine:
             result = engine.evolve(src, (b,), cancel=Event())
             changed = engine.evolve(other, (b,), cancel=Event())
@@ -663,7 +666,7 @@ def test_trace_diagnostics_report_maximum_without_correcting_kernel_output(resid
             states[:, 0, 0] += residual * (table.timeline[rows] + 1)
             return np.zeros(len(rows), dtype=np.bool_)
 
-    engine = Engine(1, 0, kernels=(TraceResidualKernel("t4"),))
+    engine = Engine(1, kernels=(TraceResidualKernel("t4"),))
     result = run(engine, source(), (batch(3),))
     expected = np.repeat(source().initial_density[None], 3, axis=0)
     expected[:, 0, 0] += residual * np.arange(1, 4)
@@ -672,7 +675,7 @@ def test_trace_diagnostics_report_maximum_without_correcting_kernel_output(resid
 
 
 def test_empty_evolve_has_zero_trace_diagnostic():
-    result = run(Engine(1, 0), source(), ())
+    result = run(Engine(1), source(), ())
     assert getattr(result.paths, "max_trace_error", None) == 0.0
 
 
@@ -722,7 +725,7 @@ def test_empty_evolve_preserves_preflight_error_order(
 ) -> None:
     cancel = Event()
     cancel.set()
-    with closing(Engine(1, 0, kernels=())) as engine:
+    with closing(Engine(1, kernels=())) as engine:
         if closed:
             engine.close()
         with pytest.raises(error, match=message):
@@ -803,7 +806,6 @@ def test_unknown_input_probe_uses_dyson_without_binding_and_matches_dop853():
     actual = run(
         Engine(
             1,
-            100000,
             kernels=(
                 T4(),
                 dyson,
@@ -831,7 +833,6 @@ def test_unknown_input_probe_uses_dyson_without_binding_and_matches_dop853():
     expected = run(
         Engine(
             1,
-            0,
             kernels=(
                 ReferenceDrive(),
                 ReferenceIdle(),
@@ -900,7 +901,7 @@ def test_shared_shaped_prefix_supplies_one_input_to_probe_and_later_segments(bin
         ),
     )
     src = source()
-    result = run(Engine(1, 0, kernels=(spectral, direct, probe, idle)), src, (b,))
+    result = run(Engine(1, kernels=(spectral, direct, probe, idle)), src, (b,))
     assert len(probe.known_inputs) == 1
     saved = probe.known_inputs[0]
     assert np.max(abs(saved - src.initial_density)) > 0.01
@@ -949,7 +950,6 @@ def test_shared_prefix_paths_and_exceedances_count_each_adopting_timeline():
         result = run(
             Engine(
                 1,
-                0,
                 kernels=(
                     spectral,
                     direct,

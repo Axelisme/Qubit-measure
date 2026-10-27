@@ -1,8 +1,8 @@
 # Six-fluxonium material
 
-**Last updated:** 2026-10-27, per-qubit coherence drift.
+**Last updated:** 2026-10-27 (UTC), routing-only residency allowance.
 
-**Readers:** framework-dev, lab-author. Load six circuit materials with local currents and one shared coil.
+**Readers:** framework-dev, lab-author, agent. Load six circuit materials with local currents and one shared coil.
 
 `parse_six_fluxonium(document)` validates a decoded mapping.
 `load_six_fluxonium(path)` reads UTF-8 YAML relative to the caller's cwd.
@@ -24,11 +24,10 @@ fail validation. Negative periods reverse flux direction. The single-fluxonium
 schema is unchanged. Old six-system documents have no fallback conversion.
 The type contracts and units live in `schema.py`.
 
-Top-level `numerics` sets byte allowances for cache residency. Prepare, exact
-result and routing totals default to 256, 64 and 4 MiB across the environment.
-Each source receives one sixth of each total, rounded down. ADC defaults to
-8 MiB per source. Zero disables the corresponding cache. Values must be strict
-nonnegative integers. These limits exclude models, scratch and process RSS.
+Top-level `numerics.routing_cache_bytes` sets a 4 MiB routing-facts allowance
+across the environment. Each source receives one sixth, rounded down.
+Zero disables routing retention. The value must be a strict nonnegative integer.
+The allowance excludes models, complete preparations, scratch and process RSS.
 Per-qubit `numerics` continues to hold solver, truncation, seed and pacing values.
 
 Each qubit also accepts optional `drift` with the single-fluxonium schema.

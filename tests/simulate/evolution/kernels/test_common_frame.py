@@ -12,7 +12,7 @@ from .._common_frame import batch, model_source, strict_lab
 
 
 def evolve(source, timeline):
-    with closing(Engine(1, 0)) as engine:
+    with closing(Engine(1)) as engine:
         return engine.evolve(source, (timeline,), cancel=Event(), budget=0.01)
 
 
@@ -67,7 +67,7 @@ def test_over_budget_and_expensive_rows_use_existing_fallback(gain, frequency):
     result = evolve(source, timeline)
     assert result.paths.segments_by_kernel.get("common_frame", 0) == 0
     with closing(
-        Engine(1, 0, kernels=tuple(k for k in REGISTRY if k.name != "common_frame"))
+        Engine(1, kernels=tuple(k for k in REGISTRY if k.name != "common_frame"))
     ) as engine:
         original = engine.evolve(source, (timeline,), cancel=Event(), budget=0.01)
     np.testing.assert_array_equal(result.densities, original.densities)

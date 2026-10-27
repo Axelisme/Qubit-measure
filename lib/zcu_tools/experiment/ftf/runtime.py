@@ -33,12 +33,12 @@ from zcu_tools.resources.ftf import FTFSettings, load_ftf, parse_ftf
 from zcu_tools.resources.simulation_replay import ReplayAcquire, save_replay
 from zcu_tools.simulate.adc import (
     ChannelReadout,
+    ConditionalReadout,
     ConditionalSums,
     PopulationValidationError,
     PreparedRawShots,
     PreparedStatistics,
     ReadoutBatch,
-    ReadoutCache,
     normalize_populations,
     sample_traces,
 )
@@ -135,10 +135,8 @@ class FTFAcquire:
             try:
                 prepared = self._reuse_or_prepare(snapshot, index, cancel=cancel)
             except Exception:
-                # Preparation may have filled only part of either deterministic
-                # cache. Do not keep any generation's partial products.
+                # Do not retain partial products from a failed preparation.
                 owner.preparation_cache.clear()
-                owner.readout_cache.clear()
                 self._prepared = None
                 self._snapshot = None
                 raise
@@ -292,10 +290,12 @@ class FTFAcquire:
                 offset = 0
                 for plan in plans:
                     readout = plan.readouts[channel_index].batch
-                    conditional = owner.readout_cache.responses(
-                        replace(readout, include_traces=acquire.mode == "decimated"),
+                    conditional = ConditionalReadout(
+                        readout.model,
                         rtol=owner.settings.numerics.solver.rtol,
                         atol=owner.settings.numerics.solver.atol,
+                    ).responses(
+                        replace(readout, include_traces=acquire.mode == "decimated")
                     )
                     conditionals.append(conditional)
                     raw_pulses.extend(readout.pulses)
@@ -358,14 +358,15 @@ class FTFSource:
     identities whose live values are read by snapshot, even after session
     disconnects or registry renames. engine optionally supplies a configured numerical
     executor; this source takes ownership, including close(). Without it, use
-    workers=1 and a 2 GiB prepare cache. acquisition.private_replay is an optional absolute
-    author-only input archive directory; None performs no replay I/O. readout
-    optionally supplies detached author capabilities, otherwise adapts settings.
+    workers=1 and a 4 MiB routing-facts allowance. acquisition.private_replay
+    selects an optional absolute author-only input archive directory; None performs
+    no replay I/O. readout optionally supplies detached author capabilities,
+    otherwise adapts settings.
     Replay rejects overrides that cannot be reconstructed from those settings.
 
     open_acquire drops the previous session's preparation references. execute
     opens a session only when its request object changes, preserving preparation
-    across equal-snapshot rounds. The engine/cache survives across acquires.
+    across equal-snapshot rounds. The engine and routing facts survive acquires.
     preparation_cache owns at most 4 MiB of read-only probabilities, conditionals,
     content mappings, path diagnostics and deterministic integrated samplers.
     Exact current C1 content, layout, mode, reps and readout values select entries.
@@ -376,15 +377,13 @@ class FTFSource:
     Its public max_bytes may be adjusted between calls; zero disables residency.
     Cumulative builds/hits and resident_bytes report reuse, never noisy results
     or request sampling identities. A hit updates this acquire's numeric use and
-    reemits any report-only accuracy warning. Failed preparation clears both
-    deterministic caches. Active sessions/caller references are outside budgets.
+    reemits any report-only accuracy warning. Failed preparation clears the
+    complete preparation cache. Active sessions/caller references are outside budgets.
     At most one complete snapshot's physical model survives across acquires;
     full settings and numeric revisions also participate in its exact key.
-    readout_cache owns at most 8 MiB of physical ADC solvers and exact conditional
-    contents across acquires, never noisy IQ. Its cumulative builds/hits and
-    resident_bytes are author diagnostics. Full model/receiver/tolerance content
-    selects solvers; physical-facts generation changes clear all readout residents.
-    close releases physical facts/readout residents, invalidates the session and
+    Conditional ADC solvers live only during preparation; the complete preparation
+    retains their deterministic sums. close releases physical facts and complete
+    preparations, invalidates the session and
     closes the engine. envelope_encoder owns at most 32 MiB of immutable
     PulseEnvelope content fingerprints, including full retained envelopes and
     Python containers. Its cumulative builds/hits and resident_bytes report
@@ -438,11 +437,10 @@ class FTFSource:
         self._pending_acquire = False
         self.private_replay = private_replay
         self.telemetry = telemetry
-        self.engine = Engine(1, 2 * 1024**3) if engine is None else engine
+        self.engine = Engine(1) if engine is None else engine
         self.evaluations: tuple[FTFNumericUse, ...] = ()
         self._session: FTFAcquire | None = None
         self._facts: FTFModelFacts | None = None
-        self.readout_cache = ReadoutCache(8 * 1024**2)
         self.preparation_cache: PreparationCache[_Prepared] = PreparationCache()
         self.envelope_encoder = EnvelopeEncoder()
         self._preparation_engine = self.engine
@@ -471,7 +469,7 @@ class FTFSource:
         (or fresh entropy). Subsequent calls keep those streams and start a new
         acquisition even without a request. All points/rounds share the values.
         Enabled drift writes three private truth rows and invalidates physical
-        facts plus readout/preparation caches. Disabled drift draws no RNG and
+        facts plus complete preparations. Disabled drift draws no RNG and
         writes nothing. Closed sources raise RuntimeError; log I/O errors propagate.
         """
         if self._closed:
@@ -489,7 +487,6 @@ class FTFSource:
             if self._facts is not None:
                 self._facts.source.close()
             self._facts = None
-            self.readout_cache.clear()
             self.preparation_cache.clear()
         self._pending_acquire = True
 
@@ -508,7 +505,6 @@ class FTFSource:
         if self._facts is None or not self._facts.matches(
             self.effective_settings, snapshot
         ):
-            self.readout_cache.clear()
             self.preparation_cache.clear()
             if self._facts is not None:
                 self._facts.source.close()
@@ -616,7 +612,6 @@ class FTFSource:
         if self._facts is not None:
             self._facts.source.close()
         self._facts = None
-        self.readout_cache.clear()
         self.preparation_cache.clear()
         self.envelope_encoder.clear()
         self._closed = True
@@ -656,7 +651,7 @@ def ftf(
     no U table or exact density record is consulted. One engine persists across
     acquires, using workers (default 1) as its sole parallel width.
     Worker threads live only during multi-timeline evolve; dropping the environment
-    releases its in-memory engine cache. FTFSource.close explicitly clears it.
+    releases its in-memory routing facts. FTFSource.close explicitly clears it.
     warmup=False keeps direct callers/tests free of background CPU work. True
     starts process-wide single-flight numeric preparation. The Notebook example
     opts in and reserves two host CPUs; GUI startup uses one worker without
@@ -711,7 +706,7 @@ def ftf(
         coordinator = FTFSource(
             settings,
             devices,
-            engine=Engine(workers, 2 * 1024**3),
+            engine=Engine(workers),
             acquisition=replace(options, clock=sim_clock),
             telemetry=telemetry,
         )

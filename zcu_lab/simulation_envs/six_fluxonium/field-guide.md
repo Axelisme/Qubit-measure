@@ -1,6 +1,8 @@
 # Six-fluxonium settings guide
 
-**Readers:** operator, lab-author, framework-dev. Read physical units, per-qubit parameters and approximation limits before changing this environment.
+**Last updated:** 2026-10-27 (UTC), routing-only residency allowance.
+
+**Readers:** operator, lab-author, framework-dev, agent. Read physical units, per-qubit parameters and approximation limits before changing this environment.
 
 ## Files and components
 
@@ -72,32 +74,25 @@ At 30 MHz and above, dispatch keeps the existing RWA/Floquet/Dyson/T6 order.
 
 ## Cache residency budgets
 
-Set the environment's cache allowances in the top-level `numerics` section of
-`six_fluxonium.yaml`, not in `qubits.Q1..Q6.numerics`.
+Set `numerics.routing_cache_bytes` in the top-level `six_fluxonium.yaml`
+section, not in `qubits.Q1..Q6.numerics`. The default is 4194304 bytes, 4 MiB
+across six sources. Each Engine receives one sixth, rounded down.
+The value is a nonnegative integer. Zero disables retention.
+At most five bytes remain unused. The cap excludes models, complete
+preparations, numerical scratch and GUI/native allocations. It is not an RSS cap.
 
-| Field | Default | Scope |
-| --- | --- | --- |
-| `prepare_cache_bytes` | 805306368 bytes, 768 MiB | Total across six sources |
-| `result_memo_bytes` | 67108864 bytes, 64 MiB | Total across six sources |
-| `routing_cache_bytes` | 4194304 bytes, 4 MiB | Total across six sources |
-| `adc_cache_bytes` | 8388608 bytes, 8 MiB | Each source |
+Engine prepare residency, exact-result memoization and source ADC solver
+residency are removed. Existing working YAML files must remove
+`prepare_cache_bytes`, `result_memo_bytes` and `adc_cache_bytes` before restart.
+The loader does not silently accept those retired fields.
+Single-source structure and complete preparations retain their own
+[lifetimes](../../../lib/zcu_tools/experiment/single_fluxonium/README.md#reuse-and-lifetime).
+The six sources remain independent and do not share receiver calibrations.
 
-Each Engine receives one sixth of the first three totals, rounded down.
-The prepare allowance is 134217728 bytes, or 128 MiB, per Engine.
-The six sources keep independent models and cache keys. They do not build a
-joint Hilbert space or share ADC receiver calibrations.
-All four fields accept nonnegative integers in bytes. Zero disables the
-corresponding cache. There is no fixed upper bound. At most five bytes of each
-divided total remain unused.
-
-These defaults allow at most 884 MiB of cache residency, including estimated
-metadata. Previously, six sources each had 256 MiB prepare, 64 MiB result and
-4 MiB routing allowances, plus 8 MiB ADC, for 1992 MiB combined.
-Evicted or oversized products compute again without changing the result or RNG
-stream. Models, solver scratch, active products and GUI/native allocations sit
-outside these caps. Reducing a cap does not impose a process RSS limit.
-The walkthrough timings and acquire-only observations below predate these shared
-budgets. The following measurements compare the cache-budget change.
+The measurements below describe the earlier prepare/result/ADC budget design,
+not the current routing-only design. Their numeric results and historical
+conclusions are unchanged. They do not measure the effect of removing those
+layers. See the current [evolution contract](../../../lib/zcu_tools/simulate/evolution/README.md#evolve-local-preparations-and-caller-reuse).
 
 ## Cache budget measurements
 

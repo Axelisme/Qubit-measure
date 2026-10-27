@@ -173,7 +173,7 @@ class MixedEngine(Engine):
     """Supply a nontrivial joint mixture without performing evolution."""
 
     def __init__(self):
-        super().__init__(1, 0)
+        super().__init__(1)
 
     def evolve(
         self,

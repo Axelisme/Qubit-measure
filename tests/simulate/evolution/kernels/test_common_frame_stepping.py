@@ -70,7 +70,7 @@ def test_narrow_envelope_knots_preserve_resonant_pulse_area():
     )
     expected = np.outer(psi, psi.conj())
     with closing(
-        Engine(1, 0, kernels=tuple(k for k in REGISTRY if k.name != "multitone_rwa"))
+        Engine(1, kernels=tuple(k for k in REGISTRY if k.name != "multitone_rwa"))
     ) as engine:
         result = engine.evolve(source, (timeline,), cancel=Event(), budget=0.01)
     assert result.paths.segments_by_kernel == {"common_frame": 4}

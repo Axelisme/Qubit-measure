@@ -45,7 +45,6 @@ def test_replay_retains_round_raw_after_source_release(tmp_path: Path, mode):
         archived_round = replay_paths(tmp_path / "archive")[0]
         # Eviction and a later round must not change this delivery's identity.
         source.preparation_cache.max_bytes = 0
-        source.readout_cache.clear()
         source.execute(
             RoundRequest(
                 replace(acquire, sequence=8),

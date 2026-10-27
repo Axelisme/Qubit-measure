@@ -146,16 +146,6 @@ class SlowEnvelopeKernel:
             channels.append(_Channel(u, p, c))
         return _Prepared(tuple(channels))
 
-    def admit_prepared(
-        self,
-        prepared: Prepared,
-        table: SegmentTable,
-        rows: NDArray[np.int64],
-        context: KernelContext,
-    ) -> None:
-        """Use the ordinary guard, independent of cached products."""
-        del prepared, table, rows, context
-
     def guard_prepared(
         self, table: SegmentTable, rows: NDArray[np.int64], context: KernelContext
     ) -> None:

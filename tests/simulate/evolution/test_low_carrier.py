@@ -38,7 +38,7 @@ def test_low_carrier_strong_tones_match_reference(frequency: float, coherent: bo
     )
     later = replace(pulse, start_ns=np.array([duration]), phase_rad=np.array([-0.7]))
     timeline = replace(batch(1, duration=2 * duration), tracks=(pulse, later))
-    result = run(Engine(1, 0), src, (timeline,))
+    result = run(Engine(1), src, (timeline,))
     assert result.paths.segments_by_kernel == {"floquet_period": 2}
     assert result.paths.exceeded_by_kernel == {}
 
@@ -89,7 +89,6 @@ def test_gain_scan_is_bitwise_invariant_to_workers_and_chunks(workers, chunks):
         return run(
             Engine(
                 worker_count,
-                0,
                 chunks_per_worker=chunk_count,
                 kernels=(
                     RecordingKernel("dyson", accepts=False),
@@ -153,7 +152,6 @@ def test_many_low_carrier_keys_do_not_all_stay_live():
     result = run(
         Engine(
             1,
-            0,
             chunks_per_worker=1,
             kernels=(
                 RecordingKernel("dyson", accepts=False),
@@ -201,7 +199,6 @@ def test_long_plateau_reuses_period_across_durations():
     result = run(
         Engine(
             1,
-            0,
             kernels=(
                 RecordingKernel("dyson", accepts=False),
                 ObservedPeriod(),

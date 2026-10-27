@@ -890,16 +890,6 @@ class FloquetPeriodKernel:
             entries.append(_prepare_entry(model, _Tone(port, frequency, gain), context))
         return _Periods(tuple(entries))
 
-    def admit_prepared(
-        self,
-        prepared: Prepared,
-        table: SegmentTable,
-        rows: NDArray[np.int64],
-        context: KernelContext,
-    ) -> None:
-        """Decline cached-domain admission; use the ordinary guard build path."""
-        del prepared, table, rows, context
-
     def guard_prepared(
         self,
         table: SegmentTable,

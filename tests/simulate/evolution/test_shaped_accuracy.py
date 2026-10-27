@@ -61,7 +61,7 @@ def circular_pulse(
 
 
 def evolve(source: ModelSource, batch: TimelineBatch) -> NDArray[np.complex128]:
-    engine = Engine(1, 0)
+    engine = Engine(1)
     try:
         return engine.evolve(source, (batch,), cancel=Event()).densities
     finally:

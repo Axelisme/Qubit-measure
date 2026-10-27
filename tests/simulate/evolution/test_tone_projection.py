@@ -69,7 +69,7 @@ def test_sparse_tracks_pack_in_input_order_with_half_open_support(continuous):
         flux_waveform=waveform if continuous else None,
     )
     kernels = tuple(RecordingKernel(k.name) for k in REGISTRY)
-    result = run(Engine(1, 0, kernels=kernels), src, (timeline,))
+    result = run(Engine(1, kernels=kernels), src, (timeline,))
     observations = {
         (int(table.timeline[row]), float(table.start_ns[row])): (table, row, k.name)
         for k in kernels

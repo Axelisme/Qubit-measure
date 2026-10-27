@@ -239,16 +239,6 @@ class AdiabaticMapKernel:
         factors.setflags(write=False)
         return _Prepared(factors)
 
-    def admit_prepared(
-        self,
-        prepared: Prepared,
-        table: SegmentTable,
-        rows: NDArray[np.int64],
-        context: KernelContext,
-    ) -> None:
-        """Decline cached-domain admission; ordinary row-local guard is cheap."""
-        del prepared, table, rows, context
-
     def guard_prepared(
         self, table: SegmentTable, rows: NDArray[np.int64], context: KernelContext
     ) -> None:

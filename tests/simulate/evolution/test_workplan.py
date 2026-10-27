@@ -9,7 +9,7 @@ import pytest
 from zcu_tools.simulate.evolution import Cancelled, Engine
 from zcu_tools.simulate.evolution.kernel import KernelContext
 
-from ._engine import Payload, RecordingKernel, batch, source
+from ._engine import RecordingKernel, batch, source
 
 
 @dataclass(frozen=True)
@@ -76,7 +76,7 @@ class ContextKernel(RecordingKernel):
 
 def test_workers_share_one_immutable_fact_and_evolve_does_not_retain_it():
     kernel = ContextKernel(parallel=True)
-    with closing(Engine(2, 0, kernels=(kernel,), chunks_per_worker=1)) as engine:
+    with closing(Engine(2, kernels=(kernel,), chunks_per_worker=1)) as engine:
         result = engine.evolve(source(), (batch(2),), cancel=kernel.event)
     assert result.paths.segments_by_kernel == {"t4": 2}
     assert kernel.builds == 1
@@ -92,7 +92,7 @@ def test_workers_share_one_immutable_fact_and_evolve_does_not_retain_it():
 @pytest.mark.parametrize("outcome", ["success", "cancel", "failure"])
 def test_evolve_releases_open_resources_on_every_exit(outcome):
     kernel = ContextKernel(outcome=outcome)
-    with closing(Engine(1, 0, kernels=(kernel,))) as engine:
+    with closing(Engine(1, kernels=(kernel,))) as engine:
         if outcome == "failure":
             with pytest.raises(RuntimeError, match="numerical failure"):
                 engine.evolve(source(), (batch(1),), cancel=kernel.event)
@@ -120,11 +120,11 @@ def test_sealed_resource_releases_after_last_actual_handoff():
             return accepted
 
     kernel = SealingKernel()
-    with closing(Engine(1, 0, kernels=(kernel,))) as engine:
+    with closing(Engine(1, kernels=(kernel,))) as engine:
         engine.evolve(source(), (batch(1),), cancel=kernel.event)
 
 
-def test_declined_cached_admission_keeps_guard_build_handoff():
+def test_guard_build_handoff_reaches_apply():
     from zcu_tools.simulate.evolution.kernel import GuardPreparation, GuardResult
 
     class Builder(ContextKernel):
@@ -132,7 +132,6 @@ def test_declined_cached_admission_keeps_guard_build_handoff():
 
         def guard_prepared(self, table, rows, context, *legacy):
             self.guard(table, rows, context, *legacy)
-            assert self.admit_prepared(Payload(1), table, rows, context) is None
             keys, first = np.unique(
                 self.prepare_keys(table, rows, context), return_index=True
             )
@@ -142,7 +141,7 @@ def test_declined_cached_admission_keeps_guard_build_handoff():
             )
 
     kernel = Builder()
-    with closing(Engine(1, 0, kernels=(kernel,))) as engine:
+    with closing(Engine(1, kernels=(kernel,))) as engine:
         result = engine.evolve(source(), (batch(1),), cancel=kernel.event)
     assert result.paths.segments_by_kernel == {"t4": 1}
     assert kernel.preparations == 1

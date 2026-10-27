@@ -54,7 +54,7 @@ def test_overlapping_evolves_hold_blas_one_until_last_exit(failure):
             return super().apply(prepared, key_index, table, rows, states, context)
 
     def evolve(index):
-        engine = Engine(1, 0, kernels=(ObservedKernel(index),))
+        engine = Engine(1, kernels=(ObservedKernel(index),))
         try:
             return engine.evolve(source(), (batch(1),), cancel=Event())
         finally:
@@ -115,7 +115,7 @@ def test_serial_fast_path_does_not_open_joblib_pool(case, monkeypatch):
     }[case]
     # The named backend is a neutral scheduler seam, not an engine patch.
     monkeypatch.setitem(joblib.parallel.BACKENDS, "threading", ObservedBackend)
-    engine = Engine(2, 0, kernels=(ObservedKernel("t4"),))
+    engine = Engine(2, kernels=(ObservedKernel("t4"),))
     try:
         actual = engine.evolve(source(), batches, cancel=Event())
     finally:
@@ -127,7 +127,7 @@ def test_serial_fast_path_does_not_open_joblib_pool(case, monkeypatch):
         actual.densities, np.repeat(source().initial_density[None], n, axis=0)
     )
     if case == "single-timeline":
-        engine = Engine(2, 0, kernels=(RecordingKernel("t4"),))
+        engine = Engine(2, kernels=(RecordingKernel("t4"),))
         try:
             pooled = engine.evolve(source(), (batch(2),), cancel=Event())
         finally:

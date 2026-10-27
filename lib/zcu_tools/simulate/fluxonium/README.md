@@ -1,8 +1,8 @@
 # `simulate/fluxonium` 模塊重點文檔
 
-**Last updated:** 2026-10-27，逐點固定溫度 T1
+**Last updated:** 2026-10-27 (UTC)，損耗無關結構重用
 
-**讀者：** framework-dev。Fluxonium 能譜、色散與 predictor 的數值工具。
+**讀者：** framework-dev、agent。Fluxonium 能譜、色散與 predictor 的數值工具。
 
 基於 [scqubits](https://scqubits.readthedocs.io) 的 Fluxonium 量子比特數值模擬工具集,提供能譜、色散位移、矩陣元、相干時間與實驗參數預測等計算。
 
@@ -34,6 +34,10 @@ Directional rates 重用既有 coherence helper 的 `total=False`，不把 equil
 Purcell helper 轉成 κ/(2π) GHz。Purcell 只作用於 0↔1，以 detailed balance 分配既有
 雙向總率，不新增高能階 loss。殘餘熱光子的 pure dephasing 使用既有 dephasing 工具。
 `readout_frequencies_ghz` 回傳 DC 狀態順序的絕對 dressed 腔頻，不負責 ADC 校正。
+Model 保留各 flux 的本徵系統與 resonator 的 dressed 腔頻，公開方法仍回傳獨立陣列。
+這些資料不含損耗。每次建立 `model_source` 都綁定本次 noise，重新建立 directional rates
+與 dephasing，不從舊 source 借用 dissipative model 或 density。
+Caller 在溫度、DC、truncation 或其他結構設定改變時建立新 Model。
 
 `operators.py` 提供 cutoff-aware `calculate_eigensystem` 與
 `calculate_oscillator_operators`。後者回傳原生 H_LC、帶 EJ 的 cos/sin 算符與完整 charge；

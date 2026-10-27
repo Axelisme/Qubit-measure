@@ -79,7 +79,7 @@ def test_populations_match_dense_ode(frequency: float) -> None:
         phase_rad=np.array([1.1]),
     )
     timeline = replace(batch(1, duration=50.0), tracks=(pulse,))
-    result = run(Engine(1, 0), case.source, (timeline,))
+    result = run(Engine(1), case.source, (timeline,))
     expected_route = "floquet_period" if abs(frequency) >= 0.03 else "slow_envelope"
     assert result.paths.segments_by_kernel == {expected_route: 1}
     np.testing.assert_allclose(
