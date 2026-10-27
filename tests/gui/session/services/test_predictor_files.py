@@ -17,6 +17,7 @@ from zcu_tools.gui.session.types import SessionEnv
 from zcu_tools.resources.entry import ResultEntry
 from zcu_tools.resources.predictor_file import (
     PredictorFile,
+    PredictorFlux,
     PredictorSource,
     save_predictor_file,
 )
@@ -121,7 +122,12 @@ def test_load_file_preserves_partial_model_and_metadata_without_writes(files, pa
     context, control, entry = files
     context.install_entry(entry)
     entry.predictors_path.mkdir()
-    expected = PredictorFile(params.model, params, "mA", PredictorSource("run-1", None))
+    expected = PredictorFile(
+        params.model,
+        params,
+        PredictorFlux(0.2, {"coil": -2.0, "bias": 4.0}, {"coil": "mA", "bias": "V"}),
+        PredictorSource("run-1", None),
+    )
     path = entry.predictors_path / "trial.json"
     save_predictor_file(path, expected)
     before = path.read_bytes()
