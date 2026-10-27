@@ -138,6 +138,37 @@ Root seed 可指定或生成。各 acquire 使用獨立抽樣流，round／point
 
 Acquire 與 round 記錄可引用去重，但模型、waveform、設定內容必須保留且可解析，不能只留下可被覆寫的路徑。正常 GUI／MCP 只取得 I/Q、分析、控制值與公開 provenance；private truth／重播資料分開，不以模型真值幫操作者校準。這是介面界線，不是對本機檔案權限的 sandbox。
 
+### 固定讀出線背景
+
+FTF、single_fluxonium 與 six_fluxonium 共用 `simulate.adc.Receiver.background(f)`。
+`resources.simulation_schema` 驗證 YAML；experiment 只轉成 ADC 的具名數值 records。
+FTF detached author config 保存 ADC frozen dataclasses，preparation key 不依賴 YAML schema。
+數學只由 ADC 實作，不改 physical cavity fields、耗散、receiver offset 或 noise。
+
+既有 `ripple_*` 駐波與 dB/GHz 斜率保留。每個 receiver 的 `background` 可另填：
+
+- `extra_ripples` 列表，每筆為 `depth`、正值 `period_mhz` 與選填 `phase_deg`。
+  每筆駐波以 `1 + depth·exp(i·phase(f))` 與原背景相乘，depth 範圍為 `[0,1)`。
+- `roughness` 包含非負 `amplitude`、正值 `correlation_mhz` 與非負整數 `seed`。
+  它以 `1 + z(f)` 乘上背景。Amplitude 是複數 perturbation 的 RMS。
+  Correlation 是 ensemble 相關降至 `e^-1` 的頻距，頻率相關近似 Gaussian。
+  ADC 以獨立 PCG64 stream 產生固定頻譜，不逐掃描點抽亂數。
+  同一設定、seed 與頻率的值相同，不受點數、順序或 acquire 次數影響。
+  有限頻段的 RMS 與相關寬度會有統計起伏，不承諾跨 NumPy／數值版本 bit-exact。
+- `band_edges` 可填 `low` 或 `high`，每側為有限 `corner_ghz` 與正值 `rolloff_db_per_ghz`。
+  角外衰減隨距離以 dB 線性增加，角內不衰減。振幅在轉角連續，兩側都填時 low 必須低於 high。
+
+`roughness.seed` 預設 0，與 `numerics.seed` 無關。背景代表固定線路與接頭，
+不應隨 session 的量測雜訊改變。即使 `numerics.seed: null` 每次選不同雜訊 seed，
+背景仍固定；更換線路形狀時才改 `roughness.seed`。
+
+三個選填項預設分別為空列表、null 與 null，省略時逐點保留原數值。
+共用 schema 拒絕非法範圍與非有限值，錯誤包含欄位路徑。Format／version 不變。
+三份 `default.yaml` 樣板改用 68／44／308 MHz 駐波、2% 複數 RMS roughness、
+約 −4 dB/GHz 斜率與 3.7 GHz 低頻轉角。這些值模擬實測背景的尺度，不是線路校準。
+既有未納入 Git 的工作副本保持原樣，使用者需自行補上新欄位並重啟環境才看得到。
+完整公式與數值 seed 規則見 [ADC README](../../../lib/zcu_tools/simulate/adc/README.md)。
+
 ### 第一版模型組合與控制非理想
 
 2026-10-13，使用者對保留 arbitrary I/Q 與第一版模型組合回答：「你說目前把 arbitrary I/Q 轉成 abs(I+jQ)是目前的SimEngine嗎？確實不理想。採用建議」。FTF 在含耦合聯合空間演化，產生 coupler 調諧、混成、idle ZZ、conditional phase 與 leakage，不直接套理想 CZ。

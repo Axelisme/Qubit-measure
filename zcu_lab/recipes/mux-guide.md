@@ -76,8 +76,8 @@ the missing or extra original positions before acquisition.
 
 `flux_unit` optionally labels A, V or native. Omission keeps the label; null clears it.
 The device owner checks it against each selected source. No values are rescaled.
-Global source identity starts at the captured `$mux.flux_source`; local sources
-start at each captured `Q.flux_source`. Use overrides for intentional device,
+Global source identity starts at the captured `$mux.flux_dev`; local sources
+start at each captured `Q.flux_dev`. Use overrides for intentional device,
 averaging or timing edits. There is no nested `spectrum` cfg.
 
 For example, a three-Q group can scan Q3 then Q1 with this onetone global input.
@@ -125,7 +125,7 @@ center using its period rule. Review its actual committed state.
    Onetone copies group tones and applies ringup timing; twotone keeps the slot.
    Slot existence does not prove complete drives, frequency bounds or DC bounds.
    Local bounds derive from each Q's captured flux mapping and other devices' detached values. Global bounds
-   use the union of all initial participants' actual intervals for the group's flux_source. Missing
+   use the union of all initial participants' actual intervals for the group's flux_dev. Missing
    calibration keeps endpoints required. Selection changes do not recompute seeds.
 4. For an agent recipe, pass explicit missing inputs in the shapes above.
    `needs_parameters` includes owner paths and reasons. Fix those fields rather
@@ -161,7 +161,23 @@ or finish analysis.
 Review each proposal's original index, Q and destination. Respond with selected
 items or decline. The recipe applies only those selected IDs and reports
 `writeback_applied` from the owner receipt, not from accepted alone.
-Both global and local analysis propose one complete `<Q>.flux.<scanned device>` entry containing reference `half`, `integer` and signed `period`. Global uses cfg.flux_dev; local uses that Q's selected device. Other entries stay unchanged. Each analysis also proposes an ordinary raw-fit record with devices and the original Run frame. Destinations use Run capture, never current aliases.
+Both global and local analysis propose `<Q>.flux.period.<scanned device>` and
+a separate, default-selected `<Q>.flux.offset`. Global uses cfg.flux_dev; local
+uses that Q's selected device. Period updates its magnitude and keeps its sign,
+initially positive. Offset uses `0.5 - half_fit / period_s - Σ V_o / period_o`.
+Other values come from the Run snapshot; the swept value is replaced by half_fit
+once. Missing devices contribute zero and keep their periods. The offset note
+lists every other present calibrated device's value and contribution, including
+zero values. Other periods stay unchanged. Each analysis also proposes an
+ordinary raw-fit record with devices and the original `{offset, period}` Run
+frame. Destinations use Run capture, never current aliases.
+
+The half/integer recipe inputs and report fields are native picker positions,
+not component schema fields. Component v3 stores `flux: {offset, period}` and
+uses `flux_dev` only as the default control device. Missing offset or selected
+period leaves required sweep bounds blank. A missing default device leaves the
+device field required. Independent app Export params writes energies and period
+only; it never writes component offset.
 
 The report retains completed Q rows in participant order, original index, Q,
 native flux_half/flux_integer/flux_period and per-Q writeback_applied.

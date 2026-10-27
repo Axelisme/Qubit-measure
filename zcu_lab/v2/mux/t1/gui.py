@@ -165,10 +165,7 @@ def _get_writeback_items(
                         "devices": {
                             name: deepcopy(info) for name, info in devices.items()
                         },
-                        "flux_frame": {
-                            name: dict(calibration)
-                            for name, calibration in frame.items()
-                        },
+                        "flux_frame": frame,
                         "run": {
                             "run_id": metadata.run_id,
                             "experiment": metadata.experiment,

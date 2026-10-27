@@ -28,30 +28,23 @@ Experiment 公開同一型別，GUI analyze work 經分類後才讓 recipe 交�
 ## 多 device flux 座標
 
 `analysis.flux` 擁有線性 flux 數學，不讀 component、record 或檔案，也不畫圖。
-`DeviceFluxFrame(integer, period, unit="native")` 描述一台儀器在其他 device 都停在 integer 時的參考點。
-Period 是每 Phi0 的 signed 儀器值差，必須有限且非零。
-`FluxFrame(devices)` 保存非空的 device 名稱到具名 frame 的 mapping。
-Device keys 與數學入口的 `device_name` 共用 `cfg_model.validate_device_name`。
+`DevicePeriod(period, unit="native")` 保存帶號、有限且非零的儀器值／Φ0。
+`FluxFrame(offset, devices)` 保存所有儀器輸出為 0 時的 flux，以及每台儀器的 period。
+Offset 以 Φ0 表示，不做 mod 1。空 devices mapping 表示固定 flux。
+建構時複製 mapping，各儀器使用自己的原生單位，不換算單位。
+
+Device keys 與投影入口的 `device_name` 共用 `cfg_model.validate_device_name`。
 它拒絕 ASCII 點號、空字串與全空白，其餘名稱原樣保留。
-各 device 使用自己的原生單位，工具不換算單位。
+Boolean 不算數值。無效 offset、period、unit 或使用中的值會拋出 ValueError。
+值的錯誤會指名儀器。
 
-`flux_from_device_values(frame, values)` 計算 `Σ(value - integer) / period`。
-`values` 是 device 名稱到當下有限儀器值的 mapping。
-缺任何 contributing device 就報錯，不猜零。
-Booleans 不算數值。
+- `flux_from_device_values(frame, values)` 計算 `offset + Σ value / period`。
+- `device_value_at_flux(frame, values, device_name=..., flux=...)` 固定其他儀器，求選定儀器達到目標 flux 的值。Half 取 flux=0.5，integer 取 flux=0。
+- `offset_for_flux(devices, values, flux=...)` 由目標 flux 扣除各儀器貢獻，反解 offset。
 
-`DeviceFluxPoint(integer, half)` 保存同一 device 的整數與半整數 flux 儀器值。
-`reference_flux_points(fitted, device_name=..., frame=..., values=...)` 把擬合點換回其他 device 的 integer 參考點。
-Caller 在 frame 的 selected device 填本次擬合的 period 大小與保留的方向，其他 device 保留當時的參考校準。
-函式對兩個點都加上 selected period 乘以其他 device 的 flux 貢獻。
-`actual_flux_points(reference, ...)` 減去同一平移量，得到其他 device 停在當下值時的掃描點。
-兩個入口只要求其他 device 的當下值，不讀被掃 device 的值。
-它們委派 `validate_flux_spacing(points, device, name)` 檢查點對間距為 `abs(period) / 2`，允許 half 在 integer 任一側。
-這個公開純數學入口共用 relative tolerance `1e-9`、absolute tolerance `0`，lab calibration 的使用處也委派它。
-
-Record 轉成這些具名輸入的責任留在 resources。
-Notebook 的第二軸也呼叫同一數學入口。
-這個方向讓分析不依賴儲存容器。
+三個入口都將沒有值的儀器視為不貢獻，忽略未校準的額外儀器。
+投影不使用選定儀器的當下值。輸入保持不變。
+Record 到這些型別的轉換由 resources 負責，Notebook 副軸使用同一投影入口。
 
 ## 子模組
 

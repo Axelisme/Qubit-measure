@@ -1,10 +1,10 @@
 """Synthetic component schemas shared by fluxdep analysis tests."""
 
-from zcu_tools.analysis.flux import DeviceFluxPoint
 from zcu_tools.gui.app.fluxdep.export_plan import (
     ComponentExportPlan,
     FluxWritebackReceipt,
 )
+from zcu_tools.gui.app.fluxdep.state import AlignmentPublication
 from zcu_tools.resources.entry.schema import ComponentSchema
 
 
@@ -18,7 +18,7 @@ class SyntheticFluxonium(ComponentSchema):
 
 
 def skip_calibration(
-    _model: ComponentSchema, _points: DeviceFluxPoint
+    _model: ComponentSchema, _points: AlignmentPublication
 ) -> ComponentExportPlan:
     """Synthetic policy with no calibration fields; explicitly report the omission."""
     return ComponentExportPlan(

@@ -471,6 +471,23 @@ class MigrationSession:
         self.report(report)
 
 
+def record_parameter_notes(
+    session: MigrationSession, target: Path, notes: tuple[str, ...]
+) -> None:
+    """Attach destination context to caller diagnostics and checkpoint once.
+
+    Messages stay opaque. Repeated identical messages at the same destination
+    appear once; dry-run updates only the in-memory report.
+    """
+    if not notes:
+        return
+    report = session.manifest.report
+    located = tuple(f"{target}: {note}" for note in notes)
+    session.report(
+        replace(report, notes=tuple(dict.fromkeys((*report.notes, *located))))
+    )
+
+
 def record_key_mapping(session: MigrationSession, item: KeyMappingItem) -> None:
     """Upsert one typed source-key decision and checkpoint the cumulative report.
 

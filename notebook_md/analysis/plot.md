@@ -35,11 +35,11 @@ import pandas as pd
 %autoreload 2
 import zcu_tools.notebook.analysis.plot as zp
 from zcu_tools.notebook.analysis.fluxdep.utils import FreqFluxDependVisualizer
+from zcu_tools.analysis.flux import DevicePeriod, FluxFrame, device_value_at_flux
 from zcu_tools.resources.qubit_params import QubitParams
 from zcu_tools.resources.record_table import (
     JsonlRecordTable,
     project_device_coordinates,
-    RecordFluxFrame,
     resolve_record_flux,
     validate_record_table_v2,
 )
@@ -68,10 +68,9 @@ params = fit.params
 # is a current source, "A" — never inferred from column names or magnitudes.
 # This same caller-declared frame also resolves sample rows that carry no
 # explicit flux and no row frame (see the Load Sample Points cell).
-frame = RecordFluxFrame(
-    dev_unit="A",
-    flux_int=fit.flux_half - 0.5 * fit.flux_period,
-    flux_period=fit.flux_period,
+frame = FluxFrame(
+    offset=0.5 - fit.flux_half / fit.flux_period,
+    devices={"bias_device": DevicePeriod(fit.flux_period, "A")},
 )
 allows = fit.plot_transitions
 EJ, EC, EL = params
@@ -92,7 +91,10 @@ if "sample_f" in allows:
 
 
 flxs = np.linspace(0.5, 1.0, 100)
-dev_values = frame.dev_value_from_flux(flxs)
+dev_values = np.array([
+    device_value_at_flux(frame, {}, device_name="bias_device", flux=float(flux))
+    for flux in flxs
+])
 ```
 
 ```python

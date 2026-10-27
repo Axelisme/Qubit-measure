@@ -2,7 +2,7 @@
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from math import isclose, isfinite
+from math import isfinite
 from numbers import Real
 from types import MappingProxyType
 
@@ -10,180 +10,108 @@ from zcu_tools.cfg_model import validate_device_name
 
 
 @dataclass(frozen=True)
-class DeviceFluxFrame:
-    """One device's reference calibration in its native instrument unit.
+class DevicePeriod:
+    """A signed nonzero span per Phi0 in the named native instrument unit.
 
-    integer is the finite device value at integer flux with all other devices
-    at their integer references. period is the finite nonzero signed value
-    span per Phi0: negative means increasing value decreases flux. unit names
-    the value unit (for example A, V or native); no conversion is performed.
-    Invalid fields raise ValueError at construction; booleans are not numbers.
+    period must be a finite real number, not a boolean. unit is a nonblank
+    string (for example A, V or native); no unit conversion is performed.
+    Invalid fields raise ValueError at construction.
     """
 
-    integer: float
     period: float
     unit: str = "native"
 
     def __post_init__(self) -> None:
-        _finite_value(self.integer, field="integer")
         if _finite_value(self.period, field="period") == 0:
             raise ValueError("period must be nonzero (signed device units per Phi0)")
-        _require_nonempty_name(self.unit, field="unit")
+        _require_unit(self.unit)
 
 
 @dataclass(frozen=True)
 class FluxFrame:
-    """Nonempty mapping of device names to their independent linear frames.
+    """Zero-output flux offset in Phi0 and each device's signed native period.
 
-    devices keys are nonblank instrument names without ASCII dots; values are
-    DeviceFluxFrame. Valid names are preserved, including surrounding spaces.
-    Each device can use its own native unit and signed period. Construction
-    snapshots the mapping. Invalid keys/values or an empty frame raise
-    ValueError. All contributing devices must be supplied when evaluating flux.
+    offset must be finite and real, not boolean, and is not reduced modulo 1.
+    devices maps nonblank instrument names without ASCII dots to DevicePeriod.
+    An empty mapping describes a constant flux. Construction snapshots it;
+    valid names, including surrounding spaces, are preserved unchanged.
+    Invalid fields raise ValueError. Missing device values contribute zero.
     """
 
-    devices: Mapping[str, DeviceFluxFrame]
+    offset: float
+    devices: Mapping[str, DevicePeriod]
 
     def __post_init__(self) -> None:
-        if not self.devices:
-            raise ValueError("devices must be nonempty")
+        _finite_value(self.offset, field="offset")
         for name, device in self.devices.items():
             validate_device_name(name)
-            _require_device_frame(device, name)
+            _require_device_period(device, name)
         object.__setattr__(self, "devices", MappingProxyType(dict(self.devices)))
 
 
 def flux_from_device_values(frame: FluxFrame, values: Mapping[str, float]) -> float:
-    """Return sum((value - integer) / period) in dimensionless Phi0.
+    """Return offset + sum(value / period) in dimensionless Phi0.
 
-    values maps every frame device to a finite real instrument value in that
-    device's declared unit. Extra devices are ignored. No unit conversion or
-    component parsing occurs. Missing devices, booleans and nonfinite/non-real
-    used values raise ValueError naming the device. Inputs are not modified.
+    values uses each device's declared native unit. Missing devices contribute
+    zero and extra devices are ignored. Used boolean, non-real or nonfinite
+    values raise ValueError naming the device. Inputs remain unchanged.
     """
-    return sum(
-        (_device_value(values, name) - device.integer) / device.period
+    return frame.offset + sum(
+        _finite_value(values[name], field=f"device {name!r} value") / device.period
         for name, device in frame.devices.items()
+        if name in values
     )
 
 
-@dataclass(frozen=True)
-class DeviceFluxPoint:
-    """An integer/half pair for one device in that device's native unit.
-
-    integer and half are finite real instrument values (not booleans). They
-    can be measured at current other-device values, or expressed at the
-    frame's integer references; the converting function declares which.
-    Either half branch is allowed. Construction rejects invalid numbers with
-    ValueError; conversion checks that their separation is abs(period)/2,
-    with relative tolerance 1e-9 and no absolute tolerance.
-    """
-
-    integer: float
-    half: float
-
-    def __post_init__(self) -> None:
-        _finite_value(self.integer, field="integer")
-        _finite_value(self.half, field="half")
-
-
-def reference_flux_points(
-    fitted: DeviceFluxPoint,
-    *,
-    device_name: str,
+def device_value_at_flux(
     frame: FluxFrame,
     values: Mapping[str, float],
-) -> DeviceFluxPoint:
-    """Translate fitted integer/half back to other devices' integer references.
-
-    fitted uses the selected device's unit and was fitted at the supplied
-    other-device values. frame must use the newly fitted signed period for
-    the selected device, and the reference calibrations for all others.
-    Add selected signed period times the other devices'
-    flux contribution to both points. values requires every OTHER frame
-    device, in its declared unit; the selected device value is not used.
-    device_name must be nonblank without ASCII dots; valid names are unchanged.
-    Inputs stay unchanged. ValueError names an invalid/unknown selected device,
-    missing/invalid used values, or a pair not separated by abs(period)/2.
-    """
-    device = _selected_frame(frame, device_name)
-    validate_flux_spacing(fitted, device, device_name)
-    shift = device.period * flux_from_device_values(
-        frame, {**values, device_name: device.integer}
-    )
-    return DeviceFluxPoint(fitted.integer + shift, fitted.half + shift)
-
-
-def actual_flux_points(
-    reference: DeviceFluxPoint,
     *,
     device_name: str,
-    frame: FluxFrame,
+    flux: float,
+) -> float:
+    """Project a finite target flux (Phi0) onto one device's native value.
+
+    Other devices stay at values, with absent devices contributing zero. The
+    selected device's current value and extra devices are ignored. No units
+    are converted and no inputs change. ValueError names an invalid/unknown
+    device, an invalid used value, or a nonfinite/non-real/boolean target flux.
+    """
+    validate_device_name(device_name)
+    if device_name not in frame.devices:
+        raise ValueError(f"unknown frame device {device_name!r}")
+    target = _finite_value(flux, field="flux")
+    other_flux = flux_from_device_values(frame, {**values, device_name: 0.0})
+    return frame.devices[device_name].period * (target - other_flux)
+
+
+def offset_for_flux(
+    devices: Mapping[str, DevicePeriod],
     values: Mapping[str, float],
-) -> DeviceFluxPoint:
-    """Translate reference integer/half to the other devices' current values.
+    *,
+    flux: float,
+) -> float:
+    """Infer the unwrapped zero-output offset giving target flux at values.
 
-    reference is the selected device's pair with all other frame devices at
-    their integer references, in its declared unit. Subtract selected signed
-    period times the other devices' flux contribution from both points.
-    values requires every OTHER frame device in its declared unit; selected
-    device values and extra devices are ignored. Inputs are unchanged.
-    device_name must be nonblank without ASCII dots; valid names are unchanged.
-    ValueError names invalid/unknown device, missing/invalid used values, or a pair
-    not separated by abs(period)/2.
+    devices declares signed native periods; values uses those native units.
+    Missing devices contribute zero and extra devices are ignored. Return
+    target flux minus all contributions without changing inputs. Invalid
+    periods/names/used values or a nonfinite/non-real/boolean target raise
+    ValueError, with used-value errors naming the device.
     """
-    device = _selected_frame(frame, device_name)
-    validate_flux_spacing(reference, device, device_name)
-    shift = device.period * flux_from_device_values(
-        frame, {**values, device_name: device.integer}
+    return _finite_value(flux, field="flux") - flux_from_device_values(
+        FluxFrame(0.0, devices), values
     )
-    return DeviceFluxPoint(reference.integer - shift, reference.half - shift)
 
 
-def validate_flux_spacing(
-    points: DeviceFluxPoint, device: DeviceFluxFrame, name: str
-) -> None:
-    """Check a native-unit point pair against a device's signed period.
-
-    points and device must use the same instrument unit. name labels the device
-    in errors; callers validate its syntax and membership separately. Return
-    None without changing inputs when abs(integer-half) equals abs(period)/2,
-    allowing either half branch and period sign. Relative tolerance is 1e-9;
-    absolute tolerance is zero, including tiny periods. Otherwise raise
-    ValueError naming the device. No component or record data is read.
-    """
-    if not isclose(
-        abs(points.integer - points.half),
-        abs(device.period) / 2,
-        rel_tol=1e-9,
-        abs_tol=0.0,
-    ):
-        raise ValueError(
-            f"device {name!r} half/integer separation must be abs(period)/2"
-        )
-
-
-def _selected_frame(frame: FluxFrame, name: str) -> DeviceFluxFrame:
-    validate_device_name(name)
-    if name not in frame.devices:
-        raise ValueError(f"unknown frame device {name!r}")
-    return frame.devices[name]
-
-
-def _device_value(values: Mapping[str, float], name: str) -> float:
-    if name not in values:
-        raise ValueError(f"missing device value for {name!r}")
-    return _finite_value(values[name], field=f"device {name!r} value")
-
-
-def _require_nonempty_name(value: object, *, field: str) -> None:
+def _require_unit(value: object) -> None:
     if not isinstance(value, str) or not value.strip():
-        raise ValueError(f"{field} must be a nonempty string")
+        raise ValueError("unit must be a nonempty string")
 
 
-def _require_device_frame(value: object, name: str) -> None:
-    if not isinstance(value, DeviceFluxFrame):
-        raise ValueError(f"device {name!r} must be a DeviceFluxFrame")
+def _require_device_period(value: object, name: str) -> None:
+    if not isinstance(value, DevicePeriod):
+        raise ValueError(f"device {name!r} must be a DevicePeriod")
 
 
 def _finite_value(value: object, *, field: str) -> float:

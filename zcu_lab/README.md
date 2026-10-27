@@ -1,6 +1,6 @@
 # zcu_lab
 
-**Last updated:** 2026-10-27，多 device flux 與 component schema v2
+**Last updated:** 2026-10-27，offset／period 與 component schema v3
 
 **讀者：** lab-author、agent。查找實驗室定義的套件邊界、註冊入口與操作文件。
 
@@ -12,19 +12,19 @@
 
 `v2/` 放各實驗的 core 與前端附件，`recipes/` 放量測流程定義。`workflows/` 的 `coherence_fluxdep/`、`mist_fluxdep/`、`overnight/` 各自擁有流程、表單與科學工具，`common/` 只放真正共用的實驗步驟。`workflows/registry.py` 提供有序註冊清單。Window、App、RPC、MCP、表單協調、layout 與 input 保存都由 lib 宿主負責。實驗室宣告位於 `components/`、`definitions.py` 與 `templates.py`。[`simulation_envs/`](simulation_envs/FTF/README.md) 放 GUI／Notebook 共用的模擬參數檔與 startup 範例，不提供離線建庫入口。[Six-fluxonium](simulation_envs/six_fluxonium/README.md) 提供六顆無耦合 fluxonium、六條局部 DC 線、共用 coil 與 mux 讀出。每顆各自設定局部線與 coil 的 current offset／period，兩路 reduced flux 相加，不含串擾或 fast-flux pulse。
 
-GUI 啟動時 alias 表是空的，沒有 preset 檔。Alias 只存在各 point 的 `aliases.yaml`：開 entry 清空 alias，選 point 載入該 point 的表；Inspect 編輯目前表的草稿，Apply 才保存至目前 point。要在啟動時有初值，由 startup 腳本先建立 point，再用 `ctx.context.apply_alias_rows` 初始化並保存其表（simulation_envs 與 kickstart 的腳本都這樣做）。Alias 表只選元件焦點。表單從元件的 flux_source／rf_source 取得裝置初值，框架不從 cache 推測裝置。
+GUI 啟動時 alias 表是空的，沒有 preset 檔。Alias 只存在各 point 的 `aliases.yaml`：開 entry 清空 alias，選 point 載入該 point 的表；Inspect 編輯目前表的草稿，Apply 才保存至目前 point。要在啟動時有初值，由 startup 腳本先建立 point，再用 `ctx.context.apply_alias_rows` 初始化並保存其表（simulation_envs 與 kickstart 的腳本都這樣做）。Alias 表只選元件焦點。表單從元件的 flux_dev／rf_source 取得裝置初值，框架不從 cache 推測裝置。
 
 `templates.TEMPLATES` 是「新建 module／waveform」的持久範本來源。組合根以 `Registry(templates=TEMPLATES)` 注入一次；Library 新建直接讀 registry 的範本，不另建 catalog。`definitions.register_all` 註冊 adapters，並可用 `components` 傳入共用 ComponentRegistry。Reload 省略此 receiver，保留既有範本與元件註冊。Import 不執行註冊，重複 bootstrap 按 registry 規則報錯。
 
 `components/` 擁有具體元件 model、wiring、module 槽與內建角色。`base.py` 放共用欄位與基礎元件；`qubit.py` 放共用 qubit 欄位與 wiring。Fluxonium、transmon、resonator、JPA 與 mux 各有獨立子模組。`__init__.py` 提供公開匯出與明確註冊入口。Model 自行宣告 ext 與 extra 策略，普通字串引用在 resolve 時解析。GUI 與 MCP 組合根明確 bootstrap；notebook caller 可呼叫 `components.register_all(component_registry)`。框架只提供容器、kind 查表、角色解析與來源記錄。
 
-`MuxGroupSchema` 以 `group/mux` 註冊於同一 ComponentRegistry。必填 resonators 保存 1 至 8 個有序名稱。選填 qubits 必須等長且不重複。`flux_source` 保存 global coil 的 device 名稱。每顆 qubit 的 `flux.<device>` 保存 local、coil 與其他 contributor 校準，group 不再存 `coil_flux`。Component YAML 使用 `schema_version: 2`；舊文件經[長期升級入口](../docs/parameter-upgrades.md)轉換，runtime 不自動升級。提供 qubits 時，lab Form 在 Open／Reset 以固定 ParameterContext 檢查兩邊 component 存在、kind 正確，並逐項要求 qubits[i].resonator 等於 resonators[i]。錯誤指名欄位、index 與實際值。Resonators 不去重；沒有 qubits 的 onetone 保留手填 readout 與缺來源的既有政策。
+`MuxGroupSchema` 以 `group/mux` 註冊於同一 ComponentRegistry。必填 resonators 保存 1 至 8 個有序名稱。選填 qubits 必須等長且不重複。`flux_dev` 保存 global coil 的 device 名稱。每顆 qubit 的 `flux: {offset, period: {<device>: ...}}` 保存零輸出時的 flux 與 local、coil 等儀器的 signed periods，group 不另存校準。Component YAML 使用 `schema_version: 3`；舊文件經[長期升級入口](../docs/parameter-upgrades.md)轉換，runtime 不自動升級。提供 qubits 時，lab Form 在 Open／Reset 以固定 ParameterContext 檢查兩邊 component 存在、kind 正確，並逐項要求 qubits[i].resonator 等於 resonators[i]。錯誤指名欄位、index 與實際值。Resonators 不去重；沒有 qubits 的 onetone 保留手填 readout 與缺來源的既有政策。
 
 Scalar alias `mux=MG12` 讓 mux adapter 從固定 capture 的 `$mux.module.readout` 取得 Readout 初值。完整 tones[i] 綁定 resonators[i]。participants 以 list[int] 選擇量測的原始序號並指定順序，不改綁定或保存的 resonators。Module owner 是 group，不是第一個 resonator；重排不會改 owner。Framework 不知道 group schema。定位與 writeback capture 邊界見 [ADR-0072](../docs/adr/0072-module-boundaries.md#mux-group-是實驗室的-component-定義)。
 
 ## Component 欄位單位
 
-元件型別別名在既有 Field 附靜態 `json_schema_extra` 單位資料。Frequency 用 MHz，Duration 用 us，Energy 用 GHz，PumpPower 用 dBm。Qubit 的 `flux.<device>.{half, integer, period}` 使用各 device info 的原生單位，不標固定單位。Global flux 原值仍可存於 `general.ext.flux_value`。Qubit 不再保存 `flux_unit`，JPA 的 `J1.flux_unit` 維持原契約。Flux 不標固定單位。未宣告單位不代表無因次。Resources 以公開路徑查詢提供固定欄位的靜態 unit。GUI 的 WB 列只用查詢結果加標籤，不換算。Ext 與 flux 類欄位不顯示單位；run context 不消費這些標記。
+元件型別別名在既有 Field 附靜態 `json_schema_extra` 單位資料。Frequency 用 MHz，Duration 用 us，Energy 用 GHz，PumpPower 用 dBm。Qubit 的 `flux.offset` 使用 Φ0，`flux.period.<device>` 使用各儀器原生單位／Φ0，方向保留。Global flux 原值仍可存於 `general.ext.flux_value`。Qubit 不再保存 `flux_unit`，JPA 的 `J1.flux_unit` 維持原契約。Flux 不標固定單位。未宣告單位不代表無因次。Resources 以公開路徑查詢提供固定欄位的靜態 unit。GUI 的 WB 列只用查詢結果加標籤，不換算。Ext 與 flux 類欄位不顯示單位；run context 不消費這些標記。
 
 `recipes.RECIPES` 明列 `@recipe(name, description)` 產生的宣告。
 作者寫 `async def (session, inputs: RecipeInputs) -> Report`，在 RecipeInputs 子類加入實驗欄位，在 RecipeReport 子類加入報告欄位。
@@ -41,7 +41,7 @@ Module 與掃描欄位平鋪於頂層，只有 pulse Advanced 保留既有分組
 Load 不轉換舊 2.0 cfg，也不反填目前 Form；資料與 metadata 保留，record.cfg 為 None 並附原因。
 `onetone/flux_dep` 與 `twotone/fluxdep` 的 core 用具名 `flux_dev: str`；
 JPA 使用具名 `jpa_flux_dev` 與 `jpa_rf_dev`。Form 在 Open／Reset 讀取
-`$qubit.flux_source`、`$mux.flux_source` 或 JPA 的 `$jpa.flux_source`／`$jpa.rf_source`，
+`$qubit.flux_dev`、`$mux.flux_dev` 或 JPA 的 `$jpa.flux_dev`／`$jpa.rf_source`，
 保存可覆寫的 direct 裝置名稱。既有 input 不隨 alias 或元件參數更新。
 缺來源時留空，必填欄位保持 Invalid，可選欄位保留 None，不使用靜態名稱 fallback。Core 透過 RunContext.devices
 取得 driver，不認得 alias。Analyze／WB／Save 使用 Run 的固定來源，不重讀目前表。

@@ -7,13 +7,13 @@ import pandas as pd
 from numpy.typing import NDArray
 
 from zcu_tools.analysis.flux import (
-    DeviceFluxFrame,
+    DevicePeriod,
     FluxFrame,
     flux_from_device_values,
 )
 from zcu_tools.cfg_model import validate_device_name
 
-from .schema import RecordFluxFrame, resolve_record_flux
+from .schema import resolve_record_flux
 
 
 def project_device_coordinates(
@@ -73,34 +73,24 @@ def project_device_coordinates(
 def flux_from_frame(
     table: pd.DataFrame,
     *,
-    device_name: str,
-    fallback_frame: RecordFluxFrame | FluxFrame | None = None,
+    fallback_frame: FluxFrame | None = None,
 ) -> NDArray[np.float64]:
     """Return each record's normalized flux, preserving row order and input.
 
-    table contains nested records or their dotted-column CSV representation.
-    Each row uses explicit finite flux, then its flux_frame device mapping
-    (integer/period and devices.<name>.value), then caller fallback only if no
-    row frame exists. All row-frame devices contribute with signed periods.
-    Row frames do not require units: values already use the calibration units.
-    Nested membership follows frame keys. Dotted membership uses any non-null
-    flux_frame.<device>.* cell in that row; all-null device fields mean absent.
-    Flattening cannot distinguish absent devices from originally all-null ones.
-
-    device_name must be nonblank without ASCII dots and is preserved unchanged.
-    It selects ONLY the device used by a RecordFluxFrame fallback.
-    A FluxFrame fallback uses all its named devices
-    and requires each recorded value_unit to equal its declared unit. Neither
-    fallback converts units or reads files. Flat flux_int/flux_period columns
-    are not row frames; resolve_record_flux retains its independent v2 API.
-
-    Invalid device_name raises ValueError even for empty/explicit-only tables.
-    ValueError names the row and missing/invalid used field, including partial
-    frames and missing device values; invalid used frames never fall back.
-    Valid explicit flux ignores unused frame/device fields. Empty tables return
-    an empty float array. No input table, JSONL or calibration is changed.
+    Each nested or dotted row uses explicit finite flux, then flux_frame.offset
+    plus devices.<name>.value / flux_frame.period.<name>, then caller fallback
+    only when no row frame exists. Dotted membership uses non-null period cells.
+    Missing device values contribute zero. Dotted NaN value/period cells are
+    absent: flattening loses the distinction between a missing key and an
+    explicit NaN. Only nested input guarantees rejection of explicit NaN.
+    Present inf, boolean and other invalid values still raise.
+    Row frames use native calibration units without checking unit labels.
+    Fallback checks value_unit against DevicePeriod.unit for each present value.
+    No unit conversion or file reads occur. Flat flux_int/flux_period columns
+    are not row frames. Errors name the row and used field; invalid frames do
+    not fall back. Explicit flux ignores unused fields. Inputs remain unchanged
+    and empty tables return an empty float array.
     """
-    validate_device_name(device_name)
     values = np.empty(len(table), dtype=np.float64)
     for position, (index, row) in enumerate(table.iterrows()):
         single = table.iloc[position : position + 1]
@@ -112,17 +102,13 @@ def flux_from_frame(
         try:
             frame = _row_flux_frame(row)
             if frame is not None:
-                values[position] = _flux_for_record(single, frame, check_units=False)
+                values[position] = _flux_for_record(row, frame, check_units=False)
             elif isinstance(fallback_frame, FluxFrame):
                 values[position] = _flux_for_record(
-                    single, fallback_frame, check_units=True
+                    row, fallback_frame, check_units=True
                 )
             else:
-                projected = project_device_coordinates(single, device_name=device_name)
-                values[position] = resolve_record_flux(
-                    projected.reindex(columns=["dev_value", "dev_unit"]),
-                    fallback_frame=fallback_frame,
-                ).values[0]
+                raise ValueError("missing flux_frame and fallback frame")
         except ValueError as exc:
             raise ValueError(f"row {index!r}: {exc}") from exc
     return values
@@ -139,53 +125,38 @@ def _absent(value: object) -> bool:
 def _row_flux_frame(row: pd.Series) -> FluxFrame | None:
     raw: object = row.get("flux_frame")
     if isinstance(raw, dict):
-        devices = {
-            name: _device_frame(name, parameters) for name, parameters in raw.items()
+        offset: object = raw.get("offset")
+        periods: object = raw.get("period")
+    else:
+        if not _absent(raw):
+            raise ValueError("flux_frame must contain offset and period")
+        periods = {
+            column.removeprefix("flux_frame.period."): value
+            for column, value in row.items()
+            if isinstance(column, str)
+            and column.startswith("flux_frame.period.")
+            and not _absent(value)
         }
-        return FluxFrame(devices)
-    if not _absent(raw):
-        raise ValueError("flux_frame must be a device mapping")
-    # CSV columns are the union of all rows: all-null device fields in this
-    # row do not declare a contributor, but any populated field declares one.
-    names = {
-        column.removeprefix("flux_frame.").rpartition(".")[0]
-        for column, value in row.items()
-        if isinstance(column, str)
-        and column.startswith("flux_frame.")
-        and not _absent(value)
-    }
-    if not names:
-        return None
+        offset = row.get("flux_frame.offset")
+        if not periods and _absent(offset):
+            return None
+    if _absent(offset):
+        raise ValueError("missing flux_frame.offset")
+    if not isinstance(periods, dict):
+        raise ValueError("flux_frame.period must be a device mapping")
     return FluxFrame(
-        {
-            name: _device_frame(
-                name,
-                {
-                    "integer": row.get(f"flux_frame.{name}.integer"),
-                    "period": row.get(f"flux_frame.{name}.period"),
-                },
-            )
-            for name in sorted(names)
-        }
+        _record_number(offset, "flux_frame.offset"),
+        {name: _device_frame(name, period) for name, period in periods.items()},
     )
 
 
-def _device_frame(name: str, parameters: object) -> DeviceFluxFrame:
-    if not isinstance(parameters, dict):
-        raise ValueError(f"flux_frame.{name} must contain integer and period")
-    integer: object = parameters.get("integer")
-    period: object = parameters.get("period")
-    for field, value in (("integer", integer), ("period", period)):
-        if _absent(value):
-            raise ValueError(f"missing flux_frame.{name}.{field}")
-    integer_value = _record_number(integer, f"flux_frame.{name}.integer")
-    period_value = _record_number(period, f"flux_frame.{name}.period")
-    # The numerical owner validates finite references and signed periods.
-    # Give its diagnostic the record column's full path.
+def _device_frame(name: str, period: object) -> DevicePeriod:
+    field = f"flux_frame.period.{name}"
+    period_value = _record_number(period, field)
     try:
-        return DeviceFluxFrame(integer=integer_value, period=period_value)
+        return DevicePeriod(period_value)
     except ValueError as exc:
-        raise ValueError(f"flux_frame.{name}.{exc}") from exc
+        raise ValueError(f"{field}: {exc}") from exc
 
 
 def _record_number(value: object, field: str) -> float:
@@ -194,19 +165,38 @@ def _record_number(value: object, field: str) -> float:
     ):
         raise ValueError(f"{field} must be a real number")
     try:
-        return float(value)
+        result = float(value)
     except OverflowError as exc:
         raise ValueError(f"{field} must be finite") from exc
+    if not isfinite(result):
+        raise ValueError(f"{field} must be finite")
+    return result
 
 
-def _flux_for_record(
-    row: pd.DataFrame, frame: FluxFrame, *, check_units: bool
-) -> float:
+def _flux_for_record(row: pd.Series, frame: FluxFrame, *, check_units: bool) -> float:
     values: dict[str, float] = {}
     for name, device in frame.devices.items():
-        projected = project_device_coordinates(row, device_name=name)
-        values[name] = float(projected["dev_value"].iloc[0])
-        if check_units and projected["dev_unit"].iloc[0] != device.unit:
+        devices: object = row.get("devices")
+        if isinstance(devices, dict):
+            entry: object = devices.get(name)
+            if entry is None:
+                continue
+            if not isinstance(entry, dict):
+                raise ValueError(f"devices.{name} must be a value mapping")
+            if "value" not in entry:
+                continue
+            value: object = entry["value"]
+            unit: object = entry.get("value_unit")
+        else:
+            column = f"devices.{name}.value"
+            if column not in row:
+                continue
+            value = row[column]
+            if _absent(value):
+                continue
+            unit = row.get(f"devices.{name}.value_unit")
+        values[name] = _record_number(value, f"devices.{name}.value")
+        if check_units and unit != device.unit:
             raise ValueError(
                 f"devices.{name}.value_unit must match fallback unit {device.unit!r}"
             )

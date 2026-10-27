@@ -2,7 +2,7 @@
 
 **Readers:** operator, lab-author. Start an offline single-fluxonium environment and supply a one-point twotone input.
 
-**Last updated:** 2026-10-26, per-user simulation settings.
+**Last updated:** 2026-10-27, fixed multiplicative readout background.
 
 This environment has one fluxonium, one DC source, one microwave line,
 one fast-flux line and one readout cavity. It has no coupler, second qubit or mux.
@@ -10,6 +10,15 @@ one fast-flux line and one readout cavity. It has no coupler, second qubit or mu
 `single_fluxonium.yaml`, an untracked working copy beside the startup script.
 `entry-template.yaml` contains working components, wiring and aliases. Neither
 the physical settings nor the entry template supplies a calibrated pulse library.
+
+The template background now multiplies 68/44/308 MHz waves, 2% complex RMS
+roughness, a -4 dB/GHz slope and a 3.7 GHz low-frequency edge. Existing working
+copies do not update automatically. Copy the template's `background.extra_ripples`,
+`roughness` and `band_edges` into each receiver in your working YAML, update the
+legacy ripple/slope values too, then restart the environment. `roughness.seed`
+fixes the line shape independently of the measurement-noise `numerics.seed`.
+See the [ADC background contract](../../../lib/zcu_tools/simulate/adc/README.md)
+for field definitions and reproducibility limits.
 
 ## Trusted startup
 
@@ -39,11 +48,11 @@ numeric warmup or real hardware access occurs during startup.
 A new entry contains Q1 as `qubit/fluxonium`, R1 as `resonator`, and `flux_bias`
 as `device/current_source`. Q1 uses generators 1 and 2. R1 uses generator 0 and
 ADC 0. Aliases are `qubit: Q1` and `resonator: $qubit.resonator`.
-Flux forms read `$qubit.flux_source` on Open/Reset without a device alias.
-The template seeds simulated-truth from
-`default.yaml`: Q1's `flux.flux_bias` has `half: 0`, `period: 0.01` and
-`integer: -0.005` in A. The component template uses `schema_version: 2`.
-Existing v1 documents require the explicit [upgrade command](../../../docs/parameter-upgrades.md);
+Flux forms read `$qubit.flux_dev` on Open/Reset without a device alias.
+The template seeds simulated-truth from `default.yaml`: Q1 has
+`flux: {offset: 0.5, period: {flux_bias: 0.01}}`, with offset in Phi0 and period
+in A/Phi0. The component template uses `schema_version: 3`.
+Existing v1/v2 documents require the explicit [upgrade command](../../../docs/parameter-upgrades.md);
 startup never upgrades saved entries. R1 has total linewidth 1.1 MHz and pulse-route flight
 time 0.4 us. These values are not measurement results. This environment has
 no mux route, global coil or readout amplifier component.

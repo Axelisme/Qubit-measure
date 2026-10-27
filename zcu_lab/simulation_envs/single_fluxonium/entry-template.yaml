@@ -1,11 +1,11 @@
 # Entry working values and wiring, separate from physical simulation settings.
 # No module library or pulse sequence is supplied.
 # simulated-truth: default.yaml DC offset_phi0=0.5, flux_per_unit=100 Phi0/A;
-# int=-offset/coefficient, period=1/coefficient, half=(0.5-offset)/coefficient.
+# offset=offset_phi0, period=1/flux_per_unit in A/Phi0.
 # Resonator kappa and route TOF come from readout settings, not measurements.
 format: zcu.entry-template
 format_version: "1.0"
-schema_version: 2
+schema_version: 3
 components:
   Q1:
     kind: qubit/fluxonium
@@ -14,9 +14,11 @@ components:
     EL: 1.0
     freq: null # Bias-dependent; this is not a frequency calibration.
     resonator: R1
-    flux_source: flux_bias
+    flux_dev: flux_bias
     flux:
-      flux_bias: {half: 0.0, integer: -0.005, period: 0.01}
+      offset: 0.5
+      period:
+        flux_bias: 0.01
     wiring:
       ch: 1
       lo_flux_ch: 2

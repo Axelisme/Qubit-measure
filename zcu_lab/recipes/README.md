@@ -31,6 +31,9 @@ Import 不開 GUI、不註冊 adapter，也不執行量測。新增宣告後須�
 Updates helper 只把完整 tones 的原始位置與 Q 名對應到分析參數，不改量測設定或選來源。
 每個 Q 都明送 `flux_half`／`flux_int`，未指定的線送 null，讓 owner 使用該 Q 的 Run capture。
 這是避免沿用上一個 Q 顯式線的 reset 指令，不是把所有省略欄位轉成 null。
+Recipe 的 half／integer 輸入與報告是原生偏壓擬合點，不是 component 欄位。
+Component v3 使用 `{offset, period}` 與 `flux_dev`。量測 writeback 分開提 signed period 與預設勾選的 offset，note 列其他儀器的 Run snapshot 值與扣除貢獻。
+缺席儀器不貢獻，period 保留。獨立 app Export params 只寫 energies 與選定 period，一律保留 component offset。
 
 ## 作者可呼叫的操作
 

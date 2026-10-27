@@ -183,7 +183,7 @@ def calibration_defaults(
     """Seed captured fluxonium physics, flux device and x180 pi estimate.
 
     data is caller-owned and changed in place. flux_dev is a direct, editable
-    name from $qubit.flux_source; absent sources leave it required and blank.
+    name from $qubit.flux_dev; absent sources leave it required and blank.
     flux_unit and seed_flux use the selected device's detached native unit
     and value. Without a captured DC device both remain required and blank.
     This is an editable starting guess, not proof of the pulse's calibration
@@ -202,7 +202,7 @@ def calibration_defaults(
     if env.parameters is None:
         return data
     try:
-        data["flux_dev"] = env.parameters.lookup_point("$qubit.flux_source").value
+        data["flux_dev"] = env.parameters.lookup_point("$qubit.flux_dev").value
     except RoleResolutionError as error:
         if error.reason not in {"Alias is not bound", "Unknown alias"}:
             raise

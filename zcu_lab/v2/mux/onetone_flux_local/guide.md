@@ -8,7 +8,7 @@ Bind alias `mux` to a `group/mux` component. The group must name matching
 ordered qubits and resonators. Tone index i always refers to that full group
 position, even when participants are reordered or omitted.
 
-Each qubit's `flux_source` names its own connected DC driver. All local sources must be distinct.
+Each qubit's `flux_dev` names its own connected DC driver. All local sources must be distinct.
 Choose `flux_unit` to match the driver's stored native unit. No unit conversion,
 mode change or output enabling occurs. Confirm limits, wiring, power and output
 before running on hardware.
@@ -21,13 +21,15 @@ edits and captures sources again.
 
 - `participants` selects original tone indices in acquisition order. The tone picker only
   selects which full-list position to edit.
-- `tones[i].flux_dev` starts from that Q's captured `flux_source`.
+- `tones[i].flux_dev` starts from that Q's captured `flux_dev`.
 - Each `tones[i].sweep` has independent native-unit Start and Stop.
   `flux_expts` is the one point count shared by all local lines, initially 101.
   Lines advance together by point index, not as a Cartesian product.
-- Start is `1.1*Q.flux_int - 0.1*Q.flux_half`; Stop is
-  `1.1*Q.flux_half - 0.1*Q.flux_int`. Missing calibration leaves required
-  endpoints blank. Unselected lines are validated but never written.
+- Project integer (flux=0) and half (flux=0.5) from each Q's `{offset, period}`
+  with the other devices' detached Form values. Start is `1.1*integer - 0.1*half`;
+  Stop is `1.1*half - 0.1*integer`. Missing offset or selected period leaves
+  required endpoints blank. Missing other device values contribute zero.
+  Unselected lines are validated but never written.
 - `settle` is the wait in seconds after all DC writes at each flux point.
 - `modules` contains the optional common reset and full mux readout.
 - `frequency` contains only frequency-scan inputs.
@@ -144,12 +146,20 @@ half-to-integer separation. The summary includes the original index and Q name.
 
 Review the resulting proposals before applying Writeback. Destinations use the
 Run/Load capture, not the current form or aliases.
-Only that Q's `flux.<scanned device>` entry is proposed. The key is that tone's `flux_dev`. A different participant's scanned device in this Q's frame blocks writeback because it is not a fixed contributor.
-The proposal converts the picked half/integer back to the other contributors' integer references, using their Run-start snapshot biases.
-It updates the period magnitude and preserves its stored sign. A first calibration uses positive direction.
-Other device entries and Qs are preserved.
+The proposals separately update that Q's `flux.period.<scanned device>` and
+`flux.offset`. The device is that tone's `flux_dev`.
+Period updates its magnitude and preserves its sign, initially positive.
+The default-selected offset uses `0.5 - half_fit / period_s - Σ V_o / period_o`.
+Other values come from the Run-start snapshot; the swept value is replaced by
+half_fit once. The note lists other present calibrated devices' values and
+contributions, including zero values. Missing devices contribute zero and retain
+their periods. Other periods and Qs are preserved. Simultaneous scans do not
+block the proposal; the experiment author must judge that calibration.
 The accompanying ordinary record stores the raw picked half/integer/positive period, scanned device, complete connected-device Run snapshot and original Run parameter frame.
-Accept both proposals to keep the calibration and its measurement record. Missing Run device evidence blocks calibration; acceptance never reads live devices or current parameters.
+Review the period, offset and record items separately. Accepting period does not
+require accepting offset. A missing whole Run snapshot blocks calibration;
+missing individual device values contribute zero. Acceptance never reads live
+devices or current parameters.
 Repeat Analyze and Writeback for each acquired participant. Cancel produces no
 new calibration. Missing historical cfg prevents identity-dependent analysis;
 missing parameter capture permits picking but yields no writeback proposals.

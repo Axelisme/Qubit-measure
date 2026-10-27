@@ -1,320 +1,203 @@
-"""Author-selected device coordinates from record tables and their dotted CSVs."""
+"""Flux coordinates from self-contained nested records and dotted CSV rows."""
 
-from pathlib import Path
+from collections.abc import Mapping, Sequence
 
 import numpy as np
 import pandas as pd
 import pytest
-from zcu_tools.analysis.flux import DeviceFluxFrame, FluxFrame
-from zcu_tools.resources.record_table import (
-    JsonlRecordTable,
-    RecordFluxFrame,
-    flux_from_frame,
-)
+from zcu_tools.analysis.flux import DevicePeriod, FluxFrame
+from zcu_tools.resources.record_table import flux_from_frame
 
 
-@pytest.mark.parametrize("name", ["bias.local", "", " \t "])
-def test_flux_rejects_invalid_selected_device_name_even_with_explicit_flux(
-    name: str,
-) -> None:
-    with pytest.raises(ValueError, match="(?i)device.name"):
-        flux_from_frame(pd.DataFrame({"flux": [0.5]}), device_name=name)
-
-
-@pytest.mark.parametrize("name", ["bias.local", "", " \t "])
-@pytest.mark.parametrize("flatten", [False, True])
-def test_flux_rejects_invalid_used_row_frame_names(name: str, flatten: bool) -> None:
-    rows = [
-        {
-            "devices": {name: {"value": 3}},
-            "flux_frame": {name: {"integer": 1, "period": 4}},
-        }
-    ]
-    table = pd.json_normalize(rows) if flatten else pd.DataFrame(rows)
-    table.index = ["sample"]
-    with pytest.raises(ValueError, match="sample.*(?i:device name)"):
-        flux_from_frame(table, device_name="bias")
-
-
-@pytest.mark.parametrize("name", [" Bias ", "bias", "BIAS", "偏壓", "bias．local"])
-@pytest.mark.parametrize("flatten", [False, True])
-def test_flux_preserves_names_for_row_frame_and_single_or_multi_fallback(
-    name: str, flatten: bool
-) -> None:
-    rows = [
-        {
-            "devices": {
-                name: {"value": 3, "value_unit": "V"},
-                "coil": {"value": 3, "value_unit": "A"},
-            },
-            "flux_frame": {
-                name: {"integer": 1, "period": 4},
-                "coil": {"integer": 2, "period": -4},
-            },
-        },
-        {
-            "devices": {
-                name: {"value": 3, "value_unit": "V"},
-                "coil": {"value": 2, "value_unit": "A"},
-            }
-        },
-    ]
-    table = pd.json_normalize(rows) if flatten else pd.DataFrame(rows)
-    multi = FluxFrame(
-        {name: DeviceFluxFrame(1, 4, "V"), "coil": DeviceFluxFrame(2, -4, "A")}
-    )
-    for fallback in (RecordFluxFrame("V", 1, 4), multi):
-        np.testing.assert_allclose(
-            flux_from_frame(table, device_name=name, fallback_frame=fallback),
-            [0.25, 0.5],
-        )
+def make_table(rows: Sequence[Mapping[str, object]], *, flatten: bool) -> pd.DataFrame:
+    records = [dict(row) for row in rows]
+    return pd.json_normalize(records) if flatten else pd.DataFrame(records)
 
 
 @pytest.mark.parametrize("flatten", [False, True])
-def test_flux_uses_explicit_then_row_frame_then_named_fallback(flatten: bool) -> None:
-    rows = [
-        {
-            "flux": 0.8,
-            "flux_frame": {"bias": {"integer": "unused"}},
-            "devices": {"bias": {"value": "unused"}},
-        },
-        {
-            "devices": {
-                "bias": {"value": 3, "value_unit": "arbitrary"},
-                "other": {"value": 99},
-            },
-            "flux_frame": {"bias": {"integer": 1, "period": 4}},
-        },
-        {"devices": {"bias": {"value": 4, "value_unit": "V"}}},
-    ]
-    table = pd.json_normalize(rows) if flatten else pd.DataFrame(rows)
-    table.index = [8, 2, 5]
-    original = table.copy(deep=True)
-
-    flux = flux_from_frame(
-        table, device_name="bias", fallback_frame=RecordFluxFrame("V", 2, 8)
-    )
-
-    np.testing.assert_allclose(flux, [0.8, 0.5, 0.25])
-    pd.testing.assert_frame_equal(table, original)
-
-
-@pytest.mark.parametrize("flatten", [False, True])
-def test_flux_from_record_read_handles_null_and_populated_devices(
-    tmp_path: Path, flatten: bool
-) -> None:
-    path = tmp_path / "records.jsonl"
-    path.write_text(
-        '{"run_id":"explicit","flux":0.7,"devices":null}\n'
-        '{"run_id":"frame","devices":{"bias":{"value":0.9,"value_unit":"V"}},'
-        '"flux_frame":{"bias":{"integer":0.1,"period":0.8}}}\n',
-        encoding="utf-8",
-    )
-    table = JsonlRecordTable(path).read(flatten=flatten)
-    original = table.copy(deep=True)
-
-    np.testing.assert_allclose(flux_from_frame(table, device_name="bias"), [0.7, 1.0])
-    pd.testing.assert_frame_equal(table, original)
-
-
-def test_flux_row_frame_accepts_numeric_dotted_columns_without_units() -> None:
-    table = pd.DataFrame(
-        {
-            "devices.bias.value": [3, 5],
-            "flux_frame.bias.integer": [1, 1],
-            "flux_frame.bias.period": [4, 4],
-        }
-    )
-
-    np.testing.assert_allclose(flux_from_frame(table, device_name="bias"), [0.5, 1.0])
-
-
-@pytest.mark.parametrize(
-    ("present", "missing"),
-    [
-        ("flux_frame.bias.integer", "flux_frame.bias.period"),
-        ("flux_frame.bias.period", "flux_frame.bias.integer"),
-    ],
-)
-@pytest.mark.parametrize("null_column", [False, True])
-def test_incomplete_used_row_frame_fails_without_fallback(
-    present: str, missing: str, null_column: bool
-) -> None:
-    table = pd.DataFrame(
-        {
-            "flux": [0.8, np.nan],
-            "devices.bias.value": [np.nan, 3.0],
-            "devices.bias.value_unit": [None, "V"],
-            present: [np.nan, 1.0],
-        },
-        index=["explicit", "partial"],
-    )
-    if null_column:
-        table[missing] = np.nan
-
-    with pytest.raises(ValueError, match=f"partial.*{missing}|{missing}.*partial"):
-        flux_from_frame(
-            table, device_name="bias", fallback_frame=RecordFluxFrame("V", 1, 4)
-        )
-
-
-@pytest.mark.parametrize("flatten", [False, True])
-def test_flux_sums_every_row_frame_device_with_signed_period(flatten: bool) -> None:
-    rows = [
-        {
-            "devices": {"bias": {"value": 3}, "coil": {"value": 3}},
-            "flux_frame": {
-                "bias": {"integer": 1, "period": 4},
-                "coil": {"integer": 2, "period": -4},
-            },
-        },
-        {
-            "devices": {"coil": {"value": 6}},
-            "flux_frame": {"coil": {"integer": 2, "period": -4}},
-        },
-        {"flux": 0.8, "flux_frame": {"missing": {"integer": "unused"}}},
-    ]
-    table = pd.json_normalize(rows) if flatten else pd.DataFrame(rows)
-    table.index = ["combined", "coil-only", "explicit"]
-    original = table.copy(deep=True)
-    np.testing.assert_allclose(
-        flux_from_frame(table, device_name="bias"), [0.25, -1.0, 0.8]
-    )
-    pd.testing.assert_frame_equal(table, original)
-
-
-@pytest.mark.parametrize("flatten", [False, True])
-@pytest.mark.parametrize("missing", ["value", "integer", "period"])
-def test_used_frame_reports_missing_contributor_without_falling_back(
-    flatten: bool, missing: str
-) -> None:
-    coil_frame = {"integer": 2, "period": -4}
-    coil_value = {"value": 3, "value_unit": "A"}
-    if missing == "value":
-        coil_value.pop(missing)
-    else:
-        coil_frame.pop(missing)
-    row = {
-        "devices": {"bias": {"value": 3}, "coil": coil_value},
-        "flux_frame": {"bias": {"integer": 1, "period": 4}, "coil": coil_frame},
-    }
-    table = pd.json_normalize([row]) if flatten else pd.DataFrame([row])
-    table.index = ["partial"]
-    with pytest.raises(ValueError, match=f"partial.*coil.*{missing}"):
-        flux_from_frame(
-            table, device_name="bias", fallback_frame=RecordFluxFrame("V", 0, 2)
-        )
-
-
-@pytest.mark.parametrize("flatten", [False, True])
-def test_multiple_device_fallback_uses_caller_units_and_current_row_values(
+def test_flux_uses_explicit_then_offset_period_frame_then_fallback(
     flatten: bool,
 ) -> None:
     rows = [
-        {"flux": 0.8},
         {
-            "devices": {"bias": {"value": 5}, "coil": {"value": 3}},
-            "flux_frame": {
-                "bias": {"integer": 1, "period": 4},
-                "coil": {"integer": 2, "period": -4},
-            },
+            "flux": 0.8,
+            "flux_frame": {"offset": "unused"},
+            "devices": {"bias": {"value": "unused"}},
         },
         {
-            "devices": {
-                "bias": {"value": 3, "value_unit": "V"},
-                "coil": {"value": 3, "value_unit": "A"},
-            }
+            "flux_frame": {"offset": 0.5, "period": {"bias": 4, "coil": -2}},
+            "devices": {"bias": {"value": 3}, "coil": {"value": 0.5}},
         },
+        {"devices": {"bias": {"value": 4, "value_unit": "V"}}},
     ]
-    table = pd.json_normalize(rows) if flatten else pd.DataFrame(rows)
-    fallback = FluxFrame(
-        {"bias": DeviceFluxFrame(1, 4, "V"), "coil": DeviceFluxFrame(2, -4, "A")}
+    table = make_table(rows, flatten=flatten)
+    table.index = ["explicit", "row", "fallback"]
+    original = table.copy(deep=True)
+    actual = flux_from_frame(
+        table, fallback_frame=FluxFrame(-0.25, {"bias": DevicePeriod(8, "V")})
+    )
+    np.testing.assert_allclose(actual, [0.8, 1.0, 0.25])
+    pd.testing.assert_frame_equal(table, original)
+
+
+@pytest.mark.parametrize("flatten", [False, True])
+def test_missing_offset_names_row_and_field_without_falling_back(flatten: bool) -> None:
+    rows = [
+        {"flux_frame": {"period": {"coil": -2}}, "devices": {"coil": {"value": 0.5}}}
+    ]
+    table = make_table(rows, flatten=flatten)
+    table.index = ["partial"]
+    with pytest.raises(ValueError, match=r"partial.*flux_frame.offset"):
+        flux_from_frame(table, fallback_frame=FluxFrame(0, {}))
+
+
+@pytest.mark.parametrize("flatten", [False, True])
+def test_absent_device_values_contribute_zero(flatten: bool) -> None:
+    rows = [
+        {
+            "flux_frame": {"offset": 0.5, "period": {"bias": 4, "coil": -2}},
+            "devices": {"bias": {"value": 3, "value_unit": "V"}},
+        }
+    ]
+    table = make_table(rows, flatten=flatten)
+    np.testing.assert_allclose(flux_from_frame(table), [1.25])
+    fallback_table = table.drop(
+        columns=[c for c in table.columns if str(c).startswith("flux_frame")]
     )
     np.testing.assert_allclose(
-        flux_from_frame(table, device_name="bias", fallback_frame=fallback),
-        [0.8, 0.75, 0.25],
+        flux_from_frame(
+            fallback_table,
+            fallback_frame=FluxFrame(
+                0.5, {"bias": DevicePeriod(4, "V"), "coil": DevicePeriod(-2, "A")}
+            ),
+        ),
+        [1.25],
     )
 
 
 @pytest.mark.parametrize("unit", ["V", None])
-def test_multiple_device_fallback_rejects_missing_or_mismatching_unit(
-    unit: str | None,
+@pytest.mark.parametrize("flatten", [False, True])
+def test_fallback_checks_unit_for_present_values(
+    unit: str | None, flatten: bool
 ) -> None:
-    table = pd.DataFrame(
-        {"devices.coil.value": [3], "devices.coil.value_unit": [unit]},
-        index=["old"],
-    )
-    with pytest.raises(ValueError, match="old.*devices.coil.value_unit"):
+    rows = [{"devices": {"coil": {"value": 3, "value_unit": unit}}}]
+    table = make_table(rows, flatten=flatten)
+    table.index = ["old"]
+    with pytest.raises(ValueError, match=r"old.*devices.coil.value_unit"):
         flux_from_frame(
-            table,
-            device_name="coil",
-            fallback_frame=FluxFrame({"coil": DeviceFluxFrame(2, -4, "A")}),
+            table, fallback_frame=FluxFrame(0.5, {"coil": DevicePeriod(-4, "A")})
         )
 
 
-def test_dotted_all_null_device_is_absent_but_any_frame_field_declares_it() -> None:
+@pytest.mark.parametrize("name", ["bias.local", "", " \t "])
+@pytest.mark.parametrize("flatten", [False, True])
+def test_invalid_used_frame_device_names_are_rejected(name: str, flatten: bool) -> None:
+    rows = [{"flux_frame": {"offset": 0.5, "period": {name: 4}}}]
+    table = make_table(rows, flatten=flatten)
+    table.index = ["sample"]
+    with pytest.raises(ValueError, match="sample.*(?i:device name)"):
+        flux_from_frame(table)
+
+
+@pytest.mark.parametrize("bad", [True, float("nan"), float("inf"), -float("inf"), "1"])
+def test_present_invalid_nested_device_value_names_row_and_column(bad: float) -> None:
     table = pd.DataFrame(
-        {
-            "devices.bias.value": [3, 3],
-            "devices.bias.value_unit": ["V", "V"],
-            "flux_frame.bias.integer": [1, None],
-            "flux_frame.bias.period": [4, None],
-            "flux_frame.coil.integer": [None, None],
-            "flux_frame.coil.period": [None, None],
-            "flux_frame.coil.half": [None, None],
-        },
-        index=["row-frame", "fallback"],
+        [
+            {
+                "flux_frame": {"offset": 0.5, "period": {"bias": 4}},
+                "devices": {"bias": {"value": bad}},
+            }
+        ],
+        index=["invalid"],
     )
+    with pytest.raises(ValueError, match=r"invalid.*devices.bias.value"):
+        flux_from_frame(table)
+
+
+def test_dotted_union_treats_nan_value_and_period_cells_as_absent() -> None:
+    rows = [
+        {
+            "flux_frame": {"offset": 0.5, "period": {"bias": 4, "coil": -2}},
+            "devices": {"bias": {"value": 3}},
+        },
+        {
+            "flux_frame": {"offset": 0.5, "period": {"coil": -2}},
+            "devices": {"coil": {"value": 0.5}},
+        },
+    ]
+    table = pd.json_normalize(rows)
+    np.testing.assert_allclose(flux_from_frame(table), [1.25, 0.25])
+    values_only = table.drop(
+        columns=[c for c in table.columns if c.startswith("flux_frame")]
+    )
+    # Absent value cells need no unit, while present values must match fallback.
+    values_only["devices.bias.value_unit"] = ["V", None]
+    values_only["devices.coil.value_unit"] = [None, "A"]
     np.testing.assert_allclose(
         flux_from_frame(
-            table, device_name="bias", fallback_frame=RecordFluxFrame("V", 2, 4)
+            values_only,
+            fallback_frame=FluxFrame(
+                0.5, {"bias": DevicePeriod(4, "V"), "coil": DevicePeriod(-2, "A")}
+            ),
         ),
-        [0.5, 0.25],
+        [1.25, 0.25],
     )
-    table.loc["row-frame", "flux_frame.coil.half"] = 2
-    with pytest.raises(ValueError, match="row-frame.*flux_frame.coil.integer"):
-        flux_from_frame(table, device_name="bias")
 
 
-def test_nested_device_key_with_all_null_fields_is_invalid() -> None:
-    table = pd.DataFrame(
-        [{"flux_frame": {"coil": {"integer": None, "period": None}}}],
-        index=["corrupt"],
-    )
-    with pytest.raises(ValueError, match="corrupt.*flux_frame.coil.integer"):
-        flux_from_frame(table, device_name="coil")
-
-
-@pytest.mark.parametrize(
-    ("column", "value"),
-    [
-        ("flux_frame.bias.period", 0),
-        ("flux_frame.bias.integer", True),
-        ("devices.bias.value", True),
-    ],
-)
-def test_invalid_used_numeric_field_names_row_and_field(
-    column: str, value: float
+@pytest.mark.parametrize("field", ["flux_frame.period.bias", "devices.bias.value"])
+@pytest.mark.parametrize("bad", [True, float("inf"), -float("inf")])
+def test_dotted_invalid_non_nan_cells_still_report_row_and_field(
+    field: str, bad: float
 ) -> None:
     table = pd.DataFrame(
         {
-            "flux_frame.bias.integer": [1],
-            "flux_frame.bias.period": [4],
+            "flux_frame.offset": [0.5],
+            "flux_frame.period.bias": [4],
             "devices.bias.value": [3],
         },
         index=["invalid"],
         dtype=object,
     )
-    table.loc["invalid", column] = value
-    with pytest.raises(ValueError, match="invalid.*bias.*" + column.rpartition(".")[2]):
+    table.loc["invalid", field] = bad
+    with pytest.raises(ValueError, match="invalid.*" + field):
+        flux_from_frame(table)
+
+
+@pytest.mark.parametrize("flatten", [False, True])
+def test_nan_period_is_only_absent_after_flattening(flatten: bool) -> None:
+    rows = [
+        {
+            "flux_frame": {"offset": 0.5, "period": {"bias": float("nan")}},
+            "devices": {"bias": {"value": 3}},
+        }
+    ]
+    table = make_table(rows, flatten=flatten)
+    if flatten:
+        np.testing.assert_allclose(flux_from_frame(table), [0.5])
+    else:
+        with pytest.raises(ValueError, match=r"flux_frame.period.bias"):
+            flux_from_frame(table)
+
+
+@pytest.mark.parametrize("raw", [{}, {"offset": None}, {"period": {}}])
+def test_nested_missing_offset_never_uses_fallback(raw: dict[str, object]) -> None:
+    with pytest.raises(ValueError, match=r"partial.*flux_frame.offset"):
         flux_from_frame(
-            table, device_name="bias", fallback_frame=RecordFluxFrame("V", 0, 4)
+            pd.DataFrame([{"flux_frame": raw}], index=["partial"]),
+            fallback_frame=FluxFrame(0.5, {}),
         )
 
 
-def test_missing_frame_and_fallback_reports_row() -> None:
+@pytest.mark.parametrize("flatten", [False, True])
+def test_zero_period_reports_row_and_field(flatten: bool) -> None:
+    rows = [{"flux_frame": {"offset": 0.5, "period": {"bias": 0}}}]
+    table = make_table(rows, flatten=flatten)
+    table.index = ["bad-period"]
+    with pytest.raises(ValueError, match=r"bad-period.*flux_frame.period.bias"):
+        flux_from_frame(table)
+
+
+def test_no_frame_reports_row_and_empty_table_returns_empty_array() -> None:
     with pytest.raises(ValueError, match="unresolved"):
-        flux_from_frame(
-            pd.DataFrame({"devices.bias.value": [3]}, index=["unresolved"]),
-            device_name="bias",
-        )
+        flux_from_frame(pd.DataFrame([{"devices": {}}], index=["unresolved"]))
+    assert flux_from_frame(pd.DataFrame()).shape == (0,)
