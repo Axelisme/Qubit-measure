@@ -185,9 +185,11 @@ class FTFAcquire:
             save_replay(
                 owner.private_replay,
                 ReplayAcquire(
-                    settings=owner.settings, request=acquire, versions=replay_versions()
+                    settings=owner.effective_settings,
+                    request=acquire,
+                    versions=replay_versions(),
                 ),
-                snapshot,
+                replace(snapshot, model_identity=owner.identity),
                 index,
             )
         return result
