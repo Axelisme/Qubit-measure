@@ -14,12 +14,11 @@ from zcu_tools.gui.session.operation_runner import (
     OperationSpec,
     SettleFn,
 )
-from zcu_tools.gui.session.ports import ExclusionGate, OperationKind
+from zcu_tools.gui.session.ports import OperationKind
 from zcu_tools.gui.session.types import SocCfgHandle, SocHandle
 
 if TYPE_CHECKING:
     from zcu_tools.gui.event_bus import BaseEventBus
-    from zcu_tools.gui.session.operation_handles import OperationHandles
     from zcu_tools.gui.session.operation_runner import OperationRunner
     from zcu_tools.gui.session.state import SessionState
 
@@ -69,20 +68,13 @@ class SoCConnectionService:
         self,
         state: SessionState,
         bus: BaseEventBus,
-        gate: ExclusionGate,
-        handles: OperationHandles,
         runner: OperationRunner,
     ) -> None:
         self._state = state
         self._bus = bus
-        # Connect composes both leaves (ADR-0066): an Exclusion lease
-        # (SOC_CONNECT vs run / another connect) + a Handle. A connect has no
-        # cancellation point, so cancel_hook=None (§B.3 equivalence).
-        self._gate = gate
-        self._handles = handles
+        # The runner owns exclusion and handles for both inline and async work.
+        # Connect has no cancellation point, so every spec uses cancel_hook=None.
         self._runner = runner
-        # _active_token: POST-BEGIN set, on_terminal cleared (run.py pattern).
-        self._active_token: int | None = None
         self._connected_request: ConnectRequest | None = None
 
     # ------------------------------------------------------------------
@@ -121,25 +113,18 @@ class SoCConnectionService:
         self._replace_soc(None, None)
 
     def _replace_soc(self, soc: SocHandle | None, soccfg: SocCfgHandle | None) -> None:
-        self._gate.ensure_can_start(OperationKind.SOC_CONNECT, resource_id=None)
-        origin = self._bus.current_origin
-        token = self._handles.create(cancel_hook=None, origin=origin)
-        self._gate.register(
-            token,
-            OperationKind.SOC_CONNECT,
+        spec = OperationSpec(
+            exclusion=ExclusionRequest(
+                kind=OperationKind.SOC_CONNECT,
+                owner_id="soc",
+                note="replace SoC",
+            ),
             owner_id="soc",
-            origin_kind=origin.kind,
-            note="replace SoC",
+            wants_progress=False,
+            cancel_hook=None,
         )
-        with self._bus.origin(self._handles.event_origin(token)):
-            try:
-                self._apply_connection(soc, soccfg, None)
-                self._handles.settle(token, OperationOutcome("finished"))
-            except Exception as exc:
-                self._handles.settle(token, OperationOutcome("failed", str(exc)))
-                raise
-            finally:
-                self._gate.release(token)
+        with self._runner.inline(spec):
+            self._apply_connection(soc, soccfg, None)
 
     def current_request(self) -> ConnectRemoteRequest | None:
         """Read the last successful remote endpoint on-owner, without network I/O.
@@ -158,11 +143,6 @@ class SoCConnectionService:
                 "port": self._connected_request.port,
             }
         return {"address": None, "port": None}
-
-    def is_connect_active(self) -> bool:
-        # _active_token is POST-BEGIN set and cleared in on_terminal (§B.4 option A,
-        # mirrors run.py _active_token pattern).
-        return self._active_token is not None
 
     # ------------------------------------------------------------------
     # Connect (async-shaped API, OperationRunner client)
@@ -204,35 +184,26 @@ class SoCConnectionService:
         if type(req) is not ConnectRemoteRequest:
             raise TypeError(f"Unsupported connect request: {type(req).__name__}")
 
-        # Hold the SOC_CONNECT lease for the whole synchronous connect so it cannot
-        # race the GUI's connect button (or an async start_connect). A connect has
-        # no cancellation point, so the token is a lease handle only (cancel_hook
-        # None); it is settled + released in the finally regardless of outcome.
-        self._gate.ensure_can_start(OperationKind.SOC_CONNECT, resource_id=None)
-        origin = self._bus.current_origin
-        token = self._handles.create(cancel_hook=None, origin=origin)
-        self._gate.register(
-            token,
-            OperationKind.SOC_CONNECT,
+        spec = OperationSpec(
+            exclusion=ExclusionRequest(
+                kind=OperationKind.SOC_CONNECT,
+                owner_id="soc",
+                note="connect SoC (remote)",
+            ),
             owner_id="soc",
-            origin_kind=origin.kind,
-            note="connect SoC (remote)",
+            wants_progress=False,
+            cancel_hook=None,
         )
-        self._active_token = token
-        with self._bus.origin(self._handles.event_origin(token)):
+        with self._runner.inline(spec) as lease:
             try:
                 soc, soccfg = self._run_connect_work(req)
                 self._apply_connection(soc, soccfg, req)
-                self._handles.settle(token, OperationOutcome("finished"))
-                return soc, soccfg
             except Exception as exc:
-                self._handles.settle(
-                    token, OperationOutcome("failed", _format_error(exc))
-                )
+                # Keep connection error classification as domain policy; the
+                # runner still owns settlement and release failure isolation.
+                lease.settle(OperationOutcome("failed", _format_error(exc)))
                 raise
-            finally:
-                self._active_token = None
-                self._gate.release(token)
+            return soc, soccfg
 
     def start_connect(self, req: ConnectRequest) -> int:
         """Start a SoC connect; outcome arrives as ``ConnectionFinishedPayload``.
@@ -252,7 +223,6 @@ class SoCConnectionService:
         def on_terminal(bg: BgResult, settle: SettleFn) -> None:
             # Runs on main thread (bg marshal). _apply_connection writes State and
             # calls version.bump("soc") — main-thread invariant preserved (§B.2).
-            self._active_token = None
             if bg.ok:
                 soc, soccfg = bg.result
                 self._apply_connection(soc, soccfg, req)
@@ -286,11 +256,7 @@ class SoCConnectionService:
             on_terminal=on_terminal,
         )
 
-        token = self._runner.begin(spec)
-        # POST-BEGIN: set bookkeeping only after begin() succeeds (never written
-        # on conflict, mirrors run.py _active_token pattern).
-        self._active_token = token
-        return token
+        return self._runner.begin(spec)
 
     def _apply_connection(
         self,

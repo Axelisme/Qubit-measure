@@ -128,7 +128,7 @@ def _make_svc(
     fake_bg = bg or _FakeBg()
     progress = ProgressService(DirectProgressTransport())
     runner = OperationRunner(real_gate, handles, progress, fake_bg, bus)
-    svc = SoCConnectionService(state, bus, real_gate, handles, runner)
+    svc = SoCConnectionService(state, bus, runner)
     return svc, fake_bg, handles
 
 
@@ -147,7 +147,7 @@ def test_start_connect_mock_emits_finished_and_updates_context(qapp, real_bg):
     handles = OperationHandles()
     progress = ProgressService(DirectProgressTransport())
     runner = OperationRunner(gate, handles, progress, real_bg, bus)
-    svc = SoCConnectionService(state, bus, gate, handles, runner)
+    svc = SoCConnectionService(state, bus, runner)
 
     token = svc.start_connect(ConnectRemoteRequest(ip="192.0.2.1", port=8888))
     # The finite offline proxy returns, then the owner publishes this handle's outcome.
@@ -165,7 +165,7 @@ def test_connect_bumps_soc_not_context_version(qapp, real_bg):
     handles = OperationHandles()
     progress = ProgressService(DirectProgressTransport())
     runner = OperationRunner(gate, handles, progress, real_bg, bus)
-    svc = SoCConnectionService(state, bus, gate, handles, runner)
+    svc = SoCConnectionService(state, bus, runner)
 
     ctx_before = state.version.get("context")
     soc_before = state.version.get("soc")
@@ -205,7 +205,6 @@ def test_connect_sync_mock_sets_soc_and_emits_payload(qapp):
     assert payloads[0].is_mock is True
     # Lease released, no lingering active token.
     assert not gate.has_active(OperationKind.SOC_CONNECT)
-    assert not svc.is_connect_active()
 
 
 def test_successful_endpoint_changes_and_failed_reconnect_preserves_it(
@@ -417,7 +416,6 @@ def test_connect_sync_remote_failure_releases_lease_and_raises(qapp, monkeypatch
         svc.connect_sync(ConnectRemoteRequest(ip="127.0.0.1", port=7000))
 
     assert not gate.has_active(OperationKind.SOC_CONNECT)
-    assert not svc.is_connect_active()
     assert not svc.has_soc()
 
 
@@ -490,7 +488,7 @@ def test_start_connect_remote_failure_emits_failed(qapp, monkeypatch, real_bg):
     handles = OperationHandles()
     progress = ProgressService(DirectProgressTransport())
     runner = OperationRunner(gate, handles, progress, real_bg, bus)
-    svc = SoCConnectionService(state, bus, gate, handles, runner)
+    svc = SoCConnectionService(state, bus, runner)
 
     import zcu_tools.qick_remote as remote
 
@@ -508,7 +506,6 @@ def test_start_connect_remote_failure_emits_failed(qapp, monkeypatch, real_bg):
 
     assert errors
     assert "nope" in errors[0]
-    assert not svc.is_connect_active()
 
 
 # ---------------------------------------------------------------------------
@@ -534,7 +531,7 @@ def test_soc_changed_subscriber_failure_releases_connection_lease(qapp):
     progress = ProgressService(DirectProgressTransport())
     fake_bg = _FakeBg()
     runner = OperationRunner(gate, handles, progress, fake_bg, bus)
-    svc = SoCConnectionService(state, bus, gate, handles, runner)
+    svc = SoCConnectionService(state, bus, runner)
 
     # start_connect registers the exclusion lease and submits to fake_bg
     svc.start_connect(ConnectRemoteRequest(ip="192.0.2.1", port=8888))
@@ -572,7 +569,6 @@ def test_cancel_token_does_not_interrupt_connect(qapp):
 
     # Lease is released — connect finished normally despite the cancel call
     assert not gate.has_active(OperationKind.SOC_CONNECT)
-    assert not svc.is_connect_active()
 
 
 def test_cancel_all_does_not_interrupt_connect(qapp):
@@ -589,4 +585,3 @@ def test_cancel_all_does_not_interrupt_connect(qapp):
     fake_bg.deliver_result()
 
     assert not gate.has_active(OperationKind.SOC_CONNECT)
-    assert not svc.is_connect_active()
