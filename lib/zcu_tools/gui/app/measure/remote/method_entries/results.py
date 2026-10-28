@@ -11,7 +11,10 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         "results:h_results_list",
         MethodSpec(
             30.0,
-            "Read all saved Database runs under the current project root as {runs: [...]}. "
+            "Read all saved Database runs under the current project root as "
+            "{runs: [...], issues: [{entry, path, reason}, ...]}. "
+            "Top-level issues identify unenumerable Database items; entry is null "
+            "for the Database root. Escaping items are not followed. "
             "No opened entry or selected point required. Each row includes opaque key, "
             "entry, nullable run_id/experiment/point/at, captured roles, registered, "
             "exact run_path/data_path/figure_paths/analysis_paths, figures (filename "

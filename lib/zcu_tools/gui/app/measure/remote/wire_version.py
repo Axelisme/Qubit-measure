@@ -20,8 +20,11 @@ from __future__ import annotations
 # Workflow records expose executor operations without program acquisition observations.
 # Predictor queries require device_values and explicit v2 flux; calibration returns Phi0 correction.
 # Tab admission shares domain-first reasons before wire source checks.
-WIRE_VERSION = 128
+# Results list exposes named item issues for unenumerable Database paths.
+# point.list includes parameter-only availability and per-point error diagnostics.
+# Context snapshots no longer include library provenance.
+WIRE_VERSION = 130
 
 # Bump for meaningful GUI code changes that need a reload signal.
 # Wire-contract changes bump both versions.
-GUI_VERSION = 161
+GUI_VERSION = 163

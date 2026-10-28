@@ -24,7 +24,13 @@ from zcu_tools.resources.record_table import JsonlRecordTable
 
 from . import _point_origin
 from ._path_segments import validate_path_segment
-from .aliases import EntryAliases, load_entry_aliases_with_revision, save_entry_aliases
+from .aliases import (
+    AliasReadResult,
+    EntryAliases,
+    load_entry_aliases_with_revision,
+    read_entry_aliases,
+    save_entry_aliases,
+)
 from .errors import DestinationExistsError, MissingPointError
 from .ledger import RecordsLedger
 from .ledger_models import (
@@ -225,8 +231,8 @@ class ResultEntry:
 
         point=None selects <entry>/aliases.yaml. Otherwise point is a safe
         single-segment label selecting <entry>/points/<point>/aliases.yaml;
-        invalid labels raise ValueError, and missing point.yaml or module_cfg.yaml
-        raises FileNotFoundError. Neither parameter document is parsed or changed.
+        invalid labels raise ValueError. Only aliases.yaml is read; neither
+        point.yaml nor module_cfg.yaml needs to exist or is parsed or changed.
         A missing alias file returns an empty EntryAliases, without copying or
         falling back to setup. Preserve order, empty bindings and raw $ links.
         Accept zcu.aliases 1.x; header/schema/YAML and I/O errors propagate.
@@ -247,6 +253,15 @@ class ResultEntry:
         aliases, revision = load_entry_aliases_with_revision(self._aliases_path(point))
         return (EntryAliases(aliases={}) if aliases is None else aliases), revision
 
+    def read_aliases(self, *, point: str | None = None) -> AliasReadResult:
+        """Observe aliases once with their raw revision and deferred content error.
+
+        Selection follows load_aliases. The result retains invalid bytes' hash
+        and original error, not a valid empty fallback. Missing files are empty
+        with revision=None; other filesystem errors propagate. No writes occur.
+        """
+        return read_entry_aliases(self._aliases_path(point))
+
     def save_aliases(
         self, aliases: EntryAliases, *, point: str | None = None
     ) -> DocumentRevision:
@@ -255,24 +270,26 @@ class ResultEntry:
         aliases is an EntryAliases containing ordered scalar/list bindings, not
         resolved names. point=None selects setup; a safe single-segment point
         label selects only that point's aliases.yaml. Invalid labels raise
-        ValueError; missing point.yaml or module_cfg.yaml raises FileNotFoundError.
-        Neither parameter document is parsed or changed. Write zcu.aliases 1.0
-        after strict string validation, using sibling-temp replacement. Schema,
+        ValueError; missing point.yaml raises FileNotFoundError. module_cfg.yaml
+        need not exist. Neither parameter document is parsed or changed.
+        Write zcu.aliases 1.0 after strict string validation, using sibling-temp
+        replacement. Schema,
         YAML and I/O errors propagate; failed replacement retains the old file.
         Other alias tables, parameters, library, ledger and preferences do not
         change. Return the exact written bytes' revision. No multiwriter merge
         or crash guarantee is offered.
         """
-        return save_entry_aliases(self._aliases_path(point), aliases)
+        destination = self._aliases_path(point)
+        if point is not None:
+            source = destination.parent / "point.yaml"
+            if not source.is_file():
+                raise FileNotFoundError(source)
+        return save_entry_aliases(destination, aliases)
 
     def _aliases_path(self, point: str | None) -> Path:
         if point is None:
             return self._result_path / "aliases.yaml"
         directory = _entry_path(self._result_path / "points", point)
-        for name in ("point.yaml", "module_cfg.yaml"):
-            source = directory / name
-            if not source.is_file():
-                raise FileNotFoundError(source)
         return directory / "aliases.yaml"
 
     @property
@@ -335,19 +352,55 @@ class ResultEntry:
         return bind_record_table(self._result_path, component)
 
     def list_points(self) -> list[str]:
-        """Return sorted labels of directories containing both point files.
+        """Return sorted labels of directories containing point.yaml.
 
-        Inspect points/ on disk for point.yaml and module_cfg.yaml; incomplete
-        directories are omitted. File contents are not loaded or validated here.
-        Missing or unreadable points/ raises the underlying filesystem error.
+        Library and aliases files are not required or inspected. Parameter
+        contents are not loaded or validated here. Missing points/ returns [];
+        other filesystem errors propagate.
         """
+        if not (self._result_path / "points").exists():
+            return []
         return sorted(
             path.name
             for path in (self._result_path / "points").iterdir()
-            if path.is_dir()
-            and (path / "point.yaml").is_file()
-            and (path / "module_cfg.yaml").is_file()
+            if path.is_dir() and (path / "point.yaml").is_file()
         )
+
+    def point_description(self, label: str) -> str:
+        """Read only general.description for a safe single-segment point label.
+
+        Missing/null descriptions return empty text. Other fields, component
+        kinds and versions are not interpreted. Invalid YAML, non-mapping
+        general, non-string descriptions and I/O failures propagate with the
+        document path. No library or aliases are read. No locks are acquired
+        and no files are changed or created.
+        """
+        source = _entry_path(self._result_path / "points", label) / "point.yaml"
+        try:
+            with source.open(encoding="utf-8") as stream:
+                document = TypeAdapter(dict[object, object]).validate_python(
+                    YAML(typ="safe").load(stream)
+                )
+            general = TypeAdapter(dict[object, object]).validate_python(
+                document.get("general", {})
+            )
+            return (
+                TypeAdapter(str | None).validate_python(general.get("description"))
+                or ""
+            )
+        except (ValueError, YAMLError) as error:
+            raise ValueError(f"{source}: {error}") from error
+
+    def validate_point_parameters(self, label: str) -> None:
+        """Probe one point parameter document without opening library or aliases.
+
+        label is a safe single path segment. Apply the same strict parameter
+        header, schema policy, component models and view binding as use_point.
+        Validation and I/O failures propagate; callers may isolate them per point.
+        No view is installed, and no documents are changed or created.
+        """
+        source = _entry_path(self._result_path / "points", label) / "point.yaml"
+        self._point_store(source)
 
     def new_point(
         self,
@@ -667,21 +720,18 @@ class ResultEntry:
     def open(
         cls, name: str, *, result_root: str | Path, database_root: str | Path
     ) -> ResultEntry:
-        """Open a complete Result entry and bind database_root/name for Save.
+        """Open a Result entry from setup and bind database_root/name for Save.
 
-        name must be a safe single path segment. The Result entry, points and
-        records directories must exist; setup must validate its format and UUID.
+        name must be a safe single path segment. The Result entry directory and
+        setup must exist; setup must validate its format and UUID.
+        Missing points/ and records/ are empty and are not created.
         Missing paths propagate filesystem errors. Schema ValidationError becomes
         ValueError with the full document path and original diagnostic. The original
         error remains its cause. Other schema errors propagate. Database is not inspected or created.
         """
         result_path = _entry_path(result_root, name)
         database_path = Path(database_root) / name
-        for directory in (
-            result_path,
-            result_path / "points",
-            result_path / "records",
-        ):
+        for directory in (result_path,):
             if not directory.exists():
                 raise FileNotFoundError(
                     errno.ENOENT, os.strerror(errno.ENOENT), str(directory)

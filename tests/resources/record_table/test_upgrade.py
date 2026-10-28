@@ -7,8 +7,15 @@ import pytest
 from zcu_tools.resources.record_table.upgrade import upgrade_record_files
 
 
-def test_mixed_history_dry_run_apply_backup_and_idempotence(tmp_path: Path) -> None:
-    path = tmp_path / "Q1.jsonl"
+@pytest.fixture
+def data_dir(tmp_path: Path) -> Path:
+    path = tmp_path / "project" / "result"
+    path.mkdir(parents=True)
+    return path
+
+
+def test_mixed_history_dry_run_apply_backup_and_idempotence(data_dir: Path) -> None:
+    path = data_dir / "Q1.jsonl"
     original = (
         b'{"run_id":"same","dev_value":0.25,"dev_unit":" mV ","flux_int":0.1,"flux_period":0.8,"extra":{"a":[null,true]}}\r\n'
         b'{ "run_id": "other", "devices": {"bias": {"value": 3, "value_unit": "V", "tag": "keep"}}, "component": "Q2" }\n'
@@ -26,12 +33,17 @@ def test_mixed_history_dry_run_apply_backup_and_idempotence(tmp_path: Path) -> N
         (4, "new"),
     ]
     assert path.read_bytes() == original
-    assert list(tmp_path.iterdir()) == [path]
+    assert list(data_dir.iterdir()) == [path]
     (applied,) = upgrade_record_files((path,), device_name="bias", apply=True)
     assert applied.status == "applied"
     assert not list(path.parent.glob("*.lock"))
     assert applied.backup_path is not None
     assert applied.backup_path.read_bytes() == original
+    assert (
+        applied.backup_path.parent
+        == data_dir.parent.with_name("project-backup") / "result"
+    )
+    assert list(data_dir.iterdir()) == [path]
     assert [json.loads(line) for line in path.read_bytes().splitlines()] == [
         {
             "run_id": "same",
@@ -57,12 +69,12 @@ def test_mixed_history_dry_run_apply_backup_and_idempotence(tmp_path: Path) -> N
         == original.splitlines(keepends=True)[1]
     )
     after = path.read_bytes()
-    files = set(tmp_path.iterdir())
+    files = set(data_dir.iterdir())
     (rerun,) = upgrade_record_files((path,), device_name="bias", apply=True)
     assert rerun.status == "skipped"
     assert rerun.backup_path is None
     assert path.read_bytes() == after
-    assert set(tmp_path.iterdir()) == files
+    assert set(data_dir.iterdir()) == files
 
 
 @pytest.mark.parametrize(
@@ -109,9 +121,9 @@ def test_mixed_history_dry_run_apply_backup_and_idempotence(tmp_path: Path) -> N
     ],
 )
 def test_partial_or_corrupt_line_rejects_whole_file_but_continues_siblings(
-    tmp_path: Path, bad_line: bytes, classification: str, diagnostic: str
+    data_dir: Path, bad_line: bytes, classification: str, diagnostic: str
 ) -> None:
-    bad, good = tmp_path / "bad.jsonl", tmp_path / "good.jsonl"
+    bad, good = data_dir / "bad.jsonl", data_dir / "good.jsonl"
     old = b'{"run_id":"ok","dev_value":2,"dev_unit":"V"}\n'
     original = old + bad_line
     bad.write_bytes(original)
@@ -127,7 +139,7 @@ def test_partial_or_corrupt_line_rejects_whole_file_but_continues_siblings(
     ]
     assert diagnostic in (rejected.rows[1].error or "")
     assert bad.read_bytes() == original
-    assert list(tmp_path.glob("bad.jsonl.*.bak")) == []
+    assert list(data_dir.glob("bad.jsonl.*.bak")) == []
     assert applied.status == "applied"
     assert json.loads(good.read_bytes()) == {
         "run_id": "ok",
@@ -136,9 +148,9 @@ def test_partial_or_corrupt_line_rejects_whole_file_but_continues_siblings(
 
 
 def test_metadata_merge_preserves_other_devices_and_all_diagnostics(
-    tmp_path: Path,
+    data_dir: Path,
 ) -> None:
-    path = tmp_path / "records.jsonl"
+    path = data_dir / "records.jsonl"
     original = (
         '{"run_id":"a","dev_value":-3,"dev_unit":" arb. ","devices":'
         '{" 偏壓 ":{"calibration":{"who":"operator"}},"other":{"value":NaN},"unused":null}}\n'
@@ -175,25 +187,27 @@ def test_metadata_merge_preserves_other_devices_and_all_diagnostics(
 
 
 @pytest.mark.parametrize("name", ["", " ", "\t\n", "bias.dot", "."])
-def test_invalid_operator_name_fails_before_io(tmp_path: Path, name: str) -> None:
+def test_invalid_operator_name_fails_before_io(data_dir: Path, name: str) -> None:
     with pytest.raises(ValueError, match="name"):
         upgrade_record_files(
-            (tmp_path / "missing.jsonl",), device_name=name, apply=True
+            (data_dir / "missing.jsonl",), device_name=name, apply=True
         )
-    assert list(tmp_path.iterdir()) == []
+    assert list(data_dir.iterdir()) == []
 
 
 @pytest.mark.parametrize("fail_replace", [False, True])
 def test_backup_precedes_atomic_replace_and_survives_publication_failure(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fail_replace: bool
+    data_dir: Path, monkeypatch: pytest.MonkeyPatch, fail_replace: bool
 ) -> None:
-    path = tmp_path / "record.jsonl"
+    path = data_dir / "record.jsonl"
     original = b'{"run_id":"a","dev_value":1,"dev_unit":"V"}\n'
     path.write_bytes(original)
     replace = Path.replace
 
     def observed_replace(temporary: Path, destination: Path) -> Path:
-        (backup,) = tmp_path.glob("record.jsonl.*.bak")
+        (backup,) = (data_dir.parent.with_name("project-backup") / "result").glob(
+            "record.jsonl.*.bak"
+        )
         assert backup.read_bytes() == original
         assert destination.read_bytes() == original
         if fail_replace:
@@ -208,13 +222,13 @@ def test_backup_precedes_atomic_replace_and_survives_publication_failure(
     if fail_replace:
         assert result.error == "publication unavailable"
         assert path.read_bytes() == original
-    assert set(tmp_path.iterdir()) == {path, result.backup_path}
+    assert set(data_dir.iterdir()) == {path}
 
 
 def test_unresolvable_source_rejects_without_stopping_later_files(
-    tmp_path: Path,
+    data_dir: Path,
 ) -> None:
-    loop, good = tmp_path / "loop", tmp_path / "good.jsonl"
+    loop, good = data_dir / "loop", data_dir / "good.jsonl"
     loop.symlink_to(loop.name)
     good.write_bytes(b'{"run_id":"a","dev_value":1,"dev_unit":"V"}\n')
     rejected, applied = upgrade_record_files(

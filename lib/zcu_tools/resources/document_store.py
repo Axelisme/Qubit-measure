@@ -59,8 +59,10 @@ _SUPPORTED_VERSION = FormatVersion(1, 0)
 class DocumentRevision:
     """An installed file version, without reading the current disk contents.
 
-    path is the absolute owner file path. revision is its validated raw bytes'
-    SHA-256 hex digest; None denotes an absent optional aliases file only.
+    path is the absolute owner file path. revision is its raw bytes' SHA-256
+    hex digest. Store documents are validated; aliases may retain an observed
+    content error, so their hash does not imply validity. None denotes an absent
+    optional aliases file only.
     """
 
     path: Path

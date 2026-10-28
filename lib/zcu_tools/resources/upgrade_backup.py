@@ -1,0 +1,71 @@
+"""External, collision-resistant backup destinations for explicit file upgrades."""
+
+from pathlib import Path
+from uuid import uuid4
+
+
+def upgrade_backup_path(source: Path, *, backup_root: Path | None = None) -> Path:
+    """Resolve a unique .bak destination without writing files or directories.
+
+    Find the nearest result/Database ancestor of the resolved source and mirror
+    its project-relative path under <project>-backup. backup_root overrides that
+    root; without a project ancestor it is required and receives the basename.
+    Relative paths use cwd. A resolved root containing direct result/Database
+    subdirectories must have a name ending in -backup. Such roots can resume
+    existing mirrors and share migration backups. Other names can use an empty
+    root, but its first mirror makes later calls fail this check; use a -backup
+    name for continuation. Identification uses names and directories, not file
+    contents or marker files. Resolve symlinks before rejecting destinations
+    inside any result/Database tree, or inside a standalone source parent. Mirror
+    symlinks cannot escape the root or enter another result/Database tree. Raise
+    ValueError for an unidentified project without an override or unsafe output;
+    filesystem resolution errors propagate. Call before acquiring write locks.
+    The caller creates parents and opens the destination exclusively.
+    """
+    source = source.resolve()
+    data_root = next(
+        (parent for parent in source.parents if parent.name in {"result", "Database"}),
+        None,
+    )
+    if data_root is None:
+        if backup_root is None:
+            raise ValueError(
+                f"{source}: cannot locate result/Database; specify --backup-root"
+            )
+        relative = Path(source.name)
+        root = backup_root.resolve()
+    else:
+        project = data_root.parent
+        relative = source.relative_to(project)
+        root = (backup_root or project.with_name(f"{project.name}-backup")).resolve()
+    if not root.name.endswith("-backup") and any(
+        (root / name).is_dir() for name in ("result", "Database")
+    ):
+        raise ValueError(
+            f"{root}: backup root contains result/Database directories; "
+            "choose a *-backup directory or an empty directory"
+        )
+    mirror = (root / relative).with_name(f"{source.name}.{uuid4().hex}.bak")
+    destination = mirror.resolve()
+    if any(parent.name in {"result", "Database"} for parent in (root, *root.parents)):
+        raise ValueError(f"{root}: backup cannot be inside a result/Database tree")
+    if data_root is not None and destination.is_relative_to(data_root):
+        raise ValueError(
+            f"{destination}: backup mirror cannot be inside the source result/Database tree"
+        )
+    if not destination.is_relative_to(root):
+        raise ValueError(f"{destination}: backup mirror symlink escapes backup root")
+    # Ordinary mirrored result/Database directories are backup content. A symlink
+    # must not introduce a different data-tree ancestor, even within backup root.
+    if any(
+        parent.name in {"result", "Database"} and parent not in mirror.parents
+        for parent in destination.parents
+    ):
+        raise ValueError(
+            f"{destination}: backup mirror symlink enters a result/Database tree"
+        )
+    if data_root is None and destination.is_relative_to(source.parent):
+        raise ValueError(
+            f"{destination}: backup cannot be inside standalone source parent"
+        )
+    return destination

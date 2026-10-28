@@ -52,6 +52,20 @@ def test_bare_rf_seed_priority(analysis_target, bare_rf, r_f, resonator, expecte
     assert inputs.bare_rf_seed == expected
 
 
+@pytest.mark.parametrize(
+    "content", ["not json", '{"format":"zcu.dispersive","version":9}']
+)
+def test_bad_dispersive_seed_does_not_block_predictor(analysis_target, caplog, content):
+    path = analysis_target.resource.dispersive_path / "q1.json"
+    path.write_text(content, encoding="utf-8")
+    inputs = ProjectService(DispersiveState(analysis_target)).load_fit_inputs(
+        "fit.json"
+    )
+    assert inputs.params == (4.0, 1.0, 0.5)
+    assert inputs.bare_rf_seed == 5.75
+    assert str(path) in caplog.text
+
+
 def test_predictor_reload_preserves_accepted_tune(analysis_target):
     state = DispersiveState(analysis_target)
     state.set_disp_result(g=0.06, bare_rf=5.91, res_dim=4)

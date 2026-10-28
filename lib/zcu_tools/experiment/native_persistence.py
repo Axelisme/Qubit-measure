@@ -254,6 +254,26 @@ def _validate_metadata_doc(doc: JsonObject) -> RunMetadata:
         raise ValueError(f"/docs/metadata: {error}") from error
 
 
+def device_snapshot_from_container(
+    container: Container,
+) -> dict[str, JsonObject] | None:
+    """Project recorded device settings without requiring unrelated run evidence.
+
+    Missing metadata/device_snapshot or explicit null means unrecorded (None).
+    An empty mapping means no devices were recorded. Invalid snapshot structure
+    raises ValueError naming /docs/metadata/device_snapshot. No cfg, provenance,
+    arrays or identity fields are validated; no I/O or mutation occurs.
+    Device owners validate the settings they actually consume.
+    """
+    document = container.docs.get("metadata", {})
+    try:
+        return TypeAdapter(dict[str, JsonObject] | None).validate_python(
+            document.get("device_snapshot"), strict=True
+        )
+    except ValueError as error:
+        raise ValueError(f"/docs/metadata/device_snapshot: {error}") from error
+
+
 def metadata_from_container(container: Container) -> RunMetadata:
     """Validate and return typed historical evidence from container.docs/metadata.
 

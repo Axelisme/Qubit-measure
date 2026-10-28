@@ -267,6 +267,23 @@ class ResultsBrowser(QWidget):
         self._visible_count.setObjectName("results.visible_count")
         make_label_selectable(self._visible_count)
         layout.addWidget(self._visible_count)
+        issues = QLabel(
+            "Cannot index: "
+            + ", ".join(
+                sorted({issue.entry or "Database" for issue in self._index.issues})
+            )
+        )
+        issues.setObjectName("results.issues")
+        issues.setWordWrap(True)
+        issues.setToolTip(
+            "\n".join(
+                f"{issue.entry or 'Database'}: {issue.path}: {issue.reason}"
+                for issue in self._index.issues
+            )
+        )
+        make_label_selectable(issues)
+        issues.setVisible(bool(self._index.issues))
+        layout.addWidget(issues)
         return layout
 
     def _date_filter(self, name: str, initial: str, layout: QHBoxLayout) -> QDateEdit:
