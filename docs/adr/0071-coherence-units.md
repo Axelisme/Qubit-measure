@@ -21,9 +21,31 @@ Forward helpers、pointwise Q 與 Purcell 實作遵循本篇契約。T1 由 SI �
 
 Finite-temperature T1 必須交代是否合併 upward 與 downward rates。兩能級人口向熱平衡回復的 rate 是 Γ↓ + Γ↑，不是只取 downward rate。Fast 與 slow helper 比較時要使用相同的 total 設定。
 
-Spectral density 需與其 noise operator、Fourier convention 及 frequency units 配對。若以 dimensionless operator 寫 Γ = |〈i|O|j〉|² S(ω)，其中 S 已包含 coupling prefactor，S 的單位須為 ns⁻¹。不能把 spectral prefactor 缺失的 2π 留到最外層 T1 補回。Forward prediction、pointwise extraction 與 combined fit 使用同一物理定義。
+Spectral density 需與其 noise operator、Fourier convention 及 frequency units 配對。若以 dimensionless operator 寫 Γ = |〈i|O|j〉|² S(ω)，其中 S 已包含 coupling prefactor，S 的單位須為 ns⁻¹。不能把 spectral prefactor 缺失的 2π 留到最外層 T1 補回。Forward prediction、pointwise extraction 與 combined fit 共用上述頻率、時間與損耗參數定義。這不要求各 caller 選用同一種 population-decay 模型。
 
 本篇不新增 package import 或依賴方向，因此不新增 import-linter contract。
+
+## Pair lifetime 與 manifold model T1
+
+Pair lifetime 是指定兩能階的 equilibrium relaxation time，`T1_pair = 1/(Γ10+Γ01)`。
+它包含該 pair 的 upward 與 downward rates，不包含經其他能階返回的 cascade。
+
+`t1_curve` 的 fit 使用 manifold model T1，不提供 pair forward 選項。
+Manifold 先取 Gibbs 布居，再交換 0、1 能階，代表理想 π pulse；observable 是 `1-p0(t)`。
+排除平衡模後，t1_curve 選 signed amplitude 最大的衰減模，以其 `1/λ` 作為 model T1。
+次模振幅佔比只作診斷，不把量測 delay 窗內的曲線另擬合成單指數。
+Simulate 回傳所有模、分析端選模的責任分界見 [[0072]]。
+
+兩種 forward 使用同一套 spectral density、GHz/ns 單位與 loss parameters。
+這不表示 finite-temperature pair lifetime 等於 manifold model T1；低溫也不保證全域等價。
+Two-level manifold 可退化為 pair，增加能階後則須檢查熱激發與 cascade 的影響。
+Pointwise Q probes 仍以 pair 反解，當 Γ12/Γ10 不小時只供粗估與初值參考。
+T2 與 Purcell 保持既有模型；Purcell 與其他 extra relaxation 只在主模 lifetime 上加 rate，
+不改 intrinsic secondary fraction，也不因此加入 manifold rate matrix。
+
+2026-10-28，使用者提出「能不能取振幅最大的2個特徵t1就好？」並以「可以，開」同意實作。
+最後採用主模作為 fit forward、次模佔比作為診斷，不採用 delay-window 擬合。
+公開行為與低溫反例見 [t1_curve README](../../lib/zcu_tools/notebook/analysis/t1_curve/README.md#manifold-forward-與非單指數診斷)。
 
 ## 為何不保留外乘 2π
 
