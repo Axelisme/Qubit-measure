@@ -117,6 +117,7 @@ drive_lines:
 
 # Optional fast-flux routes, separate from linearized drive_lines operator: flux.
 # Omitted or {} leaves pulsed flux disabled. Each loop is optional/null.
+# Flux gen_ch must differ from other flux loops, drive_lines and pulse/mux readout.
 # Illustrative calibration only; entry fast-flux wiring is not prefilled.
 # flux_lines:
 #   f1:

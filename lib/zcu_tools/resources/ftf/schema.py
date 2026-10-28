@@ -251,7 +251,7 @@ class ReadoutSource(Values):
 class MuxReadoutSource(ReadoutSource):
     """Independent mux source and its bound receiver calibrations.
 
-    gen_ch: nonnegative integer generator, distinct from pulse and drive lines.
+    gen_ch: nonnegative integer generator, distinct from pulse, drive and flux lines.
     input_per_gain: signed finite incident sqrt(photons/ns) per program gain.
     adc: 1..8 receivers with unique nonnegative ro_ch, disjoint from pulse ADC.
     Indices have no fixed upper bound. Program tones select receiver subsets and
@@ -484,6 +484,8 @@ class FTFSettings(Values):
     resonators with a pulse source/receiver and an optional mux source/receivers.
     flux_lines optionally binds f1/coupler/f2 fast-flux routes, using the single
     FluxLine fields; omitted/empty disables pulsed flux without changing DC.
+    Flux generators must differ from all drive and pulse/mux readout generators;
+    collisions raise ValueError naming both bindings and the channel index.
     numerics supplies truncations/solver/seed. design optionally maps entry qubit
     names to complete independent predictor guesses; omitted/empty creates none.
     Channel counts derive from maximum configured indices plus one. Unknown
@@ -507,6 +509,28 @@ class FTFSettings(Values):
     flux_lines: FTFFluxLines = Field(default_factory=FTFFluxLines)
     readout: Readout
     numerics: Numerics
+
+    @model_validator(mode="after")
+    def separate_flux_generators(self) -> Self:
+        """Reject flux-to-drive/readout reuse, naming both bindings and channel."""
+        channels = {
+            line.gen_ch: f"drive_lines.{name}.gen_ch"
+            for name, line in self.drive_lines.items()
+        }
+        channels[self.readout.drive.gen_ch] = "readout.drive.gen_ch"
+        if self.readout.mux is not None:
+            channels[self.readout.mux.gen_ch] = "readout.mux.gen_ch"
+        for loop, line in (
+            ("f1", self.flux_lines.f1),
+            ("coupler", self.flux_lines.coupler),
+            ("f2", self.flux_lines.f2),
+        ):
+            if line is not None and line.gen_ch in channels:
+                raise ValueError(
+                    f"flux_lines.{loop}.gen_ch: channel {line.gen_ch} is also bound "
+                    f"to {channels[line.gen_ch]}"
+                )
+        return self
 
     @model_validator(mode="after")
     def drift_losses(self) -> Self:

@@ -4,7 +4,7 @@ import pytest
 from zcu_tools.resources.ftf import parse_ftf
 from zcu_tools.resources.single_fluxonium.schema import FluxLine
 
-from tests.resources._ftf_data import ftf_document
+from tests.resources._ftf_data import dual_readout_document, ftf_document
 
 
 @pytest.mark.parametrize(
@@ -57,6 +57,60 @@ def test_flux_lines_reject_shared_generator_with_both_loops_and_channel(
     assert f"flux_lines.{second}" in message
     assert "gen_ch" in message
     assert "7" in message
+
+
+@pytest.mark.parametrize("loop", ["f1", "coupler", "f2"])
+@pytest.mark.parametrize(
+    "binding,channel,operator",
+    [
+        ("drive_lines.mw", 2, "charge"),
+        ("drive_lines.mw", 2, "flux"),
+        ("readout.drive", 0, "charge"),
+        ("readout.mux", 1, "charge"),
+    ],
+)
+def test_flux_lines_reject_drive_and_readout_generator_reuse(
+    loop: str, binding: str, channel: int, operator: str
+) -> None:
+    document = dual_readout_document()
+    if operator == "flux":
+        document["drive_lines"] = {
+            "mw": {
+                "gen_ch": 2,
+                "operator": "flux",
+                "flux_drive_phi0_per_gain": {
+                    "f1": {"real": 0.02, "imag": 0.0},
+                    "coupler": {"real": 0.0, "imag": 0.0},
+                    "f2": {"real": 0.0, "imag": 0.0},
+                },
+            }
+        }
+    document["flux_lines"] = {
+        loop: {"name": "park", "gen_ch": channel, "flux_phi0_per_gain": 0.02}
+    }
+    with pytest.raises(ValueError, match="gen_ch") as error:
+        parse_ftf(document)
+    message = str(error.value)
+    assert f"flux_lines.{loop}.gen_ch" in message
+    assert f"{binding}.gen_ch" in message
+    assert f"channel {channel}" in message
+
+
+def test_flux_lines_allow_free_generators_with_mux_and_repeated_names() -> None:
+    settings = parse_ftf(
+        dual_readout_document()
+        | {
+            "flux_lines": {
+                loop: {"name": "mw", "gen_ch": channel, "flux_phi0_per_gain": 0.02}
+                for loop, channel in (("f1", 4), ("coupler", 5), ("f2", 6))
+            }
+        }
+    )
+    assert settings.flux_lines.model_dump(exclude_none=True) == {
+        loop: FluxLine(name="mw", gen_ch=channel, flux_phi0_per_gain=0.02).model_dump()
+        for loop, channel in (("f1", 4), ("coupler", 5), ("f2", 6))
+    }
+    assert parse_ftf(settings.model_dump(mode="json")) == settings
 
 
 def test_flux_lines_allow_null_loops_and_default_instantaneous_response() -> None:

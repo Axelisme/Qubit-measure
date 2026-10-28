@@ -247,14 +247,17 @@ Flux operator 在每 round 的 live DC 工作點用解析導數求值，經固�
 `flux_lines` 是固定迴路 record，接受 `f1`、`coupler`、`f2`，不是任意線路名稱的 map。
 每個迴路最多一條線，省略或填 `null` 表示沒有該線。
 省略整段或填 `{}` 不宣告 pulsed flux，頂層 `flux_lines: null` 會報錯。
-兩迴路不可共用同一 `gen_ch`，錯誤會列出兩個迴路與 channel。
+Flux 線不可與另一 flux loop、任一 `drive_lines`、`readout.drive` 或可選的 `readout.mux` 共用 `gen_ch`。
+載入失敗時，錯誤會列出兩端綁定與 channel，例如 `flux_lines.f1.gen_ch: channel 2 is also bound to drive_lines.mw.gen_ch`。
+這項限制只檢查 generator 綁定，不要求 `FluxLine.name` 在整份文件中唯一。
+未宣告 flux line 時，既有 drive／readout 驗證規則不變。
 
 每條線沿用 single-fluxonium 的 `FluxLine`，欄位如下：
 
 | 欄位 | 意義與單位 | 必填／省略語意 |
 | --- | --- | --- |
 | `name` | 非空線路名稱 | 必填 |
-| `gen_ch` | 非負整數 generator index，無固定上限 | 必填，不可與另一 flux loop 重複 |
+| `gen_ch` | 非負整數 generator index，無固定上限 | 必填，不可與另一 flux loop、drive line、pulse 或 mux readout 重複 |
 | `flux_phi0_per_gain` | 有限 signed Phi0/gain | 必填，0 表示無磁通作用；不接受別名 `phi0_per_gain` |
 | `delay_ns` | 有限非負線路延遲，ns | 省略為 0 |
 | `tau_ns` | 有限非負 base response time，ns | 省略為 0，表示瞬時響應 |
@@ -321,7 +324,7 @@ CKP 兩個 preparation 分支的腔中心分裂由 χ/κ 決定。κ ≫ χ 時�
 
 | 欄位 | 用途 | 單位與合法範圍 | 必填／省略語意 |
 | --- | --- | --- | --- |
-| `gen_ch` | Pulse readout generator | 無單位，整數 ≥ 0，不可與 mux generator 或任一 drive line 重複 | 必填 |
+| `gen_ch` | Pulse readout generator | 無單位，整數 ≥ 0，不可與 mux generator、任一 drive line 或 flux line 重複 | 必填 |
 | `input_per_gain` | Program gain 到 incident amplitude 的轉換 | sqrt(photons/ns)/gain，有限 signed 數，可為 0 | 必填，沒有猜測值 |
 
 Carrier、envelope 與 phase 由 program 提供。`input_per_gain` 是物理入射場的刻度，不是 ADC gain。
@@ -332,7 +335,7 @@ Carrier、envelope 與 phase 由 program 提供。`input_per_gain` 是物理入�
 
 | 欄位 | 用途 | 單位與合法範圍 | 必填／省略語意 |
 | --- | --- | --- | --- |
-| `gen_ch` | Mux readout generator | 無單位，整數 ≥ 0，不可與 pulse generator 或任一 drive line 重複 | Mux 段內必填 |
+| `gen_ch` | Mux readout generator | 無單位，整數 ≥ 0，不可與 pulse generator、任一 drive line 或 flux line 重複 | Mux 段內必填 |
 | `input_per_gain` | 每個 program tone gain 到 incident amplitude 的轉換 | sqrt(photons/ns)/gain，有限 signed 數，可為 0 | Mux 段內必填，不繼承 pulse 刻度 |
 | `adc` | 可供 program tones 選用的 receivers | 1 至 8 個 receiver object 的 list，`ro_ch` 不重複且不得占用 pulse ADC | Mux 段內必填，單 receiver 也用 list |
 
