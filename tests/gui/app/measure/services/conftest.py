@@ -1,9 +1,17 @@
 """Native role-bound sources for result/analysis service contracts."""
 
 from collections.abc import Iterator
+from dataclasses import replace
+from pathlib import Path
 
 import pytest
+from qtpy.QtWidgets import QApplication
+from zcu_tools.gui.app.measure.services.pane_commit import commit_run
+from zcu_tools.gui.app.measure.state import RunPaneState
+from zcu_tools.gui.session.aliases import AliasRow
+from zcu_tools.gui.session.context_control import ContextControlFacet
 from zcu_tools.gui.session.context_types import SavedPoint
+from zcu_tools.gui.session.parameter_capture import capture_parameters
 from zcu_tools.gui.session.types import ParameterContext
 from zcu_tools.resources.context.library import LibrarySnapshot, ModuleLibraryDocument
 from zcu_tools.resources.entry import (
@@ -13,6 +21,12 @@ from zcu_tools.resources.entry import (
     role_registry,
 )
 from zcu_tools.resources.entry.schema import PointDocument
+
+from tests.gui.app.measure._native_save_support import (
+    NativeSaveSession,
+    native_save_session,
+)
+from tests.gui.app.measure._record_support import require_record, require_target
 
 
 class SourceQubit(ComponentSchema):
@@ -56,3 +70,47 @@ def result_sources() -> Iterator[tuple[ParameterContext, ParameterContext]]:
         role_registry.unregister("source_qubit")
         component_registry.unregister("run-source/qubit")
         assert component_registry.kinds() == before
+
+
+@pytest.fixture
+def role_load_session(
+    tmp_path: Path,
+    qapp: QApplication,
+    result_sources: tuple[ParameterContext, ParameterContext],
+    monkeypatch: pytest.MonkeyPatch,
+) -> Iterator[NativeSaveSession]:
+    """Save Q1 roles at p, then update persisted Q1.rate before native Load."""
+    del result_sources  # Fixture owns the component-kind registration lifecycle.
+    with native_save_session(tmp_path, qapp) as session:
+        control = ContextControlFacet(context=session.context)
+        tab = session.state.get_tab("tab")
+        control.add_component("Q1", "run-source/qubit", {"rate": 1.0})
+        control.add_component("Q2", "run-source/qubit", {"rate": 2.0})
+        session.context.set_alias_rows(
+            (
+                AliasRow("source_qubit", "Q1"),
+                AliasRow("custom", "Q2"),
+            )
+        )
+        captured = session.context.read_context()
+        assert captured is not None and captured.roles is not None
+        session.metadata = session.metadata.model_copy(
+            update={
+                "snapshot": replace(
+                    session.metadata.snapshot, roles=captured.roles.names
+                ),
+                "parameter_snapshot": capture_parameters(captured),
+            }
+        )
+        commit_run(
+            session.state,
+            "tab",
+            RunPaneState(
+                result=replace(require_record(tab.run), metadata=session.metadata),
+                storage=captured.storage,
+                parameters=captured,
+            ),
+        )
+        session.save()
+        control.set_parameter(require_target(captured), "Q1.rate", 7.0)
+        yield session

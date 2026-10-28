@@ -60,6 +60,13 @@ DocumentStore 每次讀取磁碟 bytes，未變內容沿用驗證快取。
 各組提交到固定目的地，錯誤分類與 applied 狀態由已提交項目決定。
 Apply 同步執行。
 
+## Captured device evidence
+
+`create_draft(device_snapshot=...)` 接受固定裝置設定或讀取 detached Run 證據的 callback。
+建立 draft 不呼叫 callback，`draft.device_snapshot` 才讀取並回傳隔離設定。
+歷史設定格式錯誤時，這次讀取保留 experiment owner 的欄位錯誤，不改成 None 或空 mapping。
+Post draft 延續 Primary 的 reader，沒有裝置需求的 Analyze／Post 不先驗證這份證據。
+
 ## Captured acceptance
 
 `accept_drafts` 在同一次 owner 呼叫核對全部 selected drafts 的 IDs，再依輸入群組順序寫入。

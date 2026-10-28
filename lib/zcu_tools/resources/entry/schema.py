@@ -15,6 +15,7 @@ from pydantic import (
     RootModel,
     TypeAdapter,
     field_validator,
+    model_serializer,
     model_validator,
 )
 from pydantic_core import (
@@ -276,6 +277,20 @@ class ParameterContent(RootModel[YamlValue]):
         content._source = source
         return content
 
+    @model_serializer
+    def serialized_content(self) -> YamlValue:
+        """Copy recorded content for output, omitting only legacy general.entry_id.
+
+        Unused and unknown values remain opaque, including general extensions.
+        Serialization does not validate sections or mutate the captured source.
+        """
+        document = deepcopy(self.root)
+        if isinstance(document, dict):
+            general = document.get("general")
+            if isinstance(general, dict):
+                general.pop("entry_id", None)
+        return document
+
     def section(self, name: str) -> YamlValue:
         """Copy a recorded section; missing sections raise AttributeError."""
         if not isinstance(self.root, dict):
@@ -310,10 +325,12 @@ class ParameterContent(RootModel[YamlValue]):
     def captured(self) -> Self:
         """Detach raw content with already consumed defaults recorded as values.
 
-        Unused fields stay opaque and no new defaults or validators run. Reusing
-        this serialized content therefore cannot regenerate a consumed factory.
+        Legacy general.entry_id is omitted. Other unused fields stay opaque and
+        no new defaults or validators run. Reusing this serialized content
+        therefore cannot regenerate a consumed factory.
         """
         content = self.model_copy(deep=True)
+        content.root = self.serialized_content()
         for path, value in sorted(
             self._defaults.items(), key=lambda item: item[0].count(".")
         ):

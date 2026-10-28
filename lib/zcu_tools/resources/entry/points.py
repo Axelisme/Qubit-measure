@@ -161,14 +161,15 @@ class PointView:
         """
         return document_meta(cached_parameter_content(self), path)
 
-    def refresh(self) -> None:
-        """Reload point.yaml content without validating unused component fields.
+    def refresh(self, *, strict: bool = False) -> None:
+        """Reload point.yaml, validating the full candidate when strict=True.
 
-        Missing files, invalid YAML and incompatible headers raise without
-        publication. Used fields and complete projections validate on demand.
-        No files are committed.
+        Ordinary refresh leaves unused fields unvalidated until projected.
+        Watcher/reload installation must pass strict=True. Missing files,
+        invalid YAML, incompatible headers and validation failures raise before
+        publication, preserving the prior content and revision. No files are written.
         """
-        self._store.refresh()
+        self._store.refresh(strict=strict)
 
     def add_component(self, name: str, *, kind: str, **fields: YamlValue) -> None:
         """Add a complete registered component to this point, not its template.

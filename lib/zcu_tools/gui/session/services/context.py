@@ -249,7 +249,7 @@ class ContextService:
             self._install_alias_rows(candidate, revision)
         else:
             if file.document == "parameters":
-                self._point.refresh()
+                self._point.refresh(strict=True)
             else:
                 self._library.refresh(strict=True)
             current = ParameterContext(

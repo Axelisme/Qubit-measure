@@ -1,6 +1,5 @@
 """Native Load retains history and rejects unsafe saves through public services."""
 
-from collections.abc import Iterator
 from dataclasses import replace
 from pathlib import Path
 from typing import Literal
@@ -58,7 +57,6 @@ from zcu_tools.gui.session.context_types import (
 )
 from zcu_tools.gui.session.operation_runner import OperationRunner
 from zcu_tools.gui.session.parameter_capture import capture_parameters
-from zcu_tools.gui.session.parameters import ParameterContext
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from zcu_tools.resources.entry import (
     AcceptedPayload,
@@ -138,107 +136,6 @@ def _native_controls(
         bus=session.bus,
     )
     return commands, wb
-
-
-@pytest.fixture
-def role_load_session(
-    tmp_path: Path,
-    qapp: QApplication,
-    result_sources: tuple[ParameterContext, ParameterContext],
-    monkeypatch: pytest.MonkeyPatch,
-) -> Iterator[NativeSaveSession]:
-    """Save Q1 roles at p, then update persisted Q1.rate before native Load."""
-    del result_sources  # Fixture owns the component-kind registration lifecycle.
-    with native_save_session(tmp_path, qapp) as session:
-        control = ContextControlFacet(context=session.context)
-        tab = session.state.get_tab("tab")
-        control.add_component("Q1", "run-source/qubit", {"rate": 1.0})
-        control.add_component("Q2", "run-source/qubit", {"rate": 2.0})
-        session.context.set_alias_rows(
-            (
-                AliasRow("source_qubit", "Q1"),
-                AliasRow("custom", "Q2"),
-            )
-        )
-        captured = session.context.read_context()
-        assert captured is not None and captured.roles is not None
-        session.metadata = session.metadata.model_copy(
-            update={
-                "snapshot": replace(
-                    session.metadata.snapshot, roles=captured.roles.names
-                ),
-                "parameter_snapshot": capture_parameters(captured),
-            }
-        )
-        commit_run(
-            session.state,
-            "tab",
-            RunPaneState(
-                result=replace(require_record(tab.run), metadata=session.metadata),
-                storage=captured.storage,
-                parameters=captured,
-            ),
-        )
-        session.save()
-        control.set_parameter(require_target(captured), "Q1.rate", 7.0)
-        yield session
-
-
-def test_native_save_load_uses_captured_environment_after_source_removal(
-    role_load_session: NativeSaveSession,
-) -> None:
-    import shutil
-
-    from zcu_tools.cfg_model import PulseSpec
-
-    session = role_load_session
-    control = ContextControlFacet(context=session.context)
-    target = require_target(control.read_context())
-    control.set_module(
-        target,
-        "Q1.pulses.pi",
-        PulseSpec(
-            ch=0,
-            nqz=1,
-            freq=100.0,
-            gain=0.25,
-            waveform="const",
-        ),
-    )
-    captured = control.read_context()
-    tab = session.state.get_tab("tab")
-    record = require_record(tab.run)
-    metadata = require_metadata(tab.run).model_copy(
-        update={
-            "parameter_snapshot": capture_parameters(captured),
-        }
-    )
-    commit_run(
-        session.state,
-        "tab",
-        RunPaneState(
-            result=replace(record, metadata=metadata),
-            parameters=captured,
-            storage=captured.storage,
-        ),
-    )
-    control.set_parameter(target, "Q1.rate", 99.0)
-    session.save()
-    portable = session.entry.database_path.parent.parent / "portable.h5"
-    shutil.copyfile(session.native_data_path, portable)
-    session.context.clear_context()
-    shutil.rmtree(session.entry.result_path)
-    LoadService(session.state).load_result("tab", str(portable))
-    restored = tab.run.parameters
-    assert restored is not None
-    assert restored.target is None
-    assert restored.value("$source_qubit.rate") == 7.0
-    assert restored.value("$custom.rate") == 2.0
-    pulse = restored.library.module_spec("Q1.pulses.pi")
-    assert isinstance(pulse, PulseSpec)
-    assert pulse.gain == 0.25
-    assert restored.aliases == captured.aliases
-    assert require_metadata(tab.run) == metadata
 
 
 @pytest.mark.parametrize("defect", ["provenance", "snapshot", "completion"])

@@ -73,7 +73,9 @@ class _RunSource:
 
     experiment_name: str
     run_id: str | None
-    device_snapshot: Mapping[str, JsonObject] | None
+    device_snapshot: (
+        Mapping[str, JsonObject] | Callable[[], Mapping[str, JsonObject] | None] | None
+    )
 
 
 class WritebackDraft:
@@ -123,8 +125,13 @@ class WritebackDraft:
 
     @property
     def device_snapshot(self) -> Mapping[str, JsonObject] | None:
-        """Detached Run-time device settings, or None when not captured."""
-        return copy.deepcopy(self._run_source.device_snapshot)
+        """Project detached Run device settings; malformed historical evidence raises.
+
+        Deferred sources validate only on this explicit read. None means the
+        Run did not capture device evidence, not that validation failed.
+        """
+        source = self._run_source.device_snapshot
+        return copy.deepcopy(source() if callable(source) else source)
 
     @property
     def unavailable_reasons(self) -> tuple[str, ...]:
@@ -280,7 +287,11 @@ class WritebackService:
         parameters: ParameterContext | None,
         experiment_name: str,
         run_id: str | None = None,
-        device_snapshot: Mapping[str, JsonObject] | None = None,
+        device_snapshot: (
+            Mapping[str, JsonObject]
+            | Callable[[], Mapping[str, JsonObject] | None]
+            | None
+        ) = None,
     ) -> WritebackDraft:
         """Create a draft with one Form per module item at the creation capture.
 
@@ -306,8 +317,10 @@ class WritebackService:
         historical native Loads; None means no native acquisition evidence.
         It stays fixed through Save, selection changes, edits and application.
         Application copies it into accepted evidence.
-        device_snapshot maps Run-fixed device names to their JSON settings; None
-        means no device evidence. Records are detached adapter-owned JSON;
+        device_snapshot maps Run-fixed device names to their JSON settings, or
+        supplies a reader over detached Run evidence. Readers run only when
+        draft.device_snapshot is requested and must preserve owner validation
+        errors. None means no device evidence. Records are detached adapter-owned JSON;
         this service neither reads device facts nor adds coordinate fields.
         The append owner requires run_id and supplies only the provenance
         envelope (run_id/point/at/source). Record format follows adapter policy.
