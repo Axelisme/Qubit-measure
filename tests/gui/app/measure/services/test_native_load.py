@@ -709,10 +709,9 @@ def test_loaded_same_entry_different_point_resaves_original_run(
 
 
 @pytest.mark.parametrize("save_all", [False, True])
-def test_loaded_foreign_origin_save_rejects_before_mapping_or_io(
+def test_loaded_foreign_origin_saves_with_captured_storage_and_historical_metadata(
     tmp_path: Path,
     qapp: QApplication,
-    monkeypatch: pytest.MonkeyPatch,
     save_all: bool,
 ) -> None:
     with native_save_session(tmp_path, qapp) as session:
@@ -740,29 +739,41 @@ def test_loaded_foreign_origin_save_rejects_before_mapping_or_io(
         assert tab.run.parameters is None
         assert tab.run.storage is not None
         assert tab.run.storage.entry_id == captured.entry_id
-        before = {
-            p.relative_to(tmp_path): p.read_bytes()
-            for p in tmp_path.rglob("*")
-            if p.is_file()
+        source_bytes = source.read_bytes()
+        source_events = session.entry.ledger.events()
+        history = require_metadata(tab.run)
+        if save_all:
+            declare_panes(session, ("fit",))
+        planned_paths = {
+            output.path
+            for section in session.state.get_artifact_snapshots("tab")
+            for artifact in section.artifacts
+            for member in artifact.members
+            for output in member.outputs
         }
 
         save = session.save_artifacts if save_all else session.save
-        with pytest.raises(FailedPreconditionError) as error:
-            save()
+        report = save()
 
-        message = str(error.value)
-        assert str(session.metadata.snapshot.entry_id) in message
-        assert session.metadata.snapshot.point == "p"
-        assert session.metadata.snapshot.point in message
-        assert str(captured.entry_id) in message
-        assert captured.point in message
-        after = {
-            p.relative_to(tmp_path): p.read_bytes()
-            for p in tmp_path.rglob("*")
-            if p.is_file()
-        }
-        assert after == before
-        assert tab.run.confirmed_run_id is None
+        assert report.run_id == history.run_id
+        assert all(item.status == "saved" for item in report.outputs)
+        assert {item.output.path for item in report.outputs} == planned_paths
+        saved_data = next(
+            item.output.path
+            for item in report.outputs
+            if item.output.format == "data_h5"
+        )
+        assert saved_data.is_relative_to(captured.database_path)
+        assert metadata_from_container(load(saved_data)) == history
+        assert require_metadata(tab.run) == history
+        assert tab.run.storage == captured
+        assert source.read_bytes() == source_bytes
+        assert session.entry.ledger.events() == source_events
+        event = destination.ledger.events()[-1]
+        assert event.kind == "saved"
+        assert isinstance(event.payload, SavedPayload)
+        assert event.payload.run_id == history.run_id
+        assert tab.run.confirmed_run_id == history.run_id
 
 
 @pytest.mark.parametrize("save_all", [False, True])

@@ -83,10 +83,9 @@ class SaveService:
 
         tab_id identifies an existing idle tab with historical storage/metadata.
         comment=None retains its annotation; origin attributes this command.
-        Missing evidence, busy or an entry mismatch between file history and
-        captured storage raises FailedPreconditionError before mapping or I/O.
-        Mismatch diagnostics identify both sources; no automatic rebinding occurs.
-        Within the same entry, retain the historical run_id and point for all
+        Missing evidence or busy raises FailedPreconditionError before mapping
+        or I/O. Historical entry identity does not restrict captured storage.
+        Retain the historical run_id and point for all
         output paths and the saved event, regardless of later global selections.
         Output failures appear in the complete report; ledger errors
         propagate without a report. State publication completes before return.
@@ -108,10 +107,9 @@ class SaveService:
 
         tab_id identifies an existing tab. None selects all declarations, including
         Saved; explicit refs are ordered, unique and nonempty. Unknown refs,
-        missing storage/metadata, busy or history/captured entry mismatch raise
-        FailedPreconditionError before mapping, I/O or annotation mutation.
-        Mismatch diagnostics identify both sources; no automatic rebinding occurs.
-        Within the same entry, all selected outputs and the saved event use the
+        missing storage/metadata or busy raise FailedPreconditionError before
+        mapping, I/O or annotation mutation. Historical entry identity does not
+        restrict captured storage. All selected outputs and the saved event use the
         historical run_id and point, not the current global point.
         Invalid pane content raises TypeError/ValueError.
         comment=None retains the annotation. origin attributes this command.
@@ -140,12 +138,6 @@ class SaveService:
         except ValueError as exc:
             raise FailedPreconditionError(str(exc)) from exc
         history = metadata.snapshot
-        if history.entry_id != storage.entry_id:
-            raise FailedPreconditionError(
-                f"Historical run entry_id={history.entry_id!r}, point={history.point!r} "
-                f"does not match result source entry_id={storage.entry_id!r}, "
-                f"point={storage.point!r}; load with the matching historical entry."
-            )
         saved_at = datetime.now().astimezone()
         stem = tab.adapter.save_stem(
             SaveContext(
