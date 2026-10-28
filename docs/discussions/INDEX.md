@@ -18,6 +18,7 @@
 
 ## 模擬量測環境
 
+- 2026-10-29 [Module 改 QICK Macro 與模擬 frontend 改讀 macro](2026-10-29-module-to-macro.md)：延後解析的時間層經原型逐位重現現行 ASM；`Module.init()` 搬不進 macro，不立即全面遷移；模擬 frontend 改讀語意 macro 或底層 macro 兩案待第二個原型比較，2026-10-14 裁決暫不改。
 - 2026-10-28 [FTF 固定 DC flux ramp 的截斷與成本界限](2026-10-28-ftf-fixed-dc-flux-benchmark.md)：未認證，僅界限。M8/M16 的共同 DC K8 population L1 差為 0.359636；M16 只是最大成功尺寸，M24 首點與 M32 reference 的 quadrature 失敗，不能認證大幅 excursion 或 reset fidelity。
 
 - 2026-10-21 [CKP reduced closure 研究：精度過但成本 42 倍](2026-10-21-ckp-reduced-closure-study.md)：flip 非真空腔激發必須保留；displaced-Fock N2 精度過但成本 41.9 倍，Gaussian 否決；半古典先 partial land，下一步走 joint Fock 性能研究。
@@ -37,6 +38,7 @@
 
 ## Cfg 與表單
 
+- 2026-10-29 [Singleshot 分類參數放進 readout cfg](2026-10-29-readout-classifier.md)：g/e 中心、radius、confusion matrix 改為 readout cfg 的可選 `classifier`，由 library readout module 擁有、GE 寫回 module；acquire 的分類參數由 readout module 工具算出、作者明確傳入；讀出設定改變後的失效機制暫不做。
 - 2026-10-17 [Measure Form 的校準初值與 sweep 模式切換](2026-10-17-measure-form-initial-values-and-sweep-mode.md)：缺值給公允值、無效值留空、故障報錯，「可預測與一致比正確重要」，初值開 Form 時算成數字；sweep 模式存於共用 Form 輸入，recipe 一次設定並重設為 range + expts。
 - 2026-10-13 [Measure 表單重設計：從 builder 重抄到 core cfg 推導](2026-10-13-measure-form-redesign.md)：表單形狀從 core cfg 推導、說明放 core、起始值寫在 form.py 樹，角色表退化成範本目錄，`dev` 改具名欄位；決策見 [ADR-0073 Measure 表單推導](../adr/0073-measure-form-derivation.md)。
 - 2026-10-13 [表單選項的分層：生成器給選項，widget 照清單畫](2026-10-13-form-options-layering.md)：選項清單由生成器產生、核心通用、widget 只照清單畫；換分支不繼承舊值；ref 轉 inline 用選項指令；key-or-inline 統一成有 tag 的形狀；歷史草稿為 Pydantic 表單 ADR，現行決策見 [ADR-0065](../adr/0065-cfg-editing.md) 與 [ADR-0073](../adr/0073-measure-form-derivation.md)。
@@ -56,4 +58,5 @@
 
 ## 量測策略
 
+- 2026-10-29 [Heralding：取數層 post-selection，不做 FPGA active reset](2026-10-29-heralding-post-selection.md)：QICK 的平均本來就在 host 用整個 round 的逐發資料計算，所以在取數層依 herald 篩選再平均不需存逐發資料；FPGA 回饋因延遲未知、ALU 無乘法與模擬器限制否決；上層新增 `heralding/*`，先做單 qubit。
 - 2026-10-27 [T1/T2 over flux 量測策略：哪些機制有效](2026-10-27-coherence-strategy-levers.md)：自適應 flux 選點沒有增益；唯一有效的是每條曲線的穩健 delay 取樣（σ 約 0.73 倍）；不需新 workflow，建議在 `coherence_fluxdep` 加 delay 模式。
