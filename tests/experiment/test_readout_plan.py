@@ -45,6 +45,26 @@ def template(
     )
 
 
+def test_logical_contents_keep_unobserved_terminal_and_group_repeated_triggers() -> (
+    None
+):
+    base = template((pulse(0.010), pulse(0.030)), (0.011, 0.015))
+    contents = readout_plan.logical_event_contents(
+        base, readout_plan.ReadoutDrive(0, 2.0), base.readouts[0], {}
+    )
+    assert len(contents) == 2
+    for point in range(2):
+        herald, terminal = (content.inverse[point] for content in contents)
+        assert len(contents[0].grids[herald]) == 2
+        assert contents[1].grids[terminal] == ()
+        assert contents[1].pulses[terminal][0].start_ns == 30
+        # Common-origin phases agree with the original pulse, not a second
+        # pulse-local rephase. The program reference is one ns at six GHz.
+        assert contents[1].pulses[terminal][0].phase_rad == pytest.approx(
+            np.pi / 6 - 2 * np.pi * 6
+        )
+
+
 def test_event_contents_pair_each_trigger_with_its_own_point_local_pulse() -> None:
     first, second, terminal = pulse(0.010), pulse(0.020), pulse(0.030)
     shifts = np.array([0.0, 0.002])

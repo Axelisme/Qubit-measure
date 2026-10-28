@@ -376,6 +376,69 @@ def _block_triggers(
     return tuple(triggers)
 
 
+def logical_event_contents(
+    template: TimelineTemplate,
+    drive: ReadoutDrive,
+    window: ReadoutSlot,
+    memo: dict[int, EnvelopeSpec],
+) -> tuple[ReadoutContents, ...]:
+    """Return projective blocks followed by terminal, including unobserved blocks.
+
+    Inputs and phase/units follow readout_contents. window must belong to
+    template.readouts and contain at least one trigger. Each returned content
+    holds only that block's pulses and zero or more grids in channel-local
+    trigger order. All ADCs therefore share one chronological logical event
+    axis. Empty grids emit no read column. Cross-point topology differences,
+    invalid pulse counts/routes and crossing windows raise ValueError through
+    classify_readout. Terminal-only plans retain readout_contents' exact
+    deduplication and phases. Projective plans use point-local contents with
+    identity inverse maps. No densities or ADC responses are constructed.
+    """
+    partition = classify_readout(template, drive, memo)
+    if not any(partition.projective_reads):
+        return (
+            readout_contents(
+                replace(template, events=partition.terminal_slots), drive, window, memo
+            ),
+        )
+    observed = read_event_contents(template, drive, window, memo)
+    blocks = tuple(
+        (*(read.pulses for read in reads), terminal)
+        for reads, terminal in zip(
+            partition.projective_reads, partition.terminal_pulses, strict=True
+        )
+    )
+    contents = []
+    for event in range(len(blocks[0])):
+        pulses = tuple(
+            tuple(
+                replace(
+                    pulse,
+                    phase_rad=pulse.phase_rad
+                    + 2 * np.pi * pulse.frequency_ghz * pulse.start_ns,
+                )
+                for pulse in point[event]
+            )
+            for point in blocks
+        )
+        starts = np.array([point[event][0].start_ns for point in blocks])
+        grids = tuple(
+            tuple(
+                grid
+                for content in observed
+                if content.end_ns[point] == start
+                for grid in content.grids[content.inverse[point]]
+            )
+            for point, start in enumerate(starts)
+        )
+        contents.append(
+            ReadoutContents(
+                starts, pulses, grids, np.arange(len(template.points), dtype=np.int64)
+            )
+        )
+    return tuple(contents)
+
+
 def read_event_contents(
     template: TimelineTemplate,
     drive: ReadoutDrive,

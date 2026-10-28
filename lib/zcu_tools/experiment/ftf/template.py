@@ -12,11 +12,10 @@ from zcu_tools.core.simulation import (
 from zcu_tools.experiment.readout_plan import (
     ProjectiveRead,
     ReadoutDrive,
-    ReadoutPartition,
     classify_readout,
     drive_track,
     local_readout_pulses,
-    read_event_contents,
+    logical_event_contents,
     readout_contents,
 )
 from zcu_tools.resources.ftf import FTFSettings
@@ -212,60 +211,35 @@ class _ReadoutEvents:
 def _projective_contents(
     template: TimelineTemplate,
     drive: ReadoutDrive,
-    partition: ReadoutPartition,
-    terminal_start_ns: NDArray[np.float64],
     memo: dict[int, EnvelopeSpec],
 ) -> tuple[tuple[_ReadoutEvents, ...], float]:
     """Align actual trigger contents on a common chronological block axis."""
     channels = tuple(
-        read_event_contents(template, drive, window, memo)
+        logical_event_contents(template, drive, window, memo)
         for window in template.readouts
     )
-    reference = partition.terminal_pulses[0][0].frequency_ghz
-    # Projective plans retain point-local contents, including unobserved terminal
-    # pulses. Observed-trigger keys alone cannot identify those incident fields.
-    inverse = np.arange(len(template.points), dtype=np.int64)
-    events_by_channel: list[list[tuple[ReadoutEvent, ...]]] = [[] for _ in channels]
-    for point in range(len(template.points)):
-        starts = (
-            *(read.start_ns for read in partition.projective_reads[point]),
-            float(terminal_start_ns[point]),
+    reference = channels[0][-1].pulses[0][0].frequency_ghz
+    aligned = []
+    for contents in channels:
+        localized = tuple(
+            local_readout_pulses(content.pulses, reference) for content in contents
         )
-        blocks = (
-            *(read.pulses for read in partition.projective_reads[point]),
-            partition.terminal_pulses[point],
-        )
-        # Classification phases are already pulse-local at zero GHz. Changing
-        # the rotating reference adds only its phase at each pulse's start.
-        pulses = tuple(
-            tuple(
-                replace(
-                    pulse,
-                    phase_rad=pulse.phase_rad + 2 * np.pi * reference * pulse.start_ns,
-                )
-                for pulse in block
-            )
-            for block in blocks
-        )
-        for output, channel in zip(events_by_channel, channels, strict=True):
-            output.append(
+        aligned.append(
+            _ReadoutEvents(
                 tuple(
-                    ReadoutEvent(
-                        incident,
-                        tuple(
-                            grid
-                            for content in channel
-                            if content.end_ns[point] == start
-                            for grid in content.grids[content.inverse[point]]
-                        ),
+                    tuple(
+                        ReadoutEvent(
+                            pulses[content.inverse[point]],
+                            content.grids[content.inverse[point]],
+                        )
+                        for content, pulses in zip(contents, localized, strict=True)
                     )
-                    for start, incident in zip(starts, pulses, strict=True)
-                )
+                    for point in range(len(template.points))
+                ),
+                np.arange(len(template.points), dtype=np.int64),
             )
-    return (
-        tuple(_ReadoutEvents(tuple(events), inverse) for events in events_by_channel),
-        reference,
-    )
+        )
+    return tuple(aligned), reference
 
 
 def plan_template(
@@ -338,7 +312,7 @@ def plan_template(
     )
     if any(partition.projective_reads):
         event_contents, reference_frequency_ghz = _projective_contents(
-            template, drive, partition, end_ns, memo
+            template, drive, memo
         )
     else:
         contents = tuple(
