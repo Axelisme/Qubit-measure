@@ -3,16 +3,16 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Literal
 
 import numpy as np
 from matplotlib.backends.backend_qt import NavigationToolbar2QT
 from qtpy.QtWidgets import QTabWidget, QVBoxLayout, QWidget
 
-from zcu_tools.analysis.flux import FluxFrame, flux_from_device_values
+from zcu_tools.analysis.flux import flux_from_device_values
 from zcu_tools.gui.expected_error import FailedPreconditionError
+from zcu_tools.gui.session.predictor_trial import CurveCoordinates
 from zcu_tools.gui.session.services.predictor import PredictMatrixCurveRequest
 from zcu_tools.gui.session.ui.predictor_canvas import CurveView, PredictorCurveCanvas
 from zcu_tools.simulate.parameters import ModelParams
@@ -25,19 +25,6 @@ logger = logging.getLogger(__name__)
 
 _DEFAULT_FLUX_WINDOW: tuple[float, float] = (0.4, 1.1)
 _CURVE_GRID_N = 200
-
-
-@dataclass(frozen=True)
-class CurveCoordinates:
-    """Native scan coordinates shared by the frequency and matrix plots.
-
-    frame holds Phi0 offset and signed native periods/units. axis_device names
-    one frame device. device_values fixes every other device in its native unit.
-    """
-
-    frame: FluxFrame
-    axis_device: str
-    device_values: Mapping[str, float]
 
 
 class PredictorCurveTabs(QTabWidget):

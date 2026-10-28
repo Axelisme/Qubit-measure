@@ -15,9 +15,7 @@ import logging
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
-
-import numpy as np
+from typing import TYPE_CHECKING
 
 # tolerated: qtpy exposes Signal at runtime but its QtCore stub does not export it.
 from qtpy.QtCore import QTimer, Signal  # pyright: ignore[reportPrivateImportUsage]
@@ -40,18 +38,15 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
-from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.lifetime import LifetimeScope
 from zcu_tools.gui.session.persistence import PersistenceError, SingleFileCaretaker
+from zcu_tools.gui.session.predictor_trial import PredictorTrial
 from zcu_tools.gui.session.ui.eval_field import EvalNumericField
 from zcu_tools.gui.session.ui.predictor_cache import (
     PredictorSnapshot,
     PredictorSnapshotCodec,
 )
-from zcu_tools.gui.session.ui.predictor_curves import (
-    CurveCoordinates,
-    PredictorCurveTabs,
-)
+from zcu_tools.gui.session.ui.predictor_curves import PredictorCurveTabs
 from zcu_tools.gui.session.ui.predictor_flux import PredictorFluxEditor
 from zcu_tools.gui.session.ui.predictor_parameters import PredictorParameterEditor
 from zcu_tools.gui.widgets import error_colour, set_foreground, success_colour
@@ -154,6 +149,7 @@ class PredictorDialog(QDialog):
         super().__init__(parent)
         self._scope = LifetimeScope(self)
         self._pred = predictor
+        self._trial = PredictorTrial(predictor)
         self._dev = device
         self._parameter_provider = parameter_provider or (lambda: None)
         self._persistent_on_close = persistent_on_close
@@ -182,6 +178,7 @@ class PredictorDialog(QDialog):
 
         self._parameter_editor = PredictorParameterEditor(
             predictor,
+            trial=self._trial,
             on_edited=self._on_parameters_changed,
             on_replaced=self._on_parameters_replaced,
             on_status=lambda message, error: self._set_status(message, error=error),
@@ -189,7 +186,7 @@ class PredictorDialog(QDialog):
         )
         controls_layout.addWidget(self._parameter_editor)
         self._flux_editor = PredictorFluxEditor(
-            self._scope.callback(self._on_parameters_changed)
+            self._scope.callback(self._on_parameters_changed), trial=self._trial
         )
         self._scope.add_cleanup(self._flux_editor.retire_callbacks)
         controls_layout.addWidget(self._flux_editor)
@@ -547,14 +544,8 @@ class PredictorDialog(QDialog):
 
     def predict_frequency(self, transition: tuple[int, int] = (0, 1)) -> float:
         """Return MHz at all current native trial values; invalid inputs raise."""
-        from zcu_tools.gui.session.services.predictor import PredictFreqRequest
-
-        return self._pred.predict_freq(
-            self.parameters(),
-            PredictFreqRequest(
-                self.flux().to_frame(), self.device_values(), transition
-            ),
-        )
+        self._parameter_editor.refresh_errors()
+        return self._trial.predict_frequency(transition)
 
     def calibrate(
         self, frequency_mhz: float, transition: tuple[int, int] = (0, 1)
@@ -866,41 +857,20 @@ class PredictorDialog(QDialog):
         is as accurate as possible.  Expected unavailable-model failures show "—";
         unexpected backend failures fail the whole update once to avoid log storms.
         """
-        from zcu_tools.gui.session.services.predictor import (
-            PredictFreqRequest,
-        )
-
-        marker_value = self._predict_value_spin.value()
+        self._parameter_editor.refresh_errors()
         try:
-            for row_idx, transition in enumerate(self._tracked):
-                # Freq column: per-row scalar predict_freq (most accurate)
-                try:
-                    freq = self._pred.predict_freq(
-                        self.parameters(),
-                        PredictFreqRequest(
-                            self.flux().to_frame(), self.device_values(), transition
-                        ),
-                    )
-                    freq_text = f"{freq:.4f}"
-                except (FailedPreconditionError, PredictorInputError):
-                    freq_text = "—"
-
-                freq_item = self._table.item(row_idx, _COL_FREQ)
-                if freq_item is not None:
-                    freq_item.setText(freq_text)
-
-                # |n| and |phi| columns: one single-point matrix curve call per
-                # operator (avoids the level<=1 cap in predict_matrix_element).
-                n_item = self._table.item(row_idx, _COL_MAG_N)
-                if n_item is not None:
-                    n_item.setText(
-                        self._point_matrix_text(marker_value, transition, "n")
-                    )
-                phi_item = self._table.item(row_idx, _COL_MAG_PHI)
-                if phi_item is not None:
-                    phi_item.setText(
-                        self._point_matrix_text(marker_value, transition, "phi")
-                    )
+            rows = self._trial.row_values(
+                tuple(self._tracked), self._predict_value_spin.value()
+            )
+            for row_idx, values in enumerate(rows):
+                for column, value, digits in (
+                    (_COL_FREQ, values.freq_mhz, 4),
+                    (_COL_MAG_N, values.mag_n, 5),
+                    (_COL_MAG_PHI, values.mag_phi, 5),
+                ):
+                    item = self._table.item(row_idx, column)
+                    if item is not None:
+                        item.setText("—" if value is None else f"{value:.{digits}f}")
         except Exception as exc:
             logger.exception("predictor value-column update failed")
             self._set_status(str(exc), error=True)
@@ -913,43 +883,17 @@ class PredictorDialog(QDialog):
                 if item is not None:
                     item.setText(text)
 
-    def _point_matrix_text(
-        self, value: float, transition: tuple[int, int], operator: Literal["n", "phi"]
-    ) -> str:
-        """|<i|operator|j>| at a single device value, formatted, or "—" on expected failure."""
-        from zcu_tools.gui.session.services.predictor import (
-            PredictMatrixCurveRequest,
-        )
-
-        try:
-            mat_result = self._pred.predict_matrix_element_curve(
-                self.parameters(),
-                PredictMatrixCurveRequest(
-                    frame=self.flux().to_frame(),
-                    axis_device=self._flux_editor.axis_device(),
-                    device_values=self.device_values(),
-                    values=np.array([value], dtype=np.float64),
-                    transitions=(transition,),
-                    operator=operator,
-                ),
-            )
-            return f"{mat_result.mags[0, 0]:.5f}"
-        except (FailedPreconditionError, PredictorInputError):
-            return "—"
-
     # ------------------------------------------------------------------
     # Curve refresh
     # ------------------------------------------------------------------
 
     def _refresh_curves(self) -> None:
         """Refresh the curve view, then settle table values only after successful rendering."""
+        self._parameter_editor.refresh_errors()
         try:
-            coordinates = CurveCoordinates(
-                self.flux().to_frame(),
-                self._flux_editor.axis_device(),
-                self.device_values(),
-            )
-            params = self.parameters()
+            inputs = self._trial.inputs()
+            coordinates = inputs.curve_coordinates()
+            params = inputs.params
         except PredictorInputError as exc:
             self._clear_predictor_display()
             self._set_status(str(exc), error=True)

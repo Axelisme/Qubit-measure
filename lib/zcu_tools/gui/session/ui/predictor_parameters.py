@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
-from math import isfinite
 from typing import TYPE_CHECKING
 
 from qtpy.QtGui import QPalette
@@ -20,11 +19,9 @@ from qtpy.QtWidgets import (
 )
 
 from zcu_tools.gui.expected_error import ExpectedError, FailedPreconditionError
+from zcu_tools.gui.session.predictor_trial import PredictorTrial
 from zcu_tools.gui.widgets import error_colour, set_foreground
-from zcu_tools.simulate.fluxonium.predict import FluxoniumParams
 from zcu_tools.simulate.parameters import ModelParams
-from zcu_tools.simulate.predictor import PredictorInputError
-from zcu_tools.simulate.transmon import TransmonParams
 
 if TYPE_CHECKING:
     from zcu_tools.gui.session.predictor_control import PredictorControlPort
@@ -32,17 +29,9 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Initial standalone trial values, not defaults for missing file inputs.
-_DEFAULT_EJ = 4.0
-_DEFAULT_EC = 1.0
-_DEFAULT_EL = 1.0
-_DEFAULT_EJMAX = 20.0
-_DEFAULT_TRANSMON_EC = 0.25
-_DEFAULT_ASYMMETRY = 0.0
-
 
 class PredictorParameterEditor(QGroupBox):
-    """Own nullable model controls, local edit locks and explicit prefill.
+    """Present trial's nullable model drafts, local edit locks and explicit prefill.
 
     predictor supplies current-entry filenames and read-only predictor inputs.
     No trial writes back to the source file or a component.
@@ -59,6 +48,7 @@ class PredictorParameterEditor(QGroupBox):
         self,
         predictor: PredictorControlPort,
         *,
+        trial: PredictorTrial,
         on_edited: Callable[[], None],
         on_replaced: Callable[[], None],
         on_status: Callable[[str, bool], None],
@@ -66,6 +56,7 @@ class PredictorParameterEditor(QGroupBox):
     ) -> None:
         super().__init__("Model params")
         self._pred = predictor
+        self._trial = trial
         self._on_edited = on_edited
         self._on_replaced = on_replaced
         self._on_status = on_status
@@ -87,9 +78,9 @@ class PredictorParameterEditor(QGroupBox):
 
         # Plain text preserves finite precision and blank unknowns.
         # The parameter classes own physical validation.
-        self._ej_field = self._make_param_field(_DEFAULT_EJ)
-        self._ec_field = self._make_param_field(_DEFAULT_EC)
-        self._el_field = self._make_param_field(_DEFAULT_EL)
+        self._ej_field = QLineEdit(self._trial.energy_text("fluxonium", "EJ"))
+        self._ec_field = QLineEdit(self._trial.energy_text("fluxonium", "EC"))
+        self._el_field = QLineEdit(self._trial.energy_text("fluxonium", "EL"))
         self._fluxonium_energies_label = QLabel("Energies:")
         self._fluxonium_energies_row = self._make_param_row(
             ("EJ (GHz)", self._ej_field),
@@ -99,9 +90,9 @@ class PredictorParameterEditor(QGroupBox):
         self._ec_field.setObjectName("predictor_input_fluxonium_EC")
         model_form.addRow(self._fluxonium_energies_label, self._fluxonium_energies_row)
         # SQUID transmon: EJmax/EC in GHz, d is the dimensionless asymmetry.
-        self._ejmax_field = self._make_param_field(_DEFAULT_EJMAX)
-        self._transmon_ec_field = self._make_param_field(_DEFAULT_TRANSMON_EC)
-        self._asymmetry_field = self._make_param_field(_DEFAULT_ASYMMETRY)
+        self._ejmax_field = QLineEdit(self._trial.energy_text("transmon", "EJmax"))
+        self._transmon_ec_field = QLineEdit(self._trial.energy_text("transmon", "EC"))
+        self._asymmetry_field = QLineEdit(self._trial.energy_text("transmon", "d"))
         self._transmon_energies_label = QLabel("Energies:")
         self._transmon_energies_row = self._make_param_row(
             ("EJmax (GHz)", self._ejmax_field),
@@ -117,6 +108,7 @@ class PredictorParameterEditor(QGroupBox):
         self._model_combo = QComboBox()
         self._model_combo.addItem("Fluxonium", "fluxonium")
         self._model_combo.addItem("SQUID transmon", "transmon")
+        self._model_combo.setCurrentIndex(self._model_combo.findData(self._trial.model))
         model_form.addRow("Model:", self._model_combo)
         self._file_combo = QComboBox()
         self._file_combo.setObjectName("predictor_file")
@@ -144,17 +136,33 @@ class PredictorParameterEditor(QGroupBox):
         PredictorInputError. No source/session read or write occurs.
         Invalid physical values are rejected only when queried.
         """
-        if self._model_combo.currentData() == "transmon":
-            return TransmonParams(
-                self._parameter_value(self._ejmax_field),
-                self._parameter_value(self._transmon_ec_field),
-                self._parameter_value(self._asymmetry_field),
-            )
-        return FluxoniumParams(
-            self._parameter_value(self._ej_field),
-            self._parameter_value(self._ec_field),
-            self._parameter_value(self._el_field),
+        self.refresh_errors()
+        return self._trial.parameters()
+
+    def refresh_errors(self) -> None:
+        """Show parsed-field errors at the original read boundary, without editing drafts.
+
+        Fields after the first invalid input keep their previous appearance,
+        matching the former short-circuit parameter read.
+        """
+        fields = (
+            (self._ejmax_field, self._transmon_ec_field, self._asymmetry_field)
+            if self._trial.model == "transmon"
+            else (self._ej_field, self._ec_field, self._el_field)
         )
+        for field in fields:
+            message = self._trial.energy_error(
+                self._trial.model, self._parameter_fields[field]
+            )
+            field.setToolTip(message or "Leave blank for unknown.")
+            set_foreground(
+                field,
+                error_colour(field)
+                if message
+                else self.palette().color(QPalette.ColorRole.Text),
+            )
+            if message:
+                break
 
     def set_parameters(self, params: ModelParams) -> None:
         """Replace the detached trial and select its model, retaining invalid physics.
@@ -164,24 +172,20 @@ class PredictorParameterEditor(QGroupBox):
         Computation validates physics later. Calls on_replaced exactly once after
         all edits, synchronously; callback failures propagate to the caller.
         """
+        self._trial.set_parameters(params)
         self._updating_parameters = True
         try:
             self._model_combo.setCurrentIndex(self._model_combo.findData(params.model))
-            if isinstance(params, TransmonParams):
-                energies = (
-                    (self._ejmax_field, params.EJmax),
-                    (self._transmon_ec_field, params.EC),
-                    (self._asymmetry_field, params.d),
-                )
-            else:
-                energies = (
-                    (self._ej_field, params.EJ),
-                    (self._ec_field, params.EC),
-                    (self._el_field, params.EL),
-                )
-            for field, value in energies:
+            fields = (
+                (self._ejmax_field, self._transmon_ec_field, self._asymmetry_field)
+                if params.model == "transmon"
+                else (self._ej_field, self._ec_field, self._el_field)
+            )
+            for field in fields:
                 field.setEnabled(not self._live_mode)
-                field.setText("" if value is None else repr(value))
+                field.setText(
+                    self._trial.energy_text(params.model, self._parameter_fields[field])
+                )
         finally:
             self._updating_parameters = False
         self._on_replaced()
@@ -215,30 +219,21 @@ class PredictorParameterEditor(QGroupBox):
         if index >= 0:
             self._file_combo.setCurrentIndex(index)
 
-    def _parameter_value(self, field: QLineEdit) -> float | None:
-        field.setToolTip("Leave blank for unknown.")
-        set_foreground(field, self.palette().color(QPalette.ColorRole.Text))
-        text = field.text().strip()
-        if not text:
-            return None
-        name = self._parameter_fields[field]
-        try:
-            value = float(text)
-        except ValueError as exc:
-            message = f"{name}: enter a finite number or leave blank."
-            field.setToolTip(message)
-            set_foreground(field, error_colour(field))
-            raise PredictorInputError(message) from exc
-        if not isfinite(value):
-            message = f"{name}: enter a finite number or leave blank."
-            field.setToolTip(message)
-            set_foreground(field, error_colour(field))
-            raise PredictorInputError(message)
-        return value
-
     def _on_parameters_changed(self, *_args: object) -> None:
         if self._updating_parameters:
             return
+        self._trial.select_model(str(self._model_combo.currentData()))
+        for model, fields in (
+            ("fluxonium", (self._ej_field, self._ec_field, self._el_field)),
+            (
+                "transmon",
+                (self._ejmax_field, self._transmon_ec_field, self._asymmetry_field),
+            ),
+        ):
+            for field in fields:
+                self._trial.set_energy_text(
+                    model, self._parameter_fields[field], field.text()
+                )
         self._on_edited()
 
     def refresh_files(self) -> None:
@@ -283,11 +278,6 @@ class PredictorParameterEditor(QGroupBox):
         self._file_combo.setEnabled(editable and self.selected_file() is not None)
         self._file_refresh_btn.setEnabled(editable)
         self._file_load_btn.setEnabled(editable and self.selected_file() is not None)
-
-    @staticmethod
-    def _make_param_field(default: float = 0.0) -> QLineEdit:
-        """Preserve finite float text and allow blank or invalid drafts."""
-        return QLineEdit(repr(default))
 
     def _make_param_row(self, *pairs: tuple[str, QLineEdit]) -> QWidget:
         holder = QWidget()

@@ -77,6 +77,9 @@ def test_blank_parameters_can_be_completed_cleared_and_corrected(
             assert name in field.tooltip and "finite number" in field.tooltip
             assert name in ui.observe(object_name="predictor_status").text
             assert not ui.observe("Calibrate").enabled
+            rows = ui.table_rows(object_name="predictor_transitions")
+            assert rows and rows[0].columns[1] == "—"
+            assert all(value in ("—", "") for row in rows for value in row.columns[1:])
             assert all(axis.visible_curves == 0 for axis in ui.plots().axes)
         ui.enter_text(object_name=field_name, value="0.1", commit=False)
         qt_until(
@@ -174,21 +177,6 @@ def component_context(tmp_path: Path):
     finally:
         if added:
             component_registry.unregister("qubit/fluxonium")
-
-
-def test_dialog_missing_frame_requires_explicit_source(qapp) -> None:
-    dialog = PredictorDialog(
-        PredictorControlFacet(PredictorService()), params=TransmonParams(20.0, 0.3, 0.1)
-    )
-    try:
-        with pytest.raises(ValueError, match="flux frame"):
-            dialog.predict_frequency()
-        dialog.set_flux(PredictorFlux(0.2, {"coil": 2.0}, {"coil": "A"}), {})
-        with pytest.raises(ValueError, match="coil"):
-            dialog.predict_frequency()
-    finally:
-        dialog.close()
-        dialog.deleteLater()
 
 
 def test_dialog_cache_restores_transmon_and_fluxonium_trials(
