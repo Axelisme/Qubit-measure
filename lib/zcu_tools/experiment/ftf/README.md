@@ -1,6 +1,6 @@
 # FTF environment composition
 
-**Last updated:** 2026-10-28 (UTC), three-loop flux pulses
+**Last updated:** 2026-10-28 (UTC), flux-pulse reset validation
 
 **讀者：** lab-author、framework-dev、agent。FTF 環境的組裝、數值接線與 acquisition 設定。
 
@@ -345,6 +345,35 @@ fixed-DC projection. Large excursions can leave that subspace. Users must check
 local and retained-level convergence for their excursion and ramp; these routes
 do not certify reset fidelity or nonadiabatic accuracy. Small-signal
 `DriveLine.operator: flux` remains a separate fixed-DC derivative control.
+
+#### Reset interpretation
+
+A reset sequence ramps to a park flux, holds there, returns to the snapshot DC,
+and starts terminal readout after the return. Disable drift when comparing hold
+times. Compute park Gibbs weights from `JointModel.eigensystem(park_flux)` at the
+configured temperature. Adiabatic return maps those energy-index populations
+back to DC. It does not rethermalize them to the DC Gibbs state. In a two-state
+model, the hold approaches park equilibrium with
+`T1 = 1 / (rates[0,1] + rates[1,0])`, where `rates = joint.rates(park_flux)`.
+A larger park gap alone does not guarantee a shorter T1. Check the rates too.
+
+`tests/experiment/ftf/test_flux_reset.py` exercises synthetic templates through
+`plan_template` and `Engine.evolve`, observing the density at terminal readout
+start. The drift-free two-state fixture uses F1 DC 0.5, park 0.4, 50 mK,
+`q_cap=1e6`, `xqp=1e-3`, and 8 ns sampled cosine ramps. Spectator loops retain
+one state each and charge couplings are zero. Park T1 is about 92 ns versus
+129 microseconds at DC. Holds of zero, one and twelve park T1 approach the
+analytic two-population relaxation curve within 0.005 absolute population.
+The long hold returns ground population about 0.829, above DC equilibrium 0.585.
+
+The constant-envelope control jumps to park and back at the same terminal time.
+Its longer park exposure does not remove the sudden return's basis rotation.
+The test compares its full DC density with `V_park diag(p_Gibbs) V_park†` within
+0.002 per matrix entry. Its ground population is about 0.601, rather than 0.829.
+This contrast verifies the existing sudden and adiabatic mapping semantics.
+The short ramps do not establish physical adiabaticity. These small-model checks
+also do not certify local/retained-level convergence, ADC reset fidelity, or
+large-excursion device accuracy.
 
 ### Cavity drives
 
