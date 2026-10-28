@@ -9,6 +9,7 @@ import pytest
 from filelock import FileLock, Timeout
 from pydantic import TypeAdapter
 from zcu_tools.resources.entry import AnalyzedPayload, LedgerEvent, RecordsLedger
+from zcu_tools.resources.file_lock import lock_path_for
 
 
 def _event(entry_id: str) -> LedgerEvent:
@@ -224,7 +225,7 @@ def test_dependency_check_propagates_nonmissing_failures(
         with pytest.raises(ValueError, match="missing format"):
             ledger.dependencies_exist((event.id,))
     elif failure == "lock":
-        with FileLock(str(path) + ".lock"), pytest.raises(Timeout):
+        with FileLock(str(lock_path_for(path))), pytest.raises(Timeout):
             ledger.dependencies_exist((event.id,))
     else:
         attachment = path.parent / f"{event.id}.json"

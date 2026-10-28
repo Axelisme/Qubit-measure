@@ -92,6 +92,14 @@ def pytest_configure(config: pytest.Config) -> None:
     config.add_cleanup(directory.cleanup)
 
 
+@pytest.fixture(autouse=True)
+def isolated_lock_runtime(
+    tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Keep resource locks from every owner inside a pytest-owned runtime root."""
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path_factory.mktemp("lock-runtime")))
+
+
 @pytest.fixture(scope="module", autouse=True)
 def synthetic_parameter_schema_policy():
     """Bootstrap the framework suite with a synthetic version, restoring state.
