@@ -17,6 +17,17 @@ def validate_secondary_threshold(secondary_threshold: float) -> None:
         raise ValueError("secondary_threshold must be finite and in [0,1]")
 
 
+def secondary_exceeds_threshold(
+    secondary_fractions: NDArray[np.float64], secondary_threshold: float
+) -> NDArray[np.bool_]:
+    """Flag signed fractions strictly above a validated finite [0,1] threshold.
+
+    T1FitResult and T1ChannelCurves use this rule for sample and dense arrays.
+    Preserve array shape; negative and equal-to-threshold values are not flagged.
+    """
+    return secondary_fractions > secondary_threshold
+
+
 class ManifoldPrediction(NamedTuple):
     """Intrinsic prediction arrays in input flux order.
 

@@ -28,6 +28,7 @@ from .fit import (
     T1FitParams,
     T1FitResult,
 )
+from .forward import secondary_exceeds_threshold
 
 MechanismName = Literal["capacitive", "quasiparticle", "inductive"]
 
@@ -408,7 +409,9 @@ class T1ChannelCurves:
     @property
     def non_single_exponential(self) -> NDArray[np.bool_]:
         """Mark dense fractions strictly above secondary_threshold."""
-        return self.secondary_fractions > self.secondary_threshold
+        return secondary_exceeds_threshold(
+            self.secondary_fractions, self.secondary_threshold
+        )
 
 
 @dataclass(frozen=True, slots=True)

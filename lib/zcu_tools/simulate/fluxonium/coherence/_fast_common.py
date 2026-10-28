@@ -1,4 +1,4 @@
-"""Shared spectral admission and native-operator cache for both T1 forwards."""
+"""Shared spectral admission, native cache and energy-basis sweep for T1."""
 
 from collections.abc import Callable, Sequence
 from functools import lru_cache
@@ -187,6 +187,66 @@ def t1_operators(
     return NativeT1Operators(
         lc_diag, cos_phi, sin_phi, n_op, phi_op, cos_half, sin_half, float(fx.EJ)
     )
+
+
+class T1BasisSweep(NamedTuple):
+    """Energy-basis loss operators in input flux order.
+
+    energies holds energy/h in GHz, shape (N,qub_dim), ascending per flux.
+    operators maps requested n/phi/dHdflux/sinhalf keys to (N,qub_dim,qub_dim)
+    matrices. Charge n is complex; the other operators are real.
+    Operator units follow NativeT1Operators; dHdflux is GHz per reduced flux.
+    """
+
+    energies: NDArray[np.float64]
+    operators: dict[str, NDArray[np.float64] | NDArray[np.complex128]]
+
+
+def sweep_t1_basis(
+    native: NativeT1Operators,
+    fluxs: NDArray[np.float64],
+    qub_dim: int,
+    need: set[str],
+) -> T1BasisSweep:
+    """Diagonalize H_LC-EJ*cos(phi+2*pi*flux) and transform requested losses.
+
+    The pair and manifold fast forwards supply cached native operators, a 1D
+    reduced-flux grid and retained qub_dim. Only keys in need are transformed:
+    n, phi, dHdflux and sinhalf. Return energies and operators in flux order;
+    inputs and cached arrays are not changed. Eigensolver failures propagate.
+    """
+    beta = 2.0 * np.pi * fluxs
+    cb = np.cos(beta)[:, None, None]
+    sb = np.sin(beta)[:, None, None]
+    hamiltonians = np.diag(native.lc_diag)[None] - native.ej * (
+        native.cos_phi[None] * cb - native.sin_phi[None] * sb
+    )
+    energies, vectors = np.linalg.eigh(hamiltonians)
+    vectors = vectors[:, :, :qub_dim]
+    adjoint = vectors.conj().swapaxes(-1, -2)
+
+    # Real operators stay real; charge retains its complex matrix elements.
+    operators: dict[str, NDArray[np.float64] | NDArray[np.complex128]] = {}
+    if "n" in need:
+        operators["n"] = adjoint @ (native.n_op[None] @ vectors)
+    if "phi" in need:
+        operators["phi"] = adjoint @ (native.phi_op[None] @ vectors)
+    if "dHdflux" in need:
+        derivative = (
+            -2
+            * np.pi
+            * native.ej
+            * (native.sin_phi[None] * cb + native.cos_phi[None] * sb)
+        )
+        operators["dHdflux"] = adjoint @ (derivative @ vectors)
+    if "sinhalf" in need:
+        half_beta = 0.5 * beta
+        half_sine = (
+            native.sin_half[None] * np.cos(half_beta)[:, None, None]
+            + native.cos_half[None] * np.sin(half_beta)[:, None, None]
+        )
+        operators["sinhalf"] = adjoint @ (half_sine @ vectors)
+    return T1BasisSweep(energies[:, :qub_dim], operators)
 
 
 def validate_temperature(

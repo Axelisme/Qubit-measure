@@ -1,6 +1,6 @@
 # Fluxonium coherence
 
-**Last updated:** 2026-10-28，manifold population-decay modes
+**Last updated:** 2026-10-28，pair/manifold 共用 energy-basis sweep
 
 **讀者：** framework-dev、agent。查閱 pair lifetime、manifold modes 與 Purcell 的計算邊界。
 
@@ -9,7 +9,8 @@
 `calculate_eff_t1_vs_flux_fast` 保留兩能階的 equilibrium lifetime，
 `T1=1/(Γ10+Γ01)`。其他 transition 可由 `i, j` 指定。
 `calculate_manifold_t1_vs_flux_fast` 納入最低 `qub_dim` 個能階的所有 pair。
-兩者共用 spectral density、channel options、native operator cache 與溫度驗證。
+兩者共用 spectral density、channel options、native operator cache、energy-basis sweep 與溫度驗證。
+Sweep 只轉換所需 loss operators。Pair 與 manifold 各自合成 equilibrium 與 directional rates。
 時間使用 ns，能量使用 GHz，溫度使用 K。
 
 Manifold 以 `R[target,source]` 建立 directional rates，再以

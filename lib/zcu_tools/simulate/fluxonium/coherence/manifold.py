@@ -12,6 +12,7 @@ from ._fast_common import (
     NoiseChannel,
     SpectralDensity,
     resolve_channels,
+    sweep_t1_basis,
     t1_operators,
     validate_temperature,
 )
@@ -72,7 +73,12 @@ def calculate_manifold_t1_vs_flux_fast(
     channels = resolve_channels(noise_channels, *params)
     if not len(fluxs):
         return []
-    energies, operators = _manifold_operators(params, fluxs, cutoff, qub_dim)
+    energies, operators = sweep_t1_basis(
+        t1_operators(params, cutoff, qub_dim),
+        fluxs,
+        qub_dim,
+        {key for key, _ in channels},
+    )
     rates = np.zeros((len(fluxs), qub_dim, qub_dim))
     for lower in range(qub_dim):
         for upper in range(lower + 1, qub_dim):
@@ -92,35 +98,6 @@ def calculate_manifold_t1_vs_flux_fast(
         _population_modes(rate, energy, float(temperature))
         for rate, energy, temperature in zip(rates, energies, temperatures, strict=True)
     ]
-
-
-def _manifold_operators(
-    params: tuple[float, float, float],
-    fluxs: NDArray[np.float64],
-    cutoff: int,
-    qub_dim: int,
-) -> tuple[NDArray[np.float64], dict[str, NDArray[np.complex128]]]:
-    """Build all five loss operators in the retained native energy basis."""
-    lc, cos_phi, sin_phi, charge, phase, cos_half, sin_half, ej = t1_operators(
-        params, cutoff, qub_dim
-    )
-    beta = 2 * np.pi * fluxs[:, None, None]
-    cosine, sine = np.cos(beta), np.sin(beta)
-    hamiltonians = np.diag(lc)[None] - ej * (cos_phi * cosine - sin_phi * sine)
-    energies, vectors = np.linalg.eigh(hamiltonians)
-    vectors = vectors[:, :, :qub_dim]
-    adjoint = vectors.conj().swapaxes(-1, -2)
-    native = {
-        "n": charge,
-        "phi": phase,
-        "dHdflux": -2 * np.pi * ej * (sin_phi * cosine + cos_phi * sine),
-        "sinhalf": sin_half * np.cos(beta / 2) + cos_half * np.sin(beta / 2),
-    }
-    operators = {
-        name: np.asarray(adjoint @ operator @ vectors, dtype=np.complex128)
-        for name, operator in native.items()
-    }
-    return energies[:, :qub_dim], operators
 
 
 def _directional_spectrum(

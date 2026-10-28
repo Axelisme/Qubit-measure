@@ -25,7 +25,6 @@ are the five Fluxonium T1 channels; an unsupported channel name fast-fails.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import Any
 
 import numpy as np
 from numpy.typing import NDArray
@@ -36,6 +35,7 @@ from ._fast_common import (
     UnsupportedNoiseChannelError,
     UnsupportedNoiseOptionError,
     resolve_channels,
+    sweep_t1_basis,
     t1_operators,
     validate_temperature,
 )
@@ -90,9 +90,7 @@ def calculate_eff_t1_vs_flux_fast(  # noqa: PLR0913
 
     # Flux-independent native operators — built once and memoised across calls that
     # share (params, cutoff, qub_dim) (see t1_operators).
-    lc_diag, cos_phi, sin_phi, n_op, phi_op, cos_half, sin_half, EJ_val = t1_operators(
-        params, cutoff, qub_dim
-    )
+    native = t1_operators(params, cutoff, qub_dim)
 
     chans = resolve_channels(noise_channels, EJ, EC, EL)
     # Which flux-dependent operators are actually needed (skip building unused ones).
@@ -102,40 +100,7 @@ def calculate_eff_t1_vs_flux_fast(  # noqa: PLR0913
     if n == 0:
         return np.empty(0, dtype=np.float64)
 
-    # --- Batched per-flux eigensolve ------------------------------------------------
-    # Stack H(flux) = H_LC - EJ*cos(phi + beta) for all fluxes into (N, dim, dim) and
-    # diagonalise in one np.linalg.eigh call (it vmaps over the leading axis). beta has
-    # shape (N,); broadcasting (N,1,1)*(dim,dim) builds the stack without a Python loop.
-    beta = 2.0 * np.pi * fluxs  # (N,)
-    cb = np.cos(beta)[:, None, None]  # (N,1,1)
-    sb = np.sin(beta)[:, None, None]
-    Hq = np.diag(lc_diag)[None] - EJ_val * (cos_phi[None] * cb - sin_phi[None] * sb)
-    evals_full, evecs_full = np.linalg.eigh(Hq)  # (N,dim), (N,dim,dim)
-    evals = evals_full[:, :qub_dim]  # (N, qub_dim)
-    evecs = evecs_full[:, :, :qub_dim]  # (N, dim, qub_dim)
-    evecs_h = np.conj(np.swapaxes(evecs, -1, -2))  # (N, qub_dim, dim)
-
-    def _to_eigbasis(op: NDArray[Any]) -> NDArray[Any]:
-        # evecs^H @ op @ evecs, batched over flux: (N,d,d)->(N,qub,qub).
-        return evecs_h @ (op[None] @ evecs)
-
-    # Operator matrices are complex or real depending on the channel; NDArray[Any]
-    # is honest here since some ops (phi, dHdflux, sinhalf) are float64.
-    ops: dict[str, NDArray[Any]] = {}
-    if "n" in need:
-        ops["n"] = _to_eigbasis(n_op)
-    if "phi" in need:
-        ops["phi"] = _to_eigbasis(phi_op)
-    if "dHdflux" in need:
-        # dH/dflux = -2*pi*EJ*sin(phi + beta) (recombined, no sinm), stacked over flux.
-        dHdflux = -2 * np.pi * EJ_val * (sin_phi[None] * cb + cos_phi[None] * sb)
-        ops["dHdflux"] = evecs_h @ (dHdflux @ evecs)
-    if "sinhalf" in need:
-        bh = 0.5 * beta  # sin(phi/2 + pi*flux)
-        cbh = np.cos(bh)[:, None, None]
-        sbh = np.sin(bh)[:, None, None]
-        sinhalf = sin_half[None] * cbh + cos_half[None] * sbh
-        ops["sinhalf"] = evecs_h @ (sinhalf @ evecs)
+    evals, ops = sweep_t1_basis(native, fluxs, qub_dim, need)
 
     # --- Per-channel Fermi rates, vectorised over flux -------------------------------
     # omega = 2*pi*(E_i - E_j) is now a length-N vector; the spectral densities are
