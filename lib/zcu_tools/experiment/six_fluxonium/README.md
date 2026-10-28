@@ -1,6 +1,6 @@
 # Six independent fluxonium cavities
 
-**Last updated:** 2026-10-28 (UTC), projective routing and multi-ADC preparation
+**Last updated:** 2026-10-28 (UTC), projective readout rules and pruning limits
 
 **Readers:** framework-dev, lab-author, agent. Build and acquire six independent cavities through the normal simulation SoC.
 
@@ -72,9 +72,13 @@ losing their logical event identity. ADCs observing the same event share its
 CTMC path. Independent cavities keep separate histories and sampling streams.
 Projection uses rank-1 DC energy states, not groups inferred from IQ separation.
 ADC jumps during herald affect IQ but do not feed back into later evolution.
+This does not add MIST or data-dependent feedback for active reset. Trigger
+pairing and nonterminal sample-window rejection follow the shared
+[readout planner](../README.md#explicit-simulation-environments).
 Each qubit's `numerics.projection_prune_floor` controls its own global history
-pruning. Zero retains every history, including zero-weight histories. A positive
-floor discards lower weights and renormalizes survivors. Empty survivors raise
+pruning. It accepts finite `0 <= floor < 1` and defaults to `1e-9`.
+Zero retains every history, including zero-weight histories. A positive floor
+discards lower weights and renormalizes survivors. Empty survivors raise
 `ValueError` naming the point and floor.
 Pulse ADC6 uses Q1's receiver gain, offset, phase, time of flight and noise PSD.
 Its physical cavity and incident-field calibration follow the frequency route.

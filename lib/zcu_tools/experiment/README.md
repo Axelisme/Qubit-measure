@@ -1,6 +1,6 @@
 # `zcu_tools.experiment` — 實驗層
 
-**Last updated:** 2026-10-28
+**Last updated:** 2026-10-28, projective readout ownership
 
 **讀者：** framework-dev。實驗介面、Run 資料、持久化映射與裝置操作邊界。
 
@@ -71,7 +71,7 @@ sources independently of backend lifetime.
 
 `readout_plan.py` owns shared QICK drive/readout waveform conversion without
 settings or circuit physics. `drive_track` detaches microwave slots with the
-same support, carrier-phase and envelope semantics for both environments.
+same support, carrier-phase and envelope semantics across the three environments.
 `classify_readout` separates terminal blocks, triggered nonterminal projective
 reads and untriggered cavity drives at each point. Projective reads group the
 coherent tones and bound receiver triggers at one projection time. A block owns
@@ -85,6 +85,28 @@ contents. `readout_contents` retains the terminal-only planning contract.
 The shared planner converts common-origin carrier phases to pulse-local phases. Environment planners supply
 `ReadoutDrive` calibration and retain responsibility for receiver binding,
 physical models, evolution and sampling.
+
+Before evolution or sampling, each environment also requires equal projective
+counts and per-ADC/event grid counts across templates in one numeric preparation.
+Conflicts name the templates and layouts. Six applies this rule per routed
+physical source, not across independent cavities. Single's public `preflight`
+validates a cavity's complete ADC observation set; `prepare_readouts` builds one
+shared projection history. Six preflights all routed sources before preparing any.
+All ADCs retain the same logical-event axis, using empty grids for events they
+do not observe. No ADC must observe terminal, but each must observe some event.
+
+Environment runtimes project the density at each triggered nonterminal block's
+start and continue each rank-1 DC energy outcome through evolution. ADC samples
+one complete outcome history per shot and shares it between herald and terminal
+reads. Integrated counts flatten the outcome and terminal-state axes. ADC CTMC
+jumps during herald affect IQ only, not later density evolution. This excludes
+MIST, IQ-clustered projection and data-dependent feedback for active reset.
+Pruning thresholds and diagnostics belong to the
+[single](single_fluxonium/README.md#complete-timelines),
+[six](six_fluxonium/README.md#routing-and-acquisition) and
+[FTF](ftf/README.md#cavity-drives) settings/runtime contracts.
+Templates without projective reads retain their existing raw, integrated and
+decimated outputs.
 
 ## 實驗介面與資料
 

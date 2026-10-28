@@ -1,6 +1,6 @@
 # Single-fluxonium acquisition
 
-**Last updated:** 2026-10-28 (UTC), complete-set multi-ADC preparation
+**Last updated:** 2026-10-28 (UTC), projective readout rules and preparation lifetime
 
 **Readers:** framework-dev, lab-author, agent. Compose complete fluxonium timelines with one physical readout cavity.
 
@@ -37,7 +37,11 @@ The planner never forces the endpoint back to DC.
 
 A nonterminal readout block with an ADC trigger causes one projective read at
 its pulse start. Repeated triggers on that block share one projection and CTMC
-path. `SingleFluxoniumPlan.read_events` retains projective blocks followed by
+path. The shared [readout planner](../README.md#explicit-simulation-environments)
+binds triggers from this block's start until the next block starts, including
+ringdown after pulse end. The last nonterminal sample must precede the next
+block start; violations name the block and trigger.
+`SingleFluxoniumPlan.read_events` retains projective blocks followed by
 terminal, with common-origin phases and channel-local grids. An unobserved
 terminal block has empty grids but still ends evolution and contributes its
 state to integrated counts. Untriggered earlier blocks remain `cavity_drives`;
@@ -196,6 +200,11 @@ Keys include settings, the full snapshot, numeric/dependency versions, layout,
 all borrowed control/readout arrays and every waveform sample/time. Buffers are
 reread on each lookup. Evolution validates reuse against its own routing policy.
 Noise, counts, round identities and measured IQ are never cached.
+Projection continuation densities exist only while preparing the spans of one
+timeline. No later shot, round or acquisition starts from a previous outcome's
+terminal density. Reuse of immutable outcome weights, event populations and
+conditional sums follows the complete-preparation rules above. It does not
+carry forward a sampled herald result.
 Reassigning `source.settings` to validated settings changes the snapshot's
 settings identity and clears preparations on the next lookup. It does not
 replace the startup driver or reset its value. Replay captures the current

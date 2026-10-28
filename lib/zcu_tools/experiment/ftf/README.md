@@ -1,6 +1,6 @@
 # FTF environment composition
 
-**Last updated:** 2026-10-28 (UTC), projective outcome continuation and telemetry
+**Last updated:** 2026-10-28 (UTC), projective readout rules and preparation lifetime
 
 **讀者：** lab-author、framework-dev、agent。FTF 環境的組裝、數值接線與 acquisition 設定。
 
@@ -236,9 +236,14 @@ real acquire compile events with an empty scratch `NUMBA_CACHE_DIR`.
 ### Preparation reuse
 
 `open_acquire(request)` starts a session for a fixed request. Its
-`sample_round(snapshot, index)` reuses the preceding round's density and
-conditional response when the snapshot is equal. Every round draws a new stream.
+`sample_round(snapshot, index)` reuses the preceding round's noiseless event
+populations and conditional response when the snapshot is equal. Every round
+draws a new stream.
 Opening another acquire invalidates the old session and drops its references.
+Projection continuation densities exist only during span preparation. A later shot, round or acquire does not inherit a preceding
+outcome's terminal state or sampled herald result. Immutable outcome weights,
+event populations and conditional sums follow the complete-preparation reuse
+rules below. See [ADR-0078](../../../../docs/adr/0078-evolution-module-boundary.md#損耗漂移下的結構與-preparation-lifetime).
 A source-owned 4 MiB LRU retains owned, read-only probabilities, conditional sums,
 content mappings, path diagnostics and integrated sampling plans across acquires.
 Its key reads full current C1 content, layout, mode, reps and readout values,
@@ -340,7 +345,7 @@ outcome's later quantum evolution. This approximation excludes active reset and
 measurement-induced state transitions.
 
 `numerics.projection_weight_floor` defaults to `1e-9`. Runtime removes global
-history weights below this value and redistributes the survivors proportionally.
+history weights below this value and renormalizes surviving weights proportionally.
 Zero disables pruning, including zero-weight histories. Removing all histories
 raises `ValueError` naming the point and floor. The schema accepts finite values
 in `[0, 1)`. Telemetry records retained counts and removed probability.

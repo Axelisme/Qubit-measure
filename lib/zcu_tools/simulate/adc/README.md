@@ -1,6 +1,6 @@
 # ADC probability and readout contracts
 
-**Last updated:** 2026-10-28 (UTC), projection-conditioned read events
+**Last updated:** 2026-10-28 (UTC), projection histories and partial event observations
 
 **讀者：** framework-dev、agent。ADC 機率、讀出訊號與 interval moment 契約。
 
@@ -153,7 +153,10 @@ is applied once per sample, not once per tone. Responses concatenate grids in
 event order. `ReadoutEvent.grids=()` keeps an event's position when that ADC
 does not observe it. It emits no read column. All ADCs and projection populations
 use the same event axis, while each ADC keeps its own observed trigger order.
-Each ADC content still requires at least one observed grid across its events.
+All ADCs may omit terminal observations. The terminal event still occupies the
+last position in the common axis and contributes its populations to integrated
+counts, but produces no terminal read column. Each ADC content still requires
+at least one observed grid across its events.
 `ConditionalSums.event_indices` maps each emitted read to its original event. `ConditionalReadout` computes state-conditioned responses once
 per distinct content. Integrated flat (`envelope=None`), common-start mux
 contents sum each carrier's linear response through the same line. Different
@@ -243,8 +246,10 @@ and one event. A single outcome consumes no extra outcome RNG draw. Its raw,
 trace and integrated outputs retain the previous single-event RNG order,
 including shared-event multi-grid and multi-ADC arrangements.
 
-The experiment runtime supplies rank-1 diagonal projections in the readout
-basis. It does not group states by IQ distinguishability. ADC transitions during
+The experiment runtime classifies readout blocks, prunes projection histories
+and supplies rank-1 diagonal projections in the retained DC energy basis.
+ADC neither chooses projection times nor applies the pruning floor. It does not
+group states by IQ distinguishability. ADC transitions during
 a herald event affect that event's IQ only. They do not feed back into the
 populations supplied for later events.
 
