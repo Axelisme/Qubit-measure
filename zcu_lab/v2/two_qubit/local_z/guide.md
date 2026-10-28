@@ -1,14 +1,14 @@
 # Local Z
 
+**讀者：** operator、agent。從 GUI 或 MCP 量兩個 target 的 local-Z slope，審閱並套用 correction pair。
+
+**Last updated:** 2026-10-21
+
 GE centers come only from the saved readout cfg at `roles.f1_tone` and
 `roles.f2_tone`. Circle classifiers need no radius for this analysis. There is
 no manual center override or point-parameter calibration lookup. Missing or
 linear classifiers permit raw acquisition; analysis retains an ADC-named
 reason and does not infer a phase or fit.
-
-**讀者：** operator、agent。從 GUI 或 MCP 量兩個 target 的 local-Z slope，審閱並套用 correction pair。
-
-**Last updated:** 2026-10-21
 
 Readout 有 `$mux.module.readout` slot 時引用 library 的完整 tones 與 scalar 設定。缺 slot 時從 blank mux 範本開始，須手填全部必要讀出欄位。
 
