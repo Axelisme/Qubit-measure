@@ -10,9 +10,12 @@ from .coherence_fast import (
     calculate_eff_t1_fast,
     calculate_eff_t1_vs_flux_fast,
 )
+from .manifold import Mode, calculate_manifold_t1_vs_flux_fast
 from .purcell import calculate_purcell_t1_vs_flux
 
 __all__ = [
+    "Mode",
+    "calculate_manifold_t1_vs_flux_fast",
     # Coherence helpers backed by scqubits.
     "calculate_eff_t1",
     "calculate_eff_t1_vs_flux",

@@ -22,6 +22,7 @@ from .fit import (
     T1FitResult,
     fit_t1_noise_params,
 )
+from .forward import ManifoldPrediction, predict_manifold_t1
 from .models import (
     MechanismName,
     MechanismOrParamName,
@@ -96,6 +97,7 @@ __all__ = [
     "F01FluxCorrectionResult",
     "FluxResidualWeighting",
     "FluxWeightingMode",
+    "ManifoldPrediction",
     "MechanismName",
     "MechanismOrParamName",
     "MeasurementErrorPolicy",
@@ -163,6 +165,7 @@ __all__ = [
     "plot_t1_vs_elements",
     "plot_t1_with_sample",
     "prepare_t1_curve_data",
+    "predict_manifold_t1",
     "qp_spectral_density",
     "run_t1_curve_analysis",
     "save_t1_curve_figure",
