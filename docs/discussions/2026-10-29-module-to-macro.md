@@ -62,3 +62,15 @@ advisor 給的選項是 A 現在做原型、B 晚點評估、C 不做，建議 B
 - QICK 0.2.436 `asm_v2.py`：`Macro`、`TimedMacro`、`_make_asm` 的 preprocess 與 translate 順序、`AsmV2.extend_macros`。
 - repo：`lib/zcu_tools/program/v2/modules/`（Module 契約與 19 個具體類別）、`lib/zcu_tools/program/v2/macro/`、`lib/zcu_tools/program/v2/ir/`、`lib/zcu_tools/program/v2/simulation/`（`vector.py`、`timeline.py`、`frontend.py`）、`docs/adr/draft/simulation-environments.md`。
 - 可行性調查與兩個原型為未入庫的工作檔；本文已寫入結論與必要事實。
+
+## 後記（2026-10-29，第二個原型之後）
+
+更正：上文把方案 1 寫成「讀 ModularProgram 產生、與舊 Module 幾乎同形的語意 macro」，與使用者的意思不同。使用者更正：「不是產生macro，而是使用，我預期實驗作者不怎麼要改寫法，只是module變成繼承macro，program內部解析方式不同而已」。方案 1 是 Module 類別本身繼承 QICK Macro，作者照舊寫 `Pulse(name, cfg)` 等；program 直接把這些物件放進 macro 序列，時間由 QICK preprocess 解析，模擬 frontend 讀這些 module-macro 物件。第二個原型照這個意思做。
+
+第二個原型的結果（工作檔未入庫，結論如下）：
+
+- 9 組設定 × 2 種方案，18 個 TimelineTemplate 與現行 Module frontend 的結果逐欄相等。9 組是純量、掃 pulse 長度、掃 delay、Join 一支掃長度、Repeat、LoadValue 表派發的 Branch、ScanWith、PulseReadout 最終讀出、MuxReadout 中途加最終讀出。兩種 frontend 都禁止讀 `prog.modules`，各自組出 template。
+- 方案 2（底層 macro）也能處理沒有 ModularProgram 祖先的程式，但會遺失資訊：兩個不同名稱的 Pulse 共用同一個 pulse cfg 時，registry 只留第一個名稱，第二個 pulse 的 source 還原錯誤（物理欄位相等）。ComputedPulse、TableLengthPulse、TablePulseReadout 需要額外的局部資料流與 template 更新解讀，原型沒有做完，不算成功。
+- 作者端程式：標準 zcu_lab 寫法在方案 1 預估 0 行改動；library 端仍要保留 `Module.init()` 的宣告時機、更新 factory，並處理 `run()` 回傳時間的契約、同一 instance 重用與 tag 相容。
+- 規模估計：方案 1 的模擬 frontend 約 800–1,200 行，Module／Macro 整合與時間層另約 400–700 行；方案 2 約 1,500–2,500 行，而且需要另訂發射來源的契約才能補回遺失的資訊。
+- 原型建議方案 1。是否修改 2026-10-14 的模擬器裁決，仍待使用者決定。
