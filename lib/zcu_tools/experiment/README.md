@@ -1,6 +1,6 @@
 # `zcu_tools.experiment` — 實驗層
 
-**Last updated:** 2026-10-27
+**Last updated:** 2026-10-28
 
 **讀者：** framework-dev。實驗介面、Run 資料、持久化映射與裝置操作邊界。
 
@@ -71,9 +71,15 @@ sources independently of backend lifetime.
 
 `readout_plan.py` owns shared QICK drive/readout waveform conversion without
 settings or circuit physics. `drive_track` detaches microwave slots with the
-same support, carrier-phase and envelope semantics for both environments. It partitions terminal readout and earlier cavity
-drives, detaches envelopes, deduplicates pulse/grid contents and converts
-common-origin carrier phases to pulse-local phases. Environment planners supply
+same support, carrier-phase and envelope semantics for both environments.
+`classify_readout` separates terminal blocks, triggered nonterminal projective
+reads and untriggered cavity drives at each point. Projective reads group the
+coherent tones and bound receiver triggers at one projection time. A block owns
+triggers from its start until the next block start, including ringdown after
+pulse end. Nonterminal sampling must finish strictly before the next block.
+`read_event_contents` detaches and deduplicates each trigger's own pulse/grid
+contents. `readout_contents` retains the terminal-only planning contract.
+The shared planner converts common-origin carrier phases to pulse-local phases. Environment planners supply
 `ReadoutDrive` calibration and retain responsibility for receiver binding,
 physical models, evolution and sampling.
 

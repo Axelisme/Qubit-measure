@@ -190,7 +190,7 @@ def test_cavity_drives_are_classified_per_point_with_calibrated_envelopes() -> N
 
 
 @pytest.mark.parametrize("trigger", [0.007999999999, 0.0])
-def test_terminal_readout_rejects_first_trigger_before_latest_block(trigger) -> None:
+def test_readout_rejects_trigger_without_an_incident_pulse_window(trigger) -> None:
     import zcu_tools.experiment.ftf as ftf
 
     base = template()
