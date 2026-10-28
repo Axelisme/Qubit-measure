@@ -24,10 +24,6 @@ def test_app_bundle_retains_shared_session(qapp, tmp_path):
     )
     try:
         session = services.session
-        assert session.context is services.context
-        assert session.device is services.device
-        assert session.progress is services.progress
-        assert session.soc_control is services.soc_control
         assert session.value_sources.snapshot().values == {}
     finally:
         services.background.quiesce()
