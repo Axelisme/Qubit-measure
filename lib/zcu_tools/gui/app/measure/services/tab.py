@@ -16,7 +16,7 @@ from zcu_tools.gui.form_adapter import Form, FormContext
 
 from ..adapter import AdapterGuide, AnalysisMode
 from ..writeback import WritebackDraft
-from .plot_lifecycle import release_retired_plots
+from .pane_commit import retire_resources
 from .ports import (
     AnalysisPaneSnapshot,
     PostAnalysisPaneSnapshot,
@@ -35,7 +35,7 @@ if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.state import State
     from zcu_tools.resources.entry import PointStorageBinding
 
-    from .ports import WritebackLifecyclePort
+    from ..writeback import WritebackService
     from .tab_form import TabFormResources, TabFormSources
 
 
@@ -68,7 +68,7 @@ class TabService:
         self,
         state: State,
         registry: Registry,
-        writeback: WritebackLifecyclePort,
+        writeback: WritebackService,
         cfg_resources: TabFormResources,
         form_sources: Callable[[Mapping[str, str] | None], TabFormSources],
     ) -> None:
@@ -80,8 +80,7 @@ class TabService:
         """
         self._state = state
         self._registry = registry
-        # The tab lifecycle previews pane drafts and tears them down on close via
-        # one narrow port, without depending on the concrete sibling service.
+        # Writeback owns draft previews; pane_commit owns retirement on close.
         self._writeback = writeback
         self._cfg_resources = cfg_resources
         self._form_sources = form_sources
@@ -281,13 +280,7 @@ class TabService:
         if self._state.is_tab_busy(tab_id):
             raise RuntimeError(f"Cannot close busy tab {tab_id!r}")
         self._cfg_resources.retire(tab_id)
-        retired = self._state.remove_tab(tab_id)
-        for draft in retired.writeback_drafts:
-            try:
-                self._writeback.teardown_draft(draft)
-            except Exception:
-                logger.exception("closed-tab draft teardown failed")
-        release_retired_plots(retired)
+        retire_resources(self._state.remove_tab(tab_id))
 
     def get_tab_analyze_result(self, tab_id: str) -> object | None:
         return self._state.get_tab(tab_id).analysis.result

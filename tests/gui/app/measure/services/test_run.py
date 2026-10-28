@@ -15,7 +15,6 @@ from __future__ import annotations
 
 from dataclasses import replace
 from typing import Any
-from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
@@ -36,6 +35,8 @@ from zcu_tools.gui.app.measure.events.tab import (
 from zcu_tools.gui.app.measure.services.operation_gate import (
     OperationKind,
 )
+from zcu_tools.gui.app.measure.services.pane_commit import commit_analysis, commit_run
+from zcu_tools.gui.app.measure.state import AnalysisPaneState, RunPaneState
 from zcu_tools.gui.event_bus import EventMeta, EventOrigin
 from zcu_tools.gui.expected_error import (
     ExpectedErrorCategory,
@@ -46,6 +47,8 @@ from zcu_tools.gui.session.types import ParameterContext
 
 from tests.gui.app.measure._cfg_fakes import parameter_capture
 from tests.gui.app.measure._form_fakes import make_form
+from tests.gui.app.measure._load_support import historical_metadata
+from tests.gui.app.measure._native_save_support import native_save_session
 from tests.gui.app.measure._synthetic import (
     SampleAdapter,
     SampleCfg,
@@ -117,10 +120,23 @@ def test_run_publishes_admitted_source_despite_later_global_change(
     q1, q2 = result_sources
     captured = None if context_free else q1
     tab = state.get_tab(tab_id)
-    state.update_tab_result(
-        tab_id, RunRecord(None, object()), parameters=q2, source_operation_id=91
+    commit_run(
+        state,
+        tab_id,
+        RunPaneState(
+            result=RunRecord(None, object()),
+            storage=q2.storage,
+            parameters=q2,
+            source_operation_id=91,
+        ),
     )
-    state.update_tab_analyze(tab_id, object(), None)
+    commit_analysis(
+        state,
+        tab_id,
+        AnalysisPaneState(
+            result=object(), plots=None, params=state.get_tab(tab_id).analysis.params
+        ),
+    )
     state.set_context(replace(state.session_env, parameters=captured))
     inputs = make_inputs(state, tab_id, adapter)
     assert inputs.parameters is captured
@@ -157,7 +173,7 @@ def test_run_publishes_admitted_source_despite_later_global_change(
     assert next_source.value("$source_qubit.rate") == 2.0
     assert tab.run.source_operation_id == next_token
 
-    state.clear_tab_results(tab_id)
+    commit_run(state, tab_id, RunPaneState())
     assert tab.run.result is None
     assert tab.run.parameters is None
     assert tab.run.source_operation_id is None
@@ -169,8 +185,15 @@ def test_cancelled_run_without_data_keeps_no_previous_source(
     state, tab_id, adapter = make_state(readiness=ContextReadiness.ACTIVE)
     q1, q2 = result_sources
     tab = state.get_tab(tab_id)
-    state.update_tab_result(
-        tab_id, RunRecord(None, object()), parameters=q1, source_operation_id=91
+    commit_run(
+        state,
+        tab_id,
+        RunPaneState(
+            result=RunRecord(None, object()),
+            storage=q1.storage,
+            parameters=q1,
+            source_operation_id=91,
+        ),
     )
     state.set_context(replace(state.session_env, parameters=q2))
     inputs = make_inputs(state, tab_id, adapter)
@@ -338,25 +361,28 @@ def test_run_finished_emits_outcome_finished():
     )
 
 
+@pytest.fixture
+def native_parameters(tmp_path, qapp):
+    with native_save_session(tmp_path, qapp) as session:
+        yield session.state.get_tab("tab").run.parameters
+
+
 @pytest.mark.parametrize("cancel_requested", [False, True])
 def test_result_commit_failure_settles_run_as_failed(
-    monkeypatch, caplog, cancel_requested: bool
+    native_parameters, caplog, cancel_requested: bool
 ) -> None:
     state, tab_id, adapter = make_state()
     svc, _gate, bg, handles = make_run_service(state)
     plots = make_plots()
     plots.subplots("trace")
-    token = svc.start_run(make_inputs(state, tab_id, adapter), plots=plots)
+    inputs = replace(make_inputs(state, tab_id, adapter), parameters=native_parameters)
+    token = svc.start_run(inputs, plots=plots)
     failure = RuntimeError("commit refused")
-    monkeypatch.setattr(
-        state,
-        "update_tab_result",
-        MagicMock(side_effect=failure),
-    )
+    adapter.save_stem.side_effect = failure
     if cancel_requested:
         assert svc.cancel_run()
     assert bg.last_on_done is not None
-    bg.last_on_done(RunRecord(None, object()))
+    bg.last_on_done(RunRecord(None, object(), metadata=historical_metadata()))
 
     outcome = handles.poll(token)
     assert outcome is not None and outcome.status == "failed"

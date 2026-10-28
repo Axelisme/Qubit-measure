@@ -11,6 +11,16 @@ from zcu_tools.gui.app.measure.events.tab import (
     TabInteractionChangedPayload,
     TabInteractionFact,
 )
+from zcu_tools.gui.app.measure.services.pane_commit import (
+    commit_analysis,
+    commit_post_analysis,
+    commit_run,
+)
+from zcu_tools.gui.app.measure.state import (
+    AnalysisPaneState,
+    PostAnalysisPaneState,
+    RunPaneState,
+)
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.event_bus import EventMeta, EventOrigin
 from zcu_tools.gui.expected_error import FailedPreconditionError
@@ -32,8 +42,14 @@ from tests.gui.session.ui._parameter_fakes import make_parameters
 def test_framework_session_drives_committed_result_and_one_terminal_operation(qapp):
     state = make_state()
     captured = make_parameters({"rate": 1.0})
-    state.update_tab_result(
-        "tab1", require_record(state.get_tab("tab1").run), parameters=captured
+    commit_run(
+        state,
+        "tab1",
+        RunPaneState(
+            result=require_record(state.get_tab("tab1").run),
+            storage=captured.storage,
+            parameters=captured,
+        ),
     )
     state.set_context(
         replace(state.session_env, parameters=make_parameters({"rate": 2.0}))
@@ -151,7 +167,16 @@ def test_plugin_record_failure_settles_failed_and_keeps_previous_result(qapp):
     previous_plots = make_plots()
     previous_plots.adopt("fit", Figure())
     previous_plots.finish()
-    state.update_tab_analyze("tab1", previous, previous_plots, source_operation_id=900)
+    commit_analysis(
+        state,
+        "tab1",
+        AnalysisPaneState(
+            result=previous,
+            plots=previous_plots,
+            params=state.get_tab("tab1").analysis.params,
+            source_operation_id=900,
+        ),
+    )
     handles = OperationHandles()
     writeback = MagicMock()
     bus = EventBus()
@@ -327,8 +352,26 @@ def test_cancelled_interaction_retains_previous_pane_operation_sources(qapp):
     state = make_state()
     primary = MagicMock(figure=None)
     post = MagicMock(figure=None)
-    state.update_tab_analyze("tab1", primary, None, source_operation_id=900)
-    state.update_tab_post_analyze("tab1", post, None, source_operation_id=901)
+    commit_analysis(
+        state,
+        "tab1",
+        AnalysisPaneState(
+            result=primary,
+            plots=None,
+            params=state.get_tab("tab1").analysis.params,
+            source_operation_id=900,
+        ),
+    )
+    commit_post_analysis(
+        state,
+        "tab1",
+        PostAnalysisPaneState(
+            result=post,
+            plots=None,
+            params=state.get_tab("tab1").post_analysis.params,
+            source_operation_id=901,
+        ),
+    )
     handles = OperationHandles()
     svc, _ = make_service(state, EventBus(), handles=handles)
     plugin = PluginDefinition(

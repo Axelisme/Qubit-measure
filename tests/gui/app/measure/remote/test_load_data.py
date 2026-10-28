@@ -13,6 +13,8 @@ from zcu_tools.gui.app.measure.adapter import Adapter
 from zcu_tools.gui.app.measure.remote.handlers.run_save import h_tab_load_data
 from zcu_tools.gui.app.measure.services import AdmissionDecision
 from zcu_tools.gui.app.measure.services.load import LoadDataError, LoadTabResultOutcome
+from zcu_tools.gui.app.measure.services.pane_commit import commit_run
+from zcu_tools.gui.app.measure.state import RunPaneState
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 
 from tests.experiment._saving_support import SavingCore, SavingResult
@@ -82,7 +84,7 @@ def test_registered_load_rejects_file_before_adapter_and_keeps_result(
         path.unlink()
     tab = fx.state.get_tab(tab_id)
     old = RunRecord(None, object())
-    fx.state.update_tab_result(tab_id, old)
+    commit_run(fx.state, tab_id, RunPaneState(result=old))
     previous = tab.run
     with pytest.raises(RemoteError) as caught:
         dispatch_handler(

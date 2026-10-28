@@ -8,12 +8,10 @@ only what the consumer uses; an existing implementer need not inherit the port.
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import (
     TYPE_CHECKING,
-    Any,
     Protocol,
     runtime_checkable,
 )
@@ -21,23 +19,16 @@ from typing import (
 from pydantic import JsonValue
 
 from zcu_tools.gui.form import FormPath
-from zcu_tools.gui.session.types import ParameterContext
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.adapter import AdapterCapabilities
     from zcu_tools.gui.app.measure.artifacts import ArtifactSectionSnapshot
     from zcu_tools.gui.app.measure.state import (
-        RetiredPaneResources,
-        Session,
         TabInteractionState,
     )
     from zcu_tools.gui.app.measure.writeback import WritebackItem
-    from zcu_tools.gui.session.types import SessionEnv
     from zcu_tools.plotting.figures import FigureCollection
-    from zcu_tools.plotting.plots import Plots
-    from zcu_tools.resources.entry.ledger_models import JsonObject
 
-    from ..writeback import WritebackDraft
     from .tab_input import TabInput
     from .workspace_types import WorkspaceTab
 
@@ -211,72 +202,3 @@ class TabLifecyclePort(Protocol):
     def dropped_input_paths(self, tab_id: str) -> tuple[FormPath, ...]:
         """Return paths discarded when creating this tab from saved Form input."""
         ...
-
-
-@runtime_checkable
-class WritebackLifecyclePort(Protocol):
-    """Writeback lifecycle surface used by result-owning panes.
-
-    The pane-owned opaque draft is the only contract; tab-level adapters are
-    removed.
-    """
-
-    def create_draft(
-        self,
-        items: Iterable[WritebackItem],
-        *,
-        parameters: ParameterContext | None,
-        experiment_name: str,
-        run_id: str | None = None,
-        device_snapshot: Mapping[str, JsonObject] | None = None,
-    ) -> WritebackDraft:
-        """Fix proposals, destination and native Run identity in one draft.
-
-        run_id is historical RunMetadata.run_id, even before Save, or None
-        without native evidence. Save does not change the draft's identity.
-        Record proposals supply opaque JSON. The framework does not interpret
-        fields or inject coordinates; adapters own record policy. device_snapshot
-        remains a detached Run fact, not an automatic source for record fields.
-        A module proposal that is not a concrete persistent Spec raises.
-        """
-        ...
-
-    def preview_draft(self, draft: Any) -> list[WritebackItem]: ...
-    def teardown_draft(self, draft: Any) -> None: ...
-
-
-@runtime_checkable
-class AnalyzeStatePort(Protocol):
-    """State reads and writes consumed by analyze and post-analyze services.
-
-    Result replacement returns detached resources for post-commit cleanup.
-    """
-
-    def is_tab_busy(self, tab_id: str) -> bool: ...
-
-    @property
-    def session_env(self) -> SessionEnv: ...
-
-    def get_tab(self, tab_id: str) -> Session[Any, Any, Any, Any]: ...
-
-    def set_tab_analyzing(self, tab_id: str, *, analyzing: bool) -> None: ...
-    def update_tab_analyze(
-        self,
-        tab_id: str,
-        analyze_result: object,
-        plots: Plots | None,
-        writeback_draft: object | None = None,
-        analyze_params_instance: object = ...,
-        *,
-        source_operation_id: int | None = None,
-    ) -> RetiredPaneResources: ...
-    def update_tab_post_analyze(
-        self,
-        tab_id: str,
-        post_analyze_result: object,
-        plots: Plots | None,
-        *,
-        post_analyze_params_instance: object = ...,
-        writeback_draft: object | None = None,
-        source_operation_id: int | None = None,
-    ) -> RetiredPaneResources: ...

@@ -27,9 +27,10 @@ from zcu_tools.gui.app.measure.adapter import (
 from zcu_tools.gui.app.measure.controller import Controller
 from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.remote import ControlOptions, RemoteControlAdapter
+from zcu_tools.gui.app.measure.services.pane_commit import commit_run
 from zcu_tools.gui.app.measure.services.results_comparison import build_comparison
 from zcu_tools.gui.app.measure.services.results_index import scan_results
-from zcu_tools.gui.app.measure.state import SessionEnv, State
+from zcu_tools.gui.app.measure.state import RunPaneState, SessionEnv, State
 from zcu_tools.gui.app.measure.ui.interactive_frontend import InteractiveFrontend
 from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 from zcu_tools.gui.event_bus import BaseEventBus
@@ -277,10 +278,16 @@ def host(tmp_path: Path, qapp, request) -> Iterator[Host]:
         ),
     )
     cfg = SavingCfg()
-    state.update_tab_result(
+    commit_run(
+        state,
         tab,
-        RunRecord(cfg, SavingCore().run(cfg, context=None), metadata=metadata),
-        parameters=captured,
+        RunPaneState(
+            result=RunRecord(
+                cfg, SavingCore().run(cfg, context=None), metadata=metadata
+            ),
+            storage=captured.storage,
+            parameters=captured,
+        ),
     )
     remote = RemoteControlAdapter(controller, ControlOptions(port=0), OwnerScheduler())
     link = ClientLink("native-analysis", token_required=False)

@@ -20,7 +20,7 @@ from zcu_tools.gui.plotting.explicit import QtPlotHost
 from zcu_tools.gui.session.context_types import CommandOrigin
 
 from .guard import GuardError, TabAction
-from .plot_lifecycle import discard_unpublished_plots
+from .pane_commit import discard_unpublished_plots
 
 logger = logging.getLogger(__name__)
 _GUI_ORIGIN = CommandOrigin("gui")

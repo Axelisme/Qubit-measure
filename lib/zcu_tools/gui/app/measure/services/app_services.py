@@ -235,14 +235,13 @@ def build_app_services(  # noqa: PLR0913
         ContextControlFacet(context=context),
         arb_names=arb_waveform.list_data_keys,
     )
-    # TabService composes the tab render model and needs the writeback query port
+    # TabService composes the tab render model and needs the writeback owner
     # (built above) — built after writeback (read-model dependency, ADR-0067).
     tab = TabService(state, registry, writeback, tab_forms, form_sources)
     workspace = WorkspaceService(state, tab, bus)
     guard = GuardService(state, access=access)
     load = LoadService(
         state,
-        writeback,
         context=ContextControlFacet(context=context),
         captured_parameters=captured_parameters,
     )
@@ -251,7 +250,6 @@ def build_app_services(  # noqa: PLR0913
         session.runner,
         bus,
         handles,
-        writeback,
         gate=operation_gate,
         devices=device.get_connected_devices,
         refresh_devices=device.refresh_connected_device_info,

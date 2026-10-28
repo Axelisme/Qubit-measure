@@ -30,8 +30,18 @@ from zcu_tools.gui.app.measure.events.tab import (
     TabInteractionFact,
 )
 from zcu_tools.gui.app.measure.registry import Registry
+from zcu_tools.gui.app.measure.services.pane_commit import (
+    commit_analysis,
+    commit_post_analysis,
+    commit_run,
+)
 from zcu_tools.gui.app.measure.services.tab import TabService
-from zcu_tools.gui.app.measure.state import State
+from zcu_tools.gui.app.measure.state import (
+    AnalysisPaneState,
+    PostAnalysisPaneState,
+    RunPaneState,
+    State,
+)
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.context_control import ContextControlFacet
@@ -68,10 +78,14 @@ def test_data_preparation_failure_reports_outputs_and_saves_other_artifacts(
     if failure == "invalid_shape":
         result.signal = result.signal[:1]
     source = RunRecord(cfg=None if failure == "missing_cfg" else cfg, result=result)
-    session.state.update_tab_result(
+    commit_run(
+        session.state,
         "tab",
-        replace(source, metadata=session.metadata),
-        parameters=session.state.get_tab("tab").run.parameters,
+        RunPaneState(
+            result=replace(source, metadata=session.metadata),
+            storage=session.state.get_tab("tab").run.storage,
+            parameters=session.state.get_tab("tab").run.parameters,
+        ),
     )
     declare_panes(session)
     try:
@@ -142,8 +156,16 @@ def test_default_stems_keep_distinct_runs_with_the_same_id_tail_separate(
                 ),
             }
         )
-        session.state.update_tab_result(
-            "tab", replace(source, metadata=metadata), parameters=tab.run.parameters
+        commit_run(
+            session.state,
+            "tab",
+            RunPaneState(
+                result=replace(source, metadata=metadata),
+                storage=None
+                if tab.run.parameters is None
+                else tab.run.parameters.storage,
+                parameters=tab.run.parameters,
+            ),
         )
         native, labber = session.save().outputs
         assert native.status == labber.status == "saved"
@@ -412,7 +434,7 @@ def test_save_commands_reject_before_annotation_or_output_mutation(
     if rejection == "busy":
         session.state.set_tab_analyzing("tab", analyzing=True)
     else:
-        session.state.clear_tab_results("tab")
+        commit_run(session.state, "tab", RunPaneState())
     before = session.state.get_artifact_snapshots("tab")
     command = session.control.save_artifacts if batch else session.control.save_data
     with pytest.raises(FailedPreconditionError, match="busy|No run result") as caught:
@@ -542,9 +564,14 @@ def test_missing_native_evidence_rejects_before_operation_or_files(
 ) -> None:
     session = native_session
     if missing == "metadata":
-        session.state.update_tab_result(
+        commit_run(
+            session.state,
             "tab",
-            replace(require_record(session.state.get_tab("tab").run), metadata=None),
+            RunPaneState(
+                result=replace(
+                    require_record(session.state.get_tab("tab").run), metadata=None
+                )
+            ),
         )
     else:
         session.state.get_tab("tab").run.storage = None
@@ -560,10 +587,14 @@ def test_invalid_record_reports_failed_data_outputs_and_saved_event(
     native_session: NativeSaveSession,
 ) -> None:
     session = native_session
-    session.state.update_tab_result(
+    commit_run(
+        session.state,
         "tab",
-        RunRecord(cfg=None, result=object(), metadata=session.metadata),
-        parameters=session.state.get_tab("tab").run.parameters,
+        RunPaneState(
+            result=RunRecord(cfg=None, result=object(), metadata=session.metadata),
+            storage=session.state.get_tab("tab").run.storage,
+            parameters=session.state.get_tab("tab").run.parameters,
+        ),
     )
     report = session.save()
     assert len(report.outputs) == 2
@@ -747,9 +778,14 @@ def test_missing_evidence_rejects_comment_before_operation(
 ) -> None:
     session = native_session
     if missing == "metadata":
-        session.state.update_tab_result(
+        commit_run(
+            session.state,
             "tab",
-            replace(require_record(session.state.get_tab("tab").run), metadata=None),
+            RunPaneState(
+                result=replace(
+                    require_record(session.state.get_tab("tab").run), metadata=None
+                )
+            ),
         )
     else:
         session.state.get_tab("tab").run.storage = None
@@ -770,14 +806,20 @@ def test_analysis_replacement_and_new_run_retire_saved_sections(
     declare_panes(session)
     completed = session.save_artifacts()
     assert completed is not None
-    session.state.update_tab_post_analyze(
-        "tab", PostSummary(0.8), None, post_analyze_params_instance=PaneParams(5.0)
+    commit_post_analysis(
+        session.state,
+        "tab",
+        PostAnalysisPaneState(
+            result=PostSummary(0.8), plots=None, params=PaneParams(5.0)
+        ),
     )
     sections = session.state.get_artifact_snapshots("tab")
     assert sections[1].artifacts[0].status is SaveStatus.SAVED
     assert sections[2].artifacts[0].status is SaveStatus.NOT_SAVED
-    session.state.update_tab_analyze(
-        "tab", PaneSummary(7.0), None, analyze_params_instance=PaneParams(8.0)
+    commit_analysis(
+        session.state,
+        "tab",
+        AnalysisPaneState(result=PaneSummary(7.0), plots=None, params=PaneParams(8.0)),
     )
     sections = session.state.get_artifact_snapshots("tab")
     assert [section.section for section in sections] == ["run", "analysis"]
@@ -785,7 +827,7 @@ def test_analysis_replacement_and_new_run_retire_saved_sections(
     assert [member.key.member for member in sections[1].artifacts[0].members] == [
         "analysis"
     ]
-    session.state.clear_tab_results("tab")
+    commit_run(session.state, "tab", RunPaneState())
     assert session.state.get_artifact_snapshots("tab") == ()
 
 
@@ -815,7 +857,7 @@ def test_resave_all_failed_replaces_previous_success_evidence(
     metadata = require_record(session.state.get_tab("tab").run).metadata
     assert metadata is not None
     assert session.state.get_tab("tab").run.confirmed_run_id == first.run_id
-    session.state.clear_tab_results("tab")
+    commit_run(session.state, "tab", RunPaneState())
     assert session.state.get_tab("tab").run.confirmed_run_id is None
 
 
@@ -841,8 +883,12 @@ def test_unsupported_analysis_field_rejects_before_annotation_or_files(
     native_session: NativeSaveSession,
 ) -> None:
     session = native_session
-    session.state.update_tab_analyze(
-        "tab", {"unsupported": object()}, None, analyze_params_instance=PaneParams()
+    commit_analysis(
+        session.state,
+        "tab",
+        AnalysisPaneState(
+            result={"unsupported": object()}, plots=None, params=PaneParams()
+        ),
     )
     with pytest.raises(TypeError, match=r"summary\.unsupported.*object"):
         session.control.save_artifacts("tab", comment="rejected", origin=GUI_ORIGIN)

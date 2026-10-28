@@ -12,7 +12,18 @@ import pytest
 from matplotlib.figure import Figure
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.records import RunRecord
-from zcu_tools.gui.app.measure.state import Session, State
+from zcu_tools.gui.app.measure.services.pane_commit import (
+    commit_analysis,
+    commit_post_analysis,
+    commit_run,
+)
+from zcu_tools.gui.app.measure.state import (
+    AnalysisPaneState,
+    PostAnalysisPaneState,
+    RunPaneState,
+    Session,
+    State,
+)
 from zcu_tools.gui.form_adapter import Form
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 
@@ -42,17 +53,33 @@ def _make_state(tab_id: str = "t1") -> State:
 
 def _seed_analyze(state: State, tab_id: str = "t1") -> None:
     """Put the tab in a state where a primary analyze result exists."""
-    state.update_tab_result(tab_id, RunRecord(None, object()))
-    state.update_tab_analyze(tab_id, MagicMock(), _plots_for(Figure()))
+    commit_run(state, tab_id, RunPaneState(result=RunRecord(None, object())))
+    commit_analysis(
+        state,
+        tab_id,
+        AnalysisPaneState(
+            result=MagicMock(),
+            plots=_plots_for(Figure()),
+            params=state.get_tab(tab_id).analysis.params,
+        ),
+    )
 
 
 def test_update_post_analyze_requires_primary_result() -> None:
     state = _make_state()
-    state.update_tab_result(
-        "t1", RunRecord(None, object())
+    commit_run(
+        state, "t1", RunPaneState(result=RunRecord(None, object()))
     )  # run result but no analyze result
     with pytest.raises(RuntimeError, match="no primary analyze result"):
-        state.update_tab_post_analyze("t1", MagicMock(), _plots_for(Figure()))
+        commit_post_analysis(
+            state,
+            "t1",
+            PostAnalysisPaneState(
+                result=MagicMock(),
+                plots=_plots_for(Figure()),
+                params=state.get_tab("t1").post_analysis.params,
+            ),
+        )
 
 
 def test_update_post_analyze_records_result_and_figure() -> None:
@@ -60,7 +87,15 @@ def test_update_post_analyze_records_result_and_figure() -> None:
     _seed_analyze(state)
     fig = Figure()
     post_result = MagicMock()
-    state.update_tab_post_analyze("t1", post_result, _plots_for(fig))
+    commit_post_analysis(
+        state,
+        "t1",
+        PostAnalysisPaneState(
+            result=post_result,
+            plots=_plots_for(fig),
+            params=state.get_tab("t1").post_analysis.params,
+        ),
+    )
 
     tab = state.get_tab("t1")
     assert tab.post_analysis.result is post_result
@@ -72,11 +107,27 @@ def test_update_post_analyze_records_result_and_figure() -> None:
 def test_post_analyze_invalidated_on_reanalyze() -> None:
     state = _make_state()
     _seed_analyze(state)
-    state.update_tab_post_analyze("t1", MagicMock(), _plots_for(Figure()))
+    commit_post_analysis(
+        state,
+        "t1",
+        PostAnalysisPaneState(
+            result=MagicMock(),
+            plots=_plots_for(Figure()),
+            params=state.get_tab("t1").post_analysis.params,
+        ),
+    )
     assert state.get_tab("t1").has_post_analyze_result() is True
 
     # A re-analyze replaces the primary result the post built on → post cleared.
-    state.update_tab_analyze("t1", MagicMock(), _plots_for(Figure()))
+    commit_analysis(
+        state,
+        "t1",
+        AnalysisPaneState(
+            result=MagicMock(),
+            plots=_plots_for(Figure()),
+            params=state.get_tab("t1").analysis.params,
+        ),
+    )
     tab = state.get_tab("t1")
     assert tab.post_analysis.result is None
     assert tab.post_analysis.plots is None
@@ -86,10 +137,18 @@ def test_post_analyze_invalidated_on_reanalyze() -> None:
 def test_post_analyze_invalidated_on_rerun() -> None:
     state = _make_state()
     _seed_analyze(state)
-    state.update_tab_post_analyze("t1", MagicMock(), _plots_for(Figure()))
+    commit_post_analysis(
+        state,
+        "t1",
+        PostAnalysisPaneState(
+            result=MagicMock(),
+            plots=_plots_for(Figure()),
+            params=state.get_tab("t1").post_analysis.params,
+        ),
+    )
 
     # A new run result clears both the primary analyze and the post-analysis.
-    state.update_tab_result("t1", RunRecord(None, object()))
+    commit_run(state, "t1", RunPaneState(result=RunRecord(None, object())))
     tab = state.get_tab("t1")
     assert tab.post_analysis.result is None
     assert tab.post_analysis.plots is None
@@ -98,9 +157,17 @@ def test_post_analyze_invalidated_on_rerun() -> None:
 def test_post_analyze_invalidated_on_clear_results() -> None:
     state = _make_state()
     _seed_analyze(state)
-    state.update_tab_post_analyze("t1", MagicMock(), _plots_for(Figure()))
+    commit_post_analysis(
+        state,
+        "t1",
+        PostAnalysisPaneState(
+            result=MagicMock(),
+            plots=_plots_for(Figure()),
+            params=state.get_tab("t1").post_analysis.params,
+        ),
+    )
 
-    state.clear_tab_results("t1")
+    commit_run(state, "t1", RunPaneState())
     tab = state.get_tab("t1")
     assert tab.post_analysis.result is None
     assert tab.post_analysis.plots is None

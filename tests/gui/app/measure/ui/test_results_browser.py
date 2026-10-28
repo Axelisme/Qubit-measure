@@ -14,7 +14,9 @@ from zcu_tools.gui.app.measure.adapter import Adapter
 from zcu_tools.gui.app.measure.controller import Controller
 from zcu_tools.gui.app.measure.registry import ExperimentResolution, Registry
 from zcu_tools.gui.app.measure.services.load import LoadTabResultOutcome
+from zcu_tools.gui.app.measure.services.pane_commit import commit_run
 from zcu_tools.gui.app.measure.services.results_index import ResultsIndex, scan_results
+from zcu_tools.gui.app.measure.state import RunPaneState
 from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 from zcu_tools.gui.app.measure.ui.results_browser import ResultsBrowser
 from zcu_tools.gui.session.context_types import (
@@ -679,13 +681,19 @@ def load_browser(
         history = replace(
             session.metadata.snapshot, point="missing" if variant == "missing" else None
         )
-        session.state.update_tab_result(
+        commit_run(
+            session.state,
             "tab",
-            replace(
-                require_record(tab.run),
-                metadata=session.metadata.model_copy(update={"snapshot": history}),
+            RunPaneState(
+                result=replace(
+                    require_record(tab.run),
+                    metadata=session.metadata.model_copy(update={"snapshot": history}),
+                ),
+                storage=None
+                if tab.run.parameters is None
+                else tab.run.parameters.storage,
+                parameters=tab.run.parameters,
             ),
-            parameters=tab.run.parameters,
         )
     session.save()
     image = QImage(400, 220, QImage.Format.Format_RGB32)

@@ -14,7 +14,6 @@ from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputEr
 
 from ..services.guard import GuardError, TabAction
 from .contracts import WritebackAcceptance, WritebackApplied, WritebackSelection
-from .service import WritebackDraft
 from .submissions import WritebackCompleted, WritebackSubmission, WritebackSubmissions
 
 WritebackPane: TypeAlias = Literal["analysis", "post_analysis"]
@@ -26,7 +25,7 @@ if TYPE_CHECKING:
 
     from ..services.guard import GuardService
     from .contracts import WritebackEdit, WritebackValues, WritebackWritten
-    from .service import WritebackService
+    from .service import WritebackDraft, WritebackService
 
 
 @dataclass(frozen=True)
@@ -157,7 +156,7 @@ class WritebackControlFacet:
     def has_tab(self, tab_id: str) -> bool:
         return self._state.has_tab(tab_id)
 
-    def _draft_for_pane(self, tab_id: str, pane: WritebackPane):
+    def _draft_for_pane(self, tab_id: str, pane: WritebackPane) -> WritebackDraft:
         tab = self._state.get_tab(tab_id)
         if pane == "analysis":
             draft = tab.analysis.writeback_draft
@@ -169,7 +168,7 @@ class WritebackControlFacet:
             raise FailedPreconditionError(
                 f"No {'post ' if pane == 'post_analysis' else ''}writeback draft for tab {tab_id!r}"
             )
-        if not getattr(draft, "is_active", False):
+        if not draft.is_active:
             raise FailedPreconditionError(
                 f"Writeback draft for tab {tab_id!r} pane {pane!r} has been torn down"
             )
@@ -186,8 +185,6 @@ class WritebackControlFacet:
         """
         self._require_admission(tab_id)
         draft = self._draft_for_pane(tab_id, pane)
-        if not isinstance(draft, WritebackDraft):
-            raise InvalidInputError("unknown writeback draft")
         return self._writeback.get_item_form(draft, session_id)
 
     def set_writeback_item_for_pane(
@@ -195,8 +192,6 @@ class WritebackControlFacet:
     ) -> None:
         self._require_admission(tab_id)
         draft = self._draft_for_pane(tab_id, pane)
-        if not isinstance(draft, WritebackDraft):
-            raise InvalidInputError("unknown writeback draft")
         self._writeback.edit_draft(draft, session_id, **changes)
         self._emit_draft_changed(tab_id)
 
@@ -209,8 +204,6 @@ class WritebackControlFacet:
     ) -> dict[str, Any]:
         self._require_admission(tab_id)
         draft = self._draft_for_pane(tab_id, pane)
-        if not isinstance(draft, WritebackDraft):
-            raise InvalidInputError("unknown writeback draft")
         try:
             return self._writeback.apply_draft(draft, item_ids=item_ids)
         finally:
@@ -229,8 +222,6 @@ class WritebackControlFacet:
         with self._submissions.submit(tab_id, submission_id) as receipt:
             self._require_admission(tab_id)
             draft = self._draft_for_pane(tab_id, pane)
-            if not isinstance(draft, WritebackDraft):
-                raise InvalidInputError("unknown writeback draft")
 
             def retain(values: tuple[WritebackApplied, ...]) -> None:
                 if receipt is not None:
@@ -270,8 +261,6 @@ class WritebackControlFacet:
             groups: list[WritebackSelection] = []
             for selection in selections:
                 draft = self._draft_for_pane(tab_id, selection.subtab_id)
-                if not isinstance(draft, WritebackDraft):
-                    raise InvalidInputError("unknown writeback draft")
                 groups.append(WritebackSelection(draft, selection.ids))
             try:
                 result = self._writeback.accept_drafts(tuple(groups))
@@ -309,8 +298,6 @@ class WritebackControlFacet:
         propagate. Facts belong to this pane's creation capture, not active focus.
         """
         draft = self._draft_for_pane(tab_id, pane)
-        if not isinstance(draft, WritebackDraft):
-            raise InvalidInputError("unknown writeback draft")
         return self._writeback.preview_values(draft, session_id=session_id)
 
     def get_writeback_summaries_for_pane(
@@ -322,8 +309,7 @@ class WritebackControlFacet:
             draft = self._draft_for_pane(tab_id, pane)
         except FailedPreconditionError:
             return {}
-        # tolerated: The active pane draft was created by WritebackService; the pane annotation erases its concrete type.
-        return self._writeback.get_all_summaries(draft)  # pyright: ignore[reportArgumentType]
+        return self._writeback.get_all_summaries(draft)
 
     def get_writeback_applied_for_pane(
         self, tab_id: str, pane: WritebackPane
@@ -332,8 +318,7 @@ class WritebackControlFacet:
             draft = self._draft_for_pane(tab_id, pane)
         except FailedPreconditionError:
             return {}
-        # tolerated: The active pane draft was created by WritebackService; the pane annotation erases its concrete type.
-        return self._writeback.get_all_applied(draft)  # pyright: ignore[reportArgumentType]
+        return self._writeback.get_all_applied(draft)
 
     def _emit_draft_changed(self, tab_id: str) -> None:
         self._bus.emit(

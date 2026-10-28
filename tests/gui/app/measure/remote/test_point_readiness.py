@@ -8,9 +8,11 @@ from zcu_tools.gui.app.measure.adapter import ParameterWriteback
 from zcu_tools.gui.app.measure.catalog import ExperimentAccess
 from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.services.guard import GuardService
+from zcu_tools.gui.app.measure.services.pane_commit import commit_analysis
 from zcu_tools.gui.app.measure.services.tab import TabService
 from zcu_tools.gui.app.measure.services.tab_control import TabControlFacet
 from zcu_tools.gui.app.measure.services.workspace import WorkspaceService
+from zcu_tools.gui.app.measure.state import AnalysisPaneState
 from zcu_tools.gui.app.measure.ui.exp_tab_widget import ExpTabWidget
 from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 from zcu_tools.gui.app.measure.writeback import WritebackControlFacet, WritebackService
@@ -86,7 +88,15 @@ def test_unselected_point_disables_run_writeback_and_inspect_with_next_step(
 ) -> None:
     application.open_entry()
     tab_id = application.controller.tab_control.new_tab("pointed")
-    application.state.update_tab_analyze(tab_id, object(), None)
+    commit_analysis(
+        application.state,
+        tab_id,
+        AnalysisPaneState(
+            result=object(),
+            plots=None,
+            params=application.state.get_tab(tab_id).analysis.params,
+        ),
+    )
     window = MainWindow(
         application.controller,
         templates=lambda: {},
@@ -153,7 +163,16 @@ def test_writeback_requires_selection_after_reopen_but_keeps_captured_destinatio
         parameters=captured,
         experiment_name="test/point-admission",
     )
-    application.state.update_tab_analyze(tab_id, object(), None, writeback_draft=draft)
+    commit_analysis(
+        application.state,
+        tab_id,
+        AnalysisPaneState(
+            result=object(),
+            plots=None,
+            params=application.state.get_tab(tab_id).analysis.params,
+            writeback_draft=draft,
+        ),
+    )
     application.controller.setup_control.open_entry(EntryRequest("entry"))
     before = entry_resource(application).ledger.events()
     try:
@@ -224,7 +243,16 @@ def parameter_writeback_pane(
         parameters=captured,
         experiment_name="test/point-admission",
     )
-    application.state.update_tab_analyze(tab_id, object(), None, writeback_draft=draft)
+    commit_analysis(
+        application.state,
+        tab_id,
+        AnalysisPaneState(
+            result=object(),
+            plots=None,
+            params=application.state.get_tab(tab_id).analysis.params,
+            writeback_draft=draft,
+        ),
+    )
     registry = Registry()
     registry.register("pointed", PointAdapter)
     tab = TabService(
