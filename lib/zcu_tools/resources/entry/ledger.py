@@ -175,6 +175,20 @@ class RecordsLedger:
             for item in self._read(force_reload=True, publish_state=False).values()
         )
 
+    def read_contents_snapshot(self) -> tuple[LedgerEventContent, ...]:
+        """Read detached partial events without creating files or acquiring a lock.
+
+        Validate JSON, versions, event/run IDs, duplicates and complete LF tails.
+        Unconsumed payload fields and attachments stay opaque. Missing ledger
+        returns (). I/O and consumed-field errors propagate. Like the whole
+        read_events_snapshot, concurrent incomplete appends may require refresh.
+        This does not update this handle's incremental index.
+        """
+        return tuple(
+            item.content
+            for item in self._read(force_reload=True, publish_state=False).values()
+        )
+
     def reload(self) -> tuple[LedgerEvent, ...]:
         """Fully validate history from byte zero and replace this handle's index.
 

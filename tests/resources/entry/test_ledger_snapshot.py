@@ -32,6 +32,8 @@ def test_snapshot_reads_current_events_without_sidecar_or_cached_state(
     before = {p.name: p.read_bytes() for p in tmp_path.iterdir()}
     snapshot = ledger.read_events_snapshot()
     assert snapshot == (event,)
+    partial = ledger.read_contents_snapshot()
+    assert tuple(content.project() for content in partial) == (event,)
     assert {p.name: p.read_bytes() for p in tmp_path.iterdir()} == before
     payload = snapshot[0].payload
     assert isinstance(payload, AcquiredPayload)
@@ -43,6 +45,10 @@ def test_snapshot_reads_current_events_without_sidecar_or_cached_state(
         encoding="utf-8",
     )
     assert ledger.read_events_snapshot() == (event, added)
+    assert tuple(content.project() for content in ledger.read_contents_snapshot()) == (
+        event,
+        added,
+    )
 
 
 @pytest.mark.parametrize("defect", ["tail", "duplicate", "schema"])
@@ -60,10 +66,13 @@ def test_snapshot_rejects_invalid_history(
     ledger = RecordsLedger(tmp_path)
     with pytest.raises(ValueError, match=r"ledger\.jsonl:1|ledger\.jsonl:2"):
         ledger.read_events_snapshot()
+    with pytest.raises(ValueError, match=r"ledger\.jsonl:1|ledger\.jsonl:2"):
+        ledger.read_contents_snapshot()
 
 
 def test_snapshot_missing_ledger_does_not_publish_files(
     tmp_path: Path, event: LedgerEvent
 ) -> None:
     assert RecordsLedger(tmp_path).read_events_snapshot() == ()
+    assert RecordsLedger(tmp_path).read_contents_snapshot() == ()
     assert list(tmp_path.iterdir()) == []

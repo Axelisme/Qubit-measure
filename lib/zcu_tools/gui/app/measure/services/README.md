@@ -21,6 +21,7 @@ UI 與 remote 經 Controller／control facets 呼叫這些 owners，不各自建
 | `results_index.py`、`results_comparison.py` | 唯讀索引保存成果，將已存 summary 投影為比較列，不重新分析。 |
 
 Results index 隔離各 entry 的 setup／ledger 與 run 成員讀取錯誤，保留其他成果。
+Ledger 讀取使用 resources 的無 lock typed partial snapshot，只消費 acquired 身分／時間與 saved 成功路徑。未用的歷史 payload 或 attachment reference 不影響登錄；實際使用的壞值仍診斷並沿既有 entry 層級隔離。
 沒有對應 Result entry 的 Database run 仍可瀏覽。無法安全列舉的 Database 項目
 以 `ResultsIndex.issues` 回報 entry、路徑與原因，不偽造 run；可列出的 run
 則沿用 `ResultRun.issues`。Symlink escape 項目不讀、不跟隨。

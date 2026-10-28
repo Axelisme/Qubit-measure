@@ -82,6 +82,7 @@ def test_missing_event_history_is_empty_without_creating_storage(
         (setup.parent / "records").mkdir()
     before = set(root.rglob("*"))
     assert ResultEntry.read_events_snapshot(name, result_root=root) == ()
+    assert ResultEntry.read_contents_snapshot(name, result_root=root) == ()
     assert set(root.rglob("*")) == before
 
 
@@ -104,6 +105,8 @@ def test_event_snapshot_rejects_redirected_storage(setup: Path, redirect: str) -
         source.symlink_to(moved, target_is_directory=redirect != "ledger.jsonl")
         with pytest.raises(ValueError, match="escapes"):
             ResultEntry.read_events_snapshot("entry", result_root=root)
+        with pytest.raises(ValueError, match="escapes"):
+            ResultEntry.read_contents_snapshot("entry", result_root=root)
     finally:
         source.unlink()
         moved.rename(source)

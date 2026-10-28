@@ -37,6 +37,7 @@ from .ledger_models import (
     AnalyzedPayload,
     JsonObject,
     LedgerEvent,
+    LedgerEventContent,
 )
 from .points import PointView
 from .registry import component_registry
@@ -603,6 +604,24 @@ class ResultEntry:
         otherwise raise ValueError. No entry, file, directory or lock is created,
         and attachments are not read.
         """
+        return tuple(
+            content.project()
+            for content in cls.read_contents_snapshot(name, result_root=result_root)
+        )
+
+    @classmethod
+    def read_contents_snapshot(
+        cls, name: str, *, result_root: str | Path
+    ) -> tuple[LedgerEventContent, ...]:
+        """Read partial historical events for a safe single-segment entry name.
+
+        result_root is the exact Result root, not an entry or Database directory.
+        Missing entry/records/ledger returns (). Validate setup identity, ledger
+        JSON, versions, event/run IDs, duplicates and complete tails. Other fields
+        validate on use or explicit project(). I/O and validation errors propagate.
+        Symlink containment matches read_events_snapshot. No files, directories
+        or locks are created; attachments are not read.
+        """
         root = Path(result_root).absolute()
         result = _entry_path(root, name)
         for path in (root, result):
@@ -619,7 +638,7 @@ class ResultEntry:
         ledger = records / "ledger.jsonl"
         if not ledger.resolve().is_relative_to(records):
             raise ValueError(f"{ledger}: ledger path escapes records")
-        return RecordsLedger(records).read_events_snapshot()
+        return RecordsLedger(records).read_contents_snapshot()
 
     @classmethod
     def read_identity(cls, name: str, *, result_root: str | Path) -> EntryIdentity:

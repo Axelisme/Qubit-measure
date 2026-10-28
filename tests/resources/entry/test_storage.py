@@ -69,10 +69,11 @@ def test_recorded_output_binding_rejects_symlink_escape_without_writes(
 
 
 @pytest.mark.parametrize("field", ["entry_name", "point"])
+@pytest.mark.parametrize("invalid", ["", "../outside"])
 def test_recorded_output_binding_rejects_unsafe_names_without_writes(
-    tmp_path: Path, field: str
+    tmp_path: Path, field: str, invalid: str
 ) -> None:
-    names = {"entry_name": "recorded", "point": "p", field: "../outside"}
+    names = {"entry_name": "recorded", "point": "p", field: invalid}
     with pytest.raises(ValueError, match=field):
         bind_run_outputs(
             result_root=tmp_path / "result",

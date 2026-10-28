@@ -97,6 +97,8 @@ Acquired 只保存 run 身分、experiment、point、roles 與事件時間，不
 
 `RecordsLedger.read_events_snapshot()` 供唯讀瀏覽完整事件清單，不取得或建立 lock file。它沿用 events 的 schema、重複 ID 與完整尾行驗證，不讀附檔，也不更新 handle 的增量索引。並行 append 的未完成尾行會報錯，caller 可稍後重新查詢。
 
+`ResultEntry.read_contents_snapshot(name, result_root=...)` 與 `RecordsLedger.read_contents_snapshot()` 提供相同無 lock、無寫入的部分讀取。前者保留 setup identity 與 root／entry／records／ledger 的 containment 驗證。兩者驗 JSON、版本、event／run ID、duplicate 與完整尾行，再回傳 detached `LedgerEventContent`。Results index 使用 `acquisition()` 取得時間與 acquired 身分，使用 `saved_paths()` 取得 run ID 與成功輸出的路徑字串。未使用的 origin、attachment、analyzed summary、Labber 路徑與 output metadata 不預驗。Saved paths 不授權開檔，讀檔 consumer 仍先驗 containment。實際消費的壞欄位指名 ledger 行與欄位；整筆 events／snapshot／project 仍完整驗證。
+
 其餘讀取與追加都持同一 resolved path 對應的 per-user runtime lock，位置見 [resources owner](../README.md#檔案鎖)。每個 RecordsLedger handle 保存已驗證的 byte offset 與 event_id 索引，正常追加只解析新尾段。前 4096 bytes、上次 offset 前最後一行或檔案身分改變、檔案縮短，以及同大小但修改時間改變時，重新驗證整份 ledger。Ledger 的契約是 append-only。同 inode、相同頭部與前次尾行下，中段原地改寫並增長不在增量偵測範圍；`reload()` 明確從頭驗證並更新索引。回傳的事件互相隔離，附檔內容不快取。
 
 新事件只寫 1.0。Append 完整驗證新事件，既有歷史只驗追加必需的 JSON、版本、event／run ID、duplicate 與完整尾行。不合完整 model 的歷史 payload 不阻擋追加。無效新事件在寫入前拒絕，原 bytes 保持不變。
@@ -123,7 +125,7 @@ Accepted 不要求前序事件或 run。Producer 先 append accepted，再提交
 
 `SaveLayout.run_path` 回傳 exact absolute run 目錄，不建立檔案。完整 run_id 由 native metadata 或 ledger 證據識別，不從 stem 推論。
 
-`bind_run_outputs(result_root=..., database_root=..., entry_name=..., point=...)` 綁定目前 roots 與記錄的名稱，不開 ResultEntry、不讀參數，也不要求 entry／point 存在。缺名稱使用 unnamed_entry，缺 point 使用 unnamed_point。回傳的 RunOutputBinding 透過 layout 計算 SaveLayout，prepare_ledger 只建立 Result 輸出目錄並綁定 ledger，不製造 setup 或 point 文件。Entry 名稱、point 與 symlink 邊界仍由 resources 驗證。
+`bind_run_outputs(result_root=..., database_root=..., entry_name=..., point=...)` 綁定目前 roots 與記錄的名稱，不開 ResultEntry、不讀參數，也不要求 entry／point 存在。只有 None 名稱使用 unnamed_entry，只有 None point 使用 unnamed_point。顯式空字串與其他非法路徑段會拒絕，不建立輸出。回傳的 RunOutputBinding 透過 layout 計算 SaveLayout，prepare_ledger 只建立 Result 輸出目錄並綁定 ledger，不製造 setup 或 point 文件。Entry 名稱、point 與 symlink 邊界仍由 resources 驗證。
 
 Run 目錄為 `Database/<name>/runs/<stem>/`。Data 回傳其中的 data.h5 與當地日期樹 `Labber/YYYY/MM/Data_MMDD/<stem>.hdf5`。只有 Labber 初始目的已存在時才交既有 helper 取 numeric suffix，不作跨程序原子保留。
 

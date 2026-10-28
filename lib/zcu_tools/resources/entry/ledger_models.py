@@ -3,6 +3,7 @@
 import math
 import re
 from copy import deepcopy
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Annotated, Literal, Self, get_args, get_origin
 from uuid import UUID
@@ -315,6 +316,31 @@ class LedgerEvent(_LedgerModel):
         return self
 
 
+@dataclass(frozen=True)
+class LedgerAcquisition:
+    """Run-index evidence: at is validated UTC text; payload holds run identity.
+
+    The payload contains only run_id, experiment, optional point and roles.
+    Envelope origin and attachment references are not consumed by this projection.
+    """
+
+    at: str
+    payload: AcquiredPayload
+
+
+@dataclass(frozen=True)
+class LedgerSavedPaths:
+    """Run-index evidence from successful outputs, without opening any path.
+
+    run_id identifies the saved run. paths contains recorded exact path strings
+    in output order, only for status=saved. Failed output paths and other output
+    metadata remain unread; these strings do not authorize filesystem access.
+    """
+
+    run_id: str
+    paths: tuple[str, ...]
+
+
 class LedgerEventContent:
     """Readonly historical JSON with field-level reads and explicit full projection.
 
@@ -351,6 +377,52 @@ class LedgerEventContent:
             for field in ("run_id", "run_ids"):
                 if field in payload:
                     self.value(f"payload.{field}")
+
+    def acquisition(self) -> LedgerAcquisition | None:
+        """Read acquired identity/time, or None for another validated event kind.
+
+        Validate only at and the acquired payload; unused envelope fields and
+        attachment references stay opaque. Invalid consumed fields raise
+        ValueError naming the source line. No files or attachments are opened.
+        """
+        if self.value("kind") != "acquired":
+            return None
+        try:
+            payload = AcquiredPayload.model_validate(
+                deepcopy(self._data.get("payload")), extra="ignore"
+            )
+        except ValueError as exc:
+            raise ValueError(f"{self._source}: payload: {exc}") from exc
+        return LedgerAcquisition(self._string_value("at"), payload)
+
+    def saved_paths(self) -> LedgerSavedPaths | None:
+        """Read saved run ID and successful paths, or None for another kind.
+
+        Validate output sequence structure, each status and only saved paths.
+        Other output fields, labber_path and attachment references stay opaque.
+        Invalid consumed fields raise ValueError with source/path. Paths are
+        evidence strings, not resolved/opened paths or an access capability.
+        """
+        if self.value("kind") != "saved":
+            return None
+        try:
+            outputs, _ = self._field("payload.outputs")
+        except (ValueError, KeyError) as exc:
+            raise ValueError(f"{self._source}: payload.outputs: {exc}") from exc
+        if not isinstance(outputs, list):
+            raise ValueError(f"{self._source}: payload.outputs: expected sequence")
+        paths = tuple(
+            self._string_value(f"payload.outputs.{index}.path")
+            for index in range(len(outputs))
+            if self.value(f"payload.outputs.{index}.status") == "saved"
+        )
+        return LedgerSavedPaths(self._string_value("payload.run_id"), paths)
+
+    def _string_value(self, path: str) -> str:
+        value = self.value(path)
+        if not isinstance(value, str):
+            raise ValueError(f"{self._source}: {path}: expected string")
+        return value
 
     def project(self) -> LedgerEvent:
         """Validate the whole event/payload; unknown reader fields are ignored.

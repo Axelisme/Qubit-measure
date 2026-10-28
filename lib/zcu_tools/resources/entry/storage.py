@@ -89,12 +89,12 @@ def bind_run_outputs(
 ) -> RunOutputBinding:
     """Bind current roots plus recorded names without locating a live entry.
 
-    Missing names use unnamed_entry and unnamed_point. Names must be safe
-    single path segments and neither entry path may escape its owning root.
+    None names use unnamed_entry and unnamed_point. Explicit names must be
+    nonempty safe path segments; neither entry path may escape its owning root.
     No parameter, metadata, ledger or original data file is read.
     """
-    name = entry_name or "unnamed_entry"
-    label = point or "unnamed_point"
+    name = "unnamed_entry" if entry_name is None else entry_name
+    label = "unnamed_point" if point is None else point
     validate_path_segment(name, field="entry_name")
     validate_path_segment(label, field="point")
     result_path = result_root / name
