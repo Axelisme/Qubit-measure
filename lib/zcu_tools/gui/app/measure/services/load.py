@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -11,14 +10,10 @@ from zcu_tools.experiment.native_persistence import metadata_from_container
 from zcu_tools.gui.app.measure.services.pane_commit import commit_run
 from zcu_tools.gui.app.measure.state import RunPaneState
 from zcu_tools.gui.expected_error import FailedPreconditionError
-from zcu_tools.gui.session.context_types import SavedPoint
-from zcu_tools.gui.session.parameters import RoleBinding
-from zcu_tools.resources.entry import MissingPointError
+from zcu_tools.gui.session.parameters import ParameterContext
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.state import State
-    from zcu_tools.gui.session.context_control import ContextControlPort
-    from zcu_tools.gui.session.parameters import ParameterContext
 
 
 logger = logging.getLogger(__name__)
@@ -71,24 +66,8 @@ class LoadService:
     initializes analyze params afterward so run-finish and load share that policy.
     """
 
-    def __init__(
-        self,
-        state: State,
-        *,
-        context: ContextControlPort,
-        captured_parameters: Callable[
-            [Mapping[str, str] | None], ParameterContext | None
-        ],
-    ) -> None:
-        """Inject fixed Load-time metadata capture, distinct from the tab form capture.
-
-        captured_parameters reads current point/library/storage and global aliases
-        on the owner thread; its result must not follow later source changes.
-        context reads the file's fixed point/roles in the opened entry without
-        changing selection. Load preserves the tab's authored input and fixed sources.
-        """
-        self._context = context
-        self._captured_parameters = captured_parameters
+    def __init__(self, state: State) -> None:
+        """Inject the pane owner; Load requires no live context or storage."""
         self._state = state
 
     def load_result(self, tab_id: str, data_path: str) -> LoadTabResultOutcome:
@@ -113,9 +92,6 @@ class LoadService:
 
         tab = self._state.get_tab(tab_id)
         tab.cfg.require_mutation_allowed()
-        captured = self._captured_parameters(None)
-        # Native history owns aliases; Save needs only the Load-time entry capability.
-        storage = None if captured is None else captured.bind_aliases((), {}).storage
         logger.info("load_result: tab_id=%r data_path=%r", tab_id, data_path)
         try:
             stored = load(Path(data_path))
@@ -148,27 +124,11 @@ class LoadService:
                 f"{data_path}: restored record has no metadata",
                 reason_code="invalid_data_file",
             )
-        history = metadata.snapshot
-        parameters = None
-        analysis_source_issue = None
-        if captured is None:
-            analysis_source_issue = "No active context is available"
-        elif storage is None or storage.entry_id != history.entry_id:
-            analysis_source_issue = "Historical entry differs from the opened entry"
-        elif history.point is None:
-            analysis_source_issue = "Historical metadata has no point"
-        else:
-            try:
-                parameters = self._context.read_target(
-                    SavedPoint(
-                        entry_name=captured.target.entry_name, point=history.point
-                    ),
-                    roles=RoleBinding(None, {}, history.roles),
-                )
-            except MissingPointError as error:
-                analysis_source_issue = (
-                    f"Historical point {history.point!r} is unavailable: {error}"
-                )
+        parameters = (
+            ParameterContext.empty()
+            if metadata.parameter_snapshot is None
+            else ParameterContext.from_snapshot(metadata.parameter_snapshot)
+        )
         commit_run(
             self._state,
             tab_id,
@@ -176,8 +136,7 @@ class LoadService:
                 result=restored.record,
                 source_path=data_path,
                 parameters=parameters,
-                storage=storage,
-                analysis_source_issue=analysis_source_issue,
+                storage=None,
             ),
         )
         return LoadTabResultOutcome(
@@ -186,5 +145,4 @@ class LoadService:
             result_type=type(restored.record).__name__,
             cfg_issue=restored.cfg_issue,
             has_analyze_params=False,
-            analysis_source_issue=analysis_source_issue,
         )

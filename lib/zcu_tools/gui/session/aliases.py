@@ -14,7 +14,7 @@ from zcu_tools.resources.entry.aliases import AliasValue
 
 if TYPE_CHECKING:
     from zcu_tools.resources.entry import RoleSpec
-    from zcu_tools.resources.entry.schema import PointDocument, SetupDocument
+    from zcu_tools.resources.entry.schema import ParameterContent, PointDocument, SetupDocument
 
 
 @dataclass(frozen=True)
@@ -151,7 +151,7 @@ class AliasTable:
     def resolve(
         self,
         alias: str,
-        point: SetupDocument | PointDocument,
+        point: SetupDocument | PointDocument | ParameterContent,
         *,
         kind: str | None = None,
     ) -> str:
@@ -179,7 +179,7 @@ class AliasTable:
     def resolve_value(
         self,
         alias: str,
-        point: SetupDocument | PointDocument,
+        point: SetupDocument | PointDocument | ParameterContent,
         *,
         kind: str | None = None,
     ) -> AliasValue:
@@ -208,7 +208,7 @@ class AliasTable:
         return name
 
     def names(
-        self, point: SetupDocument | PointDocument, declarations: Mapping[str, RoleSpec]
+        self, point: SetupDocument | PointDocument | ParameterContent, declarations: Mapping[str, RoleSpec]
     ) -> dict[str, AliasValue]:
         """Capture all bound rows as concrete names for Run/storage records.
 
@@ -236,7 +236,7 @@ class AliasTable:
     def _resolve_name(
         self,
         alias: str,
-        point: SetupDocument | PointDocument,
+        point: SetupDocument | PointDocument | ParameterContent,
         *,
         kind: str | None = None,
     ) -> AliasValue | None:
@@ -279,7 +279,7 @@ class AliasTable:
     def _scalar_name(
         self,
         alias: str,
-        point: SetupDocument | PointDocument,
+        point: SetupDocument | PointDocument | ParameterContent,
         *,
         value: str,
         kind: str | None,

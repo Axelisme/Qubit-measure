@@ -12,6 +12,7 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    SerializeAsAny,
     TypeAdapter,
     field_validator,
 )
@@ -205,6 +206,35 @@ class _ParameterDocument(BaseModel):
     @classmethod
     def validate_metadata(cls, value: object) -> dict[str, YamlMap]:
         return TypeAdapter(dict[str, YamlMap]).validate_python(value, strict=True)
+
+
+class ParameterContent(BaseModel):
+    """Detached parameter data without a persistent document identity.
+
+    components holds registered component models in working units; metadata maps
+    dotted paths to opaque YAML mappings. general retains captured point metadata,
+    or None when none was recorded. No timestamps or storage headers are invented.
+    Construction validates component names/kinds and YAML metadata through the
+    parameter document owner. Unknown fields and invalid components raise.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    components: dict[str, SerializeAsAny[ComponentSchema]] = Field(default_factory=dict)
+    metadata: dict[str, YamlMap] = Field(default_factory=dict)
+    general: PointGeneral | None = None
+
+    @field_validator("components", mode="before")
+    @classmethod
+    def validate_components(cls, value: object) -> dict[str, ComponentSchema]:
+        """Validate registered components without a storage schema header."""
+        return _ParameterDocument.validate_components(value)
+
+    @field_validator("metadata", mode="before")
+    @classmethod
+    def validate_metadata(cls, value: object) -> dict[str, YamlMap]:
+        """Require opaque YAML mappings keyed by logical parameter paths."""
+        return _ParameterDocument.validate_metadata(value)
 
 
 class SetupDocument(_ParameterDocument):

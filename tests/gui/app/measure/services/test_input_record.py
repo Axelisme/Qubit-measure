@@ -172,13 +172,7 @@ def test_host_retains_adapter_record_and_native_load_never_refills_input(
             item for item in report.outputs if item.output.format == "data_h5"
         )
         assert native.status == "saved", native.error
-        loader = LoadService(
-            state,
-            context=host.context,
-            captured_parameters=lambda aliases: host.context.read_context(
-                aliases=aliases
-            ),
-        )
+        loader = LoadService(state)
         loader.load_result("tab", str(native.output.path))
         restored = require_record(state.get_tab("tab").run)
         assert restored.cfg == SavingCfg(gain=0.25)

@@ -1,5 +1,7 @@
 """Experiment-owned historical run documents and configuration envelopes."""
 
+from __future__ import annotations
+
 import json
 import re
 from collections.abc import Mapping
@@ -16,9 +18,12 @@ from pydantic import (
     TypeAdapter,
     ValidationError,
     field_validator,
+    model_validator,
 )
 
 from zcu_tools.datafile import JsonObject
+from zcu_tools.resources.context.library import ModuleLibraryDocument
+from zcu_tools.resources.entry import ParameterContent
 from zcu_tools.resources.entry.aliases import AliasValue
 
 _WORKFLOW_RUN_ID_PATTERN = r"[0-9a-f]{32}"
@@ -42,6 +47,31 @@ class CfgSnapshot:
     schema_version: str
 
 
+class ParameterSnapshot(BaseModel):
+    """Captured analysis environment, independent of live files and write targets.
+
+    point is resource-owned component/general/opaque metadata content. library
+    retains persistent Specs, not materialized cfg. aliases preserves authored
+    row order and softlinks; None denotes fixed names without authored rows.
+    names contains resolved scalar/list bindings from capture time. All values
+    use working units. Missing fields, unknown fields and invalid content raise
+    ValidationError. No storage path, timestamp or target is synthesized.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    point: ParameterContent
+    library: ModuleLibraryDocument
+    aliases: dict[str, AliasValue] | None
+    names: dict[str, AliasValue]
+
+    @model_validator(mode="after")
+    def validate_library(self) -> ParameterSnapshot:
+        """Reject invalid library Specs instead of restoring an empty environment."""
+        self.library.validate_content()
+        return self
+
+
 @dataclass(frozen=True, kw_only=True)
 class RunSnapshot:
     """Historical entry state, never a live entry or hardware reference.
@@ -54,6 +84,7 @@ class RunSnapshot:
     """
 
     entry_id: UUID
+    entry_name: str | None = None
     point: str | None
     roles: Annotated[
         Mapping[str, AliasValue],
@@ -124,6 +155,7 @@ class RunMetadata(BaseModel):
     completion: Literal["complete", "partial", "stopped", "unknown"]
     snapshot: RunSnapshot
     provenance: SoftwareProvenance
+    parameter_snapshot: ParameterSnapshot | None = None
     device_snapshot: (
         Annotated[
             Mapping[str, JsonObject],

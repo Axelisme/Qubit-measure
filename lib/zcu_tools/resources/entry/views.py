@@ -40,6 +40,7 @@ from .field_views import (
 from .registry import component_registry
 from .schema import (
     ComponentSchema,
+    ParameterContent,
     PointDocument,
     PointGeneral,
     SetupDocument,
@@ -211,7 +212,7 @@ class DocumentField:
 
 
 def document_fields(
-    document: SetupDocument | PointDocument,
+    document: SetupDocument | PointDocument | ParameterContent,
 ) -> tuple[DocumentField, ...]:
     """List isolated logical rows without I/O, validation or serialization hooks.
 
@@ -235,13 +236,14 @@ def document_fields(
         metadata = read_metadata(document.metadata, path) if path is not None else None
         rows.append(DocumentField(segments, path, value, metadata))
 
-    append_rows(("general",), _logical_value(document.general))
+    if document.general is not None:
+        append_rows(("general",), _logical_value(document.general))
     for name, component in document.components.items():
         append_rows((name,), _logical_value(component))
     return tuple(rows)
 
 
-def document_unit(document: SetupDocument | PointDocument, path: str) -> str | None:
+def document_unit(document: SetupDocument | PointDocument | ParameterContent, path: str) -> str | None:
     """Read a fixed field's static schema unit at an actual dotted path.
 
     Return the nonempty json_schema_extra.unit label without converting values.
@@ -270,7 +272,7 @@ def document_unit(document: SetupDocument | PointDocument, path: str) -> str | N
     return None
 
 
-def document_value(document: SetupDocument | PointDocument, path: str) -> YamlValue:
+def document_value(document: SetupDocument | PointDocument | ParameterContent, path: str) -> YamlValue:
     """Read an actual dotted component/general path from this document only.
 
     Return an isolated working-unit YAML value, including explicit null and
@@ -294,7 +296,7 @@ def document_value(document: SetupDocument | PointDocument, path: str) -> YamlVa
 
 
 def resolve_path(
-    document: PointDocument,
+    document: PointDocument | ParameterContent,
     path: str,
     *,
     roles: Mapping[str, AliasValue],
@@ -320,8 +322,10 @@ def resolve_path(
         namespaces.append("component")
     if (
         prefix == "general"
-        or prefix in type(document.general).model_fields
-        or prefix in (document.general.model_extra or {})
+        or (document.general is not None and (
+            prefix in type(document.general).model_fields
+            or prefix in (document.general.model_extra or {})
+        ))
     ):
         namespaces.append("general")
     if prefix in reserved_names:
@@ -427,7 +431,7 @@ def add_component_to_draft(
     draft.components[name] = component
 
 
-def document_meta(document: SetupDocument | PointDocument, path: str) -> YamlMap | None:
+def document_meta(document: SetupDocument | PointDocument | ParameterContent, path: str) -> YamlMap | None:
     """Return this document's isolated opaque metadata for a dotted path, or None.
 
     Invalid empty paths or empty path segments raise ValueError. The value at

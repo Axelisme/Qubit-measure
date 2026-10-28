@@ -44,7 +44,7 @@ from .save_layout import (
     workflow_roots,
 )
 from .save_names import SaveContext, default_save_stem
-from .schema import ComponentSchema
+from .schema import ComponentSchema, ParameterContent
 from .schema_fields import (
     FieldSpec,
     FieldValueKind,

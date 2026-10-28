@@ -69,11 +69,7 @@ def _service(state: State) -> tuple[LoadService, MagicMock]:
     context = MagicMock()
     context.read_context.side_effect = lambda: state.session_env.parameters
     return (
-        LoadService(
-            state,
-            context=context,
-            captured_parameters=lambda _aliases: state.session_env.parameters,
-        ),
+        LoadService(state),
         emit,
     )
 

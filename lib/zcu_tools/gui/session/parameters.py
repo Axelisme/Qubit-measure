@@ -9,13 +9,16 @@ from fnmatch import fnmatchcase
 from types import MappingProxyType
 from typing import TYPE_CHECKING
 
+from zcu_tools.experiment.metadata import ParameterSnapshot
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 from zcu_tools.gui.session.aliases import AliasRow, AliasTable, ResolvedAliasRow
 from zcu_tools.gui.session.context_types import (
     ContextSourceUnavailableError,
 )
+from zcu_tools.resources.context.library import LibrarySnapshot, ModuleLibraryDocument
 from zcu_tools.resources.document_store import DocumentValue
 from zcu_tools.resources.entry import (
+    ParameterContent,
     RoleResolutionError,
     document_value,
     resolve_path,
@@ -29,7 +32,6 @@ _LIBRARY_PARTITIONS = ("pulses", "readout", "reset", "waveforms")
 if TYPE_CHECKING:
     from zcu_tools.format_version import YamlValue
     from zcu_tools.gui.session.context_types import ContextSourceFault, ContextTarget
-    from zcu_tools.resources.context.library import LibrarySnapshot
     from zcu_tools.resources.entry import RoleSpec
     from zcu_tools.resources.entry.schema import PointDocument
 
@@ -96,9 +98,9 @@ class ParameterContext:
     def __init__(
         self,
         *,
-        point: PointDocument,
+        point: PointDocument | ParameterContent,
         library: LibrarySnapshot,
-        target: ContextTarget,
+        target: ContextTarget | None,
         roles: RoleBinding | None,
         source_faults: tuple[ContextSourceFault, ...] = (),
         storage: PointStorageBinding | None = None,
@@ -121,12 +123,14 @@ class ParameterContext:
         if any(fault.document == "setup" for fault in source_faults):
             raise ValueError("Parameter captures accept only point/module_cfg faults")
         if storage is not None and (
-            storage.entry_name != target.entry_name or storage.point != target.point
+            target is None
+            or storage.entry_name != target.entry_name
+            or storage.point != target.point
         ):
             raise ValueError("Storage origin must match the saved-point target")
         self._point = point.model_copy(deep=True)
         self._library = library
-        self._target = target.model_copy(deep=True)
+        self._target = None if target is None else target.model_copy(deep=True)
         self._roles = deepcopy(roles)
         self._source_faults = deepcopy(source_faults)
         self._storage = storage
@@ -161,10 +165,73 @@ class ParameterContext:
                         f"Captured target {name!r} is missing or has the wrong kind",
                     )
 
+    @classmethod
+    def empty(cls) -> ParameterContext:
+        """Create a readable empty environment with no target, metadata or storage."""
+        return cls(
+            point=ParameterContent(),
+            library=LibrarySnapshot(ModuleLibraryDocument(
+                format="zcu.module-library", format_version="2.0",
+            )),
+            target=None,
+            roles=None,
+        )
+
+    def snapshot(self) -> ParameterSnapshot:
+        """Detach readable point, library and aliases for native RunMetadata.
+
+        Capture uses only fixed memory, never current files or selection.
+        Unavailable sources or invalid bound aliases raise their owner error.
+        Persistent targets and storage capabilities are not serialized.
+        """
+        self._ensure_readable()
+        point = self._point
+        content = (
+            point.model_copy(deep=True)
+            if isinstance(point, ParameterContent)
+            else ParameterContent.model_construct(
+                components=deepcopy(point.components),
+                metadata=deepcopy(point.metadata),
+                general=point.general.model_copy(deep=True),
+            )
+        )
+        roles = self.roles
+        return ParameterSnapshot(
+            point=content,
+            library=self._library.document(),
+            aliases=(
+                None if self._aliases is None
+                else {row.alias: row.value for row in self.aliases}
+            ),
+            names={} if roles is None else dict(roles.names),
+        )
+
+    @classmethod
+    def from_snapshot(cls, snapshot: ParameterSnapshot) -> ParameterContext:
+        """Restore validated stored content without reading live files or assets.
+
+        No persistent target/storage is granted. Library materialization needing
+        external waveform assets still requires its own capability.
+        Authored aliases retain order/links; fixed-name captures stay resolved.
+        Invalid aliases raise InvalidInputError at restoration.
+        """
+        return cls(
+            point=snapshot.point,
+            library=LibrarySnapshot(snapshot.library),
+            target=None,
+            roles=RoleBinding(
+                None, {}, snapshot.names,
+                aliases=(
+                    None if snapshot.aliases is None
+                    else tuple(AliasRow(key, value) for key, value in snapshot.aliases.items())
+                ),
+            ),
+        )
+
     @property
-    def target(self) -> ContextTarget:
-        """Return an independent saved-point destination."""
-        return self._target.model_copy(deep=True)
+    def target(self) -> ContextTarget | None:
+        """Return a detached persistent target, or None for stored/empty content."""
+        return None if self._target is None else self._target.model_copy(deep=True)
 
     @property
     def roles(self) -> RoleBinding | None:
@@ -255,7 +322,7 @@ class ParameterContext:
         if self._source_faults:
             raise ContextSourceUnavailableError(self._source_faults)
 
-    def document(self) -> PointDocument:
+    def document(self) -> PointDocument | ParameterContent:
         """Copy the fixed point without I/O or model hooks; unavailable sources raise."""
         self._ensure_readable()
         return self._point.model_copy(deep=True)

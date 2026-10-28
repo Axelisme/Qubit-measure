@@ -240,11 +240,7 @@ def build_app_services(  # noqa: PLR0913
     tab = TabService(state, registry, writeback, tab_forms, form_sources)
     workspace = WorkspaceService(state, tab, bus)
     guard = GuardService(state, access=access)
-    load = LoadService(
-        state,
-        context=ContextControlFacet(context=context),
-        captured_parameters=captured_parameters,
-    )
+    load = LoadService(state)
     run = RunService(
         state,
         session.runner,

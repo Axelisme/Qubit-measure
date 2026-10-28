@@ -161,11 +161,7 @@ def test_query_metadata_and_load_validity_are_independent(
         assert load.isEnabled()
         load.click()
         assert dialog.selected_path() == str(path)
-        service = LoadService(
-            session.state,
-            context=ContextControlFacet(context=session.context),
-            captured_parameters=lambda _aliases: None,
-        )
+        service = LoadService(session.state)
         with pytest.raises(LoadDataError) as error:
             service.load_result("tab", dialog.selected_path() or "")
         assert error.value.reason_code == (

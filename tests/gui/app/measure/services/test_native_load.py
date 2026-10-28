@@ -101,11 +101,7 @@ def _native_controls(
         form_resources(session.state),
         lambda aliases: form_sources(session.state, aliases),
     )
-    load = LoadService(
-        session.state,
-        context=control,
-        captured_parameters=capture,
-    )
+    load = LoadService(session.state)
     run = RunService(
         session.state,
         runner,
@@ -186,6 +182,45 @@ def role_load_session(
         yield session
 
 
+def test_native_save_load_uses_captured_environment_after_source_removal(
+    role_load_session: NativeSaveSession,
+) -> None:
+    import shutil
+    from zcu_tools.cfg_model import PulseSpec
+
+    session = role_load_session
+    control = ContextControlFacet(context=session.context)
+    target = control.read_context().target
+    control.set_module(target, "Q1.pulses.pi", PulseSpec(
+        ch=0, nqz=1, freq=100.0, gain=0.25, waveform="const",
+    ))
+    captured = control.read_context()
+    tab = session.state.get_tab("tab")
+    record = require_record(tab.run)
+    metadata = require_metadata(tab.run).model_copy(update={
+        "parameter_snapshot": captured.snapshot(),
+    })
+    commit_run(session.state, "tab", RunPaneState(
+        result=replace(record, metadata=metadata), parameters=captured,
+        storage=captured.storage,
+    ))
+    control.set_parameter(target, "Q1.rate", 99.0)
+    session.save()
+    portable = session.entry.database_path.parent.parent / "portable.h5"
+    shutil.copyfile(session.native_data_path, portable)
+    session.context.clear_context()
+    shutil.rmtree(session.entry.result_path)
+    LoadService(session.state).load_result("tab", str(portable))
+    restored = tab.run.parameters
+    assert restored is not None
+    assert restored.target is None
+    assert restored.value("$source_qubit.rate") == 7.0
+    assert restored.value("$custom.rate") == 2.0
+    assert restored.library.module_spec("Q1.pulses.pi").gain == 0.25
+    assert restored.aliases == captured.aliases
+    assert require_metadata(tab.run) == metadata
+
+
 def test_native_load_analysis_and_writeback_keep_historical_point_aliases_and_id(
     role_load_session: NativeSaveSession,
     monkeypatch: pytest.MonkeyPatch,
@@ -206,11 +241,7 @@ def test_native_load_analysis_and_writeback_keep_historical_point_aliases_and_id
         )
     )
     rows = session.context.get_alias_rows()
-    service = LoadService(
-        session.state,
-        context=control,
-        captured_parameters=session.capture_parameters,
-    )
+    service = LoadService(session.state)
 
     service.load_result("tab", str(path))
 
@@ -306,11 +337,7 @@ def test_native_load_missing_source_is_reported_but_corruption_preserves_previou
     session.save()
     previous = tab.run
     events = session.entry.ledger.events()
-    service = LoadService(
-        session.state,
-        context=ContextControlFacet(context=session.context),
-        captured_parameters=session.capture_parameters,
-    )
+    service = LoadService(session.state)
     if fault == "corrupt":
         source = (
             session.entry.result_path / "points" / str(history.point) / "point.yaml"
@@ -353,11 +380,7 @@ def test_native_load_keeps_unknown_historical_name_until_component_field_read(
     saved_metadata = require_record(tab.run).metadata
     events = session.entry.ledger.events()
     rows = session.context.get_alias_rows()
-    service = LoadService(
-        session.state,
-        context=ContextControlFacet(context=session.context),
-        captured_parameters=session.capture_parameters,
-    )
+    service = LoadService(session.state)
 
     service.load_result(
         "tab",
@@ -567,11 +590,7 @@ def test_native_load_retains_history_and_resaves_captured_source(
         path = session.native_data_path
         stored = load(path)
         events = session.entry.ledger.events()
-        service = LoadService(
-            session.state,
-            context=ContextControlFacet(context=session.context),
-            captured_parameters=session.capture_parameters,
-        )
+        service = LoadService(session.state)
         outcome = service.load_result("tab", str(path))
         original_capture = session.state.get_tab("tab").run.parameters
         other = ResultEntry.create(
@@ -619,11 +638,7 @@ def test_loaded_same_entry_different_point_resaves_original_run(
         control = ContextControlFacet(context=session.context)
         control.use_point(PointUseRequest("destination-point"))
         tab = session.state.get_tab("tab")
-        service = LoadService(
-            session.state,
-            context=ContextControlFacet(context=session.context),
-            captured_parameters=session.capture_parameters,
-        )
+        service = LoadService(session.state)
         service.load_result("tab", str(source))
         assert tab.run.confirmed_run_id is None
         planned_copies: tuple[Path, ...] = ()
@@ -729,11 +744,7 @@ def test_loaded_foreign_origin_saves_with_captured_storage_and_historical_metada
         tab = session.state.get_tab("tab")
         captured = control.read_context().capture_storage()
         assert captured.point == "destination-point"
-        service = LoadService(
-            session.state,
-            context=ContextControlFacet(context=session.context),
-            captured_parameters=session.capture_parameters,
-        )
+        service = LoadService(session.state)
         service.load_result("tab", str(source))
         assert require_record(tab.run).metadata == metadata_from_container(load(source))
         assert tab.run.parameters is None
@@ -795,11 +806,7 @@ def test_unselected_entry_load_retains_history_and_save_rejects_without_writes(
             if p.is_file()
         }
         events = session.entry.ledger.events()
-        service = LoadService(
-            session.state,
-            context=ContextControlFacet(context=session.context),
-            captured_parameters=session.capture_parameters,
-        )
+        service = LoadService(session.state)
 
         outcome = service.load_result("tab", str(path))
 
@@ -853,11 +860,7 @@ def test_native_experiment_mismatch_keeps_previous_result_and_history(
         session.save()
         path = session.native_data_path
         old_run = tab.run
-        service = LoadService(
-            session.state,
-            context=ContextControlFacet(context=session.context),
-            captured_parameters=session.capture_parameters,
-        )
+        service = LoadService(session.state)
 
         with pytest.raises(LoadDataError) as error:
             service.load_result("tab", str(path))
@@ -873,11 +876,7 @@ def test_unreadable_native_load_keeps_previous_result_and_history(
     with native_save_session(tmp_path, qapp) as session:
         tab = session.state.get_tab("tab")
         old_run = tab.run
-        service = LoadService(
-            session.state,
-            context=ContextControlFacet(context=session.context),
-            captured_parameters=session.capture_parameters,
-        )
+        service = LoadService(session.state)
 
         with pytest.raises(LoadDataError) as error:
             service.load_result("tab", str(tmp_path / "missing.h5"))

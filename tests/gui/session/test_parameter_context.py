@@ -127,6 +127,75 @@ def declarations() -> dict[str, RoleSpec]:
     }
 
 
+def test_empty_analysis_environment_has_no_persistent_identity_or_metadata() -> None:
+    context = ParameterContext.empty()
+    assert context.target is None
+    assert context.storage is None
+    assert context.document().general is None
+    assert context.document().metadata == {}
+    assert context.document().components == {}
+    assert context.lookup("general.created_at") == DocumentValue(False, None)
+    assert context.library.module_keys() == ()
+    assert context.aliases == ()
+
+
+def test_parameter_snapshot_round_trip_keeps_content_library_and_authored_aliases(
+    source: tuple[PointDocument, LibrarySnapshot],
+) -> None:
+    from pydantic import TypeAdapter
+
+    original = capture(source).bind_aliases(
+        (AliasRow("drive", "Q1"), AliasRow("sensor", "$drive.sense")), {}
+    )
+    snapshot = original.snapshot()
+    codec = TypeAdapter(type(snapshot))
+    encoded = codec.dump_json(snapshot)
+    source[0].components.clear()
+    restored = ParameterContext.from_snapshot(
+        codec.validate_json(encoded)
+    )
+    assert restored.target is None
+    assert restored.storage is None
+    assert restored.value("$drive.rate") == 4300.0
+    assert restored.value("$sensor.rate") == 6500.0
+    assert restored.value("$drive.pulses.pi.gain") == 0.25
+    assert restored.aliases == original.aliases
+    assert restored.document().metadata == original.document().metadata
+
+
+@pytest.mark.parametrize("defect", ["missing", "different_format", "extra"])
+def test_snapshot_validates_only_values_actually_read(
+    source: tuple[PointDocument, LibrarySnapshot], defect: str,
+) -> None:
+    import json
+    from pydantic import TypeAdapter
+
+    original = capture(source).bind_aliases((AliasRow("drive", "Q1"),), {})
+    snapshot = original.snapshot()
+    codec = TypeAdapter(type(snapshot))
+    data = json.loads(codec.dump_json(snapshot))
+    data["point"]["components"]["unused"] = ["not a component"]
+    data["point"]["general"] = "unrelated old format"
+    data["aliases"]["unused"] = {"not": "an alias binding"}
+    if defect == "missing":
+        del data["library"]
+    elif defect == "different_format":
+        data["library"] = ["unrelated old format"]
+    else:
+        data["extra"] = ["unknown block"]
+        data["library"]["extra"] = {"anything": True}
+        data["library"]["components"]["Q1"]["pulses"]["pi"]["unused"] = []
+    restored = ParameterContext.from_snapshot(codec.validate_json(json.dumps(data)))
+    assert restored.value("$drive.rate") == 4300.0
+    if defect == "extra":
+        assert restored.library.module_spec("Q1.pulses.pi").gain == 0.25
+    else:
+        with pytest.raises((KeyError, ValueError), match="library"):
+            restored.library.module_spec("Q1.pulses.pi")
+    with pytest.raises((ValueError, InvalidInputError), match="unused|alias"):
+        restored.value("$unused")
+
+
 def test_point_capture_is_detached_and_preserves_target(
     source: tuple[PointDocument, LibrarySnapshot],
 ) -> None:

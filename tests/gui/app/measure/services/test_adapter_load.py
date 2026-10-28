@@ -40,11 +40,7 @@ def test_load_value_accepts_native_data_and_keeps_it_when_next_file_is_unsupport
             cfg=make_form(saving_form(FormContext(None)), state=state),
         ),
     )
-    service = LoadService(
-        state,
-        context=MagicMock(),
-        captured_parameters=lambda aliases: None,
-    )
+    service = LoadService(state)
     supported = tmp_path / "supported.h5"
     metadata = write_native_file(supported, tag=SavingCore.AXES_SPEC.tag)
     GuardService(state, access=ExperimentAccess()).check_load("tab")
