@@ -395,6 +395,8 @@ async def run_mist_stage(
 
 
 @workflow("mist_fluxdep", "Calibrate and acquire MIST gain traces versus flux.")
+# tolerated(radon): Per docs/code-quality.md, per-point calibration and preparation
+# gates, stage order and record writes stay together in the main loop.
 async def mist_fluxdep(  # noqa: C901, PLR0912, PLR0915  # tolerated: workflow flow reads top to bottom
     env: WorkflowEnv[Calibrated], plan: MISTPlan, tun: Live[MISTTunables]
 ) -> RunSummary:

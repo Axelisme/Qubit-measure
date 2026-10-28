@@ -17,6 +17,7 @@ from ruamel.yaml import YAML, YAMLError
 from zcu_tools.format_version import YamlMap
 from zcu_tools.resources.document_store import DocumentValue, FieldPath
 from zcu_tools.resources.entry import entry_component_paths, entry_predictor_paths
+from zcu_tools.resources.file_lock import lock_path_for
 from zcu_tools.resources.parameter_schema import ParameterSchemaPolicy
 from zcu_tools.resources.predictor_upgrade import upgrade_predictor_files
 from zcu_tools.resources.record_table.upgrade import upgrade_record_files
@@ -186,7 +187,7 @@ def upgrade_files(
 
     sources is an ordered collection of paths with optional point labels. plan
     owns all component classification/validation. apply takes each file's same
-    sidecar lock as DocumentStore, re-reads under lock, creates an exclusive
+    runtime lock as DocumentStore, re-reads under lock, creates an exclusive
     sibling backup before atomic replacement, and returns its path. Dry-run
     creates no files or locks. Current documents are fully validated then skipped.
     YAML, ValueError, lock timeout and I/O failures become rejected results;
@@ -247,7 +248,7 @@ def _upgrade_file(
     try:
         # Check before FileLock: missing inputs must not create parent directories.
         path.parent.stat()
-        lock = FileLock(f"{path}.lock", timeout=5) if apply else nullcontext()
+        lock = FileLock(str(lock_path_for(path)), timeout=5) if apply else nullcontext()
         with lock:
             original = path.read_bytes()
             decoded = YAML(typ="safe").load(original.decode("utf-8"))

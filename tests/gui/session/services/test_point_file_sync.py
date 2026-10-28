@@ -75,9 +75,7 @@ def test_invalid_candidate_retains_memory_revision_and_bytes(
     assert context.read_context().value("Q1.rate") == old.value("Q1.rate")
     assert context.get_alias_rows() == ()
     assert file.path.read_text() == body
-    assert not (set(file.path.parent.iterdir()) - siblings) - {
-        Path(f"{file.path}.lock")
-    }
+    assert set(file.path.parent.iterdir()) == siblings
     assert facts == []
     status = context.get_file_sync_status()[0]
     assert status.state == "error"
