@@ -179,8 +179,7 @@ class ParameterContext:
         None means no consumer declarations.
         """
         if self._aliases is not None and self._roles is not None:
-            if self._alias_error is not None:
-                raise self._alias_error
+            self._ensure_aliases_readable()
             self._ensure_readable()
             names = self._aliases.names(self._point, self._roles.declarations)
             return RoleBinding(None, self._roles.declarations, names)
@@ -189,8 +188,7 @@ class ParameterContext:
     @property
     def aliases(self) -> tuple[AliasRow, ...]:
         """Return fixed authored rows, or raise the captured alias-file error."""
-        if self._alias_error is not None:
-            raise self._alias_error
+        self._ensure_aliases_readable()
         return () if self._aliases is None else self._aliases.rows
 
     def resolved_aliases(self) -> tuple[ResolvedAliasRow, ...]:
@@ -203,8 +201,7 @@ class ParameterContext:
         Reads neither live aliases nor files and never materializes assets.
         """
         self._ensure_readable()
-        if self._alias_error is not None:
-            raise self._alias_error
+        self._ensure_aliases_readable()
         if self._aliases is None:
             return ()
         rows: list[ResolvedAliasRow] = []
@@ -261,6 +258,10 @@ class ParameterContext:
     def _ensure_readable(self) -> None:
         if self._source_faults:
             raise ContextSourceUnavailableError(self._source_faults)
+
+    def _ensure_aliases_readable(self) -> None:
+        if self._alias_error is not None:
+            raise self._alias_error
 
     def document(self) -> PointDocument:
         """Copy the fixed point without I/O or model hooks; unavailable sources raise."""
@@ -355,8 +356,7 @@ class ParameterContext:
 
     def _alias_value(self, alias: str) -> AliasValue:
         self._ensure_readable()
-        if self._alias_error is not None:
-            raise self._alias_error
+        self._ensure_aliases_readable()
         spec = self._roles.declarations.get(alias) if self._roles is not None else None
         if self._aliases is not None:
             if spec is not None:
