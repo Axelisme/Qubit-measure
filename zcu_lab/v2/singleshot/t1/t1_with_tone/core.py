@@ -7,6 +7,7 @@ from typing import Annotated, ClassVar
 import numpy as np
 from matplotlib.axes import Axes
 from numpy.typing import NDArray
+from pydantic import field_serializer
 from zcu_tools.analysis.fitting.multi_decay import (
     calc_lambdas,
     fit_dual_transition_rates,
@@ -35,10 +36,8 @@ from zcu_tools.program.v2 import (
     SweepCfg,
     sweep2param,
 )
-from zcu_tools.program.v2.modules.readout import classification_parameters
 
 from zcu_lab.v2.support import LinePlot, live_line
-from zcu_lab.v2.support.singleshot.util import readout_confusion_matrix
 
 
 def _default_initial_states() -> NDArray[np.int64]:
@@ -94,10 +93,18 @@ class T1WithToneCfg(ConfigBase):
     probe_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Probe Pulse")]
     readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
     length: Annotated[SweepCfg | list[float], FieldMeta(label="Delay", unit="us")]
+    g_center: Annotated[complex, FieldMeta(label="Ground center")]
+    e_center: Annotated[complex, FieldMeta(label="Excited center")]
+    radius: Annotated[float, FieldMeta(label="Classification radius")]
+
+    @field_serializer("g_center", "e_center")
+    def serialize_center(self, value: complex) -> str:
+        return str(value)
 
 
 @dataclass(frozen=True)
 class T1WithToneAnalyzeOptions:
+    confusion_matrix: NDArray[np.float64] | None = None
     skip: int = 0
 
 
@@ -163,13 +170,12 @@ class T1WithToneExp(Experiment[T1WithToneResult, T1WithToneCfg]):
         the FPGA; non-uniform lengths run on the host and omit the tone at zero.
         Return lengths in us and populations shaped (length, preparation, G/E),
         averaged over rounds. Cancellation leaves unmeasured entries as NaN.
-        cfg supplies the pulses and readout classifier; context
+        cfg supplies the pulses and IQ classification centers/radius; context
         supplies hardware, plots and cancellation. Uniform mode requires SweepCfg;
         non-uniform lengths must stay distinct on the probe generator's grid.
         """
         # 1. Quantize durations without changing the caller's pulse settings.
         cfg = deepcopy(cfg)
-        classification = classification_parameters(cfg.readout, require_other=True)
         soc, soccfg = context.soc, context.soccfg
         if cfg.uniform:
             length_sweep = cfg.length
@@ -225,7 +231,9 @@ class T1WithToneExp(Experiment[T1WithToneResult, T1WithToneCfg]):
                     .declare_sweep("ge", 2)
                     .build_and_acquire(
                         raw2signal_fn=raw_population_signal,
-                        classify=classification,
+                        g_center=cfg.g_center,
+                        e_center=cfg.e_center,
+                        ge_radius=cfg.radius,
                         rounds=cfg.rounds,
                     )
                 )
@@ -270,7 +278,9 @@ class T1WithToneExp(Experiment[T1WithToneResult, T1WithToneCfg]):
                         _ = builder.run_program(
                             programs[length_key],
                             raw2signal_fn=raw_population_signal,
-                            classify=classification,
+                            g_center=cfg.g_center,
+                            e_center=cfg.e_center,
+                            ge_radius=cfg.radius,
                             rounds=cfg.rounds,
                         )
 
@@ -294,10 +304,7 @@ class T1WithToneExp(Experiment[T1WithToneResult, T1WithToneCfg]):
         """
         # 1. Select durations and correct readout populations for both preparations.
         result = source.result
-        skip = options.skip
-        confusion_matrix = readout_confusion_matrix(
-            None if source.cfg is None else source.cfg.readout
-        )
+        skip, confusion_matrix = options.skip, options.confusion_matrix
 
         lens, populations = result.lengths, result.signals
 

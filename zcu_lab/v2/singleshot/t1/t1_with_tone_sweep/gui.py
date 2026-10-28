@@ -32,6 +32,7 @@ from zcu_lab.v2.singleshot.t1.t1_with_tone_sweep.form import (
 )
 from zcu_lab.v2.support.measure.singleshot_shared import (
     read_analysis_float,
+    read_confusion_matrix,
 )
 
 SsT1ToneSweepRunResult: TypeAlias = RunRecord[T1WithToneSweepCfg, T1WithToneSweepResult]
@@ -44,12 +45,16 @@ def _analyze(
     xlabel: str,
 ) -> None:
     # ``ac_coeff`` (= md 'ac_stark_coeff') rescales the outer x-axis to photon
-    # number. Readout correction comes from the saved cfg, not the point. ``xlabel`` labels the rate plots with this adapter's outer
+    # number; ``confusion_matrix`` readout-corrects; both are md inputs, not
+    # user knobs. ``xlabel`` labels the rate plots with this adapter's outer
     # axis.
     ac_coeff = read_analysis_float(req.parameters, "$qubit.ext.ac_stark_coeff")
+    confusion = read_confusion_matrix(req.parameters)
     T1WithToneSweepExp().analyze(
         req.run_result,
-        T1WithToneSweepAnalyzeOptions(ac_coeff=ac_coeff, xlabel=xlabel),
+        T1WithToneSweepAnalyzeOptions(
+            ac_coeff=ac_coeff, confusion_matrix=confusion, xlabel=xlabel
+        ),
         plots=plots,
     )
     return

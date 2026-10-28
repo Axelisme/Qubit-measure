@@ -142,8 +142,10 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
         """Measure relaxation from both the unflipped and pi-prepared states.
 
         Reset, apply I or pi, wait a variable delay, then classify readout shots
-        using cfg.readout.classifier in raw normalized ADC coordinates. Return quantized delays in us and
-        G/E populations with shape (delay, initial state, population state).
+        using each ADC's corresponding readout classifier in raw normalized ADC
+        coordinates. Analyze only the first readout result. Return quantized
+        delays in us and G/E populations with shape
+        (delay, initial state, population state).
         Uniform sampling requires a SweepCfg; nonuniform sampling also accepts
         an explicit delay list and rejects collisions on the hardware time grid.
         """

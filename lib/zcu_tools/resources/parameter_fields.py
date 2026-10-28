@@ -347,8 +347,9 @@ def sequence_index(value: Sequence[object], segment: str) -> int:
 
     value supplies only the length; this does not choose readable or writable
     container types. segment must be "0" or digits without leading zero, and
-    identify an existing element. Invalid syntax, overly long numbers and
-    out-of-range indices raise ValueError before integer conversion.
+    identify an existing element. Invalid syntax and overly long numbers are
+    rejected before integer conversion. All invalid or out-of-range indices
+    raise ValueError.
     """
     if (
         not segment.isascii()
@@ -373,9 +374,10 @@ def set_model_value(model: BaseModel, path: str, value: object) -> None:
     or negative indexing. Tuple/ndarray writes are not supported.
     Native complex scalars use the shared persisted tag. Values are copied;
     model types and field presence are retained. Missing/non-container parents
-    raise KeyError/AttributeError. An undeclared field on a model that does not
-    allow extras raises ValidationError naming the full path, without invoking
-    model validators. The owner must validate the full model before publication.
+    raise KeyError/AttributeError. Invalid or out-of-range list indices raise
+    ValueError. An undeclared field on a model that does not allow extras raises
+    ValidationError naming the full path, without invoking model validators.
+    The owner must validate the full model before publication.
     No metadata or files are changed.
     """
     parts = parameter_path(path)
