@@ -68,10 +68,17 @@ class RunPaneSnapshot:
 
 @dataclass(frozen=True, slots=True)
 class AnalysisPaneSnapshot:
+    """Primary analysis projection.
+
+    has_result is the State-owned presence fact, including figures-only results
+    and published empty figure collections. It is independent of admission.
+    """
+
     params: object | None
     result: object | None
     figures: FigureCollection | None
     writeback_items: tuple[WritebackItem, ...]
+    has_result: bool
     has_writeback_draft: bool = False
     source_operation_id: int | None = None
     result_params: object | None = None
@@ -83,10 +90,17 @@ class AnalysisPaneSnapshot:
 
 @dataclass(frozen=True, slots=True)
 class PostAnalysisPaneSnapshot:
+    """Post-analysis projection.
+
+    has_result is the State-owned presence fact, including figures-only results
+    and published empty figure collections. It is independent of admission.
+    """
+
     params: object | None
     result: object | None
     figures: FigureCollection | None
     writeback_items: tuple[WritebackItem, ...]
+    has_result: bool
     has_writeback_draft: bool = False
     source_operation_id: int | None = None
     result_params: object | None = None

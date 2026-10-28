@@ -59,10 +59,10 @@ def _adapter_with_params(params: ChoiceParams) -> MagicMock:
     control.has_tab.return_value = True
     control.get_tab_snapshot.return_value = SimpleNamespace(
         analysis=SimpleNamespace(
-            params=params, has_writeback_draft=False, result=object()
+            params=params, has_writeback_draft=False, result=object(), has_result=True
         ),
         post_analysis=SimpleNamespace(
-            params=params, has_writeback_draft=False, result=None
+            params=params, has_writeback_draft=False, result=None, has_result=False
         ),
         capabilities=SimpleNamespace(analysis=AnalysisMode.FIT),
         interaction=None,
@@ -176,6 +176,7 @@ def test_start_projects_only_content_replaced_on_success(handler, expected):
     snapshot.analysis.has_writeback_draft = True
     snapshot.post_analysis.has_writeback_draft = True
     snapshot.post_analysis.result = object()
+    snapshot.post_analysis.has_result = True
     snapshot.capabilities.analysis = AnalysisMode.INTERACTIVE
 
     reply = handler(adapter, {"tab_id": "t", "updates": {}})

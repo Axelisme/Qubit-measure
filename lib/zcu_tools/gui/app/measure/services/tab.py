@@ -133,6 +133,7 @@ class TabService:
             analysis=AnalysisPaneSnapshot(
                 params=tab.analysis.params,
                 result=tab.analysis.result,
+                has_result=tab.has_analyze_result(),
                 figures=tab.analysis.plots,
                 writeback_items=analysis_items,
                 unavailable_reasons=(
@@ -148,6 +149,7 @@ class TabService:
             post_analysis=PostAnalysisPaneSnapshot(
                 params=tab.post_analysis.params,
                 result=tab.post_analysis.result,
+                has_result=tab.has_post_analyze_result(),
                 figures=tab.post_analysis.plots,
                 writeback_items=post_items,
                 unavailable_reasons=(

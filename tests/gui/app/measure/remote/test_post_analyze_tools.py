@@ -22,9 +22,12 @@ from ._helpers import dispatch_handler as _dispatch
 def _snapshot(*, has_analyze_result: bool, post_params: object) -> SimpleNamespace:
     """Minimal pane-qualified snapshot consumed by the post handlers."""
     return SimpleNamespace(
-        analysis=SimpleNamespace(result=object() if has_analyze_result else None),
+        analysis=SimpleNamespace(
+            result=object() if has_analyze_result else None,
+            has_result=has_analyze_result,
+        ),
         post_analysis=SimpleNamespace(
-            params=post_params, has_writeback_draft=False, result=None
+            params=post_params, has_writeback_draft=False, result=None, has_result=False
         ),
     )
 
@@ -122,6 +125,8 @@ def test_get_result_summarizes():
         "confusion": [[1.0, 0.0], [0.0, 1.0]],
     }
     ctrl.get_post_analyze_result.return_value = result
+    ctrl.get_tab_snapshot.return_value.post_analysis.result = result
+    ctrl.get_tab_snapshot.return_value.post_analysis.has_result = True
     res = _dispatch(ctrl, "tab.get_post_analyze_result", {"tab_id": "t"})
     assert res == {
         "summary": {

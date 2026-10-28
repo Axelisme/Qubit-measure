@@ -88,6 +88,51 @@ def test_tab_snapshot_is_single_pure_render_model() -> None:
     assert state.get_tab("tab").analysis.params is analyze_params
 
 
+@pytest.mark.parametrize("publication", ["absent", "numeric", "figures_only", "empty"])
+@pytest.mark.parametrize("stage", ["analysis", "post_analysis"])
+def test_snapshot_projects_analysis_presence(publication: str, stage: str) -> None:
+    """Presence survives missing numeric data and an empty published collection."""
+    state = _active_state()
+    state.add_tab(
+        "tab",
+        Session(
+            adapter_name="fake",
+            adapter=MagicMock(),
+            cfg=MagicMock(),
+            analysis=AnalysisPaneState(
+                result=object() if stage == "post_analysis" else None
+            ),
+        ),
+    )
+    plots = None
+    if publication in ("figures_only", "empty"):
+        plots = Plots(NonPresentingHost())
+        if publication == "figures_only":
+            plots.subplots("fit")
+        plots.finish()
+    result = object() if publication == "numeric" else None
+    if publication != "absent":
+        if stage == "analysis":
+            state.replace_analysis_pane("tab", result=result, plots=plots)
+        else:
+            state.replace_post_analysis_pane("tab", result=result, plots=plots)
+    service = TabService(
+        state,
+        MagicMock(),
+        MagicMock(),
+        form_resources(state),
+        form_sources=lambda aliases: form_sources(state, aliases),
+    )
+
+    snapshot = service.get_snapshot("tab")
+
+    pane = snapshot.analysis if stage == "analysis" else snapshot.post_analysis
+    assert pane is not None
+    assert pane.has_result is (publication != "absent")
+    assert pane.result is result
+    assert pane.figures is plots
+
+
 def test_snapshot_projects_empty_writeback_draft_existence() -> None:
     state = _active_state()
     draft = object()

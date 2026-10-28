@@ -87,6 +87,7 @@ def make_snapshot(tab_id, *, plots: Plots, analysis=AnalysisMode.FIT, post=False
     analysis_snap = AnalysisPaneSnapshot(
         params=MagicMock(),
         result=object(),
+        has_result=True,
         figures=plots,
         writeback_items=(),
         has_writeback_draft=False,
@@ -94,6 +95,7 @@ def make_snapshot(tab_id, *, plots: Plots, analysis=AnalysisMode.FIT, post=False
     post_snap = PostAnalysisPaneSnapshot(
         params=None,
         result=None,
+        has_result=False,
         figures=None,
         writeback_items=(),
         has_writeback_draft=False,

@@ -118,12 +118,14 @@ def make_snapshot(
     analysis_snap = AnalysisPaneSnapshot(
         params=DummyParams() if has_analyze_result else None,
         result=object() if has_analyze_result else None,
+        has_result=has_analyze_result or figure_obj is not None,
         figures=ready_figures(figure_obj),
         writeback_items=tuple(analysis_writeback_items),
     )
     post_snap = PostAnalysisPaneSnapshot(
         params=DummyPostParams() if has_post_result else None,
         result=object() if has_post_result else None,
+        has_result=has_post_result or post_figure_obj is not None,
         figures=ready_figures(post_figure_obj),
         writeback_items=tuple(post_writeback_items),
     )

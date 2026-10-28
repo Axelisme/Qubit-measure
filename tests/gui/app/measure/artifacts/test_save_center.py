@@ -53,12 +53,14 @@ def test_pane_specimens_render_data_json_and_named_figure_outputs(
             analysis=AnalysisPaneSnapshot(
                 params=None,
                 result=object(),
+                has_result=True,
                 figures=ready_figures(Figure() if has_figures else None),
                 writeback_items=(),
             ),
             post_analysis=PostAnalysisPaneSnapshot(
                 params=None,
                 result=object(),
+                has_result=True,
                 figures=ready_figures(Figure() if has_figures else None),
                 writeback_items=(),
             ),

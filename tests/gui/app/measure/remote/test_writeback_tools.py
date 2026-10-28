@@ -60,6 +60,7 @@ def _snapshot(
     ana = AnalysisPaneSnapshot(
         params=None,
         result=object(),
+        has_result=True,
         figures=None,
         writeback_items=tuple(items),
         has_writeback_draft=has_writeback_draft,
@@ -67,6 +68,7 @@ def _snapshot(
     post = PostAnalysisPaneSnapshot(
         params=None,
         result=None,
+        has_result=False,
         figures=None,
         writeback_items=tuple(),
     )

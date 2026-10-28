@@ -1001,13 +1001,13 @@ class ExpTabWidget(QWidget):
                 )
             )
             self._post_gate_label.setVisible(
-                snapshot.analysis is None or snapshot.analysis.result is None
+                snapshot.analysis is None or not snapshot.analysis.has_result
             )
             self.post_writeback_widget.setEnabled(
                 idle
                 and writeback.allowed
                 and snapshot.post_analysis is not None
-                and snapshot.post_analysis.result is not None
+                and snapshot.post_analysis.has_result
             )
             self.post_writeback_widget.setToolTip(writeback.message)
 

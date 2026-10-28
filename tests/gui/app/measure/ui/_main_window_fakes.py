@@ -162,12 +162,14 @@ def make_tab_snapshot(
     analysis_snap = AnalysisPaneSnapshot(
         params=resolved_analyze_params,
         result=object() if has_analyze_result else None,
+        has_result=has_analyze_result or figure_obj is not None,
         figures=ready_figures(figure_obj),
         writeback_items=tuple(writeback_items),
     )
     post_snap = PostAnalysisPaneSnapshot(
         params=post_analyze_params,
         result=object() if has_post_analyze_result else None,
+        has_result=has_post_analyze_result or post_figure_obj is not None,
         figures=ready_figures(post_figure_obj),
         writeback_items=(),
     )

@@ -49,7 +49,7 @@ def test_write_follow_precedes_mutation_and_headless_still_works(
         capabilities=SimpleNamespace(analysis=AnalysisMode.FIT),
         analysis=SimpleNamespace(params=Params(), has_writeback_draft=False),
         post_analysis=SimpleNamespace(
-            params=Params(), has_writeback_draft=False, result=None
+            params=Params(), has_writeback_draft=False, result=None, has_result=False
         ),
     )
     adapter.tab_control.get_running_tab_id.return_value = None

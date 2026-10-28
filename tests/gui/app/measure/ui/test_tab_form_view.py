@@ -94,10 +94,18 @@ def snapshot(*, is_running: bool = False, is_analyzing: bool = False) -> TabSnap
             capabilities=CAPABILITIES,
             run=RunPaneSnapshot(result=None, source_path=None),
             analysis=AnalysisPaneSnapshot(
-                params=None, result=None, figures=None, writeback_items=()
+                params=None,
+                result=None,
+                has_result=False,
+                figures=None,
+                writeback_items=(),
             ),
             post_analysis=PostAnalysisPaneSnapshot(
-                params=None, result=None, figures=None, writeback_items=()
+                params=None,
+                result=None,
+                has_result=False,
+                figures=None,
+                writeback_items=(),
             ),
             save=SavePaneSnapshot(),
         )

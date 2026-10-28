@@ -78,6 +78,7 @@ class WritebackHarness:
             analysis=AnalysisPaneSnapshot(
                 params=None,
                 result=None,
+                has_result=False,
                 figures=None,
                 writeback_items=self.draft.items,
                 has_writeback_draft=True,
