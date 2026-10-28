@@ -345,6 +345,37 @@ def setup_status(dialog: SetupDialog) -> str:
     return status.text()
 
 
+def test_unavailable_point_shows_reason_while_another_point_remains_selectable(
+    entry_dialog: tuple[SetupDialog, Controller, State], tmp_path: Path
+) -> None:
+    dialog, controller, _state = entry_dialog
+    for label in ("bad", "good"):
+        controller.setup_control.new_point(
+            PointCreateRequest(label, f"{label} description", CommandOrigin("gui"))
+        )
+    source = tmp_path / "result/remembered/points/bad/point.yaml"
+    with source.open("a") as stream:
+        stream.write("\nunexpected: opaque\n")
+    driver = ComponentDriver(dialog)
+    evidence = Path(os.environ.get("SESSION_DIALOG_EVIDENCE", str(tmp_path)))
+
+    driver.click(text="Open")
+    driver.screenshot(evidence / "unavailable-point.png")
+    rows = driver.list_rows()
+    assert [row.text for row in rows] == ["bad (unavailable)", "good"]
+    assert "bad description" in rows[0].tooltip
+    assert str(source) in rows[0].tooltip
+    assert "extra" in rows[0].tooltip
+    driver.select_list_row("good")
+    driver.click(text="Switch to selected")
+    driver.screenshot(evidence / "available-point-selected.png")
+    assert [row.text for row in driver.list_rows()] == ["bad (unavailable)", "● good"]
+    assert (
+        driver.observe(object_name="selected_point_description").text
+        == "Description: good description"
+    )
+
+
 def test_working_point_switch_uses_label_and_displays_description(
     entry_dialog: tuple[SetupDialog, Controller, State],
 ) -> None:

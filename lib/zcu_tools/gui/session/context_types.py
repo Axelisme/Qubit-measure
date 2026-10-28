@@ -127,10 +127,18 @@ class EntryInfo:
 
 @dataclass(frozen=True)
 class WorkingPointInfo:
-    """A point label and its general.description, with absent description as ''."""
+    """Point metadata and the last parameter-only availability observation.
+
+    label is the persisted directory label; description is general.description,
+    empty when absent or unreadable. available means its parameters passed the
+    owner schema probe, not that library/aliases are usable. error is None on
+    success, otherwise the failed document path and diagnostic.
+    """
 
     label: str
     description: str
+    available: bool = True
+    error: str | None = None
 
 
 @dataclass(frozen=True)

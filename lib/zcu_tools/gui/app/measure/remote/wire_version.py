@@ -21,8 +21,9 @@ from __future__ import annotations
 # Predictor queries require device_values and explicit v2 flux; calibration returns Phi0 correction.
 # Tab admission shares domain-first reasons before wire source checks.
 # Results list exposes named item issues for unenumerable Database paths.
-WIRE_VERSION = 128
+# point.list includes parameter-only availability and per-point error diagnostics.
+WIRE_VERSION = 129
 
 # Bump for meaningful GUI code changes that need a reload signal.
 # Wire-contract changes bump both versions.
-GUI_VERSION = 161
+GUI_VERSION = 162
