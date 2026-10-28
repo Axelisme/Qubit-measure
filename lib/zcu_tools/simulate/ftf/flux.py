@@ -128,7 +128,14 @@ def _terminal_times(
             * np.max(np.abs(line.coefficients))
         )
         # Allocate the absolute error budget to pulses, not their signed sum.
-        extra = line.tau_ns * np.log(np.maximum(1.0, bound * len(tracks) / (DELTA / 2)))
+        weights = (1 - sum(t.amplitude for t in line.distortion_terms),) + tuple(
+            t.amplitude for t in line.distortion_terms
+        )
+        slowest = max((line.tau_ns, *(t.tau_ns for t in line.distortion_terms)))
+        absolute_weight = sum(abs(weight) for weight in weights)
+        extra = slowest * np.log(
+            np.maximum(1.0, bound * absolute_weight * len(tracks) / (DELTA / 2))
+        )
         horizon = np.maximum(horizon, np.where(mask, end + line.delay_ns + extra, 0.0))
     return np.where(active, (np.floor(horizon / step) + 1) * step, 0.0)
 
@@ -146,17 +153,19 @@ def _moments(length: RealArray, lam: ComplexArray) -> tuple[ComplexArray, Comple
     return first, numerator / lam**2
 
 
-def _filtered_track(track: FluxTrack, line: FluxLine, times: RealArray) -> RealArray:
-    """Exact convolution of linear complex envelope pieces times a carrier."""
+def _lowpass_track(
+    track: FluxTrack, delay_ns: float, tau_ns: float, times: RealArray
+) -> RealArray:
+    """Exact one-pole convolution of linear envelope pieces times a carrier."""
     start, end = _support(track)
     duration = (end - start)[:, None]
-    local = times[None, :] - line.delay_ns - start[:, None]
+    local = times[None, :] - delay_ns - start[:, None]
     omega = 2 * np.pi * track.frequency_ghz[:, None]
     phase = track.phase_rad[:, None] + omega * start[:, None]
     output: ComplexArray = np.zeros(local.shape, dtype=np.complex128)
     for index, env in enumerate(track.envelopes):
         selected = track.active & (track.envelope_index == index)
-        if line.tau_ns == 0:
+        if tau_ns == 0:
             values = env.values(np.maximum(local, 0))
             output += np.where(
                 selected[:, None] & (local >= 0) & (local < duration),
@@ -166,7 +175,7 @@ def _filtered_track(track: FluxTrack, line: FluxLine, times: RealArray) -> RealA
             continue
         knots = np.array([0.0]) if env.kind == "constant" else env.sample_ns
         values = np.array([1.0 + 0j]) if env.kind == "constant" else env.samples
-        lam = np.asarray(1 / line.tau_ns + 1j * omega, dtype=np.complex128)
+        lam = np.asarray(1 / tau_ns + 1j * omega, dtype=np.complex128)
         for k, lo in enumerate(knots):
             hi = knots[k + 1] if k + 1 < len(knots) else np.inf
             slope = (values[k + 1] - values[k]) / (hi - lo) if np.isfinite(hi) else 0j
@@ -177,12 +186,25 @@ def _filtered_track(track: FluxTrack, line: FluxLine, times: RealArray) -> RealA
             # Upper-end factoring prevents overflow on long pulses/tails.
             contribution = (
                 np.exp(1j * (phase + omega * upper))
-                * np.exp(-np.maximum(local - upper, 0) / line.tau_ns)
+                * np.exp(-np.maximum(local - upper, 0) / tau_ns)
                 * (amplitude * first - slope * second)
-                / line.tau_ns
+                / tau_ns
             )
             output += np.where(selected[:, None], contribution, 0)
     return output.real * track.amplitude[:, None]
+
+
+def _filtered_track(track: FluxTrack, line: FluxLine, times: RealArray) -> RealArray:
+    """Combine the base pole and signed distortion poles before loop mixing."""
+    base = _lowpass_track(track, line.delay_ns, line.tau_ns, times)
+    if not line.distortion_terms:
+        return base
+    result = (1 - sum(t.amplitude for t in line.distortion_terms)) * base
+    for term in line.distortion_terms:
+        result += term.amplitude * _lowpass_track(
+            track, line.delay_ns, term.tau_ns, times
+        )
+    return result
 
 
 def _sample(
@@ -214,9 +236,11 @@ def flux_waveform(
 
     points is the integer count, in track-array order. Each point starts at zero;
     sample_period_ns is the positive DAC spacing. Source delay/lowpass precedes
-    loop mixing. Samples retain unsnapped filtered values. A terminal DC sample
+    loop mixing, including the base pole and all signed distortion terms in
+    FluxLine's step response. Samples retain unsnapped filtered values. A terminal DC sample
     is appended only after a conservative sum-of-absolute-pulse-tails bound is
-    below delta/2 = 5e-4 Phi0 on every loop. Empty/inactive points contain DC at
+    below delta/2 = 5e-4 Phi0 on every loop. The bound sums absolute pole weights
+    and uses the slowest decay, without signed cancellation. Empty/inactive points contain DC at
     t=0 only. Invalid shapes, unknown sources or same-source overlaps raise
     ValueError. No state survives calls, and no per-point quadrature is used.
     """
@@ -236,6 +260,28 @@ def flux_waveform(
         np.broadcast_to(times, keep.shape)[keep],
         flux[keep],
     )
+
+
+def plateau_boundaries(waveform: FluxWaveform) -> tuple[tuple[float, ...], ...]:
+    """Return point-aligned ns boundaries between constant and moving flux spans.
+
+    Uses exact equality across all three loops on adjacent waveform samples,
+    matching their linear interpolation. Includes the terminal node if the last
+    interval moves, since flux stays constant after that node. Single-node points
+    have no boundaries. Merge these with timeline events to keep constant holds
+    separate from motion without changing waveform samples or bath levels.
+    """
+    boundaries = []
+    for lo, hi in zip(waveform.offsets[:-1], waveform.offsets[1:], strict=True):
+        times = waveform.time_ns[lo:hi]
+        values = waveform.flux[lo:hi]
+        moving = np.any(values[1:] != values[:-1], axis=1)
+        transitions = np.flatnonzero(moving[1:] != moving[:-1]) + 1
+        nodes = times[transitions]
+        if len(moving) and moving[-1]:
+            nodes = np.r_[nodes, times[-1]]
+        boundaries.append(tuple(float(t) for t in nodes))
+    return tuple(boundaries)
 
 
 def schedule(

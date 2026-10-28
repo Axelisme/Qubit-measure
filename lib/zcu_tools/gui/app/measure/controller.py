@@ -34,7 +34,6 @@ from zcu_tools.gui.form import (
 )
 from zcu_tools.gui.plotting import FigureContainer
 from zcu_tools.gui.session.aliases import scalar_alias_bindings
-from zcu_tools.gui.session.controller_mixin import SessionControllerMixin
 from zcu_tools.gui.session.events import (
     DeviceOperationFinishedPayload,
     DeviceSetupFinishedPayload,
@@ -290,14 +289,11 @@ def _save_summary(report: SaveReport) -> str:
     return f"Saved {total} files for run {report.run_id}"
 
 
-class Controller(SessionControllerMixin):
+class Controller:
     """Façade for the GUI application. Delegates to domain services.
 
-    The identical shared controller forwards live in SessionControllerMixin
-    (read through the _*_svc accessors assigned in __init__); app-specific methods
-    are kept here (get_project_root / get_bus, plus everything app-specific). Shared setup,
-    context / inspect, and value-md-ml consumers use their own control facets
-    instead of this facade.
+    Shared setup, context / inspect, and value-source consumers use their own
+    control facets instead of this facade.
     """
 
     # tolerated: View/state wiring and storage, reload, predictor and device injections have distinct owners; no shared input bundle.
@@ -1185,6 +1181,10 @@ class Controller(SessionControllerMixin):
         individual unreadable run documents remain visible through run.issues.
         """
         return scan_results(Path(self.get_project_root()))
+
+    def get_left_panel_width(self) -> int:
+        """Return the remembered left-panel width in logical pixels for new tabs."""
+        return self._settings_svc.get_left_panel_width()
 
     def get_project_root(self) -> str:
         """Return the injected base directory for result and Database roots.

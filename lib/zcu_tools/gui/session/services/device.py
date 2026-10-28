@@ -227,26 +227,19 @@ class DeviceService:
 
     @contextmanager
     def _device_lease(self, name: str, kind: OperationKind) -> Generator[None]:
-        self._gate.ensure_can_start(kind, resource_id=name)
-        origin = self._bus.current_origin
-        token = self._handles.create(cancel_hook=None, origin=origin)
-        self._gate.register(
-            token,
-            kind,
+        spec = OperationSpec(
+            exclusion=ExclusionRequest(
+                kind=kind,
+                owner_id=name,
+                note=f"{kind.value}: {name}",
+                resource_id=name,
+            ),
             owner_id=name,
-            origin_kind=origin.kind,
-            note=f"{kind.value}: {name}",
-            resource_id=name,
+            wants_progress=False,
+            cancel_hook=None,
         )
-        try:
+        with self._runner.inline(spec):
             yield
-        except Exception as exc:
-            self._handles.settle(token, OperationOutcome("failed", str(exc)))
-            raise
-        else:
-            self._handles.settle(token, OperationOutcome("finished"))
-        finally:
-            self._gate.release(token)
 
     def publish_initial_devices(self) -> None:
         """Publish injected live drivers before preference restore, on owner loop.

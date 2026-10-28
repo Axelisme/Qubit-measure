@@ -9,12 +9,20 @@ from zcu_tools.simulate.evolution import (
     Envelope,
     EnvelopeSpec,
 )
-from zcu_tools.simulate.lines import FilteredFlux, FluxLine
+from zcu_tools.simulate.lines import DistortionTerm, FilteredFlux, FluxLine
 
 
 @pytest.mark.parametrize("gain", [0.7, -0.7])
 @pytest.mark.parametrize("sampled", [False, True])
-def test_batch_midpoints_and_waveform_match_scalar_filter(gain, sampled):
+@pytest.mark.parametrize("tau", [0.0, 6.0])
+@pytest.mark.parametrize(
+    "distortion",
+    [(), (DistortionTerm(1.4, 4.0), DistortionTerm(-0.6, 16.0))],
+    ids=["base", "signed-distortion"],
+)
+def test_batch_midpoints_and_waveform_match_scalar_filter(
+    gain, sampled, tau, distortion
+):
     spec = (
         EnvelopeSpec(
             "sampled",
@@ -36,7 +44,7 @@ def test_batch_midpoints_and_waveform_match_scalar_filter(gain, sampled):
         np.array([True, True, False]),
     )
     dc = np.array([0.31, 0.17, 0.43])
-    lines = (FluxLine("bias", (0.11, -0.06, 0.03), 3.0, 6.0),)
+    lines = (FluxLine("bias", (0.11, -0.06, 0.03), 3.0, tau, distortion),)
     schedule = ftf.schedule(
         (track,), dc_flux=dc, lines=lines, sample_period_ns=2.0, points=3
     )
@@ -131,6 +139,47 @@ def test_overlapping_lines_sum_before_quantizing_and_tails_use_absolute_bounds()
         np.testing.assert_array_equal(
             result.level[index], np.rint(reference.at(t + 1) / 1e-3)
         )
+
+
+def test_opposite_distortion_weights_do_not_cancel_the_tail_error_budget():
+    track = ftf.FluxTrack(
+        "bias",
+        np.zeros(1),
+        np.array([12.0]),
+        np.zeros(1),
+        np.zeros(1),
+        np.ones(1),
+        (EnvelopeSpec("constant"),),
+        np.zeros(1, dtype=np.int64),
+        np.ones(1, dtype=bool),
+    )
+    # Equal opposite poles cancel physically, but each owns an absolute tail budget.
+    line = FluxLine(
+        "bias",
+        (0.1, 0, 0),
+        tau_ns=0,
+        distortion_terms=(DistortionTerm(1, 20), DistortionTerm(-1, 20)),
+    )
+    waveform = ftf.flux_waveform(
+        (track,),
+        dc_flux=np.zeros(3),
+        lines=(line,),
+        sample_period_ns=2,
+        points=1,
+    )
+    terminal = waveform.time_ns[-1]
+    individual_tail = 0.1 * (1 - np.exp(-12 / 20)) * np.exp(-(terminal - 12) / 20)
+    assert 2 * individual_tail < 5e-4
+    schedule = ftf.schedule(
+        (track,),
+        dc_flux=np.zeros(3),
+        lines=(line,),
+        sample_period_ns=2,
+        points=1,
+    )
+    # The base tau=0 feedthrough remains an ideal platform when the poles cancel.
+    np.testing.assert_array_equal(schedule.start_ns, [0, 12])
+    np.testing.assert_array_equal(schedule.level, [[100, 0, 0], [0, 0, 0]])
 
 
 def test_empty_template_has_one_dc_span_per_point():
