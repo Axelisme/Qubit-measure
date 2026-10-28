@@ -25,8 +25,9 @@ from __future__ import annotations
 # Context snapshots no longer include library provenance.
 # Entry info, point bindings and writeback targets use folder names, without UUIDs.
 # Loaded Runs expose recorded parameter content independently of live storage.
-WIRE_VERSION = 130
+# Point library revisions may be null; library writers accept an explicit null base.
+WIRE_VERSION = 131
 
 # Bump for meaningful GUI code changes that need a reload signal.
 # Wire-contract changes bump both versions.
-GUI_VERSION = 163
+GUI_VERSION = 164

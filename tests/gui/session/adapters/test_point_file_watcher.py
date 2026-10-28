@@ -48,6 +48,34 @@ def test_flush_uses_current_admission_and_ignores_own_writes(qapp, selected) -> 
     assert context.read_context().value("Q1.rate") == 6100.0
 
 
+def test_directory_event_installs_new_library_after_absent_selection(
+    qapp, selected
+) -> None:
+    from zcu_tools.gui.session.adapters import PointFileWatcher
+
+    context, bus, entry = selected
+    path = entry.result_path / "points/first/module_cfg.yaml"
+    path.unlink()
+    context.use_point(PointUseRequest("first"))
+    captured = context.read_context()
+    watcher = PointFileWatcher(context, bus, admit_reload=lambda: True)
+    try:
+        path.write_text(
+            'format: zcu.module-library\nformat_version: "2.0"\n'
+            "components: {Q1: {waveforms: {base: {style: const, length: 0.2}}}}\n"
+        )
+        qt_until(
+            lambda: (
+                context.read_context().library.waveform_keys() == ("Q1.waveforms.base",)
+            ),
+            label="new library file reload",
+        )
+        assert captured.library.waveform_keys() == ()
+        assert context.get_file_revisions()[1].revision is not None
+    finally:
+        watcher.close()
+
+
 def test_directory_events_follow_atomic_replace_point_switch_and_missing_aliases(
     qapp, selected
 ) -> None:

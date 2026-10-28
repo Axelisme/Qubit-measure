@@ -13,7 +13,7 @@ class DestinationExistsError(FileExistsError):
 
 
 class MissingPointError(FileNotFoundError):
-    """ResultEntry.use_point could not find point.yaml or module_cfg.yaml.
+    """ResultEntry.use_point could not find point.yaml.
 
     This class does not classify missing references, library assets, schema
     failures or other I/O errors. FileNotFoundError callers remain compatible.

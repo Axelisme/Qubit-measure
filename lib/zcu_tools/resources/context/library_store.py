@@ -76,14 +76,18 @@ def _read_document(document: YamlMap, version: FormatVersion) -> YamlMap:
 def copy_library(source: Path, destination: Path) -> None:
     """Copy admitted Specs to a new file, omitting legacy sources and invalid roots.
 
-    source must be an existing library; destination must not exist and its parent
-    must exist. Source bytes stay unchanged. Forward-minor fields survive. I/O,
-    header and container errors propagate; no ledger or attachment is accessed.
+    A missing source leaves destination absent. Otherwise destination must not
+    exist and its parent must exist. Source bytes stay unchanged. Forward-minor
+    fields survive. I/O, header and container errors propagate; no ledger or
+    attachment is accessed.
     """
-    store = open_library_store(source)
+    store = open_library_store(source, allow_absent=True)
     with store.locked():
         store.refresh()
-        original = source.read_bytes()
+        try:
+            original = source.read_bytes()
+        except FileNotFoundError:
+            return
         document = TypeAdapter(YamlMap).validate_python(
             YAML(typ="rt").load(original.decode("utf-8"))
         )
@@ -103,14 +107,18 @@ def copy_library(source: Path, destination: Path) -> None:
                 YAML(typ="rt").dump(candidate, stream)
 
 
-def open_library_store(path: Path) -> DocumentStore[ModuleLibraryDocument]:
-    """Open existing module_cfg.yaml without modifying it or consulting a ledger.
+def open_library_store(
+    path: Path, *, allow_absent: bool = False
+) -> DocumentStore[ModuleLibraryDocument]:
+    """Open module_cfg.yaml without modifying it or consulting a ledger.
 
     Invalid disk Specs are omitted from the snapshot and recorded by root in
     invalid_entries. Header/container errors propagate. Strict refresh rejects
     invalid Specs instead of omitting them. Draft operations remain strict.
     Legacy provenance is ignored; a nonempty commit drops it from disk.
-    No references materialize and no missing files or directories are created.
+    allow_absent supplies an empty snapshot with revision None for a missing
+    file. Nonempty edits then create it. No references materialize and reads
+    never create missing files or directories.
     """
     return DocumentStore(
         path,
@@ -119,4 +127,9 @@ def open_library_store(path: Path) -> DocumentStore[ModuleLibraryDocument]:
         supported_version=MODULE_LIBRARY_VERSION,
         validate=lambda document: document.validate_content(),
         read_normalize=_read_document,
+        absent_document=(
+            ModuleLibraryDocument(format=MODULE_LIBRARY_FORMAT, format_version="2.0")
+            if allow_absent
+            else None
+        ),
     )
