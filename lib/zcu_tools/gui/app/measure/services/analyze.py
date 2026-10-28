@@ -265,8 +265,8 @@ class AnalyzeService(StagedAnalyzeService):
             try:
                 active.session.ensure_input_open()
             except FailedPreconditionError:
-                token = self._active_tokens[tab_id]
-                with self._bus.origin(self._handles.event_origin(token)):
+                lease = self._interactive_leases[tab_id]
+                with self._bus.origin(lease.origin):
                     self._interactive_instances.pop(tab_id)
                     active.session.dispose()
                     self._interactive_tabs.discard(tab_id)
@@ -295,9 +295,9 @@ class AnalyzeService(StagedAnalyzeService):
                     )
                 return True
             raise
-        token = self._active_tokens[tab_id]
+        lease = self._interactive_leases[tab_id]
         captured = self._captured_inputs[tab_id]
-        with self._bus.origin(self._handles.event_origin(token)):
+        with self._bus.origin(lease.origin):
             self._interactive_instances.pop(tab_id)
             active.session.dispose()
             self._interactive_tabs.discard(tab_id)
@@ -321,8 +321,8 @@ class AnalyzeService(StagedAnalyzeService):
         """
         if tab_id not in self._interactive_tabs:
             return False
-        token = self._active_tokens[tab_id]
-        with self._bus.origin(self._handles.event_origin(token)):
+        lease = self._interactive_leases[tab_id]
+        with self._bus.origin(lease.origin):
             self._interactive_tabs.discard(tab_id)
             active = self._interactive_instances.pop(tab_id, None)
             if active is not None:
@@ -364,8 +364,7 @@ class AnalyzeService(StagedAnalyzeService):
             tab_id,
             type(analyze_result).__name__,
         )
-        # Interactive uses _release (not runner settle) — the token is in
-        # _active_tokens from _open_token.
+        # Commit the domain result before _release settles the retained lease.
         try:
             self._record(tab_id, analyze_result, captured_inputs=captured_inputs)
         except Exception as exc:

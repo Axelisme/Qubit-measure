@@ -141,9 +141,7 @@ def build_session_services(  # noqa: PLR0913
         driver_factory=driver_factory,
         device_registry=device_registry,
     )
-    soc_connection = SoCConnectionService(
-        state, bus, operations.gate, operations.handles, operations.runner
-    )
+    soc_connection = SoCConnectionService(state, bus, operations.runner)
     progress_control = ProgressControlFacet(progress)
     context = ContextService(
         state,

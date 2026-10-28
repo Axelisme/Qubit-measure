@@ -296,7 +296,11 @@ def test_interactive_start_and_finish_keep_captured_operation_origin(
             analyze_params_instance="submitted",
             plots=make_plots(),
         )
+        assert bus.current_origin == EventOrigin(kind="agent", client_id="client-a")
+    # The retained operation must not tag unrelated owner-loop work between callbacks.
+    assert bus.current_origin == EventOrigin(kind="user")
     svc.finish_plugin("tab1")
+    assert bus.current_origin == EventOrigin(kind="user")
 
     assert [fact for fact, _meta in observed] == [
         TabInteractionFact.PRIMARY_ANALYZE_STARTED,
