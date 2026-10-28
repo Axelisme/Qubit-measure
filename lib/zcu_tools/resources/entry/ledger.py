@@ -66,10 +66,11 @@ class RecordsLedger:
     def __init__(
         self, records: Path, *, entry_id: str, lock_timeout: float = 10.0
     ) -> None:
-        """Bind an existing records directory and UUID, without creating files.
+        """Bind a records directory and informational UUID without creating files.
 
-        records is not the entry root or a filename. Missing/non-directory paths
-        raise FileNotFoundError/NotADirectoryError. Invalid entry_id or non-finite,
+        records is not the entry root or a filename. A missing directory is empty
+        until append creates it; its parent must exist for append. Existing
+        non-directory paths raise NotADirectoryError. Invalid entry_id or non-finite,
         negative lock_timeout seconds raise ValueError. All handles resolve the
         same directory before choosing their ledger and runtime lock paths.
         Binding creates the runtime lock directory on demand, not a lock file.
@@ -81,12 +82,10 @@ class RecordsLedger:
         if not math.isfinite(lock_timeout) or lock_timeout < 0:
             raise ValueError("lock_timeout must be finite nonnegative seconds")
         self._records = records.resolve()
-        self._records.stat()
-        if not self._records.is_dir():
+        if self._records.exists() and not self._records.is_dir():
             raise NotADirectoryError(
                 errno.ENOTDIR, os.strerror(errno.ENOTDIR), str(self._records)
             )
-        self._entry_id = entry_id
         self._timeout = lock_timeout
         self._path = self._records / "ledger.jsonl"
         self._lock = FileLock(str(lock_path_for(self._path)))
@@ -119,7 +118,8 @@ class RecordsLedger:
         event.record must be None. An attachment is published under <id>.json and
         its canonical reference added to a copy, never to the input event. Under
         the lock, validate all historical lines before appending and flushing a
-        complete UTF-8 line. Duplicate IDs, wrong entry_id, invalid content and
+        complete UTF-8 line. Event entry_id is informational, not membership.
+        Duplicate IDs, invalid content and
         existing attachments are rejected without overwriting history. After an
         I/O failure only unpublished temporary files are removed, not evidence.
         """
@@ -128,8 +128,6 @@ class RecordsLedger:
         validated = LedgerEvent.model_validate(event.model_dump())
         if validated.format_version != "1.0":
             raise ValueError(f"{self._path}: append requires format_version 1.0")
-        if validated.entry_id != self._entry_id:
-            raise ValueError(f"{self._path}: event.entry_id belongs to another entry")
         attachment = None
         if record is not None:
             try:
@@ -144,6 +142,7 @@ class RecordsLedger:
             entries = self._read()
             if validated.id in entries:
                 raise ValueError(f"{self._path}: duplicate event ID {validated.id!r}")
+            self._records.mkdir(exist_ok=True)
             if attachment is not None:
                 self._publish_record(validated.id, attachment)
             with self._path.open("a", encoding="utf-8", newline="") as stream:
@@ -153,8 +152,8 @@ class RecordsLedger:
     def events(self) -> tuple[LedgerEvent, ...]:
         """Return validated events in append order without reading attachments.
 
-        An existing records directory with no ledger returns (). Corrupt rows,
-        duplicate IDs, foreign entry identities and incomplete tails raise;
+        A missing records directory or ledger returns () without creating it. Corrupt rows,
+        duplicate IDs and incomplete tails raise; event entry_id is informational;
         successful reads never rewrite ledger bytes.
         """
         with self._locked():
@@ -167,7 +166,7 @@ class RecordsLedger:
 
         Use for read-only browsing, not read-modify-write transactions. Read the
         complete current ledger; missing ledger returns (). Validation matches
-        events(), including entry identity, duplicates and complete LF tails.
+        events(), including duplicates and complete LF tails.
         A concurrent append may expose an incomplete tail and raise ValueError;
         callers may refresh later. Attachments are not opened and no files are
         created. I/O errors propagate. This does not update the incremental index.
@@ -238,8 +237,6 @@ class RecordsLedger:
         try:
             stream = self._path.open("rb")
         except FileNotFoundError:
-            # Only an absent ledger in an existing directory means no events.
-            self._records.stat()
             if self._path.is_symlink():
                 raise
             if publish_state:
@@ -291,7 +288,7 @@ class RecordsLedger:
         return entries
 
     def _parse_entry(self, encoded_line: bytes) -> LedgerEntry:
-        """Decode one complete line and validate its envelope and entry identity."""
+        """Decode one complete line and validate its event envelope."""
         line = encoded_line.decode("utf-8")
         if not line.endswith("\n"):
             raise ValueError("incomplete tail: expected LF")
@@ -304,8 +301,6 @@ class RecordsLedger:
         event = LedgerEvent.model_validate(
             data, extra="ignore", context={"ledger_read": True}
         )
-        if event.entry_id != self._entry_id:
-            raise ValueError("entry_id belongs to another entry")
         return LedgerEntry(event, None, raw)
 
     def _publish_record(self, event_id: str, content: JsonObject) -> None:

@@ -4,7 +4,7 @@
 
 **讀者：** framework-dev。Result entry、point、ledger 與輸出位置契約。
 
-`ResultEntry` 只以 `result/<name>/` 構成條目。Caller 明確傳入 Result root 與 Database 輸出 root，Database 不參與條目的存在判定。條目名稱與 point label 是安全的單一路徑段，不代表物理量。`setup.yaml` 的 UUID entry_id 是不可變身分。載入驗證 UUID 與 UTC 建立時間，既有 handle 的 refresh 不接受另一個身分。
+`ResultEntry` 只以 `result/<name>/` 構成條目。Caller 明確傳入 Result root 與 Database 輸出 root，Database 不參與條目的存在判定。條目名稱與 point label 是安全的單一路徑段，不代表物理量。同一 Result root 下以資料夾名稱判斷 entry 歸屬。`setup.yaml` 的 UUID 只用來偵測已開 handle 的 setup 被替換。載入仍驗證 UUID 與 UTC 建立時間。
 
 `create` 只在 Result 建立 setup、entry 層只有標頭的 `module_cfg.yaml`、points 與 records。預設產生新的 UUID 與 UTC 建立時間。傳入 `identity=EntryIdentity(entry_id=<UUID>, created_at=<UTC datetime>)` 可固定這兩個值，非法 UUID 或非 UTC／無時區時間會拒絕。這個參數不授權認領、覆寫或修復既有 entry，Result 目的地已存在仍拒絕。失敗只清理本次建立的條目，不刪 caller 的根目錄或既有資料。`open` 要求完整的新格式 Result 條目，不猜測 legacy 格式。`open`／`use_point` 在 setup／point 首次讀檔時，將 Pydantic ValidationError 轉為 ValueError，訊息含文件完整路徑與原始驗證文字，cause 保留原錯誤。既有 view 的 edit／refresh 仍回報原本的 schema 錯誤。
 
@@ -34,7 +34,7 @@ Setup 的 alias 存在 `<entry>/aliases.yaml`。每個 point 的 alias 存在 `<
 
 ## 文件與 seed
 
-Setup 是元件範本。Point 自帶 kind、元件、metadata 與 general。General 的固定欄位只有 entry_id、created_at、description 與 ext。Setup 的 entry_id 是條目身分；point 可保留 seed 的 entry_id，但它不代表 point 身分。Caller 可在 general.ext.flux_value／general.ext.flux_unit 記錄 global flux，ext 沿既有 YAML 值契約保存原值，不提供 flux 專用型別、驗證或單位換算。`new_point` 整份複製建立當下的來源 YAML，再更新 created_at。不傳 clone_from 時來源是 setup.yaml，包含 general.ext、metadata 與可接受的 forward-minor 未知欄位，並建立只有標頭的 module_cfg。傳 clone_from 時來源是已發布的 point.yaml，module_cfg 沿既有 library clone 契約處理。New point 的 description=None 保留 seed／clone 描述，字串明確設定描述，包括空字串。設定在本次建立與失敗清理範圍內完成。Setup 與 point 的修改、引用與快照互不影響。
+Setup 是元件範本。Point 自帶 kind、元件、metadata 與 general。General 的固定欄位只有 entry_id、created_at、description 與 ext。Setup 的 entry_id 是換人偵測資訊；point 可保留 seed 的 entry_id，但它不代表 point 身分。Caller 可在 general.ext.flux_value／general.ext.flux_unit 記錄 global flux，ext 沿既有 YAML 值契約保存原值，不提供 flux 專用型別、驗證或單位換算。`new_point` 整份複製建立當下的來源 YAML，再更新 created_at。不傳 clone_from 時來源是 setup.yaml，包含 general.ext、metadata 與可接受的 forward-minor 未知欄位，並建立只有標頭的 module_cfg。傳 clone_from 時來源是已發布的 point.yaml，module_cfg 沿既有 library clone 契約處理。New point 的 description=None 保留 seed／clone 描述，字串明確設定描述，包括空字串。設定在本次建立與失敗清理範圍內完成。Setup 與 point 的修改、引用與快照互不影響。
 
 `SetupView` 與 `PointView` 各綁一個 DocumentStore。屬性讀取只看記憶體快照。`edit()`、單行賦值與 `refresh()` 只讀寫自己的文件。修改多個 point 時逐筆提交，每筆各自成功或失敗。
 
@@ -44,7 +44,7 @@ Package functions `snapshot(view)`、`source_path(view)` 與 `document_value(doc
 
 PointView 的公開 constructor 必須提供 result_root、source 與 entry_id，在建構時捕捉 clone 身分。database_root 仍須提供，但只設定 Save 輸出位置，不作為 clone 邊界。SetupView 只需 store 與 source。直接建構的 view 與 ResultEntry 回傳的 view 使用相同 clone 規則，不依靠事後補登記。
 
-`new_point(clone_from=...)` 接受同條目 label、`<entry>/<point>` 或相同 Result root 的 PointView，Database root 可以不同。Clone 重讀已發布的 point 與 module_cfg，不用 view 的舊快照，也不讀目的 setup。目的 point 保留來源的其他 general 資料，更新 created_at。參數值與 metadata 原樣複製，不查 ledger、不匯入事件、不改寫 source，也不加 cloned_from。
+`new_point(clone_from=...)` 接受同條目 label、`<entry>/<point>` 或相同 Result root 的 PointView，Database root 可以不同。Clone 重讀來源位置當下已發布的 point 與 module_cfg，不用 view 的舊快照或 UUID，也不讀目的 setup。目的 point 保留來源的其他 general 資料，更新 created_at。參數值與 metadata 原樣複製，不查 ledger、不匯入事件、不改寫 source，也不加 cloned_from。
 
 `module_library(label=None, assets=...)` 開啟 entry 層 library，傳入 label 時開啟該 point 的 library。Assets 只供 materialization 使用。它不讀 point、不選 active point、不查 ledger，也不建立缺失文件。無 clone_from 的新 point 建立只有標頭的 library，不複製 setup library。
 
@@ -81,13 +81,13 @@ Setup 與 point 文件使用 `format: zcu.parameter-container`、`format_version
 
 ## Records ledger
 
-`ResultEntry.ledger` 綁定條目的 UUID 與 records 目錄。RecordsLedger 擁有 typed 事件、JSON 附檔、完整 schema 驗證與 append-only 儲存。Caller 建立 acquire、save 或 accept 領域事件，提供事件 ID、UTC 時間與 frontend origin。Origin 是 gui、notebook 或 mcp。所有公開型別從 entry package 匯出。
+`ResultEntry.ledger` 綁定 records 目錄。事件 entry_id 只作資訊，不參與讀取或 append 的歸屬檢查。缺 records 時讀取回空且不建目錄，第一次 append 才建立 records。RecordsLedger 擁有 typed 事件、JSON 附檔、完整 schema 驗證與 append-only 儲存。Caller 建立 acquire、save 或 accept 領域事件，提供事件 ID、UTC 時間與 frontend origin。Origin 是 gui、notebook 或 mcp。所有公開型別從 entry package 匯出。
 
 Acquired 只保存 run 身分、experiment、point、roles 與事件時間，不另存 cfg 摘要。Cfg 正本隨 native run data 保存。
 
 `ResultEntry.read_events_snapshot(name, *, result_root)` 封裝歷史 entry 的身分、records 路徑與 ledger 讀取。它不解析 component，也不建立 entry、檔案或 lock。缺 entry、records 或 ledger 回空 tuple；已有 entry 的身分、ledger schema 與 I/O 錯誤傳遞，重導路徑的 symlink 拒絕。
 
-`RecordsLedger.read_events_snapshot()` 供唯讀瀏覽完整事件清單，不取得或建立 lock file。它沿用 events 的 schema、entry identity、重複 ID 與完整尾行驗證，不讀附檔，也不更新 handle 的增量索引。並行 append 的未完成尾行會報錯，caller 可稍後重新查詢。
+`RecordsLedger.read_events_snapshot()` 供唯讀瀏覽完整事件清單，不取得或建立 lock file。它沿用 events 的 schema、重複 ID 與完整尾行驗證，不讀附檔，也不更新 handle 的增量索引。並行 append 的未完成尾行會報錯，caller 可稍後重新查詢。
 
 其餘讀取與追加都持同一 resolved path 對應的 per-user runtime lock，位置見 [resources owner](../README.md#檔案鎖)。每個 RecordsLedger handle 保存已驗證的 byte offset 與 event_id 索引，正常追加只解析新尾段。前 4096 bytes、上次 offset 前最後一行或檔案身分改變、檔案縮短，以及同大小但修改時間改變時，重新驗證整份 ledger。Ledger 的契約是 append-only。同 inode、相同頭部與前次尾行下，中段原地改寫並增長不在增量偵測範圍；`reload()` 明確從頭驗證並更新索引。回傳的事件互相隔離，附檔內容不快取。
 
@@ -105,7 +105,7 @@ Accepted 不要求前序事件或 run。Producer 先 append accepted，再提交
 
 `ResultEntry.dispersive_path` 回傳 Result 條目下的 `dispersive/` 目錄。屬性不建立目錄、不讀 component 或 ledger，並拒絕逃出條目的 symlink。Entry 不提供這些檔案的 codec，也不把它們複製到 point。Caller 以 component 名或自選名稱組成 JSON 檔名，再經 [resources 分析格式 owner](../README.md#entry-分析格式檔) 的具名 load/save 讀寫。
 
-`ResultEntry.result_path` 是唯讀的 Result 條目路徑，`database_path` 是唯讀的 Database 輸出位置，不是上層 roots，也不保證 Database 已存在。`SaveLayout` 接收這兩個 exact paths、caller 產生的 stem、可選 point 與帶 timezone 的 saved_at，集中計算輸出位置。Stem 原樣使用，框架不補前綴或 run_id；非法路徑段直接拒絕。它不建立目錄或檔案。共用 saver 使用這些輸出，entry 不編排保存。`capture_point_storage(view, roles=...)` 從 bound point 的 constructor origin 與 cached snapshot 捕捉 entry 身分、名稱、point、description、exact paths 與 scoped ledger，不 refresh 或重開 ResultEntry。可選的 RoleView 必須綁同一 UUID、point source 與 Result／Database roots，另一個合法 handle 可以使用。錯誤來源即使 roles 為空也拒絕。回傳的 roles 是解析當下名稱的隔離唯讀 mapping，不重新解角色或查目前焦點；省略 roles 時回傳空 mapping。
+`ResultEntry.result_path` 是唯讀的 Result 條目路徑，`database_path` 是唯讀的 Database 輸出位置，不是上層 roots，也不保證 Database 已存在。`SaveLayout` 接收這兩個 exact paths、caller 產生的 stem、可選 point 與帶 timezone 的 saved_at，集中計算輸出位置。Stem 原樣使用，框架不補前綴或 run_id；非法路徑段直接拒絕。它不建立目錄或檔案。共用 saver 使用這些輸出，entry 不編排保存。`capture_point_storage(view, roles=...)` 從 bound point 的 constructor origin 與 cached snapshot 捕捉 entry 身分、名稱、point、description、exact paths 與 scoped ledger，不 refresh 或重開 ResultEntry。可選的 RoleView 必須綁同一 point source 與 Result／Database roots，另一個合法 handle 可以使用。錯誤來源即使 roles 為空也拒絕。回傳的 roles 是解析當下名稱的隔離唯讀 mapping，不重新解角色或查目前焦點；省略 roles 時回傳空 mapping。
 
 `ArtifactKey` 用 section、artifact name 與 member kind 定位輸出。Figure 與 analysis 另需 member_name，保留同 artifact 的多成員身分。名稱不承載物理語意，安全路徑段規則共用 entry owner。Figure 圖名為 `<section>_<name>_<member_name>`，各 token 原樣保留底線與 percent。每次保存選集使用新的 SaveLayout；同一 instance 中，不同 figure key 算到相同輸出路徑時，會拋出 ValueError 並列出路徑與兩個 key，不自動改名。同 key 可重算。Analysis 使用安全的 member_name 作檔名，producer 傳入 pane 名稱；section／artifact name 不參與 JSON 路徑。同 pane 可以跨 artifact 共用目的地，保存依選集順序覆寫。Data 與 analysis 不套用 figure 的碰撞檢查，不做批次內容去重或路徑衝突預檢。Symlink 不能讓目的地離開 entry root。
 

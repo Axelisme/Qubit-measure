@@ -19,7 +19,7 @@ class SavedPoint(BaseModel):
     """A persisted destination within an entry.
 
     kind is the JSON discriminator, always saved_point.
-    entry_id is the UUID string supplied by ResultEntry.entry_id.
+    entry_name is ResultEntry.result_path.name within the currently opened result root.
     point is the entry owner's validated single-segment point label.
     This value carries no selection generation or writable handle. Commands
     validate entry membership and the label through the owning ResultEntry.
@@ -28,7 +28,7 @@ class SavedPoint(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid", strict=True)
 
     kind: Literal["saved_point"] = "saved_point"
-    entry_id: str
+    entry_name: str
     point: str
 
 

@@ -1,4 +1,4 @@
-"""Immutable point identity and clone checks; no view methods or identity table."""
+"""Captured point location and clone checks; no view methods or identity table."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ if TYPE_CHECKING:
 class PointOrigin:
     """Owning identity and output configuration bound when constructing a view.
 
-    source is the bound point.yaml path and entry_id its owning entry's immutable
+    source is the bound point.yaml path and entry_id its owning entry's informational
     UUID. result_root is the resolved root used for clone identity. database_root
     is the resolved Save output root, not a clone boundary. Identity does not
     depend on later ResultEntry registration.
@@ -30,7 +30,7 @@ def clone_source(view: PointView, *, result_root: Path) -> PointOrigin:
     """Return this view's constructor identity if the Result root matches.
 
     Root mismatch raises ValueError without I/O. The caller reloads the published
-    point and checks the source entry's UUID before cloning; no cached view data
+    point at its current source location before cloning; no cached view data
     or destination identity is used to invent an origin.
     """
     # Import at use time: views owns bindings and imports the identity type.

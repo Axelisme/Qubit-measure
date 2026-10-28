@@ -100,12 +100,12 @@ def _new_request(label: str, *, clone: str | None = None) -> PointCreateRequest:
     return PointCreateRequest(label, "session description", CommandOrigin("gui"), clone)
 
 
-def _entry_command(context: ContextService, command: str, entry_id: str) -> object:
+def _entry_command(context: ContextService, command: str, entry_name: str) -> object:
     if command == "use":
         return context.use_point(PointUseRequest("new"))
     if command == "new":
         return context.new_point(PointCreateRequest("new", "", CommandOrigin("gui")))
-    return context.entry_ledger(entry_id)
+    return context.entry_ledger(entry_name)
 
 
 def test_global_alias_changes_install_before_the_fact_and_reject_invalid_batches() -> (
@@ -322,7 +322,7 @@ def test_use_point_detaches_capture_and_uses_same_entry_library(
     context.install_entry(entry)
     target = context.use_point(PointUseRequest("first"))
     capture = context.read_context()
-    assert target == SavedPoint(entry_id=entry.entry_id, point="first")
+    assert target == SavedPoint(entry_name=entry.result_path.name, point="first")
     assert capture.document().general.description == "first point"
     with first.edit() as edit:
         edit.general.description = "changed outside publication"
@@ -345,7 +345,7 @@ def test_cross_entry_ledger_rejects_before_changing_binding(
     context.install_entry(entry)
     before = context.get_session_env()
     with pytest.raises(FailedPreconditionError) as error:
-        _entry_command(context, "ledger", other.entry_id)
+        _entry_command(context, "ledger", other.result_path.name)
     assert error.value.reason_code == "entry_not_open"
     assert context.get_session_env() == before
     assert entry.list_points() == [] and other.list_points() == []
@@ -393,7 +393,7 @@ def test_new_point_uses_seed_or_clone_and_request_description(
         edit.set("general.ext.marker", 7.0)
     context.install_entry(entry)
     target = context.new_point(_new_request("destination", clone=clone))
-    assert target == SavedPoint(entry_id=entry.entry_id, point="destination")
+    assert target == SavedPoint(entry_name=entry.result_path.name, point="destination")
     document = context.read_context().document()
     assert document.general.description == "session description"
     assert document.general.ext.get("marker") == (None if clone is None else 7.0)
@@ -533,7 +533,7 @@ def test_entry_ledger_is_the_real_capability_and_capture_never_appends(
     entry = _entry(tmp_path)
     before = entry.ledger.events()
     context.install_entry(entry)
-    ledger = context.entry_ledger(entry.entry_id)
+    ledger = context.entry_ledger(entry.result_path.name)
     assert ledger.events() == before
     context.new_point(_new_request("working"))
     context.read_context()
@@ -618,7 +618,7 @@ def test_publication_facts_observe_installed_state_and_one_context_bump(
             else:
                 assert env.parameters is not None
                 assert env.parameters.target == SavedPoint(
-                    entry_id=info.entry_id, point="first" if version == 2 else "second"
+                    entry_name=info.name, point="first" if version == 2 else "second"
                 )
             assert sources is not None and sources.sources
             assert env.result_dir == str(info.result_path)

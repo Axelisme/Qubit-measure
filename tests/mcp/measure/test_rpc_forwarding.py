@@ -25,7 +25,7 @@ def test_context_browse_forwarding_preserves_one_request_and_reply(
     params: dict[str, object],
 ) -> None:
     expected = {
-        "target": {"kind": "saved_point", "entry_id": "entry", "point": "working"},
+        "target": {"kind": "saved_point", "entry_name": "entry", "point": "working"},
         "aliases": [{"alias": "drive", "value": "Q1", "resolved": "Q1"}],
         "path": "aliases.0.resolved",
         "value": "Q1",

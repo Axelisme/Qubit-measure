@@ -2,6 +2,7 @@
 
 import json
 from datetime import datetime, timezone
+from pathlib import Path
 from uuid import UUID
 
 import pytest
@@ -52,6 +53,24 @@ def test_record_analysis_appends_evidence_and_optional_json_attachment(
     assert second_id != event_id
     assert [event.id for event in entry.ledger.events()] == [event_id, second_id]
     assert entry.ledger.get(event_id) == stored
+
+
+def test_record_analysis_appends_to_transplanted_foreign_history(
+    entry: ResultEntry, tmp_path: Path
+) -> None:
+    foreign = ResultEntry.create(
+        "foreign", result_root=tmp_path / "source", database_root=tmp_path / "db"
+    )
+    foreign.record_analysis("prior-fit", run_ids=[], summary={"value": 1})
+    history = foreign.ledger.events()
+    (entry.result_path / "records/ledger.jsonl").write_bytes(
+        (foreign.result_path / "records/ledger.jsonl").read_bytes()
+    )
+
+    event_id = entry.record_analysis("new-fit", run_ids=[], summary={"value": 2})
+
+    assert entry.ledger.events() == (*history, entry.ledger.get(event_id).event)
+    assert entry.ledger.get(event_id).event.entry_id == entry.entry_id
 
 
 def test_record_analysis_propagates_ledger_io_failure(entry: ResultEntry) -> None:

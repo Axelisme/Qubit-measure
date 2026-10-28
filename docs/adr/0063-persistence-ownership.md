@@ -52,6 +52,10 @@ MCP call log 是 best-effort 除錯紀錄，可以截斷、清除或停用，不
 
 Entry 只由 `result/<name>/` 構成。`resources.entry.ResultEntry` 提供條目的不可變身分、exact Result path、Database 輸出位置與 scoped ledger。`create`／`open` 只檢查 Result，不檢查或建立 `Database/<name>/`。第一次 Save 才由 writer 建立所需的 Database 目錄，已有的同名 Database 照用，不另加混雜偵測。
 
+同一 Result root 下，entry 歸屬由資料夾名稱決定。Ledger 不以事件行的 entry_id 拒絕讀取或追加；UUID 只供已開 ResultEntry 偵測 setup 被替換。Role capture 比對 point source 與 owning roots，不比 UUID。Clone 使用來源位置當下的內容，不以舊 PointView 的 UUID 限制來源。缺 records 時 ledger 讀取回空且不建目錄，第一次 append 才建立。
+
+2026-10-28 使用者詢問「這裡的UUID能做什麼？什麼是目錄名不能而必須要UUID?」，並以「選B」採用位置歸屬與 setup 換人偵測。
+
 `rename_entry` 只移動 Result，不改內容或 UUID，也不移動 Database 舊輸出。改名後重新 open，新 Save 使用 `Database/<新名>/`，舊輸出留在原處。Database 不是 entry 的存在或 clone 身分邊界，因此沒有雙目錄改名與復原協定。
 
 使用者於 2026-10-20 裁決：「甲，簡單的機制加一致的規則比非預期的兼容邏輯好維護與使用，同樣名字的Database會混雜屬於有意不處理的設計。」對改名裁決：「改名時Database不動，Database是輸出位置，不是什麼要綁定的目錄」。

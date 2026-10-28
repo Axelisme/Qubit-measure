@@ -20,10 +20,10 @@ from .views import point_origin, snapshot
 class PointStorageBinding:
     """One point's cached context and exact owning persistence capabilities.
 
-    entry_id is the immutable owning UUID; entry_name is its captured name.
+    entry_id is the captured informational UUID; entry_name locates the entry in its result root.
     point is the bound label and description is its cached text or None.
     result_path and database_path are absolute entry directories, not roots.
-    ledger is a RecordsLedger bound to that entry's existing records directory.
+    ledger is a RecordsLedger bound to that entry's records directory, created on first append if absent.
     roles is a detached mapping of captured aliases to scalar names or ordered lists;
     it is empty when capture_point_storage was called without a RoleView.
     """
@@ -66,7 +66,7 @@ def capture_point_storage(
     Names are copied without re-resolving focus, references or changed values.
     Use its constructor origin and cached snapshot, never cwd or GUI focus.
     Do not reopen ResultEntry, refresh YAML, create outputs or append events.
-    RecordsLedger checks the existing records directory; its I/O errors and
+    RecordsLedger permits a missing records directory; other I/O errors and
     invalid bound UUID propagate. No hardware is read.
     """
     origin = point_origin(view)

@@ -126,7 +126,7 @@ def test_entry_point_commands_show_in_reopened_setup_and_failures_keep_the_conte
         point = app.invoke(
             "rpc_call", {"method": "point.new", "params": {"label": "q1"}}
         )
-        target = SavedPoint(entry_id=entry["entry_id"], point=point["point"])
+        target = SavedPoint(entry_name=entry["name"], point=point["point"])
         assert control.read_context().target == target
 
         # Selecting the same point keeps the selected resource identity.

@@ -536,6 +536,8 @@ def coupler_load_application(qapp, tmp_path: Path, point_models, point_registry_
     context = fx.ctrl.context_control
     context.add_component("coupler", "fake/drive/a", {"rate": 0.4})
     target = context.read_context().target
+    entry_info = context.get_entry_info()
+    assert entry_info is not None
     context.set_waveform(target, MODULE_PROPOSAL_WAVEFORM, ConstWaveformCfg(length=0.1))
     context.set_module(target, "coupler.pulses.cz_f2", _stored_pulse(gain=0.2))
     context.set_alias_rows((AliasRow("coupler", "coupler"),))
@@ -546,7 +548,7 @@ def coupler_load_application(qapp, tmp_path: Path, point_models, point_registry_
         update={
             "snapshot": replace(
                 metadata_from_container(stored).snapshot,
-                entry_id=UUID(target.entry_id),
+                entry_id=UUID(entry_info.entry_id),
                 point=target.point,
                 roles={"coupler": "coupler"},
             )

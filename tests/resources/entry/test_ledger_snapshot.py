@@ -46,7 +46,7 @@ def test_snapshot_reads_current_events_without_sidecar_or_cached_state(
     assert ledger.read_events_snapshot() == (event, added)
 
 
-@pytest.mark.parametrize("defect", ["tail", "duplicate", "foreign", "schema"])
+@pytest.mark.parametrize("defect", ["tail", "duplicate", "schema"])
 def test_snapshot_rejects_invalid_history(
     tmp_path: Path, event: LedgerEvent, defect: str
 ) -> None:
@@ -55,10 +55,6 @@ def test_snapshot_rejects_invalid_history(
         line = line.rstrip("\n")
     elif defect == "duplicate":
         line += line
-    elif defect == "foreign":
-        line = (
-            event.model_copy(update={"entry_id": str(uuid4())}).model_dump_json() + "\n"
-        )
     else:
         line = '{"format":"zcu.ledger","format_version":"1.0"}\n'
     (tmp_path / "ledger.jsonl").write_text(line, encoding="utf-8")

@@ -121,7 +121,7 @@ class ParameterContext:
         if any(fault.document == "setup" for fault in source_faults):
             raise ValueError("Parameter captures accept only point/module_cfg faults")
         if storage is not None and (
-            str(storage.entry_id) != target.entry_id or storage.point != target.point
+            storage.entry_name != target.entry_name or storage.point != target.point
         ):
             raise ValueError("Storage origin must match the saved-point target")
         self._point = point.model_copy(deep=True)

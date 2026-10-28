@@ -350,7 +350,7 @@ def test_append_preserves_history_and_publishes_local_record_without_mutating_ev
     )
 
 
-def test_duplicate_and_foreign_entry_rejections_preserve_published_bytes(
+def test_duplicate_rejection_preserves_published_bytes(
     entry_records: tuple[ResultEntry, Path],
 ) -> None:
     entry, records = entry_records
@@ -360,12 +360,31 @@ def test_duplicate_and_foreign_entry_rejections_preserve_published_bytes(
     record_before = (records / f"{event.id}.json").read_bytes()
     with pytest.raises(ValueError, match="ledger"):
         entry.ledger.append(event)
-    foreign = _accepted(str(uuid4()))
-    with pytest.raises(ValueError, match="ledger"):
-        entry.ledger.append(foreign, record={"value": 2})
     assert (records / "ledger.jsonl").read_bytes() == before
     assert (records / f"{event.id}.json").read_bytes() == record_before
-    assert not (records / f"{foreign.id}.json").exists()
+
+
+def test_foreign_entry_history_can_be_read_and_appended(
+    entry_records: tuple[ResultEntry, Path],
+) -> None:
+    entry, records = entry_records
+    foreign = _accepted(str(uuid4()))
+    path = records / "ledger.jsonl"
+    original = (foreign.model_dump_json() + "\n").encode()
+    path.write_bytes(original)
+    ledger = entry.ledger
+
+    assert ledger.events() == (foreign,)
+    assert ledger.read_events_snapshot() == (foreign,)
+    added = _accepted(str(uuid4()))
+    ledger.append(added, record={"value": 2})
+
+    assert entry.ledger.events() == (
+        foreign,
+        added.model_copy(update={"record": f"records/{added.id}.json"}),
+    )
+    assert ledger.get(added.id).record == {"value": 2}
+    assert path.read_bytes().startswith(original)
 
 
 def test_caller_record_reference_is_rejected_before_writing(
@@ -433,17 +452,33 @@ def test_constructor_rejects_invalid_lock_timeout(
         RecordsLedger(records, entry_id=entry.entry_id, lock_timeout=timeout)
 
 
-def test_constructor_requires_records_directory_and_uuid(tmp_path: Path) -> None:
-    missing = tmp_path / "missing"
-    with pytest.raises(FileNotFoundError):
-        RecordsLedger(missing, entry_id=str(uuid4()))
+def test_constructor_rejects_non_directory_and_invalid_uuid(tmp_path: Path) -> None:
     file = tmp_path / "file"
     file.write_text("not a directory")
     with pytest.raises(NotADirectoryError):
         RecordsLedger(file, entry_id=str(uuid4()))
     with pytest.raises(ValueError, match="entry_id"):
         RecordsLedger(tmp_path, entry_id="not-a-uuid")
-    assert not missing.exists()
+
+
+def test_missing_records_read_is_empty_and_first_append_creates_directory(
+    entry_records: tuple[ResultEntry, Path],
+) -> None:
+    opened, records = entry_records
+    records.rmdir()
+
+    ledger = opened.ledger
+    assert ledger.events() == ()
+    assert ledger.read_events_snapshot() == ()
+    assert not records.exists()
+    event = _accepted(opened.entry_id)
+    ledger.append(event, record={"value": 3})
+
+    assert records.is_dir()
+    assert opened.ledger.events() == (
+        event.model_copy(update={"record": f"records/{event.id}.json"}),
+    )
+    assert opened.ledger.get(event.id).record == {"value": 3}
 
 
 @pytest.mark.parametrize(
@@ -570,7 +605,7 @@ def test_invalid_record_input_leaves_ledger_and_sidecars_unchanged(
     assert not (records / f"{event.id}.json").exists()
 
 
-@pytest.mark.parametrize("failure", ["duplicate", "foreign_entry", "bad_payload"])
+@pytest.mark.parametrize("failure", ["duplicate", "bad_payload"])
 def test_invalid_existing_event_blocks_read_and_append_without_rewrite(
     entry_records: tuple[ResultEntry, Path],
     failure: str,
@@ -580,10 +615,7 @@ def test_invalid_existing_event_blocks_read_and_append_without_rewrite(
     entry.ledger.append(event)
     path = records / "ledger.jsonl"
     data = json.loads(path.read_text())
-    if failure == "foreign_entry":
-        data["id"] = str(uuid4())
-        data["entry_id"] = str(uuid4())
-    elif failure == "bad_payload":
+    if failure == "bad_payload":
         data["id"] = str(uuid4())
         data["payload"]["writes"] = []
     path.write_text(path.read_text() + json.dumps(data) + "\n", encoding="utf-8")

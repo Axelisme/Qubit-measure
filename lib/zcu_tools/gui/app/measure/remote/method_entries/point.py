@@ -78,7 +78,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "Create and select label in the currently opened entry; no_entry if none. Copies setup when "
             "clone_from is omitted, otherwise a same-entry point; never unsaved session parameters. "
             "description defaults to empty and replaces seed/clone description. "
-            "Returns {kind: 'saved_point', entry_id, point}. Binding failure retains "
+            "Returns {kind: 'saved_point', entry_name, point}. Binding failure retains "
             "the created point and old selection: point_binding_failed with "
             "{entry_id, point, created: true}; recover with point.use, not New.",
             (
@@ -102,7 +102,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         MethodSpec(
             5.0,
             "Select label in the currently opened entry; no_entry if none. Return "
-            "{kind: 'saved_point', entry_id, point}. Failure preserves the old "
+            "{kind: 'saved_point', entry_name, point}. Failure preserves the old "
             "binding. Existing tabs retain their capture; new tabs use this point.",
             (required_string("label", "Existing single-segment point label"),),
         ),

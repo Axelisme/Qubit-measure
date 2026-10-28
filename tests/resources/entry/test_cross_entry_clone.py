@@ -281,6 +281,27 @@ def test_foreign_source_failure_does_not_publish_destination_or_modify_source(
     assert foreign.entry_id != entry.entry_id
 
 
+def test_clone_stale_view_reads_current_contents_at_source_location(
+    entry: ResultEntry, entry_roots: tuple[Path, Path], tmp_path: Path
+) -> None:
+    results, database = entry_roots
+    original = ResultEntry.create("other", result_root=results, database_root=database)
+    original.setup.add_component("Q1", kind="fake/drive/a", rate=5000.0)
+    stale = original.new_point("source")
+    original.result_path.rename(tmp_path / "retired")
+    replacement = ResultEntry.create(
+        "other", result_root=results, database_root=database
+    )
+    replacement.setup.add_component("Q1", kind="fake/drive/a", rate=6100.0)
+    replacement.new_point("source")
+
+    cloned = entry.new_point("current-copy", clone_from=stale)
+
+    assert cloned.Q1.rate == 6100.0
+    assert replacement.use_point("source").Q1.rate == 6100.0
+    assert entry.ledger.events() == ()
+
+
 def test_foreign_view_with_other_result_root_is_rejected_without_publishing(
     entry: ResultEntry,
     entry_roots: tuple[Path, Path],

@@ -176,6 +176,27 @@ def test_default_stems_keep_distinct_runs_with_the_same_id_tail_separate(
     assert metadata_from_container(load(paths[1][0])).run_id == run_ids[1]
 
 
+def test_save_appends_saved_event_after_transplanted_foreign_history(
+    native_session: NativeSaveSession, tmp_path: Path
+) -> None:
+    session = native_session
+    foreign = ResultEntry.create(
+        "foreign", result_root=tmp_path / "source", database_root=tmp_path / "db"
+    )
+    foreign.record_analysis("prior-fit", run_ids=[], summary={})
+    history = foreign.ledger.events()
+    session.entry.ledger.source_path.write_bytes(
+        foreign.ledger.source_path.read_bytes()
+    )
+
+    report = session.save()
+
+    assert all(output.status == "saved" for output in report.outputs)
+    saved = session.entry.ledger.events()[-1]
+    assert saved.kind == "saved"
+    assert session.entry.ledger.events() == (*history, saved)
+
+
 def test_data_save_writes_both_formats_and_resave_keeps_run_identity(
     native_session: NativeSaveSession,
 ) -> None:

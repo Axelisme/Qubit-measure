@@ -153,14 +153,16 @@ class LoadService:
         analysis_source_issue = None
         if captured is None:
             analysis_source_issue = "No active context is available"
-        elif captured.target.entry_id != str(history.entry_id):
+        elif storage is None or storage.entry_id != history.entry_id:
             analysis_source_issue = "Historical entry differs from the opened entry"
         elif history.point is None:
             analysis_source_issue = "Historical metadata has no point"
         else:
             try:
                 parameters = self._context.read_target(
-                    SavedPoint(entry_id=str(history.entry_id), point=history.point),
+                    SavedPoint(
+                        entry_name=captured.target.entry_name, point=history.point
+                    ),
                     roles=RoleBinding(None, {}, history.roles),
                 )
             except MissingPointError as error:

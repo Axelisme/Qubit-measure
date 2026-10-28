@@ -134,7 +134,7 @@ def test_read_target_observes_detached_writes_without_selecting_or_publishing(
 
 
 def test_read_target_rejects_other_entries(session: _Session) -> None:
-    target = SavedPoint(entry_id="other", point="a")
+    target = SavedPoint(entry_name="other", point="a")
     before = session.state.session_env
     with pytest.raises(FailedPreconditionError) as error:
         session.control.read_target(target)
@@ -143,7 +143,7 @@ def test_read_target_rejects_other_entries(session: _Session) -> None:
 
 
 def test_read_target_missing_point_does_not_create_it(session: _Session) -> None:
-    target = SavedPoint(entry_id=session.entry.entry_id, point="missing")
+    target = SavedPoint(entry_name=session.entry.result_path.name, point="missing")
     with pytest.raises(FileNotFoundError):
         session.control.read_target(target)
     assert session.entry.list_points() == []
@@ -223,13 +223,26 @@ def test_detached_saved_point_write_keeps_current_point_and_publication(
 
 
 @pytest.mark.parametrize("kind", KINDS)
+@pytest.mark.parametrize("copied", [False, True])
 def test_cross_entry_target_rejected_before_any_write(
-    session: _Session, tmp_path: Path, kind: Kind
+    session: _Session, tmp_path: Path, kind: Kind, copied: bool
 ) -> None:
     old_target = _select(session, "a")
-    other = ResultEntry.create(
-        "other", result_root=tmp_path / "Result", database_root=tmp_path / "Database"
-    )
+    if copied:
+        from shutil import copytree
+
+        copytree(session.entry.result_path, tmp_path / "Result" / "other")
+        other = ResultEntry.open(
+            "other",
+            result_root=tmp_path / "Result",
+            database_root=tmp_path / "Database",
+        )
+    else:
+        other = ResultEntry.create(
+            "other",
+            result_root=tmp_path / "Result",
+            database_root=tmp_path / "Database",
+        )
     session.service.install_entry(other)
     current = session.state.session_env
     with pytest.raises(FailedPreconditionError) as error:
@@ -237,7 +250,7 @@ def test_cross_entry_target_rejected_before_any_write(
     assert error.value.reason_code == "entry_not_open"
     assert session.state.session_env == current
     assert session.entry.list_points() == ["a"]
-    assert other.list_points() == []
+    assert other.list_points() == (["a"] if copied else [])
 
 
 def test_invalid_parameter_schema_is_not_published(session: _Session) -> None:
@@ -376,7 +389,7 @@ def test_missing_saved_point_is_not_created_by_setter(
     kind: Kind,
 ) -> None:
     _select(session, "selected")
-    target = SavedPoint(entry_id=session.entry.entry_id, point="missing")
+    target = SavedPoint(entry_name=session.entry.result_path.name, point="missing")
     capture = session.control.read_context()
     with pytest.raises(FileNotFoundError):
         _write(session.control, target, kind, 0.2)
@@ -516,7 +529,7 @@ def test_sample_only_writeback_rejects_invalid_saved_point_before_acceptance(
     points = session.entry.list_points()
     point_before = snapshot(session.entry.use_point("a")).model_dump(mode="json")
     version = session.state.version.get("context")
-    target = SavedPoint(entry_id=session.entry.entry_id, point=label)
+    target = SavedPoint(entry_name=session.entry.result_path.name, point=label)
 
     with pytest.raises(error_type):
         session.service.apply_writeback(

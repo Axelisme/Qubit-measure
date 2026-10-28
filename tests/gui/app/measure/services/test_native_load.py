@@ -679,7 +679,7 @@ def test_loaded_same_entry_different_point_resaves_original_run(
             tab.run.parameters is not None
             and tab.run.parameters.target
             == SavedPoint(
-                entry_id=str(stored.snapshot.entry_id),
+                entry_name=session.entry.result_path.name,
                 point=stored.snapshot.point,
             )
         )

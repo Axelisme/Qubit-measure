@@ -17,7 +17,7 @@ _Avoid_: experiment wrapper, GUI plugin
 ## 參數與環境
 
 **Result Entry**:
-一次降溫加一片 chip 的資料單位，包含工作點、參數與量測成果。名稱由使用者決定，不帶可解析的物理意義。
+一次降溫加一片 chip 的資料單位，包含工作點、參數與量測成果。名稱由使用者決定，不帶可解析的物理意義。同一 Result root 內以資料夾名稱判斷歸屬，UUID 只偵測已開啟的 setup 被替換。
 _Avoid_: project identity, chip/qubit scope
 
 **Working Point（工作點）**:
@@ -41,7 +41,7 @@ _Avoid_: component name, module name
 _Avoid_: focus component, tab-local binding
 
 **Ledger**:
-一個 Result Entry 的事件記錄，包含量測、保存與接受結果等事實。Record 的 source 可引用 accepted 事件，library 不查 ledger。Import 事件只供歷史讀取。
+一個 Result Entry 的事件記錄，包含量測、保存與接受結果等事實。事件歸屬由 records 所在資料夾決定，不比對行內 entry_id。缺 records 時讀取回空，第一次追加才建立。Record 的 source 可引用 accepted 事件，library 不查 ledger。Import 事件只供歷史讀取。
 _Avoid_: run directory, parameter snapshot
 
 **ModuleLibrary Template**:

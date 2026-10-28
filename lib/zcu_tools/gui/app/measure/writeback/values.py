@@ -94,7 +94,7 @@ def applied_values(
                 value=deepcopy(committed.value),
                 destination={
                     "kind": "saved_point",
-                    "entry_id": parameters.target.entry_id,
+                    "entry_name": parameters.target.entry_name,
                     "point": parameters.target.point,
                 },
             )

@@ -60,7 +60,7 @@ def test_new_uses_setup_and_clone_replaces_description(
     info = application.open_entry()
     context = application.controller.context_control
     context.add_component("Q1", "fake/drive/a", {"rate": 10.0}, setup=True)
-    expected = {"kind": "saved_point", "entry_id": info.entry_id, "point": "seed"}
+    expected = {"kind": "saved_point", "entry_name": info.name, "point": "seed"}
     assert (
         application.result(
             "point.new", new_params("seed", description="seed description")
@@ -68,12 +68,12 @@ def test_new_uses_setup_and_clone_replaces_description(
         == expected
     )
     captured = context.read_context()
-    assert captured.target == SavedPoint(entry_id=info.entry_id, point="seed")
+    assert captured.target == SavedPoint(entry_name=info.name, point="seed")
     assert captured.lookup("Q1.rate").value == 10.0
     context.set_parameter(captured.target, "Q1.rate", 20.0)
     assert application.result("point.new", new_params("clone", clone_from="seed")) == {
         "kind": "saved_point",
-        "entry_id": info.entry_id,
+        "entry_name": info.name,
         "point": "clone",
     }
     assert context.read_context().lookup("Q1.rate").value == 20.0
@@ -136,11 +136,11 @@ def test_mutations_use_current_entry_after_switch(
 
     assert application.result(method, {"label": "selected"}) == {
         "kind": "saved_point",
-        "entry_id": current.entry_id,
+        "entry_name": current.name,
         "point": "selected",
     }
     assert application.controller.context_control.read_context().target == SavedPoint(
-        entry_id=current.entry_id, point="selected"
+        entry_name=current.name, point="selected"
     )
     assert opened_resource(previous).list_points() == ["selected"]
     assert opened_resource(current).list_points() == ["selected"]
@@ -214,6 +214,6 @@ def test_created_binding_failure_preserves_destination_and_recovers_with_use(
     fail = False
     assert application.result("point.use", {"label": "retained"}) == {
         "kind": "saved_point",
-        "entry_id": info.entry_id,
+        "entry_name": info.name,
         "point": "retained",
     }

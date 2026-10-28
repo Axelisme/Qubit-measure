@@ -307,7 +307,7 @@ class ContextService:
         )
         self._aliases, self._aliases_revision = aliases
         self._install_point(point, library, parameters, sources, info)
-        return SavedPoint(entry_id=entry.entry_id, point=request.label)
+        return SavedPoint(entry_name=entry.result_path.name, point=request.label)
 
     def new_point(self, request: PointCreateRequest) -> SavedPoint:
         """Create from setup or a same-entry clone, then install ACTIVE.
@@ -354,7 +354,7 @@ class ContextService:
             ) from exc
         self._aliases, self._aliases_revision = aliases
         self._install_point(point, library, parameters, sources, info)
-        return SavedPoint(entry_id=entry.entry_id, point=request.label)
+        return SavedPoint(entry_name=entry.result_path.name, point=request.label)
 
     def clear_context(self) -> None:
         """Publish EMPTY, clear entry/point, retaining non-parameter handles.
@@ -804,32 +804,32 @@ class ContextService:
             return library.replaced_waveform(destination, change.waveform)
         raise InvalidInputError("Library put/replace requires a Spec")
 
-    def entry_ledger(self, entry_id: str) -> RecordsLedger:
+    def entry_ledger(self, entry_name: str) -> RecordsLedger:
         """Return only the currently opened entry's ledger; never append an event.
 
-        No entry raises no_entry; a different UUID raises entry_not_open.
+        No entry raises no_entry; a different name in the current result root raises entry_not_open.
         Use capture_storage(parameters).ledger for a result's historical origin.
         Ledger capabilities are not serialized into wire data.
         """
         self._owner.assert_owner()
-        return self._require_entry(entry_id).ledger
+        return self._require_entry(entry_name).ledger
 
     def _require_open_entry(self) -> ResultEntry:
         if self._entry is None:
             raise FailedPreconditionError("No entry is opened", reason_code="no_entry")
         return self._entry
 
-    def _require_entry(self, entry_id: str) -> ResultEntry:
+    def _require_entry(self, entry_name: str) -> ResultEntry:
         entry = self._require_open_entry()
-        if entry_id != entry.entry_id:
+        if entry_name != entry.result_path.name:
             raise FailedPreconditionError(
-                f"Entry {entry_id!r} is not opened", reason_code="entry_not_open"
+                f"Entry {entry_name!r} is not opened", reason_code="entry_not_open"
             )
         return entry
 
     def _require_write_target(self, target: ContextTarget) -> ResultEntry:
         """Reject cross-entry targets before opening a resource."""
-        return self._require_entry(target.entry_id)
+        return self._require_entry(target.entry_name)
 
     def _published_parameters(self) -> ParameterContext:
         """Read the carrier without requiring unrelated selected-source data."""
@@ -882,7 +882,7 @@ class ContextService:
         parameters = ParameterContext(
             point=document,
             library=library.snapshot(),
-            target=SavedPoint(entry_id=entry.entry_id, point=label),
+            target=SavedPoint(entry_name=entry.result_path.name, point=label),
             roles=None,
             storage=capture_point_storage(point),
         )

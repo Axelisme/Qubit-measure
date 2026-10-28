@@ -77,11 +77,11 @@ def test_open_existing_entry_clears_point_and_new_point_uses_current_entry(
     selected = application.result("point.use", {"label": "existing"})
     assert selected == {
         "kind": "saved_point",
-        "entry_id": second.entry_id,
+        "entry_name": second.result_path.name,
         "point": "existing",
     }
     created = application.result("point.new", {"label": "next"})
-    assert created["entry_id"] == second.entry_id
+    assert created["entry_name"] == second.result_path.name
     application.result("entry.open", {"name": "first"})
     assert application.result("entry.info", {}) == {"entry": first, "files": []}
     assert application.state.session_env.readiness == ContextReadiness.EMPTY

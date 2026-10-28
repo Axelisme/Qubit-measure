@@ -92,7 +92,7 @@ Owner 在同一次 dispatch 核對 Primary／Post 全部選定 IDs，unknown／d
 `tab.writeback_receipt(submission_id)` 唯讀回 `{submission_id, tab_id, status, completed, error}`。
 Status 是 pending、completed 或 failed。Pending 包含只 reserve 或仍執行，不能推論沒有副作用。
 Completed 的每列是 `{subtab_id, item:{id, kind, target, value, destination}}`。
-Destination 是固定的 `{kind: "saved_point", entry_id, point}`，value 是 owner 當次確認的實際值。
+Destination 是固定的 `{kind: "saved_point", entry_name, point}`，value 是 owner 當次確認的實際值。
 查詢不重讀當前 draft 或磁碟，僅保留 GUI 生命週期的記憶體 receipt。
 10 秒 handler 逾時不表示寫入失敗。Caller 先查該 ID 的狀態，再決定是否重送。
 Recipe receipt.items 是成功 ID 對應的原捕捉候選，實際值與目的地仍取提交當下的 draft。

@@ -184,7 +184,7 @@ def test_sample_write_receipt_reads_latest_jsonl_before_and_after_at_fixed_point
     }
     assert updated["source"] != row["source"]
     assert context.read_context().target == SavedPoint(
-        entry_id=entry.entry_id, point="b"
+        entry_name=entry.result_path.name, point="b"
     )
     assert service.get_all_applied(draft) == {"record-1": True}
 
@@ -267,7 +267,7 @@ def test_record_preview_selection_and_apply_preserve_adapter_json(
         "source": event.id,
     }
     assert context.read_context().target == SavedPoint(
-        entry_id=entry.entry_id, point="b"
+        entry_name=entry.result_path.name, point="b"
     )
     assert service.get_all_applied(draft) == {"param-1": False, "record-1": True}
     assert dispatch_handler(harness, "tab.writeback_preview", params)["items"] == [

@@ -120,6 +120,26 @@ def test_capture_accepts_roles_from_another_handle_of_the_same_point(
     assert entry.ledger.events() == ()
 
 
+def test_role_capture_accepts_current_point_at_same_location_after_replacement(
+    entry: ResultEntry, tmp_path: Path
+) -> None:
+    original = _role_point(entry)
+    resolved = original.resolve(["driver", "sense"], focus="Q1")
+    result_root = entry.result_path.parent
+    database_root = entry.database_path.parent
+    entry.result_path.rename(tmp_path / "retired")
+    replacement = ResultEntry.create(
+        "entry", result_root=result_root, database_root=database_root
+    )
+    current = _role_point(replacement)
+
+    captured = capture_point_storage(current, roles=resolved)
+
+    assert captured.entry_id == UUID(replacement.entry_id)
+    assert captured.entry_name == "entry"
+    assert captured.roles == {"driver": "Q1", "sense": "R1"}
+
+
 @pytest.mark.parametrize("empty", [False, True])
 @pytest.mark.parametrize("mismatch", ["point", "entry", "result-root", "database-root"])
 def test_capture_rejects_roles_from_another_owner_without_saving(

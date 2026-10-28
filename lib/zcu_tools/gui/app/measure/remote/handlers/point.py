@@ -144,12 +144,12 @@ class PointListReply(TypedDict):
 class SavedPointReply(TypedDict):
     """Persisted destination, not a binding generation or writable handle.
 
-    kind is always saved_point. entry_id is the opened entry UUID.
+    kind is always saved_point. entry_name is the opened entry's directory name.
     point is the owner's validated single-segment label.
     """
 
     kind: Literal["saved_point"]
-    entry_id: str
+    entry_name: str
     point: str
 
 
@@ -222,7 +222,7 @@ def h_point_new(
             reason="point_binding_failed",
             data={"entry_id": exc.entry_id, "point": exc.label, "created": True},
         ) from exc
-    return {"kind": point.kind, "entry_id": point.entry_id, "point": point.point}
+    return {"kind": point.kind, "entry_name": point.entry_name, "point": point.point}
 
 
 def h_point_use(
@@ -239,4 +239,4 @@ def h_point_use(
     if not isinstance(label, str):
         raise RemoteError(ErrorCode.INVALID_PARAMS, "'label' must be a string")
     point = adapter.context_control.use_point(PointUseRequest(label))
-    return {"kind": point.kind, "entry_id": point.entry_id, "point": point.point}
+    return {"kind": point.kind, "entry_name": point.entry_name, "point": point.point}

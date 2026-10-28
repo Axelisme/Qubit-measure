@@ -61,7 +61,7 @@ def capture(alias: str = "qubit") -> CountingContext:
         library=LibrarySnapshot(
             ModuleLibraryDocument(format="zcu.module-library", format_version="2.0")
         ),
-        target=SavedPoint(entry_id="entry", point="working"),
+        target=SavedPoint(entry_name="entry", point="working"),
         roles=RoleBinding(
             None,
             {},

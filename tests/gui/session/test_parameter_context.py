@@ -114,7 +114,7 @@ def capture(
     return ParameterContext(
         point=point,
         library=library,
-        target=SavedPoint(entry_id="entry", point="working"),
+        target=SavedPoint(entry_name="entry", point="working"),
         roles=roles,
         source_faults=faults,
     )
@@ -136,7 +136,7 @@ def test_point_capture_is_detached_and_preserves_target(
     copied.general.ext.clear()
     assert context.value("Q1.rate") == 4300.0
     assert context.value("general.ext.nested.number") == 2.0
-    assert context.target == SavedPoint(entry_id="entry", point="working")
+    assert context.target == SavedPoint(entry_name="entry", point="working")
     assert context.roles is None
     assert context.source_faults == ()
 
@@ -244,7 +244,7 @@ def test_partial_capture_reports_unbound_role_only_when_read(
     context = ParameterContext(
         point=point,
         library=library,
-        target=SavedPoint(entry_id="entry", point="working"),
+        target=SavedPoint(entry_name="entry", point="working"),
         roles=RoleBinding(None, declarations(), {"capture_sensor": "R1"}),
     )
     assert context.value("$capture_sensor.rate") == 6500.0

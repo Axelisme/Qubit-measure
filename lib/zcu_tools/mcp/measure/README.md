@@ -522,7 +522,7 @@ not_started 與失敗 stage 的不確定性。
 `submission_id` 是最後嘗試的 pane，`recovery` 帶 `tab.writeback_receipt` 與精確 query params。
 寫入逾時時 status 是 unknown，保留 `failed_stage_may_have_partial_writes`，
 並要求先查狀態，再決定是否重送。不能把 handler 逾時當成寫入失敗。
-查詢回完成列的 item ID、實際值、concrete target 與固定 entry_id／point。
+查詢回完成列的 item ID、實際值、concrete target 與固定 entry_name／point。
 Receipt 只保留在 GUI 生命週期內，查詢不重新讀取當前 draft 或目的地。
 Recipe `accept_writeback` 的 receipt 也保留 submission_id／recovery，逾時回 unknown。
 它的 items 仍是 confirmed IDs 對應的原捕捉候選，不取代 owner 的實際值 receipt。

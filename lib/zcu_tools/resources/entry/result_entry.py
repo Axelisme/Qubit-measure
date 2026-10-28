@@ -280,7 +280,8 @@ class ResultEntry:
         """Bind this entry's records directory and UUID without caching events.
 
         Reads and appends use RecordsLedger's lock, schema and failure contracts.
-        Missing records directories raise; accessing this property writes no files.
+        Missing records read as empty; the first append creates the directory.
+        Accessing this property writes no files.
         """
         return RecordsLedger(self._result_path / "records", entry_id=self.entry_id)
 
@@ -416,7 +417,6 @@ class ResultEntry:
     def _clone_source(self, clone_from: str | PointView) -> tuple[ResultEntry, Path]:
         result_root = self._result_path.parent
         database_root = self._database_path.parent
-        expected_id = None
         if isinstance(clone_from, PointView):
             identity = _point_origin.clone_source(
                 clone_from,
@@ -424,7 +424,6 @@ class ResultEntry:
             )
             source = identity.source.parent
             name = source.parent.parent.name
-            expected_id = identity.entry_id
         else:
             segments = clone_from.split("/")
             if len(segments) == 1:
@@ -439,8 +438,6 @@ class ResultEntry:
             entry = ResultEntry.open(
                 name, result_root=result_root, database_root=database_root
             )
-        if expected_id is not None and entry.entry_id != expected_id:
-            raise ValueError("PointView source entry_id has changed")
         return entry, source
 
     def _clone_point(

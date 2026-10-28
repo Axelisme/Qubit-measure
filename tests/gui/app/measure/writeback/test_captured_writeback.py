@@ -140,7 +140,11 @@ def test_acceptance_retains_actual_values_and_fixed_destination_for_confirmed_pr
                 "kind": "parameter",
                 "target": "Q1.ext.accepted",
                 "value": 0.6,
-                "destination": captured.target.model_dump(),
+                "destination": {
+                    "kind": "saved_point",
+                    "entry_name": "entry",
+                    "point": "working",
+                },
             },
         ),
     )

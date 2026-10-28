@@ -71,6 +71,29 @@ def test_library_acceptance_keeps_audit_event_without_leaf_sources(
     assert events[0].id == result.event_id
 
 
+def test_writeback_appends_acceptance_after_transplanted_foreign_history(
+    point: PointView, tmp_path: Path
+) -> None:
+    writer = target(point)
+    foreign = ResultEntry.create(
+        "foreign", result_root=tmp_path / "source", database_root=tmp_path / "db"
+    )
+    foreign.record_analysis("prior-fit", run_ids=[], summary={})
+    history = foreign.ledger.events()
+    writer.ledger.source_path.write_bytes(foreign.ledger.source_path.read_bytes())
+
+    result = apply_writeback(
+        (ParameterWriteback("Q1.rate", 6100.0),),
+        target=writer,
+        evidence=evidence(),
+    )
+
+    assert point.Q1.rate == 6100.0
+    accepted = writer.ledger.get(result.event_id).event
+    assert accepted.kind == "accepted"
+    assert writer.ledger.events() == (*history, accepted)
+
+
 @pytest.mark.parametrize("fails", [False, True])
 def test_executor_returns_each_committed_value_and_failure_prefix(
     point: PointView, fails: bool

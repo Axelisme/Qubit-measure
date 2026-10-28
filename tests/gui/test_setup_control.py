@@ -70,11 +70,11 @@ class RecordingContext(ContextControlFacet):
 
     def use_point(self, request: PointUseRequest) -> SavedPoint:
         self._log.add("context", "use_point", request)
-        return SavedPoint(entry_id="entry", point=request.label)
+        return SavedPoint(entry_name="entry", point=request.label)
 
     def new_point(self, request: PointCreateRequest) -> SavedPoint:
         self._log.add("context", "new_point", request)
-        return SavedPoint(entry_id="entry", point=request.label)
+        return SavedPoint(entry_name="entry", point=request.label)
 
     def list_points(self, *, refresh: bool = False) -> tuple[WorkingPointInfo, ...]:
         self._log.add("context", "list_points", refresh=refresh)
@@ -142,7 +142,7 @@ def test_setup_control_facet_forwards_deliberate_setup_dialog_contract() -> None
     facet, _soc, log, bus, _connection = _facet()
     request = EntryRequest("chip")
     point = PointCreateRequest("new", "", CommandOrigin("gui"), clone_from="base")
-    saved = SavedPoint(entry_id="entry", point="base")
+    saved = SavedPoint(entry_name="entry", point="base")
     info = EntryInfo(
         "entry", "chip", Path("/tmp/result/chip"), Path("/tmp/Database/chip")
     )
@@ -186,7 +186,7 @@ def test_setup_control_facet_forwards_deliberate_setup_dialog_contract() -> None
         (
             "new_point",
             lambda: facet.new_point(point),
-            SavedPoint(entry_id="entry", point="new"),
+            SavedPoint(entry_name="entry", point="new"),
             call("context", "new_point", point),
         ),
         (
