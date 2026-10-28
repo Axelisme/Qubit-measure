@@ -90,7 +90,6 @@ def test_eval_ref_source_failure_propagates_but_trial_returns_diagnostic(
     parameters: ParameterContext, caplog: pytest.LogCaptureFixture
 ) -> None:
     from zcu_tools.gui.session import expression
-    from zcu_tools.gui.session.predictor_control import PredictorControlFacet
     from zcu_tools.gui.session.predictor_trial import PredictorTrial
     from zcu_tools.gui.session.services.predictor import PredictorService
 
@@ -102,7 +101,7 @@ def test_eval_ref_source_failure_propagates_but_trial_returns_diagnostic(
     with pytest.raises(OSError, match="alias source offline") as raised:
         expression.resolve_eval_ref(ref, capture)
     assert raised.value is failure
-    trial = PredictorTrial(PredictorControlFacet(PredictorService()))
+    trial = PredictorTrial(PredictorService())
     resolved = trial.resolve_calibration_frequency_mhz(ref, lambda: capture)
     assert resolved.frequency_mhz is None
     assert resolved.error == "alias source offline"

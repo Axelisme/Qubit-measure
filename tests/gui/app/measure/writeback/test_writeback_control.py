@@ -30,7 +30,6 @@ from zcu_tools.gui.app.measure.writeback import (
 from zcu_tools.gui.app.measure.writeback.contracts import WritebackAcceptance
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
-from zcu_tools.gui.session.context_control import ContextControlFacet
 from zcu_tools.gui.session.context_types import PointUseRequest
 from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.state import SessionState
@@ -299,7 +298,7 @@ def test_batch_write_publishes_shared_draft_even_after_partial_failure(
         bind_assets=ArbWaveformDatabase.info_at,
     )
     context_service.install_entry(entry)
-    control = ContextControlFacet(context=context_service)
+    control = context_service
     control.use_point(PointUseRequest("a"))
     parameters = control.read_context()
     state = State(SessionEnv(parameters=parameters, soc=None, soccfg=None))

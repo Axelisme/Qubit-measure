@@ -10,7 +10,6 @@ from zcu_tools.gui.app.measure.remote import ControlOptions, RemoteControlAdapte
 from zcu_tools.gui.app.measure.state import State
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.session.context_types import EntryRequest
-from zcu_tools.gui.session.predictor_control import PredictorControlFacet
 from zcu_tools.gui.session.types import SessionEnv
 from zcu_tools.mcp.measure.session import GuiRpcError
 
@@ -332,7 +331,7 @@ def test_numerical_failures_are_unexpected_with_traceback(
 ) -> None:
     _, adapter, sock = simulator
     service = FailingPredictorService(failure)
-    adapter.predictor_control = PredictorControlFacet(service)
+    adapter.predictor_control = service
     with caplog.at_level("ERROR"):
         reply = call(
             sock,

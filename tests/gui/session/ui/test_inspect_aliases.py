@@ -22,7 +22,7 @@ from qtpy.QtWidgets import (
 )
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.session.aliases import AliasRow
-from zcu_tools.gui.session.context_control import ContextControlFacet
+from zcu_tools.gui.session.context_control import ContextControlPort
 from zcu_tools.gui.session.context_types import PointUseRequest
 from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.state import SessionState
@@ -47,7 +47,7 @@ class _ArbNames:
 
 @dataclass
 class _Session:
-    control: ContextControlFacet
+    control: ContextControlPort
     bus: BaseEventBus
     entry: ResultEntry | None = None
     dialogs: list[InspectDialog] = field(default_factory=list)
@@ -82,7 +82,7 @@ def memory_session(qapp: QApplication, tmp_path: Path) -> Generator[_Session]:
     service = _service(bus)
     service.install_entry(entry)
     service.use_point(PointUseRequest("working"))
-    control = ContextControlFacet(context=service)
+    control = service
     control.set_alias_rows(
         (AliasRow("qubit", "Q1"), AliasRow("resonator", "$qubit.resonator"))
     )
@@ -105,7 +105,7 @@ def entry_session(qapp: QApplication, tmp_path: Path) -> Generator[_Session]:
     service.install_entry(entry)
     service.use_point(PointUseRequest("working"))
     service.set_alias_rows((AliasRow("qubit", "Q1"),))
-    session = _Session(ContextControlFacet(context=service), bus, entry, owner=service)
+    session = _Session(service, bus, entry, owner=service)
     try:
         yield session
     finally:
@@ -124,7 +124,7 @@ def resolved_session(qapp: QApplication, tmp_path: Path) -> Generator[_Session]:
     bus = BaseEventBus()
     service = _service(bus)
     service.install_entry(entry)
-    control = ContextControlFacet(context=service)
+    control = service
     control.use_point(PointUseRequest("working"))
     control.add_component("R1", "fake/sensor", {})
     control.add_component("Q1", "fake/drive/a", {"sense": "R1"})
@@ -256,7 +256,7 @@ def test_edit_without_point_shows_actionable_error(
     qapp: QApplication, tmp_path: Path
 ) -> None:
     bus = BaseEventBus()
-    control = ContextControlFacet(context=_service(bus, (AliasRow("qubit", "Q1"),)))
+    control = _service(bus, (AliasRow("qubit", "Q1"),))
     session = _Session(control, bus)
     try:
         ui = ComponentDriver(_open(session))
@@ -474,7 +474,7 @@ def test_resolution_column_shows_owner_projection_and_read_only_cells(
 
 def test_resolution_without_selected_point_is_empty(qapp: QApplication) -> None:
     bus = BaseEventBus()
-    control = ContextControlFacet(context=_service(bus, (AliasRow("qubit", "Q1"),)))
+    control = _service(bus, (AliasRow("qubit", "Q1"),))
     session = _Session(control, bus)
     dialog = _open(session)
     table = _table(_aliases_page(dialog))

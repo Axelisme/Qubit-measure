@@ -44,7 +44,6 @@ from zcu_tools.gui.app.measure.state import (
 )
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.expected_error import FailedPreconditionError
-from zcu_tools.gui.session.context_control import ContextControlFacet
 from zcu_tools.gui.session.context_types import (
     CommandOrigin,
     PointUseRequest,
@@ -569,7 +568,7 @@ def test_save_uses_tab_storage_after_live_entry_switch(
     )
     other.new_point("q")
     session.context.install_entry(other)
-    ContextControlFacet(context=session.context).use_point(PointUseRequest("q"))
+    session.context.use_point(PointUseRequest("q"))
     completed = session.save()
     assert all(
         item.output.path.is_relative_to(session.entry.database_path)

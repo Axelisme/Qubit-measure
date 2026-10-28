@@ -8,7 +8,6 @@ from pathlib import Path
 
 import pytest
 from qtpy.QtCore import QTimer
-from zcu_tools.gui.session.predictor_control import PredictorControlFacet
 from zcu_tools.gui.session.ui.predictor_dialog import PredictorDialog
 from zcu_tools.resources.predictor_file import PredictorFlux
 from zcu_tools.simulate.fluxonium.predict import FluxoniumParams
@@ -28,7 +27,7 @@ def predictor_ui(qapp, monkeypatch: pytest.MonkeyPatch, request):
 
     monkeypatch.setattr(QTimer, "setInterval", immediate_debounce)
     dialog = PredictorDialog(
-        PredictorControlFacet(SyntheticCurves()),
+        SyntheticCurves(),
         params=FluxoniumParams(4.0, 1.0, 1.0),
     )
     dialog.set_flux(PredictorFlux(0.0, {"coil": 1.0}, {"coil": "A"}), {"coil": 0.0})

@@ -16,7 +16,6 @@ from qtpy.QtWidgets import QApplication
 from zcu_tools.cfg_model import ConstWaveformCfg
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.session.aliases import AliasRow
-from zcu_tools.gui.session.context_control import ContextControlFacet
 from zcu_tools.gui.session.context_types import PointUseRequest
 from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.state import SessionState
@@ -103,7 +102,7 @@ def conflict_ui(
     )
     service.install_entry(entry)
     service.use_point(PointUseRequest("point"))
-    control = ContextControlFacet(context=service)
+    control = service
     control.add_component("Q1", "fake/drive/a", {"rate": 4300.0})
     control.add_component("Q1", "fake/drive/a", {"rate": 1200.0}, setup=True)
     entry.new_point("second")

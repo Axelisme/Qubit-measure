@@ -1,6 +1,6 @@
 # Shared session UI
 
-**Last updated:** 2026-10-29
+**Last updated:** 2026-10-29，Context／Predictor 窄 control ports
 
 **讀者：** framework-dev、agent。查找共用 dialog 的 owner，以及 UI 命令交給 session 的接縫。
 
@@ -15,10 +15,11 @@
 | `PredictorDialog` | 呈現獨立的 PredictorTrial，協調查詢、校準結果、cache 與另存 I/O。 |
 | `ProgressStack` | 將 owner 提供的 progress 投影為 Qt 控件。 |
 
-本目錄只依賴所需的窄 control facets，不反向 import app。
+本目錄只依賴所需的窄 control ports，不反向 import app。
+ContextControlPort 與 PredictorControlPort 直接由 owner service 實作，UI 不因移除純轉發層而取得額外能力。
 App 決定 dialog 的呈現與生命週期，session services 擁有狀態提交與資源操作。
 Widget 不直接寫入 point 文件或管理 driver 連線。
-各 facet 的完整責任見 [session README](../README.md)。
+各 port 與組合 facet 的完整責任見 [session README](../README.md)。
 
 ## Predictor 與生命週期
 

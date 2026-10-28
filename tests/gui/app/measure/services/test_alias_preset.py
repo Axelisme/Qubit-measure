@@ -74,7 +74,7 @@ def composed_context(
                     project_root=str(root),
                     alias_presets={"default": rows},
                 )
-                context = services.context_control
+                context = services.session.context_control
         yield context
     finally:
         background.quiesce()
