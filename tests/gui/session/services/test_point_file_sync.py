@@ -20,6 +20,59 @@ from zcu_tools.resources.entry import ResultEntry
 type SelectedPoint = tuple[ContextService, BaseEventBus, ResultEntry]
 
 
+@pytest.mark.parametrize("watcher", [False, True])
+def test_absent_library_installs_external_creation_strictly(
+    selected: SelectedPoint, watcher: bool
+) -> None:
+    context, bus, entry = selected
+    path = entry.result_path / "points/first/module_cfg.yaml"
+    path.unlink()
+    context.use_point(PointUseRequest("first"))
+    file = next(
+        item for item in context.get_file_revisions() if item.document == "library"
+    )
+    assert file.revision is None
+    captured = context.read_context()
+    binding = context.get_source_binding()
+    facts: list[MlChangedPayload] = []
+    bus.subscribe(MlChangedPayload, facts.append)
+    context.check_file_revision(file)
+
+    invalid = 'format: zcu.module-library\nformat_version: "2.0"\ncomponents: {Q1: {waveforms: {bad: {type: nonexistent}}}}\n'
+    path.write_text(invalid)
+    with pytest.raises(FailedPreconditionError, match="revision"):
+        context.check_file_revision(file)
+    if watcher:
+        context.synchronize_files(admit_reload=True)
+    else:
+        with pytest.raises(InvalidInputError):
+            context.reload_file(path, None)
+    assert context.read_context().library.waveform_keys() == ()
+    assert (
+        next(
+            item for item in context.get_file_revisions() if item.document == "library"
+        )
+        == file
+    )
+    assert path.read_text() == invalid
+    assert facts == []
+
+    body = 'format: zcu.module-library\nformat_version: "2.0"\ncomponents: {Q1: {waveforms: {base: {style: const, length: 0.2}}}}\n'
+    path.write_text(body)
+    if watcher:
+        context.synchronize_files(admit_reload=True)
+    else:
+        context.reload_file(path, None)
+    assert context.read_context().library.waveform_keys() == ("Q1.waveforms.base",)
+    assert captured.library.waveform_keys() == ()
+    assert context.get_source_binding() == binding
+    assert len(facts) == 1
+    assert context.get_file_sync_status()[0].state == "reloaded"
+    assert path.read_text() == body
+    with pytest.raises(FailedPreconditionError, match="revision"):
+        context.reload_file(path, None)
+
+
 def test_reload_installs_before_fact_and_keeps_old_capture(selected) -> None:
     context, bus, _ = selected
     assert hasattr(context, "reload_file"), "Owner must reload a selected point file"

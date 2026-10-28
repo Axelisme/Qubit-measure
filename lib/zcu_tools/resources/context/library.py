@@ -602,18 +602,21 @@ class ModuleLibrary:
         path: Path,
         *,
         assets: WaveformAssetInfo | None = None,
+        allow_absent: bool = False,
     ) -> None:
-        """Open existing module_cfg.yaml without writes or ledger dependencies.
+        """Open module_cfg.yaml without writes or ledger dependencies.
 
         assets is optional for Spec-only operations; Arb materialization needs a
         provider. Invalid disk Specs are skipped with invalid_entries diagnostics.
         Header/container/I/O errors propagate. Draft edits remain strict.
+        allow_absent treats a missing file as empty with revision None, without
+        creating it. The first nonempty edit creates it in its existing parent.
         """
         self._path = path.resolve()
         self._assets = assets
         from .library_store import open_library_store
 
-        self._store = open_library_store(self._path)
+        self._store = open_library_store(self._path, allow_absent=allow_absent)
 
     @property
     def source_path(self) -> Path:

@@ -71,6 +71,37 @@ def test_library_acceptance_keeps_audit_event_without_leaf_sources(
     assert events[0].id == result.event_id
 
 
+def test_library_writeback_creates_missing_file_only_when_touched(
+    point: PointView,
+) -> None:
+    storage = capture_point_storage(point)
+    path = storage.result_path / "points" / storage.point / "module_cfg.yaml"
+    path.unlink()
+    writer = target(point)
+    apply_writeback(
+        (ParameterWriteback("Q1.rate", 6100.0),),
+        target=writer,
+        evidence=evidence(),
+    )
+    assert not path.exists()
+
+    result = apply_writeback(
+        (WaveformWriteback("Q1.waveforms.pi", ConstWaveformCfg(length=0.2)),),
+        target=writer,
+        evidence=evidence(),
+    )
+
+    assert len(result.committed) == 1
+    entry = ResultEntry.open(
+        storage.entry_name,
+        result_root=storage.result_path.parent,
+        database_root=storage.database_path.parent,
+    )
+    assert entry.module_library(storage.point).snapshot().waveform_keys() == (
+        "Q1.waveforms.pi",
+    )
+
+
 def test_writeback_appends_acceptance_after_transplanted_foreign_history(
     point: PointView, tmp_path: Path
 ) -> None:

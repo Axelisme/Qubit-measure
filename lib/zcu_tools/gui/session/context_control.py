@@ -202,7 +202,7 @@ class ContextControlPort(Protocol):
     def check_file_revision(self, expected: PointFileRevision) -> None:
         """Compare draft path/version with disk; mismatch rejects without mutation.
 
-        None expects an absent aliases file only. Invalid paths/base raise
+        None expects an absent library or aliases file. Invalid paths/base raise
         InvalidInputError; mismatch raises FailedPreconditionError(revision_mismatch).
         """
         ...

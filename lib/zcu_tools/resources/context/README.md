@@ -10,6 +10,8 @@
 
 `library.py` 擁有 `module_cfg.yaml` 的文件、查詢與編輯。`library_store.py` 擁有磁碟讀取與 clone 複製。
 文件格式維持 `zcu.module-library` 2.0，header-only 文件表示空 library。
+`ResultEntry.module_library(label)` 允許 point library 缺席，回空快照與 revision=None。
+讀取不建立檔案或父目錄，setup library 缺檔仍報錯。
 版本只跟容器結構走，不隨 Spec 欄位演進升版，見 ADR-0072。Forward minor 保留容器層未知欄位。
 
 讀取不寫檔、不備份，也不查 ledger。舊 `provenance:` 不論內容都忽略。
@@ -36,10 +38,14 @@ Rename 不求值 child、不改其他引用，也不 cascade。Library 不產生
 `ModuleLibrary.edit()` 沿用 DocumentStore 的單檔交易。Draft setter 嚴格驗證新值。
 Body、schema、conflict 或 I/O 失敗不發布候選。Body 中的 snapshot 反映前項寫入。
 `snapshot()` 只複製記憶體，`refresh()` 顯式重載，`subscribe()` 在 publication 後通知。
-未變的 bytes 沿用驗證快取，不另查外部依賴。Handle 不監看磁碟、不建立缺失文件。
+未變的 bytes 沿用驗證快取，不另查外部依賴。Handle 不監看磁碟。
+缺席 library 的空 edit 不建檔，第一次非空 edit 在原鎖與單檔交易內建立文件。
+外部先建立文件時，edit 報 ConflictError 且不覆寫外部 bytes。
+`refresh(strict=True)` 可安裝外部新建的合法 library，無效候選保留已發布內容。
 
 Caller 透過 `ResultEntry.module_library(label)` 開啟 library，建立 point 由 ResultEntry 負責。
 Clone 複製合法 Specs 與 forward-minor 容器欄位，不改來源檔、不匯入事件或附件。
+來源缺 library 時，目的也保持缺檔。
 缺失的 child reference 在使用該欄位時報錯，不 cascade、不補 defaults。
 舊 flat 文件由 root `migrations/` 的離線工具轉換後使用。
 
