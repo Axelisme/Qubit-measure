@@ -488,6 +488,36 @@ def test_unsafe_backup_destination_rejects_before_writes(
     assert set(tmp_path.rglob("*")) == before
 
 
+@pytest.mark.parametrize("data_tree", ["result", "Database"])
+@pytest.mark.parametrize("symlink_override", [False, True])
+def test_project_root_backup_override_rejects_mirror_into_source_tree_before_writes(
+    tmp_path: Path,
+    rename_plan: UpgradePlan,
+    data_tree: str,
+    symlink_override: bool,
+) -> None:
+    project = tmp_path / "project"
+    source = project / data_tree / "entry" / "point.yaml"
+    source.parent.mkdir(parents=True)
+    original = b"old: 7\n"
+    source.write_bytes(original)
+    backup_root = project
+    if symlink_override:
+        backup_root = tmp_path / "backup-link"
+        backup_root.symlink_to(project, target_is_directory=True)
+    before = set(tmp_path.rglob("*"))
+
+    (result,) = upgrade_files(
+        (UpgradeSource(source),), plan=rename_plan, apply=True, backup_root=backup_root
+    )
+
+    assert result.status == "rejected"
+    assert "backup" in (result.error or "")
+    assert result.backup_path is None
+    assert source.read_bytes() == original
+    assert set(tmp_path.rglob("*")) == before
+
+
 def test_database_source_uses_project_sibling_backup(
     tmp_path: Path, rename_plan: UpgradePlan
 ) -> None:

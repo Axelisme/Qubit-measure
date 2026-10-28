@@ -37,6 +37,10 @@ def upgrade_backup_path(source: Path, *, backup_root: Path | None = None) -> Pat
     )
     if any(parent.name in {"result", "Database"} for parent in (root, *root.parents)):
         raise ValueError(f"{root}: backup cannot be inside a result/Database tree")
+    if data_root is not None and destination.is_relative_to(data_root):
+        raise ValueError(
+            f"{destination}: backup mirror cannot be inside the source result/Database tree"
+        )
     if not destination.is_relative_to(root):
         raise ValueError(f"{destination}: backup mirror symlink escapes backup root")
     if data_root is None and destination.is_relative_to(source.parent):
