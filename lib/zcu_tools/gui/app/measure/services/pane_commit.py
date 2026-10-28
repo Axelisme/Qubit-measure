@@ -74,7 +74,7 @@ def commit_run(state: State, tab_id: str, pane: RunPaneState) -> None:
     tab = state.get_tab(tab_id)
     layout = _save_layout(pane, tab=tab)
     artifacts = ArtifactTracker()
-    if pane.result is not None and layout is not None:
+    if pane.result is not None:
         artifacts.replace_section(
             "run",
             (
@@ -106,11 +106,10 @@ def commit_analysis(
     tab = state.get_tab(tab_id)
     artifacts = deepcopy(tab.artifacts)
     layout = _save_layout(tab.run, tab=tab)
-    if layout is not None:
-        artifacts.replace_section(
-            "analysis", _pane_declarations("analysis", pane), layout=layout
-        )
-        artifacts.replace_section("post_analysis", (), layout=layout)
+    artifacts.replace_section(
+        "analysis", _pane_declarations("analysis", pane), layout=layout
+    )
+    artifacts.replace_section("post_analysis", (), layout=layout)
     pane.result_params = deepcopy(pane.params)
     pane.figures_replaced = bool(tab.analysis.plots)
     retired = state.set_analysis_pane(tab_id, pane, artifacts)
@@ -137,10 +136,9 @@ def commit_post_analysis(
         )
     artifacts = deepcopy(tab.artifacts)
     layout = _save_layout(tab.run, tab=tab)
-    if layout is not None:
-        artifacts.replace_section(
-            "post_analysis", _pane_declarations("post_analysis", pane), layout=layout
-        )
+    artifacts.replace_section(
+        "post_analysis", _pane_declarations("post_analysis", pane), layout=layout
+    )
     pane.result_params = deepcopy(pane.params)
     pane.figures_replaced = bool(tab.post_analysis.plots)
     retired = state.set_post_analysis_pane(tab_id, pane, artifacts)

@@ -113,7 +113,7 @@ def host(tmp_path: Path, qapp: QApplication) -> Iterator[RunHost]:
 
 @pytest.mark.parametrize("cfg_available", [True, False], ids=["actual-cfg", "cfg-none"])
 def test_host_retains_adapter_record_and_native_load_never_refills_input(
-    host: RunHost, cfg_available: bool
+    host: RunHost, cfg_available: bool, tmp_path: Path
 ) -> None:
     returned: list[RunRecord[SavingCfg, SavingResult]] = []
 
@@ -165,9 +165,12 @@ def test_host_retains_adapter_record_and_native_load_never_refills_input(
         if not cfg_available:
             return
         resource.write({("amplitude_percent",): 90.0})
-        report = SaveService(state, host.bus).save_data(
-            "tab", origin=CommandOrigin("gui")
-        )
+        report = SaveService(
+            state,
+            host.bus,
+            result_root=tmp_path / "results",
+            database_root=tmp_path / "database",
+        ).save_data("tab", origin=CommandOrigin("gui"))
         native = next(
             item for item in report.outputs if item.output.format == "data_h5"
         )

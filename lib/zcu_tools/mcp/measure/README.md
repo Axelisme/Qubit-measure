@@ -380,7 +380,7 @@ partial 與 Save 收據，不靠作者補取消報告。
 Scalar、uncertainty、unit 與元素 identity 都沿 owner summary，不重算或套 reporting 宣告。
 Status 的 active_path 會讀 GUI 當前 scope，其餘 captured detail 不重讀 GUI，也不自動存檔。
 
-全域 status 的 entry 是 null 或 GUI entry.info 的 UUID、name、result_path、database_path，
+全域 status 的 entry 是 null 或 GUI entry.info 的 name、result_path、database_path，
 只讀 metadata，不建立 context observation。
 `ready.can_run` 只表示環境 readiness。它檢查 entry、active context、SoC 與至少一張 tab 是否存在，缺項列在 `ready.missing`。未 open entry 時 missing 包含 `entry`。它不驗證任何 tab 的表單，也不保證 holder、busy 或硬體 guard 會允許 Run。
 

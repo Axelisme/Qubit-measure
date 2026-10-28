@@ -25,7 +25,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         MethodSpec(
             5.0,
             "Return {entry, files}: entry is null before opening, otherwise "
-            "entry_id/name/result_path/database_path from the cached owner identity. "
+            "name/result_path/database_path from the cached owner identity. "
             "files lists installed point {document, path, revision}, ordered "
             "parameters/library/aliases; empty before point selection. Paths are "
             "absolute and revisions are raw-byte SHA-256 (null only for missing aliases). "
@@ -39,7 +39,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         MethodSpec(
             10.0,
             "Create a named entry without selecting a point "
-            "or touching hardware. Return entry_id/name/result_path/database_path. "
+            "or touching hardware. Return name/result_path/database_path. "
             "Name is one arbitrary resource-validated segment, not chip/qubit. "
             "Existing or invalid names fail without changing the binding. "
             "Installation failure retains the created entry; recover with entry.open, "
@@ -53,7 +53,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         MethodSpec(
             10.0,
             "Open an existing named entry without selecting "
-            "a point or touching hardware. Return entry_id/name/result_path/"
+            "a point or touching hardware. Return name/result_path/"
             "database_path. Invalid/missing entry or installation failure preserves "
             "the old binding; never creates an entry or retries.",
             (required_string("name", "Existing single-segment result entry name"),),
@@ -64,7 +64,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         "point:h_point_list",
         MethodSpec(
             5.0,
-            "Return {entry, points}: entry is null or entry_id/name/result_path/"
+            "Return {entry, points}: entry is null or name/result_path/"
             "database_path; points contains label/description/available/error. "
             "Refresh parameter availability independently per point without reading "
             "library/aliases. Point errors stay in their row; discovery failures "

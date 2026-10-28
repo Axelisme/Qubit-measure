@@ -343,10 +343,10 @@ def test_missing_names_are_diagnosed_only_when_used(tmp_path: Path) -> None:
     assert capture.value("Q1.rate") == 4300.0
     assert capture.value("$driver") == "Gone"
     assert capture.value("$flux_dev") == "MissingDevice"
-    with pytest.raises(RoleResolutionError, match="Unknown path prefix 'Gone'"):
+    with pytest.raises(RoleResolutionError, match="Unknown parameter namespace 'Gone'"):
         capture.value("$driver.rate")
     with pytest.raises(
-        RoleResolutionError, match="Unknown path prefix 'MissingDevice'"
+        RoleResolutionError, match="Unknown parameter namespace 'MissingDevice'"
     ):
         capture.value("$flux_dev.rate")
 
@@ -366,4 +366,4 @@ def test_temporary_capture_and_historical_storage_stay_fixed(tmp_path: Path) -> 
     context.install_entry(entry_at(tmp_path, "two"))
     assert capture.value("$driver.rate") == 4300.0
     assert context.capture_storage(capture) == storage
-    assert str(storage.entry_id) == entry.entry_id
+    assert storage.entry_name == entry.result_path.name

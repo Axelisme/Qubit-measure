@@ -38,6 +38,8 @@ from zcu_tools.resources.entry import (
 )
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
+from tests.gui.app.measure._record_support import require_target
+
 Kind = Literal["parameter", "module", "waveform"]
 KINDS: tuple[Kind, ...] = ("parameter", "module", "waveform")
 AT = "2026-10-07T00:00:00Z"
@@ -186,11 +188,11 @@ def test_library_setters_preserve_old_capture(session: _Session, kind: Kind) -> 
     capture = session.control.read_context()
     old_document = capture.document()
     old_library = capture.library.document()
-    created_at = old_document.general.created_at
+    created_at = capture.whole_document().general.created_at
     _write(session.control, target, kind, 0.2)
     current = session.control.read_context()
     assert _value(current, kind) == pytest.approx(0.2)
-    assert current.document().general.created_at == created_at
+    assert current.whole_document().general.created_at == created_at
     assert capture.document() == old_document
     assert capture.library.document() == old_library
     assert _persisted(session.entry, target, kind) == pytest.approx(0.2)
@@ -451,7 +453,7 @@ def test_shared_writeback_entry_retains_order_metadata_and_failure_prefix(
     event = session.entry.ledger.get(error.event_id).event
     assert event.kind == "accepted"
     current = session.control.read_target(target)
-    assert current.document().general.description is None
+    assert current.whole_document().general.description is None
     assert not current.lookup("general.ext.later").present
     assert current.library.waveform_keys() == ()
     assert document_meta(current.document(), "general.description") is None
@@ -586,7 +588,7 @@ def test_saved_point_samples_persist_and_replace_latest_run_row(
     assert session.control.read_record(target, "Q1", "run-1") == expected
     assert session.control.read_record(target, "Q1", "missing") is None
     second = session.control.apply_writeback(
-        session.control.read_context().target,
+        require_target(session.control.read_context()),
         (writeback.RecordWriteback("Q1", {"t1_us": 31.7}),),
         evidence=writeback.WritebackEvidence(origin="gui", run_id="run-1"),
     )
@@ -596,7 +598,7 @@ def test_saved_point_samples_persist_and_replace_latest_run_row(
         session.entry.ledger.get(second_id).event.at
     )
     assert session.control.read_record(
-        session.control.read_context().target, "Q1", "run-1"
+        require_target(session.control.read_context()), "Q1", "run-1"
     ) == {
         "component": "Q1",
         "t1_us": 31.7,

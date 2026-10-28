@@ -19,13 +19,13 @@ class ContextWritebackTarget:
     """Bind a captured saved point to resources.entry.writeback.WritebackTarget.
 
     context is the owner-thread service used for parameter/library writes.
-    target fixes the entry UUID and safe point label; entry must be that
+    target fixes the entry name and safe point label; entry must be that
     target's open ResultEntry. Binding stores these handles without reading or
     writing files. It neither follows later selection nor creates an entry.
     Caller must supply matching handles; binding does not validate them.
 
-    Public fields describe the bound destination: entry_id is entry's UUID
-    string, ledger is its RecordsLedger for accepted events, and point is the
+    Public fields describe the bound destination: ledger is the owning
+    RecordsLedger for accepted events, and point is the
     captured nonempty point label. Treat these fields as read-only.
 
     set_parameters/set_modules implement the nonempty ordered batch contract
@@ -50,7 +50,6 @@ class ContextWritebackTarget:
         self._context = context
         self._target = target
         self._entry = entry
-        self.entry_id = entry.entry_id
         self.ledger = entry.ledger
         self.point = target.point
 

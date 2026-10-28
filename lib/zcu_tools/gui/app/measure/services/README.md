@@ -29,7 +29,7 @@ Results index 隔離各 entry 的 setup／ledger 與 run 成員讀取錯誤，�
 
 Load 只使用檔內 experiment tag、資料與參數快照，不讀 live point 或先驗完整 RunMetadata。缺快照使用空參數內容；壞快照由 owner 報錯，Load 保留原 pane 並回傳指名來源檔的 LoadDataError。未用的歷史 metadata 欄位延後到使用或完整投影時驗證。
 
-Run、Analyze、PostAnalyze、Load 與 Tab 將 pane 提交或退役清理交給 `pane_commit`。
+Run、Analyze、PostAnalyze、Load 與 Tab 將 pane 提交或退役清理交給 `pane_commit`。無 storage 仍提交 artifact/member declarations，首次 Save 前 outputs 可為空，不表示已 Save。SaveService 使用 composition root 注入的目前 roots，再交 resources 的 bind_run_outputs 依記錄名稱計算目的地，不查 live entry／point。Bound previews 沿用既有規則，Save report 發布實際輸出與逐項失敗。
 `GuardService.admit` 統一 domain admission，啟動時的 hardware exclusion 仍由 operation gate 裁決。
 各 operation 決定終局與觸發清理的時機。
 State 保存已提交的 tab 與 pane 狀態，只被動交換已備妥的 pane 與 artifacts，回傳退役資源。

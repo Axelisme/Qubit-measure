@@ -121,7 +121,7 @@ def test_parts_accumulate_with_same_identity(
         validate_cfg=validate_cfg,
         validate_native=noop_validation,
     )
-    assert result.entry_id == initial.entry_id
+    assert result.migration_id == initial.migration_id
     assert result.part == "all"
     assert len(result.key_mappings) == 1
 

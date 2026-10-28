@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-from uuid import UUID
 
 import numpy as np
 from zcu_tools.datafile import (
@@ -25,7 +24,7 @@ def native_spectrum_file(path: Path, snapshot: dict[str, JsonObject] | None) -> 
         started_at=None,
         finished_at=None,
         completion="unknown",
-        snapshot=RunSnapshot(entry_id=UUID(int=1), point=None, roles={}),
+        snapshot=RunSnapshot(entry_name="entry", point=None, roles={}),
         provenance=SoftwareProvenance(
             software_versions={},
             git_commit=None,

@@ -199,7 +199,7 @@ def test_new_point_inherits_setup_general_with_fresh_creation_time(
     stored = YAML(typ="safe").load(
         (entry.result_path / "points/inherited/point.yaml").read_text()
     )
-    assert stored["general"]["entry_id"] == entry.entry_id
+
     assert stored["general"]["created_at"] > "2000-01-01T00:00:00Z"
     assert source.read_bytes() == before
     point.general.ext["flux_unit"] = "A"
@@ -426,10 +426,16 @@ def test_point_reload_uses_only_its_file_and_keeps_snapshot_on_failure(
     stored = YAML(typ="rt").load(source.read_text())
     stored["components"]["Q1"]["rate"] = "invalid"
     write_yaml(source, stored)
-    with pytest.raises(ValueError, match="rate"):
-        reload_point()
-    assert point.Q1.rate == 5100.0
+    before = source.read_bytes()
+    loaded = reload_point()
+    if loaded is not None:
+        point = loaded
     assert point.Q1.duration == 12.0
+    with pytest.raises(ValueError, match="rate"):
+        _ = point.Q1.rate
+    with pytest.raises(ValueError, match="rate"):
+        point.Q1.duration = 13.0
+    assert source.read_bytes() == before
 
 
 def test_point_edit_rejects_invalid_reload_before_exposing_draft(

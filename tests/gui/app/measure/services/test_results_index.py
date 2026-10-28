@@ -2,7 +2,7 @@
 
 from datetime import datetime, timezone
 from pathlib import Path
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 import pytest
 from zcu_tools.datafile import Container, ContainerAttrs, JsonObject, save
@@ -53,7 +53,7 @@ def _native(run: Path, entry: ResultEntry, run_id: str, point: str) -> None:
         finished_at=None,
         completion="unknown",
         snapshot=RunSnapshot(
-            entry_id=UUID(entry.entry_id), point=point, roles={"qubit": "Q1"}
+            entry_name=entry.result_path.name, point=point, roles={"qubit": "Q1"}
         ),
         provenance=SoftwareProvenance(
             software_versions={},
@@ -79,7 +79,6 @@ def _acquired(entry: ResultEntry, run_id: str, point: str) -> None:
     entry.ledger.append(
         LedgerEvent(
             id=str(uuid4()),
-            entry_id=entry.entry_id,
             kind="acquired",
             at=_AT,
             origin="notebook",
@@ -97,7 +96,6 @@ def _saved_figure(entry: ResultEntry, run: Path, run_id: str) -> None:
     entry.ledger.append(
         LedgerEvent(
             id=str(uuid4()),
-            entry_id=entry.entry_id,
             kind="saved",
             at=_AT,
             origin="notebook",

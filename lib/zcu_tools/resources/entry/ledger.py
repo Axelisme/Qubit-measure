@@ -8,7 +8,6 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from tempfile import NamedTemporaryFile
-from uuid import UUID
 
 from filelock import FileLock, Timeout
 from pydantic import TypeAdapter
@@ -69,22 +68,16 @@ class RecordsLedger:
     tail; later operations report that tail rather than skipping it.
     """
 
-    def __init__(
-        self, records: Path, *, entry_id: str, lock_timeout: float = 10.0
-    ) -> None:
-        """Bind a records directory and informational UUID without creating files.
+    def __init__(self, records: Path, *, lock_timeout: float = 10.0) -> None:
+        """Bind a records directory without creating files.
 
         records is not the entry root or a filename. A missing directory is empty
         until append creates it; its parent must exist for append. Existing
-        non-directory paths raise NotADirectoryError. Invalid entry_id or non-finite,
-        negative lock_timeout seconds raise ValueError. All handles resolve the
+        non-directory paths raise NotADirectoryError. Non-finite or negative
+        lock_timeout seconds raise ValueError. All handles resolve the
         same directory before choosing their ledger and runtime lock paths.
         Binding creates the runtime lock directory on demand, not a lock file.
         """
-        try:
-            UUID(entry_id)
-        except ValueError as exc:
-            raise ValueError("entry_id must be a UUID") from exc
         if not math.isfinite(lock_timeout) or lock_timeout < 0:
             raise ValueError("lock_timeout must be finite nonnegative seconds")
         self._records = records.resolve()
@@ -126,7 +119,7 @@ class RecordsLedger:
         the lock, check historical JSON/header/event and run references, duplicate
         IDs and complete tails before flushing a UTF-8 line. Unused historical
         payload fields are not projected. This new event is fully validated.
-        Event entry_id is informational, not membership.
+        Historical entry_id is ignored, not membership.
         Duplicate IDs, invalid content and
         existing attachments are rejected without overwriting history. After an
         I/O failure only unpublished temporary files are removed, not evidence.
@@ -161,7 +154,7 @@ class RecordsLedger:
         """Return validated events in append order without reading attachments.
 
         A missing records directory or ledger returns () without creating it. Corrupt rows,
-        duplicate IDs and incomplete tails raise; event entry_id is informational;
+        duplicate IDs and incomplete tails raise; historical entry_id is ignored;
         successful reads never rewrite ledger bytes.
         """
         with self._locked():

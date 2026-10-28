@@ -100,7 +100,6 @@ def source() -> Generator[tuple[PointDocument, LibrarySnapshot]]:
             format_version="2.0",
             schema_version=1,
             general=PointGeneral(
-                entry_id="00000000-0000-0000-0000-000000000001",
                 created_at="2026-10-09T00:00:00Z",
                 ext={"nullable": None, "nested": {"number": 2.0}},
             ),
@@ -452,6 +451,49 @@ def test_bind_roles_uses_only_fixed_point_and_detaches_mappings(
     assert context.roles is None
 
 
+@pytest.mark.parametrize("fault_document", [None, "point", "module_cfg"])
+def test_empty_role_binding_does_not_consume_components_or_sources(
+    source: tuple[PointDocument, LibrarySnapshot],
+    tmp_path: Path,
+    fault_document: Literal["point", "module_cfg"] | None,
+) -> None:
+    faults = (
+        ()
+        if fault_document is None
+        else (
+            ContextSourceFault(
+                fault_document,
+                tmp_path / f"{fault_document}.yaml",
+                "OSError",
+                "unreadable",
+            ),
+        )
+    )
+    context = ParameterContext(
+        point=ParameterContent({"components": ["not a component mapping"]}),
+        library=source[1],
+        target=None,
+        roles=None,
+        source_faults=faults,
+    )
+
+    bound = context.bind_roles({}, focus=None, explicit={})
+
+    assert bound.roles == RoleBinding(None, {}, {})
+    assert bound.target is None
+    assert bound.source_faults == faults
+    with pytest.raises(RoleResolutionError, match="Role is not declared"):
+        context.bind_roles({}, focus=None, explicit={"extra": "Q1"})
+    if fault_document == "point":
+        with pytest.raises(ContextSourceUnavailableError) as error:
+            bound.document()
+        assert error.value.faults == faults
+    elif fault_document == "module_cfg":
+        with pytest.raises(ContextSourceUnavailableError) as error:
+            _ = bound.library
+        assert error.value.faults == faults
+
+
 def test_bind_roles_returns_partial_aliases_after_ambiguous_inference(
     source: tuple[PointDocument, LibrarySnapshot],
 ) -> None:
@@ -623,6 +665,46 @@ def test_nested_library_failure_is_not_reported_as_missing(
         capture((point, broken)).lookup("Q1.pulses.pi.gain")
 
 
+def test_point_consumers_ignore_unused_library_source_fault(
+    source: tuple[PointDocument, LibrarySnapshot], tmp_path: Path
+) -> None:
+    fault = ContextSourceFault(
+        "module_cfg", tmp_path / "module_cfg.yaml", "OSError", "unreadable"
+    )
+    context = capture(source, faults=(fault,))
+
+    assert context.value("Q1.rate") == 4300.0
+    assert context.lookup_point("Q1.rate") == DocumentValue(True, 4300.0)
+    assert context.component("Q1") == source[0].components["Q1"]
+    assert context.document() == source[0]
+    assert context.whole_document() == source[0]
+    bound = context.bind_roles(declarations(), focus="Q1", explicit={})
+    assert bound.value("$capture_driver.rate") == 4300.0
+    assert bound.source_faults == (fault,)
+    aliased = context.bind_aliases((AliasRow("driver", "Q1"),), {})
+    assert aliased.value("$driver.rate") == 4300.0
+    assert aliased.roles == RoleBinding(None, {}, {"driver": "Q1"})
+    with pytest.raises(ContextSourceUnavailableError) as error:
+        _ = context.library
+    assert error.value.faults == (fault,)
+
+
+@pytest.mark.parametrize("method", ["lookup", "library_key", "has_library_key"])
+def test_library_consumers_report_their_own_source_fault(
+    source: tuple[PointDocument, LibrarySnapshot], tmp_path: Path, method: str
+) -> None:
+    fault = ContextSourceFault(
+        "module_cfg", tmp_path / "module_cfg.yaml", "OSError", "unreadable"
+    )
+    context = capture(source, faults=(fault,))
+
+    path = "Q1.pulses.pi.freq" if method == "lookup" else "Q1.pulses.pi"
+    with pytest.raises(ContextSourceUnavailableError) as error:
+        getattr(context, method)(path)
+    assert error.value.faults == (fault,)
+    assert context.value("Q1.rate") == 4300.0
+
+
 def test_parameter_capture_rejects_setup_diagnostics(
     source: tuple[PointDocument, LibrarySnapshot],
     tmp_path: Path,
@@ -638,8 +720,12 @@ def read_projection(context: ParameterContext, method: str) -> None:
     """Exercise one public getter without reaching inside the captured source."""
     if method == "document":
         context.document()
+    elif method == "whole_document":
+        context.whole_document()
+    elif method == "component":
+        context.component("Q1")
     elif method == "bind_roles":
-        context.bind_roles({}, focus=None, explicit={})
+        context.bind_roles(declarations(), focus="Q1", explicit={})
     else:
         getattr(context, method)("Q1.rate")
 
@@ -669,6 +755,8 @@ def test_library_capture_checks_only_its_source_fault(
     "method",
     [
         "document",
+        "whole_document",
+        "component",
         "bind_roles",
         "resolve_path",
         "library_key",

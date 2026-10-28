@@ -188,7 +188,7 @@ class ParameterContext:
 
     def point_content(self) -> ParameterContent:
         """Copy captured resource content without consulting files or selection."""
-        self._ensure_readable()
+        self._ensure_readable("point")
         if isinstance(self._point, ParameterContent):
             return self._point.captured()
         return ParameterContent(
@@ -256,7 +256,7 @@ class ParameterContext:
             return RoleBinding(None, {}, names)
         if self._aliases is not None and self._roles is not None:
             self._ensure_aliases_readable()
-            self._ensure_readable()
+            self._ensure_readable("point")
             names = self._aliases.names(self._point, self._roles.declarations)
             return RoleBinding(None, self._roles.declarations, names)
         return deepcopy(self._roles)
@@ -312,7 +312,7 @@ class ParameterContext:
         captures without an origin capability raise FailedPreconditionError with
         reason_code storage_unavailable. This performs no I/O or ledger append.
         """
-        self._ensure_readable()
+        self._ensure_readable("point")
         storage = self.storage
         if storage is None:
             raise FailedPreconditionError(
@@ -331,11 +331,9 @@ class ParameterContext:
         self._ensure_readable("module_cfg")
         return self._library
 
-    def _ensure_readable(self, document: str | None = None) -> None:
+    def _ensure_readable(self, document: str) -> None:
         faults = tuple(
-            fault
-            for fault in self._source_faults
-            if document is None or fault.document == document
+            fault for fault in self._source_faults if fault.document == document
         )
         if faults:
             raise ContextSourceUnavailableError(faults)
@@ -352,6 +350,7 @@ class ParameterContext:
         Unrelated components remain unread. Missing/unbound aliases, unknown
         names, malformed fields and model checks raise their owner errors.
         """
+        self._ensure_readable("point")
         name = self.resolve_path(path) if path.startswith("$") else path
         if "." in name or name == "general":
             raise ValueError(f"Expected one component name: {path!r}")
@@ -363,7 +362,7 @@ class ParameterContext:
 
     def document(self) -> PointDocument | ParameterContent:
         """Copy the fixed point without I/O or model hooks; unavailable sources raise."""
-        self._ensure_readable()
+        self._ensure_readable("point")
         return self._point.model_copy(deep=True)
 
     def whole_document(self) -> PointDocument:
@@ -373,7 +372,7 @@ class ParameterContext:
         Incomplete stored/empty content and malformed fields raise owner errors.
         Native typed captures retain their original component values.
         """
-        self._ensure_readable()
+        self._ensure_readable("point")
         if isinstance(self._point, ParameterContent):
             return self._point.project()
         return self._point.model_copy(deep=True)
@@ -468,19 +467,27 @@ class ParameterContext:
         Declarations are ordered kind/via rules. Explicit concrete names win
         over focus/via inference. None explicitly leaves its role unbound;
         an absent explicit key allows inference. The returned RoleBinding keeps
-        the same focus and explicit choices. Empty declarations remain empty.
+        the same focus and explicit choices. Empty declarations consume no
+        components or sources. Nonempty declarations use the existing complete
+        component projection for kind/via inference. Source faults remain in
+        the returned capture and fail only readers that need that source.
         Auto inference with zero/multiple candidates leaves roles unbound;
         their use raises RoleResolutionError. Invalid explicit choices and
         dangling/wrong-kind references still raise during binding.
         target and source data are retained; live session state is never read.
         """
-        self._ensure_readable()
-        names = resolve_names(self._point.components, declarations, focus, explicit)
+        if declarations:
+            self._ensure_readable("point")
+            components = self._point.components
+        else:
+            components = {}
+        names = resolve_names(components, declarations, focus, explicit)
         return ParameterContext(
             point=self._point,
             library=self._library,
             target=self._target,
             roles=RoleBinding(focus, declarations, names, explicit),
+            source_faults=self._source_faults,
             storage=self._storage,
         )
 
@@ -495,7 +502,7 @@ class ParameterContext:
         fields, independent of alias names or bindings, in Run and Load captures.
         Other entry syntax/collision/unknown namespace errors propagate.
         """
-        self._ensure_readable()
+        self._ensure_readable("point")
         if path.startswith("$"):
             alias, separator, suffix = path[1:].partition(".")
             if not alias or (separator and not suffix):
@@ -515,7 +522,7 @@ class ParameterContext:
         return resolve_path(self._point, path, roles={})
 
     def _alias_value(self, alias: str) -> AliasValue:
-        self._ensure_readable()
+        self._ensure_readable("point")
         self._ensure_aliases_readable()
         spec = self._roles.declarations.get(alias) if self._roles is not None else None
         if self._recorded and self._aliases is None:
@@ -574,7 +581,7 @@ class ParameterContext:
             raise ValueError(f"Expected a library root: {path!r}")
         kind = "waveform" if parts[1] == "waveforms" else "module"
         try:
-            self._library.entry_value(resolved, kind=kind)
+            self.library.entry_value(resolved, kind=kind)
         except KeyError as cause:
             if is_slot:
                 raise ModuleSlotError(f"Dangling module slot: {path!r}") from cause
@@ -603,7 +610,7 @@ class ParameterContext:
             raise
         kind = "waveform" if key.split(".")[1] == "waveforms" else "module"
         try:
-            self._library.entry_value(key, kind=kind)
+            self.library.entry_value(key, kind=kind)
         except KeyError:
             return False
         return True
@@ -636,7 +643,7 @@ class ParameterContext:
         resolved = self.resolve_path(path)
         library_path = self._library_path(resolved)
         if library_path is not None:
-            return self._library.lookup(library_path)
+            return self.library.lookup(library_path)
         return self._point_value(resolved)
 
     def _alias_lookup(self, alias: str) -> DocumentValue:

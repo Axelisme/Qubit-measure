@@ -159,7 +159,7 @@ def test_entry_point_commands_show_in_reopened_setup_and_failures_keep_the_conte
         )
         assert changed["name"] == "chip-b"
         info = control.get_entry_info()
-        assert info is not None and info.entry_id == changed["entry_id"]
+        assert info is not None and info.name == changed["name"]
         with pytest.raises(FailedPreconditionError) as caught:
             control.read_context()
         assert caught.value.reason_code == "no_context"

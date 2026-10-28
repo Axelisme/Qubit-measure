@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 from pydantic import TypeAdapter, ValidationError
 from ruamel.yaml import YAML
@@ -144,16 +144,14 @@ def rename_entry(old: str, new: str, *, result_root: str | Path) -> None:
 class EntryIdentity:
     """Fixed values for creating a new entry, not ownership of existing paths.
 
-    entry_id is the UUID to write to setup. created_at is a timezone-aware UTC
-    datetime; non-UTC or naive times raise ValueError, invalid IDs ValidationError.
+    created_at is a timezone-aware UTC datetime written to setup.
+    Non-UTC or naive times raise ValueError.
     These values do not authorize opening, replacing or repairing any entry.
     """
 
-    entry_id: UUID
     created_at: datetime
 
     def __post_init__(self) -> None:
-        TypeAdapter(UUID).validate_python(self.entry_id, strict=True)
         if self.created_at.utcoffset() != timedelta(0):
             raise ValueError("created_at must be a timezone-aware UTC datetime")
 
@@ -162,7 +160,6 @@ class ResultEntry:
     def __init__(self, result_path: Path, database_path: Path) -> None:
         self._result_path = result_path
         self._database_path = database_path
-        self._entry_id: str | None = None
         source = result_path / "setup.yaml"
 
         # Bind diagnostics to this handle without shared mutable model context.
@@ -187,24 +184,10 @@ class ResultEntry:
 
     def _validate_setup(self, document: SetupDocument) -> None:
         validate_view_components(document, source=self._result_path / "setup.yaml")
-        if self._entry_id is None:
-            self._entry_id = document.general.entry_id
-        elif document.general.entry_id != self._entry_id:
-            raise ValueError(
-                f"{self._result_path / 'setup.yaml'}: entry_id is immutable; "
-                f"expected {self._entry_id!r}, got {document.general.entry_id!r}"
-            )
 
     @property
     def setup(self) -> SetupView:
         return self._setup
-
-    @property
-    def entry_id(self) -> str:
-        value = ParameterContent(self._setup_store.content()).value("general.entry_id")
-        if not isinstance(value, str):
-            raise ValueError("general.entry_id must be a string")
-        return value
 
     @property
     def result_path(self) -> Path:
@@ -304,13 +287,13 @@ class ResultEntry:
 
     @property
     def ledger(self) -> RecordsLedger:
-        """Bind this entry's records directory and UUID without caching events.
+        """Bind this entry's records directory without caching events.
 
         Reads and appends use RecordsLedger's lock, schema and failure contracts.
         Missing records read as empty; the first append creates the directory.
         Accessing this property writes no files.
         """
-        return RecordsLedger(self._result_path / "records", entry_id=self.entry_id)
+        return RecordsLedger(self._result_path / "records")
 
     def record_analysis(
         self,
@@ -327,7 +310,7 @@ class ResultEntry:
         run data. summary and optional record are strict JSON objects with
         finite numbers; their contents have no framework-defined schema.
 
-        The analyzed event uses this entry's UUID, current UTC time and notebook
+        The analyzed event uses current UTC time and notebook
         origin. A non-None record (including {}) is attached as records/<id>.json.
         The returned ID can be read with ledger.get(id). No values are written;
         callers use ordinary point or setup edits and choose any metadata.
@@ -340,7 +323,6 @@ class ResultEntry:
             id=str(uuid4()),
             kind="analyzed",
             at=datetime.now(timezone.utc).isoformat(),
-            entry_id=self.entry_id,
             origin="notebook",
             payload=AnalyzedPayload(
                 analysis_kind=analysis_kind,
@@ -555,7 +537,6 @@ class ResultEntry:
         return PointView(
             self._point_store(source),
             source,
-            entry_id=self.entry_id,
             result_root=self._result_path.parent,
             database_root=self._database_path.parent,
         )
@@ -616,7 +597,7 @@ class ResultEntry:
 
         result_root is the exact Result root, not an entry or Database directory.
         Missing entry, records directory or ledger returns (). An existing entry
-        must have a valid setup header and UUID/UTC identity; components are not
+        must have a valid setup header and UTC creation time; components are not
         interpreted. Ledger validation and I/O errors propagate. Symlinks must
         preserve root/entry/records containment and keep the ledger in records,
         otherwise raise ValueError. No entry, file, directory or lock is created,
@@ -629,7 +610,7 @@ class ResultEntry:
                 raise ValueError(f"{path}: path escapes its entry location")
         if not result.exists():
             return ()
-        identity = cls.read_identity(name, result_root=root)
+        cls.read_identity(name, result_root=root)
         records = result / "records"
         if not records.resolve().is_relative_to(records):
             raise ValueError(f"{records}: records path escapes its entry location")
@@ -638,16 +619,14 @@ class ResultEntry:
         ledger = records / "ledger.jsonl"
         if not ledger.resolve().is_relative_to(records):
             raise ValueError(f"{ledger}: ledger path escapes records")
-        return RecordsLedger(
-            records, entry_id=str(identity.entry_id)
-        ).read_events_snapshot()
+        return RecordsLedger(records).read_events_snapshot()
 
     @classmethod
     def read_identity(cls, name: str, *, result_root: str | Path) -> EntryIdentity:
         """Read setup header and identity without component registration or locks.
 
         name is a safe single entry name under result_root. Validate the shared
-        parameter-container header and general UUID/UTC creation time only;
+        parameter-container header and general UTC creation time only;
         do not interpret component kinds or require point/records directories.
         Invalid names, identity/header/YAML and escaping symlinks raise ValueError.
         Missing setup and other filesystem errors propagate. No files are written.
@@ -665,7 +644,6 @@ class ResultEntry:
         except (ValueError, YAMLError) as error:
             raise ValueError(f"{source}: {error}") from error
         return EntryIdentity(
-            entry_id=UUID(general.entry_id),
             created_at=datetime.fromisoformat(general.created_at),
         )
 
@@ -695,8 +673,8 @@ class ResultEntry:
     ) -> ResultEntry:
         """Create a new Result entry and bind a Database output location.
 
-        name is a safe single path segment. identity fixes the setup UUID and UTC
-        creation time, or None generates both now. An existing Result destination
+        name is a safe single path segment. identity fixes the UTC creation
+        time, or None uses the current time. An existing Result destination
         raises DestinationExistsError before writes. Database is neither inspected
         nor created; its configured path is database_root/name, for later Save.
         Schema/I/O failures propagate and remove only directories created by this
@@ -706,9 +684,7 @@ class ResultEntry:
 
         policy = component_registry.require_schema_policy()
         if identity is None:
-            identity = EntryIdentity(
-                entry_id=uuid4(), created_at=datetime.now(timezone.utc)
-            )
+            identity = EntryIdentity(created_at=datetime.now(timezone.utc))
         result_path = _entry_path(result_root, name, new_destination=True)
         database_path = Path(database_root) / name
         result_path.mkdir(parents=True)
@@ -720,7 +696,6 @@ class ResultEntry:
                 "schema_version": policy.current_version,
                 "format_version": f"{PARAMETER_VERSION.major}.{PARAMETER_VERSION.minor}",
                 "general": {
-                    "entry_id": str(identity.entry_id),
                     "created_at": identity.created_at.isoformat().replace(
                         "+00:00", "Z"
                     ),
@@ -744,7 +719,7 @@ class ResultEntry:
         """Open a Result entry from setup and bind database_root/name for Save.
 
         name must be a safe single path segment. The Result entry directory and
-        setup must exist; setup must validate its format and UUID.
+        setup must exist and validate its header; field values validate on use.
         Missing points/ and records/ are empty and are not created.
         Missing paths propagate filesystem errors. Schema ValidationError becomes
         ValueError with the full document path and original diagnostic. The original

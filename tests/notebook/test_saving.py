@@ -781,7 +781,7 @@ def test_accept_commit_validator_error_propagates_and_keeps_event(
             raise failure
 
     path = source_path(point)
-    binding = capture_point_storage(point)
+
     bound = PointView(
         DocumentStore(
             path,
@@ -791,7 +791,6 @@ def test_accept_commit_validator_error_propagates_and_keeps_event(
             validate=reject_fit,
         ),
         path,
-        entry_id=str(binding.entry_id),
         result_root=tmp_path / "results",
         database_root=tmp_path / "Database",
     )

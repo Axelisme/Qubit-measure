@@ -88,9 +88,13 @@ def test_open_invalid_component_reports_source_and_original_validation(
 
     def open_document() -> None:
         if owner == "setup":
-            ResultEntry.open("entry", result_root=results, database_root=database)
+            view = ResultEntry.open(
+                "entry", result_root=results, database_root=database
+            ).setup
         else:
-            entry.use_point("working")
+            view = entry.use_point("working")
+        assert view.description is None
+        _ = view.N1.rate
 
     with pytest.raises(ValueError, match=r"N1\.rate") as failure:
         open_document()

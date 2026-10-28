@@ -2,7 +2,6 @@
 
 from dataclasses import replace
 from pathlib import Path
-from uuid import UUID
 
 from zcu_tools.datafile import save
 from zcu_tools.experiment.metadata import RunMetadata, RunSnapshot, SoftwareProvenance
@@ -44,7 +43,7 @@ def historical_metadata() -> RunMetadata:
         finished_at="2026-10-08T00:01:00+00:00",
         completion="complete",
         snapshot=RunSnapshot(
-            entry_id=UUID("00000000-0000-4000-8000-000000000001"),
+            entry_name="entry",
             point="original-point",
             roles={},
         ),

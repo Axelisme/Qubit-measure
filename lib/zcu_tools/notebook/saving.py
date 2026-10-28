@@ -118,7 +118,7 @@ class SavedRun(Generic[CfgT, ResultT]):
             finished_at=acquisition.finished_at.isoformat(),
             completion=acquisition.completion,
             snapshot=RunSnapshot(
-                entry_id=self._storage.entry_id,
+                entry_name=self._storage.entry_name,
                 point=self._storage.point,
                 roles=dict(self._storage.roles),
             ),
@@ -137,7 +137,7 @@ class SavedRun(Generic[CfgT, ResultT]):
         metadata = self._record.metadata
         if metadata is None:
             raise ValueError("SavedRun requires record metadata")
-        return metadata
+        return metadata.project()
 
     @property
     def run_id(self) -> str:
@@ -190,7 +190,6 @@ class SavedRun(Generic[CfgT, ResultT]):
                     id=str(uuid4()),
                     kind="acquired",
                     at=self._acquired_at,
-                    entry_id=str(self._storage.entry_id),
                     origin="notebook",
                     payload=AcquiredPayload(
                         run_id=self.run_id,

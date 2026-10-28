@@ -23,7 +23,8 @@ from __future__ import annotations
 # Results list exposes named item issues for unenumerable Database paths.
 # point.list includes parameter-only availability and per-point error diagnostics.
 # Context snapshots no longer include library provenance.
-# Point bindings and writeback destinations identify entries by folder name.
+# Entry info, point bindings and writeback targets use folder names, without UUIDs.
+# Loaded Runs expose recorded parameter content independently of live storage.
 WIRE_VERSION = 130
 
 # Bump for meaningful GUI code changes that need a reload signal.

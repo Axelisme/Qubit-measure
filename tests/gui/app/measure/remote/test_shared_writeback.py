@@ -115,7 +115,7 @@ def context_at(
     return entry, context
 
 
-def test_sample_write_receipt_reads_latest_jsonl_before_and_after_at_fixed_point(
+def test_sample_write_receipt_reads_latest_jsonl_at_current_point(
     tmp_path: Path,
 ) -> None:
     entry, context = context_at(tmp_path)
@@ -158,7 +158,7 @@ def test_sample_write_receipt_reads_latest_jsonl_before_and_after_at_fixed_point
         "component": "Q1",
         "t1_us": 20.09,
         "run_id": "run-fixed",
-        "point": "a",
+        "point": "b",
         "at": row["at"],
         "source": entry.ledger.events()[-1].id,
     }
@@ -262,7 +262,7 @@ def test_record_preview_selection_and_apply_preserve_adapter_json(
     assert row == expected | {
         "component": "Q1",
         "run_id": "run-fixed",
-        "point": "a",
+        "point": "b",
         "at": row["at"],
         "source": event.id,
     }

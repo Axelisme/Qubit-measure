@@ -41,7 +41,7 @@ class ContextControlPort(Protocol):
 
     Reads never refresh implicitly. read_context rejects EMPTY/unavailable
     sources, fixing current alias rows with optional temporary named overrides. Point commands validate the
-    opened entry UUID before resource preparation. Preparation failures preserve
+    opened entry name before resource preparation. Preparation failures preserve
     the binding; a created-but-unbound point raises PointBindingError.
     """
 
@@ -407,9 +407,9 @@ class ContextControlFacet(ContextControlPort):
         return self._context.get_entry_info()
 
     def current_point_label(self) -> str | None:
-        # Published parameters exist only while a saved point is selected.
         parameters = self._context.get_session_env().parameters
-        return None if parameters is None else parameters.target.point
+        target = None if parameters is None else parameters.target
+        return None if target is None else target.point
 
     def list_points(self, *, refresh: bool = False) -> tuple[WorkingPointInfo, ...]:
         return self._context.list_points(refresh=refresh)

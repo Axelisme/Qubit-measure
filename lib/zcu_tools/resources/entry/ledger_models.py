@@ -219,12 +219,11 @@ class AcceptedPayload(_LedgerModel):
 class ImportPayload(_LedgerModel):
     """Historical evidence copied from another entry into a local import event.
 
-    source_entry_id and source_event_id are UUIDs. source_event_json is the exact
+    source_event_id is the historical event UUID. source_event_json is the exact
     original JSON line without LF. source_record is the original optional record
     reference, never a query path. Only the outer event.record is queried.
     """
 
-    source_entry_id: _Identity
     source_event_id: _Identity
     source_event_json: StrictStr
     source_record: StrictStr | None = None
@@ -243,7 +242,7 @@ class LedgerEvent(_LedgerModel):
     """Immutable event envelope, validated with its corresponding typed payload.
 
     format is zcu.ledger; format_version is 1.x (append only accepts 1.0).
-    id and entry_id are UUIDs; kind selects acquired, saved, analyzed, accepted
+    id is an event UUID; kind selects acquired, saved, analyzed, accepted
     or import. at is an ISO 8601 UTC timestamp with Z or +00:00. origin identifies
     the frontend as gui, notebook or mcp. record is None on append,
     or records/<id>.json on disk. payload carries the kind-specific evidence.
@@ -257,7 +256,6 @@ class LedgerEvent(_LedgerModel):
     id: _Identity
     kind: Literal["acquired", "saved", "analyzed", "accepted", "import"]
     at: StrictStr
-    entry_id: _Identity
     origin: Origin
     record: StrictStr | None = None
     payload: (

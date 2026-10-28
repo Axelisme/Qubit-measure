@@ -2,7 +2,7 @@
 
 from datetime import datetime, timezone
 from pathlib import Path
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 import pytest
 from zcu_tools.resources.entry import (
@@ -40,7 +40,7 @@ def test_identity_does_not_resolve_component_kinds_or_publish_files(
     except UnknownKindError as error:
         pytest.fail(f"identity query must not require component registration: {error}")
     assert identity == EntryIdentity(
-        entry_id=UUID(_ID), created_at=datetime(2026, 10, 23, tzinfo=timezone.utc)
+        created_at=datetime(2026, 10, 23, tzinfo=timezone.utc)
     )
     assert {p: p.read_bytes() for p in setup.parent.rglob("*") if p.is_file()} == before
 
@@ -52,7 +52,6 @@ def test_event_snapshot_does_not_resolve_components_or_publish_files(
     records.mkdir()
     event = LedgerEvent(
         id=str(uuid4()),
-        entry_id=_ID,
         kind="acquired",
         at="2026-10-23T01:00:00Z",
         origin="gui",
@@ -63,7 +62,7 @@ def test_event_snapshot_does_not_resolve_components_or_publish_files(
             roles={"qubit": "Q1"},
         ),
     )
-    RecordsLedger(records, entry_id=_ID).append(event)
+    RecordsLedger(records).append(event)
     for lock in records.glob("*.lock"):
         lock.unlink()
     before = {p: p.read_bytes() for p in setup.parent.rglob("*") if p.is_file()}
@@ -110,11 +109,9 @@ def test_event_snapshot_rejects_redirected_storage(setup: Path, redirect: str) -
         moved.rename(source)
 
 
-@pytest.mark.parametrize(
-    "field,bad", [("entry_id", "bad-id"), ("created_at", "2026-10-23")]
-)
+@pytest.mark.parametrize("field,bad", [("created_at", "2026-10-23")])
 def test_identity_rejects_invalid_identity(setup: Path, field: str, bad: str) -> None:
-    valid = _ID if field == "entry_id" else "2026-10-23T00:00:00Z"
+    valid = "2026-10-23T00:00:00Z"
     setup.write_text(
         setup.read_text(encoding="utf-8").replace(valid, bad), encoding="utf-8"
     )

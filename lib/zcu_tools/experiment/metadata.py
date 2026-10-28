@@ -9,7 +9,6 @@ from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Annotated, Literal
-from uuid import UUID
 
 from pydantic import (
     BaseModel,
@@ -72,14 +71,14 @@ class ParameterSnapshot(BaseModel):
 class RunSnapshot:
     """Historical entry state, never a live entry or hardware reference.
 
-    entry_id identifies the entry; point is the optional work-point label.
+    entry_name is the recorded folder name, or None when unknown.
+    point is the optional work-point label.
     roles maps aliases to scalar names
     or ordered name lists. Lists preserve acquisition order, not tone indexes.
     Writers never refresh these values from a live entry. Python and JSON
     serialization copy roles into a detached dict, including read-only mappings.
     """
 
-    entry_id: UUID
     entry_name: str | None = None
     point: str | None
     roles: Annotated[
@@ -90,7 +89,7 @@ class RunSnapshot:
     def to_labber_snapshot(self) -> JsonObject:
         """Return historical point and roles for a portable Labber comment.
 
-        Omit entry_id; native metadata retains the complete snapshot.
+        Native metadata also retains the recorded entry name.
         Do not refresh aliases or resolve names from current entry state.
         """
         return TypeAdapter(JsonObject).validate_python(

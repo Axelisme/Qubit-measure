@@ -41,7 +41,6 @@ def foreign_recorded_point(
         id=str(uuid4()),
         kind="accepted",
         at="2026-10-06T02:00:00Z",
-        entry_id=foreign.entry_id,
         origin="gui",
         payload=AcceptedPayload(
             writes=(
@@ -278,7 +277,6 @@ def test_foreign_source_failure_does_not_publish_destination_or_modify_source(
     assert entry.list_points() == []
     assert source.read_bytes() == before
     assert ledger_path.read_bytes() == ledger_before
-    assert foreign.entry_id != entry.entry_id
 
 
 def test_clone_stale_view_reads_current_contents_at_source_location(
@@ -350,7 +348,6 @@ def test_clone_accepts_point_identity_with_different_database_root(
                 supported_version=PARAMETER_VERSION,
             ),
             source,
-            entry_id=source_entry.entry_id,
             result_root=results,
             database_root=other_output,
         )
@@ -408,7 +405,6 @@ def test_constructor_bound_view_clones_without_later_identity_registration(
     manual = PointView(
         store,
         source,
-        entry_id=foreign.entry_id,
         result_root=results,
         database_root=database,
     )

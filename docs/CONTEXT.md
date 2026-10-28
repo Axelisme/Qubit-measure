@@ -17,7 +17,7 @@ _Avoid_: experiment wrapper, GUI plugin
 ## 參數與環境
 
 **Result Entry**:
-一次降溫加一片 chip 的資料單位，包含工作點、參數與量測成果。名稱由使用者決定，不帶可解析的物理意義。同一 Result root 內以資料夾名稱判斷歸屬，UUID 只偵測已開啟的 setup 被替換。
+一次降溫加一片 chip 的資料單位，包含工作點、參數與量測成果。名稱由使用者決定，不帶可解析的物理意義。同一 Result root 內以資料夾名稱判斷歸屬，不使用 entry UUID。
 _Avoid_: project identity, chip/qubit scope
 
 **Working Point（工作點）**:

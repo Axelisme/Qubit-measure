@@ -7,12 +7,11 @@ import warnings
 from dataclasses import dataclass, replace
 from pathlib import Path
 from types import MappingProxyType
-from uuid import UUID
 
 import numpy as np
 import pytest
 import zcu_tools.experiment as experiment
-from pydantic import TypeAdapter
+from pydantic import JsonValue, TypeAdapter
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.datafile import DataVariable, JsonObject, load, save
 from zcu_tools.experiment.native_persistence import read_run_metadata
@@ -29,7 +28,7 @@ def historical_metadata(
         finished_at="2026-10-06T01:00:02Z",
         completion="unknown",
         snapshot=experiment.RunSnapshot(
-            entry_id=UUID("12345678-1234-5678-1234-567812345678"),
+            entry_name="entry",
             point="sweet",
             roles={"qubit": "Q1"},
         ),
@@ -121,9 +120,25 @@ def test_run_identity_rejects_other_strings(entry: str, run_id: str) -> None:
         validate(run_id)
 
 
+@pytest.mark.parametrize("legacy", [None, "not-a-uuid", {"malformed": [1]}])
+def test_historical_snapshot_uses_only_recorded_names(legacy: JsonValue) -> None:
+    document: JsonObject = {
+        "entry_name": "recorded",
+        "point": "sweet",
+        "roles": {"qubit": "Q1"},
+    }
+    historical = dict(document)
+    if legacy is not None:
+        historical["entry_id"] = legacy
+    adapter = TypeAdapter(experiment.RunSnapshot)
+    restored = adapter.validate_python(historical)
+    assert restored.entry_name == "recorded"
+    assert adapter.dump_python(restored, mode="json") == document
+
+
 def test_readonly_snapshot_roles_serialize_without_warnings() -> None:
     snapshot = experiment.RunSnapshot(
-        entry_id=UUID("12345678-1234-5678-1234-567812345678"),
+        entry_name="entry",
         point="sweet",
         roles=MappingProxyType({"qubit": "Q1"}),
     )
@@ -136,12 +151,11 @@ def test_readonly_snapshot_roles_serialize_without_warnings() -> None:
 
     assert not caught, [str(warning.message) for warning in caught]
     expected_json = {
-        "entry_name": None,
-        "entry_id": "12345678-1234-5678-1234-567812345678",
+        "entry_name": "entry",
         "point": "sweet",
         "roles": {"qubit": "Q1"},
     }
-    assert python_doc == {**expected_json, "entry_id": snapshot.entry_id}
+    assert python_doc == expected_json
     assert json_doc == expected_json
     assert json.loads(json_bytes) == expected_json
     python_doc["roles"]["qubit"] = "renamed in Python output"

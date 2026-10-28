@@ -20,9 +20,8 @@ if TYPE_CHECKING:
 
 
 class PointEntry(TypedDict):
-    """Opened entry: UUID, directory name and exact absolute owner roots."""
+    """Opened entry: directory name and exact absolute owner roots."""
 
-    entry_id: str
     name: str
     result_path: str
     database_path: str
@@ -120,7 +119,6 @@ def h_entry_open(
 
 def _entry_projection(info: EntryInfo) -> PointEntry:
     return {
-        "entry_id": info.entry_id,
         "name": info.name,
         "result_path": str(info.result_path),
         "database_path": str(info.database_path),

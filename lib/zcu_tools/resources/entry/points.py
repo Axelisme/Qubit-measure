@@ -42,7 +42,6 @@ class PointView:
         store: DocumentStore[PointDocument],
         source: Path,
         *,
-        entry_id: str,
         result_root: Path,
         database_root: Path,
     ) -> None:
@@ -53,8 +52,8 @@ class PointView:
         ResultEntry supplies these dependencies; construction does not reload or
         revalidate field values. Binding rejects components shadowing any public
         SetupView/PointView/EditView member with ValueError naming the member.
-        entry_id is the owning entry's immutable UUID. result_root and database_root
-        are resolved once. Clone identity binds source, entry_id and result_root,
+        result_root and database_root are resolved once.
+        Clone identity binds source and result_root,
         including for directly constructed views. database_root only configures
         Save output, not clone identity. Cloning requires a matching Result root
         and reloads the published source, not this cached snapshot. No later
@@ -69,7 +68,6 @@ class PointView:
         self._source = source
         origin = _point_origin.PointOrigin(
             source=source,
-            entry_id=entry_id,
             result_root=result_root.resolve(),
             database_root=database_root.resolve(),
         )

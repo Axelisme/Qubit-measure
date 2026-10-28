@@ -6,7 +6,6 @@ from copy import deepcopy
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import ClassVar, Literal, Self, get_args, get_origin, override
-from uuid import UUID
 
 from pydantic import (
     BaseModel,
@@ -16,6 +15,7 @@ from pydantic import (
     RootModel,
     TypeAdapter,
     field_validator,
+    model_validator,
 )
 from pydantic_core import (
     PydanticUndefined,
@@ -76,19 +76,24 @@ def validate_component_name(name: str, *, source: Path | None = None) -> None:
         )
 
 
+def _ignore_legacy_identity(value: object) -> object:
+    if isinstance(value, Mapping):
+        return {key: item for key, item in value.items() if key != "entry_id"}
+    return value
+
+
 class SetupGeneral(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    entry_id: str
     created_at: str
     description: str | None = None
     ext: YamlMap = Field(default_factory=dict)
 
-    @field_validator("entry_id")
+    @model_validator(mode="before")
     @classmethod
-    def validate_entry_id(cls, value: str) -> str:
-        UUID(value)
-        return value
+    def ignore_legacy_identity(cls, value: object) -> object:
+        """Discard obsolete entry identity without interpreting its value."""
+        return _ignore_legacy_identity(value)
 
     @field_validator("created_at")
     @classmethod
@@ -101,7 +106,7 @@ class SetupGeneral(BaseModel):
 class PointGeneral(BaseModel):
     """Independent metadata copied from the seed setup or source point.
 
-    entry_id optionally retains the seed entry UUID; it is not point identity.
+    Legacy entry_id is ignored and omitted from explicit writes.
     created_at is renewed on creation, as an ISO-8601 UTC timestamp.
     description is optional human-readable text; None means no description.
     ext is a YAML mapping, empty by default, with no unit conversion.
@@ -111,17 +116,15 @@ class PointGeneral(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    entry_id: str | None = None
     created_at: str
     description: str | None = None
     ext: YamlMap = Field(default_factory=dict)
 
-    @field_validator("entry_id")
+    @model_validator(mode="before")
     @classmethod
-    def validate_entry_id(cls, value: str | None) -> str | None:
-        if value is not None:
-            SetupGeneral.validate_entry_id(value)
-        return value
+    def ignore_legacy_identity(cls, value: object) -> object:
+        """Discard obsolete entry identity without interpreting its value."""
+        return _ignore_legacy_identity(value)
 
     @field_validator("created_at")
     @classmethod
@@ -541,7 +544,7 @@ class ParameterContent(RootModel[YamlValue]):
         try:
             validated = SchemaValidator(schema).validate_python(deepcopy(node))
         except ValueError as exc:
-            raise ValueError(f"{path}: {exc}") from exc
+            raise ValueError(f"{self._source}: {path}: {exc}") from exc
         serialized = SchemaSerializer(schema).to_python(validated, mode="python")
         return TypeAdapter(YamlValue).validate_python(serialized)
 

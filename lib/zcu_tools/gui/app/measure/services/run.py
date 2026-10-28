@@ -229,7 +229,6 @@ class RunService:
                 id=str(uuid4()),
                 kind="acquired",
                 at=metadata.finished_at,
-                entry_id=str(metadata.snapshot.entry_id),
                 origin=op.origin.origin,
                 payload=AcquiredPayload(
                     run_id=metadata.run_id,

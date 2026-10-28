@@ -294,6 +294,11 @@ class ComponentTreeWidget(QWidget):
                 self._control.set_setup_parameter(path, value)
             else:
                 point = target or self._control.read_context().target
+                if point is None:
+                    raise FailedPreconditionError(
+                        "Select a working point before editing parameters",
+                        reason_code="no_context",
+                    )
                 self._control.set_parameter(point, path, value)
         except Exception as exc:
             logger.exception("Parameter edit failed")

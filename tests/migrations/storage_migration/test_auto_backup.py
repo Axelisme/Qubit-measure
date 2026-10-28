@@ -580,7 +580,7 @@ def test_initial_manifest_interruption_reruns_with_fixed_identity_and_future_fie
 ) -> None:
     assert interrupted_initialization.is_file(), "ownership must precede entry writes"
     raw = json.loads(interrupted_initialization.read_text())
-    identity = raw["manifest"]["identity"]["entry_id"]
+
     created_at = raw["created_at"]
     report_path = raw["manifest"]["report_path"]
     raw["future"] = {"opaque": [1, "retained"]}
@@ -591,7 +591,7 @@ def test_initial_manifest_interruption_reruns_with_fixed_identity_and_future_fie
         result_root=request_data.results_root,
         database_root=request_data.database_root,
     )
-    assert entry.entry_id == identity
+
     assert snapshot(entry.setup).general.created_at == created_at
     manifest = json.loads(
         (entry.result_path / "records/migration-state.json").read_text()
@@ -615,7 +615,7 @@ def test_initialization_windows_resume_without_an_explicit_resume_flag(
     def fail_mkdir(
         path: Path, mode: int = 0o777, parents: bool = False, exist_ok: bool = False
     ) -> None:
-        if window == "before-entry" and path.name.startswith(".migration-init-"):
+        if window == "before-entry" and path.name.startswith(".migration-operation-"):
             raise OSError("initialization interrupted")
         mkdir(path, mode=mode, parents=parents, exist_ok=exist_ok)
 
@@ -643,7 +643,7 @@ def test_initialization_windows_resume_without_an_explicit_resume_flag(
         result_root=request_data.results_root,
         database_root=request_data.database_root,
     )
-    assert entry.entry_id == raw["manifest"]["identity"]["entry_id"]
+
     assert snapshot(entry.setup).general.created_at == raw["created_at"]
     assert not (request_data.results_root / raw["temporary_name"]).exists()
     assert not (request_data.database_root / raw["temporary_name"]).exists()

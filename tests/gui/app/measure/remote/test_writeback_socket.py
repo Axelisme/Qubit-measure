@@ -3,7 +3,6 @@
 from dataclasses import replace
 from pathlib import Path
 from socket import socket
-from uuid import UUID
 
 import numpy as np
 import pytest
@@ -26,6 +25,7 @@ from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 from zcu_tools.gui.app.measure.writeback import WritebackEdit
 from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_types import CommandOrigin, PointCreateRequest
+from zcu_tools.gui.session.parameter_capture import capture_parameters
 from zcu_tools.resources.entry import AcceptedWrite, RoleSpec
 
 from tests.experiment._saving_support import SavingCfg, SavingResult
@@ -36,6 +36,7 @@ from tests.gui.app.measure._native_save_support import (
     PaneParams,
     PaneSummary,
 )
+from tests.gui.app.measure._record_support import require_target
 from tests.gui.app.measure._synthetic import (
     MODULE_PROPOSAL_TARGET,
     MODULE_PROPOSAL_WAVEFORM,
@@ -147,7 +148,7 @@ def test_complete_md_values_survive_preview_and_write_socket(
     fx = Fixture(active_label="ctx001", project_root=str(tmp_path / "project"))
     fx.registry.register("proposals", definition)
     context = fx.ctrl.context_control
-    target = context.read_context().target
+    target = require_target(context.read_context())
     if isinstance(before, complex):
         admitted = AcceptedWrite.model_validate(
             {"path": "general.ext.value", "value": before}
@@ -215,7 +216,7 @@ def module_fixture(tmp_path, qapp, point_models, point_registry_guard):
     fx = Fixture(active_label="ctx001", project_root=str(tmp_path / "project"))
     fx.registry.register("synthetic/module_writeback", ModuleProposalAdapter)
     context = fx.ctrl.context_control
-    target = context.read_context().target
+    target = require_target(context.read_context())
     context.add_component("Q1", "fake/drive/a", {})
     context.set_waveform(target, MODULE_PROPOSAL_WAVEFORM, ConstWaveformCfg(length=0.1))
     context.set_module(target, MODULE_PROPOSAL_TARGET, _stored_pulse())
@@ -307,8 +308,8 @@ def test_live_preview_and_explicit_apply_preserve_other_gui_selection(
     fx = Fixture(active_label="ctx001", project_root=str(tmp_path / "project"))
     fx.registry.register("proposals", definition)
     context = fx.ctrl.context_control
-    context.set_parameter(context.read_context().target, "general.ext.a", 1.0)
-    context.set_parameter(context.read_context().target, "general.ext.b", 2.0)
+    context.set_parameter(require_target(context.read_context()), "general.ext.a", 1.0)
+    context.set_parameter(require_target(context.read_context()), "general.ext.b", 2.0)
     fx.start()
     sock = open_client(fx.service.port)
     try:
@@ -458,7 +459,7 @@ def test_native_preview_and_window_keep_captured_path_and_stderr(
         application, controller.run_analyze_control.analyze(tab, SampleParams())
     )
     assert analyzed["status"] == "finished", analyzed
-    context.set_parameter(captured.target, "Q1.ext.value", 19.9)
+    context.set_parameter(require_target(captured), "Q1.ext.value", 19.9)
     application.result("point.new", {"label": "b"})
     context.set_alias_rows((AliasRow("driver", "Q2"),))
     active = context.read_context().target
@@ -475,7 +476,7 @@ def test_native_preview_and_window_keep_captured_path_and_stderr(
         assert item["target_name"] == "$driver.ext.value"
         assert item["actual_path"] == "Q1.ext.value"
         assert item["stderr"] == 0.18
-        assert item["current"] == 19.9
+        assert item["current"] == 19.8
         assert item["proposed"] == 20.09
         other = items[1]
         assert isinstance(other, dict)
@@ -487,7 +488,7 @@ def test_native_preview_and_window_keep_captured_path_and_stderr(
         texts = [label.text() for label in window.findChildren(QLabel)]
         assert any("Q1.ext.value" in text for text in texts)
         assert any("±" in text and "0.18" in text for text in texts)
-        assert any("19.9" in text for text in texts)
+        assert any("19.8" in text for text in texts)
         assert context.read_context().target == active
         assert context.get_alias_rows() == (AliasRow("driver", "Q2"),)
     finally:
@@ -535,7 +536,7 @@ def coupler_load_application(qapp, tmp_path: Path, point_models, point_registry_
     fx.registry.register("captured-coupler", CapturedCouplerAdapter)
     context = fx.ctrl.context_control
     context.add_component("coupler", "fake/drive/a", {"rate": 0.4})
-    target = context.read_context().target
+    target = require_target(context.read_context())
     entry_info = context.get_entry_info()
     assert entry_info is not None
     context.set_waveform(target, MODULE_PROPOSAL_WAVEFORM, ConstWaveformCfg(length=0.1))
@@ -548,10 +549,11 @@ def coupler_load_application(qapp, tmp_path: Path, point_models, point_registry_
         update={
             "snapshot": replace(
                 metadata_from_container(stored).snapshot,
-                entry_id=UUID(entry_info.entry_id),
+                entry_name=entry_info.name,
                 point=target.point,
                 roles={"coupler": "coupler"},
-            )
+            ),
+            "parameter_snapshot": capture_parameters(context.read_context()),
         }
     )
     save(
@@ -586,6 +588,12 @@ def test_registered_source_only_load_analyze_preview_keeps_concrete_collision_ta
         PointCreateRequest("other", "", CommandOrigin("gui"))
     )
     context.add_component("Q2", "fake/drive/a", {"rate": 9.0})
+    context.add_component("coupler", "fake/drive/a", {"rate": 0.9})
+    context.set_module(
+        require_target(context.read_context()),
+        "coupler.pulses.cz_f2",
+        _stored_pulse(gain=0.8),
+    )
     context.set_alias_rows((AliasRow("coupler", "Q2"),))
     active = context.read_context().target
     started = call(client, "tab.analyze", {"tab_id": tab})
@@ -597,9 +605,9 @@ def test_registered_source_only_load_analyze_preview_keeps_concrete_collision_ta
     assert preview["ok"], preview
     pulse, rate = preview["result"]["items"]
     assert pulse["actual_path"] == "coupler.pulses.cz_f2"
-    assert pulse["current"]["gain"] == 0.6
+    assert pulse["current"]["gain"] == 0.8
     assert pulse["proposed"]["gain"] == 0.4
     assert rate["actual_path"] == "coupler.rate"
-    assert (rate["current"], rate["proposed"]) == (0.7, 0.4)
+    assert (rate["current"], rate["proposed"]) == (0.9, 0.4)
     assert context.read_context().target == active
     assert context.get_alias_rows() == (AliasRow("coupler", "Q2"),)

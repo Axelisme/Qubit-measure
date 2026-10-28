@@ -63,7 +63,6 @@ from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from zcu_tools.resources.entry import (
     AcceptedPayload,
     ResultEntry,
-    RoleResolutionError,
     SavedPayload,
 )
 
@@ -167,7 +166,8 @@ def role_load_session(
             update={
                 "snapshot": replace(
                     session.metadata.snapshot, roles=captured.roles.names
-                )
+                ),
+                "parameter_snapshot": capture_parameters(captured),
             }
         )
         commit_run(
@@ -320,12 +320,12 @@ def test_native_load_analysis_and_writeback_keep_historical_point_aliases_and_id
 
     loaded = tab.run.parameters
     assert loaded is not None
-    assert loaded.target == target
+    assert loaded.target is None
     assert loaded.roles is not None and loaded.roles.names == {
         "source_qubit": "Q1",
         "custom": "Q2",
     }
-    assert tab.run.storage is not None and tab.run.storage.point == "other"
+    assert tab.run.storage is None
     assert control.read_context().target == other
     control.set_parameter(target, "Q1.rate", 10.0)
     seen: list[AnalyzeRequest[RunRecord[SavingCfg, SavingResult], object]] = []
@@ -363,31 +363,32 @@ def test_native_load_analysis_and_writeback_keep_historical_point_aliases_and_id
     analysis.start_analyze("tab", PaneParams(), plots=Plots(NonPresentingHost()))
     assert session.background.quiesce()
     assert len(seen) == 1 and seen[0].parameters is loaded
-    assert loaded.value("$source_qubit.rate") == 7.0
+    assert loaded.value("$source_qubit.rate") == 1.0
     draft = tab.analysis.writeback_draft
     assert isinstance(draft, WritebackDraft)
     assert draft.parameters is loaded
     assert draft.run_id == session.metadata.run_id
-    assert writeback.preview_values(draft)["param-1"].current == 10.0
+    assert writeback.preview_values(draft)["param-1"].current == 40.0
     assert writeback.write_draft(
         draft,
         (WritebackEdit("param-1"),),
         origin=CommandOrigin("mcp"),
-    ) == [WritebackWritten("param-1", "parameter", "Q1.rate", 10.0, 12.0)]
+    ) == [WritebackWritten("param-1", "parameter", "Q1.rate", 40.0, 12.0)]
     event = session.entry.ledger.events()[-1]
     assert (
         isinstance(event.payload, AcceptedPayload)
         and event.payload.run_id == session.metadata.run_id
     )
     assert control.read_context().target == other
+    assert control.read_context().value("Q1.rate") == 12.0
     assert control.read_context().value("Q2.rate") == 50.0
-    assert control.read_target(target).value("Q1.rate") == 12.0
+    assert control.read_target(target).value("Q1.rate") == 10.0
     assert session.context.get_alias_rows() == rows
     writeback.teardown_draft(draft)
 
 
 @pytest.mark.parametrize("fault", ["missing", "corrupt"])
-def test_native_load_missing_source_is_reported_but_corruption_preserves_previous_result(
+def test_native_load_ignores_missing_or_corrupted_external_source(
     role_load_session: NativeSaveSession,
     fault: str,
 ) -> None:
@@ -408,7 +409,6 @@ def test_native_load_missing_source_is_reported_but_corruption_preserves_previou
         ),
     )
     session.save()
-    previous = tab.run
     events = session.entry.ledger.events()
     service = LoadService(session.state)
     if fault == "corrupt":
@@ -416,21 +416,15 @@ def test_native_load_missing_source_is_reported_but_corruption_preserves_previou
             session.entry.result_path / "points" / str(history.point) / "point.yaml"
         )
         source.write_text("format: invalid\\n", encoding="utf-8")
-        with pytest.raises(ValueError, match="format"):
-            service.load_result("tab", str(session.native_data_path))
-        assert tab.run is previous
-    else:
-        outcome = service.load_result("tab", str(session.native_data_path))
-        assert "Historical point 'missing' is unavailable" in str(
-            outcome.analysis_source_issue
-        )
-        assert tab.run.analysis_source_issue == outcome.analysis_source_issue
-        assert tab.run.parameters is None
-        assert require_metadata(tab.run).snapshot == broken
+    outcome = service.load_result("tab", str(session.native_data_path))
+    assert outcome.analysis_source_issue is None
+    assert tab.run.parameters is not None and tab.run.parameters.target is None
+    assert tab.run.parameters.value("$source_qubit.rate") == 1.0
+    assert require_metadata(tab.run).snapshot == broken
     assert session.entry.ledger.events() == events
 
 
-def test_native_load_keeps_unknown_historical_name_until_component_field_read(
+def test_native_load_uses_parameter_snapshot_names_not_history_summary(
     role_load_session: NativeSaveSession,
 ) -> None:
     session = role_load_session
@@ -463,14 +457,11 @@ def test_native_load_keeps_unknown_historical_name_until_component_field_read(
     loaded = tab.run.parameters
     assert loaded is not None and loaded is not previous.parameters
     assert require_metadata(tab.run) == saved_metadata
-    assert loaded.roles is not None and loaded.roles.names == history.roles
-    assert loaded.value("$source_qubit") == "missing"
-    with pytest.raises(RoleResolutionError) as error:
-        loaded.value("$source_qubit.rate")
-    assert error.value.role == "missing"
+    assert loaded.value("$source_qubit") == "Q1"
+    assert loaded.value("$source_qubit.rate") == 1.0
     assert previous.parameters is not None
     assert previous.parameters.value("$source_qubit.rate") == 1.0
-    assert loaded.value("Q1.rate") == 7.0
+    assert loaded.value("Q1.rate") == 1.0
     assert session.context.get_alias_rows() == rows
     assert session.entry.ledger.events() == events
 
@@ -487,22 +478,34 @@ def assert_empty_writeback_admission(
         assert caught.value.reason_code == "no_context"
 
 
-@pytest.mark.parametrize("source", ["foreign", "empty", "pointless"])
-def test_native_load_without_readable_source_allows_context_free_analysis(
+@pytest.fixture
+def context_free_load_session(
     role_load_session: NativeSaveSession,
     tmp_path: Path,
     source: str,
-) -> None:
+) -> NativeSaveSession:
+    """Own a legacy file without a parameter snapshot and independent live selection."""
     session = role_load_session
     tab = session.state.get_tab("tab")
-    path = session.native_data_path
+    session.metadata = session.metadata.model_copy(update={"parameter_snapshot": None})
+    commit_run(
+        session.state,
+        "tab",
+        RunPaneState(
+            result=replace(require_record(tab.run), metadata=session.metadata),
+            storage=tab.run.storage,
+            parameters=tab.run.parameters,
+        ),
+    )
+    session.save()
     if source == "foreign":
         other = ResultEntry.create(
             "foreign",
             result_root=tmp_path / "Foreign",
             database_root=tmp_path / "ForeignDB",
         )
-        other.new_point("foreign-point")
+        point = other.new_point("foreign-point")
+        point.add_component("Q1", kind="run-source/qubit", rate=5.0)
         session.context.install_entry(other)
         ContextControlFacet(context=session.context).use_point(
             PointUseRequest("foreign-point")
@@ -529,31 +532,37 @@ def test_native_load_without_readable_source_allows_context_free_analysis(
             ),
         )
         session.save()
+    return session
+
+
+@pytest.mark.parametrize("source", ["foreign", "empty", "pointless"])
+def test_native_load_without_readable_source_allows_context_free_analysis(
+    context_free_load_session: NativeSaveSession,
+    source: str,
+) -> None:
+    session = context_free_load_session
+    tab = session.state.get_tab("tab")
+    path = session.native_data_path
     control = ContextControlFacet(context=session.context)
     writeback = WritebackService(control, arb_names=lambda: ())
     commands, wb = _native_controls(session, writeback, control)
     loaded = commands.load_tab_result("tab", str(path))
     assert loaded.has_analyze_params
-    assert (
-        loaded.analysis_source_issue
-        == {
-            "foreign": "Historical entry differs from the opened entry",
-            "empty": "No active context is available",
-            "pointless": "Historical metadata has no point",
-        }[source]
-    )
+    assert loaded.analysis_source_issue is None
     assert tab.run.analysis_source_issue == loaded.analysis_source_issue
     assert require_record(tab.run).metadata is not None
     assert require_metadata(tab.run).run_id == session.metadata.run_id
-    assert tab.run.parameters is None
-    if source == "empty":
-        assert tab.run.storage is None
+    assert tab.run.parameters is not None and tab.run.parameters.target is None
+    assert tab.run.storage is None
     commands.analyze("tab", PaneParams())
     assert session.background.quiesce()
     assert isinstance(tab.analysis.result, PaneSummary)
     draft = tab.analysis.writeback_draft
     assert isinstance(draft, WritebackDraft)
-    assert draft.parameters is None and draft.run_id == session.metadata.run_id
+    assert (
+        draft.parameters is tab.run.parameters
+        and draft.run_id == session.metadata.run_id
+    )
     assert draft.items == ()
     events = session.entry.ledger.events()
     assert_empty_writeback_admission(wb, selected=source != "empty")
@@ -568,18 +577,23 @@ def test_native_load_without_readable_source_allows_context_free_analysis(
     tab.analysis.writeback_draft = rejected
     selection = control.get_source_binding()
     try:
-        message = "working point" if source == "empty" else "captured context"
-        with pytest.raises(FailedPreconditionError, match=message):
+        if source == "empty":
+            with pytest.raises(FailedPreconditionError, match="working point"):
+                wb.apply_writeback_for_pane("tab", "analysis")
+            assert session.entry.ledger.events() == events
+            assert not any(
+                wb.get_writeback_applied_for_pane("tab", "analysis").values()
+            )
+        else:
             wb.apply_writeback_for_pane("tab", "analysis")
-        assert session.entry.ledger.events() == events
+            assert control.read_context().value("Q1.rate") == 99.0
         assert control.get_source_binding() == selection
         assert rejected.is_active
-        assert not any(wb.get_writeback_applied_for_pane("tab", "analysis").values())
     finally:
         writeback.teardown_draft(rejected)
 
 
-def test_public_writeback_rejects_foreign_entry_without_acceptance_or_write(
+def test_public_writeback_targets_current_entry_not_historical_source(
     role_load_session: NativeSaveSession, tmp_path: Path
 ) -> None:
     session = role_load_session
@@ -610,21 +624,23 @@ def test_public_writeback_rejects_foreign_entry_without_acceptance_or_write(
         result_root=tmp_path / "Foreign",
         database_root=tmp_path / "ForeignDB",
     )
-    other.new_point("other")
+    selected = other.new_point("other")
+    selected.add_component("Q1", kind="run-source/qubit", rate=5.0)
     session.context.install_entry(other)
     control.use_point(PointUseRequest("other"))
+    session.context.set_alias_rows((AliasRow("source_qubit", "Q1"),))
     original_events = session.entry.ledger.events()
     foreign_events = other.ledger.events()
     selection = control.get_source_binding()
     try:
-        with pytest.raises(FailedPreconditionError) as caught:
-            wb.apply_writeback_for_pane("tab", "analysis")
-        assert caught.value.reason_code == "entry_not_open"
+        wb.apply_writeback_for_pane("tab", "analysis")
+        assert control.read_context().value("Q1.rate") == 99.0
         assert session.entry.ledger.events() == original_events
-        assert other.ledger.events() == foreign_events
+        assert other.ledger.events()[:-1] == foreign_events
+        assert other.ledger.events()[-1].kind == "accepted"
         assert control.get_source_binding() == selection
         assert draft.is_active
-        assert not any(wb.get_writeback_applied_for_pane("tab", "analysis").values())
+        assert all(wb.get_writeback_applied_for_pane("tab", "analysis").values())
         session.context.install_entry(session.entry)
         control.use_point(PointUseRequest(parameters.target.point))
         assert control.read_context().lookup("Q1.rate").value == 7.0
@@ -736,7 +752,7 @@ def test_loaded_same_entry_different_point_resaves_original_run(
                 if output.format == "png"
                 and output.path.is_relative_to(session.entry.result_path)
             )
-            assert len(planned_copies) == 2
+            assert not planned_copies
             assert all(
                 path.parent
                 == session.entry.result_path
@@ -763,22 +779,13 @@ def test_loaded_same_entry_different_point_resaves_original_run(
         saved = metadata_from_container(load(source))
         assert require_metadata(tab.run) == saved
         assert tab.run.confirmed_run_id == stored.run_id
-        assert (
-            tab.run.parameters is not None
-            and tab.run.parameters.target
-            == SavedPoint(
-                entry_name=session.entry.result_path.name,
-                point=stored.snapshot.point,
-            )
-        )
-        assert (
-            tab.run.storage is not None and tab.run.storage.point == "destination-point"
-        )
+        assert tab.run.parameters is not None and tab.run.parameters.target is None
+        assert tab.run.storage is None
         events = session.entry.ledger.events()
         assert events[:-1] == previous_events
         event = events[-1]
         assert event.kind == "saved"
-        assert event.entry_id == str(stored.snapshot.entry_id)
+
         assert isinstance(event.payload, SavedPayload)
         assert event.payload.run_id == stored.run_id
         record = session.entry.ledger.get(event.id).record
@@ -792,12 +799,16 @@ def test_loaded_same_entry_different_point_resaves_original_run(
                 if item.output.format == "png"
                 and item.output.path.is_relative_to(session.entry.result_path)
             ]
-            assert tuple(copies) == planned_copies
+            assert len(copies) == 2
+            assert all(
+                path.parent == session.entry.result_path / "points" / "p" / "figures"
+                for path in copies
+            )
             assert all(path.is_file() for path in copies)
 
 
 @pytest.mark.parametrize("save_all", [False, True])
-def test_loaded_foreign_origin_saves_with_captured_storage_and_historical_metadata(
+def test_loaded_foreign_selection_saves_recorded_names_and_historical_metadata(
     tmp_path: Path,
     qapp: QApplication,
     save_all: bool,
@@ -820,10 +831,8 @@ def test_loaded_foreign_origin_saves_with_captured_storage_and_historical_metada
         service = LoadService(session.state)
         service.load_result("tab", str(source))
         assert require_metadata(tab.run) == metadata_from_container(load(source))
-        assert tab.run.parameters is None
-        assert tab.run.storage is not None
-        assert tab.run.storage.entry_id == captured.entry_id
-        source_bytes = source.read_bytes()
+        assert tab.run.parameters is not None and tab.run.parameters.target is None
+        assert tab.run.storage is None
         source_events = session.entry.ledger.events()
         history = require_metadata(tab.run)
         if save_all:
@@ -841,19 +850,19 @@ def test_loaded_foreign_origin_saves_with_captured_storage_and_historical_metada
 
         assert report.run_id == history.run_id
         assert all(item.status == "saved" for item in report.outputs)
-        assert {item.output.path for item in report.outputs} == planned_paths
+        assert not planned_paths
         saved_data = next(
             item.output.path
             for item in report.outputs
             if item.output.format == "data_h5"
         )
-        assert saved_data.is_relative_to(captured.database_path)
+        assert saved_data == source
         assert metadata_from_container(load(saved_data)) == history
         assert require_metadata(tab.run) == history
-        assert tab.run.storage == captured
-        assert source.read_bytes() == source_bytes
-        assert session.entry.ledger.events() == source_events
-        event = destination.ledger.events()[-1]
+        assert tab.run.storage is None
+        assert session.entry.ledger.events()[:-1] == source_events
+        assert destination.ledger.events() == ()
+        event = session.entry.ledger.events()[-1]
         assert event.kind == "saved"
         assert isinstance(event.payload, SavedPayload)
         assert event.payload.run_id == history.run_id
@@ -861,7 +870,7 @@ def test_loaded_foreign_origin_saves_with_captured_storage_and_historical_metada
 
 
 @pytest.mark.parametrize("save_all", [False, True])
-def test_unselected_entry_load_retains_history_and_save_rejects_without_writes(
+def test_unselected_entry_load_and_save_use_recorded_history(
     tmp_path: Path, qapp: QApplication, save_all: bool
 ) -> None:
     with native_save_session(tmp_path, qapp) as session:
@@ -886,27 +895,43 @@ def test_unselected_entry_load_retains_history_and_save_rejects_without_writes(
         assert outcome.result_type == "RunRecord"
         assert isinstance(require_record(tab.run), RunRecord)
         metadata = require_record(tab.run).metadata
-        assert metadata is not None and metadata == metadata_from_container(stored)
+        assert metadata is not None and metadata.project() == metadata_from_container(
+            stored
+        )
         assert tab.run.source_path == str(path)
         assert tab.run.confirmed_run_id is None
-        assert tab.run.parameters is None
-        assert str(metadata.snapshot.entry_id) == session.entry.entry_id
+        assert tab.run.parameters is not None and tab.run.parameters.target is None
+        assert metadata.snapshot.entry_name == session.entry.result_path.name
         assert metadata.snapshot.point == "p"
         assert tab.run.storage is None
         assert tab.analysis.result is None
         assert tab.post_analysis.result is None
-        assert tab.artifacts.snapshot() == ()
-        # Later active selection cannot fill this Load's missing storage.
-        control.use_point(PointUseRequest("p"))
-        save = session.save_artifacts if save_all else session.save
-        with pytest.raises(FailedPreconditionError):
-            save()
-        assert session.entry.ledger.events() == events
+        assert tab.artifacts.snapshot()
+        assert all(
+            not member.outputs
+            for section in tab.artifacts.snapshot()
+            for artifact in section.artifacts
+            for member in artifact.members
+        )
         assert {
             p.relative_to(tmp_path): p.read_bytes()
             for p in tmp_path.rglob("*")
             if p.is_file()
         } == before
+        control.use_point(PointUseRequest("p"))
+        save = session.save_artifacts if save_all else session.save
+        report = save()
+        assert all(item.status == "saved" for item in report.outputs)
+        assert (
+            next(
+                item.output.path
+                for item in report.outputs
+                if item.output.format == "data_h5"
+            )
+            == path
+        )
+        assert metadata_from_container(load(path)) == metadata_from_container(stored)
+        assert session.entry.ledger.events()[:-1] == events
 
 
 def test_native_experiment_mismatch_keeps_previous_result_and_history(

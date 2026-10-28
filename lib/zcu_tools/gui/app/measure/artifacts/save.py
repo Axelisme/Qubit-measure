@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from datetime import datetime
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from zcu_tools.experiment.artifacts import (
@@ -29,12 +30,17 @@ from zcu_tools.gui.app.measure.events.tab import (
 from zcu_tools.gui.app.measure.figure_export import render_save_figure_png
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.context_types import CommandOrigin
-from zcu_tools.resources.entry import ArtifactKey, SaveContext, SaveLayout
+from zcu_tools.resources.entry import (
+    ArtifactKey,
+    RunOutputBinding,
+    SaveContext,
+    SaveLayout,
+    bind_run_outputs,
+)
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.state import State
     from zcu_tools.gui.event_bus import BaseEventBus as EventBus
-    from zcu_tools.resources.entry import PointStorageBinding
 
 
 @dataclass(frozen=True)
@@ -42,7 +48,7 @@ class _SavePlan:
     artifacts: tuple[SaveArtifact, ...]
     layout: SaveLayout
     record: RunRecord[Any, Any]
-    storage: PointStorageBinding
+    outputs: RunOutputBinding
     origin: CommandOrigin
     comment: str
 
@@ -60,11 +66,19 @@ class SaveService:
         state: State,
         bus: EventBus,
         *,
+        result_root: Path,
+        database_root: Path,
         access: ExperimentAccess | None = None,
     ) -> None:
-        """Inject the State owner, publication bus and reload/shutdown entry gate."""
+        """Inject State, publication bus, current output roots and the catalog gate.
+
+        result_root and database_root are parent roots, not entry directories.
+        Save binds recorded names beneath them without consulting live points.
+        """
         self._state = state
         self._bus = bus
+        self._result_root = result_root
+        self._database_root = database_root
         self._access = access if access is not None else ExperimentAccess()
 
     def require_save_available(self, tab_id: str) -> None:
@@ -81,10 +95,10 @@ class SaveService:
     ) -> SaveReport:
         """Synchronously save native HDF5 and a fresh Labber file on the owner thread.
 
-        tab_id identifies an existing idle tab with historical storage/metadata.
+        tab_id identifies an existing idle tab with native metadata.
         comment=None retains its annotation; origin attributes this command.
         Missing evidence or busy raises FailedPreconditionError before mapping
-        or I/O. Historical entry identity does not restrict captured storage.
+        or I/O. Recorded names select outputs under the injected current roots.
         Retain the historical run_id and point for all
         output paths and the saved event, regardless of later global selections.
         Output failures appear in the complete report; ledger errors
@@ -107,9 +121,9 @@ class SaveService:
 
         tab_id identifies an existing tab. None selects all declarations, including
         Saved; explicit refs are ordered, unique and nonempty. Unknown refs,
-        missing storage/metadata or busy raise FailedPreconditionError before
-        mapping, I/O or annotation mutation. Historical entry identity does not
-        restrict captured storage. All selected outputs and the saved event use the
+        missing metadata or busy raise FailedPreconditionError before
+        mapping, I/O or annotation mutation. No live entry, point or storage
+        capability is required. All selected outputs and the saved event use the
         historical run_id and point, not the current global point.
         Invalid pane content raises TypeError/ValueError.
         comment=None retains the annotation. origin attributes this command.
@@ -131,7 +145,7 @@ class SaveService:
         comment: str | None,
         origin: CommandOrigin,
     ) -> _SavePlan:
-        record, metadata, storage = self._capture_source(tab_id)
+        record, metadata = self._capture_source(tab_id)
         tab = self._state.get_tab(tab_id)
         try:
             selected = tab.artifacts.select(refs)
@@ -149,13 +163,13 @@ class SaveService:
                 saved_at=saved_at,
             )
         )
-        layout = SaveLayout(
-            result_path=storage.result_path,
-            database_path=storage.database_path,
-            stem=stem,
+        outputs = bind_run_outputs(
+            result_root=self._result_root,
+            database_root=self._database_root,
+            entry_name=history.entry_name,
             point=history.point,
-            saved_at=saved_at,
         )
+        layout = outputs.layout(stem=stem, saved_at=saved_at)
         annotation = tab.save.comment if comment is None else comment
         captured: list[SaveArtifact] = []
         for artifact in selected:
@@ -187,11 +201,9 @@ class SaveService:
                         )
                     )
             captured.append(SaveArtifact(ref, tuple(members)))
-        return _SavePlan(tuple(captured), layout, record, storage, origin, annotation)
+        return _SavePlan(tuple(captured), layout, record, outputs, origin, annotation)
 
-    def _capture_source(
-        self, tab_id: str
-    ) -> tuple[RunRecord[Any, Any], RunMetadata, PointStorageBinding]:
+    def _capture_source(self, tab_id: str) -> tuple[RunRecord[Any, Any], RunMetadata]:
         """Capture native save evidence after admission checks."""
         if not self._state.has_tab(tab_id):
             raise FailedPreconditionError(
@@ -200,19 +212,18 @@ class SaveService:
         tab = self._state.get_tab(tab_id)
         record = tab.run.result
         metadata = None if record is None else record.metadata
-        storage = tab.run.storage
         if record is None:
             raise FailedPreconditionError(
                 "No run result available to save.", reason_code="no_run_result"
             )
         self._access.require_available()
         self._require_tab_idle(tab_id)
-        if metadata is None or storage is None:
+        if metadata is None:
             raise FailedPreconditionError(
-                "Run has no historical native metadata or captured storage",
+                "Run has no historical native metadata",
                 reason_code="storage_unavailable",
             )
-        return record, metadata.project(), storage
+        return record, metadata.project()
 
     def _capture_data(self, tab_id: str, key: ArtifactKey, comment: str) -> DataItem:
         tab = self._state.get_tab(tab_id)
@@ -231,7 +242,7 @@ class SaveService:
             plan.artifacts,
             layout=plan.layout,
             record=plan.record,
-            ledger=plan.storage.ledger,
+            ledger=plan.outputs.prepare_ledger(),
             origin=plan.origin.origin,
             figure_encoder=render_save_figure_png,
         )

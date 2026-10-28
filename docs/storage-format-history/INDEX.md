@@ -15,6 +15,8 @@
 
 ## 其他格式變更
 
+- 2026-10-28，[Entry 名稱與量測參數快照](2026-10-28-entry-names-and-run-parameters.md)。Entry 移除 UUID，Run 保存參數環境，Load 不讀 live point，Save 依目前 roots 與記錄名稱寫入。
+
 - 2026-10-28，[移除模組來源](2026-10-28-remove-module-provenance.md)。Library 2.0 忽略舊 provenance，讀取不改檔，clone 不匯入事件。
 
 - 2026-10-27，[Labber 目標身分與 caller 命名](2026-10-27-labber-identity.md)。Labber comment 加入 point／roles snapshot，Labber 與 native 路徑改用 caller 的 save_stem，既有檔案不改名。

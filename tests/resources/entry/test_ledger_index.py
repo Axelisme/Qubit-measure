@@ -10,12 +10,11 @@ from pydantic import TypeAdapter
 from zcu_tools.resources.entry import AnalyzedPayload, LedgerEvent, RecordsLedger
 
 
-def _event(entry_id: str) -> LedgerEvent:
+def _event() -> LedgerEvent:
     return LedgerEvent(
         id=str(uuid4()),
         kind="analyzed",
         at="2026-10-06T02:00:00Z",
-        entry_id=entry_id,
         origin="notebook",
         payload=AnalyzedPayload(
             analysis_kind="fit", run_ids=(), summary={"rate": 5300.0}
@@ -33,11 +32,10 @@ def _write(path: Path, events: tuple[LedgerEvent, ...]) -> None:
 def indexed_ledger(
     tmp_path: Path,
 ) -> tuple[RecordsLedger, Path, tuple[LedgerEvent, ...]]:
-    entry_id = str(uuid4())
-    history = tuple(_event(entry_id) for _ in range(30))
+    history = tuple(_event() for _ in range(30))
     path = tmp_path / "ledger.jsonl"
     _write(path, history)
-    ledger = RecordsLedger(tmp_path, entry_id=entry_id, lock_timeout=0.0)
+    ledger = RecordsLedger(tmp_path, lock_timeout=0.0)
     assert ledger.events() == history
     return ledger, path, history
 
@@ -65,13 +63,13 @@ def test_changed_history_rebuilds_index(
         _write(path, expected)
     elif change == "replace":
         # Preserve prefix and previous last line, so only file identity changes.
-        expected = (*history, _event(history[0].entry_id))
+        expected = (*history, _event())
         replacement = path.with_suffix(".replacement")
         _write(replacement, expected)
         replacement.replace(path)
     else:
         if change != "same_size":
-            expected = (*expected, _event(history[0].entry_id))
+            expected = (*expected, _event())
         _write(path, expected)
         if change == "same_size":
             assert path.stat().st_size == before.st_size
@@ -102,7 +100,7 @@ def test_reload_validates_middle_rewrite_despite_unchanged_append_boundaries(
     data = path.read_bytes()
     middle = history[15].model_dump_json().encode()
     rewritten = middle.replace(b'"rate":5300.0', b'"rate":5400.0')
-    added = _event(history[0].entry_id)
+    added = _event()
     path.write_bytes(
         data.replace(middle, rewritten) + added.model_dump_json().encode() + b"\n"
     )
@@ -155,7 +153,7 @@ def test_valid_prefix_of_failed_tail_is_not_published_or_skipped(
     indexed_ledger: tuple[RecordsLedger, Path, tuple[LedgerEvent, ...]],
 ) -> None:
     ledger, path, history = indexed_ledger
-    added = _event(history[0].entry_id)
+    added = _event()
     with path.open("a", encoding="utf-8") as stream:
         stream.write(added.model_dump_json() + "\n{broken}\n")
     for _ in range(2):

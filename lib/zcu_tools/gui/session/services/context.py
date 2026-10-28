@@ -162,7 +162,6 @@ class ContextService:
         points = self._load_points(entry)
         self._bind_assets(entry.database_path / "arb_waveforms")
         info = EntryInfo(
-            entry.entry_id,
             entry.result_path.name,
             entry.result_path,
             entry.database_path,
@@ -237,11 +236,12 @@ class ContextService:
 
     def _reload_point_file(self, file: PointFileRevision) -> PointFileRevision:
         parameters = self._published_parameters()
-        if self._point is None or self._library is None:
+        target = parameters.target
+        if self._point is None or self._library is None or target is None:
             raise RuntimeError("Selected point resources disappeared")
         if file.document == "aliases":
             saved, revision = self._require_open_entry().load_aliases_with_revision(
-                point=parameters.target.point
+                point=target.point
             )
             candidate = AliasTable(
                 tuple(AliasRow(name, value) for name, value in saved.aliases.items())
@@ -392,7 +392,7 @@ class ContextService:
                     "No entry is opened", reason_code="no_entry"
                 )
             return snapshot(self._setup)
-        return self.read_context().document()
+        return self.read_context().whole_document()
 
     def add_component(
         self, name: str, kind: str, fields: YamlMap, *, setup: bool = False
@@ -776,9 +776,14 @@ class ContextService:
         propagate, leaving this command uncommitted and publishing no events.
         """
         self._owner.assert_owner()
-        entry = self._require_write_target(parameters.target)
+        target = parameters.target
+        if target is None:
+            raise FailedPreconditionError(
+                "Select a working point first", reason_code="no_context"
+            )
+        entry = self._require_write_target(target)
         selected = self._published_parameters()
-        handle = self._write_library(entry, parameters.target, selected)
+        handle = self._write_library(entry, target, selected)
         with handle.edit() as draft:
             candidate = self._library_change_candidate(draft.snapshot(), change)
             draft.replace_contents(candidate)

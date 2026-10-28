@@ -114,13 +114,12 @@ class PointFileRevision:
 
 @dataclass(frozen=True)
 class EntryInfo:
-    """Opened entry UUID, directory name, and absolute owner-supplied roots.
+    """Opened entry directory name and absolute owner-supplied roots.
 
-    entry_id is ResultEntry.entry_id. name is its single-segment directory name.
+    name is its single-segment directory name in the configured Result root.
     result_path and database_path are the exact paths owned by this entry.
     """
 
-    entry_id: str
     name: str
     result_path: Path
     database_path: Path

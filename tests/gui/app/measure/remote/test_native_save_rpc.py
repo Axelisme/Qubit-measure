@@ -11,7 +11,7 @@ import pytest
 from qtpy.QtWidgets import QApplication
 from zcu_tools.datafile import load
 from zcu_tools.experiment.context import RunContext
-from zcu_tools.experiment.metadata import SoftwareProvenance
+from zcu_tools.experiment.metadata import RunMetadata, SoftwareProvenance
 from zcu_tools.experiment.native_persistence import metadata_from_container
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.simulation import white_noise
@@ -171,6 +171,27 @@ def test_analysis_reports_raw_identity_without_saving_measurement_data(
         assert session.native_data_path.is_file()
 
 
+def assert_loaded_rpc_save_preserves_complete_data(
+    session: NativeSaveSession,
+    sock: socket.socket,
+    tab_id: str,
+    path: Path,
+    metadata: RunMetadata,
+) -> None:
+    """Save restored data even when analysis options failed or storage is absent."""
+    events = session.entry.ledger.events()
+    reply = call(sock, "tab.save_data", {"tab_id": tab_id})
+    assert reply["ok"], reply
+    report = SaveSnapshotWire.model_validate(reply["result"])
+    assert report.run_id == metadata.run_id
+    stored = load(path)
+    assert metadata_from_container(stored) == metadata
+    np.testing.assert_array_equal(
+        next(iter(stored.vars.values())).values, [1 + 2j, 3 - 4j, 5 + 6j]
+    )
+    assert session.entry.ledger.events()[:-1] == events
+
+
 def install_unbound_saved_capture(session: NativeSaveSession) -> None:
     """Keep the selected point's fixed names and values without storage capability."""
     captured = session.state.session_env.parameters
@@ -253,8 +274,17 @@ def test_native_load_rpc_retains_history_on_analysis_partial_failure(
         if unbound_capture:
             assert tab.run.parameters is not None
             assert tab.run.storage is None
-            assert tab.artifacts.snapshot() == ()
+            assert tab.artifacts.snapshot()
+            assert all(
+                not member.outputs
+                for section in tab.artifacts.snapshot()
+                for artifact in section.artifacts
+                for member in artifact.members
+            )
         assert session.entry.ledger.events() == events
+        assert_loaded_rpc_save_preserves_complete_data(
+            session, sock, "tab", path, metadata_from_container(stored)
+        )
 
 
 @pytest.mark.parametrize("unbound_capture", [False, True])
@@ -300,11 +330,20 @@ def test_native_open_file_rpc_retains_history_after_explicit_context_read(
         assert tab.run.source_path == str(path)
         assert tab.run.confirmed_run_id is None
         assert tab.run.parameters is not None
-        assert (tab.run.storage is None) is unbound_capture
+        assert tab.run.storage is None
         if unbound_capture:
-            assert tab.artifacts.snapshot() == ()
+            assert tab.artifacts.snapshot()
+            assert all(
+                not member.outputs
+                for section in tab.artifacts.snapshot()
+                for artifact in section.artifacts
+                for member in artifact.members
+            )
         assert session.state.active_tab_id == new_id
         assert session.entry.ledger.events() == events
+        assert_loaded_rpc_save_preserves_complete_data(
+            session, sock, new_id, path, history
+        )
 
 
 @pytest.mark.parametrize("unbound_capture", [False, True])

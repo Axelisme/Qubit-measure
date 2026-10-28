@@ -111,15 +111,10 @@ def test_load_retains_history_without_foreign_analysis_fallback(
     service, _emit = _service(state)
     outcome = service.load_result(tab_id, native_path)
 
-    expected_issue = (
-        "No active context is available"
-        if context_free
-        else "Historical entry differs from the opened entry"
-    )
-    assert outcome.analysis_source_issue == expected_issue
-    assert tab.run.analysis_source_issue == expected_issue
+    assert outcome.analysis_source_issue is None
+    assert tab.run.analysis_source_issue is None
     assert tab.run.result is loaded
-    assert tab.run.parameters is None
+    assert tab.run.parameters is not None and tab.run.parameters.target is None
     assert tab.run.storage is None
     assert tab.run.source_operation_id is None
     assert require_metadata(tab.run) == metadata

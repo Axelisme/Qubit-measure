@@ -254,7 +254,13 @@ def build_app_services(  # noqa: PLR0913
     post_analyze = PostAnalyzeService(
         state, session.runner, bus, handles, writeback=writeback
     )
-    save = SaveService(state, bus, access=access)
+    save = SaveService(
+        state,
+        bus,
+        result_root=Path(project_root) / "result",
+        database_root=Path(project_root) / "Database",
+        access=access,
+    )
     run_analyze_control = RunAnalyzeControlFacet(
         state=state,
         bus=bus,

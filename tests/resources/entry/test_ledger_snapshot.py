@@ -11,7 +11,6 @@ from zcu_tools.resources.entry import AcquiredPayload, LedgerEvent, RecordsLedge
 def event() -> LedgerEvent:
     return LedgerEvent(
         id=str(uuid4()),
-        entry_id=str(uuid4()),
         kind="acquired",
         at="2026-10-23T00:00:00Z",
         origin="notebook",
@@ -29,7 +28,7 @@ def test_snapshot_reads_current_events_without_sidecar_or_cached_state(
 ) -> None:
     source = tmp_path / "ledger.jsonl"
     source.write_text(event.model_dump_json() + "\n", encoding="utf-8")
-    ledger = RecordsLedger(tmp_path, entry_id=event.entry_id)
+    ledger = RecordsLedger(tmp_path)
     before = {p.name: p.read_bytes() for p in tmp_path.iterdir()}
     snapshot = ledger.read_events_snapshot()
     assert snapshot == (event,)
@@ -58,7 +57,7 @@ def test_snapshot_rejects_invalid_history(
     else:
         line = '{"format":"zcu.ledger","format_version":"1.0"}\n'
     (tmp_path / "ledger.jsonl").write_text(line, encoding="utf-8")
-    ledger = RecordsLedger(tmp_path, entry_id=event.entry_id)
+    ledger = RecordsLedger(tmp_path)
     with pytest.raises(ValueError, match=r"ledger\.jsonl:1|ledger\.jsonl:2"):
         ledger.read_events_snapshot()
 
@@ -66,5 +65,5 @@ def test_snapshot_rejects_invalid_history(
 def test_snapshot_missing_ledger_does_not_publish_files(
     tmp_path: Path, event: LedgerEvent
 ) -> None:
-    assert RecordsLedger(tmp_path, entry_id=event.entry_id).read_events_snapshot() == ()
+    assert RecordsLedger(tmp_path).read_events_snapshot() == ()
     assert list(tmp_path.iterdir()) == []

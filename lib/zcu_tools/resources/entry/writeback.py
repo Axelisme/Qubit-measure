@@ -223,7 +223,7 @@ class WritebackApplyError(RuntimeError):
 class WritebackTarget(Protocol):
     """Bound document-batch write capabilities for a saved point.
 
-    entry_id/ledger identify the owning entry; point is its saved label.
+    ledger identifies the owning entry; point is its saved label.
     set_parameters/set_modules each validate an ordered nonempty batch in one
     draft and commit one file, or raise without committing any batch item.
     They return one detached actual value per command, captured immediately
@@ -235,7 +235,6 @@ class WritebackTarget(Protocol):
     at/event source; it records this target's point label through the record owner.
     """
 
-    entry_id: str
     ledger: RecordsLedger
     point: str
 
@@ -323,7 +322,6 @@ class PointWritebackTarget:
     def __init__(self, point: PointView, storage: PointStorageBinding) -> None:
         self._point = point
         self._storage = storage
-        self.entry_id = str(storage.entry_id)
         self.ledger = storage.ledger
         self.point = storage.point
         self._library_handle: ModuleLibrary | None = None
@@ -450,7 +448,6 @@ def apply_writeback(
         id=str(uuid4()),
         kind="accepted",
         at=datetime.now(UTC).isoformat(),
-        entry_id=target.entry_id,
         origin=evidence.origin,
         payload=AcceptedPayload(
             writes=writes, run_id=evidence.run_id, source=evidence.source

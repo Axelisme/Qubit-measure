@@ -133,7 +133,6 @@ def saved_runs(tmp_path: Path) -> tuple[Path, Path, Path]:
             id=str(uuid4()),
             kind="acquired",
             at="2026-10-08T00:02:00Z",
-            entry_id=entry.entry_id,
             origin="gui",
             payload=AcquiredPayload(
                 run_id="20261008T000000Z-aaaaaa",

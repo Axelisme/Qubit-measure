@@ -41,7 +41,7 @@ class RecordingSettings(ProjectSettingsService):
         self._log = log
         self.preferences = SetupPreferences(entry_name="chip", ip="10.0.0.2", port=7000)
         self.info = EntryInfo(
-            "entry", "chip", Path("/tmp/result/chip"), Path("/tmp/Database/chip")
+            "chip", Path("/tmp/result/chip"), Path("/tmp/Database/chip")
         )
 
     def get_setup_preferences(self) -> SetupPreferences:
@@ -82,9 +82,7 @@ class RecordingContext(ContextControlFacet):
 
     def get_entry_info(self) -> EntryInfo:
         self._log.add("context", "get_entry_info")
-        return EntryInfo(
-            "entry", "chip", Path("/tmp/result/chip"), Path("/tmp/Database/chip")
-        )
+        return EntryInfo("chip", Path("/tmp/result/chip"), Path("/tmp/Database/chip"))
 
 
 class RecordingConnection(SoCConnectionService):
@@ -143,9 +141,7 @@ def test_setup_control_facet_forwards_deliberate_setup_dialog_contract() -> None
     request = EntryRequest("chip")
     point = PointCreateRequest("new", "", CommandOrigin("gui"), clone_from="base")
     saved = SavedPoint(entry_name="entry", point="base")
-    info = EntryInfo(
-        "entry", "chip", Path("/tmp/result/chip"), Path("/tmp/Database/chip")
-    )
+    info = EntryInfo("chip", Path("/tmp/result/chip"), Path("/tmp/Database/chip"))
     cases: tuple[tuple[str, Callable[[], object], object, RecordedCall], ...] = (
         (
             "get_setup_preferences",

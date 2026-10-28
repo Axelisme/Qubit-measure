@@ -197,7 +197,7 @@ def native_save_session(
         finished_at="2026-10-08T00:01:00+00:00",
         completion="complete",
         snapshot=RunSnapshot(
-            entry_id=storage.entry_id, point=storage.point, roles=storage.roles
+            entry_name=storage.entry_name, point=storage.point, roles=storage.roles
         ),
         provenance=SoftwareProvenance(
             software_versions={},
@@ -227,7 +227,9 @@ def native_save_session(
     )
     handles = OperationHandles()
     background = BackgroundRunner()
-    service = SaveService(state, bus)
+    service = SaveService(
+        state, bus, result_root=tmp_path / "result", database_root=tmp_path / "Database"
+    )
     control = SaveControlFacet(
         state=state,
         save=service,

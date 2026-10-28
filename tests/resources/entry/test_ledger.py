@@ -12,7 +12,7 @@ from uuid import uuid4
 import numpy as np
 import pytest
 from filelock import FileLock, Timeout
-from pydantic import TypeAdapter
+from pydantic import JsonValue, TypeAdapter
 from zcu_tools.resources.entry import (
     AcceptedPayload,
     AcceptedWrite,
@@ -42,12 +42,11 @@ def entry_records(tmp_path: Path) -> tuple[ResultEntry, Path]:
     return entry, tmp_path / "results/entry/records"
 
 
-def _accepted(entry_id: str, *, event_id: str | None = None) -> LedgerEvent:
+def _accepted(*, event_id: str | None = None) -> LedgerEvent:
     return LedgerEvent(
         id=event_id or str(uuid4()),
         kind="accepted",
         at=_AT,
-        entry_id=entry_id,
         origin="notebook",
         payload=AcceptedPayload(
             writes=(AcceptedWrite(path="Q1.rate", value=5300.0),),
@@ -59,14 +58,14 @@ def test_partial_history_reads_and_append_do_not_validate_unused_payload_fields(
     entry_records: tuple[ResultEntry, Path],
 ) -> None:
     entry, records = entry_records
-    event = _accepted(entry.entry_id)
+    event = _accepted()
     data = event.model_dump(mode="json")
     data["payload"]["source"] = ["not a source reference"]
     path = records / "ledger.jsonl"
     path.write_text(json.dumps(data) + "\n", encoding="utf-8")
     before = path.read_bytes()
     ledger = entry.ledger
-    added = _accepted(entry.entry_id)
+    added = _accepted()
     ledger.append(added)
     assert path.read_bytes().startswith(before)
     content = ledger.content(event.id)
@@ -91,7 +90,7 @@ def test_partial_attachment_index_defers_reference_but_access_cannot_escape_root
     defect: str,
 ) -> None:
     entry, records = entry_records
-    event = _accepted(entry.entry_id)
+    event = _accepted()
     ledger = entry.ledger
     ledger.append(event, record={"normal": True})
     external = records.parent / "external.json"
@@ -108,7 +107,7 @@ def test_partial_attachment_index_defers_reference_but_access_cannot_escape_root
     before = path.read_bytes()
     assert ledger.content(event.id).value("kind") == "accepted"
     assert len(ledger.contents()) == 1
-    ledger.append(_accepted(entry.entry_id))
+    ledger.append(_accepted())
     assert path.read_bytes().startswith(before)
     with patch.object(Path, "open", autospec=True, side_effect=Path.open) as opened:
         with pytest.raises(ValueError, match="record.*records/|record escapes"):
@@ -123,7 +122,7 @@ def test_append_keeps_locks_out_of_records(
     entry_records: tuple[ResultEntry, Path],
 ) -> None:
     entry, records = entry_records
-    event = _accepted(entry.entry_id)
+    event = _accepted()
 
     entry.ledger.append(event)
 
@@ -134,14 +133,14 @@ def test_append_keeps_locks_out_of_records(
 def test_large_ledger_parses_only_new_tail_after_append(
     entry_records: tuple[ResultEntry, Path],
 ) -> None:
-    entry, records = entry_records
-    history = tuple(_accepted(entry.entry_id) for _ in range(1000))
+    _entry, records = entry_records
+    history = tuple(_accepted() for _ in range(1000))
     path = records / "ledger.jsonl"
     path.write_text(
         "".join(event.model_dump_json() + "\n" for event in history), encoding="utf-8"
     )
-    ledger = RecordsLedger(records, entry_id=entry.entry_id)
-    added = _accepted(entry.entry_id)
+    ledger = RecordsLedger(records)
+    added = _accepted()
 
     # Observe the external JSON decoder and filesystem, not ledger internals.
     with patch.object(
@@ -197,12 +196,11 @@ def test_accepted_complex_uses_tag_in_payload_and_persisted_ledger(
         id=str(uuid4()),
         kind="accepted",
         at=_AT,
-        entry_id=entry.entry_id,
         origin="notebook",
         payload=payload,
     )
     entry.ledger.append(event)
-    persisted = RecordsLedger(records, entry_id=entry.entry_id).get(event.id).event
+    persisted = RecordsLedger(records).get(event.id).event
     assert isinstance(persisted.payload, AcceptedPayload)
     assert persisted.payload.writes == payload.writes
     assert persisted.model_dump(mode="json")["payload"]["writes"][0]["value"] == tag
@@ -306,14 +304,14 @@ def test_empty_entry_and_independent_handles_observe_first_append(
     entry_records: tuple[ResultEntry, Path],
 ) -> None:
     entry, records = entry_records
-    other = RecordsLedger(records, entry_id=entry.entry_id)
+    other = RecordsLedger(records)
     assert entry.ledger.events() == ()
     assert other.events() == ()
     assert not (records / "ledger.jsonl").exists()
     unknown = str(uuid4())
     with pytest.raises(KeyError, match=unknown):
         other.get(unknown)
-    event = _accepted(entry.entry_id)
+    event = _accepted()
     entry.ledger.append(event)
     assert other.events() == (event,)
     assert other.get(event.id).event == event
@@ -324,6 +322,42 @@ def test_empty_entry_and_independent_handles_observe_first_append(
     assert payload.source is None
 
 
+@pytest.mark.parametrize("legacy", [None, "not-a-uuid", {"malformed": [1]}])
+def test_historical_import_projects_without_entry_identity(
+    entry_records: tuple[ResultEntry, Path], legacy: JsonValue
+) -> None:
+    entry, records = entry_records
+    source_id = str(uuid4())
+    payload: JsonObject = {
+        "source_event_id": source_id,
+        "source_event_json": ' {"kept": true} ',
+    }
+    raw: JsonObject = {
+        "format": "zcu.ledger",
+        "format_version": "1.0",
+        "id": str(uuid4()),
+        "kind": "import",
+        "at": _AT,
+        "origin": "notebook",
+        "payload": payload,
+    }
+    if legacy is not None:
+        payload["source_entry_id"] = legacy
+    path = records / "ledger.jsonl"
+    original = json.dumps(raw)
+    path.write_text(original + "\n", encoding="utf-8")
+    before = path.read_bytes()
+
+    (event,) = entry.ledger.events()
+    stored = entry.ledger.get(event.id)
+    assert stored.event == event
+    assert stored.event_json == original
+    assert isinstance(event.payload, ImportPayload)
+    assert event.payload.source_event_id == source_id
+    assert event.payload.source_event_json == ' {"kept": true} '
+    assert path.read_bytes() == before
+
+
 def test_all_event_kinds_round_trip_in_append_order(
     entry_records: tuple[ResultEntry, Path],
 ) -> None:
@@ -332,7 +366,6 @@ def test_all_event_kinds_round_trip_in_append_order(
         id=str(uuid4()),
         kind="acquired",
         at=_AT,
-        entry_id=entry.entry_id,
         origin="gui",
         payload=AcquiredPayload(
             run_id="run-1",
@@ -345,7 +378,6 @@ def test_all_event_kinds_round_trip_in_append_order(
         id=str(uuid4()),
         kind="saved",
         at=_AT,
-        entry_id=entry.entry_id,
         origin="notebook",
         payload=SavedPayload(
             run_id="run-1",
@@ -364,7 +396,6 @@ def test_all_event_kinds_round_trip_in_append_order(
         id=str(uuid4()),
         kind="analyzed",
         at=_AT,
-        entry_id=entry.entry_id,
         origin="mcp",
         payload=AnalyzedPayload(
             analysis_kind="fit",
@@ -372,15 +403,13 @@ def test_all_event_kinds_round_trip_in_append_order(
             summary={"error": None},
         ),
     )
-    accepted = _accepted(entry.entry_id)
+    accepted = _accepted()
     imported = LedgerEvent(
         id=str(uuid4()),
         kind="import",
         at=_AT,
-        entry_id=entry.entry_id,
         origin="notebook",
         payload=ImportPayload(
-            source_entry_id=str(uuid4()),
             source_event_id=str(uuid4()),
             source_event_json=' {"historical": true} ',
         ),
@@ -396,7 +425,7 @@ def test_append_preserves_history_and_publishes_local_record_without_mutating_ev
     entry_records: tuple[ResultEntry, Path],
 ) -> None:
     entry, records = entry_records
-    original = _accepted(entry.entry_id)
+    original = _accepted()
     content: JsonObject = {"fit": {"value": 5.3, "samples": [1, True, None, "µ"]}}
     entry.ledger.append(original, record=content)
     first_bytes = (records / "ledger.jsonl").read_bytes()
@@ -407,7 +436,7 @@ def test_append_preserves_history_and_publishes_local_record_without_mutating_ev
     assert found.record == content
     assert json.loads(found.event_json)["id"] == original.id
     assert json.loads((records / f"{original.id}.json").read_text()) == content
-    second = _accepted(entry.entry_id)
+    second = _accepted()
     entry.ledger.append(second)
     assert (records / "ledger.jsonl").read_bytes().startswith(first_bytes)
     assert tuple(event.id for event in entry.ledger.events()) == (
@@ -420,7 +449,7 @@ def test_duplicate_rejection_preserves_published_bytes(
     entry_records: tuple[ResultEntry, Path],
 ) -> None:
     entry, records = entry_records
-    event = _accepted(entry.entry_id)
+    event = _accepted()
     entry.ledger.append(event, record={"value": 1})
     before = (records / "ledger.jsonl").read_bytes()
     record_before = (records / f"{event.id}.json").read_bytes()
@@ -434,15 +463,17 @@ def test_foreign_entry_history_can_be_read_and_appended(
     entry_records: tuple[ResultEntry, Path],
 ) -> None:
     entry, records = entry_records
-    foreign = _accepted(str(uuid4()))
+    foreign = _accepted()
     path = records / "ledger.jsonl"
-    original = (foreign.model_dump_json() + "\n").encode()
+    historical = foreign.model_dump(mode="json")
+    historical["entry_id"] = "foreign, malformed, ignored"
+    original = (json.dumps(historical) + "\n").encode()
     path.write_bytes(original)
     ledger = entry.ledger
 
     assert ledger.events() == (foreign,)
     assert ledger.read_events_snapshot() == (foreign,)
-    added = _accepted(str(uuid4()))
+    added = _accepted()
     ledger.append(added, record={"value": 2})
 
     assert entry.ledger.events() == (
@@ -457,7 +488,7 @@ def test_caller_record_reference_is_rejected_before_writing(
     entry_records: tuple[ResultEntry, Path],
 ) -> None:
     entry, records = entry_records
-    event = _accepted(entry.entry_id)
+    event = _accepted()
     referenced = event.model_copy(update={"record": f"records/{event.id}.json"})
     with pytest.raises(ValueError, match="record"):
         entry.ledger.append(referenced, record={"value": 1})
@@ -469,7 +500,7 @@ def test_existing_orphan_record_is_not_overwritten(
     entry_records: tuple[ResultEntry, Path],
 ) -> None:
     entry, records = entry_records
-    event = _accepted(entry.entry_id)
+    event = _accepted()
     orphan = records / f"{event.id}.json"
     orphan.write_text('{"orphan": true}\n', encoding="utf-8")
     before = orphan.read_bytes()
@@ -484,8 +515,8 @@ def test_two_handles_append_without_overwrite(
 ) -> None:
     entry, records = entry_records
     first = entry.ledger
-    second = RecordsLedger(records / ".." / "records", entry_id=entry.entry_id)
-    events = tuple(_accepted(entry.entry_id) for _ in range(20))
+    second = RecordsLedger(records / ".." / "records")
+    events = tuple(_accepted() for _ in range(20))
     for index, event in enumerate(events):
         (first if index % 2 else second).append(event)
     assert first.events() == events
@@ -496,8 +527,8 @@ def test_two_handles_append_without_overwrite(
 def test_lock_timeout_keeps_native_type_and_diagnostic_notes(
     entry_records: tuple[ResultEntry, Path],
 ) -> None:
-    entry, records = entry_records
-    ledger = RecordsLedger(records, entry_id=entry.entry_id, lock_timeout=0.0)
+    _entry, records = entry_records
+    ledger = RecordsLedger(records, lock_timeout=0.0)
     lock_path = lock_path_for(records / "ledger.jsonl")
     with FileLock(str(lock_path)), pytest.raises(Timeout) as caught:
         ledger.events()
@@ -513,18 +544,16 @@ def test_constructor_rejects_invalid_lock_timeout(
     entry_records: tuple[ResultEntry, Path],
     timeout: float,
 ) -> None:
-    entry, records = entry_records
+    _entry, records = entry_records
     with pytest.raises(ValueError, match="lock_timeout"):
-        RecordsLedger(records, entry_id=entry.entry_id, lock_timeout=timeout)
+        RecordsLedger(records, lock_timeout=timeout)
 
 
-def test_constructor_rejects_non_directory_and_invalid_uuid(tmp_path: Path) -> None:
+def test_constructor_rejects_non_directory(tmp_path: Path) -> None:
     file = tmp_path / "file"
     file.write_text("not a directory")
     with pytest.raises(NotADirectoryError):
-        RecordsLedger(file, entry_id=str(uuid4()))
-    with pytest.raises(ValueError, match="entry_id"):
-        RecordsLedger(tmp_path, entry_id="not-a-uuid")
+        RecordsLedger(file)
 
 
 def test_missing_records_read_is_empty_and_first_append_creates_directory(
@@ -537,7 +566,7 @@ def test_missing_records_read_is_empty_and_first_append_creates_directory(
     assert ledger.events() == ()
     assert ledger.read_events_snapshot() == ()
     assert not records.exists()
-    event = _accepted(opened.entry_id)
+    event = _accepted()
     ledger.append(event, record={"value": 3})
 
     assert records.is_dir()
@@ -565,8 +594,8 @@ def test_event_model_rejects_invalid_header_origin_and_payload_pair(
     entry_records: tuple[ResultEntry, Path],
     change: dict[str, object],
 ) -> None:
-    entry, _records = entry_records
-    data = _accepted(entry.entry_id).model_dump(mode="json")
+    _entry, _records = entry_records
+    data = _accepted().model_dump(mode="json")
     data.update(change)
     with pytest.raises(ValueError, match="format|id|origin|kind|at|unexpected|payload"):
         LedgerEvent.model_validate(data)
@@ -622,7 +651,7 @@ def test_corrupt_external_input_is_not_skipped_or_rewritten(
     broken: str,
 ) -> None:
     entry, records = entry_records
-    event = _accepted(entry.entry_id)
+    event = _accepted()
     entry.ledger.append(event)
     path = records / "ledger.jsonl"
     path.write_text(path.read_text() + broken, encoding="utf-8")
@@ -630,7 +659,7 @@ def test_corrupt_external_input_is_not_skipped_or_rewritten(
     for operation in (
         lambda: entry.ledger.events(),
         lambda: entry.ledger.get(event.id),
-        lambda: entry.ledger.append(_accepted(entry.entry_id)),
+        lambda: entry.ledger.append(_accepted()),
     ):
         with pytest.raises(ValueError, match="ledger") as caught:
             operation()
@@ -643,7 +672,7 @@ def test_missing_referenced_record_reports_its_physical_path(
     entry_records: tuple[ResultEntry, Path],
 ) -> None:
     entry, records = entry_records
-    event = _accepted(entry.entry_id)
+    event = _accepted()
     entry.ledger.append(event, record={"fit": 1})
     physical = records / f"{event.id}.json"
     physical.unlink()
@@ -657,11 +686,11 @@ def test_invalid_record_input_leaves_ledger_and_sidecars_unchanged(
     entry_records: tuple[ResultEntry, Path],
 ) -> None:
     entry, records = entry_records
-    first = _accepted(entry.entry_id)
+    first = _accepted()
     entry.ledger.append(first, record={"existing": True})
     before = (records / "ledger.jsonl").read_bytes()
     record_before = (records / f"{first.id}.json").read_bytes()
-    event = _accepted(entry.entry_id)
+    event = _accepted()
     # model_validate is not involved: append owns validation of the record input.
     record: JsonObject = {"unsupported": float("nan")}
     with pytest.raises(ValueError, match="record"):
@@ -675,7 +704,7 @@ def test_duplicate_existing_event_blocks_read_and_append_without_rewrite(
     entry_records: tuple[ResultEntry, Path],
 ) -> None:
     entry, records = entry_records
-    event = _accepted(entry.entry_id)
+    event = _accepted()
     entry.ledger.append(event)
     path = records / "ledger.jsonl"
     data = json.loads(path.read_text())
@@ -684,7 +713,7 @@ def test_duplicate_existing_event_blocks_read_and_append_without_rewrite(
     for operation in (
         lambda: entry.ledger.events(),
         lambda: entry.ledger.get(event.id),
-        lambda: entry.ledger.append(_accepted(entry.entry_id)),
+        lambda: entry.ledger.append(_accepted()),
     ):
         with pytest.raises(ValueError, match="ledger") as caught:
             operation()
@@ -698,7 +727,7 @@ def test_reader_preserves_raw_event_and_unknown_fields_without_rewrite(
     entry_records: tuple[ResultEntry, Path], version: str
 ) -> None:
     entry, records = entry_records
-    event = _accepted(entry.entry_id)
+    event = _accepted()
     entry.ledger.append(event, record={"fit": [1, 2]})
     path = records / "ledger.jsonl"
     data = json.loads(path.read_text())
@@ -718,7 +747,7 @@ def test_reader_preserves_raw_event_and_unknown_fields_without_rewrite(
     assert found.event_json == raw
     assert entry.ledger.events() == (found.event,)
     assert path.read_bytes() == before
-    entry.ledger.append(_accepted(entry.entry_id))
+    entry.ledger.append(_accepted())
     assert path.read_bytes().startswith(before)
     assert entry.ledger.get(event.id).event_json == raw
     assert record_path.read_bytes() == record_before
@@ -736,7 +765,7 @@ def test_legacy_acquired_projects_evidence_and_keeps_raw_cfg(
         "id": event_id,
         "kind": "acquired",
         "at": _AT,
-        "entry_id": entry.entry_id,
+        "entry_id": "not-a-uuid",
         "origin": "notebook",
         "payload": {
             "run_id": "historical-run",
@@ -770,7 +799,6 @@ def test_payload_kind_controls_unknown_field_projection(
         id=str(uuid4()),
         kind="saved",
         at=_AT,
-        entry_id=entry.entry_id,
         origin="notebook",
         payload=SavedPayload(run_id="r", outputs=()),
     )
@@ -803,7 +831,7 @@ def test_invalid_utf8_ledger_reports_exact_line_without_rewrite(
     entry_records: tuple[ResultEntry, Path],
 ) -> None:
     entry, records = entry_records
-    event = _accepted(entry.entry_id)
+    event = _accepted()
     entry.ledger.append(event)
     path = records / "ledger.jsonl"
     corrupt = path.read_bytes() + b"\xff\n"
@@ -811,7 +839,7 @@ def test_invalid_utf8_ledger_reports_exact_line_without_rewrite(
     for operation in (
         lambda: entry.ledger.events(),
         lambda: entry.ledger.get(event.id),
-        lambda: entry.ledger.append(_accepted(entry.entry_id)),
+        lambda: entry.ledger.append(_accepted()),
     ):
         with pytest.raises(ValueError, match="utf-8") as caught:
             operation()
@@ -824,7 +852,7 @@ def test_invalid_utf8_record_reports_physical_path_without_rewrite(
     entry_records: tuple[ResultEntry, Path],
 ) -> None:
     entry, records = entry_records
-    event = _accepted(entry.entry_id)
+    event = _accepted()
     entry.ledger.append(event, record={"sample": 1})
     path = records / f"{event.id}.json"
     path.write_bytes(b"\xff")
@@ -843,10 +871,10 @@ def test_record_rename_failure_cleans_only_unpublished_temp(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     entry, records = entry_records
-    entry.ledger.append(_accepted(entry.entry_id))
+    entry.ledger.append(_accepted())
     path = records / "ledger.jsonl"
     before = path.read_bytes()
-    event = _accepted(entry.entry_id)
+    event = _accepted()
     original_replace = Path.replace
 
     def fail_record_rename(source: Path, target: Path) -> Path:
@@ -896,10 +924,10 @@ def test_append_io_failure_retains_published_record_and_historical_bytes(
     fail_at: Literal["open", "write", "flush"],
 ) -> None:
     entry, records = entry_records
-    entry.ledger.append(_accepted(entry.entry_id))
+    entry.ledger.append(_accepted())
     path = records / "ledger.jsonl"
     before = path.read_bytes()
-    event = _accepted(entry.entry_id)
+    event = _accepted()
     record: JsonObject = {"sample": [1, "µ"]}
     original_open = Path.open
 
@@ -935,7 +963,7 @@ def test_append_io_failure_retains_published_record_and_historical_bytes(
         for operation in (
             lambda: entry.ledger.events(),
             lambda: entry.ledger.get(event.id),
-            lambda: entry.ledger.append(_accepted(entry.entry_id)),
+            lambda: entry.ledger.append(_accepted()),
         ):
             with pytest.raises(ValueError, match="incomplete tail"):
                 operation()

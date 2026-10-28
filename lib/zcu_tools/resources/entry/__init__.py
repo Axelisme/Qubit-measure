@@ -52,7 +52,12 @@ from .schema_fields import (
     component_field_specs,
     role_candidates,
 )
-from .storage import PointStorageBinding, capture_point_storage
+from .storage import (
+    PointStorageBinding,
+    RunOutputBinding,
+    bind_run_outputs,
+    capture_point_storage,
+)
 from .template import EntryTemplate, load_entry_template
 from .views import (
     ComponentView,

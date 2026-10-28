@@ -9,6 +9,7 @@ from zcu_tools.format_version import YamlMap
 from zcu_tools.resources.entry import (
     ResultEntry,
     UnknownKindError,
+    snapshot,
 )
 from zcu_tools.resources.entry.views import FieldView
 
@@ -122,16 +123,19 @@ def test_newer_minor_still_validates_known_values_and_kinds(
     def perform_operation() -> None:
         if operation == "refresh":
             entry.setup.refresh()
+            view = entry.setup
         else:
-            ResultEntry.open("entry", result_root=results, database_root=database)
+            view = ResultEntry.open(
+                "entry", result_root=results, database_root=database
+            ).setup
+        assert view.description is None
+        snapshot(view)
 
-    expected_error = (
-        ValueError if operation == "open" and error is ValidationError else error
-    )
+    expected_error = UnknownKindError if error is UnknownKindError else ValidationError
     with pytest.raises(expected_error):
         perform_operation()
     assert setup_path.read_bytes() == before
-    assert entry.setup.R1.rate == pytest.approx(6500.0)
+    assert entry.setup.description is None
 
 
 @pytest.mark.parametrize("method", ["attribute", "path"])
@@ -230,35 +234,6 @@ def test_path_set_and_attribute_edits_use_the_same_shared_draft(
     assert YAML(typ="safe").load(setup_path)["components"]["R1"]["rate"] == 6550.0
 
 
-@pytest.mark.parametrize("operation", ["direct", "draft"])
-def test_entry_identity_cannot_be_replaced_through_general_or_a_whole_draft(
-    entry_roots: tuple[Path, Path], entry: ResultEntry, operation: str
-) -> None:
-    results, _database = entry_roots
-    setup_path = results / "entry" / "setup.yaml"
-    entry.setup.add_component("R1", kind="fake/sensor", rate=6500.0)
-    original_id = entry.entry_id
-    before = setup_path.read_bytes()
-
-    def perform_operation() -> None:
-        replacement = "00000000-0000-0000-0000-000000000000"
-        if operation == "direct":
-            entry.setup.general.entry_id = replacement
-        else:
-            with entry.setup.edit() as draft:
-                draft.R1.rate = 6550.0
-                draft.description = "must be rolled back with the invalid identity"
-                draft.general.entry_id = replacement
-
-    with pytest.raises(ValueError, match="entry_id is immutable"):
-        perform_operation()
-    assert setup_path.read_bytes() == before
-    assert entry.entry_id == original_id
-    assert entry.setup.general.entry_id == original_id
-    assert entry.setup.description is None
-    assert entry.setup.R1.rate == pytest.approx(6500.0)
-
-
 def test_general_extensions_support_direct_and_shared_draft_writes_without_scaling(
     entry_roots: tuple[Path, Path], entry: ResultEntry
 ) -> None:
@@ -286,7 +261,7 @@ def test_general_extensions_support_direct_and_shared_draft_writes_without_scali
     assert isinstance(restored, FieldView)
     assert restored.rate == 12.3
     assert restored.flags == [True, None]
-    assert reopened.setup.general.entry_id == entry.entry_id
+
     assert (
         reopened.setup.description == "physical environment is not encoded in the name"
     )
@@ -408,7 +383,11 @@ def test_wiring_channels_reject_explicit_null_without_losing_the_valid_snapshot(
         elif operation == "write":
             setattr(entry.setup.R1.wiring, field, None)
         else:
-            ResultEntry.open("entry", result_root=results, database_root=database)
+            opened = ResultEntry.open(
+                "entry", result_root=results, database_root=database
+            )
+            assert opened.setup.description is None
+            _ = getattr(opened.setup.R1.wiring, field)
 
     error = ValueError if operation == "open" else ValidationError
     with pytest.raises(error, match=field) as failure:
@@ -466,15 +445,14 @@ def test_component_names_cannot_shadow_public_view_members(
     assert setup_path.read_bytes() == before
 
 
-def test_absent_optional_physical_fields_are_not_fabricated_or_readable(
+def test_absent_optional_physical_fields_use_the_declared_default_without_writes(
     entry_roots: tuple[Path, Path], entry: ResultEntry
 ) -> None:
     results, _database = entry_roots
     entry.setup.add_component("R1", kind="fake/sensor")
     document = YAML(typ="safe").load(results / "entry" / "setup.yaml")
     assert "rate" not in document["components"]["R1"]
-    with pytest.raises(AttributeError, match=r"R1\.rate.*not set"):
-        _ = entry.setup.R1.rate
+    assert entry.setup.R1.rate is None
 
 
 @pytest.mark.parametrize("operation", ["add", "read", "write", "open"])
@@ -498,12 +476,15 @@ def test_forbidden_component_fields_preserve_values_sources_and_disk(
         elif operation == "write":
             entry.setup.R1.raet = 6600.0
         else:
-            ResultEntry.open("entry", result_root=results, database_root=database)
+            opened = ResultEntry.open(
+                "entry", result_root=results, database_root=database
+            )
+            assert opened.setup.R1.rate == 6.5e9
+            snapshot(opened.setup)
 
     previous = entry.setup.meta("R1.rate")
     error = AttributeError if operation == "read" else ValidationError
-    if operation == "open":
-        error = ValueError
+
     with pytest.raises(error):
         perform_operation()
     assert setup_path.read_bytes() == before
@@ -525,7 +506,10 @@ def test_unknown_kinds_report_the_source_component_and_a_close_name(
         if operation == "add":
             entry.setup.add_component("R1", kind="fake/sensr")
         else:
-            ResultEntry.open("entry", result_root=results, database_root=database)
+            opened = ResultEntry.open(
+                "entry", result_root=results, database_root=database
+            )
+            _ = opened.setup.R1.kind
 
     with pytest.raises(UnknownKindError) as failure:
         perform_operation()

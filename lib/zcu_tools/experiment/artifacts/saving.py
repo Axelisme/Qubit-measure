@@ -157,7 +157,6 @@ def save_artifacts(
             id=str(uuid4()),
             kind="saved",
             at=datetime.now(UTC).isoformat(),
-            entry_id=str(metadata.snapshot.entry_id),
             origin=origin,
             payload=SavedPayload(
                 run_id=report.run_id,

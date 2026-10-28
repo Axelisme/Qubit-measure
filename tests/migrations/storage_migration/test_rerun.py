@@ -35,6 +35,15 @@ def convert(request: MigrationRequest, mapping: MigrationMapping) -> MigrationRe
     )
 
 
+def test_migration_operation_token_is_independent_of_entry_creation(
+    request_data: MigrationRequest, mapping: MigrationMapping
+) -> None:
+    report = convert(replace(request_data, dry_run=True), mapping)
+    assert report.migration_id.version == 4
+    assert not report.destination.result_path.exists()
+    assert not report.destination.database_path.exists()
+
+
 def files_under(*roots: Path) -> dict[Path, tuple[bytes, int]]:
     return {
         path: (path.read_bytes(), path.stat().st_mtime_ns)
@@ -42,6 +51,28 @@ def files_under(*roots: Path) -> dict[Path, tuple[bytes, int]]:
         for path in root.rglob("*")
         if path.is_file()
     }
+
+
+@pytest.mark.parametrize("owner", ["identity", "report"])
+def test_legacy_manifest_refuses_resume_and_keeps_sources(
+    request_data: MigrationRequest, mapping: MigrationMapping, owner: str
+) -> None:
+    source = request_data.result_root / "chip/qubit/original.bin"
+    source.write_bytes(b"original data")
+    report = convert(replace(request_data, part="parameters"), mapping)
+    manifest = report.destination.result_path / "records/migration-state.json"
+    raw = json.loads(manifest.read_text())
+    raw[owner]["entry_id"] = "obsolete-owner-token"
+    manifest.write_text(json.dumps(raw))
+    assert report.backup_path is not None
+    before = files_under(request_data.result_root.parent, report.backup_path)
+
+    with pytest.raises(MigrationInputError, match="old version") as caught:
+        convert(replace(request_data, resume=True), mapping)
+
+    assert str(manifest) in str(caught.value)
+    assert files_under(request_data.result_root.parent, report.backup_path) == before
+    assert source.read_bytes() == b"original data"
 
 
 @pytest.mark.parametrize("resume", [False, True])
@@ -62,7 +93,7 @@ def test_completed_rerun_verifies_without_writing(
         report = convert(replace(request_data, resume=resume, dry_run=dry_run), mapping)
     except MigrationInputError as error:
         pytest.fail(f"An owned identical rerun must succeed: {error}")
-    assert report.entry_id == first.entry_id
+    assert report.migration_id == first.migration_id
     assert {
         first.destination.result_path / name
         for name in ("setup.yaml", "points/bias/point.yaml", "opaque.bin")
