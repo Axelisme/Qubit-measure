@@ -476,8 +476,11 @@ def test_point_unknown_kind_reports_own_source_without_publishing(
             if operation == "refresh"
             else lambda: entry.use_point("a")
         )
-        with pytest.raises(UnknownKindError) as error:
+        loaded = entry.use_point("a") if operation == "use" else working_point
+        if operation == "refresh":
             reload_point()
+        with pytest.raises(UnknownKindError) as error:
+            _ = loaded.Q1.rate
 
     assert error.value.source == source
     assert error.value.component == "Q1"
@@ -485,8 +488,12 @@ def test_point_unknown_kind_reports_own_source_without_publishing(
     assert str(source) in str(error.value)
     assert str(setup_source) not in str(error.value)
     assert entered == []
-    assert working_point.Q1.rate == 5000.0
-    assert working_point.Q1.duration == 12.0
+    if operation != "refresh":
+        assert working_point.Q1.rate == 5000.0
+        assert working_point.Q1.duration == 12.0
+    with pytest.raises(UnknownKindError), working_point.edit():
+        entered.append(True)
+    assert entered == []
     assert source.read_bytes() == before
     assert setup_source.read_bytes() == setup_before
 

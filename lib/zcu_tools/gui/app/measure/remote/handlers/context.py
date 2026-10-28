@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 from pydantic import TypeAdapter, ValidationError
 
-from zcu_tools.gui.expected_error import InvalidInputError
+from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_types import SavedPoint
@@ -98,6 +98,11 @@ def h_context_set_parameter(
         ) from exc
     check_writer_revision(adapter, "parameters", params)
     capture = adapter.context_control.read_context()
+    target = capture.target
+    if target is None:
+        raise FailedPreconditionError(
+            "Select or create a working point first", reason_code="no_context"
+        )
     if path.split(".")[1:2] == ["module"]:
         # Slots are stored point values, not materialized library parameters.
         try:
@@ -106,7 +111,7 @@ def h_context_set_parameter(
             before = None
     else:
         before = context_wire_value(capture.lookup_point(path).value)
-    adapter.context_control.set_parameter(capture.target, path, value, metadata=None)
+    adapter.context_control.set_parameter(target, path, value, metadata=None)
     return {"path": path, "before": before, "value": value}
 
 
@@ -204,10 +209,11 @@ def h_context_snapshot(
             if row.error is not None:
                 projected["error"] = row.error
             aliases.append(projected)
+        target = parameters.target
         snapshot: dict[str, object] = {
-            "target": parameters.target.model_dump(mode="python"),
+            "target": None if target is None else target.model_dump(mode="python"),
             # Registered component subclasses own the complete persisted fields.
-            "point": parameters.document().model_dump(
+            "point": parameters.whole_document().model_dump(
                 mode="python", serialize_as_any=True
             ),
             "library": parameters.library.document().model_dump(

@@ -29,6 +29,8 @@ from zcu_tools.resources.entry import (
 )
 from zcu_tools.resources.file_lock import lock_path_for
 
+from tests._filesystem import symlink_or_skip
+
 _AT = "2026-10-06T02:00:00Z"
 
 
@@ -51,6 +53,70 @@ def _accepted(entry_id: str, *, event_id: str | None = None) -> LedgerEvent:
             writes=(AcceptedWrite(path="Q1.rate", value=5300.0),),
         ),
     )
+
+
+def test_partial_history_reads_and_append_do_not_validate_unused_payload_fields(
+    entry_records: tuple[ResultEntry, Path],
+) -> None:
+    entry, records = entry_records
+    event = _accepted(entry.entry_id)
+    data = event.model_dump(mode="json")
+    data["payload"]["source"] = ["not a source reference"]
+    path = records / "ledger.jsonl"
+    path.write_text(json.dumps(data) + "\n", encoding="utf-8")
+    before = path.read_bytes()
+    ledger = entry.ledger
+    added = _accepted(entry.entry_id)
+    ledger.append(added)
+    assert path.read_bytes().startswith(before)
+    content = ledger.content(event.id)
+    assert content.value("payload.writes.0.value") == 5300.0
+    assert content.value("payload.run_id") is None
+    with pytest.raises(ValueError, match="payload.source"):
+        content.value("payload.source")
+    with pytest.raises(ValueError, match="payload.source"):
+        content.project()
+    with pytest.raises(ValueError, match="source"):
+        ledger.events()
+    before_invalid = path.read_bytes()
+    invalid = added.model_copy(update={"at": "yesterday"})
+    with pytest.raises(ValueError, match="at"):
+        ledger.append(invalid)
+    assert path.read_bytes() == before_invalid
+
+
+@pytest.mark.parametrize("defect", ["reference", "symlink"])
+def test_partial_attachment_index_defers_reference_but_access_cannot_escape_root(
+    entry_records: tuple[ResultEntry, Path],
+    defect: str,
+) -> None:
+    entry, records = entry_records
+    event = _accepted(entry.entry_id)
+    ledger = entry.ledger
+    ledger.append(event, record={"normal": True})
+    external = records.parent / "external.json"
+    external.write_text('{"private": true}', encoding="utf-8")
+    path = records / "ledger.jsonl"
+    if defect == "reference":
+        data = json.loads(path.read_text())
+        data["record"] = "../external.json"
+        path.write_text(json.dumps(data) + "\n", encoding="utf-8")
+    else:
+        attachment = records / f"{event.id}.json"
+        attachment.unlink()
+        symlink_or_skip(attachment, external)
+    before = path.read_bytes()
+    assert ledger.content(event.id).value("kind") == "accepted"
+    assert len(ledger.contents()) == 1
+    ledger.append(_accepted(entry.entry_id))
+    assert path.read_bytes().startswith(before)
+    with patch.object(Path, "open", autospec=True, side_effect=Path.open) as opened:
+        with pytest.raises(ValueError, match="record.*records/|record escapes"):
+            ledger.get(event.id)
+        assert all(
+            Path(call.args[0]).resolve() != external for call in opened.call_args_list
+        )
+    assert external.read_text(encoding="utf-8") == '{"private": true}'
 
 
 def test_append_keeps_locks_out_of_records(
@@ -605,19 +671,14 @@ def test_invalid_record_input_leaves_ledger_and_sidecars_unchanged(
     assert not (records / f"{event.id}.json").exists()
 
 
-@pytest.mark.parametrize("failure", ["duplicate", "bad_payload"])
-def test_invalid_existing_event_blocks_read_and_append_without_rewrite(
+def test_duplicate_existing_event_blocks_read_and_append_without_rewrite(
     entry_records: tuple[ResultEntry, Path],
-    failure: str,
 ) -> None:
     entry, records = entry_records
     event = _accepted(entry.entry_id)
     entry.ledger.append(event)
     path = records / "ledger.jsonl"
     data = json.loads(path.read_text())
-    if failure == "bad_payload":
-        data["id"] = str(uuid4())
-        data["payload"]["writes"] = []
     path.write_text(path.read_text() + json.dumps(data) + "\n", encoding="utf-8")
     before = path.read_bytes()
     for operation in (

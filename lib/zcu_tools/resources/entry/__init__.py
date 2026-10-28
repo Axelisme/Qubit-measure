@@ -19,6 +19,7 @@ from .ledger_models import (
     JsonObject,
     JsonValue,
     LedgerEvent,
+    LedgerEventContent,
     Origin,
     OutputFormat,
     SavedOutput,

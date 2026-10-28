@@ -87,7 +87,7 @@ Setup 與 point 文件使用 `format: zcu.parameter-container`、`format_version
 
 ## Records ledger
 
-`ResultEntry.ledger` 綁定 records 目錄。事件 entry_id 只作資訊，不參與讀取或 append 的歸屬檢查。缺 records 時讀取回空且不建目錄，第一次 append 才建立 records。RecordsLedger 擁有 typed 事件、JSON 附檔、完整 schema 驗證與 append-only 儲存。Caller 建立 acquire、save 或 accept 領域事件，提供事件 ID、UTC 時間與 frontend origin。Origin 是 gui、notebook 或 mcp。所有公開型別從 entry package 匯出。
+`ResultEntry.ledger` 綁定 records 目錄。事件 entry_id 只作資訊，不參與讀取或 append 的歸屬檢查。缺 records 時讀取回空且不建目錄，第一次 append 才建立 records。RecordsLedger 擁有 typed 事件、部分讀取內容、JSON 附檔與 append-only 儲存。Caller 建立 acquire、save 或 accept 領域事件，提供事件 ID、UTC 時間與 frontend origin。Origin 是 gui、notebook 或 mcp。所有公開型別從 entry package 匯出。
 
 Acquired 只保存 run 身分、experiment、point、roles 與事件時間，不另存 cfg 摘要。Cfg 正本隨 native run data 保存。
 
@@ -97,7 +97,11 @@ Acquired 只保存 run 身分、experiment、point、roles 與事件時間，不
 
 其餘讀取與追加都持同一 resolved path 對應的 per-user runtime lock，位置見 [resources owner](../README.md#檔案鎖)。每個 RecordsLedger handle 保存已驗證的 byte offset 與 event_id 索引，正常追加只解析新尾段。前 4096 bytes、上次 offset 前最後一行或檔案身分改變、檔案縮短，以及同大小但修改時間改變時，重新驗證整份 ledger。Ledger 的契約是 append-only。同 inode、相同頭部與前次尾行下，中段原地改寫並增長不在增量偵測範圍；`reload()` 明確從頭驗證並更新索引。回傳的事件互相隔離，附檔內容不快取。
 
-新事件只寫 1.0；讀取 1.0 與較新 1.x 時，envelope 與 kind-specific payload 都忽略不支援欄位，包括舊 cfg_summary。`get` 的 raw event_json 保留原行，讀取不改寫行或附檔。已知欄位錯誤、未知 major／kind 與損壞行仍拒絕，append 仍驗證 caller 的已知欄位。帶 record 的 append 先發布新 JSON 附檔，再追加事件，不修改 caller model 或既有附檔。失敗可以留下孤兒附檔或不完整尾行，不提供 crash recovery。
+新事件只寫 1.0。Append 完整驗證新事件，既有歷史只驗追加必需的 JSON、版本、event／run ID、duplicate 與完整尾行。不合完整 model 的歷史 payload 不阻擋追加。無效新事件在寫入前拒絕，原 bytes 保持不變。
+
+`content(id)` 與 `contents()` 回傳 resource-owned `LedgerEventContent`，不讀附檔。`value(path)` 只驗請求欄位的 annotation、field validators 與必要祖先，支援序列的零起算索引。缺值沿欄位 default，同一份內容保持穩定。`project()`、`events()`、`read_events_snapshot()` 與 `get().event` 明確投影整筆事件，執行完整 payload model 與跨欄位檢查。部分讀取不因無關壞 leaf 失敗，實際使用該 leaf 才報 ledger 路徑與欄位錯誤。
+
+讀取 1.0 與較新 1.x 時，envelope 與 kind-specific payload 忽略不支援欄位，包括舊 cfg_summary。`get` 的 raw event_json 保留原行，讀取不改寫行或附檔。Index 不驗未使用的 attachment reference。`get` 真正讀附件前，先驗 `records/<event-id>.json` canonical reference，再確認實體路徑未經 symlink 逃出 records。帶 record 的 append 先發布新 JSON 附檔，再追加事件，不修改 caller model 或既有附檔。失敗可以留下孤兒附檔或不完整尾行，不提供 crash recovery。
 
 `ResultEntry.record_analysis(analysis_kind, *, run_ids, summary, record=None)` 記錄跨 run 分析，回傳可供 `ledger.get(id)` 查詢的事件 UUID。事件保留 caller 的分析種類、輸入 runs 順序與 JSON 摘要，origin 為 notebook；不查 run 資料，也不要求工作點。非 None 的 record 交給 ledger 保存與引用，內容格式由 caller 決定。入口只記錄分析，不寫回值；使用者以一般 point 或 setup 編輯寫入值，需要時自行寫 metadata，Entry 不自動連回分析事件。
 

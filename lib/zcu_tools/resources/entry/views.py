@@ -91,7 +91,7 @@ def _validate_view_component_name(name: str, *, source: Path | None) -> None:
 
 
 def validate_view_components(
-    document: SetupDocument | PointDocument, *, source: Path | None
+    document: SetupDocument | PointDocument | ParameterContent, *, source: Path | None
 ) -> None:
     """Reject components that shadow any SetupView/PointView/EditView public member.
 
@@ -101,7 +101,13 @@ def validate_view_components(
     member before binding/publication. No mutation, model hooks or I/O occurs.
     Public class members are discovered on each call, without a reserved table.
     """
-    for name in document.components:
+    names = (
+        document.component_names()
+        if isinstance(document, ParameterContent)
+        else document.components
+    )
+    for name in names:
+        validate_component_name(name, source=source)
         _validate_view_component_name(name, source=source)
 
 
@@ -122,9 +128,7 @@ def register_view_read(
     Validate the cached document without I/O before binding. No model hook runs.
     """
     if isinstance(document, DocumentStore):
-        content = ParameterContent(document.content())
-        for name in content.component_names():
-            _validate_view_component_name(name, source=source)
+        validate_view_components(ParameterContent(document.content()), source=source)
     else:
         validate_view_components(document, source=source)
     state = vars(view)
@@ -193,7 +197,9 @@ def cached_parameter_content(view: PointView | SetupView) -> ParameterContent:
     if not isinstance(document, DocumentStore):
         raise TypeError("Parameter content requires a bound document")
     if binding.content is None or binding.revision != document.document_revision:
-        binding.content = ParameterContent(document.content())
+        binding.content = ParameterContent.from_document(
+            document.content(), source=document.source_path
+        )
         binding.revision = document.document_revision
     return binding.content
 

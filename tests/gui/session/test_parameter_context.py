@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Self
 
 import pytest
-from pydantic import model_validator
+from pydantic import Field, field_validator, model_validator
 from zcu_tools.cfg_model import ConstWaveformCfg, PulseSpec
 from zcu_tools.gui.expected_error import ExpectedErrorCategory, InvalidInputError
 from zcu_tools.gui.session.aliases import AliasRow, AliasTable
@@ -205,6 +205,58 @@ def test_parameter_snapshot_round_trip_keeps_content_library_and_authored_aliase
     assert restored.aliases == original.aliases
     assert restored.roles == original.roles
     assert restored.document().metadata == original.document().metadata
+
+
+def test_snapshot_preserves_consumed_factory_defaults_without_validating_unused_fields(
+    source: tuple[PointDocument, LibrarySnapshot],
+) -> None:
+    from itertools import count
+
+    from zcu_tools.experiment.metadata import ParameterSnapshot
+
+    sequence = count(1)
+
+    class Notebook(ComponentSchema):
+        title: str
+        token: str = Field(default_factory=lambda: f"capture-{next(sequence)}")
+        bad: float
+
+        @field_validator("title", mode="before")
+        @classmethod
+        def strip_title(cls, value: object) -> object:
+            return value.strip().lower() if isinstance(value, str) else value
+
+    component_registry.register("capture/notebook", Notebook)
+    try:
+        original = ParameterContext(
+            point=ParameterContent(
+                {
+                    "components": {
+                        "note": {
+                            "kind": "capture/notebook",
+                            "title": "  SAVED  ",
+                            "bad": [],
+                        }
+                    }
+                }
+            ),
+            library=source[1],
+            target=None,
+            roles=None,
+        )
+        assert original.value("note.token") == "capture-1"
+        assert original.value("note.title") == "saved"
+        encoded = capture_parameters(original).model_dump_json()
+        restored = restore_parameters(ParameterSnapshot.model_validate_json(encoded))
+        assert restored.value("note.token") == "capture-1"
+        assert restored.value("note.token") == "capture-1"
+        assert restored.value("note.title") == "saved"
+        with pytest.raises(ValueError, match="note.bad"):
+            restored.value("note.bad")
+        with pytest.raises(ValueError, match="note"):
+            restored.component("note")
+    finally:
+        component_registry.unregister("capture/notebook")
 
 
 @pytest.mark.parametrize("defect", ["missing", "different_format", "extra"])

@@ -189,7 +189,7 @@ class ParameterContext:
         """Copy captured resource content without consulting files or selection."""
         self._ensure_readable()
         if isinstance(self._point, ParameterContent):
-            return self._point.model_copy(deep=True)
+            return self._point.captured()
         return ParameterContent(
             TypeAdapter(YamlValue).validate_python(
                 self._point.model_dump(mode="python", serialize_as_any=True)
@@ -358,6 +358,18 @@ class ParameterContext:
     def document(self) -> PointDocument | ParameterContent:
         """Copy the fixed point without I/O or model hooks; unavailable sources raise."""
         self._ensure_readable()
+        return self._point.model_copy(deep=True)
+
+    def whole_document(self) -> PointDocument:
+        """Project the complete fixed point with all model checks, without I/O.
+
+        Unlike document(), this explicitly consumes every parameter section.
+        Incomplete stored/empty content and malformed fields raise owner errors.
+        Native typed captures retain their original component values.
+        """
+        self._ensure_readable()
+        if isinstance(self._point, ParameterContent):
+            return self._point.project()
         return self._point.model_copy(deep=True)
 
     def bind_aliases(

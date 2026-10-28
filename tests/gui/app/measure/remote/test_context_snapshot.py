@@ -9,7 +9,7 @@ import pytest
 from zcu_tools.cfg_model import ArbWaveformCfg, PulseSpec
 from zcu_tools.gui.remote.errors import ErrorCode
 from zcu_tools.gui.session.aliases import AliasRow
-from zcu_tools.gui.session.context_types import ContextSourceFault
+from zcu_tools.gui.session.context_types import ContextSourceFault, SavedPoint
 from zcu_tools.gui.session.parameters import ParameterContext, RoleBinding
 from zcu_tools.resources.entry import ComponentSchema, ResultEntry, component_registry
 from zcu_tools.resources.waveform_assets import ArbWaveformError
@@ -116,8 +116,8 @@ def test_snapshot_returns_complete_native_documents_without_materializing_assets
     captured = context.read_context()
     result = application.result("context.snapshot", {})
     assert result == {
-        "target": captured.target.model_dump(),
-        "point": captured.document().model_dump(serialize_as_any=True),
+        "target": saved_target(captured).model_dump(),
+        "point": captured.whole_document().model_dump(serialize_as_any=True),
         "library": captured.library.document().model_dump(serialize_as_any=True),
         "aliases": [],
     }
@@ -187,13 +187,19 @@ def test_nonfinite_snapshot_never_substitutes_null_or_unlocks_context(
     application.result("point.new", {"label": "working"})
     context = application.controller.context_control
     context.set_parameter(
-        context.read_context().target, "general.ext.nested", {"values": [value]}
+        saved_target(context.read_context()), "general.ext.nested", {"values": [value]}
     )
     reply = application.rpc("context.snapshot", {})
     error = reply["error"]
     assert isinstance(error, dict)
     assert error["code"] == ErrorCode.PRECONDITION_FAILED
     assert error["reason"] == "unserializable_context"
+
+
+def saved_target(parameters: ParameterContext) -> SavedPoint:
+    target = parameters.target
+    assert isinstance(target, SavedPoint)
+    return target
 
 
 def snapshot_mapping(value: object) -> dict[str, object]:
@@ -214,7 +220,7 @@ def browse_context(application: PointApplication) -> PointApplication:
     context.add_component("Q1", "fake/drive/a", {"rate": 10.0, "sense": "S1"})
     context.add_component("S1", "fake/sensor", {"rate": 20.0})
     context.set_parameter(
-        context.read_context().target,
+        saved_target(context.read_context()),
         "general.ext.browse",
         {
             "scalar": 7.5,
@@ -248,7 +254,7 @@ def test_snapshot_summary_preserves_native_array_shape_and_numpy_scalars(
         application.open_entry()
         application.result("point.new", {"label": "working"})
         captured = application.controller.context_control.read_context()
-        point = captured.document()
+        point = captured.whole_document()
         point = point.model_copy(
             update={
                 "components": {

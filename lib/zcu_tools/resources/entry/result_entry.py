@@ -582,6 +582,7 @@ class ResultEntry:
 
     def _validate_parameter_read(self, document: YamlMap, source: Path) -> None:
         validate_parameter_header(document, source=source)
+        validate_view_components(ParameterContent(document), source=source)
         component_registry.require_schema_policy().require_current(
             document, source=source, upgrade_target=self._result_path
         )

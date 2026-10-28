@@ -227,6 +227,14 @@ class ParameterContent(RootModel[YamlValue]):
 
     root: YamlValue = Field(default_factory=dict)
     _defaults: dict[str, YamlValue] = PrivateAttr(default_factory=dict)
+    _source: Path = PrivateAttr(default=Path("snapshot"))
+
+    @classmethod
+    def from_document(cls, document: YamlValue, *, source: Path) -> Self:
+        """Detach cached YAML with its diagnostic source, never serialized as data."""
+        content = cls(deepcopy(document))
+        content._source = source
+        return content
 
     def section(self, name: str) -> YamlValue:
         """Copy a recorded section; missing sections raise AttributeError."""
@@ -259,6 +267,38 @@ class ParameterContent(RootModel[YamlValue]):
         except ValueError as exc:
             raise ValueError(f"{name}: {exc}") from exc
 
+    def captured(self) -> Self:
+        """Detach raw content with already consumed defaults recorded as values.
+
+        Unused fields stay opaque and no new defaults or validators run. Reusing
+        this serialized content therefore cannot regenerate a consumed factory.
+        """
+        content = self.model_copy(deep=True)
+        for path, value in sorted(
+            self._defaults.items(), key=lambda item: item[0].count(".")
+        ):
+            parts = path.split(".")
+            if parts[0] != "general":
+                parts.insert(0, "components")
+            node = content.root
+            for part in parts[:-1]:
+                if not isinstance(node, dict):
+                    raise ValueError(f"{path}: default ancestor must be a mapping")
+                node = node[part]
+            if not isinstance(node, dict):
+                raise ValueError(f"{path}: default parent must be a mapping")
+            node[parts[-1]] = deepcopy(value)
+        return content
+
+    def project(self) -> "PointDocument":
+        """Validate the complete recorded document, including all model checks.
+
+        Requires a complete point document, unlike leaf reads. Missing sections,
+        malformed components/general and model invariants raise owner errors.
+        No file is read and no missing identity or timestamp is synthesized.
+        """
+        return PointDocument.model_validate(self.captured().root)
+
     def component_names(self) -> tuple[str, ...]:
         """List recorded names without decoding any component or general fields."""
         if isinstance(self.root, dict) and "components" not in self.root:
@@ -280,7 +320,7 @@ class ParameterContent(RootModel[YamlValue]):
         """Decode the complete components section on explicit whole-section use."""
         if self.root == {}:
             return {}
-        return _ParameterDocument.validate_components(self.section("components"))
+        return {name: self.component(name) for name in self.component_names()}
 
     @property
     def general(self) -> PointGeneral | None:
@@ -335,9 +375,7 @@ class ParameterContent(RootModel[YamlValue]):
         kind = node.get("kind")
         if not isinstance(kind, str):
             raise ValueError(f"{name}.kind must be a string")
-        return node, component_registry.get(
-            kind, source=Path("snapshot"), component=name
-        )
+        return node, component_registry.get(kind, source=self._source, component=name)
 
     def _default_value(self, path: str, schema: core_schema.CoreSchema) -> YamlValue:
         if path not in self._defaults:

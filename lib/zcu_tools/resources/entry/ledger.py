@@ -16,7 +16,7 @@ from pydantic import TypeAdapter
 from zcu_tools.resources.file_lock import lock_path_for
 from zcu_tools.utils import atomic_replace
 
-from .ledger_models import JsonObject, LedgerEvent
+from .ledger_models import JsonObject, LedgerEvent, LedgerEventContent
 
 _JSON_OBJECT = TypeAdapter(JsonObject)
 
@@ -36,6 +36,12 @@ class LedgerEntry:
 
 
 @dataclass(frozen=True)
+class _IndexedEntry:
+    content: LedgerEventContent
+    event_json: str
+
+
+@dataclass(frozen=True)
 class _LedgerState:
     """Validated prefix and ID index, published only after the whole tail passes."""
 
@@ -44,13 +50,13 @@ class _LedgerState:
     offset: int
     head: bytes
     last_line: bytes
-    entries: dict[str, LedgerEntry]
+    entries: dict[str, _IndexedEntry]
 
 
 class RecordsLedger:
     """Serialize reads/appends with one per-user runtime lock for ledger.jsonl.
 
-    Each handle indexes validated lines and parses only appended bytes. A shorter
+    Each handle indexes header/identity-checked JSON and parses only appended bytes. A shorter
     file, changed first 4096 bytes, changed previous last line or changed file
     identity triggers a full reread, as does a modified file of unchanged size.
     The ledger is append-only: an in-place middle rewrite combined with growth,
@@ -117,8 +123,10 @@ class RecordsLedger:
 
         event.record must be None. An attachment is published under <id>.json and
         its canonical reference added to a copy, never to the input event. Under
-        the lock, validate all historical lines before appending and flushing a
-        complete UTF-8 line. Event entry_id is informational, not membership.
+        the lock, check historical JSON/header/event and run references, duplicate
+        IDs and complete tails before flushing a UTF-8 line. Unused historical
+        payload fields are not projected. This new event is fully validated.
+        Event entry_id is informational, not membership.
         Duplicate IDs, invalid content and
         existing attachments are rejected without overwriting history. After an
         I/O failure only unpublished temporary files are removed, not evidence.
@@ -157,9 +165,7 @@ class RecordsLedger:
         successful reads never rewrite ledger bytes.
         """
         with self._locked():
-            return tuple(
-                item.event.model_copy(deep=True) for item in self._read().values()
-            )
+            return tuple(item.content.project() for item in self._read().values())
 
     def read_events_snapshot(self) -> tuple[LedgerEvent, ...]:
         """Read isolated validated events without acquiring or creating a lock.
@@ -172,7 +178,7 @@ class RecordsLedger:
         created. I/O errors propagate. This does not update the incremental index.
         """
         return tuple(
-            item.event.model_copy(deep=True)
+            item.content.project()
             for item in self._read(force_reload=True, publish_state=False).values()
         )
 
@@ -186,9 +192,27 @@ class RecordsLedger:
         """
         with self._locked():
             return tuple(
-                item.event.model_copy(deep=True)
+                item.content.project()
                 for item in self._read(force_reload=True).values()
             )
+
+    def content(self, event_id: str) -> LedgerEventContent:
+        """Read one immutable partial event without projecting payload or attachment.
+
+        JSON/header/event and run references, duplicate IDs and tail are checked.
+        Unknown event IDs raise KeyError. Leaf reads report requested field errors.
+        """
+        with self._locked():
+            return self._read()[event_id].content
+
+    def contents(self) -> tuple[LedgerEventContent, ...]:
+        """List immutable partial events in append order, without attachments.
+
+        Index validation matches content(). Other fields remain opaque until used.
+        No ledger bytes are written; a missing ledger returns an empty tuple.
+        """
+        with self._locked():
+            return tuple(item.content for item in self._read().values())
 
     def get(self, event_id: str) -> LedgerEntry:
         """Read an event and its local JSON attachment under the ledger lock.
@@ -203,8 +227,8 @@ class RecordsLedger:
     def get_many(self, event_ids: tuple[str, ...]) -> tuple[LedgerEntry, ...]:
         """Read requested events and attachments with one locked ledger parse.
 
-        Return entries in input order, including repeated IDs. Each unique ID
-        and attachment is checked once per call. Validated ledger lines are indexed;
+        Return entries in input order, including repeated IDs. Each requested
+        complete event and attachment is checked once per call. Partial lines are indexed;
         attachments are read from disk on every call.
         The first missing ID raises KeyError; earlier attachment failures
         propagate just as in get(). Unrequested attachments are not read.
@@ -220,20 +244,23 @@ class RecordsLedger:
                 found[event_id] = self._with_record(item)
             return tuple(found[event_id] for event_id in event_ids)
 
-    def _with_record(self, item: LedgerEntry) -> LedgerEntry:
+    def _with_record(self, item: _IndexedEntry) -> LedgerEntry:
+        event = item.content.project()
         record = None
-        if item.event.record is not None:
-            path = self._records / f"{item.event.id}.json"
+        if event.record is not None:
+            path = self._records / f"{event.id}.json"
+            if not path.resolve().is_relative_to(self._records):
+                raise ValueError(f"{path}: record escapes its root")
             try:
                 content = path.read_text(encoding="utf-8")
                 record = _JSON_OBJECT.validate_json(content)
             except ValueError as exc:
                 raise ValueError(f"{path}: invalid record: {exc}") from exc
-        return LedgerEntry(item.event.model_copy(deep=True), record, item.event_json)
+        return LedgerEntry(event, record, item.event_json)
 
     def _read(
         self, *, force_reload: bool = False, publish_state: bool = True
-    ) -> dict[str, LedgerEntry]:
+    ) -> dict[str, _IndexedEntry]:
         try:
             stream = self._path.open("rb")
         except FileNotFoundError:
@@ -264,16 +291,17 @@ class RecordsLedger:
                     previous = None
             entries = previous.entries if previous is not None else {}
             stream.seek(previous.offset if previous is not None else 0)
-            added: dict[str, LedgerEntry] = {}
+            added: dict[str, _IndexedEntry] = {}
             last_line = previous.last_line if previous is not None else b""
             for number, encoded_line in enumerate(stream, start=len(entries) + 1):
                 try:
-                    item = self._parse_entry(encoded_line)
-                    if item.event.id in entries or item.event.id in added:
-                        raise ValueError(f"duplicate event ID {item.event.id!r}")
+                    item = self._parse_entry(encoded_line, number=number)
+                    event_id = item.content.id
+                    if event_id in entries or event_id in added:
+                        raise ValueError(f"duplicate event ID {event_id!r}")
                 except ValueError as exc:
                     raise ValueError(f"{self._path}:{number}: {exc}") from exc
-                added[item.event.id] = item
+                added[event_id] = item
                 last_line = encoded_line
             offset = stream.tell()
             # A bounded prefix detects replacement without rereading growing history.
@@ -287,8 +315,8 @@ class RecordsLedger:
             )
         return entries
 
-    def _parse_entry(self, encoded_line: bytes) -> LedgerEntry:
-        """Decode one complete line and validate its event envelope."""
+    def _parse_entry(self, encoded_line: bytes, *, number: int) -> _IndexedEntry:
+        """Decode one complete line and validate only required index information."""
         line = encoded_line.decode("utf-8")
         if not line.endswith("\n"):
             raise ValueError("incomplete tail: expected LF")
@@ -296,12 +324,9 @@ class RecordsLedger:
         data = _JSON_OBJECT.validate_json(raw)
         if "format" not in data or "format_version" not in data:
             raise ValueError("missing format or format_version header")
-        # Reading projects known fields at every supported minor;
-        # event_json retains the complete original envelope.
-        event = LedgerEvent.model_validate(
-            data, extra="ignore", context={"ledger_read": True}
-        )
-        return LedgerEntry(event, None, raw)
+        content = LedgerEventContent(data, source=f"{self._path}:{number}")
+        content.validate_index()
+        return _IndexedEntry(content, raw)
 
     def _publish_record(self, event_id: str, content: JsonObject) -> None:
         path = self._records / f"{event_id}.json"
