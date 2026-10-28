@@ -1,6 +1,6 @@
 # Single-fluxonium acquisition
 
-**Last updated:** 2026-10-28 (UTC), projective readout
+**Last updated:** 2026-10-28 (UTC), complete-set multi-ADC preparation
 
 **Readers:** framework-dev, lab-author, agent. Compose complete fluxonium timelines with one physical readout cavity.
 
@@ -82,6 +82,28 @@ explicit `Basis` records to `batch_populations`, then calls
 the retained DC energy order. Cavity frequencies include the model owner's
 dressed shifts at that DC point. Receiver PSD converts to sample covariance
 using the ADC sample interval. One scattering phase is always supplied explicitly.
+
+`preflight(request, snapshot, receivers=...)` plans the complete observation set
+of one physical cavity. Pass every ADC's `resources.simulation_schema.Receiver`
+calibration in request order. Omitting `receivers` selects the configured
+standalone ADC. Classification uses all triggers, even when an ADC observes
+only terminal or only herald. Each ADC keeps empty grids for unobserved events.
+Preflight checks every template's projective count and each ADC's event/grid
+layout without building a model, evolving a density or solving an ADC response.
+Conflicts name the ADC, templates and layouts.
+
+`prepare_readouts(preflight)` evolves one common `ProjectionReadout` and returns
+all `channels` and `raw.batches` in receiver order. ADCs observing the same event
+share its CTMC path in raw and decimated sampling. Their receiver noise remains
+independent. `ConditionalSums.event_indices` retains original logical event IDs,
+so a terminal-only ADC does not relabel terminal as event zero. Preflight binds
+the current settings and snapshot. Changing source settings before preparation
+raises `ValueError`; request arrays must remain unchanged between those calls.
+
+Standalone `prepare(request, snapshot)` uses the same owner with one receiver.
+Its `channel` property returns that receiver. Multi-ADC callers use `channels`;
+asking for `channel` when several receivers exist raises `ValueError`.
+No terminal marginal can replace `raw.readout` when sampling projection histories.
 
 Integrated rounds use ADC `round_statistics` and `PreparedRawShots`.
 Decimated rounds use ADC `sample_traces`. No environment-owned random sampler,

@@ -37,7 +37,8 @@ class SingleFluxoniumPreparation:
 
     key: content digest including settings, snapshot, controls and layout.
     populations: read-only (*point_dims,states) terminal DC-state marginals after
-        ADC normalization. channel: event-aligned ADC conditional sums.
+        ADC normalization. channels: event-aligned ADC conditional sums in
+        preflight receiver order. channel selects the sole standalone receiver.
     raw.readout keeps full projection histories and event populations; sampling
         must use it, not reconstruct independent events from the marginals.
     raw: immutable deferred physical-shot inputs, without a round RNG identity.
@@ -47,11 +48,19 @@ class SingleFluxoniumPreparation:
 
     key: bytes
     populations: NDArray[np.float64]
-    channel: ChannelReadout
+    channels: tuple[ChannelReadout, ...]
     raw: PreparedRawShots
     paths: PathDiagnostics
     reuse_keys: tuple[bytes, ...]
     """All evolution span digests requiring current Engine routing validation."""
+
+    @property
+    def channel(self) -> ChannelReadout:
+        """Return the sole ADC; raise ValueError for multi-receiver preparation."""
+        if len(self.channels) != 1:
+            raise ValueError("multi-ADC preparation requires channels, not channel")
+        return self.channels[0]
+
     projection_diagnostics: ProjectionDiagnostics | None = None
     """Per-point retained histories/pruned mass, or None without projection."""
 

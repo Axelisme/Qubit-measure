@@ -1,6 +1,6 @@
 # Six independent fluxonium cavities
 
-**Last updated:** 2026-10-28 (UTC), routing-only residency allowance
+**Last updated:** 2026-10-28 (UTC), projective routing and multi-ADC preparation
 
 **Readers:** framework-dev, lab-author, agent. Build and acquire six independent cavities through the normal simulation SoC.
 
@@ -57,9 +57,25 @@ Independent cavities draw separate streams. QICK retains ADC declaration order,
 normalization, software-round averaging and companion sums from decimated traces.
 
 A request uses either the pulse route or mux routes. All reads of one ADC at one
-point must select the same cavity. Earlier cavity pulses, missing incident tones,
-unbound controls and ambiguous frequency assignments fail before evolution.
-The backend supports terminal readout only, as the single-model source does.
+point must select the same cavity. Untriggered cavity drives, missing terminal
+tones, unbound controls and ambiguous frequency assignments fail before evolution.
+Triggered nonterminal blocks follow their tones into each cavity's complete
+observation set. Single's public `preflight` owns classification and validates
+every ADC/template layout. Six completes preflight for all routed sources
+before any density evolution or sampling. A source requires equal projective
+counts and per-ADC/event grid counts across its templates. Conflicts name the
+ADC, templates and layouts. Different sources may have different topologies.
+
+Each cavity prepares one complete projection history through single's public
+`prepare_readouts`. An ADC may omit herald or terminal observations without
+losing their logical event identity. ADCs observing the same event share its
+CTMC path. Independent cavities keep separate histories and sampling streams.
+Projection uses rank-1 DC energy states, not groups inferred from IQ separation.
+ADC jumps during herald affect IQ but do not feed back into later evolution.
+Each qubit's `numerics.projection_prune_floor` controls its own global history
+pruning. Zero retains every history, including zero-weight histories. A positive
+floor discards lower weights and renormalizes survivors. Empty survivors raise
+`ValueError` naming the point and floor.
 Pulse ADC6 uses Q1's receiver gain, offset, phase, time of flight and noise PSD.
 Its physical cavity and incident-field calibration follow the frequency route.
 Q1's seed selects the environment root stream. The largest per-qubit
@@ -104,9 +120,14 @@ Single-fluxonium's pulse-only private replay contract is unchanged.
 ## Bounded statistics
 
 The backend partitions only routing patterns present in the request. It prepares
-independent cavity populations and ADC responses on those point subsets.
-Integrated mode preserves every sampled marginal count. Sorted cumulative-count
-boundaries encode the common summary in at most `1 + sum(levels - 1)` bins.
-For six 21-level circuits this is 121 bins, rather than `21**6` joint states.
-This summary represents marginal moments, not a joint quantum state.
+independent cavity histories and ADC responses on those point subsets.
+Integrated mode flattens each cavity's history and terminal state into one
+marginal axis. Sorted cumulative-count boundaries preserve each sampled
+marginal count in at most `1 + sum(axis_sizes - 1)` bins. Each axis size is the
+maximum flattened count width for that cavity, with its retained level count
+as the minimum. Without projections, six 21-level circuits still use 121 bins,
+rather than `21**6` joint states. This summary represents marginal moments,
+not a cross-cavity joint quantum state or a physical joint-shot sample.
+Raw retains the complete independent sources through `IndependentRawShots`.
 Raw and decimated draws use the ADC owner's physical samplers, not that histogram.
+Terminal-only raw, integrated and decimated numeric outputs remain unchanged.

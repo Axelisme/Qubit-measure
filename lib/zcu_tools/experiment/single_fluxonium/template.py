@@ -206,7 +206,9 @@ def plan_template(
     No forced return to DC or physics calculation occurs. All original points
     occupy one batch, even when their readout times differ. Engine owns segmenting.
 
-    Exactly one configured receiver and terminal pulse block per point are required.
+    The configured receiver must occur once in the complete observation set.
+    Other receivers retain their triggers for shared projective classification.
+    One terminal pulse block per point is required.
     Triggered nonterminal blocks become ordered projective reads. Unobserved
     terminal blocks retain pulses and empty grids. Projective starts enter batch
     segment boundaries; runtime alone projects densities and continues evolution.
@@ -217,11 +219,13 @@ def plan_template(
     numeric records raise ValueError. No ADC solver, density or RNG is used.
     Returned contents are detached; input buffers may subsequently be reused.
     """
-    if (
-        len(template.readouts) != 1
-        or template.readouts[0].channel != settings.readout.adc.ro_ch
-    ):
-        raise ValueError("single fluxonium requires its one bound receiver")
+    windows = tuple(
+        window
+        for window in template.readouts
+        if window.channel == settings.readout.adc.ro_ch
+    )
+    if len(windows) != 1:
+        raise ValueError("single fluxonium requires its configured receiver once")
     dc = dc_flux(settings, snapshot)
     memo: dict[int, EnvelopeSpec] = {}
     drive = ReadoutDrive(
@@ -230,7 +234,7 @@ def plan_template(
         readout_kind,
     )
     partition = classify_readout(template, drive, memo)
-    read_events = logical_event_contents(template, drive, template.readouts[0], memo)
+    read_events = logical_event_contents(template, drive, windows[0], memo)
     contents = read_events[-1]
     microwave, fast_flux = [], []
     for event in template.events:

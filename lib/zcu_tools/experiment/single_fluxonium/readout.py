@@ -123,10 +123,12 @@ def prepare_readout(
     errors propagate; no sampling, normalization or QICK averaging occurs here.
     """
     adc = settings.readout.adc
-    rate = request.templates[0].readouts[0].sample_rate_mhz
-    if any(
-        template.readouts[0].sample_rate_mhz != rate for template in request.templates
-    ):
+    windows = tuple(
+        next(window for window in template.readouts if window.channel == adc.ro_ch)
+        for template in request.templates
+    )
+    rate = windows[0].sample_rate_mhz
+    if any(window.sample_rate_mhz != rate for window in windows):
         raise ValueError("single-cavity templates require one ADC sample rate")
     receiver = Receiver(
         adc.gain,
