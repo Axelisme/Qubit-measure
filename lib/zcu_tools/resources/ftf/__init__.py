@@ -40,7 +40,9 @@ def parse_ftf(document: object) -> FTFSettings:
 
     document is an external value, not a numeric kernel parameter. Unknown fields,
     dimensions, units, duplicate sources/generators, source limits and receiver PSD
-    errors raise ValueError with a dotted field path. No I/O or resource creation.
+    errors raise ValueError with a dotted field path. Flux generator collisions
+    name both bindings and the channel, including drive and pulse/mux readout.
+    No I/O or resource creation.
     """
     try:
         config = FTFSettings.model_validate(document)
