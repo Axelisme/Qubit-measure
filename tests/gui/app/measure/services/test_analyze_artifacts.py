@@ -30,7 +30,8 @@ from zcu_tools.gui.app.measure.interactive_flux_pick import (
     FluxPickResult,
 )
 from zcu_tools.gui.app.measure.services.analyze import AnalyzeService
-from zcu_tools.gui.app.measure.state import State
+from zcu_tools.gui.app.measure.services.pane_commit import commit_analysis, commit_run
+from zcu_tools.gui.app.measure.state import AnalysisPaneState, RunPaneState, State
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.interactive import PluginDefinition
 from zcu_tools.gui.session.adapters.manual_owner_scheduler import ManualOwnerScheduler
@@ -145,15 +146,19 @@ def test_typed_gui_analysis_publishes_typed_result_and_saveable_named_fit(
     source = RunRecord[SavingCfg, SavingResult](
         cfg=None, result=SavingResult(times, signals)
     )
-    state.update_tab_result(
+    commit_run(
+        state,
         "tab",
-        replace(
-            source,
-            metadata=native_session.metadata.model_copy(
-                update={"experiment": SavingCore.AXES_SPEC.tag}
+        RunPaneState(
+            result=replace(
+                source,
+                metadata=native_session.metadata.model_copy(
+                    update={"experiment": SavingCore.AXES_SPEC.tag}
+                ),
             ),
+            storage=_flux_parameters(tab.run.parameters).storage,
+            parameters=_flux_parameters(tab.run.parameters),
         ),
-        parameters=_flux_parameters(tab.run.parameters),
     )
     handles = OperationHandles()
     service, bg = make_service(state, EventBus(), handles=handles)
@@ -210,15 +215,19 @@ def test_onetone_gui_done_uses_frontend_result_and_retains_named_pick(
         dtype=np.complex128,
     )
     source = RunRecord(cfg=None, result=SpectrumResult(values, freqs, signals))
-    state.update_tab_result(
+    commit_run(
+        state,
         "tab",
-        replace(
-            source,
-            metadata=native_session.metadata.model_copy(
-                update={"experiment": SpectrumCore.AXES_SPEC.tag}
+        RunPaneState(
+            result=replace(
+                source,
+                metadata=native_session.metadata.model_copy(
+                    update={"experiment": SpectrumCore.AXES_SPEC.tag}
+                ),
             ),
+            storage=_flux_parameters(tab.run.parameters).storage,
+            parameters=_flux_parameters(tab.run.parameters),
         ),
-        parameters=_flux_parameters(tab.run.parameters),
     )
     state.set_context(replace(state.session_env, parameters=tab.run.parameters))
     plots = make_plots()
@@ -293,8 +302,16 @@ def test_onetone_gui_cancel_retains_prior_analysis_and_no_new_pick(qapp) -> None
         cfg=None,
         result=SpectrumResult(values, freqs, np.ones((9, 7), dtype=np.complex128)),
     )
-    state.update_tab_result("tab1", source)
-    state.update_tab_analyze("tab1", previous, previous_plots)
+    commit_run(state, "tab1", RunPaneState(result=source))
+    commit_analysis(
+        state,
+        "tab1",
+        AnalysisPaneState(
+            result=previous,
+            plots=previous_plots,
+            params=state.get_tab("tab1").analysis.params,
+        ),
+    )
     plots = make_plots()
     handles = OperationHandles()
     service, _plugin, token = _start_onetone_plugin(state, source, plots, handles)
@@ -325,16 +342,40 @@ def test_onetone_gui_failed_frontend_analysis_settles_without_replacing_old_pane
             np.ones((9, 7), dtype=np.complex128),
         ),
     )
-    state.update_tab_result("tab1", source)
+    commit_run(state, "tab1", RunPaneState(result=source))
     previous = object()
     previous_plots = make_plots()
     old_figure, _ = previous_plots.subplots("old")
     previous_plots.finish()
-    state.update_tab_analyze("tab1", previous, previous_plots)
+    commit_analysis(
+        state,
+        "tab1",
+        AnalysisPaneState(
+            result=previous,
+            plots=previous_plots,
+            params=state.get_tab("tab1").analysis.params,
+        ),
+    )
     parameters = _flux_parameters()
-    state.update_tab_result("tab1", source, parameters=parameters)
+    commit_run(
+        state,
+        "tab1",
+        RunPaneState(
+            result=source,
+            storage=parameters.storage,
+            parameters=parameters,
+        ),
+    )
     state.set_context(replace(state.session_env, parameters=parameters))
-    state.update_tab_analyze("tab1", previous, previous_plots)
+    commit_analysis(
+        state,
+        "tab1",
+        AnalysisPaneState(
+            result=previous,
+            plots=previous_plots,
+            params=state.get_tab("tab1").analysis.params,
+        ),
+    )
     plots = make_plots()
 
     def fail_kernel(

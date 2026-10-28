@@ -177,7 +177,6 @@ def make_run_service(
     bus = bg.bus
     gate = OperationGate(bus)
     handles = OperationHandles()
-    writeback = MagicMock()
     progress = ProgressService(DirectProgressTransport())
     runner = OperationRunner(gate, handles, progress, bg, bus)
     svc = RunService(
@@ -185,7 +184,6 @@ def make_run_service(
         runner,
         bus,
         handles,
-        writeback,
         gate=gate,
         devices=lambda: {} if devices is None else devices,
         refresh_devices=lambda: None,

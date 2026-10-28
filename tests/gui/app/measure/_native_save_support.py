@@ -23,7 +23,18 @@ from zcu_tools.gui.app.measure.events.completion import (
     SaveArtifactsFinishedPayload,
     SaveDataFinishedPayload,
 )
-from zcu_tools.gui.app.measure.state import Session, State
+from zcu_tools.gui.app.measure.services.pane_commit import (
+    commit_analysis,
+    commit_post_analysis,
+    commit_run,
+)
+from zcu_tools.gui.app.measure.state import (
+    AnalysisPaneState,
+    PostAnalysisPaneState,
+    RunPaneState,
+    Session,
+    State,
+)
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
@@ -205,8 +216,14 @@ def native_save_session(
             cfg=make_form(SavingAdapter.make_form(FormContext(None)), state=state),
         ),
     )
-    state.update_tab_result(
-        "tab", replace(record, metadata=metadata), parameters=captured
+    commit_run(
+        state,
+        "tab",
+        RunPaneState(
+            result=replace(record, metadata=metadata),
+            storage=captured.storage,
+            parameters=captured,
+        ),
     )
     handles = OperationHandles()
     background = BackgroundRunner()
@@ -252,10 +269,14 @@ def declare_panes(
         _, axes = plots.subplots(name)
         axes.plot([0, 1], [1, 2])
     plots.finish(present=False)
-    session.state.update_tab_analyze(
-        "tab", PaneSummary(), plots, analyze_params_instance=PaneParams(2.0)
+    commit_analysis(
+        session.state,
+        "tab",
+        AnalysisPaneState(result=PaneSummary(), plots=plots, params=PaneParams(2.0)),
     )
-    session.state.update_tab_post_analyze(
-        "tab", PostSummary(), None, post_analyze_params_instance=PaneParams(4.0)
+    commit_post_analysis(
+        session.state,
+        "tab",
+        PostAnalysisPaneState(result=PostSummary(), plots=None, params=PaneParams(4.0)),
     )
     return plots

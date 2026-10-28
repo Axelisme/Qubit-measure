@@ -14,10 +14,15 @@ from zcu_tools.gui.app.measure.adapter import (
     PostAnalyzeRequest,
 )
 from zcu_tools.gui.app.measure.services.analyze import AnalyzeService
-from zcu_tools.gui.app.measure.services.plot_lifecycle import release_retired_plots
+from zcu_tools.gui.app.measure.services.pane_commit import commit_analysis, commit_run
 from zcu_tools.gui.app.measure.services.post_analyze import PostAnalyzeService
 from zcu_tools.gui.app.measure.services.tab import TabService
-from zcu_tools.gui.app.measure.state import Session, State
+from zcu_tools.gui.app.measure.state import (
+    AnalysisPaneState,
+    RunPaneState,
+    Session,
+    State,
+)
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.interactive import PluginDefinition
 from zcu_tools.gui.session.adapters.manual_owner_scheduler import ManualOwnerScheduler
@@ -70,14 +75,19 @@ def test_default_analysis_params_retain_result_source(
     )
     result = RunRecord(None, object())
     metadata = historical_metadata()
-    retired = (
-        state.update_tab_loaded_result(
-            "tab", replace(result, metadata=metadata), "native.h5", parameters=saved
+    if loaded:
+        pane = RunPaneState(
+            result=replace(result, metadata=metadata),
+            source_path="native.h5",
+            parameters=saved,
         )
-        if loaded
-        else state.update_tab_result("tab", result, parameters=saved)
-    )
-    release_retired_plots(retired)
+    else:
+        pane = RunPaneState(
+            result=result,
+            storage=None if saved is None else saved.storage,
+            parameters=saved,
+        )
+    commit_run(state, "tab", pane)
     service = TabService(
         state,
         MagicMock(),
@@ -89,7 +99,13 @@ def test_default_analysis_params_retain_result_source(
     assert preparation.has_params and preparation.error is None
     assert state.get_tab("tab").analysis.params is primary_params
     assert primary_contexts == [saved]
-    release_retired_plots(state.update_tab_analyze("tab", object(), None))
+    commit_analysis(
+        state,
+        "tab",
+        AnalysisPaneState(
+            result=object(), plots=None, params=state.get_tab("tab").analysis.params
+        ),
+    )
     assert service.initialize_tab_post_analyze_params("tab") is post_params
     assert state.get_tab("tab").post_analysis.params is post_params
     assert post_contexts == [saved]
@@ -132,7 +148,7 @@ def _make_source_state() -> State:
     state.add_tab(
         "tab1", Session(adapter_name="fake", adapter=MagicMock(), cfg=MagicMock())
     )
-    state.update_tab_result("tab1", RunRecord(None, object()))
+    commit_run(state, "tab1", RunPaneState(result=RunRecord(None, object())))
     return state
 
 
@@ -168,7 +184,15 @@ def test_fit_uses_run_source_for_request_and_writeback_after_rebinding(
     q1, q2 = result_sources
     captured = None if context_free else q1
     tab = state.get_tab("tab1")
-    state.update_tab_result("tab1", RunRecord(None, object()), parameters=captured)
+    commit_run(
+        state,
+        "tab1",
+        RunPaneState(
+            result=RunRecord(None, object()),
+            storage=None if captured is None else captured.storage,
+            parameters=captured,
+        ),
+    )
     state.set_context(replace(state.session_env, parameters=q2))
     writeback = MagicMock()
     service, background = _make_primary_service(state, EventBus(), writeback=writeback)
@@ -205,7 +229,15 @@ def test_interactive_writeback_retains_run_source_after_rebinding(
     state = _make_source_state()
     q1, q2 = result_sources
     captured = None if context_free else q1
-    state.update_tab_result("tab1", RunRecord(None, object()), parameters=captured)
+    commit_run(
+        state,
+        "tab1",
+        RunPaneState(
+            result=RunRecord(None, object()),
+            storage=None if captured is None else captured.storage,
+            parameters=captured,
+        ),
+    )
     tab = state.get_tab("tab1")
     state.set_context(replace(state.session_env, parameters=q2))
     writeback = MagicMock()
@@ -244,8 +276,24 @@ def test_post_uses_run_source_for_request_and_writeback_after_rebinding(
     captured = None if context_free else q1
     tab = state.get_tab("tab1")
     run_result, primary_result = RunRecord(None, object()), object()
-    state.update_tab_result("tab1", run_result, parameters=captured)
-    state.update_tab_analyze("tab1", primary_result, None)
+    commit_run(
+        state,
+        "tab1",
+        RunPaneState(
+            result=run_result,
+            storage=None if captured is None else captured.storage,
+            parameters=captured,
+        ),
+    )
+    commit_analysis(
+        state,
+        "tab1",
+        AnalysisPaneState(
+            result=primary_result,
+            plots=None,
+            params=state.get_tab("tab1").analysis.params,
+        ),
+    )
     state.set_context(replace(state.session_env, parameters=q2))
     writeback = MagicMock()
     service, background = _make_post_service(state, EventBus(), writeback=writeback)

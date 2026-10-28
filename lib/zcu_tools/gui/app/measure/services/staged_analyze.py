@@ -48,7 +48,7 @@ logger = logging.getLogger(__name__)
 if TYPE_CHECKING:
     from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 
-    from .ports import AnalyzeStatePort
+    from ..state import State
 
 
 class StagedAnalyzeService:
@@ -70,7 +70,7 @@ class StagedAnalyzeService:
 
     def __init__(
         self,
-        state: AnalyzeStatePort,
+        state: State,
         runner: OperationRunner,
         bus: EventBus,
         handles: OperationHandles,
