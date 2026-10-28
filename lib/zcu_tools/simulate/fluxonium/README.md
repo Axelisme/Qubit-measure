@@ -1,6 +1,6 @@
 # `simulate/fluxonium` 模塊重點文檔
 
-**Last updated:** 2026-10-28，reduced-flux predictor 與損耗無關結構重用
+**Last updated:** 2026-10-28，manifold population-decay modes
 
 **讀者：** framework-dev、agent。Fluxonium 能譜、色散與 predictor 的數值工具。
 
@@ -79,7 +79,8 @@ Caller 在溫度、DC、truncation 或其他結構設定改變時建立新 Model
 - `calculate_eff_t1(_with)` / `calculate_eff_t1_vs_flux(_with)` 包裝 scqubits，回傳 physical ns。`_with` 接受既有 Fluxonium 與 eigenpairs／spectrum data，供重用本徵分解。
 - `calculate_eff_t1_fast` / `calculate_eff_t1_vs_flux_fast` 使用快取算子與批次 numpy 計算，和 slow 路徑使用相同的物理 rates，`T1 = 1/Σrate`。支援 capacitive、inductive、charge impedance、flux bias line 與 quasiparticle channels。Fast 固定 `total=True`；不支援的 channel／options 直接報錯，需要單向 rate 時使用 slow 路徑。
 - `calculate_eff_t1_vs_flux_fast` 的 Temp 可為 scalar K 或與 flux 等長的固定逐點 K 陣列。陣列必須一維、正值且 finite；scalar 保留零溫極限。輸出依輸入 flux 順序對應；溫度形狀或值無效時在 eigensolve 前拋出 `ValueError`。此數值入口不讀溫度檔案、不做頻率內插。
-- Loss spectra 由 `simulate.spectra` 提供，與 joint directional baths 共用。Coherence 仍合併兩方向，不把 equilibrium rate 當單向 jump；預設 Q 與 scalar／array、callable options 不變。
+- `calculate_manifold_t1_vs_flux_fast` 以所有 retained 能階的 directional rates 求 population-decay modes。初態是 Gibbs 布居交換 0、1，observable 為 `1-p0`。每個 flux 回傳按 signed amplitude 降序的 `list[Mode(t1_ns, amplitude)]`，排除平衡模後歸一，不合併模，也不選主次模。溫度與五種 channel options 沿用 pair fast path，純 dephasing 不進 rate matrix。完整契約見 [coherence](coherence/README.md)。
+- Loss spectra 由 `simulate.spectra` 提供，與 joint directional baths 共用。Pair lifetime 合併兩方向，manifold 則保留每個方向建立 population generator；兩者都不把 equilibrium rate 當單向 jump。預設 Q 與 scalar／array、callable options 不變。
 - 絕對單位由 SI LC energy lifetime 與 raw scqubits regressions 驗證，fast／slow 相等不是唯一 oracle。半通量附近 matrix element 可能因 parity 消失，應比較接近零的 rate，不能只比較巨大 T1 的相對差。
 - `calculate_purcell_t1_vs_flux(..., progress=True)` 分別對 qubit e→g 與 g→e rates 做 resonator thermal average，回傳 equilibrium `T1=1/(Γeg+Γge)`，單位 ns。只納入 0↔1，不包含高能態 leakage，也不代表來源論文的完整 loss 模型。
   - 底層 module-public `purcell` 仍回傳指定 initial→final groups 的 directional escape lifetime。高階 sweep 重用同一本徵分解求兩個方向，再合併 rates。
