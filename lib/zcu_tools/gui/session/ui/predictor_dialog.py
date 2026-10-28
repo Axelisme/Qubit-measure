@@ -40,7 +40,7 @@ from qtpy.QtWidgets import (
 
 from zcu_tools.gui.lifetime import LifetimeScope
 from zcu_tools.gui.session.persistence import PersistenceError, SingleFileCaretaker
-from zcu_tools.gui.session.predictor_trial import PredictorTrial
+from zcu_tools.gui.session.predictor_trial import CalibrationReadiness, PredictorTrial
 from zcu_tools.gui.session.ui.eval_field import EvalNumericField
 from zcu_tools.gui.session.ui.predictor_cache import (
     PredictorSnapshot,
@@ -557,14 +557,7 @@ class PredictorDialog(QDialog):
         Return correction, actual MHz and clamped. Failures leave inputs unchanged.
         Neither the component nor the source predictor file is written.
         """
-        from zcu_tools.gui.session.services.predictor import CalibrateOffsetRequest
-
-        result = self._pred.calibrate_offset(
-            self.parameters(),
-            CalibrateOffsetRequest(
-                self.flux().to_frame(), self.device_values(), frequency_mhz, transition
-            ),
-        )
+        result = self._trial.calibrate(frequency_mhz, transition)
         self._display_calibration(result)
         return result
 
@@ -769,64 +762,32 @@ class PredictorDialog(QDialog):
         """Return all currently selected transitions for canvas highlighting."""
         return tuple(self._selected_transitions())
 
-    def _resolve_calibration_frequency_mhz(
-        self, *, update_status: bool = True
-    ) -> float | None:
-        from zcu_tools.gui.session.expression import (
-            EvalRef,
-            coerce_eval_result,
-            evaluate_numeric_expr,
+    def _resolve_calibration_frequency_mhz(self) -> float | None:
+        resolved = self._trial.resolve_calibration_frequency_mhz(
+            self._calibration_freq_field.read_raw(), self._parameter_provider
         )
+        if resolved.error is not None:
+            self._set_status(f"Calibration frequency: {resolved.error}", error=True)
+        return resolved.frequency_mhz
 
-        raw = self._calibration_freq_field.read_raw()
-        if not isinstance(raw, EvalRef):
-            return float(raw)
-        try:
-            parameters = self._parameter_provider()
-            resolved = coerce_eval_result(
-                evaluate_numeric_expr(raw.expr, parameters), raw.type_
-            )
-        # tolerated: Arbitrary capture/source failures must block calibration and retain the diagnostic message.
-        except Exception as exc:  # noqa: BLE001
-            if update_status:
-                self._set_status(f"Calibration frequency: {exc}", error=True)
-            return None
-        if not (raw.minimum <= float(resolved) <= raw.maximum):
-            if update_status:
-                self._set_status(
-                    f"Calibration frequency: value {resolved} out of range",
-                    error=True,
-                )
-            return None
-        return float(resolved)
-
-    def _calibration_block_status(self) -> tuple[str, bool] | None:
-        if self._live_mode:
-            return ("Live mode keeps calibration read-only.", False)
-        try:
-            self.parameters().build_predictor()
-            self.flux()
-            self.device_values()
-        except PredictorInputError as exc:
-            return (str(exc), True)
-        selected = self._selected_transitions()
-        if len(selected) != 1:
-            return ("Select exactly one transition to calibrate.", True)
-        if self._resolve_calibration_frequency_mhz(update_status=False) is None:
-            return ("Calibration frequency is unresolved.", True)
-        return None
+    def _calibration_block_status(self) -> CalibrationReadiness | None:
+        return self._trial.calibration_readiness(
+            live_mode=self._live_mode,
+            selected=self._selected_transitions(),
+            frequency=self._calibration_freq_field.read_raw(),
+            parameter_provider=self._parameter_provider,
+        )
 
     def _sync_calibration_button(self) -> None:
         status = self._calibration_block_status()
-        reason = status[0] if status is not None else None
+        reason = status.reason if status is not None else None
         self._calibrate_btn.setEnabled(reason is None)
         self._calibrate_btn.setToolTip("" if reason is None else reason)
 
     def _on_calibrate_clicked(self) -> None:
         block_status = self._calibration_block_status()
         if block_status is not None:
-            reason, is_error = block_status
-            self._set_status(reason, error=is_error)
+            self._set_status(block_status.reason, error=block_status.is_error)
             self._sync_calibration_button()
             return
         frequency_mhz = self._resolve_calibration_frequency_mhz()
@@ -841,7 +802,7 @@ class PredictorDialog(QDialog):
             self._set_status(str(exc), error=True)
 
     def _display_calibration(self, result: CalibrationResult) -> None:
-        self._flux_editor.set_offset(self.flux().offset + result.offset_correction)
+        self._flux_editor.refresh_offset()
         self._set_status(
             f"Calibrated offset={self.flux().offset:.6g} Φ0 "
             f"(correction {result.offset_correction:+.6g} Φ0); "

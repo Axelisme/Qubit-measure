@@ -6,7 +6,7 @@ Parsing raises named PredictorInputError failures; control failures propagate.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from math import isfinite
 from typing import TYPE_CHECKING, Literal
@@ -15,18 +15,42 @@ import numpy as np
 
 from zcu_tools.analysis.flux import FluxFrame
 from zcu_tools.gui.expected_error import FailedPreconditionError
+from zcu_tools.gui.session.expression import EvalRef, resolve_eval_ref
 from zcu_tools.gui.session.services.predictor import (
+    CalibrateOffsetRequest,
     PredictFreqRequest,
     PredictMatrixCurveRequest,
 )
 from zcu_tools.resources.predictor_file import PredictorFlux
 from zcu_tools.simulate.fluxonium.predict import FluxoniumParams
 from zcu_tools.simulate.parameters import ModelParams
-from zcu_tools.simulate.predictor import PredictorInputError
+from zcu_tools.simulate.predictor import CalibrationResult, PredictorInputError
 from zcu_tools.simulate.transmon import TransmonParams
 
 if TYPE_CHECKING:
     from zcu_tools.gui.session.predictor_control import PredictorControlPort
+    from zcu_tools.gui.session.types import ParameterContext
+
+
+@dataclass(frozen=True)
+class CalibrationFrequency:
+    """Calibration expression outcome, without status updates or logging.
+
+    frequency_mhz is the resolved measured MHz, or None on failure.
+    error is the original detailed failure message, or None on success.
+    Exactly one field is non-None.
+    """
+
+    frequency_mhz: float | None = None
+    error: str | None = None
+
+
+@dataclass(frozen=True)
+class CalibrationReadiness:
+    """A calibration blocker: reason is the exact UI message; is_error selects red status."""
+
+    reason: str
+    is_error: bool
 
 
 @dataclass(frozen=True)
@@ -261,6 +285,85 @@ class PredictorTrial:
             values = self.device_values()
             axis = self._axis
         return TrialInputs(params, frame, values, axis)
+
+    def calibration_readiness(
+        self,
+        *,
+        live_mode: bool,
+        selected: Sequence[tuple[int, int]],
+        frequency: float | EvalRef,
+        parameter_provider: Callable[[], ParameterContext | None] | None = None,
+    ) -> CalibrationReadiness | None:
+        """Return the first calibration blocker, or None when ready, without changes.
+
+        live_mode blocks before parsing. selected contains the selected level pairs.
+        frequency is measured MHz or a bounded EvalRef in MHz.
+        parameter_provider captures expression sources
+        only after valid physics, frame, native values and exactly one selection.
+        Expected input errors become blockers; unexpected model/control failures
+        propagate. Callers own button/status presentation and all notifications.
+        """
+        if live_mode:
+            return CalibrationReadiness("Live mode keeps calibration read-only.", False)
+        try:
+            self.parameters().build_predictor()
+            self.flux()
+            self.device_values()
+        except PredictorInputError as exc:
+            return CalibrationReadiness(str(exc), True)
+        if len(selected) != 1:
+            return CalibrationReadiness(
+                "Select exactly one transition to calibrate.", True
+            )
+        resolved = self.resolve_calibration_frequency_mhz(frequency, parameter_provider)
+        if resolved.frequency_mhz is None:
+            return CalibrationReadiness("Calibration frequency is unresolved.", True)
+        return None
+
+    def resolve_calibration_frequency_mhz(
+        self,
+        frequency: float | EvalRef,
+        parameter_provider: Callable[[], ParameterContext | None] | None = None,
+    ) -> CalibrationFrequency:
+        """Resolve measured MHz or a bounded MHz EvalRef without changing drafts.
+
+        Capture parameter_provider only for EvalRef; None permits arithmetic only.
+        Expression/coercion/range and arbitrary capture/source failures return the
+        original detailed error. No query runs, event emits or logging occurs.
+        Callers choose generic readiness or detailed status presentation.
+        """
+        if not isinstance(frequency, EvalRef):
+            return CalibrationFrequency(frequency_mhz=float(frequency))
+        try:
+            parameters = (
+                parameter_provider() if parameter_provider is not None else None
+            )
+            value = resolve_eval_ref(frequency, parameters)
+        # tolerated: Arbitrary capture/source failures must block calibration and retain the diagnostic message.
+        except Exception as exc:  # noqa: BLE001
+            return CalibrationFrequency(error=str(exc))
+        return CalibrationFrequency(frequency_mhz=float(value))
+
+    def calibrate(
+        self, frequency_mhz: float, transition: tuple[int, int] = (0, 1)
+    ) -> CalibrationResult:
+        """Add a measured transition's correction to the local Phi0 offset draft.
+
+        frequency_mhz is measured MHz; transition is an increasing level pair.
+        Assemble current parameters, frame and all native values once. Return
+        correction, actual MHz and clamped. Input and control failures propagate
+        without changing drafts. No component/file writes or events occur.
+        Callers must present the new offset before publishing success status.
+        """
+        inputs = self.inputs()
+        result = self._predictor.calibrate_offset(
+            inputs.params,
+            CalibrateOffsetRequest(
+                inputs.frame, inputs.device_values, frequency_mhz, transition
+            ),
+        )
+        self.set_offset(inputs.frame.offset + result.offset_correction)
+        return result
 
     def predict_frequency(self, transition: tuple[int, int] = (0, 1)) -> float:
         """Return MHz for a level pair at current native values; query failures propagate."""

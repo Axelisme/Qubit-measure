@@ -127,6 +127,14 @@ class PredictorFluxEditor(QGroupBox):
     def set_offset(self, offset: float) -> None:
         """Set local Phi0 offset text, notifying the owner on change."""
         self._trial.set_offset(offset)
+        self.refresh_offset()
+
+    def refresh_offset(self) -> None:
+        """Present the model's Phi0 offset text, notifying the owner if it changed.
+
+        Call after model calibration, before publishing a success status. The
+        synchronous text-change callback keeps normal edit/debounce/cache order.
+        """
         self._offset.setText(self._trial.offset_text)
 
     def set_device_value(self, name: str, value: float, *, notify: bool = True) -> None:

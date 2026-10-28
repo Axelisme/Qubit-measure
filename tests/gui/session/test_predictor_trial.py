@@ -4,7 +4,9 @@ import numpy as np
 import pytest
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.predictor_control import PredictorControlFacet
+from zcu_tools.gui.session.predictor_trial import PredictorTrial
 from zcu_tools.gui.session.services.predictor import (
+    CalibrateOffsetRequest,
     PredictFreqRequest,
     PredictMatrixCurveRequest,
     PredictMatrixCurveResult,
@@ -12,7 +14,11 @@ from zcu_tools.gui.session.services.predictor import (
 )
 from zcu_tools.resources.predictor_file import PredictorFlux
 from zcu_tools.simulate.fluxonium.predict import FluxoniumParams
-from zcu_tools.simulate.predictor import PredictorInputError, PredictorParams
+from zcu_tools.simulate.predictor import (
+    CalibrationResult,
+    PredictorInputError,
+    PredictorParams,
+)
 from zcu_tools.simulate.transmon import TransmonParams
 
 
@@ -62,15 +68,115 @@ def test_energy_drafts_preserve_finite_float_values(
     assert trial.energy_text(model, name) == "0.1"
 
 
+@pytest.fixture
+def calibration_trial() -> PredictorTrial:
+    trial = PredictorTrial(PredictorControlFacet(PredictorService()))
+    trial.set_flux(PredictorFlux(0.2, {"coil": 2.0}, {"coil": "A"}), {"coil": 0.3})
+    return trial
+
+
+def test_calibration_readiness_live_mode_takes_precedence(
+    calibration_trial: PredictorTrial,
+) -> None:
+    calibration_trial.set_energy_text("fluxonium", "EJ", "oops")
+    calibration_trial.set_flux(None, {})
+    block = calibration_trial.calibration_readiness(
+        live_mode=True, selected=(), frequency=0.0
+    )
+    assert block is not None
+    assert block.reason == "Live mode keeps calibration read-only."
+    assert not block.is_error
+
+
+@pytest.mark.parametrize(
+    ("text", "reason"),
+    [
+        ("oops", "EJ: enter a finite number or leave blank."),
+        ("", "Missing parameters: EJ"),
+    ],
+)
+def test_calibration_readiness_invalid_energy_precedes_missing_frame(
+    calibration_trial: PredictorTrial, text: str, reason: str
+) -> None:
+    calibration_trial.set_energy_text("fluxonium", "EJ", text)
+    calibration_trial.set_flux(None, {})
+    block = calibration_trial.calibration_readiness(
+        live_mode=False, selected=(), frequency=0.0
+    )
+    assert block is not None
+    assert block.reason == reason
+    assert block.is_error
+
+
+@pytest.mark.parametrize(
+    ("source", "reason"),
+    [
+        ("frame", "Load a predictor file to set the flux frame"),
+        ("device", "coil: enter a finite number"),
+        ("offset", "offset: enter a finite number"),
+    ],
+)
+def test_calibration_readiness_requires_frame_and_native_values(
+    calibration_trial: PredictorTrial, source: str, reason: str
+) -> None:
+    if source == "frame":
+        calibration_trial.set_flux(None, {})
+    elif source == "device":
+        calibration_trial.set_device_text("coil", "")
+    else:
+        calibration_trial.set_offset_text("nan")
+    block = calibration_trial.calibration_readiness(
+        live_mode=False, selected=(), frequency=0.0
+    )
+    assert block is not None
+    assert block.reason == reason
+    assert block.is_error
+
+
+@pytest.mark.parametrize("selected", [(), ((0, 1), (0, 2))])
+def test_calibration_readiness_requires_exactly_one_transition(
+    calibration_trial: PredictorTrial, selected: tuple[tuple[int, int], ...]
+) -> None:
+    block = calibration_trial.calibration_readiness(
+        live_mode=False, selected=selected, frequency=0.0
+    )
+    assert block is not None
+    assert block.reason == "Select exactly one transition to calibrate."
+    assert block.is_error
+
+
+@pytest.mark.parametrize("expr", ["", "missing.path", "11", "-1"])
+def test_calibration_readiness_blocks_unresolved_or_out_of_range_frequency(
+    calibration_trial: PredictorTrial, expr: str
+) -> None:
+    from zcu_tools.gui.session.expression import EvalRef
+
+    block = calibration_trial.calibration_readiness(
+        live_mode=False, selected=((0, 1),), frequency=EvalRef(expr, float, 0, 10)
+    )
+    assert block is not None
+    assert block.reason == "Calibration frequency is unresolved."
+    assert block.is_error
+
+
 class RecordingQueries(PredictorService):
     """Record requests at the control seam without executing numerical solvers."""
 
     def __init__(self) -> None:
         super().__init__()
+        self.calibrations: list[CalibrateOffsetRequest] = []
         self.points: list[PredictFreqRequest] = []
         self.matrices: list[PredictMatrixCurveRequest] = []
         self.failure: Exception | None = None
         self.matrix_failure: Exception | None = None
+
+    def calibrate_offset(
+        self, params: PredictorParams, req: CalibrateOffsetRequest
+    ) -> CalibrationResult:
+        self.calibrations.append(req)
+        if self.failure is not None:
+            raise self.failure
+        return CalibrationResult(0.03, 4321.0, True)
 
     def predict_freq(self, params: PredictorParams, req: PredictFreqRequest) -> float:
         self.points.append(req)
@@ -92,6 +198,127 @@ class RecordingQueries(PredictorService):
             req.values,
             np.array([[0.2 if req.operator == "n" else 0.3]]),
         )
+
+
+@pytest.mark.parametrize("frequency", [1200.0, "1000 + 200"])
+def test_calibration_frequency_success_and_readiness(
+    calibration_trial: PredictorTrial, frequency: float | str
+) -> None:
+    from zcu_tools.gui.session.expression import EvalRef
+
+    raw = (
+        EvalRef(frequency, float, 0, 2000) if isinstance(frequency, str) else frequency
+    )
+    resolved = calibration_trial.resolve_calibration_frequency_mhz(raw)
+    assert resolved.frequency_mhz == 1200.0
+    assert resolved.error is None
+    assert (
+        calibration_trial.calibration_readiness(
+            live_mode=False, selected=((0, 1),), frequency=raw
+        )
+        is None
+    )
+
+
+@pytest.mark.parametrize("expr", ["11", "-1"])
+def test_calibration_frequency_retains_detailed_range_error(
+    calibration_trial: PredictorTrial, expr: str, caplog: pytest.LogCaptureFixture
+) -> None:
+    from zcu_tools.gui.session.expression import EvalRef
+
+    resolved = calibration_trial.resolve_calibration_frequency_mhz(
+        EvalRef(expr, float, 0, 10)
+    )
+    assert resolved.frequency_mhz is None
+    assert resolved.error == f"value {float(expr)} out of range"
+    assert not caplog.records
+
+
+def test_calibration_frequency_isolates_provider_failure_and_captures_lazily(
+    calibration_trial: PredictorTrial, caplog: pytest.LogCaptureFixture
+) -> None:
+    from zcu_tools.gui.session.expression import EvalRef
+    from zcu_tools.gui.session.types import ParameterContext
+
+    calls: list[str] = []
+
+    def unavailable() -> ParameterContext | None:
+        calls.append("capture")
+        raise RuntimeError("capture offline")
+
+    raw = EvalRef("1200", float, 0, 2000)
+    for live_mode, selected in [(True, ((0, 1),)), (False, ())]:
+        assert (
+            calibration_trial.calibration_readiness(
+                live_mode=live_mode,
+                selected=selected,
+                frequency=raw,
+                parameter_provider=unavailable,
+            )
+            is not None
+        )
+    assert (
+        calibration_trial.resolve_calibration_frequency_mhz(
+            1200.0, unavailable
+        ).frequency_mhz
+        == 1200.0
+    )
+    assert not calls
+    resolved = calibration_trial.resolve_calibration_frequency_mhz(raw, unavailable)
+    assert resolved.frequency_mhz is None
+    assert resolved.error == "capture offline"
+    block = calibration_trial.calibration_readiness(
+        live_mode=False,
+        selected=((0, 1),),
+        frequency=raw,
+        parameter_provider=unavailable,
+    )
+    assert block is not None
+    assert block.reason == "Calibration frequency is unresolved."
+    assert calls == ["capture", "capture"]
+    assert not caplog.records
+
+
+@pytest.mark.parametrize(
+    "failure", [PredictorInputError("invalid query"), RuntimeError("solver offline")]
+)
+def test_calibration_control_failure_propagates_without_draft_changes(
+    failure: Exception,
+) -> None:
+    service = RecordingQueries()
+    service.failure = failure
+    trial = PredictorTrial(PredictorControlFacet(service))
+    trial.set_flux(PredictorFlux(0.2, {"coil": 2.0}, {"coil": "A"}), {"coil": 0.3})
+    with pytest.raises(type(failure)) as raised:
+        trial.calibrate(4300.0)
+    assert raised.value is failure
+    assert trial.offset_text == "0.2"
+    assert trial.device_text("coil") == "0.3"
+
+
+def test_calibration_adds_correction_to_local_offset_with_explicit_inputs() -> None:
+    service = RecordingQueries()
+    trial = PredictorTrial(PredictorControlFacet(service))
+    trial.set_flux(
+        PredictorFlux(0.2, {"coil": 2.0, "trim": -4.0}, {"coil": "A", "trim": "V"}),
+        {"coil": 0.3, "trim": -0.4},
+    )
+    result = trial.calibrate(4300.0, (1, 2))
+    assert result == CalibrationResult(0.03, 4321.0, True)
+    assert trial.offset_text == "0.23"
+    assert trial.flux().offset == 0.23
+    assert len(service.calibrations) == 1
+    request = service.calibrations[0]
+    assert request.frequency_mhz == 4300.0
+    assert request.transition == (1, 2)
+    assert request.frame.offset == 0.2
+    assert (
+        request.frame
+        == PredictorFlux(
+            0.2, {"coil": 2.0, "trim": -4.0}, {"coil": "A", "trim": "V"}
+        ).to_frame()
+    )
+    assert request.device_values == {"coil": 0.3, "trim": -0.4}
 
 
 @pytest.mark.parametrize("valid", [True, False])

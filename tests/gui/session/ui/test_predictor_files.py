@@ -194,8 +194,30 @@ def _save_through_chooser(
     assert not errors, errors
 
 
+@pytest.fixture
+def calibration_publications(
+    multidevice_trial, monkeypatch: pytest.MonkeyPatch
+) -> list[str]:
+    """Sample visible offset text at Qt's success-status presentation boundary."""
+    from qtpy.QtWidgets import QLabel
+
+    ui, _, _ = multidevice_trial
+    offsets: list[str] = []
+    original = QLabel.setText
+
+    def present(label: QLabel, text: str) -> None:
+        if label.objectName() == "predictor_status" and text.startswith(
+            "Calibrated offset="
+        ):
+            offsets.append(ui.observe(object_name="predictor_offset").text)
+        original(label, text)
+
+    monkeypatch.setattr(QLabel, "setText", present)
+    return offsets
+
+
 def test_multidevice_calibrate_and_save_as_visible_flow(
-    multidevice_trial, tmp_path: Path
+    multidevice_trial, calibration_publications: list[str], tmp_path: Path
 ):
     ui, source, params = multidevice_trial
     original = source.read_bytes()
@@ -246,6 +268,8 @@ def test_multidevice_calibrate_and_save_as_visible_flow(
     ui.screenshot(evidence / "05-ready-to-calibrate.png")
     assert ui.observe("Calibrate").enabled
     ui.click("Calibrate")
+    assert len(calibration_publications) == 1
+    assert abs(float(calibration_publications[0]) - 0.23) < 1e-5
     qt_until(
         lambda: "Calibrated offset=" in ui.observe(object_name="predictor_status").text,
         label="calibration",
@@ -255,6 +279,10 @@ def test_multidevice_calibrate_and_save_as_visible_flow(
         label="calibrated curves",
     )
     ui.screenshot(evidence / "06-calibrated-unsaved.png")
+    (evidence / "calibration-publication.txt").write_text(
+        f"Offset text before success status: {calibration_publications[0]}\n",
+        encoding="utf-8",
+    )
     assert abs(float(ui.observe(object_name="predictor_offset").text) - 0.23) < 1e-5
     assert source.read_bytes() == original
     _save_through_chooser(ui, destination, evidence)
