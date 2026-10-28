@@ -68,6 +68,140 @@ def test_energy_drafts_preserve_finite_float_values(
     assert trial.energy_text(model, name) == "0.1"
 
 
+@pytest.mark.parametrize("model", ["fluxonium", "transmon"])
+@pytest.mark.parametrize("value", [5e-324, 1.2345678901234567, 1e200, None])
+def test_snapshot_captures_nullable_energy_and_partial_native_inputs(
+    model: str, value: float | None
+) -> None:
+    trial = PredictorTrial(PredictorControlFacet(PredictorService()))
+    params = (
+        FluxoniumParams(value, None, value)
+        if model == "fluxonium"
+        else TransmonParams(value, None, 0.12345678901234567)
+    )
+    trial.set_parameters(params)
+    empty = trial.snapshot()
+    assert empty.version == 2
+    assert empty.model == model
+    assert empty.params == params
+    assert empty.flux is None
+    assert empty.device_values == {}
+    assert empty.axis_device is None
+    flux = PredictorFlux(0.2, {"coil": 2.0, "trim": -4.0}, {"coil": "A", "trim": "V"})
+    trial.set_flux(flux, {"coil": 0.3})
+    trial.set_axis_device("trim")
+    partial = trial.snapshot()
+    assert partial.params == params
+    assert partial.flux == flux.to_dict()
+    assert partial.device_values == {"coil": 0.3}
+    assert partial.axis_device == "trim"
+    trial.set_device_text("coil", "0.4")
+    assert partial.device_values == {"coil": 0.3}
+
+
+@pytest.mark.parametrize("model", ["fluxonium", "transmon"])
+@pytest.mark.parametrize("value", [5e-324, 0.123456789012345, 1e200])
+def test_restore_accepts_existing_v2_cache_and_replaces_all_trial_inputs(
+    model: str, value: float
+) -> None:
+    from zcu_tools.gui.session.predictor_cache import PredictorSnapshotCodec
+
+    codec = PredictorSnapshotCodec()
+    params = (
+        {"EJ": value, "EC": None, "EL": 0.12345678901234567}
+        if model == "fluxonium"
+        else {"EJmax": value, "EC": None, "d": 0.12345678901234567}
+    )
+    # The existing on-disk v2 shape, independent of trial snapshot assembly.
+    state = codec.decode(
+        {
+            "version": 2,
+            "model": model,
+            "params": params,
+            "flux": {
+                "offset": value,
+                "period": {"coil": 2.0, "trim": -4.0},
+                "unit": {"coil": "A", "trim": "V"},
+            },
+            "device_values": {"coil": value},
+            "axis_device": "trim",
+        }
+    )
+    trial = PredictorTrial(PredictorControlFacet(PredictorService()))
+    trial.set_flux(PredictorFlux(0.2, {"stale": 3.0}, {"stale": "V"}), {"stale": 0.9})
+    trial.restore(state)
+    assert trial.model == model
+    assert trial.parameters() == state.params
+    assert trial.flux() == PredictorFlux(
+        value, {"coil": 2.0, "trim": -4.0}, {"coil": "A", "trim": "V"}
+    )
+    assert trial.device_text("trim") == ""
+    assert trial.axis_device() == "trim"
+    assert trial.known_device_values() == {"coil": value}
+    assert codec.encode(trial.snapshot()) == codec.encode(state)
+    trial.restore(codec.default())
+    assert trial.parameters() == FluxoniumParams()
+    assert not trial.has_frame()
+    assert trial.device_values() == {}
+    assert trial.snapshot() == codec.default()
+
+
+@pytest.mark.parametrize(
+    "params", [FluxoniumParams(5.0, None, 0.5), TransmonParams(20.0, 0.3, 0.1)]
+)
+def test_predictor_file_exports_only_energy_and_frame_with_unknown_source(
+    params: FluxoniumParams | TransmonParams,
+) -> None:
+    from zcu_tools.resources.predictor_file import PredictorSource
+
+    trial = PredictorTrial(PredictorControlFacet(PredictorService()))
+    trial.set_parameters(params)
+    with pytest.raises(PredictorInputError, match="flux frame"):
+        trial.predictor_file()
+    flux = PredictorFlux(0.2, {"coil": 2.0, "trim": -4.0}, {"coil": "A", "trim": "V"})
+    trial.set_flux(flux, {})
+    trial.set_device_text("coil", "oops")
+    trial.set_axis_device("trim")
+    exported = trial.predictor_file()
+    assert exported.model == params.model
+    assert exported.params == params
+    assert exported.flux == flux
+    assert exported.source == PredictorSource(None, None)
+    trial.set_offset_text("nan")
+    with pytest.raises(PredictorInputError, match="offset"):
+        trial.predictor_file()
+    trial.set_energy_text(params.model, "EC", "oops")
+    with pytest.raises(PredictorInputError, match="EC"):
+        trial.predictor_file()
+
+
+@pytest.mark.parametrize("text", ["oops", "1e", "nan", "inf"])
+@pytest.mark.parametrize("field", ["energy", "offset", "device"])
+def test_snapshot_rejects_invalid_drafts_without_replacing_them(
+    field: str, text: str
+) -> None:
+    trial = PredictorTrial(PredictorControlFacet(PredictorService()))
+    trial.set_flux(PredictorFlux(0.2, {"coil": 2.0}, {"coil": "A"}), {"coil": 0.3})
+    if field == "energy":
+        trial.set_energy_text("fluxonium", "EC", text)
+        name = "EC"
+    elif field == "offset":
+        trial.set_offset_text(text)
+        name = "offset"
+    else:
+        trial.set_device_text("coil", text)
+        name = "coil"
+    with pytest.raises(PredictorInputError, match=name):
+        trial.snapshot()
+    assert (
+        trial.energy_text("fluxonium", "EC")
+        if field == "energy"
+        else trial.offset_text
+        if field == "offset"
+        else trial.device_text("coil")
+    ) == text
+
+
 @pytest.fixture
 def calibration_trial() -> PredictorTrial:
     trial = PredictorTrial(PredictorControlFacet(PredictorService()))

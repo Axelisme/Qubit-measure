@@ -200,7 +200,7 @@ def test_supplied_frame_clears_stale_missing_frame_status(qapp):
 
 
 def test_empty_snapshot_replaces_a_previously_loaded_flux_frame(qapp):
-    from zcu_tools.gui.session.ui.predictor_cache import PredictorSnapshot
+    from zcu_tools.gui.session.predictor_cache import PredictorSnapshot
     from zcu_tools.simulate.predictor import PredictorInputError
 
     dialog = _make_dialog()

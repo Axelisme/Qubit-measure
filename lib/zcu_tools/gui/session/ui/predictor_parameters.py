@@ -173,18 +173,30 @@ class PredictorParameterEditor(QGroupBox):
         all edits, synchronously; callback failures propagate to the caller.
         """
         self._trial.set_parameters(params)
+        self.refresh_from_trial()
+
+    def refresh_from_trial(self) -> None:
+        """Present the selected model's drafts and call on_replaced once synchronously.
+
+        Use after a model-owned restore. No drafts are parsed or replaced, and
+        callback failures propagate just as for set_parameters.
+        """
         self._updating_parameters = True
         try:
-            self._model_combo.setCurrentIndex(self._model_combo.findData(params.model))
+            self._model_combo.setCurrentIndex(
+                self._model_combo.findData(self._trial.model)
+            )
             fields = (
                 (self._ejmax_field, self._transmon_ec_field, self._asymmetry_field)
-                if params.model == "transmon"
+                if self._trial.model == "transmon"
                 else (self._ej_field, self._ec_field, self._el_field)
             )
             for field in fields:
                 field.setEnabled(not self._live_mode)
                 field.setText(
-                    self._trial.energy_text(params.model, self._parameter_fields[field])
+                    self._trial.energy_text(
+                        self._trial.model, self._parameter_fields[field]
+                    )
                 )
         finally:
             self._updating_parameters = False

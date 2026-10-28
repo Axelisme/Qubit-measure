@@ -63,6 +63,16 @@ class PredictorFluxEditor(QGroupBox):
         The first device becomes the axis; empty frames have no device axis.
         None clears a previously loaded frame and shows the load-file prompt.
         """
+        self._trial.set_flux(flux, values)
+        self.refresh_from_trial()
+
+    def refresh_from_trial(self) -> None:
+        """Rebuild frame rows from the trial, retaining its drafts and selected axis.
+
+        No notifications occur. A loaded frame requires a valid offset draft;
+        PredictorInputError propagates otherwise. Use after model-owned restore.
+        """
+        flux = self._trial.flux() if self._trial.has_frame() else None
         self._rows_scope.close()
         self._rows_scope = LifetimeScope(self)
         while self._layout.count() > 2:
@@ -71,7 +81,6 @@ class PredictorFluxEditor(QGroupBox):
                 widget.deleteLater()
         self._values.clear()
         self._axes.clear()
-        self._trial.set_flux(flux, values)
         self._offset.blockSignals(True)
         self._offset.setText(self._trial.offset_text)
         self._offset.blockSignals(False)
@@ -91,7 +100,7 @@ class PredictorFluxEditor(QGroupBox):
             self._layout.addWidget(axis, row, 0)
             self._layout.addWidget(field, row, 1)
             self._layout.addWidget(QLabel(flux.unit[name]), row, 2)
-            if row == 1:
+            if name == self._trial.axis_device():
                 axis.setChecked(True)
             self._values[name] = field
             self._axes[name] = axis

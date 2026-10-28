@@ -4,11 +4,6 @@ The optional device control supplies values only. Entry predictor files are read
 prefill. No operation installs a model or writes a component or source file.
 """
 
-# tolerated(file-size): Device polling/subscriptions, transition selection/table and
-# calibration share marker/debounce and persistent-close ordering. Splitting their
-# callbacks would spread that timing across more owners; parameter editing and
-# curve-local state already have dedicated widget owners.
-
 from __future__ import annotations
 
 import logging
@@ -40,12 +35,12 @@ from qtpy.QtWidgets import (
 
 from zcu_tools.gui.lifetime import LifetimeScope
 from zcu_tools.gui.session.persistence import PersistenceError, SingleFileCaretaker
-from zcu_tools.gui.session.predictor_trial import CalibrationReadiness, PredictorTrial
-from zcu_tools.gui.session.ui.eval_field import EvalNumericField
-from zcu_tools.gui.session.ui.predictor_cache import (
+from zcu_tools.gui.session.predictor_cache import (
     PredictorSnapshot,
     PredictorSnapshotCodec,
 )
+from zcu_tools.gui.session.predictor_trial import CalibrationReadiness, PredictorTrial
+from zcu_tools.gui.session.ui.eval_field import EvalNumericField
 from zcu_tools.gui.session.ui.predictor_curves import PredictorCurveTabs
 from zcu_tools.gui.session.ui.predictor_flux import PredictorFluxEditor
 from zcu_tools.gui.session.ui.predictor_parameters import PredictorParameterEditor
@@ -53,9 +48,7 @@ from zcu_tools.gui.widgets import error_colour, set_foreground, success_colour
 from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 from zcu_tools.gui.widgets.spinbox import TrimDoubleSpinBox
 from zcu_tools.resources.predictor_file import (
-    PredictorFile,
     PredictorFlux,
-    PredictorSource,
     save_predictor_file,
 )
 from zcu_tools.simulate.parameters import ModelParams
@@ -423,13 +416,8 @@ class PredictorDialog(QDialog):
         Provenance is unknown for this local trial. Invalid trial text or I/O
         failures propagate; no component or source file is implicitly updated.
         """
-        params = self.parameters()
-        save_predictor_file(
-            destination,
-            PredictorFile(
-                params.model, params, self.flux(), PredictorSource(None, None)
-            ),
-        )
+        self._parameter_editor.refresh_errors()
+        save_predictor_file(destination, self._trial.predictor_file())
 
     def _on_save_as_clicked(self) -> None:
         filename, _filter = QFileDialog.getSaveFileName(
@@ -477,17 +465,8 @@ class PredictorDialog(QDialog):
         Values are detached from component storage. Invalid editable inputs raise
         PredictorInputError; blank device values are omitted.
         """
-        params = self.parameters()
-        flux = self.flux() if self._flux_editor.has_frame() else None
-        return PredictorSnapshot(
-            model=params.model,
-            params=params,
-            flux=flux.to_dict() if flux is not None else None,
-            device_values=self._flux_editor.known_device_values(),
-            axis_device=self._flux_editor.axis_device()
-            if flux is not None and flux.period
-            else None,
-        )
+        self._parameter_editor.refresh_errors()
+        return self._trial.snapshot()
 
     def restore_persisted_state(self, state: PredictorSnapshot) -> None:
         """Restore cached model, params, flux, device_values and axis_device locally.
@@ -495,13 +474,9 @@ class PredictorDialog(QDialog):
         Missing flux clears the frame; missing device values remain blank. No
         component storage or source predictor file is changed.
         """
-        self._flux_editor.set_flux(
-            PredictorFlux.from_mapping(state.flux) if state.flux is not None else None,
-            state.device_values,
-        )
-        if state.axis_device is not None:
-            self._flux_editor.set_axis_device(state.axis_device)
-        self.set_parameters(state.params)
+        self._trial.restore(state)
+        self._flux_editor.refresh_from_trial()
+        self._parameter_editor.refresh_from_trial()
 
     def _save_parameters(self) -> None:
         if self._caretaker is not None:

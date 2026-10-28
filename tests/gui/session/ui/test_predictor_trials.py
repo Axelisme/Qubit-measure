@@ -1,5 +1,6 @@
 """Detached energy/frame trials, nullable drafts, cache and calibration displays."""
 
+import json
 import os
 from pathlib import Path
 
@@ -221,6 +222,77 @@ def test_dialog_parameters_and_cache_preserve_finite_float_values(
     try:
         reopened.enable_parameter_cache(cache_dir=tmp_path)
         assert reopened.parameters() == trial
+    finally:
+        reopened.close()
+        reopened.deleteLater()
+
+
+@pytest.mark.parametrize(
+    ("field", "valid", "invalid"),
+    [
+        ("predictor_input_fluxonium_EC", "1.0", "oops"),
+        ("predictor_offset", "0.2", "nan"),
+        ("predictor_value_coil", "0.3", "nan"),
+    ],
+    ids=["energy", "offset", "native"],
+)
+def test_invalid_drafts_do_not_overwrite_restored_v2_cache(
+    qapp, tmp_path: Path, field: str, valid: str, invalid: str
+) -> None:
+    cache = tmp_path / "predictor.json"
+    cache.write_text(
+        json.dumps(
+            {
+                "version": 2,
+                "model": "fluxonium",
+                "params": {"EJ": None, "EC": 1.0, "EL": None},
+                "flux": {
+                    "offset": 0.2,
+                    "period": {"coil": 2.0, "trim": -4.0},
+                    "unit": {"coil": "A", "trim": "V"},
+                },
+                "device_values": {"coil": 0.3},
+                "axis_device": "trim",
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    evidence = Path(os.environ.get("PREDICTOR_CACHE_EVIDENCE", str(tmp_path))) / field
+    port = PredictorControlFacet(PredictorService())
+    dialog = PredictorDialog(port)
+    try:
+        dialog.enable_parameter_cache(cache_dir=tmp_path)
+        dialog.show()
+        qapp.processEvents()
+        ui = ComponentDriver(dialog)
+        ui.screenshot(evidence / "01-restored-v2.png")
+        assert ui.observe(object_name=field).text == valid
+        assert ui.observe(object_name="predictor_axis_trim").checked
+        assert ui.observe(object_name="predictor_value_trim").text == ""
+        previous = cache.read_bytes()
+        ui.enter_text(object_name=field, value=invalid, commit=False)
+        ui.screenshot(evidence / "02-invalid-draft.png")
+        assert ui.observe(object_name=field).text == invalid
+        assert not ui.observe("Calibrate").enabled
+        assert cache.read_bytes() == previous
+        ui.click("Close")
+        assert cache.read_bytes() == previous
+    finally:
+        dialog.close()
+        dialog.deleteLater()
+    reopened = PredictorDialog(port)
+    try:
+        reopened.enable_parameter_cache(cache_dir=tmp_path)
+        reopened.show()
+        qapp.processEvents()
+        ui = ComponentDriver(reopened)
+        ui.screenshot(evidence / "03-reopened-last-valid.png")
+        assert ui.observe(object_name=field).text == valid
+        assert ui.observe(object_name="predictor_axis_trim").checked
+        assert ui.observe(object_name="predictor_value_trim").text == ""
+        assert reopened.parameters() == FluxoniumParams(None, 1.0, None)
+        ui.click("Close")
     finally:
         reopened.close()
         reopened.deleteLater()

@@ -16,12 +16,17 @@ import numpy as np
 from zcu_tools.analysis.flux import FluxFrame
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.expression import EvalRef, resolve_eval_ref
+from zcu_tools.gui.session.predictor_cache import PredictorSnapshot
 from zcu_tools.gui.session.services.predictor import (
     CalibrateOffsetRequest,
     PredictFreqRequest,
     PredictMatrixCurveRequest,
 )
-from zcu_tools.resources.predictor_file import PredictorFlux
+from zcu_tools.resources.predictor_file import (
+    PredictorFile,
+    PredictorFlux,
+    PredictorSource,
+)
 from zcu_tools.simulate.fluxonium.predict import FluxoniumParams
 from zcu_tools.simulate.parameters import ModelParams
 from zcu_tools.simulate.predictor import CalibrationResult, PredictorInputError
@@ -285,6 +290,52 @@ class PredictorTrial:
             values = self.device_values()
             axis = self._axis
         return TrialInputs(params, frame, values, axis)
+
+    def snapshot(self) -> PredictorSnapshot:
+        """Capture nullable energies, optional frame, known native values and axis.
+
+        Blank native inputs are omitted. Invalid selected energy, offset or
+        native drafts raise PredictorInputError without changing the trial.
+        Values are detached; no file, session or component is read or written.
+        """
+        params = self.parameters()
+        flux = self.flux() if self.has_frame() else None
+        return PredictorSnapshot(
+            model=params.model,
+            params=params,
+            flux=flux.to_dict() if flux is not None else None,
+            device_values=self.known_device_values(),
+            axis_device=self.axis_device()
+            if flux is not None and flux.period
+            else None,
+        )
+
+    def restore(self, state: PredictorSnapshot) -> None:
+        """Replace selected energies, frame, native values and axis from validated cache.
+
+        Missing frame clears it; missing native values stay blank. Energies use
+        repr and offset/native drafts use .15g, as for programmatic prefill.
+        No notifications, queries, session/component writes or file I/O occur.
+        """
+        self.set_flux(
+            PredictorFlux.from_mapping(state.flux) if state.flux is not None else None,
+            state.device_values,
+        )
+        if state.axis_device is not None:
+            self.set_axis_device(state.axis_device)
+        self.set_parameters(state.params)
+
+    def predictor_file(self) -> PredictorFile:
+        """Export selected nullable energies and frame with unknown provenance.
+
+        Native drafts and axis are display inputs, not file fields. Invalid
+        selected energy or offset drafts and a missing frame raise named
+        PredictorInputError. No file I/O, queries or component writes occur.
+        """
+        params = self.parameters()
+        return PredictorFile(
+            params.model, params, self.flux(), PredictorSource(None, None)
+        )
 
     def calibration_readiness(
         self,
