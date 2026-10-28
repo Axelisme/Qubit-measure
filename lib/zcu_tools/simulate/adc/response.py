@@ -133,6 +133,7 @@ class ConditionalReadout:
                 for index, event in enumerate(batch.events[0])
                 for _ in event.grids
             ),
+            batch.output_order,
         )
 
     def _event_responses(self, batch: ReadoutBatch) -> ConditionalSums:

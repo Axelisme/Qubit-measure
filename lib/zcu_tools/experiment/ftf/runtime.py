@@ -171,6 +171,7 @@ def _prepare_channels(
         conditionals = []
         traces = []
         raw_events = []
+        output_orders = []
         content_index = np.empty(prod(acquire.point_dims), dtype=np.int64)
         offset = 0
         for plan in plans:
@@ -182,6 +183,7 @@ def _prepare_channels(
             ).responses(replace(readout, include_traces=acquire.mode == "decimated"))
             conditionals.append(conditional)
             raw_events.extend(readout.events)
+            output_orders.append(readout.column_order)
             if conditional.traces is not None:
                 traces.append(conditional.traces)
             content_index[plan.batch.points] = offset + readout.content_index
@@ -191,9 +193,13 @@ def _prepare_channels(
             conditionals[0].sample_counts,
             np.concatenate(traces) if traces else None,
             conditionals[0].event_indices,
+            np.concatenate(output_orders),
         )
         raw_batches[first.channel] = ReadoutBatch(
-            first.batch.model, tuple(raw_events), content_index
+            first.batch.model,
+            tuple(raw_events),
+            content_index,
+            output_order=conditional.output_order,
         )
         channels.append(
             ChannelReadout(

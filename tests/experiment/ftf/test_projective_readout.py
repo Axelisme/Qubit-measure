@@ -75,6 +75,115 @@ def test_request_rejects_equal_total_reads_with_different_template_event_layout(
         source.close()
 
 
+@pytest.mark.parametrize("mode", ["raw", "integrated", "decimated"])
+def test_trigger_emission_columns_survive_event_grouping_with_partial_adc(mode):
+    base, config = herald_template()
+    both, partial = base.readouts
+    # Point zero emits terminal before herald; point one stays chronological.
+    order = np.array([[1, 0], [0, 1]])
+    reordered = replace(
+        both,
+        trigger_us=np.take_along_axis(both.trigger_us, order, axis=1),
+        frequency_mhz=np.take_along_axis(both.frequency_mhz, order, axis=1),
+        phase_deg=np.take_along_axis(both.phase_deg, order, axis=1),
+    )
+    partial = replace(
+        partial,
+        frequency_mhz=both.frequency_mhz[:, 1:],
+        phase_deg=both.phase_deg[:, 1:],
+    )
+    numeric = settings().with_telemetry(enabled=False)
+    canonical = plan_template(
+        numeric, snapshot(), replace(base, readouts=(both, partial)), readout=config
+    )
+    emitted = plan_template(
+        numeric,
+        snapshot(),
+        replace(base, readouts=(reordered, partial)),
+        readout=config,
+    )
+    readout = adc.ProjectionReadout(
+        np.array([[0.4, 0.6], [0.7, 0.3]]),
+        (
+            np.tile(np.eye(2), (2, 1, 1)),
+            np.tile(np.eye(2)[::-1], (2, 1, 1)),
+        ),
+    )
+    identity = SamplingIdentity(123, (7, 0, 1))
+    reps = 8
+
+    def observe(plan):
+        batches = {item.channel: item.batch for item in plan.readouts}
+        if mode == "raw":
+            return {
+                channel: np.moveaxis(values, 0, 1)
+                for channel, values in adc.PreparedRawShots(readout, batches, reps=reps)
+                .bind(identity)
+                .materialize(reps, 0)
+                .items()
+            }
+        if mode == "decimated":
+            return {
+                item.channel: item.iq.reshape(2, reps, *item.iq.shape[1:])
+                for item in adc.sample_traces(
+                    readout, batches, reps=reps, identity=identity
+                ).channels
+            }
+        raise AssertionError("shot observation requires raw or decimated mode")
+
+    def statistics(plan):
+        batches = {item.channel: item.batch for item in plan.readouts}
+        return adc.round_statistics(
+            readout,
+            tuple(
+                adc.ChannelReadout(
+                    channel,
+                    adc.ConditionalReadout(batch.model).responses(batch),
+                    batch.content_index,
+                    batch.model.receiver,
+                )
+                for channel, batch in batches.items()
+            ),
+            reps=reps,
+            seed=123,
+            acquire_sequence=7,
+            round_index=0,
+        )
+
+    if mode == "integrated":
+        expected, actual = statistics(canonical), statistics(emitted)
+        np.testing.assert_array_equal(actual.state_counts, expected.state_counts)
+        old, new = expected.channels[0], actual.channels[0]
+        assert not np.allclose(old.conditional_sums[0, 0], old.conditional_sums[0, 1])
+        np.testing.assert_allclose(
+            new.conditional_sums[0], old.conditional_sums[0, ::-1], rtol=1e-12
+        )
+        np.testing.assert_allclose(new.conditional_sums[1], old.conditional_sums[1])
+        # The direct draw adds the same output-column noise to reordered means.
+        old_mean = np.einsum(
+            "ps,prsi->pri", expected.state_counts, old.conditional_sums
+        )
+        new_mean = np.einsum("ps,prsi->pri", actual.state_counts, new.conditional_sums)
+        np.testing.assert_allclose(new.sums, new_mean + old.sums - old_mean, atol=1e-10)
+        np.testing.assert_array_equal(
+            actual.channels[1].sums, expected.channels[1].sums
+        )
+    else:
+        expected_shots, actual_shots = observe(canonical), observe(emitted)
+        read_axis = 1
+        assert not np.array_equal(
+            expected_shots[4][0, :, 0], expected_shots[4][0, :, 1]
+        )
+        np.testing.assert_array_equal(
+            actual_shots[4][0], np.take(expected_shots[4][0], [1, 0], axis=read_axis)
+        )
+        np.testing.assert_array_equal(actual_shots[4][1], expected_shots[4][1])
+        np.testing.assert_array_equal(actual_shots[1], expected_shots[1])
+        # The partial ADC observes the same terminal CTMC, not another event.
+        np.testing.assert_array_equal(actual_shots[4][0, :, :1], actual_shots[1][0])
+        np.testing.assert_array_equal(actual_shots[4][1, :, 1:], actual_shots[1][1])
+
+
 def thermal_mux_settings():
     numeric = settings().with_telemetry(enabled=False)
     chip = numeric.chip.model_copy(

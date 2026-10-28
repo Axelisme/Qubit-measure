@@ -56,6 +56,53 @@ def test_batch_rejects_misaligned_or_invalid_content(change):
         replace(valid, **change)
 
 
+@pytest.mark.parametrize("record", ["batch", "conditional"])
+@pytest.mark.parametrize(
+    "order",
+    [
+        np.array([[0, 0]], dtype=np.int64),
+        np.array([[0, 2]], dtype=np.int64),
+        np.array([[-1, 0]], dtype=np.int64),
+        np.array([[0.0, 1.0]]),
+        np.array([0, 1], dtype=np.int64),
+        np.array([[0, 1], [1, 0]], dtype=np.int64),
+    ],
+)
+def test_output_order_rejects_incomplete_or_invalid_content_permutations(record, order):
+    if record == "batch":
+        event = batch().events[0][0]
+        valid = adc.ReadoutBatch(
+            model(), ((event, event),), np.array([0], dtype=np.int64)
+        )
+    else:
+        valid = adc.ConditionalSums(
+            np.zeros((1, 2, 2, 2)), np.array([4, 4], dtype=np.int64)
+        )
+    with pytest.raises(ValueError, match="output_order"):
+        replace(valid, output_order=order)
+
+
+@pytest.mark.parametrize("record", ["batch", "conditional"])
+def test_output_order_owns_per_content_column_selection(record):
+    order = np.array([[1, 0]], dtype=np.int64)
+    if record == "batch":
+        event = batch().events[0][0]
+        result = adc.ReadoutBatch(
+            model(),
+            ((event, event),),
+            np.array([0, 0], dtype=np.int64),
+            output_order=order,
+        )
+    else:
+        result = adc.ConditionalSums(
+            np.zeros((1, 2, 2, 2)),
+            np.array([4, 4], dtype=np.int64),
+            output_order=order,
+        )
+    order[:] = 0
+    np.testing.assert_array_equal(result.output_order, [[1, 0]])
+
+
 def test_conditional_accepts_sums_and_aligned_traces():
     result = adc.ConditionalSums(
         np.full((2, 1, 2, 2), 4.0),

@@ -1,6 +1,6 @@
 # `zcu_tools.experiment` — 實驗層
 
-**Last updated:** 2026-10-28, projective readout ownership
+**Last updated:** 2026-10-28, projective readout and emission-column mapping
 
 **讀者：** framework-dev。實驗介面、Run 資料、持久化映射與裝置操作邊界。
 
@@ -82,6 +82,10 @@ them. Projective block counts and each ADC's per-event grid counts must match
 across points; classification rejects differences with the point and counts.
 `read_event_contents` detaches and deduplicates each trigger's own pulse/grid
 contents. `readout_contents` retains the terminal-only planning contract.
+`logical_event_contents` retains chronological physical events and each grid's
+original channel-local trigger column. `map_readout_events` localizes phases,
+expands point/event contents and supplies the per-content output permutation.
+Single and FTF share this mapping; six uses single's preparation interface.
 The shared planner converts common-origin carrier phases to pulse-local phases. Environment planners supply
 `ReadoutDrive` calibration and retain responsibility for receiver binding,
 physical models, evolution and sampling.

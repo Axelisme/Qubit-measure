@@ -100,6 +100,13 @@ def physical_shots(
         for channel, batch in batches:
             offsets[channel] += len(batch.events[0][event_index].grids)
     _add_receiver_noise(prepared, output, rng, traces=traces)
+    for channel, batch in batches:
+        order = batch.column_order[batch.content_index][:, None, :]
+        output[channel] = np.take_along_axis(
+            output[channel],
+            order[..., None, None] if traces else order[..., None],
+            axis=2,
+        )
     return output
 
 
