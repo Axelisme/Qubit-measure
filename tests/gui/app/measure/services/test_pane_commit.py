@@ -168,6 +168,106 @@ def test_post_commit_preserves_primary_and_retires_only_previous_post(session):
     plots.release()
 
 
+@pytest.mark.parametrize("stage", ["analysis", "post_analysis"])
+@pytest.mark.parametrize("publication", ["absent", "numeric", "figures_only", "empty"])
+@pytest.mark.parametrize("with_drafts", [False, True])
+def test_transition_preview_is_read_only_and_matches_commit(
+    session, stage, publication, with_drafts
+):
+    state = session.state
+    writeback = WritebackService(session.context, arb_names=lambda: ())
+    host = RecordingHost()
+
+    def published_pane(pane_type):
+        plots = None
+        if publication in ("figures_only", "empty"):
+            plots = Plots(host)
+            if publication == "figures_only":
+                plots.subplots("old")
+            plots.finish()
+        draft = (
+            writeback.create_draft([], parameters=None, experiment_name="saving")
+            if with_drafts
+            else None
+        )
+        return pane_type(
+            result="old" if publication == "numeric" else None,
+            plots=plots,
+            writeback_draft=draft,
+        )
+
+    primary = published_pane(AnalysisPaneState)
+    # A Post commit needs a legal Primary even when the old Post is absent.
+    if stage == "post_analysis" and publication == "absent":
+        primary.result = "source"
+    pane_commit.commit_analysis(state, "tab", primary)
+    post = PostAnalysisPaneState()
+    if state.get_tab("tab").has_analyze_result():
+        post = published_pane(PostAnalysisPaneState)
+        pane_commit.commit_post_analysis(state, "tab", post)
+    versions = state.version.snapshot()
+    artifacts = state.get_artifact_snapshots("tab")
+    old_figures = tuple(
+        figure
+        for pane in (primary, post)
+        if pane.plots is not None
+        for figure in pane.plots.values()
+    )
+
+    preview = state.preview_pane_transition("tab", stage)
+
+    replacing_primary = stage == "analysis"
+    present = publication != "absent"
+    assert preview.analysis_result is (replacing_primary and present)
+    assert preview.analysis_writeback is (replacing_primary and with_drafts)
+    assert preview.post_analysis_result is present
+    assert preview.post_analysis_writeback is (
+        with_drafts and (present or not replacing_primary)
+    )
+    assert state.version.snapshot() == versions
+    assert state.get_artifact_snapshots("tab") == artifacts
+    assert state.get_tab("tab").analysis is primary
+    if present or not replacing_primary:
+        assert state.get_tab("tab").post_analysis is post
+    assert host.released == []
+    for pane in (primary, post):
+        if pane.writeback_draft is not None:
+            assert pane.writeback_draft.is_active
+    assert (
+        tuple(
+            figure
+            for pane in (primary, post)
+            if pane.plots is not None
+            for figure in pane.plots.values()
+        )
+        == old_figures
+    )
+
+    if replacing_primary:
+        pane_commit.commit_analysis(state, "tab", AnalysisPaneState(result="new"))
+        assert not state.get_tab("tab").has_post_analyze_result()
+    else:
+        pane_commit.commit_post_analysis(
+            state, "tab", PostAnalysisPaneState(result="new")
+        )
+        assert state.get_tab("tab").analysis is primary
+    for pane, invalidated in (
+        (primary, preview.analysis_writeback),
+        (post, preview.post_analysis_writeback),
+    ):
+        if pane.writeback_draft is not None:
+            assert pane.writeback_draft.is_active is not invalidated
+    expected_released = tuple(
+        figure
+        for pane in ((primary, post) if replacing_primary else (post,))
+        if pane.plots is not None
+        for figure in pane.plots.values()
+    )
+    assert tuple(host.released) == expected_released
+    # The collection contents survive retirement; only ownership is released.
+    pane_commit.commit_run(state, "tab", RunPaneState())
+
+
 class FailingWriteback(WritebackService):
     def teardown_draft(self, draft):
         raise RuntimeError("draft teardown failed")

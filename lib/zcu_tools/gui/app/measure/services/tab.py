@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.registry import Registry
-    from zcu_tools.gui.app.measure.state import State
+    from zcu_tools.gui.app.measure.state import PaneTransitionPreview, State
     from zcu_tools.resources.entry import PointStorageBinding
 
     from ..writeback import WritebackService
@@ -84,6 +84,12 @@ class TabService:
         self._writeback = writeback
         self._cfg_resources = cfg_resources
         self._form_sources = form_sources
+
+    def preview_pane_transition(
+        self, tab_id: str, stage: Literal["analysis", "post_analysis"]
+    ) -> PaneTransitionPreview:
+        """Forward State's read-only retirement facts; its access errors propagate."""
+        return self._state.preview_pane_transition(tab_id, stage)
 
     def get_snapshot(self, tab_id: str) -> TabSnapshot:
         """Build the immutable full render model for one tab (all live fields

@@ -12,6 +12,7 @@ from unittest.mock import MagicMock
 
 import pytest
 from zcu_tools.gui.app.measure.services import AdmissionDecision
+from zcu_tools.gui.app.measure.state import PaneTransitionPreview
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 
 from tests.gui.app.measure._synthetic import EmptyParams
@@ -40,6 +41,12 @@ def _ctrl(*, has_analyze_result: bool = True, post_params: object = _DEFAULT):
         post_params = EmptyParams()
     ctrl = MagicMock()
     ctrl.has_tab.return_value = True
+    ctrl.preview_pane_transition.return_value = PaneTransitionPreview(
+        analysis_result=False,
+        analysis_writeback=False,
+        post_analysis_result=False,
+        post_analysis_writeback=False,
+    )
     ctrl.admit.return_value = (
         AdmissionDecision(True, None, "")
         if has_analyze_result

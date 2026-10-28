@@ -17,7 +17,11 @@ from zcu_tools.gui.app.measure.adapter import (
 from zcu_tools.gui.app.measure.artifacts import (
     SaveStatus,
 )
-from zcu_tools.gui.app.measure.services.pane_commit import commit_run
+from zcu_tools.gui.app.measure.services.pane_commit import (
+    commit_analysis,
+    commit_post_analysis,
+    commit_run,
+)
 from zcu_tools.gui.app.measure.services.ports import TabSnapshot
 from zcu_tools.gui.app.measure.services.tab import TabService
 from zcu_tools.gui.app.measure.state import (
@@ -115,9 +119,11 @@ def test_snapshot_projects_analysis_presence(publication: str, stage: str) -> No
     result = object() if publication == "numeric" else None
     if publication != "absent":
         if stage == "analysis":
-            state.replace_analysis_pane("tab", result=result, plots=plots)
+            commit_analysis(state, "tab", AnalysisPaneState(result=result, plots=plots))
         else:
-            state.replace_post_analysis_pane("tab", result=result, plots=plots)
+            commit_post_analysis(
+                state, "tab", PostAnalysisPaneState(result=result, plots=plots)
+            )
     service = TabService(
         state,
         MagicMock(),

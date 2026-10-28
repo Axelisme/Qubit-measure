@@ -10,6 +10,11 @@ from zcu_tools.gui.app.measure.adapter import Adapter, Analysis, PostAnalysis
 from zcu_tools.gui.app.measure.controller import Controller
 from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.remote import ControlOptions, RemoteControlAdapter
+from zcu_tools.gui.app.measure.services.pane_commit import (
+    commit_analysis,
+    commit_post_analysis,
+)
+from zcu_tools.gui.app.measure.state import AnalysisPaneState, PostAnalysisPaneState
 from zcu_tools.gui.form_adapter import Form
 from zcu_tools.gui.session.context_types import EntryRequest, PointUseRequest
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
@@ -174,11 +179,13 @@ def test_published_empty_collection_is_available_without_figures(figures_rpc, po
     session, invoke, _wait = figures_rpc
     primary_plots = Plots(NonPresentingHost())
     primary_plots.finish()
-    session.state.replace_analysis_pane("tab", result=None, plots=primary_plots)
+    commit_analysis(session.state, "tab", AnalysisPaneState(plots=primary_plots))
     if post:
         post_plots = Plots(NonPresentingHost())
         post_plots.finish()
-        session.state.replace_post_analysis_pane("tab", result=None, plots=post_plots)
+        commit_post_analysis(
+            session.state, "tab", PostAnalysisPaneState(plots=post_plots)
+        )
 
     assert invoke("tab.get_analyze_result")["summary"] == {}
     assert invoke("tab.get_post_analyze_result")["summary"] == ({} if post else None)

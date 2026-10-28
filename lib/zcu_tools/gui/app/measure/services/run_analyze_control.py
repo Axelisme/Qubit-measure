@@ -28,7 +28,7 @@ _GUI_ORIGIN = CommandOrigin("gui")
 if TYPE_CHECKING:
     from matplotlib.figure import Figure
 
-    from zcu_tools.gui.app.measure.state import State
+    from zcu_tools.gui.app.measure.state import PaneTransitionPreview, State
     from zcu_tools.gui.event_bus import BaseEventBus as EventBus
     from zcu_tools.gui.plotting import FigureContainer
     from zcu_tools.gui.session.ports import OwnerScheduler
@@ -94,6 +94,12 @@ class RunAnalyzeControlPort(Protocol):
         ...
 
     def get_tab_snapshot(self, tab_id: str) -> TabSnapshot: ...
+
+    def preview_pane_transition(
+        self, tab_id: str, stage: Literal["analysis", "post_analysis"]
+    ) -> PaneTransitionPreview:
+        """Read State's retirement facts on-owner without changing the tab."""
+        ...
 
     def analysis_result_read_timeout_seconds(self, tab_id: str) -> float:
         """Return the fixed 60-second budget for reading analysis results."""
@@ -214,6 +220,12 @@ class RunAnalyzeControlFacet:
 
     def get_tab_snapshot(self, tab_id: str) -> TabSnapshot:
         return self._tab.get_snapshot(tab_id)
+
+    def preview_pane_transition(
+        self, tab_id: str, stage: Literal["analysis", "post_analysis"]
+    ) -> PaneTransitionPreview:
+        """Forward the owner's read-only preview; State access errors propagate."""
+        return self._tab.preview_pane_transition(tab_id, stage)
 
     def analysis_result_read_timeout_seconds(self, tab_id: str) -> float:
         """Use the fixed MCP result-read budget; unknown tabs raise KeyError."""

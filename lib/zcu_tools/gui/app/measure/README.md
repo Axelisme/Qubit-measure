@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure`
 
-**Last updated:** 2026-10-28, tab admission、pane commit 與具名 writeback draft
+**Last updated:** 2026-10-28, tab admission、pane commit 與唯讀失效預覽
 
 **讀者：** framework-dev。量測 GUI 的組裝、分頁、tab admission 與 Run／Load／Save 分工。
 
@@ -110,6 +110,8 @@ rejects Done without closing input.
   `services.results_comparison.build_comparison(index, run_keys)` 將保存的 summary JSON 投影為逐 run 的比較列。身分四欄後接葉節點點路徑，欄位依釘選與 JSON 順序取 union。物件 list 以索引多行呈現，不辨識實驗名稱或特定 key；parameters 不進表。檔案與 JSON 讀取仍委派 `ResultsIndex`，不換算單位或重新分析。
 - [`state.py`](state.py)：保存 tab/device/pane/path/version-table SSOT，限定在 owner thread 修改。
   每種 pane 只有一個被動交換入口，安裝備妥的 pane 與 artifacts，回傳退役資源。
+  `preview_pane_transition` 與 Analysis/Post swap 共用退役選擇，回傳具名失效事實。
+  查詢不改版本、artifacts、draft 或 plots，service/control 只轉接，remote 只投影 wire 字串與順序。
   State 不規劃 artifacts、不執行退役清理，也不在交換時遞增版本。
   Analysis 與 PostAnalysis 各自保存 `WritebackDraft | None`，None 表示沒有 draft。
 - [`services/pane_commit.py`](services/pane_commit.py)：提交 Run、Analysis、PostAnalysis pane。

@@ -55,6 +55,15 @@ from tests.gui.app.measure.ui._main_window_fakes import (
 from tests.gui.widgets.form._text_input import commit_text
 
 
+def _load_button(tab: ExpTabWidget) -> QPushButton:
+    """Find the tab-owned Load Data action by its visible label."""
+    return next(
+        button
+        for button in tab.findChildren(QPushButton)
+        if button.text() == "Load Data"
+    )
+
+
 class _RecordingTabActions:
     def __init__(self) -> None:
         self.calls: list[tuple[str, str] | tuple[str, str, ArtifactRef]] = []
@@ -159,11 +168,7 @@ def test_exp_tab_disables_local_buttons_while_analyzing(
     )
 
     assert tab.analyze_btn.isEnabled() is False
-    load = next(
-        button
-        for button in tab.findChildren(QPushButton)
-        if button.text() == "Load Data"
-    )
+    load = _load_button(tab)
     assert load.isHidden() is False
     assert load.isEnabled() is False
     assert tab.writeback_widget.isEnabled() is False
@@ -307,11 +312,7 @@ def test_exp_tab_unselected_context_allows_analysis_but_disables_run_and_save(
 
     assert tab.run_btn.isEnabled() is False
     assert tab.run_btn.toolTip() == "Select or create a working point first"
-    load = next(
-        button
-        for button in tab.findChildren(QPushButton)
-        if button.text() == "Load Data"
-    )
+    load = _load_button(tab)
     assert load.isHidden() is False
     assert load.isEnabled() is True
     assert tab.analyze_btn.isEnabled() is True
@@ -411,11 +412,7 @@ def test_exp_tab_load_button_requires_context_but_not_soc(
         "tab-1", mock_ctrl(main_window_control_factory), snap1.capabilities
     )
     tab.update_interaction_state(snap1)
-    load = next(
-        button
-        for button in tab.findChildren(QPushButton)
-        if button.text() == "Load Data"
-    )
+    load = _load_button(tab)
     assert load.isHidden() is False
     assert load.isEnabled() is True
 
@@ -520,11 +517,7 @@ def test_exp_tab_buttons_dispatch_public_tab_actions(main_window_control_factory
     tab.attach(snapshot, actions)
 
     assert tab.run_btn.isEnabled() is True
-    load = next(
-        button
-        for button in tab.findChildren(QPushButton)
-        if button.text() == "Load Data"
-    )
+    load = _load_button(tab)
     assert load.isHidden() is False
     assert load.isEnabled() is True
     assert tab.analyze_btn.isEnabled() is True

@@ -121,14 +121,16 @@ def h_tab_analyze(
     updated = _updated_params(ap, raw_updates, label="analyze_params")
     if snap.capabilities is None:
         raise RemoteError(ErrorCode.INTERNAL, "snapshot has no capabilities")
-    invalidated = []
-    if snap.analysis is not None and snap.analysis.has_writeback_draft:
-        invalidated.append("analysis.writeback")
-    if snap.post_analysis is not None:
-        if snap.post_analysis.has_result:
-            invalidated.append("post.result")
-        if snap.post_analysis.has_writeback_draft:
-            invalidated.append("post.writeback")
+    preview = control.preview_pane_transition(tab_id, "analysis")
+    invalidated = [
+        label
+        for invalidated, label in (
+            (preview.analysis_writeback, "analysis.writeback"),
+            (preview.post_analysis_result, "post.result"),
+            (preview.post_analysis_writeback, "post.writeback"),
+        )
+        if invalidated
+    ]
     follow_tab(adapter, tab_id, "analysis")
     raw_data = project_raw_data_state(
         snap.artifacts,
@@ -197,11 +199,8 @@ def h_tab_post_analyze(
     # tolerated(cast): default_object admits a JSON dict or {}; Mapping erases its type.
     raw_updates = cast(dict[str, object], params["updates"])
     updated = _updated_params(pp, raw_updates, label="post_analyze_params")
-    invalidated = (
-        ["post.writeback"]
-        if snap.post_analysis is not None and snap.post_analysis.has_writeback_draft
-        else []
-    )
+    preview = control.preview_pane_transition(tab_id, "post_analysis")
+    invalidated = ["post.writeback"] if preview.post_analysis_writeback else []
     read_timeout = control.analysis_result_read_timeout_seconds(tab_id)
     follow_tab(adapter, tab_id, "post_analysis")
     operation_id = control.start_post_analyze(

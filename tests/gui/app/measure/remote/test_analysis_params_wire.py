@@ -10,6 +10,7 @@ from zcu_tools.gui.app.measure.remote.handlers.analysis import (
     h_tab_analyze,
     h_tab_post_analyze,
 )
+from zcu_tools.gui.app.measure.state import PaneTransitionPreview
 from zcu_tools.gui.remote.errors import RemoteError
 
 from tests.gui._qt_waits import qt_until
@@ -57,6 +58,12 @@ def test_analyze_params_wire_generates_definitions_after_run(qapp, tmp_path):
 def _adapter_with_params(params: ChoiceParams) -> MagicMock:
     control = MagicMock()
     control.has_tab.return_value = True
+    control.preview_pane_transition.return_value = PaneTransitionPreview(
+        analysis_result=True,
+        analysis_writeback=False,
+        post_analysis_result=False,
+        post_analysis_writeback=False,
+    )
     control.get_tab_snapshot.return_value = SimpleNamespace(
         analysis=SimpleNamespace(
             params=params, has_writeback_draft=False, result=object(), has_result=True
@@ -173,10 +180,14 @@ def test_start_projects_only_content_replaced_on_success(handler, expected):
     original = ChoiceParams()
     adapter = _adapter_with_params(original)
     snapshot = adapter.run_analyze_control.get_tab_snapshot.return_value
-    snapshot.analysis.has_writeback_draft = True
-    snapshot.post_analysis.has_writeback_draft = True
-    snapshot.post_analysis.result = object()
-    snapshot.post_analysis.has_result = True
+    adapter.run_analyze_control.preview_pane_transition.return_value = (
+        PaneTransitionPreview(
+            analysis_result=handler is h_tab_analyze,
+            analysis_writeback=handler is h_tab_analyze,
+            post_analysis_result=True,
+            post_analysis_writeback=True,
+        )
+    )
     snapshot.capabilities.analysis = AnalysisMode.INTERACTIVE
 
     reply = handler(adapter, {"tab_id": "t", "updates": {}})
