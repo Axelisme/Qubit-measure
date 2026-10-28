@@ -393,9 +393,10 @@ and does not model MIST onset.
 
 ### Readout and sampling
 
-Readout uses the DC model and populations in its energy basis. FTF explicitly
-calls ADC's `normalize_populations` once after `batch_populations`, before
-conditional responses or sampling. ADC owns the 1e-6 probability tolerance,
+Readout uses the DC model and populations in its energy basis. Terminal-only
+preparations call ADC's `normalize_populations` once after `batch_populations`,
+before conditional responses or sampling. Projective preparations normalize the
+diagonal at each projection and each retained terminal outcome. ADC owns the 1e-6 probability tolerance,
 tolerated-negative cleanup and row normalization. Invalid rows fail without
 sampling. ADC raises `PopulationValidationError` with `rejected_rows` for the
 reported validation rule. FTF catches only that type, retains its count in
