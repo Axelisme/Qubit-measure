@@ -11,6 +11,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
+from zcu_tools.gui.app.measure.services import AdmissionDecision
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 
 from tests.gui.app.measure._synthetic import EmptyParams
@@ -36,6 +37,11 @@ def _ctrl(*, has_analyze_result: bool = True, post_params: object = _DEFAULT):
         post_params = EmptyParams()
     ctrl = MagicMock()
     ctrl.has_tab.return_value = True
+    ctrl.admit.return_value = (
+        AdmissionDecision(True, None, "")
+        if has_analyze_result
+        else AdmissionDecision(False, "no_analyze_result", "No primary result")
+    )
     ctrl.get_tab_snapshot.return_value = _snapshot(
         has_analyze_result=has_analyze_result, post_params=post_params
     )
@@ -83,7 +89,7 @@ def test_start_without_primary_result_fast_fails():
 
 def test_start_unknown_tab_rejected():
     ctrl = _ctrl()
-    ctrl.has_tab.return_value = False
+    ctrl.admit.return_value = AdmissionDecision(False, "unknown_tab", "Unknown tab")
     with pytest.raises(RemoteError) as excinfo:
         _dispatch(ctrl, "tab.post_analyze", {"tab_id": "nope", "updates": {}})
     assert excinfo.value.code is ErrorCode.INVALID_PARAMS

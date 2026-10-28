@@ -183,7 +183,10 @@ def test_analyze_rejects_a_superseded_run_without_changing_the_pane(
             await_terminal(sock, reply["result"]["operation_id"])
         assert reply["ok"] is False
         assert reply["error"]["code"] == "precondition_failed"
-        assert reply["error"]["reason"] == "result_superseded"
+        expected_reason = (
+            "no_run_result" if replacement == "no_result" else "result_superseded"
+        )
+        assert reply["error"]["reason"] == expected_reason
         assert call(sock, "tab.snapshot", {"tab_id": tab})["result"] == before
         assert (
             call(sock, "tab.get_analyze_result", {"tab_id": tab})["result"]
@@ -491,7 +494,18 @@ def test_soc_info_requires_connected_soc(fx):
 
 @pytest.mark.parametrize("source", ["primary", "run"])
 def test_post_control_rejects_replaced_source_without_starting(fx, source):
-    tab = fx.ctrl.tab_control.new_tab("fake")
+    fx.registry.register(
+        "with-post",
+        Adapter(
+            spec=SampleAdapter.spec,
+            make_form=SampleAdapter.make_form,
+            run=SampleAdapter.run,
+            guide=None,
+            analysis=SampleAdapter.analysis,
+            post_analysis=PostAnalysis(fn=lambda req, *, plots: req.analyze_result),
+        ),
+    )
+    tab = fx.ctrl.tab_control.new_tab("with-post")
     with open_client(fx.service.port) as sock:
         run = _completed_run(fx, sock, tab)
         primary = call(sock, "tab.analyze", {"tab_id": tab})["result"]["operation_id"]

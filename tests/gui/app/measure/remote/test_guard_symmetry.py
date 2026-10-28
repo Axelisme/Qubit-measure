@@ -1,10 +1,7 @@
-"""Guard symmetry: the remote dispatch path enforces the same domain guard as
-the UI (Controller) path.
+"""Wire projection of shared admission decisions through real app dispatch.
 
-Both clients route protected operations through GuardService. This test invokes
-the dispatch handlers directly against a real Controller and asserts that the
-same precondition that the UI path rejects (Controller raises GuardError) is
-surfaced as a RemoteError(PRECONDITION_FAILED) on the remote path.
+Admission order and capture belong to services/test_guard.py. These cases cover
+remote error envelopes and their precedence over wire-specific source checks.
 """
 
 from __future__ import annotations
@@ -17,7 +14,7 @@ import pytest
 from zcu_tools.gui.app.measure.adapter import ContextReadiness
 from zcu_tools.gui.app.measure.controller import Controller
 from zcu_tools.gui.app.measure.remote.dispatch import METHOD_REGISTRY
-from zcu_tools.gui.app.measure.services.guard import GuardError
+from zcu_tools.gui.app.measure.services import TabAction
 from zcu_tools.gui.expected_error import ExpectedError
 from zcu_tools.gui.remote.errors import (
     ErrorCode,
@@ -70,15 +67,11 @@ def _dispatch(ctrl: Controller, method: str, params: Mapping[str, object]) -> ob
 
 
 def test_run_start_unselected_context_symmetry(tmp_path, qapp):
-    """Unselected context: UI raises GuardError; remote returns PRECONDITION_FAILED."""
+    """Unselected context projects the shared Run denial to the wire."""
     ctrl = _make_controller(ContextReadiness.EMPTY, tmp_path=tmp_path)
     tab_id = ctrl.tab_control.new_tab("fake")
 
-    # UI path
-    with pytest.raises(GuardError, match="active file-backed context"):
-        ctrl.run_analyze_control.start_run(tab_id)
-
-    # Remote path — same precondition, mapped to a typed wire error.
+    decision = ctrl.admit(tab_id, TabAction.RUN)
     with pytest.raises(RemoteError) as excinfo:
         _dispatch(
             ctrl,
@@ -88,24 +81,69 @@ def test_run_start_unselected_context_symmetry(tmp_path, qapp):
             },
         )
     assert excinfo.value.code is ErrorCode.PRECONDITION_FAILED
-    assert "active file-backed context" in excinfo.value.message
+    assert excinfo.value.message == decision.message
+    assert excinfo.value.reason == decision.reason
 
 
 def test_analyze_without_run_result_symmetry(tmp_path, qapp):
-    """ACTIVE context but no run result: both paths reject on the same guard."""
+    """No result projects no_run_result before analysis option validation."""
     ctrl = _make_controller(ContextReadiness.ACTIVE, tmp_path=tmp_path)
     tab_id = ctrl.tab_control.new_tab("fake")
 
-    with pytest.raises(GuardError, match="No run result"):
-        ctrl.run_analyze_control.analyze(tab_id, object())
-
-    # The wire path (tab.analyze) checks run-result presence first too, so the
-    # agent gets the true reason 'no_run_result' rather than the downstream
-    # 'no analyze params available' (params only exist once a run produced one).
+    decision = ctrl.admit(tab_id, TabAction.ANALYZE)
     with pytest.raises(RemoteError) as excinfo:
         _dispatch(ctrl, "tab.analyze", {"tab_id": tab_id, "updates": {}})
     assert excinfo.value.code is ErrorCode.PRECONDITION_FAILED
     assert excinfo.value.reason == "no_run_result"
+    assert excinfo.value.message == decision.message
+
+
+_ADMISSION_REQUESTS = [
+    ("tab.run_start", {}),
+    ("tab.load_data", {"data_path": "missing.h5"}),
+    ("tab.analyze", {"updates": {}, "run_operation_id": 999}),
+    ("tab.post_analyze", {"updates": {}, "operation_id": 999}),
+]
+
+
+@pytest.mark.parametrize(("method", "params"), _ADMISSION_REQUESTS)
+@pytest.mark.parametrize("known_tab", [False, True], ids=["unknown", "known"])
+def test_experiment_unavailable_is_first_wire_reason(
+    tmp_path, qapp, method: str, params: dict[str, object], known_tab: bool
+) -> None:
+    """Catalog access wins over tab lookup, result readiness and stale sources."""
+    ctrl = _make_controller(ContextReadiness.EMPTY, tmp_path=tmp_path)
+    tab_id = ctrl.tab_control.new_tab("fake") if known_tab else "missing"
+    ctrl.begin_shutdown(lambda: None)
+    try:
+        with pytest.raises(RemoteError) as excinfo:
+            _dispatch(ctrl, method, {"tab_id": tab_id, **params})
+        error = excinfo.value
+        assert (error.code, error.message, error.reason, error.data) == (
+            ErrorCode.PRECONDITION_FAILED,
+            "Experiments are unavailable during reload or shutdown",
+            "experiment_unavailable",
+            None,
+        )
+    finally:
+        ctrl.abort_shutdown()
+
+
+@pytest.mark.parametrize(("method", "params"), _ADMISSION_REQUESTS)
+def test_unknown_tab_retains_legacy_wire_tuple(
+    tmp_path, qapp, method: str, params: dict[str, object]
+) -> None:
+    """Remote tab lookup remains invalid_params rather than a domain error."""
+    ctrl = _make_controller(ContextReadiness.EMPTY, tmp_path=tmp_path)
+    with pytest.raises(RemoteError) as excinfo:
+        _dispatch(ctrl, method, {"tab_id": "missing", **params})
+    error = excinfo.value
+    assert (error.code, error.message, error.reason, error.data) == (
+        ErrorCode.INVALID_PARAMS,
+        "unknown tab_id: 'missing'",
+        "",
+        None,
+    )
 
 
 def test_save_no_run_result_carries_reason(tmp_path, qapp):

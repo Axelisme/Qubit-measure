@@ -11,6 +11,7 @@ import pytest
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import Adapter
 from zcu_tools.gui.app.measure.remote.handlers.run_save import h_tab_load_data
+from zcu_tools.gui.app.measure.services import AdmissionDecision
 from zcu_tools.gui.app.measure.services.load import LoadDataError, LoadTabResultOutcome
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 
@@ -117,10 +118,11 @@ def test_tab_load_data_dispatch_returns_serializable_outcome(analysis_error) -> 
             params=_AnalyzeParams(threshold=0.25) if analysis_error is None else None
         ),
     )
-    adapter = SimpleNamespace(run_analyze_control=ctrl.run_analyze_control)
+    ctrl.admit.return_value = AdmissionDecision(True, None, "")
+    adapter = SimpleNamespace(ctrl=ctrl, run_analyze_control=ctrl.run_analyze_control)
 
     reply = h_tab_load_data(
-        # tolerated(cast): The control-only namespace is not a RemoteControlAdapter.
+        # tolerated(cast): The admission/load-control namespace is not a RemoteControlAdapter.
         cast(Any, adapter),
         {"tab_id": "tab-1", "data_path": "/tmp/result.hdf5"},
     )

@@ -19,6 +19,7 @@ from zcu_tools.gui.app.measure.remote.handlers.run_save import (
 from zcu_tools.gui.app.measure.remote.handlers.view import (
     h_tab_get_figure,
 )
+from zcu_tools.gui.app.measure.services import AdmissionDecision
 from zcu_tools.gui.session.value_lookup import ProviderError
 
 
@@ -34,15 +35,20 @@ def _assert_escapes_unchanged(call: Any, error: BaseException) -> None:
 
 
 def test_run_and_analyze_runtime_errors_escape_handlers_unchanged() -> None:
+    ctrl = MagicMock()
+    ctrl.admit.return_value = AdmissionDecision(True, None, "")
     run_error = RuntimeError("run programmer bug")
     run_control = MagicMock()
     run_control.has_tab.return_value = True
     run_control.start_run.side_effect = run_error
     _assert_escapes_unchanged(
         lambda: h_tab_run_start(
-            # tolerated(cast): Run's nominal RemoteControlAdapter needs only run control and render_view here.
+            # tolerated(cast): This namespace supplies admission, run control and render_view, not a nominal adapter.
             cast(
-                Any, SimpleNamespace(run_analyze_control=run_control, render_view=None)
+                Any,
+                SimpleNamespace(
+                    ctrl=ctrl, run_analyze_control=run_control, render_view=None
+                ),
             ),
             {"tab_id": "t1", "expected": {"cfg_id": "cfg-t1", "revision": "0"}},
         ),
@@ -63,10 +69,12 @@ def test_run_and_analyze_runtime_errors_escape_handlers_unchanged() -> None:
     analyze_control.analyze.side_effect = analyze_error
     _assert_escapes_unchanged(
         lambda: h_tab_analyze(
-            # tolerated(cast): Analyze's nominal RemoteControlAdapter needs only analysis control and render_view here.
+            # tolerated(cast): This namespace supplies admission, analysis control and render_view, not a nominal adapter.
             cast(
                 Any,
-                SimpleNamespace(run_analyze_control=analyze_control, render_view=None),
+                SimpleNamespace(
+                    ctrl=ctrl, run_analyze_control=analyze_control, render_view=None
+                ),
             ),
             {"tab_id": "t1", "updates": {}},
         ),
@@ -89,14 +97,16 @@ def test_provider_error_escapes_value_handler_unchanged() -> None:
 
 
 def test_load_and_save_runtime_errors_escape_handlers_unchanged() -> None:
+    ctrl = MagicMock()
+    ctrl.admit.return_value = AdmissionDecision(True, None, "")
     load_error = RuntimeError("load programmer bug")
     load_control = MagicMock()
     load_control.has_tab.return_value = True
     load_control.load_tab_result.side_effect = load_error
     _assert_escapes_unchanged(
         lambda: h_tab_load_data(
-            # tolerated(cast): Load requires RemoteControlAdapter but this failure uses only run_analyze_control.
-            cast(Any, SimpleNamespace(run_analyze_control=load_control)),
+            # tolerated(cast): This namespace supplies admission and load control, not a nominal adapter.
+            cast(Any, SimpleNamespace(ctrl=ctrl, run_analyze_control=load_control)),
             {"tab_id": "t1", "data_path": "result.hdf5"},
         ),
         load_error,

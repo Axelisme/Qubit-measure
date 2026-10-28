@@ -11,12 +11,13 @@ from zcu_tools.gui.app.measure.adapter.analyze_params import (
     describe_analyze_params,
     reconstruct_params,
 )
+from zcu_tools.gui.app.measure.services import TabAction
 from zcu_tools.gui.app.measure.summary import summarize_analysis
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 
 from ..analysis_types import AnalysisPresentation
 from ..save_types import project_raw_data_state
-from ._common import follow_tab
+from ._common import follow_tab, require_tab_admission
 from .tab import tab_operation_state
 
 if TYPE_CHECKING:
@@ -106,25 +107,12 @@ def h_tab_analyze(
 ) -> Mapping[str, object]:
     tab_id = str(params["tab_id"])
     control = adapter.run_analyze_control
-    if not control.has_tab(tab_id):
-        raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
+    require_tab_admission(adapter, tab_id, TabAction.ANALYZE)
     # tolerated(cast): optional_integer admits int or None; Mapping erases its type.
     run_operation_id = cast(int | None, params.get("run_operation_id"))
     if run_operation_id is not None:
         control.require_run_operation(tab_id, run_operation_id)
     snap = control.get_tab_snapshot(tab_id)
-    # Order the checks by the true cause: analyze params only exist once a run
-    # produced a result (they are built from it). A run-in-flight / failed /
-    # cancelled tab has no result, so report that — not the downstream "no
-    # analyze params", which reads as a config gap rather than "nothing to
-    # analyze yet".
-    interaction = snap.interaction
-    if interaction is not None and not interaction.has_run_result:
-        raise RemoteError(
-            ErrorCode.PRECONDITION_FAILED,
-            "No run result available to analyze.",
-            reason="no_run_result",
-        )
     ap = None if snap.analysis is None else snap.analysis.params
     if ap is None and adapter.tab_control.analyze_param_definitions(
         tab_id, stage="primary"
@@ -195,8 +183,7 @@ def h_tab_post_analyze(
 ) -> Mapping[str, object]:
     tab_id = str(params["tab_id"])
     control = adapter.run_analyze_control
-    if not control.has_tab(tab_id):
-        raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
+    require_tab_admission(adapter, tab_id, TabAction.POST_ANALYZE)
     # tolerated(cast): optional_integer admits int or None; Mapping erases its type.
     source_operation_id = cast(int | None, params.get("operation_id"))
     # tolerated(cast): optional_integer admits int or None; Mapping erases its type.
@@ -206,17 +193,6 @@ def h_tab_post_analyze(
     if run_operation_id is not None:
         control.require_run_operation(tab_id, run_operation_id)
     snap = control.get_tab_snapshot(tab_id)
-    # Order the checks by the true cause: post params only exist once a primary
-    # analyze produced a result (they are built from it). Report the missing
-    # primary result first — it reads as "nothing to post-analyze yet" rather
-    # than the downstream "no post params", which looks like a config gap.
-    interaction = snap.interaction
-    if interaction is not None and not interaction.has_analyze_result:
-        raise RemoteError(
-            ErrorCode.PRECONDITION_FAILED,
-            "No primary analyze result available to post-analyze.",
-            reason="no_analyze_result",
-        )
     pp = None if snap.post_analysis is None else snap.post_analysis.params
     if pp is None and adapter.tab_control.analyze_param_definitions(
         tab_id, stage="post"
