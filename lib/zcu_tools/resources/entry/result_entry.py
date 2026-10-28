@@ -24,7 +24,13 @@ from zcu_tools.resources.record_table import JsonlRecordTable
 
 from . import _point_origin
 from ._path_segments import validate_path_segment
-from .aliases import EntryAliases, load_entry_aliases_with_revision, save_entry_aliases
+from .aliases import (
+    AliasReadResult,
+    EntryAliases,
+    load_entry_aliases_with_revision,
+    read_entry_aliases,
+    save_entry_aliases,
+)
 from .errors import DestinationExistsError, MissingPointError
 from .ledger import RecordsLedger
 from .ledger_models import (
@@ -228,8 +234,8 @@ class ResultEntry:
 
         point=None selects <entry>/aliases.yaml. Otherwise point is a safe
         single-segment label selecting <entry>/points/<point>/aliases.yaml;
-        invalid labels raise ValueError, and missing point.yaml or module_cfg.yaml
-        raises FileNotFoundError. Neither parameter document is parsed or changed.
+        invalid labels raise ValueError. Only aliases.yaml is read; neither
+        point.yaml nor module_cfg.yaml needs to exist or is parsed or changed.
         A missing alias file returns an empty EntryAliases, without copying or
         falling back to setup. Preserve order, empty bindings and raw $ links.
         Accept zcu.aliases 1.x; header/schema/YAML and I/O errors propagate.
@@ -250,6 +256,15 @@ class ResultEntry:
         aliases, revision = load_entry_aliases_with_revision(self._aliases_path(point))
         return (EntryAliases(aliases={}) if aliases is None else aliases), revision
 
+    def read_aliases(self, *, point: str | None = None) -> AliasReadResult:
+        """Observe aliases once with their raw revision and deferred content error.
+
+        Selection follows load_aliases. The result retains invalid bytes' hash
+        and original error, not a valid empty fallback. Missing files are empty
+        with revision=None; other filesystem errors propagate. No writes occur.
+        """
+        return read_entry_aliases(self._aliases_path(point))
+
     def save_aliases(
         self, aliases: EntryAliases, *, point: str | None = None
     ) -> DocumentRevision:
@@ -258,24 +273,26 @@ class ResultEntry:
         aliases is an EntryAliases containing ordered scalar/list bindings, not
         resolved names. point=None selects setup; a safe single-segment point
         label selects only that point's aliases.yaml. Invalid labels raise
-        ValueError; missing point.yaml or module_cfg.yaml raises FileNotFoundError.
-        Neither parameter document is parsed or changed. Write zcu.aliases 1.0
-        after strict string validation, using sibling-temp replacement. Schema,
+        ValueError; missing point.yaml raises FileNotFoundError. module_cfg.yaml
+        need not exist. Neither parameter document is parsed or changed.
+        Write zcu.aliases 1.0 after strict string validation, using sibling-temp
+        replacement. Schema,
         YAML and I/O errors propagate; failed replacement retains the old file.
         Other alias tables, parameters, library, ledger and preferences do not
         change. Return the exact written bytes' revision. No multiwriter merge
         or crash guarantee is offered.
         """
-        return save_entry_aliases(self._aliases_path(point), aliases)
+        destination = self._aliases_path(point)
+        if point is not None:
+            source = destination.parent / "point.yaml"
+            if not source.is_file():
+                raise FileNotFoundError(source)
+        return save_entry_aliases(destination, aliases)
 
     def _aliases_path(self, point: str | None) -> Path:
         if point is None:
             return self._result_path / "aliases.yaml"
         directory = _entry_path(self._result_path / "points", point)
-        for name in ("point.yaml", "module_cfg.yaml"):
-            source = directory / name
-            if not source.is_file():
-                raise FileNotFoundError(source)
         return directory / "aliases.yaml"
 
     @property

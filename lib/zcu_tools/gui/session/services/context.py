@@ -12,7 +12,7 @@ from ruamel.yaml.error import YAMLError
 
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 from zcu_tools.gui.owner import OwnerThreadGuard
-from zcu_tools.gui.session.aliases import AliasRow, AliasTable
+from zcu_tools.gui.session.aliases import AliasRow, AliasSnapshot, AliasTable
 from zcu_tools.gui.session.context_types import (
     ContextSource,
     ContextSourceBinding,
@@ -137,8 +137,7 @@ class ContextService:
         self._points: tuple[WorkingPointInfo, ...] = ()
         self._source_binding: ContextSourceBinding | None = None
         self._binding_id = 0
-        self._aliases = AliasTable(alias_rows)
-        self._aliases_revision: DocumentRevision | None = None
+        self._aliases = AliasSnapshot(AliasTable(alias_rows))
         self._file_sync = PointFileSync(
             bus, installed=self.get_file_revisions, install=self._reload_point_file
         )
@@ -175,8 +174,7 @@ class ContextService:
         self._point = None
         self._library = None
         self._points = points
-        self._aliases = AliasTable()
-        self._aliases_revision = None
+        self._aliases = AliasSnapshot(AliasTable())
         self._publish(None, sources, ContextReadiness.EMPTY, active_label="")
         return info
 
@@ -194,19 +192,21 @@ class ContextService:
     def get_file_revisions(self) -> tuple[PointFileRevision, ...]:
         """Return installed parameters/library/aliases versions, or () without a point.
 
-        Paths are absolute. No disk reads or implicit refresh occur. Failed
-        writes and point preparation retain the previous installed versions.
+        Paths are absolute. Aliases use the observed bytes hash even when their
+        content failed validation; None means absent only. No disk reads or
+        implicit refresh occur. Failed writes and point preparation retain the
+        previous installed versions.
         """
         self._owner.assert_owner()
         if (
             self._point is None
             or self._library is None
-            or self._aliases_revision is None
+            or self._aliases.revision is None
         ):
             return ()
         parameters = document_revision(self._point)
         library = self._library.document_revision
-        aliases = self._aliases_revision
+        aliases = self._aliases.revision
         return (
             PointFileRevision("parameters", parameters.path, parameters.revision),
             PointFileRevision("library", library.path, library.revision),
@@ -246,8 +246,7 @@ class ContextService:
             candidate = AliasTable(
                 tuple(AliasRow(name, value) for name, value in saved.aliases.items())
             )
-            self._aliases_revision = revision
-            self._install_alias_rows(candidate)
+            self._install_alias_rows(candidate, revision)
         else:
             if file.document == "parameters":
                 self._point.refresh()
@@ -297,8 +296,11 @@ class ContextService:
         """Prepare point/library/assets/aliases, then install ACTIVE and publish facts.
 
         Load point-local aliases, including an empty table for a missing file.
-        No setup or preset fallback is used. Alias syntax and storage errors
-        propagate before replacing the binding or table.
+        No setup or preset fallback is used. Alias content/syntax errors are
+        captured with the observed bytes hash, not raised during selection.
+        Alias consumers raise that original error; concrete parameter/library
+        reads remain available. Other storage errors propagate before replacing
+        the binding or table.
 
         No opened entry raises FailedPreconditionError(no_entry). Preparation
         failure retains the old binding. The returned target has no session
@@ -310,7 +312,7 @@ class ContextService:
         parameters, library, sources, info, aliases = self._prepare_point(
             entry, request.label, point
         )
-        self._aliases, self._aliases_revision = aliases
+        self._aliases = aliases
         self._install_point(point, library, parameters, sources, info)
         return SavedPoint(entry_id=entry.entry_id, point=request.label)
 
@@ -358,7 +360,7 @@ class ContextService:
             raise PointBindingError(
                 entry_id=entry.entry_id, label=request.label
             ) from exc
-        self._aliases, self._aliases_revision = aliases
+        self._aliases = aliases
         self._install_point(point, library, parameters, sources, info)
         return SavedPoint(entry_id=entry.entry_id, point=request.label)
 
@@ -374,8 +376,7 @@ class ContextService:
         self._point = None
         self._library = None
         self._points = ()
-        self._aliases = AliasTable()
-        self._aliases_revision = None
+        self._aliases = AliasSnapshot(AliasTable())
         self._publish(None, (), ContextReadiness.EMPTY, active_label="")
 
     def inspect_document(self, *, setup: bool = False) -> SetupDocument | PointDocument:
@@ -461,7 +462,9 @@ class ContextService:
         unbound aliases raise RoleResolutionError naming the alias, with no
         concrete-name fallback. Bare concrete paths remain independent.
         The capture never follows later source or alias edits and performs no
-        I/O. EMPTY raises FailedPreconditionError(no_context). Necessary source
+        I/O. Alias-file errors remain fixed and raise only on alias reads or
+        projections, never concrete parameter/library reads. EMPTY raises
+        FailedPreconditionError(no_context). Necessary source
         faults raise ContextSourceUnavailableError, never returning old values.
         """
         self._owner.assert_owner()
@@ -470,16 +473,17 @@ class ContextService:
             raise FailedPreconditionError(
                 "Select or create a working point first", reason_code="no_context"
             )
-        table = self._aliases
+        table = self._aliases.table
         for alias, component in (aliases or {}).items():
             table = table.with_override(alias, component)
-        return parameters.bind_aliases(table.rows, {})
+        return parameters.bind_aliases(table.rows, {}, alias_error=self._aliases.error)
 
     def get_alias_rows(self) -> tuple[AliasRow, ...]:
         """Read authored rows without expansion or I/O, even without a point.
 
         Entry installation/clearing leaves an empty table; explicit memory-only
-        set_alias_rows may populate it before selecting a point.
+        set_alias_rows may populate it before selecting a point. An invalid
+        selected-point alias file raises its captured original error.
         """
         self._owner.assert_owner()
         return self._aliases.rows
@@ -498,10 +502,13 @@ class ContextService:
             return
         self._install_alias_rows(AliasTable(rows))
 
-    def _install_alias_rows(self, candidate: AliasTable) -> None:
-        previous = self._aliases.rows
-        self._aliases = candidate
-        if candidate.rows != previous:
+    def _install_alias_rows(
+        self, candidate: AliasTable, revision: DocumentRevision | None = None
+    ) -> None:
+        previous = self._aliases.table.rows
+        had_error = self._aliases.error is not None
+        self._aliases = AliasSnapshot(candidate, revision)
+        if candidate.rows != previous or had_error:
             self._state.version.bump("context")
             self._bus.emit(AliasesChangedPayload(rows=candidate.rows))
 
@@ -528,8 +535,7 @@ class ContextService:
             EntryAliases(aliases={row.alias: row.value for row in candidate.rows}),
             point=label,
         )
-        self._aliases_revision = revision
-        self._install_alias_rows(candidate)
+        self._install_alias_rows(candidate, revision)
 
     def capture_storage(self, parameters: ParameterContext) -> PointStorageBinding:
         """Return historical storage for a fixed capture on the owner sequence.
@@ -888,7 +894,7 @@ class ContextService:
         ModuleLibrary,
         tuple[ContextSource, ...],
         WorkingPointInfo,
-        tuple[AliasTable, DocumentRevision],
+        AliasSnapshot,
     ]:
         if self._setup is None:
             raise RuntimeError("Opened entry has no setup binding")
@@ -908,13 +914,8 @@ class ContextService:
             ContextSource("module_cfg", library.source_path, None),
         )
         info = WorkingPointInfo(label, document.general.description or "")
-        saved_aliases, alias_revision = entry.load_aliases_with_revision(point=label)
-        aliases = AliasTable(
-            tuple(
-                AliasRow(name, value) for name, value in saved_aliases.aliases.items()
-            )
-        )
-        return parameters, library, sources, info, (aliases, alias_revision)
+        aliases = AliasSnapshot.from_read(entry.read_aliases(point=label))
+        return parameters, library, sources, info, aliases
 
     def _install_point(
         self,

@@ -103,7 +103,8 @@ class PointFileRevision:
 
     document is parameters, library or aliases, in that order in file lists.
     path is the absolute owner file. revision is the installed raw-byte SHA-256
-    hex digest; None is allowed only for a missing aliases file.
+    hex digest; None is allowed only for a missing aliases file. Aliases may
+    retain a content error, so their observed hash does not imply validity.
     """
 
     document: Literal["parameters", "library", "aliases"]
