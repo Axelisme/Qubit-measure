@@ -17,6 +17,7 @@ from zcu_tools.simulate.adc import (
     ConditionalReadout,
     ConditionalSums,
     ReadoutBatch,
+    ReadoutEvent,
     ReadoutModel,
     Receiver,
 )
@@ -146,7 +147,14 @@ def prepare_readout(
     for plan in plans:
         content = plan.readout
         local = local_readout_pulses(content.pulses, reference)
-        batch = ReadoutBatch(model, local, content.grids, content.inverse)
+        batch = ReadoutBatch(
+            model,
+            tuple(
+                (ReadoutEvent(pulses, grids),)
+                for pulses, grids in zip(local, content.grids, strict=True)
+            ),
+            content.inverse,
+        )
         conditional = solver.responses(batch)
         content_index[plan.batch.points] = len(pulses) + content.inverse
         pulses.extend(local)
@@ -160,5 +168,12 @@ def prepare_readout(
         ChannelReadout(
             adc.ro_ch, conditional, content_index.reshape(request.point_dims), receiver
         ),
-        ReadoutBatch(model, tuple(pulses), tuple(grids), content_index),
+        ReadoutBatch(
+            model,
+            tuple(
+                (ReadoutEvent(pulses, grids),)
+                for pulses, grids in zip(tuple(pulses), tuple(grids), strict=True)
+            ),
+            content_index,
+        ),
     )

@@ -19,7 +19,7 @@ from zcu_tools.core.simulation import (
 
 from ._noise import noise_root
 from .model import ReadoutModel, RealArray, Receiver, readonly_array
-from .populations import validate_populations
+from .projection import ProjectionReadout
 from .request import ReadoutPulse, SampleGrid
 
 
@@ -34,41 +34,57 @@ def _indices(value: NDArray[np.int64], contents: int, name: str) -> NDArray[np.i
 
 
 @dataclass(frozen=True)
+class ReadoutEvent:
+    """One logical read event in physical ns/GHz units.
+
+    pulses: nonempty tuple of coherent incident pulses sharing one CTMC path.
+    grids: ADC windows in channel-local trigger order, sharing that path.
+        Empty means this ADC does not observe the event and emits no read column.
+        Windows may include lookback, gaps and ringdown.
+    Empty pulses raise ValueError; physical records validate themselves.
+    """
+
+    pulses: tuple[ReadoutPulse, ...]
+    grids: tuple[SampleGrid, ...]
+
+    def __post_init__(self) -> None:
+        if not self.pulses:
+            raise ValueError("readout event requires nonempty pulses")
+
+
+@dataclass(frozen=True)
 class ReadoutBatch:
-    """Distinct readout contents for many points of one ADC, in engine units.
+    """Distinct ordered read-event contents for many points of one ADC.
 
-    model: DC ReadoutModel; its state order defines the conditional-state axis.
-        Frequencies are GHz, times ns and phases radians. No flux tail or
-        overlapping pulse/flux correction is applied.
-    pulses: one tuple per distinct content, each containing one or more finite
-        ReadoutPulse. Pulses are shared by all reads of that content.
-    grids: one tuple of SampleGrid per content, in read order. Every content
-        has the same positive number of reads. Grids retain physical timing
-        and demodulation, including pre-pulse lookback.
-    content_index: owned/read-only int64 (points,) indices into pulses/grids.
-        Repeated indices reuse the same conditional response.
-    include_traces: request conditional per-sample traces for decimated mode;
-        False returns only sums, with ConditionalSums.traces=None.
-
-    Empty/misaligned contents, reads or out-of-range/non-int64 indices raise
-    ValueError. Pulse, grid and model records validate their own physical inputs.
+    model: DC model whose state order defines each event's initial-state axis.
+    events: nonempty tuple of contents, each a nonempty ordered event tuple.
+        Contents have identical event counts and grid counts per event. Grids
+        within one event share a CTMC across ADCs; different events do not.
+        Events may have zero grids, but each ADC content must observe at least
+        one grid across its events. Responses concatenate only observed grids
+        in event order, without re-numbering their logical event indices.
+    content_index: owned/read-only int64 (points,) mapping points to contents.
+    include_traces: request conditional per-sample traces as well as sums.
+    Empty/misaligned contents or invalid indices raise ValueError.
     """
 
     model: ReadoutModel
-    pulses: tuple[tuple[ReadoutPulse, ...], ...]
-    grids: tuple[tuple[SampleGrid, ...], ...]
+    events: tuple[tuple[ReadoutEvent, ...], ...]
     content_index: NDArray[np.int64]
     include_traces: bool = False
 
     def __post_init__(self) -> None:
-        if not self.pulses or len(self.grids) != len(self.pulses):
-            raise ValueError("pulse and grid content counts must match and be nonempty")
-        if any(not pulses for pulses in self.pulses):
-            raise ValueError("each readout content must contain at least one pulse")
-        reads = len(self.grids[0])
-        if not reads or any(len(grids) != reads for grids in self.grids):
-            raise ValueError("grid contents must have the same positive read count")
-        indices = _indices(self.content_index, len(self.pulses), "content_index")
+        if not self.events or not self.events[0]:
+            raise ValueError("readout contents and events must be nonempty")
+        layout = tuple(len(event.grids) for event in self.events[0])
+        if not any(layout):
+            raise ValueError("each ADC content must have at least one observed grid")
+        if any(
+            tuple(len(event.grids) for event in events) != layout
+            for events in self.events
+        ):
+            raise ValueError("contents must have the same event and grid counts")
+        indices = _indices(self.content_index, len(self.events), "content_index")
         if indices.ndim != 1:
             raise ValueError("content_index must have shape (points,)")
         object.__setattr__(self, "content_index", indices)
@@ -90,6 +106,9 @@ class ConditionalSums:
         (contents, reads, states, samples, 2) in ADC sample units, using the same
         calibration as sums. Dense traces require every sample_count to equal
         the samples axis. None means traces were not requested.
+    event_indices: one nonnegative logical event index per read. Empty means
+        all reads belong to event zero. Integrated sampling validates indices
+        against ProjectionReadout and expands reads onto its joint count axis.
 
     Invalid shapes, nonpositive/non-int64 sample counts or nonfinite values
     raise ValueError. Constructors do not recompute sums from optional traces.
@@ -98,6 +117,7 @@ class ConditionalSums:
     sums: RealArray
     sample_counts: NDArray[np.int64]
     traces: RealArray | None = None
+    event_indices: tuple[int, ...] = ()
 
     def __post_init__(self) -> None:
         sums = readonly_array(self.sums, "conditional sums")
@@ -118,6 +138,14 @@ class ConditionalSums:
             raise ValueError("sample_counts must be positive int64 with shape (reads,)")
         counts = counts.copy()
         counts.setflags(write=False)
+        events = self.event_indices or (0,) * sums.shape[1]
+        if len(events) != sums.shape[1] or any(
+            type(index) is not int or index < 0 for index in events
+        ):
+            raise ValueError(
+                "event_indices must contain one nonnegative integer per read"
+            )
+        object.__setattr__(self, "event_indices", events)
         object.__setattr__(self, "sums", sums)
         object.__setattr__(self, "sample_counts", counts)
         if self.traces is not None:
@@ -166,7 +194,7 @@ class ChannelReadout:
 
 
 def round_statistics(
-    populations: NDArray[np.float64],
+    readout: ProjectionReadout,
     channels: tuple[ChannelReadout, ...],
     *,
     reps: int,
@@ -176,23 +204,25 @@ def round_statistics(
 ) -> RoundStatistics:
     """Draw integrated statistics for all ADCs from one joint state-count draw.
 
-    populations: finite float64 (*point_dims, states), nonnegative rows summing
-        to one within 1e-6 (inclusive float64 endpoints), in conditional state
-        order. The caller explicitly normalizes before sampling; this function
-        only validates, without clipping, normalization or repair.
+    readout: immutable outcome weights and event-specific populations. State
+        order must match every channel's conditional state axis. Probabilities
+        are validated by ProjectionReadout, never normalized by sampling.
     channels: unique ADCs; content_index shape must equal point_dims and each
-        conditional state axis must match populations. Reads of one ADC must
+        conditional state axis must match readout populations. Reads of one ADC must
         have equal sample_counts; ADCs may have different sample counts.
     reps: nonnegative integer shots per point; zero produces zero counts/sums.
     seed/acquire_sequence/round_index: nonnegative integers selecting the local
         SamplingIdentity(seed, (acquire_sequence, round_index, 0)) PCG64 stream.
         One stream serves every point and ADC without changing global RNG state.
 
-    counts[p] is Multinomial(reps, populations[p]), shared across ADCs/reads.
-    Each ADC/read sum is counts @ conditional means plus independent Gaussian
+    counts[p] is Multinomial(reps, weights[k] * terminal_populations[k,s]),
+    with (k,s) flattened in C order and shared across ADCs/reads. Earlier reads'
+    conditional means average their event populations for k, repeated across s;
+    terminal reads depend on s, repeated across k. Each ADC/read sum is counts
+    @ those conditional means plus independent Gaussian
     noise with covariance reps * (sample_count * receiver.noise_covariance
     + I/12). The I/12 term models nearest-even int64 rounding of individual shots.
-    Returned conditional_sums are expanded to (*point_dims, reads, states, 2);
+    Returned conditional_sums have shape (*point_dims, reads, outcomes*states, 2);
     shot_covariance excludes rounding. raw_identity uses the same seed with
     stream (acquire_sequence, round_index, 1), isolating deferred raw draws.
     Inputs remain unchanged and equal identities reproduce results within the
@@ -201,7 +231,7 @@ def round_statistics(
     Raise ValueError for invalid probabilities, reps/identity, duplicate ADCs,
     incompatible point/state shapes or unequal read sample counts.
     """
-    return PreparedStatistics(populations, channels, reps=reps).draw(
+    return PreparedStatistics(readout, channels, reps=reps).draw(
         seed=seed, acquire_sequence=acquire_sequence, round_index=round_index
     )
 
@@ -221,8 +251,9 @@ class PreparedStatistics:
     Constructor inputs and errors match round_statistics, including probability,
     reps and channel layout validation. Copies probabilities and expands owned
     conditional means once. Each channel's covariance is factored once, without
-    changing draw order or arithmetic. populations is read-only float64 in the
-    explicit readout-state order; reps is the validated shots per point. draw
+    changing draw order or arithmetic. populations is read-only float64
+    (*point_dims, outcomes*states) in C-order (outcome, terminal state) order;
+    reps is the validated shots per point. draw
     validates a fresh identity on every call and returns independently owned
     counts/noisy totals, so previous rounds and delayed raw remain usable.
     """
@@ -232,16 +263,20 @@ class PreparedStatistics:
     _channels: tuple[_StatisticsChannel, ...]
 
     def __init__(
-        self, populations: RealArray, channels: tuple[ChannelReadout, ...], *, reps: int
+        self,
+        readout: ProjectionReadout,
+        channels: tuple[ChannelReadout, ...],
+        *,
+        reps: int,
     ) -> None:
-        probabilities = _validate_round_inputs(populations, channels, reps)
+        probabilities = _validate_round_inputs(readout, channels, reps)
         object.__setattr__(
             self, "populations", readonly_array(probabilities, "populations")
         )
         object.__setattr__(self, "reps", reps)
         prepared = []
         for channel in channels:
-            conditional = channel.conditional.sums[channel.content_index]
+            conditional = _joint_conditional(readout, channel)
             covariance = (
                 int(channel.conditional.sample_counts[0])
                 * channel.receiver.noise_covariance
@@ -289,11 +324,37 @@ class PreparedStatistics:
         )
 
 
+def _joint_conditional(
+    readout: ProjectionReadout, channel: ChannelReadout
+) -> RealArray:
+    """Expand each read onto the (outcome, final state) count axis."""
+    values = channel.conditional.sums[channel.content_index]
+    outcomes, states = readout.populations[-1].shape[-2:]
+    reads = []
+    for index, event in enumerate(channel.conditional.event_indices):
+        conditional = values[..., index, :, :]
+        if event == len(readout.populations) - 1:
+            expanded = np.broadcast_to(
+                conditional[..., None, :, :],
+                (*conditional.shape[:-2], outcomes, states, 2),
+            )
+        else:
+            means = np.einsum(
+                "...ks,...si->...ki", readout.populations[event], conditional
+            )
+            expanded = np.broadcast_to(
+                means[..., :, None, :], (*means.shape[:-2], outcomes, states, 2)
+            )
+        reads.append(expanded.reshape((*expanded.shape[:-3], outcomes * states, 2)))
+    return np.stack(reads, axis=-3)
+
+
 def _validate_round_inputs(
-    populations: RealArray, channels: tuple[ChannelReadout, ...], reps: int
+    readout: ProjectionReadout, channels: tuple[ChannelReadout, ...], reps: int
 ) -> RealArray:
     """Validate the shared probability/layout contract without repairing inputs."""
-    probabilities = validate_populations(populations)
+    joint = readout.weights[..., :, None] * readout.populations[-1]
+    probabilities = joint.reshape((*readout.weights.shape[:-1], -1))
     if type(reps) is not int or reps < 0:
         raise ValueError("reps must be a nonnegative integer")
     if len({channel.channel for channel in channels}) != len(channels):
@@ -302,7 +363,9 @@ def _validate_round_inputs(
         if channel.content_index.shape != probabilities.shape[:-1]:
             raise ValueError("channel point shape must match populations")
         conditional = channel.conditional
-        if conditional.sums.shape[2] != probabilities.shape[-1]:
+        if max(conditional.event_indices) >= len(readout.populations):
+            raise ValueError("conditional event index outside readout events")
+        if conditional.sums.shape[2] != readout.populations[-1].shape[-1]:
             raise ValueError("conditional state axis must match populations")
         if np.any(conditional.sample_counts != conditional.sample_counts[0]):
             raise ValueError("reads of one channel must have equal sample counts")

@@ -19,6 +19,7 @@ from zcu_tools.experiment.readout_plan import (
 from zcu_tools.resources.ftf import FTFSettings
 from zcu_tools.simulate.adc import (
     ReadoutBatch,
+    ReadoutEvent,
     ReadoutPulse,
     Receiver,
 )
@@ -289,8 +290,16 @@ def plan_template(
                 window.channel,
                 ReadoutBatch(
                     model,
-                    local_readout_pulses(content.pulses, reference_frequency_ghz),
-                    content.grids,
+                    tuple(
+                        (ReadoutEvent(pulses, grids),)
+                        for pulses, grids in zip(
+                            local_readout_pulses(
+                                content.pulses, reference_frequency_ghz
+                            ),
+                            content.grids,
+                            strict=True,
+                        )
+                    ),
                     content.inverse,
                 ),
             )

@@ -42,12 +42,12 @@ def test_template_units_common_phase_flat_readout_and_dc_model() -> None:
     np.testing.assert_allclose(track.phase_rad, [0.0, 0.0], atol=1e-14)
     np.testing.assert_array_equal(track.amplitude, [-0.2, -0.2])
     np.testing.assert_array_equal(plan.batch.end_ns, [8.0, 10.0])
-    pulse = plan.readouts[0].batch.pulses[0][0]
+    pulse = plan.readouts[0].batch.events[0][0].pulses[0]
     assert pulse.envelope is None
     assert pulse.amplitude == pytest.approx(0.2j)
     assert pulse.phase_rad == pytest.approx(np.pi / 6 - 12 * np.pi)
     np.testing.assert_array_equal(
-        plan.readouts[0].batch.grids[0][0].times_ns, [8, 9, 10, 11]
+        plan.readouts[0].batch.events[0][0].grids[0].times_ns, [8, 9, 10, 11]
     )
     np.testing.assert_array_equal(
         plan.readouts[0].batch.model.receiver.noise_covariance, np.zeros((2, 2))
@@ -186,7 +186,11 @@ def test_cavity_drives_are_classified_per_point_with_calibrated_envelopes() -> N
     assert first.envelope is None
     assert second.phase_rad == pytest.approx(np.pi / 6 - 2 * np.pi * 5.9 * 3)
     np.testing.assert_array_equal(plan.batch.end_ns, [8, 10])
-    assert all(len(content) == 1 for content in plan.readouts[0].batch.pulses)
+    assert all(
+        len(content) == 1
+        for events in plan.readouts[0].batch.events
+        for content in (events[0].pulses,)
+    )
 
 
 @pytest.mark.parametrize("trigger", [0.007999999999, 0.0])
@@ -377,9 +381,9 @@ def test_template_wires_receiver_delay_and_mismatch_without_delaying_evolution()
         getattr(plan.readouts[0].batch.model, "mismatch_phase_rad", None), [0.6, -0.4]
     )
     np.testing.assert_array_equal(plan.batch.end_ns, [8.0, 10.0])
-    assert plan.readouts[0].batch.pulses[0][0].start_ns == 8.0
+    assert plan.readouts[0].batch.events[0][0].pulses[0].start_ns == 8.0
     np.testing.assert_array_equal(
-        plan.readouts[0].batch.grids[0][0].times_ns, [8, 9, 10, 11]
+        plan.readouts[0].batch.events[0][0].grids[0].times_ns, [8, 9, 10, 11]
     )
 
 
@@ -402,7 +406,8 @@ def test_sampled_readout_template_preserves_linear_envelope_without_field_ode(
             adc.ConditionalReadout(batch.model, rtol=1e-12, atol=1e-14)
             .response(ps, gs[0])
             .traces.sum(axis=-2)
-            for ps, gs in zip(batch.pulses, batch.grids, strict=True)
+            for events in batch.events
+            for ps, gs in ((events[0].pulses, events[0].grids),)
         ]
     )
     calls = []
