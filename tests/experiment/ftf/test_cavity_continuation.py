@@ -17,7 +17,13 @@ from zcu_tools.simulate.evolution import (
     segment_spans,
 )
 
-from tests.experiment._ftf_templates import request, settings, snapshot, template
+from tests.experiment._ftf_templates import (
+    herald_template,
+    request,
+    settings,
+    snapshot,
+    template,
+)
 
 pytestmark = pytest.mark.sim
 
@@ -142,6 +148,96 @@ def test_acquire_continues_each_point_span_density_field_and_common_origin(shape
         source.open_acquire(replace(acquire, sequence=8)).sample_round(snapshot(), 1)
         assert len(engine.calls) == max(map(len, spans))
         assert source.preparation_cache.hits == 1
+    finally:
+        source.close()
+
+
+def test_projection_outcomes_carry_their_own_cavity_memory_into_the_next_span():
+    engine = ObservingEngine()
+    base, readout = herald_template()
+    # A second herald gives cavity memory a projected continuation boundary.
+    terminal = tuple(
+        replace(event, start_us=event.start_us + 0.012) for event in base.events[-2:]
+    )
+    middle = tuple(
+        replace(event, duration_us=np.full(2, 0.002)) for event in base.events[-2:]
+    )
+    windows = tuple(
+        replace(
+            window,
+            trigger_us=np.column_stack(
+                (window.trigger_us, window.trigger_us[:, -1] + 0.012)
+            ),
+            frequency_mhz=np.column_stack(
+                (window.frequency_mhz, window.frequency_mhz[:, -1])
+            ),
+            phase_deg=np.column_stack((window.phase_deg, window.phase_deg[:, -1])),
+            generator_channels=np.column_stack(
+                (window.generator_channels, window.generator_channels[:, -1])
+            ),
+        )
+        for window in base.readouts
+    )
+    driven = replace(
+        base,
+        events=(*base.events[:2], *middle, *terminal),
+        readouts=windows,
+        duration_us=base.duration_us + 0.012,
+    )
+    numeric = settings().with_telemetry(enabled=False)
+    numeric = numeric.model_copy(
+        update={
+            "chip": numeric.chip.model_copy(
+                update={
+                    "temperature_k": 1.0,
+                    "f1": numeric.chip.f1.model_copy(update={"q_cap": 10.0}),
+                }
+            )
+        }
+    )
+    source = FTFSource(numeric, DeviceManager(), readout=readout, engine=engine)
+    try:
+        facts = source.model_facts(snapshot())
+        plan = plan_template(numeric, snapshot(), driven, readout=readout, facts=facts)
+        source.open_acquire(request(templates=(driven,))).sample_round(snapshot(), 0)
+        calls = [
+            batches[0] for _, batches, _ in engine.calls if batches[0].points[0] == 0
+        ]
+        assert len(calls) == 6
+        pulses = tuple(
+            pulse for read in plan.projective_reads[0] for pulse in read.pulses
+        )
+        model = facts.readout
+        bare = np.array(
+            [
+                numeric.readout.resonators.r1.frequency_ghz,
+                numeric.readout.resonators.r2.frequency_ghz,
+            ]
+        )
+        chi = model.frequencies_ghz - bare
+        for index, batch in enumerate(calls[2:]):
+            first_state, second_state = divmod(index, 2)
+            initial = np.zeros((1, 2, 2), complex)
+            initial[0, second_state, second_state] = 1
+            np.testing.assert_array_equal(batch.initial_densities, initial)
+            fields = cavity_fields(
+                model, pulses, np.array([0.0, 8.0]), initial_time_ns=0.0
+            )
+            memory = fields[-1, first_state]
+            average = cavity_field_average(
+                model, pulses, 8.0, 20.0, initial_field=memory, initial_time_ns=8.0
+            )
+            shift = batch.segment_shifts[0][0]
+            np.testing.assert_allclose(
+                shift.energy_shift_ghz,
+                (chi * average.photons).sum(axis=-1),
+                rtol=1e-10,
+                atol=1e-15,
+            )
+        assert not np.array_equal(
+            calls[2].segment_shifts[0][0].energy_shift_ghz,
+            calls[4].segment_shifts[0][0].energy_shift_ghz,
+        )
     finally:
         source.close()
 

@@ -26,12 +26,14 @@ from .populations import (
     PopulationValidationError,
     normalize_populations,
 )
+from .projection import ProjectionReadout
 from .raw import ADCRawShots, PreparedRawShots
 from .readout_batch import (
     ChannelReadout,
     ConditionalSums,
     PreparedStatistics,
     ReadoutBatch,
+    ReadoutEvent,
     round_statistics,
 )
 from .request import (

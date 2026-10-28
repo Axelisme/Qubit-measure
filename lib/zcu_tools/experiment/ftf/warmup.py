@@ -25,6 +25,7 @@ from zcu_tools.simulate.adc import (
     ConditionalReadout,
     PiecewiseLinearEnvelope,
     ReadoutBatch,
+    ReadoutEvent,
     ReadoutModel,
     ReadoutPulse,
     Receiver,
@@ -357,8 +358,10 @@ def _readout(name: str) -> None:
         response.responses(
             ReadoutBatch(
                 model,
-                contents,
-                grids,
+                tuple(
+                    (ReadoutEvent(pulses, grids),)
+                    for pulses, grids in zip(contents, grids, strict=True)
+                ),
                 np.arange(len(contents), dtype=np.int64),
                 include_traces=traces,
             )

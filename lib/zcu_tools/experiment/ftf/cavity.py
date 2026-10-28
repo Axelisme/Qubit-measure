@@ -8,10 +8,17 @@ from numpy.typing import NDArray
 
 from zcu_tools.core.simulation import CancellationQuery
 from zcu_tools.resources.ftf import FTFSettings
-from zcu_tools.simulate.adc import CavityAverageCache
+from zcu_tools.simulate.adc import (
+    CavityAverageCache,
+    ProjectionReadout,
+    normalize_populations,
+)
 from zcu_tools.simulate.evolution import (
     Engine,
     EvolutionResult,
+    FluxSchedule,
+    FluxWaveform,
+    PathDiagnostics,
     SegmentShift,
     TimelineBatch,
     merge_path_diagnostics,
@@ -94,7 +101,233 @@ def _span_key(key: bytes, step: int, batches: tuple[TimelineBatch, ...]) -> byte
         if batch.start_ns is not None and batch.initial_densities is not None:
             digest.update(batch.start_ns.tobytes())
             digest.update(batch.initial_densities.tobytes())
+        digest.update(batch.points.tobytes())
+        for shifts in batch.segment_shifts:
+            for shift in shifts:
+                digest.update(shift.energy_shift_ghz.tobytes())
+                digest.update(shift.dephasing_per_ns.tobytes())
     return digest.digest()
+
+
+@dataclass
+class _Outcome:
+    timeline: _CavityTimeline
+    weight: float
+    history: tuple[int, ...]
+
+
+@dataclass(frozen=True)
+class ProjectionEvolution:
+    """FTF outcome continuation products in result.points order.
+
+    result: final density mixtures and merged evolution diagnostics.
+    readout: normalized weights and conditional populations for every ordered
+        logical event, including an unobserved terminal event.
+    reuse_keys: all engine continuation digests, including projected densities.
+    outcomes: retained history count per point, including zeros when floor=0.
+    pruned_weight: cumulative removed probability per point before redistribution.
+    """
+
+    result: EvolutionResult
+    readout: ProjectionReadout
+    reuse_keys: tuple[bytes, ...]
+    outcomes: tuple[int, ...]
+    pruned_weight: tuple[float, ...]
+
+
+def _point_batch(batch: TimelineBatch, point: int) -> TimelineBatch:
+    row = slice(point, point + 1)
+    flux_rows = slice(batch.flux.offsets[point], batch.flux.offsets[point + 1])
+    flux = FluxSchedule(
+        np.array([0, flux_rows.stop - flux_rows.start], dtype=np.int64),
+        batch.flux.start_ns[flux_rows],
+        batch.flux.level[flux_rows],
+    )
+    waveform = batch.flux_waveform
+    if waveform is not None:
+        samples = slice(waveform.offsets[point], waveform.offsets[point + 1])
+        waveform = FluxWaveform(
+            np.array([0, samples.stop - samples.start], dtype=np.int64),
+            waveform.time_ns[samples],
+            waveform.flux[samples],
+        )
+    return replace(
+        batch,
+        points=batch.points[row],
+        end_ns=batch.end_ns[row],
+        tracks=tuple(
+            replace(
+                track,
+                start_ns=track.start_ns[row],
+                duration_ns=track.duration_ns[row],
+                frequency_ghz=track.frequency_ghz[row],
+                phase_rad=track.phase_rad[row],
+                amplitude=track.amplitude[row],
+                envelope_index=track.envelope_index[row],
+                active=track.active[row],
+            )
+            for track in batch.tracks
+        ),
+        flux=flux,
+        flux_waveform=waveform,
+        segment_boundaries=(batch.segment_boundaries[point],),
+    )
+
+
+def _project_outcomes(
+    outcomes: list[_Outcome], floor: float
+) -> tuple[list[_Outcome], float]:
+    expanded = []
+    removed = 0.0
+    for outcome in outcomes:
+        timeline = outcome.timeline
+        probabilities = normalize_populations(timeline.density[0].diagonal().real)
+        for state, probability in enumerate(probabilities):
+            weight = outcome.weight * float(probability)
+            if weight < floor:
+                removed += weight
+                continue
+            density = np.zeros_like(timeline.density)
+            density[0, state, state] = 1
+            expanded.append(
+                _Outcome(
+                    replace(timeline, density=density, fields=timeline.fields.copy()),
+                    weight,
+                    (*outcome.history, state),
+                )
+            )
+    if not expanded:
+        point = outcomes[0].timeline.batch.points[0]
+        raise ValueError(
+            f"point {point}: projection_weight_floor {floor} removed every FTF outcome"
+        )
+    retained = sum(outcome.weight for outcome in expanded)
+    for outcome in expanded:
+        outcome.weight /= retained
+    return expanded, removed
+
+
+def _evolve_outcomes(
+    engine: Engine,
+    outcomes: list[_Outcome],
+    facts: FTFModelFacts,
+    read_starts: tuple[float, ...],
+    *,
+    options: CavityEvolutionOptions,
+    floor: float,
+) -> tuple[list[_Outcome], list[PathDiagnostics], list[bytes], float]:
+    paths = []
+    keys = []
+    survival = 1.0
+    for step, (start, _) in enumerate(outcomes[0].timeline.spans[0]):
+        if start in read_starts:
+            outcomes, removed = _project_outcomes(outcomes, floor)
+            survival *= 1 - removed
+        for outcome in outcomes:
+            batch = outcome.timeline.advance(step)
+            # Histories can end in the same density with different cavity memory.
+            history_key = sha256(
+                options.key + np.asarray(outcome.history, dtype=np.int64).tobytes()
+            ).digest()
+            key = _span_key(history_key, step, (batch,))
+            result = engine.evolve(
+                facts.source,
+                (batch,),
+                cancel=options.cancel,
+                telemetry=options.telemetry,
+                reuse_key=key,
+            )
+            outcome.timeline.density = result.densities
+            paths.append(result.paths)
+            keys.append(key)
+    return outcomes, paths, keys, 1 - survival
+
+
+def evolve_projective_plans(
+    engine: Engine,
+    plans: tuple[FTFTemplatePlan, ...],
+    facts: FTFModelFacts,
+    settings: FTFSettings,
+    *,
+    options: CavityEvolutionOptions,
+) -> ProjectionEvolution:
+    """Project at each read start and continue each history through cavity spans.
+
+    Plans use one common ordered event topology. Each outcome owns its DC
+    density and semiclassical dominant-state cavity field; herald pulses drive
+    those fields on the same span path as untriggered cavity pulses. Rank-1
+    projection uses retained DC energy states, not IQ clusters. ADC CTMC jumps
+    affect IQ only and never feed back into this continuation.
+
+    Low-weight histories are pruned at settings.numerics.projection_weight_floor
+    and retained weights redistributed proportionally after each projection.
+    A zero floor retains even zero-weight histories. Removing every outcome
+    raises ValueError naming its point and floor. Engine and population validation
+    errors propagate. Every evolve contains one unique caller point, so repeated
+    point IDs across outcomes never share a WorkPlan. One acquire-local flat
+    cavity-average cache is cleared on success or failure.
+    """
+    points = np.concatenate([plan.batch.points for plan in plans])
+    count = facts.source.initial_density.shape[0]
+    rows = []
+    paths = []
+    keys = []
+    pruned = []
+    cache = CavityAverageCache()
+    try:
+        pair = resonators(settings)
+        for plan in plans:
+            for point in range(len(plan.batch.points)):
+                batch = _point_batch(plan.batch, point)
+                reads = plan.projective_reads[point]
+                pulses = (
+                    *plan.cavity_drives[point],
+                    *(p for read in reads for p in read.pulses),
+                )
+                timeline = _CavityTimeline(
+                    batch,
+                    segment_spans(batch),
+                    (CavityDrive(facts.joint, pair, pulses, cache=cache),),
+                    facts.source.initial_density[None].copy(),
+                    np.zeros((1, 2), dtype=np.complex128),
+                )
+                outcomes, reports, digests, removed = _evolve_outcomes(
+                    engine,
+                    [_Outcome(timeline, 1.0, ())],
+                    facts,
+                    tuple(read.start_ns for read in reads),
+                    options=options,
+                    floor=settings.numerics.projection_weight_floor,
+                )
+                rows.append(outcomes)
+                paths.extend(reports)
+                keys.extend(digests)
+                pruned.append(removed)
+    finally:
+        cache.clear()
+    width = max(map(len, rows))
+    weights = np.zeros((len(rows), width))
+    events = len(rows[0][0].history) + 1
+    populations = [np.zeros((len(rows), width, count)) for _ in range(events)]
+    for values in populations:
+        values[..., 0] = 1  # Valid populations for zero-weight padding.
+    densities = np.zeros((len(rows), count, count), dtype=np.complex128)
+    for point, outcomes in enumerate(rows):
+        for index, outcome in enumerate(outcomes):
+            weights[point, index] = outcome.weight
+            for event, state in enumerate(outcome.history):
+                populations[event][point, index] = np.eye(count)[state]
+            populations[-1][point, index] = normalize_populations(
+                outcome.timeline.density[0].diagonal().real
+            )
+            densities[point] += outcome.weight * outcome.timeline.density[0]
+    return ProjectionEvolution(
+        EvolutionResult(points, densities, merge_path_diagnostics(paths)),
+        ProjectionReadout(weights, tuple(populations)),
+        tuple(keys),
+        tuple(map(len, rows)),
+        tuple(pruned),
+    )
 
 
 def evolve_plans(

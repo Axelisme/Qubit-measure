@@ -548,9 +548,7 @@ def test_source_rejects_nonterminal_cavity_pulses_before_evolution():
         request = replace(
             request, templates=(replace(original, events=(earlier, *original.events)),)
         )
-        with pytest.raises(
-            ValueError, match="only terminal readout|terminal readout only"
-        ):
+        with pytest.raises(ValueError, match="untriggered cavity drive"):
             source.execute(RoundRequest(request, source.snapshot(), 0))
     finally:
         source.close()

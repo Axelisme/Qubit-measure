@@ -28,6 +28,7 @@ from zcu_tools.program.v2.simulation import (
     SimulationSoc,
     SimulationTiming,
 )
+from zcu_tools.resources.simulation_schema import Receiver
 from zcu_tools.resources.single_fluxonium import (
     load_single_fluxonium,
     parse_single_fluxonium,
@@ -35,6 +36,7 @@ from zcu_tools.resources.single_fluxonium import (
 from zcu_tools.resources.single_fluxonium.schema import SingleFluxoniumSettings
 from zcu_tools.simulate.adc import (
     PreparedRawShots,
+    ProjectionReadout,
     ReadoutModel,
     normalize_populations,
 )
@@ -54,6 +56,7 @@ from . import replay
 from .acquire import SingleFluxoniumAcquire, SingleFluxoniumPreparation
 from .drift import CoherenceDrift
 from .numeric import dc_flux
+from .projection import ProjectionRunner
 from .readout import dispersive_resonator, prepare_readout, readout_model
 from .template import SingleFluxoniumPlan, plan_template
 
@@ -113,6 +116,16 @@ def _build_facts(
         raise
 
 
+def _validate_readout_layout(plans: tuple[SingleFluxoniumPlan, ...]) -> None:
+    expected = tuple(len(event.grids[0]) for event in plans[0].read_events)
+    for index, plan in enumerate(plans[1:], start=1):
+        layout = tuple(len(event.grids[0]) for event in plan.read_events)
+        if layout != expected:
+            raise ValueError(
+                f"template {index} readout layout {layout} differs from template 0 layout {expected}"
+            )
+
+
 def _template_digest(template: TimelineTemplate) -> bytes:
     digest = sha256(b"single-fluxonium-template-v1")
     for array in (template.points, template.duration_us):
@@ -147,6 +160,26 @@ def _template_digest(template: TimelineTemplate) -> bytes:
             digest.update(repr((array.dtype.str, array.shape)).encode())
             digest.update(array.tobytes())
     return digest.digest()
+
+
+@dataclass(frozen=True)
+class SingleFluxoniumPreflight:
+    """Validated observation set for one source, with no evolution or ADC solve.
+
+    request: complete same-cavity templates, including every receiver's triggers.
+    snapshot: fixed native DC input used for planning and subsequent preparation.
+    settings: exact source settings at validation; changing them invalidates this record.
+    receivers: ordered calibrations, one per requested ADC, with unique ro_ch.
+    plans: corresponding per-receiver template plans on the common logical event axis.
+    Construct with SingleFluxoniumSource.preflight, then pass unchanged to
+    prepare_readouts on that source. Borrowed request arrays must remain unchanged.
+    """
+
+    request: AcquireRequest
+    snapshot: EnvironmentSnapshot
+    settings: SingleFluxoniumSettings
+    receivers: tuple[Receiver, ...]
+    plans: tuple[tuple[SingleFluxoniumPlan, ...], ...]
 
 
 @dataclass(frozen=True)
@@ -185,7 +218,7 @@ class SingleFluxoniumSource:
     and one complete preparation survives across acquires. Loss-independent
     projection/eigensystems survive loss changes; full models and preparations
     do not. No noisy result or sampling identity enters retained preparations.
-    readout_kind selects one terminal pulse or coherent mux tones on the same
+    readout_kind selects one pulse or coherent mux tones per block on the same
     physical cavity. It does not add receivers, coupling or hardware routes.
     runtime selects execution resources through SingleFluxoniumRuntimeOptions;
     None uses that record's defaults.
@@ -386,6 +419,66 @@ class SingleFluxoniumSource:
         """
         return sha256(self.effective_settings.model_dump_json().encode()).hexdigest()
 
+    def preflight(
+        self,
+        request: AcquireRequest,
+        snapshot: EnvironmentSnapshot,
+        *,
+        receivers: tuple[Receiver, ...] | None = None,
+    ) -> SingleFluxoniumPreflight:
+        """Validate every ADC/template before any evolution or sampling.
+
+        request contains all observations of this physical source, not an ADC
+        subset. receivers supplies each ADC calibration exactly once in request
+        order; None selects the configured standalone receiver. Every template
+        must contain that same receiver set. Classification uses all triggers;
+        each ADC may omit events, including terminal. Its per-event grid counts
+        must agree across templates. Layout conflicts name ADC and templates.
+        Empty templates, receiver mismatch or untriggered cavity drives raise
+        ValueError. No model construction, density propagation or ADC solve runs.
+        Treat returned plans as read-only. Keep request arrays unchanged until
+        prepare_readouts returns. Closed sources raise RuntimeError.
+        """
+        self._require_open()
+        receivers = (self.settings.readout.adc,) if receivers is None else receivers
+        channels = tuple(receiver.ro_ch for receiver in receivers)
+        if not request.templates or not channels or len(set(channels)) != len(channels):
+            raise ValueError("single fluxonium requires templates and unique receivers")
+        if tuple(window.channel for window in request.readouts) != channels or any(
+            tuple(window.channel for window in template.readouts) != channels
+            for template in request.templates
+        ):
+            raise ValueError(
+                "single fluxonium requires the complete calibrated receiver set"
+            )
+        observations = []
+        for receiver in receivers:
+            settings = self.settings.model_copy(
+                update={
+                    "readout": self.settings.readout.model_copy(
+                        update={"adc": receiver}
+                    )
+                }
+            )
+            plans = tuple(
+                plan_template(
+                    settings, snapshot, template, readout_kind=self._readout_kind
+                )
+                for template in request.templates
+            )
+            try:
+                _validate_readout_layout(plans)
+            except ValueError as error:
+                raise ValueError(f"ADC {receiver.ro_ch}: {error}") from error
+            if any(any(plan.cavity_drives) for plan in plans):
+                raise ValueError(
+                    "single fluxonium does not support untriggered cavity drives"
+                )
+            observations.append(plans)
+        return SingleFluxoniumPreflight(
+            request, snapshot, self.settings, receivers, tuple(observations)
+        )
+
     def prepare(
         self,
         request: AcquireRequest,
@@ -393,16 +486,47 @@ class SingleFluxoniumSource:
         *,
         cancel: CancellationQuery | None = None,
     ) -> SingleFluxoniumPreparation:
-        """Prepare noiseless ADC inputs; used by the serialized acquire session.
+        """Prepare the configured standalone ADC through the complete-set owner.
+
+        request must contain only the configured receiver. See preflight for
+        layout validation and prepare_readouts for evolution/pruning semantics.
+        Repeated unchanged requests return the same retained preparation.
+        """
+        return self.prepare_readouts(self.preflight(request, snapshot), cancel=cancel)
+
+    def prepare_readouts(
+        self,
+        validated: SingleFluxoniumPreflight,
+        *,
+        cancel: CancellationQuery | None = None,
+    ) -> SingleFluxoniumPreparation:
+        """Prepare all validated ADCs with one common projection history.
+
+        validated comes unchanged from preflight at the current source settings.
+        All receivers share physical paths, but retain their own calibration and
+        emitted read columns. Different ADC noise remains independent.
+        Changed settings raise ValueError. No receiver is synthesized.
+
+        Prepare noiseless ADC inputs; used by the serialized acquire session.
 
         Requires an admitted request (see open_acquire) and matching DC snapshot.
         Complete template bytes, layout, settings, snapshot and numeric versions
-        key a single resident. Evolution alone segments the complete timelines.
+        key a single resident. All templates must share their logical event/grid
+        layout; conflicts raise ValueError naming templates before evolution.
+        Triggered nonterminal blocks project into DC rank-1 outcomes and continue
+        through Engine.evolve. Untriggered cavity drives raise ValueError.
+        Per-point pruning follows numerics.projection_prune_floor; empty surviving
+        outcomes raise ValueError naming the point and floor. Preparation retains
+        full event histories and author-only projection_diagnostics.
+        Evolution alone segments the timelines between projection starts.
         ADC normalization is the sole probability repair. Errors clear partial
         preparations; they propagate without a result.
         cancel is checked between evolution chunks; None disables cancellation.
         """
         self._require_open()
+        request, snapshot = validated.request, validated.snapshot
+        if validated.settings != self.settings:
+            raise ValueError("preflight settings changed before preparation")
         try:
             facts = self.model_facts(snapshot)
             digest = sha256(
@@ -415,6 +539,7 @@ class SingleFluxoniumSource:
                         request.mode,
                         request.reps,
                         request.readouts,
+                        validated.receivers,
                     )
                 ).encode()
             )
@@ -424,45 +549,76 @@ class SingleFluxoniumSource:
             if (
                 self._prepared is not None
                 and self._prepared.key == key
-                and self.engine.reuse(facts.source, key)
+                and all(
+                    self.engine.reuse(facts.source, span_key, cancel=cancel)
+                    for span_key in self._prepared.reuse_keys
+                )
             ):
                 self._prepared.paths.warn_exceeded()
                 return self._prepared
-            plans = tuple(
-                self.plan_template(snapshot, template) for template in request.templates
-            )
-            if any(any(plan.cavity_drives) for plan in plans):
-                raise ValueError(
-                    "single fluxonium supports only terminal readout; earlier readout-generator pulses are unsupported"
-                )
-            evolved = self.engine.evolve(
-                facts.source,
-                tuple(plan.batch for plan in plans),
-                cancel=cancel,
-                reuse_key=key,
-            )
+            plans = validated.plans[0]
             dc = facts.source.model((0,))
             basis = Basis(dc.identity, facts.readout.state_labels, dc.eigenvectors)
-            probabilities = np.empty((prod(request.point_dims), len(basis.labels)))
-            probabilities[evolved.points] = normalize_populations(
-                batch_populations(evolved.densities, basis, basis)
-            )
-            probabilities = probabilities.reshape(
-                (*request.point_dims, len(basis.labels))
-            )
+            diagnostics = None
+            reuse_keys = (key,)
+            if any(any(plan.projective_reads) for plan in plans):
+                projected = ProjectionRunner(
+                    self.engine,
+                    facts.source,
+                    basis,
+                    self.settings.numerics.projection_prune_floor,
+                    cancel,
+                ).prepare(plans, request.point_dims, key)
+                readout = projected.readout
+                paths, reuse_keys = projected.paths, projected.reuse_keys
+                diagnostics = projected.diagnostics
+                probabilities = np.sum(
+                    readout.weights[..., None] * readout.populations[-1], axis=-2
+                )
+            else:
+                evolved = self.engine.evolve(
+                    facts.source,
+                    tuple(plan.batch for plan in plans),
+                    cancel=cancel,
+                    reuse_key=key,
+                )
+                probabilities = np.empty((prod(request.point_dims), len(basis.labels)))
+                probabilities[evolved.points] = normalize_populations(
+                    batch_populations(evolved.densities, basis, basis)
+                )
+                probabilities = probabilities.reshape(
+                    (*request.point_dims, len(basis.labels))
+                )
+                readout, paths = (
+                    ProjectionReadout.unprojected(probabilities),
+                    evolved.paths,
+                )
             probabilities.setflags(write=False)
-            channel, batch = prepare_readout(
-                self.settings, facts.readout, plans, request
-            )
+            channels, batches = [], {}
+            for receiver, receiver_plans in zip(
+                validated.receivers, validated.plans, strict=True
+            ):
+                settings = self.settings.model_copy(
+                    update={
+                        "readout": self.settings.readout.model_copy(
+                            update={"adc": receiver}
+                        )
+                    }
+                )
+                channel, batch = prepare_readout(
+                    settings, facts.readout, receiver_plans, request
+                )
+                channels.append(channel)
+                batches[channel.channel] = batch
             raw = PreparedRawShots(
-                probabilities,
-                {channel.channel: batch},
+                readout,
+                batches,
                 reps=request.reps,
                 rtol=self.settings.numerics.solver.rtol,
                 atol=self.settings.numerics.solver.atol,
             )
             self._prepared = SingleFluxoniumPreparation(
-                key, probabilities, channel, raw, evolved.paths
+                key, probabilities, tuple(channels), raw, paths, reuse_keys, diagnostics
             )
             return self._prepared
         except Exception:

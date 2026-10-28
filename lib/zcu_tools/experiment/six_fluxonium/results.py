@@ -78,9 +78,12 @@ def combine_integrated(
 ) -> IntegratedRound:
     """Combine independent cavity marginals without enumerating joint states.
 
-    rounds partition requested ADCs/points. Each cavity's sampled multinomial
-    counts are preserved exactly. Sorted marginal cumulative-count boundaries
-    form a sparse common histogram with at most 1+sum(levels-1) bins per point;
+    rounds partition requested ADCs/points; each count axis flattens that
+    cavity's (history, terminal state). levels supplies the six retained state
+    dimensions, used as minimum widths to preserve terminal-only layout.
+    index is the nonnegative software-round identity. Each cavity's sampled
+    multinomial counts are preserved exactly. Sorted cumulative-count boundaries
+    form at most 1+sum(maximum_cavity_axis_widths-1) bins per point;
     zero-width duplicate boundaries are retained. Conditional responses select
     each marginal's state on these bins. This is a representation of integrated
     marginal moments, not a joint state distribution or raw-shot sampler.
@@ -88,13 +91,18 @@ def combine_integrated(
     for multiple ADCs observing the same cavity at the same point.
     """
     points = prod(request.point_dims)
-    counts = [np.zeros((points, size), dtype=np.int64) for size in levels]
+    sizes = list(levels)
+    for piece in rounds:
+        sizes[piece.group.cavity] = max(
+            sizes[piece.group.cavity], piece.result.statistics.state_counts.shape[-1]
+        )
+    counts = [np.zeros((points, size), dtype=np.int64) for size in sizes]
     for value in counts:
         value[:, 0] = request.reps
     for piece in rounds:
-        counts[piece.group.cavity][piece.group.points] = (
-            piece.result.statistics.state_counts
-        )
+        value = piece.result.statistics.state_counts
+        counts[piece.group.cavity][piece.group.points] = 0
+        counts[piece.group.cavity][piece.group.points, : value.shape[-1]] = value
     cumulative = [np.cumsum(value, axis=-1) for value in counts]
     boundaries = np.sort(
         np.concatenate(
@@ -117,7 +125,7 @@ def combine_integrated(
             >= cumulative[group.cavity][group.points, None, :-1],
             axis=-1,
         )
-        states = np.minimum(states, levels[group.cavity] - 1)
+        states = np.minimum(states, piece.result.statistics.state_counts.shape[-1] - 1)
         for channel in piece.result.statistics.channels:
             if channel.channel not in channels:
                 reads = channel.sums.shape[-2]

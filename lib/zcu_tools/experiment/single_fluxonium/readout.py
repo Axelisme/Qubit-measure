@@ -6,7 +6,7 @@ from math import prod
 import numpy as np
 
 from zcu_tools.core.simulation import AcquireRequest
-from zcu_tools.experiment.readout_plan import local_readout_pulses
+from zcu_tools.experiment.readout_plan import map_readout_events
 from zcu_tools.resources.single_fluxonium import SingleFluxoniumSettings
 from zcu_tools.simulate.adc import (
     BackgroundBandEdge,
@@ -73,6 +73,15 @@ def readout_model(
     )
 
 
+def _event_batch(
+    plan: SingleFluxoniumPlan, model: ReadoutModel, reference: float
+) -> ReadoutBatch:
+    mapping = map_readout_events(plan.read_events, reference)
+    return ReadoutBatch(
+        model, mapping.events, mapping.inverse, output_order=mapping.output_order
+    )
+
+
 def prepare_readout(
     settings: SingleFluxoniumSettings,
     physical: ReadoutModel,
@@ -90,10 +99,12 @@ def prepare_readout(
     errors propagate; no sampling, normalization or QICK averaging occurs here.
     """
     adc = settings.readout.adc
-    rate = request.templates[0].readouts[0].sample_rate_mhz
-    if any(
-        template.readouts[0].sample_rate_mhz != rate for template in request.templates
-    ):
+    windows = tuple(
+        next(window for window in template.readouts if window.channel == adc.ro_ch)
+        for template in request.templates
+    )
+    rate = windows[0].sample_rate_mhz
+    if any(window.sample_rate_mhz != rate for window in windows):
         raise ValueError("single-cavity templates require one ADC sample rate")
     receiver = Receiver(
         adc.gain,
@@ -141,24 +152,29 @@ def prepare_readout(
         rtol=settings.numerics.solver.rtol,
         atol=settings.numerics.solver.atol,
     )
-    pulses, grids, conditionals = [], [], []
+    events, conditionals, output_orders = [], [], []
     content_index = np.empty(prod(request.point_dims), dtype=np.int64)
     for plan in plans:
-        content = plan.readout
-        local = local_readout_pulses(content.pulses, reference)
-        batch = ReadoutBatch(model, local, content.grids, content.inverse)
+        batch = _event_batch(plan, model, reference)
         conditional = solver.responses(batch)
-        content_index[plan.batch.points] = len(pulses) + content.inverse
-        pulses.extend(local)
-        grids.extend(content.grids)
+        content_index[plan.batch.points] = len(events) + batch.content_index
+        events.extend(batch.events)
+        output_orders.append(batch.column_order)
         conditionals.append(conditional)
     conditional = ConditionalSums(
         np.concatenate([value.sums for value in conditionals]),
         conditionals[0].sample_counts,
+        event_indices=conditionals[0].event_indices,
+        output_order=np.concatenate(output_orders),
     )
     return (
         ChannelReadout(
             adc.ro_ch, conditional, content_index.reshape(request.point_dims), receiver
         ),
-        ReadoutBatch(model, tuple(pulses), tuple(grids), content_index),
+        ReadoutBatch(
+            model,
+            tuple(events),
+            content_index,
+            output_order=conditional.output_order,
+        ),
     )

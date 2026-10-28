@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import numpy as np
-from numpy.typing import NDArray
 from zcu_tools.core.simulation import (
     ChannelStatistics,
     RoundStatistics,
@@ -13,7 +12,7 @@ from zcu_tools.simulate import adc
 
 
 def reference_statistics(
-    populations: NDArray[np.float64],
+    readout: adc.ProjectionReadout,
     channels: tuple[adc.ChannelReadout, ...],
     *,
     reps: int,
@@ -22,6 +21,7 @@ def reference_statistics(
     round_index: int,
 ) -> RoundStatistics:
     """Draw each point independently, sharing counts across every ADC and read."""
+    populations = readout.populations[0][..., 0, :]
     rng = np.random.Generator(
         np.random.PCG64(
             np.random.SeedSequence((seed, acquire_sequence, round_index, 0))
