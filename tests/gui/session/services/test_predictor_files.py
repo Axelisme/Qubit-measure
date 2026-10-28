@@ -9,7 +9,7 @@ import pytest
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 from zcu_tools.gui.session.context_control import ContextControlFacet
-from zcu_tools.gui.session.predictor_control import PredictorControlFacet
+from zcu_tools.gui.session.predictor_control import PredictorControlPort
 from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.services.predictor import PredictorService
 from zcu_tools.gui.session.state import SessionState
@@ -33,9 +33,7 @@ def files(tmp_path: Path):
         BaseEventBus(),
         bind_assets=ArbWaveformDatabase.info_at,
     )
-    control = PredictorControlFacet(
-        PredictorService(ContextControlFacet(context=context))
-    )
+    control = PredictorService(ContextControlFacet(context=context))
     entry = ResultEntry.create(
         "files",
         result_root=tmp_path / "result",
@@ -78,7 +76,7 @@ def test_list_files_rejects_predictor_directory_is_file(files) -> None:
 
 
 def load_outcome(
-    control: PredictorControlFacet, filename: str
+    control: PredictorControlPort, filename: str
 ) -> PredictorFile | Exception:
     """Observe either a returned file or the public failure without masking its type."""
     try:

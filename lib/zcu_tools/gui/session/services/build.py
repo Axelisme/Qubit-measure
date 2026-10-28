@@ -20,7 +20,6 @@ from typing import TYPE_CHECKING
 from zcu_tools.gui.session.context_control import ContextControlFacet
 from zcu_tools.gui.session.device_control import DeviceControlFacet
 from zcu_tools.gui.session.operation_runner import OperationInfrastructure
-from zcu_tools.gui.session.predictor_control import PredictorControlFacet
 from zcu_tools.gui.session.progress_control import ProgressControlFacet
 from zcu_tools.gui.session.services.arb_waveform import ArbWaveformService
 from zcu_tools.gui.session.services.connection import SoCConnectionService
@@ -61,8 +60,8 @@ class SessionServices:
         progress: Injected session progress owner. Publishes live bars by operation
             and owner id, with reads and listener delivery on the owner thread.
         soc_connection: SoC connection commands and cached connection queries.
-        predictor: Predictor installation and calculation commands.
-        predictor_control: Narrow predictor command/query/event facade.
+        predictor: Read-only explicit-parameter computations and entry file queries.
+        predictor_control: The same predictor owner exposed through its narrow port.
         progress_control: Narrow owner-keyed progress query/subscription facade.
         context: Entry/point binding and fixed parameter capture owner.
         context_control: Narrow parameter and alias command/query facade.
@@ -152,7 +151,6 @@ def build_session_services(  # noqa: PLR0913
     )
     context_control = ContextControlFacet(context=context)
     predictor = PredictorService(context_control)
-    predictor_control = PredictorControlFacet(predictor)
     device_control = DeviceControlFacet(bus=bus, device=device, progress=progress)
     value_sources = ValueSourceBinder(state=state, bus=bus, registry=value_registry)
     # Entry composition uses the context owner and live dialog preferences.
@@ -174,7 +172,7 @@ def build_session_services(  # noqa: PLR0913
         progress=progress,
         soc_connection=soc_connection,
         predictor=predictor,
-        predictor_control=predictor_control,
+        predictor_control=predictor,
         progress_control=progress_control,
         context=context,
         context_control=context_control,

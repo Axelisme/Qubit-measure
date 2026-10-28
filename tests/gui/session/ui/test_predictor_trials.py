@@ -8,7 +8,6 @@ import pytest
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.session.context_control import ContextControlFacet
 from zcu_tools.gui.session.context_types import CommandOrigin, PointCreateRequest
-from zcu_tools.gui.session.predictor_control import PredictorControlFacet
 from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.services.predictor import PredictorService
 from zcu_tools.gui.session.state import SessionState
@@ -36,7 +35,7 @@ from tests.gui.session.ui._predictor_support import SyntheticCurves
 def test_blank_parameters_can_be_completed_cleared_and_corrected(
     qapp, tmp_path: Path, trial, name
 ) -> None:
-    dialog = PredictorDialog(PredictorControlFacet(SyntheticCurves()), params=trial)
+    dialog = PredictorDialog(SyntheticCurves(), params=trial)
     dialog.set_flux(PredictorFlux(0.2, {"coil": 1.0}, {"coil": "A"}), {"coil": 0.0})
     evidence = (
         Path(os.environ.get("PREDICTOR_BLANK_EVIDENCE", str(tmp_path))) / trial.model
@@ -122,7 +121,7 @@ def test_curve_status_prioritizes_coordinates_but_scalar_prioritizes_energy(
     status: str,
 ) -> None:
     dialog = PredictorDialog(
-        PredictorControlFacet(SyntheticCurves()),
+        SyntheticCurves(),
         params=FluxoniumParams(float("nan"), 1.0, 1.0),
     )
     if flux is not None:
@@ -171,9 +170,7 @@ def test_curve_status_prioritizes_coordinates_but_scalar_prioritizes_energy(
 def test_dialog_logs_unexpected_value_error_with_traceback(qapp, caplog) -> None:
     failure = ValueError("solver invariant")
     service = FailingPredictorService(failure)
-    dialog = PredictorDialog(
-        PredictorControlFacet(service), params=FluxoniumParams(5.0, 1.0, 0.5)
-    )
+    dialog = PredictorDialog(service, params=FluxoniumParams(5.0, 1.0, 0.5))
     with caplog.at_level("ERROR"):
         dialog.set_flux(PredictorFlux(0.2, {"coil": 1.0}, {"coil": "A"}), {"coil": 0.1})
     try:
@@ -209,7 +206,7 @@ def test_dialog_parameters_and_cache_preserve_finite_float_values(
         if model == "fluxonium"
         else TransmonParams(value, None, 0.12345678901234567)
     )
-    port = PredictorControlFacet(PredictorService())
+    port = PredictorService()
     dialog = PredictorDialog(port, params=FluxoniumParams())
     try:
         dialog.enable_parameter_cache(cache_dir=tmp_path)
@@ -259,7 +256,7 @@ def test_invalid_drafts_do_not_overwrite_restored_v2_cache(
         encoding="utf-8",
     )
     evidence = Path(os.environ.get("PREDICTOR_CACHE_EVIDENCE", str(tmp_path))) / field
-    port = PredictorControlFacet(PredictorService())
+    port = PredictorService()
     dialog = PredictorDialog(port)
     try:
         dialog.enable_parameter_cache(cache_dir=tmp_path)
@@ -329,7 +326,7 @@ def component_context(tmp_path: Path):
 def test_dialog_cache_restores_transmon_and_fluxonium_trials(
     qapp, tmp_path: Path
 ) -> None:
-    port = PredictorControlFacet(PredictorService())
+    port = PredictorService()
     trial = TransmonParams(EJmax=20.0, EC=0.3, d=0.0)
     dialog = PredictorDialog(port)
     try:
@@ -366,9 +363,7 @@ def test_dialog_displays_actual_calibration_and_clamping_without_point_writes(
 
     query = PredictorService(ContextControlFacet(context=component_context))
     before = component_context.read_context().document()
-    dialog = PredictorDialog(
-        PredictorControlFacet(query), params=TransmonParams(20.0, 0.3, 0.0)
-    )
+    dialog = PredictorDialog(query, params=TransmonParams(20.0, 0.3, 0.0))
     try:
         dialog.set_flux(PredictorFlux(0.2, {"coil": 2.0}, {"coil": "A"}), {"coil": 0.1})
         result = dialog.calibrate(target)
