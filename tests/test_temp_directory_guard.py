@@ -2,6 +2,7 @@
 
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from types import SimpleNamespace
 
 import pytest
 
@@ -27,6 +28,48 @@ class RecordingTerminal:
 def test_default_temp_directories_are_owned_by_the_pytest_session(tmp_path_factory):
     with TemporaryDirectory(prefix="ordinary-") as directory:
         assert Path(directory).is_relative_to(tmp_path_factory.getbasetemp())
+
+
+def test_worker_crash_without_output_does_not_report_a_directory_leak():
+    guard = ContextDirectoryGuard()
+    terminal = RecordingTerminal()
+
+    guard.pytest_testnodedown(SimpleNamespace(), "worker crashed")
+    guard.pytest_terminal_summary(terminal)
+
+    assert terminal.lines == []
+
+
+def test_worker_directory_leaks_are_merged_and_reported_with_their_owners():
+    config = pytest.Config.fromdictargs({}, [])
+    session = pytest.Session.from_config(config)
+    session.exitstatus = pytest.ExitCode.OK
+    guard = ContextDirectoryGuard()
+    terminal = RecordingTerminal()
+    try:
+        for path, owner in (
+            ("/worker-0/context-first", "test_first.py::test_polluter"),
+            ("/worker-1/context-second", "test_second.py::test_polluter"),
+        ):
+            node = SimpleNamespace(
+                workeroutput={"context_directory_leaks": {path: owner}}
+            )
+            guard.pytest_testnodedown(node, None)
+        guard.pytest_sessionfinish(session)
+        guard.pytest_terminal_summary(terminal)
+
+        assert session.exitstatus == pytest.ExitCode.TESTS_FAILED
+        report = "\n".join(terminal.lines)
+        assert (
+            "/worker-0/context-first — observed during test_first.py::test_polluter"
+            in report
+        )
+        assert (
+            "/worker-1/context-second — observed during test_second.py::test_polluter"
+            in report
+        )
+    finally:
+        config.hook.pytest_unconfigure(config=config)
 
 
 @pytest.mark.parametrize("leak", [False, True])
