@@ -7,7 +7,12 @@ import numpy as np
 from numpy.typing import NDArray
 
 from zcu_tools.core.simulation import EventSlot, ReadoutSlot, TimelineTemplate
-from zcu_tools.simulate.adc import PiecewiseLinearEnvelope, ReadoutPulse, SampleGrid
+from zcu_tools.simulate.adc import (
+    PiecewiseLinearEnvelope,
+    ReadoutEvent,
+    ReadoutPulse,
+    SampleGrid,
+)
 from zcu_tools.simulate.evolution import DriveTrack, EnvelopeSpec
 
 
@@ -91,7 +96,7 @@ class ReadoutPartition:
 
 @dataclass(frozen=True)
 class ReadoutContents:
-    """Distinct incident fields and one ADC's sampling grids for a read block.
+    """Incident fields and one ADC's sampling grids for a read block.
 
     end_ns: owned float64 (points,) evolution endpoints at this pulse start.
     pulses: per-content tuples of coherent ReadoutPulse values with absolute ns,
@@ -100,7 +105,12 @@ class ReadoutContents:
     grids: matching per-content tuples of SampleGrid values in trigger order,
         using absolute ns, GHz and radians without moving the demodulation origin.
     inverse: owned int64 (points,) indices selecting pulses/grids for each point.
-        Distinct contents are sorted by numeric pulse and ADC feature rows.
+        Terminal-only readout_contents deduplicates contents and sorts numeric
+        pulse/ADC feature rows. Projective logical_event_contents retains one
+        content per point, without deduplication, and uses an identity inverse.
+    read_indices: per-content original channel-local trigger columns, aligned
+        with grids. Empty tuples mark unobserved blocks. Across logical events,
+        each point's indices cover its complete ADC emission order exactly once.
     All arrays/specs must remain unchanged while a consumer uses this plan.
     """
 
@@ -108,6 +118,80 @@ class ReadoutContents:
     pulses: tuple[tuple[ReadoutPulse, ...], ...]
     grids: tuple[tuple[SampleGrid, ...], ...]
     inverse: NDArray[np.int64]
+    read_indices: tuple[tuple[int, ...], ...]
+
+
+@dataclass(frozen=True)
+class ReadoutMapping:
+    """Localized numeric events and their channel-local output column mapping.
+
+    events: per-content chronological ReadoutEvent tuples, in ns/GHz and
+        pulse-local radians at the caller's rotating reference. Empty grids
+        retain unobserved event positions without emitting columns.
+    inverse: int64 (points,) selecting one events content per point. A single
+        event retains its deduplication; multiple events use point-local
+        contents and identity indices.
+    output_order: int64 (contents, reads), where [c, r] selects the event-major
+        column to emit as output column r for content c. Every row is a complete
+        permutation. Use inverse to select a point's permutation, just as events.
+    Keep the returned arrays and event records unchanged while in use.
+    """
+
+    events: tuple[tuple[ReadoutEvent, ...], ...]
+    inverse: NDArray[np.int64]
+    output_order: NDArray[np.int64]
+
+
+def map_readout_events(
+    contents: tuple[ReadoutContents, ...], reference_frequency_ghz: float
+) -> ReadoutMapping:
+    """Localize planned logical events and restore original ADC emission columns.
+
+    contents is a nonempty chronological tuple from logical_event_contents, or
+    one terminal-only readout_contents result. Its points and per-event grid
+    counts must align. reference_frequency_ghz is the finite ADC model reference;
+    phases follow local_readout_pulses. No physical model or sampling is built.
+    Invalid event layout or incomplete/duplicate trigger indices raise ValueError.
+    """
+    if not contents:
+        raise ValueError("readout mapping requires logical event contents")
+    localized = tuple(
+        local_readout_pulses(content.pulses, reference_frequency_ghz)
+        for content in contents
+    )
+    if any(content.inverse.shape != contents[0].inverse.shape for content in contents):
+        raise ValueError("readout event point layouts must align")
+    if len(contents) == 1:
+        content = contents[0]
+        events = tuple(
+            (ReadoutEvent(pulses, grids),)
+            for pulses, grids in zip(localized[0], content.grids, strict=True)
+        )
+        inverse = content.inverse
+        indices = content.read_indices
+    else:
+        events = tuple(
+            tuple(
+                ReadoutEvent(
+                    pulses[content.inverse[p]], content.grids[content.inverse[p]]
+                )
+                for content, pulses in zip(contents, localized, strict=True)
+            )
+            for p in range(len(contents[0].inverse))
+        )
+        inverse = np.arange(len(events), dtype=np.int64)
+        indices = tuple(
+            tuple(
+                index
+                for content in contents
+                for index in content.read_indices[content.inverse[p]]
+            )
+            for p in range(len(events))
+        )
+    reads = sum(len(event.grids) for event in events[0])
+    if any(sorted(row) != list(range(reads)) for row in indices):
+        raise ValueError("readout trigger indices must form a complete permutation")
+    return ReadoutMapping(events, inverse, np.argsort(indices, axis=1).astype(np.int64))
 
 
 def envelope_specs(
@@ -388,7 +472,9 @@ def logical_event_contents(
     template.readouts and contain at least one trigger. Each returned content
     holds only that block's pulses and zero or more grids in channel-local
     trigger order. All ADCs therefore share one chronological logical event
-    axis. Empty grids emit no read column. Cross-point topology differences,
+    axis. read_indices retains the original emission columns across events;
+    map_readout_events converts these to the final output permutation.
+    Empty grids emit no read column. Cross-point topology differences,
     invalid pulse counts/routes and crossing windows raise ValueError through
     classify_readout. Terminal-only plans retain readout_contents' exact
     deduplication and phases. Projective plans use point-local contents with
@@ -431,9 +517,21 @@ def logical_event_contents(
             )
             for point, start in enumerate(starts)
         )
+        indices = tuple(
+            tuple(
+                read
+                for read, content in enumerate(observed)
+                if content.end_ns[point] == start
+            )
+            for point, start in enumerate(starts)
+        )
         contents.append(
             ReadoutContents(
-                starts, pulses, grids, np.arange(len(template.points), dtype=np.int64)
+                starts,
+                pulses,
+                grids,
+                np.arange(len(template.points), dtype=np.int64),
+                indices,
             )
         )
     return tuple(contents)
@@ -488,10 +586,11 @@ def read_event_contents(
             phase_deg=window.phase_deg[:, read : read + 1],
             generator_channels=window.generator_channels[:, read : read + 1],
         )
+        content = readout_contents(
+            replace(template, events=events), drive, selected_window, memo
+        )
         contents.append(
-            readout_contents(
-                replace(template, events=events), drive, selected_window, memo
-            )
+            replace(content, read_indices=tuple((read,) for _ in content.grids))
         )
     if not contents:
         raise ValueError("requires ADC timing and its bound readout generator")
@@ -587,7 +686,11 @@ def readout_contents(
             )
         )
     return ReadoutContents(
-        values[:, 0, 0] * 1000, tuple(pulses), tuple(grids), inverse.astype(np.int64)
+        values[:, 0, 0] * 1000,
+        tuple(pulses),
+        tuple(grids),
+        inverse.astype(np.int64),
+        (tuple(range(window.trigger_us.shape[1])),) * len(grids),
     )
 
 

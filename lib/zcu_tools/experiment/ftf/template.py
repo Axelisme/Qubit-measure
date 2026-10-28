@@ -12,16 +12,16 @@ from zcu_tools.core.simulation import (
 from zcu_tools.experiment.readout_plan import (
     ProjectiveRead,
     ReadoutDrive,
+    ReadoutMapping,
     classify_readout,
     drive_track,
-    local_readout_pulses,
     logical_event_contents,
+    map_readout_events,
     readout_contents,
 )
 from zcu_tools.resources.ftf import FTFSettings
 from zcu_tools.simulate.adc import (
     ReadoutBatch,
-    ReadoutEvent,
     ReadoutPulse,
     Receiver,
 )
@@ -307,46 +307,20 @@ def _cavity_batch(
     return replace(batch, segment_boundaries=boundaries)
 
 
-@dataclass(frozen=True)
-class _ReadoutEvents:
-    """One ADC's detached logical events and point-to-content mapping."""
-
-    events: tuple[tuple[ReadoutEvent, ...], ...]
-    inverse: NDArray[np.int64]
-
-
 def _projective_contents(
     template: TimelineTemplate,
     drive: ReadoutDrive,
     memo: dict[int, EnvelopeSpec],
-) -> tuple[tuple[_ReadoutEvents, ...], float]:
+) -> tuple[tuple[ReadoutMapping, ...], float]:
     """Align actual trigger contents on a common chronological block axis."""
     channels = tuple(
         logical_event_contents(template, drive, window, memo)
         for window in template.readouts
     )
     reference = channels[0][-1].pulses[0][0].frequency_ghz
-    aligned = []
-    for contents in channels:
-        localized = tuple(
-            local_readout_pulses(content.pulses, reference) for content in contents
-        )
-        aligned.append(
-            _ReadoutEvents(
-                tuple(
-                    tuple(
-                        ReadoutEvent(
-                            pulses[content.inverse[point]],
-                            content.grids[content.inverse[point]],
-                        )
-                        for content, pulses in zip(contents, localized, strict=True)
-                    )
-                    for point in range(len(template.points))
-                ),
-                np.arange(len(template.points), dtype=np.int64),
-            )
-        )
-    return tuple(aligned), reference
+    return tuple(
+        map_readout_events(contents, reference) for contents in channels
+    ), reference
 
 
 def plan_template(
@@ -434,17 +408,7 @@ def plan_template(
         )
         reference_frequency_ghz = contents[0].pulses[0][0].frequency_ghz
         event_contents = tuple(
-            _ReadoutEvents(
-                tuple(
-                    (ReadoutEvent(pulses, grids),)
-                    for pulses, grids in zip(
-                        local_readout_pulses(content.pulses, reference_frequency_ghz),
-                        content.grids,
-                        strict=True,
-                    )
-                ),
-                content.inverse,
-            )
+            map_readout_events((content,), reference_frequency_ghz)
             for content in contents
         )
     if facts is None:
@@ -492,6 +456,7 @@ def plan_template(
                     model,
                     content.events,
                     content.inverse,
+                    output_order=content.output_order,
                 ),
             )
         )

@@ -6,7 +6,7 @@ from math import prod
 import numpy as np
 
 from zcu_tools.core.simulation import AcquireRequest
-from zcu_tools.experiment.readout_plan import local_readout_pulses
+from zcu_tools.experiment.readout_plan import map_readout_events
 from zcu_tools.resources.single_fluxonium import SingleFluxoniumSettings
 from zcu_tools.simulate.adc import (
     BackgroundBandEdge,
@@ -17,7 +17,6 @@ from zcu_tools.simulate.adc import (
     ConditionalReadout,
     ConditionalSums,
     ReadoutBatch,
-    ReadoutEvent,
     ReadoutModel,
     Receiver,
 )
@@ -77,32 +76,9 @@ def readout_model(
 def _event_batch(
     plan: SingleFluxoniumPlan, model: ReadoutModel, reference: float
 ) -> ReadoutBatch:
-    localized = tuple(
-        local_readout_pulses(content.pulses, reference) for content in plan.read_events
-    )
-    if len(plan.read_events) == 1:
-        content = plan.read_events[0]
-        return ReadoutBatch(
-            model,
-            tuple(
-                (ReadoutEvent(pulses, grids),)
-                for pulses, grids in zip(localized[0], content.grids, strict=True)
-            ),
-            content.inverse,
-        )
+    mapping = map_readout_events(plan.read_events, reference)
     return ReadoutBatch(
-        model,
-        tuple(
-            tuple(
-                ReadoutEvent(
-                    pulses[content.inverse[point]],
-                    content.grids[content.inverse[point]],
-                )
-                for content, pulses in zip(plan.read_events, localized, strict=True)
-            )
-            for point in range(len(plan.batch.points))
-        ),
-        np.arange(len(plan.batch.points), dtype=np.int64),
+        model, mapping.events, mapping.inverse, output_order=mapping.output_order
     )
 
 
@@ -176,18 +152,20 @@ def prepare_readout(
         rtol=settings.numerics.solver.rtol,
         atol=settings.numerics.solver.atol,
     )
-    events, conditionals = [], []
+    events, conditionals, output_orders = [], [], []
     content_index = np.empty(prod(request.point_dims), dtype=np.int64)
     for plan in plans:
         batch = _event_batch(plan, model, reference)
         conditional = solver.responses(batch)
         content_index[plan.batch.points] = len(events) + batch.content_index
         events.extend(batch.events)
+        output_orders.append(batch.column_order)
         conditionals.append(conditional)
     conditional = ConditionalSums(
         np.concatenate([value.sums for value in conditionals]),
         conditionals[0].sample_counts,
         event_indices=conditionals[0].event_indices,
+        output_order=np.concatenate(output_orders),
     )
     return (
         ChannelReadout(
@@ -197,5 +175,6 @@ def prepare_readout(
             model,
             tuple(events),
             content_index,
+            output_order=conditional.output_order,
         ),
     )

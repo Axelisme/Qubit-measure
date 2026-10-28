@@ -33,6 +33,23 @@ def _indices(value: NDArray[np.int64], contents: int, name: str) -> NDArray[np.i
     return result
 
 
+def _output_order(
+    value: NDArray[np.int64] | None, contents: int, reads: int
+) -> NDArray[np.int64]:
+    """Own complete per-content permutations from event-major to output columns."""
+    identity = np.arange(reads, dtype=np.int64)
+    order = np.tile(identity, (contents, 1)) if value is None else np.asarray(value)
+    if (
+        order.dtype != np.int64
+        or order.shape != (contents, reads)
+        or np.any(np.sort(order, axis=1) != identity)
+    ):
+        raise ValueError("output_order must be int64 (contents, reads) permutations")
+    result = order.copy()
+    result.setflags(write=False)
+    return result
+
+
 @dataclass(frozen=True)
 class ReadoutEvent:
     """One logical read event in physical ns/GHz units.
@@ -65,6 +82,13 @@ class ReadoutBatch:
         in event order, without re-numbering their logical event indices.
     content_index: owned/read-only int64 (points,) mapping points to contents.
     include_traces: request conditional per-sample traces as well as sums.
+    output_order: optional int64 (contents, reads) complete permutations. Entry
+        [c, r] selects the event-major grid column to emit at output column r.
+        content_index selects each point's row. None selects identity event-major
+        order. Explicit permutations are owned/read-only; None remains the
+        identity policy when replacing a batch with a different grid layout.
+        Events and conditional responses remain chronological; raw, integrated
+        statistics and decimated outputs apply this order after physical work.
     Empty/misaligned contents or invalid indices raise ValueError.
     """
 
@@ -72,6 +96,7 @@ class ReadoutBatch:
     events: tuple[tuple[ReadoutEvent, ...], ...]
     content_index: NDArray[np.int64]
     include_traces: bool = False
+    output_order: NDArray[np.int64] | None = None
 
     def __post_init__(self) -> None:
         if not self.events or not self.events[0]:
@@ -88,6 +113,26 @@ class ReadoutBatch:
         if indices.ndim != 1:
             raise ValueError("content_index must have shape (points,)")
         object.__setattr__(self, "content_index", indices)
+        object.__setattr__(
+            self,
+            "output_order",
+            None
+            if self.output_order is None
+            else _output_order(self.output_order, len(self.events), sum(layout)),
+        )
+
+    @property
+    def column_order(self) -> NDArray[np.int64]:
+        """Return read-only int64 (contents, reads) output-to-event-major indices.
+
+        Resolve the identity policy to a complete permutation per content.
+        Point rows are selected by content_index; physical events stay unchanged.
+        """
+        return _output_order(
+            self.output_order,
+            len(self.events),
+            sum(len(e.grids) for e in self.events[0]),
+        )
 
 
 @dataclass(frozen=True)
@@ -109,6 +154,12 @@ class ConditionalSums:
     event_indices: one nonnegative logical event index per read. Empty means
         all reads belong to event zero. Integrated sampling validates indices
         against ProjectionReadout and expands reads onto its joint count axis.
+    output_order: optional int64 (contents, reads) complete permutations, with
+        the same output-column-to-event-major-column direction as ReadoutBatch.
+        None retains the identity policy; explicit permutations are owned and
+        read-only. sums, traces, sample_counts and event_indices stay in
+        event-major order. Integrated
+        sampling applies this permutation after expanding the joint count axis.
 
     Invalid shapes, nonpositive/non-int64 sample counts or nonfinite values
     raise ValueError. Constructors do not recompute sums from optional traces.
@@ -118,6 +169,7 @@ class ConditionalSums:
     sample_counts: NDArray[np.int64]
     traces: RealArray | None = None
     event_indices: tuple[int, ...] = ()
+    output_order: NDArray[np.int64] | None = None
 
     def __post_init__(self) -> None:
         sums = readonly_array(self.sums, "conditional sums")
@@ -148,6 +200,13 @@ class ConditionalSums:
         object.__setattr__(self, "event_indices", events)
         object.__setattr__(self, "sums", sums)
         object.__setattr__(self, "sample_counts", counts)
+        object.__setattr__(
+            self,
+            "output_order",
+            None
+            if self.output_order is None
+            else _output_order(self.output_order, *sums.shape[:2]),
+        )
         if self.traces is not None:
             traces = readonly_array(self.traces, "conditional traces")
             if (
@@ -158,6 +217,15 @@ class ConditionalSums:
             ):
                 raise ValueError("traces must align with sums and sample_counts")
             object.__setattr__(self, "traces", traces)
+
+    @property
+    def column_order(self) -> NDArray[np.int64]:
+        """Return read-only int64 (contents, reads) output-to-event-major indices.
+
+        Resolve identity without reordering sums, traces or event_indices.
+        ChannelReadout.content_index selects each point's permutation.
+        """
+        return _output_order(self.output_order, *self.sums.shape[:2])
 
 
 @dataclass(frozen=True)
@@ -346,7 +414,11 @@ def _joint_conditional(
                 means[..., :, None, :], (*means.shape[:-2], outcomes, states, 2)
             )
         reads.append(expanded.reshape((*expanded.shape[:-3], outcomes * states, 2)))
-    return np.stack(reads, axis=-3)
+    expanded = np.stack(reads, axis=-3)
+    order = channel.conditional.column_order
+    return np.take_along_axis(
+        expanded, order[channel.content_index][..., :, None, None], axis=-3
+    )
 
 
 def _validate_round_inputs(

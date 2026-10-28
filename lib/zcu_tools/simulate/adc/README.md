@@ -1,6 +1,6 @@
 # ADC probability and readout contracts
 
-**Last updated:** 2026-10-28 (UTC), projection histories and partial event observations
+**Last updated:** 2026-10-28 (UTC), projection histories and emission-column mapping
 
 **讀者：** framework-dev、agent。ADC 機率、讀出訊號與 interval moment 契約。
 
@@ -157,7 +157,16 @@ All ADCs may omit terminal observations. The terminal event still occupies the
 last position in the common axis and contributes its populations to integrated
 counts, but produces no terminal read column. Each ADC content still requires
 at least one observed grid across its events.
-`ConditionalSums.event_indices` maps each emitted read to its original event. `ConditionalReadout` computes state-conditioned responses once
+`ReadoutBatch.output_order` optionally maps each output column to an event-major
+column, separately for every content. `content_index` selects each point's row.
+None means identity order. Explicit rows must be complete int64 permutations.
+`ConditionalSums` retains event-major sums, traces and `event_indices`, and carries
+the same output permutation. Integrated sampling expands the physical event's
+joint populations before reordering conditional means and drawing output totals.
+Raw and decimated sampling reorder after the shared paths and receiver noise.
+This preserves chronological physics while restoring the original channel-local
+trigger emission order, even when it differs between points.
+`ConditionalReadout` computes state-conditioned responses once
 per distinct content. Integrated flat (`envelope=None`), common-start mux
 contents sum each carrier's linear response through the same line. Different
 pulse end times retain their own ringdown. Each carrier first tries guarded
