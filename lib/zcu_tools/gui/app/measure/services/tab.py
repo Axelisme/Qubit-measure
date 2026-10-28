@@ -35,7 +35,7 @@ if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.state import State
     from zcu_tools.resources.entry import PointStorageBinding
 
-    from .ports import WritebackLifecyclePort
+    from ..writeback import WritebackService
     from .tab_form import TabFormResources, TabFormSources
 
 
@@ -68,7 +68,7 @@ class TabService:
         self,
         state: State,
         registry: Registry,
-        writeback: WritebackLifecyclePort,
+        writeback: WritebackService,
         cfg_resources: TabFormResources,
         form_sources: Callable[[Mapping[str, str] | None], TabFormSources],
     ) -> None:
@@ -80,8 +80,7 @@ class TabService:
         """
         self._state = state
         self._registry = registry
-        # The tab lifecycle previews pane drafts and tears them down on close via
-        # one narrow port, without depending on the concrete sibling service.
+        # Writeback owns draft previews; pane_commit owns retirement on close.
         self._writeback = writeback
         self._cfg_resources = cfg_resources
         self._form_sources = form_sources

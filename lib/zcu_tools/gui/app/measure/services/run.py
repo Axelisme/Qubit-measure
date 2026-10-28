@@ -46,7 +46,7 @@ from zcu_tools.resources.entry import AcquiredPayload, LedgerEvent, PointStorage
 
 from .guard import RunInputs
 from .operation_gate import OperationKind
-from .plot_lifecycle import discard_unpublished_plots
+from .pane_commit import discard_unpublished_plots
 
 logger = logging.getLogger(__name__)
 _GUI_ORIGIN = CommandOrigin("gui")
@@ -58,7 +58,6 @@ if TYPE_CHECKING:
     from zcu_tools.plotting.plots import Plots
 
     from ..state import State
-    from .ports import WritebackLifecyclePort
 
 
 @dataclass(slots=True)
@@ -97,7 +96,6 @@ class RunService:
         runner: OperationRunner,
         bus: EventBus,
         handles: OperationHandles,
-        writeback: WritebackLifecyclePort,
         *,
         gate: ExclusionGate,
         devices: Callable[[], Mapping[str, BaseDevice[Any]]],
@@ -120,7 +118,6 @@ class RunService:
         # by the controller. The runner also holds a reference to the same handles
         # instance (shared, single source of truth for operation lifecycle).
         self._handles = handles
-        self._writeback = writeback
         # active_token is set by begin() and cleared on the terminal path so the
         # controller can cancel_run() and await the outcome (ADR-0066).
         self._active_token: int | None = None

@@ -99,7 +99,6 @@ def host(tmp_path: Path, qapp: QApplication) -> Iterator[RunHost]:
         runner,
         bus,
         handles,
-        MagicMock(),
         gate=gate,
         devices=lambda: {},
         refresh_devices=lambda: None,
@@ -173,7 +172,6 @@ def test_host_retains_adapter_record_and_native_load_never_refills_input(
         assert native.status == "saved", native.error
         loader = LoadService(
             state,
-            MagicMock(),
             context=host.context,
             captured_parameters=lambda aliases: host.context.read_context(
                 aliases=aliases

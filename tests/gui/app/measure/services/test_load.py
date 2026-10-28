@@ -62,22 +62,19 @@ def _make_state() -> tuple[State, str, MagicMock]:
     return state, tab_id, adapter
 
 
-def _service(state: State) -> tuple[LoadService, MagicMock, MagicMock]:
+def _service(state: State) -> tuple[LoadService, MagicMock]:
     bus = EventBus()
     emit = MagicMock()
     bus.emit = emit
-    writeback = MagicMock()
     context = MagicMock()
     context.read_context.side_effect = lambda: state.session_env.parameters
     return (
         LoadService(
             state,
-            writeback,
             context=context,
             captured_parameters=lambda _aliases: state.session_env.parameters,
         ),
         emit,
-        writeback,
     )
 
 
@@ -115,7 +112,7 @@ def test_load_retains_history_without_foreign_analysis_fallback(
         return RestoredRun(loaded, "cfg unavailable")
 
     adapter.restore.side_effect = restore_and_rebind
-    service, _emit, _writeback = _service(state)
+    service, _emit = _service(state)
     outcome = service.load_result(tab_id, native_path)
 
     expected_issue = (
@@ -173,7 +170,7 @@ def test_load_result_replaces_run_result_and_invalidates_dependents(
     )
     cfg_version = state.version.get(f"tab:{tab_id}:cfg")
     save_path_version = state.version.get(f"tab:{tab_id}:save_path")
-    svc, emit, _writeback = _service(state)
+    svc, emit = _service(state)
 
     outcome = svc.load_result(tab_id, native_path)
 
@@ -223,7 +220,7 @@ def test_load_preserves_authored_input_including_invalid_drafts(
     loaded = RunRecord(RepeatsCfg(reps=40), object(), historical_metadata())
     metadata = historical_metadata()
     adapter.restore.return_value = RestoredRun(loaded, None)
-    service, _emit, _writeback = _service(state)
+    service, _emit = _service(state)
 
     try:
         outcome = service.load_result(tab_id, native_path)
@@ -244,7 +241,7 @@ def test_load_preserves_authored_input_including_invalid_drafts(
 def test_reentrant_load_does_not_replace_result() -> None:
     state, tab_id, adapter = _make_state()
     tab = state.get_tab(tab_id)
-    service, _emit, _writeback = _service(state)
+    service, _emit = _service(state)
     failures: list[CfgPreconditionReason] = []
 
     def callback() -> None:
@@ -266,7 +263,7 @@ def test_reentrant_load_does_not_replace_result() -> None:
 def test_load_result_rejects_busy_tab_without_calling_adapter() -> None:
     state, tab_id, adapter = _make_state()
     state.set_tab_analyzing(tab_id, analyzing=True)
-    svc, _emit, writeback = _service(state)
+    svc, _emit = _service(state)
 
     with pytest.raises(FailedPreconditionError, match="busy") as exc_info:
         svc.load_result(tab_id, "/tmp/new.hdf5")
@@ -274,7 +271,6 @@ def test_load_result_rejects_busy_tab_without_calling_adapter() -> None:
     assert exc_info.value.category is ExpectedErrorCategory.FAILED_PRECONDITION
     assert exc_info.value.reason_code == ""
     adapter.restore.assert_not_called()
-    writeback.teardown_draft.assert_not_called()
     assert state.get_tab(tab_id).run.result is None
 
 
@@ -283,7 +279,7 @@ def test_load_result_error_leaves_state_unchanged(native_path: str) -> None:
     old = RunRecord(None, object())
     state.get_tab(tab_id).run.result = old
     adapter.restore.side_effect = ValueError("bad file")
-    svc, _emit, writeback = _service(state)
+    svc, _emit = _service(state)
 
     with pytest.raises(LoadDataError, match="Cannot load this data file") as exc_info:
         svc.load_result(tab_id, native_path)
@@ -291,6 +287,5 @@ def test_load_result_error_leaves_state_unchanged(native_path: str) -> None:
     assert exc_info.value.reason_code == "invalid_data_file"
     assert exc_info.value.category is ExpectedErrorCategory.FAILED_PRECONDITION
     assert "Details: bad file" in str(exc_info.value)
-    writeback.teardown_draft.assert_not_called()
     assert state.get_tab(tab_id).run.result is old
     assert state.version.get(f"tab:{tab_id}:result") == 0

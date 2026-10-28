@@ -20,7 +20,6 @@ if TYPE_CHECKING:
     from zcu_tools.gui.session.context_control import ContextControlPort
     from zcu_tools.gui.session.parameters import ParameterContext
 
-    from .ports import WritebackLifecyclePort
 
 logger = logging.getLogger(__name__)
 
@@ -75,7 +74,6 @@ class LoadService:
     def __init__(
         self,
         state: State,
-        writeback: WritebackLifecyclePort,
         *,
         context: ContextControlPort,
         captured_parameters: Callable[
@@ -92,7 +90,6 @@ class LoadService:
         self._context = context
         self._captured_parameters = captured_parameters
         self._state = state
-        self._writeback = writeback
 
     def load_result(self, tab_id: str, data_path: str) -> LoadTabResultOutcome:
         """Load data_path into an existing tab after GuardService.check_load.

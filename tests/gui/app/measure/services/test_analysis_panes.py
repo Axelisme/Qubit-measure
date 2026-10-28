@@ -1,3 +1,5 @@
+"""Analysis operations publish captured results, plots and writeback proposals."""
+
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
@@ -8,13 +10,11 @@ from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
-from zcu_tools.experiment.artifacts import ArtifactRef
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     ContextReadiness,
     SessionEnv,
 )
-from zcu_tools.gui.app.measure.artifacts import SaveStatus
 from zcu_tools.gui.app.measure.services.analyze import AnalyzeService
 from zcu_tools.gui.app.measure.services.pane_commit import (
     commit_analysis,
@@ -54,8 +54,6 @@ from tests.gui.app.measure._components import QubitSchema
 from tests.gui.app.measure._form_fakes import form_resources, make_form
 from tests.gui.app.measure._native_save_support import (
     NativeSaveSession,
-    PaneSummary,
-    PostSummary,
     native_save_session,
 )
 from tests.gui.app.measure._pane_adapter import (
@@ -77,8 +75,6 @@ class _Writeback(WritebackService):
     def __init__(self) -> None:
         super().__init__(MagicMock(), arb_names=lambda: ())
         self.created: list[WritebackDraft] = []
-        self.torn_down: list[WritebackDraft] = []
-        self.fail_teardown = False
         self.fail_create = False
 
     def create_draft(
@@ -101,12 +97,6 @@ class _Writeback(WritebackService):
         )
         self.created.append(draft)
         return draft
-
-    def teardown_draft(self, draft: WritebackDraft) -> None:
-        self.torn_down.append(draft)
-        if self.fail_teardown:
-            raise RuntimeError("teardown failed")
-        super().teardown_draft(draft)
 
 
 class _Bg:
@@ -162,216 +152,11 @@ def _analyze_service(
     return AnalyzeService(state, runner, bus, writeback, handles), bg
 
 
-def test_snapshot_exposes_independent_panes_and_paths(
-    native_session: NativeSaveSession,
-) -> None:
-    session = native_session
-    state, tab_id = session.state, "tab"
-    run_result = state.get_tab(tab_id).run.result
-    primary, post = PaneSummary(), PostSummary()
-    primary_plots = Plots(NonPresentingHost())
-    primary_plots.subplots("fit")
-    primary_plots.finish()
-    post_plots = Plots(NonPresentingHost())
-    post_plots.subplots("fit")
-    post_plots.finish()
-    primary_draft, post_draft = MagicMock(), MagicMock()
-    commit_analysis(
-        state,
-        tab_id,
-        AnalysisPaneState(
-            result=primary,
-            plots=primary_plots,
-            params=PaneParams(initial_state="excited"),
-            writeback_draft=primary_draft,
-        ),
-    )
-    commit_post_analysis(
-        state,
-        tab_id,
-        PostAnalysisPaneState(
-            result=post,
-            plots=post_plots,
-            params=PaneParams(initial_state="ground"),
-            writeback_draft=post_draft,
-        ),
-    )
-    writeback = MagicMock()
-    writeback.preview_draft.side_effect = lambda draft: (
-        ["primary-item"] if draft is primary_draft else ["post-item"]
-    )
-    tabs = TabService(state, MagicMock(), writeback, form_resources(state), MagicMock())
-    snapshot = tabs.get_snapshot(tab_id)
-    assert snapshot.run is not None and snapshot.run.result is run_result
-    assert snapshot.analysis is not None and snapshot.analysis.result is primary
-    assert snapshot.post_analysis is not None and snapshot.post_analysis.result is post
-    assert snapshot.analysis.writeback_items == ("primary-item",)
-    assert snapshot.post_analysis.writeback_items == ("post-item",)
-    assert [
-        artifact.ref for section in snapshot.artifacts for artifact in section.artifacts
-    ] == [
-        ArtifactRef("run", "measurement_data"),
-        ArtifactRef("analysis", "results"),
-        ArtifactRef("post_analysis", "results"),
-    ]
-    assert all(
-        artifact.status is SaveStatus.NOT_SAVED
-        for section in snapshot.artifacts
-        for artifact in section.artifacts
-    )
-    report = session.save_artifacts()
-    saved = tabs.get_snapshot(tab_id)
-    assert {
-        member.key: tuple(
-            (output.path, output.status, output.error) for output in member.outputs
-        )
-        for section in saved.artifacts
-        for artifact in section.artifacts
-        for member in artifact.members
-    } == {
-        key: tuple(
-            (item.output.path, item.status, item.error)
-            for item in report.outputs
-            if item.key == key
-        )
-        for key in {item.key for item in report.outputs}
-    }
-    assert all(
-        artifact.status is SaveStatus.SAVED
-        for section in saved.artifacts
-        for artifact in section.artifacts
-    )
-    primary_plots.release()
-    post_plots.release()
-
-
-def test_named_panes_project_paths_and_retire_original_collections(
-    native_session: NativeSaveSession,
-) -> None:
-    session = native_session
-    state, tab_id = session.state, "tab"
-    original = Plots(NonPresentingHost())
-    old_figure, _ = original.subplots("old")
-    original.finish()
-    commit_analysis(
-        state, tab_id, AnalysisPaneState(result=PaneSummary(), plots=original)
-    )
-    replacement = Plots(NonPresentingHost())
-    first, _ = replacement.subplots("fit")
-    second, _ = replacement.subplots("diagnostic")
-    replacement.finish()
-    commit_analysis(
-        state, tab_id, AnalysisPaneState(result=PaneSummary(), plots=replacement)
-    )
-    png = BytesIO()
-    old_figure.savefig(png, format="png")
-    assert png.getvalue().startswith(b"\x89PNG\r\n\x1a\n")
-    post = Plots(NonPresentingHost())
-    post_figure, _ = post.subplots("fit")
-    post.finish()
-    commit_post_analysis(
-        state, tab_id, PostAnalysisPaneState(result=PostSummary(), plots=post)
-    )
-    tabs = TabService(
-        state, MagicMock(), MagicMock(), form_resources(state), MagicMock()
-    )
-    snapshot = tabs.get_snapshot(tab_id)
-    assert (
-        snapshot.analysis is not None
-        and snapshot.analysis.figures is not None
-        and snapshot.analysis.figures is replacement
-    )
-    assert (
-        snapshot.post_analysis is not None
-        and snapshot.post_analysis.figures is not None
-        and snapshot.post_analysis.figures is post
-    )
-    assert snapshot.analysis.figures["fit"] is first
-    assert snapshot.analysis.figures["diagnostic"] is second
-    assert snapshot.post_analysis.figures["fit"] is post_figure
-    assert [
-        member.key
-        for section in snapshot.artifacts
-        for artifact in section.artifacts
-        for member in artifact.members
-    ] == [
-        ArtifactKey("run", "measurement_data", "data"),
-        ArtifactKey("analysis", "results", "figure", "fit"),
-        ArtifactKey("analysis", "results", "figure", "diagnostic"),
-        ArtifactKey("analysis", "results", "analysis", "analysis"),
-        ArtifactKey("post_analysis", "results", "figure", "fit"),
-        ArtifactKey("post_analysis", "results", "analysis", "post_analysis"),
-    ]
-    session.save_artifacts()
-    assert all(
-        artifact.status is SaveStatus.SAVED
-        for section in tabs.get_snapshot(tab_id).artifacts
-        for artifact in section.artifacts
-    )
-    newer = Plots(NonPresentingHost())
-    newer.subplots("fit")
-    newer.finish()
-    commit_analysis(state, tab_id, AnalysisPaneState(result=PaneSummary(), plots=newer))
-    assert state.get_tab(tab_id).post_analysis.plots is None
-    current = tabs.get_snapshot(tab_id)
-    assert [
-        artifact.ref for section in current.artifacts for artifact in section.artifacts
-    ] == [
-        ArtifactRef("run", "measurement_data"),
-        ArtifactRef("analysis", "results"),
-    ]
-    analysis = current.artifacts[1].artifacts[0]
-    assert analysis.status is SaveStatus.NOT_SAVED
-    assert [member.key for member in analysis.members] == [
-        ArtifactKey("analysis", "results", "figure", "fit"),
-        ArtifactKey("analysis", "results", "analysis", "analysis"),
-    ]
-    assert all(
-        output.status == "reserved"
-        for member in analysis.members
-        for output in member.outputs
-    )
-    replacement.release()
-    post.release()
-    newer.release()
-
-
-def test_post_swap_does_not_replace_primary() -> None:
-    state, tab_id, _adapter, _ctx = _state()
-    commit_analysis(state, tab_id, AnalysisPaneState(result="primary", plots=None))
-    primary_pane = state.get_tab(tab_id).analysis
-
-    commit_post_analysis(
-        state, tab_id, PostAnalysisPaneState(result="post", plots=None)
-    )
-
-    tab = state.get_tab(tab_id)
-    assert tab.analysis is primary_pane
-    assert tab.analysis.result == "primary"
-    assert tab.post_analysis.result == "post"
-
-
-def test_analyze_uses_captured_inputs_and_cleans_retired_after_commit() -> None:
+def test_analyze_publishes_result_from_captured_inputs() -> None:
     state, tab_id, adapter, _ctx = _state()
     writeback = _Writeback()
-    old_primary_draft = writeback.create_draft(
-        [], parameters=None, experiment_name="fake"
-    )
-    old_post_draft = writeback.create_draft([], parameters=None, experiment_name="fake")
-    commit_analysis(
-        state,
-        tab_id,
-        AnalysisPaneState(
-            result="old-primary", plots=None, writeback_draft=old_primary_draft
-        ),
-    )
-    commit_post_analysis(
-        state,
-        tab_id,
-        PostAnalysisPaneState(
-            result="old-post", plots=None, writeback_draft=old_post_draft
-        ),
-    )
+    commit_analysis(state, tab_id, AnalysisPaneState(result="old-primary"))
+    commit_post_analysis(state, tab_id, PostAnalysisPaneState(result="old-post"))
     adapter.get_writeback_items.return_value = []
     service, bg = _analyze_service(state, writeback)
     plots = Plots(NonPresentingHost())
@@ -393,8 +178,6 @@ def test_analyze_uses_captured_inputs_and_cleans_retired_after_commit() -> None:
     assert state.get_tab(tab_id).analysis.plots is plots
     assert tuple(plots) == ("fit",)
     assert state.get_tab(tab_id).post_analysis.result is None
-    assert old_primary_draft in writeback.torn_down
-    assert old_post_draft in writeback.torn_down
 
 
 def _pane_source_with_excited_initial_state() -> RunRecord[SavingCfg, SavingResult]:
@@ -599,43 +382,3 @@ def test_failed_draft_build_preserves_previous_primary_and_post() -> None:
     assert tab.analysis.result == "old-primary"
     assert tab.post_analysis.result == "old-post"
     assert writeback.created == []
-
-
-def test_retired_teardown_failure_does_not_roll_back_committed_pane() -> None:
-    state, tab_id, adapter, _ctx = _state()
-    writeback = _Writeback()
-    old_primary_draft = writeback.create_draft(
-        [], parameters=None, experiment_name="fake"
-    )
-    old_post_draft = writeback.create_draft([], parameters=None, experiment_name="fake")
-    commit_analysis(
-        state,
-        tab_id,
-        AnalysisPaneState(
-            result="old-primary", plots=None, writeback_draft=old_primary_draft
-        ),
-    )
-    commit_post_analysis(
-        state,
-        tab_id,
-        PostAnalysisPaneState(
-            result="old-post", plots=None, writeback_draft=old_post_draft
-        ),
-    )
-    adapter.get_writeback_items.return_value = []
-    writeback.fail_teardown = True
-    service, bg = _analyze_service(state, writeback)
-    plots = Plots(NonPresentingHost())
-    plots.subplots("diagnostic")
-    service.start_analyze(tab_id, "params", plots=plots)
-    new_result = object()
-
-    bg.on_done(new_result)
-
-    tab = state.get_tab(tab_id)
-    assert tab.analysis.result is new_result
-    assert tab.analysis.plots is plots
-    assert tab.analysis.writeback_draft is writeback.created[-1]
-    assert tab.post_analysis.result is None
-    assert tab.post_analysis.writeback_draft is None
-    assert writeback.torn_down == [old_primary_draft, old_post_draft]

@@ -102,7 +102,6 @@ def _native_controls(
     )
     load = LoadService(
         session.state,
-        writeback,
         context=control,
         captured_parameters=capture,
     )
@@ -111,7 +110,6 @@ def _native_controls(
         runner,
         session.bus,
         session.handles,
-        writeback,
         gate=MagicMock(),
         devices=lambda: {},
         refresh_devices=lambda: None,
@@ -209,7 +207,6 @@ def test_native_load_analysis_and_writeback_keep_historical_point_aliases_and_id
     rows = session.context.get_alias_rows()
     service = LoadService(
         session.state,
-        MagicMock(),
         context=control,
         captured_parameters=session.capture_parameters,
     )
@@ -310,7 +307,6 @@ def test_native_load_missing_source_is_reported_but_corruption_preserves_previou
     events = session.entry.ledger.events()
     service = LoadService(
         session.state,
-        MagicMock(),
         context=ContextControlFacet(context=session.context),
         captured_parameters=session.capture_parameters,
     )
@@ -358,7 +354,6 @@ def test_native_load_keeps_unknown_historical_name_until_component_field_read(
     rows = session.context.get_alias_rows()
     service = LoadService(
         session.state,
-        MagicMock(),
         context=ContextControlFacet(context=session.context),
         captured_parameters=session.capture_parameters,
     )
@@ -573,7 +568,6 @@ def test_native_load_retains_history_and_resaves_captured_source(
         events = session.entry.ledger.events()
         service = LoadService(
             session.state,
-            MagicMock(),
             context=ContextControlFacet(context=session.context),
             captured_parameters=session.capture_parameters,
         )
@@ -626,7 +620,6 @@ def test_loaded_same_entry_different_point_resaves_original_run(
         tab = session.state.get_tab("tab")
         service = LoadService(
             session.state,
-            MagicMock(),
             context=ContextControlFacet(context=session.context),
             captured_parameters=session.capture_parameters,
         )
@@ -738,7 +731,6 @@ def test_loaded_foreign_origin_save_rejects_before_mapping_or_io(
         assert captured.point == "destination-point"
         service = LoadService(
             session.state,
-            MagicMock(),
             context=ContextControlFacet(context=session.context),
             captured_parameters=session.capture_parameters,
         )
@@ -793,7 +785,6 @@ def test_unselected_entry_load_retains_history_and_save_rejects_without_writes(
         events = session.entry.ledger.events()
         service = LoadService(
             session.state,
-            MagicMock(),
             context=ContextControlFacet(context=session.context),
             captured_parameters=session.capture_parameters,
         )
@@ -852,7 +843,6 @@ def test_native_experiment_mismatch_keeps_previous_result_and_history(
         old_run = tab.run
         service = LoadService(
             session.state,
-            MagicMock(),
             context=ContextControlFacet(context=session.context),
             captured_parameters=session.capture_parameters,
         )
@@ -873,7 +863,6 @@ def test_unreadable_native_load_keeps_previous_result_and_history(
         old_run = tab.run
         service = LoadService(
             session.state,
-            MagicMock(),
             context=ContextControlFacet(context=session.context),
             captured_parameters=session.capture_parameters,
         )

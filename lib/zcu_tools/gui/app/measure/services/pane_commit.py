@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 from copy import deepcopy
 from datetime import datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from zcu_tools.experiment.artifacts import ArtifactRef
 from zcu_tools.resources.entry import ArtifactKey, SaveContext, SaveLayout
@@ -25,7 +25,23 @@ from ..state import (
     State,
 )
 
+if TYPE_CHECKING:
+    from zcu_tools.plotting.plots import Plots
+
 logger = logging.getLogger(__name__)
+
+
+def discard_unpublished_plots(plots: Plots) -> None:
+    """Stop an unsuccessful producer and detach even if its final draw fails.
+
+    Call when the operation discards its unpublished presentation. Finish without
+    presenting, then always release attachments. Cleanup errors propagate to the
+    operation's failure-isolation policy; detached Figures remain caller-owned.
+    """
+    try:
+        plots.finish(present=False)
+    finally:
+        plots.release()
 
 
 def retire_resources(retired: RetiredPaneResources) -> None:

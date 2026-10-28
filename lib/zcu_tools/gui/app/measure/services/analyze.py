@@ -22,7 +22,7 @@ from zcu_tools.gui.session.operation_handles import OperationHandles, OperationO
 from zcu_tools.gui.session.operation_runner import OperationRunner
 from zcu_tools.resources.entry.ledger_models import JsonObject
 
-from .plot_lifecycle import discard_unpublished_plots
+from .pane_commit import discard_unpublished_plots
 from .staged_analyze import StagedAnalyzeService
 
 logger = logging.getLogger(__name__)
@@ -35,7 +35,7 @@ if TYPE_CHECKING:
     from zcu_tools.plotting.plots import Plots
 
     from ..state import State
-    from .ports import WritebackLifecyclePort
+    from ..writeback import WritebackService
 
 
 @dataclass(frozen=True, slots=True)
@@ -71,7 +71,7 @@ class AnalyzeService(StagedAnalyzeService):
         state: State,
         runner: OperationRunner,
         bus: EventBus,
-        writeback: WritebackLifecyclePort,
+        writeback: WritebackService,
         handles: OperationHandles,
     ) -> None:
         # FIT analyze runs off-main with explicit operation plots (no progress
