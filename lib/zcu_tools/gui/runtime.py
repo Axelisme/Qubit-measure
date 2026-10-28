@@ -13,9 +13,10 @@ import logging
 import sys
 import threading
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar, Protocol, TextIO, TypeVar
+from typing import TYPE_CHECKING, ClassVar, Protocol, TextIO
 
 from zcu_tools.gui.logging_setup import setup_gui_logging
 from zcu_tools.gui.remote.rpc_endpoint import ControlOptions
@@ -154,9 +155,6 @@ class GuiRuntimeBehavior(ABC):
         del assembly
 
 
-BehaviorT = TypeVar("BehaviorT", bound=GuiRuntimeBehavior)
-
-
 def build_control_options(
     spec: GuiRuntimeSpec, options: GuiLaunchOptions
 ) -> ControlOptions | None:
@@ -177,31 +175,32 @@ def build_control_options(
 
 
 def launch_gui_runtime(
-    behavior_cls: type[BehaviorT],
+    spec: GuiRuntimeSpec,
     options: GuiLaunchOptions,
-    *args: Any,
-    extra_logging_namespaces: tuple[str, ...] = (),
-    **kwargs: Any,
+    *,
+    behavior_factory: Callable[[], GuiRuntimeBehavior],
+    logging_namespaces: tuple[str, ...],
 ) -> int:
     """Configure process policy, instantiate behavior, and return its exit code.
 
-    behavior_cls declares the app's fixed runtime spec. options supplies CLI
-    process settings; args and kwargs go to the behavior constructor. The
-    caller-provided extra_logging_namespaces are appended to the app's fixed
-    logging namespaces before construction, without changing the shared spec.
-    Logging, construction and runtime failures propagate to the caller.
+    spec declares the app's fixed process requirements; options supplies CLI
+    settings. logging_namespaces comes from the caller's lab description and is
+    appended to spec.logging_extra_namespaces without mutating the spec.
+    behavior_factory takes no arguments; bind the behavior's explicit constructor
+    parameters with functools.partial at the composition root. Logging is set up
+    before invoking it so catalog registration and construction failures reach
+    the session log. Logging, construction and runtime failures propagate.
     """
-    spec = behavior_cls.spec
     log_file = setup_gui_logging(
         app_name=spec.app_name,
         log_root=options.log_root,
         to_file=options.to_file,
         log_file=options.log_file,
-        extra_namespaces=spec.logging_extra_namespaces + extra_logging_namespaces,
+        extra_namespaces=spec.logging_extra_namespaces + logging_namespaces,
         group=spec.logging_group,
     )
     control = build_control_options(spec, options)
-    behavior = behavior_cls(*args, **kwargs)
+    behavior = behavior_factory()
     return run_gui_runtime(
         behavior, control, exit_diagnostics=GuiExitDiagnostics(log_file)
     )

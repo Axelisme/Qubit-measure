@@ -15,8 +15,8 @@ from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.ui.interactive_frontend import InteractiveFrontend
 from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 
+from tests._lab import synthetic_lab
 from tests.gui.app.measure._native_save_support import AnalysisSavingAdapter
-from tests.gui.app.measure._reload_fakes import Loader
 
 
 class RecordingFrontend(InteractiveFrontend):
@@ -51,7 +51,7 @@ def main(project_root: Path) -> int:
     registry = Registry()
     registry.register("saving", AnalysisSavingAdapter)
     behavior = MeasureGuiBehavior(
-        lambda: (registry, Loader()),
+        synthetic_lab(registry),
         clean=True,
         project_root=str(project_root),
     )

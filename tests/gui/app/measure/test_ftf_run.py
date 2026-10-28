@@ -25,10 +25,10 @@ from zcu_tools.program.v2.modules.pulse import PulseCfg
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 
+from tests._lab import synthetic_lab
 from tests.experiment._saving_support import SavingResult
 from tests.gui._qt_waits import qt_until
 from tests.gui.app.measure._native_save_support import SavingAdapter
-from tests.gui.app.measure._reload_fakes import Loader
 from tests.gui.app.measure.remote._helpers import call, open_client
 from tests.resources._ftf_data import ftf_document
 
@@ -87,7 +87,7 @@ def ftf_window(qapp, tmp_path):
     registry.register("ftf", FTFAcquisitionAdapter)
     old_hook = sys.excepthook
     behavior = MeasureGuiBehavior(
-        lambda: (registry, Loader()),
+        synthetic_lab(registry),
         clean=True,
         project_root=str(tmp_path),
     )

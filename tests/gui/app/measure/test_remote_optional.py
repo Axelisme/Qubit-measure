@@ -9,38 +9,26 @@ from pathlib import Path
 import pytest
 from qtpy.QtWidgets import QApplication
 from zcu_tools.gui.app.measure.app import MeasureGuiBehavior
-from zcu_tools.gui.app.measure.catalog import (
-    ExperimentCatalogLoader,
-    PreparedCatalogReload,
-)
 from zcu_tools.gui.app.measure.controller import Controller
 from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 from zcu_tools.gui.form import FormErrors
 
+from tests._lab import synthetic_lab
 from tests.gui.app.measure._synthetic import SampleAdapter
 
 
 @pytest.fixture
 def measure_gui(qapp: QApplication, tmp_path: Path) -> Iterator[Controller]:
-    class UnusedLoader:
-        def prepare(self) -> PreparedCatalogReload:
-            raise RuntimeError("reload is not part of this composition test")
-
-        def load(self, plan: PreparedCatalogReload) -> Registry:
-            raise RuntimeError("reload is not part of this composition test")
-
-    def registry_factory() -> tuple[Registry, ExperimentCatalogLoader]:
-        registry = Registry()
-        registry.register("fake", SampleAdapter)
-        return registry, UnusedLoader()
+    registry = Registry()
+    registry.register("fake", SampleAdapter)
 
     previous_hook = sys.excepthook
     ctrl: Controller | None = None
     window: MainWindow | None = None
     try:
         behavior = MeasureGuiBehavior(
-            registry_factory, clean=True, project_root=str(tmp_path)
+            synthetic_lab(registry), clean=True, project_root=str(tmp_path)
         )
         assembly = behavior.assemble(None)
         assert assembly.control_adapter is None

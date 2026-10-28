@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import sys
+from collections.abc import Callable
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -13,7 +15,68 @@ from zcu_tools.gui.app.measure.remote import ControlOptions
 from zcu_tools.gui.app.measure.remote.dialogs import DialogName
 from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
 
+from tests._lab import synthetic_lab
 from tests.gui.app.measure._reload_fakes import Loader
+
+
+def test_lab_composition_uses_injected_definitions(qapp, tmp_path):
+    from zcu_tools.cfg_model import PulseSpec, TemplateDef
+    from zcu_tools.gui.app.measure.controller import Controller
+
+    from tests.gui.app.measure._operation_plots import attachment
+    from tests.gui.app.measure._synthetic import SampleAdapter
+
+    registry = Registry()
+    registry.register("injected", SampleAdapter)
+    effects: list[str] = []
+
+    def register_components(_registry):
+        effects.append("components")
+
+    template = TemplateDef(PulseSpec, "Injected pulse", {})
+    lab = replace(
+        synthetic_lab(registry),
+        register_components=register_components,
+        templates={"injected-pulse": template},
+        workflow_attachments=(attachment(),),
+    )
+    previous_hook = sys.excepthook
+    behavior = None
+    try:
+        behavior = MeasureGuiBehavior(lab, clean=True, project_root=str(tmp_path))
+        assembly = behavior.assemble(None)
+        assert isinstance(assembly.controller, Controller)
+        assert assembly.controller.get_adapter_names() == ["injected"]
+        assert assembly.controller.get_template("injected-pulse") is template
+        assert assembly.controller.workflow_control().names() == ("operation-plots",)
+        assert effects == ["components"]
+    finally:
+        if behavior is not None:
+            behavior.close(None)
+        sys.excepthook = previous_hook
+
+
+def construct_with_legacy_keyword(
+    constructor: Callable[..., object], keyword: str
+) -> object:
+    """Exercise invalid API calls without claiming they are statically valid."""
+
+    def factory():
+        return Registry(), Loader()
+
+    if keyword == "registry_factory":
+        return constructor(registry_factory=factory)
+    return constructor(factory, configure_workflows=lambda _control: None)
+
+
+@pytest.mark.parametrize("keyword", ["registry_factory", "configure_workflows"])
+def test_measure_behavior_rejects_legacy_keywords(keyword):
+    previous_hook = sys.excepthook
+    try:
+        with pytest.raises(TypeError, match="unexpected keyword argument"):
+            construct_with_legacy_keyword(MeasureGuiBehavior, keyword)
+    finally:
+        sys.excepthook = previous_hook
 
 
 class ControlledDrain(BackgroundRunner):
@@ -39,7 +102,7 @@ def composition(qapp: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPa
         lambda: runner,
     )
     behavior = MeasureGuiBehavior(
-        lambda: (Registry(), Loader()), clean=True, project_root=str(tmp_path)
+        synthetic_lab(), clean=True, project_root=str(tmp_path)
     )
     try:
         yield behavior, runner

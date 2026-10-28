@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from functools import partial
 from pathlib import Path
 
 from zcu_tools.gui.app.analysis_project.launcher import (
@@ -59,10 +60,14 @@ def main(argv: list[str] | None = None) -> int:
     from zcu_tools.gui.runtime import launch_gui_runtime
 
     return launch_gui_runtime(
-        DispersiveGuiBehavior,
+        DispersiveGuiBehavior.spec,
         runtime_options_from_args(args, log_root=PROJECT_ROOT),
-        project=analysis_target_from_args(args, project_root=project_root),
-        project_root=project_root,
+        logging_namespaces=(),
+        behavior_factory=partial(
+            DispersiveGuiBehavior,
+            project=analysis_target_from_args(args, project_root=project_root),
+            project_root=project_root,
+        ),
     )
 
 
