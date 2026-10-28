@@ -53,7 +53,11 @@ def test_entry_commands_require_explicit_point_before_application_and_wire_reads
     assert application.controller.context_control.get_entry_info() is not None
     labels = application.result("point.list", {})["points"]
     assert labels == (
-        [] if command == "new" else [{"label": "existing", "description": ""}]
+        []
+        if command == "new"
+        else [
+            {"label": "existing", "description": "", "available": True, "error": None}
+        ]
     )
     control = application.controller.context_control
     with pytest.raises(FailedPreconditionError) as caught:

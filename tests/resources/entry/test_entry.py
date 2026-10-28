@@ -344,22 +344,37 @@ def test_create_rejects_existing_destination_without_touching_either_entry(
         assert existing.readlink() == Path("missing-target")
 
 
-@pytest.mark.parametrize("missing", ["setup.yaml", "points", "records"])
-def test_open_rejects_incomplete_entry_with_actual_missing_path(
-    entry_roots: tuple[Path, Path], missing: str
+def test_open_rejects_missing_setup_with_actual_path(
+    entry_roots: tuple[Path, Path],
 ) -> None:
     results, database = entry_roots
     ResultEntry.create("entry", result_root=results, database_root=database)
-    missing_path = results / "entry" / missing
-    if missing_path.is_dir():
-        missing_path.rmdir()
-    else:
-        missing_path.unlink()
+    missing_path = results / "entry/setup.yaml"
+    missing_path.unlink()
 
     with pytest.raises(FileNotFoundError) as failure:
         ResultEntry.open("entry", result_root=results, database_root=database)
 
     assert failure.value.filename == str(missing_path)
+
+
+def test_open_accepts_setup_without_point_or_record_directories(
+    entry_roots: tuple[Path, Path],
+) -> None:
+    results, database = entry_roots
+    entry = ResultEntry.create("entry", result_root=results, database_root=database)
+    (entry.result_path / "points").rmdir()
+    (entry.result_path / "records").rmdir()
+    (entry.result_path / "module_cfg.yaml").unlink()
+    before = read_entry_files(entry.result_path)
+
+    opened = ResultEntry.open("entry", result_root=results, database_root=database)
+
+    assert opened.entry_id == entry.entry_id
+    assert opened.list_points() == []
+    assert ResultEntry.read_events_snapshot("entry", result_root=results) == ()
+    assert read_entry_files(entry.result_path) == before
+    assert not opened.database_path.exists()
 
 
 def test_open_reads_existing_identity_without_rewriting_setup(tmp_path: Path) -> None:

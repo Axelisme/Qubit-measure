@@ -172,8 +172,11 @@ def test_analysis_timestamp_locators_survive_source_cleanup_and_resume(
     loaded = (
         load_dispersive_file(file) if kind == "dispersive" else load_t1_curve_file(file)
     )
+    assert loaded.source is not None
     assert loaded.source.created_at is None
-    assert load_migrated_predictor(request_data).source.created_at is None
+    predictor = load_migrated_predictor(request_data)
+    assert predictor.source is not None
+    assert predictor.source.created_at is None
     locations = {f"{section}.timestamp", "fluxdep_fit.timestamp"}
     rows = [
         row

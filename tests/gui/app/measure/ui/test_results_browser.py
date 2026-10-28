@@ -48,6 +48,30 @@ def test_menu_opens_independent_results_window(
     ui.screenshot(tmp_path / "empty-browser.png")
 
 
+def test_browser_shows_item_read_issues_alongside_healthy_results(
+    browser_host: MainWindow, tmp_path: Path
+) -> None:
+    (tmp_path / "Database" / "healthy" / "runs" / "saved").mkdir(parents=True)
+    outside = tmp_path / "detached"
+    outside.mkdir()
+    source = tmp_path / "Database" / "broken"
+    source.symlink_to(outside, target_is_directory=True)
+    ui = ComponentDriver(browser_host)
+
+    ui.click("Results browser…")
+
+    assert ui.observe(object_name="results.focus").text == "All results · 1 runs"
+    issue = ui.observe(object_name="results.issues")
+    assert issue.visible
+    assert "broken" in issue.text and str(source) in issue.tooltip
+    assert "escapes" in issue.tooltip
+    ui.screenshot(tmp_path / "item-issues.png")
+    ui.enter_text(value="healthy", object_name="results.search")
+    assert ui.observe(object_name="results.focus").text == "All results · 1 runs"
+    assert ui.observe(object_name="results.issues").visible
+    ui.screenshot(tmp_path / "item-issues-filtered.png")
+
+
 @pytest.mark.parametrize("run_focus", [False, True])
 def test_grouping_reuses_visible_cards_and_decoded_images(
     populated_browser: ComponentDriver,

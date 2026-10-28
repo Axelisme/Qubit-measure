@@ -1,9 +1,11 @@
 """Entry/point publication and fixed reads through the public session owner."""
 
 from collections.abc import Generator
+from datetime import date
 from pathlib import Path
 
 import pytest
+from ruamel.yaml import YAML
 from zcu_tools.cfg_model import WaveformAssetInfo
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
@@ -25,7 +27,12 @@ from zcu_tools.gui.session.events import (
 from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.state import SessionState
 from zcu_tools.gui.session.types import ContextReadiness, SessionEnv
-from zcu_tools.resources.entry import ResultEntry, RoleResolutionError
+from zcu_tools.resources.entry import (
+    ResultEntry,
+    RoleResolutionError,
+    component_registry,
+)
+from zcu_tools.resources.parameter_schema import ParameterSchemaPolicy
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
 from tests.resources.entry.fakes import (
@@ -54,6 +61,10 @@ def registered_entry_models() -> Generator[None]:
     before = registry_state()
     try:
         register_fakes()
+        # Version 2 lets the isolation regression exercise an older valid version.
+        component_registry.configure_schema(
+            ParameterSchemaPolicy(2, ("synthetic-upgrade",))
+        )
         installed = registry_state()
         yield
         assert registry_state() == installed, (
@@ -311,6 +322,74 @@ def test_install_entry_preserves_nonparameter_capabilities_without_selecting_poi
     assert current.parameters is None
     assert not context.has_context()
     assert context.list_points() == ()
+
+
+@pytest.mark.parametrize(
+    ("damage", "reason"),
+    [
+        ("schema", "schema_version"),
+        ("kind", "unknown"),
+        ("extra", "extra"),
+        ("timestamp", "unexpected"),
+    ],
+)
+def test_install_entry_isolates_bad_point_parameters_without_reading_other_files(
+    context: ContextService, tmp_path: Path, damage: str, reason: str
+) -> None:
+    entry = _entry(tmp_path)
+    entry.new_point("good", description="usable point")
+    entry.new_point("bad", description="retained description")
+    source = entry.result_path / "points/bad/point.yaml"
+    yaml = YAML(typ="safe")
+    document = yaml.load(source.read_text())
+    if damage == "schema":
+        document["schema_version"] = 1
+    elif damage == "kind":
+        document["components"] = {"Q": {"kind": "unknown/test"}}
+    elif damage == "timestamp":
+        document["unexpected"] = date(2020, 1, 1)
+    else:
+        document["unexpected"] = "opaque"
+    with source.open("w") as stream:
+        yaml.dump(document, stream)
+    # Neither summary nor parameter availability consumes these documents.
+    for label in ("good", "bad"):
+        directory = entry.result_path / "points" / label
+        if label == "good":
+            (directory / "module_cfg.yaml").unlink()
+        else:
+            (directory / "module_cfg.yaml").write_text(
+                "[invalid YAML", encoding="utf-8"
+            )
+        (directory / "aliases.yaml").write_text("[invalid YAML", encoding="utf-8")
+    before = {
+        path: path.read_bytes()
+        for path in entry.result_path.rglob("*")
+        if path.is_file()
+    }
+
+    context.install_entry(entry)
+
+    points = {point.label: point for point in context.list_points()}
+    assert points["good"].available
+    assert points["good"].error is None
+    assert points["bad"].description == "retained description"
+    assert not points["bad"].available
+    assert points["bad"].error is not None
+    assert reason in points["bad"].error
+    assert str(source) in points["bad"].error
+    assert {
+        path: path.read_bytes()
+        for path in entry.result_path.rglob("*")
+        if path.is_file()
+    } == before
+    # Restore only the files selection currently needs, outside the probe.
+    (entry.result_path / "points/good/module_cfg.yaml").write_bytes(
+        (entry.result_path / "module_cfg.yaml").read_bytes()
+    )
+    (entry.result_path / "points/good/aliases.yaml").unlink()
+    context.use_point(PointUseRequest("good"))
+    assert context.read_context().document().general.description == "usable point"
 
 
 def test_use_point_detaches_capture_and_uses_same_entry_library(
