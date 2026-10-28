@@ -97,6 +97,75 @@ def test_reload_installs_edited_disk_using_installed_base_revision(
         assert control.get_alias_rows() == (AliasRow("driver", "Q1"),)
 
 
+@pytest.mark.parametrize("external_exists", [False, True])
+def test_library_writer_null_checks_absence_before_first_creation(
+    application: PointApplication, external_exists: bool
+) -> None:
+    info = application.open_entry()
+    application.result("point.new", {"label": "portable"})
+    path = info.result_path / "points/portable/module_cfg.yaml"
+    external = path.read_bytes() + b"# external creation\n"
+    path.unlink()
+    application.result("point.use", {"label": "portable"})
+    files = application.result("entry.info", {})["files"]
+    assert isinstance(files, list)
+    assert files[1] == {"document": "library", "path": str(path), "revision": None}
+    assert not path.exists()
+    if external_exists:
+        path.write_bytes(external)
+    params: dict[str, object] = {
+        "role_id": "synthetic.const",
+        "name": "Q1.waveforms.new",
+        "edits": [{"path": ["length"], "value": 0.2}],
+        "expected_revision": None,
+    }
+    if external_exists:
+        error = error_reply(application, "context.ml_create_from_role", params)
+        assert (error["code"], error.get("reason")) == (
+            ErrorCode.PRECONDITION_FAILED,
+            "revision_mismatch",
+        )
+        assert path.read_bytes() == external
+        assert application.result("entry.info", {})["files"] == files
+    else:
+        reply = application.rpc("context.ml_create_from_role", params)
+        assert reply["ok"] is True, reply
+        assert (
+            application.controller.context_control.read_context().library.waveform_keys()
+            == ("Q1.waveforms.new",)
+        )
+        assert path.is_file()
+
+
+def test_absent_library_reports_null_and_reloads_external_file(
+    application: PointApplication,
+) -> None:
+    info = application.open_entry()
+    application.result("point.new", {"label": "portable"})
+    path = info.result_path / "points/portable/module_cfg.yaml"
+    body = path.read_bytes()
+    path.unlink()
+    application.result("point.use", {"label": "portable"})
+    files = application.result("entry.info", {})["files"]
+    assert isinstance(files, list)
+    assert files[1] == {"document": "library", "path": str(path), "revision": None}
+    assert not path.exists()
+    path.write_bytes(b"invalid: true\n")
+    error = error_reply(
+        application, "context.reload", {"path": str(path), "expected_revision": None}
+    )
+    assert error["code"] == ErrorCode.INVALID_PARAMS
+    assert application.result("entry.info", {})["files"] == files
+    path.write_bytes(body)
+    assert application.result(
+        "context.reload", {"path": str(path), "expected_revision": None}
+    ) == {
+        "document": "library",
+        "path": str(path),
+        "revision": sha256(body).hexdigest(),
+    }
+
+
 def test_reload_rejects_disk_hash_instead_of_installed_base(
     application: PointApplication, point_files: dict[Document, PointFileRevision]
 ) -> None:
@@ -260,7 +329,7 @@ def test_optional_writer_revision_rejects_stale_disk_without_side_effects(
     ("method", "document", "params"),
     [writer for writer in WRITERS if writer[1] != "aliases"],
 )
-def test_optional_writer_revision_accepts_matching_disk_and_rejects_null_elsewhere(
+def test_optional_writer_revision_accepts_matching_disk_and_checks_null(
     application: PointApplication,
     point_files: dict[Document, PointFileRevision],
     method: str,
@@ -268,9 +337,14 @@ def test_optional_writer_revision_accepts_matching_disk_and_rejects_null_elsewhe
     params: dict[str, object],
 ) -> None:
     file = point_files[document]
-    if document != "aliases":
-        error = error_reply(application, method, {**params, "expected_revision": None})
+    error = error_reply(application, method, {**params, "expected_revision": None})
+    if document == "parameters":
         assert error["code"] == ErrorCode.INVALID_PARAMS, error
+    else:
+        assert (error["code"], error.get("reason")) == (
+            ErrorCode.PRECONDITION_FAILED,
+            "revision_mismatch",
+        ), error
     reply = application.rpc(method, {**params, "expected_revision": file.revision})
     assert reply["ok"] is True, reply
     installed = {

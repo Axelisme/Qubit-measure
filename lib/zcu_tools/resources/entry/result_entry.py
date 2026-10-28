@@ -414,7 +414,8 @@ class ResultEntry:
         PointView using the same resolved result/database roots. Reload published
         point and module_cfg and renew creation time. Copy aliases.yaml from
         setup when seeding, or from the source point when cloning, only if present.
-        Missing source aliases stay absent, without setup fallback during clone.
+        Missing source aliases or library stay absent, without setup fallback
+        during clone. Seeding without clone_from creates a header-only library.
         All alias tables remain independent after creation. Point values and
         opaque metadata copy verbatim. Library Specs copy without source records,
         ledger events or attachments. Invalid disk Specs are skipped in the copy;
@@ -517,9 +518,9 @@ class ResultEntry:
     def use_point(self, label: str) -> PointView:
         """Load one complete point and return an independently bound view.
 
-        label follows new_point's single-segment path rules. Both point.yaml and
-        module_cfg.yaml must exist; the latter is not parsed here. Invalid labels
-        raise ValueError. Missing required documents raise MissingPointError,
+        label follows new_point's single-segment path rules. Only point.yaml
+        must exist; module_cfg.yaml is neither required nor parsed here. Invalid
+        labels raise ValueError. Missing point.yaml raises MissingPointError,
         a FileNotFoundError subclass; other I/O and reference errors propagate. Original
         models apply their required fields, defaults and validators. Schema
         ValidationError becomes ValueError with the full document path and original
@@ -529,12 +530,10 @@ class ResultEntry:
         """
         directory = _entry_path(self._result_path / "points", label)
         source = directory / "point.yaml"
-        module = directory / "module_cfg.yaml"
-        for required in (module, source):
-            try:
-                required.stat()
-            except FileNotFoundError as error:
-                raise MissingPointError(required) from error
+        try:
+            source.stat()
+        except FileNotFoundError as error:
+            raise MissingPointError(source) from error
         return PointView(
             self._point_store(source),
             source,
@@ -545,10 +544,12 @@ class ResultEntry:
     def module_library(
         self, label: str | None = None, *, assets: WaveformAssetInfo | None = None
     ) -> ModuleLibrary:
-        """Open an existing setup or point library without consulting the ledger.
+        """Open a setup or point library without consulting the ledger.
 
         None selects entry/module_cfg.yaml; a label selects its point library
         under use_point's safe path rules. assets is optional for Spec-only use.
+        A missing point library is empty with revision None; the first nonempty
+        edit creates it. A missing setup library still raises FileNotFoundError.
         Invalid disk Specs are skipped and reported by snapshot.invalid_entries.
         Header/container/I/O errors propagate. Opening never writes or creates
         files, reads point/assets, or selects an active point. Drafts stay strict.
@@ -560,7 +561,9 @@ class ResultEntry:
             if label is None
             else _entry_path(self._result_path / "points", label)
         )
-        return ModuleLibrary(directory / "module_cfg.yaml", assets=assets)
+        return ModuleLibrary(
+            directory / "module_cfg.yaml", assets=assets, allow_absent=label is not None
+        )
 
     def _validate_parameter_read(self, document: YamlMap, source: Path) -> None:
         validate_parameter_header(document, source=source)

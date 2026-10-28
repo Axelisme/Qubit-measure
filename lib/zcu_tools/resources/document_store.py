@@ -1,4 +1,4 @@
-"""Typed optimistic transactions over an existing round-trip YAML document.
+"""Typed optimistic transactions over a round-trip YAML document.
 
 Each store owns an independent memory snapshot. ``snapshot`` never reads disk;
 ``edit`` reloads under short entry/commit locks and rejects nested transactions.
@@ -62,7 +62,7 @@ class DocumentRevision:
     path is the absolute owner file path. revision is its raw bytes' SHA-256
     hex digest. Store documents are validated; aliases may retain an observed
     content error, so their hash does not imply validity. None denotes an absent
-    optional aliases file only.
+    optional file, including an opt-in absent store document.
     """
 
     path: Path
@@ -110,6 +110,8 @@ class ConflictError(RuntimeError):
     source is the YAML path; path is a tuple of unchanged mapping keys.
     original/current are the normalized values at that path, or the absent-key
     marker displayed as "<missing>". Null is None, distinct from that marker.
+    For external creation against an absent document, path is (), original is
+    absent and current is the competing raw-byte SHA-256, without parsing it.
     """
 
     def __init__(
@@ -459,7 +461,8 @@ class DocumentStore[T: BaseModel]:
 
     model T owns the document shape; format identifies its persisted artifact.
     This store owns normalization, raw-node preservation and single-file
-    replacement. It never creates missing documents or watches for changes.
+    replacement. Missing documents require an explicit absent snapshot.
+    It never watches files.
     A snapshot is memory-only; edit/refresh reload disk. Observers see published
     state after unlock and cannot roll back a completed write.
     """
@@ -476,10 +479,11 @@ class DocumentStore[T: BaseModel]:
         validate: Callable[[T], None] | None = None,
         read_normalize: Callable[[YamlMap, FormatVersion], YamlMap] | None = None,
         read_validate: Callable[[YamlMap], None] | None = None,
+        absent_document: T | None = None,
         lock_path: Path | None = None,
         lock_timeout: float = 10.0,
     ) -> None:
-        """Open an existing UTF-8 YAML mapping and validate its initial snapshot.
+        """Open a UTF-8 YAML mapping and validate its initial snapshot.
 
         path names the document, not its directory. model is the BaseModel class
         for its full shape, including format and format_version fields. format
@@ -491,7 +495,7 @@ class DocumentStore[T: BaseModel]:
         Values use the same units in the document and typed model. Unit metadata
         belongs to the caller's schema and is not interpreted here. validate
         receives each typed model after schema validation and may raise to reject it.
-        Disk reads stat and hash the complete bytes. Unchanged content reuses a
+        Disk reads hash the complete bytes. Unchanged content reuses a
         detached validated snapshot without rerunning schema or validation.
         read_normalize optionally transforms a detached disk mapping before model
         validation. It never changes disk bytes and never runs on authored drafts.
@@ -500,6 +504,9 @@ class DocumentStore[T: BaseModel]:
         refresh validate the header and this structural callback, not model T.
         content() exposes that content; snapshot() explicitly requests full T.
         Edits and strict refresh always retain full model/validate checks.
+        absent_document optionally supplies the full empty document when path is
+        missing, with revision None and no disk writes. It requires typed reads
+        (no read_validate). Nonempty edits create the file; its parent must exist.
 
         lock_path overrides the per-user runtime lock returned by lock_path_for(path).
         The default creates the runtime lock directory on demand.
@@ -513,6 +520,13 @@ class DocumentStore[T: BaseModel]:
         creation under a caller-held lock. Writers must replace atomically.
 
         """
+        if absent_document is not None and read_validate is not None:
+            raise ValueError("absent_document requires typed reads")
+        self._absent_document = (
+            absent_document.model_copy(deep=True)
+            if absent_document is not None
+            else None
+        )
         self._path = path.resolve()
         self._model = model
         self._format = format
@@ -591,6 +605,8 @@ class DocumentStore[T: BaseModel]:
         document values. A conflict rejects all changes; body/schema/validate/I/O errors
         do not publish a draft. Nested edits on this store raise RuntimeError.
         Missing, null, deleted and in-place default changes remain distinct.
+        An absent installed document rejects external creation before entry or
+        commit with ConflictError; refresh explicitly adopts an external file.
 
         A successful empty edit adopts the latest disk snapshot without rewriting
         or notifying. Nonempty edits notify after publication and outermost unlock;
@@ -601,12 +617,13 @@ class DocumentStore[T: BaseModel]:
         self._editing = True
         try:
             with self.locked():
-                _, base_normalized, base, _ = self._read()
+                self._check_absent_revision(self._revision)
+                _, base_normalized, base, base_revision = self._read()
             draft = base.model_copy(deep=True)
             yield draft
             with self.locked():
                 document, snapshot, paths, revision = self._commit(
-                    base_normalized, base, draft
+                    base_normalized, base, draft, base_revision
                 )
                 self._snapshot = snapshot
                 self._document = document
@@ -616,13 +633,34 @@ class DocumentStore[T: BaseModel]:
         if paths:
             self._dispatch_change(DocumentChange(self._path, paths, "commit"))
 
+    def _check_absent_revision(
+        self, revision: str | None, *, proposed: YamlValue = None
+    ) -> None:
+        """Reject external creation before parsing or merging its content."""
+        if revision is not None:
+            return
+        try:
+            content = self._path.read_bytes()
+        except FileNotFoundError:
+            return
+        raise ConflictError(
+            self._path,
+            (),
+            _Missing.VALUE,
+            sha256(content).hexdigest(),
+            proposed=(
+                _projection(self._absent_document) if proposed is None else proposed
+            ),
+        )
+
     def _commit(
-        self, base_normalized: YamlMap, base: T, draft: T
-    ) -> tuple[YamlMap, T, tuple[FieldPath, ...], str]:
+        self, base_normalized: YamlMap, base: T, draft: T, base_revision: str | None
+    ) -> tuple[YamlMap, T, tuple[FieldPath, ...], str | None]:
         """Merge canonical-path edits, validate, then patch raw nodes atomically."""
         base_values = _projection(base)
         draft_values = _draft_projection(base, draft)
         patches = tuple(_changes(base_values, draft_values))
+        self._check_absent_revision(base_revision, proposed=draft_values)
         document, normalized, snapshot, revision = self._read()
         if not patches:
             return document, snapshot, (), revision
@@ -710,15 +748,23 @@ class DocumentStore[T: BaseModel]:
                     proposed=_lookup(draft, prefix),
                 )
 
-    def _read(self, *, strict: bool = False) -> tuple[YamlMap, YamlMap, T, str]:
+    def _read(self, *, strict: bool = False) -> tuple[YamlMap, YamlMap, T, str | None]:
         """Read raw nodes, normalized YAML values and a public typed snapshot.
 
         No lock is acquired here. Edit/refresh callers own their lock scope;
         initial construction may run while a different owner already holds it.
         """
-        size = self._path.stat().st_size
-        original = self._path.read_bytes()
-        key = (size, sha256(original).digest())
+        try:
+            original = self._path.read_bytes()
+        except FileNotFoundError:
+            if self._absent_document is None:
+                raise
+            document = TypeAdapter(YamlMap).validate_python(
+                _projection(self._absent_document)
+            )
+            normalized, snapshot = self._model_snapshot(document)
+            return document, normalized, snapshot, None
+        key = (len(original), sha256(original).digest())
         if (
             not strict
             and key == self._validated_key
