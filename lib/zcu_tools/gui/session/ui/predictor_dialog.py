@@ -891,7 +891,7 @@ class PredictorDialog(QDialog):
         """Refresh the curve view, then settle table values only after successful rendering."""
         self._parameter_editor.refresh_errors()
         try:
-            inputs = self._trial.inputs()
+            inputs = self._trial.inputs(for_curves=True)
             coordinates = inputs.curve_coordinates()
             params = inputs.params
         except PredictorInputError as exc:

@@ -17,6 +17,7 @@ from zcu_tools.resources.entry import ResultEntry, component_registry
 from zcu_tools.resources.predictor_file import PredictorFlux
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 from zcu_tools.simulate.fluxonium.predict import FluxoniumParams
+from zcu_tools.simulate.predictor import PredictorInputError
 from zcu_tools.simulate.transmon import TransmonParams
 
 import tests.gui._component_fakes as components
@@ -92,6 +93,78 @@ def test_blank_parameters_can_be_completed_cleared_and_corrected(
     finally:
         dialog.close()
         dialog.deleteLater()
+
+
+@pytest.mark.parametrize(
+    "flux, values, status",
+    [
+        (None, {}, "Load a predictor file to set the flux frame"),
+        (PredictorFlux(0.2, {}, {}), {}, "Select a horizontal axis instrument"),
+        (
+            PredictorFlux(0.2, {"coil": 1.0}, {"coil": "A"}),
+            {},
+            "coil: enter a finite number",
+        ),
+        (
+            PredictorFlux(0.2, {"coil": 1.0, "bias": 2.0}, {"coil": "A", "bias": "V"}),
+            {"coil": 0.0},
+            "bias: enter a finite number",
+        ),
+    ],
+    ids=["missing-frame", "missing-axis", "missing-axis-value", "missing-fixed-value"],
+)
+def test_curve_status_prioritizes_coordinates_but_scalar_prioritizes_energy(
+    qapp,
+    tmp_path: Path,
+    flux: PredictorFlux | None,
+    values: dict[str, float],
+    status: str,
+) -> None:
+    dialog = PredictorDialog(
+        PredictorControlFacet(SyntheticCurves()),
+        params=FluxoniumParams(float("nan"), 1.0, 1.0),
+    )
+    if flux is not None:
+        dialog.set_flux(flux, values)
+    evidence = Path(os.environ.get("PREDICTOR_PRECEDENCE_EVIDENCE", str(tmp_path)))
+    case = (
+        "missing-frame"
+        if flux is None
+        else "missing-axis"
+        if not flux.period
+        else "missing-axis-value"
+        if not values
+        else "missing-fixed-value"
+    )
+    energy_error = "EJ: enter a finite number or leave blank."
+    try:
+        dialog.show()
+        qapp.processEvents()
+        ui = ComponentDriver(dialog)
+        ui.screenshot(evidence / case / "01-invalid-energy-and-coordinates.png")
+        assert ui.observe(object_name="predictor_status").text == status
+        assert ui.observe(object_name="predictor_input_EJ").tooltip == energy_error
+        assert all(axis.visible_curves == 0 for axis in ui.plots().axes)
+        with pytest.raises(PredictorInputError, match="^EJ:") as failure:
+            dialog.predict_frequency()
+        assert str(failure.value) == energy_error
+
+        ui.enter_text(object_name="predictor_input_EJ", value="5.0", commit=False)
+        qt_until(
+            lambda: ui.observe(object_name="predictor_status").text == status,
+            label="coordinate error after energy correction",
+        )
+        ui.screenshot(evidence / case / "02-energy-corrected.png")
+        assert (
+            ui.observe(object_name="predictor_input_EJ").tooltip
+            == "Leave blank for unknown."
+        )
+        assert all(axis.visible_curves == 0 for axis in ui.plots().axes)
+        ui.click("Close")
+    finally:
+        dialog.close()
+        dialog.deleteLater()
+        qapp.processEvents()
 
 
 def test_dialog_logs_unexpected_value_error_with_traceback(qapp, caplog) -> None:

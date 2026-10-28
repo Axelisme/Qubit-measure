@@ -243,11 +243,24 @@ class PredictorTrial:
         """Return all native values; blank/invalid drafts raise a named error."""
         return {name: _number(text, name) for name, text in self._device_texts.items()}
 
-    def inputs(self) -> TrialInputs:
-        """Parse a detached query snapshot; missing/invalid inputs raise named errors."""
-        return TrialInputs(
-            self.parameters(), self.flux().to_frame(), self.device_values(), self._axis
-        )
+    def inputs(self, *, for_curves: bool = False) -> TrialInputs:
+        """Parse a detached query snapshot; invalid drafts raise named errors.
+
+        Scalar queries validate parameters, frame, then native values. Curve
+        queries (for_curves=True) validate frame, axis, native values, then
+        parameters, preserving the curve status precedence when drafts conflict.
+        """
+        if for_curves:
+            frame = self.flux().to_frame()
+            axis = self.axis_device()
+            values = self.device_values()
+            params = self.parameters()
+        else:
+            params = self.parameters()
+            frame = self.flux().to_frame()
+            values = self.device_values()
+            axis = self._axis
+        return TrialInputs(params, frame, values, axis)
 
     def predict_frequency(self, transition: tuple[int, int] = (0, 1)) -> float:
         """Return MHz for a level pair at current native values; query failures propagate."""
@@ -259,7 +272,7 @@ class PredictorTrial:
 
     def curve_coordinates(self) -> CurveCoordinates:
         """Return current scan coordinates; invalid drafts or a missing axis raise."""
-        return self.inputs().curve_coordinates()
+        return self.inputs(for_curves=True).curve_coordinates()
 
     def row_values(
         self, transitions: tuple[tuple[int, int], ...], marker_value: float

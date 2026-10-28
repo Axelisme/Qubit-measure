@@ -101,9 +101,9 @@ def test_table_batch_and_curve_coordinates_share_explicit_inputs(valid: bool) ->
     class CountedTrial(PredictorTrial):
         input_calls = 0
 
-        def inputs(self) -> TrialInputs:
+        def inputs(self, *, for_curves: bool = False) -> TrialInputs:
             self.input_calls += 1
-            return super().inputs()
+            return super().inputs(for_curves=for_curves)
 
     service = RecordingQueries()
     trial = CountedTrial(PredictorControlFacet(service))
