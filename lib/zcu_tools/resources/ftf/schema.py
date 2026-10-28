@@ -391,12 +391,15 @@ class Numerics(RoundPacing):
     time_scale: finite nonnegative physical-time multiplier per binding round,
     default 1.0; zero disables pacing.
     telemetry: local acquire-summary policy; omitted settings enable logging.
+    projection_weight_floor: finite probability in [0, 1), default 1e-9;
+        outcome histories below it are removed and survivors renormalized.
     """
 
     truncation: Truncation
     solver: Solver
     seed: Index | None = None
     telemetry: TelemetrySettings = Field(default_factory=TelemetrySettings)
+    projection_weight_floor: Annotated[Finite, Field(ge=0, lt=1)] = 1e-9
 
 
 class SquidDrift(Values):

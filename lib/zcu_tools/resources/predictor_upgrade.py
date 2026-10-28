@@ -10,6 +10,7 @@ from uuid import uuid4
 
 from filelock import FileLock, Timeout
 
+from zcu_tools.resources.file_lock import lock_path_for
 from zcu_tools.resources.predictor_file import (
     PredictorFile,
     save_predictor_file,
@@ -40,8 +41,9 @@ def upgrade_predictor_files(
     """Preview or explicitly upgrade exact predictor JSON paths independently.
 
     Default dry-run validates/converts without creating files or locks. Apply
-    re-reads under a sidecar lock, backs up original bytes exclusively, and uses
-    the v2 owner's atomic writer. Current v2 files validate then skip unchanged.
+    re-reads under a per-user runtime lock. It backs up original bytes exclusively,
+    then writes atomically through the v2 owner. Current v2 files validate then
+    skip unchanged.
     Malformed/unsupported/incomplete v1 input, I/O and lock failures become
     rejected results without stopping siblings. Unexpected failures propagate.
     """
@@ -52,7 +54,7 @@ def _upgrade_file(path: Path, *, apply: bool) -> PredictorUpgradeResult:
     backup: Path | None = None
     try:
         path.parent.stat()
-        lock = FileLock(f"{path}.lock", timeout=5) if apply else nullcontext()
+        lock = FileLock(str(lock_path_for(path)), timeout=5) if apply else nullcontext()
         with lock:
             original = path.read_bytes()
             document: object = json.loads(original.decode("utf-8"))
