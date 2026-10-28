@@ -32,7 +32,15 @@ uv run --directory /absolute/checkout --no-sync -- python scripts/upgrade_parame
   /data/result/device --apply
 ```
 
-每份合法候選先取得同名 `.lock`，鎖最多等待 5 秒。Runner 在鎖內重讀來源並驗證整條鏈，再用獨立檔名保存完整原 bytes。備份路徑是原檔名加唯一識別碼與 `.bak`。備份成功才以同目錄 temporary 檔原子替換來源。輸出列出備份路徑與 `applied`，替換失敗也保留並列出已完成的備份。
+Apply 先檢查備份位置，再取得 [per-user runtime lock](../lib/zcu_tools/resources/README.md#檔案鎖)，最多等待 5 秒。Runner 在鎖內重讀來源並驗證整條鏈，再保存完整原 bytes。備份成功才以同目錄 temporary 檔原子替換來源。輸出列出備份路徑與 `applied`，替換失敗也保留並列出已完成的備份。
+
+### 備份位置
+
+Component、predictor、record 與 processed spectrum 升級共用備份規則。工具從來源向上找最近的 `result` 或 `Database` 目錄，其父目錄是資料專案根。備份位於 `<專案根>-backup/`，不是工具 checkout 旁，也不寫進資料項目。它鏡像來源相對於專案根的路徑，並加 UUID 防止覆寫。例如 `/data/project/result/device/setup.yaml` 備份為 `/data/project-backup/result/device/setup.yaml.<UUID>.bak`。此根目錄也供 storage migration 使用。
+
+`--backup-root /absolute/archive` 可覆寫備份根目錄。有專案根時仍鏡像相對路徑。來源不在 `result`／`Database` 下時，apply 必須提供此選項，備份直接放在 `<backup-root>/<原檔名>.<UUID>.bak`。例如升級 checkout 中的 entry template 時，指定 checkout 外的備份目錄。公開 runner 接受對應的 `backup_root=Path(...)`。
+
+工具先解析 symlink，再拒絕位於任何 `result`／`Database` 資料樹內的備份根目錄。Standalone 來源也拒絕位於來源父目錄內的備份。鏡像子目錄的 symlink 不得跳出備份根目錄。這些拒絕在建立鎖或 temporary 前發生。專案內其他位置可作覆寫目錄。Dry-run 不需要建立備份位置。
 
 `rejected` 會列出未通過的檢查。該文件不替換，其餘文件照常處理。有任何拒絕，命令回傳 1；全部成功或跳過，回傳 0。已是 current 的合法文件不重寫、不再備份，重跑結果是 `skipped`。這不是多檔交易，也不保證掉電後整批一致。
 

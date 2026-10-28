@@ -40,16 +40,13 @@ def load_t1_curve_context(
     samples_filename is relative to result_dir, or an absolute CSV path.
     fluxs supplies one normalized Phi0 coordinate per CSV row, in row order.
     CSV flux/frame columns are ignored. Require numeric t1_us; missing freq_mhz
-    and t1_err_us become NaN. Ignore unused columns. Create image_dir (default
-    result_dir/t1_curve) and return inputs with preview_rows initial rows.
+    and t1_err_us become NaN. Ignore unused columns. Resolve image_dir (default
+    result_dir/t1_curve) without creating it; return preview_rows initial rows.
     Missing files/parameters, missing required columns or nonnumeric used
     values raise with the file or column name. Non-1D, nonfinite or wrong-length
     fluxs raise ValueError before any analysis.
     """
     resolved_image_dir = image_dir or os.path.join(result_dir, "t1_curve")
-    os.makedirs(result_dir, exist_ok=True)
-    os.makedirs(resolved_image_dir, exist_ok=True)
-
     params_file = QubitParams(os.path.join(result_dir, "params.json"), readonly=True)
     fit_inputs = params_file.require_fluxdep_fit()
     samples_df = pd.read_csv(os.path.join(result_dir, samples_filename))

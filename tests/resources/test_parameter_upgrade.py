@@ -20,6 +20,13 @@ from zcu_tools.resources.parameter_upgrade import (
 )
 
 
+@pytest.fixture
+def data_dir(tmp_path: Path) -> Path:
+    path = tmp_path / "project" / "result"
+    path.mkdir(parents=True)
+    return path
+
+
 def test_schema_hint_previews_and_applies_source_or_caller_target() -> None:
     policy = ParameterSchemaPolicy(
         2, ("uv", "run", "--no-sync", "--", "python", "scripts/upgrade_parameters.py")
@@ -92,14 +99,14 @@ def test_runner_orders_steps_and_preserves_caller_input() -> None:
 
 
 def test_cli_reports_conversion_notes_outside_yaml_payload(
-    tmp_path: Path, rename_plan: UpgradePlan, capsys: pytest.CaptureFixture[str]
+    data_dir: Path, rename_plan: UpgradePlan, capsys: pytest.CaptureFixture[str]
 ) -> None:
     def transform(document: ParameterDocument) -> ParameterDocument:
         converted = rename_plan.steps[0].transform(document)
         return replace(converted, notes=("new: rename the declared placeholder",))
 
     plan = replace(rename_plan, steps=(UpgradeStep(1, transform),))
-    path = tmp_path / "point.yaml"
+    path = data_dir / "point.yaml"
     path.write_text("schema_version: 1\nold: 7\n", encoding="utf-8")
     assert main([str(path)], plan=plan) == 0
     assert "new: rename the declared placeholder" in capsys.readouterr().out
@@ -192,9 +199,9 @@ def rename_plan() -> UpgradePlan:
 
 
 def test_file_dry_run_reports_changes_and_apply_backs_up_before_idempotent_rerun(
-    tmp_path: Path, rename_plan: UpgradePlan
+    data_dir: Path, rename_plan: UpgradePlan
 ) -> None:
-    path = tmp_path / "point.yaml"
+    path = data_dir / "point.yaml"
     original = b"schema_version: 1\nold: 7\nkeep: [null, x]\n"
     path.write_bytes(original)
     source = UpgradeSource(path, point="bias-a")
@@ -207,12 +214,17 @@ def test_file_dry_run_reports_changes_and_apply_backs_up_before_idempotent_rerun
         ("schema_version",),
     }
     assert path.read_bytes() == original
-    assert list(tmp_path.iterdir()) == [path]
+    assert list(data_dir.iterdir()) == [path]
     (applied,) = upgrade_files((source,), plan=rename_plan, apply=True)
     assert applied.status == "applied"
     assert not list(path.parent.glob("*.lock"))
     assert applied.backup_path is not None
     assert applied.backup_path.read_bytes() == original
+    assert (
+        applied.backup_path.parent
+        == data_dir.parent.with_name("project-backup") / "result"
+    )
+    assert set(data_dir.iterdir()) == {path}
     assert YAML(typ="safe").load(path) == {
         "schema_version": 2,
         "new": 7,
@@ -226,13 +238,13 @@ def test_file_dry_run_reports_changes_and_apply_backs_up_before_idempotent_rerun
 
 
 def test_cli_isolates_corrupt_and_partial_documents_and_defaults_to_dry_run(
-    tmp_path: Path, rename_plan: UpgradePlan, capsys: pytest.CaptureFixture[str]
+    data_dir: Path, rename_plan: UpgradePlan, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    good = tmp_path / "bias-a.yaml"
-    partial = tmp_path / "bias-b.yaml"
-    corrupt = tmp_path / "bias-c.yaml"
-    malformed = tmp_path / "syntax.yaml"
-    current_bad = tmp_path / "current-bad.yaml"
+    good = data_dir / "bias-a.yaml"
+    partial = data_dir / "bias-b.yaml"
+    corrupt = data_dir / "bias-c.yaml"
+    malformed = data_dir / "syntax.yaml"
+    current_bad = data_dir / "current-bad.yaml"
     inputs = {
         good: b"old: 7\nkeep: untouched\n",
         partial: b"schema_version: 1\nold: 7\nnew: 7\n",
@@ -250,7 +262,7 @@ def test_cli_isolates_corrupt_and_partial_documents_and_defaults_to_dry_run(
     assert all(str(path) in output for path in inputs)
     assert "v1: require old=7 and no new" in output
     assert "v2: require new=7 and no old" in output
-    assert set(tmp_path.iterdir()) == set(inputs)
+    assert set(data_dir.iterdir()) == set(inputs)
     assert all(path.read_bytes() == content for path, content in inputs.items())
     assert main(["--apply", *argv], plan=rename_plan) == 1
     output = capsys.readouterr().out
@@ -269,9 +281,9 @@ def test_cli_isolates_corrupt_and_partial_documents_and_defaults_to_dry_run(
 
 
 def test_component_cli_expands_entry_for_preview_and_apply(
-    tmp_path: Path, rename_plan: UpgradePlan, capsys: pytest.CaptureFixture[str]
+    data_dir: Path, rename_plan: UpgradePlan, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    root = tmp_path / "entry with spaces"
+    root = data_dir / "entry with spaces"
     sources = (
         root / "setup.yaml",
         root / "points" / "bias-a" / "point.yaml",
@@ -302,7 +314,12 @@ def test_component_cli_expands_entry_for_preview_and_apply(
             "new": 7,
             "keep": "untouched",
         }
-        backups = list(path.parent.glob(f"{path.name}.*.bak"))
+        backups = list(
+            (
+                data_dir.parent.with_name("project-backup")
+                / path.parent.relative_to(data_dir.parent)
+            ).glob(f"{path.name}.*.bak")
+        )
         assert len(backups) == 1
         assert backups[0].read_bytes() == original
         assert str(backups[0]) in output
@@ -310,22 +327,22 @@ def test_component_cli_expands_entry_for_preview_and_apply(
 
 
 def test_component_cli_rejects_non_entry_directory(
-    tmp_path: Path, rename_plan: UpgradePlan, capsys: pytest.CaptureFixture[str]
+    data_dir: Path, rename_plan: UpgradePlan, capsys: pytest.CaptureFixture[str]
 ) -> None:
     with pytest.raises(SystemExit) as error:
-        main([str(tmp_path)], plan=rename_plan)
+        main([str(data_dir)], plan=rename_plan)
     assert error.value.code == 2
     diagnostic = capsys.readouterr().err
-    assert str(tmp_path) in diagnostic
+    assert str(data_dir) in diagnostic
     assert "not an entry directory" in diagnostic
     assert "setup.yaml" in diagnostic
-    assert list(tmp_path.iterdir()) == []
+    assert list(data_dir.iterdir()) == []
 
 
 def test_component_cli_prints_caller_assumptions_before_file_results(
-    tmp_path: Path, rename_plan: UpgradePlan, capsys: pytest.CaptureFixture[str]
+    data_dir: Path, rename_plan: UpgradePlan, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    path = tmp_path / "point.yaml"
+    path = data_dir / "point.yaml"
     path.write_text("old: 7\n", encoding="utf-8")
     plan = replace(rename_plan, notes=("Reference points are assumed; recalibrate.",))
     assert main([str(path)], plan=plan) == 0
@@ -335,9 +352,9 @@ def test_component_cli_prints_caller_assumptions_before_file_results(
 
 
 def test_file_runner_carries_source_context_across_fresh_step_outputs(
-    tmp_path: Path,
+    data_dir: Path,
 ) -> None:
-    source = tmp_path / "setup.yaml"
+    source = data_dir / "setup.yaml"
     source.write_text("schema_version: 1\n", encoding="utf-8")
     seen: list[tuple[Path | None, int]] = []
 
@@ -357,19 +374,23 @@ def test_file_runner_carries_source_context_across_fresh_step_outputs(
 
 @pytest.mark.parametrize("fail_replace", [False, True])
 def test_apply_finishes_backup_before_replace_and_retains_it_on_failure(
-    tmp_path: Path,
+    data_dir: Path,
     rename_plan: UpgradePlan,
     monkeypatch: pytest.MonkeyPatch,
     fail_replace: bool,
 ) -> None:
-    source = tmp_path / "point.yaml"
+    source = data_dir / "point.yaml"
     original = b"schema_version: 1\nold: 7\n"
     source.write_bytes(original)
     replace = Path.replace
     backups: list[Path] = []
 
     def observed_replace(temporary: Path, destination: Path) -> Path:
-        backups.extend(tmp_path.glob("point.yaml.*.bak"))
+        backups.extend(
+            (data_dir.parent.with_name("project-backup") / "result").glob(
+                "point.yaml.*.bak"
+            )
+        )
         assert len(backups) == 1
         assert backups[0].read_bytes() == original
         assert destination.read_bytes() == original
@@ -386,10 +407,100 @@ def test_apply_finishes_backup_before_replace_and_retains_it_on_failure(
         assert source.read_bytes() == original
     else:
         assert result.status == "applied"
-    assert set(tmp_path.iterdir()) == {
-        source,
-        backups[0],
-    }
+    assert set(data_dir.iterdir()) == {source}
+
+
+def test_cli_backup_override_mirrors_project_path(
+    data_dir: Path, rename_plan: UpgradePlan
+) -> None:
+    source = data_dir / "point.yaml"
+    original = b"old: 7\n"
+    source.write_bytes(original)
+    backup_root = data_dir.parent / "archive"
+    assert (
+        main(
+            [str(source), "--apply", "--backup-root", str(backup_root)],
+            plan=rename_plan,
+        )
+        == 0
+    )
+    (backup,) = (backup_root / "result").glob("point.yaml.*.bak")
+    assert backup.read_bytes() == original
+    assert list(data_dir.iterdir()) == [source]
+
+
+def test_standalone_apply_requires_override_and_can_restore_original(
+    tmp_path: Path, rename_plan: UpgradePlan
+) -> None:
+    source_dir = tmp_path / "standalone"
+    source_dir.mkdir()
+    source = source_dir / "point.yaml"
+    original = b"old: 7\n"
+    source.write_bytes(original)
+    sources = (UpgradeSource(source),)
+    (preview,) = upgrade_files(sources, plan=rename_plan)
+    assert preview.status == "dry-run"
+    (rejected,) = upgrade_files(sources, plan=rename_plan, apply=True)
+    assert rejected.status == "rejected"
+    assert "--backup-root" in (rejected.error or "")
+    assert set(tmp_path.rglob("*")) == {source_dir, source}
+    assert source.read_bytes() == original
+    backup_root = tmp_path / "archive"
+    (applied,) = upgrade_files(
+        sources, plan=rename_plan, apply=True, backup_root=backup_root
+    )
+    assert applied.status == "applied"
+    assert applied.backup_path is not None
+    assert applied.backup_path.parent == backup_root
+    source.write_bytes(applied.backup_path.read_bytes())
+    assert source.read_bytes() == original
+
+
+@pytest.mark.parametrize(
+    "unsafe", ["result", "Database", "symlink", "mirror-symlink", "standalone"]
+)
+def test_unsafe_backup_destination_rejects_before_writes(
+    tmp_path: Path, rename_plan: UpgradePlan, unsafe: str
+) -> None:
+    data_dir = tmp_path / "project" / "result"
+    data_dir.mkdir(parents=True)
+    source = data_dir / "point.yaml"
+    backup_root = tmp_path / "archive"
+    if unsafe == "standalone":
+        source = tmp_path / "point.yaml"
+        backup_root = tmp_path / "nested"
+    elif unsafe == "symlink":
+        backup_root.symlink_to(data_dir, target_is_directory=True)
+    elif unsafe == "mirror-symlink":
+        backup_root.mkdir()
+        (backup_root / "result").symlink_to(data_dir, target_is_directory=True)
+    else:
+        backup_root = tmp_path / "other" / unsafe / "backups"
+    source.write_bytes(b"old: 7\n")
+    before = set(tmp_path.rglob("*"))
+    (result,) = upgrade_files(
+        (UpgradeSource(source),), plan=rename_plan, apply=True, backup_root=backup_root
+    )
+    assert result.status == "rejected"
+    assert "backup" in (result.error or "")
+    assert result.backup_path is None
+    assert source.read_bytes() == b"old: 7\n"
+    assert set(tmp_path.rglob("*")) == before
+
+
+def test_database_source_uses_project_sibling_backup(
+    tmp_path: Path, rename_plan: UpgradePlan
+) -> None:
+    source = tmp_path / "project" / "Database" / "entry" / "point.yaml"
+    source.parent.mkdir(parents=True)
+    source.write_bytes(b"old: 7\n")
+    (result,) = upgrade_files((UpgradeSource(source),), plan=rename_plan, apply=True)
+    assert result.status == "applied"
+    assert result.backup_path is not None
+    assert (
+        result.backup_path.parent == tmp_path / "project-backup" / "Database" / "entry"
+    )
+    assert result.backup_path.read_bytes() == b"old: 7\n"
 
 
 def test_no_policy_default_or_missing_upgrade_step_is_inferred() -> None:
