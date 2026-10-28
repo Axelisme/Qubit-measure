@@ -633,7 +633,9 @@ class DocumentStore[T: BaseModel]:
         if paths:
             self._dispatch_change(DocumentChange(self._path, paths, "commit"))
 
-    def _check_absent_revision(self, revision: str | None) -> None:
+    def _check_absent_revision(
+        self, revision: str | None, *, proposed: YamlValue = None
+    ) -> None:
         """Reject external creation before parsing or merging its content."""
         if revision is not None:
             return
@@ -646,7 +648,9 @@ class DocumentStore[T: BaseModel]:
             (),
             _Missing.VALUE,
             sha256(content).hexdigest(),
-            proposed=_projection(self._absent_document),
+            proposed=(
+                _projection(self._absent_document) if proposed is None else proposed
+            ),
         )
 
     def _commit(
@@ -656,7 +660,7 @@ class DocumentStore[T: BaseModel]:
         base_values = _projection(base)
         draft_values = _draft_projection(base, draft)
         patches = tuple(_changes(base_values, draft_values))
-        self._check_absent_revision(base_revision)
+        self._check_absent_revision(base_revision, proposed=draft_values)
         document, normalized, snapshot, revision = self._read()
         if not patches:
             return document, snapshot, (), revision

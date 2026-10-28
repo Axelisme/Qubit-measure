@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 from zcu_tools.cfg_model import ConstWaveformCfg, PulseSpec
 from zcu_tools.core.waveform_format import WaveformSamples
+from zcu_tools.resources.context.library import ModuleLibraryDocument
 from zcu_tools.resources.document_store import ConflictError
 from zcu_tools.resources.entry import (
     ResultEntry,
@@ -101,8 +102,15 @@ def test_absent_library_edit_conflicts_with_external_creation(
             if created_during_edit:
                 path.write_bytes(external)
 
-    with pytest.raises(ConflictError):
+    with pytest.raises(ConflictError) as caught:
         save_library()
+    if created_during_edit:
+        proposed = ModuleLibraryDocument.model_validate(
+            caught.value.proposed_value.value
+        )
+        assert proposed.components["Q1"].waveforms["base"] == ConstWaveformCfg(
+            length=0.05
+        )
     assert path.read_bytes() == external
     assert library.document_revision.revision is None
     assert library.snapshot().waveform_keys() == ()
