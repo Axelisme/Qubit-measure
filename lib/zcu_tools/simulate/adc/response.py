@@ -91,7 +91,9 @@ class ConditionalReadout:
         ConditionalSums.sums has shape (contents, reads, states, 2), after
         physical delay/demodulation/conjugation/gain/phase/offset. Traces have shape
         (contents, reads, states, samples, 2) only if batch.include_traces;
-        otherwise traces is None. No initial-state or noise draw occurs.
+        otherwise traces is None. Events with no grids emit no read column;
+        event_indices retains each observed read's original logical event index.
+        No initial-state or noise draw occurs.
         Inputs are not mutated; populations are never clipped or normalized.
         Raise ValueError for incompatible grids/sample counts or invalid
         callbacks; RuntimeError for solver failure or invalid final populations.
@@ -99,6 +101,42 @@ class ConditionalReadout:
         also require equal sample counts across reads. The existing single-grid
         response continues to use DOP853.
         """
+        _sample_counts(batch)
+        responses = tuple(
+            self._event_responses(
+                ReadoutBatch(
+                    batch.model,
+                    tuple((events[index],) for events in batch.events),
+                    batch.content_index,
+                    batch.include_traces,
+                )
+            )
+            for index in range(len(batch.events[0]))
+            if batch.events[0][index].grids
+        )
+        traces = None
+        if batch.include_traces:
+            traces = np.concatenate(
+                [
+                    response.traces
+                    for response in responses
+                    if response.traces is not None
+                ],
+                axis=1,
+            )
+        return ConditionalSums(
+            np.concatenate([response.sums for response in responses], axis=1),
+            np.concatenate([response.sample_counts for response in responses]),
+            traces,
+            tuple(
+                index
+                for index, event in enumerate(batch.events[0])
+                for _ in event.grids
+            ),
+        )
+
+    def _event_responses(self, batch: ReadoutBatch) -> ConditionalSums:
+        """Solve one event per content, retaining the existing content cache."""
         counts = _sample_counts(batch)
         model_key = readout_model_key(batch.model)
         solver = (
@@ -107,23 +145,30 @@ class ConditionalReadout:
             else ConditionalReadout(batch.model, rtol=self.rtol, atol=self.atol)
         )
         self._batch_integrated(solver, batch, model_key)
+        events = tuple(content[0] for content in batch.events)
         times_by_content = [
-            np.unique(np.concatenate([g.times_ns for g in grids]))
-            for grids in batch.grids
+            np.unique(np.concatenate([g.times_ns for g in event.grids]))
+            for event in events
         ]
         relative_keys = [
             np.maximum(
-                times - batch.model.receiver.time_of_flight_ns - pulses[0].start_ns,
+                times
+                - batch.model.receiver.time_of_flight_ns
+                - event.pulses[0].start_ns,
                 0.0,
             ).tobytes()
-            for pulses, times in zip(batch.pulses, times_by_content, strict=True)
+            for event, times in zip(events, times_by_content, strict=True)
         ]
         grid_uses = Counter(relative_keys)
         contents = []
         summed = []
-        for pulses, grids, times, relative_key in zip(
-            batch.pulses, batch.grids, times_by_content, relative_keys, strict=True
+        for event, times, relative_key in zip(
+            events,
+            times_by_content,
+            relative_keys,
+            strict=True,
         ):
+            pulses, grids = event.pulses, event.grids
             key = (model_key, _pulse_key(pulses), _grid_key(grids))
             flat_mux = _is_common_start_flat_mux(pulses)
             if not batch.include_traces:
@@ -171,11 +216,7 @@ class ConditionalReadout:
             contents.append(traces)
             summed.append(np.stack([trace.sum(axis=-2) for trace in traces]))
         sums = np.stack(summed)
-        dense = (
-            np.stack([np.stack(traces) for traces in contents])
-            if batch.include_traces
-            else None
-        )
+        dense = np.stack(contents) if batch.include_traces else None
         return ConditionalSums(sums, counts, dense)
 
     def _content_fields(self, pulses, times, flat_mux, constant, projected):
@@ -201,7 +242,11 @@ class ConditionalReadout:
         groups: dict[tuple[object, ...], list[int]] = {}
         keys = []
         for index, (pulses, grids) in enumerate(
-            zip(batch.pulses, batch.grids, strict=True)
+            zip(
+                tuple(events[0].pulses for events in batch.events),
+                tuple(events[0].grids for events in batch.events),
+                strict=True,
+            )
         ):
             key = (model_key, _pulse_key(pulses), _grid_key(grids))
             keys.append(key)
@@ -226,14 +271,17 @@ class ConditionalReadout:
                 tile = indices[left : left + 64]
                 results = solver._constant_line.integrated_batch_sums(
                     batch.model,
-                    tuple(batch.pulses[i][0] for i in tile),
-                    tuple(batch.grids[i] for i in tile),
+                    tuple((batch.events[i][0].pulses[0] for i in tile)),
+                    tuple((batch.events[i][0].grids for i in tile)),
                 )
                 for index, result in zip(tile, results, strict=True):
                     if result is not None:
                         sums, populations = result
                         solver._validate_solution(populations[:, None, :])
-                        self._sums[keys[index]] = (batch.pulses[index], sums)
+                        self._sums[keys[index]] = (
+                            batch.events[index][0].pulses,
+                            sums,
+                        )
 
     def _sampled_fields(self, pulses: tuple[ReadoutPulse, ...], times: RealArray):
         """Superpose known common-start envelopes, retaining ODE on guard failure."""
@@ -570,9 +618,14 @@ class ConditionalReadout:
 
 def _sample_counts(batch: ReadoutBatch) -> NDArray[np.int64]:
     """Validate shared per-read counts and equal read lengths for dense traces."""
-    counts = np.array([len(g.times_ns) for g in batch.grids[0]], dtype=np.int64)
+    counts = np.array(
+        [len(grid.times_ns) for event in batch.events[0] for grid in event.grids],
+        dtype=np.int64,
+    )
     if any(
-        [len(g.times_ns) for g in grids] != counts.tolist() for grids in batch.grids
+        [len(grid.times_ns) for event in events for grid in event.grids]
+        != counts.tolist()
+        for events in batch.events
     ):
         raise ValueError("sample counts must match across grid contents")
     if batch.include_traces and np.any(counts != counts[0]):

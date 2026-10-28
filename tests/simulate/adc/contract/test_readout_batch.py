@@ -23,7 +23,9 @@ def batch():
     pulse = adc.ReadoutPulse(0.0, 4.0, 1.0, 0.0)
     grid = adc.SampleGrid(np.arange(4.0), 0.0)
     return adc.ReadoutBatch(
-        model(), ((pulse,),), ((grid,),), np.array([0, 0], dtype=np.int64)
+        model(),
+        ((adc.ReadoutEvent((pulse,), (grid,)),),),
+        np.array([0, 0], dtype=np.int64),
     )
 
 
@@ -40,10 +42,8 @@ def test_batch_accepts_shared_content_and_optional_traces():
 @pytest.mark.parametrize(
     "change",
     [
-        {"pulses": ()},
-        {"grids": ()},
-        {"grids": ((),)},
-        {"pulses": ((),)},
+        {"events": ()},
+        {"events": ((),)},
         {"content_index": np.array([-1], dtype=np.int64)},
         {"content_index": np.array([1], dtype=np.int64)},
         {"content_index": np.array([0.5])},

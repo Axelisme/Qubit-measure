@@ -1,6 +1,6 @@
 # ADC probability and readout contracts
 
-**Last updated:** 2026-10-27 (UTC), request-local conditional solvers
+**Last updated:** 2026-10-28 (UTC), projection-conditioned read events
 
 **讀者：** framework-dev、agent。ADC 機率、讀出訊號與 interval moment 契約。
 
@@ -61,8 +61,9 @@ outside tolerance. Invalid shapes raise `ValueError`. Row validation raises
 counts rows failing the first reported rule. It returns no partial results.
 Callers can retain this count without parsing error text.
 
-`PopulationInput`, `round_statistics`, `PreparedRawShots` and `sample_traces`
-validate the same probability trace interval and require nonnegative entries.
+`PopulationInput` and `ProjectionReadout` validate the same probability trace
+interval and require nonnegative entries. `round_statistics`, `PreparedRawShots`
+and `sample_traces` take a `ProjectionReadout` as their first argument.
 They expect explicitly normalized distributions and do not normalize or clip them. Their tolerance accommodates
 numeric residuals; it does not replace explicit preparation. State ordering must
 match the readout model and conditional responses. No basis inference occurs in
@@ -144,10 +145,16 @@ before conjugation, giving the hanger model's +phi sign in microwave IQ. The
 reciprocal shared-line generator and transition rates are unchanged. This is a
 scattering-phase model, not a full impedance network or a global signal rotation.
 
-`ReadoutBatch` accepts one or more coherent incident pulses per content and
-independent demodulation grids. Every grid observes the sum of all incident
-carriers through the same physical line; receiver offset is applied once, not
-once per tone. `ConditionalReadout` computes state-conditioned responses once
+`ReadoutEvent(pulses, grids)` groups coherent incident pulses and ADC windows
+that share one physical read event. `ReadoutBatch(model, events, content_index)`
+stores ordered events per distinct content. Every grid in an event observes the
+sum of its incident carriers through the same physical line. Receiver offset
+is applied once per sample, not once per tone. Responses concatenate grids in
+event order. `ReadoutEvent.grids=()` keeps an event's position when that ADC
+does not observe it. It emits no read column. All ADCs and projection populations
+use the same event axis, while each ADC keeps its own observed trigger order.
+Each ADC content still requires at least one observed grid across its events.
+`ConditionalSums.event_indices` maps each emitted read to its original event. `ConditionalReadout` computes state-conditioned responses once
 per distinct content. Integrated flat (`envelope=None`), common-start mux
 contents sum each carrier's linear response through the same line. Different
 pulse end times retain their own ringdown. Each carrier first tries guarded
@@ -228,16 +235,32 @@ traces. Multiple incident carriers superpose their vacuum fields and retain
 one cavity memory on the same path. Integrated direct means retain conditional
 moments and nearest-even shot rounding variance. Acquisition averaging belongs to program.
 
-`PreparedRawShots(populations, batches, reps=...)` owns noiseless probabilities
+`ProjectionReadout(weights, populations)` owns outcome weights with shape
+`(*point_dims, K)` and one `(*point_dims, K, states)` population array per event.
+It validates and copies these arrays without clipping or normalization.
+`ProjectionReadout.unprojected(populations)` explicitly constructs one outcome
+and one event. A single outcome consumes no extra outcome RNG draw. Its raw,
+trace and integrated outputs retain the previous single-event RNG order,
+including shared-event multi-grid and multi-ADC arrangements.
+
+The experiment runtime supplies rank-1 diagonal projections in the readout
+basis. It does not group states by IQ distinguishability. ADC transitions during
+a herald event affect that event's IQ only. They do not feed back into the
+populations supplied for later events.
+
+`PreparedRawShots(readout, batches, reps=...)` owns noiseless probabilities
 and per-channel ReadoutBatch inputs. `bind(identity)` returns an `ADCRawShots`
 source without doing shot work. `materialize(reps, avg_level)` alone draws full
-CTMC paths shared across every carrier, ADC and read. Each receiver adds
+CTMC paths, one per logical event. Within an event all carriers, ADCs and grids
+share the path. Different events draw independent paths after selecting one
+outcome shared by the whole shot. Each receiver adds
 independent noise. Zero jumps use direct vacuum sums. Jumped shots use compiled exact homogeneous propagation and discrete
 sample sums. Uniform samples use binary geometric sums; irregular samples keep
 their original coordinates. Flat baselines use singular-safe phi1 propagation.
 Shaped and opaque envelopes retain the existing DOP853 vacuum-baseline tolerances.
 There is no ODE per shot, jump-time LUT, path-count conditioning or tail cutoff.
-Reads share one path through ringdown and gaps; offset is added once per sample.
+Windows within one event share its path through ringdown and gaps. Offset is
+added once per sample.
 All ADC models must declare identical state labels and directional rates.
 Different receivers may deduplicate contents differently; point mappings select
 physical inputs independently without changing the common path.
@@ -250,22 +273,27 @@ layout, shapes or states raise ValueError, as do unsafe integer sums. Solver
 failures raise RuntimeError. `simulate.rounding` owns shared numeric int64
 conversion and shot-axis layout. Numeric sources do not import program.
 
-`sample_traces(populations, batches, reps=..., identity=..., rtol=..., atol=...)`
+`sample_traces(readout, batches, reps=..., identity=..., rtol=..., atol=...)`
 requires physical `ReadoutBatch` inputs keyed by ADC channel in declaration order.
 It returns `RoundSignals` with owned float64 arrays shaped
 `(prod(point_dims)*reps, reads, samples, 2)`, in point-major C order then shot order.
 Each ADC requires equal sample counts across reads and contents. The complete
 `SamplingIdentity` seeds PCG64 without an extra suffix. FTF supplies
-`(acquire_sequence, round_index, 0)` as its stream. Calls share the full CTMC path,
-including times not observed by any window. Delay, mismatch and demodulation
+`(acquire_sequence, round_index, 0)` as its stream. Windows of one event share
+the full CTMC path, including times not observed by any window. Delay, mismatch and demodulation
 remain per receiver/grid; noise is independent per ADC/read/sample/shot. There
 is no integrated rounding term. Invalid probabilities, states, rates, layouts,
 counts or tolerances raise `ValueError`; baseline/field failures raise
 `RuntimeError`. There is no conditional-only trace sampler or fallback.
 
-`PreparedStatistics(populations, channels, reps=...)` validates and owns immutable
-integrated sampling inputs. It expands conditional means and factors each ADC's
-noise covariance once. `draw(seed=..., acquire_sequence=..., round_index=...)`
+`PreparedStatistics(readout, channels, reps=...)` validates and owns immutable
+integrated sampling inputs. It draws counts on the C-order flattened
+`(outcome, terminal state)` axis with probabilities `weights[k] * final[k, s]`.
+Earlier-event conditional sums average that event's populations for each outcome,
+then repeat across terminal states. Terminal-event conditional sums depend on
+the terminal state and repeat across outcomes. Every ADC/read uses those joint
+counts. Preparation expands conditional means and factors each ADC's noise
+covariance once. `draw(seed=..., acquire_sequence=..., round_index=...)`
 validates a fresh identity, draws the same joint multinomial and ADC-ordered
 Gaussian arrays as `round_statistics`, and retains no noisy results or identities.
 The public `round_statistics` still validates arbitrary inputs by building a plan

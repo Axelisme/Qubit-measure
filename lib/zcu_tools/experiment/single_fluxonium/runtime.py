@@ -35,6 +35,7 @@ from zcu_tools.resources.single_fluxonium import (
 from zcu_tools.resources.single_fluxonium.schema import SingleFluxoniumSettings
 from zcu_tools.simulate.adc import (
     PreparedRawShots,
+    ProjectionReadout,
     ReadoutModel,
     normalize_populations,
 )
@@ -455,7 +456,7 @@ class SingleFluxoniumSource:
                 self.settings, facts.readout, plans, request
             )
             raw = PreparedRawShots(
-                probabilities,
+                ProjectionReadout.unprojected(probabilities),
                 {channel.channel: batch},
                 reps=request.reps,
                 rtol=self.settings.numerics.solver.rtol,

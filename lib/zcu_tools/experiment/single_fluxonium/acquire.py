@@ -19,6 +19,7 @@ from zcu_tools.resources.simulation_replay import ReplayAcquire, save_replay
 from zcu_tools.simulate.adc import (
     ChannelReadout,
     PreparedRawShots,
+    ProjectionReadout,
     round_statistics,
     sample_traces,
 )
@@ -93,7 +94,7 @@ class SingleFluxoniumAcquire:
         prepared = owner.prepare(acquire, snapshot, cancel=cancel)
         if acquire.mode == "integrated":
             statistics = round_statistics(
-                prepared.populations,
+                ProjectionReadout.unprojected(prepared.populations),
                 (prepared.channel,),
                 reps=acquire.reps,
                 seed=acquire.root_seed,
@@ -105,7 +106,7 @@ class SingleFluxoniumAcquire:
             )
         else:
             traces = sample_traces(
-                prepared.populations,
+                ProjectionReadout.unprojected(prepared.populations),
                 dict(prepared.raw.batches),
                 reps=acquire.reps,
                 identity=SamplingIdentity(

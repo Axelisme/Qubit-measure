@@ -62,7 +62,10 @@ def _batch(model, pulses, *, include_traces):
         adc.SampleGrid(np.arange(20.0, 60.0, 2.0), 6.013, -0.21),
     )
     return adc.ReadoutBatch(
-        model, (pulses,), (grids,), np.array([0], dtype=np.int64), include_traces
+        model,
+        ((adc.ReadoutEvent(pulses, grids),),),
+        np.array([0], dtype=np.int64),
+        include_traces,
     )
 
 
@@ -114,7 +117,7 @@ def test_one_cavity_conditional_mean_and_decimated_traces_follow_scalar_line(kin
     solver = adc.ConditionalReadout(model)
     result = solver.responses(batch)
     assert result.traces is not None
-    for read, grid in enumerate(batch.grids[0]):
+    for read, grid in enumerate(batch.events[0][0].grids):
         emitted = grid.times_ns - model.receiver.time_of_flight_ns
         selected = emitted >= 0
         fields = np.zeros((len(emitted), 3), dtype=complex)
@@ -143,7 +146,7 @@ def test_one_cavity_conditional_mean_and_decimated_traces_follow_scalar_line(kin
     integrated = solver.responses(replace(batch, include_traces=False))
     np.testing.assert_allclose(integrated.sums, result.traces.sum(axis=-2), atol=2e-8)
     statistics = adc.round_statistics(
-        np.array([[0.0, 1.0, 0.0]]),
+        adc.ProjectionReadout.unprojected(np.array([[0.0, 1.0, 0.0]])),
         (
             adc.ChannelReadout(
                 4, integrated, np.array([0], dtype=np.int64), model.receiver
@@ -175,13 +178,20 @@ def test_one_cavity_raw_and_trace_paths_share_physical_memory(kind, jumping):
     assert expected.traces is not None
     identity = SamplingIdentity(71, (2, 3, 1))
     probabilities = np.array([[0.0, 1.0, 0.0]])
-    traces = adc.sample_traces(probabilities, {4: batch}, reps=5, identity=identity)
+    traces = adc.sample_traces(
+        adc.ProjectionReadout.unprojected(probabilities),
+        {4: batch},
+        reps=5,
+        identity=identity,
+    )
     values = traces.channels[0].iq
     assert values.shape == (5, 2, 20, 2)
     np.testing.assert_allclose(
         values, np.broadcast_to(expected.traces[0, :, 1], values.shape), atol=2e-8
     )
-    source = adc.PreparedRawShots(probabilities, {4: batch}, reps=5).bind(identity)
+    source = adc.PreparedRawShots(
+        adc.ProjectionReadout.unprojected(probabilities), {4: batch}, reps=5
+    ).bind(identity)
     raw = source.materialize(5, 0)[4]
     assert raw.shape == (5, 1, 2, 2)
     np.testing.assert_array_equal(
@@ -190,13 +200,13 @@ def test_one_cavity_raw_and_trace_paths_share_physical_memory(kind, jumping):
     np.testing.assert_array_equal(source.materialize(5, 0)[4], raw)
     population = adc.PopulationInput(model.state_labels, probabilities[0])
     windows = adc.ADC(model).sample_windows(
-        population, pulses, batch.grids[0], identity, shots=5
+        population, pulses, batch.events[0][0].grids, identity, shots=5
     )
     for read, window in enumerate(windows):
         np.testing.assert_allclose(window.traces, values[:, read], atol=2e-8)
         np.testing.assert_array_equal(window.sums, window.traces.sum(axis=1))
     single = adc.ADC(model).sample(
-        population, pulses, batch.grids[0][0], identity, shots=5
+        population, pulses, batch.events[0][0].grids[0], identity, shots=5
     )
     np.testing.assert_allclose(single.traces, windows[0].traces, atol=2e-8)
 
@@ -207,7 +217,9 @@ def test_one_cavity_state_dependent_jumps_match_conditional_first_moment():
     pulses = _pulses("flat")
     batch = _batch(model, pulses, include_traces=False)
     source = adc.PreparedRawShots(
-        np.array([[0.0, 1.0, 0.0]]), {4: batch}, reps=1200
+        adc.ProjectionReadout.unprojected(np.array([[0.0, 1.0, 0.0]])),
+        {4: batch},
+        reps=1200,
     ).bind(SamplingIdentity(52))
     raw = source.materialize(1200, 0)[4][:, 0]
     expected = adc.ConditionalReadout(model).responses(batch).sums[0, :, 1]

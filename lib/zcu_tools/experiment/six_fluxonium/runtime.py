@@ -49,6 +49,7 @@ from zcu_tools.resources.six_fluxonium.schema import CircuitBias
 from zcu_tools.simulate.adc import (
     ChannelReadout,
     PreparedRawShots,
+    ProjectionReadout,
     ReadoutBatch,
     round_statistics,
     sample_traces,
@@ -336,7 +337,11 @@ class SixFluxoniumSource:
             raise ValueError("cavity group requires an ADC")
         solver = source.settings.numerics.solver
         raw = PreparedRawShots(
-            populations, batches, reps=request.reps, rtol=solver.rtol, atol=solver.atol
+            ProjectionReadout.unprojected(populations),
+            batches,
+            reps=request.reps,
+            rtol=solver.rtol,
+            atol=solver.atol,
         )
         return populations, tuple(channels), raw
 
@@ -387,7 +392,7 @@ class SixFluxoniumSource:
             sequence = diagonal * (diagonal + 1) // 2 + first_point
             if request.mode == "integrated":
                 statistics = round_statistics(
-                    populations,
+                    ProjectionReadout.unprojected(populations),
                     channels,
                     reps=request.reps,
                     seed=request.root_seed,
@@ -402,7 +407,7 @@ class SixFluxoniumSource:
                 )
             else:
                 result = sample_traces(
-                    populations,
+                    ProjectionReadout.unprojected(populations),
                     dict(raw.batches),
                     reps=request.reps,
                     identity=SamplingIdentity(request.root_seed, (sequence, index, 0)),

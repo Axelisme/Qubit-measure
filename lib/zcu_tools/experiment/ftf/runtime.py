@@ -38,6 +38,7 @@ from zcu_tools.simulate.adc import (
     PopulationValidationError,
     PreparedRawShots,
     PreparedStatistics,
+    ProjectionReadout,
     ReadoutBatch,
     normalize_populations,
     sample_traces,
@@ -158,7 +159,7 @@ class FTFAcquire:
             )
         else:
             traces = sample_traces(
-                prepared.populations,
+                ProjectionReadout.unprojected(prepared.populations),
                 dict(prepared.raw.batches),
                 rtol=owner.settings.numerics.solver.rtol,
                 atol=owner.settings.numerics.solver.atol,
@@ -284,8 +285,7 @@ class FTFAcquire:
             for channel_index, first in enumerate(plans[0].readouts):
                 conditionals = []
                 traces = []
-                raw_pulses = []
-                raw_grids = []
+                raw_events = []
                 content_index = np.empty(prod(acquire.point_dims), dtype=np.int64)
                 offset = 0
                 for plan in plans:
@@ -298,8 +298,7 @@ class FTFAcquire:
                         replace(readout, include_traces=acquire.mode == "decimated")
                     )
                     conditionals.append(conditional)
-                    raw_pulses.extend(readout.pulses)
-                    raw_grids.extend(readout.grids)
+                    raw_events.extend(readout.events)
                     if conditional.traces is not None:
                         traces.append(conditional.traces)
                     content_index[plan.batch.points] = offset + readout.content_index
@@ -310,10 +309,7 @@ class FTFAcquire:
                     np.concatenate(traces) if traces else None,
                 )
                 raw_batches[first.channel] = ReadoutBatch(
-                    first.batch.model,
-                    tuple(raw_pulses),
-                    tuple(raw_grids),
-                    content_index,
+                    first.batch.model, tuple(raw_events), content_index
                 )
                 channels.append(
                     ChannelReadout(
@@ -330,12 +326,16 @@ class FTFAcquire:
             raw = previous.raw
         else:
             sampler = (
-                PreparedStatistics(probabilities, tuple(channels), reps=acquire.reps)
+                PreparedStatistics(
+                    ProjectionReadout.unprojected(probabilities),
+                    tuple(channels),
+                    reps=acquire.reps,
+                )
                 if acquire.mode == "integrated"
                 else None
             )
             raw = PreparedRawShots(
-                probabilities,
+                ProjectionReadout.unprojected(probabilities),
                 raw_batches,
                 reps=acquire.reps,
                 rtol=owner.settings.numerics.solver.rtol,
