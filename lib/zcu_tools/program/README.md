@@ -17,6 +17,23 @@
 輸入時間單位為 µs，rounds 與 reps 為正整數；不計 acquisition 固定開銷與 flux ramp。
 模擬 binding 的 pacing 使用同一個公式，不累計 acquisition 的硬體總時間。
 
+## Herald declarations
+
+`PulseReadout.herald_spec(prog, occurrence=...)` derives one `program.herald.HeraldSpec`
+from a compiled program. The required occurrence counts this instance's emissions
+within each shot; the returned read_index counts all reads on its logical ADC.
+Initialize an instance once, then reuse its run method for herald and terminal
+reads. A later read on the same ADC is required. Any Repeat/Branch trigger on
+that ADC, count mismatches and missing calibration fail before acquisition.
+The control-flow restriction includes non-herald reads because QICK's static
+trigger counts cannot reliably determine dynamic read indices. Control flow on
+other ADCs remains supported. Circle calibration requires the GE Post radius.
+The method returns a classifier snapshot and does not register a herald.
+Acquisition code must receive the spec explicitly and admit at most one herald per ADC. `program.herald.herald_ground_mask` is the shared ground
+acceptance helper. It takes complex IQ divided by ADC integration length, without
+subtracting offsets. Circle uses the strict g circle and nearest-center region;
+linear rotates by exp(+1j*angle) and accepts values at or below threshold.
+
 ## 主要依賴面
 
 - `ImproveAcquireMixin` 直接擴充 `qick.qick_asm.AcquireMixin`，是 `program` 層最核心的 QICK 接點。
