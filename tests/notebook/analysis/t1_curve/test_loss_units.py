@@ -59,7 +59,8 @@ def test_pointwise_loss_recovers_raw_scqubits_truth(
     np.testing.assert_allclose(errors, 0.03 * q, rtol=1e-9)
 
 
-def test_combined_fit_recovers_external_loss_parameters() -> None:
+def test_two_level_fit_recovers_external_loss_parameters() -> None:
+    """The two-level manifold retains the externally calibrated pair lifetime."""
     fluxs = np.linspace(0.05, 0.47, 21)
     truth = T1FitParams(Temp=0.055, Q_cap=1.6e6, Q_ind=4e8, x_qp=1.2e-6)
     noise = [
@@ -85,7 +86,7 @@ def test_combined_fit_recovers_external_loss_parameters() -> None:
         init=T1FitParams(Temp=truth.Temp, Q_cap=2.4e6, Q_ind=2.5e8, x_qp=8e-7),
         fixed=("Temp",),
         cutoff=30,
-        qub_dim=4,
+        qub_dim=2,
         ftol=1e-12,
         xtol=1e-12,
         gtol=1e-12,

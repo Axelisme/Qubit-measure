@@ -9,6 +9,7 @@ from .coherence import (
     calculate_eff_t1_with,
     calculate_purcell_t1_vs_flux,
 )
+from .coherence.manifold import Mode, calculate_manifold_t1_vs_flux_fast
 from .coherence.rates import FluxoniumNoise, calculate_directional_loss_rates
 from .dispersive import (
     calculate_chi_sweep,
@@ -50,6 +51,8 @@ from .prediction import (
 )
 
 __all__ = [
+    "Mode",
+    "calculate_manifold_t1_vs_flux_fast",
     "SingleFluxoniumModel",
     "DispersiveResonator",
     "FluxoniumNoise",

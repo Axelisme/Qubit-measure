@@ -23,12 +23,22 @@ from zcu_tools.gui.app.measure.adapter import (
 from zcu_tools.gui.app.measure.services.analyze import AnalyzeService
 from zcu_tools.gui.app.measure.services.guard import GuardService
 from zcu_tools.gui.app.measure.services.load import LoadDataError, LoadService
+from zcu_tools.gui.app.measure.services.pane_commit import (
+    commit_analysis,
+    commit_post_analysis,
+    commit_run,
+)
 from zcu_tools.gui.app.measure.services.post_analyze import PostAnalyzeService
 from zcu_tools.gui.app.measure.services.run import RunService
 from zcu_tools.gui.app.measure.services.run_analyze_control import (
     RunAnalyzeControlFacet,
 )
 from zcu_tools.gui.app.measure.services.tab import TabService
+from zcu_tools.gui.app.measure.state import (
+    AnalysisPaneState,
+    PostAnalysisPaneState,
+    RunPaneState,
+)
 from zcu_tools.gui.app.measure.writeback import (
     WritebackControlFacet,
     WritebackDraft,
@@ -92,7 +102,6 @@ def _native_controls(
     )
     load = LoadService(
         session.state,
-        writeback,
         context=control,
         captured_parameters=capture,
     )
@@ -101,7 +110,6 @@ def _native_controls(
         runner,
         session.bus,
         session.handles,
-        writeback,
         gate=MagicMock(),
         devices=lambda: {},
         refresh_devices=lambda: None,
@@ -163,10 +171,14 @@ def role_load_session(
                 )
             }
         )
-        session.state.update_tab_result(
+        commit_run(
+            session.state,
             "tab",
-            replace(require_record(tab.run), metadata=session.metadata),
-            parameters=captured,
+            RunPaneState(
+                result=replace(require_record(tab.run), metadata=session.metadata),
+                storage=captured.storage,
+                parameters=captured,
+            ),
         )
         session.save()
         control.set_parameter(captured.target, "Q1.rate", 7.0)
@@ -195,7 +207,6 @@ def test_native_load_analysis_and_writeback_keep_historical_point_aliases_and_id
     rows = session.context.get_alias_rows()
     service = LoadService(
         session.state,
-        MagicMock(),
         context=control,
         captured_parameters=session.capture_parameters,
     )
@@ -279,20 +290,23 @@ def test_native_load_missing_source_is_reported_but_corruption_preserves_previou
     tab = session.state.get_tab("tab")
     history = session.metadata.snapshot
     broken = replace(history, point="missing" if fault == "missing" else history.point)
-    session.state.update_tab_result(
+    commit_run(
+        session.state,
         "tab",
-        replace(
-            require_record(tab.run),
-            metadata=session.metadata.model_copy(update={"snapshot": broken}),
+        RunPaneState(
+            result=replace(
+                require_record(tab.run),
+                metadata=session.metadata.model_copy(update={"snapshot": broken}),
+            ),
+            storage=None if tab.run.parameters is None else tab.run.parameters.storage,
+            parameters=tab.run.parameters,
         ),
-        parameters=tab.run.parameters,
     )
     session.save()
     previous = tab.run
     events = session.entry.ledger.events()
     service = LoadService(
         session.state,
-        MagicMock(),
         context=ContextControlFacet(context=session.context),
         captured_parameters=session.capture_parameters,
     )
@@ -323,10 +337,16 @@ def test_native_load_keeps_unknown_historical_name_until_component_field_read(
     previous = tab.run
     history = replace(session.metadata.snapshot, roles={"source_qubit": "missing"})
     metadata = session.metadata.model_copy(update={"snapshot": history})
-    session.state.update_tab_result(
+    commit_run(
+        session.state,
         "tab",
-        replace(require_record(previous), metadata=metadata),
-        parameters=previous.parameters,
+        RunPaneState(
+            result=replace(require_record(previous), metadata=metadata),
+            storage=None
+            if previous.parameters is None
+            else previous.parameters.storage,
+            parameters=previous.parameters,
+        ),
     )
     session.save()
     saved_metadata = require_record(tab.run).metadata
@@ -334,7 +354,6 @@ def test_native_load_keeps_unknown_historical_name_until_component_field_read(
     rows = session.context.get_alias_rows()
     service = LoadService(
         session.state,
-        MagicMock(),
         context=ContextControlFacet(context=session.context),
         captured_parameters=session.capture_parameters,
     )
@@ -394,15 +413,23 @@ def test_native_load_without_readable_source_allows_context_free_analysis(
     elif source == "empty":
         session.context.clear_context()
     else:
-        session.state.update_tab_result(
+        commit_run(
+            session.state,
             "tab",
-            replace(
-                require_record(tab.run),
-                metadata=session.metadata.model_copy(
-                    update={"snapshot": replace(session.metadata.snapshot, point=None)}
+            RunPaneState(
+                result=replace(
+                    require_record(tab.run),
+                    metadata=session.metadata.model_copy(
+                        update={
+                            "snapshot": replace(session.metadata.snapshot, point=None)
+                        }
+                    ),
                 ),
+                storage=None
+                if tab.run.parameters is None
+                else tab.run.parameters.storage,
+                parameters=tab.run.parameters,
             ),
-            parameters=tab.run.parameters,
         )
         session.save()
     control = ContextControlFacet(context=session.context)
@@ -471,7 +498,16 @@ def test_public_writeback_rejects_foreign_entry_without_acceptance_or_write(
         run_id=session.metadata.run_id,
         experiment_name="test/writeback",
     )
-    session.state.update_tab_analyze("tab", PaneSummary(), None, writeback_draft=draft)
+    commit_analysis(
+        session.state,
+        "tab",
+        AnalysisPaneState(
+            result=PaneSummary(),
+            plots=None,
+            params=session.state.get_tab("tab").analysis.params,
+            writeback_draft=draft,
+        ),
+    )
     other = ResultEntry.create(
         "foreign",
         result_root=tmp_path / "Foreign",
@@ -511,13 +547,17 @@ def test_native_load_retains_history_and_resaves_captured_source(
         session.metadata = session.metadata.model_copy(
             update={"completion": completion, "started_at": started_at}
         )
-        session.state.update_tab_result(
+        commit_run(
+            session.state,
             "tab",
-            replace(
-                require_record(session.state.get_tab("tab").run),
-                metadata=session.metadata,
+            RunPaneState(
+                result=replace(
+                    require_record(session.state.get_tab("tab").run),
+                    metadata=session.metadata,
+                ),
+                storage=session.state.get_tab("tab").run.storage,
+                parameters=session.state.get_tab("tab").run.parameters,
             ),
-            parameters=session.state.get_tab("tab").run.parameters,
         )
         initial_report = session.save()
         assert all(output.status == "saved" for output in initial_report.outputs), (
@@ -528,7 +568,6 @@ def test_native_load_retains_history_and_resaves_captured_source(
         events = session.entry.ledger.events()
         service = LoadService(
             session.state,
-            MagicMock(),
             context=ContextControlFacet(context=session.context),
             captured_parameters=session.capture_parameters,
         )
@@ -581,7 +620,6 @@ def test_loaded_same_entry_different_point_resaves_original_run(
         tab = session.state.get_tab("tab")
         service = LoadService(
             session.state,
-            MagicMock(),
             context=ContextControlFacet(context=session.context),
             captured_parameters=session.capture_parameters,
         )
@@ -593,11 +631,12 @@ def test_loaded_same_entry_different_point_resaves_original_run(
             post_plots = Plots(NonPresentingHost())
             post_plots.subplots("post")
             post_plots.finish(present=False)
-            session.state.update_tab_post_analyze(
+            commit_post_analysis(
+                session.state,
                 "tab",
-                PostSummary(),
-                post_plots,
-                post_analyze_params_instance=PaneParams(4.0),
+                PostAnalysisPaneState(
+                    result=PostSummary(), plots=post_plots, params=PaneParams(4.0)
+                ),
             )
             planned_copies = tuple(
                 output.path
@@ -692,7 +731,6 @@ def test_loaded_foreign_origin_save_rejects_before_mapping_or_io(
         assert captured.point == "destination-point"
         service = LoadService(
             session.state,
-            MagicMock(),
             context=ContextControlFacet(context=session.context),
             captured_parameters=session.capture_parameters,
         )
@@ -747,7 +785,6 @@ def test_unselected_entry_load_retains_history_and_save_rejects_without_writes(
         events = session.entry.ledger.events()
         service = LoadService(
             session.state,
-            MagicMock(),
             context=ContextControlFacet(context=session.context),
             captured_parameters=session.capture_parameters,
         )
@@ -785,22 +822,27 @@ def test_native_experiment_mismatch_keeps_previous_result_and_history(
 ) -> None:
     with native_save_session(tmp_path, qapp) as session:
         tab = session.state.get_tab("tab")
-        session.state.update_tab_result(
+        commit_run(
+            session.state,
             "tab",
-            replace(
-                require_record(tab.run),
-                metadata=session.metadata.model_copy(
-                    update={"experiment": "test/different"}
+            RunPaneState(
+                result=replace(
+                    require_record(tab.run),
+                    metadata=session.metadata.model_copy(
+                        update={"experiment": "test/different"}
+                    ),
                 ),
+                storage=None
+                if tab.run.parameters is None
+                else tab.run.parameters.storage,
+                parameters=tab.run.parameters,
             ),
-            parameters=tab.run.parameters,
         )
         session.save()
         path = session.native_data_path
         old_run = tab.run
         service = LoadService(
             session.state,
-            MagicMock(),
             context=ContextControlFacet(context=session.context),
             captured_parameters=session.capture_parameters,
         )
@@ -821,7 +863,6 @@ def test_unreadable_native_load_keeps_previous_result_and_history(
         old_run = tab.run
         service = LoadService(
             session.state,
-            MagicMock(),
             context=ContextControlFacet(context=session.context),
             captured_parameters=session.capture_parameters,
         )

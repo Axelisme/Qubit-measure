@@ -32,6 +32,16 @@ Intrinsic channels use `Eff_T(f01)` at each point. Purcell uses the fixed
 `Eff_T(bare_rf)`. The author assigns these temperatures before calling the
 shared fitter. The fitter does not read the temperature file or infer its units.
 The top-fraction Q estimate below is a separate author analysis, not a fit constraint.
+It still uses the 0↔1 pair inverse. When Γ12/Γ10 is not small, use these Q
+values as rough estimates rather than a multilevel inversion.
+
+The combined fit and displayed model curves use the largest signed-amplitude
+decay mode of the multilevel rate matrix. The initial state swaps Gibbs
+populations 0 and 1, and the observable is `1-p0(t)`.
+Secondary fractions are signed `a2/(a1+a2)`, or zero for one mode.
+A flux without decay modes raises an error. Fractions strictly above
+`secondary_threshold` flag points where a single fitted T1 is ambiguous.
+Purcell adds rate to the dominant lifetime and does not change this diagnostic.
 
 # Import
 
@@ -321,9 +331,9 @@ for mechanism in active_mechanisms:
     estimated_params = zt1.make_t1_fit_init(
         active_mechanisms=(mechanism,), Temp=init.Temp, **{param_name: estimate},
     )
-    intrinsic = calculate_eff_t1_vs_flux_fast(
+    intrinsic = zt1.predict_manifold_t1(
         ctx.params, t_fluxs, zt1.t1_noise_channels_from_params(estimated_params), t_Temp_K,
-    )
+    ).T1_ns
     components = {mechanism: intrinsic}
     effective = intrinsic
     if grid_purcell_T1_ns is not None:
@@ -346,6 +356,7 @@ display(pd.DataFrame(mechanism_rows))
 # Combined fit and identifiability
 
 ```python
+secondary_threshold = 0.1  # finite [0,1], strict > flags a point
 profile_fit = zt1.fit_t1_noise_params(
     data.fit.fluxs, data.fit.T1_ns, ctx.params,
     init=init, fixed_temperatures=fit_Temp_K,
@@ -355,7 +366,14 @@ profile_fit = zt1.fit_t1_noise_params(
     flux_weighting=flux_weighting, residual_mode=residual_mode,
     loss=loss, max_nfev=max_nfev,
     extra_relaxation_rate_fn=lambda current: fit_extra_rates,
+    secondary_threshold=secondary_threshold,
 )
+display(pd.DataFrame({
+    "flux": data.fit.fluxs,
+    "T1_model_ns": profile_fit.model_T1s,
+    "secondary_fraction": profile_fit.secondary_fractions,
+    "non_single_exponential": profile_fit.non_single_exponential,
+}))
 print("success =", profile_fit.success)
 print(profile_fit.message)
 print("free =", profile_fit.free)
@@ -384,17 +402,24 @@ else:
 # Channel curves
 
 ```python
-intrinsic = calculate_eff_t1_vs_flux_fast(
+prediction = zt1.predict_manifold_t1(
     ctx.params, t_fluxs, zt1.t1_noise_channels_from_params(profile_fit.params), t_Temp_K,
 )
+intrinsic = prediction.T1_ns
+grid_flags = prediction.secondary_fractions > profile_fit.secondary_threshold
+display(pd.DataFrame({
+    "flux": t_fluxs,
+    "secondary_fraction": prediction.secondary_fractions,
+    "non_single_exponential": grid_flags,
+}))
 component_T1s = {}
 for mechanism in active_mechanisms:
     component_params = zt1.make_t1_fit_init(
         active_mechanisms=(mechanism,), Temp=init.Temp, **parameter_values,
     )
-    component_T1s[mechanism] = calculate_eff_t1_vs_flux_fast(
+    component_T1s[mechanism] = zt1.predict_manifold_t1(
         ctx.params, t_fluxs, zt1.t1_noise_channels_from_params(component_params), t_Temp_K,
-    )
+    ).T1_ns
 grid_effective_T1_ns = intrinsic
 if grid_purcell_T1_ns is not None:
     component_T1s["Purcell"] = grid_purcell_T1_ns
@@ -411,6 +436,21 @@ fig, ax = zt1.plot_eff_t1_with_sample(
     grid_effective_T1_ns, t_fluxs, label="effective",
     component_t1s=component_T1s, parameter_text="\n".join(parameter_lines),
 )
+if grid_flags.any():
+    ax.plot(
+        t_fluxs[grid_flags], grid_effective_T1_ns[grid_flags],
+        linestyle="none", marker="o", markersize=5,
+        markerfacecolor="none", markeredgecolor="darkorange",
+        label="non-single-exponential model",
+    )
+fit_flags = profile_fit.non_single_exponential
+if fit_flags.any():
+    ax.plot(
+        data.fit.fluxs[fit_flags], data.fit.T1_ns[fit_flags],
+        linestyle="none", marker="x", color="darkorange",
+        label="non-single-exponential samples",
+    )
+ax.legend(fontsize="small")
 if device_axis_frame is not None:
     zfit.add_device_axis(ax, device_axis_frame, device_name=device_axis_name)
 figure_paths["channel_overlay"] = zt1.save_t1_curve_figure(

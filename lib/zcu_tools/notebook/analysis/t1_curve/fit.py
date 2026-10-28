@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import Literal, NamedTuple
 
 import numpy as np
 from numpy.typing import NDArray
@@ -22,7 +22,13 @@ from zcu_tools.notebook.analysis.fit_tools import (
 )
 from zcu_tools.progress_bar import make_pbar
 from zcu_tools.progress_bar.base import BaseProgressBar
-from zcu_tools.simulate.fluxonium import calculate_eff_t1_vs_flux_fast
+
+from .forward import (
+    ManifoldPrediction,
+    predict_manifold_t1,
+    secondary_exceeds_threshold,
+    validate_secondary_threshold,
+)
 
 NoiseParameterName = Literal["Q_cap", "x_qp", "Q_ind"]
 ParameterName = Literal["Q_cap", "x_qp", "Q_ind", "Temp"]
@@ -70,6 +76,13 @@ ExtraRelaxationRateFn = Callable[[T1FitParams], NDArray[np.float64]]
 
 @dataclass(frozen=True, slots=True)
 class T1FitResult:
+    """Fitted losses, ns predictions and optimizer diagnostics in sample order.
+
+    secondary_fractions holds intrinsic signed a2/(a1+a2), zero for one mode.
+    secondary_threshold is finite [0,1], default 0.1. non_single_exponential
+    marks fractions strictly above it, independently of any extra rates.
+    """
+
     params: T1FitParams
     stderr: T1FitParams
     fixed: tuple[str, ...]
@@ -86,6 +99,31 @@ class T1FitResult:
     # Free natural-log parameter covariance/correlation and Jacobian geometry;
     # None when all parameters are fixed or covariance cannot be computed.
     correlation: FitCorrelation | None = None
+    # Signed a2/(a1+a2) in sample order; zero for a single mode.
+    secondary_fractions: NDArray[np.float64] = field(
+        default_factory=lambda: np.empty(0, dtype=np.float64)
+    )
+    secondary_threshold: float = 0.1
+
+    @property
+    def non_single_exponential(self) -> NDArray[np.bool_]:
+        """Mark sample fractions strictly above secondary_threshold."""
+        return secondary_exceeds_threshold(
+            self.secondary_fractions, self.secondary_threshold
+        )
+
+
+class _FitPrediction(NamedTuple):
+    """Total model lifetime and unchanged intrinsic diagnostics per sample.
+
+    total_T1_ns is the dominant intrinsic lifetime after adding extra rates,
+    in ns and sample order. It equals intrinsic.T1_ns without extra rates.
+    intrinsic holds the manifold mode lifetime and signed secondary fractions
+    before extra relaxation, for both fixed and optimized fit results.
+    """
+
+    total_T1_ns: NDArray[np.float64]
+    intrinsic: ManifoldPrediction
 
 
 # tolerated: Public fit keywords separate whitelist init, error policy and solver controls.
@@ -113,6 +151,7 @@ def fit_t1_noise_params(  # noqa: PLR0913
     j: int = 0,
     extra_relaxation_rate_fn: ExtraRelaxationRateFn | None = None,
     progress: bool = False,
+    secondary_threshold: float = 0.1,
 ) -> T1FitResult:
     """Fit active T1 noise parameters against measured T1 vs normalized flux.
 
@@ -128,7 +167,16 @@ def fit_t1_noise_params(  # noqa: PLR0913
     profile. The callback owns any independent temperature assignment. The array
     must be 1D with the same shape as T1s; invalid input raises ValueError before
     any model evaluation. Global Temp remains fit-able when the array is absent.
+
+    The intrinsic model always selects the largest signed manifold amplitude.
+    i/j accept only (1,0) or (0,1), the same Gibbs pi pulse. Empty modes raise
+    ValueError identifying the flux. Extra relaxation adds rate to dominant T1;
+    secondary fractions still describe the intrinsic manifold. secondary_threshold
+    must be finite in [0,1]; only strictly larger fractions are flagged.
     """
+    validate_secondary_threshold(secondary_threshold)
+    if (i, j) not in ((1, 0), (0, 1)):
+        raise ValueError("manifold fit requires the 0↔1 pi transition")
     data = _validate_data(fluxs, T1s, T1errs, T1_error_policy, flux_weighting)
     if residual_mode not in ("log", "linear"):
         raise ValueError("residual_mode must be 'log' or 'linear'")
@@ -145,39 +193,31 @@ def fit_t1_noise_params(  # noqa: PLR0913
 
     lower_log = np.log(np.array([lower[name] for name in free_names]))
     upper_log = np.log(np.array([upper[name] for name in free_names]))
-    init_log = np.log(np.array([init_values[name] for name in free_names]))
 
-    def model(current: T1FitParams) -> NDArray[np.float64]:
-        noise_channels = _noise_channels_from_params(current, active_names)
-        intrinsic_T1s = calculate_eff_t1_vs_flux_fast(
+    def model(current: T1FitParams) -> _FitPrediction:
+        prediction = predict_manifold_t1(
             params,
             data.fluxs,
-            noise_channels,
+            _noise_channels_from_params(current, active_names),
             current.Temp if fixed_temperatures is None else fixed_temperatures,
             cutoff=cutoff,
             qub_dim=qub_dim,
-            i=i,
-            j=j,
         )
         if extra_relaxation_rate_fn is None:
-            return intrinsic_T1s
+            return _FitPrediction(prediction.T1_ns, prediction)
         extra_rates = _validate_extra_relaxation_rates(
             extra_relaxation_rate_fn(current),
             shape=data.T1s.shape,
         )
-        return _combine_t1_with_extra_rates(intrinsic_T1s, extra_rates)
-
-    def residual_from_params(current: T1FitParams) -> NDArray[np.float64]:
-        return _calc_residuals(
-            model(current),
-            data,
-            residual_mode=residual_mode,
+        return _FitPrediction(
+            _combine_t1_with_extra_rates(prediction.T1_ns, extra_rates),
+            prediction,
         )
 
     if not free_names:
         fixed_model = model(init)
         residuals = _calc_residuals(
-            fixed_model,
+            fixed_model.total_T1_ns,
             data,
             residual_mode=residual_mode,
         )
@@ -189,7 +229,7 @@ def fit_t1_noise_params(  # noqa: PLR0913
             free=free_names,
             T1_error_resolution=data.T1_error_resolution,
             flux_weights=data.flux_weights,
-            model_T1s=fixed_model,
+            model_T1s=fixed_model.total_T1_ns,
             residuals=residuals,
             cost=cost,
             reduced_chi2=reduced_chi2_from_cost(
@@ -198,6 +238,8 @@ def fit_t1_noise_params(  # noqa: PLR0913
             success=True,
             message="all parameters fixed",
             optimizer_result=None,
+            secondary_fractions=fixed_model.intrinsic.secondary_fractions,
+            secondary_threshold=secondary_threshold,
         )
 
     pbar: BaseProgressBar | None = None
@@ -209,7 +251,11 @@ def fit_t1_noise_params(  # noqa: PLR0913
         current_values = init_values.copy()
         for name, value in zip(free_names, np.exp(log_free_values), strict=True):
             current_values[name] = float(value)
-        residuals = residual_from_params(_values_to_params(current_values))
+        residuals = _calc_residuals(
+            model(_values_to_params(current_values)).total_T1_ns,
+            data,
+            residual_mode=residual_mode,
+        )
         if pbar is not None:
             best_cost = min(best_cost, least_squares_cost(residuals))
             pbar.set_description(f"T1 fit cost={best_cost:.3g}")
@@ -222,7 +268,7 @@ def fit_t1_noise_params(  # noqa: PLR0913
     try:
         opt = least_squares(
             residual_from_free,
-            init_log,
+            np.log(np.array([init_values[name] for name in free_names])),
             bounds=(lower_log, upper_log),
             loss=loss,
             max_nfev=max_nfev,
@@ -240,7 +286,7 @@ def fit_t1_noise_params(  # noqa: PLR0913
     fit_params = _values_to_params(fit_values)
     fit_model = model(fit_params)
     residuals = _calc_residuals(
-        fit_model,
+        fit_model.total_T1_ns,
         data,
         residual_mode=residual_mode,
     )
@@ -265,7 +311,7 @@ def fit_t1_noise_params(  # noqa: PLR0913
         free=free_names,
         T1_error_resolution=data.T1_error_resolution,
         flux_weights=data.flux_weights,
-        model_T1s=fit_model,
+        model_T1s=fit_model.total_T1_ns,
         residuals=residuals,
         cost=cost,
         reduced_chi2=reduced_chi2_from_cost(
@@ -275,6 +321,8 @@ def fit_t1_noise_params(  # noqa: PLR0913
         message=str(opt.message),
         optimizer_result=opt,
         correlation=correlation,
+        secondary_fractions=fit_model.intrinsic.secondary_fractions,
+        secondary_threshold=secondary_threshold,
     )
 
 

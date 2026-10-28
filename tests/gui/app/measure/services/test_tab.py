@@ -17,6 +17,7 @@ from zcu_tools.gui.app.measure.adapter import (
 from zcu_tools.gui.app.measure.artifacts import (
     SaveStatus,
 )
+from zcu_tools.gui.app.measure.services.pane_commit import commit_run
 from zcu_tools.gui.app.measure.services.ports import TabSnapshot
 from zcu_tools.gui.app.measure.services.tab import TabService
 from zcu_tools.gui.app.measure.state import (
@@ -27,6 +28,7 @@ from zcu_tools.gui.app.measure.state import (
     Session,
     State,
 )
+from zcu_tools.gui.app.measure.writeback import WritebackService
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 
 from tests.gui.app.measure._cfg_fakes import (
@@ -90,7 +92,9 @@ def test_tab_snapshot_is_single_pure_render_model() -> None:
 
 def test_snapshot_projects_empty_writeback_draft_existence() -> None:
     state = _active_state()
-    draft = object()
+    draft = WritebackService(MagicMock(), arb_names=lambda: ()).create_draft(
+        [], parameters=None, experiment_name="fake"
+    )
     state.add_tab(
         "tab",
         Session(
@@ -118,7 +122,9 @@ def test_snapshot_projects_empty_writeback_draft_existence() -> None:
 
 def test_snapshot_propagates_writeback_preview_failure() -> None:
     state = _active_state()
-    draft = object()
+    draft = WritebackService(MagicMock(), arb_names=lambda: ()).create_draft(
+        [], parameters=None, experiment_name="fake"
+    )
     state.add_tab(
         "tab",
         Session(
@@ -306,12 +312,15 @@ def test_tab_snapshot_loaded_artifacts_have_no_success_record(
     record = require_record(session.state.get_tab("tab").run)
     assert record is not None
     run = session.state.get_tab("tab").run
-    session.state.update_tab_loaded_result(
+    commit_run(
+        session.state,
         "tab",
-        replace(record, metadata=session.metadata),
-        "existing.hdf5",
-        parameters=run.parameters,
-        storage=run.storage,
+        RunPaneState(
+            result=replace(record, metadata=session.metadata),
+            source_path="existing.hdf5",
+            parameters=run.parameters,
+            storage=run.storage,
+        ),
     )
     snapshot = _native_snapshot(session)
 
@@ -365,19 +374,28 @@ def test_tab_snapshot_tracks_actual_success_and_draft_or_result_drift(
     record = require_record(session.state.get_tab("tab").run)
     assert record is not None
     run = session.state.get_tab("tab").run
-    session.state.update_tab_result(
-        "tab", replace(record, metadata=session.metadata), parameters=run.parameters
+    commit_run(
+        session.state,
+        "tab",
+        RunPaneState(
+            result=replace(record, metadata=session.metadata),
+            storage=None if run.parameters is None else run.parameters.storage,
+            parameters=run.parameters,
+        ),
     )
     assert (
         _native_snapshot(session).artifacts[0].artifacts[0].status
         is SaveStatus.NOT_SAVED
     )
-    session.state.update_tab_loaded_result(
+    commit_run(
+        session.state,
         "tab",
-        replace(record, metadata=session.metadata),
-        "imported.hdf5",
-        parameters=run.parameters,
-        storage=run.storage,
+        RunPaneState(
+            result=replace(record, metadata=session.metadata),
+            source_path="imported.hdf5",
+            parameters=run.parameters,
+            storage=run.storage,
+        ),
     )
     loaded = _native_snapshot(session)
     assert loaded.run is not None and loaded.run.source_path == "imported.hdf5"

@@ -9,7 +9,8 @@ from unittest.mock import MagicMock
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import ContextReadiness
 from zcu_tools.gui.app.measure.services.analyze import AnalyzeService
-from zcu_tools.gui.app.measure.state import Session, SessionEnv, State
+from zcu_tools.gui.app.measure.services.pane_commit import commit_run
+from zcu_tools.gui.app.measure.state import RunPaneState, Session, SessionEnv, State
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.session.operation_handles import OperationHandles
 from zcu_tools.gui.session.operation_runner import OperationRunner
@@ -39,7 +40,7 @@ def make_state(tab_id: str = "tab1") -> State:
         Session(adapter_name="fake", adapter=MagicMock(), cfg=MagicMock()),
     )
     # Provide a fake run_result so the tab is not empty
-    state.update_tab_result(tab_id, RunRecord(None, object()))
+    commit_run(state, tab_id, RunPaneState(result=RunRecord(None, object())))
     return state
 
 
@@ -110,5 +111,5 @@ def make_two_tab_state() -> State:
         "tab2",
         Session(adapter_name="fake", adapter=MagicMock(), cfg=MagicMock()),
     )
-    state.update_tab_result("tab2", RunRecord(None, object()))
+    commit_run(state, "tab2", RunPaneState(result=RunRecord(None, object())))
     return state

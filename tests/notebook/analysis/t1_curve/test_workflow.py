@@ -25,6 +25,7 @@ from zcu_tools.notebook.analysis.t1_curve import (
     load_t1_purcell_params,
     make_t1_fit_init,
     mechanisms_to_fixed_params,
+    plot_t1_channel_analysis,
     plot_t1_mechanism_limit,
     prepare_t1_curve_data,
     subtract_relaxation_limit,
@@ -437,6 +438,108 @@ def test_channel_curves_use_resolved_purcell_temperature(
     )
     assert analysis.curves.purcell_T1_ns is not None
     np.testing.assert_allclose(analysis.curves.purcell_T1_ns, expected)
+
+
+def test_manifold_channel_curve_marks_secondary_points_in_plot_and_table() -> None:
+    from zcu_tools.simulate.fluxonium import calculate_manifold_t1_vs_flux_fast
+
+    data = _synthetic_prepared_data()
+    curve = replace(data.fit, fluxs=np.array([0.1, 0.2, 0.3]))
+    data = replace(data, fit=curve, sample=curve, analysis_flux_range=(0.1, 0.3))
+    combined = fit_t1_curve(
+        data,
+        init=T1FitParams(Q_cap=1e6, Temp=0.1),
+        fixed=("Q_cap", "Temp"),
+        secondary_threshold=0.1,
+    )
+    analysis = build_t1_channel_curves(
+        combined,
+        t_flux_count=3,
+        flux_range=(0.1, 0.3),
+    )
+    points = calculate_manifold_t1_vs_flux_fast(
+        data.calibration.context.params,
+        analysis.curves.fluxs,
+        [("t1_capacitive", {"Q_cap": 1e6})],
+        0.1,
+    )
+    expected_t1 = np.array([p[0].t1_ns for p in points])
+    expected_fraction = np.array(
+        [p[1].amplitude / (p[0].amplitude + p[1].amplitude) for p in points]
+    )
+    expected_flags = expected_fraction > 0.1
+    assert expected_flags.any() and not expected_flags.all()
+    np.testing.assert_allclose(analysis.curves.display_T1_ns, expected_t1)
+    np.testing.assert_allclose(
+        analysis.curves.component_T1s_ns["capacitive"], expected_t1
+    )
+    np.testing.assert_allclose(
+        analysis.pointwise_table["secondary_fraction"], expected_fraction
+    )
+    np.testing.assert_array_equal(
+        analysis.pointwise_table["non_single_exponential"], expected_flags
+    )
+    np.testing.assert_allclose(
+        combined.pointwise_table["secondary_fraction"],
+        combined.fit_result.secondary_fractions,
+    )
+    fig, ax = plot_t1_channel_analysis(analysis)
+    try:
+        marked = next(
+            line
+            for line in ax.lines
+            if line.get_label() == "non-single-exponential model"
+        )
+        assert marked.get_visible()
+        assert marked.get_marker() == "o"
+        np.testing.assert_allclose(
+            np.asarray(marked.get_xdata(), dtype=np.float64),
+            analysis.curves.fluxs[expected_flags],
+        )
+        np.testing.assert_allclose(
+            np.asarray(marked.get_ydata(), dtype=np.float64),
+            expected_t1[expected_flags],
+        )
+        samples = next(
+            line
+            for line in ax.lines
+            if line.get_label() == "non-single-exponential samples"
+        )
+        assert samples.get_visible() and samples.get_marker() == "x"
+        np.testing.assert_allclose(
+            np.asarray(samples.get_xdata(), dtype=np.float64),
+            data.fit.fluxs[expected_flags],
+        )
+        np.testing.assert_allclose(
+            np.asarray(samples.get_ydata(), dtype=np.float64),
+            data.fit.T1_ns[expected_flags],
+        )
+        legend = ax.get_legend()
+        assert legend is not None
+        assert "non-single-exponential model" in [
+            text.get_text() for text in legend.get_texts()
+        ]
+    finally:
+        plt.close(fig)
+
+
+def test_channel_plot_does_not_mark_fractions_below_threshold() -> None:
+    combined = fit_t1_curve(
+        _synthetic_prepared_data(),
+        init=T1FitParams(Q_cap=1e6, Temp=0.1),
+        fixed=("Q_cap", "Temp"),
+        secondary_threshold=1.0,
+    )
+    analysis = build_t1_channel_curves(combined, t_flux_count=3)
+    fig, ax = plot_t1_channel_analysis(analysis)
+    try:
+        assert not any(
+            line.get_label()
+            in ("non-single-exponential model", "non-single-exponential samples")
+            for line in ax.lines
+        )
+    finally:
+        plt.close(fig)
 
 
 def test_build_t1_channel_curves_uses_uniform_flux_grid() -> None:

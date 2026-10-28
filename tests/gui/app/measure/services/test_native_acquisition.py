@@ -80,7 +80,6 @@ def _acquire_to_terminal(
         ),
         session.bus,
         session.handles,
-        MagicMock(),
         gate=gate,
         devices=lambda: {},
         refresh_devices=lambda: None,

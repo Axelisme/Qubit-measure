@@ -11,10 +11,6 @@ from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 
-from zcu_tools.simulate.fluxonium import (
-    calculate_eff_t1_vs_flux_fast,
-)
-
 from .base import (
     format_parameter,
     omega_mask,
@@ -26,6 +22,7 @@ from .base import (
 from .fit import (
     T1FitResult,
 )
+from .forward import predict_manifold_t1
 from .models import (
     CURVE_LABELS,
     NOISE_CHANNELS,
@@ -279,12 +276,12 @@ def plot_t1_mechanism_limit(
         "upper": probe.parameter_upper,
     }
     mechanism_curves = {
-        f"{CURVE_LABELS[probe.mechanism]} {label}": calculate_eff_t1_vs_flux_fast(
+        f"{CURVE_LABELS[probe.mechanism]} {label}": predict_manifold_t1(
             context.params,
             t_fluxs,
             [(channel_name, {option_name: value})],
             probe.temperature,
-        )
+        ).T1_ns
         for label, value in values.items()
     }
     probe_curve_name = f"{CURVE_LABELS[probe.mechanism]} probe"
@@ -351,7 +348,10 @@ def plot_t1_channel_analysis(
     channel_analysis supplies normalized flux, fit parameters and component
     order. parameter_text overrides the active-parameter display when supplied.
     Return a new Figure/Axes without recalculating, showing or saving curves.
-    Base plotting failures, including no positive sample T1, propagate.
+    Orange open circles mark dense model points whose intrinsic secondary
+    fraction strictly exceeds the fit threshold. Orange crosses mark the
+    corresponding fit samples. Base plotting failures, including no positive
+    sample T1, propagate.
     """
     combined_fit = channel_analysis.combined_fit
     data = combined_fit.data
@@ -367,6 +367,30 @@ def plot_t1_channel_analysis(
         component_t1s=channel_analysis.curves.component_T1s_ns,
         parameter_text=parameter_text,
     )
+    curves = channel_analysis.curves
+    flags = curves.non_single_exponential
+    if flags.any():
+        ax.plot(
+            curves.fluxs[flags],
+            curves.display_T1_ns[flags],
+            linestyle="none",
+            marker="o",
+            markersize=5,
+            markerfacecolor="none",
+            markeredgecolor="darkorange",
+            label="non-single-exponential model",
+        )
+    fit_flags = combined_fit.fit_result.non_single_exponential
+    if fit_flags.any():
+        ax.plot(
+            data.fit.fluxs[fit_flags],
+            data.fit.T1_ns[fit_flags],
+            linestyle="none",
+            marker="x",
+            color="darkorange",
+            label="non-single-exponential samples",
+        )
+    ax.legend(fontsize="small")
     ax.set_xlim(*channel_analysis.flux_range)
     return fig, ax
 
