@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from .container import FigureContainer
     from .host import (
+        AttachedFigureSnapshot,
         PlotStateSnapshot,
         assert_plot_invariants,
         attach_existing_figure_to_container,
@@ -29,6 +30,7 @@ if TYPE_CHECKING:
 # Public name → (submodule, attribute). Resolved lazily so importing this package
 # does not drag in matplotlib/qtpy; those load only when a name is first used.
 _LAZY: dict[str, str] = {
+    "AttachedFigureSnapshot": "host",
     "FigureContainer": "container",
     "PlotStateSnapshot": "host",
     "assert_plot_invariants": "host",
@@ -44,6 +46,7 @@ _LAZY: dict[str, str] = {
 }
 
 __all__ = [
+    "AttachedFigureSnapshot",
     "FigureContainer",
     "PlotStateSnapshot",
     "assert_plot_invariants",

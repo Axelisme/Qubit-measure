@@ -58,9 +58,30 @@ def drop_from_registry(fig: Figure) -> None:
 
 
 @dataclass(frozen=True)
+class AttachedFigureSnapshot:
+    """One live presentation attachment, without retaining its Figure or owner.
+
+    figure_id is the Python identity of the attached Figure.
+    container_object_name is the owning stack's Qt objectName, empty if unnamed.
+    """
+
+    figure_id: int
+    container_object_name: str
+
+
+@dataclass(frozen=True)
 class PlotStateSnapshot:
+    """GUI-thread presentation state after excluding stale registry entries.
+
+    active_figure_count counts Figures still held by live container canvases.
+    attached_figure_ids lists those Figure identities in increasing order.
+    attached_figures names their owners in the same order, without strong refs.
+    Detached or deleted canvases and figures awaiting GC alone are excluded.
+    """
+
     active_figure_count: int
     attached_figure_ids: tuple[int, ...]
+    attached_figures: tuple[AttachedFigureSnapshot, ...]
 
 
 def attach_existing_figure_to_container(
@@ -118,15 +139,27 @@ def _purge_stale_registry_entries() -> None:
 
 
 def dump_plot_state() -> PlotStateSnapshot:
+    """Return live figure identities and container names on the GUI thread.
+
+    Purge mappings whose container no longer hosts a live canvas. This query
+    neither delivers Qt deletion events nor collects Python reference cycles;
+    callers observing a teardown boundary must complete those steps first.
+    """
     _purge_stale_registry_entries()
-    # Snapshot keys to a list before taking ids: WeakKeyDictionary iteration can
-    # raise if a figure is GC'd mid-loop.
-    attached_figure_ids = tuple(
-        sorted(id(fig) for fig in list(_fig_container_registry))
+    # Copy weak items before inspecting them: GC may otherwise mutate iteration.
+    attached_figures = tuple(
+        sorted(
+            (
+                AttachedFigureSnapshot(id(fig), str(container.object_name))
+                for fig, container in list(_fig_container_registry.items())
+            ),
+            key=lambda entry: entry.figure_id,
+        )
     )
     return PlotStateSnapshot(
-        active_figure_count=len(attached_figure_ids),
-        attached_figure_ids=attached_figure_ids,
+        active_figure_count=len(attached_figures),
+        attached_figure_ids=tuple(entry.figure_id for entry in attached_figures),
+        attached_figures=attached_figures,
     )
 
 

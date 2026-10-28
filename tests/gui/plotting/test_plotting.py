@@ -55,6 +55,27 @@ def test_plot_state_snapshot_and_invariants(qapp):
     plt.close(fig)
 
 
+def test_snapshot_identifies_live_container_and_forgets_deleted_owner(qapp):
+    """Diagnostics name the live owner, not a figure's pending Python GC cycle."""
+    from matplotlib.figure import Figure
+    from qtpy.QtCore import QCoreApplication, QEvent
+
+    container, stack = _make_container()
+    stack.setObjectName("snapshot-owner")
+    figure = Figure()
+    try:
+        attach_existing_figure_to_container(figure, container)
+        attachments = dump_plot_state().attached_figures
+        matching = [entry for entry in attachments if entry.figure_id == id(figure)]
+        assert len(matching) == 1
+        assert matching[0].container_object_name == "snapshot-owner"
+
+    finally:
+        stack.deleteLater()
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete.value)
+    assert id(figure) not in dump_plot_state().attached_figure_ids
+
+
 def test_two_figures_coexist_in_one_container(qapp):
     """Regression: a run/analyze figure and a post-analysis figure share one
     container's stack. Alternating attaches (A, B, A) must NOT delete the other
