@@ -27,6 +27,8 @@ Results index 隔離各 entry 的 setup／ledger 與 run 成員讀取錯誤，�
 
 `RunService` 在提交 worker 前固定 ParameterContext 的參數快照。Worker 將它放進當次 RunMetadata，後續切換 point 不改這份分析環境。
 
+Load 只使用檔內 experiment tag、資料與參數快照，不讀 live point 或先驗完整 RunMetadata。缺快照使用空參數內容；壞快照由 owner 報錯，Load 保留原 pane 並回傳指名來源檔的 LoadDataError。未用的歷史 metadata 欄位延後到使用或完整投影時驗證。
+
 Run、Analyze、PostAnalyze、Load 與 Tab 將 pane 提交或退役清理交給 `pane_commit`。
 `GuardService.admit` 統一 domain admission，啟動時的 hardware exclusion 仍由 operation gate 裁決。
 各 operation 決定終局與觸發清理的時機。

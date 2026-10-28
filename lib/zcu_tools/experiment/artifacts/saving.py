@@ -113,7 +113,7 @@ def save_artifacts(
     metadata = record.metadata
     if metadata is None:
         raise ValueError("RunRecord.metadata is None; cannot save without metadata")
-    metadata = RunMetadata.model_validate(metadata)
+    metadata = metadata.project()
     validate_origin(origin)
     for artifact in artifacts:
         artifact.__post_init__()

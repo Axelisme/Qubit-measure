@@ -42,7 +42,7 @@ from tests.gui.app.measure._flux_adapter import (
     SpectrumCore,
     SpectrumResult,
 )
-from tests.gui.app.measure._record_support import require_record
+from tests.gui.app.measure._record_support import require_metadata
 
 from ._helpers import Fixture, recv_response, send
 
@@ -120,7 +120,7 @@ def load_native_spectrum(
     )
     save_run(replace(RunRecord(cfg, result), metadata=metadata), path, spec=spec)
     fx.ctrl.run_analyze_control.load_tab_result(tab_id, str(path))
-    assert require_record(fx.state.get_tab(tab_id).run).metadata == metadata
+    assert require_metadata(fx.state.get_tab(tab_id).run) == metadata
 
 
 def start_mounted(

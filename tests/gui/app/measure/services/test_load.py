@@ -35,7 +35,7 @@ from zcu_tools.plotting.plots import NonPresentingHost, Plots
 
 from tests.gui.app.measure._form_fakes import make_form
 from tests.gui.app.measure._load_support import historical_metadata, write_native_file
-from tests.gui.app.measure._record_support import require_record
+from tests.gui.app.measure._record_support import require_metadata
 
 
 @pytest.fixture
@@ -122,7 +122,7 @@ def test_load_retains_history_without_foreign_analysis_fallback(
     assert tab.run.parameters is None
     assert tab.run.storage is None
     assert tab.run.source_operation_id is None
-    assert require_record(tab.run).metadata == metadata
+    assert require_metadata(tab.run) == metadata
     commit_run(state, tab_id, RunPaneState())
     assert tab.run.parameters is None
 
@@ -171,7 +171,7 @@ def test_load_result_replaces_run_result_and_invalidates_dependents(
     outcome = svc.load_result(tab_id, native_path)
 
     assert tab.run.result is loaded
-    assert require_record(tab.run).metadata == metadata
+    assert require_metadata(tab.run) == metadata
     assert tab.run.confirmed_run_id is None
     assert tab.run.source_path == native_path
     assert tab.analysis.result is None
@@ -227,7 +227,7 @@ def test_load_preserves_authored_input_including_invalid_drafts(
         assert tab.run.result is loaded
         assert loaded.cfg is not None
         assert loaded.cfg.reps == 40
-        assert require_record(tab.run).metadata == metadata
+        assert require_metadata(tab.run) == metadata
         assert tab.run.source_path == native_path
         assert outcome.cfg_issue is None
     finally:

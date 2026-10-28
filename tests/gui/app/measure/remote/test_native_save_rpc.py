@@ -37,7 +37,7 @@ from tests.gui.app.measure._native_save_support import (
     declare_panes,
     native_save_session,
 )
-from tests.gui.app.measure._record_support import require_record
+from tests.gui.app.measure._record_support import require_metadata, require_record
 
 from ._helpers import call, open_client, reset_inbox
 
@@ -221,7 +221,7 @@ def test_native_load_rpc_retains_history_on_analysis_partial_failure(
             "analysis parameters unavailable" if analysis_failure else None
         )
         tab = session.state.get_tab("tab")
-        assert require_record(tab.run).metadata == metadata_from_container(stored)
+        assert require_metadata(tab.run) == metadata_from_container(stored)
         assert tab.run.source_path == str(path)
         assert tab.run.confirmed_run_id is None
         assert tab.post_analysis.result is None
@@ -296,7 +296,7 @@ def test_native_open_file_rpc_retains_history_after_explicit_context_read(
         assert outcome["analysis_error"] == (
             "analysis parameters unavailable" if analysis_failure else None
         )
-        assert require_record(tab.run).metadata == history
+        assert require_metadata(tab.run) == history
         assert tab.run.source_path == str(path)
         assert tab.run.confirmed_run_id is None
         assert tab.run.parameters is not None

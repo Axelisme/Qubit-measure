@@ -7,7 +7,7 @@ from typing import Generic, TypeVar
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.plotting.figures import NamedFigures
 
-from .metadata import RunMetadata
+from .metadata import RunMetadata, RunMetadataContent
 
 CfgT = TypeVar("CfgT", bound=ConfigBase)
 ResultT = TypeVar("ResultT")
@@ -23,14 +23,16 @@ class RunRecord(Generic[CfgT, ResultT]):
     stay paired, while cfg and result data remain mutable. Callers own the result
     data; hardware handles and presentation do not belong in this envelope.
     Loaded data may remain usable without a valid configuration.
-    metadata holds historical run facts, or None until the host captures them.
+    metadata holds complete captured RunMetadata, deferred RunMetadataContent
+    after native Load, or None until the host captures historical facts. Deferred
+    properties validate requested fields; project() requests all fields.
     Construction detaches metadata from the caller; nested values remain mutable.
     Native saving requires metadata; no writer captures live evidence.
     """
 
     cfg: CfgT | None
     result: ResultT
-    metadata: RunMetadata | None = None
+    metadata: RunMetadata | RunMetadataContent | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "cfg", deepcopy(self.cfg))

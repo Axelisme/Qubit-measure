@@ -212,7 +212,7 @@ class SaveService:
                 "Run has no historical native metadata or captured storage",
                 reason_code="storage_unavailable",
             )
-        return record, metadata, storage
+        return record, metadata.project(), storage
 
     def _capture_data(self, tab_id: str, key: ArtifactKey, comment: str) -> DataItem:
         tab = self._state.get_tab(tab_id)

@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from zcu_tools.datafile import load
-from zcu_tools.experiment.native_persistence import metadata_from_container
+from zcu_tools.experiment.native_persistence import metadata_content_from_container
 from zcu_tools.gui.app.measure.services.pane_commit import commit_run
 from zcu_tools.gui.app.measure.state import RunPaneState
 from zcu_tools.gui.expected_error import FailedPreconditionError
@@ -74,19 +74,14 @@ class LoadService:
     def load_result(self, tab_id: str, data_path: str) -> LoadTabResultOutcome:
         """Load data_path into an existing tab after GuardService.check_load.
 
-        Call in the same owner-thread command; data_path is the selected file.
-        Capture current global parameters once before the adapter call, never tab
-        birth bindings. Retain its Save storage, not its aliases for analysis.
-        In the same entry, read the file's point/roles once for analysis and WB.
-        This reads current persisted values, not an unrecorded historical version.
-        Foreign-entry/pointless/EMPTY loads have no analysis source; context-free
-        analysis remains available. A missing required historical point document
-        commits history without a source and returns analysis_source_issue.
-        Schema, references and other I/O failures propagate before replacement. Retain native history without acquisition.
-        Return committed result details without validating or replacing form input.
-        Busy or cfg notification reentrancy rejects before loading;
-        incompatible files and restore
-        failures raise LoadDataError without replacing the previous result.
+        Call in the owner thread; data_path may be anywhere on disk. Restore
+        arrays/cfg and the recorded parameter environment without live point I/O,
+        location-derived identity or persistent storage. Missing/null snapshots
+        provide empty content; malformed snapshots never fall back to empty.
+        Metadata validates only requested fields, not unused historical sections.
+        Retain native history without acquisition or Form input replacement.
+        Busy or cfg notification reentrancy rejects before loading. Incompatible
+        files and restore failures raise LoadDataError before replacing the pane.
         """
         if self._state.is_tab_busy(tab_id):
             raise FailedPreconditionError(f"Tab {tab_id!r} is busy")
@@ -96,13 +91,22 @@ class LoadService:
         logger.info("load_result: tab_id=%r data_path=%r", tab_id, data_path)
         try:
             stored = load(Path(data_path))
-            metadata = metadata_from_container(stored)
+            metadata = metadata_content_from_container(stored)
             if metadata.experiment != tab.adapter.experiment_tag:
                 raise ValueError(
                     f"Expected experiment tag {tab.adapter.experiment_tag!r}, "
                     f"got {metadata.experiment!r}"
                 )
             restored = tab.adapter.restore(stored)
+            metadata = restored.record.metadata
+            if metadata is None:
+                raise ValueError("restored record has no metadata")
+            snapshot = metadata.parameter_snapshot
+            parameters = (
+                ParameterContext.empty()
+                if snapshot is None
+                else restore_parameters(snapshot)
+            )
         except NotImplementedError as exc:
             raise LoadDataError(
                 f"This tab does not support loading data files.\n\nDetails: {exc}",
@@ -119,17 +123,6 @@ class LoadService:
                 reason_code="invalid_data_file",
             ) from exc
 
-        metadata = restored.record.metadata
-        if metadata is None:
-            raise LoadDataError(
-                f"{data_path}: restored record has no metadata",
-                reason_code="invalid_data_file",
-            )
-        parameters = (
-            ParameterContext.empty()
-            if metadata.parameter_snapshot is None
-            else restore_parameters(metadata.parameter_snapshot)
-        )
         commit_run(
             self._state,
             tab_id,

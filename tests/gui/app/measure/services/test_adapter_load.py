@@ -1,7 +1,6 @@
 """Every registered value may attempt Load; incompatible files retain prior data."""
 
 from pathlib import Path
-from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
@@ -47,7 +46,8 @@ def test_load_value_accepts_native_data_and_keeps_it_when_next_file_is_unsupport
     outcome = service.load_result("tab", str(supported))
     retained = require_record(state.get_tab("tab").run)
     assert outcome.cfg_issue is None
-    assert retained.metadata == metadata
+    assert retained.metadata is not None
+    assert retained.metadata.project() == metadata
     assert retained.cfg == SavingCfg()
     np.testing.assert_array_equal(retained.result.signal, [1 + 2j, 3 - 4j, 5 + 6j])
 

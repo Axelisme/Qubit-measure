@@ -33,7 +33,7 @@ from zcu_tools.plotting.plots import NonPresentingHost, Plots
 
 from tests.gui.app.measure._form_fakes import form_resources, form_sources
 from tests.gui.app.measure._load_support import historical_metadata
-from tests.gui.app.measure._record_support import require_record
+from tests.gui.app.measure._record_support import require_metadata
 from tests.gui.session.ui._parameter_fakes import make_parameters
 
 
@@ -115,7 +115,7 @@ def test_default_analysis_params_retain_result_source(
         assert saved.value("$source_qubit.rate") == 1.0
     if loaded:
         assert state.get_tab("tab").run.source_operation_id is None
-        assert require_record(state.get_tab("tab").run).metadata == metadata
+        assert require_metadata(state.get_tab("tab").run) == metadata
         assert state.get_tab("tab").run.source_path == "native.h5"
 
 
