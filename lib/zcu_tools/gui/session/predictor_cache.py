@@ -1,4 +1,4 @@
-"""Versioned, dialog-owned simulator cache; never a component document."""
+"""Versioned detached predictor trial cache; never a component document."""
 
 from typing import Literal, Self
 

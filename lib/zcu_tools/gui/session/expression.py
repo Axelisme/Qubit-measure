@@ -74,9 +74,10 @@ _ALLOWED_NODES = (
 
 @dataclass(frozen=True)
 class EvalRef:
-    """Unresolved device-dialog expression, accepted at apply time.
+    """Unresolved field expression, accepted at apply time.
 
-    Bounds and target type belong to the field. This marker neither persists nor
+    expr is scalar expression text. type_ is int or float. minimum and maximum
+    are inclusive bounds in the field's units. This marker neither persists nor
     depends on cfg EvalValue or app-specific machinery.
     """
 
@@ -84,6 +85,22 @@ class EvalRef:
     type_: type
     minimum: float
     maximum: float
+
+
+def resolve_eval_ref(ref: EvalRef, parameters: ParameterContext | None) -> int | float:
+    """Resolve an apply-time expression to its target int/float and inclusive bounds.
+
+    ref carries the expression, target type and bounds in the field's own units.
+    parameters is a fixed capture; None permits pure arithmetic only. Invalid
+    expressions, coercions or out-of-range values raise ExpressionError. Source
+    provider failures propagate. This function changes no state and emits no events.
+    """
+    resolved = coerce_eval_result(
+        evaluate_numeric_expr(ref.expr, parameters), ref.type_
+    )
+    if not (ref.minimum <= float(resolved) <= ref.maximum):
+        raise ExpressionError(f"value {resolved} out of range")
+    return resolved
 
 
 def evaluate_numeric_expr(expr: str, parameters: ParameterContext | None) -> float:
