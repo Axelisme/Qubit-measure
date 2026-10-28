@@ -51,7 +51,8 @@ class ResultRun:
     entry. run_path is the absolute exact run directory. data_path is an existing
     data.h5 or None. figure_paths/analysis_paths are sorted existing PNG/JSON
     members. search_text is casefolded identity, roles, cfg and analysis content,
-    including tone names absent from roles. issues holds per-file read failures.
+    including tone names absent from roles. issues holds setup/ledger failures
+    for this entry and per-file read failures for this run.
     """
 
     key: str
@@ -71,10 +72,26 @@ class ResultRun:
 
 
 @dataclass(frozen=True)
+class ResultItemIssue:
+    """An unreadable item that cannot be represented by a run row.
+
+    entry is the Database entry name, or None for the Database root. path is the
+    absolute rejected/unreadable location. reason preserves the read or path
+    containment error. No contents below an escaping path have been indexed.
+    """
+
+    entry: str | None
+    path: Path
+    reason: str
+
+
+@dataclass(frozen=True)
 class ResultsIndex:
     """Detached project query snapshot; no open files, locks or live entry state.
 
     project_root is absolute. runs is sorted by entry then run-directory name.
+    issues records entries/run directories that could not be safely enumerated;
+    per-file and Result ledger failures remain in ResultRun.issues.
     Member selectors are exact indexed filenames, never arbitrary paths.
     Filesystem/schema errors propagate from document reads. Refresh by calling
     scan_results again; membership is fixed but reads see current file contents.
@@ -82,6 +99,7 @@ class ResultsIndex:
 
     project_root: Path
     runs: tuple[ResultRun, ...]
+    issues: tuple[ResultItemIssue, ...] = ()
 
     def get_run(self, key: str) -> ResultRun:
         """Return the run with opaque key; unknown keys raise KeyError."""
@@ -148,41 +166,87 @@ def scan_results(
     are listed. Without readable native metadata, match acquired events through
     successful saved events' exact member paths, never directory-name suffixes.
     Preserve unknown identities rather than guessing experiment or time from names.
-    Isolate malformed native/doc files in ResultRun.issues. Ledger/schema errors
-    propagate. Escaping symlinks raise ValueError. Never create files or locks.
+    Isolate setup, ledger and native/document failures in the affected runs'
+    issues. Missing setup means no Result entry, not an error. A failed ledger
+    leaves that entry's runs unregistered. Escaping members are excluded and
+    diagnosed without following them. Unenumerable entries/runs produce named
+    ResultsIndex.issues, not synthetic runs. Never create files or locks.
     """
     root = project_root.resolve()
     if entries is not None:
         for entry in entries:
             validate_path_segment(entry, field="entry")
-    database = _inside(root / "Database", root / "Database")
-    if not database.exists():
-        return ResultsIndex(root, ())
-    names = (
-        sorted(set(entries))
-        if entries is not None
-        else sorted(path.name for path in database.iterdir() if path.is_dir())
-    )
+    database = root / "Database"
+    try:
+        _inside(database, database)
+        if not database.exists():
+            return ResultsIndex(root, ())
+        names = (
+            sorted(set(entries))
+            if entries is not None
+            else sorted(path.name for path in database.iterdir())
+        )
+    except (OSError, ValueError) as error:
+        return ResultsIndex(root, (), (ResultItemIssue(None, database, str(error)),))
     runs: list[ResultRun] = []
+    issues: list[ResultItemIssue] = []
     for entry in names:
-        entry_path = _inside(database / entry, database / entry)
-        run_root = _inside(entry_path / "runs", entry_path / "runs")
-        if not run_root.exists():
-            continue
-        events = ResultEntry.read_events_snapshot(entry, result_root=root / "result")
-        acquisitions = _acquisitions(events)
-        saved_outputs = {
-            Path(output.path): event.payload.run_id
-            for event in events
-            if isinstance(event.payload, SavedPayload)
-            for output in event.payload.outputs
-            if output.status == "saved"
-        }
-        for path in sorted(run_root.iterdir()):
+        runs.extend(_scan_entry(root, entry, issues))
+    return ResultsIndex(root, tuple(runs), tuple(issues))
+
+
+def _scan_entry(
+    root: Path, entry: str, issues: list[ResultItemIssue]
+) -> list[ResultRun]:
+    location = root / "Database" / entry
+    try:
+        _inside(location, location)
+        if not location.is_dir():
+            return []
+        location /= "runs"
+        _inside(location, location)
+        if not location.exists():
+            return []
+        paths = sorted(location.iterdir())
+    except (OSError, ValueError) as error:
+        issues.append(ResultItemIssue(entry, location, str(error)))
+        return []
+    entry_issues: list[str] = []
+    events = _entry_events(root, entry, entry_issues)
+    acquisitions = _acquisitions(events)
+    saved_outputs = {
+        Path(output.path): event.payload.run_id
+        for event in events
+        if isinstance(event.payload, SavedPayload)
+        for output in event.payload.outputs
+        if output.status == "saved"
+    }
+    runs: list[ResultRun] = []
+    for path in paths:
+        try:
+            _checked_run(root, entry, path)
             if path.is_dir():
-                _checked_run(root, entry, path)
-                runs.append(_scan_run(entry, path, acquisitions, saved_outputs))
-    return ResultsIndex(root, tuple(runs))
+                runs.append(
+                    _scan_run(entry, path, acquisitions, saved_outputs, entry_issues)
+                )
+        except (OSError, ValueError) as error:
+            issues.append(ResultItemIssue(entry, path, str(error)))
+    return runs
+
+
+def _entry_events(root: Path, entry: str, issues: list[str]) -> tuple[LedgerEvent, ...]:
+    result = root / "result"
+    setup = result / entry / "setup.yaml"
+    try:
+        _inside(result, result)
+        _inside(result / entry, result / entry)
+        _inside(result / entry, setup)
+        if not setup.exists():
+            return ()
+        return ResultEntry.read_events_snapshot(entry, result_root=result)
+    except (OSError, ValueError) as error:
+        issues.append(f"{setup}: {error}")
+        return ()
 
 
 def _inside(root: Path, path: Path) -> Path:
@@ -224,11 +288,27 @@ def _acquisitions(events: tuple[LedgerEvent, ...]) -> Mapping[str, LedgerEvent]:
     return by_id
 
 
-def _members(run: Path, folder: str, pattern: str) -> tuple[Path, ...]:
-    directory = _inside(run, run / folder)
-    return tuple(
-        _inside(run, path) for path in sorted(directory.glob(pattern)) if path.is_file()
-    )
+def _members(
+    run: Path, folder: str, pattern: str, issues: list[str]
+) -> tuple[Path, ...]:
+    directory = run / folder
+    try:
+        _inside(run, directory)
+        if not directory.exists():
+            return ()
+        paths = sorted(path for path in directory.iterdir() if path.match(pattern))
+    except (OSError, ValueError) as error:
+        issues.append(f"{directory}: {error}")
+        return ()
+    members: list[Path] = []
+    for path in paths:
+        try:
+            _inside(run, path)
+            if path.is_file():
+                members.append(path)
+        except (OSError, ValueError) as error:
+            issues.append(f"{path}: {error}")
+    return tuple(members)
 
 
 def _metadata(path: Path | None, issues: list[str]) -> _SavedMetadata | None:
@@ -264,12 +344,18 @@ def _scan_run(
     path: Path,
     acquisitions: Mapping[str, LedgerEvent],
     saved_outputs: Mapping[Path, str],
+    entry_issues: list[str],
 ) -> ResultRun:
-    data_path = _inside(path, path / "data.h5")
-    data = data_path if data_path.is_file() else None
-    figures = _members(path, "figures", "*.png")
-    analysis = _members(path, "analysis", "*.json")
-    issues: list[str] = []
+    issues = list(entry_issues)
+    data_path = path / "data.h5"
+    try:
+        _inside(path, data_path)
+        data = data_path if data_path.is_file() else None
+    except (OSError, ValueError) as error:
+        issues.append(f"{data_path}: {error}")
+        data = None
+    figures = _members(path, "figures", "*.png", issues)
+    analysis = _members(path, "analysis", "*.json", issues)
     metadata = _metadata(data, issues)
     event = next(
         (
