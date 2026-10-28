@@ -38,6 +38,7 @@ from pydantic import BaseModel, TypeAdapter
 from ruamel.yaml import YAML
 
 from zcu_tools.format_version import FormatVersion, YamlMap, YamlValue, validate_header
+from zcu_tools.resources.file_lock import lock_path_for
 from zcu_tools.utils import atomic_replace
 
 type FieldPath = tuple[str, ...]
@@ -169,7 +170,7 @@ def _document_value(value: YamlValue | _Missing) -> DocumentValue:
 
 
 class LockTimeoutError(TimeoutError):
-    """Lock acquisition failed: lock_path is the sidecar file, timeout is seconds."""
+    """Lock acquisition failed: lock_path is the lock file, timeout is seconds."""
 
     def __init__(self, lock_path: Path, timeout: float) -> None:
         """Record the attempted lock_path and wait limit; no document was changed."""
@@ -463,7 +464,7 @@ class DocumentStore[T: BaseModel]:
     """
 
     # tolerated: Public kwargs/defaults independently select schema/version,
-    # validation/read-cleanup and sidecar lock policies.
+    # validation/read-cleanup and lock policies.
     def __init__(  # noqa: PLR0913
         self,
         path: Path,
@@ -499,14 +500,15 @@ class DocumentStore[T: BaseModel]:
         Without it, external dependencies are rechecked only on changed content
         or candidate validation during a nonempty edit.
 
-        lock_path selects a shared sidecar, defaulting to path + ".lock".
+        lock_path overrides the per-user runtime lock returned by lock_path_for(path).
+        The default creates the runtime lock directory on demand.
         lock_timeout is FileLock's wait in seconds (negative waits indefinitely).
-        Stores sharing a document must use the same sidecar. This lock does not
+        Stores sharing a document must use the same lock path. This lock does not
         synchronize threads that share a store; each handle owns its state.
 
         Missing/unreadable files, YAML/header/version/schema errors, invalid
         physical values and validate exceptions propagate without publication.
-        By default initialization reads without acquiring the sidecar, allowing
+        By default initialization reads without acquiring the lock, allowing
         creation under a caller-held lock. Writers must replace atomically.
 
         read_cleanup opts into locked disk-read cleanup, including initialization.
@@ -528,7 +530,9 @@ class DocumentStore[T: BaseModel]:
         self._validate = validate
         self._check_dependencies = check_dependencies
         self._read_cleanup = read_cleanup
-        self._lock_path = lock_path or Path(f"{self._path}.lock")
+        self._lock_path = (
+            lock_path if lock_path is not None else lock_path_for(self._path)
+        )
         self._lock_timeout = lock_timeout
         self._lock = FileLock(str(self._lock_path))
         self._editing = False
@@ -813,7 +817,7 @@ class DocumentStore[T: BaseModel]:
 
     @contextmanager
     def locked(self) -> Generator[None]:
-        """Hold this store's real reentrant sidecar lock until context exit.
+        """Hold this store's real reentrant file lock until context exit.
 
         Raise LockTimeoutError when acquisition exceeds lock_timeout. An outer
         locked() also holds through edit bodies and defers commit/refresh notices.
