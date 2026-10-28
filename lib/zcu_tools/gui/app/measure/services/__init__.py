@@ -32,9 +32,11 @@ if TYPE_CHECKING:
         create_persistence_caretaker,
     )
     from .guard import (
+        AdmissionDecision,
         GuardError,
         GuardService,
         RunInputs,
+        TabAction,
     )
     from .load import LoadService, LoadTabResultOutcome
     from .operation_gate import OperationGate, OperationKind
@@ -74,6 +76,8 @@ __all__ = [
     "OperationGate",
     "OperationKind",
     "PostAnalyzeService",
+    "AdmissionDecision",
+    "TabAction",
     "GuardError",
     "GuardService",
     "RunInputs",
@@ -118,6 +122,8 @@ _EXPORT_MODULES: dict[str, str] = {
     "OperationGate": ".operation_gate",
     "OperationKind": ".operation_gate",
     "PostAnalyzeService": ".post_analyze",
+    "AdmissionDecision": ".guard",
+    "TabAction": ".guard",
     "GuardError": ".guard",
     "GuardService": ".guard",
     "RunInputs": ".guard",

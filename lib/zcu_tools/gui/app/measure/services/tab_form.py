@@ -251,6 +251,28 @@ class TabFormResource:
             return result
         return self._form.to_cfg(result, self._sources.env)
 
+    def run_invalid_reason(self) -> str | None:
+        """Return the first Run-blocking cfg message, or None for valid input.
+
+        A missing Form returns its preparation error first. Model and lowering
+        errors use dotted field paths followed by their message and, for multiple
+        errors, a (+N more) suffix counting the remaining fields. This read is
+        allowed during notifications and does not accept or publish cfg, capture
+        sources, or change input. Revocation raises RESOURCE_GONE; author
+        lower-hook exceptions propagate, just as for result(). Editor-local
+        parse errors are not part of this resource's input.
+        """
+        if self.unavailable_reason is not None:
+            return self.unavailable_reason
+        result = self.result()
+        if not isinstance(result, FormErrors):
+            return None
+        path, message = next(iter(result.messages.items()))
+        label = ".".join(str(part) for part in path)
+        first = f"{label}: {message}" if label else message
+        remaining = len(result.messages) - 1
+        return f"{first} (+{remaining} more)" if remaining else first
+
     def diagnostics(self) -> tuple[FieldDiagnostic, ...]:
         """Return all current canonical errors and seed facts across every element.
 

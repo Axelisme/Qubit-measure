@@ -168,6 +168,40 @@ def open_tab(qapp: QApplication) -> Iterator[Callable[..., TabView]]:
     qapp.processEvents()
 
 
+def test_run_blocker_counts_resource_errors_with_component_driver(
+    open_tab: Callable[..., TabView], tmp_path: Path
+) -> None:
+    class TwoFields(ConfigBase):
+        first: float
+        second: float
+
+    resource = TabFormResource(
+        lambda _ctx: Form(TwoFields, {}),
+        capture=lambda _aliases: TabFormSources(FormEnv()),
+        mutation_allowed=lambda: True,
+    )
+    view = open_tab(resource=resource)
+    view.actions.refresh_interaction.side_effect = lambda _tab_id: (
+        view.tab.update_interaction_state(snapshot())
+    )
+    view.tab.resize(1200, 850)
+    view.tab.show()
+    ui = ComponentDriver(view.tab)
+    ui.screenshot(tmp_path / "cfg-two-errors.png")
+    assert not ui.observe("Run").enabled
+    assert (
+        ui.observe("Run").tooltip == "Config invalid: first: Field required (+1 more)"
+    )
+    ui.enter_text(object_name="form.input.first", value="1")
+    ui.screenshot(tmp_path / "cfg-one-error.png")
+    assert not ui.observe("Run").enabled
+    assert ui.observe("Run").tooltip == "Config invalid: second: Field required"
+    ui.enter_text(object_name="form.input.second", value="2")
+    ui.screenshot(tmp_path / "cfg-valid.png")
+    assert ui.observe("Run").enabled
+    assert ui.observe("Run").tooltip == ""
+
+
 def test_editor_input_reaches_the_resource_and_validity_gates_run(
     open_tab: Callable[..., TabView],
 ) -> None:

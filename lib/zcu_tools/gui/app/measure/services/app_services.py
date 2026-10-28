@@ -239,7 +239,7 @@ def build_app_services(  # noqa: PLR0913
     # (built above) — built after writeback (read-model dependency, ADR-0067).
     tab = TabService(state, registry, writeback, tab_forms, form_sources)
     workspace = WorkspaceService(state, tab, bus)
-    guard = GuardService(state)
+    guard = GuardService(state, access=access)
     load = LoadService(
         state,
         writeback,
@@ -275,7 +275,6 @@ def build_app_services(  # noqa: PLR0913
         run_background=lambda compute, on_done, on_error: background.submit(
             compute, on_done=on_done, on_error=on_error, run_in_pool=True
         ),
-        access=access,
     )
     tab_control = TabControlFacet(
         state=state,
@@ -298,7 +297,6 @@ def build_app_services(  # noqa: PLR0913
         writeback=writeback,
         resource_versions=resource_versions,
         bus=bus,
-        access=access,
     )
     reload_service = ExperimentReloadService(
         state=state,

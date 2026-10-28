@@ -372,10 +372,12 @@ WritebackService 不解析欄位、不補座標、不查裝置或 alias。
 每個 Run 都需要 SoC，guard 檢查 context、cfg 與連線。實驗的輸入驗證在 run 內執行。
 每個 adapter 都可嘗試 Load，LoadService 以檔案與 spec 判斷相容性，失敗保留舊成果。
 Qt tab 依 analysis／post-analysis 建立控制項，remote writeback subtab params 也檢查對應宣告。
-但 analyze permit 未查 analysis，非 interactive 的分析會進 FIT 路徑；
-post-analyze 入口未查 post-analysis。不可將 UI／remote 的局部檢查視為
-所有 application 入口的保證；補齊目標見
-[GUI capability draft](../../../../../docs/adr/draft/gui-adapter-capability-guards.md)。
+`GuardService.admit` 統一檢查 catalog availability、tab 前提、能力與 tab busy。
+Analyze 在 Run result 後檢查 analysis；Post-analyze 在 Primary result 後檢查 post-analysis。
+`capture_run_inputs` 先取得 Run decision，拒絕時以相同 reason/message raise GuardError。
+放行後才 accept cfg，執行時的 resource／reentrancy 錯誤保留原分類。
+`TabFormResource.run_invalid_reason()` 提供 cfg 首因與其他錯誤數，不接受或發布 cfg。
+Startup、其他 tab 的 Run 與 hardware exclusion 仍由 operation gate 裁決。
 
 ## Experiment reload
 

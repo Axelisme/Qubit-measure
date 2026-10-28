@@ -5,6 +5,7 @@ from collections.abc import Iterator
 import pytest
 from qtpy.QtWidgets import QLabel, QPushButton
 from zcu_tools.gui.app.measure.adapter import ParameterWriteback
+from zcu_tools.gui.app.measure.catalog import ExperimentAccess
 from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.services.guard import GuardService
 from zcu_tools.gui.app.measure.services.tab import TabService
@@ -137,7 +138,7 @@ def test_writeback_requires_selection_after_reopen_but_keeps_captured_destinatio
     captured = control.read_context()
     bus = BaseEventBus()
     service = WritebackService(control, arb_names=lambda: ())
-    guard = GuardService(application.state)
+    guard = GuardService(application.state, access=ExperimentAccess())
     facet = WritebackControlFacet(
         state=application.state,
         guard=guard,
@@ -208,7 +209,7 @@ def parameter_writeback_pane(
     service = WritebackService(control, arb_names=lambda: ())
     facet = WritebackControlFacet(
         state=application.state,
-        guard=GuardService(application.state),
+        guard=GuardService(application.state, access=ExperimentAccess()),
         writeback=service,
         resource_versions=application.state.version.snapshot,
         bus=bus,

@@ -6,6 +6,7 @@ from unittest.mock import MagicMock
 import numpy as np
 import pytest
 from zcu_tools.gui.app.measure.adapter import Adapter, SessionEnv
+from zcu_tools.gui.app.measure.catalog import ExperimentAccess
 from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.services.guard import GuardService
 from zcu_tools.gui.app.measure.services.load import LoadDataError, LoadService
@@ -47,7 +48,7 @@ def test_load_value_accepts_native_data_and_keeps_it_when_next_file_is_unsupport
     )
     supported = tmp_path / "supported.h5"
     metadata = write_native_file(supported, tag=SavingCore.AXES_SPEC.tag)
-    GuardService(state).check_load("tab")
+    GuardService(state, access=ExperimentAccess()).check_load("tab")
     outcome = service.load_result("tab", str(supported))
     retained = require_record(state.get_tab("tab").run)
     assert outcome.cfg_issue is None
@@ -57,7 +58,7 @@ def test_load_value_accepts_native_data_and_keeps_it_when_next_file_is_unsupport
 
     unsupported = tmp_path / "unsupported.h5"
     write_native_file(unsupported, tag="other/experiment")
-    GuardService(state).check_load("tab")
+    GuardService(state, access=ExperimentAccess()).check_load("tab")
     with pytest.raises(LoadDataError, match="Expected experiment tag") as error:
         service.load_result("tab", str(unsupported))
     assert error.value.reason_code == "invalid_data_file"

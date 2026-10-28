@@ -16,6 +16,7 @@ from zcu_tools.gui.app.measure.adapter import (
     AnalyzeRequest,
 )
 from zcu_tools.gui.app.measure.artifacts import SaveService
+from zcu_tools.gui.app.measure.catalog import ExperimentAccess
 from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.services.guard import GuardService
 from zcu_tools.gui.app.measure.services.load import LoadService
@@ -146,7 +147,8 @@ def test_host_retains_adapter_record_and_native_load_never_refills_input(
         ),
     )
     token = host.service.start_run(
-        GuardService(state).capture_run_inputs("tab"), plots=Plots(NonPresentingHost())
+        GuardService(state, access=ExperimentAccess()).capture_run_inputs("tab"),
+        plots=Plots(NonPresentingHost()),
     )
     assert host.background.quiesce()
     outcome = host.handles.poll(token)

@@ -17,6 +17,7 @@ from zcu_tools.gui.app.measure.adapter import (
     Adapter,
     SessionEnv,
 )
+from zcu_tools.gui.app.measure.catalog import ExperimentAccess
 from zcu_tools.gui.app.measure.events.run import RunFinishedPayload
 from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.services.app_services import (
@@ -96,7 +97,9 @@ def _acquire_to_terminal(
         replace(session.state.session_env, soc=MagicMock(), soccfg=MagicMock())
     )
     session.state.get_tab("tab").cfg.reset()
-    inputs = GuardService(session.state).capture_run_inputs("tab")
+    inputs = GuardService(session.state, access=ExperimentAccess()).capture_run_inputs(
+        "tab"
+    )
     finished: list[RunFinishedPayload] = []
 
     def terminal(payload: RunFinishedPayload) -> None:

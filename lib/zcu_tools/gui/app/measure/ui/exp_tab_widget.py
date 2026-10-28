@@ -36,7 +36,7 @@ from zcu_tools.gui.app.measure.adapter import AdapterCapabilities, AnalysisMode
 from zcu_tools.gui.app.measure.artifacts import ArtifactSaveCenter
 from zcu_tools.gui.app.measure.ui.interactive_frontend import InteractiveFrontend
 from zcu_tools.gui.expected_error import ExpectedError
-from zcu_tools.gui.form import FormErrors, FormModel, FormState
+from zcu_tools.gui.form import FormModel, FormState
 from zcu_tools.gui.lifetime import LifetimeScope
 from zcu_tools.gui.plotting import FigureContainer
 from zcu_tools.gui.session.library_entry import LibraryEntryInvalid
@@ -780,12 +780,9 @@ class ExpTabWidget(QWidget):
         """
         if self._cfg.unavailable_reason is not None:
             return self._cfg.unavailable_reason
-        errors = self._require_editor().errors()
+        errors = self._require_editor().local_parse_errors()
         if errors is None:
-            result = self._cfg.result()
-            errors = result if isinstance(result, FormErrors) else None
-        if errors is None:
-            return None
+            return self._cfg.run_invalid_reason()
         path, message = next(iter(errors.messages.items()))
         label = ".".join(str(part) for part in path)
         return f"{label}: {message}" if label else message

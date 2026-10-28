@@ -25,7 +25,7 @@ from zcu_tools.gui.app.measure.services.form_contracts import (
     CfgPreconditionError,
     CfgPreconditionReason,
 )
-from zcu_tools.gui.app.measure.services.guard import RunInputs
+from zcu_tools.gui.app.measure.services.guard import GuardError, RunInputs
 from zcu_tools.gui.app.measure.services.run import RunService
 from zcu_tools.gui.app.measure.state import State
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
@@ -116,9 +116,9 @@ def test_run_rejects_unaccepted_cfg_without_operation(application: Fixture) -> N
     tab_id = application.ctrl.tab_control.new_tab("cfg-contract")
     editor = application.ctrl.cfg_resources.lookup(tab_id)
     editor.write({("gain",): {"expr": "unfinished +"}})
-    with pytest.raises(CfgPreconditionError) as caught:
+    with pytest.raises(GuardError) as caught:
         application.ctrl.run_analyze_control.start_run(tab_id)
-    assert caught.value.reason is CfgPreconditionReason.NOT_VALID
+    assert caught.value.reason_code == "not_valid"
     assert application.ctrl.run_analyze_control.active_tab_operations() == ()
     assert application.ctrl.tab_control.get_running_tab_id() is None
     assert editor.input.data["gain"] == {"expr": "unfinished +"}
@@ -353,9 +353,9 @@ def test_authored_missing_module_expression_blocks_run(
     assert isinstance(result, FormErrors)
     assert ("gain",) in result.messages
     assert "Q1.module.x180" in result.messages[("gain",)]
-    with pytest.raises(CfgPreconditionError) as caught:
+    with pytest.raises(GuardError) as caught:
         services.guard.capture_run_inputs(tab_id)
-    assert caught.value.reason is CfgPreconditionReason.NOT_VALID
+    assert caught.value.reason_code == "not_valid"
 
 
 def test_reset_aliases_capture_once_for_run(
@@ -464,8 +464,9 @@ def test_unbound_alias_reports_named_invalid_input(
     result = cfg.result()
     assert isinstance(result, FormErrors)
     assert "qubit" in result.messages[("gain",)]
-    with pytest.raises(CfgPreconditionError):
+    with pytest.raises(GuardError) as caught:
         services.guard.capture_run_inputs(tab_id)
+    assert caught.value.reason_code == "not_valid"
 
 
 @pytest.mark.parametrize("fail_submit", [False, True])

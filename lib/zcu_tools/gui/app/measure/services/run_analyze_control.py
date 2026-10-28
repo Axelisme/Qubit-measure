@@ -10,7 +10,6 @@ from typing import TYPE_CHECKING, Literal, Protocol
 from zcu_tools.experiment.stop_signal import CancelResult
 from zcu_tools.gui.app.measure.adapter import AnalysisMode, AnalyzeRequest
 from zcu_tools.gui.app.measure.adapter.hooks import InteractiveFrontendEnv
-from zcu_tools.gui.app.measure.catalog import ExperimentAccess
 from zcu_tools.gui.app.measure.events.tab import (
     TabContentChangedPayload,
     TabContentFact,
@@ -20,6 +19,7 @@ from zcu_tools.gui.interactive import PluginDefinition, Session
 from zcu_tools.gui.plotting.explicit import QtPlotHost
 from zcu_tools.gui.session.context_types import CommandOrigin
 
+from .guard import GuardError, TabAction
 from .plot_lifecycle import discard_unpublished_plots
 
 logger = logging.getLogger(__name__)
@@ -176,7 +176,6 @@ class RunAnalyzeControlFacet:
             None,
         ]
         | None = None,
-        access: ExperimentAccess | None = None,
     ) -> None:
         self._state = state
         self._bus = bus
@@ -189,7 +188,6 @@ class RunAnalyzeControlFacet:
         self._render_host = render_host
         self._owner_scheduler = owner_scheduler
         self._run_background = run_background
-        self._access = access if access is not None else ExperimentAccess()
 
     def has_tab(self, tab_id: str) -> bool:
         return self._state.has_tab(tab_id)
@@ -240,9 +238,7 @@ class RunAnalyzeControlFacet:
         missing saved-point storage emits a diagnostic instead of an event.
         No refresh, focus substitution, Save or automatic retry occurs.
         """
-        self._access.require_available()
         inputs = self._guard.capture_run_inputs(tab_id)
-        self._ensure_tab_idle(tab_id)
         host = self._render_host()
         live_container = host.make_run_container(tab_id) if host is not None else None
         return self._run.start_run(
@@ -252,8 +248,7 @@ class RunAnalyzeControlFacet:
         )
 
     def load_tab_result(self, tab_id: str, data_path: str) -> LoadTabResultOutcome:
-        self._access.require_available()
-        self._guard.check_load(tab_id)
+        self._require_admission(tab_id, TabAction.LOAD)
         outcome = self._load.load_result(tab_id, data_path)
         self._run.release_view_plots(tab_id)
         preparation = self._tab.prepare_result_analysis(tab_id)
@@ -337,11 +332,9 @@ class RunAnalyzeControlFacet:
         *,
         run_operation_id: int | None = None,
     ) -> int:
-        self._access.require_available()
+        self._require_admission(tab_id, TabAction.ANALYZE)
         if run_operation_id is not None:
             self._state.require_run_operation(tab_id, run_operation_id)
-        self._guard.check_analyze(tab_id)
-        self._ensure_tab_idle(tab_id)
         tab = self._state.get_tab(tab_id)
         if tab.adapter.capabilities.analysis is AnalysisMode.INTERACTIVE:
             return self._start_interactive_analyze(tab_id, analyze_params_instance)
@@ -439,7 +432,7 @@ class RunAnalyzeControlFacet:
         operation_id: int | None = None,
         run_operation_id: int | None = None,
     ) -> int:
-        self._ensure_tab_idle(tab_id)
+        self._require_admission(tab_id, TabAction.POST_ANALYZE)
         if operation_id is not None:
             self._state.require_analysis_operation(tab_id, "analysis", operation_id)
         if run_operation_id is not None:
@@ -477,10 +470,10 @@ class RunAnalyzeControlFacet:
         )
         return plots
 
-    def _ensure_tab_idle(self, tab_id: str) -> None:
-        self._access.require_available()
-        if self._state.is_tab_busy(tab_id):
-            raise FailedPreconditionError(f"Tab {tab_id!r} is busy")
+    def _require_admission(self, tab_id: str, action: TabAction) -> None:
+        decision = self._guard.admit(tab_id, action)
+        if not decision.allowed:
+            raise GuardError(decision.message, reason_code=decision.reason or "")
 
     def get_post_analyze_result(self, tab_id: str) -> object | None:
         return self._tab.get_tab_post_analyze_result(tab_id)
