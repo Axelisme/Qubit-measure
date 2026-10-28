@@ -81,7 +81,10 @@ def fit_spectrum(
     peaks must have been detected on these inputs with options' thresholds.
     isolate_peaks=False retains the legacy whole-window fit for single-mode
     workflows. No candidate or fewer than six isolated samples raises
-    AnalysisFailed; invalid numeric inputs and optimizer failures propagate.
+    AnalysisFailed. No-candidate reasons distinguish prominence/SNR rejection
+    from observable widths below min_width_samples, listing centers in MHz and
+    widths in sample intervals. Invalid numeric inputs and optimizer failures
+    propagate.
     """
     expected = options.expected_center_mhz
     if expected is not None and not np.isfinite(expected):
@@ -104,7 +107,7 @@ def fit_spectrum(
     )
     if isolate_peaks:
         if selected is None:
-            raise AnalysisFailed("No candidate peaks above the prominence threshold")
+            raise AnalysisFailed(_no_candidate_message(freqs, observed, options))
         lower = max(
             (peak.center for peak in peaks if peak.center < selected.center),
             default=-np.inf,
@@ -153,4 +156,30 @@ def fit_spectrum(
         fitted,
         peaks,
         selected,
+    )
+
+
+def _no_candidate_message(
+    freqs: NDArray[np.float64],
+    observed: NDArray[np.float64],
+    options: FreqAnalyzeOptions,
+) -> str:
+    # Detect on sample indices to report observable widths even on uneven grids.
+    # Peak separation cannot reject every candidate; omit it for this diagnostic.
+    narrow_peaks = detect_peaks(
+        np.arange(freqs.size, dtype=np.float64),
+        observed,
+        min_prominence=options.min_prominence,
+        min_snr=options.min_snr,
+        min_width_samples=0,
+    )
+    if not narrow_peaks:
+        return "No candidate peaks pass the prominence and SNR thresholds"
+    details = "; ".join(
+        f"{freqs[int(peak.center)]:.6g} MHz (observable width {peak.width:.3g} samples)"
+        for peak in narrow_peaks
+    )
+    return (
+        "Candidate peaks pass the prominence and SNR thresholds but fail "
+        f"min_width_samples={options.min_width_samples:g} samples: {details}"
     )
