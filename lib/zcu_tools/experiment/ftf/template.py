@@ -24,15 +24,20 @@ from zcu_tools.simulate.adc import (
 )
 from zcu_tools.simulate.evolution import (
     EnvelopeSpec,
+    FluxWaveform,
     ModelSource,
     TimelineBatch,
 )
 from zcu_tools.simulate.ftf import (
+    FluxTrack,
     JointModel,
+    flux_waveform,
     model_source,
+    plateau_boundaries,
     readout_model,
     schedule,
 )
+from zcu_tools.simulate.lines import DistortionTerm, FluxLine
 
 from . import replay
 from .numeric import dc_flux, drive_sources, joint_parameters, resonators
@@ -93,7 +98,8 @@ class FTFTemplatePlan:
     """Detached numeric inputs for all points of one structural template.
 
     source: round-DC secular model source, including the Gibbs initial density.
-    batch: ns/GHz/rad charge/flux drives at fixed DC, ending at readout start.
+    batch: ns/GHz/rad microwave tracks and three-loop fast-flux schedule,
+        with continuous samples for filtered/varying flux, ending at readout start.
     readouts: per-ADC distinct terminal pulse/grid contents at DC, in declaration order.
     cavity_drives: tuple in batch.points order, each containing the earlier active
         readout-generator ReadoutPulse inputs in template slot order. Supports are
@@ -102,7 +108,7 @@ class FTFTemplatePlan:
         constant envelope values; nonconstant envelopes retain their local shape.
         Empty point tuples mean no cavity drive. Earlier pulses must end no later
         than terminal start; crossing pulses raise ValueError during planning.
-    batch includes cavity pulse boundaries, but not cavity shifts. Runtime
+    batch includes delayed flux events and cavity pulse boundaries, but not cavity shifts. Runtime
     queries final spans and advances densities and the dominant cavity branch
     sequentially. Planning never solves cavity fields, propagates a density or
     draws random samples.
@@ -143,6 +149,54 @@ def _readout_path(
     )
 
 
+def _flux_lines(settings: FTFSettings) -> dict[int, FluxLine]:
+    """Adapt one-loop resource calibrations into F1/C/F2 numeric source lines."""
+    lines = {}
+    for axis, (loop, line) in enumerate(
+        (
+            ("f1", settings.flux_lines.f1),
+            ("coupler", settings.flux_lines.coupler),
+            ("f2", settings.flux_lines.f2),
+        )
+    ):
+        if line is not None:
+            # Loop keys identify numeric sources; display names need not be unique.
+            lines[line.gen_ch] = FluxLine(
+                loop,
+                tuple(line.flux_phi0_per_gain if i == axis else 0.0 for i in range(3)),
+                line.delay_ns,
+                line.tau_ns,
+                tuple(
+                    DistortionTerm(t.amplitude, t.tau_ns) for t in line.distortion_terms
+                ),
+            )
+    return lines
+
+
+def _flux_boundaries(
+    tracks: tuple[FluxTrack, ...],
+    lines: dict[str, FluxLine],
+    ends: NDArray[np.float64],
+    waveform: FluxWaveform | None,
+) -> tuple[tuple[float, ...], ...]:
+    """Keep nominal events and actual sampled plateau edges inside each window."""
+    if not tracks:
+        return ()
+    events: list[set[float]] = [set() for _ in ends]
+    if waveform is not None:
+        for point, nodes in enumerate(plateau_boundaries(waveform)):
+            events[point].update(t for t in nodes if 0 <= t <= ends[point])
+    for track in tracks:
+        for point in np.flatnonzero(track.active):
+            start, duration = track.start_ns[point], track.duration_ns[point]
+            knots = track.envelopes[track.envelope_index[point]].sample_ns
+            interior = knots[(knots > 0) & (knots < duration)]
+            times = np.r_[start, start + duration, 2 * np.rint((start + interior) / 2)]
+            times += lines[track.source].delay_ns
+            events[point].update(float(t) for t in times if 0 <= t <= ends[point])
+    return tuple(tuple(sorted(point)) for point in events)
+
+
 def _timeline_batch(
     settings: FTFSettings,
     joint: JointModel,
@@ -151,23 +205,70 @@ def _timeline_batch(
     path: _ReadoutPath,
     memo: dict[int, EnvelopeSpec],
 ) -> TimelineBatch:
-    """Map charge/flux drive tracks onto the engine's fixed-DC schedule."""
+    """Separate microwave and fast-flux slots using the round's DC projection."""
     microwave = {s.gen_ch: name for name, s in settings.drive_lines.items()}
-    drives = []
+    lines = _flux_lines(settings)
+    drives, flux_tracks = [], []
     for event in template.events:
         if event.gen_ch == path.gen_ch or not np.any(event.active):
             continue
-        if event.gen_ch not in microwave:
+        if event.gen_ch in lines:
+            track = drive_track(event, lines[event.gen_ch].source, memo)
+            flux_tracks.append(
+                FluxTrack(
+                    track.port,
+                    track.start_ns,
+                    track.duration_ns,
+                    track.frequency_ghz,
+                    track.phase_rad,
+                    track.amplitude,
+                    track.envelopes,
+                    track.envelope_index,
+                    track.active,
+                )
+            )
+        elif event.gen_ch in microwave:
+            drives.append(drive_track(event, microwave[event.gen_ch], memo))
+        else:
             raise ValueError(f"unbound FTF control generator {event.gen_ch}")
-        drives.append(drive_track(event, microwave[event.gen_ch], memo))
-    fixed_dc = schedule(
-        (),
+    flux = schedule(
+        tuple(flux_tracks),
         dc_flux=joint.dc_flux,
-        lines=(),
+        lines=tuple(lines.values()),
         sample_period_ns=2.0,
         points=len(template.points),
     )
-    return TimelineBatch(template.points, tuple(drives), fixed_dc, end_ns)
+    by_source = {line.source: line for line in lines.values()}
+    continuous = any(
+        by_source[track.source].tau_ns
+        or by_source[track.source].distortion_terms
+        or np.any(track.frequency_ghz[track.active] != 0)
+        or any(
+            env.kind == "sampled" and np.any(env.samples != env.samples[0])
+            for env in track.envelopes
+        )
+        for track in flux_tracks
+    )
+    waveform = (
+        flux_waveform(
+            tuple(flux_tracks),
+            dc_flux=joint.dc_flux,
+            lines=tuple(lines.values()),
+            sample_period_ns=2.0,
+            points=len(template.points),
+        )
+        if continuous
+        else None
+    )
+    boundaries = _flux_boundaries(tuple(flux_tracks), by_source, end_ns, waveform)
+    return TimelineBatch(
+        template.points,
+        tuple(drives),
+        flux,
+        end_ns,
+        flux_waveform=waveform,
+        segment_boundaries=boundaries,
+    )
 
 
 def _cavity_batch(
@@ -181,9 +282,12 @@ def _cavity_batch(
         tuple(
             sorted(
                 {float(t) for pulse in point for t in (pulse.start_ns, pulse.end_ns)}
+                | set(
+                    batch.segment_boundaries[index] if batch.segment_boundaries else ()
+                )
             )
         )
-        for point in pulses
+        for index, point in enumerate(pulses)
     )
     return replace(batch, segment_boundaries=boundaries)
 
@@ -204,7 +308,13 @@ def plan_template(
     latest active readout-generator block per point ends evolution. Earlier
     readout pulses are cavity drives and must end no later than that start.
     The first ADC trigger must not precede it; triggers after pulse end are valid.
-    Overlapping/later drive-line controls do not affect the DC readout model.
+    Bound fast-flux generators pass through per-loop delay and multi-exponential
+    filtering, with 2 ns waveform samples and 1e-3 Phi0 midpoint bath levels.
+    Ideal constant platforms omit continuous samples to retain sudden switching.
+    Filtered or varying envelopes provide continuous samples for engine routing.
+    Flux endpoints and envelope knots join cavity boundaries. Snapshot DC still
+    defines the fixed projection, Gibbs state and terminal readout model.
+    Overlapping/later controls and unsettled flux do not change that DC ADC model.
     Constant complex readout envelopes fold into amplitude, enabling the exact field solution.
     readout supplies detached author capabilities; None adapts current settings.
     facts optionally shares physical inputs across templates/acquires. It must

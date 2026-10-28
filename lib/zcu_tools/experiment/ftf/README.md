@@ -1,6 +1,6 @@
 # FTF environment composition
 
-**Last updated:** 2026-10-27 (UTC), acquisition drift with evolve-local preparations
+**Last updated:** 2026-10-28 (UTC), flux-pulse routing and ramp-relaxation limits
 
 **讀者：** lab-author、framework-dev、agent。FTF 環境的組裝、數值接線與 acquisition 設定。
 
@@ -28,6 +28,7 @@ builder with an explicit YAML path. Neither caller uses an environment wrapper.
 - [Acquisition and numeric composition](#acquisition-and-numeric-composition)
   - [Preparation reuse](#preparation-reuse)
   - [Control conversion](#control-conversion)
+  - [Flux pulses](#flux-pulses)
   - [Cavity drives](#cavity-drives)
   - [Readout and sampling](#readout-and-sampling)
   - [Physical applicability](#physical-applicability)
@@ -291,9 +292,8 @@ ADC demodulation keeps its absolute-time grid. An isolated addressed carrier's
 conditional IQ center is therefore invariant under a common pulse/grid time
 shift. With multiple nonzero carriers, finite-window cross-tone leakage can
 still depend on the readout start. Pulse supports use absolute nearest-2-ns rounding, ties even.
-The model owner supplies a fixed-DC `ModelSource` and static schedule for each
-round. Charge and small-signal flux controls evolve every template to readout
-start. Each drive line selects full charge n or the derivative of the existing
+The model owner supplies a round-DC `ModelSource`. Charge and small-signal flux
+controls evolve every template to readout start. Each drive line selects full charge n or the derivative of the existing
 fixed-coordinate Hamiltonian at that round's DC point. Omitted operator means
 charge. Charge calibration uses GHz/gain; flux calibration uses Phi0/gain and
 multiplies the derivative in GHz/Phi0. Signed complex crosstalk uses
@@ -303,6 +303,90 @@ secular energy-basis rotations. They do not activate the shared engine's
 large-amplitude flux controls, filtering or flux-tail paths. Version 2 settings
 group physical values, named DC/drive lines, readout and numerics. Version 1 is
 not accepted.
+
+### Flux pulses
+
+Optional `flux_lines.f1`, `flux_lines.coupler` and `flux_lines.f2` each bind one
+generator to one loop. A pulse on that generator contributes signed gain times
+`flux_phi0_per_gain` in Phi0. The public `ftf` builder includes these channels in
+the mock QICK profile. Line display names may repeat across loops. Pulses on
+unbound generators still fail. With no flux lines, the existing fixed-DC batch
+and microwave controls remain unchanged.
+
+`plan_template` converts flux slots to `FluxTrack` inputs for the FTF numeric
+owner's `schedule` and `flux_waveform`. Each source passes through its own
+`delay_ns`, base `tau_ns` and signed `distortion_terms` before entering its loop.
+Complex envelopes and carrier phases form the real lab-frame signal before
+filtering. Nonzero flux carriers also select the continuous waveform.
+The numeric owner samples continuous waveforms every 2 ns and interpolates
+linearly. Pulse endpoints round independently to nearest 2 ns, ties even.
+Delayed pulse endpoints, sampled-envelope knots and actual interpolated plateau
+edges join cavity boundaries in `segment_boundaries`. Plateau edges follow the
+sampled waveform even when a line delay falls between DAC nodes.
+The snapshot still supplies the round's DC flux and Gibbs
+state. Pulses never change the snapshot or rebuild the fixed-DC projection.
+
+Bath levels round midpoint offsets from that DC to integer multiples of
+1e-3 Phi0, ties even. Offsets smaller than 5e-4 Phi0 snap to DC. Equal adjacent
+levels merge. Filtering retains tails until their conservative absolute sum is
+below 5e-4 Phi0 per loop, then appends DC. Signed cancellation does not shorten
+that bound. Evolution stops at terminal readout start even if a tail continues.
+The terminal ADC model always uses the snapshot DC, including when the pulse
+has not settled. Sequences that need DC readout must allow settling first.
+
+Ideal constant baseband platforms with zero tau and no distortion omit the
+continuous waveform. Without microwaves they use `t4`, with sudden basis changes
+between levels. Filtered or varying sampled envelopes provide a continuous
+waveform. Without microwaves, continuous varying spans use `adiabatic_map`.
+It preserves instantaneous eigenstate populations even when the row bath has
+nonzero rates. Those rates affect coherence decay only; this kernel models no
+interlevel transitions. The engine does not check the adiabatic condition.
+Neglecting population relaxation on a ramp is reasonable only when the ramp is
+much shorter than T1. A ramp near T1 underestimates relaxation on this route.
+With microwaves, continuous flux rows use `flux_dop853`.
+There is no separate sudden/adiabatic switch.
+
+The Hamiltonian uses the existing exact flux expansion inside the retained
+fixed-DC projection. Large excursions can leave that subspace. Users must check
+local and retained-level convergence for their excursion and ramp; these routes
+do not certify reset fidelity or nonadiabatic accuracy. Small-signal
+`DriveLine.operator: flux` remains a separate fixed-DC derivative control.
+The [fixed-DC flux benchmark](../../../../docs/discussions/2026-10-28-ftf-fixed-dc-flux-benchmark.md)
+provides bounds only, not certification. M16 is the largest successful run, not
+a converged reference; M24's first point and the M32 reference fail phase/gauge
+quadrature. The other five M24 candidates were not run. Neither the excursion
+range nor device reset fidelity is certified.
+
+#### Reset interpretation
+
+A reset sequence ramps to a park flux, holds there, returns to the snapshot DC,
+and starts terminal readout after the return. Disable drift when comparing hold
+times. Compute park Gibbs weights from `JointModel.eigensystem(park_flux)` at the
+configured temperature. Adiabatic return maps those energy-index populations
+back to DC. It does not rethermalize them to the DC Gibbs state.
+
+In the no-microwave sequence here, population relaxation occurs during a truly
+constant park span routed to `t4`, not during the continuous `adiabatic_map`
+ramps. In a two-state model, that constant hold approaches park equilibrium with
+`T1 = 1 / (rates[0,1] + rates[1,0])`, where `rates = joint.rates(park_flux)`.
+A larger park gap alone does not guarantee a shorter T1. Check the rates too.
+A filtered waveform routed entirely through `adiabatic_map` is not a T1 reset.
+A filter tail that has not formed a constant plateau does not guarantee reset.
+Callers must check the actual routing and allow settling into a constant park
+span, as well as settling back to DC before readout. The planner separates
+constant plateaus at the sampled waveform's motion boundaries. A merged row
+that still contains motion can remain `adiabatic_map` even if its quantized
+level is constant.
+
+`tests/experiment/ftf/test_flux_reset.py` checks synthetic templates through
+`plan_template` and `Engine.evolve`, observing the density at terminal readout
+start. Long constant holds approach park Gibbs populations after adiabatic
+return. The constant-envelope control instead returns a basis-rotated park
+density through sudden steps. These checks verify the mapping semantics and
+constant-hold relaxation, including line delays between waveform samples.
+The short ramps do not establish physical adiabaticity. These small-model checks
+also do not certify local/retained-level convergence, ADC reset fidelity, or
+large-excursion device accuracy.
 
 ### Cavity drives
 
