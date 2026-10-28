@@ -186,8 +186,7 @@ def test_background_weights_each_absolute_carrier_before_offset(path, envelope):
         result = adc.ConditionalReadout(current).responses(
             adc.ReadoutBatch(
                 current,
-                (incident,),
-                ((grid,),),
+                ((adc.ReadoutEvent(incident, (grid,)),),),
                 np.array([0], dtype=np.int64),
                 include_traces=path == "trace",
             )
@@ -230,7 +229,10 @@ def traces(model, pulse, grid, path):
         pulse = replace(pulse, envelope=lambda local: 1.0)
     result = reader.responses(
         adc.ReadoutBatch(
-            model, ((pulse,),), ((grid,),), np.array([0], dtype=np.int64), True
+            model,
+            ((adc.ReadoutEvent((pulse,), (grid,)),),),
+            np.array([0], dtype=np.int64),
+            True,
         )
     )
     if result.traces is None:
@@ -414,7 +416,10 @@ def test_shaped_envelope_is_delayed_before_receiver_offset_and_noise():
         result.traces[0], np.column_stack((expected.real, expected.imag)) + [0.2, -0.3]
     )
     inputs = adc.ReadoutBatch(
-        model, ((pulse,),), ((grid,),), np.array([0], dtype=np.int64), True
+        model,
+        ((adc.ReadoutEvent((pulse,), (grid,)),),),
+        np.array([0], dtype=np.int64),
+        True,
     )
     reader = adc.ConditionalReadout(model)
     batched = reader.responses(inputs)
@@ -447,7 +452,10 @@ def test_response_cache_distinguishes_receiver_delay_and_each_mismatch(parameter
             ),
         )
     inputs = adc.ReadoutBatch(
-        original, ((pulse,),), ((grid,),), np.array([0], dtype=np.int64), True
+        original,
+        ((adc.ReadoutEvent((pulse,), (grid,)),),),
+        np.array([0], dtype=np.int64),
+        True,
     )
     before = reader.responses(inputs)
     after = reader.responses(replace(inputs, model=changed))

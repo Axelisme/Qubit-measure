@@ -11,18 +11,31 @@ from zcu_tools.core.simulation import SamplingIdentity
 from zcu_tools.simulate.rounding import shot_layout
 
 from ._path_sampling import physical_shots
-from .model import RealArray, readonly_array
-from .populations import validate_populations
+from .projection import ProjectionReadout
 from .readout_batch import ReadoutBatch
+
+
+def _validate_event_layout(batch: ReadoutBatch, event_count: int) -> None:
+    """Validate event correspondence and stable per-read sample counts."""
+    if len(batch.events[0]) != event_count:
+        raise ValueError("batch event count must match readout populations")
+    counts = tuple(
+        len(grid.times_ns) for event in batch.events[0] for grid in event.grids
+    )
+    if any(
+        tuple(len(grid.times_ns) for event in events for grid in event.grids) != counts
+        for events in batch.events
+    ):
+        raise ValueError("sample counts must match across grid contents")
 
 
 @dataclass(frozen=True, init=False)
 class PreparedRawShots:
     """Retain noiseless inputs for deferred integrated ADC paths and noise.
 
-    populations: finite nonnegative float64 (*point_dims,states) normalized to
-        one within ADC's 1e-6 tolerance, in every batch model's state order.
-        Copied read-only; this constructor validates rather than normalizes.
+    readout: owned immutable ProjectionReadout. Its populations use every
+        batch model's identical state order. Each batch must have exactly the
+        same number of logical events as readout.populations.
     batches: constructor mapping from unique nonnegative ADC indices to ReadoutBatch;
         retained as an immutable tuple of (channel,batch) pairs. Each
         batch.content_index is flat C-order (prod(point_dims),), and the state
@@ -41,7 +54,7 @@ class PreparedRawShots:
     ValueError. Numeric/solver failures propagate at materialization time.
     """
 
-    populations: RealArray
+    readout: ProjectionReadout
     batches: tuple[tuple[int, ReadoutBatch], ...]
     reps: int
     rtol: float
@@ -49,14 +62,14 @@ class PreparedRawShots:
 
     def __init__(
         self,
-        populations: RealArray,
+        readout: ProjectionReadout,
         batches: Mapping[int, ReadoutBatch],
         *,
         reps: int,
         rtol: float = 1e-10,
         atol: float = 1e-12,
     ) -> None:
-        probabilities = validate_populations(populations)
+        probabilities = readout.populations[-1]
         if type(reps) is not int or reps < 0:
             raise ValueError("reps must be a nonnegative integer")
         if not np.isfinite([rtol, atol]).all() or min(rtol, atol) <= 0:
@@ -66,7 +79,7 @@ class PreparedRawShots:
         for channel, batch in batches.items():
             if type(channel) is not int or channel < 0:
                 raise ValueError("channel must be a nonnegative integer")
-            if batch.content_index.shape != (prod(probabilities.shape[:-1]),):
+            if batch.content_index.shape != (prod(readout.weights.shape[:-1]),):
                 raise ValueError("batch point shape must match populations")
             if len(batch.model.state_labels) != probabilities.shape[-1]:
                 raise ValueError("model state axis must match populations")
@@ -78,15 +91,8 @@ class PreparedRawShots:
                 raise ValueError("directional rates must match across ADCs")
             labels = batch.model.state_labels
             rates = batch.model.rates_per_ns
-            counts = tuple(len(grid.times_ns) for grid in batch.grids[0])
-            if any(
-                tuple(len(grid.times_ns) for grid in grids) != counts
-                for grids in batch.grids
-            ):
-                raise ValueError("sample counts must match across grid contents")
-        object.__setattr__(
-            self, "populations", readonly_array(probabilities, "populations")
-        )
+            _validate_event_layout(batch, len(readout.populations))
+        object.__setattr__(self, "readout", readout)
         object.__setattr__(self, "batches", tuple(batches.items()))
         object.__setattr__(self, "reps", reps)
         object.__setattr__(self, "rtol", rtol)
@@ -123,12 +129,13 @@ class ADCRawShots:
         point dimensions and must be in [0,len(point_dims)]. Invalid arguments,
         nonfinite receiver output or int64 overflow raise ValueError; baseline
         solver failures raise RuntimeError. Receiver noise is independent per
-        ADC/read/shot. Initial states and full continuous-time jump paths are
-        shared across every carrier, ADC and read, including all multi-jump
-        tails and gaps. No raw is shifted to fit round sums.
+        ADC/read/shot. One outcome is shared across the shot. Within each event,
+        initial states and full CTMC paths are shared across carriers, ADCs and
+        grids, including multi-jump tails and gaps. Different events draw
+        independent paths. No raw is shifted to fit round sums.
         """
         prepared = self.prepared
-        point_dims = prepared.populations.shape[:-1]
+        point_dims = prepared.readout.weights.shape[:-1]
         if type(reps) is not int or reps != prepared.reps:
             raise ValueError("reps must match the raw preparation")
         if type(avg_level) is not int or not 0 <= avg_level <= len(point_dims):

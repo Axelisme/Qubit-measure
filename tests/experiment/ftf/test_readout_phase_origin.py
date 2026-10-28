@@ -95,7 +95,8 @@ def centers(batch, route):
     return np.array(
         [
             solver.response(pulses, grids[0]).traces[0].mean(axis=0)
-            for pulses, grids in zip(batch.pulses, batch.grids, strict=True)
+            for events in batch.events
+            for pulses, grids in ((events[0].pulses, events[0].grids),)
         ]
     )
 
@@ -121,11 +122,23 @@ def test_reference_carrier_output_is_bitwise_equal_to_unconverted_phase(route):
     # Drop the zero-gain companion for a genuine single-tone response. The
     # existing common-origin phase expression must remain bit-for-bit intact.
     original_phase = float(np.deg2rad(23.0 - 360 * 6000.0 * 0.001))
-    single = replace(batch, pulses=tuple((pulses[0],) for pulses in batch.pulses))
+    single = replace(
+        batch,
+        events=tuple(
+            (replace(events[0], pulses=(events[0].pulses[0],)),)
+            for events in batch.events
+        ),
+    )
     unconverted = replace(
         single,
-        pulses=tuple(
-            (replace(pulses[0], phase_rad=original_phase),) for pulses in single.pulses
+        events=tuple(
+            (
+                replace(
+                    events[0],
+                    pulses=(replace(events[0].pulses[0], phase_rad=original_phase),),
+                ),
+            )
+            for events in single.events
         ),
     )
     np.testing.assert_array_equal(centers(single, route), centers(unconverted, route))

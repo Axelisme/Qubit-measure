@@ -6,7 +6,6 @@ from math import prod
 from pathlib import Path
 
 import numpy as np
-from numpy.typing import NDArray
 
 from zcu_tools.core.simulation import (
     AcquireRequest,
@@ -38,6 +37,7 @@ from zcu_tools.simulate.adc import (
     PopulationValidationError,
     PreparedRawShots,
     PreparedStatistics,
+    ProjectionReadout,
     ReadoutBatch,
     normalize_populations,
     sample_traces,
@@ -45,18 +45,19 @@ from zcu_tools.simulate.adc import (
 from zcu_tools.simulate.evolution import (
     Basis,
     Engine,
+    EvolutionResult,
     PathDiagnostics,
     batch_populations,
 )
 
 from .acquisition import FTFAcquisitionOptions
-from .cavity import CavityEvolutionOptions, evolve_plans
+from .cavity import CavityEvolutionOptions, evolve_plans, evolve_projective_plans
 from .drift import FTFCoherenceDrift
 from .preparation import EnvelopeEncoder, PreparationCache, preparation_key
 from .readout import FTFReadoutConfig, readout_configuration
 from .replay import BACKEND_VERSION, replay_versions
 from .telemetry import RoutingTelemetry
-from .template import FTFModelFacts, plan_template
+from .template import FTFModelFacts, FTFTemplatePlan, plan_template
 
 
 @dataclass(frozen=True)
@@ -68,22 +69,147 @@ class FTFNumericUse:
     rejected_rows is zero after successful ADC preparation, or the number of
     rows ADC rejected under its reported validation rule. The record survives
     that failure. A reused snapshot does not create a new solve or change it.
+    projection_outcomes counts retained histories per C-order point, not the
+    semiclassical cavity main state. projection_pruned_weight gives cumulative
+    removed probability before proportional redistribution. Both are empty for
+    terminal-only templates. Reuse preserves these author-only values.
     """
 
     acquire_sequence: int
     round_index: int
     paths: PathDiagnostics
     rejected_rows: int = 0
+    projection_outcomes: tuple[int, ...] = ()
+    projection_pruned_weight: tuple[float, ...] = ()
 
 
 @dataclass(frozen=True)
 class _Prepared:
-    populations: NDArray[np.float64]
+    readout: ProjectionReadout
     channels: tuple[ChannelReadout, ...]
     paths: PathDiagnostics
     sampler: PreparedStatistics | None
     raw: PreparedRawShots
     reuse_keys: tuple[bytes, ...]
+    projection_outcomes: tuple[int, ...]
+    projection_pruned_weight: tuple[float, ...]
+
+
+def _readout_distribution(
+    evolved: EvolutionResult,
+    plans: tuple[FTFTemplatePlan, ...],
+    point_dims: tuple[int, ...],
+    projected: ProjectionReadout | None,
+) -> ProjectionReadout:
+    if projected is not None:
+        order = np.argsort(evolved.points)
+        return ProjectionReadout(
+            projected.weights[order].reshape(
+                (*point_dims, projected.weights.shape[-1])
+            ),
+            tuple(
+                values[order].reshape((*point_dims, *values.shape[-2:]))
+                for values in projected.populations
+            ),
+        )
+    state_count = evolved.densities.shape[-1]
+    probabilities = np.empty((prod(point_dims), state_count))
+    dc_model = plans[0].source.model((0,) * plans[0].batch.flux.level.shape[1])
+    # Evolution and readout use the same retained DC energy coordinates.
+    basis = Basis(
+        dc_model.identity,
+        plans[0].readouts[0].batch.model.state_labels,
+        dc_model.eigenvectors,
+    )
+    populations = batch_populations(evolved.densities, basis, basis)
+    probabilities[evolved.points] = normalize_populations(populations)
+    return ProjectionReadout.unprojected(
+        probabilities.reshape((*point_dims, state_count))
+    )
+
+
+def _same_readout(first: ProjectionReadout, second: ProjectionReadout) -> bool:
+    return np.array_equal(first.weights, second.weights) and all(
+        np.array_equal(current, old)
+        for current, old in zip(first.populations, second.populations, strict=True)
+    )
+
+
+def _validate_event_layouts(plans: tuple[FTFTemplatePlan, ...]) -> None:
+    # Single-template planners already require point-consistent event contents.
+    layouts = [
+        (
+            len(plan.projective_reads[0]),
+            tuple(
+                sorted(
+                    (
+                        readout.channel,
+                        tuple(len(event.grids) for event in readout.batch.events[0]),
+                    )
+                    for readout in plan.readouts
+                )
+            ),
+        )
+        for plan in plans
+    ]
+    for index, layout in enumerate(layouts[1:], 1):
+        if layout != layouts[0]:
+            raise ValueError(
+                f"templates 0 and {index} have different projective/ADC event layouts: "
+                f"{layouts[0]} != {layout}"
+            )
+
+
+def _prepare_channels(
+    plans: tuple[FTFTemplatePlan, ...],
+    acquire: AcquireRequest,
+    settings: FTFSettings,
+) -> tuple[tuple[ChannelReadout, ...], dict[int, ReadoutBatch]]:
+    channels = []
+    raw_batches = {}
+    for channel_index, first in enumerate(plans[0].readouts):
+        conditionals = []
+        traces = []
+        raw_events = []
+        output_orders = []
+        content_index = np.empty(prod(acquire.point_dims), dtype=np.int64)
+        offset = 0
+        for plan in plans:
+            readout = plan.readouts[channel_index].batch
+            conditional = ConditionalReadout(
+                readout.model,
+                rtol=settings.numerics.solver.rtol,
+                atol=settings.numerics.solver.atol,
+            ).responses(replace(readout, include_traces=acquire.mode == "decimated"))
+            conditionals.append(conditional)
+            raw_events.extend(readout.events)
+            output_orders.append(readout.column_order)
+            if conditional.traces is not None:
+                traces.append(conditional.traces)
+            content_index[plan.batch.points] = offset + readout.content_index
+            offset += len(conditional.sums)
+        conditional = ConditionalSums(
+            np.concatenate([item.sums for item in conditionals]),
+            conditionals[0].sample_counts,
+            np.concatenate(traces) if traces else None,
+            conditionals[0].event_indices,
+            np.concatenate(output_orders),
+        )
+        raw_batches[first.channel] = ReadoutBatch(
+            first.batch.model,
+            tuple(raw_events),
+            content_index,
+            output_order=conditional.output_order,
+        )
+        channels.append(
+            ChannelReadout(
+                first.channel,
+                conditional,
+                content_index.reshape(acquire.point_dims),
+                first.batch.model.receiver,
+            )
+        )
+    return tuple(channels), raw_batches
 
 
 class FTFAcquire:
@@ -158,7 +284,7 @@ class FTFAcquire:
             )
         else:
             traces = sample_traces(
-                prepared.populations,
+                prepared.readout,
                 dict(prepared.raw.batches),
                 rtol=owner.settings.numerics.solver.rtol,
                 atol=owner.settings.numerics.solver.atol,
@@ -220,7 +346,13 @@ class FTFAcquire:
             if owner.telemetry is not None:
                 self.routing.append(prepared.paths.for_reuse(telemetry=True))
             owner.evaluations = (
-                FTFNumericUse(self.request.sequence, index, prepared.paths),
+                FTFNumericUse(
+                    self.request.sequence,
+                    index,
+                    prepared.paths,
+                    projection_outcomes=prepared.projection_outcomes,
+                    projection_pruned_weight=prepared.projection_pruned_weight,
+                ),
             )
             prepared.paths.warn_exceeded()
         return prepared
@@ -247,30 +379,46 @@ class FTFAcquire:
             )
             for template in acquire.templates
         )
-        evolved, reuse_keys = evolve_plans(
-            owner.engine,
-            plans,
-            facts,
-            owner.effective_settings,
-            options=CavityEvolutionOptions(key, owner.telemetry is not None, cancel),
-        )
+        _validate_event_layouts(plans)
+        projection = None
+        options = CavityEvolutionOptions(key, owner.telemetry is not None, cancel)
+        if any(any(plan.projective_reads) for plan in plans):
+            projection = evolve_projective_plans(
+                owner.engine, plans, facts, owner.effective_settings, options=options
+            )
+            evolved, reuse_keys = projection.result, projection.reuse_keys
+        else:
+            evolved, reuse_keys = evolve_plans(
+                owner.engine, plans, facts, owner.effective_settings, options=options
+            )
         if owner.telemetry is not None:
             self.routing.append(evolved.paths)
         # Retain solve diagnostics even when ADC preparation rejects a row.
-        owner.evaluations = (FTFNumericUse(acquire.sequence, index, evolved.paths),)
-        state_count = evolved.densities.shape[-1]
-        probabilities = np.empty((prod(acquire.point_dims), state_count))
-        dc_model = plans[0].source.model((0,) * plans[0].batch.flux.level.shape[1])
-        # Evolution returns DC energy coordinates; readout uses that same basis
-        # with the ADC model's explicit state order.
-        readout_basis = Basis(
-            dc_model.identity,
-            plans[0].readouts[0].batch.model.state_labels,
-            dc_model.eigenvectors,
+        order = np.argsort(evolved.points)
+        outcome_counts = (
+            () if projection is None else tuple(projection.outcomes[p] for p in order)
         )
-        populations = batch_populations(evolved.densities, readout_basis, readout_basis)
+        pruned_weight = (
+            ()
+            if projection is None
+            else tuple(projection.pruned_weight[p] for p in order)
+        )
+        owner.evaluations = (
+            FTFNumericUse(
+                acquire.sequence,
+                index,
+                evolved.paths,
+                projection_outcomes=outcome_counts,
+                projection_pruned_weight=pruned_weight,
+            ),
+        )
         try:
-            probabilities[evolved.points] = normalize_populations(populations)
+            distribution = _readout_distribution(
+                evolved,
+                plans,
+                acquire.point_dims,
+                None if projection is None else projection.readout,
+            )
         except PopulationValidationError as error:
             owner.evaluations = (
                 FTFNumericUse(
@@ -278,76 +426,39 @@ class FTFAcquire:
                 ),
             )
             raise
-        channels = [] if previous is None else list(previous.channels)
-        raw_batches = {} if previous is None else dict(previous.raw.batches)
         if previous is None:
-            for channel_index, first in enumerate(plans[0].readouts):
-                conditionals = []
-                traces = []
-                raw_pulses = []
-                raw_grids = []
-                content_index = np.empty(prod(acquire.point_dims), dtype=np.int64)
-                offset = 0
-                for plan in plans:
-                    readout = plan.readouts[channel_index].batch
-                    conditional = ConditionalReadout(
-                        readout.model,
-                        rtol=owner.settings.numerics.solver.rtol,
-                        atol=owner.settings.numerics.solver.atol,
-                    ).responses(
-                        replace(readout, include_traces=acquire.mode == "decimated")
-                    )
-                    conditionals.append(conditional)
-                    raw_pulses.extend(readout.pulses)
-                    raw_grids.extend(readout.grids)
-                    if conditional.traces is not None:
-                        traces.append(conditional.traces)
-                    content_index[plan.batch.points] = offset + readout.content_index
-                    offset += len(conditional.sums)
-                conditional = ConditionalSums(
-                    np.concatenate([item.sums for item in conditionals]),
-                    conditionals[0].sample_counts,
-                    np.concatenate(traces) if traces else None,
-                )
-                raw_batches[first.channel] = ReadoutBatch(
-                    first.batch.model,
-                    tuple(raw_pulses),
-                    tuple(raw_grids),
-                    content_index,
-                )
-                channels.append(
-                    ChannelReadout(
-                        first.channel,
-                        conditional,
-                        content_index.reshape(acquire.point_dims),
-                        first.batch.model.receiver,
-                    )
-                )
-        probabilities = probabilities.reshape((*acquire.point_dims, state_count))
-        probabilities.setflags(write=False)
-        if previous is not None and np.array_equal(probabilities, previous.populations):
+            channels, raw_batches = _prepare_channels(plans, acquire, owner.settings)
+        else:
+            channels, raw_batches = previous.channels, dict(previous.raw.batches)
+        if previous is not None and _same_readout(distribution, previous.readout):
             sampler = previous.sampler
             raw = previous.raw
         else:
             sampler = (
-                PreparedStatistics(probabilities, tuple(channels), reps=acquire.reps)
+                PreparedStatistics(
+                    distribution,
+                    tuple(channels),
+                    reps=acquire.reps,
+                )
                 if acquire.mode == "integrated"
                 else None
             )
             raw = PreparedRawShots(
-                probabilities,
+                distribution,
                 raw_batches,
                 reps=acquire.reps,
                 rtol=owner.settings.numerics.solver.rtol,
                 atol=owner.settings.numerics.solver.atol,
             )
         return _Prepared(
-            probabilities,
+            distribution,
             tuple(channels),
             evolved.paths.for_reuse(telemetry=False),
             sampler,
             raw,
             reuse_keys,
+            outcome_counts,
+            pruned_weight,
         )
 
 
@@ -602,6 +713,12 @@ class FTFSource:
             rounds=len(rounds),
             wall_s=wall_s,
             paths=paths,
+            projection_outcomes=self.evaluations[-1].projection_outcomes
+            if paths and self.evaluations
+            else (),
+            projection_pruned_weight=self.evaluations[-1].projection_pruned_weight
+            if paths and self.evaluations
+            else (),
         )
 
     def close(self) -> None:
