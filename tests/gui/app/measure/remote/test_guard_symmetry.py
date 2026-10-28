@@ -58,6 +58,7 @@ def _dispatch(ctrl: Controller, method: str, params: Mapping[str, object]) -> ob
         render_view=None,
         operation_control=ctrl.operation_control,
         save_control=ctrl.save_control,
+        writeback_control=ctrl.writeback_control,
         tab_control=ctrl.tab_control,
     )
     try:
@@ -103,6 +104,7 @@ _ADMISSION_REQUESTS = [
     ("tab.load_data", {"data_path": "missing.h5"}),
     ("tab.analyze", {"updates": {}, "run_operation_id": 999}),
     ("tab.post_analyze", {"updates": {}, "operation_id": 999}),
+    ("tab.writeback_write", {"subtab_id": "analysis", "write": [{"id": "param-1"}]}),
 ]
 
 

@@ -18,7 +18,8 @@ from zcu_tools.gui.app.measure.remote.handlers.run_save import (
 from zcu_tools.gui.app.measure.remote.handlers.writeback import (
     h_tab_writeback_write,
 )
-from zcu_tools.gui.remote.errors import RemoteError
+from zcu_tools.gui.app.measure.services import AdmissionDecision, TabAction
+from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 from zcu_tools.gui.session.context_types import CommandOrigin
 
 
@@ -149,6 +150,59 @@ def test_writeback_selects_its_pane_before_shared_draft_changes(pane, headless):
         },
     ) == {"written": []}
     assert order == (["write"] if headless else [("t", pane), "write"])
+
+
+@pytest.mark.parametrize("pane", ["analysis", "post_analysis"])
+@pytest.mark.parametrize(
+    ("reason", "message", "code", "wire_reason"),
+    [
+        ("unknown_tab", "Unknown tab", ErrorCode.INVALID_PARAMS, ""),
+        (
+            "experiment_unavailable",
+            "Experiments are unavailable during reload or shutdown",
+            ErrorCode.PRECONDITION_FAILED,
+            "experiment_unavailable",
+        ),
+        (
+            "no_context",
+            "No active context",
+            ErrorCode.PRECONDITION_FAILED,
+            "no_context",
+        ),
+        (
+            "no_analyze_result",
+            "No primary analyze result",
+            ErrorCode.PRECONDITION_FAILED,
+            "no_analyze_result",
+        ),
+        ("tab_busy", "Tab is busy", ErrorCode.PRECONDITION_FAILED, "tab_busy"),
+    ],
+)
+def test_denied_writeback_does_not_follow_or_write(
+    pane, reason, message, code, wire_reason
+):
+    """Every WRITEBACK denial precedes view selection and draft mutation."""
+    adapter = MagicMock()
+    adapter.ctrl.admit.return_value = AdmissionDecision(False, reason, message)
+    with pytest.raises(RemoteError) as caught:
+        h_tab_writeback_write(
+            adapter,
+            {
+                "tab_id": "t",
+                "subtab_id": pane,
+                "write": [{"id": "param-1", "value": 42}],
+            },
+        )
+    error = caught.value
+    assert (error.code, error.message, error.reason, error.data) == (
+        code,
+        "unknown tab_id: 't'" if reason == "unknown_tab" else message,
+        wire_reason,
+        None,
+    )
+    adapter.ctrl.admit.assert_called_once_with("t", TabAction.WRITEBACK)
+    adapter.render_view.select_tab_pane.assert_not_called()
+    adapter.writeback_control.write_writeback_for_pane.assert_not_called()
 
 
 def test_failed_writeback_view_selection_leaves_draft_untouched():
