@@ -1,6 +1,6 @@
 # gui/session/ — 量測 session core
 
-**Last updated:** 2026-10-28
+**Last updated:** 2026-10-29
 
 **讀者：** framework-dev。Session 層的資源綁定、operation 與共用對話框分工。
 
@@ -226,11 +226,13 @@ Run、WB 與目前 point 的 Inspect Set 都要求先選取或建立工作點。
 
 `PredictFreqRequest` 與 `CalibrateOffsetRequest` 帶 frame 與完整 device_values。`PredictCurveRequest`／`PredictMatrixCurveRequest` 另指定 axis_device、native values 與其他固定 device_values，掃描軸不需要當下值。Service 的 `calibrate_offset` 只回 additive Φ0 correction、actual MHz 與 clamped；caller 把 correction 加到目前 offset。Flux 數學由 `analysis.flux` 擁有，GUI→analysis 依賴沿用 C8／C9。
 
-Dialog 持有 cache、device 訂閱、tracked table、calibration 與持續隱藏／重開的生命週期。兩個具體 child QWidget 分別持有參數編輯與曲線互動的 controls 和局部 state。子元件不取得整個 dialog，也不讀其他 owner 的私有狀態。Programmatic 預填同步完成整批編輯，再由 dialog 停止參數 timer、立即刷新、同步 calibration 並保存一次。User edit 則先清舊結果、同步狀態及保存，再啟動 150ms debounce。
+Qt-free 的 `PredictorTrial` 保存 model、能量草稿、可選 flux frame、offset、各儀器值與橫軸儀器。它集中組裝請求，提供 predict、table 列值、曲線座標、欄位錯誤、校準 readiness 與 calibration。校準頻率解析回傳具名結果，不 logging；control 的未預期例外原樣傳出，由 dialog 記錄。Trial 不持有 widget。
+
+`PredictorParameterEditor` 與 `PredictorFluxEditor` 必須接收同一份 trial，只呈現與提交草稿。`PredictorCurveTabs` 持有曲線與跨圖互動。Dialog 保留版面、tracked table、live mode、timer、status、檔案對話框、marker 與生命週期，不把整個 dialog 交給 child。它只在載入 frame 時讀取 device cache，沒有 device 訂閱；live 值由宿主供應。Programmatic 預填同步完成整批編輯，再由 dialog 停止參數 timer、立即刷新、同步 calibration 並保存一次。User edit 則先清舊結果、同步狀態及保存，再啟動 150ms debounce。校準先呈現新 offset，再發布成功 status。使用者 2026-10-29 裁決與原先的 widget 分工見 ADR-0067。
 
 `simulate.fluxonium.predict.FluxoniumParams` 與 `simulate.transmon.TransmonParams` 保存可未知的具名物理輸入，missing() 指出缺項。
 齊全且有效才建立中性 query model。Service 不持有 installed model，不讀 dialog。
 PredictorService 透過 ContextControlPort 取得 ResultEntry 擁有的 predictors_path。list_files 列出當前 entry 的 predictors/*.json 檔名，load_file 只接受含 .json 的單一檔名，拒絕絕對路徑與路徑片段。resources.predictor_file 擁有 JSON 格式與驗證。未開 entry 時清單為空，load_file 拒絕；開 entry 後不必選工作點就能載入。格式與檔案錯誤向 caller 傳遞，不以預設參數代替。
 Dialog 選檔後按 Load 才預填本地 energy/frame trial。每台儀器的值由 device cache 帶入，缺值留白，操作者可改。預設橫軸為檔案第一台儀器，不讀 component。Refresh files 保留選取但不載入；沒有檔案時提示開 entry 或新增檔案。重開視窗不覆寫手動值。能量旁標 GHz，d 無因次；儀器值各用檔內單位，offset 用 Φ0。校準式預設空白。能量留空代表 None，非法文字顯示具名錯誤。查詢與 Calibrate 不寫元件、來源檔案或版本，只有 Save as 明確寫出指定 v2 檔。
 模型選單有 Fluxonium 與 SQUID transmon，各自顯示自己的能量欄位，flux 欄位共用。載入檔案會依其 model 選模型。Fluxonium 顯示頻率與 |n|、|phi| 曲線。Transmon 沒有矩陣元素能力，只顯示頻率曲線。
-Measure registry 啟用獨立 predictor.json user cache。Dialog 的 PredictorSnapshot v2 保存 model、nullable 能量、可選 flux frame、已知 native 值與所選軸。SingleFileCaretaker 在可解析編輯與關閉時保存，非法草稿不覆寫上次 cache。Standalone caller 用 enable_parameter_cache(cache_dir=...) 啟用隔離 cache，立即還原。舊版或無效 cache 回空 trial 並顯示錯誤，不遷移、不讀寫 component DocumentStore。
+Measure registry 啟用獨立 predictor.json user cache。`gui/session/predictor_cache.py` 擁有 PredictorSnapshot v2 與 codec，格式不變。Trial 的 snapshot／restore 保存及替換 model、nullable 能量、可選 flux frame、已知 native 值與所選軸；PredictorFile 匯出只含能量與 frame，來源未知。Dialog 只協調控件呈現、SingleFileCaretaker 與另存 I/O。Caretaker 在可解析編輯與關閉時保存，非法草稿不覆寫上次 cache。Standalone caller 用 enable_parameter_cache(cache_dir=...) 啟用隔離 cache，立即還原。舊版或無效 cache 回空 trial 並顯示錯誤，不遷移、不讀寫 component DocumentStore。
