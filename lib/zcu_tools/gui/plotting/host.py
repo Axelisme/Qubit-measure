@@ -150,7 +150,7 @@ def dump_plot_state() -> PlotStateSnapshot:
     attached_figures = tuple(
         sorted(
             (
-                AttachedFigureSnapshot(id(fig), str(container.object_name))
+                AttachedFigureSnapshot(id(fig), container.object_name)
                 for fig, container in list(_fig_container_registry.items())
             ),
             key=lambda entry: entry.figure_id,

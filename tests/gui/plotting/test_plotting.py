@@ -3,7 +3,13 @@
 from __future__ import annotations
 
 import weakref
+from collections.abc import Callable, Iterator
 
+import pytest
+from matplotlib.backend_bases import FigureManagerBase
+from matplotlib.backends.backend_qt import FigureManagerQT
+from matplotlib.figure import Figure
+from qtpy.QtCore import QCoreApplication, QEvent
 from qtpy.QtWidgets import QApplication, QLabel, QStackedWidget
 from zcu_tools.gui.plotting import (
     FigureContainer,
@@ -21,12 +27,59 @@ def _make_container() -> tuple[FigureContainer, QStackedWidget]:
     return FigureContainer(stack, placeholder), stack
 
 
-def test_attach_existing_figure_to_container(qapp):
-    del qapp
+@pytest.fixture
+def make_figure(qapp: QApplication) -> Iterator[Callable[[], Figure]]:
+    """Delete the Qt manager windows created by this test's pyplot figures."""
     import matplotlib.pyplot as plt
 
-    container, stack = _make_container()
-    fig = plt.figure()
+    owned: list[tuple[Figure, FigureManagerBase | None]] = []
+
+    def make() -> Figure:
+        figure = plt.figure()
+        owned.append((figure, figure.canvas.manager))
+        return figure
+
+    yield make
+
+    for figure, manager in reversed(owned):
+        # pyplot.close hides the manager window but does not delete its QObject.
+        try:
+            plt.close(figure)
+        finally:
+            if isinstance(manager, FigureManagerQT):
+                manager.window.deleteLater()
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete.value)
+    qapp.processEvents()
+
+
+@pytest.fixture
+def make_container(
+    qapp: QApplication,
+) -> Iterator[Callable[[], tuple[FigureContainer, QStackedWidget]]]:
+    """Own presentation cleanup even when an attachment assertion fails."""
+    owned: list[tuple[FigureContainer, QStackedWidget]] = []
+
+    def make() -> tuple[FigureContainer, QStackedWidget]:
+        presentation = _make_container()
+        owned.append(presentation)
+        return presentation
+
+    yield make
+
+    for container, stack in reversed(owned):
+        try:
+            container.clear_dynamic_canvases()
+        finally:
+            stack.deleteLater()
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete.value)
+    qapp.processEvents()
+
+
+def test_attach_existing_figure_to_container(make_container, make_figure):
+    import matplotlib.pyplot as plt
+
+    container, stack = make_container()
+    fig = make_figure()
 
     canvas = attach_existing_figure_to_container(fig, container)
 
@@ -37,13 +90,12 @@ def test_attach_existing_figure_to_container(qapp):
     plt.close(fig)
 
 
-def test_plot_state_snapshot_and_invariants(qapp):
-    del qapp
+def test_plot_state_snapshot_and_invariants(make_container, make_figure):
     import matplotlib.pyplot as plt
 
     # This test observes the public snapshot, not the stack presentation.
-    container, _ = _make_container()
-    fig = plt.figure()
+    container, _ = make_container()
+    fig = make_figure()
     attach_existing_figure_to_container(fig, container)
 
     state = dump_plot_state()
@@ -58,7 +110,6 @@ def test_plot_state_snapshot_and_invariants(qapp):
 def test_snapshot_identifies_live_container_and_forgets_deleted_owner(qapp):
     """Diagnostics name the live owner, not a figure's pending Python GC cycle."""
     from matplotlib.figure import Figure
-    from qtpy.QtCore import QCoreApplication, QEvent
 
     container, stack = _make_container()
     stack.setObjectName("snapshot-owner")
@@ -76,7 +127,7 @@ def test_snapshot_identifies_live_container_and_forgets_deleted_owner(qapp):
     assert id(figure) not in dump_plot_state().attached_figure_ids
 
 
-def test_two_figures_coexist_in_one_container(qapp):
+def test_two_figures_coexist_in_one_container(make_container, make_figure):
     """Regression: a run/analyze figure and a post-analysis figure share one
     container's stack. Alternating attaches (A, B, A) must NOT delete the other
     figure's canvas — both stay alive, and the last-attached is current.
@@ -85,13 +136,12 @@ def test_two_figures_coexist_in_one_container(qapp):
     old single-slot ``_canvas_widget`` evicted the other figure's canvas, whose
     dead wrapper was then reused on the next attach and crashed.
     """
-    del qapp
     import matplotlib.pyplot as plt
     from qtpy import sip
 
-    container, stack = _make_container()
-    fig_a = plt.figure()  # run/analyze figure
-    fig_b = plt.figure()  # post-analysis figure
+    container, stack = make_container()
+    fig_a = make_figure()  # run/analyze figure
+    fig_b = make_figure()  # post-analysis figure
     try:
         canvas_a = attach_existing_figure_to_container(fig_a, container)
         canvas_b = attach_existing_figure_to_container(fig_b, container)
@@ -115,16 +165,15 @@ def test_two_figures_coexist_in_one_container(qapp):
         plt.close(fig_b)
 
 
-def test_attach_self_heals_dead_canvas_wrapper(qapp):
+def test_attach_self_heals_dead_canvas_wrapper(make_container, make_figure):
     """Defense: if a figure's canvas widget is force-deleted out from under it,
     re-attaching the same figure builds a fresh canvas instead of crashing on
     the dead wrapper."""
-    del qapp
     import matplotlib.pyplot as plt
     from qtpy import sip
 
-    container, stack = _make_container()
-    fig = plt.figure()
+    container, stack = make_container()
+    fig = make_figure()
     try:
         canvas = attach_existing_figure_to_container(fig, container)
 
@@ -192,7 +241,7 @@ def test_registry_evicts_gc_collected_figure(qapp):
             qapp.processEvents()
 
 
-def test_new_figure_does_not_detach_other_container(qapp):
+def test_new_figure_does_not_detach_other_container(qapp, make_figure):
     """Root fix: attaching a new figure to container B never detaches the canvas
     of an unrelated container A. A ghost figure is publicly attached to A, then
     detached and released for GC without popping its registry mapping. After
@@ -209,7 +258,7 @@ def test_new_figure_does_not_detach_other_container(qapp):
         container_b, stack_b = _make_container()
         try:
             # A keeps a real, current canvas of its own.
-            fig_a = plt.figure()
+            fig_a = make_figure()
             try:
                 canvas_a = attach_existing_figure_to_container(fig_a, container_a)
                 assert stack_a.currentWidget() is canvas_a
@@ -230,7 +279,7 @@ def test_new_figure_does_not_detach_other_container(qapp):
                     "ghost was not GC'd; test requires weak eviction"
                 )
 
-                fig_b = plt.figure()
+                fig_b = make_figure()
                 try:
                     canvas_b = attach_existing_figure_to_container(fig_b, container_b)
                     # B got its own canvas; A is untouched (still showing A).
@@ -255,18 +304,17 @@ def test_new_figure_does_not_detach_other_container(qapp):
                 qapp.processEvents()
 
 
-def test_attach_ignores_stale_previous_container_entry(qapp):
+def test_attach_ignores_stale_previous_container_entry(make_container, make_figure):
     """Stale-entry defense: if the registry maps a figure to a container that no
     longer hosts its canvas, attaching to a new container must NOT call
     detach_canvas on the stale one (which would flip it to its placeholder)."""
-    del qapp
     import matplotlib.pyplot as plt
 
-    stale_container, stale_stack = _make_container()
-    target_container, target_stack = _make_container()
+    stale_container, stale_stack = make_container()
+    target_container, target_stack = make_container()
 
-    other_fig = plt.figure()
-    fig = plt.figure()
+    other_fig = make_figure()
+    fig = make_figure()
     try:
         # Detach presentation without dropping the figure's container mapping.
         stale_canvas = attach_existing_figure_to_container(fig, stale_container)

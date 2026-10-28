@@ -110,7 +110,11 @@ def make_view() -> MagicMock:
     view = MagicMock()
     view.show_status_message = MagicMock()
     view.show_error_dialog = MagicMock()
+    # Wire-contract tests have no Qt presentation owners. Unconfigured Mock
+    # containers would retain attached canvases in their call histories.
     view.make_run_container = MagicMock(return_value=None)
+    view.make_analysis_container = MagicMock(return_value=None)
+    view.make_post_analysis_container = MagicMock(return_value=None)
     # shaped View surface so Controller.open_dialog / take_figure_screenshot_for_subtab
     # / get_view_snapshot have somewhere to land in tests.
     view._open_dialogs = []
