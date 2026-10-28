@@ -609,6 +609,7 @@ def _diagnostic_rows(
     ]
 
 
+# tolerated: The preparation stage supplies separate sample/fit windows and their range, count and provenance facts.
 def _dephasing_summary_table(  # noqa: PLR0913
     *,
     window: T2WindowData,

@@ -51,8 +51,7 @@ class LedgerSection(QWidget):
 
         # Header — whole row is clickable (S1/A2).
         self._header = QWidget()
-        # tolerated: QtPy promotes the binding enum members onto Qt at runtime.
-        self._header.setCursor(Qt.PointingHandCursor)  # pyright: ignore[reportAttributeAccessIssue]
+        self._header.setCursor(Qt.CursorShape.PointingHandCursor)
         self._header.setObjectName("ledgerHeader")
         header_row = QHBoxLayout(self._header)
         header_row.setContentsMargins(4, 4, 4, 4)
@@ -94,8 +93,7 @@ class LedgerSection(QWidget):
             QWidget.mouseReleaseEvent(self._header, a0)
             return
         try:
-            # tolerated: QtPy promotes the binding enum members onto Qt at runtime.
-            if a0.button() == Qt.LeftButton:  # pyright: ignore[reportAttributeAccessIssue]
+            if a0.button() == Qt.MouseButton.LeftButton:
                 self._toggle()
                 a0.accept()
                 return
