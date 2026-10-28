@@ -2,7 +2,7 @@
 
 **讀者：** framework-dev。FTF YAML schema、單位與欄位診斷契約。
 
-**Last updated:** 2026-10-28, optional three-loop fast-flux routes
+**Last updated:** 2026-10-28, optional three-loop fast-flux routes and generator counts
 
 `load_ftf(path)` 一次讀取 UTF-8 YAML，`parse_ftf(document)` 驗證記憶體中的文件。兩者回傳 immutable `FTFSettings`。本模組擁有 schema、單位與欄位路徑診斷，不依賴 `simulate`、`device` 或 `program`，也不建立裝置或決定物理適用性。
 
@@ -56,6 +56,6 @@ Program 提供 tones 的頻率、gain、phase 與順序，YAML 綁定各路徑�
 兩條路徑共用兩個物理 resonator，不新增 tone-to-qubit mapping。
 `readout.receivers` 依 pulse、mux 設定順序回傳全部 receiver，不決定 program 輸出順序。
 
-Generator 數量是 drive/readout 最大 generator index 加一，ADC 數量是所有 `ro_ch` 最大值加一。索引必須是非負整數，不設固定上限。索引空洞不是已綁定的線路。Charge 係數與 resonator coupling 乘 full charge operator，不隱藏 n01 正規化。ADC noise 採 two-sided white PSD，sample covariance 為 PSD/dt_ns，receiver gain 不縮放 noise。這些設定與固定 QICK profile 的對照見欄位指南。
+Generator 數量是所有 drive、flux、pulse readout 與可選 mux generator index 的最大值加一，ADC 數量是所有 `ro_ch` 最大值加一。索引必須是非負整數，不設固定上限。索引空洞不是已綁定的線路。Charge 係數與 resonator coupling 乘 full charge operator，不隱藏 n01 正規化。ADC noise 採 two-sided white PSD，sample covariance 為 PSD/dt_ns，receiver gain 不縮放 noise。這些設定與固定 QICK profile 的對照見欄位指南。
 
 [default.yaml](../../../../zcu_lab/simulation_envs/FTF/default.yaml) 的 circuit energies、couplings 與 resonator frequencies 採 Device A，其餘包含本機手動設定。它不是通用校準結果，也不保證截斷或 solver 收斂。
