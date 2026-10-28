@@ -15,6 +15,7 @@ from .views import (
     EditView,
     GeneralView,
     add_component_to_draft,
+    cached_parameter_content,
     document_meta,
     point_origin,
     register_view_read,
@@ -77,7 +78,11 @@ class PointView:
     @property
     def general(self) -> GeneralView:
         """Return cached general fields; tagged ext leaves read as native complex."""
-        return GeneralView(lambda: self._store.snapshot().general, self._edit_general)
+        return GeneralView(
+            lambda: self._store.snapshot().general,
+            self._edit_general,
+            content=lambda: cached_parameter_content(self),
+        )
 
     @contextmanager
     def _edit_general(self, _field: str) -> Generator[PointGeneral]:
@@ -87,7 +92,7 @@ class PointView:
     @property
     def description(self) -> str | None:
         """Return the cached description, or None when it is unset."""
-        return self._store.snapshot().general.description
+        return self.general.description
 
     @description.setter
     def description(self, value: str | None) -> None:
@@ -95,12 +100,13 @@ class PointView:
             draft.description = value
 
     def __getattr__(self, name: str) -> ComponentView:
-        if name not in self._store.snapshot().components:
+        if name not in cached_parameter_content(self).component_names():
             raise AttributeError(f"Unknown component {name!r}")
         return ComponentView(
             lambda: self._store.snapshot().components[name],
             lambda field: self._edit_component(name, field),
             name,
+            content=lambda: cached_parameter_content(self),
         )
 
     @contextmanager
@@ -155,13 +161,14 @@ class PointView:
 
         No value lookup, key interpretation or I/O occurs; {} means cleared.
         """
-        return document_meta(self._store.snapshot(), path)
+        return document_meta(cached_parameter_content(self), path)
 
     def refresh(self) -> None:
-        """Reload only point.yaml; invalid data keeps the cached snapshot.
+        """Reload point.yaml content without validating unused component fields.
 
-        Missing files, incompatible headers or invalid component models raise
-        without publication. No files are committed.
+        Missing files, invalid YAML and incompatible headers raise without
+        publication. Used fields and complete projections validate on demand.
+        No files are committed.
         """
         self._store.refresh()
 

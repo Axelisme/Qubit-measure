@@ -10,7 +10,7 @@
 
 `ResultEntry.read_identity(name, *, result_root)` 只驗 setup header 與 general 的 UUID／UTC 建立時間，回 `EntryIdentity`。它不解析 component schema、不要求註冊歷史 component kind，也不要求 points 或 records 目錄。讀取不建立檔案或鎖，格式與 I/O 錯誤傳遞。
 
-`list_points` 依 `point.yaml` 列出 label，不要求 library 或 aliases。`point_description` 只讀 `general.description`，不解讀其他欄位。`validate_point_parameters` 獨立沿用嚴格參數 schema 與 view 名稱規則，錯誤交 caller 隔離，不讀 library 或 aliases。
+`list_points` 依 `point.yaml` 列出 label，不要求 library 或 aliases。`point_description` 只讀 `general.description`，不解讀其他欄位。`validate_point_parameters` 只要求可讀的 YAML mapping、參數 header 與目前 schema version。局部 component 或 leaf 格式錯誤不使 point 不可用，使用該值或寫入時才報錯。解析與 I/O 錯誤仍交 caller 逐 point 隔離，不讀 library 或 aliases。
 
 `use_point` 的必需 `point.yaml` 或 `module_cfg.yaml` 缺失時回報公開 `MissingPointError`，它保留 `FileNotFoundError` 繼承關係。Schema、permission、其他 I/O 與額外引用檔缺失不歸類為 point 缺失。
 
@@ -42,7 +42,7 @@ Setup 是元件範本。Point 自帶 kind、元件、metadata 與 general。Gene
 
 `SetupView` 與 `PointView` 各綁一個 DocumentStore。屬性讀取只看記憶體快照。`edit()`、單行賦值與 `refresh()` 只讀寫自己的文件。修改多個 point 時逐筆提交，每筆各自成功或失敗。
 
-Package functions `snapshot(view)`、`source_path(view)` 與 `document_value(document, path)` 提供隔離的 typed 讀取、綁定文件位置與 logical YAML 值，不讀檔或執行 model hooks。Snapshot 也接受 EditView，複製尚未提交的 draft。Document_value 只讀實際元件或 general 路徑，不展開角色，區分 explicit null 與缺值。`document_meta(document, path)` 回傳本文件該路徑的隔離 opaque metadata，不查值是否存在。`document_unit(document, path)` 只讀固定欄位既有的靜態 schema unit，包含尚未 set 的 optional leaf。直接指向已宣告欄位時，list、mapping 或 null 值不影響 label。Ext、mapping/list 內的子路徑、缺失路徑或無 metadata 的欄位沒有單位。查詢不讀 leaf 值、不執行 schema callback、不推導可變單位，也不換算值。`resolve_path(document, path, roles=..., reserved_names=...)` 只展開已捕捉角色的首段，不檢查後續 leaf 或 library key。Role、component、general 欄位和 expression 保留名稱碰撞時明確報錯，general 欄位必須使用 general namespace。這些能力不加成 view method，保留 snapshot、path 等合法元件名稱。
+Package functions `snapshot(view)`、`source_path(view)` 與 `document_value(document, path)` 提供完整 typed 投影、綁定文件位置與 logical YAML 值，不讀檔。Snapshot 對 bound content 執行完整文件的 model validation。Snapshot 也接受 EditView，只複製尚未提交的 draft。Document_value 只讀實際元件或 general 路徑，不展開角色，區分 explicit null 與缺值。`document_meta(document, path)` 回傳本文件該路徑的隔離 opaque metadata，不查值是否存在。`document_unit(document, path)` 只讀固定欄位既有的靜態 schema unit，包含尚未 set 的 optional leaf。直接指向已宣告欄位時，list、mapping 或 null 值不影響 label。Ext、mapping/list 內的子路徑、缺失路徑或無 metadata 的欄位沒有單位。查詢不讀 leaf 值、不執行 schema callback、不推導可變單位，也不換算值。`resolve_path(document, path, roles=..., reserved_names=...)` 只展開已捕捉角色的首段，不檢查後續 leaf 或 library key。Role、component、general 欄位和 expression 保留名稱碰撞時明確報錯，general 欄位必須使用 general namespace。這些能力不加成 view method，保留 snapshot、path 等合法元件名稱。
 
 `document_fields(document)` 列舉 logical data 的隔離 DocumentField。Models／mapping 展開為葉列，list、null 與空 mapping 是單列。Segments 保留 literal keys；有空字串或點號的 row 沒有 editable_path，不以另一條 dotted path 冒充它。Row 的 metadata 是該 editable_path 的隔離 mapping，無法定址的列為 None。列舉不執行 serializers/model hooks、不讀檔或顯示 opaque forward-minor 資料。
 
@@ -61,13 +61,13 @@ Clone 由 library owner 複製合法 Specs 與 forward-minor 容器欄位，忽�
 
 Registry 只做 kind 查表與 ComponentSchema 子類檢查。重複 kind 報 ValueError，非法 model 報 TypeError，未知 kind 報 UnknownKindError 並附相近名稱。失敗時 registry 保持原狀，unregister 後可明確替換。`kinds()` 回傳隔離的註冊順序 tuple，不驗證 model 或執行 factory。
 
-ComponentSchema 只要求字串 kind。原 model 決定必填欄位、型別、extra 策略、defaults、field validators、model validators 與 post-init hooks。Ext、wiring 與 module 都不是框架特例。Forbid model 的錯字由 Pydantic 拒絕，allow model 的額外欄位可讀寫及 set／meta。沒有值且 default 為 None 的欄位讀取報 AttributeError。
+ComponentSchema 只要求字串 kind。完整 component 投影與寫入沿原 model 的必填欄位、extra、defaults、validators 與 post-init hooks。Leaf read 只驗請求欄位的 annotation 與 field validators，包含 before，不執行 model validators。缺值使用該欄位的 default 或 default_factory，同一份文件重讀保持穩定。只靠 model validator 的舊欄位轉換不在 leaf read 發生，需明確 edit 或 parameter upgrade。Ext、wiring 與 module 都不是框架特例。
 
 `component_field_specs(kind)` 依宣告順序深度優先投影 kind 的 pydantic 欄位，供編輯器使用。每個 FieldSpec 帶 segments、value_kind、required、choices、unit 與 description；巢狀 model 先列 group 再列子欄位，`kind` 不列。投影只讀 class 宣告，不讀值、不建 defaults、不跑 validator 或 I/O。未知 kind 報 UnknownKindError。頂層 text 欄位的 key 若等於沒有 via 的已註冊角色名稱，`reference_role` 填該角色；`role_candidates(document, role)` 依文件順序列出 kind 符合角色 pattern 的元件，供引用欄位的下拉選單使用。這沿用角色解析的既有慣例，不是引用標記，也不檢查目標是否存在。
 
 新增元件保留已產生的 defaults，避免 reload 或 seed 重生 factory 值。Seed 也複製當次 template validation 產生、原 YAML 尚未保存的 defaults。框架不檢查 canonical 或冪等，不替定義者修復 validator。
 
-`ParameterContent` 承載量測檔中的唯讀參數，不帶持久文件身分。空內容不帶 general 或 created_at。它保留未使用的 raw 區塊，`document_value` 在請求具體欄位時才解碼。明確讀取完整 components、general 或 metadata property 時，owner 才驗證該 section。
+`ParameterContent` 承載 live point 與量測檔中的唯讀參數，不帶持久文件身分。空內容不帶 general 或 created_at。`parameter_content(view)` 複製 cached content，未用的 raw 區塊保持不解碼。`document_value` 在請求具體欄位時才驗證。`component(name)` 完整驗證單一 component，供依賴跨欄位不變式的 consumer 使用，不先驗其他 component。明確讀取完整 components、general 或 metadata property 時，owner 才驗證該 section。
 
 ## 視圖與 metadata
 
@@ -133,7 +133,7 @@ DocumentStore 擁有單檔衝突檢查與 atomic replace。檔案、快照與視
 
 Model 的 before validator 可把舊欄位改成新欄位。Setup／point 的 open、refresh 與空 edit 不寫檔。Library 讀取同樣不改檔，無效 Spec 略過並透過 snapshot.invalid_entries() 回報原因。非空 commit 在最新 normalized tree 合併與完整驗證，再把序列化差異套回 raw YAML，保留未改節點的引號、註解與順序。保存消費 actual model_dump 輸出，不用原欄位值繞過 serializer。格式轉換不生成 metadata。
 
-Format 與 format_version 只描述容器結構。檔頭不符或 major 不同時拒絕載入。較新 2.x minor 保留容器層的未知欄位與 metadata 內容，不覆寫元件或 nested model 的 extra 策略。任何 minor 都由原 model 驗證完整元件 input：forbid 拒絕未知欄位，ignore 丟棄它們，allow 保留並公開它們。Ignore 丟棄的欄位在非空 commit 時移除。元件的 defaults、validators 與舊寫法演進由定義者決定，不綁容器版本號。非法元件在 load、refresh 與 commit 驗證時失敗，不發布新的值、metadata 或快照。
+Format 與 format_version 只描述容器結構。檔頭不符或 major 不同時拒絕載入。較新 2.x minor 保留容器層的未知欄位與 metadata 內容，不覆寫元件或 nested model 的 extra 策略。任何 minor 都由原 model 驗證完整元件 input：forbid 拒絕未知欄位，ignore 丟棄它們，allow 保留並公開它們。Ignore 丟棄的欄位在非空 commit 時移除。元件的 defaults、validators 與舊寫法演進由定義者決定，不綁容器版本號。Load 與一般 refresh 保留未使用的 component 內容。實際 leaf 讀取、完整 component 投影與 edit 各按自己的驗證邊界報錯。Edit 與 strict refresh 仍驗證完整文件，失敗不提交值或 metadata。
 
 容器層剩餘未知欄位的 serialization 位置若不再是 mapping，或 key 已被 serializer 佔用，直接 raise，不猜重塑後的位置。
 

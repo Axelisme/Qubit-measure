@@ -42,6 +42,54 @@ from tests.resources.entry.fakes import (
 )
 
 
+def test_point_capture_reads_good_leaf_with_bad_sibling(
+    rich_entry: ResultEntry, context: ContextService
+) -> None:
+    rich_entry.new_point("partial")
+    path = rich_entry.result_path / "points" / "partial" / "point.yaml"
+    raw = YAML(typ="safe").load(path)
+    raw["components"]["Q1"]["sense"] = ["bad sibling"]
+    with path.open("w", encoding="utf-8") as stream:
+        YAML(typ="rt").dump(raw, stream)
+    before = path.read_bytes()
+    context.install_entry(rich_entry)
+
+    context.use_point(PointUseRequest("partial"))
+    parameters = context.read_context()
+
+    assert parameters.value("Q1.rate") == 4300.0
+    with pytest.raises(ValueError, match="Q1.sense"):
+        parameters.value("Q1.sense")
+    assert path.read_bytes() == before
+
+
+def test_point_availability_accepts_parseable_partial_components_and_isolates_bad_yaml(
+    rich_entry: ResultEntry, context: ContextService
+) -> None:
+    rich_entry.new_point("partial")
+    rich_entry.new_point("unparseable")
+    path = rich_entry.result_path / "points" / "partial" / "point.yaml"
+    raw = YAML(typ="safe").load(path)
+    raw["components"]["Q1"]["sense"] = ["bad sibling"]
+    raw["components"]["unused"] = ["bad component"]
+    with path.open("w", encoding="utf-8") as stream:
+        YAML(typ="rt").dump(raw, stream)
+    broken = rich_entry.result_path / "points" / "unparseable" / "point.yaml"
+    broken.write_text("components: [", encoding="utf-8")
+    context.install_entry(rich_entry)
+
+    rows = {row.label: row for row in context.list_points()}
+
+    assert rows["partial"].available
+    assert rows["partial"].error is None
+    assert not rows["unparseable"].available
+    assert rows["unparseable"].error
+    context.use_point(PointUseRequest("partial"))
+    assert context.read_context().value("Q1.rate") == 4300.0
+    with pytest.raises(ValueError, match="Q1.sense"):
+        context.read_context().value("Q1.sense")
+
+
 class Assets:
     """Explicit resource capability provider with an observable binding failure."""
 

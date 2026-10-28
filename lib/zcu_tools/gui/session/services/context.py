@@ -49,6 +49,7 @@ from zcu_tools.resources.document_store import DocumentRevision
 from zcu_tools.resources.entry import (
     DestinationExistsError,
     document_revision,
+    parameter_content,
     snapshot,
     source_path,
     validate_path_segment,
@@ -252,7 +253,7 @@ class ContextService:
             else:
                 self._library.refresh(strict=True)
             current = ParameterContext(
-                point=snapshot(self._point),
+                point=parameter_content(self._point),
                 library=self._library.snapshot(),
                 target=parameters.target,
                 roles=None,
@@ -561,7 +562,7 @@ class ContextService:
         assets = self._bind_assets(entry.database_path / "arb_waveforms")
         library = entry.module_library(target.point, assets=assets)
         return ParameterContext(
-            point=snapshot(point),
+            point=parameter_content(point),
             library=library.snapshot(),
             target=target,
             roles=roles,
@@ -893,7 +894,7 @@ class ContextService:
             raise RuntimeError("Opened entry has no setup binding")
         assets = self._bind_assets(entry.database_path / "arb_waveforms")
         library = entry.module_library(label, assets=assets)
-        document = snapshot(point)
+        document = parameter_content(point)
         parameters = ParameterContext(
             point=document,
             library=library.snapshot(),
@@ -906,7 +907,7 @@ class ContextService:
             ContextSource("point", source_path(point), None),
             ContextSource("module_cfg", library.source_path, None),
         )
-        info = WorkingPointInfo(label, document.general.description or "")
+        info = WorkingPointInfo(label, point.description or "")
         aliases = AliasSnapshot.from_read(entry.read_aliases(point=label))
         return parameters, library, sources, info, aliases
 

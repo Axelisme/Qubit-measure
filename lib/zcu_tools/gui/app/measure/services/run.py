@@ -41,6 +41,7 @@ from zcu_tools.gui.session.operation_runner import (
     OperationSpec,
     SettleFn,
 )
+from zcu_tools.gui.session.parameter_capture import capture_parameters
 from zcu_tools.gui.session.scopes import progress_ambient
 from zcu_tools.resources.entry import AcquiredPayload, LedgerEvent, PointStorageBinding
 
@@ -334,7 +335,7 @@ class RunService:
             raise FailedPreconditionError(f"Tab {tab_id!r} is busy")
 
         parameter_snapshot = (
-            None if inputs.parameters is None else inputs.parameters.snapshot()
+            None if inputs.parameters is None else capture_parameters(inputs.parameters)
         )
         logger.info("start_run: tab_id=%r", tab_id)
         self.release_view_plots(tab_id)

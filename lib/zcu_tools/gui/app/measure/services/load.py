@@ -10,6 +10,7 @@ from zcu_tools.experiment.native_persistence import metadata_from_container
 from zcu_tools.gui.app.measure.services.pane_commit import commit_run
 from zcu_tools.gui.app.measure.state import RunPaneState
 from zcu_tools.gui.expected_error import FailedPreconditionError
+from zcu_tools.gui.session.parameter_capture import restore_parameters
 from zcu_tools.gui.session.parameters import ParameterContext
 
 if TYPE_CHECKING:
@@ -127,7 +128,7 @@ class LoadService:
         parameters = (
             ParameterContext.empty()
             if metadata.parameter_snapshot is None
-            else ParameterContext.from_snapshot(metadata.parameter_snapshot)
+            else restore_parameters(metadata.parameter_snapshot)
         )
         commit_run(
             self._state,

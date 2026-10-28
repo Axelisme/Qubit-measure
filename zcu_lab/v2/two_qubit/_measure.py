@@ -1,6 +1,7 @@
 """Fixed capture binding for FTF Forms, never used by core."""
 
 from zcu_tools.gui.form_adapter import FormContext
+from zcu_tools.resources.entry import RoleResolutionError
 
 from zcu_lab.components.mux import MuxGroupSchema
 from zcu_lab.v2.support.measure.mux_bindings import validate_mux_bindings
@@ -18,7 +19,6 @@ def captured_roles(ctx: FormContext) -> dict[str, str | int]:
     parameters = ctx.parameters
     if parameters is None:
         raise ValueError("FTF readout requires a fixed parameter capture")
-    components = parameters.document().components
     f1, f2, coupler, mux = (
         parameters.resolve_path(f"${role}") for role in ("f1", "f2", "coupler", "mux")
     )
@@ -27,12 +27,15 @@ def captured_roles(ctx: FormContext) -> dict[str, str | int]:
         ("f2", f2, "qubit/fluxonium"),
         ("coupler", coupler, "qubit/transmon"),
     ):
-        component = components.get(name)
-        if component is None or component.kind != kind:
+        try:
+            actual_kind = parameters.value(f"{name}.kind")
+        except (AttributeError, RoleResolutionError) as exc:
+            raise ValueError(f"${role}={name!r} must name a {kind} component") from exc
+        if actual_kind != kind:
             raise ValueError(f"${role}={name!r} must name a {kind} component")
     if f1 == f2:
         raise ValueError("F1 and F2 must be distinct fluxonium components")
-    group = components.get(mux)
+    group = parameters.component(mux)
     if not isinstance(group, MuxGroupSchema) or group.qubits is None:
         raise ValueError("FTF readout requires a MuxGroup with ordered qubits")
     if f1 not in group.qubits or f2 not in group.qubits:

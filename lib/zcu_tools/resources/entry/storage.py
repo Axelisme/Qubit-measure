@@ -13,7 +13,7 @@ from .aliases import AliasValue
 from .ledger import RecordsLedger
 from .points import PointView
 from .roles import RoleView, capture_role_components
-from .views import point_origin, snapshot
+from .views import point_origin
 
 
 @dataclass(frozen=True)
@@ -86,14 +86,13 @@ def capture_point_storage(
     entry_name, _, point, _ = relative.parts
     validate_path_segment(entry_name, field="entry_name")
     validate_path_segment(point, field="point")
-    document = snapshot(view)
     result_path = origin.result_root / entry_name
     database_path = origin.database_root / entry_name
     return PointStorageBinding(
         entry_id=entry_id,
         entry_name=entry_name,
         point=point,
-        description=document.general.description,
+        description=view.description,
         result_path=result_path,
         database_path=database_path,
         ledger=RecordsLedger(result_path / "records", entry_id=str(entry_id)),

@@ -87,6 +87,49 @@ def write_yaml(source: Path, document: object) -> None:
         YAML(typ="rt").dump(document, stream)
 
 
+def test_point_reads_only_requested_leaf_and_rejects_invalid_document_edits(
+    entry: ResultEntry, range_kind: str
+) -> None:
+    entry.setup.add_component("sensor", kind=range_kind, low=1.0, high=2.0)
+    entry.new_point("partial")
+    path = entry.result_path / "points" / "partial" / "point.yaml"
+    raw = YAML(typ="safe").load(path)
+    raw["components"]["sensor"]["high"] = ["not a number"]
+    write_yaml(path, raw)
+    before = path.read_bytes()
+
+    point = entry.use_point("partial")
+
+    assert point.sensor.low == 1.0
+    assert path.read_bytes() == before
+    with pytest.raises(ValueError, match="sensor.high"):
+        _ = point.sensor.high
+    with pytest.raises(ValueError, match="sensor.high"), point.edit() as draft:
+        draft.sensor.low = 3.0
+    assert path.read_bytes() == before
+
+
+def test_leaf_reads_keep_field_normalization_and_stable_defaults_without_model_checks(
+    entry: ResultEntry, notebook_kind: str
+) -> None:
+    entry.setup.add_component("sensor", kind=notebook_kind, gain=1.0, title="seed")
+    entry.new_point("defaults")
+    path = entry.result_path / "points" / "defaults" / "point.yaml"
+    raw = YAML(typ="safe").load(path)
+    raw["components"]["sensor"]["gain"] = ["bad sibling"]
+    raw["components"]["sensor"]["title"] = "  Mixed CASE  "
+    del raw["components"]["sensor"]["token"]
+    write_yaml(path, raw)
+
+    point = entry.use_point("defaults")
+
+    assert point.sensor.title == "mixed case"
+    first = point.sensor.token
+    assert isinstance(first, str) and len(first) == 36
+    assert point.sensor.token == first
+    assert point.sensor.title == "mixed case"
+
+
 @pytest.mark.parametrize("missing", ["point.yaml", "module_cfg.yaml"])
 def test_use_point_classifies_required_document_absence(
     entry: ResultEntry,

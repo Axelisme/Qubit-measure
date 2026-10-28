@@ -11,7 +11,6 @@ from typing import TYPE_CHECKING
 
 from pydantic import TypeAdapter
 
-from zcu_tools.experiment.metadata import ParameterSnapshot
 from zcu_tools.format_version import YamlValue
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 from zcu_tools.gui.session.aliases import AliasRow, AliasTable, ResolvedAliasRow
@@ -21,6 +20,7 @@ from zcu_tools.gui.session.context_types import (
 from zcu_tools.resources.context.library import LibrarySnapshot, ModuleLibraryDocument
 from zcu_tools.resources.document_store import DocumentValue
 from zcu_tools.resources.entry import (
+    ComponentSchema,
     ParameterContent,
     RoleResolutionError,
     document_value,
@@ -130,7 +130,8 @@ class ParameterContext:
             or storage.point != target.point
         ):
             raise ValueError("Storage origin must match the saved-point target")
-        self._stored_snapshot: ParameterSnapshot | None = None
+        self._recorded = False
+        self._recorded_names: YamlValue = None
         self._point = point.model_copy(deep=True)
         self._library = library
         self._target = None if target is None else target.model_copy(deep=True)
@@ -184,59 +185,51 @@ class ParameterContext:
             roles=None,
         )
 
-    def snapshot(self) -> ParameterSnapshot:
-        """Detach readable point, library and aliases for native RunMetadata.
-
-        Capture uses only fixed memory, never current files or selection.
-        Unavailable sources or invalid bound aliases raise their owner error.
-        Persistent targets and storage capabilities are not serialized.
-        """
+    def point_content(self) -> ParameterContent:
+        """Copy captured resource content without consulting files or selection."""
         self._ensure_readable()
-        point = self._point
-        content = (
-            point.model_copy(deep=True)
-            if isinstance(point, ParameterContent)
-            else ParameterContent(
-                TypeAdapter(YamlValue).validate_python(
-                    point.model_dump(mode="python", serialize_as_any=True)
-                )
+        if isinstance(self._point, ParameterContent):
+            return self._point.model_copy(deep=True)
+        return ParameterContent(
+            TypeAdapter(YamlValue).validate_python(
+                self._point.model_dump(mode="python", serialize_as_any=True)
             )
         )
-        if self._stored_snapshot is not None:
-            return self._stored_snapshot.model_copy(deep=True)
-        return ParameterSnapshot(
-            point=content,
-            library=self._library.content(),
-            aliases=(
-                None
-                if self._aliases is None
-                else TypeAdapter(YamlValue).validate_python(
-                    {row.alias: row.value for row in self.aliases}
-                )
-            ),
-            names=TypeAdapter(YamlValue).validate_python(
-                {} if self._roles is None else dict(self._roles.names)
-            ),
+
+    def alias_content(self) -> YamlValue:
+        """Copy authored rows without resolving unused links; None means fixed names."""
+        self._ensure_aliases_readable()
+        return None if self._aliases is None else self._aliases.content()
+
+    def name_content(self) -> YamlValue:
+        """Copy fixed names without validating unrelated recorded bindings."""
+        if self._recorded:
+            return deepcopy(self._recorded_names)
+        return TypeAdapter(YamlValue).validate_python(
+            {} if self._roles is None else dict(self._roles.names)
         )
 
     @classmethod
-    def from_snapshot(cls, snapshot: ParameterSnapshot) -> ParameterContext:
-        """Restore recorded content without decoding unused fields or reading files.
+    def from_content(
+        cls,
+        *,
+        point: ParameterContent,
+        library: LibrarySnapshot,
+        aliases: YamlValue,
+        names: YamlValue,
+    ) -> ParameterContext:
+        """Restore detached content without granting a persistent target or storage.
 
-        No persistent target/storage is granted. Library materialization needing
-        external waveform assets still requires its own capability.
-        Authored aliases retain order/links; fixed-name captures stay resolved.
-        Only a requested value, Spec or alias is validated by its owner on use.
+        Sections stay opaque until a read requests their value or binding.
+        No live files, aliases or library assets are consulted during restoration.
         """
         restored = cls(
-            point=snapshot.point,
-            library=LibrarySnapshot.from_content(snapshot.library),
-            target=None,
-            roles=RoleBinding(None, {}, {}),
+            point=point, library=library, target=None, roles=RoleBinding(None, {}, {})
         )
-        restored._stored_snapshot = snapshot.model_copy(deep=True)
-        if snapshot.aliases is not None:
-            restored._aliases = AliasTable.from_content(snapshot.aliases)
+        restored._recorded = True
+        restored._recorded_names = deepcopy(names)
+        if aliases is not None:
+            restored._aliases = AliasTable.from_content(aliases)
         return restored
 
     @property
@@ -255,9 +248,9 @@ class ParameterContext:
         not authored rows, so historical target reads never re-expand links.
         None means no consumer declarations.
         """
-        if self._stored_snapshot is not None and self._aliases is None:
+        if self._recorded and self._aliases is None:
             names = TypeAdapter(dict[str, AliasValue]).validate_python(
-                self._stored_snapshot.names
+                self._recorded_names
             )
             return RoleBinding(None, {}, names)
         if self._aliases is not None and self._roles is not None:
@@ -344,6 +337,23 @@ class ParameterContext:
     def _ensure_aliases_readable(self) -> None:
         if self._alias_error is not None:
             raise self._alias_error
+
+    def component(self, path: str) -> ComponentSchema:
+        """Copy one complete component after all model-level checks.
+
+        path is a concrete name or scalar $alias, not a dotted field path.
+        Use this projection when a consumer relies on cross-field invariants.
+        Unrelated components remain unread. Missing/unbound aliases, unknown
+        names, malformed fields and model checks raise their owner errors.
+        """
+        name = self.resolve_path(path) if path.startswith("$") else path
+        if "." in name or name == "general":
+            raise ValueError(f"Expected one component name: {path!r}")
+        if isinstance(self._point, ParameterContent):
+            return self._point.component(name)
+        if name not in self._point.components:
+            raise AttributeError(name)
+        return self._point.components[name].model_copy(deep=True)
 
     def document(self) -> PointDocument | ParameterContent:
         """Copy the fixed point without I/O or model hooks; unavailable sources raise."""
@@ -440,8 +450,8 @@ class ParameterContext:
         self._ensure_readable()
         self._ensure_aliases_readable()
         spec = self._roles.declarations.get(alias) if self._roles is not None else None
-        if self._stored_snapshot is not None and self._aliases is None:
-            names = self._stored_snapshot.names
+        if self._recorded and self._aliases is None:
+            names = self._recorded_names
             if not isinstance(names, dict):
                 raise ValueError("snapshot names must be a mapping")
             if alias not in names:

@@ -107,6 +107,14 @@ class AliasTable:
         table._stored = deepcopy(content)
         return table
 
+    def content(self) -> YamlValue:
+        """Copy captured authored content without validating unused stored rows."""
+        if self._stored is not None:
+            return deepcopy(self._stored)
+        return TypeAdapter(YamlValue).validate_python(
+            {row.alias: row.value for row in self._rows}
+        )
+
     def _stored_table(self, alias: str | None) -> AliasTable:
         raw = self._stored
         if not isinstance(raw, dict):

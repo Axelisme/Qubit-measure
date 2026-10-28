@@ -9,8 +9,10 @@ from __future__ import annotations
 from collections.abc import Callable, Generator, Mapping
 from contextlib import AbstractContextManager, contextmanager
 from copy import deepcopy
+from typing import TypeGuard
 
 from pydantic import BaseModel, TypeAdapter, ValidationError
+from pydantic_core import core_schema
 
 from zcu_tools.core.complex_codec import decode_complex, encode_complex
 from zcu_tools.format_version import YamlValue
@@ -19,6 +21,64 @@ from .parameter_metadata import parameter_path
 
 # Logical field containers retain typed models inside mappings. No list indexing.
 type FieldNode = BaseModel | dict[str, object]
+
+
+def _definitions(
+    schema: core_schema.CoreSchema,
+) -> TypeGuard[core_schema.DefinitionsSchema]:
+    return schema["type"] == "definitions"
+
+
+def _model_fields(
+    schema: core_schema.CoreSchema,
+) -> TypeGuard[core_schema.ModelFieldsSchema]:
+    return schema["type"] == "model-fields"
+
+
+def _model_wrapper(
+    schema: core_schema.CoreSchema,
+) -> TypeGuard[
+    core_schema.ModelSchema
+    | core_schema.BeforeValidatorFunctionSchema
+    | core_schema.AfterValidatorFunctionSchema
+    | core_schema.WrapValidatorFunctionSchema
+]:
+    # Pydantic's schema TypedDicts mark the discriminator optional, so direct
+    # discriminator checks do not narrow their union in Pyright.
+    return schema["type"] in (
+        "model",
+        "function-before",
+        "function-after",
+        "function-wrap",
+    )
+
+
+def model_field_schema(model: type[BaseModel], name: str) -> core_schema.CoreSchema:
+    """Return one field's schema, including its defaults and field validators.
+
+    Model-level validators are excluded. Unknown fields raise AttributeError.
+    Definitions required by nested/recursive field models remain available.
+    No values or unrelated fields are validated.
+    """
+    schema = model.__pydantic_core_schema__
+    definitions: list[core_schema.CoreSchema] = []
+    while True:
+        if _definitions(schema):
+            definitions.extend(schema["definitions"])
+            schema = schema["schema"]
+        elif _model_wrapper(schema):
+            schema = schema["schema"]
+        elif _model_fields(schema):
+            if name not in schema["fields"]:
+                raise AttributeError(name)
+            field = schema["fields"][name]["schema"]
+            return (
+                core_schema.definitions_schema(field, definitions)
+                if definitions
+                else field
+            )
+        else:
+            raise TypeError(f"{model.__name__}: unsupported model field schema")
 
 
 def model_field_value(node: BaseModel, name: str) -> object:

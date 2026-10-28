@@ -43,6 +43,7 @@ from zcu_tools.gui.expected_error import (
     FailedPreconditionError,
 )
 from zcu_tools.gui.form_adapter import Form, FormContext
+from zcu_tools.gui.session.parameter_capture import restore_parameters
 from zcu_tools.gui.session.types import ParameterContext
 
 from tests.gui.app.measure._cfg_fakes import parameter_capture
@@ -199,7 +200,7 @@ def test_run_metadata_fixes_parameter_capture_before_worker_execution(
     assert record is not None and record.metadata is not None
     snapshot = record.metadata.parameter_snapshot
     assert snapshot is not None
-    restored = ParameterContext.from_snapshot(snapshot)
+    restored = restore_parameters(snapshot)
     assert restored.value("$source_qubit.rate") == 1.0
 
 

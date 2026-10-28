@@ -475,6 +475,7 @@ class DocumentStore[T: BaseModel]:
         supported_version: FormatVersion = _SUPPORTED_VERSION,
         validate: Callable[[T], None] | None = None,
         read_normalize: Callable[[YamlMap, FormatVersion], YamlMap] | None = None,
+        read_validate: Callable[[YamlMap], None] | None = None,
         lock_path: Path | None = None,
         lock_timeout: float = 10.0,
     ) -> None:
@@ -495,6 +496,10 @@ class DocumentStore[T: BaseModel]:
         read_normalize optionally transforms a detached disk mapping before model
         validation. It never changes disk bytes and never runs on authored drafts.
         strict refresh bypasses this transformation and the validation cache.
+        read_validate opts into detached content reads: initialization and ordinary
+        refresh validate the header and this structural callback, not model T.
+        content() exposes that content; snapshot() explicitly requests full T.
+        Edits and strict refresh always retain full model/validate checks.
 
         lock_path overrides the per-user runtime lock returned by lock_path_for(path).
         The default creates the runtime lock directory on demand.
@@ -514,6 +519,7 @@ class DocumentStore[T: BaseModel]:
         self._supported_version = supported_version
         self._validate = validate
         self._read_normalize = read_normalize
+        self._read_validate = read_validate
         self._lock_path = (
             lock_path if lock_path is not None else lock_path_for(self._path)
         )
@@ -525,7 +531,11 @@ class DocumentStore[T: BaseModel]:
         self._deferred_until_unlock: list[DocumentChange] = []
         self._validated_key: tuple[int, bytes] | None = None
         self._validated_read: tuple[YamlMap, YamlMap, T] | None = None
-        self._document, _, self._snapshot, self._revision = self._read()
+        self._snapshot: T | None = None
+        if self._read_validate is None:
+            self._document, _, self._snapshot, self._revision = self._read()
+        else:
+            self._document, self._revision = self._read_content()
 
     @property
     def source_path(self) -> Path:
@@ -539,7 +549,38 @@ class DocumentStore[T: BaseModel]:
 
     def snapshot(self) -> T:
         """Return a deep independent copy in working units, without I/O or notice."""
+        if self._snapshot is None:
+            _, self._snapshot = self._model_snapshot(self._document)
         return self._snapshot.model_copy(deep=True)
+
+    def content(self) -> YamlMap:
+        """Copy installed working-unit content without I/O.
+
+        With read_validate configured, this preserves unconsumed fields without
+        constructing T. Otherwise it projects the validated snapshot, including
+        defaults and normalization. Edits still validate the complete model T.
+        """
+        if self._read_validate is not None:
+            return deepcopy(self._document)
+        return TypeAdapter(YamlMap).validate_python(
+            self.snapshot().model_dump(mode="python", serialize_as_any=True)
+        )
+
+    def _read_content(self) -> tuple[YamlMap, str]:
+        original = self._path.read_bytes()
+        yaml = YAML(typ="rt")
+        yaml.preserve_quotes = True
+        raw = yaml.load(original.decode("utf-8"))
+        document = TypeAdapter(YamlMap).validate_python(raw, strict=True)
+        validate_header(
+            document,
+            expected_format=self._format,
+            supported_version=self._supported_version,
+            source=self._path,
+        )
+        if self._read_validate is not None:
+            self._read_validate(deepcopy(document))
+        return document, sha256(original).hexdigest()
 
     @contextmanager
     def edit(self) -> Generator[T]:
@@ -746,7 +787,11 @@ class DocumentStore[T: BaseModel]:
         observer failures are logged separately from successful publication.
         """
         with self.locked():
-            document, _, snapshot, revision = self._read(strict=strict)
+            snapshot: T | None = None
+            if self._read_validate is not None and not strict:
+                document, revision = self._read_content()
+            else:
+                document, _, snapshot, revision = self._read(strict=strict)
             paths = tuple(path for path, _ in _changes(self._document, document))
             self._snapshot = snapshot
             self._document = document

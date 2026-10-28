@@ -5,19 +5,27 @@ from collections.abc import Mapping
 from copy import deepcopy
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import ClassVar, Literal, Self, get_args, override
+from typing import ClassVar, Literal, Self, get_args, get_origin, override
 from uuid import UUID
 
 from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    PrivateAttr,
     RootModel,
     TypeAdapter,
     field_validator,
 )
+from pydantic_core import (
+    PydanticUndefined,
+    SchemaSerializer,
+    SchemaValidator,
+    core_schema,
+)
 
 from zcu_tools.format_version import YamlMap, YamlValue
+from zcu_tools.resources.parameter_fields import model_field_schema
 from zcu_tools.resources.parameter_metadata import (
     PARAMETER_FORMAT,
     PARAMETER_VERSION,
@@ -218,6 +226,7 @@ class ParameterContent(RootModel[YamlValue]):
     """
 
     root: YamlValue = Field(default_factory=dict)
+    _defaults: dict[str, YamlValue] = PrivateAttr(default_factory=dict)
 
     def section(self, name: str) -> YamlValue:
         """Copy a recorded section; missing sections raise AttributeError."""
@@ -227,9 +236,32 @@ class ParameterContent(RootModel[YamlValue]):
             raise AttributeError(f"Missing parameter section: {name}")
         return deepcopy(self.root[name])
 
+    def component(self, name: str) -> ComponentSchema:
+        """Validate only this complete component, including model-level invariants.
+
+        Unknown names raise AttributeError. Malformed fields and cross-field
+        checks raise ValueError naming the component. Other components stay opaque.
+        """
+        node, model = self._root_field(name)
+        if name == "general" or not issubclass(model, ComponentSchema):
+            raise ValueError("Expected a component name")
+        values = TypeAdapter(YamlMap).validate_python(deepcopy(node))
+        for field_name, field in model.model_fields.items():
+            if field_name not in values and (
+                field.default_factory is not None
+                or (not field.is_required() and field.default is not None)
+            ):
+                values[field_name] = self._default_value(
+                    f"{name}.{field_name}", model_field_schema(model, field_name)
+                )
+        try:
+            return model.model_validate(values)
+        except ValueError as exc:
+            raise ValueError(f"{name}: {exc}") from exc
+
     def component_names(self) -> tuple[str, ...]:
         """List recorded names without decoding any component or general fields."""
-        if self.root == {}:
+        if isinstance(self.root, dict) and "components" not in self.root:
             return ()
         components = self.section("components")
         if not isinstance(components, dict):
@@ -266,37 +298,64 @@ class ParameterContent(RootModel[YamlValue]):
         return _ParameterDocument.validate_metadata(self.section("metadata"))
 
     def value(self, path: str) -> YamlValue:
-        """Read one concrete path, validating only its requested field annotation.
+        """Read a concrete field; reject malformed used values with its full path.
 
-        Missing fields raise AttributeError; malformed used ancestors or leaves
-        raise ValueError. Unrelated component fields and general remain opaque.
+        Unrelated component/general fields stay opaque. Missing fields raise
+        AttributeError. Explicit whole-model reads validate that requested model.
         """
+        node, schema = self._field(path)
+        try:
+            validated = SchemaValidator(schema).validate_python(deepcopy(node))
+        except ValueError as exc:
+            raise ValueError(f"{path}: {exc}") from exc
+        serialized = SchemaSerializer(schema).to_python(validated, mode="python")
+        return TypeAdapter(YamlValue).validate_python(serialized)
+
+    def node(self, path: str) -> YamlValue:
+        """Copy one declared node for field navigation without decoding its children.
+
+        Ancestors must be mappings. Requested component kinds must be registered.
+        Scalar values still require value() before consumption.
+        """
+        return deepcopy(self._field(path)[0])
+
+    def _root_field(self, name: str) -> tuple[YamlValue, type[BaseModel]]:
         from .registry import component_registry
 
+        if name == "general":
+            return self.section("general"), PointGeneral
+        components = self.section("components")
+        if not isinstance(components, dict):
+            raise ValueError("parameter components must be a mapping")
+        if name not in components:
+            raise AttributeError(name)
+        node = components[name]
+        if not isinstance(node, dict):
+            raise ValueError(f"{name}: component must be a mapping")
+        kind = node.get("kind")
+        if not isinstance(kind, str):
+            raise ValueError(f"{name}.kind must be a string")
+        return node, component_registry.get(
+            kind, source=Path("snapshot"), component=name
+        )
+
+    def _default_value(self, path: str, schema: core_schema.CoreSchema) -> YamlValue:
+        if path not in self._defaults:
+            default = SchemaValidator(schema).validate_python(PydanticUndefined)
+            self._defaults[path] = TypeAdapter(YamlValue).validate_python(
+                SchemaSerializer(schema).to_python(default, mode="python")
+            )
+        return self._defaults[path]
+
+    def _field(self, path: str) -> tuple[YamlValue, core_schema.CoreSchema]:
         parts = path.split(".")
         if not all(parts):
             raise ValueError(f"Invalid parameter path: {path!r}")
-        model: type[BaseModel] | None
-        if parts[0] == "general":
-            node = self.section("general")
-            model = PointGeneral
-        else:
-            components = self.section("components")
-            if not isinstance(components, dict):
-                raise ValueError("parameter components must be a mapping")
-            if parts[0] not in components:
-                raise AttributeError(path)
-            node = components[parts[0]]
-            if not isinstance(node, dict):
-                raise ValueError(f"{parts[0]}: component must be a mapping")
-            kind = node.get("kind")
-            if not isinstance(kind, str):
-                raise ValueError(f"{parts[0]}.kind must be a string")
-            model = component_registry.get(
-                kind, source=Path("snapshot"), component=parts[0]
-            )
+        node, root_model = self._root_field(parts[0])
+        model: type[BaseModel] | None = root_model
         annotation: object = YamlValue
-        for part in parts[1:]:
+        schema = TypeAdapter(YamlValue).core_schema
+        for index, part in enumerate(parts[1:], start=1):
             if not isinstance(node, dict):
                 raise ValueError(f"{path}: ancestor must be a mapping")
             field = None if model is None else model.model_fields.get(part)
@@ -306,11 +365,29 @@ class ParameterContent(RootModel[YamlValue]):
                 and model.model_config.get("extra") != "allow"
             ):
                 raise AttributeError(path)
-            if part not in node:
-                raise AttributeError(path)
-            node = node[part]
-            annotation = YamlValue if field is None else field.rebuild_annotation()
-            nested = (annotation, *get_args(annotation))
+            if field is not None and model is not None:
+                annotation = field.rebuild_annotation()
+                schema = model_field_schema(model, part)
+            else:
+                arguments = get_args(annotation)
+                annotation = (
+                    arguments[1]
+                    if get_origin(annotation) is dict and len(arguments) == 2
+                    else YamlValue
+                )
+                schema = TypeAdapter(annotation).core_schema
+            if part in node:
+                node = node[part]
+            elif field is not None and not field.is_required():
+                prefix = ".".join(parts[: index + 1])
+                node = self._default_value(prefix, schema)
+            else:
+                raise AttributeError(f"{path}: field is not set")
+            nested = (
+                ()
+                if get_origin(annotation) is dict
+                else (annotation, *get_args(annotation))
+            )
             model = next(
                 (
                     item
@@ -319,10 +396,7 @@ class ParameterContent(RootModel[YamlValue]):
                 ),
                 None,
             )
-        validated = TypeAdapter(annotation).validate_python(deepcopy(node))
-        if isinstance(validated, BaseModel):
-            validated = validated.model_dump(mode="python")
-        return TypeAdapter(YamlValue).validate_python(validated)
+        return node, schema
 
 
 class SetupDocument(_ParameterDocument):

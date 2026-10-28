@@ -2,8 +2,10 @@
 
 from collections.abc import Generator, MutableMapping
 from pathlib import Path
+from typing import Self
 
 import pytest
+from pydantic import model_validator
 from zcu_tools.cfg_model import ConstWaveformCfg, PulseSpec
 from zcu_tools.gui.expected_error import ExpectedErrorCategory, InvalidInputError
 from zcu_tools.gui.session.aliases import AliasRow, AliasTable
@@ -11,6 +13,10 @@ from zcu_tools.gui.session.context_types import (
     ContextSourceFault,
     ContextSourceUnavailableError,
     SavedPoint,
+)
+from zcu_tools.gui.session.parameter_capture import (
+    capture_parameters,
+    restore_parameters,
 )
 from zcu_tools.gui.session.types import ParameterContext, RoleBinding
 from zcu_tools.resources.context.library import (
@@ -26,7 +32,11 @@ from zcu_tools.resources.entry import (
     component_registry,
     role_registry,
 )
-from zcu_tools.resources.entry.schema import PointDocument, PointGeneral
+from zcu_tools.resources.entry.schema import (
+    ParameterContent,
+    PointDocument,
+    PointGeneral,
+)
 
 
 class CaptureDrive(ComponentSchema):
@@ -37,6 +47,41 @@ class CaptureDrive(ComponentSchema):
 
 class CaptureSensor(ComponentSchema):
     rate: float
+
+
+def test_component_projection_enforces_cross_field_checks_without_blocking_leaf_reads(
+    source: tuple[PointDocument, LibrarySnapshot],
+) -> None:
+    class Bounded(ComponentSchema):
+        low: float
+        high: float
+
+        @model_validator(mode="after")
+        def bounds(self) -> Self:
+            if self.low > self.high:
+                raise ValueError("low exceeds high")
+            return self
+
+    component_registry.register("capture/bounded", Bounded)
+    try:
+        parameters = ParameterContext(
+            point=ParameterContent(
+                {
+                    "components": {
+                        "pair": {"kind": "capture/bounded", "low": 3.0, "high": 2.0},
+                        "unused": ["bad component"],
+                    }
+                }
+            ),
+            library=source[1],
+            target=None,
+            roles=None,
+        )
+        assert parameters.value("pair.low") == 3.0
+        with pytest.raises(ValueError, match="(?s)pair.*low exceeds high"):
+            parameters.component("pair")
+    finally:
+        component_registry.unregister("capture/bounded")
 
 
 @pytest.fixture
@@ -147,11 +192,11 @@ def test_parameter_snapshot_round_trip_keeps_content_library_and_authored_aliase
     original = capture(source).bind_aliases(
         (AliasRow("drive", "Q1"), AliasRow("sensor", "$drive.sense")), {}
     )
-    snapshot = original.snapshot()
+    snapshot = capture_parameters(original)
     codec = TypeAdapter(type(snapshot))
     encoded = codec.dump_json(snapshot)
     source[0].components.clear()
-    restored = ParameterContext.from_snapshot(codec.validate_json(encoded))
+    restored = restore_parameters(codec.validate_json(encoded))
     assert restored.target is None
     assert restored.storage is None
     assert restored.value("$drive.rate") == 4300.0
@@ -172,7 +217,7 @@ def test_snapshot_validates_only_values_actually_read(
     from pydantic import TypeAdapter
 
     original = capture(source).bind_aliases((AliasRow("drive", "Q1"),), {})
-    snapshot = original.snapshot()
+    snapshot = capture_parameters(original)
     codec = TypeAdapter(type(snapshot))
     data = json.loads(codec.dump_json(snapshot))
     data["point"]["components"]["unused"] = ["not a component"]
@@ -188,7 +233,7 @@ def test_snapshot_validates_only_values_actually_read(
         data["extra"] = ["unknown block"]
         data["library"]["extra"] = {"anything": True}
         data["library"]["components"]["Q1"]["pulses"]["pi"]["unused"] = []
-    restored = ParameterContext.from_snapshot(codec.validate_json(json.dumps(data)))
+    restored = restore_parameters(codec.validate_json(json.dumps(data)))
     assert restored.value("$drive.rate") == 4300.0
     if defect == "extra":
         assert (
@@ -219,7 +264,7 @@ def test_snapshot_general_reads_do_not_require_component_or_alias_sections(
         "aliases": 42,
     }
     snapshot = ParameterSnapshot.model_validate_json(json.dumps(data))
-    restored = ParameterContext.from_snapshot(snapshot)
+    restored = restore_parameters(snapshot)
     assert restored.value("general.description") == "recorded"
     with pytest.raises(ValueError, match="alias"):
         restored.value("$unused")

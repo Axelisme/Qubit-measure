@@ -63,6 +63,7 @@ from .views import (
     document_revision,
     document_unit,
     document_value,
+    parameter_content,
     resolve_path,
     snapshot,
     source_path,

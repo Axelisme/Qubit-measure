@@ -46,6 +46,10 @@ from zcu_tools.gui.session.context_types import (
 )
 from zcu_tools.gui.session.expression import evaluate_scalar_expr
 from zcu_tools.gui.session.operation_runner import OperationRunner
+from zcu_tools.gui.session.parameter_capture import (
+    capture_parameters,
+    restore_parameters,
+)
 from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.state import SessionState
 from zcu_tools.gui.session.types import ParameterContext, SessionEnv
@@ -278,7 +282,7 @@ def test_preview_and_apply_use_current_gui_point_not_analysis_origin(
     session.control.set_parameter(saved_target(original), "Q1.ext.gain", 0.1)
     parameters = original
     if source == "snapshot":
-        parameters = ParameterContext.from_snapshot(original.snapshot())
+        parameters = restore_parameters(capture_parameters(original))
     elif source == "empty":
         parameters = ParameterContext.empty()
     elif source == "absent":

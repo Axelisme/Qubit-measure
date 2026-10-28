@@ -57,6 +57,7 @@ from zcu_tools.gui.session.context_types import (
     SavedPoint,
 )
 from zcu_tools.gui.session.operation_runner import OperationRunner
+from zcu_tools.gui.session.parameter_capture import capture_parameters
 from zcu_tools.gui.session.parameters import ParameterContext
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from zcu_tools.resources.entry import (
@@ -186,24 +187,40 @@ def test_native_save_load_uses_captured_environment_after_source_removal(
     role_load_session: NativeSaveSession,
 ) -> None:
     import shutil
+
     from zcu_tools.cfg_model import PulseSpec
 
     session = role_load_session
     control = ContextControlFacet(context=session.context)
     target = control.read_context().target
-    control.set_module(target, "Q1.pulses.pi", PulseSpec(
-        ch=0, nqz=1, freq=100.0, gain=0.25, waveform="const",
-    ))
+    control.set_module(
+        target,
+        "Q1.pulses.pi",
+        PulseSpec(
+            ch=0,
+            nqz=1,
+            freq=100.0,
+            gain=0.25,
+            waveform="const",
+        ),
+    )
     captured = control.read_context()
     tab = session.state.get_tab("tab")
     record = require_record(tab.run)
-    metadata = require_metadata(tab.run).model_copy(update={
-        "parameter_snapshot": captured.snapshot(),
-    })
-    commit_run(session.state, "tab", RunPaneState(
-        result=replace(record, metadata=metadata), parameters=captured,
-        storage=captured.storage,
-    ))
+    metadata = require_metadata(tab.run).model_copy(
+        update={
+            "parameter_snapshot": capture_parameters(captured),
+        }
+    )
+    commit_run(
+        session.state,
+        "tab",
+        RunPaneState(
+            result=replace(record, metadata=metadata),
+            parameters=captured,
+            storage=captured.storage,
+        ),
+    )
     control.set_parameter(target, "Q1.rate", 99.0)
     session.save()
     portable = session.entry.database_path.parent.parent / "portable.h5"

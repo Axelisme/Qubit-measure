@@ -39,9 +39,11 @@ from .ledger_models import (
     LedgerEvent,
 )
 from .points import PointView
+from .registry import component_registry
 from .schema import (
     PARAMETER_FORMAT,
     PARAMETER_VERSION,
+    ParameterContent,
     PointDocument,
     SetupDocument,
     SetupGeneral,
@@ -49,6 +51,7 @@ from .schema import (
 from .storage import bind_record_table
 from .views import (
     SetupView,
+    cached_parameter_content,
     validate_view_components,
 )
 
@@ -174,9 +177,13 @@ class ResultEntry:
                 format=PARAMETER_FORMAT,
                 supported_version=PARAMETER_VERSION,
                 validate=self._validate_setup,
+                read_validate=lambda document: self._validate_parameter_read(
+                    document, source
+                ),
             )
         except ValidationError as exc:
             raise ValueError(f"{source.resolve()}: {exc}") from exc
+        self._setup = SetupView(self._setup_store, source)
 
     def _validate_setup(self, document: SetupDocument) -> None:
         validate_view_components(document, source=self._result_path / "setup.yaml")
@@ -190,11 +197,14 @@ class ResultEntry:
 
     @property
     def setup(self) -> SetupView:
-        return SetupView(self._setup_store, self._result_path / "setup.yaml")
+        return self._setup
 
     @property
     def entry_id(self) -> str:
-        return self._setup_store.snapshot().general.entry_id
+        value = ParameterContent(self._setup_store.content()).value("general.entry_id")
+        if not isinstance(value, str):
+            raise ValueError("general.entry_id must be a string")
+        return value
 
     @property
     def result_path(self) -> Path:
@@ -395,9 +405,10 @@ class ResultEntry:
     def validate_point_parameters(self, label: str) -> None:
         """Probe one point parameter document without opening library or aliases.
 
-        label is a safe single path segment. Apply the same strict parameter
-        header, schema policy, component models and view binding as use_point.
-        Validation and I/O failures propagate; callers may isolate them per point.
+        label is a safe single path segment. Require a readable YAML mapping
+        with this owner's header and schema version. Component/leaf values stay
+        opaque until used or edited. Parse/header/I/O failures propagate for
+        callers to isolate per point. No availability guard is added to reads.
         No view is installed, and no documents are changed or created.
         """
         source = _entry_path(self._result_path / "points", label) / "point.yaml"
@@ -451,7 +462,10 @@ class ResultEntry:
         # Copy the validated YAML snapshot while the template lock is held.
         with self._setup_store.locked():
             self._setup_store.refresh()
-            components = self._setup_store.snapshot().components
+            content = cached_parameter_content(self.setup)
+            components = {
+                name: content.component(name) for name in content.component_names()
+            }
             shutil.copyfile(
                 self._result_path / "setup.yaml", destination / "point.yaml"
             )
@@ -566,6 +580,12 @@ class ResultEntry:
         )
         return ModuleLibrary(directory / "module_cfg.yaml", assets=assets)
 
+    def _validate_parameter_read(self, document: YamlMap, source: Path) -> None:
+        validate_parameter_header(document, source=source)
+        component_registry.require_schema_policy().require_current(
+            document, source=source, upgrade_target=self._result_path
+        )
+
     def _point_store(self, source: Path) -> DocumentStore[PointDocument]:
         class EntryPointDocument(PointDocument):
             _source = source
@@ -579,6 +599,9 @@ class ResultEntry:
                 supported_version=PARAMETER_VERSION,
                 validate=lambda document: validate_view_components(
                     document, source=source
+                ),
+                read_validate=lambda document: self._validate_parameter_read(
+                    document, source
                 ),
             )
         except ValidationError as exc:

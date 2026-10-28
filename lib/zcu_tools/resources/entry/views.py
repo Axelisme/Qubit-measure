@@ -61,7 +61,7 @@ type _ViewDocument = (
 )
 
 
-@dataclass(frozen=True)
+@dataclass
 class _ViewRead:
     """Package-owned access for three view types without reserving method names.
 
@@ -73,6 +73,8 @@ class _ViewRead:
     document: _ViewDocument
     source: Path | None
     origin: PointOrigin | None
+    content: ParameterContent | None = None
+    revision: DocumentRevision | None = None
 
 
 def _validate_view_component_name(name: str, *, source: Path | None) -> None:
@@ -119,10 +121,12 @@ def register_view_read(
     ValueError; objects without an instance dictionary raise TypeError.
     Validate the cached document without I/O before binding. No model hook runs.
     """
-    validate_view_components(
-        document.snapshot() if isinstance(document, DocumentStore) else document,
-        source=source,
-    )
+    if isinstance(document, DocumentStore):
+        content = ParameterContent(document.content())
+        for name in content.component_names():
+            _validate_view_component_name(name, source=source)
+    else:
+        validate_view_components(document, source=source)
     state = vars(view)
     if "_entry_read" in state:
         raise ValueError("Entry view is already bound")
@@ -164,15 +168,34 @@ def snapshot(view: EditView) -> SetupDocument | PointDocument: ...
 def snapshot(
     view: PointView | SetupView | EditView,
 ) -> SetupDocument | PointDocument:
-    """Copy this handle's cached document or edit draft without I/O or validation.
+    """Project the complete cached document or edit draft without I/O.
 
-    The result is deeply isolated, uses working units and preserves the typed
-    document's field visibility. Mutating it does not change the handle or disk.
+    Bound content is validated as the complete document, including model-level
+    transformations and checks. Drafts are copied without revalidation. The
+    result is isolated and uses working units. Mutating it changes no file.
+    Use parameter_content() for reads that must leave unused fields opaque.
     """
     document = _view_read(view).document
     if isinstance(document, DocumentStore):
         return document.snapshot()
     return document.model_copy(deep=True)
+
+
+def parameter_content(view: PointView | SetupView) -> ParameterContent:
+    """Copy cached resource content without validating unused component fields."""
+    return cached_parameter_content(view).model_copy(deep=True)
+
+
+def cached_parameter_content(view: PointView | SetupView) -> ParameterContent:
+    """Owner-internal cached content; defaults stay stable until the file changes."""
+    binding = _view_read(view)
+    document = binding.document
+    if not isinstance(document, DocumentStore):
+        raise TypeError("Parameter content requires a bound document")
+    if binding.content is None or binding.revision != document.document_revision:
+        binding.content = ParameterContent(document.content())
+        binding.revision = document.document_revision
+    return binding.content
 
 
 def document_revision(view: PointView | SetupView) -> DocumentRevision:
@@ -686,7 +709,11 @@ class SetupView:
 
     @property
     def general(self) -> GeneralView:
-        return GeneralView(lambda: self._store.snapshot().general, self._edit_general)
+        return GeneralView(
+            lambda: self._store.snapshot().general,
+            self._edit_general,
+            content=lambda: cached_parameter_content(self),
+        )
 
     @contextmanager
     def _edit_general(self, _field: str) -> Generator[SetupGeneral]:
@@ -695,7 +722,7 @@ class SetupView:
 
     @property
     def description(self) -> str | None:
-        return self._store.snapshot().general.description
+        return self.general.description
 
     @description.setter
     def description(self, value: str | None) -> None:
@@ -710,7 +737,7 @@ class SetupView:
 
     def meta(self, path: str) -> YamlMap | None:
         """Return isolated cached opaque metadata for a dotted path, or None."""
-        return document_meta(self._store.snapshot(), path)
+        return document_meta(cached_parameter_content(self), path)
 
     def refresh(self) -> None:
         self._store.refresh()
@@ -727,12 +754,13 @@ class SetupView:
             add_component_to_draft(draft, name, kind, fields, self._source)
 
     def __getattr__(self, name: str) -> ComponentView:
-        if name not in self._store.snapshot().components:
+        if name not in cached_parameter_content(self).component_names():
             raise AttributeError(f"Unknown component {name!r}")
         return ComponentView(
             lambda: self._store.snapshot().components[name],
             lambda field: self._edit_component(name, field),
             name,
+            content=lambda: cached_parameter_content(self),
         )
 
     @contextmanager
