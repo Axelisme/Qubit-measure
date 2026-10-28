@@ -224,7 +224,7 @@ def test_seed_accepts_omitted_components_without_rewriting_setup(
     assert source.read_bytes() == before
 
 
-def test_list_points_sorts_complete_points_and_ignores_incomplete_directories(
+def test_list_points_sorts_parameter_documents_without_requiring_library(
     entry: ResultEntry, entry_roots: tuple[Path, Path]
 ) -> None:
     entry.new_point("z (cold)")
@@ -232,10 +232,10 @@ def test_list_points_sorts_complete_points_and_ignores_incomplete_directories(
     partial = entry_roots[0] / "entry/points/partial"
     partial.mkdir()
     (partial / "point.yaml").touch()
-    assert entry.list_points() == ["a (warm)", "z (cold)"]
+    assert entry.list_points() == ["a (warm)", "partial", "z (cold)"]
     with pytest.raises(FileNotFoundError):
         entry.use_point("partial")
-    assert entry.list_points() == ["a (warm)", "z (cold)"]
+    assert entry.list_points() == ["a (warm)", "partial", "z (cold)"]
 
 
 @pytest.mark.parametrize("label", ["", ".", "..", "../outside", "nested/point", "x\\y"])

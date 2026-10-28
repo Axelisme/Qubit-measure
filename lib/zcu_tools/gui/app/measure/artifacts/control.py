@@ -6,8 +6,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, Protocol
 
+from pydantic import BaseModel, ConfigDict, Field
+
+from zcu_tools.datafile import read_doc
 from zcu_tools.experiment.artifacts import ArtifactRef, SaveReport
-from zcu_tools.experiment.native_persistence import read_run_metadata
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.context_types import CommandOrigin
 from zcu_tools.gui.session.services.context import ContextService
@@ -24,7 +26,7 @@ class SavedRunInfo:
 
     data_path is its exact path. run_id, point, experiment, started_at,
     finished_at and completion come from RunMetadata/RunSnapshot. Times are
-    historical UTC ISO strings, or None when unknown. completion is historical
+    recorded strings, or None when unknown. completion is historical
     progress, including unknown, not a save status. metadata_error is None on a
     successful metadata read. Otherwise it contains the decoding/I/O diagnostic,
     run_id and experiment are empty, and unavailable point/times/completion are
@@ -95,15 +97,31 @@ class SaveControlPort(Protocol):
         ...
 
 
+class _ListingSnapshot(BaseModel):
+    model_config = ConfigDict(strict=True)
+    point: str | None = None
+
+
+class _ListingMetadata(BaseModel):
+    # Listing displays only these historical facts, not provenance or typed cfg.
+    model_config = ConfigDict(strict=True)
+    run_id: str = Field(min_length=1)
+    experiment: str = Field(min_length=1)
+    snapshot: _ListingSnapshot | None = None
+    started_at: str | None = None
+    finished_at: str | None = None
+    completion: Literal["complete", "partial", "stopped", "unknown"] | None = None
+
+
 def _saved_run_info(path: Path) -> SavedRunInfo:
     try:
-        metadata = read_run_metadata(path)
+        metadata = _ListingMetadata.model_validate(read_doc(path, "metadata"))
     except (KeyError, OSError, ValueError) as error:
         # Isolate a single unreadable file so selection still reaches Load errors.
         return SavedRunInfo("", None, "", None, path, metadata_error=str(error))
     return SavedRunInfo(
         run_id=metadata.run_id,
-        point=metadata.snapshot.point,
+        point=metadata.snapshot.point if metadata.snapshot is not None else None,
         experiment=metadata.experiment,
         started_at=metadata.started_at,
         finished_at=metadata.finished_at,

@@ -110,7 +110,7 @@ GUI Native Load 由 LoadService 呼叫 datafile.load 讀成 Container，使用 e
 
 相同 opened entry 且可定位歷史 point 時，context owner 一次讀取檔案的 point 和已解析 alias names，固定 Load 時的持久值供 Analyze／Post／Writeback。檔案不保存原始 point／library 版本，不能把這份來源當成原始量測參數。跨 entry、EMPTY 或無歷史 point 時沒有 analysis source，不回退目前 alias。Save storage 在 Load request 時獨立捕捉；同 entry 沿歷史 point／run_id 保存，跨 entry 在 mapping 和 I/O 前拒絕。
 
-Load Data 同時提供 File 選檔與 opened entry 的 native 檔案清單。清單掃描 `Database/<entry>/runs/*/data.h5`，完全不讀 ledger。Run 身分、experiment、point、開始／結束時間與 completion 來自各檔的 RunMetadata／RunSnapshot；未知歷史時間保持空白，completion 保留 unknown。Experiment 的 `read_run_metadata` 透過 datafile.read_doc 只讀並驗證 metadata，不讀 cfg 或量測 arrays，也不保證整份資料可載入。Metadata 讀取失敗時，run_id 為空字串，experiment、point、時間與 completion 欄位留空。清單保留 exact Path 與既有錯誤資訊，選取仍回傳 exact path，由既有 Load 路徑回報失敗。清單不解析新舊目錄名來補欄位，避免讓路徑命名成為第二份歷史身分來源。查詢不建立目錄或事件，遷移也不手造 ledger。
+Load Data 同時提供 File 選檔與 opened entry 的 native 檔案清單。清單掃描 `Database/<entry>/runs/*/data.h5`，完全不讀 ledger。Run 身分、experiment、point、開始／結束時間與 completion 來自各檔的 RunMetadata／RunSnapshot；未知歷史時間保持空白，completion 保留 unknown。清單透過 `datafile.read_doc` 讀 metadata，只解碼與驗證上述顯示欄位，不要求完整 RunMetadata 或 provenance，也不讀 cfg 或量測 arrays。清單可顯示不代表整份資料可載入。Metadata 讀取失敗時，run_id 為空字串，experiment、point、時間與 completion 欄位留空。清單保留 exact Path 與既有錯誤資訊，選取仍回傳 exact path，由既有 Load 路徑回報失敗。清單不解析新舊目錄名來補欄位，避免讓路徑命名成為第二份歷史身分來源。查詢不建立目錄或事件，遷移也不手造 ledger。
 
 使用者於 2026-10-20 確認檔案清單與成功 Load 分開：「我以為只要是data.h5就可以看到，能不能Load另說」。對清單完全不讀 ledger、顯示欄位只從檔案 metadata 讀取的方案回覆：「可以」。
 
@@ -126,7 +126,11 @@ Setup 的 alias 位於 `<entry>/aliases.yaml`。每個 point 的 alias 位於 `<
 
 `EntryAliases` 保存 authored 值，不保存解析後名稱。Run snapshot、storage 及 acquired metadata 則固定當次解析後的單一名稱或有序名稱清單。歷史載入不重展全域表；單一名稱消費者遇清單明確拒絕。Alias 資料型別由 resources 擁有，experiment／frontends 向下引用，不反向依賴 session。這條依賴由 `layers` 的 C8 及 `top-level-acyclic` 的 C9 contract 約束。
 
-檔案使用 `format: zcu.aliases`，寫入 `format_version: "1.0"`，讀取接受 major 1 的 forward minor。空 mapping 與缺檔都讀成空表。格式、結構或 alias 語法錯誤直接失敗，不回退 preset。
+檔案使用 `format: zcu.aliases`，寫入 `format_version: "1.0"`，讀取接受 major 1 的 forward minor。空 mapping 與缺檔都讀成空表。嚴格讀取與寫入仍直接回報格式、結構或 alias 語法錯誤，不回退 preset。
+
+供 session 使用的 resources 讀取結果在一次 I/O 中固定解碼內容、原始內容錯誤與 observed bytes revision。Session 保存這份結果及自己的 alias 語法錯誤，建立固定 capture。壞 aliases 不阻擋 point 的參數與 library；實際 alias 讀取或投影才報該 capture 的原錯。錯誤狀態不是有效空表，修復後的新 capture 也不改舊 capture。Revision 不保證內容有效，修復與衝突語意見 [[0081]]。Session 透過 resources 的讀取契約取得資料，依賴方向由 C8／C9 約束。Caller 不重讀或補驗檔案。
+
+2026-10-29，使用者對 alias 錯誤隔離、owner 分工與 observed revision 的文件補充回覆「同意」。這項隔離實作下方的按需讀取原則，不放寬 alias writer 的驗證。
 
 Dialog Apply 先驗整表，再由 entry owner 寫 sibling temporary 並 atomic replace，成功後才安裝 memory 和發布變更 fact。失敗保舊表、舊檔與 dialog draft，可修正後再 Apply。未選 point 時 Apply 以 `FailedPreconditionError(no_context)` 拒絕，不寫 setup。普通 `set_alias_rows` 在未選 point 時只改 memory；選定 point 後與 Apply 一樣，先保存該 point 的表，再安裝 memory 與發布 fact，見 [[0081]]。兩者都不修改 setup alias。Apply 不關閉 dialog，Cancel 不撤回先前已 Apply 的內容。
 
@@ -168,7 +172,9 @@ Grid 不同的 grouped 實驗可由 spec 明確宣告 independent Labber layout�
 
 ### 資料容器的讀取契約
 
-資料容器採 Tolerant Reader。載入時忽略不認得或舊格式的欄位，不因多出或缺少欄位報錯。容器可以不再讀取舊欄位，不必轉換或提供相容別名。只有實際使用某欄位時才檢查它是否存在、數值是否可用；缺失時在使用處報錯並指名欄位，或在該功能可選時關閉並註明原因。寫入端仍寫出完整、正確的格式。
+資料容器採 Tolerant Reader。每個 app 只讀、只驗當次操作需要的檔案與欄位。用不到的欄位缺少、多出或格式不同都不報錯；實際使用時才檢查它是否存在、數值是否可用。有問題時在使用處報錯並指名欄位，或在該功能可選時關閉並註明原因。容器可以不再讀取舊欄位，不必轉換或提供相容別名。寫入端仍寫出完整、正確的格式。
+
+這項規則也適用於按 point 或個別分析成果移植資料。App 不因其他檔案或區塊缺席、格式不同而拒絕使用已具備的資料。2026-10-28，使用者說明：「我會預期一個app只會需要給他需要的資料，而不是檢查用不到的格式與欄位」。2026-10-29 再次確認：「我一致的設計規則是：只檢查需要用到的資訊」。
 
 2026-10-26，使用者裁決：「我對這種資料容器的行為預期都是：可以不讀舊格式欄位，但不要因為少了欄位或多了欄位就報錯。」這是一般資料讀取的欄位容忍原則。既有容器 header／major、component `schema_version` 的拒讀規則與元件 model 驗證契約仍由各 owner 決定，不以此新增相容層。
 
@@ -182,7 +188,11 @@ Grid 不同的 grouped 實驗可由 spec 明確宣告 independent Labber layout�
 
 Runtime 只接受目前版本。缺版或版本不同時，讀取處列出文件版本、目前版本與可執行的 upgrade 命令，不推測、不改檔。優先新增有預設值的欄位，結構變更才增加一個 vN→vN+1 純函式步驟。
 
-`resources.parameter_upgrade` 擁有通用鏈與 YAML I/O。Caller 提供完整舊格式分類、每版完整驗證及純函式步驟。未標版文件只有在 operator 明確 upgrade，且完整分類確認後才視為 v1。Runner 驗證每步輸出正好是下一版，current 文件也先驗證再跳過。預設 dry-run 不建檔或鎖，逐文件、逐欄位列出差異。Apply 用 DocumentStore 的同名 sidecar lock，重讀、完整驗證、exclusive byte backup、sibling temporary 與 atomic replace。失敗保留原檔與已完成的備份，其餘文件照常處理。這不是多檔或掉電交易。
+`resources.parameter_upgrade` 擁有通用鏈與 YAML I/O。Caller 提供完整舊格式分類、每版完整驗證及純函式步驟。未標版文件只有在 operator 明確 upgrade，且完整分類確認後才視為 v1。Runner 驗證每步輸出正好是下一版，current 文件也先驗證再跳過。預設 dry-run 不建檔或鎖，逐文件、逐欄位列出差異。Apply 使用 resources 的 per-user runtime file lock，重讀、完整驗證、exclusive byte backup、sibling temporary 與 atomic replace。失敗保留原檔與已完成的備份，其餘文件照常處理。這不是多檔或掉電交易。
+
+`resources.upgrade_backup` 擁有 parameter、predictor、record table 與 processed spectrum 升級共用的備份定位。它依來源最近的 `result`／`Database` 所屬資料專案，選擇旁側 `<專案根>-backup`，不是工具 checkout 旁，也不把備份留在資料項目內。Helper 在任何寫入前檢查目的地；caller 才建立目錄並保存原 bytes。它不依賴 migrations，C20 禁止 runtime 反向依賴離線遷移，C21 禁止 library 反向依賴 scripts。Override、相對鏡像、resolved `-backup` 名稱與 symlink 規則由[備份位置](../parameter-upgrades.md#備份位置)擁有，不在各升級工具重做判斷。
+
+2026-10-28，使用者對升級備份移到資料項目外、與遷移備份同處的選項回覆「2A」。2026-10-29 對上述共用 owner 與外部備份分工的文件補充回覆「同意」。
 
 Lab 的 component flux 純轉換由長期升級步驟與一次性 `storage_mapping` 共用。Migrations 透過 caller 的完整文件 batch callback 在 current schema 驗證前轉換 seed／value，不先發布舊格式再升級。框架不解讀 lab 欄位。離線 YAML 沒有 device catalog，只驗共用名稱語法，device 存在性留在使用處檢查。`migrations → zcu_lab.components` 是 caller 指向定義者的邊，C14、C16、C20 保護反向隔離，不限制 caller 載入。
 

@@ -113,6 +113,8 @@ Results browser… on the toolbar opens an independent top-level Results browser
 When space is short, the button moves into More ▾. Closing the
 measure window closes this browser. It reads the Controller results query once
 and filters the shared index without changing the opened entry or point.
+Unenumerable Database items appear beside the filters as Cannot index, with
+entry, rejected path and reason in the tooltip. They do not hide healthy runs.
 The navigation tree starts with entries, then experiment → point → run or
 point → experiment → run. Both orders share focus history and keep entries
 isolated even when experiment, point and run names match. Group galleries show

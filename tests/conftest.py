@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from tests._cache_environment import temporary_cache_root
+from tests._cache_environment import persistent_numba_cache_root, temporary_cache_root
 from tests._temp_directory_guard import ContextDirectoryGuard
 
 # Configure the cache before third-party imports or descendant conftests can
@@ -14,6 +14,10 @@ from tests._temp_directory_guard import ContextDirectoryGuard
 # The bootstrap retains it through process exit. Never restore the user's cache
 # environment during nested pytest.main() teardown.
 os.environ["ZCU_TOOLS_CACHE_DIR"] = temporary_cache_root()
+# Machine code is reusable across workers and invocations in this worktree.
+# Keep GUI/user caches process-private, and never inherit another worktree's
+# Numba parent. The simulator retains ownership of source/version invalidation.
+os.environ["NUMBA_CACHE_DIR"] = persistent_numba_cache_root()
 
 # BLAS thread pinning for xdist workers — must happen BEFORE numpy is imported
 # so that OpenBLAS / MKL / OpenMP size their thread pools from the environment

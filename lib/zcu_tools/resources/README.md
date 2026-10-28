@@ -1,13 +1,13 @@
 # `zcu_tools.resources` experiment work resources
 
-**Last updated:** 2026-10-28（per-user runtime locks）
+**Last updated:** 2026-10-28（backup root naming）
 
 **讀者：** framework-dev。實驗資源的 scope、讀寫與持久化 owner 導覽。
 
 `resources/` 組織實驗工作資源的命名、讀寫與交換。資料檔格式與讀寫由 [datafile](../datafile/README.md) 擁有。
 
 - [`context/`](context/README.md) 管理 point-local typed ModuleLibrary。
-- `predictor_file.py` 擁有 `zcu.predictor` v2 JSON 的具名讀寫。`PredictorFile.params` 只含 simulate 的 nullable 能量／asymmetry，`PredictorFile.flux` 是 `PredictorFlux(offset, period, unit)`。`PredictorFlux.from_mapping` 解碼與檔案相同的 offset／period／unit 格式，`to_dict()` 回傳 detached typed JSON 欄位。RPC 與檔案共用此 decoder，不另建驗證。Flux 透過 `to_frame()` 複用 `analysis.flux.FluxFrame` 與 `DevicePeriod` 的驗證，不在 resources 重寫仿射數學。此 resources→analysis 依賴沿用 C8 分層與 C9 無循環 contract。`encode_predictor_document` 驗證並回傳 detached `PredictorDocument`，供 save、validate 與離線 migration baseline 共用 v2 表示，不讓 caller 序列化 frozen mappings。`validate_predictor_file` 與 load/save 共用表示規則，不建數值模型。完整性與物理約束由 `params.build_predictor()` 驗證。V1 只透過純函式 `upgrade_predictor_document` 轉為 v2，runtime 拒讀並列出升級命令。`predictor_upgrade.py` 擁有明確升級的逐檔預覽、備份及替換。格式與還原見 [Predictor v2](../../../docs/storage-format-history/predictor-v2.md)。它不讀 component、alias 或舊 `params.json`。
+- `predictor_file.py` 擁有 `zcu.predictor` v2 JSON 的具名讀寫。`PredictorFile.params` 只含 simulate 的 nullable 能量／asymmetry，`PredictorFile.flux` 是 `PredictorFlux(offset, period, unit)`。`PredictorFlux.from_mapping` 解碼與檔案相同的 offset／period／unit 格式，`to_dict()` 回傳 detached typed JSON 欄位。RPC 與檔案共用此 decoder，不另建驗證。Flux 透過 `to_frame()` 複用 `analysis.flux.FluxFrame` 與 `DevicePeriod` 的驗證，不在 resources 重寫仿射數學。此 resources→analysis 依賴沿用 C8 分層與 C9 無循環 contract。`encode_predictor_document` 驗證並回傳 detached `PredictorDocument`，供 save、validate 與離線 migration baseline 共用 v2 表示，不讓 caller 序列化 frozen mappings。`validate_predictor_file` 與 save／upgrade 保留嚴格完整規則，不建數值模型。Load 忽略 envelope、params、flux 與 source 的未知欄位，只將已知參數交給 simulate。`PredictorFile.source` 缺失或無法解析時為 None，無時區時間也投影為 None；可解析的來源保留原文。Writer 要求明確的合法 source。完整性與物理約束由 `params.build_predictor()` 驗證。V1 只透過純函式 `upgrade_predictor_document` 轉為 v2，runtime 拒讀並列出升級命令。`predictor_upgrade.py` 擁有明確升級的逐檔預覽、備份及替換。格式與還原見 [Predictor v2](../../../docs/storage-format-history/predictor-v2.md)。它不讀 component、alias 或舊 `params.json`。
 - `simulation_replay.py` owns opt-in private FTF and single-fluxonium input JSON, content integrity,
   atomic file I/O and acquire/round reference resolution. It retains detached
   waveform samples and settings, not measured I/Q. Template arrays use explicit
@@ -23,6 +23,7 @@
 - [`waveform_assets.py`](waveform_assets.py) 是 qubit-scoped arbitrary waveform asset 的公開入口。每個 Database instance 持有固定 root，capture capability 固定原目錄但每次讀現在 bytes；沒有全域 repository 選擇器。core.waveform_format 負責 NPZ samples codec；內部 data、formula 與 NPZ 模組分別負責 payload／preview、formula 語意／rendering 與實體 I/O；格式、方法與約束見 [waveform_assets.md](waveform_assets.md)。
 - [`document_store.py`](document_store.py) 提供 typed YAML 的記憶體快照、單檔樂觀交易與跨程序鎖。公開 `DocumentRevision(path, revision)` 記錄絕對路徑與已安裝原始 bytes 的 SHA-256。`DocumentStore` 與 `ModuleLibrary` 的 `document_revision` 屬性，以及 entry 的 `document_revision(view)` 函式都不重新讀檔。提交或 refresh 成功才更新版本，失敗保留舊版本。Entry、point-local ModuleLibrary 與 GUI／MCP 參數操作使用它。
 - [`entry/`](entry/README.md) 組合條目身分、setup 範本與獨立完整的 point。每個視圖綁自己的 DocumentStore，建立 point 時複製 seed。
+- `upgrade_backup.py` 集中 parameter、predictor、record 與 spectrum 明確升級的備份定位。來源最近的 `result`／`Database` 所屬專案決定 `<專案根>-backup/`，鏡像相對路徑並加 UUID。CLI `--backup-root` 與 runner `backup_root` 可覆寫。解析後的根若直接含 `result`／`Database` 子目錄，名稱必須以 `-backup` 結尾；此名稱允許接續鏡像與遷移備份共處。未依此命名的空根首次產生鏡像後，後續 apply 會拒絕。Standalone 來源必須覆寫；資料樹內目的地、跳出鏡像根或導入另一資料樹的 symlink 在任何寫入前拒絕。它不依賴 migrations；操作規則見 [備份位置](../../../docs/parameter-upgrades.md#備份位置)。
 - `parameter_schema.py` 擁有 caller 注入的 `ParameterSchemaPolicy`。`parameter_upgrade.py` 提供具名文件、線性純函式升級鏈與 `main(argv, *, plan)`，預設 dry-run。Component CLI 接受檔案或 entry 目錄，目錄的 component 文件與 predictor JSON 由 entry owner 列舉。Predictor 檔案走獨立的 v1→v2 owner，不使用 component schema plan。Policy 的版本錯誤列出 Preview 與含 `--apply` 的 Apply 指令，目標由 caller 傳入，預設是來源檔。Lib 只讀版本、驗證連續性與管理單檔備份／replace，不知道 lab 欄位。完整舊格式分類、逐版本驗證與步驟由 caller 提供，未標版只在明確 upgrade 且分類成功後視為 v1。Runtime 讀取從不改檔。`UpgradePlan.notes` 列出整體操作警告；每份 `ParameterDocument.notes` 隨轉換傳到 `UpgradeResult.notes`，CLI 在該檔結果下呈現。Notes 不寫入 YAML，runner 不解析 caller 的欄位或診斷內容。
 
 樣本歷史使用 JSONL，舊 CSV 的離線讀取與轉換由 root [`migrations/`](../../../migrations/README.md) 提供。
@@ -48,11 +49,11 @@ DocumentStore 的 explicit `lock_path` 仍可指定其他鎖檔。
 
 `dispersive_file.py` 擁有 `zcu.dispersive` v1，公開 `DispersiveFile`、`DispersiveParams`、`PlotTransitions` 與 `load_dispersive_file`／`save_dispersive_file`。Resources root 不 re-export 這些名稱。
 
-JSON 必須含 `format`、嚴格整數 `version: 1`、`params` 與 `source`。Envelope 與 source 不接受額外欄位。`analysis_source.AnalysisSource` 驗證來源。`source.run_id` 與 `source.created_at` 必填，未知寫 null。Run ID 是非空字串。Created_at 只接受 `YYYY-MM-DDTHH:MM[:SS[.ffffff]]` 加 `Z` 或 `±HH:MM`。日期須有效，小數秒可有一至六位。讀寫保留原文，不改成 UTC，也不補目前時間。
+Reader 回傳 `DispersiveFileView`，要求 `format`、嚴格整數 `version: 1` 與 `params`，忽略未知欄位。`source` 缺失或無法解析時為 None，無時區時間也投影為 None；可解析來源保留原文。`DispersiveParamsView` 驗 bare_rf／r_f，g 保持 opaque JSON，使用者呼叫 `require_g()` 才驗證有限 GHz 數值。Writer 仍使用嚴格的 `DispersiveFile`／`DispersiveParams` 與 `AnalysisSource`。Source 的 run_id 與 created_at 必填，未知寫 null；時間須含時區，不補目前時間。
 
 `params.g` 與 `params.bare_rf` 是 GHz，可省略或 null。`params.plot_transitions.r_f` 是 GHz 的 resonator seed，可省略或 null。其餘 transition keys 保留原始 JsonValue，不解釋躍遷名稱。
 
-Load 讀 caller 指定的 exact path，缺檔與格式錯誤直接拋出。Save 重新驗證具名 model，保留 explicit null、未提供的欄位與來源字串。Parent directory 必須存在。Writer 先寫 sibling temporary，再 atomic replace，失敗清 temporary。這不是多檔交易、multiwriter lock 或掉電持久保證。ResultEntry 只提供 `dispersive_path` 目錄，caller 選擇檔名。
+Load 讀 caller 指定的 exact path，缺檔與格式錯誤直接拋出。Save 以嚴格 writer model 重新驗證，保留 explicit null、未提供的欄位與來源字串；讀取 view 若缺合法 source 或 g 非法則拒絕寫入。Parent directory 必須存在。Writer 先寫 sibling temporary，再 atomic replace，失敗清 temporary。這不是多檔交易、multiwriter lock 或掉電持久保證。ResultEntry 只提供 `dispersive_path` 目錄，caller 選擇檔名。
 
 離線 T1 分析格式與 codec 由 `migrations/storage_migration/t1_curve_file.py` 擁有，runtime 不讀寫。
 

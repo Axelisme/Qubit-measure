@@ -153,7 +153,7 @@ def test_empty_project_results_are_readable_without_entry_or_control(
     results_rpc: ResultsRpc,
 ) -> None:
     assert results_rpc.result("entry.info", {})["entry"] is None
-    assert results_rpc.result("results.list", {}) == {"runs": []}
+    assert results_rpc.result("results.list", {}) == {"runs": [], "issues": []}
     assert results_rpc.result("control.status", {})["me"] is False
 
 
@@ -188,6 +188,26 @@ def test_results_list_projects_all_entries_history_and_missing_mux_roles(
     assert unknown["at"] is None
     assert unknown["data_path"] is None
     assert unknown["figures"] == ["overview.png"]
+
+
+def test_results_list_reports_unenumerable_entries_with_healthy_runs(
+    results_rpc: ResultsRpc, saved_runs: tuple[Path, Path, Path], tmp_path: Path
+) -> None:
+    source = tmp_path / "Database" / "A" / "runs"
+    moved = tmp_path / "detached"
+    source.rename(moved)
+    source.symlink_to(moved, target_is_directory=True)
+
+    reply = results_rpc.result("results.list", {})
+
+    rows = _ROWS.validate_python(reply["runs"], strict=True)
+    assert len(rows) == 2
+    assert all(row["entry"] == "B" for row in rows)
+    issues = _ROWS.validate_python(reply["issues"], strict=True)
+    assert len(issues) == 1
+    assert issues[0]["entry"] == "A"
+    assert issues[0]["path"] == str(source)
+    assert "escapes" in str(issues[0]["reason"])
 
 
 def test_results_list_refreshes_disk_without_switching_opened_entry(

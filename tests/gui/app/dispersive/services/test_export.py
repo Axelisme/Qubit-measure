@@ -20,6 +20,7 @@ def test_export_writes_entry_artifact_without_adding_component_fields(analysis_t
     saved = load_dispersive_file(expected)
     assert saved.params.g == 0.068
     assert saved.params.bare_rf == 5.35
+    assert saved.source is not None
     assert saved.source.run_id is None
     assert saved.source.created_at is not None
     assert snapshot(analysis_target.resource.setup) == before

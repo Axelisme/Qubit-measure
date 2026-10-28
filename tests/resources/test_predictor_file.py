@@ -163,7 +163,7 @@ def test_load_preserves_unknown_metadata_and_timezone_text(
         pytest.param("2026-10-20T12:34.5Z", id="fractional-minute"),
     ],
 )
-def test_rejects_timestamp_outside_extended_shape(
+def test_timestamp_outside_extended_shape_is_unknown_on_read_and_rejected_on_write(
     tmp_path: Path,
     document: dict[str, object],
     operation: str,
@@ -174,8 +174,7 @@ def test_rejects_timestamp_outside_extended_shape(
     before = path.read_bytes()
 
     if operation == "load":
-        with pytest.raises(ValueError, match="."):
-            load_predictor_file(path)
+        assert load_predictor_file(path).source is None
     else:
         predictor = PredictorFile(
             "fluxonium",
@@ -200,7 +199,7 @@ def test_rejects_timestamp_outside_extended_shape(
     ],
     ids=["ordinal-date", "invalid-calendar-date", "invalid-time", "invalid-offset"],
 )
-def test_rejects_invalid_timestamp_values(
+def test_invalid_timestamp_is_unknown_on_read_and_rejected_on_write(
     tmp_path: Path,
     document: dict[str, object],
     operation: str,
@@ -209,8 +208,7 @@ def test_rejects_invalid_timestamp_values(
     document["source"] = {"run_id": None, "created_at": timestamp}
     path = write_document(tmp_path / "predictor.json", document)
     if operation == "load":
-        with pytest.raises(ValueError, match="."):
-            load_predictor_file(path)
+        assert load_predictor_file(path).source is None
     else:
         predictor = PredictorFile(
             "fluxonium",
@@ -266,14 +264,10 @@ def test_timestamp_extended_shape_round_trips_verbatim(
         {"model": None},
         {"params": []},
         {"params": None},
-        {"params": {"typo": 1}},
-        {"params": {"EJmax": 1}},
         {"params": {"EJ": True}},
         {"params": {"EJ": "5"}},
         {"params": {"EC": float("nan")}},
         {"params": {"EL": float("inf")}},
-        {"params": {"flux_period": -float("inf")}},
-        {"model": "transmon", "params": {"EJ": 1}},
         {"model": "transmon", "params": {"d": False}},
         {"model": "transmon", "params": {"EJmax": float("nan")}},
         {"flux": {"offset": 0, "period": {"bias": 1}, "unit": {"bias": ""}}},
@@ -302,14 +296,10 @@ def test_timestamp_extended_shape_round_trips_verbatim(
         "null-model",
         "array-params",
         "null-params",
-        "unknown-parameter",
-        "wrong-model-parameter",
         "bool-parameter",
         "text-parameter",
         "nan-parameter",
         "inf-parameter",
-        "negative-inf-parameter",
-        "transmon-wrong-parameter",
         "transmon-bool",
         "transmon-nan",
         "empty-unit",
@@ -329,7 +319,7 @@ def test_timestamp_extended_shape_round_trips_verbatim(
         "extra-envelope",
     ],
 )
-def test_load_rejects_invalid_envelope_metadata_and_parameters(
+def test_load_validates_only_header_and_numeric_inputs(
     tmp_path: Path,
     document: dict[str, object],
     changes: dict[str, object],
@@ -337,13 +327,22 @@ def test_load_rejects_invalid_envelope_metadata_and_parameters(
     document.update(changes)
     path = write_document(tmp_path / "invalid.json", document)
 
-    with pytest.raises(ValueError, match="."):
-        load_predictor_file(path)
+    if (
+        "source" in changes
+        and isinstance(changes["source"], dict)
+        and "extra" in changes["source"]
+    ):
+        assert load_predictor_file(path).source == PredictorSource(None, None)
+    elif "source" in changes:
+        assert load_predictor_file(path).source is None
+    elif "extra" in changes:
+        assert load_predictor_file(path).params == FluxoniumParams(EJ=5, EC=1, EL=0.5)
+    else:
+        with pytest.raises(ValueError, match="."):
+            load_predictor_file(path)
 
 
-@pytest.mark.parametrize(
-    "field", ["format", "version", "model", "params", "flux", "source"]
-)
+@pytest.mark.parametrize("field", ["format", "version", "model", "params", "flux"])
 def test_load_requires_every_envelope_field(
     tmp_path: Path,
     document: dict[str, object],
@@ -357,7 +356,7 @@ def test_load_requires_every_envelope_field(
 
 
 @pytest.mark.parametrize("field", ["run_id", "created_at"])
-def test_load_requires_nullable_source_fields(
+def test_load_incomplete_source_is_unknown(
     tmp_path: Path,
     document: dict[str, object],
     field: str,
@@ -367,8 +366,7 @@ def test_load_requires_nullable_source_fields(
     document["source"] = source
     path = write_document(tmp_path / "missing.json", document)
 
-    with pytest.raises(ValueError, match=field):
-        load_predictor_file(path)
+    assert load_predictor_file(path).source is None
 
 
 @pytest.mark.parametrize("content", ["[]", "null", "42", "{broken"])
@@ -469,7 +467,6 @@ def test_v1_reader_requires_explicit_upgrade(tmp_path: Path) -> None:
         {"offset": 0, "period": {"bias": 1}, "unit": {}},
         {"offset": 0, "period": {}, "unit": {"extra": "A"}},
         {"offset": 0, "period": {"bad.name": 1}, "unit": {"bad.name": "A"}},
-        {"offset": 0, "period": {}, "unit": {}, "extra": 1},
     ],
 )
 def test_load_rejects_invalid_flux_frame(
@@ -546,6 +543,59 @@ def test_upgrade_rejects_unusable_affine_without_mutating_input(
     assert document == before
 
 
+@pytest.mark.parametrize(
+    "source",
+    [None, [], {}, {"run_id": "run", "created_at": "2026-10-20T12:00:00"}],
+)
+def test_reader_projects_numeric_inputs_without_requiring_provenance(
+    tmp_path: Path, document: dict[str, object], source: object
+) -> None:
+    document.pop("source")
+    if source is not None:
+        document["source"] = source
+    path = write_document(tmp_path / "reader.json", document)
+    before = path.read_bytes()
+
+    loaded = load_predictor_file(path)
+
+    assert loaded.params == FluxoniumParams(EJ=5, EC=1, EL=0.5)
+    assert loaded.flux == PredictorFlux(0.25, {"bias": -0.4}, {"bias": "mA"})
+    assert loaded.source is None
+    assert path.read_bytes() == before
+
+
+@pytest.mark.parametrize("location", ["envelope", "params", "flux"])
+@pytest.mark.parametrize("model", ["fluxonium", "transmon"])
+def test_reader_ignores_unknown_keys_without_weakening_numeric_owner(
+    tmp_path: Path, document: dict[str, object], location: str, model: ModelName
+) -> None:
+    values = (
+        {"EJ": 5, "EC": 1, "EL": 0.5}
+        if model == "fluxonium"
+        else {"EJmax": 20, "EC": 0.3, "d": 0.1}
+    )
+    document.update(model=model, params=values)
+    if location == "envelope":
+        document["future"] = []
+    elif location == "params":
+        document["params"] = {**values, "future": []}
+    else:
+        document["flux"] = {"offset": 0.25, "period": {}, "unit": {}, "future": []}
+    path = write_document(tmp_path / "extra.json", document)
+    assert load_predictor_file(path).params == params_class(model).from_mapping(values)
+    with pytest.raises(ValueError, match="Unknown parameters"):
+        params_class(model).from_mapping({**values, "future": []})
+
+
+@pytest.mark.parametrize("operation", ["save", "validate"])
+def test_writer_requires_explicit_source(tmp_path, operation):
+    predictor = PredictorFile(
+        "fluxonium", FluxoniumParams(), PredictorFlux(0, {}, {}), None
+    )
+    with pytest.raises(ValueError, match="source"):
+        save_or_validate(operation, tmp_path / "fit.json", predictor)
+
+
 def test_load_missing_file_propagates_io_error(tmp_path: Path) -> None:
     with pytest.raises(FileNotFoundError):
         load_predictor_file(tmp_path / "missing.json")
@@ -590,8 +640,8 @@ def test_save_writes_versioned_json_and_round_trips(
             "unit": dict(predictor.flux.unit),
         },
         "source": {
-            "run_id": predictor.source.run_id,
-            "created_at": predictor.source.created_at,
+            "run_id": predictor.source.run_id if predictor.source else None,
+            "created_at": predictor.source.created_at if predictor.source else None,
         },
     }
     assert load_predictor_file(destination) == predictor

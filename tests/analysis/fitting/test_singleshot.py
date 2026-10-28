@@ -268,7 +268,8 @@ def test_ge_rejects_unestimable_covariance():
 
     # Six observations cannot estimate the covariance of seven free parameters.
     xs = np.array([-1.0, 0.0, 1.0])
-    truth = (-0.3, 0.3, 1.2, 0.6, 0.2, 0.7, 0.7)
+    # Exercise covariance rejection rather than a difficult transition search.
+    truth = (-0.3, 0.3, 1.2, 0.6, 0.2, 0.5, 1.5)
     g = calc_population_pdf(xs, *truth)
     e = calc_population_pdf(xs, *truth[:3], truth[4], truth[3], *truth[5:])
     with (
