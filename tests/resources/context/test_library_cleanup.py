@@ -19,6 +19,7 @@ from zcu_tools.resources.context.library import ModuleLibrary
 from zcu_tools.resources.entry import AcceptedPayload, AcceptedWrite, LedgerEvent
 from zcu_tools.resources.entry.ledger import RecordsLedger
 from zcu_tools.resources.entry.provenance import Provenance
+from zcu_tools.resources.file_lock import lock_path_for
 
 ENTRY_ID = "78fa0941-f9ce-49d4-9665-4eb9302b8162"
 HEADER = "format: zcu.module-library\nformat_version: '2.0'\n"
@@ -519,14 +520,14 @@ def _locked_reader(
                 with library.edit() as draft:
                     draft.set_waveform("Q1.waveforms.new", ConstWaveformCfg(length=0.2))
                     connection.send("ready")
-                    # Parent sends go after ready while holding the sidecar lock.
+                    # Parent sends go after ready while holding the runtime lock.
                     assert connection.poll(30), "parent did not send go"
                     assert connection.recv() == "go"
                     armed = True
                     connection.send("attempting")
             else:
                 connection.send("ready")
-                # Parent sends go after ready while holding the sidecar lock.
+                # Parent sends go after ready while holding the runtime lock.
                 assert connection.poll(30), "parent did not send go"
                 assert connection.recv() == "go"
                 armed = True
@@ -549,7 +550,7 @@ def _locked_reader(
 
 
 @pytest.mark.parametrize("operation", ["open", "refresh", "enter", "commit"])
-def test_cleanup_waits_for_sidecar_and_backs_up_latest_bytes(
+def test_cleanup_waits_for_runtime_lock_and_backs_up_latest_bytes(
     tmp_path: Path, operation: str
 ) -> None:
     path = tmp_path / "module_cfg.yaml"
@@ -566,14 +567,14 @@ def test_cleanup_waits_for_sidecar_and_backs_up_latest_bytes(
         # Started child completes its valid-file setup and then sends ready.
         assert parent.poll(30), "reader setup did not finish"
         assert parent.recv() == "ready"
-        with FileLock(str(path) + ".lock"):
+        with FileLock(str(lock_path_for(path))):
             parent.send("go")
             # Go releases the child's receive, which sends the pre-call message.
             assert parent.poll(30), "reader did not acknowledge go"
             assert parent.recv() == "attempting"
             # No public queue-arrival point: this only samples non-completion;
             # scheduling affects detection power, never correct-reader success.
-            assert not parent.poll(0.15), "reader bypassed the sidecar lock"
+            assert not parent.poll(0.15), "reader bypassed the runtime lock"
             original = mixed(path)
             # End the protected phase BEFORE unlocking: no post-unlock race.
             release_intent.set()
