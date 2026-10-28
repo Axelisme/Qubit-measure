@@ -24,6 +24,8 @@ from zcu_tools.gui.remote.rpc_endpoint import ControlOptions
 if TYPE_CHECKING:
     from qtpy.QtWidgets import QApplication
 
+    from zcu_tools.gui.lifetime import LifetimeScope
+
 
 @dataclass(frozen=True)
 class GuiRuntimeSpec:
@@ -216,13 +218,17 @@ def run_gui_runtime(
 
     exit_diagnostics optionally arms a process-exit watchdog after close;
     None records only the thread summary. The launcher supplies diagnostics
-    using the resolved GUI log path.
+    using the resolved GUI log path. Quit callbacks are disconnected after
+    behavior.close, including failure paths. Plotting stays in shutdown mode
+    after quit to protect canvas destructors during process finalization.
     """
-    app = _get_or_create_qapplication()
-    _initialize_rendering(app)
+    from zcu_tools.gui.lifetime import LifetimeScope
 
+    app = _get_or_create_qapplication()
+    scope = LifetimeScope()
     assembly = None
     try:
+        _initialize_rendering(app, scope)
         assembly = behavior.assemble(control)
         _validate_control_assembly(control, assembly)
         behavior.before_show(assembly)
@@ -235,14 +241,17 @@ def run_gui_runtime(
                 return 1
             # stop() unsubscribes app-side listeners synchronously, so keep it on the
             # Qt main thread; aboutToQuit is emitted there.
-            app.aboutToQuit.connect(assembly.control_adapter.stop)
+            scope.connect(app.aboutToQuit, assembly.control_adapter.stop)
 
         behavior.after_show(assembly)
         return int(app.exec())
     finally:
         # Runs after admission/drain on success and on every startup failure.
         # A close failure retains the original exception as its context.
-        behavior.close(assembly)
+        try:
+            behavior.close(assembly)
+        finally:
+            scope.close()
         threads = "; ".join(
             f"name={thread.name!r} daemon={thread.daemon} ident={thread.ident}"
             for thread in threading.enumerate()
@@ -282,7 +291,7 @@ def _start_control_adapter(
     return True
 
 
-def _initialize_rendering(app: QApplication) -> None:
+def _initialize_rendering(app: QApplication, scope: LifetimeScope) -> None:
     from zcu_tools.gui.plotting import (
         ensure_host,
         install_mathtext_lock,
@@ -291,7 +300,7 @@ def _initialize_rendering(app: QApplication) -> None:
     )
 
     ensure_host()
-    app.aboutToQuit.connect(lambda: set_shutting_down(value=True))
+    scope.connect(app.aboutToQuit, lambda: set_shutting_down(value=True))
     install_mathtext_lock()
     prewarm_mathtext()
 

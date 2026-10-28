@@ -31,6 +31,15 @@ class FigureContainer:
         # correctly instead of taking the worker's affinity.
         _host.ensure_host()
 
+    @property
+    def object_name(self) -> str:
+        """Return the live stack's Qt objectName on the GUI thread.
+
+        An unnamed stack returns an empty string. A deleted stack raises
+        RuntimeError; query membership before requesting its diagnostic name.
+        """
+        return self._stack.objectName()
+
     def contains_figure(self, fig: Figure) -> bool:
         """Inspect membership of ``fig`` by Figure identity on the GUI thread.
 

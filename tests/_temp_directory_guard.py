@@ -37,7 +37,10 @@ class ContextDirectoryGuard:
 
     @pytest.hookimpl(optionalhook=True)
     def pytest_testnodedown(self, node, error) -> None:
-        self.leaks.update(node.workeroutput.get("context_directory_leaks", {}))
+        """Merge reported leaks; a crashed worker may not have published output."""
+        worker_output = getattr(node, "workeroutput", None)
+        if worker_output is not None:
+            self.leaks.update(worker_output.get("context_directory_leaks", {}))
 
     def pytest_sessionfinish(self, session: pytest.Session) -> None:
         if self.root is not None:

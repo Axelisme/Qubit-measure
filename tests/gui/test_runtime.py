@@ -2,13 +2,13 @@ from __future__ import annotations
 
 import logging
 import sys
-from collections.abc import Callable
 from functools import partial
 from pathlib import Path
 from threading import Event, Thread
 from typing import ClassVar, TextIO
 
 import pytest
+from PyQt6.QtCore import QObject, pyqtSignal
 from zcu_tools.gui import plotting, runtime
 from zcu_tools.gui.remote.rpc_endpoint import ControlOptions
 from zcu_tools.gui.runtime import (
@@ -20,6 +20,18 @@ from zcu_tools.gui.runtime import (
     build_control_options,
     run_gui_runtime,
 )
+
+
+@pytest.fixture(autouse=True)
+def restore_plotting_shutdown_state():
+    """Restore the shared qapp after exercising standalone process shutdown."""
+    # Production must keep shutdown=True through interpreter finalization.
+    # These tests reuse qapp instead of exiting the process (ADR-0064).
+    before = plotting.is_shutting_down()
+    try:
+        yield
+    finally:
+        plotting.set_shutting_down(value=before)
 
 
 def test_build_control_options_disabled() -> None:
@@ -171,6 +183,50 @@ def test_teardown_summary_identifies_live_non_daemon_thread(
         assert not worker.is_alive()
 
 
+@pytest.mark.parametrize("failure", [None, "startup", "close"])
+def test_runtime_releases_only_its_quit_subscriptions(
+    qapp, failure: str | None
+) -> None:
+    from qtpy.QtCore import QTimer
+    from zcu_tools.gui.lifetime import LifetimeScope
+
+    events: list[str] = []
+
+    class ScopedBehavior(_Behavior):
+        def before_show(self, assembly: GuiAssembly) -> None:
+            if failure == "startup":
+                raise RuntimeError("startup failed")
+
+        def after_show(self, assembly: GuiAssembly) -> None:
+            QTimer.singleShot(0, qapp.quit)
+
+        def close(self, assembly: GuiAssembly | None) -> None:
+            if failure == "close":
+                raise RuntimeError("close failed")
+
+    external = LifetimeScope()
+    external.connect(qapp.aboutToQuit, lambda: events.append("external"))
+    try:
+        before = qapp.receivers(qapp.aboutToQuit)
+        behavior = ScopedBehavior(events)
+        control = ControlOptions(port=9999, app_slug="fake")
+        if failure is None:
+            assert run_gui_runtime(behavior, control) == 0
+        else:
+            with pytest.raises(RuntimeError, match=f"{failure} failed"):
+                run_gui_runtime(behavior, control)
+        assert qapp.receivers(qapp.aboutToQuit) == before
+        # Production still suppresses canvas removal through process exit.
+        assert plotting.is_shutting_down() is (failure != "startup")
+        events.clear()
+        plotting.set_shutting_down(value=False)
+        qapp.aboutToQuit.emit()
+        assert events == ["external"]
+        assert not plotting.is_shutting_down()
+    finally:
+        external.close()
+
+
 class _RecordingWatchdog:
     def __init__(self) -> None:
         self.requests: list[tuple[float, bool, TextIO]] = []
@@ -238,24 +294,17 @@ def test_exit_diagnostics_appends_stacks_without_replacing_session_log(
         output.close()
 
 
-class _Signal:
-    def __init__(self, events: list[str]) -> None:
-        self._events = events
-        self.callbacks: list[Callable[[], None]] = []
+class _App(QObject):
+    aboutToQuit = pyqtSignal()
 
-    def connect(self, callback: Callable[[], None]) -> None:
-        self._events.append("connect")
-        self.callbacks.append(callback)
-
-
-class _App:
     def __init__(self, events: list[str], code: int = 0) -> None:
+        super().__init__()
         self._events = events
-        self.aboutToQuit = _Signal(events)
         self._code = code
 
     def exec(self) -> int:
         self._events.append("exec")
+        self.aboutToQuit.emit()
         return self._code
 
 
@@ -345,20 +394,17 @@ def test_run_gui_runtime_orders_lifecycle(
     assert code == 17
     assert events == [
         "host",
-        "connect",
         "mathtext-lock",
         "mathtext-prewarm",
         "assemble",
         "before",
         "show",
         "start",
-        "connect",
         "after",
         "exec",
+        "shutdown:True",
+        "stop",
     ]
-    for callback in app.aboutToQuit.callbacks:
-        callback()
-    assert events[-2:] == ["shutdown:True", "stop"]
 
 
 def test_run_gui_runtime_reports_control_start_failure(
@@ -378,7 +424,6 @@ def test_run_gui_runtime_reports_control_start_failure(
     assert code == 1
     assert events == [
         "host",
-        "connect",
         "mathtext-lock",
         "mathtext-prewarm",
         "assemble",
