@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 from pydantic import TypeAdapter, ValidationError
 
-from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
+from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_types import SavedPoint
@@ -193,12 +193,18 @@ def h_context_snapshot(
     over summaries. Invalid paths raise InvalidInputError naming the first bad
     segment. Path replies include target, aliases, path and value.
     No refresh, file I/O or asset materialization occurs. EMPTY/source faults
-    retain owner errors. Unsupported/nonfinite values fail the entire read with
-    PRECONDITION_FAILED/unserializable_context, even in partial modes.
+    retain owner errors when the requested projection uses that source. Full
+    reads validate all schemas and wire values; paths validate only the selected
+    subtree. Summaries validate emitted fields and described sequence structure,
+    not hidden elements. Unsupported/nonfinite emitted values fail the read with
+    PRECONDITION_FAILED/unserializable_context, never null or empty substitution.
     This read does not establish a per-connection mutation baseline.
     """
     parameters = adapter.context_control.read_context()
     try:
+        path = params.get("path")
+        # Let the selected owner report an invalid path before reading reply siblings.
+        selected = parameters.snapshot_value(path) if isinstance(path, str) else None
         aliases: list[dict[str, object]] = []
         for row in parameters.resolved_aliases():
             projected: dict[str, object] = {
@@ -210,6 +216,30 @@ def h_context_snapshot(
                 projected["error"] = row.error
             aliases.append(projected)
         target = parameters.target
+        if isinstance(path, str):
+            return json.loads(
+                json.dumps(
+                    context_wire_value(
+                        {
+                            "target": None
+                            if target is None
+                            else target.model_dump(mode="python"),
+                            "aliases": aliases,
+                            "path": path,
+                            "value": selected,
+                        }
+                    ),
+                    allow_nan=False,
+                )
+            )
+        if params.get("summaries", False):
+            summary = {
+                "target": None if target is None else target.model_dump(mode="python"),
+                "aliases": aliases,
+                "point": parameters.summarized_document(_snapshot_summary),
+                "library": parameters.library.summary(_snapshot_summary),
+            }
+            return json.loads(json.dumps(context_wire_value(summary), allow_nan=False))
         snapshot: dict[str, object] = {
             "target": None if target is None else target.model_dump(mode="python"),
             # Registered component subclasses own the complete persisted fields.
@@ -221,24 +251,10 @@ def h_context_snapshot(
             ),
             "aliases": aliases,
         }
-        # Validate the complete capture even when a projection hides some values.
+        # The unprojected mode explicitly consumes the complete capture.
         wire: dict[str, object] = json.loads(
             json.dumps(context_wire_value(snapshot), allow_nan=False)
         )
-        path = params.get("path")
-        if isinstance(path, str):
-            return {
-                "target": wire["target"],
-                "aliases": wire["aliases"],
-                "path": path,
-                "value": _snapshot_path_value(wire, path),
-            }
-        if params.get("summaries", False):
-            summary = {
-                key: aliases if key == "aliases" else _snapshot_summary(value)
-                for key, value in snapshot.items()
-            }
-            return json.loads(json.dumps(context_wire_value(summary), allow_nan=False))
         return wire
     except (TypeError, ValueError, RecursionError) as exc:
         raise RemoteError(
@@ -273,27 +289,6 @@ def _snapshot_summary(value: object) -> object:
             return value
         return {key: _snapshot_summary(item) for key, item in value.items()}
     return _md_summary(value)
-
-
-def _snapshot_path_value(snapshot: Mapping[str, object], path: str) -> object:
-    value: object = snapshot
-    for segment in path.split("."):
-        if segment and isinstance(value, Mapping) and segment in value:
-            value = value[segment]
-        elif (
-            isinstance(value, list)
-            and segment.isascii()
-            and segment.isdecimal()
-            and (segment == "0" or not segment.startswith("0"))
-            and len(segment) <= len(str(len(value)))
-            and int(segment) < len(value)
-        ):
-            value = value[int(segment)]
-        else:
-            raise InvalidInputError(
-                f"Invalid snapshot path {path!r}: segment {segment!r} is not readable"
-            )
-    return value
 
 
 def _value_info_to_wire(info: ValueInfo) -> dict[str, object]:

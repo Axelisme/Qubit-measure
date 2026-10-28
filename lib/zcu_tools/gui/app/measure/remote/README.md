@@ -1,6 +1,6 @@
 # `gui.app.measure.remote`
 
-**Last updated:** 2026-10-28
+**Last updated:** 2026-10-29
 
 **讀者：** framework-dev。量測 GUI 的 RPC 方法、控制權與來源投影契約。
 
@@ -18,8 +18,11 @@ live at `records/components/<target>.jsonl`; the event ledger stays at `records/
 
 ## Context snapshot
 
-`context.snapshot` 的 library 只投影持久 Specs，不回傳 `provenance`。
-Point metadata、target 與 aliases 投影不變。這次 wire 變更將 WIRE_VERSION 升至 128，GUI_VERSION 升至 161。
+`context.snapshot` 回傳固定 capture 的 target、point、library 與完整 aliases。Library 只投影持久 Specs，不回傳 `provenance`，也不 materialize assets。目前契約版本為 WIRE_VERSION 130、GUI_VERSION 163。
+
+省略 path 與 summaries 時，owner 驗證完整 schema，wire encoder 再驗證所有輸出值。`path` 使用 dotted keys 與 canonical 非負 list indices，只由 owner 讀驗所選部分，並優先於 summaries。選整個 component 或 subtree 時，該層的完整投影契約仍適用。未選 sibling 的壞 schema、nonfinite 或 library source fault 不再擋住正常 point leaf。Invalid path 保留第一個不可讀 segment，不先驗其他 sibling。
+
+`summaries=true` 保留 scalar 與 mapping，將 array/list leaf 改為形狀或項數。Owner 驗證輸出的欄位與產生形狀所需的結構，不預驗未輸出的 list elements 或未知欄位。輸出的壞 scalar、必要欄位缺漏與 used-source 故障仍失敗。真正送上 wire 的 nonfinite 或 unsupported value 一律拒絕，不換成 null 或空資料。Handler 只做表示與 wire 轉換，不重做 resource schema 驗證。
 
 ## Owners
 

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from copy import deepcopy
 from dataclasses import dataclass, field, replace
 from fnmatch import fnmatchcase
@@ -29,6 +29,7 @@ from zcu_tools.resources.entry import (
 from zcu_tools.resources.entry.aliases import AliasValue
 from zcu_tools.resources.entry.roles import resolve_names
 from zcu_tools.resources.entry.storage import PointStorageBinding
+from zcu_tools.resources.projection import ProjectionPathError, projection_value
 
 _LIBRARY_PARTITIONS = ("pulses", "readout", "reset", "waveforms")
 
@@ -275,7 +276,7 @@ class ParameterContext:
         raise ContextSourceUnavailableError for the whole read, even with no rows.
         Reads neither live aliases nor files and never materializes assets.
         """
-        self._ensure_readable()
+        self._ensure_readable("point")
         self._ensure_aliases_readable()
         if self._aliases is None:
             return ()
@@ -327,12 +328,17 @@ class ParameterContext:
     @property
     def library(self) -> LibrarySnapshot:
         """Return the fixed read-only library; unavailable sources raise."""
-        self._ensure_readable()
+        self._ensure_readable("module_cfg")
         return self._library
 
-    def _ensure_readable(self) -> None:
-        if self._source_faults:
-            raise ContextSourceUnavailableError(self._source_faults)
+    def _ensure_readable(self, document: str | None = None) -> None:
+        faults = tuple(
+            fault
+            for fault in self._source_faults
+            if document is None or fault.document == document
+        )
+        if faults:
+            raise ContextSourceUnavailableError(faults)
 
     def _ensure_aliases_readable(self) -> None:
         if self._alias_error is not None:
@@ -372,6 +378,56 @@ class ParameterContext:
             return self._point.project()
         return self._point.model_copy(deep=True)
 
+    def summarized_document(self, describe: Callable[[object], object]) -> object:
+        """Project point summary fields without consuming described sequences.
+
+        describe recursively formats dictionaries and describes array/list leaves.
+        Resource-owned stored content validates only emitted scalar fields and
+        structure required by the summary. Typed native captures retain arrays.
+        Source/schema failures propagate; no files or wire encoder are consulted.
+        """
+        self._ensure_readable("point")
+        if isinstance(self._point, ParameterContent):
+            return self._point.summary(describe)
+        return describe(self._point.model_dump(mode="python", serialize_as_any=True))
+
+    def snapshot_value(self, path: str) -> object:
+        """Project a native snapshot path from this fixed capture without I/O.
+
+        Dotted paths begin with point, library, target or aliases. Resource owners
+        validate only the chosen subtree; full components keep model invariants.
+        List indices must be canonical nonnegative decimals. InvalidInputError
+        names the first unreadable segment. Schema/source failures propagate.
+        This does not perform wire conversion or grant mutation authority.
+        """
+        section, *suffix = path.split(".")
+        segments = tuple(suffix)
+        try:
+            if section == "point":
+                self._ensure_readable("point")
+                if isinstance(self._point, ParameterContent):
+                    return self._point.projection(segments)
+                return projection_value(self._point, segments)
+            if section == "library":
+                return self.library.projection(segments)
+            if section == "target":
+                return projection_value(self._target, segments)
+            if section == "aliases":
+                rows: list[dict[str, object]] = []
+                for row in self.resolved_aliases():
+                    projected: dict[str, object] = {
+                        "alias": row.alias,
+                        "value": row.value,
+                        "resolved": row.resolved,
+                    }
+                    if row.error is not None:
+                        projected["error"] = row.error
+                    rows.append(projected)
+                return projection_value(rows, segments)
+            raise ProjectionPathError(section)
+        except ProjectionPathError as exc:
+            raise InvalidInputError(f"Invalid snapshot path {path!r}: {exc}") from exc
+
     def bind_aliases(
         self,
         rows: tuple[AliasRow, ...],
@@ -389,12 +445,12 @@ class ParameterContext:
         only; concrete reads remain available. Unavailable sources and invalid
         rows propagate.
         """
-        self._ensure_readable()
         captured = ParameterContext(
             point=self._point,
             library=self._library,
             target=self._target,
             roles=RoleBinding(None, declarations, {}, aliases=rows),
+            source_faults=self._source_faults,
             storage=self._storage,
         )
         captured._alias_error = alias_error

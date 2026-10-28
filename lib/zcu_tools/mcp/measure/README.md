@@ -1,6 +1,6 @@
 # `zcu_tools/mcp/measure/`
 
-**Last updated:** 2026-10-28
+**Last updated:** 2026-10-29
 
 **讀者：** agent。量測 MCP 的啟動、表單、operation 與寫回契約。
 
@@ -82,6 +82,14 @@ Raw RPC 以完整 cfg 非同步執行 setup。Caller 先讀 `device.snapshot`，
 `device_setup` 固定最多等待 300 秒。逾時保留正在執行的操作，回傳 running 與已知 op；caller 用 `wait(op)` 續等。需要短等時使用 raw RPC 與 caller 的 wait。Client deadline 必須大於 300 秒並預留 transport/reply overhead。
 
 Device setup 保留 pre_read、start、wait、post_read、requested、before/after 與 native operation。Device requested 是 `{name, cfg}`，cfg 在 before-read 與合併完成前為 null，之後是完整候選，不保證 model 接受。Before.info 為 null 時不能合併，pre_read failed。Before 有 Info 則送一次 RPC，由 service 拒絕未連線裝置，回 start failed、完整 candidate、before facts 與 null after。Device 不做 verification；snapshot 有目標值不代表 operation finished。Native finished／failed／cancelled、driver error 與 unknown 原樣保留。Step completed 只表示該步成功。工具不重連、重送或回滾。Caller 用已知 op 的 wait 和完整 snapshot 接手。
+
+## Context snapshot
+
+`rpc_call(method="context.snapshot", params={})` 讀取固定 capture 的完整 target、point、library 與 aliases。完整回覆驗證全部 schema 與 wire 值，不 materialize library assets。
+
+`params={"path":"point.components.Q1.rate"}` 只讀驗指定部分，回覆保留 target、aliases、path 與 value。Path 以 target、point、library 或 aliases 開頭，list index 使用 canonical 非負整數。選整個 component 或 subtree 時保留該層完整投影檢查。未選 sibling 的壞 schema 或 nonfinite 不擋回覆，無效 path 由 owner 指名第一個不可讀 segment。
+
+`params={"summaries":true}` 保留 scalar 與 mapping，將 list/array 改為項數或形狀。只驗產生摘要實際需要或輸出的欄位，不先驗隱藏的 list elements。Path 優先於 summaries。真正輸出的 nonfinite、壞 scalar 與必要結構錯誤仍拒絕，不以 null 或空結果掩蓋。
 
 ## 日常與細部操作
 

@@ -43,6 +43,7 @@ from zcu_tools.cfg_model import (
 from zcu_tools.format_version import FormatVersion, YamlMap, YamlValue
 
 from ..document_store import DocumentChange, DocumentRevision, DocumentValue
+from ..projection import typed_projection, typed_summary
 
 MODULE_LIBRARY_FORMAT = "zcu.module-library"
 MODULE_LIBRARY_VERSION = FormatVersion(2, 0)
@@ -290,6 +291,27 @@ class LibrarySnapshot:
         if self._content is not None:
             return ModuleLibraryDocument.model_validate(self._content.root)
         return self._document.model_copy(deep=True)
+
+    def projection(self, segments: tuple[str, ...]) -> object:
+        """Project a native document subtree without decoding other Specs.
+
+        Empty segments explicitly validate the complete library. Selected
+        components, partitions and Specs retain their whole projection checks;
+        selected leaves retain field checks. No references or assets are loaded.
+        Invalid paths raise ProjectionPathError; used schema failures propagate.
+        """
+        value: object = self._document if self._content is None else self._content.root
+        return typed_projection(value, ModuleLibraryDocument, segments)
+
+    def summary(self, describe: Callable[[object], object]) -> object:
+        """Describe sequence leaves and validate only fields emitted by a summary.
+
+        describe formats a sequence's shape without projecting its elements.
+        Used scalar fields keep their schema checks. No materialization, I/O or
+        empty-on-error substitution occurs; malformed used content raises.
+        """
+        value: object = self._document if self._content is None else self._content.root
+        return typed_summary(value, ModuleLibraryDocument, describe)
 
     def module_keys(self) -> tuple[str, ...]:
         """Return sorted concrete roots in the three module partitions."""

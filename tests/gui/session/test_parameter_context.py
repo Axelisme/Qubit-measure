@@ -2,7 +2,7 @@
 
 from collections.abc import Generator, MutableMapping
 from pathlib import Path
-from typing import Self
+from typing import Literal, Self
 
 import pytest
 from pydantic import Field, field_validator, model_validator
@@ -257,6 +257,46 @@ def test_snapshot_preserves_consumed_factory_defaults_without_validating_unused_
             restored.component("note")
     finally:
         component_registry.unregister("capture/notebook")
+
+
+def test_snapshot_preserves_nested_factory_defaults_through_capture(
+    source: tuple[PointDocument, LibrarySnapshot],
+) -> None:
+    from itertools import count
+
+    from pydantic import BaseModel
+    from zcu_tools.experiment.metadata import ParameterSnapshot
+
+    sequence = count(1)
+
+    class Nested(BaseModel):
+        token: str = Field(default_factory=lambda: f"nested-{next(sequence)}")
+        optional: float | None = None
+
+    class Notebook(ComponentSchema):
+        nested: Nested = Field(default_factory=Nested)
+
+    component_registry.register("capture/nested-notebook", Notebook)
+    try:
+        original = ParameterContext.from_content(
+            point=ParameterContent(
+                {"components": {"note": {"kind": "capture/nested-notebook"}}}
+            ),
+            library=source[1],
+            aliases=None,
+            names={},
+        )
+        assert original.value("note.nested.token") == "nested-1"
+        assert original.value("note.nested.token") == "nested-1"
+        encoded = capture_parameters(original).model_dump_json()
+        restored = restore_parameters(ParameterSnapshot.model_validate_json(encoded))
+        assert restored.value("note.nested.token") == "nested-1"
+        assert restored.component("note").model_dump()["nested"] == {
+            "token": "nested-1",
+            "optional": None,
+        }
+    finally:
+        component_registry.unregister("capture/nested-notebook")
 
 
 @pytest.mark.parametrize("defect", ["missing", "different_format", "extra"])
@@ -596,9 +636,7 @@ def test_parameter_capture_rejects_setup_diagnostics(
 
 def read_projection(context: ParameterContext, method: str) -> None:
     """Exercise one public getter without reaching inside the captured source."""
-    if method == "library":
-        _ = context.library
-    elif method == "document":
+    if method == "document":
         context.document()
     elif method == "bind_roles":
         context.bind_roles({}, focus=None, explicit={})
@@ -606,11 +644,31 @@ def read_projection(context: ParameterContext, method: str) -> None:
         getattr(context, method)("Q1.rate")
 
 
+@pytest.mark.parametrize("document", ["point", "module_cfg"])
+def test_library_capture_checks_only_its_source_fault(
+    source: tuple[PointDocument, LibrarySnapshot],
+    tmp_path: Path,
+    document: Literal["point", "module_cfg"],
+) -> None:
+    fault = ContextSourceFault(
+        document, tmp_path / f"{document}.yaml", "OSError", "unreadable"
+    )
+    broken = capture(source, faults=(fault,))
+    assert broken.source_faults == (fault,)
+    if document == "module_cfg":
+        with pytest.raises(ContextSourceUnavailableError) as error:
+            _ = broken.library
+        assert error.value.faults == (fault,)
+    else:
+        assert (
+            broken.library.entry_value("Q1.pulses.pi", kind="module")["freq"] == 100.0
+        )
+
+
 @pytest.mark.parametrize(
     "method",
     [
         "document",
-        "library",
         "bind_roles",
         "resolve_path",
         "library_key",

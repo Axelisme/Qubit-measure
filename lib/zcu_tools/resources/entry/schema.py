@@ -1,7 +1,7 @@
 """Typed setup document at the persistence boundary."""
 
 import keyword
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from copy import deepcopy
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -25,11 +25,20 @@ from pydantic_core import (
 )
 
 from zcu_tools.format_version import YamlMap, YamlValue
-from zcu_tools.resources.parameter_fields import model_field_schema
+from zcu_tools.resources.parameter_fields import (
+    mapping_shape,
+    model_field_schema,
+    sequence_shape,
+)
 from zcu_tools.resources.parameter_metadata import (
     PARAMETER_FORMAT,
     PARAMETER_VERSION,
     validate_parameter_header,
+)
+from zcu_tools.resources.projection import (
+    ProjectionPathError,
+    projection_child,
+    projection_value,
 )
 
 __all__ = (
@@ -216,6 +225,34 @@ class _ParameterDocument(BaseModel):
         return TypeAdapter(dict[str, YamlMap]).validate_python(value, strict=True)
 
 
+type _DefaultOmissions = (
+    Mapping[str, bool | _DefaultOmissions] | Mapping[int, bool | _DefaultOmissions]
+)
+
+
+def _default_omissions(value: object) -> _DefaultOmissions:
+    """Keep factory outputs but omit model nulls that were never supplied."""
+    if isinstance(value, (list, tuple)):
+        return {
+            index: child
+            for index, item in enumerate(value)
+            if (child := _default_omissions(item))
+        }
+    fields: dict[str, bool | _DefaultOmissions] = {}
+    if isinstance(value, BaseModel):
+        for name in type(value).model_fields:
+            item = getattr(value, name)
+            if item is None and name not in value.model_fields_set:
+                fields[name] = True
+            elif child := _default_omissions(item):
+                fields[name] = child
+    elif isinstance(value, dict):
+        for name, item in value.items():
+            if isinstance(name, str) and (child := _default_omissions(item)):
+                fields[name] = child
+    return fields
+
+
 class ParameterContent(RootModel[YamlValue]):
     """Detached working-unit parameter content, decoded only when requested.
 
@@ -277,6 +314,10 @@ class ParameterContent(RootModel[YamlValue]):
         for path, value in sorted(
             self._defaults.items(), key=lambda item: item[0].count(".")
         ):
+            # Omitted optional nulls remain omitted: a field-level before rule may
+            # reject an explicitly supplied null even though its default is None.
+            if value is None:
+                continue
             parts = path.split(".")
             if parts[0] != "general":
                 parts.insert(0, "components")
@@ -298,6 +339,159 @@ class ParameterContent(RootModel[YamlValue]):
         No file is read and no missing identity or timestamp is synthesized.
         """
         return PointDocument.model_validate(self.captured().root)
+
+    def projection(self, segments: tuple[str, ...]) -> object:
+        """Project one native document subtree, validating only that selection.
+
+        Empty segments explicitly validate the complete document. Components,
+        general and nested models retain their full projection checks when chosen
+        as a whole. Leaves use field checks; unselected siblings stay opaque.
+        Missing keys or invalid indices raise ProjectionPathError naming the first
+        bad segment. No files are read and no values are replaced on failure.
+        """
+        if not segments:
+            return self.project().model_dump(mode="python", serialize_as_any=True)
+        section, *suffix = segments
+        if section == "components":
+            return self._component_projection(tuple(suffix))
+        if section == "general":
+            if not suffix:
+                general = self.general
+                return None if general is None else general.model_dump(mode="python")
+            return self._projection_field((section, *suffix))
+        return self._section_projection(section, tuple(suffix))
+
+    def _component_projection(self, segments: tuple[str, ...]) -> object:
+        if not segments:
+            return {
+                name: component.model_dump(mode="python", serialize_as_any=True)
+                for name, component in self.components.items()
+            }
+        name, *fields = segments
+        if name not in self.component_names():
+            raise ProjectionPathError(name)
+        if not fields:
+            return self.component(name).model_dump(mode="python", serialize_as_any=True)
+        return self._projection_field((name, *fields))
+
+    def _section_projection(self, section: str, suffix: tuple[str, ...]) -> object:
+        if section == "metadata":
+            # Metadata has no component schema; only the selected opaque subtree
+            # is consumed, unless the complete section is explicitly requested.
+            return projection_value(
+                self.metadata if not suffix else self.section(section), tuple(suffix)
+            )
+        if section not in PointDocument.model_fields:
+            raise ProjectionPathError(section)
+        raw = self.section(section)
+        if suffix:
+            return projection_value(raw, tuple(suffix))
+        schema = model_field_schema(PointDocument, section)
+        value = SchemaValidator(schema).validate_python(raw)
+        return SchemaSerializer(schema).to_python(value, mode="python")
+
+    def _projection_field(self, segments: tuple[str, ...]) -> YamlValue:
+        for length in range(2, len(segments) + 1):
+            if not segments[length - 1]:
+                raise ProjectionPathError("")
+            try:
+                self.node(".".join(segments[:length]))
+            except AttributeError as exc:
+                raise ProjectionPathError(segments[length - 1]) from exc
+        return self.value(".".join(segments))
+
+    def summary(self, describe: Callable[[object], object]) -> dict[str, object]:
+        """Describe sequence leaves and project only the scalar fields emitted.
+
+        describe receives each sequence without consuming its elements. Other
+        output leaves retain their field validation. Nested model dictionaries
+        are traversed by declared fields, not validated as complete components.
+        Missing or malformed fields needed for the output raise owner errors.
+        No wire conversion, file access or empty-on-error substitution occurs.
+        """
+        result: dict[str, object] = {
+            name: self.projection((name,))
+            for name in ("format", "format_version", "schema_version")
+        }
+        result["general"] = self._summary_model(PointGeneral, "general", describe)
+        result["components"] = {
+            name: self._summary_model(self._root_field(name)[1], name, describe)
+            for name in self.component_names()
+        }
+        result["metadata"] = self._summary_opaque(self.metadata, describe)
+        return result
+
+    def _summary_model(
+        self, model: type[BaseModel], path: str, describe: Callable[[object], object]
+    ) -> dict[str, object]:
+        node = self.node(path)
+        if not isinstance(node, dict):
+            raise ValueError(f"{path}: expected a model mapping")
+        fields = [
+            name for name, field in model.model_fields.items() if not field.exclude
+        ]
+        extras = [name for name in node if name not in model.model_fields]
+        if model.model_config.get("extra") == "allow":
+            fields.extend(extras)
+        return {
+            name: self._summary_field(f"{path}.{name}", model, name, describe)
+            for name in fields
+        }
+
+    def _summary_field(
+        self,
+        path: str,
+        parent: type[BaseModel],
+        name: str,
+        describe: Callable[[object], object],
+    ) -> object:
+        node = self.node(path)
+        field = parent.model_fields.get(name)
+        annotation = None if field is None else field.annotation
+        nested = next(
+            (
+                item
+                for item in (annotation, *get_args(annotation))
+                if isinstance(item, type) and issubclass(item, BaseModel)
+            ),
+            None,
+        )
+        if nested is not None and isinstance(node, dict):
+            return self._summary_model(nested, path, describe)
+        if isinstance(node, list):
+            return describe(sequence_shape(node, self._field(path)[1]))
+        if isinstance(node, dict):
+            mapping_shape(node, self._field(path)[1])
+            return self._summary_mapping(path, node, describe)
+        return self.value(path)
+
+    def _summary_mapping(
+        self,
+        path: str,
+        node: dict[str, YamlValue],
+        describe: Callable[[object], object],
+    ) -> object:
+        if "__complex__" in node:
+            return self.value(path)
+        return {
+            key: self._summary_mapping(f"{path}.{key}", value, describe)
+            if isinstance(value, dict)
+            else describe(value)
+            if isinstance(value, list)
+            else self.value(f"{path}.{key}")
+            for key, value in node.items()
+        }
+
+    @staticmethod
+    def _summary_opaque(value: object, describe: Callable[[object], object]) -> object:
+        if isinstance(value, dict):
+            if "__complex__" in value:
+                return deepcopy(value)
+            return {
+                key: ParameterContent._summary_opaque(child, describe)
+                for key, child in value.items()
+            }
+        return describe(value) if isinstance(value, list) else value
 
     def component_names(self) -> tuple[str, ...]:
         """List recorded names without decoding any component or general fields."""
@@ -381,7 +575,9 @@ class ParameterContent(RootModel[YamlValue]):
         if path not in self._defaults:
             default = SchemaValidator(schema).validate_python(PydanticUndefined)
             self._defaults[path] = TypeAdapter(YamlValue).validate_python(
-                SchemaSerializer(schema).to_python(default, mode="python")
+                SchemaSerializer(schema).to_python(
+                    default, mode="python", exclude=_default_omissions(default)
+                )
             )
         return self._defaults[path]
 
@@ -393,9 +589,22 @@ class ParameterContent(RootModel[YamlValue]):
         model: type[BaseModel] | None = root_model
         annotation: object = YamlValue
         schema = TypeAdapter(YamlValue).core_schema
+        defaulted = False
         for index, part in enumerate(parts[1:], start=1):
+            defaulted = False
+            if model is not None:
+                self._require_model_mapping(node, annotation, path, part)
+            if isinstance(node, list):
+                arguments = get_args(annotation)
+                node = TypeAdapter(YamlValue).validate_python(
+                    projection_child(node, part)
+                )
+                annotation = arguments[0] if arguments else YamlValue
+                schema = TypeAdapter(annotation).core_schema
+                model = self._nested_model(annotation)
+                continue
             if not isinstance(node, dict):
-                raise ValueError(f"{path}: ancestor must be a mapping")
+                raise ProjectionPathError(part)
             field = None if model is None else model.model_fields.get(part)
             if (
                 field is None
@@ -419,22 +628,39 @@ class ParameterContent(RootModel[YamlValue]):
             elif field is not None and not field.is_required():
                 prefix = ".".join(parts[: index + 1])
                 node = self._default_value(prefix, schema)
+                defaulted = True
             else:
                 raise AttributeError(f"{path}: field is not set")
-            nested = (
-                ()
-                if get_origin(annotation) is dict
-                else (annotation, *get_args(annotation))
-            )
-            model = next(
-                (
-                    item
-                    for item in nested
-                    if isinstance(item, type) and issubclass(item, BaseModel)
-                ),
-                None,
-            )
-        return node, schema
+            model = self._nested_model(annotation)
+        # A default has already passed its own schema. Revalidating its serialized
+        # value would turn an omitted optional field into an explicit null input.
+        return node, TypeAdapter(YamlValue).core_schema if defaulted else schema
+
+    @staticmethod
+    def _require_model_mapping(
+        node: YamlValue, annotation: object, path: str, segment: str
+    ) -> None:
+        if isinstance(node, dict):
+            return
+        if node is None and type(None) in get_args(annotation):
+            raise ProjectionPathError(segment)
+        raise ValueError(f"{path}: model ancestor must be a mapping")
+
+    @staticmethod
+    def _nested_model(annotation: object) -> type[BaseModel] | None:
+        nested = (
+            ()
+            if get_origin(annotation) is dict
+            else (annotation, *get_args(annotation))
+        )
+        return next(
+            (
+                item
+                for item in nested
+                if isinstance(item, type) and issubclass(item, BaseModel)
+            ),
+            None,
+        )
 
 
 class SetupDocument(_ParameterDocument):

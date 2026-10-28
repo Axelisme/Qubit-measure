@@ -69,6 +69,8 @@ ComponentSchema 只要求字串 kind。完整 component 投影與寫入沿原 mo
 
 `ParameterContent` 承載 live point 與量測檔中的唯讀參數，不帶持久文件身分。空內容不帶 general 或 created_at。`parameter_content(view)` 複製 cached content，未用的 raw 區塊保持不解碼。`document_value` 在請求具體欄位時才驗證。`component(name)` 完整驗證單一 component，供依賴跨欄位不變式的 consumer 使用，不先驗其他 component。明確讀取完整 components、general 或 metadata property 時，owner 才驗證該 section。
 
+`ParameterContent.projection(segments)` 以 document 路徑選取 subtree，不預驗其他 section 或 sibling。選完整 component 或 nested model 時仍執行該層 model 規則。`summary(describe)` 逐欄位驗證輸出的 scalar，將 sequence 交給 describe 產生形狀，不投影其隱藏 elements。未知且未輸出的欄位不擋摘要。完整 `project()`、component 投影與 edit 仍執行完整驗證。Invalid projection path 指名第一個不可讀 segment，schema 錯誤不降成空內容。
+
 ## 視圖與 metadata
 
 SetupView、PointView 與 EditView 共用的 FieldView 將 `{"__complex__": [re, im]}` 葉值讀成 Python complex，RoleView 也沿同一讀取路徑。其他 dict 與巢狀 BaseModel 欄位回傳 FieldView。子 view 保留完整路徑，每次讀取都跟隨 owning view 的最新快照。Scalar、null 與 list 回傳獨立 YAML 值，沒有 list index 子 view，list 內保留原始 YAML 元素。Malformed tag 由唯一的 core.complex_codec 拒絕，不當作一般子 view。Item access 使用單一 literal key，set／meta 使用點分路徑。空 key 或含點號的 key 無法以點分路徑定址，框架不拒絕這些 key，也不提供 escaping。

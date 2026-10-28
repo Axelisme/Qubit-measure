@@ -29,6 +29,8 @@ Spec 查詢不展開引用；成品查詢使用固定 snapshot 與顯式 asset c
 Replacement、delete 與 rename 返回新候選，不更新原 snapshot。
 Rename 不求值 child、不改其他引用，也不 cascade。Library 不產生來源、時間、stderr 或 clone 標記。
 
+`LibrarySnapshot.projection(segments)` 只驗所選 document subtree。選完整 component、partition 或 Spec 時仍驗證該層完整 model，選 leaf 時保留該欄位規則。`summary(describe)` 只驗輸出的 scalar 與描述 sequence 所需的結構，不預驗隱藏的 elements。兩者都不展開 references、不讀 assets，錯誤不變空結果。
+
 `LibraryContent` 保存量測檔中的 opaque library 內容。`LibrarySnapshot.from_content` 不讀檔、不預驗未使用的 Specs。查詢一個 root 時才解碼該 Spec，列出 keys 時只讀取該 family 的名稱。缺少或格式不符的 used section 報錯，不代換成空 library。
 
 `ModuleLibrary.edit()` 沿用 DocumentStore 的單檔交易。Draft setter 嚴格驗證新值。
