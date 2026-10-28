@@ -12,16 +12,17 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
-from zcu_tools.gui.app.analysis_project.flux import ComponentFluxProvider
-from zcu_tools.gui.app.fluxdep.export_plan import ExportPlanner
+from zcu_tools.gui.app.analysis_project.entry import AnalysisTarget
+from zcu_tools.gui.app.analysis_project.selection import AnalysisSelection
+from zcu_tools.gui.app.fluxdep.lab import FluxDepGuiLab
 from zcu_tools.gui.runtime import (
     GuiAssembly,
     GuiRuntimeBehavior,
     GuiRuntimeSpec,
 )
+from zcu_tools.resources.entry.registry import component_registry
 
 if TYPE_CHECKING:
-    from zcu_tools.gui.app.analysis_project.entry import AnalysisTarget
     from zcu_tools.gui.remote.rpc_endpoint import ControlOptions
 
 
@@ -34,20 +35,24 @@ class FluxDepGuiBehavior(GuiRuntimeBehavior):
 
     def __init__(
         self,
-        project: AnalysisTarget | None = None,
-        project_root: str | None = None,
-        export_planner: ExportPlanner | None = None,
-        flux_context_provider: ComponentFluxProvider | None = None,
+        lab: FluxDepGuiLab,
+        selection: AnalysisSelection,
     ) -> None:
-        """Bind entry/path context and the lab's component export policy.
+        """Register lab components, then open the requested entry and bind policies.
 
-        export_planner receives detached setup and native reference positions.
-        When omitted, viewing/search remain available but export is refused.
+        selection supplies the project root, entry and optional component. Empty
+        entry leaves the GUI unopened; component without entry raises ValueError.
+        Registration and target errors propagate before window assembly.
+        A None planner preserves viewing/search but refuses export. A None flux
+        provider refuses operations that require component context.
         """
-        self._export_planner = export_planner
-        self._flux_context_provider = flux_context_provider
-        self._project = project
-        self._project_root = project_root
+        lab.register_components(component_registry)
+        if not selection.entry and selection.component is not None:
+            raise ValueError("--component requires --entry")
+        self._export_planner = lab.fluxdep_export_planner
+        self._flux_context_provider = lab.component_flux_context_provider
+        self._project = AnalysisTarget.open(selection) if selection.entry else None
+        self._project_root = str(selection.project_root)
 
     def assemble(self, control: ControlOptions | None) -> GuiAssembly:
         from zcu_tools.gui.app.fluxdep.controller import Controller

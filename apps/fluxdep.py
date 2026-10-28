@@ -15,7 +15,7 @@ from pathlib import Path
 
 from zcu_tools.gui.app.analysis_project.launcher import (
     add_analysis_entry_cli_options,
-    analysis_target_from_args,
+    analysis_selection_from_args,
 )
 from zcu_tools.gui.launcher import (
     add_runtime_cli_options,
@@ -52,25 +52,20 @@ def main(argv: list[str] | None = None) -> int:
     project_root = str(PROJECT_ROOT)
 
     from zcu_tools.gui.app.fluxdep.app import FluxDepGuiBehavior
-    from zcu_tools.resources.entry import component_registry
-
-    from zcu_lab.component_flux import component_flux_context
-    from zcu_lab.components import register_all
-    from zcu_lab.fluxdep_export import plan_fluxdep_export
-
-    register_all(component_registry)
     from zcu_tools.gui.runtime import launch_gui_runtime
+
+    from zcu_lab.assembly import lab_definitions
+
+    lab = lab_definitions()
 
     return launch_gui_runtime(
         FluxDepGuiBehavior.spec,
         runtime_options_from_args(args, log_root=PROJECT_ROOT),
-        logging_namespaces=(),
+        logging_namespaces=lab.logging_namespaces,
         behavior_factory=partial(
             FluxDepGuiBehavior,
-            project=analysis_target_from_args(args, project_root=project_root),
-            project_root=args.project_root or project_root,
-            export_planner=plan_fluxdep_export,
-            flux_context_provider=component_flux_context,
+            lab,
+            selection=analysis_selection_from_args(args, project_root=project_root),
         ),
     )
 

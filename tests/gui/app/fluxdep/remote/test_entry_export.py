@@ -8,6 +8,7 @@ import numpy as np
 import pytest
 from zcu_tools.analysis.flux import ComponentFluxContext, DevicePeriod, FluxFrame
 from zcu_tools.gui.app.analysis_project.entry import AnalysisTarget
+from zcu_tools.gui.app.analysis_project.selection import AnalysisSelection
 from zcu_tools.gui.app.fluxdep.state import SpectrumEntry
 from zcu_tools.gui.remote.errors import RemoteError
 from zcu_tools.resources.entry import ResultEntry, component_registry, snapshot
@@ -128,7 +129,7 @@ def test_skipped_predictor_projects_null_path_and_both_receipts(
     route_harness: RouteHarness, analysis_entry: ResultEntry
 ) -> None:
     target = AnalysisTarget.open(
-        analysis_entry.result_path.parent.parent, "synthetic", "Q2"
+        AnalysisSelection(analysis_entry.result_path.parent.parent, "synthetic", "Q2")
     )
     route_harness.ctrl.configure_flux_context(
         lambda _model: ComponentFluxContext(None, None, {})
@@ -171,7 +172,7 @@ def test_export_unit_failure_reaches_rpc_without_writing(
     route_harness: RouteHarness, analysis_entry: ResultEntry
 ) -> None:
     target = AnalysisTarget.open(
-        analysis_entry.result_path.parent.parent, "synthetic", "Q2"
+        AnalysisSelection(analysis_entry.result_path.parent.parent, "synthetic", "Q2")
     )
     entry = replace(
         aligned_export_state(target).get_spectrum("aligned"),

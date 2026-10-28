@@ -1,6 +1,6 @@
 # Dispersive-shift analysis GUI
 
-**Last updated:** 2026-10-27
+**Last updated:** 2026-10-28
 
 **讀者：** framework-dev、operator。開啟 entry、選 predictor 與匯出色散擬合的流程及 owner。
 
@@ -11,7 +11,9 @@
 省略 component 時，以 setup 的 qubit alias 預選。Alias 缺失或錯誤時，使用者必須明示選擇。
 
 共用 [analysis_project](../analysis_project/README.md) 擁有 entry 開啟、component/kind
-驗證、dialog 與 CLI。Dispersive 不複製這些規則。組合根註冊 lab schema，lib 不 import lab。
+驗證、dialog 與 CLI。Dispersive 不複製這些規則。`DispersiveGuiBehavior(lab, selection)`
+先呼叫 `DispersiveGuiLab` 的 component registrar，再依 `AnalysisSelection` 開啟 target。
+Framework 不 import lab。
 Project root 下的 result/ 和 Database/ 分別是兩個 roots。分析不執行 Database Save。
 
 Load predictor 列出 entry.predictors_path 下的 JSON 檔名，只接受目錄內的檔案。

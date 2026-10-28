@@ -12,16 +12,20 @@ on the Qt main thread when the app quits.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING
 
+from zcu_tools.gui.app.analysis_project.entry import AnalysisTarget
+from zcu_tools.gui.app.analysis_project.selection import AnalysisSelection
+from zcu_tools.gui.app.dispersive.lab import DispersiveGuiLab
 from zcu_tools.gui.runtime import (
     GuiAssembly,
     GuiRuntimeBehavior,
     GuiRuntimeSpec,
 )
+from zcu_tools.resources.entry.registry import component_registry
 
 if TYPE_CHECKING:
-    from zcu_tools.gui.app.analysis_project.entry import AnalysisTarget
     from zcu_tools.gui.remote.rpc_endpoint import ControlOptions
 
 
@@ -34,11 +38,23 @@ class DispersiveGuiBehavior(GuiRuntimeBehavior):
 
     def __init__(
         self,
-        project: AnalysisTarget | None = None,
-        project_root: str | None = None,
+        lab: DispersiveGuiLab,
+        selection: AnalysisSelection,
     ) -> None:
-        self._project = project
-        self._project_root = project_root
+        """Register lab components, then open the requested entry.
+
+        selection supplies the project root, entry and optional component. Empty
+        entry leaves the GUI unopened; component without entry raises ValueError.
+        The project root is resolved at construction so later cwd changes do
+        not move dialog defaults. Registration and target errors propagate
+        before window assembly.
+        Dispersive reads predictor frames, not component flux policy.
+        """
+        lab.register_components(component_registry)
+        if not selection.entry and selection.component is not None:
+            raise ValueError("--component requires --entry")
+        self._project = AnalysisTarget.open(selection) if selection.entry else None
+        self._project_root = str(Path(selection.project_root).resolve())
 
     def assemble(self, control: ControlOptions | None) -> GuiAssembly:
         from zcu_tools.gui.app.dispersive.controller import Controller

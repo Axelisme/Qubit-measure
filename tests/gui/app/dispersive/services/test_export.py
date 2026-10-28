@@ -1,6 +1,7 @@
 """Dispersive export uses the entry artifact and declared component fields."""
 
 import pytest
+from zcu_tools.gui.app.analysis_project.selection import AnalysisSelection
 from zcu_tools.gui.app.dispersive.services.export import ExportService
 from zcu_tools.gui.app.dispersive.state import DispersiveState
 from zcu_tools.resources.dispersive_file import load_dispersive_file
@@ -28,7 +29,9 @@ def test_export_updates_only_declared_component_fields(analysis_target):
     from zcu_tools.gui.app.analysis_project.entry import AnalysisTarget
 
     target = AnalysisTarget.open(
-        analysis_target.result_root.parent, analysis_target.entry, "q2"
+        AnalysisSelection(
+            analysis_target.result_root.parent, analysis_target.entry, "q2"
+        )
     )
     state = DispersiveState(target)
     state.set_disp_result(g=0.068, bare_rf=5.35, res_dim=4)

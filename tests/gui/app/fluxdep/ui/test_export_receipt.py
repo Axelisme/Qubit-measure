@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 from zcu_tools.analysis.flux import ComponentFluxContext, DevicePeriod, FluxFrame
 from zcu_tools.gui.app.analysis_project.entry import AnalysisTarget
+from zcu_tools.gui.app.analysis_project.selection import AnalysisSelection
 from zcu_tools.gui.app.fluxdep.controller import Controller
 from zcu_tools.gui.app.fluxdep.ui.analyze_panel import AnalyzePanelWidget
 from zcu_tools.resources.entry import ResultEntry
@@ -19,7 +20,7 @@ def test_export_shows_separate_predictor_and_component_outcomes(
     qapp, fluxonium_entry: ResultEntry, tmp_path: Path, case: str
 ) -> None:
     target = AnalysisTarget.open(
-        fluxonium_entry.result_path.parent.parent, "synthetic", "Q1"
+        AnalysisSelection(fluxonium_entry.result_path.parent.parent, "synthetic", "Q1")
     )
     ctrl = Controller(aligned_export_state(target))
     ctrl.configure_export(skip_calibration)

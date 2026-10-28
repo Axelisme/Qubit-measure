@@ -3,10 +3,8 @@
 from __future__ import annotations
 
 import argparse
-from typing import TYPE_CHECKING
 
-if TYPE_CHECKING:
-    from zcu_tools.gui.app.analysis_project.entry import AnalysisTarget
+from .selection import AnalysisSelection
 
 
 def add_analysis_entry_cli_options(parser: argparse.ArgumentParser) -> None:
@@ -28,20 +26,16 @@ def add_analysis_entry_cli_options(parser: argparse.ArgumentParser) -> None:
     )
 
 
-def analysis_target_from_args(
+def analysis_selection_from_args(
     args: argparse.Namespace, *, project_root: str
-) -> AnalysisTarget | None:
-    """Open the requested target, or leave an unconfigured GUI when entry is omitted.
+) -> AnalysisSelection:
+    """Describe CLI choices without accessing files or component definitions.
 
-    --component without --entry raises ValueError. Entry and kind errors propagate.
-    No entry, component or Database output is created.
+    project_root is the default when --project-root is omitted. An empty entry
+    leaves the GUI unopened. A component without an entry raises ValueError.
     """
-    from zcu_tools.gui.app.analysis_project.entry import AnalysisTarget
-
-    if not args.entry:
-        if args.component is not None:
-            raise ValueError("--component requires --entry")
-        return None
-    return AnalysisTarget.open(
+    if not args.entry and args.component is not None:
+        raise ValueError("--component requires --entry")
+    return AnalysisSelection(
         args.project_root or project_root, args.entry, args.component
     )

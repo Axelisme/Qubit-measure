@@ -27,6 +27,7 @@ from zcu_tools.analysis.fluxdep.search import DatabaseSearchResult, ParamBounds
 from zcu_tools.gui.app.analysis_project.entry import AnalysisTarget
 from zcu_tools.gui.app.analysis_project.flux import ComponentFluxProvider
 from zcu_tools.gui.app.analysis_project.native import NativeSpectrumSelection
+from zcu_tools.gui.app.analysis_project.selection import AnalysisSelection
 from zcu_tools.gui.app.fluxdep.event_bus import (
     ActiveSpectrumChangedPayload,
     EventBus,
@@ -190,7 +191,7 @@ class Controller(BaseController[FluxDepState, EventBus]):
         Omitted component resolves the setup qubit alias. Invalid targets fail
         before publication. Database is bound for API completeness, never saved.
         """
-        project = AnalysisTarget.open(project_root, entry, component)
+        project = AnalysisTarget.open(AnalysisSelection(project_root, entry, component))
         self._state.set_project(project)
         self._emit(ProjectChangedPayload())
 

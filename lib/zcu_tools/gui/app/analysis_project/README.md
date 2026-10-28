@@ -1,14 +1,17 @@
 # Analysis entry selection
 
-**Last updated:** 2026-10-27
+**Last updated:** 2026-10-28
 
 **讀者：** framework-dev、agent。兩個分析 GUI 共用的 entry/component 選擇與 native 光譜載入接口。
 
 `entry.AnalysisEntry.open(project_root, entry)` 只開 entry 並列合法 components，不解析 alias。
 沒有合法 component 時報錯。`.select(component=None)` 選目標，None 才解析 qubit alias。
 `AnalysisEntry.list_names(project_root)` 供 dialog 列 entry，同一個 owner 推導 Result root。
-`entry.AnalysisTarget.open(project_root, entry, component=None)` 委派這兩步，使用
-`project_root/result` 與 `project_root/Database` 開啟既有 ResultEntry。
+`selection.AnalysisSelection(project_root, entry="", component=None)` 保存未解析的選擇，不讀檔。
+空 entry 讓 behavior 保持未開啟，component 沒有 entry 時報錯。
+`entry.AnalysisTarget.open(selection)` 委派上述兩步，使用
+`selection.project_root/result` 與 `selection.project_root/Database` 開啟既有 ResultEntry。
+此入口要求非空 entry；兩個 analysis behavior 在註冊 lab components 後才呼叫它。
 Component 省略時，以 AliasTable 解析 setup 的 qubit alias。
 缺 entry、component 或未綁 alias 會報錯。Kind 必須是 qubit/fluxonium 或其子 kind。
 
@@ -25,8 +28,9 @@ Alias 缺或錯時顯示原因並保留空選擇，OK disabled，使用者明示
 `selected_target()` 回傳所選 target。`set_writable` 停用編輯與 OK，保留 Cancel。
 
 `launcher.add_analysis_entry_cli_options` 加入 --project-root、--entry、--component。
-`analysis_target_from_args` 開啟指定 entry，未指定 entry 則讓 GUI 保持未開啟。
-Component 沒有 entry 時報錯。兩個 scripts 組合根負責註冊 lab schema，lib 不 import lab。
+`analysis_selection_from_args` 只將 CLI 選項轉成 selection，不開啟 entry。
+Component 沒有 entry 時報錯。兩個 analysis behavior 接收 lab 與 selection，
+先呼叫 lab 的 registrar，再開啟 target。Framework 不 import lab。
 
 `flux.ComponentFluxProvider` 接受 `ComponentSchema`，回傳 analysis 的 `ComponentFluxContext`。
 `component_flux_context(target, provider)` 從 target 的公開 snapshot 取得 component，再呼叫 provider。
