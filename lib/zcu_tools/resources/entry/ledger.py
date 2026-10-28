@@ -13,6 +13,7 @@ from uuid import UUID
 from filelock import FileLock, Timeout
 from pydantic import TypeAdapter
 
+from zcu_tools.resources.file_lock import lock_path_for
 from zcu_tools.utils import atomic_replace
 
 from .ledger_models import JsonObject, LedgerEvent
@@ -47,7 +48,7 @@ class _LedgerState:
 
 
 class RecordsLedger:
-    """Serialize reads/appends with one resolved ledger.jsonl.lock sidecar.
+    """Serialize reads/appends with one per-user runtime lock for ledger.jsonl.
 
     Each handle indexes validated lines and parses only appended bytes. A shorter
     file, changed first 4096 bytes, changed previous last line or changed file
@@ -70,7 +71,8 @@ class RecordsLedger:
         records is not the entry root or a filename. Missing/non-directory paths
         raise FileNotFoundError/NotADirectoryError. Invalid entry_id or non-finite,
         negative lock_timeout seconds raise ValueError. All handles resolve the
-        same directory before choosing their ledger and lock paths.
+        same directory before choosing their ledger and runtime lock paths.
+        Binding creates the runtime lock directory on demand, not a lock file.
         """
         try:
             UUID(entry_id)
@@ -87,7 +89,7 @@ class RecordsLedger:
         self._entry_id = entry_id
         self._timeout = lock_timeout
         self._path = self._records / "ledger.jsonl"
-        self._lock = FileLock(str(self._path) + ".lock")
+        self._lock = FileLock(str(lock_path_for(self._path)))
         self._state: _LedgerState | None = None
 
     @property
