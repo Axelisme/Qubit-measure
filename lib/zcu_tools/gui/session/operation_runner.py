@@ -264,31 +264,11 @@ class OperationRunner:
             raise RuntimeError("operation requires a progress service")
         if spec.exclusion is not None and self._gate is None:
             raise RuntimeError("operation requires an exclusion gate")
-        if spec.exclusion is not None and self._gate is not None:
-            self._gate.ensure_can_start(
-                spec.exclusion.kind, resource_id=spec.exclusion.resource_id
-            )
-        origin = self._bus.current_origin
-        token = self._handles.create(cancel_hook=spec.cancel_hook, origin=origin)
+        token, origin = self._create_operation(spec)
         settle = self._make_settle(spec, token)
         operation_origin = self._handles.event_origin(token)
         try:
-            if spec.on_opened is not None:
-                spec.on_opened(token)
-            if spec.exclusion is not None and self._gate is not None:
-                self._gate.register(
-                    token,
-                    spec.exclusion.kind,
-                    owner_id=spec.exclusion.owner_id,
-                    origin_kind=origin.kind,
-                    note=spec.exclusion.note,
-                    resource_id=spec.exclusion.resource_id,
-                )
-            factory = (
-                self._progress.make_factory(token, spec.owner_id)
-                if spec.wants_progress and self._progress is not None
-                else None
-            )
+            factory = self._register_resources(spec, token, origin)
         except BaseException as exc:
             with self._bus.origin(operation_origin):
                 settle(OperationOutcome("failed", str(exc)))
@@ -321,32 +301,10 @@ class OperationRunner:
             raise RuntimeError("operation requires an exclusion gate")
         if spec.wants_progress and self._progress is None:
             raise RuntimeError("operation requires a progress service")
-        if spec.exclusion is not None and self._gate is not None:
-            self._gate.ensure_can_start(
-                spec.exclusion.kind, resource_id=spec.exclusion.resource_id
-            )
-
-        origin = self._bus.current_origin
-        token = self._handles.create(cancel_hook=spec.cancel_hook, origin=origin)
-
+        token, origin = self._create_operation(spec)
         settle = self._make_settle(spec, token)
         try:
-            if spec.on_opened is not None:
-                spec.on_opened(token)
-            if spec.exclusion is not None and self._gate is not None:
-                self._gate.register(
-                    token,
-                    spec.exclusion.kind,
-                    owner_id=spec.exclusion.owner_id,
-                    origin_kind=origin.kind,
-                    note=spec.exclusion.note,
-                    resource_id=spec.exclusion.resource_id,
-                )
-            factory = (
-                self._progress.make_factory(token, spec.owner_id)
-                if spec.wants_progress and self._progress is not None
-                else None
-            )
+            factory = self._register_resources(spec, token, origin)
             self._bg.submit(
                 lambda: work(factory),
                 run_in_pool=spec.run_in_pool,
@@ -369,6 +327,41 @@ class OperationRunner:
             raise
 
         return token
+
+    def _create_operation(self, spec: OperationSpec) -> tuple[int, EventOrigin]:
+        """Check admission, capture origin and create a handle before cleanup applies."""
+        if spec.exclusion is not None and self._gate is not None:
+            self._gate.ensure_can_start(
+                spec.exclusion.kind, resource_id=spec.exclusion.resource_id
+            )
+        origin = self._bus.current_origin
+        token = self._handles.create(cancel_hook=spec.cancel_hook, origin=origin)
+        return token, origin
+
+    def _register_resources(
+        self, spec: OperationSpec, token: int, origin: EventOrigin
+    ) -> Callable[..., object] | None:
+        """Notify the owner, register exclusion and allocate requested progress.
+
+        The entrypoint owns the cleanup boundary and its exception policy.
+        Registration uses the origin captured before on_opened can change it.
+        """
+        if spec.on_opened is not None:
+            spec.on_opened(token)
+        if spec.exclusion is not None and self._gate is not None:
+            self._gate.register(
+                token,
+                spec.exclusion.kind,
+                owner_id=spec.exclusion.owner_id,
+                origin_kind=origin.kind,
+                note=spec.exclusion.note,
+                resource_id=spec.exclusion.resource_id,
+            )
+        return (
+            self._progress.make_factory(token, spec.owner_id)
+            if spec.wants_progress and self._progress is not None
+            else None
+        )
 
     def continue_operation[R](
         self,

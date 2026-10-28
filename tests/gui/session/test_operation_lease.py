@@ -187,23 +187,26 @@ def test_inline_cleanup_failures_are_isolated_and_preserve_original_error(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
     bus = BaseEventBus()
-    runner, gate, handles, progress, _bg = make_runner(bus=bus)
     steps: list[tuple[str, EventOrigin]] = []
+
+    class FailingHandles(OperationHandles):
+        def settle(self, token: int, outcome: OperationOutcome) -> None:
+            steps.append(("handle", bus.current_origin))
+            raise RuntimeError("settle failed")
+
+    runner, gate, _handles, progress, _bg = make_runner(
+        bus=bus, handles=FailingHandles()
+    )
 
     def discard(_token: int) -> None:
         steps.append(("progress", bus.current_origin))
         raise RuntimeError("discard failed")
-
-    def settle(_token: int, _outcome: OperationOutcome) -> None:
-        steps.append(("handle", bus.current_origin))
-        raise RuntimeError("settle failed")
 
     def release(_token: int) -> None:
         steps.append(("gate", bus.current_origin))
         raise RuntimeError("release failed")
 
     monkeypatch.setattr(progress, "discard_operation", discard)
-    monkeypatch.setattr(handles, "settle", settle)
     monkeypatch.setattr(gate, "release", release)
     spec = replace(
         _lease_spec(),
