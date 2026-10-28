@@ -12,7 +12,7 @@ from zcu_tools.gui.app.measure.events.tab import (
 )
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 
-from ..services.guard import GuardError, TabAction
+from ..services.guard import TabAction
 from .contracts import WritebackAcceptance, WritebackApplied, WritebackSelection
 from .submissions import WritebackCompleted, WritebackSubmission, WritebackSubmissions
 
@@ -183,14 +183,14 @@ class WritebackControlFacet:
         a retained Form is not continuing admission. See get_item_form for
         the shared draft and its editing effects.
         """
-        self._require_admission(tab_id)
+        self._guard.require_admission(tab_id, TabAction.WRITEBACK)
         draft = self._draft_for_pane(tab_id, pane)
         return self._writeback.get_item_form(draft, session_id)
 
     def set_writeback_item_for_pane(
         self, tab_id: str, pane: WritebackPane, session_id: str, **changes: Any
     ) -> None:
-        self._require_admission(tab_id)
+        self._guard.require_admission(tab_id, TabAction.WRITEBACK)
         draft = self._draft_for_pane(tab_id, pane)
         self._writeback.edit_draft(draft, session_id, **changes)
         self._emit_draft_changed(tab_id)
@@ -202,7 +202,7 @@ class WritebackControlFacet:
         *,
         item_ids: tuple[str, ...] | None = None,
     ) -> dict[str, Any]:
-        self._require_admission(tab_id)
+        self._guard.require_admission(tab_id, TabAction.WRITEBACK)
         draft = self._draft_for_pane(tab_id, pane)
         try:
             return self._writeback.apply_draft(draft, item_ids=item_ids)
@@ -220,7 +220,7 @@ class WritebackControlFacet:
     ) -> list[WritebackWritten]:
         """Write once; a reserved ID retains the confirmed prefix and outcome."""
         with self._submissions.submit(tab_id, submission_id) as receipt:
-            self._require_admission(tab_id)
+            self._guard.require_admission(tab_id, TabAction.WRITEBACK)
             draft = self._draft_for_pane(tab_id, pane)
 
             def retain(values: tuple[WritebackApplied, ...]) -> None:
@@ -247,7 +247,7 @@ class WritebackControlFacet:
         Permission, idle and active draft checks apply before any submission.
         """
         with self._submissions.submit(tab_id, submission_id) as receipt:
-            self._require_admission(tab_id)
+            self._guard.require_admission(tab_id, TabAction.WRITEBACK)
             panes = tuple(selection.subtab_id for selection in selections)
             if panes not in (
                 (),
@@ -327,11 +327,6 @@ class WritebackControlFacet:
                 fact=TabInteractionFact.WRITEBACK_DRAFT_CHANGED,
             )
         )
-
-    def _require_admission(self, tab_id: str) -> None:
-        decision = self._guard.admit(tab_id, TabAction.WRITEBACK)
-        if not decision.allowed:
-            raise GuardError(decision.message, reason_code=decision.reason or "")
 
     def get_context_version(self) -> int:
         return self._resource_versions().get("context", 0)

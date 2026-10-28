@@ -99,6 +99,11 @@ class RecordingGuard:
         self._log.add("guard", "admit", tab_id, action)
         return self.decision
 
+    def require_admission(self, tab_id: str, action: TabAction) -> None:
+        decision = self.admit(tab_id, action)
+        if not decision.allowed:
+            raise GuardError(decision.message, reason_code=decision.reason or "")
+
     def capture_run_inputs(
         self,
         tab_id: str,

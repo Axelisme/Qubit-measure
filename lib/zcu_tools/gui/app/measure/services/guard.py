@@ -218,7 +218,17 @@ class GuardService:
             return AdmissionDecision(False, "no_soc", str(exc))
         return None
 
-    def _require_admission(self, tab_id: str, action: TabAction) -> None:
+    def require_admission(self, tab_id: str, action: TabAction) -> None:
+        """Require tab_id's domain readiness for the requested TabAction.
+
+        Call admit(tab_id, action) exactly once on the owner thread, without
+        mutation. Return None when allowed; otherwise raise GuardError with
+        the decision's message and reason_code (an empty string if reason is
+        None). Other exceptions from admit propagate unchanged.
+        This read-only observation does not capture inputs, start work or
+        acquire a lease. Success does not guarantee later operation admission
+        or hardware availability; the operation gate still owns exclusion.
+        """
         decision = self.admit(tab_id, action)
         if not decision.allowed:
             raise GuardError(decision.message, reason_code=decision.reason or "")
@@ -256,7 +266,7 @@ class GuardService:
         entry/point/description. No Run,
         lease, file or ledger write starts; source and alias errors propagate.
         """
-        self._require_admission(tab_id, TabAction.RUN)
+        self.require_admission(tab_id, TabAction.RUN)
         tab = self._state.get_tab(tab_id)
 
         ctx = self._state.session_env
@@ -297,7 +307,7 @@ class GuardService:
         history without an analysis source. Raise GuardError on rejection;
         return None without mutation on success.
         """
-        self._require_admission(tab_id, TabAction.LOAD)
+        self.require_admission(tab_id, TabAction.LOAD)
 
     def check_analyze(self, tab_id: str) -> None:
         """Require an existing tab and a Run result, not a live context.
@@ -307,7 +317,7 @@ class GuardService:
         failures. Raise GuardError on rejection; return None without mutation
         on success. AnalysisMode.NONE and tab busy are rejected.
         """
-        self._require_admission(tab_id, TabAction.ANALYZE)
+        self.require_admission(tab_id, TabAction.ANALYZE)
 
     def check_writeback(self, tab_id: str) -> None:
         """Require a selected working point, an existing tab and a Primary result.
@@ -318,4 +328,4 @@ class GuardService:
         before nonempty writes. Selection admits the command but never replaces
         its captured SavedPoint destination with the currently selected point.
         """
-        self._require_admission(tab_id, TabAction.WRITEBACK)
+        self.require_admission(tab_id, TabAction.WRITEBACK)

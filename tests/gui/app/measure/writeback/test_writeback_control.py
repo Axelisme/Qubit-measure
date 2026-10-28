@@ -16,6 +16,7 @@ from zcu_tools.gui.app.measure.events.tab import (
 from zcu_tools.gui.app.measure.services.guard import (
     AdmissionDecision,
     GuardError,
+    GuardService,
     TabAction,
 )
 from zcu_tools.gui.app.measure.state import Session, State
@@ -73,6 +74,11 @@ class RecordingGuard:
         if self._state.busy:
             return AdmissionDecision(False, "tab_busy", "Tab is busy")
         return self.decision
+
+    def require_admission(self, tab_id: str, action: TabAction) -> None:
+        decision = self.admit(tab_id, action)
+        if not decision.allowed:
+            raise GuardError(decision.message, reason_code=decision.reason or "")
 
     def check_writeback(self, tab_id: str) -> None:
         self._log.add("guard", "check_writeback", tab_id)
@@ -326,6 +332,9 @@ def test_batch_write_publishes_shared_draft_even_after_partial_failure(
         ),
     )
     guard = MagicMock()
+    guard.require_admission.side_effect = lambda tab_id, action: (
+        GuardService.require_admission(guard, tab_id, action)
+    )
     facet = WritebackControlFacet(
         state=state,
         guard=guard,

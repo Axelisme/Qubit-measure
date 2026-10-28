@@ -19,7 +19,7 @@ from zcu_tools.gui.interactive import PluginDefinition, Session
 from zcu_tools.gui.plotting.explicit import QtPlotHost
 from zcu_tools.gui.session.context_types import CommandOrigin
 
-from .guard import GuardError, TabAction
+from .guard import TabAction
 from .pane_commit import discard_unpublished_plots
 
 logger = logging.getLogger(__name__)
@@ -260,7 +260,7 @@ class RunAnalyzeControlFacet:
         )
 
     def load_tab_result(self, tab_id: str, data_path: str) -> LoadTabResultOutcome:
-        self._require_admission(tab_id, TabAction.LOAD)
+        self._guard.require_admission(tab_id, TabAction.LOAD)
         outcome = self._load.load_result(tab_id, data_path)
         self._run.release_view_plots(tab_id)
         preparation = self._tab.prepare_result_analysis(tab_id)
@@ -344,7 +344,7 @@ class RunAnalyzeControlFacet:
         *,
         run_operation_id: int | None = None,
     ) -> int:
-        self._require_admission(tab_id, TabAction.ANALYZE)
+        self._guard.require_admission(tab_id, TabAction.ANALYZE)
         if run_operation_id is not None:
             self._state.require_run_operation(tab_id, run_operation_id)
         tab = self._state.get_tab(tab_id)
@@ -444,7 +444,7 @@ class RunAnalyzeControlFacet:
         operation_id: int | None = None,
         run_operation_id: int | None = None,
     ) -> int:
-        self._require_admission(tab_id, TabAction.POST_ANALYZE)
+        self._guard.require_admission(tab_id, TabAction.POST_ANALYZE)
         if operation_id is not None:
             self._state.require_analysis_operation(tab_id, "analysis", operation_id)
         if run_operation_id is not None:
@@ -481,11 +481,6 @@ class RunAnalyzeControlFacet:
             )
         )
         return plots
-
-    def _require_admission(self, tab_id: str, action: TabAction) -> None:
-        decision = self._guard.admit(tab_id, action)
-        if not decision.allowed:
-            raise GuardError(decision.message, reason_code=decision.reason or "")
 
     def get_post_analyze_result(self, tab_id: str) -> object | None:
         return self._tab.get_tab_post_analyze_result(tab_id)
