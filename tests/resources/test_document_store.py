@@ -3,7 +3,7 @@ from math import isnan
 from pathlib import Path
 
 import pytest
-from filelock import Timeout
+from filelock import FileLock, Timeout
 from pydantic import BaseModel, Field, ValidationError, field_validator
 from ruamel.yaml import YAML
 from zcu_tools.format_version import FormatError, VersionError
@@ -14,6 +14,7 @@ from zcu_tools.resources.document_store import (
     DocumentValue,
     LockTimeoutError,
 )
+from zcu_tools.resources.file_lock import lock_path_for
 
 from tests.resources._document_store_fakes import StrictDocument, SyntheticDocument
 
@@ -109,6 +110,29 @@ def make_sequenced_groups_store(path: Path) -> DocumentStore[SequencedGroupsDocu
 
 def make_nullable_general_store(path: Path) -> DocumentStore[NullableGeneralDocument]:
     return DocumentStore(path, NullableGeneralDocument, format="synthetic")
+
+
+def test_edit_uses_runtime_lock_without_data_sidecars(document_path: Path) -> None:
+    contended: list[bool] = []
+
+    def observe_commit(document: SyntheticDocument) -> None:
+        if document.values["left"] == 9.0:
+            with (
+                pytest.raises(Timeout),
+                FileLock(str(lock_path_for(document_path)), timeout=0),
+            ):
+                pass
+            contended.append(True)
+
+    store = DocumentStore(
+        document_path, SyntheticDocument, format="synthetic", validate=observe_commit
+    )
+    with store.edit() as draft:
+        draft.values["left"] = 9.0
+
+    assert make_store(document_path).snapshot().values["left"] == 9.0
+    assert contended
+    assert not list(document_path.parent.glob("*.lock"))
 
 
 def test_snapshot_is_an_independent_memory_only_typed_copy(document_path: Path) -> None:
