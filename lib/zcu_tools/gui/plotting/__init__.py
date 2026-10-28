@@ -17,6 +17,7 @@ if TYPE_CHECKING:
         dump_plot_state,
         ensure_host,
         get_figure_container,
+        is_shutting_down,
         remove_canvas,
         set_shutting_down,
     )
@@ -35,6 +36,7 @@ _LAZY: dict[str, str] = {
     "dump_plot_state": "host",
     "ensure_host": "host",
     "get_figure_container": "host",
+    "is_shutting_down": "host",
     "install_mathtext_lock": "mathtext_lock",
     "prewarm_mathtext": "mathtext_lock",
     "remove_canvas": "host",
@@ -49,6 +51,7 @@ __all__ = [
     "dump_plot_state",
     "ensure_host",
     "get_figure_container",
+    "is_shutting_down",
     "install_mathtext_lock",
     "prewarm_mathtext",
     "remove_canvas",

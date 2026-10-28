@@ -42,8 +42,14 @@ _shutting_down: bool = False
 
 
 def set_shutting_down(*, value: bool) -> None:
+    """Suppress canvas removal during Qt/process teardown when value is True."""
     global _shutting_down
     _shutting_down = value
+
+
+def is_shutting_down() -> bool:
+    """Return whether canvas removal is suppressed for Qt/process teardown."""
+    return _shutting_down
 
 
 def drop_from_registry(fig: Figure) -> None:

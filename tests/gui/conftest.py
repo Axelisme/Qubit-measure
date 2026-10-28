@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Iterator
 
 import pytest
 
@@ -21,6 +22,20 @@ def qapp():
     if app is None:
         app = QApplication([])
     return app
+
+
+@pytest.fixture(scope="module", autouse=True)
+def plotting_state_policy(request: pytest.FixtureRequest) -> Iterator[None]:
+    """Identify modules that leak shutdown state or live figure attachments."""
+    from zcu_tools.gui.plotting import dump_plot_state, is_shutting_down
+
+    before = (is_shutting_down(), dump_plot_state())
+    yield
+    after = (is_shutting_down(), dump_plot_state())
+    assert after == before, (
+        f"plotting state polluter: {request.node.path}; "
+        f"before={before!r}; after={after!r}"
+    )
 
 
 @pytest.fixture(params=["white", "#202020"], ids=["light", "dark"])
