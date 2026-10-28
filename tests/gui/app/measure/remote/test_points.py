@@ -203,11 +203,14 @@ def test_created_binding_failure_preserves_destination_and_recovers_with_use(
     assert error.code == ErrorCode.CONTROLLER_ERROR
     assert error.reason == "point_binding_failed"
     assert error.data == {
-        "entry_id": info.entry_id,
+        "entry_name": info.name,
         "point": "retained",
         "created": True,
     }
     assert isinstance(error.__cause__, PointBindingError)
+    assert error.__cause__.entry_name == info.name
+    assert error.__cause__.point == "retained"
+    assert error.__cause__.created is True
     assert isinstance(error.__cause__.__cause__, OSError)
     assert entry.list_points() == ["previous", "retained"]
     assert service.read_context().target == before

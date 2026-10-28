@@ -178,18 +178,20 @@ class PointCreateRequest:
 class PointBindingError(RuntimeError):
     """A point was created but could not be installed; never delete or retry it.
 
-    entry_id and label identify the retained destination. The raising service
-    chains the installation cause; Open/Use is recovery, not repeating New.
+    entry_name identifies the entry within the current result root; point is
+    the retained label. created is always True. The raising service chains the
+    installation cause; Open/Use is recovery, not repeating New.
     """
 
-    entry_id: str
-    label: str
+    entry_name: str
+    point: str
+    created: Literal[True] = True
 
-    def __init__(self, *, entry_id: str, label: str) -> None:
-        self.entry_id = entry_id
-        self.label = label
+    def __init__(self, *, entry_name: str, point: str) -> None:
+        self.entry_name = entry_name
+        self.point = point
         super().__init__(
-            f"Point {label!r} in entry {entry_id!r} was created but could not be "
+            f"Point {point!r} in entry {entry_name!r} was created but could not be "
             "installed. Use the same point to recover; do not repeat New."
         )
 

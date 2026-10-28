@@ -192,7 +192,7 @@ def h_point_new(
     Collision rejection preserves selection/files for setup and clone alike.
     Owner no_entry/schema/source/other I/O failures retain their classification.
     Created-but-uninstalled PointBindingError becomes CONTROLLER_ERROR with
-    reason point_binding_failed and data entry_id/point/created=True. Keep the
+    reason point_binding_failed and data entry_name/point/created=True. Keep the
     original cause and point; Use is recovery, never retry or delete New.
     Existing tabs retain their parameter capture; new tabs use this point.
     """
@@ -220,7 +220,11 @@ def h_point_new(
             ErrorCode.CONTROLLER_ERROR,
             str(exc),
             reason="point_binding_failed",
-            data={"entry_id": exc.entry_id, "point": exc.label, "created": True},
+            data={
+                "entry_name": exc.entry_name,
+                "point": exc.point,
+                "created": exc.created,
+            },
         ) from exc
     return {"kind": point.kind, "entry_name": point.entry_name, "point": point.point}
 

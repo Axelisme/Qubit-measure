@@ -80,7 +80,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "description defaults to empty and replaces seed/clone description. "
             "Returns {kind: 'saved_point', entry_name, point}. Binding failure retains "
             "the created point and old selection: point_binding_failed with "
-            "{entry_id, point, created: true}; recover with point.use, not New.",
+            "{entry_name, point, created: true}; recover with point.use, not New.",
             (
                 required_string("label", "New single-segment point label"),
                 ParamSpec(

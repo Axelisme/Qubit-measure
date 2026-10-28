@@ -521,7 +521,10 @@ def test_created_point_binding_failure_retains_point_and_previous_binding(
     assets.fail = True
     with pytest.raises(PointBindingError) as error:
         context.new_point(_new_request("retained"))
-    assert error.value.entry_id == entry.entry_id and error.value.label == "retained"
+    assert (
+        error.value.entry_name == entry.result_path.name
+        and error.value.point == "retained"
+    )
     assert isinstance(error.value.__cause__, OSError)
     assert entry.list_points() == ["retained"]
     assert context.get_session_env().parameters is None

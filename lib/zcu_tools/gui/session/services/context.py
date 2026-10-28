@@ -350,7 +350,7 @@ class ContextService:
         except Exception as exc:
             # Resource creation succeeded; report the retained point as recovery.
             raise PointBindingError(
-                entry_id=entry.entry_id, label=request.label
+                entry_name=entry.result_path.name, point=request.label
             ) from exc
         self._aliases, self._aliases_revision = aliases
         self._install_point(point, library, parameters, sources, info)
