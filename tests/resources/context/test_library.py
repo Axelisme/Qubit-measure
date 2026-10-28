@@ -8,6 +8,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from pydantic import TypeAdapter
 from zcu_tools.cfg_model import (
     ConstWaveformCfg,
     PulseCfg,
