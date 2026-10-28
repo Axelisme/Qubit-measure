@@ -14,7 +14,7 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 
 ## Concurrency / Lifecycle
 
-- [0066 — Operation 執行、取消與關閉](0066-operation-lifecycle.md)：guard／lease／handle、runner、互動、shutdown 與 device disconnect 的跨 owner 責任，SaveService 單一擁有保存前置檢查；measure close 已有 caller drain／逾時留窗；其餘未落實目標見 [Operation draft](draft/operation-lifecycle-boundaries.md)。
+- [0066 — Operation 執行、取消與關閉](0066-operation-lifecycle.md)：domain admission／tab busy、啟動時 hardware exclusion、lease／handle、runner、互動、shutdown 與 device disconnect 的跨 owner 責任，SaveService 單一擁有保存前置檢查；measure close 已有 caller drain／逾時留窗；其餘未落實目標見 [Operation draft](draft/operation-lifecycle-boundaries.md)。
 - [0001 — Domain guard 與 Lease 分離](0001-permit-lease-typed-guard.md)：typed Permit proof 已由 0066 的 checks／RunInputs 取代，保留 guard 與 lease 的責任分界。
 - [0002 — Version table + off-main handler（handle 模型沿革）](0002-version-table-async-handle-off-main.md)：owner resource counters 與 RPC off-main handler 的局部契約仍有效；Remote 權限由 0070 的 holder 取代版本 guard，operation handle 分界由 0066 承接。
 - [0053 — Owner scheduler 與 gate presence](0053-owner-scheduler-and-gate-presence.md)：scheduler port、State owner guard、completion facts 與 gate presence 的局部契約仍有效；operation owner-loop 規則由 0066 承接。
@@ -77,7 +77,6 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 - [模擬環境、FTF preset 與參數檔](draft/simulation-environments.md)：已交付明確環境、white_noise、Module 控制、FTF 快速分段引擎與重算式單 round 重播。離線 U 表與持久 exact records 已移除。Engine 只保留 routing facts，數值 preparation 限一次 evolve，routing 預算不是 process RAM 上限。可信 startup 腳本組裝並交付資源，GUI 不載入 environment；FTF 從 template 建 entry／point 並用具名 YAML 調參。現行 backend 為 `ftf-segment-v6`，支援 pulse／mux readout。F1／F2 與 conditional Ramsey 的歷史證據不代表現行版本的精度或效能。
 
 - [GUI 事件收合](draft/remote-event-coalescing.md)：GUI 訂閱端依 payload type 與 tab 的 per-tick 收合尚未落實；cfg 表單 snapshot 收合已實作。
-- [GUI adapter capability 入口檢查](draft/gui-adapter-capability-guards.md)：analysis／post-analysis application 入口的完整拒絕尚待實作。
 - [Operation 關閉與 disconnect](draft/operation-lifecycle-boundaries.md)：shutdown 期限、無 handle 背景工作與 GUI device/factory owner 的未落實目標。
 
 ## Retired

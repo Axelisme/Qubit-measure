@@ -1,8 +1,8 @@
 # `zcu_tools.gui.app.measure`
 
-**Last updated:** 2026-10-28
+**Last updated:** 2026-10-28, tab admission
 
-**讀者：** framework-dev。量測 GUI 的組裝、分頁與 Run／Load／Save 分工。
+**讀者：** framework-dev。量測 GUI 的組裝、分頁、tab admission 與 Run／Load／Save 分工。
 
 `gui.app.measure` 是 measure-gui 的 app framework。它負責 tab lifecycle、cfg
 editing、context/SoC/device/session wiring、run/analyze/save/writeback workflow、Qt
@@ -11,7 +11,9 @@ framework 接收 caller 注入的 `Adapter` 值。
 RunAnalyzeControl 對 MCP 結果讀取使用固定 60 秒 budget，不猜 opaque result 結構。
 Adapter 的 `make_form` 從固定 `FormContext` 產生 fresh input。
 分析與 Post 的結果／參數槽位預設 None，表示沒有數值或輸入。
-Figures-only 的完成事實由 pane plots 保留，不靠 numeric payload 判斷。
+`AnalysisPaneSnapshot.has_result` 與 `PostAnalysisPaneSnapshot.has_result` 交付 State 的結果存在事實。
+Figures-only 與已發布的空 FigureCollection 都算有結果，不靠 numeric payload 判斷。
+UI 與 remote 讀取這兩個欄位，不從 admission 推回結果是否存在。
 None 結果產生空摘要與零 writeback 候選，圖與空摘要沿用既有保存格式。
 
 ## Immutable definition values
@@ -372,12 +374,43 @@ WritebackService 不解析欄位、不補座標、不查裝置或 alias。
 每個 Run 都需要 SoC，guard 檢查 context、cfg 與連線。實驗的輸入驗證在 run 內執行。
 每個 adapter 都可嘗試 Load，LoadService 以檔案與 spec 判斷相容性，失敗保留舊成果。
 Qt tab 依 analysis／post-analysis 建立控制項，remote writeback subtab params 也檢查對應宣告。
-`GuardService.admit` 統一檢查 catalog availability、tab 前提、能力與 tab busy。
-Analyze 在 Run result 後檢查 analysis；Post-analyze 在 Primary result 後檢查 post-analysis。
-`capture_run_inputs` 先取得 Run decision，拒絕時以相同 reason/message raise GuardError。
-放行後才 accept cfg，執行時的 resource／reentrancy 錯誤保留原分類。
-`TabFormResource.run_invalid_reason()` 提供 cfg 首因與其他錯誤數，不接受或發布 cfg。
-Startup、其他 tab 的 Run 與 hardware exclusion 仍由 operation gate 裁決。
+
+## Tab admission
+
+`GuardService.admit(tab_id, action) -> AdmissionDecision` 在 owner thread 讀取 domain 前提。
+Decision 包含 `allowed`、第一個拒絕的 `reason` 與共用 `message`，放行時 reason 為 None、message 為空字串。
+所有 action 先查 `experiment_unavailable`，再查 `unknown_tab`，其餘檢查依下表由左至右執行。
+
+| Action | 其餘檢查順序 |
+| --- | --- |
+| RUN | active context → cfg → SoC 連線 → tab busy |
+| LOAD | tab busy |
+| ANALYZE | Run result → analysis capability → tab busy |
+| POST_ANALYZE | Primary result → post-analysis capability → tab busy |
+| WRITEBACK | selected working point → Primary result → tab busy |
+
+Run、Load 不要求 storage，Load 與 Analyze 不要求目前 context。
+Analyze 缺能力時回 `no_analysis`，不會把 `AnalysisMode.NONE` 送入 FIT worker。
+Post-analyze 缺能力時回 `no_post_analysis`。
+Writeback owner 另行驗證 captured destination；Post writeback UI 還要求 Post result，只有 Post result 不能略過 Primary result 前提。
+Save 不使用這份 admission，保存前提仍由 SaveService 檢查。
+
+`check_load/analyze/writeback` 是 admit 的薄包裝，拒絕時以 decision 的 reason/message raise `GuardError`。
+Run facet 只呼叫 `capture_run_inputs`，由 capture 呼叫一次 admit，invalid cfg 也以相同 reason/message raise `GuardError`。
+放行後 capture 只呼叫一次 `accept()`，執行時的 resource／reentrancy 拒絕保留 `CfgPreconditionError`。
+`TabFormResource.run_invalid_reason()` 先讀 Form unavailable 原因，再讀 model／lowering 錯誤。
+多錯誤時首因附 `(+N more)`，N 是其餘錯誤數。
+這個唯讀查詢不接受或發布 cfg、不捕捉來源，可在 notification 中呼叫。
+Resource revocation 與 author lower-hook 例外仍傳出，不偽裝成放行。
+
+UI 的 domain 拒絕停用按鈕並顯示 decision.message。
+Run admission 放行後，UI 仍依序顯示尚未寫入 resource 的 editor parse 錯誤、startup、其他 tab Run 的阻擋訊息。
+Admission 不取得 lease，hardware exclusion 仍由 operation gate 在啟動時裁決，放行不保證啟動成功。
+Remote 也讀取 decision；只有 `unknown_tab` 投影成既有 `INVALID_PARAMS` 與空 reason，其餘拒絕保留 decision 的 reason/message。
+Run aliases 檢查仍在 admission 前，admission 則先於 source provenance 檢查。
+沒有 Run result 時，帶 run_operation_id 仍先回 `no_run_result`；已有結果但來源過期或未知時仍由 source owner 回 `result_superseded`。
+Remote Run 保留 admission 後 `accept()` 執行時 `CfgPreconditionError` 的 wire 轉譯。
+責任分工與裁決見 ADR-0066、ADR-0067。
 
 ## Experiment reload
 
