@@ -58,7 +58,9 @@ def _adapter_with_params(params: ChoiceParams) -> MagicMock:
     control = MagicMock()
     control.has_tab.return_value = True
     control.get_tab_snapshot.return_value = SimpleNamespace(
-        analysis=SimpleNamespace(params=params, has_writeback_draft=False),
+        analysis=SimpleNamespace(
+            params=params, has_writeback_draft=False, result=object()
+        ),
         post_analysis=SimpleNamespace(
             params=params, has_writeback_draft=False, result=None
         ),

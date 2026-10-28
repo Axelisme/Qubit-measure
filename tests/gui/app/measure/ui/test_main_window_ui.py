@@ -616,9 +616,7 @@ def test_main_window_soc_changed_refreshes_run_lock(
     ctrl.get_bus.return_value = bus
     ctrl.tab_control.get_running_tab_id.return_value = None
     ctrl.tab_control.has_tab.return_value = True
-    ctrl.tab_control.get_tab_snapshot.return_value = make_tab_snapshot(
-        "tab-1", has_soc=False
-    )
+    ctrl.tab_control.get_tab_snapshot.return_value = make_tab_snapshot("tab-1")
 
     window = MainWindow(ctrl, templates=lambda: {})
     try:

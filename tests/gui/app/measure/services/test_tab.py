@@ -224,8 +224,7 @@ def test_snapshot_carries_post_analyze_fields() -> None:
     assert snapshot.post_analysis.figures is not None
     assert snapshot.post_analysis.figures is post_plots
     assert snapshot.post_analysis.figures["fit"] is post_fig
-    assert snapshot.interaction is not None
-    assert snapshot.interaction.has_post_analyze_result is True
+    assert snapshot.post_analysis.result is not None
 
 
 def test_initialize_post_analyze_params_seeds_from_primary_result() -> None:

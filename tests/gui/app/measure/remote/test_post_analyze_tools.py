@@ -21,10 +21,10 @@ from ._helpers import dispatch_handler as _dispatch
 def _snapshot(*, has_analyze_result: bool, post_params: object) -> SimpleNamespace:
     """Minimal pane-qualified snapshot consumed by the post handlers."""
     return SimpleNamespace(
-        interaction=SimpleNamespace(
-            has_analyze_result=has_analyze_result, has_post_analyze_result=False
+        analysis=SimpleNamespace(result=object() if has_analyze_result else None),
+        post_analysis=SimpleNamespace(
+            params=post_params, has_writeback_draft=False, result=None
         ),
-        post_analysis=SimpleNamespace(params=post_params, has_writeback_draft=False),
     )
 
 

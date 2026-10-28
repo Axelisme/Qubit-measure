@@ -98,13 +98,9 @@ class TabService:
             startup_active=self._state.is_startup_active(),
             has_context=ctx.has_context(),
             has_active_context=ctx.is_active(),
-            has_soc=ctx.has_soc(),
             is_running=is_running,
             is_analyzing=tab.is_analyzing,
             has_run_result=tab.has_run_result(),
-            has_analyze_result=tab.has_analyze_result(),
-            has_figure=tab.has_figure(),
-            has_post_analyze_result=tab.has_post_analyze_result(),
         )
 
         # Pane-owned writeback items via opaque drafts.
