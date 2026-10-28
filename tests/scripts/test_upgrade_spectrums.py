@@ -12,7 +12,8 @@ from scripts.upgrade_spectrums import main
 
 @pytest.fixture
 def legacy_spectrums(tmp_path):
-    path = tmp_path / "spectrums.hdf5"
+    path = tmp_path / "project" / "result" / "entry" / "spectrums.hdf5"
+    path.parent.mkdir(parents=True)
     with h5py.File(path, "w") as handle:
         group = handle.create_group("scan.with.dots")
         group.attrs["type"] = "OneTone"
@@ -50,7 +51,8 @@ def test_preview_then_apply_preserves_arrays_and_backs_up_original_bytes(
     assert main([str(path), "--apply"]) == 0
     report = capsys.readouterr().out
     assert "applied" in report
-    backups = list(path.parent.glob("*.bak"))
+    backup_dir = path.parents[2].with_name("project-backup") / "result" / "entry"
+    backups = list(backup_dir.glob("*.bak"))
     assert len(backups) == 1
     assert backups[0].read_bytes() == original
     result = load_spectrums(str(path))["scan.with.dots"]
@@ -66,7 +68,34 @@ def test_preview_then_apply_preserves_arrays_and_backs_up_original_bytes(
     assert main([str(path), "--apply"]) == 0
     assert "skipped" in capsys.readouterr().out
     assert path.read_bytes() == upgraded
-    assert list(path.parent.glob("*.bak")) == backups
+    assert list(backup_dir.glob("*.bak")) == backups
+    assert list(path.parent.iterdir()) == [path]
+    path.write_bytes(backups[0].read_bytes())
+    assert path.read_bytes() == original
+
+
+def test_standalone_requires_external_override_before_writing(
+    legacy_spectrums, tmp_path, capsys
+):
+    source_dir = tmp_path / "standalone"
+    source_dir.mkdir()
+    path = source_dir / "spectrums.hdf5"
+    legacy_spectrums.replace(path)
+    original = path.read_bytes()
+    before = set(tmp_path.rglob("*"))
+    assert main([str(path)]) == 0
+    assert main([str(path), "--apply"]) == 1
+    assert "--backup-root" in capsys.readouterr().out
+    assert (
+        main([str(path), "--apply", "--backup-root", str(source_dir / "backups")]) == 1
+    )
+    assert set(tmp_path.rglob("*")) == before
+    assert path.read_bytes() == original
+    backup_root = tmp_path / "archive"
+    assert main([str(path), "--apply", "--backup-root", str(backup_root)]) == 0
+    (backup,) = backup_root.glob("spectrums.hdf5.*.bak")
+    path.write_bytes(backup.read_bytes())
+    assert path.read_bytes() == original
 
 
 @pytest.mark.parametrize("period", [0.0, float("nan")])

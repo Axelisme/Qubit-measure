@@ -8,13 +8,13 @@ from math import isfinite
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 from typing import Literal
-from uuid import uuid4
 
 from filelock import FileLock, Timeout
 from pydantic import JsonValue, TypeAdapter
 
 from zcu_tools.cfg_model import validate_device_name
 from zcu_tools.resources.file_lock import lock_path_for
+from zcu_tools.resources.upgrade_backup import upgrade_backup_path
 from zcu_tools.utils import atomic_replace
 
 
@@ -51,7 +51,11 @@ class RecordUpgradeResult:
 
 
 def upgrade_record_files(
-    paths: Sequence[Path], *, device_name: str, apply: bool = False
+    paths: Sequence[Path],
+    *,
+    device_name: str,
+    apply: bool = False,
+    backup_root: Path | None = None,
 ) -> tuple[RecordUpgradeResult, ...]:
     """Attribute old dev_value/dev_unit pairs to an operator-declared device.
 
@@ -62,7 +66,8 @@ def upgrade_record_files(
     Target metadata is retained; old fields coexisting with target pair fields
     conflict, never overwrite. Other devices and no-device rows stay opaque.
     Default dry-run creates no files. apply backs up original bytes before atomic
-    replacement. Reject
+    replacement. backup_root overrides the external project sibling root;
+    see upgrade_backup_path for placement and pre-write rejection rules. Reject
     a whole file on any partial/corrupt row, report physical line numbers, and
     continue other files. Preserve all rows, duplicate run IDs and opaque fields;
     never append, infer component/frame, or change component schema versions.
@@ -70,7 +75,10 @@ def upgrade_record_files(
     or power-loss guarantee. Stop concurrent writers before applying.
     """
     validate_device_name(device_name)
-    return tuple(_upgrade_file(path, device_name, apply=apply) for path in paths)
+    return tuple(
+        _upgrade_file(path, device_name, apply=apply, backup_root=backup_root)
+        for path in paths
+    )
 
 
 class _PartialRecord(ValueError):
@@ -147,11 +155,16 @@ def _replace_history(path: Path, content: bytes) -> None:
             temporary.unlink(missing_ok=True)
 
 
-def _upgrade_file(path: Path, device_name: str, *, apply: bool) -> RecordUpgradeResult:
-    resolved = path.resolve()
+def _upgrade_file(
+    path: Path, device_name: str, *, apply: bool, backup_root: Path | None
+) -> RecordUpgradeResult:
     backup: Path | None = None
     rows: list[RecordRowUpgrade] = []
     try:
+        resolved = path.resolve()
+        destination = (
+            upgrade_backup_path(resolved, backup_root=backup_root) if apply else None
+        )
         resolved.parent.stat()
         lock = (
             FileLock(str(lock_path_for(resolved)), timeout=5)
@@ -177,7 +190,9 @@ def _upgrade_file(path: Path, device_name: str, *, apply: bool) -> RecordUpgrade
                 return RecordUpgradeResult(path, device_name, "skipped", tuple(rows))
             if not apply:
                 return RecordUpgradeResult(path, device_name, "dry-run", tuple(rows))
-            destination = resolved.with_name(f"{resolved.name}.{uuid4().hex}.bak")
+            if destination is None:
+                raise RuntimeError("apply requires a backup destination")
+            destination.parent.mkdir(parents=True, exist_ok=True)
             with destination.open("xb") as stream:
                 stream.write(original)
             backup = destination

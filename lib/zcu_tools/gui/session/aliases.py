@@ -9,8 +9,9 @@ from fnmatch import fnmatchcase
 from typing import TYPE_CHECKING
 
 from zcu_tools.gui.expected_error import InvalidInputError
+from zcu_tools.resources.document_store import DocumentRevision
 from zcu_tools.resources.entry import RoleResolutionError, document_value
-from zcu_tools.resources.entry.aliases import AliasValue
+from zcu_tools.resources.entry.aliases import AliasReadResult, AliasValue
 
 if TYPE_CHECKING:
     from zcu_tools.resources.entry import RoleSpec
@@ -349,6 +350,50 @@ class AliasTable:
             dependency = binding[1:].split(".", 1)[0]
             chain.append(rows[dependency])
         return tuple(chain)
+
+
+@dataclass(frozen=True)
+class AliasSnapshot:
+    """A session alias observation with syntax validation and deferred errors.
+
+    table is usable only when error is None. revision is the observed raw-byte
+    version, including invalid content, or None before a point is selected.
+    error retains the original file-content or session-syntax failure. Consumers
+    must raise it before using table; it is never a valid empty fallback.
+    """
+
+    table: AliasTable
+    revision: DocumentRevision | None = None
+    error: Exception | None = None
+
+    @property
+    def rows(self) -> tuple[AliasRow, ...]:
+        """Return detached authored rows, or raise the original observation error."""
+        if self.error is not None:
+            raise self.error
+        return self.table.rows
+
+    @classmethod
+    def from_read(cls, result: AliasReadResult) -> AliasSnapshot:
+        """Validate one owner observation without rereading or raising content errors.
+
+        Preserve result.revision and its original error. For valid file content,
+        validate session syntax/order and retain InvalidInputError on failure.
+        Missing files produce an empty usable table. No I/O or writes occur.
+        """
+        table = AliasTable()
+        error = result.error
+        if error is None:
+            try:
+                table = AliasTable(
+                    tuple(
+                        AliasRow(name, value)
+                        for name, value in result.aliases.aliases.items()
+                    )
+                )
+            except InvalidInputError as cause:
+                error = cause
+        return cls(table, result.revision, error)
 
 
 def _list_error(alias: str, kind: str | None) -> RoleResolutionError:

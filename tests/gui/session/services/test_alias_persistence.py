@@ -195,30 +195,46 @@ def test_switch_point_reloads_local_table_without_setup_or_preset_fallback(
         ("{}", "2.0", ValueError),
     ],
 )
-def test_bad_file_preserves_old_binding_and_aliases(
+def test_bad_alias_file_isolated_until_consumed_and_repaired(
     tmp_path: Path, body: str, version: str, expected_error: type[Exception]
 ) -> None:
     context = service()
     first = entry_at(tmp_path, "one")
     context.install_entry(first)
     context.use_point(PointUseRequest("first"))
-    binding = context.get_source_binding()
-    rows = context.get_alias_rows()
     entry = first
     entry.new_point("second")
     (entry.result_path / "points" / "second" / "aliases.yaml").write_text(
         f'format: zcu.aliases\nformat_version: "{version}"\naliases: {body}\n',
         encoding="utf-8",
     )
+    target = context.use_point(PointUseRequest("second"))
+    captured = context.read_context()
+    assert captured.value("Q1.rate") == 4300.0
+    assert captured.library.module_keys() == ()
+    context.set_parameter(target, "Q1.rate", 4400.0)
+    assert context.read_context().value("Q1.rate") == 4400.0
     with pytest.raises(expected_error) as failure:
-        context.use_point(PointUseRequest("second"))
+        captured.resolve_path("$driver.rate")
     if isinstance(failure.value, InvalidInputError):
         assert failure.value.reason_code == "alias_invalid"
-    assert context.get_source_binding() == binding
-    assert context.get_alias_rows() == rows
-    info = context.get_entry_info()
-    assert info is not None
-    assert info.entry_id == first.entry_id
+    source = entry.result_path / "points/second/aliases.yaml"
+    invalid_bytes = source.read_bytes()
+    revision = context.get_file_revisions()[2]
+    assert revision.revision == sha256(invalid_bytes).hexdigest()
+    entry.save_aliases(EntryAliases(aliases={"driver": "Q1"}), point="second")
+    repaired = context.reload_file(source.resolve(), revision.revision)
+    assert repaired.revision == sha256(source.read_bytes()).hexdigest()
+    assert context.read_context().resolve_path("$driver.rate") == "Q1.rate"
+    with pytest.raises(expected_error) as fixed_failure:
+        captured.resolve_path("$driver.rate")
+    assert fixed_failure.value is failure.value
+    entry.save_aliases(EntryAliases(aliases={"driver": "R1"}), point="second")
+    external = source.read_bytes()
+    with pytest.raises(FailedPreconditionError) as conflict:
+        context.reload_file(source.resolve(), revision.revision)
+    assert conflict.value.reason_code == "revision_mismatch"
+    assert source.read_bytes() == external
 
 
 def test_apply_round_trip_entry_isolation_and_write_through_set(tmp_path: Path) -> None:

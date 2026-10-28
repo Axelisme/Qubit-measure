@@ -410,9 +410,10 @@ def save_t1_curve_figure(  # noqa: PLR0913
 
     dpi and bbox_inches pass to Matplotlib savefig. After saving, show the
     figure when show=True, then close it when close=True. Save/show failures
-    propagate without continuing the later side effects; directories are not
-    created here.
+    propagate without continuing the later side effects. Create context.image_dir
+    and its parents before writing; loading the context does not create them.
     """
+    os.makedirs(context.image_dir, exist_ok=True)
     path = os.path.join(context.image_dir, filename)
     fig.savefig(path, dpi=dpi, bbox_inches=bbox_inches)
     if show:

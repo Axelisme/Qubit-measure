@@ -29,6 +29,8 @@ Bare resonator frequency 初值依序取：
 3. setup 的 resonator alias 所指 component 已設的 freq，MHz 換 GHz。
 4. 5 GHz。
 
+壞 dispersive seed 記 warning 後退回 alias／預設值，不擋 predictor。只讀 seed 不驗 g；實際使用 g 時由 resources 的 `require_g()` 驗證。
+
 重新載入 predictor 不覆蓋已有 tune bare_rf。Preprocess 完成後，slider 仍以
 median_rf 設初值。這兩項分別是 state seed 與畫面初值，不互相取代。
 不讀舊 params.json，也不從 chip/qubit 名稱推導目錄。

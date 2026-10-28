@@ -17,6 +17,10 @@ GUI 與 agent 都需要讀寫 point 的參數、module library 與 `aliases.yaml
 
 每個 point 的參數文件、library 文件與 `aliases.yaml` 是唯一權威。記憶體保存已安裝內容與該檔內容的 hash 作為 revision，各檔獨立。`entry.info` 與 `status` 回每個檔的路徑與 revision。
 
+Aliases 的 revision 是固定 capture 當次觀察到的原始 bytes SHA-256，不表示內容有效。選取 point 時，壞 aliases 可連同原錯及 hash 保存在 session，參數與 library 仍可使用；實際 alias consumer 才報該 capture 的原錯。只有缺少 aliases 檔時 revision 才是 None。修復後安裝的新狀態不改舊 capture，讀取 owner 與 session 的分工見 [[0063]]。
+
+這項語意只涵蓋 alias read／capture，不授權參數或 library 安裝壞內容，也不改變下方 watcher／reload 失敗保留舊狀態的規則。2026-10-29，使用者對「aliases hash 不保證有效」的 capture 語意與文件補充回覆「同意」。
+
 ### 所有寫入 write-through
 
 任何 writer（Inspect 對話框、writeback、MCP、recipe、啟動腳本）都經 owner：驗證 → 寫暫存檔並 rename → 算 hash → 安裝記憶體 → 發布事件。安裝成功即落盤，不存在「記憶體比磁碟新」的狀態。`resources` 既有的單檔原子替換是唯一寫檔路徑。
@@ -35,9 +39,11 @@ GUI 監看 point 目錄，去抖後讀檔算 hash：等於記憶體 revision 視
 
 ### Agent 直接讀寫檔案
 
-Agent 直接讀檔取得磁碟內容。`status` 回已安裝版本的 revision，外部候選在通過驗證前可能與它不同。
+Agent 直接讀檔取得磁碟內容。`status` 回已安裝版本的 revision，外部候選在通過驗證前可能與它不同。Aliases 即使已有 revision，內容仍可能無效；不要把取得 hash 當成驗證成功。
 
 Agent 編輯檔案後呼叫 `context.reload(path, expected_revision)`，expected_revision 是編輯前的已安裝版本。Owner 讀檔、驗證、安裝、發布並回新 revision。驗證失敗回檔案路徑與原因，保留舊記憶體及磁碟候選。Revision 不符時重讀狀態與內容再決定，非 holder 則拒絕重載。既有 RPC 寫入可選帶 `expected_revision`。
+
+修復固定 capture 中的壞 aliases 時，agent 仍以該次 observed hash 作為編輯前的 expected_revision，沿原 holder 與 reload 契約提交。外部再次修改造成 revision 不符時照舊拒絕，不新增 wire 欄位。操作步驟見 [MCP Point 檔案讀寫](../../lib/zcu_tools/mcp/measure/README.md#point-檔案讀寫)，capture 行為見 [session owner](../../lib/zcu_tools/gui/session/README.md#contextsession-environment-與-run-snapshot) 與 [alias 檔案 owner](../../lib/zcu_tools/resources/entry/README.md#setup-與-point-alias-表)。
 
 ### MCP 固定工具收斂
 

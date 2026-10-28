@@ -36,7 +36,7 @@ uv run --directory /absolute/checkout --no-sync -- python scripts/upgrade_parame
   /data/result/sample/records/components/Q1.jsonl --apply
 ```
 
-Apply 取得來源的 `.lock`，最多等待 5 秒，並在鎖內重讀整份檔案。合法候選先保存原 bytes，備份檔名為 `<原檔名>.<唯一識別碼>.bak`。完成備份後，工具才用同目錄 temporary 檔原子替換來源。報告列出備份路徑與 `applied`。若替換失敗，報告仍列出已完成的備份。
+Apply 先檢查備份位置，再取得來源的 per-user runtime lock，最多等待 5 秒，並在鎖內重讀整份檔案。合法候選先保存原 bytes，備份檔名為 `<原檔名>.<唯一識別碼>.bak`。備份位於資料專案旁的 `<專案根>-backup/`，鏡像專案相對路徑，不寫進 record 資料項目。`--backup-root` 可覆寫；無法定位專案根的來源必須提供此選項。定位與安全拒絕規則見 [備份位置](parameter-upgrades.md#備份位置)。完成備份後，工具才用同目錄 temporary 檔原子替換來源。報告列出備份路徑與 `applied`。若替換失敗，報告仍列出已完成的備份。
 
 這把鎖協調 upgrade writers。一般 JSONL append 不參與這把鎖，所以不能一邊量測一邊 apply。這也不是多檔交易或掉電恢復機制。
 
@@ -100,7 +100,7 @@ Apply 取得來源的 `.lock`，最多等待 5 秒，並在鎖內重讀整份檔
 
 ```bash
 cp /data/result/sample/records/components/Q1.jsonl /data/Q1.before-restore.jsonl
-cp /data/result/sample/records/components/Q1.jsonl.<唯一識別碼>.bak \
+cp /data-backup/result/sample/records/components/Q1.jsonl.<唯一識別碼>.bak \
   /data/result/sample/records/components/Q1.jsonl
 ```
 
