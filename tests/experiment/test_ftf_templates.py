@@ -22,6 +22,7 @@ from zcu_tools.simulate.evolution import (
 
 from tests.experiment._ftf_templates import (
     expect_statistics,
+    herald_template,
     request,
     settings,
     snapshot,
@@ -42,12 +43,12 @@ def test_template_units_common_phase_flat_readout_and_dc_model() -> None:
     np.testing.assert_allclose(track.phase_rad, [0.0, 0.0], atol=1e-14)
     np.testing.assert_array_equal(track.amplitude, [-0.2, -0.2])
     np.testing.assert_array_equal(plan.batch.end_ns, [8.0, 10.0])
-    pulse = plan.readouts[0].batch.pulses[0][0]
+    pulse = plan.readouts[0].batch.events[0][0].pulses[0]
     assert pulse.envelope is None
     assert pulse.amplitude == pytest.approx(0.2j)
     assert pulse.phase_rad == pytest.approx(np.pi / 6 - 12 * np.pi)
     np.testing.assert_array_equal(
-        plan.readouts[0].batch.grids[0][0].times_ns, [8, 9, 10, 11]
+        plan.readouts[0].batch.events[0][0].grids[0].times_ns, [8, 9, 10, 11]
     )
     np.testing.assert_array_equal(
         plan.readouts[0].batch.model.receiver.noise_covariance, np.zeros((2, 2))
@@ -186,11 +187,76 @@ def test_cavity_drives_are_classified_per_point_with_calibrated_envelopes() -> N
     assert first.envelope is None
     assert second.phase_rad == pytest.approx(np.pi / 6 - 2 * np.pi * 5.9 * 3)
     np.testing.assert_array_equal(plan.batch.end_ns, [8, 10])
-    assert all(len(content) == 1 for content in plan.readouts[0].batch.pulses)
+    assert all(
+        len(content) == 1
+        for events in plan.readouts[0].batch.events
+        for content in (events[0].pulses,)
+    )
+
+
+def test_herald_plan_aligns_two_events_when_one_adc_only_observes_terminal() -> None:
+    import zcu_tools.experiment.ftf as ftf
+
+    base, config = herald_template()
+    plan = ftf.plan_template(settings(), snapshot(), base, readout=config)
+    assert tuple(item.channel for item in plan.readouts) == (4, 1)
+    np.testing.assert_array_equal(plan.batch.end_ns, [8, 10])
+    assert plan.cavity_drives == ((), ())
+    assert tuple(len(reads) for reads in plan.projective_reads) == (1, 1)
+    for point, start in enumerate((0.0, 2.0)):
+        assert plan.projective_reads[point][0].start_ns == start
+        assert start in plan.batch.segment_boundaries[point]
+        for item, expected_grids in zip(plan.readouts, ((1, 1), (0, 1)), strict=True):
+            events = item.batch.events[item.batch.content_index[point]]
+            assert len(events) == 2
+            assert tuple(len(event.grids) for event in events) == expected_grids
+            assert tuple(p.start_ns for p in events[0].pulses) == (start, start)
+            assert tuple(p.frequency_ghz for p in events[0].pulses) == (5.9, 5.98)
+            assert tuple(p.amplitude for p in events[0].pulses) == (0.6j, 0.6j)
+            assert events[0].pulses[0].phase_rad == pytest.approx(
+                np.pi / 6 - 2 * np.pi * 5.9 + 2 * np.pi * 0.1 * start
+            )
+            assert tuple(p.start_ns for p in events[1].pulses) == (start + 8, start + 8)
+            assert tuple(p.frequency_ghz for p in events[1].pulses) == (6.0, 6.08)
+            assert events[1].pulses[0].phase_rad == pytest.approx(np.deg2rad(-2130))
+            np.testing.assert_array_equal(
+                events[1].grids[0].times_ns, np.arange(start + 8, start + 12)
+            )
+        observed = plan.readouts[0].batch
+        herald_event = observed.events[observed.content_index[point]][0]
+        np.testing.assert_array_equal(
+            herald_event.grids[0].times_ns, np.arange(start + 3, start + 7)
+        )
+        assert herald_event.grids[0].demodulation_frequency_ghz == 5.9
+        assert herald_event.grids[0].phase_rad == pytest.approx(np.deg2rad(10))
+
+
+def test_herald_only_observations_keep_an_unobserved_terminal_event() -> None:
+    from zcu_tools.experiment.ftf import plan_template
+
+    base, config = herald_template()
+    both = base.readouts[0]
+    herald_only = replace(
+        both,
+        trigger_us=both.trigger_us[:, :1],
+        frequency_mhz=both.frequency_mhz[:, :1],
+        phase_deg=both.phase_deg[:, :1],
+        generator_channels=both.generator_channels[:, :1],
+    )
+    base = replace(base, readouts=(herald_only, replace(herald_only, channel=1)))
+    plan = plan_template(settings(), snapshot(), base, readout=config)
+    np.testing.assert_array_equal(plan.batch.end_ns, [8, 10])
+    for item in plan.readouts:
+        for point, index in enumerate(item.batch.content_index):
+            herald, terminal = item.batch.events[index]
+            assert len(herald.grids) == 1
+            assert terminal.grids == ()
+            assert tuple(p.start_ns for p in terminal.pulses) == (8 + 2 * point,) * 2
+            assert tuple(p.frequency_ghz for p in terminal.pulses) == (6.0, 6.08)
 
 
 @pytest.mark.parametrize("trigger", [0.007999999999, 0.0])
-def test_terminal_readout_rejects_first_trigger_before_latest_block(trigger) -> None:
+def test_readout_rejects_trigger_without_an_incident_pulse_window(trigger) -> None:
     import zcu_tools.experiment.ftf as ftf
 
     base = template()
@@ -377,9 +443,9 @@ def test_template_wires_receiver_delay_and_mismatch_without_delaying_evolution()
         getattr(plan.readouts[0].batch.model, "mismatch_phase_rad", None), [0.6, -0.4]
     )
     np.testing.assert_array_equal(plan.batch.end_ns, [8.0, 10.0])
-    assert plan.readouts[0].batch.pulses[0][0].start_ns == 8.0
+    assert plan.readouts[0].batch.events[0][0].pulses[0].start_ns == 8.0
     np.testing.assert_array_equal(
-        plan.readouts[0].batch.grids[0][0].times_ns, [8, 9, 10, 11]
+        plan.readouts[0].batch.events[0][0].grids[0].times_ns, [8, 9, 10, 11]
     )
 
 
@@ -402,7 +468,8 @@ def test_sampled_readout_template_preserves_linear_envelope_without_field_ode(
             adc.ConditionalReadout(batch.model, rtol=1e-12, atol=1e-14)
             .response(ps, gs[0])
             .traces.sum(axis=-2)
-            for ps, gs in zip(batch.pulses, batch.grids, strict=True)
+            for events in batch.events
+            for ps, gs in ((events[0].pulses, events[0].grids),)
         ]
     )
     calls = []

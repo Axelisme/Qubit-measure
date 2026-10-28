@@ -9,6 +9,22 @@ from zcu_tools.resources.ftf import load_ftf, parse_ftf
 from tests.resources._ftf_data import dual_readout_document, ftf_document
 
 
+@pytest.mark.parametrize("floor", [0.0, 0.1, 0.999])
+def test_projection_weight_floor_accepts_finite_probability_threshold(floor):
+    document = ftf_document()
+    _set_field(document, "numerics.projection_weight_floor", floor)
+    parsed = parse_ftf(document)
+    assert parsed.numerics.projection_weight_floor == floor
+
+
+@pytest.mark.parametrize("floor", [-0.1, 1.0, float("nan"), float("inf"), None])
+def test_projection_weight_floor_rejects_invalid_threshold(floor):
+    document = ftf_document()
+    _set_field(document, "numerics.projection_weight_floor", floor)
+    with pytest.raises(ValueError, match="numerics.projection_weight_floor"):
+        parse_ftf(document)
+
+
 def test_three_loop_drift_parses_and_omitted_drift_is_disabled() -> None:
     baseline = parse_ftf(ftf_document())
     assert baseline.drift is None

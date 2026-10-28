@@ -1,6 +1,6 @@
 # Single-fluxonium YAML values
 
-**Last updated:** 2026-10-27
+**Last updated:** 2026-10-28
 
 **讀者：** framework-dev。查閱 single-fluxonium YAML 的載入入口、欄位單位與驗證規則。
 
@@ -13,6 +13,7 @@ The format is `zcu.single-fluxonium`, integer version `1`. The schema has one fl
 - `drive_line` calibrates the full charge operator in complex GHz/gain. `flux_line` calibrates reduced flux per gain and includes delay, a base response time and signed exponential distortion terms. Set it to null or omit it for DC-only flux. No pulsed flux generator is bound in that case.
 - `readout` separates incident field, cavity and receiver calibrations. ADC noise is a two-sided spectral density, not sample covariance.
 - Optional `drift` selects `q_cap`, `xqp` and/or `aphi` log-OU processes. Each takes finite `sigma >= 0` in ln(loss) and finite `tau_s > 0` seconds. A selected loss must be strictly positive, so disabled `q_cap: null` or zero `xqp`/`aphi` cannot drift. Omitted parameters stay constant. Omitted/null `drift` disables the feature without a format/version change. The stationary log mean is ln(the configured loss). Each environment starts at the configured losses, not at a random stationary draw.
+- `numerics.projection_prune_floor` is a finite global outcome-weight threshold in `[0, 1)`, default `1e-9`. Zero disables pruning. Execution drops weights below it after each projective read and normalizes survivors per point. If every outcome is dropped, execution raises `ValueError` naming that point and the floor.
 - `numerics.truncation.native_cutoff` is the harmonic basis dimension. `levels` is the fixed space of lowest DC-reference eigenstates used away from DC as well. They are accuracy parameters, not convergence guarantees.
 
 Source names must differ across DC, microwave and fast flux. All bound generator routes must differ. ADC channels use a separate namespace. Unknown fields, invalid dimensions, nonfinite numbers and non-PSD receiver noise fail before resource creation. YAML decoding uses the shared `resources.yaml.load_yaml`; common physical records come from `resources.simulation_schema`, also used by FTF.

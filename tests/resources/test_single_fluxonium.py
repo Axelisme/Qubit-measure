@@ -58,6 +58,21 @@ numerics:
 """
 
 
+@pytest.mark.parametrize("floor", [0.0, 0.25])
+def test_projection_floor_accepts_finite_probability_threshold(floor):
+    document = yaml.safe_load(DOCUMENT)
+    document["numerics"]["projection_prune_floor"] = floor
+    assert _parse(document).numerics.projection_prune_floor == floor
+
+
+@pytest.mark.parametrize("floor", [-0.1, 1.0, float("inf"), float("nan")])
+def test_projection_floor_rejects_invalid_probability_threshold(floor):
+    document = yaml.safe_load(DOCUMENT)
+    document["numerics"]["projection_prune_floor"] = floor
+    with pytest.raises(ValueError, match="numerics.projection_prune_floor"):
+        _parse(document)
+
+
 def test_optional_drift_validates_log_ou_parameters_and_positive_loss():
     document = yaml.safe_load(DOCUMENT)
     document["chip"]["qubit"].update(q_cap=1e6, xqp=1e-7, aphi=1e-6)

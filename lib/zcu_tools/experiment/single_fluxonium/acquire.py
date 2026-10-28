@@ -25,6 +25,7 @@ from zcu_tools.simulate.adc import (
 from zcu_tools.simulate.evolution import PathDiagnostics
 
 from . import replay
+from .projection import ProjectionDiagnostics
 
 if TYPE_CHECKING:
     from .runtime import SingleFluxoniumSource
@@ -35,8 +36,11 @@ class SingleFluxoniumPreparation:
     """Noiseless acquisition inputs retained across rounds, never measured IQ.
 
     key: content digest including settings, snapshot, controls and layout.
-    populations: read-only (*point_dims,states) DC-state probabilities after ADC
-        normalization. channel: ADC conditional sums with matching state order.
+    populations: read-only (*point_dims,states) terminal DC-state marginals after
+        ADC normalization. channels: event-aligned ADC conditional sums in
+        preflight receiver order. channel selects the sole standalone receiver.
+    raw.readout keeps full projection histories and event populations; sampling
+        must use it, not reconstruct independent events from the marginals.
     raw: immutable deferred physical-shot inputs, without a round RNG identity.
     paths: evolution-owned diagnostics, repeated on valid noiseless reuse.
     This record keeps physical and ADC state order together for Source/Acquire.
@@ -44,9 +48,21 @@ class SingleFluxoniumPreparation:
 
     key: bytes
     populations: NDArray[np.float64]
-    channel: ChannelReadout
+    channels: tuple[ChannelReadout, ...]
     raw: PreparedRawShots
     paths: PathDiagnostics
+    reuse_keys: tuple[bytes, ...]
+    """All evolution span digests requiring current Engine routing validation."""
+
+    @property
+    def channel(self) -> ChannelReadout:
+        """Return the sole ADC; raise ValueError for multi-receiver preparation."""
+        if len(self.channels) != 1:
+            raise ValueError("multi-ADC preparation requires channels, not channel")
+        return self.channels[0]
+
+    projection_diagnostics: ProjectionDiagnostics | None = None
+    """Per-point retained histories/pruned mass, or None without projection."""
 
 
 class SingleFluxoniumAcquire:
@@ -93,7 +109,7 @@ class SingleFluxoniumAcquire:
         prepared = owner.prepare(acquire, snapshot, cancel=cancel)
         if acquire.mode == "integrated":
             statistics = round_statistics(
-                prepared.populations,
+                prepared.raw.readout,
                 (prepared.channel,),
                 reps=acquire.reps,
                 seed=acquire.root_seed,
@@ -105,7 +121,7 @@ class SingleFluxoniumAcquire:
             )
         else:
             traces = sample_traces(
-                prepared.populations,
+                prepared.raw.readout,
                 dict(prepared.raw.batches),
                 reps=acquire.reps,
                 identity=SamplingIdentity(
