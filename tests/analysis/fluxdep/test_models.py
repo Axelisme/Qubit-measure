@@ -12,7 +12,6 @@ from zcu_tools.analysis.fluxdep.search_models import (
     compile_transitions,
     count_max_evals,
 )
-from zcu_tools.analysis.fluxdep.search_njit import energy2linearform_nb
 
 
 def test_required_levels_expand_high_order_frequencies_and_labels():
@@ -38,6 +37,9 @@ def test_required_levels_preserve_basic_and_ignore_empty_dynamic_choices():
 
 
 def _check_matches(transitions, energies):
+    # Explicit Numba signatures compile on import; defer until a kernel is used.
+    from zcu_tools.analysis.fluxdep.search_njit import energy2linearform_nb
+
     B_py, C_py = energy2linearform(energies, transitions)
     pairs, coeffs, offsets = compile_transitions(transitions, energies.shape[1])
     B_nb, C_nb = energy2linearform_nb(energies, pairs, coeffs, offsets)
@@ -118,6 +120,8 @@ def test_mirror_without_sample_f_or_r_f_raises_consistently():
 
 
 def test_nb_empty_transitions_k_zero():
+    from zcu_tools.analysis.fluxdep.search_njit import energy2linearform_nb
+
     energies = np.zeros((5, 4), dtype=np.float64)
     pairs, coeffs, offsets = compile_transitions({}, 4)
     assert pairs.shape == (0, 2)
