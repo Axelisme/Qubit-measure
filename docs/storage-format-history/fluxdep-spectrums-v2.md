@@ -38,11 +38,11 @@ Reader 只接受 v2。舊檔會報錯並列出升級命令。
 
 ```bash
 uv run --directory . --no-sync -- python scripts/upgrade_spectrums.py /path/spectrums.hdf5
-uv run --directory . --no-sync -- python scripts/upgrade_spectrums.py /path/spectrums.hdf5 --apply
+uv run --directory . --no-sync -- python scripts/upgrade_spectrums.py /path/spectrums.hdf5 --apply --backup-root /archive
 ```
 
 CLI 逐位置列出變更。預設不寫檔。
 套用時保留 period 與所有陣列，計算 `offset = 0.5 - flux_half / flux_period`，移除舊 calibration datasets。
-CLI 先驗證候選檔，再建立相鄰且不覆寫的 `.bak` 原始 bytes 備份，最後原子替換原路徑。
+CLI 先檢查外部備份位置，再驗證候選檔。它在資料專案旁的 `<專案根>-backup/` 建立鏡像路徑，以 UUID `.bak` 保存原始 bytes，最後原子替換原路徑。`--backup-root` 可覆寫；不在 `result`／`Database` 下的來源必須提供此選項。定位與安全拒絕規則見 [備份位置](../parameter-upgrades.md#備份位置)。
 已是 v2 的檔案通過驗證後跳過。壞檔維持原樣，其他輸入繼續處理，任一拒絕使命令回傳 1。
 還原時先停止使用該檔案，再將報告中的 `.bak` 複製回原路徑。

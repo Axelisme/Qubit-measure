@@ -13,6 +13,7 @@ from zcu_tools.notebook.analysis.t1_curve import (
     load_t1_curve_context,
     plot_t1_curve_data,
     prepare_t1_curve_data,
+    save_t1_curve_figure,
 )
 from zcu_tools.resources.qubit_params import FluxDepFit, QubitParams
 
@@ -23,6 +24,35 @@ def sample_dir(tmp_path: Path) -> Path:
         FluxDepFit(EJ=3.4, EC=0.9, EL=0.6, flux_half=0, flux_int=0.5, flux_period=1)
     )
     return tmp_path
+
+
+@pytest.mark.parametrize("custom_images", [False, True])
+def test_load_leaves_input_tree_unchanged(
+    sample_dir: Path, custom_images: bool
+) -> None:
+    pd.DataFrame({"t1_us": [40]}).to_csv(sample_dir / "samples.csv", index=False)
+    before = set(sample_dir.rglob("*"))
+    images = sample_dir / "nested" / "images" if custom_images else None
+    context = load_t1_curve_context(
+        result_dir=str(sample_dir),
+        fluxs=np.array([0.51]),
+        image_dir=str(images) if images else None,
+    )
+    assert context.image_dir == str(images or sample_dir / "t1_curve")
+    assert set(sample_dir.rglob("*")) == before
+
+
+def test_save_creates_output_directory_only_when_writing(sample_dir: Path) -> None:
+    pd.DataFrame({"t1_us": [40]}).to_csv(sample_dir / "samples.csv", index=False)
+    context = load_t1_curve_context(result_dir=str(sample_dir), fluxs=np.array([0.51]))
+    fig, ax = plt.subplots()
+    ax.plot([0, 1], [1, 2])
+    try:
+        saved = save_t1_curve_figure(fig, context, "curve.png", show=False)
+        assert Path(saved) == sample_dir / "t1_curve" / "curve.png"
+        assert Path(saved).read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
+    finally:
+        plt.close(fig)
 
 
 @pytest.mark.parametrize("csv_flux", [None, [0.8]])

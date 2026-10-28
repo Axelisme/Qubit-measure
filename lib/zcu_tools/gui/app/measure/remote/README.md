@@ -1,6 +1,6 @@
 # `gui.app.measure.remote`
 
-**Last updated:** 2026-10-27
+**Last updated:** 2026-10-28
 
 **讀者：** framework-dev。量測 GUI 的 RPC 方法、控制權與來源投影契約。
 
@@ -49,10 +49,14 @@ observations are not part of this projection. This wire-contract change advances
 
 ## Saved results
 
-`results.list()` returns `{runs: [...]}` from a fresh project-wide Database
+`results.list()` returns `{runs: [...], issues: [...]}` from a fresh project-wide Database
 snapshot through `Controller.query_results() -> ResultsIndex`, the same query
 used by the results browser. It needs neither an opened entry nor a selected
-point and does not switch either. Missing Database returns an empty list.
+point and does not switch either. Missing Database returns empty runs and issues.
+Top-level issues contain `entry`, absolute `path` and `reason` for Database items
+that could not be safely enumerated. `entry` is null for a Database root error.
+Escaping paths are not followed and do not hide healthy entries. Setup and ledger
+errors stay in the affected runs' issues; failed ledgers leave runs unregistered.
 
 Each run includes opaque `key`, `entry`, historical `run_id`, `experiment`,
 `point`, captured `roles`, `at`, `registered`, absolute `run_path`,
@@ -308,6 +312,15 @@ Form input, values and errors, and neither changes global aliases. Source events
 do not refresh existing tabs. Recipe aliases continue through Reset, not Run.
 The Form owner defines these rules; RPC forwards them without a second evaluator
 or implicit refresh. See [ADR-0065](../../../../../../docs/adr/0065-cfg-editing.md).
+
+## Point availability
+
+`point.list` refreshes each point independently. Each row contains `label`,
+`description`, `available` and `error`. Description reads only `general.description`.
+The independent parameter probe uses the owner's current schema policy and component
+models. It does not read library or aliases. Invalid parameters produce an unavailable
+row with the failed document path and diagnostic in `error`; healthy rows have
+`available=true` and `error=null`. Directory discovery errors still fail the request.
 
 ## Point-file reload and guarded writes
 

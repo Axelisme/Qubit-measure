@@ -3,7 +3,15 @@
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, JsonValue, StrictInt
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    JsonValue,
+    StrictInt,
+    TypeAdapter,
+    field_validator,
+)
 
 from ._analysis_file import load_file, save_file
 from .analysis_source import AnalysisSource
@@ -53,17 +61,69 @@ class DispersiveFile(BaseModel):
     source: AnalysisSource
 
 
-def load_dispersive_file(path: Path) -> DispersiveFile:
+class DispersiveParamsView(BaseModel):
+    """Read projection with GHz resonator seeds and deferred coupling validation.
+
+    bare_rf and plot_transitions.r_f are nullable finite GHz seeds. g retains
+    opaque JSON until require_g is called. Unknown parameter keys are ignored.
+    """
+
+    model_config = ConfigDict(strict=True, extra="ignore", allow_inf_nan=False)
+    g: JsonValue = None
+    bare_rf: float | None = None
+    plot_transitions: PlotTransitions = Field(default_factory=PlotTransitions)
+
+    def require_g(self) -> float:
+        """Return finite coupling in GHz; missing, null or invalid g raises ValueError."""
+        if self.g is None:
+            raise ValueError("params.g is required")
+        try:
+            return TypeAdapter(
+                float, config=ConfigDict(strict=True, allow_inf_nan=False)
+            ).validate_python(self.g)
+        except ValueError as error:
+            raise ValueError(f"params.g: {error}") from error
+
+
+class DispersiveFileView(BaseModel):
+    """Artifact read projection; strict format/version, optional provenance.
+
+    params validates resonator seeds, deferring g until require_g. source is None
+    when absent or unparseable, including timezone-free timestamps. Parseable
+    source text is preserved. Unknown envelope fields are ignored.
+    """
+
+    model_config = ConfigDict(strict=True, extra="ignore")
+    format: Literal["zcu.dispersive"]
+    version: StrictInt = Field(ge=1, le=1)
+    params: DispersiveParamsView
+    source: AnalysisSource | None = None
+
+    @field_validator("source", mode="before")
+    @classmethod
+    def optional_source(cls, value: object) -> AnalysisSource | None:
+        """Keep parseable evidence; unrelated malformed provenance stays unknown."""
+        try:
+            return AnalysisSource.model_validate(value, extra="ignore")
+        except ValueError:
+            return None
+
+
+def load_dispersive_file(path: Path) -> DispersiveFileView:
     """Read exact path as zcu.dispersive v1 without changing it.
 
     Raise ValueError for invalid JSON/schema, FileNotFoundError for missing
     files; other I/O errors propagate. Unknown values stay null/absent and no
-    source metadata or physical completeness is inferred.
+    source metadata or physical completeness is inferred. Missing/unparseable
+    source, including naive timestamps, becomes None. Unknown keys are ignored.
+    Coupling g is validated only when params.require_g() is called.
     """
-    return load_file(path, DispersiveFile)
+    return load_file(path, DispersiveFileView)
 
 
-def save_dispersive_file(path: Path, document: DispersiveFile) -> None:
+def save_dispersive_file(
+    path: Path, document: DispersiveFile | DispersiveFileView
+) -> None:
     """Validate and atomically replace exact path; its parent must exist.
 
     Preserve explicit nulls, omitted content fields, transition annotations and
@@ -72,4 +132,5 @@ def save_dispersive_file(path: Path, document: DispersiveFile) -> None:
     before replacement and cleaning the sibling temporary. No multiwriter lock,
     cross-file transaction or power-loss durability is provided.
     """
-    save_file(path, document, DispersiveFile)
+    validated = DispersiveFile.model_validate(document.model_dump(exclude_unset=True))
+    save_file(path, validated, DispersiveFile)

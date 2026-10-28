@@ -130,6 +130,7 @@ class ParameterContext:
         self._roles = deepcopy(roles)
         self._source_faults = deepcopy(source_faults)
         self._storage = storage
+        self._alias_error: Exception | None = None
         self._aliases = (
             AliasTable(self._roles.aliases)
             if self._roles is not None and self._roles.aliases is not None
@@ -178,6 +179,7 @@ class ParameterContext:
         None means no consumer declarations.
         """
         if self._aliases is not None and self._roles is not None:
+            self._ensure_aliases_readable()
             self._ensure_readable()
             names = self._aliases.names(self._point, self._roles.declarations)
             return RoleBinding(None, self._roles.declarations, names)
@@ -185,7 +187,8 @@ class ParameterContext:
 
     @property
     def aliases(self) -> tuple[AliasRow, ...]:
-        """Return fixed authored alias rows; empty means none were captured."""
+        """Return fixed authored rows, or raise the captured alias-file error."""
+        self._ensure_aliases_readable()
         return () if self._aliases is None else self._aliases.rows
 
     def resolved_aliases(self) -> tuple[ResolvedAliasRow, ...]:
@@ -198,6 +201,7 @@ class ParameterContext:
         Reads neither live aliases nor files and never materializes assets.
         """
         self._ensure_readable()
+        self._ensure_aliases_readable()
         if self._aliases is None:
             return ()
         rows: list[ResolvedAliasRow] = []
@@ -255,6 +259,10 @@ class ParameterContext:
         if self._source_faults:
             raise ContextSourceUnavailableError(self._source_faults)
 
+    def _ensure_aliases_readable(self) -> None:
+        if self._alias_error is not None:
+            raise self._alias_error
+
     def document(self) -> PointDocument:
         """Copy the fixed point without I/O or model hooks; unavailable sources raise."""
         self._ensure_readable()
@@ -264,6 +272,8 @@ class ParameterContext:
         self,
         rows: tuple[AliasRow, ...],
         declarations: Mapping[str, RoleSpec],
+        *,
+        alias_error: Exception | None = None,
     ) -> ParameterContext:
         """Return a fixed capture of authored aliases and consumer kind rules.
 
@@ -271,16 +281,20 @@ class ParameterContext:
         until used; reads report RoleResolutionError naming the alias. Use $
         for aliases and bare paths for concrete components. Declaration.via and
         focus never infer aliases. Point/library/target/storage stay at this
-        capture's origin. Unavailable sources and invalid rows propagate.
+        capture's origin. alias_error retains a file failure for alias consumers
+        only; concrete reads remain available. Unavailable sources and invalid
+        rows propagate.
         """
         self._ensure_readable()
-        return ParameterContext(
+        captured = ParameterContext(
             point=self._point,
             library=self._library,
             target=self._target,
             roles=RoleBinding(None, declarations, {}, aliases=rows),
             storage=self._storage,
         )
+        captured._alias_error = alias_error
+        return captured
 
     def bind_roles(
         self,
@@ -342,6 +356,7 @@ class ParameterContext:
 
     def _alias_value(self, alias: str) -> AliasValue:
         self._ensure_readable()
+        self._ensure_aliases_readable()
         spec = self._roles.declarations.get(alias) if self._roles is not None else None
         if self._aliases is not None:
             if spec is not None:

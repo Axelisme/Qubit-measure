@@ -49,8 +49,8 @@ Setup 與 ledger 仍寫入，既有 predictor 保持原樣。
 在 checkout 根目錄執行同一個 component 升級入口，預設只列預覽：
 
 ```bash
-uv run --no-sync -- python scripts/upgrade_parameters.py Result/<entry>
-uv run --no-sync -- python scripts/upgrade_parameters.py Result/<entry> --apply
+uv run --no-sync -- python scripts/upgrade_parameters.py result/<entry>
+uv run --no-sync -- python scripts/upgrade_parameters.py result/<entry> --apply
 ```
 
 Entry 範圍包含 setup、各 point 的 component YAML 與 `predictors/*.json`。
@@ -69,7 +69,7 @@ unit = {"unnamed_device": flux_unit 或 "native"}
 半通量、period 或 bias 缺失、非有限，以及 period 為零的 v1 都會拒絕升級，
 不替未知校準補預設值。已是 v2 的檔案驗證後跳過，未來版本拒絕處理。
 
-`--apply` 在替換每個有效舊檔前，先建立 `<file>.<unique>.bak` 保存原始 bytes。
+`--apply` 在替換每個有效舊檔前，先在資料專案旁的 `<專案根>-backup/` 建立鏡像路徑，檔名加 `<unique>.bak` 保存原始 bytes，不寫進 entry。`--backup-root` 可覆寫，standalone 來源必須提供此選項。定位與安全拒絕規則見 [備份位置](../parameter-upgrades.md#備份位置)。
 單檔替換採 sibling temporary 與 atomic replace。每份檔案獨立報告
 dry-run、applied、skipped 或 rejected，一份失敗不阻止其他檔案。
 這不是多檔交易或掉電持久保證。還原時停止使用該檔，將報告中的 backup 複製回原路徑。

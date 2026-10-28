@@ -31,7 +31,7 @@ from zcu_tools.analysis.fluxdep.models import DeviceSnapshotValue, PointsData
 from zcu_tools.analysis.spectrum import SpectrumData, format_rawdata
 from zcu_tools.datafile import Container, LabberData
 from zcu_tools.device import snapshot_scalar_values
-from zcu_tools.experiment.native_persistence import metadata_from_container
+from zcu_tools.experiment.native_persistence import device_snapshot_from_container
 from zcu_tools.gui.app.analysis_project.flux import (
     ComponentFluxProvider,
     component_flux_context,
@@ -167,7 +167,7 @@ class LoadService:
                     reason_code="unknown_device",
                 )
             if "metadata" in source.docs:
-                snapshot = metadata_from_container(source).device_snapshot
+                snapshot = device_snapshot_from_container(source)
                 if snapshot is not None:
                     scalars = snapshot_scalar_values(
                         snapshot, context.units if context is not None else [device]

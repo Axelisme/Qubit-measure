@@ -42,7 +42,9 @@ class ExportService:
         document = DispersiveFile(
             format="zcu.dispersive",
             version=1,
-            params=params.model_copy(update={"g": fit.g, "bare_rf": fit.bare_rf}),
+            params=DispersiveParams(
+                g=fit.g, bare_rf=fit.bare_rf, plot_transitions=params.plot_transitions
+            ),
             source=AnalysisSource(
                 run_id=None, created_at=datetime.now(timezone.utc).isoformat()
             ),

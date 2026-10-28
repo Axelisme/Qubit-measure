@@ -53,26 +53,47 @@ def test_alias_round_trip_keeps_setup_and_points_independent(
 
 
 @pytest.mark.parametrize("operation", ["load", "save"])
-@pytest.mark.parametrize(
-    "label,error",
-    [
-        ("../escape", ValueError),
-        ("missing", FileNotFoundError),
-        ("partial", FileNotFoundError),
-    ],
-)
-def test_point_alias_io_requires_a_safe_complete_point(
-    entry: ResultEntry, operation: str, label: str, error: type[Exception]
+def test_point_alias_io_rejects_unsafe_labels(
+    entry: ResultEntry, operation: str
+) -> None:
+    if operation == "load":
+        with pytest.raises(ValueError, match="name"):
+            entry.load_aliases(point="../escape")
+    else:
+        with pytest.raises(ValueError, match="name"):
+            entry.save_aliases(EntryAliases(aliases={}), point="../escape")
+
+
+def test_point_alias_load_reads_only_the_selected_alias_file(
+    entry: ResultEntry, authored: EntryAliases
+) -> None:
+    directory = entry.result_path / "points" / "orphan"
+    directory.mkdir()
+    save_entry_aliases(directory / "aliases.yaml", authored)
+    assert entry.load_aliases(point="orphan") == authored
+    assert entry.load_aliases(point="absent") == EntryAliases(aliases={})
+    assert not (entry.result_path / "points/absent").exists()
+
+
+def test_point_alias_save_needs_parameters_but_not_library(
+    entry: ResultEntry, authored: EntryAliases
 ) -> None:
     directory = entry.result_path / "points" / "partial"
     directory.mkdir()
-    (directory / "point.yaml").write_text("{}\n", encoding="utf-8")
-    if operation == "load":
-        with pytest.raises(error):
-            entry.load_aliases(point=label)
-    else:
-        with pytest.raises(error):
-            entry.save_aliases(EntryAliases(aliases={}), point=label)
+    source = directory / "point.yaml"
+    source.write_text("{}\n", encoding="utf-8")
+    entry.save_aliases(authored, point="partial")
+    assert entry.load_aliases(point="partial") == authored
+    assert source.read_text(encoding="utf-8") == "{}\n"
+    assert not (directory / "module_cfg.yaml").exists()
+    source.unlink()
+    before = (directory / "aliases.yaml").read_bytes()
+    with pytest.raises(FileNotFoundError):
+        entry.save_aliases(EntryAliases(aliases={}), point="partial")
+    assert (directory / "aliases.yaml").read_bytes() == before
+    with pytest.raises(FileNotFoundError):
+        entry.save_aliases(authored, point="absent")
+    assert not (entry.result_path / "points/absent").exists()
 
 
 def test_point_aliases_accept_forward_minor_and_preserve_raw_rows(
