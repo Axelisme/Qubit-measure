@@ -48,9 +48,11 @@ You may select a candidate manually after inspecting the model and raw IQ.
 
 Analysis and writeback use the fixed parameter source of the selected Run or Load result. Run keeps the source used for that measurement.
 
-For a file from the same opened entry, Load reads the current persisted values at the file's historical point, using its role assignments. It does not use the tab's Open/Reset aliases or restore an unsaved historical parameter version. Files from another entry or without a point have no parameter source for analysis or writeback. Analysis that needs no such source remains available.
+Load uses the parameter and library content saved in data.h5, without reading the historical point or live Form. Preview and Apply target the GUI's currently selected point. Select a point before applying.
 
-Writeback targets `$qubit.ext.readout_cal` for the source qubit when that source is available. Primary analysis proposes `fidelity`, `sigma`, `g_center` and `e_center`. Post-Analysis proposes `radius` and `confusion_matrix`. The centres are complex IQ coordinates and the confusion matrix is a nested list. Existing proposals stay attached to that qubit when point or focus changes.
+Writeback resolves the Run's `$resonator.module.readout` slot to its library module. Primary proposes a circle classifier with g/e centers. Post proposes centers, radius and the 3x3 prepared-to-measured confusion matrix. Centers and radius use raw ADC sums divided by integration length without IQ-offset subtraction. Fidelity and sigma are not stored. The proposal preserves waveform keys and rejects readout settings that differ from the captured library module, apart from classifier. Equal materialized settings are accepted even if the Run used an inline copy or another key.
+
+A batch applies Primary before Post and leaves the complete classifier. Separate Apply calls use the last replacement. Applying Primary after Post clears radius and matrix; apply Post again before a measurement that needs radius. Old point calibration values are not read or migrated. Re-run GE after this update.
 
 ## Recommended
 
@@ -66,7 +68,7 @@ Histogram fitting remains internal, so histogram log scale does not change the s
 Two separated IQ clouds indicate readout separation.
 Use Post-Analysis to inspect the classified shots and 3x3 confusion diagnostic derived from the primary fit.
 
-**Last updated:** 2026-10-21
+**Last updated:** 2026-10-29
 
 ## Four starting situations
 

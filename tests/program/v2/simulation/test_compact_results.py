@@ -4,6 +4,7 @@ from dataclasses import replace
 
 import numpy as np
 import pytest
+from zcu_tools.cfg_model import CircleClassifier
 from zcu_tools.core.simulation import (
     ChannelStatistics,
     RoundRequest,
@@ -163,7 +164,12 @@ def test_shot_processing_uses_materialized_statistics(processing):
         result = prog.acquire(env.soc, progress=False, threshold=12.5)
     elif processing == "classification":
         result = prog.acquire(
-            env.soc, progress=False, g_center=10 - 1j, e_center=11 - 1j, ge_radius=0.1
+            env.soc,
+            progress=False,
+            classify={
+                ch: CircleClassifier(g_center=10 - 1j, e_center=11 - 1j, radius=0.1)
+                for ch in (1, 0)
+            },
         )
     else:
         result = prog.acquire(env.soc, progress=False, trackers=[Tracker(), Tracker()])

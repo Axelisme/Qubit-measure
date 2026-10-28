@@ -5,6 +5,29 @@ from typing import Any, Literal, Protocol
 
 import numpy as np
 from numpy.typing import NDArray
+from zcu_tools.cfg_model import CircleClassifier
+from zcu_tools.program.v2.modules.readout import PulseReadoutCfg, ReadoutCfg
+
+
+def readout_confusion_matrix(cfg: ReadoutCfg | None) -> NDArray[np.float64] | None:
+    """Read saved single-qubit circle correction, never point calibration.
+
+    Missing historical cfg/classifier/matrix skips correction. Linear has no
+    other state and cannot correct a three-state T1 analysis. MuxReadout declares
+    ADCs in tone order; raw_population_signal reads its first result, so use
+    tones[0], not the lowest ADC number. Radius is only needed during acquisition.
+    """
+    if cfg is None:
+        return None
+    classifier = (
+        cfg.classifier if isinstance(cfg, PulseReadoutCfg) else cfg.tones[0].classifier
+    )
+    if classifier is None:
+        return None
+    if not isinstance(classifier, CircleClassifier):
+        raise ValueError("T1 requires other; linear classifier has only g/e states")
+    matrix = classifier.confusion_matrix
+    return None if matrix is None else np.asarray(matrix, dtype=np.float64)
 
 
 def ge_signals_by_state(

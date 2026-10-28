@@ -17,6 +17,7 @@ from zcu_tools.format_version import YamlValue
 from zcu_tools.resources.parameter_fields import (
     mapping_shape,
     model_field_schema,
+    sequence_index,
     sequence_shape,
 )
 
@@ -223,15 +224,11 @@ def projection_child(value: object, segment: str) -> object:
             return (value.model_extra or {})[segment]
     elif segment and isinstance(value, Mapping) and segment in value:
         return value[segment]
-    elif (
-        isinstance(value, (list, tuple))
-        and segment.isascii()
-        and segment.isdecimal()
-        and (segment == "0" or not segment.startswith("0"))
-        and len(segment) <= len(str(len(value)))
-        and int(segment) < len(value)
-    ):
-        return value[int(segment)]
+    elif isinstance(value, (list, tuple)):
+        try:
+            return value[sequence_index(value, segment)]
+        except ValueError as exc:
+            raise ProjectionPathError(segment) from exc
     raise ProjectionPathError(segment)
 
 

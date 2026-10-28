@@ -1,6 +1,6 @@
 # `zcu_tools.resources` experiment work resources
 
-**Last updated:** 2026-10-28（backup root naming）
+**Last updated:** 2026-10-29
 
 **讀者：** framework-dev。實驗資源的 scope、讀寫與持久化 owner 導覽。
 
@@ -59,7 +59,11 @@ Load 讀 caller 指定的 exact path，缺檔與格式錯誤直接拋出。Save 
 
 ## Point 欄位視圖
 
-`parameter_fields.py` 集中 FieldView 與完整 caller-model candidate 驗證。Entry 的 setup／point 視圖重用 FieldView、stage_model 與 metadata 讀寫，並使用 2.0 header 契約。`parameter_metadata.py` 擁有 opaque mapping 讀寫與 2.x header 拒絕契約。這些機制不解釋 metadata 的科學意義。
+`parameter_fields.py` 集中 FieldView 與完整 caller-model candidate 驗證。
+`set_model_value` 可沿 model／mapping 欄位與既有 list 的 canonical 非負 ASCII index 寫入 detached candidate。
+數字 mapping key 仍是 key。Setter 不建容器、不 append／insert、不接受 slice 或負索引，也不寫 tuple／ndarray。
+`sequence_index` 只驗 canonical index 與界限，供 setter 與 projection reader 共用；reader 保留 tuple／ndarray 讀取。
+複數仍交既有 codec，發布前由 caller 完整驗證 model。Entry 的 setup／point 視圖重用 FieldView、stage_model 與 metadata 讀寫，並使用 2.0 header 契約。`parameter_metadata.py` 擁有 opaque mapping 讀寫與 2.x header 拒絕契約。這些機制不解釋 metadata 的科學意義。
 
 ## Scope 差別
 

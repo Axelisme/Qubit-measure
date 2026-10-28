@@ -8,6 +8,28 @@
 `items.py` 定義 adapter 的可變 proposals；`contracts.py` 定義 owner 的 edit、preview 與 submission records。
 `service.py` 保留 draft 生命週期、ID 檢查與寫入執行，也繼續匯出既有公開型別。
 
+## Complete module proposals
+
+`calibrated_module_writeback(parameters, tested_module, target=...,
+description=..., field_updates=...)` builds one complete `ModuleWriteback`.
+The caller supplies a read-only Run/Load ParameterContext, the native tested
+module cfg, and exact dotted Spec paths with new values.
+The builder resolves the captured slot, copies `LibrarySnapshot.module_spec()`,
+and materializes `get_module()` through the existing native converter.
+It compares every other field and reports differing dotted paths.
+Equivalent inline values or different child keys with equal materialized values
+are accepted. The proposal preserves the library's original child keys.
+
+Only the exact updated paths are excluded from comparison. Updating
+`tones.1.classifier` still checks that tone's frequency and ADC.
+`resources.parameter_fields.set_model_value` writes existing indexed elements;
+Spec validation remains with cfg_model. The builder has no classifier policy.
+It does not read the live target, write files or change Apply semantics.
+
+Primary and Post remain complete replacements. One batch accepts Primary before
+Post. Separate Apply calls use the last replacement, so applying center-only
+Primary after Post removes radius and matrix. Library stores no provenance.
+
 ## Dialog lifetime
 
 The ledger owns a LifetimeScope and retires all open scalar/module editors when

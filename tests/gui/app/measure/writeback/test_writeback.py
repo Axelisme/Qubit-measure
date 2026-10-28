@@ -5,12 +5,20 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from zcu_tools.cfg_model import ArbWaveformCfg, ConstWaveformCfg, PulseSpec
+from zcu_tools.cfg_model import (
+    ArbWaveformCfg,
+    CircleClassifier,
+    ConstWaveformCfg,
+    PulseReadoutSpec,
+    PulseSpec,
+)
+from zcu_tools.gui.app.measure import writeback
 from zcu_tools.gui.app.measure.writeback import (
     ModuleWriteback,
     ParameterWriteback,
     RecordWriteback,
     WritebackEdit,
+    WritebackSelection,
     WritebackService,
     WritebackWritten,
 )
@@ -23,6 +31,7 @@ from zcu_tools.gui.session.library_entry import LibraryEntryInvalid, ModuleEntry
 from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.state import SessionState
 from zcu_tools.gui.session.types import SessionEnv
+from zcu_tools.program.v2.modules import ModuleCfgFactory
 from zcu_tools.resources.entry import ResultEntry, document_meta
 from zcu_tools.resources.entry.ledger_models import JsonObject
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
@@ -69,6 +78,157 @@ def session(tmp_path: Path):
         assert registry_state() == installed
     finally:
         restore_registry(before)
+
+
+@pytest.fixture
+def readout_source(session):
+    _entry, control, _service = session
+    captured = control.read_context()
+    target = require_target(captured)
+    control.set_module(
+        target,
+        "Q1.readout.main",
+        PulseReadoutSpec(
+            gen_ch=0,
+            nqz=1,
+            freq=100.0,
+            gain=0.1,
+            ro_ch=0,
+            ro_length=1.0,
+            waveform=WAVEFORM,
+        ),
+    )
+    captured = control.read_context()
+    tested = ModuleCfgFactory.from_core(
+        captured.library.get_module("Q1.readout.main"), context=None
+    )
+    return captured, tested
+
+
+def test_calibration_proposal_preserves_library_children_and_ignores_replaced_field(
+    session, readout_source
+):
+    _entry, control, service = session
+    captured, tested = readout_source
+    calibration = CircleClassifier(g_center=0j, e_center=1 + 0j)
+    item = writeback.calibrated_module_writeback(
+        captured,
+        tested,
+        target="Q1.readout.main",
+        description="Centers",
+        field_updates={"classifier": calibration},
+    )
+    draft = service.create_draft(
+        [item], parameters=captured, experiment_name="synthetic"
+    )
+    service.apply_draft(draft)
+    actual = control.read_context().library.module_spec("Q1.readout.main")
+    assert isinstance(actual, PulseReadoutSpec)
+    assert actual.waveform == WAVEFORM
+    assert actual.classifier == calibration
+    assert (
+        captured.library.module_spec("Q1.readout.main").to_dict().get("classifier")
+        is None
+    )
+
+
+def test_calibration_proposal_rejects_changed_tested_fields(readout_source):
+    captured, tested = readout_source
+    tested.gain = 0.2
+    tested.waveform.length = 2.0
+    with pytest.raises(ValueError, match=r"gain.*waveform.length"):
+        writeback.calibrated_module_writeback(
+            captured,
+            tested,
+            target="Q1.readout.main",
+            description="Centers",
+            field_updates={
+                "classifier": CircleClassifier(g_center=0j, e_center=1 + 0j)
+            },
+        )
+
+
+@pytest.mark.parametrize("mode", ["batch", "primary-post", "post-primary"])
+def test_complete_classifier_replacements_follow_apply_order(
+    session, readout_source, mode
+):
+    _entry, control, service = session
+    captured, tested = readout_source
+    primary = CircleClassifier(g_center=0j, e_center=1 + 0j)
+    post = primary.with_updates(
+        radius=0.5,
+        confusion_matrix=[
+            [0.9, 0.05, 0.05],
+            [0.05, 0.9, 0.05],
+            [0.1, 0.1, 0.8],
+        ],
+    )
+    drafts = [
+        service.create_draft(
+            [
+                writeback.calibrated_module_writeback(
+                    captured,
+                    tested,
+                    target="Q1.readout.main",
+                    description="Calibration",
+                    field_updates={"classifier": calibration},
+                ),
+            ],
+            parameters=captured,
+            experiment_name="synthetic",
+        )
+        for calibration in (primary, post)
+    ]
+    if mode == "batch":
+        service.accept_drafts(
+            tuple(WritebackSelection(draft, ("ml-1",)) for draft in drafts)
+        )
+    else:
+        for index in (0, 1) if mode == "primary-post" else (1, 0):
+            service.apply_draft(drafts[index])
+    actual = control.read_context().library.module_spec("Q1.readout.main")
+    assert isinstance(actual, PulseReadoutSpec)
+    assert actual.classifier == (primary if mode == "post-primary" else post)
+    assert actual.waveform == WAVEFORM
+
+
+def test_indexed_proposal_changes_only_selected_element_and_checks_its_siblings(
+    session,
+):
+    from zcu_tools.cfg_model import MuxReadoutSpec
+
+    from tests.program.v2._mux_support import native_mux
+
+    _entry, control, _service = session
+    tested = native_mux((4, 1))
+    original = CircleClassifier(g_center=2 + 0j, e_center=3 + 0j, radius=0.5)
+    tested.tones[1].classifier = original
+    capture = control.read_context()
+    control.set_module(
+        require_target(capture),
+        "Q1.readout.mux",
+        MuxReadoutSpec.model_validate(tested.to_dict()),
+    )
+    capture = control.read_context()
+    updated = CircleClassifier(g_center=0j, e_center=1 + 0j, radius=0.5)
+    item = writeback.calibrated_module_writeback(
+        capture,
+        tested,
+        target="Q1.readout.mux",
+        description="Tone calibration",
+        field_updates={"tones.0.classifier": updated},
+    )
+    assert isinstance(item.proposal, MuxReadoutSpec)
+    assert [tone.classifier for tone in item.proposal.tones] == [updated, original]
+    tested.tones[0].freq += 1.0
+    with pytest.raises(ValueError, match=r"tones.0.freq"):
+        writeback.calibrated_module_writeback(
+            capture,
+            tested,
+            target="Q1.readout.mux",
+            description="Tone calibration",
+            field_updates={"tones.0.classifier": updated},
+        )
 
 
 @pytest.mark.parametrize("kind", ["parameter", "module", "record"])
