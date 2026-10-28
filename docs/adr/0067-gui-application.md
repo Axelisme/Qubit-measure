@@ -6,7 +6,7 @@ status: accepted
 
 **狀態：** accepted。
 
-**Last updated:** 2026-10-22，workflow 嵌入 measure 與 headless owner；獨立 SoC dialog 與窄 control facets；predictor 與 experiment figure area 的控件 owner；腳本 session 所有權、動態資源與儀器 adapter 邊界
+**Last updated:** 2026-10-29，workflow 嵌入 measure 與 headless owner；獨立 SoC dialog 與窄 control facets；predictor 與 experiment figure area 的控件 owner；腳本 session 所有權、動態資源與儀器 adapter 邊界
 
 ## 問題與決策
 
@@ -51,7 +51,7 @@ Setup 等 shared dialog 只依賴窄 control facet 表達一般能力（開啟 e
 
 Measure 的 library editor 交未 lower 的 schema 與固定 ParameterContext。ContextService 透過 app 注入的 callbacks 準備 ModuleSpec／WaveformSpec，再提交一筆 library structure change。Rename 不級聯修改其他引用。
 
-WritebackService 先以分析來源的固定 capture 解析與 lower 全部選定 proposals，再依提案順序交 concrete items 給 `ContextService.apply_writeback`。此入口驗證固定 SavedPoint、綁定資源並交 resources 共用 executor。未選工作點時，application 在 append 前沿 no_context 拒絕，提示先選或建立工作點。同 entry 選取其他 point 只允許命令開始，不改 captured SavedPoint 的寫入目的地；跨 entry 仍拒絕。Executor 追加 accepted 後依序提交 point 組、library 組與逐筆 samples，組內保留提案順序。任一項無效整組不寫，首錯停止，保留已提交組與事件，不提供跨檔 rollback 或 retry。Context owner 每個成功的 point／library 組發布一次。GUI 以 committed 的供應序 index 關聯 draft item ID，分組順序與成功項目數不能用來切供應序前綴。GUI 標記該前綴 applied 後原樣拋 producer cause，保留既有 wire 分類。Parameter 的 metadata 整份替換為 `{stderr: x}`，沒有 stderr 時為 `{}`，不寫 source、kind、run_id 或時間。Module 只保存 Spec，不保存 per-leaf stderr 或來源。Parameter／Module／Sample proposal、Form draft 與 selected Apply 的契約見 [[0008]]、[[0065]]；子模組搬遷不改成功前綴、權限、busy admission、欄位驗證或錯誤分類。
+WritebackService 先以分析來源的固定 capture 解析與 lower 全部選定 proposals，再依提案順序交 concrete items 給 `ContextService.apply_writeback`。Preview／Apply 從命令當下 read_context().target 取得 GUI 選定的 SavedPoint，不從歷史 capture 決定目的地。此入口驗證這個目標、綁定資源並交 resources 共用 executor。未選工作點時，application 在 append 前沿 no_context 拒絕，提示先選或建立工作點。空歷史環境不構成拒絕寫回的理由；底層 context 仍拒絕 caller 指定其他 entry 的 SavedPoint。Executor 追加 accepted 後依序提交 point 組、library 組與逐筆 samples，組內保留提案順序。任一項無效整組不寫，首錯停止，保留已提交組與事件，不提供跨檔 rollback 或 retry。Context owner 每個成功的 point／library 組發布一次。GUI 以 committed 的供應序 index 關聯 draft item ID，分組順序與成功項目數不能用來切供應序前綴。GUI 標記該前綴 applied 後原樣拋 producer cause，保留既有 wire 分類。Parameter 的 metadata 整份替換為 `{stderr: x}`，沒有 stderr 時為 `{}`，不寫 source、kind、run_id 或時間。Module 只保存 Spec，不保存 per-leaf stderr 或來源。Parameter／Module／Sample proposal、Form draft 與 selected Apply 的契約見 [[0008]]、[[0065]]；子模組搬遷不改成功前綴、權限、busy admission、欄位驗證或錯誤分類。
 
 2026-10-28 使用者裁決：「我其實沒有要知道來源的需求，這功能純屬於錦上添花」「來源我一直以為只是metadata，沒想要解析」。Library 移除模組來源；accepted 事件與 record 的事件引用仍保留，見 [[0063]]。
 
@@ -63,7 +63,7 @@ WritebackService 先以分析來源的固定 capture 解析與 lower 全部選�
 
 公開 `read_context(aliases=None)` 固定 point、library、storage 與全表，不檢查 consumer kind。GUI adapter、Tab、Run、Load 和 template create 直接使用它，不宣告角色。裸 `$alias` 回名稱，欄位路徑延後交讀取 owner 檢查。非空具名 overrides 只改本次 capture，不保存到 tab、全域表或檔案。EMPTY 無覆寫由 app 保留 None 的 context-free／deferred 路徑；非空覆寫拒絕 no_context。Notebook 保留自己的顯式 role kind 契約與 caller 提供的 bindings。
 
-Shared `gui.session.ui.alias_panel` 是 Measure 與 workflows 的 Inspect Aliases 編輯入口，不設 app-local wrapper。Alias draft 固定載入時的 entry／point，clean 時跟隨切換，dirty 時保留並拒絕跨 target Apply。Revert 或重開載入目前 point，避免舊草稿靜默覆寫另一個 point。同 target Apply 保持 Inspect 開啟，Cancel 不撤回已 Apply 的表。Tab 不顯示角色列，建立時固定目前 point／library、alias 表、cached device infos 與 value sources。Refresh 重新 capture 並保留 authored inputs，Reset 重新 capture 並重算 defaults。來源事件不自動刷新，Run 使用目前 tab 的有效 Form result 與固定來源。FIT、interactive、Post、Writeback 和 Save 使用結果的固定來源，不因後來選取而換目的地。Native Load 的來源與保存規則見 [[0063]]，cfg acceptance 見 [[0065]]。
+Shared `gui.session.ui.alias_panel` 是 Measure 與 workflows 的 Inspect Aliases 編輯入口，不設 app-local wrapper。Alias draft 固定載入時的 entry／point，clean 時跟隨切換，dirty 時保留並拒絕跨 target Apply。Revert 或重開載入目前 point，避免舊草稿靜默覆寫另一個 point。同 target Apply 保持 Inspect 開啟，Cancel 不撤回已 Apply 的表。Tab 不顯示角色列，建立時固定目前 point／library、alias 表、cached device infos 與 value sources。Refresh 重新 capture 並保留 authored inputs，Reset 重新 capture 並重算 defaults。來源事件不自動刷新，Run 使用目前 tab 的有效 Form result 與固定來源。FIT、interactive、Post 與 Writeback 求值使用結果的固定來源，不因後來選取而改變分析環境。Writeback 的目的地是命令當下 GUI 選定的 point；Save 則以目前 roots 與 Run 記錄的名稱生成目的地。Native Load 的來源與保存規則見 [[0063]]，cfg acceptance 見 [[0065]]。
 
 Device 的連線資訊、記得但未連線列與 cached DeviceInfo 在 `SessionState`，`DeviceService` 控制 driver 與 in-flight 工作。記哪些 device、重啟時嘗試哪些連線由腳本決定，framework 不從 domain session 快取回填。Setup preferences 只是 live 預填值。State 是否供多方觀察與資料是否重啟後保存是兩個問題，worker、lease 和 driver 的控制權不因有人需要觀察而交給 State。
 

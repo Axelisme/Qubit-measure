@@ -11,9 +11,11 @@ measure-gui 的「量測 session core」（context 系統 + SoC 連線 + 多 dev
 
 `ContextService` 私下持有 `ResultEntry` 與 point/library handles。開啟或建立 entry 只發布 metadata 和 point list，不自選 point。此時 readiness=EMPTY、parameters=None，但 entry metadata、point list 與 setup source binding 仍可讀。未開 entry 時 metadata 與 source binding 才是 None，point list 為空。SoC、device 與獨立 predictor 保留各自能力。明確選取或建立 point 後才發布 ACTIVE。它先完成資源與 asset capability 準備，再替換 session binding。準備失敗保留原 binding；point 已建立但安裝失敗時回報 `PointBindingError`，保留合法 point。
 
-列 point 時只投影 description，並獨立 probe 參數 availability，不讀 library 或 aliases。
-單一 point 失敗只將該列標為 unavailable 並保存路徑與錯誤。
-Setup 以 disabled row 與 tooltip 呈現，remote point.list 投影 available/error。
+列 point 時只投影 description，availability 另判參數文件可讀且能解析成 owner 文件結構，保留 header 與目前 schema version 檢查，不讀 library 或 aliases。
+局部 leaf／component 格式問題在使用或寫入時報錯，不讓整個 point 不可用。
+讀不到或解析不了的 point 只將該列標為 unavailable 並保存路徑與錯誤。
+Setup 保留 disabled row、不可當 clone 來源與 tooltip，remote point.list 投影 available/error。
+Availability 不作為 use_point、Load、Save 或其他讀取的額外前置條件。
 
 三個 target setter 都經 resources owner 驗證。`set_parameter` 驗 value schema 與 metadata 的 YAML 保存表示；metadata 是 caller 的 opaque mapping，setter 不解讀 key，也不查來源。`set_module`／`set_waveform` 驗 library spec，不建立模組來源，也不查 ledger。SavedPoint 是唯一 target，使用單檔交易。目前 target 成功寫入後先安裝固定投影與版本，再發一個 MD／ML fact，保留焦點與 binding ID。同 entry 的其他 point 可獨立寫入，不改目前投影；舊 capture 保持隔離。
 

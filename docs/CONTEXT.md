@@ -127,7 +127,7 @@ _Avoid_: multi-file workaround, sidecar artifact
 _Avoid_: result file, run handle
 
 **Writeback**:
-把分析成果以 Parameter、Module 或 Sample proposal 提交回固定來源的流程。選定 Apply 依序提交提案，失敗時保留成功前綴，見 [ADR-0008](adr/0008-cfg-editor-session.md) 與 [ADR-0067](adr/0067-gui-application.md)。保存量測資料檔是另一個流程。
+把分析成果以 Parameter、Module 或 Record proposal 提交到持久工作點的流程，與保存量測資料檔不同。GUI 寫回到命令當下選定的 point，歷史參數環境只供提案求值，見 [ADR-0008](adr/0008-cfg-editor-session.md) 與 [ADR-0067](adr/0067-gui-application.md)。
 _Avoid_: save, auto-apply, calibration sync
 
 ## 分析與 waveform

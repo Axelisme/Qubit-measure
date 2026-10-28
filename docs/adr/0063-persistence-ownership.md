@@ -4,7 +4,7 @@ status: accepted
 
 # Persistence：保存權威與資料契約
 
-**Last updated:** 2026-10-27
+**Last updated:** 2026-10-29
 
 ## 脈絡
 
@@ -35,7 +35,9 @@ Wire kind、written key 與 session prefix 使用 `record`、`records` 與 `reco
 
 Ledger 的 acquired 只記 run_id、experiment、point、roles 與事件時間，不保存 cfg_summary，也不從 Form 或 RunRecord.cfg 序列化第二份設定。只量測未保存仍可追加 acquired，不建立 run 目錄。
 
-RecordsLedger 讀取 envelope 與依 kind 選出的 payload 時忽略未知欄位，包括舊 1.0 行的 cfg_summary。讀取不改寫原行或附檔，get 的 raw event_json 保留未知內容。已知欄位型別、必填欄位、格式 major、kind、entry identity 與 JSON 損壞仍按契約拒絕；append 仍驗證已知欄位。不升格式 major，也不做 strip／rewrite migration。
+RecordsLedger 忽略未知欄位，包括舊 1.0 行的 cfg_summary 與 entry_id。讀取不改寫原行或附檔，get 的 raw event_json 保留未知內容。部分內容投影只驗請求欄位與必要祖先；明確整筆投影 events()／get().event 仍驗完整 payload model。歷史 import 的 source_entry_id 只留在 raw，不讀取或驗證，source_event_id 與 source_event_json 的引用契約保持。
+
+Append 完整驗證本次新事件。既有歷史只驗追加需要的 JSON、版本、event／run ID、duplicate、完整尾行與既有安全條件，未使用的壞 payload 不阻擋新事件。無效新事件仍拒絕且不改原 bytes。Index 不預驗未使用的 attachment reference；真正使用附件時，先驗 canonical reference 與 root containment，再解析路徑或開檔。不升格式 major，也不做 strip／rewrite migration。
 
 使用者於 2026-10-14 對保存位置選擇「A」，正本只放資料檔。對前端讀回裁定：「Notebook與GUI應該都讀data.h5，只有log browser讀Labber檔。」2026-10-15 確認：「1可以，2採用忽略不支援欄位的方式，3同意，4一起做吧」。其中 ledger 採忽略未知欄位，不改寫歷史行；Labber-only 資料先離線遷移，Load 不回填表單。
 
@@ -54,7 +56,13 @@ Entry 只由 `result/<name>/` 構成。`resources.entry.ResultEntry` 提供條�
 
 同一 Result root 下，entry 歸屬由資料夾名稱決定，不產生或使用 entry UUID。Setup／point 的舊 entry_id 即使格式不合法也忽略，讀取不改 bytes，明確寫入時移除。新 ledger 事件與 RunSnapshot 不含 entry_id，舊事件的該欄位不參與讀取或追加。Run ID 與 event ID 不變。Role capture 仍核對 point source 與 owning roots。Clone 使用來源位置當下的內容。缺 records 時 ledger 讀取回空且不建目錄，第一次 append 才建立。
 
-2026-10-28 使用者詢問「這裡的UUID能做什麼？什麼是目錄名不能而必須要UUID?」，並先採用位置歸屬，隨後要求完全移除 entry UUID。Setup 同名替換後，公開 refresh、new_point 或重新 open 使用新內容，不以 UUID 拒絕。這不新增 setup 自動監看，既有 point watcher 與讀取、安全邊界保持。
+2026-10-28 使用者詢問「這裡的UUID能做什麼？什麼是目錄名不能而必須要UUID?」，先以「選B」採用位置歸屬，UUID 不再當跨檔身分。隨後在 A「完全移除 entry UUID」與 B「只保留開啟中 setup 被換成不同 UUID 時拒絕操作」之間選擇「A」。
+
+A 包含新建 entry 不產生 UUID。Setup／point 接受有或沒有 entry_id 的舊檔並忽略其值，下次明確寫入去掉。新 ledger／量測 metadata 與公開 wire 不再包含 entry_id，setup 換檔也不因 UUID 拒絕。Run ID 與 ledger 事件 ID 不受影響。
+
+Setup 同名替換後，經公開 SetupView.refresh 或會重讀 setup 的 ResultEntry.new_point、重新開啟 entry 取得新內容，不以 UUID 拒絕。這不新增 setup 自動監看，既有 point files 的 wire、讀取失敗、格式錯誤、安全與 watcher 生命週期契約保持。
+
+Point 是實驗語意下具有一致環境參數的單位，不限於 flux。2026-10-28 使用者定義：「一個point不是一個flux點的意思，而是在其中的實驗語義下，具有一致的環境參數的意思，不只包含flux。而對於實驗本身就在掃某個環境參數，其一致性要求本來就不包含那個參數，所以哪個參數不會影響一致性」。
 
 `rename_entry` 只移動 Result，不改文件內容，也不移動 Database 舊輸出。重新 open 後的新 Run 記錄新名稱，新 Save 使用 `Database/<新名>/`。已有 Run 重存仍沿它記錄的名稱，舊輸出留在原處。Database 不是 entry 的存在或 clone 身分邊界，因此沒有雙目錄改名與復原協定。
 
@@ -67,6 +75,8 @@ Entry 只由 `result/<name>/` 構成。`resources.entry.ResultEntry` 提供條�
 GUI 的 `Adapter.save_stem(context)` 委派自己的 `AxesSpec.save_stem` 或 `GroupedAxesSpec.save_stem`。Adapter 可用自己的 spec 覆寫，不改核心的原 spec。Notebook 沿 core spec 的同一 callback；workflow 的 `write_outputs(..., save_stem=...)` 由 caller 提供 callback。這些入口共用 `SaveContext`，包含完整 adapter path／tag／workflow name、完整 run_id、歷史 point、解析後 roles、可用 cfg values 與保存時間。缺 cfg 時傳 None，不讀 live context 補值。
 
 預設 callback 將名稱中的 `/` 轉成 `.`，接上依 mapping 順序以 `-` 連接的 role values，再接完整 run_id，各段以 `_` 連接。Role list 按原順序攤平，未綁名稱不加入。沒有 roles 時省略該段。例如 `twotone.time_domain.t1_Q1-R1_20261027T120000Z-a1b2c3`。Mux adapters 依 cfg participants 原索引順序以 `+` 列參與 qubits，例如 `mux.t1_Q1+Q2+Q3_20261027T120000Z-a1b2c3`。Readout-only onetone 列 resonator labels，缺 cfg 名稱時回預設 role 命名，不猜 qubit 身分。
+
+Database 的 runs 平放與按 point 分層都可行，目前選平放，日後有移植需要再改。2026-10-28 使用者裁決：「Database平放與按point分感覺都可以，我認為目前平放就先保持好了」。
 
 Native run 目錄為 `Database/<name>/runs/<stem>/`。再次 Save 的 callback 回傳相同 stem 時，更新其中的 `data.h5`、具名圖片與 `analysis/<pane>.json`。圖片另有 Result point／全域 figures 副本，檔名為 `<stem>_<圖名>.png`。Native 同名目的仍由 saver 明確 replace=True 原子覆寫，不加避讓規則。自訂 callback 若依保存時間改名，後續保存會寫到另一個目錄。
 
@@ -87,6 +97,10 @@ Workflow 本身的兩側目錄維持 `workflows/<workflow名>_<run_id>/`，保�
 RunMetadata 的 run_id、時間、completion、RunSnapshot 與 SoftwareProvenance 是 caller 提供的歷史事實。RunSnapshot 保存 entry_name、point 與 roles，不帶 entry UUID。Experiment 的 ParameterSnapshot 保存 resources 擁有的 point 參數內容、library Specs、authored aliases 與 fixed names。Session 的 capture／restore adapter 連接這兩個 owner，不讓 resources 或通用 ParameterContext 依賴 experiment。C8 分層、C9 無循環與 parameter-context-no-experiment contract 保護這個方向。
 
 GUI 在 Run admission 固定參數環境。Save 使用 metadata 內的快照，不重新讀 live point。Load 只還原檔內快照；缺快照回沒有 general、created_at、SavedPoint 或 storage 的空內容，不補造歷史資訊。Analyze／Post 使用這份內容。寫回提案仍從歷史內容求值及解析 alias／slot，但 Preview／Apply 的 target 取命令當下 GUI 選定的 point。未選 point 時拒絕，空歷史環境不是拒絕理由。
+
+2026-10-28 使用者說明 Load 的來源：「我認為run R確實可以記錄是哪個entry與point，但Load為什麼要看entry/point資訊？他又不需要，他只需要當時capture的環境就好？」對沒有快照的舊量測補充：「沒有快照的舊量測，可以用空環境來生成分析參數預設值，而不是不能分析。」當時的「1A 2A」裁決中，寫回選擇 GUI 目前選的 point。
+
+Save 目的地隨後改採記錄的 entry／point。2026-10-28 使用者要求：「我希望load只需要給data.h5的路徑，不要求其在對應的儲存位置，但再儲存的目標就是內部記錄的entry與point。」「我認為Save的部分，應該不用找？」「直接生成路徑，然後覆寫就好」。缺名稱與 point 的處理分別是「我認為沒有記錄entry_name，那就用unnamed_entry之類的」「point應該也可以比照辦理，unnamed_point」。這項 Save 裁決取代存到目前開啟 entry 的方案，不改寫檔內歷史 metadata。
 
 新檔由 [[0080]] 的 zcu.container 3.0 保存，實驗欄位進入 docs/metadata。`started_at` 接受 UTC ISO 字串或 None，`completion` 接受 complete、partial、stopped 或 unknown。None 與 unknown 表示缺少歷史證據，不從檔案時間、檔名或 run_id 補造。正常量測路徑仍必填開始時間，只產生已知完成狀態。
 
@@ -116,7 +130,7 @@ GUI Native Load 由 LoadService 呼叫 datafile.load 讀成 Container，透過 e
 
 原始 cfg 正本保存在 native 資料檔的 docs/cfg，可透過公開 datafile.load 離線讀取。使用者於 2026-10-16 選擇「A」時不新增 GUI 入口；2026-10-23 批准的 Results browser 是唯讀檢視例外，呈現保存的 cfg_type、schema_version 與以 values 為根的相對路徑。瀏覽器不修改檔案、不回填表單，也不重新分析。視窗與前端邊界見 [[0067]]；Load 與 adapter 的 opaque record 契約不變。
 
-Load 接受任意位置的 data.h5，不讀目前 entry 或歷史 point 的外部文件。未使用的 metadata、參數與 library 區塊延後驗證，使用壞值時報來源與欄位，不降成空內容。Save、完整 metadata／component／document 投影與 edit 仍完整驗證。Leaf read 執行所需欄位的 annotation、default、field validators 與必要祖先，不執行無關 model validators；完整投影及 edit 執行原 model checks。Header／major、schema_version、JSON／YAML 表示、實際使用的 attachment path 與 ledger 追加安全規則保持。
+Load 接受任意位置的 data.h5，不讀目前 entry 或歷史 point 的外部文件。未使用的 metadata、參數與 library 區塊延後驗證，使用壞值時報來源與欄位，不降成空內容。Save、完整 metadata／component／document 投影與 edit 仍完整驗證。Leaf read 只執行請求欄位的 annotation、field validators，包括 before，與必要祖先檢查，不執行 model 層級 before／after validators。缺值沿該欄位的 default／default_factory，同文件重讀保持穩定。Whole-component projection、edit、seed 與 clone 執行完整 model，包括轉換與跨欄位檢查。需要跨欄位不變式的 consumer 使用 whole-component projection；只靠 model validator 的 legacy 轉換需明確 edit 或 parameter upgrade，不在 leaf read 補做。Header／major、schema_version、JSON／YAML 表示、實際使用的 attachment path 與 ledger 追加安全規則保持。
 
 沒有 storage 的 Run 仍保留 artifact／member declarations，首次 Save 前 outputs 可以為空，但狀態不是 Saved。Save report 發布實際路徑、成功或逐項失敗。Bound Run 的既有預覽保留，但不決定 Save 目的地；同 session 改名或改 roots 時，預覽可能不同於實際輸出。實際 Save 建立目錄並覆寫同名 data.h5、分析與圖，Result 圖副本放到記錄的 points/<point>/，缺 point 放 points/unnamed_point/。不新增 source.json 或另一份來源權威。
 
@@ -154,7 +168,7 @@ Dialog Apply 先驗整表，再由 entry owner 寫 sibling temporary 並 atomic 
 
 2026-10-23 使用者對以下寫入慣例回覆「認同」：一次使用者動作、每份文件一筆交易，不承諾跨文件原子提交。Owner 寫入 API 以「一份文件的一組變更」為原形，單項寫入是長度 1 的批次，避免逐項重開同份文件、驗證與提交。
 
-DocumentStore 分開保存 raw YAML 節點、驗證後的 normalized tree 與 public typed snapshot。一般讀取及空 edit 不寫檔；非空 commit 以最新 normalized tree 合併與驗證，再把差異套回 raw 節點。Model 的讀檔轉換在下一次 commit 寫回，未改節點保留原樣。
+resources.entry、DocumentStore 與 ledger_models 在 owner 內部分開讀取投影與寫入驗證。參數讀取保留未使用的 raw 內容，同一 component 的壞 leaf 不擋其他 leaf，不先建立整份嚴格 model。Edit／append 不因此放寬寫入契約，壞值仍由 owner 指出路徑，不略過或降成空內容。DocumentStore 保存 raw YAML 節點，完整驗證時產生 normalized tree 與 typed snapshot。一般讀取及空 edit 不寫檔；非空 commit 以最新 normalized tree 合併與驗證，再把差異套回 raw 節點。Model 轉換在下一次 commit 寫回，未改節點保留原樣。
 
 ModuleLibrary 讀取不改檔。Library owner 先驗 header、容器與可定址名稱，再逐 root 驗證 Spec。無效 Spec 從讀取投影略過，公開 `invalid_entries()` 回報 root 與原因，合法兄弟仍可用。Header、容器及 I/O 錯誤傳遞。Strict refresh 不略過無效 Spec，失敗保留已發布快照。讀取與空 edit 保留原 bytes，不建立 .bak。
 
@@ -182,7 +196,9 @@ Grid 不同的 grouped 實驗可由 spec 明確宣告 independent Labber layout�
 
 資料容器採 Tolerant Reader。每個 app 只讀、只驗當次操作需要的檔案與欄位。用不到的欄位缺少、多出或格式不同都不報錯；實際使用時才檢查它是否存在、數值是否可用。有問題時在使用處報錯並指名欄位，或在該功能可選時關閉並註明原因。容器可以不再讀取舊欄位，不必轉換或提供相容別名。寫入端仍寫出完整、正確的格式。
 
-這項規則也適用於按 point 或個別分析成果移植資料。App 不因其他檔案或區塊缺席、格式不同而拒絕使用已具備的資料。2026-10-28，使用者說明：「我會預期一個app只會需要給他需要的資料，而不是檢查用不到的格式與欄位」。2026-10-29 再次確認：「我一致的設計規則是：只檢查需要用到的資訊」。
+這項規則也適用於按 point 或個別分析成果移植資料。App 不因其他檔案或區塊缺席、格式不同而拒絕使用已具備的資料。2026-10-28，使用者說明：「我會預期一個app只會需要給他需要的資料，而不是檢查用不到的格式與欄位」。2026-10-29 再次確認：「基本上可以，但我要提醒，我一致的設計規則是：只檢查需要用到的資訊」。
+
+Point availability 只判參數文件可讀且能解析成 owner 的文件結構，保留 header 與目前 schema version 檢查，不讀 library 或 aliases。Leaf／component 格式問題在使用或寫入時報錯，不讓整個 point 不可用。讀不到或解析不了的 point 仍標不可用並附原因，其他 point 正常；UI 停用、不可當 clone 來源、tooltip 與 remote error 的呈現不變。Availability 不作為 use_point、Load、Save 或其他讀取的額外前置條件，檔案同步見 [[0081]]。
 
 2026-10-26，使用者裁決：「我對這種資料容器的行為預期都是：可以不讀舊格式欄位，但不要因為少了欄位或多了欄位就報錯。」這是一般資料讀取的欄位容忍原則。既有容器 header／major、component `schema_version` 的拒讀規則與元件 model 驗證契約仍由各 owner 決定，不以此新增相容層。
 

@@ -588,4 +588,4 @@ MCP server 結束時斷線並加入其 workers。它不關閉 GUI，也不保證
 
 `tests/mcp/measure/` 經 public tools/session 與 recording transport 驗證 recipe、分析、catalog、連線、holder admission 與 operation。GUI remote/service 測試驗證 socket 與 GUI-origin 路徑。離線選集只用 fake/mock，不啟動真儀器；fixture 與測試歸屬見 `tests/README.md`。
 
-Entry new/open 只建立或開啟 entry，不自選 point，也沒有參數環境。Agent 先明確呼叫 point.use 或 point.new，才能 Run、WB 或目前 point 的 Inspect writes；未選取時沿既有 failed precondition 拒絕。WB 使用候選捕捉的 SavedPoint，選取其他同 entry point 不更換目的地。
+Entry new/open 只建立或開啟 entry，不自選 point，也沒有參數環境。Agent 先明確呼叫 point.use 或 point.new，才能 Run、WB 或目前 point 的 Inspect writes；未選取時沿既有 failed precondition 拒絕。WB 的 Preview／Apply 使用命令當下 GUI 選定的 point；歷史 capture 只供提案求值，不決定目的地。空歷史環境本身不阻擋寫回。

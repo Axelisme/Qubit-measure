@@ -325,10 +325,15 @@ or implicit refresh. See [ADR-0065](../../../../../../docs/adr/0065-cfg-editing.
 
 `point.list` refreshes each point independently. Each row contains `label`,
 `description`, `available` and `error`. Description reads only `general.description`.
-The independent parameter probe uses the owner's current schema policy and component
-models. It does not read library or aliases. Invalid parameters produce an unavailable
-row with the failed document path and diagnostic in `error`; healthy rows have
-`available=true` and `error=null`. Directory discovery errors still fail the request.
+Availability requires a readable parameter document that parses into the owner's
+document structure, with its header and current schema version. It does not read
+library or aliases or validate full component models. A malformed leaf or component
+remains available; its owner reports the error when that value is used or written.
+Unreadable or unparseable documents produce an unavailable row with the document
+path and diagnostic in `error`; other rows have `available=true` and `error=null`.
+UI disabled rows, clone-source exclusion, tooltips and remote error presentation
+remain unchanged. Availability is not an extra precondition for use_point, Load,
+Save or other reads. Directory discovery errors still fail the request.
 
 ## Point-file reload and guarded writes
 
