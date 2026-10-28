@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
 from zcu_tools.experiment.scope import Scope
@@ -195,6 +196,59 @@ def _coarse_outcome(
     return scan, fits, "rejected" if reason == "stopped" else "failed", reason
 
 
+@dataclass(frozen=True)
+class _FrequencyScanOutcome:
+    """Fitted scan, optional candidate confirmation, and its acceptance decision."""
+
+    scan: FrequencyScan
+    fit: FrequencyFit | None
+    confirmation: FrequencyCandidateAttempt | None
+    status: StageStatus
+    reason: str | None
+
+
+def _fit_frequency_outcome(
+    result: FreqResult | Failed,
+    scan: FrequencyScan,
+    settings: CalibrationTunables,
+    *,
+    hint: float,
+    coarse_fit: FrequencyFit | None,
+    coarse_file: str | None,
+) -> _FrequencyScanOutcome:
+    """Fit a fine/single scan and apply confirmation and acceptance gates.
+
+    Retain a successful fit even when rejected; failed fits return None.
+    This step does not update tracker history or linewidth feedback.
+    """
+    scan, fit = fit_frequency_scan(
+        result, scan, settings, None if scan.stage == "fine" else hint
+    )
+    rejection = fit.reason if isinstance(fit, Failed) else None
+    confirmation = None
+    if coarse_fit is not None:
+        scan, confirmation = confirm_frequency_candidate(
+            coarse_fit, coarse_file, scan, fit, settings, result
+        )
+        rejection = confirmation.rejection_reason
+    if isinstance(fit, Failed) or rejection is not None:
+        status, reason = (
+            _frequency_failure_status(fit, rejection),
+            rejection or "No accepted frequency fit",
+        )
+    elif accept_frequency_fit(fit, fit.source, settings):
+        status, reason = "accepted", None
+    else:
+        status, reason = "rejected", "No accepted frequency fit"
+    return _FrequencyScanOutcome(
+        scan,
+        None if isinstance(fit, Failed) else fit,
+        confirmation,
+        status,
+        reason,
+    )
+
+
 async def calibrate_frequency(
     scope: Scope,
     env: StageEnv,
@@ -261,35 +315,30 @@ async def calibrate_frequency(
             elif len(attempts) >= settings.max_candidates or reason == "stopped":
                 pending.clear()
             continue
-        scan, fit = fit_frequency_scan(
-            result, scan, settings, None if stage == "fine" else hint
+        outcome = _fit_frequency_outcome(
+            result,
+            scan,
+            settings,
+            hint=hint,
+            coarse_fit=coarse_fit,
+            coarse_file=coarse_file,
         )
-        scans[-1] = scan
-        if not isinstance(fit, Failed):
+        scans[-1] = outcome.scan
+        if outcome.confirmation is not None:
+            attempts.append(outcome.confirmation)
+        status, reason = outcome.status, outcome.reason
+        fit = outcome.fit
+        if fit is not None:
             last_fit = fit
-        rejection = fit.reason if isinstance(fit, Failed) else None
-        if coarse_fit is not None:
-            scans[-1], confirmation = confirm_frequency_candidate(
-                coarse_fit, coarse_file, scan, fit, settings, result
-            )
-            attempts.append(confirmation)
-            rejection = confirmation.rejection_reason
-        if isinstance(fit, Failed) or rejection is not None:
-            status, reason = (
-                _frequency_failure_status(fit, rejection),
-                rejection or "No accepted frequency fit",
-            )
-            if reason == "stopped":
+            if status == "accepted":
+                tracker.finish_point(guess.point.flux, fit.frequency_mhz, tun=settings)
+                observe_frequency_linewidth(
+                    tracker, fit, fit.source, scan.gain, guess.point.index, settings
+                )
+                accepted_mhz = fit.frequency_mhz
                 break
-            continue
-        if accept_frequency_fit(fit, fit.source, settings):
-            tracker.finish_point(guess.point.flux, fit.frequency_mhz, tun=settings)
-            observe_frequency_linewidth(
-                tracker, fit, fit.source, scan.gain, guess.point.index, settings
-            )
-            status, reason, accepted_mhz = "accepted", None, fit.frequency_mhz
+        if reason == "stopped":
             break
-        status, reason = "rejected", "No accepted frequency fit"
     if accepted_mhz is None and reason not in ("stopped", "Point cancelled"):
         tracker.finish_point(guess.point.flux, None, tun=settings)
     return FrequencyStageResult(
