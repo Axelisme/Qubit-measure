@@ -162,7 +162,7 @@ Predictor 不持有 installed session model，不參與 Run 或 Analyze／Post-a
 Session predictor service 透過 ContextControlPort 取得 ResultEntry 擁有的目錄，集中列檔、檔名驗證與載入。
 Dialog／remote 使用檔名或明確參數，不解讀 component 欄位，也不由 alias 選來源。
 Framework 不 import 使用者套件（C16）；simulate 不讀容器或檔案（C8、C9）。
-Dialog 擁有可手動修改的獨立 trial，不寫回元件或來源檔案。Service／remote 不讀 dialog。
+`PredictorTrial` 擁有可手動修改的獨立試算草稿，不寫回元件或來源檔案。Dialog 呈現這份 trial；Service／remote 不讀 dialog 或 trial。
 Service 與 RPC 接受明確 flux frame 和所有必要儀器值，不從其他 owner 補值。`analysis.flux` 擁有 native values 到 reduced flux 的換算，GUI→analysis 依賴由 C8／C9 約束。Calibrate 只計算可加到目前 offset 的 Φ0 correction，不寫來源。Simulation coordinator 只組裝 SoC 與 devices。
 
 使用者於 2026-10-20 裁定：「框架內支援的fluxonium/transmon是理論上的兩種qubit，有自己定義的參數，與用戶定義的component解偶」。
@@ -171,8 +171,15 @@ Service 與 RPC 接受明確 flux frame 和所有必要儀器值，不從其他 
 
 2026-10-19，使用者裁決：「採 B，只限 PredictorDialog。依 repo 規則，新 class 有理由：它們各自隱藏真實的控件與局部 state 協調（參數編輯、曲線互動），不是轉接層。照你列的硬邊界（PredictorControlPort／ModelParams／物理 owner 不變、public 行為與文字版面不變、無 Protocol/factory/mixin、callers/tests 同票）。外觀不得改變；ComponentDriver 情境＋逐步 PNG 你親看即可，不需交使用者。」
 
-`PredictorParameterEditor` 持有 model 選擇、nullable 參數與已知欄位控件，以及顯式 file 預填。`PredictorCurveTabs` 持有三張 canvas、toolbars、matrix capability 與跨圖 marker／highlight／xlim 協調。兩者是 dialog-owned 的具體 child QWidget，不取得整個 dialog，也不跨 owner 存取私有狀態。
-Dialog 保留 cache、device 訂閱、calibration、tracked table 與生命週期。子元件沿用原 predictor queries 與物理參數型別。Programmatic 預填以同步 callback 保留立即刷新、保存與例外傳遞；不以 Qt signal 隔離取代同步呼叫。這個責任劃分只適用 PredictorDialog。
+2026-10-29，使用者裁決：「候選11可以做，都允許你自己決定」。試算狀態與規則移到 Qt-free 的 `PredictorTrial`，UI 行為、文字與版面不變。
+
+`PredictorTrial` 保存 model、能量草稿文字、可選 flux frame、offset 文字、各儀器值文字與橫軸儀器。它集中組裝 predict／calibrate 請求，提供 table 列值、曲線座標、逐欄錯誤與校準 readiness。校準頻率解析回傳具名成功值或詳細錯誤，不 logging；control query 的未預期例外原樣傳出，由 dialog 記錄。模型不持有 widget，也不引入 Qt。
+
+`PredictorParameterEditor` 呈現 model 選擇與 nullable 能量草稿，並處理顯式 file 預填。`PredictorFluxEditor` 呈現 frame、offset、各儀器值與橫軸選擇。兩個 editor 都必須接收 dialog 的同一份 trial，不自行建立模型。`PredictorCurveTabs` 持有三張 canvas、toolbars、matrix capability 與跨圖 marker／highlight／xlim 協調。這些具體 child QWidget 不取得整個 dialog，也不跨 owner 存取私有狀態。
+
+Dialog 保留版面、tracked table、live mode、timer、status、檔案對話框、marker 與 canvas 互動，以及隱藏／重開的生命週期。它只在載入 frame 時讀取 device cache，沒有 device 訂閱；live 值由宿主呼叫供應。Programmatic 預填同步更新整批草稿與控件，再以一次 callback 立即刷新及保存；user edit 保留清舊結果、同步狀態、保存與 150ms debounce 的順序。校準成功時先呈現 offset，再發布成功 status。
+
+`gui/session/predictor_cache.py` 擁有 `PredictorSnapshot` v2 與 codec。Trial 提供 snapshot／restore 與 `PredictorFile` 匯出；dialog 協調還原後呈現、caretaker 與另存 I/O。`predictor.json` 格式不變，nullable 能量、可選 frame、已知儀器值與所選軸都可還原。非法草稿不覆寫上次可保存的 cache。這個責任劃分只適用 PredictorDialog，不改 remote 的獨立請求來源。
 
 ## Experiment figure area
 
