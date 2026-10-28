@@ -7,7 +7,11 @@ import tempfile
 from pathlib import Path
 
 import pytest
+from filelock import FileLock, Timeout
+from zcu_tools.resources.document_store import DocumentStore
 from zcu_tools.resources.file_lock import lock_path_for
+
+from tests.resources._document_store_fakes import SyntheticDocument
 
 
 def test_runtime_lock_identity_and_private_root(
@@ -66,3 +70,27 @@ def test_unavailable_runtime_uses_per_user_temporary_root(
     assert root.is_dir()
     if os.name == "posix":
         assert stat.S_IMODE(root.stat().st_mode) == 0o700
+
+
+def test_edit_uses_runtime_lock_without_data_sidecars(document_path: Path) -> None:
+    contended: list[bool] = []
+
+    def observe_commit(document: SyntheticDocument) -> None:
+        if document.values["left"] == 9.0:
+            with (
+                pytest.raises(Timeout),
+                FileLock(str(lock_path_for(document_path)), timeout=0),
+            ):
+                pass
+            contended.append(True)
+
+    store = DocumentStore(
+        document_path, SyntheticDocument, format="synthetic", validate=observe_commit
+    )
+    with store.edit() as draft:
+        draft.values["left"] = 9.0
+
+    reread = DocumentStore(document_path, SyntheticDocument, format="synthetic")
+    assert reread.snapshot().values["left"] == 9.0
+    assert contended
+    assert not list(document_path.parent.glob("*.lock"))
