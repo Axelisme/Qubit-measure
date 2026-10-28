@@ -14,13 +14,15 @@ from zcu_tools.gui.app.measure.events.tab import (
     TabInteractionChangedPayload,
     TabInteractionFact,
 )
+from zcu_tools.gui.app.measure.services.pane_commit import commit_analysis
+from zcu_tools.gui.app.measure.state import AnalysisPaneState
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.interactive import PluginDefinition, Session
 from zcu_tools.gui.session.operation_handles import OperationHandles, OperationOutcome
 from zcu_tools.gui.session.operation_runner import OperationRunner
 from zcu_tools.resources.entry.ledger_models import JsonObject
 
-from .plot_lifecycle import discard_unpublished_plots, release_retired_plots
+from .pane_commit import discard_unpublished_plots
 from .staged_analyze import StagedAnalyzeService
 
 logger = logging.getLogger(__name__)
@@ -32,8 +34,8 @@ if TYPE_CHECKING:
     from zcu_tools.gui.session.types import SessionEnv
     from zcu_tools.plotting.plots import Plots
 
-    from ..state import RetiredPaneResources
-    from .ports import AnalyzeStatePort, WritebackLifecyclePort
+    from ..state import State
+    from ..writeback import WritebackService
 
 
 @dataclass(frozen=True, slots=True)
@@ -66,10 +68,10 @@ class AnalyzeService(StagedAnalyzeService):
 
     def __init__(
         self,
-        state: AnalyzeStatePort,
+        state: State,
         runner: OperationRunner,
         bus: EventBus,
-        writeback: WritebackLifecyclePort,
+        writeback: WritebackService,
         handles: OperationHandles,
     ) -> None:
         # FIT analyze runs off-main with explicit operation plots (no progress
@@ -399,16 +401,6 @@ class AnalyzeService(StagedAnalyzeService):
             )
         )
 
-    def _teardown_retired(self, retired: RetiredPaneResources | None) -> None:
-        if retired is None:
-            return
-        for draft in retired.writeback_drafts:
-            try:
-                self._writeback.teardown_draft(draft)
-            except Exception:
-                logger.exception("retired analyze draft teardown failed")
-        release_retired_plots(retired)
-
     def _record(
         self,
         tab_id: str,
@@ -447,13 +439,16 @@ class AnalyzeService(StagedAnalyzeService):
                 device_snapshot=captured_inputs.device_snapshot,
             )
             plots.finish()
-            retired = self._state.update_tab_analyze(
+            commit_analysis(
+                self._state,
                 tab_id,
-                analyze_result,
-                plots,
-                writeback_draft=draft,
-                analyze_params_instance=analyze_params,
-                source_operation_id=self._active_tokens[tab_id],
+                AnalysisPaneState(
+                    result=analyze_result,
+                    plots=plots,
+                    params=analyze_params,
+                    writeback_draft=draft,
+                    source_operation_id=self._active_tokens[tab_id],
+                ),
             )
         except BaseException:
             if draft is not None:
@@ -462,4 +457,3 @@ class AnalyzeService(StagedAnalyzeService):
                 except Exception:
                     logger.exception("new analyze draft teardown failed")
             raise
-        self._teardown_retired(retired)

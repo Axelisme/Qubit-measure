@@ -41,7 +41,6 @@ def test_load_value_accepts_native_data_and_keeps_it_when_next_file_is_unsupport
     )
     service = LoadService(
         state,
-        MagicMock(),
         context=MagicMock(),
         captured_parameters=lambda aliases: None,
     )

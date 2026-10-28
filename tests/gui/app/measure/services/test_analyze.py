@@ -13,6 +13,16 @@ from zcu_tools.gui.app.measure.events.tab import (
     TabInteractionChangedPayload,
     TabInteractionFact,
 )
+from zcu_tools.gui.app.measure.services.pane_commit import (
+    commit_analysis,
+    commit_post_analysis,
+    commit_run,
+)
+from zcu_tools.gui.app.measure.state import (
+    AnalysisPaneState,
+    PostAnalysisPaneState,
+    RunPaneState,
+)
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.expected_error import ExpectedErrorCategory, FailedPreconditionError
 from zcu_tools.gui.session.aliases import AliasRow
@@ -86,10 +96,14 @@ def test_historical_analyze_uses_run_capture_after_alias_and_parameter_edits(
         point=point, library=original.library, target=original.target, roles=None
     ).bind_aliases((AliasRow("qubit", "Q1"),), {})
     state = make_state()
-    state.update_tab_result(
+    commit_run(
+        state,
         "tab1",
-        RunRecord(None, object()),
-        parameters=captured if has_run_source else None,
+        RunPaneState(
+            result=RunRecord(None, object()),
+            storage=captured.storage if has_run_source else None,
+            parameters=captured if has_run_source else None,
+        ),
     )
     point.components["Q1"] = QubitSchema(kind="qubit/fluxonium", freq=4300.0)
     current = ParameterContext(
@@ -141,8 +155,24 @@ def test_start_analyze_submit_rejection_emits_restore_fact(qapp):
     old_post_plots = make_plots()
     old_post_plots.adopt("fit", Figure())
     old_post_plots.finish()
-    state.update_tab_analyze("tab1", object(), old_plots)
-    state.update_tab_post_analyze("tab1", object(), old_post_plots)
+    commit_analysis(
+        state,
+        "tab1",
+        AnalysisPaneState(
+            result=object(),
+            plots=old_plots,
+            params=state.get_tab("tab1").analysis.params,
+        ),
+    )
+    commit_post_analysis(
+        state,
+        "tab1",
+        PostAnalysisPaneState(
+            result=object(),
+            plots=old_post_plots,
+            params=state.get_tab("tab1").post_analysis.params,
+        ),
+    )
     bus = EventBus()
     received: list[TabInteractionFact] = []
     bus.subscribe(TabInteractionChangedPayload, lambda p: received.append(p.fact))

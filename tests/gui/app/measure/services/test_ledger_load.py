@@ -11,7 +11,6 @@ from qtpy.QtWidgets import QApplication, QPushButton, QTableWidget
 from zcu_tools.datafile import save
 from zcu_tools.gui.app.measure.services.load import LoadDataError, LoadService
 from zcu_tools.gui.app.measure.ui.run_load_dialog import RunLoadDialog
-from zcu_tools.gui.app.measure.writeback import WritebackService
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.context_control import ContextControlFacet
 from zcu_tools.resources.entry import (
@@ -164,9 +163,6 @@ def test_query_metadata_and_load_validity_are_independent(
         assert dialog.selected_path() == str(path)
         service = LoadService(
             session.state,
-            WritebackService(
-                ContextControlFacet(context=session.context), arb_names=lambda: ()
-            ),
             context=ContextControlFacet(context=session.context),
             captured_parameters=lambda _aliases: None,
         )

@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure`
 
-**Last updated:** 2026-10-28
+**Last updated:** 2026-10-28, pane commit 與具名 writeback draft
 
 **讀者：** framework-dev。量測 GUI 的組裝、分頁與 Run／Load／Save 分工。
 
@@ -101,11 +101,20 @@ rejects Done without closing input.
 - [`adapter/`](adapter/value.py)：四種定義值、typed callback hooks、request/result 與分析參數。
   `spec.tag` 提供 experiment tag。`restore` 將已讀 Container 與 spec 交給 `restore_run`，不建構 core。
   Writeback 型別由 `writeback/` 擁有，adapter 公開入口再匯出。ModuleWriteback proposal 直接使用持久 ModuleSpec。
-- [`services/`](services/app_services.py)：app service layer。Service 透過 ports 與其他 services 合作；package `__init__` 只做 lazy public re-export。
+- [`services/`](services/app_services.py)：app service layer。Run、Analyze、PostAnalyze、Load 與 Tab 將 pane 提交及退役資源清理交給 `pane_commit`。
+  各 operation 仍決定 admission、終局與觸發清理的時機。Run 與 Load 不依賴 WritebackService 來清理 draft。
+  Service 透過 ports 與其他 services 合作；package `__init__` 只做 lazy public re-export。
   `services.results_index.scan_results(project_root)` 供結果瀏覽器與 RPC 共用唯讀 `ResultsIndex`。它掃描各 Database entry 的 run 目錄，從 datafile.read_doc 讀保存 metadata，再以同名 Result entry 的 acquired 事件提供歷史身分，缺 ledger 仍列為未登錄。瀏覽投影容許 metadata 缺欄與額外欄位，不以目前 RunMetadata 型別擋住歷史內容；壞文件保留 run 與 issues。Cfg JSON 原樣讀取，不查 catalog 或驗證實驗 schema。Cfg／analysis 搜尋包含未出現在 roles 的 tone 名稱。文件與圖檔讀取只接受索引中的 run key 與成員檔名，讀取前重驗根目錄與 symlink 邊界。索引不建立檔案或 lock，也不改 opened entry。
   `services.results_comparison.build_comparison(index, run_keys)` 將保存的 summary JSON 投影為逐 run 的比較列。身分四欄後接葉節點點路徑，欄位依釘選與 JSON 順序取 union。物件 list 以索引多行呈現，不辨識實驗名稱或特定 key；parameters 不進表。檔案與 JSON 讀取仍委派 `ResultsIndex`，不換算單位或重新分析。
-- [`state.py`](state.py)：tab/device/pane/path/version-table SSOT 與主線程 mutators；固定的
-  Run、Analysis、Post-Analysis、Save pane 各自擁有自己的 resource。
+- [`state.py`](state.py)：保存 tab/device/pane/path/version-table SSOT，限定在 owner thread 修改。
+  每種 pane 只有一個被動交換入口，安裝備妥的 pane 與 artifacts，回傳退役資源。
+  State 不規劃 artifacts、不執行退役清理，也不在交換時遞增版本。
+  Analysis 與 PostAnalysis 各自保存 `WritebackDraft | None`，None 表示沒有 draft。
+- [`services/pane_commit.py`](services/pane_commit.py)：提交 Run、Analysis、PostAnalysis pane。
+  它先規劃 artifacts，再交 State 交換，遞增版本，最後關閉退役 draft 並釋放 plots。
+  規劃失敗保留舊 pane。清理失敗逐項記錄，不回滾已提交結果，也不跳過其他資源。
+  Run 提交清空 Analysis 與 PostAnalysis，Analysis 提交清空 PostAnalysis，PostAnalysis 提交保留 Analysis。
+  Tab 移除後也由此 module 清理退役資源。未發布的 plots 由 `discard_unpublished_plots` 結束產生作業，不呈現最後一幀，並保證釋放 attachments。
 - [`artifacts/`](artifacts/handover.py)：tracker、SaveService、SaveControl、保存中心與 `ArtifactHandover`。
   保存中心在全部 artifact 都是 SAVED 時停用 Save All 與各列 Save。
   任一 artifact 不是 SAVED 時恢復啟用，但仍須符合 idle、可寫與 active context 條件。
