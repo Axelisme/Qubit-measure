@@ -2,7 +2,7 @@
 
 **讀者：** operator、lab-author、agent。準備 FTF 模擬參數與 entry，並從 GUI 或 Notebook 啟動模擬環境。
 
-**Last updated:** 2026-10-28，三迴路漂移、真值 log、predictor v2 startup 與 evolve-local preparation
+**Last updated:** 2026-10-28，flux pulse 能力、路由與 reset 近似
 
 既有 entry 把 resonator 與 mux group 的 `ext.time_of_fly` 搬到頂層 `time_of_fly`。程式不自動搬移。
 
@@ -97,7 +97,11 @@ MCP 先呼叫 `predictor.list_files` 發現檔案，再使用
 
 `default.yaml` 使用 `format: zcu.ftf`、整數 `version: 2`。V1 文件不能載入，不自動轉換既有工作副本，也不自動更新既有 entry。三個 DC 電源與校準位於 `dc_bias.sources`，樣板使用 A。環境每 round 讀取 live DC snapshot，保留靜態磁通掃描。`drive_lines` 的每條線以 `operator: charge | flux` 選電荷或固定 DC 小訊號磁通導數，省略為 charge。Flux operator 不是逐時重算 Hamiltonian 的大振幅 fast-flux 控制。
 
-FTF 的 flux drive 只在 DC 附近線性化，不建構大振幅 fast-flux controls；`flux_lines` 即使為空 map 也按未知欄位拒絕。未綁定 generator 沿用既有處理。共享 `simulate` 引擎仍保留完整 flux-pulse 能力，但 FTF 不使用該路徑。採用新樣板時請自行保留或重新填入需要的設定，不覆寫尚未保存的本機調整。舊工作副本或預覽若仍含 `flux_lines`，須自行移除。
+序列內的 flux pulse 另以 `flux_lines` 宣告，不放在 `drive_lines`。`f1`、`coupler`、`f2` 各可選填一條 single-fluxonium 格式的 `FluxLine`，填入 `name`、`gen_ch`、`flux_phi0_per_gain`，再依需求設定 ns 單位的延遲與濾波。Flux 線的 generator 不可與另一 flux loop、任一 drive line、pulse readout 或可選 mux readout 重複。載入失敗時，錯誤會列出兩端綁定的欄位路徑與 channel。省略或填 `{}` 保留原本設定，各迴路省略或填 `null` 停用該線。`default.yaml` 只附註解範例，不預設啟用 pulsed flux，entry 範本也不預填快速 flux channel。欄位與單位見 [Flux lines](field-guide.md#flux-lines序列內磁通校準與濾波)。
+
+FTF 的 `DriveLine.operator: flux` 仍只在 DC 附近線性化。Fast-flux 線的校準與該小訊號算符分開，數值接線與限制見 [FTF 契約](../../../lib/zcu_tools/experiment/ftf/README.md)。未綁定 generator 沿用既有處理。採用新樣板時請保留自己的工作副本，逐欄核對，不覆寫尚未保存的本機調整。
+
+無微波的連續 flux motion 走 `adiabatic_map`，即使 bath 含 rates 也保持 populations，只衰減 coherence。只有 ramp 遠短於 T1 才能忽略這項近似，接近 T1 的 ramp 會低估弛豫。T1 reset 須有真正 constant park row 走 `t4`，不把 filter tail 視為 constant hold。物理 adiabatic 條件與 native／local／retained-level 收斂另需驗證。DAC 取樣、flux 量化、其他路由與 DC readout settling 限制見 [Flux lines 指南](field-guide.md#flux-lines序列內磁通校準與濾波)。
 
 啟動腳本會執行 Python，只載入可信來源。修改腳本或 YAML 後須重啟 GUI。腳本失敗時，GUI 保留已完成操作並顯示腳本位置與錯誤，不自動改跑預設腳本。
 
