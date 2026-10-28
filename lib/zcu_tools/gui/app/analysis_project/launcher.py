@@ -34,8 +34,6 @@ def analysis_selection_from_args(
     project_root is the default when --project-root is omitted. An empty entry
     leaves the GUI unopened. A component without an entry raises ValueError.
     """
-    if not args.entry and args.component is not None:
-        raise ValueError("--component requires --entry")
     return AnalysisSelection(
         args.project_root or project_root, args.entry, args.component
     )

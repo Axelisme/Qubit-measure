@@ -27,6 +27,11 @@ def test_cli_selection_preserves_empty_entry_and_rejects_component_alone(
         analysis_selection_from_args(args, project_root=str(tmp_path))
 
 
+def test_selection_rejects_component_without_entry(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="--component requires --entry"):
+        AnalysisSelection(tmp_path, component="Q1")
+
+
 def test_target_open_accepts_an_unresolved_selection(tmp_path: Path) -> None:
     with pytest.raises(FileNotFoundError, match="not-created"):
         AnalysisTarget.open(AnalysisSelection(tmp_path, "not-created", "Q1"))

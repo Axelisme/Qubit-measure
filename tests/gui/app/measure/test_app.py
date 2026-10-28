@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+import threading
 from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
@@ -19,7 +20,21 @@ from tests._lab import synthetic_lab
 from tests.gui.app.measure._reload_fakes import Loader
 
 
-def test_lab_composition_uses_injected_definitions(qapp, tmp_path):
+@pytest.fixture
+def restored_exception_hooks():
+    """Restore both process exception hooks even when construction or close fails."""
+    previous_hook = sys.excepthook
+    previous_thread_hook = threading.excepthook
+    try:
+        yield
+    finally:
+        sys.excepthook = previous_hook
+        threading.excepthook = previous_thread_hook
+
+
+def test_lab_composition_uses_injected_definitions(
+    qapp, tmp_path, restored_exception_hooks
+):
     from zcu_tools.cfg_model import PulseSpec, TemplateDef
     from zcu_tools.gui.app.measure.controller import Controller
 
@@ -40,7 +55,6 @@ def test_lab_composition_uses_injected_definitions(qapp, tmp_path):
         templates={"injected-pulse": template},
         workflow_attachments=(attachment(),),
     )
-    previous_hook = sys.excepthook
     behavior = None
     try:
         behavior = MeasureGuiBehavior(lab, clean=True, project_root=str(tmp_path))
@@ -53,7 +67,6 @@ def test_lab_composition_uses_injected_definitions(qapp, tmp_path):
     finally:
         if behavior is not None:
             behavior.close(None)
-        sys.excepthook = previous_hook
 
 
 def construct_with_legacy_keyword(
@@ -70,13 +83,9 @@ def construct_with_legacy_keyword(
 
 
 @pytest.mark.parametrize("keyword", ["registry_factory", "configure_workflows"])
-def test_measure_behavior_rejects_legacy_keywords(keyword):
-    previous_hook = sys.excepthook
-    try:
-        with pytest.raises(TypeError, match="unexpected keyword argument"):
-            construct_with_legacy_keyword(MeasureGuiBehavior, keyword)
-    finally:
-        sys.excepthook = previous_hook
+def test_measure_behavior_rejects_legacy_keywords(keyword, restored_exception_hooks):
+    with pytest.raises(TypeError, match="unexpected keyword argument"):
+        construct_with_legacy_keyword(MeasureGuiBehavior, keyword)
 
 
 class ControlledDrain(BackgroundRunner):
@@ -94,8 +103,12 @@ class ControlledDrain(BackgroundRunner):
 
 
 @pytest.fixture
-def composition(qapp: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    previous_hook = sys.excepthook
+def composition(
+    qapp: QApplication,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    restored_exception_hooks,
+):
     runner = ControlledDrain()
     monkeypatch.setattr(
         "zcu_tools.gui.app.measure.services.app_services.BackgroundRunner",
@@ -109,7 +122,6 @@ def composition(qapp: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPa
     finally:
         runner.ready = True
         behavior.close(None)
-        sys.excepthook = previous_hook
 
 
 def test_close_destroys_window_and_children_once(composition):

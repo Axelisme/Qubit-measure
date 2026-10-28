@@ -41,14 +41,13 @@ class FluxDepGuiBehavior(GuiRuntimeBehavior):
         """Register lab components, then open the requested entry and bind policies.
 
         selection supplies the project root, entry and optional component. Empty
-        entry leaves the GUI unopened; component without entry raises ValueError.
+        entry leaves the GUI unopened. AnalysisSelection construction rejects a
+        component without an entry before this behavior is constructed.
         Registration and target errors propagate before window assembly.
         A None planner preserves viewing/search but refuses export. A None flux
         provider refuses operations that require component context.
         """
         lab.register_components(component_registry)
-        if not selection.entry and selection.component is not None:
-            raise ValueError("--component requires --entry")
         self._export_planner = lab.fluxdep_export_planner
         self._flux_context_provider = lab.component_flux_context_provider
         self._project = AnalysisTarget.open(selection) if selection.entry else None

@@ -44,15 +44,14 @@ class DispersiveGuiBehavior(GuiRuntimeBehavior):
         """Register lab components, then open the requested entry.
 
         selection supplies the project root, entry and optional component. Empty
-        entry leaves the GUI unopened; component without entry raises ValueError.
+        entry leaves the GUI unopened. AnalysisSelection construction rejects a
+        component without an entry before this behavior is constructed.
         The project root is resolved at construction so later cwd changes do
         not move dialog defaults. Registration and target errors propagate
         before window assembly.
         Dispersive reads predictor frames, not component flux policy.
         """
         lab.register_components(component_registry)
-        if not selection.entry and selection.component is not None:
-            raise ValueError("--component requires --entry")
         self._project = AnalysisTarget.open(selection) if selection.entry else None
         self._project_root = str(Path(selection.project_root).resolve())
 
