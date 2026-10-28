@@ -1,6 +1,6 @@
 # FTF environment composition
 
-**Last updated:** 2026-10-28 (UTC), flux-pulse reset validation
+**Last updated:** 2026-10-28 (UTC), flux-pulse reset routing and bath semantics
 
 **讀者：** lab-author、framework-dev、agent。FTF 環境的組裝、數值接線與 acquisition 設定。
 
@@ -335,9 +335,11 @@ has not settled. Sequences that need DC readout must allow settling first.
 Ideal constant baseband platforms with zero tau and no distortion omit the
 continuous waveform. Without microwaves they use `t4`, with sudden basis changes
 between levels. Filtered or varying sampled envelopes provide a continuous
-waveform. Without microwaves they use `adiabatic_map`, which preserves
-instantaneous eigenstate populations apart from the modeled baths. The engine
-does not check the adiabatic condition. With microwaves they use `flux_dop853`.
+waveform. Without microwaves, continuous varying spans use `adiabatic_map`.
+It preserves instantaneous eigenstate populations even when the row bath has
+nonzero rates. Those rates affect coherence decay only; this kernel models no
+interlevel transitions. The engine does not check the adiabatic condition.
+With microwaves they use `flux_dop853`.
 There is no separate sudden/adiabatic switch.
 
 The Hamiltonian uses the existing exact flux expansion inside the retained
@@ -352,10 +354,17 @@ A reset sequence ramps to a park flux, holds there, returns to the snapshot DC,
 and starts terminal readout after the return. Disable drift when comparing hold
 times. Compute park Gibbs weights from `JointModel.eigensystem(park_flux)` at the
 configured temperature. Adiabatic return maps those energy-index populations
-back to DC. It does not rethermalize them to the DC Gibbs state. In a two-state
-model, the hold approaches park equilibrium with
+back to DC. It does not rethermalize them to the DC Gibbs state.
+
+In the no-microwave sequence here, population relaxation occurs during a truly
+constant park span routed to `t4`, not during the continuous `adiabatic_map`
+ramps. In a two-state model, that constant hold approaches park equilibrium with
 `T1 = 1 / (rates[0,1] + rates[1,0])`, where `rates = joint.rates(park_flux)`.
 A larger park gap alone does not guarantee a shorter T1. Check the rates too.
+A filtered waveform routed entirely through `adiabatic_map` is not a T1 reset.
+A filter tail that has not formed a constant plateau does not guarantee reset.
+Callers must check the actual routing and allow settling into a constant park
+span, as well as settling back to DC before readout.
 
 `tests/experiment/ftf/test_flux_reset.py` exercises synthetic templates through
 `plan_template` and `Engine.evolve`, observing the density at terminal readout
