@@ -227,6 +227,8 @@ def draw_summaries(
     "coherence_fluxdep", "Calibrate and measure independent lifetimes versus flux."
 )
 # tolerated(radon): Keep the point's stage sequence together for lab authors.
+# tolerated(radon): Per docs/code-quality.md, point-stage gates, GE spacing, history
+# updates and record writes stay in the main loop so acquisition order is visible.
 async def coherence_fluxdep(  # noqa: C901, PLR0912, PLR0915  # tolerated: workflow flow reads top to bottom
     env: WorkflowEnv[Calibrated],
     plan: CoherencePlan,

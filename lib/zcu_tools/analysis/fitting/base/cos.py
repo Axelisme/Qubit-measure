@@ -54,7 +54,7 @@ def fitcos(
         phase = np.angle(fft[max_id], deg=True) % 360
 
         assign_init_p(fitparams, [y0, yscale, freq, phase])
-    # tolerated(cast): FFT guesses fill four unset slots and preserve supplied values; in-place filling cannot narrow the list type.
+    # tolerated(cast): reportArgumentType: FFT guesses fill four unset slots and preserve supplied values; in-place filling cannot narrow the list type.
     fitparams = cast(list[float], fitparams)
 
     # bounds
@@ -133,7 +133,7 @@ def fitdecaycos(
         freq = fitparams[2]
         assert freq is not None
         freq_bound = (0.2 * freq, 5 * freq)
-    # tolerated(cast): FFT/decay guesses fill five unset slots and preserve supplied values; in-place filling cannot narrow the list type.
+    # tolerated(cast): reportArgumentType: FFT/decay guesses fill five unset slots and preserve supplied values; in-place filling cannot narrow the list type.
     fitparams = cast(list[float], fitparams)
 
     # bounds

@@ -69,8 +69,7 @@ class ExperimentFigureArea(QWidget):
         if self._has_analysis:
             self._analysis_stack = FigurePaneLayout()
             self._analysis_placeholder = QLabel("(no plot yet)")
-            # tolerated: QtPy promotes the binding enum members onto Qt at runtime.
-            self._analysis_placeholder.setAlignment(Qt.AlignCenter)  # pyright: ignore[reportAttributeAccessIssue]
+            self._analysis_placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
             self._analysis_stack.addWidget(self._analysis_placeholder)
             self._analysis_container = FigureContainer(
                 self._analysis_stack, self._analysis_placeholder
@@ -96,8 +95,7 @@ class ExperimentFigureArea(QWidget):
         if self._has_post:
             self._post_stack = FigurePaneLayout()
             self._post_placeholder = QLabel("(no plot yet)")
-            # tolerated: QtPy promotes the binding enum members onto Qt at runtime.
-            self._post_placeholder.setAlignment(Qt.AlignCenter)  # pyright: ignore[reportAttributeAccessIssue]
+            self._post_placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
             self._post_stack.addWidget(self._post_placeholder)
             self._post_container = FigureContainer(
                 self._post_stack, self._post_placeholder
@@ -125,8 +123,7 @@ class ExperimentFigureArea(QWidget):
         # Run figure pane (always)
         self._run_stack = FigurePaneLayout()
         self._run_placeholder = QLabel("(no plot yet)")
-        # tolerated: QtPy promotes the binding enum members onto Qt at runtime.
-        self._run_placeholder.setAlignment(Qt.AlignCenter)  # pyright: ignore[reportAttributeAccessIssue]
+        self._run_placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._run_stack.addWidget(self._run_placeholder)
         self._run_container = FigureContainer(self._run_stack, self._run_placeholder)
         self._run_figures: FigureCollection | None = None
@@ -154,8 +151,7 @@ class ExperimentFigureArea(QWidget):
 
         # Placeholder for Guide (no figure) — Data now shows gallery (S4)
         self._right_placeholder = QLabel("(no plot yet)")
-        # tolerated: QtPy promotes the binding enum members onto Qt at runtime.
-        self._right_placeholder.setAlignment(Qt.AlignCenter)  # pyright: ignore[reportAttributeAccessIssue]
+        self._right_placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         self._right_stack.addWidget(self._run_panel_right)
         if self._has_analysis:
