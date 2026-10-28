@@ -300,7 +300,7 @@ class WritebackService:
         run_id is the source RunMetadata.run_id, including unsaved Runs and
         historical native Loads; None means no native acquisition evidence.
         It stays fixed through Save, selection changes, edits and application.
-        Application copies it into accepted evidence and library provenance.
+        Application copies it into accepted evidence.
         device_snapshot maps Run-fixed device names to their JSON settings; None
         means no device evidence. Records are detached adapter-owned JSON;
         this service neither reads device facts nor adds coordinate fields.
@@ -505,7 +505,7 @@ class WritebackService:
         captured SavedPoint in its still-open entry. GUI defaults
         to the GUI origin; MCP callers explicitly identify the MCP frontend.
         Unknown/duplicate IDs or concrete destinations fail before any write.
-        Accepted payload and every library provenance use draft.run_id;
+        Accepted payload uses draft.run_id;
         application never re-reads Run or Save state to determine its identity.
         Each parameter's metadata is replaced by {"stderr": x} when the item has
         stderr, else by {}; no source, kind, run_id or time is written there.
@@ -553,11 +553,7 @@ class WritebackService:
                 written["parameter"].append(path)
             else:
                 path = parameters.library_key(item.target_name)
-                items.append(
-                    concrete.ModuleWriteback(
-                        path, self._module_spec(entry), item.stderr
-                    )
-                )
+                items.append(concrete.ModuleWriteback(path, self._module_spec(entry)))
                 written["ml_modules"].append(path)
             if path in destinations:
                 raise InvalidInputError(f"duplicate writeback destination: {path!r}")
@@ -567,7 +563,6 @@ class WritebackService:
                 parameters.target,
                 tuple(items),
                 evidence=concrete.WritebackEvidence(
-                    kind=draft.experiment_name,
                     origin=origin.origin,
                     run_id=draft.run_id,
                 ),

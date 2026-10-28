@@ -1,17 +1,13 @@
-"""Specs, materialization, provenance and single-file publication contracts."""
+"""Specs, materialization and single-file publication contracts."""
 
 import json
 import logging
 import os
 from collections.abc import Callable
 from pathlib import Path
-from unittest.mock import patch
-from uuid import uuid4
 
 import numpy as np
 import pytest
-from pydantic import TypeAdapter
-from ruamel.yaml import YAML
 from zcu_tools.cfg_model import (
     ConstWaveformCfg,
     PulseCfg,
@@ -32,20 +28,9 @@ from zcu_tools.resources.document_store import (
     DocumentChange,
     DocumentValue,
 )
-from zcu_tools.resources.entry.ledger import RecordsLedger
-from zcu_tools.resources.entry.ledger_models import (
-    AcceptedPayload,
-    AcceptedWrite,
-    LedgerEvent,
-)
-from zcu_tools.resources.entry.provenance import Provenance, ProvenanceData
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
 from tests.program.v2.support.waveform_assets import InMemoryWaveformAsset
-
-ENTRY_ID = "78fa0941-f9ce-49d4-9665-4eb9302b8162"
-EVENT_ID = "b13fea4c-1678-4b5c-b7a2-edb975c20611"
-AT = "2026-10-04T00:00:00Z"
 
 
 def pulse(*, gain: float = 0.25, waveform: str = "Q1.waveforms.base") -> PulseSpec:
@@ -62,60 +47,6 @@ def document() -> ModuleLibraryDocument:
                 waveforms={"base": ConstWaveformCfg(length=0.05)},
             )
         },
-    )
-
-
-@pytest.mark.parametrize("append_tail", [False, True])
-def test_nonempty_edits_parse_only_new_ledger_tail(
-    files: tuple[Path, Path], append_tail: bool
-) -> None:
-    _, ledger_path = files
-    events = tuple(
-        LedgerEvent(
-            id=str(uuid4()),
-            kind="accepted",
-            at=AT,
-            entry_id=ENTRY_ID,
-            origin="notebook",
-            payload=AcceptedPayload(
-                writes=(AcceptedWrite(path="Q1.pulses.pi.gain", value=0.25),)
-            ),
-        )
-        for _ in range(1000)
-    )
-    ledger_path.write_text("".join(event.model_dump_json() + "\n" for event in events))
-    value = document()
-    value.provenance["Q1.pulses.pi.gain"] = ProvenanceData.from_provenance(
-        Provenance(events[0].id, "rabi", None, AT, 0.01)
-    )
-    write_document(files, value)
-    library = open_library(files)
-    # Warm the same public nonempty edit path used by repeated setters.
-    with library.edit() as draft:
-        draft.set_module("Q1.pulses.pi2", pulse(gain=0.2))
-    if append_tail:
-        with ledger_path.open("a") as stream:
-            stream.write(
-                events[0].model_copy(update={"id": str(uuid4())}).model_dump_json()
-                + "\n"
-            )
-
-    with patch.object(
-        TypeAdapter,
-        "validate_json",
-        autospec=True,
-        side_effect=TypeAdapter.validate_json,
-    ) as parsed:
-        for gain in (0.3, 0.4):
-            with library.edit() as draft:
-                draft.set_module("Q1.pulses.pi2", pulse(gain=gain))
-
-    assert library.snapshot().module_spec("Q1.pulses.pi2") == pulse(gain=0.4)
-    assert library.snapshot().meta("Q1.pulses.pi.gain") == Provenance(
-        events[0].id, "rabi", None, AT, 0.01
-    )
-    assert parsed.call_count == int(append_tail), (
-        "validated ledger history must not be reparsed by nonempty edits"
     )
 
 
@@ -145,40 +76,21 @@ def assets() -> InMemoryWaveformAsset:
 
 
 @pytest.fixture
-def files(tmp_path: Path) -> tuple[Path, Path]:
+def library_path(tmp_path: Path) -> Path:
     path = tmp_path / "module_cfg.yaml"
     path.write_text(
         "format: zcu.module-library\nformat_version: '2.0'\n", encoding="utf-8"
     )
-    records = tmp_path / "records"
-    records.mkdir()
-    return path, records / "ledger.jsonl"
+    return path
 
 
-def open_library(files: tuple[Path, Path]) -> ModuleLibrary:
-    path, ledger = files
-    return ModuleLibrary(path, assets=assets(), ledger=ledger, entry_id=ENTRY_ID)
+def open_library(library_path: Path) -> ModuleLibrary:
+    path = library_path
+    return ModuleLibrary(path, assets=assets())
 
 
-def write_document(files: tuple[Path, Path], value: ModuleLibraryDocument) -> None:
-    files[0].write_text(value.model_dump_json(), encoding="utf-8")
-
-
-def local_source(files: tuple[Path, Path]) -> Provenance:
-    RecordsLedger(files[1].parent, entry_id=ENTRY_ID).append(
-        LedgerEvent(
-            id=EVENT_ID,
-            kind="accepted",
-            at=AT,
-            entry_id=ENTRY_ID,
-            origin="notebook",
-            payload=AcceptedPayload(
-                writes=(AcceptedWrite(path="Q1.pulses.pi.gain", value=0.25),),
-            ),
-        ),
-        record={"summary": {"gain": 0.25}},
-    )
-    return Provenance(EVENT_ID, "rabi", None, AT, 0.01)
+def write_document(library_path: Path, value: ModuleLibraryDocument) -> None:
+    library_path.write_text(value.model_dump_json(), encoding="utf-8")
 
 
 @pytest.mark.parametrize(
@@ -211,10 +123,10 @@ def test_library_key_kind_rejects_invalid_or_leaf_paths(path: str) -> None:
 
 
 def test_library_without_assets_supports_specs_but_rejects_arb_materialization(
-    files: tuple[Path, Path],
+    library_path: Path,
 ) -> None:
-    path, ledger = files
-    library = ModuleLibrary(path, ledger=ledger, entry_id=ENTRY_ID)
+    path = library_path
+    library = ModuleLibrary(path)
     with library.edit() as draft:
         draft.set_waveform(
             "Q1.waveforms.arb",
@@ -229,26 +141,26 @@ def test_library_without_assets_supports_specs_but_rejects_arb_materialization(
 
 
 def test_header_only_open_and_empty_edit_do_not_rewrite(
-    files: tuple[Path, Path],
+    library_path: Path,
 ) -> None:
-    original = files[0].read_bytes()
-    library = open_library(files)
-    assert library.source_path == files[0].resolve()
+    original = library_path.read_bytes()
+    library = open_library(library_path)
+    assert library.source_path == library_path.resolve()
     assert library.snapshot().module_keys() == ()
     assert library.snapshot().waveform_keys() == ()
     changes: list[DocumentChange] = []
     library.subscribe(changes.append)
     with library.edit() as draft:
         assert draft.snapshot().document().components == {}
-    assert files[0].read_bytes() == original
+    assert library_path.read_bytes() == original
     assert changes == []
 
 
-def test_missing_document_is_not_created(files: tuple[Path, Path]) -> None:
-    files[0].unlink()
+def test_missing_document_is_not_created(library_path: Path) -> None:
+    library_path.unlink()
     with pytest.raises(FileNotFoundError):
-        open_library(files)
-    assert not files[0].exists()
+        open_library(library_path)
+    assert not library_path.exists()
 
 
 @pytest.mark.parametrize(
@@ -261,12 +173,12 @@ def test_missing_document_is_not_created(files: tuple[Path, Path]) -> None:
     ],
 )
 def test_open_rejects_invalid_document_without_rewriting(
-    files: tuple[Path, Path], content: str
+    library_path: Path, content: str
 ) -> None:
-    files[0].write_text(content, encoding="utf-8")
+    library_path.write_text(content, encoding="utf-8")
     with pytest.raises(ValueError, match="format|header|version|Extra"):
-        open_library(files)
-    assert files[0].read_text(encoding="utf-8") == content
+        open_library(library_path)
+    assert library_path.read_text(encoding="utf-8") == content
 
 
 @pytest.mark.parametrize(
@@ -329,15 +241,15 @@ def test_validation_context_is_fresh_and_uses_fixed_snapshot() -> None:
 
 
 def test_snapshot_is_memory_only_and_does_not_implicitly_refresh(
-    files: tuple[Path, Path],
+    library_path: Path,
 ) -> None:
-    write_document(files, document())
-    library = open_library(files)
+    write_document(library_path, document())
+    library = open_library(library_path)
     first = library.snapshot()
     changed = document()
     changed.components["Q1"].pulses["pi"].gain = 0.5
-    write_document(files, changed)
-    files[0].unlink()
+    write_document(library_path, changed)
+    library_path.unlink()
     assert first.value("Q1.pulses.pi.gain") == 0.25
     assert library.snapshot().value("Q1.pulses.pi.gain") == 0.25
 
@@ -361,7 +273,6 @@ def test_projection_kind_and_missing_root_are_distinct() -> None:
         snapshot.value("Q1.pulses.pi.absent")
     with pytest.raises(AttributeError):
         snapshot.value("Q1.pulses.absent.gain")
-    assert snapshot.meta("Q1.pulses.pi.gain") is None
 
 
 def test_entry_projection_does_not_expand_missing_asset_or_child() -> None:
@@ -383,23 +294,20 @@ def test_entry_projection_does_not_expand_missing_asset_or_child() -> None:
 
 
 def test_draft_snapshot_supplies_previous_writes_to_later_materialization(
-    files: tuple[Path, Path],
+    library_path: Path,
 ) -> None:
-    library = open_library(files)
+    library = open_library(library_path)
     with library.edit() as draft:
         draft.set_waveform("Q1.waveforms.base", ConstWaveformCfg(length=0.05))
         draft.set_module("Q1.pulses.pi", pulse())
         assert library.snapshot().module_keys() == ()
         assert draft.snapshot().value("Q1.pulses.pi.waveform.length") == 0.05
-    assert open_library(files).snapshot().value("Q1.pulses.pi.gain") == 0.25
-    source = library.snapshot().meta("Q1.pulses.pi.gain")
-    assert source is not None
-    assert source.source == "manual"
+    assert open_library(library_path).snapshot().value("Q1.pulses.pi.gain") == 0.25
 
 
-def test_body_failure_does_not_publish_or_write(files: tuple[Path, Path]) -> None:
-    original = files[0].read_bytes()
-    library = open_library(files)
+def test_body_failure_does_not_publish_or_write(library_path: Path) -> None:
+    original = library_path.read_bytes()
+    library = open_library(library_path)
     changes: list[DocumentChange] = []
     library.subscribe(changes.append)
 
@@ -411,14 +319,14 @@ def test_body_failure_does_not_publish_or_write(files: tuple[Path, Path]) -> Non
     with pytest.raises(RuntimeError, match="reject body"):
         rejected_edit()
     assert library.snapshot().module_keys() == ()
-    assert files[0].read_bytes() == original
+    assert library_path.read_bytes() == original
     assert changes == []
 
 
 def test_invalid_family_rejects_operation_without_poisoning_draft(
-    files: tuple[Path, Path],
+    library_path: Path,
 ) -> None:
-    library = open_library(files)
+    library = open_library(library_path)
     with library.edit() as draft:
         with pytest.raises(ValueError, match="family|partition"):
             draft.set_module("Q1.reset.pi", pulse())
@@ -427,213 +335,14 @@ def test_invalid_family_rejects_operation_without_poisoning_draft(
     assert library.snapshot().module_keys() == ("Q1.pulses.pi",)
 
 
-def test_edit_expires_and_nested_edit_is_rejected(files: tuple[Path, Path]) -> None:
-    library = open_library(files)
+def test_edit_expires_and_nested_edit_is_rejected(library_path: Path) -> None:
+    library = open_library(library_path)
     with library.edit() as draft, pytest.raises(RuntimeError), library.edit():
         pass
     with pytest.raises(RuntimeError):
         draft.snapshot()
     with pytest.raises(RuntimeError):
         draft.set_module("Q1.pulses.pi", pulse())
-
-
-def test_manual_replacement_clears_previous_sources_and_clone_marker() -> None:
-    value = document()
-    value.provenance["Q1.pulses.pi.gain"] = ProvenanceData(
-        source=EVENT_ID,
-        kind="rabi",
-        run_id=None,
-        at=AT,
-        stderr=0.01,
-        cloned_from={"entry_id": ENTRY_ID, "point": "first"},
-    )
-    snapshot = LibrarySnapshot(value)
-    replacement = snapshot.replaced_module("Q1.pulses.pi", pulse(gain=0.5))
-    source = replacement.meta("Q1.pulses.pi.gain")
-    assert source is not None
-    assert source.source == "manual"
-    assert source.cloned_from is None
-    original_source = snapshot.meta("Q1.pulses.pi.gain")
-    assert original_source is not None
-    assert original_source.source == EVENT_ID
-    assert replacement.value("Q1.pulses.pi.gain") == 0.5
-    envelope = replacement.replaced_waveform(
-        "Q1.waveforms.base", ConstWaveformCfg(length=0.1)
-    )
-    assert envelope.value("Q1.pulses.pi.waveform.length") == 0.1
-    assert replacement.value("Q1.pulses.pi.waveform.length") == 0.05
-
-
-def test_source_acceptance_reads_ledger_once_for_all_provenance_leaves(
-    files: tuple[Path, Path],
-) -> None:
-    source = local_source(files)
-    write_document(files, document())
-    library = open_library(files)
-    with library.edit() as draft:
-        with patch.object(Path, "open", autospec=True, side_effect=Path.open) as opened:
-            draft.accept_source("Q1.pulses.pi", provenance=source)
-        assert draft.snapshot().meta("Q1.pulses.pi.gain") == source
-
-    ledger_reads = [call for call in opened.call_args_list if call.args[0] == files[1]]
-    assert len(ledger_reads) == 1
-    assert library.snapshot().meta("Q1.pulses.pi.freq") == source
-
-
-def test_source_acceptance_round_trips_local_evidence_without_changing_value(
-    files: tuple[Path, Path],
-) -> None:
-    source = local_source(files)
-    write_document(files, document())
-    library = open_library(files)
-    before = library.snapshot().entry_value("Q1.pulses.pi", kind="module")
-    with library.edit() as draft:
-        draft.accept_source("Q1.pulses.pi", provenance=source)
-        assert draft.snapshot().meta("Q1.pulses.pi.gain") == source
-    snapshot = open_library(files).snapshot()
-    assert snapshot.entry_value("Q1.pulses.pi", kind="module") == before
-    assert snapshot.meta("Q1.pulses.pi.gain") == source
-    evidence = RecordsLedger(files[1].parent, entry_id=ENTRY_ID).get(EVENT_ID)
-    assert evidence.record == {"summary": {"gain": 0.25}}
-
-
-def test_invalid_source_leaves_draft_and_disk_unchanged(
-    files: tuple[Path, Path],
-) -> None:
-    write_document(files, document())
-    library = open_library(files)
-    original = files[0].read_bytes()
-    with library.edit() as draft:
-        with pytest.raises(ValueError, match="does not exist") as failure:
-            draft.accept_source(
-                "Q1.pulses.pi", provenance=Provenance(EVENT_ID, "rabi", None, AT, 0.01)
-            )
-        assert isinstance(failure.value.__cause__, KeyError)
-        assert draft.snapshot().meta("Q1.pulses.pi.gain") is None
-    assert files[0].read_bytes() == original
-
-
-def test_open_validates_nonmanual_source_and_attachment(
-    files: tuple[Path, Path],
-) -> None:
-    local_source(files)
-    value = document()
-    value.provenance["Q1.pulses.pi.gain"] = ProvenanceData(
-        source=EVENT_ID,
-        kind="rabi",
-        run_id=None,
-        at=AT,
-        stderr=0.01,
-    )
-    write_document(files, value)
-    open_library(files)
-    (files[1].parent / f"{EVENT_ID}.json").unlink()
-    with pytest.raises(FileNotFoundError):
-        open_library(files)
-
-
-@pytest.mark.parametrize("action", ["refresh", "edit"])
-def test_unchanged_library_bytes_recheck_attachments_without_reparsing_yaml(
-    files: tuple[Path, Path], action: str
-) -> None:
-    local_source(files)
-    value = document()
-    value.provenance["Q1.pulses.pi.gain"] = ProvenanceData(
-        source=EVENT_ID, kind="rabi", run_id=None, at=AT, stderr=0.01
-    )
-    write_document(files, value)
-    library = open_library(files)
-    (files[1].parent / f"{EVENT_ID}.json").unlink()
-
-    def reload_library() -> None:
-        if action == "refresh":
-            library.refresh()
-        else:
-            with library.edit():
-                pass
-
-    with (
-        patch.object(YAML, "load", autospec=True, side_effect=YAML.load) as load,
-        pytest.raises(FileNotFoundError),
-    ):
-        reload_library()
-    assert load.call_count == 0
-    assert library.snapshot().meta("Q1.pulses.pi.gain") is not None
-
-
-@pytest.mark.parametrize("action", ["refresh", "edit"])
-def test_unchanged_library_checks_dependencies_without_reading_attachment_content(
-    files: tuple[Path, Path], action: str, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    source = local_source(files)
-    value = document()
-    value.provenance["Q1.pulses.pi.gain"] = ProvenanceData.from_provenance(source)
-    write_document(files, value)
-    library = open_library(files)
-    attachment = files[1].parent / f"{EVENT_ID}.json"
-    read_text = Path.read_text
-    attachment_reads: list[Path] = []
-
-    def observe_read(path: Path, *args: object, **kwargs: object) -> str:
-        if path == attachment:
-            attachment_reads.append(path)
-        return read_text(path, encoding="utf-8")
-
-    monkeypatch.setattr(Path, "read_text", observe_read)
-
-    def reload_library() -> None:
-        if action == "refresh":
-            library.refresh()
-        else:
-            with library.edit():
-                pass
-
-    reload_library()
-    reload_library()
-    assert attachment_reads == []
-    # Removing an event invalidates a cached library even when its bytes match.
-    files[1].unlink()
-    reload_library()
-    assert library.snapshot().module_keys() == ("Q1.pulses.pi2",)
-    assert library.snapshot().meta("Q1.pulses.pi.gain") is None
-
-
-def test_rename_preserves_complete_metadata_and_segment_boundaries() -> None:
-    value = document()
-    value.components["Q1"].pulses["pi"].waveform = "Q1.waveforms.absent"
-    value.provenance = {
-        "Q1.pulses.pi": ProvenanceData(
-            source="manual", kind=None, run_id=None, at=AT, stderr=None
-        ),
-        "Q1.pulses.pi.gain": ProvenanceData(
-            source=EVENT_ID,
-            kind="rabi",
-            run_id=None,
-            at=AT,
-            stderr=0.01,
-            cloned_from={"entry_id": ENTRY_ID, "point": "first"},
-        ),
-        "Q1.pulses.pi2.gain": ProvenanceData(
-            source="manual", kind=None, run_id=None, at=AT, stderr=None
-        ),
-    }
-    snapshot = LibrarySnapshot(value)
-    before = snapshot.entry_state("Q1.pulses.pi", kind="module")
-    assert set(before.provenance) == {(), ("gain",)}
-    renamed = snapshot.renamed("Q1.pulses.pi", "R1.pulses.copy", kind="module")
-    assert renamed.entry_state("R1.pulses.copy", kind="module") == before
-    assert renamed.meta("Q1.pulses.pi.gain") is None
-    assert renamed.meta("Q1.pulses.pi2.gain") == snapshot.meta("Q1.pulses.pi2.gain")
-    assert snapshot.entry_state("Q1.pulses.pi", kind="module") == before
-    before.value["gain"] = 0.9
-    clone = before.provenance[("gain",)].cloned_from
-    assert clone is not None
-    clone["point"] = "changed"
-    assert renamed.entry_state("R1.pulses.copy", kind="module").value["gain"] == 0.25
-    moved_source = renamed.meta("R1.pulses.copy.gain")
-    assert moved_source is not None
-    assert moved_source.cloned_from is not None
-    assert moved_source.cloned_from["point"] == "first"
 
 
 @pytest.mark.parametrize(
@@ -647,31 +356,26 @@ def test_invalid_rename_does_not_mutate_original(target: str) -> None:
     assert snapshot.document() == before
 
 
-def test_active_rename_commits_spec_and_sources_together_without_ledger_append(
-    files: tuple[Path, Path],
+def test_active_rename_preserves_old_snapshot(
+    library_path: Path,
 ) -> None:
-    source = local_source(files)
-    write_document(files, document())
-    library = open_library(files)
-    with library.edit() as draft:
-        draft.accept_source("Q1.pulses.pi", provenance=source)
-    before = library.snapshot().entry_state("Q1.pulses.pi", kind="module")
-    ledger_bytes = files[1].read_bytes()
+    write_document(library_path, document())
+    library = open_library(library_path)
+    before = library.snapshot().entry_value("Q1.pulses.pi", kind="module")
     with library.edit() as draft:
         draft.rename("Q1.pulses.pi", "Q1.pulses.copy", kind="module")
-        assert draft.snapshot().entry_state("Q1.pulses.copy", kind="module") == before
-        assert library.snapshot().entry_state("Q1.pulses.pi", kind="module") == before
-    reopened = open_library(files).snapshot()
-    assert reopened.entry_state("Q1.pulses.copy", kind="module") == before
+        assert draft.snapshot().entry_value("Q1.pulses.copy", kind="module") == before
+        assert library.snapshot().entry_value("Q1.pulses.pi", kind="module") == before
+    reopened = open_library(library_path).snapshot()
+    assert reopened.entry_value("Q1.pulses.copy", kind="module") == before
     assert "Q1.pulses.pi" not in reopened.module_keys()
-    assert files[1].read_bytes() == ledger_bytes
 
 
 def test_delete_candidate_and_live_delete_do_not_cascade(
-    files: tuple[Path, Path],
+    library_path: Path,
 ) -> None:
-    write_document(files, document())
-    library = open_library(files)
+    write_document(library_path, document())
+    library = open_library(library_path)
     before = library.snapshot()
     deleted = before.deleted("Q1.waveforms.base", kind="waveform")
     assert deleted.waveform_keys() == ()
@@ -682,16 +386,16 @@ def test_delete_candidate_and_live_delete_do_not_cascade(
     )
     with library.edit() as draft:
         draft.delete("Q1.waveforms.base", kind="waveform")
-    assert open_library(files).snapshot().waveform_keys() == ()
+    assert open_library(library_path).snapshot().waveform_keys() == ()
     with pytest.raises(ValueError, match="Q1.waveforms.base"):
         library.snapshot().get_module("Q1.pulses.pi")
 
 
-def test_conflict_rejects_complete_losing_proposal_and_sources(
-    files: tuple[Path, Path],
+def test_conflict_rejects_complete_losing_proposal(
+    library_path: Path,
 ) -> None:
-    write_document(files, document())
-    losing, winning = open_library(files), open_library(files)
+    write_document(library_path, document())
+    losing, winning = open_library(library_path), open_library(library_path)
 
     def competing_edits() -> None:
         with losing.edit() as draft:
@@ -702,20 +406,17 @@ def test_conflict_rejects_complete_losing_proposal_and_sources(
 
     with pytest.raises(ConflictError):
         competing_edits()
-    current = open_library(files).snapshot()
+    current = open_library(library_path).snapshot()
     assert current.value("Q1.pulses.pi.gain") == 0.6
-    assert current.meta("Q1.pulses.pi.gain") == winning.snapshot().meta(
-        "Q1.pulses.pi.gain"
-    )
     assert "Q1.pulses.extra" not in current.module_keys()
     assert losing.snapshot().value("Q1.pulses.pi.gain") == 0.25
 
 
 def test_refresh_publishes_after_install_and_unsubscribe_is_idempotent(
-    files: tuple[Path, Path],
+    library_path: Path,
 ) -> None:
-    write_document(files, document())
-    library, other = open_library(files), open_library(files)
+    write_document(library_path, document())
+    library, other = open_library(library_path), open_library(library_path)
     observed: list[tuple[str, float]] = []
 
     def observe(change: DocumentChange) -> None:
@@ -737,10 +438,10 @@ def test_refresh_publishes_after_install_and_unsubscribe_is_idempotent(
     assert observed == [("refresh", 0.5)]
 
 
-def test_invalid_refresh_retains_published_snapshot(files: tuple[Path, Path]) -> None:
-    write_document(files, document())
-    library = open_library(files)
-    files[0].write_text("format: wrong\nformat_version: '2.0'\n", encoding="utf-8")
+def test_invalid_refresh_retains_published_snapshot(library_path: Path) -> None:
+    write_document(library_path, document())
+    library = open_library(library_path)
+    library_path.write_text("format: wrong\nformat_version: '2.0'\n", encoding="utf-8")
     with pytest.raises(ValueError, match="format"):
         library.refresh()
     assert library.snapshot().value("Q1.pulses.pi.gain") == 0.25
@@ -788,13 +489,13 @@ def test_pure_waveform_rename_does_not_evaluate_reference_cycle_or_asset() -> No
     assert moved.entry_value("R1.waveforms.copy", kind="waveform")["data"] == "absent"
 
 
-def test_atomic_replace_failure_does_not_publish_candidate_or_sources(
-    files: tuple[Path, Path],
+def test_atomic_replace_failure_does_not_publish_candidate(
+    library_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    write_document(files, document())
-    library = open_library(files)
-    original = files[0].read_bytes()
+    write_document(library_path, document())
+    library = open_library(library_path)
+    original = library_path.read_bytes()
     changes: list[DocumentChange] = []
     library.subscribe(changes.append)
 
@@ -805,40 +506,12 @@ def test_atomic_replace_failure_does_not_publish_candidate_or_sources(
     with pytest.raises(OSError, match="replace rejected"), library.edit() as draft:
         draft.set_module("Q1.pulses.pi", pulse(gain=0.5))
     assert library.snapshot().value("Q1.pulses.pi.gain") == 0.25
-    assert library.snapshot().meta("Q1.pulses.pi.gain") is None
-    assert files[0].read_bytes() == original
+    assert library_path.read_bytes() == original
     assert changes == []
 
 
-def test_missing_source_refresh_removes_root_and_explicit_replacement_publishes(
-    files: tuple[Path, Path],
-) -> None:
-    write_document(files, document())
-    library = open_library(files)
-    changes: list[DocumentChange] = []
-    library.subscribe(changes.append)
-    changed = document()
-    changed.provenance["Q1.pulses.pi.gain"] = ProvenanceData(
-        source=EVENT_ID,
-        kind="rabi",
-        run_id=None,
-        at=AT,
-        stderr=0.01,
-    )
-    write_document(files, changed)
-    assert library.refresh()
-    assert library.snapshot().module_keys() == ("Q1.pulses.pi2",)
-    assert library.snapshot().meta("Q1.pulses.pi.gain") is None
-    assert len(changes) == 1
-    source = local_source(files)
-    write_document(files, changed)
-    assert library.refresh()
-    assert library.snapshot().meta("Q1.pulses.pi.gain") == source
-    assert len(changes) == 2
-
-
-def test_obsolete_nested_readout_is_named_and_backed_up_while_flat_readout_loads(
-    files: tuple[Path, Path], caplog: pytest.LogCaptureFixture
+def test_obsolete_nested_readout_is_reported_while_flat_readout_loads(
+    library_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
     raw = {
         "format": "zcu.module-library",
@@ -878,12 +551,12 @@ def test_obsolete_nested_readout_is_named_and_backed_up_while_flat_readout_loads
             }
         },
     }
-    path = files[0]
+    path = library_path
     path.write_text(json.dumps(raw), encoding="utf-8")
     original = path.read_bytes()
 
     with caplog.at_level(logging.WARNING):
-        library = open_library(files)
+        library = open_library(library_path)
 
     snapshot = library.snapshot()
     assert snapshot.module_keys() == ("Q1.readout.probe",)
@@ -893,22 +566,13 @@ def test_obsolete_nested_readout_is_named_and_backed_up_while_flat_readout_loads
     assert cfg.waveform.length == 0.5
     with pytest.raises(KeyError, match="broken_probe"):
         snapshot.module_spec("Q1.readout.broken_probe")
-    backups = list(path.parent.glob("*.bak*"))
-    assert len(backups) == 1
-    assert backups[0].read_bytes() == original
-    warnings = [
-        record.getMessage()
-        for record in caplog.records
-        if record.levelno == logging.WARNING
-    ]
-    assert len(warnings) == 1
-    assert "Q1.readout.broken_probe" in warnings[0]
-    assert str(backups[0]) in warnings[0]
+    assert path.read_bytes() == original
+    assert library.snapshot().invalid_entries()["Q1.readout.broken_probe"]
     assert not library.refresh()
 
 
 def test_mux_and_pulse_readouts_roundtrip_and_materialize_fixed_snapshot(
-    files: tuple[Path, Path],
+    library_path: Path,
 ) -> None:
     from zcu_tools import cfg_model
 
@@ -930,7 +594,7 @@ def test_mux_and_pulse_readouts_roundtrip_and_materialize_fixed_snapshot(
             {"freq": 5980.0, "gain": -0.04, "phase": 0.0, "ro_ch": 1, "label": ""},
         ],
     }
-    library = open_library(files)
+    library = open_library(library_path)
     with library.edit() as draft:
         draft.set_module("Q1.readout.mux", cfg_model.module_spec_from_raw(raw))
         draft.set_module(
@@ -948,7 +612,7 @@ def test_mux_and_pulse_readouts_roundtrip_and_materialize_fixed_snapshot(
                 }
             ),
         )
-    fixed = open_library(files).snapshot()
+    fixed = open_library(library_path).snapshot()
     spec = fixed.module_spec("Q1.readout.mux")
     assert isinstance(spec, cfg_model.MuxReadoutSpec)
     assert fixed.entry_value("Q1.readout.mux", kind="module")["tones"] == raw["tones"]
@@ -960,7 +624,7 @@ def test_mux_and_pulse_readouts_roundtrip_and_materialize_fixed_snapshot(
     assert isinstance(fixed.get_module("Q1.readout.pulse"), PulseReadoutCfg)
     with library.edit() as draft:
         draft.set_module("Q1.readout.mux", spec.with_updates(length=3.0))
-    files[0].unlink()
+    library_path.unlink()
     cfg.tones.reverse()
     assert fixed.get_module("Q1.readout.mux").to_dict()["tones"] == raw["tones"]
     assert fixed.get_module("Q1.readout.mux").to_dict()["length"] == 2.0

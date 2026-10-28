@@ -6,7 +6,6 @@ from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from math import isfinite
 from typing import TYPE_CHECKING, Protocol
 from uuid import uuid4
 
@@ -33,7 +32,6 @@ from .ledger_models import (
     SourceReference,
 )
 from .points import PointView
-from .provenance import Provenance
 from .storage import PointStorageBinding, bind_record_table
 from .views import document_value, snapshot
 
@@ -62,14 +60,11 @@ class ModuleWriteback:
     """One concrete library key and persistent module Spec (not a raw mapping).
 
     path follows the library owner's module key contract, with roles already
-    resolved. value retains inline Specs and concrete child references. stderr
-    is unknown when None, otherwise a finite nonnegative working-unit uncertainty
-    attached to every accepted leaf source; no unit conversion occurs.
+    resolved. value retains inline Specs and concrete child references.
     """
 
     path: str
     value: ModuleSpec
-    stderr: float | None = None
 
 
 @dataclass(frozen=True)
@@ -77,14 +72,11 @@ class WaveformWriteback:
     """One concrete library waveform key and persistent Spec, never raw mapping.
 
     path follows the library owner's waveform key contract, with roles already
-    resolved. value retains inline Specs and concrete child references. stderr
-    is unknown when None, otherwise a finite nonnegative working-unit uncertainty
-    attached to every accepted leaf source; no unit conversion occurs.
+    resolved. value retains inline Specs and concrete child references.
     """
 
     path: str
     value: WaveformSpec
-    stderr: float | None = None
 
 
 @dataclass(frozen=True)
@@ -114,13 +106,12 @@ type WritebackItem = (
 class WritebackEvidence:
     """Caller-captured source facts shared by all writes in one acceptance.
 
-    kind is the nonempty captured experiment name. origin identifies gui,
-    notebook or mcp. run_id is the captured acquisition identity, or None when
-    native acquisition evidence is unavailable. source is an optional ledger
+    origin identifies gui, notebook or mcp. run_id is the captured acquisition
+    identity, or None when native acquisition evidence is unavailable.
+    source is an optional ledger
     reference copied into accepted; ordinary single-run acceptance uses None.
     """
 
-    kind: str
     origin: Origin
     run_id: str | None = None
     source: SourceReference | None = None
@@ -143,13 +134,6 @@ def _normalize_record_value(value: object) -> object:
 def _accepted_write(item: WritebackItem) -> AcceptedWrite:
     if isinstance(item, ParameterWriteback) and item.metadata is not None:
         TypeAdapter(YamlMap).validate_python(item.metadata, strict=True)
-    if (
-        isinstance(item, (ModuleWriteback, WaveformWriteback))
-        and item.stderr is not None
-    ):
-        stderr = TypeAdapter(float).validate_python(item.stderr, strict=True)
-        if not isfinite(stderr) or stderr < 0:
-            raise ValueError("stderr must be finite and non-negative, or None")
     if isinstance(item, ParameterWriteback):
         return AcceptedWrite.model_validate({"path": item.path, "value": item.value})
     if isinstance(item, RecordWriteback):
@@ -182,16 +166,9 @@ class ParameterUpdate:
 
 @dataclass(frozen=True)
 class LibraryUpdate:
-    """One module or waveform command and its optional source in a library batch.
-
-    item supplies the concrete key, named Spec and family. source=None requests
-    manual provenance; otherwise the library owner validates the explicit source
-    against its ledger. item.stderr is not interpreted here: accepted executors
-    already include it in source. All commands share one library transaction.
-    """
+    """One library command; item supplies its concrete key, named Spec and family."""
 
     item: ModuleWriteback | WaveformWriteback
-    source: Provenance | None = None
 
 
 @dataclass(frozen=True)
@@ -252,7 +229,7 @@ class WritebackTarget(Protocol):
     They return one detached actual value per command, captured immediately
     after that command's validation so later overwrites do not alter receipts.
     Values are returned only after the entire batch commits. ParameterUpdate
-    and LibraryUpdate describe value, metadata and source contracts.
+    and LibraryUpdate describe value and metadata contracts.
     Publication belongs to the context owner, not this protocol or executor. append_record accepts a
     safe component segment, producer fields and separate accepted run_id/UTC
     at/event source; it records this target's point label through the record owner.
@@ -312,14 +289,12 @@ def commit_library_updates(
 
     library is the caller's already-bound ModuleLibrary; it is not reopened.
     updates must be nonempty. LibraryUpdate defines each concrete key, named
-    Spec family and source; the library validates sources against its ledger.
+    Spec and family; the library validates them without consulting a ledger.
     Return one detached actual Spec mapping per update in supplied order,
     captured after that draft setter, only after the whole edit commits.
     Later updates cannot change earlier receipts. Empty input raises ValueError.
-    Key, family, schema, source, conflict and I/O errors propagate without
-    committing batch updates. The library's edit-time disk cleanup policy still
-    applies; completed cleanup is not rolled back. No GUI publication or
-    accepted event is produced.
+    Key, family, schema, conflict and I/O errors propagate without
+    committing batch updates. No GUI publication or accepted event is produced.
     """
     if not updates:
         raise ValueError("library updates must be nonempty")
@@ -328,10 +303,10 @@ def commit_library_updates(
         for update in updates:
             item = update.item
             if isinstance(item, ModuleWriteback):
-                draft.set_module(item.path, item.value, provenance=update.source)
+                draft.set_module(item.path, item.value)
                 kind = "module"
             else:
-                draft.set_waveform(item.path, item.value, provenance=update.source)
+                draft.set_waveform(item.path, item.value)
                 kind = "waveform"
             actual.append(draft.snapshot().entry_value(item.path, kind=kind))
     return tuple(actual)
@@ -341,7 +316,7 @@ class PointWritebackTarget:
     """Bind a captured PointView/storage for Notebook or other persistent callers.
 
     Construction does no I/O. The caller supplies matching captured capabilities.
-    Library opening is lazy; owner key/family/source/conflict errors propagate.
+    Library opening is lazy; owner key/family/conflict errors propagate.
     Each setter commits one file; record rows append through the record owner.
     """
 
@@ -366,7 +341,6 @@ class PointWritebackTarget:
         return commit_parameter_updates(self._point, updates)
 
     def _library(self) -> ModuleLibrary:
-        # Library imports entry provenance; defer to avoid the package cycle.
         from zcu_tools.resources.context.library import ModuleLibrary
 
         if self._library_handle is None:
@@ -375,24 +349,16 @@ class PointWritebackTarget:
                 / "points"
                 / self._storage.point
                 / "module_cfg.yaml",
-                ledger=self._storage.result_path / "records" / "ledger.jsonl",
-                entry_id=self.entry_id,
             )
         return self._library_handle
 
-    def set_module(self, path: str, value: ModuleSpec, source: Provenance) -> YamlMap:
+    def set_module(self, path: str, value: ModuleSpec) -> YamlMap:
         """Commit one module and return its actual cached Spec mapping."""
-        return self.set_modules((LibraryUpdate(ModuleWriteback(path, value), source),))[
-            0
-        ]
+        return self.set_modules((LibraryUpdate(ModuleWriteback(path, value)),))[0]
 
-    def set_waveform(
-        self, path: str, value: WaveformSpec, source: Provenance
-    ) -> YamlMap:
+    def set_waveform(self, path: str, value: WaveformSpec) -> YamlMap:
         """Commit one waveform and return its actual cached Spec mapping."""
-        return self.set_modules(
-            (LibraryUpdate(WaveformWriteback(path, value), source),)
-        )[0]
+        return self.set_modules((LibraryUpdate(WaveformWriteback(path, value)),))[0]
 
     def set_modules(self, updates: tuple[LibraryUpdate, ...]) -> tuple[YamlMap, ...]:
         """Commit one nonempty mixed module/waveform batch, or leave it unwritten."""
@@ -450,14 +416,14 @@ def apply_writeback(
 
     target binds the destination and its entry ledger; callers resolve roles
     before this entry. Nonempty items, strict JSON/Spec values, parameter
-    metadata representation, finite nonnegative library stderr, kind and record
+    metadata representation and record
     run_id are validated before append. Record dict/list values first normalize
     numpy floating/integer scalars to Python numbers without mutating producers;
     non-finite results and other non-JSON values remain invalid. Target owners
-    validate paths, schema, sources and transactions within each group draft. Parameters commit the
+    validate paths, schema and transactions within each group draft. Parameters commit the
     caller's metadata unchanged, or keep existing metadata when it is None; no
-    event, source or time is added to it. Library items receive the accepted
-    Provenance. Records receive run_id, saved point, UTC at and accepted source;
+    event, source or time is added to it. Library items store only Specs.
+    Records receive run_id, saved point, UTC at and accepted source;
     producer device fields are preserved, not inferred. Return WritebackResult
     with the accepted event ID and each owner's confirmed committed value.
 
@@ -475,9 +441,6 @@ def apply_writeback(
     """
     if not items:
         raise ValueError("writeback items must be nonempty")
-    kind = TypeAdapter(str).validate_python(evidence.kind, strict=True)
-    if not kind.strip():
-        raise ValueError("writeback kind must be nonempty")
     if any(isinstance(item, RecordWriteback) for item in items) and (
         evidence.run_id is None or not evidence.run_id.strip()
     ):
@@ -506,18 +469,7 @@ def apply_writeback(
         elif isinstance(item, RecordWriteback):
             record_indices.append(index)
         else:
-            library.append(
-                LibraryUpdate(
-                    item,
-                    Provenance(
-                        source=event.id,
-                        kind=kind,
-                        run_id=evidence.run_id,
-                        at=event.at,
-                        stderr=item.stderr,
-                    ),
-                )
-            )
+            library.append(LibraryUpdate(item))
             library_indices.append(index)
 
     committed: list[CommittedWrite] = []

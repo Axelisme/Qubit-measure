@@ -29,11 +29,8 @@ from .errors import DestinationExistsError, MissingPointError
 from .ledger import RecordsLedger
 from .ledger_models import (
     AnalyzedPayload,
-    ImportPayload,
     JsonObject,
     LedgerEvent,
-    Origin,
-    validate_origin,
 )
 from .points import PointView
 from .schema import (
@@ -50,7 +47,7 @@ from .views import (
 )
 
 if TYPE_CHECKING:
-    from zcu_tools.resources.context.library import ModuleLibrary, ModuleLibraryDocument
+    from zcu_tools.resources.context.library import ModuleLibrary
 
 
 def _create_empty_library(path: Path) -> None:
@@ -358,7 +355,6 @@ class ResultEntry:
         *,
         clone_from: str | PointView | None = None,
         description: str | None = None,
-        origin: Origin = "notebook",
     ) -> PointView:
         """Create an independent complete point and return its validated view.
 
@@ -372,28 +368,20 @@ class ResultEntry:
         setup when seeding, or from the source point when cloning, only if present.
         Missing source aliases stay absent, without setup fallback during clone.
         All alias tables remain independent after creation. Point values and
-        opaque metadata copy verbatim. Library sources keep the library contract:
-        cross-entry nonmanual library sources become local import events with
-        copied JSON attachments, and library sources mark the direct clone
-        origin. origin identifies the importing frontend as gui, notebook or mcp.
-        description=None preserves the source description; a string explicitly sets it,
-        including empty text, within this creation/cleanup scope.
-        Reading the source library may first back up its original bytes and
-        clean invalid entries and their sources from its module_cfg. Clone copies
-        only retained entries and imports only retained sources. Data and images
-        are not copied or changed; other source files are unchanged.
-        Failure removes only the new point. Completed source-library cleanup and
-        its backup remain, and completed imports may remain orphaned. No cross-file
-        transaction is provided.
+        opaque metadata copy verbatim. Library Specs copy without source records,
+        ledger events or attachments. Invalid disk Specs are skipped in the copy;
+        source bytes stay unchanged. description=None preserves the source
+        description; a string explicitly sets it, including empty text.
+        Data and images are not copied or changed. Failure removes only the new
+        point. No cross-file transaction is provided.
         """
-        validate_origin(origin)
         destination = _entry_path(
             self._result_path / "points", label, new_destination=True
         )
         destination.mkdir()
         try:
             if clone_from is not None:
-                self._clone_point(destination, clone_from, origin=origin)
+                self._clone_point(destination, clone_from)
             else:
                 self._seed_point(destination)
             point = self.use_point(label)
@@ -459,8 +447,6 @@ class ResultEntry:
         self,
         destination: Path,
         clone_from: str | PointView,
-        *,
-        origin: Origin,
     ) -> None:
         source_entry, source = self._clone_source(clone_from)
         store = source_entry._point_store(source / "point.yaml")
@@ -471,100 +457,15 @@ class ResultEntry:
         aliases = source / "aliases.yaml"
         if aliases.exists():
             shutil.copyfile(aliases, destination / "aliases.yaml")
-        library_store = source_entry._library_store(source / "module_cfg.yaml")
-        with library_store.locked():
-            library_store.refresh()
-            library_document = library_store.snapshot()
-            shutil.copyfile(source / "module_cfg.yaml", destination / "module_cfg.yaml")
-        event_ids = tuple(
-            dict.fromkeys(
-                metadata.source
-                for metadata in library_document.provenance.values()
-                if metadata.source != "manual"
-            )
-        )
-        imports: dict[str, str] = {}
-        if source_entry is not self:
-            imports = self._import_sources(event_ids, source_entry, origin=origin)
+        from zcu_tools.resources.context.library_store import copy_library
+
+        copy_library(source / "module_cfg.yaml", destination / "module_cfg.yaml")
         cloned_store = self._point_store(destination / "point.yaml")
         with cloned_store.edit() as draft:
             draft.components = point_document.components
             draft.general.created_at = (
                 datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
             )
-        # This private copy has already passed source-owner cleanup. Its foreign
-        # IDs must be rewritten before destination-owner source validation.
-        from zcu_tools.resources.context.library import (
-            MODULE_LIBRARY_FORMAT,
-            MODULE_LIBRARY_VERSION,
-            ModuleLibraryDocument,
-        )
-
-        cloned_library = DocumentStore(
-            destination / "module_cfg.yaml",
-            ModuleLibraryDocument,
-            format=MODULE_LIBRARY_FORMAT,
-            supported_version=MODULE_LIBRARY_VERSION,
-        )
-        with cloned_library.edit() as draft:
-            for metadata in draft.provenance.values():
-                if metadata.source in imports:
-                    metadata.source = imports[metadata.source]
-                metadata.cloned_from = {
-                    "entry_id": source_entry.entry_id,
-                    "point": source.name,
-                }
-            draft.validate_content(
-                ledger=self._result_path / "records/ledger.jsonl",
-                entry_id=self.entry_id,
-            )
-        cloned_library.snapshot().validate_content(
-            ledger=self._result_path / "records/ledger.jsonl", entry_id=self.entry_id
-        )
-
-    def _library_store(self, source: Path) -> DocumentStore[ModuleLibraryDocument]:
-        # Library imports entry provenance; defer composition until both packages load.
-        from zcu_tools.resources.context.library_store import open_library_store
-
-        return open_library_store(
-            source,
-            ledger=self._result_path / "records/ledger.jsonl",
-            entry_id=self.entry_id,
-        )
-
-    def _import_sources(
-        self,
-        event_ids: tuple[str, ...],
-        source_entry: ResultEntry,
-        *,
-        origin: Origin,
-    ) -> dict[str, str]:
-        imports: dict[str, str] = {}
-        source_ledger = source_entry.ledger
-        destination_ledger = self.ledger
-        for event_id in event_ids:
-            try:
-                evidence = source_ledger.get(event_id)
-            except KeyError as exc:
-                raise ValueError(
-                    f"source ledger event {event_id!r} does not exist"
-                ) from exc
-            imported = LedgerEvent(
-                id=str(uuid4()),
-                kind="import",
-                at=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-                entry_id=self.entry_id,
-                origin=origin,
-                payload=ImportPayload(
-                    source_entry_id=source_entry.entry_id,
-                    source_event_id=event_id,
-                    source_event_json=evidence.event_json,
-                    source_record=evidence.event.record,
-                ),
-            )
-            destination_ledger.append(imported, record=evidence.record)
-            imports[event_id] = imported.id
-        return imports
 
     def use_point(self, label: str) -> PointView:
         """Load one complete point and return an independently bound view.
@@ -598,20 +499,14 @@ class ResultEntry:
     def module_library(
         self, label: str | None = None, *, assets: WaveformAssetInfo | None = None
     ) -> ModuleLibrary:
-        """Open the setup or point library with this entry's ledger and optional assets.
+        """Open an existing setup or point library without consulting the ledger.
 
-        None selects entry/module_cfg.yaml, initialized by create. A string
-        selects a point library and follows use_point's safe single-segment rules.
-        Only module_cfg.yaml
-        is loaded; the point and assets are not read and no active point is selected.
-        Omit assets for Spec-only reads/edits; materializing Arb requires a provider.
-        The existing library must have a valid header and container. Invalid
-        existing Specs or entry-local provenance are backed up and removed under
-        the document lock; new edits remain strict. Invalid labels raise ValueError;
-        missing files, container errors and ledger I/O/schema failures propagate.
-        Opening creates no missing document or parent directory.
+        None selects entry/module_cfg.yaml; a label selects its point library
+        under use_point's safe path rules. assets is optional for Spec-only use.
+        Invalid disk Specs are skipped and reported by snapshot.invalid_entries.
+        Header/container/I/O errors propagate. Opening never writes or creates
+        files, reads point/assets, or selects an active point. Drafts stay strict.
         """
-        # Avoid the library -> entry.provenance -> ResultEntry import cycle.
         from zcu_tools.resources.context.library import ModuleLibrary
 
         directory = (
@@ -619,12 +514,7 @@ class ResultEntry:
             if label is None
             else _entry_path(self._result_path / "points", label)
         )
-        return ModuleLibrary(
-            directory / "module_cfg.yaml",
-            assets=assets,
-            ledger=self._result_path / "records/ledger.jsonl",
-            entry_id=self.entry_id,
-        )
+        return ModuleLibrary(directory / "module_cfg.yaml", assets=assets)
 
     def _point_store(self, source: Path) -> DocumentStore[PointDocument]:
         class EntryPointDocument(PointDocument):

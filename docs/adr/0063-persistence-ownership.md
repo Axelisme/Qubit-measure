@@ -18,7 +18,7 @@ App memento、Experiment Data File、workflow run artifact、`params.json`、Rec
 - Experiment Data File 是正規的 `data.h5`，保存一個 Experiment Result 的全部 Data Variables。Labber 是供 Log Browser 使用的衍生輸出，不是原始資料權威。`experiment.axes_spec` 定義 typed Result／cfg 與 persisted axes、units、variables 和 metadata 的 mapping；`datafile` 擁有 [[0080]] 的通用容器格式與讀寫，不反向依賴 experiment。Container 只認 vars、docs、groups；cfg、metadata 的具名型別、編碼與驗證由 experiment 擁有。正常載入在 experiment 邊界還原 typed Result，不把 generic variable mapping 洩漏給分析端。
 - Workflow run 保存跨步驟的提交與 audit。Engine 擁有 manifest、journal 與 best-effort iteration record.json；workflow 擁有 native 量測檔及圖形，並在 point record 記錄用途與檔名。Engine 每輪提供唯讀 absolute iteration_dir，不保存、追蹤或保證 workflow 檔案。單次量測 Completed 與保存分開，責任與失敗規則見 [[0062]]。
 - `params.json` 是跨 workflow 的 typed parameter handoff。`QubitParams` 擁有 section 更新與 project identity；不把 sample arrays 或 dense curves 塞進參數檔。generic table storage 不負責這類語意。
-- 參數容器由 `resources.entry` 組合條目、setup 範本與獨立工作點。值與 opaque metadata 共用一份文件，setup／point 重用 `resources.parameter_metadata` 的 2.0 header 與 metadata 讀寫，以及 `resources.parameter_fields` 的 value staging；DocumentStore 擁有單檔衝突與原子提交，不換算數值。Entry 不產生、解釋或驗證參數 metadata，clone 原樣複製；library 來源記錄與本條目 ledger 引用驗證仍由 library owner 擁有。Accepted executor 對參數只提交 caller 提供的 metadata。GUI context owner 與 Notebook 經公開 capability 使用 entry。GUI proposal 留在 frontend，Apply 才轉成 resources concrete items。兩者共用 accepted executor，resources 不 import frontend 或 experiment，由 C8 分層與 C9 無循環 contract 約束。
+- 參數容器由 `resources.entry` 組合條目、setup 範本與獨立工作點。值與 opaque metadata 共用一份文件，setup／point 重用 `resources.parameter_metadata` 的 2.0 header 與 metadata 讀寫，以及 `resources.parameter_fields` 的 value staging；DocumentStore 擁有單檔衝突與原子提交，不換算數值。Entry 不產生、解釋或驗證參數 metadata，clone 原樣複製；library 只保存 Spec，不建立模組來源或查 ledger。Accepted executor 對參數只提交 caller 提供的 metadata。GUI context owner 與 Notebook 經公開 capability 使用 entry。GUI proposal 留在 frontend，Apply 才轉成 resources concrete items。兩者共用 accepted executor，resources 不 import frontend 或 experiment，由 C8 分層與 C9 無循環 contract 約束。
 - 使用者於 2026-10-13 裁決：「可以改metadata」。新參數容器寫 `format_version: "2.0"`，只讀 major 2，保留同 major 的 forward-minor 契約。入口直接拒絕舊 major 或任何含 `provenance` 旁表的文件，錯誤含路徑、讀到版本與期望版本 2.0。不雙讀、不附轉換工具，由使用者自行修改既有文件。這項參數格式變更不改 generic DocumentStore、ModuleLibrary 或其他成果的版本契約。
 - Setup 與每個 point 各自的 authored alias 表由 `resources.entry` 保存為獨立的 `aliases.yaml`，不是 memento 或 ledger。ContextService 擁有有序表的語法與 Apply 時機，resources 擁有檔案表示、建立時複製及單檔原子替換。MCP 的單次 aliases／target 覆寫不保存它。
 - `RecordWriteback` 只 append adapter 組裝的任意 JSON object，不選座標裝置、不注入 `dev_value/dev_unit`，也不因裝置資料缺失而省略 proposal。框架只補 `component`、`run_id`、`point`、`at` 與 `source` provenance 信封。`component` 來自明示的 table binding，producer 同名欄位不能覆寫它；舊列缺此欄仍可讀，不補寫。格式由 adapter 間的 policy 決定，見 [lab authoring 的 Record policy](../../zcu_lab/v2/measure-authoring.md#record-policy)。元件記錄放在 `records/components/<target>.jsonl`，事件 ledger 維持 `records/ledger.jsonl`，附件維持 `records/<event UUID>.json`，兩個命名空間不共用行格式。
@@ -142,15 +142,13 @@ Dialog Apply 先驗整表，再由 entry owner 寫 sibling temporary 並 atomic 
 
 DocumentStore 分開保存 raw YAML 節點、驗證後的 normalized tree 與 public typed snapshot。一般讀取及空 edit 不寫檔；非空 commit 以最新 normalized tree 合併與驗證，再把差異套回 raw 節點。Model 的讀檔轉換在下一次 commit 寫回，未改節點保留原樣。
 
-ModuleLibrary 是讀取可寫檔的明確例外。Library owner 先驗 header、容器與可定址名稱，再逐條驗證 Spec 及所屬 provenance。壞 Spec、entry-local provenance 或不存在的本地事件使該 root 及附屬來源被移除，不影響合法兄弟。孤立或不可定址的 provenance、header 或容器錯誤整份拒絕，不備份、不清理。Ledger I/O、schema、附檔與非預期錯誤傳遞，不降級為壞條目。
+ModuleLibrary 讀取不改檔。Library owner 先驗 header、容器與可定址名稱，再逐 root 驗證 Spec。無效 Spec 從讀取投影略過，公開 `invalid_entries()` 回報 root 與原因，合法兄弟仍可用。Header、容器及 I/O 錯誤傳遞。Strict refresh 不略過無效 Spec，失敗保留已發布快照。讀取與空 edit 保留原 bytes，不建立 .bak。
 
-Library bytes 未變時，DocumentStore 不重 parse YAML、不重跑 Pydantic、cleanup 或完整 validate。Library owner 仍對快照內全部 provenance source 做依賴存在性檢查，以 ledger 的 event 索引確認事件存在，並對 attachment 做 stat；這不重驗未變 library 內容或附檔內容。依賴全部存在才沿用已驗證快照，bytes 改變或任一依賴缺失則走完整驗證、清理、備份與錯誤傳遞路徑。不存在的本地事件仍使所屬 root 移除，附檔缺失仍在當次讀取立即失敗，不等 library bytes 改變才回報。
+Library 不再保存 per-leaf provenance 或 stderr。舊 `provenance:` 容忍並忽略，非空寫入時自然移除。讀取與寫入都不需要 ledger 或 entry_id。DocumentStore 對未變 bytes 沿用驗證快取，不做來源依賴檢查。新 draft 仍嚴格驗證，不略過 caller 的壞值。
 
-DocumentStore 的同一把 sidecar lock 涵蓋初始讀取、refresh、edit 進入及 commit 重讀的清理。清理候選通過完整驗證後，store 先將完整原檔逐 byte 複製成同目錄、不覆寫既有檔案的時間戳 .bak，再以 sibling temporary 與 atomic replace 清理主檔。成功後只寫一行 warning，列出備份路徑與移除 roots。合法檔與 header-only 不重寫；snapshot 仍只讀合法的已發布記憶體，不新增 GUI／MCP 顯示。
+ResultEntry clone 只複製 point 參數、metadata、合法 library Specs 與來源 point 的 alias，不改來源檔。跨 entry 不匯入事件、不複製附檔，也不寫 source 或 cloned_from。`import` kind 保留為歷史讀取類型，不再有 producer。Clone 失敗只清理本次目的 point，不承諾跨檔 snapshot 或交易。
 
-備份失敗不替換主檔；replace 失敗保留原主檔及完成的備份，兩者都不發布候選。讀取清理已完成後，後續 draft、body 或 conflict 失敗不回滾清理。新 draft 仍嚴格驗證，不能以清理吞掉 caller 的壞值。ResultEntry clone 先用來源條目的相同政策清理，再複製文件及匯入剩餘合法來源。此例外只適用明確啟用政策的 library，不擴張到 setup、point 或其他 store，也不承諾跨檔交易或掉電恢復。Library 版本只看容器，見 [[0072]]。
-
-使用者於 2026-10-15 裁決：「其實我覺得很簡單，讀取時發現有問題，就重命名當前檔案或複製成.bak檔，本體留合法的即可，也不用處理顯示的問題。」對先複製完整原檔、備份名加時間戳的建議回覆：「照建議做」。
+2026-10-28 使用者裁決：「我其實沒有要知道來源的需求，這功能純屬於錦上添花」「來源我一直以為只是metadata，沒想要解析」。這次移除模組來源機制與讀取清理例外，取代 2026-10-15 的 library 先備份再清理政策。Library 容器仍是 2.0，變更記錄見 [移除模組來源](../storage-format-history/2026-10-28-remove-module-provenance.md)。
 
 Format 與 format_version 只描述容器結構。檔頭不符或 major 不同時拒絕載入；forward-minor 保留容器層剩餘未知欄位，不覆寫元件或 nested model 的 extra 策略。
 

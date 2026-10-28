@@ -69,7 +69,7 @@ class ContextWritebackTarget:
         """Commit nonempty library updates under the class batch contract.
 
         LibraryUpdate supplies each concrete key, named module/waveform Spec
-        and optional provenance. Return each validated Spec mapping; owner
+        without source records. Return each validated Spec mapping; owner
         target, schema, source, conflict and I/O failures propagate without a commit.
         """
         return self._context.set_modules(self._target, updates)

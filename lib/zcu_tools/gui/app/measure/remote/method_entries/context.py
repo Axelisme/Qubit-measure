@@ -176,7 +176,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "resolved=null and error. All come from one fixed capture without kind checks. "
             "target is the existing saved_point locator. "
             "point and library are complete working-unit native documents: point includes "
-            "components and metadata; library contains Specs and provenance without asset "
+            "components and metadata; library contains Specs without asset "
             "materialization. "
             "Complex numbers use {__complex__: [real, imag]}. May return large or sensitive data; "
             "summaries=true preserves dict trees and scalars and describes array/list leaves. "

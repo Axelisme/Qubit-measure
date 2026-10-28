@@ -88,7 +88,6 @@ if TYPE_CHECKING:
         SetupView,
     )
     from zcu_tools.resources.entry.ledger import RecordsLedger
-    from zcu_tools.resources.entry.provenance import Provenance
 
 
 class ContextService:
@@ -314,7 +313,7 @@ class ContextService:
         """Create from setup or a same-entry clone, then install ACTIVE.
 
         No opened entry raises FailedPreconditionError(no_entry). Pass description
-        and origin unchanged to ResultEntry.new_point. An unsafe
+        unchanged to ResultEntry.new_point. An unsafe
         label raises InvalidInputError(point_label_invalid) before source reads or
         writes, preserving binding, files, ledger and versions. Label safety follows
         the entry owner's single path component rule. An existing destination
@@ -341,7 +340,6 @@ class ContextService:
                 request.label,
                 clone_from=clone,
                 description=request.description,
-                origin=request.origin.origin,
             )
         except DestinationExistsError as exc:
             raise InvalidInputError(str(exc)) from exc
@@ -692,35 +690,30 @@ class ContextService:
         target: ContextTarget,
         path: str,
         value: ModuleSpec,
-        *,
-        source: Provenance | None = None,
     ) -> YamlMap:
         """Write a module and return its detached actual cached Spec mapping.
 
-        Target/publication/error rules match set_parameter. Omitted source is
-        manual; explicit Provenance is validated by the library owner against
-        this entry's ledger. SavedPoint uses one library transaction.
+        Target/publication/error rules match set_parameter.
+        SavedPoint uses one library transaction without source records.
         No lowering, materialization, accepted event production or batch receipt.
         """
-        return self.set_modules(
-            target, (LibraryUpdate(ModuleWriteback(path, value), source),)
-        )[0]
+        return self.set_modules(target, (LibraryUpdate(ModuleWriteback(path, value)),))[
+            0
+        ]
 
     def set_waveform(
         self,
         target: ContextTarget,
         path: str,
         value: WaveformSpec,
-        *,
-        source: Provenance | None = None,
     ) -> YamlMap:
         """Write a waveform and return its detached actual cached Spec mapping.
 
-        Target/publication/source/error rules match set_module. Owner rejects
-        invalid roots/families/sources before installing any candidate.
+        Target/publication/error rules match set_module. Owner rejects
+        invalid roots/families before installing any candidate.
         """
         return self.set_modules(
-            target, (LibraryUpdate(WaveformWriteback(path, value), source),)
+            target, (LibraryUpdate(WaveformWriteback(path, value)),)
         )[0]
 
     def set_modules(
@@ -728,7 +721,7 @@ class ContextService:
     ) -> tuple[YamlMap, ...]:
         """Commit a nonempty mixed module/waveform group and publish once.
 
-        LibraryUpdate defines each key, family, Spec and source. Target and
+        LibraryUpdate defines each key, family and Spec. Target and
         failure rules match set_module. Each update validates in one draft;
         any failure leaves the entire group unwritten and publishes nothing.
         Return each detached validated value only after the group commits,

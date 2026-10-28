@@ -26,7 +26,6 @@ from .ledger_models import (
     SourceReference,
 )
 from .points import PointView
-from .provenance import ClonedFrom, Provenance
 from .registry import ComponentRegistry, RoleRegistry, RoleSpec, component_registry
 from .result_entry import (
     EntryIdentity,

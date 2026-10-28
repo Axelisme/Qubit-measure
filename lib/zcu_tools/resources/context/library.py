@@ -8,15 +8,20 @@ provided. DocumentStore owns version handling, conflicts and atomic replacement.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Generator, Iterator, Mapping
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
-from dataclasses import dataclass
-from datetime import datetime, timezone
 from pathlib import Path
 from types import TracebackType
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    TypeAdapter,
+    ValidationError,
+    model_validator,
+)
 
 from zcu_tools.cfg_model import (
     CfgValidationContext,
@@ -36,8 +41,6 @@ from zcu_tools.cfg_model import (
 from zcu_tools.format_version import FormatVersion, YamlMap, YamlValue
 
 from ..document_store import DocumentChange, DocumentRevision, DocumentValue
-from ..entry.ledger import RecordsLedger
-from ..entry.provenance import Provenance, ProvenanceData, validate_sources
 
 MODULE_LIBRARY_FORMAT = "zcu.module-library"
 MODULE_LIBRARY_VERSION = FormatVersion(2, 0)
@@ -68,8 +71,8 @@ class ModuleLibraryDocument(BaseModel):
 
     format is zcu.module-library; format_version is the major.minor header
     interpreted by DocumentStore. components maps nonempty dot-free component
-    names to their partitions. provenance maps concrete dotted leaf paths,
-    without a components prefix, to source records. Empty mappings are legal.
+    names to their partitions. invalid_entries holds omitted disk roots and their
+    validation diagnostics, and is never serialized. Empty mappings are legal.
     Unknown current-minor fields are rejected; Store preserves future fields.
     """
 
@@ -78,35 +81,19 @@ class ModuleLibraryDocument(BaseModel):
     format: Literal["zcu.module-library"]
     format_version: str
     components: dict[str, ComponentLibrary] = Field(default_factory=dict)
-    provenance: dict[str, ProvenanceData] = Field(default_factory=dict)
+    invalid_entries: dict[str, str] = Field(default_factory=dict, exclude=True)
 
-    def validate_content(self, *, ledger: Path | RecordsLedger, entry_id: str) -> None:
-        """Validate persistent keys, Specs and local source evidence, without mutation.
+    @model_validator(mode="before")
+    @classmethod
+    def ignore_legacy_provenance(cls, value: object) -> object:
+        """Ignore retired source records without interpreting their contents."""
+        if isinstance(value, dict):
+            return {key: child for key, child in value.items() if key != "provenance"}
+        return value
 
-        ledger is the owning entry's records/ledger.jsonl path or its scoped
-        RecordsLedger handle. entry_id opens path inputs; handles already own
-        their entry scope and incremental index. Supplied handles must belong
-        to this document's entry. Every call fully validates source attachments.
-        Reject invalid names, non-YAML values, invalid Spec source paths or missing
-        local events. Ledger schema/attachment/I/O errors propagate. Manual sources
-        do not consult the ledger. References and assets are not materialized.
-        DocumentStore owns format/version checks; this method does not read YAML.
-        """
-        _validate_document(self, ledger=ledger, entry_id=entry_id)
-
-
-@dataclass(frozen=True)
-class LibraryEntryState:
-    """An independent entry projection for fixed-proposal comparisons.
-
-    value is its working-unit Spec mapping, preserving child reference strings.
-    provenance maps relative leaf-segment tuples to independent source records.
-    The empty tuple represents an existing root record, never a generated one.
-    Missing sources remain missing; referenced children are not flattened.
-    """
-
-    value: YamlMap
-    provenance: Mapping[tuple[str, ...], Provenance]
+    def validate_content(self) -> None:
+        """Validate persistent keys and Specs without I/O or materializing references."""
+        _validate_document(self)
 
 
 def _root_parts(
@@ -145,21 +132,6 @@ def library_key_kind(path: str) -> Literal["module", "waveform"]:
     if suffix:
         raise ValueError(f"Expected a library root, not a leaf: {path!r}")
     return kind
-
-
-def has_persistent_source_suffix(spec: YamlValue, suffix: tuple[str, ...]) -> bool:
-    """Return whether suffix addresses persisted Spec data, without materializing.
-
-    spec is an entry's YAML-value projection; suffix contains relative mapping
-    keys, with an empty tuple addressing the root. Missing keys, scalar descent
-    and list indexing return False. No reference expansion or asset I/O occurs.
-    """
-    value = spec
-    for segment in suffix:
-        if not isinstance(value, dict) or segment not in value:
-            return False
-        value = value[segment]
-    return True
 
 
 def _validate_names(document: ModuleLibraryDocument) -> None:
@@ -205,43 +177,6 @@ def _put_waveform(
     document.components.setdefault(component, ComponentLibrary()).waveforms[name] = spec
 
 
-def _remove_sources(document: ModuleLibraryDocument, path: str) -> None:
-    prefix = path + "."
-    document.provenance = {
-        key: source
-        for key, source in document.provenance.items()
-        if key != path and not key.startswith(prefix)
-    }
-
-
-def _leaf_paths(value: YamlValue, prefix: str) -> Iterator[str]:
-    if isinstance(value, dict):
-        for key, child in value.items():
-            yield from _leaf_paths(child, prefix + "." + key)
-    else:
-        # Lists are a single field, not index-addressable provenance paths.
-        yield prefix
-
-
-def _accept_sources(
-    document: ModuleLibraryDocument,
-    path: str,
-    value: YamlMap,
-    source: Provenance,
-) -> None:
-    record = ProvenanceData.from_provenance(source)
-    record.cloned_from = None
-    _remove_sources(document, path)
-    for leaf in _leaf_paths(value, path):
-        document.provenance[leaf] = record.model_copy(deep=True)
-
-
-def _manual_source() -> Provenance:
-    return Provenance(
-        "manual", None, None, datetime.now(timezone.utc).isoformat(), None
-    )
-
-
 def _delete_entry(
     document: ModuleLibraryDocument,
     path: str,
@@ -261,7 +196,6 @@ def _delete_entry(
             del library.waveforms[name]
         case _:
             raise ValueError(f"Invalid library partition: {path!r}")
-    _remove_sources(document, path)
 
 
 class LibrarySnapshot:
@@ -269,7 +203,7 @@ class LibrarySnapshot:
 
     Queries never read files or ledger. Spec queries preserve references; cfg
     queries materialize through core factories and the bound asset capability.
-    Returned documents, models, YAML values and provenance are independent.
+    Returned documents, models and YAML values are independent.
     """
 
     def __init__(
@@ -400,33 +334,14 @@ class LibrarySnapshot:
         spec = self.module_spec(path) if kind == "module" else self.waveform_spec(path)
         return _YAML_MAP.validate_python(spec.model_dump(mode="python"))
 
-    def meta(self, path: str) -> Provenance | None:
-        """Copy a recorded concrete path's source, or None; illegal paths raise ValueError."""
-        _path_root(path)
-        source = self._document.provenance.get(path)
-        return source.to_provenance() if source is not None else None
-
-    def entry_state(
-        self, path: str, *, kind: Literal["module", "waveform"]
-    ) -> LibraryEntryState:
-        """Copy a complete Spec and its relative recorded sources; errors follow entry_value."""
-        value = self.entry_value(path, kind=kind)
-        prefix = path + "."
-        sources = {
-            (
-                ()
-                if source_path == path
-                else tuple(source_path[len(prefix) :].split("."))
-            ): source.to_provenance()
-            for source_path, source in self._document.provenance.items()
-            if source_path == path or source_path.startswith(prefix)
-        }
-        return LibraryEntryState(value, sources)
+    def invalid_entries(self) -> dict[str, str]:
+        """Return omitted disk roots and their Spec validation diagnostics."""
+        return dict(self._document.invalid_entries)
 
     def renamed(
         self, from_path: str, to_path: str, *, kind: Literal["module", "waveform"]
     ) -> LibrarySnapshot:
-        """Pure-relocate Spec and sources in a copy, without evaluating children.
+        """Pure-relocate Spec in a copy, without evaluating children.
 
         Missing source raises KeyError; identical/existing destination or wrong
         family raises ValueError. No other references or ledger events change.
@@ -448,81 +363,31 @@ class LibrarySnapshot:
         else:
             _put_waveform(candidate, to_path, self.waveform_spec(from_path))
         _delete_entry(candidate, from_path, kind=kind)
-        prefix = from_path + "."
-        for source_path, source in self._document.provenance.items():
-            if source_path == from_path or source_path.startswith(prefix):
-                candidate.provenance[to_path + source_path[len(from_path) :]] = (
-                    source.model_copy(deep=True)
-                )
         return LibrarySnapshot(candidate, assets=self._assets)
 
-    def replaced_module(
-        self,
-        path: str,
-        value: ModuleSpec,
-        *,
-        provenance: Provenance | None = None,
-    ) -> LibrarySnapshot:
-        """Return an isolated module replacement with manual or explicit sources.
-
-        path is a concrete library root; wrong path/family/source raises ValueError.
-        Explicit Provenance preserves source/kind/run_id/at/stderr and clears
-        clone origin on accepted leaves. This pure candidate does not read a
-        ledger; the writing entry owner validates local evidence before install.
-        No materialization, asset access, file changes or mutation of this snapshot.
-        """
+    def replaced_module(self, path: str, value: ModuleSpec) -> LibrarySnapshot:
+        """Return an isolated module replacement; invalid root/family raises ValueError."""
         candidate = self.document()
         _put_module(candidate, path, value)
-        projection = LibrarySnapshot(candidate, assets=self._assets)
-        _accept_sources(
-            candidate,
-            path,
-            projection.entry_value(path, kind="module"),
-            provenance if provenance is not None else _manual_source(),
-        )
         return LibrarySnapshot(candidate, assets=self._assets)
 
-    def replaced_waveform(
-        self,
-        path: str,
-        value: WaveformSpec,
-        *,
-        provenance: Provenance | None = None,
-    ) -> LibrarySnapshot:
-        """Return an isolated waveform replacement with manual or explicit sources.
-
-        path is a concrete waveforms root; wrong path/kind/source raises ValueError.
-        Explicit Provenance preserves source/kind/run_id/at/stderr and clears
-        clone origin on accepted leaves. The writing entry validates local
-        evidence separately. No ledger/YAML I/O, materialization or mutation.
-        """
+    def replaced_waveform(self, path: str, value: WaveformSpec) -> LibrarySnapshot:
+        """Return an isolated waveform replacement; invalid root/family raises ValueError."""
         candidate = self.document()
         _put_waveform(candidate, path, value)
-        projection = LibrarySnapshot(candidate, assets=self._assets)
-        _accept_sources(
-            candidate,
-            path,
-            projection.entry_value(path, kind="waveform"),
-            provenance if provenance is not None else _manual_source(),
-        )
         return LibrarySnapshot(candidate, assets=self._assets)
 
     def deleted(
         self, path: str, *, kind: Literal["module", "waveform"]
     ) -> LibrarySnapshot:
-        """Copy and remove one entry and sources without cascading; errors follow entry_value."""
+        """Copy and remove one entry without cascading; errors follow entry_value."""
         candidate = self.document()
         _delete_entry(candidate, path, kind=kind)
         return LibrarySnapshot(candidate, assets=self._assets)
 
 
-def _validate_document(
-    document: ModuleLibraryDocument,
-    *,
-    ledger: Path | RecordsLedger,
-    entry_id: str,
-) -> None:
-    """Validate persistent Specs, addressable sources and local source evidence."""
+def _validate_document(document: ModuleLibraryDocument) -> None:
+    """Validate persistent keys and Specs without external dependencies."""
     _validate_names(document)
     _YAML_MAP.validate_python(document.model_dump(mode="python"))
     for library in document.components.values():
@@ -534,17 +399,6 @@ def _validate_document(
             module_spec_from_raw(spec)
         for waveform in library.waveforms.values():
             waveform_spec_from_raw(waveform)
-    snapshot = LibrarySnapshot(document)
-    for path in document.provenance:
-        root, kind, suffix = _path_root(path)
-        value: YamlValue = snapshot.entry_value(root, kind=kind)
-        if not has_persistent_source_suffix(value, suffix):
-            raise ValueError(f"Source path is not a persistent Spec leaf: {path!r}")
-    validate_sources(
-        (record.to_provenance() for record in document.provenance.values()),
-        ledger,
-        entry_id,
-    )
 
 
 class LibraryEdit:
@@ -555,23 +409,10 @@ class LibraryEdit:
         document: ModuleLibraryDocument,
         *,
         assets: WaveformAssetInfo | None,
-        ledger: Path | RecordsLedger,
-        entry_id: str,
     ) -> None:
-        """Bind a Store-owned draft and its scope; callers receive this from edit().
-
-        document is the mutable draft, not the published snapshot. assets,
-        ledger and entry_id are the owning handle's fixed capabilities. ledger
-        accepts its scoped RecordsLedger or its records/ledger.jsonl path;
-        entry_id opens path inputs. Supplied handles must belong to this entry.
-        Candidate validation always reads source attachment contents, while a
-        retained handle reuses only its incrementally validated event index.
-        ModuleLibrary expires this object when its with body exits.
-        """
+        """Bind a Store-owned draft and optional asset capability until edit exits."""
         self._document = document
         self._assets = assets
-        self._ledger = ledger
-        self._entry_id = entry_id
         self._active = True
 
     def _ensure_active(self) -> None:
@@ -598,87 +439,49 @@ class LibraryEdit:
         self._active = False
 
     def _install(self, candidate: ModuleLibraryDocument) -> None:
-        """Validate a complete candidate before replacing the two draft mappings."""
+        """Validate a complete candidate before replacing the draft components."""
         self._ensure_active()
-        candidate.validate_content(ledger=self._ledger, entry_id=self._entry_id)
+        candidate.validate_content()
         self._document.components = candidate.components
-        self._document.provenance = candidate.provenance
 
     def snapshot(self) -> LibrarySnapshot:
-        """Copy this draft's current Specs and sources for subsequent materialization."""
+        """Copy this draft's current Specs for subsequent materialization."""
         self._ensure_active()
         return LibrarySnapshot(self._document, assets=self._assets)
 
-    def set_module(
-        self, path: str, value: ModuleSpec, *, provenance: Provenance | None = None
-    ) -> None:
-        """Set a validated module root and leaf sources; omit provenance for manual.
-
-        Invalid root/family/source raises without changing the draft. Explicit
-        non-manual sources must exist in this entry's ledger and attachments.
-        """
+    def set_module(self, path: str, value: ModuleSpec) -> None:
+        """Set one validated module; invalid root/family leaves the draft unchanged."""
         candidate = self.snapshot().document()
         _put_module(candidate, path, value)
-        projection = LibrarySnapshot(candidate, assets=self._assets)
-        _accept_sources(
-            candidate,
-            path,
-            projection.entry_value(path, kind="module"),
-            provenance or _manual_source(),
-        )
         self._install(candidate)
 
-    def set_waveform(
-        self, path: str, value: WaveformSpec, *, provenance: Provenance | None = None
-    ) -> None:
-        """Set a validated waveform root and leaf sources, with set_module's source policy."""
+    def set_waveform(self, path: str, value: WaveformSpec) -> None:
+        """Set one validated waveform; invalid root/family leaves the draft unchanged."""
         candidate = self.snapshot().document()
         _put_waveform(candidate, path, value)
-        projection = LibrarySnapshot(candidate, assets=self._assets)
-        _accept_sources(
-            candidate,
-            path,
-            projection.entry_value(path, kind="waveform"),
-            provenance or _manual_source(),
-        )
         self._install(candidate)
 
     def replace_contents(self, candidate: LibrarySnapshot) -> None:
         """Install a complete isolated candidate into this active transaction.
 
-        Validate schema and local provenance before changing the transaction.
+        Validate schema before changing the transaction.
         Candidate may combine the snapshot's pure rename/delete/replacement
         operations; no references materialize and no files commit until edit
-        exits successfully. Inactive draft, schema and source errors propagate.
+        exits successfully. Inactive draft, schema errors propagate.
         Subsequent snapshot reads see the replacement; body/conflict/I/O errors
         still leave the owning ModuleLibrary unpublished.
         """
         self._install(candidate.document())
 
-    def accept_source(self, path: str, *, provenance: Provenance) -> None:
-        """Attach a validated source to an existing entry's leaves, without changing its Spec.
-
-        Missing roots raise KeyError; invalid roots/sources raise ValueError.
-        Ledger schema, attachment and I/O failures propagate.
-        """
-        snapshot = self.snapshot()
-        root, kind, suffix = _path_root(path)
-        if suffix:
-            raise ValueError(f"Source acceptance requires a root path: {path!r}")
-        value = snapshot.entry_value(root, kind=kind)
-        candidate = snapshot.document()
-        _accept_sources(candidate, root, value, provenance)
-        self._install(candidate)
-
     def rename(
         self, from_path: str, to_path: str, *, kind: Literal["module", "waveform"]
     ) -> None:
-        """Pure-relocate this draft's Spec and all recorded sources; policy follows renamed."""
+        """Pure-relocate this draft's Spec; policy follows renamed."""
         candidate = self.snapshot().renamed(from_path, to_path, kind=kind)
         self._install(candidate.document())
 
     def delete(self, path: str, *, kind: Literal["module", "waveform"]) -> None:
-        """Delete only this root and sources; errors follow entry_value, no reference cascade."""
+        """Delete only this root; errors follow entry_value, no reference cascade."""
         candidate = self.snapshot().deleted(path, kind=kind)
         self._install(candidate.document())
 
@@ -695,29 +498,18 @@ class ModuleLibrary:
         path: Path,
         *,
         assets: WaveformAssetInfo | None = None,
-        ledger: Path,
-        entry_id: str,
     ) -> None:
-        """Open existing YAML with this entry's source scope, without creation.
+        """Open existing module_cfg.yaml without writes or ledger dependencies.
 
-        path is the point-local module_cfg.yaml; assets is its fixed capability,
-        or None for Spec-only operations. Materializing Arb requires a provider.
-        ledger names the entry's records/ledger.jsonl; entry_id is its UUID.
-        Invalid existing Specs or entry-local provenance are backed up and
-        removed under the document lock. Container/header, ledger I/O/schema
-        and unexpected errors propagate without publication. Reads can write
-        cleanup; new edits remain strict. Opening does not read assets.
+        assets is optional for Spec-only operations; Arb materialization needs a
+        provider. Invalid disk Specs are skipped with invalid_entries diagnostics.
+        Header/container/I/O errors propagate. Draft edits remain strict.
         """
         self._path = path.resolve()
         self._assets = assets
-        self._ledger = RecordsLedger(ledger.resolve().parent, entry_id=entry_id)
-        self._entry_id = entry_id
-        # Defer composition: the store policy uses the document models above.
         from .library_store import open_library_store
 
-        self._store = open_library_store(
-            self._path, ledger=self._ledger, entry_id=self._entry_id
-        )
+        self._store = open_library_store(self._path)
 
     @property
     def source_path(self) -> Path:
@@ -745,8 +537,6 @@ class ModuleLibrary:
             LibraryEdit(
                 document,
                 assets=self._assets,
-                ledger=self._ledger,
-                entry_id=self._entry_id,
             ) as draft,
         ):
             yield draft
@@ -754,10 +544,10 @@ class ModuleLibrary:
     def refresh(self, *, strict: bool = False) -> bool:
         """Reload and publish changed valid content; return whether it changed.
 
-        By default invalid entries are backed up and removed before publication.
-        strict=True instead validates the whole external candidate without repair
-        or backup. Validation and I/O failures retain the installed snapshot and
-        revision. Strict reload never writes the document.
+        By default invalid disk Specs are skipped and reported in invalid_entries.
+        strict=True validates the whole external candidate without skipping.
+        Validation and I/O failures retain the installed snapshot and revision.
+        Refresh never writes the document.
         """
         return self._store.refresh(strict=strict)
 

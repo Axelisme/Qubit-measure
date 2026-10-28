@@ -27,7 +27,6 @@ if TYPE_CHECKING:
     from zcu_tools.gui.session.types import ParameterContext, RoleBinding
     from zcu_tools.gui.session.value_lookup import ScalarValue, ValueInfo
     from zcu_tools.resources.entry.ledger_models import JsonObject
-    from zcu_tools.resources.entry.provenance import Provenance
     from zcu_tools.resources.entry.schema import PointDocument, SetupDocument
     from zcu_tools.resources.entry.storage import PointStorageBinding
     from zcu_tools.resources.entry.writeback import (
@@ -162,8 +161,6 @@ class ContextControlPort(Protocol):
         target: ContextTarget,
         path: str,
         value: ModuleSpec,
-        *,
-        source: Provenance | None = None,
     ) -> YamlMap:
         """Write a module; return its actual cached Spec mapping after commit."""
         ...
@@ -173,8 +170,6 @@ class ContextControlPort(Protocol):
         target: ContextTarget,
         path: str,
         value: WaveformSpec,
-        *,
-        source: Provenance | None = None,
     ) -> YamlMap:
         """Write a waveform; return its actual cached Spec mapping after commit."""
         ...
@@ -188,7 +183,7 @@ class ContextControlPort(Protocol):
         move or remove an existing root. The command runs in one library
         transaction. Writes require a selected working point. Detached
         SavedPoint writes do not select or publish. Invalid target, Spec
-        family, source, conflict and I/O failures write and publish nothing.
+        family, conflict and I/O failures write and publish nothing.
         """
         ...
 
@@ -369,20 +364,16 @@ class ContextControlFacet(ContextControlPort):
         target: ContextTarget,
         path: str,
         value: ModuleSpec,
-        *,
-        source: Provenance | None = None,
     ) -> YamlMap:
-        return self._context.set_module(target, path, value, source=source)
+        return self._context.set_module(target, path, value)
 
     def set_waveform(
         self,
         target: ContextTarget,
         path: str,
         value: WaveformSpec,
-        *,
-        source: Provenance | None = None,
     ) -> YamlMap:
-        return self._context.set_waveform(target, path, value, source=source)
+        return self._context.set_waveform(target, path, value)
 
     def apply_library_change(
         self, parameters: ParameterContext, change: LibraryChange

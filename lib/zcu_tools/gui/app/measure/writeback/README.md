@@ -1,6 +1,6 @@
 # `gui.app.measure.writeback`
 
-**Last updated:** 2026-10-27
+**Last updated:** 2026-10-28
 
 **讀者：** framework-dev。寫回提案、review widget 與逐項 Apply 契約。
 
@@ -51,9 +51,9 @@ Parameter 與 library 各用一次單檔交易，組內任一項無效整組不�
 Ledger append 失敗時不提交任何列。Apply 不提供跨列 rollback 或自動 retry。
 
 資源層對完整 serialization tree 驗證一次 YAML 表示。
-Library 的完整 provenance 驗證一次讀取 ledger，並檢查每個被引用的事件與附件。
-DocumentStore 每次仍讀取磁碟 bytes，相同內容只重用已解析的 YAML 節點。
-每次 Apply 都執行模型、清理政策與外部來源驗證，重新驗證 ledger 與附件。
+Library 只保存 Spec，不保存 per-leaf stderr 或 provenance，也不驗來源事件或附件。
+DocumentStore 每次讀取磁碟 bytes，未變內容沿用驗證快取。
+每次 Apply 仍驗證新 draft 的完整模型，並保留 accepted 稽核事件。
 各組提交到固定目的地，錯誤分類與 applied 狀態由已提交項目決定。
 Apply 同步執行。
 

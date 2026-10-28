@@ -1,8 +1,6 @@
-"""Cross-entry clone: library imports stay resolvable; point metadata copies verbatim."""
+"""Point cloning copies parameters, library Specs and aliases without importing events."""
 
 import json
-import os
-from dataclasses import replace
 from pathlib import Path
 from uuid import uuid4
 
@@ -20,14 +18,10 @@ from zcu_tools.resources.document_store import DocumentStore
 from zcu_tools.resources.entry import (
     AcceptedPayload,
     AcceptedWrite,
-    ImportPayload,
     LedgerEvent,
     PointView,
-    Provenance,
     ResultEntry,
-    SavedPayload,
 )
-from zcu_tools.resources.entry.provenance import ProvenanceData
 from zcu_tools.resources.entry.schema import (
     PARAMETER_FORMAT,
     PARAMETER_VERSION,
@@ -73,7 +67,7 @@ def foreign_recorded_point(
 def write_source_library(
     entry: ResultEntry, event: LedgerEvent
 ) -> ModuleLibraryDocument:
-    """Publish valid Specs with shared, library-only and manual source leaves."""
+    """Write valid Specs with a legacy library source record."""
     value = ModuleLibraryDocument(
         format="zcu.module-library",
         format_version="2.0",
@@ -91,30 +85,36 @@ def write_source_library(
                 waveforms={"base": ConstWaveformCfg(length=0.05)},
             )
         },
-        provenance={
-            "Q1.pulses.pi.gain": ProvenanceData.from_provenance(
-                Provenance(event.id, "rabi", None, event.at, 0.01)
-            ),
-            "Q1.waveforms.base.length": ProvenanceData.from_provenance(
-                Provenance("manual", None, None, event.at, None)
-            ),
-        },
     )
+    stored = value.model_dump(mode="json")
+    stored["provenance"] = {
+        "Q1.pulses.pi.gain": {
+            "source": event.id,
+            "kind": "rabi",
+            "run_id": None,
+            "at": event.at,
+            "stderr": 0.01,
+        }
+    }
     (entry.result_path / "points/source/module_cfg.yaml").write_text(
-        value.model_dump_json(), encoding="utf-8"
+        json.dumps(stored), encoding="utf-8"
     )
     return value
 
 
 @pytest.mark.parametrize("source_mode", ["label", "view"])
 @pytest.mark.parametrize("same_entry", [True, False])
-def test_clone_rewrites_library_sources_and_copies_point_metadata_verbatim(
+def test_clone_copies_values_without_importing_library_events(
     entry: ResultEntry,
     foreign_recorded_point: tuple[ResultEntry, PointView, LedgerEvent],
     source_mode: str,
     same_entry: bool,
 ) -> None:
     foreign, point, event = foreign_recorded_point
+    from zcu_tools.resources.entry.aliases import EntryAliases
+
+    aliases = EntryAliases(aliases={"drive": "Q1", "copy": "$drive"})
+    foreign.save_aliases(aliases, point="source")
     source_document = write_source_library(foreign, event)
     source_file = foreign.result_path / "points/source/module_cfg.yaml"
     before = source_file.read_bytes()
@@ -134,168 +134,44 @@ def test_clone_rewrites_library_sources_and_copies_point_metadata_verbatim(
     spec = library.module_spec("Q1.pulses.pi")
     assert isinstance(spec, PulseSpec)
     assert spec.waveform == "Q1.waveforms.missing"
-    copied = library.meta("Q1.pulses.pi.gain")
-    assert copied is not None
-    expected_id = event.id if same_entry else destination.ledger.events()[0].id
-    assert copied == replace(
-        source_document.provenance["Q1.pulses.pi.gain"].to_provenance(),
-        source=expected_id,
-        cloned_from={"entry_id": foreign.entry_id, "point": "source"},
-    )
     assert cloned.meta("Q1.rate") == point.meta("Q1.rate")
-    assert len(destination.ledger.events()) == 1
-    manual = library.meta("Q1.waveforms.base.length")
-    assert manual is not None
-    assert manual.source == "manual"
-    assert manual.cloned_from == {"entry_id": foreign.entry_id, "point": "source"}
+    assert destination.load_aliases(point="library-copy") == aliases
+    assert len(destination.ledger.events()) == (1 if same_entry else 0)
     assert source_file.read_bytes() == before
 
 
-def test_library_only_import_keeps_evidence_after_source_entry_moves(
-    entry: ResultEntry,
-    entry_roots: tuple[Path, Path],
-    foreign_recorded_point: tuple[ResultEntry, PointView, LedgerEvent],
-) -> None:
-    foreign, _point, event = foreign_recorded_point
-    original = foreign.ledger.get(event.id)
-    write_source_library(foreign, event)
-    entry.new_point("library-only", clone_from="other/source", origin="mcp")
-    imported = entry.ledger.events()[0]
-    assert len(entry.ledger.events()) == 1
-    assert imported.origin == "mcp"
-    assert isinstance(imported.payload, ImportPayload)
-    assert imported.payload.source_event_json == original.event_json
-    assert imported.payload.source_record == original.event.record
-    results, _database = entry_roots
-    (results / "other").rename(results / "moved-other")
-    stored = DocumentStore(
-        entry.result_path / "points/library-only/module_cfg.yaml",
-        ModuleLibraryDocument,
-        format=MODULE_LIBRARY_FORMAT,
-        supported_version=MODULE_LIBRARY_VERSION,
-    ).snapshot()
-    copied = stored.provenance["Q1.pulses.pi.gain"]
-    assert copied.source == imported.id
-    assert copied.cloned_from == {"entry_id": foreign.entry_id, "point": "source"}
-    assert entry.ledger.get(copied.source).record == original.record
-
-
-def test_clone_imports_distinct_library_events(
+def test_clone_skips_invalid_specs_without_rewriting_source(
     entry: ResultEntry,
     foreign_recorded_point: tuple[ResultEntry, PointView, LedgerEvent],
-) -> None:
-    foreign, _point, event = foreign_recorded_point
-    second = LedgerEvent(
-        id=str(uuid4()),
-        kind="accepted",
-        at=event.at,
-        entry_id=foreign.entry_id,
-        origin="notebook",
-        payload=AcceptedPayload(
-            writes=(AcceptedWrite(path="Q1.waveforms.base.length", value=0.05),),
-        ),
-    )
-    foreign.ledger.append(second, record={"length": 0.05})
-    document = write_source_library(foreign, event)
-    document.provenance["Q1.waveforms.base.length"] = ProvenanceData.from_provenance(
-        Provenance(second.id, "fit", None, second.at, 0.002)
-    )
-    (foreign.result_path / "points/source/module_cfg.yaml").write_text(
-        document.model_dump_json(), encoding="utf-8"
-    )
-    entry.new_point("distinct", clone_from="other/source")
-    imports: dict[str, str] = {}
-    for imported in entry.ledger.events():
-        assert isinstance(imported.payload, ImportPayload)
-        imports[imported.payload.source_event_id] = imported.id
-    assert set(imports) == {event.id, second.id}
-    copied = DocumentStore(
-        entry.result_path / "points/distinct/module_cfg.yaml",
-        ModuleLibraryDocument,
-        format=MODULE_LIBRARY_FORMAT,
-        supported_version=MODULE_LIBRARY_VERSION,
-    ).snapshot()
-    assert copied.provenance["Q1.pulses.pi.gain"].source == imports[event.id]
-    assert copied.provenance["Q1.waveforms.base.length"].source == imports[second.id]
-    assert entry.ledger.get(imports[second.id]).record == {"length": 0.05}
-
-
-def test_manual_library_clone_produces_no_import(
-    entry: ResultEntry,
-    foreign_recorded_point: tuple[ResultEntry, PointView, LedgerEvent],
-) -> None:
-    foreign, _point, event = foreign_recorded_point
-    document = write_source_library(foreign, event)
-    document.provenance["Q1.pulses.pi.gain"].source = "manual"
-    (foreign.result_path / "points/source/module_cfg.yaml").write_text(
-        document.model_dump_json(), encoding="utf-8"
-    )
-    entry.new_point("manual-library", clone_from="other/source")
-    copied = DocumentStore(
-        entry.result_path / "points/manual-library/module_cfg.yaml",
-        ModuleLibraryDocument,
-        format=MODULE_LIBRARY_FORMAT,
-        supported_version=MODULE_LIBRARY_VERSION,
-    ).snapshot()
-    assert entry.ledger.events() == ()
-    assert all(record.source == "manual" for record in copied.provenance.values())
-    assert all(
-        record.cloned_from == {"entry_id": foreign.entry_id, "point": "source"}
-        for record in copied.provenance.values()
-    )
-
-
-def test_failed_library_commit_removes_new_point_but_keeps_completed_import(
-    entry: ResultEntry,
-    foreign_recorded_point: tuple[ResultEntry, PointView, LedgerEvent],
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    foreign, _point, event = foreign_recorded_point
-    write_source_library(foreign, event)
-    source = foreign.result_path / "points/source"
-    before = {
-        name: (source / name).read_bytes() for name in ("point.yaml", "module_cfg.yaml")
-    }
-    target = entry.result_path / "points/io-failure/module_cfg.yaml"
-    replace_file = os.replace
-
-    def fail_library_replace(source: str | Path, destination: str | Path) -> None:
-        if Path(destination) == target:
-            raise OSError("library commit failed")
-        replace_file(source, destination)
-
-    with monkeypatch.context() as patch:
-        patch.setattr(os, "replace", fail_library_replace)
-        with pytest.raises(OSError, match="library commit failed"):
-            entry.new_point("io-failure", clone_from="other/source")
-    assert not target.parent.exists()
-    assert entry.list_points() == []
-    assert {name: (source / name).read_bytes() for name in before} == before
-    imports = entry.ledger.events()
-    assert len(imports) == 1
-    assert isinstance(imports[0].payload, ImportPayload)
-    assert imports[0].payload.source_event_id == event.id
-    assert entry.ledger.get(imports[0].id).record == foreign.ledger.get(event.id).record
-
-
-@pytest.mark.parametrize("failure", ["attachment", "header"])
-def test_library_clone_failure_cleans_destination_and_keeps_source(
-    entry: ResultEntry,
-    foreign_recorded_point: tuple[ResultEntry, PointView, LedgerEvent],
-    failure: str,
 ) -> None:
     foreign, _point, event = foreign_recorded_point
     write_source_library(foreign, event)
     source = foreign.result_path / "points/source/module_cfg.yaml"
-    if failure == "attachment":
-        (foreign.result_path / f"records/{event.id}.json").unlink()
-    else:
-        source.write_text(
-            source.read_text().replace(
-                '"format_version":"2.0"', '"format_version":"1.0"'
-            ),
-            encoding="utf-8",
-        )
+    document = json.loads(source.read_text())
+    document["components"]["Q1"]["pulses"]["pi"]["mask"] = 3
+    source.write_text(json.dumps(document))
+    original = source.read_bytes()
+
+    entry.new_point("filtered-copy", clone_from="other/source")
+
+    copied = entry.module_library("filtered-copy").snapshot()
+    assert copied.module_keys() == ()
+    assert copied.waveform_spec("Q1.waveforms.base").length == 0.05
+    assert source.read_bytes() == original
+    assert list(source.parent.glob("*.bak*")) == []
+    assert entry.ledger.events() == ()
+
+
+def test_library_clone_failure_cleans_destination_and_keeps_source(
+    entry: ResultEntry,
+    foreign_recorded_point: tuple[ResultEntry, PointView, LedgerEvent],
+) -> None:
+    foreign, _point, event = foreign_recorded_point
+    write_source_library(foreign, event)
+    source = foreign.result_path / "points/source/module_cfg.yaml"
+    document = json.loads(source.read_text())
+    document["format_version"] = "1.0"
+    source.write_text(json.dumps(document))
     before = source.read_bytes()
     with pytest.raises((ValueError, FileNotFoundError)):
         entry.new_point("failed-library", clone_from="other/source")
@@ -378,57 +254,7 @@ def test_cross_entry_clone_uses_published_values_and_copies_metadata(
     assert entry.use_point("target").meta("Q1.rate") == fresh.meta("Q1.rate")
 
 
-def test_nested_import_remains_locally_resolvable_after_source_entries_move(
-    entry: ResultEntry,
-    entry_roots: tuple[Path, Path],
-    foreign_recorded_point: tuple[ResultEntry, PointView, LedgerEvent],
-) -> None:
-    results, database = entry_roots
-    foreign, _point, event = foreign_recorded_point
-    # Future-minor unknown data and exact whitespace are historical evidence.
-    ledger_path = results / "other/records/ledger.jsonl"
-    raw_event = json.loads(ledger_path.read_text())
-    raw_event["format_version"] = "1.2"
-    raw_event["future_header"] = {"confidence": None}
-    raw_event["payload"]["future_payload"] = [1, True]
-    raw = "  " + json.dumps(raw_event, ensure_ascii=False) + "  "
-    ledger_path.write_text(raw + "\n", encoding="utf-8")
-    write_source_library(foreign, event)
-    entry.new_point("first", clone_from="other/source")
-    first_import = entry.ledger.events()[0]
-    first_evidence = entry.ledger.get(first_import.id)
-    third = ResultEntry.create("third", result_root=results, database_root=database)
-    cloned = third.new_point("final", clone_from="entry/first")
-    final_import = third.ledger.events()[0]
-    assert isinstance(final_import.payload, ImportPayload)
-    assert final_import.payload.source_event_json == first_evidence.event_json
-    assert final_import.payload.source_event_id == first_import.id
-    assert final_import.payload.source_entry_id == entry.entry_id
-    assert final_import.payload.source_record == first_import.record
-    assert isinstance(first_import.payload, ImportPayload)
-    assert first_import.payload.source_event_json == raw
-    assert first_import.payload.source_event_id == event.id
-    assert first_import.payload.source_entry_id == foreign.entry_id
-    assert third.ledger.get(final_import.id).record == first_evidence.record
-    assert ledger_path.read_text() == raw + "\n"
-    for name in ("other", "entry"):
-        (results / name).rename(results / f"moved-{name}")
-    reopened = ResultEntry.open("third", result_root=results, database_root=database)
-    point = reopened.use_point("final")
-    assert point.Q1.rate == 5300.0
-    assert point.Q1.duration == 12.0
-    library = reopened.module_library("final").snapshot()
-    metadata = library.meta("Q1.pulses.pi.gain")
-    assert metadata is not None
-    assert metadata.cloned_from == {"entry_id": entry.entry_id, "point": "first"}
-    found = reopened.ledger.get(metadata.source)
-    assert found.event.id == final_import.id
-    assert found.record == first_evidence.record
-    assert point.meta("Q1.rate") == {"source": event.id, "kind": "fit", "stderr": 0.18}
-    assert cloned.meta("Q1.rate") == point.meta("Q1.rate")
-
-
-@pytest.mark.parametrize("failure", ["record", "point", "header"])
+@pytest.mark.parametrize("failure", ["point"])
 def test_foreign_source_failure_does_not_publish_destination_or_modify_source(
     entry: ResultEntry,
     entry_roots: tuple[Path, Path],
@@ -440,17 +266,10 @@ def test_foreign_source_failure_does_not_publish_destination_or_modify_source(
     write_source_library(foreign, event)
     source = results / "other/points/source/point.yaml"
     ledger_path = results / "other/records/ledger.jsonl"
-    if failure == "record":
-        (results / f"other/records/{event.id}.json").unlink()
-    elif failure == "point":
-        document = YAML(typ="rt").load(source.read_text())
-        document["components"]["Q1"]["rate"] = "invalid"
-        with source.open("w", encoding="utf-8") as stream:
-            YAML(typ="rt").dump(document, stream)
-    else:
-        raw = json.loads(ledger_path.read_text())
-        raw["entry_id"] = str(uuid4())
-        ledger_path.write_text(json.dumps(raw) + "\n", encoding="utf-8")
+    document = YAML(typ="rt").load(source.read_text())
+    document["components"]["Q1"]["rate"] = "invalid"
+    with source.open("w", encoding="utf-8") as stream:
+        YAML(typ="rt").dump(document, stream)
     before = source.read_bytes()
     ledger_before = ledger_path.read_bytes()
     with pytest.raises((ValueError, FileNotFoundError)):
@@ -549,50 +368,6 @@ def test_existing_cross_entry_destination_is_not_merged(
     assert entry.ledger.events() == ()
 
 
-def test_future_minor_import_preserves_payload_branch_collision_evidence(
-    entry: ResultEntry,
-    entry_roots: tuple[Path, Path],
-    foreign_recorded_point: tuple[ResultEntry, PointView, LedgerEvent],
-) -> None:
-    foreign, view, _event = foreign_recorded_point
-    results, _database = entry_roots
-    event = LedgerEvent(
-        id=str(uuid4()),
-        kind="saved",
-        at="2026-10-06T02:00:00Z",
-        entry_id=foreign.entry_id,
-        origin="notebook",
-        payload=SavedPayload(run_id="r", outputs=()),
-    )
-    foreign.ledger.append(event, record={"sample": 1})
-    write_source_library(foreign, event)
-    path = results / "other/records/ledger.jsonl"
-    lines = path.read_text().splitlines()
-    data = json.loads(lines[-1])
-    data["format_version"] = "1.1"
-    data["payload"].update(
-        run_id="future-run",
-        tab="Spectroscopy",
-        experiment="future-spec",
-        cfg_summary={},
-        roles={},
-    )
-    raw = json.dumps(data)
-    path.write_text("\n".join([*lines[:-1], raw]) + "\n", encoding="utf-8")
-    before = path.read_bytes()
-    source_record = foreign.ledger.get(event.id).record
-    cloned = entry.new_point("future-copy", clone_from=view)
-    library = entry.module_library("future-copy").snapshot()
-    metadata = library.meta("Q1.pulses.pi.gain")
-    assert metadata is not None
-    imported = entry.ledger.get(metadata.source)
-    assert isinstance(imported.event.payload, ImportPayload)
-    assert imported.event.payload.source_event_json == raw
-    assert imported.record == source_record
-    assert cloned.Q1.rate == 5300.0
-    assert path.read_bytes() == before
-
-
 @pytest.mark.parametrize("same_entry", [True, False])
 def test_constructor_bound_view_clones_without_later_identity_registration(
     entry: ResultEntry,
@@ -622,43 +397,3 @@ def test_constructor_bound_view_clones_without_later_identity_registration(
     assert len(foreign.ledger.events()) == 1
     for path in ("Q1.rate", "Q1.duration"):
         assert cloned.meta(path) == view.meta(path)
-
-
-@pytest.mark.parametrize(
-    "defect", ["spec", "missing_event", "source_schema", "source_path"]
-)
-@pytest.mark.parametrize("same_entry", [True, False])
-def test_clone_cleans_source_before_copy_and_import(
-    entry: ResultEntry,
-    foreign_recorded_point: tuple[ResultEntry, PointView, LedgerEvent],
-    defect: str,
-    same_entry: bool,
-) -> None:
-    foreign, _point, event = foreign_recorded_point
-    value = write_source_library(foreign, event).model_dump(mode="json")
-    source = foreign.result_path / "points/source/module_cfg.yaml"
-    if defect == "spec":
-        value["components"]["Q1"]["pulses"]["pi"]["mask"] = 3
-    elif defect == "missing_event":
-        value["provenance"]["Q1.pulses.pi.gain"]["source"] = "absent"
-    elif defect == "source_schema":
-        value["provenance"]["Q1.pulses.pi.gain"]["stderr"] = "invalid"
-    else:
-        value["provenance"]["Q1.pulses.pi.absent"] = value["provenance"].pop(
-            "Q1.pulses.pi.gain"
-        )
-    source.write_text(json.dumps(value), encoding="utf-8")
-    original = source.read_bytes()
-    destination = foreign if same_entry else entry
-    destination.new_point(
-        "clean-copy", clone_from="source" if same_entry else "other/source"
-    )
-    copied = destination.module_library("clean-copy").snapshot()
-    assert copied.module_keys() == ()
-    assert copied.waveform_keys() == ("Q1.waveforms.base",)
-    assert set(copied.document().provenance) == {"Q1.waveforms.base.length"}
-    assert len(destination.ledger.events()) == (1 if same_entry else 0)
-    backups = list(source.parent.glob("*.bak*"))
-    assert len(backups) == 1
-    assert backups[0].read_bytes() == original
-    assert foreign.module_library("source").snapshot().module_keys() == ()

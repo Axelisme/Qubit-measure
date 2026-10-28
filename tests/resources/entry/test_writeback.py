@@ -46,7 +46,29 @@ def target(point: PointView) -> PointWritebackTarget:
 
 
 def evidence() -> WritebackEvidence:
-    return WritebackEvidence(kind="test/fit", origin="notebook", run_id="run-1")
+    return WritebackEvidence(origin="notebook", run_id="run-1")
+
+
+def test_library_acceptance_keeps_audit_event_without_leaf_sources(
+    point: PointView,
+) -> None:
+    writer = target(point)
+    result = apply_writeback(
+        (WaveformWriteback("Q1.waveforms.pi", ConstWaveformCfg(length=0.2)),),
+        target=writer,
+        evidence=evidence(),
+    )
+    storage = capture_point_storage(point)
+    path = storage.result_path / "points" / storage.point / "module_cfg.yaml"
+    from ruamel.yaml import YAML
+
+    stored = YAML(typ="safe").load(path.read_text())
+    assert "provenance" not in stored
+    assert stored["components"]["Q1"]["waveforms"]["pi"]["length"] == 0.2
+    events = writer.ledger.events()
+    assert len(events) == 1
+    assert events[0].kind == "accepted"
+    assert events[0].id == result.event_id
 
 
 @pytest.mark.parametrize("fails", [False, True])

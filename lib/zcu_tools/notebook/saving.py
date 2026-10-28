@@ -265,12 +265,12 @@ class SavedRun(Generic[CfgT, ResultT]):
 
         Append one accepted event, then apply parameter, module, waveform and
         records in that order, preserving each mapping's iteration order.
-        Each item commits separately. An item failure raises WritebackApplyError
-        with event_id/applied and the original cause; ledger append fails unchanged.
-        The first failure stops later writes; prior successful items
-        and the event remain. No cross-item rollback or retry is provided.
-        Library Provenance kind is this run's experiment name, never
-        caller-supplied. Parameter metadata receives no event, run or time.
+        Point and library each commit one document batch; records append individually.
+        A group failure raises WritebackApplyError with event_id/applied and the
+        original cause; ledger append fails unchanged. The first failure stops
+        later groups; prior groups and the event remain. No rollback or retry
+        is provided. Library writes store only Specs, without leaf sources.
+        Parameter metadata receives no event, run or time.
         Return the accepted event ID after all items succeed.
         """
         if not parameter and not module and not waveform and not records:
@@ -299,7 +299,6 @@ class SavedRun(Generic[CfgT, ResultT]):
             tuple(items),
             target=PointWritebackTarget(self._point, self._storage),
             evidence=WritebackEvidence(
-                kind=self._metadata.experiment,
                 run_id=self.run_id,
                 origin="notebook",
             ),

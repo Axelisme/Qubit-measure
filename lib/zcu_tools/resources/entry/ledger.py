@@ -191,31 +191,6 @@ class RecordsLedger:
                 for item in self._read(force_reload=True).values()
             )
 
-    def dependencies_exist(self, event_ids: tuple[str, ...]) -> bool:
-        """Check event IDs and local attachment existence without parsing records.
-
-        Empty input returns True without I/O. Otherwise hold the ledger lock,
-        update the incremental index and check each unique ID and its referenced
-        local attachment with stat. A missing ID or attachment returns False.
-        Ledger schema, lock and other I/O errors propagate. Attachment content is
-        not read or validated; imports never follow historical source_record.
-        Callers that require content validation must use get/get_many/find_many.
-        """
-        if not event_ids:
-            return True
-        with self._locked():
-            entries = self._read()
-            for event_id in dict.fromkeys(event_ids):
-                item = entries.get(event_id)
-                if item is None:
-                    return False
-                if item.event.record is not None:
-                    try:
-                        (self._records / f"{event_id}.json").stat()
-                    except FileNotFoundError:
-                        return False
-            return True
-
     def get(self, event_id: str) -> LedgerEntry:
         """Read an event and its local JSON attachment under the ledger lock.
 
@@ -245,26 +220,6 @@ class RecordsLedger:
                 item = entries[event_id]
                 found[event_id] = self._with_record(item)
             return tuple(found[event_id] for event_id in event_ids)
-
-    def find_many(self, event_ids: tuple[str, ...]) -> dict[str, LedgerEntry | None]:
-        """Look up all IDs with one locked parse, mapping absent IDs to None.
-
-        Keys follow first occurrence in event_ids. Each unique requested event
-        and its local attachment is checked once; unrequested attachments are
-        not read. Empty input returns {} without I/O. Ledger schema, attachment
-        and I/O errors propagate, including after an absent ID. Results are
-        isolated copies with freshly read attachments. Use get_many for strict
-        lookup that raises at the first absent ID.
-        """
-        if not event_ids:
-            return {}
-        with self._locked():
-            entries = self._read()
-            found: dict[str, LedgerEntry | None] = {}
-            for event_id in dict.fromkeys(event_ids):
-                item = entries.get(event_id)
-                found[event_id] = self._with_record(item) if item is not None else None
-            return found
 
     def _with_record(self, item: LedgerEntry) -> LedgerEntry:
         record = None

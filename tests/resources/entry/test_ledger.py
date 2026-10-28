@@ -20,7 +20,6 @@ from zcu_tools.resources.entry import (
     AnalyzedPayload,
     ImportPayload,
     JsonObject,
-    LedgerEntry,
     LedgerEvent,
     RecordsLedger,
     ResultEntry,
@@ -95,11 +94,6 @@ def test_large_ledger_parses_only_new_tail_after_append(
                 item.event
                 for item in ledger.get_many((added.id, history[0].id, added.id))
             ) == (added, history[0], added)
-            found = ledger.find_many(("absent", history[-1].id, added.id))
-            assert found["absent"] is None
-            assert found[history[-1].id] == LedgerEntry(
-                history[-1], None, history[-1].model_dump_json()
-            )
             assert ledger.events() == (*history, added)
 
         decoded_lines = [call.args[1] for call in parsed.call_args_list]
@@ -110,77 +104,7 @@ def test_large_ledger_parses_only_new_tail_after_append(
             for call in opened.call_args_list
             if call.args[0] == path and call.args[1] == "rb"
         ]
-        assert len(ledger_reads) == 5, "each operation checks disk under its lock"
-
-
-def test_find_many_reports_all_missing_ids_with_one_read(
-    entry_records: tuple[ResultEntry, Path],
-) -> None:
-    entry, records = entry_records
-    event = _accepted(entry.entry_id)
-    entry.ledger.append(event, record={"evidence": 1})
-
-    with patch.object(Path, "open", autospec=True, side_effect=Path.open) as opened:
-        found = entry.ledger.find_many(("absent-a", event.id, "absent-b", event.id))
-
-    assert tuple(found) == ("absent-a", event.id, "absent-b")
-    assert found["absent-a"] is None
-    assert found["absent-b"] is None
-    present = found[event.id]
-    assert present is not None
-    assert present.event == event.model_copy(
-        update={"record": f"records/{event.id}.json"}
-    )
-    assert present.record == {"evidence": 1}
-    assert (
-        len(
-            [
-                call
-                for call in opened.call_args_list
-                if call.args[0] == records / "ledger.jsonl"
-            ]
-        )
-        == 1
-    )
-    assert (
-        len(
-            [
-                call
-                for call in opened.call_args_list
-                if call.args[0] == records / f"{event.id}.json"
-            ]
-        )
-        == 1
-    )
-    with pytest.raises(KeyError, match="absent-a"):
-        entry.ledger.get_many(("absent-a", event.id, "absent-b"))
-
-
-def test_find_many_empty_does_not_access_ledger(
-    entry_records: tuple[ResultEntry, Path],
-) -> None:
-    entry, _ = entry_records
-    with patch.object(Path, "open", side_effect=AssertionError("unexpected I/O")):
-        assert entry.ledger.find_many(()) == {}
-
-
-@pytest.mark.parametrize("defect", ["missing", "malformed"])
-def test_find_many_propagates_attachment_errors_after_missing_ids(
-    entry_records: tuple[ResultEntry, Path], defect: str
-) -> None:
-    entry, records = entry_records
-    event = _accepted(entry.entry_id)
-    entry.ledger.append(event, record={"evidence": 1})
-    attachment = records / f"{event.id}.json"
-    if defect == "missing":
-        attachment.unlink()
-        failure = FileNotFoundError
-    else:
-        attachment.write_text("{broken")
-        failure = ValueError
-
-    with pytest.raises(failure, match=event.id):
-        entry.ledger.find_many(("absent", event.id))
+        assert len(ledger_reads) == 4, "each operation checks disk under its lock"
 
 
 def test_accepted_complex_uses_tag_in_payload_and_persisted_ledger(

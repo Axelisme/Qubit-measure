@@ -1,6 +1,6 @@
 # `gui.app.measure.remote`
 
-**Last updated:** 2026-10-27
+**Last updated:** 2026-10-28
 
 **讀者：** framework-dev。量測 GUI 的 RPC 方法、控制權與來源投影契約。
 
@@ -15,6 +15,11 @@ Record writeback uses kind=`record`, IDs `record-<n>` and `written.records`.
 The preview's `proposed_value` carries the adapter's JSON object unchanged.
 Wire version 123 removes the old sample names without aliases. Component records
 live at `records/components/<target>.jsonl`; the event ledger stays at `records/ledger.jsonl`.
+
+## Context snapshot
+
+`context.snapshot` 的 library 只投影持久 Specs，不回傳 `provenance`。
+Point metadata、target 與 aliases 投影不變。這次 wire 變更將 WIRE_VERSION 升至 128，GUI_VERSION 升至 161。
 
 ## Owners
 

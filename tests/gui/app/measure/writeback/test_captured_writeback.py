@@ -599,8 +599,6 @@ def test_writeback_evaluates_module_expression_from_creation_capture(
     assert event.kind == "accepted"
     assert isinstance(event.payload, AcceptedPayload)
     assert event.payload.writes[0].path == "Q1.pulses.pi"
-    source = current.library.meta("Q1.pulses.pi.gain")
-    assert source is not None and source.source == event.id
 
 
 def test_append_failure_leaves_parameter_untouched(
@@ -772,11 +770,9 @@ def test_library_receipt_reads_actual_raw_entry_and_uses_capture_for_proposal(
     assert receipt.target == item.target_name
     assert isinstance(receipt.before, dict) and receipt.before[field] == 0.6
     assert isinstance(receipt.after, dict) and receipt.after[field] == 0.2
-    source = session.control.read_context().library.meta(f"{item.target_name}.{field}")
-    assert source is not None and source.stderr == item.stderr
     event = session.entry.ledger.events()[-1]
     assert isinstance(event.payload, AcceptedPayload)
-    assert event.payload.run_id == source.run_id == draft.run_id == "original-run"
+    assert event.payload.run_id == draft.run_id == "original-run"
 
 
 def test_each_parameter_write_replaces_metadata_with_its_own_stderr(

@@ -134,7 +134,7 @@ def test_snapshot_returns_complete_native_documents_without_materializing_assets
     }
     wire_library = result["library"]
     assert isinstance(wire_library, dict)
-    assert wire_library["provenance"]
+    assert "provenance" not in wire_library
     # The asset was never created: a full Spec read must still succeed.
     with pytest.raises(ArbWaveformError):
         _ = captured.library.get_waveform("Q1.waveforms.arbitrary").length

@@ -46,9 +46,10 @@ PointView 的公開 constructor 必須提供 result_root、source 與 entry_id�
 
 `new_point(clone_from=...)` 接受同條目 label、`<entry>/<point>` 或相同 Result root 的 PointView，Database root 可以不同。Clone 重讀已發布的 point 與 module_cfg，不用 view 的舊快照，也不讀目的 setup。目的 point 保留來源的其他 general 資料，更新 created_at。參數值與 metadata 原樣複製，不查 ledger、不匯入事件、不改寫 source，也不加 cloned_from。
 
-`module_library(label=None, assets=...)` 開啟 setup 的 entry 層 `module_cfg.yaml`。傳入 label 時開啟該 point 的 typed library。兩者都綁定本條目 ledger 與 asset capability。舊 entry 若沒有 entry 層 library，開啟時回報缺檔，不在讀取時建立。新 point 不自動複製 setup library，無 clone_from 時仍建立只有標頭的 library。它不讀 point、不選 active point，也不建立缺失文件。Library handle 與 clone 共用 library owner 的文件、來源驗證及讀取清理政策。Clone 讀取來源 library 時，可能先逐 byte 備份原檔，再從來源主檔移除壞條目與附屬來源。Clone 只複製保留的條目，並只匯入保留的來源。
+`module_library(label=None, assets=...)` 開啟 entry 層 library，傳入 label 時開啟該 point 的 library。Assets 只供 materialization 使用。它不讀 point、不選 active point、不查 ledger，也不建立缺失文件。無 clone_from 的新 point 建立只有標頭的 library，不複製 setup library。
 
-跨條目 clone 只依 library 來源表，把每個不同的非 manual source 匯入為一筆本地 import 事件，共用事件只產生一筆 import。Library 來源表改寫為本地 ID，並更新直接 cloned_from。事件保存原行文字，附檔複製到目的 records。Manual 不產生 import；同條目 clone 不改 source。來源條目移走後，本地引用仍可查回。Clone 不複製 data 或圖片，不承諾 point 與 module_cfg 的跨檔 snapshot。失敗清理本次 point，已追加的 import 可以保留。後續 clone 失敗不回滾已完成的來源 library 清理，也不刪除其備份。
+Clone 由 library owner 複製合法 Specs 與 forward-minor 容器欄位，忽略舊 provenance，不改來源檔、不備份。跨 entry 不匯入事件或附件，同 entry 也不加來源標記。Data 與圖片不複製。Clone 不承諾 point 與 library 的跨檔 snapshot，失敗清理本次 point。
+
 
 ## 元件與定義
 
@@ -82,15 +83,13 @@ Setup 與 point 文件使用 `format: zcu.parameter-container`、`format_version
 
 `ResultEntry.ledger` 綁定條目的 UUID 與 records 目錄。RecordsLedger 擁有 typed 事件、JSON 附檔、完整 schema 驗證與 append-only 儲存。Caller 建立 acquire、save 或 accept 領域事件，提供事件 ID、UTC 時間與 frontend origin。Origin 是 gui、notebook 或 mcp。所有公開型別從 entry package 匯出。
 
-`RecordsLedger.find_many(event_ids)` 一次讀取 ledger，依首次出現順序回傳 ID 到 `LedgerEntry | None` 的 mapping。缺失事件回 None，已存在事件的附檔與 ledger 錯誤仍傳遞。`provenance.missing_sources` 忽略 manual 並回報全部缺失 ID，供 library 逐 root 清理。既有 `get`、`get_many` 與 `validate_sources` 仍在首個缺失 ID 拋錯。
-
 Acquired 只保存 run 身分、experiment、point、roles 與事件時間，不另存 cfg 摘要。Cfg 正本隨 native run data 保存。
 
 `ResultEntry.read_events_snapshot(name, *, result_root)` 封裝歷史 entry 的身分、records 路徑與 ledger 讀取。它不解析 component，也不建立 entry、檔案或 lock。缺 entry、records 或 ledger 回空 tuple；已有 entry 的身分、ledger schema 與 I/O 錯誤傳遞，重導路徑的 symlink 拒絕。
 
 `RecordsLedger.read_events_snapshot()` 供唯讀瀏覽完整事件清單，不取得或建立 lock file。它沿用 events 的 schema、entry identity、重複 ID 與完整尾行驗證，不讀附檔，也不更新 handle 的增量索引。並行 append 的未完成尾行會報錯，caller 可稍後重新查詢。
 
-其餘讀取與追加都持同一 resolved path 對應的 per-user runtime lock，位置見 [resources owner](../README.md#檔案鎖)。每個 RecordsLedger handle 保存已驗證的 byte offset 與 event_id 索引，正常追加只解析新尾段。前 4096 bytes、上次 offset 前最後一行或檔案身分改變、檔案縮短，以及同大小但修改時間改變時，重新驗證整份 ledger。Ledger 的契約是 append-only。同 inode、相同頭部與前次尾行下，中段原地改寫並增長不在增量偵測範圍；`reload()` 明確從頭驗證並更新索引。回傳的事件互相隔離，附檔內容不快取。`dependencies_exist(event_ids)` 在同鎖內更新索引並 stat 每個不同 ID 的本地附檔，不讀取或驗證附檔 JSON。全部存在回 True，缺失回 False，其他 ledger、lock 與 I/O 錯誤傳遞；空 tuple 回 True 且不作 I/O。需要附檔內容驗證時使用 get、get_many 或 find_many。
+其餘讀取與追加都持同一 resolved path 對應的 per-user runtime lock，位置見 [resources owner](../README.md#檔案鎖)。每個 RecordsLedger handle 保存已驗證的 byte offset 與 event_id 索引，正常追加只解析新尾段。前 4096 bytes、上次 offset 前最後一行或檔案身分改變、檔案縮短，以及同大小但修改時間改變時，重新驗證整份 ledger。Ledger 的契約是 append-only。同 inode、相同頭部與前次尾行下，中段原地改寫並增長不在增量偵測範圍；`reload()` 明確從頭驗證並更新索引。回傳的事件互相隔離，附檔內容不快取。
 
 新事件只寫 1.0；讀取 1.0 與較新 1.x 時，envelope 與 kind-specific payload 都忽略不支援欄位，包括舊 cfg_summary。`get` 的 raw event_json 保留原行，讀取不改寫行或附檔。已知欄位錯誤、未知 major／kind 與損壞行仍拒絕，append 仍驗證 caller 的已知欄位。帶 record 的 append 先發布新 JSON 附檔，再追加事件，不修改 caller model 或既有附檔。失敗可以留下孤兒附檔或不完整尾行，不提供 crash recovery。
 
@@ -98,7 +97,7 @@ Acquired 只保存 run 身分、experiment、point、roles 與事件時間，不
 
 Accepted 不要求前序事件或 run。Producer 先 append accepted，再提交值與 metadata。Point commit 失敗時 accepted 可以保留，值與 metadata 仍由 DocumentStore 單檔交易控制。Ledger 鎖不延伸到 point；兩者不是跨檔交易。
 
-`writeback` 提供共用 parameter／module／waveform／record 項目與 `apply_writeback`。RecordWriteback 接受具體元件名與 producer JSON 欄位，補上 captured run_id、point、accepted 時間與事件 source。Writeback 入口遞迴將 dict／list 內的 numpy floating／integer scalar 轉為 Python float／int，不修改 producer 的資料。Float 沿用 Python rounding，integer 保留精確值；非有限結果與其他非 JSON 值仍在追加 accepted 前拒絕。Ledger 與 record sink 使用同一份正規化 JSON；dev 欄位選填，caller 單位不轉換。Caller 傳入固定 SavedPoint 的 write target、已解析的具體路徑，以及具名 evidence，包含實驗名稱、run_id、origin 與可選 source。ParameterWriteback 的 metadata 為 None 時保留該 path 既有 metadata，mapping 則在同筆 point commit 整份替換；executor 不加入事件、來源或時間。Module／waveform 項目照舊帶 accepted Provenance 交給 library owner。流程追加一筆 accepted 後依序提交 point 參數一組、library module／waveform 一組與逐筆 records，組內保留供應順序。Point 與 library 各用一次 edit；任一項無效整組不寫，首錯停止。成功回 `WritebackResult(event_id, committed)`，每筆 committed value 由實際 setter 在逐項 draft 驗證後捕捉，只有整組 commit 成功才回傳，record 使用 append 回傳的完整 row。Committed 依實際提交順序，accepted payload writes 依供應順序；CommittedWrite.index 保留供應 tuple 的位置，重複 path 也可逐項關聯。項目失敗拋 `WritebackApplyError(result)`，同份 result 只保留已提交組的全部項目，event_id／applied 與原始 cause 仍可查，前組與事件保留。applied 仍計項目數，失敗組計零。GUI 不在整批後重讀目的地，因此父／子路徑後項覆寫不改首筆 receipt。Ledger append 失敗原樣傳播，不寫值。Library 在首次執行 library 項目時才開啟，key、family 與持久值驗證仍由 library owner 負責。流程不 import frontend 或 experiment，不建立跨文件交易或回復框架。Notebook 與 GUI 共用 executor。GUI context owner 綁定公開批次 setters，每個成功文件發布一次；GUI service 標記該前綴 applied 後原樣拋 cause，保持既有 wire 錯誤分類。
+`writeback` 提供共用 parameter／module／waveform／record 項目與 `apply_writeback`。RecordWriteback 接受具體元件名與 producer JSON 欄位，補上 captured run_id、point、accepted 時間與事件 source。Writeback 入口遞迴將 dict／list 內的 numpy floating／integer scalar 轉為 Python float／int，不修改 producer 的資料。Float 沿用 Python rounding，integer 保留精確值；非有限結果與其他非 JSON 值仍在追加 accepted 前拒絕。Ledger 與 record sink 使用同一份正規化 JSON；dev 欄位選填，caller 單位不轉換。Caller 傳入固定 SavedPoint 的 write target、已解析的具體路徑，以及具名 evidence，包含 run_id、origin 與可選 source。ParameterWriteback 的 metadata 為 None 時保留該 path 既有 metadata，mapping 則在同筆 point commit 整份替換；executor 不加入事件、來源或時間。Module／waveform 項目只交 Spec 給 library owner，不保存 per-leaf stderr 或來源。流程追加一筆 accepted 後依序提交 point 參數一組、library module／waveform 一組與逐筆 records，組內保留供應順序。Point 與 library 各用一次 edit；任一項無效整組不寫，首錯停止。成功回 `WritebackResult(event_id, committed)`，每筆 committed value 由實際 setter 在逐項 draft 驗證後捕捉，只有整組 commit 成功才回傳，record 使用 append 回傳的完整 row。Committed 依實際提交順序，accepted payload writes 依供應順序；CommittedWrite.index 保留供應 tuple 的位置，重複 path 也可逐項關聯。項目失敗拋 `WritebackApplyError(result)`，同份 result 只保留已提交組的全部項目，event_id／applied 與原始 cause 仍可查，前組與事件保留。applied 仍計項目數，失敗組計零。GUI 不在整批後重讀目的地，因此父／子路徑後項覆寫不改首筆 receipt。Ledger append 失敗原樣傳播，不寫值。Library 在首次執行 library 項目時才開啟，key、family 與持久值驗證仍由 library owner 負責。流程不 import frontend 或 experiment，不建立跨文件交易或回復框架。Notebook 與 GUI 共用 executor。GUI context owner 綁定公開批次 setters，每個成功文件發布一次；GUI service 標記該前綴 applied 後原樣拋 cause，保持既有 wire 錯誤分類。
 
 ## 輸出位置
 
@@ -126,7 +125,7 @@ Figure 回傳 run 的 `figures/<圖名>.png` 與 Result 的 point 或全域 figu
 
 DocumentStore 擁有單檔衝突檢查與 atomic replace。檔案、快照與視圖使用相同工作單位。不同 leaf 可合併，同 leaf 衝突拒絕整筆交易。Entry 不提供條目鎖或多檔交易。
 
-Model 的 before validator 可把舊欄位改成新欄位。Setup／point 的 open、refresh 與空 edit 不寫檔。Library 的讀取清理是例外，依前述政策先備份再改寫。非空 commit 在最新 normalized tree 合併與完整驗證，再把序列化差異套回 raw YAML，保留未改節點的引號、註解與順序。保存消費 actual model_dump 輸出，不用原欄位值繞過 serializer。格式轉換不生成 metadata。
+Model 的 before validator 可把舊欄位改成新欄位。Setup／point 的 open、refresh 與空 edit 不寫檔。Library 讀取同樣不改檔，無效 Spec 略過並透過 snapshot.invalid_entries() 回報原因。非空 commit 在最新 normalized tree 合併與完整驗證，再把序列化差異套回 raw YAML，保留未改節點的引號、註解與順序。保存消費 actual model_dump 輸出，不用原欄位值繞過 serializer。格式轉換不生成 metadata。
 
 Format 與 format_version 只描述容器結構。檔頭不符或 major 不同時拒絕載入。較新 2.x minor 保留容器層的未知欄位與 metadata 內容，不覆寫元件或 nested model 的 extra 策略。任何 minor 都由原 model 驗證完整元件 input：forbid 拒絕未知欄位，ignore 丟棄它們，allow 保留並公開它們。Ignore 丟棄的欄位在非空 commit 時移除。元件的 defaults、validators 與舊寫法演進由定義者決定，不綁容器版本號。非法元件在 load、refresh 與 commit 驗證時失敗，不發布新的值、metadata 或快照。
 
