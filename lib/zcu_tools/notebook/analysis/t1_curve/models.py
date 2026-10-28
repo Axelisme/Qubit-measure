@@ -155,6 +155,7 @@ class T1CurveAnalysisConfig:
     fit_Q_cap_override/fit_x_qp_override/fit_Q_ind_override are dimensionless.
     fit_bounds uses those same units; residual_mode/loss/max_nfev control fitting.
     t_flux_count selects dense curve size; progress controls fit display.
+    secondary_threshold is finite [0,1], default 0.1, for strict fraction flags.
     save_figures enables plotting/saving; show_figures controls display on save.
     """
 
@@ -199,6 +200,7 @@ class T1CurveAnalysisConfig:
     loss: str = "linear"
     max_nfev: int = 10000
     t_flux_count: int = 1000
+    secondary_threshold: float = 0.1
     progress: bool = True
     save_figures: bool = True
     show_figures: bool = True
@@ -352,6 +354,7 @@ class T1CombinedFit:
     optimizer controls. fit_result owns fitted values, uncertainty and residuals.
     params_table/summary_table present fit diagnostics; purcell records the
     optional GHz resonator inputs used in the fitted total relaxation rate.
+    pointwise_table shows each fit flux, observed/model T1, signed fraction and flag.
     """
 
     data: T1PreparedData
@@ -366,6 +369,19 @@ class T1CombinedFit:
     summary_table: pd.DataFrame
     purcell: PurcellEffectParams | None = None
 
+    @property
+    def pointwise_table(self) -> pd.DataFrame:
+        """Show fit flux, observed/model ns T1, signed fraction and flags."""
+        return pd.DataFrame(
+            {
+                "flux": self.data.fit.fluxs,
+                "T1_observed_ns": self.data.fit.T1_ns,
+                "T1_model_ns": self.fit_result.model_T1s,
+                "secondary_fraction": self.fit_result.secondary_fractions,
+                "non_single_exponential": self.fit_result.non_single_exponential,
+            }
+        )
+
 
 @dataclass(frozen=True, slots=True)
 class T1ChannelCurves:
@@ -375,6 +391,8 @@ class T1ChannelCurves:
     component_T1s_ns maps ordered component labels to ns limits.
     purcell_T1_ns is the optional separate ns Purcell limit. display_T1_ns is
     the total-rate combined ns curve, or the intrinsic curve without Purcell.
+    secondary_fractions holds intrinsic signed a2/(a1+a2), zero for one mode.
+    secondary_threshold is finite [0,1]; non_single_exponential uses strict >.
     """
 
     fluxs: NDArray[np.float64]
@@ -382,6 +400,15 @@ class T1ChannelCurves:
     component_T1s_ns: Mapping[str, NDArray[np.float64]]
     purcell_T1_ns: NDArray[np.float64] | None
     display_T1_ns: NDArray[np.float64]
+    secondary_fractions: NDArray[np.float64] = field(
+        default_factory=lambda: np.empty(0, dtype=np.float64)
+    )
+    secondary_threshold: float = 0.1
+
+    @property
+    def non_single_exponential(self) -> NDArray[np.bool_]:
+        """Mark dense fractions strictly above secondary_threshold."""
+        return self.secondary_fractions > self.secondary_threshold
 
 
 @dataclass(frozen=True, slots=True)
@@ -391,6 +418,7 @@ class T1ChannelAnalysis:
     combined_fit retains the input data and fit. curves stores ns T1 arrays;
     flux_range is normalized flux and t_flux_count is the requested grid size.
     summary_table records grid, channel and fixed/free parameter information.
+    pointwise_table shows displayed ns T1, signed fraction and flag per dense flux.
     """
 
     combined_fit: T1CombinedFit
@@ -398,6 +426,18 @@ class T1ChannelAnalysis:
     flux_range: tuple[float, float]
     t_flux_count: int
     summary_table: pd.DataFrame
+
+    @property
+    def pointwise_table(self) -> pd.DataFrame:
+        """Show dense flux, displayed ns T1, signed fraction and flags."""
+        return pd.DataFrame(
+            {
+                "flux": self.curves.fluxs,
+                "T1_model_ns": self.curves.display_T1_ns,
+                "secondary_fraction": self.curves.secondary_fractions,
+                "non_single_exponential": self.curves.non_single_exponential,
+            }
+        )
 
 
 @dataclass(frozen=True, slots=True)

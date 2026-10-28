@@ -14,7 +14,10 @@ from zcu_tools.notebook.analysis.t1_curve import (
     T1FitParams,
     fit_t1_noise_params,
 )
-from zcu_tools.simulate.fluxonium import calculate_eff_t1_vs_flux_fast
+from zcu_tools.simulate.fluxonium import (
+    calculate_eff_t1_vs_flux_fast,
+    calculate_manifold_t1_vs_flux_fast,
+)
 
 _PARAMS = (3.469, 0.952, 0.582)
 
@@ -22,6 +25,151 @@ _PARAMS = (3.469, 0.952, 0.582)
 def test_t1_curve_fit_module_exports_public_api() -> None:
     assert public_fit_mod.T1FitParams is T1FitParams
     assert public_fit_mod.fit_t1_noise_params is fit_t1_noise_params
+
+
+def test_hot_manifold_fit_recovers_losses_and_reports_secondary_fraction() -> None:
+    fluxs = np.linspace(0.55, 0.8, 9)
+    truth = T1FitParams(Q_cap=1e6, Q_ind=1e8, x_qp=2e-7, Temp=0.05)
+    modes = calculate_manifold_t1_vs_flux_fast(
+        _PARAMS, fluxs, _noise_channels(truth), truth.Temp, qub_dim=4
+    )
+    observed = np.array([point[0].t1_ns for point in modes])
+    pair = calculate_eff_t1_vs_flux_fast(
+        _PARAMS, fluxs, _noise_channels(truth), truth.Temp
+    )
+    # The old forward disagrees even at the true losses.
+    assert np.max(np.abs(pair / observed - 1)) > 0.1
+
+    result = fit_t1_noise_params(
+        fluxs,
+        observed,
+        _PARAMS,
+        init=T1FitParams(Q_cap=8e5, Q_ind=7e7, x_qp=3e-7, Temp=0.05),
+        fixed=("Temp",),
+        qub_dim=4,
+    )
+
+    assert result.success
+    assert result.params.Q_cap == pytest.approx(truth.Q_cap, rel=1e-4)
+    assert result.params.Q_ind == pytest.approx(truth.Q_ind, rel=1e-4)
+    assert result.params.x_qp == pytest.approx(truth.x_qp, rel=1e-4)
+    np.testing.assert_allclose(result.model_T1s, observed, rtol=1e-6)
+    expected_fraction = [
+        p[1].amplitude / (p[0].amplitude + p[1].amplitude) for p in modes
+    ]
+    np.testing.assert_allclose(result.secondary_fractions, expected_fraction, atol=1e-7)
+
+
+def _dominant_t1(
+    params: tuple[float, float, float],
+    fluxs: NDArray[np.float64],
+    channels: list[tuple[str, dict[str, float]]],
+    Temp: float,
+) -> NDArray[np.float64]:
+    return np.array(
+        [
+            modes[0].t1_ns
+            for modes in calculate_manifold_t1_vs_flux_fast(
+                params, fluxs, channels, Temp
+            )
+        ]
+    )
+
+
+@pytest.mark.parametrize("threshold", [-0.1, 1.1, np.nan, np.inf])
+def test_secondary_threshold_rejects_values_outside_finite_unit_interval(
+    threshold: float,
+) -> None:
+    with pytest.raises(ValueError, match="secondary_threshold"):
+        fit_t1_noise_params(
+            np.array([0.7]),
+            np.ones(1),
+            _PARAMS,
+            init=T1FitParams(Q_cap=1e6, Temp=0.05),
+            fixed=("Q_cap", "Temp"),
+            secondary_threshold=threshold,
+        )
+
+
+@pytest.mark.parametrize("transition", [(2, 0), (1, 1)])
+def test_manifold_fit_rejects_non_pi_transition(transition: tuple[int, int]) -> None:
+    with pytest.raises(ValueError, match="0.*1"):
+        fit_t1_noise_params(
+            np.array([0.7]),
+            np.ones(1),
+            _PARAMS,
+            init=T1FitParams(Q_cap=1e6, Temp=0.05),
+            fixed=("Q_cap", "Temp"),
+            i=transition[0],
+            j=transition[1],
+        )
+
+
+def test_two_level_fit_has_no_secondary_and_accepts_reversed_pi() -> None:
+    result = fit_t1_noise_params(
+        np.array([0.7]),
+        np.ones(1),
+        _PARAMS,
+        init=T1FitParams(Q_cap=1e6, Temp=0.05),
+        fixed=("Q_cap", "Temp"),
+        qub_dim=2,
+        i=0,
+        j=1,
+        secondary_threshold=0.0,
+    )
+    np.testing.assert_array_equal(result.secondary_fractions, [0.0])
+    np.testing.assert_array_equal(result.non_single_exponential, [False])
+
+
+def test_manifold_fit_reports_flux_when_loss_has_no_decay_modes() -> None:
+    with pytest.raises(ValueError, match="flux index 0.*0.7"):
+        fit_t1_noise_params(
+            np.array([0.7]),
+            np.ones(1),
+            (0.0, 0.952, 0.582),
+            init=T1FitParams(x_qp=2e-7, Temp=0.05),
+            fixed=("x_qp", "Temp"),
+            qub_dim=3,
+        )
+
+
+def test_signed_secondary_is_not_clipped_or_used_as_absolute_weight() -> None:
+    result = fit_t1_noise_params(
+        np.array([0.7]),
+        np.ones(1),
+        _PARAMS,
+        init=T1FitParams(Q_cap=1e6, Temp=0.05),
+        fixed=("Q_cap", "Temp"),
+        qub_dim=3,
+        secondary_threshold=0.0,
+    )
+    np.testing.assert_allclose(result.secondary_fractions, [-0.070001410], rtol=1e-6)
+    np.testing.assert_array_equal(result.non_single_exponential, [False])
+
+
+def test_secondary_equal_to_threshold_is_not_flagged() -> None:
+    fluxs = np.array([0.1])
+    init = T1FitParams(Q_cap=1e6, Temp=0.05)
+    baseline = fit_t1_noise_params(
+        fluxs,
+        np.ones(1),
+        _PARAMS,
+        init=init,
+        fixed=("Q_cap", "Temp"),
+        qub_dim=3,
+    )
+    assert baseline.non_single_exponential[0]
+    fraction = float(baseline.secondary_fractions[0])
+    at_threshold = fit_t1_noise_params(
+        fluxs,
+        np.ones(1),
+        _PARAMS,
+        init=init,
+        fixed=("Q_cap", "Temp"),
+        qub_dim=3,
+        secondary_threshold=fraction,
+    )
+    np.testing.assert_array_equal(at_threshold.non_single_exponential, [False])
 
 
 def _sample_fluxs() -> NDArray[np.float64]:
@@ -32,9 +180,7 @@ def _identifiability_samples(
     init: T1FitParams, flux_range: tuple[float, float] = (0.08, 0.49)
 ) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
     fluxs = np.linspace(*flux_range, 8, dtype=np.float64)
-    T1s = calculate_eff_t1_vs_flux_fast(
-        _PARAMS, fluxs, _noise_channels(init), init.Temp
-    )
+    T1s = _dominant_t1(_PARAMS, fluxs, _noise_channels(init), init.Temp)
     return fluxs, T1s
 
 
@@ -84,7 +230,7 @@ def test_joint_fit_reports_log_covariance_in_free_order() -> None:
 def test_negligible_inductive_channel_is_flagged_by_log_uncertainty() -> None:
     init = T1FitParams(Q_cap=8e5, Q_ind=1e10, Temp=0.06)
     fluxs, T1s = _identifiability_samples(init)
-    cap_only = calculate_eff_t1_vs_flux_fast(
+    cap_only = _dominant_t1(
         _PARAMS, fluxs, [("t1_capacitive", {"Q_cap": 8e5})], init.Temp
     )
     # The inductive contribution stays below the synthetic measurement scatter.
@@ -181,7 +327,7 @@ def test_fixed_temperature_profile_keeps_independent_callback_reference() -> Non
     fluxs = np.array([0.15, 0.3, 0.4, 0.49])
     init = T1FitParams(Q_cap=8e5, Temp=0.06)
     # The intrinsic bath is isothermal, but differs from the extra-rate reference.
-    intrinsic_T1s = calculate_eff_t1_vs_flux_fast(
+    intrinsic_T1s = _dominant_t1(
         _PARAMS, fluxs, [("t1_capacitive", {"Q_cap": 8e5})], 0.08
     )
     observed = 1.0 / (1.0 / intrinsic_T1s + 6e-6)
@@ -239,9 +385,7 @@ def test_varying_temperature_profile_changes_model_and_recovers_loss() -> None:
     # Independent per-point scalar calls are the profile reference.
     observed = np.array(
         [
-            calculate_eff_t1_vs_flux_fast(
-                _PARAMS, np.array([flux]), channels, float(temp)
-            )[0]
+            _dominant_t1(_PARAMS, np.array([flux]), channels, float(temp))[0]
             for flux, temp in zip(fluxs, temperatures, strict=True)
         ]
     )
@@ -273,9 +417,7 @@ def test_varying_temperature_profile_changes_model_and_recovers_loss() -> None:
 def test_fit_t1_noise_params_keeps_fixed_values() -> None:
     true_params = T1FitParams(Q_cap=8e5, x_qp=1.5e-6, Q_ind=3e7, Temp=0.06)
     fluxs = _sample_fluxs()
-    T1s = calculate_eff_t1_vs_flux_fast(
-        _PARAMS, fluxs, _noise_channels(true_params), true_params.Temp
-    )
+    T1s = _dominant_t1(_PARAMS, fluxs, _noise_channels(true_params), true_params.Temp)
 
     result = fit_t1_noise_params(
         fluxs,
@@ -298,9 +440,7 @@ def test_fit_t1_noise_params_keeps_fixed_values() -> None:
 def test_fit_t1_noise_params_all_fixed_skips_optimizer() -> None:
     init = T1FitParams(Q_cap=8e5, x_qp=1.5e-6, Q_ind=3e7, Temp=0.06)
     fluxs = _sample_fluxs()
-    T1s = calculate_eff_t1_vs_flux_fast(
-        _PARAMS, fluxs, _noise_channels(init), init.Temp
-    )
+    T1s = _dominant_t1(_PARAMS, fluxs, _noise_channels(init), init.Temp)
 
     result = fit_t1_noise_params(
         fluxs,
@@ -341,9 +481,7 @@ def test_t1_fit_result_constructor_accepts_base_public_signature() -> None:
 def test_fit_t1_noise_params_fills_nan_errors_by_flux_bin() -> None:
     fluxs = np.array([0.490, 0.491, 0.510], dtype=np.float64)
     init = T1FitParams(Q_cap=8e5, Temp=0.06)
-    T1s = calculate_eff_t1_vs_flux_fast(
-        _PARAMS, fluxs, _noise_channels(init), init.Temp
-    )
+    T1s = _dominant_t1(_PARAMS, fluxs, _noise_channels(init), init.Temp)
     T1errs = np.array([100.0, np.nan, np.nan], dtype=np.float64)
 
     result = fit_t1_noise_params(
@@ -477,9 +615,7 @@ def _noise_channels(
 def test_fit_t1_noise_params_uses_provided_noise_params_as_whitelist() -> None:
     init = T1FitParams(Temp=0.06, x_qp=1.5e-6)
     fluxs = np.array([0.49, 0.51], dtype=np.float64)
-    T1s = calculate_eff_t1_vs_flux_fast(
-        _PARAMS, fluxs, _noise_channels(init), init.Temp
-    )
+    T1s = _dominant_t1(_PARAMS, fluxs, _noise_channels(init), init.Temp)
 
     result = fit_t1_noise_params(fluxs, T1s, _PARAMS, init=init, fixed=("x_qp", "Temp"))
 

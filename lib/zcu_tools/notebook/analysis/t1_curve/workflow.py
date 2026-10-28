@@ -20,9 +20,6 @@ from zcu_tools.resources.qubit_params import (
     T1CurveFitParams,
     T1CurveFitUncertainty,
 )
-from zcu_tools.simulate.fluxonium import (
-    calculate_eff_t1_vs_flux_fast,
-)
 
 from .base import (
     DEFAULT_TEMP_LOWER_BOUND,
@@ -41,6 +38,7 @@ from .fit import (
     T1FitResult,
     fit_t1_noise_params,
 )
+from .forward import predict_manifold_t1
 from .models import (
     CURVE_LABELS,
     NOISE_CHANNELS,
@@ -216,7 +214,16 @@ def fit_t1_curve(  # noqa: PLR0913
     loss: str = "linear",
     max_nfev: int | None = 10000,
     progress: bool = False,
+    secondary_threshold: float = 0.1,
 ) -> T1CombinedFit:
+    """Fit prepared ns T1 with the dominant manifold mode and optional Purcell.
+
+    init, bounds and solver controls follow fit_t1_noise_params. Purcell adds
+    rate to dominant T1 without changing intrinsic secondary fractions.
+    secondary_threshold is finite [0,1]; fractions strictly above it are marked
+    in pointwise_table and subsequent channel plots. Invalid fit inputs raise
+    ValueError; numerical failures propagate.
+    """
     context = data.calibration.context
     extra_relaxation_rate_fn = (
         _purcell_rate_fn(data, purcell) if purcell is not None else None
@@ -237,6 +244,7 @@ def fit_t1_curve(  # noqa: PLR0913
         max_nfev=max_nfev,
         extra_relaxation_rate_fn=extra_relaxation_rate_fn,
         progress=progress,
+        secondary_threshold=secondary_threshold,
     )
     params_table = _fit_params_table(init, fit_result)
     purcell_rows = _purcell_fit_summary_rows(purcell)
@@ -281,6 +289,16 @@ def build_t1_channel_curves(
     purcell: PurcellEffectParams | None = None,
     include_purcell: bool | None = None,
 ) -> T1ChannelAnalysis:
+    """Build uniform-flux dominant manifold and single-channel ns T1 curves.
+
+    combined_fit supplies losses, scalar K temperature and secondary threshold.
+    t_flux_count samples flux_range, defaulting to the prepared analysis window.
+    purcell/include_purcell select the existing separate resonator rate limit.
+    Add that rate only after selecting intrinsic dominant T1. Return fractions
+    and strict threshold flags on the same dense grid in curves/pointwise_table.
+    Empty decay modes raise ValueError with flux identity; other numerical
+    failures propagate. No plotting or writes occur.
+    """
     data = combined_fit.data
     context = data.calibration.context
     resolved_purcell = _resolve_channel_purcell(
@@ -295,20 +313,21 @@ def build_t1_channel_curves(
     fit_params = combined_fit.fit_result.params
     noise_channels = t1_noise_channels_from_params(fit_params)
     component_t1s = {
-        CURVE_LABELS[PARAM_TO_MECHANISM[param_name]]: calculate_eff_t1_vs_flux_fast(
+        CURVE_LABELS[PARAM_TO_MECHANISM[param_name]]: predict_manifold_t1(
             context.params,
             grid_fluxs,
             [(channel_name, dict(options))],
             fit_params.Temp,
-        )
+        ).T1_ns
         for param_name, channel_name, options in _iter_noise_channels(fit_params)
     }
-    mechanism_T1s = calculate_eff_t1_vs_flux_fast(
+    prediction = predict_manifold_t1(
         context.params,
         grid_fluxs,
         noise_channels,
         fit_params.Temp,
     )
+    mechanism_T1s = prediction.T1_ns
     purcell_T1s = None
     display_T1s = mechanism_T1s
     if resolved_purcell is not None:
@@ -327,6 +346,8 @@ def build_t1_channel_curves(
         component_T1s_ns=component_t1s,
         purcell_T1_ns=purcell_T1s,
         display_T1_ns=display_T1s,
+        secondary_fractions=prediction.secondary_fractions,
+        secondary_threshold=combined_fit.fit_result.secondary_threshold,
     )
     summary_table = pd.DataFrame(
         [
@@ -502,6 +523,7 @@ def run_t1_curve_analysis(
         max_nfev=config.max_nfev,
         purcell=config.purcell,
         progress=config.progress,
+        secondary_threshold=config.secondary_threshold,
     )
     channel_analysis = build_t1_channel_curves(
         combined_fit,
