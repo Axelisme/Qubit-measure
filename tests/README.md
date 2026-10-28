@@ -125,7 +125,7 @@ uv run --directory <worktree> --no-sync -- \
 背景負載與 cache 順序沒有完全控制，這不是穩定加速率或其他機器的最佳值。
 保留 `worksteal`，不改 pytest 的預設 marker。
 
-task 進 land review 前才跑全樹驗證。依變更範圍選擇 marker expression，兩種都包含 slow：
+全樹驗證的時點依 task 適用流程安排，並先取得 heavy slot。依變更範圍選擇 marker expression，兩種都包含 slow：
 
 - 未改 `lib/zcu_tools/simulate/`，用 `-m "not sim"`。
 - 改到 `lib/zcu_tools/simulate/`，用 `-m ""`，包含所有測試。
