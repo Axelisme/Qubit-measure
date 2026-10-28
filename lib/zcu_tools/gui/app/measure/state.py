@@ -227,19 +227,21 @@ class Session(Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams]):
 
 @dataclass(frozen=True)
 class TabInteractionState:
+    """UI facts not replaced by domain admission decisions.
+
+    global_run_active and startup_active describe separate hardware exclusion.
+    is_running selects Stop; is_analyzing also locks local editing. has_context
+    gates Load and has_active_context gates Save in their existing views.
+    has_run_result supports result presentation and window event reactions.
+    Analysis, Post and figure presence are read from their snapshot panes.
+    """
+
     global_run_active: bool
     is_running: bool
     is_analyzing: bool
     has_context: bool
     has_active_context: bool
-    has_soc: bool
     has_run_result: bool
-    has_analyze_result: bool
-    has_figure: bool
-    # Post-analysis (second layer) facts — gate the Post sub-tab. The post form
-    # is enabled once a primary analyze result exists; the post figure/summary
-    # render once a post result exists.
-    has_post_analyze_result: bool = False
     # True while a startup script owns admission; only Run is unavailable.
     startup_active: bool = False
 

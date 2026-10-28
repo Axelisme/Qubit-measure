@@ -17,7 +17,7 @@ from zcu_tools.gui.app.measure.adapter import (
     AnalysisMode,
 )
 from zcu_tools.gui.app.measure.artifacts import ArtifactSaveCenter
-from zcu_tools.gui.app.measure.services import TabSnapshot
+from zcu_tools.gui.app.measure.services import AdmissionDecision, TabSnapshot
 from zcu_tools.gui.app.measure.state import TabInteractionState
 from zcu_tools.gui.app.measure.writeback import WritebackValues
 from zcu_tools.gui.control_identity import ControlIdentity
@@ -138,11 +138,7 @@ def make_snapshot(
             is_analyzing=is_analyzing,
             has_context=True,
             has_active_context=True,
-            has_soc=True,
             has_run_result=has_run_result,
-            has_analyze_result=has_analyze_result,
-            has_figure=has_figure,
-            has_post_analyze_result=has_post_result,
         ),
         capabilities=AdapterCapabilities(
             analysis=analysis, post_analysis=post, load_data=True
@@ -591,40 +587,50 @@ def test_save_and_image_paths_follow_artifact_keys_and_pane_routing(
 
 
 @pytest.mark.parametrize(
-    ("changes", "text", "enabled", "tooltip"),
+    ("changes", "decision", "text", "enabled", "tooltip"),
     [
-        ({}, "Run", True, ""),
-        ({"is_running": True}, "Stop", True, "Running"),
+        ({}, AdmissionDecision(True, None, ""), "Run", True, ""),
         (
-            {"is_analyzing": True, "global_run_active": True},
-            "Run",
-            False,
-            "Tab is busy",
+            {"is_running": True},
+            AdmissionDecision(False, "tab_busy", "Busy"),
+            "Stop",
+            True,
+            "Running",
         ),
         (
-            {"global_run_active": True, "has_active_context": False},
+            {"is_analyzing": True, "global_run_active": True},
+            AdmissionDecision(False, "tab_busy", "Tab 'tab-1' is busy"),
+            "Run",
+            False,
+            "Tab 'tab-1' is busy",
+        ),
+        (
+            {"global_run_active": True},
+            AdmissionDecision(False, "no_active_context", "Domain context blocker"),
+            "Run",
+            False,
+            "Domain context blocker",
+        ),
+        (
+            {"global_run_active": True},
+            AdmissionDecision(True, None, ""),
             "Run",
             False,
             "Another tab is running",
         ),
-        (
-            {"has_active_context": False, "has_soc": False},
-            "Run",
-            False,
-            "Select or create a working point first",
-        ),
-        ({"has_soc": False}, "Run", False, "No SoC connection"),
     ],
 )
 def test_run_action_projects_status_and_reason_priority(
-    qapp, exp_tab_widget, make_ctrl, changes, text, enabled, tooltip
+    qapp, exp_tab_widget, make_ctrl, changes, decision, text, enabled, tooltip
 ):
     snapshot = make_snapshot("tab-1", analysis=AnalysisMode.FIT, post=True)
     assert snapshot.interaction is not None
     assert snapshot.capabilities is not None
-    tab = exp_tab_widget("tab-1", make_ctrl(), snapshot.capabilities)
+    ctrl = make_ctrl()
+    tab = exp_tab_widget("tab-1", ctrl, snapshot.capabilities)
     tab.attach(snapshot, MagicMock())
     try:
+        ctrl.admit.return_value = decision
         changed = replace(
             snapshot, interaction=replace(snapshot.interaction, **changes)
         )
@@ -633,6 +639,7 @@ def test_run_action_projects_status_and_reason_priority(
         assert tab.run_btn.isEnabled() is enabled
         assert tab.run_btn.toolTip() == tooltip
         assert tab.reset_btn.isHidden() is bool(changes.get("is_running", False))
+        ctrl.admit.return_value = AdmissionDecision(True, None, "")
         tab.update_interaction_state(snapshot)
         assert tab.run_btn.text() == "Run"
         assert tab.run_btn.isEnabled()

@@ -85,9 +85,7 @@ def h_tab_get_analyze_result(
         control.require_analysis_operation(tab_id, "analysis", operation_id)
     result = control.get_tab_analyze_result(tab_id)
     snap = control.get_tab_snapshot(tab_id)
-    if result is None and (
-        snap.interaction is None or not snap.interaction.has_analyze_result
-    ):
+    if result is None and (snap.analysis is None or snap.analysis.result is None):
         return {"summary": None, "invalid": []}
     reply = _summary_to_wire({} if result is None else result)
     if operation_id is not None:
@@ -127,9 +125,7 @@ def h_tab_analyze(
     if snap.analysis is not None and snap.analysis.has_writeback_draft:
         invalidated.append("analysis.writeback")
     if snap.post_analysis is not None:
-        if snap.post_analysis.result is not None or (
-            snap.interaction is not None and snap.interaction.has_post_analyze_result
-        ):
+        if snap.post_analysis.result is not None:
             invalidated.append("post.result")
         if snap.post_analysis.has_writeback_draft:
             invalidated.append("post.writeback")
@@ -162,7 +158,7 @@ def h_tab_get_post_analyze_result(
     result = control.get_post_analyze_result(tab_id)
     snap = control.get_tab_snapshot(tab_id)
     if result is None and (
-        snap.interaction is None or not snap.interaction.has_post_analyze_result
+        snap.post_analysis is None or snap.post_analysis.result is None
     ):
         return {"summary": None, "invalid": []}
     reply = _summary_to_wire({} if result is None else result)

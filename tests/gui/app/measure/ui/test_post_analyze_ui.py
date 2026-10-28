@@ -22,7 +22,7 @@ from zcu_tools.gui.app.measure.adapter import (
     AdapterGuide,
     AnalysisMode,
 )
-from zcu_tools.gui.app.measure.services import TabSnapshot
+from zcu_tools.gui.app.measure.services import AdmissionDecision, TabAction, TabSnapshot
 from zcu_tools.gui.app.measure.state import TabInteractionState
 from zcu_tools.gui.app.measure.ui.exp_tab_widget import ExpTabWidget
 from zcu_tools.gui.control_identity import ControlIdentity
@@ -139,11 +139,7 @@ def _snapshot(
             is_analyzing=is_analyzing,
             has_context=True,
             has_active_context=has_active_context,
-            has_soc=True,
             has_run_result=has_run_result,
-            has_analyze_result=has_analyze_result,
-            has_figure=True,
-            has_post_analyze_result=has_post_analyze_result,
         ),
         cfg_input={},
         capabilities=AdapterCapabilities(
@@ -195,9 +191,15 @@ def test_post_form_disabled_without_primary_analyze_result(
     """No primary analyze result → the post form + Run are disabled and the gate
     hint is shown."""
 
+    ctrl = make_ctrl()
+    ctrl.admit.side_effect = lambda _tab_id, action: (
+        AdmissionDecision(False, "no_analyze_result", "No primary result")
+        if action in (TabAction.POST_ANALYZE, TabAction.WRITEBACK)
+        else AdmissionDecision(True, None, "")
+    )
     tab = exp_tab_widget(
         "tab-1",
-        make_ctrl(),
+        ctrl,
         AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=True),
     )
     tab.update_interaction_state(_snapshot("tab-1", has_analyze_result=False))
@@ -207,6 +209,37 @@ def test_post_form_disabled_without_primary_analyze_result(
     # isHidden reflects the widget's own setVisible state independent of whether
     # an ancestor is shown (the tab is not .show()n here). Gate closed → shown.
     assert tab._post_gate_label.isHidden() is False
+
+
+@pytest.mark.parametrize(
+    ("primary", "post", "enabled"),
+    [(False, True, False), (True, False, False), (True, True, True)],
+)
+def test_post_writeback_needs_admission_and_its_own_result(
+    qapp, make_ctrl, exp_tab_widget, primary: bool, post: bool, enabled: bool
+):
+    ctrl = make_ctrl()
+    ctrl.admit.side_effect = lambda _tab_id, action: (
+        AdmissionDecision(
+            False, "no_analyze_result", "No analyze result available for writeback."
+        )
+        if action is TabAction.WRITEBACK and not primary
+        else AdmissionDecision(True, None, "")
+    )
+    tab = exp_tab_widget(
+        "tab-1",
+        ctrl,
+        AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=True),
+    )
+    tab.update_interaction_state(
+        _snapshot("tab-1", has_analyze_result=primary, has_post_analyze_result=post)
+    )
+    assert tab.post_writeback_widget.isEnabled() is enabled
+    if not primary:
+        assert (
+            tab.post_writeback_widget.toolTip()
+            == "No analyze result available for writeback."
+        )
 
 
 def test_post_form_enabled_with_primary_analyze_result(qapp, make_ctrl, exp_tab_widget):
@@ -261,9 +294,15 @@ def test_empty_post_params_show_hint_across_gate_states(
     qapp, make_ctrl, exp_tab_widget
 ):
 
+    ctrl = make_ctrl()
+    ctrl.admit.side_effect = lambda _tab_id, action: (
+        AdmissionDecision(False, "no_analyze_result", "No primary result")
+        if action in (TabAction.POST_ANALYZE, TabAction.WRITEBACK)
+        else AdmissionDecision(True, None, "")
+    )
     tab = exp_tab_widget(
         "tab-1",
-        make_ctrl(),
+        ctrl,
         AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=True),
     )
     actions = MagicMock()
@@ -291,6 +330,8 @@ def test_empty_post_params_show_hint_across_gate_states(
     )
     actions.save_artifact.reset_mock()
 
+    ctrl.admit.side_effect = None
+    ctrl.admit.return_value = AdmissionDecision(True, None, "")
     tab.update_interaction_state(
         _snapshot(
             "tab-1",

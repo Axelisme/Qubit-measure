@@ -50,7 +50,11 @@ def test_browser_load_keeps_factory_failure_in_form_and_run(
             notice = ui.observe(object_name="history.form_error")
             assert notice.visible and notice.text == reason
             button = ui.observe("Run")
-            assert not button.enabled and reason in button.tooltip
+            assert not button.enabled
+            assert button.tooltip == (
+                "Cannot run without an active file-backed context "
+                "(current readiness: empty)."
+            )
             assert ui.status().text == "History browser ready"
             ui.select_tab("Data")
             assert ui.observe(object_name="dataFigurePreviewGallery").visible
