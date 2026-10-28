@@ -1,6 +1,6 @@
 # `zcu_tools.notebook`
 
-**Last updated:** 2026-10-27
+**Last updated:** 2026-10-28
 
 **讀者：** lab-author。Notebook 實驗入口、互動分析與支援模組導覽。
 
@@ -39,7 +39,7 @@ Native 寫 `runs/<stem>/data.h5`，Labber 寫日期樹內的 `<stem>.hdf5`。只
 
 `SavedRun.report` 與 `paths` 只表示最新一次保存結果。輸出或編碼失敗時，`PartialSaveError` 保留同一 SavedRun 及 report，caller 修正內容後可明確再存。Ledger 失敗直接傳播，不轉成 PartialSaveError，也不自動 retry。Figures／analysis 為 None 時保留上一組，空 mapping／tuple 清除該組。Run 身分、量測時間與 captured context 不因重存改變。
 
-`SavedRun.accept(parameter=..., module=..., waveform=..., records=...)` 共用 entry 的寫回流程。Parameter 接受普通點分路徑的工作單位 JSON／complex 值，可用 `(value, metadata)` 以 mapping 整份替換該路徑的 opaque metadata，例如 `{"stderr": 0.8}`。只給 value 時保留既有 metadata；舊 `(value, float)` 形狀報錯。Module 與 waveform 接受 library key 到具名持久 Spec 的 mapping，不接受 raw dict。各類至少一個非空。Records 是具體元件名到 JSON 欄位 dict 的 mapping。流程補上 run_id、point、at、accepted source 與 component。Component 取自 records mapping 中該筆資料綁定的具體元件名，不由 Notebook 推測或計算。Caller 提供的 dev 或其他儀器欄位原樣保留，缺 dev 也成功，資料一致性由 caller 保證。Notebook 不捕捉 alias，也不從 live device、cfg 或 snapshot 推論樣本值。Parameter／library 的 role 首段沿保存時固定的映射展開，records 不解析角色。Accepted 事件與 library provenance 的 kind 自動使用該 run 的實驗名稱。
+`SavedRun.accept(parameter=..., module=..., waveform=..., records=...)` 共用 entry 的寫回流程。Parameter 接受普通點分路徑的工作單位 JSON／complex 值，可用 `(value, metadata)` 以 mapping 整份替換該路徑的 opaque metadata，例如 `{"stderr": 0.8}`。只給 value 時保留既有 metadata；舊 `(value, float)` 形狀報錯。Module 與 waveform 接受 library key 到具名持久 Spec 的 mapping，不接受 raw dict。各類至少一個非空。Records 是具體元件名到 JSON 欄位 dict 的 mapping。流程補上 run_id、point、at、accepted source 與 component。Component 取自 records mapping 中該筆資料綁定的具體元件名，不由 Notebook 推測或計算。Caller 提供的 dev 或其他儀器欄位原樣保留，缺 dev 也成功，資料一致性由 caller 保證。Notebook 不捕捉 alias，也不從 live device、cfg 或 snapshot 推論樣本值。Parameter／library 的 role 首段沿保存時固定的映射展開，records 不解析角色。Accepted 事件保留 run_id 與寫入值供稽核。Module 與 waveform 只保存 Spec，不保存 leaf 來源。
 
 Record 的校準欄位由 caller 在量測前捕捉。接受時明傳當時的副本，不重新讀目前 point。
 以下例子的 `parameters` 是作者建立本次 cfg 時使用的固定 ParameterContext，`point` 是保存目的地。

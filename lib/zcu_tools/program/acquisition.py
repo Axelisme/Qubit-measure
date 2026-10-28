@@ -4,7 +4,7 @@ import functools
 import operator
 import os
 import warnings
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from typing import Literal, Protocol, TypeAlias, cast, final, overload
 
 import numpy as np
@@ -17,6 +17,7 @@ from qick.qick_asm import (
     obtain,  # pyright: ignore[reportAttributeAccessIssue]
 )
 
+from zcu_tools.cfg_model import CircleClassifier, ReadoutClassifier
 from zcu_tools.progress_bar import make_pbar
 from zcu_tools.utils.shot_classification import classify_shots
 
@@ -391,103 +392,98 @@ class EarlyStopMixin(TypedAcquireMixin):
 
 
 class SingleShotMixin(TypedAcquireMixin):
+    _classify: Mapping[int, ReadoutClassifier] | None = None
+
+    @overload
+    def acquire(
+        self,
+        soc: object,
+        *,
+        step_rounds: Literal[False] = False,
+        classify: Mapping[int, ReadoutClassifier] | None = None,
+        **kwargs: object,
+    ) -> list[NDArray[np.float64]]: ...
+
+    @overload
+    def acquire(
+        self,
+        soc: object,
+        *,
+        step_rounds: Literal[True],
+        classify: Mapping[int, ReadoutClassifier] | None = None,
+        **kwargs: object,
+    ) -> None: ...
+
+    @overload
+    def acquire(
+        self,
+        soc: object,
+        *args,
+        classify: Mapping[int, ReadoutClassifier] | None = None,
+        **kwargs,
+    ) -> list[NDArray[np.float64]] | None: ...
+
     def acquire(
         self,
         *args,
-        g_center: complex | None = None,
-        e_center: complex | None = None,
-        ge_radius: float | None = None,
+        classify: Mapping[int, ReadoutClassifier] | None = None,
         **kwargs,
-    ):
-        extra_args = kwargs.pop("extra_args", dict())
-        extra_args.update(g_center=g_center, e_center=e_center, ge_radius=ge_radius)
+    ) -> list[NDArray[np.float64]] | None:
+        """Acquire IQ, or g/e populations with explicit per-ADC calibration.
 
-        return super().acquire(*args, extra_args=extra_args, **kwargs)
-
-    def acquire_decimated(
-        self,
-        *args,
-        g_center: complex | None = None,
-        e_center: complex | None = None,
-        ge_radius: float | None = None,
-        **kwargs,
-    ):
-        extra_args = kwargs.pop("extra_args", dict())
-        extra_args.update(g_center=g_center, e_center=e_center, ge_radius=ge_radius)
-
-        return super().acquire_decimated(*args, extra_args=extra_args, **kwargs)
+        classify maps ADC channel numbers to circle/linear calibration in raw
+        sums divided by ADC length, without IQ-offset subtraction. None retains
+        QICK IQ/threshold behavior. Circle requires a Post radius. Population
+        output ends in (g, e); other is implicit as 1-g-e. Linear excited
+        means real(IQ * exp(1j*angle)) > threshold; equality belongs to ground.
+        Keys must exactly match declared ADC channels or ValueError is raised
+        before transport acquisition. No program registry supplies calibration.
+        """
+        if classify is not None:
+            assert isinstance(self, qick_asm.AbsQickProgram)
+            missing = sorted(self.ro_chs.keys() - classify.keys())
+            unexpected = sorted(classify.keys() - self.ro_chs.keys())
+            if missing or unexpected:
+                raise ValueError(
+                    f"classify ADC keys: missing={missing}, unexpected={unexpected}"
+                )
+            for ch, classifier in classify.items():
+                if (
+                    isinstance(classifier, CircleClassifier)
+                    and classifier.radius is None
+                ):
+                    raise ValueError(
+                        f"ADC {ch}: circle radius missing; run GE Post analysis"
+                    )
+        self._classify = classify
+        return super().acquire(*args, **kwargs)
 
     @final
     def _process_accumulated(self, acc_buf) -> list[NDArray[np.float64]]:
-        assert self.acquire_params is not None
-
-        # tolerated: QICK documents scalar or per-channel thresholds, but acquire_params also contains unrelated string options.
-        threshold: float | list[float] | None = self.acquire_params.get("threshold")  # pyright: ignore[reportAssignmentType]
-        # tolerated: QICK documents scalar or per-channel angles, but acquire_params has no per-key value types.
-        angle: float | list[float] | None = self.acquire_params.get("angle")  # pyright: ignore[reportAssignmentType]
-
-        # tolerated: QICK merges the typed acquire g_center option into its heterogeneous acquire_params mapping.
-        g_center: complex | None = self.acquire_params.get("g_center")  # pyright: ignore[reportAssignmentType]
-        # tolerated: QICK merges the typed acquire e_center option into its heterogeneous acquire_params mapping.
-        e_center: complex | None = self.acquire_params.get("e_center")  # pyright: ignore[reportAssignmentType]
-        # tolerated: QICK merges the typed acquire ge_radius option into its heterogeneous acquire_params mapping.
-        ge_radius: float | None = self.acquire_params.get("ge_radius")  # pyright: ignore[reportAssignmentType]
-
-        # tolerated: QICK stores its boolean remove_offset option alongside transport and string options without a per-key type.
-        remove_offset: bool = self.acquire_params["remove_offset"]  # pyright: ignore[reportAssignmentType]
-
-        if threshold is not None:
-            d_reps = [np.zeros_like(d) for d in acc_buf]
-            if ge_radius is not None:
-                warnings.warn(
-                    "Both threshold and ge_radius are set, threshold will be applied and ge_radius will be ignored",
-                    stacklevel=2,
-                    skip_file_prefixes=_ACQUIRE_WARNING_INTERNAL_PATHS,
-                )
-            self.shots = self._apply_threshold(acc_buf, threshold, angle, remove_offset)
-            for i, ch_shot in enumerate(self.shots):
-                d_reps[i][..., 0] = ch_shot
-            return self._average_buf(d_reps, length_norm=False)
-        if ge_radius is not None:
-            d_reps = [np.zeros_like(d) for d in acc_buf]
-            if g_center is None or e_center is None:
-                raise ValueError(
-                    "g_center and e_center must be provided when ge_radius is set"
-                )
-            self.shots = self._apply_classification(
-                acc_buf, g_center, e_center, ge_radius, remove_offset=remove_offset
-            )
-            for i, ch_shot in enumerate(self.shots):
-                d_reps[i] = ch_shot
-            return self._average_buf(d_reps, length_norm=False)
-        d_reps = acc_buf
-        return self._average_buf(
-            d_reps,
-            length_norm=True,
-            remove_offset=remove_offset,
-        )
-
-    def _apply_classification(
-        self,
-        acc_buf: Sequence[NDArray[np.float64] | NDArray[np.int64]],
-        g_center: complex,
-        e_center: complex,
-        ge_radius: float,
-        *,
-        remove_offset: bool,
-    ) -> list[NDArray[np.float64]]:
+        if self._classify is None:
+            return super()._process_accumulated(acc_buf)
         assert isinstance(self, qick_asm.AbsQickProgram)
-        shots = []
-        for i_ch, (ro_ch, ro) in enumerate(self.ro_chs.items()):
-            avg = acc_buf[i_ch] / ro["length"]
-            if remove_offset:
-                offset = self.soccfg["readouts"][ro_ch]["iq_offset"]
-                avg -= offset
-            g_shot, e_shot, _ = classify_shots(
-                avg.dot([1, 1j]), g_center, e_center, ge_radius
-            )
-            shots.append(np.stack([g_shot, e_shot], axis=-1).astype(np.float64))
-        return shots
+        shots: list[NDArray[np.float64]] = []
+        for raw, (ch, ro) in zip(acc_buf, self.ro_chs.items(), strict=True):
+            classifier = self._classify[ch]
+            iq = (raw / ro["length"]).dot([1, 1j])
+            if isinstance(classifier, CircleClassifier):
+                if classifier.radius is None:
+                    raise ValueError(
+                        f"ADC {ch}: circle radius missing; run GE Post analysis"
+                    )
+                ground, excited, _ = classify_shots(
+                    iq, classifier.g_center, classifier.e_center, classifier.radius
+                )
+            else:
+                # GE theta rotates by exp(+i theta), opposite QICK's projection angle.
+                excited = (
+                    iq * np.exp(1j * classifier.angle)
+                ).real > classifier.threshold
+                ground = ~excited
+            shots.append(np.stack([ground, excited], axis=-1).astype(np.float64))
+        self.shots = shots
+        return self._average_buf(shots, length_norm=False)
 
 
 class TrackerProtocol(Protocol):

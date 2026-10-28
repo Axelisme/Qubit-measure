@@ -133,7 +133,7 @@ def _spectrum_record(
         finished_at="2026-10-27T00:01:00Z",
         completion="complete",
         snapshot=RunSnapshot(
-            entry_id=storage.entry_id, point=storage.point, roles=storage.roles
+            entry_name=storage.entry_name, point=storage.point, roles=storage.roles
         ),
         provenance=SoftwareProvenance(
             software_versions={},

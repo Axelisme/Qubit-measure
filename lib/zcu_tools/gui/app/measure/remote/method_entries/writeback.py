@@ -31,7 +31,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             5.0,
             "Query submission_id: returns status pending|completed|failed, tab_id, "
             "completed [{subtab_id,item:{id,kind,target,value,destination}}] and error. "
-            "Destination identifies the fixed entry_id/point. Values are retained "
+            "Destination identifies the fixed entry_name/point. Values are retained "
             "confirmed writes, not a fresh preview. Pending means reserved or still "
             "running, not that no writes occurred. After a timeout, check this status "
             "before deciding whether to resubmit. No retry or rollback.",

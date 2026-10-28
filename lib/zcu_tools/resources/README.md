@@ -1,6 +1,6 @@
 # `zcu_tools.resources` experiment work resources
 
-**Last updated:** 2026-10-28（backup root naming）
+**Last updated:** 2026-10-29
 
 **讀者：** framework-dev。實驗資源的 scope、讀寫與持久化 owner 導覽。
 
@@ -59,7 +59,11 @@ Load 讀 caller 指定的 exact path，缺檔與格式錯誤直接拋出。Save 
 
 ## Point 欄位視圖
 
-`parameter_fields.py` 集中 FieldView 與完整 caller-model candidate 驗證。Entry 的 setup／point 視圖重用 FieldView、stage_model 與 metadata 讀寫，並使用 2.0 header 契約。`parameter_metadata.py` 擁有 opaque mapping 讀寫與 2.x header 拒絕契約。這些機制不解釋 metadata 的科學意義。
+`parameter_fields.py` 集中 FieldView 與完整 caller-model candidate 驗證。
+`set_model_value` 可沿 model／mapping 欄位與既有 list 的 canonical 非負 ASCII index 寫入 detached candidate。
+數字 mapping key 仍是 key。Setter 不建容器、不 append／insert、不接受 slice 或負索引，也不寫 tuple／ndarray。
+`sequence_index` 只驗 canonical index 與界限，供 setter 與 projection reader 共用；reader 保留 tuple／ndarray 讀取。
+複數仍交既有 codec，發布前由 caller 完整驗證 model。Entry 的 setup／point 視圖重用 FieldView、stage_model 與 metadata 讀寫，並使用 2.0 header 契約。`parameter_metadata.py` 擁有 opaque mapping 讀寫與 2.x header 拒絕契約。這些機制不解釋 metadata 的科學意義。
 
 ## Scope 差別
 
@@ -71,9 +75,9 @@ Load 讀 caller 指定的 exact path，缺檔與格式錯誤直接拋出。Save 
 - `ResultEntry.records(component)` 綁定元件 JSONL 樣本歷史。v2 座標協定保持 opt-in。
 - `ArbWaveformDatabase` 是 qubit-scoped 的 asset repository，與 context 分開。
 
-`DocumentStore` 擁有單檔交易，不換算數值。Caller 提供文件 model 與整份文件的 validation。參數容器的檔案與視圖使用相同工作單位；值與 metadata 都不經 SI 投影。不同 store 不共用快照；任一欄位衝突會拒絕整筆交易。通知失敗獨立回報，不撤銷已完成的提交。它不提供跨檔掉電保證，也不自動監看檔案。
+`DocumentStore` 擁有單檔交易，不換算數值。Caller 提供文件 model 與整份文件的 validation。Entry 另以 `read_validate` 選擇結構讀取，`content()` 保留未消費的欄位，`snapshot()`、edit 與 strict refresh 仍驗完整 model。其他 consumer 不啟用這個選項，維持既有完整驗證。參數容器的檔案與視圖使用相同工作單位；值與 metadata 都不經 SI 投影。不同 store 不共用快照；任一欄位衝突會拒絕整筆交易。通知失敗獨立回報，不撤銷已完成的提交。它不提供跨檔掉電保證，也不自動監看檔案。
 
-DocumentStore 在自己的單檔 edit 內合併、驗證、replace 並發布快照，不開放多檔 prepare／restore／publish 接縫。非空 commit 同時寫回 model 的讀檔轉換，以 normalized tree 比較衝突，再把差異套回 raw YAML，保留未改節點。一般讀取與空 edit 不 normalize 寫檔。只有明確啟用政策的 ModuleLibrary 遇壞條目時，會在同鎖內先完整備份再清理主檔，見 [context owner](context/README.md) 與 ADR-0063。Entry 的 setup 與 point 不共用條目鎖或交易。
+DocumentStore 在自己的單檔 edit 內合併、驗證、replace 並發布快照，不開放多檔 prepare／restore／publish 接縫。非空 commit 同時寫回 model 的讀檔轉換，以 normalized tree 比較衝突，再把差異套回 raw YAML，保留未改節點。一般讀取與空 edit 不 normalize 寫檔。ModuleLibrary 讀取略過無效 Spec 並公開原因，不改檔、不備份，見 [context owner](context/README.md) 與 ADR-0063。Entry 的 setup 與 point 不共用條目鎖或交易。
 
 Caller 從各 owner 的 module 或子 package import。
 

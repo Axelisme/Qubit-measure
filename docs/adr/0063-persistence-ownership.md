@@ -4,7 +4,7 @@ status: accepted
 
 # Persistence：保存權威與資料契約
 
-**Last updated:** 2026-10-27
+**Last updated:** 2026-10-29
 
 ## 脈絡
 
@@ -18,7 +18,7 @@ App memento、Experiment Data File、workflow run artifact、`params.json`、Rec
 - Experiment Data File 是正規的 `data.h5`，保存一個 Experiment Result 的全部 Data Variables。Labber 是供 Log Browser 使用的衍生輸出，不是原始資料權威。`experiment.axes_spec` 定義 typed Result／cfg 與 persisted axes、units、variables 和 metadata 的 mapping；`datafile` 擁有 [[0080]] 的通用容器格式與讀寫，不反向依賴 experiment。Container 只認 vars、docs、groups；cfg、metadata 的具名型別、編碼與驗證由 experiment 擁有。正常載入在 experiment 邊界還原 typed Result，不把 generic variable mapping 洩漏給分析端。
 - Workflow run 保存跨步驟的提交與 audit。Engine 擁有 manifest、journal 與 best-effort iteration record.json；workflow 擁有 native 量測檔及圖形，並在 point record 記錄用途與檔名。Engine 每輪提供唯讀 absolute iteration_dir，不保存、追蹤或保證 workflow 檔案。單次量測 Completed 與保存分開，責任與失敗規則見 [[0062]]。
 - `params.json` 是跨 workflow 的 typed parameter handoff。`QubitParams` 擁有 section 更新與 project identity；不把 sample arrays 或 dense curves 塞進參數檔。generic table storage 不負責這類語意。
-- 參數容器由 `resources.entry` 組合條目、setup 範本與獨立工作點。值與 opaque metadata 共用一份文件，setup／point 重用 `resources.parameter_metadata` 的 2.0 header 與 metadata 讀寫，以及 `resources.parameter_fields` 的 value staging；DocumentStore 擁有單檔衝突與原子提交，不換算數值。Entry 不產生、解釋或驗證參數 metadata，clone 原樣複製；library 來源記錄與本條目 ledger 引用驗證仍由 library owner 擁有。Accepted executor 對參數只提交 caller 提供的 metadata。GUI context owner 與 Notebook 經公開 capability 使用 entry。GUI proposal 留在 frontend，Apply 才轉成 resources concrete items。兩者共用 accepted executor，resources 不 import frontend 或 experiment，由 C8 分層與 C9 無循環 contract 約束。
+- 參數容器由 `resources.entry` 組合條目、setup 範本與獨立工作點。值與 opaque metadata 共用一份文件，setup／point 重用 `resources.parameter_metadata` 的 2.0 header 與 metadata 讀寫，以及 `resources.parameter_fields` 的 value staging；DocumentStore 擁有單檔衝突與原子提交，不換算數值。Entry 不產生、解釋或驗證參數 metadata，clone 原樣複製；library 只保存 Spec，不建立模組來源或查 ledger。Accepted executor 對參數只提交 caller 提供的 metadata。GUI context owner 與 Notebook 經公開 capability 使用 entry。GUI proposal 留在 frontend，Apply 才轉成 resources concrete items。兩者共用 accepted executor，resources 不 import frontend 或 experiment，由 C8 分層與 C9 無循環 contract 約束。
 - 使用者於 2026-10-13 裁決：「可以改metadata」。新參數容器寫 `format_version: "2.0"`，只讀 major 2，保留同 major 的 forward-minor 契約。入口直接拒絕舊 major 或任何含 `provenance` 旁表的文件，錯誤含路徑、讀到版本與期望版本 2.0。不雙讀、不附轉換工具，由使用者自行修改既有文件。這項參數格式變更不改 generic DocumentStore、ModuleLibrary 或其他成果的版本契約。
 - Setup 與每個 point 各自的 authored alias 表由 `resources.entry` 保存為獨立的 `aliases.yaml`，不是 memento 或 ledger。ContextService 擁有有序表的語法與 Apply 時機，resources 擁有檔案表示、建立時複製及單檔原子替換。MCP 的單次 aliases／target 覆寫不保存它。
 - `RecordWriteback` 只 append adapter 組裝的任意 JSON object，不選座標裝置、不注入 `dev_value/dev_unit`，也不因裝置資料缺失而省略 proposal。框架只補 `component`、`run_id`、`point`、`at` 與 `source` provenance 信封。`component` 來自明示的 table binding，producer 同名欄位不能覆寫它；舊列缺此欄仍可讀，不補寫。格式由 adapter 間的 policy 決定，見 [lab authoring 的 Record policy](../../zcu_lab/v2/measure-authoring.md#record-policy)。元件記錄放在 `records/components/<target>.jsonl`，事件 ledger 維持 `records/ledger.jsonl`，附件維持 `records/<event UUID>.json`，兩個命名空間不共用行格式。
@@ -35,7 +35,9 @@ Wire kind、written key 與 session prefix 使用 `record`、`records` 與 `reco
 
 Ledger 的 acquired 只記 run_id、experiment、point、roles 與事件時間，不保存 cfg_summary，也不從 Form 或 RunRecord.cfg 序列化第二份設定。只量測未保存仍可追加 acquired，不建立 run 目錄。
 
-RecordsLedger 讀取 envelope 與依 kind 選出的 payload 時忽略未知欄位，包括舊 1.0 行的 cfg_summary。讀取不改寫原行或附檔，get 的 raw event_json 保留未知內容。已知欄位型別、必填欄位、格式 major、kind、entry identity 與 JSON 損壞仍按契約拒絕；append 仍驗證已知欄位。不升格式 major，也不做 strip／rewrite migration。
+RecordsLedger 忽略未知欄位，包括舊 1.0 行的 cfg_summary 與 entry_id。讀取不改寫原行或附檔，get 的 raw event_json 保留未知內容。部分內容投影只驗請求欄位與必要祖先；明確整筆投影 events()／get().event 仍驗完整 payload model。歷史 import 的 source_entry_id 只留在 raw，不讀取或驗證，source_event_id 與 source_event_json 的引用契約保持。
+
+Append 完整驗證本次新事件。既有歷史只驗追加需要的 JSON、版本、event／run ID、duplicate、完整尾行與既有安全條件，未使用的壞 payload 不阻擋新事件。無效新事件仍拒絕且不改原 bytes。Index 不預驗未使用的 attachment reference；真正使用附件時，先驗 canonical reference 與 root containment，再解析路徑或開檔。不升格式 major，也不做 strip／rewrite migration。
 
 使用者於 2026-10-14 對保存位置選擇「A」，正本只放資料檔。對前端讀回裁定：「Notebook與GUI應該都讀data.h5，只有log browser讀Labber檔。」2026-10-15 確認：「1可以，2採用忽略不支援欄位的方式，3同意，4一起做吧」。其中 ledger 採忽略未知欄位，不改寫歷史行；Labber-only 資料先離線遷移，Load 不回填表單。
 
@@ -50,17 +52,31 @@ MCP call log 是 best-effort 除錯紀錄，可以截斷、清除或停用，不
 新格式根目錄統一為 `result/`，與 GUI runtime 一致，不另設 `results/`。`.gitignore` 保留 `result/`，移除 `/results/`。
 使用者於 2026-10-20 裁決：「好，統一result，那gitignore也做處理」。
 
-Entry 只由 `result/<name>/` 構成。`resources.entry.ResultEntry` 提供條目的不可變身分、exact Result path、Database 輸出位置與 scoped ledger。`create`／`open` 只檢查 Result，不檢查或建立 `Database/<name>/`。第一次 Save 才由 writer 建立所需的 Database 目錄，已有的同名 Database 照用，不另加混雜偵測。
+Entry 只由 `result/<name>/` 構成。`resources.entry.ResultEntry` 提供條目名稱、UTC 建立時間、exact Result path、Database 輸出位置與 scoped ledger。`create`／`open` 只檢查 Result，不檢查或建立 `Database/<name>/`。第一次 Save 才由 writer 建立所需的 Database 目錄，已有的同名 Database 照用，不另加混雜偵測。
 
-`rename_entry` 只移動 Result，不改內容或 UUID，也不移動 Database 舊輸出。改名後重新 open，新 Save 使用 `Database/<新名>/`，舊輸出留在原處。Database 不是 entry 的存在或 clone 身分邊界，因此沒有雙目錄改名與復原協定。
+同一 Result root 下，entry 歸屬由資料夾名稱決定，不產生或使用 entry UUID。Setup／point 的舊 entry_id 即使格式不合法也忽略，讀取不改 bytes，明確寫入時移除。新 ledger 事件與 RunSnapshot 不含 entry_id，舊事件的該欄位不參與讀取或追加。Run ID 與 event ID 不變。Role capture 仍核對 point source 與 owning roots。Clone 使用來源位置當下的內容。缺 records 時 ledger 讀取回空且不建目錄，第一次 append 才建立。
+
+2026-10-28 使用者詢問「這裡的UUID能做什麼？什麼是目錄名不能而必須要UUID?」，先以「選B」採用位置歸屬，UUID 不再當跨檔身分。隨後在 A「完全移除 entry UUID」與 B「只保留開啟中 setup 被換成不同 UUID 時拒絕操作」之間選擇「A」。
+
+A 包含新建 entry 不產生 UUID。Setup／point 接受有或沒有 entry_id 的舊檔並忽略其值，下次明確寫入去掉。新 ledger／量測 metadata 與公開 wire 不再包含 entry_id，setup 換檔也不因 UUID 拒絕。Run ID 與 ledger 事件 ID 不受影響。
+
+Setup 同名替換後，經公開 SetupView.refresh 或會重讀 setup 的 ResultEntry.new_point、重新開啟 entry 取得新內容，不以 UUID 拒絕。這不新增 setup 自動監看，既有 point files 的 wire、讀取失敗、格式錯誤、安全與 watcher 生命週期契約保持。
+
+Point 是實驗語意下具有一致環境參數的單位，不限於 flux。2026-10-28 使用者定義：「一個point不是一個flux點的意思，而是在其中的實驗語義下，具有一致的環境參數的意思，不只包含flux。而對於實驗本身就在掃某個環境參數，其一致性要求本來就不包含那個參數，所以哪個參數不會影響一致性」。
+
+`rename_entry` 只移動 Result，不改文件內容，也不移動 Database 舊輸出。重新 open 後的新 Run 記錄新名稱，新 Save 使用 `Database/<新名>/`。已有 Run 重存仍沿它記錄的名稱，舊輸出留在原處。Database 不是 entry 的存在或 clone 身分邊界，因此沒有雙目錄改名與復原協定。
 
 使用者於 2026-10-20 裁決：「甲，簡單的機制加一致的規則比非預期的兼容邏輯好維護與使用，同樣名字的Database會混雜屬於有意不處理的設計。」對改名裁決：「改名時Database不動，Database是輸出位置，不是什麼要綁定的目錄」。
+
+`bind_run_outputs` 在 resources.entry 內依目前 Result／Database roots 與 Run 記錄的 entry 名稱、point 綁定輸出位置，不開 ResultEntry、不要求 entry 或 point 存在。缺名稱使用 unnamed_entry，缺 point 使用 unnamed_point。GUI Save 不使用 live selection、捕捉時的 storage 或原檔位置決定目的地。
 
 `SaveLayout` 接收 exact entry paths、caller 產生的 stem、point 與保存時間，再按 artifact key 計算 exact outputs。它不建立目錄或寫檔，不補前綴或 run_id，也不正規化 stem。Stem 必須是安全的單一路徑段，非法值直接拒絕。C8 分層與 C9 無循環 contract 涵蓋 experiment 使用 datafile／resources 的方向。
 
 GUI 的 `Adapter.save_stem(context)` 委派自己的 `AxesSpec.save_stem` 或 `GroupedAxesSpec.save_stem`。Adapter 可用自己的 spec 覆寫，不改核心的原 spec。Notebook 沿 core spec 的同一 callback；workflow 的 `write_outputs(..., save_stem=...)` 由 caller 提供 callback。這些入口共用 `SaveContext`，包含完整 adapter path／tag／workflow name、完整 run_id、歷史 point、解析後 roles、可用 cfg values 與保存時間。缺 cfg 時傳 None，不讀 live context 補值。
 
 預設 callback 將名稱中的 `/` 轉成 `.`，接上依 mapping 順序以 `-` 連接的 role values，再接完整 run_id，各段以 `_` 連接。Role list 按原順序攤平，未綁名稱不加入。沒有 roles 時省略該段。例如 `twotone.time_domain.t1_Q1-R1_20261027T120000Z-a1b2c3`。Mux adapters 依 cfg participants 原索引順序以 `+` 列參與 qubits，例如 `mux.t1_Q1+Q2+Q3_20261027T120000Z-a1b2c3`。Readout-only onetone 列 resonator labels，缺 cfg 名稱時回預設 role 命名，不猜 qubit 身分。
+
+Database 的 runs 平放與按 point 分層都可行，目前選平放，日後有移植需要再改。2026-10-28 使用者裁決：「Database平放與按point分感覺都可以，我認為目前平放就先保持好了」。
 
 Native run 目錄為 `Database/<name>/runs/<stem>/`。再次 Save 的 callback 回傳相同 stem 時，更新其中的 `data.h5`、具名圖片與 `analysis/<pane>.json`。圖片另有 Result point／全域 figures 副本，檔名為 `<stem>_<圖名>.png`。Native 同名目的仍由 saver 明確 replace=True 原子覆寫，不加避讓規則。自訂 callback 若依保存時間改名，後續保存會寫到另一個目錄。
 
@@ -78,7 +94,13 @@ Workflow 本身的兩側目錄維持 `workflows/<workflow名>_<run_id>/`，保�
 
 `experiment.native_persistence.prepare_run_data` 從 typed RunRecord 與 axes spec 建立同一份 SI／離散 payload 和 cfg snapshot。Native 與 Labber writers 分別消費它，不先寫 native 再讀回轉成 Labber，也不互相呼叫。Datafile writer 只處理自己的格式與 caller 指定的目的地，不選路徑、不擷取 live context、不決定 batch。`experiment.artifacts` 的共用保存編排負責 artifact 選集、輸出順序與逐輸出失敗隔離，一個 writer 失敗不阻擋其他輸出。
 
-RunMetadata 的 run_id、時間、completion、RunSnapshot 與 SoftwareProvenance 是 caller 提供的歷史事實。
+RunMetadata 的 run_id、時間、completion、RunSnapshot 與 SoftwareProvenance 是 caller 提供的歷史事實。RunSnapshot 保存 entry_name、point 與 roles，不帶 entry UUID。Experiment 的 ParameterSnapshot 保存 resources 擁有的 point 參數內容、library Specs、authored aliases 與 fixed names。Session 的 capture／restore adapter 連接這兩個 owner，不讓 resources 或通用 ParameterContext 依賴 experiment。C8 分層、C9 無循環與 parameter-context-no-experiment contract 保護這個方向。
+
+GUI 在 Run admission 固定參數環境。Save 使用 metadata 內的快照，不重新讀 live point。Load 只還原檔內快照；缺快照回沒有 general、created_at、SavedPoint 或 storage 的空內容，不補造歷史資訊。Analyze／Post 使用這份內容。寫回提案仍從歷史內容求值及解析 alias／slot，但 Preview／Apply 的 target 取命令當下 GUI 選定的 point。未選 point 時拒絕，空歷史環境不是拒絕理由。
+
+2026-10-28 使用者說明 Load 的來源：「我認為run R確實可以記錄是哪個entry與point，但Load為什麼要看entry/point資訊？他又不需要，他只需要當時capture的環境就好？」對沒有快照的舊量測補充：「沒有快照的舊量測，可以用空環境來生成分析參數預設值，而不是不能分析。」當時的「1A 2A」裁決中，寫回選擇 GUI 目前選的 point。
+
+Save 目的地隨後改採記錄的 entry／point。2026-10-28 使用者要求：「我希望load只需要給data.h5的路徑，不要求其在對應的儲存位置，但再儲存的目標就是內部記錄的entry與point。」「我認為Save的部分，應該不用找？」「直接生成路徑，然後覆寫就好」。缺名稱與 point 的處理分別是「我認為沒有記錄entry_name，那就用unnamed_entry之類的」「point應該也可以比照辦理，unnamed_point」。這項 Save 裁決取代存到目前開啟 entry 的方案，不改寫檔內歷史 metadata。
 
 新檔由 [[0080]] 的 zcu.container 3.0 保存，實驗欄位進入 docs/metadata。`started_at` 接受 UTC ISO 字串或 None，`completion` 接受 complete、partial、stopped 或 unknown。None 與 unknown 表示缺少歷史證據，不從檔案時間、檔名或 run_id 補造。正常量測路徑仍必填開始時間，只產生已知完成狀態。
 
@@ -104,11 +126,13 @@ DataItem 保留 typed run 準備成功或失敗的結果；cfg=None 或 producer
 
 GUI Save／Save All 與 MCP 保存使用這條 run 保存流程。Save All 包含已保存的 artifact，每次重寫全部選定成員。GUI 在 owner thread 同步完成並回傳完整 SaveReport，不建立 Save handle、worker 或 save-busy phase。Data pane 唯讀顯示每個 output 的 path、status 和 error，不讓使用者改目的地。Notebook 的本機單檔 save 保留原入口，不猜格式；`save_run` 使用 bound PointView 的公開 capability。C8 與 C9 涵蓋 notebook → experiment/datafile/resources 的依賴，C12 保持 datafile 不依賴 stateful resources。
 
-GUI Native Load 由 LoadService 呼叫 datafile.load 讀成 Container，使用 experiment.metadata_from_container 驗證 metadata 並比對 experiment tag，再交 adapter.restore(container)。Adapter 依 spec 呼叫 restore_run，共用資料優先轉換見 [[0069]]。核心與 Notebook 保持 typed RunRecord，GUI 只持有 opaque record 與明示 cfg_issue，不探測 cfg／result。完整 RunMetadata 沿 RunRecord.metadata 保留原 run_id、時間、completion、snapshot 與 provenance，不包含輸出路徑，也不產生 acquired。Load 不回填表單，不以目前 Form、library、default 或 live device 補回歷史 cfg。
+GUI Native Load 由 LoadService 呼叫 datafile.load 讀成 Container，透過 experiment 的 metadata content 只讀驗 experiment tag，再交 adapter.restore(container)。Adapter 依 spec 呼叫 restore_run，共用資料優先轉換見 [[0069]]。核心與 Notebook 保持 typed RunRecord，GUI 只持有 opaque record 與明示 cfg_issue，不探測 cfg／result。RunMetadataContent 沿 RunRecord.metadata 保留原 run_id、時間、completion、snapshot 與 provenance，不包含輸出路徑，也不產生 acquired。Load 不回填表單，不以目前 Form、library、default 或 live device 補回歷史 cfg。
 
 原始 cfg 正本保存在 native 資料檔的 docs/cfg，可透過公開 datafile.load 離線讀取。使用者於 2026-10-16 選擇「A」時不新增 GUI 入口；2026-10-23 批准的 Results browser 是唯讀檢視例外，呈現保存的 cfg_type、schema_version 與以 values 為根的相對路徑。瀏覽器不修改檔案、不回填表單，也不重新分析。視窗與前端邊界見 [[0067]]；Load 與 adapter 的 opaque record 契約不變。
 
-相同 opened entry 且可定位歷史 point 時，context owner 一次讀取檔案的 point 和已解析 alias names，固定 Load 時的持久值供 Analyze／Post／Writeback。檔案不保存原始 point／library 版本，不能把這份來源當成原始量測參數。跨 entry、EMPTY 或無歷史 point 時沒有 analysis source，不回退目前 alias。Save storage 在 Load request 時獨立捕捉；同 entry 沿歷史 point／run_id 保存，跨 entry 在 mapping 和 I/O 前拒絕。
+Load 接受任意位置的 data.h5，不讀目前 entry 或歷史 point 的外部文件。未使用的 metadata、參數與 library 區塊延後驗證，使用壞值時報來源與欄位，不降成空內容。Save、完整 metadata／component／document 投影與 edit 仍完整驗證。Leaf read 只執行請求欄位的 annotation、field validators，包括 before，與必要祖先檢查，不執行 model 層級 before／after validators。缺值沿該欄位的 default／default_factory，同文件重讀保持穩定。Whole-component projection、edit、seed 與 clone 執行完整 model，包括轉換與跨欄位檢查。需要跨欄位不變式的 consumer 使用 whole-component projection；只靠 model validator 的 legacy 轉換需明確 edit 或 parameter upgrade，不在 leaf read 補做。Header／major、schema_version、JSON／YAML 表示、實際使用的 attachment path 與 ledger 追加安全規則保持。
+
+沒有 storage 的 Run 仍保留 artifact／member declarations，首次 Save 前 outputs 可以為空，但狀態不是 Saved。Save report 發布實際路徑、成功或逐項失敗。Bound Run 的既有預覽保留，但不決定 Save 目的地；同 session 改名或改 roots 時，預覽可能不同於實際輸出。實際 Save 建立目錄並覆寫同名 data.h5、分析與圖，Result 圖副本放到記錄的 points/<point>/，缺 point 放 points/unnamed_point/。不新增 source.json 或另一份來源權威。
 
 Load Data 同時提供 File 選檔與 opened entry 的 native 檔案清單。清單掃描 `Database/<entry>/runs/*/data.h5`，完全不讀 ledger。Run 身分、experiment、point、開始／結束時間與 completion 來自各檔的 RunMetadata／RunSnapshot；未知歷史時間保持空白，completion 保留 unknown。清單透過 `datafile.read_doc` 讀 metadata，只解碼與驗證上述顯示欄位，不要求完整 RunMetadata 或 provenance，也不讀 cfg 或量測 arrays。清單可顯示不代表整份資料可載入。Metadata 讀取失敗時，run_id 為空字串，experiment、point、時間與 completion 欄位留空。清單保留 exact Path 與既有錯誤資訊，選取仍回傳 exact path，由既有 Load 路徑回報失敗。清單不解析新舊目錄名來補欄位，避免讓路徑命名成為第二份歷史身分來源。查詢不建立目錄或事件，遷移也不手造 ledger。
 
@@ -144,17 +168,15 @@ Dialog Apply 先驗整表，再由 entry owner 寫 sibling temporary 並 atomic 
 
 2026-10-23 使用者對以下寫入慣例回覆「認同」：一次使用者動作、每份文件一筆交易，不承諾跨文件原子提交。Owner 寫入 API 以「一份文件的一組變更」為原形，單項寫入是長度 1 的批次，避免逐項重開同份文件、驗證與提交。
 
-DocumentStore 分開保存 raw YAML 節點、驗證後的 normalized tree 與 public typed snapshot。一般讀取及空 edit 不寫檔；非空 commit 以最新 normalized tree 合併與驗證，再把差異套回 raw 節點。Model 的讀檔轉換在下一次 commit 寫回，未改節點保留原樣。
+resources.entry、DocumentStore 與 ledger_models 在 owner 內部分開讀取投影與寫入驗證。參數讀取保留未使用的 raw 內容，同一 component 的壞 leaf 不擋其他 leaf，不先建立整份嚴格 model。Edit／append 不因此放寬寫入契約，壞值仍由 owner 指出路徑，不略過或降成空內容。DocumentStore 保存 raw YAML 節點，完整驗證時產生 normalized tree 與 typed snapshot。一般讀取及空 edit 不寫檔；非空 commit 以最新 normalized tree 合併與驗證，再把差異套回 raw 節點。Model 轉換在下一次 commit 寫回，未改節點保留原樣。
 
-ModuleLibrary 是讀取可寫檔的明確例外。Library owner 先驗 header、容器與可定址名稱，再逐條驗證 Spec 及所屬 provenance。壞 Spec、entry-local provenance 或不存在的本地事件使該 root 及附屬來源被移除，不影響合法兄弟。孤立或不可定址的 provenance、header 或容器錯誤整份拒絕，不備份、不清理。Ledger I/O、schema、附檔與非預期錯誤傳遞，不降級為壞條目。
+ModuleLibrary 讀取不改檔。Library owner 先驗 header、容器與可定址名稱，再逐 root 驗證 Spec。無效 Spec 從讀取投影略過，公開 `invalid_entries()` 回報 root 與原因，合法兄弟仍可用。Header、容器及 I/O 錯誤傳遞。Strict refresh 不略過無效 Spec，失敗保留已發布快照。讀取與空 edit 保留原 bytes，不建立 .bak。
 
-Library bytes 未變時，DocumentStore 不重 parse YAML、不重跑 Pydantic、cleanup 或完整 validate。Library owner 仍對快照內全部 provenance source 做依賴存在性檢查，以 ledger 的 event 索引確認事件存在，並對 attachment 做 stat；這不重驗未變 library 內容或附檔內容。依賴全部存在才沿用已驗證快照，bytes 改變或任一依賴缺失則走完整驗證、清理、備份與錯誤傳遞路徑。不存在的本地事件仍使所屬 root 移除，附檔缺失仍在當次讀取立即失敗，不等 library bytes 改變才回報。
+Library 不再保存 per-leaf provenance 或 stderr。舊 `provenance:` 容忍並忽略，非空寫入時自然移除。讀取與寫入都不需要 ledger 或 entry_id。DocumentStore 對未變 bytes 沿用驗證快取，不做來源依賴檢查。新 draft 仍嚴格驗證，不略過 caller 的壞值。
 
-DocumentStore 的同一把 sidecar lock 涵蓋初始讀取、refresh、edit 進入及 commit 重讀的清理。清理候選通過完整驗證後，store 先將完整原檔逐 byte 複製成同目錄、不覆寫既有檔案的時間戳 .bak，再以 sibling temporary 與 atomic replace 清理主檔。成功後只寫一行 warning，列出備份路徑與移除 roots。合法檔與 header-only 不重寫；snapshot 仍只讀合法的已發布記憶體，不新增 GUI／MCP 顯示。
+ResultEntry clone 只複製 point 參數、metadata、合法 library Specs 與來源 point 的 alias，不改來源檔。跨 entry 不匯入事件、不複製附檔，也不寫 source 或 cloned_from。`import` kind 保留為歷史讀取類型，不再有 producer。Clone 失敗只清理本次目的 point，不承諾跨檔 snapshot 或交易。
 
-備份失敗不替換主檔；replace 失敗保留原主檔及完成的備份，兩者都不發布候選。讀取清理已完成後，後續 draft、body 或 conflict 失敗不回滾清理。新 draft 仍嚴格驗證，不能以清理吞掉 caller 的壞值。ResultEntry clone 先用來源條目的相同政策清理，再複製文件及匯入剩餘合法來源。此例外只適用明確啟用政策的 library，不擴張到 setup、point 或其他 store，也不承諾跨檔交易或掉電恢復。Library 版本只看容器，見 [[0072]]。
-
-使用者於 2026-10-15 裁決：「其實我覺得很簡單，讀取時發現有問題，就重命名當前檔案或複製成.bak檔，本體留合法的即可，也不用處理顯示的問題。」對先複製完整原檔、備份名加時間戳的建議回覆：「照建議做」。
+2026-10-28 使用者裁決：「我其實沒有要知道來源的需求，這功能純屬於錦上添花」「來源我一直以為只是metadata，沒想要解析」。這次移除模組來源機制與讀取清理例外，取代 2026-10-15 的 library 先備份再清理政策。Library 容器仍是 2.0，變更記錄見 [移除模組來源](../storage-format-history/2026-10-28-remove-module-provenance.md)。
 
 Format 與 format_version 只描述容器結構。檔頭不符或 major 不同時拒絕載入；forward-minor 保留容器層剩餘未知欄位，不覆寫元件或 nested model 的 extra 策略。
 
@@ -174,7 +196,9 @@ Grid 不同的 grouped 實驗可由 spec 明確宣告 independent Labber layout�
 
 資料容器採 Tolerant Reader。每個 app 只讀、只驗當次操作需要的檔案與欄位。用不到的欄位缺少、多出或格式不同都不報錯；實際使用時才檢查它是否存在、數值是否可用。有問題時在使用處報錯並指名欄位，或在該功能可選時關閉並註明原因。容器可以不再讀取舊欄位，不必轉換或提供相容別名。寫入端仍寫出完整、正確的格式。
 
-這項規則也適用於按 point 或個別分析成果移植資料。App 不因其他檔案或區塊缺席、格式不同而拒絕使用已具備的資料。2026-10-28，使用者說明：「我會預期一個app只會需要給他需要的資料，而不是檢查用不到的格式與欄位」。2026-10-29 再次確認：「我一致的設計規則是：只檢查需要用到的資訊」。
+這項規則也適用於按 point 或個別分析成果移植資料。App 不因其他檔案或區塊缺席、格式不同而拒絕使用已具備的資料。2026-10-28，使用者說明：「我會預期一個app只會需要給他需要的資料，而不是檢查用不到的格式與欄位」。2026-10-29 再次確認：「基本上可以，但我要提醒，我一致的設計規則是：只檢查需要用到的資訊」。
+
+Point availability 只判參數文件可讀且能解析成 owner 的文件結構，保留 header 與目前 schema version 檢查，不讀 library 或 aliases。Leaf／component 格式問題在使用或寫入時報錯，不讓整個 point 不可用。讀不到或解析不了的 point 仍標不可用並附原因，其他 point 正常；UI 停用、不可當 clone 來源、tooltip 與 remote error 的呈現不變。Availability 不作為 use_point、Load、Save 或其他讀取的額外前置條件，檔案同步見 [[0081]]。
 
 2026-10-26，使用者裁決：「我對這種資料容器的行為預期都是：可以不讀舊格式欄位，但不要因為少了欄位或多了欄位就報錯。」這是一般資料讀取的欄位容忍原則。既有容器 header／major、component `schema_version` 的拒讀規則與元件 model 驗證契約仍由各 owner 決定，不以此新增相容層。
 
@@ -215,6 +239,8 @@ Autofluxdep artifact 建立失敗不啟動 run；canonical row write／flush／j
 2026-10-21 註：上一段描述已移除的 Autofluxdep artifact，不是現行 runtime 的失敗契約。現行 Experiment writer 依下段處理 exact path；Workflow 保存見 [ADR-0062](0062-experiment-workflow.md)。
 
 Experiment writer 寫 caller 指定的 exact path。Labber 拒絕既有目的地；native 預設也拒絕，只有明確 replace=True 才用同目錄 temp、關檔後 atomic replace，失敗清 temp 並保留舊目的地。SaveLayout 的 Labber suffix 只避讓當時已存在的檔案，不是跨程序 filename reservation；collision 由上層回報該輸出失敗，不隱藏 retry。單檔 replace 與 ledger append 不是跨檔交易，也不保證掉電恢復。Run identity 由 run-scoped metadata 記錄，不由可讀 slug 或檔名猜測。Workflow manifest 連結 metadata root 和 heavy-data root，不把 exports 當另一份原始權威。
+
+Storage migration 的 migration_id 是單次操作 ownership token，不是 entry 身分。Manifest／report 與初始化暫存名稱都使用 migration 專屬名稱，setup／point／run／ledger 產出不依賴 entry UUID。需要重跑或 cleanup 的舊 ownership 欄位 entry_id 會使操作拒絕並指名檔案。工具不讀其值、不自動轉換或刪除來源、備份與目的地。Operator 使用舊版完成，或確認後自行處理。重跑、備份、cleanup 的 ownership 與越界路徑保護保持。
 
 Normal runtime 只接受各自契約指定的格式，不猜測 legacy shape／unit；版本必須與 artifact kind 一起判斷，合法 streaming v1 不因數字小於 one-shot v2 而視為同類 legacy。Experiment 的舊 converter 和 GUI fallback 已退休。既有 pure DataFrame conversion 只產生分析 frame，不是 raw-record loader，不補造 `devices`，也不自動改寫 CSV。QubitParams 的 project identity migration 由其 owner 管理，不因本 ADR 授權寫入使用者資料，也不建立跨資料類型的共用 migration layer。
 

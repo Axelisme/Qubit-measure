@@ -227,7 +227,7 @@ def export_run(
     manifest = read_manifest(run, "coherence_fluxdep")
     try:
         plan = CoherencePlan.model_validate(manifest.plan)
-        if str(plan.snapshot.entry_id) != manifest.identity.entry_id:
+        if plan.snapshot.entry_name != manifest.identity.entry_name:
             raise ValueError("Plan snapshot entry and manifest identity differ")
     except ValueError as error:
         raise ValueError(f"{run}/manifest.json: {error}") from error

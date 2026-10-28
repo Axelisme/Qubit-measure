@@ -1,6 +1,6 @@
 # `gui.app.measure.remote`
 
-**Last updated:** 2026-10-28
+**Last updated:** 2026-10-29
 
 **讀者：** framework-dev。量測 GUI 的 RPC 方法、控制權與來源投影契約。
 
@@ -15,6 +15,14 @@ Record writeback uses kind=`record`, IDs `record-<n>` and `written.records`.
 The preview's `proposed_value` carries the adapter's JSON object unchanged.
 Wire version 123 removes the old sample names without aliases. Component records
 live at `records/components/<target>.jsonl`; the event ledger stays at `records/ledger.jsonl`.
+
+## Context snapshot
+
+`context.snapshot` 回傳固定 capture 的 target、point、library 與完整 aliases。Library 只投影持久 Specs，不回傳 `provenance`，也不 materialize assets。目前契約版本為 WIRE_VERSION 130、GUI_VERSION 163。
+
+省略 path 與 summaries 時，owner 驗證完整 schema，wire encoder 再驗證所有輸出值。`path` 使用 dotted keys 與 canonical 非負 list indices，只由 owner 讀驗所選部分，並優先於 summaries。選整個 component 或 subtree 時，該層的完整投影契約仍適用。未選 sibling 的壞 schema、nonfinite 或 library source fault 不再擋住正常 point leaf。Invalid path 保留第一個不可讀 segment，不先驗其他 sibling。
+
+`summaries=true` 保留 scalar 與 mapping，將 array/list leaf 改為形狀或項數。Owner 驗證輸出的欄位與產生形狀所需的結構，不預驗未輸出的 list elements 或未知欄位。輸出的壞 scalar、必要欄位缺漏與 used-source 故障仍失敗。真正送上 wire 的 nonfinite 或 unsupported value 一律拒絕，不換成 null 或空資料。Handler 只做表示與 wire 轉換，不重做 resource schema 驗證。
 
 ## Owners
 
@@ -91,7 +99,7 @@ Owner 在同一次 dispatch 核對 Primary／Post 全部選定 IDs，unknown／d
 `tab.writeback_receipt(submission_id)` 唯讀回 `{submission_id, tab_id, status, completed, error}`。
 Status 是 pending、completed 或 failed。Pending 包含只 reserve 或仍執行，不能推論沒有副作用。
 Completed 的每列是 `{subtab_id, item:{id, kind, target, value, destination}}`。
-Destination 是固定的 `{kind: "saved_point", entry_id, point}`，value 是 owner 當次確認的實際值。
+Destination 是固定的 `{kind: "saved_point", entry_name, point}`，value 是 owner 當次確認的實際值。
 查詢不重讀當前 draft 或磁碟，僅保留 GUI 生命週期的記憶體 receipt。
 10 秒 handler 逾時不表示寫入失敗。Caller 先查該 ID 的狀態，再決定是否重送。
 Recipe receipt.items 是成功 ID 對應的原捕捉候選，實際值與目的地仍取提交當下的 draft。
@@ -317,10 +325,15 @@ or implicit refresh. See [ADR-0065](../../../../../../docs/adr/0065-cfg-editing.
 
 `point.list` refreshes each point independently. Each row contains `label`,
 `description`, `available` and `error`. Description reads only `general.description`.
-The independent parameter probe uses the owner's current schema policy and component
-models. It does not read library or aliases. Invalid parameters produce an unavailable
-row with the failed document path and diagnostic in `error`; healthy rows have
-`available=true` and `error=null`. Directory discovery errors still fail the request.
+Availability requires a readable parameter document that parses into the owner's
+document structure, with its header and current schema version. It does not read
+library or aliases or validate full component models. A malformed leaf or component
+remains available; its owner reports the error when that value is used or written.
+Unreadable or unparseable documents produce an unavailable row with the document
+path and diagnostic in `error`; other rows have `available=true` and `error=null`.
+UI disabled rows, clone-source exclusion, tooltips and remote error presentation
+remain unchanged. Availability is not an extra precondition for use_point, Load,
+Save or other reads. Directory discovery errors still fail the request.
 
 ## Point-file reload and guarded writes
 

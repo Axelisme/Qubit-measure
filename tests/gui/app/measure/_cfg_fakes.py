@@ -59,6 +59,6 @@ def parameter_capture(
     return ParameterContext(
         point=point,
         library=library,
-        target=SavedPoint(entry_id="entry", point="working"),
+        target=SavedPoint(entry_name="entry", point="working"),
         roles=None,
     )

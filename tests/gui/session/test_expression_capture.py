@@ -36,7 +36,7 @@ def parameters() -> Generator[ParameterContext]:
         yield ParameterContext(
             point=point,
             library=library,
-            target=SavedPoint(entry_id="entry", point="working"),
+            target=SavedPoint(entry_name="entry", point="working"),
             roles=RoleBinding(
                 None,
                 {"qubit": RoleSpec("lowering/driver")},
@@ -52,6 +52,61 @@ def parameters() -> Generator[ParameterContext]:
 def test_role_path_expression_uses_fixed_capture(parameters: ParameterContext) -> None:
     assert evaluate_scalar_expr("$qubit.rate * 2", parameters) == 8600.0
     assert evaluate_scalar_expr("Q1.rate + 100", parameters) == 4400.0
+
+
+@pytest.mark.parametrize("target_type", [int, float])
+@pytest.mark.parametrize("bounds", [(4400.0, 4500.0), (4300.0, 4400.0)])
+def test_eval_ref_resolves_captured_paths_and_inclusive_bounds(
+    parameters: ParameterContext, target_type: type, bounds: tuple[float, float]
+) -> None:
+    from zcu_tools.gui.session import expression
+
+    ref = expression.EvalRef("Q1.rate + 100", target_type, *bounds)
+    result = expression.resolve_eval_ref(ref, parameters)
+    assert result == 4400
+    assert type(result) is target_type
+
+
+@pytest.mark.parametrize(
+    ("expr", "target_type", "message"),
+    [
+        ("-1", float, "value -1.0 out of range"),
+        ("11", int, "value 11 out of range"),
+        ("1.5", int, "not an integer"),
+        ("Q1.rate", float, "requires a context"),
+        ("sqrt(-1)", float, "math domain error"),
+    ],
+)
+def test_eval_ref_rejects_invalid_or_out_of_range_values(
+    expr: str, target_type: type, message: str
+) -> None:
+    from zcu_tools.gui.session import expression
+
+    with pytest.raises(ExpressionError, match=message):
+        expression.resolve_eval_ref(expression.EvalRef(expr, target_type, 0, 10), None)
+
+
+def test_eval_ref_source_failure_propagates_but_trial_returns_diagnostic(
+    parameters: ParameterContext, caplog: pytest.LogCaptureFixture
+) -> None:
+    from zcu_tools.gui.session import expression
+    from zcu_tools.gui.session.predictor_control import PredictorControlFacet
+    from zcu_tools.gui.session.predictor_trial import PredictorTrial
+    from zcu_tools.gui.session.services.predictor import PredictorService
+
+    failure = OSError("alias source offline")
+    capture = parameters.bind_aliases(
+        (AliasRow("qubit", "Q1"),), {}, alias_error=failure
+    )
+    ref = expression.EvalRef("$qubit.rate", float, 0, 10000)
+    with pytest.raises(OSError, match="alias source offline") as raised:
+        expression.resolve_eval_ref(ref, capture)
+    assert raised.value is failure
+    trial = PredictorTrial(PredictorControlFacet(PredictorService()))
+    resolved = trial.resolve_calibration_frequency_mhz(ref, lambda: capture)
+    assert resolved.frequency_mhz is None
+    assert resolved.error == "alias source offline"
+    assert not caplog.records
 
 
 def test_no_parameters_allows_math_but_not_parameter_paths() -> None:

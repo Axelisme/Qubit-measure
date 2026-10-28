@@ -19,7 +19,7 @@ class SavedPoint(BaseModel):
     """A persisted destination within an entry.
 
     kind is the JSON discriminator, always saved_point.
-    entry_id is the UUID string supplied by ResultEntry.entry_id.
+    entry_name is ResultEntry.result_path.name within the currently opened result root.
     point is the entry owner's validated single-segment point label.
     This value carries no selection generation or writable handle. Commands
     validate entry membership and the label through the owning ResultEntry.
@@ -28,7 +28,7 @@ class SavedPoint(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid", strict=True)
 
     kind: Literal["saved_point"] = "saved_point"
-    entry_id: str
+    entry_name: str
     point: str
 
 
@@ -114,13 +114,12 @@ class PointFileRevision:
 
 @dataclass(frozen=True)
 class EntryInfo:
-    """Opened entry UUID, directory name, and absolute owner-supplied roots.
+    """Opened entry directory name and absolute owner-supplied roots.
 
-    entry_id is ResultEntry.entry_id. name is its single-segment directory name.
+    name is its single-segment directory name in the configured Result root.
     result_path and database_path are the exact paths owned by this entry.
     """
 
-    entry_id: str
     name: str
     result_path: Path
     database_path: Path
@@ -187,18 +186,20 @@ class PointCreateRequest:
 class PointBindingError(RuntimeError):
     """A point was created but could not be installed; never delete or retry it.
 
-    entry_id and label identify the retained destination. The raising service
-    chains the installation cause; Open/Use is recovery, not repeating New.
+    entry_name identifies the entry within the current result root; point is
+    the retained label. created is always True. The raising service chains the
+    installation cause; Open/Use is recovery, not repeating New.
     """
 
-    entry_id: str
-    label: str
+    entry_name: str
+    point: str
+    created: Literal[True] = True
 
-    def __init__(self, *, entry_id: str, label: str) -> None:
-        self.entry_id = entry_id
-        self.label = label
+    def __init__(self, *, entry_name: str, point: str) -> None:
+        self.entry_name = entry_name
+        self.point = point
         super().__init__(
-            f"Point {label!r} in entry {entry_id!r} was created but could not be "
+            f"Point {point!r} in entry {entry_name!r} was created but could not be "
             "installed. Use the same point to recover; do not repeat New."
         )
 

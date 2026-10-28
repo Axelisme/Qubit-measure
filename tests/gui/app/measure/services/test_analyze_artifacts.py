@@ -77,7 +77,9 @@ def _flux_parameters(original: ParameterContext | None = None) -> ParameterConte
         parameters = parameter_capture({"Q1": qubit})
     else:
         parameters = ParameterContext(
-            point=original.document().model_copy(update={"components": {"Q1": qubit}}),
+            point=original.whole_document().model_copy(
+                update={"components": {"Q1": qubit}}
+            ),
             library=original.library,
             target=original.target,
             roles=None,

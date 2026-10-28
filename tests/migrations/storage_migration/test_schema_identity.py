@@ -75,7 +75,7 @@ def test_unconvertible_cfg_version_is_pending_and_can_be_corrected(
         validate_cfg=validate_cfg,
         validate_native=check_native,
     )
-    assert result.entry_id == report.entry_id
+    assert result.migration_id == report.migration_id
     assert len(result.converted_files) == len(result.moved_labber_files) == 1
     stored = read_migrated(result.converted_files[0].destination)
     assert stored.cfg.values == document["entries"][0]["cfg"]["values"]

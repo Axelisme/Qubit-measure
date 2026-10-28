@@ -7,7 +7,6 @@ from typing import Annotated, ClassVar
 import numpy as np
 from matplotlib.axes import Axes
 from numpy.typing import NDArray
-from pydantic import field_serializer
 from zcu_tools.analysis.fitting.multi_decay import (
     calc_lambdas,
     fit_dual_transition_rates,
@@ -36,8 +35,10 @@ from zcu_tools.program.v2 import (
     SweepCfg,
     sweep2param,
 )
+from zcu_tools.program.v2.modules.readout import classification_parameters
 
 from zcu_lab.v2.support import LinePlot, live_line
+from zcu_lab.v2.support.singleshot.util import readout_confusion_matrix
 
 
 def _default_initial_states() -> NDArray[np.int64]:
@@ -80,18 +81,10 @@ class T1Cfg(ConfigBase):
     pi_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Pi Pulse")]
     readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
     length: Annotated[SweepCfg | list[float], FieldMeta(label="Delay", unit="us")]
-    g_center: Annotated[complex, FieldMeta(label="Ground center")]
-    e_center: Annotated[complex, FieldMeta(label="Excited center")]
-    radius: Annotated[float, FieldMeta(label="Classification radius")]
-
-    @field_serializer("g_center", "e_center")
-    def serialize_center(self, value: complex) -> str:
-        return str(value)
 
 
 @dataclass(frozen=True)
 class T1AnalyzeOptions:
-    confusion_matrix: NDArray[np.float64] | None = None
     skip: int = 0
 
 
@@ -149,13 +142,16 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
         """Measure relaxation from both the unflipped and pi-prepared states.
 
         Reset, apply I or pi, wait a variable delay, then classify readout shots
-        using cfg's IQ centers and radius. Return quantized delays in us and
-        G/E populations with shape (delay, initial state, population state).
+        using each ADC's corresponding readout classifier in raw normalized ADC
+        coordinates. Analyze only the first readout result. Return quantized
+        delays in us and G/E populations with shape
+        (delay, initial state, population state).
         Uniform sampling requires a SweepCfg; nonuniform sampling also accepts
         an explicit delay list and rejects collisions on the hardware time grid.
         """
         # 1. Prepare the delay axis on the hardware grid without changing cfg.
         cfg = deepcopy(cfg)
+        classification = classification_parameters(cfg.readout, require_other=True)
         soc, soccfg = context.soc, context.soccfg
         delay_table = None
         if cfg.uniform:
@@ -237,9 +233,7 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
             # 4. Classify shots and average rounds, preserving cancelled partial data.
             _ = builder.build_and_acquire(
                 raw2signal_fn=raw_population_signal,
-                g_center=cfg.g_center,
-                e_center=cfg.e_center,
-                ge_radius=cfg.radius,
+                classify=classification,
                 rounds=cfg.rounds,
             )
 
@@ -255,13 +249,16 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
         """Plot relaxation fits and T1/T1_b from both preparation populations.
 
         source supplies delay times in us and G/E populations. Skip the first
-        options.skip points, optionally correct readout with the supplied
+        options.skip points, optionally correct readout with the saved cfg classifier's
         confusion matrix, and fit the two traces together. Publish the fit in
         plots; fitting errors propagate.
         """
         # 1. Select delays and reconstruct Other before readout correction.
         result = source.result
-        skip, confusion_matrix = options.skip, options.confusion_matrix
+        skip = options.skip
+        confusion_matrix = readout_confusion_matrix(
+            None if source.cfg is None else source.cfg.readout
+        )
 
         lens, populations = result.lengths, result.signals
 

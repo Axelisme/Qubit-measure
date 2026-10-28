@@ -17,6 +17,7 @@ from zcu_tools.gui.session.context_types import LibraryChange
 from zcu_tools.mcp.measure.session import GuiRpcError
 from zcu_tools.resources.entry import ComponentSchema
 
+from tests.gui.app.measure._record_support import require_target
 from tests.gui.app.measure._templates import TEMPLATES
 from tests.resources.entry.fakes import register_fakes, registry_state, restore_registry
 
@@ -32,7 +33,9 @@ def library_client(qapp, tmp_path):
     )
     context = fx.ctrl.context_control
     context.set_waveform(
-        context.read_context().target, "Q1.waveforms.seed", ConstWaveformCfg(length=0.1)
+        require_target(context.read_context()),
+        "Q1.waveforms.seed",
+        ConstWaveformCfg(length=0.1),
     )
     fx.start()
     bridge, invoke = mcp_client(fx.service.port, tmp_path)
@@ -99,7 +102,7 @@ def test_ml_rename_then_delete_updates_only_the_selected_collection(
 def test_ml_rename_rejects_collision_without_overwriting(library_client):
     invoke, fx = library_client
     fx.ctrl.context_control.set_waveform(
-        fx.ctrl.context_control.read_context().target,
+        require_target(fx.ctrl.context_control.read_context()),
         "Q1.waveforms.occupied",
         ConstWaveformCfg(length=0.3),
     )

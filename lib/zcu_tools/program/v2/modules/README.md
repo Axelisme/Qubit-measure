@@ -47,6 +47,11 @@ Native conversion preserves the optional classifier on pulse readout and each
 mux tone. The shared cfg_model schemas define circle/linear calibration in
 normalized ADC coordinates without IQ-offset subtraction. Modules retain this
 data but do not apply classification during declaration or playback.
+`readout.classification_parameters(cfg, require_other=False)` returns detached
+calibration keyed by each pulse/tone ADC number. Authors pass that mapping to
+`acquire(classify=...)`. Missing calibration or circle radius raises an ADC-named
+error. `require_other=True` rejects two-state linear calibration. The helper does
+not read a program, registry or hardware.
 
 `PulseReadoutCfg` owns flat generator/ADC settings and a native waveform. One
 semantic `freq` configures both channels. `PulseReadout` declares and schedules

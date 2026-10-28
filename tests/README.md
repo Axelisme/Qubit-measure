@@ -1,6 +1,6 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-10-28（GUI driver 職責拆分與測試資源清理責任）
+**Last updated:** 2026-10-29（worker、marker、targeted 選集與 Numba cache 操作）
 
 **讀者：** framework-dev、agent。查閱測試的 owner、fixture、執行方式與搬遷驗收契約。
 
@@ -88,20 +88,51 @@ ticket 內只跑受影響選集。只有變更觸及 `lib/zcu_tools/simulate/` �
 `-m sim` 或包含 sim 的受影響選集跑模擬測試。`-m` 會取代預設過濾，
 若仍要排除慢測試，明寫 `-m "sim and not slow"`。
 
-少數 targeted tests 直接用 `-n 0`。跨多檔的 pytest 以 xdist 平行，worker 數依機器核心數決定：
+### 怎麼跑比較快
+
+先用改動的 owning module 找既有測試檔，再依受影響的公開契約補上 caller 或整合選集。
+單一案例用完整 nodeid，檔內一組情境可用路徑搭配 `-k`。不要為了快而省掉受影響的契約。
+少數 targeted tests 用 `-n 0`，避免啟動多個 worker 的 collection 成本。
+跨多檔先用 `-n 4 --dist=worksteal`，不要直接按核心數選 `-n auto`。
 
 ```bash
-uv run --directory <worktree> --no-sync -- pytest <affected-paths> -n auto
+# 少量案例，沿用預設 marker。
+uv run --directory <worktree> --no-sync -- pytest <test-file>::<test-name> -n 0
+# 跨檔受影響選集，沿用預設 marker。
+uv run --directory <worktree> --no-sync -- \
+  pytest <affected-paths> -n 4 --dist=worksteal --durations=25
+# 需要驗證 slow 案例時，明確取代預設 marker。
+uv run --directory <worktree> --no-sync -- \
+  pytest <affected-paths> -n 4 --dist=worksteal -m "not sim" --durations=25
 ```
 
-task 進 land review 前才跑全樹驗證。依變更範圍選擇 marker expression，兩種都包含 slow：
+| 用途 | Marker expression | 是否含 slow |
+| --- | --- | --- |
+| 日常預設 | 不另傳 `-m`，即 `not slow and not sim` | 否 |
+| 受影響模擬案例 | `-m sim` | 是 |
+| 受影響模擬案例，明確排除 slow | `-m "sim and not slow"` | 否 |
+| 完整非模擬選集 | `-m "not sim"` | 是 |
+| 全部案例，包含模擬 | `-m ""` | 是 |
+
+完整效能對照用 `not sim` 與 `sim` 兩個互斥選集，不能把 `not sim` 與空 marker 的時間相加。
+完整選集與 full Pyright 必須先取得共用 heavy queue 的明確 slot，再由 Orchestrator
+經 `.agent_state/tools/run-heavy.sh` 執行。該 runner 預設 4 workers，使用 headless GUI
+與數值函式庫 threads=1；不要為了量測另開未授權的 full 暖機。
+
+4 workers 的建議來自同機 8 核心的單次矩陣。非模擬在 2／4／6／8 workers 的 receipt wall
+為 458／306／321／322 s，模擬為 219／166／165／181 s。
+6 workers 沒有明確優於 4，4 也留下核心給其他 lane。
+背景負載與 cache 順序沒有完全控制，這不是穩定加速率或其他機器的最佳值。
+保留 `worksteal`，不改 pytest 的預設 marker。
+
+全樹驗證的時點依 task 適用流程安排，並先取得 heavy slot。依變更範圍選擇 marker expression，兩種都包含 slow：
 
 - 未改 `lib/zcu_tools/simulate/`，用 `-m "not sim"`。
 - 改到 `lib/zcu_tools/simulate/`，用 `-m ""`，包含所有測試。
 
 ```bash
 uv run --directory <worktree> --no-sync -- \
-  pytest -n auto --dist=worksteal -m "not sim" --durations=25 \
+  pytest -n 4 --dist=worksteal -m "not sim" --durations=25 \
   --failure-log <per-task 目錄>/pytest-failures.jsonl
 # 若改到 lib/zcu_tools/simulate/，將上面的 -m "not sim" 換成 -m ""。
 ```
@@ -188,6 +219,31 @@ Wall 包含 uv／Python／pytest 啟動與退出；兩邊的 instrumentation、J
 - 數值 fit 資料量變更須保留真擬合與驗證精度，不能降級驗證來換速度。
 
 既有成本診斷只用來找候選，不是加速證據；整個案例的秒數也不是可省時間的上界估計。
+
+### Numba cache 重用與冷跑
+
+Root `tests/conftest.py` 在載入第三方套件與產品模組前，把 `NUMBA_CACHE_DIR` 設為
+`<worktree>/.pytest-tmp-numba-cache`。同一 worktree 的 xdist workers 與後續 pytest
+呼叫共用這個持久目錄，process 結束與 pytest basetemp 清理都不會刪它。
+它在既有 `.pytest-tmp*` ignore 規則內，不 commit `.nbc`／`.nbi`。
+Root conftest 會覆寫外部傳入的 `NUMBA_CACHE_DIR`，不要用環境變數把測試導向其他 lane 的 cache。
+
+Simulator 在這個 parent 下加 `zcu-simulate-<digest>` namespace，digest 包含 simulator
+來源與 runtime 版本。來源或版本變動會選新 namespace；Numba 仍檢查 ABI 與 CPU key。
+細節見 [Numba machine-code cache](../lib/zcu_tools/simulate/README.md#numba-machine-code-cache)。
+不要跨 worktree 複製 machine code，也不要刪使用者或其他 lane 的 cache。
+
+日常重跑保留目錄即可。需要刻意冷編譯時，先確認該 worktree 沒有 pytest 正在使用 cache，
+再只刪該 worktree 的 parent：
+
+```bash
+rm -rf -- <worktree>/.pytest-tmp-numba-cache
+```
+
+這只清 Numba disk cache，不會重設 OS page cache 或 Python bytecode cache。
+效能比較須記錄首次執行前的目錄狀態、選集、worker 數、執行順序與觀測成本。
+後一次執行可能讀到前一次的 machine code，但不等於同 process 的暖 JIT，
+也不保證所有 signature 都已命中。單次 cold／warm 數字不要外推成穩定收益。
 
 ### GUI cache 隔離
 

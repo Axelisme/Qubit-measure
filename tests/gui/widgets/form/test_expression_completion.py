@@ -18,7 +18,11 @@ from zcu_tools.gui.session.parameters import ParameterContext, RoleBinding
 from zcu_tools.gui.widgets.form import FormEditor
 from zcu_tools.resources.context.library import LibrarySnapshot, ModuleLibraryDocument
 from zcu_tools.resources.entry import ComponentSchema
-from zcu_tools.resources.entry.schema import PointDocument, PointGeneral
+from zcu_tools.resources.entry.schema import (
+    ParameterContent,
+    PointDocument,
+    PointGeneral,
+)
 
 from tests.gui._user_input import ComponentDriver
 from tests.gui.widgets.form._clock import Clock
@@ -43,7 +47,7 @@ class CountingContext(ParameterContext):
         self.alias_reads += 1
         return super().resolved_aliases()
 
-    def document(self) -> PointDocument:
+    def document(self) -> PointDocument | ParameterContent:
         self.document_reads += 1
         return super().document()
 
@@ -61,7 +65,7 @@ def capture(alias: str = "qubit") -> CountingContext:
         library=LibrarySnapshot(
             ModuleLibraryDocument(format="zcu.module-library", format_version="2.0")
         ),
-        target=SavedPoint(entry_id="entry", point="working"),
+        target=SavedPoint(entry_name="entry", point="working"),
         roles=RoleBinding(
             None,
             {},

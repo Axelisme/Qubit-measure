@@ -31,7 +31,13 @@ from .axes_spec import (
     VariableSpec,
     VariableZSpec,
 )
-from .metadata import CfgSnapshot, RunMetadata, RunSnapshot, validate_cfg_snapshot
+from .metadata import (
+    CfgSnapshot,
+    RunMetadata,
+    RunMetadataContent,
+    RunSnapshot,
+    validate_cfg_snapshot,
+)
 from .records import RunRecord
 
 CfgT = TypeVar("CfgT", bound=ConfigBase)
@@ -89,7 +95,7 @@ class PreparedRunData:
         object.__setattr__(self, "cfg", deepcopy(self.cfg))
         object.__setattr__(self, "labber_metadata", deepcopy(self.labber_metadata))
 
-    def to_container(self, metadata: RunMetadata) -> Container:
+    def to_container(self, metadata: RunMetadata | RunMetadataContent) -> Container:
         """Return the prepared arrays with validated docs/cfg and docs/metadata.
 
         metadata is the saving record's historical evidence. Revalidate even
@@ -98,10 +104,7 @@ class PreparedRunData:
         docs/groups and container attributes remain intact.
         """
         validate_cfg_snapshot(self.cfg)
-        try:
-            metadata = _METADATA.validate_python(metadata)
-        except ValidationError as error:
-            raise ValueError(f"/docs/metadata: {error}") from error
+        metadata = metadata.project()
         docs = dict(self.container.docs)
         docs["cfg"] = _JSON.validate_python(_CFG.dump_python(self.cfg, mode="json"))
         docs["metadata"] = _JSON.validate_python(metadata.model_dump(mode="json"))
@@ -217,7 +220,8 @@ def load_run(
     """Load a record and its historical snapshot using an explicit declaration.
 
     This tuple retains the snapshot convenience contract. Both items come from
-    the same validated metadata document; invalid data/metadata/cfg raises a
+    the same metadata content. The complete snapshot validates that section;
+    unused metadata sections remain deferred. Invalid used fields/data/cfg raise a
     source-located ValueError. I/O errors propagate. Incompatible typed cfg emits
     CfgUnavailableWarning and leaves valid arrays/metadata available with cfg=None.
     """
@@ -274,6 +278,19 @@ def device_snapshot_from_container(
         raise ValueError(f"/docs/metadata/device_snapshot: {error}") from error
 
 
+def metadata_content_from_container(container: Container) -> RunMetadataContent:
+    """Detach metadata without validating fields not requested by the caller.
+
+    container has already been read; this performs no I/O or live lookup. Missing
+    metadata raises ValueError naming /docs/metadata. The returned owner view
+    validates each requested field; project() requests the complete schema.
+    """
+    try:
+        return RunMetadataContent(container.docs["metadata"])
+    except KeyError as error:
+        raise ValueError(f"/docs/metadata: {error}") from error
+
+
 def metadata_from_container(container: Container) -> RunMetadata:
     """Validate and return typed historical evidence from container.docs/metadata.
 
@@ -295,7 +312,8 @@ def read_run_metadata(path: Path) -> RunMetadata:
     """Read typed run metadata without loading arrays, cfg or the whole container.
 
     path is the exact major-3 container or legacy native major-2 source path.
-    Validate only its projected metadata doc using the same schema as full load.
+    This is an explicit complete projection using the full RunMetadata schema;
+    unlike restore_run it validates every metadata field.
     Invalid metadata/format raises path-qualified ValueError; missing documents
     raise path-qualified KeyError and I/O errors propagate. No full-load fallback,
     live capture, registry lookup or filename-derived identity is used.
@@ -314,15 +332,16 @@ def restore_run(
 ) -> RestoredRun[RunRecord[CfgT, ResultT]]:
     """Restore typed arrays/cfg/metadata from an already-read Container, without I/O.
 
-    Validate metadata/tag, required variables, units/axes/dtypes/shapes and cfg
-    envelope. Reconstruct and validate Result before concrete cfg validation;
+    Validate the experiment tag, required variables, units/axes/dtypes/shapes and
+    cfg envelope. Keep metadata as detached content, validating other fields only
+    when requested; project() explicitly validates the whole document. Reconstruct and validate Result before concrete cfg validation;
     grouped builders receive only loaded arrays. Extra variables/unknown cfg keys
     remain in the Container, not the typed record. Malformed docs or data raise
     ValueError/TypeError. An incompatible cfg type/schema/model yields cfg=None,
     cfg_issue and one CfgUnavailableWarning, retaining data and record.metadata.
     Inputs are not changed and no current settings substitute historical values.
     """
-    metadata = metadata_from_container(stored)
+    metadata = metadata_content_from_container(stored)
     if metadata.experiment != spec.tag:
         raise ValueError(
             f"/docs/metadata: experiment {metadata.experiment!r} does not match {spec.tag!r}"

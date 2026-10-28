@@ -24,7 +24,6 @@ from collections.abc import Callable, Generator, Iterator, Mapping
 from contextlib import contextmanager
 from copy import deepcopy
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from enum import Enum
 from hashlib import sha256
 from io import StringIO
@@ -466,7 +465,7 @@ class DocumentStore[T: BaseModel]:
     """
 
     # tolerated: Public kwargs/defaults independently select schema/version,
-    # validation/read-cleanup and lock policies.
+    # validation/read-normalization and lock policies.
     def __init__(  # noqa: PLR0913
         self,
         path: Path,
@@ -475,8 +474,8 @@ class DocumentStore[T: BaseModel]:
         format: str,
         supported_version: FormatVersion = _SUPPORTED_VERSION,
         validate: Callable[[T], None] | None = None,
-        check_dependencies: Callable[[T], bool] | None = None,
-        read_cleanup: Callable[[YamlMap, FormatVersion], tuple[str, ...]] | None = None,
+        read_normalize: Callable[[YamlMap, FormatVersion], YamlMap] | None = None,
+        read_validate: Callable[[YamlMap], None] | None = None,
         lock_path: Path | None = None,
         lock_timeout: float = 10.0,
     ) -> None:
@@ -493,14 +492,14 @@ class DocumentStore[T: BaseModel]:
         belongs to the caller's schema and is not interpreted here. validate
         receives each typed model after schema validation and may raise to reject it.
         Disk reads stat and hash the complete bytes. Unchanged content reuses a
-        detached validated snapshot without rerunning schema, validate or cleanup.
-        check_dependencies optionally receives a detached typed snapshot on each
-        unchanged-content read under the caller's existing lock. Return True
-        to reuse validation, or False to rerun cleanup and full validation using
-        the cached raw YAML. Exceptions propagate without publishing. The callback
-        should only check external dependency existence, not revalidate content.
-        Without it, external dependencies are rechecked only on changed content
-        or candidate validation during a nonempty edit.
+        detached validated snapshot without rerunning schema or validation.
+        read_normalize optionally transforms a detached disk mapping before model
+        validation. It never changes disk bytes and never runs on authored drafts.
+        strict refresh bypasses this transformation and the validation cache.
+        read_validate opts into detached content reads: initialization and ordinary
+        refresh validate the header and this structural callback, not model T.
+        content() exposes that content; snapshot() explicitly requests full T.
+        Edits and strict refresh always retain full model/validate checks.
 
         lock_path overrides the per-user runtime lock returned by lock_path_for(path).
         The default creates the runtime lock directory on demand.
@@ -513,25 +512,14 @@ class DocumentStore[T: BaseModel]:
         By default initialization reads without acquiring the lock, allowing
         creation under a caller-held lock. Writers must replace atomically.
 
-        read_cleanup opts into locked disk-read cleanup, including initialization.
-        After header validation it receives independent round-trip YAML nodes
-        and their admitted format version.
-        It must reject container errors, remove only invalid existing entries,
-        and return their names, or an empty tuple without changing the mapping.
-        The full candidate passes model/validate before any write. Nonempty
-        cleanup copies the original bytes to an exclusive timestamped sibling
-        backup, then atomically replaces the document and logs one warning.
-        Backup/replace failures propagate without publishing; a completed backup
-        survives replace failure. Cleanup never runs on new draft validation.
-        Later body/commit failure does not roll back completed read cleanup.
         """
         self._path = path.resolve()
         self._model = model
         self._format = format
         self._supported_version = supported_version
         self._validate = validate
-        self._check_dependencies = check_dependencies
-        self._read_cleanup = read_cleanup
+        self._read_normalize = read_normalize
+        self._read_validate = read_validate
         self._lock_path = (
             lock_path if lock_path is not None else lock_path_for(self._path)
         )
@@ -543,13 +531,11 @@ class DocumentStore[T: BaseModel]:
         self._deferred_until_unlock: list[DocumentChange] = []
         self._validated_key: tuple[int, bytes] | None = None
         self._validated_read: tuple[YamlMap, YamlMap, T] | None = None
-        if read_cleanup is None:
+        self._snapshot: T | None = None
+        if self._read_validate is None:
             self._document, _, self._snapshot, self._revision = self._read()
         else:
-            # FileLock would create a missing parent; opening is not creation.
-            self._path.parent.stat()
-            with self.locked():
-                self._document, _, self._snapshot, self._revision = self._read()
+            self._document, self._revision = self._read_content()
 
     @property
     def source_path(self) -> Path:
@@ -563,7 +549,38 @@ class DocumentStore[T: BaseModel]:
 
     def snapshot(self) -> T:
         """Return a deep independent copy in working units, without I/O or notice."""
+        if self._snapshot is None:
+            _, self._snapshot = self._model_snapshot(self._document)
         return self._snapshot.model_copy(deep=True)
+
+    def content(self) -> YamlMap:
+        """Copy installed working-unit content without I/O.
+
+        With read_validate configured, this preserves unconsumed fields without
+        constructing T. Otherwise it projects the validated snapshot, including
+        defaults and normalization. Edits still validate the complete model T.
+        """
+        if self._read_validate is not None:
+            return deepcopy(self._document)
+        return TypeAdapter(YamlMap).validate_python(
+            self.snapshot().model_dump(mode="python", serialize_as_any=True)
+        )
+
+    def _read_content(self) -> tuple[YamlMap, str]:
+        original = self._path.read_bytes()
+        yaml = YAML(typ="rt")
+        yaml.preserve_quotes = True
+        raw = yaml.load(original.decode("utf-8"))
+        document = TypeAdapter(YamlMap).validate_python(raw, strict=True)
+        validate_header(
+            document,
+            expected_format=self._format,
+            supported_version=self._supported_version,
+            source=self._path,
+        )
+        if self._read_validate is not None:
+            self._read_validate(deepcopy(document))
+        return document, sha256(original).hexdigest()
 
     @contextmanager
     def edit(self) -> Generator[T]:
@@ -707,41 +724,25 @@ class DocumentStore[T: BaseModel]:
             and key == self._validated_key
             and self._validated_read is not None
         ):
-            # Transactions and dependency callbacks must never own the cache.
-            if self._check_dependencies is None or self._check_dependencies(
-                self._validated_read[2].model_copy(deep=True)
-            ):
-                document, normalized, snapshot = deepcopy(self._validated_read)
-                return document, normalized, snapshot, key[1].hex()
-            raw = deepcopy(self._validated_read[0])
-        else:
-            yaml = YAML(typ="rt")
-            yaml.preserve_quotes = True
-            raw = yaml.load(original.decode("utf-8"))
+            document, normalized, snapshot = deepcopy(self._validated_read)
+            return document, normalized, snapshot, key[1].hex()
+        yaml = YAML(typ="rt")
+        yaml.preserve_quotes = True
+        raw = yaml.load(original.decode("utf-8"))
         # Validate the recursive shape without discarding ruamel's round-trip nodes.
         TypeAdapter(YamlMap).validate_python(raw, strict=True)
         # tolerated(cast): Strict validation cannot narrow raw; its return drops round-trip nodes.
         document = cast(YamlMap, raw)
-        removed: tuple[str, ...] = ()
-        if not strict and self._read_cleanup is not None:
+        candidate = document
+        if not strict and self._read_normalize is not None:
             version = validate_header(
                 document,
                 expected_format=self._format,
                 supported_version=self._supported_version,
                 source=self._path,
             )
-            document = deepcopy(document)
-            removed = self._read_cleanup(document, version)
-        normalized, snapshot = self._model_snapshot(document)
-        if removed:
-            backup = self._backup_original(original)
-            original = self._replace_document(document)
-            logging.getLogger(__name__).warning(
-                "%s: backed up to %s; removed entries: %s",
-                self._path,
-                backup,
-                ", ".join(removed),
-            )
+            candidate = self._read_normalize(deepcopy(document), version)
+        normalized, snapshot = self._model_snapshot(candidate)
         self._cache_read(original, (document, normalized, snapshot))
         return document, normalized, snapshot, sha256(original).hexdigest()
 
@@ -749,28 +750,6 @@ class DocumentStore[T: BaseModel]:
         """Retain isolated read results only after validation and any write succeed."""
         self._validated_read = deepcopy(values)
         self._validated_key = (len(content), sha256(content).digest())
-
-    def _backup_original(self, original: bytes) -> Path:
-        """Copy pre-cleanup bytes without overwriting any existing sibling."""
-        timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H%M%S%f")
-        attempt = 0
-        while True:
-            suffix = f".{attempt}" if attempt else ""
-            backup = self._path.with_name(
-                f"{self._path.stem}.{timestamp}{suffix}.bak{self._path.suffix}"
-            )
-            try:
-                stream = backup.open("xb")
-            except FileExistsError:
-                attempt += 1
-                continue
-            try:
-                with stream:
-                    stream.write(original)
-            except BaseException:
-                backup.unlink(missing_ok=True)
-                raise
-            return backup
 
     def _model_snapshot(self, document: YamlMap) -> tuple[YamlMap, T]:
         """Check the header, validate T and custom rules without converting values.
@@ -799,7 +778,7 @@ class DocumentStore[T: BaseModel]:
     def refresh(self, *, strict: bool = False) -> bool:
         """Reload/validate disk and publish its working-unit snapshot.
 
-        strict=True bypasses read cleanup and its cache: validate the complete
+        strict=True bypasses disk normalization and its cache: validate the complete
         external candidate without backup, repair or any document writes.
 
         Return True and notify if raw YAML differs, otherwise return False.
@@ -808,7 +787,11 @@ class DocumentStore[T: BaseModel]:
         observer failures are logged separately from successful publication.
         """
         with self.locked():
-            document, _, snapshot, revision = self._read(strict=strict)
+            snapshot: T | None = None
+            if self._read_validate is not None and not strict:
+                document, revision = self._read_content()
+            else:
+                document, _, snapshot, revision = self._read(strict=strict)
             paths = tuple(path for path, _ in _changes(self._document, document))
             self._snapshot = snapshot
             self._document = document

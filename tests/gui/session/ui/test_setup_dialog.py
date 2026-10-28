@@ -19,6 +19,7 @@ from qtpy.QtWidgets import (
     QListWidget,
     QPushButton,
 )
+from ruamel.yaml import YAML
 from zcu_tools.device.yoko import YOKOGS200Info
 from zcu_tools.gui.app.measure.controller import Controller
 from zcu_tools.gui.app.measure.registry import Registry
@@ -354,8 +355,11 @@ def test_unavailable_point_shows_reason_while_another_point_remains_selectable(
             PointCreateRequest(label, f"{label} description", CommandOrigin("gui"))
         )
     source = tmp_path / "result/remembered/points/bad/point.yaml"
-    with source.open("a") as stream:
-        stream.write("\nunexpected: opaque\n")
+    yaml = YAML(typ="safe")
+    document = yaml.load(source.read_text())
+    document["schema_version"] = 0
+    with source.open("w") as stream:
+        yaml.dump(document, stream)
     driver = ComponentDriver(dialog)
     evidence = Path(os.environ.get("SESSION_DIALOG_EVIDENCE", str(tmp_path)))
 
@@ -365,7 +369,7 @@ def test_unavailable_point_shows_reason_while_another_point_remains_selectable(
     assert [row.text for row in rows] == ["bad (unavailable)", "good"]
     assert "bad description" in rows[0].tooltip
     assert str(source) in rows[0].tooltip
-    assert "extra" in rows[0].tooltip
+    assert "schema_version" in rows[0].tooltip
     driver.select_list_row("good")
     driver.click(text="Switch to selected")
     driver.screenshot(evidence / "available-point-selected.png")
@@ -418,7 +422,7 @@ def test_working_point_create_clones_source_and_replaces_description(
     capture = controller.context_control.read_context()
     assert capture.target != source
     assert capture.value("general.ext.flux_value") == 0.27
-    assert capture.document().general.description == description
+    assert capture.whole_document().general.description == description
     assert {p.label: p.description for p in controller.setup_control.list_points()} == {
         "cloned": description,
         source_label: "source description",
@@ -436,8 +440,8 @@ def test_working_point_empty_create_uses_setup_seed(
     entry_button(dialog, "Create").click()
     capture = controller.context_control.read_context()
     assert not capture.lookup("general.ext.flux_value").present
-    assert capture.document().general.description == ""
-    assert capture.document().components == {}
+    assert capture.whole_document().general.description == ""
+    assert capture.whole_document().components == {}
     assert state.session_env.readiness == ContextReadiness.ACTIVE
 
 
@@ -858,7 +862,6 @@ def test_setup_success_replaces_error_foreground(qapp, window_palette):
         )
         ctrl.open_entry.side_effect = None
         ctrl.open_entry.return_value = EntryInfo(
-            "id",
             "entry",
             Path("/synthetic/result/entry"),
             Path("/synthetic/database/entry"),

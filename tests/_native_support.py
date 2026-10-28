@@ -1,7 +1,5 @@
 """Synthetic historical inputs shared by native datafile and experiment tests."""
 
-from uuid import UUID
-
 import h5py as h5
 import numpy as np
 from pydantic import TypeAdapter
@@ -44,7 +42,7 @@ def native_metadata(tag: str = "test/native") -> RunMetadata:
         finished_at="2026-10-06T01:00:02Z",
         completion="complete",
         snapshot=RunSnapshot(
-            entry_id=UUID("12345678-1234-5678-1234-567812345678"),
+            entry_name="entry",
             point="sweet",
             roles={"qubit": "Q1"},
         ),

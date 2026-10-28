@@ -14,20 +14,16 @@ from zcu_tools.plotting.plots import Plots
 
 from zcu_lab.v2.singleshot.t1.t1.core import T1AnalyzeOptions, T1Cfg, T1Exp, T1Result
 from zcu_lab.v2.singleshot.t1.t1.form import make_form
-from zcu_lab.v2.support.measure.singleshot_shared import read_confusion_matrix
 
 # Transition-rate analysis publishes figures without numeric writeback.
 SsT1RunResult: TypeAlias = RunRecord[T1Cfg, T1Result]
 
 
 def _analyze(req: AnalyzeRequest[SsT1RunResult, None], *, plots: Plots) -> None:
-    # ``confusion_matrix`` is the GE 3×3 readout-correction matrix from md.
+    # The core reads correction from the saved readout classifier.
     # ``skip`` is not exposed as a user knob — users can re-run with a shorter
     # sweep instead.
-    confusion = read_confusion_matrix(req.parameters)
-    T1Exp().analyze(
-        req.run_result, T1AnalyzeOptions(confusion_matrix=confusion), plots=plots
-    )
+    T1Exp().analyze(req.run_result, T1AnalyzeOptions(), plots=plots)
     return
 
 

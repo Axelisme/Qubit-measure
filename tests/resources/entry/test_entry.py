@@ -2,7 +2,6 @@
 
 from datetime import datetime, timezone
 from pathlib import Path
-from uuid import UUID
 
 import pytest
 from pydantic import ValidationError
@@ -24,19 +23,18 @@ def test_create_accepts_a_fixed_identity_without_changing_default_creation(
     )
     result, database = entry_roots
     identity = entry_api.EntryIdentity(
-        entry_id=UUID("00000000-0000-0000-0000-000000000042"),
         created_at=datetime(2026, 10, 20, 1, 2, 3, tzinfo=timezone.utc),
     )
     fixed = ResultEntry.create(
         "fixed", result_root=result, database_root=database, identity=identity
     )
     reopened = ResultEntry.open("fixed", result_root=result, database_root=database)
-    assert fixed.entry_id == reopened.entry_id == str(identity.entry_id)
+    assert fixed.result_path == reopened.result_path == result / "fixed"
     assert (
         entry_api.snapshot(reopened.setup).general.created_at == "2026-10-20T01:02:03Z"
     )
     fresh = ResultEntry.create("fresh", result_root=result, database_root=database)
-    assert fresh.entry_id != fixed.entry_id
+    assert fresh.result_path == result / "fresh"
     assert (
         datetime.fromisoformat(
             entry_api.snapshot(fresh.setup).general.created_at
@@ -55,11 +53,56 @@ def test_fixed_identity_rejects_naive_creation_time_before_creating_directories(
             result_root=entry_roots[0],
             database_root=entry_roots[1],
             identity=entry_api.EntryIdentity(
-                entry_id=UUID("00000000-0000-0000-0000-000000000042"),
                 created_at=datetime(2026, 10, 20),
             ),
         )
     assert all(not root.exists() for root in entry_roots)
+
+
+@pytest.mark.parametrize("legacy", [None, "not-a-uuid", {"malformed": [1]}])
+def test_legacy_entry_identity_is_ignored_until_explicit_write(
+    entry: ResultEntry, entry_roots: tuple[Path, Path], legacy: object
+) -> None:
+    point = entry.new_point("working")
+    yaml = YAML(typ="safe")
+    paths = [
+        entry.result_path / "setup.yaml",
+        entry.result_path / "points/working/point.yaml",
+    ]
+    for path in paths:
+        document = yaml.load(path.read_text(encoding="utf-8"))
+        document["general"].pop("entry_id", None)
+        document["general"]["ext"] = {"note": "kept"}
+        if legacy is not None:
+            document["general"]["entry_id"] = legacy
+        with path.open("w", encoding="utf-8") as stream:
+            yaml.dump(document, stream)
+    before = {path: path.read_bytes() for path in paths}
+
+    opened = ResultEntry.open(
+        "entry", result_root=entry_roots[0], database_root=entry_roots[1]
+    )
+    point = opened.use_point("working")
+    assert opened.setup.description is None
+    assert point.description is None
+    assert {path: path.read_bytes() for path in paths} == before
+
+    opened.setup.description = "template annotation"
+    point.description = "point annotation"
+    assert [
+        yaml.load(path.read_text(encoding="utf-8"))["general"] for path in paths
+    ] == [
+        {
+            "created_at": entry_api.snapshot(opened.setup).general.created_at,
+            "description": "template annotation",
+            "ext": {"note": "kept"},
+        },
+        {
+            "created_at": entry_api.snapshot(point).general.created_at,
+            "description": "point annotation",
+            "ext": {"note": "kept"},
+        },
+    ]
 
 
 def read_entry_files(path: Path) -> dict[Path, bytes]:
@@ -87,17 +130,14 @@ def test_setup_reads_use_memory_even_when_the_file_is_unavailable(
 ) -> None:
     results, _database = entry_roots
     entry.setup.description = "cached annotation"
-    original_id = entry.entry_id
     setup_path = results / "entry" / "setup.yaml"
     setup_path.unlink()
 
     assert entry.setup.description == "cached annotation"
-    assert entry.entry_id == original_id
     with pytest.raises(FileNotFoundError) as failure:
         entry.setup.refresh()
     assert failure.value.filename == str(setup_path)
     assert entry.setup.description == "cached annotation"
-    assert entry.entry_id == original_id
 
 
 def test_setup_edit_discards_body_failure_and_allows_the_next_transaction(
@@ -123,33 +163,37 @@ def test_setup_edit_discards_body_failure_and_allows_the_next_transaction(
     assert entry.setup.description == "next annotation"
 
 
-def test_entry_identity_is_read_only_and_refresh_cannot_publish_a_replacement(
-    entry_roots: tuple[Path, Path], entry: ResultEntry
+@pytest.mark.parametrize(
+    "legacy", ["00000000-0000-4000-8000-000000000001", {"obsolete": "identity"}]
+)
+def test_setup_refresh_publishes_replacement_content_ignoring_legacy_identity(
+    entry_roots: tuple[Path, Path], entry: ResultEntry, legacy: str | dict[str, str]
 ) -> None:
     results, _database = entry_roots
-    original_id = entry.entry_id
     entry.setup.description = "original annotation"
-    replacement_id = "00000000-0000-0000-0000-000000000001"
-    with pytest.raises(AttributeError, match="entry_id"):
-        # tolerated: Exercise runtime readonly rejection without an invalid typed assignment.
-        setattr(entry, "entry_id", replacement_id)  # noqa: B010
-
     setup_path = results / "entry" / "setup.yaml"
     yaml = YAML(typ="safe")
-    with setup_path.open(encoding="utf-8") as stream:
-        document = yaml.load(stream)
-    document["general"]["entry_id"] = replacement_id
+    document = yaml.load(setup_path.read_text(encoding="utf-8"))
+    document["general"]["entry_id"] = legacy
     document["general"]["description"] = "external annotation"
     with setup_path.open("w", encoding="utf-8") as stream:
         yaml.dump(document, stream)
     before = setup_path.read_bytes()
 
-    with pytest.raises(ValueError, match="entry_id is immutable"):
-        entry.setup.refresh()
+    entry.setup.refresh()
 
-    assert entry.entry_id == original_id
-    assert entry.setup.description == "original annotation"
+    assert entry.setup.description == "external annotation"
     assert setup_path.read_bytes() == before
+    seeded = entry.new_point("after-replacement")
+    assert seeded.description == "external annotation"
+    entry.setup.description = "allowed edit after replacement"
+    assert entry.setup.description == "allowed edit after replacement"
+    assert (
+        ResultEntry.open(
+            "entry", result_root=results, database_root=entry.database_path.parent
+        ).setup.description
+        == "allowed edit after replacement"
+    )
 
 
 def test_setup_description_uses_one_transaction_for_direct_and_edit_writes(
@@ -173,13 +217,12 @@ def test_setup_description_uses_one_transaction_for_direct_and_edit_writes(
 @pytest.mark.parametrize(
     ("field", "invalid"),
     [
-        ("entry_id", "not-a-uuid"),
         ("created_at", "yesterday"),
         ("created_at", "2026-10-04T06:00:00"),
         ("created_at", "2026-10-04T06:00:00+08:00"),
     ],
 )
-def test_open_validates_uuid_and_utc_created_at_before_publishing_entry(
+def test_created_at_is_validated_on_use_without_rewriting_setup(
     entry_roots: tuple[Path, Path],
     entry: ResultEntry,
     field: str,
@@ -195,13 +238,13 @@ def test_open_validates_uuid_and_utc_created_at_before_publishing_entry(
         yaml.dump(document, stream)
     before = setup_path.read_bytes()
 
+    opened = ResultEntry.open("entry", result_root=results, database_root=database)
     with pytest.raises(ValueError, match=field) as failure:
-        ResultEntry.open("entry", result_root=results, database_root=database)
+        entry_api.document_value(
+            entry_api.parameter_content(opened.setup), f"general.{field}"
+        )
 
-    assert str(setup_path.resolve()) in str(failure.value)
-    original = failure.value.__cause__
-    assert isinstance(original, ValidationError)
-    assert ("general", field) in [error["loc"] for error in original.errors()]
+    assert isinstance(failure.value.__cause__, ValidationError)
     assert setup_path.read_bytes() == before
 
 
@@ -232,8 +275,10 @@ def test_rename_refuses_existing_result_destination(
     assert failure.value.filename == str(destination)
     assert read_entry_files(results / "entry") == before_result
     assert (
-        ResultEntry.open("entry", result_root=results, database_root=database).entry_id
-        == entry.entry_id
+        ResultEntry.open(
+            "entry", result_root=results, database_root=database
+        ).result_path
+        == entry.result_path
     )
     if shape == "file":
         assert destination.read_bytes() == b"unrelated data"
@@ -274,7 +319,7 @@ def test_rename_moves_only_result_and_retargets_future_save_paths(
     assert read_entry_files(database) == database_before
     assert database_path.exists() == database_exists
     reopened = ResultEntry.open("renamed", result_root=results, database_root=database)
-    assert reopened.entry_id == entry.entry_id
+    assert reopened.result_path == results / "renamed"
     assert reopened.database_path == database / "renamed"
 
 
@@ -370,7 +415,7 @@ def test_open_accepts_setup_without_point_or_record_directories(
 
     opened = ResultEntry.open("entry", result_root=results, database_root=database)
 
-    assert opened.entry_id == entry.entry_id
+    assert opened.result_path == entry.result_path
     assert opened.list_points() == []
     assert ResultEntry.read_events_snapshot("entry", result_root=results) == ()
     assert read_entry_files(entry.result_path) == before
@@ -390,7 +435,7 @@ def test_open_reads_existing_identity_without_rewriting_setup(tmp_path: Path) ->
         "plain (label)", result_root=results, database_root=database
     )
 
-    assert reopened.entry_id == entry.entry_id
+    assert reopened.result_path == entry.result_path
     assert setup_path.read_bytes() == before
 
 
@@ -434,9 +479,9 @@ def test_entry_ignores_database_filesystem(
         original = ResultEntry.create(
             "entry", result_root=results, database_root=database.parent / "unused-db"
         )
-        expected_id = original.entry_id
+        expected_path = original.result_path
     else:
-        expected_id = None
+        expected_path = None
     destination = database / "entry"
     marker = prepare_database_destination(database, database_state)
     before = marker.read_bytes() if marker is not None else None
@@ -449,8 +494,8 @@ def test_entry_ignores_database_filesystem(
 
     assert opened.result_path == results / "entry"
     assert opened.database_path == destination
-    if expected_id is not None:
-        assert opened.entry_id == expected_id
+    if expected_path is not None:
+        assert opened.result_path == expected_path
     if marker is not None:
         assert marker.read_bytes() == before
     if database_state == "absent":
@@ -461,14 +506,13 @@ def test_entry_ignores_database_filesystem(
         assert destination.readlink() == database.parent / "external"
 
 
-def test_create_builds_new_format_entry_with_uuid_and_utc_identity(
+def test_create_builds_new_format_entry_with_utc_creation_time(
     tmp_path: Path,
 ) -> None:
     results = tmp_path / "results"
     database = tmp_path / "Database"
     entry = ResultEntry.create("Q12_2D[3]", result_root=results, database_root=database)
 
-    assert UUID(entry.entry_id).version == 4
     result_path = results / "Q12_2D[3]"
     assert (result_path / "records").is_dir()
     assert (result_path / "points").is_dir()
@@ -479,7 +523,7 @@ def test_create_builds_new_format_entry_with_uuid_and_utc_identity(
     assert document["format"] == "zcu.parameter-container"
     assert document["format_version"] == "2.0"
     assert document["metadata"] == {}
-    assert document["general"]["entry_id"] == entry.entry_id
+
     assert datetime.fromisoformat(
         document["general"]["created_at"]
     ).utcoffset() == timezone.utc.utcoffset(None)

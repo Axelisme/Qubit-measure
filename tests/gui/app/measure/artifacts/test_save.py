@@ -176,6 +176,27 @@ def test_default_stems_keep_distinct_runs_with_the_same_id_tail_separate(
     assert metadata_from_container(load(paths[1][0])).run_id == run_ids[1]
 
 
+def test_save_appends_saved_event_after_transplanted_foreign_history(
+    native_session: NativeSaveSession, tmp_path: Path
+) -> None:
+    session = native_session
+    foreign = ResultEntry.create(
+        "foreign", result_root=tmp_path / "source", database_root=tmp_path / "db"
+    )
+    foreign.record_analysis("prior-fit", run_ids=[], summary={})
+    history = foreign.ledger.events()
+    session.entry.ledger.source_path.write_bytes(
+        foreign.ledger.source_path.read_bytes()
+    )
+
+    report = session.save()
+
+    assert all(output.status == "saved" for output in report.outputs)
+    saved = session.entry.ledger.events()[-1]
+    assert saved.kind == "saved"
+    assert session.entry.ledger.events() == (*history, saved)
+
+
 def test_data_save_writes_both_formats_and_resave_keeps_run_identity(
     native_session: NativeSaveSession,
 ) -> None:
@@ -558,23 +579,19 @@ def test_save_uses_tab_storage_after_live_entry_switch(
     assert other.ledger.events() == ()
 
 
-@pytest.mark.parametrize("missing", ["metadata", "storage"])
 def test_missing_native_evidence_rejects_before_operation_or_files(
-    native_session: NativeSaveSession, missing: str
+    native_session: NativeSaveSession,
 ) -> None:
     session = native_session
-    if missing == "metadata":
-        commit_run(
-            session.state,
-            "tab",
-            RunPaneState(
-                result=replace(
-                    require_record(session.state.get_tab("tab").run), metadata=None
-                )
-            ),
-        )
-    else:
-        session.state.get_tab("tab").run.storage = None
+    commit_run(
+        session.state,
+        "tab",
+        RunPaneState(
+            result=replace(
+                require_record(session.state.get_tab("tab").run), metadata=None
+            )
+        ),
+    )
     with pytest.raises(FailedPreconditionError):
         session.control.save_data("tab", origin=GUI_ORIGIN)
     assert not session.state.is_tab_busy("tab")
@@ -771,24 +788,20 @@ def test_invalid_artifact_selection_preserves_annotation_and_admission(
     assert not (session.entry.database_path / "runs").exists()
 
 
-@pytest.mark.parametrize("missing", ["metadata", "storage"])
 @pytest.mark.parametrize("batch", [False, True])
 def test_missing_evidence_rejects_comment_before_operation(
-    native_session: NativeSaveSession, missing: str, batch: bool
+    native_session: NativeSaveSession, batch: bool
 ) -> None:
     session = native_session
-    if missing == "metadata":
-        commit_run(
-            session.state,
-            "tab",
-            RunPaneState(
-                result=replace(
-                    require_record(session.state.get_tab("tab").run), metadata=None
-                )
-            ),
-        )
-    else:
-        session.state.get_tab("tab").run.storage = None
+    commit_run(
+        session.state,
+        "tab",
+        RunPaneState(
+            result=replace(
+                require_record(session.state.get_tab("tab").run), metadata=None
+            )
+        ),
+    )
     command = session.control.save_artifacts if batch else session.control.save_data
     with pytest.raises(FailedPreconditionError):
         command("tab", comment="rejected", origin=GUI_ORIGIN)

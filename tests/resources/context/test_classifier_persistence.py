@@ -16,28 +16,19 @@ from zcu_tools.resources.context import ModuleLibrary
 
 
 @pytest.fixture
-def files(tmp_path: Path) -> tuple[Path, Path]:
-    """Create empty library YAML and return its path plus an unused ledger path."""
+def library_path(tmp_path: Path) -> Path:
+    """Create empty library YAML and return its path."""
     path = tmp_path / "module_cfg.yaml"
     path.write_text(
         "format: zcu.module-library\nformat_version: '2.0'\n", encoding="utf-8"
     )
-    records = tmp_path / "records"
-    records.mkdir()
-    return path, records / "ledger.jsonl"
-
-
-def open_library(files: tuple[Path, Path]) -> ModuleLibrary:
-    """Open the fixture library with a fixed entry identity and no asset provider."""
-    return ModuleLibrary(
-        files[0], ledger=files[1], entry_id="78fa0941-f9ce-49d4-9665-4eb9302b8162"
-    )
+    return path
 
 
 @pytest.mark.parametrize("family", ["pulse", "mux"])
 @pytest.mark.parametrize("mode", ["circle", "linear"])
 def test_readout_classifier_survives_library_edit_and_reopen(
-    files: tuple[Path, Path], family: str, mode: str
+    library_path: Path, family: str, mode: str
 ) -> None:
     classifier = (
         CircleClassifier(
@@ -81,17 +72,17 @@ def test_readout_classifier_survives_library_edit_and_reopen(
             }
         )
     )
-    library = open_library(files)
+    library = ModuleLibrary(library_path)
     with library.edit() as draft:
         draft.set_module("Q1.readout.calibrated", spec)
 
-    reopened = open_library(files).snapshot()
+    reopened = ModuleLibrary(library_path).snapshot()
     assert reopened.module_spec("Q1.readout.calibrated") == spec
     assert (
         reopened.entry_value("Q1.readout.calibrated", kind="module")
         == spec.model_dump()
     )
-    saved = YAML(typ="safe").load(files[0].read_text())
+    saved = YAML(typ="safe").load(library_path.read_text())
     saved_readout = saved["components"]["Q1"]["readout"]["calibrated"]
     saved_classifier = (
         saved_readout["classifier"]
@@ -102,7 +93,7 @@ def test_readout_classifier_survives_library_edit_and_reopen(
 
 
 def test_uncalibrated_library_preserves_old_readout_fields_on_unrelated_edit(
-    files: tuple[Path, Path],
+    library_path: Path,
 ) -> None:
     old_readouts = {
         "pulse": {
@@ -125,7 +116,7 @@ def test_uncalibrated_library_preserves_old_readout_fields_on_unrelated_edit(
             "tones": [{"freq": 6020.0, "gain": 0.1, "ro_ch": 3}],
         },
     }
-    files[0].write_text(
+    library_path.write_text(
         json.dumps(
             {
                 "format": "zcu.module-library",
@@ -135,9 +126,9 @@ def test_uncalibrated_library_preserves_old_readout_fields_on_unrelated_edit(
         ),
         encoding="utf-8",
     )
-    original = files[0].read_bytes()
-    library = open_library(files)
-    assert files[0].read_bytes() == original
+    original = library_path.read_bytes()
+    library = ModuleLibrary(library_path)
+    assert library_path.read_bytes() == original
     pulse_spec = library.snapshot().module_spec("Q1.readout.pulse")
     mux_spec = library.snapshot().module_spec("Q1.readout.mux")
     assert isinstance(pulse_spec, PulseReadoutSpec)
@@ -151,5 +142,5 @@ def test_uncalibrated_library_preserves_old_readout_fields_on_unrelated_edit(
             PulseSpec(ch=0, nqz=1, freq=100.0, gain=0.25, waveform="Q1.waveforms.base"),
         )
 
-    saved = YAML(typ="safe").load(files[0].read_text())
+    saved = YAML(typ="safe").load(library_path.read_text())
     assert saved["components"]["Q1"]["readout"] == old_readouts

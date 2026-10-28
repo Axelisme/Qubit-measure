@@ -6,18 +6,15 @@ from unittest.mock import patch
 from uuid import uuid4
 
 import pytest
-from filelock import FileLock, Timeout
 from pydantic import TypeAdapter
 from zcu_tools.resources.entry import AnalyzedPayload, LedgerEvent, RecordsLedger
-from zcu_tools.resources.file_lock import lock_path_for
 
 
-def _event(entry_id: str) -> LedgerEvent:
+def _event() -> LedgerEvent:
     return LedgerEvent(
         id=str(uuid4()),
         kind="analyzed",
         at="2026-10-06T02:00:00Z",
-        entry_id=entry_id,
         origin="notebook",
         payload=AnalyzedPayload(
             analysis_kind="fit", run_ids=(), summary={"rate": 5300.0}
@@ -35,11 +32,10 @@ def _write(path: Path, events: tuple[LedgerEvent, ...]) -> None:
 def indexed_ledger(
     tmp_path: Path,
 ) -> tuple[RecordsLedger, Path, tuple[LedgerEvent, ...]]:
-    entry_id = str(uuid4())
-    history = tuple(_event(entry_id) for _ in range(30))
+    history = tuple(_event() for _ in range(30))
     path = tmp_path / "ledger.jsonl"
     _write(path, history)
-    ledger = RecordsLedger(tmp_path, entry_id=entry_id, lock_timeout=0.0)
+    ledger = RecordsLedger(tmp_path, lock_timeout=0.0)
     assert ledger.events() == history
     return ledger, path, history
 
@@ -67,13 +63,13 @@ def test_changed_history_rebuilds_index(
         _write(path, expected)
     elif change == "replace":
         # Preserve prefix and previous last line, so only file identity changes.
-        expected = (*history, _event(history[0].entry_id))
+        expected = (*history, _event())
         replacement = path.with_suffix(".replacement")
         _write(replacement, expected)
         replacement.replace(path)
     else:
         if change != "same_size":
-            expected = (*expected, _event(history[0].entry_id))
+            expected = (*expected, _event())
         _write(path, expected)
         if change == "same_size":
             assert path.stat().st_size == before.st_size
@@ -90,7 +86,8 @@ def test_changed_history_rebuilds_index(
         "changed history requires full validation"
     )
     if change == "truncate":
-        assert ledger.find_many((history[-1].id,)) == {history[-1].id: None}
+        with pytest.raises(KeyError):
+            ledger.get(history[-1].id)
     else:
         expected_last = expected[-1] if change == "same_size" else expected[-2]
         assert ledger.get(history[-1].id).event == expected_last
@@ -103,7 +100,7 @@ def test_reload_validates_middle_rewrite_despite_unchanged_append_boundaries(
     data = path.read_bytes()
     middle = history[15].model_dump_json().encode()
     rewritten = middle.replace(b'"rate":5300.0', b'"rate":5400.0')
-    added = _event(history[0].entry_id)
+    added = _event()
     path.write_bytes(
         data.replace(middle, rewritten) + added.model_dump_json().encode() + b"\n"
     )
@@ -128,12 +125,13 @@ def test_removed_ledger_discards_index_and_recreation_can_reuse_ids(
     ledger, path, history = indexed_ledger
     path.unlink()
     assert ledger.events() == ()
-    assert ledger.find_many((history[0].id,)) == {history[0].id: None}
+    with pytest.raises(KeyError):
+        ledger.get(history[0].id)
     ledger.append(history[0])
     assert ledger.events() == history[:1]
 
 
-@pytest.mark.parametrize("lookup", ["events", "get", "get_many", "find_many"])
+@pytest.mark.parametrize("lookup", ["events", "get", "get_many"])
 def test_returned_payload_mutation_does_not_change_later_reads(
     indexed_ledger: tuple[RecordsLedger, Path, tuple[LedgerEvent, ...]], lookup: str
 ) -> None:
@@ -143,12 +141,8 @@ def test_returned_payload_mutation_does_not_change_later_reads(
         found = ledger.events()[0]
     elif lookup == "get":
         found = ledger.get(event_id).event
-    elif lookup == "get_many":
-        found = ledger.get_many((event_id,))[0].event
     else:
-        item = ledger.find_many((event_id,))[event_id]
-        assert item is not None
-        found = item.event
+        found = ledger.get_many((event_id,))[0].event
     payload = found.payload
     assert isinstance(payload, AnalyzedPayload)
     payload.summary["rate"] = 9999.0
@@ -159,7 +153,7 @@ def test_valid_prefix_of_failed_tail_is_not_published_or_skipped(
     indexed_ledger: tuple[RecordsLedger, Path, tuple[LedgerEvent, ...]],
 ) -> None:
     ledger, path, history = indexed_ledger
-    added = _event(history[0].entry_id)
+    added = _event()
     with path.open("a", encoding="utf-8") as stream:
         stream.write(added.model_dump_json() + "\n{broken}\n")
     for _ in range(2):
@@ -167,77 +161,3 @@ def test_valid_prefix_of_failed_tail_is_not_published_or_skipped(
             ledger.get(added.id)
     _write(path, (*history, added))
     assert ledger.events() == (*history, added)
-
-
-def test_dependencies_stat_unique_attachments_without_reading_json(
-    indexed_ledger: tuple[RecordsLedger, Path, tuple[LedgerEvent, ...]],
-) -> None:
-    ledger, path, history = indexed_ledger
-    event = _event(history[0].entry_id)
-    ledger.append(event, record={"fit": [1]})
-    ledger.get(event.id)
-    attachment = path.parent / f"{event.id}.json"
-    with (
-        patch.object(
-            TypeAdapter,
-            "validate_json",
-            autospec=True,
-            side_effect=TypeAdapter.validate_json,
-        ) as parsed,
-        patch.object(Path, "open", autospec=True, side_effect=Path.open) as opened,
-        patch.object(Path, "stat", autospec=True, side_effect=Path.stat) as stated,
-    ):
-        assert ledger.dependencies_exist((event.id, event.id, history[0].id))
-    assert parsed.call_count == 0
-    assert not any(call.args[0] == attachment for call in opened.call_args_list)
-    assert sum(call.args[0] == attachment for call in stated.call_args_list) == 1
-    attachment.write_text("{not json}", encoding="utf-8")
-    assert ledger.dependencies_exist((event.id,))
-    with pytest.raises(ValueError, match="invalid record"):
-        ledger.get(event.id)
-    attachment.unlink()
-    assert not ledger.dependencies_exist((event.id,))
-    assert not ledger.dependencies_exist(("absent",))
-
-
-def test_empty_dependency_check_does_not_access_filesystem(
-    indexed_ledger: tuple[RecordsLedger, Path, tuple[LedgerEvent, ...]],
-) -> None:
-    ledger, _path, _history = indexed_ledger
-    with (
-        patch.object(Path, "open", side_effect=AssertionError("unexpected open")),
-        patch.object(Path, "stat", side_effect=AssertionError("unexpected stat")),
-    ):
-        assert ledger.dependencies_exist(())
-
-
-@pytest.mark.parametrize("failure", ["schema", "stat", "lock"])
-def test_dependency_check_propagates_nonmissing_failures(
-    indexed_ledger: tuple[RecordsLedger, Path, tuple[LedgerEvent, ...]], failure: str
-) -> None:
-    ledger, path, history = indexed_ledger
-    event = _event(history[0].entry_id)
-    ledger.append(event, record={"fit": 1})
-    ledger.get(event.id)
-    if failure == "schema":
-        with path.open("a", encoding="utf-8") as stream:
-            stream.write("{}\n")
-        with pytest.raises(ValueError, match="missing format"):
-            ledger.dependencies_exist((event.id,))
-    elif failure == "lock":
-        with FileLock(str(lock_path_for(path))), pytest.raises(Timeout):
-            ledger.dependencies_exist((event.id,))
-    else:
-        attachment = path.parent / f"{event.id}.json"
-        original_stat = Path.stat
-
-        def fail_stat(source: Path, *, follow_symlinks: bool = True) -> os.stat_result:
-            if source == attachment:
-                raise PermissionError("injected attachment stat")
-            return original_stat(source, follow_symlinks=follow_symlinks)
-
-        with (
-            patch.object(Path, "stat", autospec=True, side_effect=fail_stat),
-            pytest.raises(PermissionError, match="injected attachment stat"),
-        ):
-            ledger.dependencies_exist((event.id,))

@@ -36,13 +36,14 @@ from zcu_tools.gui.form import (
 )
 from zcu_tools.program.v2.sweep import SweepCfg
 
+from ._converters import model_converters
 from ._display import field_display
 from ._modules import (
     ModuleField,
     editable_spec,
     module_specs,
 )
-from ._seeds import persistent_input
+from ._seeds import disabled_model_defaults, persistent_input
 from ._types import annotated_type, branch_metadata, union_type
 from ._types import members as _members
 from .device_name import device_suggestions
@@ -245,7 +246,7 @@ def _section_converters(
     _cls: type[FormModel],
     env: FormEnv,
 ) -> Mapping[tuple[str | int, ...], InputConverter]:
-    converters: dict[tuple[str | int, ...], InputConverter] = {
+    converters = model_converters(_cls, env) | {
         (name,): field.converter(env) for name, field in fields.items()
     }
     if issubclass(core, FormModel):
@@ -532,13 +533,16 @@ class Section:
                 }
             else:
                 data[name] = _seed_json(node)
-        # Only core-disabled modules get an explicit selection. Existing initial
-        # values win, while nullable fields without a None default stay missing.
-        data = {
-            name: None
-            for name in self.modules
-            if self.core.model_fields[name].default is None
-        } | data
+        # Disabled selectors need explicit null; existing authored values win.
+        data = (
+            disabled_model_defaults(self.model)
+            | {
+                name: None
+                for name in self.modules
+                if self.core.model_fields[name].default is None
+            }
+            | data
+        )
         data.update(self._required_children(data, env))
         return data
 

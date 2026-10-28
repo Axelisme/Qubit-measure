@@ -1,8 +1,9 @@
 """Project result queries preserve historical facts and restrict file access."""
 
+import json
 from datetime import datetime, timezone
 from pathlib import Path
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 import pytest
 from zcu_tools.datafile import Container, ContainerAttrs, JsonObject, save
@@ -10,6 +11,7 @@ from zcu_tools.experiment.metadata import RunMetadata, RunSnapshot, SoftwareProv
 from zcu_tools.gui.app.measure.services.results_index import scan_results
 from zcu_tools.resources.entry import (
     AcquiredPayload,
+    AnalyzedPayload,
     LedgerEvent,
     ResultEntry,
     SavedOutput,
@@ -53,7 +55,7 @@ def _native(run: Path, entry: ResultEntry, run_id: str, point: str) -> None:
         finished_at=None,
         completion="unknown",
         snapshot=RunSnapshot(
-            entry_id=UUID(entry.entry_id), point=point, roles={"qubit": "Q1"}
+            entry_name=entry.result_path.name, point=point, roles={"qubit": "Q1"}
         ),
         provenance=SoftwareProvenance(
             software_versions={},
@@ -79,7 +81,6 @@ def _acquired(entry: ResultEntry, run_id: str, point: str) -> None:
     entry.ledger.append(
         LedgerEvent(
             id=str(uuid4()),
-            entry_id=entry.entry_id,
             kind="acquired",
             at=_AT,
             origin="notebook",
@@ -97,7 +98,6 @@ def _saved_figure(entry: ResultEntry, run: Path, run_id: str) -> None:
     entry.ledger.append(
         LedgerEvent(
             id=str(uuid4()),
-            entry_id=entry.entry_id,
             kind="saved",
             at=_AT,
             origin="notebook",
@@ -292,6 +292,91 @@ def test_custom_stem_figure_only_identity_uses_exact_saved_path(
         None,
         None,
     )
+
+
+@pytest.mark.parametrize(
+    ("kind", "field", "invalid"),
+    [
+        ("analyzed", "summary", "unused bad summary"),
+        ("acquired", "origin", "unknown frontend"),
+        ("acquired", "record", "../../outside.json"),
+        ("saved", "labber_path", {"unused": True}),
+        ("saved", "outputs.0.artifact", {"unused": True}),
+    ],
+)
+def test_index_ignores_unused_ledger_fields_without_writes(
+    project: Path, kind: str, field: str, invalid: object
+) -> None:
+    entry = ResultEntry.open(
+        "alpha", result_root=project / "result", database_root=project / "Database"
+    )
+    entry.ledger.append(
+        LedgerEvent(
+            id=str(uuid4()),
+            kind="analyzed",
+            at=_AT,
+            origin="notebook",
+            payload=AnalyzedPayload(
+                analysis_kind="unrelated", run_ids=(_RUN1,), summary={}
+            ),
+        )
+    )
+    ledger = entry.result_path / "records/ledger.jsonl"
+    rows = [json.loads(line) for line in ledger.read_text().splitlines()]
+    row = next(row for row in rows if row["kind"] == kind)
+    target = row if field in ("origin", "record") else row["payload"]
+    parts = field.split(".")
+    for part in parts[:-1]:
+        target = target[int(part)] if isinstance(target, list) else target[part]
+    target[parts[-1]] = invalid
+    ledger.write_text("".join(json.dumps(row) + "\n" for row in rows))
+    (_layout(project, "alpha", "mux/readout", _RUN1).run_path / "data.h5").unlink()
+    before = {p: p.read_bytes() for p in project.rglob("*") if p.is_file()}
+
+    index = scan_results(project)
+
+    run = index.get_run(f"alpha/mux_readout_{_RUN1}")
+    assert (run.registered, run.run_id, run.point, run.at) == (True, _RUN1, "p1", _AT)
+    assert not run.issues
+    assert index.get_run(f"beta/mux_readout_{_RUN1}").registered
+    assert not index.get_run(f"alpha/mux_readout_{_RUN2}").registered
+    assert {p: p.read_bytes() for p in project.rglob("*") if p.is_file()} == before
+    with pytest.raises(ValueError, match="ledger.jsonl"):
+        ResultEntry.read_events_snapshot("alpha", result_root=project / "result")
+
+
+@pytest.mark.parametrize(
+    ("kind", "field", "invalid"),
+    [
+        ("acquired", "experiment", []),
+        ("acquired", "roles", "bad roles"),
+        ("acquired", "at", "not UTC"),
+        ("saved", "outputs", "not a sequence"),
+        ("saved", "outputs", [{"status": "invalid"}]),
+        ("saved", "outputs", [{"status": "saved", "path": []}]),
+    ],
+)
+def test_consumed_ledger_fields_report_source_and_isolate_entry(
+    project: Path, kind: str, field: str, invalid: object
+) -> None:
+    ledger = project / "result/alpha/records/ledger.jsonl"
+    rows = [json.loads(line) for line in ledger.read_text().splitlines()]
+    row = next(row for row in rows if row["kind"] == kind)
+    target = row if field == "at" else row["payload"]
+    target[field] = invalid
+    ledger.write_text("".join(json.dumps(row) + "\n" for row in rows))
+    before = {p: p.read_bytes() for p in project.rglob("*") if p.is_file()}
+
+    index = scan_results(project)
+
+    affected = index.get_run(f"alpha/mux_readout_{_RUN1}")
+    assert not affected.registered
+    assert any(str(ledger) in issue and field in issue for issue in affected.issues)
+    # Existing entry-level isolation remains: native identities still survive.
+    assert index.get_run(f"alpha/mux_readout_{_RUN2}").run_id == _RUN2
+    assert index.get_run(f"beta/mux_readout_{_RUN1}").registered
+    assert all(not run.issues for run in index.runs if run.entry != "alpha")
+    assert {p: p.read_bytes() for p in project.rglob("*") if p.is_file()} == before
 
 
 def test_broken_native_is_retained_with_diagnostic(project: Path) -> None:

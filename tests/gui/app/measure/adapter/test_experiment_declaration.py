@@ -30,7 +30,8 @@ def test_adapter_restores_from_the_declaration_without_constructing_core(
     restored = definition.restore(load(path))
     assert restored.cfg_issue is None
     assert restored.record.cfg == SavingCfg(gain=2.0)
-    assert restored.record.metadata == metadata
+    assert restored.record.metadata is not None
+    assert restored.record.metadata.project() == metadata
     np.testing.assert_array_equal(
         restored.record.result.signal, [2 + 4j, 6 - 8j, 10 + 12j]
     )

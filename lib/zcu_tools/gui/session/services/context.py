@@ -49,6 +49,7 @@ from zcu_tools.resources.document_store import DocumentRevision
 from zcu_tools.resources.entry import (
     DestinationExistsError,
     document_revision,
+    parameter_content,
     snapshot,
     source_path,
     validate_path_segment,
@@ -90,7 +91,6 @@ if TYPE_CHECKING:
         SetupView,
     )
     from zcu_tools.resources.entry.ledger import RecordsLedger
-    from zcu_tools.resources.entry.provenance import Provenance
 
 
 class ContextService:
@@ -162,7 +162,6 @@ class ContextService:
         points = self._load_points(entry)
         self._bind_assets(entry.database_path / "arb_waveforms")
         info = EntryInfo(
-            entry.entry_id,
             entry.result_path.name,
             entry.result_path,
             entry.database_path,
@@ -237,11 +236,12 @@ class ContextService:
 
     def _reload_point_file(self, file: PointFileRevision) -> PointFileRevision:
         parameters = self._published_parameters()
-        if self._point is None or self._library is None:
+        target = parameters.target
+        if self._point is None or self._library is None or target is None:
             raise RuntimeError("Selected point resources disappeared")
         if file.document == "aliases":
             saved, revision = self._require_open_entry().load_aliases_with_revision(
-                point=parameters.target.point
+                point=target.point
             )
             candidate = AliasTable(
                 tuple(AliasRow(name, value) for name, value in saved.aliases.items())
@@ -249,11 +249,11 @@ class ContextService:
             self._install_alias_rows(candidate, revision)
         else:
             if file.document == "parameters":
-                self._point.refresh()
+                self._point.refresh(strict=True)
             else:
                 self._library.refresh(strict=True)
             current = ParameterContext(
-                point=snapshot(self._point),
+                point=parameter_content(self._point),
                 library=self._library.snapshot(),
                 target=parameters.target,
                 roles=None,
@@ -314,13 +314,13 @@ class ContextService:
         )
         self._aliases = aliases
         self._install_point(point, library, parameters, sources, info)
-        return SavedPoint(entry_id=entry.entry_id, point=request.label)
+        return SavedPoint(entry_name=entry.result_path.name, point=request.label)
 
     def new_point(self, request: PointCreateRequest) -> SavedPoint:
         """Create from setup or a same-entry clone, then install ACTIVE.
 
         No opened entry raises FailedPreconditionError(no_entry). Pass description
-        and origin unchanged to ResultEntry.new_point. An unsafe
+        unchanged to ResultEntry.new_point. An unsafe
         label raises InvalidInputError(point_label_invalid) before source reads or
         writes, preserving binding, files, ledger and versions. Label safety follows
         the entry owner's single path component rule. An existing destination
@@ -347,7 +347,6 @@ class ContextService:
                 request.label,
                 clone_from=clone,
                 description=request.description,
-                origin=request.origin.origin,
             )
         except DestinationExistsError as exc:
             raise InvalidInputError(str(exc)) from exc
@@ -358,11 +357,11 @@ class ContextService:
         except Exception as exc:
             # Resource creation succeeded; report the retained point as recovery.
             raise PointBindingError(
-                entry_id=entry.entry_id, label=request.label
+                entry_name=entry.result_path.name, point=request.label
             ) from exc
         self._aliases = aliases
         self._install_point(point, library, parameters, sources, info)
-        return SavedPoint(entry_id=entry.entry_id, point=request.label)
+        return SavedPoint(entry_name=entry.result_path.name, point=request.label)
 
     def clear_context(self) -> None:
         """Publish EMPTY, clear entry/point, retaining non-parameter handles.
@@ -393,7 +392,7 @@ class ContextService:
                     "No entry is opened", reason_code="no_entry"
                 )
             return snapshot(self._setup)
-        return self.read_context().document()
+        return self.read_context().whole_document()
 
     def add_component(
         self, name: str, kind: str, fields: YamlMap, *, setup: bool = False
@@ -563,7 +562,7 @@ class ContextService:
         assets = self._bind_assets(entry.database_path / "arb_waveforms")
         library = entry.module_library(target.point, assets=assets)
         return ParameterContext(
-            point=snapshot(point),
+            point=parameter_content(point),
             library=library.snapshot(),
             target=target,
             roles=roles,
@@ -702,35 +701,30 @@ class ContextService:
         target: ContextTarget,
         path: str,
         value: ModuleSpec,
-        *,
-        source: Provenance | None = None,
     ) -> YamlMap:
         """Write a module and return its detached actual cached Spec mapping.
 
-        Target/publication/error rules match set_parameter. Omitted source is
-        manual; explicit Provenance is validated by the library owner against
-        this entry's ledger. SavedPoint uses one library transaction.
+        Target/publication/error rules match set_parameter.
+        SavedPoint uses one library transaction without source records.
         No lowering, materialization, accepted event production or batch receipt.
         """
-        return self.set_modules(
-            target, (LibraryUpdate(ModuleWriteback(path, value), source),)
-        )[0]
+        return self.set_modules(target, (LibraryUpdate(ModuleWriteback(path, value)),))[
+            0
+        ]
 
     def set_waveform(
         self,
         target: ContextTarget,
         path: str,
         value: WaveformSpec,
-        *,
-        source: Provenance | None = None,
     ) -> YamlMap:
         """Write a waveform and return its detached actual cached Spec mapping.
 
-        Target/publication/source/error rules match set_module. Owner rejects
-        invalid roots/families/sources before installing any candidate.
+        Target/publication/error rules match set_module. Owner rejects
+        invalid roots/families before installing any candidate.
         """
         return self.set_modules(
-            target, (LibraryUpdate(WaveformWriteback(path, value), source),)
+            target, (LibraryUpdate(WaveformWriteback(path, value)),)
         )[0]
 
     def set_modules(
@@ -738,7 +732,7 @@ class ContextService:
     ) -> tuple[YamlMap, ...]:
         """Commit a nonempty mixed module/waveform group and publish once.
 
-        LibraryUpdate defines each key, family, Spec and source. Target and
+        LibraryUpdate defines each key, family and Spec. Target and
         failure rules match set_module. Each update validates in one draft;
         any failure leaves the entire group unwritten and publishes nothing.
         Return each detached validated value only after the group commits,
@@ -782,9 +776,14 @@ class ContextService:
         propagate, leaving this command uncommitted and publishing no events.
         """
         self._owner.assert_owner()
-        entry = self._require_write_target(parameters.target)
+        target = parameters.target
+        if target is None:
+            raise FailedPreconditionError(
+                "Select a working point first", reason_code="no_context"
+            )
+        entry = self._require_write_target(target)
         selected = self._published_parameters()
-        handle = self._write_library(entry, parameters.target, selected)
+        handle = self._write_library(entry, target, selected)
         with handle.edit() as draft:
             candidate = self._library_change_candidate(draft.snapshot(), change)
             draft.replace_contents(candidate)
@@ -821,32 +820,32 @@ class ContextService:
             return library.replaced_waveform(destination, change.waveform)
         raise InvalidInputError("Library put/replace requires a Spec")
 
-    def entry_ledger(self, entry_id: str) -> RecordsLedger:
+    def entry_ledger(self, entry_name: str) -> RecordsLedger:
         """Return only the currently opened entry's ledger; never append an event.
 
-        No entry raises no_entry; a different UUID raises entry_not_open.
+        No entry raises no_entry; a different name in the current result root raises entry_not_open.
         Use capture_storage(parameters).ledger for a result's historical origin.
         Ledger capabilities are not serialized into wire data.
         """
         self._owner.assert_owner()
-        return self._require_entry(entry_id).ledger
+        return self._require_entry(entry_name).ledger
 
     def _require_open_entry(self) -> ResultEntry:
         if self._entry is None:
             raise FailedPreconditionError("No entry is opened", reason_code="no_entry")
         return self._entry
 
-    def _require_entry(self, entry_id: str) -> ResultEntry:
+    def _require_entry(self, entry_name: str) -> ResultEntry:
         entry = self._require_open_entry()
-        if entry_id != entry.entry_id:
+        if entry_name != entry.result_path.name:
             raise FailedPreconditionError(
-                f"Entry {entry_id!r} is not opened", reason_code="entry_not_open"
+                f"Entry {entry_name!r} is not opened", reason_code="entry_not_open"
             )
         return entry
 
     def _require_write_target(self, target: ContextTarget) -> ResultEntry:
         """Reject cross-entry targets before opening a resource."""
-        return self._require_entry(target.entry_id)
+        return self._require_entry(target.entry_name)
 
     def _published_parameters(self) -> ParameterContext:
         """Read the carrier without requiring unrelated selected-source data."""
@@ -900,11 +899,11 @@ class ContextService:
             raise RuntimeError("Opened entry has no setup binding")
         assets = self._bind_assets(entry.database_path / "arb_waveforms")
         library = entry.module_library(label, assets=assets)
-        document = snapshot(point)
+        document = parameter_content(point)
         parameters = ParameterContext(
             point=document,
             library=library.snapshot(),
-            target=SavedPoint(entry_id=entry.entry_id, point=label),
+            target=SavedPoint(entry_name=entry.result_path.name, point=label),
             roles=None,
             storage=capture_point_storage(point),
         )
@@ -913,7 +912,7 @@ class ContextService:
             ContextSource("point", source_path(point), None),
             ContextSource("module_cfg", library.source_path, None),
         )
-        info = WorkingPointInfo(label, document.general.description or "")
+        info = WorkingPointInfo(label, point.description or "")
         aliases = AliasSnapshot.from_read(entry.read_aliases(point=label))
         return parameters, library, sources, info, aliases
 

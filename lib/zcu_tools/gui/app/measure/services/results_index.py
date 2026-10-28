@@ -11,9 +11,9 @@ from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 from zcu_tools.datafile import JsonObject, read_doc
 from zcu_tools.resources.entry import (
     AcquiredPayload,
-    LedgerEvent,
+    LedgerAcquisition,
+    LedgerEventContent,
     ResultEntry,
-    SavedPayload,
     validate_path_segment,
 )
 from zcu_tools.resources.entry.aliases import AliasValue
@@ -213,14 +213,18 @@ def _scan_entry(
         return []
     entry_issues: list[str] = []
     events = _entry_events(root, entry, entry_issues)
-    acquisitions = _acquisitions(events)
-    saved_outputs = {
-        Path(output.path): event.payload.run_id
-        for event in events
-        if isinstance(event.payload, SavedPayload)
-        for output in event.payload.outputs
-        if output.status == "saved"
-    }
+    try:
+        acquisitions = _acquisitions(events)
+        saved_outputs = {
+            Path(path): saved.run_id
+            for event in events
+            if (saved := event.saved_paths()) is not None
+            for path in saved.paths
+        }
+    except ValueError as error:
+        # Preserve the existing entry-level ledger failure isolation.
+        entry_issues.append(str(error))
+        acquisitions, saved_outputs = {}, {}
     runs: list[ResultRun] = []
     for path in paths:
         try:
@@ -234,7 +238,9 @@ def _scan_entry(
     return runs
 
 
-def _entry_events(root: Path, entry: str, issues: list[str]) -> tuple[LedgerEvent, ...]:
+def _entry_events(
+    root: Path, entry: str, issues: list[str]
+) -> tuple[LedgerEventContent, ...]:
     result = root / "result"
     setup = result / entry / "setup.yaml"
     try:
@@ -243,7 +249,7 @@ def _entry_events(root: Path, entry: str, issues: list[str]) -> tuple[LedgerEven
         _inside(result / entry, setup)
         if not setup.exists():
             return ()
-        return ResultEntry.read_events_snapshot(entry, result_root=result)
+        return ResultEntry.read_contents_snapshot(entry, result_root=result)
     except (OSError, ValueError) as error:
         issues.append(f"{setup}: {error}")
         return ()
@@ -279,13 +285,14 @@ def _read_json(path: Path) -> JsonObject:
         raise ValueError(f"{path}: {error}") from error
 
 
-def _acquisitions(events: tuple[LedgerEvent, ...]) -> Mapping[str, LedgerEvent]:
-    by_id: dict[str, LedgerEvent] = {}
-    for event in events:
-        if isinstance(event.payload, AcquiredPayload):
-            payload = event.payload
-            by_id[payload.run_id] = event
-    return by_id
+def _acquisitions(
+    events: tuple[LedgerEventContent, ...],
+) -> Mapping[str, LedgerAcquisition]:
+    return {
+        acquired.payload.run_id: acquired
+        for event in events
+        if (acquired := event.acquisition()) is not None
+    }
 
 
 def _members(
@@ -342,7 +349,7 @@ def _search_documents(
 def _scan_run(
     entry: str,
     path: Path,
-    acquisitions: Mapping[str, LedgerEvent],
+    acquisitions: Mapping[str, LedgerAcquisition],
     saved_outputs: Mapping[Path, str],
     entry_issues: list[str],
 ) -> ResultRun:

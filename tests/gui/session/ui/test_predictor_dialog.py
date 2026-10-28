@@ -35,55 +35,6 @@ from tests.gui.session.ui._predictor_support import (
 )
 
 
-def test_parameter_editor_returns_energy_only_trial(qapp):
-    from zcu_tools.gui.session.ui.predictor_parameters import PredictorParameterEditor
-
-    editor = PredictorParameterEditor(
-        PredictorControlFacet(PredictorService()),
-        on_edited=lambda: None,
-        on_replaced=lambda: None,
-        on_status=lambda _message, _error: None,
-    )
-    try:
-        trial = FluxoniumParams(EJ=6.3, EC=None, EL=0.7)
-        editor.set_parameters(trial)
-        assert editor.parameters() == trial
-    finally:
-        editor.deleteLater()
-
-
-def test_flux_editor_formats_prefilled_and_updated_numeric_fields(qapp):
-    from zcu_tools.gui.session.ui.predictor_flux import PredictorFluxEditor
-
-    editor = PredictorFluxEditor(on_edited=lambda: None)
-    offset = editor.findChild(QLineEdit, "predictor_offset")
-    assert offset is not None
-    try:
-        editor.set_flux(
-            PredictorFlux(0.22999999999999998, {"coil": 2.0}, {"coil": "A"}),
-            {"coil": 0.22999999999999998},
-        )
-        native_value = editor.findChild(QLineEdit, "predictor_value_coil")
-        assert native_value is not None
-        assert (offset.text(), native_value.text()) == ("0.23", "0.23")
-
-        for value, expected in (
-            (0.1472990092, "0.1472990092"),
-            (0.123456789012345, "0.123456789012345"),
-            (1e-7, "1e-07"),
-            (0.22999999999999998, "0.23"),
-        ):
-            editor.set_offset(value)
-            editor.set_device_value("coil", value)
-            assert (offset.text(), native_value.text()) == (expected, expected)
-            assert editor.flux().offset == float(expected)
-            assert editor.device_values()["coil"] == float(expected)
-    finally:
-        editor.retire_callbacks()
-        editor.close()
-        editor.deleteLater()
-
-
 def test_dialog_loads_frame_and_every_cached_device_value(qapp):
     from zcu_tools.resources.predictor_file import (
         PredictorFile,
@@ -112,7 +63,7 @@ def test_dialog_loads_frame_and_every_cached_device_value(qapp):
 
 def test_curve_tabs_project_all_devices_onto_selected_axis(qapp):
     from zcu_tools.analysis.flux import DevicePeriod, FluxFrame
-    from zcu_tools.gui.session.ui.predictor_curves import CurveCoordinates
+    from zcu_tools.gui.session.predictor_trial import CurveCoordinates
     from zcu_tools.simulate.transmon import TransmonParams
 
     from tests.gui._user_input import ComponentDriver
@@ -249,7 +200,7 @@ def test_supplied_frame_clears_stale_missing_frame_status(qapp):
 
 
 def test_empty_snapshot_replaces_a_previously_loaded_flux_frame(qapp):
-    from zcu_tools.gui.session.ui.predictor_cache import PredictorSnapshot
+    from zcu_tools.gui.session.predictor_cache import PredictorSnapshot
     from zcu_tools.simulate.predictor import PredictorInputError
 
     dialog = _make_dialog()

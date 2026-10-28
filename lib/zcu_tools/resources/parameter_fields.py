@@ -6,11 +6,13 @@ the supplied edit context owns full-model validation and value publication.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Generator, Mapping
+from collections.abc import Callable, Generator, Mapping, Sequence
 from contextlib import AbstractContextManager, contextmanager
 from copy import deepcopy
+from typing import TypeGuard
 
 from pydantic import BaseModel, TypeAdapter, ValidationError
+from pydantic_core import SchemaValidator, core_schema
 
 from zcu_tools.core.complex_codec import decode_complex, encode_complex
 from zcu_tools.format_version import YamlValue
@@ -19,6 +21,136 @@ from .parameter_metadata import parameter_path
 
 # Logical field containers retain typed models inside mappings. No list indexing.
 type FieldNode = BaseModel | dict[str, object]
+
+
+def _definitions(
+    schema: core_schema.CoreSchema,
+) -> TypeGuard[core_schema.DefinitionsSchema]:
+    return schema["type"] == "definitions"
+
+
+def _model_fields(
+    schema: core_schema.CoreSchema,
+) -> TypeGuard[core_schema.ModelFieldsSchema]:
+    return schema["type"] == "model-fields"
+
+
+def _model_wrapper(
+    schema: core_schema.CoreSchema,
+) -> TypeGuard[
+    core_schema.ModelSchema
+    | core_schema.BeforeValidatorFunctionSchema
+    | core_schema.AfterValidatorFunctionSchema
+    | core_schema.WrapValidatorFunctionSchema
+]:
+    # Pydantic's schema TypedDicts mark the discriminator optional, so direct
+    # discriminator checks do not narrow their union in Pyright.
+    return schema["type"] in (
+        "model",
+        "function-before",
+        "function-after",
+        "function-wrap",
+    )
+
+
+def model_field_schema(model: type[BaseModel], name: str) -> core_schema.CoreSchema:
+    """Return one field's schema, including its defaults and field validators.
+
+    Model-level validators are excluded. Unknown fields raise AttributeError.
+    Definitions required by nested/recursive field models remain available.
+    No values or unrelated fields are validated.
+    """
+    schema = model.__pydantic_core_schema__
+    definitions: list[core_schema.CoreSchema] = []
+    while True:
+        if _definitions(schema):
+            definitions.extend(schema["definitions"])
+            schema = schema["schema"]
+        elif _model_wrapper(schema):
+            schema = schema["schema"]
+        elif _model_fields(schema):
+            if name not in schema["fields"]:
+                raise AttributeError(name)
+            field = schema["fields"][name]["schema"]
+            return (
+                core_schema.definitions_schema(field, definitions)
+                if definitions
+                else field
+            )
+        else:
+            raise TypeError(f"{model.__name__}: unsupported model field schema")
+
+
+def _list_schema(schema: core_schema.CoreSchema) -> TypeGuard[core_schema.ListSchema]:
+    return schema["type"] == "list"
+
+
+def _field_wrapper(
+    schema: core_schema.CoreSchema,
+) -> TypeGuard[
+    core_schema.WithDefaultSchema
+    | core_schema.NullableSchema
+    | core_schema.BeforeValidatorFunctionSchema
+    | core_schema.AfterValidatorFunctionSchema
+    | core_schema.WrapValidatorFunctionSchema
+]:
+    return schema["type"] in (
+        "default",
+        "nullable",
+        "function-before",
+        "function-after",
+        "function-wrap",
+    )
+
+
+def _sequence_shape_schema(schema: core_schema.CoreSchema) -> core_schema.CoreSchema:
+    if _list_schema(schema):
+        return {**schema, "items_schema": core_schema.any_schema()}
+    if _field_wrapper(schema):
+        wrapped = deepcopy(schema)
+        wrapped["schema"] = _sequence_shape_schema(schema["schema"])
+        return wrapped
+    return schema
+
+
+def sequence_shape(value: object, schema: core_schema.CoreSchema) -> object:
+    """Validate a described list's container and field rules, not item schemas.
+
+    schema is the owning field's core schema, including defaults and field-level
+    validators. List annotations keep their length/type constraints; scalar
+    annotations still reject lists. Returned items are not projected or sent on
+    wire. Field rules may inspect them when that is necessary to describe shape.
+    Malformed used structure raises its original validation error.
+    """
+    return SchemaValidator(_sequence_shape_schema(schema)).validate_python(
+        deepcopy(value)
+    )
+
+
+def _dict_schema(schema: core_schema.CoreSchema) -> TypeGuard[core_schema.DictSchema]:
+    return schema["type"] == "dict"
+
+
+def _mapping_shape_schema(schema: core_schema.CoreSchema) -> core_schema.CoreSchema:
+    if _dict_schema(schema):
+        return {**schema, "values_schema": core_schema.any_schema()}
+    if _field_wrapper(schema):
+        wrapped = deepcopy(schema)
+        wrapped["schema"] = _mapping_shape_schema(schema["schema"])
+        return wrapped
+    return schema
+
+
+def mapping_shape(value: object, schema: core_schema.CoreSchema) -> object:
+    """Validate mapping structure and field rules without consuming child values.
+
+    schema is the owning field schema. Mapping keys and container constraints
+    remain checked; scalar annotations reject mappings. The owner then projects
+    individual output children. Malformed used structure raises schema errors.
+    """
+    return SchemaValidator(_mapping_shape_schema(schema)).validate_python(
+        deepcopy(value)
+    )
 
 
 def model_field_value(node: BaseModel, name: str) -> object:
@@ -210,24 +342,62 @@ def stage_model[T: BaseModel](model: T, publish: Callable[[T], None]) -> Generat
     publish(accepted)
 
 
+def sequence_index(value: Sequence[object], segment: str) -> int:
+    """Decode an existing canonical nonnegative ASCII decimal sequence index.
+
+    value supplies only the length; this does not choose readable or writable
+    container types. segment must be "0" or digits without leading zero, and
+    identify an existing element. Invalid syntax and overly long numbers are
+    rejected before integer conversion. All invalid or out-of-range indices
+    raise ValueError.
+    """
+    if (
+        not segment.isascii()
+        or not segment.isdecimal()
+        or (segment != "0" and segment.startswith("0"))
+        or len(segment) > len(str(len(value)))
+    ):
+        raise ValueError(f"Invalid sequence index: {segment!r}")
+    index = int(segment)
+    if index >= len(value):
+        raise ValueError(f"Sequence index out of range: {segment!r}")
+    return index
+
+
 def set_model_value(model: BaseModel, path: str, value: object) -> None:
     """Assign one dotted field in an independent candidate, without validation.
 
     model must be a detached candidate managed by stage_model or a DocumentStore
-    draft. path uses nonempty mapping/model segments, with no list indexing.
+    draft. path uses nonempty model/mapping segments or canonical nonnegative
+    ASCII indices through existing lists. Numeric mapping keys remain keys.
+    Lists allow existing elements only: no auto-create, append, insert, slice
+    or negative indexing. Tuple/ndarray writes are not supported.
     Native complex scalars use the shared persisted tag. Values are copied;
     model types and field presence are retained. Missing/non-container parents
-    raise KeyError/AttributeError. An undeclared field on a model that does not
-    allow extras raises ValidationError naming the full path, without invoking
-    model validators. The owner must validate the full model before publication.
+    raise KeyError/AttributeError. Invalid or out-of-range list indices raise
+    ValueError. An undeclared field on a model that does not allow extras raises
+    ValidationError naming the full path, without invoking model validators.
+    The owner must validate the full model before publication.
     No metadata or files are changed.
     """
     parts = parameter_path(path)
-    node: FieldNode = model
+    node: FieldNode | list[object] = model
     for index, name in enumerate(parts[:-1]):
         parent_path = ".".join(parts[:index])
-        child = read_field(node, name, parent_path)
+        if isinstance(node, list):
+            child = node[sequence_index(node, name)]
+        else:
+            child = read_field(node, name, parent_path)
         if isinstance(node, BaseModel):
             node.model_fields_set.add(name)
-        node = field_container(child, ".".join(parts[: index + 1]))
-    _write_field(node, parts[-1], value, path)
+        node = (
+            child
+            if isinstance(child, list)
+            else field_container(child, ".".join(parts[: index + 1]))
+        )
+    if isinstance(node, list):
+        node[sequence_index(node, parts[-1])] = deepcopy(
+            encode_complex(value) if isinstance(value, complex) else value
+        )
+    else:
+        _write_field(node, parts[-1], value, path)

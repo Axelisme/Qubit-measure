@@ -28,11 +28,13 @@ if TYPE_CHECKING:
         WritebackControlPort,
         WritebackPane,
     )
+    from .proposal import calibrated_module_writeback
     from .service import WritebackDraft, WritebackService
     from .widget import WritebackWidget
 
 __all__ = [
     "ModuleWriteback",
+    "calibrated_module_writeback",
     "ParameterWriteback",
     "RecordWriteback",
     "WritebackItem",
@@ -51,6 +53,7 @@ __all__ = [
 ]
 
 _EXPORT_MODULES = {
+    "calibrated_module_writeback": ".proposal",
     "WritebackControlFacet": ".control",
     "WritebackControlPort": ".control",
     "WritebackPane": ".control",

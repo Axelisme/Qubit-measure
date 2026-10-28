@@ -120,6 +120,22 @@ def _check_header(raw: JsonObject, expected: str, path: Path) -> None:
         raise MigrationInputError(f"{path}: unsupported {expected} version {version!r}")
 
 
+def validate_migration_fields(raw: JsonObject, *, path: Path) -> None:
+    """Reject obsolete ownership fields before interpreting or changing files.
+
+    raw is a manifest, its embedded report, or a standalone report. path names
+    the containing file. Legacy entry_id fields require the old tool or manual
+    operator review; their values are never read or converted to migration_id.
+    Unknown unrelated fields retain their existing preservation policy.
+    """
+    for node in (raw, raw.get("identity"), raw.get("report")):
+        if isinstance(node, dict) and "entry_id" in node:
+            raise MigrationInputError(
+                f"{path}: obsolete entry_id ownership field; use the old version "
+                "to finish, or review and handle the files manually. No data was changed."
+            )
+
+
 def read_manifest(path: Path) -> MigrationManifest:
     """Read exact UTF-8 1.x manifest/report models and retain both raw JSON trees.
 
@@ -132,6 +148,7 @@ def read_manifest(path: Path) -> MigrationManifest:
         text = path.read_text(encoding="utf-8")
         raw = _JSON.validate_json(text, strict=True)
         _check_header(raw, "zcu.storage-migration", path)
+        validate_migration_fields(raw, path=path)
         report_raw = raw.get("report")
         if not isinstance(report_raw, dict):
             raise MigrationInputError(f"{path}: missing report")

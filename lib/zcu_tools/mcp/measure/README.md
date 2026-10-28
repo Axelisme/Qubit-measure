@@ -1,6 +1,6 @@
 # `zcu_tools/mcp/measure/`
 
-**Last updated:** 2026-10-28
+**Last updated:** 2026-10-29
 
 **讀者：** agent。量測 MCP 的啟動、表單、operation 與寫回契約。
 
@@ -82,6 +82,14 @@ Raw RPC 以完整 cfg 非同步執行 setup。Caller 先讀 `device.snapshot`，
 `device_setup` 固定最多等待 300 秒。逾時保留正在執行的操作，回傳 running 與已知 op；caller 用 `wait(op)` 續等。需要短等時使用 raw RPC 與 caller 的 wait。Client deadline 必須大於 300 秒並預留 transport/reply overhead。
 
 Device setup 保留 pre_read、start、wait、post_read、requested、before/after 與 native operation。Device requested 是 `{name, cfg}`，cfg 在 before-read 與合併完成前為 null，之後是完整候選，不保證 model 接受。Before.info 為 null 時不能合併，pre_read failed。Before 有 Info 則送一次 RPC，由 service 拒絕未連線裝置，回 start failed、完整 candidate、before facts 與 null after。Device 不做 verification；snapshot 有目標值不代表 operation finished。Native finished／failed／cancelled、driver error 與 unknown 原樣保留。Step completed 只表示該步成功。工具不重連、重送或回滾。Caller 用已知 op 的 wait 和完整 snapshot 接手。
+
+## Context snapshot
+
+`rpc_call(method="context.snapshot", params={})` 讀取固定 capture 的完整 target、point、library 與 aliases。完整回覆驗證全部 schema 與 wire 值，不 materialize library assets。
+
+`params={"path":"point.components.Q1.rate"}` 只讀驗指定部分，回覆保留 target、aliases、path 與 value。Path 以 target、point、library 或 aliases 開頭，list index 使用 canonical 非負整數。選整個 component 或 subtree 時保留該層完整投影檢查。未選 sibling 的壞 schema 或 nonfinite 不擋回覆，無效 path 由 owner 指名第一個不可讀 segment。
+
+`params={"summaries":true}` 保留 scalar 與 mapping，將 list/array 改為項數或形狀。只驗產生摘要實際需要或輸出的欄位，不先驗隱藏的 list elements。Path 優先於 summaries。真正輸出的 nonfinite、壞 scalar 與必要結構錯誤仍拒絕，不以 null 或空結果掩蓋。
 
 ## 日常與細部操作
 
@@ -372,7 +380,7 @@ partial 與 Save 收據，不靠作者補取消報告。
 Scalar、uncertainty、unit 與元素 identity 都沿 owner summary，不重算或套 reporting 宣告。
 Status 的 active_path 會讀 GUI 當前 scope，其餘 captured detail 不重讀 GUI，也不自動存檔。
 
-全域 status 的 entry 是 null 或 GUI entry.info 的 UUID、name、result_path、database_path，
+全域 status 的 entry 是 null 或 GUI entry.info 的 name、result_path、database_path，
 只讀 metadata，不建立 context observation。
 `ready.can_run` 只表示環境 readiness。它檢查 entry、active context、SoC 與至少一張 tab 是否存在，缺項列在 `ready.missing`。未 open entry 時 missing 包含 `entry`。它不驗證任何 tab 的表單，也不保證 holder、busy 或硬體 guard 會允許 Run。
 
@@ -524,7 +532,7 @@ not_started 與失敗 stage 的不確定性。
 `submission_id` 是最後嘗試的 pane，`recovery` 帶 `tab.writeback_receipt` 與精確 query params。
 寫入逾時時 status 是 unknown，保留 `failed_stage_may_have_partial_writes`，
 並要求先查狀態，再決定是否重送。不能把 handler 逾時當成寫入失敗。
-查詢回完成列的 item ID、實際值、concrete target 與固定 entry_id／point。
+查詢回完成列的 item ID、實際值、concrete target 與固定 entry_name／point。
 Receipt 只保留在 GUI 生命週期內，查詢不重新讀取當前 draft 或目的地。
 Recipe `accept_writeback` 的 receipt 也保留 submission_id／recovery，逾時回 unknown。
 它的 items 仍是 confirmed IDs 對應的原捕捉候選，不取代 owner 的實際值 receipt。
@@ -580,4 +588,4 @@ MCP server 結束時斷線並加入其 workers。它不關閉 GUI，也不保證
 
 `tests/mcp/measure/` 經 public tools/session 與 recording transport 驗證 recipe、分析、catalog、連線、holder admission 與 operation。GUI remote/service 測試驗證 socket 與 GUI-origin 路徑。離線選集只用 fake/mock，不啟動真儀器；fixture 與測試歸屬見 `tests/README.md`。
 
-Entry new/open 只建立或開啟 entry，不自選 point，也沒有參數環境。Agent 先明確呼叫 point.use 或 point.new，才能 Run、WB 或目前 point 的 Inspect writes；未選取時沿既有 failed precondition 拒絕。WB 使用候選捕捉的 SavedPoint，選取其他同 entry point 不更換目的地。
+Entry new/open 只建立或開啟 entry，不自選 point，也沒有參數環境。Agent 先明確呼叫 point.use 或 point.new，才能 Run、WB 或目前 point 的 Inspect writes；未選取時沿既有 failed precondition 拒絕。WB 的 Preview／Apply 使用命令當下 GUI 選定的 point；歷史 capture 只供提案求值，不決定目的地。空歷史環境本身不阻擋寫回。

@@ -10,8 +10,8 @@ from numpy.typing import NDArray
 from pydantic import BeforeValidator
 from qick.asm_v2 import QickParam, Trigger
 
+from zcu_tools.cfg_model import CircleClassifier, ReadoutClassifier
 from zcu_tools.cfg_model import MuxReadoutCfg as CoreMuxReadoutCfg
-from zcu_tools.cfg_model import ReadoutClassifier
 from zcu_tools.program.herald import HeraldSpec
 
 from ..macro.readout import ReadoutEmission, readout_control_scope
@@ -130,6 +130,38 @@ class MuxReadoutCfg(CoreMuxReadoutCfg, AbsReadoutCfg):
 
 
 ReadoutCfg: TypeAlias = PulseReadoutCfg | MuxReadoutCfg
+
+
+def classification_parameters(
+    cfg: ReadoutCfg, *, require_other: bool = False
+) -> dict[int, ReadoutClassifier]:
+    """Return detached per-ADC calibration for explicit acquire(classify=...).
+
+    cfg supplies normalized raw ADC calibration without offset subtraction.
+    Missing calibration or circle radius raises ValueError naming the ADC;
+    missing radius requires GE Post analysis. require_other rejects linear
+    because it has only g/e states. No program registry or hardware is read.
+    """
+    entries = (
+        [(cfg.ro_ch, cfg.classifier)]
+        if isinstance(cfg, PulseReadoutCfg)
+        else [(tone.ro_ch, tone.classifier) for tone in cfg.tones]
+    )
+    result: dict[int, ReadoutClassifier] = {}
+    for ch, classifier in entries:
+        if classifier is None:
+            raise ValueError(f"ADC {ch}: classifier missing; run singleshot GE")
+        if isinstance(classifier, CircleClassifier):
+            if classifier.radius is None:
+                raise ValueError(
+                    f"ADC {ch}: circle radius missing; run GE Post analysis"
+                )
+        elif require_other:
+            raise ValueError(
+                f"ADC {ch}: linear classifier has no other state; use circle"
+            )
+        result[ch] = classifier.model_copy(deep=True)
+    return result
 
 
 class AbsReadout(Module):

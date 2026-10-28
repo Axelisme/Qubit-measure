@@ -48,7 +48,7 @@ from zcu_tools.gui.form import (
 from zcu_tools.program.v2.modules import AbsModuleCfg as NativeModuleBase
 from zcu_tools.program.v2.modules import ModuleCfgFactory as NativeModuleFactory
 
-from ._converters import module_converter
+from ._converters import model_converters, module_converter
 from ._display import field_display
 from ._seeds import (
     complete_input,
@@ -118,13 +118,12 @@ def _key_specs(annotation: object) -> tuple[type[ConfigBase], ...]:
 
 
 def _spec_tag(model: type[BaseModel]) -> tuple[str, str]:
-    for name in ("type", "style"):
-        info = model.model_fields.get(name)
-        if info is not None and get_origin(info.annotation) is Literal:
+    for name, info in model.model_fields.items():
+        if get_origin(info.annotation) is Literal:
             tags = get_args(info.annotation)
             if len(tags) == 1 and isinstance(tags[0], str):
                 return name, tags[0]
-    raise ValueError(f"Persistent Spec needs a unique type/style tag: {model.__name__}")
+    raise ValueError(f"Model needs a literal string tag: {model.__name__}")
 
 
 def _inline_kinds(annotation: object) -> tuple[type[BaseModel], ...]:
@@ -450,7 +449,7 @@ def editable_spec(
         cls: type[FormModel],
         env: FormEnv,
     ) -> Mapping[tuple[str | int, ...], InputConverter]:
-        return {
+        return model_converters(cls, env) | {
             (name,): module_converter(info.annotation, env)
             for name, info in cls.model_fields.items()
             if inline_wrapper(info.annotation) is not None

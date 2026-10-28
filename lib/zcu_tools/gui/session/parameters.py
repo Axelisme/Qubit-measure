@@ -2,20 +2,26 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from copy import deepcopy
 from dataclasses import dataclass, field, replace
 from fnmatch import fnmatchcase
 from types import MappingProxyType
 from typing import TYPE_CHECKING
 
+from pydantic import TypeAdapter
+
+from zcu_tools.format_version import YamlValue
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 from zcu_tools.gui.session.aliases import AliasRow, AliasTable, ResolvedAliasRow
 from zcu_tools.gui.session.context_types import (
     ContextSourceUnavailableError,
 )
+from zcu_tools.resources.context.library import LibrarySnapshot, ModuleLibraryDocument
 from zcu_tools.resources.document_store import DocumentValue
 from zcu_tools.resources.entry import (
+    ComponentSchema,
+    ParameterContent,
     RoleResolutionError,
     document_value,
     resolve_path,
@@ -23,13 +29,12 @@ from zcu_tools.resources.entry import (
 from zcu_tools.resources.entry.aliases import AliasValue
 from zcu_tools.resources.entry.roles import resolve_names
 from zcu_tools.resources.entry.storage import PointStorageBinding
+from zcu_tools.resources.projection import ProjectionPathError, projection_value
 
 _LIBRARY_PARTITIONS = ("pulses", "readout", "reset", "waveforms")
 
 if TYPE_CHECKING:
-    from zcu_tools.format_version import YamlValue
     from zcu_tools.gui.session.context_types import ContextSourceFault, ContextTarget
-    from zcu_tools.resources.context.library import LibrarySnapshot
     from zcu_tools.resources.entry import RoleSpec
     from zcu_tools.resources.entry.schema import PointDocument
 
@@ -96,9 +101,9 @@ class ParameterContext:
     def __init__(
         self,
         *,
-        point: PointDocument,
+        point: PointDocument | ParameterContent,
         library: LibrarySnapshot,
-        target: ContextTarget,
+        target: ContextTarget | None,
         roles: RoleBinding | None,
         source_faults: tuple[ContextSourceFault, ...] = (),
         storage: PointStorageBinding | None = None,
@@ -121,12 +126,16 @@ class ParameterContext:
         if any(fault.document == "setup" for fault in source_faults):
             raise ValueError("Parameter captures accept only point/module_cfg faults")
         if storage is not None and (
-            str(storage.entry_id) != target.entry_id or storage.point != target.point
+            target is None
+            or storage.entry_name != target.entry_name
+            or storage.point != target.point
         ):
             raise ValueError("Storage origin must match the saved-point target")
+        self._recorded = False
+        self._recorded_names: YamlValue = None
         self._point = point.model_copy(deep=True)
         self._library = library
-        self._target = target.model_copy(deep=True)
+        self._target = None if target is None else target.model_copy(deep=True)
         self._roles = deepcopy(roles)
         self._source_faults = deepcopy(source_faults)
         self._storage = storage
@@ -162,10 +171,72 @@ class ParameterContext:
                         f"Captured target {name!r} is missing or has the wrong kind",
                     )
 
+    @classmethod
+    def empty(cls) -> ParameterContext:
+        """Create a readable empty environment with no target, metadata or storage."""
+        return cls(
+            point=ParameterContent(),
+            library=LibrarySnapshot(
+                ModuleLibraryDocument(
+                    format="zcu.module-library",
+                    format_version="2.0",
+                )
+            ),
+            target=None,
+            roles=None,
+        )
+
+    def point_content(self) -> ParameterContent:
+        """Copy captured resource content without consulting files or selection."""
+        self._ensure_readable("point")
+        if isinstance(self._point, ParameterContent):
+            return self._point.captured()
+        return ParameterContent(
+            TypeAdapter(YamlValue).validate_python(
+                self._point.model_dump(mode="python", serialize_as_any=True)
+            )
+        )
+
+    def alias_content(self) -> YamlValue:
+        """Copy authored rows without resolving unused links; None means fixed names."""
+        self._ensure_aliases_readable()
+        return None if self._aliases is None else self._aliases.content()
+
+    def name_content(self) -> YamlValue:
+        """Copy fixed names without validating unrelated recorded bindings."""
+        if self._recorded:
+            return deepcopy(self._recorded_names)
+        return TypeAdapter(YamlValue).validate_python(
+            {} if self._roles is None else dict(self._roles.names)
+        )
+
+    @classmethod
+    def from_content(
+        cls,
+        *,
+        point: ParameterContent,
+        library: LibrarySnapshot,
+        aliases: YamlValue,
+        names: YamlValue,
+    ) -> ParameterContext:
+        """Restore detached content without granting a persistent target or storage.
+
+        Sections stay opaque until a read requests their value or binding.
+        No live files, aliases or library assets are consulted during restoration.
+        """
+        restored = cls(
+            point=point, library=library, target=None, roles=RoleBinding(None, {}, {})
+        )
+        restored._recorded = True
+        restored._recorded_names = deepcopy(names)
+        if aliases is not None:
+            restored._aliases = AliasTable.from_content(aliases)
+        return restored
+
     @property
-    def target(self) -> ContextTarget:
-        """Return an independent saved-point destination."""
-        return self._target.model_copy(deep=True)
+    def target(self) -> ContextTarget | None:
+        """Return a detached persistent target, or None for stored/empty content."""
+        return None if self._target is None else self._target.model_copy(deep=True)
 
     @property
     def roles(self) -> RoleBinding | None:
@@ -178,9 +249,14 @@ class ParameterContext:
         not authored rows, so historical target reads never re-expand links.
         None means no consumer declarations.
         """
+        if self._recorded and self._aliases is None:
+            names = TypeAdapter(dict[str, AliasValue]).validate_python(
+                self._recorded_names
+            )
+            return RoleBinding(None, {}, names)
         if self._aliases is not None and self._roles is not None:
             self._ensure_aliases_readable()
-            self._ensure_readable()
+            self._ensure_readable("point")
             names = self._aliases.names(self._point, self._roles.declarations)
             return RoleBinding(None, self._roles.declarations, names)
         return deepcopy(self._roles)
@@ -196,11 +272,11 @@ class ParameterContext:
 
         Preserve order and softlink values. No consumer kind declaration limits
         this projection. A RoleResolutionError becomes a row with resolved=None
-        and its diagnostic in error; other rows remain readable. Source faults
-        raise ContextSourceUnavailableError for the whole read, even with no rows.
+        and its diagnostic in error; other rows remain readable. Required point
+        source faults raise ContextSourceUnavailableError, even with no rows.
         Reads neither live aliases nor files and never materializes assets.
         """
-        self._ensure_readable()
+        self._ensure_readable("point")
         self._ensure_aliases_readable()
         if self._aliases is None:
             return ()
@@ -236,7 +312,7 @@ class ParameterContext:
         captures without an origin capability raise FailedPreconditionError with
         reason_code storage_unavailable. This performs no I/O or ledger append.
         """
-        self._ensure_readable()
+        self._ensure_readable("point")
         storage = self.storage
         if storage is None:
             raise FailedPreconditionError(
@@ -252,21 +328,104 @@ class ParameterContext:
     @property
     def library(self) -> LibrarySnapshot:
         """Return the fixed read-only library; unavailable sources raise."""
-        self._ensure_readable()
+        self._ensure_readable("module_cfg")
         return self._library
 
-    def _ensure_readable(self) -> None:
-        if self._source_faults:
-            raise ContextSourceUnavailableError(self._source_faults)
+    def _ensure_readable(self, document: str) -> None:
+        faults = tuple(
+            fault for fault in self._source_faults if fault.document == document
+        )
+        if faults:
+            raise ContextSourceUnavailableError(faults)
 
     def _ensure_aliases_readable(self) -> None:
         if self._alias_error is not None:
             raise self._alias_error
 
-    def document(self) -> PointDocument:
+    def component(self, path: str) -> ComponentSchema:
+        """Copy one complete component after all model-level checks.
+
+        path is a concrete name or scalar $alias, not a dotted field path.
+        Use this projection when a consumer relies on cross-field invariants.
+        Unrelated components remain unread. Missing/unbound aliases, unknown
+        names, malformed fields and model checks raise their owner errors.
+        """
+        self._ensure_readable("point")
+        name = self.resolve_path(path) if path.startswith("$") else path
+        if "." in name or name == "general":
+            raise ValueError(f"Expected one component name: {path!r}")
+        if isinstance(self._point, ParameterContent):
+            return self._point.component(name)
+        if name not in self._point.components:
+            raise AttributeError(name)
+        return self._point.components[name].model_copy(deep=True)
+
+    def document(self) -> PointDocument | ParameterContent:
         """Copy the fixed point without I/O or model hooks; unavailable sources raise."""
-        self._ensure_readable()
+        self._ensure_readable("point")
         return self._point.model_copy(deep=True)
+
+    def whole_document(self) -> PointDocument:
+        """Project the complete fixed point with all model checks, without I/O.
+
+        Unlike document(), this explicitly consumes every parameter section.
+        Incomplete stored/empty content and malformed fields raise owner errors.
+        Native typed captures retain their original component values.
+        """
+        self._ensure_readable("point")
+        if isinstance(self._point, ParameterContent):
+            return self._point.project()
+        return self._point.model_copy(deep=True)
+
+    def summarized_document(self, describe: Callable[[object], object]) -> object:
+        """Project point summary fields without consuming described sequences.
+
+        describe recursively formats dictionaries and describes array/list leaves.
+        Resource-owned stored content validates only emitted scalar fields and
+        structure required by the summary. Typed native captures retain arrays.
+        Source/schema failures propagate; no files or wire encoder are consulted.
+        """
+        self._ensure_readable("point")
+        if isinstance(self._point, ParameterContent):
+            return self._point.summary(describe)
+        return describe(self._point.model_dump(mode="python", serialize_as_any=True))
+
+    def snapshot_value(self, path: str) -> object:
+        """Project a native snapshot path from this fixed capture without I/O.
+
+        Dotted paths begin with point, library, target or aliases. Resource owners
+        validate only the chosen subtree; full components keep model invariants.
+        List indices must be canonical nonnegative decimals. InvalidInputError
+        names the first unreadable segment. Schema/source failures propagate.
+        This does not perform wire conversion or grant mutation authority.
+        """
+        section, *suffix = path.split(".")
+        segments = tuple(suffix)
+        try:
+            if section == "point":
+                self._ensure_readable("point")
+                if isinstance(self._point, ParameterContent):
+                    return self._point.projection(segments)
+                return projection_value(self._point, segments)
+            if section == "library":
+                return self.library.projection(segments)
+            if section == "target":
+                return projection_value(self._target, segments)
+            if section == "aliases":
+                rows: list[dict[str, object]] = []
+                for row in self.resolved_aliases():
+                    projected: dict[str, object] = {
+                        "alias": row.alias,
+                        "value": row.value,
+                        "resolved": row.resolved,
+                    }
+                    if row.error is not None:
+                        projected["error"] = row.error
+                    rows.append(projected)
+                return projection_value(rows, segments)
+            raise ProjectionPathError(section)
+        except ProjectionPathError as exc:
+            raise InvalidInputError(f"Invalid snapshot path {path!r}: {exc}") from exc
 
     def bind_aliases(
         self,
@@ -282,15 +441,15 @@ class ParameterContext:
         for aliases and bare paths for concrete components. Declaration.via and
         focus never infer aliases. Point/library/target/storage stay at this
         capture's origin. alias_error retains a file failure for alias consumers
-        only; concrete reads remain available. Unavailable sources and invalid
-        rows propagate.
+        only; concrete reads remain available. Source faults stay fixed for
+        actual-use checks. Invalid rows raise without producing a capture.
         """
-        self._ensure_readable()
         captured = ParameterContext(
             point=self._point,
             library=self._library,
             target=self._target,
             roles=RoleBinding(None, declarations, {}, aliases=rows),
+            source_faults=self._source_faults,
             storage=self._storage,
         )
         captured._alias_error = alias_error
@@ -308,19 +467,27 @@ class ParameterContext:
         Declarations are ordered kind/via rules. Explicit concrete names win
         over focus/via inference. None explicitly leaves its role unbound;
         an absent explicit key allows inference. The returned RoleBinding keeps
-        the same focus and explicit choices. Empty declarations remain empty.
+        the same focus and explicit choices. Empty declarations consume no
+        components or sources. Nonempty declarations use the existing complete
+        component projection for kind/via inference. Source faults remain in
+        the returned capture and fail only readers that need that source.
         Auto inference with zero/multiple candidates leaves roles unbound;
         their use raises RoleResolutionError. Invalid explicit choices and
         dangling/wrong-kind references still raise during binding.
         target and source data are retained; live session state is never read.
         """
-        self._ensure_readable()
-        names = resolve_names(self._point.components, declarations, focus, explicit)
+        if declarations:
+            self._ensure_readable("point")
+            components = self._point.components
+        else:
+            components = {}
+        names = resolve_names(components, declarations, focus, explicit)
         return ParameterContext(
             point=self._point,
             library=self._library,
             target=self._target,
             roles=RoleBinding(focus, declarations, names, explicit),
+            source_faults=self._source_faults,
             storage=self._storage,
         )
 
@@ -335,7 +502,7 @@ class ParameterContext:
         fields, independent of alias names or bindings, in Run and Load captures.
         Other entry syntax/collision/unknown namespace errors propagate.
         """
-        self._ensure_readable()
+        self._ensure_readable("point")
         if path.startswith("$"):
             alias, separator, suffix = path[1:].partition(".")
             if not alias or (separator and not suffix):
@@ -355,9 +522,19 @@ class ParameterContext:
         return resolve_path(self._point, path, roles={})
 
     def _alias_value(self, alias: str) -> AliasValue:
-        self._ensure_readable()
+        self._ensure_readable("point")
         self._ensure_aliases_readable()
         spec = self._roles.declarations.get(alias) if self._roles is not None else None
+        if self._recorded and self._aliases is None:
+            names = self._recorded_names
+            if not isinstance(names, dict):
+                raise ValueError("snapshot names must be a mapping")
+            if alias not in names:
+                raise RoleResolutionError(alias, None, None, "Alias is not bound")
+            value = TypeAdapter(AliasValue).validate_python(names[alias])
+            if not value:
+                raise RoleResolutionError(alias, None, None, "Alias is not bound")
+            return value
         if self._aliases is not None:
             if spec is not None:
                 return self._aliases.resolve(alias, self._point, kind=spec.kind)
@@ -404,7 +581,7 @@ class ParameterContext:
             raise ValueError(f"Expected a library root: {path!r}")
         kind = "waveform" if parts[1] == "waveforms" else "module"
         try:
-            self._library.entry_value(resolved, kind=kind)
+            self.library.entry_value(resolved, kind=kind)
         except KeyError as cause:
             if is_slot:
                 raise ModuleSlotError(f"Dangling module slot: {path!r}") from cause
@@ -433,7 +610,7 @@ class ParameterContext:
             raise
         kind = "waveform" if key.split(".")[1] == "waveforms" else "module"
         try:
-            self._library.entry_value(key, kind=kind)
+            self.library.entry_value(key, kind=kind)
         except KeyError:
             return False
         return True
@@ -466,7 +643,7 @@ class ParameterContext:
         resolved = self.resolve_path(path)
         library_path = self._library_path(resolved)
         if library_path is not None:
-            return self._library.lookup(library_path)
+            return self.library.lookup(library_path)
         return self._point_value(resolved)
 
     def _alias_lookup(self, alias: str) -> DocumentValue:

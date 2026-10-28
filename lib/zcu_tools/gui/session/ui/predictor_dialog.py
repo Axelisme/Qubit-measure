@@ -4,20 +4,13 @@ The optional device control supplies values only. Entry predictor files are read
 prefill. No operation installs a model or writes a component or source file.
 """
 
-# tolerated(file-size): Device polling/subscriptions, transition selection/table and
-# calibration share marker/debounce and persistent-close ordering. Splitting their
-# callbacks would spread that timing across more owners; parameter editing and
-# curve-local state already have dedicated widget owners.
-
 from __future__ import annotations
 
 import logging
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
-
-import numpy as np
+from typing import TYPE_CHECKING
 
 # tolerated: qtpy exposes Signal at runtime but its QtCore stub does not export it.
 from qtpy.QtCore import QTimer, Signal  # pyright: ignore[reportPrivateImportUsage]
@@ -40,27 +33,22 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
-from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.lifetime import LifetimeScope
 from zcu_tools.gui.session.persistence import PersistenceError, SingleFileCaretaker
-from zcu_tools.gui.session.ui.eval_field import EvalNumericField
-from zcu_tools.gui.session.ui.predictor_cache import (
+from zcu_tools.gui.session.predictor_cache import (
     PredictorSnapshot,
     PredictorSnapshotCodec,
 )
-from zcu_tools.gui.session.ui.predictor_curves import (
-    CurveCoordinates,
-    PredictorCurveTabs,
-)
+from zcu_tools.gui.session.predictor_trial import CalibrationReadiness, PredictorTrial
+from zcu_tools.gui.session.ui.eval_field import EvalNumericField
+from zcu_tools.gui.session.ui.predictor_curves import PredictorCurveTabs
 from zcu_tools.gui.session.ui.predictor_flux import PredictorFluxEditor
 from zcu_tools.gui.session.ui.predictor_parameters import PredictorParameterEditor
 from zcu_tools.gui.widgets import error_colour, set_foreground, success_colour
 from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 from zcu_tools.gui.widgets.spinbox import TrimDoubleSpinBox
 from zcu_tools.resources.predictor_file import (
-    PredictorFile,
     PredictorFlux,
-    PredictorSource,
     save_predictor_file,
 )
 from zcu_tools.simulate.parameters import ModelParams
@@ -154,6 +142,7 @@ class PredictorDialog(QDialog):
         super().__init__(parent)
         self._scope = LifetimeScope(self)
         self._pred = predictor
+        self._trial = PredictorTrial(predictor)
         self._dev = device
         self._parameter_provider = parameter_provider or (lambda: None)
         self._persistent_on_close = persistent_on_close
@@ -182,6 +171,7 @@ class PredictorDialog(QDialog):
 
         self._parameter_editor = PredictorParameterEditor(
             predictor,
+            trial=self._trial,
             on_edited=self._on_parameters_changed,
             on_replaced=self._on_parameters_replaced,
             on_status=lambda message, error: self._set_status(message, error=error),
@@ -189,7 +179,7 @@ class PredictorDialog(QDialog):
         )
         controls_layout.addWidget(self._parameter_editor)
         self._flux_editor = PredictorFluxEditor(
-            self._scope.callback(self._on_parameters_changed)
+            self._scope.callback(self._on_parameters_changed), trial=self._trial
         )
         self._scope.add_cleanup(self._flux_editor.retire_callbacks)
         controls_layout.addWidget(self._flux_editor)
@@ -426,13 +416,8 @@ class PredictorDialog(QDialog):
         Provenance is unknown for this local trial. Invalid trial text or I/O
         failures propagate; no component or source file is implicitly updated.
         """
-        params = self.parameters()
-        save_predictor_file(
-            destination,
-            PredictorFile(
-                params.model, params, self.flux(), PredictorSource(None, None)
-            ),
-        )
+        self._parameter_editor.refresh_errors()
+        save_predictor_file(destination, self._trial.predictor_file())
 
     def _on_save_as_clicked(self) -> None:
         filename, _filter = QFileDialog.getSaveFileName(
@@ -480,17 +465,8 @@ class PredictorDialog(QDialog):
         Values are detached from component storage. Invalid editable inputs raise
         PredictorInputError; blank device values are omitted.
         """
-        params = self.parameters()
-        flux = self.flux() if self._flux_editor.has_frame() else None
-        return PredictorSnapshot(
-            model=params.model,
-            params=params,
-            flux=flux.to_dict() if flux is not None else None,
-            device_values=self._flux_editor.known_device_values(),
-            axis_device=self._flux_editor.axis_device()
-            if flux is not None and flux.period
-            else None,
-        )
+        self._parameter_editor.refresh_errors()
+        return self._trial.snapshot()
 
     def restore_persisted_state(self, state: PredictorSnapshot) -> None:
         """Restore cached model, params, flux, device_values and axis_device locally.
@@ -498,13 +474,9 @@ class PredictorDialog(QDialog):
         Missing flux clears the frame; missing device values remain blank. No
         component storage or source predictor file is changed.
         """
-        self._flux_editor.set_flux(
-            PredictorFlux.from_mapping(state.flux) if state.flux is not None else None,
-            state.device_values,
-        )
-        if state.axis_device is not None:
-            self._flux_editor.set_axis_device(state.axis_device)
-        self.set_parameters(state.params)
+        self._trial.restore(state)
+        self._flux_editor.refresh_from_trial()
+        self._parameter_editor.refresh_from_trial()
 
     def _save_parameters(self) -> None:
         if self._caretaker is not None:
@@ -547,14 +519,8 @@ class PredictorDialog(QDialog):
 
     def predict_frequency(self, transition: tuple[int, int] = (0, 1)) -> float:
         """Return MHz at all current native trial values; invalid inputs raise."""
-        from zcu_tools.gui.session.services.predictor import PredictFreqRequest
-
-        return self._pred.predict_freq(
-            self.parameters(),
-            PredictFreqRequest(
-                self.flux().to_frame(), self.device_values(), transition
-            ),
-        )
+        self._parameter_editor.refresh_errors()
+        return self._trial.predict_frequency(transition)
 
     def calibrate(
         self, frequency_mhz: float, transition: tuple[int, int] = (0, 1)
@@ -566,14 +532,7 @@ class PredictorDialog(QDialog):
         Return correction, actual MHz and clamped. Failures leave inputs unchanged.
         Neither the component nor the source predictor file is written.
         """
-        from zcu_tools.gui.session.services.predictor import CalibrateOffsetRequest
-
-        result = self._pred.calibrate_offset(
-            self.parameters(),
-            CalibrateOffsetRequest(
-                self.flux().to_frame(), self.device_values(), frequency_mhz, transition
-            ),
-        )
+        result = self._trial.calibrate(frequency_mhz, transition)
         self._display_calibration(result)
         return result
 
@@ -778,64 +737,32 @@ class PredictorDialog(QDialog):
         """Return all currently selected transitions for canvas highlighting."""
         return tuple(self._selected_transitions())
 
-    def _resolve_calibration_frequency_mhz(
-        self, *, update_status: bool = True
-    ) -> float | None:
-        from zcu_tools.gui.session.expression import (
-            EvalRef,
-            coerce_eval_result,
-            evaluate_numeric_expr,
+    def _resolve_calibration_frequency_mhz(self) -> float | None:
+        resolved = self._trial.resolve_calibration_frequency_mhz(
+            self._calibration_freq_field.read_raw(), self._parameter_provider
         )
+        if resolved.error is not None:
+            self._set_status(f"Calibration frequency: {resolved.error}", error=True)
+        return resolved.frequency_mhz
 
-        raw = self._calibration_freq_field.read_raw()
-        if not isinstance(raw, EvalRef):
-            return float(raw)
-        try:
-            parameters = self._parameter_provider()
-            resolved = coerce_eval_result(
-                evaluate_numeric_expr(raw.expr, parameters), raw.type_
-            )
-        # tolerated: Arbitrary capture/source failures must block calibration and retain the diagnostic message.
-        except Exception as exc:  # noqa: BLE001
-            if update_status:
-                self._set_status(f"Calibration frequency: {exc}", error=True)
-            return None
-        if not (raw.minimum <= float(resolved) <= raw.maximum):
-            if update_status:
-                self._set_status(
-                    f"Calibration frequency: value {resolved} out of range",
-                    error=True,
-                )
-            return None
-        return float(resolved)
-
-    def _calibration_block_status(self) -> tuple[str, bool] | None:
-        if self._live_mode:
-            return ("Live mode keeps calibration read-only.", False)
-        try:
-            self.parameters().build_predictor()
-            self.flux()
-            self.device_values()
-        except PredictorInputError as exc:
-            return (str(exc), True)
-        selected = self._selected_transitions()
-        if len(selected) != 1:
-            return ("Select exactly one transition to calibrate.", True)
-        if self._resolve_calibration_frequency_mhz(update_status=False) is None:
-            return ("Calibration frequency is unresolved.", True)
-        return None
+    def _calibration_block_status(self) -> CalibrationReadiness | None:
+        return self._trial.calibration_readiness(
+            live_mode=self._live_mode,
+            selected=self._selected_transitions(),
+            frequency=self._calibration_freq_field.read_raw(),
+            parameter_provider=self._parameter_provider,
+        )
 
     def _sync_calibration_button(self) -> None:
         status = self._calibration_block_status()
-        reason = status[0] if status is not None else None
+        reason = status.reason if status is not None else None
         self._calibrate_btn.setEnabled(reason is None)
         self._calibrate_btn.setToolTip("" if reason is None else reason)
 
     def _on_calibrate_clicked(self) -> None:
         block_status = self._calibration_block_status()
         if block_status is not None:
-            reason, is_error = block_status
-            self._set_status(reason, error=is_error)
+            self._set_status(block_status.reason, error=block_status.is_error)
             self._sync_calibration_button()
             return
         frequency_mhz = self._resolve_calibration_frequency_mhz()
@@ -850,7 +777,7 @@ class PredictorDialog(QDialog):
             self._set_status(str(exc), error=True)
 
     def _display_calibration(self, result: CalibrationResult) -> None:
-        self._flux_editor.set_offset(self.flux().offset + result.offset_correction)
+        self._flux_editor.refresh_offset()
         self._set_status(
             f"Calibrated offset={self.flux().offset:.6g} Φ0 "
             f"(correction {result.offset_correction:+.6g} Φ0); "
@@ -866,41 +793,20 @@ class PredictorDialog(QDialog):
         is as accurate as possible.  Expected unavailable-model failures show "—";
         unexpected backend failures fail the whole update once to avoid log storms.
         """
-        from zcu_tools.gui.session.services.predictor import (
-            PredictFreqRequest,
-        )
-
-        marker_value = self._predict_value_spin.value()
+        self._parameter_editor.refresh_errors()
         try:
-            for row_idx, transition in enumerate(self._tracked):
-                # Freq column: per-row scalar predict_freq (most accurate)
-                try:
-                    freq = self._pred.predict_freq(
-                        self.parameters(),
-                        PredictFreqRequest(
-                            self.flux().to_frame(), self.device_values(), transition
-                        ),
-                    )
-                    freq_text = f"{freq:.4f}"
-                except (FailedPreconditionError, PredictorInputError):
-                    freq_text = "—"
-
-                freq_item = self._table.item(row_idx, _COL_FREQ)
-                if freq_item is not None:
-                    freq_item.setText(freq_text)
-
-                # |n| and |phi| columns: one single-point matrix curve call per
-                # operator (avoids the level<=1 cap in predict_matrix_element).
-                n_item = self._table.item(row_idx, _COL_MAG_N)
-                if n_item is not None:
-                    n_item.setText(
-                        self._point_matrix_text(marker_value, transition, "n")
-                    )
-                phi_item = self._table.item(row_idx, _COL_MAG_PHI)
-                if phi_item is not None:
-                    phi_item.setText(
-                        self._point_matrix_text(marker_value, transition, "phi")
-                    )
+            rows = self._trial.row_values(
+                tuple(self._tracked), self._predict_value_spin.value()
+            )
+            for row_idx, values in enumerate(rows):
+                for column, value, digits in (
+                    (_COL_FREQ, values.freq_mhz, 4),
+                    (_COL_MAG_N, values.mag_n, 5),
+                    (_COL_MAG_PHI, values.mag_phi, 5),
+                ):
+                    item = self._table.item(row_idx, column)
+                    if item is not None:
+                        item.setText("—" if value is None else f"{value:.{digits}f}")
         except Exception as exc:
             logger.exception("predictor value-column update failed")
             self._set_status(str(exc), error=True)
@@ -913,43 +819,17 @@ class PredictorDialog(QDialog):
                 if item is not None:
                     item.setText(text)
 
-    def _point_matrix_text(
-        self, value: float, transition: tuple[int, int], operator: Literal["n", "phi"]
-    ) -> str:
-        """|<i|operator|j>| at a single device value, formatted, or "—" on expected failure."""
-        from zcu_tools.gui.session.services.predictor import (
-            PredictMatrixCurveRequest,
-        )
-
-        try:
-            mat_result = self._pred.predict_matrix_element_curve(
-                self.parameters(),
-                PredictMatrixCurveRequest(
-                    frame=self.flux().to_frame(),
-                    axis_device=self._flux_editor.axis_device(),
-                    device_values=self.device_values(),
-                    values=np.array([value], dtype=np.float64),
-                    transitions=(transition,),
-                    operator=operator,
-                ),
-            )
-            return f"{mat_result.mags[0, 0]:.5f}"
-        except (FailedPreconditionError, PredictorInputError):
-            return "—"
-
     # ------------------------------------------------------------------
     # Curve refresh
     # ------------------------------------------------------------------
 
     def _refresh_curves(self) -> None:
         """Refresh the curve view, then settle table values only after successful rendering."""
+        self._parameter_editor.refresh_errors()
         try:
-            coordinates = CurveCoordinates(
-                self.flux().to_frame(),
-                self._flux_editor.axis_device(),
-                self.device_values(),
-            )
-            params = self.parameters()
+            inputs = self._trial.inputs(for_curves=True)
+            coordinates = inputs.curve_coordinates()
+            params = inputs.params
         except PredictorInputError as exc:
             self._clear_predictor_display()
             self._set_status(str(exc), error=True)

@@ -11,6 +11,7 @@ from zcu_tools.cfg_model import (
     ConstWaveformCfg,
     GaussWaveformCfg,
     PulseSpec,
+    ReadoutClassifier,
 )
 from zcu_tools.gui.app.measure.remote.form_description import recipe_field_wire
 from zcu_tools.gui.app.measure.remote.form_errors import recipe_form_errors
@@ -32,6 +33,7 @@ from ._support import make_client
 
 class ReadTone(ConfigBase):
     gain: float = 0.2
+    classifier: ReadoutClassifier | None = None
 
 
 class PrimitiveCfg(ConfigBase):
@@ -193,6 +195,48 @@ def test_read_dotted_paths_observes_nested_fields_and_original_list_indexes(
         assert tab.read("tones.1.gain").value == 0.7
         assert tab.read("pulse.waveform.sigma").value == 0.2
         assert tab.read("count").value == 1
+        return Report(count=inputs.count)
+
+    client = make_client(tmp_path, respond, recipes=(synthetic,))
+    try:
+        execution = start(client, "synthetic")
+        execution.join()
+        assert execution.snapshot().status == "completed", execution.snapshot()
+    finally:
+        client.context.session.close()
+
+
+def test_indexed_classifier_choices_and_edits_share_logical_paths(
+    tmp_path: Path,
+    form_owner: tuple[TabFormResource, Responder],
+) -> None:
+    _owner, respond = form_owner
+
+    @api.recipe("synthetic", "Edit independent classifier branches by original index")
+    async def synthetic(session: api.RecipeSession, inputs: Inputs) -> Report:
+        tab = session.open_tab("synthetic")
+        assert tab.read("tones.1.classifier").value is None
+        tab.select("tones.1.classifier", "linear")
+        assert set(tab.read("tones.1.classifier").fields) == {
+            "angle",
+            "threshold",
+            "confusion_matrix",
+        }
+        tab.set("tones.1.classifier.angle", 0.25)
+        tab.set("tones.1.classifier.threshold", 3.5)
+        assert tab.read("tones.1.classifier.threshold").value == 3.5
+        assert tab.read("tones.0.classifier").value is None
+        tab.select("tones.0.classifier", "circle")
+        tab.set("tones.0.classifier.g_center", 1 + 2j)
+        tab.set("tones.0.classifier.e_center", 3 + 4j)
+        assert tab.read("tones.0.classifier.g_center").value == {
+            "__complex__": [1.0, 2.0]
+        }
+        tab.select("tones.1.classifier", "circle")
+        assert "g_center" in tab.read("tones.1.classifier").fields
+        assert tab.read("tones.0.classifier.e_center").value == {
+            "__complex__": [3.0, 4.0]
+        }
         return Report(count=inputs.count)
 
     client = make_client(tmp_path, respond, recipes=(synthetic,))

@@ -18,6 +18,7 @@ from zcu_tools.gui.session.types import SessionEnv
 from zcu_tools.resources.context.library import LibrarySnapshot, ModuleLibraryDocument
 
 from tests.gui._qt_waits import qt_until
+from tests.gui.app.measure._record_support import require_target
 from tests.gui.app.measure.remote._helpers import Fixture
 from tests.resources.entry.fakes import register_fakes, registry_state, restore_registry
 
@@ -36,9 +37,11 @@ def library_app(qapp, tmp_path: Path):
         control = fx.ctrl.context_control
         control.add_component("Q1", "fake/drive/a", {})
         parameters = control.read_context()
-        control.set_waveform(parameters.target, WAVEFORM, ConstWaveformCfg(length=0.1))
+        control.set_waveform(
+            require_target(parameters), WAVEFORM, ConstWaveformCfg(length=0.1)
+        )
         control.set_module(
-            parameters.target,
+            require_target(parameters),
             PULSE,
             PulseSpec(ch=0, nqz=1, freq=100.0, gain=0.2, waveform=WAVEFORM),
         )

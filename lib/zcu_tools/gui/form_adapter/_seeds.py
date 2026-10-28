@@ -20,7 +20,7 @@ from zcu_tools.gui.form import FormEnv, static_defaults
 from zcu_tools.gui.session.parameters import ModuleSlotError
 from zcu_tools.resources.entry.roles import RoleResolutionError
 
-from ._types import members, type_tag
+from ._types import branch_tag, members, type_tag
 
 
 def slot_key(slot: Slot, env: FormEnv) -> str | None:
@@ -158,17 +158,14 @@ def selected_model(
     )
     if len(models) == 1:
         return models[0]
-    matches: list[type[BaseModel]] = []
-    for model in models:
-        for tag in ("type", "style", "kind"):
-            info = model.model_fields.get(tag)
-            if (
-                info is not None
-                and get_origin(info.annotation) is Literal
-                and data.get(tag) in get_args(info.annotation)
-            ):
-                matches.append(model)
-                break
+    tag = branch_tag(models)
+    matches = [
+        model
+        for model in models
+        if tag is not None
+        and tag in data
+        and data[tag] in get_args(model.model_fields[tag].annotation)
+    ]
     if len(matches) != 1:
         raise ValueError(f"Expected one tagged inline Spec branch, got {dict(data)!r}")
     return matches[0]
@@ -209,6 +206,24 @@ def supported_input(
     return result
 
 
+def disabled_model_defaults(model: type[BaseModel]) -> dict[str, JsonValue]:
+    """Make default-None model unions explicit for generated selector display.
+
+    Required nullable fields stay missing. Scalar None defaults keep the core
+    static-default policy, allowing before validators to derive ordinary values.
+    """
+    return {
+        name: None
+        for name, info in model.model_fields.items()
+        if info.default is None
+        and sum(
+            isinstance(member, type) and issubclass(member, BaseModel)
+            for member in members(info.annotation)
+        )
+        > 1
+    }
+
+
 def complete_input(
     model: type[BaseModel],
     authored: Mapping[str, JsonValue],
@@ -227,6 +242,7 @@ def complete_input(
         paths = sorted(".".join((*path, name)) for name in unknown)
         raise ValueError(f"Unknown or unsupported seeds for {model.__name__}: {paths}")
     data = persistent_input(model, static_defaults(model))
+    data = disabled_model_defaults(model) | data
     data.update(authored)
     for name, value in tuple(data.items()):
         info = model.model_fields[name]

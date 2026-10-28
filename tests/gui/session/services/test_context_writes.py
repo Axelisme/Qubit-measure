@@ -6,7 +6,6 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Literal
-from uuid import uuid4
 
 import pytest
 from pydantic import ValidationError
@@ -37,13 +36,9 @@ from zcu_tools.resources.entry import (
     document_meta,
     snapshot,
 )
-from zcu_tools.resources.entry.ledger_models import (
-    AcceptedPayload,
-    AcceptedWrite,
-    LedgerEvent,
-)
-from zcu_tools.resources.entry.provenance import Provenance
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
+
+from tests.gui.app.measure._record_support import require_target
 
 Kind = Literal["parameter", "module", "waveform"]
 KINDS: tuple[Kind, ...] = ("parameter", "module", "waveform")
@@ -77,7 +72,6 @@ def _write(
     kind: Kind,
     number: float,
     *,
-    source: Provenance | None = None,
     metadata: YamlMap | None = None,
     path: str | None = None,
 ) -> None:
@@ -99,12 +93,9 @@ def _write(
             PulseSpec(
                 ch=0, nqz=1, freq=100.0, gain=number, waveform="Q1.waveforms.missing"
             ),
-            source=source,
         )
     else:
-        control.set_waveform(
-            target, destination, ConstWaveformCfg(length=number), source=source
-        )
+        control.set_waveform(target, destination, ConstWaveformCfg(length=number))
 
 
 def _value(capture: ParameterContext, kind: Kind) -> YamlValue:
@@ -113,11 +104,6 @@ def _value(capture: ParameterContext, kind: Kind) -> YamlValue:
     if kind == "module":
         return capture.library.entry_value("Q1.pulses.pi", kind="module")["gain"]
     return capture.library.entry_value("Q1.waveforms.base", kind="waveform")["length"]
-
-
-def _library_meta(capture: ParameterContext, kind: Kind) -> Provenance | None:
-    path = {"module": "Q1.pulses.pi.gain", "waveform": "Q1.waveforms.base.length"}[kind]
-    return capture.library.meta(path)
 
 
 def _select(session: _Session, label: str) -> SavedPoint:
@@ -150,7 +136,7 @@ def test_read_target_observes_detached_writes_without_selecting_or_publishing(
 
 
 def test_read_target_rejects_other_entries(session: _Session) -> None:
-    target = SavedPoint(entry_id="other", point="a")
+    target = SavedPoint(entry_name="other", point="a")
     before = session.state.session_env
     with pytest.raises(FailedPreconditionError) as error:
         session.control.read_target(target)
@@ -159,27 +145,10 @@ def test_read_target_rejects_other_entries(session: _Session) -> None:
 
 
 def test_read_target_missing_point_does_not_create_it(session: _Session) -> None:
-    target = SavedPoint(entry_id=session.entry.entry_id, point="missing")
+    target = SavedPoint(entry_name=session.entry.result_path.name, point="missing")
     with pytest.raises(FileNotFoundError):
         session.control.read_target(target)
     assert session.entry.list_points() == []
-
-
-def _source(entry: ResultEntry) -> Provenance:
-    event_id = str(uuid4())
-    entry.ledger.append(
-        LedgerEvent(
-            id=event_id,
-            kind="accepted",
-            at=AT,
-            entry_id=entry.entry_id,
-            origin="gui",
-            payload=AcceptedPayload(
-                writes=(AcceptedWrite(path="general.ext.flux_value", value=0.2),),
-            ),
-        )
-    )
-    return Provenance(event_id, "fit", None, AT, 0.01)
 
 
 def _persisted(entry: ResultEntry, target: SavedPoint, kind: Kind) -> YamlValue:
@@ -214,27 +183,16 @@ def test_parameter_setter_commits_caller_metadata_and_keeps_old_capture(
 
 
 @pytest.mark.parametrize("kind", ["module", "waveform"])
-@pytest.mark.parametrize("explicit_source", [False, True], ids=["manual", "accepted"])
-def test_library_setters_preserve_source_and_old_capture(
-    session: _Session, kind: Kind, explicit_source: bool
-) -> None:
+def test_library_setters_preserve_old_capture(session: _Session, kind: Kind) -> None:
     target = _select(session, "a")
     capture = session.control.read_context()
     old_document = capture.document()
     old_library = capture.library.document()
-    created_at = old_document.general.created_at
-    source = _source(session.entry) if explicit_source else None
-    _write(session.control, target, kind, 0.2, source=source)
+    created_at = capture.whole_document().general.created_at
+    _write(session.control, target, kind, 0.2)
     current = session.control.read_context()
     assert _value(current, kind) == pytest.approx(0.2)
-    provenance = _library_meta(current, kind)
-    assert provenance is not None
-    if source is None:
-        assert provenance.source == "manual" and provenance.kind is None
-    else:
-        assert provenance == source
-    assert provenance.cloned_from is None
-    assert current.document().general.created_at == created_at
+    assert current.whole_document().general.created_at == created_at
     assert capture.document() == old_document
     assert capture.library.document() == old_library
     assert _persisted(session.entry, target, kind) == pytest.approx(0.2)
@@ -267,13 +225,26 @@ def test_detached_saved_point_write_keeps_current_point_and_publication(
 
 
 @pytest.mark.parametrize("kind", KINDS)
+@pytest.mark.parametrize("copied", [False, True])
 def test_cross_entry_target_rejected_before_any_write(
-    session: _Session, tmp_path: Path, kind: Kind
+    session: _Session, tmp_path: Path, kind: Kind, copied: bool
 ) -> None:
     old_target = _select(session, "a")
-    other = ResultEntry.create(
-        "other", result_root=tmp_path / "Result", database_root=tmp_path / "Database"
-    )
+    if copied:
+        from shutil import copytree
+
+        copytree(session.entry.result_path, tmp_path / "Result" / "other")
+        other = ResultEntry.open(
+            "other",
+            result_root=tmp_path / "Result",
+            database_root=tmp_path / "Database",
+        )
+    else:
+        other = ResultEntry.create(
+            "other",
+            result_root=tmp_path / "Result",
+            database_root=tmp_path / "Database",
+        )
     session.service.install_entry(other)
     current = session.state.session_env
     with pytest.raises(FailedPreconditionError) as error:
@@ -281,25 +252,7 @@ def test_cross_entry_target_rejected_before_any_write(
     assert error.value.reason_code == "entry_not_open"
     assert session.state.session_env == current
     assert session.entry.list_points() == ["a"]
-    assert other.list_points() == []
-
-
-@pytest.mark.parametrize("kind", ["module", "waveform"])
-def test_invalid_library_source_keeps_projection_and_version(
-    session: _Session, kind: Kind
-) -> None:
-    target = _select(session, "a")
-    capture = session.control.read_context()
-    version = session.state.version.get("context")
-    bad = Provenance(str(uuid4()), "fit", None, AT, 0.01)
-    with pytest.raises(ValueError, match="source.*does not exist") as error:
-        _write(session.control, target, kind, 0.2, source=bad)
-    assert error.value.__cause__ is not None
-    assert session.control.read_context().document() == capture.document()
-    assert (
-        session.control.read_context().library.document() == capture.library.document()
-    )
-    assert session.state.version.get("context") == version
+    assert other.list_points() == (["a"] if copied else [])
 
 
 def test_invalid_parameter_schema_is_not_published(session: _Session) -> None:
@@ -438,7 +391,7 @@ def test_missing_saved_point_is_not_created_by_setter(
     kind: Kind,
 ) -> None:
     _select(session, "selected")
-    target = SavedPoint(entry_id=session.entry.entry_id, point="missing")
+    target = SavedPoint(entry_name=session.entry.result_path.name, point="missing")
     capture = session.control.read_context()
     with pytest.raises(FileNotFoundError):
         _write(session.control, target, kind, 0.2)
@@ -492,9 +445,7 @@ def test_shared_writeback_entry_retains_order_metadata_and_failure_prefix(
                 writeback.ParameterWriteback("general.description", 42),
                 writeback.ParameterWriteback("general.ext.later", 3.0),
             ),
-            evidence=writeback.WritebackEvidence(
-                kind="test/ordered", origin="gui", run_id="run-1"
-            ),
+            evidence=writeback.WritebackEvidence(origin="gui", run_id="run-1"),
         )
     error = caught.value
     assert error.applied == 0
@@ -502,7 +453,7 @@ def test_shared_writeback_entry_retains_order_metadata_and_failure_prefix(
     event = session.entry.ledger.get(error.event_id).event
     assert event.kind == "accepted"
     current = session.control.read_target(target)
-    assert current.document().general.description is None
+    assert current.whole_document().general.description is None
     assert not current.lookup("general.ext.later").present
     assert current.library.waveform_keys() == ()
     assert document_meta(current.document(), "general.description") is None
@@ -536,45 +487,12 @@ def test_grouped_writeback_publishes_one_fact_per_committed_document(
             ),
             writeback.ParameterWriteback("general.ext.fit.gain", 0.2),
         ),
-        evidence=writeback.WritebackEvidence(kind="test/grouped", origin="gui"),
+        evidence=writeback.WritebackEvidence(origin="gui"),
     )
     assert [type(event) for event in events] == [MdChangedPayload, MlChangedPayload]
     assert session.state.version.get("context") == before + 2
     assert [item.value for item in result.committed[:2]] == [{"gain": 0.1}, 0.2]
     assert session.control.read_context().value("general.ext.fit.gain") == 0.2
-
-
-@pytest.mark.parametrize("kind", ["module", "waveform"])
-@pytest.mark.parametrize("stderr", [-0.1, float("inf")])
-def test_library_writeback_rejects_invalid_uncertainty_before_acceptance(
-    session: _Session, kind: str, stderr: float
-) -> None:
-    from zcu_tools.resources.entry import writeback
-
-    target = _select(session, "a")
-    capture = session.control.read_context()
-    version = session.state.version.get("context")
-    waveform = ConstWaveformCfg(length=0.1)
-    item = (
-        writeback.ModuleWriteback(
-            "Q1.pulses.pi",
-            PulseSpec(ch=0, nqz=1, freq=100.0, gain=0.2, waveform=waveform),
-            stderr=stderr,
-        )
-        if kind == "module"
-        else writeback.WaveformWriteback("Q1.waveforms.base", waveform, stderr=stderr)
-    )
-    with pytest.raises(ValueError, match="stderr"):
-        session.control.apply_writeback(
-            target,
-            (item,),
-            evidence=writeback.WritebackEvidence(kind="test/uncertainty", origin="gui"),
-        )
-    assert session.entry.ledger.events() == ()
-    assert (
-        session.control.read_context().library.document() == capture.library.document()
-    )
-    assert session.state.version.get("context") == version
 
 
 def test_shared_writeback_entry_uses_detached_saved_target(
@@ -586,7 +504,7 @@ def test_shared_writeback_entry_uses_detached_saved_target(
     second = _select(session, "b")
     version = session.state.version.get("context")
     item = writeback.ParameterWriteback("general.description", "detached")
-    evidence = writeback.WritebackEvidence(kind="test/fixed", origin="mcp")
+    evidence = writeback.WritebackEvidence(origin="mcp")
     result = session.control.apply_writeback(first, (item,), evidence=evidence)
     event_id = result.event_id
     assert [(item.path, item.value) for item in result.committed] == [
@@ -613,15 +531,13 @@ def test_sample_only_writeback_rejects_invalid_saved_point_before_acceptance(
     points = session.entry.list_points()
     point_before = snapshot(session.entry.use_point("a")).model_dump(mode="json")
     version = session.state.version.get("context")
-    target = SavedPoint(entry_id=session.entry.entry_id, point=label)
+    target = SavedPoint(entry_name=session.entry.result_path.name, point=label)
 
     with pytest.raises(error_type):
         session.service.apply_writeback(
             target,
             (writeback.RecordWriteback("Q1", {"t1_us": 50}),),
-            evidence=writeback.WritebackEvidence(
-                kind="test/sample", origin="gui", run_id="run-1"
-            ),
+            evidence=writeback.WritebackEvidence(origin="gui", run_id="run-1"),
         )
 
     assert session.entry.ledger.events() == ()
@@ -651,9 +567,7 @@ def test_saved_point_samples_persist_and_replace_latest_run_row(
             ),
             writeback.ParameterWriteback("general.description", "draft value"),
         ),
-        evidence=writeback.WritebackEvidence(
-            kind="test/sample", origin="gui", run_id="run-1"
-        ),
+        evidence=writeback.WritebackEvidence(origin="gui", run_id="run-1"),
     )
     event_id = result.event_id
     event = session.entry.ledger.get(event_id).event
@@ -674,11 +588,9 @@ def test_saved_point_samples_persist_and_replace_latest_run_row(
     assert session.control.read_record(target, "Q1", "run-1") == expected
     assert session.control.read_record(target, "Q1", "missing") is None
     second = session.control.apply_writeback(
-        session.control.read_context().target,
+        require_target(session.control.read_context()),
         (writeback.RecordWriteback("Q1", {"t1_us": 31.7}),),
-        evidence=writeback.WritebackEvidence(
-            kind="test/sample", origin="gui", run_id="run-1"
-        ),
+        evidence=writeback.WritebackEvidence(origin="gui", run_id="run-1"),
     )
     second_id = second.event_id
     second_row = session.entry.records("Q1").read().iloc[0].to_dict()
@@ -686,7 +598,7 @@ def test_saved_point_samples_persist_and_replace_latest_run_row(
         session.entry.ledger.get(second_id).event.at
     )
     assert session.control.read_record(
-        session.control.read_context().target, "Q1", "run-1"
+        require_target(session.control.read_context()), "Q1", "run-1"
     ) == {
         "component": "Q1",
         "t1_us": 31.7,

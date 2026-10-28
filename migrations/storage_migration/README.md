@@ -1,6 +1,6 @@
 # `migrations.storage_migration` 離線遷移
 
-**Last updated:** 2026-10-28，v2 predictor publication 與缺證據保全
+**Last updated:** 2026-10-29，migration ownership token 與歷史欄位拒絕
 
 **讀者：** framework-dev、agent。維護離線遷移的來源 mapping、owner 接縫與可續跑 publication。
 
@@ -203,7 +203,7 @@ RunMetadata、RunSnapshot 與 SoftwareProvenance 由 [experiment](../../lib/zcu_
 
 - `backup.py` 擁有鏡像位置、完整複製、清單驗證與清理。Manifest 綁定兩份清單的 SHA256 及來源完整 hashes。每次 resume 只驗證本次鏡像，不重做備份，也不要求其他 chip/qubit 的內容固定。已搬移或已清理的來源不必存在。未完成的備份不授權遷移。初始化中斷可用原指令重跑，不要求手動刪 entry 或備份。工具只認領本工具紀錄擁有的 entry，不刪共用根或其他備份。舊每-entry 備份不提供相容讀取或自動搬移。
 
-- `initialization.py` 在首次備份或 entry 寫入前，將 typed ownership 存到 `migration-records/<chip>/<qubit>/migration-initialization.json`。紀錄固定來源完整清單、request identity、宣告、mapping 版本、entry UUID、setup 建立時間與報告日期／路徑，保留未知 wire 欄位。只有這份紀錄或正式 manifest 能認領 entry。
+- `initialization.py` 在首次備份或 entry 寫入前，將 typed ownership 存到 `migration-records/<chip>/<qubit>/migration-initialization.json`。紀錄固定來源完整清單、request identity、宣告、mapping 版本、migration_id 操作 token、setup 建立時間與報告日期／路徑，保留未知 wire 欄位。只有這份紀錄或正式 manifest 能認領 entry。migration_id 只屬於一次遷移操作，不用於 entry 歸屬。暫存名稱使用 .migration-operation-<migration_id.hex>。舊 manifest、report 或 initialization 含 entry_id ownership 時，公開操作拒絕並指名檔案，不讀舊值、不轉換、不刪來源或備份。Operator 需用舊版完成，或確認後自行處理。
 
 - 初始化先以 `ResultEntry.create(identity=EntryIdentity(...))` 在 Result root 的已記錄暫存名稱建完整 entry，再只 rename Result 到正式名稱。Database 不建立 staging，也不參與 rename，首次 data publication 才建立所需目錄。遷移仍要求未認領的兩個目的都不存在，這是保護目的資料的 preflight，不是一般 entry create／open 的條件。重跑只可刪紀錄指名且尚未發布的 Result 暫存目錄，不能刪正式 entry。Prepared 狀態保存 owner 產物清單，重跑先用公開 schema 比較 YAML，包含未知原文，再核其他檔案 SHA256 與所有目錄。排版不算差異，既有相同檔案不重寫。Result rename 後中斷時驗證正式目錄，再落正式 manifest。這不提供掉電交易或並行 writer 保證。
 

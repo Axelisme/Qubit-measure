@@ -405,9 +405,6 @@ def test_parameters_publish_canonical_specs_references_units_and_manual_sources(
     module = entry.use_point("context").C1.module
     assert isinstance(module, FieldView)
     assert module.chosen == "C1.pulses.pi"
-    provenance = snapshot.meta("C1.pulses.pi.freq")
-    assert provenance is not None and provenance.source == "manual"
-    assert provenance.run_id is None and provenance.cloned_from is None
     assert entry.ledger.events() == ()
     decisions = {
         (item.library_kind, item.old_key): item.new_path

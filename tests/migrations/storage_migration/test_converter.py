@@ -128,7 +128,7 @@ def test_native_is_readable_and_validated_before_source_removal(
     )
     assert moved.read_bytes() == before
     stored = read_migrated(observed[0])
-    assert stored.metadata.snapshot.entry_id == report.entry_id
+    assert stored.metadata.snapshot.entry_name == report.destination.result_path.name
     manifest = json.loads(manifest_path(request).read_text())
     assert request.run_evidence is not None
     assert manifest["evidence"] == request.run_evidence.raw
@@ -219,7 +219,7 @@ def test_missing_evidence_is_pending_and_can_be_supplied_on_resume(
         validate_cfg=validate_cfg,
         validate_native=noop_validation,
     )
-    assert report.entry_id == initial.entry_id
+    assert report.migration_id == initial.migration_id
     assert not report.pending
     assert not source.exists()
 

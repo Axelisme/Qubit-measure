@@ -178,7 +178,7 @@ def test_original_start_context_and_injected_handles_are_shared(rig: Rig) -> Non
 
 
 def test_author_identity_matches_supplied_run_and_saved_manifest(rig: Rig) -> None:
-    supplied = replace(identity(), entry_id="point-7", entry_label="Sample point")
+    supplied = replace(identity(), entry_name="entry", entry_label="Sample point")
     observed: list[RunIdentity] = []
 
     @workflow("identity", "Expose the existing workflow run identity to savers")

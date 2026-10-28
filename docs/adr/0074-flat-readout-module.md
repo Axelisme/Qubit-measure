@@ -77,6 +77,17 @@ Radius 提供時須有限且 >0；None 表示尚未提供 Post 半徑校準。
 Core/native conversion、library 與 data.h5 cfg 都保留 classifier，不升容器版本。
 舊條目沒有 classifier 時讀為 None，不從其他參數補值。
 
+Readout 工具從 cfg 產生以 ADC channel 為 key 的型別化 mapping，由作者明確交給 acquire。
+Acquire 不掃 program registry，mapping 必須完整覆蓋已宣告 ADC，不混合 IQ 與 population。
+未傳 classify 保留 IQ 路徑。Linear 以旋轉後實部大於 threshold 判 excited，等於時判 ground。
+
+單 qubit GE Primary 提出只有中心的 circle，Post 提出含中心、radius 與 matrix 的完整 circle。
+兩者都是完整 module replacement，同次批次依 Primary→Post 接受。
+分兩次 Apply 時最後一次生效，Post→Primary 會回到只有中心。
+需要 radius 的 consumer 因此提示做 Post。T1 需要 other，不接受 linear。
+舊 cfg 沒有 classifier 時，T1 分析略過 confusion 修正，不讀 point 校準。
+GE 以 run 的 readout slot 解析目標，proposal builder 與 materialized 比對契約見 [[0008]]。
+
 ### Owner 不變，caller 不重建舊配置
 
 `cfg_model` 擁有 Spec、cfg 驗證、引用展開與參數設定。

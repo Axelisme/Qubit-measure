@@ -747,7 +747,7 @@ def load_browser(
     ["available", "empty", "foreign", "pointless", "missing"],
     indirect=True,
 )
-def test_new_analysis_tab_projects_the_same_load_source_reason(
+def test_new_analysis_tab_loads_without_requiring_live_entry_or_point(
     load_browser: tuple[ComponentDriver, str],
     live_ui: tuple[NativeSaveSession, Controller, MainWindow, str],
     qapp: QApplication,
@@ -761,24 +761,10 @@ def test_new_analysis_tab_projects_the_same_load_source_reason(
     assert qapp.activeWindow() is live_ui[2]
     tabs = ui.tabs("saving")
     assert tabs.current == tabs.captions[-1]
-    if variant == "available":
-        assert feedback.startswith("Loaded history:")
-        assert "history.analysis_source" not in {
-            w.object_name for w in ui.visible().widgets
-        }
-    else:
-        expected = {
-            "empty": "No active context is available",
-            "foreign": "Historical entry differs from the opened entry",
-            "pointless": "Historical metadata has no point",
-            "missing": "Historical point 'missing' is unavailable",
-        }[variant]
-        assert (
-            "History loaded, no analysis source:" in feedback and expected in feedback
-        )
-        tab_message = ui.observe(object_name="history.analysis_source")
-        assert tab_message.visible and expected in tab_message.text
-        assert "History loaded, no analysis source:" in tab_message.text
+    assert feedback.startswith("Loaded history:")
+    assert "history.analysis_source" not in {
+        w.object_name for w in ui.visible().widgets
+    }
     ui.screenshot(tmp_path / f"load-{variant}.png")
 
 

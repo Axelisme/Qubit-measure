@@ -2,8 +2,10 @@
 
 import math
 import re
+from copy import deepcopy
+from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Annotated, Literal, Self
+from typing import Annotated, Literal, Self, get_args, get_origin
 from uuid import UUID
 
 from pydantic import (
@@ -13,13 +15,21 @@ from pydantic import (
     ConfigDict,
     Field,
     StrictStr,
+    TypeAdapter,
     ValidationInfo,
     field_validator,
     model_validator,
 )
+from pydantic_core import (
+    PydanticUndefined,
+    SchemaSerializer,
+    SchemaValidator,
+    core_schema,
+)
 
 from zcu_tools.core.complex_codec import encode_complex
 from zcu_tools.core.numeric_scalar import normalize_numpy_scalar
+from zcu_tools.resources.parameter_fields import model_field_schema
 
 from .aliases import AliasValue
 
@@ -210,22 +220,30 @@ class AcceptedPayload(_LedgerModel):
 class ImportPayload(_LedgerModel):
     """Historical evidence copied from another entry into a local import event.
 
-    source_entry_id and source_event_id are UUIDs. source_event_json is the exact
+    source_event_id is the historical event UUID. source_event_json is the exact
     original JSON line without LF. source_record is the original optional record
     reference, never a query path. Only the outer event.record is queried.
     """
 
-    source_entry_id: _Identity
     source_event_id: _Identity
     source_event_json: StrictStr
     source_record: StrictStr | None = None
+
+
+_PAYLOAD_MODELS: dict[str, type[BaseModel]] = {
+    "acquired": AcquiredPayload,
+    "saved": SavedPayload,
+    "analyzed": AnalyzedPayload,
+    "accepted": AcceptedPayload,
+    "import": ImportPayload,
+}
 
 
 class LedgerEvent(_LedgerModel):
     """Immutable event envelope, validated with its corresponding typed payload.
 
     format is zcu.ledger; format_version is 1.x (append only accepts 1.0).
-    id and entry_id are UUIDs; kind selects acquired, saved, analyzed, accepted
+    id is an event UUID; kind selects acquired, saved, analyzed, accepted
     or import. at is an ISO 8601 UTC timestamp with Z or +00:00. origin identifies
     the frontend as gui, notebook or mcp. record is None on append,
     or records/<id>.json on disk. payload carries the kind-specific evidence.
@@ -239,7 +257,6 @@ class LedgerEvent(_LedgerModel):
     id: _Identity
     kind: Literal["acquired", "saved", "analyzed", "accepted", "import"]
     at: StrictStr
-    entry_id: _Identity
     origin: Origin
     record: StrictStr | None = None
     payload: (
@@ -261,20 +278,13 @@ class LedgerEvent(_LedgerModel):
         projecting future 1.x, not used to select a branch; new 1.0 inputs reject
         them.
         """
-        models: dict[str, type[BaseModel]] = {
-            "acquired": AcquiredPayload,
-            "saved": SavedPayload,
-            "analyzed": AnalyzedPayload,
-            "accepted": AcceptedPayload,
-            "import": ImportPayload,
-        }
         kind = info.data.get("kind")
-        if kind not in models:
+        if kind not in _PAYLOAD_MODELS:
             # Invalid/missing kind is reported by its own required field.
             return value
         future = info.data.get("format_version", "1.0") != "1.0"
         reading = info.context is not None and info.context.get("ledger_read", False)
-        return models[kind].model_validate(
+        return _PAYLOAD_MODELS[kind].model_validate(
             value, extra="ignore" if reading or future else "forbid"
         )
 
@@ -301,13 +311,229 @@ class LedgerEvent(_LedgerModel):
         """Check operation identity, canonical record reference and payload kind."""
         if self.record is not None and self.record != f"records/{self.id}.json":
             raise ValueError("record must be records/<id>.json")
-        expected: dict[str, type[BaseModel]] = {
-            "acquired": AcquiredPayload,
-            "saved": SavedPayload,
-            "analyzed": AnalyzedPayload,
-            "accepted": AcceptedPayload,
-            "import": ImportPayload,
-        }
-        if not isinstance(self.payload, expected[self.kind]):
+        if not isinstance(self.payload, _PAYLOAD_MODELS[self.kind]):
             raise ValueError("kind does not match payload type")
         return self
+
+
+@dataclass(frozen=True)
+class LedgerAcquisition:
+    """Run-index evidence: at is validated UTC text; payload holds run identity.
+
+    The payload contains only run_id, experiment, optional point and roles.
+    Envelope origin and attachment references are not consumed by this projection.
+    """
+
+    at: str
+    payload: AcquiredPayload
+
+
+@dataclass(frozen=True)
+class LedgerSavedPaths:
+    """Run-index evidence from successful outputs, without opening any path.
+
+    run_id identifies the saved run. paths contains recorded exact path strings
+    in output order, only for status=saved. Failed output paths and other output
+    metadata remain unread; these strings do not authorize filesystem access.
+    """
+
+    run_id: str
+    paths: tuple[str, ...]
+
+
+class LedgerEventContent:
+    """Readonly historical JSON with field-level reads and explicit full projection.
+
+    data is one decoded JSON object; source identifies its ledger and line for
+    diagnostics. Construction never validates unused payload fields. Returned
+    values and projections are detached. Field defaults stay stable on this
+    content. Leaf reads skip parent model checks; requested complete submodels
+    and project() run their full validation. No file is read.
+    """
+
+    def __init__(self, data: JsonObject, *, source: str) -> None:
+        self._data = deepcopy(data)
+        self._source = source
+        self._defaults: dict[str, JsonValue] = {}
+
+    @property
+    def id(self) -> str:
+        """Validate the UUID event identity needed for indexing and duplicates."""
+        return TypeAdapter(_Identity).validate_python(self._data.get("id"))
+
+    def validate_index(self) -> None:
+        """Validate only ledger header, event identity and declared run references.
+
+        Missing headers, unsupported versions, invalid event/run IDs raise.
+        Payload fields unrelated to those references and attachments stay opaque.
+        """
+        for field in ("format", "format_version", "id"):
+            self.value(field)
+        kind = self._data.get("kind")
+        payload = self._data.get("payload")
+        if kind in ("acquired", "saved"):
+            self.value("payload.run_id")
+        elif isinstance(payload, dict):
+            for field in ("run_id", "run_ids"):
+                if field in payload:
+                    self.value(f"payload.{field}")
+
+    def acquisition(self) -> LedgerAcquisition | None:
+        """Read acquired identity/time, or None for another validated event kind.
+
+        Validate only at and the acquired payload; unused envelope fields and
+        attachment references stay opaque. Invalid consumed fields raise
+        ValueError naming the source line. No files or attachments are opened.
+        """
+        if self.value("kind") != "acquired":
+            return None
+        try:
+            payload = AcquiredPayload.model_validate(
+                deepcopy(self._data.get("payload")), extra="ignore"
+            )
+        except ValueError as exc:
+            raise ValueError(f"{self._source}: payload: {exc}") from exc
+        return LedgerAcquisition(self._string_value("at"), payload)
+
+    def saved_paths(self) -> LedgerSavedPaths | None:
+        """Read saved run ID and successful paths, or None for another kind.
+
+        Validate output sequence structure, each status and only saved paths.
+        Other output fields, labber_path and attachment references stay opaque.
+        Invalid consumed fields raise ValueError with source/path. Paths are
+        evidence strings, not resolved/opened paths or an access capability.
+        """
+        if self.value("kind") != "saved":
+            return None
+        try:
+            outputs, _ = self._field("payload.outputs")
+        except (ValueError, KeyError) as exc:
+            raise ValueError(f"{self._source}: payload.outputs: {exc}") from exc
+        if not isinstance(outputs, list):
+            raise ValueError(f"{self._source}: payload.outputs: expected sequence")
+        paths = tuple(
+            self._string_value(f"payload.outputs.{index}.path")
+            for index in range(len(outputs))
+            if self.value(f"payload.outputs.{index}.status") == "saved"
+        )
+        return LedgerSavedPaths(self._string_value("payload.run_id"), paths)
+
+    def _string_value(self, path: str) -> str:
+        value = self.value(path)
+        if not isinstance(value, str):
+            raise ValueError(f"{self._source}: {path}: expected string")
+        return value
+
+    def project(self) -> LedgerEvent:
+        """Validate the whole event/payload; unknown reader fields are ignored.
+
+        Invalid values raise ValueError naming the original ledger line and field.
+        This does not follow an attachment reference or touch the filesystem.
+        """
+        try:
+            return LedgerEvent.model_validate(
+                deepcopy(self._data), extra="ignore", context={"ledger_read": True}
+            )
+        except ValueError as exc:
+            raise ValueError(f"{self._source}: {exc}") from exc
+
+    def value(self, path: str) -> JsonValue:
+        """Read one dotted field or canonical sequence index with field validators.
+
+        Payload kind selects its declared schema, not a guessed union branch.
+        Ancestors must have the requested mapping/sequence structure. Missing
+        required fields and malformed requested values raise with source/path.
+        A whole model-valued field runs that requested model's complete checks.
+        """
+        try:
+            node, schema = self._field(path)
+            value = SchemaValidator(schema).validate_python(
+                deepcopy(node), extra="ignore"
+            )
+            return TypeAdapter(JsonValue).validate_python(
+                SchemaSerializer(schema).to_python(value, mode="json")
+            )
+        except (ValueError, KeyError) as exc:
+            raise ValueError(f"{self._source}: {path}: {exc}") from exc
+
+    def _payload_model(self) -> type[BaseModel]:
+        kind = self.value("kind")
+        if not isinstance(kind, str) or kind not in _PAYLOAD_MODELS:
+            raise ValueError("unknown payload kind")
+        return _PAYLOAD_MODELS[kind]
+
+    def _field(self, path: str) -> tuple[object, core_schema.CoreSchema]:
+        parts = path.split(".")
+        if not all(parts):
+            raise ValueError("expected a dotted field path")
+        node: object = self._data
+        model: type[BaseModel] | None = LedgerEvent
+        annotation: object = JsonValue
+        schema = TypeAdapter(JsonValue).core_schema
+        for index, part in enumerate(parts):
+            if index == 0 and part == "payload":
+                annotation = self._payload_model()
+                schema = TypeAdapter(annotation).core_schema
+            else:
+                annotation, schema = self._child_schema(model, annotation, part)
+            node = self._child_value(node, part, schema, ".".join(parts[: index + 1]))
+            model = (
+                None
+                if get_origin(annotation) in (dict, list, tuple)
+                else next(
+                    (
+                        item
+                        for item in (annotation, *get_args(annotation))
+                        if isinstance(item, type) and issubclass(item, BaseModel)
+                    ),
+                    None,
+                )
+            )
+        return node, schema
+
+    @staticmethod
+    def _child_schema(
+        model: type[BaseModel] | None,
+        annotation: object,
+        part: str,
+    ) -> tuple[object, core_schema.CoreSchema]:
+        if model is not None:
+            field = model.model_fields.get(part)
+            if field is None:
+                raise ValueError("unknown field")
+            return field.rebuild_annotation(), model_field_schema(model, part)
+        args = get_args(annotation)
+        origin = get_origin(annotation)
+        child = (
+            args[1]
+            if origin is dict and len(args) == 2
+            else args[0]
+            if origin in (list, tuple) and args
+            else JsonValue
+        )
+        return child, TypeAdapter(child).core_schema
+
+    def _child_value(
+        self,
+        node: object,
+        part: str,
+        schema: core_schema.CoreSchema,
+        path: str,
+    ) -> object:
+        if isinstance(node, dict):
+            if part in node:
+                return node[part]
+            if path not in self._defaults:
+                default = SchemaValidator(schema).validate_python(PydanticUndefined)
+                self._defaults[path] = TypeAdapter(JsonValue).validate_python(
+                    SchemaSerializer(schema).to_python(default, mode="json")
+                )
+            return self._defaults[path]
+        if isinstance(node, (tuple, list)) and (
+            part == "0"
+            or (part.isascii() and part.isdecimal() and not part.startswith("0"))
+        ):
+            if int(part) >= len(node):
+                raise ValueError("index out of range")
+            return node[int(part)]
+        raise ValueError("required field or ancestor is missing")

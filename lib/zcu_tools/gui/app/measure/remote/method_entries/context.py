@@ -176,14 +176,16 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "resolved=null and error. All come from one fixed capture without kind checks. "
             "target is the existing saved_point locator. "
             "point and library are complete working-unit native documents: point includes "
-            "components and metadata; library contains Specs and provenance without asset "
+            "components and metadata; library contains Specs without asset "
             "materialization. "
             "Complex numbers use {__complex__: [real, imag]}. May return large or sensitive data; "
             "summaries=true preserves dict trees and scalars and describes array/list leaves. "
             "path selects a complete subtree, takes priority over summaries, and returns "
             "{target, aliases, path, value}. Dotted paths start with target/point/library/aliases; "
             "list indices must be canonical nonnegative decimals. Invalid paths name the first bad segment. "
-            "Unsupported values fail the entire read in every mode.",
+            "Full reads validate every schema and wire value. Path reads validate only the "
+            "selected subtree; summaries validate emitted fields and described sequence structure, "
+            "not hidden elements. Unsupported or nonfinite values actually emitted fail the read.",
             (
                 ParamSpec("summaries", JsonType.BOOLEAN, required=False, default=False),
                 optional_string("path"),

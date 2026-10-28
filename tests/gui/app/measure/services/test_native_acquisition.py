@@ -44,6 +44,7 @@ from zcu_tools.gui.session.services.progress import ProgressService
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from zcu_tools.resources.entry import (
     AcquiredPayload,
+    RecordsLedger,
     ResultEntry,
 )
 
@@ -55,7 +56,7 @@ from tests.gui.app.measure._native_save_support import (
     NativeSaveSession,
     SavingAdapter,
 )
-from tests.gui.app.measure._record_support import require_record
+from tests.gui.app.measure._record_support import require_record, require_target
 from tests.gui.app.measure._synthetic import ALIAS_PRESET
 from tests.resources.entry.fakes import (
     register_fakes,
@@ -180,7 +181,7 @@ def test_native_run_without_save_records_acquired_at_its_historical_entry(
     assert len(events) == 1
     event = events[0]
     assert event.kind == "acquired" and event.origin == frontend
-    assert event.entry_id == str(other.entry_id)
+    assert event.id == other.ledger.events()[0].id
     assert event.at == metadata.finished_at
     assert isinstance(event.payload, AcquiredPayload)
     assert event.payload.run_id == metadata.run_id
@@ -193,11 +194,11 @@ def test_native_run_without_save_records_acquired_at_its_historical_entry(
     assert session.completions == []
     session.save()
     session.save()
-    assert [event.kind for event in other.ledger.events()] == [
-        "acquired",
-        "saved",
-        "saved",
-    ]
+    assert [event.kind for event in other.ledger.events()] == ["acquired"]
+    assert [
+        event.kind
+        for event in RecordsLedger(tmp_path / "result" / "other" / "records").events()
+    ] == ["saved", "saved"]
 
 
 @pytest.fixture
@@ -293,8 +294,8 @@ def test_run_save_retains_admission_source_after_global_entry_and_alias_changes(
     assert metadata is not None and parameters is not None
     storage = parameters.capture_storage()
     assert metadata.snapshot.roles == {"driver": "Q2", "custom": "Q1"}
-    assert (metadata.snapshot.entry_id, metadata.snapshot.point) == (
-        storage.entry_id,
+    assert (metadata.snapshot.entry_name, metadata.snapshot.point) == (
+        storage.entry_name,
         "run-point",
     )
     (acquired,) = storage.ledger.events()
@@ -308,7 +309,7 @@ def test_run_save_retains_admission_source_after_global_entry_and_alias_changes(
         for member in artifact.members
         for output in member.outputs
     )
-    services.context.set_parameter(parameters.target, "Q2.rate", 30.0)
+    services.context.set_parameter(require_target(parameters), "Q2.rate", 30.0)
     services.context.set_alias_rows((AliasRow("driver", "Q1"),))
     services.setup_control.new_entry(EntryRequest("later"))
     assert parameters.value("$driver.rate") == 20.0

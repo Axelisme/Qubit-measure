@@ -18,6 +18,8 @@ from zcu_tools.resources.entry import (
     snapshot,
 )
 
+from tests.gui.app.measure._record_support import require_target
+
 from ._helpers import dispatch_handler as _dispatch
 from ._point_application import PointApplication
 
@@ -196,7 +198,7 @@ def test_parameter_set_commits_current_point_preserving_metadata_and_captures(
     application.result("point.new", {"label": "selected"})
     selected = control.read_context()
     metadata: YamlMap = {"comment": "manual", "stderr": 0.2}
-    control.set_parameter(selected.target, "Q1.rate", 12.0, metadata=metadata)
+    control.set_parameter(require_target(selected), "Q1.rate", 12.0, metadata=metadata)
     before = control.read_context()
     assert application.result(
         "context.set_parameter", {"path": "Q1.rate", "value": 25.0}
@@ -207,7 +209,9 @@ def test_parameter_set_commits_current_point_preserving_metadata_and_captures(
     assert document_value(persisted, "Q1.rate") == 25.0
     assert document_meta(persisted, "Q1.rate") == metadata
     assert before.lookup_point("Q1.rate").value == 12.0
-    assert control.read_target(first.target).lookup_point("Q1.rate").value == 10.0
+    assert (
+        control.read_target(require_target(first)).lookup_point("Q1.rate").value == 10.0
+    )
     assert document_value(snapshot(entry_resource(info).setup), "Q1.rate") == 10.0
     assert entry_resource(info).ledger.events() == ()
 
@@ -261,8 +265,8 @@ def test_parameter_set_rejects_nonconcrete_parameter_path(
     assert error["code"] == ErrorCode.INVALID_PARAMS
     assert control.read_context().document() == before.document()
     assert snapshot(entry_resource(info).use_point("base")).model_dump(
-        mode="python"
-    ) == before.document().model_dump(mode="python")
+        mode="python", serialize_as_any=True
+    ) == before.whole_document().model_dump(mode="python", serialize_as_any=True)
 
 
 @pytest.mark.parametrize(
@@ -336,8 +340,8 @@ def test_parameter_set_rejects_malformed_payload_before_effects(
     error = rpc_error(application, "context.set_parameter", params)
     assert error["code"] == ErrorCode.INVALID_PARAMS
     assert snapshot(entry_resource(info).use_point("base")).model_dump(
-        mode="python"
-    ) == before.document().model_dump(mode="python")
+        mode="python", serialize_as_any=True
+    ) == before.whole_document().model_dump(mode="python", serialize_as_any=True)
     assert entry_resource(info).ledger.events() == ()
 
 
@@ -356,8 +360,8 @@ def test_parameter_set_preserves_schema_failure_and_old_point(
     assert "validation error" in str(error["message"])
     assert control.read_context().document() == before.document()
     assert snapshot(entry_resource(info).use_point("base")).model_dump(
-        mode="python"
-    ) == before.document().model_dump(mode="python")
+        mode="python", serialize_as_any=True
+    ) == before.whole_document().model_dump(mode="python", serialize_as_any=True)
 
 
 @pytest.mark.parametrize(
@@ -379,7 +383,7 @@ def test_context_direct_write_admission_allows_active_run_without_changing_captu
     try:
         reply = application.rpc(method, params)
         assert reply["ok"] is True, reply
-        assert before.document().general.description == ""
+        assert before.whole_document().general.description == ""
         assert before.aliases == ()
         assert application.state.is_run_active()
     finally:

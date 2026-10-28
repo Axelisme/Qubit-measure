@@ -6,11 +6,13 @@ from typing import Literal
 
 import numpy as np
 import pytest
+from pydantic import ConfigDict
 from zcu_tools.cfg_model import ArbWaveformCfg, PulseSpec
 from zcu_tools.gui.remote.errors import ErrorCode
 from zcu_tools.gui.session.aliases import AliasRow
-from zcu_tools.gui.session.context_types import ContextSourceFault
+from zcu_tools.gui.session.context_types import ContextSourceFault, SavedPoint
 from zcu_tools.gui.session.parameters import ParameterContext, RoleBinding
+from zcu_tools.resources.context.library import LibraryContent, LibrarySnapshot
 from zcu_tools.resources.entry import ComponentSchema, ResultEntry, component_registry
 from zcu_tools.resources.waveform_assets import ArbWaveformError
 
@@ -116,8 +118,8 @@ def test_snapshot_returns_complete_native_documents_without_materializing_assets
     captured = context.read_context()
     result = application.result("context.snapshot", {})
     assert result == {
-        "target": captured.target.model_dump(),
-        "point": captured.document().model_dump(serialize_as_any=True),
+        "target": saved_target(captured).model_dump(),
+        "point": captured.whole_document().model_dump(serialize_as_any=True),
         "library": captured.library.document().model_dump(serialize_as_any=True),
         "aliases": [],
     }
@@ -134,7 +136,7 @@ def test_snapshot_returns_complete_native_documents_without_materializing_assets
     }
     wire_library = result["library"]
     assert isinstance(wire_library, dict)
-    assert wire_library["provenance"]
+    assert "provenance" not in wire_library
     # The asset was never created: a full Spec read must still succeed.
     with pytest.raises(ArbWaveformError):
         _ = captured.library.get_waveform("Q1.waveforms.arbitrary").length
@@ -187,13 +189,333 @@ def test_nonfinite_snapshot_never_substitutes_null_or_unlocks_context(
     application.result("point.new", {"label": "working"})
     context = application.controller.context_control
     context.set_parameter(
-        context.read_context().target, "general.ext.nested", {"values": [value]}
+        saved_target(context.read_context()), "general.ext.nested", {"values": [value]}
     )
     reply = application.rpc("context.snapshot", {})
     error = reply["error"]
     assert isinstance(error, dict)
     assert error["code"] == ErrorCode.PRECONDITION_FAILED
     assert error["reason"] == "unserializable_context"
+
+
+@pytest.mark.parametrize("bad", ["not a frequency", float("inf")])
+def test_snapshot_path_validates_only_the_selected_parameter_subtree(
+    application: PointApplication, bad: str | float
+) -> None:
+    application.open_entry()
+    application.result("point.new", {"label": "working"})
+    context = application.controller.context_control
+    context.add_component("Q1", "fake/drive/a", {"rate": 10.0})
+    captured = context.read_context()
+    content = captured.point_content()
+    raw = snapshot_mapping(content.root)
+    components = snapshot_mapping(raw["components"])
+    components["Q1"] = {"kind": "fake/drive/a", "rate": 10.0}
+    components["Broken"] = {"kind": "fake/drive/a", "rate": bad}
+    restored = ParameterContext.from_content(
+        point=content, library=captured.library, aliases=None, names={}
+    )
+    application.state.set_context(
+        replace(application.state.session_env, parameters=restored)
+    )
+
+    selected = application.result(
+        "context.snapshot", {"path": "point.components.Q1.rate"}
+    )
+    assert selected["value"] == 10.0
+    component = application.result("context.snapshot", {"path": "point.components.Q1"})
+    assert snapshot_mapping(component["value"])["rate"] == 10.0
+    for params in (
+        {"path": "point.components.Broken.rate"},
+        {"path": "point.components.Broken"},
+        {"path": "point.components"},
+        {},
+    ):
+        error = snapshot_mapping(application.rpc("context.snapshot", params)["error"])
+        assert error["code"] == ErrorCode.PRECONDITION_FAILED
+        assert error["reason"] == "unserializable_context"
+    invalid = snapshot_mapping(
+        application.rpc(
+            "context.snapshot", {"path": "point.components.Q1.missing.child"}
+        )["error"]
+    )
+    assert invalid["code"] == ErrorCode.INVALID_PARAMS
+    assert "'missing'" in str(invalid["message"])
+
+
+def test_snapshot_summary_does_not_consume_hidden_list_elements(
+    application: PointApplication,
+) -> None:
+    application.open_entry()
+    application.result("point.new", {"label": "working"})
+    context = application.controller.context_control
+    context.set_parameter(
+        saved_target(context.read_context()),
+        "general.ext.hidden",
+        {"values": [float("inf"), float("nan")]},
+    )
+    summary = application.result("context.snapshot", {"summaries": True})
+    general = snapshot_mapping(snapshot_mapping(summary["point"])["general"])
+    assert snapshot_mapping(snapshot_mapping(general["ext"])["hidden"]) == {
+        "values": "2 items"
+    }
+    error = snapshot_mapping(application.rpc("context.snapshot", {})["error"])
+    assert error["reason"] == "unserializable_context"
+    context.set_parameter(
+        saved_target(context.read_context()), "general.ext.output", float("inf")
+    )
+    used = snapshot_mapping(
+        application.rpc("context.snapshot", {"summaries": True})["error"]
+    )
+    assert used["reason"] == "unserializable_context"
+
+
+def test_snapshot_summary_checks_fields_it_outputs_not_list_item_schemas(
+    application: PointApplication,
+) -> None:
+    class TraceComponent(ComponentSchema):
+        model_config = ConfigDict(extra="forbid")
+        trace: list[float]
+        scale: float
+
+    component_registry.register("browse/trace", TraceComponent)
+    try:
+        application.open_entry()
+        application.result("point.new", {"label": "working"})
+        captured = application.controller.context_control.read_context()
+        content = captured.point_content()
+        components = snapshot_mapping(snapshot_mapping(content.root)["components"])
+        components["Trace"] = {
+            "kind": "browse/trace",
+            "trace": ["unused invalid float"],
+            "scale": 2.0,
+            "unused_future_field": {"bad": "not part of the summary schema"},
+        }
+        application.state.set_context(
+            replace(
+                application.state.session_env,
+                parameters=ParameterContext.from_content(
+                    point=content, library=captured.library, aliases=None, names={}
+                ),
+            )
+        )
+        summary = application.result("context.snapshot", {"summaries": True})
+        traces = snapshot_mapping(snapshot_mapping(summary["point"])["components"])
+        assert snapshot_mapping(traces["Trace"]) == {
+            "kind": "browse/trace",
+            "trace": "1 items",
+            "scale": 2.0,
+        }
+        for params in ({}, {"path": "point.components.Trace.trace.0"}):
+            error = snapshot_mapping(
+                application.rpc("context.snapshot", params)["error"]
+            )
+            assert error["reason"] == "unserializable_context"
+    finally:
+        component_registry.unregister("browse/trace")
+
+
+def test_snapshot_path_reads_a_leaf_without_validating_same_component_sibling(
+    application: PointApplication,
+) -> None:
+    application.open_entry()
+    application.result("point.new", {"label": "working"})
+    context = application.controller.context_control
+    context.add_component("Q1", "fake/drive/a", {"rate": 10.0})
+    captured = context.read_context()
+    content = captured.point_content()
+    components = snapshot_mapping(snapshot_mapping(content.root)["components"])
+    components["Q1"] = {"kind": "fake/drive/a", "rate": 10.0, "sense": 42}
+    application.state.set_context(
+        replace(
+            application.state.session_env,
+            parameters=ParameterContext.from_content(
+                point=content, library=captured.library, aliases=None, names={}
+            ),
+        )
+    )
+    assert (
+        application.result("context.snapshot", {"path": "point.components.Q1.rate"})[
+            "value"
+        ]
+        == 10.0
+    )
+    for params in (
+        {"path": "point.components.Q1.sense"},
+        {"path": "point.components.Q1"},
+        {"summaries": True},
+        {},
+    ):
+        error = snapshot_mapping(application.rpc("context.snapshot", params)["error"])
+        assert error["reason"] == "unserializable_context"
+        assert "sense" in str(error["message"])
+
+
+def test_snapshot_library_path_reads_only_selected_spec_fields(
+    application: PointApplication,
+) -> None:
+    application.open_entry()
+    application.result("point.new", {"label": "working"})
+    captured = application.controller.context_control.read_context()
+    library = LibrarySnapshot.from_content(
+        LibraryContent(
+            {
+                "format": "zcu.module-library",
+                "format_version": "2.0",
+                "components": {
+                    "Q1": {
+                        "pulses": {
+                            "pi": {
+                                "ch": 0,
+                                "nqz": 1,
+                                "freq": 100.0,
+                                "gain": "bad gain",
+                                "waveform": "missing",
+                            }
+                        },
+                        "waveforms": {
+                            "broken": {"style": "const", "length": "bad length"}
+                        },
+                    }
+                },
+            }
+        )
+    )
+    application.state.set_context(
+        replace(
+            application.state.session_env,
+            parameters=ParameterContext.from_content(
+                point=captured.point_content(), library=library, aliases=None, names={}
+            ),
+        )
+    )
+    assert (
+        application.result(
+            "context.snapshot", {"path": "library.components.Q1.pulses.pi.freq"}
+        )["value"]
+        == 100.0
+    )
+    for path in (
+        "library.components.Q1.pulses.pi.gain",
+        "library.components.Q1.pulses.pi",
+        "library.components.Q1.pulses",
+        "library.components.Q1",
+        "library",
+    ):
+        error = snapshot_mapping(
+            application.rpc("context.snapshot", {"path": path})["error"]
+        )
+        assert error["reason"] == "unserializable_context"
+    invalid = snapshot_mapping(
+        application.rpc(
+            "context.snapshot", {"path": "library.components.Q1.pulses.missing.freq"}
+        )["error"]
+    )
+    assert invalid["code"] == ErrorCode.INVALID_PARAMS
+    assert "'missing'" in str(invalid["message"])
+
+
+def test_snapshot_point_path_does_not_consume_unselected_library_source_fault(
+    application: PointApplication, tmp_path: Path
+) -> None:
+    application.open_entry()
+    application.result("point.new", {"label": "working", "description": "available"})
+    captured = application.controller.context_control.read_context()
+    unavailable = ParameterContext(
+        point=captured.document(),
+        library=captured.library,
+        target=captured.target,
+        roles=None,
+        source_faults=(
+            ContextSourceFault(
+                "module_cfg", tmp_path / "module_cfg.yaml", "OSError", "library fault"
+            ),
+        ),
+    )
+    application.state.set_context(
+        replace(application.state.session_env, parameters=unavailable)
+    )
+    assert (
+        application.result("context.snapshot", {"path": "point.general.description"})[
+            "value"
+        ]
+        == "available"
+    )
+    for params in ({}, {"path": "library"}, {"summaries": True}):
+        error = snapshot_mapping(application.rpc("context.snapshot", params)["error"])
+        assert error["reason"] == "source_unavailable"
+    invalid = snapshot_mapping(
+        application.rpc("context.snapshot", {"path": "point.general.missing"})["error"]
+    )
+    assert invalid["code"] == ErrorCode.INVALID_PARAMS
+    assert "'missing'" in str(invalid["message"])
+
+
+def test_invalid_snapshot_target_path_precedes_unselected_point_source_fault(
+    application: PointApplication, tmp_path: Path
+) -> None:
+    application.open_entry()
+    application.result("point.new", {"label": "working"})
+    captured = application.controller.context_control.read_context()
+    unavailable = ParameterContext(
+        point=captured.document(),
+        library=captured.library,
+        target=captured.target,
+        roles=None,
+        source_faults=(
+            ContextSourceFault(
+                "point", tmp_path / "point.yaml", "OSError", "point fault"
+            ),
+        ),
+    )
+    application.state.set_context(
+        replace(application.state.session_env, parameters=unavailable)
+    )
+    error = snapshot_mapping(
+        application.rpc("context.snapshot", {"path": "target.missing"})["error"]
+    )
+    assert error["code"] == ErrorCode.INVALID_PARAMS
+    assert "'missing'" in str(error["message"])
+
+
+@pytest.mark.parametrize("wiring", ["bad mapping", ["bad mapping"]])
+def test_snapshot_path_reports_malformed_required_ancestor_as_schema_error(
+    application: PointApplication, wiring: str | list[str]
+) -> None:
+    application.open_entry()
+    application.result("point.new", {"label": "working"})
+    captured = application.controller.context_control.read_context()
+    content = captured.point_content()
+    components = snapshot_mapping(snapshot_mapping(content.root)["components"])
+    components["Q1"] = {"kind": "fake/drive/a", "rate": 10.0, "wiring": wiring}
+    restored = ParameterContext.from_content(
+        point=content, library=captured.library, aliases=None, names={}
+    )
+    application.state.set_context(
+        replace(application.state.session_env, parameters=restored)
+    )
+    assert (
+        application.result("context.snapshot", {"path": "point.components.Q1.rate"})[
+            "value"
+        ]
+        == 10.0
+    )
+    error = snapshot_mapping(
+        application.rpc("context.snapshot", {"path": "point.components.Q1.wiring.ch"})[
+            "error"
+        ]
+    )
+    assert error["code"] == ErrorCode.PRECONDITION_FAILED
+    assert error["reason"] == "unserializable_context"
+    assert "Q1.wiring.ch" in str(error["message"])
+    with pytest.raises(ValueError, match="Q1.wiring.ch"):
+        restored.value("Q1.wiring.ch")
+
+
+def saved_target(parameters: ParameterContext) -> SavedPoint:
+    target = parameters.target
+    assert isinstance(target, SavedPoint)
+    return target
 
 
 def snapshot_mapping(value: object) -> dict[str, object]:
@@ -214,7 +536,7 @@ def browse_context(application: PointApplication) -> PointApplication:
     context.add_component("Q1", "fake/drive/a", {"rate": 10.0, "sense": "S1"})
     context.add_component("S1", "fake/sensor", {"rate": 20.0})
     context.set_parameter(
-        context.read_context().target,
+        saved_target(context.read_context()),
         "general.ext.browse",
         {
             "scalar": 7.5,
@@ -248,7 +570,7 @@ def test_snapshot_summary_preserves_native_array_shape_and_numpy_scalars(
         application.open_entry()
         application.result("point.new", {"label": "working"})
         captured = application.controller.context_control.read_context()
-        point = captured.document()
+        point = captured.whole_document()
         point = point.model_copy(
             update={
                 "components": {
@@ -281,6 +603,15 @@ def test_snapshot_summary_preserves_native_array_shape_and_numpy_scalars(
             "context.snapshot", {"path": "point.components.Trace.trace"}
         )
         assert value["value"] == [[0, 1, 2], [3, 4, 5]]
+        indexed = application.result(
+            "context.snapshot", {"path": "point.components.Trace.trace.1"}
+        )
+        assert indexed["value"] == [3, 4, 5]
+        subtree = application.result("context.snapshot", {"path": "point.components"})
+        assert (
+            snapshot_mapping(snapshot_mapping(subtree["value"])["Trace"])["scalar"]
+            == 4.5
+        )
     finally:
         component_registry.unregister("browse/array")
 

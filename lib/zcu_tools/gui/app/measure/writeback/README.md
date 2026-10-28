@@ -1,12 +1,34 @@
 # `gui.app.measure.writeback`
 
-**Last updated:** 2026-10-27
+**Last updated:** 2026-10-29
 
 **讀者：** framework-dev。寫回提案、review widget 與逐項 Apply 契約。
 
 本模組擁有 parameter、module 與 record 的 proposal、draft、service、control 與 Qt review widget。
 `items.py` 定義 adapter 的可變 proposals；`contracts.py` 定義 owner 的 edit、preview 與 submission records。
 `service.py` 保留 draft 生命週期、ID 檢查與寫入執行，也繼續匯出既有公開型別。
+
+## Complete module proposals
+
+`calibrated_module_writeback(parameters, tested_module, target=...,
+description=..., field_updates=...)` builds one complete `ModuleWriteback`.
+The caller supplies a read-only Run/Load ParameterContext, the native tested
+module cfg, and exact dotted Spec paths with new values.
+The builder resolves the captured slot, copies `LibrarySnapshot.module_spec()`,
+and materializes `get_module()` through the existing native converter.
+It compares every other field and reports differing dotted paths.
+Equivalent inline values or different child keys with equal materialized values
+are accepted. The proposal preserves the library's original child keys.
+
+Only the exact updated paths are excluded from comparison. Updating
+`tones.1.classifier` still checks that tone's frequency and ADC.
+`resources.parameter_fields.set_model_value` writes existing indexed elements;
+Spec validation remains with cfg_model. The builder has no classifier policy.
+It does not read the live target, write files or change Apply semantics.
+
+Primary and Post remain complete replacements. One batch accepts Primary before
+Post. Separate Apply calls use the last replacement, so applying center-only
+Primary after Post removes radius and matrix. Library stores no provenance.
 
 ## Dialog lifetime
 
@@ -44,18 +66,28 @@ Wire kind、session prefix 與 written key 分別為 `record`、`record-<n>` 與
 ## Apply
 
 `WritebackService` 從 draft 的固定 Run／Load capture 解析選定提案與 module Form，
-再交給 context owner。全部提案通過輸入驗證後，共用 executor 先追加一筆 accepted
+再交給 context owner。來源只提供提案求值與 alias／slot 路徑，不決定寫入 point。
+Preview 與 Apply 從當下 `read_context().target` 取得 GUI 選定的 point。
+未選 point 時拒絕，缺少歷史來源不阻擋 concrete parameter／record 提案。
+全部提案通過輸入驗證後，共用 executor 先追加一筆 accepted
 ledger event，再依序提交 point 參數組、library 組與逐筆 Record，組內保留提案順序。
 Parameter 與 library 各用一次單檔交易，組內任一項無效整組不寫，Record 各列追加樣本。
 第一個失敗會停止後組，保留 accepted event 與已提交組，並標記已成功的 draft 列。
 Ledger append 失敗時不提交任何列。Apply 不提供跨列 rollback 或自動 retry。
 
 資源層對完整 serialization tree 驗證一次 YAML 表示。
-Library 的完整 provenance 驗證一次讀取 ledger，並檢查每個被引用的事件與附件。
-DocumentStore 每次仍讀取磁碟 bytes，相同內容只重用已解析的 YAML 節點。
-每次 Apply 都執行模型、清理政策與外部來源驗證，重新驗證 ledger 與附件。
+Library 只保存 Spec，不保存 per-leaf stderr 或 provenance，也不驗來源事件或附件。
+DocumentStore 每次讀取磁碟 bytes，未變內容沿用驗證快取。
+每次 Apply 仍驗證新 draft 的完整模型，並保留 accepted 稽核事件。
 各組提交到固定目的地，錯誤分類與 applied 狀態由已提交項目決定。
 Apply 同步執行。
+
+## Captured device evidence
+
+`create_draft(device_snapshot=...)` 接受固定裝置設定或讀取 detached Run 證據的 callback。
+建立 draft 不呼叫 callback，`draft.device_snapshot` 才讀取並回傳隔離設定。
+歷史設定格式錯誤時，這次讀取保留 experiment owner 的欄位錯誤，不改成 None 或空 mapping。
+Post draft 延續 Primary 的 reader，沒有裝置需求的 Analyze／Post 不先驗證這份證據。
 
 ## Captured acceptance
 
@@ -74,7 +106,7 @@ Control 的 `begin_writeback(tab_id)` 配置一次性 `submission_id`，不驗�
 `write_writeback_for_pane` 與 `accept_writeback` 可帶該 ID，仍在 owner thread 同步執行。
 同 ID 只准提交一次，未知 ID 或不同 tab 的 ID 會拒絕。
 `get_writeback_receipt` 回 detached 的 pending／completed／failed 狀態與成功前綴。
-每列保留 pane、item ID、kind、實際值、concrete target 與固定 entry_id／point。
+每列保留 pane、item ID、kind、實際值、concrete target 與提交時的 entry_name／point。
 Pending 可表示只 reserve 或仍在執行，不能推論尚未寫入。
 Receipt 留在 GUI 生命週期的記憶體。後續 draft 編輯或目的地變更不改舊 receipt。
 逾時只結束 caller 的等待，不取消同步寫入，也不觸發 retry 或 rollback。

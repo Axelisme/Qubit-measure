@@ -121,7 +121,7 @@ def test_document_minor_never_relaxes_original_model_validation(
 
 @pytest.mark.parametrize("owner", ["setup", "point"])
 @pytest.mark.parametrize("location", ["component", "nested"])
-def test_refresh_minor_rejects_forbidden_data_without_publishing(
+def test_refresh_minor_defers_forbidden_data_until_whole_projection_or_edit(
     entry: ResultEntry, owner: str, location: str, strict_kind: str
 ) -> None:
     view = bound_view(entry, owner, strict_kind)
@@ -129,26 +129,24 @@ def test_refresh_minor_rejects_forbidden_data_without_publishing(
     metadata = document_meta(cached, "S1.rate")
     path = source_path(view)
     bad_bytes = add_future_data(path, location)
-    error = None
-    try:
-        view.refresh()
-    except ValidationError as caught:
-        error = caught
-    assert error is not None, "refresh must validate the original model"
-    assert "future" in str(error)
-    assert snapshot(view) == cached
-    assert document_meta(snapshot(view), "S1.rate") == metadata
-    assert path.read_bytes() == bad_bytes
+    view.refresh()
+    assert view.S1.rate == document_value(cached, "S1.rate")
+    assert view.meta("S1.rate") == metadata
+    with pytest.raises(ValidationError, match="future"):
+        snapshot(view)
+    with pytest.raises(ValidationError, match="future"):
+        view.S1.rate = 13.0
     if owner == "setup":
-        with pytest.raises(ValueError, match="future"):
-            ResultEntry.open(
-                "entry",
-                result_root=entry.result_path.parent,
-                database_root=entry.database_path.parent,
-            )
+        reopened = ResultEntry.open(
+            "entry",
+            result_root=entry.result_path.parent,
+            database_root=entry.database_path.parent,
+        ).setup
     else:
-        with pytest.raises(ValueError, match="future"):
-            entry.use_point("a")
+        reopened = entry.use_point("a")
+    assert reopened.S1.rate == document_value(cached, "S1.rate")
+    with pytest.raises(ValidationError, match="future"):
+        snapshot(reopened)
     assert path.read_bytes() == bad_bytes
 
 

@@ -171,6 +171,7 @@ def test_pulse_to_readout_retains_nested_raw_draft_and_missing_fields():
         "kind": "inline",
         "module": {
             "type": "readout/pulse",
+            "classifier": None,
             "nqz": 2,
             "freq": {"expr": "100 + 3"},
             "gain": "invalid",

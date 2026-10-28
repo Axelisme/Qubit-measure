@@ -30,6 +30,8 @@ from zcu_tools.gui.session.types import ParameterContext, SessionEnv
 from zcu_tools.resources.entry import ResultEntry
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
+from tests.gui.app.measure._record_support import require_target
+
 PULSE = "Q1.pulses.pi"
 WAVEFORM = "Q1.waveforms.base"
 
@@ -66,10 +68,14 @@ def _seed(session: LibrarySession, pulse: PulseSpec | None = None) -> ParameterC
     """Select point a with flux 2.0, a const waveform and a pulse using its key."""
     _select(session, "a")
     capture = session.control.read_context()
-    session.control.set_parameter(capture.target, "general.ext.flux_value", 2.0)
-    session.control.set_waveform(capture.target, WAVEFORM, ConstWaveformCfg(length=1.0))
+    session.control.set_parameter(
+        require_target(capture), "general.ext.flux_value", 2.0
+    )
+    session.control.set_waveform(
+        require_target(capture), WAVEFORM, ConstWaveformCfg(length=1.0)
+    )
     session.control.set_module(
-        capture.target,
+        require_target(capture),
         PULSE,
         pulse or PulseSpec(ch=0, nqz=1, freq=100.0, gain=0.2, waveform=WAVEFORM),
     )
@@ -94,9 +100,13 @@ def test_expression_stores_the_number_from_the_open_capture(
     capture = _seed(session)
     entry = open_library_entry(capture, "module", PULSE, arb_names=())
     entry.state.write({("gain",): {"expr": "general.ext.flux_value / 10"}}, entry.env)
-    session.control.set_parameter(capture.target, "general.ext.flux_value", 8.0)
+    session.control.set_parameter(
+        require_target(capture), "general.ext.flux_value", 8.0
+    )
     session.control.apply_library_change(entry.parameters, entry.put(PULSE))
-    session.control.set_parameter(capture.target, "general.ext.flux_value", 9.0)
+    session.control.set_parameter(
+        require_target(capture), "general.ext.flux_value", 9.0
+    )
     written = session.control.read_context().library.module_spec(PULSE)
     assert isinstance(written, PulseSpec)
     assert written.gain == pytest.approx(0.2)
@@ -167,7 +177,7 @@ def test_replace_renames_and_writes_in_one_library_change(
 def test_replace_onto_an_existing_name_is_rejected(session: LibrarySession) -> None:
     capture = _seed(session)
     session.control.set_module(
-        capture.target,
+        require_target(capture),
         "Q1.pulses.occupied",
         PulseSpec(ch=1, nqz=1, freq=50.0, gain=0.1, waveform=WAVEFORM),
     )
@@ -187,7 +197,7 @@ def test_arb_data_options_are_the_names_captured_at_open(
     _select(session, "a")
     capture = session.control.read_context()
     session.control.set_waveform(
-        capture.target, "Q1.waveforms.arb", ArbWaveformCfg(data="first")
+        require_target(capture), "Q1.waveforms.arb", ArbWaveformCfg(data="first")
     )
     capture = session.control.read_context()
     entry = open_library_entry(
@@ -246,7 +256,7 @@ def test_submission_after_a_point_switch_writes_the_open_target(
     session.control.apply_library_change(
         entry.parameters, entry.put("Q1.waveforms.copy")
     )
-    original = session.control.read_target(first.target).library
+    original = session.control.read_target(require_target(first)).library
     assert original.waveform_spec("Q1.waveforms.copy").length == 3.0
     assert session.control.read_context().library.waveform_keys() == ()
 

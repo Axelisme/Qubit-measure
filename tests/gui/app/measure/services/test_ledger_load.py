@@ -13,7 +13,6 @@ from zcu_tools.datafile import load, save
 from zcu_tools.gui.app.measure.services.load import LoadDataError, LoadService
 from zcu_tools.gui.app.measure.ui.run_load_dialog import RunLoadDialog
 from zcu_tools.gui.expected_error import FailedPreconditionError
-from zcu_tools.gui.session.context_control import ContextControlFacet
 from zcu_tools.resources.entry import (
     AcquiredPayload,
     LedgerEvent,
@@ -59,7 +58,6 @@ def acquired(session: NativeSaveSession, run_id: str) -> None:
             id=str(uuid4()),
             kind="acquired",
             at="2026-10-08T00:02:00Z",
-            entry_id=session.entry.entry_id,
             origin="gui",
             payload=AcquiredPayload(
                 run_id=run_id, experiment="ledger/tag", point="other", roles={}
@@ -182,11 +180,7 @@ def test_query_metadata_and_load_validity_are_independent(
         assert load.isEnabled()
         load.click()
         assert dialog.selected_path() == str(path)
-        service = LoadService(
-            session.state,
-            context=ContextControlFacet(context=session.context),
-            captured_parameters=lambda _aliases: None,
-        )
+        service = LoadService(session.state)
         with pytest.raises(LoadDataError) as error:
             service.load_result("tab", dialog.selected_path() or "")
         assert error.value.reason_code == (
@@ -212,7 +206,6 @@ def test_query_ledger_fault_does_not_hide_valid_or_broken_files(
             id=event_id,
             kind="saved",
             at="2026-10-08T00:03:00Z",
-            entry_id=session.entry.entry_id,
             origin="gui",
             payload=SavedPayload(run_id=session.metadata.run_id, outputs=()),
         ),

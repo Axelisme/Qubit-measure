@@ -6,7 +6,7 @@ status: accepted
 
 **狀態：** accepted。
 
-**Last updated:** 2026-10-22，workflow 嵌入 measure 與 headless owner；獨立 SoC dialog 與窄 control facets；predictor 與 experiment figure area 的控件 owner；腳本 session 所有權、動態資源與儀器 adapter 邊界
+**Last updated:** 2026-10-29，workflow 嵌入 measure 與 headless owner；獨立 SoC dialog 與窄 control facets；predictor 與 experiment figure area 的控件 owner；腳本 session 所有權、動態資源與儀器 adapter 邊界
 
 ## 問題與決策
 
@@ -51,7 +51,9 @@ Setup 等 shared dialog 只依賴窄 control facet 表達一般能力（開啟 e
 
 Measure 的 library editor 交未 lower 的 schema 與固定 ParameterContext。ContextService 透過 app 注入的 callbacks 準備 ModuleSpec／WaveformSpec，再提交一筆 library structure change。Rename 不級聯修改其他引用。
 
-WritebackService 先以分析來源的固定 capture 解析與 lower 全部選定 proposals，再依提案順序交 concrete items 給 `ContextService.apply_writeback`。此入口驗證固定 SavedPoint、綁定資源並交 resources 共用 executor。未選工作點時，application 在 append 前沿 no_context 拒絕，提示先選或建立工作點。同 entry 選取其他 point 只允許命令開始，不改 captured SavedPoint 的寫入目的地；跨 entry 仍拒絕。Executor 追加 accepted 後依序提交 point 組、library 組與逐筆 samples，組內保留提案順序。任一項無效整組不寫，首錯停止，保留已提交組與事件，不提供跨檔 rollback 或 retry。Context owner 每個成功的 point／library 組發布一次。GUI 以 committed 的供應序 index 關聯 draft item ID，分組順序與成功項目數不能用來切供應序前綴。GUI 標記該前綴 applied 後原樣拋 producer cause，保留既有 wire 分類。Parameter 的 metadata 整份替換為 `{stderr: x}`，沒有 stderr 時為 `{}`，不寫 source、kind、run_id 或時間。Module 的 stderr 隨 accepted provenance 保存。Parameter／Module／Sample proposal、Form draft 與 selected Apply 的契約見 [[0008]]、[[0065]]；子模組搬遷不改成功前綴、權限、busy admission、欄位驗證或錯誤分類。
+WritebackService 先以分析來源的固定 capture 解析與 lower 全部選定 proposals，再依提案順序交 concrete items 給 `ContextService.apply_writeback`。Preview／Apply 從命令當下 read_context().target 取得 GUI 選定的 SavedPoint，不從歷史 capture 決定目的地。此入口驗證這個目標、綁定資源並交 resources 共用 executor。未選工作點時，application 在 append 前沿 no_context 拒絕，提示先選或建立工作點。空歷史環境不構成拒絕寫回的理由；底層 context 仍拒絕 caller 指定其他 entry 的 SavedPoint。Executor 追加 accepted 後依序提交 point 組、library 組與逐筆 samples，組內保留提案順序。任一項無效整組不寫，首錯停止，保留已提交組與事件，不提供跨檔 rollback 或 retry。Context owner 每個成功的 point／library 組發布一次。GUI 以 committed 的供應序 index 關聯 draft item ID，分組順序與成功項目數不能用來切供應序前綴。GUI 標記該前綴 applied 後原樣拋 producer cause，保留既有 wire 分類。Parameter 的 metadata 整份替換為 `{stderr: x}`，沒有 stderr 時為 `{}`，不寫 source、kind、run_id 或時間。Module 只保存 Spec，不保存 per-leaf stderr 或來源。Parameter／Module／Sample proposal、Form draft 與 selected Apply 的契約見 [[0008]]、[[0065]]；子模組搬遷不改成功前綴、權限、busy admission、欄位驗證或錯誤分類。
+
+2026-10-28 使用者裁決：「我其實沒有要知道來源的需求，這功能純屬於錦上添花」「來源我一直以為只是metadata，沒想要解析」。Library 移除模組來源；accepted 事件與 record 的事件引用仍保留，見 [[0063]]。
 
 目前 point 的有序 alias 表由 ContextService 擁有。元件與 device 共用同表，每列保存名稱或引用前列的 `$` 軟連結，不做 kind 或名稱可用性預驗。Caller 以 `alias_presets` 提供具名 catalog，default rows 僅作為未開 entry 的 memory 初值。框架不宣告領域 preset，也不反向 import zcu_lab。
 
@@ -61,7 +63,7 @@ WritebackService 先以分析來源的固定 capture 解析與 lower 全部選�
 
 公開 `read_context(aliases=None)` 固定 point、library、storage 與全表，不檢查 consumer kind。GUI adapter、Tab、Run、Load 和 template create 直接使用它，不宣告角色。裸 `$alias` 回名稱，欄位路徑延後交讀取 owner 檢查。非空具名 overrides 只改本次 capture，不保存到 tab、全域表或檔案。EMPTY 無覆寫由 app 保留 None 的 context-free／deferred 路徑；非空覆寫拒絕 no_context。Notebook 保留自己的顯式 role kind 契約與 caller 提供的 bindings。
 
-Shared `gui.session.ui.alias_panel` 是 Measure 與 workflows 的 Inspect Aliases 編輯入口，不設 app-local wrapper。Alias draft 固定載入時的 entry／point，clean 時跟隨切換，dirty 時保留並拒絕跨 target Apply。Revert 或重開載入目前 point，避免舊草稿靜默覆寫另一個 point。同 target Apply 保持 Inspect 開啟，Cancel 不撤回已 Apply 的表。Tab 不顯示角色列，建立時固定目前 point／library、alias 表、cached device infos 與 value sources。Refresh 重新 capture 並保留 authored inputs，Reset 重新 capture 並重算 defaults。來源事件不自動刷新，Run 使用目前 tab 的有效 Form result 與固定來源。FIT、interactive、Post、Writeback 和 Save 使用結果的固定來源，不因後來選取而換目的地。Native Load 的來源與保存規則見 [[0063]]，cfg acceptance 見 [[0065]]。
+Shared `gui.session.ui.alias_panel` 是 Measure 與 workflows 的 Inspect Aliases 編輯入口，不設 app-local wrapper。Alias draft 固定載入時的 entry／point，clean 時跟隨切換，dirty 時保留並拒絕跨 target Apply。Revert 或重開載入目前 point，避免舊草稿靜默覆寫另一個 point。同 target Apply 保持 Inspect 開啟，Cancel 不撤回已 Apply 的表。Tab 不顯示角色列，建立時固定目前 point／library、alias 表、cached device infos 與 value sources。Refresh 重新 capture 並保留 authored inputs，Reset 重新 capture 並重算 defaults。來源事件不自動刷新，Run 使用目前 tab 的有效 Form result 與固定來源。FIT、interactive、Post 與 Writeback 求值使用結果的固定來源，不因後來選取而改變分析環境。Writeback 的目的地是命令當下 GUI 選定的 point；Save 則以目前 roots 與 Run 記錄的名稱生成目的地。Native Load 的來源與保存規則見 [[0063]]，cfg acceptance 見 [[0065]]。
 
 Device 的連線資訊、記得但未連線列與 cached DeviceInfo 在 `SessionState`，`DeviceService` 控制 driver 與 in-flight 工作。記哪些 device、重啟時嘗試哪些連線由腳本決定，framework 不從 domain session 快取回填。Setup preferences 只是 live 預填值。State 是否供多方觀察與資料是否重啟後保存是兩個問題，worker、lease 和 driver 的控制權不因有人需要觀察而交給 State。
 
@@ -160,7 +162,7 @@ Predictor 不持有 installed session model，不參與 Run 或 Analyze／Post-a
 Session predictor service 透過 ContextControlPort 取得 ResultEntry 擁有的目錄，集中列檔、檔名驗證與載入。
 Dialog／remote 使用檔名或明確參數，不解讀 component 欄位，也不由 alias 選來源。
 Framework 不 import 使用者套件（C16）；simulate 不讀容器或檔案（C8、C9）。
-Dialog 擁有可手動修改的獨立 trial，不寫回元件或來源檔案。Service／remote 不讀 dialog。
+`PredictorTrial` 擁有可手動修改的獨立試算草稿，不寫回元件或來源檔案。Dialog 呈現這份 trial；Service／remote 不讀 dialog 或 trial。
 Service 與 RPC 接受明確 flux frame 和所有必要儀器值，不從其他 owner 補值。`analysis.flux` 擁有 native values 到 reduced flux 的換算，GUI→analysis 依賴由 C8／C9 約束。Calibrate 只計算可加到目前 offset 的 Φ0 correction，不寫來源。Simulation coordinator 只組裝 SoC 與 devices。
 
 使用者於 2026-10-20 裁定：「框架內支援的fluxonium/transmon是理論上的兩種qubit，有自己定義的參數，與用戶定義的component解偶」。
@@ -169,8 +171,15 @@ Service 與 RPC 接受明確 flux frame 和所有必要儀器值，不從其他 
 
 2026-10-19，使用者裁決：「採 B，只限 PredictorDialog。依 repo 規則，新 class 有理由：它們各自隱藏真實的控件與局部 state 協調（參數編輯、曲線互動），不是轉接層。照你列的硬邊界（PredictorControlPort／ModelParams／物理 owner 不變、public 行為與文字版面不變、無 Protocol/factory/mixin、callers/tests 同票）。外觀不得改變；ComponentDriver 情境＋逐步 PNG 你親看即可，不需交使用者。」
 
-`PredictorParameterEditor` 持有 model 選擇、nullable 參數與已知欄位控件，以及顯式 file 預填。`PredictorCurveTabs` 持有三張 canvas、toolbars、matrix capability 與跨圖 marker／highlight／xlim 協調。兩者是 dialog-owned 的具體 child QWidget，不取得整個 dialog，也不跨 owner 存取私有狀態。
-Dialog 保留 cache、device 訂閱、calibration、tracked table 與生命週期。子元件沿用原 predictor queries 與物理參數型別。Programmatic 預填以同步 callback 保留立即刷新、保存與例外傳遞；不以 Qt signal 隔離取代同步呼叫。這個責任劃分只適用 PredictorDialog。
+2026-10-29，使用者裁決：「候選11可以做，都允許你自己決定」。試算狀態與規則移到 Qt-free 的 `PredictorTrial`，UI 行為、文字與版面不變。
+
+`PredictorTrial` 保存 model、能量草稿文字、可選 flux frame、offset 文字、各儀器值文字與橫軸儀器。它集中組裝 predict／calibrate 請求，提供 table 列值、曲線座標、逐欄錯誤與校準 readiness。校準頻率解析回傳具名成功值或詳細錯誤，不 logging；control query 的未預期例外原樣傳出，由 dialog 記錄。模型不持有 widget，也不引入 Qt。
+
+`PredictorParameterEditor` 呈現 model 選擇與 nullable 能量草稿，並處理顯式 file 預填。`PredictorFluxEditor` 呈現 frame、offset、各儀器值與橫軸選擇。兩個 editor 都必須接收 dialog 的同一份 trial，不自行建立模型。`PredictorCurveTabs` 持有三張 canvas、toolbars、matrix capability 與跨圖 marker／highlight／xlim 協調。這些具體 child QWidget 不取得整個 dialog，也不跨 owner 存取私有狀態。
+
+Dialog 保留版面、tracked table、live mode、timer、status、檔案對話框、marker 與 canvas 互動，以及隱藏／重開的生命週期。它只在載入 frame 時讀取 device cache，沒有 device 訂閱；live 值由宿主呼叫供應。Programmatic 預填同步更新整批草稿與控件，再以一次 callback 立即刷新及保存；user edit 保留清舊結果、同步狀態、保存與 150ms debounce 的順序。校準成功時先呈現 offset，再發布成功 status。
+
+`gui/session/predictor_cache.py` 擁有 `PredictorSnapshot` v2 與 codec。Trial 提供 snapshot／restore 與 `PredictorFile` 匯出；dialog 協調還原後呈現、caretaker 與另存 I/O。`predictor.json` 格式不變，nullable 能量、可選 frame、已知儀器值與所選軸都可還原。非法草稿不覆寫上次可保存的 cache。這個責任劃分只適用 PredictorDialog，不改 remote 的獨立請求來源。
 
 ## Experiment figure area
 
