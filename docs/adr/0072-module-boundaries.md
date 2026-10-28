@@ -46,6 +46,22 @@ status: accepted
 
 既有 `.importlinter` 的 `program-simulation-entry` contract 限制 program classes 直接依賴 simulation frontend、timeline 與 adapter internals，只能經模擬入口使用。這是依賴檢查，不是 runtime 隔離的完整保證；真實 acquire 不執行模擬模組仍須在審閱執行路徑時確認。不新增 contract。
 
+### Manifold 衰減模與分析診斷的 owner
+
+`simulate.fluxonium.coherence` 負責組合 directional rate matrix 並計算衰減模。
+Manifold forward 每個 flux 點回傳所有衰減模，型別為 `list[list[Mode]]`。
+`Mode` 只有 `t1_ns` 與 `amplitude`，清單按 signed amplitude 降序排列。
+Simulate 不選主模，不回傳 secondary fraction，也不套用非單指數標記門檻。
+
+`notebook.analysis.t1_curve` 選振幅最大的模作為 model T1，計算次模佔比並標記圖表。
+這些是分析端的選取與呈現政策，不放進數值工具。兩種 T1 的物理定義與共同單位見 [[0071]]。
+依賴方向沿用 import-linter C8 的 notebook → simulate，無環由 C9 檢查；不新增或放寬 contract。
+局部輸出與失敗契約由 [coherence README](../../lib/zcu_tools/simulate/fluxonium/coherence/README.md) 與
+[t1_curve README](../../lib/zcu_tools/notebook/analysis/t1_curve/README.md) 擁有。
+
+2026-10-28，使用者提出「我覺得工具就應該保持單純」。Advisor 復述為 simulate 回傳所有模、
+t1_curve 負責主模選取與診斷，使用者回答「對」。這個分工避免讓呼叫端的分析政策成為數值工具的回傳契約。
+
 ### 模擬損耗漂移的數值、設定與 truth owner
 
 純 log-OU 數值類別 `LogOU` 位於 `simulate.drift`：只接 mean、sigma、tau_s 與 RNG，依 caller 提供的時間算精確轉移，不讀 YAML、clock 或檔案。

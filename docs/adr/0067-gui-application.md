@@ -83,6 +83,12 @@ Device 活動狀態由 driver 在 `device_operation` 中記錄，只有是否在
 
 State 提交由單一 owner loop 序列化。Session 的 `OwnerScheduler` 可由 Qt queued signal 或 headless queue 實作；這個規則不等同於要求 core 依賴 Qt 主線程。操作的取消、handle 與 terminal settle 由 Operation owner 決定，本篇不複製生命週期規則。
 
+Measure 的 `services.pane_commit` 擁有 pane 提交、artifact 規劃、版本更新與退役資源清理。State 每種 pane 只提供一個被動交換入口，安裝備妥的資料並回傳退役資源。Run、Analyze、PostAnalyze、Load 與 Tab 將提交或清理交給 pane_commit，不各自維護 draft teardown 與 plots release。Run 與 Load 不為清理 draft 而依賴 WritebackService。
+
+未發布 plots 的 discard 也由 pane_commit 擁有。各 operation 保留 admission、terminal policy 與觸發清理的時機，不把 operation lifecycle 搬進提交 module。提交順序、失敗語意與 pane 失效關係見 [measure owners](../../lib/zcu_tools/gui/app/measure/README.md#owners)。這是 app 內的責任收斂，既有 C8／C9 分層與無循環契約、artifacts／writeback 分隔契約不變。
+
+使用者於 2026-10-28 對 pane 提交與退役清理集中到單一 module 的建議裁定：「強烈建議的都採用」。集中 owner 後，新增退役資源的清理規則不再需要同步修改五個 service。
+
 建立一條依賴時，先辨認互動：查詢走可用的狀態或 read contract，命令呼叫負責該行為的 owner，對已提交變化的反應訂閱 domain fact。Command 可以是單向的 owning-service 合作；不把「service 絕不互調」當成禁令，也不為每條邊建立 Protocol。窄 port 用在跨 owner 或 shared／app 邊界有隔離需求的地方。Port 和 EventBus 不會自動消除循環，仍要檢查誰發起、誰寫入、誰反應。組裝決定注入哪些模組；有界流程的 coordinator 可決定觸發、順序與分支，但仍透過 owner 的 commands／queries 工作，不直接取得它的寫入權威。Startup／mock setup 與 pane 反應是不同流程，不合成萬用 coordinator。
 
 ## Workflow 嵌入 measure
@@ -182,7 +188,7 @@ Results browser 的分組、filter、圖庫、細節與比較只讀保存內容�
 
 ## Adapter capability 與事件
 
-Measure 的 `artifacts` package 擁有 ArtifactTracker、SaveService、SaveControl、保存中心與 ArtifactHandover。Run 與 restore 的公開契約使用 RunRecord envelope。RunService 只將 acquisition metadata 裝進 record，持有並轉交它。cfg 與 Result 仍由 adapter 擁有，GUI 不探測其欄位或 shape。Acquired 沿 record.metadata 寫入，不保存 cfg。分析結果與 writeback draft 仍是 opaque handle，不收窄 workflow 的任意回傳值。
+Measure 的 `artifacts` package 擁有 ArtifactTracker、SaveService、SaveControl、保存中心與 ArtifactHandover。Run 與 restore 的公開契約使用 RunRecord envelope。RunService 只將 acquisition metadata 裝進 record，持有並轉交它。cfg 與 Result 仍由 adapter 擁有，GUI 不探測其欄位或 shape。Acquired 沿 record.metadata 寫入，不保存 cfg。分析結果仍是 opaque handle，不收窄 workflow 的任意回傳值。Pane 的 draft 使用 WritebackService 擁有的具名 `WritebackDraft`，沒有 draft 時為 None。
 
 使用者於 2026-10-22 裁定：「存讀檔接口也不用RunRecord外的資訊了」。Metadata 與資料使用同一個 envelope，避免宿主保存兩份可能錯配的來源；不保留 opaque Run fallback。
 
@@ -196,7 +202,7 @@ LoadService 擁有 native 讀檔與 tag 比對，再呼叫 adapter.restore(store
 
 GUI handover 與 Qt-free experiment 核心分層，依 GUI → experiment → datafile／resources 的 C8、C9 contracts；共用核心另由 artifacts-core-no-ui 禁止 GUI／Qt 依賴。2026-10-15 以「1可以，2採用忽略不支援欄位的方式，3同意，4一起做吧」確認 Load 不回填與兩個子模組一併實作。
 
-Measure 的 `writeback` package 擁有 Parameter／Module／Sample proposals、opaque draft、
+Measure 的 `writeback` package 擁有 Parameter／Module／Sample proposals、具名 `WritebackDraft`、
 service、control 與 Qt widget。Adapter 公開入口再匯出 proposal 型別；resources.entry
 executor 與 remote handler／wire types 留在原 owner。`artifacts` 與 `writeback` 不直接
 互相 import，由 app composition 協調，仍可共用 State、events 與 context。

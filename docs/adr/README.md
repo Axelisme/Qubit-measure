@@ -10,7 +10,7 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 
 ## Module Boundaries
 
-- [0072 — 模組定位與依賴邊界](0072-module-boundaries.md)：各 package 的定位、實驗計算歸 core 與 GUI 接線規則、五層、單一 lab 描述與各入口最小 Protocol、logging-before-construction、analysis selection 與兩個 module-only MCP 例外、使用者元件子模組與模擬環境定位、穩定工具與有狀態模組的分類、分析 app 的 entry/component owner 與 native 光譜選擇、analysis 的 native 投影、device snapshot 標量解讀、模擬損耗漂移的 simulate／resources／experiment 分工、core 共用 waveform 格式、cfg_model 契約、library 容器版本政策、依 kind 宣告的 component wiring、lab mux group 的具名 coil 來源與 active selection 邊界、債務清單。分層、無循環與 core 只依賴 utils 由 .importlinter C8–C13／C19 檢查，C15 保護使用者 core 的 GUI independence，C16 禁止 framework 反向 import 使用者套件；離線遷移專用程式只放 `migrations/`。剩餘債務以 `ignore_imports` 記帳。
+- [0072 — 模組定位與依賴邊界](0072-module-boundaries.md)：各 package 的定位、實驗計算歸 core 與 GUI 接線規則、五層、單一 lab 描述與各入口最小 Protocol、logging-before-construction、analysis selection 與兩個 module-only MCP 例外、使用者元件子模組與模擬環境定位、穩定工具與有狀態模組的分類、分析 app 的 entry/component owner 與 native 光譜選擇、analysis 的 native 投影、device snapshot 標量解讀、模擬損耗漂移的 simulate／resources／experiment 分工、manifold 衰減模與 t1_curve 分析診斷的分工、core 共用 waveform 格式、cfg_model 契約、library 容器版本政策、依 kind 宣告的 component wiring、lab mux group 的具名 coil 來源與 active selection 邊界、債務清單。分層、無循環與 core 只依賴 utils 由 .importlinter C8–C13／C19 檢查，C15 保護使用者 core 的 GUI independence，C16 禁止 framework 反向 import 使用者套件；離線遷移專用程式只放 `migrations/`。剩餘債務以 `ignore_imports` 記帳。
 
 ## Concurrency / Lifecycle
 
@@ -22,7 +22,7 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 ## GUI Service Architecture
 
 - [0076 — Device 活動快照與 run 後讀回](0076-device-activity-and-readback.md)：driver 記錄兩項活動狀態、DeviceManager 具名快照、GUI 定時讀取與標記、單 driver 單名稱及 closing driver 登記拒絕，以及獨立於 acquisition snapshot 的 run 後 cache 讀回。
-- [0067 — GUI 應用核心與前端邊界](0067-gui-application.md)：shared session、獨立 SoC dialog 與窄 control facets、腳本保存權威、動態 SoC／device 交接、明確儀器 adapter catalog 與專屬面板、interactive 與單層 undo、domain facts 與前端反應、Artifact／Writeback 子模組與 explicit plotting；PredictorParameterEditor／PredictorCurveTabs 與 ExperimentFigureArea 的具體控件 owner；measure workflow 多 tab、單 toggle、Ask sub-tab 與 headless facet／pane 分工；歷史開 tab 的 factory 失敗隔離與 Load 失敗清理，以及 Results browser 的保存 cfg 唯讀檢視例外。
+- [0067 — GUI 應用核心與前端邊界](0067-gui-application.md)：shared session、獨立 SoC dialog 與窄 control facets、腳本保存權威、動態 SoC／device 交接、明確儀器 adapter catalog 與專屬面板、interactive 與單層 undo、domain facts 與前端反應、Artifact／Writeback 子模組、pane 提交與退役清理、具名 draft 與 explicit plotting；PredictorParameterEditor／PredictorCurveTabs 與 ExperimentFigureArea 的具體控件 owner；measure workflow 多 tab、單 toggle、Ask sub-tab 與 headless facet／pane 分工；歷史開 tab 的 factory 失敗隔離與 Load 失敗清理，以及 Results browser 的保存 cfg 唯讀檢視例外。
 - [0064 — GUI process startup 與 app composition](0064-process-startup.md)：launcher／runtime／composition、可信 startup(ctx) 的 default／custom／clean 選擇、背景執行、on_close 與預設腳本的 session 保存責任。
 
 ## Cfg / Value Model
@@ -60,7 +60,7 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 
 - [0078 — Evolution 黑盒邊界與算法內聚](0078-evolution-module-boundary.md)：對外只用 package root，內部允許實質耦合；dispatch 擁有分類、builder 與 frame 決策，kernel 擁有數值 certificate 與 apply，共用數值由單一模組擁有。所有模擬器納入每次 acquisition 固定、預設關閉的損耗漂移；Engine preparation 限一次 evolve，single 跨損耗保留結構並重建 rates，FTF 漂移時重建完整 facts，routing facts 與 acquire-local CavityAverageCache 各有獨立 lifetime。Program 擁有 RawShots 介面，環境生成完整 raw，core 保持純資料。依賴方向沿用 C8、C9、C12、C19。
 
-- [0071 — Coherence 頻率與時間單位](0071-coherence-units.md)：energy/h=GHz、physical ns、標準 loss parameters 與 spectral-rate 換算；T1／pointwise Q 與 Purcell 的實作契約、獨立物理驗證及歷史 2π 修改證據。
+- [0071 — Coherence 頻率與時間單位](0071-coherence-units.md)：energy/h=GHz、physical ns、標準 loss parameters 與 spectral-rate 換算；pair lifetime 與 manifold model T1 的區別、T1／pointwise Q 與 Purcell 的實作契約、獨立物理驗證及歷史 2π 修改證據。
 
 局部分析／預測契約見 [fluxdep](../../lib/zcu_tools/analysis/fluxdep/README.md)、[fitting](../../lib/zcu_tools/analysis/fitting/README.md) 與 [prediction](../../lib/zcu_tools/simulate/fluxonium/README.md)；waveform 資產契約見 [repository 參考](../../lib/zcu_tools/resources/waveform_assets.md)。
 
