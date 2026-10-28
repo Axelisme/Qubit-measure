@@ -5,13 +5,12 @@ from __future__ import annotations
 
 import logging
 import runpy
-from collections.abc import Sequence
 from pathlib import Path
 from tempfile import gettempdir
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from zcu_tools.mcp.measure.recipe_api import RecipeDeclaration
+    from zcu_tools.mcp.measure.lab import MeasureMcpLab
 
 logger = logging.getLogger(__name__)
 
@@ -340,16 +339,19 @@ def _setup_logging() -> None:
     )
 
 
-def main(*, recipes: Sequence[RecipeDeclaration], gui_module: str) -> None:
-    """Run the stdio server with explicitly supplied async declarations.
+def main(lab: MeasureMcpLab, *, gui_module: str) -> None:
+    """Register lab components and run stdio tools from the lab's async recipes.
 
-    gui_module is the caller's Python module launched from the repository root.
-    recipes is the composition root's immutable declaration sequence. Invalid
-    definitions fail during session assembly, before GUI operations. On EOF/error,
+    lab supplies a component registrar and recipe declarations; registration and
+    invalid definitions fail before stdio dispatch or GUI operations. gui_module
+    is the caller's Python module launched from the repository root. On EOF/error,
     disconnect and drain session workers/PNGs; do not close the GUI or hardware.
     """
     from zcu_tools.mcp.core.stdio_server import StdioLoopHooks, run_stdio_loop
+    from zcu_tools.resources.entry.registry import component_registry
 
+    lab.register_components(component_registry)
+    recipes = lab.recipes
     config = MCPBridgeConfig(
         app_name="gui",
         app_slug="measure",
