@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from datetime import datetime
 from pathlib import Path
 from tempfile import NamedTemporaryFile
@@ -110,19 +110,23 @@ class PredictorFile:
     model selects the built-in 'fluxonium' or 'transmon' parameter type.
     params holds only that model's energy/asymmetry inputs; None is unknown.
     flux records offset, signed device periods and explicit native units.
-    source holds authored provenance, without checking whether the run exists.
-    validate_predictor_file and the I/O functions check representation, not
-    completeness or physical constraints. Call params.build_predictor() to
+    source holds authored provenance, or None if absent/unparseable on read.
+    Writers require explicit provenance; no run existence lookup is performed.
+    validate_predictor_file and save check the complete writer representation.
+    Load checks only numeric inputs and parseable optional provenance. None of
+    these checks require completeness or physical constraints. Call params.build_predictor() to
     validate and build a model.
     """
 
     model: ModelName
     params: ModelParams
     flux: PredictorFlux
-    source: PredictorSource
+    source: PredictorSource | None
 
 
-def _fields(value: object, expected: tuple[str, ...], name: str) -> dict[str, object]:
+def _fields(
+    value: object, expected: tuple[str, ...], name: str, *, allow_extra: bool = False
+) -> dict[str, object]:
     if not isinstance(value, dict):
         raise ValueError(f"{name} must be a JSON object")
     result: dict[str, object] = {}
@@ -134,7 +138,7 @@ def _fields(value: object, expected: tuple[str, ...], name: str) -> dict[str, ob
     if missing:
         raise ValueError(f"{name} missing fields: {', '.join(sorted(missing))}")
     unknown = result.keys() - set(expected)
-    if unknown:
+    if unknown and not allow_extra:
         raise ValueError(f"{name} unknown fields: {', '.join(sorted(unknown))}")
     return result
 
@@ -147,7 +151,7 @@ def _nullable_text(value: object, name: str) -> str | None:
     return value
 
 
-def _decode(value: object) -> PredictorFile:
+def _decode(value: object, *, for_read: bool = False) -> PredictorFile:
     if (
         isinstance(value, dict)
         and type(value.get("version")) is int
@@ -158,8 +162,11 @@ def _decode(value: object) -> PredictorFile:
         )
     document = _fields(
         value,
-        ("format", "version", "model", "params", "flux", "source"),
+        ("format", "version", "model", "params", "flux")
+        if for_read
+        else ("format", "version", "model", "params", "flux", "source"),
         "predictor",
+        allow_extra=for_read,
     )
     if document["format"] != "zcu.predictor":
         raise ValueError("format must be 'zcu.predictor'")
@@ -174,9 +181,27 @@ def _decode(value: object) -> PredictorFile:
     if not isinstance(raw_params, dict):
         raise ValueError("params must be a JSON object")
     # Numeric owners validate parameter names and finite numbers, not this envelope.
-    params = params_class(model_name).from_mapping(raw_params)
-    flux = _decode_flux(document["flux"])
-    source = _fields(document["source"], ("run_id", "created_at"), "source")
+    parameter_type = params_class(model_name)
+    if for_read:
+        raw_params = {
+            field.name: raw_params[field.name]
+            for field in fields(parameter_type)
+            if field.name in raw_params
+        }
+    params = parameter_type.from_mapping(raw_params)
+    flux = _decode_flux(document["flux"], allow_extra=for_read)
+    if for_read:
+        try:
+            source = _decode_source(document.get("source"), allow_extra=True)
+        except ValueError:
+            source = None
+    else:
+        source = _decode_source(document["source"])
+    return PredictorFile(model_name, params, flux, source)
+
+
+def _decode_source(value: object, *, allow_extra: bool = False) -> PredictorSource:
+    source = _fields(value, ("run_id", "created_at"), "source", allow_extra=allow_extra)
     run_id = _nullable_text(source["run_id"], "source.run_id")
     created_at = _nullable_text(source["created_at"], "source.created_at")
     if created_at is not None:
@@ -195,11 +220,11 @@ def _decode(value: object) -> PredictorFile:
         timestamp = datetime.fromisoformat(created_at)
         if timestamp.utcoffset() is None:
             raise ValueError("source.created_at must include a timezone")
-    return PredictorFile(model_name, params, flux, PredictorSource(run_id, created_at))
+    return PredictorSource(run_id, created_at)
 
 
-def _decode_flux(value: object) -> PredictorFlux:
-    flux = _fields(value, ("offset", "period", "unit"), "flux")
+def _decode_flux(value: object, *, allow_extra: bool = False) -> PredictorFlux:
+    flux = _fields(value, ("offset", "period", "unit"), "flux", allow_extra=allow_extra)
     periods, units = flux["period"], flux["unit"]
     if not isinstance(periods, dict) or not isinstance(units, dict):
         raise ValueError("flux.period and flux.unit must be objects")
@@ -282,10 +307,11 @@ def upgrade_predictor_document(value: object) -> PredictorFile:
 def load_predictor_file(path: Path) -> PredictorFile:
     """Read existing UTF-8 zcu.predictor v2 JSON into independent typed inputs.
 
-    All envelope/source fields are required, including nullable metadata. Extra
-    envelope/source fields, unknown models/parameters, invalid metadata, bool or
-    nonfinite numeric inputs raise ValueError. Numeric fields may be omitted or
-    null. Version must be integer 2, not bool/float. Timestamps need a timezone.
+    Model, params and flux are required. Unknown envelope, parameter and flux
+    fields are ignored. Invalid known numeric fields and unknown models raise
+    ValueError. Numeric fields may be omitted or null. Version must be integer 2,
+    not bool/float. Missing or unparseable source (including naive timestamps)
+    becomes None; parseable provenance retains its original text.
     V1 is rejected with the explicit entry upgrade command. Flux fields are
     complete and validated by analysis.flux; device/unit keys must match.
     Parsing errors and filesystem errors propagate; no file or directory is
@@ -293,7 +319,7 @@ def load_predictor_file(path: Path) -> PredictorFile:
     """
     with path.open(encoding="utf-8") as stream:
         value: object = json.load(stream)
-    return _decode(value)
+    return _decode(value, for_read=True)
 
 
 class PredictorSourceValues(TypedDict):
@@ -330,6 +356,8 @@ def encode_predictor_document(predictor: PredictorFile) -> PredictorDocument:
     """
     if predictor.model != predictor.params.model:
         raise ValueError("model and params type must agree")
+    if predictor.source is None:
+        raise ValueError("source is required for writing")
     document: PredictorDocument = {
         "format": "zcu.predictor",
         "version": 2,
@@ -346,7 +374,7 @@ def encode_predictor_document(predictor: PredictorFile) -> PredictorDocument:
 
 
 def validate_predictor_file(predictor: PredictorFile) -> None:
-    """Validate typed inputs using the load/save representation rules, without I/O.
+    """Validate typed inputs using strict writer representation rules, without I/O.
 
     Model and parameter type must agree. Invalid metadata or numeric inputs raise
     ValueError. Unknown numbers and metadata remain unknown; incomplete or
@@ -361,8 +389,8 @@ def save_predictor_file(path: Path, predictor: PredictorFile) -> None:
     """Validate and atomically replace path with zcu.predictor v2 UTF-8 JSON.
 
     The parent directory must exist. Model and parameter type must agree;
-    representation errors raise ValueError before writing, using the same rules
-    as load_predictor_file. Unknown numeric values are saved as null. No values,
+    representation errors raise ValueError before writing. Unlike the reader,
+    writing requires valid explicit source metadata. Unknown numeric values are saved as null. No values,
     units, run IDs or timestamps are inferred, and predictor is not mutated.
     I/O errors propagate; a failed replacement retains the existing destination
     and removes the sibling temporary. There is no multiwriter merge, lock or

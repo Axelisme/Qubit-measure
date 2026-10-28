@@ -122,7 +122,7 @@ AnalyzePanel 是 **MainWindow 持有的單例**（第一次進 Fit 頁時建立�
 ### 領域邊界：不碰 experiment.v2
 
 不 import `experiment.v2`。Native 檔案經 analysis 的公開投影取得陣列與單位。
-`LoadService` 只從同一個 Container 的 metadata，經 `experiment.native_persistence` 解碼 acquisition snapshot，
+`LoadService` 只從同一個 Container 的 metadata，經 `experiment.native_persistence.device_snapshot_from_container` 投影 device snapshot，不要求 provenance 或完整 RunMetadata，
 再向 device 的 `snapshot_scalar_values` 取得 context 指名的 scalar。它不解析 cfg 或 driver settings。
 缺 snapshot 保留 None，已記錄空 snapshot 保留空 mapping。
 
