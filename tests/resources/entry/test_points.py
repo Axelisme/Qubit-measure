@@ -594,17 +594,20 @@ def test_clone_copy_failure_cleans_new_directory_and_keeps_source(
     }
     copyfile = shutil.copyfile
 
-    def fail_module_copy(
+    def block_library_destination(
         source: str | Path, target: str | Path, *, follow_symlinks: bool = True
     ) -> str | Path:
-        if Path(target) == root / "points/b/module_cfg.yaml":
-            raise OSError("module copy failed")
-        return copyfile(source, target, follow_symlinks=follow_symlinks)
+        copied = copyfile(source, target, follow_symlinks=follow_symlinks)
+        if Path(target) == root / "points/b/point.yaml":
+            # The point now exists; make the subsequent library write fail on disk.
+            (root / "points/b/module_cfg.yaml").mkdir()
+        return copied
 
     with monkeypatch.context() as patch:
-        patch.setattr(shutil, "copyfile", fail_module_copy)
-        with pytest.raises(OSError, match="module copy failed"):
+        patch.setattr(shutil, "copyfile", block_library_destination)
+        with pytest.raises(OSError, match="module_cfg") as failure:
             entry.new_point("b", clone_from=working_point)
+        assert failure.value.filename == str(root / "points/b/module_cfg.yaml")
     assert not (root / "points/b").exists()
     assert entry.list_points() == ["a"]
     assert {name: (source / name).read_bytes() for name in before} == before
