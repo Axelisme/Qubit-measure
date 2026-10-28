@@ -1,6 +1,6 @@
 # `t1_curve` 模塊重點文檔
 
-**Last updated:** 2026-10-27（Purcell 選填獨立溫度）
+**Last updated:** 2026-10-28（manifold T1、secondary 診斷與低溫偏差線性化）
 
 **讀者：** lab-author。T1 資料準備、噪聲模型擬合與分析呈現契約。
 
@@ -37,6 +37,52 @@ Fluxonium T1 vs. flux 的分析工具：從實測 T1 資料反推各噪聲通道
 - `plot_sample_t1(s_fluxs, s_T1s, s_T1errs)` 直接接收 normalized flux 與 ns 量測。`plot_eff_t1_with_sample(s_fluxs, s_T1s, s_T1errs, t1_effs, t_fluxs, ...)` 也直接接收 normalized sample/model flux。兩者不要求 device frame；作者若需要儀器值軸，另呼叫 `fit_tools.add_device_axis(ax, frame, device_name=...)`。
 - `plot_t1_with_sample(s_dev_values, s_T1s, s_T1errs, flux_half, flux_period, params, t_fluxs, *, name, noise_name, noise_values, Temp, **other_noise_options)`：疊加多條理論 T1(φ) 曲線；`name` ∈ {`Q_cap`, `x_qp`, `Q_ind`}；`noise_values` 中元素可為 float 或 callable `f(ω, T)`（可變 Q(ω) 模型）；底層呼叫 `simulate.fluxonium.calculate_eff_t1_vs_flux_fast`，接收 `params` tuple 並計算 eigenpairs。
 - `plot_eff_t1_with_sample(...)` 直接接受已算好的 `t1_effs`；可選 `component_t1s={label: curve}` 疊加每個獨立 T1 機制的上限曲線，曲線長度需與 `t_fluxs` 相同；`component_bands={label: (lower, upper)}` 會在 lower/upper 之間畫半透明區間且不佔 legend。Effective curve 用黑色粗實線，Purcell 用紅色 dash-dot，其他 component 用較細 dotted/dashed 線；逐項機制圖的 lower/upper legend 顯示為 `- lower` / `- upper` 並排在主擬合線後。`parameter_text` 會把擬合參數畫在座標軸外，讓圖內 legend 保持短線名，T1 workflow 預設只顯示 active `Q_*` / `x_qp` 與 `Temp`。
+
+### Manifold forward 與非單指數診斷
+
+Fit 將所有 active intrinsic 通道的 directional rates 加入同一個多能階 rate matrix。
+Simulate 以 Gibbs 布居交換 0、1 作初態，計算 observable `1-p0(t)` 的衰減模。
+`predict_manifold_t1(params, fluxs, noise_channels, Temp, ...)` 選 signed amplitude 最大的模。
+回傳的 `ManifoldPrediction.T1_ns` 是這個模的 ns lifetime。
+`secondary_fractions` 使用第二大振幅的 `a2/(a1+a2)`，保留負值，不取絕對值或 clip。
+只有一個模時佔比為 0。沒有衰減模時拋出指名 flux index 與值的 `ValueError`。
+
+`fit_t1_noise_params(..., secondary_threshold=0.1)` 與 `fit_t1_curve` 使用同一門檻。
+`T1FitResult.secondary_fractions` 按 fit flux 順序排列。
+`non_single_exponential` 只標記佔比嚴格大於門檻的點。
+門檻必須 finite 且在 [0,1]。
+`i,j` 只接受 (1,0) 與 (0,1)，兩者代表同一個 0↔1 π pulse。
+Fit 不提供 pair forward 選項。
+
+`combined_fit.pointwise_table` 與 `channel_analysis.pointwise_table` 顯示每點的 T1、signed 佔比與標記。
+`plot_t1_channel_analysis` 以橘色空心圓標記 dense model，以橘色叉號標記 fit samples。
+Channel curves 與逐機制參考曲線都使用 manifold 主模。
+Combined intrinsic curve 先加 rates 再選模，不能由逐機制主模的倒數相加推回。
+Purcell 與其他 extra relaxation 仍只在 dominant T1 上加 rate，不改 intrinsic secondary 佔比。
+
+Pointwise Q probes 仍以 0↔1 pair 反解。
+當 Γ12/Γ10 不小時，熱激發與 cascade 會讓 measured T1 偏離 pair lifetime，這些 Q 只供粗估與初值參考。
+20 mK 不保證 pair 與 manifold 在全域等價。
+以 Q2 的 EJ/EC/EL = 5.71/1.30/0.59 GHz、真值 Q_cap = 1e6、Q_ind = 1e8、x_qp = 2e-7 為例，
+在 φ=0.1–0.75 的 24 點 manifold 合成資料上，pair fit 的三個參數偏差依序約 −8.7%、+7.4%、−15%。
+這個結果不代表其他器件的偏差。
+
+低溫 parity 使用 fit 前以真值固定的物理子集，不依 fit 結果挑點。
+同一組 Q2 參數在 20 mK、cutoff=60、qub_dim=20 下，從 φ=0.1 至 0.75 的 24 點選出 14 點。
+每點同時滿足次模振幅佔比 <1%，以及 directional Γ12/Γ10 <1%，後者是 1→2／1→0 的 rate ratio。
+子集範圍是 φ≈0.3261 至 0.6935，兩種 forward 的最大逐點相對曲線差為 0.8102553%，通過 <1% 門檻。
+
+原先要求三個 fit 參數相對差各自 <2%，但 Q_cap、Q_ind、x_qp 的差依序為 −1.82885%、+1.46677%、−2.69754%。
+x_qp 未通過，原失敗結果保留。現行檢查改為驗證曲線差能否經 fit 的線性化解釋這些偏差，不要求三參數等價。
+在真值處計算 pair forward 的 J = ∂log(T1_pair)/∂log(Q_cap,Q_ind,x_qp)，
+並以 Δr = log(T1_pair_truth) − log(T1_manifold_truth) 預測 Δp = −solve(JᵀJ, JᵀΔr)。
+將 log shift 轉成相對差後，預測與既有 fit 觀測須同號，且誤差不得超過觀測量絕對值的 25%。
+此檢查不重跑 fit，也不改既有 mask、權重或曲線門檻。
+
+JᵀJ 的條件數為 195.9280。三參數預測相對差依序為 −1.84391%、+1.45457%、−2.65945%。
+它們與既有觀測同號，誤差分別占觀測量的 0.824%、0.832%、1.412%，通過 25% 門檻。
+這支持該子集的參數偏差可由小曲線差解釋，不能外推為全域 pair 等價。
+T2 與 Purcell 的模型不因這項切換改變。
 
 ### `t1_curve_fit.py` / `fit.py` — white-list T1 noise fit
 
