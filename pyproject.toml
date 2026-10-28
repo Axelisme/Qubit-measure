@@ -149,12 +149,15 @@ max-complexity = 12
 max-args = 6
 
 [tool.ruff.lint.per-file-ignores]
-"scripts/start_server.py" = ["UP"]
-"lib/zcu_tools/qick_remote/pyro.py" = ["UP"]
+# tolerated(config): F401 flags intentional package re-exports in __init__.py barrels.
 "__init__.py" = ["F401"]
-# Fixtures legitimately take many parameters and accept ones they only activate;
-# `assert False` (B011) is a normal marker for a branch a test asserts is unreachable.
-"tests/**" = ["PLR0913", "ARG001", "ARG002", "FBT001", "FBT002", "B011"]
+"tests/**" = [
+  "PLR0913", # tolerated(config): Fixtures and synthetic numeric models expose independent inputs.
+  "ARG001", # tolerated(config): Fixture arguments activate setup; test callbacks mirror collaborator signatures.
+  "ARG002", # tolerated(config): Recording fakes implement collaborator methods without using every argument.
+  "FBT001", # tolerated(config): Test fakes preserve positional boolean signatures of their collaborators.
+  "FBT002", # tolerated(config): RPC and persistence fakes mirror positional boolean defaults.
+]
 
 [tool.pyright]
 include = ["lib", "zcu_lab", "apps", "tests", "scripts", "mcp_servers", "tools", "migrations"]
@@ -169,26 +172,32 @@ executionEnvironments = [
   # Resolve production packages before same-named test packages.
   { root = ".", extraPaths = ["lib", "tools", "tests"] },
 ]
-# strict, minus the rules whose diagnostics are produced by untyped third-party
-# packages (qick, pyvisa, scqubits, qtpy) rather than by this repository. Measured
-# on lib/: the reportUnknown* family is 59% of strict output and is almost entirely
-# third-party in origin; with it disabled every remaining diagnostic is own-code.
+# Strict with existing untyped third-party and test-helper diagnostics disabled.
+# Optional packages, numeric backends and synthetic collaborators still lack types.
 typeCheckingMode = "strict"
 reportUnnecessaryTypeIgnoreComment = "error"
 # Missing optional-profile packages remain visible debt in the ratchet; missing
 # imports and missing third-party stubs are different diagnostics.
 reportMissingImports = "error"
+# tolerated(config): scipy.ndimage/signal and other installed numeric packages lack stubs.
 reportMissingTypeStubs = "none"
+# tolerated(config): Untyped scipy results and GUI factories flow into typed numeric/runtime calls.
 reportUnknownArgumentType = "none"
+# tolerated(config): Imported scipy functions and their results carry partially unknown signatures.
 reportUnknownVariableType = "none"
+# tolerated(config): scipy optimizer result attributes and Qt/scqubits members lack complete types.
 reportUnknownMemberType = "none"
+# tolerated(config): Optimizer and synthetic callback lambdas inherit unknown parameter types.
 reportUnknownLambdaType = "none"
+# tolerated(config): Numeric backend kwargs and synthetic test collaborators remain unannotated.
 reportUnknownParameterType = "none"
+# tolerated(config): Backend kwargs and test fixtures omit parameter annotations across existing callers.
 reportMissingParameterType = "none"
+# tolerated(config): numba.njit decorators lack typed signatures for the numeric kernels they wrap.
 reportUntypedFunctionDecorator = "none"
+# tolerated(config): Optional qiskit-metal component bases lack usable type information.
 reportUntypedBaseClass = "none"
-# Ruff owns unused imports (F401, with __init__.py barrels exempted); a second
-# authority on the same rule would only disagree about the barrels.
+# tolerated(config): Ruff F401 owns unused imports; Pyright also flags intentional barrel exports.
 reportUnusedImport = "none"
 # reportPrivateUsage stays ON everywhere, including tests. In lib/ its 327 hits are
 # encapsulation breaks across module boundaries, which is the signal this gate
@@ -196,8 +205,7 @@ reportUnusedImport = "none"
 # which the test contract (tests validate observable behaviour and Interfaces)
 # already forbids; the ratchet drains them rather than the config hiding them.
 #
-# Pre-existing override that narrows strict; a candidate for removal as the ratchet
-# drains.
+# tolerated(config): Schema subclasses narrow mutable discriminator fields to Literal variants.
 reportIncompatibleVariableOverride = "none"
 
 [tool.pytest.ini_options]

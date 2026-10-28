@@ -187,7 +187,7 @@ def test_open_rebuilds_stale_destroyed_dialog(qapp) -> None:
         return dialog
 
     registry = _FactoryRegistry(parent, build_dialog)
-    # tolerated(cast): Non-Qt fake deterministically raises the deleted-wrapper error.
+    # tolerated(cast): reportArgumentType: Non-Qt fake deterministically raises the deleted-wrapper error.
     stale = cast(QDialog, _DestroyedDialog())
     registry.refs.retain_named(DialogName.SETUP, stale, on_released=lambda: None)
 

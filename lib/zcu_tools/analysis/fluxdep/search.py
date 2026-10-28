@@ -128,13 +128,17 @@ def _load_database_cached(
     """
     with File(datapath, "r") as file:
         if "fluxs" in file:
-            f_fluxs = file["fluxs"][:]  # (P,) # type: ignore[index]
+            # tolerated: Database schema makes fluxs a (P,) Dataset; h5py lookup also types Datatype.
+            f_fluxs = file["fluxs"][:]  # pyright: ignore[reportIndexIssue]
         elif "flxs" in file:  # accepted misspelling in existing database files
-            f_fluxs = file["flxs"][:]  # (P,) # type: ignore[index]
+            # tolerated: Legacy flxs is the same (P,) Dataset; h5py lookup also types Datatype.
+            f_fluxs = file["flxs"][:]  # pyright: ignore[reportIndexIssue]
         else:
             raise KeyError("Database file must contain 'fluxs' or 'flxs' dataset.")
-        f_params = file["params"][:]  # (N, 3) # type: ignore[index]
-        f_energies = file["energies"][:]  # (N, P, M) # type: ignore[index]
+        # tolerated: Database params is an (N, 3) Dataset; h5py lookup also types Datatype.
+        f_params = file["params"][:]  # pyright: ignore[reportIndexIssue]
+        # tolerated: Database energies is an (N, P, M) Dataset; h5py lookup also types Datatype.
+        f_energies = file["energies"][:]  # pyright: ignore[reportIndexIssue]
     assert isinstance(f_fluxs, np.ndarray)
     assert isinstance(f_params, np.ndarray)
     assert isinstance(f_energies, np.ndarray)

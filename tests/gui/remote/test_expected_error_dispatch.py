@@ -41,7 +41,7 @@ class _ImmediateOwnerScheduler:
 
 
 class _InvalidCategoryExpectedError(ExpectedError):
-    # tolerated(cast): Invalid enum input tests translator-failure containment.
+    # tolerated(cast): reportAssignmentType: Invalid enum input tests translator-failure containment.
     category = cast(ExpectedErrorCategory, "invalid_category")
     reason_code = ""
 

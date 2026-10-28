@@ -20,6 +20,7 @@ from zcu_tools.utils.process import SmoothingOptions, smooth_signal_nd
 from zcu_lab.v2.twotone.rabi.len_rabi.core import (
     LenRabiCfg,
     LenRabiExp,
+    LenRabiResult,
 )
 from zcu_lab.v2.twotone.ro_optimize.freq_gain.core import (
     FreqGainCfg,
@@ -415,8 +416,23 @@ async def calibrate_len_rabi(
             record=replace(diagnostics, reason=fit.reason, file="rabi.h5"),
             len_trace=trace,
         )
+    record = _len_rabi_fit_record(result, fit, settings, diagnostics)
+    trace = replace(
+        trace,
+        observed=fit.observed,
+        fitted=fit.fitted,
+        accepted=fit.pi_length_us if record.status == "accepted" else None,
+    )
+    _observe_len_rabi_fit(
+        record, settings, guess=guess, rabi_drive=rabi_drive, gain=gain, result=result
+    )
+    return RabiStageResult(record=record, len_trace=trace)
+
+
+def _trusted_len_rabi_fit(fit: RabiFit, settings: CalibrationTunables) -> bool:
+    """Check fit quality independently of the measured duration window."""
     residual = fit.quality.normalized_residual_rms
-    quality_trusted = (
+    return (
         math.isfinite(fit.pi_length_us)
         and fit.pi_length_us > 0
         and trusted_curve(
@@ -428,29 +444,22 @@ async def calibrate_len_rabi(
         and residual is not None
         and residual < settings.max_fit_residual
     )
+
+
+def _len_rabi_fit_record(
+    result: LenRabiResult,
+    fit: RabiFit,
+    settings: CalibrationTunables,
+    diagnostics: RabiResult,
+) -> RabiResult:
+    """Classify the fit against quality and the acquired length window."""
+    quality_trusted = _trusted_len_rabi_fit(fit, settings)
     too_fast = quality_trusted and fit.pi_length_us < 0.03
     too_slow = quality_trusted and fit.pi_length_us > 0.9 * float(
         np.max(result.lengths)
     )
     accepted = quality_trusted and not too_fast and not too_slow
-    trace = replace(
-        trace,
-        observed=fit.observed,
-        fitted=fit.fitted,
-        accepted=fit.pi_length_us if accepted else None,
-    )
     if not accepted:
-        if settings.rabi_drive_gain_mode == "auto_pi_product":
-            if too_fast:
-                rabi_drive.observe_too_fast(
-                    fit.pi_length_us, gain, max(target_pi_us, 0.03)
-                )
-            elif too_slow:
-                rabi_drive.observe_too_slow(
-                    fit.pi_length_us,
-                    gain,
-                    min(target_pi_us, 0.9 * float(np.max(result.lengths))),
-                )
         reason = (
             "π shorter than minimum trusted length"
             if too_fast
@@ -458,39 +467,59 @@ async def calibrate_len_rabi(
             if too_slow
             else "Rabi fit rejected"
         )
-        return RabiStageResult(
-            record=replace(
-                diagnostics,
-                status="rejected",
-                reason=reason,
-                file="rabi.h5",
-                too_fast_pi_length_us=fit.pi_length_us if too_fast else None,
-                too_slow_pi_length_us=fit.pi_length_us if too_slow else None,
-            ),
-            len_trace=trace,
+        return replace(
+            diagnostics,
+            status="rejected",
+            reason=reason,
+            file="rabi.h5",
+            too_fast_pi_length_us=fit.pi_length_us if too_fast else None,
+            too_slow_pi_length_us=fit.pi_length_us if too_slow else None,
         )
-    rabi_drive.observe(
-        guess.point.index,
-        fit.pi_length_us,
-        gain,
-        target_pi_us,
-        control=settings.rabi_drive_gain_mode == "auto_pi_product",
-    )
     pi2 = (
         fit.pi2_length_us
         if math.isfinite(fit.pi2_length_us) and fit.pi2_length_us >= 0.03
         else None
     )
-    return RabiStageResult(
-        record=replace(
-            diagnostics,
-            status="accepted",
-            pi_length_us=fit.pi_length_us,
-            pi2_length_us=pi2,
-            file="rabi.h5",
-        ),
-        len_trace=trace,
+    return replace(
+        diagnostics,
+        status="accepted",
+        pi_length_us=fit.pi_length_us,
+        pi2_length_us=pi2,
+        file="rabi.h5",
     )
+
+
+def _observe_len_rabi_fit(
+    record: RabiResult,
+    settings: CalibrationTunables,
+    *,
+    guess: RabiGuess,
+    rabi_drive: RabiDriveFeedback,
+    gain: float,
+    result: LenRabiResult,
+) -> None:
+    """Update usable pi feedback only on acceptance, or propose a window correction."""
+    target_pi_us = guess.target_pi_us
+    if record.status == "accepted":
+        assert record.pi_length_us is not None
+        rabi_drive.observe(
+            guess.point.index,
+            record.pi_length_us,
+            gain,
+            target_pi_us,
+            control=settings.rabi_drive_gain_mode == "auto_pi_product",
+        )
+    elif settings.rabi_drive_gain_mode == "auto_pi_product":
+        if record.too_fast_pi_length_us is not None:
+            rabi_drive.observe_too_fast(
+                record.too_fast_pi_length_us, gain, max(target_pi_us, 0.03)
+            )
+        elif record.too_slow_pi_length_us is not None:
+            rabi_drive.observe_too_slow(
+                record.too_slow_pi_length_us,
+                gain,
+                min(target_pi_us, 0.9 * float(np.max(result.lengths))),
+            )
 
 
 def readout_due(point_index: int, tun: CalibrationTunables) -> bool:
