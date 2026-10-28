@@ -6,7 +6,6 @@ from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import MagicMock
-from uuid import UUID
 
 import numpy as np
 import pytest
@@ -56,7 +55,7 @@ from ._run_support import (
 
 def _run_snapshot() -> RunSnapshot:
     return RunSnapshot(
-        entry_id=UUID("00000000-0000-0000-0000-000000000001"),
+        entry_name="entry",
         point="original-point",
         roles={"qubit": "Q1", "resonator": "R1"},
     )

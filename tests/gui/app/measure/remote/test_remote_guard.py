@@ -33,6 +33,7 @@ from zcu_tools.resources.entry.registry import component_registry
 from tests.gui._qt_waits import qt_until
 from tests.gui.app.measure._components import QubitSchema, ResonatorSchema
 from tests.gui.app.measure._load_support import historical_metadata
+from tests.gui.app.measure._record_support import require_target
 from tests.gui.app.measure._synthetic import SampleAdapter
 
 from ._helpers import call as _raw_call
@@ -91,7 +92,7 @@ def _edit_context_as_gui(fx: _Fixture, key: str, value: str | int) -> None:
     parameters = fx.ctrl.context_control.read_context()
     assert parameters is not None
     fx.ctrl.context_control.set_parameter(
-        parameters.target, f"general.ext.{key}", value
+        require_target(parameters), f"general.ext.{key}", value
     )
 
 

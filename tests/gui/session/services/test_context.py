@@ -24,6 +24,7 @@ from zcu_tools.gui.session.events import (
     AliasesChangedPayload,
     ContextSwitchedPayload,
 )
+from zcu_tools.gui.session.parameters import ParameterContext
 from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.state import SessionState
 from zcu_tools.gui.session.types import ContextReadiness, SessionEnv
@@ -31,6 +32,7 @@ from zcu_tools.resources.entry import (
     ResultEntry,
     RoleResolutionError,
     component_registry,
+    snapshot,
 )
 from zcu_tools.resources.parameter_schema import ParameterSchemaPolicy
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
@@ -40,6 +42,64 @@ from tests.resources.entry.fakes import (
     registry_state,
     restore_registry,
 )
+
+
+def test_current_point_label_for_storage_free_content_has_no_persistent_point() -> None:
+    state = SessionState(
+        SessionEnv(parameters=ParameterContext.empty(), soc=None, soccfg=None)
+    )
+    owner = ContextService(
+        state, BaseEventBus(), bind_assets=ArbWaveformDatabase.info_at
+    )
+    assert ContextControlFacet(context=owner).current_point_label() is None
+
+
+def test_point_capture_reads_good_leaf_with_bad_sibling(
+    rich_entry: ResultEntry, context: ContextService
+) -> None:
+    rich_entry.new_point("partial")
+    path = rich_entry.result_path / "points" / "partial" / "point.yaml"
+    raw = YAML(typ="safe").load(path)
+    raw["components"]["Q1"]["sense"] = ["bad sibling"]
+    with path.open("w", encoding="utf-8") as stream:
+        YAML(typ="rt").dump(raw, stream)
+    before = path.read_bytes()
+    context.install_entry(rich_entry)
+
+    context.use_point(PointUseRequest("partial"))
+    parameters = context.read_context()
+
+    assert parameters.value("Q1.rate") == 4300.0
+    with pytest.raises(ValueError, match="Q1.sense"):
+        parameters.value("Q1.sense")
+    assert path.read_bytes() == before
+
+
+def test_point_availability_accepts_parseable_partial_components_and_isolates_bad_yaml(
+    rich_entry: ResultEntry, context: ContextService
+) -> None:
+    rich_entry.new_point("partial")
+    rich_entry.new_point("unparseable")
+    path = rich_entry.result_path / "points" / "partial" / "point.yaml"
+    raw = YAML(typ="safe").load(path)
+    raw["components"]["Q1"]["sense"] = ["bad sibling"]
+    raw["components"]["unused"] = ["bad component"]
+    with path.open("w", encoding="utf-8") as stream:
+        YAML(typ="rt").dump(raw, stream)
+    broken = rich_entry.result_path / "points" / "unparseable" / "point.yaml"
+    broken.write_text("components: [", encoding="utf-8")
+    context.install_entry(rich_entry)
+
+    rows = {row.label: row for row in context.list_points()}
+
+    assert rows["partial"].available
+    assert rows["partial"].error is None
+    assert not rows["unparseable"].available
+    assert rows["unparseable"].error
+    context.use_point(PointUseRequest("partial"))
+    assert context.read_context().value("Q1.rate") == 4300.0
+    with pytest.raises(ValueError, match="Q1.sense"):
+        context.read_context().value("Q1.sense")
 
 
 class Assets:
@@ -111,12 +171,12 @@ def _new_request(label: str, *, clone: str | None = None) -> PointCreateRequest:
     return PointCreateRequest(label, "session description", CommandOrigin("gui"), clone)
 
 
-def _entry_command(context: ContextService, command: str, entry_id: str) -> object:
+def _entry_command(context: ContextService, command: str, entry_name: str) -> object:
     if command == "use":
         return context.use_point(PointUseRequest("new"))
     if command == "new":
         return context.new_point(PointCreateRequest("new", "", CommandOrigin("gui")))
-    return context.entry_ledger(entry_id)
+    return context.entry_ledger(entry_name)
 
 
 def test_global_alias_changes_install_before_the_fact_and_reject_invalid_batches() -> (
@@ -314,7 +374,7 @@ def test_install_entry_preserves_nonparameter_capabilities_without_selecting_poi
     old = context.get_session_env()
     info = context.install_entry(entry)
     current = context.get_session_env()
-    assert info.entry_id == entry.entry_id
+    assert info.name == entry.result_path.name
     assert info.result_path == entry.result_path
     assert info.database_path == entry.database_path
     assert current.readiness is ContextReadiness.EMPTY
@@ -374,10 +434,16 @@ def test_install_entry_isolates_bad_point_parameters_without_reading_other_files
     assert points["good"].available
     assert points["good"].error is None
     assert points["bad"].description == "retained description"
-    assert not points["bad"].available
-    assert points["bad"].error is not None
-    assert reason in points["bad"].error
-    assert str(source) in points["bad"].error
+    if damage in ("kind", "extra"):
+        assert points["bad"].available
+        assert points["bad"].error is None
+        with pytest.raises(ValueError, match=reason):
+            snapshot(entry.use_point("bad"))
+    else:
+        assert not points["bad"].available
+        assert points["bad"].error is not None
+        assert reason in points["bad"].error
+        assert str(source) in points["bad"].error
     assert {
         path: path.read_bytes()
         for path in entry.result_path.rglob("*")
@@ -389,7 +455,7 @@ def test_install_entry_isolates_bad_point_parameters_without_reading_other_files
     )
     (entry.result_path / "points/good/aliases.yaml").unlink()
     context.use_point(PointUseRequest("good"))
-    assert context.read_context().document().general.description == "usable point"
+    assert context.read_context().whole_document().general.description == "usable point"
 
 
 def test_use_point_detaches_capture_and_uses_same_entry_library(
@@ -401,14 +467,14 @@ def test_use_point_detaches_capture_and_uses_same_entry_library(
     context.install_entry(entry)
     target = context.use_point(PointUseRequest("first"))
     capture = context.read_context()
-    assert target == SavedPoint(entry_id=entry.entry_id, point="first")
-    assert capture.document().general.description == "first point"
+    assert target == SavedPoint(entry_name=entry.result_path.name, point="first")
+    assert capture.whole_document().general.description == "first point"
     with first.edit() as edit:
         edit.general.description = "changed outside publication"
     context.use_point(PointUseRequest("second"))
-    assert capture.document().general.description == "first point"
+    assert capture.whole_document().general.description == "first point"
     assert capture.target == target
-    assert context.read_context().document().general.description == "second point"
+    assert context.read_context().whole_document().general.description == "second point"
     assert context.get_session_env().readiness is ContextReadiness.ACTIVE
     assert {point.label: point.description for point in context.list_points()} == {
         "first": "first point",
@@ -424,7 +490,7 @@ def test_cross_entry_ledger_rejects_before_changing_binding(
     context.install_entry(entry)
     before = context.get_session_env()
     with pytest.raises(FailedPreconditionError) as error:
-        _entry_command(context, "ledger", other.entry_id)
+        _entry_command(context, "ledger", other.result_path.name)
     assert error.value.reason_code == "entry_not_open"
     assert context.get_session_env() == before
     assert entry.list_points() == [] and other.list_points() == []
@@ -440,7 +506,7 @@ def test_failed_point_read_keeps_previous_capture(
     with pytest.raises(FileNotFoundError):
         context.use_point(PointUseRequest("missing"))
     assert context.read_context().target == before
-    assert context.read_context().document().general.description == "retained"
+    assert context.read_context().whole_document().general.description == "retained"
 
 
 def test_failed_entry_asset_preparation_keeps_previous_binding(tmp_path: Path) -> None:
@@ -457,7 +523,7 @@ def test_failed_entry_asset_preparation_keeps_previous_binding(tmp_path: Path) -
     with pytest.raises(OSError, match="asset binding"):
         context.install_entry(other)
     info = context.get_entry_info()
-    assert info is not None and info.entry_id == first.entry_id
+    assert info is not None and info.name == first.result_path.name
     assert context.get_session_env().parameters is None
     assert assets.paths[-1] == other.database_path / "arb_waveforms"
 
@@ -472,8 +538,8 @@ def test_new_point_uses_seed_or_clone_and_request_description(
         edit.set("general.ext.marker", 7.0)
     context.install_entry(entry)
     target = context.new_point(_new_request("destination", clone=clone))
-    assert target == SavedPoint(entry_id=entry.entry_id, point="destination")
-    document = context.read_context().document()
+    assert target == SavedPoint(entry_name=entry.result_path.name, point="destination")
+    document = context.read_context().whole_document()
     assert document.general.description == "session description"
     assert document.general.ext.get("marker") == (None if clone is None else 7.0)
     assert {point.label for point in context.list_points()} == {"source", "destination"}
@@ -600,7 +666,10 @@ def test_created_point_binding_failure_retains_point_and_previous_binding(
     assets.fail = True
     with pytest.raises(PointBindingError) as error:
         context.new_point(_new_request("retained"))
-    assert error.value.entry_id == entry.entry_id and error.value.label == "retained"
+    assert (
+        error.value.entry_name == entry.result_path.name
+        and error.value.point == "retained"
+    )
     assert isinstance(error.value.__cause__, OSError)
     assert entry.list_points() == ["retained"]
     assert context.get_session_env().parameters is None
@@ -612,7 +681,7 @@ def test_entry_ledger_is_the_real_capability_and_capture_never_appends(
     entry = _entry(tmp_path)
     before = entry.ledger.events()
     context.install_entry(entry)
-    ledger = context.entry_ledger(entry.entry_id)
+    ledger = context.entry_ledger(entry.result_path.name)
     assert ledger.events() == before
     context.new_point(_new_request("working"))
     context.read_context()
@@ -697,7 +766,7 @@ def test_publication_facts_observe_installed_state_and_one_context_bump(
             else:
                 assert env.parameters is not None
                 assert env.parameters.target == SavedPoint(
-                    entry_id=info.entry_id, point="first" if version == 2 else "second"
+                    entry_name=info.name, point="first" if version == 2 else "second"
                 )
             assert sources is not None and sources.sources
             assert env.result_dir == str(info.result_path)

@@ -92,7 +92,7 @@ def env() -> FormEnv:
             general=PointGeneral(created_at="2026-10-13T00:00:00Z"),
         ),
         library=library,
-        target=SavedPoint(entry_id="entry", point="synthetic"),
+        target=SavedPoint(entry_name="entry", point="synthetic"),
         roles=None,
         storage=None,
     ).bind_aliases(

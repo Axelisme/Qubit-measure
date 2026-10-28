@@ -82,6 +82,46 @@ def test_invalid_candidate_retains_memory_revision_and_bytes(
     assert status.error is not None and str(file.path) in status.error
 
 
+@pytest.mark.parametrize("watcher", [False, True])
+@pytest.mark.parametrize("invalid_field", ["created_at", "rate"])
+def test_reload_validates_complete_parameter_candidate(
+    selected, watcher: bool, invalid_field: str
+) -> None:
+    context, bus, _ = selected
+    old = context.read_context()
+    binding = context.get_source_binding()
+    file = context.get_file_revisions()[0]
+    facts: list[MdChangedPayload] = []
+    bus.subscribe(MdChangedPayload, facts.append)
+    original = file.path.read_text()
+    body = (
+        original.replace("created_at:", "created_at: not-a-time #")
+        if invalid_field == "created_at"
+        else original.replace("4300.0", "bad")
+    )
+    file.path.write_text(body)
+    if watcher:
+        context.synchronize_files(admit_reload=True)
+    else:
+        with pytest.raises(InvalidInputError, match=str(file.path)):
+            context.reload_file(file.path, file.revision)
+    assert context.get_file_revisions()[0] == file
+    assert context.get_source_binding() == binding
+    assert context.read_context().value("Q1.rate") == old.value("Q1.rate")
+    assert facts == []
+    assert context.get_file_sync_status()[0].state == "error"
+    assert file.path.read_text() == body
+
+    file.path.write_text(original.replace("4300.0", "5100.0"))
+    if watcher:
+        context.synchronize_files(admit_reload=True)
+    else:
+        context.reload_file(file.path, file.revision)
+    assert context.read_context().value("Q1.rate") == 5100.0
+    assert len(facts) == 1
+    assert context.get_file_sync_status()[0].state == "reloaded"
+
+
 def test_revision_checks_compare_disk_while_reload_compares_installed(selected) -> None:
     context, _, _ = selected
     assert hasattr(context, "check_file_revision"), (

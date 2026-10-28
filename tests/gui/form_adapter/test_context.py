@@ -93,7 +93,7 @@ def parameters(*, faults: tuple[ContextSourceFault, ...] = ()) -> ParameterConte
                 },
             )
         ),
-        target=SavedPoint(entry_id="synthetic", point="working"),
+        target=SavedPoint(entry_name="synthetic", point="working"),
         roles=None,
         source_faults=faults,
     )

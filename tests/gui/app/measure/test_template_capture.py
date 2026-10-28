@@ -17,6 +17,7 @@ from zcu_tools.gui.session.types import SessionEnv
 from zcu_tools.resources.entry import ResultEntry, component_registry
 
 from tests.gui.app.measure._components import register_all
+from tests.gui.app.measure._record_support import require_target
 from tests.gui.app.measure._templates import TEMPLATES
 from tests.resources.entry.fakes import registry_state, restore_registry
 
@@ -89,8 +90,6 @@ def test_bound_resonator_creates_original_probe_from_public_template(
     assert probe.freq == 6123.0
     assert probe.ch == 1
     assert original.library.module_keys() == ()
-    source = current.library.meta("R1.pulses.probe.freq")
-    assert source is not None and source.source == "manual"
     assert session.entry.ledger.events() == ledger
 
 
@@ -99,7 +98,7 @@ def test_bound_resonator_creates_original_readout_with_adc_channel(
 ) -> None:
     ctrl = session.controller
     ctrl.context_control.set_parameter(
-        ctrl.context_control.read_context().target, "R1.ext.time_of_fly", 0.5
+        require_target(ctrl.context_control.read_context()), "R1.ext.time_of_fly", 0.5
     )
     try:
         ctrl.create_from_template("module", "readout", "R1.readout.rf")

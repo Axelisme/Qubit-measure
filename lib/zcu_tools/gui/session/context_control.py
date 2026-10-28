@@ -27,7 +27,6 @@ if TYPE_CHECKING:
     from zcu_tools.gui.session.types import ParameterContext, RoleBinding
     from zcu_tools.gui.session.value_lookup import ScalarValue, ValueInfo
     from zcu_tools.resources.entry.ledger_models import JsonObject
-    from zcu_tools.resources.entry.provenance import Provenance
     from zcu_tools.resources.entry.schema import PointDocument, SetupDocument
     from zcu_tools.resources.entry.storage import PointStorageBinding
     from zcu_tools.resources.entry.writeback import (
@@ -42,7 +41,7 @@ class ContextControlPort(Protocol):
 
     Reads never refresh implicitly. read_context rejects EMPTY/unavailable
     sources, fixing current alias rows with optional temporary named overrides. Point commands validate the
-    opened entry UUID before resource preparation. Preparation failures preserve
+    opened entry name before resource preparation. Preparation failures preserve
     the binding; a created-but-unbound point raises PointBindingError.
     """
 
@@ -162,8 +161,6 @@ class ContextControlPort(Protocol):
         target: ContextTarget,
         path: str,
         value: ModuleSpec,
-        *,
-        source: Provenance | None = None,
     ) -> YamlMap:
         """Write a module; return its actual cached Spec mapping after commit."""
         ...
@@ -173,8 +170,6 @@ class ContextControlPort(Protocol):
         target: ContextTarget,
         path: str,
         value: WaveformSpec,
-        *,
-        source: Provenance | None = None,
     ) -> YamlMap:
         """Write a waveform; return its actual cached Spec mapping after commit."""
         ...
@@ -188,7 +183,7 @@ class ContextControlPort(Protocol):
         move or remove an existing root. The command runs in one library
         transaction. Writes require a selected working point. Detached
         SavedPoint writes do not select or publish. Invalid target, Spec
-        family, source, conflict and I/O failures write and publish nothing.
+        family, conflict and I/O failures write and publish nothing.
         """
         ...
 
@@ -369,20 +364,16 @@ class ContextControlFacet(ContextControlPort):
         target: ContextTarget,
         path: str,
         value: ModuleSpec,
-        *,
-        source: Provenance | None = None,
     ) -> YamlMap:
-        return self._context.set_module(target, path, value, source=source)
+        return self._context.set_module(target, path, value)
 
     def set_waveform(
         self,
         target: ContextTarget,
         path: str,
         value: WaveformSpec,
-        *,
-        source: Provenance | None = None,
     ) -> YamlMap:
-        return self._context.set_waveform(target, path, value, source=source)
+        return self._context.set_waveform(target, path, value)
 
     def apply_library_change(
         self, parameters: ParameterContext, change: LibraryChange
@@ -416,9 +407,9 @@ class ContextControlFacet(ContextControlPort):
         return self._context.get_entry_info()
 
     def current_point_label(self) -> str | None:
-        # Published parameters exist only while a saved point is selected.
         parameters = self._context.get_session_env().parameters
-        return None if parameters is None else parameters.target.point
+        target = None if parameters is None else parameters.target
+        return None if target is None else target.point
 
     def list_points(self, *, refresh: bool = False) -> tuple[WorkingPointInfo, ...]:
         return self._context.list_points(refresh=refresh)

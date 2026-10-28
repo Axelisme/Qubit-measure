@@ -10,6 +10,8 @@ from zcu_tools.gui.remote.errors import ErrorCode
 from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_types import PointFileRevision
 
+from tests.gui.app.measure._record_support import require_target
+
 from ._point_application import PointApplication
 
 Document = Literal["parameters", "library", "aliases"]
@@ -30,7 +32,7 @@ def point_files(application: PointApplication) -> dict[Document, PointFileRevisi
     control = application.controller.context_control
     control.add_component("Q1", "fake/drive/a", {"rate": 10.0}, setup=True)
     application.result("point.new", {"label": "base"})
-    target = control.read_context().target
+    target = require_target(control.read_context())
     control.set_waveform(target, "Q1.waveforms.seed", ConstWaveformCfg(length=10.0))
     control.set_module(
         target,

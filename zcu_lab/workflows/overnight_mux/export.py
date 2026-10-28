@@ -24,7 +24,7 @@ def export_run(run: Path, *, result: Path) -> tuple[SampleExportReport, ...]:
     """
     manifest = read_manifest(run, "overnight_mux")
     plan = OvernightMuxPlan.model_validate(manifest.plan)
-    if str(plan.snapshot.entry_id) != manifest.identity.entry_id:
+    if plan.snapshot.entry_name != manifest.identity.entry_name:
         raise ValueError(
             f"{run}/manifest.json: Plan snapshot entry and identity differ"
         )

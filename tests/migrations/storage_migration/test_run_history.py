@@ -152,7 +152,7 @@ def test_unknown_start_still_publishes_native_and_reports_assigned_identity(
         "unknown",
         None,
     )
-    assert metadata.snapshot.entry_id == report.entry_id
+    assert metadata.snapshot.entry_name == report.destination.result_path.name
     assert metadata.snapshot.point == "point_at_acquisition"
     assert any(
         item.old_key == "run_id" and "遷移賦值" in item.reason

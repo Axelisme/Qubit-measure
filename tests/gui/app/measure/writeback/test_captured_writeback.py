@@ -42,12 +42,17 @@ from zcu_tools.gui.session.context_control import ContextControlFacet
 from zcu_tools.gui.session.context_types import (
     CommandOrigin,
     PointUseRequest,
+    SavedPoint,
 )
 from zcu_tools.gui.session.expression import evaluate_scalar_expr
 from zcu_tools.gui.session.operation_runner import OperationRunner
+from zcu_tools.gui.session.parameter_capture import (
+    capture_parameters,
+    restore_parameters,
+)
 from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.state import SessionState
-from zcu_tools.gui.session.types import SessionEnv
+from zcu_tools.gui.session.types import ParameterContext, SessionEnv
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from zcu_tools.resources.entry import (
     ResultEntry,
@@ -68,6 +73,14 @@ from tests.gui.app.measure._native_save_support import (
 )
 from tests.gui.app.measure._record_support import require_metadata, require_record
 from tests.resources.entry.fakes import register_fakes, registry_state, restore_registry
+
+
+def saved_target(parameters: ParameterContext) -> SavedPoint:
+    """Require a saved-point fixture capture for setup writes."""
+    target = parameters.target
+    if target is None:
+        raise AssertionError("Fixture capture has no saved point")
+    return target
 
 
 @dataclass
@@ -140,7 +153,11 @@ def test_acceptance_retains_actual_values_and_fixed_destination_for_confirmed_pr
                 "kind": "parameter",
                 "target": "Q1.ext.accepted",
                 "value": 0.6,
-                "destination": captured.target.model_dump(),
+                "destination": {
+                    "kind": "saved_point",
+                    "entry_name": "entry",
+                    "point": "working",
+                },
             },
         ),
     )
@@ -150,7 +167,7 @@ def test_acceptance_retains_actual_values_and_fixed_destination_for_confirmed_pr
     assert result.applied_ids == (((),) if fails else (("param-1",),))
     assert (result.error is not None) == fails
     draft.edit("param-1", proposed_value=0.9)
-    session.control.set_parameter(captured.target, "Q1.ext.accepted", 0.7)
+    session.control.set_parameter(saved_target(captured), "Q1.ext.accepted", 0.7)
     assert asdict(result)["written"] == expected
     assert not session.control.read_context().lookup("Q1.ext.later").present
 
@@ -256,6 +273,48 @@ def test_acceptance_keeps_per_item_values_without_postcommit_readback(
     assert len(session.entry.ledger.events()) == 1
 
 
+@pytest.mark.parametrize("source", ["live", "snapshot", "empty", "absent"])
+def test_preview_and_apply_use_current_gui_point_not_analysis_origin(
+    session: WritebackSession,
+    source: str,
+) -> None:
+    original = session.control.read_context()
+    session.control.set_parameter(saved_target(original), "Q1.ext.gain", 0.1)
+    parameters = original
+    if source == "snapshot":
+        parameters = restore_parameters(capture_parameters(original))
+    elif source == "empty":
+        parameters = ParameterContext.empty()
+    elif source == "absent":
+        parameters = None
+    draft = session.service.create_draft(
+        [ParameterWriteback("Q1.ext.gain", "Gain", proposed_value=0.8)],
+        parameters=parameters,
+        experiment_name="synthetic",
+    )
+    session.entry.new_point("other")
+    session.control.use_point(PointUseRequest("other"))
+    session.control.add_component("Q1", "fake/drive/a", {})
+    selected = session.control.read_context()
+    session.control.set_parameter(saved_target(selected), "Q1.ext.gain", 0.2)
+    values = session.service.preview_values(draft)
+    assert values["param-1"].current == 0.2
+    result = session.service.accept_drafts((WritebackSelection(draft, ("param-1",)),))
+    assert result.error is None
+    assert result.written[0][0].destination == {
+        "kind": "saved_point",
+        "entry_name": "entry",
+        "point": "other",
+    }
+    assert (
+        document_value(snapshot(session.entry.use_point("other")), "Q1.ext.gain") == 0.8
+    )
+    assert (
+        document_value(snapshot(session.entry.use_point("working")), "Q1.ext.gain")
+        == 0.1
+    )
+
+
 def test_draft_detaches_author_element_identity(session: WritebackSession) -> None:
     identity = ElementIdentity(index=2, name="Q3")
     proposal = ParameterWriteback(
@@ -309,7 +368,7 @@ def test_accepted_retains_run_identity_with_or_without_save(
         assert event.kind == "accepted"
         assert isinstance(event.payload, AcceptedPayload)
         assert event.payload.run_id == source_run_id
-        current = control.read_target(captured.target)
+        current = control.read_target(saved_target(captured))
         assert document_meta(current.document(), "general.ext.flux_value") == {}
         assert draft.run_id == source_run_id
         service.teardown_draft(draft)
@@ -570,7 +629,7 @@ def test_writeback_evaluates_module_expression_from_creation_capture(
 ) -> None:
     session = saved_session
     initial = session.control.read_context()
-    session.control.set_parameter(initial.target, "general.ext.flux_value", 0.5)
+    session.control.set_parameter(saved_target(initial), "general.ext.flux_value", 0.5)
     captured = session.control.read_context()
     draft = session.service.create_draft(
         [
@@ -590,7 +649,7 @@ def test_writeback_evaluates_module_expression_from_creation_capture(
         experiment_name="test/writeback",
     )
     draft.edit("ml-1", edits={("gain",): {"expr": "general.ext.flux_value"}})
-    session.control.set_parameter(captured.target, "general.ext.flux_value", 0.9)
+    session.control.set_parameter(saved_target(captured), "general.ext.flux_value", 0.9)
     session.service.apply_draft(draft)
     current = session.control.read_context()
     written = current.library.module_spec("Q1.pulses.pi")
@@ -599,8 +658,6 @@ def test_writeback_evaluates_module_expression_from_creation_capture(
     assert event.kind == "accepted"
     assert isinstance(event.payload, AcceptedPayload)
     assert event.payload.writes[0].path == "Q1.pulses.pi"
-    source = current.library.meta("Q1.pulses.pi.gain")
-    assert source is not None and source.source == event.id
 
 
 def test_append_failure_leaves_parameter_untouched(
@@ -624,7 +681,7 @@ def test_append_failure_leaves_parameter_untouched(
     assert session.entry.ledger.events() == ()
 
 
-def test_complex_writeback_preview_apply_and_disk_keep_captured_role_target(
+def test_complex_writeback_keeps_captured_role_path_but_writes_selected_point(
     session: WritebackSession,
 ) -> None:
     session.entry.new_point("a")
@@ -663,9 +720,15 @@ def test_complex_writeback_preview_apply_and_disk_keep_captured_role_target(
     session.entry.new_point("b")
     second = session.control.use_point(PointUseRequest("b"))
     session.control.add_component("Q2", "fake/drive/a", {})
-    selected = session.control.read_context().document()
+    session.control.add_component(
+        "Q1",
+        "fake/drive/a",
+        {
+            "ext": {"readout_cal": {"g_center": {"__complex__": [0.7, 0.2]}}},
+        },
+    )
     preview = session.service.preview_values(draft)
-    assert preview["param-1"].current == {"__complex__": [0.6, 0.1]}
+    assert preview["param-1"].current == {"__complex__": [0.7, 0.2]}
     assert preview["param-2"].current is None
     assert [preview[item].actual_path for item in ("param-1", "param-2")] == [
         "Q1.ext.readout_cal.g_center",
@@ -674,7 +737,10 @@ def test_complex_writeback_preview_apply_and_disk_keep_captured_role_target(
     assert [preview[item].proposed for item in ("param-1", "param-2")] == tags
     assert session.entry.ledger.events() == ()
     session.service.apply_draft(draft, origin=CommandOrigin("mcp"))
-    current = session.control.read_target(first, roles=captured.roles)
+    current = session.control.read_target(second, roles=captured.roles)
+    assert session.control.read_target(first).value("Q1.ext.readout_cal.g_center") == {
+        "__complex__": [0.6, 0.1],
+    }
     paths = ("Q1.ext.readout_cal.g_center", "Q1.ext.readout_cal.e_center")
     assert [current.value(path) for path in paths] == tags
     assert (
@@ -684,7 +750,6 @@ def test_complex_writeback_preview_apply_and_disk_keep_captured_role_target(
         "__complex__": [0.2, -0.1]
     }
     assert session.control.read_context().target == second
-    assert session.control.read_context().document() == selected
     event = session.entry.ledger.events()[-1]
     assert event.origin == "mcp"
     assert isinstance(event.payload, AcceptedPayload)
@@ -699,7 +764,7 @@ def test_complex_writeback_preview_apply_and_disk_keep_captured_role_target(
         result_root=session.entry.result_path.parent,
         database_root=session.entry.database_path.parent,
     )
-    document = snapshot(reopened.use_point("a"))
+    document = snapshot(reopened.use_point("b"))
     assert [document_value(document, path) for path in paths] == tags
 
 
@@ -721,22 +786,23 @@ def test_receipt_reads_actual_role_target_after_point_change(
     session.control.set_parameter(first, "Q1.rate", 0.6)
     session.entry.new_point("b")
     second = session.control.use_point(PointUseRequest("b"))
-    session.control.add_component("Q2", "fake/drive/a", {"rate": 0.8})
-    selected = session.control.read_context().document()
-    assert session.service.preview_values(draft)["param-1"].current == 0.6
+    session.control.add_component("Q2", "fake/drive/a", {"rate": 0.9})
+    session.control.add_component("Q1", "fake/drive/a", {"rate": 0.8})
+    assert session.service.preview_values(draft)["param-1"].current == 0.8
     draft.edit("param-1", selected=False)
     written = session.service.write_draft(
         draft, (WritebackEdit("param-1"),), origin=CommandOrigin("mcp")
     )
-    assert written == [WritebackWritten("param-1", "parameter", "Q1.rate", 0.6, 0.2)]
+    assert written == [WritebackWritten("param-1", "parameter", "Q1.rate", 0.8, 0.2)]
     assert captured.value("$driver.rate") == 0.1
     assert session.control.read_context().target == second
-    assert session.control.read_context().document() == selected
+    assert session.control.read_context().value("Q1.rate") == 0.2
+    assert session.control.read_target(first).value("Q1.rate") == 0.6
     assert not draft.items[0].selected
     assert session.service.get_all_applied(draft) == {"param-1": True}
     event = session.entry.ledger.events()[-1]
     assert event.origin == "mcp"
-    target = session.control.read_target(first)
+    target = session.control.read_target(second)
     assert document_meta(target.document(), "Q1.rate") == {"stderr": 0.05}
     assert isinstance(event.payload, AcceptedPayload)
     assert event.payload.run_id == draft.run_id == "original-run"
@@ -747,14 +813,14 @@ def test_library_receipt_reads_actual_raw_entry_and_uses_capture_for_proposal(
 ) -> None:
     session = saved_session
     initial = session.control.read_context()
-    session.control.set_parameter(initial.target, "general.ext.flux_value", 0.2)
+    session.control.set_parameter(saved_target(initial), "general.ext.flux_value", 0.2)
     captured = session.control.read_context()
     cfg = PulseSpec(
         ch=0, nqz=1, freq=100.0, gain=0.2, waveform=ConstWaveformCfg(length=0.1)
     )
     item = ModuleWriteback("Q1.pulses.pi", "Pulse", cfg, stderr=0.02)
     session.control.set_module(
-        captured.target, item.target_name, cfg.model_copy(update={"gain": 0.6})
+        saved_target(captured), item.target_name, cfg.model_copy(update={"gain": 0.6})
     )
     item_id, field = "ml-1", "gain"
     draft = session.service.create_draft(
@@ -764,7 +830,7 @@ def test_library_receipt_reads_actual_raw_entry_and_uses_capture_for_proposal(
         experiment_name="test/writeback",
     )
     draft.edit(item_id, edits={(field,): {"expr": "general.ext.flux_value"}})
-    session.control.set_parameter(captured.target, "general.ext.flux_value", 9.0)
+    session.control.set_parameter(saved_target(captured), "general.ext.flux_value", 9.0)
     preview = session.service.preview_values(draft)[item_id]
     assert isinstance(preview.current, dict) and preview.current[field] == 0.6
     assert isinstance(preview.proposed, dict) and preview.proposed[field] == 0.2
@@ -772,18 +838,16 @@ def test_library_receipt_reads_actual_raw_entry_and_uses_capture_for_proposal(
     assert receipt.target == item.target_name
     assert isinstance(receipt.before, dict) and receipt.before[field] == 0.6
     assert isinstance(receipt.after, dict) and receipt.after[field] == 0.2
-    source = session.control.read_context().library.meta(f"{item.target_name}.{field}")
-    assert source is not None and source.stderr == item.stderr
     event = session.entry.ledger.events()[-1]
     assert isinstance(event.payload, AcceptedPayload)
-    assert event.payload.run_id == source.run_id == draft.run_id == "original-run"
+    assert event.payload.run_id == draft.run_id == "original-run"
 
 
 def test_each_parameter_write_replaces_metadata_with_its_own_stderr(
     saved_session: WritebackSession,
 ) -> None:
     session = saved_session
-    target = session.control.read_context().target
+    target = saved_target(session.control.read_context())
     for path in ("Q1.rate", "Q1.coherence"):
         session.control.set_parameter(
             target, path, 1.0, metadata={"stderr": 9.0, "comment": "old"}

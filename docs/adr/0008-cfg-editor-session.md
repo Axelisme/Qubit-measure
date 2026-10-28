@@ -28,7 +28,7 @@ Analysis 與 Post-Analysis 各保存自己的 opaque draft。Remote 以 `(tab_id
 
 Selected Apply 先準備所有選中項目的值與目的地。任一 module form Invalid 時，不 append accepted、不寫 target。準備成功後，既有 Context write owner 先 append accepted，再依目的地文件分組提交：point 一組、library 一組、樣本逐筆，組內順序保留。任一項無效整組不寫，首錯停止，保留 accepted evidence 與已提交組；不回復前組，也不保證跨檔 crash transaction。`tab.writeback_write` 依序調整 draft；後項失敗可保留前項 draft 修改，這不等於已寫入 target。
 
-Draft 固定來源的 run_id 與 SavedPoint。後來切 point、改 alias 或切換 pane 都不改目的地。Host 的 busy、writable、result、context 與 [[0070]] holder admission 仍各自生效。可預期的 `LibraryEntryInvalid` 保留 dialog、row、selection 與 draft，供使用者修正；非預期錯誤向外傳遞。
+Draft 固定來源的 run_id 與參數環境，來源可以沒有 SavedPoint。後來切 point、改 alias 或切換 pane 不改歷史求值內容。Preview／Apply 的 SavedPoint 取命令當下 GUI 選定的 point，不取歷史來源；未選 point 時拒絕，空歷史環境不構成拒絕理由。此分界依 2026-10-28 使用者裁決，見 [[0063]]。Host 的 busy、writable、result、context 與 [[0070]] holder admission 仍各自生效。可預期的 `LibraryEntryInvalid` 保留 dialog、row、selection 與 draft，供使用者修正；非預期錯誤向外傳遞。
 
 ## 取捨與相鄰責任
 

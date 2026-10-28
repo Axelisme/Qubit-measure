@@ -119,7 +119,6 @@ def test_schema_accepts_identifiers_but_view_binding_rejects_shadowing(
                 PointView(
                     point_store,
                     source,
-                    entry_id=entry.entry_id,
                     result_root=entry_roots[0],
                     database_root=entry_roots[1],
                 )

@@ -115,7 +115,7 @@ def context_at(
     return entry, context
 
 
-def test_sample_write_receipt_reads_latest_jsonl_before_and_after_at_fixed_point(
+def test_sample_write_receipt_reads_latest_jsonl_at_current_point(
     tmp_path: Path,
 ) -> None:
     entry, context = context_at(tmp_path)
@@ -158,7 +158,7 @@ def test_sample_write_receipt_reads_latest_jsonl_before_and_after_at_fixed_point
         "component": "Q1",
         "t1_us": 20.09,
         "run_id": "run-fixed",
-        "point": "a",
+        "point": "b",
         "at": row["at"],
         "source": entry.ledger.events()[-1].id,
     }
@@ -184,7 +184,7 @@ def test_sample_write_receipt_reads_latest_jsonl_before_and_after_at_fixed_point
     }
     assert updated["source"] != row["source"]
     assert context.read_context().target == SavedPoint(
-        entry_id=entry.entry_id, point="b"
+        entry_name=entry.result_path.name, point="b"
     )
     assert service.get_all_applied(draft) == {"record-1": True}
 
@@ -262,12 +262,12 @@ def test_record_preview_selection_and_apply_preserve_adapter_json(
     assert row == expected | {
         "component": "Q1",
         "run_id": "run-fixed",
-        "point": "a",
+        "point": "b",
         "at": row["at"],
         "source": event.id,
     }
     assert context.read_context().target == SavedPoint(
-        entry_id=entry.entry_id, point="b"
+        entry_name=entry.result_path.name, point="b"
     )
     assert service.get_all_applied(draft) == {"param-1": False, "record-1": True}
     assert dispatch_handler(harness, "tab.writeback_preview", params)["items"] == [

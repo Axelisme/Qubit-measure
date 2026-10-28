@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable, Generator
 from contextlib import AbstractContextManager, contextmanager
 
+from zcu_tools.core.complex_codec import decode_complex
 from zcu_tools.format_version import YamlValue
 from zcu_tools.resources.parameter_fields import (
     FieldNode,
@@ -14,7 +15,7 @@ from zcu_tools.resources.parameter_fields import (
     read_field,
 )
 
-from .schema import ComponentSchema, PointGeneral, SetupGeneral
+from .schema import ComponentSchema, ParameterContent, PointGeneral, SetupGeneral
 
 __all__ = (
     "ComponentView",
@@ -34,9 +35,14 @@ class GeneralView(FieldView):
         self,
         model: Callable[[], SetupGeneral | PointGeneral],
         edit: Callable[[str], AbstractContextManager[SetupGeneral | PointGeneral]],
+        *,
+        content: Callable[[], ParameterContent] | None = None,
     ) -> None:
         super().__init__(model, edit, "general")
         self._general_model = model
+        self._content_fields = (
+            None if content is None else ContentFields(content, edit, "general")
+        )
 
         @contextmanager
         def edit_extension(name: str) -> Generator[FieldNode]:
@@ -44,11 +50,20 @@ class GeneralView(FieldView):
                 yield field_container(draft.ext, "general.ext")
                 draft.model_fields_set.add("ext")
 
-        self._extension = FieldView(
-            lambda: field_container(model().ext, "general.ext"),
-            edit_extension,
-            "general.ext",
+        self._extension = (
+            FieldView(
+                lambda: field_container(model().ext, "general.ext"),
+                edit_extension,
+                "general.ext",
+            )
+            if content is None
+            else ContentFields(content, edit_extension, "general.ext")
         )
+
+    def __getitem__(self, name: str) -> YamlValue | complex | FieldView:
+        if self._content_fields is not None:
+            return self._content_fields[name]
+        return super().__getitem__(name)
 
     @property
     def ext(self) -> FieldView:
@@ -56,11 +71,49 @@ class GeneralView(FieldView):
 
     @property
     def description(self) -> str | None:
-        return self._general_model().description
+        value = self["description"]
+        if value is not None and not isinstance(value, str):
+            raise ValueError("general.description must be a string or null")
+        return value
 
     @description.setter
     def description(self, value: str | None) -> None:
         self["description"] = value
+
+
+class ContentFields(FieldView):
+    """Navigate captured resource content while validating only consumed leaves.
+
+    content supplies cached content without I/O. edit retains the existing full
+    model transaction. path is the concrete component/general field prefix.
+    """
+
+    def __init__(
+        self,
+        content: Callable[[], ParameterContent],
+        edit: Callable[[str], AbstractContextManager[FieldNode]],
+        path: str,
+    ) -> None:
+        super().__init__(lambda: {}, edit, path)
+        self._content = content
+
+    def __getitem__(self, name: str) -> YamlValue | complex | FieldView:
+        """Read a literal field; mappings remain navigable without sibling validation."""
+        path = f"{self._path}.{name}"
+        try:
+            node = self._content().node(path)
+        except AttributeError as exc:
+            raise KeyError(name) from exc
+        if isinstance(node, dict) and "__complex__" not in node:
+            return ContentFields(
+                self._content,
+                lambda field: self._edit_child(name, field),
+                path,
+            )
+        value = self._content().value(path)
+        if isinstance(value, dict) and "__complex__" in value:
+            return decode_complex(value)
+        return value
 
 
 class ComponentView:
@@ -72,6 +125,8 @@ class ComponentView:
         model: Callable[[], ComponentSchema],
         edit: Callable[[str], AbstractContextManager[ComponentSchema]],
         path: str,
+        *,
+        content: Callable[[], ParameterContent] | None = None,
     ) -> None:
         """Bind a component to memory reads and complete-model field edits.
 
@@ -83,12 +138,19 @@ class ComponentView:
         Malformed tags propagate the core codec error.
         """
         self._model = model
-        self._fields = FieldView(model, edit, path)
+        self._fields = (
+            FieldView(model, edit, path)
+            if content is None
+            else ContentFields(content, edit, path)
+        )
 
     @property
     def kind(self) -> str:
         """Return the component's declared kind."""
-        return self._model().kind
+        value = self._fields["kind"]
+        if not isinstance(value, str):
+            raise ValueError("Component kind must be a string")
+        return value
 
     def __getattr__(self, name: str) -> YamlValue | complex | FieldView:
         """Read a field with complex tags decoded; missing/unset raises AttributeError.

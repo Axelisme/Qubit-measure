@@ -87,6 +87,49 @@ def write_yaml(source: Path, document: object) -> None:
         YAML(typ="rt").dump(document, stream)
 
 
+def test_point_reads_only_requested_leaf_and_rejects_invalid_document_edits(
+    entry: ResultEntry, range_kind: str
+) -> None:
+    entry.setup.add_component("sensor", kind=range_kind, low=1.0, high=2.0)
+    entry.new_point("partial")
+    path = entry.result_path / "points" / "partial" / "point.yaml"
+    raw = YAML(typ="safe").load(path)
+    raw["components"]["sensor"]["high"] = ["not a number"]
+    write_yaml(path, raw)
+    before = path.read_bytes()
+
+    point = entry.use_point("partial")
+
+    assert point.sensor.low == 1.0
+    assert path.read_bytes() == before
+    with pytest.raises(ValueError, match="sensor.high"):
+        _ = point.sensor.high
+    with pytest.raises(ValueError, match="sensor.high"), point.edit() as draft:
+        draft.sensor.low = 3.0
+    assert path.read_bytes() == before
+
+
+def test_leaf_reads_keep_field_normalization_and_stable_defaults_without_model_checks(
+    entry: ResultEntry, notebook_kind: str
+) -> None:
+    entry.setup.add_component("sensor", kind=notebook_kind, gain=1.0, title="seed")
+    entry.new_point("defaults")
+    path = entry.result_path / "points" / "defaults" / "point.yaml"
+    raw = YAML(typ="safe").load(path)
+    raw["components"]["sensor"]["gain"] = ["bad sibling"]
+    raw["components"]["sensor"]["title"] = "  Mixed CASE  "
+    del raw["components"]["sensor"]["token"]
+    write_yaml(path, raw)
+
+    point = entry.use_point("defaults")
+
+    assert point.sensor.title == "mixed case"
+    first = point.sensor.token
+    assert isinstance(first, str) and len(first) == 36
+    assert point.sensor.token == first
+    assert point.sensor.title == "mixed case"
+
+
 @pytest.mark.parametrize("missing", ["point.yaml", "module_cfg.yaml"])
 def test_use_point_classifies_required_document_absence(
     entry: ResultEntry,
@@ -156,7 +199,7 @@ def test_new_point_inherits_setup_general_with_fresh_creation_time(
     stored = YAML(typ="safe").load(
         (entry.result_path / "points/inherited/point.yaml").read_text()
     )
-    assert stored["general"]["entry_id"] == entry.entry_id
+
     assert stored["general"]["created_at"] > "2000-01-01T00:00:00Z"
     assert source.read_bytes() == before
     point.general.ext["flux_unit"] = "A"
@@ -383,10 +426,16 @@ def test_point_reload_uses_only_its_file_and_keeps_snapshot_on_failure(
     stored = YAML(typ="rt").load(source.read_text())
     stored["components"]["Q1"]["rate"] = "invalid"
     write_yaml(source, stored)
-    with pytest.raises(ValueError, match="rate"):
-        reload_point()
-    assert point.Q1.rate == 5100.0
+    before = source.read_bytes()
+    loaded = reload_point()
+    if loaded is not None:
+        point = loaded
     assert point.Q1.duration == 12.0
+    with pytest.raises(ValueError, match="rate"):
+        _ = point.Q1.rate
+    with pytest.raises(ValueError, match="rate"):
+        point.Q1.duration = 13.0
+    assert source.read_bytes() == before
 
 
 def test_point_edit_rejects_invalid_reload_before_exposing_draft(
@@ -433,8 +482,11 @@ def test_point_unknown_kind_reports_own_source_without_publishing(
             if operation == "refresh"
             else lambda: entry.use_point("a")
         )
-        with pytest.raises(UnknownKindError) as error:
+        loaded = entry.use_point("a") if operation == "use" else working_point
+        if operation == "refresh":
             reload_point()
+        with pytest.raises(UnknownKindError) as error:
+            _ = loaded.Q1.rate
 
     assert error.value.source == source
     assert error.value.component == "Q1"
@@ -442,8 +494,12 @@ def test_point_unknown_kind_reports_own_source_without_publishing(
     assert str(source) in str(error.value)
     assert str(setup_source) not in str(error.value)
     assert entered == []
-    assert working_point.Q1.rate == 5000.0
-    assert working_point.Q1.duration == 12.0
+    if operation != "refresh":
+        assert working_point.Q1.rate == 5000.0
+        assert working_point.Q1.duration == 12.0
+    with pytest.raises(UnknownKindError), working_point.edit():
+        entered.append(True)
+    assert entered == []
     assert source.read_bytes() == before
     assert setup_source.read_bytes() == setup_before
 
@@ -594,17 +650,20 @@ def test_clone_copy_failure_cleans_new_directory_and_keeps_source(
     }
     copyfile = shutil.copyfile
 
-    def fail_module_copy(
+    def block_library_destination(
         source: str | Path, target: str | Path, *, follow_symlinks: bool = True
     ) -> str | Path:
-        if Path(target) == root / "points/b/module_cfg.yaml":
-            raise OSError("module copy failed")
-        return copyfile(source, target, follow_symlinks=follow_symlinks)
+        copied = copyfile(source, target, follow_symlinks=follow_symlinks)
+        if Path(target) == root / "points/b/point.yaml":
+            # The point now exists; make the subsequent library write fail on disk.
+            (root / "points/b/module_cfg.yaml").mkdir()
+        return copied
 
     with monkeypatch.context() as patch:
-        patch.setattr(shutil, "copyfile", fail_module_copy)
-        with pytest.raises(OSError, match="module copy failed"):
+        patch.setattr(shutil, "copyfile", block_library_destination)
+        with pytest.raises(OSError, match="module_cfg") as failure:
             entry.new_point("b", clone_from=working_point)
+        assert failure.value.filename == str(root / "points/b/module_cfg.yaml")
     assert not (root / "points/b").exists()
     assert entry.list_points() == ["a"]
     assert {name: (source / name).read_bytes() for name in before} == before

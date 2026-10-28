@@ -96,6 +96,51 @@ def test_load_preserves_future_fields_and_historical_snapshot(tmp_path: Path) ->
     assert entry.provenance.hostname is None
 
 
+@pytest.mark.parametrize("legacy", [None, "not-a-uuid", {"malformed": [1]}])
+@pytest.mark.parametrize("point", ["historical", ["invalid"]])
+def test_clone_evidence_ignores_legacy_identity_and_preserves_raw(
+    tmp_path: Path, legacy: JsonValue, point: JsonValue
+) -> None:
+    clone: JsonObject = {"point": point}
+    if legacy is not None:
+        clone["entry_id"] = legacy
+    document = evidence_document(
+        entry_update={
+            "snapshot": {
+                "entry_name": "historical_name",
+                "point": None,
+                "description": None,
+                "roles": {},
+                "params": {
+                    "C1.frequency": {
+                        "value": 12.5,
+                        "unit": "MHz",
+                        "source": {
+                            "source": "manual",
+                            "kind": None,
+                            "run_id": None,
+                            "at": "2025-09-30T00:00:00Z",
+                            "stderr": None,
+                            "cloned_from": clone,
+                        },
+                    }
+                },
+            }
+        }
+    )
+    path = write_document(tmp_path, document)
+    before = path.read_bytes()
+    if isinstance(point, str):
+        loaded = load_run_evidence(path)
+        origin = loaded.entries[0].snapshot.params["C1.frequency"].source.cloned_from
+        assert origin is not None and origin.point == "historical"
+        assert loaded.raw == document
+    else:
+        with pytest.raises(MigrationInputError, match="cloned_from.point"):
+            load_run_evidence(path)
+    assert path.read_bytes() == before
+
+
 def test_explicit_no_point_remains_none(tmp_path: Path) -> None:
     document = evidence_document(
         entry_update={

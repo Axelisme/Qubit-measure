@@ -126,8 +126,8 @@ def mux_readout_initial(
         return Slot("$mux.module.readout")
     tones: list[dict[str, TemplateSeed]] = []
     for index, resonator in enumerate(group.resonators):
-        component = parameters.document().components.get(resonator)
-        if component is None or component.kind.split("/")[0] != "resonator":
+        kind = parameters.value(f"{resonator}.kind")
+        if not isinstance(kind, str) or kind.split("/")[0] != "resonator":
             raise ValueError(
                 f"$mux.resonators[{index}]={resonator!r}: expected resonator"
             )

@@ -47,16 +47,16 @@ def test_unchanged_reads_reuse_validation_and_isolate_mutable_snapshots(
     def validate(document: SyntheticDocument) -> None:
         validations.append(document.values["left"])
 
-    def cleanup(document: YamlMap, version: FormatVersion) -> tuple[str, ...]:
+    def normalize(document: YamlMap, version: FormatVersion) -> YamlMap:
         cleanups.append(version)
-        return ()
+        return document
 
     store = DocumentStore(
         document_path,
         SyntheticDocument,
         format="synthetic",
         validate=validate,
-        read_cleanup=cleanup,
+        read_normalize=normalize,
     )
     assert not store.refresh()
     document_path.touch()
@@ -114,43 +114,6 @@ def test_nonempty_edit_validates_candidate_without_revalidating_unchanged_reads(
         draft.values["left"] = 10.0
     assert store.snapshot().values == {"left": 10.0, "right": 2.0}
     assert validations == [1.0, 10.0]
-
-
-def test_cleanup_replacement_is_cached_only_after_successful_validation(
-    document_path: Path,
-) -> None:
-    document_path.write_text(
-        "format: synthetic\nformat_version: '1.0'\n"
-        "values: {left: 1.0, right: 2.0, bad: -1.0}\n",
-        encoding="utf-8",
-    )
-    cleanups: list[FormatVersion] = []
-    validations: list[float] = []
-
-    def cleanup(document: YamlMap, version: FormatVersion) -> tuple[str, ...]:
-        cleanups.append(version)
-        values = document["values"]
-        if isinstance(values, dict) and "bad" in values:
-            del values["bad"]
-            return ("bad",)
-        return ()
-
-    def validate(document: SyntheticDocument) -> None:
-        validations.append(document.values["left"])
-
-    store = DocumentStore(
-        document_path,
-        SyntheticDocument,
-        format="synthetic",
-        validate=validate,
-        read_cleanup=cleanup,
-    )
-    assert not store.refresh()
-    with store.edit():
-        pass
-    assert store.snapshot().values == {"left": 1.0, "right": 2.0}
-    assert validations == [1.0]
-    assert cleanups == [FormatVersion(1, 0)]
 
 
 def test_failed_external_validation_is_retried_without_polluting_cached_values(

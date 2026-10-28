@@ -20,9 +20,8 @@ if TYPE_CHECKING:
 
 
 class PointEntry(TypedDict):
-    """Opened entry: UUID, directory name and exact absolute owner roots."""
+    """Opened entry: directory name and exact absolute owner roots."""
 
-    entry_id: str
     name: str
     result_path: str
     database_path: str
@@ -120,7 +119,6 @@ def h_entry_open(
 
 def _entry_projection(info: EntryInfo) -> PointEntry:
     return {
-        "entry_id": info.entry_id,
         "name": info.name,
         "result_path": str(info.result_path),
         "database_path": str(info.database_path),
@@ -151,12 +149,12 @@ class PointListReply(TypedDict):
 class SavedPointReply(TypedDict):
     """Persisted destination, not a binding generation or writable handle.
 
-    kind is always saved_point. entry_id is the opened entry UUID.
+    kind is always saved_point. entry_name is the opened entry's directory name.
     point is the owner's validated single-segment label.
     """
 
     kind: Literal["saved_point"]
-    entry_id: str
+    entry_name: str
     point: str
 
 
@@ -205,7 +203,7 @@ def h_point_new(
     Collision rejection preserves selection/files for setup and clone alike.
     Owner no_entry/schema/source/other I/O failures retain their classification.
     Created-but-uninstalled PointBindingError becomes CONTROLLER_ERROR with
-    reason point_binding_failed and data entry_id/point/created=True. Keep the
+    reason point_binding_failed and data entry_name/point/created=True. Keep the
     original cause and point; Use is recovery, never retry or delete New.
     Existing tabs retain their parameter capture; new tabs use this point.
     """
@@ -233,9 +231,13 @@ def h_point_new(
             ErrorCode.CONTROLLER_ERROR,
             str(exc),
             reason="point_binding_failed",
-            data={"entry_id": exc.entry_id, "point": exc.label, "created": True},
+            data={
+                "entry_name": exc.entry_name,
+                "point": exc.point,
+                "created": exc.created,
+            },
         ) from exc
-    return {"kind": point.kind, "entry_id": point.entry_id, "point": point.point}
+    return {"kind": point.kind, "entry_name": point.entry_name, "point": point.point}
 
 
 def h_point_use(
@@ -252,4 +254,4 @@ def h_point_use(
     if not isinstance(label, str):
         raise RemoteError(ErrorCode.INVALID_PARAMS, "'label' must be a string")
     point = adapter.context_control.use_point(PointUseRequest(label))
-    return {"kind": point.kind, "entry_id": point.entry_id, "point": point.point}
+    return {"kind": point.kind, "entry_name": point.entry_name, "point": point.point}

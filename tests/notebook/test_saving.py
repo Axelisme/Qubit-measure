@@ -781,7 +781,7 @@ def test_accept_commit_validator_error_propagates_and_keeps_event(
             raise failure
 
     path = source_path(point)
-    binding = capture_point_storage(point)
+
     bound = PointView(
         DocumentStore(
             path,
@@ -791,7 +791,6 @@ def test_accept_commit_validator_error_propagates_and_keeps_event(
             validate=reject_fit,
         ),
         path,
-        entry_id=str(binding.entry_id),
         result_root=tmp_path / "results",
         database_root=tmp_path / "Database",
     )
@@ -893,19 +892,6 @@ def test_accept_writes_parameter_module_waveform_with_one_event(
     assert library.module_spec("D1.pulses.pi") == pulse
     assert library.waveform_spec("D1.waveforms.base") == waveform
     assert accept_point.D1.rate == 1500.0
-    for metadata in (
-        library.meta("D1.pulses.pi.gain"),
-        library.meta("D1.waveforms.base.length"),
-    ):
-        assert metadata is not None
-        assert (metadata.source, metadata.kind, metadata.run_id, metadata.at) == (
-            event_id,
-            "test/saving",
-            saved.run_id,
-            event.at,
-        )
-    module_meta = library.meta("D1.pulses.pi.gain")
-    assert module_meta is not None and module_meta.stderr is None
     assert accept_point.meta("D1.rate") == {"stderr": 0.5}
 
 

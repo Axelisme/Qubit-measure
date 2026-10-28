@@ -105,9 +105,8 @@ class MigrationMapping:
 
 @dataclass(frozen=True, kw_only=True)
 class LegacyCloneOrigin:
-    """Historical source entry UUID and optional work-point label."""
+    """Historical work-point label; obsolete identity stays only in raw evidence."""
 
-    entry_id: UUID
     point: str | None
 
 
@@ -146,8 +145,8 @@ class LegacySnapshotEvidence:
     entry_name is the name at acquisition. point is the historical context label
     or explicit None; description is historical text or None. roles maps role
     names to component names. params maps dotted paths to historical values and
-    self-contained audit sources, in working units. The converter assigns the
-    new entry's UUID only when constructing a native RunSnapshot.
+    self-contained audit sources, in working units. The converter records the
+    destination folder name when constructing a native RunSnapshot.
     """
 
     entry_name: str
@@ -395,7 +394,8 @@ class PreservedSampleField:
 class MigrationReport:
     """Cumulative report of attempted parts, not a claim that pending is empty.
 
-    source/destination identify both resolved roots. entry_id is the new UUID.
+    source/destination identify both resolved roots. migration_id is the operation
+    ownership token, never entry identity.
     part is the union of attempted parts. key_mappings holds explicit decisions.
     converted_files, moved_labber_files and preserved_files contain completed
     actions of the corresponding status. pending/failures hold unresolved items.
@@ -411,7 +411,7 @@ class MigrationReport:
 
     source: MigrationSource
     destination: MigrationDestination
-    entry_id: UUID
+    migration_id: UUID
     part: MigrationPart
     notes: tuple[str, ...] = ()
     """Located caller-owned parameter conversion diagnostics, including next actions."""
@@ -473,7 +473,7 @@ class RunAssignment:
 
 @dataclass(frozen=True, kw_only=True)
 class MigrationIdentity:
-    """Immutable resolved roots, safe source segments, new name and entry UUID.
+    """Immutable resolved roots, safe source segments, name and operation token.
 
     part and evidence are deliberately absent: they may extend a pending run.
     """
@@ -484,7 +484,7 @@ class MigrationIdentity:
     source_chip: str
     source_qubit: str
     name: str
-    entry_id: UUID
+    migration_id: UUID
 
 
 @dataclass(frozen=True, kw_only=True)

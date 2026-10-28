@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from copy import deepcopy
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any
@@ -43,7 +43,7 @@ class _AnalyzeCapture:
     run_result: RunRecord[ConfigBase, object]
     run_id: str | None
     experiment_name: str
-    device_snapshot: Mapping[str, JsonObject] | None
+    device_snapshot: Callable[[], Mapping[str, JsonObject] | None]
     context: SessionEnv
     adapter: RegisteredAdapter
     params: object | None
@@ -117,7 +117,7 @@ class AnalyzeService(StagedAnalyzeService):
             raise FailedPreconditionError(
                 f"Tab {tab_id!r} has no run result to analyze"
             )
-        metadata = source.metadata
+        metadata = deepcopy(source.metadata)
         ctx = replace(self._state.session_env, parameters=tab.run.parameters)
         req = AnalyzeRequest(
             run_result=source,
@@ -136,9 +136,9 @@ class AnalyzeService(StagedAnalyzeService):
             experiment_name=metadata.experiment
             if metadata is not None
             else tab.adapter_name,
-            device_snapshot=deepcopy(metadata.device_snapshot)
-            if metadata is not None
-            else None,
+            device_snapshot=lambda: (
+                metadata.device_snapshot if metadata is not None else None
+            ),
             context=ctx,
             adapter=adapter,
             params=analyze_params_instance,
@@ -200,7 +200,7 @@ class AnalyzeService(StagedAnalyzeService):
             raise FailedPreconditionError(
                 f"Tab {tab_id!r} has no run result to analyze"
             )
-        metadata = source.metadata
+        metadata = deepcopy(source.metadata)
         ctx = replace(self._state.session_env, parameters=tab.run.parameters)
         captured = _AnalyzeCapture(
             run_result=source,
@@ -208,9 +208,9 @@ class AnalyzeService(StagedAnalyzeService):
             experiment_name=metadata.experiment
             if metadata is not None
             else tab.adapter_name,
-            device_snapshot=deepcopy(metadata.device_snapshot)
-            if metadata is not None
-            else None,
+            device_snapshot=lambda: (
+                metadata.device_snapshot if metadata is not None else None
+            ),
             context=ctx,
             adapter=tab.adapter,
             params=analyze_params_instance,

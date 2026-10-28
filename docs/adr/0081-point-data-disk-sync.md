@@ -21,6 +21,12 @@ Aliases 的 revision 是固定 capture 當次觀察到的原始 bytes SHA-256，
 
 這項語意只涵蓋 alias read／capture，不授權參數或 library 安裝壞內容，也不改變下方 watcher／reload 失敗保留舊狀態的規則。2026-10-29，使用者對「aliases hash 不保證有效」的 capture 語意與文件補充回覆「同意」。
 
+### Point availability 與使用時驗證
+
+Point 清單只投影 description，availability 另判參數文件可讀且能解析成 owner 文件結構，保留 header 與目前 schema version 檢查。不讀 library 或 aliases，不預驗整份 component model。局部 leaf／component 格式問題在使用或寫入時報錯，不使整個 point 不可用。
+
+讀不到或解析不了的 point 仍不可用並附原因，其他 point 正常。UI 的停用列、不可當 clone 來源、tooltip 與 remote error 呈現保持。Availability 不作為 use_point、Load、Save 或其他讀取的額外前置條件，也不放寬下方 write-through、watcher／reload 安裝驗證與安全規則。按需讀取與寫入驗證的 owner 分界見 [[0063]]。
+
 ### 所有寫入 write-through
 
 任何 writer（Inspect 對話框、writeback、MCP、recipe、啟動腳本）都經 owner：驗證 → 寫暫存檔並 rename → 算 hash → 安裝記憶體 → 發布事件。安裝成功即落盤，不存在「記憶體比磁碟新」的狀態。`resources` 既有的單檔原子替換是唯一寫檔路徑。

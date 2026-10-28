@@ -117,7 +117,7 @@ def test_cli_identical_rerun_prints_skipped_and_keeps_all_files(
     )
     assert call(again) == 0, "Owned CLI rerun must automatically verify and skip"
     report = json.loads(capsys.readouterr().out)
-    assert report["entry_id"] == first["entry_id"]
+    assert report["migration_id"] == first["migration_id"]
     assert any(row["destination"].endswith("/setup.yaml") for row in report["skipped"])
     assert any(
         row["destination"].endswith("/figures/image/fit.png")

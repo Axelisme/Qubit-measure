@@ -72,6 +72,6 @@ def test_empty_owner_capture_and_write_fail_explicitly(
     assert capture.value.reason_code == "no_context"
     with pytest.raises(FailedPreconditionError) as write:
         control.set_parameter(
-            SavedPoint(entry_id="entry", point="a"), "Q1.rate", 4300.0
+            SavedPoint(entry_name="entry", point="a"), "Q1.rate", 4300.0
         )
     assert write.value.reason_code == "no_entry"

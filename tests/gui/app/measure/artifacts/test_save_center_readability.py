@@ -4,6 +4,7 @@ from collections.abc import Generator
 from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
+from shutil import rmtree
 
 import pytest
 from qtpy.QtWidgets import QApplication, QLabel, QLineEdit, QTextEdit
@@ -86,6 +87,94 @@ def saving_view(
             ctrl.tab_control.close_tab(tab_id)
             window.deleteLater()
             qapp.processEvents()
+
+
+@pytest.fixture
+def unbound_saving_view(
+    tmp_path: Path, qapp: QApplication, request: pytest.FixtureRequest
+) -> Generator[tuple[ComponentDriver, bool]]:
+    """Publicly load a portable native file, then expose only the visible driver.
+
+    The partial variant obstructs the external Labber directory with a file;
+    native output still succeeds. No writer or controller method is patched.
+    """
+    with native_save_session(tmp_path, qapp) as session:
+        session.save()
+        portable = tmp_path / "portable" / "data.h5"
+        portable.parent.mkdir()
+        portable.write_bytes(session.native_data_path.read_bytes())
+        rmtree(tmp_path / "Database")
+        if request.param:
+            blocked = tmp_path / "Database/original/Labber"
+            blocked.parent.mkdir(parents=True)
+            blocked.write_text("Labber destination unavailable")
+        registry = Registry()
+        registry.register("saving", AnalysisSavingAdapter)
+        ctrl = Controller(
+            session.state,
+            registry,
+            None,
+            session.bus,
+            progress_transport=DirectProgressTransport(),
+            project_root=str(tmp_path),
+        )
+        tab_id = ctrl.tab_control.new_tab("saving")
+        ctrl.run_analyze_control.load_tab_result(tab_id, str(portable))
+        window = MainWindow(
+            ctrl, templates=lambda: {}, dialog_presenter=RecordingDialogPresenter()
+        )
+        ctrl.add_view(window)
+        window.add_tab_widget(tab_id, "saving")
+        window.resize(1600, 900)
+        window.show()
+        qapp.processEvents()
+        try:
+            yield ComponentDriver(window), bool(request.param)
+        finally:
+            ctrl.close()
+            ctrl.tab_control.close_tab(tab_id)
+            window.deleteLater()
+            qapp.processEvents()
+
+
+@pytest.mark.parametrize(
+    "unbound_saving_view", [False, True], indirect=True, ids=["success", "partial"]
+)
+def test_loaded_unbound_declarations_and_actual_save_outputs(
+    unbound_saving_view: tuple[ComponentDriver, bool], tmp_path: Path
+) -> None:
+    driver, partial = unbound_saving_view
+    images = tmp_path / "unbound-save"
+    driver.select_tab("Data")
+    driver.screenshot(images / "01-loaded-not-saved.png")
+    visible = driver.visible().widgets
+    assert any(w.text == "Measurement data" for w in visible)
+    assert any(w.text == "○ NOT SAVED" for w in visible)
+    assert driver.observe("Save All").enabled
+    assert driver.observe("Save").enabled
+    assert not any("data.h5" in w.text or "runs/" in w.text for w in visible)
+
+    driver.click("Save All")
+    driver.screenshot(images / "02-save-report.png")
+    visible = driver.visible().widgets
+    assert any(w.text == "data.h5" for w in visible)
+    assert any(
+        "saving_20261008T000000Z-a1b2c3/data.h5" in w.text
+        or "saving_20261008T000000Z-a1b2c3/data.h5" in w.tooltip
+        for w in visible
+    )
+    assert any(w.text == "✓" for w in visible)
+    if partial:
+        assert any(w.text == "◐ PARTIALLY SAVED" for w in visible)
+        assert driver.observe("Save All").enabled
+        assert driver.observe("Save").enabled
+        assert "Saved 1 of 2 files" in driver.status().text
+        assert "1 failed" in driver.status().text
+    else:
+        assert "Saved 2 files" in driver.status().text
+        assert any(w.text == "✓ SAVED" for w in visible)
+        assert not driver.observe("Save All").enabled
+        assert not driver.observe("Save").enabled
 
 
 def test_single_artifact_title_and_output_filenames(saving_view) -> None:

@@ -3,17 +3,85 @@
 from datetime import UTC, datetime
 from pathlib import Path
 from shutil import copytree
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 import pytest
 from zcu_tools.resources.entry import (
     AcquiredPayload,
+    ArtifactKey,
     LedgerEvent,
     PointView,
     ResultEntry,
+    bind_run_outputs,
     capture_point_storage,
-    snapshot,
 )
+
+from tests._filesystem import symlink_or_skip
+
+
+@pytest.mark.parametrize(
+    "location", ["result-entry", "database-entry", "records", "run", "point"]
+)
+def test_recorded_output_binding_rejects_symlink_escape_without_writes(
+    tmp_path: Path,
+    location: str,
+) -> None:
+    result_root, database_root = tmp_path / "result", tmp_path / "Database"
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    sentinel = outside / "retained.txt"
+    sentinel.write_text("unchanged")
+    paths = {
+        "result-entry": result_root / "recorded",
+        "database-entry": database_root / "recorded",
+        "records": result_root / "recorded/records",
+        "run": database_root / "recorded/runs",
+        "point": result_root / "recorded/points/p",
+    }
+    source = paths[location]
+    source.parent.mkdir(parents=True)
+    symlink_or_skip(source, outside, target_is_directory=True)
+    before = tuple(sorted(tmp_path.rglob("*")))
+    if location in ("result-entry", "database-entry"):
+        with pytest.raises(ValueError, match="escape"):
+            bind_run_outputs(
+                result_root=result_root,
+                database_root=database_root,
+                entry_name="recorded",
+                point="p",
+            )
+    else:
+        binding = bind_run_outputs(
+            result_root=result_root,
+            database_root=database_root,
+            entry_name="recorded",
+            point="p",
+        )
+        if location == "records":
+            with pytest.raises(ValueError, match="escape"):
+                binding.prepare_ledger()
+        else:
+            layout = binding.layout(stem="capture", saved_at=datetime.now(UTC))
+            with pytest.raises(ValueError, match="escape"):
+                layout.outputs(ArtifactKey("analysis", "fit", "figure", "plot"))
+    assert sentinel.read_text() == "unchanged"
+    assert tuple(sorted(tmp_path.rglob("*"))) == before
+
+
+@pytest.mark.parametrize("field", ["entry_name", "point"])
+@pytest.mark.parametrize("invalid", ["", "../outside"])
+def test_recorded_output_binding_rejects_unsafe_names_without_writes(
+    tmp_path: Path, field: str, invalid: str
+) -> None:
+    names = {"entry_name": "recorded", "point": "p", field: invalid}
+    with pytest.raises(ValueError, match=field):
+        bind_run_outputs(
+            result_root=tmp_path / "result",
+            database_root=tmp_path / "Database",
+            entry_name=names["entry_name"],
+            point=names["point"],
+        )
+    assert tuple(tmp_path.iterdir()) == ()
 
 
 def test_capture_retains_cached_context_and_exact_entry_attribution(
@@ -30,7 +98,6 @@ def test_capture_retains_cached_context_and_exact_entry_attribution(
     before = tuple(sorted(tmp_path.rglob("*")))
     captured = capture_point_storage(point)
 
-    assert captured.entry_id == UUID(snapshot(entry.setup).general.entry_id)
     assert captured.entry_name == "entry"
     assert captured.point == "sweet"
     assert captured.description == "cached"
@@ -43,7 +110,6 @@ def test_capture_retains_cached_context_and_exact_entry_attribution(
         id=str(uuid4()),
         kind="acquired",
         at=datetime.now(UTC).isoformat(),
-        entry_id=str(captured.entry_id),
         origin="notebook",
         payload=AcquiredPayload(
             run_id="captured-run",
@@ -118,6 +184,25 @@ def test_capture_accepts_roles_from_another_handle_of_the_same_point(
     assert captured.roles == ({} if empty else {"driver": "Q1", "sense": "R1"})
     assert _published_state(tmp_path) == before
     assert entry.ledger.events() == ()
+
+
+def test_role_capture_accepts_current_point_at_same_location_after_replacement(
+    entry: ResultEntry, tmp_path: Path
+) -> None:
+    original = _role_point(entry)
+    resolved = original.resolve(["driver", "sense"], focus="Q1")
+    result_root = entry.result_path.parent
+    database_root = entry.database_path.parent
+    entry.result_path.rename(tmp_path / "retired")
+    replacement = ResultEntry.create(
+        "entry", result_root=result_root, database_root=database_root
+    )
+    current = _role_point(replacement)
+
+    captured = capture_point_storage(current, roles=resolved)
+
+    assert captured.entry_name == "entry"
+    assert captured.roles == {"driver": "Q1", "sense": "R1"}
 
 
 @pytest.mark.parametrize("empty", [False, True])

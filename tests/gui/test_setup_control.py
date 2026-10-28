@@ -41,7 +41,7 @@ class RecordingSettings(ProjectSettingsService):
         self._log = log
         self.preferences = SetupPreferences(entry_name="chip", ip="10.0.0.2", port=7000)
         self.info = EntryInfo(
-            "entry", "chip", Path("/tmp/result/chip"), Path("/tmp/Database/chip")
+            "chip", Path("/tmp/result/chip"), Path("/tmp/Database/chip")
         )
 
     def get_setup_preferences(self) -> SetupPreferences:
@@ -70,11 +70,11 @@ class RecordingContext(ContextControlFacet):
 
     def use_point(self, request: PointUseRequest) -> SavedPoint:
         self._log.add("context", "use_point", request)
-        return SavedPoint(entry_id="entry", point=request.label)
+        return SavedPoint(entry_name="entry", point=request.label)
 
     def new_point(self, request: PointCreateRequest) -> SavedPoint:
         self._log.add("context", "new_point", request)
-        return SavedPoint(entry_id="entry", point=request.label)
+        return SavedPoint(entry_name="entry", point=request.label)
 
     def list_points(self, *, refresh: bool = False) -> tuple[WorkingPointInfo, ...]:
         self._log.add("context", "list_points", refresh=refresh)
@@ -82,9 +82,7 @@ class RecordingContext(ContextControlFacet):
 
     def get_entry_info(self) -> EntryInfo:
         self._log.add("context", "get_entry_info")
-        return EntryInfo(
-            "entry", "chip", Path("/tmp/result/chip"), Path("/tmp/Database/chip")
-        )
+        return EntryInfo("chip", Path("/tmp/result/chip"), Path("/tmp/Database/chip"))
 
 
 class RecordingConnection(SoCConnectionService):
@@ -142,10 +140,8 @@ def test_setup_control_facet_forwards_deliberate_setup_dialog_contract() -> None
     facet, _soc, log, bus, _connection = _facet()
     request = EntryRequest("chip")
     point = PointCreateRequest("new", "", CommandOrigin("gui"), clone_from="base")
-    saved = SavedPoint(entry_id="entry", point="base")
-    info = EntryInfo(
-        "entry", "chip", Path("/tmp/result/chip"), Path("/tmp/Database/chip")
-    )
+    saved = SavedPoint(entry_name="entry", point="base")
+    info = EntryInfo("chip", Path("/tmp/result/chip"), Path("/tmp/Database/chip"))
     cases: tuple[tuple[str, Callable[[], object], object, RecordedCall], ...] = (
         (
             "get_setup_preferences",
@@ -186,7 +182,7 @@ def test_setup_control_facet_forwards_deliberate_setup_dialog_contract() -> None
         (
             "new_point",
             lambda: facet.new_point(point),
-            SavedPoint(entry_id="entry", point="new"),
+            SavedPoint(entry_name="entry", point="new"),
             call("context", "new_point", point),
         ),
         (

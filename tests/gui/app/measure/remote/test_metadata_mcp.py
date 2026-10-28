@@ -8,6 +8,8 @@ from zcu_tools.format_version import YamlValue
 from zcu_tools.gui.session.parameters import ParameterContext
 from zcu_tools.mcp.measure.session import GuiRpcError
 
+from tests.gui.app.measure._record_support import require_target
+
 from ._helpers import Fixture, call, mcp_client, open_client
 
 
@@ -34,7 +36,7 @@ def test_md_rpc_shares_gui_values_and_rejects_reserved_keys(
         context = fx.ctrl.context_control
         for key, value in (("freq", 5.0), ("matrix", matrix), ("bias", 0.25)):
             context.set_parameter(
-                context.read_context().target, f"general.ext.{key}", value
+                require_target(context.read_context()), f"general.ext.{key}", value
             )
         assert invoke(
             "rpc_call", {"method": "context.snapshot", "params": {"summaries": True}}
@@ -90,7 +92,7 @@ def test_md_rpc_shares_gui_values_and_rejects_reserved_keys(
             )
         assert missing.value.code == "invalid_params"
         captured = context.read_context()
-        point = captured.document()
+        point = captured.whole_document()
         general = point.general.model_copy(
             update={"ext": {**point.general.ext, "complex": 1 + 2j}}
         )

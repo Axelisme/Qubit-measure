@@ -61,7 +61,7 @@ def test_soc_tools_observe_gui_connection_without_hardware(
             },
         ) == {
             "kind": "saved_point",
-            "entry_id": entry["entry_id"],
+            "entry_name": entry["name"],
             "point": "base",
         }
         assert invoke("status", {})["soc"] == {"connected": True, "mock": True}

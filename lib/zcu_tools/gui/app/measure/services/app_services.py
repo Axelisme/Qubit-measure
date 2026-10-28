@@ -240,11 +240,7 @@ def build_app_services(  # noqa: PLR0913
     tab = TabService(state, registry, writeback, tab_forms, form_sources)
     workspace = WorkspaceService(state, tab, bus)
     guard = GuardService(state, access=access)
-    load = LoadService(
-        state,
-        context=ContextControlFacet(context=context),
-        captured_parameters=captured_parameters,
-    )
+    load = LoadService(state)
     run = RunService(
         state,
         session.runner,
@@ -258,7 +254,13 @@ def build_app_services(  # noqa: PLR0913
     post_analyze = PostAnalyzeService(
         state, session.runner, bus, handles, writeback=writeback
     )
-    save = SaveService(state, bus, access=access)
+    save = SaveService(
+        state,
+        bus,
+        result_root=Path(project_root) / "result",
+        database_root=Path(project_root) / "Database",
+        access=access,
+    )
     run_analyze_control = RunAnalyzeControlFacet(
         state=state,
         bus=bus,

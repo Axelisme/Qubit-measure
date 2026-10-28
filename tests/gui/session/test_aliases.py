@@ -163,7 +163,6 @@ def test_list_cannot_be_used_as_a_scalar_link_root(point: PointDocument) -> None
 def test_setup_alias_links_resolve_against_the_fixed_component_snapshot() -> None:
     setup = SetupDocument.model_construct(
         general=SetupGeneral(
-            entry_id="00000000-0000-0000-0000-000000000001",
             created_at="2026-10-09T00:00:00Z",
         ),
         components={

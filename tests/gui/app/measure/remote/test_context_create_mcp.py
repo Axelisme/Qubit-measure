@@ -6,6 +6,8 @@ import pytest
 from zcu_tools.mcp.measure.session import GuiRpcError
 from zcu_tools.resources.entry import ResultEntry, source_path
 
+from tests.gui.app.measure._record_support import require_target
+
 from ._helpers import Fixture, call, mcp_client, open_client
 
 
@@ -36,13 +38,15 @@ def test_context_create_named_clone_and_invalid_source_do_not_change_active(
         assert invoke(
             "rpc_call",
             {"method": "point.new", "params": {"label": "base", "clone_from": None}},
-        ) == {"kind": "saved_point", "entry_id": entry["entry_id"], "point": "base"}
+        ) == {"kind": "saved_point", "entry_name": entry["name"], "point": "base"}
         context = fx.ctrl.context_control
-        context.set_parameter(context.read_context().target, "general.ext.freq", 5.0)
+        context.set_parameter(
+            require_target(context.read_context()), "general.ext.freq", 5.0
+        )
         assert invoke(
             "rpc_call",
             {"method": "point.new", "params": {"label": "copy", "clone_from": "base"}},
-        ) == {"kind": "saved_point", "entry_id": entry["entry_id"], "point": "copy"}
+        ) == {"kind": "saved_point", "entry_name": entry["name"], "point": "copy"}
         assert (
             call(sock, "context.snapshot", {"path": "point.general.ext.freq"})[
                 "result"
@@ -63,7 +67,7 @@ def test_context_create_named_clone_and_invalid_source_do_not_change_active(
 
         assert invoke(
             "rpc_call", {"method": "point.use", "params": {"label": "base"}}
-        ) == {"kind": "saved_point", "entry_id": entry["entry_id"], "point": "base"}
+        ) == {"kind": "saved_point", "entry_name": entry["name"], "point": "base"}
         unknown = call(sock, "point.use", {"label": "ghost"})
         assert unknown["ok"] is False
         assert "ghost" in unknown["error"]["message"]
@@ -295,17 +299,19 @@ def test_context_create_default_without_active_is_empty_and_explicit_null_skips_
         assert invoke(
             "rpc_call",
             {"method": "point.new", "params": {"label": "base", "clone_from": None}},
-        ) == {"kind": "saved_point", "entry_id": entry["entry_id"], "point": "base"}
+        ) == {"kind": "saved_point", "entry_name": entry["name"], "point": "base"}
         assert (
             call(sock, "context.snapshot", {})["result"]["point"]["general"]["ext"]
             == {}
         )
         context = fx.ctrl.context_control
-        context.set_parameter(context.read_context().target, "general.ext.freq", 5.0)
+        context.set_parameter(
+            require_target(context.read_context()), "general.ext.freq", 5.0
+        )
         assert invoke(
             "rpc_call",
             {"method": "point.new", "params": {"label": "empty", "clone_from": None}},
-        ) == {"kind": "saved_point", "entry_id": entry["entry_id"], "point": "empty"}
+        ) == {"kind": "saved_point", "entry_name": entry["name"], "point": "empty"}
         assert (
             call(sock, "context.snapshot", {})["result"]["point"]["general"]["ext"]
             == {}

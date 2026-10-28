@@ -184,7 +184,7 @@ class AliasPanel(QWidget):
         label = self._control.current_point_label()
         if info is None or label is None:
             return None
-        return SavedPoint(entry_id=info.entry_id, point=label)
+        return SavedPoint(entry_name=info.name, point=label)
 
     def set_read_only(self, *, read_only: bool) -> None:
         """Lock or unlock edits while keeping the rows selectable and scrollable.

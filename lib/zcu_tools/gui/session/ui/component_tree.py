@@ -88,7 +88,7 @@ class _EditTarget:
     write_depth: int
     revision: PointFileRevision | None = None
     setup: bool = False
-    entry_id: str | None = None
+    entry_name: str | None = None
     point: SavedPoint | None = None
     draft: str | None = None
 
@@ -294,6 +294,11 @@ class ComponentTreeWidget(QWidget):
                 self._control.set_setup_parameter(path, value)
             else:
                 point = target or self._control.read_context().target
+                if point is None:
+                    raise FailedPreconditionError(
+                        "Select a working point before editing parameters",
+                        reason_code="no_context",
+                    )
                 self._control.set_parameter(point, path, value)
         except Exception as exc:
             logger.exception("Parameter edit failed")
@@ -535,7 +540,7 @@ class ComponentTreeWidget(QWidget):
             target = replace(
                 target,
                 setup=setup,
-                entry_id=None if entry is None else entry.entry_id,
+                entry_name=None if entry is None else entry.name,
                 point=None if setup else self._control.read_context().target,
                 revision=None if setup else self._sync.capture(),
             )
@@ -565,7 +570,7 @@ class ComponentTreeWidget(QWidget):
             current_revision = self._sync.capture()
             if (
                 target.setup != self._is_setup()
-                or target.entry_id != (None if entry is None else entry.entry_id)
+                or target.entry_name != (None if entry is None else entry.name)
                 or (
                     not target.setup
                     and (

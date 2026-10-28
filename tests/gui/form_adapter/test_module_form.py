@@ -655,7 +655,7 @@ def creation_env(
             general=PointGeneral(created_at="2026-10-13T00:00:00Z", ext={"seed": seed}),
         ),
         library=library,
-        target=SavedPoint(entry_id="synthetic", point="synthetic"),
+        target=SavedPoint(entry_name="synthetic", point="synthetic"),
         roles=None,
         source_faults=faults,
     )

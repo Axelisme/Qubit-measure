@@ -17,7 +17,7 @@ _Avoid_: experiment wrapper, GUI plugin
 ## 參數與環境
 
 **Result Entry**:
-一次降溫加一片 chip 的資料單位，包含工作點、參數與量測成果。名稱由使用者決定，不帶可解析的物理意義。
+一次降溫加一片 chip 的資料單位，包含工作點、參數與量測成果。名稱由使用者決定，不帶可解析的物理意義。同一 Result root 內以資料夾名稱判斷歸屬，不使用 entry UUID。
 _Avoid_: project identity, chip/qubit scope
 
 **Working Point（工作點）**:
@@ -25,7 +25,7 @@ _Avoid_: project identity, chip/qubit scope
 _Avoid_: device value, bias folder
 
 **Parameter Container（參數容器）**:
-保存參數與來源的文件模型，包含 general、components 與 provenance。Setup 元件範本與工作點使用同一種模型，各自保存獨立的值與來源。
+保存參數與 opaque metadata 的文件模型，包含 general、components 與 metadata。Setup 元件範本與工作點使用同一種模型，各自保存獨立的值與 metadata。Library 另存 Spec，不保存模組來源。
 _Avoid_: global parameter dict
 
 **Component（元件）**:
@@ -41,7 +41,7 @@ _Avoid_: component name, module name
 _Avoid_: focus component, tab-local binding
 
 **Ledger**:
-一個 Result Entry 的事件記錄，包含量測、保存與接受結果等事實。參數來源可引用同條目的事件。
+一個 Result Entry 的事件記錄，包含量測、保存與接受結果等事實。事件歸屬由 records 所在資料夾決定，不比對行內 entry_id。缺 records 時讀取回空，第一次追加才建立。Record 的 source 可引用 accepted 事件，library 不查 ledger。Import 事件只供歷史讀取。
 _Avoid_: run directory, parameter snapshot
 
 **ModuleLibrary Template**:
@@ -127,7 +127,7 @@ _Avoid_: multi-file workaround, sidecar artifact
 _Avoid_: result file, run handle
 
 **Writeback**:
-把分析成果以 Parameter、Module 或 Sample proposal 提交回固定來源的流程。選定 Apply 依序提交提案，失敗時保留成功前綴，見 [ADR-0008](adr/0008-cfg-editor-session.md) 與 [ADR-0067](adr/0067-gui-application.md)。保存量測資料檔是另一個流程。
+把分析成果以 Parameter、Module 或 Record proposal 提交到持久工作點的流程，與保存量測資料檔不同。GUI 寫回到命令當下選定的 point，歷史參數環境只供提案求值，見 [ADR-0008](adr/0008-cfg-editor-session.md) 與 [ADR-0067](adr/0067-gui-application.md)。
 _Avoid_: save, auto-apply, calibration sync
 
 ## 分析與 waveform

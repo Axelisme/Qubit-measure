@@ -16,6 +16,7 @@ from zcu_tools.gui.app.measure.adapter import (
 from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.gui.session.context_types import LibraryChange
 
+from tests.gui.app.measure._record_support import require_target
 from tests.gui.app.measure._synthetic import SampleAdapter, SampleCfg
 
 from ._helpers import Fixture, mcp_client
@@ -102,7 +103,7 @@ def test_library_mutation_refreshes_ref_and_explicit_inline_tab_cfg(
     )
     if kind == "waveform":
         fx.ctrl.context_control.set_module(
-            fx.ctrl.context_control.read_context().target,
+            require_target(fx.ctrl.context_control.read_context()),
             "Q1.pulses.carrier",
             PulseSpec(ch=0, nqz=1, freq=100.0, gain=0.5, waveform=path),
         )

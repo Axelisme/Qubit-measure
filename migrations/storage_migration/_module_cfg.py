@@ -411,7 +411,6 @@ def convert_module_cfg(
                 ).edit() as document:
                     planned = candidate.document()
                     document.components = planned.components
-                    document.provenance = planned.provenance
 
             publish_document(session, source, library.source_path, "library", build)
             library.refresh()

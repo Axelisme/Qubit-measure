@@ -3,7 +3,6 @@
 from dataclasses import replace
 from pathlib import Path
 from threading import get_ident
-from uuid import UUID
 
 import pytest
 from qtpy.QtWidgets import QApplication
@@ -96,7 +95,7 @@ def test_measure_terminal_reads_back_on_worker_and_commits_on_owner(
         inputs = replace(
             inputs,
             snapshot=RunSnapshot(
-                entry_id=UUID(int=1),
+                entry_name="entry",
                 point="point",
                 roles={},
             ),

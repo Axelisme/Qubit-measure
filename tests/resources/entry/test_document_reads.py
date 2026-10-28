@@ -377,15 +377,17 @@ def test_public_document_read_preserves_forward_minor_visibility(
         stored = yaml.load(path)
         stored["format_version"] = "2.2"
         stored["components"]["N1"]["future"] = {"count": 2}
-        cached = snapshot(entry.setup)
+
         yaml.dump(stored, path)
         before = path.read_bytes()
         if extra_policy == "forbid":
-            with pytest.raises(ValidationError, match="future"):
-                entry.setup.refresh()
-            assert snapshot(entry.setup) == cached
-        else:
             entry.setup.refresh()
+            assert entry.setup.N1.freq == 10.0
+            with pytest.raises(ValidationError, match="future"):
+                snapshot(entry.setup)
+            assert path.read_bytes() == before
+            return
+        entry.setup.refresh()
         document = snapshot(entry.setup)
         if extra_policy == "allow":
             assert document_value(document, "N1.future.count") == 2

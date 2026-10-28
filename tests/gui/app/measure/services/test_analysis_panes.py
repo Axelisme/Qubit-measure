@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, replace
 from io import BytesIO
 from typing import Any
@@ -84,7 +84,11 @@ class _Writeback(WritebackService):
         parameters: ParameterContext | None,
         experiment_name: str,
         run_id: str | None = None,
-        device_snapshot: Mapping[str, JsonObject] | None = None,
+        device_snapshot: (
+            Mapping[str, JsonObject]
+            | Callable[[], Mapping[str, JsonObject] | None]
+            | None
+        ) = None,
     ) -> WritebackDraft:
         if self.fail_create:
             raise RuntimeError("draft creation failed")
@@ -190,7 +194,7 @@ def _pane_capture(original: ParameterContext | None) -> ParameterContext:
     if original is None:
         raise RuntimeError("Native fixture must retain its Run parameter capture")
     return ParameterContext(
-        point=original.document().model_copy(
+        point=original.whole_document().model_copy(
             update={"components": {"Q1": QubitSchema(kind="qubit/fluxonium")}}
         ),
         library=original.library,

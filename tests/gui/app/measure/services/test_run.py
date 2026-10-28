@@ -43,6 +43,7 @@ from zcu_tools.gui.expected_error import (
     FailedPreconditionError,
 )
 from zcu_tools.gui.form_adapter import Form, FormContext
+from zcu_tools.gui.session.parameter_capture import restore_parameters
 from zcu_tools.gui.session.types import ParameterContext
 
 from tests.gui.app.measure._cfg_fakes import parameter_capture
@@ -177,6 +178,30 @@ def test_run_publishes_admitted_source_despite_later_global_change(
     assert tab.run.result is None
     assert tab.run.parameters is None
     assert tab.run.source_operation_id is None
+
+
+def test_run_metadata_fixes_parameter_capture_before_worker_execution(
+    result_sources: tuple[ParameterContext, ParameterContext],
+) -> None:
+    state, tab_id, adapter = make_state(readiness=ContextReadiness.ACTIVE)
+    captured, later = result_sources
+    state.set_context(replace(state.session_env, parameters=captured))
+    inputs = replace(
+        make_inputs(state, tab_id, adapter),
+        snapshot=historical_metadata().snapshot,
+        experiment_tag="test/load",
+    )
+    service, _gate, background, _handles = make_run_service(state)
+    adapter.run.return_value = RunRecord(None, object())
+    service.start_run(inputs, plots=make_plots())
+    state.set_context(replace(state.session_env, parameters=later))
+    background.run_work()
+    record = state.get_tab(tab_id).run.result
+    assert record is not None and record.metadata is not None
+    snapshot = record.metadata.parameter_snapshot
+    assert snapshot is not None
+    restored = restore_parameters(snapshot)
+    assert restored.value("$source_qubit.rate") == 1.0
 
 
 def test_cancelled_run_without_data_keeps_no_previous_source(

@@ -16,7 +16,7 @@ from zcu_tools.gui.form import FormValue
 from zcu_tools.gui.form_adapter import Form, FormContext
 
 from tests.gui._qt_waits import qt_until
-from tests.gui.app.measure._record_support import require_record
+from tests.gui.app.measure._record_support import require_record, require_target
 from tests.gui.app.measure.remote._helpers import Fixture
 
 
@@ -150,14 +150,14 @@ def test_open_edit_run_and_reset_use_public_form_authority(
     application.registry.register("trace", TraceAdapter)
     parameters = application.ctrl.context_control.read_context()
     application.ctrl.context_control.set_parameter(
-        parameters.target, "general.ext.amount", 2.0
+        require_target(parameters), "general.ext.amount", 2.0
     )
     try:
         tab_id = application.ctrl.tab_control.new_tab("trace")
         resource = application.ctrl.cfg_resources.lookup(tab_id)
         resource.write({("amount",): {"expr": "general.ext.amount * 3"}})
         application.ctrl.context_control.set_parameter(
-            parameters.target, "general.ext.amount", 5.0
+            require_target(parameters), "general.ext.amount", 5.0
         )
         assert resource.result() == TraceCfg(amount=6.0)
         assert resource.preview().values[("amount",)] == 6.0

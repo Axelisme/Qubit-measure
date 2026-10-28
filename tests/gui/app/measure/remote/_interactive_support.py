@@ -31,6 +31,7 @@ from zcu_tools.gui.app.measure.state import RunPaneState
 from zcu_tools.gui.app.measure.ui.exp_tab_widget import ExpTabWidget
 from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
+from zcu_tools.gui.session.parameter_capture import capture_parameters
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from zcu_tools.program.v2.sweep import SweepCfg
 
@@ -42,7 +43,7 @@ from tests.gui.app.measure._flux_adapter import (
     SpectrumCore,
     SpectrumResult,
 )
-from tests.gui.app.measure._record_support import require_record
+from tests.gui.app.measure._record_support import require_metadata
 
 from ._helpers import Fixture, recv_response, send
 
@@ -107,8 +108,9 @@ def load_native_spectrum(
         finished_at="2026-10-08T00:01:00+00:00",
         completion="complete",
         snapshot=RunSnapshot(
-            entry_id=storage.entry_id, point=storage.point, roles=storage.roles
+            entry_name=storage.entry_name, point=storage.point, roles=storage.roles
         ),
+        parameter_snapshot=capture_parameters(parameters),
         provenance=SoftwareProvenance(
             software_versions={},
             git_commit=None,
@@ -120,7 +122,7 @@ def load_native_spectrum(
     )
     save_run(replace(RunRecord(cfg, result), metadata=metadata), path, spec=spec)
     fx.ctrl.run_analyze_control.load_tab_result(tab_id, str(path))
-    assert require_record(fx.state.get_tab(tab_id).run).metadata == metadata
+    assert require_metadata(fx.state.get_tab(tab_id).run) == metadata
 
 
 def start_mounted(

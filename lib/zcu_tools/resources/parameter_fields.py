@@ -9,8 +9,10 @@ from __future__ import annotations
 from collections.abc import Callable, Generator, Mapping
 from contextlib import AbstractContextManager, contextmanager
 from copy import deepcopy
+from typing import TypeGuard
 
 from pydantic import BaseModel, TypeAdapter, ValidationError
+from pydantic_core import SchemaValidator, core_schema
 
 from zcu_tools.core.complex_codec import decode_complex, encode_complex
 from zcu_tools.format_version import YamlValue
@@ -19,6 +21,136 @@ from .parameter_metadata import parameter_path
 
 # Logical field containers retain typed models inside mappings. No list indexing.
 type FieldNode = BaseModel | dict[str, object]
+
+
+def _definitions(
+    schema: core_schema.CoreSchema,
+) -> TypeGuard[core_schema.DefinitionsSchema]:
+    return schema["type"] == "definitions"
+
+
+def _model_fields(
+    schema: core_schema.CoreSchema,
+) -> TypeGuard[core_schema.ModelFieldsSchema]:
+    return schema["type"] == "model-fields"
+
+
+def _model_wrapper(
+    schema: core_schema.CoreSchema,
+) -> TypeGuard[
+    core_schema.ModelSchema
+    | core_schema.BeforeValidatorFunctionSchema
+    | core_schema.AfterValidatorFunctionSchema
+    | core_schema.WrapValidatorFunctionSchema
+]:
+    # Pydantic's schema TypedDicts mark the discriminator optional, so direct
+    # discriminator checks do not narrow their union in Pyright.
+    return schema["type"] in (
+        "model",
+        "function-before",
+        "function-after",
+        "function-wrap",
+    )
+
+
+def model_field_schema(model: type[BaseModel], name: str) -> core_schema.CoreSchema:
+    """Return one field's schema, including its defaults and field validators.
+
+    Model-level validators are excluded. Unknown fields raise AttributeError.
+    Definitions required by nested/recursive field models remain available.
+    No values or unrelated fields are validated.
+    """
+    schema = model.__pydantic_core_schema__
+    definitions: list[core_schema.CoreSchema] = []
+    while True:
+        if _definitions(schema):
+            definitions.extend(schema["definitions"])
+            schema = schema["schema"]
+        elif _model_wrapper(schema):
+            schema = schema["schema"]
+        elif _model_fields(schema):
+            if name not in schema["fields"]:
+                raise AttributeError(name)
+            field = schema["fields"][name]["schema"]
+            return (
+                core_schema.definitions_schema(field, definitions)
+                if definitions
+                else field
+            )
+        else:
+            raise TypeError(f"{model.__name__}: unsupported model field schema")
+
+
+def _list_schema(schema: core_schema.CoreSchema) -> TypeGuard[core_schema.ListSchema]:
+    return schema["type"] == "list"
+
+
+def _field_wrapper(
+    schema: core_schema.CoreSchema,
+) -> TypeGuard[
+    core_schema.WithDefaultSchema
+    | core_schema.NullableSchema
+    | core_schema.BeforeValidatorFunctionSchema
+    | core_schema.AfterValidatorFunctionSchema
+    | core_schema.WrapValidatorFunctionSchema
+]:
+    return schema["type"] in (
+        "default",
+        "nullable",
+        "function-before",
+        "function-after",
+        "function-wrap",
+    )
+
+
+def _sequence_shape_schema(schema: core_schema.CoreSchema) -> core_schema.CoreSchema:
+    if _list_schema(schema):
+        return {**schema, "items_schema": core_schema.any_schema()}
+    if _field_wrapper(schema):
+        wrapped = deepcopy(schema)
+        wrapped["schema"] = _sequence_shape_schema(schema["schema"])
+        return wrapped
+    return schema
+
+
+def sequence_shape(value: object, schema: core_schema.CoreSchema) -> object:
+    """Validate a described list's container and field rules, not item schemas.
+
+    schema is the owning field's core schema, including defaults and field-level
+    validators. List annotations keep their length/type constraints; scalar
+    annotations still reject lists. Returned items are not projected or sent on
+    wire. Field rules may inspect them when that is necessary to describe shape.
+    Malformed used structure raises its original validation error.
+    """
+    return SchemaValidator(_sequence_shape_schema(schema)).validate_python(
+        deepcopy(value)
+    )
+
+
+def _dict_schema(schema: core_schema.CoreSchema) -> TypeGuard[core_schema.DictSchema]:
+    return schema["type"] == "dict"
+
+
+def _mapping_shape_schema(schema: core_schema.CoreSchema) -> core_schema.CoreSchema:
+    if _dict_schema(schema):
+        return {**schema, "values_schema": core_schema.any_schema()}
+    if _field_wrapper(schema):
+        wrapped = deepcopy(schema)
+        wrapped["schema"] = _mapping_shape_schema(schema["schema"])
+        return wrapped
+    return schema
+
+
+def mapping_shape(value: object, schema: core_schema.CoreSchema) -> object:
+    """Validate mapping structure and field rules without consuming child values.
+
+    schema is the owning field schema. Mapping keys and container constraints
+    remain checked; scalar annotations reject mappings. The owner then projects
+    individual output children. Malformed used structure raises schema errors.
+    """
+    return SchemaValidator(_mapping_shape_schema(schema)).validate_python(
+        deepcopy(value)
+    )
 
 
 def model_field_value(node: BaseModel, name: str) -> object:

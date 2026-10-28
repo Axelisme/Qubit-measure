@@ -588,7 +588,6 @@ def convert_parameters(
                     "format_version": "2.0",
                     "schema_version": component_registry.require_schema_policy().current_version,
                     "general": {
-                        "entry_id": str(session.manifest.identity.entry_id),
                         "created_at": datetime.now(timezone.utc).isoformat(),
                     },
                     "components": _YAML_MAP.validate_python(mapping.components),

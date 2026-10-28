@@ -184,7 +184,9 @@ def test_single_instance_native_round_trip_keeps_cfg_snapshot_and_memory_units(
     save_run(record, path, spec=experiment.AXES_SPEC)
     loaded, snapshot = load_run(path, spec=experiment.AXES_SPEC)
     assert loaded.cfg == record.cfg
-    assert loaded.metadata == record.metadata
+    assert loaded.metadata is not None
+    assert record.metadata is not None
+    assert loaded.metadata.project() == record.metadata.project()
     assert record.metadata is not None
     assert snapshot == record.metadata.snapshot
     np.testing.assert_array_equal(loaded.result.frequency, record.result.frequency)
@@ -403,7 +405,8 @@ def test_full_metadata_load_preserves_historical_evidence(
     save_run(record, path, spec=SINGLE)
     loaded = load_run_with_metadata(path, spec=SINGLE)
     old_loaded, snapshot = load_run(path, spec=SINGLE)
-    assert loaded.metadata == metadata
+    assert loaded.metadata is not None
+    assert loaded.metadata.project() == metadata
     assert snapshot == metadata.snapshot
     assert loaded.cfg == old_loaded.cfg == record.cfg
     with pytest.raises(ValueError, match="experiment") as caught:
@@ -605,8 +608,10 @@ def test_native_wrappers_share_cfg_fallback_and_keep_history(
     with pytest.warns(CfgUnavailableWarning, match=issue):
         old_record, snapshot = load_run(path, spec=spec)
     assert record.metadata is not None
-    assert record.metadata == old_record.metadata
-    assert record.metadata.model_dump(mode="json") == stored.docs["metadata"]
+    assert record.metadata is not None
+    assert old_record.metadata is not None
+    assert record.metadata.project() == old_record.metadata.project()
+    assert record.metadata.project().model_dump(mode="json") == stored.docs["metadata"]
     assert snapshot == record.metadata.snapshot
     assert record.cfg is old_record.cfg is None
     np.testing.assert_allclose(record.result.signal, [2 + 3j, 4 - 5j])
@@ -626,7 +631,10 @@ def test_restore_run_returns_the_record_and_cfg_diagnostic(
     assert restored.cfg_issue is None
     assert restored.record.cfg == NativeCfg()
     assert restored.record.metadata is not None
-    assert restored.record.metadata.model_dump(mode="json") == stored.docs["metadata"]
+    assert (
+        restored.record.metadata.project().model_dump(mode="json")
+        == stored.docs["metadata"]
+    )
     np.testing.assert_array_equal(restored.record.result.frequency, [4000.0, 5000.0])
     np.testing.assert_allclose(restored.record.result.signal, [2 + 3j, 4 - 5j])
 

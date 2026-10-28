@@ -22,8 +22,11 @@ from __future__ import annotations
 # Tab admission shares domain-first reasons before wire source checks.
 # Results list exposes named item issues for unenumerable Database paths.
 # point.list includes parameter-only availability and per-point error diagnostics.
-WIRE_VERSION = 129
+# Context snapshots no longer include library provenance.
+# Entry info, point bindings and writeback targets use folder names, without UUIDs.
+# Loaded Runs expose recorded parameter content independently of live storage.
+WIRE_VERSION = 130
 
 # Bump for meaningful GUI code changes that need a reload signal.
 # Wire-contract changes bump both versions.
-GUI_VERSION = 162
+GUI_VERSION = 163

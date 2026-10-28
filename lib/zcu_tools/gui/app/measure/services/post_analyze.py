@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any
 
@@ -40,7 +40,7 @@ class _PostAnalyzeCapture:
     analyze_result: object
     run_id: str | None
     experiment_name: str
-    device_snapshot: Mapping[str, JsonObject] | None
+    device_snapshot: Callable[[], Mapping[str, JsonObject] | None]
     context: SessionEnv
     adapter: RegisteredAdapter
     params: object
@@ -135,9 +135,9 @@ class PostAnalyzeService(StagedAnalyzeService):
             experiment_name=primary_draft.experiment_name
             if primary_draft is not None
             else tab.adapter_name,
-            device_snapshot=primary_draft.device_snapshot
-            if primary_draft is not None
-            else None,
+            device_snapshot=lambda: (
+                primary_draft.device_snapshot if primary_draft is not None else None
+            ),
             context=ctx,
             adapter=adapter,
             params=post_analyze_params_instance,
