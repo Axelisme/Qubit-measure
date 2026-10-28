@@ -9,7 +9,6 @@ from qtpy.QtWidgets import QApplication
 from zcu_tools.gui.app.measure.services.pane_commit import commit_run
 from zcu_tools.gui.app.measure.state import RunPaneState
 from zcu_tools.gui.session.aliases import AliasRow
-from zcu_tools.gui.session.context_control import ContextControlFacet
 from zcu_tools.gui.session.context_types import SavedPoint
 from zcu_tools.gui.session.parameter_capture import capture_parameters
 from zcu_tools.gui.session.types import ParameterContext
@@ -82,7 +81,7 @@ def role_load_session(
     """Save Q1 roles at p, then update persisted Q1.rate before native Load."""
     del result_sources  # Fixture owns the component-kind registration lifecycle.
     with native_save_session(tmp_path, qapp) as session:
-        control = ContextControlFacet(context=session.context)
+        control = session.context
         tab = session.state.get_tab("tab")
         control.add_component("Q1", "run-source/qubit", {"rate": 1.0})
         control.add_component("Q2", "run-source/qubit", {"rate": 2.0})

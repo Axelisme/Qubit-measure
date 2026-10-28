@@ -6,7 +6,6 @@ from pathlib import Path
 
 import pytest
 from zcu_tools.gui.event_bus import BaseEventBus
-from zcu_tools.gui.session.context_control import ContextControlFacet
 from zcu_tools.gui.session.context_types import CommandOrigin, PointCreateRequest
 from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.services.predictor import PredictorService
@@ -361,7 +360,7 @@ def test_dialog_displays_actual_calibration_and_clamping_without_point_writes(
 ):
     from qtpy.QtWidgets import QLabel
 
-    query = PredictorService(ContextControlFacet(context=component_context))
+    query = PredictorService(component_context)
     before = component_context.read_context().document()
     dialog = PredictorDialog(query, params=TransmonParams(20.0, 0.3, 0.0))
     try:

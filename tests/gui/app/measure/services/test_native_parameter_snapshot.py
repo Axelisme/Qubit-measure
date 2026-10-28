@@ -11,7 +11,6 @@ from zcu_tools.gui.app.measure.services.pane_commit import commit_run
 from zcu_tools.gui.app.measure.services.post_analyze import PostAnalyzeService
 from zcu_tools.gui.app.measure.state import RunPaneState
 from zcu_tools.gui.app.measure.writeback import WritebackService
-from zcu_tools.gui.session.context_control import ContextControlFacet
 from zcu_tools.gui.session.context_types import PointUseRequest
 from zcu_tools.gui.session.operation_runner import OperationRunner
 from zcu_tools.gui.session.parameter_capture import capture_parameters
@@ -41,7 +40,7 @@ def test_native_save_load_uses_captured_environment_after_source_removal(
     from zcu_tools.cfg_model import PulseSpec
 
     session = role_load_session
-    control = ContextControlFacet(context=session.context)
+    control = session.context
     target = require_target(control.read_context())
     control.set_module(
         target,
@@ -139,9 +138,7 @@ def test_loaded_analysis_and_post_defer_unused_device_evidence(
     LoadService(session.state).load_result("tab", str(path))
     tab = session.state.get_tab("tab")
     tab.adapter = AnalysisSavingAdapter
-    writeback = WritebackService(
-        ContextControlFacet(context=session.context), arb_names=lambda: ()
-    )
+    writeback = WritebackService(session.context, arb_names=lambda: ())
     runner = OperationRunner(
         None, session.handles, None, session.background, session.bus
     )

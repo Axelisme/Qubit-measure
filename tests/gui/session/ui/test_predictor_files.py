@@ -5,7 +5,6 @@ from pathlib import Path
 
 import pytest
 from zcu_tools.gui.event_bus import BaseEventBus
-from zcu_tools.gui.session.context_control import ContextControlFacet
 from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.services.predictor import PredictorService
 from zcu_tools.gui.session.state import SessionState
@@ -75,7 +74,7 @@ def test_entry_files_load_and_remain_manually_editable(qapp, tmp_path: Path):
         )
     context.install_entry(entry)
     dialog = PredictorDialog(
-        PredictorService(ContextControlFacet(context=context)),
+        PredictorService(context),
         params=FluxoniumParams(),
     )
     evidence = Path(os.environ.get("PREDICTOR_FILES_EVIDENCE", str(tmp_path)))
@@ -146,7 +145,7 @@ def multidevice_trial(qapp, tmp_path: Path):
     )
     context.install_entry(entry)
     dialog = PredictorDialog(
-        PredictorService(ContextControlFacet(context=context)),
+        PredictorService(context),
         params=FluxoniumParams(),
         device=make_device_control(cached={"coil": 0.3, "trim": -0.4}),
     )

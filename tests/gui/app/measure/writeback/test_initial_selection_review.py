@@ -15,7 +15,6 @@ from zcu_tools.gui.app.measure.writeback import (
     WritebackWidget,
 )
 from zcu_tools.gui.event_bus import BaseEventBus
-from zcu_tools.gui.session.context_control import ContextControlFacet
 from zcu_tools.gui.session.context_types import PointUseRequest
 from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.state import SessionState
@@ -71,9 +70,7 @@ def review(qapp: QApplication, tmp_path: Path) -> Generator[ComponentDriver]:
     )
     context.install_entry(entry)
     context.use_point(PointUseRequest("a"))
-    service = WritebackService(
-        ContextControlFacet(context=context), arb_names=lambda: ()
-    )
+    service = WritebackService(context, arb_names=lambda: ())
     adapter = ReviewAdapter
     run = RunRecord(
         SampleCfg(sweep=SweepCfg(start=0.0, stop=1.0, expts=2, step=1.0)),

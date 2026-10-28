@@ -31,7 +31,6 @@ from zcu_tools.gui.app.measure.state import State
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
 from zcu_tools.gui.session.aliases import AliasRow
-from zcu_tools.gui.session.context_control import ContextControlFacet
 from zcu_tools.gui.session.context_types import (
     CommandOrigin,
     EntryRequest,
@@ -167,7 +166,7 @@ def test_native_run_without_save_records_acquired_at_its_historical_entry(
     )
     other.new_point("q")
     session.context.install_entry(other)
-    ContextControlFacet(context=session.context).use_point(PointUseRequest("q"))
+    session.context.use_point(PointUseRequest("q"))
     origin = GUI_ORIGIN if frontend == "gui" else CommandOrigin("mcp")
     token, terminal = _acquire_to_terminal(session, monkeypatch, origin=origin)
     assert terminal.outcome == "finished"

@@ -21,7 +21,6 @@ from zcu_tools.gui.app.measure.startup_context import (
 from zcu_tools.gui.form import FormEnv
 from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
 from zcu_tools.gui.session.alias_presets import AliasPresets, validate_alias_presets
-from zcu_tools.gui.session.context_control import ContextControlFacet
 from zcu_tools.gui.session.operation_handles import OperationHandles
 from zcu_tools.gui.session.operation_runner import (
     OperationInfrastructure,
@@ -209,7 +208,7 @@ def build_app_services(  # noqa: PLR0913
         mutation_allowed=lambda tab_id: not state.is_tab_busy(tab_id),
     )
     writeback = WritebackService(
-        ContextControlFacet(context=context),
+        context,
         arb_names=arb_waveform.list_data_keys,
     )
     # TabService composes the tab render model and needs the writeback owner

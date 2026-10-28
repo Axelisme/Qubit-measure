@@ -279,6 +279,12 @@ class ContextService:
         """
         return deepcopy(self._entry_info)
 
+    def current_point_label(self) -> str | None:
+        """Return the selected saved point label, or None without selection; no I/O."""
+        parameters = self._state.session_env.parameters
+        target = None if parameters is None else parameters.target
+        return None if target is None else target.point
+
     def list_points(self, *, refresh: bool = False) -> tuple[WorkingPointInfo, ...]:
         """Return cached descriptions/parameter availability, empty without an entry.
 

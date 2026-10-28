@@ -10,7 +10,6 @@ from zcu_tools.cfg_model import WaveformAssetInfo
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 from zcu_tools.gui.session.aliases import AliasRow
-from zcu_tools.gui.session.context_control import ContextControlFacet
 from zcu_tools.gui.session.context_types import (
     CommandOrigin,
     ContextSourceBinding,
@@ -51,7 +50,23 @@ def test_current_point_label_for_storage_free_content_has_no_persistent_point() 
     owner = ContextService(
         state, BaseEventBus(), bind_assets=ArbWaveformDatabase.info_at
     )
-    assert ContextControlFacet(context=owner).current_point_label() is None
+    assert owner.current_point_label() is None
+
+
+def test_current_point_label_follows_selection_without_refreshing_files(
+    rich_entry: ResultEntry, context: ContextService
+) -> None:
+    assert context.current_point_label() is None
+    rich_entry.new_point("selected")
+    context.install_entry(rich_entry)
+    assert context.current_point_label() is None
+
+    context.use_point(PointUseRequest("selected"))
+    rich_entry.result_path.rename(rich_entry.result_path.with_name("offline"))
+    assert context.current_point_label() == "selected"
+
+    context.clear_context()
+    assert context.current_point_label() is None
 
 
 def test_point_capture_reads_good_leaf_with_bad_sibling(
@@ -552,7 +567,7 @@ def test_duplicate_point_is_typed_input_error_without_side_effects(
     state = SessionState(SessionEnv(parameters=None, soc=None, soccfg=None))
     bus = BaseEventBus()
     service = ContextService(state, bus, bind_assets=ArbWaveformDatabase.info_at)
-    context = ContextControlFacet(context=service)
+    context = service
     entry = _entry(tmp_path)
     for label in ("copy", "source"):
         entry.new_point(label, description="retained")
@@ -618,7 +633,7 @@ def test_unsafe_point_label_is_typed_input_error_without_side_effects(
     state = SessionState(SessionEnv(parameters=None, soc=None, soccfg=None))
     bus = BaseEventBus()
     service = ContextService(state, bus, bind_assets=ArbWaveformDatabase.info_at)
-    context = ContextControlFacet(context=service)
+    context = service
     entry = _entry(tmp_path)
     entry.new_point("source", description="retained")
     service.install_entry(entry)

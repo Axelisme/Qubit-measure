@@ -8,7 +8,6 @@ from typing import NoReturn
 import pytest
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
-from zcu_tools.gui.session.context_control import ContextControlFacet
 from zcu_tools.gui.session.predictor_control import PredictorControlPort
 from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.services.predictor import PredictorService
@@ -33,7 +32,7 @@ def files(tmp_path: Path):
         BaseEventBus(),
         bind_assets=ArbWaveformDatabase.info_at,
     )
-    control = PredictorService(ContextControlFacet(context=context))
+    control = PredictorService(context)
     entry = ResultEntry.create(
         "files",
         result_root=tmp_path / "result",
