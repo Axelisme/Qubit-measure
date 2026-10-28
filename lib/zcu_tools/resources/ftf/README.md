@@ -2,7 +2,7 @@
 
 **讀者：** framework-dev。FTF YAML schema、單位與欄位診斷契約。
 
-**Last updated:** 2026-10-27, drift configuration and runtime ownership
+**Last updated:** 2026-10-28, projective outcome pruning
 
 `load_ftf(path)` 一次讀取 UTF-8 YAML，`parse_ftf(document)` 驗證記憶體中的文件。兩者回傳 immutable `FTFSettings`。本模組擁有 schema、單位與欄位路徑診斷，不依賴 `simulate`、`device` 或 `program`，也不建立裝置或決定物理適用性。
 
@@ -35,6 +35,8 @@ Private replay 保存當次 effective settings，`drift=None`，不依賴時鐘�
 可省略的 `design` map 以 entry qubit 名稱保存完整的獨立標稱值，不從 `chip` 或 `dc_bias` 補值。每筆必填正值 `ej_ghz/ec_ghz/el_ghz`、A/V `flux_unit`、有限的 `flux_half/flux_bias` 與有限非零 signed `flux_period`。缺欄位在載入時報 `design.<qubit>.<field>`。省略或空 map 表示沒有設計初猜。Startup 負責依 entry-template 驗證 qubit 名稱與 device 單位，再交 predictor 檔案 owner 保存；schema 不建立 predictor 或讀 entry。
 
 `numerics.time_scale` 是有限非負的物理時間倍率。省略為 1.0，0.1 為十倍速，0 關閉補等。每 round 的目標秒數為 `time_scale × reps × Σ(各點 timeline 長度 + relax_delay) × 1e-6`，長度與 delay 使用 us。Binding 扣掉計算耗時，只等待正餘量，Stop 可中斷等待。成功 round 仍向共用時鐘補入 unscaled physical duration 的正差額，所以 `time_scale=0` 不會停止漂移時間；閒置時間也照常推進。Builder 提供 `ftf(..., time_scale=0)` 覆寫，無須改寫 YAML。舊欄位 `min_round_duration_s` 會報錯並指出新名稱。
+
+`numerics.projection_weight_floor` 接受有限的 `[0, 1)` 機率，省略為 `1e-9`。Runtime 在每次 projective read 後剪除低於此值的全域 outcome 權重，將權重按比例歸到其餘 outcomes。設為 0 保留零權重 outcomes。若某 point 剪空，runtime 會報錯並指名 point 與 floor。Telemetry 記錄保留數與剪除機率。
 
 `numerics.telemetry.enabled` 省略為 `true`，記錄每次 acquire 的路由彙總。`numerics.telemetry.directory` 省略或 `null` 時，由環境選擇 project root 下的 `.sim_telemetry/`。明確相對路徑在環境建立時解析。公開方法 `settings.with_telemetry(enabled=False)` 回傳關閉記錄的設定副本，供 `ftf(settings.with_telemetry(enabled=False))` 使用。`directory=Path(...)` 可指定另一個目錄，省略則保留原設定。此方法只建立記憶體中的設定副本，原設定保持不變。欄位、50 MiB 輪替與 warning 語意見 [FTF runtime](../../experiment/ftf/README.md#routing-telemetry)。
 
