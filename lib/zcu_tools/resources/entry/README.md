@@ -6,9 +6,11 @@
 
 `ResultEntry` 只以 `result/<name>/` 構成條目。Caller 明確傳入 Result root 與 Database 輸出 root，Database 不參與條目的存在判定。條目名稱與 point label 是安全的單一路徑段，不代表物理量。`setup.yaml` 的 UUID entry_id 是不可變身分。載入驗證 UUID 與 UTC 建立時間，既有 handle 的 refresh 不接受另一個身分。
 
-`create` 只在 Result 建立 setup、entry 層只有標頭的 `module_cfg.yaml`、points 與 records。預設產生新的 UUID 與 UTC 建立時間。傳入 `identity=EntryIdentity(entry_id=<UUID>, created_at=<UTC datetime>)` 可固定這兩個值，非法 UUID 或非 UTC／無時區時間會拒絕。這個參數不授權認領、覆寫或修復既有 entry，Result 目的地已存在仍拒絕。失敗只清理本次建立的條目，不刪 caller 的根目錄或既有資料。`open` 要求完整的新格式 Result 條目，不猜測 legacy 格式。`open`／`use_point` 在 setup／point 首次讀檔時，將 Pydantic ValidationError 轉為 ValueError，訊息含文件完整路徑與原始驗證文字，cause 保留原錯誤。既有 view 的 edit／refresh 仍回報原本的 schema 錯誤。
+`create` 只在 Result 建立 setup、entry 層只有標頭的 `module_cfg.yaml`、points 與 records。預設產生新的 UUID 與 UTC 建立時間。傳入 `identity=EntryIdentity(entry_id=<UUID>, created_at=<UTC datetime>)` 可固定這兩個值，非法 UUID 或非 UTC／無時區時間會拒絕。這個參數不授權認領、覆寫或修復既有 entry，Result 目的地已存在仍拒絕。失敗只清理本次建立的條目，不刪 caller 的根目錄或既有資料。`open` 只要求 Result 目錄與合法 `setup.yaml`，不猜測 legacy 格式。缺 `points/` 時 `list_points` 回空清單，缺 `records/` 時 `read_events_snapshot` 回空 tuple。這些讀取不建目錄。`open`／`use_point` 在 setup／point 首次讀檔時，將 Pydantic ValidationError 轉為 ValueError，訊息含文件完整路徑與原始驗證文字，cause 保留原錯誤。既有 view 的 edit／refresh 仍回報原本的 schema 錯誤。
 
 `ResultEntry.read_identity(name, *, result_root)` 只驗 setup header 與 general 的 UUID／UTC 建立時間，回 `EntryIdentity`。它不解析 component schema、不要求註冊歷史 component kind，也不要求 points 或 records 目錄。讀取不建立檔案或鎖，格式與 I/O 錯誤傳遞。
+
+`list_points` 依 `point.yaml` 列出 label，不要求 library 或 aliases。`point_description` 只讀 `general.description`，不解讀其他欄位。`validate_point_parameters` 獨立沿用嚴格參數 schema 與 view 名稱規則，錯誤交 caller 隔離，不讀 library 或 aliases。
 
 `use_point` 的必需 `point.yaml` 或 `module_cfg.yaml` 缺失時回報公開 `MissingPointError`，它保留 `FileNotFoundError` 繼承關係。Schema、permission、其他 I/O 與額外引用檔缺失不歸類為 point 缺失。
 

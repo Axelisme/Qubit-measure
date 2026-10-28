@@ -8,6 +8,8 @@ from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from ruamel.yaml.error import YAMLError
+
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 from zcu_tools.gui.owner import OwnerThreadGuard
 from zcu_tools.gui.session.aliases import AliasRow, AliasTable
@@ -146,10 +148,11 @@ class ContextService:
     def install_entry(self, entry: ResultEntry) -> EntryInfo:
         """Prepare an opened entry and atomically publish metadata without selecting a point.
 
-        Prepare setup, the complete point-description cache, and entry-scoped
-        assets before replacing any binding. Alias rows reset to empty because
-        no point is selected; setup aliases are not read. Failure retains the old binding,
-        not deleting an entry already created by resources. Success bumps the
+        Prepare setup, descriptions, parameter-only probes and entry-scoped assets
+        before replacing any binding. Each bad point becomes an unavailable row.
+        Do not read library or aliases. Reset aliases because no point is selected.
+        Other preparation failures retain the old binding and any created entry.
+        Success bumps the
         context once and publishes a switch fact after installation. It clears
         point selection and publishes EMPTY with parameters=None, while retaining
         entry metadata, the point list and setup source binding. SoC, device and
@@ -278,10 +281,11 @@ class ContextService:
         return deepcopy(self._entry_info)
 
     def list_points(self, *, refresh: bool = False) -> tuple[WorkingPointInfo, ...]:
-        """Return cached label/descriptions, empty without an opened entry.
+        """Return cached descriptions/parameter availability, empty without an entry.
 
-        refresh=True completely prepares a fresh list before replacing cache.
-        Read/validation failures propagate, preserving the previous cache.
+        refresh=True prepares a fresh list before replacing cache. Point document
+        failures become unavailable rows with errors; discovery failures propagate,
+        preserving the previous cache. Library and aliases are not inspected.
         """
         if refresh:
             self._owner.assert_owner()
@@ -865,12 +869,17 @@ class ContextService:
         )
 
     def _load_points(self, entry: ResultEntry) -> tuple[WorkingPointInfo, ...]:
-        return tuple(
-            WorkingPointInfo(
-                label, snapshot(entry.use_point(label)).general.description or ""
-            )
-            for label in entry.list_points()
-        )
+        points: list[WorkingPointInfo] = []
+        for label in entry.list_points():
+            description = ""
+            try:
+                description = entry.point_description(label)
+                entry.validate_point_parameters(label)
+            except (OSError, ValueError, YAMLError) as error:
+                points.append(WorkingPointInfo(label, description, False, str(error)))
+            else:
+                points.append(WorkingPointInfo(label, description))
+        return tuple(points)
 
     def _prepare_point(
         self, entry: ResultEntry, label: str, point: PointView

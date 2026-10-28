@@ -338,19 +338,55 @@ class ResultEntry:
         return bind_record_table(self._result_path, component)
 
     def list_points(self) -> list[str]:
-        """Return sorted labels of directories containing both point files.
+        """Return sorted labels of directories containing point.yaml.
 
-        Inspect points/ on disk for point.yaml and module_cfg.yaml; incomplete
-        directories are omitted. File contents are not loaded or validated here.
-        Missing or unreadable points/ raises the underlying filesystem error.
+        Library and aliases files are not required or inspected. Parameter
+        contents are not loaded or validated here. Missing points/ returns [];
+        other filesystem errors propagate.
         """
+        if not (self._result_path / "points").exists():
+            return []
         return sorted(
             path.name
             for path in (self._result_path / "points").iterdir()
-            if path.is_dir()
-            and (path / "point.yaml").is_file()
-            and (path / "module_cfg.yaml").is_file()
+            if path.is_dir() and (path / "point.yaml").is_file()
         )
+
+    def point_description(self, label: str) -> str:
+        """Read only general.description for a safe single-segment point label.
+
+        Missing/null descriptions return empty text. Other fields, component
+        kinds and versions are not interpreted. Invalid YAML, non-mapping
+        general, non-string descriptions and I/O failures propagate with the
+        document path. No library or aliases are read. No locks are acquired
+        and no files are changed or created.
+        """
+        source = _entry_path(self._result_path / "points", label) / "point.yaml"
+        try:
+            with source.open(encoding="utf-8") as stream:
+                document = TypeAdapter(dict[object, object]).validate_python(
+                    YAML(typ="safe").load(stream)
+                )
+            general = TypeAdapter(dict[object, object]).validate_python(
+                document.get("general", {})
+            )
+            return (
+                TypeAdapter(str | None).validate_python(general.get("description"))
+                or ""
+            )
+        except (ValueError, YAMLError) as error:
+            raise ValueError(f"{source}: {error}") from error
+
+    def validate_point_parameters(self, label: str) -> None:
+        """Probe one point parameter document without opening library or aliases.
+
+        label is a safe single path segment. Apply the same strict parameter
+        header, schema policy, component models and view binding as use_point.
+        Validation and I/O failures propagate; callers may isolate them per point.
+        No view is installed, and no documents are changed or created.
+        """
+        source = _entry_path(self._result_path / "points", label) / "point.yaml"
+        self._point_store(source)
 
     def new_point(
         self,
@@ -777,21 +813,18 @@ class ResultEntry:
     def open(
         cls, name: str, *, result_root: str | Path, database_root: str | Path
     ) -> ResultEntry:
-        """Open a complete Result entry and bind database_root/name for Save.
+        """Open a Result entry from setup and bind database_root/name for Save.
 
-        name must be a safe single path segment. The Result entry, points and
-        records directories must exist; setup must validate its format and UUID.
+        name must be a safe single path segment. The Result entry directory and
+        setup must exist; setup must validate its format and UUID.
+        Missing points/ and records/ are empty and are not created.
         Missing paths propagate filesystem errors. Schema ValidationError becomes
         ValueError with the full document path and original diagnostic. The original
         error remains its cause. Other schema errors propagate. Database is not inspected or created.
         """
         result_path = _entry_path(result_root, name)
         database_path = Path(database_root) / name
-        for directory in (
-            result_path,
-            result_path / "points",
-            result_path / "records",
-        ):
+        for directory in (result_path,):
             if not directory.exists():
                 raise FileNotFoundError(
                     errno.ENOENT, os.strerror(errno.ENOENT), str(directory)
