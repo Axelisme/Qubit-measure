@@ -27,6 +27,8 @@ from zcu_tools.gui.app.measure.adapter import (
 )
 from zcu_tools.gui.app.measure.controller import Controller
 from zcu_tools.gui.app.measure.services import create_persistence_caretaker
+from zcu_tools.gui.app.measure.services.pane_commit import commit_analysis
+from zcu_tools.gui.app.measure.state import AnalysisPaneState
 from zcu_tools.gui.app.measure.ui.exp_tab_widget import ExpTabWidget
 from zcu_tools.gui.app.measure.ui.interactive_frontend import InteractiveFrontend
 from zcu_tools.gui.app.measure.ui.main_window import MainWindow
@@ -933,8 +935,10 @@ def test_interactive_success_restores_committed_figure_in_analysis_pane(
     plots = Plots(NonPresentingHost())
     committed_figure, _axes = plots.subplots("fit")
     plots.finish(present=False)
-    session.state.update_tab_analyze(
-        tab_id, PaneSummary(), plots, analyze_params_instance=PaneParams()
+    commit_analysis(
+        session.state,
+        tab_id,
+        AnalysisPaneState(result=PaneSummary(), plots=plots, params=PaneParams()),
     )
     window.refresh_tab_figure(tab_id, ctrl.tab_control.get_tab_snapshot(tab_id))
     assert tab.get_current_figure_for_pane("analysis") is committed_figure

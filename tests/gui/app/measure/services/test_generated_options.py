@@ -6,8 +6,14 @@ from unittest.mock import MagicMock
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure import adapter
 from zcu_tools.gui.app.measure.registry import Registry
+from zcu_tools.gui.app.measure.services.pane_commit import commit_analysis, commit_run
 from zcu_tools.gui.app.measure.services.tab import TabService
-from zcu_tools.gui.app.measure.state import Session, State
+from zcu_tools.gui.app.measure.state import (
+    AnalysisPaneState,
+    RunPaneState,
+    Session,
+    State,
+)
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 
 from tests.experiment._saving_support import SavingCfg, SavingCore, SavingResult
@@ -99,7 +105,7 @@ def test_generated_options_supply_schema_and_edits_until_source_replacement() ->
     )
     cfg = SavingCfg()
     source = RunRecord(cfg, SavingCore().run(cfg, context=None))
-    state.update_tab_result("saving", source)
+    commit_run(state, "saving", RunPaneState(result=source))
     assert service.prepare_result_analysis("saving").error is None
     for _ in range(2):
         definitions = service.analyze_param_definitions("saving", stage="primary")
@@ -116,7 +122,9 @@ def test_generated_options_supply_schema_and_edits_until_source_replacement() ->
             adapter.AnalyzeRequest(source, edited, None), plots=plots
         )
         assert result.value == 36.0
-        state.update_tab_analyze("saving", result, None, analyze_params_instance=edited)
+        commit_analysis(
+            state, "saving", AnalysisPaneState(result=result, plots=None, params=edited)
+        )
         assert service.initialize_tab_post_analyze_params("saving") == Options(45.0)
         for _ in range(2):
             definitions = service.analyze_param_definitions("saving", stage="post")
@@ -138,7 +146,7 @@ def test_generated_options_supply_schema_and_edits_until_source_replacement() ->
 
     cfg = SavingCfg(gain=2.0)
     replacement = RunRecord(cfg, SavingCore().run(cfg, context=None))
-    state.update_tab_result("saving", replacement)
+    commit_run(state, "saving", RunPaneState(result=replacement))
     assert service.prepare_result_analysis("saving").error is None
     assert state.get_tab("saving").analysis.params == Options(18.0)
     assert generated == [9.0, 18.0]

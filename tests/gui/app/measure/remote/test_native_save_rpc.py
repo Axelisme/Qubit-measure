@@ -20,6 +20,12 @@ from zcu_tools.gui.app.measure.controller import Controller
 from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.remote import ControlOptions, RemoteControlAdapter
 from zcu_tools.gui.app.measure.remote.save_types import SaveSnapshotWire
+from zcu_tools.gui.app.measure.services.pane_commit import (
+    commit_analysis,
+    commit_post_analysis,
+    commit_run,
+)
+from zcu_tools.gui.app.measure.state import RunPaneState
 from zcu_tools.gui.session.context_types import EntryRequest, PointUseRequest
 from zcu_tools.gui.session.parameters import ParameterContext
 from zcu_tools.resources.entry import AcquiredPayload
@@ -51,19 +57,25 @@ def native_save_rpc(
     """
     with native_save_session(tmp_path, qapp) as session:
         tab = session.state.get_tab("tab")
-        session.state.update_tab_result(
+        commit_run(
+            session.state,
             "tab",
-            replace(require_record(tab.run), metadata=session.metadata),
-            source_operation_id=101,
-            parameters=tab.run.parameters,
+            RunPaneState(
+                result=replace(require_record(tab.run), metadata=session.metadata),
+                storage=None
+                if tab.run.parameters is None
+                else tab.run.parameters.storage,
+                source_operation_id=101,
+                parameters=tab.run.parameters,
+            ),
         )
         declare_panes(session)
         post = tab.post_analysis
-        session.state.swap_analysis_pane(
-            "tab", replace(tab.analysis, source_operation_id=201)
+        commit_analysis(
+            session.state, "tab", replace(tab.analysis, source_operation_id=201)
         )
-        session.state.swap_post_analysis_pane(
-            "tab", replace(post, source_operation_id=301)
+        commit_post_analysis(
+            session.state, "tab", replace(post, source_operation_id=301)
         )
         adapter = AnalysisSavingAdapter
         if analysis_options_failure:
@@ -471,11 +483,17 @@ def test_save_rpc_rejects_replaced_sources_even_after_a_fresh_snapshot(
         assert call(sock, "tab.snapshot", {"tab_id": "tab"})["ok"] is True
         tab = session.state.get_tab("tab")
         if selection in ("data", "all"):
-            session.state.update_tab_result(
+            commit_run(
+                session.state,
                 "tab",
-                replace(require_record(tab.run), metadata=session.metadata),
-                source_operation_id=102,
-                parameters=tab.run.parameters,
+                RunPaneState(
+                    result=replace(require_record(tab.run), metadata=session.metadata),
+                    storage=None
+                    if tab.run.parameters is None
+                    else tab.run.parameters.storage,
+                    source_operation_id=102,
+                    parameters=tab.run.parameters,
+                ),
             )
             params = {
                 "tab_id": "tab",
@@ -484,12 +502,14 @@ def test_save_rpc_rejects_replaced_sources_even_after_a_fresh_snapshot(
             }
         else:
             if selection == "analysis":
-                session.state.swap_analysis_pane(
-                    "tab", replace(tab.analysis, source_operation_id=202)
+                commit_analysis(
+                    session.state, "tab", replace(tab.analysis, source_operation_id=202)
                 )
             else:
-                session.state.swap_post_analysis_pane(
-                    "tab", replace(tab.post_analysis, source_operation_id=302)
+                commit_post_analysis(
+                    session.state,
+                    "tab",
+                    replace(tab.post_analysis, source_operation_id=302),
                 )
             params = {
                 "tab_id": "tab",

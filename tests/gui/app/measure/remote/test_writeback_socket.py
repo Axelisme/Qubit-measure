@@ -20,6 +20,7 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackItem,
     WritebackRequest,
 )
+from zcu_tools.gui.app.measure.services.pane_commit import commit_run
 from zcu_tools.gui.app.measure.state import RunPaneState
 from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 from zcu_tools.gui.app.measure.writeback import WritebackEdit
@@ -448,8 +449,10 @@ def test_native_preview_and_window_keep_captured_path_and_stderr(
     )
     tab = controller.tab_control.new_tab("pointed")
     application.state.get_tab(tab).adapter = definition
-    application.state.replace_run_pane(
-        tab, RunPaneState(result=RunRecord(None, 1.0), parameters=captured)
+    commit_run(
+        application.state,
+        tab,
+        RunPaneState(result=RunRecord(None, 1.0), parameters=captured),
     )
     analyzed = terminal_result(
         application, controller.run_analyze_control.analyze(tab, SampleParams())

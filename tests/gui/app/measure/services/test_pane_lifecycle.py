@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, replace
 from io import BytesIO
-from typing import Any, cast
+from typing import Any
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -12,19 +12,27 @@ from zcu_tools.experiment.artifacts import ArtifactRef
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     ContextReadiness,
-    ParameterWriteback,
     SessionEnv,
 )
 from zcu_tools.gui.app.measure.artifacts import SaveStatus
 from zcu_tools.gui.app.measure.services.analyze import AnalyzeService
+from zcu_tools.gui.app.measure.services.pane_commit import (
+    commit_analysis,
+    commit_post_analysis,
+    commit_run,
+)
 from zcu_tools.gui.app.measure.services.post_analyze import PostAnalyzeService
 from zcu_tools.gui.app.measure.services.tab import TabService
 from zcu_tools.gui.app.measure.state import (
+    AnalysisPaneState,
+    PostAnalysisPaneState,
+    RunPaneState,
     Session,
     State,
 )
 from zcu_tools.gui.app.measure.writeback import (
     WritebackDraft,
+    WritebackItem,
     WritebackService,
 )
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
@@ -65,41 +73,40 @@ def native_session(tmp_path, qapp):
         yield session
 
 
-@dataclass
-class _Draft:
-    items: tuple[Any, ...]
-
-
-class _Writeback:
+class _Writeback(WritebackService):
     def __init__(self) -> None:
-        self.created: list[_Draft] = []
-        self.torn_down: list[_Draft] = []
+        super().__init__(MagicMock(), arb_names=lambda: ())
+        self.created: list[WritebackDraft] = []
+        self.torn_down: list[WritebackDraft] = []
         self.fail_teardown = False
         self.fail_create = False
 
     def create_draft(
         self,
-        items: list[Any],
+        items: Iterable[WritebackItem],
         *,
         parameters: ParameterContext | None,
         experiment_name: str,
         run_id: str | None = None,
         device_snapshot: Mapping[str, JsonObject] | None = None,
-        sample_device_alias: str | None = None,
-    ) -> _Draft:
+    ) -> WritebackDraft:
         if self.fail_create:
             raise RuntimeError("draft creation failed")
-        draft = _Draft(tuple(items))
+        draft = super().create_draft(
+            items,
+            parameters=parameters,
+            experiment_name=experiment_name,
+            run_id=run_id,
+            device_snapshot=device_snapshot,
+        )
         self.created.append(draft)
         return draft
 
-    def preview_draft(self, draft: _Draft) -> list[Any]:
-        return list(draft.items)
-
-    def teardown_draft(self, draft: _Draft) -> None:
+    def teardown_draft(self, draft: WritebackDraft) -> None:
         self.torn_down.append(draft)
         if self.fail_teardown:
             raise RuntimeError("teardown failed")
+        super().teardown_draft(draft)
 
 
 class _Bg:
@@ -131,7 +138,15 @@ def _state() -> tuple[State, str, MagicMock, SessionEnv]:
             cfg=make_form(Form(SavingCfg, {}), state=state),
         ),
     )
-    state.update_tab_result("tab", RunRecord(None, "run"), parameters=ctx.parameters)
+    commit_run(
+        state,
+        "tab",
+        RunPaneState(
+            result=RunRecord(None, "run"),
+            storage=None if ctx.parameters is None else ctx.parameters.storage,
+            parameters=ctx.parameters,
+        ),
+    )
     return state, "tab", adapter, ctx
 
 
@@ -144,9 +159,7 @@ def _analyze_service(
     runner = OperationRunner(
         MagicMock(), handles, ProgressService(DirectProgressTransport()), bg, bus
     )
-    # tolerated(cast): The minimal fake returns _Draft, not the port's WritebackDraft.
-    # Its create_draft also takes list items rather than the port's Iterable.
-    return AnalyzeService(state, runner, bus, cast(Any, writeback), handles), bg
+    return AnalyzeService(state, runner, bus, writeback, handles), bg
 
 
 def test_snapshot_exposes_independent_panes_and_paths(
@@ -163,19 +176,25 @@ def test_snapshot_exposes_independent_panes_and_paths(
     post_plots.subplots("fit")
     post_plots.finish()
     primary_draft, post_draft = MagicMock(), MagicMock()
-    state.replace_analysis_pane(
+    commit_analysis(
+        state,
         tab_id,
-        result=primary,
-        plots=primary_plots,
-        params="primary-params",
-        writeback_draft=primary_draft,
+        AnalysisPaneState(
+            result=primary,
+            plots=primary_plots,
+            params=PaneParams(initial_state="excited"),
+            writeback_draft=primary_draft,
+        ),
     )
-    state.replace_post_analysis_pane(
+    commit_post_analysis(
+        state,
         tab_id,
-        result=post,
-        plots=post_plots,
-        params="post-params",
-        writeback_draft=post_draft,
+        PostAnalysisPaneState(
+            result=post,
+            plots=post_plots,
+            params=PaneParams(initial_state="ground"),
+            writeback_draft=post_draft,
+        ),
     )
     writeback = MagicMock()
     writeback.preview_draft.side_effect = lambda draft: (
@@ -234,23 +253,25 @@ def test_named_panes_project_paths_and_retire_original_collections(
     original = Plots(NonPresentingHost())
     old_figure, _ = original.subplots("old")
     original.finish()
-    state.replace_analysis_pane(tab_id, result=PaneSummary(), plots=original)
+    commit_analysis(
+        state, tab_id, AnalysisPaneState(result=PaneSummary(), plots=original)
+    )
     replacement = Plots(NonPresentingHost())
     first, _ = replacement.subplots("fit")
     second, _ = replacement.subplots("diagnostic")
     replacement.finish()
-    retired = state.replace_analysis_pane(
-        tab_id, result=PaneSummary(), plots=replacement
+    commit_analysis(
+        state, tab_id, AnalysisPaneState(result=PaneSummary(), plots=replacement)
     )
-    assert retired.plots == (original,)
-    retired.plots[0].release()
     png = BytesIO()
     old_figure.savefig(png, format="png")
     assert png.getvalue().startswith(b"\x89PNG\r\n\x1a\n")
     post = Plots(NonPresentingHost())
     post_figure, _ = post.subplots("fit")
     post.finish()
-    state.replace_post_analysis_pane(tab_id, result=PostSummary(), plots=post)
+    commit_post_analysis(
+        state, tab_id, PostAnalysisPaneState(result=PostSummary(), plots=post)
+    )
     tabs = TabService(
         state, MagicMock(), MagicMock(), form_resources(state), MagicMock()
     )
@@ -290,8 +311,7 @@ def test_named_panes_project_paths_and_retire_original_collections(
     newer = Plots(NonPresentingHost())
     newer.subplots("fit")
     newer.finish()
-    detached = state.replace_analysis_pane(tab_id, result=PaneSummary(), plots=newer)
-    assert detached.plots == (replacement, post)
+    commit_analysis(state, tab_id, AnalysisPaneState(result=PaneSummary(), plots=newer))
     assert state.get_tab(tab_id).post_analysis.plots is None
     current = tabs.get_snapshot(tab_id)
     assert [
@@ -316,64 +336,14 @@ def test_named_panes_project_paths_and_retire_original_collections(
     newer.release()
 
 
-def test_primary_swap_returns_all_retired_dependents_and_invalidates_post(
-    native_session: NativeSaveSession,
-) -> None:
-    state, tab_id = native_session.state, "tab"
-    old_primary = object()
-    old_post = object()
-    old_primary_draft = object()
-    old_post_draft = object()
-    old_primary_plots = Plots(NonPresentingHost())
-    old_primary_plots.subplots("fit")
-    old_primary_plots.finish()
-    old_post_plots = Plots(NonPresentingHost())
-    old_post_plots.subplots("fit")
-    old_post_plots.finish()
-    new_plots = Plots(NonPresentingHost())
-    new_plots.subplots("fit")
-    new_plots.finish()
-    state.replace_analysis_pane(
-        tab_id,
-        result=old_primary,
-        plots=old_primary_plots,
-        writeback_draft=old_primary_draft,
-    )
-    state.replace_post_analysis_pane(
-        tab_id,
-        result=old_post,
-        plots=old_post_plots,
-        writeback_draft=old_post_draft,
-    )
-
-    retired = state.replace_analysis_pane(
-        tab_id,
-        result="new-primary",
-        plots=new_plots,
-        writeback_draft="new-primary-draft",
-    )
-
-    tab = state.get_tab(tab_id)
-    assert retired.analysis.result is old_primary
-    assert retired.analysis.plots is old_primary_plots
-    assert retired.analysis.writeback_draft is old_primary_draft
-    assert retired.post_analysis.result is old_post
-    assert retired.post_analysis.plots is old_post_plots
-    assert retired.post_analysis.writeback_draft is old_post_draft
-    assert retired.writeback_drafts == (old_primary_draft, old_post_draft)
-    assert tab.analysis.result == "new-primary"
-    assert tab.analysis.plots is new_plots
-    assert tab.analysis.writeback_draft == "new-primary-draft"
-    assert tab.post_analysis.result is None
-    assert tab.post_analysis.writeback_draft is None
-
-
 def test_post_swap_does_not_replace_primary() -> None:
     state, tab_id, _adapter, _ctx = _state()
-    state.replace_analysis_pane(tab_id, result="primary", plots=None)
+    commit_analysis(state, tab_id, AnalysisPaneState(result="primary", plots=None))
     primary_pane = state.get_tab(tab_id).analysis
 
-    state.replace_post_analysis_pane(tab_id, result="post", plots=None)
+    commit_post_analysis(
+        state, tab_id, PostAnalysisPaneState(result="post", plots=None)
+    )
 
     tab = state.get_tab(tab_id)
     assert tab.analysis is primary_pane
@@ -383,16 +353,26 @@ def test_post_swap_does_not_replace_primary() -> None:
 
 def test_analyze_uses_captured_inputs_and_cleans_retired_after_commit() -> None:
     state, tab_id, adapter, _ctx = _state()
-    old_primary_draft = _Draft(())
-    old_post_draft = _Draft(())
-    state.replace_analysis_pane(
-        tab_id, result="old-primary", plots=None, writeback_draft=old_primary_draft
-    )
-    state.replace_post_analysis_pane(
-        tab_id, result="old-post", plots=None, writeback_draft=old_post_draft
-    )
-    adapter.get_writeback_items.return_value = [ParameterWriteback("new", "new", 1.0)]
     writeback = _Writeback()
+    old_primary_draft = writeback.create_draft(
+        [], parameters=None, experiment_name="fake"
+    )
+    old_post_draft = writeback.create_draft([], parameters=None, experiment_name="fake")
+    commit_analysis(
+        state,
+        tab_id,
+        AnalysisPaneState(
+            result="old-primary", plots=None, writeback_draft=old_primary_draft
+        ),
+    )
+    commit_post_analysis(
+        state,
+        tab_id,
+        PostAnalysisPaneState(
+            result="old-post", plots=None, writeback_draft=old_post_draft
+        ),
+    )
+    adapter.get_writeback_items.return_value = []
     service, bg = _analyze_service(state, writeback)
     plots = Plots(NonPresentingHost())
     plots.subplots("fit")
@@ -460,15 +440,19 @@ def analysis_panes(native_session: NativeSaveSession):
     state, tab_id, ctx = native_session.state, "tab", native_session.state.session_env
     adapter = PaneAdapter
     state.get_tab(tab_id).adapter = adapter
-    state.update_tab_result(
+    commit_run(
+        state,
         tab_id,
-        replace(
-            _pane_source_with_excited_initial_state(),
-            metadata=native_session.metadata.model_copy(
-                update={"experiment": SavingCore.AXES_SPEC.tag}
+        RunPaneState(
+            result=replace(
+                _pane_source_with_excited_initial_state(),
+                metadata=native_session.metadata.model_copy(
+                    update={"experiment": SavingCore.AXES_SPEC.tag}
+                ),
             ),
+            storage=_pane_capture(state.get_tab(tab_id).run.parameters).storage,
+            parameters=_pane_capture(state.get_tab(tab_id).run.parameters),
         ),
-        parameters=_pane_capture(state.get_tab(tab_id).run.parameters),
     )
     bus = EventBus()
     writeback = WritebackService(MagicMock(), arb_names=lambda: ())
@@ -598,8 +582,10 @@ def test_pane_primary_replacement_clears_post_but_retained_plots_still_export(
 def test_failed_draft_build_preserves_previous_primary_and_post() -> None:
     state, tab_id, adapter, _ctx = _state()
     adapter.get_writeback_items.return_value = []
-    state.replace_analysis_pane(tab_id, result="old-primary", plots=None)
-    state.replace_post_analysis_pane(tab_id, result="old-post", plots=None)
+    commit_analysis(state, tab_id, AnalysisPaneState(result="old-primary", plots=None))
+    commit_post_analysis(
+        state, tab_id, PostAnalysisPaneState(result="old-post", plots=None)
+    )
     writeback = _Writeback()
     writeback.fail_create = True
     service, bg = _analyze_service(state, writeback)
@@ -617,16 +603,26 @@ def test_failed_draft_build_preserves_previous_primary_and_post() -> None:
 
 def test_retired_teardown_failure_does_not_roll_back_committed_pane() -> None:
     state, tab_id, adapter, _ctx = _state()
-    old_primary_draft = _Draft(())
-    old_post_draft = _Draft(())
-    state.replace_analysis_pane(
-        tab_id, result="old-primary", plots=None, writeback_draft=old_primary_draft
+    writeback = _Writeback()
+    old_primary_draft = writeback.create_draft(
+        [], parameters=None, experiment_name="fake"
     )
-    state.replace_post_analysis_pane(
-        tab_id, result="old-post", plots=None, writeback_draft=old_post_draft
+    old_post_draft = writeback.create_draft([], parameters=None, experiment_name="fake")
+    commit_analysis(
+        state,
+        tab_id,
+        AnalysisPaneState(
+            result="old-primary", plots=None, writeback_draft=old_primary_draft
+        ),
+    )
+    commit_post_analysis(
+        state,
+        tab_id,
+        PostAnalysisPaneState(
+            result="old-post", plots=None, writeback_draft=old_post_draft
+        ),
     )
     adapter.get_writeback_items.return_value = []
-    writeback = _Writeback()
     writeback.fail_teardown = True
     service, bg = _analyze_service(state, writeback)
     plots = Plots(NonPresentingHost())

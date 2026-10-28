@@ -24,7 +24,8 @@ from zcu_tools.experiment.simulation import white_noise
 from zcu_tools.gui.app.measure.adapter import SessionEnv
 from zcu_tools.gui.app.measure.controller import Controller
 from zcu_tools.gui.app.measure.registry import Registry
-from zcu_tools.gui.app.measure.state import State
+from zcu_tools.gui.app.measure.services.pane_commit import commit_post_analysis
+from zcu_tools.gui.app.measure.state import PostAnalysisPaneState, State
 from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 from zcu_tools.gui.app.measure.writeback import ParameterWriteback, WritebackValues
 from zcu_tools.gui.app.measure.writeback.widget import WritebackWidget
@@ -288,11 +289,15 @@ def module_widget(tmp_path: Path, qapp: QApplication, request: pytest.FixtureReq
         assert analysis.result is not None and analysis.writeback_draft is not None
         pane: Literal["analysis", "post_analysis"] = request.param
         if pane == "post_analysis":
-            state.update_tab_post_analyze(
+            commit_post_analysis(
+                state,
                 tab_id,
-                analysis.result,
-                None,
-                writeback_draft=analysis.writeback_draft,
+                PostAnalysisPaneState(
+                    result=analysis.result,
+                    plots=None,
+                    params=state.get_tab(tab_id).post_analysis.params,
+                    writeback_draft=analysis.writeback_draft,
+                ),
             )
         widget = WritebackWidget(ctrl, tab_id=tab_id, pane=pane)
         widget.resize(700, 250)

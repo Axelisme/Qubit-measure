@@ -11,6 +11,8 @@ from zcu_tools.experiment.artifacts import ArtifactRef, OutputResult, SaveReport
 from zcu_tools.gui.app.measure.artifacts import ArtifactSaveCenter, SaveStatus
 from zcu_tools.gui.app.measure.controller import Controller
 from zcu_tools.gui.app.measure.events.completion import SaveDataFinishedPayload
+from zcu_tools.gui.app.measure.services.pane_commit import commit_analysis, commit_run
+from zcu_tools.gui.app.measure.state import AnalysisPaneState, RunPaneState
 from zcu_tools.gui.app.measure.ui.exp_tab_widget import ExpTabWidget
 from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 from zcu_tools.gui.expected_error import FailedPreconditionError
@@ -39,8 +41,10 @@ def test_named_selection_drives_screenshot_and_survives_same_collection_refresh(
         _, axes = plots.subplots(name)
         axes.plot([0, 1], ys)
     plots.finish(present=False)
-    session.state.update_tab_analyze(
-        tab_id, PaneSummary(), plots, analyze_params_instance=PaneParams()
+    commit_analysis(
+        session.state,
+        tab_id,
+        AnalysisPaneState(result=PaneSummary(), plots=plots, params=PaneParams()),
     )
     snap = ctrl.tab_control.get_tab_snapshot(tab_id)
     window.refresh_tab_figure(tab_id, snap)
@@ -76,14 +80,24 @@ def test_named_selection_drives_screenshot_and_survives_same_collection_refresh(
     replacement = Plots(NonPresentingHost())
     replacement.subplots("new-fit")
     replacement.finish(present=False)
-    session.state.update_tab_analyze(
-        tab_id, PaneSummary(), replacement, analyze_params_instance=PaneParams()
+    commit_analysis(
+        session.state,
+        tab_id,
+        AnalysisPaneState(result=PaneSummary(), plots=replacement, params=PaneParams()),
     )
     window.refresh_tab_figure(tab_id, ctrl.tab_control.get_tab_snapshot(tab_id))
     assert window.take_figure_screenshot_for_subtab(tab_id, "analysis").startswith(
         b"\x89PNG"
     )
-    session.state.update_tab_analyze(tab_id, None, None)
+    commit_analysis(
+        session.state,
+        tab_id,
+        AnalysisPaneState(
+            result=None,
+            plots=None,
+            params=session.state.get_tab(tab_id).analysis.params,
+        ),
+    )
     cleared = ctrl.tab_control.get_tab_snapshot(tab_id)
     window.refresh_tab_figure(tab_id, cleared)
     window.refresh_tab_interaction(tab_id, cleared)
@@ -254,8 +268,10 @@ def test_tab_close_query_reads_only_data_artifact(
         )
         if status is SaveStatus.UNSAVED_CHANGES:
             ctrl.save_control.set_comment(tab_id, "changed")
-    session.state.update_tab_analyze(
-        tab_id, PaneSummary(), None, analyze_params_instance=PaneParams()
+    commit_analysis(
+        session.state,
+        tab_id,
+        AnalysisPaneState(result=PaneSummary(), plots=None, params=PaneParams()),
     )
     current = ctrl.tab_control.get_tab_snapshot(tab_id)
     assert (
@@ -269,6 +285,6 @@ def test_tab_close_query_reads_only_data_artifact(
     )
     window.refresh_tab_interaction(tab_id, current)
     assert tab.has_unsaved_data() is unsaved
-    session.state.clear_tab_results(tab_id)
+    commit_run(session.state, tab_id, RunPaneState())
     window.refresh_tab_interaction(tab_id)
     assert not tab.has_unsaved_data()

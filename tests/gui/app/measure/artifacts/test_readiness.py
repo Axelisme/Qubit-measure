@@ -14,7 +14,8 @@ from zcu_tools.gui.app.measure.catalog import ExperimentAccess
 from zcu_tools.gui.app.measure.events.tab import TabInteractionChangedPayload
 from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.services.app_services import build_app_services
-from zcu_tools.gui.app.measure.state import Session, State
+from zcu_tools.gui.app.measure.services.pane_commit import commit_run
+from zcu_tools.gui.app.measure.state import RunPaneState, Session, State
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.form_adapter import Form
@@ -40,7 +41,7 @@ def _make_service(
             cfg=make_form(Form(ConfigBase, {}), state=state),
         ),
     )
-    state.update_tab_result("tab", RunRecord(None, object()))
+    commit_run(state, "tab", RunPaneState(result=RunRecord(None, object())))
     return SaveService(state, bus, access=access), state
 
 

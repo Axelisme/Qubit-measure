@@ -7,6 +7,16 @@ import pytest
 from matplotlib.figure import Figure
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import Adapter, PostAnalysis
+from zcu_tools.gui.app.measure.services.pane_commit import (
+    commit_analysis,
+    commit_post_analysis,
+    commit_run,
+)
+from zcu_tools.gui.app.measure.state import (
+    AnalysisPaneState,
+    PostAnalysisPaneState,
+    RunPaneState,
+)
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 
 from tests.gui.app.measure._load_support import historical_metadata
@@ -38,7 +48,16 @@ def _install_result(
     plots.adopt("fit", Figure())
     plots.finish()
     if stage == "analysis":
-        fx.state.update_tab_analyze(tab, result, plots, source_operation_id=operation)
+        commit_analysis(
+            fx.state,
+            tab,
+            AnalysisPaneState(
+                result=result,
+                plots=plots,
+                params=fx.state.get_tab(tab).analysis.params,
+                source_operation_id=operation,
+            ),
+        )
     else:
         adapter = fx.state.get_tab(tab).adapter
         fx.state.get_tab(tab).adapter = Adapter(
@@ -51,8 +70,15 @@ def _install_result(
         )
         if fx.state.get_tab(tab).analysis.result is None:
             _install_result(fx, tab, "analysis", 1.0, 100)
-        fx.state.update_tab_post_analyze(
-            tab, result, plots, source_operation_id=operation
+        commit_post_analysis(
+            fx.state,
+            tab,
+            PostAnalysisPaneState(
+                result=result,
+                plots=plots,
+                params=fx.state.get_tab(tab).post_analysis.params,
+                source_operation_id=operation,
+            ),
         )
 
 
@@ -75,7 +101,7 @@ def fx(tmp_path, qapp):
 @pytest.mark.parametrize("stage", ["analysis", "post_analysis"])
 def test_writeback_preview_accepts_matching_analysis_operation(fx, stage):
     tab = fx.ctrl.tab_control.new_tab("fake")
-    fx.state.update_tab_result(tab, RunRecord(None, object()))
+    commit_run(fx.state, tab, RunPaneState(result=RunRecord(None, object())))
     _install_result(fx, tab, stage, 3.0, 101)
     with open_client(fx.service.port) as sock:
         result = call(
@@ -220,7 +246,7 @@ def test_operation_result_retains_inputs_after_parameter_edits_and_replacement(
     fx, stage
 ):
     tab = fx.ctrl.tab_control.new_tab("fake")
-    fx.state.update_tab_result(tab, RunRecord(None, object()))
+    commit_run(fx.state, tab, RunPaneState(result=RunRecord(None, object())))
     if stage == "post_analysis":
         _install_result(fx, tab, "analysis", 1.0, 100)
     original = ScalarParams(0.3)
@@ -261,7 +287,7 @@ def test_analysis_presentation_tracks_run_stage_and_pane_replacement(fx, stage):
     tab = fx.ctrl.tab_control.new_tab("fake")
     metadata = historical_metadata()
     source = RunRecord(None, object(), metadata=metadata)
-    fx.state.update_tab_result(tab, source)
+    commit_run(fx.state, tab, RunPaneState(result=source))
     summary: dict[str, object] = {
         "tones": [
             {"position": 2, "name": "Q3"},
@@ -287,13 +313,16 @@ def test_analysis_presentation_tracks_run_stage_and_pane_replacement(fx, stage):
             sock, _result_method(stage), {"tab_id": tab, "operation_id": 101}
         )
         assert superseded["error"]["reason"] == "result_superseded"
-        fx.state.update_tab_result(
+        commit_run(
+            fx.state,
             tab,
-            replace(
-                source,
-                metadata=metadata.model_copy(
-                    update={"run_id": "20261008T000000Z-d4e5f6"}
-                ),
+            RunPaneState(
+                result=replace(
+                    source,
+                    metadata=metadata.model_copy(
+                        update={"run_id": "20261008T000000Z-d4e5f6"}
+                    ),
+                )
             ),
         )
         _install_result(fx, tab, stage, 5.0, 103, summary=summary)
@@ -321,8 +350,17 @@ def test_operation_bound_run_figure_is_rejected(fx):
 
 def test_result_without_figure_does_not_report_a_saved_image(fx, tmp_path):
     tab = fx.ctrl.tab_control.new_tab("fake")
-    fx.state.update_tab_result(tab, RunRecord(None, object()))
-    fx.state.update_tab_analyze(tab, ScalarResult(3.0), None, source_operation_id=101)
+    commit_run(fx.state, tab, RunPaneState(result=RunRecord(None, object())))
+    commit_analysis(
+        fx.state,
+        tab,
+        AnalysisPaneState(
+            result=ScalarResult(3.0),
+            plots=None,
+            params=fx.state.get_tab(tab).analysis.params,
+            source_operation_id=101,
+        ),
+    )
     fx.service.render_view = None
     destination = tmp_path / "no-figure.png"
     with open_client(fx.service.port) as sock:

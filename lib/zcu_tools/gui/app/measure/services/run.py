@@ -28,6 +28,8 @@ from zcu_tools.gui.app.measure.events.tab import (
     TabInteractionChangedPayload,
     TabInteractionFact,
 )
+from zcu_tools.gui.app.measure.services.pane_commit import commit_run
+from zcu_tools.gui.app.measure.state import RunPaneState
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.context_types import CommandOrigin
 from zcu_tools.gui.session.operation_handles import OperationHandles, OperationOutcome
@@ -42,10 +44,9 @@ from zcu_tools.gui.session.operation_runner import (
 from zcu_tools.gui.session.scopes import progress_ambient
 from zcu_tools.resources.entry import AcquiredPayload, LedgerEvent, PointStorageBinding
 
-from ..state import RunPaneState
 from .guard import RunInputs
 from .operation_gate import OperationKind
-from .plot_lifecycle import discard_unpublished_plots, release_retired_plots
+from .plot_lifecycle import discard_unpublished_plots
 
 logger = logging.getLogger(__name__)
 _GUI_ORIGIN = CommandOrigin("gui")
@@ -56,7 +57,7 @@ if TYPE_CHECKING:
     from zcu_tools.gui.session.types import ParameterContext
     from zcu_tools.plotting.plots import Plots
 
-    from ..state import RetiredPaneResources, State
+    from ..state import State
     from .ports import WritebackLifecyclePort
 
 
@@ -139,14 +140,6 @@ class RunService:
             except Exception:
                 logger.exception("Retired run view release failed: tab_id=%r", tab_id)
 
-    def _teardown_retired(self, retired: RetiredPaneResources) -> None:
-        for draft in retired.writeback_drafts:
-            try:
-                self._writeback.teardown_draft(draft)
-            except Exception:
-                logger.exception("retired run draft teardown failed")
-        release_retired_plots(retired)
-
     def _discard_plots(self, op: _RunOperation, context: str) -> None:
         try:
             discard_unpublished_plots(op.plots)
@@ -181,19 +174,22 @@ class RunService:
             op.plots.finish()
             if self._active_token is None:
                 raise RuntimeError("Run result has no active operation")
-            retired = self._state.update_tab_result(
+            commit_run(
+                self._state,
                 op.tab_id,
-                result,
-                source_operation_id=self._active_token,
-                parameters=op.parameters,
-                partial_result=op.partial_result,
+                RunPaneState(
+                    result=result,
+                    storage=None if op.parameters is None else op.parameters.storage,
+                    source_operation_id=self._active_token,
+                    parameters=op.parameters,
+                    partial_result=op.partial_result,
+                ),
             )
         except Exception as error:
             logger.exception("Run result publication failed: tab_id=%r", op.tab_id)
             self._run_failed(op, error, settle)
             return False
         self._view_plots[op.tab_id] = op.plots
-        self._teardown_retired(retired)
         try:
             self._append_acquired(op, result)
         except Exception as error:
@@ -268,10 +264,11 @@ class RunService:
         logger.info("_on_run_cancelled: tab_id=%r", op.tab_id)
         # A cancelled run may still carry a partial result.
         if result is NO_RESULT:
-            retired = self._state.replace_run_pane(
-                op.tab_id, RunPaneState(partial_result=op.stop_signal.partial_result)
+            commit_run(
+                self._state,
+                op.tab_id,
+                RunPaneState(partial_result=op.stop_signal.partial_result),
             )
-            self._teardown_retired(retired)
             self._discard_plots(op, "Cancelled")
         elif not self._publish_run_result(op, result, settle):
             return
@@ -302,8 +299,7 @@ class RunService:
         # notifications can reenter tab editing and closing.
         self._state.set_tab_running(tab_id, running=True)
         try:
-            retired = self._state.clear_tab_results(tab_id)
-            self._teardown_retired(retired)
+            commit_run(self._state, tab_id, RunPaneState())
         except Exception:
             self._state.set_tab_running(tab_id, running=False)
             raise

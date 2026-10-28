@@ -28,7 +28,8 @@ from zcu_tools.gui.app.measure.range_find_frontend import (
 )
 from zcu_tools.gui.app.measure.range_find_plugin import RangeFindPlugin, RangeFindState
 from zcu_tools.gui.app.measure.registry import Registry
-from zcu_tools.gui.app.measure.state import State
+from zcu_tools.gui.app.measure.services.pane_commit import commit_run
+from zcu_tools.gui.app.measure.state import RunPaneState, State
 from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.form_adapter import Form, FormContext
@@ -188,8 +189,14 @@ def range_application(
     ctrl.add_view(window)
     tab_id = ctrl.tab_control.new_tab("spectrum")
     parameters = ctrl.context_control.read_context()
-    state.update_tab_result(
-        tab_id, _spectrum_record(parameters, data), parameters=parameters
+    commit_run(
+        state,
+        tab_id,
+        RunPaneState(
+            result=_spectrum_record(parameters, data),
+            storage=parameters.storage,
+            parameters=parameters,
+        ),
     )
     state.update_tab_analyze_param_instance(tab_id, PickerParams())
     window.refresh_tab_analyze_form(tab_id)

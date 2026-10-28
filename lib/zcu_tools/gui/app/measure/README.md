@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure`
 
-**Last updated:** 2026-10-28
+**Last updated:** 2026-10-28, pane commit
 
 **讀者：** framework-dev。量測 GUI 的組裝、分頁與 Run／Load／Save 分工。
 
@@ -106,6 +106,9 @@ rejects Done without closing input.
   `services.results_comparison.build_comparison(index, run_keys)` 將保存的 summary JSON 投影為逐 run 的比較列。身分四欄後接葉節點點路徑，欄位依釘選與 JSON 順序取 union。物件 list 以索引多行呈現，不辨識實驗名稱或特定 key；parameters 不進表。檔案與 JSON 讀取仍委派 `ResultsIndex`，不換算單位或重新分析。
 - [`state.py`](state.py)：tab/device/pane/path/version-table SSOT 與主線程 mutators；固定的
   Run、Analysis、Post-Analysis、Save pane 各自擁有自己的 resource。
+- [`services/pane_commit.py`](services/pane_commit.py)：提交 Run、Analysis、PostAnalysis pane。
+  它先規劃 artifacts，再交 State swap，遞增版本，最後關閉退役 draft 並釋放 plots。
+  規劃失敗保留舊 pane。清理失敗逐項記錄，不回滾已提交結果，也不跳過其他資源。
 - [`artifacts/`](artifacts/handover.py)：tracker、SaveService、SaveControl、保存中心與 `ArtifactHandover`。
   保存中心在全部 artifact 都是 SAVED 時停用 Save All 與各列 Save。
   任一 artifact 不是 SAVED 時恢復啟用，但仍須符合 idle、可寫與 active context 條件。

@@ -8,15 +8,15 @@ from typing import TYPE_CHECKING
 
 from zcu_tools.datafile import load
 from zcu_tools.experiment.native_persistence import metadata_from_container
+from zcu_tools.gui.app.measure.services.pane_commit import commit_run
+from zcu_tools.gui.app.measure.state import RunPaneState
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.context_types import SavedPoint
 from zcu_tools.gui.session.parameters import RoleBinding
 from zcu_tools.resources.entry import MissingPointError
 
-from .plot_lifecycle import release_retired_plots
-
 if TYPE_CHECKING:
-    from zcu_tools.gui.app.measure.state import RetiredPaneResources, State
+    from zcu_tools.gui.app.measure.state import State
     from zcu_tools.gui.session.context_control import ContextControlPort
     from zcu_tools.gui.session.parameters import ParameterContext
 
@@ -170,15 +170,17 @@ class LoadService:
                 analysis_source_issue = (
                     f"Historical point {history.point!r} is unavailable: {error}"
                 )
-        retired = self._state.update_tab_loaded_result(
+        commit_run(
+            self._state,
             tab_id,
-            restored.record,
-            data_path,
-            parameters=parameters,
-            storage=storage,
-            analysis_source_issue=analysis_source_issue,
+            RunPaneState(
+                result=restored.record,
+                source_path=data_path,
+                parameters=parameters,
+                storage=storage,
+                analysis_source_issue=analysis_source_issue,
+            ),
         )
-        self._teardown_retired(retired)
         return LoadTabResultOutcome(
             tab_id=tab_id,
             data_path=data_path,
@@ -187,11 +189,3 @@ class LoadService:
             has_analyze_params=False,
             analysis_source_issue=analysis_source_issue,
         )
-
-    def _teardown_retired(self, retired: RetiredPaneResources) -> None:
-        for draft in retired.writeback_drafts:
-            try:
-                self._writeback.teardown_draft(draft)
-            except Exception:
-                logger.exception("retired load draft teardown failed")
-        release_retired_plots(retired)

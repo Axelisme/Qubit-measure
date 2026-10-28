@@ -12,14 +12,15 @@ from zcu_tools.gui.app.measure.adapter import (
     PostWritebackRequest,
 )
 from zcu_tools.gui.app.measure.events.tab import TabInteractionFact
+from zcu_tools.gui.app.measure.services.pane_commit import commit_post_analysis
+from zcu_tools.gui.app.measure.state import PostAnalysisPaneState
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.operation_handles import OperationHandles
 from zcu_tools.gui.session.operation_runner import OperationRunner
 from zcu_tools.resources.entry.ledger_models import JsonObject
 
-from ..writeback import WritebackDraft
-from .plot_lifecycle import discard_unpublished_plots, release_retired_plots
+from .plot_lifecycle import discard_unpublished_plots
 from .staged_analyze import StagedAnalyzeService
 
 logger = logging.getLogger(__name__)
@@ -29,8 +30,8 @@ if TYPE_CHECKING:
     from zcu_tools.gui.session.types import SessionEnv
     from zcu_tools.plotting.plots import Plots
 
-    from ..state import RetiredPaneResources
-    from .ports import AnalyzeStatePort, WritebackLifecyclePort
+    from ..state import State
+    from .ports import WritebackLifecyclePort
 
 
 @dataclass(frozen=True, slots=True)
@@ -68,7 +69,7 @@ class PostAnalyzeService(StagedAnalyzeService):
 
     def __init__(
         self,
-        state: AnalyzeStatePort,
+        state: State,
         runner: OperationRunner,
         bus: EventBus,
         handles: OperationHandles,
@@ -112,8 +113,6 @@ class PostAnalyzeService(StagedAnalyzeService):
             )
 
         primary_draft = tab.analysis.writeback_draft
-        if primary_draft is not None and not isinstance(primary_draft, WritebackDraft):
-            raise TypeError("Primary writeback draft must be WritebackDraft")
         run_id = primary_draft.run_id if primary_draft is not None else None
 
         ctx = replace(self._state.session_env, parameters=tab.run.parameters)
@@ -168,16 +167,6 @@ class PostAnalyzeService(StagedAnalyzeService):
                 logger.exception("Unpublished post-analysis plot cleanup failed")
             raise
 
-    def _teardown_retired(self, retired: RetiredPaneResources | None) -> None:
-        if retired is None:
-            return
-        for draft in retired.writeback_drafts:
-            try:
-                self._writeback.teardown_draft(draft)
-            except Exception:
-                logger.exception("retired post-analysis draft teardown failed")
-        release_retired_plots(retired)
-
     def _record(
         self,
         tab_id: str,
@@ -216,13 +205,16 @@ class PostAnalyzeService(StagedAnalyzeService):
                 device_snapshot=captured_inputs.device_snapshot,
             )
             plots.finish()
-            retired = self._state.update_tab_post_analyze(
+            commit_post_analysis(
+                self._state,
                 tab_id,
-                post_result,
-                plots,
-                post_analyze_params_instance=params,
-                source_operation_id=self._active_tokens[tab_id],
-                writeback_draft=draft,
+                PostAnalysisPaneState(
+                    result=post_result,
+                    plots=plots,
+                    params=params,
+                    source_operation_id=self._active_tokens[tab_id],
+                    writeback_draft=draft,
+                ),
             )
         except BaseException:
             if draft is not None:
@@ -231,4 +223,3 @@ class PostAnalyzeService(StagedAnalyzeService):
                 except Exception:
                     logger.exception("new post-analysis draft teardown failed")
             raise
-        self._teardown_retired(retired)

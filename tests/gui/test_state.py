@@ -16,9 +16,12 @@ from zcu_tools.experiment.metadata import (
     SoftwareProvenance,
 )
 from zcu_tools.experiment.records import RunRecord
+from zcu_tools.gui.app.measure.services.pane_commit import commit_analysis, commit_run
 from zcu_tools.gui.app.measure.state import (
+    AnalysisPaneState,
     DeviceState,
     DeviceStatus,
+    RunPaneState,
     Session,
     State,
     TabInteractionState,
@@ -223,8 +226,16 @@ def test_update_tab_result_stores_result_and_clears_stale_analyze_data():
     state.get_tab("t1").run.source_path = "/tmp/loaded.hdf5"
     state.update_tab_analyze_param_instance("t1", _AnalyzeParams(threshold=0.5))
     fig = Figure()
-    state.update_tab_analyze("t1", object(), _plots_for(fig))
-    state.update_tab_result("t1", RunRecord(None, object()))
+    commit_analysis(
+        state,
+        "t1",
+        AnalysisPaneState(
+            result=object(),
+            plots=_plots_for(fig),
+            params=state.get_tab("t1").analysis.params,
+        ),
+    )
+    commit_run(state, "t1", RunPaneState(result=RunRecord(None, object())))
     tab = state.get_tab("t1")
     assert tab.run.source_path is None
     assert tab.analysis.result is None
@@ -258,7 +269,9 @@ def test_update_tab_loaded_result_bumps_result_analyze_and_post_versions():
         ),
     )
     historical = replace(result, metadata=metadata)
-    state.update_tab_loaded_result("t1", historical, "/tmp/loaded.hdf5")
+    commit_run(
+        state, "t1", RunPaneState(result=historical, source_path="/tmp/loaded.hdf5")
+    )
 
     tab = state.get_tab("t1")
     assert tab.run.result is historical
@@ -275,7 +288,15 @@ def test_update_tab_analyze_stores_analyze_result_and_figure():
     _add_tab(state, "t1", adapter)
     analyze_result = object()
     fig = Figure()
-    state.update_tab_analyze("t1", analyze_result, _plots_for(fig))
+    commit_analysis(
+        state,
+        "t1",
+        AnalysisPaneState(
+            result=analyze_result,
+            plots=_plots_for(fig),
+            params=state.get_tab("t1").analysis.params,
+        ),
+    )
     tab = state.get_tab("t1")
     assert tab.analysis.result is analyze_result
     assert tab.analysis.plots is not None
@@ -296,10 +317,22 @@ def test_update_tab_analyze_bumps_analyze_version():
     adapter = _make_adapter()
     _add_tab(state, "t1", adapter)
     assert state.version.get("tab:t1:analyze") == 0
-    state.update_tab_analyze("t1", object(), None)
+    commit_analysis(
+        state,
+        "t1",
+        AnalysisPaneState(
+            result=object(), plots=None, params=state.get_tab("t1").analysis.params
+        ),
+    )
     # Analyze result is a guarded resource (writeback depends on it).
     assert state.version.get("tab:t1:analyze") == 1
-    state.update_tab_analyze("t1", object(), None)
+    commit_analysis(
+        state,
+        "t1",
+        AnalysisPaneState(
+            result=object(), plots=None, params=state.get_tab("t1").analysis.params
+        ),
+    )
     assert state.version.get("tab:t1:analyze") == 2
 
 
