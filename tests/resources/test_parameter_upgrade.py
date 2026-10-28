@@ -518,6 +518,135 @@ def test_project_root_backup_override_rejects_mirror_into_source_tree_before_wri
     assert set(tmp_path.rglob("*")) == before
 
 
+@pytest.fixture
+def legacy_source(data_dir: Path) -> Path:
+    source = data_dir / "point.yaml"
+    source.write_bytes(b"old: 7\n")
+    return source
+
+
+@pytest.mark.parametrize("data_tree", ["result", "Database"])
+@pytest.mark.parametrize("symlink_override", [False, True])
+def test_other_project_root_override_rejects_before_writes(
+    tmp_path: Path,
+    legacy_source: Path,
+    rename_plan: UpgradePlan,
+    data_tree: str,
+    symlink_override: bool,
+) -> None:
+    other_project = tmp_path / "other-project"
+    other_data = other_project / data_tree
+    other_data.mkdir(parents=True)
+    existing = other_data / "existing.dat"
+    existing.write_bytes(b"other project data\n")
+    backup_root = other_project
+    if symlink_override:
+        backup_root = tmp_path / "archive-backup"
+        backup_root.symlink_to(other_project, target_is_directory=True)
+    before = set(tmp_path.rglob("*"))
+
+    (result,) = upgrade_files(
+        (UpgradeSource(legacy_source),),
+        plan=rename_plan,
+        apply=True,
+        backup_root=backup_root,
+    )
+
+    assert result.status == "rejected"
+    assert "*-backup" in (result.error or "")
+    assert "empty directory" in (result.error or "")
+    assert str(other_project) in (result.error or "")
+    assert result.backup_path is None
+    assert legacy_source.read_bytes() == b"old: 7\n"
+    assert existing.read_bytes() == b"other project data\n"
+    assert set(tmp_path.rglob("*")) == before
+
+
+@pytest.mark.parametrize("root_choice", ["default", "override", "symlink"])
+def test_named_backup_root_resumes_existing_mirrors(
+    tmp_path: Path,
+    legacy_source: Path,
+    rename_plan: UpgradePlan,
+    root_choice: str,
+) -> None:
+    root = tmp_path / (
+        "project-backup" if root_choice == "default" else "archive-backup"
+    )
+    existing_files = (
+        root / "result" / "migration-original.bak",
+        root / "Database" / "migration-original.bak",
+    )
+    for path in existing_files:
+        path.parent.mkdir(parents=True)
+        path.write_bytes(b"migration original\n")
+    override = None if root_choice == "default" else root
+    if root_choice == "symlink":
+        override = tmp_path / "archive-link"
+        override.symlink_to(root, target_is_directory=True)
+    backups: list[Path] = []
+
+    for _ in range(2):
+        legacy_source.write_bytes(b"old: 7\n")
+        (result,) = upgrade_files(
+            (UpgradeSource(legacy_source),),
+            plan=rename_plan,
+            apply=True,
+            backup_root=override,
+        )
+        assert result.status == "applied"
+        assert result.backup_path is not None
+        assert result.backup_path.parent == root / "result"
+        assert result.backup_path.read_bytes() == b"old: 7\n"
+        assert YAML(typ="safe").load(legacy_source) == {"schema_version": 2, "new": 7}
+        backups.append(result.backup_path)
+
+    assert len(set(backups)) == 2
+    assert set((root / "result").glob("point.yaml.*.bak")) == set(backups)
+    assert all(path.read_bytes() == b"old: 7\n" for path in backups)
+    assert all(path.read_bytes() == b"migration original\n" for path in existing_files)
+
+
+@pytest.mark.parametrize("initial_root", ["missing", "empty", "unrelated-directory"])
+def test_unnamed_backup_root_allows_first_mirror_but_rejects_continuation(
+    tmp_path: Path,
+    legacy_source: Path,
+    rename_plan: UpgradePlan,
+    initial_root: str,
+) -> None:
+    root = legacy_source.parent.parent / "archive"
+    if initial_root != "missing":
+        root.mkdir()
+    if initial_root == "unrelated-directory":
+        (root / "notes").mkdir()
+    (first,) = upgrade_files(
+        (UpgradeSource(legacy_source),),
+        plan=rename_plan,
+        apply=True,
+        backup_root=root,
+    )
+    assert first.status == "applied"
+    assert first.backup_path is not None
+    assert first.backup_path.parent == root / "result"
+    assert first.backup_path.read_bytes() == b"old: 7\n"
+    assert YAML(typ="safe").load(legacy_source) == {"schema_version": 2, "new": 7}
+    legacy_source.write_bytes(b"old: 7\n")
+    before = set(tmp_path.rglob("*"))
+
+    (second,) = upgrade_files(
+        (UpgradeSource(legacy_source),),
+        plan=rename_plan,
+        apply=True,
+        backup_root=root,
+    )
+
+    assert second.status == "rejected"
+    assert "*-backup" in (second.error or "")
+    assert second.backup_path is None
+    assert legacy_source.read_bytes() == b"old: 7\n"
+    assert first.backup_path.read_bytes() == b"old: 7\n"
+    assert set(tmp_path.rglob("*")) == before
+
+
 @pytest.mark.parametrize("destination_tree", ["result", "Database"])
 @pytest.mark.parametrize("redirect_entry", [False, True])
 def test_mirror_symlink_into_another_project_rejects_before_writes(
@@ -530,9 +659,10 @@ def test_mirror_symlink_into_another_project_rejects_before_writes(
     source.parent.mkdir(parents=True)
     original = b"old: 7\n"
     source.write_bytes(original)
-    other_tree = tmp_path / "project-b" / destination_tree
+    backup_root = tmp_path / "archive-backup"
+    other_tree = backup_root / "project-b" / destination_tree
     other_tree.mkdir(parents=True)
-    mirror = tmp_path / "result"
+    mirror = backup_root / "result"
     if redirect_entry:
         mirror.mkdir()
         mirror = mirror / "entry"
@@ -540,7 +670,7 @@ def test_mirror_symlink_into_another_project_rejects_before_writes(
     before = set(tmp_path.rglob("*"))
 
     (result,) = upgrade_files(
-        (UpgradeSource(source),), plan=rename_plan, apply=True, backup_root=tmp_path
+        (UpgradeSource(source),), plan=rename_plan, apply=True, backup_root=backup_root
     )
 
     assert result.status == "rejected"

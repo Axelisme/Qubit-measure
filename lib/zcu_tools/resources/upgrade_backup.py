@@ -10,8 +10,14 @@ def upgrade_backup_path(source: Path, *, backup_root: Path | None = None) -> Pat
     Find the nearest result/Database ancestor of the resolved source and mirror
     its project-relative path under <project>-backup. backup_root overrides that
     root; without a project ancestor it is required and receives the basename.
-    Relative paths use cwd. Resolve symlinks before rejecting destinations inside
-    any result/Database tree, or inside a standalone source parent. Raise
+    Relative paths use cwd. A resolved root containing direct result/Database
+    subdirectories must have a name ending in -backup. Such roots can resume
+    existing mirrors and share migration backups. Other names can use an empty
+    root, but its first mirror makes later calls fail this check; use a -backup
+    name for continuation. Identification uses names and directories, not file
+    contents or marker files. Resolve symlinks before rejecting destinations
+    inside any result/Database tree, or inside a standalone source parent. Mirror
+    symlinks cannot escape the root or enter another result/Database tree. Raise
     ValueError for an unidentified project without an override or unsafe output;
     filesystem resolution errors propagate. Call before acquiring write locks.
     The caller creates parents and opens the destination exclusively.
@@ -32,6 +38,13 @@ def upgrade_backup_path(source: Path, *, backup_root: Path | None = None) -> Pat
         project = data_root.parent
         relative = source.relative_to(project)
         root = (backup_root or project.with_name(f"{project.name}-backup")).resolve()
+    if not root.name.endswith("-backup") and any(
+        (root / name).is_dir() for name in ("result", "Database")
+    ):
+        raise ValueError(
+            f"{root}: backup root contains result/Database directories; "
+            "choose a *-backup directory or an empty directory"
+        )
     mirror = (root / relative).with_name(f"{source.name}.{uuid4().hex}.bak")
     destination = mirror.resolve()
     if any(parent.name in {"result", "Database"} for parent in (root, *root.parents)):
