@@ -1,6 +1,7 @@
 from qick.qick_asm import AcquireMixin
 from zcu_tools.program.acquisition import (
     EarlyStopMixin,
+    HeraldAcquireMixin,
     ImproveAcquireMixin,
     RoundHookMixin,
     SingleShotMixin,
@@ -15,8 +16,9 @@ def _classes_defining(cls: type, method_name: str) -> list[type]:
 
 
 def test_improve_acquire_mro_order_is_stable():
-    assert ImproveAcquireMixin.__mro__[:7] == (
+    assert ImproveAcquireMixin.__mro__[:8] == (
         ImproveAcquireMixin,
+        HeraldAcquireMixin,
         RoundHookMixin,
         TrackerMixin,
         SingleShotMixin,
