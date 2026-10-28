@@ -1,5 +1,11 @@
 # CZ common-amplitude calibration
 
+GE centers come only from the saved readout cfg at `roles.f1_tone` and
+`roles.f2_tone`. Circle classifiers need no radius for this analysis. There is
+no manual center override or point-parameter calibration lookup. Missing or
+linear role-tone classifiers make the cfg invalid. Calibrate mux singleshot GE
+under the readout conditions used here.
+
 **Readers:** operator, agent. Run common-amplitude CZ calibration through the GUI or MCP and review the first-return pulse proposals.
 
 **Last updated:** 2026-10-21

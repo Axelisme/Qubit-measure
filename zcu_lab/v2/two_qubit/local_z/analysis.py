@@ -12,6 +12,7 @@ from zcu_tools.experiment.records import RunRecord
 from zcu_tools.plotting.plots import Plots
 
 from .._phase import QuadraturePhase, quadrature_phase
+from ..joint_readout.core import tone_centers
 
 if TYPE_CHECKING:
     from .core import LocalZCfg, LocalZResult
@@ -77,12 +78,13 @@ def analyze_local_z(
         )
     mean, counts, complete = _source_quadratures(cfg, data)
     targets: list[tuple[QuadraturePhase, ...]] = []
-    for t, (tone, centers) in enumerate(
-        (
-            (cfg.roles.f1_tone, cfg.f1_centers),
-            (cfg.roles.f2_tone, cfg.f2_centers),
-        )
-    ):
+    for t, tone in enumerate((cfg.roles.f1_tone, cfg.roles.f2_tone)):
+        calibration_reason = None
+        try:
+            centers = tone_centers(cfg.readout, tone)
+        except ValueError as exc:
+            centers = None
+            calibration_reason = str(exc)
         points: list[QuadraturePhase] = []
         for n in range(len(cfg.gate_counts)):
             if not np.all(complete[t, :, n]):
@@ -90,7 +92,7 @@ def analyze_local_z(
                     np.nan, None, "Missing complete X/Y projection rounds"
                 )
             elif centers is None:
-                point = QuadraturePhase(np.nan, None, "Missing saved target GE centers")
+                point = QuadraturePhase(np.nan, None, calibration_reason)
             else:
                 point = quadrature_phase(
                     data.signals[t, 0, n, :, tone],

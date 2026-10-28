@@ -18,7 +18,7 @@ The Form copies `$coupler.module.cz_f1` and `cz_f2` into two ordinary editable p
 
 Enter an increasing Common CZ frequency range in MHz. Set the positive integer `gate_counts`; the starting list is `[1, 3, 5]`. Every frequency point replaces only the two CZ frequencies in the acquisition pulses. Repetition preserves both source gains, relative phase and waveforms. Set reps, host rounds and waits for the authorized acquisition budget.
 
-GE centers come from the fixed source's `f1.ext.readout_cal` and `f2.ext.readout_cal`. They must match the mux conditions used here. Missing centers allow raw acquisition but prevent phase analysis for that target. Invalid or coincident centers raise calibration errors. Supply centers from measured data under matching readout conditions.
+GE centers come only from each role's original tone in the saved readout cfg. Circle classifiers supply centers without requiring radius; no manual override or point calibration is read. Missing or linear classifiers allow raw acquisition, but phase analysis retains an ADC-named calibration reason instead of phase for that target. Run mux singleshot GE under matching readout conditions.
 
 ## Read the phase plots
 

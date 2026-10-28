@@ -130,6 +130,32 @@ class MuxReadoutCfg(CoreMuxReadoutCfg, AbsReadoutCfg):
 ReadoutCfg: TypeAlias = PulseReadoutCfg | MuxReadoutCfg
 
 
+def circle_classifier(cfg: ReadoutCfg, *, ro_ch: int) -> CircleClassifier:
+    """Return detached circle calibration for the specified ADC channel number.
+
+    cfg is a native Pulse or Mux readout; ro_ch identifies its declared ADC,
+    not a tone position. Centers use raw integrated ADC / readout length,
+    without IQ offset subtraction. Radius and confusion matrix may be absent.
+    Raise ValueError for an unknown ADC, missing classifier, or linear mode
+    (which stores no GE centers). No hardware or program registry is read.
+    """
+    entries = (
+        [(cfg.ro_ch, cfg.classifier)]
+        if isinstance(cfg, PulseReadoutCfg)
+        else [(tone.ro_ch, tone.classifier) for tone in cfg.tones]
+    )
+    for ch, classifier in entries:
+        if ch == ro_ch:
+            if classifier is None:
+                raise ValueError(f"ADC {ch}: classifier missing; run singleshot GE")
+            if not isinstance(classifier, CircleClassifier):
+                raise ValueError(
+                    f"ADC {ch}: linear classifier has no GE centers; use circle"
+                )
+            return classifier.model_copy(deep=True)
+    raise ValueError(f"ADC {ro_ch}: not declared by readout")
+
+
 def classification_parameters(
     cfg: ReadoutCfg, *, require_other: bool = False
 ) -> dict[int, ReadoutClassifier]:

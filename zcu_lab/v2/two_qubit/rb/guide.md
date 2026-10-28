@@ -29,8 +29,9 @@ logical Z angles in degrees, normally minus the corresponding measured local-Z
 slope. Missing angles remain invalid. Review any operator override against measured
 calibration before Run; model hypotheses only describe assumed behavior.
 
-Saved `$f1.ext.readout_cal` and `$f2.ext.readout_cal` g/e centers must match the
-mux readout conditions. Raw acquisition is possible without centers, but FIT
+The saved readout cfg supplies circle g/e centers at `roles.f1_tone` and
+`roles.f2_tone`, not by ADC sorting. Radius is not required and centers have no
+manual override. Missing or linear calibration permits raw acquisition, but FIT
 then reports the missing saved calibration. Historical analysis uses only the
 saved sources.
 

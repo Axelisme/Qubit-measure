@@ -1,6 +1,6 @@
 """Fixed-capture inputs for conditional phase calibration."""
 
-from zcu_tools.cfg_model import Expr, Hidden, Range, Slot, Template
+from zcu_tools.cfg_model import Hidden, Range, Slot, Template
 from zcu_tools.gui.form_adapter import Form, FormContext
 
 from zcu_lab.v2.support.measure.mux_forms import mux_readout_seed_metadata
@@ -13,8 +13,9 @@ def make_form(ctx: FormContext) -> Form[ConditionalPhaseCfg]:
     """Capture identities and copy calibrated pulses; absent CZ slots stay required.
 
     Missing readout may be explicitly calibrated in the complete mux template.
-    Missing GE centers permit raw acquisition but analysis explains missing source
-    calibration. No other experiment Form or simulator truth supplies inputs.
+    Centers derive only from saved role-tone circle classifiers. Missing or linear
+    calibration permits raw acquisition; analysis returns a calibration reason.
+    No other experiment Form or simulator truth supplies inputs.
     """
     roles = captured_roles(ctx)
     readout = (
@@ -33,8 +34,6 @@ def make_form(ctx: FormContext) -> Form[ConditionalPhaseCfg]:
             "readout",
             "drive",
             "target",
-            "f1_centers",
-            "f2_centers",
             "frequency",
             "gate_counts",
             "reps",
@@ -61,16 +60,5 @@ def make_form(ctx: FormContext) -> Form[ConditionalPhaseCfg]:
                 ),
             },
             "frequency": Range(None, None, expts=101),
-            **{
-                f"{role}_centers": {
-                    "g": Expr(f"${role}.ext.readout_cal.g_center"),
-                    "e": Expr(f"${role}.ext.readout_cal.e_center"),
-                }
-                if ctx.parameters is not None
-                and ctx.parameters.lookup(f"${role}.ext.readout_cal.g_center").present
-                and ctx.parameters.lookup(f"${role}.ext.readout_cal.e_center").present
-                else None
-                for role in ("f1", "f2")
-            },
         },
     ).with_seed_metadata(mux_readout_seed_metadata(readout))

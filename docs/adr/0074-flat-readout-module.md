@@ -87,6 +87,11 @@ Acquire 不掃 program registry，mapping 必須完整覆蓋已宣告 ADC，不�
 需要 radius 的 consumer 因此提示做 Post。T1 需要 other，不接受 linear。
 舊 cfg 沒有 classifier 時，T1 分析略過 confusion 修正，不讀 point 校準。
 GE 以 run 的 readout slot 解析目標，proposal builder 與 materialized 比對契約見 [[0008]]。
+Mux GE 每個 phase 合成一個完整 proposal，只更新成功 tone 的精確 classifier 路徑。
+雙 qubit 的 nearest-GE 分析只從 saved readout cfg 的角色 tone 派生 circle centers，不要求 radius。
+Joint readout、chevron、constructive phase、CZ amplitude 在 cfg 驗證時拒絕 missing／linear。
+Conditional phase、local Z、RB 保留 raw acquisition，分析將 missing／linear 轉為帶原因的結果，不產生 population 或 fit。
+Readout owner 的單 ADC circle lookup 不理解 lab 角色，也不讀 live library。
 
 ### Owner 不變，caller 不重建舊配置
 

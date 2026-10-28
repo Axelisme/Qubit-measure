@@ -147,13 +147,15 @@ def analyze_rb(
         )
         if not np.all(acquired | missing):
             raise ValueError("RB raw contains nonfinite acquired IQ or a partial round")
-        if cfg.f1_centers is None or cfg.f2_centers is None:
-            reason = "RB joint00 classification requires both saved GE center pairs"
+        try:
+            centers1, centers2 = cfg.f1_centers, cfg.f2_centers
+        except ValueError as exc:
+            reason = str(exc)
         else:
             first = raw[..., cfg.roles.f1_tone]
             second = raw[..., cfg.roles.f2_tone]
-            g1 = np.abs(first - cfg.f1_centers.g) <= np.abs(first - cfg.f1_centers.e)
-            g2 = np.abs(second - cfg.f2_centers.g) <= np.abs(second - cfg.f2_centers.e)
+            g1 = np.abs(first - centers1.g) <= np.abs(first - centers1.e)
+            g2 = np.abs(second - centers2.g) <= np.abs(second - centers2.e)
             paired = acquired.all(axis=(0, 2))
             joint00 = np.mean(g1 & g2, axis=-1)
             survival = np.where(paired[None, :, None, :], joint00, np.nan)

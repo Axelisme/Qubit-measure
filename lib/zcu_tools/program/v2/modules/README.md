@@ -52,6 +52,10 @@ calibration keyed by each pulse/tone ADC number. Authors pass that mapping to
 `acquire(classify=...)`. Missing calibration or circle radius raises an ADC-named
 error. `require_other=True` rejects two-state linear calibration. The helper does
 not read a program, registry or hardware.
+`readout.circle_classifier(cfg, ro_ch=...)` returns a detached circle for one
+ADC channel number, not a tone position. It accepts centers without radius or
+matrix and rejects unknown ADCs, missing classifiers and linear mode with an
+ADC-named ValueError. Its normalized raw ADC coordinates retain IQ offset.
 
 `PulseReadoutCfg` owns flat generator/ADC settings and a native waveform. One
 semantic `freq` configures both channels. `PulseReadout` declares and schedules
