@@ -23,7 +23,7 @@ from typing import (
 
 import numpy as np
 from numpy.typing import NDArray
-from typing_extensions import TypeVar
+from typing_extensions import ReadOnly, TypeVar
 
 from zcu_tools.experiment.acquisition_facts import StopDecision
 from zcu_tools.experiment.v2.runtime.acquire_cancel import AcquireCancelFlag
@@ -83,6 +83,8 @@ class SynchronousAcquireKeywords(TypedDict, Generic[T_Raw]):
 
     rounds is the software average count and progress controls native progress.
     round_hook receives each completed-round summary and its cancel flag.
+    Its keyword entry is read-only: consumers call the supplied hook without
+    replacing it, preserving the producer's raw-result covariance.
     cancel_flag also carries external stop requests. Omitted step_rounds keeps
     synchronous operation; stepped preparation is outside this producer seam.
     herald selects integrated shots; decimated producers may reject it.
@@ -92,7 +94,7 @@ class SynchronousAcquireKeywords(TypedDict, Generic[T_Raw]):
 
     rounds: int
     progress: bool
-    round_hook: Callable[[int, T_Raw, CancelFlagProtocol], object]
+    round_hook: ReadOnly[Callable[[int, T_Raw, CancelFlagProtocol], object]]
     cancel_flag: CancelFlagProtocol
     step_rounds: NotRequired[Literal[False]]
     herald: NotRequired[Sequence[HeraldSpec] | None]
