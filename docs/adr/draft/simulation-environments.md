@@ -187,7 +187,11 @@ FTF detached author config 保存 ADC frozen dataclasses，preparation key 不�
 
 F1／F2 使用 Fluxonium，coupler 是真正 flux-dependent circuit。使用者選擇：「1A，就是要練習用實驗找工作點」。F1–C、F2–C 與 F1–F2 皆用完整 charge coupling；2026-10-14 使用者要求「可能要考慮非零的F1-F2 coupling」。g12=0 只表示關閉該項，非模型假設。
 
-控制包含 bias offset／gain、固定 flux 串擾、可含相位的 microwave 串擾、來源線 delay／一階低通。先來源線響應、後 loop 映射；同 shot 保留 tail，每個獨立 shot 從當下 DC 線路穩態開始。不建立任意 transfer-function framework，不丟失 envelope 符號、quadrature、carrier 或 phase。
+控制包含 bias offset／gain、固定 DC flux 串擾、可含相位的 microwave 串擾、來源線 delay／低通與多指數 distortion。先來源線響應、後 loop 映射；同 shot 保留 tail，每個獨立 shot 從當下 DC 線路穩態開始。不建立任意 transfer-function framework，不丟失 envelope 符號、quadrature、carrier 或 phase。
+
+FTF 的 `flux_lines.f1`、`coupler`、`f2` 各可宣告一條序列內磁通線，以獨立 generator 的 signed gain 乘 `flux_phi0_per_gain`，再套該線的 delay、tau 與 distortion。Flux generator 不與其他 flux、drive 或 readout 線共用。省略 flux lines 時，既有 DC／drive／readout 行為不變。`DriveLine.operator: flux` 仍是 round DC 的小訊號導數，不代替這條時變 flux 路徑。Schema 與接線以 [FTF 欄位指南](../../../zcu_lab/simulation_envs/FTF/field-guide.md#flux-lines序列內磁通校準與濾波)為準。
+
+Flux pulse 經 `FluxSchedule`／`flux_waveform` 交給既有演化引擎，Hamiltonian 使用 retained 固定 DC 投影內的 exact flux expansion。Bath levels 以相對 DC 的 `1e-3 Phi0` 格點量化，平手取偶數，小於 `5e-4 Phi0` 的偏移吸回 DC。連續 waveform 在 2 ns DAC 格點取樣並線性內插，不隨 level 重建固定 DC 投影。大幅 excursion 的 native、local 與 retained-level 收斂仍由使用者驗證。
 
 Six_fluxonium 的各 cavity 委託 `SingleFluxoniumSource`，與 single_fluxonium 共用 `SingleFluxoniumModel` 及包含 Purcell 的物理模型，不另寫一套六 qubit 損耗模型。多 qubit 拓樸、coil＋local 兩源與無快磁通等環境差異見 [six_fluxonium README](../../../zcu_lab/simulation_envs/six_fluxonium/README.md#physical-model-and-single-fluxonium-consistency)。比較前在各自的 YAML 工作副本對齊物理常數。2026-10-27，使用者要求「10a 選i，但請讓six_fluxonium的模擬與single_fluxonium一致」，並授權「six_fluxonium也是，你決定。」。確認兩者已共用物理核心後，使用者答覆「接受」，因此不改程式。
 
@@ -221,6 +225,10 @@ f = Φ/Φ0, EJmax = EJ1 + EJ2, d = (EJ2 - EJ1)/(EJ1 + EJ2)
 F1／F2 納入 capacitive、inductive、quasiparticle 有效模型。Coupler 以 Q_cap 為基線，有明確有效阻抗／互感參數時可加 charge-impedance 或 flux-bias-line loss；不搬用 Fluxonium inductive／qp 公式。Baths 先彼此獨立，joint mixing 不代表新增 correlated bath；控制串擾或共享 readout line 也不自動增加共同 relaxation bath／Purcell。
 
 Dissipator 依 filtered flux 分段更新，用無 microwave、含耦合 H 建 instantaneous dressed jumps，再轉回固定 V。Coherent Hamiltonian 依實際 waveform 演化，段間不重設狀態；靜態條件可重用，不每個 microwave carrier cycle 重建。這是 weak-coupling Markov secular 近似，不含 drive-dressed／Floquet bath 或 memory。
+
+現行 flux 路由依 waveform 與微波控制選擇。沒有微波時，零 tau、無 distortion 的理想常數 baseband 階躍走 `t4` 與 sudden 換基底，continuous waveform 的 motion rows 走 `adiabatic_map`。有微波的 continuous flux rows 走 `flux_dop853`。
+
+`adiabatic_map` 即使 row bath 含 rates，也只衰減 coherence，不做 population 弛豫。只有 ramp 遠短於 T1 才能忽略缺少的弛豫，接近 T1 的 ramp 會低估弛豫。T1 reset 需要真正 constant park row 走 `t4`，仍在變動的 filter tail 或全程 `adiabatic_map` 不構成 T1 reset。引擎的 quadrature 收斂不認證物理 adiabatic 條件。路由與兩態 reset 驗證的範圍見 [FTF 契約](../../../lib/zcu_tools/experiment/ftf/README.md#flux-pulses)。這裡記錄既定近似，不更換引擎或 cache policy。
 
 事件區間不等於常數 H 區間。Backend 依使用者精度設定處理時變 envelope／carrier／flux；固定 generator 可重用傳播作用，時變區間重用算子並積分。段間接續量子態、filter、phase 與讀出場；進入狀態不同時不可直接重用上一段輸出。
 

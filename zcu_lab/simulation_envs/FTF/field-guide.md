@@ -2,7 +2,7 @@
 
 **讀者：** lab-author、framework-dev、agent。依 YAML 欄位、單位與模型限制設定 FTF 環境並對照 entry 接線。
 
-**Last updated:** 2026-10-28，三迴路選填 fast-flux 校準
+**Last updated:** 2026-10-28，flux pulse 路由、量化與 ramp 弛豫近似
 
 本指南對照 [default.yaml](default.yaml) 與 [entry-template.yaml](entry-template.yaml)。啟動方式見 [環境 README](README.md)。所有可接受的 YAML 欄位都列在下文；欄位驗證由 [resources.ftf](../../../lib/zcu_tools/resources/ftf/README.md) 負責，實際組裝與演化限制見 [FTF 契約](../../../lib/zcu_tools/experiment/ftf/README.md)。
 
@@ -287,6 +287,27 @@ flux_lines:
 
 樣板只以註解附上此範例，不改現有 generator 數量或 entry wiring。
 要使用 flux pulse，另在 program 指定相符的 generator，並自行核對 entry 的快速 flux 接線。
+
+連續 waveform 使用 2 ns DAC 格點與線性內插，pulse 端點各自取最近的 2 ns，平手取偶數。
+Bath schedule 以每個區間中點相對 snapshot DC 的偏移量量化，間距為 `1e-3 Phi0`，平手取偶數。
+小於 `5e-4 Phi0` 的偏移吸回 DC，相鄰相同 level 合併。
+濾波尾以各來源、各 pole 的絕對權重總和判斷，低於每迴路 `5e-4 Phi0` 才補 terminal DC，不靠正負抵消提前截尾。
+這項量化不會重建 DC 的固定投影，也不把連續 Hamiltonian 限成階梯。
+
+沒有微波時，零 tau、無 distortion 的理想常數 baseband pulse 不附 continuous waveform，階躍走 `t4` 與 sudden 換基底。
+濾波、時變 sampled envelope 或非零 flux carrier 會提供 continuous waveform，無微波的 motion rows 走 `adiabatic_map`，有微波的 continuous flux rows 走 `flux_dop853`。
+沒有另外的 sudden／adiabatic 開關。
+`adiabatic_map` 保持 instantaneous eigenstate populations，即使 row bath 含 transition rates 也只衰減 coherence。
+只有 ramp 遠短於 T1，才能忽略 ramp 期間不做 population 弛豫的近似，接近 T1 的 ramp 會低估弛豫。
+T1 reset 必須有真正 constant park row 走 `t4`，不能把仍在變動的濾波尾當作 reset hold。
+自行建構 timeline 時保留 ramp-end 邊界，避免 constant hold 與 motion 合成同一 row。
+
+Hamiltonian 支援時變 flux，但只在每 round DC 選定的 retained 子空間內使用 exact flux expansion。
+大幅 excursion 必須另查 native、local 與 retained-level 收斂，不能用 density 合法或演化成功代替。
+引擎不認證物理 adiabatic 條件，短 ramp 也不是該條件成立的證據。
+終端 readout 仍固定使用 snapshot DC 模型，即使 flux tail 尚未回 DC 也不改變。
+需要 DC 讀出時，須在 readout 前留足返程 settling。
+兩態 reset 的 hold curve 與 sudden 對照見 [reset 範例及限制](../../../lib/zcu_tools/experiment/ftf/README.md#reset-interpretation)，不是正式裝置 fidelity 認證。
 
 ## Readout：drive → 物理 resonators → ADC
 

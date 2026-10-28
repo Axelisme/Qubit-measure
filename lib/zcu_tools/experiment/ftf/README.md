@@ -1,6 +1,6 @@
 # FTF environment composition
 
-**Last updated:** 2026-10-28 (UTC), flux-pulse reset routing and bath semantics
+**Last updated:** 2026-10-28 (UTC), flux-pulse routing and ramp-relaxation limits
 
 **讀者：** lab-author、framework-dev、agent。FTF 環境的組裝、數值接線與 acquisition 設定。
 
@@ -339,7 +339,9 @@ waveform. Without microwaves, continuous varying spans use `adiabatic_map`.
 It preserves instantaneous eigenstate populations even when the row bath has
 nonzero rates. Those rates affect coherence decay only; this kernel models no
 interlevel transitions. The engine does not check the adiabatic condition.
-With microwaves they use `flux_dop853`.
+Neglecting population relaxation on a ramp is reasonable only when the ramp is
+much shorter than T1. A ramp near T1 underestimates relaxation on this route.
+With microwaves, continuous flux rows use `flux_dop853`.
 There is no separate sudden/adiabatic switch.
 
 The Hamiltonian uses the existing exact flux expansion inside the retained
@@ -364,7 +366,9 @@ A larger park gap alone does not guarantee a shorter T1. Check the rates too.
 A filtered waveform routed entirely through `adiabatic_map` is not a T1 reset.
 A filter tail that has not formed a constant plateau does not guarantee reset.
 Callers must check the actual routing and allow settling into a constant park
-span, as well as settling back to DC before readout.
+span, as well as settling back to DC before readout. Keep ramp-end boundaries
+explicit when constructing timelines: a merged row that still contains motion
+can remain `adiabatic_map` even if its quantized level is constant.
 
 `tests/experiment/ftf/test_flux_reset.py` exercises synthetic templates through
 `plan_template` and `Engine.evolve`, observing the density at terminal readout

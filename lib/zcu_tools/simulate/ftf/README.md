@@ -1,6 +1,6 @@
 # Fixed-coordinate FTF numerics
 
-**Last updated:** 2026-10-28 (UTC), multi-exponential batch flux filtering
+**Last updated:** 2026-10-28 (UTC), flux-pulse routing and fixed-projection limits
 
 **讀者：** framework-dev、agent。固定座標 FTF 數值模型、路由與快取契約。
 
@@ -25,8 +25,10 @@ fluxonium has H/h = kinetic - EJ*cos(phi + 2*pi*f), so its derivative is
 2*pi*EJ*sin(phi + 2*pi*f), not a bare phase operator. The fixed-theta SQUID
 derivative is pi*EJmax*[sin(pi*f)*cos(theta) + d*cos(pi*f)*sin(theta)].
 Drive composition multiplies these by GHz/gain charge coefficients or Phi0/gain
-flux coefficients. Flux quadratures are a fixed-DC small-signal linearization,
-not a large-amplitude fast-flux Hamiltonian H(Phi(t)).
+flux coefficients. These drive quadratures are a fixed-DC small-signal
+linearization. Separate `FluxTrack` inputs change H(Phi(t)) through the exact
+`flux_expansion` within the same retained DC projection; they do not use this
+derivative approximation.
 
 `native_embedding()` maps the retained joint coordinates into physical native
 F1-oscillator × coupler-charge × F2-oscillator coordinates, including both local
@@ -103,6 +105,38 @@ Offsets smaller than 5e-4 Phi0 snap to DC. These functions do not propagate a
 density or certify convergence of the fixed-DC projected subspace.
 `readout_model(joint, resonators)` supplies the existing ADC model at DC, with a
 zero reference frequency and neutral receiver for composition to calibrate.
+
+## Flux-pulse evolution and limits
+
+The experiment layer binds optional F1/C/F2 flux lines to `FluxTrack` inputs.
+Ideal constant baseband pulses with zero tau and no distortion omit the
+continuous waveform. With no microwave drive, the engine uses closed-form `t4`
+segments and sudden basis changes at flux steps. Filtered, sampled-varying or
+nonzero-carrier flux supplies a continuous waveform. No-drive motion rows use
+`adiabatic_map`; driven continuous flux uses `flux_dop853`. A truly constant
+no-drive park row uses `t4`, even within a sequence that has continuous ramps.
+There is no separate sudden/adiabatic setting.
+
+`adiabatic_map` preserves instantaneous ordered eigenstate populations, even
+when the quantized row bath has nonzero transition rates. Those rates only
+contribute coherence decay on this route. Neglecting population relaxation on
+a ramp is reasonable only when the ramp is much shorter than T1. Ramps near T1
+underestimate relaxation. A T1 reset therefore needs an actual constant park
+row routed to `t4`; a filtered tail or an entirely `adiabatic_map` sequence does
+not establish reset. The caller must also allow return-to-DC settling before
+terminal readout, whose model remains fixed at DC.
+
+The exact flux expansion is exact only inside the retained fixed-DC subspace.
+It does not restore states discarded by local or joint projection. Users must
+check native cutoffs, local levels and retained joint levels for their sequence.
+Legal density matrices, successful evolution and small local-level differences
+do not certify retained-level convergence. Adiabatic quadrature convergence
+also does not certify slow motion or a nondegenerate, noncrossing spectrum.
+The [experiment reset example](../../experiment/ftf/README.md#reset-interpretation)
+checks small-model mapping and constant-hold relaxation, not device fidelity or
+large-excursion convergence.
+
+## Cavity drive composition
 
 `CavityDrive.advance` averages one span's photons, Stark shifts and driven
 coherence decay, then returns its main branch's final field. The main branch
