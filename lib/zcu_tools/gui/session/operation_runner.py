@@ -1,7 +1,8 @@
 """OperationRunner — kind-agnostic operation lifecycle mechanism (ADR-0066).
 
-``OperationRunner`` is the *mechanism* shared by every async operation (run /
-FIT-analyze / post-analyze / device-setup / device-connect / device-disconnect).
+``OperationRunner`` owns async operations and synchronous resource leases.
+Async clients include run, analyze, device setup and connection. Synchronous
+clients use open_lease for a retained lifetime or inline for a lexical body.
 It owns exactly one responsibility: orchestrate the standard lifecycle step
 sequence::
 
@@ -22,11 +23,12 @@ licence for sloppy policy.
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
-from dataclasses import dataclass
+from collections.abc import Callable, Generator
+from contextlib import contextmanager
+from dataclasses import dataclass, field
 from typing import Any
 
-from zcu_tools.gui.event_bus import BaseEventBus
+from zcu_tools.gui.event_bus import BaseEventBus, EventOrigin
 from zcu_tools.gui.session.operation_handles import (
     NO_RESULT,
     CancelHook,
@@ -43,6 +45,7 @@ __all__ = [
     "BgResult",
     "ExclusionRequest",
     "OperationInfrastructure",
+    "OperationLease",
     "OperationRunner",
     "OperationSpec",
     "SettleFn",
@@ -108,6 +111,45 @@ class BgResult:
 SettleFn = Callable[[OperationOutcome], None]
 
 
+@dataclass
+class OperationLease:
+    """Retained operation resources, independent of an ambient origin scope.
+
+    token identifies the pending handle. origin is its captured event origin,
+    including operation_id; enter bus.origin(lease.origin) only while executing
+    each domain callback, never across event-loop turns. Call settle(outcome)
+    after domain commits to discard progress, settle the handle and release the
+    gate. progress_factory is the requested per-operation progress callable, or
+    None when wants_progress is False. This record owns no worker and performs
+    no hardware rollback. Obtain leases from open_lease or inline; callers do
+    not construct them or change their fields. _settle and _bus are injected
+    runner mechanisms, not domain policy.
+    """
+
+    token: int
+    origin: EventOrigin
+    _settle: SettleFn
+    _bus: BaseEventBus
+    progress_factory: Callable[..., object] | None = None
+    _settled: bool = field(default=False, init=False, repr=False)
+
+    @property
+    def settled(self) -> bool:
+        """Whether settlement was attempted, even if a cleanup step failed."""
+        return self._settled
+
+    def settle(self, outcome: OperationOutcome) -> None:
+        """Finish with the domain's outcome under the captured operation origin.
+
+        Cleanup failures are logged independently and do not escape. Duplicate
+        calls are logged no-ops. Cancel requests alone do not settle resources;
+        the domain chooses finished, failed or cancelled after its own cleanup.
+        """
+        self._settled = True
+        with self._bus.origin(self.origin):
+            self._settle(outcome)
+
+
 @dataclass(frozen=True)
 class OperationSpec:
     """Complete policy description for one operation.
@@ -125,11 +167,14 @@ class OperationSpec:
       to ``work``. Device-setup and run need this; analyze ops do not.
     - ``cancel_hook``: forwarded to ``OperationHandles.create``; ``None`` for
       non-cancellable ops (FIT-analyze, connect).
-    - ``work``: the off-main thunk. Receives the minted progress factory (or
+    - ``work``: the off-main thunk, required by begin and forbidden for
+      open_lease/inline (leave None). Receives the minted progress factory (or
       ``None`` if ``wants_progress`` is False) — all other ambient scopes
       (such as schedule stop scope) are baked into the closure by the policy.
-    - ``run_in_pool``: selects pool vs dedicated thread in the bg executor.
-    - ``on_terminal``: called on the main thread when the bg work completes or
+    - ``run_in_pool``: selects pool vs dedicated thread in the bg executor;
+      unused by open_lease/inline, which never submit background work.
+    - ``on_terminal``: required by begin, forbidden for open_lease/inline
+      (leave None). Called on the main thread when the bg work completes or
       errors. Receives (BgResult, SettleFn); the policy performs domain side-
       effects (State writes, signals) and calls settle exactly once.
     - ``on_opened``: optional owner-thread hook receiving the newly opened
@@ -144,9 +189,9 @@ class OperationSpec:
     owner_id: str
     wants_progress: bool
     cancel_hook: CancelHook | None
-    work: Callable[[Any], Any]
-    run_in_pool: bool
-    on_terminal: Callable[[BgResult, SettleFn], None]
+    work: Callable[[Any], Any] | None = None
+    run_in_pool: bool = False
+    on_terminal: Callable[[BgResult, SettleFn], None] | None = None
     # Called before progress notifications or submit, so domain owners can
     # latch admission and retain the token even when startup later fails.
     on_opened: Callable[[int], None] | None = None
@@ -157,8 +202,8 @@ class OperationRunner:
     every op's domain policy is injected via OperationSpec. Only recognises ports.
 
     gate/progress may be None for operations that do not request those facets.
-    Missing required facets fail in begin before any handle is created.
-    Background callbacks and begin must execute on the domain owner thread.
+    Missing required facets fail before any handle is created. All entry points,
+    lease settlement and background callbacks execute on the domain owner thread.
     """
 
     def __init__(
@@ -175,6 +220,61 @@ class OperationRunner:
         self._bg = bg
         self._bus = bus
 
+    @contextmanager
+    def inline(self, spec: OperationSpec) -> Generator[OperationLease]:
+        """Run a lexical owner-thread body under its operation event origin.
+
+        Open the same resources as open_lease and yield its lease. No background
+        work is submitted. Normal exit settles finished; a body exception settles
+        failed(str(exc)) and propagates unchanged, including BaseException.
+        Cleanup failures are isolated and logged, never replacing the body error.
+        Restore the outer event origin on either exit. Domain writes belong
+        inside the body; cancellation remains the domain's outcome decision.
+        A body that calls lease.settle(outcome) chooses the terminal outcome;
+        exiting does not attempt settlement again, even if the body later raises.
+        """
+        lease = self.open_lease(spec)
+        with self._bus.origin(lease.origin):
+            try:
+                yield lease
+            except BaseException as exc:
+                if not lease.settled:
+                    lease.settle(OperationOutcome("failed", str(exc)))
+                raise
+            else:
+                if not lease.settled:
+                    lease.settle(OperationOutcome("finished"))
+
+    def open_lease(self, spec: OperationSpec) -> OperationLease:
+        """Open resources on the owner thread without submitting work.
+
+        Check exclusion, create a handle from the current event origin, call
+        on_opened(token), register exclusion, and create requested progress.
+        Return a retained lease without retaining an ambient event-origin scope.
+        The caller
+        must settle it after domain commits, including on failure or cancel.
+        Admission errors propagate before creating a token. Startup failures
+        settle failed, release opened resources and propagate unchanged.
+        work/on_terminal must both be None, otherwise raise ValueError before
+        admission; the caller supplies synchronous work and terminal policy.
+        """
+        if spec.work is not None or spec.on_terminal is not None:
+            raise ValueError("synchronous lease forbids work and on_terminal")
+        if spec.wants_progress and self._progress is None:
+            raise RuntimeError("operation requires a progress service")
+        if spec.exclusion is not None and self._gate is None:
+            raise RuntimeError("operation requires an exclusion gate")
+        token, origin = self._create_operation(spec)
+        settle = self._make_settle(spec, token)
+        operation_origin = self._handles.event_origin(token)
+        try:
+            factory = self._register_resources(spec, token, origin)
+        except BaseException as exc:
+            with self._bus.origin(operation_origin):
+                settle(OperationOutcome("failed", str(exc)))
+            raise
+        return OperationLease(token, operation_origin, settle, self._bus, factory)
+
     def begin(self, spec: OperationSpec) -> int:
         """Synchronously open the operation and submit the work.
 
@@ -185,55 +285,38 @@ class OperationRunner:
         4. ``progress.make_factory`` (if wants_progress) — mint the pbar factory.
         5. Build the call-once settle closure and submit to bg.
 
-        Returns the operation token. Missing gate/progress facets and conflicts
-        raise before a handle is minted. Hook, registration, factory or submit
-        failure settles failed, unwinds opened resources and re-raises.
+        Returns the operation token. work and on_terminal must both be provided,
+        otherwise raise ValueError before admission. Missing gate/progress facets
+        and conflicts raise before a handle is minted. Hook, registration,
+        factory or submit failure settles failed, unwinds opened resources
+        and re-raises.
 
         The ``ensure_can_start`` raise propagates directly: no token was minted,
         no resources allocated, no cleanup needed.
         """
+        work, on_terminal = spec.work, spec.on_terminal
+        if work is None or on_terminal is None:
+            raise ValueError("begin requires work and on_terminal")
         if spec.exclusion is not None and self._gate is None:
             raise RuntimeError("operation requires an exclusion gate")
         if spec.wants_progress and self._progress is None:
             raise RuntimeError("operation requires a progress service")
-        if spec.exclusion is not None and self._gate is not None:
-            self._gate.ensure_can_start(
-                spec.exclusion.kind, resource_id=spec.exclusion.resource_id
-            )
-
-        origin = self._bus.current_origin
-        token = self._handles.create(cancel_hook=spec.cancel_hook, origin=origin)
-
+        token, origin = self._create_operation(spec)
         settle = self._make_settle(spec, token)
         try:
-            if spec.on_opened is not None:
-                spec.on_opened(token)
-            if spec.exclusion is not None and self._gate is not None:
-                self._gate.register(
-                    token,
-                    spec.exclusion.kind,
-                    owner_id=spec.exclusion.owner_id,
-                    origin_kind=origin.kind,
-                    note=spec.exclusion.note,
-                    resource_id=spec.exclusion.resource_id,
-                )
-            factory = (
-                self._progress.make_factory(token, spec.owner_id)
-                if spec.wants_progress and self._progress is not None
-                else None
-            )
+            factory = self._register_resources(spec, token, origin)
             self._bg.submit(
-                lambda: spec.work(factory),
+                lambda: work(factory),
                 run_in_pool=spec.run_in_pool,
                 on_done=lambda r: self._deliver_terminal(
                     token,
-                    spec.on_terminal,
+                    on_terminal,
                     settle,
                     BgResult(ok=True, result=r, error=None),
                 ),
                 on_error=lambda e: self._deliver_terminal(
                     token,
-                    spec.on_terminal,
+                    on_terminal,
                     settle,
                     BgResult(ok=False, result=NO_RESULT, error=e),
                 ),
@@ -244,6 +327,41 @@ class OperationRunner:
             raise
 
         return token
+
+    def _create_operation(self, spec: OperationSpec) -> tuple[int, EventOrigin]:
+        """Check admission, capture origin and create a handle before cleanup applies."""
+        if spec.exclusion is not None and self._gate is not None:
+            self._gate.ensure_can_start(
+                spec.exclusion.kind, resource_id=spec.exclusion.resource_id
+            )
+        origin = self._bus.current_origin
+        token = self._handles.create(cancel_hook=spec.cancel_hook, origin=origin)
+        return token, origin
+
+    def _register_resources(
+        self, spec: OperationSpec, token: int, origin: EventOrigin
+    ) -> Callable[..., object] | None:
+        """Notify the owner, register exclusion and allocate requested progress.
+
+        The entrypoint owns the cleanup boundary and its exception policy.
+        Registration uses the origin captured before on_opened can change it.
+        """
+        if spec.on_opened is not None:
+            spec.on_opened(token)
+        if spec.exclusion is not None and self._gate is not None:
+            self._gate.register(
+                token,
+                spec.exclusion.kind,
+                owner_id=spec.exclusion.owner_id,
+                origin_kind=origin.kind,
+                note=spec.exclusion.note,
+                resource_id=spec.exclusion.resource_id,
+            )
+        return (
+            self._progress.make_factory(token, spec.owner_id)
+            if spec.wants_progress and self._progress is not None
+            else None
+        )
 
     def continue_operation[R](
         self,

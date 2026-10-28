@@ -26,6 +26,8 @@ from zcu_tools.gui.app.measure.interactive_flux_pick import (
     FluxPickParams,
     FluxPickResult,
 )
+from zcu_tools.gui.app.measure.services.pane_commit import commit_run
+from zcu_tools.gui.app.measure.state import RunPaneState
 from zcu_tools.gui.app.measure.ui.exp_tab_widget import ExpTabWidget
 from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
@@ -141,7 +143,15 @@ def start_mounted(
     run_result = RunRecord(cfg=None, result=SpectrumResult(devs, freqs, signals))
     if native_source is None:
         parameters = fx.ctrl.context_control.read_context()
-        fx.state.update_tab_result(tab_id, run_result, parameters=parameters)
+        commit_run(
+            fx.state,
+            tab_id,
+            RunPaneState(
+                result=run_result,
+                storage=parameters.storage,
+                parameters=parameters,
+            ),
+        )
     else:
         assert isinstance(run_result.result, SpectrumResult)
         load_native_spectrum(fx, tab_id, native_source, run_result.result)
@@ -163,12 +173,19 @@ def start_interactive(fx, *, background=None):
     devs = np.linspace(-5.0, 5.0, 60)
     freqs = np.linspace(4.0, 5.0, 30)
     signals = np.exp(-(devs[:, None] ** 2)) * np.ones((1, 30))
-    fx.state.update_tab_result(
+    commit_run(
+        fx.state,
         tab_id,
-        RunRecord(
-            None, SpectrumResult(devs, freqs, np.asarray(signals, dtype=np.complex128))
+        RunPaneState(
+            result=RunRecord(
+                None,
+                SpectrumResult(devs, freqs, np.asarray(signals, dtype=np.complex128)),
+            ),
+            storage=None
+            if fx.ctrl.context_control.read_context() is None
+            else fx.ctrl.context_control.read_context().storage,
+            parameters=fx.ctrl.context_control.read_context(),
         ),
-        parameters=fx.ctrl.context_control.read_context(),
     )
     plots = Plots(NonPresentingHost())
     plugin = make_flux_pick_plugin(

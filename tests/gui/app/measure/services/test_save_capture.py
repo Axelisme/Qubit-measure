@@ -10,8 +10,9 @@ import pytest
 from qtpy.QtWidgets import QApplication
 from zcu_tools.cfg_model import ConfigBase, ConstWaveformCfg, PulseSpec
 from zcu_tools.gui.app.measure.artifacts import SaveControlFacet, SaveService
+from zcu_tools.gui.app.measure.services.pane_commit import commit_run
 from zcu_tools.gui.app.measure.services.tab import TabService
-from zcu_tools.gui.app.measure.state import State
+from zcu_tools.gui.app.measure.state import RunPaneState, State
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.form_adapter import Form
@@ -208,11 +209,14 @@ def test_tab_created_without_context_does_not_gain_later_save_origin(
             form_sources=lambda aliases: form_sources(empty_state, aliases),
         )
         tab_id = tabs.new_tab("pure")
-        empty_state.update_tab_result(
+        commit_run(
+            empty_state,
             tab_id,
-            replace(
-                require_record(native.state.get_tab("tab").run),
-                metadata=native.metadata,
+            RunPaneState(
+                result=replace(
+                    require_record(native.state.get_tab("tab").run),
+                    metadata=native.metadata,
+                )
             ),
         )
         empty_state.set_context(native.state.session_env)

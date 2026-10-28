@@ -36,7 +36,8 @@ from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.services import (
     create_persistence_caretaker as PersistenceCaretaker,
 )
-from zcu_tools.gui.app.measure.state import DeviceStatus, State
+from zcu_tools.gui.app.measure.services.pane_commit import commit_run
+from zcu_tools.gui.app.measure.state import DeviceStatus, RunPaneState, State
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.session.context_types import (
     CommandOrigin,
@@ -140,7 +141,9 @@ def cf(qapp, tmp_path) -> Iterator[ControllerFixture]:
 
 def _start_interactive_analysis(cf: ControllerFixture) -> tuple[str, int]:
     tab_id = cf.ctrl.tab_control.new_tab("interactive")
-    cf.state.update_tab_result(tab_id, RunRecord(cfg=None, result=object()))
+    commit_run(
+        cf.state, tab_id, RunPaneState(result=RunRecord(cfg=None, result=object()))
+    )
     token = cf.ctrl.run_analyze_control.analyze(tab_id, None)
     cf.view.mount_interactive_analysis.assert_called_once()
     assert cf.ctrl.run_analyze_control.get_interactive(tab_id) is not None

@@ -23,6 +23,8 @@ from zcu_tools.gui.app.measure.services.form_contracts import (
     CfgPreconditionError,
     CfgPreconditionReason,
 )
+from zcu_tools.gui.app.measure.services.pane_commit import commit_run
+from zcu_tools.gui.app.measure.state import RunPaneState
 from zcu_tools.gui.remote.framing import MAX_LINE_BYTES
 from zcu_tools.gui.session.context_types import EntryRequest
 from zcu_tools.program.v2.mocksoc import make_mock_soccfg
@@ -547,10 +549,15 @@ def test_socket_snapshot_exposes_result_replacement(fx) -> None:
         assert initial["post_analysis_state"]["available"] is False
         # A non-serializable result stays in State; the operational projection
         # identifies replacements without requiring its payload on the wire.
-        fx.state.update_tab_loaded_result(
+        commit_run(
+            fx.state,
             tab_id,
-            replace(RunRecord(None, object()), metadata=historical_metadata()),
-            "loaded.h5",
+            RunPaneState(
+                result=replace(
+                    RunRecord(None, object()), metadata=historical_metadata()
+                ),
+                source_path="loaded.h5",
+            ),
         )
         observed = rpc("tab.snapshot", {"tab_id": tab_id})["result"]["tabs"][0]
         assert observed["result_state"] == {
@@ -560,10 +567,15 @@ def test_socket_snapshot_exposes_result_replacement(fx) -> None:
             "source_operation_id": None,
             "partial_result": False,
         }
-        fx.state.update_tab_loaded_result(
+        commit_run(
+            fx.state,
             tab_id,
-            replace(RunRecord(None, object()), metadata=historical_metadata()),
-            "loaded.h5",
+            RunPaneState(
+                result=replace(
+                    RunRecord(None, object()), metadata=historical_metadata()
+                ),
+                source_path="loaded.h5",
+            ),
         )
         replacement = rpc("tab.snapshot", {"tab_id": tab_id})["result"]["tabs"][0]
         assert replacement["result_state"]["revision"] == 2

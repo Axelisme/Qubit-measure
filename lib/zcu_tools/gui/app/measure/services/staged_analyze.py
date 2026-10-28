@@ -9,10 +9,9 @@ things differ between them — the gate + request assembly that starts the work,
 failure. This base owns the lifecycle skeleton; each subclass fills the three
 seams.
 
-Stage 2c: FIT/post analyze changed from inline bg.submit to OperationRunner
-(ADR-0066). Interactive analyze (no worker, user-paced main-thread strategy)
-still uses the direct _open_token path — it is explicitly excluded from runner
-(stage2c_spec.md).
+FIT/post analyze submit workers through OperationRunner (ADR-0066).
+Interactive analyze retains an explicit runner lease across user-paced callbacks.
+Each callback enters the captured event origin only while it executes.
 
 The base deliberately holds NO operation-kind knowledge beyond "off-main work that
 settles a per-tab handle": the INTERACTIVE branch (no worker, user-paced) and the
@@ -38,6 +37,7 @@ from zcu_tools.gui.session.operation_handles import (
 )
 from zcu_tools.gui.session.operation_runner import (
     BgResult,
+    OperationLease,
     OperationRunner,
     OperationSpec,
     SettleFn,
@@ -48,7 +48,7 @@ logger = logging.getLogger(__name__)
 if TYPE_CHECKING:
     from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 
-    from .ports import AnalyzeStatePort
+    from ..state import State
 
 
 class StagedAnalyzeService:
@@ -58,8 +58,8 @@ class StagedAnalyzeService:
     success and failure. The per-tab token map, failure terminal path, and
     start/finish templates are owned here.
 
-    FIT/post analyze delegate bg submission to OperationRunner (_submit_with_runner).
-    Interactive analyze still uses _open_token + _release directly (no runner).
+    FIT/post analyze delegate worker submission to OperationRunner.
+    Interactive analyze retains runner leases until a finish or cancel callback.
     """
 
     STARTED_FACT: ClassVar[TabInteractionFact]
@@ -70,7 +70,7 @@ class StagedAnalyzeService:
 
     def __init__(
         self,
-        state: AnalyzeStatePort,
+        state: State,
         runner: OperationRunner,
         bus: EventBus,
         handles: OperationHandles,
@@ -84,6 +84,8 @@ class StagedAnalyzeService:
         # start clobber the first, leaking the first's handle. Keyed by tab_id,
         # every terminal path settles exactly the token its own start created.
         self._active_tokens: dict[str, int] = {}
+        # Only interactive operations retain resources across owner callbacks.
+        self._interactive_leases: dict[str, OperationLease] = {}
 
     def active_operations(self) -> tuple[tuple[str, int], ...]:
         """Return each tab's live handle for status, regardless of starter."""
@@ -92,28 +94,25 @@ class StagedAnalyzeService:
     # -- shared handle bookkeeping -----------------------------------------
 
     def _release(self, tab_id: str, outcome: OperationOutcome) -> None:
-        """Settle and remove the per-tab handle (interactive path only).
-
-        FIT/post use the runner-injected settle function; only interactive
-        analyze settles via this method (no runner, direct _open_token).
-        """
-        token = self._active_tokens.pop(tab_id, None)
-        if token is not None:
-            self._handles.settle(token, outcome)
+        """Remove interactive ownership and give its domain outcome to the runner."""
+        self._active_tokens.pop(tab_id, None)
+        lease = self._interactive_leases.pop(tab_id, None)
+        if lease is not None:
+            lease.settle(outcome)
 
     def _open_token(self, tab_id: str, cancel_hook: CancelHook | None = None) -> int:
-        """Mint and register the per-tab operation handle (pending).
-
-        Used ONLY by the INTERACTIVE analyze path (no worker, user-paced). FIT
-        and post-analyze handles are minted by OperationRunner._make_settle.
-        ``cancel_hook`` is forwarded to OperationChannel.create; pass None for
-        FIT-analyze (not cancellable) or a teardown callable for interactive.
-        """
-        token = self._handles.create(
-            cancel_hook=cancel_hook, origin=self._bus.current_origin
+        """Retain an interactive lease without retaining ambient event origin."""
+        lease = self._runner.open_lease(
+            OperationSpec(
+                exclusion=None,
+                owner_id=tab_id,
+                wants_progress=False,
+                cancel_hook=cancel_hook,
+            )
         )
-        self._active_tokens[tab_id] = token
-        return token
+        self._interactive_leases[tab_id] = lease
+        self._active_tokens[tab_id] = lease.token
+        return lease.token
 
     def _begin(self, tab_id: str) -> None:
         """Mark the tab analyzing and announce the interaction change.
@@ -234,9 +233,8 @@ class StagedAnalyzeService:
                 )
             )
             raise
-        # runner.begin mints and registers the token internally; we record it in
-        # _active_tokens so the interactive accessors cannot see it (they check
-        # _interactive_tabs, not _active_tokens, but _release uses _active_tokens).
+        # Keep all live operations visible to status queries. Interactive
+        # accessors distinguish their own tokens through _interactive_tabs.
         self._active_tokens[tab_id] = token
 
         # POST-BEGIN: mark analyzing after submit succeeds (begin-raise = no worker).

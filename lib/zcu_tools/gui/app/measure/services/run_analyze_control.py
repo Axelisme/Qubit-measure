@@ -20,7 +20,7 @@ from zcu_tools.gui.interactive import PluginDefinition, Session
 from zcu_tools.gui.plotting.explicit import QtPlotHost
 from zcu_tools.gui.session.context_types import CommandOrigin
 
-from .plot_lifecycle import discard_unpublished_plots
+from .pane_commit import discard_unpublished_plots
 
 logger = logging.getLogger(__name__)
 _GUI_ORIGIN = CommandOrigin("gui")
