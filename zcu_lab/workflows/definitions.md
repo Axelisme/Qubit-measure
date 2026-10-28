@@ -167,6 +167,8 @@ Tunables 的 `uniform` 預設 true，控制 T1 的線性 delay sweep。設 false
 Pause 保留 pair 的區域進度，Resume 繼續等待中的 operation；Stop 保留既有 commits。
 區域變數 `trend_points` 保留具名 scalar pair tuple，不保存 Figure 或 axes。
 `overnight.trend.draw_overnight_trend` 直接畫這些 pair，缺值維持 gaps，不重 fit。
+缺值在資料區只標 `× [編號]`，完整原因依編號列在兩個 panel 下方的換行註腳。
+圖高隨註腳行數增加，保留軸標籤空間。沒有缺值時不留註腳區。
 每個 pair 開始與完整 pair 提交前更新 `overnight_trend`。圖可能先於 journal commit 顯示，不是提交證據。
 只有一個 pair 時，以 actual_start 為中心取 ±plan.start_interval_s，UTC 刻度顯示 HH:MM:SS。多 pair 保留實際時間與自動範圍。
 宿主不輪詢 committed records 來呼叫它們。Workflow 透過 `env.plots` 決定資料與更新時機，framework 不保證只畫 journal 已提交的紀錄。
