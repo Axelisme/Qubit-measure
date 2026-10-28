@@ -85,7 +85,11 @@ State 提交由單一 owner loop 序列化。Session 的 `OwnerScheduler` 可由
 
 Measure 的 `services.pane_commit` 擁有 pane 提交、artifact 規劃、版本更新與退役資源清理。State 每種 pane 只提供一個被動交換入口，安裝備妥的資料並回傳退役資源。Run、Analyze、PostAnalyze、Load 與 Tab 將提交或清理交給 pane_commit，不各自維護 draft teardown 與 plots release。Run 與 Load 不為清理 draft 而依賴 WritebackService。
 
-未發布 plots 的 discard 也由 pane_commit 擁有。各 operation 保留 admission、terminal policy 與觸發清理的時機，不把 operation lifecycle 搬進提交 module。提交順序、失敗語意與 pane 失效關係見 [measure owners](../../lib/zcu_tools/gui/app/measure/README.md#owners)。這是 app 內的責任收斂，既有 C8／C9 分層與無循環契約、artifacts／writeback 分隔契約不變。
+State 的唯讀 pane transition preview 與實際 swap 共用退役選擇，回傳具名的失效事實。預覽不提交結果，不改版本、artifacts、draft 或 plots，也不清理資源。Service／control 只轉接這些事實，remote 只投影既有 wire 字串與順序，不另算失效規則。
+
+未發布 plots 的 discard 也由 pane_commit 擁有。各 operation 透過 GuardService 執行 domain admission，hardware exclusion 仍由啟動時的 gate 裁決，見 [[0066]]。Operation 保留 terminal policy 與觸發清理的時機，不把 operation lifecycle 搬進提交 module。提交順序、失敗語意與 pane 失效關係見 [measure owners](../../lib/zcu_tools/gui/app/measure/README.md#owners)。這是 app 內的責任收斂，既有 C8／C9 分層與無循環契約、artifacts／writeback 分隔契約不變。
+
+使用者於 2026-10-28 以「都可以」確認 State 預覽與 swap 共用退役選擇，以及 Guard、gate、operation 的上述分工。
 
 使用者於 2026-10-28 對 pane 提交與退役清理集中到單一 module 的建議裁定：「強烈建議的都採用」。集中 owner 後，新增退役資源的清理規則不再需要同步修改五個 service。
 
@@ -209,7 +213,7 @@ executor 與 remote handler／wire types 留在原 owner。`artifacts` 與 `writ
 `.importlinter` 的 `measure-artifacts-no-writeback` 與 `measure-writeback-no-artifacts`
 contracts 分別檢查兩個方向。
 
-Framework 擁有它消費的實驗 adapter interface，實驗側提供宣告和行為，app composition 注入 catalog。`AdapterCapabilities` 由 Analysis／Interactive 與 PostAnalysis 值推導分析支援範圍，不是作者旗標。Measure 的 Qt tab 依 analysis／post-analysis 宣告建立控制項；remote 的 writeback subtab params 依宣告拒絕不支援的分析類別。Run guard 一律要求 SoC 連線；每個 adapter 都可嘗試 Load，由 spec 判定檔案相容性，不支援時顯示原因並保留舊成果。Load admission 不要求目前 context。這些局部檢查不代表所有 application 操作入口都已用同一份宣告拒絕不支援的操作。`check_analyze` 只要求 Run result，不要求目前 context，也不檢查 analysis capability。非 interactive 的 analyze 會進 FIT 路徑，post-analyze 入口也未查 post-analysis capability。補齊這些入口的核准目標與轉正條件見 [GUI capability draft](draft/gui-adapter-capability-guards.md)。
+Framework 擁有它消費的實驗 adapter interface，實驗側提供宣告和行為，app composition 注入 catalog。`AdapterCapabilities` 由 Analysis／Interactive 與 PostAnalysis 值推導分析支援範圍，不是作者旗標。Measure 的 Qt tab 依 analysis／post-analysis 宣告建立控制項；remote 的 writeback subtab params 依宣告拒絕不支援的分析類別。Run guard 一律要求 SoC 連線；每個 adapter 都可嘗試 Load，由 spec 判定檔案相容性，不支援時顯示原因並保留舊成果。Load admission 不要求目前 context。`GuardService.admit` 在既有 result 前提之後拒絕缺少 analysis／post-analysis 的操作，再檢查 tab busy。Analyze 不要求目前 context。Catalog reload／shutdown 的不可用狀態是所有 action 的第一個前提；Run、Load 不新增 storage 前提。Application 提供同一份 decision 給 UI 與 remote 的 admission 投影，hardware exclusion 仍由 operation gate 裁決。
 
 Capability 不等於當次 readiness、檔案相容、權限或 hardware lease。Framework 在既有 guard 和 operation 邊界分別判斷部分 context／cfg 與動態 busy 狀態，額外實驗驗證放在 adapter.run 開頭，不提供 validate_run_request hook。這不代替 execution guard 或硬體操作。四種值、options 生成與建值期檢查見 [measure adapter contract](../../lib/zcu_tools/gui/app/measure/README.md) 及 [experiment adapter owner](../../zcu_lab/v2/gui-contracts.md)。
 

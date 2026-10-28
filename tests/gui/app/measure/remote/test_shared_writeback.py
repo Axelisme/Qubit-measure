@@ -7,6 +7,7 @@ import pytest
 from pydantic import TypeAdapter
 from zcu_tools.format_version import YamlValue
 from zcu_tools.gui.app.measure import adapter as proposals
+from zcu_tools.gui.app.measure.services import AdmissionDecision, TabAction
 from zcu_tools.gui.app.measure.services.ports import AnalysisPaneSnapshot, TabSnapshot
 from zcu_tools.gui.app.measure.writeback import (
     WritebackDraft,
@@ -56,6 +57,10 @@ class WritebackHarness:
         self.service = service
         self.draft = draft
 
+    def admit(self, tab_id: str, action: TabAction) -> AdmissionDecision:
+        """Keep domain admission outside these captured-destination wire cases."""
+        return AdmissionDecision(True, None, "")
+
     def has_tab(self, tab_id: str) -> bool:
         return tab_id == "tab"
 
@@ -73,6 +78,7 @@ class WritebackHarness:
             analysis=AnalysisPaneSnapshot(
                 params=None,
                 result=None,
+                has_result=False,
                 figures=None,
                 writeback_items=self.draft.items,
                 has_writeback_draft=True,

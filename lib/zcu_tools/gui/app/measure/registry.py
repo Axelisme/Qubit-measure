@@ -4,7 +4,7 @@ import logging
 from collections.abc import Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
-from typing import Any, cast
+from typing import Any
 
 from zcu_tools.cfg_model import TemplateDef
 
@@ -66,8 +66,7 @@ class Registry:
             raise ValueError(f"Adapter {name!r} is already registered")
         if not isinstance(adapter, Adapter):
             raise TypeError(f"Adapter {name!r} must be an Adapter value")
-        # tolerated(cast): heterogeneous adapter registry; per-adapter generics are checked at each DEFINITION
-        self._mapping[name] = cast(RegisteredAdapter, adapter)
+        self._mapping[name] = adapter
 
     def create(self, name: str) -> RegisteredAdapter:
         if name not in self._mapping:

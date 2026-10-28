@@ -88,12 +88,14 @@ def make_snapshot(tab_id: str, *, analysis=AnalysisMode.FIT, post=False):
     analysis_snap = AnalysisPaneSnapshot(
         params=DummyParams() if analysis is not AnalysisMode.NONE else None,
         result=object() if analysis is not AnalysisMode.NONE else None,
+        has_result=analysis is not AnalysisMode.NONE,
         figures=None,
         writeback_items=(),
     )
     post_snap = PostAnalysisPaneSnapshot(
         params=DummyPostParams() if post else None,
         result=object() if post else None,
+        has_result=post,
         figures=None,
         writeback_items=(),
     )
@@ -108,11 +110,7 @@ def make_snapshot(tab_id: str, *, analysis=AnalysisMode.FIT, post=False):
             is_analyzing=False,
             has_context=True,
             has_active_context=True,
-            has_soc=True,
             has_run_result=True,
-            has_analyze_result=analysis is not AnalysisMode.NONE,
-            has_figure=False,
-            has_post_analyze_result=post,
         ),
         capabilities=caps,
         run=run_snap,

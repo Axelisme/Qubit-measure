@@ -11,6 +11,8 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
+from zcu_tools.gui.app.measure.services import AdmissionDecision
+from zcu_tools.gui.app.measure.state import PaneTransitionPreview
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 
 from tests.gui.app.measure._synthetic import EmptyParams
@@ -21,10 +23,13 @@ from ._helpers import dispatch_handler as _dispatch
 def _snapshot(*, has_analyze_result: bool, post_params: object) -> SimpleNamespace:
     """Minimal pane-qualified snapshot consumed by the post handlers."""
     return SimpleNamespace(
-        interaction=SimpleNamespace(
-            has_analyze_result=has_analyze_result, has_post_analyze_result=False
+        analysis=SimpleNamespace(
+            result=object() if has_analyze_result else None,
+            has_result=has_analyze_result,
         ),
-        post_analysis=SimpleNamespace(params=post_params, has_writeback_draft=False),
+        post_analysis=SimpleNamespace(
+            params=post_params, has_writeback_draft=False, result=None, has_result=False
+        ),
     )
 
 
@@ -36,6 +41,17 @@ def _ctrl(*, has_analyze_result: bool = True, post_params: object = _DEFAULT):
         post_params = EmptyParams()
     ctrl = MagicMock()
     ctrl.has_tab.return_value = True
+    ctrl.preview_pane_transition.return_value = PaneTransitionPreview(
+        analysis_result=False,
+        analysis_writeback=False,
+        post_analysis_result=False,
+        post_analysis_writeback=False,
+    )
+    ctrl.admit.return_value = (
+        AdmissionDecision(True, None, "")
+        if has_analyze_result
+        else AdmissionDecision(False, "no_analyze_result", "No primary result")
+    )
     ctrl.get_tab_snapshot.return_value = _snapshot(
         has_analyze_result=has_analyze_result, post_params=post_params
     )
@@ -83,7 +99,7 @@ def test_start_without_primary_result_fast_fails():
 
 def test_start_unknown_tab_rejected():
     ctrl = _ctrl()
-    ctrl.has_tab.return_value = False
+    ctrl.admit.return_value = AdmissionDecision(False, "unknown_tab", "Unknown tab")
     with pytest.raises(RemoteError) as excinfo:
         _dispatch(ctrl, "tab.post_analyze", {"tab_id": "nope", "updates": {}})
     assert excinfo.value.code is ErrorCode.INVALID_PARAMS
@@ -116,6 +132,8 @@ def test_get_result_summarizes():
         "confusion": [[1.0, 0.0], [0.0, 1.0]],
     }
     ctrl.get_post_analyze_result.return_value = result
+    ctrl.get_tab_snapshot.return_value.post_analysis.result = result
+    ctrl.get_tab_snapshot.return_value.post_analysis.has_result = True
     res = _dispatch(ctrl, "tab.get_post_analyze_result", {"tab_id": "t"})
     assert res == {
         "summary": {

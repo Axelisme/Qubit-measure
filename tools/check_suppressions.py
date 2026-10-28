@@ -43,19 +43,16 @@ from typing import Final
 
 import _support
 
-# kind -> pattern anchored at the start of one comment token.
-#
-# Anchored, not searched: a directive only works where the tool reads it, at the
-# head of its own comment. Searching anywhere in the comment would also count
-# prose that merely mentions a directive -- this file's own explanation of
-# `# pyright: reportFoo=false` counted as a use of it until the patterns moved.
+# Inline directives start a hash-delimited segment, not necessarily the token.
+# File-level Pyright settings only work at the start of the comment token.
+# Keep the hash in each pattern so prose that only mentions the words is skipped.
 COMMENT_SUPPRESSIONS: Final = {
     "noqa": re.compile(r"#\s*noqa", re.IGNORECASE),
     "type-ignore": re.compile(r"#\s*type:\s*ignore"),
     "pyright-ignore": re.compile(r"#\s*pyright:\s*ignore"),
     # `# pyright: reportFoo=false` turns a rule off for a whole file, which is the
     # broadest silencer available and the one most worth seeing grow.
-    "pyright-file-rule": re.compile(r"#\s*pyright:\s*\w+\s*=\s*(?:false|none)", re.I),
+    "pyright-file-rule": re.compile(r"^#\s*pyright:\s*\w+\s*=\s*(?:false|none)", re.I),
 }
 
 CALL_SUPPRESSIONS: Final = {"typing.cast": "cast"}
@@ -73,6 +70,21 @@ class Suppression:
     count: int
 
 
+def comment_directives(comment: str) -> dict[str, re.Match[str]]:
+    """Return the first suppression match of each kind in a COMMENT token.
+
+    Inline directives must start a hash-delimited segment; file-level Pyright
+    settings must start the token itself. Match offsets refer to the original
+    token so callers can parse bracketed scope and trailing text.
+    """
+    found: dict[str, re.Match[str]] = {}
+    for kind, pattern in COMMENT_SUPPRESSIONS.items():
+        match = pattern.search(comment)
+        if match is not None:
+            found[kind] = match
+    return found
+
+
 def comment_suppressions(source: str) -> dict[str, int]:
     """Return {kind: count} over the comments of one module."""
     found: dict[str, int] = {}
@@ -81,9 +93,8 @@ def comment_suppressions(source: str) -> dict[str, int]:
         for token in tokens:
             if token.type != tokenize.COMMENT:
                 continue
-            for kind, pattern in COMMENT_SUPPRESSIONS.items():
-                if pattern.match(token.string):
-                    found[kind] = found.get(kind, 0) + 1
+            for kind in comment_directives(token.string):
+                found[kind] = found.get(kind, 0) + 1
     except (tokenize.TokenError, IndentationError, SyntaxError):
         # Keep what was read. An unterminated bracket stops the tokenizer at the
         # end of the file, and discarding the whole result would let a broken file

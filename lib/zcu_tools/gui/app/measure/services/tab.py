@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.registry import Registry
-    from zcu_tools.gui.app.measure.state import State
+    from zcu_tools.gui.app.measure.state import PaneTransitionPreview, State
     from zcu_tools.resources.entry import PointStorageBinding
 
     from ..writeback import WritebackService
@@ -85,6 +85,12 @@ class TabService:
         self._cfg_resources = cfg_resources
         self._form_sources = form_sources
 
+    def preview_pane_transition(
+        self, tab_id: str, stage: Literal["analysis", "post_analysis"]
+    ) -> PaneTransitionPreview:
+        """Forward State's read-only retirement facts; its access errors propagate."""
+        return self._state.preview_pane_transition(tab_id, stage)
+
     def get_snapshot(self, tab_id: str) -> TabSnapshot:
         """Build the immutable full render model for one tab (all live fields
         populated). cfg_input is raw live data. RAM reload uses the
@@ -97,13 +103,9 @@ class TabService:
             startup_active=self._state.is_startup_active(),
             has_context=ctx.has_context(),
             has_active_context=ctx.is_active(),
-            has_soc=ctx.has_soc(),
             is_running=is_running,
             is_analyzing=tab.is_analyzing,
             has_run_result=tab.has_run_result(),
-            has_analyze_result=tab.has_analyze_result(),
-            has_figure=tab.has_figure(),
-            has_post_analyze_result=tab.has_post_analyze_result(),
         )
 
         # Pane-owned writeback items via opaque drafts.
@@ -136,6 +138,7 @@ class TabService:
             analysis=AnalysisPaneSnapshot(
                 params=tab.analysis.params,
                 result=tab.analysis.result,
+                has_result=tab.has_analyze_result(),
                 figures=tab.analysis.plots,
                 writeback_items=analysis_items,
                 unavailable_reasons=(
@@ -151,6 +154,7 @@ class TabService:
             post_analysis=PostAnalysisPaneSnapshot(
                 params=tab.post_analysis.params,
                 result=tab.post_analysis.result,
+                has_result=tab.has_post_analyze_result(),
                 figures=tab.post_analysis.plots,
                 writeback_items=post_items,
                 unavailable_reasons=(

@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Literal
 
 import numpy as np
+from numpy.typing import NDArray
 from zcu_tools.datafile import (
     Axis,
     Container,
@@ -59,39 +60,12 @@ def _validate_gain_grid(
         )
 
 
-def prepare_export(
+def _collect_mist_traces(
     plan: MISTPlan,
     points: tuple[SavedRecord[MISTPoint], ...],
-    *,
-    mode: Literal["excited", "ground"] | None = None,
-) -> PreparedRunData:
-    """Assemble raw MIST response across flux and gain for offline analysis.
-
-    Stopped partial traces retain their native reference with success=False.
-    They export raw IQ, including NaN, without contributing an acquisition-success
-    value. Complete and stopped native acquisitions are accepted; other completion
-    states reject.
-
-    Return Flux×actualgain Signal and Flux-only Success (1 or NaN). The gain
-    axis comes from saved acquisitions, not the requested plan. All acquired
-    points must have exactly the same actual gain grid; mismatches raise a
-    source-named error listing both point indexes and their gain values.
-    mode selects a preparation; None selects ground for a ground-only plan and
-    excited otherwise. Historical single-trace records retain their native file.
-
-    plan is the fixed manifest plan; points are structured saved commits. Only
-    named final mist/gain files enter the payload. Missing rows retain NaN.
-    Actual gain must equal the plan grid exactly, without rounding/union or
-    interpolation. No usable trace, bad index/reference or schema mismatch raises
-    before outputs are allocated; the source record/native path is diagnosed.
-    """
-    mode = (
-        ("ground" if plan.measure_mode == "ground" else "excited")
-        if mode is None
-        else mode
-    )
-    if plan.measure_mode != "both" and mode != plan.measure_mode:
-        raise ValueError(f"Preparation {mode!r} was not requested by the MIST plan")
+    mode: Literal["excited", "ground"],
+) -> tuple[NDArray[np.float64], NDArray[np.float64], dict[int, LabberPayload]]:
+    """Load selected traces, preserving source-path errors and missing-row NaNs."""
     fluxes = np.array(plan.fluxes)
     success = np.full(len(fluxes), np.nan)
     seen: set[int] = set()
@@ -133,6 +107,43 @@ def prepare_export(
             raise ValueError(f"{saved.record_path}: {error}") from error
     if not traces:
         raise ValueError("No usable committed MIST acquisition")
+    return fluxes, success, traces
+
+
+def prepare_export(
+    plan: MISTPlan,
+    points: tuple[SavedRecord[MISTPoint], ...],
+    *,
+    mode: Literal["excited", "ground"] | None = None,
+) -> PreparedRunData:
+    """Assemble raw MIST response across flux and gain for offline analysis.
+
+    Stopped partial traces retain their native reference with success=False.
+    They export raw IQ, including NaN, without contributing an acquisition-success
+    value. Complete and stopped native acquisitions are accepted; other completion
+    states reject.
+
+    Return Flux×actualgain Signal and Flux-only Success (1 or NaN). The gain
+    axis comes from saved acquisitions, not the requested plan. All acquired
+    points must have exactly the same actual gain grid; mismatches raise a
+    source-named error listing both point indexes and their gain values.
+    mode selects a preparation; None selects ground for a ground-only plan and
+    excited otherwise. Historical single-trace records retain their native file.
+
+    plan is the fixed manifest plan; points are structured saved commits. Only
+    named final mist/gain files enter the payload. Missing rows retain NaN.
+    Actual gain must equal the plan grid exactly, without rounding/union or
+    interpolation. No usable trace, bad index/reference or schema mismatch raises
+    before outputs are allocated; the source record/native path is diagnosed.
+    """
+    mode = (
+        ("ground" if plan.measure_mode == "ground" else "excited")
+        if mode is None
+        else mode
+    )
+    if plan.measure_mode != "both" and mode != plan.measure_mode:
+        raise ValueError(f"Preparation {mode!r} was not requested by the MIST plan")
+    fluxes, success, traces = _collect_mist_traces(plan, points, mode)
     gains = next(iter(traces.values())).axes[0].values
     signal = np.full((len(fluxes), len(gains)), complex(np.nan, np.nan))
     for index, trace in traces.items():

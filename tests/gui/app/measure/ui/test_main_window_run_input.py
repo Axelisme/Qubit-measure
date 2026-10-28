@@ -12,6 +12,7 @@ from qtpy.QtWidgets import (
     QLineEdit,
 )
 from zcu_tools.cfg_model import ConfigBase
+from zcu_tools.gui.app.measure.services import AdmissionDecision
 from zcu_tools.gui.app.measure.services.tab_form import (
     AcceptedFormConfig,
     TabFormResource,
@@ -72,6 +73,11 @@ def run_form(
     sources = State(SessionEnv(parameters=None, soc=None, soccfg=None))
     owner = make_form(Form(ValueCfg, {}), state=sources)
     ctrl.cfg_resources.lookup.side_effect = lambda tab_id: owner
+    ctrl.admit.side_effect = lambda _tab_id, _action: (
+        AdmissionDecision(False, "not_valid", reason)
+        if (reason := owner.run_invalid_reason()) is not None
+        else AdmissionDecision(True, None, "")
+    )
     runs: list[AcceptedFormConfig] = []
 
     def start(tab_id: str) -> None:
@@ -167,9 +173,11 @@ def test_valid_input_does_not_bypass_other_run_gates(
         has_figure=False,
         is_analyzing=block == "busy",
         has_active_context=block != "context",
-        has_soc=block != "soc",
         global_run_active=block == "global-run",
     )
+    if block != "global-run":
+        fx.ctrl.admit.side_effect = None
+        fx.ctrl.admit.return_value = AdmissionDecision(False, block, block)
     edit_run_input(fx, "3.5")
     assert not fx.tab.run_btn.isEnabled()
     assert fx.runs == []

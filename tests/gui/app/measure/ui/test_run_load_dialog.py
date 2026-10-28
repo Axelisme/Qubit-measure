@@ -85,9 +85,7 @@ def history_window(
             tab_id=name,
             cfg_input={},
             capabilities=AdapterCapabilities(load_data=True),
-            interaction=TabInteractionState(
-                False, False, False, True, True, False, False, False, False
-            ),
+            interaction=TabInteractionState(False, False, False, True, True, False),
             save=SavePaneSnapshot(),
         )
         for name in ("scan", "missing")
@@ -334,9 +332,7 @@ def test_main_window_routes_dialog_selection_to_existing_load(
         tab_id="tab",
         cfg_input={},
         capabilities=AdapterCapabilities(load_data=True),
-        interaction=TabInteractionState(
-            False, False, False, True, True, False, False, False, False
-        ),
+        interaction=TabInteractionState(False, False, False, True, True, False),
         save=SavePaneSnapshot(),
     )
     ctrl.save_control.list_saved_runs.return_value = rows

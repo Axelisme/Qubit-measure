@@ -19,8 +19,9 @@ from __future__ import annotations
 # Record writeback uses record IDs/kinds and written.records; no sample aliases.
 # Workflow records expose executor operations without program acquisition observations.
 # Predictor queries require device_values and explicit v2 flux; calibration returns Phi0 correction.
-WIRE_VERSION = 126
+# Tab admission shares domain-first reasons before wire source checks.
+WIRE_VERSION = 127
 
 # Bump for meaningful GUI code changes that need a reload signal.
 # Wire-contract changes bump both versions.
-GUI_VERSION = 159
+GUI_VERSION = 160

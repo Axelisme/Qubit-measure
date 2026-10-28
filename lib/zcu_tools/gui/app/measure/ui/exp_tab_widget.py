@@ -34,9 +34,10 @@ from qtpy.QtWidgets import (
 from zcu_tools.experiment.artifacts import ArtifactRef
 from zcu_tools.gui.app.measure.adapter import AdapterCapabilities, AnalysisMode
 from zcu_tools.gui.app.measure.artifacts import ArtifactSaveCenter
+from zcu_tools.gui.app.measure.services import TabAction
 from zcu_tools.gui.app.measure.ui.interactive_frontend import InteractiveFrontend
 from zcu_tools.gui.expected_error import ExpectedError
-from zcu_tools.gui.form import FormErrors, FormModel, FormState
+from zcu_tools.gui.form import FormModel, FormState
 from zcu_tools.gui.lifetime import LifetimeScope
 from zcu_tools.gui.plotting import FigureContainer
 from zcu_tools.gui.session.library_entry import LibraryEntryInvalid
@@ -114,8 +115,7 @@ class _PanelEdgeHandle(QToolButton):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setFixedSize(16, 42)
-        # tolerated: QtPy promotes the binding enum members onto Qt at runtime.
-        self.setCursor(Qt.PointingHandCursor)  # pyright: ignore[reportAttributeAccessIssue]
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setAutoRaise(True)
         self._collapsed = False
 
@@ -221,8 +221,7 @@ class ExpTabWidget(QWidget):
         )
 
         # splitter holds two panes: left (tab panel) | right (plot)
-        # tolerated: QtPy promotes the binding enum members onto Qt at runtime.
-        splitter = QSplitter(Qt.Horizontal)  # pyright: ignore[reportAttributeAccessIssue]
+        splitter = QSplitter(Qt.Orientation.Horizontal)
 
         content_row.addWidget(splitter, stretch=1)
 
@@ -780,10 +779,10 @@ class ExpTabWidget(QWidget):
         """
         if self._cfg.unavailable_reason is not None:
             return self._cfg.unavailable_reason
-        errors = self._require_editor().errors()
-        if errors is None:
-            result = self._cfg.result()
-            errors = result if isinstance(result, FormErrors) else None
+        return self._local_cfg_invalid_reason() or self._cfg.run_invalid_reason()
+
+    def _local_cfg_invalid_reason(self) -> str | None:
+        errors = None if self._editor is None else self._editor.local_parse_errors()
         if errors is None:
             return None
         path, message = next(iter(errors.messages.items()))
@@ -891,10 +890,8 @@ class ExpTabWidget(QWidget):
     def _update_run_action_row(
         self,
         state: TabInteractionState,
-        capabilities: AdapterCapabilities,
         *,
         writable: bool,
-        local_busy: bool,
     ) -> None:
         """Project idle source actions or running Stop without changing commands."""
         # Status-free action row (A5): no readiness text, only button enablement + tooltip.
@@ -917,16 +914,14 @@ class ExpTabWidget(QWidget):
             self._run_action_layout.setStretch(2, 70)
             self.run_btn.setText("Run")
             self.run_btn.setObjectName("primaryButton")
-            self._update_run_admission(
-                state, capabilities, writable=writable, local_busy=local_busy
-            )
+            self._update_run_admission(state, writable=writable)
             # Apply explicit blue primary style (idle/disabled) — objectName alone has no global stylesheet
             self.run_btn.setStyleSheet(BLUE_PRIMARY_STYLESHEET)
             # Force style refresh for objectName/stylesheet change
-            # tolerated: The initialized button has a live widget/application style after setStyleSheet.
-            self.run_btn.style().unpolish(self.run_btn)  # pyright: ignore[reportOptionalMemberAccess]
-            # tolerated: The initialized button has a live widget/application style after setStyleSheet.
-            self.run_btn.style().polish(self.run_btn)  # pyright: ignore[reportOptionalMemberAccess]
+            style = self.run_btn.style()
+            assert style is not None
+            style.unpolish(self.run_btn)
+            style.polish(self.run_btn)
             self.run_btn.update()
 
     def update_interaction_state(self, snapshot: TabSnapshot) -> None:
@@ -953,12 +948,9 @@ class ExpTabWidget(QWidget):
         )
         self._analysis_source_notice.setVisible(issue is not None)
         state = snapshot.interaction
-        capabilities = snapshot.capabilities
         writable = self._writable
         local_busy = state.is_running or state.is_analyzing
-        self._update_run_action_row(
-            state, capabilities, writable=writable, local_busy=local_busy
-        )
+        self._update_run_action_row(state, writable=writable)
 
         idle = writable and not local_busy
         self._editing_enabled = idle
@@ -967,7 +959,7 @@ class ExpTabWidget(QWidget):
         self.reset_btn.setEnabled(idle)
         self.refresh_btn.setEnabled(idle)
 
-        self._update_analysis_actions(state, idle=idle)
+        self._update_analysis_actions(snapshot, idle=idle)
         # The center renders the shared draft and State-owned artifact status.
         if snapshot.save is None:
             raise RuntimeError(
@@ -976,32 +968,29 @@ class ExpTabWidget(QWidget):
         self._save_center.set_comment_text(snapshot.save.comment)
         self._save_center.update_interaction(snapshot, writable=writable)
 
-    def _update_analysis_actions(
-        self, state: TabInteractionState, *, idle: bool
-    ) -> None:
-        """Project analysis and writeback gates for the constructed panes.
+    def _update_analysis_actions(self, snapshot: TabSnapshot, *, idle: bool) -> None:
+        """Project decisions, retaining authority and editor-local validity.
 
-        idle means the tab is writable and neither running nor analyzing.
-        Form validity gates Analyze only when parameters are populated;
-        readiness and context retain their existing action-specific gates.
+        Post writeback additionally needs its own result. The post form and
+        hint follow the visible Primary result; domain denial still wins.
         """
+        writeback = self._ctrl.admit(self.tab_id, TabAction.WRITEBACK)
         if self._has_analysis:
+            analyze = self._ctrl.admit(self.tab_id, TabAction.ANALYZE)
+            self.analyze_btn.setToolTip(analyze.message)
             self.analyze_btn.setEnabled(
                 idle
-                and state.has_context
-                and state.has_run_result
+                and analyze.allowed
                 and (not self.analyze_form.has_params() or self.analyze_form.is_valid())
             )
             self.analyze_form.setEnabled(idle)
-            self.writeback_widget.setEnabled(
-                idle and state.has_context and state.has_analyze_result
-            )
-            self.writeback_widget.setToolTip(
-                "" if state.has_context else "Select or create a working point first"
-            )
+            self.writeback_widget.setEnabled(idle and writeback.allowed)
+            self.writeback_widget.setToolTip(writeback.message)
         if self._has_post:
-            post_enabled = idle and state.has_analyze_result
+            post = self._ctrl.admit(self.tab_id, TabAction.POST_ANALYZE)
+            post_enabled = idle and post.allowed
             self.post_analyze_form.setEnabled(post_enabled)
+            self.post_analyze_btn.setToolTip(post.message)
             self.post_analyze_btn.setEnabled(
                 post_enabled
                 and (
@@ -1009,23 +998,24 @@ class ExpTabWidget(QWidget):
                     or self.post_analyze_form.is_valid()
                 )
             )
-            self._post_gate_label.setVisible(not state.has_analyze_result)
+            self._post_gate_label.setVisible(
+                snapshot.analysis is None or not snapshot.analysis.has_result
+            )
             self.post_writeback_widget.setEnabled(
-                idle and state.has_context and state.has_post_analyze_result
+                idle
+                and writeback.allowed
+                and snapshot.post_analysis is not None
+                and snapshot.post_analysis.has_result
             )
-            self.post_writeback_widget.setToolTip(
-                "" if state.has_context else "Select or create a working point first"
-            )
+            self.post_writeback_widget.setToolTip(writeback.message)
 
     def _update_run_admission(
         self,
         state: TabInteractionState,
-        capabilities: AdapterCapabilities,
         *,
         writable: bool,
-        local_busy: bool,
     ) -> None:
-        """Enable idle Run and project the first blocking reason in UI priority order."""
+        """Show domain denial before local parse errors and hardware exclusion."""
         invalid_reason = self.cfg_invalid_reason()
         cfg_valid = invalid_reason is None
         self._run_cfg_notice.setText(
@@ -1034,32 +1024,19 @@ class ExpTabWidget(QWidget):
         self._run_cfg_notice.setVisible(
             not cfg_valid and self._cfg.unavailable_reason is None
         )
-        can_run = (
-            writable
-            and not local_busy
-            and not state.global_run_active
-            and not state.startup_active
-            and state.has_active_context
-            and (not capabilities.requires_soc or state.has_soc)
-            and cfg_valid
-        )
-        self.run_btn.setEnabled(can_run)
-        if can_run:
-            self.run_btn.setToolTip("")
-        elif local_busy:
-            self.run_btn.setToolTip("Tab is busy")
+        decision = self._ctrl.admit(self.tab_id, TabAction.RUN)
+        if not decision.allowed:
+            reason = decision.message
+        elif (local_reason := self._local_cfg_invalid_reason()) is not None:
+            reason = f"Config invalid: {local_reason}"
         elif state.startup_active:
-            self.run_btn.setToolTip("Startup script is running")
+            reason = "Startup script is running"
         elif state.global_run_active:
-            self.run_btn.setToolTip("Another tab is running")
-        elif self._cfg.unavailable_reason is not None:
-            self.run_btn.setToolTip(self._cfg.unavailable_reason)
-        elif not state.has_active_context:
-            self.run_btn.setToolTip("Select or create a working point first")
-        elif capabilities.requires_soc and not state.has_soc:
-            self.run_btn.setToolTip("No SoC connection")
-        elif invalid_reason is not None:
-            self.run_btn.setToolTip(f"Config invalid: {invalid_reason}")
+            reason = "Another tab is running"
+        else:
+            reason = ""
+        self.run_btn.setEnabled(writable and decision.allowed and not reason)
+        self.run_btn.setToolTip(reason)
 
     def _bind_to_controller(self, actions: TabActions) -> None:
         tab_id = self.tab_id

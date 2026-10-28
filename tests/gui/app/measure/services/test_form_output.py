@@ -8,6 +8,7 @@ from zcu_tools.experiment import AxesSpec, ZSpec
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import Adapter, ContextReadiness, SessionEnv
+from zcu_tools.gui.app.measure.catalog import ExperimentAccess
 from zcu_tools.gui.app.measure.services.guard import GuardService
 from zcu_tools.gui.app.measure.services.tab_form import TabFormResource, TabFormSources
 from zcu_tools.gui.app.measure.state import Session, State
@@ -77,7 +78,7 @@ def test_form_output_is_forwarded_without_rebuilding() -> None:
         "choice", Session(adapter_name="choice", adapter=adapter, cfg=resource)
     )
     resource.write({("choice",): "edited"})
-    inputs = GuardService(state).capture_run_inputs("choice")
+    inputs = GuardService(state, access=ExperimentAccess()).capture_run_inputs("choice")
     cfg = inputs.accepted_cfg.cfg
     service, _gate, background, _handles = make_run_service(state)
     service.start_run(inputs, plots=make_plots())
