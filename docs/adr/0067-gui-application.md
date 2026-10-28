@@ -85,7 +85,11 @@ State 提交由單一 owner loop 序列化。Session 的 `OwnerScheduler` 可由
 
 Measure 的 `services.pane_commit` 擁有 pane 提交、artifact 規劃、版本更新與退役資源清理。State 每種 pane 只提供一個被動交換入口，安裝備妥的資料並回傳退役資源。Run、Analyze、PostAnalyze、Load 與 Tab 將提交或清理交給 pane_commit，不各自維護 draft teardown 與 plots release。Run 與 Load 不為清理 draft 而依賴 WritebackService。
 
-未發布 plots 的 discard 也由 pane_commit 擁有。各 operation 保留 admission、terminal policy 與觸發清理的時機，不把 operation lifecycle 搬進提交 module。提交順序、失敗語意與 pane 失效關係見 [measure owners](../../lib/zcu_tools/gui/app/measure/README.md#owners)。這是 app 內的責任收斂，既有 C8／C9 分層與無循環契約、artifacts／writeback 分隔契約不變。
+State 的唯讀 pane transition preview 與實際 swap 共用退役選擇，回傳具名的失效事實。預覽不提交結果，不改版本、artifacts、draft 或 plots，也不清理資源。Service／control 只轉接這些事實，remote 只投影既有 wire 字串與順序，不另算失效規則。
+
+未發布 plots 的 discard 也由 pane_commit 擁有。各 operation 透過 GuardService 執行 domain admission，hardware exclusion 仍由啟動時的 gate 裁決，見 [[0066]]。Operation 保留 terminal policy 與觸發清理的時機，不把 operation lifecycle 搬進提交 module。提交順序、失敗語意與 pane 失效關係見 [measure owners](../../lib/zcu_tools/gui/app/measure/README.md#owners)。這是 app 內的責任收斂，既有 C8／C9 分層與無循環契約、artifacts／writeback 分隔契約不變。
+
+使用者於 2026-10-28 以「都可以」確認 State 預覽與 swap 共用退役選擇，以及 Guard、gate、operation 的上述分工。
 
 使用者於 2026-10-28 對 pane 提交與退役清理集中到單一 module 的建議裁定：「強烈建議的都採用」。集中 owner 後，新增退役資源的清理規則不再需要同步修改五個 service。
 
