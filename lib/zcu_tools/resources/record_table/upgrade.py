@@ -14,6 +14,7 @@ from filelock import FileLock, Timeout
 from pydantic import JsonValue, TypeAdapter
 
 from zcu_tools.cfg_model import validate_device_name
+from zcu_tools.resources.file_lock import lock_path_for
 from zcu_tools.utils import atomic_replace
 
 
@@ -152,7 +153,11 @@ def _upgrade_file(path: Path, device_name: str, *, apply: bool) -> RecordUpgrade
     rows: list[RecordRowUpgrade] = []
     try:
         resolved.parent.stat()
-        lock = FileLock(f"{resolved}.lock", timeout=5) if apply else nullcontext()
+        lock = (
+            FileLock(str(lock_path_for(resolved)), timeout=5)
+            if apply
+            else nullcontext()
+        )
         with lock:
             original = resolved.read_bytes()
             output: list[bytes] = []

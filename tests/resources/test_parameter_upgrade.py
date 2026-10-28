@@ -210,6 +210,7 @@ def test_file_dry_run_reports_changes_and_apply_backs_up_before_idempotent_rerun
     assert list(tmp_path.iterdir()) == [path]
     (applied,) = upgrade_files((source,), plan=rename_plan, apply=True)
     assert applied.status == "applied"
+    assert not list(path.parent.glob("*.lock"))
     assert applied.backup_path is not None
     assert applied.backup_path.read_bytes() == original
     assert YAML(typ="safe").load(path) == {
@@ -388,7 +389,6 @@ def test_apply_finishes_backup_before_replace_and_retains_it_on_failure(
     assert set(tmp_path.iterdir()) == {
         source,
         backups[0],
-        source.with_suffix(".yaml.lock"),
     }
 
 
