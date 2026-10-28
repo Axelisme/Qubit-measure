@@ -273,6 +273,7 @@ def test_historical_allows_are_owner_annotations_without_reinterpretation(
     assert dispersive.params.plot_transitions.model_dump(exclude_unset=True) == allows
     assert dispersive.params.g is None
     assert dispersive.params.bare_rf is None
+    assert dispersive.source is not None
     assert dispersive.source.run_id is None
     assert dispersive.source.created_at == "2020-07-07T16:30:00+08:00"
     assert document_value(snapshot(entry.setup), "Qlegacy.ext.legacy_params") == {
@@ -632,6 +633,7 @@ def test_undefined_explicit_model_contract_remains_located_pending(
     }
     entry = open_entry(request_data)
     dispersive = load_dispersive_file(entry.dispersive_path / "Qlegacy.json")
+    assert dispersive.source is not None
     assert dispersive.source.created_at == legacy_fit["timestamp"]
     assert dispersive.params.plot_transitions is not None
     assert dispersive.params.plot_transitions.model_extra == {"0.1": [1, 2]}
