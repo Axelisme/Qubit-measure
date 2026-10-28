@@ -5,7 +5,7 @@ Evolution owns propagation and ADC owns the shared-line conditional field solve.
 """
 
 from .cavity import CavityDrive, CavityResponse
-from .flux import FluxTrack, flux_waveform, schedule
+from .flux import FluxTrack, flux_waveform, plateau_boundaries, schedule
 from .model import (
     FluxDynamics,
     JointModel,

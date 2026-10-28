@@ -740,6 +740,19 @@ def _routing_telemetry(settings: FTFSettings) -> RoutingTelemetry | None:
     return RoutingTelemetry(directory.absolute())
 
 
+def _flux_generator_channels(settings: FTFSettings) -> tuple[int, ...]:
+    """Collect declared fast-flux generators for mock firmware capacity/routes."""
+    return tuple(
+        line.gen_ch
+        for line in (
+            settings.flux_lines.f1,
+            settings.flux_lines.coupler,
+            settings.flux_lines.f2,
+        )
+        if line is not None
+    )
+
+
 def ftf(
     configuration: FTFSettings | str | Path,
     *,
@@ -753,8 +766,9 @@ def ftf(
     Startup creates fixed V/A FakeDevices and applies initial values once. The
     returned manager owns cleanup; builder failures close all devices and preserve
     both original and cleanup errors. The mock profile includes pulse and optional
-    mux readout plus all drive lines. Generator/ADC counts are the maximum configured
-    indices plus one; mux uses its own generator and receiver profile. One environment
+    mux readout plus all drive and fast-flux lines. Generator/ADC counts are the
+    maximum configured indices plus one; mux uses its own generator and receiver
+    profile. One environment
     supports separate pulse and mux acquires without reconfiguration. Channels never
     accept arbitrary firmware overrides. Host receives no model truth.
     acquisition.private_replay explicitly enables author-only checked input archives at an
@@ -826,6 +840,7 @@ def ftf(
         gens = (
             settings.readout.drive.gen_ch,
             *(s.gen_ch for s in settings.drive_lines.values()),
+            *_flux_generator_channels(settings),
             *((mux.gen_ch,) if mux is not None else ()),
         )
         mux_receivers = () if mux is None else tuple(r.ro_ch for r in mux.receivers)

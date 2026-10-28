@@ -1,5 +1,10 @@
 # Entry values in working units, matching the illustrative default.yaml model.
 # No module library or calibrated measurement defaults are supplied.
+# wiring.ch 2/3 below are charge drives; flux_dev names live DC devices.
+# Fast-flux channels are not prefilled. For simulation pulses, declare separate
+# flux_lines.f1/coupler/f2 generators and Phi0/gain in your FTF settings YAML.
+# Program flux pulses must use those channels, not the small-signal drive operator.
+# See ../../simulation_envs/FTF/field-guide.md for routing and reset limitations.
 format: zcu.entry-template
 format_version: "1.0"
 schema_version: 3

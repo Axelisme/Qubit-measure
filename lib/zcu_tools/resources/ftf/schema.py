@@ -32,7 +32,11 @@ from zcu_tools.resources.simulation_schema import (
     Solver,
     Values,
 )
-from zcu_tools.resources.single_fluxonium.schema import CoherenceDrift, DriftParameter
+from zcu_tools.resources.single_fluxonium.schema import (
+    CoherenceDrift,
+    DriftParameter,
+    FluxLine,
+)
 
 LoopValue = TypeVar("LoopValue")
 
@@ -247,7 +251,7 @@ class ReadoutSource(Values):
 class MuxReadoutSource(ReadoutSource):
     """Independent mux source and its bound receiver calibrations.
 
-    gen_ch: nonnegative integer generator, distinct from pulse and drive lines.
+    gen_ch: nonnegative integer generator, distinct from pulse, drive and flux lines.
     input_per_gain: signed finite incident sqrt(photons/ns) per program gain.
     adc: 1..8 receivers with unique nonnegative ro_ch, disjoint from pulse ADC.
     Indices have no fixed upper bound. Program tones select receiver subsets and
@@ -443,6 +447,37 @@ class FTFDrift(Values):
     f2: CoherenceDrift | None = None
 
 
+class FTFFluxLines(Values):
+    """Optional fast-flux routes keyed by the affected FTF loop.
+
+    f1/coupler/f2 each use the single-fluxonium FluxLine calibration and causal
+    filter, with flux_phi0_per_gain in Phi0/gain and delay/tau in ns.
+    An omitted or None loop has no pulsed flux route. An empty record disables
+    all three routes. Unknown loop keys and shared generator channels fail
+    validation; collisions name both loops and the channel.
+    """
+
+    f1: FluxLine | None = None
+    coupler: FluxLine | None = None
+    f2: FluxLine | None = None
+
+    @model_validator(mode="after")
+    def unique_generators(self) -> Self:
+        """Reject a generator shared by two flux loops, naming both and its index."""
+        channels: dict[int, str] = {}
+        for loop, line in (("f1", self.f1), ("coupler", self.coupler), ("f2", self.f2)):
+            if line is None:
+                continue
+            if line.gen_ch in channels:
+                other = channels[line.gen_ch]
+                raise ValueError(
+                    f"flux_lines.{loop}.gen_ch: channel {line.gen_ch} is also bound "
+                    f"to flux_lines.{other}.gen_ch"
+                )
+            channels[line.gen_ch] = loop
+        return self
+
+
 class FTFSettings(Values):
     """Complete FTF v2 domain snapshot, not a generic environment DSL.
 
@@ -450,10 +485,14 @@ class FTFSettings(Values):
     dc_bias supplies startup/live DC calibration; drive_lines binds charge
     or small-signal flux generators (omitted/empty disables). readout serves two
     resonators with a pulse source/receiver and an optional mux source/receivers.
+    flux_lines optionally binds f1/coupler/f2 fast-flux routes, using the single
+    FluxLine fields; omitted/empty disables pulsed flux without changing DC.
+    Flux generators must differ from all drive and pulse/mux readout generators;
+    collisions raise ValueError naming both bindings and the channel index.
     numerics supplies truncations/solver/seed. design optionally maps entry qubit
     names to complete independent predictor guesses; omitted/empty creates none.
     Channel counts derive from maximum configured indices plus one. Unknown
-    fields, including large-amplitude flux controls and v1 aliases, are rejected.
+    fields and v1 aliases are rejected.
     drift optionally enables independent acquisition-frozen log-loss OU processes
     for f1/coupler/f2; None disables all drift without changing sampling streams.
     No model truth enters ordinary GUI/MCP metadata.
@@ -470,8 +509,31 @@ class FTFSettings(Values):
     drive_lines: SourceMap[DriveLine] = Field(
         default_factory=dict, validate_default=True
     )
+    flux_lines: FTFFluxLines = Field(default_factory=FTFFluxLines)
     readout: Readout
     numerics: Numerics
+
+    @model_validator(mode="after")
+    def separate_flux_generators(self) -> Self:
+        """Reject flux-to-drive/readout reuse, naming both bindings and channel."""
+        channels = {
+            line.gen_ch: f"drive_lines.{name}.gen_ch"
+            for name, line in self.drive_lines.items()
+        }
+        channels[self.readout.drive.gen_ch] = "readout.drive.gen_ch"
+        if self.readout.mux is not None:
+            channels[self.readout.mux.gen_ch] = "readout.mux.gen_ch"
+        for loop, line in (
+            ("f1", self.flux_lines.f1),
+            ("coupler", self.flux_lines.coupler),
+            ("f2", self.flux_lines.f2),
+        ):
+            if line is not None and line.gen_ch in channels:
+                raise ValueError(
+                    f"flux_lines.{loop}.gen_ch: channel {line.gen_ch} is also bound "
+                    f"to {channels[line.gen_ch]}"
+                )
+        return self
 
     @model_validator(mode="after")
     def drift_losses(self) -> Self:
