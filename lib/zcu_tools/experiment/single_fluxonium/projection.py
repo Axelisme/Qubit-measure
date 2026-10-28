@@ -26,7 +26,8 @@ class ProjectionDiagnostics:
 
     points: flat request point IDs, in the same order as the following rows.
     retained_outcomes: per-point counts after each chronological projection.
-        Counts exclude zero-weight padding and include complete outcome histories.
+        Counts exclude padding and include complete outcome histories, including
+        zero-weight histories when floor is zero.
     pruned_weight: per-point probability discarded at each projection, measured
         against the original unpruned probability mass. Sum a row for cumulative
         discarded mass; earlier pruning is not counted again at later events.
@@ -144,7 +145,7 @@ class ProjectionRunner:
                     _Outcome(weights, (*outcome.history, state), densities)
                 )
         weights = np.stack([outcome.weights for outcome in candidates], axis=-1)
-        keep = (weights >= self.floor) & (weights > 0)
+        keep = weights >= self.floor
         dropped = np.where(keep, 0, weights).sum(axis=-1)
         retained = np.where(keep, weights, 0)
         totals = retained.sum(axis=-1)
@@ -175,7 +176,9 @@ class ProjectionRunner:
         for event in range(len(plan.read_events) - 1):
             outcomes, dropped = self._split(outcomes, plan.batch.points)
             counts.append(
-                np.count_nonzero([outcome.weights for outcome in outcomes], axis=0)
+                np.full(points, len(outcomes))
+                if self.floor == 0
+                else np.count_nonzero([outcome.weights for outcome in outcomes], axis=0)
             )
             pruned.append(survival * dropped)
             survival *= 1 - dropped

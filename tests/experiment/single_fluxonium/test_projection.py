@@ -105,6 +105,48 @@ def test_source_pruning_records_discarded_mass_and_rejects_empty_point(
         assert source.prepare(request, source.snapshot()) is prepared
 
 
+@pytest.mark.parametrize("projections", [1, 2])
+def test_zero_floor_retains_zero_weight_histories_and_reuses_preparation(
+    projection_environment: tuple[SimulationEnvironment, SingleFluxoniumSource],
+    projections: int,
+):
+    env, source = projection_environment
+    values = source.settings.model_dump(mode="json")
+    values["chip"]["temperature_k"] = 0
+    values["numerics"]["projection_prune_floor"] = 0
+    source.settings = parse_single_fluxonium(values)
+    program = repeated_read_program(env, reads=projections + 1, reps=1)
+    program.acquire(env.soc, progress=False)
+    original = env.soc.binding.rounds[0]
+    snapshot = source.snapshot()
+    prepared = source.prepare(original.acquire, snapshot)
+    readout = prepared.raw.readout
+    outcomes = 2**projections
+    assert readout.weights.shape == (outcomes,)
+    np.testing.assert_array_equal(readout.weights, [1, *([0] * (outcomes - 1))])
+    histories = [
+        np.argmax(populations, axis=-1)
+        for populations in readout.populations[:projections]
+    ]
+    expected = {(0,), (1,)} if projections == 1 else {(0, 0), (0, 1), (1, 0), (1, 1)}
+    assert set(zip(*histories, strict=True)) == expected
+    diagnostics = prepared.projection_diagnostics
+    if diagnostics is None:
+        raise AssertionError("projective preparation must report retained histories")
+    counts = (2,) if projections == 1 else (2, 4)
+    assert diagnostics.retained_outcomes == (counts,)
+    np.testing.assert_array_equal(diagnostics.pruned_weight, [[0] * projections])
+    assert diagnostics.evolution_calls == len(prepared.reuse_keys) > 0
+    assert source.prepare(original.acquire, snapshot) is prepared
+    result = source.execute(replace(original, snapshot=snapshot))
+    if not isinstance(result, IntegratedRound):
+        raise AssertionError("integrated acquisition must retain joint counts")
+    assert result.statistics.state_counts.shape[-1] == outcomes * 2
+    joint = result.statistics.state_counts.reshape(outcomes, 2)
+    np.testing.assert_array_equal(joint.sum(axis=-1), [1, *([0] * (outcomes - 1))])
+    assert source.prepare(original.acquire, snapshot) is prepared
+
+
 def test_preparation_rejects_equal_read_counts_with_different_template_events(
     projection_environment: tuple[SimulationEnvironment, SingleFluxoniumSource],
 ):
