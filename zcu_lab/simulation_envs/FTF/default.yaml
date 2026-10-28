@@ -115,6 +115,20 @@ drive_lines:
       coupler: { real: 0.01, imag: 0.0 }
       f2: { real: 0.1, imag: 0.0 }
 
+# Optional fast-flux routes, separate from linearized drive_lines operator: flux.
+# Omitted or {} leaves pulsed flux disabled. Each loop is optional/null.
+# Illustrative calibration only; entry fast-flux wiring is not prefilled.
+# flux_lines:
+#   f1:
+#     name: f1_flux
+#     gen_ch: 4
+#     flux_phi0_per_gain: 0.02 # Signed Phi0 per program gain.
+#     delay_ns: 0.0
+#     tau_ns: 0.0 # Instantaneous base response.
+#     distortion_terms: [] # Optional {amplitude: signed weight, tau_ns: positive}.
+#   coupler: null
+#   f2: null
+
 readout:
   drive:
     gen_ch: 0

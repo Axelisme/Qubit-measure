@@ -2,7 +2,7 @@
 
 **讀者：** framework-dev。FTF YAML schema、單位與欄位診斷契約。
 
-**Last updated:** 2026-10-27, drift configuration and runtime ownership
+**Last updated:** 2026-10-28, optional three-loop fast-flux routes
 
 `load_ftf(path)` 一次讀取 UTF-8 YAML，`parse_ftf(document)` 驗證記憶體中的文件。兩者回傳 immutable `FTFSettings`。本模組擁有 schema、單位與欄位路徑診斷，不依賴 `simulate`、`device` 或 `program`，也不建立裝置或決定物理適用性。
 
@@ -10,7 +10,7 @@
 
 使用者填表與 entry 接線請讀 [FTF YAML v2 欄位指南](../../../../zcu_lab/simulation_envs/FTF/field-guide.md)。欄位型別與省略語意的程式契約在 [schema.py](schema.py)。[環境 README](../../../../zcu_lab/simulation_envs/FTF/README.md) 提供工作副本與 GUI／Notebook 入口。
 
-文件使用 `format: zcu.ftf`、整數 `version: 2`。`chip` 描述物理值，`dc_bias` 合併具名電源與校準，`drive_lines` 綁定 charge 或小訊號 flux drive lines，`readout` 分開 drive、物理 resonators 與 ADC，`numerics` 集中截斷與 solver。接線與校準的迴路 map 必填 `f1`、`coupler`、`f2`，key 指受作用的迴路，不是額外線路。`drift` 的迴路則為選填。
+文件使用 `format: zcu.ftf`、整數 `version: 2`。`chip` 描述物理值，`dc_bias` 合併具名電源與校準，`drive_lines` 綁定 charge 或小訊號 flux drive lines，`flux_lines` 宣告各迴路的 fast-flux 校準與濾波，`readout` 分開 drive、物理 resonators 與 ADC，`numerics` 集中截斷與 solver。接線與校準的迴路 map 必填 `f1`、`coupler`、`f2`，key 指受作用的迴路，不是額外線路。`drift` 與 `flux_lines` 的迴路則為選填。
 
 省略 `drift` 或設為 `null` 會關閉跨 acquisition 漂移。
 啟用時，`FTFDrift` 的選填 `f1`、`coupler`、`f2` 各自指定獨立 log-OU 過程。
@@ -44,7 +44,9 @@ Private replay 保存當次 effective settings，`drift=None`，不依賴時鐘�
 
 每條 `drive_lines.<name>` 的 `operator` 接受 `charge` 或 `flux`，省略為 `charge`，不接受 null。Charge 使用 `charge_drive_ghz_per_gain` 乘完整電荷算符 n；flux 使用 `flux_drive_phi0_per_gain` 乘固定 DC 工作點的 ∂(H/h)/∂f，f = Phi/Phi0。兩種校準都含三迴路的有限複數 real/imag。每條線只接受所選 operator 的校準欄位，不能錯配、同時提供或省略。
 
-FTF 支援 live DC bias、靜態掃描、charge drive、小訊號線性 flux drive 與 readout。Flux drive 使用固定 DC 工作點的線性模型，適用範圍限於小振幅。`flux_lines` 即使為空 map 也是未知欄位。未綁定 generator 沿用既有處理。共享 `simulate` 引擎的 flux-pulse 路徑維持停用。
+`flux_lines` 是選填的 `FTFFluxLines` record，接受 `f1`、`coupler`、`f2`，每個迴路最多一條線。省略或填 `{}` 不宣告 pulsed flux，保留原本 DC 與 drive 設定；頂層不接受 `null`。各迴路省略或填 `null` 都表示沒有該線。每條線直接使用 `resources.single_fluxonium.schema.FluxLine`，必填 `name`、非負整數 `gen_ch`、有限 signed `flux_phi0_per_gain`。選填 `delay_ns`、`tau_ns` 預設為 0，`distortion_terms` 預設為空。延遲與時間常數使用 ns，校準使用 Phi0/gain。兩迴路不能共用同一 `gen_ch`，錯誤會列出兩個迴路與 channel。
+
+`DriveLine.operator: flux` 仍使用固定 DC 的線性導數，限於小訊號驅動。它不取代 `flux_lines` 的時變磁通校準，也不隨 pulse 振幅重算 Hamiltonian。Flux pulse 的數值接線與演化限制由 [FTF runtime](../../experiment/ftf/README.md) 擁有，schema 不建立數值模型。
 
 `readout.drive` 綁定 pulse generator 與 incident amplitude 校準，`readout.adc` 維持單一 receiver object。
 可省略的 `readout.mux` 另綁 `gen_ch`、`input_per_gain` 與 1 至 8 個 receiver 的 `adc` list。

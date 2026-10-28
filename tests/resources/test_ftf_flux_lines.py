@@ -1,0 +1,110 @@
+"""Fast-flux routes at the public decoded FTF YAML boundary."""
+
+import pytest
+from zcu_tools.resources.ftf import parse_ftf
+from zcu_tools.resources.single_fluxonium.schema import FluxLine
+
+from tests.resources._ftf_data import ftf_document
+
+
+@pytest.mark.parametrize(
+    "loops",
+    [(), ("f1",), ("coupler",), ("f2",), ("f1", "coupler", "f2")],
+)
+def test_flux_lines_preserve_single_line_calibration_and_optional_loops(
+    loops: tuple[str, ...],
+) -> None:
+    lines = {
+        loop: {
+            "name": f"{loop}_flux",
+            "gen_ch": 4 + index,
+            "flux_phi0_per_gain": -0.02,
+            "delay_ns": 3.0,
+            "tau_ns": 8.0,
+            "distortion_terms": [{"amplitude": -0.1, "tau_ns": 12.0}],
+        }
+        for index, loop in enumerate(loops)
+    }
+    settings = parse_ftf(ftf_document() | {"flux_lines": lines})
+    expected = {
+        loop: FluxLine.model_validate(line).model_dump(mode="json")
+        for loop, line in lines.items()
+    }
+    assert settings.flux_lines.model_dump(mode="json", exclude_none=True) == expected
+    assert parse_ftf(settings.model_dump(mode="json")) == settings
+    baseline = parse_ftf(ftf_document())
+    assert baseline.flux_lines.f1 is None
+    assert baseline.flux_lines.coupler is None
+    assert baseline.flux_lines.f2 is None
+    assert settings.model_dump(exclude={"flux_lines"}) == baseline.model_dump(
+        exclude={"flux_lines"}
+    )
+
+
+@pytest.mark.parametrize("loops", [("f1", "coupler"), ("coupler", "f2"), ("f1", "f2")])
+def test_flux_lines_reject_shared_generator_with_both_loops_and_channel(
+    loops: tuple[str, str],
+) -> None:
+    first, second = loops
+    lines = {
+        loop: {"name": f"{loop}_flux", "gen_ch": 7, "flux_phi0_per_gain": 0.02}
+        for loop in loops
+    }
+    with pytest.raises(ValueError, match="gen_ch") as error:
+        parse_ftf(ftf_document() | {"flux_lines": lines})
+    message = str(error.value)
+    assert f"flux_lines.{first}" in message
+    assert f"flux_lines.{second}" in message
+    assert "gen_ch" in message
+    assert "7" in message
+
+
+def test_flux_lines_allow_null_loops_and_default_instantaneous_response() -> None:
+    settings = parse_ftf(
+        ftf_document()
+        | {
+            "flux_lines": {
+                "f1": {"name": "park", "gen_ch": 100, "flux_phi0_per_gain": 0.0},
+                "coupler": None,
+                "f2": None,
+            }
+        }
+    )
+    line = settings.flux_lines.f1
+    assert line is not None
+    assert line.gen_ch == 100
+    assert line.flux_phi0_per_gain == 0.0
+    assert line.delay_ns == 0.0
+    assert line.tau_ns == 0.0
+    assert line.distortion_terms == ()
+    assert settings.flux_lines.coupler is None
+    assert settings.flux_lines.f2 is None
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("name", ""),
+        ("gen_ch", -1),
+        ("gen_ch", True),
+        ("gen_ch", 1.5),
+        ("flux_phi0_per_gain", float("nan")),
+        ("delay_ns", -1.0),
+        ("tau_ns", -1.0),
+        ("distortion_terms", [{"amplitude": 0.1, "tau_ns": 0.0}]),
+        ("phi0_per_gain", 0.02),
+    ],
+)
+def test_flux_line_validation_reports_nested_field_path(
+    field: str,
+    value: object,
+) -> None:
+    line = {"name": "park", "gen_ch": 4, "flux_phi0_per_gain": 0.02, field: value}
+    with pytest.raises(ValueError, match=rf"flux_lines\.f1\.{field}"):
+        parse_ftf(ftf_document() | {"flux_lines": {"f1": line}})
+
+
+@pytest.mark.parametrize("lines", [None, {"other": {}}, {"f1": {}}])
+def test_flux_lines_reject_unknown_loops_and_incomplete_lines(lines: object) -> None:
+    with pytest.raises(ValueError, match="flux_lines"):
+        parse_ftf(ftf_document() | {"flux_lines": lines})

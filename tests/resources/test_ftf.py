@@ -296,8 +296,6 @@ def test_duplicate_dc_and_drive_names_are_rejected() -> None:
 @pytest.mark.parametrize(
     "field,value",
     [
-        ("flux_lines", {}),
-        ("flux_lines", {"line": {"gen_ch": 1}}),
         ("flux_sources", []),
         ("channels", {"generators": 3}),
     ],
