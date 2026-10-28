@@ -145,12 +145,7 @@ class PredictorParameterEditor(QGroupBox):
         Fields after the first invalid input keep their previous appearance,
         matching the former short-circuit parameter read.
         """
-        fields = (
-            (self._ejmax_field, self._transmon_ec_field, self._asymmetry_field)
-            if self._trial.model == "transmon"
-            else (self._ej_field, self._ec_field, self._el_field)
-        )
-        for field in fields:
+        for field in self._selected_parameter_fields():
             message = self._trial.energy_error(
                 self._trial.model, self._parameter_fields[field]
             )
@@ -186,12 +181,7 @@ class PredictorParameterEditor(QGroupBox):
             self._model_combo.setCurrentIndex(
                 self._model_combo.findData(self._trial.model)
             )
-            fields = (
-                (self._ejmax_field, self._transmon_ec_field, self._asymmetry_field)
-                if self._trial.model == "transmon"
-                else (self._ej_field, self._ec_field, self._el_field)
-            )
-            for field in fields:
+            for field in self._selected_parameter_fields():
                 field.setEnabled(not self._live_mode)
                 field.setText(
                     self._trial.energy_text(
@@ -201,6 +191,12 @@ class PredictorParameterEditor(QGroupBox):
         finally:
             self._updating_parameters = False
         self._on_replaced()
+
+    def _selected_parameter_fields(self) -> tuple[QLineEdit, QLineEdit, QLineEdit]:
+        """Return the selected trial model's energy fields in parameter order."""
+        if self._trial.model == "transmon":
+            return self._ejmax_field, self._transmon_ec_field, self._asymmetry_field
+        return self._ej_field, self._ec_field, self._el_field
 
     def _sync_model_rows(self, *_args: object) -> None:
         """Show only the selected model's energy inputs; keep hidden values untouched."""

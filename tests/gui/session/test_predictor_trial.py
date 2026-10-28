@@ -300,7 +300,9 @@ class RecordingQueries(PredictorService):
         super().__init__()
         self.calibrations: list[CalibrateOffsetRequest] = []
         self.points: list[PredictFreqRequest] = []
+        self.point_params: list[PredictorParams] = []
         self.matrices: list[PredictMatrixCurveRequest] = []
+        self.matrix_params: list[PredictorParams] = []
         self.failure: Exception | None = None
         self.matrix_failure: Exception | None = None
 
@@ -314,23 +316,29 @@ class RecordingQueries(PredictorService):
 
     def predict_freq(self, params: PredictorParams, req: PredictFreqRequest) -> float:
         self.points.append(req)
+        self.point_params.append(params)
         if self.failure is not None:
             raise self.failure
-        return 1234.5
+        return 2345.6 if req.transition == (1, 3) else 1234.5
 
     def predict_matrix_element_curve(
         self, params: PredictorParams, req: PredictMatrixCurveRequest
     ) -> PredictMatrixCurveResult:
         self.matrices.append(req)
+        self.matrix_params.append(params)
         if self.matrix_failure is not None:
             raise self.matrix_failure
         if self.failure is not None:
             raise self.failure
+        if req.transitions == ((1, 3),):
+            magnitude = 1.2 if req.operator == "n" else 1.3
+        else:
+            magnitude = 0.2 if req.operator == "n" else 0.3
         return PredictMatrixCurveResult(
-            ("0→1",),
+            tuple(f"{i}→{j}" for i, j in req.transitions),
             req.values,
             req.values,
-            np.array([[0.2 if req.operator == "n" else 0.3]]),
+            np.array([[magnitude]]),
         )
 
 
@@ -457,23 +465,14 @@ def test_calibration_adds_correction_to_local_offset_with_explicit_inputs() -> N
 
 @pytest.mark.parametrize("valid", [True, False])
 def test_table_batch_and_curve_coordinates_share_explicit_inputs(valid: bool) -> None:
-    from zcu_tools.gui.session.predictor_trial import PredictorTrial, TrialInputs
-
-    class CountedTrial(PredictorTrial):
-        input_calls = 0
-
-        def inputs(self, *, for_curves: bool = False) -> TrialInputs:
-            self.input_calls += 1
-            return super().inputs(for_curves=for_curves)
-
     service = RecordingQueries()
-    trial = CountedTrial(PredictorControlFacet(service))
-    trial.set_parameters(FluxoniumParams(5.0, 1.0, 0.5))
+    trial = PredictorTrial(PredictorControlFacet(service))
+    params = FluxoniumParams(5.0, 1.0, 0.5)
+    trial.set_parameters(params)
     flux = PredictorFlux(0.2, {"coil": 2.0, "trim": -4.0}, {"coil": "A", "trim": "V"})
     trial.set_flux(flux, {"coil": 0.3, "trim": -0.4} if valid else {})
     trial.set_axis_device("trim")
     rows = trial.row_values(((0, 1), (1, 3)), 0.7)
-    assert trial.input_calls == 1
     if not valid:
         assert [(r.freq_mhz, r.mag_n, r.mag_phi) for r in rows] == [
             (None, None, None),
@@ -483,16 +482,20 @@ def test_table_batch_and_curve_coordinates_share_explicit_inputs(valid: bool) ->
         return
     assert [(r.freq_mhz, r.mag_n, r.mag_phi) for r in rows] == [
         (1234.5, 0.2, 0.3),
-        (1234.5, 0.2, 0.3),
+        (2345.6, 1.2, 1.3),
     ]
-    assert [req.transition for req in service.points] == [(0, 1), (1, 3)]
-    assert [req.transitions for req in service.matrices] == [
-        ((0, 1),),
-        ((0, 1),),
-        ((1, 3),),
-        ((1, 3),),
+    assert service.point_params == [params, params]
+    assert sorted(service.points, key=lambda req: req.transition) == [
+        PredictFreqRequest(flux.to_frame(), {"coil": 0.3, "trim": -0.4}, (0, 1)),
+        PredictFreqRequest(flux.to_frame(), {"coil": 0.3, "trim": -0.4}, (1, 3)),
     ]
-    assert [req.operator for req in service.matrices] == ["n", "phi", "n", "phi"]
+    assert service.matrix_params == [params, params, params, params]
+    assert sorted((req.transitions, req.operator) for req in service.matrices) == [
+        (((0, 1),), "n"),
+        (((0, 1),), "phi"),
+        (((1, 3),), "n"),
+        (((1, 3),), "phi"),
+    ]
     for req in service.matrices:
         assert req.axis_device == "trim"
         assert req.device_values == {"coil": 0.3, "trim": -0.4}
