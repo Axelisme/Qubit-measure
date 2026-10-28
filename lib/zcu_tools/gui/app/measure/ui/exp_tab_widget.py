@@ -114,8 +114,7 @@ class _PanelEdgeHandle(QToolButton):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setFixedSize(16, 42)
-        # tolerated: QtPy promotes the binding enum members onto Qt at runtime.
-        self.setCursor(Qt.PointingHandCursor)  # pyright: ignore[reportAttributeAccessIssue]
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setAutoRaise(True)
         self._collapsed = False
 
@@ -221,8 +220,7 @@ class ExpTabWidget(QWidget):
         )
 
         # splitter holds two panes: left (tab panel) | right (plot)
-        # tolerated: QtPy promotes the binding enum members onto Qt at runtime.
-        splitter = QSplitter(Qt.Horizontal)  # pyright: ignore[reportAttributeAccessIssue]
+        splitter = QSplitter(Qt.Orientation.Horizontal)
 
         content_row.addWidget(splitter, stretch=1)
 
