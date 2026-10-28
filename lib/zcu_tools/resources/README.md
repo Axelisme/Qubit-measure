@@ -1,6 +1,6 @@
 # `zcu_tools.resources` experiment work resources
 
-**Last updated:** 2026-10-28
+**Last updated:** 2026-10-28（per-user runtime locks）
 
 **讀者：** framework-dev。實驗資源的 scope、讀寫與持久化 owner 導覽。
 
@@ -28,6 +28,21 @@
 樣本歷史使用 JSONL，舊 CSV 的離線讀取與轉換由 root [`migrations/`](../../../migrations/README.md) 提供。
 
 離線 legacy 轉換、evidence 與可續跑 publication 由 root [`migrations/storage_migration/`](../../../migrations/storage_migration/README.md) 擁有。Caller 注入具體 mapping 與 native 驗證。`lib` 不 import `migrations`。
+
+## 檔案鎖
+
+`file_lock.lock_path_for(data_path)` 統一 DocumentStore、ledger 與明確升級工具的鎖路徑。
+它對 `Path.resolve(strict=False)` 的絕對路徑取 SHA-256，以 hex digest 加 `.lock` 作檔名。
+相對路徑、symlink parent 與 `..` 指向同一檔案時使用同一把鎖。
+
+`XDG_RUNTIME_DIR` 有值且指向目錄時，鎖放在 `$XDG_RUNTIME_DIR/qubit-measure/locks`。
+否則放在 `tempfile.gettempdir()/qubit-measure-<user>/locks`。
+選擇鎖路徑時按需建立 root，建立模式為 `0o700`。取得鎖後保留鎖檔，不放在 result 或 Database 資料目錄。
+DocumentStore 的 explicit `lock_path` 仍可指定其他鎖檔。
+
+鎖只協調同一台機器、同一使用者且使用相同 runtime root 的程序，不提供跨機器互斥。
+舊版使用資料檔旁的 sidecar，新版使用 runtime lock，因此新舊版本不可同時寫同一份資料。
+既有 `*.lock` 可能來自舊版本或其他機器，掃描與傳輸仍忽略它們。不自動刪除既有鎖檔。
 
 ## Entry 分析格式檔
 

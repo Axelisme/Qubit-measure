@@ -22,6 +22,7 @@ from zcu_tools.resources.entry import (
     snapshot,
     source_path,
 )
+from zcu_tools.resources.file_lock import lock_path_for
 
 from migrations.storage_mapping import build_mapping
 from migrations.storage_migration import (
@@ -239,8 +240,8 @@ def test_pi_scalars_deduplicate_only_their_explicit_candidate_and_report_actual_
             assert library.snapshot().value(leaf) == _SCALARS[key]
     view = entry.setup if point is None else entry.use_point(point)
     assert document_value(snapshot(view), "Q1.ext") == {"readout_cal": {}}
-    # The exact owner sidecar protects reads too; only its empty bytes are stable.
-    sidecar = library.source_path.with_suffix(".yaml.lock")
+    # The runtime lock protects reads too; only its empty bytes are stable.
+    sidecar = lock_path_for(library.source_path)
     assert sidecar.read_bytes() == b""
     files = {
         path: (path.read_bytes(), path.stat().st_mtime_ns)
