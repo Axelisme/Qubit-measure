@@ -38,6 +38,7 @@ class _TemplateRoutes:
     template: TimelineTemplate
     tones: tuple[EventSlot, ...]
     cavities: tuple[NDArray[np.int64], ...]
+    terminal_masks: tuple[NDArray[np.bool_], ...]
     receivers: NDArray[np.int64]
 
 
@@ -88,7 +89,7 @@ def _route_template(
 ) -> _TemplateRoutes:
     partition = classify_readout(template, ReadoutDrive(gen, 1, "mux"), {})
     if any(partition.cavity_drives):
-        raise ValueError("six fluxonium supports only terminal readout")
+        raise ValueError("six fluxonium does not support untriggered cavity drives")
     for event in template.events:
         if event.gen_ch not in (gen, *range(1, 7)):
             raise ValueError(f"unbound six-fluxonium generator {event.gen_ch}")
@@ -105,14 +106,16 @@ def _route_template(
         receivers.append(selected[:, 0])
     tone_routes = []
     # Validate every active tone, including tones not observed by an ADC.
-    for event in partition.terminal_slots:
+    tones = tuple(event for event in template.events if event.gen_ch == gen)
+    for event in tones:
         routed = np.full(len(template.points), -1, dtype=np.int64)
         routed[event.active] = _nearest_cavity(event.frequency_mhz[event.active], bare)
         tone_routes.append(routed)
     return _TemplateRoutes(
         template,
-        partition.terminal_slots,
+        tones,
         tuple(tone_routes),
+        tuple(event.active for event in partition.terminal_slots),
         np.column_stack(receivers),
     )
 
@@ -131,7 +134,14 @@ def _project_template(
         e.active & (a == cavity) for e, a in zip(tones, routes.cavities, strict=True)
     )
     counts = np.sum(active, axis=0)
-    if np.any(counts[selected_rows] == 0):
+    terminal_counts = np.sum(
+        [
+            mask & terminal
+            for mask, terminal in zip(active, routes.terminal_masks, strict=True)
+        ],
+        axis=0,
+    )
+    if np.any(terminal_counts[selected_rows] == 0):
         raise ValueError("observed cavity requires an incident terminal tone")
     templates = []
     # Different counts are structural templates, not zero-amplitude tones.
@@ -172,8 +182,9 @@ def route_request(
     tied within 1e-9 MHz (subtraction tolerance). Each ADC's demod frequency
     selects the observed cavity; all reads of that ADC at a point must select
     the same cavity. Only observed routing patterns are enumerated.
-    Earlier cavity pulses, mixed pulse/mux routes, foreign generators, ties and
-    absent incident tones fail before any evolution or sampling. Microwave
+    Triggered nonterminal blocks follow their incident tones into each source.
+    Untriggered cavity drives, mixed pulse/mux routes, foreign generators, ties
+    and absent terminal tones fail before any evolution or sampling. Microwave
     controls remain with their own circuit; they never drive another qubit.
     """
     bare = np.array(

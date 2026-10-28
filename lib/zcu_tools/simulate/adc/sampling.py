@@ -9,7 +9,7 @@ from zcu_tools.core.simulation import ChannelSignals, RoundSignals, SamplingIden
 from ._integrated_paths import IntegratedPaths
 from ._jump_paths import JumpPaths
 from ._path_sampling import physical_shots
-from .model import RealArray
+from .projection import ProjectionReadout
 from .raw import PreparedRawShots
 from .readout_batch import ReadoutBatch
 from .request import (
@@ -114,7 +114,7 @@ class ADC(ConditionalReadout):
 
 
 def sample_traces(
-    populations: RealArray,
+    readout: ProjectionReadout,
     batches: Mapping[int, ReadoutBatch],
     *,
     reps: int,
@@ -124,8 +124,8 @@ def sample_traces(
 ) -> RoundSignals:
     """Draw complete physical per-execution traces for every declared ADC.
 
-    populations is finite nonnegative (*point_dims,states), normalized within
-    1e-6, in all batch models' identical state order. batches maps nonnegative
+    readout supplies outcome weights and each event's conditional populations,
+    in all batch models' identical state order. batches maps nonnegative
     ADC indices in declaration order to physical pulse/grid contents. Each
     content_index is flat C-order (prod(point_dims),); all ADCs must use the
     same directional rates. Each ADC has equal positive sample counts across
@@ -137,9 +137,9 @@ def sample_traces(
 
     Return RoundSignals in mapping order with owned float64 IQ arrays shaped
     (prod(point_dims)*reps,reads,samples,2), points then shots in C order.
-    One full CTMC path per point/shot is shared across all carriers, ADCs and
-    windows from the earliest pulse to the latest emitted sample, including
-    gaps and ringdown. Receivers add independent per-sample noise and offset
+    One outcome is shared per point/shot. Each event draws its own CTMC path,
+    shared across its carriers, ADCs and windows from the earliest pulse to the
+    latest sample, including gaps and ringdown. Receivers add independent per-sample noise and offset
     once after coherent superposition. There is no rounding or normalization.
     Calls reproduce within the same numeric/RNG version without retaining
     paths/noisy results, mutating inputs or touching global RNG.
@@ -148,7 +148,7 @@ def sample_traces(
     tolerances raise ValueError. Baseline/field failures raise RuntimeError;
     envelope errors propagate. No partial results are returned.
     """
-    prepared = PreparedRawShots(populations, batches, reps=reps, rtol=rtol, atol=atol)
+    prepared = PreparedRawShots(readout, batches, reps=reps, rtol=rtol, atol=atol)
     rng = np.random.Generator(
         np.random.PCG64(np.random.SeedSequence((identity.seed, *identity.stream)))
     )

@@ -8,7 +8,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 from typing import Literal
-from uuid import uuid4
 
 from filelock import FileLock, Timeout
 from pydantic import TypeAdapter
@@ -21,6 +20,7 @@ from zcu_tools.resources.file_lock import lock_path_for
 from zcu_tools.resources.parameter_schema import ParameterSchemaPolicy
 from zcu_tools.resources.predictor_upgrade import upgrade_predictor_files
 from zcu_tools.resources.record_table.upgrade import upgrade_record_files
+from zcu_tools.resources.upgrade_backup import upgrade_backup_path
 from zcu_tools.utils import atomic_replace
 
 
@@ -181,19 +181,27 @@ class UpgradeResult:
 
 
 def upgrade_files(
-    sources: Sequence[UpgradeSource], *, plan: UpgradePlan, apply: bool = False
+    sources: Sequence[UpgradeSource],
+    *,
+    plan: UpgradePlan,
+    apply: bool = False,
+    backup_root: Path | None = None,
 ) -> tuple[UpgradeResult, ...]:
     """Validate/upgrade exact files independently, defaulting to read-only dry-run.
 
     sources is an ordered collection of paths with optional point labels. plan
     owns all component classification/validation. apply takes each file's same
     runtime lock as DocumentStore, re-reads under lock, creates an exclusive
-    sibling backup before atomic replacement, and returns its path. Dry-run
+    external backup before atomic replacement, and returns its path. backup_root
+    overrides the project sibling root; see upgrade_backup_path. Dry-run
     creates no files or locks. Current documents are fully validated then skipped.
     YAML, ValueError, lock timeout and I/O failures become rejected results;
     unexpected callback errors propagate. No multi-file or power-loss guarantee.
     """
-    return tuple(_upgrade_file(source, plan=plan, apply=apply) for source in sources)
+    return tuple(
+        _upgrade_file(source, plan=plan, apply=apply, backup_root=backup_root)
+        for source in sources
+    )
 
 
 def _field_changes(
@@ -241,11 +249,18 @@ def _replace_yaml(path: Path, document: YamlMap) -> None:
 
 
 def _upgrade_file(
-    source: UpgradeSource, *, plan: UpgradePlan, apply: bool
+    source: UpgradeSource,
+    *,
+    plan: UpgradePlan,
+    apply: bool,
+    backup_root: Path | None,
 ) -> UpgradeResult:
     path = source.path.resolve()
     backup: Path | None = None
     try:
+        backup_candidate = (
+            upgrade_backup_path(path, backup_root=backup_root) if apply else None
+        )
         # Check before FileLock: missing inputs must not create parent directories.
         path.parent.stat()
         lock = FileLock(str(lock_path_for(path)), timeout=5) if apply else nullcontext()
@@ -261,7 +276,9 @@ def _upgrade_file(
                 return UpgradeResult(source, "skipped", notes=candidate.notes)
             if not apply:
                 return UpgradeResult(source, "dry-run", changes, notes=candidate.notes)
-            backup_candidate = path.with_name(f"{path.name}.{uuid4().hex}.bak")
+            if backup_candidate is None:
+                raise RuntimeError("apply requires a backup destination")
+            backup_candidate.parent.mkdir(parents=True, exist_ok=True)
             with backup_candidate.open("xb") as stream:
                 stream.write(original)
             backup = backup_candidate
@@ -284,7 +301,8 @@ def main(argv: Sequence[str] | None = None, *, plan: UpgradePlan | None = None) 
     caller-owned plan. Records accept only exact files, require --device-name,
     an operator declaration, and do not use plan.
     Default dry-run prints file/field or line classifications without writes.
-    Apply reports original-bytes backups. Rejected files do not stop siblings;
+    Apply reports original-bytes external backups; --backup-root overrides the
+    project sibling root (see upgrade_backup_path). Rejected files do not stop siblings;
     any rejection returns 1. Invalid CLI inputs raise argparse SystemExit(2).
     No lab modules are imported, no versions or device names are inferred.
     """
@@ -307,15 +325,21 @@ def main(argv: Sequence[str] | None = None, *, plan: UpgradePlan | None = None) 
         "--device-name",
         help="operator-declared device for old record values (not inferred)",
     )
+    parser.add_argument(
+        "--backup-root", type=Path, help="override external backup root"
+    )
     options = parser.parse_args(argv)
     paths = TypeAdapter(list[Path]).validate_python(options.paths)
     apply = TypeAdapter(bool).validate_python(options.apply)
+    backup_root = TypeAdapter(Path | None).validate_python(options.backup_root)
     device_name = TypeAdapter(str | None).validate_python(options.device_name)
     if options.scope == "records":
         if device_name is None:
             parser.error("--scope records requires --device-name")
         try:
-            return _record_cli(paths, device_name=device_name, apply=apply)
+            return _record_cli(
+                paths, device_name=device_name, apply=apply, backup_root=backup_root
+            )
         except ValueError as error:
             parser.error(str(error))
     if device_name is not None:
@@ -334,17 +358,21 @@ def main(argv: Sequence[str] | None = None, *, plan: UpgradePlan | None = None) 
         parser.error(str(error))
     for note in plan.notes:
         print(note)
-    results = upgrade_files(sources, plan=plan, apply=apply)
+    results = upgrade_files(sources, plan=plan, apply=apply, backup_root=backup_root)
     for result in results:
         _print_upgrade_result(result)
-    predictor_rejected = _predictor_cli(predictor_paths, apply=apply)
+    predictor_rejected = _predictor_cli(
+        predictor_paths, apply=apply, backup_root=backup_root
+    )
     return int(
         any(result.status == "rejected" for result in results) or predictor_rejected
     )
 
 
-def _predictor_cli(paths: Sequence[Path], *, apply: bool) -> bool:
-    results = upgrade_predictor_files(paths, apply=apply)
+def _predictor_cli(
+    paths: Sequence[Path], *, apply: bool, backup_root: Path | None
+) -> bool:
+    results = upgrade_predictor_files(paths, apply=apply, backup_root=backup_root)
     for result in results:
         if result.backup_path is not None:
             print(f"{result.path}: backup: {result.backup_path}")
@@ -387,8 +415,12 @@ def _component_sources(paths: Sequence[Path]) -> tuple[UpgradeSource, ...]:
     return tuple(sources)
 
 
-def _record_cli(paths: Sequence[Path], *, device_name: str, apply: bool) -> int:
-    results = upgrade_record_files(paths, device_name=device_name, apply=apply)
+def _record_cli(
+    paths: Sequence[Path], *, device_name: str, apply: bool, backup_root: Path | None
+) -> int:
+    results = upgrade_record_files(
+        paths, device_name=device_name, apply=apply, backup_root=backup_root
+    )
     print(f"operator-declared device: {device_name!r} (not inferred)")
     for result in results:
         if result.backup_path is not None:

@@ -195,6 +195,12 @@ class Numerics(RoundPacing):
     solver: Solver
     slow_envelope_segments_per_period: Annotated[int, Field(ge=1, strict=True)] = 20
     seed: Index | None = None
+    projection_prune_floor: Annotated[Nonnegative, Field(lt=1)] = 1e-9
+    """Discard global projective outcome weights below this finite threshold.
+
+    Zero disables pruning. If every outcome of a point falls below the floor,
+    execution raises ValueError naming the point and threshold.
+    """
 
 
 class DriftParameter(Values):

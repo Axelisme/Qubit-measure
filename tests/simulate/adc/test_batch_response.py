@@ -32,7 +32,10 @@ def batch(m: adc.ReadoutModel, *, pulse=None) -> adc.ReadoutBatch:
         adc.SampleGrid(np.array([-3.0, 4.0, 6.0, 13.0, 24.0, 29.0, 44.0]), 6.004, 0.3),
     )
     return adc.ReadoutBatch(
-        m, ((pulse,),), (grids,), np.array([0, 0], dtype=np.int64), True
+        m,
+        ((adc.ReadoutEvent((pulse,), grids),),),
+        np.array([0, 0], dtype=np.int64),
+        True,
     )
 
 
@@ -42,11 +45,24 @@ def test_batched_response_agrees_with_dop853_for_all_reads(detuned, monkeypatch)
     inputs = batch(m)
     if detuned:
         inputs = replace(
-            inputs, pulses=((replace(inputs.pulses[0][0], frequency_ghz=6.008),),)
+            inputs,
+            events=(
+                (
+                    replace(
+                        inputs.events[0][0],
+                        pulses=(
+                            replace(inputs.events[0][0].pulses[0], frequency_ghz=6.008),
+                        ),
+                    ),
+                ),
+            ),
         )
     reference = adc.ConditionalReadout(m, rtol=1e-12, atol=1e-14)
     expected = np.stack(
-        [reference.response(inputs.pulses[0], g).traces for g in inputs.grids[0]]
+        [
+            reference.response(inputs.events[0][0].pulses, g).traces
+            for g in inputs.events[0][0].grids
+        ]
     )
     expm = scipy.linalg.expm
     calls = []
@@ -81,16 +97,23 @@ def test_detuned_constant_response_uses_no_ode_and_preserves_frame_phases(
     inputs = batch(m, pulse=pulse)
     inputs = replace(
         inputs,
-        grids=(
-            tuple(
-                replace(g, times_ns=g.times_ns + start_ns - 3.0)
-                for g in inputs.grids[0]
+        events=(
+            (
+                replace(
+                    inputs.events[0][0],
+                    grids=tuple(
+                        (
+                            replace(g, times_ns=g.times_ns + start_ns - 3.0)
+                            for g in inputs.events[0][0].grids
+                        )
+                    ),
+                ),
             ),
         ),
     )
     reference = adc.ConditionalReadout(m, rtol=1e-12, atol=1e-14)
     expected = np.stack(
-        [reference.response((pulse,), g).traces for g in inputs.grids[0]]
+        [reference.response((pulse,), g).traces for g in inputs.events[0][0].grids]
     )
     ode_calls = []
     from zcu_tools.simulate.adc import response
@@ -148,11 +171,21 @@ def test_frequency_batch_matches_individual_responses_across_interval_corners(
         )
         for frequency in frequencies
     )
-    inputs = adc.ReadoutBatch(m, pulses, grids, np.arange(4, dtype=np.int64), True)
+    inputs = adc.ReadoutBatch(
+        m,
+        tuple(
+            (adc.ReadoutEvent(pulses, grids),)
+            for pulses, grids in zip(pulses, grids, strict=True)
+        ),
+        np.arange(4, dtype=np.int64),
+        True,
+    )
     result = adc.ConditionalReadout(m).responses(inputs)
     individual = [
         adc.ConditionalReadout(m).responses(
-            adc.ReadoutBatch(m, (p,), (g,), np.array([0], dtype=np.int64), True)
+            adc.ReadoutBatch(
+                m, ((adc.ReadoutEvent(p, g),),), np.array([0], dtype=np.int64), True
+            )
         )
         for p, g in zip(pulses, grids, strict=True)
     ]
@@ -196,7 +229,13 @@ def test_reused_grid_frequency_batch_matches_independent_trajectories():
     )
     grids = tuple((adc.SampleGrid(times, f, 0.1),) for f in frequencies)
     inputs = adc.ReadoutBatch(
-        m, pulses, grids, np.arange(len(frequencies), dtype=np.int64), True
+        m,
+        tuple(
+            (adc.ReadoutEvent(pulses, grids),)
+            for pulses, grids in zip(pulses, grids, strict=True)
+        ),
+        np.arange(len(frequencies), dtype=np.int64),
+        True,
     )
     result = adc.ConditionalReadout(m).responses(inputs)
     # Independent ODE trajectories retain delay, mismatch and ringdown at each
@@ -230,8 +269,19 @@ def test_response_cache_reuses_content_across_batches_and_trace_requests():
     copied = replace(
         inputs,
         model=replace(m),
-        pulses=inputs.pulses * 2,
-        grids=tuple(tuple(replace(g) for g in inputs.grids[0]) for _ in range(2)),
+        events=tuple(
+            (replace(events[0], grids=values),)
+            for events, values in zip(
+                inputs.events * 2,
+                tuple(
+                    (
+                        tuple((replace(g) for g in inputs.events[0][0].grids))
+                        for _ in range(2)
+                    )
+                ),
+                strict=True,
+            )
+        ),
     )
     traces = reader.responses(copied)
     assert len(evaluations) == count
@@ -253,16 +303,33 @@ def test_response_cache_distinguishes_changed_physical_content(change):
         )
     elif change == "pulse":
         inputs = replace(
-            inputs, pulses=((replace(inputs.pulses[0][0], amplitude=2.0),),)
+            inputs,
+            events=(
+                (
+                    replace(
+                        inputs.events[0][0],
+                        pulses=(replace(inputs.events[0][0].pulses[0], amplitude=2.0),),
+                    ),
+                ),
+            ),
         )
     else:
-        grid = inputs.grids[0][0]
+        grid = inputs.events[0][0].grids[0]
         grid = (
             replace(grid, times_ns=grid.times_ns + 1.0)
             if change == "grid"
             else replace(grid, phase_rad=0.9)
         )
-        inputs = replace(inputs, grids=((grid, inputs.grids[0][1]),))
+        inputs = replace(
+            inputs,
+            events=(
+                (
+                    replace(
+                        inputs.events[0][0], grids=(grid, inputs.events[0][0].grids[1])
+                    ),
+                ),
+            ),
+        )
     after = reader.responses(inputs)
     fresh = adc.ConditionalReadout(inputs.model).responses(inputs)
     assert np.max(np.abs(before.sums - after.sums)) > 1e-3
@@ -281,14 +348,27 @@ def test_shaped_response_preserves_envelope_and_solver_failures():
 def test_response_rejects_content_dependent_sample_counts_and_ragged_traces():
     m = model()
     inputs = batch(m)
-    shorter = replace(inputs.grids[0][0], times_ns=np.array([0.0, 1.0]))
+    shorter = replace(inputs.events[0][0].grids[0], times_ns=np.array([0.0, 1.0]))
     inconsistent = replace(
-        inputs, pulses=inputs.pulses * 2, grids=(inputs.grids[0], (shorter, shorter))
+        inputs,
+        events=(
+            (replace(inputs.events[0][0], grids=inputs.events[0][0].grids),),
+            (replace(inputs.events[0][0], grids=(shorter, shorter)),),
+        ),
     )
     reader = adc.ConditionalReadout(m)
     with pytest.raises(ValueError, match="sample|grid"):
         reader.responses(inconsistent)
-    ragged = replace(inputs, grids=((shorter, inputs.grids[0][1]),))
+    ragged = replace(
+        inputs,
+        events=(
+            (
+                replace(
+                    inputs.events[0][0], grids=(shorter, inputs.events[0][0].grids[1])
+                ),
+            ),
+        ),
+    )
     with pytest.raises(ValueError, match="sample|grid"):
         reader.responses(ragged)
     sums_only = reader.responses(replace(ragged, include_traces=False))
@@ -314,7 +394,9 @@ def test_integrated_sums_preserve_calibrated_discrete_field_sum(grid_kind):
         # Decimal steps at late origins have nonidentical float64 differences.
         pulse = replace(pulse, start_ns=100003.0, end_ns=100023.0)
         grid = replace(grid, times_ns=99995.0 + np.arange(650) * 0.1)
-    inputs = adc.ReadoutBatch(m, ((pulse,),), ((grid,),), np.array([0], dtype=np.int64))
+    inputs = adc.ReadoutBatch(
+        m, ((adc.ReadoutEvent((pulse,), (grid,)),),), np.array([0], dtype=np.int64)
+    )
     reader = adc.ConditionalReadout(m)
     result = reader.responses(inputs)
     field = adc.ConditionalReadout(m).responses(replace(inputs, include_traces=True))
@@ -325,7 +407,9 @@ def test_integrated_sums_preserve_calibrated_discrete_field_sum(grid_kind):
     np.testing.assert_allclose(actual, expected, rtol=1e-10, atol=0)
     # Equal content is stable across repeated contents, batches and trace requests.
     copied = replace(
-        inputs, model=replace(m), pulses=inputs.pulses * 2, grids=inputs.grids * 2
+        inputs,
+        model=replace(m),
+        events=inputs.events * 2,
     )
     repeated = reader.responses(copied)
     np.testing.assert_array_equal(repeated.sums[0], result.sums[0])
@@ -350,7 +434,9 @@ def test_integrated_fallback_preserves_field_values(unsupported):
                 [[0.0, 0.03, 0.0], [0.0, 0.0, 0.03], [0.0, 0.0, 0.0]]
             ),
         )
-    inputs = adc.ReadoutBatch(m, ((pulse,),), ((grid,),), np.array([0], dtype=np.int64))
+    inputs = adc.ReadoutBatch(
+        m, ((adc.ReadoutEvent((pulse,), (grid,)),),), np.array([0], dtype=np.int64)
+    )
     result = adc.ConditionalReadout(m).responses(inputs)
     decimated = adc.ConditionalReadout(m).responses(
         replace(inputs, include_traces=True)
@@ -370,8 +456,11 @@ def test_mixed_integrated_contents_preserve_each_physical_response():
     )
     inputs = adc.ReadoutBatch(
         m,
-        ((pulse,), (shaped,), (pulse,)),
-        ((uniform,), (uniform,), (nonuniform,)),
+        (
+            (adc.ReadoutEvent((pulse,), (uniform,)),),
+            (adc.ReadoutEvent((shaped,), (uniform,)),),
+            (adc.ReadoutEvent((pulse,), (nonuniform,)),),
+        ),
         np.array([2, 0, 1, 0], dtype=np.int64),
     )
     result = adc.ConditionalReadout(m).responses(inputs)
@@ -430,7 +519,9 @@ def test_flat_mux_integrates_carriers_without_ode_and_keeps_guard_fallback(
         adc.SampleGrid(times, 6.005, 0.31),
         adc.SampleGrid(times[::2] + 0.13, 5.996, -0.23),
     )
-    inputs = adc.ReadoutBatch(m, (pulses,), (grids,), np.array([0], dtype=np.int64))
+    inputs = adc.ReadoutBatch(
+        m, ((adc.ReadoutEvent(pulses, grids),),), np.array([0], dtype=np.int64)
+    )
     oracle = adc.ConditionalReadout(m, rtol=1e-12, atol=1e-14)
     expected = np.stack([oracle.response(pulses, g).traces.sum(axis=-2) for g in grids])
     ode_calls, exponential_sizes = [], []
@@ -468,7 +559,13 @@ def test_flat_mux_integrates_carriers_without_ode_and_keeps_guard_fallback(
     np.testing.assert_array_equal(result.sample_counts, counts)
     assert result.traces is None
     repeated = reader.responses(
-        replace(inputs, pulses=(pulses, pulses), grids=(grids, grids))
+        replace(
+            inputs,
+            events=(
+                (replace(inputs.events[0][0], grids=grids),),
+                (replace(inputs.events[0][0], grids=grids),),
+            ),
+        )
     )
     np.testing.assert_array_equal(repeated.sums, np.repeat(result.sums, 2, axis=0))
     # A prior integrated cache must not turn shaped/staggered contents into
@@ -478,7 +575,9 @@ def test_flat_mux_integrates_carriers_without_ode_and_keeps_guard_fallback(
         (replace(pulses[0], start_ns=-3.0), *pulses[1:]),
     ):
         one = replace(
-            inputs, pulses=(changed,), grids=((grids[0],),), include_traces=True
+            inputs,
+            include_traces=True,
+            events=((adc.ReadoutEvent(changed, (grids[0],)),),),
         )
         before = len(ode_calls)
         traced = reader.responses(one)
@@ -529,7 +628,7 @@ def test_flat_mux_traces_superpose_carriers_without_ode(tones, guard, monkeypatc
         adc.SampleGrid(times + 0.13, 5.996, -0.23),
     )
     inputs = adc.ReadoutBatch(
-        m, (pulses,), (grids,), np.array([0, 0], dtype=np.int64), True
+        m, ((adc.ReadoutEvent(pulses, grids),),), np.array([0, 0], dtype=np.int64), True
     )
     oracle = adc.ConditionalReadout(m, rtol=1e-12, atol=1e-14)
     expected = np.stack([oracle.response(pulses, g).traces for g in grids])
@@ -568,7 +667,10 @@ def test_multi_carrier_batch_matches_joint_field_and_adds_offset_once(include_tr
     grid = adc.SampleGrid(np.arange(-2.0, 31.0, 2.0), 6.005, 0.31)
     try:
         inputs = adc.ReadoutBatch(
-            m, (pulses,), ((grid,),), np.array([0], dtype=np.int64), include_traces
+            m,
+            ((adc.ReadoutEvent(pulses, (grid,)),),),
+            np.array([0], dtype=np.int64),
+            include_traces,
         )
     except ValueError as error:
         pytest.fail(f"batched readout must accept coherent incident tones: {error}")
@@ -621,7 +723,10 @@ def test_sampled_envelope_propagates_without_field_ode(
         adc.SampleGrid(times + 0.13, 5.996, -0.23),
     )
     inputs = adc.ReadoutBatch(
-        m, (pulses,), (grids,), np.array([0], dtype=np.int64), include_traces
+        m,
+        ((adc.ReadoutEvent(pulses, grids),),),
+        np.array([0], dtype=np.int64),
+        include_traces,
     )
     oracle = adc.ConditionalReadout(m, rtol=1e-12, atol=1e-14)
     expected = np.stack([oracle.response(pulses, g).traces for g in grids])
@@ -645,11 +750,26 @@ def test_sampled_envelope_propagates_without_field_ode(
     # Numeric copies are the same content, unlike opaque callbacks.
     copied = adc.PiecewiseLinearEnvelope(knots.copy(), values.copy())
     repeated = reader.responses(
-        replace(inputs, pulses=(tuple(replace(p, envelope=copied) for p in pulses),))
+        replace(
+            inputs,
+            events=(
+                (
+                    replace(
+                        inputs.events[0][0],
+                        pulses=tuple((replace(p, envelope=copied) for p in pulses)),
+                    ),
+                ),
+            ),
+        )
     )
     np.testing.assert_array_equal(result.sums, repeated.sums)
     opaque = tuple(replace(p, envelope=lambda t: envelope(t)) for p in pulses)
-    fallback = reader.responses(replace(inputs, pulses=(opaque,)))
+    fallback = reader.responses(
+        replace(
+            inputs,
+            events=((replace(inputs.events[0][0], pulses=opaque),),),
+        )
+    )
     assert calls, "opaque callbacks must retain the general ODE"
     np.testing.assert_allclose(fallback.sums, result.sums, rtol=1e-6, atol=2e-9)
 
@@ -668,10 +788,21 @@ def test_flat_integrated_contents_use_a_carrier_axis_and_preserve_fallback(monke
         *grids[:-1],
         (replace(grids[-1][0], times_ns=times + 0.01 * np.sin(times)),),
     )
-    inputs = adc.ReadoutBatch(m, pulses, grids, np.arange(70, dtype=np.int64))
+    inputs = adc.ReadoutBatch(
+        m,
+        tuple(
+            (adc.ReadoutEvent(pulses, grids),)
+            for pulses, grids in zip(pulses, grids, strict=True)
+        ),
+        np.arange(70, dtype=np.int64),
+    )
     individual = [
         adc.ConditionalReadout(m)
-        .responses(adc.ReadoutBatch(m, (p,), (g,), np.array([0], dtype=np.int64)))
+        .responses(
+            adc.ReadoutBatch(
+                m, ((adc.ReadoutEvent(p, g),),), np.array([0], dtype=np.int64)
+            )
+        )
         .sums[0]
         for p, g in zip(pulses, grids, strict=True)
     ]

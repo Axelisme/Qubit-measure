@@ -12,7 +12,6 @@ from numpy.typing import NDArray
 
 from zcu_tools.core.simulation import (
     AcquireRequest,
-    CancellationQuery,
     ChannelSignals,
     EnvironmentSnapshot,
     RoundRequest,
@@ -22,6 +21,7 @@ from zcu_tools.core.simulation import (
 from zcu_tools.device import DeviceManager, FakeDevice, FakeDeviceInfo
 from zcu_tools.experiment.simulation import SimulationEnvironment
 from zcu_tools.experiment.single_fluxonium import (
+    SingleFluxoniumPreflight,
     SingleFluxoniumRuntimeOptions,
     SingleFluxoniumSource,
 )
@@ -47,9 +47,6 @@ from zcu_tools.resources.six_fluxonium import (
 )
 from zcu_tools.resources.six_fluxonium.schema import CircuitBias
 from zcu_tools.simulate.adc import (
-    ChannelReadout,
-    PreparedRawShots,
-    ReadoutBatch,
     round_statistics,
     sample_traces,
 )
@@ -285,65 +282,50 @@ class SixFluxoniumSource:
                 raise ValueError(f"{dc.name}.value: nonfinite or outside source limits")
         return currents
 
-    def _prepare_group(
+    def _preflight_group(
         self,
         request: AcquireRequest,
         currents: dict[str, float],
         group: RoutedGroup,
-        *,
-        cancel: CancellationQuery | None = None,
-    ) -> tuple[NDArray[np.float64], tuple[ChannelReadout, ...], PreparedRawShots]:
+    ) -> SingleFluxoniumPreflight:
         source = self.sources[group.cavity]
         bias = self.settings.qubits.ordered()[group.cavity].dc_bias
         flux = _reduced_flux(
             bias, currents[self.settings.dc_source.name], currents[bias.source.name]
         )
-        channels = []
-        batches: dict[int, ReadoutBatch] = {}
-        populations = None
-        count = len(group.points)
-        for channel in group.channels:
-            source.settings = _single_settings(
+        settings = tuple(
+            _single_settings(
                 self._effective_settings, group.cavity, channel, group.gen_ch, flux
             )
-            snapshot = EnvironmentSnapshot(
-                "single-fluxonium-v1",
-                source.identity,
-                ((bias.source.name, currents[bias.source.name]),),
-            )
-            subrequest = replace(
-                request,
-                loop_dims=(request.reps, count),
-                avg_level=0,
-                readouts=tuple(w for w in request.readouts if w.channel == channel),
-                point_dims=(count,),
-                point_names=("routed_point",),
-                templates=tuple(
-                    replace(
-                        template,
-                        readouts=tuple(
-                            w for w in template.readouts if w.channel == channel
-                        ),
-                    )
-                    for template in group.templates
-                ),
-            )
-            prepared = source.prepare(subrequest, snapshot, cancel=cancel)
-            populations = prepared.populations
-            channels.append(prepared.channel)
-            batches.update(prepared.raw.batches)
-        if populations is None:
-            raise ValueError("cavity group requires an ADC")
-        solver = source.settings.numerics.solver
-        raw = PreparedRawShots(
-            populations, batches, reps=request.reps, rtol=solver.rtol, atol=solver.atol
+            for channel in group.channels
         )
-        return populations, tuple(channels), raw
+        source.settings = settings[0]
+        snapshot = EnvironmentSnapshot(
+            "single-fluxonium-v1",
+            source.identity,
+            ((bias.source.name, currents[bias.source.name]),),
+        )
+        count = len(group.points)
+        subrequest = replace(
+            request,
+            loop_dims=(request.reps, count),
+            avg_level=0,
+            readouts=tuple(w for w in request.readouts if w.channel in group.channels),
+            point_dims=(count,),
+            point_names=("routed_point",),
+            templates=group.templates,
+        )
+        return source.preflight(
+            subrequest,
+            snapshot,
+            receivers=tuple(value.readout.adc for value in settings),
+        )
 
     def execute(self, round_request: RoundRequest) -> IntegratedRound | RoundSignals:
         """Evolve each observed independent circuit and return all requested ADCs.
 
-        Routing errors fail before physical preparation. Each point starts in
+        Routing and all source/ADC/template layout checks finish before any
+        density evolution or sampling. Each point starts in
         that circuit's Gibbs state. Shared-cavity ADCs use the same physical
         populations and jump histories; distinct cavities draw independent
         streams. Integrated histograms retain all marginal counts in linear
@@ -372,11 +354,19 @@ class SixFluxoniumSource:
             self._pending_acquire = False
         currents = self._currents(snapshot)
         groups = route_request(self.settings, request)
+        validated = tuple(
+            self._preflight_group(request, currents, group) for group in groups
+        )
         rounds = []
         traces: dict[int, NDArray[np.float64]] = {}
-        for group in groups:
-            populations, channels, raw = self._prepare_group(
-                request, currents, group, cancel=round_request.cancel
+        for group, preflight in zip(groups, validated, strict=True):
+            source = self.sources[group.cavity]
+            source.settings = preflight.settings
+            prepared = source.prepare_readouts(preflight, cancel=round_request.cancel)
+            readout, channels, raw = (
+                prepared.raw.readout,
+                prepared.channels,
+                prepared.raw,
             )
             # Cantor-pair the fixed-radix acquire/cavity identity with the
             # partition's first point, independent of request size. ADCs within
@@ -387,7 +377,7 @@ class SixFluxoniumSource:
             sequence = diagonal * (diagonal + 1) // 2 + first_point
             if request.mode == "integrated":
                 statistics = round_statistics(
-                    populations,
+                    readout,
                     channels,
                     reps=request.reps,
                     seed=request.root_seed,
@@ -402,7 +392,7 @@ class SixFluxoniumSource:
                 )
             else:
                 result = sample_traces(
-                    populations,
+                    readout,
                     dict(raw.batches),
                     reps=request.reps,
                     identity=SamplingIdentity(request.root_seed, (sequence, index, 0)),

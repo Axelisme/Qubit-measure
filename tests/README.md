@@ -401,6 +401,12 @@ sampling tests live in the corresponding numeric owner directories.
 `tests/experiment/test_ftf.py` covers explicit unit conversion, common carrier phase
 and public acquire/decimated composition. `test_ftf_templates.py` covers DC readout
 and the template engine contract.
+`ftf/test_projective_readout.py` covers public frontend mux heralding, retained
+outcome histories, pruning, partial ADC observations and elementwise terminal-only
+runtime parity against direct Engine/ADC composition. Cavity field continuation
+stays in `ftf/test_cavity_continuation.py`; acquisition-frozen losses stay in
+`ftf/test_drift.py`. Repeated frontend readouts use `Repeat` and the public
+`set_reads_per_shot` count, since QICK counts the trigger macro once.
 The former TLS engine/frontend and tests serving only that implementation are
 retired. Framework Window/RPC tests continue to use synthetic registered
 experiments, not lab definitions or model-truth calibration oracles.

@@ -17,6 +17,7 @@ from zcu_tools.resources.ftf import parse_ftf
 
 from tests.experiment._ftf_templates import (
     expect_statistics,
+    herald_template,
     request,
     settings,
     snapshot,
@@ -31,6 +32,39 @@ def bounded_blas_threads():
     # These small matrix seams do not benefit from serial-run BLAS fan-out.
     with threadpool_limits(limits=1, user_api="blas"):
         yield
+
+
+def test_projective_rounds_keep_acquisition_effective_losses_and_facts(tmp_path):
+    now = [100.0]
+    configuration = drift_settings()
+    configuration = configuration.model_copy(
+        update={"chip": configuration.chip.model_copy(update={"temperature_k": 1.0})}
+    )
+    template, readout = herald_template()
+    source = FTFSource(
+        configuration,
+        DeviceManager(),
+        readout=readout,
+        acquisition=FTFAcquisitionOptions(
+            clock=SimulationClock(monotonic=lambda: now[0]),
+            truth_log=tmp_path / "truth.jsonl",
+        ),
+    )
+    try:
+        source.begin_acquire(seed=123)
+        effective = source.effective_settings
+        facts = source.model_facts(snapshot())
+        session = source.open_acquire(request(templates=(template,)))
+        for index in range(2):
+            now[0] += 2
+            result = expect_statistics(session.sample_round(snapshot(), index))
+            assert result.state_counts.shape == (2, 4)
+            assert source.effective_settings == effective
+            assert source.model_facts(snapshot()) is facts
+            assert source.evaluations[0].projection_outcomes == (2, 2)
+        assert len((tmp_path / "truth.jsonl").read_text().splitlines()) == 3
+    finally:
+        source.close()
 
 
 def drift_settings(*, sigma: float = 0.3):

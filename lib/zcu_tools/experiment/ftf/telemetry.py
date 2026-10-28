@@ -21,6 +21,8 @@ class _Record(TypedDict):
     frontend_cpu_s: float
     estimated_cost_unit: str
     families: dict[str, dict[str, int | float | None]]
+    projection_outcomes: list[int]
+    projection_pruned_weight: list[float]
 
 
 def _families(
@@ -80,6 +82,8 @@ class RoutingTelemetry:
         wall_s: float,
         rounds: int,
         paths: Sequence[PathDiagnostics],
+        projection_outcomes: Sequence[int] = (),
+        projection_pruned_weight: Sequence[float] = (),
     ) -> None:
         """Append an acquire summary; paths contains this acquire's round work.
 
@@ -87,6 +91,9 @@ class RoutingTelemetry:
         measures admitted acquire wall time including pacing, excluding this I/O.
         paths may be empty after a failure before evolution. Templates currently
         carry no experiment/program identifier, so no name is synthesized.
+        projection_outcomes and projection_pruned_weight describe the latest
+        round's retained histories and cumulative removed probability per C-order
+        point. Empty sequences mean no projective reads or no completed solve.
         """
         with self._lock:
             try:
@@ -99,6 +106,8 @@ class RoutingTelemetry:
                     "frontend_cpu_s": sum(p.frontend_cpu_s for p in paths),
                     "estimated_cost_unit": "relative scheduling units",
                     "families": _families(paths),
+                    "projection_outcomes": list(projection_outcomes),
+                    "projection_pruned_weight": list(projection_pruned_weight),
                 }
                 line = (
                     json.dumps(record, allow_nan=False, separators=(",", ":")) + "\n"

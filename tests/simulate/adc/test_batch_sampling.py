@@ -48,7 +48,12 @@ def physical_batches(*, covariance=None, rates=None):
         (pulse, replace(pulse, start_ns=15, frequency_ghz=6.021, amplitude=0.3j)),
     )
     batch = adc.ReadoutBatch(
-        model, contents, ((grid, grid),), np.array([0, 0], dtype=np.int64)
+        model,
+        tuple(
+            (adc.ReadoutEvent(pulses, grids),)
+            for pulses, grids in zip(contents, ((grid, grid),), strict=True)
+        ),
+        np.array([0, 0], dtype=np.int64),
     )
     return {3: batch, 1: batch}
 
@@ -56,7 +61,7 @@ def physical_batches(*, covariance=None, rates=None):
 def test_decimated_shots_share_states_paths_and_keep_content_and_sample_order():
     batches = physical_batches(rates=np.array([[0, 0.04], [0.02, 0]]))
     result = adc.sample_traces(
-        np.array([[[0.0, 1.0], [0.0, 1.0]]]),
+        adc.ProjectionReadout.unprojected(np.array([[[0.0, 1.0], [0.0, 1.0]]])),
         batches,
         reps=400,
         identity=SamplingIdentity(71, (2, 3, 0)),
@@ -74,7 +79,10 @@ def test_decimated_noise_is_per_sample_independent_and_has_no_rounding_term():
     batches = physical_batches(covariance=np.array([[2.0, 0.5], [0.5, 1.0]]))
     populations = np.array([[[1.0, 0.0], [0.0, 1.0]]])
     result = adc.sample_traces(
-        populations, batches, reps=12000, identity=SamplingIdentity(72, (2, 3, 0))
+        adc.ProjectionReadout.unprojected(populations),
+        batches,
+        reps=12000,
+        identity=SamplingIdentity(72, (2, 3, 0)),
     )
     noiseless = (
         adc.ADC(batches[3].model)
@@ -98,20 +106,31 @@ def test_decimated_noise_is_per_sample_independent_and_has_no_rounding_term():
 def test_decimated_zero_reps_reproducibility_global_rng_and_content_order():
     batches = physical_batches()
     content = batches[3]
-    later = tuple(replace(p, amplitude=p.amplitude * 2) for p in content.pulses[0])
+    later = tuple(
+        (replace(p, amplitude=p.amplitude * 2) for p in content.events[0][0].pulses)
+    )
     content = replace(
         content,
-        pulses=(content.pulses[0], later),
-        grids=content.grids * 2,
         content_index=np.array([0, 1], dtype=np.int64),
+        events=(content.events[0], (replace(content.events[0][0], pulses=later),)),
     )
     batches = {3: content, 1: content}
     populations = np.array([[[0.25, 0.75], [0.0, 1.0]]])
     original = populations.copy()
     before = legacy_rng_state()
     identity = SamplingIdentity(73, (2, 3, 0))
-    first = adc.sample_traces(populations, batches, reps=100, identity=identity)
-    repeated = adc.sample_traces(populations, batches, reps=100, identity=identity)
+    first = adc.sample_traces(
+        adc.ProjectionReadout.unprojected(populations),
+        batches,
+        reps=100,
+        identity=identity,
+    )
+    repeated = adc.sample_traces(
+        adc.ProjectionReadout.unprojected(populations),
+        batches,
+        reps=100,
+        identity=identity,
+    )
     np.testing.assert_array_equal(first.channels[0].iq, repeated.channels[0].iq)
     expected = (
         adc.ADC(content.model).responses(replace(content, include_traces=True)).traces
@@ -128,7 +147,10 @@ def test_decimated_zero_reps_reproducibility_global_rng_and_content_order():
     )
     assert 0.1 < g.mean() < 0.4
     empty = adc.sample_traces(
-        populations, batches, reps=0, identity=SamplingIdentity(1, (0, 0, 0))
+        adc.ProjectionReadout.unprojected(populations),
+        batches,
+        reps=0,
+        identity=SamplingIdentity(1, (0, 0, 0)),
     )
     assert empty.channels[0].iq.shape == (0, 2, 4, 2)
     np.testing.assert_array_equal(populations, original)
@@ -170,9 +192,17 @@ def test_physical_traces_reject_invalid_joint_inputs(invalid):
         reps = -1
     elif invalid == "unequal_reads":
         batch = batches[3]
-        grid = batch.grids[0][0]
+        grid = batch.events[0][0].grids[0]
         batches[3] = replace(
-            batch, grids=((grid, replace(grid, times_ns=grid.times_ns[:2])),)
+            batch,
+            events=(
+                (
+                    replace(
+                        batch.events[0][0],
+                        grids=(grid, replace(grid, times_ns=grid.times_ns[:2])),
+                    ),
+                ),
+            ),
         )
     elif invalid == "rates":
         batch = batches[3]
@@ -185,7 +215,10 @@ def test_physical_traces_reject_invalid_joint_inputs(invalid):
         ValueError, match="probabilit|population|state|point|reps|sample|rates|channel"
     ):
         adc.sample_traces(
-            populations, batches, reps=reps, identity=SamplingIdentity(73)
+            adc.ProjectionReadout.unprojected(populations),
+            batches,
+            reps=reps,
+            identity=SamplingIdentity(73),
         )
 
 
@@ -196,7 +229,12 @@ def test_physical_traces_accept_engine_trace_tolerance_without_normalizing():
     populations = np.array([[[boundary, 1 + 9e-7 - boundary], [0.4, 0.6]]])
     original = populations.copy()
     batches = physical_batches()
-    result = adc.sample_traces(populations, batches, reps=3, identity=identity)
+    result = adc.sample_traces(
+        adc.ProjectionReadout.unprojected(populations),
+        batches,
+        reps=3,
+        identity=identity,
+    )
     expected = (
         adc.ADC(batches[3].model)
         .responses(replace(batches[3], include_traces=True))
@@ -215,8 +253,12 @@ def test_round_draws_reproduce_without_mutating_inputs_or_global_rng():
     inputs = channels()
     global_state = legacy_rng_state()
     kwargs = dict(reps=17, seed=73, acquire_sequence=2, round_index=3)
-    first = adc.round_statistics(populations, inputs, **kwargs)
-    second = adc.round_statistics(populations, inputs, **kwargs)
+    first = adc.round_statistics(
+        adc.ProjectionReadout.unprojected(populations), inputs, **kwargs
+    )
+    second = adc.round_statistics(
+        adc.ProjectionReadout.unprojected(populations), inputs, **kwargs
+    )
     np.testing.assert_array_equal(first.state_counts, second.state_counts)
     np.testing.assert_array_equal(first.channels[0].sums, second.channels[0].sums)
     assert first.raw_identity == SamplingIdentity(73, (2, 3, 1))
@@ -271,7 +313,12 @@ def test_round_draws_reject_invalid_joint_inputs(invalid):
         match="probabilit|population|state|point|reps|identity|channel|sample",
     ):
         adc.round_statistics(
-            populations, inputs, reps=reps, seed=seed, acquire_sequence=2, round_index=3
+            adc.ProjectionReadout.unprojected(populations),
+            inputs,
+            reps=reps,
+            seed=seed,
+            acquire_sequence=2,
+            round_index=3,
         )
 
 
@@ -288,7 +335,7 @@ def test_round_draws_accept_engine_trace_tolerance_without_mutation():
     reps = 1_000_000_000
     try:
         result = adc.round_statistics(
-            populations,
+            adc.ProjectionReadout.unprojected(populations),
             channels(),
             reps=reps,
             seed=1,
@@ -313,7 +360,9 @@ def test_prepared_statistics_own_inputs_and_factor_once_but_draw_fresh(monkeypat
     populations = np.array([[[0.25, 0.75], [1.0, 0.0]]])
     inputs = channels(covariance=np.array([[2.0, 0.5], [0.5, 1.0]]))
     kwargs = dict(seed=73, acquire_sequence=2, round_index=3)
-    expected = adc.round_statistics(populations, inputs, reps=17, **kwargs)
+    expected = adc.round_statistics(
+        adc.ProjectionReadout.unprojected(populations), inputs, reps=17, **kwargs
+    )
     factor = np.linalg.eigh
     calls = []
 
@@ -322,7 +371,9 @@ def test_prepared_statistics_own_inputs_and_factor_once_but_draw_fresh(monkeypat
         return factor(covariance)
 
     monkeypatch.setattr(np.linalg, "eigh", observed)
-    prepared = adc.PreparedStatistics(populations, inputs, reps=17)
+    prepared = adc.PreparedStatistics(
+        adc.ProjectionReadout.unprojected(populations), inputs, reps=17
+    )
     assert len(calls) == len(inputs)
     populations[:] = 0  # Plan must not borrow the mutable input probabilities.
     first = prepared.draw(**kwargs)
