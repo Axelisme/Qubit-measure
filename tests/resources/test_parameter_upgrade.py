@@ -518,6 +518,38 @@ def test_project_root_backup_override_rejects_mirror_into_source_tree_before_wri
     assert set(tmp_path.rglob("*")) == before
 
 
+@pytest.mark.parametrize("destination_tree", ["result", "Database"])
+@pytest.mark.parametrize("redirect_entry", [False, True])
+def test_mirror_symlink_into_another_project_rejects_before_writes(
+    tmp_path: Path,
+    rename_plan: UpgradePlan,
+    destination_tree: str,
+    redirect_entry: bool,
+) -> None:
+    source = tmp_path / "project-a" / "result" / "entry" / "point.yaml"
+    source.parent.mkdir(parents=True)
+    original = b"old: 7\n"
+    source.write_bytes(original)
+    other_tree = tmp_path / "project-b" / destination_tree
+    other_tree.mkdir(parents=True)
+    mirror = tmp_path / "result"
+    if redirect_entry:
+        mirror.mkdir()
+        mirror = mirror / "entry"
+    mirror.symlink_to(other_tree, target_is_directory=True)
+    before = set(tmp_path.rglob("*"))
+
+    (result,) = upgrade_files(
+        (UpgradeSource(source),), plan=rename_plan, apply=True, backup_root=tmp_path
+    )
+
+    assert result.status == "rejected"
+    assert "backup" in (result.error or "")
+    assert result.backup_path is None
+    assert source.read_bytes() == original
+    assert set(tmp_path.rglob("*")) == before
+
+
 def test_database_source_uses_project_sibling_backup(
     tmp_path: Path, rename_plan: UpgradePlan
 ) -> None:

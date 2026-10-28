@@ -32,9 +32,8 @@ def upgrade_backup_path(source: Path, *, backup_root: Path | None = None) -> Pat
         project = data_root.parent
         relative = source.relative_to(project)
         root = (backup_root or project.with_name(f"{project.name}-backup")).resolve()
-    destination = (
-        (root / relative).with_name(f"{source.name}.{uuid4().hex}.bak").resolve()
-    )
+    mirror = (root / relative).with_name(f"{source.name}.{uuid4().hex}.bak")
+    destination = mirror.resolve()
     if any(parent.name in {"result", "Database"} for parent in (root, *root.parents)):
         raise ValueError(f"{root}: backup cannot be inside a result/Database tree")
     if data_root is not None and destination.is_relative_to(data_root):
@@ -43,6 +42,15 @@ def upgrade_backup_path(source: Path, *, backup_root: Path | None = None) -> Pat
         )
     if not destination.is_relative_to(root):
         raise ValueError(f"{destination}: backup mirror symlink escapes backup root")
+    # Ordinary mirrored result/Database directories are backup content. A symlink
+    # must not introduce a different data-tree ancestor, even within backup root.
+    if any(
+        parent.name in {"result", "Database"} and parent not in mirror.parents
+        for parent in destination.parents
+    ):
+        raise ValueError(
+            f"{destination}: backup mirror symlink enters a result/Database tree"
+        )
     if data_root is None and destination.is_relative_to(source.parent):
         raise ValueError(
             f"{destination}: backup cannot be inside standalone source parent"
