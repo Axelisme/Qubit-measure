@@ -48,7 +48,7 @@ def name_env() -> FormEnv:
         library=LibrarySnapshot(
             ModuleLibraryDocument(format="zcu.module-library", format_version="2.0")
         ),
-        target=SavedPoint(entry_id="entry", point="synthetic"),
+        target=SavedPoint(entry_name="entry", point="synthetic"),
         roles=None,
         storage=None,
     ).bind_aliases((AliasRow("device", "yoko1"), AliasRow("unbound", "")), {})

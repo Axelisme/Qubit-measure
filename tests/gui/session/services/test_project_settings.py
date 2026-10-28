@@ -104,7 +104,7 @@ def test_open_entry_then_use_point_publishes_active_target(
 
     target = context.use_point(PointUseRequest("working"))
 
-    assert target == SavedPoint(entry_id=info.entry_id, point="working")
+    assert target == SavedPoint(entry_name=info.name, point="working")
     assert state.session_env.readiness is ContextReadiness.ACTIVE
     assert context.read_context().target == target
     assert context.list_points()[0].description == "saved calibration"

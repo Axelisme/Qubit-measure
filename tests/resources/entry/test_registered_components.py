@@ -20,6 +20,7 @@ from zcu_tools.resources.entry import (
     ComponentSchema,
     ResultEntry,
     component_registry,
+    document_value,
     snapshot,
 )
 
@@ -87,9 +88,13 @@ def test_open_invalid_component_reports_source_and_original_validation(
 
     def open_document() -> None:
         if owner == "setup":
-            ResultEntry.open("entry", result_root=results, database_root=database)
+            view = ResultEntry.open(
+                "entry", result_root=results, database_root=database
+            ).setup
         else:
-            entry.use_point("working")
+            view = entry.use_point("working")
+        assert view.description is None
+        _ = view.N1.rate
 
     with pytest.raises(ValueError, match=r"N1\.rate") as failure:
         open_document()
@@ -148,7 +153,9 @@ def test_registered_legacy_rename_preserves_metadata_until_explicit_replacement(
             "entry", result_root=results, database_root=database
         )
         loaded = reopened.setup if owner == "setup" else reopened.use_point("working")
-        assert loaded.N1.modern == 7
+        with pytest.raises(AttributeError, match=r"N1\.modern"):
+            _ = loaded.N1.modern
+        assert document_value(snapshot(loaded), "N1.modern") == 7
         assert loaded.meta("N1.modern") == original_source
         assert loaded.meta("N1.legacy") is None
         with pytest.raises(AttributeError):

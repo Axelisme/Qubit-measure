@@ -21,7 +21,6 @@ def test_empty_entry_queries_and_explicit_new_leave_point_unselected(
     info = application.controller.setup_control.get_entry_info()
     assert info is not None
     assert reply == {
-        "entry_id": info.entry_id,
         "name": "cooldown-A",
         "result_path": str(tmp_path / "result" / "cooldown-A"),
         "database_path": str(tmp_path / "Database" / "cooldown-A"),
@@ -71,17 +70,17 @@ def test_open_existing_entry_clears_point_and_new_point_uses_current_entry(
         "entries": ["arbitrary-name", "first"]
     }
     opened = application.result("entry.open", {"name": "arbitrary-name"})
-    assert opened["entry_id"] == second.entry_id
+    assert opened["name"] == second.result_path.name
     assert application.state.session_env.readiness == ContextReadiness.EMPTY
     assert application.state.session_env.parameters is None
     selected = application.result("point.use", {"label": "existing"})
     assert selected == {
         "kind": "saved_point",
-        "entry_id": second.entry_id,
+        "entry_name": second.result_path.name,
         "point": "existing",
     }
     created = application.result("point.new", {"label": "next"})
-    assert created["entry_id"] == second.entry_id
+    assert created["entry_name"] == second.result_path.name
     application.result("entry.open", {"name": "first"})
     assert application.result("entry.info", {}) == {"entry": first, "files": []}
     assert application.state.session_env.readiness == ContextReadiness.EMPTY
@@ -140,7 +139,7 @@ def test_new_install_failure_keeps_created_entry_for_open_recovery(
     )
     monkeypatch.setattr(ContextService, "install_entry", original)
     opened = application.result("entry.open", {"name": "retained"})
-    assert opened["entry_id"] == retained.entry_id
+    assert opened["name"] == retained.result_path.name
     assert application.state.session_env.readiness == ContextReadiness.EMPTY
 
 

@@ -34,7 +34,7 @@ from .backup import (
 from .errors import MigrationInputError
 from .models import MigrationDifference, MigrationManifest, MigrationRequest
 from .preservation import preflight_preservation
-from .state import overlay_known_fields, write_json
+from .state import overlay_known_fields, validate_migration_fields, write_json
 
 _JSON = TypeAdapter(JsonObject)
 
@@ -59,7 +59,7 @@ class InitializationOwnership:
     manifest holds the fixed request identity, declarations, report date/path and
     initial empty conversion state. created_at is the fixed UTC setup time.
     temporary_name names only this tool's sibling staging directories, derived
-    from manifest.identity.entry_id. source_inventory fixes complete live hashes
+    from manifest.identity.migration_id. source_inventory fixes complete live hashes
     and directories before the first backup/entry write. prepared becomes true
     only after owner creation has completed and hashes/directories/documents have
     captured that initial entry. Those paths use result/Database relative labels.
@@ -136,6 +136,9 @@ def _read(path: Path) -> InitializationOwnership:
     try:
         text = path.read_bytes()
         raw = _JSON.validate_json(text, strict=True)
+        manifest_raw = raw.get("manifest")
+        if isinstance(manifest_raw, dict):
+            validate_migration_fields(manifest_raw, path=path)
         ownership = _OWNERSHIP.validate_json(text, strict=True)
     except (ValidationError, UnicodeError) as exc:
         raise MigrationInputError(f"{path}: invalid initialization ownership") from exc
@@ -170,7 +173,7 @@ def _validate_intent(
 ) -> None:
     fixed = ownership.manifest
     if (
-        fixed.report.entry_id != fixed.identity.entry_id
+        fixed.report.migration_id != fixed.identity.migration_id
         or fixed.files
         or fixed.runs
         or fixed.module_files
@@ -181,7 +184,7 @@ def _validate_intent(
         or fixed.report.format != "zcu.migration-report"
     ):
         raise MigrationInputError(f"{path}: invalid initial manifest state")
-    expected = replace(candidate.identity, entry_id=fixed.identity.entry_id)
+    expected = replace(candidate.identity, migration_id=fixed.identity.migration_id)
     comparisons = (
         ("identity", expected, fixed.identity),
         ("mapping-version", candidate.mapping_version, fixed.mapping_version),
@@ -210,10 +213,13 @@ def _validate_intent(
             str(fixed.report_path),
             str(request.report_path),
         )
-    if ownership.temporary_name != f".migration-init-{fixed.identity.entry_id.hex}":
+    if (
+        ownership.temporary_name
+        != f".migration-operation-{fixed.identity.migration_id.hex}"
+    ):
         raise MigrationInputError(f"{path}: invalid owned temporary name")
-    # The owner validates the fixed UUID/time before any path can be removed.
-    EntryIdentity(entry_id=fixed.identity.entry_id, created_at=ownership.created_at)
+    # The owner validates the fixed creation time before any path can be removed.
+    EntryIdentity(created_at=ownership.created_at)
     current = snapshot_sources(candidate.report.source)
     if current != ownership.source_inventory:
         _conflict(
@@ -335,7 +341,6 @@ def _publish_entry(
             result_root=destination.result_path.parent,
             database_root=destination.database_path.parent,
             identity=EntryIdentity(
-                entry_id=ownership.manifest.identity.entry_id,
                 created_at=ownership.created_at,
             ),
         )
@@ -399,7 +404,7 @@ def _load_or_plan(
     ownership = InitializationOwnership(
         manifest=candidate,
         created_at=datetime.now(timezone.utc),
-        temporary_name=f".migration-init-{candidate.identity.entry_id.hex}",
+        temporary_name=f".migration-operation-{candidate.identity.migration_id.hex}",
         source_inventory=snapshot_sources(candidate.report.source),
     )
     for target in (

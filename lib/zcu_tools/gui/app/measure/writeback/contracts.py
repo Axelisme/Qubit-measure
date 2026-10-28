@@ -84,10 +84,10 @@ class WritebackSelection:
 
 
 class WritebackDestination(TypedDict):
-    """Fixed persisted target: kind=saved_point, entry UUID and point label."""
+    """Fixed persisted target: kind=saved_point, entry name in the current result root and point label."""
 
     kind: Literal["saved_point"]
-    entry_id: str
+    entry_name: str
     point: str
 
 
@@ -97,7 +97,8 @@ class WritebackApplied:
 
     id is draft-local; kind is parameter/module/record. target is the concrete
     path or record component. value is the actual stored value after the write.
-    destination identifies the fixed entry and point that received it.
+    destination identifies the fixed entry name within the current result root
+    and the point that received it.
     """
 
     id: str

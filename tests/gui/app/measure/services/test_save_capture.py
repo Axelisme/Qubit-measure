@@ -8,14 +8,13 @@ from unittest.mock import MagicMock
 
 import pytest
 from qtpy.QtWidgets import QApplication
-from zcu_tools.cfg_model import ConfigBase, ConstWaveformCfg, PulseSpec
+from zcu_tools.cfg_model import ConstWaveformCfg, PulseSpec
 from zcu_tools.gui.app.measure.artifacts import SaveControlFacet, SaveService
 from zcu_tools.gui.app.measure.services.pane_commit import commit_run
 from zcu_tools.gui.app.measure.services.tab import TabService
 from zcu_tools.gui.app.measure.state import RunPaneState, State
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.expected_error import FailedPreconditionError
-from zcu_tools.gui.form_adapter import Form
 from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_control import ContextControlFacet
 from zcu_tools.gui.session.context_types import (
@@ -32,7 +31,7 @@ from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
 from tests.gui.app.measure._form_fakes import form_resources, form_sources
 from tests.gui.app.measure._native_save_support import GUI_ORIGIN, native_save_session
-from tests.gui.app.measure._record_support import require_record
+from tests.gui.app.measure._record_support import require_record, require_target
 from tests.resources.entry.fakes import register_fakes, registry_state, restore_registry
 
 
@@ -80,7 +79,7 @@ def _bound(session: SaveSession) -> ParameterContext:
 def test_storage_retains_entry_point_description_and_roles_after_switch(
     session: SaveSession, tmp_path: Path
 ) -> None:
-    target = session.control.read_context().target
+    target = require_target(session.control.read_context())
     session.control.set_parameter(target, "general.description", "original")
     capture = _bound(session)
     session.control.set_parameter(target, "general.description", "edited")
@@ -93,7 +92,7 @@ def test_storage_retains_entry_point_description_and_roles_after_switch(
     session.context.install_entry(other)
 
     storage = session.control.capture_storage(capture)
-    assert str(storage.entry_id) == session.entry.entry_id
+    assert storage.entry_name == session.entry.result_path.name
     assert storage.entry_name == "entry-a"
     assert storage.point == "p"
     assert storage.description == "original"
@@ -118,13 +117,13 @@ def test_current_storage_description_updates_without_rewriting_old_capture(
     session: SaveSession,
 ) -> None:
     old = session.control.read_context()
-    session.control.set_parameter(old.target, "general.description", "new")
+    session.control.set_parameter(require_target(old), "general.description", "new")
     fresh = session.control.read_context()
     assert session.control.capture_storage(fresh).description == "new"
     assert session.control.capture_storage(old).description != "new"
     assert (
         session.control.capture_storage(
-            session.control.read_target(old.target)
+            session.control.read_target(require_target(old))
         ).description
         == "new"
     )
@@ -137,13 +136,13 @@ def test_library_publication_preserves_storage_origin(
     original = session.control.read_context()
     if kind == "module":
         session.control.set_module(
-            original.target,
+            require_target(original),
             "Q1.pulses.pi",
             PulseSpec(ch=0, nqz=1, freq=100.0, gain=0.2, waveform="Q1.waveforms.base"),
         )
     else:
         session.control.set_waveform(
-            original.target, "Q1.waveforms.base", ConstWaveformCfg(length=1.0)
+            require_target(original), "Q1.waveforms.base", ConstWaveformCfg(length=1.0)
         )
     storage = session.control.capture_storage(session.control.read_context())
     assert storage == session.control.capture_storage(original)
@@ -192,13 +191,12 @@ def test_storage_rejects_mismatched_target(session: SaveSession) -> None:
         )
 
 
-def test_tab_created_without_context_does_not_gain_later_save_origin(
+def test_tab_without_context_saves_recorded_names_not_later_selection(
     tmp_path: Path, qapp: QApplication
 ) -> None:
     with native_save_session(tmp_path, qapp) as native:
         empty_state = State(SessionEnv(parameters=None, soc=None, soccfg=None))
-        adapter = MagicMock()
-        adapter.form = Form(ConfigBase, {})
+        adapter = native.state.get_tab("tab").adapter
         registry = MagicMock()
         registry.create.return_value = adapter
         tabs = TabService(
@@ -222,14 +220,27 @@ def test_tab_created_without_context_does_not_gain_later_save_origin(
         empty_state.set_context(native.state.session_env)
         control = SaveControlFacet(
             state=empty_state,
-            save=SaveService(empty_state, native.bus),
+            save=SaveService(
+                empty_state,
+                native.bus,
+                result_root=tmp_path / "result",
+                database_root=tmp_path / "Database",
+            ),
             context=native.context,
         )
         before = empty_state.get_artifact_snapshots(tab_id)
-        with pytest.raises(FailedPreconditionError, match="captured storage"):
-            control.save_data(tab_id, comment="rejected", origin=GUI_ORIGIN)
+        assert before and all(
+            not member.outputs
+            for section in before
+            for artifact in section.artifacts
+            for member in artifact.members
+        )
+        report = control.save_data(tab_id, comment="saved", origin=GUI_ORIGIN)
+        assert all(item.status == "saved" for item in report.outputs)
         assert empty_state.get_tab(tab_id).run.storage is None
-        assert empty_state.get_tab(tab_id).save.comment == ""
-        assert empty_state.get_artifact_snapshots(tab_id) == before
-        assert not (native.entry.database_path / "runs").exists()
-        assert native.entry.ledger.events() == ()
+        assert empty_state.get_tab(tab_id).save.comment == "saved"
+        assert len(native.entry.ledger.events()) == 1
+        assert all(
+            item.output.path.is_relative_to(native.entry.database_path)
+            for item in report.outputs
+        )

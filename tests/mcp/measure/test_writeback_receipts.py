@@ -38,7 +38,7 @@ def test_apply_timeout_returns_queryable_owner_submission_without_retry(tmp_path
                         "kind": "parameter",
                         "target": "Q1.ext.gain",
                         "value": 0.5,
-                        "destination": {"entry_id": "entry", "point": "point"},
+                        "destination": {"entry_name": "entry", "point": "point"},
                     },
                 }
             ],

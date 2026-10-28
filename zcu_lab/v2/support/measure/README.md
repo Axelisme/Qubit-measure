@@ -1,4 +1,4 @@
-**Last updated:** 2026-10-28
+**Last updated:** 2026-10-29
 
 # Measure domain support
 
@@ -99,7 +99,7 @@ Mux readout 初值與 `require_mux_qubits` 共用此查詢。缺 capture、alias
 集中 onetone、mux qubit 與 FTF two-qubit Forms 共用的跨 component 驗證。
 它只讀借用的固定 capture，不刷新來源、不讀 live 檔案或裝置，也不 materialize library assets。
 有 qubits 時，它驗證完整有序清單的 component 存在、kind 與逐項 qubit.resonator 對應。
-錯誤保留欄位、原始 index 及實際值。MuxGroup model 仍擁有名稱、等長及重複 qubit 的結構驗證。
+錯誤保留欄位、原始 index 及實際值。`require_mux_group` 與 `validate_mux_bindings` 經 `ParameterContext.component()` 完整投影指定 group，執行 MuxGroup 的名稱、等長與重複 qubit 檢查。FTF `captured_roles` 也用這個投影讀 group。Kind 與 resonator 關係讀取只要求對應 leaf，不預驗其他元件。
 
 None、未綁 mux、不存在或非 MuxGroup 的 target、沒有 qubits 都不增加 bring-up 門檻。
 其他 alias 錯誤與來源故障照常傳遞。FTF caller 自行要求 group、qubits 及 F1/F2；

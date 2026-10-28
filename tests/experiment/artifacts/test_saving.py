@@ -6,7 +6,6 @@ from datetime import UTC, datetime
 from io import BytesIO
 from pathlib import Path
 from typing import Literal
-from uuid import UUID
 
 import h5py
 import numpy as np
@@ -34,7 +33,6 @@ from zcu_tools.resources.entry import (
     ResultEntry,
     SavedPayload,
     SaveLayout,
-    snapshot,
 )
 
 from tests._native_support import native_metadata
@@ -58,7 +56,7 @@ def storage(tmp_path: Path) -> tuple[RunMetadata, SaveLayout, RecordsLedger]:
         update={
             "snapshot": replace(
                 original.snapshot,
-                entry_id=UUID(snapshot(entry.setup).general.entry_id),
+                entry_name=entry.result_path.name,
             )
         }
     )

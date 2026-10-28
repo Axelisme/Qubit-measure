@@ -1,4 +1,4 @@
-"""Complete previews read current values at each draft's fixed destination."""
+"""Previews resolve captured paths but read the GUI's current point."""
 
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -59,7 +59,7 @@ def session(tmp_path: Path, component_kinds):
     return entry, control, service
 
 
-def test_static_unit_facts_follow_captured_target_and_retarget_without_conversion(
+def test_static_unit_facts_follow_selected_point_and_captured_path_without_conversion(
     session,
 ):
     entry, control, service = session
@@ -91,10 +91,11 @@ def test_static_unit_facts_follow_captured_target_and_retarget_without_conversio
             entry.new_point("b")
             control.use_point(PointUseRequest("b"))
             control.add_component("Q2", "fake/drive/a", {})
+            control.add_component("U1", kind, {"frequency": 30.0})
             control.set_alias_rows((AliasRow("driver", "Q2"),))
             refreshed = service.preview_values(draft)["param-1"]
             assert (refreshed.actual_path, refreshed.unit) == ("U1.frequency", "MHz")
-            assert (refreshed.current, refreshed.proposed) == (21.5, 20.09)
+            assert (refreshed.current, refreshed.proposed) == (30.0, 20.09)
             draft.edit("param-1", target_name="$driver.duration")
             unset = service.preview_values(draft)["param-1"]
             assert (unset.actual_path, unset.unit) == ("U1.duration", "us")
@@ -109,7 +110,7 @@ def test_static_unit_facts_follow_captured_target_and_retarget_without_conversio
             draft.teardown()
 
 
-def test_concrete_destination_with_same_named_alias_reads_fixed_target(session):
+def test_concrete_destination_does_not_use_alias_or_historical_point_fallback(session):
     entry, control, service = session
 
     class Coupler(ComponentSchema):
@@ -148,7 +149,7 @@ def test_concrete_destination_with_same_named_alias_reads_fixed_target(session):
             control.set_alias_rows((AliasRow("coupler", "other_coupler"),))
             refreshed = service.preview_values(draft)["param-1"]
             assert refreshed.actual_path == "coupler.module.cz_f2"
-            assert refreshed.current == "coupler.pulses.updated"
+            assert refreshed.current is None
             assert refreshed.proposed == "coupler.pulses.calibrated"
             assert captured.value("coupler.module.cz_f2") == "coupler.pulses.original"
             assert control.read_context().target != captured.target
@@ -156,7 +157,7 @@ def test_concrete_destination_with_same_named_alias_reads_fixed_target(session):
             draft.teardown()
 
 
-def test_values_follow_fixed_target_retarget_edits_and_actual_current_values(session):
+def test_values_follow_selected_point_retarget_edits_and_actual_current_values(session):
     entry, control, service = session
     target = control.read_context().target
     control.set_parameter(target, "general.ext.value", [1, 2])
@@ -185,7 +186,7 @@ def test_values_follow_fixed_target_retarget_edits_and_actual_current_values(ses
     control.set_parameter(control.read_context().target, "general.ext.other", 8)
     retargeted = service.preview_values(draft)["param-1"]
     assert retargeted.actual_path == "general.ext.other"
-    assert retargeted.current == 7
+    assert retargeted.current == 8
     assert service.get_all_applied(draft) == {"param-1": False}
     assert draft.items[0].selected is True
 
@@ -278,7 +279,11 @@ def test_item_preview_excludes_invalid_siblings_but_bulk_remains_strict(session)
 
 
 def test_preview_without_context_fails_instead_of_claiming_missing_targets():
-    service = WritebackService(MagicMock(), arb_names=lambda: ())
+    port = MagicMock()
+    port.read_context.side_effect = FailedPreconditionError(
+        "Select a point", reason_code="no_context"
+    )
+    service = WritebackService(port, arb_names=lambda: ())
     draft = service.create_draft(
         [ParameterWriteback("general.ext.value", "d", proposed_value=1)],
         parameters=None,

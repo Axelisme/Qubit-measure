@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from unittest.mock import MagicMock
-from uuid import UUID
 
 import pytest
 from matplotlib.figure import Figure
@@ -252,7 +251,7 @@ def test_update_tab_loaded_result_bumps_result_analyze_and_post_versions():
         finished_at="2026-10-08T00:01:00+00:00",
         completion="complete",
         snapshot=RunSnapshot(
-            entry_id=UUID("00000000-0000-0000-0000-000000000001"),
+            entry_name="entry",
             point="historical-point",
             roles={"driver": "q1"},
         ),

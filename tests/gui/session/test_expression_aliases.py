@@ -34,7 +34,7 @@ def _parameters(*, legacy: bool = False) -> ParameterContext:
         library=LibrarySnapshot(
             ModuleLibraryDocument(format="zcu.module-library", format_version="2.0")
         ),
-        target=SavedPoint(entry_id="entry", point="working"),
+        target=SavedPoint(entry_name="entry", point="working"),
         roles=RoleBinding(None, {"qubit": RoleSpec("expression/test")}, {"qubit": "Q1"})
         if legacy
         else None,
@@ -74,7 +74,7 @@ def test_capture_without_alias_table_names_the_unbound_alias_path() -> None:
         library=LibrarySnapshot(
             ModuleLibraryDocument(format="zcu.module-library", format_version="2.0")
         ),
-        target=SavedPoint(entry_id="entry", point="working"),
+        target=SavedPoint(entry_name="entry", point="working"),
         roles=None,
     )
     with pytest.raises(ExpressionError) as raised:

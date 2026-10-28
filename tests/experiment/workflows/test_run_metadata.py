@@ -81,6 +81,8 @@ def test_descendant_cancellation_is_saved_as_stopped(tmp_path: Path) -> None:
     path = tmp_path / "descendant.h5"
     save_run(record, path, spec=core.AXES_SPEC)
     restored = load_run_with_metadata(path, spec=core.AXES_SPEC)
-    assert restored.metadata == record.metadata
+    assert restored.metadata is not None
+    assert record.metadata is not None
+    assert restored.metadata.project() == record.metadata.project()
     assert restored.metadata is not None
     assert restored.metadata.run_id == "0123456789abcdef0123456789abcdef-000003-7"

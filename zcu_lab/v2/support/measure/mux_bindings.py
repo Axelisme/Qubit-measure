@@ -21,7 +21,7 @@ def validate_mux_bindings(parameters: ParameterContext | None) -> None:
     qubits[i].resonator must equal resonators[i]. ValueError diagnostics retain
     the field, original index and actual name, kind or resonator value.
     MuxGroupSchema owns structural validation, including names, equal lengths
-    and duplicate qubits; the capture must contain model-validated components.
+    and duplicate qubits; component() explicitly validates each requested model.
 
     Source failures and alias errors other than absent/unbound mux propagate.
     An unavailable capture is not treated as None. Reads use only the fixed
@@ -36,8 +36,10 @@ def validate_mux_bindings(parameters: ParameterContext | None) -> None:
         if exc.reason in ("Unknown alias", "Alias is not bound", "Role is not bound"):
             return
         raise
-    components = parameters.document().components
-    group = components.get(name)
+    try:
+        group = parameters.component(name)
+    except AttributeError:
+        return
     if not isinstance(group, MuxGroupSchema) or group.qubits is None:
         return
     for index, (qubit, resonator) in enumerate(
@@ -47,14 +49,15 @@ def validate_mux_bindings(parameters: ParameterContext | None) -> None:
             ("qubits", qubit, "qubit"),
             ("resonators", resonator, "resonator"),
         ):
-            component = components.get(target)
-            if component is None:
+            try:
+                kind = parameters.value(f"{target}.kind")
+            except (AttributeError, RoleResolutionError) as exc:
                 raise ValueError(
                     f"$mux.{field}[{index}]={target!r}: component is missing"
-                )
-            if component.kind.split("/")[0] != expected:
+                ) from exc
+            if not isinstance(kind, str) or kind.split("/")[0] != expected:
                 raise ValueError(
-                    f"$mux.{field}[{index}]={target!r}: kind={component.kind!r}; expected {expected!r}"
+                    f"$mux.{field}[{index}]={target!r}: kind={kind!r}; expected {expected!r}"
                 )
         actual = parameters.lookup_point(f"{qubit}.resonator")
         if not actual.present or actual.value != resonator:
@@ -81,7 +84,10 @@ def require_mux_group(parameters: ParameterContext | None) -> MuxGroupSchema:
         if exc.reason in ("Unknown alias", "Alias is not bound", "Role is not bound"):
             raise ValueError(requirement) from exc
         raise
-    group = parameters.document().components.get(name)
+    try:
+        group = parameters.component(name)
+    except AttributeError as exc:
+        raise ValueError(f"{requirement}; $mux={name!r} is missing") from exc
     if not isinstance(group, MuxGroupSchema):
         raise ValueError(f"{requirement}; $mux={name!r} is not group/mux")
     return group

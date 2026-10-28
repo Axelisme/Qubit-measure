@@ -20,6 +20,7 @@ from tests.gui._dialog_fakes import RecordingDialogPresenter
 from tests.gui._user_input import ComponentDriver
 from tests.gui.app.measure._history_form_support import history_controller
 from tests.gui.app.measure._load_support import write_native_file
+from tests.gui.app.measure._record_support import require_target
 
 
 @pytest.fixture(params=["failure", "binding", "success"])
@@ -48,7 +49,7 @@ def history_ui(
             "binding": "Q1.pulses.template",
         }[request.param]
         ctrl.context_control.set_module(
-            ctrl.context_control.read_context().target,
+            require_target(ctrl.context_control.read_context()),
             key,
             PulseSpec(ch=0, nqz=1, freq=100.0, gain=0.25, waveform="Q1.waveforms.flat"),
         )
@@ -66,10 +67,6 @@ def test_history_form_failure_and_reset_are_visible(
     assert ui.observe(object_name="history.form_error").text == reason
     run = ui.observe("Run")
     assert not run.enabled and reason in run.tooltip
-    assert (
-        "Historical entry differs"
-        in ui.observe(object_name="history.analysis_source").text
-    )
     ui.screenshot(tmp_path / f"history-{variant}-before.png")
     ui.click("Reset")
     if variant == "success":

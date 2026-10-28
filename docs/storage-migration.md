@@ -108,7 +108,7 @@ Pending 的重點是缺哪項證據，以及原文保在哪裡。未知但已完
 
 ## 中斷與完成後重跑
 
-中斷時保留 entry、工具暫存檔、manifest 與備份，直接重跑原指令。工具只補缺項，沿用 entry UUID、建立時間、run_id 與報告日期。`--resume` 仍可明填。兩部分分開執行時，第二次改 `--part` 即可續接同一 manifest。
+中斷時保留 entry、工具暫存檔、manifest 與備份，直接重跑原指令。工具只補缺項，沿用 migration_id 操作 token、建立時間、run_id 與報告日期。`--resume` 仍可明填。舊 manifest、report 或 initialization 含 entry_id ownership 欄位時，新版拒絕並指名檔案，不轉換或刪除資料。需要續跑或 cleanup 時，請用舊版完成，或確認狀態後自行處理。兩部分分開執行時，第二次改 `--part` 即可續接同一 manifest。
 
 重跑沿用首次的來源、entry 名稱、kind、四個欄位／單位宣告、mapping 版本與已固定的歷史 evidence。尚未固定 native run assignment 的 pending 項可補 evidence，固定後的內容則須一致。
 
@@ -136,4 +136,4 @@ Parameters 與 data 都完成、所有 publication 完成、沒有暫待 point f
 
 清理中斷後，原指令只收尾清理，允許已核實刪除的來源缺席。來源清理後重跑仍從已驗 backup／manifest 重驗目的。相同 baseline 的來源被放回時，工具驗全部目的後略過並保留放回的來源，不刪第二次；來源不同則報差異。
 
-遷移未完成時保留固定 entry 名稱。完成後的 entry 改名只移動 Result，UUID 與 Database 舊輸出不變；以新名重新開啟後，新 Save 寫到新名稱的 Database。一般 entry 與改名契約見 [resources.entry](../lib/zcu_tools/resources/entry/README.md)。
+遷移未完成時保留固定 entry 名稱。完成後的 entry 改名只移動 Result，文件內容與 Database 舊輸出不變；以新名重新開啟後，新 Save 寫到新名稱的 Database。一般 entry 與改名契約見 [resources.entry](../lib/zcu_tools/resources/entry/README.md)。

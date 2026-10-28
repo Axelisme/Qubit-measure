@@ -3,7 +3,7 @@
 from collections.abc import Callable, Generator, Iterator
 from dataclasses import replace
 from pathlib import Path
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 import pytest
 from qtpy.QtCore import QCoreApplication, QEvent, Qt
@@ -99,7 +99,7 @@ def populated_browser(
             finished_at=None,
             completion="unknown",
             snapshot=RunSnapshot(
-                entry_id=UUID(entry.entry_id), point=point, roles={"qubit": "Q1"}
+                entry_name=entry.result_path.name, point=point, roles={"qubit": "Q1"}
             ),
             provenance=SoftwareProvenance(
                 software_versions={},
@@ -137,7 +137,6 @@ def populated_browser(
             entry.ledger.append(
                 LedgerEvent(
                     id=str(uuid4()),
-                    entry_id=entry.entry_id,
                     kind="acquired",
                     at="2026-10-21T01:05:00Z",
                     origin="notebook",

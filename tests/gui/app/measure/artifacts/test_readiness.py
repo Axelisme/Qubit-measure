@@ -30,7 +30,7 @@ from tests.gui.app.measure._synthetic import ALIAS_PRESET
 
 
 def _make_service(
-    *, bus: EventBus, access: ExperimentAccess | None = None
+    *, root: Path, bus: EventBus, access: ExperimentAccess | None = None
 ) -> tuple[SaveService, State]:
     state = State(MagicMock())
     state.add_tab(
@@ -42,14 +42,22 @@ def _make_service(
         ),
     )
     commit_run(state, "tab", RunPaneState(result=RunRecord(None, object())))
-    return SaveService(state, bus, access=access), state
+    return SaveService(
+        state,
+        bus,
+        result_root=root / "result",
+        database_root=root / "Database",
+        access=access,
+    ), state
 
 
-def test_save_preflight_default_access_is_available_without_side_effects() -> None:
+def test_save_preflight_default_access_is_available_without_side_effects(
+    tmp_path: Path,
+) -> None:
     bus = EventBus()
     facts: list[TabInteractionChangedPayload] = []
     bus.subscribe(TabInteractionChangedPayload, facts.append)
-    svc, state = _make_service(bus=bus)
+    svc, state = _make_service(root=tmp_path, bus=bus)
     before = state.get_artifact_snapshots("tab")
 
     assert svc.require_save_available("tab") is None
@@ -73,6 +81,7 @@ def test_save_preflight_default_access_is_available_without_side_effects() -> No
     ],
 )
 def test_save_preflight_observes_access_before_busy_without_side_effects(
+    tmp_path: Path,
     switching: bool,
     available: bool,
     shutting_down: bool,
@@ -86,7 +95,7 @@ def test_save_preflight_observes_access_before_busy_without_side_effects(
     bus = EventBus()
     facts: list[TabInteractionChangedPayload] = []
     bus.subscribe(TabInteractionChangedPayload, facts.append)
-    svc, state = _make_service(bus=bus, access=access)
+    svc, state = _make_service(root=tmp_path, bus=bus, access=access)
     state.set_tab_analyzing("tab", analyzing=busy)
     before = state.get_artifact_snapshots("tab")
 

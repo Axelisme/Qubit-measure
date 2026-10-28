@@ -40,12 +40,14 @@ def test_open_history_retains_native_data_when_factory_has_no_source(
         assert snapshot.run is not None
         record = snapshot.run.result
         assert isinstance(record, RunRecord)
-        assert record.metadata == metadata
+        assert record.metadata is not None
+        assert record.metadata.project() == metadata
         assert isinstance(record.result, SavingResult)
         np.testing.assert_allclose(
             record.result.signal, [0.9 + 1.8j, 2.7 - 3.6j, 4.5 + 5.4j]
         )
-        assert outcome.analysis_source_issue is not None
+        assert outcome.analysis_source_issue is None
+        assert not outcome.has_analyze_params
         resource = ctrl.cfg_resources.lookup(tab_id)
         assert resource.unavailable_reason == "factory: history_source is missing"
         with pytest.raises(
@@ -73,8 +75,10 @@ def test_unavailable_reset_updates_nonfactory_error_and_reraises_without_a_form(
         ctrl.setup_control.new_point(PointCreateRequest("p", "", CommandOrigin("gui")))
         ctrl.context_control.add_component("Q1", "history/source", {})
         ctrl.context_control.set_alias_rows((AliasRow("history", "Q1"),))
+        target = ctrl.context_control.read_context().target
+        assert target is not None
         ctrl.context_control.set_module(
-            ctrl.context_control.read_context().target,
+            target,
             "Q1.pulses.template",
             PulseSpec(ch=0, nqz=1, freq=100.0, gain=0.25, waveform="Q1.waveforms.flat"),
         )

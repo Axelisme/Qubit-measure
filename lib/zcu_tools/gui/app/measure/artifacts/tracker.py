@@ -95,10 +95,12 @@ class ArtifactTracker:
         section: str,
         artifacts: tuple[ArtifactDeclaration, ...],
         *,
-        layout: SaveLayout,
+        layout: SaveLayout | None,
     ) -> None:
         """Replace the entire section with Not saved declarations and planned paths.
 
+        layout=None keeps artifact/member declarations with empty outputs;
+        their status remains Not saved until a Save report is applied.
         Empty artifacts removes the section. Duplicate refs, mismatched section
         or layout errors fail before mutation, preserving the previous section.
         Path planning happens only here; reading a snapshot never reserves paths.
@@ -115,7 +117,9 @@ class ArtifactTracker:
                         key,
                         tuple(
                             OutputSnapshot(output.format, output.path, "reserved", None)
-                            for output in layout.outputs(key)
+                            for output in (
+                                () if layout is None else layout.outputs(key)
+                            )
                         ),
                     )
                     for key in artifact.members

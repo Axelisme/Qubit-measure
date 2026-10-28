@@ -1,12 +1,14 @@
 """Experiment-owned historical run documents and configuration envelopes."""
 
+from __future__ import annotations
+
 import json
 import re
 from collections.abc import Mapping
+from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Annotated, Literal
-from uuid import UUID
 
 from pydantic import (
     BaseModel,
@@ -17,9 +19,14 @@ from pydantic import (
     ValidationError,
     field_validator,
 )
+from pydantic_core import PydanticUndefined, SchemaValidator
 
 from zcu_tools.datafile import JsonObject
+from zcu_tools.format_version import YamlValue
+from zcu_tools.resources.context.library import LibraryContent
+from zcu_tools.resources.entry import ParameterContent
 from zcu_tools.resources.entry.aliases import AliasValue
+from zcu_tools.resources.parameter_fields import model_field_schema
 
 _WORKFLOW_RUN_ID_PATTERN = r"[0-9a-f]{32}"
 _RUN_ID_PATTERN = (
@@ -42,18 +49,37 @@ class CfgSnapshot:
     schema_version: str
 
 
+class ParameterSnapshot(BaseModel):
+    """Captured analysis environment, independent of live files and write targets.
+
+    point is resource-owned component/general/opaque metadata content. library
+    retains persistent Specs, not materialized cfg. aliases preserves authored
+    row order and softlinks; None denotes fixed names without authored rows.
+    names contains resolved scalar/list bindings from capture time. All values
+    use working units. Sections stay opaque until their resource/session owner
+    consumes them. Unknown envelope fields are ignored; missing sections remain
+    missing, not an empty environment. No target or timestamp is synthesized.
+    """
+
+    point: ParameterContent = Field(default_factory=lambda: ParameterContent(None))
+    library: LibraryContent = Field(default_factory=LibraryContent)
+    aliases: YamlValue = None
+    names: YamlValue = None
+
+
 @dataclass(frozen=True, kw_only=True)
 class RunSnapshot:
     """Historical entry state, never a live entry or hardware reference.
 
-    entry_id identifies the entry; point is the optional work-point label.
+    entry_name is the recorded folder name, or None when unknown.
+    point is the optional work-point label.
     roles maps aliases to scalar names
     or ordered name lists. Lists preserve acquisition order, not tone indexes.
     Writers never refresh these values from a live entry. Python and JSON
     serialization copy roles into a detached dict, including read-only mappings.
     """
 
-    entry_id: UUID
+    entry_name: str | None = None
     point: str | None
     roles: Annotated[
         Mapping[str, AliasValue],
@@ -63,7 +89,7 @@ class RunSnapshot:
     def to_labber_snapshot(self) -> JsonObject:
         """Return historical point and roles for a portable Labber comment.
 
-        Omit entry_id; native metadata retains the complete snapshot.
+        Native metadata also retains the recorded entry name.
         Do not refresh aliases or resolve names from current entry state.
         """
         return TypeAdapter(JsonObject).validate_python(
@@ -124,6 +150,7 @@ class RunMetadata(BaseModel):
     completion: Literal["complete", "partial", "stopped", "unknown"]
     snapshot: RunSnapshot
     provenance: SoftwareProvenance
+    parameter_snapshot: ParameterSnapshot | None = None
     device_snapshot: (
         Annotated[
             Mapping[str, JsonObject],
@@ -131,6 +158,17 @@ class RunMetadata(BaseModel):
         ]
         | None
     ) = None
+
+    def project(self) -> RunMetadata:
+        """Validate all fields, including unchecked updates, for whole consumers.
+
+        Return detached typed historical evidence. Invalid fields raise ValueError
+        naming /docs/metadata. Reading a deferred record uses the same contract.
+        """
+        try:
+            return RunMetadata.model_validate(self)
+        except ValidationError as error:
+            raise ValueError(f"/docs/metadata: {error}") from error
 
     @field_validator("started_at", "finished_at")
     @classmethod
@@ -141,6 +179,93 @@ class RunMetadata(BaseModel):
             if parsed.utcoffset() != timedelta(0):
                 raise ValueError("timestamp must be UTC ISO")
         return value
+
+
+class RunMetadataContent:
+    """Detached historical metadata with validation at each requested field.
+
+    document is an experiment-owned metadata mapping from an already-read file.
+    Construction copies it without validating unused fields. Properties enforce
+    RunMetadata's field rules and name /docs/metadata/<field> on failure. snapshot
+    and provenance request complete typed sections; parameter_snapshot retains
+    resource-owned opaque contents. Missing optional fields use schema defaults.
+    project() explicitly validates the complete document for Save or whole reads.
+    No live values, identity or empty environment substitute malformed evidence.
+    """
+
+    def __init__(self, document: Mapping[str, object]) -> None:
+        self._document = deepcopy(dict(document))
+
+    def project(self) -> RunMetadata:
+        """Return a detached, fully validated RunMetadata or a path-qualified error."""
+        try:
+            return RunMetadata.model_validate(deepcopy(self._document))
+        except ValidationError as error:
+            raise ValueError(f"/docs/metadata: {error}") from error
+
+    def _field[T](self, name: str, adapter: TypeAdapter[T]) -> T:
+        schema = model_field_schema(RunMetadata, name)
+        try:
+            value = SchemaValidator(schema).validate_python(
+                deepcopy(self._document.get(name, PydanticUndefined))
+            )
+            return adapter.validate_python(value)
+        except ValueError as error:
+            raise ValueError(f"/docs/metadata/{name}: {error}") from error
+
+    @property
+    def run_id(self) -> str:
+        """Recorded experiment/workflow operation ID, validated when requested."""
+        return self._field("run_id", TypeAdapter(str))
+
+    @property
+    def experiment(self) -> str:
+        """Nonempty experiment declaration tag used for load admission."""
+        return self._field("experiment", TypeAdapter(str))
+
+    @property
+    def started_at(self) -> str | None:
+        """Recorded UTC start timestamp, or explicit None for absent evidence."""
+        return self._field("started_at", TypeAdapter(str | None))
+
+    @property
+    def finished_at(self) -> str | None:
+        """Recorded UTC finish timestamp, or explicit None for absent evidence."""
+        return self._field("finished_at", TypeAdapter(str | None))
+
+    @property
+    def completion(self) -> Literal["complete", "partial", "stopped", "unknown"]:
+        """Acquisition completion, never inferred from a successful load/save."""
+        return self._field(
+            "completion",
+            TypeAdapter(Literal["complete", "partial", "stopped", "unknown"]),
+        )
+
+    @property
+    def snapshot(self) -> RunSnapshot:
+        """Complete historical entry/point/roles projection, not a live binding."""
+        return self._field("snapshot", TypeAdapter(RunSnapshot))
+
+    @property
+    def provenance(self) -> SoftwareProvenance:
+        """Complete software/host evidence, validated only when requested."""
+        return self._field("provenance", TypeAdapter(SoftwareProvenance))
+
+    @property
+    def parameter_snapshot(self) -> ParameterSnapshot | None:
+        """Captured analysis content; only an absent/null snapshot returns None.
+
+        Malformed envelope raises instead of degrading to an empty environment.
+        Resource owners validate its point/library/aliases at actual use.
+        """
+        return self._field("parameter_snapshot", TypeAdapter(ParameterSnapshot | None))
+
+    @property
+    def device_snapshot(self) -> Mapping[str, JsonObject] | None:
+        """Complete recorded device settings, or None when unrecorded."""
+        return self._field(
+            "device_snapshot", TypeAdapter(Mapping[str, JsonObject] | None)
+        )
 
 
 def validate_cfg_snapshot(cfg: CfgSnapshot) -> None:

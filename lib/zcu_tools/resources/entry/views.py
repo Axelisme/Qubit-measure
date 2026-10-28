@@ -40,6 +40,7 @@ from .field_views import (
 from .registry import component_registry
 from .schema import (
     ComponentSchema,
+    ParameterContent,
     PointDocument,
     PointGeneral,
     SetupDocument,
@@ -60,7 +61,7 @@ type _ViewDocument = (
 )
 
 
-@dataclass(frozen=True)
+@dataclass
 class _ViewRead:
     """Package-owned access for three view types without reserving method names.
 
@@ -72,6 +73,8 @@ class _ViewRead:
     document: _ViewDocument
     source: Path | None
     origin: PointOrigin | None
+    content: ParameterContent | None = None
+    revision: DocumentRevision | None = None
 
 
 def _validate_view_component_name(name: str, *, source: Path | None) -> None:
@@ -88,7 +91,7 @@ def _validate_view_component_name(name: str, *, source: Path | None) -> None:
 
 
 def validate_view_components(
-    document: SetupDocument | PointDocument, *, source: Path | None
+    document: SetupDocument | PointDocument | ParameterContent, *, source: Path | None
 ) -> None:
     """Reject components that shadow any SetupView/PointView/EditView public member.
 
@@ -98,7 +101,13 @@ def validate_view_components(
     member before binding/publication. No mutation, model hooks or I/O occurs.
     Public class members are discovered on each call, without a reserved table.
     """
-    for name in document.components:
+    names = (
+        document.component_names()
+        if isinstance(document, ParameterContent)
+        else document.components
+    )
+    for name in names:
+        validate_component_name(name, source=source)
         _validate_view_component_name(name, source=source)
 
 
@@ -118,10 +127,10 @@ def register_view_read(
     ValueError; objects without an instance dictionary raise TypeError.
     Validate the cached document without I/O before binding. No model hook runs.
     """
-    validate_view_components(
-        document.snapshot() if isinstance(document, DocumentStore) else document,
-        source=source,
-    )
+    if isinstance(document, DocumentStore):
+        validate_view_components(ParameterContent(document.content()), source=source)
+    else:
+        validate_view_components(document, source=source)
     state = vars(view)
     if "_entry_read" in state:
         raise ValueError("Entry view is already bound")
@@ -163,15 +172,36 @@ def snapshot(view: EditView) -> SetupDocument | PointDocument: ...
 def snapshot(
     view: PointView | SetupView | EditView,
 ) -> SetupDocument | PointDocument:
-    """Copy this handle's cached document or edit draft without I/O or validation.
+    """Project the complete cached document or edit draft without I/O.
 
-    The result is deeply isolated, uses working units and preserves the typed
-    document's field visibility. Mutating it does not change the handle or disk.
+    Bound content is validated as the complete document, including model-level
+    transformations and checks. Drafts are copied without revalidation. The
+    result is isolated and uses working units. Mutating it changes no file.
+    Use parameter_content() for reads that must leave unused fields opaque.
     """
     document = _view_read(view).document
     if isinstance(document, DocumentStore):
         return document.snapshot()
     return document.model_copy(deep=True)
+
+
+def parameter_content(view: PointView | SetupView) -> ParameterContent:
+    """Copy cached resource content without validating unused component fields."""
+    return cached_parameter_content(view).model_copy(deep=True)
+
+
+def cached_parameter_content(view: PointView | SetupView) -> ParameterContent:
+    """Owner-internal cached content; defaults stay stable until the file changes."""
+    binding = _view_read(view)
+    document = binding.document
+    if not isinstance(document, DocumentStore):
+        raise TypeError("Parameter content requires a bound document")
+    if binding.content is None or binding.revision != document.document_revision:
+        binding.content = ParameterContent.from_document(
+            document.content(), source=document.source_path
+        )
+        binding.revision = document.document_revision
+    return binding.content
 
 
 def document_revision(view: PointView | SetupView) -> DocumentRevision:
@@ -211,7 +241,7 @@ class DocumentField:
 
 
 def document_fields(
-    document: SetupDocument | PointDocument,
+    document: SetupDocument | PointDocument | ParameterContent,
 ) -> tuple[DocumentField, ...]:
     """List isolated logical rows without I/O, validation or serialization hooks.
 
@@ -235,13 +265,16 @@ def document_fields(
         metadata = read_metadata(document.metadata, path) if path is not None else None
         rows.append(DocumentField(segments, path, value, metadata))
 
-    append_rows(("general",), _logical_value(document.general))
+    if document.general is not None:
+        append_rows(("general",), _logical_value(document.general))
     for name, component in document.components.items():
         append_rows((name,), _logical_value(component))
     return tuple(rows)
 
 
-def document_unit(document: SetupDocument | PointDocument, path: str) -> str | None:
+def document_unit(
+    document: SetupDocument | PointDocument | ParameterContent, path: str
+) -> str | None:
     """Read a fixed field's static schema unit at an actual dotted path.
 
     Return the nonempty json_schema_extra.unit label without converting values.
@@ -270,7 +303,9 @@ def document_unit(document: SetupDocument | PointDocument, path: str) -> str | N
     return None
 
 
-def document_value(document: SetupDocument | PointDocument, path: str) -> YamlValue:
+def document_value(
+    document: SetupDocument | PointDocument | ParameterContent, path: str
+) -> YamlValue:
     """Read an actual dotted component/general path from this document only.
 
     Return an isolated working-unit YAML value, including explicit null and
@@ -281,6 +316,8 @@ def document_value(document: SetupDocument | PointDocument, path: str) -> YamlVa
     forward-minor data stays hidden. Roles are not expanded here.
     """
     parts = _path_parts(path)
+    if isinstance(document, ParameterContent):
+        return document.value(path)
     node: object = document if parts[0] == "general" else document.components
     for index, part in enumerate(parts):
         prefix = ".".join(parts[: index + 1])
@@ -293,8 +330,26 @@ def document_value(document: SetupDocument | PointDocument, path: str) -> YamlVa
     return _logical_value(node)
 
 
+def _content_path(
+    document: ParameterContent, parts: list[str], roles: Mapping[str, AliasValue]
+) -> str:
+    prefix = parts[0]
+    if prefix == "general":
+        return ".".join(parts)
+    names = document.component_names()
+    if prefix in names:
+        return ".".join(parts)
+    if prefix in roles:
+        target = roles[prefix]
+        if isinstance(target, str) and target in names:
+            return ".".join((target, *parts[1:]))
+    raise RoleResolutionError(
+        prefix, None, None, f"Unknown parameter namespace {prefix!r}"
+    )
+
+
 def resolve_path(
-    document: PointDocument,
+    document: PointDocument | ParameterContent,
     path: str,
     *,
     roles: Mapping[str, AliasValue],
@@ -312,6 +367,17 @@ def resolve_path(
     No I/O, model validation, serialization or mutation occurs.
     """
     parts = _path_parts(path)
+    if isinstance(document, ParameterContent):
+        return _content_path(document, parts, roles)
+    return _typed_path(document, parts, roles, reserved_names)
+
+
+def _typed_path(
+    document: PointDocument,
+    parts: list[str],
+    roles: Mapping[str, AliasValue],
+    reserved_names: Collection[str],
+) -> str:
     prefix = parts[0]
     namespaces: list[str] = []
     if prefix in roles:
@@ -427,7 +493,9 @@ def add_component_to_draft(
     draft.components[name] = component
 
 
-def document_meta(document: SetupDocument | PointDocument, path: str) -> YamlMap | None:
+def document_meta(
+    document: SetupDocument | PointDocument | ParameterContent, path: str
+) -> YamlMap | None:
     """Return this document's isolated opaque metadata for a dotted path, or None.
 
     Invalid empty paths or empty path segments raise ValueError. The value at
@@ -647,7 +715,11 @@ class SetupView:
 
     @property
     def general(self) -> GeneralView:
-        return GeneralView(lambda: self._store.snapshot().general, self._edit_general)
+        return GeneralView(
+            lambda: self._store.snapshot().general,
+            self._edit_general,
+            content=lambda: cached_parameter_content(self),
+        )
 
     @contextmanager
     def _edit_general(self, _field: str) -> Generator[SetupGeneral]:
@@ -656,7 +728,7 @@ class SetupView:
 
     @property
     def description(self) -> str | None:
-        return self._store.snapshot().general.description
+        return self.general.description
 
     @description.setter
     def description(self, value: str | None) -> None:
@@ -671,7 +743,7 @@ class SetupView:
 
     def meta(self, path: str) -> YamlMap | None:
         """Return isolated cached opaque metadata for a dotted path, or None."""
-        return document_meta(self._store.snapshot(), path)
+        return document_meta(cached_parameter_content(self), path)
 
     def refresh(self) -> None:
         self._store.refresh()
@@ -688,12 +760,13 @@ class SetupView:
             add_component_to_draft(draft, name, kind, fields, self._source)
 
     def __getattr__(self, name: str) -> ComponentView:
-        if name not in self._store.snapshot().components:
+        if name not in cached_parameter_content(self).component_names():
             raise AttributeError(f"Unknown component {name!r}")
         return ComponentView(
             lambda: self._store.snapshot().components[name],
             lambda field: self._edit_component(name, field),
             name,
+            content=lambda: cached_parameter_content(self),
         )
 
     @contextmanager

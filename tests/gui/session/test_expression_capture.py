@@ -36,7 +36,7 @@ def parameters() -> Generator[ParameterContext]:
         yield ParameterContext(
             point=point,
             library=library,
-            target=SavedPoint(entry_id="entry", point="working"),
+            target=SavedPoint(entry_name="entry", point="working"),
             roles=RoleBinding(
                 None,
                 {"qubit": RoleSpec("lowering/driver")},

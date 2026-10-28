@@ -2,8 +2,10 @@
 
 from collections.abc import Generator, MutableMapping
 from pathlib import Path
+from typing import Literal, Self
 
 import pytest
+from pydantic import Field, field_validator, model_validator
 from zcu_tools.cfg_model import ConstWaveformCfg, PulseSpec
 from zcu_tools.gui.expected_error import ExpectedErrorCategory, InvalidInputError
 from zcu_tools.gui.session.aliases import AliasRow, AliasTable
@@ -11,6 +13,10 @@ from zcu_tools.gui.session.context_types import (
     ContextSourceFault,
     ContextSourceUnavailableError,
     SavedPoint,
+)
+from zcu_tools.gui.session.parameter_capture import (
+    capture_parameters,
+    restore_parameters,
 )
 from zcu_tools.gui.session.types import ParameterContext, RoleBinding
 from zcu_tools.resources.context.library import (
@@ -26,7 +32,11 @@ from zcu_tools.resources.entry import (
     component_registry,
     role_registry,
 )
-from zcu_tools.resources.entry.schema import PointDocument, PointGeneral
+from zcu_tools.resources.entry.schema import (
+    ParameterContent,
+    PointDocument,
+    PointGeneral,
+)
 
 
 class CaptureDrive(ComponentSchema):
@@ -37,6 +47,41 @@ class CaptureDrive(ComponentSchema):
 
 class CaptureSensor(ComponentSchema):
     rate: float
+
+
+def test_component_projection_enforces_cross_field_checks_without_blocking_leaf_reads(
+    source: tuple[PointDocument, LibrarySnapshot],
+) -> None:
+    class Bounded(ComponentSchema):
+        low: float
+        high: float
+
+        @model_validator(mode="after")
+        def bounds(self) -> Self:
+            if self.low > self.high:
+                raise ValueError("low exceeds high")
+            return self
+
+    component_registry.register("capture/bounded", Bounded)
+    try:
+        parameters = ParameterContext(
+            point=ParameterContent(
+                {
+                    "components": {
+                        "pair": {"kind": "capture/bounded", "low": 3.0, "high": 2.0},
+                        "unused": ["bad component"],
+                    }
+                }
+            ),
+            library=source[1],
+            target=None,
+            roles=None,
+        )
+        assert parameters.value("pair.low") == 3.0
+        with pytest.raises(ValueError, match="(?s)pair.*low exceeds high"):
+            parameters.component("pair")
+    finally:
+        component_registry.unregister("capture/bounded")
 
 
 @pytest.fixture
@@ -55,7 +100,6 @@ def source() -> Generator[tuple[PointDocument, LibrarySnapshot]]:
             format_version="2.0",
             schema_version=1,
             general=PointGeneral(
-                entry_id="00000000-0000-0000-0000-000000000001",
                 created_at="2026-10-09T00:00:00Z",
                 ext={"nullable": None, "nested": {"number": 2.0}},
             ),
@@ -114,7 +158,7 @@ def capture(
     return ParameterContext(
         point=point,
         library=library,
-        target=SavedPoint(entry_id="entry", point="working"),
+        target=SavedPoint(entry_name="entry", point="working"),
         roles=roles,
         source_faults=faults,
     )
@@ -127,16 +171,206 @@ def declarations() -> dict[str, RoleSpec]:
     }
 
 
+def test_empty_analysis_environment_has_no_persistent_identity_or_metadata() -> None:
+    context = ParameterContext.empty()
+    assert context.target is None
+    assert context.storage is None
+    assert context.document().general is None
+    assert context.document().metadata == {}
+    assert context.document().components == {}
+    assert context.lookup("general.created_at") == DocumentValue(False, None)
+    assert context.library.module_keys() == ()
+    assert context.aliases == ()
+
+
+def test_parameter_snapshot_round_trip_keeps_content_library_and_authored_aliases(
+    source: tuple[PointDocument, LibrarySnapshot],
+) -> None:
+    from pydantic import TypeAdapter
+
+    original = capture(source).bind_aliases(
+        (AliasRow("drive", "Q1"), AliasRow("sensor", "$drive.sense")), {}
+    )
+    snapshot = capture_parameters(original)
+    codec = TypeAdapter(type(snapshot))
+    encoded = codec.dump_json(snapshot)
+    source[0].components.clear()
+    restored = restore_parameters(codec.validate_json(encoded))
+    assert restored.target is None
+    assert restored.storage is None
+    assert restored.value("$drive.rate") == 4300.0
+    assert restored.value("$sensor.rate") == 6500.0
+    assert restored.value("$drive.pulses.pi.gain") == 0.25
+    assert restored.aliases == original.aliases
+    assert restored.roles == original.roles
+    assert restored.document().metadata == original.document().metadata
+
+
+def test_snapshot_preserves_consumed_factory_defaults_without_validating_unused_fields(
+    source: tuple[PointDocument, LibrarySnapshot],
+) -> None:
+    from itertools import count
+
+    from zcu_tools.experiment.metadata import ParameterSnapshot
+
+    sequence = count(1)
+
+    class Notebook(ComponentSchema):
+        title: str
+        token: str = Field(default_factory=lambda: f"capture-{next(sequence)}")
+        bad: float
+
+        @field_validator("title", mode="before")
+        @classmethod
+        def strip_title(cls, value: object) -> object:
+            return value.strip().lower() if isinstance(value, str) else value
+
+    component_registry.register("capture/notebook", Notebook)
+    try:
+        original = ParameterContext(
+            point=ParameterContent(
+                {
+                    "components": {
+                        "note": {
+                            "kind": "capture/notebook",
+                            "title": "  SAVED  ",
+                            "bad": [],
+                        }
+                    }
+                }
+            ),
+            library=source[1],
+            target=None,
+            roles=None,
+        )
+        assert original.value("note.token") == "capture-1"
+        assert original.value("note.title") == "saved"
+        encoded = capture_parameters(original).model_dump_json()
+        restored = restore_parameters(ParameterSnapshot.model_validate_json(encoded))
+        assert restored.value("note.token") == "capture-1"
+        assert restored.value("note.token") == "capture-1"
+        assert restored.value("note.title") == "saved"
+        with pytest.raises(ValueError, match="note.bad"):
+            restored.value("note.bad")
+        with pytest.raises(ValueError, match="note"):
+            restored.component("note")
+    finally:
+        component_registry.unregister("capture/notebook")
+
+
+def test_snapshot_preserves_nested_factory_defaults_through_capture(
+    source: tuple[PointDocument, LibrarySnapshot],
+) -> None:
+    from itertools import count
+
+    from pydantic import BaseModel
+    from zcu_tools.experiment.metadata import ParameterSnapshot
+
+    sequence = count(1)
+
+    class Nested(BaseModel):
+        token: str = Field(default_factory=lambda: f"nested-{next(sequence)}")
+        optional: float | None = None
+
+    class Notebook(ComponentSchema):
+        nested: Nested = Field(default_factory=Nested)
+
+    component_registry.register("capture/nested-notebook", Notebook)
+    try:
+        original = ParameterContext.from_content(
+            point=ParameterContent(
+                {"components": {"note": {"kind": "capture/nested-notebook"}}}
+            ),
+            library=source[1],
+            aliases=None,
+            names={},
+        )
+        assert original.value("note.nested.token") == "nested-1"
+        assert original.value("note.nested.token") == "nested-1"
+        encoded = capture_parameters(original).model_dump_json()
+        restored = restore_parameters(ParameterSnapshot.model_validate_json(encoded))
+        assert restored.value("note.nested.token") == "nested-1"
+        assert restored.component("note").model_dump()["nested"] == {
+            "token": "nested-1",
+            "optional": None,
+        }
+    finally:
+        component_registry.unregister("capture/nested-notebook")
+
+
+@pytest.mark.parametrize("defect", ["missing", "different_format", "extra"])
+def test_snapshot_validates_only_values_actually_read(
+    source: tuple[PointDocument, LibrarySnapshot],
+    defect: str,
+) -> None:
+    import json
+
+    from pydantic import TypeAdapter
+
+    original = capture(source).bind_aliases((AliasRow("drive", "Q1"),), {})
+    snapshot = capture_parameters(original)
+    codec = TypeAdapter(type(snapshot))
+    data = json.loads(codec.dump_json(snapshot))
+    data["point"]["components"]["unused"] = ["not a component"]
+    data["point"]["components"]["Q1"]["unrelated"] = ["old format"]
+    data["point"]["components"]["Q1"]["sense"] = ["wrong field type"]
+    data["point"]["general"] = "unrelated old format"
+    data["aliases"]["unused"] = {"not": "an alias binding"}
+    if defect == "missing":
+        del data["library"]
+    elif defect == "different_format":
+        data["library"] = ["unrelated old format"]
+    else:
+        data["extra"] = ["unknown block"]
+        data["library"]["extra"] = {"anything": True}
+        data["library"]["components"]["Q1"]["pulses"]["pi"]["unused"] = []
+    restored = restore_parameters(codec.validate_json(json.dumps(data)))
+    assert restored.value("$drive.rate") == 4300.0
+    if defect == "extra":
+        assert (
+            restored.library.entry_value("Q1.pulses.pi", kind="module")["gain"] == 0.25
+        )
+        assert "Q1.pulses.pi" in restored.library.module_keys()
+    else:
+        with pytest.raises((KeyError, ValueError), match="library"):
+            restored.library.module_spec("Q1.pulses.pi")
+        with pytest.raises((KeyError, ValueError), match="library"):
+            restored.library.module_keys()
+    with pytest.raises((ValueError, InvalidInputError), match="unused|alias"):
+        restored.value("$unused")
+    with pytest.raises(ValueError, match="valid string"):
+        restored.value("Q1.sense")
+
+
+@pytest.mark.parametrize("components", [None, ["old shape"], {"unrelated": 1}])
+def test_snapshot_general_reads_do_not_require_component_or_alias_sections(
+    components: object,
+) -> None:
+    import json
+
+    from zcu_tools.experiment.metadata import ParameterSnapshot
+
+    data = {
+        "point": {"general": {"description": "recorded"}, "components": components},
+        "aliases": 42,
+    }
+    snapshot = ParameterSnapshot.model_validate_json(json.dumps(data))
+    restored = restore_parameters(snapshot)
+    assert restored.value("general.description") == "recorded"
+    with pytest.raises(ValueError, match="alias"):
+        restored.value("$unused")
+
+
 def test_point_capture_is_detached_and_preserves_target(
     source: tuple[PointDocument, LibrarySnapshot],
 ) -> None:
     context = capture(source)
     source[0].general.ext.clear()
     copied = context.document()
-    copied.general.ext.clear()
+    copied.components.clear()
     assert context.value("Q1.rate") == 4300.0
     assert context.value("general.ext.nested.number") == 2.0
-    assert context.target == SavedPoint(entry_id="entry", point="working")
+    assert context.target == SavedPoint(entry_name="entry", point="working")
     assert context.roles is None
     assert context.source_faults == ()
 
@@ -217,6 +451,49 @@ def test_bind_roles_uses_only_fixed_point_and_detaches_mappings(
     assert context.roles is None
 
 
+@pytest.mark.parametrize("fault_document", [None, "point", "module_cfg"])
+def test_empty_role_binding_does_not_consume_components_or_sources(
+    source: tuple[PointDocument, LibrarySnapshot],
+    tmp_path: Path,
+    fault_document: Literal["point", "module_cfg"] | None,
+) -> None:
+    faults = (
+        ()
+        if fault_document is None
+        else (
+            ContextSourceFault(
+                fault_document,
+                tmp_path / f"{fault_document}.yaml",
+                "OSError",
+                "unreadable",
+            ),
+        )
+    )
+    context = ParameterContext(
+        point=ParameterContent({"components": ["not a component mapping"]}),
+        library=source[1],
+        target=None,
+        roles=None,
+        source_faults=faults,
+    )
+
+    bound = context.bind_roles({}, focus=None, explicit={})
+
+    assert bound.roles == RoleBinding(None, {}, {})
+    assert bound.target is None
+    assert bound.source_faults == faults
+    with pytest.raises(RoleResolutionError, match="Role is not declared"):
+        context.bind_roles({}, focus=None, explicit={"extra": "Q1"})
+    if fault_document == "point":
+        with pytest.raises(ContextSourceUnavailableError) as error:
+            bound.document()
+        assert error.value.faults == faults
+    elif fault_document == "module_cfg":
+        with pytest.raises(ContextSourceUnavailableError) as error:
+            _ = bound.library
+        assert error.value.faults == faults
+
+
 def test_bind_roles_returns_partial_aliases_after_ambiguous_inference(
     source: tuple[PointDocument, LibrarySnapshot],
 ) -> None:
@@ -244,7 +521,7 @@ def test_partial_capture_reports_unbound_role_only_when_read(
     context = ParameterContext(
         point=point,
         library=library,
-        target=SavedPoint(entry_id="entry", point="working"),
+        target=SavedPoint(entry_name="entry", point="working"),
         roles=RoleBinding(None, declarations(), {"capture_sensor": "R1"}),
     )
     assert context.value("$capture_sensor.rate") == 6500.0
@@ -388,6 +665,46 @@ def test_nested_library_failure_is_not_reported_as_missing(
         capture((point, broken)).lookup("Q1.pulses.pi.gain")
 
 
+def test_point_consumers_ignore_unused_library_source_fault(
+    source: tuple[PointDocument, LibrarySnapshot], tmp_path: Path
+) -> None:
+    fault = ContextSourceFault(
+        "module_cfg", tmp_path / "module_cfg.yaml", "OSError", "unreadable"
+    )
+    context = capture(source, faults=(fault,))
+
+    assert context.value("Q1.rate") == 4300.0
+    assert context.lookup_point("Q1.rate") == DocumentValue(True, 4300.0)
+    assert context.component("Q1") == source[0].components["Q1"]
+    assert context.document() == source[0]
+    assert context.whole_document() == source[0]
+    bound = context.bind_roles(declarations(), focus="Q1", explicit={})
+    assert bound.value("$capture_driver.rate") == 4300.0
+    assert bound.source_faults == (fault,)
+    aliased = context.bind_aliases((AliasRow("driver", "Q1"),), {})
+    assert aliased.value("$driver.rate") == 4300.0
+    assert aliased.roles == RoleBinding(None, {}, {"driver": "Q1"})
+    with pytest.raises(ContextSourceUnavailableError) as error:
+        _ = context.library
+    assert error.value.faults == (fault,)
+
+
+@pytest.mark.parametrize("method", ["lookup", "library_key", "has_library_key"])
+def test_library_consumers_report_their_own_source_fault(
+    source: tuple[PointDocument, LibrarySnapshot], tmp_path: Path, method: str
+) -> None:
+    fault = ContextSourceFault(
+        "module_cfg", tmp_path / "module_cfg.yaml", "OSError", "unreadable"
+    )
+    context = capture(source, faults=(fault,))
+
+    path = "Q1.pulses.pi.freq" if method == "lookup" else "Q1.pulses.pi"
+    with pytest.raises(ContextSourceUnavailableError) as error:
+        getattr(context, method)(path)
+    assert error.value.faults == (fault,)
+    assert context.value("Q1.rate") == 4300.0
+
+
 def test_parameter_capture_rejects_setup_diagnostics(
     source: tuple[PointDocument, LibrarySnapshot],
     tmp_path: Path,
@@ -401,21 +718,45 @@ def test_parameter_capture_rejects_setup_diagnostics(
 
 def read_projection(context: ParameterContext, method: str) -> None:
     """Exercise one public getter without reaching inside the captured source."""
-    if method == "library":
-        _ = context.library
-    elif method == "document":
+    if method == "document":
         context.document()
+    elif method == "whole_document":
+        context.whole_document()
+    elif method == "component":
+        context.component("Q1")
     elif method == "bind_roles":
-        context.bind_roles({}, focus=None, explicit={})
+        context.bind_roles(declarations(), focus="Q1", explicit={})
     else:
         getattr(context, method)("Q1.rate")
+
+
+@pytest.mark.parametrize("document", ["point", "module_cfg"])
+def test_library_capture_checks_only_its_source_fault(
+    source: tuple[PointDocument, LibrarySnapshot],
+    tmp_path: Path,
+    document: Literal["point", "module_cfg"],
+) -> None:
+    fault = ContextSourceFault(
+        document, tmp_path / f"{document}.yaml", "OSError", "unreadable"
+    )
+    broken = capture(source, faults=(fault,))
+    assert broken.source_faults == (fault,)
+    if document == "module_cfg":
+        with pytest.raises(ContextSourceUnavailableError) as error:
+            _ = broken.library
+        assert error.value.faults == (fault,)
+    else:
+        assert (
+            broken.library.entry_value("Q1.pulses.pi", kind="module")["freq"] == 100.0
+        )
 
 
 @pytest.mark.parametrize(
     "method",
     [
         "document",
-        "library",
+        "whole_document",
+        "component",
         "bind_roles",
         "resolve_path",
         "library_key",

@@ -206,7 +206,7 @@ def captured_env(amount: float) -> FormEnv:
             ),
         ),
         library=library,
-        target=SavedPoint(entry_id="synthetic", point="working"),
+        target=SavedPoint(entry_name="synthetic", point="working"),
         roles=None,
     )
     return FormEnv(parameters=parameters, library=library)

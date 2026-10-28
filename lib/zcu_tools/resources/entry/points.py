@@ -15,6 +15,7 @@ from .views import (
     EditView,
     GeneralView,
     add_component_to_draft,
+    cached_parameter_content,
     document_meta,
     point_origin,
     register_view_read,
@@ -41,7 +42,6 @@ class PointView:
         store: DocumentStore[PointDocument],
         source: Path,
         *,
-        entry_id: str,
         result_root: Path,
         database_root: Path,
     ) -> None:
@@ -52,8 +52,8 @@ class PointView:
         ResultEntry supplies these dependencies; construction does not reload or
         revalidate field values. Binding rejects components shadowing any public
         SetupView/PointView/EditView member with ValueError naming the member.
-        entry_id is the owning entry's immutable UUID. result_root and database_root
-        are resolved once. Clone identity binds source, entry_id and result_root,
+        result_root and database_root are resolved once.
+        Clone identity binds source and result_root,
         including for directly constructed views. database_root only configures
         Save output, not clone identity. Cloning requires a matching Result root
         and reloads the published source, not this cached snapshot. No later
@@ -68,7 +68,6 @@ class PointView:
         self._source = source
         origin = _point_origin.PointOrigin(
             source=source,
-            entry_id=entry_id,
             result_root=result_root.resolve(),
             database_root=database_root.resolve(),
         )
@@ -77,7 +76,11 @@ class PointView:
     @property
     def general(self) -> GeneralView:
         """Return cached general fields; tagged ext leaves read as native complex."""
-        return GeneralView(lambda: self._store.snapshot().general, self._edit_general)
+        return GeneralView(
+            lambda: self._store.snapshot().general,
+            self._edit_general,
+            content=lambda: cached_parameter_content(self),
+        )
 
     @contextmanager
     def _edit_general(self, _field: str) -> Generator[PointGeneral]:
@@ -87,7 +90,7 @@ class PointView:
     @property
     def description(self) -> str | None:
         """Return the cached description, or None when it is unset."""
-        return self._store.snapshot().general.description
+        return self.general.description
 
     @description.setter
     def description(self, value: str | None) -> None:
@@ -95,12 +98,13 @@ class PointView:
             draft.description = value
 
     def __getattr__(self, name: str) -> ComponentView:
-        if name not in self._store.snapshot().components:
+        if name not in cached_parameter_content(self).component_names():
             raise AttributeError(f"Unknown component {name!r}")
         return ComponentView(
             lambda: self._store.snapshot().components[name],
             lambda field: self._edit_component(name, field),
             name,
+            content=lambda: cached_parameter_content(self),
         )
 
     @contextmanager
@@ -155,15 +159,17 @@ class PointView:
 
         No value lookup, key interpretation or I/O occurs; {} means cleared.
         """
-        return document_meta(self._store.snapshot(), path)
+        return document_meta(cached_parameter_content(self), path)
 
-    def refresh(self) -> None:
-        """Reload only point.yaml; invalid data keeps the cached snapshot.
+    def refresh(self, *, strict: bool = False) -> None:
+        """Reload point.yaml, validating the full candidate when strict=True.
 
-        Missing files, incompatible headers or invalid component models raise
-        without publication. No files are committed.
+        Ordinary refresh leaves unused fields unvalidated until projected.
+        Watcher/reload installation must pass strict=True. Missing files,
+        invalid YAML, incompatible headers and validation failures raise before
+        publication, preserving the prior content and revision. No files are written.
         """
-        self._store.refresh()
+        self._store.refresh(strict=strict)
 
     def add_component(self, name: str, *, kind: str, **fields: YamlValue) -> None:
         """Add a complete registered component to this point, not its template.

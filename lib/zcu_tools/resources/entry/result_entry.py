@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 from pydantic import TypeAdapter, ValidationError
 from ruamel.yaml import YAML
@@ -35,16 +35,16 @@ from .errors import DestinationExistsError, MissingPointError
 from .ledger import RecordsLedger
 from .ledger_models import (
     AnalyzedPayload,
-    ImportPayload,
     JsonObject,
     LedgerEvent,
-    Origin,
-    validate_origin,
+    LedgerEventContent,
 )
 from .points import PointView
+from .registry import component_registry
 from .schema import (
     PARAMETER_FORMAT,
     PARAMETER_VERSION,
+    ParameterContent,
     PointDocument,
     SetupDocument,
     SetupGeneral,
@@ -52,11 +52,12 @@ from .schema import (
 from .storage import bind_record_table
 from .views import (
     SetupView,
+    cached_parameter_content,
     validate_view_components,
 )
 
 if TYPE_CHECKING:
-    from zcu_tools.resources.context.library import ModuleLibrary, ModuleLibraryDocument
+    from zcu_tools.resources.context.library import ModuleLibrary
 
 
 def _create_empty_library(path: Path) -> None:
@@ -144,16 +145,14 @@ def rename_entry(old: str, new: str, *, result_root: str | Path) -> None:
 class EntryIdentity:
     """Fixed values for creating a new entry, not ownership of existing paths.
 
-    entry_id is the UUID to write to setup. created_at is a timezone-aware UTC
-    datetime; non-UTC or naive times raise ValueError, invalid IDs ValidationError.
+    created_at is a timezone-aware UTC datetime written to setup.
+    Non-UTC or naive times raise ValueError.
     These values do not authorize opening, replacing or repairing any entry.
     """
 
-    entry_id: UUID
     created_at: datetime
 
     def __post_init__(self) -> None:
-        TypeAdapter(UUID).validate_python(self.entry_id, strict=True)
         if self.created_at.utcoffset() != timedelta(0):
             raise ValueError("created_at must be a timezone-aware UTC datetime")
 
@@ -162,7 +161,6 @@ class ResultEntry:
     def __init__(self, result_path: Path, database_path: Path) -> None:
         self._result_path = result_path
         self._database_path = database_path
-        self._entry_id: str | None = None
         source = result_path / "setup.yaml"
 
         # Bind diagnostics to this handle without shared mutable model context.
@@ -177,27 +175,20 @@ class ResultEntry:
                 format=PARAMETER_FORMAT,
                 supported_version=PARAMETER_VERSION,
                 validate=self._validate_setup,
+                read_validate=lambda document: self._validate_parameter_read(
+                    document, source
+                ),
             )
         except ValidationError as exc:
             raise ValueError(f"{source.resolve()}: {exc}") from exc
+        self._setup = SetupView(self._setup_store, source)
 
     def _validate_setup(self, document: SetupDocument) -> None:
         validate_view_components(document, source=self._result_path / "setup.yaml")
-        if self._entry_id is None:
-            self._entry_id = document.general.entry_id
-        elif document.general.entry_id != self._entry_id:
-            raise ValueError(
-                f"{self._result_path / 'setup.yaml'}: entry_id is immutable; "
-                f"expected {self._entry_id!r}, got {document.general.entry_id!r}"
-            )
 
     @property
     def setup(self) -> SetupView:
-        return SetupView(self._setup_store, self._result_path / "setup.yaml")
-
-    @property
-    def entry_id(self) -> str:
-        return self._setup_store.snapshot().general.entry_id
+        return self._setup
 
     @property
     def result_path(self) -> Path:
@@ -297,12 +288,13 @@ class ResultEntry:
 
     @property
     def ledger(self) -> RecordsLedger:
-        """Bind this entry's records directory and UUID without caching events.
+        """Bind this entry's records directory without caching events.
 
         Reads and appends use RecordsLedger's lock, schema and failure contracts.
-        Missing records directories raise; accessing this property writes no files.
+        Missing records read as empty; the first append creates the directory.
+        Accessing this property writes no files.
         """
-        return RecordsLedger(self._result_path / "records", entry_id=self.entry_id)
+        return RecordsLedger(self._result_path / "records")
 
     def record_analysis(
         self,
@@ -319,7 +311,7 @@ class ResultEntry:
         run data. summary and optional record are strict JSON objects with
         finite numbers; their contents have no framework-defined schema.
 
-        The analyzed event uses this entry's UUID, current UTC time and notebook
+        The analyzed event uses current UTC time and notebook
         origin. A non-None record (including {}) is attached as records/<id>.json.
         The returned ID can be read with ledger.get(id). No values are written;
         callers use ordinary point or setup edits and choose any metadata.
@@ -332,7 +324,6 @@ class ResultEntry:
             id=str(uuid4()),
             kind="analyzed",
             at=datetime.now(timezone.utc).isoformat(),
-            entry_id=self.entry_id,
             origin="notebook",
             payload=AnalyzedPayload(
                 analysis_kind=analysis_kind,
@@ -397,9 +388,10 @@ class ResultEntry:
     def validate_point_parameters(self, label: str) -> None:
         """Probe one point parameter document without opening library or aliases.
 
-        label is a safe single path segment. Apply the same strict parameter
-        header, schema policy, component models and view binding as use_point.
-        Validation and I/O failures propagate; callers may isolate them per point.
+        label is a safe single path segment. Require a readable YAML mapping
+        with this owner's header and schema version. Component/leaf values stay
+        opaque until used or edited. Parse/header/I/O failures propagate for
+        callers to isolate per point. No availability guard is added to reads.
         No view is installed, and no documents are changed or created.
         """
         source = _entry_path(self._result_path / "points", label) / "point.yaml"
@@ -411,7 +403,6 @@ class ResultEntry:
         *,
         clone_from: str | PointView | None = None,
         description: str | None = None,
-        origin: Origin = "notebook",
     ) -> PointView:
         """Create an independent complete point and return its validated view.
 
@@ -425,28 +416,20 @@ class ResultEntry:
         setup when seeding, or from the source point when cloning, only if present.
         Missing source aliases stay absent, without setup fallback during clone.
         All alias tables remain independent after creation. Point values and
-        opaque metadata copy verbatim. Library sources keep the library contract:
-        cross-entry nonmanual library sources become local import events with
-        copied JSON attachments, and library sources mark the direct clone
-        origin. origin identifies the importing frontend as gui, notebook or mcp.
-        description=None preserves the source description; a string explicitly sets it,
-        including empty text, within this creation/cleanup scope.
-        Reading the source library may first back up its original bytes and
-        clean invalid entries and their sources from its module_cfg. Clone copies
-        only retained entries and imports only retained sources. Data and images
-        are not copied or changed; other source files are unchanged.
-        Failure removes only the new point. Completed source-library cleanup and
-        its backup remain, and completed imports may remain orphaned. No cross-file
-        transaction is provided.
+        opaque metadata copy verbatim. Library Specs copy without source records,
+        ledger events or attachments. Invalid disk Specs are skipped in the copy;
+        source bytes stay unchanged. description=None preserves the source
+        description; a string explicitly sets it, including empty text.
+        Data and images are not copied or changed. Failure removes only the new
+        point. No cross-file transaction is provided.
         """
-        validate_origin(origin)
         destination = _entry_path(
             self._result_path / "points", label, new_destination=True
         )
         destination.mkdir()
         try:
             if clone_from is not None:
-                self._clone_point(destination, clone_from, origin=origin)
+                self._clone_point(destination, clone_from)
             else:
                 self._seed_point(destination)
             point = self.use_point(label)
@@ -462,7 +445,10 @@ class ResultEntry:
         # Copy the validated YAML snapshot while the template lock is held.
         with self._setup_store.locked():
             self._setup_store.refresh()
-            components = self._setup_store.snapshot().components
+            content = cached_parameter_content(self.setup)
+            components = {
+                name: content.component(name) for name in content.component_names()
+            }
             shutil.copyfile(
                 self._result_path / "setup.yaml", destination / "point.yaml"
             )
@@ -481,7 +467,6 @@ class ResultEntry:
     def _clone_source(self, clone_from: str | PointView) -> tuple[ResultEntry, Path]:
         result_root = self._result_path.parent
         database_root = self._database_path.parent
-        expected_id = None
         if isinstance(clone_from, PointView):
             identity = _point_origin.clone_source(
                 clone_from,
@@ -489,7 +474,6 @@ class ResultEntry:
             )
             source = identity.source.parent
             name = source.parent.parent.name
-            expected_id = identity.entry_id
         else:
             segments = clone_from.split("/")
             if len(segments) == 1:
@@ -504,16 +488,12 @@ class ResultEntry:
             entry = ResultEntry.open(
                 name, result_root=result_root, database_root=database_root
             )
-        if expected_id is not None and entry.entry_id != expected_id:
-            raise ValueError("PointView source entry_id has changed")
         return entry, source
 
     def _clone_point(
         self,
         destination: Path,
         clone_from: str | PointView,
-        *,
-        origin: Origin,
     ) -> None:
         source_entry, source = self._clone_source(clone_from)
         store = source_entry._point_store(source / "point.yaml")
@@ -524,100 +504,15 @@ class ResultEntry:
         aliases = source / "aliases.yaml"
         if aliases.exists():
             shutil.copyfile(aliases, destination / "aliases.yaml")
-        library_store = source_entry._library_store(source / "module_cfg.yaml")
-        with library_store.locked():
-            library_store.refresh()
-            library_document = library_store.snapshot()
-            shutil.copyfile(source / "module_cfg.yaml", destination / "module_cfg.yaml")
-        event_ids = tuple(
-            dict.fromkeys(
-                metadata.source
-                for metadata in library_document.provenance.values()
-                if metadata.source != "manual"
-            )
-        )
-        imports: dict[str, str] = {}
-        if source_entry is not self:
-            imports = self._import_sources(event_ids, source_entry, origin=origin)
+        from zcu_tools.resources.context.library_store import copy_library
+
+        copy_library(source / "module_cfg.yaml", destination / "module_cfg.yaml")
         cloned_store = self._point_store(destination / "point.yaml")
         with cloned_store.edit() as draft:
             draft.components = point_document.components
             draft.general.created_at = (
                 datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
             )
-        # This private copy has already passed source-owner cleanup. Its foreign
-        # IDs must be rewritten before destination-owner source validation.
-        from zcu_tools.resources.context.library import (
-            MODULE_LIBRARY_FORMAT,
-            MODULE_LIBRARY_VERSION,
-            ModuleLibraryDocument,
-        )
-
-        cloned_library = DocumentStore(
-            destination / "module_cfg.yaml",
-            ModuleLibraryDocument,
-            format=MODULE_LIBRARY_FORMAT,
-            supported_version=MODULE_LIBRARY_VERSION,
-        )
-        with cloned_library.edit() as draft:
-            for metadata in draft.provenance.values():
-                if metadata.source in imports:
-                    metadata.source = imports[metadata.source]
-                metadata.cloned_from = {
-                    "entry_id": source_entry.entry_id,
-                    "point": source.name,
-                }
-            draft.validate_content(
-                ledger=self._result_path / "records/ledger.jsonl",
-                entry_id=self.entry_id,
-            )
-        cloned_library.snapshot().validate_content(
-            ledger=self._result_path / "records/ledger.jsonl", entry_id=self.entry_id
-        )
-
-    def _library_store(self, source: Path) -> DocumentStore[ModuleLibraryDocument]:
-        # Library imports entry provenance; defer composition until both packages load.
-        from zcu_tools.resources.context.library_store import open_library_store
-
-        return open_library_store(
-            source,
-            ledger=self._result_path / "records/ledger.jsonl",
-            entry_id=self.entry_id,
-        )
-
-    def _import_sources(
-        self,
-        event_ids: tuple[str, ...],
-        source_entry: ResultEntry,
-        *,
-        origin: Origin,
-    ) -> dict[str, str]:
-        imports: dict[str, str] = {}
-        source_ledger = source_entry.ledger
-        destination_ledger = self.ledger
-        for event_id in event_ids:
-            try:
-                evidence = source_ledger.get(event_id)
-            except KeyError as exc:
-                raise ValueError(
-                    f"source ledger event {event_id!r} does not exist"
-                ) from exc
-            imported = LedgerEvent(
-                id=str(uuid4()),
-                kind="import",
-                at=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-                entry_id=self.entry_id,
-                origin=origin,
-                payload=ImportPayload(
-                    source_entry_id=source_entry.entry_id,
-                    source_event_id=event_id,
-                    source_event_json=evidence.event_json,
-                    source_record=evidence.event.record,
-                ),
-            )
-            destination_ledger.append(imported, record=evidence.record)
-            imports[event_id] = imported.id
-        return imports
 
     def use_point(self, label: str) -> PointView:
         """Load one complete point and return an independently bound view.
@@ -643,7 +538,6 @@ class ResultEntry:
         return PointView(
             self._point_store(source),
             source,
-            entry_id=self.entry_id,
             result_root=self._result_path.parent,
             database_root=self._database_path.parent,
         )
@@ -651,20 +545,14 @@ class ResultEntry:
     def module_library(
         self, label: str | None = None, *, assets: WaveformAssetInfo | None = None
     ) -> ModuleLibrary:
-        """Open the setup or point library with this entry's ledger and optional assets.
+        """Open an existing setup or point library without consulting the ledger.
 
-        None selects entry/module_cfg.yaml, initialized by create. A string
-        selects a point library and follows use_point's safe single-segment rules.
-        Only module_cfg.yaml
-        is loaded; the point and assets are not read and no active point is selected.
-        Omit assets for Spec-only reads/edits; materializing Arb requires a provider.
-        The existing library must have a valid header and container. Invalid
-        existing Specs or entry-local provenance are backed up and removed under
-        the document lock; new edits remain strict. Invalid labels raise ValueError;
-        missing files, container errors and ledger I/O/schema failures propagate.
-        Opening creates no missing document or parent directory.
+        None selects entry/module_cfg.yaml; a label selects its point library
+        under use_point's safe path rules. assets is optional for Spec-only use.
+        Invalid disk Specs are skipped and reported by snapshot.invalid_entries.
+        Header/container/I/O errors propagate. Opening never writes or creates
+        files, reads point/assets, or selects an active point. Drafts stay strict.
         """
-        # Avoid the library -> entry.provenance -> ResultEntry import cycle.
         from zcu_tools.resources.context.library import ModuleLibrary
 
         directory = (
@@ -672,11 +560,13 @@ class ResultEntry:
             if label is None
             else _entry_path(self._result_path / "points", label)
         )
-        return ModuleLibrary(
-            directory / "module_cfg.yaml",
-            assets=assets,
-            ledger=self._result_path / "records/ledger.jsonl",
-            entry_id=self.entry_id,
+        return ModuleLibrary(directory / "module_cfg.yaml", assets=assets)
+
+    def _validate_parameter_read(self, document: YamlMap, source: Path) -> None:
+        validate_parameter_header(document, source=source)
+        validate_view_components(ParameterContent(document), source=source)
+        component_registry.require_schema_policy().require_current(
+            document, source=source, upgrade_target=self._result_path
         )
 
     def _point_store(self, source: Path) -> DocumentStore[PointDocument]:
@@ -693,6 +583,9 @@ class ResultEntry:
                 validate=lambda document: validate_view_components(
                     document, source=source
                 ),
+                read_validate=lambda document: self._validate_parameter_read(
+                    document, source
+                ),
             )
         except ValidationError as exc:
             raise ValueError(f"{source.resolve()}: {exc}") from exc
@@ -705,11 +598,29 @@ class ResultEntry:
 
         result_root is the exact Result root, not an entry or Database directory.
         Missing entry, records directory or ledger returns (). An existing entry
-        must have a valid setup header and UUID/UTC identity; components are not
+        must have a valid setup header and UTC creation time; components are not
         interpreted. Ledger validation and I/O errors propagate. Symlinks must
         preserve root/entry/records containment and keep the ledger in records,
         otherwise raise ValueError. No entry, file, directory or lock is created,
         and attachments are not read.
+        """
+        return tuple(
+            content.project()
+            for content in cls.read_contents_snapshot(name, result_root=result_root)
+        )
+
+    @classmethod
+    def read_contents_snapshot(
+        cls, name: str, *, result_root: str | Path
+    ) -> tuple[LedgerEventContent, ...]:
+        """Read partial historical events for a safe single-segment entry name.
+
+        result_root is the exact Result root, not an entry or Database directory.
+        Missing entry/records/ledger returns (). Validate setup identity, ledger
+        JSON, versions, event/run IDs, duplicates and complete tails. Other fields
+        validate on use or explicit project(). I/O and validation errors propagate.
+        Symlink containment matches read_events_snapshot. No files, directories
+        or locks are created; attachments are not read.
         """
         root = Path(result_root).absolute()
         result = _entry_path(root, name)
@@ -718,7 +629,7 @@ class ResultEntry:
                 raise ValueError(f"{path}: path escapes its entry location")
         if not result.exists():
             return ()
-        identity = cls.read_identity(name, result_root=root)
+        cls.read_identity(name, result_root=root)
         records = result / "records"
         if not records.resolve().is_relative_to(records):
             raise ValueError(f"{records}: records path escapes its entry location")
@@ -727,16 +638,14 @@ class ResultEntry:
         ledger = records / "ledger.jsonl"
         if not ledger.resolve().is_relative_to(records):
             raise ValueError(f"{ledger}: ledger path escapes records")
-        return RecordsLedger(
-            records, entry_id=str(identity.entry_id)
-        ).read_events_snapshot()
+        return RecordsLedger(records).read_contents_snapshot()
 
     @classmethod
     def read_identity(cls, name: str, *, result_root: str | Path) -> EntryIdentity:
         """Read setup header and identity without component registration or locks.
 
         name is a safe single entry name under result_root. Validate the shared
-        parameter-container header and general UUID/UTC creation time only;
+        parameter-container header and general UTC creation time only;
         do not interpret component kinds or require point/records directories.
         Invalid names, identity/header/YAML and escaping symlinks raise ValueError.
         Missing setup and other filesystem errors propagate. No files are written.
@@ -754,7 +663,6 @@ class ResultEntry:
         except (ValueError, YAMLError) as error:
             raise ValueError(f"{source}: {error}") from error
         return EntryIdentity(
-            entry_id=UUID(general.entry_id),
             created_at=datetime.fromisoformat(general.created_at),
         )
 
@@ -784,8 +692,8 @@ class ResultEntry:
     ) -> ResultEntry:
         """Create a new Result entry and bind a Database output location.
 
-        name is a safe single path segment. identity fixes the setup UUID and UTC
-        creation time, or None generates both now. An existing Result destination
+        name is a safe single path segment. identity fixes the UTC creation
+        time, or None uses the current time. An existing Result destination
         raises DestinationExistsError before writes. Database is neither inspected
         nor created; its configured path is database_root/name, for later Save.
         Schema/I/O failures propagate and remove only directories created by this
@@ -795,9 +703,7 @@ class ResultEntry:
 
         policy = component_registry.require_schema_policy()
         if identity is None:
-            identity = EntryIdentity(
-                entry_id=uuid4(), created_at=datetime.now(timezone.utc)
-            )
+            identity = EntryIdentity(created_at=datetime.now(timezone.utc))
         result_path = _entry_path(result_root, name, new_destination=True)
         database_path = Path(database_root) / name
         result_path.mkdir(parents=True)
@@ -809,7 +715,6 @@ class ResultEntry:
                 "schema_version": policy.current_version,
                 "format_version": f"{PARAMETER_VERSION.major}.{PARAMETER_VERSION.minor}",
                 "general": {
-                    "entry_id": str(identity.entry_id),
                     "created_at": identity.created_at.isoformat().replace(
                         "+00:00", "Z"
                     ),
@@ -833,7 +738,7 @@ class ResultEntry:
         """Open a Result entry from setup and bind database_root/name for Save.
 
         name must be a safe single path segment. The Result entry directory and
-        setup must exist; setup must validate its format and UUID.
+        setup must exist and validate its header; field values validate on use.
         Missing points/ and records/ are empty and are not created.
         Missing paths propagate filesystem errors. Schema ValidationError becomes
         ValueError with the full document path and original diagnostic. The original

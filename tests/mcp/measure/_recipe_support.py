@@ -192,7 +192,7 @@ class LookbackGui:
                     },
                 )
             ),
-            target=SavedPoint(entry_id="recipe-entry", point="working"),
+            target=SavedPoint(entry_name="recipe-entry", point="working"),
             roles=None,
         )
         table = AliasTable(

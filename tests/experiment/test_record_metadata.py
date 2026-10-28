@@ -7,12 +7,11 @@ import warnings
 from dataclasses import dataclass, replace
 from pathlib import Path
 from types import MappingProxyType
-from uuid import UUID
 
 import numpy as np
 import pytest
 import zcu_tools.experiment as experiment
-from pydantic import TypeAdapter
+from pydantic import JsonValue, TypeAdapter
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.datafile import DataVariable, JsonObject, load, save
 from zcu_tools.experiment.native_persistence import read_run_metadata
@@ -29,7 +28,7 @@ def historical_metadata(
         finished_at="2026-10-06T01:00:02Z",
         completion="unknown",
         snapshot=experiment.RunSnapshot(
-            entry_id=UUID("12345678-1234-5678-1234-567812345678"),
+            entry_name="entry",
             point="sweet",
             roles={"qubit": "Q1"},
         ),
@@ -121,9 +120,25 @@ def test_run_identity_rejects_other_strings(entry: str, run_id: str) -> None:
         validate(run_id)
 
 
+@pytest.mark.parametrize("legacy", [None, "not-a-uuid", {"malformed": [1]}])
+def test_historical_snapshot_uses_only_recorded_names(legacy: JsonValue) -> None:
+    document: JsonObject = {
+        "entry_name": "recorded",
+        "point": "sweet",
+        "roles": {"qubit": "Q1"},
+    }
+    historical = dict(document)
+    if legacy is not None:
+        historical["entry_id"] = legacy
+    adapter = TypeAdapter(experiment.RunSnapshot)
+    restored = adapter.validate_python(historical)
+    assert restored.entry_name == "recorded"
+    assert adapter.dump_python(restored, mode="json") == document
+
+
 def test_readonly_snapshot_roles_serialize_without_warnings() -> None:
     snapshot = experiment.RunSnapshot(
-        entry_id=UUID("12345678-1234-5678-1234-567812345678"),
+        entry_name="entry",
         point="sweet",
         roles=MappingProxyType({"qubit": "Q1"}),
     )
@@ -136,11 +151,11 @@ def test_readonly_snapshot_roles_serialize_without_warnings() -> None:
 
     assert not caught, [str(warning.message) for warning in caught]
     expected_json = {
-        "entry_id": "12345678-1234-5678-1234-567812345678",
+        "entry_name": "entry",
         "point": "sweet",
         "roles": {"qubit": "Q1"},
     }
-    assert python_doc == {**expected_json, "entry_id": snapshot.entry_id}
+    assert python_doc == expected_json
     assert json_doc == expected_json
     assert json.loads(json_bytes) == expected_json
     python_doc["roles"]["qubit"] = "renamed in Python output"
@@ -191,13 +206,15 @@ def test_native_round_trip_keeps_record_metadata_and_container_docs(
     np.testing.assert_array_equal(container.vars["signal"].axes[0].values, [4e9, 5e9])
     np.testing.assert_allclose(container.vars["signal"].values, [0.001j, 0.002j])
     restored = experiment.load_run_with_metadata(path, spec=declaration())
-    assert restored.metadata == metadata
+    assert restored.metadata is not None
+    assert restored.metadata.project() == metadata
     assert restored.cfg == record.cfg
     np.testing.assert_allclose(restored.result.values, record.result.values)
-    assert (
-        experiment.restore_run(container, spec=declaration()).record.metadata
-        == metadata
-    )
+    restored_metadata = experiment.restore_run(
+        container, spec=declaration()
+    ).record.metadata
+    assert restored_metadata is not None
+    assert restored_metadata.project() == metadata
 
 
 @pytest.mark.parametrize("legacy_value", [[], [{"requested_rounds": 10}], "legacy"])
@@ -222,7 +239,8 @@ def test_native_load_ignores_retired_metadata_without_rewriting(
     )
     before = path.read_bytes()
     restored = experiment.load_run_with_metadata(path, spec=declaration())
-    assert restored.metadata == metadata
+    assert restored.metadata is not None
+    assert restored.metadata.project() == metadata
     assert read_run_metadata(path) == metadata
     assert path.read_bytes() == before
 
@@ -238,8 +256,10 @@ def test_native_save_requires_record_metadata(tmp_path: Path) -> None:
     assert list(tmp_path.iterdir()) == []
 
 
-@pytest.mark.parametrize("defect", ["completion", "snapshot", "run_id", "started_at"])
-def test_native_load_rejects_invalid_metadata_with_source_path(
+@pytest.mark.parametrize(
+    "defect", ["completion", "snapshot", "run_id", "started_at", "provenance"]
+)
+def test_native_load_defers_unused_metadata_but_use_projection_and_save_reject(
     tmp_path: Path, defect: str
 ) -> None:
     metadata = historical_metadata()
@@ -256,9 +276,20 @@ def test_native_load_rejects_invalid_metadata_with_source_path(
         "20261022T120000Z-ab12cd-000001-3" if defect == "run_id" else "invalid"
     )
     save(path, replace(container, docs=docs), replace=True)
+    before = path.read_bytes()
+    restored = experiment.load_run_with_metadata(path, spec=declaration())
+    np.testing.assert_allclose(restored.result.values, [1j])
+    assert restored.metadata is not None
+    assert restored.metadata.experiment == "test/metadata"
+    with pytest.raises(ValueError, match=f"metadata.*{defect}"):
+        getattr(restored.metadata, defect)
     with pytest.raises(ValueError, match="metadata") as caught:
-        experiment.load_run_with_metadata(path, spec=declaration())
+        read_run_metadata(path)
     assert str(path) in str(caught.value)
+    with pytest.raises(ValueError, match="metadata"):
+        experiment.save_run(restored, tmp_path / "rejected.h5", spec=declaration())
+    assert path.read_bytes() == before
+    assert not (tmp_path / "rejected.h5").exists()
 
 
 @pytest.mark.parametrize(

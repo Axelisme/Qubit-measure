@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure`
 
-**Last updated:** 2026-10-28, Guard／gate／operation 分工與唯讀失效預覽
+**Last updated:** 2026-10-29, captured parameter environments 與 recorded-name Save
 
 **讀者：** framework-dev。量測 GUI 的組裝、分頁、tab admission 與 Run／Load／Save 分工。
 
@@ -364,17 +364,20 @@ RunService 在 run 終局後請 DeviceService 背景讀回已連線儀器。成�
 
 RunInputs 固定 admission 的 ParameterContext，RunPaneState 隨 result 保存同一引用。`partial_result` 固定 worker 完成時的 Run root 完成事實，與 operation 終態及 metadata 是否存在無關。Snapshot 與 wire 的 result_state 交付同一 bool，new Run 或非 acquisition replacement 重設為 False。
 晚開 FIT、interactive factory、Post 與 WB 讀這份 result source，不讀後來的 tab binding。
-Native Load 保留檔案 metadata。在相同 opened entry，Load 一次讀回歷史 point，
-固定檔案的 alias 名稱供分析與 WB。值是 Load 時的持久值，不重建未保存的原始參數版本。
-跨 entry、EMPTY 或無 point 時，Load 不提供分析來源，也不回退全域 alias。
-Context-free analysis 仍可用。Save storage 獨立固定在 Load request 時。
+Native Load 保留檔案 metadata，從 parameter_snapshot 還原當次 point、library 與 alias。
+Load 接受任意位置的檔案，不讀 live point，也不依 entry 身分選來源。
+缺快照時使用沒有 general、target 或 storage 的空內容，分析可以使用自己的預設值。
+無 storage 的 Run 保留 artifact/member declarations，首次 Save 前 outputs 可為空，狀態仍為 Not saved。
+SaveService 依目前 roots 與 metadata 記錄的 entry／point 取得 resources 輸出 binding。
+缺名稱使用 unnamed_entry，缺 point 使用 unnamed_point。Save report 發布實際 paths、成功與失敗。
+Bound Run 的舊預覽保留，但不能決定實際 Save 位置。
 Load 不新增 Run token 或量測歷史。
 純計算來源為 None，不回退到 session；新 Run 與 clear 清除舊來源。Analyze／Post-analyze 不攜帶 predictor。Predictor 是獨立查詢工具，不自動參與實驗。
 
 Entry New／Open 不建立參數環境，也不自選既有 point。
 Run、WB 與目前 point 的 Inspect Set 要先選取或建立工作點；GUI 停用操作並提示，application 也拒絕未選取狀態。
 重新 Open 同 entry 清除 selection，WB 必須再次選取任一 point 才能提交，
-但目的地仍是候選捕捉的 SavedPoint，不跟隨畫面上的 point。
+Preview 與 Apply 的目的地就是命令當下 GUI 選定的 point。
 Cfg/editor drafts 與 WB 候選 preview 保持各自的生命週期。
 
 `RecordWriteback` 只提出 adapter 組裝的 JSON object。
@@ -404,7 +407,7 @@ Decision 包含 `allowed`、第一個拒絕的 `reason` 與共用 `message`，�
 Run、Load 不要求 storage，Load 與 Analyze 不要求目前 context。
 Analyze 缺能力時回 `no_analysis`，不會把 `AnalysisMode.NONE` 送入 FIT worker。
 Post-analyze 缺能力時回 `no_post_analysis`。
-Writeback owner 另行驗證 captured destination；Post writeback UI 還要求 Post result，只有 Post result 不能略過 Primary result 前提。
+Writeback owner 另行驗證目前選定的 destination；Post writeback UI 還要求 Post result，只有 Post result 不能略過 Primary result 前提。
 Save 不使用這份 admission，保存前提仍由 SaveService 檢查。
 
 `check_load/analyze/writeback` 是 admit 的薄包裝，拒絕時以 decision 的 reason/message raise `GuardError`。

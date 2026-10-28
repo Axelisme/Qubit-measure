@@ -32,6 +32,7 @@ from zcu_tools.gui.session.context_types import (
 )
 from zcu_tools.resources.entry import component_registry
 
+from tests.gui.app.measure._record_support import require_target
 from tests.gui.app.measure._synthetic import SampleAdapter, SampleCfg
 from tests.resources.entry.fakes import (
     Driver,
@@ -130,7 +131,7 @@ def application(
             {"rate": 40.0, "module": {"pi": "driver.pulses.pi"}},
         )
         context.set_module(
-            context.read_context().target,
+            require_target(context.read_context()),
             "QL.pulses.pi",
             PulseSpec(
                 ch=0,
@@ -195,7 +196,7 @@ def test_parameter_read_uses_current_sources_and_temporary_aliases(
     tab_id = h_tab_new(application.remote, {"adapter_name": "targeted"})["tab_id"]
     assert isinstance(tab_id, str)
     context = application.controller.context_control
-    context.set_parameter(context.read_context().target, "Q2.rate", 25.0)
+    context.set_parameter(require_target(context.read_context()), "Q2.rate", 25.0)
     original_rows = context.get_alias_rows()
     h_tab_reset_cfg(application.remote, {"tab_id": tab_id, "aliases": {"driver": "Q2"}})
     sources = h_tab_parameter_read(
@@ -219,10 +220,10 @@ def test_parameter_read_resolves_library_slots_in_current_temporary_source(
     tab_id = h_tab_new(application.remote, {"adapter_name": "targeted"})["tab_id"]
     context = application.controller.context_control
     context.set_parameter(
-        context.read_context().target, "QL.module.pi", "QL.pulses.missing"
+        require_target(context.read_context()), "QL.module.pi", "QL.pulses.missing"
     )
     context.set_module(
-        context.read_context().target,
+        require_target(context.read_context()),
         "QL.pulses.later",
         PulseSpec(
             ch=0,
@@ -288,7 +289,7 @@ def test_target_cfg_uses_fixed_source_until_reset(
     owner.write({("rate",): {"expr": "$driver.rate"}})
     before = h_tab_get_cfg(application.remote, {"tab_id": tab_id})
     context = application.controller.context_control
-    context.set_parameter(context.read_context().target, "Q1.rate", 19.0)
+    context.set_parameter(require_target(context.read_context()), "Q1.rate", 19.0)
     assert h_tab_get_cfg(application.remote, {"tab_id": tab_id}) == before
     reset = h_tab_reset_cfg(
         application.remote, {"tab_id": tab_id, "aliases": {"driver": "Q2"}}

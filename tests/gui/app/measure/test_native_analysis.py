@@ -264,7 +264,7 @@ def host(tmp_path: Path, qapp, request) -> Iterator[Host]:
         finished_at=None,
         completion="complete",
         snapshot=RunSnapshot(
-            entry_id=storage.entry_id,
+            entry_name=storage.entry_name,
             point=storage.point,
             roles=storage.roles,
         ),

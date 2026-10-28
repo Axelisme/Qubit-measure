@@ -275,7 +275,7 @@ class WorkflowTab[C]:
         if isinstance(knobs, FormErrors):
             return knobs
         snapshot = RunSnapshot(
-            entry_id=storage.entry_id, point=storage.point, roles=storage.roles
+            entry_name=storage.entry_name, point=storage.point, roles=storage.roles
         )
         prepared = self._attachment.prepare(
             plan[0], knobs[0], knobs[1].input, env, snapshot
@@ -304,7 +304,7 @@ class WorkflowTab[C]:
         identity = RunIdentity(
             run_id,
             capture_software_provenance(context=context),
-            str(storage.entry_id),
+            storage.entry_name,
             storage.point,
         )
         ports = EnginePorts(

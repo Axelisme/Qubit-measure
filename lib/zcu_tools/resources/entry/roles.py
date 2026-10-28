@@ -3,7 +3,6 @@
 from collections.abc import Callable, Mapping, Sequence
 from fnmatch import fnmatchcase
 from types import MappingProxyType
-from uuid import UUID
 
 from pydantic import BaseModel
 
@@ -81,8 +80,8 @@ def capture_role_components(roles: RoleView, origin: PointOrigin) -> Mapping[str
     """Copy fixed names for a RoleView from this complete point origin.
 
     Entry-internal helper, not a package export. roles comes from PointView.resolve;
-    origin is the destination point's constructor identity. Compare UUID,
-    resolved source and both owning roots, not handle/callback identity.
+    origin is the destination point's constructor location. Compare resolved
+    source and both owning roots, not UUID or handle/callback identity.
     Missing or mismatched origin raises ValueError even for an empty mapping.
     No YAML contents or role declarations are read or re-resolved.
     """
@@ -91,8 +90,7 @@ def capture_role_components(roles: RoleView, origin: PointOrigin) -> Mapping[str
     if not isinstance(bound, PointOrigin):
         raise ValueError("RoleView has no bound point origin")
     if (
-        UUID(bound.entry_id) != UUID(origin.entry_id)
-        or bound.result_root != origin.result_root
+        bound.result_root != origin.result_root
         or bound.database_root != origin.database_root
         or bound.source.resolve() != origin.source.resolve()
     ):

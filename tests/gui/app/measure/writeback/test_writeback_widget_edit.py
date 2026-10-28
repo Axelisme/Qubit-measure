@@ -46,6 +46,7 @@ from tests.gui._dialog_fakes import RecordingDialogPresenter
 from tests.gui._progress_fakes import DirectProgressTransport
 from tests.gui._qt_waits import qt_until
 from tests.gui._user_input import ComponentDriver
+from tests.gui.app.measure._record_support import require_target
 from tests.gui.app.measure._synthetic import (
     MODULE_PROPOSAL_TARGET,
     MODULE_PROPOSAL_WAVEFORM,
@@ -263,11 +264,13 @@ def module_widget(tmp_path: Path, qapp: QApplication, request: pytest.FixtureReq
         context = ctrl.context_control
         context.add_component("Q1", "fake/drive/a", {})
         context.set_waveform(
-            context.read_context().target,
+            require_target(context.read_context()),
             MODULE_PROPOSAL_WAVEFORM,
             ConstWaveformCfg(length=0.1),
         )
-        context.set_parameter(context.read_context().target, "general.ext.gain", 0.4)
+        context.set_parameter(
+            require_target(context.read_context()), "general.ext.gain", 0.4
+        )
         board = white_noise()
         ctrl.session_services.soc_connection.install_soc(board.soc, board.soccfg)
         tab_id = ctrl.tab_control.new_tab("synthetic/module")
@@ -403,7 +406,9 @@ def test_module_dialog_edits_shared_form_and_applies_as_new_name(module_widget):
     assert proposed["waveform"] == MODULE_PROPOSAL_WAVEFORM
     # Preview and Apply use the opening capture, not subsequently changed values.
     context = ctrl.context_control
-    context.set_parameter(context.read_context().target, "general.ext.gain", 0.8)
+    context.set_parameter(
+        require_target(context.read_context()), "general.ext.gain", 0.8
+    )
     widget.apply_requested.connect(
         lambda: ctrl.writeback_control.apply_writeback_for_pane(tab_id, pane)
     )
@@ -447,7 +452,7 @@ def test_module_option_command_uses_captured_source_and_current_admission(
         before = form.state.input.data
         context = ctrl.context_control
         context.set_waveform(
-            context.read_context().target,
+            require_target(context.read_context()),
             MODULE_PROPOSAL_WAVEFORM,
             ConstWaveformCfg(length=0.75),
         )

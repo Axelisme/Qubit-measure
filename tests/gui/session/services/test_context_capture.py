@@ -20,6 +20,7 @@ from zcu_tools.resources.entry import ResultEntry, RoleResolutionError, source_p
 from zcu_tools.resources.entry.aliases import EntryAliases
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
+from tests.gui.app.measure._record_support import require_target
 from tests.resources.entry.fakes import register_fakes, registry_state, restore_registry
 
 
@@ -82,7 +83,7 @@ def test_capture_keeps_point_library_storage_and_rows_after_later_changes(
     session: CaptureSession,
 ) -> None:
     control = session.control
-    target = control.read_context().target
+    target = require_target(control.read_context())
     control.set_waveform(target, "Q1.waveforms.base", ConstWaveformCfg(length=0.05))
     captured = control.read_context()
     assert captured.aliases == control.get_alias_rows()
@@ -181,11 +182,11 @@ def test_read_target_preserves_historical_names_in_saved_reads(
     control.set_alias_rows(
         (AliasRow("driver", "Q2"), AliasRow("sense", "$driver.sense"))
     )
-    fixed = control.read_target(captured.target, roles=history)
+    fixed = control.read_target(require_target(captured), roles=history)
     assert fixed.value("$driver.rate") == 4300.0
     assert fixed.value("$sense.rate") == 6123.0
     control.use_point(PointUseRequest("second"))
-    assert control.read_target(captured.target, roles=history).roles == history
+    assert control.read_target(require_target(captured), roles=history).roles == history
 
 
 def test_empty_read_context_keeps_no_context_failure(session: CaptureSession) -> None:
@@ -209,7 +210,7 @@ def test_manual_history_keeps_fixed_names_storage_and_unbound_errors(
     names: dict[str, str],
 ) -> None:
     ledger = session.entry.ledger.events()
-    target = session.control.read_context().target
+    target = require_target(session.control.read_context())
     binding = RoleBinding(None, {}, names, explicit)
     fixed = session.control.read_target(target, roles=binding)
     session.control.set_alias_rows((AliasRow("driver", "Q1"),))

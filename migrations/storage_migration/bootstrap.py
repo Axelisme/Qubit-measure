@@ -38,7 +38,13 @@ from .paths import contained_path, validate_segment
 from .points import recover_points, validate_points
 from .preservation import preflight_preservation
 from .recovery import validate_owned_state
-from .state import MigrationSession, read_manifest, report_json, write_json
+from .state import (
+    MigrationSession,
+    read_manifest,
+    report_json,
+    validate_migration_fields,
+    write_json,
+)
 
 _JSON = TypeAdapter(JsonObject)
 
@@ -149,7 +155,7 @@ def _locations(
     return source, destination
 
 
-def _identity(request: MigrationRequest, entry_id: UUID) -> MigrationIdentity:
+def _identity(request: MigrationRequest, migration_id: UUID) -> MigrationIdentity:
     return MigrationIdentity(
         result_root=request.result_root.resolve(),
         database_root=request.database_root.resolve(),
@@ -157,7 +163,7 @@ def _identity(request: MigrationRequest, entry_id: UUID) -> MigrationIdentity:
         source_chip=request.source_chip,
         source_qubit=request.source_qubit,
         name=request.name,
-        entry_id=entry_id,
+        migration_id=migration_id,
     )
 
 
@@ -184,7 +190,7 @@ def _resume_session(
     verification = MigrationSession(path, manifest, dry_run=True)
     validate_backup_sources(verification)
     manifest = verification.manifest
-    expected = _identity(request, manifest.identity.entry_id)
+    expected = _identity(request, manifest.identity.migration_id)
     if (
         manifest.identity != expected
         or manifest.mapping_version != mapping.mapping_version
@@ -195,7 +201,7 @@ def _resume_session(
     if (
         manifest.report.source != source
         or manifest.report.destination != destination
-        or manifest.report.entry_id != expected.entry_id
+        or manifest.report.migration_id != expected.migration_id
         or manifest.report.backup_path != backup.path
     ):
         raise MigrationInputError(f"{path}: report identity disagrees")
@@ -217,8 +223,6 @@ def _resume_session(
         result_root=expected.results_root,
         database_root=expected.database_root,
     )
-    if UUID(entry.entry_id) != manifest.identity.entry_id:
-        raise MigrationInputError(f"{path}: entry_id changed")
     ignored = {
         point.temporary_label for point in manifest.points if not point.published
     }
@@ -283,17 +287,17 @@ def _new_session(
             )
         if not report_path.parent.is_dir():
             raise MigrationInputError(f"{report_path}: report parent must exist")
-    entry_id = uuid4()
+    migration_id = uuid4()
     report = MigrationReport(
         source=source,
         destination=destination,
-        entry_id=entry_id,
+        migration_id=migration_id,
         part=request.part,
         backup_path=backup_path,
         declarations=_declarations(request),
     )
     manifest = MigrationManifest(
-        identity=_identity(request, entry_id),
+        identity=_identity(request, migration_id),
         mapping_version=mapping.mapping_version,
         report_path=report_path,
         report_date=report_date,
@@ -346,6 +350,7 @@ def _publish_completion_report(session: MigrationSession) -> None:
     owned = manifest.completion_report_published
     if not owned and path.exists():
         existing = _JSON.validate_json(path.read_text(encoding="utf-8"), strict=True)
+        validate_migration_fields(existing, path=path)
         if not json_values_equal(existing, report_json(manifest.report)):
             raise MigrationInputError(f"{path}: unowned completion report collision")
         owned = True
@@ -360,6 +365,7 @@ def _recover_first_report(manifest: MigrationManifest) -> MigrationManifest:
         existing = _JSON.validate_json(
             manifest.report_path.read_text(encoding="utf-8"), strict=True
         )
+        validate_migration_fields(existing, path=manifest.report_path)
         if not json_values_equal(existing, report_json(manifest.report)):
             raise MigrationInputError(
                 f"{manifest.report_path}: unowned report collision"

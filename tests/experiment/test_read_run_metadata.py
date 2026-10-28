@@ -104,7 +104,7 @@ def test_read_run_metadata_returns_typed_evidence_despite_unreadable_vars(
         datafile.load(metadata_path)
     actual = native_persistence.read_run_metadata(metadata_path)
     assert actual == native_metadata()
-    assert actual.snapshot.entry_id.hex == "12345678123456781234567812345678"
+    assert actual.snapshot.entry_name == "entry"
     assert actual.provenance.hostname == "synthetic-host"
 
 

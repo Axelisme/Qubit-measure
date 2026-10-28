@@ -47,6 +47,7 @@ from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 from zcu_tools.resources.entry import ComponentSchema, component_registry
 
 from tests.gui._qt_waits import qt_until
+from tests.gui.app.measure._record_support import require_target
 from tests.gui.app.measure._synthetic import ALIAS_PRESET, SampleAdapter, SampleCfg
 from tests.gui.app.measure.remote._helpers import Fixture
 
@@ -156,7 +157,7 @@ def test_definition_failure_does_not_publish_a_partial_tab(
 def test_source_events_leave_every_tab_capture_unchanged(application: Fixture) -> None:
     parameters = application.ctrl.context_control.read_context()
     application.ctrl.context_control.set_parameter(
-        parameters.target, "general.ext.x", 1.0
+        require_target(parameters), "general.ext.x", 1.0
     )
     first = application.ctrl.tab_control.new_tab("cfg-contract")
     second = application.ctrl.tab_control.new_tab("cfg-contract")
@@ -166,7 +167,7 @@ def test_source_events_leave_every_tab_capture_unchanged(application: Fixture) -
         editor.write({("gain",): {"expr": "general.ext.x"}})
     unsubscribe = editors[0].subscribe(lambda: publications.append("changed"))
     application.ctrl.context_control.set_parameter(
-        parameters.target, "general.ext.x", 9.0
+        require_target(parameters), "general.ext.x", 9.0
     )
     unsubscribe()
     assert publications == []
@@ -391,7 +392,7 @@ def test_existing_tab_and_run_keep_point_until_reset(
     services.context.new_point(PointCreateRequest("second", "", CommandOrigin("gui")))
     services.context.set_alias_rows((AliasRow("qubit", "Q1"), AliasRow("custom", "Q2")))
     parameters = services.context.read_context()
-    services.context.set_parameter(parameters.target, "Q1.gain", 30.0)
+    services.context.set_parameter(require_target(parameters), "Q1.gain", 30.0)
     before_reset = services.guard.capture_run_inputs(tab_id)
     assert before_reset.accepted_cfg.values["gain"] == 10.0
     assert before_reset.snapshot == first.snapshot

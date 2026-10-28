@@ -8,10 +8,14 @@ from dataclasses import dataclass
 from fnmatch import fnmatchcase
 from typing import TYPE_CHECKING
 
+from pydantic import TypeAdapter, ValidationError
+
+from zcu_tools.format_version import YamlValue
 from zcu_tools.gui.expected_error import InvalidInputError
 from zcu_tools.resources.document_store import DocumentRevision
 from zcu_tools.resources.entry import RoleResolutionError, document_value
 from zcu_tools.resources.entry.aliases import AliasReadResult, AliasValue
+from zcu_tools.resources.entry.schema import ParameterContent
 
 if TYPE_CHECKING:
     from zcu_tools.resources.entry import RoleSpec
@@ -93,11 +97,57 @@ class AliasTable:
     def __init__(self, rows: Sequence[AliasRow] = ()) -> None:
         """Install validated rows in order; duplicate or invalid rows raise."""
         self._rows: tuple[AliasRow, ...] = ()
+        self._stored: YamlValue = None
         self.replace(rows)
+
+    @classmethod
+    def from_content(cls, content: YamlValue) -> AliasTable:
+        """Retain stored rows without validating unrelated rows until requested."""
+        table = cls()
+        table._stored = deepcopy(content)
+        return table
+
+    def content(self) -> YamlValue:
+        """Copy captured authored content without validating unused stored rows."""
+        if self._stored is not None:
+            return deepcopy(self._stored)
+        return TypeAdapter(YamlValue).validate_python(
+            {row.alias: row.value for row in self._rows}
+        )
+
+    def _stored_table(self, alias: str | None) -> AliasTable:
+        raw = self._stored
+        if not isinstance(raw, dict):
+            raise ValueError("stored aliases must be a mapping")
+        pending = list(raw) if alias is None else [alias]
+        selected: dict[str, AliasRow] = {}
+        keys = list(raw)
+        while pending:
+            name = pending.pop()
+            if name in selected:
+                continue
+            if name not in raw:
+                raise RoleResolutionError(name, None, None, "Unknown alias")
+            try:
+                value = TypeAdapter(AliasValue).validate_python(raw[name])
+            except ValidationError as exc:
+                raise ValueError(f"alias {name!r}: {exc}") from exc
+            values = [value] if isinstance(value, str) else value
+            preceding = set(keys[: keys.index(name)])
+            for item in values:
+                _validate_binding(
+                    name, item, preceding, allow_empty=isinstance(value, str)
+                )
+                if item.startswith("$"):
+                    pending.append(item[1:].split(".", 1)[0])
+            selected[name] = AliasRow(name, value)
+        return AliasTable(tuple(selected[key] for key in keys if key in selected))
 
     @property
     def rows(self) -> tuple[AliasRow, ...]:
         """Return detached authored rows, including ordered lists and $ references."""
+        if self._stored is not None:
+            return self._stored_table(None).rows
         return deepcopy(self._rows)
 
     def replace(self, rows: Sequence[AliasRow]) -> None:
@@ -152,7 +202,7 @@ class AliasTable:
     def resolve(
         self,
         alias: str,
-        point: SetupDocument | PointDocument,
+        point: SetupDocument | PointDocument | ParameterContent,
         *,
         kind: str | None = None,
     ) -> str:
@@ -180,7 +230,7 @@ class AliasTable:
     def resolve_value(
         self,
         alias: str,
-        point: SetupDocument | PointDocument,
+        point: SetupDocument | PointDocument | ParameterContent,
         *,
         kind: str | None = None,
     ) -> AliasValue:
@@ -194,6 +244,8 @@ class AliasTable:
         Lists never flatten and cannot serve as scalar link roots. No catalog is required
         without kind. Returned lists are detached from authored rows.
         """
+        if self._stored is not None:
+            return self._stored_table(alias).resolve_value(alias, point, kind=kind)
         name = self._resolve_name(alias, point, kind=kind)
         if name is None:
             root = self._link_chain(alias)[-1].alias
@@ -209,7 +261,9 @@ class AliasTable:
         return name
 
     def names(
-        self, point: SetupDocument | PointDocument, declarations: Mapping[str, RoleSpec]
+        self,
+        point: SetupDocument | PointDocument | ParameterContent,
+        declarations: Mapping[str, RoleSpec],
     ) -> dict[str, AliasValue]:
         """Capture all bound rows as concrete names for Run/storage records.
 
@@ -220,6 +274,8 @@ class AliasTable:
         Returned names are independent data; no declaration.via inference or
         concrete-name fallback is performed.
         """
+        if self._stored is not None:
+            return self._stored_table(None).names(point, declarations)
         names: dict[str, AliasValue] = {}
         for row in self._rows:
             spec = declarations.get(row.alias)
@@ -237,7 +293,7 @@ class AliasTable:
     def _resolve_name(
         self,
         alias: str,
-        point: SetupDocument | PointDocument,
+        point: SetupDocument | PointDocument | ParameterContent,
         *,
         kind: str | None = None,
     ) -> AliasValue | None:
@@ -280,7 +336,7 @@ class AliasTable:
     def _scalar_name(
         self,
         alias: str,
-        point: SetupDocument | PointDocument,
+        point: SetupDocument | PointDocument | ParameterContent,
         *,
         value: str,
         kind: str | None,
@@ -320,9 +376,15 @@ class AliasTable:
                     f"name a component or device (link in ${referring_alias})",
                 )
             name = target
-        component = point.components.get(name)
+        component_kind = None
+        if kind is not None:
+            if isinstance(point, ParameterContent):
+                component_kind = point.component_kind(name)
+            else:
+                component = point.components.get(name)
+                component_kind = None if component is None else component.kind
         if kind is not None and (
-            component is None or not fnmatchcase(component.kind, kind)
+            component_kind is None or not fnmatchcase(component_kind, kind)
         ):
             raise RoleResolutionError(
                 alias,

@@ -71,9 +71,9 @@ Load 讀 caller 指定的 exact path，缺檔與格式錯誤直接拋出。Save 
 - `ResultEntry.records(component)` 綁定元件 JSONL 樣本歷史。v2 座標協定保持 opt-in。
 - `ArbWaveformDatabase` 是 qubit-scoped 的 asset repository，與 context 分開。
 
-`DocumentStore` 擁有單檔交易，不換算數值。Caller 提供文件 model 與整份文件的 validation。參數容器的檔案與視圖使用相同工作單位；值與 metadata 都不經 SI 投影。不同 store 不共用快照；任一欄位衝突會拒絕整筆交易。通知失敗獨立回報，不撤銷已完成的提交。它不提供跨檔掉電保證，也不自動監看檔案。
+`DocumentStore` 擁有單檔交易，不換算數值。Caller 提供文件 model 與整份文件的 validation。Entry 另以 `read_validate` 選擇結構讀取，`content()` 保留未消費的欄位，`snapshot()`、edit 與 strict refresh 仍驗完整 model。其他 consumer 不啟用這個選項，維持既有完整驗證。參數容器的檔案與視圖使用相同工作單位；值與 metadata 都不經 SI 投影。不同 store 不共用快照；任一欄位衝突會拒絕整筆交易。通知失敗獨立回報，不撤銷已完成的提交。它不提供跨檔掉電保證，也不自動監看檔案。
 
-DocumentStore 在自己的單檔 edit 內合併、驗證、replace 並發布快照，不開放多檔 prepare／restore／publish 接縫。非空 commit 同時寫回 model 的讀檔轉換，以 normalized tree 比較衝突，再把差異套回 raw YAML，保留未改節點。一般讀取與空 edit 不 normalize 寫檔。只有明確啟用政策的 ModuleLibrary 遇壞條目時，會在同鎖內先完整備份再清理主檔，見 [context owner](context/README.md) 與 ADR-0063。Entry 的 setup 與 point 不共用條目鎖或交易。
+DocumentStore 在自己的單檔 edit 內合併、驗證、replace 並發布快照，不開放多檔 prepare／restore／publish 接縫。非空 commit 同時寫回 model 的讀檔轉換，以 normalized tree 比較衝突，再把差異套回 raw YAML，保留未改節點。一般讀取與空 edit 不 normalize 寫檔。ModuleLibrary 讀取略過無效 Spec 並公開原因，不改檔、不備份，見 [context owner](context/README.md) 與 ADR-0063。Entry 的 setup 與 point 不共用條目鎖或交易。
 
 Caller 從各 owner 的 module 或子 package import。
 

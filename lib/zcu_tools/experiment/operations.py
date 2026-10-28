@@ -19,13 +19,13 @@ if TYPE_CHECKING:
 class RunIdentity:
     """Stable run_id, native software provenance and optional entry identity.
 
-    entry_id/entry_label are host-supplied workpoint evidence or None. Unknown
+    entry_name/entry_label are host-supplied workpoint evidence or None. Unknown
     provenance remains None in SoftwareProvenance; it is not inferred here.
     """
 
     run_id: str
     provenance: SoftwareProvenance
-    entry_id: str | None = None
+    entry_name: str | None = None
     entry_label: str | None = None
 
     def __post_init__(self) -> None:

@@ -27,6 +27,7 @@ from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
 from tests.gui._dialog_fakes import RecordingDialogPresenter
 from tests.gui._user_input import ComponentDriver
+from tests.gui.app.measure._record_support import require_target
 from tests.resources.entry.fakes import register_fakes, registry_state, restore_registry
 
 
@@ -107,7 +108,7 @@ def conflict_ui(
     control.add_component("Q1", "fake/drive/a", {"rate": 1200.0}, setup=True)
     entry.new_point("second")
     service.use_point(PointUseRequest("second"))
-    control.set_parameter(control.read_context().target, "Q1.rate", 5300.0)
+    control.set_parameter(require_target(control.read_context()), "Q1.rate", 5300.0)
     service.use_point(PointUseRequest("point"))
     # The missing-file case deliberately leaves aliases revision=None.
     document = request.param

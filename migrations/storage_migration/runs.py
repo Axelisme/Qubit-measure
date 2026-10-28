@@ -4,7 +4,6 @@ from collections.abc import Callable
 from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
-from uuid import UUID
 
 from zcu_tools.datafile import (
     Container,
@@ -63,7 +62,7 @@ def _check_evidence(evidence: LegacyRunEvidence, entry: ResultEntry | None) -> N
 def _run_metadata(
     legacy: LegacyRunEvidence,
     assignment: RunAssignment,
-    entry_id: UUID,
+    entry_name: str,
     native_tag: str,
     device_snapshot: dict[str, JsonObject] | None,
 ) -> RunMetadata:
@@ -75,7 +74,7 @@ def _run_metadata(
         finished_at=None if legacy.started_at is None else legacy.finished_at,
         completion="unknown" if legacy.started_at is None else legacy.completion,
         snapshot=RunSnapshot(
-            entry_id=entry_id, point=snapshot.point, roles=snapshot.roles
+            entry_name=entry_name, point=snapshot.point, roles=snapshot.roles
         ),
         provenance=legacy.provenance,
         device_snapshot=device_snapshot,
@@ -218,7 +217,7 @@ def _convert_run(
         for item in report.key_mappings
         if not (
             item.old_file == source
-            and item.old_key in ("snapshot.entry_id", "run_id", "started_at")
+            and item.old_key in ("snapshot.entry_name", "run_id", "started_at")
         )
     )
     session.report(
@@ -228,11 +227,11 @@ def _convert_run(
                 *mappings,
                 KeyMappingItem(
                     old_file=source,
-                    old_key="snapshot.entry_id",
+                    old_key="snapshot.entry_name",
                     new_file=native_path,
-                    new_path="/docs/metadata/snapshot/entry_id",
+                    new_path="/docs/metadata/snapshot/entry_name",
                     action="value",
-                    reason="Assign the new entry UUID; the legacy system did not record this historical UUID.",
+                    reason="Record the destination entry folder name; preserve legacy acquisition names in migration evidence.",
                 ),
                 KeyMappingItem(
                     old_file=source,
@@ -264,7 +263,7 @@ def _convert_run(
     metadata = _run_metadata(
         legacy,
         assignment,
-        session.manifest.identity.entry_id,
+        session.manifest.identity.name,
         mapping.native_tags.get((legacy.experiment, cfg.cfg_type), legacy.experiment),
         device_snapshot,
     ).model_dump(mode="json")
