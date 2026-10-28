@@ -6,9 +6,11 @@
 
 `ResultEntry` 只以 `result/<name>/` 構成條目。Caller 明確傳入 Result root 與 Database 輸出 root，Database 不參與條目的存在判定。條目名稱與 point label 是安全的單一路徑段，不代表物理量。同一 Result root 下以資料夾名稱判斷 entry 歸屬。`setup.yaml` 的 UUID 只用來偵測已開 handle 的 setup 被替換。載入仍驗證 UUID 與 UTC 建立時間。
 
-`create` 只在 Result 建立 setup、entry 層只有標頭的 `module_cfg.yaml`、points 與 records。預設產生新的 UUID 與 UTC 建立時間。傳入 `identity=EntryIdentity(entry_id=<UUID>, created_at=<UTC datetime>)` 可固定這兩個值，非法 UUID 或非 UTC／無時區時間會拒絕。這個參數不授權認領、覆寫或修復既有 entry，Result 目的地已存在仍拒絕。失敗只清理本次建立的條目，不刪 caller 的根目錄或既有資料。`open` 要求完整的新格式 Result 條目，不猜測 legacy 格式。`open`／`use_point` 在 setup／point 首次讀檔時，將 Pydantic ValidationError 轉為 ValueError，訊息含文件完整路徑與原始驗證文字，cause 保留原錯誤。既有 view 的 edit／refresh 仍回報原本的 schema 錯誤。
+`create` 只在 Result 建立 setup、entry 層只有標頭的 `module_cfg.yaml`、points 與 records。預設產生新的 UUID 與 UTC 建立時間。傳入 `identity=EntryIdentity(entry_id=<UUID>, created_at=<UTC datetime>)` 可固定這兩個值，非法 UUID 或非 UTC／無時區時間會拒絕。這個參數不授權認領、覆寫或修復既有 entry，Result 目的地已存在仍拒絕。失敗只清理本次建立的條目，不刪 caller 的根目錄或既有資料。`open` 只要求 Result 目錄與合法 `setup.yaml`，不猜測 legacy 格式。缺 `points/` 時 `list_points` 回空清單，缺 `records/` 時 `read_events_snapshot` 回空 tuple。這些讀取不建目錄。`open`／`use_point` 在 setup／point 首次讀檔時，將 Pydantic ValidationError 轉為 ValueError，訊息含文件完整路徑與原始驗證文字，cause 保留原錯誤。既有 view 的 edit／refresh 仍回報原本的 schema 錯誤。
 
 `ResultEntry.read_identity(name, *, result_root)` 只驗 setup header 與 general 的 UUID／UTC 建立時間，回 `EntryIdentity`。它不解析 component schema、不要求註冊歷史 component kind，也不要求 points 或 records 目錄。讀取不建立檔案或鎖，格式與 I/O 錯誤傳遞。
+
+`list_points` 依 `point.yaml` 列出 label，不要求 library 或 aliases。`point_description` 只讀 `general.description`，不解讀其他欄位。`validate_point_parameters` 獨立沿用嚴格參數 schema 與 view 名稱規則，錯誤交 caller 隔離，不讀 library 或 aliases。
 
 `use_point` 的必需 `point.yaml` 或 `module_cfg.yaml` 缺失時回報公開 `MissingPointError`，它保留 `FileNotFoundError` 繼承關係。Schema、permission、其他 I/O 與額外引用檔缺失不歸類為 point 缺失。
 
@@ -20,9 +22,11 @@
 
 Setup 的 alias 存在 `<entry>/aliases.yaml`。每個 point 的 alias 存在 `<entry>/points/<label>/aliases.yaml`，與 `point.yaml`、`module_cfg.yaml` 並列。各表獨立，既有 point 缺檔時使用空表。
 
-`ResultEntry.load_aliases(*, point=None)` 回傳具名 `EntryAliases`。`point=None` 選 setup；`point="label"` 選該 point。缺 alias 檔回 `EntryAliases(aliases={})`，磁碟保持原狀。`save_aliases(aliases, *, point=None)` 使用相同選擇規則，只替換選定的表。Point label 必須是安全的單一路徑段，否則報 ValueError。Point 的 `point.yaml` 與 `module_cfg.yaml` 必須存在，否則讀寫都報 FileNotFoundError。Alias I/O 只讀寫選定的 alias 表，兩份參數文件保持原狀。
+`ResultEntry.load_aliases(*, point=None)` 回傳具名 `EntryAliases`。`point=None` 選 setup；`point="label"` 選該 point。缺 alias 檔回 `EntryAliases(aliases={})`，磁碟保持原狀。`save_aliases(aliases, *, point=None)` 使用相同選擇規則，只替換選定的表。Point label 必須是安全的單一路徑段，否則報 ValueError。Load 只讀選定的 alias 表，不要求 `point.yaml` 或 `module_cfg.yaml` 存在。Save 仍要求 `point.yaml` 存在，不要求 library 檔；沒有參數文件時拒絕建立孤立 aliases。Alias I/O 不解析或修改參數與 library。
 
 `aliases.yaml` 使用 `format: zcu.aliases`，寫固定 `format_version: "1.0"`，讀接受 major 1 的 forward minor。`AliasValue = str | list[str]` 表達單一名稱、`$` link 或有序名稱／link 清單。Mapping 保留空字串、空清單、原始 `$` link 與元素順序。清單以 YAML list 保存，不編碼成字串。格式、結構、非字串元素與 I/O 錯誤直接回報，不退回 preset。Resources 只保存與驗證資料表示，Session 的 AliasTable 擁有語法、backward-link 與使用時解析。Run snapshot、storage 與 acquired payload 也保留有序名稱清單；普通元件路徑解析只接受單一名稱，拒絕清單。Alias 工作焦點與 parameters 元件事實分開，見 ADR-0063。儲存先寫 sibling temporary，再原子 replace；失敗保舊檔並清 temporary。不提供跨檔交易、multiwriter merge 或掉電恢復。
+
+`read_aliases(*, point=None)` 回傳 `AliasReadResult`，一次讀取固定 alias 表、原始內容錯誤與 observed bytes SHA-256。缺檔回空表與 revision=None。格式、版本、YAML 或結構錯誤保留原 exception 與當次 bytes hash，不代表有效空表；其他 I/O 錯誤傳遞。Session 可先安裝參數與 library，實際 alias consumer 才報該錯。`load_aliases` 與 `load_aliases_with_revision` 仍直接拋出內容錯誤。
 
 `new_point` 從 setup 建立時，有 alias 檔才逐 byte 複製；clone 則只複製來源 point 的 alias 檔，適用同 entry label、跨 entry 路徑與 PointView。來源缺檔就保持缺檔，不讀目的 setup 的 alias。之後改 setup、來源或目的表都不影響其他表。
 

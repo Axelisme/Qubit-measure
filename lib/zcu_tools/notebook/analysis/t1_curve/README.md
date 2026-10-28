@@ -1,6 +1,6 @@
 # `t1_curve` 模塊重點文檔
 
-**Last updated:** 2026-10-28（manifold T1、secondary 診斷與低溫偏差線性化）
+**Last updated:** 2026-10-28（load without directory creation）
 
 **讀者：** lab-author。T1 資料準備、噪聲模型擬合與分析呈現契約。
 
@@ -108,7 +108,7 @@ T2 與 Purcell 的模型不因這項切換改變。
 - `workflow.py` 持有 combined fit、channel curves、結果收集、顯式 writeback 與一鍵編排。Package 與 workflow 直接 re-export 原有 stage 介面。
 - `base.py` 保留共用作圖與溫度工具，並持有跨 stage 的 omega window、正值解析與參數格式化。
 
-- `load_t1_curve_context(result_dir=..., fluxs=..., samples_filename="samples.csv")` 讀取量測與模型。`calibrate_t1_flux(context)` 選取 finite T1/f01 列。`prepare_t1_curve_data(calibration, analysis_flux_range=...)` 按 integer period 對齊 flux、排序、篩選 window，並將 T1/T1err 由 us 轉為 ns。缺 observed f01 的列使用對齊位置的 model f01；缺誤差保留 NaN 交給既有 fit policy 補值。
+- `load_t1_curve_context(result_dir=..., fluxs=..., samples_filename="samples.csv")` 讀取量測與模型，不建立資料或圖片目錄。`image_dir` 只記錄輸出位置，預設為 `result_dir/t1_curve`；`save_t1_curve_figure()` 寫圖時才建立它與父目錄。`calibrate_t1_flux(context)` 選取 finite T1/f01 列。`prepare_t1_curve_data(calibration, analysis_flux_range=...)` 按 integer period 對齊 flux、排序、篩選 window，並將 T1/T1err 由 us 轉為 ns。缺 observed f01 的列使用對齊位置的 model f01；缺誤差保留 NaN 交給既有 fit policy 補值。
 - `plot_t1_flux_calibration(data)` 顯示作者提供的 flux 到 integer-aligned flux 的變化，縱軸使用 observed/model f01。作者獨立呼叫的校正結果由校正工具本身提供，不寫入 stage 診斷。
 - `PurcellEffectParams(kappa_ghz, bare_rf, g, Temp=None)` 包含四個欄位。前三個欄位必填，單位 GHz，值須正且有限。`Temp` 選填，單位 K，有值時須正且有限，固定 Purcell bath 溫度；`None` 與 qubit 共用溫度。`kappa_ghz=0.001` 表示 1 MHz linewidth，不是 decay rate κ。`load_t1_purcell_params(context, kappa_ghz=..., Temp=None)` 從 `params.json` 的 `dispersive` section 解析 `bare_rf/g`，`kappa_ghz` 與選填 `Temp` 由 notebook 明確輸入。
 - `calculate_purcell_t1_limit()` 使用原 frequency-selected a†／a bath，分別對 e→g 與 g→e rates 做 resonator thermal average，回傳 equilibrium `T1=1/(Γeg+Γge)`，單位 ns。逐項 probe、combined fit 與 channel curves 都使用此 total rate。

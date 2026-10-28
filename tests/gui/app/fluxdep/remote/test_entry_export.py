@@ -98,6 +98,7 @@ def test_entry_alias_target_exports_predictor_setup_and_analysis_record(
     }
     assert predictor.flux.offset == pytest.approx(0.15)
     assert predictor.flux.period == {"unnamed_device": 2.0}
+    assert predictor.source is not None
     assert predictor.source.run_id is None
     analysis_entry.setup.refresh()
     components = snapshot(analysis_entry.setup).components

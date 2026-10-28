@@ -65,8 +65,10 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         MethodSpec(
             5.0,
             "Return {entry, points}: entry is null or entry_id/name/result_path/"
-            "database_path; points contains label/description. Refresh persisted "
-            "metadata; read failures propagate. Does not reveal context content.",
+            "database_path; points contains label/description/available/error. "
+            "Refresh parameter availability independently per point without reading "
+            "library/aliases. Point errors stay in their row; discovery failures "
+            "propagate. Does not reveal context content.",
             readonly=True,
         ),
     ),

@@ -128,10 +128,17 @@ def _entry_projection(info: EntryInfo) -> PointEntry:
 
 
 class PointSummary(TypedDict):
-    """Persisted point label and description; absent descriptions are empty."""
+    """Point label/description and independent parameter availability.
+
+    available is True when the parameter-only owner probe passed. error is None
+    on success, otherwise the failed document path and diagnostic. Library and
+    alias usability is not probed. Absent/unreadable descriptions are empty.
+    """
 
     label: str
     description: str
+    available: bool
+    error: str | None
 
 
 class PointListReply(TypedDict):
@@ -156,10 +163,10 @@ class SavedPointReply(TypedDict):
 def h_point_list(
     adapter: RemoteControlAdapter, _params: Mapping[str, object]
 ) -> PointListReply:
-    """Return entry roots and refreshed label/descriptions, not context content.
+    """Return entry roots, refreshed descriptions and parameter availability.
 
     params is empty. No entry returns entry=None and points=[].
-    Owner refresh/schema/I/O errors propagate; never fall back to cached success.
+    Point errors are isolated in each row; discovery failures propagate.
     This metadata-only read establishes no full-context observation.
     """
     info = adapter.context_control.get_entry_info()
@@ -170,7 +177,13 @@ def h_point_list(
     return {
         "entry": entry,
         "points": [
-            {"label": point.label, "description": point.description} for point in points
+            {
+                "label": point.label,
+                "description": point.description,
+                "available": point.available,
+                "error": point.error,
+            }
+            for point in points
         ],
     }
 

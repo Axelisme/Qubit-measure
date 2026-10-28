@@ -150,7 +150,29 @@ def test_native_no_target_preserves_unrecorded_vs_empty_snapshot(tmp_path, snaps
     assert ("device_snapshot" in restored) == (snapshot is not None)
 
 
-@pytest.mark.parametrize("metadata", [None, {"run_id": "invalid"}])
+@pytest.mark.parametrize(
+    "snapshot", [None, {}, {"coil": {"value": 0.002, "value_unit": "A"}}]
+)
+def test_load_projects_only_device_snapshot_without_run_provenance(
+    tmp_path, native_target, snapshot
+):
+    path = native_spectrum_file(tmp_path / "minimal.h5", None)
+    source = load(path)
+    metadata = {} if snapshot is None else {"device_snapshot": snapshot}
+    save(path, replace(source, docs={"metadata": metadata}), replace=True)
+    state, service = native_target
+    name = service.load_spectrum(
+        str(path),
+        "OneTone",
+        selection=NativeSpectrumSelection("signal", "bias", "bias"),
+    )
+    expected = None if snapshot is None else {}
+    if snapshot:
+        expected = {"coil": {"value": 0.002, "unit": "A"}}
+    assert state.get_spectrum(name).device_snapshot == expected
+
+
+@pytest.mark.parametrize("metadata", [None, {"device_snapshot": []}])
 def test_missing_metadata_is_unrecorded_but_invalid_metadata_refuses_publication(
     tmp_path, metadata
 ):

@@ -86,7 +86,7 @@ def test_open_existing_entry_clears_point_and_new_point_uses_current_entry(
     assert application.result("entry.info", {}) == {"entry": first, "files": []}
     assert application.state.session_env.readiness == ContextReadiness.EMPTY
     assert application.result("point.list", {})["points"] == [
-        {"label": "bias", "description": ""}
+        {"label": "bias", "description": "", "available": True, "error": None}
     ]
 
 

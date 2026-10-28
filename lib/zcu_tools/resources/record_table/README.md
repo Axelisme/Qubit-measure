@@ -1,12 +1,12 @@
 # `zcu_tools.resources.record_table` — component records
 
-**Last updated:** 2026-10-28
+**Last updated:** 2026-10-28（external upgrade backups）
 
 **讀者：** framework-dev。JSONL 樣本歷史、CSV 匯出與 v2 座標協定。
 
 ## 條目樣本（`jsonl.py`）
 
-`ResultEntry.records(component)` 回傳 `JsonlRecordTable`，綁定 `result/<name>/records/components/<component>.jsonl`。唯讀 `path` 提供該表 exact bound JSONL 路徑，供 caller 報告目的地或檢查同檔。綁定與查詢路徑只操作記憶體。JSONL 是只追加的樣本歷史；`read()` 回傳每個 `run_id` 最後一整行的 DataFrame，不合併舊行欄位。不存在的檔案回空表。讀取只檢查 JSON object 與選取最新列所需的非空字串 `run_id`；其他欄位、NaN 與時間等 metadata 原樣保留，不套寫入 schema。JSON 語法損壞、缺 run_id 或未完成的尾行回報檔名與行號，不跳過。`latest(run_id)` 共用同一讀取路徑，只回傳指定 run 的最新整行。`read(flatten=True)` 將巢狀物件鍵串成點號欄名，例如 `devices.bias.value`；list 保留為 cell 值。同一列的不同來源路徑若產生相同點號欄名，會拋出 ValueError，指出來源檔、從零起算的輸出列、run_id 與衝突欄名。沒有衝突的點號鍵照常保留。預設 `read()` 仍保留 nested cells 與原始點號鍵，不要求攤平。兩者都不改寫來源。
+`ResultEntry.records(component)` 回傳 `JsonlRecordTable`，綁定 `result/<name>/records/components/<component>.jsonl`。唯讀 `path` 提供該表 exact bound JSONL 路徑，供 caller 報告目的地或檢查同檔。綁定與查詢路徑只操作記憶體。JSONL 是只追加的樣本歷史；`read()` 回傳每個 `run_id` 最後一整行的 DataFrame，不合併舊行欄位。不存在的檔案回空表。讀取只檢查 JSON object 與選取最新列所需的非空字串 `run_id`；其他欄位、NaN 與時間等 metadata 原樣保留，不套寫入 schema。缺 run_id 的行以 warning 回報檔名與行號並略過，不擋其他 run。JSON 語法損壞、已提供但非法的 run_id 或未完成的尾行仍拋出錯誤，不跳過。`latest(run_id)` 共用同一讀取路徑，只回傳指定 run 的最新整行。`read(flatten=True)` 將巢狀物件鍵串成點號欄名，例如 `devices.bias.value`；list 保留為 cell 值。同一列的不同來源路徑若產生相同點號欄名，會拋出 ValueError，指出來源檔、從零起算的輸出列、run_id 與衝突欄名。沒有衝突的點號鍵照常保留。預設 `read()` 仍保留 nested cells 與原始點號鍵，不要求攤平。兩者都不改寫來源。
 
 `append` 要求 `run_id`，成功後回傳當筆已序列化的隔離 JSON row，含 component、run_id、point、at、source 與 producer 欄位，不再讀回檔案。`component` 取自 table binding，producer 同名欄位不能覆寫它。直接使用 `JsonlRecordTable(path, component=...)` 時必須明示非空元件名，不從檔名推論；省略 component 只供讀取與匯出，append 會在寫檔前報 ValueError。舊列缺 component 仍可讀，不補值或改寫。`dev_value`、`dev_unit` 與其他欄位皆由 producer 選填，保留原值與 caller 單位，不檢查 dev 存在或換算單位。`point` 可為空，`at` 預設由儲存層填 UTC，也可明示 accepted 事件的 UTC 時間。`source` 預設 manual，也可由 caller 提供 accepted 事件 ID 或 `workflow:<run_id>`。Producer 欄位可以保存巢狀 JSON。儲存層不計算 flux 座標，不讀 ledger 或元件 schema；下游查詢與 v2 驗證自行處理缺值。
 
@@ -16,7 +16,7 @@
 
 `upgrade_record_files(paths, device_name=..., apply=False)` 是舊 `dev_value/dev_unit` pair 的明確升級接縫。名稱由 operator 宣告，重用 `cfg_model.validate_device_name`，不從 setup 或路徑推測。它按實體行回傳具名 `RecordRowUpgrade` 分類與 `RecordUpgradeResult` 檔案結果，不經 `read()` 的最新列去重，也不經 append。只檢查舊 pair 與目標 named pair，保留其他 device entry、metadata、未知 payload、列順序與重複 run_id。目標 metadata-only entry 可合入 pair；任一舊欄位與目標 pair 欄位共存則拒絕，不覆寫。
 
-Dry-run 不寫檔。Apply 在 record owner 內取得 [per-user runtime lock](../README.md#檔案鎖)、重讀、備份原 bytes，再原子替換。任一 partial/corrupt 列拒絕整檔並列行號，其他檔繼續。合法新列原 bytes 保留；已升級檔重跑跳過。一般 append 不參與這把 upgrade lock，operator 必須先停止 concurrent writers。它不合成 frame/component，不增加 record 版本，也不更改 component schema_version。完整分類、CLI、備份還原與改名規則見 [操作指南](../../../../docs/record-device-upgrades.md)。
+Dry-run 不寫檔。Apply 在 record owner 內取得 [per-user runtime lock](../README.md#檔案鎖)、重讀、備份原 bytes 到資料專案旁的 `<專案根>-backup/` 鏡像路徑，再原子替換。`backup_root` 可覆寫，由 resources 的共用備份定位檢查安全位置。任一 partial/corrupt 列拒絕整檔並列行號，其他檔繼續。合法新列原 bytes 保留；已升級檔重跑跳過。一般 append 不參與這把 upgrade lock，operator 必須先停止 concurrent writers。它不合成 frame/component，不增加 record 版本，也不更改 component schema_version。完整分類、CLI、備份還原與改名規則見 [操作指南](../../../../docs/record-device-upgrades.md)。
 
 ## 裝置投影（`projection.py`）
 

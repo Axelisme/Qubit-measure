@@ -2,13 +2,14 @@
 
 import os
 from collections.abc import Iterator
+from dataclasses import replace
 from pathlib import Path
 from uuid import uuid4
 
 import h5py as h5
 import pytest
 from qtpy.QtWidgets import QApplication, QPushButton, QTableWidget
-from zcu_tools.datafile import save
+from zcu_tools.datafile import load, save
 from zcu_tools.gui.app.measure.services.load import LoadDataError, LoadService
 from zcu_tools.gui.app.measure.ui.run_load_dialog import RunLoadDialog
 from zcu_tools.gui.expected_error import FailedPreconditionError
@@ -87,6 +88,26 @@ def test_query_lists_native_files_without_ledger_and_keeps_unknown_history(
     assert session.entry.ledger.events() == ()
     assert session.control.list_saved_runs(point="p") == (row,)
     assert session.control.list_saved_runs(point="other") == ()
+
+
+@pytest.mark.parametrize("snapshot", [{"point": "p"}, None])
+def test_listing_needs_no_provenance_or_complete_snapshot(session, snapshot):
+    path = native_file(session)
+    container = load(path)
+    metadata = dict(container.docs["metadata"])
+    metadata.pop("provenance")
+    metadata.pop("snapshot")
+    if snapshot is not None:
+        metadata["snapshot"] = snapshot
+    save(path, replace(container, docs={"metadata": metadata}), replace=True)
+
+    (row,) = session.control.list_saved_runs()
+
+    assert row.metadata_error is None
+    assert row.run_id == session.metadata.run_id
+    assert row.experiment == session.metadata.experiment
+    assert row.point == ("p" if snapshot is not None else None)
+    assert row.started_at == session.metadata.started_at
 
 
 def test_query_uses_native_history_for_rows_despite_unrelated_ledger_events(

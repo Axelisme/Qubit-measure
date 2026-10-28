@@ -1,6 +1,6 @@
 # `zcu_tools/mcp/measure/`
 
-**Last updated:** 2026-10-25
+**Last updated:** 2026-10-28
 
 **讀者：** agent。量測 MCP 的啟動、表單、operation 與寫回契約。
 
@@ -44,6 +44,8 @@ Agent 直接讀寫這些檔案，固定工具不提供參數／modules／aliases
 1. 先用 `status()` 或 `rpc_call(method="entry.info")` 取得頂層 `files`。
    每筆為 `{document, path, revision}`，順序是 parameters、library、aliases。
    Path 是絕對路徑，revision 是已安裝 bytes 的 SHA-256。
+   Aliases 的 revision 是選取時觀察到的 bytes hash，不保證內容有效。
+   壞 aliases 不擋參數與 library，使用 alias 時才報當次原錯。
    Aliases 尚無檔案時 revision 為 null；未選 point 時 files 為 []。
 2. 依 path 直接讀檔。外部候選尚未通過驗證時，磁碟內容可能與已安裝版本不同。
    Status 不讀檔，也不把未驗證候選當成現值。

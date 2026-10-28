@@ -24,8 +24,8 @@ def plan() -> UpgradePlan:
 
 @pytest.fixture
 def entry(tmp_path: Path) -> Path:
-    root = tmp_path / "entry with spaces"
-    root.mkdir()
+    root = tmp_path / "project" / "result" / "entry with spaces"
+    root.mkdir(parents=True)
     (root / "setup.yaml").write_text("schema_version: 1\n", encoding="utf-8")
     predictors = root / "predictors"
     predictors.mkdir()
@@ -90,14 +90,19 @@ def test_entry_apply_backs_up_original_and_skips_current_predictor(
 ) -> None:
     path = entry / "predictors" / "qubit.json"
     original = path.read_bytes()
-    assert main([str(entry), "--apply"], plan=plan) == 0
+    backup_root = entry.parents[1] / "archive"
+    assert (
+        main([str(entry), "--apply", "--backup-root", str(backup_root)], plan=plan) == 0
+    )
     assert f"{path}: applied" in capsys.readouterr().out
     assert load_predictor_file(path).flux.offset == pytest.approx(1.0)
-    backups = list(path.parent.glob("*.bak"))
+    backup_dir = backup_root / "result" / entry.name / "predictors"
+    backups = list(backup_dir.glob("*.bak"))
     assert len(backups) == 1
     assert backups[0].read_bytes() == original
     current = path.read_bytes()
     assert main([str(entry), "--apply"], plan=plan) == 0
     assert f"{path}: skipped" in capsys.readouterr().out
     assert path.read_bytes() == current
-    assert list(path.parent.glob("*.bak")) == backups
+    assert list(backup_dir.glob("*.bak")) == backups
+    assert list(path.parent.iterdir()) == [path]

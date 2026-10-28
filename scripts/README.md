@@ -1,6 +1,6 @@
 # Scripts
 
-**Last updated:** 2026-10-27
+**Last updated:** 2026-10-28
 
 **讀者：** operator。工作站 GUI、板端 server 與資料工具的啟動方式。
 
@@ -41,6 +41,8 @@ Entry 已存在時直接重開並選 `initial`，不覆寫。它使用一個 wor
 腳本失敗保留已完成部分，GUI 顯示錯誤後仍可使用，不改跑其他腳本。
 
 ## 資料作業
+
+升級工具的備份放在資料專案旁的 `<專案根>-backup/`，不寫進資料項目。來源最近的 `result`／`Database` 決定專案根；`--backup-root` 可覆寫，standalone 來源必須指定它。四類工具共用的鏡像與安全拒絕規則見 [備份位置](../docs/parameter-upgrades.md#備份位置)。
 
 - `upgrade_spectrums.py`：逐檔升級 processed spectrum HDF5 為 v2。預設列出 offset／period／device／unit 的變更，不寫檔；`--apply` 先備份原 bytes 再替換。見 [格式歷程](../docs/storage-format-history/fluxdep-spectrums-v2.md)。
 
