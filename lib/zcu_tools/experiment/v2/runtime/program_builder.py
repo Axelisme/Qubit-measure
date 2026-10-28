@@ -8,7 +8,18 @@ from copy import deepcopy
 from dataclasses import dataclass
 from logging import getLogger
 from math import isfinite
-from typing import TYPE_CHECKING, Any, Generic, Literal, Protocol, Self, TypeAlias
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Generic,
+    Literal,
+    NotRequired,
+    Protocol,
+    Self,
+    TypeAlias,
+    TypedDict,
+    Unpack,
+)
 
 import numpy as np
 from numpy.typing import NDArray
@@ -40,6 +51,7 @@ if TYPE_CHECKING:
         ScheduleStep,
         SignalSlot,
     )
+    from zcu_tools.program.herald import HeraldSpec
 
 T_Raw = TypeVar("T_Raw")
 T_AcquireRaw_co = TypeVar("T_AcquireRaw_co", covariant=True)
@@ -66,6 +78,26 @@ class _CallbackError(Exception):
         self.error = error
 
 
+class SynchronousAcquireKeywords(TypedDict, Generic[T_Raw]):
+    """Keywords required by a synchronous builder-managed acquisition.
+
+    rounds is the software average count and progress controls native progress.
+    round_hook receives each completed-round summary and its cancel flag.
+    cancel_flag also carries external stop requests. Omitted step_rounds keeps
+    synchronous operation; stepped preparation is outside this producer seam.
+    herald selects integrated shots; decimated producers may reject it.
+    Producer-specific keywords are forwarded by the builder at runtime but are
+    not required by this structural protocol.
+    """
+
+    rounds: int
+    progress: bool
+    round_hook: Callable[[int, T_Raw, CancelFlagProtocol], object]
+    cancel_flag: CancelFlagProtocol
+    step_rounds: NotRequired[Literal[False]]
+    herald: NotRequired[Sequence[HeraldSpec] | None]
+
+
 class ProgramProtocol(Protocol[T_AcquireRaw_co, T_DecimatedRaw_co]):
     """Synchronous producer accepted by the builder's run methods.
 
@@ -75,33 +107,22 @@ class ProgramProtocol(Protocol[T_AcquireRaw_co, T_DecimatedRaw_co]):
     and the supplied cancel_flag; they check that flag before starting another
     round. Return the final raw data, retaining completed rounds on cancellation.
     Raise StoppedPartialAcquireError if cancelled before any round completes.
-    This synchronous contract uses the default step_rounds=False mode; stepped
-    preparation is not a completed raw result. Other producer errors propagate
+    herald is a typed producer option, forwarded unchanged by the builder;
+    decimated producers may reject it. This synchronous contract uses the default
+    step_rounds=False mode; stepped preparation is not a completed raw result. Other producer errors propagate
     to the builder's partial-result policy.
     """
 
     def acquire(
         self,
         soc: object,
-        *,
-        rounds: int,
-        progress: bool,
-        round_hook: Callable[[int, T_AcquireRaw_co, CancelFlagProtocol], object],
-        cancel_flag: CancelFlagProtocol,
-        step_rounds: Literal[False] = False,
-        **kwargs: object,
+        **kwargs: Unpack[SynchronousAcquireKeywords[T_AcquireRaw_co]],
     ) -> T_AcquireRaw_co: ...
 
     def acquire_decimated(
         self,
         soc: object,
-        *,
-        rounds: int,
-        progress: bool,
-        round_hook: Callable[[int, T_DecimatedRaw_co, CancelFlagProtocol], object],
-        cancel_flag: CancelFlagProtocol,
-        step_rounds: Literal[False] = False,
-        **kwargs: object,
+        **kwargs: Unpack[SynchronousAcquireKeywords[T_DecimatedRaw_co]],
     ) -> T_DecimatedRaw_co: ...
 
 

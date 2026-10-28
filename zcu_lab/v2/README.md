@@ -13,6 +13,7 @@
   - [CZ common-amplitude](two_qubit/cz_amplitude/guide.md) 保留 same-shot raw，擬合零相位完整回返週期。操作員逐列接受 coupler 的雙 pulse／雙 slot proposals。
   - [Conditional phase](two_qubit/conditional_phase/guide.md) 提供獨立 X/Y acquisition、phase 診斷與 n=1 frequency proposal。
   - [Local-Z](two_qubit/local_z/guide.md) 以雙 target 完整列估計 slope，依 correction=-slope 提供 correction pair 與手動 parameter Apply。
+- [Heralded T1](heralding/t1/guide.md) 說明單 qubit pulse readout 的 ground post-selection、pass fraction 與保存。沒有 active reset 或 joint herald。
 - [Experiment authoring](experiment-authoring.md) 說明核心 records、資料形狀與 run 慣例。
 - [Measure authoring](measure-authoring.md) 說明 cfg defaults、operator guides、writeback 與 reload。
 - [GUI contracts](gui-contracts.md) 說明 concrete adapter hooks 與 capability。
