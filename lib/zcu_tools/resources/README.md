@@ -7,7 +7,7 @@
 `resources/` 組織實驗工作資源的命名、讀寫與交換。資料檔格式與讀寫由 [datafile](../datafile/README.md) 擁有。
 
 - [`context/`](context/README.md) 管理 point-local typed ModuleLibrary。
-- `predictor_file.py` 擁有 `zcu.predictor` v2 JSON 的具名讀寫。`PredictorFile.params` 只含 simulate 的 nullable 能量／asymmetry，`PredictorFile.flux` 是 `PredictorFlux(offset, period, unit)`。`PredictorFlux.from_mapping` 解碼與檔案相同的 offset／period／unit 格式，`to_dict()` 回傳 detached typed JSON 欄位。RPC 與檔案共用此 decoder，不另建驗證。Flux 透過 `to_frame()` 複用 `analysis.flux.FluxFrame` 與 `DevicePeriod` 的驗證，不在 resources 重寫仿射數學。此 resources→analysis 依賴沿用 C8 分層與 C9 無循環 contract。`encode_predictor_document` 驗證並回傳 detached `PredictorDocument`，供 save、validate 與離線 migration baseline 共用 v2 表示，不讓 caller 序列化 frozen mappings。`validate_predictor_file` 與 load/save 共用表示規則，不建數值模型。完整性與物理約束由 `params.build_predictor()` 驗證。V1 只透過純函式 `upgrade_predictor_document` 轉為 v2，runtime 拒讀並列出升級命令。`predictor_upgrade.py` 擁有明確升級的逐檔預覽、備份及替換。格式與還原見 [Predictor v2](../../../docs/storage-format-history/predictor-v2.md)。它不讀 component、alias 或舊 `params.json`。
+- `predictor_file.py` 擁有 `zcu.predictor` v2 JSON 的具名讀寫。`PredictorFile.params` 只含 simulate 的 nullable 能量／asymmetry，`PredictorFile.flux` 是 `PredictorFlux(offset, period, unit)`。`PredictorFlux.from_mapping` 解碼與檔案相同的 offset／period／unit 格式，`to_dict()` 回傳 detached typed JSON 欄位。RPC 與檔案共用此 decoder，不另建驗證。Flux 透過 `to_frame()` 複用 `analysis.flux.FluxFrame` 與 `DevicePeriod` 的驗證，不在 resources 重寫仿射數學。此 resources→analysis 依賴沿用 C8 分層與 C9 無循環 contract。`encode_predictor_document` 驗證並回傳 detached `PredictorDocument`，供 save、validate 與離線 migration baseline 共用 v2 表示，不讓 caller 序列化 frozen mappings。`validate_predictor_file` 與 save／upgrade 保留嚴格完整規則，不建數值模型。Load 忽略 envelope、params、flux 與 source 的未知欄位，只將已知參數交給 simulate。`PredictorFile.source` 缺失或無法解析時為 None，無時區時間也投影為 None；可解析的來源保留原文。Writer 要求明確的合法 source。完整性與物理約束由 `params.build_predictor()` 驗證。V1 只透過純函式 `upgrade_predictor_document` 轉為 v2，runtime 拒讀並列出升級命令。`predictor_upgrade.py` 擁有明確升級的逐檔預覽、備份及替換。格式與還原見 [Predictor v2](../../../docs/storage-format-history/predictor-v2.md)。它不讀 component、alias 或舊 `params.json`。
 - `simulation_replay.py` owns opt-in private FTF and single-fluxonium input JSON, content integrity,
   atomic file I/O and acquire/round reference resolution. It retains detached
   waveform samples and settings, not measured I/Q. Template arrays use explicit
@@ -48,11 +48,11 @@ DocumentStore 的 explicit `lock_path` 仍可指定其他鎖檔。
 
 `dispersive_file.py` 擁有 `zcu.dispersive` v1，公開 `DispersiveFile`、`DispersiveParams`、`PlotTransitions` 與 `load_dispersive_file`／`save_dispersive_file`。Resources root 不 re-export 這些名稱。
 
-JSON 必須含 `format`、嚴格整數 `version: 1`、`params` 與 `source`。Envelope 與 source 不接受額外欄位。`analysis_source.AnalysisSource` 驗證來源。`source.run_id` 與 `source.created_at` 必填，未知寫 null。Run ID 是非空字串。Created_at 只接受 `YYYY-MM-DDTHH:MM[:SS[.ffffff]]` 加 `Z` 或 `±HH:MM`。日期須有效，小數秒可有一至六位。讀寫保留原文，不改成 UTC，也不補目前時間。
+Reader 回傳 `DispersiveFileView`，要求 `format`、嚴格整數 `version: 1` 與 `params`，忽略未知欄位。`source` 缺失或無法解析時為 None，無時區時間也投影為 None；可解析來源保留原文。`DispersiveParamsView` 驗 bare_rf／r_f，g 保持 opaque JSON，使用者呼叫 `require_g()` 才驗證有限 GHz 數值。Writer 仍使用嚴格的 `DispersiveFile`／`DispersiveParams` 與 `AnalysisSource`。Source 的 run_id 與 created_at 必填，未知寫 null；時間須含時區，不補目前時間。
 
 `params.g` 與 `params.bare_rf` 是 GHz，可省略或 null。`params.plot_transitions.r_f` 是 GHz 的 resonator seed，可省略或 null。其餘 transition keys 保留原始 JsonValue，不解釋躍遷名稱。
 
-Load 讀 caller 指定的 exact path，缺檔與格式錯誤直接拋出。Save 重新驗證具名 model，保留 explicit null、未提供的欄位與來源字串。Parent directory 必須存在。Writer 先寫 sibling temporary，再 atomic replace，失敗清 temporary。這不是多檔交易、multiwriter lock 或掉電持久保證。ResultEntry 只提供 `dispersive_path` 目錄，caller 選擇檔名。
+Load 讀 caller 指定的 exact path，缺檔與格式錯誤直接拋出。Save 以嚴格 writer model 重新驗證，保留 explicit null、未提供的欄位與來源字串；讀取 view 若缺合法 source 或 g 非法則拒絕寫入。Parent directory 必須存在。Writer 先寫 sibling temporary，再 atomic replace，失敗清 temporary。這不是多檔交易、multiwriter lock 或掉電持久保證。ResultEntry 只提供 `dispersive_path` 目錄，caller 選擇檔名。
 
 離線 T1 分析格式與 codec 由 `migrations/storage_migration/t1_curve_file.py` 擁有，runtime 不讀寫。
 
