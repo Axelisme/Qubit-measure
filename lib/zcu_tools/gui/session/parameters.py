@@ -272,8 +272,8 @@ class ParameterContext:
 
         Preserve order and softlink values. No consumer kind declaration limits
         this projection. A RoleResolutionError becomes a row with resolved=None
-        and its diagnostic in error; other rows remain readable. Source faults
-        raise ContextSourceUnavailableError for the whole read, even with no rows.
+        and its diagnostic in error; other rows remain readable. Required point
+        source faults raise ContextSourceUnavailableError, even with no rows.
         Reads neither live aliases nor files and never materializes assets.
         """
         self._ensure_readable("point")
@@ -442,8 +442,8 @@ class ParameterContext:
         for aliases and bare paths for concrete components. Declaration.via and
         focus never infer aliases. Point/library/target/storage stay at this
         capture's origin. alias_error retains a file failure for alias consumers
-        only; concrete reads remain available. Unavailable sources and invalid
-        rows propagate.
+        only; concrete reads remain available. Source faults stay fixed for
+        actual-use checks. Invalid rows raise without producing a capture.
         """
         captured = ParameterContext(
             point=self._point,
