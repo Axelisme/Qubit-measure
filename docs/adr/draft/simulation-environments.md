@@ -210,6 +210,8 @@ f = Φ/Φ0, EJmax = EJ1 + EJ2, d = (EJ2 - EJ1)/(EJ1 + EJ2)
 
 使用者裁決：「結果是不是收斂的模擬器不要保證，讓用戶自己透過yaml檔設定並自己負責，可以有註解標識建議。」Cutoffs、local levels、M、步長與容差由使用者設定，不自動收斂認證或擴張基底，不用 sink 或靜默重新正規化掩蓋失敗。M=8 不是通用預設；開發 reference 比較不成為 runtime 保證。
 
+[固定 DC flux prototype](../../discussions/2026-10-28-ftf-fixed-dc-flux-benchmark.md) 的結論為「未認證，僅界限」。M16 只是最大成功執行尺寸，不是收斂 reference。M24 首點與 M32 reference 的 phase/gauge quadrature 失敗，其餘五個 M24 候選未執行。這些結果不認證 excursion 幅度可用區或裝置 reset fidelity。
+
 ### 以既有耗散模型推導相干時間
 
 2026-10-13，使用者要求：「我認為應該使用T1_curve與T2_curve裡的工具，使用Temp/Q_cap/Q_ind/x_qp等在yaml裡的參數來推導T1/T2值。」重用物理 spectral models，不新增手填 T1／T2 的平行真值。

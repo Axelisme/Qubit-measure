@@ -308,6 +308,9 @@ Hamiltonian 支援時變 flux，但只在每 round DC 選定的 retained 子空�
 終端 readout 仍固定使用 snapshot DC 模型，即使 flux tail 尚未回 DC 也不改變。
 需要 DC 讀出時，須在 readout 前留足返程 settling。
 兩態 reset 的 hold curve 與 sudden 對照見 [reset 範例及限制](../../../lib/zcu_tools/experiment/ftf/README.md#reset-interpretation)，不是正式裝置 fidelity 認證。
+[固定 DC flux benchmark](../../../docs/discussions/2026-10-28-ftf-fixed-dc-flux-benchmark.md) 的結論為「未認證，僅界限」。
+M16 只是最大成功執行尺寸，不是收斂 reference。M24 首點與 M32 reference 在 phase/gauge quadrature 失敗，其餘五個 M24 候選未執行。
+這些結果不能認證 excursion 幅度可用區或裝置 reset fidelity。
 
 ## Readout：drive → 物理 resonators → ADC
 

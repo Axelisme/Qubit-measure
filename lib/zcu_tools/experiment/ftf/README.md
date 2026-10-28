@@ -349,6 +349,11 @@ fixed-DC projection. Large excursions can leave that subspace. Users must check
 local and retained-level convergence for their excursion and ramp; these routes
 do not certify reset fidelity or nonadiabatic accuracy. Small-signal
 `DriveLine.operator: flux` remains a separate fixed-DC derivative control.
+The [fixed-DC flux benchmark](../../../../docs/discussions/2026-10-28-ftf-fixed-dc-flux-benchmark.md)
+provides bounds only, not certification. M16 is the largest successful run, not
+a converged reference; M24's first point and the M32 reference fail phase/gauge
+quadrature. The other five M24 candidates were not run. Neither the excursion
+range nor device reset fidelity is certified.
 
 #### Reset interpretation
 

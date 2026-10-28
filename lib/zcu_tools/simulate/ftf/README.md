@@ -136,6 +136,14 @@ The [experiment reset example](../../experiment/ftf/README.md#reset-interpretati
 checks small-model mapping and constant-hold relaxation, not device fidelity or
 large-excursion convergence.
 
+The [fixed-DC flux benchmark](../../../../docs/discussions/2026-10-28-ftf-fixed-dc-flux-benchmark.md)
+is uncertified and provides bounds only. At local5/ramp8, M8 and M16 give p0
+0.809094 and 0.626069 in the same DC K8 projector, with population L1 difference
+0.359636. M16 is the largest successful run, not a converged reference. The first
+M24 point and the M32 reference fail phase/gauge quadrature at 4096 nodes;
+the other five M24 candidates were not run. No amplitude range or device reset
+fidelity is certified.
+
 ## Cavity drive composition
 
 `CavityDrive.advance` averages one span's photons, Stark shifts and driven
