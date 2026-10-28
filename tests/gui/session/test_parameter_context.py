@@ -151,23 +151,24 @@ def test_parameter_snapshot_round_trip_keeps_content_library_and_authored_aliase
     codec = TypeAdapter(type(snapshot))
     encoded = codec.dump_json(snapshot)
     source[0].components.clear()
-    restored = ParameterContext.from_snapshot(
-        codec.validate_json(encoded)
-    )
+    restored = ParameterContext.from_snapshot(codec.validate_json(encoded))
     assert restored.target is None
     assert restored.storage is None
     assert restored.value("$drive.rate") == 4300.0
     assert restored.value("$sensor.rate") == 6500.0
     assert restored.value("$drive.pulses.pi.gain") == 0.25
     assert restored.aliases == original.aliases
+    assert restored.roles == original.roles
     assert restored.document().metadata == original.document().metadata
 
 
 @pytest.mark.parametrize("defect", ["missing", "different_format", "extra"])
 def test_snapshot_validates_only_values_actually_read(
-    source: tuple[PointDocument, LibrarySnapshot], defect: str,
+    source: tuple[PointDocument, LibrarySnapshot],
+    defect: str,
 ) -> None:
     import json
+
     from pydantic import TypeAdapter
 
     original = capture(source).bind_aliases((AliasRow("drive", "Q1"),), {})
@@ -175,6 +176,8 @@ def test_snapshot_validates_only_values_actually_read(
     codec = TypeAdapter(type(snapshot))
     data = json.loads(codec.dump_json(snapshot))
     data["point"]["components"]["unused"] = ["not a component"]
+    data["point"]["components"]["Q1"]["unrelated"] = ["old format"]
+    data["point"]["components"]["Q1"]["sense"] = ["wrong field type"]
     data["point"]["general"] = "unrelated old format"
     data["aliases"]["unused"] = {"not": "an alias binding"}
     if defect == "missing":
@@ -188,11 +191,37 @@ def test_snapshot_validates_only_values_actually_read(
     restored = ParameterContext.from_snapshot(codec.validate_json(json.dumps(data)))
     assert restored.value("$drive.rate") == 4300.0
     if defect == "extra":
-        assert restored.library.module_spec("Q1.pulses.pi").gain == 0.25
+        assert (
+            restored.library.entry_value("Q1.pulses.pi", kind="module")["gain"] == 0.25
+        )
+        assert "Q1.pulses.pi" in restored.library.module_keys()
     else:
         with pytest.raises((KeyError, ValueError), match="library"):
             restored.library.module_spec("Q1.pulses.pi")
+        with pytest.raises((KeyError, ValueError), match="library"):
+            restored.library.module_keys()
     with pytest.raises((ValueError, InvalidInputError), match="unused|alias"):
+        restored.value("$unused")
+    with pytest.raises(ValueError, match="valid string"):
+        restored.value("Q1.sense")
+
+
+@pytest.mark.parametrize("components", [None, ["old shape"], {"unrelated": 1}])
+def test_snapshot_general_reads_do_not_require_component_or_alias_sections(
+    components: object,
+) -> None:
+    import json
+
+    from zcu_tools.experiment.metadata import ParameterSnapshot
+
+    data = {
+        "point": {"general": {"description": "recorded"}, "components": components},
+        "aliases": 42,
+    }
+    snapshot = ParameterSnapshot.model_validate_json(json.dumps(data))
+    restored = ParameterContext.from_snapshot(snapshot)
+    assert restored.value("general.description") == "recorded"
+    with pytest.raises(ValueError, match="alias"):
         restored.value("$unused")
 
 
@@ -202,7 +231,7 @@ def test_point_capture_is_detached_and_preserves_target(
     context = capture(source)
     source[0].general.ext.clear()
     copied = context.document()
-    copied.general.ext.clear()
+    copied.components.clear()
     assert context.value("Q1.rate") == 4300.0
     assert context.value("general.ext.nested.number") == 2.0
     assert context.target == SavedPoint(entry_name="entry", point="working")

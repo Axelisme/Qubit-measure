@@ -18,11 +18,11 @@ from pydantic import (
     TypeAdapter,
     ValidationError,
     field_validator,
-    model_validator,
 )
 
 from zcu_tools.datafile import JsonObject
-from zcu_tools.resources.context.library import ModuleLibraryDocument
+from zcu_tools.format_version import YamlValue
+from zcu_tools.resources.context.library import LibraryContent
 from zcu_tools.resources.entry import ParameterContent
 from zcu_tools.resources.entry.aliases import AliasValue
 
@@ -54,22 +54,15 @@ class ParameterSnapshot(BaseModel):
     retains persistent Specs, not materialized cfg. aliases preserves authored
     row order and softlinks; None denotes fixed names without authored rows.
     names contains resolved scalar/list bindings from capture time. All values
-    use working units. Missing fields, unknown fields and invalid content raise
-    ValidationError. No storage path, timestamp or target is synthesized.
+    use working units. Sections stay opaque until their resource/session owner
+    consumes them. Unknown envelope fields are ignored; missing sections remain
+    missing, not an empty environment. No target or timestamp is synthesized.
     """
 
-    model_config = ConfigDict(extra="forbid")
-
-    point: ParameterContent
-    library: ModuleLibraryDocument
-    aliases: dict[str, AliasValue] | None
-    names: dict[str, AliasValue]
-
-    @model_validator(mode="after")
-    def validate_library(self) -> ParameterSnapshot:
-        """Reject invalid library Specs instead of restoring an empty environment."""
-        self.library.validate_content()
-        return self
+    point: ParameterContent = Field(default_factory=lambda: ParameterContent(None))
+    library: LibraryContent = Field(default_factory=LibraryContent)
+    aliases: YamlValue = None
+    names: YamlValue = None
 
 
 @dataclass(frozen=True, kw_only=True)

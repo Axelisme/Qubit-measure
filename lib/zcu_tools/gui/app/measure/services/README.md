@@ -1,6 +1,6 @@
 # Measure services
 
-**Last updated:** 2026-10-28，tab admission、pane 提交與 State 分工
+**Last updated:** 2026-10-29
 
 **讀者：** framework-dev、agent。查找 Measure application 操作的 owner，以及 service 與 session、UI、remote 的接縫。
 
@@ -24,6 +24,8 @@ Results index 隔離各 entry 的 setup／ledger 與 run 成員讀取錯誤，�
 沒有對應 Result entry 的 Database run 仍可瀏覽。無法安全列舉的 Database 項目
 以 `ResultsIndex.issues` 回報 entry、路徑與原因，不偽造 run；可列出的 run
 則沿用 `ResultRun.issues`。Symlink escape 項目不讀、不跟隨。
+
+`RunService` 在提交 worker 前固定 ParameterContext 的參數快照。Worker 將它放進當次 RunMetadata，後續切換 point 不改這份分析環境。
 
 Run、Analyze、PostAnalyze、Load 與 Tab 將 pane 提交或退役清理交給 `pane_commit`。
 `GuardService.admit` 統一 domain admission，啟動時的 hardware exclusion 仍由 operation gate 裁決。

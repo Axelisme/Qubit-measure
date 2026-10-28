@@ -5,14 +5,14 @@ from collections.abc import Mapping
 from copy import deepcopy
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import ClassVar, Literal, Self, override
+from typing import ClassVar, Literal, Self, get_args, override
 from uuid import UUID
 
 from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
-    SerializeAsAny,
+    RootModel,
     TypeAdapter,
     field_validator,
 )
@@ -208,33 +208,121 @@ class _ParameterDocument(BaseModel):
         return TypeAdapter(dict[str, YamlMap]).validate_python(value, strict=True)
 
 
-class ParameterContent(BaseModel):
-    """Detached parameter data without a persistent document identity.
+class ParameterContent(RootModel[YamlValue]):
+    """Detached working-unit parameter content, decoded only when requested.
 
-    components holds registered component models in working units; metadata maps
-    dotted paths to opaque YAML mappings. general retains captured point metadata,
-    or None when none was recorded. No timestamps or storage headers are invented.
-    Construction validates component names/kinds and YAML metadata through the
-    parameter document owner. Unknown fields and invalid components raise.
+    root retains the captured components, general and opaque metadata sections,
+    including unknown or malformed unused values. An empty mapping has no general
+    or timestamps. Requested leaves use their registered field annotation; whole
+    section projections explicitly validate that section. No file I/O occurs.
     """
 
-    model_config = ConfigDict(extra="forbid")
+    root: YamlValue = Field(default_factory=dict)
 
-    components: dict[str, SerializeAsAny[ComponentSchema]] = Field(default_factory=dict)
-    metadata: dict[str, YamlMap] = Field(default_factory=dict)
-    general: PointGeneral | None = None
+    def section(self, name: str) -> YamlValue:
+        """Copy a recorded section; missing sections raise AttributeError."""
+        if not isinstance(self.root, dict):
+            raise ValueError("parameter content must be a mapping")
+        if name not in self.root:
+            raise AttributeError(f"Missing parameter section: {name}")
+        return deepcopy(self.root[name])
 
-    @field_validator("components", mode="before")
-    @classmethod
-    def validate_components(cls, value: object) -> dict[str, ComponentSchema]:
-        """Validate registered components without a storage schema header."""
-        return _ParameterDocument.validate_components(value)
+    def component_names(self) -> tuple[str, ...]:
+        """List recorded names without decoding any component or general fields."""
+        if self.root == {}:
+            return ()
+        components = self.section("components")
+        if not isinstance(components, dict):
+            raise ValueError("parameter components must be a mapping")
+        return tuple(components)
 
-    @field_validator("metadata", mode="before")
-    @classmethod
-    def validate_metadata(cls, value: object) -> dict[str, YamlMap]:
-        """Require opaque YAML mappings keyed by logical parameter paths."""
-        return _ParameterDocument.validate_metadata(value)
+    def component_kind(self, name: str) -> str:
+        """Read only a component's kind; malformed/missing content raises."""
+        value = self.value(f"{name}.kind")
+        if not isinstance(value, str):
+            raise ValueError(f"{name}.kind must be a string")
+        return value
+
+    @property
+    def components(self) -> dict[str, ComponentSchema]:
+        """Decode the complete components section on explicit whole-section use."""
+        if self.root == {}:
+            return {}
+        return _ParameterDocument.validate_components(self.section("components"))
+
+    @property
+    def general(self) -> PointGeneral | None:
+        """Decode captured general metadata, or None when absent."""
+        if isinstance(self.root, dict) and "general" not in self.root:
+            return None
+        value = self.section("general")
+        return None if value is None else PointGeneral.model_validate(value)
+
+    @property
+    def metadata(self) -> dict[str, YamlMap]:
+        """Decode the opaque metadata section when explicitly requested."""
+        if isinstance(self.root, dict) and "metadata" not in self.root:
+            return {}
+        return _ParameterDocument.validate_metadata(self.section("metadata"))
+
+    def value(self, path: str) -> YamlValue:
+        """Read one concrete path, validating only its requested field annotation.
+
+        Missing fields raise AttributeError; malformed used ancestors or leaves
+        raise ValueError. Unrelated component fields and general remain opaque.
+        """
+        from .registry import component_registry
+
+        parts = path.split(".")
+        if not all(parts):
+            raise ValueError(f"Invalid parameter path: {path!r}")
+        model: type[BaseModel] | None
+        if parts[0] == "general":
+            node = self.section("general")
+            model = PointGeneral
+        else:
+            components = self.section("components")
+            if not isinstance(components, dict):
+                raise ValueError("parameter components must be a mapping")
+            if parts[0] not in components:
+                raise AttributeError(path)
+            node = components[parts[0]]
+            if not isinstance(node, dict):
+                raise ValueError(f"{parts[0]}: component must be a mapping")
+            kind = node.get("kind")
+            if not isinstance(kind, str):
+                raise ValueError(f"{parts[0]}.kind must be a string")
+            model = component_registry.get(
+                kind, source=Path("snapshot"), component=parts[0]
+            )
+        annotation: object = YamlValue
+        for part in parts[1:]:
+            if not isinstance(node, dict):
+                raise ValueError(f"{path}: ancestor must be a mapping")
+            field = None if model is None else model.model_fields.get(part)
+            if (
+                field is None
+                and model is not None
+                and model.model_config.get("extra") != "allow"
+            ):
+                raise AttributeError(path)
+            if part not in node:
+                raise AttributeError(path)
+            node = node[part]
+            annotation = YamlValue if field is None else field.rebuild_annotation()
+            nested = (annotation, *get_args(annotation))
+            model = next(
+                (
+                    item
+                    for item in nested
+                    if isinstance(item, type) and issubclass(item, BaseModel)
+                ),
+                None,
+            )
+        validated = TypeAdapter(annotation).validate_python(deepcopy(node))
+        if isinstance(validated, BaseModel):
+            validated = validated.model_dump(mode="python")
+        return TypeAdapter(YamlValue).validate_python(validated)
 
 
 class SetupDocument(_ParameterDocument):

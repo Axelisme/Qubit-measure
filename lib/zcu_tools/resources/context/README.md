@@ -1,6 +1,6 @@
 # `zcu_tools.resources.context` point-local module library
 
-**Last updated:** 2026-10-28
+**Last updated:** 2026-10-29
 
 **讀者：** framework-dev。Point-local module library 的讀取、編輯與來源契約。
 
@@ -28,6 +28,8 @@ Spec 查詢不展開引用；成品查詢使用固定 snapshot 與顯式 asset c
 `entry_value` 回傳未 materialize 的 Spec mapping。
 Replacement、delete 與 rename 返回新候選，不更新原 snapshot。
 Rename 不求值 child、不改其他引用，也不 cascade。Library 不產生來源、時間、stderr 或 clone 標記。
+
+`LibraryContent` 保存量測檔中的 opaque library 內容。`LibrarySnapshot.from_content` 不讀檔、不預驗未使用的 Specs。查詢一個 root 時才解碼該 Spec，列出 keys 時只讀取該 family 的名稱。缺少或格式不符的 used section 報錯，不代換成空 library。
 
 `ModuleLibrary.edit()` 沿用 DocumentStore 的單檔交易。Draft setter 嚴格驗證新值。
 Body、schema、conflict 或 I/O 失敗不發布候選。Body 中的 snapshot 反映前項寫入。

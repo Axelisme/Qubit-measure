@@ -333,6 +333,9 @@ class RunService:
         if self._state.is_tab_busy(tab_id):
             raise FailedPreconditionError(f"Tab {tab_id!r} is busy")
 
+        parameter_snapshot = (
+            None if inputs.parameters is None else inputs.parameters.snapshot()
+        )
         logger.info("start_run: tab_id=%r", tab_id)
         self.release_view_plots(tab_id)
 
@@ -403,6 +406,7 @@ class RunService:
                     snapshot=snapshot,
                     provenance=capture_software_provenance(context=context),
                     device_snapshot=device_snapshot,
+                    parameter_snapshot=parameter_snapshot,
                 )
             # Progress alone is ambient; execution dependencies are run-owned.
             with progress_ambient(factory):

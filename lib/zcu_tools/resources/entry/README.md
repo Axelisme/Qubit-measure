@@ -1,6 +1,6 @@
 # `zcu_tools.resources.entry` result entry composition
 
-**Last updated:** 2026-10-28
+**Last updated:** 2026-10-29
 
 **讀者：** framework-dev。Result entry、point、ledger 與輸出位置契約。
 
@@ -66,6 +66,8 @@ ComponentSchema 只要求字串 kind。原 model 決定必填欄位、型別、e
 `component_field_specs(kind)` 依宣告順序深度優先投影 kind 的 pydantic 欄位，供編輯器使用。每個 FieldSpec 帶 segments、value_kind、required、choices、unit 與 description；巢狀 model 先列 group 再列子欄位，`kind` 不列。投影只讀 class 宣告，不讀值、不建 defaults、不跑 validator 或 I/O。未知 kind 報 UnknownKindError。頂層 text 欄位的 key 若等於沒有 via 的已註冊角色名稱，`reference_role` 填該角色；`role_candidates(document, role)` 依文件順序列出 kind 符合角色 pattern 的元件，供引用欄位的下拉選單使用。這沿用角色解析的既有慣例，不是引用標記，也不檢查目標是否存在。
 
 新增元件保留已產生的 defaults，避免 reload 或 seed 重生 factory 值。Seed 也複製當次 template validation 產生、原 YAML 尚未保存的 defaults。框架不檢查 canonical 或冪等，不替定義者修復 validator。
+
+`ParameterContent` 承載量測檔中的唯讀參數，不帶持久文件身分。空內容不帶 general 或 created_at。它保留未使用的 raw 區塊，`document_value` 在請求具體欄位時才解碼。明確讀取完整 components、general 或 metadata property 時，owner 才驗證該 section。
 
 ## 視圖與 metadata
 

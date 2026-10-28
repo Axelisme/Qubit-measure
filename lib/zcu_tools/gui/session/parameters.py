@@ -9,7 +9,10 @@ from fnmatch import fnmatchcase
 from types import MappingProxyType
 from typing import TYPE_CHECKING
 
+from pydantic import TypeAdapter
+
 from zcu_tools.experiment.metadata import ParameterSnapshot
+from zcu_tools.format_version import YamlValue
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 from zcu_tools.gui.session.aliases import AliasRow, AliasTable, ResolvedAliasRow
 from zcu_tools.gui.session.context_types import (
@@ -30,7 +33,6 @@ from zcu_tools.resources.entry.storage import PointStorageBinding
 _LIBRARY_PARTITIONS = ("pulses", "readout", "reset", "waveforms")
 
 if TYPE_CHECKING:
-    from zcu_tools.format_version import YamlValue
     from zcu_tools.gui.session.context_types import ContextSourceFault, ContextTarget
     from zcu_tools.resources.entry import RoleSpec
     from zcu_tools.resources.entry.schema import PointDocument
@@ -128,6 +130,7 @@ class ParameterContext:
             or storage.point != target.point
         ):
             raise ValueError("Storage origin must match the saved-point target")
+        self._stored_snapshot: ParameterSnapshot | None = None
         self._point = point.model_copy(deep=True)
         self._library = library
         self._target = None if target is None else target.model_copy(deep=True)
@@ -171,9 +174,12 @@ class ParameterContext:
         """Create a readable empty environment with no target, metadata or storage."""
         return cls(
             point=ParameterContent(),
-            library=LibrarySnapshot(ModuleLibraryDocument(
-                format="zcu.module-library", format_version="2.0",
-            )),
+            library=LibrarySnapshot(
+                ModuleLibraryDocument(
+                    format="zcu.module-library",
+                    format_version="2.0",
+                )
+            ),
             target=None,
             roles=None,
         )
@@ -190,44 +196,48 @@ class ParameterContext:
         content = (
             point.model_copy(deep=True)
             if isinstance(point, ParameterContent)
-            else ParameterContent.model_construct(
-                components=deepcopy(point.components),
-                metadata=deepcopy(point.metadata),
-                general=point.general.model_copy(deep=True),
+            else ParameterContent(
+                TypeAdapter(YamlValue).validate_python(
+                    point.model_dump(mode="python", serialize_as_any=True)
+                )
             )
         )
-        roles = self.roles
+        if self._stored_snapshot is not None:
+            return self._stored_snapshot.model_copy(deep=True)
         return ParameterSnapshot(
             point=content,
-            library=self._library.document(),
+            library=self._library.content(),
             aliases=(
-                None if self._aliases is None
-                else {row.alias: row.value for row in self.aliases}
+                None
+                if self._aliases is None
+                else TypeAdapter(YamlValue).validate_python(
+                    {row.alias: row.value for row in self.aliases}
+                )
             ),
-            names={} if roles is None else dict(roles.names),
+            names=TypeAdapter(YamlValue).validate_python(
+                {} if self._roles is None else dict(self._roles.names)
+            ),
         )
 
     @classmethod
     def from_snapshot(cls, snapshot: ParameterSnapshot) -> ParameterContext:
-        """Restore validated stored content without reading live files or assets.
+        """Restore recorded content without decoding unused fields or reading files.
 
         No persistent target/storage is granted. Library materialization needing
         external waveform assets still requires its own capability.
         Authored aliases retain order/links; fixed-name captures stay resolved.
-        Invalid aliases raise InvalidInputError at restoration.
+        Only a requested value, Spec or alias is validated by its owner on use.
         """
-        return cls(
+        restored = cls(
             point=snapshot.point,
-            library=LibrarySnapshot(snapshot.library),
+            library=LibrarySnapshot.from_content(snapshot.library),
             target=None,
-            roles=RoleBinding(
-                None, {}, snapshot.names,
-                aliases=(
-                    None if snapshot.aliases is None
-                    else tuple(AliasRow(key, value) for key, value in snapshot.aliases.items())
-                ),
-            ),
+            roles=RoleBinding(None, {}, {}),
         )
+        restored._stored_snapshot = snapshot.model_copy(deep=True)
+        if snapshot.aliases is not None:
+            restored._aliases = AliasTable.from_content(snapshot.aliases)
+        return restored
 
     @property
     def target(self) -> ContextTarget | None:
@@ -245,6 +255,11 @@ class ParameterContext:
         not authored rows, so historical target reads never re-expand links.
         None means no consumer declarations.
         """
+        if self._stored_snapshot is not None and self._aliases is None:
+            names = TypeAdapter(dict[str, AliasValue]).validate_python(
+                self._stored_snapshot.names
+            )
+            return RoleBinding(None, {}, names)
         if self._aliases is not None and self._roles is not None:
             self._ensure_aliases_readable()
             self._ensure_readable()
@@ -425,6 +440,16 @@ class ParameterContext:
         self._ensure_readable()
         self._ensure_aliases_readable()
         spec = self._roles.declarations.get(alias) if self._roles is not None else None
+        if self._stored_snapshot is not None and self._aliases is None:
+            names = self._stored_snapshot.names
+            if not isinstance(names, dict):
+                raise ValueError("snapshot names must be a mapping")
+            if alias not in names:
+                raise RoleResolutionError(alias, None, None, "Alias is not bound")
+            value = TypeAdapter(AliasValue).validate_python(names[alias])
+            if not value:
+                raise RoleResolutionError(alias, None, None, "Alias is not bound")
+            return value
         if self._aliases is not None:
             if spec is not None:
                 return self._aliases.resolve(alias, self._point, kind=spec.kind)

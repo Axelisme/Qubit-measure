@@ -1,6 +1,6 @@
 # `zcu_tools.experiment` — 實驗層
 
-**Last updated:** 2026-10-28, projective readout and selective metadata reads
+**Last updated:** 2026-10-29
 
 **讀者：** framework-dev。實驗介面、Run 資料、持久化映射與裝置操作邊界。
 
@@ -117,6 +117,7 @@ decimated outputs.
 `artifacts.AnalysisDocument` 擁有 analysis JSON 信封。`to_doc()` 回傳可放進通用容器 `docs/analysis` 的有限 JSON object，容器不解釋其鍵。既有 artifact encoder 仍產 `analysis/<pane>.json`，不改 SaveLayout 或 ledger。選用 AnalysisDocument 時不載入 artifact saver。
 
 - `records.py` 的 `RunRecord` 將 nullable cfg、純 Result 與 optional `metadata` 配對。建立時 deepcopy cfg 與 metadata，Result 保留 caller 的陣列引用。宿主完成量測後以 `replace(record, metadata=...)` 裝入歷史事實。`metadata.py` 擁有 frozen Pydantic `RunMetadata`、frozen dataclass `RunSnapshot`／`SoftwareProvenance` 與 `CfgSnapshot`。RunSnapshot 只保存 entry_id、point 與 roles。輸出 Labber path 只在 SaveReport 與 ledger 中。宿主以 `model_copy` 更新 metadata，公開保存入口會重新驗證。
+- `metadata.ParameterSnapshot` 保存 resource-owned 參數內容、library Specs、authored aliases 與 fixed names。它不含持久 target 或 storage。還原時不預驗未使用的區塊，讀取 owner 在使用值、Spec 或 alias 時報錯。GUI Run 在提交 worker 前固定這份 snapshot，Save 使用 RunMetadata 中的內容，不重新捕捉 live point。
 - `base.py` 的 `Experiment[Result, Cfg]` 只宣告 `AXES_SPEC` 與 `run`、`analyze`、`post_analyze` 簽名。未實作的操作 raise `NotImplementedError`，無持久化宣告時 `AXES_SPEC=None`。核心不保存上次結果，也不提供存讀方法。NotebookExperiment 管理 records，NotebookAdapter 只綁定可重用環境。`native_persistence` 的 `save_run(record, path, spec=...)`、`load_run(path, spec=...)`、`load_run_with_metadata(path, spec=...)` 與 `restore_run(container, spec=...)` 接明確宣告。`save_labber(record, path, spec=..., comment=..., tag=...)` 另作單檔 Labber 匯出，cfg 缺失時拒絕。路徑都是本機 `Path`，caller 選路徑與覆寫政策，不提供 server_ip／port 或格式猜測。只有 Labber 的舊檔須先用 `migrations/` 離線轉換。
 - `native_persistence.py` 的 `prepare_run_data` 將明確 RunRecord/spec 映射為 `PreparedRunData`，持有 SI `Container`、`CfgSnapshot`、原始 `LabberMetadata` 與 Labber layout。準備不做 I/O，也不要求 metadata 或 Labber common grid。`to_container(record.metadata)` 驗證 metadata，再加入 `docs/cfg={values,cfg_type,schema_version}` 與 `docs/metadata`。Metadata 以 `model_dump(mode="json")` 序列化，load 以 `TypeAdapter(RunMetadata)` 驗證。非法文件的錯誤指出來源檔。`save_run` 只收 record，不另收 metadata；缺 metadata 即拒絕。`load_run_with_metadata` 回 record，`load_run` 保留 record／snapshot tuple。
 - `native_persistence.read_run_metadata(path)` 用 datafile 的 `read_doc` 只讀歷史 metadata，不載 vars 或 cfg，也不回退到全檔 load。需要完整歷史證據的 caller 可取得 typed `RunMetadata`，不受壞 vars 阻礙。Saved-runs 清單另從 datafile.read_doc 投影顯示欄位，不要求 provenance 或完整 snapshot。缺文件 raise 指名來源的 `KeyError`，非法文件或 metadata raise 指名來源的 `ValueError`。已載 Container 的完整歷史讀取使用 `metadata_from_container(container)`，不重讀檔案。Fluxdep 用 `device_snapshot_from_container(container)` 只投影 device settings，不驗 cfg、provenance 或 entry snapshot；缺值回 None，已記錄空 mapping 保留為空。兩個入口與 restore 共用 RunMetadata 驗證；Container 入口缺失或非法時 raise 指名 `/docs/metadata` 的 `ValueError`，caller 在轉譯錯誤時附來源路徑。

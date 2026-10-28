@@ -13,7 +13,7 @@ from zcu_tools.format_version import YamlMap
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 from zcu_tools.gui.form import FormWritePath
 from zcu_tools.gui.session.context_control import ContextControlPort
-from zcu_tools.gui.session.context_types import CommandOrigin
+from zcu_tools.gui.session.context_types import CommandOrigin, SavedPoint
 from zcu_tools.gui.session.library_entry import ModuleEntryForm
 from zcu_tools.gui.session.types import ParameterContext
 from zcu_tools.resources.entry import document_unit
@@ -27,7 +27,12 @@ from .contracts import WritebackSelection as WritebackSelection
 from .contracts import WritebackValues as WritebackValues
 from .contracts import WritebackWritten as WritebackWritten
 from .items import ModuleWriteback, ParameterWriteback, RecordWriteback, WritebackItem
-from .values import applied_values, destination_path, read_destination_value
+from .values import (
+    applied_values,
+    destination_path,
+    destination_value,
+    read_destination_value,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -291,11 +296,11 @@ class WritebackService:
         generator leaves out return to Spec defaults. A proposal that is not a
         concrete persistent ModuleSpec raises TypeError and no draft is returned.
 
-        parameters fixes expression/library resolution, arb options and the
-        destination target for the draft lifetime. None is valid for an
-        empty/context-free proposal: module items are listed but have no Form,
-        so editing, preview and nonempty application fail. Baseline display
-        uses this capture; no live selection provider is retained.
+        parameters fixes expression/library resolution and baseline display,
+        not the write destination. Preview and Apply use the point selected
+        through write_port at that call. None provides no historical values;
+        concrete parameter/record proposals can still write to a selected point.
+        Module items without parameters have no Form and cannot be applied.
         experiment_name is the captured experiment name, never a frontend/event kind.
         run_id is the source RunMetadata.run_id, including unsaved Runs and
         historical native Loads; None means no native acquisition evidence.
@@ -344,7 +349,7 @@ class WritebackService:
     def preview_values(
         self, draft: WritebackDraft, *, session_id: str | None = None
     ) -> dict[str, WritebackValues]:
-        """Read actual current values at the captured target, without selecting it.
+        """Read current values at the GUI's selected point without changing selection.
 
         Proposed module values evaluate against the creation capture, never
         current focus, point, or slot references. Missing destinations have
@@ -353,7 +358,7 @@ class WritebackService:
         session_id reads only that item's facts, without lowering siblings; an
         unknown ID raises KeyError before reading the destination. Empty bulk
         reads return {}; empty item reads raise KeyError. Nonempty reads require
-        a still-readable captured target. Inactive/foreign drafts are rejected.
+        a selected persistent point. Inactive/foreign drafts are rejected.
         Target/source/I/O and requested proposal validation errors propagate.
         """
         self._require_draft(draft)
@@ -365,7 +370,7 @@ class WritebackService:
         if not items:
             return {}
         parameters = self._require_parameters(draft)
-        current = self._write.read_target(parameters.target, roles=parameters.roles)
+        current = self._write.read_target(self._current_target())
         values: dict[str, WritebackValues] = {}
         for item in items:
             path = destination_path(item, parameters)
@@ -393,9 +398,15 @@ class WritebackService:
     @staticmethod
     def _require_parameters(draft: WritebackDraft) -> ParameterContext:
         parameters = draft.parameters
-        if parameters is None:
-            raise FailedPreconditionError("Writeback requires a captured context.")
-        return parameters
+        return ParameterContext.empty() if parameters is None else parameters
+
+    def _current_target(self) -> SavedPoint:
+        target = self._write.read_context().target
+        if target is None:
+            raise FailedPreconditionError(
+                "Select or create a working point first", reason_code="no_context"
+            )
+        return target
 
     def edit_draft(
         self,
@@ -502,7 +513,7 @@ class WritebackService:
         failure writes nothing. On item failure, mark the successful prefix applied and re-raise
         the original cause unchanged, retaining accepted evidence and writes.
         Empty selection is a no-op without context. Nonempty writes require a
-        captured SavedPoint in its still-open entry. GUI defaults
+        GUI-selected SavedPoint at application time. GUI defaults
         to the GUI origin; MCP callers explicitly identify the MCP frontend.
         Unknown/duplicate IDs or concrete destinations fail before any write.
         Accepted payload uses draft.run_id;
@@ -532,6 +543,7 @@ class WritebackService:
         }
         if not selected_entries:
             return _DraftApplication((), written)
+        target = self._current_target()
         parameters = self._require_parameters(draft)
         destinations: set[str] = set()
         items: list[concrete.WritebackItem] = []
@@ -542,7 +554,7 @@ class WritebackService:
                 items.append(concrete.RecordWriteback(path, item.record))
                 written["records"].append(path)
             elif isinstance(item, ParameterWriteback):
-                path = parameters.resolve_path(item.target_name)
+                path = destination_path(item, parameters)
                 write = AcceptedWrite.model_validate(
                     {"path": path, "value": item.proposed_value}
                 )
@@ -552,7 +564,7 @@ class WritebackService:
                 items.append(concrete.ParameterWriteback(path, write.value, metadata))
                 written["parameter"].append(path)
             else:
-                path = parameters.library_key(item.target_name)
+                path = destination_path(item, parameters)
                 items.append(concrete.ModuleWriteback(path, self._module_spec(entry)))
                 written["ml_modules"].append(path)
             if path in destinations:
@@ -560,7 +572,7 @@ class WritebackService:
             destinations.add(path)
         try:
             outcome = self._write.apply_writeback(
-                parameters.target,
+                target,
                 tuple(items),
                 evidence=concrete.WritebackEvidence(
                     origin=origin.origin,
@@ -584,7 +596,7 @@ class WritebackService:
                 written,
                 cause,
                 applied_values(
-                    draft,
+                    target,
                     tuple(entry.item for entry in selected_entries),
                     exc.result,
                 )
@@ -597,7 +609,7 @@ class WritebackService:
             tuple(entry.item.session_id for entry in selected_entries),
             written,
             values=applied_values(
-                draft, tuple(entry.item for entry in selected_entries), outcome
+                target, tuple(entry.item for entry in selected_entries), outcome
             )
             if capture_values
             else (),
@@ -655,9 +667,9 @@ class WritebackService:
         origin: CommandOrigin = _GUI_ORIGIN,
         on_applied: Callable[[tuple[WritebackApplied, ...]], None] | None = None,
     ) -> list[WritebackWritten]:
-        """Edit sequentially and return actual fixed-target before/after values.
+        """Edit sequentially and return selected-point before/after values.
 
-        Read the captured destination before application, then use each write
+        Read the currently selected destination before application, then use each write
         owner's committed value; no postcommit destination read is needed.
         Targets in receipts are concrete paths resolved from the creation capture.
         Empty changes are a no-op. Edit failures, including a listed module
@@ -690,7 +702,7 @@ class WritebackService:
                 self._module_spec(entry)
             items.append(entry.item)
         paths = [destination_path(item, parameters) for item in items]
-        current = self._write.read_target(parameters.target, roles=parameters.roles)
+        current = self._write.read_target(self._current_target())
         before = [
             read_destination_value(self._write, draft, item, current, path)
             for item, path in zip(items, paths, strict=True)
@@ -842,16 +854,18 @@ class WritebackService:
             entry.proposed_summary = self._format_value_summary(item.record)
         elif isinstance(item, ParameterWriteback):
             current = (
-                None if parameters is None else parameters.lookup(item.target_name)
+                None
+                if parameters is None
+                else destination_value(
+                    item, parameters, destination_path(item, parameters)
+                )
             )
-            entry.current_summary = self._format_value_summary(
-                current.value if current is not None and current.present else None
-            )
+            entry.current_summary = self._format_value_summary(current)
             entry.proposed_summary = self._format_value_summary(item.proposed_value)
         elif isinstance(item, ModuleWriteback):
             exists = False
             if parameters is not None:
-                path = parameters.library_key(item.target_name)
+                path = destination_path(item, parameters)
                 exists = path in parameters.library.module_keys()
             entry.current_summary = "present" if exists else "— not present"
             action = "update" if exists else "create"

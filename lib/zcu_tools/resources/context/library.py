@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
+from copy import deepcopy
 from pathlib import Path
 from types import TracebackType
 from typing import Literal
@@ -18,6 +19,7 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    RootModel,
     TypeAdapter,
     ValidationError,
     model_validator,
@@ -198,6 +200,54 @@ def _delete_entry(
             raise ValueError(f"Invalid library partition: {path!r}")
 
 
+class LibraryContent(RootModel[YamlValue]):
+    """Opaque captured library sections; requested roots are decoded by this owner.
+
+    root may be missing (None) or an older unused shape. Construction never
+    validates Specs. Accessing a malformed used section raises ValueError.
+    """
+
+    root: YamlValue = None
+
+    def keys(self, *, waveform: bool) -> tuple[str, ...]:
+        """List recorded roots in the requested family, without decoding Specs.
+
+        Missing library content or malformed used containers raise ValueError;
+        absent optional partitions contribute no keys. Other families stay opaque.
+        """
+        if not isinstance(self.root, dict) or not isinstance(
+            components := self.root.get("components"), dict
+        ):
+            raise ValueError("library components must be a mapping")
+        partitions = ("waveforms",) if waveform else ("pulses", "readout", "reset")
+        roots: list[str] = []
+        for component, library in components.items():
+            if not isinstance(library, dict):
+                raise ValueError(f"library {component}: expected mapping")
+            for partition in partitions:
+                names = library.get(partition, {})
+                if not isinstance(names, dict):
+                    raise ValueError(
+                        f"library {component}.{partition}: expected mapping"
+                    )
+                for name in names:
+                    root = f"{component}.{partition}.{name}"
+                    _root_parts(root, kind="waveform" if waveform else "module")
+                    roots.append(root)
+        return tuple(sorted(roots))
+
+    def spec(self, path: str) -> YamlValue:
+        """Copy one concrete Spec; missing roots raise KeyError, bad sections ValueError."""
+        node = self.root
+        for part in ("components", *path.split(".")):
+            if not isinstance(node, dict):
+                raise ValueError(f"library {path}: expected mapping at {part}")
+            if part not in node:
+                raise KeyError(f"library {path}: missing {part}")
+            node = node[part]
+        return deepcopy(node)
+
+
 class LibrarySnapshot:
     """An independent memory-only document and fixed ModuleResolver.
 
@@ -216,13 +266,35 @@ class LibrarySnapshot:
         _validate_names(document)
         self._document = document.model_copy(deep=True)
         self._assets = assets
+        self._content: LibraryContent | None = None
+
+    @classmethod
+    def from_content(cls, content: LibraryContent) -> LibrarySnapshot:
+        """Restore opaque captured content; validate only requested roots on use."""
+        result = cls(
+            ModuleLibraryDocument(format="zcu.module-library", format_version="2.0")
+        )
+        result._content = content.model_copy(deep=True)
+        return result
+
+    def content(self) -> LibraryContent:
+        """Copy captured content without decoding unused sections or Specs."""
+        if self._content is not None:
+            return self._content.model_copy(deep=True)
+        return LibraryContent(
+            _YAML_VALUE.validate_python(self._document.model_dump(mode="python"))
+        )
 
     def document(self) -> ModuleLibraryDocument:
         """Copy the complete working-unit document without I/O."""
+        if self._content is not None:
+            return ModuleLibraryDocument.model_validate(self._content.root)
         return self._document.model_copy(deep=True)
 
     def module_keys(self) -> tuple[str, ...]:
         """Return sorted concrete roots in the three module partitions."""
+        if self._content is not None:
+            return self._content.keys(waveform=False)
         return tuple(
             sorted(
                 f"{component}.{partition}.{name}"
@@ -238,6 +310,8 @@ class LibrarySnapshot:
 
     def waveform_keys(self) -> tuple[str, ...]:
         """Return sorted concrete roots in the waveforms partition."""
+        if self._content is not None:
+            return self._content.keys(waveform=True)
         return tuple(
             sorted(
                 f"{component}.waveforms.{name}"
@@ -253,6 +327,10 @@ class LibrarySnapshot:
     def module_spec(self, path: str) -> ModuleSpec:
         """Copy a module Spec; invalid root/kind raises ValueError, missing KeyError."""
         component, partition, name = _root_parts(path, kind="module")
+        if self._content is not None:
+            return TypeAdapter(ModuleSpec).validate_python(
+                self._content.spec(path), extra="ignore"
+            )
         library = self._document.components[component]
         match partition:
             case "pulses":
@@ -268,6 +346,10 @@ class LibrarySnapshot:
     def waveform_spec(self, path: str) -> WaveformSpec:
         """Copy a waveform Spec; invalid root/kind raises ValueError, missing KeyError."""
         component, _, name = _root_parts(path, kind="waveform")
+        if self._content is not None:
+            return TypeAdapter(WaveformSpec).validate_python(
+                self._content.spec(path), extra="ignore"
+            )
         return (
             self._document.components[component].waveforms[name].model_copy(deep=True)
         )

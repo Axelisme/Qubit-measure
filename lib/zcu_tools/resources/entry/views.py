@@ -243,7 +243,9 @@ def document_fields(
     return tuple(rows)
 
 
-def document_unit(document: SetupDocument | PointDocument | ParameterContent, path: str) -> str | None:
+def document_unit(
+    document: SetupDocument | PointDocument | ParameterContent, path: str
+) -> str | None:
     """Read a fixed field's static schema unit at an actual dotted path.
 
     Return the nonempty json_schema_extra.unit label without converting values.
@@ -272,7 +274,9 @@ def document_unit(document: SetupDocument | PointDocument | ParameterContent, pa
     return None
 
 
-def document_value(document: SetupDocument | PointDocument | ParameterContent, path: str) -> YamlValue:
+def document_value(
+    document: SetupDocument | PointDocument | ParameterContent, path: str
+) -> YamlValue:
     """Read an actual dotted component/general path from this document only.
 
     Return an isolated working-unit YAML value, including explicit null and
@@ -283,6 +287,8 @@ def document_value(document: SetupDocument | PointDocument | ParameterContent, p
     forward-minor data stays hidden. Roles are not expanded here.
     """
     parts = _path_parts(path)
+    if isinstance(document, ParameterContent):
+        return document.value(path)
     node: object = document if parts[0] == "general" else document.components
     for index, part in enumerate(parts):
         prefix = ".".join(parts[: index + 1])
@@ -293,6 +299,24 @@ def document_value(document: SetupDocument | PointDocument | ParameterContent, p
         else:
             raise AttributeError(f"{prefix}: path {path!r} is not readable")
     return _logical_value(node)
+
+
+def _content_path(
+    document: ParameterContent, parts: list[str], roles: Mapping[str, AliasValue]
+) -> str:
+    prefix = parts[0]
+    if prefix == "general":
+        return ".".join(parts)
+    names = document.component_names()
+    if prefix in names:
+        return ".".join(parts)
+    if prefix in roles:
+        target = roles[prefix]
+        if isinstance(target, str) and target in names:
+            return ".".join((target, *parts[1:]))
+    raise RoleResolutionError(
+        prefix, None, None, f"Unknown parameter namespace {prefix!r}"
+    )
 
 
 def resolve_path(
@@ -314,6 +338,17 @@ def resolve_path(
     No I/O, model validation, serialization or mutation occurs.
     """
     parts = _path_parts(path)
+    if isinstance(document, ParameterContent):
+        return _content_path(document, parts, roles)
+    return _typed_path(document, parts, roles, reserved_names)
+
+
+def _typed_path(
+    document: PointDocument,
+    parts: list[str],
+    roles: Mapping[str, AliasValue],
+    reserved_names: Collection[str],
+) -> str:
     prefix = parts[0]
     namespaces: list[str] = []
     if prefix in roles:
@@ -322,10 +357,8 @@ def resolve_path(
         namespaces.append("component")
     if (
         prefix == "general"
-        or (document.general is not None and (
-            prefix in type(document.general).model_fields
-            or prefix in (document.general.model_extra or {})
-        ))
+        or prefix in type(document.general).model_fields
+        or prefix in (document.general.model_extra or {})
     ):
         namespaces.append("general")
     if prefix in reserved_names:
@@ -431,7 +464,9 @@ def add_component_to_draft(
     draft.components[name] = component
 
 
-def document_meta(document: SetupDocument | PointDocument | ParameterContent, path: str) -> YamlMap | None:
+def document_meta(
+    document: SetupDocument | PointDocument | ParameterContent, path: str
+) -> YamlMap | None:
     """Return this document's isolated opaque metadata for a dotted path, or None.
 
     Invalid empty paths or empty path segments raise ValueError. The value at
