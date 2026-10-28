@@ -36,7 +36,7 @@ class EntryListReply(TypedDict):
 class PointFile(TypedDict):
     """Installed point file: document kind, absolute path and raw-byte SHA-256.
 
-    revision is None only for an absent aliases file.
+    revision is None for an absent library or aliases file.
     """
 
     document: Literal["parameters", "library", "aliases"]

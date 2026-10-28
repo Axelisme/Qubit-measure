@@ -212,9 +212,9 @@ def test_unsafe_point_label_returns_invalid_params_without_side_effects(
     ("source_file", "invalid_content"),
     [
         ("module_cfg.yaml", "modules: [\n"),
-        ("module_cfg.yaml", None),
-        ("meta_info.json", "{broken"),
-        ("meta_info.json", "null"),
+        ("point.yaml", None),
+        ("point.yaml", "{broken"),
+        ("point.yaml", "null"),
     ],
 )
 def test_invalid_context_source_and_occupied_directory_preserve_selection(
@@ -282,6 +282,71 @@ def test_invalid_context_source_and_occupied_directory_preserve_selection(
     finally:
         bridge.disconnect()
         sock.close()
+        fx.stop()
+
+
+@pytest.mark.uses_wall_clock
+def test_missing_library_allows_clone_and_use_without_creating_files(
+    qapp, tmp_path: Path
+) -> None:
+    fx = Fixture(project_root=str(tmp_path), empty_project=True)
+    fx.start()
+    bridge, invoke = mcp_client(fx.service.port, tmp_path)
+    try:
+        invoke("connect", {"port": fx.service.port})
+        entry = invoke("rpc_call", {"method": "entry.new", "params": {"name": "q"}})
+        invoke("rpc_call", {"method": "point.new", "params": {"label": "source"}})
+        invoke(
+            "rpc_call",
+            {
+                "method": "context.set_parameter",
+                "params": {"path": "general.ext.freq", "value": 5.0},
+            },
+        )
+        files = invoke("rpc_call", {"method": "entry.info"})["files"]
+        library_source = Path(
+            next(item["path"] for item in files if item["document"] == "library")
+        )
+        invoke("rpc_call", {"method": "point.new", "params": {"label": "active"}})
+        library_source.unlink()
+        source_files = {
+            path: path.read_bytes()
+            for path in library_source.parent.rglob("*")
+            if path.is_file()
+        }
+        library_copy = library_source.parent.parent / "copy" / library_source.name
+
+        for method, params, label in (
+            ("point.new", {"label": "copy", "clone_from": "source"}, "copy"),
+            ("point.use", {"label": "source"}, "source"),
+        ):
+            assert invoke("rpc_call", {"method": method, "params": params}) == {
+                "kind": "saved_point",
+                "entry_name": entry["name"],
+                "point": label,
+            }
+            assert selection(invoke) == {
+                "active": label,
+                "labels": ["active", "copy", "source"],
+            }
+            files = invoke("rpc_call", {"method": "entry.info"})["files"]
+            assert next(item for item in files if item["document"] == "library") == {
+                "document": "library",
+                "path": str(library_copy if label == "copy" else library_source),
+                "revision": None,
+            }
+            snapshot = invoke("rpc_call", {"method": "context.snapshot"})
+            assert snapshot["library"]["components"] == {}
+            assert snapshot["point"]["general"]["ext"]["freq"] == 5.0
+            assert not library_source.exists()
+            assert not library_copy.exists()
+            assert {
+                path: path.read_bytes()
+                for path in library_source.parent.rglob("*")
+                if path.is_file()
+            } == source_files
+    finally:
+        bridge.disconnect()
         fx.stop()
 
 

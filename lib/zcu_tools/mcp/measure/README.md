@@ -46,15 +46,23 @@ Agent 直接讀寫這些檔案，固定工具不提供參數／modules／aliases
    Path 是絕對路徑，revision 是已安裝 bytes 的 SHA-256。
    Aliases 的 revision 是選取時觀察到的 bytes hash，不保證內容有效。
    壞 aliases 不擋參數與 library，使用 alias 時才報當次原錯。
-   Aliases 尚無檔案時 revision 為 null；未選 point 時 files 為 []。
+   Point library 或 aliases 尚無檔案時 revision 為 null，path 仍是預期的絕對位置。
+   缺 library 的 point 可以選用，library 內容為空，讀取不建檔。未選 point 時 files 為 []。
 2. 依 path 直接讀檔。外部候選尚未通過驗證時，磁碟內容可能與已安裝版本不同。
    Status 不讀檔，也不把未驗證候選當成現值。
 3. 修改前確認自己是 holder，保留該筆已安裝 revision，然後編輯對應檔案。
    檔案系統不執行 GUI 的 holder 檢查，取得控制權不能省略。
 4. 呼叫 `rpc_call(method="context.reload", params={"path": path, "expected_revision": revision})`。
-   expected_revision 必須明填，只有預期 aliases 缺檔時可填 null。
+   expected_revision 必須明填，預期 library 或 aliases 缺檔時填 null。
    Owner 比對已安裝版本，再讀取、驗證、安裝磁碟候選並發布事件。
    成功回 `{document, path, revision}`，revision 是新安裝版本。
+
+首次建立 point library 時，先取得 revision=null，再於該 path 寫入完整合法的
+`zcu.module-library` 2.0 文件，接著以 `expected_revision: null` 呼叫 `context.reload`。
+Owner 驗證後才安裝，既有 Tab／Run capture 不變。
+GUI library 編輯或 writeback 首次觸及 library 時，owner 會在單檔交易內建立文件。
+若外部已先建檔，帶 null 的 library writer 回 `revision_mismatch`，不覆寫外部內容。
+Setup library 缺檔行為不變，不自動補建。
 
 驗證失敗會回路徑與原因，owner 保留舊記憶體，不改磁碟候選。
 Revision 不符時重讀 files 與檔案，再決定是否修改，不自動覆寫或重試。
