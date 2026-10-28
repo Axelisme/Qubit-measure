@@ -29,6 +29,7 @@ def test_mixed_history_dry_run_apply_backup_and_idempotence(tmp_path: Path) -> N
     assert list(tmp_path.iterdir()) == [path]
     (applied,) = upgrade_record_files((path,), device_name="bias", apply=True)
     assert applied.status == "applied"
+    assert not list(path.parent.glob("*.lock"))
     assert applied.backup_path is not None
     assert applied.backup_path.read_bytes() == original
     assert [json.loads(line) for line in path.read_bytes().splitlines()] == [
@@ -207,7 +208,7 @@ def test_backup_precedes_atomic_replace_and_survives_publication_failure(
     if fail_replace:
         assert result.error == "publication unavailable"
         assert path.read_bytes() == original
-    assert set(tmp_path.iterdir()) == {path, result.backup_path, Path(f"{path}.lock")}
+    assert set(tmp_path.iterdir()) == {path, result.backup_path}
 
 
 def test_unresolvable_source_rejects_without_stopping_later_files(
