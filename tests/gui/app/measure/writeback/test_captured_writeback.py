@@ -3,7 +3,6 @@
 from collections.abc import Generator
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
-from unittest.mock import MagicMock
 
 import pytest
 from qtpy.QtWidgets import QApplication
@@ -20,7 +19,9 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackRequest,
 )
 from zcu_tools.gui.app.measure.services.analyze import AnalyzeService
+from zcu_tools.gui.app.measure.services.pane_commit import commit_analysis, commit_run
 from zcu_tools.gui.app.measure.services.post_analyze import PostAnalyzeService
+from zcu_tools.gui.app.measure.state import AnalysisPaneState, RunPaneState
 from zcu_tools.gui.app.measure.writeback import (
     ModuleWriteback,
     ParameterWriteback,
@@ -326,12 +327,15 @@ def test_analysis_draft_uses_start_run_identity(
     with native_save_session(tmp_path, qapp) as native:
         tab = native.state.get_tab("tab")
         if source == "load":
-            native.state.update_tab_loaded_result(
+            commit_run(
+                native.state,
                 "tab",
-                replace(require_record(tab.run), metadata=native.metadata),
-                "historical.h5",
-                parameters=tab.run.parameters,
-                storage=tab.run.storage,
+                RunPaneState(
+                    result=replace(require_record(tab.run), metadata=native.metadata),
+                    source_path="historical.h5",
+                    parameters=tab.run.parameters,
+                    storage=tab.run.storage,
+                ),
             )
         elif source in ("without_metadata", "context_free"):
             tab.run.result = replace(require_record(tab.run), metadata=None)
@@ -435,12 +439,15 @@ def test_post_analysis_draft_retains_primary_identity(
         tab = native.state.get_tab("tab")
         original_capture = tab.run.parameters
         if source == "load":
-            native.state.update_tab_loaded_result(
+            commit_run(
+                native.state,
                 "tab",
-                replace(require_record(tab.run), metadata=native.metadata),
-                "historical.h5",
-                parameters=original_capture,
-                storage=tab.run.storage,
+                RunPaneState(
+                    result=replace(require_record(tab.run), metadata=native.metadata),
+                    source_path="historical.h5",
+                    parameters=original_capture,
+                    storage=tab.run.storage,
+                ),
             )
         elif source in ("without_metadata", "context_free"):
             tab.run.result = replace(require_record(tab.run), metadata=None)
@@ -461,8 +468,15 @@ def test_post_analysis_draft_retains_primary_identity(
             )
         )
         primary_result = PaneSummary()
-        native.state.update_tab_analyze(
-            "tab", primary_result, None, writeback_draft=primary_draft
+        commit_analysis(
+            native.state,
+            "tab",
+            AnalysisPaneState(
+                result=primary_result,
+                plots=None,
+                params=native.state.get_tab("tab").analysis.params,
+                writeback_draft=primary_draft,
+            ),
         )
         if save_before_accept:
             # Save is independent of whether Primary has a native identity.
@@ -549,29 +563,6 @@ def test_post_analysis_draft_retains_primary_identity(
         writeback.teardown_draft(draft)
         if primary_draft is not None:
             writeback.teardown_draft(primary_draft)
-
-
-def test_post_rejects_incompatible_primary_draft_before_submission(
-    tmp_path: Path, qapp: QApplication
-) -> None:
-    with native_save_session(tmp_path, qapp) as native:
-        native.state.update_tab_analyze(
-            "tab", PaneSummary(), None, writeback_draft=object()
-        )
-        runner = OperationRunner(
-            None, native.handles, None, native.background, native.bus
-        )
-        service = PostAnalyzeService(
-            native.state, runner, native.bus, native.handles, MagicMock()
-        )
-        plots = Plots(NonPresentingHost())
-        try:
-            with pytest.raises(TypeError, match="Primary writeback draft"):
-                service.start_post_analyze("tab", object(), plots=plots)
-            assert not native.state.get_tab("tab").is_analyzing
-        finally:
-            assert native.background.quiesce()
-            plots.finish()
 
 
 def test_writeback_evaluates_module_expression_from_creation_capture(

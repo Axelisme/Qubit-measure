@@ -13,7 +13,9 @@ from zcu_tools.datafile import Container, ContainerAttrs, JsonObject, save
 from zcu_tools.experiment.metadata import RunMetadata, RunSnapshot, SoftwareProvenance
 from zcu_tools.gui.app.measure.controller import Controller
 from zcu_tools.gui.app.measure.registry import Registry
+from zcu_tools.gui.app.measure.services.pane_commit import commit_run
 from zcu_tools.gui.app.measure.services.results_index import scan_results
+from zcu_tools.gui.app.measure.state import RunPaneState
 from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 from zcu_tools.gui.control_identity import ControlIdentity
 from zcu_tools.resources.entry import AcquiredPayload, LedgerEvent, ResultEntry
@@ -213,10 +215,16 @@ def live_ui(
         )
         tab_id = ctrl.tab_control.new_tab("saving")
         original = session.state.get_tab("tab")
-        session.state.update_tab_result(
+        commit_run(
+            session.state,
             tab_id,
-            replace(require_record(original.run), metadata=session.metadata),
-            parameters=original.run.parameters,
+            RunPaneState(
+                result=replace(require_record(original.run), metadata=session.metadata),
+                storage=None
+                if original.run.parameters is None
+                else original.run.parameters.storage,
+                parameters=original.run.parameters,
+            ),
         )
         window = MainWindow(
             ctrl, templates=lambda: {}, dialog_presenter=RecordingDialogPresenter()

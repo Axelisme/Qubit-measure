@@ -10,6 +10,16 @@ from zcu_tools.gui.app.measure.adapter import (
     PostAnalyzeRequest,
     SessionEnv,
 )
+from zcu_tools.gui.app.measure.services.pane_commit import (
+    commit_analysis,
+    commit_post_analysis,
+    commit_run,
+)
+from zcu_tools.gui.app.measure.state import (
+    AnalysisPaneState,
+    PostAnalysisPaneState,
+    RunPaneState,
+)
 from zcu_tools.plotting.plots import Plots
 
 from tests.gui._qt_waits import qt_until
@@ -61,8 +71,18 @@ def test_post_start_receipt_binds_recovery(tmp_path, qapp):
     sock = open_client(fx.service.port)
     fx.registry.register("tone-cost", ToneAdapter)
     tab = fx.ctrl.tab_control.new_tab("tone-cost")
-    fx.state.update_tab_result(tab, RunRecord(None, SampleResult(np.zeros(6))))
-    fx.state.update_tab_analyze(tab, SampleAnalysis(peak=1.0), None)
+    commit_run(
+        fx.state, tab, RunPaneState(result=RunRecord(None, SampleResult(np.zeros(6))))
+    )
+    commit_analysis(
+        fx.state,
+        tab,
+        AnalysisPaneState(
+            result=SampleAnalysis(peak=1.0),
+            plots=None,
+            params=fx.state.get_tab(tab).analysis.params,
+        ),
+    )
     fx.state.update_tab_post_analyze_param_instance(tab, EmptyParams())
     try:
         response = call(sock, "tab.post_analyze", {"tab_id": tab, "updates": {}})
@@ -84,8 +104,15 @@ def test_post_start_receipt_binds_recovery(tmp_path, qapp):
             sock, "tab.get_post_analyze_result", started["recovery"]["params"]
         )
         assert recovered["result"]["summary"] == {"peak": 1.0}
-        fx.state.update_tab_post_analyze(
-            tab, SampleAnalysis(peak=2.0), None, source_operation_id=999
+        commit_post_analysis(
+            fx.state,
+            tab,
+            PostAnalysisPaneState(
+                result=SampleAnalysis(peak=2.0),
+                plots=None,
+                params=fx.state.get_tab(tab).post_analysis.params,
+                source_operation_id=999,
+            ),
         )
         superseded = call(
             sock, "tab.get_post_analyze_result", started["recovery"]["params"]

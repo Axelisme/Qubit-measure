@@ -19,6 +19,7 @@ from zcu_tools.gui.app.measure.services.tab import TabService
 from zcu_tools.gui.app.measure.services.tab_control import TabControlFacet
 from zcu_tools.gui.app.measure.services.workspace import WorkspaceService
 from zcu_tools.gui.app.measure.state import State
+from zcu_tools.gui.app.measure.writeback import WritebackService
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.form import FormEnv, FormInput, FormModel
@@ -100,7 +101,9 @@ def test_reload_preserves_config_order_selection_and_uses_new_instances(
     second = app.controls.new_tab("demo")
     app.state.set_active_tab(first)
     app.state.get_tab(first).run.result = RunRecord(None, object())
-    draft = object()
+    draft = WritebackService(MagicMock(), arb_names=lambda: ()).create_draft(
+        [], parameters=None, experiment_name="demo"
+    )
     app.state.get_tab(first).analysis.writeback_draft = draft
     expected = app.workspace.capture_session()
     closed: list[str] = []
@@ -115,7 +118,7 @@ def test_reload_preserves_config_order_selection_and_uses_new_instances(
     assert set(app.state.list_tab_ids()).isdisjoint({first, second})
     assert all(tab.adapter is NewAdapter for tab in app.state.tabs.values())
     assert all(tab.run.result is None for tab in app.state.tabs.values())
-    app.writeback.teardown_draft.assert_called_once_with(draft)
+    assert not draft.is_active
 
 
 def test_prepare_without_confirmation_does_not_close_tabs(app: App) -> None:

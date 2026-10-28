@@ -22,8 +22,20 @@ from zcu_tools.gui.app.measure.events.tab import (
     TabInteractionChangedPayload,
     TabInteractionFact,
 )
+from zcu_tools.gui.app.measure.services.pane_commit import (
+    commit_analysis,
+    commit_post_analysis,
+    commit_run,
+)
 from zcu_tools.gui.app.measure.services.post_analyze import PostAnalyzeService
-from zcu_tools.gui.app.measure.state import Session, SessionEnv, State
+from zcu_tools.gui.app.measure.state import (
+    AnalysisPaneState,
+    PostAnalysisPaneState,
+    RunPaneState,
+    Session,
+    SessionEnv,
+    State,
+)
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 from zcu_tools.gui.expected_error import (
     ExpectedErrorCategory,
@@ -58,9 +70,17 @@ def _make_state(tab_id: str = "tab1", *, with_analyze: bool = True) -> State:
         tab_id,
         Session(adapter_name="fake", adapter=MagicMock(), cfg=MagicMock()),
     )
-    state.update_tab_result(tab_id, RunRecord(None, object()))
+    commit_run(state, tab_id, RunPaneState(result=RunRecord(None, object())))
     if with_analyze:
-        state.update_tab_analyze(tab_id, object(), None)
+        commit_analysis(
+            state,
+            tab_id,
+            AnalysisPaneState(
+                result=object(),
+                plots=None,
+                params=state.get_tab(tab_id).analysis.params,
+            ),
+        )
     return state
 
 
@@ -114,8 +134,14 @@ def _make_two_tab_state() -> State:
         "tab2",
         Session(adapter_name="fake", adapter=MagicMock(), cfg=MagicMock()),
     )
-    state.update_tab_result("tab2", RunRecord(None, object()))
-    state.update_tab_analyze("tab2", object(), None)
+    commit_run(state, "tab2", RunPaneState(result=RunRecord(None, object())))
+    commit_analysis(
+        state,
+        "tab2",
+        AnalysisPaneState(
+            result=object(), plots=None, params=state.get_tab("tab2").analysis.params
+        ),
+    )
     return state
 
 
@@ -151,8 +177,24 @@ def test_start_post_analyze_submit_rejection_preserves_figures(qapp):
     old_primary.finish()
     old_post = _plots(Figure())
     old_post.finish()
-    state.update_tab_analyze("tab1", object(), old_primary)
-    state.update_tab_post_analyze("tab1", object(), old_post)
+    commit_analysis(
+        state,
+        "tab1",
+        AnalysisPaneState(
+            result=object(),
+            plots=old_primary,
+            params=state.get_tab("tab1").analysis.params,
+        ),
+    )
+    commit_post_analysis(
+        state,
+        "tab1",
+        PostAnalysisPaneState(
+            result=object(),
+            plots=old_post,
+            params=state.get_tab("tab1").post_analysis.params,
+        ),
+    )
     tab = state.get_tab("tab1")
     bus = EventBus()
     received: list[TabInteractionFact] = []
@@ -287,7 +329,16 @@ def test_on_post_analyze_finished_updates_state(qapp):
 def test_on_post_analyze_failed_resets_state(qapp):
     state = _make_state()
     previous = MagicMock(figure=None)
-    state.update_tab_post_analyze("tab1", previous, None, source_operation_id=900)
+    commit_post_analysis(
+        state,
+        "tab1",
+        PostAnalysisPaneState(
+            result=previous,
+            plots=None,
+            params=state.get_tab("tab1").post_analysis.params,
+            source_operation_id=900,
+        ),
+    )
     bus = EventBus()
     received: list[TabInteractionFact] = []
     bus.subscribe(TabInteractionChangedPayload, lambda p: received.append(p.fact))
@@ -368,9 +419,7 @@ def test_two_tabs_settle_their_own_tokens(qapp):
 # ---------------------------------------------------------------------------
 
 
-def test_on_post_analyze_finished_post_processing_raise_settles_failed(
-    qapp, monkeypatch
-):
+def test_on_post_analyze_finished_post_processing_raise_settles_failed(qapp):
     state = _make_state()
     handles = OperationHandles()
     svc, bg = _make_service(state, EventBus(), handles=handles)
@@ -379,9 +428,11 @@ def test_on_post_analyze_finished_post_processing_raise_settles_failed(
         "tab1", post_analyze_params_instance=object(), plots=_plots()
     )
 
-    # Make the State recording raise (post_analyze primary result vanished, etc.).
-    boom = RuntimeError("update boom")
-    monkeypatch.setattr(state, "update_tab_post_analyze", MagicMock(side_effect=boom))
+    # The primary result vanished while the Post worker was running.
+    commit_run(state, "tab1", RunPaneState())
+    boom = RuntimeError(
+        "Cannot record post-analysis for tab 'tab1': no primary analyze result"
+    )
 
     failed: list[tuple[str, str]] = []
     on_post_analyze_failed(svc, lambda tid, err: failed.append((tid, err)))

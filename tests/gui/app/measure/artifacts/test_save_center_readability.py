@@ -15,6 +15,8 @@ from zcu_tools.gui.app.measure.events.completion import (
     SaveDataFinishedPayload,
 )
 from zcu_tools.gui.app.measure.registry import Registry
+from zcu_tools.gui.app.measure.services.pane_commit import commit_analysis, commit_run
+from zcu_tools.gui.app.measure.state import AnalysisPaneState, RunPaneState
 from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 from zcu_tools.resources.entry import ArtifactKey, Output, ResultEntry, SaveLayout
 
@@ -53,10 +55,16 @@ def saving_view(
         )
         tab_id = ctrl.tab_control.new_tab("saving")
         original = session.state.get_tab("tab")
-        session.state.update_tab_result(
+        commit_run(
+            session.state,
             tab_id,
-            replace(require_record(original.run), metadata=session.metadata),
-            parameters=original.run.parameters,
+            RunPaneState(
+                result=replace(require_record(original.run), metadata=session.metadata),
+                storage=None
+                if original.run.parameters is None
+                else original.run.parameters.storage,
+                parameters=original.run.parameters,
+            ),
         )
         ctrl.update_tab_analyze_param_instance(tab_id, PaneParams())
         window = MainWindow(
@@ -82,8 +90,10 @@ def saving_view(
 
 def test_single_artifact_title_and_output_filenames(saving_view) -> None:
     session, ctrl, window, tab_id, center = saving_view
-    session.state.update_tab_analyze(
-        tab_id, PaneSummary(), None, analyze_params_instance=PaneParams()
+    commit_analysis(
+        session.state,
+        tab_id,
+        AnalysisPaneState(result=PaneSummary(), plots=None, params=PaneParams()),
     )
     window.refresh_tab_interaction(tab_id)
     labels = [label.text() for label in center.findChildren(QLabel)]
@@ -150,8 +160,10 @@ def test_paths_use_run_storage_after_switching_entry(
     plots = Plots(NonPresentingHost())
     plots.subplots("fit")
     plots.finish(present=False)
-    session.state.update_tab_analyze(
-        tab_id, PaneSummary(), plots, analyze_params_instance=PaneParams()
+    commit_analysis(
+        session.state,
+        tab_id,
+        AnalysisPaneState(result=PaneSummary(), plots=plots, params=PaneParams()),
     )
     other = ResultEntry.create(
         "different",
