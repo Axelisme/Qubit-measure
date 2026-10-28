@@ -1,6 +1,6 @@
 """Compiled-template planning for one fluxonium without density propagation."""
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from typing import Literal
 
 import numpy as np
@@ -8,11 +8,12 @@ from numpy.typing import NDArray
 
 from zcu_tools.core.simulation import EnvironmentSnapshot, TimelineTemplate
 from zcu_tools.experiment.readout_plan import (
+    ProjectiveRead,
     ReadoutContents,
     ReadoutDrive,
     classify_readout,
     drive_track,
-    readout_contents,
+    logical_event_contents,
 )
 from zcu_tools.resources.single_fluxonium.schema import SingleFluxoniumSettings
 from zcu_tools.simulate.adc import ReadoutPulse
@@ -43,13 +44,18 @@ class SingleFluxoniumPlan:
     cavity_drives: earlier readout-generator pulses per point, absolute ns/GHz,
         pulse-local radians with zero-GHz reference, retained but not solved.
     No model, density or random samples are built. Consumers must not modify
-    these values. Execution supports terminal readout only and rejects earlier
-    cavity drives; their Stark/backaction physics is not modeled here.
+    these values. Triggered earlier blocks project the DC density at their
+    starts. Execution rejects untriggered cavity drives; their Stark/backaction
+    physics is not modeled here.
     """
 
     batch: TimelineBatch
     readout: ReadoutContents
     cavity_drives: tuple[tuple[ReadoutPulse, ...], ...]
+    read_events: tuple[ReadoutContents, ...]
+    """Ordered projective blocks and terminal, including unobserved grids."""
+    projective_reads: tuple[tuple[ProjectiveRead, ...], ...]
+    """Per-point DC rank-1 projection times and associated physical blocks."""
 
 
 def _controls(track: DriveTrack, point: int) -> ControlPulse:
@@ -185,7 +191,7 @@ def plan_template(
     *,
     readout_kind: Literal["pulse", "mux"] = "pulse",
 ) -> SingleFluxoniumPlan:
-    """Convert one complete QICK template to evolution and terminal readout inputs.
+    """Convert one complete QICK template to evolution and logical read events.
 
     settings is validated physical/wiring data; snapshot supplies exactly the live
     DC source value in its native A/V unit. template arrays use us/MHz/degrees.
@@ -200,7 +206,10 @@ def plan_template(
     No forced return to DC or physics calculation occurs. All original points
     occupy one batch, even when their readout times differ. Engine owns segmenting.
 
-    Exactly one configured receiver and terminal readout per point are required.
+    Exactly one configured receiver and terminal pulse block per point are required.
+    Triggered nonterminal blocks become ordered projective reads. Unobserved
+    terminal blocks retain pulses and empty grids. Projective starts enter batch
+    segment boundaries; runtime alone projects densities and continues evolution.
     readout_kind="pulse" requires one tone; "mux" accepts 1..8 coherent tones
     with common start. A None flux_line permits only DC flux and microwaves.
     Earlier readout pulses are retained separately, not treated as microwaves.
@@ -221,12 +230,8 @@ def plan_template(
         readout_kind,
     )
     partition = classify_readout(template, drive, memo)
-    contents = readout_contents(
-        replace(template, events=partition.terminal_slots),
-        drive,
-        template.readouts[0],
-        memo,
-    )
+    read_events = logical_event_contents(template, drive, template.readouts[0], memo)
+    contents = read_events[-1]
     microwave, fast_flux = [], []
     for event in template.events:
         if event.gen_ch == drive.gen_ch:
@@ -242,8 +247,18 @@ def plan_template(
     flux, waveform = _flux_inputs(settings, dc, tuple(fast_flux), contents.end_ns)
     return SingleFluxoniumPlan(
         TimelineBatch(
-            template.points, tuple(microwave), flux, contents.end_ns, waveform
+            template.points,
+            tuple(microwave),
+            flux,
+            contents.end_ns,
+            waveform,
+            segment_boundaries=tuple(
+                tuple(read.start_ns for read in reads)
+                for reads in partition.projective_reads
+            ),
         ),
         contents,
         partition.cavity_drives,
+        read_events,
+        partition.projective_reads,
     )

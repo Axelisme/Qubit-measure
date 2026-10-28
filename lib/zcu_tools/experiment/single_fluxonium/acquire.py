@@ -19,13 +19,13 @@ from zcu_tools.resources.simulation_replay import ReplayAcquire, save_replay
 from zcu_tools.simulate.adc import (
     ChannelReadout,
     PreparedRawShots,
-    ProjectionReadout,
     round_statistics,
     sample_traces,
 )
 from zcu_tools.simulate.evolution import PathDiagnostics
 
 from . import replay
+from .projection import ProjectionDiagnostics
 
 if TYPE_CHECKING:
     from .runtime import SingleFluxoniumSource
@@ -36,8 +36,10 @@ class SingleFluxoniumPreparation:
     """Noiseless acquisition inputs retained across rounds, never measured IQ.
 
     key: content digest including settings, snapshot, controls and layout.
-    populations: read-only (*point_dims,states) DC-state probabilities after ADC
-        normalization. channel: ADC conditional sums with matching state order.
+    populations: read-only (*point_dims,states) terminal DC-state marginals after
+        ADC normalization. channel: event-aligned ADC conditional sums.
+    raw.readout keeps full projection histories and event populations; sampling
+        must use it, not reconstruct independent events from the marginals.
     raw: immutable deferred physical-shot inputs, without a round RNG identity.
     paths: evolution-owned diagnostics, repeated on valid noiseless reuse.
     This record keeps physical and ADC state order together for Source/Acquire.
@@ -48,6 +50,10 @@ class SingleFluxoniumPreparation:
     channel: ChannelReadout
     raw: PreparedRawShots
     paths: PathDiagnostics
+    reuse_keys: tuple[bytes, ...]
+    """All evolution span digests requiring current Engine routing validation."""
+    projection_diagnostics: ProjectionDiagnostics | None = None
+    """Per-point retained histories/pruned mass, or None without projection."""
 
 
 class SingleFluxoniumAcquire:
@@ -94,7 +100,7 @@ class SingleFluxoniumAcquire:
         prepared = owner.prepare(acquire, snapshot, cancel=cancel)
         if acquire.mode == "integrated":
             statistics = round_statistics(
-                ProjectionReadout.unprojected(prepared.populations),
+                prepared.raw.readout,
                 (prepared.channel,),
                 reps=acquire.reps,
                 seed=acquire.root_seed,
@@ -106,7 +112,7 @@ class SingleFluxoniumAcquire:
             )
         else:
             traces = sample_traces(
-                ProjectionReadout.unprojected(prepared.populations),
+                prepared.raw.readout,
                 dict(prepared.raw.batches),
                 reps=acquire.reps,
                 identity=SamplingIdentity(

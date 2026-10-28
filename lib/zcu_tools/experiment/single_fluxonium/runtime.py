@@ -55,6 +55,7 @@ from . import replay
 from .acquire import SingleFluxoniumAcquire, SingleFluxoniumPreparation
 from .drift import CoherenceDrift
 from .numeric import dc_flux
+from .projection import ProjectionRunner
 from .readout import dispersive_resonator, prepare_readout, readout_model
 from .template import SingleFluxoniumPlan, plan_template
 
@@ -112,6 +113,16 @@ def _build_facts(
     except Exception:
         source.close()
         raise
+
+
+def _validate_readout_layout(plans: tuple[SingleFluxoniumPlan, ...]) -> None:
+    expected = tuple(len(event.grids[0]) for event in plans[0].read_events)
+    for index, plan in enumerate(plans[1:], start=1):
+        layout = tuple(len(event.grids[0]) for event in plan.read_events)
+        if layout != expected:
+            raise ValueError(
+                f"template {index} readout layout {layout} differs from template 0 layout {expected}"
+            )
 
 
 def _template_digest(template: TimelineTemplate) -> bytes:
@@ -186,7 +197,7 @@ class SingleFluxoniumSource:
     and one complete preparation survives across acquires. Loss-independent
     projection/eigensystems survive loss changes; full models and preparations
     do not. No noisy result or sampling identity enters retained preparations.
-    readout_kind selects one terminal pulse or coherent mux tones on the same
+    readout_kind selects one pulse or coherent mux tones per block on the same
     physical cavity. It does not add receivers, coupling or hardware routes.
     runtime selects execution resources through SingleFluxoniumRuntimeOptions;
     None uses that record's defaults.
@@ -398,7 +409,14 @@ class SingleFluxoniumSource:
 
         Requires an admitted request (see open_acquire) and matching DC snapshot.
         Complete template bytes, layout, settings, snapshot and numeric versions
-        key a single resident. Evolution alone segments the complete timelines.
+        key a single resident. All templates must share their logical event/grid
+        layout; conflicts raise ValueError naming templates before evolution.
+        Triggered nonterminal blocks project into DC rank-1 outcomes and continue
+        through Engine.evolve. Untriggered cavity drives raise ValueError.
+        Per-point pruning follows numerics.projection_prune_floor; empty surviving
+        outcomes raise ValueError naming the point and floor. Preparation retains
+        full event histories and author-only projection_diagnostics.
+        Evolution alone segments the timelines between projection starts.
         ADC normalization is the sole probability repair. Errors clear partial
         preparations; they propagate without a result.
         cancel is checked between evolution chunks; None disables cancellation.
@@ -425,45 +443,70 @@ class SingleFluxoniumSource:
             if (
                 self._prepared is not None
                 and self._prepared.key == key
-                and self.engine.reuse(facts.source, key)
+                and all(
+                    self.engine.reuse(facts.source, span_key, cancel=cancel)
+                    for span_key in self._prepared.reuse_keys
+                )
             ):
                 self._prepared.paths.warn_exceeded()
                 return self._prepared
             plans = tuple(
                 self.plan_template(snapshot, template) for template in request.templates
             )
+            _validate_readout_layout(plans)
             if any(any(plan.cavity_drives) for plan in plans):
                 raise ValueError(
-                    "single fluxonium supports only terminal readout; earlier readout-generator pulses are unsupported"
+                    "single fluxonium does not support untriggered cavity drives"
                 )
-            evolved = self.engine.evolve(
-                facts.source,
-                tuple(plan.batch for plan in plans),
-                cancel=cancel,
-                reuse_key=key,
-            )
             dc = facts.source.model((0,))
             basis = Basis(dc.identity, facts.readout.state_labels, dc.eigenvectors)
-            probabilities = np.empty((prod(request.point_dims), len(basis.labels)))
-            probabilities[evolved.points] = normalize_populations(
-                batch_populations(evolved.densities, basis, basis)
-            )
-            probabilities = probabilities.reshape(
-                (*request.point_dims, len(basis.labels))
-            )
+            diagnostics = None
+            reuse_keys = (key,)
+            if any(any(plan.projective_reads) for plan in plans):
+                projected = ProjectionRunner(
+                    self.engine,
+                    facts.source,
+                    basis,
+                    self.settings.numerics.projection_prune_floor,
+                    cancel,
+                ).prepare(plans, request.point_dims, key)
+                readout = projected.readout
+                paths, reuse_keys = projected.paths, projected.reuse_keys
+                diagnostics = projected.diagnostics
+                probabilities = np.sum(
+                    readout.weights[..., None] * readout.populations[-1], axis=-2
+                )
+            else:
+                evolved = self.engine.evolve(
+                    facts.source,
+                    tuple(plan.batch for plan in plans),
+                    cancel=cancel,
+                    reuse_key=key,
+                )
+                probabilities = np.empty((prod(request.point_dims), len(basis.labels)))
+                probabilities[evolved.points] = normalize_populations(
+                    batch_populations(evolved.densities, basis, basis)
+                )
+                probabilities = probabilities.reshape(
+                    (*request.point_dims, len(basis.labels))
+                )
+                readout, paths = (
+                    ProjectionReadout.unprojected(probabilities),
+                    evolved.paths,
+                )
             probabilities.setflags(write=False)
             channel, batch = prepare_readout(
                 self.settings, facts.readout, plans, request
             )
             raw = PreparedRawShots(
-                ProjectionReadout.unprojected(probabilities),
+                readout,
                 {channel.channel: batch},
                 reps=request.reps,
                 rtol=self.settings.numerics.solver.rtol,
                 atol=self.settings.numerics.solver.atol,
             )
             self._prepared = SingleFluxoniumPreparation(
-                key, probabilities, channel, raw, evolved.paths
+                key, probabilities, channel, raw, paths, reuse_keys, diagnostics
             )
             return self._prepared
         except Exception:

@@ -74,6 +74,38 @@ def readout_model(
     )
 
 
+def _event_batch(
+    plan: SingleFluxoniumPlan, model: ReadoutModel, reference: float
+) -> ReadoutBatch:
+    localized = tuple(
+        local_readout_pulses(content.pulses, reference) for content in plan.read_events
+    )
+    if len(plan.read_events) == 1:
+        content = plan.read_events[0]
+        return ReadoutBatch(
+            model,
+            tuple(
+                (ReadoutEvent(pulses, grids),)
+                for pulses, grids in zip(localized[0], content.grids, strict=True)
+            ),
+            content.inverse,
+        )
+    return ReadoutBatch(
+        model,
+        tuple(
+            tuple(
+                ReadoutEvent(
+                    pulses[content.inverse[point]],
+                    content.grids[content.inverse[point]],
+                )
+                for content, pulses in zip(plan.read_events, localized, strict=True)
+            )
+            for point in range(len(plan.batch.points))
+        ),
+        np.arange(len(plan.batch.points), dtype=np.int64),
+    )
+
+
 def prepare_readout(
     settings: SingleFluxoniumSettings,
     physical: ReadoutModel,
@@ -142,27 +174,18 @@ def prepare_readout(
         rtol=settings.numerics.solver.rtol,
         atol=settings.numerics.solver.atol,
     )
-    pulses, grids, conditionals = [], [], []
+    events, conditionals = [], []
     content_index = np.empty(prod(request.point_dims), dtype=np.int64)
     for plan in plans:
-        content = plan.readout
-        local = local_readout_pulses(content.pulses, reference)
-        batch = ReadoutBatch(
-            model,
-            tuple(
-                (ReadoutEvent(pulses, grids),)
-                for pulses, grids in zip(local, content.grids, strict=True)
-            ),
-            content.inverse,
-        )
+        batch = _event_batch(plan, model, reference)
         conditional = solver.responses(batch)
-        content_index[plan.batch.points] = len(pulses) + content.inverse
-        pulses.extend(local)
-        grids.extend(content.grids)
+        content_index[plan.batch.points] = len(events) + batch.content_index
+        events.extend(batch.events)
         conditionals.append(conditional)
     conditional = ConditionalSums(
         np.concatenate([value.sums for value in conditionals]),
         conditionals[0].sample_counts,
+        event_indices=conditionals[0].event_indices,
     )
     return (
         ChannelReadout(
@@ -170,10 +193,7 @@ def prepare_readout(
         ),
         ReadoutBatch(
             model,
-            tuple(
-                (ReadoutEvent(pulses, grids),)
-                for pulses, grids in zip(tuple(pulses), tuple(grids), strict=True)
-            ),
+            tuple(events),
             content_index,
         ),
     )

@@ -1,6 +1,6 @@
 # Single-fluxonium acquisition
 
-**Last updated:** 2026-10-28 (UTC), numeric drift owner
+**Last updated:** 2026-10-28 (UTC), projective readout
 
 **Readers:** framework-dev, lab-author, agent. Compose complete fluxonium timelines with one physical readout cavity.
 
@@ -35,11 +35,37 @@ relative to live DC in 1e-3 Phi0 steps. Equal adjacent levels merge.
 Ideal constant pulses use abrupt schedule levels without a continuous waveform.
 The planner never forces the endpoint back to DC.
 
-Only terminal readout is supported. The planner identifies earlier readout
-pulses as `cavity_drives`; execution raises `ValueError` before evolution when
-any are present. It does not ignore those pulses or approximate their Stark
-shifts, cavity memory or backaction. Terminal readout uses the DC model even
+A nonterminal readout block with an ADC trigger causes one projective read at
+its pulse start. Repeated triggers on that block share one projection and CTMC
+path. `SingleFluxoniumPlan.read_events` retains projective blocks followed by
+terminal, with common-origin phases and channel-local grids. An unobserved
+terminal block has empty grids but still ends evolution and contributes its
+state to integrated counts. Untriggered earlier blocks remain `cavity_drives`;
+execution rejects them before evolution. The source does not approximate their
+Stark shifts, cavity memory or backaction. All readout uses the DC model even
 when flux has not returned to DC.
+
+`SingleFluxoniumSource.prepare` projects each density into rank-1 outcomes in the
+retained DC energy basis. It keeps each outcome's full history across later
+reads and continues from that read's start through `Engine.evolve`. ADC CTMC
+jumps during an earlier read affect its IQ only, not later density evolution.
+This approximation does not group outcomes by IQ distinguishability and does
+not add MIST or active reset. Within one preparation, templates must have equal
+projective counts and per-event grid counts. Conflicts raise `ValueError` naming
+the templates and layouts before evolution or sampling.
+
+`numerics.projection_prune_floor` discards global history weights below its
+threshold after each projection, then normalizes survivors per point. The
+finite range is `0 <= floor < 1`, with default `1e-9`; zero disables pruning.
+If a point loses every outcome, preparation raises `ValueError` naming its ID
+and floor. `SingleFluxoniumPreparation.projection_diagnostics` records retained
+history counts per point/event, discarded probability mass relative to the
+original distribution, and evolution call count. Summing a point's discarded
+weights gives its cumulative loss without recounting earlier pruning.
+Span reuse digests include continuation densities and absolute time bounds.
+Every span must pass the engine's routing validation before preparation reuse.
+Without projective reads the source keeps its terminal-only evolution and ADC
+sampling path, including RNG consumption.
 
 ## Physical and ADC composition
 
