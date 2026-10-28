@@ -291,7 +291,9 @@ def test_invalid_drafts_do_not_overwrite_restored_v2_cache(
         assert ui.observe(object_name=field).text == valid
         assert ui.observe(object_name="predictor_axis_trim").checked
         assert ui.observe(object_name="predictor_value_trim").text == ""
-        assert reopened.parameters() == FluxoniumParams(None, 1.0, None)
+        assert ui.observe(object_name="predictor_input_EJ").text == ""
+        assert ui.observe(object_name="predictor_input_fluxonium_EC").text == "1.0"
+        assert ui.observe(object_name="predictor_input_EL").text == ""
         ui.click("Close")
     finally:
         reopened.close()
