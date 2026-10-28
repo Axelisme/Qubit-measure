@@ -9,6 +9,22 @@ import pytest
 from zcu_tools.resources.record_table import JsonlRecordTable
 
 
+def test_missing_run_id_is_reported_without_hiding_other_rows(tmp_path, caplog):
+    path = tmp_path / "history.jsonl"
+    path.write_text(
+        '{"run_id":"a","value":1}\n'
+        '{"value":"foreign row"}\n'
+        '{"run_id":"a","value":2}\n'
+        '{"run_id":"b","value":3}\n',
+        encoding="utf-8",
+    )
+    table = JsonlRecordTable(path)
+    assert table.read()["run_id"].tolist() == ["a", "b"]
+    assert table.latest("a") == {"run_id": "a", "value": 2}
+    assert f"{path}:2" in caplog.text
+    assert "run_id" in caplog.text
+
+
 def test_read_and_latest_preserve_unused_fields_without_metadata_validation(
     tmp_path: Path,
 ) -> None:

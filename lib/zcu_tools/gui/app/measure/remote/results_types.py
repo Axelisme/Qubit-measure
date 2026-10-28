@@ -37,10 +37,23 @@ class ResultRunReply(TypedDict):
     issues: list[str]
 
 
+class ResultItemIssueReply(TypedDict):
+    """An unreadable Database item, without inventing a run identity.
+
+    entry names the Database entry, or null for its root. path is the absolute
+    location that could not be indexed. reason contains its read/path error.
+    """
+
+    entry: str | None
+    path: str
+    reason: str
+
+
 class ResultsListReply(TypedDict):
-    """runs contains every saved run in index order, including unregistered runs."""
+    """runs lists saved runs in index order; issues lists unenumerable items."""
 
     runs: list[ResultRunReply]
+    issues: list[ResultItemIssueReply]
 
 
 class ResultsFigureReply(TypedDict):

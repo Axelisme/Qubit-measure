@@ -1,5 +1,6 @@
 """Strict authored alias data and entry-owned YAML persistence."""
 
+from dataclasses import dataclass
 from hashlib import sha256
 from io import StringIO
 from pathlib import Path
@@ -7,6 +8,7 @@ from tempfile import NamedTemporaryFile
 
 from pydantic import BaseModel, ConfigDict, TypeAdapter
 from ruamel.yaml import YAML
+from ruamel.yaml.error import YAMLError
 
 from zcu_tools.format_version import FormatVersion, YamlMap, validate_header
 from zcu_tools.utils import atomic_replace
@@ -32,6 +34,44 @@ class EntryAliases(BaseModel):
     aliases: dict[str, AliasValue]
 
 
+@dataclass(frozen=True)
+class AliasReadResult:
+    """One raw-byte observation, including a deferred content failure.
+
+    aliases is the parsed table, or an empty table for missing/invalid content.
+    revision hashes the exact observed bytes, including invalid content; None
+    means absent only. error is the original decoding/header/schema exception,
+    or None for a valid table or missing file. Callers must raise error before
+    consuming aliases. Filesystem errors other than absence are not deferred.
+    """
+
+    aliases: EntryAliases
+    revision: DocumentRevision
+    error: Exception | None = None
+
+
+def read_entry_aliases(source: Path) -> AliasReadResult:
+    """Observe aliases once, retaining content errors and the same bytes hash.
+
+    Missing source yields an empty table and revision=None. Invalid UTF-8,
+    YAML, header or schema yields the original error with an empty table, not a
+    valid fallback. Other I/O errors propagate. No files are written.
+    """
+    try:
+        content = source.read_bytes()
+    except FileNotFoundError:
+        return AliasReadResult(
+            EntryAliases(aliases={}), DocumentRevision(source.resolve(), None)
+        )
+    revision = DocumentRevision(source.resolve(), sha256(content).hexdigest())
+    try:
+        raw = YAML(typ="safe").load(content.decode("utf-8"))
+        aliases = parse_entry_aliases(raw, source=source)
+    except (ValueError, YAMLError) as error:
+        return AliasReadResult(EntryAliases(aliases={}), revision, error)
+    return AliasReadResult(aliases, revision)
+
+
 def load_entry_aliases(source: Path) -> EntryAliases | None:
     """Read source as zcu.aliases major 1, preserving authored mapping order.
 
@@ -52,13 +92,12 @@ def load_entry_aliases_with_revision(
     Missing source returns (None, revision=None). Other failures propagate
     without a result, as load_entry_aliases does. No file writes occur.
     """
-    try:
-        content = source.read_bytes()
-    except FileNotFoundError:
-        return None, DocumentRevision(source.resolve(), None)
-    raw = YAML(typ="safe").load(content.decode("utf-8"))
-    aliases = parse_entry_aliases(raw, source=source)
-    return aliases, DocumentRevision(source.resolve(), sha256(content).hexdigest())
+    result = read_entry_aliases(source)
+    if result.error is not None:
+        raise result.error
+    return (
+        None if result.revision.revision is None else result.aliases
+    ), result.revision
 
 
 def parse_entry_aliases(raw: object, *, source: Path) -> EntryAliases:

@@ -1,5 +1,6 @@
 """Append-only, entry-bound record rows; CSV is only an export format."""
 
+import logging
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -13,6 +14,8 @@ from pydantic import (
     TypeAdapter,
     field_validator,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class _RecordRow(BaseModel):
@@ -57,8 +60,9 @@ class JsonlRecordTable:
     This store neither derives quantities nor validates device units.
     Read returns the last complete row for each run_id, not a field-wise merge.
     No files are created until append. I/O and validation failures propagate;
-    incomplete/corrupt lines are never silently skipped. There is no multi-file
-    transaction, concurrent-writer coordination or crash recovery guarantee.
+    rows missing run_id are skipped with a path/line warning; corrupt lines fail.
+    There is no multi-file transaction, concurrent-writer coordination or crash
+    recovery guarantee.
     """
 
     def __init__(self, path: str | Path, *, component: str | None = None) -> None:
@@ -123,8 +127,9 @@ class JsonlRecordTable:
     def _latest_records(self) -> dict[str, dict[str, JsonValue]]:
         """Return last whole JSON rows per run_id in file-occurrence order.
 
-        An absent file returns an empty mapping. Invalid rows raise ValueError
-        naming path and line; other I/O errors propagate. Nested JSON remains nested.
+        An absent file returns an empty mapping. Rows missing run_id are logged
+        and skipped. Other invalid rows raise ValueError naming path and line;
+        I/O errors propagate. Nested JSON remains nested.
         """
         try:
             stream = self._path.open(encoding="utf-8")
@@ -139,7 +144,12 @@ class JsonlRecordTable:
                     if not line.endswith("\n"):
                         raise ValueError("incomplete tail: expected LF")
                     record = TypeAdapter(dict[str, JsonValue]).validate_json(line)
-                    run_id = record.get("run_id")
+                    if "run_id" not in record:
+                        logger.warning(
+                            "%s:%s: skipping row missing run_id", self._path, number
+                        )
+                        continue
+                    run_id = record["run_id"]
                     if not isinstance(run_id, str) or not run_id:
                         raise ValueError("run_id must be a nonempty string")
                 except ValueError as exc:
@@ -156,7 +166,8 @@ class JsonlRecordTable:
         nonempty run_id needed for grouping are checked. Unused fields, NaN and
         metadata are preserved without schema validation. Missing component in
         old rows is left absent, not inferred from this binding or path.
-        Corrupt tails or invalid run_id raise ValueError with path/line;
+        Rows missing run_id are skipped with a logged path/line warning.
+        Corrupt tails or invalid present run_id raise ValueError with path/line;
         I/O failures propagate.
         With flatten=True, nested object keys become dot-separated columns
         (devices.bias.value); lists remain cell values. Distinct source paths
@@ -180,8 +191,9 @@ class JsonlRecordTable:
         """Read one run's latest complete JSON row, or None if absent.
 
         run_id is a nonempty acquisition key. Validate the whole history like
-        read(), checking only JSON objects and run_id, never skipping corrupt
-        siblings or tails. Returned fields are detached and otherwise opaque.
+        read(), skipping missing run_id with a logged warning, but rejecting
+        corrupt siblings or tails. Returned fields are detached and otherwise
+        opaque.
         Old rows without component keep it absent; no name is inferred.
         Missing history returns None; validation and I/O failures propagate.
         """

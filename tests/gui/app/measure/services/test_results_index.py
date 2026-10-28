@@ -353,8 +353,12 @@ def test_member_symlink_escape_is_rejected_on_scan_and_read(project: Path) -> No
     figure.symlink_to(outside)
     with pytest.raises(ValueError, match="escapes"):
         index.read_figure(run.key, figure.name)
-    with pytest.raises(ValueError, match="escapes"):
-        scan_results(project)
+    refreshed = scan_results(project)
+    affected = refreshed.get_run(run.key)
+    assert figure not in affected.figure_paths
+    assert any(str(figure) in issue and "escapes" in issue for issue in affected.issues)
+    assert len(refreshed.runs) == 5
+    assert all(not row.issues for row in refreshed.runs if row.entry != run.entry)
 
 
 @pytest.mark.parametrize(
@@ -376,16 +380,114 @@ def test_reads_reject_replaced_ancestor_roots(project: Path, ancestor: str) -> N
         index.read_analysis(run.key, "analysis.json")
 
 
+@pytest.mark.parametrize("target", ["entry", "runs", "run"])
+def test_unenumerable_paths_have_item_issues_without_hiding_other_entries(
+    project: Path, target: str
+) -> None:
+    source = project / "Database" / "alpha"
+    if target in ("runs", "run"):
+        source /= "runs"
+    if target == "run":
+        source /= f"mux_readout_{_RUN1}"
+    moved = project / "detached"
+    source.rename(moved)
+    source.symlink_to(moved, target_is_directory=True)
+
+    index = scan_results(project)
+
+    assert len(index.runs) == (4 if target == "run" else 3)
+    assert index.get_run(f"beta/mux_readout_{_RUN1}").registered
+    assert len(index.issues) == 1
+    issue = index.issues[0]
+    assert issue.entry == "alpha"
+    assert issue.path == source
+    assert "escapes" in issue.reason
+
+
+@pytest.mark.parametrize("member", ["data.h5", "figures", "analysis"])
+def test_escaped_members_are_excluded_without_hiding_the_run(
+    project: Path, member: str
+) -> None:
+    run_path = _layout(project, "alpha", "mux/readout", _RUN1).run_path
+    source = run_path / member
+    moved = project / "detached"
+    source.rename(moved)
+    source.symlink_to(moved, target_is_directory=moved.is_dir())
+
+    index = scan_results(project)
+
+    assert len(index.runs) == 5
+    run = index.get_run(f"alpha/{run_path.name}")
+    assert any(str(source) in issue and "escapes" in issue for issue in run.issues)
+    if member == "data.h5":
+        assert run.data_path is None
+    elif member == "figures":
+        assert run.figure_paths == ()
+    else:
+        assert run.analysis_paths == ()
+    assert all(not row.issues for row in index.runs if row.entry == "beta")
+
+
+@pytest.mark.parametrize("member", ["figures", "analysis"])
+def test_unreadable_member_directory_is_reported_without_hiding_run(
+    project: Path, member: str
+) -> None:
+    run_path = _layout(project, "alpha", "mux/readout", _RUN1).run_path
+    source = run_path / member
+    source.rename(project / "detached")
+    source.write_text("not a directory", encoding="utf-8")
+
+    index = scan_results(project)
+
+    assert len(index.runs) == 5
+    run = index.get_run(f"alpha/{run_path.name}")
+    assert any(str(source) in issue for issue in run.issues)
+    assert run.data_path == run_path / "data.h5"
+    assert all(not row.issues for row in index.runs if row.entry == "beta")
+
+
 def test_entry_selection_rejects_traversal(project: Path) -> None:
     with pytest.raises(ValueError, match="entry"):
         scan_results(project, entries=("../elsewhere",))
 
 
-def test_corrupt_ledger_is_not_silently_unregistered(project: Path) -> None:
-    ledger = project / "result" / "alpha" / "records" / "ledger.jsonl"
-    ledger.write_text("incomplete", encoding="utf-8")
-    with pytest.raises(ValueError, match="ledger.jsonl"):
-        scan_results(project)
+@pytest.mark.parametrize(
+    "damage", ["missing_setup", "foreign_setup", "partial_ledger", "foreign_ledger"]
+)
+def test_entry_read_failures_do_not_hide_other_results(
+    project: Path, damage: str
+) -> None:
+    entry = project / "result" / "alpha"
+    setup = entry / "setup.yaml"
+    ledger = entry / "records" / "ledger.jsonl"
+    if damage == "missing_setup":
+        setup.unlink()
+    elif damage == "foreign_setup":
+        setup.write_text("format: foreign\n", encoding="utf-8")
+    elif damage == "partial_ledger":
+        with ledger.open("a", encoding="utf-8") as stream:
+            stream.write('{"unfinished":')
+    else:
+        with ledger.open("a", encoding="utf-8") as stream:
+            stream.write('{"foreign": true}\n')
+    (project / "result" / "unrelated-data").mkdir()
+
+    index = scan_results(project)
+
+    assert len(index.runs) == 5
+    alpha = [run for run in index.runs if run.entry == "alpha"]
+    assert len(alpha) == 2
+    assert all(not run.registered for run in alpha)
+    if damage == "missing_setup":
+        assert all(not run.issues for run in alpha)
+    else:
+        failed_path = setup if damage == "foreign_setup" else ledger
+        assert all(
+            any(str(failed_path) in issue for issue in run.issues) for run in alpha
+        )
+    assert index.get_run(f"beta/mux_readout_{_RUN1}").registered
+    assert all(not run.issues for run in index.runs if run.entry != "alpha")
+    assert index.get_run(f"orphan/unknown_{_RUN3}").figure_paths
 
 
 def test_missing_database_is_an_empty_read_only_index(tmp_path: Path) -> None:

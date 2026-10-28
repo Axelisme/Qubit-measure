@@ -109,8 +109,18 @@ def test_duplicate_point_returns_invalid_params_without_side_effects(
         assert failed["error"].get("data") is None
         assert call(sock, "context.snapshot", {})["result"] == before
         assert call(sock, "point.list", {})["result"]["points"] == [
-            {"label": "copy", "description": "retained"},
-            {"label": "source", "description": "retained"},
+            {
+                "label": "copy",
+                "description": "retained",
+                "available": True,
+                "error": None,
+            },
+            {
+                "label": "source",
+                "description": "retained",
+                "available": True,
+                "error": None,
+            },
         ]
         assert {
             path: path.read_bytes() if path.is_file() else None
@@ -176,7 +186,12 @@ def test_unsafe_point_label_returns_invalid_params_without_side_effects(
         assert failed["error"].get("data") is None
         assert call(sock, "context.snapshot", {})["result"] == before
         assert call(sock, "point.list", {})["result"]["points"] == [
-            {"label": "source", "description": "retained"}
+            {
+                "label": "source",
+                "description": "retained",
+                "available": True,
+                "error": None,
+            }
         ]
         assert {
             path: path.read_bytes() if path.is_file() else None

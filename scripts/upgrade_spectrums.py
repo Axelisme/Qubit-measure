@@ -9,11 +9,11 @@ import shutil
 import tempfile
 from collections.abc import Sequence
 from pathlib import Path
-from uuid import uuid4
 
 import h5py
 from pydantic import TypeAdapter
 from zcu_tools.analysis.fluxdep.io import load_spectrums
+from zcu_tools.resources.upgrade_backup import upgrade_backup_path
 
 
 def _legacy_calibrations(handle: h5py.File) -> dict[str, tuple[float, float]]:
@@ -47,7 +47,8 @@ def _legacy_calibrations(handle: h5py.File) -> dict[str, tuple[float, float]]:
     return calibrations
 
 
-def _upgrade(path: Path, *, apply: bool) -> None:
+def _upgrade(path: Path, *, apply: bool, backup_root: Path | None) -> None:
+    backup = upgrade_backup_path(path, backup_root=backup_root) if apply else None
     with h5py.File(path, "r") as handle:
         if (
             handle.attrs.get("format") == "zcu.fluxdep-spectrums"
@@ -84,7 +85,9 @@ def _upgrade(path: Path, *, apply: bool) -> None:
                 for field in ("flux_half", "flux_int", "flux_period"):
                     del group[field]
         load_spectrums(str(candidate))
-        backup = path.with_name(f"{path.name}.{uuid4().hex}.bak")
+        if backup is None:
+            raise RuntimeError("apply requires a backup destination")
+        backup.parent.mkdir(parents=True, exist_ok=True)
         with path.open("rb") as source, backup.open("xb") as target:
             shutil.copyfileobj(source, target)
         print(f"{path}: backup: {backup}")
@@ -99,7 +102,9 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     None reads process arguments. Print each changed HDF5 location and status.
     Dry-run creates no files. Apply validates a sibling candidate, then saves
-    an exclusive original-bytes .bak before atomic replacement. Existing v2 files
+    an exclusive original-bytes .bak under the external project sibling root
+    (or --backup-root override) before atomic replacement. Unlocated projects
+    require the override; unsafe destinations reject before writes. Existing v2 files
     are validated and skipped. Rejected files remain unchanged; processing
     continues with other paths and returns 1 on any rejection, otherwise 0.
     Invalid arguments raise argparse SystemExit(2). No device identity is guessed:
@@ -108,13 +113,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("paths", nargs="+", type=Path)
     parser.add_argument("--apply", action="store_true")
+    parser.add_argument(
+        "--backup-root", type=Path, help="override external backup root"
+    )
     options = parser.parse_args(argv)
     paths = TypeAdapter(list[Path]).validate_python(options.paths)
     apply = TypeAdapter(bool).validate_python(options.apply)
+    backup_root = TypeAdapter(Path | None).validate_python(options.backup_root)
     failed = False
     for path in paths:
         try:
-            _upgrade(path, apply=apply)
+            _upgrade(path, apply=apply, backup_root=backup_root)
         except (OSError, ValueError, KeyError, TypeError) as error:
             print(f"{path}: rejected\n  failed checks: {error}")
             failed = True

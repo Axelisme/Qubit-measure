@@ -435,6 +435,7 @@ def test_raw_params_preservation_is_typed_located_and_durable(
     predictor = load_migrated_predictor(request_data)
     assert predictor.params == FluxoniumParams(EC=1.41, EL=0.8)
     assert predictor.flux.unit == {"unnamed_device": "native"}
+    assert predictor.source is not None
     assert predictor.source.created_at is None
     assert (
         load_dispersive_file(entry.dispersive_path / "Qlegacy.json").params.bare_rf

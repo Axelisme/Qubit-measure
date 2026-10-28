@@ -20,6 +20,11 @@ UI 與 remote 經 Controller／control facets 呼叫這些 owners，不各自建
 | `startup.py`、`experiment_reload.py`、`workspace.py` | 執行啟動、重載與目前程序內的 workspace 重建。 |
 | `results_index.py`、`results_comparison.py` | 唯讀索引保存成果，將已存 summary 投影為比較列，不重新分析。 |
 
+Results index 隔離各 entry 的 setup／ledger 與 run 成員讀取錯誤，保留其他成果。
+沒有對應 Result entry 的 Database run 仍可瀏覽。無法安全列舉的 Database 項目
+以 `ResultsIndex.issues` 回報 entry、路徑與原因，不偽造 run；可列出的 run
+則沿用 `ResultRun.issues`。Symlink escape 項目不讀、不跟隨。
+
 Run、Analyze、PostAnalyze、Load 與 Tab 將 pane 提交或退役清理交給 `pane_commit`。
 `GuardService.admit` 統一 domain admission，啟動時的 hardware exclusion 仍由 operation gate 裁決。
 各 operation 決定終局與觸發清理的時機。

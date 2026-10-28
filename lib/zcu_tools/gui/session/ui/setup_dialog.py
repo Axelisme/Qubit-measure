@@ -564,9 +564,16 @@ class SetupDialog(QDialog):
         current_item: QListWidgetItem | None = None
         for point in points:
             is_current = point.label == current
-            item = QListWidgetItem(f"● {point.label}" if is_current else point.label)
+            caption = f"● {point.label}" if is_current else point.label
+            if not point.available:
+                caption += " (unavailable)"
+            item = QListWidgetItem(caption)
             item.setData(Qt.ItemDataRole.UserRole, point.label)
-            item.setToolTip(point.description)
+            item.setToolTip(
+                "\n".join(text for text in (point.description, point.error) if text)
+            )
+            if not point.available:
+                item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEnabled)
             if is_current:
                 font = item.font()
                 font.setBold(True)
@@ -578,7 +585,7 @@ class SetupDialog(QDialog):
         else:
             self._ctx_list.setCurrentItem(current_item)
         self._show_selected_description(current_item, None)
-        self._refresh_clone_combo([point.label for point in points])
+        self._refresh_clone_combo([point.label for point in points if point.available])
 
     def _show_selected_description(
         self, current: QListWidgetItem | None, _previous: QListWidgetItem | None

@@ -3,8 +3,9 @@
 from pathlib import Path
 
 import pytest
+from pydantic import TypeAdapter
 from zcu_tools.cfg_model import WaveformAssetInfo
-from zcu_tools.gui.app.measure.remote.handlers.point import h_point_new
+from zcu_tools.gui.app.measure.remote.handlers.point import PointListReply, h_point_new
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 from zcu_tools.gui.session.context_control import ContextControlFacet
@@ -50,7 +51,14 @@ def test_list_empty_and_refresh_persisted_metadata(
             "result_path": str(info.result_path),
             "database_path": str(info.database_path),
         },
-        "points": [{"label": "base", "description": "external edit"}],
+        "points": [
+            {
+                "label": "base",
+                "description": "external edit",
+                "available": True,
+                "error": None,
+            }
+        ],
     }
 
 
@@ -79,8 +87,13 @@ def test_new_uses_setup_and_clone_replaces_description(
     assert context.read_context().lookup("Q1.rate").value == 20.0
     assert context.read_context().document().general.description == ""
     assert application.result("point.list", {})["points"] == [
-        {"label": "clone", "description": ""},
-        {"label": "seed", "description": "seed description"},
+        {"label": "clone", "description": "", "available": True, "error": None},
+        {
+            "label": "seed",
+            "description": "seed description",
+            "available": True,
+            "error": None,
+        },
     ]
 
 
@@ -161,21 +174,32 @@ def test_missing_point_io_is_not_reclassified_or_replaced(
     assert opened_resource(info).list_points() == ["good"]
 
 
-def test_list_failure_keeps_cache_instead_of_returning_cached_success(
+def test_list_isolates_unreadable_point_and_refreshes_its_error(
     application: PointApplication,
 ) -> None:
     info = application.open_entry()
     opened_resource(info).new_point("base", description="cached")
     context = application.controller.context_control
-    before = context.list_points(refresh=True)
-    source_path(opened_resource(info).use_point("base")).write_text(
-        "[invalid YAML", encoding="utf-8"
+    opened_resource(info).new_point("good", description="usable")
+    context.list_points(refresh=True)
+    source = source_path(opened_resource(info).use_point("base"))
+    source.write_text("[invalid YAML", encoding="utf-8")
+    reply = TypeAdapter(PointListReply).validate_python(
+        application.result("point.list", {})
     )
-    reply = application.rpc("point.list", {})
-    error = reply["error"]
-    assert isinstance(error, dict)
-    assert error["code"] == ErrorCode.CONTROLLER_ERROR
-    assert context.list_points() == before
+    assert reply["points"][0]["label"] == "base"
+    assert reply["points"][0]["available"] is False
+    error = reply["points"][0]["error"]
+    assert error is not None
+    assert str(source) in error
+    assert reply["points"][1] == {
+        "label": "good",
+        "description": "usable",
+        "available": True,
+        "error": None,
+    }
+    application.result("point.use", {"label": "good"})
+    assert context.read_context().target.point == "good"
 
 
 def test_created_binding_failure_preserves_destination_and_recovers_with_use(
