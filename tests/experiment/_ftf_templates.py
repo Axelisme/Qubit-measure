@@ -15,6 +15,11 @@ from zcu_tools.core.simulation import (
     RoundStatistics,
     TimelineTemplate,
 )
+from zcu_tools.experiment.ftf import (
+    FTFMuxReadoutConfig,
+    FTFReadoutConfig,
+    FTFReceiverConfig,
+)
 from zcu_tools.program.v2.simulation import IntegratedRound
 from zcu_tools.resources.ftf import parse_ftf
 
@@ -56,6 +61,54 @@ def template(*, tones: int = 0) -> TimelineTemplate:
     )
     return TimelineTemplate(
         np.array([0, 1], dtype=np.int64), (*drives, ro), (readout,), np.full(2, 0.030)
+    )
+
+
+def herald_template() -> tuple[TimelineTemplate, FTFReadoutConfig]:
+    """Two mux blocks; ADC4 reads both, ADC1 only reads the terminal block."""
+    base = template()
+    terminal = replace(base.events[0], gen_ch=1)
+    herald = replace(
+        terminal,
+        start_us=np.array([0.0, 0.002]),
+        duration_us=np.full(2, 0.002),
+        frequency_mhz=np.full(2, 5900.0),
+        gain=np.full(2, 0.3),
+    )
+    # Herald triggers are in ringdown, not inside the incident pulse support.
+    both = replace(
+        base.readouts[0],
+        channel=4,
+        trigger_us=np.array([[0.003, 0.008], [0.005, 0.010]]),
+        frequency_mhz=np.tile([5900.0, 6000.0], (2, 1)),
+        phase_deg=np.tile([10.0, 45.0], (2, 1)),
+        generator_channels=np.ones((2, 2), dtype=np.int64),
+    )
+    terminal_only = replace(
+        base.readouts[0],
+        channel=1,
+        frequency_mhz=np.full((2, 1), 6080.0),
+        generator_channels=np.ones((2, 1), dtype=np.int64),
+    )
+    receiver = FTFReceiverConfig(0, 1000.0, ((0.0, 0.0), (0.0, 0.0)))
+    config = FTFReadoutConfig(
+        receiver,
+        FTFMuxReadoutConfig(
+            1, 1.0, tuple(replace(receiver, ro_ch=ch) for ch in (4, 1))
+        ),
+    )
+    return (
+        replace(
+            base,
+            events=(
+                herald,
+                replace(herald, frequency_mhz=herald.frequency_mhz + 80),
+                terminal,
+                replace(terminal, frequency_mhz=terminal.frequency_mhz + 80),
+            ),
+            readouts=(both, terminal_only),
+        ),
+        config,
     )
 
 

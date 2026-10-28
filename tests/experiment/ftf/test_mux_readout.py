@@ -101,10 +101,10 @@ def test_mux_planning_keeps_every_incident_tone_and_independent_adc_grid():
     assert tuple(item.channel for item in plan.readouts) == (4, 1)
     np.testing.assert_array_equal(plan.batch.end_ns, [8.0, 10.0])
     for item, samples, gain in zip(plan.readouts, (4, 3), (1000, 1100), strict=True):
-        assert len(item.batch.pulses[0]) == 2
-        assert item.batch.pulses[0][0].frequency_ghz == 6.0
-        assert item.batch.pulses[0][1].frequency_ghz == 6.08
-        assert len(item.batch.grids[0][0].times_ns) == samples
+        assert len(item.batch.events[0][0].pulses) == 2
+        assert item.batch.events[0][0].pulses[0].frequency_ghz == 6.0
+        assert item.batch.events[0][0].pulses[1].frequency_ghz == 6.08
+        assert len(item.batch.events[0][0].grids[0].times_ns) == samples
         assert item.batch.model.receiver.gain == gain
     np.testing.assert_array_equal(
         plan.readouts[0].batch.model.frequencies_ghz,

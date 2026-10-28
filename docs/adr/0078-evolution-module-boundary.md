@@ -85,6 +85,13 @@ eigensystem 與 dressed readout frequencies。Experiment 只組合 owner 的結�
 結構依賴改變時，source 丟棄結構。Dissipative propagator、density 與完整
 preparation 不得跨不同 losses 重用。
 
+2026-10-28，使用者以「A我認為可以完整版。」授權 single、six、FTF 三環境的中途 projective readout。這句授權決定支援範圍，lifetime 沿用本節既有規則。
+分支 continuation density 僅在一次 preparation 的 span 演化中存在，不跨 acquisition 保留或作下次初態。
+環境在 projective read 起點投影並續演化，Engine 仍不保留跨 evolve 的數值 preparation。
+同輸入的 immutable 完整 preparation 是否重用，仍依本節既有設定、losses 與 route 規則。
+其中的 outcome weights、各 event populations 與 conditional sums 是可重用的數值產品，不是上一個 shot、round 或 acquisition 的量子態或已抽樣 herald 結果。
+已交付 raw source 保留自己的不可變抽樣輸入，不因此承接前次量子態。
+
 Engine 的 routing-facts cache 只驗證 caller-owned preparation 的當前 route。
 它保留 inventory 與 pricing facts，不保留數值傳播結果。
 FTF 的 complete preparation LRU、envelope fingerprints 與上述 acquire-local

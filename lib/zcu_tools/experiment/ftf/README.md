@@ -1,6 +1,6 @@
 # FTF environment composition
 
-**Last updated:** 2026-10-28 (UTC), flux-pulse routing and ramp-relaxation limits
+**Last updated:** 2026-10-28 (UTC), projective readout and preparation lifetime; flux-pulse routing and ramp-relaxation limits
 
 **讀者：** lab-author、framework-dev、agent。FTF 環境的組裝、數值接線與 acquisition 設定。
 
@@ -86,6 +86,12 @@ cache hits but zero kernel CPU, rejections and estimated work. Actual CPU exclud
 ADC, sampling and routing bookkeeping; wall includes those operations.
 Numeric templates contain no program/experiment identifier, so `experiment` is
 omitted rather than guessed from controls or caller frames.
+
+`projection_outcomes` counts retained outcome histories per C-order point in the
+latest solved round. `projection_pruned_weight` gives each point's cumulative
+removed probability before redistribution. Both arrays are empty for
+terminal-only templates or when no solve completed. Reused preparations retain
+these values. They do not count the semiclassical cavity main state.
 
 The writer caps its `routing-*.jsonl` files at **50 MiB**. Before each append it
 deletes oldest files by modification time, breaking ties by filename, until the
@@ -231,9 +237,14 @@ real acquire compile events with an empty scratch `NUMBA_CACHE_DIR`.
 ### Preparation reuse
 
 `open_acquire(request)` starts a session for a fixed request. Its
-`sample_round(snapshot, index)` reuses the preceding round's density and
-conditional response when the snapshot is equal. Every round draws a new stream.
+`sample_round(snapshot, index)` reuses the preceding round's noiseless event
+populations and conditional response when the snapshot is equal. Every round
+draws a new stream.
 Opening another acquire invalidates the old session and drops its references.
+Projection continuation densities exist only during span preparation. A later shot, round or acquire does not inherit a preceding
+outcome's terminal state or sampled herald result. Immutable outcome weights,
+event populations and conditional sums follow the complete-preparation reuse
+rules below. See [ADR-0078](../../../../docs/adr/0078-evolution-module-boundary.md#損耗漂移下的結構與-preparation-lifetime).
 A source-owned 4 MiB LRU retains owned, read-only probabilities, conditional sums,
 content mappings, path diagnostics and integrated sampling plans across acquires.
 Its key reads full current C1 content, layout, mode, reps and readout values,
@@ -390,10 +401,38 @@ large-excursion device accuracy.
 
 ### Cavity drives
 
-Nonterminal pulses on the readout generator are cavity drives. At each point,
-the latest active readout-channel block starts the terminal readout. Every earlier
-readout-channel pulse must end by that start, and the first ADC trigger must not
-precede it. A pulse that crosses the terminal start raises `ValueError`.
+At each point, the latest active readout-channel block is terminal. The planner
+classifies earlier blocks with ADC triggers as projective reads and earlier blocks
+without triggers as cavity drives. A block owns triggers from its start until the
+next block starts, including ringdown after pulse end. Earlier pulses may end at
+the next start, but their last ADC sample must be strictly earlier. A crossing
+sample window raises `ValueError` naming the block and trigger.
+
+`FTFTemplatePlan.projective_reads` retains each point's ordered projection times,
+incident pulses and bound triggers. The numeric batch includes projection starts
+as segment boundaries. Planning does not project or evolve densities.
+Projective block counts and each ADC's per-event grid counts must match across
+points. Planning rejects a difference with the point and differing counts.
+Before evolution or sampling, request preparation also compares all templates'
+projective counts and each ADC's per-event grid counts. A difference raises
+`ValueError` naming both templates and layouts, even when total reads match.
+This check belongs to environment preparation, not the program frontend.
+
+At each projective start, runtime replaces the DC density with rank-1 energy
+outcomes and weights them by its normalized diagonal. It retains the complete
+outcome history across later reads. Each outcome has its own density and cavity
+field. The projective pulse drives that outcome's cavity during continuation.
+A later projection copies the incoming cavity field before continuing each new
+outcome. Projection uses all retained energy levels, not IQ-resolvability clusters.
+ADC CTMC transitions during a herald affect its IQ only. They do not change the
+outcome's later quantum evolution. This approximation excludes active reset and
+measurement-induced state transitions.
+
+`numerics.projection_weight_floor` defaults to `1e-9`. Runtime removes global
+history weights below this value and renormalizes surviving weights proportionally.
+Zero disables pruning, including zero-weight histories. Removing all histories
+raises `ValueError` naming the point and floor. The schema accepts finite values
+in `[0, 1)`. Telemetry records retained counts and removed probability.
 
 `simulate.adc` solves the linear, state-conditioned cavity fields. The incident
 amplitude uses the same `input_per_gain` conversion as terminal readout.
@@ -419,10 +458,14 @@ neutral `SegmentShift` values to evolution. Evolution propagates only that span
 from the preceding output density, without normalizing or clipping it. Absolute
 control coordinates, carrier phases and pulse-local envelopes keep their common
 origin. Within a span, evolution uses the averages rather than instantaneous
-fields. Undriven templates retain their original single-evolve path.
+fields. Templates with neither cavity drives nor projective reads retain their
+original single-evolve path.
 
 Each cavity-driven preparation retains all span reuse keys. Cache hits check
-every key through `Engine.reuse`. Evolution's `merge_path_diagnostics` combines
+every key through `Engine.reuse`. Projection history, initial density and span
+shifts enter continuation digests. Runtime evolves each point/outcome separately,
+so one Engine call never contains duplicate point IDs. Evolution's
+`merge_path_diagnostics` combines
 span work and unions class membership by caller point index, so each point counts
 once per class across the acquire.
 
@@ -439,9 +482,10 @@ and does not model MIST onset.
 
 ### Readout and sampling
 
-Readout uses the DC model and populations in its energy basis. FTF explicitly
-calls ADC's `normalize_populations` once after `batch_populations`, before
-conditional responses or sampling. ADC owns the 1e-6 probability tolerance,
+Readout uses the DC model and populations in its energy basis. Terminal-only
+preparations call ADC's `normalize_populations` once after `batch_populations`,
+before conditional responses or sampling. Projective preparations normalize the
+diagonal at each projection and each retained terminal outcome. ADC owns the 1e-6 probability tolerance,
 tolerated-negative cleanup and row normalization. Invalid rows fail without
 sampling. ADC raises `PopulationValidationError` with `rejected_rows` for the
 reported validation rule. FTF catches only that type, retains its count in
@@ -449,8 +493,8 @@ reported validation rule. FTF catches only that type, retains its count in
 preparations retain zero rejected rows. The source retains the latest
 evolve diagnostics even when this preparation fails, including the engine's
 report-only maximum trace error. Raw evolution densities remain unchanged.
-It ignores drive-line controls during or after readout. Earlier control portions still evolve
-normally. Pulse readout requires exactly one active terminal incident pulse per
+It ignores drive-line controls at or after the terminal readout start. Earlier
+control portions, including controls after a herald, still evolve normally. Pulse readout requires exactly one active terminal incident pulse per
 point, including mutually exclusive slots. Mux readout permits 1..8 coherent incident tones with
 a common pulse start. Every ADC observes the total shared-line field through its
 own demodulation, calibration, delay and sample grid. The physical resonator pair
@@ -489,7 +533,13 @@ profile only when mux is configured and includes both paths in the routes.
 `plan_template` and `FTFSource` accept an explicit `readout=` override; private replay rejects an
 override that cannot be reconstructed from captured settings. Plans expose
 `readouts`, an ordered tuple of `FTFReadoutPlan(channel, batch)`, not a singleton.
-Each batch contains every incident tone and that ADC's grids. Integrated flat,
+Each batch retains the same chronological logical-event axis. An event contains
+only its own incident pulse block and that ADC's observed grids. Empty grids mean
+that ADC does not observe the event and emits no read column. All ADCs may omit
+terminal observations; the terminal event and evolution endpoint remain in the
+plan. Each ADC must still observe at least one event. Projective plans retain
+point-local event contents. Templates without projective reads keep their existing
+terminal-content deduplication and rotating reference. Integrated flat,
 common-start mux batches use ADC's carrier-wise linear sums. Each carrier keeps
 the guarded direct-sum or constant-field/full-exponential route. Delay, mismatch,
 ringdown and per-receiver offset remain part of ADC's response contract. Shaped
@@ -509,8 +559,11 @@ later rounds, preparation eviction and `FTFSource.close()`. A program getter
 uses that source without capturing devices or rerunning evolution/readout
 preparation. It cannot switch to another program's more recent round.
 The same physical inputs feed ADC's required batch-based trace interface in
-decimated mode. Both modes share each shot's full CTMC path across carriers,
-ADCs and windows. Decimated acquisition returns `RoundSignals`,
+decimated mode. Each shot selects one complete projection history. Integrated
+counts flatten its outcome and terminal-state axes. Herald conditional sums use
+the corresponding history state; terminal sums use the terminal state. Each
+logical event has its own CTMC path, shared across its carriers, ADCs and grids.
+An ADC that omits a herald keeps the terminal's original logical event index. Decimated acquisition returns `RoundSignals`,
 reordering point-major samples into QICK loop order. ADC owns integrated raw generation, noise, rounding and loop layout. Program
 owns detached buffers, declaration order and acquisition averaging. All channels at the same shot
 index share one sampled joint state; receiver noise is independent. There is no

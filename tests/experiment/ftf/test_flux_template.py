@@ -14,9 +14,14 @@ from zcu_tools.program.v2.modules.pulse import PulseCfg
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.resources.ftf import FTFSettings, parse_ftf
-from zcu_tools.simulate.evolution import Engine
+from zcu_tools.simulate.evolution import Engine, segment_spans
 
-from tests.experiment._ftf_templates import settings, snapshot, template
+from tests.experiment._ftf_templates import (
+    herald_template,
+    settings,
+    snapshot,
+    template,
+)
 
 pytestmark = pytest.mark.sim
 
@@ -196,6 +201,110 @@ def test_cavity_boundaries_merge_with_delayed_flux_events() -> None:
     original = replace(base, events=(flux_slot(4, 0.02), earlier, *base.events))
     plan = plan_template(flux_settings(), snapshot(), original)
     assert plan.batch.segment_boundaries == ((0.0, 2.0, 6.0), (0.0, 2.0, 6.0))
+
+
+def test_projective_and_cavity_boundaries_preserve_filtered_flux_splits() -> None:
+    herald, readout = herald_template()
+    shifted = replace(
+        herald,
+        events=tuple(
+            replace(event, start_us=event.start_us + 0.020) for event in herald.events
+        ),
+        readouts=tuple(
+            replace(window, trigger_us=window.trigger_us + 0.020)
+            for window in herald.readouts
+        ),
+    )
+    cavity = replace(
+        shifted.events[0],
+        start_us=np.array([0.010, 0.012]),
+        envelopes=(None,),
+    )
+    observed = replace(shifted, events=(cavity, *shifted.events))
+    config = flux_settings(tau=2.0)
+    facts = FTFModelFacts(config, snapshot())
+    flux_only = plan_template(
+        config,
+        snapshot(),
+        replace(
+            template(),
+            events=(flux_slot(4, 0.2), *shifted.events[-2:]),
+            readouts=tuple(
+                replace(
+                    window,
+                    trigger_us=window.trigger_us[:, -1:],
+                    frequency_mhz=window.frequency_mhz[:, -1:],
+                    phase_deg=window.phase_deg[:, -1:],
+                    generator_channels=window.generator_channels[:, -1:],
+                )
+                for window in shifted.readouts
+            ),
+        ),
+        readout=readout,
+        facts=facts,
+    )
+    projection_only = plan_template(
+        config, snapshot(), observed, readout=readout, facts=facts
+    )
+    combined = plan_template(
+        config,
+        snapshot(),
+        replace(observed, events=(flux_slot(4, 0.2), *observed.events)),
+        readout=readout,
+        facts=facts,
+    )
+    # The delayed 0..4 ns flux pulse must still split at 2 and 6 ns.
+    assert all({2.0, 6.0} <= set(nodes) for nodes in flux_only.batch.segment_boundaries)
+    expected = tuple(
+        tuple(sorted(set(flux_nodes) | set(read_nodes)))
+        for flux_nodes, read_nodes in zip(
+            flux_only.batch.segment_boundaries,
+            ((10.0, 12.0, 20.0), (12.0, 14.0, 22.0)),
+            strict=True,
+        )
+    )
+    assert combined.batch.segment_boundaries == expected
+    spans = segment_spans(combined.batch)
+    for point, projection_start in enumerate((20.0, 22.0)):
+        assert {2.0, 6.0, projection_start} <= {start for start, _ in spans[point]}
+        assert [read.start_ns for read in combined.projective_reads[point]] == [
+            projection_start
+        ]
+    assert combined.projective_reads == projection_only.projective_reads
+    assert combined.cavity_drives == projection_only.cavity_drives
+    for actual, original in zip(
+        combined.readouts, projection_only.readouts, strict=True
+    ):
+        for events, expected_events in zip(
+            actual.batch.events, original.batch.events, strict=True
+        ):
+            for event, expected_event in zip(events, expected_events, strict=True):
+                assert event.pulses == expected_event.pulses
+                for grid, expected_grid in zip(
+                    event.grids, expected_event.grids, strict=True
+                ):
+                    np.testing.assert_array_equal(grid.times_ns, expected_grid.times_ns)
+                    assert (
+                        grid.demodulation_frequency_ghz
+                        == expected_grid.demodulation_frequency_ghz
+                    )
+                    assert grid.phase_rad == expected_grid.phase_rad
+    assert [
+        tuple(len(event.grids) for event in channel.batch.events[0])
+        for channel in combined.readouts
+    ] == [(1, 1), (0, 1)]
+    np.testing.assert_array_equal(
+        combined.batch.flux.offsets, flux_only.batch.flux.offsets
+    )
+    np.testing.assert_array_equal(
+        combined.batch.flux.start_ns, flux_only.batch.flux.start_ns
+    )
+    np.testing.assert_array_equal(combined.batch.flux.level, flux_only.batch.flux.level)
+    waveform = combined.batch.flux_waveform
+    original_waveform = flux_only.batch.flux_waveform
+    assert waveform is not None and original_waveform is not None
+    np.testing.assert_array_equal(waveform.time_ns, original_waveform.time_ns)
+    np.testing.assert_array_equal(waveform.flux, original_waveform.flux)
 
 
 def test_unbound_flux_configuration_preserves_elementwise_batch_contract() -> None:
