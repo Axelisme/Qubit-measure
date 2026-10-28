@@ -36,7 +36,9 @@ def batch(readout_model, *, shaped=False):
         adc.SampleGrid(np.array([-5, 5, 10, 25, 45, 65, 85.0]), 6.003, 0.1),
     )
     return adc.ReadoutBatch(
-        readout_model, ((pulse,),), (grids,), np.array([0], dtype=np.int64)
+        readout_model,
+        ((adc.ReadoutEvent((pulse,), grids),),),
+        np.array([0], dtype=np.int64),
     )
 
 
@@ -45,7 +47,7 @@ def prepare(populations, batches, *, reps):
     # missing implementation is a behaviour failure rather than an import error.
     factory = getattr(adc, "PreparedRawShots", None)
     assert factory is not None, "ADC must prepare deferred physical raw shots"
-    return factory(populations, batches, reps=reps)
+    return factory(adc.ProjectionReadout.unprojected(populations), batches, reps=reps)
 
 
 @pytest.mark.parametrize("shaped", [False, True])
@@ -113,14 +115,27 @@ def test_integrated_shots_form_bridge_and_match_conditional_expectation(rates, s
 def test_receivers_share_full_paths_and_windows_with_independent_noise(mux):
     rates = np.array([[0, 0.12, 0.04], [0.06, 0, 0.1], [0.09, 0.03, 0]])
     content = batch(model(rates), shaped=mux)
-    pulse = content.pulses[0][0]
+    pulse = content.events[0][0].pulses[0]
     if mux:
         content = replace(
             content,
-            pulses=((pulse, replace(pulse, start_ns=15, frequency_ghz=6.021)),),
+            events=(
+                (
+                    replace(
+                        content.events[0][0],
+                        pulses=(
+                            pulse,
+                            replace(pulse, start_ns=15, frequency_ghz=6.021),
+                        ),
+                    ),
+                ),
+            ),
         )
-    grid = content.grids[0][0]
-    content = replace(content, grids=((grid, grid),))
+    grid = content.events[0][0].grids[0]
+    content = replace(
+        content,
+        events=((replace(content.events[0][0], grids=(grid, grid)),),),
+    )
     shifted = replace(
         content,
         model=replace(
@@ -161,11 +176,23 @@ def test_receivers_share_full_paths_and_windows_with_independent_noise(mux):
 
 def test_mux_carriers_superpose_on_the_same_jumping_cavity():
     content = batch(model(np.array([[0, 0.1, 0.03], [0.05, 0, 0.08], [0.02, 0.04, 0]])))
-    first = content.pulses[0][0]
+    first = content.events[0][0].pulses[0]
     second = replace(first, start_ns=15, frequency_ghz=6.023, amplitude=0.3 - 0.4j)
-    mux = replace(content, pulses=((first, second),))
+    mux = replace(
+        content,
+        events=((replace(content.events[0][0], pulses=(first, second)),),),
+    )
     # The silent first pulse preserves the population origin for the later tone.
-    later = replace(content, pulses=((replace(first, amplitude=0), second),))
+    later = replace(
+        content,
+        events=(
+            (
+                replace(
+                    content.events[0][0], pulses=(replace(first, amplitude=0), second)
+                ),
+            ),
+        ),
+    )
     raw = (
         prepare(np.array([0.0, 0.0, 1.0]), {0: mux, 1: content, 2: later}, reps=120)
         .bind(SamplingIdentity(4))
@@ -177,13 +204,28 @@ def test_mux_carriers_superpose_on_the_same_jumping_cavity():
 
 def test_deferred_raw_does_not_change_statistics_stream_or_retain_noisy_results():
     content = batch(model(np.array([[0, 0.025, 0], [0, 0, 0.04], [0, 0, 0]])))
-    content = replace(content, grids=((content.grids[0][0], content.grids[0][0]),))
+    content = replace(
+        content,
+        events=(
+            (
+                replace(
+                    content.events[0][0],
+                    grids=(
+                        content.events[0][0].grids[0],
+                        content.events[0][0].grids[0],
+                    ),
+                ),
+            ),
+        ),
+    )
     conditional = adc.ADC(content.model).responses(content)
     channel = adc.ChannelReadout(
         0, conditional, np.array(0, dtype=np.int64), content.model.receiver
     )
     probabilities = np.array([0.1, 0.2, 0.7])
-    sampler = adc.PreparedStatistics(probabilities, (channel,), reps=13)
+    sampler = adc.PreparedStatistics(
+        adc.ProjectionReadout.unprojected(probabilities), (channel,), reps=13
+    )
     prepared = prepare(probabilities, {0: content}, reps=13)
     arguments = dict(seed=12, acquire_sequence=2, round_index=3)
     before = sampler.draw(**arguments)

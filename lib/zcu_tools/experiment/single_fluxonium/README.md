@@ -1,6 +1,6 @@
 # Single-fluxonium acquisition
 
-**Last updated:** 2026-10-28 (UTC), numeric drift owner
+**Last updated:** 2026-10-28 (UTC), projective readout rules and preparation lifetime
 
 **Readers:** framework-dev, lab-author, agent. Compose complete fluxonium timelines with one physical readout cavity.
 
@@ -35,11 +35,41 @@ relative to live DC in 1e-3 Phi0 steps. Equal adjacent levels merge.
 Ideal constant pulses use abrupt schedule levels without a continuous waveform.
 The planner never forces the endpoint back to DC.
 
-Only terminal readout is supported. The planner identifies earlier readout
-pulses as `cavity_drives`; execution raises `ValueError` before evolution when
-any are present. It does not ignore those pulses or approximate their Stark
-shifts, cavity memory or backaction. Terminal readout uses the DC model even
+A nonterminal readout block with an ADC trigger causes one projective read at
+its pulse start. Repeated triggers on that block share one projection and CTMC
+path. The shared [readout planner](../README.md#explicit-simulation-environments)
+binds triggers from this block's start until the next block starts, including
+ringdown after pulse end. The last nonterminal sample must precede the next
+block start; violations name the block and trigger.
+`SingleFluxoniumPlan.read_events` retains projective blocks followed by
+terminal, with common-origin phases and channel-local grids. An unobserved
+terminal block has empty grids but still ends evolution and contributes its
+state to integrated counts. Untriggered earlier blocks remain `cavity_drives`;
+execution rejects them before evolution. The source does not approximate their
+Stark shifts, cavity memory or backaction. All readout uses the DC model even
 when flux has not returned to DC.
+
+`SingleFluxoniumSource.prepare` projects each density into rank-1 outcomes in the
+retained DC energy basis. It keeps each outcome's full history across later
+reads and continues from that read's start through `Engine.evolve`. ADC CTMC
+jumps during an earlier read affect its IQ only, not later density evolution.
+This approximation does not group outcomes by IQ distinguishability and does
+not add MIST or active reset. Within one preparation, templates must have equal
+projective counts and per-event grid counts. Conflicts raise `ValueError` naming
+the templates and layouts before evolution or sampling.
+
+`numerics.projection_prune_floor` discards global history weights below its
+threshold after each projection, then normalizes survivors per point. The
+finite range is `0 <= floor < 1`, with default `1e-9`; zero disables pruning.
+If a point loses every outcome, preparation raises `ValueError` naming its ID
+and floor. `SingleFluxoniumPreparation.projection_diagnostics` records retained
+history counts per point/event, discarded probability mass relative to the
+original distribution, and evolution call count. Summing a point's discarded
+weights gives its cumulative loss without recounting earlier pruning.
+Span reuse digests include continuation densities and absolute time bounds.
+Every span must pass the engine's routing validation before preparation reuse.
+Without projective reads the source keeps its terminal-only evolution and ADC
+sampling path, including RNG consumption.
 
 ## Physical and ADC composition
 
@@ -56,6 +86,28 @@ explicit `Basis` records to `batch_populations`, then calls
 the retained DC energy order. Cavity frequencies include the model owner's
 dressed shifts at that DC point. Receiver PSD converts to sample covariance
 using the ADC sample interval. One scattering phase is always supplied explicitly.
+
+`preflight(request, snapshot, receivers=...)` plans the complete observation set
+of one physical cavity. Pass every ADC's `resources.simulation_schema.Receiver`
+calibration in request order. Omitting `receivers` selects the configured
+standalone ADC. Classification uses all triggers, even when an ADC observes
+only terminal or only herald. Each ADC keeps empty grids for unobserved events.
+Preflight checks every template's projective count and each ADC's event/grid
+layout without building a model, evolving a density or solving an ADC response.
+Conflicts name the ADC, templates and layouts.
+
+`prepare_readouts(preflight)` evolves one common `ProjectionReadout` and returns
+all `channels` and `raw.batches` in receiver order. ADCs observing the same event
+share its CTMC path in raw and decimated sampling. Their receiver noise remains
+independent. `ConditionalSums.event_indices` retains original logical event IDs,
+so a terminal-only ADC does not relabel terminal as event zero. Preflight binds
+the current settings and snapshot. Changing source settings before preparation
+raises `ValueError`; request arrays must remain unchanged between those calls.
+
+Standalone `prepare(request, snapshot)` uses the same owner with one receiver.
+Its `channel` property returns that receiver. Multi-ADC callers use `channels`;
+asking for `channel` when several receivers exist raises `ValueError`.
+No terminal marginal can replace `raw.readout` when sampling projection histories.
 
 Integrated rounds use ADC `round_statistics` and `PreparedRawShots`.
 Decimated rounds use ADC `sample_traces`. No environment-owned random sampler,
@@ -148,6 +200,11 @@ Keys include settings, the full snapshot, numeric/dependency versions, layout,
 all borrowed control/readout arrays and every waveform sample/time. Buffers are
 reread on each lookup. Evolution validates reuse against its own routing policy.
 Noise, counts, round identities and measured IQ are never cached.
+Projection continuation densities exist only while preparing the spans of one
+timeline. No later shot, round or acquisition starts from a previous outcome's
+terminal density. Reuse of immutable outcome weights, event populations and
+conditional sums follows the complete-preparation rules above. It does not
+carry forward a sampled herald result.
 Reassigning `source.settings` to validated settings changes the snapshot's
 settings identity and clears preparations on the next lookup. It does not
 replace the startup driver or reset its value. Replay captures the current

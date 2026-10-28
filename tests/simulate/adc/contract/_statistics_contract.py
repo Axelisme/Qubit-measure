@@ -20,7 +20,7 @@ class StatisticsImplementation(Protocol):
 
     def __call__(
         self,
-        populations: NDArray[np.float64],
+        readout: adc.ProjectionReadout,
         channels: tuple[adc.ChannelReadout, ...],
         *,
         reps: int,
@@ -58,7 +58,12 @@ class RoundStatisticsContract:
     ) -> None:
         populations, channels = scenario(12)
         result = round_statistics_impl(
-            populations, channels, reps=reps, seed=37, acquire_sequence=2, round_index=5
+            adc.ProjectionReadout.unprojected(populations),
+            channels,
+            reps=reps,
+            seed=37,
+            acquire_sequence=2,
+            round_index=5,
         )
         assert result.state_counts.shape == (2, 6, 2)
         assert result.state_counts.dtype == np.int64
@@ -78,7 +83,12 @@ class RoundStatisticsContract:
     ) -> None:
         populations, channels = scenario()
         result = round_statistics_impl(
-            populations, channels, reps=16, seed=37, acquire_sequence=2, round_index=5
+            adc.ProjectionReadout.unprojected(populations),
+            channels,
+            reps=16,
+            seed=37,
+            acquire_sequence=2,
+            round_index=5,
         )
         for channel in result.channels:
             # Worked two-state mixture: E[mu]=(3,-1.5), Var(mu)=(3,.75),
@@ -124,7 +134,12 @@ class RoundStatisticsContract:
             ),
         )
         result = round_statistics_impl(
-            populations, channels, reps=16, seed=37, acquire_sequence=2, round_index=5
+            adc.ProjectionReadout.unprojected(populations),
+            channels,
+            reps=16,
+            seed=37,
+            acquire_sequence=2,
+            round_index=5,
         )
         samples = result.channels[0].sums.reshape(-1, 2)
         np.testing.assert_allclose(samples.mean(axis=0), 0, atol=0.03, rtol=0)
@@ -146,7 +161,12 @@ class RoundStatisticsContract:
 
         monkeypatch.setattr(np.random, "SeedSequence", record_seed_sequence)
         result = round_statistics_impl(
-            populations, channels, reps=17, seed=37, acquire_sequence=2, round_index=5
+            adc.ProjectionReadout.unprojected(populations),
+            channels,
+            reps=17,
+            seed=37,
+            acquire_sequence=2,
+            round_index=5,
         )
         assert entropies == [(37, 2, 5, 0)]
         assert result.raw_identity == SamplingIdentity(37, (2, 5, 1))
