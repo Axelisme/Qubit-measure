@@ -1,6 +1,6 @@
 # program/v2/modules — semantic program modules
 
-**Last updated:** 2026-10-26
+**Last updated:** 2026-10-29
 
 **讀者：** framework-dev。語意 program modules 的角色、組裝與邊界。
 
@@ -42,6 +42,11 @@ in `ModularProgramV2`, `ProgramBuilder.add`, `Repeat`, `Branch`, `Join` and
   uncompressed because consumers care about the exact word loaded into a register.
 
 ## Readout configuration
+
+Native conversion preserves the optional classifier on pulse readout and each
+mux tone. The shared cfg_model schemas define circle/linear calibration in
+normalized ADC coordinates without IQ-offset subtraction. Modules retain this
+data but do not apply classification during declaration or playback.
 
 `PulseReadoutCfg` owns flat generator/ADC settings and a native waveform. One
 semantic `freq` configures both channels. `PulseReadout` declares and schedules

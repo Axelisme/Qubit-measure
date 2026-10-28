@@ -951,7 +951,10 @@ def test_mux_and_pulse_readouts_roundtrip_and_materialize_fixed_snapshot(
     fixed = open_library(files).snapshot()
     spec = fixed.module_spec("Q1.readout.mux")
     assert isinstance(spec, cfg_model.MuxReadoutSpec)
-    assert fixed.entry_value("Q1.readout.mux", kind="module")["tones"] == raw["tones"]
+    expected_tones = TypeAdapter(list[dict[str, object]]).validate_python(raw["tones"])
+    assert fixed.entry_value("Q1.readout.mux", kind="module")["tones"] == [
+        {**tone, "classifier": None} for tone in expected_tones
+    ]
     cfg = cfg_model.ModuleCfgFactory.from_raw(
         "Q1.readout.mux", context=fixed.validation_context()
     )

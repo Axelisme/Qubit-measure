@@ -61,6 +61,22 @@ FixedElements 的無 participants 模式只固定目前 inline 清單的槽位�
 
 2026-10-21 註：目前的表單設計採用固定 model-list 與逐欄編輯，JSON leaf 是已被取代的候選。
 
+### Classifier 隨 readout 保存
+
+Pulse readout 與 mux 的每筆 tone 各有可選 `classifier`，預設 None。
+數值由 library readout module 擁有，module 本身只保存而不使用分類參數。
+使用者於 2026-10-29 提出：「將center/radius/confusion matrix等資訊直接放到readout cfg裡的可選欄位中」，並說明「module本身不利用，但可以自然綁定到對應的readout module上」。
+
+Circle 保存 g/e 複數中心、可缺的 radius 與 3×3 confusion matrix。
+Linear 保存 radians 的 angle、threshold 與可缺的 2×2 confusion matrix。
+分類座標為原始積分 ADC 值除以積分長度，不扣 IQ offset；linear 以 `exp(1j*angle)` 旋轉。
+矩陣 rows 為真實／準備態，columns 為量到的態，circle 順序 g/e/other，linear 順序 g/e。
+矩陣只驗有限值與形狀，不轉置、不限制值域或 row sum。
+Radius 提供時須有限且 >0；None 表示尚未提供 Post 半徑校準。
+複數中心沿用 point 參數的 `{__complex__: [re, im]}` tag，由 `core.complex_codec` 編解碼。
+Core/native conversion、library 與 data.h5 cfg 都保留 classifier，不升容器版本。
+舊條目沒有 classifier 時讀為 None，不從其他參數補值。
+
 ### Owner 不變，caller 不重建舊配置
 
 `cfg_model` 擁有 Spec、cfg 驗證、引用展開與參數設定。

@@ -11,6 +11,7 @@ from pydantic import BeforeValidator
 from qick.asm_v2 import QickParam
 
 from zcu_tools.cfg_model import MuxReadoutCfg as CoreMuxReadoutCfg
+from zcu_tools.cfg_model import ReadoutClassifier
 
 from ..macro.wmem import PatchWmemFromDmem
 from .base import AbsModuleCfg, Module
@@ -36,7 +37,9 @@ class PulseReadoutCfg(AbsReadoutCfg):
     an expanded native envelope (arb holds its absolute asset path). pre_delay
     and post_delay bracket generator playback in us; ro_length is the ADC window
     and trig_offset the trigger delay in us. Scalar knobs except mixer_freq accept
-    QICK sweeps. desc is optional prose. type is readout/pulse.
+    QICK sweeps. desc is optional prose. type is readout/pulse. classifier stores
+    offset-free normalized ADC calibration (including radians for linear angle);
+    None means no calibration is available. The module does not apply it.
     """
 
     type: Literal["readout/pulse"] = "readout/pulse"
@@ -52,6 +55,7 @@ class PulseReadoutCfg(AbsReadoutCfg):
     ro_ch: int
     ro_length: float | QickParam
     trig_offset: float | QickParam = 0.0
+    classifier: ReadoutClassifier | None = None
 
     def build(self, name: str) -> PulseReadout:
         """Capture this cfg as a named, blocking QICK readout module."""
@@ -114,6 +118,8 @@ class MuxReadoutCfg(CoreMuxReadoutCfg, AbsReadoutCfg):
 
     Inherited fields retain MHz, degrees, normalized gain and us units. build
     captures a copy for mixmux8/static PFBv4; every set_param call is rejected.
+    Each tone's optional classifier retains its offset-free normalized ADC
+    calibration; None means unavailable. The module does not apply it.
     """
 
     def build(self, name: str) -> MuxReadout:

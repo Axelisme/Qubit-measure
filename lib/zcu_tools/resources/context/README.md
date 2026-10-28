@@ -1,6 +1,6 @@
 # `zcu_tools.resources.context` point-local module library
 
-**Last updated:** 2026-10-28
+**Last updated:** 2026-10-29
 
 **讀者：** framework-dev。Point-local module library 的讀取、編輯與來源契約。
 
@@ -19,6 +19,8 @@ DocumentStore 每次讀取先 stat 並 hash 完整 YAML bytes。內容未變時�
 Library handle 使用的 ledger 採 append-only 契約。索引會在前 4096 bytes 改變、inode／device 改變、檔案縮短、同大小的 mtime_ns 改變，或前次 offset 前最後一行改變時整份重讀。其餘讀取只 parse 新增尾段。同 inode、同 prefix、同前次尾行下，歷史中段原地改寫並同時增長不在偵測範圍。需要完整驗證時，呼叫 `RecordsLedger.reload()` 從 byte 0 重讀；成功後才替換索引，回傳 append order 的隔離 events，不讀 attachments。
 
 這是一般讀取不寫檔的 library 例外（ADR-0063），涵蓋 open、refresh、edit 進入與 commit 重讀。合法檔與 header-only 不重寫，也不重複備份。Header／容器或不可歸屬的 provenance 錯誤整份拒絕，不備份、不清理。Ledger I/O、schema、附檔與非預期錯誤直接傳遞。備份失敗不替換主檔；replace 失敗保留原主檔及已完成的備份，不發布候選。這不是跨檔交易或掉電恢復。
+
+Library readout 的可選 `classifier` 保存分類校準，mux 各 tone 獨立保存。複數中心沿用 `{__complex__: [re, im]}` tag，library 維持 2.0。舊條目沒有 classifier 時讀為 None，讀取與無關編輯不補寫新 key。
 
 Readout 使用獨立、平鋪的 `readout/pulse` Spec，waveform 可保留 key 引用，見 [ADR-0074](../../../../docs/adr/0074-flat-readout-module.md)。舊 nested readout 沿壞條目政策備份並移除，不遷移或相容讀取。
 

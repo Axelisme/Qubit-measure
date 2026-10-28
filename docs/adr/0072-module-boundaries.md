@@ -278,7 +278,7 @@ Datafile／resources → core 的方向由 C8、C9、C12 約束。此函式只�
 `cfg_model` 與頂層 `format_version.py` 的搬遷排在 waveform 接線後，目前仍保留原位置。
 
 - **內容**：`ConfigBase`；module 與 waveform 的 cfg schema（欄位、驗證、`set_param`）；有狀態模組之間溝通用的 Protocol，例如 `ModuleResolver`（依名稱取 module 或 waveform cfg）與 `WaveformAssetInfo`（依名稱查波形長度）。
-- **依賴**：cfg_model 只依賴外部函式庫、utils 與 core.waveform_format，不讀寫檔案。
+- **依賴**：cfg_model 只依賴外部函式庫、utils、core.waveform_format 與 core.complex_codec，不讀寫檔案。Classifier 的複數中心共用既有 tag codec，不另定 library 格式。
 - **准入**：型別只有在兩個以上有狀態模組都需要時才放進來。
 - **改動**：核心 schema 會寫進檔案，例如每個工作點的 `module_cfg.yaml`。Library 的 format／format_version 只描述 header 與容器結構，不描述個別 module／waveform Spec 的欄位。新增、刪除或修改 Spec 欄位不自動升 library 版本。目前 library 維持 2.0，不遷移、不加相容讀取；entry schema 仍依現行定義驗證，不能以 forward minor 放寬 extra 策略。
 
@@ -336,7 +336,7 @@ Device API 的局部參數與錯誤細節留在 module 文件與 docstring。
 | C8 | `layers` | 前端框架 > `experiment` > 能力模組 |
 | C9 | `acyclic_siblings` | `zcu_tools` 的頂層 package 之間沒有循環 |
 | C10 | `independence` | `program`、`resources`、`device`、`qick_remote` 彼此獨立 |
-| C11 | `forbidden` | `cfg_model` 只依賴 `utils` 與 `core.waveform_format` |
+| C11 | `forbidden` | `cfg_model` 不依賴有狀態模組、實驗與前端；使用 `utils`、`core.waveform_format` 與 `core.complex_codec` |
 | C12 | `forbidden` | 穩定工具包含 core，不依賴有狀態模組 |
 | C13 | `forbidden` | `mcp` 只使用 `gui.remote` 與各 app 的 wire spec |
 | C15 | `forbidden` | 使用者實驗的 core 不依賴 GUI framework |

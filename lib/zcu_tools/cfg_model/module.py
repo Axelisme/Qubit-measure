@@ -9,6 +9,7 @@ from pydantic import ConfigDict, Field, field_validator
 from qick.asm_v2 import QickParam
 
 from .base import ConfigBase
+from .classifier import ReadoutClassifier
 from .field_meta import FieldMeta
 from .gain import Gain, GainParam
 from .waveform import WaveformCfg, WaveformSpec
@@ -97,8 +98,13 @@ class _PulseReadoutFields[WaveformT](_ModuleFields):
     pre_delay/post_delay are generator delays in us; ro_length is the integration
     window in us and trig_offset is the trigger delay in us. Frequency, gain,
     phase and timing accept QICK sweeps in materialized cfgs, not persistent Specs.
+    classifier stores offset-free normalized ADC calibration; None means no
+    calibration is available. The readout module does not apply classification.
     """
 
+    classifier: Annotated[
+        ReadoutClassifier | None, FieldMeta(label="Classifier", group="Advanced")
+    ] = None
     type: Literal["readout/pulse"] = "readout/pulse"
     waveform: Annotated[WaveformT, FieldMeta(label="Waveform")]
     gen_ch: Annotated[int, FieldMeta(label="Gen ch")]
@@ -161,7 +167,9 @@ class MuxReadoutTone(ConfigBase):
     order, not frequency or channel order, defines identity. label is optional
     display text, defaults to the empty string, and may repeat; it is not a
     component identity and program execution does not interpret it. No rescaling
-    occurs; the author owns summed-signal headroom.
+    occurs; the author owns summed-signal headroom. classifier stores optional
+    offset-free normalized ADC calibration; None means no calibration is
+    available. The module itself does not apply classification.
     """
 
     model_config = ConfigDict(strict=True, allow_inf_nan=False)
@@ -171,6 +179,9 @@ class MuxReadoutTone(ConfigBase):
     phase: Annotated[float, FieldMeta(label="Phase", unit="deg")] = 0.0
     ro_ch: Annotated[int, Field(ge=0)]
     label: str = ""
+    classifier: Annotated[
+        ReadoutClassifier | None, FieldMeta(label="Classifier", group="Advanced")
+    ] = None
 
 
 class _MuxReadoutFields(_ModuleFields):

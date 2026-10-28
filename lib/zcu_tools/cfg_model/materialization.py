@@ -9,6 +9,7 @@ from typing import Literal
 from pydantic import TypeAdapter, ValidationError
 
 from .base import ConfigBase
+from .classifier import CircleClassifier, LinearClassifier
 from .dependencies import CfgValidationContext
 from .inputs import CfgInputMap
 from .module import (
@@ -49,6 +50,9 @@ def _isolated_raw(value: object) -> object:
 
 def _persistent_raw(value: object) -> object:
     """Reject runtime state before copying or recursively dumping Spec fields."""
+    if isinstance(value, (CircleClassifier, LinearClassifier)):
+        # These persistent models own the complex-tag encoding exception.
+        return _persistent_raw(value.to_dict())
     if isinstance(value, ConfigBase):
         if not isinstance(
             value,

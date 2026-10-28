@@ -1,6 +1,7 @@
 """Shared configuration schemas and injected dependencies, without I/O."""
 
 from .base import ConfigBase
+from .classifier import CircleClassifier, LinearClassifier, ReadoutClassifier
 from .dependencies import (
     CfgValidationContext,
     ModuleResolver,
@@ -76,6 +77,9 @@ __all__ = [
     "Range",
     "LogPoints",
     "ConfigBase",
+    "CircleClassifier",
+    "LinearClassifier",
+    "ReadoutClassifier",
     "Gain",
     "GainParam",
     "validate_gain",
