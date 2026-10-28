@@ -125,7 +125,7 @@ class _CombinedFitArrays:
     T2e_err_us: NDArray[np.float64]
 
 
-def analyze_flux_noise_limit(  # noqa: PLR0913
+def analyze_flux_noise_limit(  # noqa: PLR0913  # tolerated: Notebook callers pass dephasing data and independent readout, noise and fit-policy controls explicitly.
     data: T2DephasingAnalysis,
     *,
     readout_kappa_over_2pi_mhz: float,

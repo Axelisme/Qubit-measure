@@ -1,6 +1,6 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-10-28（plotting module guard 與測試資源清理責任）
+**Last updated:** 2026-10-28（GUI driver 職責拆分與測試資源清理責任）
 
 **讀者：** framework-dev、agent。查閱測試的 owner、fixture、執行方式與搬遷驗收契約。
 
@@ -31,6 +31,12 @@ recording adapter 放明確可 import 的支援模組，不把 `conftest.py` 當
 不要為了少建幾次物件把 fixture 提升到更廣的可見範圍。Root fixture 必須具有全套件用途。
 相似 setup 只有在代表相同語意時才共用；不同責任不為減少行數而塞入帶多個旗標的萬用 fixture。
 
+GUI 情境從 [`gui/_user_input/`](gui/_user_input/) 匯入 `ComponentDriver` 與鍵盤／滑鼠 helper，
+既有 `tests.gui._user_input` import 路徑不變。`driver.py` 負責 selector 與操作 policy；
+`selection.py` 共用可見性、modal 與唯一匹配規則。`input.py` 發送事件，`collections.py`
+處理 table／tree viewport，`menus.py` 管理 menu／file dialog 的 nested-loop delivery，
+`observing.py` 讀取可見快照與截圖。這些支援模組不宣告 fixture，視窗與 worker 生命週期仍由呼叫端擁有。
+
 Root session fixture 將 `tempfile.tempdir` 指向 `tmp_path_factory` 建立的私有目錄，
 結束時還原。每個 xdist worker 各有自己的目錄。專案根與測試資料優先明確傳入 `tmp_path`。
 裸 `tempfile` 呼叫仍須負責清理。Session guard 檢查私有目錄中殘留的 `context-*`，
@@ -40,7 +46,7 @@ Root session fixture 將 `tempfile.tempdir` 指向 `tmp_path_factory` 建立的�
 ## UI 驗證
 
 有 UI 改動的票，驗收須包含元件驅動情境。情境使用
-[`ComponentDriver`](gui/_user_input.py)，依使用者可見文字或既有 objectName 找元件，
+[`ComponentDriver`](gui/_user_input/)，依使用者可見文字或既有 objectName 找元件，
 以真實鍵盤／滑鼠事件操作。Disabled、hidden 或完全被 scroll viewport 裁掉的元件不繞過。
 可見性依 Qt visible region 判斷，不偵測 OS 層的其他視窗遮蔽。
 啟動與 teardown 可用公開 fixture；情境本身只經 driver 操作與觀察。

@@ -38,7 +38,7 @@ def test_dialog_ref_store_cleans_up_on_destroyed_only() -> None:
     store = DialogRefStore()
     dialog = _Dialog()
 
-    # tolerated(cast): The fake emits destroyed alone without ending a Qt lifetime.
+    # tolerated(cast): reportArgumentType: The fake emits destroyed alone without ending a Qt lifetime.
     store.open_named("setup", cast(QDialog, dialog))
 
     assert store.get("setup") is dialog
@@ -56,10 +56,10 @@ def test_dialog_ref_store_duplicate_key_fast_fails() -> None:
     first = _Dialog()
     second = _Dialog()
 
-    # tolerated(cast): The recording fake retains identity without a Qt-owned lifetime.
+    # tolerated(cast): reportArgumentType: The recording fake retains identity without a Qt-owned lifetime.
     store.open_named("setup", cast(QDialog, first))
     with pytest.raises(RuntimeError, match="dialog key is already retained"):
-        # tolerated(cast): The fake counts opens to verify rejection before second.open.
+        # tolerated(cast): reportArgumentType: The fake counts opens to verify rejection before second.open.
         store.open_named("setup", cast(QDialog, second))
 
     assert second.open_count == 0
@@ -74,7 +74,7 @@ def test_dialog_ref_store_retains_without_opening_and_reports_release() -> None:
         nonlocal releases
         releases += 1
 
-    # tolerated(cast): The fake emits destroyed without finished to isolate retain/release.
+    # tolerated(cast): reportArgumentType: The fake emits destroyed without finished to isolate retain/release.
     store.retain_named("startup", cast(QDialog, dialog), on_released=on_released)
     dialog.destroyed.emit(object())
 
