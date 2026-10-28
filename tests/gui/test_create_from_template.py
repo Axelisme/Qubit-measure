@@ -27,6 +27,7 @@ from zcu_tools.gui.session.types import SessionEnv
 from zcu_tools.resources.entry import component_registry
 
 from tests.gui._component_fakes import Qubit
+from tests.gui.app.measure._record_support import require_target
 
 
 class TemplateController(Controller):
@@ -79,7 +80,9 @@ def controller(qapp, tmp_path: Path):
         )
         ctrl.context_control.set_alias_rows((AliasRow("qubit", "Q1"),))
         capture = ctrl.context_control.read_context()
-        ctrl.context_control.set_parameter(capture.target, "Q1.ext.freq", 6123.0)
+        ctrl.context_control.set_parameter(
+            require_target(capture), "Q1.ext.freq", 6123.0
+        )
         yield ctrl
     finally:
         ctrl.quiesce()
@@ -122,7 +125,7 @@ def test_rejected_creation_leaves_library_unchanged(
 ):
     capture = controller.context_control.read_context()
     controller.context_control.set_module(
-        capture.target,
+        require_target(capture),
         "Q1.pulses.occupied",
         PulseSpec(
             ch=0, nqz=1, freq=1.0, gain=0.1, waveform=ConstWaveformCfg(length=1.0)
@@ -141,7 +144,9 @@ def test_rejected_creation_leaves_library_unchanged(
 
 def test_invalid_template_input_is_rejected_before_write(controller: Controller):
     capture = controller.context_control.read_context()
-    controller.context_control.set_parameter(capture.target, "Q1.ext.freq", None)
+    controller.context_control.set_parameter(
+        require_target(capture), "Q1.ext.freq", None
+    )
     with pytest.raises(LibraryEntryInvalid, match="freq"):
         controller.create_from_template("module", "probe", "Q1.pulses.new")
     assert controller.context_control.read_context().library.module_keys() == ()

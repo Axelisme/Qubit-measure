@@ -31,6 +31,7 @@ from zcu_tools.gui.app.measure.state import RunPaneState
 from zcu_tools.gui.app.measure.ui.exp_tab_widget import ExpTabWidget
 from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
+from zcu_tools.gui.session.parameter_capture import capture_parameters
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from zcu_tools.program.v2.sweep import SweepCfg
 
@@ -109,6 +110,7 @@ def load_native_spectrum(
         snapshot=RunSnapshot(
             entry_name=storage.entry_name, point=storage.point, roles=storage.roles
         ),
+        parameter_snapshot=capture_parameters(parameters),
         provenance=SoftwareProvenance(
             software_versions={},
             git_commit=None,

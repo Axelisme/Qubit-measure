@@ -51,6 +51,7 @@ from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
 from tests.gui._dialog_fakes import RecordingDialogPresenter
 from tests.gui._user_input import ComponentDriver, key_click
+from tests.gui.app.measure._record_support import require_target
 from tests.gui.widgets.form._text_input import commit_text_on_focus_loss as commit_text
 
 PULSE = "Q1.pulses.pi"
@@ -330,7 +331,7 @@ def test_reopened_module_preserves_full_frequency_precision_on_commit(
     session: _Session,
 ) -> None:
     session.control.set_module(
-        session.control.read_context().target,
+        require_target(session.control.read_context()),
         PULSE,
         PulseSpec(ch=0, nqz=1, freq=5000.1234, gain=0.25, waveform=WAVEFORM),
     )
@@ -402,7 +403,7 @@ def test_name_enter_renames_and_a_taken_name_keeps_input_inline(
     tmp_path: Path,
 ) -> None:
     session.control.set_module(
-        session.control.read_context().target,
+        require_target(session.control.read_context()),
         f"{PULSE}_v2",
         PulseSpec(ch=0, nqz=1, freq=1.0, gain=0.1, waveform=WAVEFORM),
     )
@@ -574,7 +575,7 @@ def test_new_entry_suggests_names_until_the_user_types_one(
     session: _Session,
 ) -> None:
     session.control.set_module(
-        session.control.read_context().target,
+        require_target(session.control.read_context()),
         "Q1.pulses.probe",
         PulseSpec(ch=0, nqz=1, freq=1.0, gain=0.1, waveform=WAVEFORM),
     )

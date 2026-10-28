@@ -27,6 +27,7 @@ from zcu_tools.resources.entry import ResultEntry, document_meta
 from zcu_tools.resources.entry.ledger_models import JsonObject
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
+from tests.gui.app.measure._record_support import require_target
 from tests.resources.entry.fakes import register_fakes, registry_state, restore_registry
 
 PULSE = "Q1.pulses.tuned"
@@ -60,7 +61,7 @@ def session(tmp_path: Path):
         control = ContextControlFacet(context=context)
         control.use_point(PointUseRequest("a"))
         control.add_component("Q1", "fake/drive/a", {})
-        target = control.read_context().target
+        target = require_target(control.read_context())
         control.set_waveform(target, WAVEFORM, ConstWaveformCfg(length=0.1))
         control.set_parameter(target, "general.ext.flux_value", 2.0)
         service = WritebackService(control, arb_names=lambda: ())
@@ -179,7 +180,7 @@ def test_default_proposal_selection_and_optional_note(session):
 
 def test_module_preview_proposes_the_spec_in_the_current_shape(session):
     _entry, control, service = session
-    control.set_module(control.read_context().target, PULSE, pulse_proposal())
+    control.set_module(require_target(control.read_context()), PULSE, pulse_proposal())
     capture = control.read_context()
     draft = service.create_draft(
         [ModuleWriteback(PULSE, "pulse", pulse_proposal(gain=0.4))],
@@ -212,7 +213,7 @@ def test_module_form_edits_apply_the_edited_spec_and_keep_child_keys(session):
             ("freq",): 5100.0,
         },
     )
-    control.set_parameter(capture.target, "general.ext.flux_value", 8.0)
+    control.set_parameter(require_target(capture), "general.ext.flux_value", 8.0)
     assert draft.apply()["applied_ids"] == ["ml-1"]
     written = control.read_context().library.module_spec(PULSE)
     assert isinstance(written, PulseSpec)
@@ -338,7 +339,7 @@ def test_ordered_write_rejects_invalid_module_before_context_apply(session):
 
 def test_ordered_module_write_returns_spec_values(session):
     _entry, control, service = session
-    control.set_module(control.read_context().target, PULSE, pulse_proposal())
+    control.set_module(require_target(control.read_context()), PULSE, pulse_proposal())
     draft = service.create_draft(
         [ModuleWriteback(PULSE, "pulse", pulse_proposal())],
         parameters=control.read_context(),
@@ -418,7 +419,7 @@ def test_non_scalar_current_and_proposed_summaries_use_the_same_bounded_shape(se
     _entry, control, service = session
     matrix = [[0.95, 0.03, 0.02], [0.03, 0.95, 0.02], [0.0, 0.0, 1.0]]
     control.set_parameter(
-        control.read_context().target, "general.ext.confusion_matrix", matrix
+        require_target(control.read_context()), "general.ext.confusion_matrix", matrix
     )
     draft = service.create_draft(
         [
@@ -561,7 +562,9 @@ def test_explicit_empty_apply_does_not_fall_back_to_selected_items(session):
 
 def test_ordered_write_returns_actual_values_and_leaves_selection_alone(session):
     _entry, control, service = session
-    control.set_parameter(control.read_context().target, "general.ext.dest", [1])
+    control.set_parameter(
+        require_target(control.read_context()), "general.ext.dest", [1]
+    )
     draft = service.create_draft(
         [
             ParameterWriteback("general.ext.a", "d", proposed_value=2),

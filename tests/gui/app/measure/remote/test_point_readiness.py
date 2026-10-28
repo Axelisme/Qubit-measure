@@ -26,6 +26,7 @@ from zcu_tools.resources.entry import ResultEntry
 
 from tests.gui._dialog_fakes import RecordingDialogPresenter
 from tests.gui.app.measure._form_fakes import form_resources, form_sources
+from tests.gui.app.measure._record_support import require_target
 
 from ._point_application import PointAdapter, PointApplication
 
@@ -83,8 +84,11 @@ def test_entry_commands_require_explicit_point_before_application_and_wire_reads
         {"label": "selected" if command == "new" else "existing"},
     )
     capture = control.read_context()
-    control.set_parameter(capture.target, "general.ext.flux_value", 2.0)
-    assert control.read_target(capture.target).value("general.ext.flux_value") == 2.0
+    control.set_parameter(require_target(capture), "general.ext.flux_value", 2.0)
+    assert (
+        control.read_target(require_target(capture)).value("general.ext.flux_value")
+        == 2.0
+    )
 
 
 def test_unselected_point_disables_run_writeback_and_inspect_with_next_step(
@@ -143,7 +147,7 @@ def test_unselected_point_disables_run_writeback_and_inspect_with_next_step(
 
 
 @pytest.mark.parametrize("frontend", ["application", "wire"])
-def test_writeback_requires_selection_after_reopen_but_keeps_captured_destination(
+def test_writeback_requires_selection_after_reopen_then_uses_selected_destination(
     application: PointApplication, frontend: str
 ) -> None:
     application.open_entry()
@@ -204,15 +208,20 @@ def test_writeback_requires_selection_after_reopen_but_keeps_captured_destinatio
         application.result("point.new", {"label": "b"})
         facet.apply_writeback_for_pane(tab_id, "analysis")
         assert (
-            control.read_target(captured.target).value("general.ext.flux_value") == 2.0
+            not control.read_target(require_target(captured))
+            .lookup("general.ext.flux_value")
+            .present
         )
-        assert not control.read_context().lookup("general.ext.flux_value").present
-        assert control.read_context().target.point == "b"
+        selected = control.read_context()
+        assert selected.value("general.ext.flux_value") == 2.0
+        assert require_target(selected).point == "b"
+        assert len(entry_resource(application).ledger.events()) == len(before) + 1
         application.controller.setup_control.new_entry(EntryRequest("other"))
         application.result("point.new", {"label": "c"})
-        with pytest.raises(FailedPreconditionError) as caught:
-            facet.apply_writeback_for_pane(tab_id, "analysis")
-        assert caught.value.reason_code == "entry_not_open"
+        facet.apply_writeback_for_pane(tab_id, "analysis")
+        assert control.read_context().value("general.ext.flux_value") == 2.0
+        assert require_target(control.read_context()).point == "c"
+        assert len(entry_resource(application).ledger.events()) == 1
     finally:
         service.teardown_draft(draft)
         application.state.get_tab(tab_id).analysis.writeback_draft = None
@@ -226,8 +235,8 @@ def parameter_writeback_pane(
     application.result("point.new", {"label": "a"})
     control = application.controller.context_control
     captured = control.read_context()
-    control.set_parameter(captured.target, "general.ext.a", 1.0)
-    control.set_parameter(captured.target, "general.ext.b", 2.0)
+    control.set_parameter(require_target(captured), "general.ext.a", 1.0)
+    control.set_parameter(require_target(captured), "general.ext.b", 2.0)
     bus = BaseEventBus()
     service = WritebackService(control, arb_names=lambda: ())
     facet = WritebackControlFacet(

@@ -67,6 +67,7 @@ from tests.gui.app.measure._form_fakes import (
     configure_form_lookup,
     make_form,
 )
+from tests.gui.app.measure._record_support import require_target
 from tests.gui.app.measure._synthetic import SampleAdapter, SampleCfg
 from tests.gui.app.measure.artifacts._snapshots import with_artifacts
 from tests.gui.app.measure.remote._helpers import Fixture
@@ -493,7 +494,7 @@ def source_window(tmp_path, qapp: QApplication) -> Iterator[MainWindow]:
     application = Fixture(headless=True, project_root=str(tmp_path / "project"))
     application.registry.register("source", SourceAdapter)
     ctrl = application.ctrl
-    target = ctrl.context_control.read_context().target
+    target = require_target(ctrl.context_control.read_context())
     ctrl.context_control.set_parameter(target, "general.ext.amount", 0.2)
     window = MainWindow(ctrl, templates=lambda: {})
     ctrl.add_view(window)

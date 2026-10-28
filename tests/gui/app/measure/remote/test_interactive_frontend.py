@@ -233,7 +233,7 @@ def test_mcp_interactive_uses_mounted_plugin_and_original_operation(
         if terminal == "done":
             assert source is not None and source.snapshot.point is not None
             assert captured is not None
-            storage = captured.capture_storage()
+            assert source.snapshot.entry_name == "fake_qubit"
             fx.ctrl.context_control.new_point(
                 PointCreateRequest(
                     "later", "", CommandOrigin("gui"), clone_from=source.snapshot.point
@@ -255,11 +255,18 @@ def test_mcp_interactive_uses_mounted_plugin_and_original_operation(
             png_outputs = analysis.members["figure:pick"]
             assert len(png_outputs) == 2
             assert {Path(output.path).parent for output in png_outputs} == {
-                storage.database_path
+                tmp_path
+                / "Database"
+                / "fake_qubit"
                 / "runs"
                 / f"synthetic.magnitude_Q1-R1_{source.run_id}"
                 / "figures",
-                storage.result_path / "points" / source.snapshot.point / "figures",
+                tmp_path
+                / "result"
+                / "fake_qubit"
+                / "points"
+                / source.snapshot.point
+                / "figures",
             }
             for output in png_outputs:
                 assert output.status == "saved" and output.error is None
@@ -365,7 +372,7 @@ def test_mcp_done_writeback_save_and_close_share_the_gui_result(
     captured = fx.state.get_tab(tab_id).run.parameters
     assert source is not None and source.snapshot.point is not None
     assert captured is not None
-    storage = captured.capture_storage()
+    assert source.snapshot.entry_name == "fake_qubit"
     bridge, call = mcp_client(fx.service.port, tmp_path, request=request)
     try:
         call("connect", {"port": fx.service.port})
@@ -451,11 +458,18 @@ def test_mcp_done_writeback_save_and_close_share_the_gui_result(
         png_outputs = analysis.members["figure:pick"]
         assert len(png_outputs) == 2
         assert {Path(output.path).parent for output in png_outputs} == {
-            storage.database_path
+            tmp_path
+            / "Database"
+            / "fake_qubit"
             / "runs"
             / f"synthetic.magnitude_Q1-R1_{source.run_id}"
             / "figures",
-            storage.result_path / "points" / source.snapshot.point / "figures",
+            tmp_path
+            / "result"
+            / "fake_qubit"
+            / "points"
+            / source.snapshot.point
+            / "figures",
         }
         for output in png_outputs:
             assert output.format == "png"
