@@ -1,6 +1,6 @@
 # FTF environment composition
 
-**Last updated:** 2026-10-27 (UTC), acquisition drift with evolve-local preparations
+**Last updated:** 2026-10-28 (UTC), three-loop flux pulses
 
 **讀者：** lab-author、framework-dev、agent。FTF 環境的組裝、數值接線與 acquisition 設定。
 
@@ -28,6 +28,7 @@ builder with an explicit YAML path. Neither caller uses an environment wrapper.
 - [Acquisition and numeric composition](#acquisition-and-numeric-composition)
   - [Preparation reuse](#preparation-reuse)
   - [Control conversion](#control-conversion)
+  - [Flux pulses](#flux-pulses)
   - [Cavity drives](#cavity-drives)
   - [Readout and sampling](#readout-and-sampling)
   - [Physical applicability](#physical-applicability)
@@ -291,9 +292,8 @@ ADC demodulation keeps its absolute-time grid. An isolated addressed carrier's
 conditional IQ center is therefore invariant under a common pulse/grid time
 shift. With multiple nonzero carriers, finite-window cross-tone leakage can
 still depend on the readout start. Pulse supports use absolute nearest-2-ns rounding, ties even.
-The model owner supplies a fixed-DC `ModelSource` and static schedule for each
-round. Charge and small-signal flux controls evolve every template to readout
-start. Each drive line selects full charge n or the derivative of the existing
+The model owner supplies a round-DC `ModelSource`. Charge and small-signal flux
+controls evolve every template to readout start. Each drive line selects full charge n or the derivative of the existing
 fixed-coordinate Hamiltonian at that round's DC point. Omitted operator means
 charge. Charge calibration uses GHz/gain; flux calibration uses Phi0/gain and
 multiplies the derivative in GHz/Phi0. Signed complex crosstalk uses
@@ -303,6 +303,48 @@ secular energy-basis rotations. They do not activate the shared engine's
 large-amplitude flux controls, filtering or flux-tail paths. Version 2 settings
 group physical values, named DC/drive lines, readout and numerics. Version 1 is
 not accepted.
+
+### Flux pulses
+
+Optional `flux_lines.f1`, `flux_lines.coupler` and `flux_lines.f2` each bind one
+generator to one loop. A pulse on that generator contributes signed gain times
+`flux_phi0_per_gain` in Phi0. The public `ftf` builder includes these channels in
+the mock QICK profile. Line display names may repeat across loops. Pulses on
+unbound generators still fail. With no flux lines, the existing fixed-DC batch
+and microwave controls remain unchanged.
+
+`plan_template` converts flux slots to `FluxTrack` inputs for the FTF numeric
+owner's `schedule` and `flux_waveform`. Each source passes through its own
+`delay_ns`, base `tau_ns` and signed `distortion_terms` before entering its loop.
+Complex envelopes and carrier phases form the real lab-frame signal before
+filtering. Nonzero flux carriers also select the continuous waveform.
+The numeric owner samples continuous waveforms every 2 ns and interpolates
+linearly. Pulse endpoints round independently to nearest 2 ns, ties even.
+Delayed pulse endpoints and sampled-envelope knots join cavity boundaries in
+`segment_boundaries`. The snapshot still supplies the round's DC flux and Gibbs
+state. Pulses never change the snapshot or rebuild the fixed-DC projection.
+
+Bath levels round midpoint offsets from that DC to integer multiples of
+1e-3 Phi0, ties even. Offsets smaller than 5e-4 Phi0 snap to DC. Equal adjacent
+levels merge. Filtering retains tails until their conservative absolute sum is
+below 5e-4 Phi0 per loop, then appends DC. Signed cancellation does not shorten
+that bound. Evolution stops at terminal readout start even if a tail continues.
+The terminal ADC model always uses the snapshot DC, including when the pulse
+has not settled. Sequences that need DC readout must allow settling first.
+
+Ideal constant baseband platforms with zero tau and no distortion omit the
+continuous waveform. Without microwaves they use `t4`, with sudden basis changes
+between levels. Filtered or varying sampled envelopes provide a continuous
+waveform. Without microwaves they use `adiabatic_map`, which preserves
+instantaneous eigenstate populations apart from the modeled baths. The engine
+does not check the adiabatic condition. With microwaves they use `flux_dop853`.
+There is no separate sudden/adiabatic switch.
+
+The Hamiltonian uses the existing exact flux expansion inside the retained
+fixed-DC projection. Large excursions can leave that subspace. Users must check
+local and retained-level convergence for their excursion and ramp; these routes
+do not certify reset fidelity or nonadiabatic accuracy. Small-signal
+`DriveLine.operator: flux` remains a separate fixed-DC derivative control.
 
 ### Cavity drives
 

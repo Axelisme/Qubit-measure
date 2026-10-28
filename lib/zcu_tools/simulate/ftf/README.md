@@ -1,6 +1,6 @@
 # Fixed-coordinate FTF numerics
 
-**Last updated:** 2026-10-27 (UTC), evolve-local numerical preparations
+**Last updated:** 2026-10-28 (UTC), multi-exponential batch flux filtering
 
 **讀者：** framework-dev、agent。固定座標 FTF 數值模型、路由與快取契約。
 
@@ -85,10 +85,22 @@ The collapse-operator and secular representations share the pure-rate calculatio
 `FluxTrack` carries one source slot across all template points in ns/GHz/rad.
 `schedule` filters source signals before loop mixing, then quantizes each DAC
 interval's midpoint and merges equal levels. `flux_waveform` retains unsnapped
-flux on DAC nodes for linear interpolation. Both use an absolute tail bound of
-5e-4 Phi0 per loop, summed over absolute pulse contributions; waveform appends a
-terminal DC sample. Filtering integrates sampled linear complex envelopes and
-carriers analytically across the point arrays, without per-point quadrature.
+flux on DAC nodes for linear interpolation. Each line implements the public
+`FluxLine` step response as a base pole of weight `1-sum(A_k)` plus distortion
+poles of signed weights `A_k`. A zero base tau gives instantaneous feedthrough.
+Filtering integrates sampled linear complex envelopes and carriers analytically
+across the point arrays, without per-point quadrature. Empty distortion terms
+retain the original single-pole calculation.
+
+Both functions use an absolute tail bound of 5e-4 Phi0 per loop. Each pulse's
+maximum absolute envelope, gain and loop coefficient scale the sum of absolute
+pole weights. The slowest pole bounds their decay after delayed pulse end.
+The error budget is divided among source slots, so opposite signed poles or
+sources cannot cancel the bound. The waveform appends a terminal DC sample only
+after that bound is below tolerance. `schedule` rounds midpoint offsets from DC
+to the nearest 1e-3 Phi0 level, ties even, and merges equal adjacent levels.
+Offsets smaller than 5e-4 Phi0 snap to DC. These functions do not propagate a
+density or certify convergence of the fixed-DC projected subspace.
 `readout_model(joint, resonators)` supplies the existing ADC model at DC, with a
 zero reference frequency and neutral receiver for composition to calibrate.
 
