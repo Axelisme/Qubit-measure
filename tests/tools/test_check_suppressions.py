@@ -22,6 +22,29 @@ def test_each_comment_silencer_is_counted() -> None:
     }
 
 
+def test_directives_after_another_comment_are_counted() -> None:
+    source = (
+        "a = 1  # (shape) # type: ignore[index]\n"
+        "b = 2  # explanation # pyright: ignore[reportX]\n"
+        "c = 3  # explanation # noqa: E501\n"
+    )
+
+    assert checker.comment_suppressions(source) == {
+        "type-ignore": 1,
+        "pyright-ignore": 1,
+        "noqa": 1,
+    }
+
+
+def test_mid_comment_file_rules_are_not_counted() -> None:
+    source = (
+        "# explanation # pyright: reportAssignmentType=false\n"
+        "# explanation `# pyright: reportAssignmentType=none`\n"
+    )
+
+    assert checker.comment_suppressions(source) == {}
+
+
 def test_a_silencer_inside_a_string_is_not_a_silencer() -> None:
     """Matching the file text would count documentation and test data."""
     source = 'message = "add # noqa: C901 to silence it"\n'
@@ -30,8 +53,13 @@ def test_a_silencer_inside_a_string_is_not_a_silencer() -> None:
 
 
 def test_prose_that_mentions_a_directive_is_not_a_use_of_it() -> None:
-    """A comment explaining `# noqa` is documentation, not a silenced finding."""
-    source = "# the `# noqa` comment below silences it\n# see also # type: ignore\n"
+    """Words without a directive at a hash-delimited segment do not silence."""
+    source = (
+        "# avoid type: ignore here\n"
+        "# mention pyright: ignore here\n"
+        "# mention noqa: E501 here\n"
+        "# mention pyright: reportUnusedFunction=false here\n"
+    )
 
     assert checker.comment_suppressions(source) == {}
 
