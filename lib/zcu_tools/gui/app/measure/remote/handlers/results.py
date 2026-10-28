@@ -24,10 +24,17 @@ def h_results_list(
     """Read all project runs with no parameters or entry/point prerequisite.
 
     Each call scans a fresh disk snapshot; no filters or session changes apply.
-    Index scan failures propagate to shared dispatch's structured wire errors.
+    Per-item failures are returned in issues, not raised for the whole listing.
+    Top-level issues name unenumerable paths; run issues include file/ledger errors.
     """
     index = adapter.ctrl.query_results()
-    return {"runs": [project_result_run(run) for run in index.runs]}
+    return {
+        "runs": [project_result_run(run) for run in index.runs],
+        "issues": [
+            {"entry": issue.entry, "path": str(issue.path), "reason": issue.reason}
+            for issue in index.issues
+        ],
+    }
 
 
 def h_results_figure(

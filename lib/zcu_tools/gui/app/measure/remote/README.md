@@ -49,10 +49,14 @@ observations are not part of this projection. This wire-contract change advances
 
 ## Saved results
 
-`results.list()` returns `{runs: [...]}` from a fresh project-wide Database
+`results.list()` returns `{runs: [...], issues: [...]}` from a fresh project-wide Database
 snapshot through `Controller.query_results() -> ResultsIndex`, the same query
 used by the results browser. It needs neither an opened entry nor a selected
-point and does not switch either. Missing Database returns an empty list.
+point and does not switch either. Missing Database returns empty runs and issues.
+Top-level issues contain `entry`, absolute `path` and `reason` for Database items
+that could not be safely enumerated. `entry` is null for a Database root error.
+Escaping paths are not followed and do not hide healthy entries. Setup and ledger
+errors stay in the affected runs' issues; failed ledgers leave runs unregistered.
 
 Each run includes opaque `key`, `entry`, historical `run_id`, `experiment`,
 `point`, captured `roles`, `at`, `registered`, absolute `run_path`,

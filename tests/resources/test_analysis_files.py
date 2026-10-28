@@ -5,6 +5,9 @@ from pathlib import Path
 
 import pytest
 from zcu_tools.resources.dispersive_file import (
+    DispersiveFile,
+)
+from zcu_tools.resources.dispersive_file import (
     load_dispersive_file as load,
 )
 from zcu_tools.resources.dispersive_file import (
@@ -26,6 +29,46 @@ def document() -> dict[str, object]:
     }
 
 
+@pytest.mark.parametrize("source", [None, [], {}, {"created_at": "naive"}])
+def test_reader_ignores_unused_content_and_reports_unknown_source(tmp_path, source):
+    raw = document()
+    raw.pop("source")
+    if source is not None:
+        raw["source"] = source
+    path = tmp_path / "reader.json"
+    path.write_text(json.dumps(raw), encoding="utf-8")
+    before = path.read_bytes()
+
+    loaded = load(path)
+
+    assert loaded.params.bare_rf == 5.1
+    assert loaded.source is None
+    assert path.read_bytes() == before
+
+
+def test_reader_ignores_extra_parameter_fields(tmp_path):
+    raw = document()
+    raw["params"] = {"bare_rf": 5.1, "future": {"unrelated": []}}
+    path = tmp_path / "extra.json"
+    path.write_text(json.dumps(raw), encoding="utf-8")
+    assert load(path).params.bare_rf == 5.1
+
+
+@pytest.mark.parametrize("g", [0.02, None, "broken", True, float("inf"), float("nan")])
+def test_reader_defers_coupling_validation_until_requested(tmp_path, g):
+    raw = document()
+    raw["params"] = {"g": g, "bare_rf": 5.1}
+    path = tmp_path / "coupling.json"
+    path.write_text(json.dumps(raw), encoding="utf-8")
+    params = load(path).params
+    assert params.bare_rf == 5.1
+    if g == 0.02:
+        assert params.require_g() == 0.02
+    else:
+        with pytest.raises(ValueError, match="g"):
+            params.require_g()
+
+
 def test_owner_roundtrip_retains_unknowns_without_creating_provenance(
     tmp_path: Path,
 ) -> None:
@@ -35,6 +78,7 @@ def test_owner_roundtrip_retains_unknowns_without_creating_provenance(
     target = tmp_path / "output.json"
     save(target, loaded)
     assert load(target) == loaded
+    assert loaded.source is not None
     assert loaded.source.run_id is None
     assert loaded.source.created_at is None
     assert loaded.params.g is None
@@ -59,7 +103,7 @@ def test_owner_roundtrip_retains_unknowns_without_creating_provenance(
         (("extra",), 1),
     ],
 )
-def test_owner_rejects_invalid_envelope(
+def test_owner_validates_header_and_projects_optional_source(
     tmp_path: Path, path: tuple[str, ...], bad: object
 ) -> None:
     raw = document()
@@ -70,14 +114,20 @@ def test_owner_rejects_invalid_envelope(
         raw["source"] = {**source, path[1]: bad}
     file = tmp_path / "bad.json"
     file.write_text(json.dumps(raw), encoding="utf-8")
-    with pytest.raises(ValueError, match=path[0]):
-        load(file)
+    if path == ("source", "extra"):
+        assert load(file).source is not None
+    elif path[0] == "source":
+        assert load(file).source is None
+    elif path[0] == "extra":
+        assert load(file).params.bare_rf == 5.1
+    else:
+        with pytest.raises(ValueError, match=path[0]):
+            load(file)
 
 
 @pytest.mark.parametrize(
     "params",
     [
-        {"g": True},
         {"bare_rf": "5.0"},
         {"plot_transitions": {"r_f": float("inf")}},
     ],
@@ -91,15 +141,24 @@ def test_owner_rejects_bad_content(tmp_path: Path, params: dict[str, object]) ->
         load(file)
 
 
+@pytest.mark.parametrize("fault", ["version", "source", "g"])
 def test_save_revalidates_and_retains_existing_file_on_invalid_input(
     tmp_path: Path,
+    fault: str,
 ) -> None:
     file = tmp_path / "fit.json"
     file.write_text(json.dumps(document()), encoding="utf-8")
     loaded = load(file)
-    invalid = loaded.model_copy(update={"version": True})
+    if fault == "g":
+        invalid = loaded.model_copy(
+            update={"params": loaded.params.model_copy(update={"g": "bad"})}
+        )
+    else:
+        invalid = loaded.model_copy(
+            update={fault: True if fault == "version" else None}
+        )
     before = file.read_bytes()
-    with pytest.raises(ValueError, match="version"):
+    with pytest.raises(ValueError, match=fault):
         save(file, invalid)
     assert file.read_bytes() == before
 
@@ -127,6 +186,7 @@ def test_owner_preserves_proven_source_text(tmp_path: Path, created_at: str) -> 
     file.write_text(json.dumps(raw), encoding="utf-8")
     loaded = load(file)
     save(file, loaded)
+    assert loaded.source is not None
     assert loaded.source.created_at == created_at
     assert json.loads(file.read_text(encoding="utf-8"))["source"] == raw["source"]
 
@@ -161,19 +221,18 @@ def test_owner_preserves_proven_source_text(tmp_path: Path, created_at: str) -> 
         "2026-10-20T08:00:00Z\n",
     ],
 )
-def test_owner_rejects_unproven_created_at_on_load_and_save(
+def test_unproven_created_at_is_unknown_on_read_but_rejected_on_save(
     tmp_path: Path, operation: str, created_at: str
 ) -> None:
     file = tmp_path / "fit.json"
     raw = document()
     file.write_text(json.dumps(raw), encoding="utf-8")
-    valid = load(file)
+    valid = DispersiveFile.model_validate(raw)
     before = file.read_bytes()
     if operation == "load":
         raw["source"] = {"run_id": None, "created_at": created_at}
         file.write_text(json.dumps(raw), encoding="utf-8")
-        with pytest.raises(ValueError, match="created_at"):
-            load(file)
+        assert load(file).source is None
     else:
         invalid = valid.model_copy(
             update={

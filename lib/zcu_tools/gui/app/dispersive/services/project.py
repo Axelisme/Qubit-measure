@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 from zcu_tools.gui.app.analysis_project.entry import AnalysisTarget, require_target
@@ -16,15 +17,21 @@ from zcu_tools.resources.entry import RoleResolutionError, document_value, snaps
 from zcu_tools.resources.predictor_file import load_predictor_file
 from zcu_tools.simulate.fluxonium.predict import FluxoniumParams
 
+logger = logging.getLogger(__name__)
+
 
 def _bare_rf_seed(target: AnalysisTarget) -> float:
     path = target.resource.dispersive_path / f"{target.component}.json"
     if path.exists():
-        params = load_dispersive_file(path).params
-        if params.bare_rf is not None:
-            return params.bare_rf
-        if params.plot_transitions.r_f is not None:
-            return params.plot_transitions.r_f
+        try:
+            params = load_dispersive_file(path).params
+        except (OSError, ValueError) as error:
+            logger.warning("Cannot read optional dispersive seed %s: %s", path, error)
+        else:
+            if params.bare_rf is not None:
+                return params.bare_rf
+            if params.plot_transitions.r_f is not None:
+                return params.plot_transitions.r_f
     aliases = AliasTable(
         [AliasRow(k, v) for k, v in target.resource.load_aliases().aliases.items()]
     )
@@ -69,7 +76,8 @@ class ProjectService:
         models with ValueError. Missing/invalid/incomplete files propagate their
         errors without replacing state. Seed priority is dispersive bare_rf,
         plot_transitions.r_f, resonator alias freq (MHz to GHz), then 5 GHz.
-        An existing tuning value is retained.
+        An unreadable optional dispersive seed is logged and falls through to
+        the alias/default. An existing tuning value is retained.
         """
         target = require_target(self._state.project)
         root = target.resource.predictors_path
