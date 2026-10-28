@@ -47,7 +47,9 @@ Project… 使用共用 EntryDialog 開啟 `project_root/result/<entry>`。CLI �
 CLI 未指定 entry 時，GUI 保持未開啟。
 Dialog 列出全部合法 component，有效 qubit alias 只作預選。
 Alias 缺失或錯誤時，OK 保持停用，直到使用者明示選擇。
-不建立新條目，不讀舊兩級目錄或 params.json。啟動腳本註冊 lab component schema，框架不 import lab。
+不建立新條目，不讀舊兩級目錄或 params.json。`FluxDepGuiBehavior(lab, selection)`
+先呼叫 lab registrar，再依 `AnalysisSelection` 開啟 target。`FluxDepGuiLab` 宣告 component
+註冊、export planner 與 flux context provider；框架不 import lab。
 
 Export params… 先判定是否能寫 predictor v2。可寫時輸出 `predictors/<component>.json`。
 接著更新 setup 宣告的 EJ／EC／EL 與注入 planner 提出的校準欄位，最後追加 analysis ledger。

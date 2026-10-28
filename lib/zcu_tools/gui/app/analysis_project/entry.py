@@ -10,6 +10,8 @@ from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputEr
 from zcu_tools.gui.session.aliases import AliasRow, AliasTable
 from zcu_tools.resources.entry import ResultEntry, snapshot
 
+from .selection import AnalysisSelection
+
 
 def fluxonium_components(entry: ResultEntry) -> tuple[str, ...]:
     """List setup fluxonium qubits in document order, without changing the entry."""
@@ -104,18 +106,20 @@ class AnalysisTarget:
     @classmethod
     def open(
         cls,
-        project_root: str | Path,
-        entry: str,
-        component: str | None = None,
+        selection: AnalysisSelection,
     ) -> AnalysisTarget:
         """Open an existing entry, defaulting to its setup qubit alias.
 
-        project_root contains result/ and Database/. Database is only bound,
+        selection names the project root, entry and optional component.
+        An empty entry is invalid here; GUI composition leaves it unopened.
+        Database is only bound,
         never read or written. Missing entry propagates FileNotFoundError.
         Missing/unbound aliases preserve AliasTable errors. Unknown components
         and non-fluxonium kinds raise InvalidInputError before publication.
         """
-        return AnalysisEntry.open(project_root, entry).select(component)
+        return AnalysisEntry.open(selection.project_root, selection.entry).select(
+            selection.component
+        )
 
     @property
     def predictor_path(self) -> Path:

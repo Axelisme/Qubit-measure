@@ -10,11 +10,12 @@ from __future__ import annotations
 
 import argparse
 import sys
+from functools import partial
 from pathlib import Path
 
 from zcu_tools.gui.app.analysis_project.launcher import (
     add_analysis_entry_cli_options,
-    analysis_target_from_args,
+    analysis_selection_from_args,
 )
 from zcu_tools.gui.launcher import (
     add_runtime_cli_options,
@@ -51,18 +52,21 @@ def main(argv: list[str] | None = None) -> int:
     project_root = str(Path(args.project_root or PROJECT_ROOT).resolve())
 
     from zcu_tools.gui.app.dispersive.app import DispersiveGuiBehavior
-    from zcu_tools.resources.entry import component_registry
-
-    from zcu_lab.components import register_all
-
-    register_all(component_registry)
     from zcu_tools.gui.runtime import launch_gui_runtime
 
+    from zcu_lab.assembly import lab_definitions
+
+    lab = lab_definitions()
+
     return launch_gui_runtime(
-        DispersiveGuiBehavior,
+        DispersiveGuiBehavior.spec,
         runtime_options_from_args(args, log_root=PROJECT_ROOT),
-        project=analysis_target_from_args(args, project_root=project_root),
-        project_root=project_root,
+        logging_namespaces=lab.logging_namespaces,
+        behavior_factory=partial(
+            DispersiveGuiBehavior,
+            lab,
+            selection=analysis_selection_from_args(args, project_root=project_root),
+        ),
     )
 
 

@@ -14,8 +14,8 @@ from __future__ import annotations
 
 import argparse
 import sys
+from functools import partial
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 from zcu_tools.gui.app.measure import default_startup
 from zcu_tools.gui.launcher import (
@@ -24,10 +24,7 @@ from zcu_tools.gui.launcher import (
     select_startup_script,
 )
 
-if TYPE_CHECKING:
-    from zcu_tools.gui.app.measure.services.workflow_control import WorkflowControlFacet
-
-# Code, catalogs and logs stay anchored at the repo, not the data project.
+# Logs and the default data project stay anchored at the repo, not cwd.
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -93,46 +90,6 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def _build_measure_catalogs():
-    """Build measure-gui's experiment catalogs after runtime pre-Qt setup."""
-    from zcu_tools.gui.app.measure.catalog_loader import SourceExperimentCatalogLoader
-
-    # Composition root: wire the user-owned experiment attachments
-    # into the GUI framework. The behavior receives a factory, so these imports
-    # happen after runtime logging and matplotlib policy setup.
-    from zcu_tools.gui.app.measure.registry import Registry
-    from zcu_tools.gui.catalog_loader import SourcePackage
-    from zcu_tools.resources.entry.registry import component_registry
-
-    from zcu_lab.definitions import register_all
-    from zcu_lab.templates import TEMPLATES
-
-    registry = Registry(templates=TEMPLATES)
-    register_all(registry, components=component_registry)
-    loader = SourceExperimentCatalogLoader(
-        sources=(
-            SourcePackage("zcu_tools", REPO_ROOT / "lib" / "zcu_tools"),
-            SourcePackage("zcu_lab", REPO_ROOT / "zcu_lab"),
-        ),
-        reload_modules=("zcu_lab.v2", "zcu_lab.definitions"),
-        preserved_modules=(
-            "zcu_lab.templates",
-            "zcu_lab.v2.support.measure",
-            "zcu_lab.v2.support.singleshot",
-        ),
-        catalog_module="zcu_lab.definitions",
-        current_registry=registry,
-    )
-    return registry, loader
-
-
-def _configure_workflows(control: WorkflowControlFacet) -> None:
-    """Inject the caller's native workflow attachments after runtime setup."""
-    from zcu_lab.workflows.registry import build_registry
-
-    control.configure(build_registry())
-
-
 def main(argv: list[str] | None = None) -> int:
     """Launch the GUI; invalid project roots exit before GUI or lab assembly."""
     args = _parse_args(sys.argv[1:] if argv is None else argv)
@@ -140,19 +97,24 @@ def main(argv: list[str] | None = None) -> int:
     from zcu_tools.gui.app.measure.app import MeasureGuiBehavior
     from zcu_tools.gui.runtime import launch_gui_runtime
 
+    from zcu_lab.assembly import lab_definitions
+
+    lab = lab_definitions()
     return launch_gui_runtime(
-        MeasureGuiBehavior,
+        MeasureGuiBehavior.spec,
         runtime_options_from_args(args, log_root=REPO_ROOT),
-        extra_logging_namespaces=("zcu_lab",),
-        registry_factory=_build_measure_catalogs,
-        configure_workflows=_configure_workflows,
-        clean=args.clean,
-        startup_script=select_startup_script(
+        logging_namespaces=lab.logging_namespaces,
+        behavior_factory=partial(
+            MeasureGuiBehavior,
+            lab,
             clean=args.clean,
-            script=args.script,
-            default_script=Path(default_startup.__file__),
+            startup_script=select_startup_script(
+                clean=args.clean,
+                script=args.script,
+                default_script=Path(default_startup.__file__),
+            ),
+            project_root=str(args.project_root),
         ),
-        project_root=str(args.project_root),
     )
 
 

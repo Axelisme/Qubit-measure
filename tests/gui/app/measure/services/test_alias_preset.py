@@ -11,10 +11,6 @@ from pathlib import Path
 import pytest
 from qtpy.QtWidgets import QApplication
 from zcu_tools.gui.app.measure.app import MeasureGuiBehavior
-from zcu_tools.gui.app.measure.catalog_loader import (
-    SourceExperimentCatalogLoader,
-    SourcePackage,
-)
 from zcu_tools.gui.app.measure.controller import Controller
 from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.services.app_services import build_app_services
@@ -30,6 +26,7 @@ from zcu_tools.gui.session.types import SessionEnv
 from zcu_tools.resources.entry import ResultEntry
 from zcu_tools.resources.entry.aliases import EntryAliases
 
+from tests._lab import synthetic_lab
 from tests.gui._progress_fakes import DirectProgressTransport
 from tests.resources.entry.fakes import register_fakes, registry_state, restore_registry
 
@@ -176,18 +173,6 @@ def test_point_table_replaces_named_default_without_automatic_initialization(
         restore_registry(before)
 
 
-def registry_factory() -> tuple[Registry, SourceExperimentCatalogLoader]:
-    registry = Registry()
-    loader = SourceExperimentCatalogLoader(
-        sources=(SourcePackage("tests.gui.app.measure", Path(__file__).parents[1]),),
-        reload_modules=("tests.gui.app.measure._synthetic",),
-        preserved_modules=(),
-        catalog_module="tests.gui.app.measure._synthetic",
-        current_registry=registry,
-    )
-    return registry, loader
-
-
 @pytest.mark.parametrize("presets", [NAMED_PRESETS, {"default": ()}, None])
 def test_measure_behavior_retains_complete_named_presets(
     presets: dict[str, tuple[AliasRow, ...]] | None,
@@ -195,7 +180,7 @@ def test_measure_behavior_retains_complete_named_presets(
     original_sys, original_thread = sys.excepthook, threading.excepthook
     try:
         try:
-            behavior = MeasureGuiBehavior(registry_factory, alias_presets=presets)
+            behavior = MeasureGuiBehavior(synthetic_lab(), alias_presets=presets)
         except TypeError as error:
             pytest.fail(f"Public composition must accept named alias presets: {error}")
         assert behavior.alias_presets == presets
@@ -210,7 +195,7 @@ def test_measure_behavior_rejects_catalog_without_default(
     original_sys, original_thread = sys.excepthook, threading.excepthook
     try:
         with pytest.raises(ValueError, match="default"):
-            MeasureGuiBehavior(registry_factory, alias_presets=presets)
+            MeasureGuiBehavior(synthetic_lab(), alias_presets=presets)
     except TypeError as error:
         pytest.fail(f"Named alias preset admission is missing: {error}")
     finally:

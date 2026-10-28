@@ -10,7 +10,7 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 
 ## Module Boundaries
 
-- [0072 — 模組定位與依賴邊界](0072-module-boundaries.md)：各 package 的定位、實驗計算歸 core 與 GUI 接線規則、五層、使用者元件子模組與模擬環境定位、穩定工具與有狀態模組的分類、分析 app 的 entry/component owner 與 native 光譜選擇、analysis 的 native 投影、device snapshot 標量解讀、模擬損耗漂移的 simulate／resources／experiment 分工、core 共用 waveform 格式、cfg_model 契約、library 容器版本政策、依 kind 宣告的 component wiring、lab mux group 的具名 coil 來源與 active selection 邊界、債務清單。分層、無循環與 core 只依賴 utils 由 .importlinter C8–C13／C19 檢查，C15 保護使用者 core 的 GUI independence，C16 禁止 framework 反向 import 使用者套件；離線遷移專用程式只放 `migrations/`。剩餘債務以 `ignore_imports` 記帳。
+- [0072 — 模組定位與依賴邊界](0072-module-boundaries.md)：各 package 的定位、實驗計算歸 core 與 GUI 接線規則、五層、單一 lab 描述與各入口最小 Protocol、logging-before-construction、analysis selection 與兩個 module-only MCP 例外、使用者元件子模組與模擬環境定位、穩定工具與有狀態模組的分類、分析 app 的 entry/component owner 與 native 光譜選擇、analysis 的 native 投影、device snapshot 標量解讀、模擬損耗漂移的 simulate／resources／experiment 分工、core 共用 waveform 格式、cfg_model 契約、library 容器版本政策、依 kind 宣告的 component wiring、lab mux group 的具名 coil 來源與 active selection 邊界、債務清單。分層、無循環與 core 只依賴 utils 由 .importlinter C8–C13／C19 檢查，C15 保護使用者 core 的 GUI independence，C16 禁止 framework 反向 import 使用者套件；離線遷移專用程式只放 `migrations/`。剩餘債務以 `ignore_imports` 記帳。
 
 ## Concurrency / Lifecycle
 

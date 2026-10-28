@@ -6,11 +6,10 @@ import pytest
 from zcu_tools.device import FakeDevice, FakeDeviceInfo
 from zcu_tools.gui.app.measure.app import MeasureGuiBehavior
 from zcu_tools.gui.app.measure.controller import Controller
-from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.session.state import DeviceStatus
 from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 
-from tests.gui.app.measure._reload_fakes import Loader
+from tests._lab import synthetic_lab
 
 
 class ClosingDriver(FakeDevice):
@@ -29,7 +28,7 @@ class ClosingDriver(FakeDevice):
 def assembled_app(qapp, tmp_path):
     old_hook = sys.excepthook
     behavior = MeasureGuiBehavior(
-        lambda: (Registry(), Loader()), clean=True, project_root=str(tmp_path)
+        synthetic_lab(), clean=True, project_root=str(tmp_path)
     )
     assembly = behavior.assemble(None)
     try:

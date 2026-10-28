@@ -1,21 +1,18 @@
 #!/usr/bin/env python
-"""Inject authored async recipe declarations into the measure MCP stdio server."""
+"""Inject the lab description into the measure MCP stdio server."""
 
 from zcu_tools.mcp.measure.server import main as run_measure_mcp
-from zcu_tools.resources.entry.registry import component_registry
 
-from zcu_lab.components import register_all
-from zcu_lab.recipes import RECIPES
+from zcu_lab.assembly import lab_definitions
 
 
 def main() -> None:
-    """Bootstrap lab components and delegate recipes to the measure stdio server.
+    """Delegate the lab description to the measure stdio server.
 
     Tool calls explicitly connect or launch the GUI. On EOF the framework drains
     its session and disconnects, without closing the GUI or hardware.
     """
-    register_all(component_registry)
-    run_measure_mcp(recipes=RECIPES, gui_module="apps.measure")
+    run_measure_mcp(lab_definitions(), gui_module="apps.measure")
 
 
 if __name__ == "__main__":

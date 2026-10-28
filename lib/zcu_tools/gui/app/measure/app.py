@@ -1,14 +1,11 @@
 """GUI composition root — assembles all components for the shared runtime.
 
-This module depends only on ``zcu_tools.gui.app.measure``; it does not know which concrete
-experiments exist. The entry script wires a populated ``Registry`` with its injected templates
-(built from caller-owned definitions) and passes it in — so the
-GUI framework never imports the experiment-adapter layer.
+The entry script supplies a lab description. This module builds catalogs and
+session owners without importing any concrete lab definitions.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar, TypeGuard
 
@@ -20,16 +17,14 @@ from zcu_tools.gui.runtime import (
 )
 from zcu_tools.gui.session.alias_presets import AliasPresets, validate_alias_presets
 
+from .lab import MeasureGuiLab
+
 if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.adapter import SessionEnv
-    from zcu_tools.gui.app.measure.catalog import ExperimentCatalogLoader
     from zcu_tools.gui.app.measure.controller import Controller
     from zcu_tools.gui.app.measure.registry import Registry
-    from zcu_tools.gui.app.measure.services.workflow_control import WorkflowControlFacet
     from zcu_tools.gui.app.measure.state import State
     from zcu_tools.gui.app.measure.ui.main_window import MainWindow
-
-RegistryFactory = Callable[[], tuple["Registry", "ExperimentCatalogLoader"]]
 
 
 def _make_empty_ctx() -> SessionEnv:
@@ -39,12 +34,12 @@ def _make_empty_ctx() -> SessionEnv:
     return SessionEnv(parameters=None, soc=None, soccfg=None)
 
 
-class MeasureGuiBehavior(GuiRuntimeBehavior):
+class MeasureGuiBehavior[C](GuiRuntimeBehavior):
     """measure-gui wiring for user catalogs and shared session services.
 
-    registry_factory supplies catalogs after runtime setup. clean skips saved
-    Qt layout and startup scripts; project_root anchors entry roots. Predictor queries never depend on
-    dialog state. Assembly/source failures propagate without hidden retries.
+    lab supplies registrars, templates, workflow attachments and source reload
+    policy. clean skips saved Qt layout and startup scripts; project_root anchors
+    entry roots. Assembly/source failures propagate without hidden retries.
     """
 
     spec: ClassVar[GuiRuntimeSpec] = GuiRuntimeSpec(
@@ -55,22 +50,22 @@ class MeasureGuiBehavior(GuiRuntimeBehavior):
 
     def __init__(
         self,
-        registry_factory: RegistryFactory,
+        lab: MeasureGuiLab[C],
         *,
         clean: bool = False,
         startup_script: Path | None = None,
         project_root: str | None = None,
         alias_presets: AliasPresets | None = None,
-        configure_workflows: Callable[[WorkflowControlFacet], None] | None = None,
     ) -> None:
-        """Build caller catalogs and retain complete alias data for assembly.
+        """Build lab catalogs and retain complete alias data for assembly.
 
-        ``configure_workflows`` installs caller-owned workflow registrations on
-        the shared facet before widgets mount. None leaves an empty catalog.
-        The callback retains native generic pairing without erasing its context.
-        It must not open tabs or acquire hardware; failures abort assembly.
-        ``registry_factory`` returns the registry (including templates) and reload loader
-        after runtime setup. ``clean`` skips saved Qt layout and startup scripts.
+        lab.register_components installs models/roles into the shared process
+        registry, then lab.register_experiments fills a fresh Registry holding
+        lab.templates. lab.catalog_reload_policy bounds the source loader.
+        lab.workflow_attachments configures the shared facet before widgets mount;
+        an empty tuple leaves no workflow catalog. Registrars must not acquire
+        hardware; registration/source failures abort construction.
+        ``clean`` skips saved Qt layout and startup scripts.
         ``startup_script`` is the already-selected trusted Python path, or None
         to run no script and show Setup. Composition chooses the default, not
         this module. clean with a script raises ValueError. The script runs on
@@ -95,12 +90,28 @@ class MeasureGuiBehavior(GuiRuntimeBehavior):
             raise ValueError("--clean and --script are mutually exclusive")
         validate_alias_presets(alias_presets)
         install_global_exception_hook(show_error_dialog)
-        self._registry, self._catalog_loader = registry_factory()
+        from zcu_tools.gui.app.measure.catalog_loader import (
+            SourceExperimentCatalogLoader,
+        )
+        from zcu_tools.gui.app.measure.registry import Registry
+        from zcu_tools.resources.entry.registry import component_registry
+
+        lab.register_components(component_registry)
+        self._registry = Registry(templates=lab.templates)
+        lab.register_experiments(self._registry)
+        policy = lab.catalog_reload_policy
+        self._catalog_loader = SourceExperimentCatalogLoader(
+            sources=policy.sources,
+            reload_modules=policy.reload_modules,
+            preserved_modules=policy.preserved_modules,
+            catalog_module=policy.catalog_module,
+            current_registry=self._registry,
+        )
         self._clean = clean
         self._startup_script = startup_script
         self._project_root = project_root
         self.alias_presets: AliasPresets | None = alias_presets
-        self._configure_workflows = configure_workflows
+        self._workflow_attachments = lab.workflow_attachments
         self._assembled = False
         self._controller: Controller | None = None
         self._window: MainWindow | None = None
@@ -243,8 +254,8 @@ class MeasureGuiBehavior(GuiRuntimeBehavior):
 
         self._controller = ctrl
         try:
-            if self._configure_workflows is not None:
-                self._configure_workflows(ctrl.workflow_control())
+            if self._workflow_attachments:
+                ctrl.workflow_control().configure(self._workflow_attachments)
             window = MainWindow(
                 ctrl,
                 templates=lambda: registry.templates,

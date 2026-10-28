@@ -5,12 +5,14 @@ from __future__ import annotations
 from copy import deepcopy
 
 import pytest
+from zcu_tools.gui.app.analysis_project.selection import AnalysisSelection
 from zcu_tools.gui.app.fluxdep.app import FluxDepGuiBehavior
 from zcu_tools.gui.app.fluxdep.controller import Controller
 from zcu_tools.gui.app.fluxdep.ui.interactive.line_picker import LinePickerWidget
 from zcu_tools.gui.app.fluxdep.ui.main_window import MainWindow
 from zcu_tools.gui.event_bus import EventOrigin
 
+from tests._lab import synthetic_lab
 from tests.gui._qt_waits import qt_until
 from tests.gui.app.fluxdep._window import (
     editor,
@@ -21,8 +23,10 @@ from tests.gui.app.fluxdep._window import (
 
 
 @pytest.fixture
-def composition(qapp):
-    assembly = FluxDepGuiBehavior().assemble(None)
+def composition(qapp, tmp_path):
+    assembly = FluxDepGuiBehavior(
+        synthetic_lab(), AnalysisSelection(tmp_path)
+    ).assemble(None)
     assert isinstance(assembly.controller, Controller)
     assert isinstance(assembly.window, MainWindow)
     yield assembly.controller, assembly.window

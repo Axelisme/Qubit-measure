@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import sys
+from functools import partial
 from pathlib import Path
 from threading import Event, Thread
 from typing import ClassVar, TextIO
@@ -129,10 +130,10 @@ def test_launch_configures_logging_before_constructing_behavior(
     monkeypatch.setattr(runtime, "run_gui_runtime", run_behavior)
 
     result = runtime.launch_gui_runtime(
-        LaunchBehavior,
+        LaunchBehavior.spec,
         GuiLaunchOptions(log_root=tmp_path, no_control=True),
-        events,
-        extra_logging_namespaces=extra_namespaces,
+        behavior_factory=partial(LaunchBehavior, events),
+        logging_namespaces=extra_namespaces,
     )
 
     assert result == 17

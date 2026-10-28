@@ -5,6 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 from zcu_tools.datafile import LabberData
+from zcu_tools.gui.app.analysis_project.selection import AnalysisSelection
 from zcu_tools.resources.entry import ResultEntry, component_registry
 from zcu_tools.resources.entry.aliases import EntryAliases
 from zcu_tools.resources.predictor_file import (
@@ -107,5 +108,7 @@ def analysis_target(analysis_entry):
     from zcu_tools.gui.app.analysis_project.entry import AnalysisTarget
 
     return AnalysisTarget.open(
-        analysis_entry.result_path.parent.parent, analysis_entry.result_path.name
+        AnalysisSelection(
+            analysis_entry.result_path.parent.parent, analysis_entry.result_path.name
+        )
     )

@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 from zcu_tools.analysis.flux import ComponentFluxContext, DevicePeriod, FluxFrame
 from zcu_tools.gui.app.analysis_project.entry import AnalysisTarget
+from zcu_tools.gui.app.analysis_project.selection import AnalysisSelection
 from zcu_tools.gui.app.fluxdep.export_plan import (
     ComponentExportPlan,
     FluxWritebackReceipt,
@@ -37,7 +38,9 @@ def export_target(fluxonium_entry: ResultEntry) -> Iterator[AnalysisTarget]:
     try:
         fluxonium_entry.setup.add_component("Qcal", kind="qubit/fluxonium/export")
         yield AnalysisTarget.open(
-            fluxonium_entry.result_path.parent.parent, "synthetic", "Qcal"
+            AnalysisSelection(
+                fluxonium_entry.result_path.parent.parent, "synthetic", "Qcal"
+            )
         )
     finally:
         component_registry.unregister("qubit/fluxonium/export")

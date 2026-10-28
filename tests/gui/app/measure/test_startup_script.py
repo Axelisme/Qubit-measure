@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import sys
 import threading
+from dataclasses import replace
 from pathlib import Path
 from types import ModuleType
 
@@ -27,10 +28,10 @@ from zcu_tools.gui.session.ports import OperationConflictError
 from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 from zcu_tools.resources.entry import ResultEntry, component_registry
 
+from tests._lab import synthetic_lab
 from tests.gui._qt_waits import qt_until
 from tests.gui._user_input import ComponentDriver
 from tests.gui.app.measure._components import QubitSchema
-from tests.gui.app.measure._reload_fakes import Loader
 from tests.gui.app.measure._synthetic import SampleAdapter
 from tests.resources.entry.fakes import registry_state, restore_registry
 
@@ -62,7 +63,7 @@ def startup_app(qapp, tmp_path, monkeypatch):
     registry.register("sample", SampleAdapter)
     previous_hook = sys.excepthook
     behavior = MeasureGuiBehavior(
-        lambda: (registry, Loader()), clean=True, project_root=str(tmp_path)
+        synthetic_lab(registry), clean=True, project_root=str(tmp_path)
     )
     assembly = behavior.assemble(None)
     behavior.before_show(assembly)
@@ -143,20 +144,21 @@ def test_script_selection_uses_only_default_custom_or_clean(tmp_path):
         )
 
 
-def test_composition_rejects_clean_script_before_factory_and_global_hooks(tmp_path):
+def test_composition_rejects_clean_script_before_registration_and_global_hooks(
+    tmp_path,
+):
     factory_calls: list[str] = []
 
-    def registry_factory():
+    def register_experiments(_registry):
         factory_calls.append("called")
-        return Registry(), Loader()
+
+    lab = replace(synthetic_lab(), register_experiments=register_experiments)
 
     previous_hook = sys.excepthook
     previous_thread_hook = threading.excepthook
     try:
         with pytest.raises(ValueError, match="--clean.*--script"):
-            MeasureGuiBehavior(
-                registry_factory, clean=True, startup_script=tmp_path / "startup.py"
-            )
+            MeasureGuiBehavior(lab, clean=True, startup_script=tmp_path / "startup.py")
         assert (factory_calls, sys.excepthook, threading.excepthook) == (
             [],
             previous_hook,
@@ -576,7 +578,7 @@ def test_composition_starts_only_selected_synthetic_script(
         default_script=default,
     )
     behavior = MeasureGuiBehavior(
-        lambda: (Registry(), Loader()),
+        synthetic_lab(),
         clean=selection == "clean",
         startup_script=selected,
         project_root=str(tmp_path),
