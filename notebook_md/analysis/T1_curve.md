@@ -24,13 +24,21 @@ jupyter:
     version: 3.13.11
 ---
 
-# T1 Curve
+# T1 curve
 
 **Readers:** operator, lab-author. Fit T1 samples with capacitive, quasiparticle, inductive and Purcell relaxation channels.
 
-Model:
+The intrinsic model sums directional rates across active channels in a
+multilevel rate matrix. It swaps Gibbs populations 0 and 1 to represent a π pulse
+and selects the largest signed-amplitude decay mode of `1-p0(t)`.
+Purcell adds a separate rate to this dominant lifetime.
+Single-channel dominant lifetimes do not generally add as inverse lifetimes.
 
-`1/T1_eff = 1/T1_capacitive + 1/T1_quasiparticle + 1/T1_inductive + 1/T1_Purcell`.
+The diagnostic uses the second-largest signed amplitude, `a2/(a1+a2)`.
+One mode gives zero. Negative fractions stay negative. The fit raises for a flux
+with no decay modes. Set `secondary_threshold` in [0,1]; only strictly larger
+fractions are marked. Pointwise Q probes still invert the 0↔1 pair lifetime.
+Treat their estimates as initial guesses when Γ12/Γ10 is not small.
 
 # Import
 
@@ -395,7 +403,9 @@ combined_fit = zt1.fit_t1_curve(
     loss="linear",
     max_nfev=10000,
     progress=True,
+    secondary_threshold=0.1,
 )
+display(combined_fit.pointwise_table)
 
 print(zt1.t1_parameter_text(combined_fit.fit_result))
 print("fixed =", combined_fit.fit_result.fixed)
@@ -429,7 +439,11 @@ weak_parameters = find_weak_parameters(correlation)
 display(make_weak_parameter_table(weak_parameters))
 ```
 
-# Channel Curves
+# Channel curves
+
+Orange open circles mark dense model points above the secondary threshold.
+Orange crosses mark fit samples above the same threshold.
+The table reports signed fractions before adding Purcell rates.
 
 ```python
 channel_analysis = zt1.build_t1_channel_curves(
@@ -439,6 +453,7 @@ channel_analysis = zt1.build_t1_channel_curves(
     purcell=purcell,
 )
 
+display(channel_analysis.pointwise_table)
 fig, ax = zt1.plot_t1_channel_analysis(channel_analysis)
 if device_axis_frame is not None:
     add_device_axis(ax, device_axis_frame, device_name=device_axis_name)
