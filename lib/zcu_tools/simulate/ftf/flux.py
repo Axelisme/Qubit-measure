@@ -262,6 +262,28 @@ def flux_waveform(
     )
 
 
+def plateau_boundaries(waveform: FluxWaveform) -> tuple[tuple[float, ...], ...]:
+    """Return point-aligned ns boundaries between constant and moving flux spans.
+
+    Uses exact equality across all three loops on adjacent waveform samples,
+    matching their linear interpolation. Includes the terminal node if the last
+    interval moves, since flux stays constant after that node. Single-node points
+    have no boundaries. Merge these with timeline events to keep constant holds
+    separate from motion without changing waveform samples or bath levels.
+    """
+    boundaries = []
+    for lo, hi in zip(waveform.offsets[:-1], waveform.offsets[1:], strict=True):
+        times = waveform.time_ns[lo:hi]
+        values = waveform.flux[lo:hi]
+        moving = np.any(values[1:] != values[:-1], axis=1)
+        transitions = np.flatnonzero(moving[1:] != moving[:-1]) + 1
+        nodes = times[transitions]
+        if len(moving) and moving[-1]:
+            nodes = np.r_[nodes, times[-1]]
+        boundaries.append(tuple(float(t) for t in nodes))
+    return tuple(boundaries)
+
+
 def schedule(
     tracks: tuple[FluxTrack, ...],
     *,

@@ -26,7 +26,7 @@ from tests.resources._ftf_data import ftf_document
 pytestmark = pytest.mark.sim
 
 
-def reset_settings() -> FTFSettings:
+def reset_settings(*, delay_ns: float = 0.0) -> FTFSettings:
     """Isolate F1's two-state reset, with quasiparticle loss away from half flux."""
     base = parse_ftf(ftf_document()).model_dump(mode="json")
     return parse_ftf(
@@ -52,7 +52,12 @@ def reset_settings() -> FTFSettings:
                 "offset_phi0": {"f1": 0.5, "coupler": 0.2, "f2": 0.4},
             },
             "flux_lines": {
-                "f1": {"name": "reset", "gen_ch": 4, "flux_phi0_per_gain": 1.0}
+                "f1": {
+                    "name": "reset",
+                    "gen_ch": 4,
+                    "flux_phi0_per_gain": 1.0,
+                    "delay_ns": delay_ns,
+                }
             },
             "numerics": {
                 **base["numerics"],
@@ -67,8 +72,10 @@ def reset_settings() -> FTFSettings:
     )
 
 
-def reset_template(hold_ns: float, *, sudden: bool = False) -> TimelineTemplate:
-    """Ramp for 8 ns, park at f1=0.4, return to 0.5, and read immediately at DC.
+def reset_template(
+    hold_ns: float, *, sudden: bool = False, settling_ns: float = 0.0
+) -> TimelineTemplate:
+    """Ramp for 8 ns, park at f1=0.4, return to 0.5, then settle before DC readout.
 
     The constant-envelope control instead jumps to park at t=0 and back at the
     same terminal time, so it has at least as much relaxation time at park.
@@ -91,10 +98,11 @@ def reset_template(hold_ns: float, *, sudden: bool = False) -> TimelineTemplate:
     )
     end_us = end_ns / 1000
     flux = PulseEvent(4, 0.0, end_us, 0.0, 0.0, -0.1, envelope)
-    readout = PulseEvent(0, end_us, 0.008, 6000.0, 0.0, 0.1)
-    window = ReadoutWindow(0, 0, 4, 1000.0, (end_us,), (6000.0,), (0.0,))
+    readout_us = end_us + settling_ns / 1000
+    readout = PulseEvent(0, readout_us, 0.008, 6000.0, 0.0, 0.1)
+    window = ReadoutWindow(0, 0, 4, 1000.0, (readout_us,), (6000.0,), (0.0,))
     return single_point_template(
-        PointTimeline((), (flux, readout), (window,), end_us + 0.008)
+        PointTimeline((), (flux, readout), (window,), readout_us + 0.008)
     )
 
 
@@ -154,6 +162,33 @@ def test_cosine_reset_long_hold_approaches_park_gibbs_above_dc_equilibrium() -> 
         np.testing.assert_allclose(np.trace(rho), 1.0, atol=1e-10, rtol=0)
         np.testing.assert_allclose(rho, rho.conj().T, atol=1e-10, rtol=0)
         assert np.linalg.eigvalsh(rho).min() >= -1e-10
+
+
+@pytest.mark.parametrize("delay_ns", [0.0, 1.0, 0.5, 2.0])
+def test_delayed_cosine_reset_retains_constant_park_relaxation(delay_ns: float) -> None:
+    settings = reset_settings(delay_ns=delay_ns)
+    facts = FTFModelFacts(settings, snapshot())
+    weights, park_t1_ns = park_reference(facts)
+    hold_ns = float(2 * np.rint(12 * park_t1_ns / 2))
+    plan = plan_template(
+        settings,
+        snapshot(),
+        reset_template(hold_ns, settling_ns=8.0),
+        facts=facts,
+    )
+    # The delayed return must finish before the DC readout observation.
+    waveform = plan.batch.flux_waveform
+    assert waveform is not None
+    np.testing.assert_array_equal(waveform.flux[-1], facts.joint.dc_flux)
+    assert waveform.time_ns[-1] < plan.batch.end_ns[0]
+    engine = Engine(1)
+    try:
+        result = engine.evolve(plan.source, (plan.batch,))
+    finally:
+        engine.close()
+    # A long constant park thermalizes even when its ramp ends between samples.
+    assert result.densities[0, 0, 0].real == pytest.approx(weights[0], abs=5e-3)
+    assert result.paths.segments_by_kernel["t4"] > 0
 
 
 def test_sudden_reset_returns_rotated_park_gibbs_not_adiabatic_populations() -> None:

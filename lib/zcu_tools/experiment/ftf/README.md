@@ -320,8 +320,10 @@ Complex envelopes and carrier phases form the real lab-frame signal before
 filtering. Nonzero flux carriers also select the continuous waveform.
 The numeric owner samples continuous waveforms every 2 ns and interpolates
 linearly. Pulse endpoints round independently to nearest 2 ns, ties even.
-Delayed pulse endpoints and sampled-envelope knots join cavity boundaries in
-`segment_boundaries`. The snapshot still supplies the round's DC flux and Gibbs
+Delayed pulse endpoints, sampled-envelope knots and actual interpolated plateau
+edges join cavity boundaries in `segment_boundaries`. Plateau edges follow the
+sampled waveform even when a line delay falls between DAC nodes.
+The snapshot still supplies the round's DC flux and Gibbs
 state. Pulses never change the snapshot or rebuild the fixed-DC projection.
 
 Bath levels round midpoint offsets from that DC to integer multiples of
@@ -371,24 +373,17 @@ A larger park gap alone does not guarantee a shorter T1. Check the rates too.
 A filtered waveform routed entirely through `adiabatic_map` is not a T1 reset.
 A filter tail that has not formed a constant plateau does not guarantee reset.
 Callers must check the actual routing and allow settling into a constant park
-span, as well as settling back to DC before readout. Keep ramp-end boundaries
-explicit when constructing timelines: a merged row that still contains motion
-can remain `adiabatic_map` even if its quantized level is constant.
+span, as well as settling back to DC before readout. The planner separates
+constant plateaus at the sampled waveform's motion boundaries. A merged row
+that still contains motion can remain `adiabatic_map` even if its quantized
+level is constant.
 
-`tests/experiment/ftf/test_flux_reset.py` exercises synthetic templates through
+`tests/experiment/ftf/test_flux_reset.py` checks synthetic templates through
 `plan_template` and `Engine.evolve`, observing the density at terminal readout
-start. The drift-free two-state fixture uses F1 DC 0.5, park 0.4, 50 mK,
-`q_cap=1e6`, `xqp=1e-3`, and 8 ns sampled cosine ramps. Spectator loops retain
-one state each and charge couplings are zero. Park T1 is about 92 ns versus
-129 microseconds at DC. Holds of zero, one and twelve park T1 approach the
-analytic two-population relaxation curve within 0.005 absolute population.
-The long hold returns ground population about 0.829, above DC equilibrium 0.585.
-
-The constant-envelope control jumps to park and back at the same terminal time.
-Its longer park exposure does not remove the sudden return's basis rotation.
-The test compares its full DC density with `V_park diag(p_Gibbs) V_park†` within
-0.002 per matrix entry. Its ground population is about 0.601, rather than 0.829.
-This contrast verifies the existing sudden and adiabatic mapping semantics.
+start. Long constant holds approach park Gibbs populations after adiabatic
+return. The constant-envelope control instead returns a basis-rotated park
+density through sudden steps. These checks verify the mapping semantics and
+constant-hold relaxation, including line delays between waveform samples.
 The short ramps do not establish physical adiabaticity. These small-model checks
 also do not certify local/retained-level convergence, ADC reset fidelity, or
 large-excursion device accuracy.

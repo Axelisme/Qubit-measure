@@ -24,6 +24,7 @@ from zcu_tools.simulate.adc import (
 )
 from zcu_tools.simulate.evolution import (
     EnvelopeSpec,
+    FluxWaveform,
     ModelSource,
     TimelineBatch,
 )
@@ -32,6 +33,7 @@ from zcu_tools.simulate.ftf import (
     JointModel,
     flux_waveform,
     model_source,
+    plateau_boundaries,
     readout_model,
     schedule,
 )
@@ -175,11 +177,15 @@ def _flux_boundaries(
     tracks: tuple[FluxTrack, ...],
     lines: dict[str, FluxLine],
     ends: NDArray[np.float64],
+    waveform: FluxWaveform | None,
 ) -> tuple[tuple[float, ...], ...]:
-    """Keep delayed support and envelope events inside each evolution window."""
+    """Keep nominal events and actual sampled plateau edges inside each window."""
     if not tracks:
         return ()
     events: list[set[float]] = [set() for _ in ends]
+    if waveform is not None:
+        for point, nodes in enumerate(plateau_boundaries(waveform)):
+            events[point].update(t for t in nodes if 0 <= t <= ends[point])
     for track in tracks:
         for point in np.flatnonzero(track.active):
             start, duration = track.start_ns[point], track.duration_ns[point]
@@ -254,7 +260,7 @@ def _timeline_batch(
         if continuous
         else None
     )
-    boundaries = _flux_boundaries(tuple(flux_tracks), by_source, end_ns)
+    boundaries = _flux_boundaries(tuple(flux_tracks), by_source, end_ns, waveform)
     return TimelineBatch(
         template.points,
         tuple(drives),
