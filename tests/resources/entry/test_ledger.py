@@ -28,6 +28,7 @@ from zcu_tools.resources.entry import (
     SavedPayload,
     SourceReference,
 )
+from zcu_tools.resources.file_lock import lock_path_for
 
 _AT = "2026-10-06T02:00:00Z"
 
@@ -51,6 +52,18 @@ def _accepted(entry_id: str, *, event_id: str | None = None) -> LedgerEvent:
             writes=(AcceptedWrite(path="Q1.rate", value=5300.0),),
         ),
     )
+
+
+def test_append_keeps_locks_out_of_records(
+    entry_records: tuple[ResultEntry, Path],
+) -> None:
+    entry, records = entry_records
+    event = _accepted(entry.entry_id)
+
+    entry.ledger.append(event)
+
+    assert entry.ledger.get(event.id).event == event
+    assert not list(records.glob("*.lock"))
 
 
 def test_large_ledger_parses_only_new_tail_after_append(
@@ -476,7 +489,7 @@ def test_lock_timeout_keeps_native_type_and_diagnostic_notes(
 ) -> None:
     entry, records = entry_records
     ledger = RecordsLedger(records, entry_id=entry.entry_id, lock_timeout=0.0)
-    lock_path = records / "ledger.jsonl.lock"
+    lock_path = lock_path_for(records / "ledger.jsonl")
     with FileLock(str(lock_path)), pytest.raises(Timeout) as caught:
         ledger.events()
     assert Path(caught.value.lock_file) == lock_path
