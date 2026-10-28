@@ -2,12 +2,18 @@
 
 **讀者：** framework-dev、agent。啟動並維護注入實驗室定義與 GUI module 的 MCP 組合根。
 
-**Last updated:** 2026-10-25
+**Last updated:** 2026-10-28
 
 這裡放 agent 使用的 repo 組合根，使用工作站 Python 3.13 GUI/MCP profile。
-`measure.py` bootstrap `zcu_lab.components`，再把 `zcu_lab.recipes.RECIPES` 與 `gui_module="apps.measure"` 注入 measure stdio server。
-Workflow 工具由同一 measure server 提供。GUI 的組合根注入 workflow 註冊清單，MCP 不載入 lab workflow 或建立 Engine。
-`fluxdep.py` 與 `dispersive.py` 分別將 `apps.fluxdep`、`apps.dispersive` 注入對應 lib server，GUI module 自行註冊 lab components。
+`measure.py` 呼叫唯一的 `zcu_lab.assembly.lab_definitions()`，將 frozen lab 描述與 `gui_module="apps.measure"` 交給
+`zcu_tools.mcp.measure.server.main(lab, *, gui_module)`。
+Server 依自己的 `MeasureMcpLab` Protocol 註冊 components 並取得 recipes，不逐項接收 registrar 或 recipe 清單。
+Workflow 工具由同一 measure server 提供。GUI behavior 從 lab 取得 workflow attachments，MCP 不組裝 workflow Engine。
+
+`fluxdep.py` 與 `dispersive.py` 分別將 `apps.fluxdep`、`apps.dispersive` 注入對應 lib server。
+這兩個 server 維持 `main(*, gui_module)`，不收 lab，也不註冊 components。
+只有啟動的 GUI subprocess 取得 lab，再由各 GUI behavior 註冊 components 與開啟已選 entry。
+四個 lab 消費入口與 C13／C16 的理由見 [ADR-0072](../docs/adr/0072-module-boundaries.md#lab-定義與組合根)。
 公開 `main()` 委派 lib server，不另解析 CLI 參數。
 
 ```bash

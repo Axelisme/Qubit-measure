@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure`
 
-**Last updated:** 2026-10-27
+**Last updated:** 2026-10-28
 
 **讀者：** framework-dev。量測 GUI 的組裝、分頁與 Run／Load／Save 分工。
 
@@ -126,19 +126,26 @@ App composition 協調 Artifact 與 Writeback。
 
 `MeasureGuiBehavior` 組裝後啟用 point 檔案監看。Controller 從目前 holder 注入 admission：Local 僅發布 pending，Remote 才自動重載。Authority 改變時重查 pending 檔案。Controller.close 先解除 watcher 與 authority listener，再 drain 背景工作，避免關閉後重載。
 
-`MeasureGuiBehavior` is the process-runtime behavior for the shared
-`gui.runtime` launcher seam. It assembles `State`, `Controller`, `MainWindow`,
-persistence caretaker, and the app-local `RemoteControlAdapter`
-without loading board environments or owning process policy such as logging, rendering initialization,
-`QApplication`, control option construction, or exit-code handling. The
-standalone launcher is the sole process entrypoint. It selects one trusted
-`startup(ctx)` script.
-`--clean` skips all scripts and conflicts with `--script`. Otherwise an explicit
-script replaces the composition-supplied `default_startup.py` Path; custom code
-imports `zcu_tools.gui.app.measure.default_startup.startup` and calls it if
-needed. The framework never imports the lab to select it. After showing the window,
-`after_show` queues the selected script for background execution on the Qt loop.
-Without a selected script, it opens the shared Setup dialog.
+`MeasureGuiBehavior` 明確接收 lab 與 keyword-only 程序設定。
+它依本 package 的 `lab.MeasureGuiLab` Protocol 消費 lab，不 import 使用者套件。
+建構時先呼叫 `lab.register_components`，再建立含 `lab.templates` 的 Registry，
+交給 `lab.register_experiments` 填入 adapters。
+`lab.catalog_reload_policy` 提供 source packages 與 reload／preserved 模組邊界。
+Frozen value `CatalogReloadPolicy` 由 `gui.app.measure.lab` 擁有，lab 與合成測試物件共用此型別。
+Behavior 在掛載 widgets 前，以 `lab.workflow_attachments` 設定同一 workflow facet。
+
+Behavior 組裝 `State`、`Controller`、`MainWindow`、persistence caretaker 與 app-local `RemoteControlAdapter`。
+Logging、rendering、`QApplication`、control options 與 exit code 留在 shared `gui.runtime`。
+`apps.measure` 選定程序參數，以 `partial` 建立 zero-arg behavior factory。
+`launch_gui_runtime` 先初始化 logging，再呼叫 factory，讓 catalog 註冊與建構錯誤寫入 log。
+根直接傳入 lab 的 logging namespaces；不另建 logging Protocol。
+組裝邊界見 [ADR-0072](../../../../../docs/adr/0072-module-boundaries.md#lab-定義與組合根)。
+
+根選擇一份可信的 `startup(ctx)` 腳本。`--clean` 略過全部腳本且與 `--script` 互斥。
+顯式腳本取代框架的 `default_startup.py`；自訂腳本需要預設行為時，自行 import 並呼叫
+`zcu_tools.gui.app.measure.default_startup.startup`。
+Framework 不 import lab 來選腳本。視窗顯示後，`after_show` 在 Qt loop 排入背景執行。
+沒有選定腳本時開啟 shared Setup dialog。
 
 `build_app_services()` constructs the app-local services and injects their driven
 ports. UI and remote code submit tab, run/analyze, save, writeback and session

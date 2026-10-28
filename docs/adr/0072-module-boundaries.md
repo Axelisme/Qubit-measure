@@ -108,6 +108,47 @@ Fluxdep 所需非均勻背景由自己的私有 renderer 擁有，不依賴 lab 
 
 使用者於 2026-10-16 改定驗收方式：「算了，我認為不用真的測試ZCU_LAB移開後會不會出現錯誤。這中東西直接看有沒有import就好，偷偷做的在review也會被抓到，感覺是浪費時間測試」。Tests 不依賴 `zcu_lab` 的原則不變，由 review 檢查 import，必要時以 grep 輔助。不再暫移 `zcu_lab/` 跑 pytest，也不新增 `ZCU_LAB` 環境變數或 import hook。
 
+### Lab 定義與組合根
+
+2026-10-28 使用者裁決：「認同這個建議」。Lab 的宣告與模組佈局由 lab 擁有，組合根不逐項重組這些知識。
+
+`zcu_lab.assembly.lab_definitions()` 是唯一的 lab 組裝入口，回傳 frozen dataclass `LabDefinitions`。
+九個欄位是 `register_components`、`register_experiments`、`templates`、`workflow_attachments`、
+`recipes`、`catalog_reload_policy`、`logging_namespaces`、`fluxdep_export_planner` 與
+`component_flux_context_provider`。呼叫此函式只取得宣告，不註冊 components、不開 entry，也不啟動 GUI 或 MCP。
+Package roots 由 lab 從已安裝的 `zcu_lab` 與 `zcu_tools` 定位；reload 邊界與額外 logging namespaces 不寫在組合根。
+
+Framework 的四個入口各自在自己的 package 宣告最小 Protocol，只讀該入口消費的欄位：
+
+| 入口 | Protocol owner | 欄位 |
+| --- | --- | --- |
+| Measure GUI | `gui.app.measure.lab.MeasureGuiLab` | `register_components`、`register_experiments`、`templates`、`workflow_attachments`、`catalog_reload_policy` |
+| Fluxdep GUI | `gui.app.fluxdep.lab.FluxDepGuiLab` | `register_components`、`fluxdep_export_planner`、`component_flux_context_provider` |
+| Dispersive GUI | `gui.app.dispersive.lab.DispersiveGuiLab` | `register_components` |
+| Measure MCP | `mcp.measure.lab.MeasureMcpLab` | `register_components`、`recipes` |
+
+上述 owner 路徑都以 `zcu_tools` 為前綴。`LabDefinitions` 與 framework 測試的合成 lab 物件以結構符合這些 Protocol。
+C16 禁止 framework import `zcu_lab`，所以入口不依賴具體 dataclass。
+C13 限制 MCP 只使用 GUI remote 契約，不能為共用 lab 型別新增 GUI import。
+若把九欄 dataclass 放在 framework 的跨 GUI／MCP package，就會把 measure catalog、workflow 與 fluxdep policy 一起帶給不使用它們的入口。
+因此具體描述留在 lab，消費契約留在各入口，不設共用的 framework lab package。
+`CatalogReloadPolicy` 則由 `gui.app.measure.lab` 擁有，讓真實 lab 與合成 lab 共用 measure 的 reload 值契約。
+
+三個 GUI 組合根解析 CLI、取得 lab 描述，並以 `functools.partial` 綁定 behavior 的明確參數。
+`launch_gui_runtime(spec, options, *, behavior_factory, logging_namespaces)` 先初始化 logging，再呼叫 zero-arg factory。
+這個順序讓註冊與 behavior 建構失敗寫入 session log；factory 不是另一個 lab 組裝入口。
+`logging_namespaces` 直接取 lab 的 tuple，不另設 logging Protocol。
+Startup 腳本選擇、project root、control port 與 log 路徑描述本次程序，仍由組合根決定，見 [[0064]]。
+
+兩個 analysis behavior 明確接收 lab 與 `AnalysisSelection`，先註冊 components，再以 `AnalysisTarget.open(selection)` 開啟已選 entry。
+`gui.app.analysis_project` 擁有 selection 的 `project_root`、`entry`、`component` 與純 args 轉換。
+未選 entry 時不開 target；只有 component 沒有 entry 時報錯。註冊與開啟錯誤原樣傳遞。
+Target 選擇不藏在 callback，也不保留舊 `project` keyword。
+
+Measure MCP 組合根呼叫 `zcu_tools.mcp.measure.server.main(lab, *, gui_module)`，由 server 註冊 components 並取用 recipes。
+Fluxdep／dispersive MCP 的 roots 與 server 只接 GUI module，不接未消費的 lab，也不註冊 components。
+它們明確啟動的 GUI subprocess 才取得 lab，由 GUI behavior 註冊 components。
+
 ### 使用者元件與模擬環境的放置
 
 `zcu_lab.components` 是 package。共用欄位型別、resonator wiring 型別與基礎元件放在 `base.py`；qubit 共用定義與參數轉換放在 `qubit.py`。Fluxonium、transmon、resonator、JPA 與 mux 各自擁有一個子模組。Package 入口保留明確的 `register_all()` 與公開匯出，不作 import-time 註冊。
@@ -242,7 +283,7 @@ qubit alias。Dialog 在 alias 缺失或錯誤時要求使用者明示選擇，�
 分析 app 不使用舊 chip／qubit 兩級目錄與 params.json，也不呼叫 Database Save。
 Predictor 與 dispersive 格式由 resources 擁有。Fluxdep 匯出 predictor、更新 setup 已宣告欄位，
 並以 record_analysis 留 ledger。Dispersive 讀 entry-local predictor，匯出獨立 dispersive artifact。
-Lab kind 註冊留在 scripts 組合根，framework 不 import zcu_lab。
+Lab kind 的註冊函式由 `apps/` 組合根透過 lab 描述交給 analysis behavior；behavior 先註冊，再開啟 target。Framework 不 import `zcu_lab`。
 Notebook 的既有 params.json handoff 仍由 resources.qubit_params 擁有，不是分析 app 的 fallback。
 共用 GUI、session、remote、measure 與 workflows 不依賴這個分析 owner。
 `.importlinter` 的 `shared-no-analysis-project` contract 保護此方向。
@@ -289,7 +330,7 @@ Device API 的局部參數與錯誤細節留在 module 文件與 docstring。
 
 `composition-roots-above-framework-and-lab` 的 `layers` contract 約束 `apps : mcp_servers` > `zcu_lab` > `zcu_tools`。Lab 與 framework 不反向 import 任一組合根，不新增 `ignore_imports`。
 
-`zcu_tools`、`zcu_lab`、離線 `migrations` 與 repo 的 `apps`、`mcp_servers`、`scripts` 都是 import-linter 的 root packages。只為離線遷移存在的程式與對照表放在 `migrations/`，`zcu_lab` 與 `zcu_tools` 不 import 它，遷移完成後可整個刪除。使用者於 2026-10-14 裁定：「我自己會預期，我遷移完後刪除migrations就可以了」。組合根顯式注入 measure registry、workflow 註冊清單與 MCP recipes，framework 不反向載入使用者定義。Tests 的 lab 獨立性由 review 檢查 import，必要時以 grep `zcu_lab` 輔助，不新增 tests import contract。
+`zcu_tools`、`zcu_lab`、離線 `migrations` 與 repo 的 `apps`、`mcp_servers`、`scripts` 都是 import-linter 的 root packages。只為離線遷移存在的程式與對照表放在 `migrations/`，`zcu_lab` 與 `zcu_tools` 不 import 它，遷移完成後可整個刪除。使用者於 2026-10-14 裁定：「我自己會預期，我遷移完後刪除migrations就可以了」。三個 GUI 與 measure MCP 組合根各注入一個 lab 描述，兩個 analysis MCP 只注入 GUI module 名稱；framework 不反向載入使用者定義。Tests 的 lab 獨立性由 review 檢查 import，必要時以 grep `zcu_lab` 輔助，不新增 tests import contract。
 
 債務以確切的 module 對逐條列在 `ignore_imports`，不用萬用字元，每組註解寫明「債務，由誰移除」。`ignore_imports` 只減不增。
 

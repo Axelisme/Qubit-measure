@@ -1,6 +1,6 @@
 # `zcu_tools.gui` — GUI framework cheat-sheet
 
-**Last updated:** 2026-10-25
+**Last updated:** 2026-10-28
 
 **讀者：** framework-dev。共用 GUI 層、app 邊界與生命週期速查。
 
@@ -112,8 +112,17 @@ for static process contract and implement `assemble(control)` for app-local
 controller/window/adapter wiring. Launch-time CLI values stay in
 `GuiLaunchOptions` and behavior constructor arguments. App modules expose
 behavior classes. Repo-root `apps.measure`, `apps.fluxdep` and `apps.dispersive`
-provide `main(argv)` composition roots and call `launch_gui_runtime(...)` directly.
+provide `main(argv)` composition roots.
 `scripts/app/run_*_gui.py` are user-facing thin shells that delegate to them.
+
+三個根各從 `zcu_lab.assembly.lab_definitions()` 取得 frozen lab 描述，並以
+`functools.partial` 綁定 behavior 的明確參數。
+`launch_gui_runtime(spec, options, *, behavior_factory, logging_namespaces)`
+先初始化 logging，再呼叫 zero-arg factory，讓註冊與建構失敗寫入 session log。
+根直接傳入 lab 的 `logging_namespaces` tuple，不新增 logging Protocol。
+Measure、fluxdep、dispersive behavior 各依自己 package 的最小 Protocol 消費 lab。
+具體 dataclass 留在 lab，framework 不 import lab；measure MCP 也不為共用型別新增 GUI import。
+欄位與 Protocol owner 見 [ADR-0072](../../../docs/adr/0072-module-boundaries.md#lab-定義與組合根)。
 
 After app teardown, the runtime logs the remaining Python threads and appends
 a `GUI exit watchdog armed` header to the session log. If the process has not
@@ -125,18 +134,19 @@ header and stacks go to stderr. Normal exit adds the header without stacks.
 The runtime seam deliberately stops above remote method/domain/session policy:
 `gui.remote` still owns transport, each app owns dispatch/domain handlers, and
 `gui.session` owns measurement-session primitives. The three standalone GUI launchers (`measure`, `fluxdep`, `dispersive`) use this
-runtime directly. Measure hosts workflow tabs in the same session as experiment
-tabs. The launcher injects workflow registrations; `WorkflowControlFacet` owns
-headless drafts and native run routing. Qt panes and remote commands drive that
-same facet. Workflow tab close never drains the session or disconnects hardware.
+runtime directly. Measure 在同一 session 承載 workflow 與 experiment tabs。
+Behavior 讀取 lab 的 `workflow_attachments`，`WorkflowControlFacet` 擁有 headless drafts 與 native run routing。
+Qt panes 與 remote commands 使用同一 facet。關閉 workflow tab 不 drain session，也不斷開硬體。
 
-`gui.launcher` is the import-light CLI edge companion for runtime launchers. It
-declares shared logging/control flags and converts parser output into
-`GuiLaunchOptions`. Analysis entry flags and `AnalysisTarget` opening belong to
-`app.analysis_project.launcher`. The shared `gui.launcher` avoids importing Qt,
-matplotlib or app modules at module import time. Runtime initializes the explicit
-plot host, shutdown callback and mathtext support after QApplication exists;
-it does not select a process-wide Matplotlib backend.
+`gui.launcher` 宣告共用 logging／control flags，將 parser 結果轉成 `GuiLaunchOptions`。
+`app.analysis_project` 擁有 `AnalysisSelection`，以
+`project_root`、`entry`、`component` 保存尚未開啟的選擇。
+其 `launcher.analysis_selection_from_args` 只轉換 CLI，不讀檔或註冊 components。
+Fluxdep／dispersive behavior 先註冊 lab components，再呼叫 `AnalysisTarget.open(selection)`。
+未選 entry 時不開 target，只有 component 沒有 entry 時報錯。註冊與開啟失敗原樣傳遞。
+Shared `gui.launcher` 在 module import 時不載入 Qt、matplotlib 或 app modules。
+Runtime 等到 QApplication 建立後才初始化 explicit plot host、shutdown callback 與 mathtext。
+它不選擇 process-wide Matplotlib backend。
 
 When runtime gets or creates the `QApplication`, it calls
 `gui.widgets.selectable_text.install_selectable_message_boxes(app)`. The call
@@ -272,9 +282,9 @@ state.
 ## Logging (`logging_setup.py`)
 
 `logging_setup.setup_gui_logging` is the single place that decides *how* every
-GUI entry point configures logging. All three repo-root `apps` composition roots and
-the measure MCP server (`mcp/measure/server.py:main`) call it instead of each
-rolling their own handler set.
+GUI entry point configures logging. 三個 repo-root `apps` 組合根透過
+`launch_gui_runtime` 呼叫它，measure MCP server 使用自己的 logging hook。
+兩條路徑重用同一 helper，不另建 handler 設定。
 
 Key invariants:
 
