@@ -16,11 +16,12 @@ _EXPECTED_REVISION = ParamSpec(
     "expected_revision",
     JsonType.STRING,
     required=False,
+    nullable=True,
     omit_when_missing=True,
     description=(
         "Installed base SHA-256. Writers may omit to retain unguarded admission; "
-        "when present, compare with disk before writing. Null means missing aliases "
-        "only. context.reload requires this key and compares the installed base, "
+        "when present, compare with disk before writing. Null means missing library "
+        "or aliases. context.reload requires this key and compares the installed base, "
         "not the edited disk hash. Stale revisions return revision_mismatch."
     ),
 )
@@ -35,7 +36,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "path must be the absolute parameters, library or aliases owner path "
             "from entry.info.files. expected_revision must be explicitly supplied "
             "and match the installed base, not the edited disk hash. Null expects "
-            "a missing aliases base. Read/validate/install/publish once without "
+            "a missing library or aliases base. Read/validate/install/publish once without "
             "writing or repairing disk. Return {document, path, revision}. "
             "Invalid path/contents return invalid_params with path and cause; "
             "stale base returns precondition_failed/revision_mismatch; non-holder "
@@ -48,7 +49,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
                     JsonType.STRING,
                     required=True,
                     nullable=True,
-                    description="Required installed base SHA-256, or null for a missing aliases base",
+                    description="Required installed base SHA-256, or null for a missing library or aliases base",
                 ),
             ),
         ),

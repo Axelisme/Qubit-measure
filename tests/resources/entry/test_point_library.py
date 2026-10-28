@@ -6,6 +6,8 @@ import numpy as np
 import pytest
 from zcu_tools.cfg_model import ConstWaveformCfg, PulseSpec
 from zcu_tools.core.waveform_format import WaveformSamples
+from zcu_tools.resources.context.library import ModuleLibraryDocument
+from zcu_tools.resources.document_store import ConflictError
 from zcu_tools.resources.entry import (
     ResultEntry,
 )
@@ -59,6 +61,79 @@ def test_point_and_library_revisions_follow_each_independent_owner(
     assert library.document_revision == installed
     library.refresh()
     assert library.document_revision != installed
+
+
+def test_first_edit_creates_absent_point_library(entry: ResultEntry) -> None:
+    entry.new_point("portable")
+    path = entry.result_path / "points/portable/module_cfg.yaml"
+    path.unlink()
+    library = entry.module_library("portable")
+    with library.edit():
+        pass
+    assert not path.exists()
+    with library.edit() as draft:
+        draft.set_waveform("Q1.waveforms.base", ConstWaveformCfg(length=0.05))
+    assert library.document_revision.revision == sha256(path.read_bytes()).hexdigest()
+    assert entry.module_library("portable").snapshot().waveform_keys() == (
+        "Q1.waveforms.base",
+    )
+
+
+@pytest.mark.parametrize("created_during_edit", [False, True])
+@pytest.mark.parametrize("invalid_external", [False, True])
+def test_absent_library_edit_conflicts_with_external_creation(
+    entry: ResultEntry, created_during_edit: bool, invalid_external: bool
+) -> None:
+    entry.new_point("portable")
+    path = entry.result_path / "points/portable/module_cfg.yaml"
+    external = (
+        b"invalid: [\n"
+        if invalid_external
+        else path.read_bytes() + b"# externally created\n"
+    )
+    path.unlink()
+    library = entry.module_library("portable")
+    if not created_during_edit:
+        path.write_bytes(external)
+
+    def save_library() -> None:
+        with library.edit() as draft:
+            draft.set_waveform("Q1.waveforms.base", ConstWaveformCfg(length=0.05))
+            if created_during_edit:
+                path.write_bytes(external)
+
+    with pytest.raises(ConflictError) as caught:
+        save_library()
+    if created_during_edit:
+        proposed = ModuleLibraryDocument.model_validate(
+            caught.value.proposed_value.value
+        )
+        assert proposed.components["Q1"].waveforms["base"] == ConstWaveformCfg(
+            length=0.05
+        )
+    assert path.read_bytes() == external
+    assert library.document_revision.revision is None
+    assert library.snapshot().waveform_keys() == ()
+
+
+def test_clone_preserves_absent_library(entry: ResultEntry) -> None:
+    source = entry.new_point("source")
+    path = entry.result_path / "points/source/module_cfg.yaml"
+    path.unlink()
+    source.description = "portable point"
+
+    cloned = entry.new_point("copy", clone_from=source)
+
+    assert cloned.description == "portable point"
+    assert not (entry.result_path / "points/copy/module_cfg.yaml").exists()
+    assert entry.module_library("copy").document_revision.revision is None
+    assert not path.exists()
+
+
+def test_setup_library_still_requires_its_file(entry: ResultEntry) -> None:
+    (entry.result_path / "module_cfg.yaml").unlink()
+    with pytest.raises(FileNotFoundError):
+        entry.module_library()
 
 
 def test_setup_library_is_initialized_independently_of_new_points(
@@ -124,6 +199,27 @@ def test_module_library_does_not_create_missing_document(
     entry: ResultEntry,
     library_assets: InMemoryWaveformAsset,
 ) -> None:
-    with pytest.raises(FileNotFoundError):
-        entry.module_library("absent", assets=library_assets)
+    library = entry.module_library("absent", assets=library_assets)
+    assert library.snapshot().module_keys() == ()
+    assert library.snapshot().waveform_keys() == ()
+    assert library.document_revision.revision is None
     assert not (entry.result_path / "points/absent").exists()
+
+
+def test_point_without_library_can_be_selected_without_creating_files(
+    entry: ResultEntry,
+) -> None:
+    entry.new_point("portable")
+    path = entry.result_path / "points/portable/module_cfg.yaml"
+    path.unlink()
+    before = sorted(entry.result_path.rglob("*"))
+
+    point = entry.use_point("portable")
+    library = entry.module_library("portable")
+
+    assert point.description is None
+    assert library.snapshot().module_keys() == ()
+    assert library.snapshot().waveform_keys() == ()
+    assert library.document_revision.path == path.resolve()
+    assert library.document_revision.revision is None
+    assert sorted(entry.result_path.rglob("*")) == before

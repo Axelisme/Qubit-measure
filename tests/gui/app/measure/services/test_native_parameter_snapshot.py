@@ -31,8 +31,10 @@ from tests.gui.app.measure._record_support import (
 )
 
 
+@pytest.mark.parametrize("absent_library", [False, True])
 def test_native_save_load_uses_captured_environment_after_source_removal(
     role_load_session: NativeSaveSession,
+    absent_library: bool,
 ) -> None:
     import shutil
 
@@ -52,6 +54,9 @@ def test_native_save_load_uses_captured_environment_after_source_removal(
             waveform="const",
         ),
     )
+    library_file = session.context.get_file_revisions()[1].path
+    if absent_library:
+        library_file.unlink()
     parameter_file = session.context.get_file_revisions()[0].path
     parameter_file.write_text(
         parameter_file.read_text().replace(
@@ -94,6 +99,7 @@ def test_native_save_load_uses_captured_environment_after_source_removal(
         "ext": {"entry_id": "user-owned-extension", "note": "preserved"},
     }
     assert parameter_file.read_bytes() == source_bytes
+    assert library_file.exists() is not absent_library
     control.set_parameter(target, "Q1.rate", 99.0)
     session.save()
     portable = session.entry.database_path.parent.parent / "portable.h5"
@@ -106,9 +112,13 @@ def test_native_save_load_uses_captured_environment_after_source_removal(
     assert restored.target is None
     assert restored.value("$source_qubit.rate") == 7.0
     assert restored.value("$custom.rate") == 2.0
-    pulse = restored.library.module_spec("Q1.pulses.pi")
-    assert isinstance(pulse, PulseSpec)
-    assert pulse.gain == 0.25
+    if absent_library:
+        assert restored.library.module_keys() == ()
+        assert restored.library.waveform_keys() == ()
+    else:
+        pulse = restored.library.module_spec("Q1.pulses.pi")
+        assert isinstance(pulse, PulseSpec)
+        assert pulse.gain == 0.25
     assert restored.aliases == captured.aliases
     assert require_metadata(tab.run).model_dump(mode="json") == metadata.model_dump(
         mode="json"

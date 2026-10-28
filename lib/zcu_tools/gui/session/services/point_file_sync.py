@@ -75,7 +75,7 @@ class PointFileSync:
 
     @staticmethod
     def _validate_base(file: PointFileRevision, revision: str | None) -> None:
-        if revision is None and file.document != "aliases":
+        if revision is None and file.document == "parameters":
             raise InvalidInputError(
                 f"{file.path}: a revision is required for {file.document}"
             )
@@ -90,7 +90,7 @@ class PointFileSync:
     def check_revision(self, expected: PointFileRevision) -> None:
         """Compare a draft's absolute owner path/version with disk, without effects.
 
-        None expects an absent aliases file only. Invalid paths/bases raise
+        None expects an absent library or aliases file. Invalid paths/bases raise
         InvalidInputError. Mismatch raises FailedPreconditionError with reason
         revision_mismatch. Other I/O failures propagate; no candidate is installed.
         """
@@ -112,7 +112,7 @@ class PointFileSync:
     def reload(self, path: Path, expected_revision: str | None) -> PointFileRevision:
         """Check the installed base, strictly install the file, then publish status.
 
-        None expects an absent aliases base only. Invalid paths/bases/candidates
+        None expects an absent library or aliases base. Invalid paths/bases/candidates
         raise InvalidInputError with path/reason. A stale installed base raises
         FailedPreconditionError(revision_mismatch). Candidate failure preserves
         memory/disk and publishes only an error observation. Caller owns holder

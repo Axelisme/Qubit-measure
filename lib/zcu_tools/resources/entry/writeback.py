@@ -347,6 +347,7 @@ class PointWritebackTarget:
                 / "points"
                 / self._storage.point
                 / "module_cfg.yaml",
+                allow_absent=True,
             )
         return self._library_handle
 
