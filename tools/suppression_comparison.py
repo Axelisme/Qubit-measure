@@ -16,7 +16,7 @@ from collections import Counter
 from dataclasses import dataclass
 from typing import Literal
 
-from check_suppressions import COMMENT_SUPPRESSIONS
+from check_suppressions import comment_directives
 
 IgnoreKind = Literal["type-ignore", "pyright-ignore"]
 IgnoreReason = Literal[
@@ -76,8 +76,9 @@ def _comments(source: str) -> tuple[_Comment, ...]:
         for token in tokenize.generate_tokens(io.StringIO(source).readline):
             if token.type != tokenize.COMMENT:
                 continue
+            directives = comment_directives(token.string)
             for kind in IGNORE_KINDS:
-                match = COMMENT_SUPPRESSIONS[kind].match(token.string)
+                match = directives.get(kind)
                 if match is None:
                     continue
                 # Pyright treats every type: ignore, even bracketed ones, as

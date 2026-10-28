@@ -7,12 +7,14 @@ from check_ratchet import suppression_regressions
 from suppression_comparison import compare_ignores
 
 
+@pytest.mark.parametrize("prefix", ["", "explanation # "])
 @pytest.mark.parametrize("blanket", ["type: ignore", "type: ignore[attr-defined]"])
 def test_blanket_to_explicit_diagnostics_keeps_the_same_escape_site(
     blanket: str,
+    prefix: str,
 ) -> None:
-    before = f"import missing  # {blanket}\n"
-    after = "import missing  # pyright: ignore[reportMissingImports]\n"
+    before = f"import missing  # {prefix}{blanket}\n"
+    after = f"import missing  # {prefix}pyright: ignore[reportMissingImports]\n"
 
     assert compare_ignores(before, after) == ()
 
@@ -178,11 +180,13 @@ def test_another_family_cannot_pay_for_a_new_pyright_position() -> None:
         "type: ignore",
     ],
 )
+@pytest.mark.parametrize("prefix", ["", "explanation # "])
 def test_a_narrow_scope_cannot_grow_or_be_replaced_with_blanket(
     after_directive: str,
+    prefix: str,
 ) -> None:
-    before = "import missing  # pyright: ignore[reportMissingImports]\n"
-    after = f"import missing  # {after_directive}\n"
+    before = f"import missing  # {prefix}pyright: ignore[reportMissingImports]\n"
+    after = f"import missing  # {prefix}{after_directive}\n"
 
     found = compare_ignores(before, after)
 
@@ -198,13 +202,13 @@ def test_a_narrow_scope_cannot_grow_or_be_replaced_with_blanket(
         "reportArgumentType, reportMissingImports",
     ],
 )
+@pytest.mark.parametrize("prefix", ["", "explanation # "])
 def test_preserving_or_reducing_the_existing_diagnostic_set_is_allowed(
     codes: str,
+    prefix: str,
 ) -> None:
-    before = (
-        "import missing  # pyright: ignore[reportMissingImports, reportArgumentType]\n"
-    )
-    after = f"import missing  # pyright: ignore[{codes}]\n"
+    before = f"import missing  # {prefix}pyright: ignore[reportMissingImports, reportArgumentType]\n"
+    after = f"import missing  # {prefix}pyright: ignore[{codes}]\n"
 
     assert compare_ignores(before, after) == ()
 
@@ -218,9 +222,10 @@ def test_preserving_or_reducing_the_existing_diagnostic_set_is_allowed(
         "pyright: ignore[notAReport]",
     ],
 )
-def test_a_non_narrow_migration_is_not_credited(directive: str) -> None:
-    before = "import missing  # type: ignore\n"
-    after = f"import missing  # {directive}\n"
+@pytest.mark.parametrize("prefix", ["", "explanation # "])
+def test_a_non_narrow_migration_is_not_credited(directive: str, prefix: str) -> None:
+    before = f"import missing  # {prefix}type: ignore\n"
+    after = f"import missing  # {prefix}{directive}\n"
 
     found = compare_ignores(before, after)
 
@@ -258,11 +263,13 @@ def test_identical_statements_in_different_owners_cannot_trade_ignores(
     "directive",
     ["type: ignoreNotADirective", "pyright: ignore[", "pyright: ignore[notAReport]"],
 )
+@pytest.mark.parametrize("prefix", ["", "explanation # "])
 def test_an_unproven_previous_directive_cannot_authorize_a_new_ignore(
     directive: str,
+    prefix: str,
 ) -> None:
-    before = f"import missing  # {directive}\n"
-    after = "import missing  # pyright: ignore[reportMissingImports]\n"
+    before = f"import missing  # {prefix}{directive}\n"
+    after = f"import missing  # {prefix}pyright: ignore[reportMissingImports]\n"
 
     found = compare_ignores(before, after)
 
@@ -485,10 +492,29 @@ def test_new_source_has_no_inherited_escape_positions() -> None:
     ]
 
 
+@pytest.mark.parametrize(
+    ("directive", "kind"),
+    [
+        ("type: ignore[index]", "type-ignore"),
+        ("pyright: ignore[reportX]", "pyright-ignore"),
+    ],
+)
+def test_new_ignore_after_another_comment_is_reported(
+    directive: str,
+    kind: str,
+) -> None:
+    found = compare_ignores("", f"value = 1  # (shape) # {directive}\n")
+
+    assert [(site.line, site.kind, site.reason) for site in found] == [
+        (1, kind, "new-position")
+    ]
+
+
 def test_strings_and_comment_prose_do_not_create_escape_sites() -> None:
     source = (
         'example = "# pyright: ignore[reportMissingImports]"\n'
-        "# see also # type: ignore\n"
+        "# avoid type: ignore here\n"
+        "# mention pyright: ignore here\n"
     )
 
     assert compare_ignores("", source) == ()
