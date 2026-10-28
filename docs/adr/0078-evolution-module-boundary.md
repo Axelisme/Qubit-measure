@@ -67,6 +67,10 @@ Package root 的對外入口規則由介面與 caller review 維持；上述 con
 2026-10-27（UTC），advisor 的 before-accepted ruling：
 「保留 single 的 _models／_prepared 與 FTF acquire-local 的 CavityAverageCache；拆 _facts 為結構與 rates。」
 
+Single、six 與 FTF 三個模擬環境都納入損耗漂移。每次 acquisition 開始取一次有效損耗，整次 acquisition 固定；漂移預設關閉。
+快取層的去留以同一次 acquisition 內的實際命中判斷；只在 acquisition 之間命中不構成保留理由。
+使用者於 2026-10-27 裁決：「我預期都會加入漂移機制」、「沒有不漂移的時候，我考慮C，應該是說，用不到的就可以移除」。
+
 Single CPMG、six 與 FTF 的代表性 acquisition 在指定三層都沒有同次命中。
 這不是所有 workload 的普遍命中率宣稱。刪除 Engine 的 `prepare_cache`、
 `result_memo` 與 source 的 `readout_cache`。Engine 不保留跨 evolve 的 prepare
@@ -86,6 +90,10 @@ Engine 的 routing-facts cache 只驗證 caller-owned preparation 的當前 rout
 FTF 的 complete preparation LRU、envelope fingerprints 與上述 acquire-local
 `CavityAverageCache` 不屬於已刪三層。抽樣 RNG、raw 與 replay 的契約不變。
 依賴方向仍由 C8、C9、C12、C19 保護，沒有新增 package edge 或例外。
+
+FTF 與 single 不同，不拆損耗無關結構。漂移開啟時，每次 acquisition 用 effective settings 重建完整 `FTFModelFacts`，包含 eigensystem，並清除舊的 complete preparations；
+整次 points／rounds 共用這次的 losses，不跨不同 losses 重用 rates 或完整 preparation。漂移關閉的既有行為不變。
+這是 advisor 於 2026-10-27 依使用者授權「B你可以自己開task，不用我看過」訂定的重建策略。數值、設定與 truth 的 owner 分工見 [[0072]]。
 
 ### Integrated raw 由環境生成，介面由 program 擁有
 

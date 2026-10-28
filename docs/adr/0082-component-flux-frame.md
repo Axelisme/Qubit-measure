@@ -131,6 +131,17 @@ Lab 負責 component 轉換、表單初值與 Measure proposal，三個數學入
 Workflow FrequencyModel 的欄位與單儀器 affine 行為不變，初值由 `flux_dev` 投影 half 與 signed period。
 Predictor 檔使用 [v2](../storage-format-history/predictor-v2.md)，分開保存能量與 offset／period／unit。Resources 透過 analysis 的 FluxFrame／DevicePeriod 驗證與轉換，simulate 只收 reduced flux。Predictor 與 component 的 offset 各自記錄資料對齊與目前校準，不互相覆寫。App snapshot 與 reference anchors 的擴充不屬於 component 模型。
 
+`analysis.flux` 擁有 frame 的正向計算、單儀器投影與 offset 反解。它只收中立型別與數值，不讀 component、alias、device cache 或硬體；caller 提供 frame、儀器值與單位。
+`ComponentFluxContext` 由 lab provider 產生，再由組合根注入 app；framework 不解析 lab 欄位，也不反向 import lab。
+GUI、MCP、workflow 與模擬 startup 都呼叫這三個入口，不在呼叫端重算仿射。
+使用者於 2026-10-27 確認投影與反解兩個工具的介面：「可以」、「11同意」。Provider 邊界與 caller 責任為 advisor 依同日授權「C也是，可以直接派」訂定。
+
+`simulate` 的 predictor 與 `simulate.fluxonium.physical_fit` 只收 reduced φ 與能量。
+Fit 的 offset correction 以 Φ0 表示；snapshot 與 measured_points 不保存 native half、period 或 bias。
+Lab 的 workflow FrequencyModel 保留自己的 native alignment 與 signed period，進入核心前經 `analysis.flux` 投影成 φ，回傳的 correction 再明確換回 native bias。
+不新增收 native 輸入的第二個 simulate 介面，也不保留舊欄位的相容讀取。
+這是 advisor 於 2026-10-28 依上述授權的裁定；否決在 analysis 另開 native 輸入窄接口，因為它多一條跨 owner seam，且與「仿射只在 analysis.flux」重複。
+
 沿用 `.importlinter` C14、C16，禁止 framework 反向載入 lab。
 C20、C21 禁止 framework 依賴 migrations 或 scripts，升級能力由 caller 注入。
 本次不新增 package 依賴規則。

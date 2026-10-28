@@ -46,6 +46,17 @@ status: accepted
 
 既有 `.importlinter` 的 `program-simulation-entry` contract 限制 program classes 直接依賴 simulation frontend、timeline 與 adapter internals，只能經模擬入口使用。這是依賴檢查，不是 runtime 隔離的完整保證；真實 acquire 不執行模擬模組仍須在審閱執行路徑時確認。不新增 contract。
 
+### 模擬損耗漂移的數值、設定與 truth owner
+
+純 log-OU 數值類別 `LogOU` 位於 `simulate.drift`：只接 mean、sigma、tau_s 與 RNG，依 caller 提供的時間算精確轉移，不讀 YAML、clock 或檔案。
+漂移設定型別 `DriftParameter` 與 schema `CoherenceDrift` 由 `resources.single_fluxonium.schema` 擁有，single、six 與 FTF 共用；resources 不依賴 experiment。
+設定編排、acquisition 開始時的取值凍結與 truth log I/O 留在 experiment：`experiment.single_fluxonium.drift` 的 `LossRow` 與 `write_truth` 是 single、six、FTF 共用 truth JSONL 的唯一格式與寫入 owner，
+FTF 呼叫它而不複製格式；coupler 沒有的 q_ind／xqp 以 null 表達。每個環境自己組 effective settings 與 loss streams，FTF 不建 single settings 的 adapter。
+Truth 是模擬端 acquisition 的診斷資料，不進 Run record、GUI、MCP 或 Labber metadata；replay 用當次保存的 effective settings，不重新取時鐘或漂移。
+依賴方向沿用 C8、C9 的 experiment → simulate／resources，不新增 package edge。
+物理前提見 [[0078]]。使用者於 2026-10-27 提出漂移需求：「另外我想引入跨acquire的T1/T2漂移，這樣overnight量測才有意義」。
+Owner 分工是 advisor 於 2026-10-27 與 2026-10-28 依本篇 simulate 與 experiment 定位、以及使用者授權「B你可以自己開task，不用我看過」訂定。
+
 ### 實驗計算與 GUI 接線
 
 core.py 的 Experiment 擁有 run 與 analyze 的計算；gui.py 只接線、解析來源、決定 writeback 與 operator guide。
@@ -236,6 +247,21 @@ Notebook 的既有 params.json handoff 仍由 resources.qubit_params 擁有，�
 共用 GUI、session、remote、measure 與 workflows 不依賴這個分析 owner。
 `.importlinter` 的 `shared-no-analysis-project` contract 保護此方向。
 中立的 `nearest_existing` 位於 `gui.widgets.file_dialog`，callers 直接匯入，不經分析 owner re-export。
+
+Native 光譜的數值投影與選擇分屬兩個 owner。`analysis.fluxdep.project_native_spectrum` 擁有 Container 到光譜的投影：caller 明示 variable 與 device_axis，
+它驗證 2-D 複數資料與另一軸的頻率單位並換成 MHz；fluxdep 與 dispersive 不各自猜資料布局。
+`gui.app.analysis_project` 另擁有共用的 native source 讀取、variable／axis 預選與 dialog mechanics；它只接 caller 提供的 device choices，
+不取得 component 或 predictor，也不含 fluxdep 的 Type、Inherit 或 overlay。Session 與共用 dialog 仍不依賴這個分析 owner。
+這是 advisor 於 2026-10-27 依使用者同日授權「C也是，可以直接派」訂定的分工。
+
+### Device snapshot 標量的解讀 owner
+
+`device.snapshot_scalar_values` 是 acquisition snapshot 到具名 `DeviceScalar(value, unit)` 的唯一解讀入口。
+名稱缺席時不回傳該鍵；在場但缺 value、為 bool 或非有限值時報錯並指名。缺 unit 視為 native。Apps 不解析 driver settings 或 cfg。
+`analysis.flux` 擁有單位比對：只核對實際參與換算的其他儀器，單位精確相等，native 只等於 native，不換算。
+被掃儀器取掃描軸，不重複使用其 snapshot 值；整份 snapshot 未記錄與已記錄但某儀器缺席是不同狀態，缺席儀器依 [[0082]] 貢獻 0。
+Device API 的局部參數與錯誤細節留在 module 文件與 docstring。
+這是 advisor 於 2026-10-27 依使用者同日授權「C也是，可以直接派」訂定的分工。
 
 ### 模組之間的合作
 
