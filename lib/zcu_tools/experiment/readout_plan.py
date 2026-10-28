@@ -79,11 +79,14 @@ class ReadoutPartition:
         arrays are detached; field amplitudes include signed gain/calibration.
     projective_reads: per-point tuples of triggered nonterminal blocks, sorted
         by start time. Empty point tuples mean no projective read.
+    terminal_pulses: per-point terminal coherent tones, including when no ADC
+        observes that block. Units and phase reference match cavity_drives.
     """
 
     terminal_slots: tuple[EventSlot, ...]
     cavity_drives: tuple[tuple[ReadoutPulse, ...], ...]
     projective_reads: tuple[tuple[ProjectiveRead, ...], ...]
+    terminal_pulses: tuple[tuple[ReadoutPulse, ...], ...]
 
 
 @dataclass(frozen=True)
@@ -188,6 +191,8 @@ def classify_readout(
     Missing terminal pulses, triggers before the first block, pulses crossing
     the next start or nonterminal samples ending at/after that start raise
     ValueError. Sampling-window errors name the block, ADC and trigger index.
+    Projective block counts and each ADC's per-event grid counts must match
+    across points; differences raise ValueError naming the point and counts.
     Inputs are not modified; terminal slots borrow unchanged input arrays.
     """
     slots = tuple(event for event in template.events if event.gen_ch == drive.gen_ch)
@@ -197,6 +202,7 @@ def classify_readout(
     if not np.isfinite(latest).all():
         raise ValueError("requires one terminal readout pulse per point")
     terminals = []
+    terminal_pulses: list[list[ReadoutPulse]] = [[] for _ in template.points]
     drives: list[list[ReadoutPulse]] = [[] for _ in template.points]
     for event in slots:
         terminal = event.active & (event.start_us == latest)
@@ -238,6 +244,8 @@ def classify_readout(
         )
         for index in np.flatnonzero(earlier):
             drives[index].append(_readout_pulse(drive, rows[index], envelopes))
+        for index in np.flatnonzero(terminal):
+            terminal_pulses[index].append(_readout_pulse(drive, rows[index], envelopes))
     cavity_drives = []
     projective_reads = []
     for point, pulses in enumerate(
@@ -246,9 +254,55 @@ def classify_readout(
         cavity, reads = _partition_point(template, drive, point, pulses)
         cavity_drives.append(cavity)
         projective_reads.append(reads)
+    _validate_topology(template, tuple(projective_reads))
     return ReadoutPartition(
-        tuple(terminals), tuple(cavity_drives), tuple(projective_reads)
+        tuple(terminals),
+        tuple(cavity_drives),
+        tuple(projective_reads),
+        _terminal_pulses(terminal_pulses, drive),
     )
+
+
+def _terminal_pulses(
+    pulses: list[list[ReadoutPulse]], drive: ReadoutDrive
+) -> tuple[tuple[ReadoutPulse, ...], ...]:
+    """Validate terminal tone counts even without ADC observations and localize phases."""
+    counts = tuple(len(point) for point in pulses)
+    if drive.kind == "pulse" and any(count != 1 for count in counts):
+        raise ValueError("requires one terminal readout pulse per point")
+    if max(counts) > 8 or len(set(counts)) != 1:
+        raise ValueError("mux requires a fixed 1..8 tone count per point")
+    return local_readout_pulses(tuple(tuple(point) for point in pulses), 0.0)
+
+
+def _validate_topology(
+    template: TimelineTemplate, projective_reads: tuple[tuple[ProjectiveRead, ...], ...]
+) -> None:
+    expected = len(projective_reads[0])
+    for point, reads in enumerate(projective_reads):
+        if len(reads) != expected:
+            raise ValueError(
+                f"point {template.points[point]} projective block count {len(reads)} "
+                f"differs from point {template.points[0]} count {expected}"
+            )
+    for window in template.readouts:
+        layouts = []
+        for reads in projective_reads:
+            counts = tuple(
+                sum(t.channel == window.channel for t in read.triggers)
+                for read in reads
+            )
+            layouts.append((*counts, window.trigger_us.shape[1] - sum(counts)))
+        for point, layout in enumerate(layouts):
+            for event, (actual, expected_grids) in enumerate(
+                zip(layout, layouts[0], strict=True)
+            ):
+                if actual != expected_grids:
+                    raise ValueError(
+                        f"point {template.points[point]} ADC {window.channel} event {event} "
+                        f"grid count {actual} differs from point {template.points[0]} "
+                        f"count {expected_grids}"
+                    )
 
 
 def _partition_point(

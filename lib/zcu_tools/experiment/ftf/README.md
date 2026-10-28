@@ -1,6 +1,6 @@
 # FTF environment composition
 
-**Last updated:** 2026-10-27 (UTC), acquisition drift with evolve-local preparations
+**Last updated:** 2026-10-28 (UTC), projective read planning and partial ADC observation
 
 **讀者：** lab-author、framework-dev、agent。FTF 環境的組裝、數值接線與 acquisition 設定。
 
@@ -306,10 +306,18 @@ not accepted.
 
 ### Cavity drives
 
-Nonterminal pulses on the readout generator are cavity drives. At each point,
-the latest active readout-channel block starts the terminal readout. Every earlier
-readout-channel pulse must end by that start, and the first ADC trigger must not
-precede it. A pulse that crosses the terminal start raises `ValueError`.
+At each point, the latest active readout-channel block is terminal. The planner
+classifies earlier blocks with ADC triggers as projective reads and earlier blocks
+without triggers as cavity drives. A block owns triggers from its start until the
+next block starts, including ringdown after pulse end. Earlier pulses may end at
+the next start, but their last ADC sample must be strictly earlier. A crossing
+sample window raises `ValueError` naming the block and trigger.
+
+`FTFTemplatePlan.projective_reads` retains each point's ordered projection times,
+incident pulses and bound triggers. The numeric batch includes projection starts
+as segment boundaries. Planning does not project or evolve densities.
+Projective block counts and each ADC's per-event grid counts must match across
+points. Planning rejects a difference with the point and differing counts.
 
 `simulate.adc` solves the linear, state-conditioned cavity fields. The incident
 amplitude uses the same `input_per_gain` conversion as terminal readout.
@@ -405,7 +413,13 @@ profile only when mux is configured and includes both paths in the routes.
 `plan_template` and `FTFSource` accept an explicit `readout=` override; private replay rejects an
 override that cannot be reconstructed from captured settings. Plans expose
 `readouts`, an ordered tuple of `FTFReadoutPlan(channel, batch)`, not a singleton.
-Each batch contains every incident tone and that ADC's grids. Integrated flat,
+Each batch retains the same chronological logical-event axis. An event contains
+only its own incident pulse block and that ADC's observed grids. Empty grids mean
+that ADC does not observe the event and emits no read column. All ADCs may omit
+terminal observations; the terminal event and evolution endpoint remain in the
+plan. Each ADC must still observe at least one event. Projective plans retain
+point-local event contents. Templates without projective reads keep their existing
+terminal-content deduplication and rotating reference. Integrated flat,
 common-start mux batches use ADC's carrier-wise linear sums. Each carrier keeps
 the guarded direct-sum or constant-field/full-exponential route. Delay, mismatch,
 ringdown and per-receiver offset remain part of ADC's response contract. Shaped

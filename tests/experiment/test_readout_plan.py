@@ -136,17 +136,32 @@ def test_partition_uses_active_point_windows_not_slot_order() -> None:
     herald, terminal = pulse(0.010), pulse(0.030)
     alternate = replace(herald, active=np.array([False, True]))
     herald = replace(herald, active=np.array([True, False]))
-    # At point 1 the same earlier block has no bound trigger, so remains a drive.
     base = template((terminal, alternate, herald))
+    plan = readout_plan.classify_readout(base, readout_plan.ReadoutDrive(0, 1.0), {})
+    assert tuple(map(len, plan.projective_reads)) == (1, 1)
+    assert plan.cavity_drives == ((), ())
+    assert plan.projective_reads[1][0].start_ns == 10
+
+
+@pytest.mark.parametrize(
+    "second_triggers,difference",
+    [
+        ((0.031, 0.032, 0.033), "projective.*0.*1"),
+        ((0.011, 0.031, 0.032), "ADC 2.*grid.*1.*2"),
+    ],
+)
+def test_partition_rejects_point_with_different_logical_event_topology(
+    second_triggers, difference
+) -> None:
+    base = template((pulse(0.010), pulse(0.030)), (0.011, 0.012, 0.031))
     window = replace(
-        base.readouts[0], trigger_us=np.array([[0.011, 0.031], [0.031, 0.032]])
+        base.readouts[0],
+        trigger_us=np.array([[0.011, 0.012, 0.031], second_triggers]),
     )
-    plan = readout_plan.classify_readout(
-        replace(base, readouts=(window,)), readout_plan.ReadoutDrive(0, 1.0), {}
-    )
-    assert tuple(map(len, plan.projective_reads)) == (1, 0)
-    assert tuple(map(len, plan.cavity_drives)) == (0, 1)
-    assert plan.cavity_drives[1][0].start_ns == 10
+    with pytest.raises(ValueError, match=rf"point 1.*{difference}"):
+        readout_plan.classify_readout(
+            replace(base, readouts=(window,)), readout_plan.ReadoutDrive(0, 1.0), {}
+        )
 
 
 def test_terminal_only_event_contents_preserve_late_triggers_and_deduplication() -> (

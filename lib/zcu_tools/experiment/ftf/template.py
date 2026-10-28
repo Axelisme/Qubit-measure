@@ -10,10 +10,13 @@ from zcu_tools.core.simulation import (
     TimelineTemplate,
 )
 from zcu_tools.experiment.readout_plan import (
+    ProjectiveRead,
     ReadoutDrive,
+    ReadoutPartition,
     classify_readout,
     drive_track,
     local_readout_pulses,
+    read_event_contents,
     readout_contents,
 )
 from zcu_tools.resources.ftf import FTFSettings
@@ -95,18 +98,24 @@ class FTFTemplatePlan:
 
     source: round-DC secular model source, including the Gibbs initial density.
     batch: ns/GHz/rad charge/flux drives at fixed DC, ending at readout start.
-    readouts: per-ADC distinct terminal pulse/grid contents at DC, in declaration order.
+    readouts: per-ADC pulse/grid contents at DC, in declaration order. Every ADC
+        retains the same ordered logical event axis, with empty grids for events
+        it does not observe. An event contains only its own block's pulses.
     cavity_drives: tuple in batch.points order, each containing the earlier active
-        readout-generator ReadoutPulse inputs in template slot order. Supports are
+        untriggered readout-generator ReadoutPulse inputs in template slot order. Supports are
         absolute ns, carriers GHz, phases pulse-local radians in the neutral DC
         readout model's zero-GHz reference. Amplitudes include input_per_gain and
         constant envelope values; nonconstant envelopes retain their local shape.
         Empty point tuples mean no cavity drive. Earlier pulses must end no later
-        than terminal start; crossing pulses raise ValueError during planning.
+        than the next block start; crossing pulses raise ValueError during planning.
     batch includes cavity pulse boundaries, but not cavity shifts. Runtime
     queries final spans and advances densities and the dominant cavity branch
     sequentially. Planning never solves cavity fields, propagates a density or
     draws random samples.
+    projective_reads: per-point nonterminal read blocks in chronological order.
+        Starts are projection times in ns; pulses use zero-GHz pulse-local phases
+        and triggers retain channel-local indices. These starts are batch segment
+        boundaries. Runtime owns projection and continuation; planning does neither.
     These inputs are author diagnostics, not public measurement metadata.
     """
 
@@ -114,6 +123,7 @@ class FTFTemplatePlan:
     batch: TimelineBatch
     readouts: tuple[FTFReadoutPlan, ...]
     cavity_drives: tuple[tuple[ReadoutPulse, ...], ...]
+    projective_reads: tuple[tuple[ProjectiveRead, ...], ...]
 
 
 @dataclass(frozen=True)
@@ -174,19 +184,88 @@ def _timeline_batch(
 def _cavity_batch(
     batch: TimelineBatch,
     pulses: tuple[tuple[ReadoutPulse, ...], ...],
+    projective_reads: tuple[tuple[ProjectiveRead, ...], ...],
 ) -> TimelineBatch:
-    """Add cavity support boundaries without evolving densities or fields."""
-    if not any(pulses):
+    """Add cavity and projection boundaries without evolving densities or fields."""
+    if not any(pulses) and not any(projective_reads):
         return batch
     boundaries = tuple(
         tuple(
             sorted(
                 {float(t) for pulse in point for t in (pulse.start_ns, pulse.end_ns)}
+                | {read.start_ns for read in reads}
             )
         )
-        for point in pulses
+        for point, reads in zip(pulses, projective_reads, strict=True)
     )
     return replace(batch, segment_boundaries=boundaries)
+
+
+@dataclass(frozen=True)
+class _ReadoutEvents:
+    """One ADC's detached logical events and point-to-content mapping."""
+
+    events: tuple[tuple[ReadoutEvent, ...], ...]
+    inverse: NDArray[np.int64]
+
+
+def _projective_contents(
+    template: TimelineTemplate,
+    drive: ReadoutDrive,
+    partition: ReadoutPartition,
+    terminal_start_ns: NDArray[np.float64],
+    memo: dict[int, EnvelopeSpec],
+) -> tuple[tuple[_ReadoutEvents, ...], float]:
+    """Align actual trigger contents on a common chronological block axis."""
+    channels = tuple(
+        read_event_contents(template, drive, window, memo)
+        for window in template.readouts
+    )
+    reference = partition.terminal_pulses[0][0].frequency_ghz
+    # Projective plans retain point-local contents, including unobserved terminal
+    # pulses. Observed-trigger keys alone cannot identify those incident fields.
+    inverse = np.arange(len(template.points), dtype=np.int64)
+    events_by_channel: list[list[tuple[ReadoutEvent, ...]]] = [[] for _ in channels]
+    for point in range(len(template.points)):
+        starts = (
+            *(read.start_ns for read in partition.projective_reads[point]),
+            float(terminal_start_ns[point]),
+        )
+        blocks = (
+            *(read.pulses for read in partition.projective_reads[point]),
+            partition.terminal_pulses[point],
+        )
+        # Classification phases are already pulse-local at zero GHz. Changing
+        # the rotating reference adds only its phase at each pulse's start.
+        pulses = tuple(
+            tuple(
+                replace(
+                    pulse,
+                    phase_rad=pulse.phase_rad + 2 * np.pi * reference * pulse.start_ns,
+                )
+                for pulse in block
+            )
+            for block in blocks
+        )
+        for output, channel in zip(events_by_channel, channels, strict=True):
+            output.append(
+                tuple(
+                    ReadoutEvent(
+                        incident,
+                        tuple(
+                            grid
+                            for content in channel
+                            if content.end_ns[point] == start
+                            for grid in content.grids[content.inverse[point]]
+                        ),
+                    )
+                    for start, incident in zip(starts, pulses, strict=True)
+                )
+            )
+    return (
+        tuple(_ReadoutEvents(tuple(events), inverse) for events in events_by_channel),
+        reference,
+    )
 
 
 def plan_template(
@@ -203,8 +282,10 @@ def plan_template(
     values, and template has point arrays in us/MHz/degrees. Support rounds to
     nearest 2 ns, ties even, without changing the common carrier origin. The
     latest active readout-generator block per point ends evolution. Earlier
-    readout pulses are cavity drives and must end no later than that start.
-    The first ADC trigger must not precede it; triggers after pulse end are valid.
+    readout blocks with their own triggers are projective reads; untriggered
+    blocks are cavity drives. A block owns triggers until the next block starts,
+    including ringdown. Earlier pulses may end at the next start, but their last
+    ADC sample must be strictly earlier. Invalid windows name the block/trigger.
     Overlapping/later drive-line controls do not affect the DC readout model.
     Constant complex readout envelopes fold into amplitude, enabling the exact field solution.
     readout supplies detached author capabilities; None adapts current settings.
@@ -217,10 +298,15 @@ def plan_template(
     Readout windows must belong to that path's receivers and generator.
     Mux permits simultaneous coherent tones with independent ADC grids. Program
     common-origin carrier phases convert to pulse-local phases in the first
-    carrier's model reference frame; ADC demodulation remains absolute-time.
+    terminal carrier's model reference frame; ADC demodulation remains absolute-time.
+    All ADCs retain the same ordered event axis, even if none observes terminal.
+    Unobserved events have empty grids. Each ADC must have at least one trigger.
+    Projective block counts and each ADC's per-event grid counts must match across
+    points; differences raise ValueError naming the point and differing counts.
     Missing routes, invalid DC values or invalid readout pulse blocks raise
-    ValueError. Terminal contents deduplicate point rows; earlier cavity pulses
-    detach once per active point/slot. No per-point evolution planner is called.
+    ValueError. Terminal-only contents deduplicate point rows; projective plans
+    retain point-local contents. Earlier cavity pulses detach once per active
+    point/slot. No per-point evolution planner is called.
     """
     config = readout_configuration(settings) if readout is None else readout
     path = _readout_path(settings, config, template)
@@ -240,20 +326,47 @@ def plan_template(
     partition = classify_readout(template, drive, memo)
     cavity_drives = partition.cavity_drives
     terminal_template = replace(template, events=partition.terminal_slots)
-    contents = []
     for window in template.readouts:
         if window.channel not in receivers:
             raise ValueError(f"unbound FTF receiver {window.channel}")
-        contents.append(readout_contents(terminal_template, drive, window, memo))
-    end_ns = contents[0].end_ns
+    end_ns = np.max(
+        [
+            np.where(e.active, e.start_us * 1000, -np.inf)
+            for e in partition.terminal_slots
+        ],
+        axis=0,
+    )
+    if any(partition.projective_reads):
+        event_contents, reference_frequency_ghz = _projective_contents(
+            template, drive, partition, end_ns, memo
+        )
+    else:
+        contents = tuple(
+            readout_contents(terminal_template, drive, window, memo)
+            for window in template.readouts
+        )
+        reference_frequency_ghz = contents[0].pulses[0][0].frequency_ghz
+        event_contents = tuple(
+            _ReadoutEvents(
+                tuple(
+                    (ReadoutEvent(pulses, grids),)
+                    for pulses, grids in zip(
+                        local_readout_pulses(content.pulses, reference_frequency_ghz),
+                        content.grids,
+                        strict=True,
+                    )
+                ),
+                content.inverse,
+            )
+            for content in contents
+        )
     if facts is None:
         facts = FTFModelFacts(settings, snapshot)
     elif not facts.matches(settings, snapshot):
         raise ValueError("FTF physical facts do not match settings/snapshot/revision")
     joint, source, physical = facts.joint, facts.source, facts.readout
-    reference_frequency_ghz = contents[0].pulses[0][0].frequency_ghz
     readouts = []
-    for window, content in zip(template.readouts, contents, strict=True):
+    for window, content in zip(template.readouts, event_contents, strict=True):
         adc = receivers[window.channel]
         dt = 1000 / window.sample_rate_mhz
         receiver = Receiver(
@@ -290,16 +403,7 @@ def plan_template(
                 window.channel,
                 ReadoutBatch(
                     model,
-                    tuple(
-                        (ReadoutEvent(pulses, grids),)
-                        for pulses, grids in zip(
-                            local_readout_pulses(
-                                content.pulses, reference_frequency_ghz
-                            ),
-                            content.grids,
-                            strict=True,
-                        )
-                    ),
+                    content.events,
                     content.inverse,
                 ),
             )
@@ -309,7 +413,9 @@ def plan_template(
         _cavity_batch(
             _timeline_batch(settings, joint, template, end_ns, path, memo),
             cavity_drives,
+            partition.projective_reads,
         ),
         tuple(readouts),
         cavity_drives,
+        partition.projective_reads,
     )

@@ -77,6 +77,9 @@ reads and untriggered cavity drives at each point. Projective reads group the
 coherent tones and bound receiver triggers at one projection time. A block owns
 triggers from its start until the next block start, including ringdown after
 pulse end. Nonterminal sampling must finish strictly before the next block.
+`ReadoutPartition.terminal_pulses` retains terminal tones even when no ADC observes
+them. Projective block counts and each ADC's per-event grid counts must match
+across points; classification rejects differences with the point and counts.
 `read_event_contents` detaches and deduplicates each trigger's own pulse/grid
 contents. `readout_contents` retains the terminal-only planning contract.
 The shared planner converts common-origin carrier phases to pulse-local phases. Environment planners supply
