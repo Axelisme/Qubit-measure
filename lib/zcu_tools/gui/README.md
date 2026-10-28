@@ -147,6 +147,10 @@ Fluxdep／dispersive behavior 先註冊 lab components，再呼叫 `AnalysisTarg
 Shared `gui.launcher` 在 module import 時不載入 Qt、matplotlib 或 app modules。
 Runtime 等到 QApplication 建立後才初始化 explicit plot host、shutdown callback 與 mathtext。
 它不選擇 process-wide Matplotlib backend。
+Runtime 掛在共用 `QApplication.aboutToQuit` 上的 shutdown callback 由本次啟動的 `LifetimeScope` 持有，
+`behavior.close` 完成後在 finally 解除；外部對同一 app 的其他訂閱不受影響。
+Production 退出時 plotting 的 shutting-down 旗標設為 True 後保留，讓 interpreter finalization 期間的 canvas removal 不再派送；
+只有共用同一 `QApplication` 的測試由 runtime 測試 fixture 經公開 getter／setter 把旗標還原到進入前的值。
 
 When runtime gets or creates the `QApplication`, it calls
 `gui.widgets.selectable_text.install_selectable_message_boxes(app)`. The call

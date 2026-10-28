@@ -1,6 +1,6 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-10-27（全樹驗證即時記錄失敗節點）
+**Last updated:** 2026-10-28（plotting module guard 與測試資源清理責任）
 
 **讀者：** framework-dev、agent。查閱測試的 owner、fixture、執行方式與搬遷驗收契約。
 
@@ -219,6 +219,14 @@ def controller_view(qapp):
 直接持有其他 runner 的 fixture 繼續呼叫該 runner 的公開 lifecycle API，不套用
 Controller 的 terminal close。見 `tests/gui/session/services/test_device_manager.py`
 的 `_quiesce_services` fixture。
+
+### GUI plotting 狀態的 module guard
+
+`tests/gui/conftest.py` 的 module-scope guard 在每個測試模組前後比對 plotting 的 shutting-down 旗標與 live container attachments 快照，
+不一致時 assert 並列出 figure id 與 container object name。比對前先交付 `DeferredDelete` 並 `gc.collect()`，
+所以只剩弱引用、等待 GC 的 figure 不算污染；仍 attached 到 live container 的 figure 才算。
+測試自己建立的 `FigureContainer` 與 pyplot 的 Qt manager window 由建立它的 fixture 清理（container `clear()`／`deleteLater()`、manager window `deleteLater()`），
+不留給後面的模組。2026-10-28 全樹 15 個 teardown error 與一個退出時的 SIGSEGV 都來自這類未清理的測試資源。
 
 ### 等待、時間與完成條件
 
