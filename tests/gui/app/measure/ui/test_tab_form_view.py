@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable, Iterator
-from dataclasses import replace
+from dataclasses import asdict, replace
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -33,6 +34,7 @@ from zcu_tools.gui.app.measure.adapter import (
     AnalysisMode,
 )
 from zcu_tools.gui.app.measure.services import TabSnapshot
+from zcu_tools.gui.app.measure.services.guard import AdmissionDecision
 from zcu_tools.gui.app.measure.services.ports import (
     AnalysisPaneSnapshot,
     PostAnalysisPaneSnapshot,
@@ -87,19 +89,23 @@ def snapshot(*, is_running: bool = False, is_analyzing: bool = False) -> TabSnap
                 is_analyzing=is_analyzing,
                 has_context=True,
                 has_active_context=True,
-                has_soc=True,
                 has_run_result=False,
-                has_analyze_result=False,
-                has_figure=False,
-                has_post_analyze_result=False,
             ),
             capabilities=CAPABILITIES,
             run=RunPaneSnapshot(result=None, source_path=None),
             analysis=AnalysisPaneSnapshot(
-                params=None, result=None, figures=None, writeback_items=()
+                params=None,
+                result=None,
+                has_result=False,
+                figures=None,
+                writeback_items=(),
             ),
             post_analysis=PostAnalysisPaneSnapshot(
-                params=None, result=None, figures=None, writeback_items=()
+                params=None,
+                result=None,
+                has_result=False,
+                figures=None,
+                writeback_items=(),
             ),
             save=SavePaneSnapshot(),
         )
@@ -128,6 +134,11 @@ class TabView:
         self.ctrl.progress_control.progress_bars.return_value = []
         self.ctrl.tab_control.get_tab_snapshot.return_value = snapshot()
         self.resource: TabFormResource = self.ctrl.cfg_resources.lookup("tab-1")
+        self.ctrl.admit.side_effect = lambda _tab_id, _action: (
+            AdmissionDecision(False, "not_valid", reason)
+            if (reason := self.resource.run_invalid_reason()) is not None
+            else AdmissionDecision(True, None, "")
+        )
         self.actions = MagicMock()
         self.tab = ExpTabWidget(
             "tab-1", self.ctrl, CAPABILITIES, dialog_presenter=presenter
@@ -166,6 +177,109 @@ def open_tab(qapp: QApplication) -> Iterator[Callable[..., TabView]]:
     # Delete now, not whenever garbage collection reaches the views.
     QApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
     qapp.processEvents()
+
+
+def capture_step(ui: ComponentDriver, folder: Path, name: str) -> None:
+    """Keep a rendered PNG and named visible facts for one user interaction."""
+    ui.screenshot(folder / f"{name}.png")
+    (folder / f"{name}.json").write_text(
+        json.dumps(asdict(ui.visible()), indent=2), encoding="utf-8"
+    )
+
+
+def test_run_blocker_counts_resource_errors_with_component_driver(
+    open_tab: Callable[..., TabView], tmp_path: Path
+) -> None:
+    class TwoFields(ConfigBase):
+        first: float
+        second: float
+
+    resource = TabFormResource(
+        lambda _ctx: Form(TwoFields, {}),
+        capture=lambda _aliases: TabFormSources(FormEnv()),
+        mutation_allowed=lambda: True,
+    )
+    view = open_tab(resource=resource)
+    view.actions.refresh_interaction.side_effect = lambda _tab_id: (
+        view.tab.update_interaction_state(snapshot())
+    )
+    view.tab.resize(1200, 850)
+    view.tab.show()
+    ui = ComponentDriver(view.tab)
+    capture_step(ui, tmp_path, "cfg-two-errors")
+    assert not ui.observe("Run").enabled
+    assert ui.observe("Run").tooltip == "first: Field required (+1 more)"
+    ui.enter_text(object_name="form.input.first", value="1")
+    capture_step(ui, tmp_path, "cfg-one-error")
+    assert not ui.observe("Run").enabled
+    assert ui.observe("Run").tooltip == "second: Field required"
+    ui.enter_text(object_name="form.input.second", value="2")
+    capture_step(ui, tmp_path, "cfg-valid")
+    assert ui.observe("Run").enabled
+    assert ui.observe("Run").tooltip == ""
+
+
+def test_run_shows_domain_decision_before_hardware_gate(
+    open_tab: Callable[..., TabView], tmp_path: Path
+) -> None:
+    class RequiredValue(ConfigBase):
+        value: float
+
+    resource = TabFormResource(
+        lambda _ctx: Form(RequiredValue, {}),
+        capture=lambda _aliases: TabFormSources(FormEnv()),
+        mutation_allowed=lambda: True,
+    )
+    view = open_tab(resource=resource)
+    current = snapshot()
+    assert current.interaction is not None
+    blocked = replace(
+        current, interaction=replace(current.interaction, startup_active=True)
+    )
+    view.actions.refresh_interaction.side_effect = lambda _tab_id: (
+        view.tab.update_interaction_state(blocked)
+    )
+    view.tab.update_interaction_state(blocked)
+    view.tab.resize(1200, 850)
+    view.tab.show()
+    ui = ComponentDriver(view.tab)
+    capture_step(ui, tmp_path, "domain-before-startup")
+    assert not ui.observe("Run").enabled
+    assert ui.observe("Run").tooltip == "value: Field required"
+
+    ui.enter_text(object_name="form.input.value", value="1")
+    capture_step(ui, tmp_path, "startup-after-admission")
+    assert not ui.observe("Run").enabled
+    assert ui.observe("Run").tooltip == "Startup script is running"
+
+
+def test_run_retains_editor_local_parse_before_hardware_gate(
+    open_tab: Callable[..., TabView], tmp_path: Path
+) -> None:
+    view = open_tab()
+    current = snapshot()
+    assert current.interaction is not None
+    blocked = replace(
+        current, interaction=replace(current.interaction, startup_active=True)
+    )
+    view.actions.refresh_interaction.side_effect = lambda _tab_id: (
+        view.tab.update_interaction_state(blocked)
+    )
+    view.tab.update_interaction_state(blocked)
+    view.tab.resize(1200, 850)
+    view.tab.show()
+    ui = ComponentDriver(view.tab)
+    capture_step(ui, tmp_path, "parse-initial-startup")
+    assert ui.observe("Run").tooltip == "Startup script is running"
+    ui.enter_text(object_name="form.input.reps", value="many")
+    capture_step(ui, tmp_path, "parse-local-error")
+    assert not ui.observe("Run").enabled
+    assert ui.observe(object_name="form.input.reps").text == "many"
+    assert ui.observe("Run").tooltip.startswith("Config invalid: reps: ")
+    ui.enter_text(object_name="form.input.reps", value="7")
+    capture_step(ui, tmp_path, "parse-repaired-startup")
+    assert not ui.observe("Run").enabled
+    assert ui.observe("Run").tooltip == "Startup script is running"
 
 
 def test_editor_input_reaches_the_resource_and_validity_gates_run(

@@ -70,8 +70,10 @@ from .events.tab import (
 from .registry import ExperimentResolution, Registry
 from .remote.dialogs import DialogName
 from .services import (
+    AdmissionDecision,
     AppPersistedState,
     PersistenceError,
+    TabAction,
     build_app_services,
 )
 from .services.results_index import ResultsIndex, scan_results
@@ -588,6 +590,15 @@ class Controller:
 
     def get_bus(self) -> EventBus:
         return self._bus
+
+    def admit(self, tab_id: str, action: TabAction) -> AdmissionDecision:
+        """Return the guard decision for a tab action without changing state.
+
+        Call on the owner thread with a tab identifier and a TabAction member.
+        Missing tabs and unmet domain prerequisites return a denied decision;
+        hardware exclusion is checked separately when the operation starts.
+        """
+        return self._guard_svc.admit(tab_id, action)
 
     def get_hardware_gate_presence(self) -> tuple[GatePresence, ...]:
         return self._operation_gate.snapshot()

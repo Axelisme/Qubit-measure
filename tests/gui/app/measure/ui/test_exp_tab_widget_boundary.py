@@ -26,7 +26,11 @@ from zcu_tools.gui.app.measure.adapter import (
     ParamMeta,
 )
 from zcu_tools.gui.app.measure.controller import Controller
-from zcu_tools.gui.app.measure.services import create_persistence_caretaker
+from zcu_tools.gui.app.measure.services import (
+    AdmissionDecision,
+    TabAction,
+    create_persistence_caretaker,
+)
 from zcu_tools.gui.app.measure.services.pane_commit import commit_analysis
 from zcu_tools.gui.app.measure.state import AnalysisPaneState
 from zcu_tools.gui.app.measure.ui.exp_tab_widget import ExpTabWidget
@@ -49,6 +53,15 @@ from tests.gui.app.measure.ui._main_window_fakes import (
     tab_pane_tabs,
 )
 from tests.gui.widgets.form._text_input import commit_text
+
+
+def _load_button(tab: ExpTabWidget) -> QPushButton:
+    """Find the tab-owned Load Data action by its visible label."""
+    return next(
+        button
+        for button in tab.findChildren(QPushButton)
+        if button.text() == "Load Data"
+    )
 
 
 class _RecordingTabActions:
@@ -83,6 +96,48 @@ class _RecordingTabActions:
         self.calls.append(("save_all", tab_id))
 
 
+@pytest.mark.parametrize(
+    ("action", "target"),
+    [
+        (TabAction.ANALYZE, "analyze_btn"),
+        (TabAction.POST_ANALYZE, "post_analyze_btn"),
+        (TabAction.WRITEBACK, "writeback_widget"),
+        (TabAction.WRITEBACK, "post_writeback_widget"),
+    ],
+)
+def test_analysis_actions_project_domain_denial(
+    main_window_control_factory, qapp, action: TabAction, target: str
+):
+    ctrl = mock_ctrl(main_window_control_factory)
+    ctrl.admit.side_effect = lambda _tab_id, requested: (
+        AdmissionDecision(False, "experiment_unavailable", "Catalog is reloading")
+        if requested is action
+        else AdmissionDecision(True, None, "")
+    )
+    tab = ExpTabWidget(
+        "tab-1",
+        ctrl,
+        AdapterCapabilities(
+            analysis=AnalysisMode.FIT, post_analysis=True, load_data=True
+        ),
+    )
+    tab.update_interaction_state(
+        make_tab_snapshot(
+            "tab-1", supports_post_analysis=True, has_post_analyze_result=True
+        )
+    )
+    button = {
+        "analyze_btn": tab.analyze_btn,
+        "post_analyze_btn": tab.post_analyze_btn,
+        "writeback_widget": tab.writeback_widget,
+        "post_writeback_widget": tab.post_writeback_widget,
+    }[target]
+    assert not button.isEnabled()
+    assert button.toolTip() == "Catalog is reloading"
+    tab.detach()
+    tab.deleteLater()
+
+
 def test_exp_tab_disables_local_buttons_while_analyzing(
     main_window_control_factory, qapp
 ):
@@ -106,7 +161,6 @@ def test_exp_tab_disables_local_buttons_while_analyzing(
             is_analyzing=True,
             has_context=True,
             has_active_context=True,
-            has_soc=True,
             has_run_result=True,
             has_analyze_result=True,
             has_figure=True,
@@ -114,11 +168,7 @@ def test_exp_tab_disables_local_buttons_while_analyzing(
     )
 
     assert tab.analyze_btn.isEnabled() is False
-    load = next(
-        button
-        for button in tab.findChildren(QPushButton)
-        if button.text() == "Load Data"
-    )
+    load = _load_button(tab)
     assert load.isHidden() is False
     assert load.isEnabled() is False
     assert tab.writeback_widget.isEnabled() is False
@@ -149,7 +199,6 @@ def test_exp_tab_keeps_analyze_enabled_while_other_tab_running(
             is_analyzing=False,
             has_context=True,
             has_active_context=True,
-            has_soc=True,
             has_run_result=True,
             has_analyze_result=True,
             has_figure=True,
@@ -168,9 +217,13 @@ def test_exp_tab_keeps_analyze_enabled_while_other_tab_running(
 def test_exp_tab_run_tooltip_shows_no_soc_reason(main_window_control_factory, qapp):
     from zcu_tools.gui.app.measure.ui.main_window import ExpTabWidget
 
+    ctrl = mock_ctrl(main_window_control_factory)
+    ctrl.admit.return_value = AdmissionDecision(
+        False, "no_soc", "This experiment requires a SoC connection"
+    )
     tab = ExpTabWidget(
         "tab-1",
-        mock_ctrl(main_window_control_factory),
+        ctrl,
         AdapterCapabilities(
             analysis=AnalysisMode.FIT, post_analysis=False, load_data=True
         ),
@@ -183,7 +236,6 @@ def test_exp_tab_run_tooltip_shows_no_soc_reason(main_window_control_factory, qa
             is_analyzing=False,
             has_context=True,
             has_active_context=True,
-            has_soc=False,
             has_run_result=False,
             has_analyze_result=False,
             has_figure=False,
@@ -191,7 +243,7 @@ def test_exp_tab_run_tooltip_shows_no_soc_reason(main_window_control_factory, qa
     )
 
     assert tab.run_btn.isEnabled() is False
-    assert tab.run_btn.toolTip() == "No SoC connection"
+    assert tab.run_btn.toolTip() == "This experiment requires a SoC connection"
 
 
 def test_exp_tab_run_tooltip_shows_cfg_invalid_reason(
@@ -217,7 +269,6 @@ def test_exp_tab_run_tooltip_shows_cfg_invalid_reason(
             is_analyzing=False,
             has_context=True,
             has_active_context=True,
-            has_soc=True,
             has_run_result=False,
             has_analyze_result=False,
             has_figure=False,
@@ -240,15 +291,20 @@ def test_exp_tab_unselected_context_allows_analysis_but_disables_run_and_save(
         is_analyzing=False,
         has_context=True,
         has_active_context=False,
-        has_soc=True,
         has_run_result=True,
         has_analyze_result=True,
         has_figure=True,
     )
     assert snap.capabilities is not None
-    tab = ExpTabWidget(
-        "tab-1", mock_ctrl(main_window_control_factory), snap.capabilities
+    ctrl = mock_ctrl(main_window_control_factory)
+    ctrl.admit.side_effect = lambda _tab_id, action: (
+        AdmissionDecision(
+            False, "no_active_context", "Select or create a working point first"
+        )
+        if action is TabAction.RUN
+        else AdmissionDecision(True, None, "")
     )
+    tab = ExpTabWidget("tab-1", ctrl, snap.capabilities)
     tab.update_writeback_items(
         [ParameterWriteback("r_f", "freq", proposed_value=6100.0)]
     )
@@ -256,11 +312,7 @@ def test_exp_tab_unselected_context_allows_analysis_but_disables_run_and_save(
 
     assert tab.run_btn.isEnabled() is False
     assert tab.run_btn.toolTip() == "Select or create a working point first"
-    load = next(
-        button
-        for button in tab.findChildren(QPushButton)
-        if button.text() == "Load Data"
-    )
+    load = _load_button(tab)
     assert load.isHidden() is False
     assert load.isEnabled() is True
     assert tab.analyze_btn.isEnabled() is True
@@ -351,7 +403,6 @@ def test_exp_tab_load_button_requires_context_but_not_soc(
         "tab-1",
         has_context=True,
         has_active_context=False,
-        has_soc=False,
         has_run_result=False,
         has_analyze_result=False,
         has_figure=False,
@@ -361,11 +412,7 @@ def test_exp_tab_load_button_requires_context_but_not_soc(
         "tab-1", mock_ctrl(main_window_control_factory), snap1.capabilities
     )
     tab.update_interaction_state(snap1)
-    load = next(
-        button
-        for button in tab.findChildren(QPushButton)
-        if button.text() == "Load Data"
-    )
+    load = _load_button(tab)
     assert load.isHidden() is False
     assert load.isEnabled() is True
 
@@ -374,7 +421,6 @@ def test_exp_tab_load_button_requires_context_but_not_soc(
             "tab-1",
             has_context=False,
             has_active_context=False,
-            has_soc=False,
             has_run_result=False,
             has_analyze_result=False,
             has_figure=False,
@@ -471,11 +517,7 @@ def test_exp_tab_buttons_dispatch_public_tab_actions(main_window_control_factory
     tab.attach(snapshot, actions)
 
     assert tab.run_btn.isEnabled() is True
-    load = next(
-        button
-        for button in tab.findChildren(QPushButton)
-        if button.text() == "Load Data"
-    )
+    load = _load_button(tab)
     assert load.isHidden() is False
     assert load.isEnabled() is True
     assert tab.analyze_btn.isEnabled() is True

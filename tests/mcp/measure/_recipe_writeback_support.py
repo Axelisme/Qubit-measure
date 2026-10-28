@@ -177,6 +177,7 @@ class WritebackGui(SyntheticGui):
             analysis=AnalysisPaneSnapshot(
                 params=None,
                 result=None,
+                has_result=False,
                 figures=None,
                 writeback_items=self.drafts["analysis"].items,
                 has_writeback_draft=True,
@@ -184,6 +185,7 @@ class WritebackGui(SyntheticGui):
             post_analysis=PostAnalysisPaneSnapshot(
                 params=None,
                 result=None,
+                has_result=False,
                 figures=None,
                 writeback_items=self.drafts["post_analysis"].items,
                 has_writeback_draft=True,

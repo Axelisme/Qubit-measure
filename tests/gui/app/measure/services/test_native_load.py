@@ -20,6 +20,7 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackItem,
     WritebackRequest,
 )
+from zcu_tools.gui.app.measure.catalog import ExperimentAccess
 from zcu_tools.gui.app.measure.services.analyze import AnalyzeService
 from zcu_tools.gui.app.measure.services.guard import GuardService
 from zcu_tools.gui.app.measure.services.load import LoadDataError, LoadService
@@ -89,7 +90,7 @@ def _native_controls(
     def capture(aliases: Mapping[str, str] | None) -> ParameterContext | None:
         return session.capture_parameters(aliases)
 
-    guard = GuardService(session.state)
+    guard = GuardService(session.state, access=ExperimentAccess())
     runner = OperationRunner(
         None, session.handles, None, session.background, session.bus
     )

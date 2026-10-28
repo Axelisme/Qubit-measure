@@ -1,6 +1,6 @@
 # Measure services
 
-**Last updated:** 2026-10-28，pane 提交與 State 分工
+**Last updated:** 2026-10-28，tab admission、pane 提交與 State 分工
 
 **讀者：** framework-dev、agent。查找 Measure application 操作的 owner，以及 service 與 session、UI、remote 的接縫。
 
@@ -12,6 +12,7 @@ UI 與 remote 經 Controller／control facets 呼叫這些 owners，不各自建
 | 模組 | 負責的操作 |
 | --- | --- |
 | `tab.py`、`tab_form.py`、`tab_input.py` | 建立與關閉實驗 tab，捕捉表單來源並管理輸入。 |
+| `guard.py` | 統一 tab action 的 domain 前提與 tab busy 判斷，回傳 admission decision。 |
 | `run.py`、`analyze.py`、`post_analyze.py` | 執行 Run、primary analysis 與 post-analysis。 |
 | [`pane_commit.py`](pane_commit.py) | 規劃 artifacts、提交 pane、遞增版本並清理退役資源。 |
 | `load.py` | 將已保存的成果交回 app 的 tab／pane 流程。 |
@@ -20,7 +21,8 @@ UI 與 remote 經 Controller／control facets 呼叫這些 owners，不各自建
 | `results_index.py`、`results_comparison.py` | 唯讀索引保存成果，將已存 summary 投影為比較列，不重新分析。 |
 
 Run、Analyze、PostAnalyze、Load 與 Tab 將 pane 提交或退役清理交給 `pane_commit`。
-各 operation 仍決定 admission、終局與觸發清理的時機。
+`GuardService.admit` 統一 domain admission，啟動時的 hardware exclusion 仍由 operation gate 裁決。
+各 operation 決定終局與觸發清理的時機。
 State 保存已提交的 tab 與 pane 狀態，只被動交換已備妥的 pane 與 artifacts，回傳退役資源。
 State 不規劃 artifacts、不遞增提交版本，也不清理退役資源。
 `ports.py` 定義 service 合作時使用的 snapshots 與窄介面，數值分析仍由 adapter 背後的實驗核心負責。

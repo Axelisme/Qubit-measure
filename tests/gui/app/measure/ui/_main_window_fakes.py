@@ -86,7 +86,6 @@ def make_tab_snapshot(
     is_analyzing: bool = False,
     has_context: bool = True,
     has_active_context: bool = True,
-    has_soc: bool = True,
     has_run_result: bool = True,
     has_analyze_result: bool = True,
     has_figure: bool = True,
@@ -103,8 +102,8 @@ def make_tab_snapshot(
     """Build one tab's pane and artifact projection for synthetic view tests.
 
     tab_id identifies the tab. The global_run_active, is_running, is_analyzing,
-    has_context, has_active_context, has_soc and result/figure booleans set the
-    interaction gates. supports_analysis and supports_post_analysis select
+    has_context, has_active_context and has_run_result set retained UI facts.
+    Result/figure booleans populate the panes, not domain admission. supports_analysis and supports_post_analysis select
     analysis capabilities. Load is available to every adapter. Run and analysis result flags also
     create distinct opaque pane results; no live acquisition is performed.
 
@@ -163,12 +162,14 @@ def make_tab_snapshot(
     analysis_snap = AnalysisPaneSnapshot(
         params=resolved_analyze_params,
         result=object() if has_analyze_result else None,
+        has_result=has_analyze_result or figure_obj is not None,
         figures=ready_figures(figure_obj),
         writeback_items=tuple(writeback_items),
     )
     post_snap = PostAnalysisPaneSnapshot(
         params=post_analyze_params,
         result=object() if has_post_analyze_result else None,
+        has_result=has_post_analyze_result or post_figure_obj is not None,
         figures=ready_figures(post_figure_obj),
         writeback_items=(),
     )
@@ -181,11 +182,7 @@ def make_tab_snapshot(
             is_analyzing=is_analyzing,
             has_context=has_context,
             has_active_context=has_active_context,
-            has_soc=has_soc,
             has_run_result=has_run_result,
-            has_analyze_result=has_analyze_result,
-            has_figure=has_figure,
-            has_post_analyze_result=has_post_analyze_result,
         ),
         cfg_input={},
         capabilities=caps,

@@ -147,6 +147,25 @@ class SavePaneState:
 
 
 @dataclass(frozen=True, slots=True)
+class PaneTransitionPreview:
+    """Existing facts invalidated by replacing an Analysis or Post pane.
+
+    analysis_result is True when the old Primary result is retired.
+    analysis_writeback is True when the old Primary draft is retired.
+    post_analysis_result is True when the old Post result is retired.
+    post_analysis_writeback is True when the old Post draft is retired.
+    Result presence includes numeric data, figures-only publications and published
+    empty plot collections. False means absent or preserved by this transition.
+    These facts contain no references to mutable resources or transport labels.
+    """
+
+    analysis_result: bool
+    analysis_writeback: bool
+    post_analysis_result: bool
+    post_analysis_writeback: bool
+
+
+@dataclass(frozen=True, slots=True)
 class RetiredRunResource:
     result: object | None = None
     source_path: str | None = None
@@ -244,19 +263,21 @@ class Session(Generic[T_Cfg, T_Result, T_AnalyzeResult, T_AnalyzeParams]):
 
 @dataclass(frozen=True)
 class TabInteractionState:
+    """UI facts not replaced by domain admission decisions.
+
+    global_run_active and startup_active describe separate hardware exclusion.
+    is_running selects Stop; is_analyzing also locks local editing. has_context
+    gates Load and has_active_context gates Save in their existing views.
+    has_run_result supports result presentation and window event reactions.
+    Analysis, Post and figure presence are read from their snapshot panes.
+    """
+
     global_run_active: bool
     is_running: bool
     is_analyzing: bool
     has_context: bool
     has_active_context: bool
-    has_soc: bool
     has_run_result: bool
-    has_analyze_result: bool
-    has_figure: bool
-    # Post-analysis (second layer) facts — gate the Post sub-tab. The post form
-    # is enabled once a primary analyze result exists; the post figure/summary
-    # render once a post result exists.
-    has_post_analyze_result: bool = False
     # True while a startup script owns admission; only Run is unavailable.
     startup_active: bool = False
 
@@ -411,6 +432,48 @@ class State(SessionState):
         tab.post_analysis = PostAnalysisPaneState()
         return retired
 
+    @staticmethod
+    def _retired_for_analysis_transition(
+        tab: Session[Any, Any, Any, Any],
+        stage: Literal["analysis", "post_analysis"],
+    ) -> RetiredPaneResources:
+        if stage == "analysis":
+            return RetiredPaneResources(
+                analysis=State._retired_analysis(tab.analysis),
+                post_analysis=State._retired_analysis(tab.post_analysis),
+            )
+        if stage == "post_analysis":
+            return RetiredPaneResources(
+                post_analysis=State._retired_analysis(tab.post_analysis),
+            )
+        raise ValueError(f"Unknown analysis stage: {stage!r}")
+
+    def preview_pane_transition(
+        self, tab_id: str, stage: Literal["analysis", "post_analysis"]
+    ) -> PaneTransitionPreview:
+        """Read facts retired by the next successful replacement of stage.
+
+        Call on-owner with a live tab and analysis (Primary) or post_analysis
+        (Post). This query uses the same retirement selection as the State swap.
+        It does not check admission or commit, plan artifacts, change versions,
+        close drafts or release plots. Unknown tabs raise KeyError, off-owner
+        calls raise RuntimeError and unsupported stages raise ValueError.
+        """
+        self._assert_owner()
+        retired = self._retired_for_analysis_transition(self.tabs[tab_id], stage)
+        return PaneTransitionPreview(
+            analysis_result=(
+                retired.analysis.result is not None
+                or retired.analysis.plots is not None
+            ),
+            analysis_writeback=retired.analysis.writeback_draft is not None,
+            post_analysis_result=(
+                retired.post_analysis.result is not None
+                or retired.post_analysis.plots is not None
+            ),
+            post_analysis_writeback=retired.post_analysis.writeback_draft is not None,
+        )
+
     def set_analysis_pane(
         self,
         tab_id: str,
@@ -425,10 +488,7 @@ class State(SessionState):
         """
         self._assert_owner()
         tab = self.tabs[tab_id]
-        retired = RetiredPaneResources(
-            analysis=State._retired_analysis(tab.analysis),
-            post_analysis=State._retired_analysis(tab.post_analysis),
-        )
+        retired = self._retired_for_analysis_transition(tab, "analysis")
         tab.analysis = pane
         tab.post_analysis = PostAnalysisPaneState()
         tab.artifacts = artifacts
@@ -453,9 +513,7 @@ class State(SessionState):
                 f"Cannot record post-analysis for tab {tab_id!r}: no primary "
                 "analyze result"
             )
-        retired = RetiredPaneResources(
-            post_analysis=State._retired_analysis(tab.post_analysis),
-        )
+        retired = self._retired_for_analysis_transition(tab, "post_analysis")
         tab.post_analysis = pane
         tab.artifacts = artifacts
         return retired

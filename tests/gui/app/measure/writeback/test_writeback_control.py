@@ -13,6 +13,12 @@ from zcu_tools.gui.app.measure.events.tab import (
     TabInteractionChangedPayload,
     TabInteractionFact,
 )
+from zcu_tools.gui.app.measure.services.guard import (
+    AdmissionDecision,
+    GuardError,
+    GuardService,
+    TabAction,
+)
 from zcu_tools.gui.app.measure.state import Session, State
 from zcu_tools.gui.app.measure.writeback import (
     ParameterWriteback,
@@ -21,6 +27,7 @@ from zcu_tools.gui.app.measure.writeback import (
     WritebackPane,
     WritebackService,
 )
+from zcu_tools.gui.app.measure.writeback.contracts import WritebackAcceptance
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 from zcu_tools.gui.session.context_control import ContextControlFacet
@@ -55,8 +62,23 @@ class RecordingState:
 
 
 class RecordingGuard:
-    def __init__(self, log: CallLog) -> None:
+    def __init__(
+        self, log: CallLog, state: RecordingState, decision: AdmissionDecision
+    ) -> None:
         self._log = log
+        self._state = state
+        self.decision = decision
+
+    def admit(self, tab_id: str, action: TabAction) -> AdmissionDecision:
+        self._log.add("guard", "admit", tab_id, action)
+        if self._state.busy:
+            return AdmissionDecision(False, "tab_busy", "Tab is busy")
+        return self.decision
+
+    def require_admission(self, tab_id: str, action: TabAction) -> None:
+        decision = self.admit(tab_id, action)
+        if not decision.allowed:
+            raise GuardError(decision.message, reason_code=decision.reason or "")
 
     def check_writeback(self, tab_id: str) -> None:
         self._log.add("guard", "check_writeback", tab_id)
@@ -87,12 +109,22 @@ class RecordingWriteback:
         self._log.add("writeback", "apply_draft", draft, item_ids=item_ids)
         return {"applied_ids": ["pane-item"], "written": {}}
 
+    def write_draft(self, draft, changes, *, on_applied):
+        self._log.add("writeback", "write_draft", draft, changes)
+        return []
+
+    def accept_drafts(self, groups):
+        self._log.add("writeback", "accept_drafts", groups)
+        return WritebackAcceptance(())
+
     def get_all_applied(self, draft: object) -> dict[str, bool]:
         self._log.add("writeback", "get_all_applied", draft)
         return {"pane-item": True}
 
 
-def _facet() -> tuple[
+def _facet(
+    decision: AdmissionDecision | None = None,
+) -> tuple[
     WritebackControlFacet,
     CallLog,
     RecordingState,
@@ -112,7 +144,12 @@ def _facet() -> tuple[
             # tolerated(cast): RecordingState logs tab and busy reads without the full State owner.
             state=cast(Any, state),
             # tolerated(cast): RecordingGuard records admission calls without a full GuardService.
-            guard=cast(Any, RecordingGuard(log)),
+            guard=cast(
+                Any,
+                RecordingGuard(
+                    log, state, decision or AdmissionDecision(True, None, "")
+                ),
+            ),
             # tolerated(cast): RecordingWriteback records draft calls without a full WritebackService.
             writeback=cast(Any, writeback),
             resource_versions=lambda: versions,
@@ -124,6 +161,30 @@ def _facet() -> tuple[
         versions,
         bus,
     )
+
+
+@pytest.mark.parametrize("command", ["form", "edit", "apply", "write", "accept"])
+def test_writeback_rejection_does_not_touch_draft(command: str) -> None:
+    decision = AdmissionDecision(
+        False, "no_context", "Select or create a working point first"
+    )
+    facet, log, _state, _writeback, _versions, _bus = _facet(decision)
+    commands = {
+        "form": lambda: facet.get_writeback_item_form_for_pane(
+            "tab-1", "analysis", "param-1"
+        ),
+        "edit": lambda: facet.set_writeback_item_for_pane(
+            "tab-1", "analysis", "param-1", selected=False
+        ),
+        "apply": lambda: facet.apply_writeback_for_pane("tab-1", "analysis"),
+        "write": lambda: facet.write_writeback_for_pane("tab-1", "analysis", ()),
+        "accept": lambda: facet.accept_writeback("tab-1", ()),
+    }
+    with pytest.raises(GuardError) as caught:
+        commands[command]()
+    assert caught.value.reason_code == decision.reason
+    assert str(caught.value) == decision.message
+    assert log.calls == [call("guard", "admit", "tab-1", TabAction.WRITEBACK)]
 
 
 def test_has_tab_reads_state() -> None:
@@ -271,6 +332,9 @@ def test_batch_write_publishes_shared_draft_even_after_partial_failure(
         ),
     )
     guard = MagicMock()
+    guard.require_admission.side_effect = lambda tab_id, action: (
+        GuardService.require_admission(guard, tab_id, action)
+    )
     facet = WritebackControlFacet(
         state=state,
         guard=guard,
@@ -293,7 +357,7 @@ def test_batch_write_publishes_shared_draft_even_after_partial_failure(
         assert [item.id for item in result] == ["param-1"]
         assert len(entry.ledger.events()) == accepted_before + 1
         assert control.read_context().value("general.ext.a") == 11
-    guard.check_writeback.assert_called_once_with("tab-1")
+    guard.admit.assert_called_once_with("tab-1", TabAction.WRITEBACK)
     assert observed == [
         ("tab-1", TabInteractionFact.WRITEBACK_DRAFT_CHANGED, 11),
     ]

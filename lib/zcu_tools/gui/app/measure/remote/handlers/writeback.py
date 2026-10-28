@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Final, cast
 from pydantic import TypeAdapter, ValidationError
 
 from zcu_tools.gui.app.measure.adapter import AnalysisMode
+from zcu_tools.gui.app.measure.services import TabAction
 from zcu_tools.gui.app.measure.writeback import (
     ModuleWriteback,
     ParameterWriteback,
@@ -24,7 +25,7 @@ if TYPE_CHECKING:
     from ..service import RemoteControlAdapter
 
 from ..form_observation import entry_invalid_to_remote, form_writes
-from ._common import follow_tab
+from ._common import follow_tab, require_tab_admission
 from ._wire_values import coerce_wire_value, context_wire_value
 
 _VALID_WRITEBACK_SUBTABS: Final = ("analysis", "post_analysis")
@@ -180,12 +181,11 @@ def h_tab_writeback_write(
     subtab = str(params["subtab_id"])
     if subtab not in _VALID_WRITEBACK_SUBTABS:
         raise RemoteError(ErrorCode.INVALID_PARAMS, "invalid writeback subtab_id")
-    if not adapter.writeback_control.has_tab(tab_id):
-        raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
     raw = params["write"]
     if not isinstance(raw, list):
         raise RemoteError(ErrorCode.INVALID_PARAMS, "write must be a list")
     changes = tuple(_batch_change(item) for item in raw)
+    require_tab_admission(adapter, tab_id, TabAction.WRITEBACK)
     pane = "analysis" if subtab == "analysis" else "post_analysis"
     follow_tab(adapter, tab_id, pane)
     try:

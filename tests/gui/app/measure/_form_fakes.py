@@ -8,6 +8,7 @@ from unittest.mock import MagicMock
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.gui.app.measure.services import tab_form as resource_api
 from zcu_tools.gui.app.measure.services.form_contracts import source_basis
+from zcu_tools.gui.app.measure.services.guard import AdmissionDecision
 from zcu_tools.gui.app.measure.services.tab_form import TabFormResource, TabFormSources
 from zcu_tools.gui.app.measure.state import State
 from zcu_tools.gui.form import FormEnv
@@ -78,3 +79,4 @@ def configure_form_lookup(ctrl: MagicMock) -> None:
         return resources[tab_id]
 
     ctrl.cfg_resources.lookup.side_effect = lookup
+    ctrl.admit.return_value = AdmissionDecision(True, None, "")

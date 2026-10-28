@@ -17,7 +17,11 @@ from zcu_tools.gui.app.measure.adapter import (
 from zcu_tools.gui.app.measure.artifacts import (
     SaveStatus,
 )
-from zcu_tools.gui.app.measure.services.pane_commit import commit_run
+from zcu_tools.gui.app.measure.services.pane_commit import (
+    commit_analysis,
+    commit_post_analysis,
+    commit_run,
+)
 from zcu_tools.gui.app.measure.services.ports import TabSnapshot
 from zcu_tools.gui.app.measure.services.tab import TabService
 from zcu_tools.gui.app.measure.state import (
@@ -88,6 +92,53 @@ def test_tab_snapshot_is_single_pure_render_model() -> None:
     assert snapshot.save is not None
     assert asdict(snapshot.save)["comment"] == "draft note"
     assert state.get_tab("tab").analysis.params is analyze_params
+
+
+@pytest.mark.parametrize("publication", ["absent", "numeric", "figures_only", "empty"])
+@pytest.mark.parametrize("stage", ["analysis", "post_analysis"])
+def test_snapshot_projects_analysis_presence(publication: str, stage: str) -> None:
+    """Presence survives missing numeric data and an empty published collection."""
+    state = _active_state()
+    state.add_tab(
+        "tab",
+        Session(
+            adapter_name="fake",
+            adapter=MagicMock(),
+            cfg=MagicMock(),
+            analysis=AnalysisPaneState(
+                result=object() if stage == "post_analysis" else None
+            ),
+        ),
+    )
+    plots = None
+    if publication in ("figures_only", "empty"):
+        plots = Plots(NonPresentingHost())
+        if publication == "figures_only":
+            plots.subplots("fit")
+        plots.finish()
+    result = object() if publication == "numeric" else None
+    if publication != "absent":
+        if stage == "analysis":
+            commit_analysis(state, "tab", AnalysisPaneState(result=result, plots=plots))
+        else:
+            commit_post_analysis(
+                state, "tab", PostAnalysisPaneState(result=result, plots=plots)
+            )
+    service = TabService(
+        state,
+        MagicMock(),
+        MagicMock(),
+        form_resources(state),
+        form_sources=lambda aliases: form_sources(state, aliases),
+    )
+
+    snapshot = service.get_snapshot("tab")
+
+    pane = snapshot.analysis if stage == "analysis" else snapshot.post_analysis
+    assert pane is not None
+    assert pane.has_result is (publication != "absent")
+    assert pane.result is result
+    assert pane.figures is plots
 
 
 def test_snapshot_projects_empty_writeback_draft_existence() -> None:
@@ -230,8 +281,7 @@ def test_snapshot_carries_post_analyze_fields() -> None:
     assert snapshot.post_analysis.figures is not None
     assert snapshot.post_analysis.figures is post_plots
     assert snapshot.post_analysis.figures["fit"] is post_fig
-    assert snapshot.interaction is not None
-    assert snapshot.interaction.has_post_analyze_result is True
+    assert snapshot.post_analysis.result is not None
 
 
 def test_initialize_post_analyze_params_seeds_from_primary_result() -> None:

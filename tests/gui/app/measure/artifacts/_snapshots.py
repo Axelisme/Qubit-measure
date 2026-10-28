@@ -64,7 +64,7 @@ def with_artifacts(snapshot: TabSnapshot) -> TabSnapshot:
         ("analysis", caps.analysis is not AnalysisMode.NONE, snapshot.analysis),
         ("post_analysis", caps.post_analysis, snapshot.post_analysis),
     ):
-        if not enabled or pane is None or pane.result is None:
+        if not enabled or pane is None or not pane.has_result:
             continue
         ref = ArtifactRef(section, "results")
         figures = (

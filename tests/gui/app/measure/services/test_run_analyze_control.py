@@ -13,6 +13,11 @@ from zcu_tools.gui.app.measure.events.tab import (
     TabContentFact,
 )
 from zcu_tools.gui.app.measure.services.analyze import ActiveInteractive
+from zcu_tools.gui.app.measure.services.guard import (
+    AdmissionDecision,
+    GuardError,
+    TabAction,
+)
 from zcu_tools.gui.app.measure.services.load import LoadTabResultOutcome
 from zcu_tools.gui.app.measure.services.run_analyze_control import (
     RunAnalyzeControlFacet,
@@ -86,14 +91,28 @@ class RecordingAdapter:
 
 
 class RecordingGuard:
-    def __init__(self, log: CallLog) -> None:
+    def __init__(self, log: CallLog, decision: AdmissionDecision) -> None:
         self._log = log
+        self.decision = decision
+
+    def admit(self, tab_id: str, action: TabAction) -> AdmissionDecision:
+        self._log.add("guard", "admit", tab_id, action)
+        return self.decision
+
+    def require_admission(self, tab_id: str, action: TabAction) -> None:
+        decision = self.admit(tab_id, action)
+        if not decision.allowed:
+            raise GuardError(decision.message, reason_code=decision.reason or "")
 
     def capture_run_inputs(
         self,
         tab_id: str,
     ) -> object:
         self._log.add("guard", "capture_run_inputs", tab_id)
+        if not self.decision.allowed:
+            raise GuardError(
+                self.decision.message, reason_code=self.decision.reason or ""
+            )
         return "run-inputs"
 
     def check_load(self, tab_id: str) -> None:
@@ -303,6 +322,7 @@ def _facet(
     analysis: AnalysisMode = AnalysisMode.FIT,
     busy: bool = False,
     mount_error: Exception | None = None,
+    decision: AdmissionDecision | None = None,
 ) -> tuple[RunAnalyzeControlFacet, CallLog, RecordingState, RecordingBus]:
     log = CallLog()
     state = RecordingState(log, analysis=analysis, busy=busy)
@@ -315,7 +335,18 @@ def _facet(
             # tolerated(cast): RecordingBus logs payloads; EventBus is concrete.
             bus=cast(Any, bus),
             # tolerated(cast): RecordingGuard logs checks; GuardService is concrete.
-            guard=cast(Any, RecordingGuard(log)),
+            guard=cast(
+                Any,
+                RecordingGuard(
+                    log,
+                    decision
+                    or (
+                        AdmissionDecision(False, "tab_busy", "Tab is busy")
+                        if busy
+                        else AdmissionDecision(True, None, "")
+                    ),
+                ),
+            ),
             # tolerated(cast): RecordingTab logs preparation; TabService is concrete.
             tab=cast(Any, RecordingTab(log)),
             # tolerated(cast): RecordingLoad logs result loading; LoadService is concrete.
@@ -335,6 +366,26 @@ def _facet(
     )
 
 
+@pytest.mark.parametrize(
+    "action", [TabAction.LOAD, TabAction.ANALYZE, TabAction.POST_ANALYZE]
+)
+def test_rejected_admission_does_not_touch_services_or_presentation(
+    action: TabAction,
+) -> None:
+    decision = AdmissionDecision(False, "no_analysis", "Analysis is unavailable")
+    facet, log, _state, _bus = _facet(decision=decision)
+    commands = {
+        TabAction.LOAD: lambda: facet.load_tab_result("tab-1", "unused.h5"),
+        TabAction.ANALYZE: lambda: facet.analyze("tab-1", None),
+        TabAction.POST_ANALYZE: lambda: facet.start_post_analyze("tab-1", None),
+    }
+    with pytest.raises(GuardError) as caught:
+        commands[action]()
+    assert caught.value.reason_code == decision.reason
+    assert str(caught.value) == decision.message
+    assert log.calls == [call("guard", "admit", "tab-1", action)]
+
+
 def test_gui_started_run_and_both_analysis_stages_are_indexed() -> None:
     facet, _log, _state, _bus = _facet()
 
@@ -350,15 +401,14 @@ def test_run_control_starts_with_guard_and_live_container() -> None:
 
     assert facet.start_run("tab-1") == 11
 
-    assert log.calls[:3] == [
+    assert log.calls[:2] == [
         call("guard", "capture_run_inputs", "tab-1"),
-        call("state", "is_tab_busy", "tab-1"),
         call("host", "make_run_container", "tab-1"),
     ]
-    assert log.calls[3].target == "run"
-    assert log.calls[3].method == "start_run"
-    assert log.calls[3].args[0] == "run-inputs"
-    assert isinstance(log.calls[3].args[1], Plots)
+    assert log.calls[2].target == "run"
+    assert log.calls[2].method == "start_run"
+    assert log.calls[2].args[0] == "run-inputs"
+    assert isinstance(log.calls[2].args[1], Plots)
 
 
 def test_load_result_initializes_analyze_params_and_emits_content_changed() -> None:
@@ -368,7 +418,7 @@ def test_load_result_initializes_analyze_params_and_emits_content_changed() -> N
 
     assert outcome.has_analyze_params is True
     assert log.calls == [
-        call("guard", "check_load", "tab-1"),
+        call("guard", "admit", "tab-1", TabAction.LOAD),
         call("load", "load_result", "tab-1", "/tmp/result.hdf5"),
         call("run", "release_view_plots", "tab-1"),
         call("tab", "prepare_result_analysis", "tab-1"),
@@ -386,15 +436,14 @@ def test_fit_analyze_uses_worker_service_and_live_container() -> None:
 
     assert facet.analyze("tab-1", params) == 22
 
-    assert log.calls[:4] == [
-        call("guard", "check_analyze", "tab-1"),
-        call("state", "is_tab_busy", "tab-1"),
+    assert log.calls[:3] == [
+        call("guard", "admit", "tab-1", TabAction.ANALYZE),
         call("state", "get_tab", "tab-1"),
         call("host", "make_analysis_container", "tab-1"),
     ]
-    assert log.calls[4].method == "start_analyze"
-    assert log.calls[4].args[:2] == ("tab-1", params)
-    assert isinstance(log.calls[4].args[2], Plots)
+    assert log.calls[3].method == "start_analyze"
+    assert log.calls[3].args[:2] == ("tab-1", params)
+    assert isinstance(log.calls[3].args[2], Plots)
 
 
 @pytest.mark.parametrize("context_free", [False, True])
@@ -430,14 +479,13 @@ def test_interactive_analyze_mounts_render_host_session() -> None:
         "guard",
         "state",
         "state",
-        "state",
         "adapter",
         "analyze",
         "host",
         "adapter",
     ]
-    assert log.calls[5].method == "start_plugin"
-    assert log.calls[5].args[3] == "params"
+    assert log.calls[4].method == "start_plugin"
+    assert log.calls[4].args[3] == "params"
 
 
 def test_interactive_mount_failure_unmounts_and_cancels_operation() -> None:
@@ -463,7 +511,7 @@ def test_post_analyze_uses_shared_live_container() -> None:
     assert facet.start_post_analyze("tab-1", "post-params") == 33
 
     assert log.calls[:2] == [
-        call("state", "is_tab_busy", "tab-1"),
+        call("guard", "admit", "tab-1", TabAction.POST_ANALYZE),
         call("host", "make_post_analysis_container", "tab-1"),
     ]
     assert log.calls[2].method == "start_post_analyze"

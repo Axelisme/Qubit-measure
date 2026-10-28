@@ -2,13 +2,16 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from enum import Enum
+from typing import TYPE_CHECKING
 
 from zcu_tools.experiment.metadata import RunSnapshot
 from zcu_tools.gui.app.measure.adapter import (
+    AnalysisMode,
     RunRequest,
     require_soc_handles,
 )
+from zcu_tools.gui.app.measure.catalog import ExperimentAccess
 from zcu_tools.gui.app.measure.registry import RegisteredAdapter
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.types import ContextReadiness, ParameterContext
@@ -22,12 +25,37 @@ if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.state import State
 
 
+class TabAction(str, Enum):
+    """The tab operations whose domain readiness is owned by GuardService."""
+
+    RUN = "run"
+    LOAD = "load"
+    ANALYZE = "analyze"
+    POST_ANALYZE = "post_analyze"
+    WRITEBACK = "writeback"
+
+
+@dataclass(frozen=True)
+class AdmissionDecision:
+    """One owner-thread observation of tab readiness, not a hardware lease.
+
+    allowed is True only when all action prerequisites pass. reason is None
+    on success, otherwise the first stable wire reason code from admit's
+    documented order. message is empty on success; on rejection it is the
+    shared tooltip/error text and must not be parsed for the reason code.
+    """
+
+    allowed: bool
+    reason: str | None
+    message: str
+
+
 class GuardError(FailedPreconditionError):
-    """Raised when a protected operation's static precondition is not met.
+    """Raised when a protected operation's admission precondition is not met.
 
     This is the single failure mode both clients (View and remote) see when a
-    domain check fails. It is a domain-readiness failure, never a dynamic
-    resource conflict (that is OperationGate's OperationConflictError).
+    domain check fails. Tab busy is a domain-readiness failure; hardware
+    conflicts remain OperationGate's OperationConflictError.
 
     ``reason_code`` is a stable machine-readable tag (e.g. ``"no_run_result"``)
     so a remote client can decide the next action without parsing the human
@@ -72,32 +100,138 @@ class RunInputs:
 
 
 class GuardService:
-    """Shared domain checks and Run admission capture over State.
+    """Observe domain readiness and capture admitted Run inputs over State.
 
-    View and remote controls call these checks on the owner thread before the
-    corresponding service command. Successful checks return None, except
-    capture_run_inputs which accepts current Valid cfg and returns fixed data.
-    Checks reject unknown tabs or unmet domain conditions with GuardError and
-    its stable reason_code; cfg validity failures keep their cfg errors.
-    Checks do not emit events, acquire leases or start operations.
-
-    Analyze does not reject analysis capability NONE; post-analyze has no check
-    here (see the GUI capability draft). Busy and hardware exclusion stay at
-    the owning operation boundary — see ADR-0066.
+    Call on the owner thread. admit returns a decision without mutation;
+    check_* and capture_run_inputs raise GuardError for that decision's rejection.
+    Capture accepts cfg only after admission. No method emits events, starts
+    operations or acquires hardware leases. Tab busy belongs here; startup and
+    competing hardware operations remain with the gate (ADR-0066).
     """
 
-    def __init__(self, state: State) -> None:
+    def __init__(self, state: State, *, access: ExperimentAccess) -> None:
         """Use State readiness and the tab resource's fixed source for Run admission.
 
-        Construction/cfg acceptance does not capture parameters or query hardware.
-        The application supplies resources before asking this owner to admit Run.
+        access is the application's shared catalog reload/shutdown gate. The
+        application supplies resources before asking this owner to admit Run.
+        Construction and admission do not capture sources or query hardware.
         """
         self._state = state
+        self._access = access
 
-    def _require_tab(self, tab_id: str) -> Any:
+    def admit(self, tab_id: str, action: TabAction) -> AdmissionDecision:
+        """Read the first domain blocker without starting work or acquiring leases.
+
+        All actions first check experiment_unavailable, then unknown_tab.
+        Remaining reason codes, in first-failure order, are:
+
+        * RUN: no_active_context (wrong_readiness for other required readiness),
+          not_valid (cfg preparation, model, then lowering), no_soc, tab_busy.
+        * LOAD: tab_busy. No context, SoC, result or storage is required.
+        * ANALYZE: no_run_result, no_analysis, tab_busy.
+        * POST_ANALYZE: no_analyze_result, no_post_analysis, tab_busy.
+        * WRITEBACK: no_context, no_analyze_result (Primary), tab_busy.
+
+        Call on the owner thread. Success has reason=None and message="".
+        Rejection messages are the shared tooltip and GuardError text; reason
+        codes are the wire tags. No Run/Load storage prerequisite is added;
+        Writeback validates its captured destination in its owner. Cfg reads
+        may raise their resource-lifetime or author lower-hook exceptions.
+        Hardware exclusion remains with the operation gate. Unknown actions
+        raise ValueError after the availability and tab checks.
+        """
+        try:
+            self._access.require_available()
+        except FailedPreconditionError as exc:
+            return AdmissionDecision(False, "experiment_unavailable", str(exc))
         if not self._state.has_tab(tab_id):
-            raise GuardError(f"Unknown tab: {tab_id!r}", reason_code="unknown_tab")
-        return self._state.get_tab(tab_id)
+            return AdmissionDecision(False, "unknown_tab", f"Unknown tab: {tab_id!r}")
+        match action:
+            case TabAction.RUN:
+                blocker = self._run_blocker(tab_id)
+            case TabAction.ANALYZE | TabAction.POST_ANALYZE:
+                blocker = self._analysis_blocker(tab_id, action)
+            case TabAction.WRITEBACK:
+                blocker = self._writeback_blocker(tab_id)
+            case TabAction.LOAD:
+                blocker = None
+            case _:
+                raise ValueError(f"Unknown tab action: {action!r}")
+        if blocker is not None:
+            return blocker
+        if self._state.is_tab_busy(tab_id):
+            return AdmissionDecision(False, "tab_busy", f"Tab {tab_id!r} is busy")
+        return AdmissionDecision(True, None, "")
+
+    def _analysis_blocker(
+        self, tab_id: str, action: TabAction
+    ) -> AdmissionDecision | None:
+        tab = self._state.get_tab(tab_id)
+        if action is TabAction.ANALYZE:
+            if not tab.has_run_result():
+                return AdmissionDecision(
+                    False, "no_run_result", "No run result available to analyze."
+                )
+            if tab.adapter.capabilities.analysis is AnalysisMode.NONE:
+                return AdmissionDecision(
+                    False, "no_analysis", "This experiment has no analysis."
+                )
+        else:
+            if not tab.has_analyze_result():
+                return AdmissionDecision(
+                    False,
+                    "no_analyze_result",
+                    f"Tab {tab_id!r} has no primary analyze result to post-analyze",
+                )
+            if not tab.adapter.capabilities.post_analysis:
+                return AdmissionDecision(
+                    False, "no_post_analysis", "This experiment has no post-analysis."
+                )
+        return None
+
+    def _writeback_blocker(self, tab_id: str) -> AdmissionDecision | None:
+        if self._state.session_env.parameters is None:
+            return AdmissionDecision(
+                False, "no_context", "Select or create a working point first"
+            )
+        if not self._state.get_tab(tab_id).has_analyze_result():
+            return AdmissionDecision(
+                False, "no_analyze_result", "No analyze result available for writeback."
+            )
+        return None
+
+    def _run_blocker(self, tab_id: str) -> AdmissionDecision | None:
+        try:
+            self._require_readiness(ContextReadiness.ACTIVE, "run")
+        except GuardError as exc:
+            return AdmissionDecision(False, exc.reason_code, str(exc))
+        tab = self._state.get_tab(tab_id)
+        reason = tab.cfg.run_invalid_reason()
+        if reason is not None:
+            return AdmissionDecision(False, "not_valid", reason)
+        ctx = self._state.session_env
+        try:
+            require_soc_handles(
+                RunRequest(soc=ctx.soc, soccfg=ctx.soccfg, cfg_context=None)
+            )
+        except RuntimeError as exc:
+            return AdmissionDecision(False, "no_soc", str(exc))
+        return None
+
+    def require_admission(self, tab_id: str, action: TabAction) -> None:
+        """Require tab_id's domain readiness for the requested TabAction.
+
+        Call admit(tab_id, action) exactly once on the owner thread, without
+        mutation. Return None when allowed; otherwise raise GuardError with
+        the decision's message and reason_code (an empty string if reason is
+        None). Other exceptions from admit propagate unchanged.
+        This read-only observation does not capture inputs, start work or
+        acquire a lease. Success does not guarantee later operation admission
+        or hardware availability; the operation gate still owns exclusion.
+        """
+        decision = self.admit(tab_id, action)
+        if not decision.allowed:
+            raise GuardError(decision.message, reason_code=decision.reason or "")
 
     def _require_readiness(self, expected: ContextReadiness, operation: str) -> None:
         readiness = self._state.session_env.readiness
@@ -121,8 +255,10 @@ class GuardService:
     ) -> RunInputs:
         """Check tab_id and capture the current cfg and observed inputs.
 
-        Requires ACTIVE context, valid adapter input and connected SoC handles. Unknown tab, readiness and adapter validation failures
-        raise GuardError; invalid publications keep their cfg errors.
+        First read admit(RUN) once; every rejection raises GuardError with
+        exactly that decision's reason and message, including invalid cfg.
+        After admission, accept cfg once. Execution-time lifetime/reentrancy
+        failures from accept retain their CfgPreconditionError.
         Cached device settings do not participate in admission.
         Accept current displayed values using the tab's Open/Reset capture.
         No source is captured or expression re-resolved against
@@ -130,8 +266,8 @@ class GuardService:
         entry/point/description. No Run,
         lease, file or ledger write starts; source and alias errors propagate.
         """
-        tab = self._require_tab(tab_id)
-        self._require_readiness(ContextReadiness.ACTIVE, "run")
+        self.require_admission(tab_id, TabAction.RUN)
+        tab = self._state.get_tab(tab_id)
 
         ctx = self._state.session_env
         parameters = tab.cfg.env.parameters
@@ -143,19 +279,10 @@ class GuardService:
             if parameters is None
             else parameters.library.validation_context(),
         )
-        try:
-            require_soc_handles(req)
-        except RuntimeError as exc:
-            raise GuardError(str(exc), reason_code="no_soc") from exc
-
         snapshot = None
         storage = None
         experiment_tag = tab.adapter.experiment_tag
-        if (
-            experiment_tag is not None
-            and parameters is not None
-            and parameters.storage is not None
-        ):
+        if parameters is not None and parameters.storage is not None:
             storage = parameters.capture_storage()
             snapshot = RunSnapshot(
                 entry_id=storage.entry_id, point=storage.point, roles=storage.roles
@@ -180,8 +307,7 @@ class GuardService:
         history without an analysis source. Raise GuardError on rejection;
         return None without mutation on success.
         """
-        self._require_tab(tab_id)
-        logger.debug("check_load: tab_id=%r", tab_id)
+        self.require_admission(tab_id, TabAction.LOAD)
 
     def check_analyze(self, tab_id: str) -> None:
         """Require an existing tab and a Run result, not a live context.
@@ -189,14 +315,9 @@ class GuardService:
         Analysis consumes the historical Run source, which may be None for
         context-free analysis. Source-dependent consumers own missing-source
         failures. Raise GuardError on rejection; return None without mutation
-        on success. This check does not validate adapter analysis capability.
+        on success. AnalysisMode.NONE and tab busy are rejected.
         """
-        tab = self._require_tab(tab_id)
-        if not tab.has_run_result():
-            raise GuardError(
-                "No run result available to analyze.", reason_code="no_run_result"
-            )
-        logger.debug("check_analyze: tab_id=%r", tab_id)
+        self.require_admission(tab_id, TabAction.ANALYZE)
 
     def check_writeback(self, tab_id: str) -> None:
         """Require a selected working point, an existing tab and a Primary result.
@@ -207,14 +328,4 @@ class GuardService:
         before nonempty writes. Selection admits the command but never replaces
         its captured SavedPoint destination with the currently selected point.
         """
-        tab = self._require_tab(tab_id)
-        if self._state.session_env.parameters is None:
-            raise GuardError(
-                "Select or create a working point first", reason_code="no_context"
-            )
-        if not tab.has_analyze_result():
-            raise GuardError(
-                "No analyze result available for writeback.",
-                reason_code="no_analyze_result",
-            )
-        logger.debug("check_writeback: tab_id=%r", tab_id)
+        self.require_admission(tab_id, TabAction.WRITEBACK)

@@ -13,6 +13,11 @@ from zcu_tools.gui.app.measure.remote.handlers.run_save import (
 from zcu_tools.gui.app.measure.remote.handlers.view import (
     h_tab_get_figure,
 )
+from zcu_tools.gui.app.measure.services import AdmissionDecision
+from zcu_tools.gui.app.measure.services.form_contracts import (
+    CfgPreconditionError,
+    CfgPreconditionReason,
+)
 from zcu_tools.gui.app.measure.services.guard import GuardError
 from zcu_tools.gui.app.measure.services.load import LoadDataError
 from zcu_tools.gui.expected_error import (
@@ -26,6 +31,8 @@ from zcu_tools.gui.remote.errors import (
     RemoteError,
     remote_error_from_expected,
 )
+
+from ._helpers import dispatch_handler
 
 WireTuple = tuple[ErrorCode, str, str, dict[str, object] | None]
 
@@ -101,20 +108,44 @@ def _remote_error(call: Callable[[], object]) -> WireTuple:
     raise AssertionError("call did not raise a remote or expected error")
 
 
+def test_run_accept_failure_retains_structured_cfg_wire_details() -> None:
+    """Admission may pass while accept rejects at the execution boundary."""
+    ctrl = MagicMock()
+    ctrl.admit.return_value = AdmissionDecision(True, None, "")
+    ctrl.start_run.side_effect = CfgPreconditionError(
+        CfgPreconditionReason.REENTRANT_MUTATION,
+        "Cannot accept during notification",
+        path=("gain",),
+        edit_index=2,
+    )
+    assert _remote_error(
+        lambda: dispatch_handler(ctrl, "tab.run_start", {"tab_id": "t1"})
+    ) == (
+        ErrorCode.PRECONDITION_FAILED,
+        "Cannot accept during notification",
+        "reentrant_mutation",
+        {"path": ["gain"], "edit_index": 2},
+    )
+
+
 def test_existing_handler_error_projection_is_wire_equivalent() -> None:
     run_control = MagicMock()
     run_control.has_tab.return_value = True
     run_control.start_run.side_effect = GuardError(
         "No run result", reason_code="no_run_result"
     )
-    run_adapter = SimpleNamespace(run_analyze_control=run_control, render_view=None)
+    ctrl = MagicMock()
+    ctrl.admit.return_value = AdmissionDecision(True, None, "")
+    run_adapter = SimpleNamespace(
+        ctrl=ctrl, run_analyze_control=run_control, render_view=None
+    )
 
     load_control = MagicMock()
     load_control.has_tab.return_value = True
     load_control.load_tab_result.side_effect = LoadDataError(
         "Bad data file", reason_code="invalid_data_file"
     )
-    load_adapter = SimpleNamespace(run_analyze_control=load_control)
+    load_adapter = SimpleNamespace(ctrl=ctrl, run_analyze_control=load_control)
 
     render_view = MagicMock()
     render_view.take_figure_screenshot_for_subtab.side_effect = FailedPreconditionError(
@@ -127,7 +158,7 @@ def test_existing_handler_error_projection_is_wire_equivalent() -> None:
     cases: list[tuple[Callable[[], object], WireTuple]] = [
         (
             lambda: h_tab_run_start(
-                # tolerated(cast): The run-control namespace is not a RemoteControlAdapter.
+                # tolerated(cast): The admission/run-control namespace is not a RemoteControlAdapter.
                 cast(Any, run_adapter),
                 {"tab_id": "t1", "expected": {"cfg_id": "cfg-t1", "revision": "0"}},
             ),
@@ -140,7 +171,7 @@ def test_existing_handler_error_projection_is_wire_equivalent() -> None:
         ),
         (
             lambda: h_tab_load_data(
-                # tolerated(cast): The load-control namespace is not a RemoteControlAdapter.
+                # tolerated(cast): The admission/load-control namespace is not a RemoteControlAdapter.
                 cast(Any, load_adapter),
                 {"tab_id": "t1", "data_path": "bad.h5"},
             ),

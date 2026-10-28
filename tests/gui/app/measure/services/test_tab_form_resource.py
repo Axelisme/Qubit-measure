@@ -28,6 +28,55 @@ from zcu_tools.resources.entry.schema import (
 )
 
 
+def test_run_invalid_reason_counts_remaining_field_errors() -> None:
+    class TwoFields(ConfigBase):
+        first: float
+        second: float
+
+    resource = resource_api.TabFormResource(
+        lambda _ctx: Form(TwoFields, {}),
+        capture=lambda _aliases: resource_api.TabFormSources(FormEnv()),
+        mutation_allowed=lambda: True,
+    )
+    try:
+        reason = resource.run_invalid_reason()
+        assert reason is not None and reason.startswith("first: ")
+        assert reason.endswith(" (+1 more)")
+        resource.write({("first",): 0.25})
+        reason = resource.run_invalid_reason()
+        assert reason is not None and reason.startswith("second: ")
+        assert "more" not in reason
+    finally:
+        resource.revoke()
+
+
+def test_run_invalid_reason_is_readonly_during_notification() -> None:
+    class Gain(ConfigBase):
+        gain: float = 0.25
+
+    resource = resource_api.TabFormResource(
+        lambda _ctx: Form(Gain, {}),
+        capture=lambda _aliases: resource_api.TabFormSources(FormEnv()),
+        mutation_allowed=lambda: True,
+    )
+    observed: list[str | None] = []
+    resource.subscribe(lambda: observed.append(resource.run_invalid_reason()))
+    assert resource.run_invalid_reason() is None
+    resource.write({("gain",): {"expr": "1 / 0"}})
+    before = resource.input
+    reason = resource.run_invalid_reason()
+    assert reason is not None and reason.startswith("gain: ")
+    assert "division by zero" in reason
+    assert observed == [reason]
+    assert resource.input.same_as(before)
+    resource.write({("gain",): 0.5})
+    assert observed == [reason, None]
+    resource.revoke()
+    with pytest.raises(CfgPreconditionError) as caught:
+        resource.run_invalid_reason()
+    assert caught.value.reason is CfgPreconditionReason.RESOURCE_GONE
+
+
 def test_elements_aggregate_keeps_partial_values_and_errors_without_recapture():
     from tests.gui.form_adapter._indexed_models import indexed_env, indexed_form
 

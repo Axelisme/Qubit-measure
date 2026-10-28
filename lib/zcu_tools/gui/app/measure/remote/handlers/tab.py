@@ -120,11 +120,11 @@ def tab_operation_state(
             "is_analyzing": bool(interaction.is_analyzing),
             "has_context": bool(interaction.has_context),
             "has_active_context": bool(interaction.has_active_context),
-            "has_soc": bool(interaction.has_soc),
+            "has_soc": adapter.ctrl.has_soc(),
             "has_run_result": bool(interaction.has_run_result),
-            "has_analyze_result": bool(interaction.has_analyze_result),
-            "has_post_analyze_result": bool(interaction.has_post_analyze_result),
-            "has_figure": bool(interaction.has_figure),
+            "has_analyze_result": snap.analysis.has_result,
+            "has_post_analyze_result": snap.post_analysis.has_result,
+            "has_figure": bool(snap.analysis.figures),
         },
         **project_save_snapshot(snap.artifacts, run_id=snap.run.run_id).model_dump(
             mode="json"
@@ -145,7 +145,7 @@ def tab_operation_state(
         "analysis_state": {
             "source_operation_id": snap.analysis.source_operation_id,
             "revision": versions.get(f"tab:{tab_id}:analyze", 0),
-            "available": snap.analysis.result is not None,
+            "available": snap.analysis.has_result,
             "has_figure": bool(snap.analysis.figures),
             "figure_names": list(snap.analysis.figures or ()),
             "has_writeback_draft": snap.analysis.has_writeback_draft,
@@ -153,7 +153,7 @@ def tab_operation_state(
         "post_analysis_state": {
             "source_operation_id": snap.post_analysis.source_operation_id,
             "revision": versions.get(f"tab:{tab_id}:post_analyze", 0),
-            "available": snap.post_analysis.result is not None,
+            "available": snap.post_analysis.has_result,
             "has_figure": bool(snap.post_analysis.figures),
             "figure_names": list(snap.post_analysis.figures or ()),
             "has_writeback_draft": snap.post_analysis.has_writeback_draft,

@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING, Literal
 
+from zcu_tools.gui.app.measure.services import TabAction
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 
 if TYPE_CHECKING:
@@ -13,6 +14,25 @@ if TYPE_CHECKING:
     from ..service import RemoteControlAdapter
 
 Handler = Callable[["RemoteControlAdapter", Mapping[str, object]], Mapping[str, object]]
+
+
+def require_tab_admission(
+    adapter: RemoteControlAdapter, tab_id: str, action: TabAction
+) -> None:
+    """Reject a denied action with the guard reason before wire-specific checks.
+
+    Call on the owner thread. Unknown tabs retain the legacy invalid_params
+    envelope; every other denial uses the decision message and reason unchanged.
+    This does not capture inputs, start work or reserve hardware.
+    """
+    decision = adapter.ctrl.admit(tab_id, action)
+    if decision.allowed:
+        return
+    if decision.reason == "unknown_tab":
+        raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
+    raise RemoteError(
+        ErrorCode.PRECONDITION_FAILED, decision.message, reason=decision.reason or ""
+    )
 
 
 def follow_tab(

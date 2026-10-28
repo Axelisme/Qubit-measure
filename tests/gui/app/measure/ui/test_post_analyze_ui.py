@@ -9,7 +9,8 @@ from the primary Analysis pane.
 from __future__ import annotations
 
 from collections.abc import Callable, Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from pathlib import Path
 from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
 
@@ -22,12 +23,13 @@ from zcu_tools.gui.app.measure.adapter import (
     AdapterGuide,
     AnalysisMode,
 )
-from zcu_tools.gui.app.measure.services import TabSnapshot
+from zcu_tools.gui.app.measure.services import AdmissionDecision, TabAction, TabSnapshot
 from zcu_tools.gui.app.measure.state import TabInteractionState
 from zcu_tools.gui.app.measure.ui.exp_tab_widget import ExpTabWidget
 from zcu_tools.gui.control_identity import ControlIdentity
 from zcu_tools.gui.event_bus import BaseEventBus as EventBus
 
+from tests.gui._user_input import ComponentDriver
 from tests.gui.app.measure._form_fakes import configure_form_lookup
 from tests.gui.app.measure.artifacts._snapshots import ready_figures, with_artifacts
 
@@ -121,12 +123,14 @@ def _snapshot(
     analysis_pane = AnalysisPaneSnapshot(
         params=_AnalyzeParams() if has_analyze_result else None,
         result=object() if has_analyze_result else None,
+        has_result=has_analyze_result or analysis_figure is not None,
         figures=ready_figures(analysis_figure),
         writeback_items=(),
     )
     post_analysis_pane = PostAnalysisPaneSnapshot(
         params=post_params,
         result=object() if has_post_analyze_result else None,
+        has_result=has_post_analyze_result or post_analysis_figure is not None,
         figures=ready_figures(post_analysis_figure),
         writeback_items=(),
     )
@@ -139,11 +143,7 @@ def _snapshot(
             is_analyzing=is_analyzing,
             has_context=True,
             has_active_context=has_active_context,
-            has_soc=True,
             has_run_result=has_run_result,
-            has_analyze_result=has_analyze_result,
-            has_figure=True,
-            has_post_analyze_result=has_post_analyze_result,
         ),
         cfg_input={},
         capabilities=AdapterCapabilities(
@@ -195,9 +195,15 @@ def test_post_form_disabled_without_primary_analyze_result(
     """No primary analyze result → the post form + Run are disabled and the gate
     hint is shown."""
 
+    ctrl = make_ctrl()
+    ctrl.admit.side_effect = lambda _tab_id, action: (
+        AdmissionDecision(False, "no_analyze_result", "No primary result")
+        if action in (TabAction.POST_ANALYZE, TabAction.WRITEBACK)
+        else AdmissionDecision(True, None, "")
+    )
     tab = exp_tab_widget(
         "tab-1",
-        make_ctrl(),
+        ctrl,
         AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=True),
     )
     tab.update_interaction_state(_snapshot("tab-1", has_analyze_result=False))
@@ -207,6 +213,123 @@ def test_post_form_disabled_without_primary_analyze_result(
     # isHidden reflects the widget's own setVisible state independent of whether
     # an ancestor is shown (the tab is not .show()n here). Gate closed → shown.
     assert tab._post_gate_label.isHidden() is False
+
+
+@pytest.mark.parametrize(
+    ("primary", "post", "enabled"),
+    [(False, True, False), (True, False, False), (True, True, True)],
+)
+def test_post_writeback_needs_admission_and_its_own_result(
+    qapp, make_ctrl, exp_tab_widget, primary: bool, post: bool, enabled: bool
+):
+    ctrl = make_ctrl()
+    ctrl.admit.side_effect = lambda _tab_id, action: (
+        AdmissionDecision(
+            False, "no_analyze_result", "No analyze result available for writeback."
+        )
+        if action is TabAction.WRITEBACK and not primary
+        else AdmissionDecision(True, None, "")
+    )
+    tab = exp_tab_widget(
+        "tab-1",
+        ctrl,
+        AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=True),
+    )
+    tab.update_interaction_state(
+        _snapshot("tab-1", has_analyze_result=primary, has_post_analyze_result=post)
+    )
+    assert tab.post_writeback_widget.isEnabled() is enabled
+    if not primary:
+        assert (
+            tab.post_writeback_widget.toolTip()
+            == "No analyze result available for writeback."
+        )
+
+
+@pytest.mark.parametrize("collection", ["figures_only", "empty"])
+@pytest.mark.parametrize(
+    ("primary", "post"), [(True, True), (False, True), (True, False)]
+)
+def test_post_presence_controls_without_numeric_results(
+    qapp,
+    make_ctrl,
+    exp_tab_widget,
+    tmp_path: Path,
+    collection: str,
+    primary: bool,
+    post: bool,
+):
+    """The hint reads Primary presence; writeback also needs Post and admission."""
+    from zcu_tools.gui.app.measure.writeback import ParameterWriteback, WritebackValues
+    from zcu_tools.plotting.plots import NonPresentingHost, Plots
+
+    ctrl = make_ctrl()
+    ctrl.admit.side_effect = lambda _tab_id, action: (
+        AdmissionDecision(False, "no_analyze_result", "No primary result")
+        if not primary and action in (TabAction.POST_ANALYZE, TabAction.WRITEBACK)
+        else AdmissionDecision(True, None, "")
+    )
+    snapshot = _snapshot(
+        "tab-1", has_analyze_result=primary, has_post_analyze_result=post
+    )
+    assert snapshot.analysis is not None
+    assert snapshot.post_analysis is not None
+
+    def published_figures(present: bool) -> Plots | None:
+        if not present:
+            return None
+        figures = Plots(NonPresentingHost())
+        if collection == "figures_only":
+            figures.subplots("fit")
+        figures.finish()
+        return figures
+
+    snapshot = replace(
+        snapshot,
+        analysis=replace(
+            snapshot.analysis,
+            result=None,
+            figures=published_figures(primary),
+            has_result=primary,
+        ),
+        post_analysis=replace(
+            snapshot.post_analysis,
+            result=None,
+            figures=published_figures(post),
+            has_result=post,
+        ),
+    )
+    tab = exp_tab_widget(
+        "tab-1",
+        ctrl,
+        AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=True),
+    )
+    item = ParameterWriteback(
+        target_name="radius", description="post", proposed_value=1
+    )
+    item.session_id = "param-1"
+    ctrl.tab_control.get_tab_snapshot.return_value = snapshot
+    ctrl.writeback_control.get_writeback_values_for_pane.return_value = {
+        "param-1": WritebackValues("radius", None, 1, None)
+    }
+    tab.attach(snapshot, MagicMock())
+    tab.update_post_writeback_items([item])
+    tab.resize(1200, 950)
+    tab.show()
+    qapp.processEvents()
+    driver = ComponentDriver(tab)
+    driver.select_tab("Post-Analysis")
+    driver.screenshot(tmp_path / "post-presence.png")
+
+    visible = driver.visible().widgets
+    assert any(
+        w.text == "Run analyze first to enable post-analysis." for w in visible
+    ) is (not primary)
+    assert driver.observe("Run Post-Analysis").enabled is primary
+    assert driver.observe("Apply Selected").enabled is (primary and post)
+    if not primary:
+        writeback = next(w for w in visible if w.kind == "WritebackWidget")
+        assert writeback.tooltip == "No primary result"
 
 
 def test_post_form_enabled_with_primary_analyze_result(qapp, make_ctrl, exp_tab_widget):
@@ -261,9 +384,15 @@ def test_empty_post_params_show_hint_across_gate_states(
     qapp, make_ctrl, exp_tab_widget
 ):
 
+    ctrl = make_ctrl()
+    ctrl.admit.side_effect = lambda _tab_id, action: (
+        AdmissionDecision(False, "no_analyze_result", "No primary result")
+        if action in (TabAction.POST_ANALYZE, TabAction.WRITEBACK)
+        else AdmissionDecision(True, None, "")
+    )
     tab = exp_tab_widget(
         "tab-1",
-        make_ctrl(),
+        ctrl,
         AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=True),
     )
     actions = MagicMock()
@@ -291,6 +420,8 @@ def test_empty_post_params_show_hint_across_gate_states(
     )
     actions.save_artifact.reset_mock()
 
+    ctrl.admit.side_effect = None
+    ctrl.admit.return_value = AdmissionDecision(True, None, "")
     tab.update_interaction_state(
         _snapshot(
             "tab-1",

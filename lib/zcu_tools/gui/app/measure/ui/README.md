@@ -1,6 +1,6 @@
 # Measure Qt views
 
-**Last updated:** 2026-10-27
+**Last updated:** 2026-10-28
 
 **讀者：** framework-dev。量測 Qt views、對話框與呈現生命週期。
 
@@ -86,8 +86,10 @@ form/action builders live in `experiment_ledger.py`.
 describes how `ExpTabWidget` and `ExperimentFigureArea` divide presentation
 responsibilities. `ExperimentFigureArea` is not a second application controller.
 
-Cfg invalid reasons stay in the form area and disabled Run tooltip. A history tab
-without a form retains the factory's original reason there. Edits, interaction
+Cfg invalid reasons stay in the form area. Run, Analyze, Post-Analyze and
+writeback project the domain decision from `Controller.admit`; a denied action
+shows its shared message. After admission, local uncommitted parse errors and
+hardware exclusion still disable Run. Authority remains a separate UI gate. Edits, interaction
 refreshes and tab selection preserve unrelated bottom-status messages. They do
 not cover the tab or figure area with a cfg diagnostic. Load behavior is unchanged.
 
@@ -152,7 +154,8 @@ selected section. Headers remain mouse-resizable. Filter by date (UTC) enables
 the greyed-out date edits; either their text area or arrow opens the calendar.
 新 tab 的 Load 使用既有 application owner。缺少 analysis source 的原因同時顯示在瀏覽器結果與載入後的 tab。
 A history tab whose form factory failed shows its original reason in the form
-area and disabled Run tooltip. Reset can replace that notice with a real editor;
+area. Run shows that reason unless an earlier domain prerequisite fails, such
+as missing active context. Reset can replace that notice with a real editor;
 a failed retry leaves the notice and shows the current preparation error.
 
 `ArtifactSaveCenter` shows each output on two lines: the filename, status and

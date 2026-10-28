@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 from pydantic import ValidationError
 
 from zcu_tools.experiment.artifacts import ArtifactRef
+from zcu_tools.gui.app.measure.services import TabAction
 from zcu_tools.gui.app.measure.services.form_contracts import CfgPreconditionError
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 from zcu_tools.gui.session.context_types import CommandOrigin
@@ -15,7 +16,7 @@ from zcu_tools.gui.session.context_types import CommandOrigin
 from ..form_errors import cfg_error_to_remote
 from ..load_types import project_load_outcome
 from ..save_types import SaveArtifactRefWire, project_save_report
-from ._common import follow_tab
+from ._common import follow_tab, require_tab_admission
 from .tab import temporary_aliases
 
 if TYPE_CHECKING:
@@ -34,8 +35,7 @@ def h_tab_run_start(
             reason="run_aliases_not_supported",
         )
     control = adapter.run_analyze_control
-    if not control.has_tab(tab_id):
-        raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
+    require_tab_admission(adapter, tab_id, TabAction.RUN)
     try:
         follow_tab(adapter, tab_id, "run")
         operation_id = control.start_run(tab_id, origin=CommandOrigin("mcp"))
@@ -51,8 +51,7 @@ def h_tab_load_data(
 
     tab_id = str(params["tab_id"])
     control = adapter.run_analyze_control
-    if not control.has_tab(tab_id):
-        raise RemoteError(ErrorCode.INVALID_PARAMS, f"unknown tab_id: {tab_id!r}")
+    require_tab_admission(adapter, tab_id, TabAction.LOAD)
     outcome = control.load_tab_result(tab_id, str(params["data_path"]))
 
     snap = control.get_tab_snapshot(tab_id)
