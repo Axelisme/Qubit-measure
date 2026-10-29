@@ -112,26 +112,42 @@ Check 的 raw Run 不要求 classifier，到分析才從 saved cfg 要求 circle
 ### Herald 規格與 host post-selection
 
 Library readout cfg 擁有 herald 使用的 classifier。
-單 qubit heralded T1 用同一個 `PulseReadout` instance 發射 herald 與最終讀出，兩者共用 readout 設定。
-判斷圓或 linear 參數取自該 readout 的 classifier，不另存一組 herald 校準。
+單 qubit heralded T1、Amp Rabi、Len Rabi、Ramsey 與 Echo 各用兩個 `PulseReadout` instance，分別發射 herald 與 signal。
+兩個 instance 共用 `cfg.readout` 與 classifier，不另存一組 herald 校準。
+作者從實際發射 herald 的 instance 以 `occurrence=0` 取得規格。
+同一個 instance 也可以初始化一次後多次發射；這是公開能力，不是實驗必須採用的配置。
+2026-10-29，advisor 更正舊 spec 與本 ADR 將「同一 readout 設定」誤述為「同一 instance」的文字，沒有改變使用者要求的設定共用。
 
 Readout 公開工具依自身發射序產生具名 `HeraldSpec`，作者明確交給 acquire。
 Acquisition 不掃 program registry，也不查 live library。
-Program acquisition 擁有 ground mask、通過數加權與每點統計。
+Program acquisition 擁有一次 acquire 內的 ground mask、已完成 rounds 的通過數加權與每點統計。
 它先套 herald 遮罩，再處理 signal 的 IQ、typed classify 或 QICK threshold。
 硬體與模擬共用這段後選擇處理，沒有新增逐發持久資料。
 實際 API、資料形狀與失敗條件見 [program 契約](../../lib/zcu_tools/program/README.md#herald-declarations)。
 
+Lab 擁有 host scan 跨 acquire 的結果合併，只使用 owner 的公開通過比例，不重做分類或遮罩。
+Shaped Len Rabi 保留 round-major，掃完一條曲線才判斷 early-stop SNR。
+Lab 只合併實際交付的取數結果，依通過數加權；停止而略過 acquire 時，不把 cached program 的上一輪統計算成新資料。
+合併公式、零通過與未量測點的行為由 [Len Rabi guide](../../zcu_lab/v2/heralding/len_rabi/guide.md#run-and-inspect) 與 core 說明。
+
 實驗層以獨立的 `heralding/*` 組合序列，不在既有實驗加入 Reset 模組。
-第一階段交付單 qubit pulse-readout T1。Program accessor 提供每點通過比例，實驗的 Result 保存同網格 `pass_fraction`。
+目前提供單 qubit pulse-readout T1、Amp Rabi、Len Rabi、Ramsey 與 Echo。
+Program accessor 提供每點通過比例，實驗的 Result 保存同網格 `pass_fraction`。
+四個第二階段成員沿用一般版本的 writeback 目標與規則，描述標明 Heralded，不另設 heralded 校準欄位。
 這是 host post-selection，不是 active reset；不包含 mux herald 或雙 qubit 四態聯合分類。
-操作與保存方式見 [Heralded T1 guide](../../zcu_lab/v2/heralding/t1/guide.md)。
+操作、保存與 writeback 目標見各 guide：[T1](../../zcu_lab/v2/heralding/t1/guide.md)、
+[Amp Rabi](../../zcu_lab/v2/heralding/amp_rabi/guide.md)、[Len Rabi](../../zcu_lab/v2/heralding/len_rabi/guide.md)、
+[Ramsey](../../zcu_lab/v2/heralding/t2ramsey/guide.md)、[Echo](../../zcu_lab/v2/heralding/t2echo/guide.md)。
 
 使用者於 2026-10-29 回答先做取數層 post-selection、直接做 FPGA active reset 或兩者並行的選項時裁決：
 「那不做active reset，讓底層支援post-selection，上層使用新實驗組，比如heralding/*」。
 同日，對分類參數由作者自取、acquire 自動掃描，或 readout 工具產生具名規格再由作者明傳三個選項，使用者選 C：「我也傾向C」。
 對只做 mux 或也做單 qubit pulse readout 的範圍問題，使用者選後者並要求先做單 qubit：「3我反而想先測試在單qubit，因為比較簡單，B」。
 對實驗層不存通過比例、Result 存同網格 `pass_fraction`，或只記整體平均三個選項，使用者選 B：「5B」。
+
+使用者於 2026-10-29 對「第二階段先做單 qubit Rabi／Ramsey 成員，mux 與雙 qubit 四態聯合分類留待後續討論」的建議回答：「herald採用建議」。
+對 Amp Rabi、Len Rabi、Ramsey、Echo 四個成員的清單回答：「herald第二階段清單採用建議」。
+對 writeback 的三個選項，A 與一般版相同並標明 Heralded、B 只顯示不提 writeback、C 寫入 heralded 專用欄位，使用者選 A：「Herald選A」。
 
 依賴沿用 [[0072]] 的分層與 `.importlinter` C8、C15、C16。
 Experiment 使用 program 的後選擇能力，lab core 不依賴 GUI，framework 不反向載入 lab。
