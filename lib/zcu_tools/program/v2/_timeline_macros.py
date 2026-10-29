@@ -10,6 +10,7 @@ from qick.asm_v2 import (
     Jump,
     Label,
     Macro,
+    OpenLoop,
     QickParam,
     TimedMacro,
     WriteReg,
@@ -494,9 +495,11 @@ class PreparedTimelineMacro(TimedMacro):
     def preprocess(self, prog) -> None:
         self.math = RuntimeMath(prog)
         previous = self.book.math if self.book.preparing else None
+        previous_origin = prog._time_origin
         self.book.math = self.math
         self.book.preparing += 1
         try:
+            prog._time_origin = self.source
             self.source.preprocess(prog)
             timing_source = (
                 self.source.source
@@ -515,6 +518,7 @@ class PreparedTimelineMacro(TimedMacro):
                 prog._time_bounds.time_parameters(timing_source)
             prog._time_bounds.activate(self.source)
         finally:
+            prog._time_origin = previous_origin
             self.book.preparing -= 1
             if previous is not None:
                 self.book.math = previous
@@ -540,6 +544,15 @@ class PreparedTimelineMacro(TimedMacro):
         if not isinstance(self.source, TimedMacro):
             raise RuntimeError("this operation has no time parameters")
         return self.source.get_time_param(name)
+
+
+class PreparedTimelineOpenLoop(PreparedTimelineMacro, OpenLoop):
+    """Preserve QICK loop discovery while tracking the actual write origin."""
+
+    def __init__(self, book: TimelineBook, source: OpenLoop):
+        super().__init__(book, source)
+        self.name = source.name
+        self.n = source.n
 
 
 class TimeProducer(Macro):

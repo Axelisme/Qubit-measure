@@ -10,6 +10,7 @@ from ._timeline_macros import (
     BranchCases,
     ModuleEmission,
     PreparedTimelineMacro,
+    PreparedTimelineOpenLoop,
     TimelineAdvance,
     TimelineBoundary,
     TimelineBranch,
@@ -189,7 +190,7 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
             self.extend_macros(asm)
             self.ret()
         self.macro_list = [
-            macro
+            PreparedTimelineOpenLoop(self._timeline_book, macro)
             if isinstance(macro, OpenLoop)
             else PreparedTimelineMacro(self._timeline_book, macro)
             for macro in self.macro_list

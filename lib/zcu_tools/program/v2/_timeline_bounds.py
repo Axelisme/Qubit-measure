@@ -48,7 +48,8 @@ class ProducerBounds:
 
     def observe(self, macro: Macro) -> None:
         """Register the bounds and write identity of a native constant producer."""
-        if isinstance(macro, WriteReg) and isinstance(macro.src, Integral):
+        # Subclasses can replace translate/expand, so their src is not a proof.
+        if type(macro) is WriteReg and isinstance(macro.src, Integral):
             value = int(macro.src)
             self.register(macro.dst, CycleBounds(value, value), (macro,), ())
 
@@ -198,7 +199,7 @@ class ProducerBounds:
                 native_sweep = register is not None and register.init is not None
                 native_loop = name in prog.loop_dict
                 if (native_sweep or native_loop) and (
-                    origin is None or isinstance(origin, (OpenLoop, CloseLoop))
+                    origin is None or type(origin) in (OpenLoop, CloseLoop)
                 ):
                     continue
                 raise ValueError(

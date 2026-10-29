@@ -3,7 +3,7 @@
 from collections.abc import Callable
 
 import pytest
-from qick.asm_v2 import Macro, QickParam, QickSweep1D, WriteReg
+from qick.asm_v2 import CloseLoop, Macro, OpenLoop, QickParam, QickSweep1D, WriteReg
 from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 from zcu_tools.program.v2.modules import LoadValue, LoadWord
 from zcu_tools.program.v2.timeline import TimelineProgramV2
@@ -360,6 +360,115 @@ def test_long_pulse_crosses_branch_without_conservative_shell_padding():
     assert [waves(s) for s in result] == [[0]] * 3
     assert [s.body_end_cycle - s.start_cycle for s in result] == [28] * 3
     assert [s.end_cycle - s.start_cycle for s in result] == [28] * 3
+
+
+class CustomWrite(WriteReg):
+    value = 2**31 - 1
+
+    def translate(self, prog):
+        WriteReg(dst=self.dst, src=self.value).translate(prog)
+
+
+@pytest.mark.parametrize("use", ["source", "overwrite", "lookup_index"])
+def test_custom_write_subclass_cannot_certify_time_producer_bounds(use):
+    loader = LoadValue("time", [10, 20, 30], "duration", "loaded")
+
+    def body(prog):
+        if use != "source":
+            prog.write_reg("duration", 1)
+        prog.append_macro(CustomWrite(dst="duration", src=1))
+        if use == "lookup_index":
+            prog.emit(loader)
+            prog.delay_timeline("loaded")
+        else:
+            prog.delay_timeline("duration")
+            prog.delay_timeline(1 / 430.08)
+
+    with pytest.raises(
+        ValueError, match="duration.*(bounds|unregistered.*instruction)"
+    ):
+        program(body, initialize=lambda p: p.declare(loader))
+
+
+class CustomOpenLoop(OpenLoop):
+    dst = "scan"
+
+    def translate(self, prog):
+        super().translate(prog)
+        WriteReg(dst=self.dst, src=2**31 - 1).translate(prog)
+
+
+class CustomCloseLoop(CloseLoop):
+    dst = "scan"
+
+    def translate(self, prog):
+        super().translate(prog)
+        WriteReg(dst=self.dst, src=2**31 - 1).translate(prog)
+
+
+@pytest.mark.parametrize("custom_loop", ["open", "close"])
+def test_custom_loop_subclass_cannot_bypass_time_write_audit(custom_loop):
+    def body(prog):
+        if custom_loop == "open":
+            prog.append_macro(CustomOpenLoop(name="inner", n=1))
+        else:
+            prog.open_loop(1, name="inner")
+        prog.delay_timeline("scan")
+        if custom_loop == "close":
+            prog.append_macro(CustomCloseLoop())
+        else:
+            prog.close_loop()
+
+    with pytest.raises(ValueError, match="scan.*unregistered.*instruction"):
+        program(body)
+
+
+class CustomPreprocessWrite(Macro):
+    def preprocess(self, prog):
+        WriteReg(dst="scan", src=2**31 - 1).translate(prog)
+
+    def translate(self, prog):
+        pass
+
+
+def test_custom_preprocess_writer_cannot_impersonate_sweep_initialization():
+    def body(prog):
+        prog.append_macro(CustomPreprocessWrite())
+        prog.delay_timeline("scan")
+
+    with pytest.raises(ValueError, match="scan.*unregistered.*instruction"):
+        program(body)
+
+
+@pytest.mark.parametrize("custom_writer", ["write", "open", "close"])
+def test_custom_native_subclass_writes_do_not_restrict_non_time_words(custom_writer):
+    def body(prog):
+        if custom_writer == "open":
+            prog.append_macro(CustomOpenLoop(name="inner", n=1, dst="duration"))
+        else:
+            prog.open_loop(1, name="inner")
+        if custom_writer == "write":
+            # QICK signed immediate -1 preserves the raw 0xffffffff word.
+            prog.append_macro(CustomWrite(dst="duration", src=1, value=-1))
+        prog.delay_timeline(10 / 430.08)
+        if custom_writer == "close":
+            prog.append_macro(CustomCloseLoop(dst="duration"))
+        else:
+            prog.close_loop()
+
+    assert [s.body_end_cycle - s.start_cycle for s in shots(program(body))] == [10] * 3
+
+
+def test_custom_native_subclass_repeat_count_keeps_author_range_hint():
+    def body(prog):
+        prog.append_macro(CustomWrite(dst="duration", src=1, value=3))
+        with prog.repeat("r", "duration", range_hint=(1, 3)):
+            prog.delay_timeline(10 / 430.08)
+        prog.pulse(0, "p0", timeline="default")
+
+    result = shots(program(body))
+    assert [waves(s) for s in result] == [[30]] * 3
+    assert [s.body_end_cycle - s.start_cycle for s in result] == [58] * 3
 
 
 class OverwriteTime(Macro):
