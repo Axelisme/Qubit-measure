@@ -20,13 +20,14 @@ def test_population_input_accepts_engine_trace_residual_without_repair(trace):
     [
         ([[0.25 * (1 + 2.62e-8), 0.75 * (1 + 2.62e-8)]], [[0.25, 0.75]]),
         ([[-1e-6, 1.000001]], [[0, 1]]),
+        ([[np.nextafter(-1e-6, -1), 1.000001]], [[0, 1]]),
         (
             [[0.0, 0.999999], [0.0, 1.000001]],
             [[0, 1], [0, 1]],
         ),
     ],
 )
-def test_explicit_normalization_repairs_only_in_budget_residuals(values, expected):
+def test_explicit_normalization_repairs_trace_residuals_and_negatives(values, expected):
     assert callable(getattr(adc, "normalize_populations", None)), (
         "ADC must expose explicit probability normalization"
     )
@@ -39,12 +40,23 @@ def test_explicit_normalization_repairs_only_in_budget_residuals(values, expecte
     assert not np.shares_memory(actual, original)
 
 
+def test_explicit_normalization_clips_negatives_without_a_lower_bound():
+    values = np.array([[-6.2e-5, 0.2500155, 0.7500465], [-2.0, 0.75, 2.25]])
+    before = values.copy()
+
+    actual = adc.normalize_populations(values)
+
+    np.testing.assert_allclose(actual, [[0, 0.25, 0.75], [0, 0.25, 0.75]], atol=1e-15)
+    np.testing.assert_array_equal(values, before)
+    assert actual.flags.owndata
+    assert not np.shares_memory(actual, values)
+
+
 @pytest.mark.parametrize(
     "values, message",
     [
         ([[0.0, np.nextafter(1 - 1e-6, 0)]], "trace.*1 row"),
         ([[0.0, np.nextafter(1 + 1e-6, 2)]], "trace.*1 row"),
-        ([[np.nextafter(-1e-6, -1), 1.000001]], "negative.*1 row"),
         ([[0.2, 0.9], [0.1, 0.8], [0.5, 0.5]], "trace.*2 rows"),
         ([[np.nan, 1]], "finite"),
         ([[np.inf, 1]], "finite"),

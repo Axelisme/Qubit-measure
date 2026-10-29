@@ -367,6 +367,7 @@ class ResidualEngine(Engine):
     [
         ([0.25 * (1 + 9e-7), 0.75 * (1 + 9e-7)], [0.25, 0.75]),
         ([-1e-6, 1.000001], [0, 1]),
+        ([-2e-6, 1.000002], [0, 1]),
         ([0, 0.999999], [0, 1]),
     ],
 )
@@ -390,7 +391,7 @@ def test_acquire_explicitly_normalizes_in_budget_evolution(populations, normaliz
         source.close()
 
 
-@pytest.mark.parametrize("populations", [[0, 1.000002], [-2e-6, 1.000002]])
+@pytest.mark.parametrize("populations", [[0, 1.000002]])
 def test_acquire_rejects_out_of_budget_evolution_and_retains_diagnostics(populations):
     from zcu_tools.experiment.ftf import FTFSource
 

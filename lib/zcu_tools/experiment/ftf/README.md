@@ -1,6 +1,6 @@
 # FTF environment composition
 
-**Last updated:** 2026-10-28 (UTC), projective readout and preparation lifetime; flux-pulse routing and ramp-relaxation limits
+**Last updated:** 2026-10-29 (UTC), ADC negative population clipping
 
 **讀者：** lab-author、framework-dev、agent。FTF 環境的組裝、數值接線與 acquisition 設定。
 
@@ -485,9 +485,9 @@ and does not model MIST onset.
 Readout uses the DC model and populations in its energy basis. Terminal-only
 preparations call ADC's `normalize_populations` once after `batch_populations`,
 before conditional responses or sampling. Projective preparations normalize the
-diagonal at each projection and each retained terminal outcome. ADC owns the 1e-6 probability tolerance,
-tolerated-negative cleanup and row normalization. Invalid rows fail without
-sampling. ADC raises `PopulationValidationError` with `rejected_rows` for the
+diagonal at each projection and each retained terminal outcome. ADC owns the
+1e-6 row-sum tolerance, clipping of all negative entries and row normalization.
+Invalid rows fail without sampling. ADC raises `PopulationValidationError` with `rejected_rows` for the
 reported validation rule. FTF catches only that type, retains its count in
 `FTFNumericUse.rejected_rows`, then re-raises without sampling. Successful
 preparations retain zero rejected rows. The source retains the latest
