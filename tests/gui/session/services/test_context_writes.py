@@ -16,6 +16,7 @@ from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.context_control import ContextControlPort
 from zcu_tools.gui.session.context_types import (
     ContextTarget,
+    LibraryChange,
     PointUseRequest,
     SavedPoint,
 )
@@ -35,6 +36,7 @@ from zcu_tools.resources.entry import (
     ResultEntry,
     document_meta,
     snapshot,
+    writeback,
 )
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
@@ -133,6 +135,135 @@ def test_read_target_observes_detached_writes_without_selecting_or_publishing(
     assert session.control.read_context().document() == selected.document()
     assert session.state.version.get("context") == version
     assert events == []
+
+
+def test_global_parameter_writes_commit_once_and_detached_reads_do_not_select(
+    session: _Session,
+) -> None:
+    target = session.control.read_context().target
+    assert target is not None
+    old = session.control.read_context()
+    binding = session.control.get_source_binding()
+    facts: list[MdChangedPayload] = []
+    session.bus.subscribe(MdChangedPayload, facts.append)
+
+    session.control.set_parameter(target, "general.ext.flux_value", 0.2)
+
+    assert session.control.read_context().value("general.ext.flux_value") == 0.2
+    assert old.value("general.ext") == {}
+    assert snapshot(session.entry.setup).general.ext["flux_value"] == 0.2
+    assert session.control.get_source_binding() == binding
+    assert len(facts) == 1
+    selected = _select(session, "local")
+    version = session.state.version.get("context")
+    session.control.set_parameter(target, "general.ext.flux_value", 0.4)
+    current = session.control.read_target(target)
+    assert current.value("general.ext.flux_value") == 0.4
+    assert current.capture_storage().point is None
+    assert session.control.read_context().target == selected
+    assert session.control.read_context().value("general.ext.flux_value") == 0.2
+    assert session.state.version.get("context") == version
+    assert len(facts) == 1
+
+
+def test_global_writeback_and_library_commands_use_entry_files_and_publish_once(
+    session: _Session,
+) -> None:
+    context = session.service
+    before = context.read_context()
+    target = before.target
+    assert target is not None
+    facts: list[object] = []
+    session.bus.subscribe(MdChangedPayload, facts.append)
+    session.bus.subscribe(MlChangedPayload, facts.append)
+    result = context.apply_writeback(
+        target,
+        (
+            writeback.ParameterWriteback("general.ext.flux_value", 0.25),
+            writeback.WaveformWriteback(
+                "Q1.waveforms.base", ConstWaveformCfg(length=0.1)
+            ),
+        ),
+        evidence=writeback.WritebackEvidence(origin="gui"),
+    )
+    assert len(result.committed) == 2
+    assert len(facts) == 2
+    assert context.read_context().value("general.ext.flux_value") == 0.25
+    assert context.read_context().library.waveform_keys() == ("Q1.waveforms.base",)
+    assert before.library.waveform_keys() == ()
+    assert snapshot(session.entry.setup).general.ext["flux_value"] == 0.25
+    assert session.entry.module_library().snapshot().waveform_keys() == (
+        "Q1.waveforms.base",
+    )
+    assert session.entry.list_points() == []
+    context.apply_library_change(
+        context.read_context(),
+        LibraryChange(
+            "waveform", "rename", "Q1.waveforms.base", new_path="Q1.waveforms.next"
+        ),
+    )
+    assert context.read_context().library.waveform_keys() == ("Q1.waveforms.next",)
+    assert len(facts) == 3
+    selected = _select(session, "local")
+    version = session.state.version.get("context")
+    context.set_waveform(target, "Q1.waveforms.detached", ConstWaveformCfg(length=0.3))
+    assert set(context.read_target(target).library.waveform_keys()) == {
+        "Q1.waveforms.next",
+        "Q1.waveforms.detached",
+    }
+    assert context.read_context().target == selected
+    assert context.read_context().library.waveform_keys() == ("Q1.waveforms.next",)
+    assert session.state.version.get("context") == version
+    assert len(facts) == 3
+
+
+def test_global_writeback_rejects_unreadable_parameters_before_acceptance(
+    session: _Session,
+) -> None:
+    target = session.control.read_context().target
+    assert target is not None
+    before = session.state.session_env
+    ledger = session.entry.ledger.events()
+    (session.entry.result_path / "parameters.yaml").unlink()
+
+    with pytest.raises(FileNotFoundError):
+        session.control.apply_writeback(
+            target,
+            (writeback.ParameterWriteback("general.ext.flux_value", 0.2),),
+            evidence=writeback.WritebackEvidence(origin="gui"),
+        )
+
+    assert session.entry.ledger.events() == ledger
+    assert session.state.session_env is before
+
+
+def test_rejected_global_writeback_does_not_publish_external_parameter_revision(
+    session: _Session,
+) -> None:
+    target = session.control.read_context().target
+    assert target is not None
+    before = session.state.session_env
+    revisions = session.control.get_file_revisions()
+    external = ResultEntry.open(
+        "entry",
+        result_root=session.entry.result_path.parent,
+        database_root=session.entry.database_path.parent,
+    )
+    with external.setup.edit() as draft:
+        draft.set("general.ext.external", 7.0)
+    path = session.entry.result_path / "parameters.yaml"
+    candidate = path.read_bytes()
+
+    with pytest.raises(writeback.WritebackApplyError):
+        session.control.apply_writeback(
+            target,
+            (writeback.ParameterWriteback("general.description", ["invalid"]),),
+            evidence=writeback.WritebackEvidence(origin="gui"),
+        )
+
+    assert session.state.session_env is before
+    assert session.control.get_file_revisions() == revisions
+    assert path.read_bytes() == candidate
 
 
 def test_read_target_rejects_other_entries(session: _Session) -> None:

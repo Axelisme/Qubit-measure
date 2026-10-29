@@ -6,7 +6,7 @@ from copy import deepcopy
 from typing import TYPE_CHECKING
 
 from zcu_tools.gui.session.context_control import ContextControlPort
-from zcu_tools.gui.session.context_types import SavedPoint
+from zcu_tools.gui.session.context_types import ContextTarget
 from zcu_tools.gui.session.types import ParameterContext
 from zcu_tools.resources.entry import document_value
 from zcu_tools.resources.entry.writeback import WritebackResult
@@ -81,7 +81,7 @@ def read_destination_value(
 
 
 def applied_values(
-    target: SavedPoint,
+    target: ContextTarget,
     items: tuple[WritebackItem, ...],
     result: WritebackResult,
 ) -> tuple[WritebackApplied, ...]:

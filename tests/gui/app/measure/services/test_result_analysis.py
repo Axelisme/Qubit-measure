@@ -142,7 +142,7 @@ class _CapturedBackground:
 def _make_source_state() -> State:
     state = State(
         SessionEnv(
-            parameters=None, soc=None, soccfg=None, readiness=ContextReadiness.ACTIVE
+            parameters=None, soc=None, soccfg=None, readiness=ContextReadiness.POINT
         )
     )
     state.add_tab(

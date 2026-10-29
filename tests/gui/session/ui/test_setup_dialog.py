@@ -222,7 +222,7 @@ def test_entry_show_and_reopen_prefill_without_changing_active_point(
     qapp.processEvents()
     assert entry_selector(dialog).currentText() == "remembered"
     assert controller.context_control.read_context().target == selected
-    assert state.session_env.readiness == ContextReadiness.ACTIVE
+    assert state.session_env.readiness == ContextReadiness.POINT
     assert state.session_env.soc is None
     assert state.session_env.soccfg is None
 
@@ -243,8 +243,8 @@ def test_entry_new_arbitrary_name_displays_owner_paths_without_point(
     assert entry_selector(dialog).currentText() == info.name
     assert entry_path_row(dialog, "result_path").toolTip() == str(info.result_path)
     assert entry_path_row(dialog, "database_path").toolTip() == str(info.database_path)
-    assert state.session_env.readiness == ContextReadiness.EMPTY
-    assert state.session_env.parameters is None
+    assert state.session_env.readiness == ContextReadiness.GLOBAL
+    assert state.session_env.parameters is not None
     assert controller.setup_control.list_points() == ()
     assert state.session_env.soc is None
     assert controller.device_control.list_devices() == []
@@ -259,8 +259,8 @@ def test_entry_open_does_not_select_a_point(
     )
     entry_selector(dialog).setCurrentText("remembered")
     entry_button(dialog, "Open").click()
-    assert state.session_env.readiness == ContextReadiness.EMPTY
-    assert state.session_env.parameters is None
+    assert state.session_env.readiness == ContextReadiness.GLOBAL
+    assert state.session_env.parameters is not None
     assert controller.setup_control.list_points()[0].label == "bias"
 
 
@@ -279,7 +279,7 @@ def test_entry_rejected_new_shows_error_and_keeps_active_point(
     monkeypatch.setattr(QInputDialog, "getText", duplicate_name)
     entry_button(dialog, "New entry…").click()
     assert controller.context_control.read_context().target == selected
-    assert state.session_env.readiness == ContextReadiness.ACTIVE
+    assert state.session_env.readiness == ContextReadiness.POINT
     labels = "\n".join(label.text() for label in dialog.findChildren(QLabel))
     assert "exists" in labels.lower()
 
@@ -296,7 +296,7 @@ def test_entry_cancel_new_keeps_binding(
     monkeypatch.setattr(QInputDialog, "getText", cancelled)
     entry_button(dialog, "New entry…").click()
     assert controller.setup_control.get_entry_info() == before
-    assert state.session_env.readiness == ContextReadiness.EMPTY
+    assert state.session_env.readiness == ContextReadiness.GLOBAL
 
 
 def test_entry_owner_switch_updates_visible_identity_and_paths(
@@ -307,7 +307,7 @@ def test_entry_owner_switch_updates_visible_identity_and_paths(
     assert entry_selector(dialog).currentText() == info.name
     assert entry_path_row(dialog, "result_path").toolTip() == str(info.result_path)
     assert entry_path_row(dialog, "database_path").toolTip() == str(info.database_path)
-    assert state.session_env.readiness == ContextReadiness.EMPTY
+    assert state.session_env.readiness == ContextReadiness.GLOBAL
     assert state.session_env.soc is None
 
 
@@ -399,7 +399,7 @@ def test_working_point_switch_uses_label_and_displays_description(
     listing.setCurrentRow(0)
     entry_button(dialog, "Switch to selected").click()
     assert controller.context_control.read_context().target == first
-    assert state.session_env.readiness == ContextReadiness.ACTIVE
+    assert state.session_env.readiness == ContextReadiness.POINT
 
 
 @pytest.mark.parametrize("description", ["new description", ""])
@@ -427,14 +427,14 @@ def test_working_point_create_clones_source_and_replaces_description(
         "cloned": description,
         source_label: "source description",
     }
-    assert state.session_env.readiness == ContextReadiness.ACTIVE
+    assert state.session_env.readiness == ContextReadiness.POINT
 
 
 def test_working_point_empty_create_uses_setup_seed(
     entry_dialog: tuple[SetupDialog, Controller, State],
 ) -> None:
     dialog, controller, state = entry_dialog
-    assert state.session_env.parameters is None
+    assert state.session_env.parameters is not None
     assert point_combo(dialog, "clone_from").currentText() == "(empty)"
     point_field(dialog, "point_label").setText("fresh")
     entry_button(dialog, "Create").click()
@@ -442,7 +442,7 @@ def test_working_point_empty_create_uses_setup_seed(
     assert not capture.lookup("general.ext.flux_value").present
     assert capture.whole_document().general.description == ""
     assert capture.whole_document().components == {}
-    assert state.session_env.readiness == ContextReadiness.ACTIVE
+    assert state.session_env.readiness == ContextReadiness.POINT
 
 
 @pytest.mark.parametrize("label", ["duplicate", "", "../unsafe"])
@@ -459,7 +459,7 @@ def test_working_point_create_owner_rejection_preserves_binding(
     entry_button(dialog, "Create").click()
     assert controller.context_control.read_context().target == selected
     assert controller.setup_control.list_points() == before
-    assert state.session_env.readiness == ContextReadiness.ACTIVE
+    assert state.session_env.readiness == ContextReadiness.POINT
     assert "Failed" in setup_status(dialog)
 
 
@@ -524,8 +524,8 @@ def test_working_points_follow_entry_changes_and_reopen_without_selecting(
     item = listing.item(0)
     assert item is not None and item.toolTip() == "other entry"
     assert controller.get_session_env() == before
-    assert before.parameters is None
-    assert state.session_env.readiness == ContextReadiness.EMPTY
+    assert before.parameters is not None
+    assert state.session_env.readiness == ContextReadiness.GLOBAL
 
 
 def test_working_point_create_without_entry_shows_owner_failure(

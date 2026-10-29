@@ -14,7 +14,11 @@ from zcu_tools.gui.session.events import (
 )
 from zcu_tools.gui.session.services.value_sources import ValueSourceBinder
 from zcu_tools.gui.session.state import DeviceState, DeviceStatus
-from zcu_tools.gui.session.value_lookup import MissingValue, ValueRegistry
+from zcu_tools.gui.session.value_lookup import (
+    MissingValue,
+    UnavailableValue,
+    ValueRegistry,
+)
 
 from tests.gui.app.measure.remote._helpers import make_ctx
 
@@ -28,7 +32,7 @@ def _state(tmp_path) -> State:
             result_dir="/result",
             database_path="/db",
             active_label="flux_0.0_A",
-            readiness=ContextReadiness.ACTIVE,
+            readiness=ContextReadiness.POINT,
         )
     )
 
@@ -51,6 +55,22 @@ def test_context_sources_read_live_context_values(tmp_path) -> None:
     bus.emit(ContextSwitchedPayload(binding_id=None, sources=None))
 
     assert registry.get_as("context.active_label", str) == "next_point"
+
+
+def test_global_sources_keep_project_paths_without_inventing_a_point_label(
+    tmp_path,
+) -> None:
+    state = _state(tmp_path)
+    state.set_context(
+        dataclasses.replace(
+            state.session_env, readiness=ContextReadiness.GLOBAL, active_label=None
+        )
+    )
+    registry, _, _ = _binder(state)
+    assert registry.get_as("project.result_dir", str) == "/result"
+    assert registry.get_as("project.database_path", str) == "/db"
+    with pytest.raises(UnavailableValue):
+        registry.get_as("context.active_label", str)
 
 
 def test_device_sources_read_cached_state_without_polling(tmp_path) -> None:

@@ -211,7 +211,10 @@ class ValueSourceBinder:
         ctx = self._state.session_env
         if not ctx.has_context():
             raise UnavailableValue(f"context.{attr}", "No experiment context")
-        return str(getattr(ctx, attr))
+        value = getattr(ctx, attr)
+        if value is None:
+            raise UnavailableValue(f"context.{attr}", "No working point is selected")
+        return str(value)
 
     def _device_status(self, name: str) -> str:
         return self._require_device(name).status.value

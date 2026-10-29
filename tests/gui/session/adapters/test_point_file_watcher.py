@@ -7,6 +7,40 @@ from zcu_tools.gui.session.events import MdChangedPayload
 from tests.gui._qt_waits import qt_until
 
 
+def test_watcher_follows_point_to_global_directory_and_keeps_old_captures(
+    qapp, selected
+) -> None:
+    from zcu_tools.gui.session.adapters import PointFileWatcher
+
+    context, bus, entry = selected
+    old = context.read_context()
+    point_path = context.get_file_revisions()[0].path
+    watcher = PointFileWatcher(context, bus, admit_reload=lambda: True)
+    try:
+        context.use_global()
+        global_capture = context.read_context()
+        path = entry.result_path / "parameters.yaml"
+        path.write_text(path.read_text().replace("4300.0", "5500.0"))
+        watcher.flush()
+        assert context.read_context().value("Q1.rate") == 5500.0
+        assert global_capture.value("Q1.rate") == 4300.0
+        assert old.value("Q1.rate") == 4300.0
+        point_path.write_text("invalid: true")
+        replacement = path.with_suffix(".tmp")
+        replacement.write_text(path.read_text().replace("5500.0", "5600.0"))
+        replacement.replace(path)
+        qt_until(
+            lambda: context.read_context().value("Q1.rate") == 5600.0,
+            label="global directory reload after scope switch",
+        )
+        assert all(
+            status.file.path.parent == entry.result_path
+            for status in context.get_file_sync_status()
+        )
+    finally:
+        watcher.close()
+
+
 def test_flush_uses_current_admission_and_ignores_own_writes(qapp, selected) -> None:
     assert hasattr(adapters, "PointFileWatcher"), (
         "Point files need a lifecycle-owned watcher"

@@ -14,7 +14,7 @@ from zcu_tools.gui.app.measure.adapter import (
 from zcu_tools.gui.app.measure.catalog import ExperimentAccess
 from zcu_tools.gui.app.measure.registry import RegisteredAdapter
 from zcu_tools.gui.expected_error import FailedPreconditionError
-from zcu_tools.gui.session.types import ContextReadiness, ParameterContext
+from zcu_tools.gui.session.types import ParameterContext
 from zcu_tools.resources.entry import StorageBinding
 
 from .tab_form import AcceptedFormConfig
@@ -202,7 +202,7 @@ class GuardService:
 
     def _run_blocker(self, tab_id: str) -> AdmissionDecision | None:
         try:
-            self._require_readiness(ContextReadiness.ACTIVE, "run")
+            self._require_active_context("run")
         except GuardError as exc:
             return AdmissionDecision(False, exc.reason_code, str(exc))
         tab = self._state.get_tab(tab_id)
@@ -233,21 +233,14 @@ class GuardService:
         if not decision.allowed:
             raise GuardError(decision.message, reason_code=decision.reason or "")
 
-    def _require_readiness(self, expected: ContextReadiness, operation: str) -> None:
-        readiness = self._state.session_env.readiness
-        if readiness is expected:
-            return
-        if expected is ContextReadiness.ACTIVE:
+    def _require_active_context(self, operation: str) -> None:
+        context = self._state.session_env
+        if not context.is_active():
             raise GuardError(
                 f"Cannot {operation} without an active file-backed context "
-                f"(current readiness: {readiness.value}).",
+                f"(current readiness: {context.readiness.value}).",
                 reason_code="no_active_context",
             )
-        raise GuardError(
-            f"Cannot {operation}: context readiness {readiness.value} "
-            f"(required: {expected.value}).",
-            reason_code="wrong_readiness",
-        )
 
     def capture_run_inputs(
         self,

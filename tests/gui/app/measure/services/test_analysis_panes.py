@@ -120,7 +120,7 @@ def _state() -> tuple[State, str, MagicMock, SessionEnv]:
         database_path="/db",
         result_dir="/result",
         active_label="ctx",
-        readiness=ContextReadiness.ACTIVE,
+        readiness=ContextReadiness.POINT,
     )
     state = State(ctx)
     adapter = MagicMock()

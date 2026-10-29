@@ -20,6 +20,7 @@ if TYPE_CHECKING:
         PointFileRevision,
         PointFileSyncStatus,
         PointUseRequest,
+        SavedEntry,
         SavedPoint,
         WorkingPointInfo,
     )
@@ -101,7 +102,8 @@ class ContextControlPort(Protocol):
     ) -> ParameterContext:
         """Read current values at a fixed target without selecting it.
 
-        SavedPoint may read point/library files in the opened entry. Supplied roles stay fixed;
+        SavedEntry reads global files; SavedPoint reads point/library files in the opened entry.
+        Supplied roles stay fixed;
         cross-entry, missing point (MissingPointError), schema and I/O errors propagate.
         No versions or events are published.
         """
@@ -127,8 +129,8 @@ class ContextControlPort(Protocol):
     ) -> WritebackResult:
         """Accept at the fixed target through the context owner and shared loop.
 
-        Nonempty writes require a captured SavedPoint in the opened entry.
-        SavedPoint parameter/library values persist and records append to entry
+        Nonempty writes require a captured SavedEntry or SavedPoint in the opened entry.
+        Parameter/library values persist in that target's files; records append to entry
         JSONL. Successful prefix writes publish before later failures. Item failure raises
         WritebackApplyError with the event ID, committed values, applied count and original
         cause. Target admission and ledger append errors propagate unchanged.
@@ -191,7 +193,7 @@ class ContextControlPort(Protocol):
         ...
 
     def get_file_revisions(self) -> tuple[PointFileRevision, ...]:
-        """Read installed point file versions, or (); no I/O or refresh."""
+        """Read the active global/point file versions, or (); no I/O or refresh."""
         ...
 
     def get_file_sync_status(self) -> tuple[PointFileSyncStatus, ...]:
@@ -232,6 +234,14 @@ class ContextControlPort(Protocol):
 
     def use_point(self, request: PointUseRequest) -> SavedPoint:
         """Prepare/select a saved point in the opened entry."""
+        ...
+
+    def use_global(self) -> SavedEntry:
+        """Prepare/select the entry's global documents; errors preserve binding.
+
+        No opened entry raises no_entry. Success publishes GLOBAL and a None
+        point label. See ContextService.use_global for preparation failures.
+        """
         ...
 
     def new_point(self, request: PointCreateRequest) -> SavedPoint:

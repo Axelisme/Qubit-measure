@@ -6,7 +6,8 @@ from pathlib import Path
 
 import pytest
 from ruamel.yaml import YAML
-from zcu_tools.cfg_model import WaveformAssetInfo
+from ruamel.yaml.error import YAMLError
+from zcu_tools.cfg_model import ConstWaveformCfg, WaveformAssetInfo
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 from zcu_tools.gui.session.aliases import AliasRow
@@ -17,6 +18,7 @@ from zcu_tools.gui.session.context_types import (
     PointBindingError,
     PointCreateRequest,
     PointUseRequest,
+    SavedEntry,
     SavedPoint,
 )
 from zcu_tools.gui.session.events import (
@@ -33,6 +35,7 @@ from zcu_tools.resources.entry import (
     component_registry,
     snapshot,
 )
+from zcu_tools.resources.entry.aliases import EntryAliases
 from zcu_tools.resources.parameter_schema import ParameterSchemaPolicy
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
@@ -41,6 +44,110 @@ from tests.resources.entry.fakes import (
     registry_state,
     restore_registry,
 )
+
+
+def test_open_entry_captures_global_parameters_library_aliases_and_storage(
+    rich_entry: ResultEntry, context: ContextService
+) -> None:
+    rich_entry.save_aliases(EntryAliases(aliases={"driver": "Q1"}))
+    context.install_entry(rich_entry)
+
+    capture = context.read_context()
+
+    assert capture.value("$driver.rate") == 4300.0
+    assert capture.target is not None and capture.target.point is None
+    assert context.capture_storage(capture).point is None
+    assert context.capture_storage(capture).result_path == rich_entry.result_path
+    assert context.current_point_label() is None
+    assert context.get_session_env().active_label is None
+    assert context.get_session_env().readiness.value == "global"
+    assert context.has_context() and context.is_active_context()
+    assert [file.path for file in context.get_file_revisions()] == [
+        rich_entry.result_path / name
+        for name in ("parameters.yaml", "library.yaml", "aliases.yaml")
+    ]
+
+
+def test_point_and_global_switch_whole_sets_before_publishing_and_keep_captures(
+    rich_entry: ResultEntry,
+) -> None:
+    rich_entry.save_aliases(EntryAliases(aliases={"driver": "Q1"}))
+    with rich_entry.module_library().edit() as draft:
+        draft.set_waveform("Q1.waveforms.base", ConstWaveformCfg(length=0.1))
+    point = rich_entry.new_point("local", mode="empty")
+    point.add_component("Q2", kind="fake/drive/a", rate=5200.0, sense="R2")
+    state = SessionState(SessionEnv(parameters=None, soc=None, soccfg=None))
+    bus = BaseEventBus()
+    context = ContextService(state, bus, bind_assets=ArbWaveformDatabase.info_at)
+    seen: list[tuple[str, str | None, tuple[Path, ...]]] = []
+
+    def switched(_: ContextSwitchedPayload) -> None:
+        env = context.get_session_env()
+        seen.append(
+            (
+                env.readiness.value,
+                env.active_label,
+                tuple(file.path.parent for file in context.get_file_revisions()),
+            )
+        )
+        assert context.read_context().target is not None
+
+    subscription = bus.subscribe(ContextSwitchedPayload, switched)
+    try:
+        context.install_entry(rich_entry)
+        global_capture = context.read_context()
+        context.use_point(PointUseRequest("local"))
+        local_capture = context.read_context()
+        assert local_capture.value("Q2.rate") == 5200.0
+        assert local_capture.library.waveform_keys() == ()
+        with pytest.raises(RoleResolutionError):
+            local_capture.value("Q1.rate")
+        with pytest.raises(RoleResolutionError):
+            local_capture.value("$driver")
+        context.use_global()
+        assert context.read_context().value("$driver.rate") == 4300.0
+        assert context.read_context().library.waveform_keys() == ("Q1.waveforms.base",)
+        assert global_capture.value("Q1.rate") == 4300.0
+        assert local_capture.value("Q2.rate") == 5200.0
+        assert context.capture_storage(local_capture).point == "local"
+        assert state.version.get("context") == 3
+        assert seen == [
+            ("global", None, (rich_entry.result_path,) * 3),
+            ("point", "local", (rich_entry.result_path / "points/local",) * 3),
+            ("global", None, (rich_entry.result_path,) * 3),
+        ]
+    finally:
+        subscription.unsubscribe()
+
+
+def test_global_preparation_failure_keeps_selected_point_and_publishes_no_fact(
+    rich_entry: ResultEntry,
+) -> None:
+    rich_entry.new_point("local")
+    state = SessionState(SessionEnv(parameters=None, soc=None, soccfg=None))
+    bus = BaseEventBus()
+    context = ContextService(state, bus, bind_assets=ArbWaveformDatabase.info_at)
+    context.install_entry(rich_entry)
+    target = context.use_point(PointUseRequest("local"))
+    before = context.get_session_env()
+    binding = context.get_source_binding()
+    revisions = context.get_file_revisions()
+    version = state.version.get("context")
+    facts: list[ContextSwitchedPayload] = []
+    subscription = bus.subscribe(ContextSwitchedPayload, facts.append)
+    try:
+        path = rich_entry.result_path / "library.yaml"
+        path.write_text("[invalid yaml", encoding="utf-8")
+        with pytest.raises((ValueError, YAMLError)):
+            context.use_global()
+        assert context.get_session_env() is before
+        assert context.read_context().target == target
+        assert context.get_source_binding() == binding
+        assert context.get_file_revisions() == revisions
+        assert state.version.get("context") == version
+        assert facts == []
+    finally:
+        subscription.unsubscribe()
 
 
 def test_current_point_label_for_storage_free_content_has_no_persistent_point() -> None:
@@ -392,10 +499,10 @@ def test_install_entry_preserves_nonparameter_capabilities_without_selecting_poi
     assert info.name == entry.result_path.name
     assert info.result_path == entry.result_path
     assert info.database_path == entry.database_path
-    assert current.readiness is ContextReadiness.EMPTY
+    assert current.readiness is ContextReadiness.GLOBAL
     assert current.soc is old.soc and current.values is old.values
-    assert current.parameters is None
-    assert not context.has_context()
+    assert current.parameters is not None
+    assert context.has_context()
     assert context.list_points() == ()
 
 
@@ -488,7 +595,7 @@ def test_use_point_detaches_capture_and_uses_same_entry_library(
     assert capture.whole_document().general.description == "first point"
     assert capture.target == target
     assert context.read_context().whole_document().general.description == "second point"
-    assert context.get_session_env().readiness is ContextReadiness.ACTIVE
+    assert context.get_session_env().readiness is ContextReadiness.POINT
     assert {point.label: point.description for point in context.list_points()} == {
         "first": "first point",
         "second": "second point",
@@ -537,7 +644,7 @@ def test_failed_entry_asset_preparation_keeps_previous_binding(tmp_path: Path) -
         context.install_entry(other)
     info = context.get_entry_info()
     assert info is not None and info.name == first.result_path.name
-    assert context.get_session_env().parameters is None
+    assert context.get_session_env().readiness is ContextReadiness.GLOBAL
     assert assets.paths[-1] == other.database_path / "arb_waveforms"
 
 
@@ -685,7 +792,7 @@ def test_created_point_binding_failure_retains_point_and_previous_binding(
     )
     assert isinstance(error.value.__cause__, OSError)
     assert entry.list_points() == ["retained"]
-    assert context.get_session_env().parameters is None
+    assert context.get_session_env().readiness is ContextReadiness.GLOBAL
 
 
 def test_entry_ledger_is_the_real_capability_and_capture_never_appends(
@@ -775,7 +882,8 @@ def test_publication_facts_observe_installed_state_and_one_context_bump(
                 continue
             assert entry_info == info
             if version == 1:
-                assert env.parameters is None
+                assert env.parameters is not None
+                assert env.parameters.target == SavedEntry(entry_name=info.name)
             else:
                 assert env.parameters is not None
                 assert env.parameters.target == SavedPoint(
@@ -785,10 +893,10 @@ def test_publication_facts_observe_installed_state_and_one_context_bump(
             assert env.result_dir == str(info.result_path)
             assert env.database_path == str(info.database_path)
             assert env.active_label == (
-                "" if version == 1 else "first" if version == 2 else "second"
+                None if version == 1 else "first" if version == 2 else "second"
             )
             assert env.readiness is (
-                ContextReadiness.EMPTY if version == 1 else ContextReadiness.ACTIVE
+                ContextReadiness.GLOBAL if version == 1 else ContextReadiness.POINT
             )
     finally:
         subscription.unsubscribe()

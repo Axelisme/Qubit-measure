@@ -1081,7 +1081,7 @@ class MainWindow(QMainWindow):
             return
         dialog = RunLoadDialog(
             runs,
-            initial_point=self._ctrl.get_session_env().active_label,
+            initial_point=self._ctrl.get_session_env().active_label or "",
             initial_experiment=self._ctrl.tab_control.get_tab_snapshot(
                 tab_id
             ).adapter_name,

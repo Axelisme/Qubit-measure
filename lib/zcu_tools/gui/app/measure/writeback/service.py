@@ -13,7 +13,7 @@ from zcu_tools.format_version import YamlMap
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 from zcu_tools.gui.form import FormWritePath
 from zcu_tools.gui.session.context_control import ContextControlPort
-from zcu_tools.gui.session.context_types import CommandOrigin, SavedPoint
+from zcu_tools.gui.session.context_types import CommandOrigin, ContextTarget
 from zcu_tools.gui.session.library_entry import ModuleEntryForm
 from zcu_tools.gui.session.types import ParameterContext
 from zcu_tools.resources.entry import document_unit
@@ -413,7 +413,7 @@ class WritebackService:
         parameters = draft.parameters
         return ParameterContext.empty() if parameters is None else parameters
 
-    def _current_target(self) -> SavedPoint:
+    def _current_target(self) -> ContextTarget:
         target = self._write.read_context().target
         if target is None:
             raise FailedPreconditionError(

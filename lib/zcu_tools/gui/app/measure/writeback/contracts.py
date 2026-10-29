@@ -84,11 +84,16 @@ class WritebackSelection:
 
 
 class WritebackDestination(TypedDict):
-    """Fixed persisted target: kind=saved_point, entry name in the current result root and point label."""
+    """Fixed persisted destination in the current Result root.
+
+    entry_name names the entry directory. point is a saved point label, or None
+    for the entry-level global documents. kind retains the saved_point wire
+    discriminator; it does not distinguish internal entry and point targets.
+    """
 
     kind: Literal["saved_point"]
     entry_name: str
-    point: str
+    point: str | None
 
 
 @dataclass(frozen=True)

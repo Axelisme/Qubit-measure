@@ -71,7 +71,7 @@ def test_form_output_is_forwarded_without_rebuilding() -> None:
             parameters=parameters,
             soc=MagicMock(),
             soccfg=MagicMock(),
-            readiness=ContextReadiness.ACTIVE,
+            readiness=ContextReadiness.POINT,
         )
     )
     state.add_tab(

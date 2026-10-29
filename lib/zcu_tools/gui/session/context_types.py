@@ -33,7 +33,23 @@ class SavedPoint(BaseModel):
     point: str
 
 
-ContextTarget: TypeAlias = SavedPoint
+class SavedEntry(BaseModel):
+    """The entry-level global document set in the opened Result root.
+
+    entry_name is ResultEntry.result_path.name, not a path or UUID.
+    kind identifies this internal target as saved_entry. point is always None:
+    this destination does not select or create a point. Commands validate
+    entry membership through ResultEntry before reading or writing resources.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid", strict=True)
+
+    kind: Literal["saved_entry"] = "saved_entry"
+    entry_name: str
+    point: None = None
+
+
+ContextTarget: TypeAlias = SavedEntry | SavedPoint
 ContextSourceKind: TypeAlias = Literal["setup", "point", "module_cfg"]
 
 
