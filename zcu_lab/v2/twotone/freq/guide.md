@@ -1,8 +1,8 @@
 ## Behavior
 
-**Readers:** operator, agent. Two-tone qubit spectroscopy: drives a qubit probe tone while reading out the resonator, sweeps the drive frequency, and fits the qubit response (Lorentzian or sinc) to extract the qubit transition frequency and its linewidth. Runs on real hardware. In first bring-up, run it after onetone/flux_dep has found the scanned device's integer reference in `$qubit.flux` and onetone/freq has re-calibrated the resonator at that flux.
+**Readers:** operator, agent. Two-tone qubit spectroscopy: drives a qubit probe tone while reading out the resonator, sweeps the drive frequency, and fits the qubit response (Lorentzian or sinc) to extract the qubit transition frequency and its linewidth. Runs on the configured SoC, including an explicitly launched offline environment. In hardware first bring-up, run it after onetone/flux_dep has found the scanned device's integer reference in `$qubit.flux` and onetone/freq has re-calibrated the resonator at that flux.
 
-**Last updated:** 2026-10-25
+**Last updated:** 2026-10-29, optional preparation pulse
 
 After changing the parameter source, use Reset to recapture initial values. Refresh only updates sources and choices while preserving authored inputs; Reset can overwrite unsaved inputs.
 
@@ -12,9 +12,26 @@ Open and Reset fill editable starting values from captured calibration. The freq
 
 ## Module slots
 
-The drive starts with a fresh 'qub_probe' constant pulse for spectroscopy. Readout uses the `$resonator.module.readout` slot captured at Open/Reset; an unset slot, missing module or unbound alias uses a fresh 'readout' template with a constant waveform. That fallback still needs its required parameter sources. Reset uses the optional `$qubit.module.reset` slot; an unset slot, missing module or unbound alias leaves it disabled and Valid. Init Pulse stays disabled.
+The drive starts with a fresh 'qub_probe' constant pulse for spectroscopy. Readout uses the `$resonator.module.readout` slot captured at Open/Reset; an unset slot, missing module or unbound alias uses a fresh 'readout' template with a constant waveform. That fallback still needs its required parameter sources. Reset uses the optional `$qubit.module.reset` slot; an unset slot, missing module or unbound alias leaves it disabled and Valid. Init Pulse starts disabled (None). Enable it to select a calibrated library pulse or enter an inline preparation pulse. Run applies reset, Init Pulse, the swept Probe Pulse, then readout. Leave Init Pulse disabled for ground-state spectroscopy.
 
 Bind `resonator: $qubit.resonator` so the readout follows the selected qubit's resonator. Existing points are not migrated: rerun onetone/freq and Apply its module and slot updates, or manually set `R1.module.readout` to an existing library module; otherwise this form uses the readout template. It does not read old qubit readout slots.
+
+## Prepared-state spectroscopy
+
+For integer-fluxonium spectroscopy, first leave Init Pulse disabled and search
+for the 0–1 and 0–3 lines from ground. Enter the search windows explicitly;
+the Form does not supply model transition frequencies. Refine the observed
+lines and calibrate a π03 pulse with the existing Rabi experiments before using
+it for preparation. In this Form enable Init Pulse, choose that π03 library
+pulse or enter its measured frequency, channel, gain and waveform inline.
+Sweep Probe Pulse to find 3–2 after that preparation. The Init Pulse frequency
+stays fixed while the probe frequency follows the sweep.
+
+Keep π01, π03 and π32 calibration records separate. Do not Apply a 0–3 or
+prepared 3–2 fit to the generic qubit.freq slot as though it were 0–1.
+Use the measured 0–3 and 3–2 carriers as Pump and Stokes inputs in subsequent
+experiments. See the [integer-fluxonium environment](../../../simulation_envs/integer_fluxonium/README.md)
+for offline settings, units and reference-only limits.
 
 ## Peak selection
 

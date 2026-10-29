@@ -100,7 +100,13 @@ class FreqCfg(ConfigBase):
         ),
     ] = 1.0
     reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
-    init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init Pulse")] = None
+    init_pulse: Annotated[
+        Pulse.Cfg | None,
+        FieldMeta(
+            label="Init Pulse",
+            description="Optional preparation before the swept probe. Enter a calibrated fixed-frequency pulse (MHz, us), or None for ground-state spectroscopy.",
+        ),
+    ] = None
     qub_pulse: Annotated[
         Pulse.Cfg,
         FieldMeta(
