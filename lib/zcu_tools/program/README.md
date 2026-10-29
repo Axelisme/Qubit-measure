@@ -8,7 +8,7 @@
 
 ## Program 層定位
 
-`acquisition.py` 擴充 QICK 的 `AcquireMixin`，負責 acquisition 的型別封裝、追蹤、提前停止與 round hook。`v2/base.py` 定義 v2 program 基底 `MyProgramV2`；它使用這些 acquisition mixin，但負責的是 v2 program 結構，兩者不是同一種 base。`v2/timeline.py` 的 `TimelineProgramV2` 則直接繼承 QICK `AveragerProgramV2`，保留原生作者 hooks，提供可選的具名 timeline，不套用 builder 或模擬器。它與 `ModularProgramV2` 共用 dmem 配置及 readout route 保護。
+`acquisition.py` 擴充 QICK 的 `AcquireMixin`，負責 acquisition 的型別封裝、追蹤、提前停止與 round hook。`v2/base.py` 定義 v2 program 基底 `MyProgramV2`；它使用這些 acquisition mixin，但負責的是 v2 program 結構，兩者不是同一種 base。`v2/timeline.py` 的 `TimelineProgramV2` 繼承 `MyProgramV2`，不經 `ModularProgramV2`。它保留原生作者 hooks，提供可選的具名 timeline，所有指令共用既有 IR 管線與 acquire 擴充。Builder 與模擬 frontend 尚未切換。它與 `ModularProgramV2` 共用 dmem 配置及 readout route 保護。
 
 ## Explicit readout classification
 

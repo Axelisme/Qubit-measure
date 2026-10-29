@@ -1,8 +1,9 @@
-"""Unnamed timeline-program operations compile exactly like native QICK."""
+"""Native timing uses MyProgramV2's shared compiler after the base correction."""
 
 import numpy as np
 import pytest
 from qick.asm_v2 import AsmV2, AveragerProgramV2
+from zcu_tools.program.v2.base import MyProgramV2
 from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 from zcu_tools.program.v2.timeline import TimelineProgramV2
 
@@ -65,8 +66,8 @@ def _assert_equal(actual: AveragerProgramV2, expected: AveragerProgramV2):
 @pytest.mark.parametrize(
     "shell",
     [
-        {"initial_delay": None, "final_delay": None, "final_wait": None},
-        {"initial_delay": 0.2, "final_delay": 0.4, "final_wait": 0},
+        {"initial_delay": 0.0, "relax_delay": 0.0},
+        {"initial_delay": 0.2, "relax_delay": 0.4},
     ],
 )
 def test_unnamed_native_sequence_is_bitwise_equal(reps_innermost, shell):
@@ -77,14 +78,21 @@ def test_unnamed_native_sequence_is_bitwise_equal(reps_innermost, shell):
     kwargs = dict(
         shell, reps_innermost=reps_innermost, before_reps=before, after_reps=after
     )
-    native = _compile(AveragerProgramV2, **kwargs)
+    native = _compile(MyProgramV2, **kwargs)
     timeline = _compile(TimelineProgramV2, **kwargs)
     _assert_equal(timeline, native)
 
 
+def test_native_body_uses_the_shared_ir_pipeline():
+    # Both native and module instructions must use the repo compiler, not bare QICK.
+    expected = _compile(MyProgramV2)
+    actual = _compile(TimelineProgramV2)
+    _assert_equal(actual, expected)
+
+
 def test_native_comparison_detects_a_changed_pulse_time():
-    kwargs = {"initial_delay": None, "final_delay": None, "final_wait": None}
-    native = _compile(AveragerProgramV2, **kwargs)
+    kwargs = {"initial_delay": 0.0, "relax_delay": 0.0}
+    native = _compile(MyProgramV2, **kwargs)
     changed = _compile(TimelineProgramV2, 1, **kwargs)
     with pytest.raises(AssertionError):
         _assert_equal(changed, native)

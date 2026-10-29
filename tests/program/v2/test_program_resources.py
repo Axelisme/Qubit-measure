@@ -27,9 +27,7 @@ def _program(
 
     soccfg = make_mock_soccfg(2, 2)
     if kind == "timeline":
-        return Native(
-            soccfg, reps=1, initial_delay=None, final_delay=None, final_wait=None
-        )
+        return Native(soccfg, reps=1, initial_delay=0.0, relax_delay=0.0)
     return Modular(soccfg, modules=[], reps=1)
 
 
@@ -47,8 +45,7 @@ def test_concrete_programs_compile_empty_and_nonempty_dmem(kind, values: Sequenc
         assert words is not None
         assert words.dtype == np.int32
         np.testing.assert_array_equal(words, values)
-        # ModularProgramV2 retains its transport list normalization; native
-        # TimelineProgramV2 retains the QICK int32 array binary contract.
+        # Both concrete programs inherit MyProgramV2's transport normalization.
         np.testing.assert_array_equal(prog.binprog["dmem"], values)
     else:
         assert words is None

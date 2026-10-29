@@ -100,15 +100,15 @@ Encoding with `readout_freq_words` still takes those four explicit settings.
 
 ## 原生寫法與具名 timeline
 
-`timeline.TimelineProgramV2` 直接擴充 QICK `AveragerProgramV2`。作者在 `_initialize(cfg)` 宣告通道、pulse、readout config 與 `add_loop()`，在 `_body(cfg)` 發射原生 QICK 操作。建構子沿用 QICK 的 `reps`、`initial_delay`、`final_wait`、`final_delay` 與 `cfg`，不接收 modules，也不套用 builder、IR optimizer 或模擬器。未帶 `timeline` 時，編譯結果與原生 QICK 相同。
+`timeline.TimelineProgramV2` 繼承 `MyProgramV2`，不經 `ModularProgramV2`。作者在 `_initialize(cfg)` 宣告通道、pulse、readout config 與 `add_loop()`，在 `_body(cfg)` 發射原生 QICK 操作。建構子使用 `reps`、`initial_delay`、`relax_delay`，shot 外殼為 `final_wait=0`、`final_delay=relax_delay`。所有指令共用既有 IR optimizer，未帶 `timeline` 的同段寫法與 `MyProgramV2` 編譯逐位相同。它繼承既有 acquire 擴充，但模擬 frontend 尚不解讀新 emission 序列，builder 也尚未切換。
 
 `pulse`、`trigger`、`send_readoutconfig` 可帶 `timeline="drive"`，以該 timeline 的 offset 加 t 發射，不自動推進 offset。`delay(t, timeline="drive")` 只前進該 offset，不發指令。`delay_auto(t, gens=True, ros=True, timeline="drive")` 取 offset 與該 timeline 歷次選定 end 的最大值，加 t 後一次向上取整到 tProc cycle。End 不因自身 advance 而清除。Config 是瞬時事件，其 end 是發射時間；ADC 積分窗口由 trigger 記錄。
 
 原生 `delay`、`delay_auto`、`resync` 改變參考時間時，所有具名 offset 與 end 一起扣減，最低為零。`sync(timeline="drive")` 發出一次原生 `inc_ref`，將參考時間移到該 offset。掃描值的最大值與下限採 QICK 的 range 比較，不計算 crossing sweeps 的逐點最大值。`wait_auto` 與 `resync` 不接受 `timeline`；未帶時仍可在具名發射後使用。
 
-時間狀態只在 preprocess 更新，每次重新編譯清空。`compile()` 保留 QICK 的 binary cache；需要重編時先設 `binprog=None`。`make_program()` 保留 QICK 外殼順序，並在初始化結束、body 起訖加入不發指令的 marker。原生作者 hooks、迴圈前後指令與 subroutine 的位置不變。
+時間狀態只在 preprocess 更新，每次 `compile()` 都經共用 compiler 重編並清空狀態。`make_program()` 保留 QICK 外殼順序，並在初始化結束、body 起訖加入不發指令的 marker。原生作者 hooks、迴圈前後指令與 subroutine 的位置不變。
 
-`resources.ProgramResourcesMixin` 集中 dmem 配置與 readout route 保護，由 `TimelineProgramV2` 和 `ModularProgramV2` 共用。新基底的 binary dmem 保留 QICK 的 `np.int32` array；既有 `ModularProgramV2` 繼續在傳輸邊界轉成 `list[int]`。Builder 與模擬器仍使用 `ModularProgramV2`。
+`resources.ProgramResourcesMixin` 集中 dmem 配置與 readout route 保護，由 `TimelineProgramV2` 和 `ModularProgramV2` 共用。兩者都由 `MyProgramV2` 在傳輸邊界將 dmem 轉成 `list[int]`。Builder 與模擬器仍使用 `ModularProgramV2`。
 
 ## Macro Layer
 

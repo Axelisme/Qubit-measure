@@ -35,9 +35,8 @@ def _program(
     return Program(
         make_mock_soccfg(2, 1),
         reps=1,
-        initial_delay=None,
-        final_delay=None,
-        final_wait=None,
+        initial_delay=0.0,
+        relax_delay=0.0,
     )
 
 
@@ -58,7 +57,8 @@ def test_named_delay_places_pulses_without_advancing_reference():
     prog = _program(body)
     # ceil(0.1 * 430.08) = 44. Emission itself does not move the cursor.
     assert _pulse_ticks(prog) == [44, 44]
-    assert not [i for i in prog.prog_list if i.get("C_OP") == "inc_ref"]
+    # The shared shot shell advances through the emitted pulses at body end.
+    assert [i["LIT"] for i in prog.prog_list if i.get("C_OP") == "inc_ref"] == ["#87"]
 
 
 @pytest.mark.parametrize("delay, expected", [(0.3, 173), (0.5, 215)])
@@ -69,10 +69,8 @@ def test_native_delay_decrements_named_cursor_with_reference_floor(delay, expect
         prog.pulse(0, "p0", timeline="drive")
 
     prog = _program(body)
-    reference = sum(
-        int(str(i["LIT"])[1:]) for i in prog.prog_list if i.get("C_OP") == "inc_ref"
-    )
-    assert [reference + t for t in _pulse_ticks(prog)] == [expected]
+    # TimedMergePass folds the reference advance into the pulse's absolute time.
+    assert _pulse_ticks(prog) == [expected]
 
 
 def test_recompile_resets_named_cursors():
@@ -82,7 +80,6 @@ def test_recompile_resets_named_cursors():
 
     prog = _program(body)
     original = prog.prog_list.copy()
-    prog.binprog = None
     prog.compile()
     assert prog.prog_list == original
     assert _pulse_ticks(prog) == [44]
@@ -160,12 +157,13 @@ def test_sync_rebases_all_named_cursors_with_one_reference_increment():
         prog.delay(0.1, timeline="drive")
         prog.delay(0.4, timeline="flux")
         prog.sync(timeline="drive")
-        prog.pulse(0, "p0", timeline="drive")
-        prog.pulse(1, "p1", timeline="flux")
+        prog.pulse(0, "p0", timeline="drive", tag="drive")
+        prog.pulse(1, "p1", timeline="flux", tag="flux")
 
     prog = _program(body)
-    assert _pulse_ticks(prog) == [0, 129]
-    assert [i["LIT"] for i in prog.prog_list if i.get("C_OP") == "inc_ref"] == ["#44"]
+    assert _pulse_ticks(prog) == [44, 173]
+    assert prog.get_time_param("drive", "t") == pytest.approx(0.0)
+    assert prog.get_time_param("flux", "t") == pytest.approx(129 / 430.08)
 
 
 def test_named_trigger_rejects_implicit_output_time_at_entry():
@@ -237,13 +235,14 @@ def test_native_reference_changes_rebase_named_ends_and_cursor(operation):
         else:
             prog.resync(0.05)
         prog.delay_auto(timeline="drive")
-        prog.pulse(1, "p1", timeline="drive")
+        prog.pulse(1, "p1", timeline="drive", tag="after")
 
     # Native delay/resync subtract round(.05*430.08)=22 cycles from
     # end=44+38/384*430.08=86.56; ceil(64.56)=65. Global auto also
     # consumes the pulse end and clamps both named values to zero.
     expected = 0 if operation == "delay_auto" else 65
-    assert _pulse_ticks(_program(body)) == [44, expected]
+    prog = _program(body)
+    assert prog.get_time_param("after", "t") == pytest.approx(expected / 430.08)
 
 
 @pytest.mark.parametrize("operation", ["wait_auto", "resync"])
@@ -326,8 +325,7 @@ def test_native_auto_without_channels_does_not_move_named_cursor():
     prog = Program(
         make_mock_soccfg(0, 0),
         reps=1,
-        initial_delay=None,
-        final_delay=None,
-        final_wait=None,
+        initial_delay=0.0,
+        relax_delay=0.0,
     )
     assert [i["LIT"] for i in prog.prog_list if i.get("C_OP") == "inc_ref"] == ["#44"]

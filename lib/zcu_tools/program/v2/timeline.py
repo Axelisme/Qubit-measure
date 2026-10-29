@@ -1,12 +1,9 @@
 """Native QICK programs with independent named scheduling cursors."""
 
 from dataclasses import dataclass, field
-from typing import Literal, TypedDict
+from typing import Literal
 
-import numpy as np
-from numpy.typing import NDArray
 from qick.asm_v2 import (
-    AveragerProgramV2,
     ConfigReadout,
     Delay,
     Macro,
@@ -16,16 +13,9 @@ from qick.asm_v2 import (
     Trigger,
 )
 
+from .base import MyProgramV2
 from .modules.util import round_timestamp
 from .resources import ProgramResourcesMixin
-
-
-class _BinaryProgram(TypedDict):
-    """QICK public compiled memories: packed pmem/wmem and optional int32 dmem."""
-
-    pmem: list[list[int]]
-    wmem: list[list[int]] | None
-    dmem: NDArray[np.int32] | None
 
 
 @dataclass
@@ -164,21 +154,15 @@ class _PlacedTrigger(Trigger):
         state.ro_ends.extend(prog.get_timestamp(ro_ch=ch) for ch in self.ros)
 
 
-class TimelineProgramV2(AveragerProgramV2, ProgramResourcesMixin):
+class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
     """Author native QICK hooks with optional named timelines (times in us).
 
-    Constructor arguments and author hooks follow AveragerProgramV2. Named
-    scheduling is resolved during preprocessing, not when author hooks run.
-    Each compilation starts with empty named cursors/ends. Native compile()
-    retains QICK's binary cache; set binprog=None then call compile() to rebuild.
-    Unnamed operations retain native behavior.
+    Constructor controls follow MyProgramV2: reps, initial_delay and relax_delay.
+    Author hooks follow QICK. All instructions use the shared IR compiler.
+    Named scheduling is resolved during preprocessing, not in author hooks.
+    Each compilation starts with empty named cursors/ends. Unnamed operations
+    retain native timing semantics. Simulation frontend support is separate.
     """
-
-    # QICK accepts None to disable these shell operations despite inferring
-    # non-optional types from the defaults in its unannotated constructor.
-    initial_delay: float | None
-    final_wait: float | None
-    binprog: _BinaryProgram | None
 
     def __init__(self, *args, **kwargs):
         self._timeline_book = _TimelineBook()
@@ -196,19 +180,17 @@ class TimelineProgramV2(AveragerProgramV2, ProgramResourcesMixin):
         self._reset_resources()
         self.append_macro(_Boundary(self._timeline_book, "reset"))
         self.set_ext_counter(addr=self.COUNTER_ADDR)
-        self._initialize(self.cfg)
+        self._initialize(None)
         self.append_macro(_Boundary(self._timeline_book, "initialize_end"))
-        if self.initial_delay is not None:
-            self.delay_auto(self.initial_delay)
+        self.delay_auto(self.initial_delay)
         for name, count, before, _after in self.loops:
             self.open_loop(count, name=name)
             if before is not None:
                 self.extend_macros(before)
         self.append_macro(_Boundary(self._timeline_book, "body_start"))
-        self._body(self.cfg)
+        self._body(None)
         self.append_macro(_Boundary(self._timeline_book, "body_end"))
-        if self.final_wait is not None:
-            self.wait_auto(self.final_wait, no_warn=True)
+        self.wait_auto(self.final_wait, no_warn=True)
         if self.final_delay is not None:
             self.delay_auto(self.final_delay)
         self.inc_ext_counter(addr=self.COUNTER_ADDR)
@@ -216,7 +198,7 @@ class TimelineProgramV2(AveragerProgramV2, ProgramResourcesMixin):
             if after is not None:
                 self.extend_macros(after)
             self.close_loop()
-        self._cleanup(self.cfg)
+        self._cleanup(None)
         self.end()
         for name, asm in self.subroutines.items():
             self.label(name)
