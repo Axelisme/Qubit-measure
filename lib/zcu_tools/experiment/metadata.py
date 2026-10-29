@@ -72,7 +72,8 @@ class RunSnapshot:
     """Historical entry state, never a live entry or hardware reference.
 
     entry_name is the recorded folder name, or None when unknown.
-    point is the optional work-point label.
+    point is the work-point label, or None for global runs. Historical documents
+    that omit point also describe global runs.
     roles maps aliases to scalar names
     or ordered name lists. Lists preserve acquisition order, not tone indexes.
     Writers never refresh these values from a live entry. Python and JSON
@@ -80,7 +81,7 @@ class RunSnapshot:
     """
 
     entry_name: str | None = None
-    point: str | None
+    point: str | None = None
     roles: Annotated[
         Mapping[str, AliasValue],
         PlainSerializer(dict, return_type=dict[str, AliasValue]),

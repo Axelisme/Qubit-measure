@@ -171,9 +171,9 @@ def test_storage_requires_saved_origin_and_readable_sources(
     with pytest.raises(FailedPreconditionError, match="saved-point storage"):
         session.control.capture_storage(unbound)
     session.context.install_entry(session.entry)
-    with pytest.raises(FailedPreconditionError) as caught:
-        session.control.read_context()
-    assert caught.value.reason_code == "no_context"
+    global_storage = session.control.capture_storage(session.control.read_context())
+    assert global_storage.point is None
+    assert global_storage.result_path == session.entry.result_path
 
 
 def test_storage_rejects_mismatched_target(session: SaveSession) -> None:

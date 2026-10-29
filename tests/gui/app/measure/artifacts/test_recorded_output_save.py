@@ -7,7 +7,7 @@ from shutil import rmtree
 import numpy as np
 import pytest
 from zcu_tools.datafile import load
-from zcu_tools.experiment.metadata import RunSnapshot
+from zcu_tools.experiment.metadata import RunMetadataContent, RunSnapshot
 from zcu_tools.experiment.native_persistence import metadata_from_container
 from zcu_tools.gui.app.measure.artifacts import SaveStatus
 from zcu_tools.gui.app.measure.services.pane_commit import commit_run
@@ -144,6 +144,47 @@ def test_storage_free_save_keeps_declarations_and_publishes_recorded_outputs(
         assert metadata_from_container(load(native.output.path)) == metadata
     finally:
         plots.release()
+
+
+def test_missing_historical_point_previews_and_saves_entry_figures(
+    native_session: NativeSaveSession,
+) -> None:
+    session = native_session
+    document = session.metadata.model_dump(mode="json")
+    document["snapshot"].pop("point")
+    metadata = RunMetadataContent(document)
+    original = require_record(session.state.get_tab("tab").run)
+    commit_run(
+        session.state,
+        "tab",
+        RunPaneState(result=replace(original, metadata=metadata)),
+        plan_layout=session.save_service.plan_layout,
+    )
+    declare_panes(session, ("fit",))
+    preview = {
+        output.path
+        for section in session.state.get_artifact_snapshots("tab")
+        for artifact in section.artifacts
+        for member in artifact.members
+        for output in member.outputs
+    }
+    assert preview
+    report = session.save_artifacts()
+    assert all(item.status == "saved" for item in report.outputs)
+    assert {item.output.path for item in report.outputs} == preview
+    copies = [
+        item.output.path
+        for item in report.outputs
+        if item.output.format == "png"
+        and item.output.path.is_relative_to(session.entry.result_path)
+    ]
+    assert copies and all(
+        path.parent == session.entry.result_path / "figures" for path in copies
+    )
+    native = next(
+        item.output.path for item in report.outputs if item.output.format == "data_h5"
+    )
+    assert metadata_from_container(load(native)).snapshot.point is None
 
 
 def test_save_uses_validated_metadata_for_output_planning(
