@@ -25,7 +25,7 @@ def test_absent_library_installs_external_creation_strictly(
     selected: SelectedPoint, watcher: bool
 ) -> None:
     context, bus, entry = selected
-    path = entry.result_path / "points/first/module_cfg.yaml"
+    path = entry.result_path / "points/first/library.yaml"
     path.unlink()
     context.use_point(PointUseRequest("first"))
     file = next(
@@ -207,7 +207,7 @@ def test_reload_rejects_paths_outside_current_point(
     assert hasattr(context, "reload_file"), (
         "Reload must limit paths to selected point owners"
     )
-    path = Path("point.yaml") if relative else tmp_path / "unowned.yaml"
+    path = Path("parameters.yaml") if relative else tmp_path / "unowned.yaml"
     with pytest.raises(InvalidInputError):
         context.reload_file(path, None)
     with pytest.raises(InvalidInputError):

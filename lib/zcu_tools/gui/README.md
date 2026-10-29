@@ -169,7 +169,7 @@ hints, placeholders and decoration stay unselectable.
 
 Measure 的 shared SetupDialog 使用 `ProjectSettingsService` 開啟或建立 Result Entry，
 再透過 ContextService 選取或建立 Working Point。Entry discovery 由 resources owner
-列出含 setup.yaml 的條目，普通查詢重用 cache，明確 refresh 才重讀。開啟 entry
+列出含 parameters.yaml 的條目，普通查詢重用 cache，明確 refresh 才重讀。開啟 entry
 不自選 point，不連硬體，也不從 chip／qubit／resonator 名稱推導路徑。
 
 Fluxdep／dispersive 的 `AnalysisEntry`、`AnalysisTarget`、`EntryDialog`、

@@ -191,9 +191,9 @@ def test_allow_extras_support_child_views_set_meta_seed_and_reload(
         entry.setup.add_component("N1", kind=kind, title="ready", gain=2)
         view = entry.setup if owner == "setup" else entry.new_point("working")
         source = (
-            results / "entry/setup.yaml"
+            results / "entry/parameters.yaml"
             if owner == "setup"
-            else results / "entry/points/working/point.yaml"
+            else results / "entry/points/working/parameters.yaml"
         )
         yaml = YAML(typ="rt")
         stored = yaml.load(source)
@@ -410,9 +410,9 @@ def test_collision_extra_edit_abort_preserves_both_components(
             )
             view = entry.setup if owner == "setup" else entry.new_point("working")
             source = (
-                results / "entry/setup.yaml"
+                results / "entry/parameters.yaml"
                 if owner == "setup"
-                else results / "entry/points/working/point.yaml"
+                else results / "entry/points/working/parameters.yaml"
             )
             yaml = YAML(typ="rt")
             stored = yaml.load(source)
@@ -562,9 +562,9 @@ def test_collision_extras_read_write_meta_and_reload(
             )
             view = entry.setup if owner == "setup" else entry.new_point("working")
             source = (
-                results / "entry/setup.yaml"
+                results / "entry/parameters.yaml"
                 if owner == "setup"
-                else results / "entry/points/working/point.yaml"
+                else results / "entry/points/working/parameters.yaml"
             )
             yaml = YAML(typ="rt")
             stored = yaml.load(source)

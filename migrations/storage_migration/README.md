@@ -31,11 +31,11 @@
 
 | 舊來源 | 新目的 |
 | --- | --- |
-| 根 `meta_info.json` | `setup.yaml` 的正式欄位與 `general.ext` |
+| 根 `meta_info.json` | `parameters.yaml` 的正式欄位與 `general.ext` |
 | 根 `params.json` 的 fit | entry 的 `predictors/<Q>.json`、`dispersive/<Q>.json`、`t1_curve/<Q>.json` |
 | `params.json` 未轉 leaf | setup 的 `components.<Q>.ext.legacy_params`，完整來源留外部備份 |
-| 根 `module_cfg.yaml` | entry 的 setup library `module_cfg.yaml` |
-| `exps/<sub>/` 或舊直屬 child 的 meta／library | `points/<sub>/point.yaml`、`points/<sub>/module_cfg.yaml` |
+| 根 `module_cfg.yaml` | entry 的 setup library `library.yaml` |
+| `exps/<sub>/` 或舊直屬 child 的 meta／library | `points/<sub>/parameters.yaml`、`points/<sub>/library.yaml` |
 | `exps/<sub>/image/*.png` | `points/<sub>/figures/<原檔名>` |
 | exps 外的 `image/` | entry 的 `figures/<來源相對路徑>` |
 | `samples.csv` | `records/components/<Q>.jsonl`；有待轉列時另保全完整 `samples.csv` |
@@ -128,7 +128,7 @@ T1 的 fit 欄位包括 `params`、`stderr`、`bounds`、`fixed`、`free`、`cos
 
 ## Module library mapping
 
-- Parameters 將根層與 child point 的 module／waveform 轉成 `cfg_model` 的正式 Spec。根庫透過 `ResultEntry.module_library()` 提交到 entry 的 `module_cfg.yaml`，slots 寫 setup。Point 庫透過 `module_library(label)` 提交，slots 寫 point。Mapping 明示來源 family 與 canonical key，typed reference remap 由 `cfg_model` 擁有。Slots 依 mapping 次序選第一個成功發布的 Spec，支援候選缺必要欄位、含無法求值的已知 expression 或缺 child mapping 時才列 located pending，原文也保留在該 context。沒有成功 module Spec 的合法空庫不建立引用。新 point 複製 setup YAML，但不複製 setup library。未完成的 parameters 遷移會清除 point 中無法由該 point 自己的 library 解析的繼承 slots。有效引用保持原值，成功的 child module 再依 mapping 覆寫。完成後 resume 比較使用者編輯，差異非零且不改內容。
+- Parameters 將根層與 child point 的 module／waveform 轉成 `cfg_model` 的正式 Spec。根庫透過 `ResultEntry.module_library()` 提交到 entry 的 `library.yaml`，slots 寫 setup。Point 庫透過 `module_library(label)` 提交，slots 寫 point。Mapping 明示來源 family 與 canonical key，typed reference remap 由 `cfg_model` 擁有。Slots 依 mapping 次序選第一個成功發布的 Spec，支援候選缺必要欄位、含無法求值的已知 expression 或缺 child mapping 時才列 located pending，原文也保留在該 context。沒有成功 module Spec 的合法空庫不建立引用。新 point 複製 setup YAML，但不複製 setup library。未完成的 parameters 遷移會清除 point 中無法由該 point 自己的 library 解析的繼承 slots。有效引用保持原值，成功的 child module 再依 mapping 覆寫。完成後 resume 比較使用者編輯，差異非零且不改內容。
 
 - Module 歷史轉換只在離線 `_legacy_modules.py`。完整的舊 pulse shape 缺 type 時依歷史 `Pulse.auto_fill` 補 `pulse`，不按名稱推論；phase、pre_delay、post_delay 的歷史預設為 0.0。舊 `base` 的 pulse_cfg.ch 改為 gen_ch，ro_cfg 的 ro_ch／ro_length／trig_offset 平鋪到 `readout/pulse`。ro_freq 缺席或等於 pulse_cfg.freq 時共用 freq；不同時不建立該條 Spec，整條原文保全，pending 報兩頻。舊 `bath` 改為 `reset/bath`，三個具名子 pulse 各自重建。正式支援的 desc、mixer_freq 與其他值照轉，不因白名單而丟欄。
 

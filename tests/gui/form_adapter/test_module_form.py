@@ -856,7 +856,7 @@ def test_template_input_propagates_unavailable_captured_source(
     creation_templates: dict[str, TemplateDef],
 ) -> None:
     fault = ContextSourceFault(
-        "point", Path("/unavailable/point.yaml"), "OSError", "unreadable"
+        "point", Path("/unavailable/parameters.yaml"), "OSError", "unreadable"
     )
     env = creation_env(faults=(fault,))
     form = form_adapter.module_form(PulseSpec)

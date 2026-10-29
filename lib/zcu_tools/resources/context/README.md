@@ -8,7 +8,7 @@
 
 ## Module library
 
-`library.py` 擁有 `module_cfg.yaml` 的文件、查詢與編輯。`library_store.py` 擁有磁碟讀取與 clone 複製。
+`library.py` 擁有 `library.yaml` 的文件、查詢與編輯。`library_store.py` 擁有磁碟讀取與 clone 複製。
 文件格式維持 `zcu.module-library` 2.0，header-only 文件表示空 library。
 `ResultEntry.module_library(label)` 允許 point library 缺席，回空快照與 revision=None。
 讀取不建立檔案或父目錄，setup library 缺檔仍報錯。

@@ -80,12 +80,12 @@ def test_point_alias_save_needs_parameters_but_not_library(
 ) -> None:
     directory = entry.result_path / "points" / "partial"
     directory.mkdir()
-    source = directory / "point.yaml"
+    source = directory / "parameters.yaml"
     source.write_text("{}\n", encoding="utf-8")
     entry.save_aliases(authored, point="partial")
     assert entry.load_aliases(point="partial") == authored
     assert source.read_text(encoding="utf-8") == "{}\n"
-    assert not (directory / "module_cfg.yaml").exists()
+    assert not (directory / "library.yaml").exists()
     source.unlink()
     before = (directory / "aliases.yaml").read_bytes()
     with pytest.raises(FileNotFoundError):

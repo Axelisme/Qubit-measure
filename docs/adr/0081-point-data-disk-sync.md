@@ -15,7 +15,7 @@ GUI 與 agent 都需要讀寫 point 的參數、module library 與 `aliases.yaml
 
 ### 磁碟是真相，記憶體是帶 revision 的快取
 
-每個 point 的參數文件、library 文件與 `aliases.yaml` 是唯一權威。記憶體保存已安裝內容與該檔內容的 hash 作為 revision，各檔獨立。`entry.info` 與 `status` 回每個檔的路徑與 revision。
+每個 point 的 `parameters.yaml`、`library.yaml` 與 `aliases.yaml` 是唯一權威。Entry 層使用同一組檔名，但此決策不增加 entry 層監看或 global 工作集行為。記憶體保存已安裝內容與該檔內容的 hash 作為 revision，各檔獨立。`entry.info` 與 `status` 回每個檔的路徑與 revision。
 
 Aliases 的 revision 是固定 capture 當次觀察到的原始 bytes SHA-256，不表示內容有效。選取 point 時，壞 aliases 可連同原錯及 hash 保存在 session，參數與 library 仍可使用；實際 alias consumer 才報該 capture 的原錯。只有缺少 aliases 檔時 revision 才是 None。修復後安裝的新狀態不改舊 capture，讀取 owner 與 session 的分工見 [[0063]]。
 

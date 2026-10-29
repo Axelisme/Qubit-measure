@@ -27,11 +27,84 @@ def data_dir(tmp_path: Path) -> Path:
     return path
 
 
+@pytest.mark.parametrize("exact_file", [False, True])
+def test_filename_upgrade_previews_then_preserves_bytes_and_backup(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], exact_file: bool
+) -> None:
+    root = tmp_path / "project" / "result" / "entry"
+    point = root / "points" / "working"
+    point.mkdir(parents=True)
+    originals = {
+        root / "setup.yaml": b"# entry\\nopaque: [1, 2]\\n",
+        root / "module_cfg.yaml": b"# library\\nanything: null\\n",
+        point / "point.yaml": b"# point\\nunparsed: true\\n",
+        point / "module_cfg.yaml": b"# point library\\n",
+    }
+    for path, content in originals.items():
+        path.write_bytes(content)
+    aliases = point / "aliases.yaml"
+    aliases.write_bytes(b"aliases: {}\\n")
+    target = root / "setup.yaml" if exact_file else root
+    selected = {target: originals[target]} if exact_file else originals
+    args = ["--scope", "filenames", str(target)]
+    # Missing CLI scope is a behavior failure, not a collection/setup error.
+    try:
+        status = main(args)
+    except SystemExit as error:
+        status = error.code
+    assert status == 0
+    preview = capsys.readouterr().out
+    for path, content in selected.items():
+        assert str(path) in preview
+        assert (
+            "library.yaml" if path.name == "module_cfg.yaml" else "parameters.yaml"
+        ) in preview
+        assert path.read_bytes() == content
+    assert not (tmp_path / "project-backup").exists()
+
+    assert main([*args, "--apply"]) == 0
+    for path, content in selected.items():
+        destination = path.with_name(
+            "library.yaml" if path.name == "module_cfg.yaml" else "parameters.yaml"
+        )
+        assert destination.read_bytes() == content
+        mirror = (
+            tmp_path / "project-backup" / path.parent.relative_to(tmp_path / "project")
+        )
+        backups = list(mirror.glob(f"{path.name}*"))
+        assert len(backups) == 1
+        assert backups[0].read_bytes() == content
+    assert aliases.read_bytes() == b"aliases: {}\\n"
+    if not exact_file:
+        assert main(args) == 0
+
+
+@pytest.mark.parametrize("apply", [False, True])
+def test_filename_upgrade_rejects_coexisting_names_without_writes(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], apply: bool
+) -> None:
+    root = tmp_path / "project" / "result" / "entry"
+    root.mkdir(parents=True)
+    old = root / "setup.yaml"
+    new = root / "parameters.yaml"
+    old.write_bytes(b"old bytes\\n")
+    new.write_bytes(b"new bytes\\n")
+    args = ["--scope", "filenames", str(root)]
+    if apply:
+        args.append("--apply")
+    assert main(args) == 1
+    output = capsys.readouterr().out
+    assert str(old) in output and str(new) in output
+    assert old.read_bytes() == b"old bytes\\n"
+    assert new.read_bytes() == b"new bytes\\n"
+    assert not (tmp_path / "project-backup").exists()
+
+
 def test_schema_hint_previews_and_applies_source_or_caller_target() -> None:
     policy = ParameterSchemaPolicy(
         2, ("uv", "run", "--no-sync", "--", "python", "scripts/upgrade_parameters.py")
     )
-    source = Path("/data/entry with spaces/setup.yaml")
+    source = Path("/data/entry with spaces/parameters.yaml")
     with pytest.raises(ValueError, match="schema_version missing") as error:
         policy.require_current({}, source=source)
     lines = str(error.value).splitlines()
@@ -106,7 +179,7 @@ def test_cli_reports_conversion_notes_outside_yaml_payload(
         return replace(converted, notes=("new: rename the declared placeholder",))
 
     plan = replace(rename_plan, steps=(UpgradeStep(1, transform),))
-    path = data_dir / "point.yaml"
+    path = data_dir / "parameters.yaml"
     path.write_text("schema_version: 1\nold: 7\n", encoding="utf-8")
     assert main([str(path)], plan=plan) == 0
     assert "new: rename the declared placeholder" in capsys.readouterr().out
@@ -201,7 +274,7 @@ def rename_plan() -> UpgradePlan:
 def test_file_dry_run_reports_changes_and_apply_backs_up_before_idempotent_rerun(
     data_dir: Path, rename_plan: UpgradePlan
 ) -> None:
-    path = data_dir / "point.yaml"
+    path = data_dir / "parameters.yaml"
     original = b"schema_version: 1\nold: 7\nkeep: [null, x]\n"
     path.write_bytes(original)
     source = UpgradeSource(path, point="bias-a")
@@ -285,15 +358,15 @@ def test_component_cli_expands_entry_for_preview_and_apply(
 ) -> None:
     root = data_dir / "entry with spaces"
     sources = (
-        root / "setup.yaml",
-        root / "points" / "bias-a" / "point.yaml",
-        root / "points" / "bias-b" / "point.yaml",
+        root / "parameters.yaml",
+        root / "points" / "bias-a" / "parameters.yaml",
+        root / "points" / "bias-b" / "parameters.yaml",
     )
     original = b"old: 7\nkeep: untouched\n"
     for path in sources:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(original)
-    unrelated = root / "points" / "bias-a" / "module_cfg.yaml"
+    unrelated = root / "points" / "bias-a" / "library.yaml"
     unrelated.write_bytes(b"library: untouched\n")
     before = set(root.rglob("*"))
 
@@ -335,14 +408,14 @@ def test_component_cli_rejects_non_entry_directory(
     diagnostic = capsys.readouterr().err
     assert str(data_dir) in diagnostic
     assert "not an entry directory" in diagnostic
-    assert "setup.yaml" in diagnostic
+    assert "parameters.yaml" in diagnostic
     assert list(data_dir.iterdir()) == []
 
 
 def test_component_cli_prints_caller_assumptions_before_file_results(
     data_dir: Path, rename_plan: UpgradePlan, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    path = data_dir / "point.yaml"
+    path = data_dir / "parameters.yaml"
     path.write_text("old: 7\n", encoding="utf-8")
     plan = replace(rename_plan, notes=("Reference points are assumed; recalibrate.",))
     assert main([str(path)], plan=plan) == 0
@@ -354,7 +427,7 @@ def test_component_cli_prints_caller_assumptions_before_file_results(
 def test_file_runner_carries_source_context_across_fresh_step_outputs(
     data_dir: Path,
 ) -> None:
-    source = data_dir / "setup.yaml"
+    source = data_dir / "parameters.yaml"
     source.write_text("schema_version: 1\n", encoding="utf-8")
     seen: list[tuple[Path | None, int]] = []
 
@@ -379,7 +452,7 @@ def test_apply_finishes_backup_before_replace_and_retains_it_on_failure(
     monkeypatch: pytest.MonkeyPatch,
     fail_replace: bool,
 ) -> None:
-    source = data_dir / "point.yaml"
+    source = data_dir / "parameters.yaml"
     original = b"schema_version: 1\nold: 7\n"
     source.write_bytes(original)
     replace = Path.replace
@@ -388,7 +461,7 @@ def test_apply_finishes_backup_before_replace_and_retains_it_on_failure(
     def observed_replace(temporary: Path, destination: Path) -> Path:
         backups.extend(
             (data_dir.parent.with_name("project-backup") / "result").glob(
-                "point.yaml.*.bak"
+                "parameters.yaml.*.bak"
             )
         )
         assert len(backups) == 1
@@ -413,7 +486,7 @@ def test_apply_finishes_backup_before_replace_and_retains_it_on_failure(
 def test_cli_backup_override_mirrors_project_path(
     data_dir: Path, rename_plan: UpgradePlan
 ) -> None:
-    source = data_dir / "point.yaml"
+    source = data_dir / "parameters.yaml"
     original = b"old: 7\n"
     source.write_bytes(original)
     backup_root = data_dir.parent / "archive"
@@ -424,7 +497,7 @@ def test_cli_backup_override_mirrors_project_path(
         )
         == 0
     )
-    (backup,) = (backup_root / "result").glob("point.yaml.*.bak")
+    (backup,) = (backup_root / "result").glob("parameters.yaml.*.bak")
     assert backup.read_bytes() == original
     assert list(data_dir.iterdir()) == [source]
 
@@ -434,7 +507,7 @@ def test_standalone_apply_requires_override_and_can_restore_original(
 ) -> None:
     source_dir = tmp_path / "standalone"
     source_dir.mkdir()
-    source = source_dir / "point.yaml"
+    source = source_dir / "parameters.yaml"
     original = b"old: 7\n"
     source.write_bytes(original)
     sources = (UpgradeSource(source),)
@@ -464,10 +537,10 @@ def test_unsafe_backup_destination_rejects_before_writes(
 ) -> None:
     data_dir = tmp_path / "project" / "result"
     data_dir.mkdir(parents=True)
-    source = data_dir / "point.yaml"
+    source = data_dir / "parameters.yaml"
     backup_root = tmp_path / "archive"
     if unsafe == "standalone":
-        source = tmp_path / "point.yaml"
+        source = tmp_path / "parameters.yaml"
         backup_root = tmp_path / "nested"
     elif unsafe == "symlink":
         backup_root.symlink_to(data_dir, target_is_directory=True)
@@ -497,7 +570,7 @@ def test_project_root_backup_override_rejects_mirror_into_source_tree_before_wri
     symlink_override: bool,
 ) -> None:
     project = tmp_path / "project"
-    source = project / data_tree / "entry" / "point.yaml"
+    source = project / data_tree / "entry" / "parameters.yaml"
     source.parent.mkdir(parents=True)
     original = b"old: 7\n"
     source.write_bytes(original)
@@ -520,7 +593,7 @@ def test_project_root_backup_override_rejects_mirror_into_source_tree_before_wri
 
 @pytest.fixture
 def legacy_source(data_dir: Path) -> Path:
-    source = data_dir / "point.yaml"
+    source = data_dir / "parameters.yaml"
     source.write_bytes(b"old: 7\n")
     return source
 
@@ -601,7 +674,7 @@ def test_named_backup_root_resumes_existing_mirrors(
         backups.append(result.backup_path)
 
     assert len(set(backups)) == 2
-    assert set((root / "result").glob("point.yaml.*.bak")) == set(backups)
+    assert set((root / "result").glob("parameters.yaml.*.bak")) == set(backups)
     assert all(path.read_bytes() == b"old: 7\n" for path in backups)
     assert all(path.read_bytes() == b"migration original\n" for path in existing_files)
 
@@ -655,7 +728,7 @@ def test_mirror_symlink_into_another_project_rejects_before_writes(
     destination_tree: str,
     redirect_entry: bool,
 ) -> None:
-    source = tmp_path / "project-a" / "result" / "entry" / "point.yaml"
+    source = tmp_path / "project-a" / "result" / "entry" / "parameters.yaml"
     source.parent.mkdir(parents=True)
     original = b"old: 7\n"
     source.write_bytes(original)
@@ -683,7 +756,7 @@ def test_mirror_symlink_into_another_project_rejects_before_writes(
 def test_database_source_uses_project_sibling_backup(
     tmp_path: Path, rename_plan: UpgradePlan
 ) -> None:
-    source = tmp_path / "project" / "Database" / "entry" / "point.yaml"
+    source = tmp_path / "project" / "Database" / "entry" / "parameters.yaml"
     source.parent.mkdir(parents=True)
     source.write_bytes(b"old: 7\n")
     (result,) = upgrade_files((UpgradeSource(source),), plan=rename_plan, apply=True)

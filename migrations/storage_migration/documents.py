@@ -21,6 +21,7 @@ from zcu_tools.resources.context.library import (
     ModuleLibraryDocument,
 )
 from zcu_tools.resources.dispersive_file import load_dispersive_file
+from zcu_tools.resources.document_names import LIBRARY_FILENAME, PARAMETERS_FILENAME
 from zcu_tools.resources.document_store import DocumentStore
 from zcu_tools.resources.entry import EditView, PointView, SetupView, source_path
 from zcu_tools.resources.entry.schema import (
@@ -371,7 +372,7 @@ def validate_document_baselines(
             "缺比較依據",
         )
     root = manifest.report.destination.result_path
-    required = {root / "setup.yaml", root / "module_cfg.yaml"}
+    required = {root / PARAMETERS_FILENAME, root / LIBRARY_FILENAME}
     required.update(item.destination for item in manifest.module_files)
     required.update(
         row.new_file
@@ -392,7 +393,7 @@ def validate_document_baselines(
         if label not in pending_labels:
             required.update(
                 root / "points" / label / name
-                for name in ("point.yaml", "module_cfg.yaml")
+                for name in (PARAMETERS_FILENAME, LIBRARY_FILENAME)
             )
     missing = required - {item.destination for item in documents.values()}
     if missing:
@@ -437,12 +438,14 @@ def _validate_document_paths(
     relative = baseline.destination.relative_to(root)
     parts = relative.parts
     if baseline.kind == "setup":
-        valid = parts == ("setup.yaml",)
+        valid = parts == (PARAMETERS_FILENAME,)
     elif baseline.kind == "point":
-        valid = len(parts) == 3 and parts[0] == "points" and parts[2] == "point.yaml"
+        valid = (
+            len(parts) == 3 and parts[0] == "points" and parts[2] == PARAMETERS_FILENAME
+        )
     elif baseline.kind == "library":
-        valid = parts == ("module_cfg.yaml",) or (
-            len(parts) == 3 and parts[0] == "points" and parts[2] == "module_cfg.yaml"
+        valid = parts == (LIBRARY_FILENAME,) or (
+            len(parts) == 3 and parts[0] == "points" and parts[2] == LIBRARY_FILENAME
         )
     else:
         directory = "predictors" if baseline.kind == "predictor" else baseline.kind

@@ -14,6 +14,7 @@ from pydantic import TypeAdapter
 from ruamel.yaml import YAML, YAMLError
 
 from zcu_tools.format_version import YamlMap
+from zcu_tools.resources.document_filename_upgrade import rename_document_files
 from zcu_tools.resources.document_store import DocumentValue, FieldPath
 from zcu_tools.resources.entry import entry_component_paths, entry_predictor_paths
 from zcu_tools.resources.file_lock import lock_path_for
@@ -293,12 +294,15 @@ def _upgrade_file(
 def main(argv: Sequence[str] | None = None, *, plan: UpgradePlan | None = None) -> int:
     """Run explicit component or record upgrades in process; return 0 or 1.
 
-    argv selects file paths, --scope components (default) or records, and optional
-    --apply; None reads process arguments. Components also accept entry directories,
+    argv selects file paths, --scope components (default), records or filenames,
+    and optional --apply; None reads process arguments. Components also accept entry directories,
     expanded by the entry owner to setup, all point YAML files and predictors/*.json.
     Predictor v1-to-v2 uses the resources owner, separately from the component plan.
     Non-entry directories raise argparse SystemExit(2). Components require a
-    caller-owned plan. Records accept only exact files, require --device-name,
+    caller-owned plan. Filenames accepts entry roots or exact old file paths,
+    renames without parsing or changing bytes, and needs no plan; new/old name
+    conflicts reject before writes. Run filenames before components when needed.
+    Records accept only exact files, require --device-name,
     an operator declaration, and do not use plan.
     Default dry-run prints file/field or line classifications without writes.
     Apply reports original-bytes external backups; --backup-root overrides the
@@ -307,19 +311,19 @@ def main(argv: Sequence[str] | None = None, *, plan: UpgradePlan | None = None) 
     No lab modules are imported, no versions or device names are inferred.
     """
     parser = argparse.ArgumentParser(
-        description="Upgrade component YAML or record JSONL (default: dry-run)"
+        description="Upgrade document filenames, component YAML or record JSONL (default: dry-run)"
     )
     parser.add_argument(
         "paths",
         nargs="+",
         type=Path,
-        help="source files or entry directories (components only); shell globs accepted",
+        help="source files or entry directories (components/filenames); shell globs accepted",
     )
     parser.add_argument(
-        "--apply", action="store_true", help="back up then replace valid documents"
+        "--apply", action="store_true", help="back up then apply the selected upgrade"
     )
     parser.add_argument(
-        "--scope", choices=("components", "records"), default="components"
+        "--scope", choices=("components", "records", "filenames"), default="components"
     )
     parser.add_argument(
         "--device-name",
@@ -344,6 +348,8 @@ def main(argv: Sequence[str] | None = None, *, plan: UpgradePlan | None = None) 
             parser.error(str(error))
     if device_name is not None:
         parser.error("--device-name is only valid with --scope records")
+    if options.scope == "filenames":
+        return rename_document_files(paths, apply=apply, backup_root=backup_root)
     if plan is None:
         parser.error("component scope requires a caller-configured upgrade plan")
     try:

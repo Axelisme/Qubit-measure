@@ -18,7 +18,7 @@ from zcu_tools.resources.context import ModuleLibrary
 @pytest.fixture
 def library_path(tmp_path: Path) -> Path:
     """Create empty library YAML and return its path."""
-    path = tmp_path / "module_cfg.yaml"
+    path = tmp_path / "library.yaml"
     path.write_text(
         "format: zcu.module-library\nformat_version: '2.0'\n", encoding="utf-8"
     )

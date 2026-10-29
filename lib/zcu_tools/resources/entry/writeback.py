@@ -20,6 +20,7 @@ from zcu_tools.cfg_model import (
 )
 from zcu_tools.core.numeric_scalar import normalize_numpy_scalar
 from zcu_tools.format_version import YamlMap, YamlValue
+from zcu_tools.resources.document_names import LIBRARY_FILENAME
 
 from .ledger import RecordsLedger
 from .ledger_models import (
@@ -346,7 +347,7 @@ class PointWritebackTarget:
                 self._storage.result_path
                 / "points"
                 / self._storage.point
-                / "module_cfg.yaml",
+                / LIBRARY_FILENAME,
                 allow_absent=True,
             )
         return self._library_handle

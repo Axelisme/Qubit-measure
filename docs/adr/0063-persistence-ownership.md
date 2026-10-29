@@ -140,7 +140,7 @@ Load Data 同時提供 File 選檔與 opened entry 的 native 檔案清單。清
 
 ### Setup 與 point alias 表
 
-Setup 的 alias 位於 `<entry>/aliases.yaml`。每個 point 的 alias 位於 `<entry>/points/<p>/aliases.yaml`，與 `point.yaml`、`module_cfg.yaml` 並列。從 setup 新建 point 時有檔才複製，clone 則只複製來源 point 的檔。各表之後獨立修改，不繼承或覆寫 setup。既有 point 缺檔視為空表，不自動複製、不回退 setup。
+Setup 的 alias 位於 `<entry>/aliases.yaml`。每個 point 的 alias 位於 `<entry>/points/<p>/aliases.yaml`，與 `parameters.yaml`、`library.yaml` 並列。從 setup 新建 point 時有檔才複製，clone 則只複製來源 point 的檔。各表之後獨立修改，不繼承或覆寫 setup。既有 point 缺檔視為空表，不自動複製、不回退 setup。
 
 使用者於 2026-10-20 裁定：「採用乙，alias. yaml的獨立檔案，找不到就視內容為空，與其他兩個資料容器並列」。
 
@@ -207,6 +207,16 @@ Point availability 只判參數文件可讀且能解析成 owner 的文件結構
 2026-10-26，使用者說明原因：「所以我才希望將擬合與測量分開階段，因為你不會知道擬合需要什麼資訊，也不知道想要什麼格式，只要都記錄成jsonl，透過要分析時按需處理來組合需要的資訊。所以請你不要讓分析工具與讀取工具有非必要的格式檢查」
 
 ### Component 文件版本與明確升級
+
+Entry 根與每個 point 都使用 `parameters.yaml`、`library.yaml`、`aliases.yaml`。
+檔名由 `resources.document_names` 擁有，entry 以根層 `parameters.yaml` 識別。
+Runtime 不讀舊檔名；只有舊 setup 的 entry 開啟時列出舊路徑與明確改名指令。
+原升級入口的 `--scope filenames` 只改名、不改 bytes，提供 dry-run、外部備份與 apply。
+新舊並存時拒絕、不覆寫。需要內容升級時先 filenames，再 components。
+Components 只枚舉新名，schema_version 與容器版本不因檔名改變。
+操作與失敗限制見 [升級指南](../parameter-upgrades.md#先改檔名再升級內容)。
+
+2026-10-29，使用者對統一文件檔名的選項回覆「A1 B採用建議」。
 
 每份存 component 參數的 setup、point 與 entry template 都有 `schema_version: N`。它描述整份 component schema，不取代容器的 format／format_version。Lab 與 component models 一起在既有 ComponentRegistry 註冊具名 ParameterSchemaPolicy，提供目前版本與 upgrade 命令。未配置就失敗，lib 不預設 lab 版本，也不把 policy 參數散到 ResultEntry／open／create／template。
 

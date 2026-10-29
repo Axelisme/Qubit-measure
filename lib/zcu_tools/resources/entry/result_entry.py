@@ -18,6 +18,12 @@ from ruamel.yaml.error import YAMLError
 
 from zcu_tools.cfg_model import WaveformAssetInfo
 from zcu_tools.format_version import YamlMap
+from zcu_tools.resources.document_names import (
+    ALIASES_FILENAME,
+    LEGACY_SETUP_FILENAME,
+    LIBRARY_FILENAME,
+    PARAMETERS_FILENAME,
+)
 from zcu_tools.resources.document_store import DocumentRevision, DocumentStore
 from zcu_tools.resources.parameter_metadata import validate_parameter_header
 from zcu_tools.resources.record_table import JsonlRecordTable
@@ -90,18 +96,22 @@ def _entry_path(root: str | Path, name: str, *, new_destination: bool = False) -
 def entry_component_paths(entry_root: Path) -> tuple[Path, ...]:
     """List setup then sorted point YAML paths without parsing component schemas.
 
-    entry_root is the exact Result entry directory. A setup.yaml file identifies
+    entry_root is the exact Result entry directory. A parameters.yaml file identifies
     an entry, as in ResultEntry.list_names; otherwise raise ValueError. Include
-    every existing points/*/point.yaml file, even without module_cfg.yaml.
+    every existing points/*/parameters.yaml file, even without library.yaml.
     Missing points/ means no points. Do not read YAML or create files or locks.
     """
-    setup = entry_root / "setup.yaml"
+    setup = entry_root / PARAMETERS_FILENAME
     if not entry_root.is_dir() or not setup.is_file():
-        raise ValueError(f"{entry_root}: not an entry directory; expected setup.yaml")
+        raise ValueError(
+            f"{entry_root}: not an entry directory; expected {PARAMETERS_FILENAME}"
+        )
     return (
         setup,
         *sorted(
-            path for path in entry_root.glob("points/*/point.yaml") if path.is_file()
+            path
+            for path in entry_root.glob(f"points/*/{PARAMETERS_FILENAME}")
+            if path.is_file()
         ),
     )
 
@@ -109,7 +119,7 @@ def entry_component_paths(entry_root: Path) -> tuple[Path, ...]:
 def entry_predictor_paths(entry_root: Path) -> tuple[Path, ...]:
     """List sorted predictors/*.json in an existing Result entry without parsing.
 
-    setup.yaml identifies an entry, as for entry_component_paths. A missing
+    parameters.yaml identifies an entry, as for entry_component_paths. A missing
     predictors directory yields no paths. Reject a symlink escaping the entry
     with ValueError; do not read documents or create directories or locks.
     """
@@ -161,7 +171,7 @@ class ResultEntry:
     def __init__(self, result_path: Path, database_path: Path) -> None:
         self._result_path = result_path
         self._database_path = database_path
-        source = result_path / "setup.yaml"
+        source = result_path / PARAMETERS_FILENAME
 
         # Bind diagnostics to this handle without shared mutable model context.
         class EntrySetupDocument(SetupDocument):
@@ -184,7 +194,9 @@ class ResultEntry:
         self._setup = SetupView(self._setup_store, source)
 
     def _validate_setup(self, document: SetupDocument) -> None:
-        validate_view_components(document, source=self._result_path / "setup.yaml")
+        validate_view_components(
+            document, source=self._result_path / PARAMETERS_FILENAME
+        )
 
     @property
     def setup(self) -> SetupView:
@@ -226,7 +238,7 @@ class ResultEntry:
         point=None selects <entry>/aliases.yaml. Otherwise point is a safe
         single-segment label selecting <entry>/points/<point>/aliases.yaml;
         invalid labels raise ValueError. Only aliases.yaml is read; neither
-        point.yaml nor module_cfg.yaml needs to exist or is parsed or changed.
+        parameters.yaml nor library.yaml needs to exist or is parsed or changed.
         A missing alias file returns an empty EntryAliases, without copying or
         falling back to setup. Preserve order, empty bindings and raw $ links.
         Accept zcu.aliases 1.x; header/schema/YAML and I/O errors propagate.
@@ -264,7 +276,7 @@ class ResultEntry:
         aliases is an EntryAliases containing ordered scalar/list bindings, not
         resolved names. point=None selects setup; a safe single-segment point
         label selects only that point's aliases.yaml. Invalid labels raise
-        ValueError; missing point.yaml raises FileNotFoundError. module_cfg.yaml
+        ValueError; missing parameters.yaml raises FileNotFoundError. library.yaml
         need not exist. Neither parameter document is parsed or changed.
         Write zcu.aliases 1.0 after strict string validation, using sibling-temp
         replacement. Schema,
@@ -275,16 +287,16 @@ class ResultEntry:
         """
         destination = self._aliases_path(point)
         if point is not None:
-            source = destination.parent / "point.yaml"
+            source = destination.parent / PARAMETERS_FILENAME
             if not source.is_file():
                 raise FileNotFoundError(source)
         return save_entry_aliases(destination, aliases)
 
     def _aliases_path(self, point: str | None) -> Path:
         if point is None:
-            return self._result_path / "aliases.yaml"
+            return self._result_path / ALIASES_FILENAME
         directory = _entry_path(self._result_path / "points", point)
-        return directory / "aliases.yaml"
+        return directory / ALIASES_FILENAME
 
     @property
     def ledger(self) -> RecordsLedger:
@@ -346,7 +358,7 @@ class ResultEntry:
         return bind_record_table(self._result_path, component)
 
     def list_points(self) -> list[str]:
-        """Return sorted labels of directories containing point.yaml.
+        """Return sorted labels of directories containing parameters.yaml.
 
         Library and aliases files are not required or inspected. Parameter
         contents are not loaded or validated here. Missing points/ returns [];
@@ -357,7 +369,7 @@ class ResultEntry:
         return sorted(
             path.name
             for path in (self._result_path / "points").iterdir()
-            if path.is_dir() and (path / "point.yaml").is_file()
+            if path.is_dir() and (path / PARAMETERS_FILENAME).is_file()
         )
 
     def point_description(self, label: str) -> str:
@@ -369,7 +381,7 @@ class ResultEntry:
         document path. No library or aliases are read. No locks are acquired
         and no files are changed or created.
         """
-        source = _entry_path(self._result_path / "points", label) / "point.yaml"
+        source = _entry_path(self._result_path / "points", label) / PARAMETERS_FILENAME
         try:
             with source.open(encoding="utf-8") as stream:
                 document = TypeAdapter(dict[object, object]).validate_python(
@@ -394,7 +406,7 @@ class ResultEntry:
         callers to isolate per point. No availability guard is added to reads.
         No view is installed, and no documents are changed or created.
         """
-        source = _entry_path(self._result_path / "points", label) / "point.yaml"
+        source = _entry_path(self._result_path / "points", label) / PARAMETERS_FILENAME
         self._point_store(source)
 
     def new_point(
@@ -408,11 +420,11 @@ class ResultEntry:
 
         label is a safe single path segment; existing destinations raise
         DestinationExistsError before writes.
-        Copy the complete published source YAML: setup.yaml without clone_from,
-        otherwise the source point.yaml. Renew created_at in the independent copy.
+        Copy the complete published source YAML: parameters.yaml without clone_from,
+        otherwise the source parameters.yaml. Renew created_at in the independent copy.
         clone_from is a same-entry label, <entry>/<point>, or a ResultEntry-bound
         PointView using the same resolved result/database roots. Reload published
-        point and module_cfg and renew creation time. Copy aliases.yaml from
+        point parameters and library and renew creation time. Copy aliases.yaml from
         setup when seeding, or from the source point when cloning, only if present.
         Missing source aliases or library stay absent, without setup fallback
         during clone. Seeding without clone_from creates a header-only library.
@@ -451,19 +463,20 @@ class ResultEntry:
                 name: content.component(name) for name in content.component_names()
             }
             shutil.copyfile(
-                self._result_path / "setup.yaml", destination / "point.yaml"
+                self._result_path / PARAMETERS_FILENAME,
+                destination / PARAMETERS_FILENAME,
             )
             # Missing YAML defaults may have been generated in the template's
             # native model. Copy those values too, in the same working units.
-            with self._point_store(destination / "point.yaml").edit() as draft:
+            with self._point_store(destination / PARAMETERS_FILENAME).edit() as draft:
                 draft.components = components
                 draft.general.created_at = (
                     datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
                 )
-        _create_empty_library(destination / "module_cfg.yaml")
-        aliases = self._result_path / "aliases.yaml"
+        _create_empty_library(destination / LIBRARY_FILENAME)
+        aliases = self._result_path / ALIASES_FILENAME
         if aliases.exists():
-            shutil.copyfile(aliases, destination / "aliases.yaml")
+            shutil.copyfile(aliases, destination / ALIASES_FILENAME)
 
     def _clone_source(self, clone_from: str | PointView) -> tuple[ResultEntry, Path]:
         result_root = self._result_path.parent
@@ -497,18 +510,20 @@ class ResultEntry:
         clone_from: str | PointView,
     ) -> None:
         source_entry, source = self._clone_source(clone_from)
-        store = source_entry._point_store(source / "point.yaml")
+        store = source_entry._point_store(source / PARAMETERS_FILENAME)
         with store.locked():
             store.refresh()
             point_document = store.snapshot()
-            shutil.copyfile(source / "point.yaml", destination / "point.yaml")
-        aliases = source / "aliases.yaml"
+            shutil.copyfile(
+                source / PARAMETERS_FILENAME, destination / PARAMETERS_FILENAME
+            )
+        aliases = source / ALIASES_FILENAME
         if aliases.exists():
-            shutil.copyfile(aliases, destination / "aliases.yaml")
+            shutil.copyfile(aliases, destination / ALIASES_FILENAME)
         from zcu_tools.resources.context.library_store import copy_library
 
-        copy_library(source / "module_cfg.yaml", destination / "module_cfg.yaml")
-        cloned_store = self._point_store(destination / "point.yaml")
+        copy_library(source / LIBRARY_FILENAME, destination / LIBRARY_FILENAME)
+        cloned_store = self._point_store(destination / PARAMETERS_FILENAME)
         with cloned_store.edit() as draft:
             draft.components = point_document.components
             draft.general.created_at = (
@@ -518,9 +533,9 @@ class ResultEntry:
     def use_point(self, label: str) -> PointView:
         """Load one complete point and return an independently bound view.
 
-        label follows new_point's single-segment path rules. Only point.yaml
-        must exist; module_cfg.yaml is neither required nor parsed here. Invalid
-        labels raise ValueError. Missing point.yaml raises MissingPointError,
+        label follows new_point's single-segment path rules. Only parameters.yaml
+        must exist; library.yaml is neither required nor parsed here. Invalid
+        labels raise ValueError. Missing parameters.yaml raises MissingPointError,
         a FileNotFoundError subclass; other I/O and reference errors propagate. Original
         models apply their required fields, defaults and validators. Schema
         ValidationError becomes ValueError with the full document path and original
@@ -529,7 +544,7 @@ class ResultEntry:
         No files are committed, other snapshots changed or active point selected.
         """
         directory = _entry_path(self._result_path / "points", label)
-        source = directory / "point.yaml"
+        source = directory / PARAMETERS_FILENAME
         try:
             source.stat()
         except FileNotFoundError as error:
@@ -546,7 +561,7 @@ class ResultEntry:
     ) -> ModuleLibrary:
         """Open a setup or point library without consulting the ledger.
 
-        None selects entry/module_cfg.yaml; a label selects its point library
+        None selects entry/library.yaml; a label selects its point library
         under use_point's safe path rules. assets is optional for Spec-only use.
         A missing point library is empty with revision None; the first nonempty
         edit creates it. A missing setup library still raises FileNotFoundError.
@@ -562,7 +577,7 @@ class ResultEntry:
             else _entry_path(self._result_path / "points", label)
         )
         return ModuleLibrary(
-            directory / "module_cfg.yaml", assets=assets, allow_absent=label is not None
+            directory / LIBRARY_FILENAME, assets=assets, allow_absent=label is not None
         )
 
     def _validate_parameter_read(self, document: YamlMap, source: Path) -> None:
@@ -653,7 +668,7 @@ class ResultEntry:
         Invalid names, identity/header/YAML and escaping symlinks raise ValueError.
         Missing setup and other filesystem errors propagate. No files are written.
         """
-        source = _entry_path(result_root, name) / "setup.yaml"
+        source = _entry_path(result_root, name) / PARAMETERS_FILENAME
         if not source.resolve().is_relative_to(source.parent.resolve()):
             raise ValueError(f"{source}: setup escapes its entry")
         try:
@@ -671,7 +686,7 @@ class ResultEntry:
 
     @classmethod
     def list_names(cls, *, result_root: str | Path) -> tuple[str, ...]:
-        """List sorted direct entry directories containing setup.yaml, without parsing.
+        """List sorted direct entry directories containing parameters.yaml, without parsing.
 
         Missing/non-directory/inaccessible roots retain their filesystem errors.
         No legacy lookup, content validation or directory creation occurs.
@@ -680,7 +695,7 @@ class ResultEntry:
             sorted(
                 path.name
                 for path in Path(result_root).iterdir()
-                if path.is_dir() and (path / "setup.yaml").is_file()
+                if path.is_dir() and (path / PARAMETERS_FILENAME).is_file()
             )
         )
 
@@ -725,9 +740,11 @@ class ResultEntry:
                 "components": {},
                 "metadata": {},
             }
-            with (result_path / "setup.yaml").open("x", encoding="utf-8") as stream:
+            with (result_path / PARAMETERS_FILENAME).open(
+                "x", encoding="utf-8"
+            ) as stream:
                 YAML(typ="rt").dump(document, stream)
-            _create_empty_library(result_path / "module_cfg.yaml")
+            _create_empty_library(result_path / LIBRARY_FILENAME)
             return cls(result_path, database_path)
         except BaseException:
             # mkdir succeeded, so this call owns the new Result directory.
@@ -743,7 +760,9 @@ class ResultEntry:
         name must be a safe single path segment. The Result entry directory and
         setup must exist and validate its header; field values validate on use.
         Missing points/ and records/ are empty and are not created.
-        Missing paths propagate filesystem errors. Schema ValidationError becomes
+        A legacy-only setup filename raises ValueError naming the offline filename
+        upgrade command; no legacy content is read. Other missing paths propagate
+        filesystem errors. Schema ValidationError becomes
         ValueError with the full document path and original diagnostic. The original
         error remains its cause. Other schema errors propagate. Database is not inspected or created.
         """
@@ -758,4 +777,12 @@ class ResultEntry:
                 raise NotADirectoryError(
                     errno.ENOTDIR, os.strerror(errno.ENOTDIR), str(directory)
                 )
+        if (
+            not (result_path / PARAMETERS_FILENAME).exists()
+            and (result_path / LEGACY_SETUP_FILENAME).is_file()
+        ):
+            raise ValueError(
+                f"{result_path / LEGACY_SETUP_FILENAME}: legacy filename; run "
+                f"scripts/upgrade_parameters.py --scope filenames {str(result_path)!r}"
+            )
         return cls(result_path, database_path)
