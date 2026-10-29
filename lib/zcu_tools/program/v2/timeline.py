@@ -16,21 +16,14 @@ from qick.asm_v2 import (
     Trigger,
 )
 
+from ._timeline_guard import PulseGuard as _PulseGuard
+from ._timeline_guard import bounds as _bounds
 from .base import MyProgramV2
 from .ir import TimingLayout, TimingLoop
 from .macro.delay import DelayRegAuto
 from .modules.base import Module
 from .modules.util import get_fclk
 from .resources import ProgramResourcesMixin
-
-
-def _bounds(value: float | QickParam) -> tuple[float, float]:
-    if isinstance(value, QickParam):
-        return (
-            value.start + sum(min(0.0, s) for s in value.spans.values()),
-            value.start + sum(max(0.0, s) for s in value.spans.values()),
-        )
-    return value, value
 
 
 def _maximum(a: float | QickParam, b: float | QickParam, name: str):
@@ -93,99 +86,6 @@ def _repeat_minimum(name: str, n: int | str, range_hint: tuple[int, int] | None)
     if range_hint is not None:
         raise ValueError("integer repeat does not accept range_hint")
     return n
-
-
-def _guard_candidates(values: tuple[float | QickParam, ...]):
-    """Keep the pointwise maximum envelope without choosing crossing sweeps."""
-    result: list[float | QickParam] = []
-    for value in values:
-        if any(_bounds(old - value)[0] >= -1e-12 for old in result):
-            continue
-        result = [old for old in result if _bounds(value - old)[0] < -1e-12]
-        result.append(value)
-    return tuple(result)
-
-
-@dataclass
-class _PulseGuard:
-    """Validation-only timestamp transfer and managed-pulse entry limits.
-
-    F(x) = max(x + shifts, floors). Multiple candidates retain crossing sweep
-    envelopes exactly, rather than choosing one sweep endpoint for every point.
-    Every limit requires the entry timestamp x <= limit. No scheduling state is
-    changed here; native Pulse still owns timestamp updates.
-    """
-
-    channel: int
-    shifts: tuple[float | QickParam, ...] = (0.0,)
-    floors: tuple[float | QickParam, ...] = ()
-    limits: tuple[float | QickParam, ...] = ()
-
-    def require(self, ends, limits) -> None:
-        for end in ends:
-            for limit in limits:
-                if _bounds(limit - end)[0] < -1e-12:
-                    raise ValueError(
-                        f"repeat: channel {self.channel} pulse overlap; cannot prove "
-                        "start >= previous end at every sweep point; use delay_timeline"
-                    )
-
-    def then(self, other: "_PulseGuard") -> None:
-        """Compose a following transfer, pulling its guards back to our entry."""
-        self.require(self.floors, other.limits)
-        limits = self.limits + tuple(
-            limit - shift for limit in other.limits for shift in self.shifts
-        )
-        self.limits = tuple(-v for v in _guard_candidates(tuple(-v for v in limits)))
-        self.floors = _guard_candidates(
-            other.floors
-            + tuple(end + shift for end in self.floors for shift in other.shifts)
-        )
-        self.shifts = _guard_candidates(
-            tuple(a + b for a in self.shifts for b in other.shifts)
-        )
-
-    def repeated(self, minimum: int, maximum: int) -> "_PulseGuard":
-        """Compose every possible count without unrolling iterations.
-
-        F^n(x) has shifts n*a and floors b + max(0, (n-1)*a).
-        Guards at entries k=0..maximum-1 need x+k*a <= limit;
-        their constant floors need b+max(0, (maximum-2)*a) <= limit.
-        Each expression is affine in k, so its endpoints cover all interior
-        integer counts at each sweep point, even when candidate sweeps cross.
-        """
-        if maximum == 0:
-            return _PulseGuard(self.channel)
-        if maximum >= 2:
-            self.require(
-                self.floors
-                + tuple(
-                    end + (maximum - 2) * shift
-                    for end in self.floors
-                    for shift in self.shifts
-                ),
-                self.limits,
-            )
-        limits = self.limits + tuple(
-            limit - (maximum - 1) * shift
-            for limit in self.limits
-            for shift in self.shifts
-        )
-        return _PulseGuard(
-            self.channel,
-            _guard_candidates(
-                tuple(n * a for n in (minimum, maximum) for a in self.shifts)
-            ),
-            _guard_candidates(
-                self.floors
-                + tuple(
-                    end + (maximum - 1) * shift
-                    for end in self.floors
-                    for shift in self.shifts
-                )
-            ),
-            tuple(-v for v in _guard_candidates(tuple(-v for v in limits))),
-        )
 
 
 @dataclass

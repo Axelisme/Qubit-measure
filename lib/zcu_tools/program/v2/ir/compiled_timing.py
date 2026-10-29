@@ -275,18 +275,18 @@ class _Machine:
             value = self.label_address(inst.label, address)
         else:
             raise ValueError(f"Unsupported register write: {inst}")
-        # Immediate writeback and the flag ALU are independent. Evaluate the
-        # ALU before writeback: its operands may include the destination register.
-        flags = (
-            self.expression(inst.op)
-            if inst.uf and inst.op is not None and inst.src == SrcKeyword.IMM
-            else value
-        )
+        # The flag ALU reads prewrite operands, which may include the destination.
+        if inst.uf:
+            self.flags = self.register_flags(inst, value)
         self.registers[inst.dst.canonical_name] = (
             None if value is None else _signed32(value)
         )
-        if inst.uf:
-            self.flags = flags
+
+    def register_flags(self, inst: RegWriteInst, value: int | None) -> int | None:
+        """Evaluate the flag ALU independently of immediate destination writeback."""
+        if inst.src == SrcKeyword.IMM and inst.op is not None:
+            return self.expression(inst.op)
+        return value
 
     def read_dmem(self, inst: DmemReadInst) -> None:
         if inst.wr or inst.op or inst.lit or inst.uf:
