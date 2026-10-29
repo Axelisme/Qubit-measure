@@ -9,6 +9,7 @@ from itertools import combinations
 import numpy as np
 from numpy.typing import NDArray
 
+from zcu_tools.cfg_model import Centroid3Classifier
 from zcu_tools.utils.shot_classification import classify_shots, nearest_centroid3
 
 
@@ -152,6 +153,76 @@ def analyze_reference_iq(
         minimum_singular_value=float(np.linalg.svd(confusion, compute_uv=False).min()),
         training_shots=split,
         evaluation_shots=ordered.shape[1] - split,
+    )
+
+
+def classify_reference_iq(
+    signals: NDArray[np.complex128], centroids: NDArray[np.complex128]
+) -> NDArray[np.float64]:
+    """Classify acquired shots using three fixed reference IQ centers.
+
+    signals has arbitrary leading scan axes and a nonempty final shot axis.
+    centroids has shape (3,) in label order (g,e,f), in the same ADC units as
+    signals, e.g. analyze_reference_iq(...).centroids. Centers must be distinct.
+    Return scan axes plus a final three-label fraction axis. Exact nearest-center
+    ties choose the lowest label. No retraining, correction or clipping occurs.
+    Empty/nonfinite shots or invalid centers raise ValueError. Preparation-label
+    fractions are not latent energy-state populations.
+    """
+    if signals.ndim < 1 or signals.shape[-1] == 0 or not np.isfinite(signals).all():
+        raise ValueError("Acquired IQ must have a nonempty shot axis and finite shots")
+    if centroids.shape != (3,) or not np.isfinite(centroids).all():
+        raise ValueError("Reference centroids must have shape (3,) and be finite")
+    if len(np.unique(centroids)) != 3:
+        raise ValueError("Reference centroids must be distinct")
+    predictions = nearest_centroid3(signals, *centroids)
+    return np.stack(
+        [(predictions == label).mean(axis=-1) for label in range(3)], axis=-1
+    )
+
+
+@dataclass(frozen=True)
+class Centroid3IQAnalysis:
+    """Fixed-calibration IQ fractions in preparation-label coordinates.
+
+    raw_populations/corrected_populations preserve all scan axes and append
+    g/e/f. Corrected fractions may be negative or above one, without clipping.
+    confusion_matrix copies calibration rows prepared g/e/f, columns measured
+    g/e/f. condition_number is its 2-norm condition number;
+    minimum_singular_value is its smallest singular value. No purity is inferred.
+    """
+
+    raw_populations: NDArray[np.float64]
+    corrected_populations: NDArray[np.float64]
+    confusion_matrix: NDArray[np.float64]
+    condition_number: float
+    minimum_singular_value: float
+
+
+def analyze_centroid3_iq(
+    signals: NDArray[np.complex128], calibration: Centroid3Classifier
+) -> Centroid3IQAnalysis:
+    """Classify raw acquired IQ and correct with one captured readout calibration.
+
+    signals has arbitrary scan axes and a nonempty final shot axis, in the same
+    mean-sample ADC units as calibration centers. calibration must be the
+    caller's saved-run centroid3 calibration, not a new fit or live lookup.
+    Return raw/unclipped corrected g/e/f fractions and training-matrix quality.
+    Nonfinite/incomplete shots raise ValueError; a singular confusion matrix
+    raises LinAlgError. Inputs are unchanged. No library or hardware is read.
+    """
+    centers = np.asarray(
+        [calibration.g_center, calibration.e_center, calibration.f_center],
+        dtype=np.complex128,
+    )
+    matrix = np.asarray(calibration.confusion_matrix, dtype=np.float64)
+    raw = classify_reference_iq(signals, centers)
+    return Centroid3IQAnalysis(
+        raw_populations=raw,
+        corrected_populations=correct_populations(raw, matrix, clip=False),
+        confusion_matrix=matrix,
+        condition_number=float(np.linalg.cond(matrix)),
+        minimum_singular_value=float(np.linalg.svd(matrix, compute_uv=False).min()),
     )
 
 

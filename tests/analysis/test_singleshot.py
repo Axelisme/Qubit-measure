@@ -4,14 +4,36 @@ import numpy as np
 import pytest
 from zcu_tools.analysis.fitting.singleshot import transition_state_circle_probabilities
 from zcu_tools.analysis.singleshot import (
+    analyze_centroid3_iq,
     analyze_reference_iq,
     calc_populations,
     classify_rabi_iq,
+    classify_reference_iq,
     classify_result,
     correct_populations,
     raw_population_signal,
 )
 from zcu_tools.utils.shot_classification import gaussian_region_probability
+
+
+def test_centroid3_iq_analysis_preserves_scan_axes_and_unclipped_estimates() -> None:
+    from zcu_tools.cfg_model import Centroid3Classifier
+
+    calibration = Centroid3Classifier(
+        g_center=0j,
+        e_center=2 + 0j,
+        f_center=4 + 0j,
+        confusion_matrix=[[0.75, 0.25, 0], [0.25, 0.75, 0], [0, 0, 1]],
+    )
+    shots = np.array([[[0, 0, 0, 0], [0, 2, 4, 1]]], dtype=np.complex128)
+    result = analyze_centroid3_iq(shots, calibration)
+    np.testing.assert_allclose(result.raw_populations, [[[1, 0, 0], [0.5, 0.25, 0.25]]])
+    np.testing.assert_allclose(
+        result.corrected_populations, [[[1.5, -0.5, 0], [0.625, 0.125, 0.25]]]
+    )
+    np.testing.assert_allclose(result.confusion_matrix, calibration.confusion_matrix)
+    assert result.condition_number == pytest.approx(2)
+    assert result.minimum_singular_value == pytest.approx(0.5)
 
 
 def test_population_conversion_and_readout_correction() -> None:
@@ -118,6 +140,37 @@ def test_reference_diagnostics_do_not_depend_on_adc_unit_scale() -> None:
     result = analyze_reference_iq(signals, np.array([0, 1, 2]))
     assert result.minimum_separation == pytest.approx(np.sqrt(150))
     np.testing.assert_allclose(result.confusion_matrix, np.eye(3))
+
+
+def test_reference_classifier_applies_fixed_centers_over_scan_axes() -> None:
+    centers = np.array([0, 10, 10j], dtype=np.complex128)
+    shots = np.array([[[0, 10, 10j, 5], [10j, 10j, 10j, 0]]], dtype=np.complex128)
+    np.testing.assert_allclose(
+        classify_reference_iq(shots, centers),
+        [[[0.5, 0.25, 0.25], [0.25, 0, 0.75]]],
+    )
+    np.testing.assert_allclose(
+        classify_reference_iq(shots[0, 0], centers), [0.5, 0.25, 0.25]
+    )
+
+
+@pytest.mark.parametrize(
+    ("shots", "centers"),
+    [
+        (np.array(0j), np.array([0, 10, 10j])),
+        (np.empty((2, 0), dtype=complex), np.array([0, 10, 10j])),
+        (np.array([np.nan + 0j]), np.array([0, 10, 10j])),
+        (np.array([0j]), np.array([0, 10])),
+        (np.array([0j]), np.array([0, 0, 10j])),
+        (np.array([0j]), np.array([0, np.inf, 10j])),
+        (np.array([0j]), np.array([[0, 10, 10j]])),
+    ],
+)
+def test_reference_classifier_rejects_incomplete_iq_or_invalid_centers(
+    shots, centers
+) -> None:
+    with pytest.raises(ValueError, match="IQ|centroids"):
+        classify_reference_iq(shots, centers)
 
 
 def test_rabi_classification_reports_per_coordinate_fractions() -> None:

@@ -158,6 +158,7 @@ from zcu_lab.v2.twotone.ro_optimize.length.gui import (
 from zcu_lab.v2.twotone.ro_optimize.power.gui import (
     DEFINITION as RO_OPT_POWER_DEFINITION,
 )
+from zcu_lab.v2.twotone.stirap.gui import DEFINITION as STIRAP_DEFINITION
 from zcu_lab.v2.twotone.time_domain.cpmg.gui import DEFINITION as CPMG_DEFINITION
 from zcu_lab.v2.twotone.time_domain.t1.gui import DEFINITION as T1_DEFINITION
 from zcu_lab.v2.twotone.time_domain.t2echo.gui import DEFINITION as T2_ECHO_DEFINITION
@@ -178,6 +179,7 @@ ADAPTERS: dict[str, object] = {
     "onetone/power_dep": ONE_TONE_POWER_DEP_DEFINITION,
     "onetone/flux_dep": ONE_TONE_FLUX_DEP_DEFINITION,
     "twotone/freq": FREQ_DEFINITION,
+    "twotone/stirap": STIRAP_DEFINITION,
     "twotone/flux_dep": FLUX_DEP_DEFINITION,
     "twotone/power_dep": POWER_DEP_DEFINITION,
     "twotone/rabi/len_rabi": LEN_RABI_DEFINITION,
