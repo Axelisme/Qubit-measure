@@ -1,6 +1,6 @@
 # `zcu_tools.program` — QICK integration
 
-**Last updated:** 2026-10-29
+**Last updated:** 2026-10-29，herald instance 與跨 acquire 分工
 
 **讀者：** framework-dev。QICK 整合、程式建構與 acquisition 依賴速查。
 
@@ -42,9 +42,13 @@ missing circle radius with a GE Post instruction.
 `PulseReadout.herald_spec(prog, occurrence=...)` derives one `program.herald.HeraldSpec`
 from a compiled program. The required occurrence counts this instance's emissions
 within each shot; the returned read_index counts all reads on its logical ADC.
-Initialize an instance once, then reuse its run method for herald and terminal
-reads. A later read on the same ADC is required. Any Repeat/Branch trigger on
-that ADC, count mismatches and missing calibration fail before acquisition.
+One instance may be initialized once and emit both herald and terminal reads.
+A separate instance using the same readout settings may emit the terminal read
+instead. Sharing readout settings does not require sharing an instance.
+Call herald_spec on the instance that emitted the herald; occurrence counts only
+that instance's emissions. A later read on the same ADC is required.
+Any Repeat/Branch trigger on that ADC, count mismatches and missing calibration
+fail before acquisition.
 The control-flow restriction includes non-herald reads because QICK's static
 trigger counts cannot reliably determine dynamic read indices. Control flow on
 other ADCs remains supported. Circle calibration requires the GE Post radius.
@@ -85,10 +89,10 @@ shots. It returns excited fraction in I and zero in Q. Scalar and per-ADC-list
 projection options retain QICK declaration-order semantics.
 
 The return list stays in ADC declaration order. Each float64 array has shape
-`(remaining_reads, *point_dims, 2)`, with only herald reads removed. Acquisition
-adds accepted signal sums and counts across completed rounds, then divides by
-accepted count. It does not average round means equally. Zero-pass points have
-NaN in both components and acceptance fraction zero. Round hooks receive this
+`(remaining_reads, *point_dims, 2)`, with only herald reads removed. Within one
+acquire, acquisition adds accepted signal sums and counts across completed
+rounds, then divides by accepted count. It does not average round means equally.
+Zero-pass points have NaN in both components and acceptance fraction zero. Round hooks receive this
 same weighted running result.
 
 `get_herald_pass_fraction()` returns a detached dictionary keyed by herald ADC
@@ -99,6 +103,10 @@ integrated or decimated acquire, or after cancellation before the first complete
 round. A new admitted acquire clears previous fractions. Cancellation during a
 round discards that round and retains completed-round data and fractions.
 Finalization raises `StoppedPartialAcquireError` when no round completed.
+A host scan that combines separate acquires owns that combination and weights
+only delivered results by their accepted counts. If a builder skips acquire
+because of a stop request, the cached program has no new acquisition summary;
+its previous fractions must not be counted as another completed acquisition.
 
 `HeraldAcquireMixin` owns only grid-sized sums/counts. It precedes
 `RoundHookMixin` to replace the equal-round incremental summary. Existing tracker,

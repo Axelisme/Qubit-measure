@@ -144,6 +144,11 @@ Save report 發布實際路徑、成功或逐項失敗。
 預覽與 Save 使用各自計畫時的保存時間；自訂 stem 若依時間改名，實際輸出仍由該次 Save 計畫決定。
 實際 Save 建立目錄並覆寫同名 data.h5、分析與圖，Result 圖副本放到記錄的 points/<point>/，缺 point 放 points/unnamed_point/。不新增 source.json 或另一份來源權威。
 
+2026-10-29，先前方案保留已綁定 Run 的路徑預覽，讓無 storage 的 Run 首次 Save 前只有 declarations、沒有 outputs。
+使用者回答是否保留這項安排時說「1A, 但第一次save前沒預覽很怪」。
+隨後，使用者對預覽與 Save 共用路徑計算、讓 Load 首次 Save 前也有預覽的修正方案回覆「1做」。
+這項修正取代無 storage 時預覽為空的安排，已綁定 Run 的路徑保持不變。
+
 Load Data 同時提供 File 選檔與 opened entry 的 native 檔案清單。清單掃描 `Database/<entry>/runs/*/data.h5`，完全不讀 ledger。Run 身分、experiment、point、開始／結束時間與 completion 來自各檔的 RunMetadata／RunSnapshot；未知歷史時間保持空白，completion 保留 unknown。清單透過 `datafile.read_doc` 讀 metadata，只解碼與驗證上述顯示欄位，不要求完整 RunMetadata 或 provenance，也不讀 cfg 或量測 arrays。清單可顯示不代表整份資料可載入。Metadata 讀取失敗時，run_id 為空字串，experiment、point、時間與 completion 欄位留空。清單保留 exact Path 與既有錯誤資訊，選取仍回傳 exact path，由既有 Load 路徑回報失敗。清單不解析新舊目錄名來補欄位，避免讓路徑命名成為第二份歷史身分來源。查詢不建立目錄或事件，遷移也不手造 ledger。
 
 使用者於 2026-10-20 確認檔案清單與成功 Load 分開：「我以為只要是data.h5就可以看到，能不能Load另說」。對清單完全不讀 ledger、顯示欄位只從檔案 metadata 讀取的方案回覆：「可以」。
