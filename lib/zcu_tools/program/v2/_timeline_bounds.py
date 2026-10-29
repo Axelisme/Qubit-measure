@@ -27,6 +27,25 @@ class CycleBounds:
             raise ValueError("cycle bounds must be ordered")
 
 
+@dataclass(frozen=True)
+class FixedLoopIndex:
+    """Owner metadata for a nonempty fixed Repeat's zero-based counter.
+
+    name identifies the loop, counter names its native register, and count is
+    its positive fixed iteration count. bounds covers every executable counter
+    value, including the final conditional backedge and next-entry reset.
+    """
+
+    name: str
+    counter: str
+    count: int
+
+    @property
+    def bounds(self) -> CycleBounds:
+        """Return the inclusive valid index range, zero through count minus one."""
+        return CycleBounds(0, self.count - 1)
+
+
 class ProducerBounds:
     """Track known producers and reject unregistered writes to timing dependencies.
 
@@ -37,8 +56,12 @@ class ProducerBounds:
 
     def __init__(self):
         self.ranges: dict[str, list[CycleBounds]] = {}
+        self.fixed_loops: dict[str, FixedLoopIndex] = {}
+        self.fixed_counters: dict[str, FixedLoopIndex] = {}
+        self.counter_writers: dict[str, set[int]] = {}
         self.dependencies: dict[str, set[str]] = {}
         self.requirements: dict[str, list[tuple[str, CycleBounds]]] = {}
+        self.input_errors: dict[str, list[str]] = {}
         self.allowed: dict[int, set[str]] = {}
         self.sources: set[str] = set()
         self.defined: set[str] = set()
@@ -75,9 +98,49 @@ class ProducerBounds:
         for writer in writers:
             self.allowed.setdefault(id(writer), set()).add(name)
 
+    def register_fixed_loop(
+        self, index: FixedLoopIndex, opening: OpenLoop, closing: CloseLoop
+    ) -> None:
+        """Certify only this loop's native initialization, backedge and reset."""
+        if index.name in self.fixed_loops:
+            raise ValueError(f"{index.name}: fixed Repeat loop name already used")
+        self.fixed_loops[index.name] = index
+        self.fixed_counters[index.counter] = index
+        self.counter_writers[index.counter] = {id(opening), id(closing)}
+        self.register(index.counter, index.bounds, (opening, closing), ())
+
     def activate(self, macro: Macro) -> None:
         """Mark values written by an observed producer as initialized on this path."""
         self.defined.update(self.allowed.get(id(macro), ()))
+
+    def capture_inputs(
+        self,
+        prog,
+        name: str,
+        dependencies: tuple[str, ...],
+        requirements: Mapping[str, CycleBounds],
+    ) -> None:
+        """Retain each producer's input proof at its actual execution position.
+
+        Structured owners restore/intersect defined on Branch/Repeat paths.
+        Snapshot errors survive later initialization, overwrites and other cases.
+        They become errors only when name participates in a time dependency;
+        non-time table consumers keep their existing runtime contract.
+        """
+        for dependency in set(dependencies) | requirements.keys():
+            try:
+                actual = self._resolve(prog, dependency, check_defined=True)
+                allowed = requirements.get(dependency)
+                if allowed is not None and (
+                    actual.minimum < allowed.minimum or actual.maximum > allowed.maximum
+                ):
+                    raise ValueError(
+                        f"{name}: index dependency {dependency} allowed "
+                        f"[{allowed.minimum}, {allowed.maximum}], actual "
+                        f"[{actual.minimum}, {actual.maximum}]"
+                    )
+            except ValueError as exc:
+                self.input_errors.setdefault(name, []).append(str(exc))
 
     def source(self, prog, name: str, *, check_defined: bool = True) -> CycleBounds:
         """Resolve a nonnegative cycle source and all of its producer dependencies.
@@ -94,9 +157,14 @@ class ProducerBounds:
             if current in seen:
                 continue
             seen.add(current)
-            self._resolve(prog, current, check_defined=check_defined)
+            if not check_defined:
+                self._resolve(prog, current, check_defined=False)
+            if errors := self.input_errors.get(current):
+                raise ValueError(errors[0])
             self.sources.add(current)
             pending.extend(self.dependencies.get(current, ()))
+            if check_defined:
+                continue
             for dependency, allowed in self.requirements.get(current, ()):
                 actual = self._resolve(prog, dependency, check_defined=check_defined)
                 if actual.minimum < allowed.minimum or actual.maximum > allowed.maximum:
@@ -113,7 +181,11 @@ class ProducerBounds:
         except KeyError as exc:
             raise ValueError(f"{name}: unknown time register") from exc
         register = prog.reg_dict.get(name)
-        if name in prog.loop_dict:
+        if name in self.fixed_counters:
+            result = self.fixed_counters[name].bounds
+            if check_defined and name not in self.defined:
+                raise ValueError(f"{name}: uninitialized fixed Repeat counter")
+        elif name in prog.loop_dict:
             result = CycleBounds(0, prog.loop_dict[name] - 1)
         elif register is not None and register.init is not None:
             raw = register.init
@@ -192,6 +264,12 @@ class ProducerBounds:
                         continue
                     raise ValueError(
                         f"{name}: unregistered compiler time write at instruction {address}"
+                    )
+                if name in self.counter_writers:
+                    if id(origin) in self.counter_writers[name]:
+                        continue
+                    raise ValueError(
+                        f"{name}: unregistered fixed Repeat counter write at instruction {address}"
                     )
                 if name in self.allowed.get(id(origin), set()):
                     continue

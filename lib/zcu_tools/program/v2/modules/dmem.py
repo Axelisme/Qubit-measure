@@ -105,13 +105,29 @@ class LoadValue(Module):
         lookup. timeline and tag belong to the emission and do not alter lookup.
         Unknown registers and allocation errors propagate from prog.
         """
+        self.lower_index(prog, self.idx_reg)
+
+    def lower_index(
+        self,
+        prog: TimelineProgramV2,
+        index: str,
+    ) -> None:
+        """Load from this declared table using this emission's index register.
+
+        The caller owns index and must initialize it to a valid zero-based
+        table index. This method emits only during native body lowering and
+        reuses the declared table/destination; it allocates neither. It does
+        not mutate idx_reg or any emission state, and does not advance any
+        timeline. Empty tables emit nothing. Unknown registers
+        and invalid timing dependency bounds fail during compilation.
+        """
         if self.values:
             with prog.time_producer(
                 self.val_reg,
                 CycleBounds(min(self.values), max(self.values)),
-                dependency_ranges={self.idx_reg: CycleBounds(0, len(self.values) - 1)},
+                dependency_ranges={index: CycleBounds(0, len(self.values) - 1)},
             ):
-                self._emit_lookup(prog)
+                self._emit_lookup(prog, index)
 
     @property
     def is_compressed(self) -> bool:
@@ -147,10 +163,12 @@ class LoadValue(Module):
     def run(
         self, prog: ModularProgramV2, t: float | QickParam = 0.0
     ) -> float | QickParam:
-        self._emit_lookup(prog)
+        self._emit_lookup(prog, self.idx_reg)
         return t
 
-    def _emit_lookup(self, prog: ModularProgramV2 | TimelineProgramV2) -> None:
+    def _emit_lookup(
+        self, prog: ModularProgramV2 | TimelineProgramV2, index: str
+    ) -> None:
         if self._is_empty:
             return
 
@@ -163,14 +181,14 @@ class LoadValue(Module):
             if not self._is_compressed:
                 # Use the index register plus the optional offset as the address.
                 if self.offset == 0:
-                    prog.write_reg(addr_reg, self.idx_reg)
+                    prog.write_reg(addr_reg, index)
                 else:
-                    prog.write_reg_op(addr_reg, self.idx_reg, "+", self.offset)
+                    prog.write_reg_op(addr_reg, index, "+", self.offset)
                 prog.read_dmem(dst=self.val_reg, addr=addr_reg)
                 return
 
             # addr = (idx ASR #word_shift) [+ #offset]
-            prog.write_reg_op(addr_reg, self.idx_reg, "ASR", self._word_shift)
+            prog.write_reg_op(addr_reg, index, "ASR", self._word_shift)
             if self.offset != 0:
                 prog.inc_reg(addr_reg, self.offset)
             prog.read_dmem(dst=word_reg, addr=addr_reg)
@@ -182,7 +200,7 @@ class LoadValue(Module):
             # consumed it as the address, and word_reg now holds the fetched
             # word, so addr_reg's value is dead.
             shift_reg = addr_reg
-            prog.write_reg_op(shift_reg, self.idx_reg, "AND", self._slot_mask)
+            prog.write_reg_op(shift_reg, index, "AND", self._slot_mask)
             if self._bits_shift == 0:
                 prog.write_reg_op(shift_reg, shift_reg, "ASR", 1)
             elif self._bits_shift > 1:
@@ -190,7 +208,7 @@ class LoadValue(Module):
             prog.write_reg_op(self.val_reg, word_reg, "SR", shift_reg)
             prog.write_reg_op(self.val_reg, self.val_reg, "SR", shift_reg)
             if self._bits_shift == 0:
-                prog.write_reg_op(shift_reg, self.idx_reg, "AND", 1)
+                prog.write_reg_op(shift_reg, index, "AND", 1)
                 prog.write_reg_op(self.val_reg, self.val_reg, "SR", shift_reg)
 
             prog.write_reg_op(self.val_reg, self.val_reg, "AND", self._value_mask)
@@ -347,6 +365,15 @@ class LoadWord(Module):
 
 
 class ScanWith(Module):
+    """Scan a nonempty scalar table in order, loading before each child sequence.
+
+    Each native emission gets an independent fixed-count loop and counter.
+    Each point synchronizes the selected timeline before the next point starts.
+    Destination registers belong to the declaration unless an existing register
+    is explicitly shared with use_existed=True. Values follow the
+    nonnegative signed-int32 LoadValue contract. Empty values raise ValueError.
+    """
+
     def __init__(
         self,
         name: str,
@@ -361,17 +388,43 @@ class ScanWith(Module):
         if n == 0:
             raise ValueError("ScanWith requires a non-empty values sequence")
         repeat_mod = Repeat(f"{name}_count", n, range_hint=(0, n - 1))
-        repeat_mod.add_content(
-            LoadValue(
-                name=f"{name}_load",
-                idx_reg=repeat_mod.name,
-                val_reg=val_reg,
-                values=values,
-                use_existed=use_existed,
-            )
+        self.value_loader = LoadValue(
+            name=f"{name}_load",
+            idx_reg=repeat_mod.name,
+            val_reg=val_reg,
+            values=values,
+            use_existed=use_existed,
         )
+        repeat_mod.add_content(self.value_loader)
 
         self.repeat_mod = repeat_mod
+
+    @override
+    def declare(self, prog: TimelineProgramV2) -> None:
+        """Declare the table destination and all children on prog, in order.
+
+        The native loop owns its index register. use_existed=True leaves the
+        value register to the caller. Child declaration errors propagate.
+        """
+        for mod in self.repeat_mod.sub_modules:
+            prog.declare(mod)
+
+    @override
+    def lower(
+        self, prog: TimelineProgramV2, *, timeline: str | None, tag: str | None
+    ) -> None:
+        """Load each scalar then emit children on timeline (default if None).
+
+        Synchronize the parent at entry and close each point's actual end via
+        a fixed-count native Repeat. tag identifies this scan emission; children
+        remain separate emissions. Invalid timeline or child errors propagate.
+        """
+        parent = "default" if timeline is None else timeline
+        index = prog.emission_name(self.repeat_mod.name)
+        with prog.repeat(index, self.repeat_mod.n, timeline=parent):
+            self.value_loader.lower_index(prog, index)
+            for mod in self.repeat_mod.sub_modules[1:]:
+                prog.emit(mod, timeline=parent)
 
     def add_content(self, mod: ModuleGroup) -> Self:
         """Append a module or ordered group; skip None entries (no module)."""

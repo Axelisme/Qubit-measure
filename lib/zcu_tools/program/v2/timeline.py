@@ -5,9 +5,10 @@ from contextlib import contextmanager
 
 from qick.asm_v2 import ConfigReadout, Macro, OpenLoop, Pulse, QickParam, Trigger
 
-from ._timeline_bounds import CycleBounds, ProducerBounds
+from ._timeline_bounds import CycleBounds, FixedLoopIndex, ProducerBounds
 from ._timeline_macros import (
     BranchCases,
+    FixedRepeatLoop,
     ModuleEmission,
     PreparedTimelineMacro,
     PreparedTimelineOpenLoop,
@@ -79,6 +80,8 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         self._declaring = False
         self._building_body = False
         self._branch_serial = 0
+        self._emission_serial = 0
+        self._emission_scope: tuple[int, int] | None = None
         super().__init__(*args, **kwargs)
 
     def _make_asm(self) -> None:
@@ -112,6 +115,8 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
             self._observe_time_producers(macro.source)
             return
         self._time_bounds.observe(macro)
+        if type(macro) is FixedRepeatLoop:
+            self._time_bounds.register_fixed_loop(macro.index, macro, macro.closing)
         if isinstance(macro, TimeProducer):
             self._time_bounds.register(
                 macro.register,
@@ -153,6 +158,8 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         """
         # QICK 0.2.436 provides no public shell boundary hooks.
         self._reset_resources()
+        self._emission_serial = 0
+        self._emission_scope = None
         self._declared_modules.clear()
         self.append_macro(TimelineBoundary(self._timeline_book, "reset"))
         self.set_ext_counter(addr=self.COUNTER_ADDR)
@@ -208,6 +215,16 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
             tuple(TimingLoop(name, count) for name, count, _, _ in self.loops),
         )
 
+    @property
+    def fixed_loop_indices(self) -> tuple[FixedLoopIndex, ...]:
+        """Return Repeat-owned counter metadata in emission order after compile.
+
+        Includes nonempty fixed repeats nested in module emissions, separate
+        from QICK's top-level sweep loop_dict. No nested axis is added there.
+        A recompile rebuilds these immutable records with their native writers.
+        """
+        return tuple(self._time_bounds.fixed_loops.values())
+
     def declare(self, module: Module) -> None:
         """Declare a borrowed module in _initialize; repeat declarations are harmless.
 
@@ -234,10 +251,14 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         if not any(module is declared for declared in self._declared_modules):
             raise ValueError(f"{module.name}: module must be declared before emit")
         start = len(self.macro_list)
+        previous_scope = self._emission_scope
+        self._emission_scope = (self._emission_serial, 0)
+        self._emission_serial += 1
         try:
             module.lower(self, timeline=timeline, tag=tag)
             macros = self.macro_list[start:]
         finally:
+            self._emission_scope = previous_scope
             del self.macro_list[start:]
         self.append_macro(
             ModuleEmission(
@@ -246,6 +267,22 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
                 tag,
             )
         )
+
+    def emission_name(self, stem: str) -> str:
+        """Allocate an internal register/loop name during a module's lower call.
+
+        stem labels the owner's internal resource. Each call gets a distinct
+        name in this emission, including nested emissions. Names reset on each
+        compile; they do not reserve resources or rename explicit native loops.
+        A collision with an explicit native name fails during compilation.
+        Outside lower raises ValueError. Failed/nested lower calls restore the
+        caller's naming scope, without changing declared module resources.
+        """
+        if self._emission_scope is None:
+            raise ValueError("emission_name requires an active module lower call")
+        emission, local = self._emission_scope
+        self._emission_scope = (emission, local + 1)
+        return f"__emission_{emission}_{local}_{stem}"
 
     @contextmanager
     def time_producer(
@@ -445,10 +482,11 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
             self._timeline_book, timeline, name if variable else None
         )
         self.append_macro(entry)
-        if isinstance(n, str):
+        fixed_loop = FixedRepeatLoop(name, n) if isinstance(n, int) else None
+        if fixed_loop is None:
             self.open_inner_loop(name, name, n, range_hint=range_hint)
         else:
-            self.open_loop(n, name=name)
+            self.append_macro(fixed_loop)
         try:
             yield
         finally:
@@ -462,8 +500,8 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
             )
             if isinstance(n, str):
                 self.close_inner_loop(name, name, n)
-            else:
-                self.close_loop()
+            elif fixed_loop is not None:
+                self.append_macro(fixed_loop.closing)
 
     def join(self, *sources: str, into: str) -> None:
         """Merge existing sources and target into target's latest end (us).
