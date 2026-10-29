@@ -21,7 +21,7 @@ from pydantic import (
     ValidationInfo,
     field_validator,
 )
-from qick.asm_v2 import QickParam
+from qick.asm_v2 import QickParam, QickProgramV2
 
 from zcu_tools import cfg_model as core_cfgs
 from zcu_tools.cfg_model import CfgValidationContext, ConfigBase
@@ -29,7 +29,6 @@ from zcu_tools.cfg_model import WaveformCfg as CoreWaveformCfg
 from zcu_tools.core.waveform_format import decode_npz
 
 if TYPE_CHECKING:
-    from zcu_tools.program.v2.modular import ModularProgramV2
     from zcu_tools.resources.context import LibrarySnapshot
 
 
@@ -284,7 +283,7 @@ class AbsWaveform(ABC):
         return self.waveform_cfg.length
 
     @abstractmethod
-    def create(self, prog: ModularProgramV2, ch: int, **kwargs) -> None: ...
+    def create(self, prog: QickProgramV2, ch: int, **kwargs) -> None: ...
 
     @abstractmethod
     def to_wav_kwargs(self) -> QickWaveformKwargs: ...
@@ -299,7 +298,7 @@ class ConstWaveform(AbsWaveform):
         self.name = name
         self.waveform_cfg = waveform_cfg
 
-    def create(self, prog: ModularProgramV2, ch: int, **kwargs) -> None: ...
+    def create(self, prog: QickProgramV2, ch: int, **kwargs) -> None: ...
 
     def to_wav_kwargs(self) -> QickWaveformKwargs:
         return {"style": "const", "length": self.length}
@@ -320,7 +319,7 @@ class CosineWaveform(AbsWaveform):
         assert isinstance(cfg, CosineWaveformCfg)
         return cfg.length
 
-    def create(self, prog: ModularProgramV2, ch: int, **kwargs) -> None:
+    def create(self, prog: QickProgramV2, ch: int, **kwargs) -> None:
         prog.add_cosine(ch, self.name, length=self.length, **kwargs)
 
     def to_wav_kwargs(self) -> QickWaveformKwargs:
@@ -342,7 +341,7 @@ class GaussWaveform(AbsWaveform):
         assert isinstance(cfg, GaussWaveformCfg)
         return cfg.length
 
-    def create(self, prog: ModularProgramV2, ch: int, **kwargs) -> None:
+    def create(self, prog: QickProgramV2, ch: int, **kwargs) -> None:
         wav_cfg = self.waveform_cfg
         assert isinstance(wav_cfg, GaussWaveformCfg)
         prog.add_gauss(
@@ -372,7 +371,7 @@ class DragWaveform(AbsWaveform):
         assert isinstance(cfg, DragWaveformCfg)
         return cfg.length
 
-    def create(self, prog: ModularProgramV2, ch: int, **kwargs) -> None:
+    def create(self, prog: QickProgramV2, ch: int, **kwargs) -> None:
         wav_cfg = self.waveform_cfg
         assert isinstance(wav_cfg, DragWaveformCfg)
         prog.add_DRAG(
@@ -404,12 +403,12 @@ class ArbWaveform(AbsWaveform):
         assert isinstance(cfg, ArbWaveformCfg)
         return cfg.length
 
-    def create(self, prog: ModularProgramV2, ch: int, **kwargs) -> None:
+    def create(self, prog: QickProgramV2, ch: int, **kwargs) -> None:
         idata, qdata = self.make_iqdata(ch, prog, **kwargs)
         prog.add_envelope(ch, self.name, idata=idata, qdata=qdata)
 
     def make_iqdata(
-        self, ch: int, prog: ModularProgramV2, *, even_length: bool = False
+        self, ch: int, prog: QickProgramV2, *, even_length: bool = False
     ) -> tuple[NDArray[np.float64], NDArray[np.float64] | None]:
         """Read cfg.path samples and interpolate at the channel's timing grid.
 
@@ -459,7 +458,7 @@ class FlatTopWaveform(AbsWaveform):
 
         self.raise_waveform: AbsWaveform = waveform_cfg.raise_waveform.build(name)
 
-    def create(self, prog: ModularProgramV2, ch: int, **kwargs) -> None:
+    def create(self, prog: QickProgramV2, ch: int, **kwargs) -> None:
         kwargs.setdefault("even_length", True)
         self.raise_waveform.create(prog, ch, **kwargs)
 

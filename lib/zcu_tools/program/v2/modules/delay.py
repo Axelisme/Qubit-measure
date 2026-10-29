@@ -11,6 +11,7 @@ from .util import merge_max_length, round_timestamp
 
 if TYPE_CHECKING:
     from zcu_tools.program.v2.modular import ModularProgramV2
+    from zcu_tools.program.v2.timeline import TimelineProgramV2
 
     from .pulse import TableLengthPulse
 
@@ -34,6 +35,17 @@ class Delay(Module):
 
         return 0.0  # reset reference time
 
+    def declare(self, prog: TimelineProgramV2) -> None:
+        """Delay needs no hardware resources; prog owns the emission timeline."""
+
+    def lower(
+        self, prog: TimelineProgramV2, *, timeline: str | None, tag: str | None
+    ) -> None:
+        """Advance by delay us, or bookkeep the named cursor; tag is per emission."""
+        prog.advance_module(
+            round_timestamp(prog, self.delay), timeline=timeline, tag=tag
+        )
+
     def allow_rerun(self) -> bool:
         return self.tag is None
 
@@ -50,6 +62,17 @@ class SoftDelay(Module):
         self, prog: ModularProgramV2, t: float | QickParam = 0.0
     ) -> float | QickParam:
         return round_timestamp(prog, t + self.delay)
+
+    def declare(self, prog: TimelineProgramV2) -> None:
+        """SoftDelay needs no hardware resources on prog."""
+
+    def lower(
+        self, prog: TimelineProgramV2, *, timeline: str | None, tag: str | None
+    ) -> None:
+        """Advance by delay us, ignoring the legacy cursor-only run convention."""
+        prog.advance_module(
+            round_timestamp(prog, self.delay), timeline=timeline, tag=tag
+        )
 
     def allow_rerun(self) -> bool:
         return True
@@ -96,6 +119,31 @@ class DelayAuto(Module):
         else:
             prog.delay_auto(t=self.t, gens=self.gens, ros=self.ros, tag=self.tag)
         return 0.0
+
+    def declare(self, prog: TimelineProgramV2) -> None:
+        """DelayAuto consumes existing channel/register declarations on prog."""
+
+    def lower(
+        self, prog: TimelineProgramV2, *, timeline: str | None, tag: str | None
+    ) -> None:
+        """Align selected ends and add extra us, or runtime tProc register cycles.
+
+        Scalar named alignment only updates bookkeeping. The default register
+        path uses the existing public delay_reg_auto consumer. Register/tag
+        restrictions are the same as construction.
+        """
+        if isinstance(self.t, str):
+            if timeline is not None:
+                raise ValueError(
+                    "runtime register time supports only the default timeline"
+                )
+            if tag is not None:
+                raise ValueError("DelayAuto with a register time cannot have a tag")
+            prog.delay_reg_auto(time_reg=self.t, gens=self.gens, ros=self.ros)
+        else:
+            prog.delay_auto(
+                t=self.t, gens=self.gens, ros=self.ros, tag=tag, timeline=timeline
+            )
 
     def allow_rerun(self) -> bool:
         return self.tag is None

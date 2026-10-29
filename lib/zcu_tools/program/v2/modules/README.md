@@ -10,10 +10,27 @@ roles and design boundaries.
 
 ## Purpose
 
-`Module` objects are the semantic building blocks consumed by `ModularProgramV2`.
-Each module owns a small piece of program setup in `init()` and time-ordered
-runtime emission in `run()`. The module layer should preserve experiment meaning
+`Module` objects are declarations consumed by `TimelineProgramV2`, and semantic
+building blocks consumed by `ModularProgramV2`. On the native path, authors call
+`declare(module)` in `_initialize` and `emit(module, timeline=..., tag=...)` in
+`_body`. Each owner supplies resource declaration and native lowering. The legacy
+path still uses `init()` and time-ordered `run()`. The module layer should preserve experiment meaning
 without leaking hardware register choreography into experiment classes.
+
+## 原生寫法
+
+Pulse、Delay、SoftDelay、DelayAuto、PulseReadout 與 Reset 系列提供原生 lowering。
+每次 `emit` 建立一個 `timeline.ModuleEmission`，保存該次原生指令與 tag。
+Module 不是 QICK Macro，不能直接交給 `append_macro`。
+同一宣告物件可重複發射，舊 module 的 tag 與 block_mode 不控制新路徑。
+
+預設發射依 owner 的 `total_length` 推進真正的 QICK reference。
+具名發射只推進該 timeline。Owner 已對齊 tProc 的長度不再向上取整第二次。
+PulseReadout 的 runtime gain／generator frequency／ADC frequency words 沿用既有 consumer。
+DelayAuto 的 runtime register cycles 只支援預設 timeline，具名入口會報錯。
+具名 offset 必須逐掃描點不大於 register 推進的靜態部分，否則編譯會指出 timeline，
+並提示先 sync 或 delay_auto。Channel end 只扣靜態部分，不扣未知 register 值。
+Scalar／QickParam 的具名時間仍可用。Legacy init／run／block 保留供舊 program 使用。
 
 ## Configuration names
 

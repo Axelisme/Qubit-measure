@@ -110,6 +110,15 @@ Encoding with `readout_freq_words` still takes those four explicit settings.
 
 `resources.ProgramResourcesMixin` 集中 dmem 配置與 readout route 保護，由 `TimelineProgramV2` 和 `ModularProgramV2` 共用。兩者都由 `MyProgramV2` 在傳輸邊界將 dmem 轉成 `list[int]`。Builder 與模擬器仍使用 `ModularProgramV2`。
 
+在 `_initialize` 建立 module 後呼叫 `self.declare(module)`。
+在 `_body` 呼叫 `self.emit(module, timeline="drive", tag="first")`。
+每次發射都有新的 `ModuleEmission`，tag 屬於該次呼叫。
+未帶 timeline 的 module 依 total_length 推進原生 reference，後接的原生 pulse(t=0)
+從其結束處開始。Module 物件本身不是 QICK Macro，不能直接 append。
+Owner lowering 與原生指令共用既有 IR，不在 emission 層合併指令。
+Runtime register 時間只支援預設 timeline；具名 offset 須能逐掃描點證明不大於
+靜態推進量，否則編譯報錯。Channel end 只扣靜態部分，保留保守等待。
+
 ## Macro Layer
 
 ### Runtime and table-backed waveform updates

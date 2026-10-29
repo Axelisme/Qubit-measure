@@ -11,6 +11,7 @@ from zcu_tools.cfg_model import ConfigBase
 
 if TYPE_CHECKING:
     from zcu_tools.program.v2.modular import ModularProgramV2
+    from zcu_tools.program.v2.timeline import TimelineProgramV2
     from zcu_tools.resources.context import LibrarySnapshot
 
 
@@ -46,6 +47,25 @@ class Module(ABC):
     def run(
         self, prog: ModularProgramV2, t: float | QickParam = 0.0
     ) -> float | QickParam: ...
+
+    def declare(self, prog: TimelineProgramV2) -> None:
+        """Declare resources on prog before emission.
+
+        Only modules with a timeline lowering implement this interface.
+        Unsupported module types raise NotImplementedError without emission.
+        """
+        raise NotImplementedError(f"{type(self).__name__} has no timeline declaration")
+
+    def lower(
+        self, prog: TimelineProgramV2, *, timeline: str | None, tag: str | None
+    ) -> None:
+        """Emit native macros and advance by this owner's blocking duration.
+
+        Called by prog.emit after declaration. timeline=None advances the QICK
+        reference; a name advances only that cursor. tag belongs to this emission,
+        not to the declaration. Unsupported modules raise NotImplementedError.
+        """
+        raise NotImplementedError(f"{type(self).__name__} has no timeline lowering")
 
     def allow_rerun(self) -> bool:
         return False
