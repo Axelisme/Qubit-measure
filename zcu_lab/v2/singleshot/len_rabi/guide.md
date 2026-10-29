@@ -8,7 +8,7 @@ Single-shot Length Rabi: sweeps the qubit-drive pulse length, preserves every ra
 
 Open and Reset take a snapshot of the current aliases, parameters and module choices. Relax delay starts at 5*T1. Length sweep is 0.03 us to 4 * `$qubit.module.x180.waveform.length`.
 
-Classification starts from `$qubit.ext.readout_cal.g_center`, `e_center` and `radius`. Missing calibration leaves these fields Invalid.
+Raw acquisition and joint fitting require one ADC: Pulse or a single-tone Mux. Live preview uses that readout's circle classifier under Readout → Advanced. Without a classifier, Run still collects raw IQ and Analyze still fits; only the population preview is skipped. A supplied linear classifier cannot show Other; a circle without radius prompts singleshot GE Post.
 
 Pulse templates use `$qubit.freq`, `$qubit.wiring.ch`, `$resonator.freq`, `$resonator.wiring.ch` and `$resonator.wiring.ro_ch`. The readout trigger uses `$resonator.time_of_fly` + 0.05 us. Missing required sources leave the corresponding fields Invalid; supply them before Run.
 
@@ -26,10 +26,10 @@ The qubit pulse uses the x180 module when present and the qub_probe template whe
 
 ## Typical writeback
 
-When the joint fit is valid and its complete calibration is finite, proposes `$qubit.ext.readout_cal.g_center`, `$qubit.ext.readout_cal.e_center`, `$qubit.ext.readout_cal.radius`, and `$qubit.ext.readout_cal.confusion_matrix` as four separately applicable items. All four proposals appear together when the complete calibration passes validation; otherwise the proposal list stays empty.
+A backend-valid joint fit with finite centers, radius and confusion matrix proposes one complete readout-module replacement at `$resonator.module.readout`. Pulse updates `classifier`; a single-tone Mux updates `tones.0.classifier`. The proposal preserves library waveform keys and rejects differences in other tested settings. Missing saved cfg or parameter capture fails explicitly. Invalid or nonfinite fits produce no proposal.
 
 ## Recommended
 
-Set Initial State to the predominant state before the swept drive pulse even when the first sweep point is nonzero. Fit phase offset allows a correction within +/-90 degrees of that initial-state direction; the extrapolated zero-length population can then differ from the pre-pulse population. It is disabled by default. Set the classification calibration directly or seed it with 'singleshot/ge'. A sweep spanning a few pi lengths captures a full oscillation. Review the measured population curves and overlaid joint-fit curves before applying all four calibration proposals.
+Set Initial State to the predominant state before the swept drive pulse even when the first sweep point is nonzero. Fit phase offset allows a correction within +/-90 degrees of that initial-state direction; the extrapolated zero-length population can then differ from the pre-pulse population. It is disabled by default. A prior singleshot/ge calibration is optional for raw acquisition. A sweep spanning a few pi lengths captures a full oscillation. Review the measured population curves and overlaid joint-fit curves before applying the complete module proposal.
 
-**Last updated:** 2026-10-21
+**Last updated:** 2026-10-29

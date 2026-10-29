@@ -4,6 +4,8 @@ status: accepted
 
 # ADR-0074 — 獨立的平鋪 Readout module
 
+**讀者：** lab-author、framework-dev、agent。查閱 readout 配置、classifier 所有權與 module 引用的跨模組契約。
+
 ## 背景
 
 內嵌 Pulse 與 DirectReadout 讓作者重複填寫 generator 與 ADC 的頻率和通道。
@@ -76,6 +78,9 @@ Radius 提供時須有限且 >0；None 表示尚未提供 Post 半徑校準。
 複數中心沿用 point 參數的 `{__complex__: [re, im]}` tag，由 `core.complex_codec` 編解碼。
 Core/native conversion、library 與 data.h5 cfg 都保留 classifier，不升容器版本。
 舊條目沒有 classifier 時讀為 None，不從其他參數補值。
+Point 的 `readout_cal` 停用，不再讀寫，也不把舊數值搬入 classifier。
+改版後重跑 singleshot GE 並 Apply 到 readout library module。
+使用者於 2026-10-29 對 library 所有權與不搬舊值的選項同意：「2A 3A 4同意」。
 
 Readout 工具從 cfg 產生以 ADC channel 為 key 的型別化 mapping，由作者明確交給 acquire。
 Acquire 不掃 program registry，mapping 必須完整覆蓋已宣告 ADC，不混合 IQ 與 population。
@@ -92,6 +97,11 @@ Mux GE 每個 phase 合成一個完整 proposal，只更新成功 tone 的精確
 Joint readout、chevron、constructive phase、CZ amplitude 在 cfg 驗證時拒絕 missing／linear。
 Conditional phase、local Z、RB 保留 raw acquisition，分析將 missing／linear 轉為帶原因的結果，不產生 population 或 fit。
 Readout owner 的單 ADC circle lookup 不理解 lab 角色，也不讀 live library。
+其餘 singleshot population consumers 同樣明傳完整 ADC mapping，confusion correction 只讀 saved cfg。
+Amplitude／Length Rabi 保留單 ADC raw IQ 與聯合 fit，未校準時只略過 live population preview。
+有效 Rabi fit 經同一中立 builder 更新 captured resonator readout 的完整 classifier，
+Pulse 更新 classifier，單 tone Mux 更新 tones.0.classifier，不支援多 tone 分析。
+Check 的 raw Run 不要求 classifier，到分析才從 saved cfg 要求 circle 與 radius。
 
 ### Owner 不變，caller 不重建舊配置
 

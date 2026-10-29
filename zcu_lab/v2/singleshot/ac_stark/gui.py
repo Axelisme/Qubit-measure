@@ -27,8 +27,8 @@ from zcu_lab.v2.singleshot.ac_stark.form import make_form
 from zcu_lab.v2.support.measure.singleshot_shared import (
     read_analysis_float,
     read_chi_kappa,
-    read_confusion_matrix,
 )
+from zcu_lab.v2.support.singleshot.util import readout_confusion_matrix
 
 # Domain analysis returns a numeric coefficient and publishes its named fit. The AC-Stark
 # coefficient is written back to the parameter context (key ``ac_stark_coeff``, matching
@@ -41,7 +41,9 @@ def _analyze(
     req: AnalyzeRequest[SsAcStarkRunResult, None], *, plots: Plots
 ) -> AcStarkAnalysis:
     chi, kappa = read_chi_kappa(req.parameters)
-    confusion = read_confusion_matrix(req.parameters)
+    confusion = readout_confusion_matrix(
+        None if req.run_result.cfg is None else req.run_result.cfg.readout
+    )
     cutoff = read_analysis_float(req.parameters, "$qubit.ext.cutoff")
     return AcStarkExp().analyze(
         req.run_result,

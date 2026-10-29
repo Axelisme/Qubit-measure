@@ -21,7 +21,7 @@ from zcu_lab.v2.singleshot.mist.pre_freq.core import (
     PreFreqResult,
 )
 from zcu_lab.v2.singleshot.mist.pre_freq.form import make_form
-from zcu_lab.v2.support.measure.singleshot_shared import read_confusion_matrix
+from zcu_lab.v2.support.singleshot.util import readout_confusion_matrix
 
 MistPreFreqRunResult: TypeAlias = RunRecord[PreFreqCfg, PreFreqResult]
 
@@ -33,7 +33,9 @@ def _analyze(
 ) -> None:
     """Plot G/E/Other, using optional confusion correction from the run capture."""
     options = PreFreqAnalyzeOptions(
-        confusion_matrix=read_confusion_matrix(req.parameters)
+        confusion_matrix=readout_confusion_matrix(
+            None if req.run_result.cfg is None else req.run_result.cfg.readout
+        )
     )
     PreFreqExp().analyze(req.run_result, options, plots=plots)
     return

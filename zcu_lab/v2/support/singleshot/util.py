@@ -6,14 +6,18 @@ from typing import Any, Literal, Protocol
 import numpy as np
 from numpy.typing import NDArray
 from zcu_tools.cfg_model import CircleClassifier
-from zcu_tools.program.v2.modules.readout import PulseReadoutCfg, ReadoutCfg
+from zcu_tools.program.v2.modules.readout import (
+    PulseReadoutCfg,
+    ReadoutCfg,
+    circle_classifier,
+)
 
 
 def readout_confusion_matrix(cfg: ReadoutCfg | None) -> NDArray[np.float64] | None:
     """Read saved single-qubit circle correction, never point calibration.
 
     Missing historical cfg/classifier/matrix skips correction. Linear has no
-    other state and cannot correct a three-state T1 analysis. MuxReadout declares
+    other state and cannot correct a three-state population analysis. MuxReadout declares
     ADCs in tone order; raw_population_signal reads its first result, so use
     tones[0], not the lowest ADC number. Radius is only needed during acquisition.
     """
@@ -25,9 +29,33 @@ def readout_confusion_matrix(cfg: ReadoutCfg | None) -> NDArray[np.float64] | No
     if classifier is None:
         return None
     if not isinstance(classifier, CircleClassifier):
-        raise ValueError("T1 requires other; linear classifier has only g/e states")
+        raise ValueError(
+            "Population correction requires other; linear has only g/e states"
+        )
     matrix = classifier.confusion_matrix
     return None if matrix is None else np.asarray(matrix, dtype=np.float64)
+
+
+def rabi_preview_classifier(cfg: ReadoutCfg) -> CircleClassifier | None:
+    """Return the sole ADC's circle for raw-IQ Rabi preview, or None if absent.
+
+    Raw Rabi supports Pulse or a one-tone Mux only. Missing calibration skips
+    preview without blocking acquisition or joint fitting. A supplied linear
+    classifier cannot show Other; a circle without radius requires GE Post.
+    Values use raw integrated ADC divided by readout length, without offset.
+    """
+    if isinstance(cfg, PulseReadoutCfg):
+        ro_ch, classifier = cfg.ro_ch, cfg.classifier
+    else:
+        if len(cfg.tones) != 1:
+            raise ValueError("Raw Rabi requires exactly one readout ADC")
+        ro_ch, classifier = cfg.tones[0].ro_ch, cfg.tones[0].classifier
+    if classifier is None:
+        return None
+    circle = circle_classifier(cfg, ro_ch=ro_ch)
+    if circle.radius is None:
+        raise ValueError("Rabi preview requires radius; run singleshot GE Post")
+    return circle
 
 
 def ge_signals_by_state(

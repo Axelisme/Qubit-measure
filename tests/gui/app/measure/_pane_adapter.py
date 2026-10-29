@@ -78,12 +78,12 @@ def PaneAdapter_get_writeback_items(
     req: WritebackRequest[SavingRun, PaneResult],
 ) -> Sequence[ParameterWriteback]:
     return [
-        ParameterWriteback(f"$qubit.ext.readout_cal.{name}", name, value)
+        ParameterWriteback(f"$qubit.ext.pane_sample.{name}", name, value)
         for name, value in (
-            ("fidelity", 1.0),
-            ("sigma", 0.2),
-            ("g_center", [0.0, 0.0]),
-            ("e_center", [1.0, 1.0]),
+            ("score", 1.0),
+            ("width", 0.2),
+            ("first", [0.0, 0.0]),
+            ("second", [1.0, 1.0]),
         )
     ]
 
@@ -96,9 +96,9 @@ def PaneAdapter_get_post_writeback_items(
     if not isinstance(result, PostResult):
         raise TypeError("PaneAdapter post writeback requires PostResult")
     return [
-        ParameterWriteback("$qubit.ext.readout_cal.radius", "Radius", 0.5),
+        ParameterWriteback("$qubit.ext.pane_sample.extent", "Radius", 0.5),
         ParameterWriteback(
-            "$qubit.ext.readout_cal.confusion_matrix",
+            "$qubit.ext.pane_sample.matrix",
             "Matrix",
             result.confusion.tolist(),
         ),

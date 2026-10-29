@@ -1,8 +1,8 @@
-**Last updated:** 2026-10-29
-
 # Measure domain support
 
 **讀者：** lab-author。查閱多個量測 adapter 共用的表單初值、分析載體與 writeback 工具。
+
+**Last updated:** 2026-10-29
 
 這個公開支援 package 擁有至少兩個 measure experiment adapters 共用的 implementation
 mechanics：analysis carriers、writeback helpers 與跨實驗的 context utilities。
@@ -158,8 +158,12 @@ Point proposal 保存新的 period 與 offset，record 不重複保存它們。�
 
 ## 其他 measure helpers
 
-`singleshot_shared.py` 從 AnalyzeRequest 的固定 Run ParameterContext 讀取分類、chi/kappa
-與可選分析校準。缺 capture 明示失敗；可選 leaf 缺少或 null 時交給 core 的既有預設。
+`singleshot_shared.py` 從固定 Run ParameterContext 讀取 chi/kappa 與可選 scalar 分析校準。
+缺 capture 明示失敗；可選 leaf 缺少或 null 時交給 core 的既有預設。
+分類與 confusion matrix 只讀 saved readout cfg，不讀 point 校準。
+`singleshot_rabi.rabi_calibration_writeback` 將兩種 Rabi 的有效聯合 fit 交給中立 builder，
+對捕捉的 resonator readout slot 提出完整 classifier replacement。它保留 library child keys，
+不 Apply，也不從 live point 補缺 cfg／capture。
 
 `ctx_helpers.flux_pick_initial_points` 供 scalar onetone／twotone picker 使用。它以實際 cfg.flux_dev、Run capture 的新 flux 區塊與 Run snapshot 算初線，不讀舊 component scalar，也不取目前 live 值。缺 selected 校準才留 picker 預設，無效 contributor 直接報名失敗。
 

@@ -7,7 +7,6 @@ from typing import Annotated, ClassVar
 import numpy as np
 from matplotlib.axes import Axes
 from numpy.typing import NDArray
-from pydantic import field_serializer
 from zcu_tools.analysis.singleshot import (
     calc_populations,
     correct_populations,
@@ -21,6 +20,7 @@ from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import Pulse, Readout, Reset, SweepCfg, sweep2param
+from zcu_tools.program.v2.modules.readout import classification_parameters
 
 from zcu_lab.v2.support import live_line
 
@@ -61,13 +61,6 @@ class PreFreqCfg(ConfigBase):
     probe_pulse: Annotated[Pulse.Cfg, FieldMeta(label="MIST probe pulse")]
     readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
     freq: Annotated[SweepCfg, FieldMeta(label="Preparation freq", unit="MHz")]
-    g_center: Annotated[complex, FieldMeta(label="Ground center")]
-    e_center: Annotated[complex, FieldMeta(label="Excited center")]
-    radius: Annotated[float, FieldMeta(label="Classification radius")]
-
-    @field_serializer("g_center", "e_center")
-    def serialize_center(self, value: complex) -> str:
-        return str(value)
 
 
 @dataclass(frozen=True)
@@ -104,7 +97,7 @@ class PreFreqExp(Experiment[PreFreqResult, PreFreqCfg]):
         Return rounded preparation frequencies (MHz) and classified G/E
         fractions shaped (Nfreq, 2), averaged over shots and rounds.
 
-        cfg supplies distinct finite IQ centers and a positive finite radius.
+        cfg.readout supplies a circle classifier per ADC with a positive radius.
         Other is 1-G-E, not calibrated leakage; optional confusion correction
         belongs to subsequent analysis.
         """
@@ -112,6 +105,7 @@ class PreFreqExp(Experiment[PreFreqResult, PreFreqCfg]):
         # Sweep the preparation tone, not the later MIST probe.
         soc, soccfg = context.soc, context.soccfg
         cfg = deepcopy(cfg)
+        classification = classification_parameters(cfg.readout, require_other=True)
 
         freqs = sweep2array(
             cfg.freq,
@@ -160,9 +154,7 @@ class PreFreqExp(Experiment[PreFreqResult, PreFreqCfg]):
                 .build_and_acquire(
                     # Classify individual shots, then average their G/E fractions.
                     raw2signal_fn=raw_population_signal,
-                    g_center=cfg.g_center,
-                    e_center=cfg.e_center,
-                    ge_radius=cfg.radius,
+                    classify=classification,
                     rounds=cfg.rounds,
                 )
             )

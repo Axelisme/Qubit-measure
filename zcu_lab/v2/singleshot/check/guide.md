@@ -2,7 +2,7 @@
 
 **Readers:** operator, agent. How to check single-shot readout classification from the GUI or MCP and interpret the results.
 
-Single-shot classification check: takes 'shots' single-shot readouts of the prepared state and draws the IQ scatter with the |g>/|e> discrimination circles overlaid, reporting the fraction classified ground / excited / other. Runs on real hardware. Acquisition records IQ shots directly; classification during analysis requires the calibrated centres.
+Single-shot classification check: takes 'shots' single-shot readouts of the prepared state and draws the IQ scatter with the |g>/|e> discrimination circles overlaid, reporting the fraction classified ground / excited / other. Runs on real hardware. Acquisition records IQ shots directly and does not require calibration. Analysis uses only the saved readout cfg's sole ADC circle and radius. Missing cfg, missing or linear classifier, or missing radius fails at Analyze; missing radius prompts singleshot GE Post.
 
 ## Parameter sources
 
@@ -26,4 +26,4 @@ This is a visual diagnostic of the existing single-shot discrimination. Calibrat
 
 Run after 'singleshot/ge'. Use a large 'shots' (~5000+) for a well-sampled scatter; a tight cluster inside the matching circle indicates good discrimination.
 
-**Last updated:** 2026-10-21
+**Last updated:** 2026-10-29

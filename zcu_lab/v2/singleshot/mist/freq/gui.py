@@ -19,9 +19,7 @@ from zcu_lab.v2.singleshot.mist.freq.core import (
     FreqResult,
 )
 from zcu_lab.v2.singleshot.mist.freq.form import make_form
-from zcu_lab.v2.support.measure.singleshot_shared import (
-    read_confusion_matrix,
-)
+from zcu_lab.v2.support.singleshot.util import readout_confusion_matrix
 
 MistFreqRunResult: TypeAlias = RunRecord[FreqCfg, FreqResult]
 
@@ -32,7 +30,9 @@ def _analyze(
     plots: Plots,
 ) -> None:
     options = FreqAnalyzeOptions(
-        confusion_matrix=read_confusion_matrix(req.parameters),
+        confusion_matrix=readout_confusion_matrix(
+            None if req.run_result.cfg is None else req.run_result.cfg.readout
+        ),
     )
     FreqDepExp().analyze(req.run_result, options, plots=plots)
     return
