@@ -91,3 +91,50 @@ advisor 給的選項是 A 現在做原型、B 晚點評估、C 不做，建議 B
 這使上一段「作者端 0 行改動」只對 builder 使用者成立。第二個原型方案 2 遇到的發射來源問題（兩個 Pulse 共用 cfg 時 source 還原錯誤），在作者直接寫原生 program 時同樣會出現，需要「每次發射記錄來源」的契約。
 
 下一步是第三個丟棄式原型：T1 用底層與 builder 各寫一次並與現行 `prog_list` 逐位比對、原生 macro 與 Reset／Readout 混用的時間銜接、一個 Join 或 Repeat 例、以 macro 型別子集運作的模擬 frontend，以及實作規模估計。
+
+## 後記三（2026-10-29 下午，第三個原型與時間模型）
+
+### 第三個原型：兩層寫法
+
+依後記二的方向做第三個丟棄式原型（工作檔未入庫，依據 repo@a9b66c782、QICK 0.2.436），結論如下：
+
+- 底層寫法（program 子類在 `_initialize` 宣告、`_body` 發射我們的 macro）與 builder 寫法，對 T1 三組 cfg、一個 Join（兩支交錯發射）、一個 Repeat、以及兩個共用 cfg 的 Readout instance，`prog_list`、labels、pmem、wmem、dmem 與 asm 文字都和現行 `ModularProgramV2` 逐位相同。換 cfg 或 delay 值的負向對照會被檢出。
+- 依 macro 型別派發的模擬 frontend 輸出的 `AcquireRequest` 與現行相等；支援子集以外的 macro 型別（例如 body 內的 `ReadInput`、`Resync`）在 backend 前報錯。
+- 混用原生 macro 時，原型採「我們的 macro 以前一個的結束當起點，原生 `delay`／`delay_auto` 把這條串接歸零」，手算與實測一致，但這是作者要多記的一條規則。
+- 還沒解決：同一 instance 多次發射與 `herald_spec` 的發射掃描、內層 macro 的 tag 與 `get_time_param`、沒有 builder 時的 retry／early stop／進度、原型複製了 QICK `make_program`、Branch／LoadValue／ScanWith／ComputedPulse／TableLengthPulse／MuxReadout 等尚未轉換、模擬器仍呼叫 `total_length` 重算長度。
+- 規模估計：底層 program 120–200 行、時間層 200–300 行、19 個 module 類別淨增 300–600 行、builder 30–80 行、模擬 frontend 500–900 行，測試改寫 300–600 行與新增 500–900 行；88 個 `prog_builder(` 使用者預估 0 行改動。
+
+### 為什麼 module 要自己推導時間
+
+使用者問「我忘記為什麼module要推導時間而不用預設的delay auto了」。repo 的 ADR、README 與 commit 訊息沒有記下當初理由；從程式推得：QICK `delay_auto(t, gens=True, ros=True)` 的 `gens`／`ros` 只是布林值（`qick/asm_v2.py` 的 `Delay.preprocess` 經 `get_max_timestamp` 取全部 generator 或 readout 的最大結束時間），是全域屏障，無法表達不同通道重疊。module 自己算時間才能有非 blocking pulse（下一個 module 從同一時點開始）與 Join 的各分支獨立計時（commit 074329ab9「replace NonBlocking with Join」）；掃描長度的捨入也由 module 依 modules README「Swept pulse blocking timing」控制。
+
+### 時間模型的比較
+
+| 模型 | 做法 | 混用原生 | 重疊與 Join |
+| --- | --- | --- | --- |
+| M1 自有串接（第三個原型） | 我們的 macro 以前一個的結束當起點 | 要多記一條串接規則 | 支援，可與現行逐位相同 |
+| M2 參考時間 | blocking macro 以 `delay(自己的長度)` 推進 QICK 參考時間 | 只有 QICK 一套模型 | hard delay 不擋其他通道；多 `inc_ref` 指令，需改用 timeline 等價驗收 |
+| M3 `delay_auto` 屏障 | 每個 blocking macro 後接 `delay_auto` | 自然一致 | 無法跨通道重疊，否決 |
+
+使用者：「Program作者應該預設理解qick知識，而我在思考的是，能不能擴充qick的delay_auto，使得其能夠只delay特定的timeline，也就是M1精神使用M2實現」，並更正「我說的timeline不是綁定一個channel, 而是一個抽象的time counter，可以讓不同ch的pulse對齊」。
+
+### 具名 timeline 模型
+
+整理後的模型：timeline 是具名的參考時間，以相對 QICK 參考時間的 offset 記錄，不綁通道；掛在同一條 timeline 的 pulse 不論通道都對齊。
+
+```python
+self.pulse(flux_ch, "flux", t=0)                  # 原生、預設 timeline：一段長 flux
+self.pulse(drive_ch, "pi", t=0, timeline="q")     # 掛在 q
+self.delay_auto(timeline="q")                     # 只把 q 推到 pi 結束；不發指令
+self.pulse(ro_ch, "ro", t=0, timeline="q")        # pi 結束就讀出，不等 flux
+self.delay_auto()                                 # 原生全域同步：參考時間前進，q 對齊上來
+```
+
+使用者確認四點（「1同意 2同意 3應該可以 4背後可能是不同的macro，但方法接口可以考慮設計成一個沒問題」）：
+
+1. 預設 timeline 就是 QICK 參考時間，不帶 timeline 的原生寫法行為不變。
+2. 具名 timeline 前進只在 preprocess 記帳、算出各 pulse 的絕對 t，不發 `inc_ref` 指令。
+3. 原生 `delay`／`delay_auto()` 照 QICK 推進全域參考時間，具名 timeline 跟著扣減，最早對齊參考時間。
+4. 方法介面是原生方法加 `timeline=` 參數，背後可以是不同的 macro 類別。
+
+我們的 module 因此不需要另一套串接規則：blocking Pulse 在目前 timeline 發射後 `delay_auto(timeline=目前)`，非 blocking 不推進，Join 從目前 timeline 分出子 timeline、結束時推到各子 timeline 的最大值。QICK 已有逐通道的公開 timestamp 方法（`get_timestamp`、`set_timestamp`、`decrement_timestamps`）。下一步是第四個丟棄式原型，只用 QICK 公開 API 驗證這個模型、與現行 `prog_list` 的逐位比對、指令數與模擬器的讀法。
