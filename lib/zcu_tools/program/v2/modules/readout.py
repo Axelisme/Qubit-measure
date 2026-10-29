@@ -410,6 +410,7 @@ class PulseReadout(AbsReadout):
         configuration event; generator pre_delay and ADC trig_offset are retained.
         Declaration and QICK timing errors propagate.
         """
+        timeline = timeline if timeline is not None else "default"
         if self.ro_freq_val is None:
             prog.send_readoutconfig(
                 self.cfg.ro_ch, self.adc_name, t=0, tag=tag, timeline=timeline

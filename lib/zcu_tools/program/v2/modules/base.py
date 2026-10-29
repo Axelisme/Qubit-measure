@@ -61,9 +61,12 @@ class Module(ABC):
     ) -> None:
         """Emit native macros and advance by this owner's blocking duration.
 
-        Called by prog.emit after declaration. timeline=None advances the QICK
-        reference; a name advances only that cursor. tag belongs to this emission,
-        not to the declaration. Unsupported modules raise NotImplementedError.
+        Called by prog.emit after declaration. None selects the default timeline;
+        other names require fork in _body. Events share that timeline's current
+        end and the owner adds rule-a duration without moving reference.
+        DelayAuto instead advances native reference and rejects explicit names.
+        tag belongs to this emission, not the declaration. Unsupported modules
+        raise NotImplementedError.
         """
         raise NotImplementedError(f"{type(self).__name__} has no timeline lowering")
 

@@ -1,6 +1,6 @@
-"""Native QICK programs with independent named scheduling cursors."""
+"""Native QICK programs with timeline ends relative to reference time."""
 
-from dataclasses import dataclass, field
+import math
 from typing import Literal
 
 from qick.asm_v2 import (
@@ -14,137 +14,183 @@ from qick.asm_v2 import (
 )
 
 from .base import MyProgramV2
+from .ir import TimingLayout, TimingLoop
 from .macro.delay import DelayRegAuto
 from .modules.base import Module
-from .modules.util import get_fclk, round_timestamp
+from .modules.util import get_fclk
 from .resources import ProgramResourcesMixin
 
 
-@dataclass
-class _TimelineState:
-    offset: float | QickParam = 0.0
-    gen_ends: list[float | QickParam] = field(default_factory=list)
-    ro_ends: list[float | QickParam] = field(default_factory=list)
+def _bounds(value: float | QickParam) -> tuple[float, float]:
+    if isinstance(value, QickParam):
+        return (
+            value.start + sum(min(0.0, s) for s in value.spans.values()),
+            value.start + sum(max(0.0, s) for s in value.spans.values()),
+        )
+    return value, value
+
+
+def _maximum(a: float | QickParam, b: float | QickParam, name: str):
+    lower, upper = _bounds(a - b)
+    if lower >= -1e-12:
+        return a
+    if upper <= 1e-12:
+        return b
+    raise ValueError(
+        f"{name}: cannot prove timeline maximum at every sweep point; "
+        "use delay_timeline to arrange noncrossing ends"
+    )
+
+
+def _align_end(prog, value: float | QickParam) -> float | QickParam:
+    # Arithmetic on already integral tick values can land just above an integer.
+    # Do not turn that floating-point noise into another scheduled tick.
+    def ceil_tick(ticks: float) -> int:
+        nearest = round(ticks)
+        return (
+            nearest
+            if math.isclose(ticks, nearest, rel_tol=0, abs_tol=1e-10)
+            else math.ceil(ticks)
+        )
+
+    cycles = value * get_fclk(prog)
+    if isinstance(cycles, QickParam):
+        cycles = QickParam(
+            ceil_tick(cycles.start), {k: ceil_tick(v) for k, v in cycles.spans.items()}
+        )
+    else:
+        cycles = ceil_tick(cycles)
+    return _step_time(prog, cycles / get_fclk(prog))
+
+
+def _step_time(prog, value: float | QickParam) -> float | QickParam:
+    if not isinstance(value, QickParam):
+        return value
+    # Use QICK public conversion/rounding APIs, never inspect raw sweep internals.
+    param = QickParam(value.start, value.spans.copy())
+    prog.us2cycles(param)
+    return param.get_rounded(loop_counts=prog.loop_dict)
 
 
 class _TimelineBook:
-    """Keep preprocessing state shared by all macros in one program."""
+    """Store only relative ends, including the ordinary default timeline."""
 
     def __init__(self):
-        self.states: dict[str, _TimelineState] = {}
+        self.ends: dict[str, float | QickParam] = {"default": 0.0}
 
-    def state(self, name: str) -> _TimelineState:
-        return self.states.setdefault(name, _TimelineState())
+    def end(self, name: str) -> float | QickParam:
+        if name not in self.ends:
+            raise ValueError(f"{name}: unknown timeline; declare it with fork in _body")
+        return self.ends[name]
 
     def decrement(self, t: float | QickParam) -> None:
-        for state in self.states.values():
-            state.offset = max(0.0, state.offset - t)
-            state.gen_ends = [max(0.0, end - t) for end in state.gen_ends]
-            state.ro_ends = [max(0.0, end - t) for end in state.ro_ends]
+        self.ends = {
+            name: _maximum(0.0, end - t, name) for name, end in self.ends.items()
+        }
+
+    def maximum(self) -> float | QickParam:
+        end: float | QickParam = 0.0
+        for name, candidate in self.ends.items():
+            end = _maximum(end, candidate, name)
+        return end
+
+
+class _Fork(Macro):
+    """Copy one declared end to fresh names at this preprocessing position."""
+
+    def __init__(self, book: _TimelineBook, source: str, targets: tuple[str, ...]):
+        self.book = book
+        self.source = source
+        self.targets = targets
+
+    def preprocess(self, prog) -> None:
+        super().preprocess(prog)
+        end = self.book.end(self.source)
+        if len(set(self.targets)) != len(self.targets) or any(
+            name in self.book.ends for name in self.targets
+        ):
+            raise ValueError("fork requires new, distinct timeline names")
+        self.book.ends.update(dict.fromkeys(self.targets, end))
+
+    def translate(self, prog) -> None:
+        pass
 
 
 class _RuntimeAdvance(Macro):
-    """Guard unknown nonnegative runtime advances without adding a runtime cursor."""
+    """Guard all ends against the static part of an unknown nonnegative advance."""
 
     def __init__(self, book: _TimelineBook, source: DelayRegAuto):
         self.book = book
         self.source = source
 
     def preprocess(self, prog) -> None:
-        offsets = {name: state.offset for name, state in self.book.states.items()}
-        has_end = (
-            prog.get_max_timestamp(gens=self.source.gens, ros=self.source.ros)
-            is not None
-        )
-        self.source.preprocess(prog)
-        static = self.source.get_time_param("auto_t") if has_end else 0.0
-        for name, offset in offsets.items():
-            difference = offset - static
-            if isinstance(difference, QickParam):
-                # QickParam's ordinary range comparator is not pointwise for
-                # independent sweeps. An affine maximum includes every positive span.
-                upper = difference.start + sum(
-                    max(0.0, span) for span in difference.spans.values()
-                )
-            else:
-                upper = difference
-            if not upper <= 0:
-                raise ValueError(
-                    f"{name}: runtime register advance cannot prove offset <= "
-                    "static advance; use sync(timeline=...) or delay_auto(timeline=...)"
-                )
-        for state in self.book.states.values():
-            state.offset = 0.0
+        ends = self.book.ends.copy()
+        # The native consumer resolves its rounded static time. Suspend only
+        # timeline bookkeeping until the proof, not native channel timestamps.
+        self.book.ends.clear()
+        try:
+            self.source.preprocess(prog)
+            static = self.source.get_time_param("auto_t")
+            if static is None:
+                static = 0.0
+            for name, end in ends.items():
+                if _bounds(end - static)[1] > 1e-12:
+                    raise ValueError(
+                        f"{name}: runtime register advance cannot prove end <= "
+                        "static advance at every sweep point; first sync this timeline"
+                    )
+        except Exception:
+            self.book.ends = ends
+            raise
+        self.book.ends = dict.fromkeys(ends, 0.0)
 
     def translate(self, prog) -> None:
         self.source.translate(prog)
 
 
 class _Boundary(Macro):
-    """Preprocess-only lifecycle marker; never occupies instruction memory."""
+    """Reset preprocessing state or emit a linked IR timing boundary."""
 
     def __init__(self, book: _TimelineBook, section: str):
         self.book = book
         self.section = section
 
     def preprocess(self, prog) -> None:
-        if self.section == "reset":
-            self.book.states.clear()
         super().preprocess(prog)
+        if self.section == "reset":
+            self.book.ends = {"default": 0.0}
 
     def translate(self, prog) -> None:
-        pass
+        if self.section in ("body_start", "body_end"):
+            prog.record_meta(
+                type="TIMING_BOUNDARY", name=self.section, info={}, regs={}
+            )
 
 
 class _Advance(TimedMacro):
-    def __init__(
-        self,
-        book: _TimelineBook,
-        timeline: str,
-        source: Delay,
-        *,
-        aligned: bool = False,
-    ):
-        super().__init__(tag=source.tag)
+    def __init__(self, book, timeline, duration, *, tag=None, aligned=False):
+        super().__init__(tag=tag)
         self.book = book
         self.timeline = timeline
-        self.source = source
+        self.duration = duration
         self.aligned = aligned
 
     def preprocess(self, prog) -> None:
-        state = self.book.state(self.timeline)
-        ends = [state.offset]
-        if self.source.auto:
-            if self.source.gens:
-                ends.extend(state.gen_ends)
-            if self.source.ros:
-                ends.extend(state.ro_ends)
-        offset = max(ends) + self.source.t
-        if self.aligned:
-            # Both the cursor and owner duration are already integral tProc ticks.
-            # Recover that integer, rather than ceiling multiplication noise again.
-            cycles = offset * get_fclk(prog)
-            if isinstance(cycles, QickParam):
-                cycles.start = round(cycles.start)
-                cycles.spans = {
-                    name: round(span) for name, span in cycles.spans.items()
-                }
-            else:
-                cycles = round(cycles)
-            offset = cycles / get_fclk(prog)
-        else:
-            offset = round_timestamp(prog, offset)
-        state.offset = offset
-        self.resolved_time = (
-            offset if isinstance(offset, QickParam) else QickParam(offset)
+        duration = (
+            _step_time(prog, self.duration)
+            if self.aligned
+            else _align_end(prog, self.duration)
         )
+        end = self.book.end(self.timeline) + duration
+        self.book.ends[self.timeline] = _maximum(0.0, end, self.timeline)
+        self.resolved_time = end if isinstance(end, QickParam) else QickParam(end)
 
     def list_time_params(self) -> list[str]:
         return ["t"]
 
     def get_time_param(self, name: str) -> QickParam:
         if name != "t":
-            raise RuntimeError("named advances expose only the t parameter")
+            raise RuntimeError("timeline advances expose only the t parameter")
         return self.resolved_time
 
     def translate(self, prog) -> None:
@@ -152,13 +198,17 @@ class _Advance(TimedMacro):
 
 
 class _Sync(Delay):
-    def __init__(self, book: _TimelineBook, timeline: str):
+    def __init__(self, book: _TimelineBook, timeline: str | None):
         super().__init__(t=0, auto=False)
         self.book = book
         self.timeline = timeline
 
     def preprocess(self, prog) -> None:
-        self.t = self.book.state(self.timeline).offset
+        self.t = (
+            self.book.maximum()
+            if self.timeline is None
+            else self.book.end(self.timeline)
+        )
         super().preprocess(prog)
 
 
@@ -171,14 +221,23 @@ class _PlacedPulse(Pulse):
         self.relative_t: float | QickParam | Literal["auto"] = source.t
 
     def preprocess(self, prog) -> None:
-        state = self.book.state(self.timeline)
+        end = self.book.end(self.timeline)
         if self.relative_t == "auto":
-            self.t = max(state.offset, prog.get_timestamp(gen_ch=self.ch))
+            t = _maximum(end, prog.get_timestamp(gen_ch=self.ch), self.timeline)
         else:
-            self.t = state.offset + self.relative_t
-        self.source.t = self.t
+            t = end + self.relative_t
+        previous_end = prog.get_timestamp(gen_ch=self.ch)
+        self.source.t = t
         self.source.preprocess(prog)
-        state.gen_ends.append(prog.get_timestamp(gen_ch=self.ch))
+        actual_t = self.source.get_time_param("t")
+        if _bounds(actual_t - previous_end)[0] < -1e-12:
+            raise ValueError(
+                f"{self.timeline}: channel {self.ch} pulse overlap; cannot prove "
+                "start >= previous end at every sweep point; use delay_timeline"
+            )
+        self.book.ends[self.timeline] = _align_end(
+            prog, actual_t + prog.pulses[self.name].get_length()
+        )
 
     def translate(self, prog) -> None:
         self.source.translate(prog)
@@ -199,11 +258,11 @@ class _PlacedConfig(ConfigReadout):
         self.relative_t: float | QickParam = source.t
 
     def preprocess(self, prog) -> None:
-        state = self.book.state(self.timeline)
-        self.t = state.offset + self.relative_t
-        self.source.t = self.t
+        self.source.t = self.book.end(self.timeline) + self.relative_t
         self.source.preprocess(prog)
-        state.ro_ends.append(self.t)
+        self.book.ends[self.timeline] = _maximum(
+            0.0, self.source.get_time_param("t"), self.timeline
+        )
 
     def translate(self, prog) -> None:
         self.source.translate(prog)
@@ -231,19 +290,20 @@ class _PlacedTrigger(Trigger):
         self.relative_t: float | QickParam = source.t
 
     def preprocess(self, prog) -> None:
-        state = self.book.state(self.timeline)
-        self.t = state.offset + self.relative_t
+        self.t = self.book.end(self.timeline) + self.relative_t
         super().preprocess(prog)
-        state.ro_ends.extend(prog.get_timestamp(ro_ch=ch) for ch in self.ros)
+        end = self.get_time_param("t") + self.get_time_param("width")
+        for ch in self.ros:
+            end = _maximum(end, prog.get_timestamp(ro_ch=ch), self.timeline)
+        self.book.ends[self.timeline] = _align_end(prog, end)
 
 
 class ModuleEmission(TimedMacro):
-    """One declared module's emission, with independent native timing macros.
+    """One occurrence of a declared module, lowered through the shared compiler.
 
-    owner is the declaration object. macros are its lowered native operations in
-    execution order. tag is this occurrence's optional public timing name; timing
-    parameters delegate to the first native timed operation. Module objects are
-    never themselves QICK macros. Construction is owned by TimelineProgramV2.emit.
+    owner is the borrowed declaration object, macros are fresh native operations,
+    and tag identifies this occurrence's first timed operation in get_time_param.
+    Construction and timing placement are owned by TimelineProgramV2.emit.
     """
 
     def __init__(self, owner: Module, macros: list[Macro], tag: str | None):
@@ -252,9 +312,14 @@ class ModuleEmission(TimedMacro):
         self.macros = macros
 
     def preprocess(self, prog) -> None:
-        """Resolve this occurrence's native timing on the compiling program."""
+        """Resolve internal events at one origin; only owner duration moves its end."""
         for macro in self.macros:
-            macro.preprocess(prog)
+            if isinstance(macro, (_PlacedPulse, _PlacedConfig, _PlacedTrigger)):
+                start = macro.book.end(macro.timeline)
+                macro.preprocess(prog)
+                macro.book.ends[macro.timeline] = start
+            else:
+                macro.preprocess(prog)
 
     def translate(self, prog) -> None:
         """Translate lowered operations through the program's shared compiler."""
@@ -262,14 +327,14 @@ class ModuleEmission(TimedMacro):
             macro.translate(prog)
 
     def get_time_param(self, name: str) -> QickParam:
-        """Return first-event timing by name; missing events/parameters raise RuntimeError."""
+        """Return first-event timing; absent events/parameters raise RuntimeError."""
         for macro in self.macros:
             if isinstance(macro, TimedMacro):
                 return macro.get_time_param(name)
         raise RuntimeError("this emission has no timed operations")
 
     def list_time_params(self) -> list[str]:
-        """List first-event parameter names, or an empty list for an untimed emission."""
+        """List first-event parameter names, or [] for an untimed emission."""
         for macro in self.macros:
             if isinstance(macro, TimedMacro):
                 return macro.list_time_params()
@@ -277,30 +342,29 @@ class ModuleEmission(TimedMacro):
 
 
 class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
-    """Author native QICK hooks with optional named timelines (times in us).
+    """Author native QICK hooks with optional timeline ends (times in us).
 
-    Constructor controls follow MyProgramV2: reps, initial_delay and relax_delay.
-    Author hooks follow QICK. All instructions use the shared IR compiler.
-    Named scheduling is resolved during preprocessing, not in author hooks.
-    Each compilation starts with empty named cursors/ends. Unnamed operations
-    retain native timing semantics. Simulation frontend support is separate.
+    Constructor follows MyProgramV2: reps, initial_delay, relax_delay. Native
+    operations retain QICK timing. Named outputs update their relative ends;
+    sync and body completion move reference time. Each compile resets ends.
+    All instructions share the existing IR and acquisition implementations.
+    Simulation frontend migration is separate.
     """
 
     def __init__(self, *args, **kwargs):
         self._timeline_book = _TimelineBook()
         self._declared_modules: list[Module] = []
         self._declaring = False
+        self._building_body = False
         super().__init__(*args, **kwargs)
 
     def make_program(self) -> None:
-        """Build the native QICK shell with instruction-free lifecycle markers.
+        """Build the QICK shell with linked body markers and all-timeline closure.
 
-        Loop order, hooks, counters, final wait/delay and subroutines follow
-        AveragerProgramV2. Markers reset cursors at preprocess and identify the
-        initialization/body boundaries without changing native instructions.
+        Body closure precedes body_end and final_wait/final_delay. Loop hooks,
+        counters, cleanup and subroutines retain AveragerProgramV2's order.
         """
-        # QICK 0.2.436 has no public boundary hooks. Keep its shell order here
-        # so markers surround only author initialization/body, not final timing.
+        # QICK 0.2.436 provides no public shell boundary hooks.
         self._reset_resources()
         self._declared_modules.clear()
         self.append_macro(_Boundary(self._timeline_book, "reset"))
@@ -317,7 +381,12 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
             if before is not None:
                 self.extend_macros(before)
         self.append_macro(_Boundary(self._timeline_book, "body_start"))
-        self._body(None)
+        self._building_body = True
+        try:
+            self._body(None)
+        finally:
+            self._building_body = False
+        self.append_macro(_Sync(self._timeline_book, None))
         self.append_macro(_Boundary(self._timeline_book, "body_end"))
         self.wait_auto(self.final_wait, no_warn=True)
         if self.final_delay is not None:
@@ -334,12 +403,23 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
             self.extend_macros(asm)
             self.ret()
 
-    def declare(self, module: Module) -> None:
-        """Declare module resources explicitly in _initialize.
+    @property
+    def timing_layout(self) -> TimingLayout:
+        """Return linked body addresses and outer-to-inner axes after compile.
 
-        The object is borrowed and must not be mutated after declaration.
-        Re-declaring the same object is harmless. Calling outside _initialize
-        raises ValueError. Unsupported module types raise NotImplementedError.
+        Missing or duplicate compiler markers raise ValueError. Body end includes
+        timeline closure but precedes shell timing; shell timing belongs to shot.
+        """
+        return TimingLayout.from_metadata(
+            self.meta_infos,
+            tuple(TimingLoop(name, count) for name, count, _, _ in self.loops),
+        )
+
+    def declare(self, module: Module) -> None:
+        """Declare a borrowed module in _initialize; repeat declarations are harmless.
+
+        Do not mutate it afterward. Outside _initialize raises ValueError;
+        unsupported module types raise NotImplementedError.
         """
         if not self._declaring:
             raise ValueError("declare must be called in _initialize")
@@ -351,13 +431,12 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
     def emit(
         self, module: Module, *, timeline: str | None = None, tag: str | None = None
     ) -> None:
-        """Emit a declared module once and advance its timeline in us.
+        """Emit a declared module once, with a fresh timing/tag occurrence.
 
-        None means the real QICK reference; a name means bookkeeping only.
-        Every call creates a fresh ModuleEmission. tag identifies this occurrence
-        for get_time_param, independently of legacy module tags/block settings.
-        Undeclared objects raise ValueError; owner declaration/lowering failures
-        propagate. Unsupported modules raise NotImplementedError.
+        Omitted timeline selects ordinary default, not reference time. Internal
+        events share its current end; rule-a duration advances that end only.
+        DelayAuto is native reference advance and rejects explicit timelines.
+        Undeclared objects raise ValueError; owner lowering failures propagate.
         """
         if not any(module is declared for declared in self._declared_modules):
             raise ValueError(f"{module.name}: module must be declared before emit")
@@ -376,122 +455,82 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         timeline: str | None,
         tag: str | None = None,
     ) -> None:
-        """Advance by an owner's already tProc-aligned total_length in us.
+        """Add an owner's already tProc-aligned rule-a duration in us to its end.
 
-        Owner lowering must supply an integral number of tProc ticks, including
-        each sweep step. None emits a native reference delay; a name adds aligned
-        ticks without rounding them upward a second time. Named native delay
-        remains the entry point for arbitrary, unrounded durations. tag optionally
-        names this advance for public timing inspection.
+        None selects default. Unlike arbitrary delay_timeline inputs, this value
+        is not ceiled again. tag names the resolved end via get_time_param.
         """
-        if timeline is None:
-            self.delay(duration, tag=tag)
-        else:
-            self.append_macro(
-                _Advance(
-                    self._timeline_book,
-                    timeline,
-                    Delay(t=duration, auto=False, tag=tag),
-                    aligned=True,
-                )
+        self.append_macro(
+            _Advance(
+                self._timeline_book,
+                timeline if timeline is not None else "default",
+                duration,
+                tag=tag,
+                aligned=True,
             )
+        )
+
+    def delay_timeline(
+        self, t: float | QickParam, *, timeline: str = "default", tag: str | None = None
+    ) -> None:
+        """Add t us (ceiled to tProc cycles) to a timeline without moving reference.
+
+        tag exposes the resulting end as parameter 't'. Crossing zero or an
+        unprovable sweep floor raises ValueError during compile.
+        """
+        self.append_macro(_Advance(self._timeline_book, timeline, t, tag=tag))
 
     def decrement_timestamps(self, t: float | QickParam | None) -> None:
-        """Rebase QICK channels and named cursors/ends by t us, clamping at zero.
+        """Rebase all relative ends when QICK moves reference by t us.
 
-        QICK invokes this during preprocessing of native delay/auto/resync.
-        None denotes native auto timing with no channels and leaves cursors
-        unchanged. Sweeps use QICK range comparisons, not elementwise maxima.
+        None is native auto with no selected channels and changes no ends.
+        A sweep must prove a uniform sign for each zero floor, otherwise compile
+        raises ValueError naming the timeline and suggesting delay_timeline.
         """
         super().decrement_timestamps(t)
         if t is not None:
             self._timeline_book.decrement(t)
 
-    # Let QICK bind native arguments and construct each macro. Replace only
-    # named calls through public macro_list, preserving native positional calls.
-    def delay(self, *args, timeline: str | None = None, **kwargs) -> None:
-        """Advance reference time, or a named cursor, by t us.
-
-        args/kwargs are QICK delay(t, tag=None). Named advances round the final
-        cursor up to a tProc cycle and emit no instructions. For a named tag,
-        get_time_param(tag, 't') reports that resolved cursor. Omit timeline
-        for native delay/tag semantics.
-        """
-        super().delay(*args, **kwargs)
-        if timeline is not None:
-            source = self.macro_list.pop()
-            self.append_macro(_Advance(self._timeline_book, timeline, source))
-
-    def delay_auto(self, *args, timeline: str | None = None, **kwargs) -> None:
-        """Align reference time, or a named cursor, to selected ends plus t us.
-
-        args/kwargs are QICK delay_auto(t=0, gens=True, ros=True, tag=None).
-        Named alignment takes max(cursor, all prior generator/readout ends on
-        that timeline), filtered by gens/ros. It rounds only the final offset
-        up to a tProc cycle and emits no instructions. Ends survive advances.
-        Maxima and zero floors use QICK QickParam comparison semantics (range
-        comparisons, not elementwise maxima for crossing sweeps). Named tags
-        report the resolved cursor via get_time_param(tag, 't'). Without
-        timeline, retain native timing and tag behavior. A register-name t uses
-        delay_reg_auto and must contain nonnegative tProc cycles. Runtime register
-        time rejects named timelines and tags at entry; default compilation
-        requires the named-cursor proof described by delay_reg_auto.
-        """
-        super().delay_auto(*args, **kwargs)
-        source = self.macro_list[-1]
-        if isinstance(source.t, str):
-            self.macro_list.pop()
-            if timeline is not None:
-                raise ValueError(
-                    "runtime register time supports only the default timeline"
-                )
-            if source.tag is not None:
-                raise ValueError("runtime register time cannot have a tag")
-            self.delay_reg_auto(source.t, gens=source.gens, ros=source.ros)
-        elif timeline is not None:
-            self.macro_list.pop()
-            self.append_macro(_Advance(self._timeline_book, timeline, source))
-
     def delay_reg_auto(self, time_reg: str, *, gens=True, ros=True) -> None:
-        """Advance the default reference by selected static ends plus register cycles.
+        """Advance native reference by selected static ends plus register cycles.
 
-        time_reg must hold nonnegative tProc cycles. Each named cursor must be
-        provably <= the static advance at every sweep point, otherwise compilation
-        raises ValueError with its name and a sync/delay_auto hint. Proven cursors
-        become zero; channel ends retain only the static decrement. QICK register
-        validation is unchanged. No runtime offset or extra instruction is added.
+        time_reg contains nonnegative tProc cycles. Every timeline, including
+        default, must prove end <= static advance at every sweep point, otherwise
+        compile raises ValueError suggesting sync. Proven ends become zero.
         """
         super().delay_reg_auto(time_reg, gens=gens, ros=ros)
         source = self.macro_list.pop()
         self.append_macro(_RuntimeAdvance(self._timeline_book, source))
 
-    def wait_auto(self, *args, **kwargs) -> None:
-        """Wait using native QICK arguments; timeline= is unsupported.
+    def fork(self, source: str, *, into: str | list[str]) -> None:
+        """Declare new timeline names in _body, copying source end at this point.
 
-        args/kwargs are wait_auto(t=0, gens=False, ros=True, tag=None,
-        no_warn=False). Times are in us; selection includes all channel
-        timestamps, even named emissions. Unsupported keywords raise TypeError.
+        source must already exist; into is one new name or a list of distinct
+        new names. Unknown source or duplicate targets raise ValueError during
+        compile. Calling outside _body raises ValueError immediately. This emits
+        no instructions and does not advance reference. Each compile resets names.
         """
-        super().wait_auto(*args, **kwargs)
+        if not self._building_body:
+            raise ValueError("fork must be called in _body")
+        targets = (into,) if isinstance(into, str) else tuple(into)
+        self.append_macro(_Fork(self._timeline_book, source, targets))
 
-    def sync(self, *, timeline: str) -> None:
-        """Move reference time to the named cursor using one native inc_ref.
+    def sync(self, *, timeline: str = "default") -> None:
+        """Move reference to the chosen end and floor every rebased end at zero.
 
-        All named cursors/ends and native channel timestamps are rebased, with
-        zero as their lower bound. A previously unused timeline starts at zero.
+        Only default exists initially; other names require fork in _body.
+        Unknown names or unprovable swept floors raise ValueError during compile.
         """
         self.append_macro(_Sync(self._timeline_book, timeline))
 
     def send_readoutconfig(
         self, ch: int, name: str, *args, timeline: str | None = None, **kwargs
     ) -> None:
-        """Send config name on ADC ch, optionally relative to a named cursor.
+        """Send an instantaneous config at timeline end+t us, or native t if omitted.
 
-        args/kwargs are QICK send_readoutconfig's t=0 (us) and tag=None.
-        Named configuration is instantaneous: its end is offset+t, regardless
-        of config length, and is selected by ros in named delay_auto. It does
-        not advance the cursor or borrow an ADC integration window. Without
-        timeline, retain QICK configuration/timing/tag behavior.
+        Native args are t=0, tag=None. A timeline end becomes the scheduled config
+        instant; config length and unrelated ADC windows do not contribute.
+        Declaration and timing errors propagate.
         """
         super().send_readoutconfig(ch, name, *args, **kwargs)
         if timeline is not None:
@@ -501,11 +540,10 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
     def pulse_from_regs(
         self, ch: int, name: str, *, timeline: str | None = None, **kwargs
     ) -> None:
-        """Play a runtime-word pulse, optionally on a named timeline.
+        """Play runtime words at native t or timeline end+t, advancing a named end.
 
-        kwargs are the inherited t (us), tag, freq_reg and gain_reg. Registers
-        contain final hardware words. Template validation and QICK failures
-        propagate. Named playback retains the runtime patch before port emission.
+        kwargs are t (us), tag, freq_reg and gain_reg containing final hardware
+        words. Native patching and template/register validation are unchanged.
         """
         super().pulse_from_regs(ch, name, **kwargs)
         if timeline is not None:
@@ -515,11 +553,11 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
     def send_readoutconfig_from_regs(
         self, ch: int, name: str, *, timeline: str | None = None, **kwargs
     ) -> None:
-        """Send runtime ADC words, optionally relative to a named cursor.
+        """Send runtime ADC words at native t or timeline end+t (us).
 
-        kwargs are inherited t (us), tag and freq_reg. The named config remains
-        an instantaneous ros event; runtime patching is retained. Invalid
-        templates/registers propagate QICK errors.
+        kwargs are t, tag and freq_reg. A timeline end becomes the scheduled config
+        instant, independent of config length. Native patching and declaration/
+        register validation are unchanged.
         """
         super().send_readoutconfig_from_regs(ch, name, **kwargs)
         if timeline is not None:
@@ -527,33 +565,28 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
             self.append_macro(_PlacedConfig(self._timeline_book, timeline, source))
 
     def trigger(self, *args, timeline: str | None = None, **kwargs) -> None:
-        """Pulse ADC/time-tagger/pin triggers using native QICK arguments.
+        """Trigger ADC/tt/pins at native t or timeline end+t and advance named end.
 
-        args/kwargs are trigger(ros=None, tts=None, pins=None, t=0, width=None,
-        ddr4=False, mr=False, tag=None). ros/tts/pins select logical channels,
-        width is in us, ddr4/mr select capture buffers, and tag names the event.
-        With timeline, t is relative to its cursor; ADC integration ends are
-        recorded for ros alignment without advancing the cursor. Named t=None
-        raises ValueError at entry. Without timeline, native s_out_time
-        semantics are retained. Native declaration/argument failures propagate.
+        Native args select ros/tts/pins, t, width (us), ddr4/mr and tag. Named end
+        includes ADC integration and trigger width, rounded up to tProc cycles.
+        Named t=None raises ValueError at entry; native special values are unchanged.
         """
         super().trigger(*args, **kwargs)
         if timeline is not None:
             source = self.macro_list.pop()
             if source.t is None:
-                raise ValueError("named trigger does not support t=None")
+                raise ValueError("timeline trigger does not support t=None")
             self.append_macro(_PlacedTrigger(self._timeline_book, timeline, source))
 
     def pulse(
         self, ch: int, name: str, *args, timeline: str | None = None, **kwargs
     ) -> None:
-        """Emit a declared pulse, optionally relative to a named cursor.
+        """Play a pulse at native t or timeline end+t, advancing a named end.
 
-        args/kwargs are QICK pulse's t=0 (us or 'auto') and tag=None.
-        Named t='auto' selects max(cursor, generator timestamp), using QICK
-        QickParam range comparison semantics. Named emission does not advance
-        the cursor. Channel/pulse checks, dummypulse creation and tags retain
-        QICK behavior; omitted timeline is entirely native.
+        Native args are t=0 (us or 'auto'), tag=None. Named 'auto' takes the
+        provably later timeline/channel end. Named end includes waveform length,
+        rounded up to tProc cycles. Crossing swept maxima raise ValueError with
+        a delay_timeline hint; native declaration errors propagate.
         """
         super().pulse(ch, name, *args, **kwargs)
         if timeline is not None:

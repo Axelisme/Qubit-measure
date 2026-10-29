@@ -100,24 +100,63 @@ Encoding with `readout_freq_words` still takes those four explicit settings.
 
 ## 原生寫法與具名 timeline
 
-`timeline.TimelineProgramV2` 繼承 `MyProgramV2`，不經 `ModularProgramV2`。作者在 `_initialize(cfg)` 宣告通道、pulse、readout config 與 `add_loop()`，在 `_body(cfg)` 發射原生 QICK 操作。建構子使用 `reps`、`initial_delay`、`relax_delay`，shot 外殼為 `final_wait=0`、`final_delay=relax_delay`。所有指令共用既有 IR optimizer，未帶 `timeline` 的同段寫法與 `MyProgramV2` 編譯逐位相同。它繼承既有 acquire 擴充，但模擬 frontend 尚不解讀新 emission 序列，builder 也尚未切換。
+`timeline.TimelineProgramV2` 繼承 `MyProgramV2`，不經 `ModularProgramV2`。
+作者在 `_initialize(cfg)` 宣告通道、pulse、readout config、module 與 loops。
+在 `_body(cfg)` 發射原生 QICK 操作或 `emit(module)`。
+建構子使用 `reps`、`initial_delay`、`relax_delay`。
+Shot 外殼為 `final_wait=0`、`final_delay=relax_delay`。
+全部輸出共用既有 IR compiler。Boundary metadata 可能改變指令排列，不要求新舊逐位相同。
+Builder 與模擬 frontend 尚未切換，既有 acquire 擴充仍由共同基底提供。
 
-`pulse`、`trigger`、`send_readoutconfig` 可帶 `timeline="drive"`，以該 timeline 的 offset 加 t 發射，不自動推進 offset。`delay(t, timeline="drive")` 只前進該 offset，不發指令。`delay_auto(t, gens=True, ros=True, timeline="drive")` 取 offset 與該 timeline 歷次選定 end 的最大值，加 t 後一次向上取整到 tProc cycle。End 不因自身 advance 而清除。Config 是瞬時事件，其 end 是發射時間；ADC 積分窗口由 trigger 記錄。
+每條 timeline 只保存相對 reference 的結尾。
+Default 是普通 timeline，不是 reference。其他名字先在 `_body` 用 `fork(source, into=...)` 宣告。
+Source 必須存在，into 接受一個新名字或名字 list。未知來源、重名與未宣告使用都報錯。
+帶 timeline 的 pulse／trigger 在結尾加 t 發射，然後更新結尾。
+同 channel 的 pulse 提前開始時編譯報錯，不能用另一條 timeline 繞過。
+Config 是瞬時事件，結尾更新到發射時間 E+t，不加 config length 或其他 ADC window。
+未帶 timeline 的原生指令保留 QICK 行為。
 
-原生 `delay`、`delay_auto`、`resync` 改變參考時間時，所有具名 offset 與 end 一起扣減，最低為零。`sync(timeline="drive")` 發出一次原生 `inc_ref`，將參考時間移到該 offset。掃描值的最大值與下限採 QICK 的 range 比較，不計算 crossing sweeps 的逐點最大值。`wait_auto` 與 `resync` 不接受 `timeline`；未帶時仍可在具名發射後使用。
+`delay_timeline(t, timeline="drive")` 只將結尾加 t，不移動 reference。
+`sync(timeline="drive")` 才將 reference 移到該結尾，並扣減全部 timeline，最低為零。
+原生 delay／delay_auto／resync 也經公開 timestamp decrement 扣減全部結尾。
+掃描 floor 與 max 必須逐點證明符號。會跨零或互相交叉時編譯報錯，提示改用 delay_timeline。
+原生 delay／delay_auto／wait_auto／resync 不增加 timeline keyword。
 
-時間狀態只在 preprocess 更新，每次 `compile()` 都經共用 compiler 重編並清空狀態。`make_program()` 保留 QICK 外殼順序，並在初始化結束、body 起訖加入不發指令的 marker。原生作者 hooks、迴圈前後指令與 subroutine 的位置不變。
+Module 先明確 declare，每次 emit 建立獨立的 `ModuleEmission` 與 tag。
+Module 本身不是 QICK Macro，不能直接 append。
+一般 emit 內部事件共用所選 timeline 的結尾作為起點，再加規則 a 的 total_length。
+省略 timeline 選 default，但不移動 reference。
+例如 drive_cfg 使用 channel 0，另一個 channel 1 的 native pulse 已在初始化宣告時：
 
-`resources.ProgramResourcesMixin` 集中 dmem 配置與 readout route 保護，由 `TimelineProgramV2` 和 `ModularProgramV2` 共用。兩者都由 `MyProgramV2` 在傳輸邊界將 dmem 轉成 `list[int]`。Builder 與模擬器仍使用 `ModularProgramV2`。
+```python
+def _initialize(self, cfg):
+    self.drive = Pulse("drive", drive_cfg)
+    self.declare(self.drive)
+    self.declare_gen(1, nqz=1)
+    self.add_pulse(1, "native", style="const", freq=1000,
+                   phase=0, gain=0.5, length=0.1)
 
-在 `_initialize` 建立 module 後呼叫 `self.declare(module)`。
-在 `_body` 呼叫 `self.emit(module, timeline="drive", tag="first")`。
-每次發射都有新的 `ModuleEmission`，tag 屬於該次呼叫。
-未帶 timeline 的 module 依 total_length 推進原生 reference，後接的原生 pulse(t=0)
-從其結束處開始。Module 物件本身不是 QICK Macro，不能直接 append。
-Owner lowering 與原生指令共用既有 IR，不在 emission 層合併指令。
-Runtime register 時間只支援預設 timeline；具名 offset 須能逐掃描點證明不大於
-靜態推進量，否則編譯報錯。Channel end 只扣靜態部分，保留保守等待。
+def _body(self, cfg):
+    self.emit(self.drive)
+    self.pulse(1, "native", t=0)  # Relative to the original reference.
+    self.sync()
+    self.pulse(1, "native", t=0)  # Relative to the drive end.
+    self.fork("default", into="drive")
+    self.emit(self.drive, timeline="drive")
+```
+
+DelayAuto 是唯一例外。未指定 timeline 時包裝原生 delay_auto／delay_reg_auto，保留 gens／ros。
+指定任何 timeline 名稱都在 emit 入口報錯，包含顯式 default。
+Runtime register 時間只走 delay_reg_auto。所有結尾包含 default 都須證明不大於靜態推進量，否則先 sync。
+PulseReadout 的 gain／frequency runtime words 不受這項時間限制排除。
+
+Body 收尾先同步全部 timeline，再放 body_end marker，然後進 shot 外殼。
+每次 compile 重置宣告與結尾。公開 `timing_layout` 由真 boundary metadata 取得 linked addresses 與 loop 座標。
+將它與 prog_list／labels 交給 `ir.analyze_timing`，可觀察逐點事件、body_end 與含外殼的 shot_end。
+Resync 讀取硬體 s11，analysis 會明確拒絕，不宣稱其後精確時序。
+
+`resources.ProgramResourcesMixin` 集中 dmem 配置與 readout route 保護。
+TimelineProgramV2 與 ModularProgramV2 共用它，傳輸時由 MyProgramV2 將 dmem 轉為 list[int]。
 
 ## Macro Layer
 

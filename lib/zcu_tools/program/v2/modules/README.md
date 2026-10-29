@@ -24,13 +24,21 @@ Pulse、Delay、SoftDelay、DelayAuto、PulseReadout 與 Reset 系列提供原�
 Module 不是 QICK Macro，不能直接交給 `append_macro`。
 同一宣告物件可重複發射，舊 module 的 tag 與 block_mode 不控制新路徑。
 
-預設發射依 owner 的 `total_length` 推進真正的 QICK reference。
-具名發射只推進該 timeline。Owner 已對齊 tProc 的長度不再向上取整第二次。
+一般發射將所選 timeline 的結尾加上 owner 的規則 a `total_length`，不移動 reference。
+省略 timeline 時選 default。其他名字先在 `_body` 用 `fork("default", into="drive")` 宣告。
+同一 emission 內部事件共用起點，TwoPulseReset 的跨 channel 重疊不會被串成序列。
+同 channel 的提前發射則在編譯期報錯，即使改用另一條 timeline 也一樣。
+Owner 已對齊 tProc 的長度不再向上取整第二次。
+Delay 與 SoftDelay 都只加 timeline 結尾。`sync()` 或 body 收尾才推進 reference。
+
+DelayAuto 是唯一例外，未指定 timeline 時呼叫原生 delay_auto 或 delay_reg_auto。
+它保留 gens／ros 選取，移動 reference 並扣減全部 timeline 結尾。
+指定任何 timeline 名稱都在 emit 入口報錯，包含顯式 default。
+Register cycles 必須非負，所有結尾包含 default 都須逐點證明不大於靜態推進量。
+無法證明時，編譯會指出 timeline 並提示先 sync。
+
 PulseReadout 的 runtime gain／generator frequency／ADC frequency words 沿用既有 consumer。
-DelayAuto 的 runtime register cycles 只支援預設 timeline，具名入口會報錯。
-具名 offset 必須逐掃描點不大於 register 推進的靜態部分，否則編譯會指出 timeline，
-並提示先 sync 或 delay_auto。Channel end 只扣靜態部分，不扣未知 register 值。
-Scalar／QickParam 的具名時間仍可用。Legacy init／run／block 保留供舊 program 使用。
+時間 guard 不限制這些非時間 words。Legacy init／run／block 保留供舊 program 使用。
 
 ## Configuration names
 

@@ -41,7 +41,7 @@ class Delay(Module):
     def lower(
         self, prog: TimelineProgramV2, *, timeline: str | None, tag: str | None
     ) -> None:
-        """Advance by delay us, or bookkeep the named cursor; tag is per emission."""
+        """Add rounded delay us to the selected end (default if None); do not move reference."""
         prog.advance_module(
             round_timestamp(prog, self.delay), timeline=timeline, tag=tag
         )
@@ -69,7 +69,7 @@ class SoftDelay(Module):
     def lower(
         self, prog: TimelineProgramV2, *, timeline: str | None, tag: str | None
     ) -> None:
-        """Advance by delay us, ignoring the legacy cursor-only run convention."""
+        """Add rounded delay us to the selected end, exactly like Delay in this path."""
         prog.advance_module(
             round_timestamp(prog, self.delay), timeline=timeline, tag=tag
         )
@@ -126,24 +126,22 @@ class DelayAuto(Module):
     def lower(
         self, prog: TimelineProgramV2, *, timeline: str | None, tag: str | None
     ) -> None:
-        """Align selected ends and add extra us, or runtime tProc register cycles.
+        """Move native reference by selected channel ends plus t, not a duration.
 
-        Scalar named alignment only updates bookkeeping. The default register
-        path uses the existing public delay_reg_auto consumer. Register/tag
-        restrictions are the same as construction.
+        timeline must be None; explicit names (including default) raise ValueError
+        at emission. Register t holds nonnegative tProc cycles and requires every
+        timeline end <= static advance. Scalar/QickParam t is extra us.
         """
+        if timeline is not None:
+            raise ValueError(
+                "DelayAuto cannot select a timeline; use native delay_auto or delay_timeline"
+            )
         if isinstance(self.t, str):
-            if timeline is not None:
-                raise ValueError(
-                    "runtime register time supports only the default timeline"
-                )
             if tag is not None:
                 raise ValueError("DelayAuto with a register time cannot have a tag")
             prog.delay_reg_auto(time_reg=self.t, gens=self.gens, ros=self.ros)
         else:
-            prog.delay_auto(
-                t=self.t, gens=self.gens, ros=self.ros, tag=tag, timeline=timeline
-            )
+            prog.delay_auto(t=self.t, gens=self.gens, ros=self.ros, tag=tag)
 
     def allow_rerun(self) -> bool:
         return self.tag is None

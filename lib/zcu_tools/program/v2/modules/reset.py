@@ -183,6 +183,7 @@ class TwoPulseReset(AbsReset):
         self, prog: TimelineProgramV2, *, timeline: str | None, tag: str | None
     ) -> None:
         """Start both pulses together, then advance their maximum total_length."""
+        timeline = timeline if timeline is not None else "default"
         self.reset_pulse1.play(prog, timeline=timeline, tag=tag)
         self.reset_pulse2.play(prog, timeline=timeline)
         prog.advance_module(self.total_length(prog), timeline=timeline)
@@ -229,6 +230,7 @@ class BathReset(AbsReset):
         The cavity plus pi/2 duration is the legacy blocking rule, even when the
         overlapping qubit tone lasts longer. tag identifies the cavity start.
         """
+        timeline = timeline if timeline is not None else "default"
         self.res_pulse.play(prog, timeline=timeline, tag=tag)
         self.qub_pulse.play(prog, timeline=timeline)
         self.pi2_pulse.play(

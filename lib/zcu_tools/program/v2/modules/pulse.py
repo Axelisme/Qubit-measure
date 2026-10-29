@@ -198,6 +198,7 @@ class Pulse(Module):
         Legacy block_mode and tag do not affect this occurrence. Empty cfg has
         zero duration and no playback. QICK resource/timing errors propagate.
         """
+        timeline = timeline if timeline is not None else "default"
         self.play(prog, timeline=timeline, tag=tag)
         prog.advance_module(self.total_length(prog), timeline=timeline)
 
@@ -209,11 +210,12 @@ class Pulse(Module):
         tag: str | None = None,
         t: float | QickParam = 0.0,
     ) -> None:
-        """Place playback at t plus pre_delay without advancing the timeline.
+        """Lower playback at t plus pre_delay, without adding owner duration.
 
-        Composite owners use this for parallel/sequential reset components.
-        t is relative us. Empty cfg emits nothing; an undeclared pulse raises
-        ValueError. tag names only this playback occurrence.
+        Composite owners call this inside one emission, which holds their events
+        at the same timeline origin. Outside emission, timeline pulse placement
+        advances its end normally. t is relative us. Empty cfg emits nothing;
+        undeclared pulses raise ValueError. tag names only this playback occurrence.
         """
         if self.cfg is None:
             return
