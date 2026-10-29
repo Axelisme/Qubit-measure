@@ -1,0 +1,187 @@
+"""GUI wiring and captured-source writeback for heralded Ramsey."""
+
+from __future__ import annotations
+
+import logging
+from collections.abc import Sequence
+from copy import deepcopy
+from pathlib import Path
+from typing import TypeAlias
+
+from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.records import RunRecord
+from zcu_tools.gui.app.measure.adapter import (
+    Adapter,
+    Analysis,
+    AnalyzeRequest,
+    ParameterWriteback,
+    RecordWriteback,
+    WritebackItem,
+    WritebackRequest,
+)
+from zcu_tools.gui.form_adapter import Form, FormContext
+from zcu_tools.plotting.plots import Plots
+
+from zcu_lab.v2.support.flux import record_flux_frame
+from zcu_lab.v2.support.measure.record_frame import captured_qubit_flux
+from zcu_lab.v2.twotone.time_domain.t2ramsey.core import T2RamseyAnalyzeOptions
+from zcu_lab.v2.twotone.time_domain.t2ramsey.gui import T2RamseyAnalyzeResult
+
+from .core import (
+    HeraldingT2RamseyCfg,
+    HeraldingT2RamseyExp,
+    HeraldingT2RamseyResult,
+)
+from .form import HeraldingT2RamseyInput, make_form
+
+logger = logging.getLogger(__name__)
+
+
+T2RamseyRunResult: TypeAlias = RunRecord[HeraldingT2RamseyCfg, HeraldingT2RamseyResult]
+
+
+def _T2Ramsey_analyze(
+    req: AnalyzeRequest[T2RamseyRunResult, T2RamseyAnalyzeOptions], *, plots: Plots
+) -> T2RamseyAnalyzeResult:
+    params = req.analyze_params
+    analysis = HeraldingT2RamseyExp().analyze(
+        req.run_result,
+        req.analyze_params,
+        plots=plots,
+    )
+    return T2RamseyAnalyzeResult(
+        t2r=analysis.t2r,
+        t2r_err=analysis.t2r_err,
+        fit_quality=analysis.fit_quality,
+        detune=analysis.detune,
+        fit_fringe=params.fit_fringe,
+    )
+
+
+def _T2Ramsey_get_writeback_items(
+    req: WritebackRequest[T2RamseyRunResult, T2RamseyAnalyzeResult],
+) -> Sequence[WritebackItem]:
+    """Propose captured qubit.t2r, plus qubit.freq for a sourced fringe fit.
+
+    req supplies the committed fit, source record and captured context.
+    Frequency is source pi/2 frequency + realized detune - fitted detune;
+    it is omitted for decay fits, cfg=None or unknown realized detune.
+    Non-scalar source frequency raises ValueError. WritebackService resolves
+    destinations on req.ctx.parameters and rejects missing captures/unbound
+    roles. With a capture, also propose t2r_us/t2r_err_us for the Run's
+    resolved $qubit; an unbound alias raises RoleResolutionError. Without
+    a capture, retain parameter proposals only so loaded data can still be
+    analyzed. The adapter copies all Run devices into its record. Missing
+    metadata or snapshot logs "no device snapshot" and omits only the record.
+    No live calibration lookup, device access or write occurs here.
+    """
+    metadata = req.run_result.metadata
+    devices = (
+        None
+        if metadata is None or metadata.device_snapshot is None
+        else deepcopy(dict(metadata.device_snapshot))
+    )
+    if devices is None:
+        logging.warning("no device snapshot")
+    result = req.analyze_result
+    items: list[WritebackItem] = [
+        ParameterWriteback(
+            target_name="$qubit.t2r",
+            description="Heralded T2 Ramsey time (us)",
+            proposed_value=result.t2r,
+        ),
+    ]
+
+    # Frequency correction uses only the source run, never current calibration.
+    snapshot = req.run_result.cfg
+    if (
+        result.fit_fringe
+        and snapshot is not None
+        and req.run_result.result.true_activate_detune is not None
+    ):
+        source_freq = snapshot.pi2_pulse.freq
+        if not isinstance(source_freq, float):
+            raise ValueError(
+                "qubit.freq writeback requires a scalar source pi/2 frequency"
+            )
+        q_f = source_freq + req.run_result.result.true_activate_detune - result.detune
+        items.append(
+            ParameterWriteback(
+                target_name="$qubit.freq",
+                description="Heralded qubit frequency (MHz)",
+                proposed_value=q_f,
+            )
+        )
+
+    parameters = req.ctx.parameters
+    if parameters is not None and metadata is not None and devices is not None:
+        frame = record_flux_frame(captured_qubit_flux(parameters), devices)
+        items.append(
+            RecordWriteback(
+                target_name=parameters.resolve_path("$qubit"),
+                description="Heralded T2 Ramsey record at the captured bias",
+                record={
+                    "devices": {name: deepcopy(info) for name, info in devices.items()},
+                    "flux_frame": frame,
+                    "run": {
+                        "run_id": metadata.run_id,
+                        "experiment": metadata.experiment,
+                    },
+                    "t2r_us": result.t2r,
+                    "t2r_err_us": result.t2r_err,
+                },
+            )
+        )
+    return items
+
+
+def _T2Ramsey_make_form(ctx: FormContext) -> Form[HeraldingT2RamseyInput]:
+    """Build this adapter's definition using captured Open/Reset sources."""
+    return make_form(ctx)
+
+
+def _run(
+    inp: HeraldingT2RamseyInput, *, context: RunContext
+) -> RunRecord[HeraldingT2RamseyCfg, HeraldingT2RamseyResult]:
+    """Convert fringes/step to MHz, acquire and record the actual detune cfg.
+
+    Zero ratio disables detune. Nonzero ratio on a zero-step delay sweep fails
+    before acquisition. The measured, hardware-rounded detune is logged in MHz.
+    """
+    if inp.detune_ratio == 0.0:
+        detune = 0.0
+    elif inp.length.step == 0.0:
+        raise ValueError(
+            "cannot apply a nonzero detune_ratio on a degenerate "
+            "length sweep (expts < 2, step == 0)"
+        )
+    else:
+        detune = inp.detune_ratio / inp.length.step
+    cfg = HeraldingT2RamseyCfg(
+        reps=inp.reps,
+        rounds=inp.rounds,
+        acquire_retry=inp.acquire_retry,
+        earlystop_snr=inp.earlystop_snr,
+        relax_delay=inp.relax_delay,
+        reset=inp.reset,
+        pi2_pulse=inp.pi2_pulse,
+        readout=inp.readout,
+        length=inp.length,
+        detune=detune,
+    )
+    result = HeraldingT2RamseyExp().run(cfg, context=context)
+    logger.info("T2Ramsey true detune: %s MHz", result.true_activate_detune)
+    return RunRecord(cfg=cfg, result=result)
+
+
+DEFINITION = Adapter(
+    spec=HeraldingT2RamseyExp.AXES_SPEC,
+    make_form=_T2Ramsey_make_form,
+    run=_run,
+    guide=Path(__file__).with_name("guide.md"),
+    analysis=Analysis(
+        fn=_T2Ramsey_analyze,
+        options=lambda source, env: T2RamseyAnalyzeOptions(),
+        writeback=_T2Ramsey_get_writeback_items,
+    ),
+)

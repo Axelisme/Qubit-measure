@@ -3,6 +3,7 @@
 from .amplitude_rabi import DEFINITION as AMPLITUDE_RABI
 from .cpmg import DEFINITION as CPMG
 from .heralding_t1 import DEFINITION as HERALDING_T1
+from .heralding_t2ramsey import DEFINITION as HERALDING_T2RAMSEY
 from .lookback import DEFINITION as LOOKBACK
 from .mist_drive_frequency import DEFINITION as MIST_DRIVE_FREQUENCY
 from .mist_flux_dep import DEFINITION as MIST_FLUX_DEP
@@ -44,6 +45,7 @@ RECIPES = (
     CPMG,
     T1,
     HERALDING_T1,
+    HERALDING_T2RAMSEY,
     AMPLITUDE_RABI,
     TIME_RABI,
     TWOTONE_SPECTRUM,
