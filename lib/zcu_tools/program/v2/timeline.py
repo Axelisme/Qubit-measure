@@ -3,7 +3,7 @@
 from collections.abc import Generator, Mapping
 from contextlib import contextmanager
 
-from qick.asm_v2 import ConfigReadout, Macro, OpenLoop, Pulse, QickParam, Trigger
+from qick.asm_v2 import AsmV2, ConfigReadout, Macro, OpenLoop, Pulse, QickParam, Trigger
 
 from ._timeline_bounds import CycleBounds, FixedLoopIndex, ProducerBounds
 from ._timeline_macros import (
@@ -214,6 +214,36 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
             self.meta_infos,
             tuple(TimingLoop(name, count) for name, count, _, _ in self.loops),
         )
+
+    @property
+    def sweep_loops(self) -> tuple[TimingLoop, ...]:
+        """Return declared top-level loop names/counts, including reps, in order.
+
+        Available during _initialize after add_loop, before QICK's loop discovery.
+        This immutable view excludes body-local Repeat counters and has no ASM
+        register addresses. Recompilation rebuilds it from native declarations.
+        """
+        return tuple(TimingLoop(name, count) for name, count, _, _ in self.loops)
+
+    def append_loop_after(self, name: str, *macros: Macro) -> None:
+        """Attach native operations after each iteration of a declared sweep loop.
+
+        Call during _initialize, after add_loop. Operations execute after shot
+        closure and before the loop test/backedge, in appended order. Unknown
+        names or calls outside declaration raise ValueError.
+        """
+        if not self._declaring:
+            raise ValueError("append_loop_after must be called in _initialize")
+        for index, (loop_name, count, before, after) in enumerate(self.loops):
+            if loop_name != name:
+                continue
+            if after is None:
+                after = AsmV2()
+                self.loops[index] = (loop_name, count, before, after)
+            for macro in macros:
+                after.append_macro(macro)
+            return
+        raise ValueError(f"sweep loop {name!r} is not declared")
 
     @property
     def fixed_loop_indices(self) -> tuple[FixedLoopIndex, ...]:

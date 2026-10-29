@@ -335,7 +335,32 @@ class TableLengthPulse(Module):
             self._duration_cycles(prog, length),
         )
 
-    def _wave_length_cycles(self, prog: ModularProgramV2, length: float) -> int:
+    def declare(self, prog: TimelineProgramV2) -> None:
+        """Declare one template and the actual generator-length table, not durations.
+
+        The caller owns idx_reg. Entries must satisfy generator minimum/maximum
+        lengths and flat-top ramp constraints. No legacy duration table is built;
+        native playback timing is resolved from the selected actual waveform.
+        """
+        wave_cycles = [
+            self._wave_length_cycles(prog, length) for length in self.lengths
+        ]
+        template_cfg = self._template.cfg
+        if template_cfg is None:
+            raise ValueError(f"{self.name}: missing runtime pulse template")
+        template_cfg.set_param("length", self.lengths[0])
+        self._template.declare(prog)
+        self._length_loader = LoadValue(
+            f"{self.name}_load_gen_length",
+            wave_cycles,
+            idx_reg=self.idx_reg,
+            val_reg=self._length_reg,
+        )
+        self._length_loader.declare(prog)
+
+    def _wave_length_cycles(
+        self, prog: ModularProgramV2 | TimelineProgramV2, length: float
+    ) -> int:
         wave_length = length
         if isinstance(self.cfg.waveform, FlatTopWaveformCfg):
             wave_length -= float(self.cfg.waveform.raise_waveform.length)

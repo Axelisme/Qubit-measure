@@ -7,10 +7,12 @@ from typing import TYPE_CHECKING
 from qick.asm_v2 import QickParam
 
 from zcu_tools.program.v2.modules.base import Module
+from zcu_tools.program.v2.modules.dmem import LoadValue
 from zcu_tools.program.v2.modules.pulse import Pulse, PulseCfg
 
 if TYPE_CHECKING:
     from zcu_tools.program.v2.modular import ModularProgramV2
+    from zcu_tools.program.v2.timeline import TimelineProgramV2
 
 logger = logging.getLogger(__name__)
 
@@ -51,7 +53,39 @@ class ComputedPulse(Module):
             for i, cfg in enumerate(raw_cfgs)
         ]
 
+    def declare(self, prog: TimelineProgramV2) -> None:
+        """Declare candidate waveforms and their selector-indexed wmem table.
+
+        Candidate channels, pre-delays and waveform strides must agree. Unsupported
+        int4 flat-top layouts raise ValueError. The selector register is borrowed;
+        its bounds and all address writes are audited when consumed as time.
+        """
+        base_idxs = self._declare_candidates(prog)
+        self._address_loader = LoadValue(
+            f"{self.name}_address",
+            base_idxs,
+            idx_reg=self.val_reg,
+            val_reg=f"{self.name}_wmem_index",
+        )
+        self._address_loader.declare(prog)
+
     def init(self, prog: ModularProgramV2) -> None:
+        base_idxs = self._declare_candidates(prog)
+        self.dmem_offset = prog.add_dmem(base_idxs)
+        logger.debug(
+            "ComputedPulse.init: name='%s', ch=%d, style=%s, stride=%d, "
+            "dmem_offset=%d, wmem_base_idxs=%s",
+            self.name,
+            self.ref_cfg.ch,
+            self.ref_cfg.waveform.style,
+            self._stride,
+            self.dmem_offset,
+            base_idxs,
+        )
+
+    def _declare_candidates(
+        self, prog: ModularProgramV2 | TimelineProgramV2
+    ) -> list[int]:
         if self._is_flat_top:
             gen_type = prog.soccfg["gens"][self.ref_cfg.ch].get("type", "")
             if gen_type in ("axis_sg_int4_v1", "axis_sg_int4_v2"):
@@ -81,18 +115,7 @@ class ComputedPulse(Module):
                 )
             base_idxs.append(prog.wave2idx[wave_names[0]])
 
-        self.dmem_offset = prog.add_dmem(base_idxs)
-
-        logger.debug(
-            "ComputedPulse.init: name='%s', ch=%d, style=%s, stride=%d, "
-            "dmem_offset=%d, wmem_base_idxs=%s",
-            self.name,
-            self.ref_cfg.ch,
-            self.ref_cfg.waveform.style,
-            self._stride,
-            self.dmem_offset,
-            base_idxs,
-        )
+        return base_idxs
 
     def run(
         self, prog: ModularProgramV2, t: float | QickParam = 0.0
