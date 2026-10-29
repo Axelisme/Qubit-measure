@@ -570,7 +570,23 @@ The kernel registry does not retain this workspace.
 
 The engine deduplicates prepare keys across one evolve. Keys used by distinct
 timelines enter shared preparation. Local builders and repeated local keys stream
-one timeline at a time. Single-use ordinary keys prepare at their apply wave.
+one timeline at a time, with one static-map exception. A complete classified
+inventory containing only `t4` and `shaped_sambe`, both present and no deferred
+rows, can batch static keys within each timeline chunk. The default scheduler
+requires at least two timelines per worker and 64 rows per timeline, then uses
+one timeline chunk per worker. Prepare partitioning stays unchanged. Explicit
+`chunks_per_worker` keeps the previous streaming policy.
+
+In that narrow case, ordinary `t4` maps prepare once per complete local key in
+the chunk instead of forcing all shared shaped playback into singleton timelines.
+The existing cursor and scatter advance each timeline's own density and carrier
+phase in order. Keys, numerical routes, budgets and density operations do not
+change. Static maps expire with the chunk; other local builders retain their
+one-timeline lifetime. Local static-map array storage is `24 * d**2 * K` bytes
+for dimension `d` and `K` distinct local keys in that chunk. `K` can grow with
+timeline and row count. Shared preparations retain their separate evolve lifetime.
+
+Single-use ordinary keys prepare at their apply wave.
 Accepted guard products go directly to apply, even when only a subset of rows
 accepts. Fully rejected products have no consumers and are released.
 Input-bound payloads, densities and dissipative preparations never cross evolves

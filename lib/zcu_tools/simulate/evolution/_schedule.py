@@ -137,6 +137,7 @@ class Schedule:
         self.context = context
         self.source, self.budget = context.source, context.budget
         self.table = geometry.table
+        self.batch_static_maps = False
         self.initial_density = (
             context.source.initial_density
             if initial_density is None
@@ -305,6 +306,9 @@ class Schedule:
         The 64/95% margins admit half-depth and minor Sambe tails, not short
         scans or integrator-heavy inventories. Require multiple timelines per
         worker. These thresholds select scheduling, not numerical admission.
+        Long fully classified shaped/static inventories use the same row and
+        timeline thresholds, without the cheap-gate fraction. Their local static
+        maps stay chunk-local so ready shaped rows can form independent waves.
         The full classified inventory is fixed before any worker starts; no
         resident state, prepare outcome or execution order enters this choice.
         """
@@ -312,6 +316,18 @@ class Schedule:
         names = self.dispatch.names
         if count < 2 * workers or len(names) < 64 * count:
             return fallback
+        deferred = self.dispatch.deferred
+        if (
+            np.any(names == "t4")
+            and np.any(names == "shaped_sambe")
+            and np.all(np.isin(names, ("t4", "shaped_sambe")))
+            and (deferred is None or not np.any(deferred))
+        ):
+            # Local idle durations must not serialize otherwise shared shaped
+            # playback. Keep each complete static key once in this chunk;
+            # _Chunk still advances every timeline's density/phase separately.
+            self.batch_static_maps = True
+            return workers
         cheap = np.isin(names, ("t4", "single_tone_gate", "multitone_gate"))
         if np.count_nonzero(cheap) < 0.95 * len(names):
             return fallback
@@ -461,6 +477,12 @@ class Schedule:
         )
         owned = deferred.copy()
         for entry in entries:
+            if (
+                self.batch_static_maps
+                and entry.kernel.name == "t4"
+                and not entry.kernel.guard_builds
+            ):
+                continue
             owned[entry.rows] |= (
                 selected[entry.rows]
                 & ~entry.shared[entry.inverse]
