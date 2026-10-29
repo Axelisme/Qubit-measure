@@ -43,7 +43,9 @@ from ._timeline_selected import TimelineSelectedPulse
 from ._timeline_state import TimelineBook
 from .macro.delay import DelayRegAuto
 from .macro.dmem import DmemLookup
+from .macro.meta import MetaMacro
 from .macro.pluse_reg import PulseByReg
+from .macro.structure import MarkedCloseLoop, SourcePulse
 from .macro.wmem import (
     ConfigReadoutFromRegs,
     PatchWmemFromDmem,
@@ -73,6 +75,7 @@ _REFERENCE_STABLE = (
     TimelinePlacedTrigger,
     TimelineSelectedPulse,
     Pulse,
+    SourcePulse,
     ConfigReadout,
     Trigger,
     PulseFromRegs,
@@ -88,10 +91,19 @@ _REFERENCE_STABLE = (
     DmemLookup,
     FixedRepeatLoop,
     CloseLoop,
+    MarkedCloseLoop,
 )
 
 
+def _annotation(macro: Macro) -> bool:
+    # Only snapshot-only annotations are inert. Other metadata can instruct
+    # the IR optimizer to rebuild control flow, rather than describe it.
+    return type(macro) is MetaMacro and macro.type in ("SOURCE_START", "SOURCE_END")
+
+
 def _advances(macro: Macro) -> bool:
+    if _annotation(macro):
+        return False
     if type(macro) in (
         PreparedTimelineMacro,
         TimelineObservedPulse,
@@ -318,6 +330,8 @@ def _patch_resource(prog, macro) -> _Effects:
 
 
 def _leaf_resource(prog, macro: Macro) -> _Effects | None:
+    if _annotation(macro):
+        return _Effects(set(), set(), set())
     if type(macro) in (WriteReg, WriteRegOp, IncReg, ReadDmem, DmemLookup):
         return _register_resource(prog, macro)
     if type(macro) in (
@@ -340,6 +354,7 @@ def _leaf_resource(prog, macro: Macro) -> _Effects | None:
         return _timed_resource(prog, macro.source)
     if type(macro) in (
         Pulse,
+        SourcePulse,
         ConfigReadout,
         PulseFromRegs,
         ConfigReadoutFromRegs,
