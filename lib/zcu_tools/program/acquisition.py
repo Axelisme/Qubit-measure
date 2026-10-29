@@ -17,10 +17,8 @@ from qick.qick_asm import (
     obtain,  # pyright: ignore[reportAttributeAccessIssue]
 )
 
-from zcu_tools.cfg_model import Centroid3Classifier, CircleClassifier, ReadoutClassifier
-from zcu_tools.program.herald import HeraldSpec, herald_ground_mask
+from zcu_tools.program._shot_processing import validated_payload
 from zcu_tools.progress_bar import make_pbar
-from zcu_tools.utils.shot_classification import classify_shots, nearest_centroid3
 
 __all__ = [
     "ImproveAcquireMixin",
@@ -28,6 +26,7 @@ __all__ = [
     "StoppedPartialAcquireError",
     "AcquisitionContractError",
     "TrackerProtocol",
+    "ShotProcessor",
 ]
 
 
@@ -54,6 +53,10 @@ class _LocalCancelFlag:
 
     def set(self) -> None:
         self._is_set = True
+
+
+# Per-shot normalized [I,Q] (shots, reads, 2) -> float64 (shots, out_reads, N).
+ShotProcessor: TypeAlias = Callable[[NDArray[np.float64]], NDArray[np.float64]]
 
 
 RoundHookType: TypeAlias = Callable[
@@ -170,11 +173,15 @@ class TypedAcquireMixin(AcquireMixin):
     def acquire_decimated(self, *args, **kwargs) -> list[NDArray[np.float64]] | None:
         """Return decimated IQ for omitted/False step_rounds; True prepares only.
 
+        Nonempty herald raises ValueError because post-selection needs integrated
+        shots. Omission or an empty sequence leaves the trace path unchanged.
         Preparation returns None. Mode typing is precise with only soc
         positional; extra positional options or a dynamic bool retain the union.
         QICK argument/transport errors propagate. Cancellation retains completed
         rounds, or raises StoppedPartialAcquireError if none completed.
         """
+        if kwargs.pop("herald", None):
+            raise ValueError("acquire_decimated does not support herald")
         return super().acquire_decimated(*args, **kwargs)
 
     def _completed_round_count(self) -> int:
@@ -392,109 +399,6 @@ class EarlyStopMixin(TypedAcquireMixin):
         )
 
 
-def _classified_populations(
-    iq: NDArray[np.complex128], classifier: ReadoutClassifier
-) -> NDArray[np.float64]:
-    if isinstance(classifier, CircleClassifier):
-        if classifier.radius is None:
-            raise ValueError("circle radius missing; run GE Post analysis")
-        ground, excited, _ = classify_shots(
-            iq, classifier.g_center, classifier.e_center, classifier.radius
-        )
-    elif isinstance(classifier, Centroid3Classifier):
-        labels = nearest_centroid3(
-            iq, classifier.g_center, classifier.e_center, classifier.f_center
-        )
-        ground, excited = labels == 0, labels == 1
-    else:
-        # GE theta rotates by exp(+i theta), opposite QICK's projection angle.
-        excited = (iq * np.exp(1j * classifier.angle)).real > classifier.threshold
-        ground = ~excited
-    return np.stack([ground, excited], axis=-1).astype(np.float64)
-
-
-class SingleShotMixin(TypedAcquireMixin):
-    _classify: Mapping[int, ReadoutClassifier] | None = None
-
-    @overload
-    def acquire(
-        self,
-        soc: object,
-        *,
-        step_rounds: Literal[False] = False,
-        classify: Mapping[int, ReadoutClassifier] | None = None,
-        **kwargs: object,
-    ) -> list[NDArray[np.float64]]: ...
-
-    @overload
-    def acquire(
-        self,
-        soc: object,
-        *,
-        step_rounds: Literal[True],
-        classify: Mapping[int, ReadoutClassifier] | None = None,
-        **kwargs: object,
-    ) -> None: ...
-
-    @overload
-    def acquire(
-        self,
-        soc: object,
-        *args,
-        classify: Mapping[int, ReadoutClassifier] | None = None,
-        **kwargs,
-    ) -> list[NDArray[np.float64]] | None: ...
-
-    def acquire(
-        self,
-        *args,
-        classify: Mapping[int, ReadoutClassifier] | None = None,
-        **kwargs,
-    ) -> list[NDArray[np.float64]] | None:
-        """Acquire IQ, or g/e populations with explicit per-ADC calibration.
-
-        classify maps ADC channel numbers to circle/linear/centroid3 calibration in raw
-        sums divided by ADC length, without IQ-offset subtraction. None retains
-        QICK IQ/threshold behavior. Circle requires a Post radius. Population
-        output ends in (g, e); 1-g-e is circle's other or centroid3's f.
-        Centroid3 chooses the nearest g/e/f center, ties in that order.
-        Linear excited
-        means real(IQ * exp(1j*angle)) > threshold; equality belongs to ground.
-        Keys must exactly match declared ADC channels or ValueError is raised
-        before transport acquisition. No program registry supplies calibration.
-        """
-        if classify is not None:
-            assert isinstance(self, qick_asm.AbsQickProgram)
-            missing = sorted(self.ro_chs.keys() - classify.keys())
-            unexpected = sorted(classify.keys() - self.ro_chs.keys())
-            if missing or unexpected:
-                raise ValueError(
-                    f"classify ADC keys: missing={missing}, unexpected={unexpected}"
-                )
-            for ch, classifier in classify.items():
-                if (
-                    isinstance(classifier, CircleClassifier)
-                    and classifier.radius is None
-                ):
-                    raise ValueError(
-                        f"ADC {ch}: circle radius missing; run GE Post analysis"
-                    )
-        self._classify = classify
-        return super().acquire(*args, **kwargs)
-
-    def _process_accumulated(self, acc_buf) -> list[NDArray[np.float64]]:
-        if self._classify is None:
-            return super()._process_accumulated(acc_buf)
-        assert isinstance(self, qick_asm.AbsQickProgram)
-        shots: list[NDArray[np.float64]] = []
-        for raw, (ch, ro) in zip(acc_buf, self.ro_chs.items(), strict=True):
-            classifier = self._classify[ch]
-            iq = (raw / ro["length"]).dot([1, 1j])
-            shots.append(_classified_populations(iq, classifier))
-        self.shots = shots
-        return self._average_buf(shots, length_norm=False)
-
-
 class TrackerProtocol(Protocol):
     def update(self, points: NDArray[np.float64]) -> None:
         """points shape: (*sweep, reps, 2)"""
@@ -673,221 +577,83 @@ class RoundHookMixin(TypedAcquireMixin):
         return cancel_flag
 
 
-class HeraldAcquireMixin(RoundHookMixin, SingleShotMixin):
-    """Own per-point accepted sums/counts, shared by transport and simulation.
-
-    This modifier precedes RoundHookMixin so hooks and finish_acquire use the
-    same count-weighted summary instead of averaging round means equally.
-    """
-
-    _herald_specs: dict[int, HeraldSpec] | None = None
-    _herald_sums: list[NDArray[np.float64]] | None = None
-    _herald_counts: list[NDArray[np.int64]] | None = None
-    _herald_attempts: int = 0
+class ImproveAcquireMixin(RoundHookMixin, TrackerMixin, EarlyStopMixin):
+    _processors: Mapping[int, ShotProcessor] | None = None
 
     def acquire(
+        self, *args, _processors: Mapping[int, ShotProcessor] | None = None, **kwargs
+    ):
+        """Acquire through the native IQ pipeline or explicit shot processors.
+
+        Omit _processors for ordinary acquisition. acquire_processed uses that
+        reserved dispatch option to replace per-shot processing. QICK options,
+        round hooks, cancellation and stepped ownership follow the existing
+        acquire pipeline; each new acquire resets processor output dimensions.
+        """
+        self._processors = _processors
+        self._processor_shapes: dict[int, tuple[int, ...]] = {}
+        return super().acquire(*args, **kwargs)
+
+    def acquire_processed(
         self,
-        *args,
-        herald: Sequence[HeraldSpec] | None = None,
-        trackers: list[TrackerProtocol] | None = None,
-        **kwargs,
-    ):
-        """Post-select reads using explicit herald specs, at most one per ADC.
+        soc: object,
+        *,
+        processors: Mapping[int, ShotProcessor],
+        rounds: int = 1,
+        step_rounds: bool = False,
+        **qick_options: object,
+    ) -> list[NDArray[np.float64]] | None:
+        """Process each completed round's shots before averaging repetitions.
 
-        herald identifies ADC numbers and trigger-order reads including herald.
-        None or an empty sequence retains ordinary acquisition. Results retain
-        ADC declaration order and have shape (non-herald reads, *point_dims, 2).
-        IQ is normalized by ADC samples with the ordinary remove_offset policy.
-        Herald calibration always uses raw sums/length without offset subtraction.
-        classify applies its per-ADC calibration only to accepted signal reads,
-        returning (g,e) instead of IQ and taking precedence over threshold/angle.
-        Otherwise QICK threshold/angle projects accepted shots in its original
-        radians/sign/offset convention and returns (excited_fraction,0).
-        Each ADC uses only its own herald mask. Completed rounds are weighted by
-        accepted shot count; no accepted shots produces NaN in both components.
-        trackers together with herald, duplicate/undeclared ADCs, count mismatches
-        and invalid/terminal read indices raise ValueError before transport.
-        Cancellation keeps completed rounds only and raises
-        StoppedPartialAcquireError if none completed. Ordinary QICK options,
-        including step_rounds, are forwarded. No new per-shot history is retained.
+        processors maps every declared ADC number to a callable receiving all
+        normalized float64 (shots, reads, 2) IQ, without offset subtraction.
+        Each returns float64 (shots, out_reads, N), with positive output axes
+        fixed per ADC through this acquire. Results follow ADC declaration order
+        and have shape (out_reads, *point_dims, N). Equal-size rounds have equal
+        weight; round_hook receives their cumulative mean and the cancel flag.
+        Ordinary QICK options are forwarded except threshold/angle and herald,
+        which raise ValueError. Invalid mappings or payloads raise ValueError;
+        processor exceptions propagate without publishing the failed round.
+        step_rounds=True prepares only and returns None; use finish_round,
+        prepare_round and finish_acquire to drive hardware rounds. Cancellation
+        discards incomplete rounds; no completed round raises
+        StoppedPartialAcquireError. Raw integer sums remain available via get_raw.
         """
-        self._reset_herald()
-        if herald:
-            if trackers is not None:
-                raise ValueError("herald cannot be combined with trackers")
-            self._herald_specs = self._validate_herald(herald)
-        return super().acquire(*args, trackers=trackers, **kwargs)
-
-    def acquire_decimated(
-        self, *args, herald: Sequence[HeraldSpec] | None = None, **kwargs
-    ):
-        """Acquire traces without herald; nonempty herald raises ValueError.
-
-        An ordinary decimated call clears prior herald pass fractions. Other
-        parameters, return shapes, errors and cancellation follow acquire_decimated
-        on the normal QICK pipeline. Post-selection requires integrated shots.
-        """
-        self._reset_herald()
-        if herald:
-            raise ValueError("acquire_decimated does not support herald")
-        return super().acquire_decimated(*args, **kwargs)
-
-    def _reset_herald(self) -> None:
-        self._herald_specs = None
-        self._herald_sums = None
-        self._herald_counts = None
-        self._herald_attempts = 0
-
-    def _validate_herald(self, herald: Sequence[HeraldSpec]) -> dict[int, HeraldSpec]:
         assert isinstance(self, qick_asm.AbsQickProgram)
-        specs: dict[int, HeraldSpec] = {}
-        for spec in herald:
-            ch = spec.ro_ch
-            if ch not in self.ro_chs:
-                raise ValueError(f"Herald ADC {ch} is not declared")
-            if ch in specs:
-                raise ValueError(f"ADC {ch} supports at most one herald")
-            actual_reads = self.ro_chs[ch]["trigs"]
-            if spec.reads_per_shot != actual_reads:
-                raise ValueError(
-                    f"ADC {ch}: herald reads_per_shot={spec.reads_per_shot}, "
-                    f"actual reads_per_shot={actual_reads}"
-                )
-            if (
-                type(spec.read_index) is not int
-                or not 0 <= spec.read_index < actual_reads - 1
-            ):
-                raise ValueError(
-                    f"ADC {ch}: herald read_index={spec.read_index} must be a "
-                    "nonnegative integer with at least one later read"
-                )
-            specs[ch] = spec
-        return specs
-
-    def get_herald_pass_fraction(self) -> dict[int, NDArray[np.float64]] | None:
-        """Return detached per-ADC accepted/attempted fractions in [0,1].
-
-        Keys are herald ADC numbers. Each float64 array has shape point_dims,
-        with repetitions and reads removed (a scalar array without sweeps).
-        Only completed rounds contribute, including after cancellation. Returns
-        None before a herald acquisition completes any round or when herald is
-        omitted on the latest acquire. A new acquire clears the previous state.
-        This getter neither samples shots nor runs a transport/backend.
-        """
-        if self._herald_specs is None or self._herald_counts is None:
-            return None
-        assert isinstance(self, qick_asm.AbsQickProgram)
-        return {
-            ch: np.asarray(
-                self._herald_counts[index] / self._herald_attempts, dtype=np.float64
-            )
-            for index, ch in enumerate(self.ro_chs)
-            if ch in self._herald_specs
-        }
-
-    def _herald_buffers(self, acc_buf):
-        assert isinstance(self, qick_asm.AbsQickProgram)
-        assert self._herald_specs is not None
-        buffers = []
-        masks = []
-        for raw, (ch, ro) in zip(acc_buf, self.ro_chs.items(), strict=True):
-            spec = self._herald_specs.get(ch)
-            mask = np.ones(raw.shape[:-2], dtype=np.bool_)
-            if spec is not None:
-                iq = (raw[..., spec.read_index, :] / ro["length"]).dot([1, 1j])
-                mask = herald_ground_mask(iq, spec.classifier)
-                raw = np.delete(raw, spec.read_index, axis=-2)
-            buffers.append(raw)
-            masks.append(mask)
-        return buffers, masks
-
-    def _herald_selected_values(self, selected) -> list[NDArray[np.float64]]:
-        assert isinstance(self, qick_asm.AbsQickProgram)
-        assert self.acquire_params is not None
-        if self._classify is not None:
-            return [
-                _classified_populations(
-                    (raw / ro["length"]).dot([1, 1j]), self._classify[ch]
-                )
-                for raw, (ch, ro) in zip(selected, self.ro_chs.items(), strict=True)
-            ]
-        params = self.acquire_params
-        if params["threshold"] is not None:
-            # Reuse QICK's scalar/list, angle sign, offset and equality policy.
-            # Every input contains accepted signal reads only, before projection.
-            shots = self._apply_threshold(
-                selected, params["threshold"], params["angle"], params["remove_offset"]
-            )
-            return [np.stack([shot, np.zeros_like(shot)], axis=-1) for shot in shots]
-        values = []
-        for raw, (ch, ro) in zip(selected, self.ro_chs.items(), strict=True):
-            value = raw.astype(np.float64)
-            if not ro["edge_counting"]:
-                value /= ro["length"]
-                if params["remove_offset"]:
-                    value -= self._ro_offset(ch, ro.get("ro_config"))
-            values.append(value)
-        return values
+        for option in ("threshold", "angle", "herald"):
+            if option in qick_options:
+                raise ValueError(f"acquire_processed does not accept {option}")
+        if any(type(ch) is not int for ch in processors):
+            raise ValueError("processors ADC keys must be integers")
+        if processors.keys() != self.ro_chs.keys():
+            raise ValueError("processors ADC keys must exactly match declared ADCs")
+        if any(not callable(processor) for processor in processors.values()):
+            raise ValueError("processors must contain one callable per ADC")
+        return self.acquire(
+            soc,
+            _processors=dict(processors),
+            rounds=rounds,
+            step_rounds=step_rounds,
+            **qick_options,
+        )
 
     def _process_accumulated(self, acc_buf) -> list[NDArray[np.float64]]:
-        if self._herald_specs is None:
+        if self._processors is None:
             return super()._process_accumulated(acc_buf)
+        assert isinstance(self, qick_asm.AbsQickProgram)
+        assert self.loop_dims is not None
         assert self.avg_level is not None
-        buffers, masks = self._herald_buffers(acc_buf)
-        # Flatten only point/repetition coordinates, preserving each read's IQ.
-        # Rejected shots never enter either classification or QICK projection.
-        selected = self._herald_selected_values(
-            [raw[mask] for raw, mask in zip(buffers, masks, strict=True)]
-        )
-        sums: list[NDArray[np.float64]] = []
-        counts: list[NDArray[np.int64]] = []
-        for raw, mask, values in zip(buffers, masks, selected, strict=True):
-            dense = np.zeros_like(raw, dtype=np.float64)
-            dense[mask] = values
-            sums.append(np.moveaxis(dense.sum(axis=self.avg_level), -2, 0))
-            counts.append(np.asarray(mask.sum(axis=self.avg_level), dtype=np.int64))
-        if self._herald_sums is None:
-            self._herald_sums = [value.copy() for value in sums]
-            self._herald_counts = [value.copy() for value in counts]
-        else:
-            assert self._herald_counts is not None
-            for total, value in zip(self._herald_sums, sums, strict=True):
-                total += value
-            for total, value in zip(self._herald_counts, counts, strict=True):
-                total += value
-        self._herald_attempts += acc_buf[0].shape[self.avg_level]
-        return self._herald_means(sums, counts)
-
-    def _herald_means(
-        self, sums: list[NDArray[np.float64]], counts: list[NDArray[np.int64]]
-    ) -> list[NDArray[np.float64]]:
-        return [
-            np.divide(
-                total,
-                count[..., None],
-                out=np.full_like(total, np.nan),
-                where=count[..., None] != 0,
-            )
-            for total, count in zip(sums, counts, strict=True)
-        ]
-
-    def _summarize_accumulated(
-        self, rounds_buf: list[NDArray[np.float64]]
-    ) -> list[NDArray[np.float64]]:
-        if self._herald_specs is None:
-            return super()._summarize_accumulated(rounds_buf)
-        assert self._herald_sums is not None
-        assert self._herald_counts is not None
-        return self._herald_means(self._herald_sums, self._herald_counts)
-
-    def _inc_summarize_accumulated(
-        self, rounds_buf: list[NDArray[np.float64]]
-    ) -> list[NDArray[np.float64]]:
-        if self._herald_specs is None:
-            return super()._inc_summarize_accumulated(rounds_buf)
-        return self._summarize_accumulated(rounds_buf)
-
-
-class ImproveAcquireMixin(
-    HeraldAcquireMixin, TrackerMixin, SingleShotMixin, EarlyStopMixin
-): ...
+        result = []
+        for raw, (ch, ro) in zip(acc_buf, self.ro_chs.items(), strict=True):
+            iq = raw.reshape(-1, ro["trigs"], 2) / ro["length"]
+            payload = validated_payload(self._processors[ch](iq), shots=iq.shape[0])
+            shape = payload.shape[1:]
+            expected = self._processor_shapes.get(ch, shape)
+            if shape != expected:
+                raise ValueError(
+                    f"ADC {ch}: processor output shape changed from {expected} to {shape}"
+                )
+            self._processor_shapes[ch] = shape
+            grid = payload.reshape(*self.loop_dims, *payload.shape[1:])
+            result.append(np.moveaxis(grid.mean(axis=self.avg_level), -2, 0))
+        return result

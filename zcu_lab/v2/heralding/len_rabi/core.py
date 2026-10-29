@@ -19,15 +19,12 @@ from zcu_tools.experiment import (
 )
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
-from zcu_tools.experiment.v2.runtime.program_builder import (
-    AcquireOptions,
-    default_raw2signal_fn,
-)
+from zcu_tools.experiment.v2.runtime.program_builder import AcquireOptions
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.experiment.v2.utils.snr import snr_checker
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.herald import HeraldSpec
+from zcu_tools.program.herald import HeraldSpec, herald_ratio, heralded
 from zcu_tools.program.v2 import ModularProgramV2, Pulse, Reset, sweep2param
 from zcu_tools.program.v2.modules import PulseReadout
 
@@ -96,17 +93,17 @@ def _combine_host_rounds(
 def _selected_signal_with_fraction(
     raw: Sequence[NDArray[np.float64]],
     *,
-    program: ModularProgramV2,
-    herald: HeraldSpec,
     fraction_slot: NDArray[np.float64],
 ) -> NDArray[np.complex128]:
-    """Record acceptance only when the builder delivers this acquisition's IQ."""
-    signal = default_raw2signal_fn(raw)
-    # A pre-acquire stop leaves cached program stats intact, but delivers no raw.
-    passed = program.get_herald_pass_fraction()
-    if passed is not None:
-        fraction_slot[:] = passed[herald.ro_ch]
-    return signal
+    """Store delivered pass fractions, then return conditional complex signal IQ.
+
+    raw contains ADC-ordered weighted IQ with acceptance as the last component.
+    fraction_slot is the sweep grid or one host point's writable fraction view.
+    Both cumulative round updates and final results use the same conversion.
+    """
+    iq, fraction = herald_ratio(raw[0])
+    fraction_slot[:] = fraction
+    return iq[0, ..., 0] + 1j * iq[0, ..., 1]
 
 
 class HeraldingLenRabiExp(Experiment[HeraldingLenRabiResult, HeraldingLenRabiCfg]):
@@ -194,19 +191,17 @@ class HeraldingLenRabiExp(Experiment[HeraldingLenRabiResult, HeraldingLenRabiCfg
                     relax_delay=cfg.relax_delay,
                 )
                 herald = herald_readout.herald_spec(prog, occurrence=0)
-                try:
-                    sched.prog_builder(soc, soccfg).run_program(
-                        prog,
-                        rounds=cfg.rounds,
-                        herald=[herald],
-                        options=AcquireOptions(
-                            retry=cfg.acquire_retry, stop_condition=check_snr
-                        ),
-                    )
-                finally:
-                    passed = prog.get_herald_pass_fraction()
-                    if passed is not None:
-                        fractions[:] = passed[herald.ro_ch]
+                sched.prog_builder(soc, soccfg).run_program_processed(
+                    prog,
+                    rounds=cfg.rounds,
+                    processors={herald.ro_ch: heralded(herald, np.copy)},
+                    processed2signal_fn=partial(
+                        _selected_signal_with_fraction, fraction_slot=fractions
+                    ),
+                    options=AcquireOptions(
+                        retry=cfg.acquire_retry, stop_condition=check_snr
+                    ),
+                )
             else:
                 # Each host round scans all lengths before checking curve SNR.
                 round_fractions = np.full((cfg.rounds, len(lengths)), np.nan)
@@ -236,14 +231,12 @@ class HeraldingLenRabiExp(Experiment[HeraldingLenRabiResult, HeraldingLenRabiCfg
                         prog, herald = programs[length]
 
                         try:
-                            step.prog_builder(soc, soccfg).run_program(
+                            step.prog_builder(soc, soccfg).run_program_processed(
                                 prog,
                                 rounds=1,
-                                herald=[herald],
-                                raw2signal_fn=partial(
+                                processors={herald.ro_ch: heralded(herald, np.copy)},
+                                processed2signal_fn=partial(
                                     _selected_signal_with_fraction,
-                                    program=prog,
-                                    herald=herald,
                                     fraction_slot=round_fractions[
                                         round_index, index : index + 1
                                     ],
