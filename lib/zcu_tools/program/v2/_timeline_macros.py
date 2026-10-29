@@ -5,6 +5,7 @@ from contextlib import contextmanager
 from copy import deepcopy
 
 from qick.asm_v2 import (
+    CloseLoop,
     CondJump,
     Delay,
     Jump,
@@ -16,7 +17,7 @@ from qick.asm_v2 import (
     WriteReg,
 )
 
-from ._timeline_bounds import CycleBounds
+from ._timeline_bounds import CycleBounds, FixedLoopIndex
 from ._timeline_guard import PulseGuard as _PulseGuard
 from ._timeline_guard import bounds as _bounds
 from ._timeline_outputs import (
@@ -546,6 +547,21 @@ class PreparedTimelineMacro(TimedMacro):
         return self.source.get_time_param(name)
 
 
+class FixedRepeatLoop(OpenLoop):
+    """Native fixed loop paired with the exact writer that closes its counter.
+
+    index is Repeat-owned metadata; closing is the native matching backedge.
+    The original QICK preprocess/expand behavior is unchanged. Keeping both
+    identities lets the range proof reject unrelated counter writes even when
+    this loop is nested inside a module emission rather than in loop_dict.
+    """
+
+    def __init__(self, name: str, count: int):
+        super().__init__(name=name, n=count)
+        self.index = FixedLoopIndex(name, name, count)
+        self.closing = CloseLoop()
+
+
 class PreparedTimelineOpenLoop(PreparedTimelineMacro, OpenLoop):
     """Preserve QICK loop discovery while tracking the actual write origin."""
 
@@ -573,6 +589,9 @@ class TimeProducer(Macro):
         self.prepared = [PreparedTimelineMacro(book, macro) for macro in macros]
 
     def preprocess(self, prog) -> None:
+        prog._time_bounds.capture_inputs(
+            prog, self.register, self.dependencies, self.dependency_ranges
+        )
         for macro in self.prepared:
             macro.preprocess(prog)
         prog._time_bounds.defined.add(self.register)
