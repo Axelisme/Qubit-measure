@@ -9,6 +9,22 @@ from ._timeline_guard import bounds
 from ._timeline_runtime import RuntimeEnd, RuntimeMath, Time, time_bounds
 
 
+@dataclass(frozen=True)
+class RepeatFrameSnapshot:
+    """Repeat path effects saved while Branch prepares each case.
+
+    advance is reference movement in us; variable marks path-dependent movement.
+    written_gens and written_ros contain channel IDs touched on the path.
+    pulse_guards holds independent per-generator playback guards for that path.
+    """
+
+    advance: float | QickParam
+    variable: bool
+    written_gens: set[int]
+    written_ros: set[int]
+    pulse_guards: dict[int, _PulseGuard]
+
+
 @dataclass
 class RepeatFrame:
     parent: str
