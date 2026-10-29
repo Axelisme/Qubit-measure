@@ -1,8 +1,8 @@
 ## Behavior
 
-**Readers:** operator, agent. Amplitude Rabi: drives the qubit at its known frequency and sweeps the drive-pulse gain, fitting the resulting Rabi oscillation to find the pi and pi/2 pulse amplitudes. Runs on real hardware. Run once you know the qubit frequency, to calibrate a pi pulse by amplitude (the pulse length stays fixed).
+**Readers:** operator, agent. Sweep drive-pulse gain at a measured carrier and fixed duration, then fit the oscillation to find pi and pi/2 gains. Use with the selected hardware or simulator environment.
 
-**Last updated:** 2026-10-21
+**Last updated:** 2026-10-29
 
 After changing the parameter source, use Reset to recapture initial values. Refresh only updates sources and choices while preserving authored inputs; Reset can overwrite unsaved inputs.
 
@@ -17,6 +17,27 @@ Open and Reset capture the T1 used for starting values. A missing or null T1, or
 ## Module slots
 
 Readout uses the `$resonator.module.readout` slot captured at Open/Reset; an unset slot, missing module or unbound alias uses a fresh 'readout' template. That fallback still needs its required parameter sources. Reset uses qubit.module.reset and stays disabled when absent. The drive uses the sources described above, with qubit.module.x180 when present and qub_probe when absent. Unset slots or slots pointing to missing modules use the named template. Saved modules remain selectable. Pulse templates read qubit.freq, qubit.wiring.ch, resonator.freq, resonator.wiring.ch/ro_ch and resonator.time_of_fly + 0.05 us; missing required calibration remains Invalid.
+
+## Prepared-state amplitude Rabi
+
+Open New Tab → twotone → rabi → amp_rabi. Init Pulse starts at None, which skips preparation and preserves the ground-state workflow.
+To start from another state, select a saved preparation pulse or choose Inline in Init Pulse.
+For an inline constant pulse, select Waveform → Inline: const and enter Length in us.
+Enter its calibrated Gen ch, Frequency in MHz and fixed Gain. Open Advanced and set NQZ for the selected generator.
+Resolve any remaining required fields before Run.
+Each repetition applies Reset if configured, then Init Pulse, the gain-swept Rabi Pulse and Readout.
+Only the Rabi Pulse gain is swept. The preparation pulse stays fixed.
+
+For integer-fluxonium Pi 32 calibration, first measure the 0–3 carrier and calibrate Pi 03 from ground.
+Use Pi 03 as Init Pulse on generator 1. The integer-fluxonium simulator uses NQZ 1 for both charge drives.
+Find the 3–2 carrier with twotone/freq using the same preparation.
+Return to amp_rabi, set Rabi Pulse to generator 2 and the measured 3–2 carrier, and fix its waveform duration.
+Both generators must be bound to charge drive lines in the environment settings.
+Use the validated readout settings and sweep Gain until the displayed IQ projection shows at least one full oscillation.
+Click Analysis → Analyze to fit the period and read the pi gain. Record the carrier, generator, gain and duration together as Pi 32.
+Do not apply the default x180/x90 writeback for Pi 32 if those slots hold your 0–1 calibration.
+The fitted gain is a pulse calibration, not a state-purity or gate-fidelity measurement.
+No transition frequency is inferred from the simulator. Select None again to disable preparation.
 
 ## Typical writeback
 

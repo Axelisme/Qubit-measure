@@ -9,7 +9,10 @@ The entry qubit frequency remains unset until you measure it. The Form does not 
 
 Find 0–1 and 0–3 with ground-state twotone/freq spectroscopy.
 Use the existing Rabi experiment at each measured carrier to determine Pi 01 and Pi 03 amplitude and duration.
-Prepare level 3 with Pi 03 in twotone/freq's Init Pulse, then locate 3–2 and use prepared-state Rabi to calibrate Pi 32.
+Prepare level 3 with Pi 03 in twotone/freq's Init Pulse, then locate 3–2.
+Open New Tab → twotone → rabi → amp_rabi and set Init Pulse to the calibrated Pi 03 on generator 1.
+Set Rabi Pulse to generator 2, the measured 3–2 carrier and a fixed duration. Sweep Gain, inspect the oscillation, then click Analysis → Analyze to determine the Pi 32 gain.
+See the [amplitude Rabi guide](../../twotone/rabi/amp_rabi/guide.md#prepared-state-amplitude-rabi) for the pulse fields and None ground-state path.
 Enter those calibrations in the three pulse editors, including MHz frequency, gain, us duration and generator.
 For integer-fluxonium, Pump uses generator 1, Stokes uses generator 2 and readout uses generator 0.
 Pi 32 must target the configured charge line; it is not a fast-flux channel.

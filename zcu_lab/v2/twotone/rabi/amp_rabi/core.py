@@ -82,7 +82,13 @@ class AmpRabiCfg(ConfigBase):
         ),
     ] = 1.0
     reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
-    init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init Pulse")] = None
+    init_pulse: Annotated[
+        Pulse.Cfg | None,
+        FieldMeta(
+            label="Init Pulse",
+            description="Fixed preparation pulse before each gain-swept Rabi pulse; None skips preparation.",
+        ),
+    ] = None
     qub_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Rabi Pulse")]
     readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
     gain: Annotated[GainSweep, FieldMeta(label="Gain", unit="a.u.")]
