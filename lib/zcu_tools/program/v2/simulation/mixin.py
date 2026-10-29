@@ -1,6 +1,6 @@
 """Single synchronous simulation entry ahead of the original acquisition mixins."""
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 from inspect import Signature, signature
 from typing import TYPE_CHECKING, Literal, overload
 
@@ -8,7 +8,6 @@ import numpy as np
 from numpy.typing import NDArray
 from qick.qick_asm import AcquireMixin
 
-from zcu_tools.cfg_model import ReadoutClassifier
 from zcu_tools.core.simulation import (
     AcquireRequest,
     ChargeDriveRequirement,
@@ -30,7 +29,7 @@ _acquire_signature: tuple[Callable[..., object], Signature] | None = None
 
 
 class SimulationAcquireMixin(ImproveAcquireMixin):
-    """Delegate rounds/hooks/Stop/classification/averaging to the normal pipeline.
+    """Delegate rounds/hooks/Stop/processing/averaging to the normal pipeline.
 
     Bound simulations reject stepped ownership and reentry before changing hooks
     or acquire_params. No binding leaves the original hardware path unchanged.
@@ -111,10 +110,8 @@ class SimulationAcquireMixin(ImproveAcquireMixin):
         assert self.acquire_params is not None
         assert self.loop_dims is not None
         params = self.acquire_params
-        self._simulation_needs_raw = (
-            self._herald_specs is not None
-            or self._classify is not None
-            or any(params.get(key) is not None for key in ("threshold", "trackers"))
+        self._simulation_needs_raw = self._processors is not None or any(
+            params.get(key) is not None for key in ("threshold", "trackers")
         )
         self._simulation_normalization: list[tuple[int | None, float | None]] = []
         for ch, ro in self._program().ro_chs.items():
@@ -257,7 +254,6 @@ class SimulationAcquireMixin(ImproveAcquireMixin):
         *,
         rounds: int = 1,
         step_rounds: Literal[False] = False,
-        classify: Mapping[int, ReadoutClassifier] | None = None,
         charge_requirements: tuple[ChargeDriveRequirement, ...] = (),
         **kwargs: object,
     ) -> list[NDArray[np.float64]]: ...
@@ -269,7 +265,6 @@ class SimulationAcquireMixin(ImproveAcquireMixin):
         *,
         rounds: int = 1,
         step_rounds: Literal[True],
-        classify: Mapping[int, ReadoutClassifier] | None = None,
         charge_requirements: tuple[ChargeDriveRequirement, ...] = (),
         **kwargs: object,
     ) -> None: ...
@@ -280,7 +275,6 @@ class SimulationAcquireMixin(ImproveAcquireMixin):
         soc: object,
         *args,
         rounds: int = 1,
-        classify: Mapping[int, ReadoutClassifier] | None = None,
         charge_requirements: tuple[ChargeDriveRequirement, ...] = (),
         **kwargs,
     ) -> list[NDArray[np.float64]] | None: ...
@@ -290,41 +284,30 @@ class SimulationAcquireMixin(ImproveAcquireMixin):
         soc,
         *args,
         rounds: int = 1,
-        classify: Mapping[int, ReadoutClassifier] | None = None,
         charge_requirements: tuple[ChargeDriveRequirement, ...] = (),
         **kwargs,
     ) -> list[NDArray[np.float64]] | None:
-        """Return averaged IQ or explicit classify populations, preserving ADC order.
+        """Return native averaged IQ, preserving ADC declaration order.
 
-        classify maps every declared ADC number to circle/linear calibration.
-        Populations end in (g, e), using raw sums divided by ADC length without
-        offset subtraction. Omission retains IQ. Missing/extra ADC keys or a
-        circle without a Post radius raise ValueError before acquiring shots.
-        True step_rounds prepares hardware and returns None; SimulationSoc raises ValueError
-        instead, before admission. Typing is precise with only soc positional;
-        extra positional options or a dynamic bool retain the union.
-        herald is forwarded as an explicit sequence of HeraldSpec. It forces raw
-        shots through the shared host mask and count-weighted summary, removes
-        herald reads and exposes get_herald_pass_fraction. It cannot be combined
-        with trackers. Classification takes precedence over QICK threshold/angle;
-        both process accepted signal shots only. No-pass points are NaN.
+        QICK threshold/angle projects normalized shots into excited fraction I
+        and zero Q. Shot processors use acquire_processed and materialize each
+        round's retained raw source through the same pipeline as hardware.
+        True step_rounds prepares hardware and returns None; SimulationSoc raises
+        ValueError before admission. Extra positional options or a dynamic bool
+        retain the list-or-None type. Errors and cancellation follow the normal
+        acquisition pipeline.
         charge_requirements names generators that must bind to physical charge
         lines. Only simulations carry these records to their environment, which
         validates or explicitly rejects unsupported requirements. White noise
         accepts them without physical checks. Hardware drops this keyword before
         the original acquisition pipeline; operators own physical wiring.
-        Other acquisition errors and cancellation follow the normal pipeline.
         """
         if not isinstance(soc, SimulationSoc):
-            return super().acquire(
-                soc, *args, rounds=rounds, classify=classify, **kwargs
-            )
+            return super().acquire(soc, *args, rounds=rounds, **kwargs)
         with self._simulation_call(
             soc, "integrated", kwargs, charge_requirements=charge_requirements
         ):
-            return super().acquire(
-                soc, *args, rounds=rounds, classify=classify, **kwargs
-            )
+            return super().acquire(soc, *args, rounds=rounds, **kwargs)
 
     @overload
     def acquire_decimated(
@@ -360,7 +343,7 @@ class SimulationAcquireMixin(ImproveAcquireMixin):
         instead, before admission. Typing is precise with only soc positional;
         extra positional options or a dynamic bool retain the union.
         Nonempty herald raises ValueError because post-selection needs integrated
-        shots. Ordinary calls clear prior herald acceptance fractions.
+        shots.
         Other acquisition errors and cancellation follow the normal pipeline.
         """
         if not isinstance(soc, SimulationSoc):

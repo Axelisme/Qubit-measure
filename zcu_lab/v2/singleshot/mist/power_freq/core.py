@@ -6,11 +6,7 @@ from typing import Annotated, ClassVar
 
 import numpy as np
 from numpy.typing import NDArray
-from zcu_tools.analysis.singleshot import (
-    calc_populations,
-    correct_populations,
-    raw_population_signal,
-)
+from zcu_tools.analysis.singleshot import correct_populations
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment
 from zcu_tools.experiment.context import RunContext
@@ -19,17 +15,25 @@ from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import GainSweep, Pulse, Readout, Reset, SweepCfg, sweep2param
-from zcu_tools.program.v2.modules.readout import classification_parameters
+from zcu_tools.program.v2.modules.readout import classification_processors
 
 from zcu_lab.v2.support import live_heatmap
 
 
 def _default_population_states() -> NDArray[np.int64]:
-    return np.array([0, 1], dtype=np.int64)
+    return np.array([0, 1, 2], dtype=np.int64)
 
 
 @dataclass(frozen=True)
 class FreqPowerResult:
+    """Measured signals (Ngain, Nfreq, 3) on rounded gain/frequency grids.
+
+    Gains are in a.u.; frequencies are in MHz.
+
+    The final state axis is [g,e,other], labeled by population_states=[0,1,2].
+    Unmeasured points remain NaN after cancellation.
+    """
+
     gains: NDArray[np.float64]
     freqs: NDArray[np.float64]
     signals: NDArray[np.float64]
@@ -73,7 +77,7 @@ class FreqPowerExp(Experiment[FreqPowerResult, FreqPowerCfg]):
 
     AXES_SPEC: ClassVar[AxesSpec[FreqPowerResult, FreqPowerCfg]] = AxesSpec(
         axes=(
-            AxesSpec.Axis("population_states", "GE Population", "None", dtype=np.int64),
+            AxesSpec.Axis("population_states", "Population", "None", dtype=np.int64),
             AxesSpec.Axis("freqs", "Drive Freq", "Hz", scale=1e6, dtype=np.float64),
             AxesSpec.Axis("gains", "Drive gain", "a.u.", dtype=np.float64),
         ),
@@ -94,18 +98,19 @@ class FreqPowerExp(Experiment[FreqPowerResult, FreqPowerCfg]):
 
         At each host-side probe gain, apply optional reset and init, play the
         frequency-swept probe, then read out. Return rounded gains (a.u.),
-        frequencies (MHz), and classified G/E fractions shaped (Ngain, Nfreq, 2),
+        frequencies (MHz), and classified G/E/Other fractions shaped (Ngain, Nfreq, 3),
         averaged over shots and rounds.
 
         cfg.readout supplies a circle classifier per ADC with a positive radius.
-        Other is 1-G-E, not calibrated leakage. Gain remains a drive amplitude,
-        not a photon number; optional confusion correction is analysis-only.
+        Other counts unclassified shots, not calibrated leakage.
+        Gain is a drive amplitude, not a photon number.
+        Optional confusion correction is analysis-only.
         """
 
         # Prepare host gain points and the board frequency grid.
         soc, soccfg = context.soc, context.soccfg
         cfg = deepcopy(cfg)
-        classification = classification_parameters(cfg.readout, require_other=True)
+        processors = classification_processors(cfg.readout, require_other=True)
 
         freq_sweep = cfg.freq
         gain_sweep = cfg.gain
@@ -122,7 +127,7 @@ class FreqPowerExp(Experiment[FreqPowerResult, FreqPowerCfg]):
             {"soccfg": soccfg, "gen_ch": cfg.probe_pulse.ch},
         )
 
-        # Display all classification regions while storing only G/E fractions.
+        # Display the measured G/E/Other fractions in classifier order.
         figure, _ = context.plots.subplots(
             "measurement", nrows=3, ncols=1, figsize=(12, 6)
         )
@@ -141,13 +146,12 @@ class FreqPowerExp(Experiment[FreqPowerResult, FreqPowerCfg]):
             )
         )
 
-        def plot_fn(data: NDArray[np.float64]) -> None:
-            populations = calc_populations(data)
+        def plot_fn(populations: NDArray[np.float64]) -> None:
             for i, viewer in enumerate(viewers):
                 viewer.update(gains, freqs, populations[..., i])
 
         buffer = SignalBuffer(
-            (len(gains), len(freqs), 2),
+            (len(gains), len(freqs), 3),
             dtype=np.float64,
             on_update=plot_fn,
         )
@@ -169,15 +173,15 @@ class FreqPowerExp(Experiment[FreqPowerResult, FreqPowerCfg]):
                     .add_pulse("probe_pulse", step.cfg.probe_pulse)
                     .add_readout("readout", step.cfg.readout)
                     .declare_sweep("freq", step.cfg.freq)
-                    .build_and_acquire(
-                        # Classify individual shots before averaging populations.
-                        raw2signal_fn=raw_population_signal,
-                        classify=classification,
+                    .build_and_acquire_processed(
+                        # First ADC/read, with all G/E/Other columns.
+                        processed2signal_fn=lambda processed: processed[0][0],
+                        processors=processors,
                         rounds=cfg.rounds,
                     )
                 )
 
-        # Preserve gain/frequency/G-E axis order; Other is derived on demand.
+        # Preserve gain/frequency/state order with explicit G/E/Other columns.
         signals = buffer.array
 
         return FreqPowerResult(gains=gains, freqs=freqs, signals=signals)
@@ -189,10 +193,19 @@ class FreqPowerExp(Experiment[FreqPowerResult, FreqPowerCfg]):
         *,
         plots: Plots,
     ) -> None:
+        """Plot the run's [g,e,other] fractions with optional confusion correction.
+
+        source supplies the saved sweep grid and three-column populations;
+        cfg may be None. options controls correction and any axis conversion.
+        Publish the fit figure to plots. Legacy G/E data raise ValueError.
+        """
         result = source.result
         gains, freqs, populations = result.gains, result.freqs, result.signals
-
-        populations = calc_populations(populations)
+        if populations.shape[-1] != 3:
+            raise ValueError(
+                "Expected [g,e,other] populations; legacy G/E files are unsupported. "
+                "Acquire a new run."
+            )
 
         populations = correct_populations(populations, options.confusion_matrix)
 

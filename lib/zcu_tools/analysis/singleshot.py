@@ -25,15 +25,6 @@ def raw_population_signal(
     return raw[0][0]
 
 
-def calc_populations(signals: NDArray[np.float64]) -> NDArray[np.float64]:
-    """Append other-state probability 1-g-e to final-axis ground/excited fractions.
-
-    signals has final axis containing at least g/e; returns a new float array
-    with final axis (g, e, other). Does not clamp or renormalize inputs."""
-    g_pop, e_pop = signals[..., 0], signals[..., 1]
-    return np.stack([g_pop, e_pop, 1 - g_pop - e_pop], axis=-1)
-
-
 def correct_populations(
     populations: NDArray[np.float64],
     confusion_matrix: NDArray[np.float64] | None,

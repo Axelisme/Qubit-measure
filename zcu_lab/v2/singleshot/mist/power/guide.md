@@ -28,4 +28,16 @@ This is a diagnostic only. Read the population curves from the plot; calibration
 
 Run singleshot/ge Primary and Post, then Apply to the selected readout module. Sweep the probe gain across the MIST onset; provide '`$qubit.ext.ac_stark_coeff`' (from the AC-Stark experiment) for a photon-number x-axis.
 
+## Saved populations
+
+Save keeps `signals` shaped `(Ngain, 3)` in `[g,e,other]` order, with
+`population_states=[0,1,2]`. Other counts shots outside the accepted circles
+or tied between them. It is not a calibrated leakage population.
+Sweep coordinates and units are unchanged. Cfg schema remains 3.0.
+
+Old two-column G/E files are not supported by the three-state analysis.
+Load rejects files with the former `GE Population` axis label. If a file loads
+with two columns, Analyze rejects it before correction or fitting. Acquire a
+new run. Load and Analyze do not reconstruct Other from G/E.
+
 **Last updated:** 2026-10-29

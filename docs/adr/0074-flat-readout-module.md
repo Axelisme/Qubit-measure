@@ -90,12 +90,16 @@ Classifier 不保存校準時的 readout 設定，也沒有自動失效機制。
 使用者於 2026-10-29 裁決：「QC3我認為分類參數比對需求還不確定，先A」。
 Writeback proposal 的 materialized 設定比對只防止把新校準寫給不同設定，不檢查既有 classifier 的有效性。
 
-Readout 工具從 cfg 產生以 ADC channel 為 key 的型別化 mapping，由作者明確交給 acquire。
-Acquire 不掃 program registry，mapping 必須完整覆蓋已宣告 ADC，不混合 IQ 與 population。
-未傳 classify 保留 IQ 路徑。Linear 以旋轉後實部大於 threshold 判 excited，等於時判 ground。
-Centroid3 每 shot 選 Euclidean 距離最近的中心，等距時依 g/e/f 順序選第一個，沒有拒判區。
-Acquire 最後一軸維持長度 2，依序保存 [g,e]。Centroid3 的 f＝1−g−e，circle 的第三類仍是 other。
-`require_other` 與 heralding 明確拒絕 centroid3，本次不新增三態 heralding。
+Readout 工具從 cfg 產生以 ADC channel 為 key 的 detached processors，由作者明確交給 `acquire_processed`。
+Mapping 必須完整覆蓋已宣告 ADC，acquisition 不掃 program registry。
+每個 processor 接收 normalized float64 `(shots, reads, 2)` IQ，回傳 `(shots, out_reads, N)` float64 payload。
+框架平均 shots 與 rounds，回傳 `(out_reads, *point_dims, N)`，output axes 在同次 acquire 每個 ADC 固定。
+Circle 輸出 [g,e,other]，半徑邊界與等距屬 other。
+Linear 輸出 [g,e]，旋轉後實部大於 threshold 判 excited，等於時判 ground。
+Centroid3 輸出 [g,e,f]，每 shot 選 Euclidean 距離最近的中心，等距時依 g/e/f 順序選第一個，沒有拒判區。
+F 不代表 circle 的 other，`require_other` 與 heralding 明確拒絕 centroid3。
+普通 `acquire` 保留原生 IQ 與 QICK threshold／angle，不提供 host classify 或 herald option。
+Builder 的 processed methods 要求 explicit converter，不把 population 當作 IQ。
 
 三態 reference 只用 acquired IQ 與 preparation labels 建立中心及 training confusion。
 它經既有完整 readout module proposal／Apply 流程，只更新 Run 捕捉的 library 目標的 classifier，保留其他欄位與 child keys。
@@ -105,11 +109,12 @@ Training confusion 包含準備污染，correction 回到 preparation-label 座�
 STIRAP 與單頻 g↔f Raman 從該次 run 保存的 readout cfg 要求 centroid3。
 缺少 classifier、型別不符或未知 ADC 明確失敗，不退回 circle、不從 live library 補值、不讀 simulator truth。
 校準沿 Spec、native cfg、library 與 data.h5 的 run cfg 保存，不另建 experiment calibration storage。
-Reference 分析與 acquire 共用 `utils.shot_classification` 的最近中心規則。
+Reference 分析與 centroid3 processor 共用 `utils.shot_classification` 的最近中心規則。
 
 2026-10-29，使用者對三態校準交接選 A，答「3A」：新增 readout classifier 型別，由三態 reference Apply 到 library，後續實驗讀 saved run cfg。
 對 acquire 輸出答「5A，但這不是長久之計，必須設計一個方案來回傳任意維度的數據。而不是2維」。
-本次沿用 [g,e] 兩欄，任意維度輸出另做設計，不在本實作預留抽象。
+使用者於 2026-10-29 後續選擇逐 shot 後處理方法，保留每 ADC 一個 ndarray 與單一可變長 payload 軸。
+分類 processor 明列每個狀態，不從 g/e 重建第三類；`acquire_decimated` 不變。
 
 單 qubit GE Primary 提出只有中心的 circle，Post 提出含中心、radius 與 matrix 的完整 circle。
 兩者都是完整 module replacement，同次批次依 Primary→Post 接受。
@@ -137,21 +142,27 @@ Library readout cfg 擁有 herald 使用的 classifier。
 同一個 instance 也可以初始化一次後多次發射；這是公開能力，不是實驗必須採用的配置。
 2026-10-29，advisor 更正舊 spec 與本 ADR 將「同一 readout 設定」誤述為「同一 instance」的文字，沒有改變使用者要求的設定共用。
 
-Readout 公開工具依自身發射序產生具名 `HeraldSpec`，作者明確交給 acquire。
-Acquisition 不掃 program registry，也不查 live library。
-Program acquisition 擁有一次 acquire 內的 ground mask、已完成 rounds 的通過數加權與每點統計。
-它先套 herald 遮罩，再處理 signal 的 IQ、typed classify 或 QICK threshold。
-硬體與模擬共用這段後選擇處理，沒有新增逐發持久資料。
+Readout 公開工具依自身發射序產生具名 `HeraldSpec`。
+作者用 `heralded(spec, inner)` 包裝該 ADC 的 signal processor，明傳給 `acquire_processed`。
+`acquire` 與 `acquire_processed` 都不接受 herald option，也不掃 registry 或查 live library。
+Caller 的 processor 執行 ground classification，移除 herald read，輸出 signal numerator 與 acceptance 分量。
+框架平均 numerator 與 acceptance，builder converter 呼叫 `herald_ratio` 還原 conditional signal，將 fraction 寫入實驗 Result。
+Cumulative round hooks 使用相同公式，等同依 accepted shots 數加權。
+零通過時 signal 為 NaN，不發出除零 warning。
+Program 不保存 integrated mask/count state 或 pass-fraction accessor。
+模擬把每輪 retained raw shots 交給同一 processor path，不設獨立 herald mode，也不重新呼叫 backend。
+沒有新增逐發持久資料。
+使用者於 2026-10-29 對以 processor helper 取代 integrated herald 與 accessor 的方案選 A，答「6A」。
 實際 API、資料形狀與失敗條件見 [program 契約](../../lib/zcu_tools/program/README.md#herald-declarations)。
 
-Lab 擁有 host scan 跨 acquire 的結果合併，只使用 owner 的公開通過比例，不重做分類或遮罩。
+Lab 擁有 host scan 跨 acquire 的結果合併，使用 `herald_ratio` 回傳的通過比例，不重做分類或遮罩。
 Shaped Len Rabi 保留 round-major，掃完一條曲線才判斷 early-stop SNR。
 Lab 只合併實際交付的取數結果，依通過數加權；停止而略過 acquire 時，不把 cached program 的上一輪統計算成新資料。
 合併公式、零通過與未量測點的行為由 [Len Rabi guide](../../zcu_lab/v2/heralding/len_rabi/guide.md#run-and-inspect) 與 core 說明。
 
 實驗層以獨立的 `heralding/*` 組合序列，不在既有實驗加入 Reset 模組。
 目前提供單 qubit pulse-readout T1、Amp Rabi、Len Rabi、Ramsey 與 Echo。
-Program accessor 提供每點通過比例，實驗的 Result 保存同網格 `pass_fraction`。
+實驗的 Result 保存同網格 `pass_fraction`，與 `signals` 的名稱、shape 及 MCP recipe 呼叫保持不變。
 四個第二階段成員沿用一般版本的 writeback 目標與規則，描述標明 Heralded，不另設 heralded 校準欄位。
 這是 host post-selection，不是 active reset；不包含 mux herald 或雙 qubit 四態聯合分類。
 操作、保存與 writeback 目標見各 guide：[T1](../../zcu_lab/v2/heralding/t1/guide.md)、

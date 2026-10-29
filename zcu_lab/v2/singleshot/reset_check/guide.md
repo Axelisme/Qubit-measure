@@ -2,7 +2,13 @@
 
 **Readers:** operator, agent. How to compare single-shot reset branches from the GUI or MCP and interpret the results.
 
-Hardware gain and three-branch sweep: Rabi / Rabi + reset / Rabi + reset + Rabi. Both pulses share the swept gain. Saves classified G/E populations; live view and analysis show Ground / Excited / Other with color for state and solid / dashed / dotted lines for branch.
+Hardware gain and three-branch sweep: Rabi / Rabi + reset / Rabi + reset + Rabi. Both pulses share the swept gain. Saves classified G/E/Other populations; live view and analysis show Ground / Excited / Other with color for state and solid / dashed / dotted lines for branch.
+
+## Saved populations
+
+The saved `signals` array has axes `(gain, reset branch, population state)`. The final axis contains the measured fractions `[g,e,other]`, with `population_states=[0,1,2]`. Other counts rejected shots, including ties, rather than a reconstructed remainder. Unmeasured points remain NaN.
+
+Older files saved only two population columns under the `GE Population` axis label. The new loader rejects that label because it expects `Population`. Those files cannot enter the new Analyze directly. Keep the old analysis version for those files; this version does not reconstruct Other or convert old results. The cfg schema remains 3.0 because the configuration fields did not change.
 
 ## Parameter sources
 
@@ -26,6 +32,6 @@ This is a diagnostic only; calibration parameters stay unchanged. It reports the
 
 ## Recommended
 
-Reps are shots per gain per branch per round; rounds average repeated hardware sweeps and update the live plot. Branches are independent preparations. Other is the unclassified remainder. Calibrated leakage and reset-channel fidelity require separate characterization.
+Reps are shots per gain per branch per round; rounds average repeated hardware sweeps and update the live plot. Branches are independent preparations. Other counts shots outside the accepted circle regions or tied between them. Calibrated leakage and reset-channel fidelity require separate characterization.
 
 **Last updated:** 2026-10-29
