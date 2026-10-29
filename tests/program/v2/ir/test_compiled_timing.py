@@ -205,6 +205,108 @@ def test_known_runtime_repeat_and_wave_patch_keep_scheduled_times():
     assert [[e.cycle for e in s.events] for s in result.shots] == [[23, 43], [63, 83]]
 
 
+class RegisterDispatchProgram(ScalarProgram):
+    def _initialize(self, cfg):
+        super()._initialize(cfg)
+        self.add_reg("count")
+        self.add_reg("counter")
+        self.write_reg("count", 3)
+
+    def _body(self, cfg):
+        self.meta_macro("TIMING_BOUNDARY", "body_start")
+        self.open_inner_loop("repeat", "counter", "count", range_hint=(2, 4))
+        self.append_macro(Pulse(ch=0, name="p", t=0))
+        self.delay(25 / 430.08)
+        self.close_inner_loop("repeat", "counter", "count")
+        self.meta_macro("TIMING_BOUNDARY", "body_end")
+
+
+def test_native_register_loop_dispatch_preserves_events_and_reference():
+    prog = RegisterDispatchProgram(make_mock_soccfg(), initial_delay=0, relax_delay=0)
+    layout = ir.TimingLayout.from_metadata(prog.meta_infos)
+    result = ir.analyze_timing(
+        ir.CompiledTimingInput(prog.prog_list, prog.labels, layout)
+    )
+    assert [e.cycle for e in result.shots[0].events] == [0, 25, 50]
+    assert result.shots[0].body_end_cycle == 75
+    assert result.shots[0].end_cycle == 75
+
+
+class AbsoluteTimeProgram(MyProgramV2):
+    input_value: int | str = 7
+
+    def _initialize(self, cfg):
+        # Reserve explicit registers for the native assembly macro below.
+        self.add_reg("operand", addr=10)
+        self.add_reg("magnitude", addr=11)
+        self.add_reg("r15", addr=15)
+        self.write_reg("operand", self.input_value)
+
+    def _body(self, cfg):
+        self.meta_macro("TIMING_BOUNDARY", "body_start")
+        self.asm_inst({"CMD": "REG_WR", "DST": "r11", "SRC": "op", "OP": "ABS r10"})
+        self.write_reg("s_out_time", "magnitude")
+        self.asm_inst({"CMD": "TRIG", "DST": "2", "SRC": "set"})
+        self.cond_jump("zero_magnitude", "magnitude", "Z")
+        self.delay(5 / 430.08)
+        self.label("zero_magnitude")
+        self.asm_inst({"CMD": "TIME", "C_OP": "inc_ref", "R1": "r11"})
+        self.meta_macro("TIMING_BOUNDARY", "body_end")
+
+
+def compile_absolute_time(value: int | str) -> ir.CompiledTimingInput:
+    class Program(AbsoluteTimeProgram):
+        input_value = value
+
+    prog = Program(make_mock_soccfg(), initial_delay=0, relax_delay=0)
+    return ir.CompiledTimingInput(
+        prog.prog_list, prog.labels, ir.TimingLayout.from_metadata(prog.meta_infos)
+    )
+
+
+@pytest.mark.parametrize(
+    "value,event_cycle,end_cycle",
+    [
+        (7, 7, 12),
+        (-7, 7, 12),
+        (0, 0, 0),
+        (2147483647, 2147483647, 2147483652),
+        (-2147483647, 2147483647, 2147483652),
+    ],
+)
+def test_native_absolute_register_drives_event_reference_and_control(
+    value, event_cycle, end_cycle
+):
+    result = ir.analyze_timing(compile_absolute_time(value))
+    shot = result.shots[0]
+    assert [(e.kind, e.port, e.value, e.cycle) for e in shot.events] == [
+        ("trigger", 2, 1, event_cycle)
+    ]
+    assert (shot.start_cycle, shot.body_end_cycle, shot.end_cycle) == (
+        0,
+        end_cycle,
+        end_cycle,
+    )
+    assert result.end_cycle == end_cycle
+
+
+def test_native_absolute_minimum_signed_word_rejects_uncertain_overflow():
+    with pytest.raises(ValueError, match="ABS.*-2147483648.*overflow"):
+        ir.analyze_timing(compile_absolute_time(-2147483648))
+
+
+@pytest.mark.parametrize(
+    "value,message",
+    [
+        ("r15", "Unknown register value: s14"),
+        ("s11", "s11"),
+    ],
+)
+def test_native_absolute_unknown_time_sources_are_not_zero(value, message):
+    with pytest.raises(ValueError, match=message):
+        ir.analyze_timing(compile_absolute_time(value))
+
+
 class TriggerProgram(MyProgramV2):
     def _body(self, cfg):
         self.meta_macro("TIMING_BOUNDARY", "body_start")
