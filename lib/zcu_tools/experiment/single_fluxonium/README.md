@@ -1,6 +1,6 @@
 # Single-fluxonium acquisition
 
-**Last updated:** 2026-10-29 (UTC), named charge admission
+**Last updated:** 2026-10-30, inactive fast-flux DC shortcut
 
 **Readers:** framework-dev, lab-author, agent. Compose complete fluxonium timelines with one physical readout cavity.
 
@@ -32,6 +32,10 @@ It converts QICK us/MHz/degrees into ns/GHz/radians. Shared
 `experiment.readout_plan.drive_track` preserves signed gains, complex envelopes
 and the common carrier origin. Each template remains one `TimelineBatch`.
 `Engine.evolve` owns segmentation, kernel selection and propagation.
+
+With a configured flux line but no active point on any fast-flux track, the
+planner keeps flux at the live DC value and skips flux-history sampling.
+Active tracks retain the causal response and passive tails described below.
 
 Fast flux uses `simulate.lines.FilteredFlux` with one loop. The planner samples
 its complete causal response until terminal readout, including passive tails.
