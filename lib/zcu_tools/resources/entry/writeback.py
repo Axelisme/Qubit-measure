@@ -33,8 +33,8 @@ from .ledger_models import (
     SourceReference,
 )
 from .points import PointView
-from .storage import PointStorageBinding, bind_record_table
-from .views import document_value, snapshot
+from .storage import StorageBinding, bind_record_table
+from .views import SetupView, document_value, snapshot, source_path
 
 if TYPE_CHECKING:
     from zcu_tools.resources.context.library import ModuleLibrary
@@ -222,9 +222,9 @@ class WritebackApplyError(RuntimeError):
 
 
 class WritebackTarget(Protocol):
-    """Bound document-batch write capabilities for a saved point.
+    """Bound document-batch write capabilities for entry or point documents.
 
-    ledger identifies the owning entry; point is its saved label.
+    ledger identifies the owning entry; point is its label or None for entry scope.
     set_parameters/set_modules each validate an ordered nonempty batch in one
     draft and commit one file, or raise without committing any batch item.
     They return one detached actual value per command, captured immediately
@@ -237,7 +237,11 @@ class WritebackTarget(Protocol):
     """
 
     ledger: RecordsLedger
-    point: str
+
+    @property
+    def point(self) -> str | None:
+        """Return the bound point label, or None for entry-level writes."""
+        ...
 
     def set_parameters(
         self, updates: tuple[ParameterUpdate, ...]
@@ -257,11 +261,11 @@ class WritebackTarget(Protocol):
 
 
 def commit_parameter_updates(
-    point: PointView, updates: tuple[ParameterUpdate, ...]
+    point: PointView | SetupView, updates: tuple[ParameterUpdate, ...]
 ) -> tuple[YamlValue, ...]:
-    """Commit ordered updates through an already-bound point's single edit.
+    """Commit ordered updates through a bound entry/point view's single edit.
 
-    point is the caller's existing PointView; this function does not reopen it
+    point is the caller's existing PointView or SetupView; do not reopen it
     or select a GUI target. updates must be nonempty. ParameterUpdate defines
     concrete paths, YAML values and optional metadata replacement.
     Return one detached actual value per update in supplied order, captured
@@ -312,15 +316,10 @@ def commit_library_updates(
     return tuple(actual)
 
 
-class PointWritebackTarget:
-    """Bind a captured PointView/storage for Notebook or other persistent callers.
+class _DocumentWritebackTarget:
+    """Share single-file batch commits and lazy library binding across scopes."""
 
-    Construction does no I/O. The caller supplies matching captured capabilities.
-    Library opening is lazy; owner key/family/conflict errors propagate.
-    Each setter commits one file; record rows append through the record owner.
-    """
-
-    def __init__(self, point: PointView, storage: PointStorageBinding) -> None:
+    def __init__(self, point: PointView | SetupView, storage: StorageBinding) -> None:
         self._point = point
         self._storage = storage
         self.ledger = storage.ledger
@@ -336,7 +335,7 @@ class PointWritebackTarget:
     def set_parameters(
         self, updates: tuple[ParameterUpdate, ...]
     ) -> tuple[YamlValue, ...]:
-        """Commit one nonempty point batch under WritebackTarget's batch contract."""
+        """Commit one nonempty parameter batch under WritebackTarget's contract."""
         return commit_parameter_updates(self._point, updates)
 
     def _library(self) -> ModuleLibrary:
@@ -344,10 +343,7 @@ class PointWritebackTarget:
 
         if self._library_handle is None:
             self._library_handle = ModuleLibrary(
-                self._storage.result_path
-                / "points"
-                / self._storage.point
-                / LIBRARY_FILENAME,
+                source_path(self._point).parent / LIBRARY_FILENAME,
                 allow_absent=True,
             )
         return self._library_handle
@@ -379,6 +375,40 @@ class PointWritebackTarget:
         return bind_record_table(self._storage.result_path, component).append(
             run_id=run_id, point=self.point, at=at, source=source, **fields
         )
+
+
+class PointWritebackTarget(_DocumentWritebackTarget):
+    """Bind point documents and captured storage for persistent writeback.
+
+    point and storage must describe the same captured point. Construction does
+    no I/O. Parameter and library setters each commit one validated file and
+    return detached receipts. Library opening is lazy and permits absent files.
+    Owner path, schema, conflict and I/O failures propagate; no cross-file
+    rollback occurs. ledger is the storage ledger; point is its bound label.
+    Record methods append through the entry record owner.
+    """
+
+    def __init__(self, point: PointView, storage: StorageBinding) -> None:
+        super().__init__(point, storage)
+
+
+class EntryWritebackTarget(_DocumentWritebackTarget):
+    """Bind global parameter/library documents and captured entry storage.
+
+    setup is the owning ResultEntry.setup; storage comes from
+    capture_entry_storage on that entry. Construction does no I/O and requires
+    storage.point=None, otherwise raises ValueError. ledger is that entry's
+    captured ledger and point is None. Each nonempty parameter/library batch
+    validates and commits one file, returning detached receipts. A missing
+    library is created only by its first nonempty edit. Existing points and
+    captured contexts remain unchanged. Owner schema, conflict and I/O errors
+    propagate; accepted events and earlier groups are not rolled back.
+    """
+
+    def __init__(self, setup: SetupView, storage: StorageBinding) -> None:
+        if storage.point is not None:
+            raise ValueError("Entry writeback requires entry-level storage")
+        super().__init__(setup, storage)
 
 
 def _append_accepted_record(

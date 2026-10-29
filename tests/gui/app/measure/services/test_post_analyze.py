@@ -63,7 +63,7 @@ def _make_state(tab_id: str = "tab1", *, with_analyze: bool = True) -> State:
         soc=MagicMock(),
         soccfg=MagicMock(),
         result_dir="/tmp",
-        readiness=ContextReadiness.ACTIVE,
+        readiness=ContextReadiness.POINT,
     )
     state = State(ctx)
     state.add_tab(

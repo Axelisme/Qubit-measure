@@ -128,9 +128,14 @@ def test_load_file_preserves_partial_model_and_metadata_without_writes(files, pa
     path = entry.predictors_path / "trial.json"
     save_predictor_file(path, expected)
     before = path.read_bytes()
+    captured = context.read_context()
+    revisions = context.get_file_revisions()
     assert load_outcome(control, "trial.json") == expected
     assert path.read_bytes() == before
-    assert context.get_session_env().parameters is None
+    assert context.read_context().target == captured.target
+    assert context.read_context().whole_document() == captured.whole_document()
+    assert context.get_file_revisions() == revisions
+    assert context.get_session_env().active_label is None
 
 
 @pytest.mark.parametrize(

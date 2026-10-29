@@ -59,7 +59,7 @@ def session(qapp, tmp_path: Path) -> Generator[TemplateSession]:
         )
         ctrl.setup_control.open_entry(EntryRequest("entry"))
         ctrl.context_control.use_point(PointUseRequest("first"))
-        ctrl.context_control.set_alias_rows((AliasRow("resonator", "R1"),))
+        ctrl.context_control.apply_alias_rows((AliasRow("resonator", "R1"),))
         try:
             yield TemplateSession(ctrl, entry, state)
             assert registry_state() == installed, (
@@ -117,7 +117,7 @@ def test_bound_empty_resonator_reports_first_missing_leaf_without_write(
     session: TemplateSession,
 ) -> None:
     ctrl = session.controller
-    ctrl.context_control.set_alias_rows((AliasRow("resonator", "Empty"),))
+    ctrl.context_control.apply_alias_rows((AliasRow("resonator", "Empty"),))
     before = ctrl.context_control.read_context()
     version = session.state.version.get("context")
     ledger = session.entry.ledger.events()

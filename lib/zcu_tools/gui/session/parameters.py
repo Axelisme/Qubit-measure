@@ -29,7 +29,11 @@ from zcu_tools.resources.entry import (
 )
 from zcu_tools.resources.entry.aliases import AliasValue
 from zcu_tools.resources.entry.roles import resolve_names
-from zcu_tools.resources.entry.storage import PointStorageBinding, capture_point_storage
+from zcu_tools.resources.entry.storage import (
+    StorageBinding,
+    capture_entry_storage,
+    capture_point_storage,
+)
 from zcu_tools.resources.projection import ProjectionPathError, projection_value
 
 _LIBRARY_PARTITIONS = ("pulses", "readout", "reset", "waveforms")
@@ -37,7 +41,7 @@ _LIBRARY_PARTITIONS = ("pulses", "readout", "reset", "waveforms")
 if TYPE_CHECKING:
     from zcu_tools.gui.session.context_types import ContextSourceFault, ContextTarget
     from zcu_tools.resources.context.library import ModuleLibrary
-    from zcu_tools.resources.entry import PointView, RoleSpec
+    from zcu_tools.resources.entry import PointView, ResultEntry, RoleSpec
     from zcu_tools.resources.entry.schema import PointDocument
 
 
@@ -83,7 +87,7 @@ class RoleBinding:
 class ParameterContext:
     """An isolated working-unit point/library capture with an explicit target.
 
-    Construction accepts validated point and library snapshots, a SavedPoint
+    Construction accepts parameter and library snapshots, a SavedEntry or SavedPoint
     destination, and an optional fixed consumer RoleBinding.
     Binding declarations may omit names for unbound roles. Their $role reads
     raise RoleResolutionError naming the role; bare paths always name concrete
@@ -108,7 +112,7 @@ class ParameterContext:
         target: ContextTarget | None,
         roles: RoleBinding | None,
         source_faults: tuple[ContextSourceFault, ...] = (),
-        storage: PointStorageBinding | None = None,
+        storage: StorageBinding | None = None,
     ) -> None:
         """Detach input data and retain the immutable library projection.
 
@@ -116,7 +120,7 @@ class ParameterContext:
         declared component consumers. Undeclared names may identify devices.
         Declared roles absent from names are unbound, not constructor failures.
         A setup diagnostic is outside this capture contract and raises
-        ValueError. storage optionally retains a resource-owned saved-point
+        ValueError. storage optionally retains a resource-owned entry/point
         capability with matching target identity; omit it for synthetic
         captures. Mismatched storage origins also raise ValueError.
         roles.aliases optionally supplies fixed authored rows. When supplied,
@@ -132,7 +136,7 @@ class ParameterContext:
             or storage.entry_name != target.entry_name
             or storage.point != target.point
         ):
-            raise ValueError("Storage origin must match the saved-point target")
+            raise ValueError("Storage origin must match the persistent target")
         self._recorded = False
         self._recorded_names: YamlValue = None
         self._point = point.model_copy(deep=True)
@@ -197,6 +201,31 @@ class ParameterContext:
             target=target,
             roles=roles,
             storage=capture_point_storage(point),
+        )
+
+    @classmethod
+    def from_entry(
+        cls,
+        entry: ResultEntry,
+        library: ModuleLibrary,
+        target: ContextTarget,
+        *,
+        roles: RoleBinding | None = None,
+    ) -> ParameterContext:
+        """Capture cached global parameters, library and entry storage.
+
+        entry and library must already be opened. target must identify this
+        entry with point=None, otherwise construction raises ValueError.
+        roles follows the constructor's fixed binding contract. Inputs are
+        detached; no refresh, file writes, selection changes or events occur.
+        Snapshot and storage failures propagate.
+        """
+        return cls(
+            point=parameter_content(entry.setup),
+            library=library.snapshot(),
+            target=target,
+            roles=roles,
+            storage=capture_entry_storage(entry),
         )
 
     @classmethod
@@ -319,7 +348,7 @@ class ParameterContext:
         return tuple(rows)
 
     @property
-    def storage(self) -> PointStorageBinding | None:
+    def storage(self) -> StorageBinding | None:
         """Return the fixed origin capability, or None for synthetic unbound captures.
 
         Its roots, ledger and description belong to capture time. This projection
@@ -333,7 +362,7 @@ class ParameterContext:
         names = {} if roles is None else dict(roles.names)
         return replace(self._storage, roles=MappingProxyType(names))
 
-    def capture_storage(self) -> PointStorageBinding:
+    def capture_storage(self) -> StorageBinding:
         """Return storage at this capture's origin, never the current selection.
 
         Necessary source faults raise ContextSourceUnavailableError. Synthetic

@@ -74,7 +74,7 @@ def test_unavailable_reset_updates_nonfactory_error_and_reraises_without_a_form(
         ctrl.setup_control.new_entry(EntryRequest("current"))
         ctrl.setup_control.new_point(PointCreateRequest("p", "", CommandOrigin("gui")))
         ctrl.context_control.add_component("Q1", "history/source", {})
-        ctrl.context_control.set_alias_rows((AliasRow("history", "Q1"),))
+        ctrl.context_control.apply_alias_rows((AliasRow("history", "Q1"),))
         target = ctrl.context_control.read_context().target
         assert target is not None
         ctrl.context_control.set_module(

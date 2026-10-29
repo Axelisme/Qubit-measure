@@ -13,6 +13,7 @@ from zcu_tools.resources.entry import (
     PointView,
     ResultEntry,
     bind_run_outputs,
+    capture_entry_storage,
     capture_point_storage,
 )
 
@@ -82,6 +83,48 @@ def test_recorded_output_binding_rejects_unsafe_names_without_writes(
             point=names["point"],
         )
     assert tuple(tmp_path.iterdir()) == ()
+
+
+def test_capture_entry_storage_retains_cached_global_context_without_io(
+    entry: ResultEntry,
+) -> None:
+    entry.setup.description = "cached global"
+    newer = ResultEntry.open(
+        "entry",
+        result_root=entry.result_path.parent,
+        database_root=entry.database_path.parent,
+    )
+    newer.setup.description = "published later"
+    before = _published_state(entry.result_path)
+    captured = capture_entry_storage(entry)
+    assert captured.entry_name == "entry"
+    assert captured.point is None
+    assert captured.description == "cached global"
+    assert captured.roles == {}
+    assert captured.result_path == entry.result_path.resolve()
+    assert captured.database_path == entry.database_path.resolve()
+    assert captured.ledger.events() == ()
+    assert _published_state(entry.result_path) == before
+
+
+def test_recorded_run_without_point_uses_global_figure_directory(
+    tmp_path: Path,
+) -> None:
+    binding = bind_run_outputs(
+        result_root=tmp_path / "result",
+        database_root=tmp_path / "Database",
+        entry_name=None,
+        point=None,
+    )
+    layout = binding.layout(stem="recorded", saved_at=datetime.now(UTC))
+    outputs = layout.outputs(ArtifactKey("analysis", "fit", "figure", "plot"))
+    assert binding.point is None
+    assert layout.run_path == tmp_path / "Database/unnamed_entry/runs/recorded"
+    assert (
+        outputs[1].path
+        == tmp_path / "result/unnamed_entry/figures/recorded_analysis_fit_plot.png"
+    )
+    assert list(tmp_path.iterdir()) == []
 
 
 def test_capture_retains_cached_context_and_exact_entry_attribution(

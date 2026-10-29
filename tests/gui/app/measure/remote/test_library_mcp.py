@@ -204,7 +204,7 @@ def role_socket(qapp, tmp_path, component_registry):
 def test_ml_create_binds_placeholders_to_resolved_alias_not_entry_name(role_socket):
     fx, sock = role_socket
     fx.ctrl.context_control.add_component("Q2", "synthetic/slotted", {"rate": 567.0})
-    fx.ctrl.context_control.set_alias_rows((AliasRow("qubit", "R1"),))
+    fx.ctrl.context_control.apply_alias_rows((AliasRow("qubit", "R1"),))
     reply = call(
         sock,
         "context.ml_create_from_role",
@@ -223,7 +223,7 @@ def test_ml_create_missing_alias_reports_binding_without_writing(
 ):
     fx, sock = role_socket
     if alias_value is not None:
-        fx.ctrl.context_control.set_alias_rows((AliasRow("qubit", alias_value),))
+        fx.ctrl.context_control.apply_alias_rows((AliasRow("qubit", alias_value),))
     before = fx.ctrl.context_control.read_context().library.document()
     reply = call(
         sock,

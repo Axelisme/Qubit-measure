@@ -540,9 +540,9 @@ def test_without_parameter_context_the_tree_clears_and_add_is_disabled(
         destination = next(
             combo
             for combo in widget.findChildren(QComboBox)
-            if combo.findText("Setup template") >= 0
+            if combo.findText("Entry template") >= 0
         )
-        destination.setCurrentText("Setup template")
+        destination.setCurrentText("Entry template")
         assert _add_button(widget).isEnabled()
         assert hint.text() == ""
         assert widget.add_component(
@@ -641,9 +641,9 @@ def test_add_button_opens_a_modal_dialog_naming_the_destination(qapp, component_
     destination = next(
         combo
         for combo in widget.findChildren(QComboBox)
-        if combo.findText("Setup template") >= 0
+        if combo.findText("Entry template") >= 0
     )
-    destination.setCurrentText("Setup template")
+    destination.setCurrentText("Entry template")
     dialog = _open_add_dialog(qapp, widget, "test/profiled")
     setup_text = _child(dialog, QLabel, "add_destination").text()
     assert setup_text != current_text

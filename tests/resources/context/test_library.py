@@ -157,6 +157,22 @@ def test_header_only_open_and_empty_edit_do_not_rewrite(
     assert changes == []
 
 
+def test_explicit_empty_library_creation_is_readable_and_never_overwrites(
+    library_path: Path,
+) -> None:
+    from zcu_tools.resources.context import library_store
+
+    library_path.unlink()
+    library_store.create_empty_library(library_path)
+    library = ModuleLibrary(library_path)
+    assert library.snapshot().module_keys() == ()
+    assert library.snapshot().waveform_keys() == ()
+    before = library_path.read_bytes()
+    with pytest.raises(FileExistsError):
+        library_store.create_empty_library(library_path)
+    assert library_path.read_bytes() == before
+
+
 def test_missing_document_is_not_created(library_path: Path) -> None:
     library_path.unlink()
     with pytest.raises(FileNotFoundError):

@@ -4,6 +4,7 @@ from collections.abc import Generator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
+from hashlib import sha256
 from pathlib import Path
 from typing import Literal
 
@@ -13,14 +14,18 @@ from zcu_tools.cfg_model import ConstWaveformCfg, PulseSpec
 from zcu_tools.format_version import YamlMap, YamlValue
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.expected_error import FailedPreconditionError
+from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_control import ContextControlPort
 from zcu_tools.gui.session.context_types import (
     ContextTarget,
+    LibraryChange,
     PointUseRequest,
     SavedPoint,
 )
 from zcu_tools.gui.session.events import (
     ContextSwitchedPayload,
+    EntryDocumentsChangedPayload,
+    FileChangedPayload,
     MdChangedPayload,
     MlChangedPayload,
 )
@@ -35,10 +40,12 @@ from zcu_tools.resources.entry import (
     ResultEntry,
     document_meta,
     snapshot,
+    writeback,
 )
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
 from tests.gui.app.measure._record_support import require_target
+from tests.resources.entry.fakes import register_fakes, registry_state, restore_registry
 
 Kind = Literal["parameter", "module", "waveform"]
 KINDS: tuple[Kind, ...] = ("parameter", "module", "waveform")
@@ -133,6 +140,307 @@ def test_read_target_observes_detached_writes_without_selecting_or_publishing(
     assert session.control.read_context().document() == selected.document()
     assert session.state.version.get("context") == version
     assert events == []
+
+
+def test_global_alias_edits_persist_and_keep_the_active_three_file_versions(
+    session: _Session,
+) -> None:
+    before = session.control.read_context()
+    files = session.control.get_file_revisions()
+    rows = (AliasRow("driver", "Q1"),)
+
+    session.control.apply_alias_rows(rows)
+
+    assert session.entry.load_aliases().aliases == {"driver": "Q1"}
+    assert session.control.get_alias_rows() == rows
+    assert session.control.read_context().value("$driver") == "Q1"
+    assert before.resolved_aliases() == ()
+    installed = session.control.get_file_revisions()
+    assert [item.document for item in installed] == ["parameters", "library", "aliases"]
+    assert installed[:2] == files[:2]
+    assert installed[2].revision is not None
+    assert installed[2].path == (session.entry.result_path / "aliases.yaml").resolve()
+    session.service.install_entry(session.entry)
+    assert session.control.get_alias_rows() == rows
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_entry_writes_install_before_notification_and_leave_active_capture_fixed(
+    session: _Session, kind: Kind
+) -> None:
+    entry_target = require_target(session.control.read_context())
+    _write(session.control, entry_target, kind, 0.2)
+    selected = _select(session, "a")
+    captured = session.control.read_context(setup=True)
+    active = session.control.read_context()
+    active_files = session.control.get_file_revisions()
+    version = session.state.version.get("context")
+    observed: list[ParameterContext] = []
+    other_events: list[object] = []
+    session.bus.subscribe(
+        EntryDocumentsChangedPayload,
+        lambda _: observed.append(session.control.read_context(setup=True)),
+    )
+    for event in (MdChangedPayload, MlChangedPayload, FileChangedPayload):
+        session.bus.subscribe(event, other_events.append)
+
+    _write(session.control, entry_target, kind, 0.3)
+
+    assert [_value(item, kind) for item in observed] == [pytest.approx(0.3)]
+    assert _value(session.control.read_context(setup=True), kind) == pytest.approx(0.3)
+    assert _value(captured, kind) == pytest.approx(0.2)
+    assert _value(active, kind) == pytest.approx(0.2)
+    assert _value(session.control.read_context(), kind) == pytest.approx(0.2)
+    assert session.control.read_context().target == selected
+    assert session.control.get_file_revisions() == active_files
+    assert session.state.version.get("context") == version
+    assert other_events == []
+    document = "parameters" if kind == "parameter" else "library"
+    installed = next(
+        file
+        for file in session.control.get_installed_file_revisions()[3:]
+        if file.document == document
+    )
+    assert installed.revision == sha256(installed.path.read_bytes()).hexdigest()
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_pending_entry_candidates_leave_captures_fixed_and_fail_explicit_guards(
+    session: _Session, kind: Kind
+) -> None:
+    target = require_target(session.control.read_context())
+    _write(session.control, target, kind, 0.2)
+    _select(session, "a")
+    captured = session.control.read_context(setup=True)
+    document = "parameters" if kind == "parameter" else "library"
+    file = next(
+        file
+        for file in session.control.get_installed_file_revisions()[3:]
+        if file.document == document
+    )
+    candidate = file.path.read_text().replace("0.2", "0.7")
+    file.path.write_text(candidate)
+    session.service.synchronize_files(admit_reload=False)
+    observed: list[EntryDocumentsChangedPayload] = []
+    session.bus.subscribe(EntryDocumentsChangedPayload, observed.append)
+    assert _value(session.control.read_context(setup=True), kind) == pytest.approx(0.2)
+
+    with pytest.raises(FailedPreconditionError) as failure:
+        session.control.check_file_revision(file)
+    assert failure.value.reason_code == "revision_mismatch"
+
+    assert observed == []
+    assert file.path.read_text() == candidate
+    assert _value(session.control.read_context(setup=True), kind) == pytest.approx(0.2)
+    assert _value(captured, kind) == pytest.approx(0.2)
+    assert file in session.control.get_installed_file_revisions()
+
+
+@pytest.mark.parametrize("operation", ["component", "library", "aliases"])
+def test_entry_structure_writes_notify_after_cache_installation(
+    session: _Session, operation: str
+) -> None:
+    _select(session, "a")
+    captured = session.control.read_context(setup=True)
+    active = session.control.read_context()
+    version = session.state.version.get("context")
+    observed: list[ParameterContext] = []
+    session.bus.subscribe(
+        EntryDocumentsChangedPayload,
+        lambda _: observed.append(session.control.read_context(setup=True)),
+    )
+    before = registry_state()
+    try:
+        register_fakes()
+        if operation == "component":
+            session.control.add_component(
+                "Q1", "fake/drive/a", {"rate": 4300.0}, setup=True
+            )
+        elif operation == "library":
+            session.control.apply_library_change(
+                captured,
+                LibraryChange(
+                    "waveform",
+                    "put",
+                    "Q1.waveforms.base",
+                    waveform=ConstWaveformCfg(length=0.3),
+                ),
+            )
+        else:
+            session.control.apply_alias_rows((AliasRow("driver", "Q1"),), setup=True)
+        assert len(observed) == 1
+        if operation == "component":
+            assert observed[0].value("Q1.rate") == 4300.0
+            assert "Q1" not in captured.whole_document().components
+        elif operation == "library":
+            assert observed[0].library.waveform_keys() == ("Q1.waveforms.base",)
+            assert captured.library.waveform_keys() == ()
+        else:
+            assert observed[0].value("$driver") == "Q1"
+            assert captured.resolved_aliases() == ()
+        assert session.control.read_context().document() == active.document()
+        assert (
+            session.control.read_context().library.document()
+            == active.library.document()
+        )
+        assert session.control.get_alias_rows() == ()
+        assert session.state.version.get("context") == version
+    finally:
+        restore_registry(before)
+
+
+@pytest.mark.parametrize("setup", [False, True], ids=["active", "entry-template"])
+def test_global_component_add_and_template_edit_update_only_future_captures(
+    session: _Session,
+    setup: bool,
+) -> None:
+    old = session.control.read_context()
+    before = registry_state()
+    try:
+        register_fakes()
+        session.control.add_component(
+            "Q1", "fake/drive/a", {"rate": 4300.0}, setup=setup
+        )
+        assert session.control.read_context().value("Q1.rate") == 4300.0
+        session.control.set_setup_parameter("Q1.rate", 5250.0)
+        assert session.control.read_context().value("Q1.rate") == 5250.0
+        assert session.control.read_context().target == old.target
+        assert "Q1" not in old.whole_document().components
+        assert (
+            snapshot(session.entry.setup).components["Q1"].model_dump()["rate"]
+            == 5250.0
+        )
+    finally:
+        restore_registry(before)
+
+
+def test_global_parameter_writes_commit_once_and_detached_reads_do_not_select(
+    session: _Session,
+) -> None:
+    target = session.control.read_context().target
+    assert target is not None
+    old = session.control.read_context()
+    binding = session.control.get_source_binding()
+    facts: list[MdChangedPayload] = []
+    session.bus.subscribe(MdChangedPayload, facts.append)
+
+    session.control.set_parameter(target, "general.ext.flux_value", 0.2)
+
+    assert session.control.read_context().value("general.ext.flux_value") == 0.2
+    assert old.value("general.ext") == {}
+    assert snapshot(session.entry.setup).general.ext["flux_value"] == 0.2
+    assert session.control.get_source_binding() == binding
+    assert len(facts) == 1
+    selected = _select(session, "local")
+    version = session.state.version.get("context")
+    session.control.set_parameter(target, "general.ext.flux_value", 0.4)
+    current = session.control.read_target(target)
+    assert current.value("general.ext.flux_value") == 0.4
+    assert current.capture_storage().point is None
+    assert session.control.read_context().target == selected
+    assert session.control.read_context().value("general.ext.flux_value") == 0.2
+    assert session.state.version.get("context") == version
+    assert len(facts) == 1
+
+
+def test_global_writeback_and_library_commands_use_entry_files_and_publish_once(
+    session: _Session,
+) -> None:
+    context = session.service
+    before = context.read_context()
+    target = before.target
+    assert target is not None
+    facts: list[object] = []
+    session.bus.subscribe(MdChangedPayload, facts.append)
+    session.bus.subscribe(MlChangedPayload, facts.append)
+    result = context.apply_writeback(
+        target,
+        (
+            writeback.ParameterWriteback("general.ext.flux_value", 0.25),
+            writeback.WaveformWriteback(
+                "Q1.waveforms.base", ConstWaveformCfg(length=0.1)
+            ),
+        ),
+        evidence=writeback.WritebackEvidence(origin="gui"),
+    )
+    assert len(result.committed) == 2
+    assert len(facts) == 2
+    assert context.read_context().value("general.ext.flux_value") == 0.25
+    assert context.read_context().library.waveform_keys() == ("Q1.waveforms.base",)
+    assert before.library.waveform_keys() == ()
+    assert snapshot(session.entry.setup).general.ext["flux_value"] == 0.25
+    assert session.entry.module_library().snapshot().waveform_keys() == (
+        "Q1.waveforms.base",
+    )
+    assert session.entry.list_points() == []
+    context.apply_library_change(
+        context.read_context(),
+        LibraryChange(
+            "waveform", "rename", "Q1.waveforms.base", new_path="Q1.waveforms.next"
+        ),
+    )
+    assert context.read_context().library.waveform_keys() == ("Q1.waveforms.next",)
+    assert len(facts) == 3
+    selected = _select(session, "local")
+    version = session.state.version.get("context")
+    context.set_waveform(target, "Q1.waveforms.detached", ConstWaveformCfg(length=0.3))
+    assert set(context.read_target(target).library.waveform_keys()) == {
+        "Q1.waveforms.next",
+        "Q1.waveforms.detached",
+    }
+    assert context.read_context().target == selected
+    assert context.read_context().library.waveform_keys() == ("Q1.waveforms.next",)
+    assert session.state.version.get("context") == version
+    assert len(facts) == 3
+
+
+def test_global_writeback_rejects_unreadable_parameters_before_acceptance(
+    session: _Session,
+) -> None:
+    target = session.control.read_context().target
+    assert target is not None
+    before = session.state.session_env
+    ledger = session.entry.ledger.events()
+    (session.entry.result_path / "parameters.yaml").unlink()
+
+    with pytest.raises(FileNotFoundError):
+        session.control.apply_writeback(
+            target,
+            (writeback.ParameterWriteback("general.ext.flux_value", 0.2),),
+            evidence=writeback.WritebackEvidence(origin="gui"),
+        )
+
+    assert session.entry.ledger.events() == ledger
+    assert session.state.session_env is before
+
+
+def test_rejected_global_writeback_does_not_publish_external_parameter_revision(
+    session: _Session,
+) -> None:
+    target = session.control.read_context().target
+    assert target is not None
+    before = session.state.session_env
+    revisions = session.control.get_file_revisions()
+    external = ResultEntry.open(
+        "entry",
+        result_root=session.entry.result_path.parent,
+        database_root=session.entry.database_path.parent,
+    )
+    with external.setup.edit() as draft:
+        draft.set("general.ext.external", 7.0)
+    path = session.entry.result_path / "parameters.yaml"
+    candidate = path.read_bytes()
+
+    with pytest.raises(writeback.WritebackApplyError):
+        session.control.apply_writeback(
+            target,
+            (writeback.ParameterWriteback("general.description", ["invalid"]),),
+            evidence=writeback.WritebackEvidence(origin="gui"),
+        )
+
+    assert session.state.session_env is before
+    assert session.control.get_file_revisions() == revisions
+    assert path.read_bytes() == candidate
 
 
 def test_read_target_rejects_other_entries(session: _Session) -> None:

@@ -294,7 +294,7 @@ def test_document_fields_preserve_logical_rows_metadata_and_literal_keys(
             view = entry.setup
         else:
             entry.new_point("seed")
-            view = entry.new_point("working", clone_from="seed")
+            view = entry.new_point("working", mode="clone", clone_from="seed")
         view.general.ext["mapping"] = {"a.b": 1, "": 2, "safe": 3}
         document = snapshot(view)
         before_calls = calls.copy()

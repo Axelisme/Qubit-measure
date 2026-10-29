@@ -745,8 +745,15 @@ class SetupView:
         """Return isolated cached opaque metadata for a dotted path, or None."""
         return document_meta(cached_parameter_content(self), path)
 
-    def refresh(self) -> None:
-        self._store.refresh()
+    def refresh(self, *, strict: bool = False) -> None:
+        """Reload entry parameters, validating the whole candidate when strict.
+
+        Ordinary refresh defers unused field validation until projection.
+        Watcher/reload callers must pass strict=True. Missing files, invalid
+        YAML, headers or schema raise without publishing content or revision.
+        This operation never writes or repairs the candidate on disk.
+        """
+        self._store.refresh(strict=strict)
 
     def add_component(self, name: str, *, kind: str, **fields: YamlValue) -> None:
         """Add a registered component with working-unit fields to this template.

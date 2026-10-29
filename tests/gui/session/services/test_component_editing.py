@@ -90,7 +90,7 @@ def test_add_saved_component_persists_and_can_bind_global_alias(component_sessio
     control.new_point(PointCreateRequest("a", "", CommandOrigin("gui")))
     control.add_component("Q1", "fake/drive/a", {"rate": 4300.0})
     assert entry.use_point("a").Q1.rate == 4300.0
-    control.set_alias_rows((AliasRow("driver", "Q1"),))
+    control.apply_alias_rows((AliasRow("driver", "Q1"),))
     assert (
         control.read_context()
         .bind_aliases(control.get_alias_rows(), {})

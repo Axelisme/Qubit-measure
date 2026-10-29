@@ -1,6 +1,6 @@
 # `gui.app.measure.remote`
 
-**Last updated:** 2026-10-29
+**Last updated:** 2026-10-29，global 文件組的 wire 133／GUI 166
 
 **讀者：** framework-dev。量測 GUI 的 RPC 方法、控制權與來源投影契約。
 
@@ -16,9 +16,24 @@ The preview's `proposed_value` carries the adapter's JSON object unchanged.
 Wire version 123 removes the old sample names without aliases. Component records
 live at `records/components/<target>.jsonl`; the event ledger stays at `records/ledger.jsonl`.
 
+## Point selection
+
+`point.use` requires `label`: `{"label": "bias-a"}` selects that point;
+`{"label": null}` selects the opened entry Global documents. Omitting label is
+`invalid_params`. Both return `{entry_name, point}`, with point null for Global.
+Existing tab captures remain unchanged. Preparation failure preserves selection.
+
+`point.new` requires label and accepts mode `inherit` (default), `empty`, or
+`clone`. Inherit copies Global parameters, library and aliases. Empty creates
+minimal parameters with the requested description and no library or aliases.
+Clone requires a same-entry `clone_from`; other modes reject that source.
+For example, `{"label": "copy", "mode": "clone", "clone_from": "bias-a"}`
+creates and selects a copy. The response is `{entry_name, point}`.
+Neither method returns a kind discriminator.
+
 ## Context snapshot
 
-`context.snapshot` 回傳固定 capture 的 target、point、library 與完整 aliases。Library 只投影持久 Specs，不回傳 `provenance`，也不 materialize assets。目前契約版本為 WIRE_VERSION 132、GUI_VERSION 165。Point files 的路徑使用 `parameters.yaml`／`library.yaml`／`aliases.yaml`；檔名改變因此升 wire 與 GUI 版本。
+`context.snapshot` 回傳固定 capture 的 target、point、library 與完整 aliases。Library 只投影持久 Specs，不回傳 `provenance`，也不 materialize assets。目前契約版本為 WIRE_VERSION 133、GUI_VERSION 166。本次升版涵蓋 global／point 的作用中三筆 files、EMPTY／GLOBAL／POINT readiness、point.use 的必填 nullable label 與無 kind 回覆，以及 writeback preview／receipt 只報 entry_name、point 的目的地。Entry 與 point 共用 `parameters.yaml`／`library.yaml`／`aliases.yaml`；前次檔名統一對應的版本是 132／165。
 
 省略 path 與 summaries 時，owner 驗證完整 schema，wire encoder 再驗證所有輸出值。`path` 使用 dotted keys 與 canonical 非負 list indices，只由 owner 讀驗所選部分，並優先於 summaries。選整個 component 或 subtree 時，該層的完整投影契約仍適用。未選 sibling 的壞 schema、nonfinite 或 library source fault 不再擋住正常 point leaf。Invalid path 保留第一個不可讀 segment，不先驗其他 sibling。
 
@@ -90,6 +105,8 @@ creates files or locks, writes results, or changes entry/point selection.
 ## Captured writeback
 
 `tab.writeback_preview` 回 owner 當下的 draft 候選，不帶 revision。
+`destination_context` 只含當下的 `{entry_name, point}`。Global 的 point 為 null，未開 entry 時兩欄皆為 null。
+未開 entry 仍可預覽合法 tab，current 值為 null。Apply 仍以 no_context 拒絕。
 `tab.writeback_accept(tab_id, stages)` 接受有序的 `{subtab_id, ids}` 清單，不帶 `expected_revision`。
 Owner 在同一次 dispatch 核對 Primary／Post 全部選定 IDs，unknown／duplicate 在第一筆寫入前拒絕。
 通過後按 Primary、Post、各 pane 的候選順序寫入 owner 當下 draft 的值與目的地，不還原捕捉時的 proposal。
@@ -99,7 +116,8 @@ Owner 在同一次 dispatch 核對 Primary／Post 全部選定 IDs，unknown／d
 `tab.writeback_receipt(submission_id)` 唯讀回 `{submission_id, tab_id, status, completed, error}`。
 Status 是 pending、completed 或 failed。Pending 包含只 reserve 或仍執行，不能推論沒有副作用。
 Completed 的每列是 `{subtab_id, item:{id, kind, target, value, destination}}`。
-Destination 是固定的 `{kind: "saved_point", entry_name, point}`，value 是 owner 當次確認的實際值。
+Destination 是固定的 `{entry_name, point}`，value 是 owner 當次確認的實際值。
+Apply 使用提交當下作用中的文件組，global 的 point 為 null，已提交的 entry_name 必為字串。
 查詢不重讀當前 draft 或磁碟，僅保留 GUI 生命週期的記憶體 receipt。
 10 秒 handler 逾時不表示寫入失敗。Caller 先查該 ID 的狀態，再決定是否重送。
 Recipe receipt.items 是成功 ID 對應的原捕捉候選，實際值與目的地仍取提交當下的 draft。
@@ -335,22 +353,29 @@ UI disabled rows, clone-source exclusion, tooltips and remote error presentation
 remain unchanged. Availability is not an extra precondition for use_point, Load,
 Save or other reads. Directory discovery errors still fail the request.
 
-## Point-file reload and guarded writes
+## Installed-file reload and guarded writes
 
-`entry.info.files` lists the selected point's absolute parameters, library and
-aliases paths and their installed SHA-256 revisions. Read this base before
+`entry.info.files` lists the active parameters, library and aliases absolute
+paths and their installed SHA-256 revisions, in that order. An opened entry
+always returns three files, using global without a point or the selected point
+set. Only a closed entry returns an empty list. There is no scope field.
+The same missing-file rules apply at both levels. Inspect still edits entry
+files while a point is active, and the single watcher observes both sets.
+Those inactive entry files are not listed; agents switch to global before
+editing global files. `context.reload` accepts any installed owner path. Read this base before
 editing a file. Edit that path, then call `context.reload` with its path and the
 previously installed `expected_revision`, not the edited disk hash. Supply the
 key explicitly. Use null when the library or aliases base has no file.
-A point with no library remains selectable. Its library is empty, its revision
+A global or point set with no library remains usable. Its library is empty, its revision
 is null and its path still names the expected absolute file. Reads create nothing.
 
 ```json
 {"method": "context.reload", "params": {"path": "/project/results/entry/points/base/aliases.yaml", "expected_revision": null}}
 ```
 
-The owner validates and installs the candidate, publishes source changes and
-returns `{document, path, revision}`. It never rewrites or repairs the edited
+The owner validates and installs the candidate and returns
+`{document, path, revision}`. Active changes publish source facts; an inactive
+entry reload updates only its installed state and Inspect observation. It never rewrites or repairs the edited
 file. Invalid paths or contents return `invalid_params` with the path and
 reason. A stale installed base returns `precondition_failed` with
 `reason=revision_mismatch`. A non-holder receives the existing `not_holder`
@@ -367,10 +392,11 @@ null returns `revision_mismatch` without overwriting it. Omission keeps the
 original unguarded writer contract. These checks are optimistic, without a
 cross-process lock or a multi-file transaction.
 
-Recipe and startup code still use the context owner facets. Startup must select
-or create a point before `ctx.context.apply_alias_rows(rows)`. That command
-validates and atomically saves the selected point's aliases before installing
-or publishing them. No extra save or subsequent reload is needed.
+Recipe and startup code still use the context owner facets. Startup opens an
+entry before `ctx.context.apply_alias_rows(rows)`. That command validates and
+atomically saves active aliases, entry-level in GLOBAL or selected-point in
+POINT, before installing rows and revisions. Without an entry it raises
+no_context and retains no pending rows. No extra save or reload is needed.
 
 ## Authority and dispatch
 

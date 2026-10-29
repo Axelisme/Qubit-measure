@@ -233,7 +233,7 @@ def test_indexed_proposal_changes_only_selected_element_and_checks_its_siblings(
 @pytest.mark.parametrize("kind", ["parameter", "module", "record"])
 def test_proposal_initial_selection_and_note_survive_manual_review(session, kind):
     _entry, control, service = session
-    control.set_alias_rows((AliasRow("flux_dev", "bias"),))
+    control.apply_alias_rows((AliasRow("flux_dev", "bias"),))
     proposals = {
         "parameter": ParameterWriteback("general.ext.value", "fit", 5.0),
         "module": ModuleWriteback(PULSE, "fit", pulse_proposal()),

@@ -67,8 +67,11 @@ Wire kind、session prefix 與 written key 分別為 `record`、`record-<n>` 與
 
 `WritebackService` 從 draft 的固定 Run／Load capture 解析選定提案與 module Form，
 再交給 context owner。來源只提供提案求值與 alias／slot 路徑，不決定寫入 point。
-Preview 與 Apply 從當下 `read_context().target` 取得 GUI 選定的 point。
-未選 point 時拒絕，缺少歷史來源不阻擋 concrete parameter／record 提案。
+Preview 與 Apply 取當下作用中的文件組，global 寫 entry 層，point 寫目前 point。
+Preview 的位置只含 entry_name 與 point，global 的 point 為 null。
+未開 entry 仍可預覽，位置兩欄與 current 值皆為 null，但 Apply 以 no_context 拒絕。
+缺少歷史來源不阻擋 concrete parameter／record 提案。
+Record 的 point 跟隨提交位置，global 樣本保存 null。
 全部提案通過輸入驗證後，共用 executor 先追加一筆 accepted
 ledger event，再依序提交 point 參數組、library 組與逐筆 Record，組內保留提案順序。
 Parameter 與 library 各用一次單檔交易，組內任一項無效整組不寫，Record 各列追加樣本。
@@ -107,6 +110,7 @@ Control 的 `begin_writeback(tab_id)` 配置一次性 `submission_id`，不驗�
 同 ID 只准提交一次，未知 ID 或不同 tab 的 ID 會拒絕。
 `get_writeback_receipt` 回 detached 的 pending／completed／failed 狀態與成功前綴。
 每列保留 pane、item ID、kind、實際值、concrete target 與提交時的 entry_name／point。
+Destination 只含 entry_name 與 point，不含 kind。提交成功的 entry_name 必為字串。
 Pending 可表示只 reserve 或仍在執行，不能推論尚未寫入。
 Receipt 留在 GUI 生命週期的記憶體。後續 draft 編輯或目的地變更不改舊 receipt。
 逾時只結束 caller 的等待，不取消同步寫入，也不觸發 retry 或 rollback。

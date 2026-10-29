@@ -48,7 +48,7 @@ from zcu_tools.resources.entry import ComponentSchema, component_registry
 
 from tests.gui._qt_waits import qt_until
 from tests.gui.app.measure._record_support import require_target
-from tests.gui.app.measure._synthetic import ALIAS_PRESET, SampleAdapter, SampleCfg
+from tests.gui.app.measure._synthetic import SampleAdapter, SampleCfg
 from tests.gui.app.measure.remote._helpers import Fixture
 
 
@@ -306,7 +306,6 @@ def global_sources(
     registry.register("missing-slot", MissingModuleSlotAdapter)
     try:
         services = build_app_services(
-            alias_presets={"default": ALIAS_PRESET},
             state=state,
             bus=EventBus(),
             registry=registry,
@@ -327,7 +326,7 @@ def global_sources(
             services.session.context.new_point(
                 PointCreateRequest("first", "", CommandOrigin("gui"))
             )
-            services.session.context.set_alias_rows(
+            services.session.context.apply_alias_rows(
                 (AliasRow("qubit", "Q1"), AliasRow("custom", "Q2"))
             )
             yield services, state
@@ -392,7 +391,7 @@ def test_existing_tab_and_run_keep_point_until_reset(
     services.session.context.new_point(
         PointCreateRequest("second", "", CommandOrigin("gui"))
     )
-    services.session.context.set_alias_rows(
+    services.session.context.apply_alias_rows(
         (AliasRow("qubit", "Q1"), AliasRow("custom", "Q2"))
     )
     parameters = services.session.context.read_context()
@@ -417,7 +416,7 @@ def test_dollar_defaults_materialize_fixed_alias_capture_until_reset(
     services, state = global_sources
     tab_id = services.tab.new_tab("global-source")
     cfg = state.get_tab(tab_id).cfg
-    services.session.context.set_alias_rows(
+    services.session.context.apply_alias_rows(
         (AliasRow("qubit", "Q2"), AliasRow("custom", "Q1"))
     )
     assert cfg.accept().values["gain"] == 10.0
@@ -463,7 +462,7 @@ def test_unbound_alias_reports_named_invalid_input(
     global_sources: tuple[AppServices, State],
 ) -> None:
     services, state = global_sources
-    services.session.context.set_alias_rows(
+    services.session.context.apply_alias_rows(
         (AliasRow("qubit", ""), AliasRow("custom", "Q2"))
     )
     tab_id = services.tab.new_tab("global-source")

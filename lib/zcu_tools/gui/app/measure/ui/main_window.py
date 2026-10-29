@@ -40,7 +40,7 @@ from zcu_tools.gui.app.measure.services.experiment_reload import ReloadReport
 from zcu_tools.gui.app.measure.services.load import LoadDataError
 from zcu_tools.gui.control_identity import ControlStatus
 from zcu_tools.gui.expected_error import ExpectedError, FailedPreconditionError
-from zcu_tools.gui.session.context_types import CommandOrigin, SavedPoint
+from zcu_tools.gui.session.context_types import CommandOrigin, SavedEntry, SavedPoint
 from zcu_tools.gui.widgets import (
     DialogPresenter,
     DialogRefStore,
@@ -584,7 +584,7 @@ class MainWindow(QMainWindow):
     def refresh_context_panel(self) -> None:
         """Project current entry and point without submitting source commands.
 
-        Show the SavedPoint name or "No point selected".
+        Show the point name, "Global" for entry scope, or "No point selected".
         Refresh tab interaction state without changing titles or result panes.
         """
         entry = self._ctrl.context_control.get_entry_info()
@@ -596,8 +596,10 @@ class MainWindow(QMainWindow):
         else:
             self._entry_label.setText(entry.name)
             reset_foreground(self._entry_label)
-        if isinstance(target, SavedPoint):
-            self._point_label.setText(target.point)
+        if isinstance(target, (SavedEntry, SavedPoint)):
+            self._point_label.setText(
+                target.point if isinstance(target, SavedPoint) else "Global"
+            )
             reset_foreground(self._point_label)
         else:
             self._point_label.setText("No point selected")
@@ -621,11 +623,6 @@ class MainWindow(QMainWindow):
             return
         if self._ctrl.context_control.get_entry_info() is None:
             self._empty_hint.setText("Open or create an entry in Setup… to begin.")
-        elif self._ctrl.context_control.current_point_label() is None:
-            # An opened entry selects no point; experiments need one to run.
-            self._empty_hint.setText(
-                "Select or create a working point in Setup… to run experiments."
-            )
         else:
             self._empty_hint.setText("Use New Tab to start an experiment.")
         self._tab_area.setCurrentWidget(self._empty_hint)
@@ -1081,7 +1078,7 @@ class MainWindow(QMainWindow):
             return
         dialog = RunLoadDialog(
             runs,
-            initial_point=self._ctrl.get_session_env().active_label,
+            initial_point=self._ctrl.get_session_env().active_label or "",
             initial_experiment=self._ctrl.tab_control.get_tab_snapshot(
                 tab_id
             ).adapter_name,

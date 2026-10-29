@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Literal, TypeAlias
 from pydantic import BaseModel, ConfigDict
 
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
+from zcu_tools.resources.entry import validate_point_creation
 
 if TYPE_CHECKING:
     from zcu_tools.cfg_model import ModuleSpec, WaveformSpec
@@ -33,7 +34,23 @@ class SavedPoint(BaseModel):
     point: str
 
 
-ContextTarget: TypeAlias = SavedPoint
+class SavedEntry(BaseModel):
+    """The entry-level global document set in the opened Result root.
+
+    entry_name is ResultEntry.result_path.name, not a path or UUID.
+    kind identifies this internal target as saved_entry. point is always None:
+    this destination does not select or create a point. Commands validate
+    entry membership through ResultEntry before reading or writing resources.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid", strict=True)
+
+    kind: Literal["saved_entry"] = "saved_entry"
+    entry_name: str
+    point: None = None
+
+
+ContextTarget: TypeAlias = SavedEntry | SavedPoint
 ContextSourceKind: TypeAlias = Literal["setup", "point", "module_cfg"]
 
 
@@ -108,8 +125,8 @@ class EntryRequest:
 
 
 @dataclass(frozen=True)
-class PointFileSyncStatus:
-    """Most recent external observation of one selected-point file.
+class FileSyncStatus:
+    """Most recent external observation of one installed entry/point file.
 
     file is the installed owner version. disk_revision is the observed raw-byte
     SHA-256, or None for a missing file. state is pending when admission denies
@@ -117,15 +134,15 @@ class PointFileSyncStatus:
     has a nonempty error string, including the path and rejection reason.
     """
 
-    file: PointFileRevision
+    file: FileRevision
     disk_revision: str | None
     state: Literal["pending", "reloaded", "error"]
     error: str | None
 
 
 @dataclass(frozen=True)
-class PointFileRevision:
-    """One installed selected-point document, without reading disk.
+class FileRevision:
+    """One installed entry/point document, without reading disk.
 
     document is parameters, library or aliases, in that order in file lists.
     path is the absolute owner file. revision is the installed raw-byte SHA-256
@@ -198,15 +215,24 @@ class PointCreateRequest:
     the entry owner's exists message before writes. It rejects an unsafe label
     with InvalidInputError before any source reads or writes, including when
     clone_from is supplied.
-    description replaces the seed/clone description, including empty text.
-    origin attributes the resource command. clone_from is a same-entry label;
-    None copies setup components and uses an empty library.
+    description replaces the inherited/clone description, including empty text.
+    origin attributes the resource command. mode defaults to inherit, copying the
+    global documents. empty creates minimal parameters and no library/aliases.
+    clone requires clone_from, a same-entry label. Other modes reject clone_from.
+    Invalid mode/source combinations raise InvalidInputError before resource reads.
     """
 
     label: str
     description: str
     origin: CommandOrigin
     clone_from: str | None = None
+    mode: Literal["inherit", "empty", "clone"] = "inherit"
+
+    def __post_init__(self) -> None:
+        try:
+            validate_point_creation(self.mode, self.clone_from)
+        except ValueError as error:
+            raise InvalidInputError(str(error)) from error
 
 
 class PointBindingError(RuntimeError):

@@ -56,8 +56,16 @@ def load_backdrop(qapp: QApplication) -> Iterator[QWidget]:
 
 
 @pytest.fixture
+def history_point() -> str | None:
+    return "p"
+
+
+@pytest.fixture
 def history_window(
-    qapp: QApplication, rows: tuple[SavedRunInfo, ...], tmp_path: Path
+    qapp: QApplication,
+    rows: tuple[SavedRunInfo, ...],
+    tmp_path: Path,
+    history_point: str | None,
 ) -> Iterator[MainWindow]:
     """Show two synthetic tabs sharing an entry's saved run history."""
     ctrl = MagicMock(control_identity=ControlIdentity())
@@ -75,7 +83,7 @@ def history_window(
         parameters=None,
         soc=None,
         soccfg=None,
-        active_label="p",
+        active_label=history_point,
         database_path=str(tmp_path),
     )
     ctrl.tab_control.has_tab.return_value = True
@@ -138,6 +146,29 @@ def test_load_data_preselects_current_experiment_and_allows_all(
         [(RunLoadDialog, inspect_dialog)],
     )
     ui.screenshot(tmp_path / "04-scan-cancelled.png")
+    assert ui.dialogs() == ()
+
+
+@pytest.mark.parametrize("history_point", [None])
+def test_load_data_in_global_scope_has_no_point_filter(
+    qapp: QApplication, history_window: MainWindow, tmp_path: Path
+) -> None:
+    ui = ComponentDriver(history_window)
+    ui.select_tab("scan")
+    ui.select_tab("Data")
+    ui.screenshot(tmp_path / "01-global-data.png")
+
+    def inspect_dialog(dialog: RunLoadDialog) -> None:
+        chooser = ComponentDriver(dialog)
+        chooser.screenshot(tmp_path / "02-global-load.png")
+        assert chooser.observe(object_name="load_point").text == "All points"
+        assert tuple(
+            row.columns[:3] for row in chooser.table_rows(object_name="load_runs")
+        ) == (("r1", "p", "scan"), ("r3", "other", "scan"))
+        chooser.click("Cancel")
+
+    modal_action(qapp, lambda: ui.click("Load Data"), [(RunLoadDialog, inspect_dialog)])
+    ui.screenshot(tmp_path / "03-global-cancelled.png")
     assert ui.dialogs() == ()
 
 

@@ -68,8 +68,8 @@ def test_shared_build_routes_entry_and_point_commands_to_real_owners(
 
     entry = services.setup_control.new_entry(EntryRequest("entry"))
 
-    assert state.session_env.readiness is ContextReadiness.EMPTY
-    assert state.session_env.parameters is None
+    assert state.session_env.readiness is ContextReadiness.GLOBAL
+    assert state.session_env.parameters is not None
     assert services.setup_control.get_entry_info() == entry
 
     target = services.setup_control.new_point(
@@ -80,7 +80,7 @@ def test_shared_build_routes_entry_and_point_commands_to_real_owners(
         )
     )
 
-    assert state.session_env.readiness is ContextReadiness.ACTIVE
+    assert state.session_env.readiness is ContextReadiness.POINT
     assert services.context_control.read_context().target == target
     assert (
         services.setup_control.list_points()[0].description == "created through Setup"

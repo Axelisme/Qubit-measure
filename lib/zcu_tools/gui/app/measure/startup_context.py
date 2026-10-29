@@ -11,6 +11,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 from zcu_tools.device.base import BaseDevice, BaseDeviceInfo
 from zcu_tools.format_version import YamlMap
@@ -26,6 +27,7 @@ from zcu_tools.gui.session.context_types import (
     EntryRequest,
     PointCreateRequest,
     PointUseRequest,
+    SavedEntry,
     SavedPoint,
 )
 from zcu_tools.gui.session.operation_handles import OperationHandles
@@ -231,16 +233,27 @@ class StartupSetup:
         """
         return self.calls.call(lambda: self.control.new_entry(EntryRequest(name)))
 
-    def new_point(self, label: str) -> SavedPoint:
-        """Create and select label in the opened entry, seeded from its setup.
+    def new_point(
+        self,
+        label: str,
+        *,
+        mode: Literal["inherit", "empty", "clone"] = "inherit",
+        clone_from: str | None = None,
+        description: str = "",
+    ) -> SavedPoint:
+        """Create and select a point using the opened entry on-owner.
 
-        label is one safe path segment. Use an empty description/library and GUI
-        attribution. Missing entry, invalid/existing label and I/O errors
+        label is one safe path segment. inherit copies global documents; empty
+        creates minimal parameters without library/aliases. clone requires a
+        same-entry clone_from label; other modes reject it. description replaces
+        inherited metadata, including empty text. Use GUI attribution.
+        Missing entry, invalid/existing label, invalid mode/source and I/O errors
         propagate. Binding failure retains the new point and old selection for
-        use_point recovery; no rollback. The owner manages files/binding.
-        Synchronous from a worker or owner callback.
+        use_point recovery; no rollback. Safe from a worker or owner callback.
         """
-        request = PointCreateRequest(label, "", CommandOrigin("gui"))
+        request = PointCreateRequest(
+            label, description, CommandOrigin("gui"), clone_from, mode=mode
+        )
         return self.calls.call(lambda: self.control.new_point(request))
 
     def open_entry(self, name: str) -> EntryInfo:
@@ -260,6 +273,14 @@ class StartupSetup:
         """
         return self.calls.call(lambda: self.control.use_point(PointUseRequest(label)))
 
+    def use_global(self) -> SavedEntry:
+        """Select the opened entry global documents on-owner without creating a point.
+
+        Missing entry or preparation failure propagates and preserves selection.
+        Safe from a worker or owner callback. Existing captures remain unchanged.
+        """
+        return self.calls.call(self.control.use_global)
+
 
 @dataclass(frozen=True)
 class StartupParameters:
@@ -268,21 +289,13 @@ class StartupParameters:
     calls: OwnerCalls
     control: ContextControlPort
 
-    def set_alias_rows(self, rows: tuple[AliasRow, ...]) -> None:
-        """Replace ordered authored aliases in memory, without saving aliases.yaml.
-
-        Invalid rows propagate without changing the old table. Point-local
-        disk aliases remain governed by Inspect Apply. Worker/owner safe.
-        """
-        self.calls.call(lambda: self.control.set_alias_rows(rows))
-
     def apply_alias_rows(self, rows: tuple[AliasRow, ...]) -> None:
         """Validate and persist ordered authored rows, then publish them in memory.
 
-        Save the selected point's aliases.yaml, then install memory. Without a
-        selected point raise FailedPreconditionError(no_context) before I/O.
-        Unlike set_alias_rows, this commits point-local aliases. Invalid
-        rows and storage errors propagate, preserving the prior table/file.
+        Save the active aliases.yaml (entry when global, otherwise the selected
+        point), then install its revision and rows. Without an opened entry
+        raise FailedPreconditionError(no_context) before validation or I/O.
+        Invalid rows and storage errors preserve the prior table/file.
         The context owner manages validation and atomic file replacement.
         Synchronous from a worker or owner callback.
         """

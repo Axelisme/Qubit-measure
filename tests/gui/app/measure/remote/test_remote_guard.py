@@ -26,7 +26,6 @@ from zcu_tools.gui.app.measure.services.form_contracts import (
 from zcu_tools.gui.app.measure.services.pane_commit import commit_run
 from zcu_tools.gui.app.measure.state import RunPaneState
 from zcu_tools.gui.remote.framing import MAX_LINE_BYTES
-from zcu_tools.gui.session.context_types import EntryRequest
 from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 from zcu_tools.resources.entry.registry import component_registry
 
@@ -308,7 +307,7 @@ def test_tab_run_rejects_missing_active_context_without_starting(
 ) -> None:
     _prepare_guarded_context(fx)
     tab_id = fx.ctrl.tab_control.new_tab("fake")
-    fx.ctrl.setup_control.open_entry(EntryRequest("fake_qubit"))
+    fx.ctrl.session_services.context.clear_context()
     bridge, call = _mcp_client(fx.service.port, tmp_path)
     try:
         call("connect", {"port": fx.service.port})

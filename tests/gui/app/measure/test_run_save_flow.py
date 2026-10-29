@@ -5,7 +5,6 @@ from __future__ import annotations
 import logging
 from collections.abc import Generator, Sequence
 from pathlib import Path
-from tempfile import TemporaryDirectory
 from unittest.mock import MagicMock
 
 import pytest
@@ -104,25 +103,35 @@ PlottedSavingAdapter = Adapter(
 
 
 @pytest.fixture
-def measure_window(qapp, monkeypatch: pytest.MonkeyPatch) -> Generator[QWidget]:
+def measure_window(
+    qapp,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    request: pytest.FixtureRequest,
+) -> Generator[QWidget]:
     registry = Registry()
     registry.register("synthetic", PlottedSavingAdapter)
     before = registry_state()
     with (
-        TemporaryDirectory(prefix="measure-chooser-", dir=Path.cwd()) as directory,
         monkeypatch.context() as context,
         registered_model("synthetic/calibration", CalibrationSchema),
-        launched_measure_app(qapp, Path(directory), registry=registry) as app,
+        launched_measure_app(qapp, tmp_path / "project", registry=registry) as app,
     ):
         installed = registry_state()
-        # Fixture bootstrap only: create an isolated entry/point before opening a tab.
+        # Fixture bootstrap only: open an isolated entry before user interaction.
+        global_context = getattr(request, "param", "point") == "global"
         app.controller.setup_control.new_entry(EntryRequest("component-flow"))
-        app.controller.setup_control.new_point(
-            PointCreateRequest("p", "Synthetic component flow", CommandOrigin("gui"))
-        )
+        if not global_context:
+            app.controller.setup_control.new_point(
+                PointCreateRequest(
+                    "p", "Synthetic component flow", CommandOrigin("gui")
+                )
+            )
         app.controller.context_control.add_component(
-            "calibration", "synthetic/calibration", {}
+            "calibration", "synthetic/calibration", {}, setup=global_context
         )
+        if global_context:
+            app.controller.setup_control.open_entry(EntryRequest("component-flow"))
         app.controller.session_services.soc_connection.install_soc(
             MagicMock(), make_mock_soccfg()
         )
@@ -135,6 +144,51 @@ def measure_window(qapp, monkeypatch: pytest.MonkeyPatch) -> Generator[QWidget]:
         yield app.window
         assert registry_state() == installed
     assert registry_state() == before
+
+
+@pytest.mark.parametrize("measure_window", ["global"], indirect=True)
+def test_global_run_analyze_and_save_through_visible_controls(
+    measure_window: QWidget, tmp_path: Path
+) -> None:
+    flow = _user_input.ComponentDriver(measure_window)
+    shots = tmp_path / "global-run-analyze-save"
+    flow.screenshot(shots / "01-setup.png")
+    flow.click("Close")
+    flow.screenshot(shots / "02-global-ready.png")
+    assert flow.observe(object_name="current_point").text == "Global"
+    assert flow.observe("Run").enabled
+    flow.click("Run")
+    flow.screenshot(shots / "03-run-requested.png")
+    qt_until(
+        lambda: (
+            flow.legends().texts == ("Signal",)
+            and any(w.text == "Run" and w.enabled for w in flow.visible().widgets)
+        ),
+        label="global synthetic Run terminal",
+    )
+    flow.screenshot(shots / "04-run-complete.png")
+    flow.select_tab("Analysis")
+    flow.screenshot(shots / "05-analysis-ready.png")
+    assert flow.observe("Analyze").enabled
+    flow.click("Analyze")
+    flow.screenshot(shots / "06-analyze-requested.png")
+    qt_until(
+        lambda: (
+            flow.legends().texts == ("Synthetic fit",)
+            and any(w.text == "Analyze" and w.enabled for w in flow.visible().widgets)
+        ),
+        label="global synthetic analysis terminal",
+    )
+    flow.screenshot(shots / "07-analyzed.png")
+    flow.select_tab("Data")
+    flow.screenshot(shots / "08-preview.png")
+    assert flow.observe("Save All").enabled
+    flow.click("Save All")
+    flow.screenshot(shots / "09-saved.png")
+    assert flow.status().text.startswith("Saved ")
+    assert "failed" not in flow.status().text
+    assert not flow.observe("Save All").enabled
+    assert flow.dialogs() == ()
 
 
 def test_run_curve_then_save_all_reports_native_save_in_bottom_status(

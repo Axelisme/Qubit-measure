@@ -2,13 +2,13 @@
 
 **讀者：** lab-author、agent。指定 startup 腳本，建立 entry、point 與 alias 表。
 
-讀完本篇，你能指定一份 startup script，建立自己的 entry，並讓表單透過 alias 讀取目前 point 的元件。先使用 [FTF kickstart](../kickstart/FTF/README.md)。這份腳本不連線 SoC 或 device，也不建立模擬環境。
+讀完本篇，你能指定一份 startup script，建立自己的 entry，並讓表單透過 alias 讀取作用中文件組的元件。先使用 [FTF kickstart](../kickstart/FTF/README.md)。這份腳本不連線 SoC 或 device，也不建立模擬環境。
 
 ## 先分清 startup 與 entry
 
-Startup script 是定義 `startup(ctx)` 的可信 Python 檔。GUI 顯示後會在背景執行它，狀態列顯示進度，完成前不能 Run。腳本透過 `ctx.setup` 建立或開啟 entry、選取 point，再透過 `ctx.context` 加入元件與套用 alias rows。可用能力與錯誤處理見 [Measure 啟動腳本](../../docs/adr/0064-process-startup.md#measure-啟動腳本)。
+Startup script 是定義 `startup(ctx)` 的可信 Python 檔。GUI 顯示後會在背景執行它，狀態列顯示進度，完成前不能 Run。腳本先透過 `ctx.setup` 建立或開啟 entry，再透過 `ctx.context` 加入元件與呼叫 `apply_alias_rows(rows)`。選取 point 是可選步驟。可用能力與錯誤處理見 [Measure 啟動腳本](../../docs/adr/0064-process-startup.md#measure-啟動腳本)。
 
-Entry 保存實驗參數與結果的工作範圍。Setup 是新 point 的元件範本，每個 point 有獨立的元件、module library 與 alias 表。改 setup 不會同步改既有 point。複製規則見 [文件與 seed](../../lib/zcu_tools/resources/entry/README.md#文件與-seed)。Startup 只是操作這些資源的程式，不是 entry 的檔案格式。
+Entry 保存實驗參數與結果的工作範圍。開 entry 後，entry 層 parameters.yaml、library.yaml 與 aliases.yaml 就是作用中的 GLOBAL 文件組。選 point 後整組換成該 point 的文件，不逐名稱回退。Entry 文件同時是新 point 預設繼承的範本，之後修改不會同步改既有 point。複製規則見 [文件與 seed](../../lib/zcu_tools/resources/entry/README.md#文件與-seed)。Startup 只是操作這些資源的程式，不是 entry 的檔案格式。
 
 FTF 的 [startup.py](../kickstart/FTF/startup.py) 第一次會建立 `FTF` entry，讀取相鄰的 [entry-template.yaml](../kickstart/FTF/entry-template.yaml)，把元件加入 setup，建立並選取 `initial` point，最後保存該 point 的 aliases。範本不含 module library 或校準完成的量測輸入，建立成功不代表可以 Run。
 
@@ -74,9 +74,22 @@ Aliases 的 Value 欄接受具體名稱或前列 alias 的欄位連結，兩者�
 
 若要讓 `f1` 與 `qubit1` 指向同一元件，兩列都填具體名稱 `Q1`。不要填 `f1: $qubit1`，Aliases 不接受裸 alias 作為另一列的連結。`$qubit.resonator` 才是可接受的欄位連結，而且 `qubit` 必須排在 `resonator` 前面。這是 Aliases 的儲存語法，不是表單 expression 中裸 `$alias` 的求值語法。
 
-在 GUI 開啟 Inspect 的 Aliases 頁，把 `qubit` 改成 `Q2`，再按 Apply。`resonator` 會解析成 `R2`。重新 Open／Reset 後，flux 表單從 Q2 的 flux_dev 取得 `f2_bias`。`mux: MG12` 仍指向同一個 group，不隨 `qubit` 切換。元件的 source 欄位與表單的裝置名稱都不會連線或建立 device。
+在 GUI 開啟 Inspect 的 Aliases 頁，Destination 選 Active documents，把 `qubit` 的 Value 改成 `Q2`，按 Enter 完成編輯。有效編輯會立即保存，沒有另一個 Apply 按鈕。`resonator` 會解析成 `R2`。重新 Open／Reset 後，flux 表單從 Q2 的 flux_dev 取得 `f2_bias`。`mux: MG12` 仍指向同一個 group，不隨 `qubit` 切換。元件的 source 欄位與表單的裝置名稱都不會連線或建立 device。
 
-Apply 保存目前 point 的 `points/initial/aliases.yaml`。切到另一個 point 會載入另一張表，缺檔時是空表，不回退到 setup 或 preset。Alias 解析與保存細節見 [context 與 Run snapshot](../../lib/zcu_tools/gui/session/README.md#contextsession-environment-與-run-snapshot)。
+程式的 `apply_alias_rows(rows)` 與 Inspect 完成編輯都直接保存所選文件。GLOBAL 保存 entry 層 aliases.yaml，選了 initial 則保存 points/initial/aliases.yaml。Inspect 的 Entry template 固定編輯 entry 表，即使已選 point 也不改該 point。切到另一個 point 會載入另一張表，缺檔時是空表，不回退到 entry 表。未開 entry 時呼叫 `apply_alias_rows` 會以 no_context 拒絕，不暫存或自動建立 entry。
+
+自訂 startup 可在開 entry 後直接設定 global alias，不必建立 point：
+
+```python
+from zcu_tools.gui.session.aliases import AliasRow
+
+
+def startup(ctx):
+    ctx.setup.open_entry("my-entry")
+    ctx.context.apply_alias_rows((AliasRow("qubit", "Q1"),))
+```
+
+這個例子要求 my-entry 已存在，且 Q1 是之後要使用的元件名稱。保存 alias 不會建立元件或連線硬體。若要保留先前編輯的表，不要在每次啟動時重新套用 rows。Alias 解析與保存細節見 [context 與 Run snapshot](../../lib/zcu_tools/gui/session/README.md#contextsession-environment-與-run-snapshot)。
 
 既有 tab 不會因 alias 改變而更新 input。重新 Open 或 Reset，表單才會從新的 alias 表擷取初值。Alias rows 也不是 `Template.bindings`，不替表單補模板佔位符。範本與初值的 author 契約見 [measure adapter authoring](../v2/measure-authoring.md#目錄佈局)。
 

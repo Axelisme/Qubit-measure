@@ -57,8 +57,8 @@ def test_entry_commands_leave_point_unselected_through_real_context_owner(
     else:
         info = settings.new_entry(EntryRequest("entry"))
 
-    assert state.session_env.readiness is ContextReadiness.EMPTY
-    assert state.session_env.parameters is None
+    assert state.session_env.readiness is ContextReadiness.GLOBAL
+    assert state.session_env.parameters is not None
     assert context.get_entry_info() == info
     assert context.list_points() == ()
     assert info.result_path == tmp_path / "result" / "entry"
@@ -105,7 +105,7 @@ def test_open_entry_then_use_point_publishes_active_target(
     target = context.use_point(PointUseRequest("working"))
 
     assert target == SavedPoint(entry_name=info.name, point="working")
-    assert state.session_env.readiness is ContextReadiness.ACTIVE
+    assert state.session_env.readiness is ContextReadiness.POINT
     assert context.read_context().target == target
     assert context.list_points()[0].description == "saved calibration"
 

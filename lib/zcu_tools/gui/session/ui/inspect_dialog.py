@@ -23,6 +23,7 @@ from qtpy.QtCore import Qt
 from qtpy.QtGui import QFont, QKeyEvent
 from qtpy.QtWidgets import (
     QApplication,
+    QComboBox,
     QDialog,
     QDialogButtonBox,
     QHBoxLayout,
@@ -43,10 +44,12 @@ from zcu_tools.gui.form import FormWritePath
 from zcu_tools.gui.lifetime import LifetimeScope
 from zcu_tools.gui.session.context_types import LibraryChange
 from zcu_tools.gui.session.events import (
+    AliasesChangedPayload,
     ContextSwitchedPayload,
+    EntryDocumentsChangedPayload,
+    FileChangedPayload,
     MdChangedPayload,
     MlChangedPayload,
-    PointFileChangedPayload,
     SessionPayload,
 )
 from zcu_tools.gui.session.library_entry import (
@@ -58,8 +61,8 @@ from zcu_tools.gui.session.library_entry import (
 )
 from zcu_tools.gui.session.ui.alias_panel import AliasPanel
 from zcu_tools.gui.session.ui.component_tree import ComponentTreeWidget
+from zcu_tools.gui.session.ui.file_banner import FileBanner
 from zcu_tools.gui.session.ui.new_entry_dialog import NewEntryDialog
-from zcu_tools.gui.session.ui.point_file_banner import PointFileBanner
 from zcu_tools.gui.session.ui.tree_filter import TreeFilter
 from zcu_tools.gui.widgets import set_foreground, success_colour
 from zcu_tools.gui.widgets.form import FormEditor
@@ -126,7 +129,7 @@ class InspectDialog(QDialog):
     Spec together through apply_library_change. Typing alone never writes.
     Invalid text stays marked in the form. Owner/revision failures appear in
     inspect.entry.error and keep the input editable without changing the file.
-    PointFileBanner offers Keep/Reload for stale revisions. Switching entries or
+    FileBanner offers Keep/Reload for stale revisions. Switching entries or
     points, deleting, or closing discards uncommitted input without questions.
     Successful writes keep the mounted form and focus; no undo is retained.
 
@@ -190,6 +193,7 @@ class InspectDialog(QDialog):
 
         self._tabs = QTabWidget()
         self._component_tree = ComponentTreeWidget(ctrl)
+        self._scope.add_cleanup(self._component_tree.detach)
         self._aliases = AliasPanel(ctrl)
         self._scope.add_cleanup(self._aliases.detach)
         self._tabs.addTab(self._component_tree, "Parameters")
@@ -223,7 +227,17 @@ class InspectDialog(QDialog):
         )
         self._scope.add_cleanup(
             bus.subscribe(
-                PointFileChangedPayload, self._scope.callback(self._on_file_changed)
+                EntryDocumentsChangedPayload, self._scope.callback(self._on_bus_refresh)
+            ).unsubscribe
+        )
+        self._scope.add_cleanup(
+            bus.subscribe(
+                AliasesChangedPayload, self._scope.callback(self._on_bus_refresh)
+            ).unsubscribe
+        )
+        self._scope.add_cleanup(
+            bus.subscribe(
+                FileChangedPayload, self._scope.callback(self._on_file_changed)
             ).unsubscribe
         )
         for button in self.findChildren(QPushButton):
@@ -253,7 +267,18 @@ class InspectDialog(QDialog):
         widget = QWidget()
         layout = QVBoxLayout(widget)
         layout.setContentsMargins(0, 4, 0, 0)
-        self._library_sync = PointFileBanner(
+        self._destination = QComboBox()
+        self._destination.setObjectName("inspect.library.destination")
+        self._destination.addItems(["Active documents", "Entry template"])
+        toolbar = QHBoxLayout()
+        toolbar.addWidget(QLabel("Destination:"))
+        toolbar.addWidget(self._destination)
+        toolbar.addStretch()
+        layout.addLayout(toolbar)
+        self._scope.connect(
+            self._destination.currentIndexChanged, self._destination_changed
+        )
+        self._library_sync = FileBanner(
             self._ctrl,
             "library",
             self._scope.callback(self._reload_library),
@@ -355,7 +380,7 @@ class InspectDialog(QDialog):
         self._component_tree.refresh()
         self._library_sync.refresh(has_draft=self._has_library_draft())
         try:
-            parameters = self._ctrl.read_context()
+            parameters = self._ctrl.read_context(setup=self._is_setup())
         except FailedPreconditionError:
             self._populate(None)
             self._status_label.setText("No context")
@@ -461,9 +486,18 @@ class InspectDialog(QDialog):
             self._open_entry(key)
         self._update_controls()
 
+    def _is_setup(self) -> bool:
+        return self._destination.currentIndex() == 1
+
+    def _destination_changed(self) -> None:
+        self._library_sync.set_setup(setup=self._is_setup())
+        self._close_entry()
+        self._selected = None
+        self._populate_from_context()
+
     def _populate_from_context(self) -> None:
         try:
-            library = self._ctrl.read_context().library
+            library = self._ctrl.read_context(setup=self._is_setup()).library
         except FailedPreconditionError:
             library = None
         self._populate(library)
@@ -476,7 +510,7 @@ class InspectDialog(QDialog):
         kind, name = key
         try:
             entry = open_library_entry(
-                self._ctrl.read_context(),
+                self._ctrl.read_context(setup=self._is_setup()),
                 kind,
                 name,
                 arb_names=self._arb_waveforms.list_data_keys(),
@@ -589,7 +623,7 @@ class InspectDialog(QDialog):
         self._selected = (key[0], new_name)
         self._name_edit.setText(new_name)
         self._library_revision = self._library_sync.capture()
-        self._library = self._ctrl.read_context().library
+        self._library = self._ctrl.read_context(setup=self._is_setup()).library
         self._rebuild_tree(self._library, self._selected)
         self._entry_error.clear()
 
@@ -610,7 +644,7 @@ class InspectDialog(QDialog):
         kind, name = key
         # Pin the target before any question: a context switch while asking
         # must not redirect the deletion into another point or entry.
-        capture = self._ctrl.read_context()
+        capture = self._ctrl.read_context(setup=self._is_setup())
         if confirm and not self._presenter.confirm(
             self,
             "Confirm Deletion",
@@ -646,6 +680,7 @@ class InspectDialog(QDialog):
             self._templates,
             arb_waveforms=self._arb_waveforms,
             dialog_presenter=self._presenter,
+            setup=self._is_setup(),
             parent=self,
         )
         dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
@@ -672,9 +707,12 @@ class InspectDialog(QDialog):
         self._close_entry()
         self._populate_from_context()
 
-    def _on_file_changed(self, payload: PointFileChangedPayload) -> None:
-        del payload
-        # Source observations alone must not rebuild an active parameter editor.
+    def _on_file_changed(self, payload: FileChangedPayload) -> None:
+        if payload.status.state == "reloaded":
+            # Read installed cache only; refresh preserves drafts and their baselines.
+            self.refresh()
+            return
+        # Pending/error observations alone must not rebuild a parameter editor.
         self._library_sync.refresh(has_draft=self._has_library_draft())
         self._aliases.refresh()
         self._component_tree.refresh_file_status()

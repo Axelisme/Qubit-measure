@@ -105,16 +105,19 @@ rpc_call(method, params). Every listed public method remains callable even
 when a recipe or shared tool covers it. Raw RPC does not aggregate tool
 results, decode PNG replies, or run the analysis artifact save pipeline.
 
-Read point parameters, library and aliases directly from disk. Global status()
+Read active parameters, library and aliases directly from disk. Global status()
 or rpc_call(method="entry.info") returns top-level files, ordered parameters,
 library, aliases, each with document, absolute path and installed revision.
-Revision is the installed bytes' SHA-256; only missing aliases uses null.
-No selected point returns files=[]. Status does not read or validate disk candidates.
+An opened entry always has three files: global without a point, otherwise the
+selected point set. No entry returns files=[]. Non-active entry files are not
+listed; switch back to global before editing global files. There is no scope field.
+Revision is the installed bytes' SHA-256; missing library or aliases uses null.
+Status does not read or validate disk candidates.
 Before editing, confirm you hold control and retain the installed revision.
 After editing a file, call rpc_call(method="context.reload",
 params={"path": path, "expected_revision": revision}). The base is the installed
 revision, not the edited bytes' hash. expected_revision must be present; null
-means aliases was missing. The owner validates, installs and publishes, returning
+means library or aliases was missing. The owner validates, installs and publishes, returning
 {document, path, revision}. Invalid input names the path and cause, preserves
 installed memory and leaves the disk candidate untouched. Revision mismatch
 requires rereading files and content before deciding; holder rejection requires
@@ -248,7 +251,7 @@ Terminal execution results are not rewritten.
 
 For owner-generated Library templates, use the existing RPC
 rpc_call(method="context.ml_create_from_role", params=...).
-For direct Library file edits, use the point-file reload workflow above.
+For direct Library file edits, use the active-file reload workflow above.
 List templates with context.ml_list_roles. Provide role_id and a new name such as
 "R1.readout.mux". Optional edits use the same shape as context.ml_edit:
 [{"path": ["tones"], "value": [{"freq": 100.0, "gain": 0.2, "ro_ch": 0}]}].

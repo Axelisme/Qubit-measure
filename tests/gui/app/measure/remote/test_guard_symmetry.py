@@ -33,8 +33,9 @@ def _make_controller(readiness: ContextReadiness, *, tmp_path) -> Controller:
     from ._helpers import Fixture
 
     fixture = Fixture(empty_project=True, project_root=str(tmp_path / "project"))
-    fixture.ctrl.setup_control.new_entry(EntryRequest("fake_qubit"))
-    if readiness is ContextReadiness.ACTIVE:
+    if readiness is not ContextReadiness.EMPTY:
+        fixture.ctrl.setup_control.new_entry(EntryRequest("fake_qubit"))
+    if readiness is ContextReadiness.POINT:
         fixture.ctrl.setup_control.new_point(
             PointCreateRequest("ctx001", "", CommandOrigin("gui"))
         )
@@ -88,7 +89,7 @@ def test_run_start_unselected_context_symmetry(tmp_path, qapp):
 
 def test_analyze_without_run_result_symmetry(tmp_path, qapp):
     """No result projects no_run_result before analysis option validation."""
-    ctrl = _make_controller(ContextReadiness.ACTIVE, tmp_path=tmp_path)
+    ctrl = _make_controller(ContextReadiness.POINT, tmp_path=tmp_path)
     tab_id = ctrl.tab_control.new_tab("fake")
 
     decision = ctrl.admit(tab_id, TabAction.ANALYZE)
@@ -150,7 +151,7 @@ def test_unknown_tab_retains_legacy_wire_tuple(
 
 def test_save_no_run_result_carries_reason(tmp_path, qapp):
     """ACTIVE context, no run result: save fails with reason='no_run_result'."""
-    ctrl = _make_controller(ContextReadiness.ACTIVE, tmp_path=tmp_path)
+    ctrl = _make_controller(ContextReadiness.POINT, tmp_path=tmp_path)
     tab_id = ctrl.tab_control.new_tab("fake")
 
     with pytest.raises(RemoteError) as excinfo:

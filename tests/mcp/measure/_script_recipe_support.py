@@ -122,7 +122,10 @@ class SyntheticGui:
                         "kind": "parameter",
                     }
                 ],
-                "destination_context": {"active_label": "preview-context"},
+                "destination_context": {
+                    "entry_name": "entry",
+                    "point": "preview-context",
+                },
             }
         if method == "tab.writeback_accept":
             return {

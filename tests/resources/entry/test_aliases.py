@@ -16,8 +16,22 @@ def authored() -> EntryAliases:
     return EntryAliases(aliases={"spare": "", "drive": "Q1", "sense": "$drive.sense"})
 
 
-def test_missing_setup_aliases_are_an_empty_table(entry: ResultEntry) -> None:
+def test_missing_setup_aliases_are_empty_until_first_explicit_save(
+    entry: ResultEntry, authored: EntryAliases
+) -> None:
+    source = entry.result_path / "aliases.yaml"
     assert entry.load_aliases() == EntryAliases(aliases={})
+    aliases, revision = entry.load_aliases_with_revision()
+    assert aliases.aliases == {}
+    assert revision.revision is None
+    assert entry.read_aliases().revision == revision
+    assert not source.exists()
+
+    written = entry.save_aliases(authored)
+    restored, installed = entry.load_aliases_with_revision()
+    assert restored == authored
+    assert installed == written
+    assert installed.revision is not None
 
 
 def test_missing_point_aliases_do_not_fall_back_to_setup(
@@ -174,7 +188,7 @@ def test_clone_copies_published_source_point_aliases_not_either_setup(
     clone_from: str | PointView = (
         source_view if via_view else ("source/original" if foreign else "original")
     )
-    entry.new_point("cloned", clone_from=clone_from)
+    entry.new_point("cloned", mode="clone", clone_from=clone_from)
     destination = entry.result_path / "points/cloned/aliases.yaml"
     assert load_entry_aliases(destination) == authored
     save_entry_aliases(source_aliases, EntryAliases(aliases={"drive": "later source"}))
@@ -184,6 +198,6 @@ def test_clone_copies_published_source_point_aliases_not_either_setup(
         aliases={"drive": "later source"}
     )
     source_aliases.unlink()
-    entry.new_point("missing", clone_from=clone_from)
+    entry.new_point("missing", mode="clone", clone_from=clone_from)
     assert load_entry_aliases(entry.result_path / "points/missing/aliases.yaml") is None
     assert entry.load_aliases() == EntryAliases(aliases={"drive": "destination setup"})

@@ -15,11 +15,12 @@ if TYPE_CHECKING:
         ContextSourceBinding,
         ContextTarget,
         EntryInfo,
+        FileRevision,
+        FileSyncStatus,
         LibraryChange,
         PointCreateRequest,
-        PointFileRevision,
-        PointFileSyncStatus,
         PointUseRequest,
+        SavedEntry,
         SavedPoint,
         WorkingPointInfo,
     )
@@ -27,7 +28,7 @@ if TYPE_CHECKING:
     from zcu_tools.gui.session.value_lookup import ScalarValue, ValueInfo
     from zcu_tools.resources.entry.ledger_models import JsonObject
     from zcu_tools.resources.entry.schema import PointDocument, SetupDocument
-    from zcu_tools.resources.entry.storage import PointStorageBinding
+    from zcu_tools.resources.entry.storage import StorageBinding
     from zcu_tools.resources.entry.writeback import (
         WritebackEvidence,
         WritebackItem,
@@ -48,7 +49,7 @@ class ContextControlPort(Protocol):
         """Return the cached setup template or current point document without I/O.
 
         setup=True reads the opened entry template; False reads the published
-        selected saved point. No entry/context raises FailedPreconditionError.
+        active GLOBAL or POINT document. No entry raises FailedPreconditionError.
         Returned data is isolated; changing it does not write.
         """
         ...
@@ -59,10 +60,12 @@ class ContextControlPort(Protocol):
         """Add one component with working-unit fields using its registered kind.
 
         setup=True edits only the opened entry template. Otherwise edit the
-        selected saved point in one resource transaction.
+        active GLOBAL or POINT documents in one resource transaction.
         Invalid names/kinds/required fields/duplicates leave content unchanged.
         Success on the current point installs its source before publishing one
-        parameter change. Setup edits never change existing points or captures.
+        parameter change. A nonactive entry edit installs cache/revision before
+        an EntryDocumentsChangedPayload fact, without changing active content or
+        existing captures.
         No entry/context, schema, conflict and I/O errors propagate.
         """
         ...
@@ -76,9 +79,12 @@ class ContextControlPort(Protocol):
         ...
 
     def read_context(
-        self, *, aliases: Mapping[str, str] | None = None
+        self, *, aliases: Mapping[str, str] | None = None, setup: bool = False
     ) -> ParameterContext:
-        """Fix point/library/storage and all alias rows without I/O or kind checks.
+        """Fix installed documents/storage and aliases without I/O or kind checks.
+
+        setup=True selects the entry cache, even with a selected point; False
+        uses the active set. Pending disk candidates are never read.
 
         aliases maps alias names to temporary concrete components, preserving
         dependent links without changing global state. Later edits do not change
@@ -88,7 +94,7 @@ class ContextControlPort(Protocol):
         """
         ...
 
-    def capture_storage(self, parameters: ParameterContext) -> PointStorageBinding:
+    def capture_storage(self, parameters: ParameterContext) -> StorageBinding:
         """Return historical origin/roles on the owner thread without I/O.
 
         Source faults propagate. Unbound captures raise
@@ -101,7 +107,8 @@ class ContextControlPort(Protocol):
     ) -> ParameterContext:
         """Read current values at a fixed target without selecting it.
 
-        SavedPoint may read point/library files in the opened entry. Supplied roles stay fixed;
+        SavedEntry reads global files; SavedPoint reads point/library files in the opened entry.
+        Supplied roles stay fixed;
         cross-entry, missing point (MissingPointError), schema and I/O errors propagate.
         No versions or events are published.
         """
@@ -127,8 +134,8 @@ class ContextControlPort(Protocol):
     ) -> WritebackResult:
         """Accept at the fixed target through the context owner and shared loop.
 
-        Nonempty writes require a captured SavedPoint in the opened entry.
-        SavedPoint parameter/library values persist and records append to entry
+        Nonempty writes require a captured SavedEntry or SavedPoint in the opened entry.
+        Parameter/library values persist in that target's files; records append to entry
         JSONL. Successful prefix writes publish before later failures. Item failure raises
         WritebackApplyError with the event ID, committed values, applied count and original
         cause. Target admission and ledger append errors propagate unchanged.
@@ -180,7 +187,9 @@ class ContextControlPort(Protocol):
 
         Put/replace write the change's persistent Spec as given; rename/delete
         move or remove an existing root. The command runs in one library
-        transaction. Writes require a selected working point. Detached
+        transaction. Writes require an opened entry. SavedEntry uses installed
+        entry handles and notifies nonactive entry consumers without changing the
+        active point or its version. Detached
         SavedPoint writes do not select or publish. Invalid target, Spec
         family, conflict and I/O failures write and publish nothing.
         """
@@ -190,15 +199,23 @@ class ContextControlPort(Protocol):
         """Return the opened entry predictor directory, or None; no I/O or creation."""
         ...
 
-    def get_file_revisions(self) -> tuple[PointFileRevision, ...]:
-        """Read installed point file versions, or (); no I/O or refresh."""
+    def get_file_revisions(self) -> tuple[FileRevision, ...]:
+        """Read the active global/point file versions, or (); no I/O or refresh."""
         ...
 
-    def get_file_sync_status(self) -> tuple[PointFileSyncStatus, ...]:
+    def get_installed_file_revisions(self) -> tuple[FileRevision, ...]:
+        """Read active versions plus entry versions in POINT, without I/O.
+
+        Each set is ordered parameters/library/aliases. Paths are absolute;
+        missing library/aliases revisions are None. No entry returns ().
+        """
+        ...
+
+    def get_file_sync_status(self) -> tuple[FileSyncStatus, ...]:
         """Return recent external observations without I/O; cleared on point switch."""
         ...
 
-    def check_file_revision(self, expected: PointFileRevision) -> None:
+    def check_file_revision(self, expected: FileRevision) -> None:
         """Compare draft path/version with disk; mismatch rejects without mutation.
 
         None expects an absent library or aliases file. Invalid paths/base raise
@@ -206,13 +223,11 @@ class ContextControlPort(Protocol):
         """
         ...
 
-    def reload_file(
-        self, path: Path, expected_revision: str | None
-    ) -> PointFileRevision:
+    def reload_file(self, path: Path, expected_revision: str | None) -> FileRevision:
         """Strictly install one absolute current owner file, then publish facts.
 
         Compare expected_revision with the installed base, None only for absent
-        aliases. Invalid paths/candidates raise InvalidInputError with path/reason;
+        library or aliases. Invalid paths/candidates raise InvalidInputError with path/reason;
         stale base raises FailedPreconditionError(revision_mismatch). Failure
         retains memory/disk; caller owns holder admission. Captures stay fixed.
         """
@@ -234,6 +249,14 @@ class ContextControlPort(Protocol):
         """Prepare/select a saved point in the opened entry."""
         ...
 
+    def use_global(self) -> SavedEntry:
+        """Prepare/select the entry's global documents; errors preserve binding.
+
+        No opened entry raises no_entry. Success publishes GLOBAL and a None
+        point label. See ContextService.use_global for preparation failures.
+        """
+        ...
+
     def new_point(self, request: PointCreateRequest) -> SavedPoint:
         """Create from setup/clone and select, preserving attribution/errors.
 
@@ -251,35 +274,31 @@ class ContextControlPort(Protocol):
         """Read detached source facts without I/O."""
         ...
 
-    def get_alias_rows(self) -> tuple[AliasRow, ...]:
-        """Read immutable authored global rows on the owner thread without I/O.
+    def get_alias_rows(self, *, setup: bool = False) -> tuple[AliasRow, ...]:
+        """Read installed authored rows on the owner thread without I/O.
 
-        Links remain authored strings, not resolved component names. No point
-        is required. Entry installation/clearing resets the table to empty;
-        selecting a point loads its saved rows without setup/preset fallback.
+        setup=True selects the entry cache, otherwise the active table.
+        Pending disk candidates never replace the installed rows.
+
+        Links remain authored strings, not resolved component names. No entry
+        returns (). Entry/point selection loads its own table without fallback.
         """
         ...
 
-    def set_alias_rows(self, rows: tuple[AliasRow, ...]) -> None:
-        """Submit authored rows, saving first when a point is selected.
-
-        Run on the owner thread. Before point selection this only sets memory
-        initial rows; a selected point uses apply_alias_rows write-through.
-        Invalid syntax/order and storage failures preserve rows and versions.
-        Changed rows publish AliasesChangedPayload after installation; identical
-        submissions publish nothing. No preferences or ledger records are written.
-        """
-        ...
-
-    def apply_alias_rows(self, rows: tuple[AliasRow, ...]) -> None:
+    def apply_alias_rows(
+        self, rows: tuple[AliasRow, ...], *, setup: bool = False
+    ) -> None:
         """Confirm the ordered table on the owner thread.
 
-        No selected point raises FailedPreconditionError(no_context) before
-        validation or I/O. Validate syntax/order, then atomically save the
-        selected point's aliases.yaml before memory/event installation.
-        Never write setup aliases. InvalidInputError or storage errors propagate,
+        No opened entry raises FailedPreconditionError(no_context) before
+        validation or I/O. Validate syntax/order, then atomically save active
+        aliases.yaml (entry in GLOBAL, selected point in POINT) before installing
+        memory and revision. setup=True always selects entry aliases, updating
+        its installed cache/revision without changing an active point or existing
+        captures. InvalidInputError or storage errors propagate,
         retaining old rows, versions and file. Empty rows are authoritative.
-        Identical rows still save but emit no change. No other point container,
+        Identical active rows still save but emit no change. Nonactive entry
+        commits publish EntryDocumentsChangedPayload after cache installation. No other point container,
         ledger or preferences write occurs.
         """
         ...

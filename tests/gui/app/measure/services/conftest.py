@@ -85,7 +85,7 @@ def role_load_session(
         tab = session.state.get_tab("tab")
         control.add_component("Q1", "run-source/qubit", {"rate": 1.0})
         control.add_component("Q2", "run-source/qubit", {"rate": 2.0})
-        session.context.set_alias_rows(
+        session.context.apply_alias_rows(
             (
                 AliasRow("source_qubit", "Q1"),
                 AliasRow("custom", "Q2"),

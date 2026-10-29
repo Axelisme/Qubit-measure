@@ -56,7 +56,6 @@ from tests.gui.app.measure._native_save_support import (
     SavingAdapter,
 )
 from tests.gui.app.measure._record_support import require_record, require_target
-from tests.gui.app.measure._synthetic import ALIAS_PRESET
 from tests.resources.entry.fakes import (
     register_fakes,
     registry_state,
@@ -221,7 +220,6 @@ def role_application(
         "zcu_tools.gui.app.measure.services.run.capture_software_provenance", provenance
     )
     services = build_app_services(
-        alias_presets={"default": ALIAS_PRESET},
         state=state,
         bus=bus,
         registry=registry,
@@ -240,7 +238,7 @@ def role_application(
         )
         for name in ("Q1", "Q2"):
             services.session.context.add_component(name, "fake/drive/a", {"rate": 10.0})
-        services.session.context.set_alias_rows((AliasRow("driver", "Q1"),))
+        services.session.context.apply_alias_rows((AliasRow("driver", "Q1"),))
         yield state, services, bus
         assert registry_state() == installed
     finally:
@@ -270,7 +268,7 @@ def test_run_save_retains_admission_source_after_global_entry_and_alias_changes(
     )
     for name in ("Q1", "Q2"):
         services.session.context.add_component(name, "fake/drive/a", {"rate": 20.0})
-    services.session.context.set_alias_rows(
+    services.session.context.apply_alias_rows(
         (
             AliasRow("driver", "Q2" if target is None else "Q1"),
             AliasRow("custom", "Q1"),
@@ -311,7 +309,7 @@ def test_run_save_retains_admission_source_after_global_entry_and_alias_changes(
         for output in member.outputs
     )
     services.session.context.set_parameter(require_target(parameters), "Q2.rate", 30.0)
-    services.session.context.set_alias_rows((AliasRow("driver", "Q1"),))
+    services.session.context.apply_alias_rows((AliasRow("driver", "Q1"),))
     services.session.setup_control.new_entry(EntryRequest("later"))
     assert parameters.value("$driver.rate") == 20.0
     report = services.save_control.save_data(tab_id, origin=origin)

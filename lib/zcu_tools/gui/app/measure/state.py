@@ -32,7 +32,7 @@ from zcu_tools.gui.session.types import ParameterContext, SessionEnv
 from zcu_tools.gui.version_table import (
     VersionTable as VersionTable,
 )
-from zcu_tools.resources.entry import PointStorageBinding
+from zcu_tools.resources.entry import StorageBinding
 
 from .adapter import (
     T_AnalyzeParams,
@@ -89,7 +89,7 @@ class RunPaneState:
     source_operation_id: int | None = None
     confirmed_run_id: str | None = None
     parameters: ParameterContext | None = None
-    storage: PointStorageBinding | None = None
+    storage: StorageBinding | None = None
     partial_result: bool = False
     # None for readable loaded history or non-Load; otherwise the fixed Load reason.
     analysis_source_issue: str | None = None
