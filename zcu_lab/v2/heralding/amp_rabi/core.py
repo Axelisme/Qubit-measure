@@ -20,6 +20,7 @@ from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
+from zcu_tools.program.herald import herald_ratio, heralded
 from zcu_tools.program.v2 import GainSweep, ModularProgramV2, Pulse, Reset, sweep2param
 from zcu_tools.program.v2.modules import PulseReadout
 
@@ -120,6 +121,15 @@ class HeraldingAmpRabiExp(Experiment[HeraldingAmpRabiResult, HeraldingAmpRabiCfg
             (len(gains),), on_update=lambda data: viewer.update(gains, np.abs(data))
         )
         fractions = np.full(len(gains), np.nan, dtype=np.float64)
+
+        def processed_to_signal(
+            raw: list[NDArray[np.float64]],
+        ) -> NDArray[np.complex128]:
+            """Store pass fractions and return conditional IQ on this sweep's grid."""
+            iq, fraction = herald_ratio(raw[0])
+            fractions[:] = fraction
+            return iq[0, ..., 0] + 1j * iq[0, ..., 1]
+
         with Schedule(cfg, buffer, scope=context.scope) as sched:
             cfg = sched.cfg
             cfg.qub_pulse.set_param("gain", sweep2param("gain", cfg.gain))
@@ -141,13 +151,13 @@ class HeraldingAmpRabiExp(Experiment[HeraldingAmpRabiResult, HeraldingAmpRabiCfg
             )
             herald = herald_readout.herald_spec(prog, occurrence=0)
             builder = sched.prog_builder(context.soc, soccfg)
-            try:
-                builder.run_program(prog, rounds=cfg.rounds, herald=[herald])
-            finally:
-                # Cancellation retains the last completed-round summary, if any.
-                passed = prog.get_herald_pass_fraction()
-                if passed is not None:
-                    fractions[:] = passed[herald.ro_ch]
+            builder.run_program_processed(
+                prog,
+                rounds=cfg.rounds,
+                processors={herald.ro_ch: heralded(herald, np.copy)},
+                processed2signal_fn=processed_to_signal,
+            )
+
         return HeraldingAmpRabiResult(gains, buffer.array, fractions)
 
     def analyze(

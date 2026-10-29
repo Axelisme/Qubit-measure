@@ -202,7 +202,7 @@ def test_join_proves_swept_order_by_difference_and_resets_each_shot():
     assert _shots(prog) == shots
 
 
-def test_join_rejects_crossing_swept_ends():
+def test_join_uses_pointwise_crossing_swept_ends():
     def initialize(prog):
         prog.add_loop("scan", 3)
 
@@ -212,8 +212,8 @@ def test_join_rejects_crossing_swept_ends():
         prog.delay_timeline(20 / 430.08, timeline="a")
         prog.join("a", into="default")
 
-    with pytest.raises(ValueError, match="default.*cannot prove.*maximum"):
-        _program(body, initialize)
+    result = _shots(_program(body, initialize))
+    assert [s.body_end_cycle - s.start_cycle for s in result] == [20, 20, 30]
 
 
 def test_join_without_fork_rejoining_still_closes_all_body_ends():

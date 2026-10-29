@@ -8,11 +8,7 @@ import numpy as np
 from matplotlib.axes import Axes
 from matplotlib.image import NonUniformImage
 from numpy.typing import NDArray
-from zcu_tools.analysis.singleshot import (
-    calc_populations,
-    correct_populations,
-    raw_population_signal,
-)
+from zcu_tools.analysis.singleshot import correct_populations
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment
 from zcu_tools.experiment.context import RunContext
@@ -21,7 +17,7 @@ from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import GainSweep, Pulse, Readout, Reset, SweepCfg, sweep2param
-from zcu_tools.program.v2.modules.readout import classification_parameters
+from zcu_tools.program.v2.modules.readout import classification_processors
 from zcu_tools.utils.process import minus_background
 
 from zcu_lab.v2.support import live_heatmap, live_line
@@ -29,11 +25,19 @@ from zcu_lab.v2.support.resonance import get_resonance_freq
 
 
 def _default_population_states() -> NDArray[np.int64]:
-    return np.array([0, 1], dtype=np.int64)
+    return np.array([0, 1, 2], dtype=np.int64)
 
 
 @dataclass(frozen=True)
 class AcStarkResult:
+    """Measured populations (Ngain, Nfreq, 3) on rounded gain/frequency grids.
+
+    Gains are in a.u.; frequencies are in MHz.
+
+    The final state axis is [g,e,other], labeled by population_states=[0,1,2].
+    Unmeasured points remain NaN after cancellation.
+    """
+
     gains: NDArray[np.float64]
     freqs: NDArray[np.float64]
     populations: NDArray[np.float64]
@@ -95,7 +99,7 @@ class AcStarkExp(Experiment[AcStarkResult, AcStarkCfg]):
 
     AXES_SPEC: ClassVar[AxesSpec[AcStarkResult, AcStarkCfg]] = AxesSpec(
         axes=(
-            AxesSpec.Axis("population_states", "GE Population", "None", dtype=np.int64),
+            AxesSpec.Axis("population_states", "Population", "None", dtype=np.int64),
             AxesSpec.Axis("freqs", "Frequency", "Hz", scale=1e6, dtype=np.float64),
             AxesSpec.Axis("gains", "Stark Pulse Gain", "a.u.", dtype=np.float64),
         ),
@@ -120,16 +124,17 @@ class AcStarkExp(Experiment[AcStarkResult, AcStarkCfg]):
         Scan cavity gain on the host, uniformly in gain squared before
         hardware rounding, and probe frequency on the board.
 
-        Return gains (a.u.), probe frequencies (MHz), and classified G/E
-        fractions shaped (Ngain, Nfreq, 2). cfg.readout supplies circle
-        classifiers with positive radii for all declared ADCs. Other is 1-G-E, not a calibrated
-        leakage population. Subsequent analysis extracts the Stark shift.
+        Return gains (a.u.), probe frequencies (MHz), and classified G/E/Other
+        fractions shaped (Ngain, Nfreq, 3). cfg.readout supplies circle
+        classifiers with positive radii for all declared ADCs. Other counts
+        unclassified shots, not calibrated leakage.
+        Subsequent analysis extracts the Stark shift.
         """
 
         # Prepare the probe grid and a gain grid spaced in drive intensity.
         soc, soccfg = context.soc, context.soccfg
         cfg = deepcopy(cfg)
-        classification = classification_parameters(cfg.readout, require_other=True)
+        processors = classification_processors(cfg.readout, require_other=True)
 
         gain_sweep = cfg.gain
 
@@ -148,7 +153,7 @@ class AcStarkExp(Experiment[AcStarkResult, AcStarkCfg]):
             allow_array=True,
         )
 
-        # Show G/E and the unclassified remainder alongside the current trace.
+        # Show measured G/E/Other fractions alongside the current trace.
         def configure_axes(ax: Axes) -> None:
             ax.set_ylim(0.0, 1.0)
             for line, label in zip(
@@ -189,10 +194,8 @@ class AcStarkExp(Experiment[AcStarkResult, AcStarkCfg]):
         )
         current_index = 0
 
-        def plot_fn(data: NDArray[np.float64]) -> None:
+        def plot_fn(populations: NDArray[np.float64]) -> None:
             i = current_index
-
-            populations = calc_populations(data)
 
             g_2d.update(gains, freqs, populations[..., 0])
             e_2d.update(gains, freqs, populations[..., 1])
@@ -200,7 +203,7 @@ class AcStarkExp(Experiment[AcStarkResult, AcStarkCfg]):
             cur_1d.update(freqs, populations[i, :].T)
 
         buffer = SignalBuffer(
-            (len(gains), len(freqs), 2),
+            (len(gains), len(freqs), 3),
             dtype=np.float64,
             on_update=plot_fn,
         )
@@ -232,15 +235,15 @@ class AcStarkExp(Experiment[AcStarkResult, AcStarkCfg]):
                     .add_pulse("stark_pulse2", step.cfg.stark_pulse2)
                     .add_readout("readout", step.cfg.readout)
                     .declare_sweep("freq", step.cfg.freq)
-                    .build_and_acquire(
-                        # Classify shots before averaging; do not classify mean IQ.
-                        raw2signal_fn=raw_population_signal,
-                        classify=classification,
+                    .build_and_acquire_processed(
+                        # First ADC/read, with all G/E/Other columns.
+                        processed2signal_fn=lambda processed: processed[0][0],
+                        processors=processors,
                         rounds=cfg.rounds,
                     )
                 )
 
-        # Preserve measured G/E fractions; Other remains a derived quantity.
+        # Preserve measured G/E/Other fractions in the Result.
         signals = buffer.array
         return AcStarkResult(gains=gains, freqs=freqs, populations=signals)
 
@@ -251,19 +254,29 @@ class AcStarkExp(Experiment[AcStarkResult, AcStarkCfg]):
         *,
         plots: Plots,
     ) -> AcStarkAnalysis:
+        """Fit the saved three-state map and return photons per gain squared.
+
+        source supplies gains in a.u., frequencies in MHz and [g,e,other];
+        cfg may be None. options supplies chi/kappa in MHz, optional confusion
+        correction and an exclusive gain cutoff. Publish the fit to plots.
+        Legacy G/E data raise ValueError before correction or fitting.
+        """
         result = source.result
         chi, kappa = options.chi, options.kappa
         confusion_matrix, cutoff = options.confusion_matrix, options.cutoff
 
         gains, freqs, populations = result.gains, result.freqs, result.populations
+        if populations.shape[-1] != 3:
+            raise ValueError(
+                "Expected [g,e,other] populations; legacy G/E files are unsupported. "
+                "Acquire a new run."
+            )
 
         # apply cutoff if provided
         if cutoff is not None:
             valid_indices = np.where(gains < cutoff)[0]
             gains = gains[valid_indices]
             populations = populations[valid_indices]
-
-        populations = calc_populations(populations)  # (xs, 2, Ts, 3)
 
         populations = correct_populations(populations, confusion_matrix)
 
@@ -342,19 +355,29 @@ class AcStarkExp(Experiment[AcStarkResult, AcStarkCfg]):
         *,
         plots: Plots,
     ) -> None:
+        """Plot the saved [g,e,other] map against photon number and MHz.
+
+        source supplies the saved map; cfg may be None. options supplies
+        photons per gain squared, optional confusion correction and an exclusive
+        gain cutoff. Publish the populations figure to plots.
+        Legacy G/E data raise ValueError before correction or plotting.
+        """
         result = source.result
         ac_coeff = options.ac_coeff
         confusion_matrix, cutoff = options.confusion_matrix, options.cutoff
 
         gains, freqs, populations = result.gains, result.freqs, result.populations
+        if populations.shape[-1] != 3:
+            raise ValueError(
+                "Expected [g,e,other] populations; legacy G/E files are unsupported. "
+                "Acquire a new run."
+            )
 
         # apply cutoff if provided
         if cutoff is not None:
             valid_indices = np.where(gains < cutoff)[0]
             gains = gains[valid_indices]
             populations = populations[valid_indices]
-
-        populations = calc_populations(populations)  # (xs, 2, Ts, 3)
 
         populations = correct_populations(populations, confusion_matrix)
 

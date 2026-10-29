@@ -1,6 +1,6 @@
 # Explicit acquisition environments
 
-**Last updated:** 2026-10-29, explicit charge requirements
+**Last updated:** 2026-10-30，processor-only herald and explicit charge requirements
 
 **讀者：** framework-dev。模擬 acquisition 的 request、round 與 raw source 契約。
 
@@ -49,7 +49,7 @@ Other SoC objects use the original path. Integrated simulation configures the
 compiled program and readouts without serializing DAC/weight arrays for no-op
 transport. Requested uploads still validate int16 envelope and weight dtypes;
 QICK retains first-compilation ownership. Hardware and decimated paths keep
-their original configuration. Classification, hooks, tracker, normalization,
+their original configuration. Shot processing, hooks, tracker, normalization,
 averaging and Stop still belong to that pipeline.
 
 `SimulationBinding(..., timing=SimulationTiming(clock=SimulationClock(...)))` optionally tracks physical
@@ -235,14 +235,21 @@ Normal hardware compilation and the existing block_mode timing policy are unchan
   hit. Certificates live with the SoC and do not cross the core/backend boundary.
   Fixed request layouts and integrated normalization metadata are prepared once
   per acquire; this never freezes snapshots or certifies later backend values.
-  Without threshold, classification, trackers or herald post-selection, it divides
-  totals by reps and readout length, removes QICK offsets and moves reads first,
+  Without processors, threshold or trackers,
+  it divides totals by reps and readout length, removes QICK offsets and moves reads first,
   without allocating `acc_buf`. Hooks receive the running mean of completed rounds.
-  Herald post-selection also materializes the environment's raw shots and uses
-  the hardware acquisition mask/weighted-summary pipeline. Each herald and signal
-  read comes from that same per-shot outcome history. The shared per-ADC sample
-  length applies to both. Compact totals never replace post-selected raw means.
-  Threshold, classification, trackers and `get_raw()` materialize deterministic
+  Every `acquire_processed` round materializes retained raw shots and uses the
+  same per-shot processor pipeline as hardware. `heralded` is an ordinary
+  processor wrapper here, with no separate simulation mode. Compact totals do
+  not determine processor payloads. Each processor receives float64
+  `(shots, reads, 2)` normalized IQ and returns `(shots, out_reads, N)` payloads.
+  Herald and signal reads come from the same outcome history and share each
+  ADC's rounded integration length, without IQ-offset subtraction.
+  `heralded(spec, inner)` appends acceptance to weighted signal components.
+  `herald_ratio` divides both final and cumulative round-hook numerators by
+  acceptance, giving accepted-count weighting and NaN without divide warnings
+  at zero acceptance. The builder converter writes the fraction to the Lab Result.
+  Threshold, trackers and `get_raw()` materialize deterministic
   int64 shots from the retained last-round source. The environment owns signal,
   noise, rounding and loop layout. Every source call returns fresh arrays with
   shape `(*loop_dims, reads, 2)`, keyed by requested ADC indices. Sources retain

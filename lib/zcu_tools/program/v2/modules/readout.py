@@ -1,18 +1,27 @@
+# tolerated(file-size): PulseReadout, TablePulseReadout and MuxReadout own native
+# cfg adaptation plus declare/lower; no existing owner can take either part.
 from __future__ import annotations
 
 from abc import abstractmethod
 from collections.abc import Sequence
 from copy import deepcopy
-from typing import TYPE_CHECKING, Annotated, Literal, TypeAlias
+from typing import TYPE_CHECKING, Annotated, Literal, TypeAlias, TypedDict
 
 import numpy as np
 from numpy.typing import NDArray
 from pydantic import BeforeValidator
 from qick.asm_v2 import QickParam, Trigger
 
-from zcu_tools.cfg_model import Centroid3Classifier, CircleClassifier, ReadoutClassifier
+from zcu_tools.cfg_model import (
+    Centroid3Classifier,
+    CircleClassifier,
+    LinearClassifier,
+    ReadoutClassifier,
+)
 from zcu_tools.cfg_model import MuxReadoutCfg as CoreMuxReadoutCfg
+from zcu_tools.program.acquisition import ShotProcessor
 from zcu_tools.program.herald import HeraldSpec
+from zcu_tools.utils.shot_classification import classify_shots, nearest_centroid3
 
 from ..macro.readout import ReadoutEmission, readout_control_scope
 from ..macro.wmem import PatchWmemFromDmem
@@ -191,17 +200,22 @@ def centroid3_classifier(cfg: ReadoutCfg, *, ro_ch: int) -> Centroid3Classifier:
     return classifier
 
 
-def classification_parameters(
+def classification_processors(
     cfg: ReadoutCfg, *, require_other: bool = False
-) -> dict[int, ReadoutClassifier]:
-    """Return detached per-ADC calibration for explicit acquire(classify=...).
+) -> dict[int, ShotProcessor]:
+    """Return detached processors keyed by declared ADC channel number.
 
-    cfg supplies normalized raw ADC calibration without offset subtraction.
-    Missing calibration or circle radius raises ValueError naming the ADC;
-    missing radius requires GE Post analysis. require_other rejects linear
-    (only g/e) and centroid3 (its third state is f, not other). No program registry or hardware is read.
+    cfg is native Pulse or Mux readout calibration in normalized ADC units,
+    without offset subtraction. Each callable accepts float64 (shots, reads, 2)
+    IQ and returns float64 (shots, reads, classes) without modifying its input.
+    Circle columns are g/e/other, with ties and radius boundaries in other.
+    Linear columns are g/e; real(IQ * exp(1j*angle)) > threshold is excited,
+    equality is ground. Centroid3 columns are g/e/f, nearest-center ties in
+    g/e/f order. No confusion correction is applied.
+    Missing calibration/radius raises an ADC-named ValueError; require_other
+    accepts only circle. Calibration changes after this call have no effect.
     """
-    result: dict[int, ReadoutClassifier] = {}
+    result: dict[int, ShotProcessor] = {}
     for ch, classifier in _classifier_entries(cfg):
         if classifier is None:
             raise ValueError(f"ADC {ch}: classifier missing; run singleshot GE")
@@ -214,8 +228,92 @@ def classification_parameters(
             raise ValueError(
                 f"ADC {ch}: {classifier.mode} classifier has no other state; use circle"
             )
-        result[ch] = classifier.model_copy(deep=True)
+        result[ch] = _classification_processor(classifier.model_copy(deep=True))
     return result
+
+
+def _classification_processor(classifier: ReadoutClassifier) -> ShotProcessor:
+    def process(iq: NDArray[np.float64]) -> NDArray[np.float64]:
+        signals = iq[..., 0] + 1j * iq[..., 1]
+        if isinstance(classifier, CircleClassifier):
+            if classifier.radius is None:
+                raise ValueError("circle radius missing; run GE Post analysis")
+            return np.stack(
+                classify_shots(
+                    signals, classifier.g_center, classifier.e_center, classifier.radius
+                ),
+                axis=-1,
+            ).astype(np.float64)
+        if isinstance(classifier, LinearClassifier):
+            excited = (
+                signals * np.exp(1j * classifier.angle)
+            ).real > classifier.threshold
+            return np.stack([~excited, excited], axis=-1).astype(np.float64)
+        labels = nearest_centroid3(
+            signals, classifier.g_center, classifier.e_center, classifier.f_center
+        )
+        return np.eye(3, dtype=np.float64)[labels]
+
+    return process
+
+
+class QickThresholdOptions(TypedDict, total=False):
+    """Native acquire keywords; empty means ordinary IQ without projection.
+
+    threshold holds normalized ADC projection cutoffs in ADC declaration order.
+    angle holds matching QICK projection angles in radians. remove_offset=False
+    retains the calibration's normalized, unsubtracted ADC coordinates.
+    """
+
+    threshold: list[float]
+    angle: list[float]
+    remove_offset: Literal[False]
+
+
+def qick_threshold_options(
+    cfg: ReadoutCfg | Sequence[ReadoutCfg],
+) -> QickThresholdOptions:
+    """Convert readout calibration to optional native QICK projection keywords.
+
+    cfg is a native Pulse/Mux cfg or a sequence in declaration order. Repeated
+    ADCs with identical classifiers produce one entry at their first occurrence.
+    Empty input, any missing/unusable classifier or conflicting calibrations on
+    one ADC returns empty options for the entire acquisition.
+    Linear uses the opposite calibration angle and the same threshold; circle
+    uses the g/e perpendicular bisector, ignoring radius and other. Centroid3
+    or missing calibration returns empty options for ordinary IQ acquisition.
+    Result lists follow ADC declaration order. remove_offset=False preserves
+    normalized ADC calibration coordinates. No confusion correction is applied.
+    Caller must cover every program-declared ADC in declaration order: QICK
+    requires lists of exactly that length and uses that order. This helper does
+    not read a program, registry or live library to verify or guess its layout.
+    """
+    thresholds: list[float] = []
+    angles: list[float] = []
+    configs = [cfg] if isinstance(cfg, (PulseReadoutCfg, MuxReadoutCfg)) else cfg
+    classifiers: dict[int, ReadoutClassifier] = {}
+    for readout_cfg in configs:
+        for ch, classifier in _classifier_entries(readout_cfg):
+            if classifier is None or isinstance(classifier, Centroid3Classifier):
+                return {}
+            if ch in classifiers and classifiers[ch] != classifier:
+                return {}
+            classifiers[ch] = classifier
+    if not classifiers:
+        return {}
+    for classifier in classifiers.values():
+        if isinstance(classifier, LinearClassifier):
+            angle = -classifier.angle
+            threshold = classifier.threshold
+        elif isinstance(classifier, CircleClassifier):
+            angle = float(np.angle(classifier.e_center - classifier.g_center))
+            midpoint = (classifier.g_center + classifier.e_center) / 2
+            threshold = float((midpoint * np.exp(-1j * angle)).real)
+        else:
+            return {}
+        thresholds.append(threshold)
+        angles.append(angle)
+    return {"threshold": thresholds, "angle": angles, "remove_offset": False}
 
 
 class AbsReadout(Module):
@@ -430,7 +528,7 @@ class PulseReadout(AbsReadout):
     def lower(
         self, prog: TimelineProgramV2, *, timeline: str | None, tag: str | None
     ) -> None:
-        """Configure and trigger the ADC, play the pulse, then advance total_length.
+        """Configure/trigger/play at one origin, then ceil max end plus post_delay.
 
         All times are relative to the selected timeline. tag identifies the
         configuration event; generator pre_delay and ADC trig_offset are retained.
@@ -468,7 +566,7 @@ class PulseReadout(AbsReadout):
             )
         else:
             self.pulse.play(prog, timeline=timeline)
-        prog.advance_module(self.total_length(prog), timeline=timeline)
+        prog.delay_timeline(self.cfg.post_delay, timeline=timeline)
 
     def _run_readout_config_from_regs(
         self, prog: ModularProgramV2, name: str, t: float | QickParam
@@ -555,6 +653,42 @@ class TablePulseReadout(AbsReadout):
         self._freq_loader.init(prog)
         self._ro_freq_loader.init(prog)
         prog.add_reg(self._addr_reg)
+        self._append_updates(prog)
+
+    def declare(self, prog: TimelineProgramV2) -> None:
+        """Declare independent templates and paired words for a public sweep loop.
+
+        idx_reg must name a top-level native loop with exactly the table count;
+        missing loops or count mismatches raise ValueError before allocation.
+        Updates execute after each shot and wrap to the first pair.
+        """
+        matches = [loop for loop in prog.sweep_loops if loop.name == self.idx_reg]
+        if len(matches) != 1:
+            raise ValueError(
+                f"TablePulseReadout idx_reg={self.idx_reg!r} requires one sweep loop"
+            )
+        if matches[0].count != len(self.freq_words):
+            raise ValueError(
+                f"TablePulseReadout table length {len(self.freq_words)} does not "
+                f"match loop {self.idx_reg!r} count {matches[0].count}"
+            )
+        self._readout.declare(prog)
+        self._freq_loader.declare(prog)
+        self._ro_freq_loader.declare(prog)
+        prog.add_reg(self._addr_reg)
+        self._append_updates(prog)
+
+    def lower(
+        self, prog: TimelineProgramV2, *, timeline: str | None, tag: str | None
+    ) -> None:
+        """Play the current paired templates with fixed duration and rule-b end.
+
+        Hook updates affect only frequency words, not placement or duration.
+        timeline=None selects default; tag names this occurrence's config.
+        """
+        self._readout.lower(prog, timeline=timeline, tag=tag)
+
+    def _append_updates(self, prog: ModularProgramV2 | TimelineProgramV2) -> None:
         pulse_id = self._readout.pulse.pulse_id
         assert pulse_id is not None
         prog.append_loop_after(
@@ -626,11 +760,38 @@ class MuxReadout(AbsReadout):
         self._program: ModularProgramV2 | None = None
 
     def init(self, prog: ModularProgramV2) -> None:
-        """Validate cached hardware/routes, then declare all tones and ADC windows.
+        """Declare legacy playback and retain prog for IQ collection."""
+        self._declare_resources(prog)
+        self._program = prog
 
-        Raises ValueError with the module name for incompatible wiring/capacity
-        or illegal rounded durations. QICK frequency/format errors propagate.
+    def declare(self, prog: TimelineProgramV2) -> None:
+        """Declare tones/routes without enabling legacy raw-IQ collection.
+
+        Incompatible wiring, duplicate routes and illegal rounded durations raise
+        ValueError naming this module. QICK frequency/format errors propagate.
         """
+        self._declare_resources(prog)
+
+    def lower(
+        self, prog: TimelineProgramV2, *, timeline: str | None, tag: str | None
+    ) -> None:
+        """Play all tones and trigger all ADCs at one origin, then add post once.
+
+        The end covers the actual all-tone waveform and every rounded ADC window.
+        timeline=None selects default. Legacy collection remains unavailable.
+        """
+        timeline = timeline if timeline is not None else "default"
+        prog.pulse(
+            self.cfg.gen_ch, self.name, t=self.cfg.pre_delay, tag=tag, timeline=timeline
+        )
+        prog.trigger(
+            [tone.ro_ch for tone in self.cfg.tones],
+            t=self.cfg.trig_offset,
+            timeline=timeline,
+        )
+        prog.delay_timeline(self.cfg.post_delay, timeline=timeline)
+
+    def _declare_resources(self, prog: ModularProgramV2 | TimelineProgramV2) -> None:
         self._validate_generator(prog)
         self._validate_readouts(prog)
         cfg = self.cfg
@@ -661,9 +822,8 @@ class MuxReadout(AbsReadout):
         prog.protect_readout_routes(
             self.name, cfg.gen_ch, [tone.ro_ch for tone in cfg.tones]
         )
-        self._program = prog
 
-    def _validate_generator(self, prog: ModularProgramV2) -> None:
+    def _validate_generator(self, prog: ModularProgramV2 | TimelineProgramV2) -> None:
         ch = self.cfg.gen_ch
         gens = prog.soccfg["gens"]
         if ch >= len(gens):
@@ -689,7 +849,7 @@ class MuxReadout(AbsReadout):
                 f"{self.name}.length: generator {ch} rounded length must be 3..2**32-1 cycles"
             )
 
-    def _validate_readouts(self, prog: ModularProgramV2) -> None:
+    def _validate_readouts(self, prog: ModularProgramV2 | TimelineProgramV2) -> None:
         channels: set[int] = set()
         ports: set[int] = set()
         path: str | None = None
