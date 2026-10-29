@@ -10,14 +10,17 @@ from qick.asm_v2 import (
     ConfigReadout,
     Delay,
     Macro,
+    OpenLoop,
     Pulse,
     QickParam,
     TimedMacro,
     Trigger,
 )
 
+from ._timeline_bounds import _ProducerBounds
 from ._timeline_guard import PulseGuard as _PulseGuard
 from ._timeline_guard import bounds as _bounds
+from ._timeline_runtime import Time, _Cycles, _RuntimeMath, time_bounds
 from .base import MyProgramV2
 from .ir import TimingLayout, TimingLoop
 from .macro.delay import DelayRegAuto
@@ -124,12 +127,14 @@ class _TimelineBook:
     """Store only relative ends, including the ordinary default timeline."""
 
     def __init__(self):
-        self.ends: dict[str, float | QickParam] = {"default": 0.0}
+        self.ends: dict[str, Time] = {"default": 0.0}
+        self.math: _RuntimeMath
+        self.runtime_gens: dict[int, _Cycles] = {}
         self.waiting: set[str] = set()
         self.repeats: list[_RepeatFrame] = []
         self.native_only = False
 
-    def end(self, name: str, *, placement: bool = False) -> float | QickParam:
+    def end(self, name: str, *, placement: bool = False) -> Time:
         if name not in self.ends:
             raise ValueError(f"{name}: unknown timeline; declare it with fork in _body")
         if placement and name in self.waiting:
@@ -139,9 +144,16 @@ class _TimelineBook:
             )
         return self.ends[name]
 
-    def decrement(self, t: float | QickParam, *, observe_pulses: bool = True) -> None:
+    def decrement(self, t: Time, *, observe_pulses: bool = True) -> None:
         if self.native_only:
             return
+        for ch, end in list(self.runtime_gens.items()):
+            remaining = self.math.floor(end, t)
+            if isinstance(remaining, _Cycles):
+                self.runtime_gens[ch] = remaining
+            else:
+                del self.runtime_gens[ch]
+            self.math.prog.set_timestamp(time_bounds(self.math.prog, remaining)[1], gen_ch=ch)
         if self.repeats:
             frame = self.repeats[-1]
             frame.advance += t
@@ -149,16 +161,17 @@ class _TimelineBook:
                 for ch, guard in frame.pulse_guards.items():
                     guard.then(_PulseGuard(ch, shifts=(-t,), floors=(0.0,)))
         self.ends = {
-            name: _maximum(0.0, end - t, name) for name, end in self.ends.items()
+            name: self.math.floor(end, t) for name, end in self.ends.items()
         }
         self.waiting = {
-            name for name in self.waiting if _bounds(self.ends[name])[1] > 1e-12
+            name for name in self.waiting
+            if time_bounds(self.math.prog, self.ends[name])[1] > 1e-12
         }
 
-    def maximum(self) -> float | QickParam:
-        end: float | QickParam = 0.0
-        for name, candidate in self.ends.items():
-            end = _maximum(end, candidate, name)
+    def maximum(self) -> Time:
+        end: Time = 0.0
+        for candidate in self.ends.values():
+            end = self.math.maximum(end, candidate)
         return end
 
 
@@ -197,7 +210,7 @@ class _Join(Macro):
         super().preprocess(prog)
         end = self.book.end(self.into)
         for source in self.sources:
-            end = _maximum(end, self.book.end(source), self.into)
+            end = self.book.math.maximum(end, self.book.end(source))
         self.book.ends[self.into] = end
         self.book.waiting.discard(self.into)
 
@@ -259,6 +272,7 @@ class _Boundary(Macro):
             self.book.waiting.clear()
             self.book.repeats.clear()
             self.book.native_only = False
+            self.book.runtime_gens.clear()
 
     def translate(self, prog) -> None:
         if self.section in ("body_start", "body_end"):
@@ -276,14 +290,21 @@ class _Advance(TimedMacro):
         self.aligned = aligned
 
     def preprocess(self, prog) -> None:
-        duration = (
-            _step_time(prog, self.duration)
-            if self.aligned
-            else _align_end(prog, self.duration)
-        )
-        end = self.book.end(self.timeline, placement=True) + duration
-        self.book.ends[self.timeline] = _maximum(0.0, end, self.timeline)
-        self.resolved_time = end if isinstance(end, QickParam) else QickParam(end)
+        if isinstance(self.duration, str):
+            limits = prog._time_bounds.source(prog, self.duration)
+            duration = _Cycles(self.duration, limits.minimum, limits.maximum)
+        else:
+            duration = (
+                _step_time(prog, self.duration)
+                if self.aligned
+                else _align_end(prog, self.duration)
+            )
+        previous = self.book.end(self.timeline, placement=True)
+        end = (self.book.math.add(previous, duration)
+               if isinstance(previous, _Cycles) or isinstance(duration, _Cycles)
+               else previous + duration)
+        self.book.ends[self.timeline] = self.book.math.maximum(0.0, end)
+        self.resolved_time = end
 
     def list_time_params(self) -> list[str]:
         return ["t"]
@@ -291,7 +312,10 @@ class _Advance(TimedMacro):
     def get_time_param(self, name: str) -> QickParam:
         if name != "t":
             raise RuntimeError("timeline advances expose only the t parameter")
-        return self.resolved_time
+        if isinstance(self.resolved_time, _Cycles):
+            raise RuntimeError("runtime timeline end is not an affine time parameter")
+        return (self.resolved_time if isinstance(self.resolved_time, QickParam)
+                else QickParam(self.resolved_time))
 
     def translate(self, prog) -> None:
         pass
@@ -309,7 +333,23 @@ class _Sync(Delay):
             if self.timeline is None
             else self.book.end(self.timeline)
         )
-        super().preprocess(prog)
+        if isinstance(self.t, _Cycles):
+            self.t_regs["t"] = self.t.register
+            self.book.native_only = True
+            try:
+                prog.decrement_timestamps(self.t.minimum / get_fclk(prog))
+            finally:
+                self.book.native_only = False
+            if self.timeline is None:
+                for ch in self.book.runtime_gens:
+                    prog.set_timestamp(0.0, gen_ch=ch)
+                self.book.runtime_gens.clear()
+                self.book.ends = dict.fromkeys(self.book.ends, 0.0)
+                self.book.waiting.clear()
+            else:
+                self.book.decrement(self.t)
+        else:
+            super().preprocess(prog)
 
 
 class _RepeatEnter(_Sync):
@@ -440,6 +480,19 @@ class _PlacedPulse(_ObservedPulse):
 
     def preprocess(self, prog) -> None:
         end = self.book.end(self.timeline, placement=True)
+        if isinstance(end, _Cycles):
+            if self.relative_t == "auto":
+                start = self.book.math.maximum(end, prog.get_timestamp(gen_ch=self.ch))
+            else:
+                start = self.book.math.add(end, self.relative_t)
+            self.source.t = time_bounds(prog, start)[1]
+            self.source.preprocess(prog)
+            self.source.t_regs["t"] = self.book.math.cycles(start).register
+            self.book.ends[self.timeline] = self.book.math.add(
+                start, _align_end(prog, prog.pulses[self.name].get_length())
+            )
+            self.book.runtime_gens[self.ch] = self.book.ends[self.timeline]
+            return
         if self.relative_t == "auto":
             t = _maximum(end, prog.get_timestamp(gen_ch=self.ch), self.timeline)
         else:
@@ -551,6 +604,38 @@ class ModuleEmission(TimedMacro):
         return []
 
 
+class _Prepared(TimedMacro):
+    """Keep cycle arithmetic at the native operation's execution position."""
+
+    def __init__(self, book: _TimelineBook, source: Macro):
+        super().__init__(tag=getattr(source, "tag", None))
+        self.book = book
+        self.source = source
+
+    def preprocess(self, prog) -> None:
+        self.math = _RuntimeMath(prog)
+        self.book.math = self.math
+        self.source.preprocess(prog)
+
+    def translate(self, prog) -> None:
+        previous = prog._time_origin
+        try:
+            prog._time_origin = self.math
+            self.math.translate(prog)
+            prog._time_origin = self.source
+            self.source.translate(prog)
+        finally:
+            prog._time_origin = previous
+
+    def list_time_params(self) -> list[str]:
+        return self.source.list_time_params() if isinstance(self.source, TimedMacro) else []
+
+    def get_time_param(self, name: str) -> QickParam:
+        if not isinstance(self.source, TimedMacro):
+            raise RuntimeError("this operation has no time parameters")
+        return self.source.get_time_param(name)
+
+
 class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
     """Author native QICK hooks with optional timeline ends (times in us).
 
@@ -563,10 +648,24 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
 
     def __init__(self, *args, **kwargs):
         self._timeline_book = _TimelineBook()
+        self._time_bounds = _ProducerBounds()
+        self._time_origin: Macro | None = None
         self._declared_modules: list[Module] = []
         self._declaring = False
         self._building_body = False
         super().__init__(*args, **kwargs)
+
+    def _make_asm(self) -> None:
+        self._time_bounds = _ProducerBounds()
+        for prepared in self.macro_list:
+            source = prepared.source if isinstance(prepared, _Prepared) else prepared
+            self._time_bounds.observe(source)
+        super()._make_asm()
+        self._time_bounds.audit(self)
+
+    def _add_asm(self, inst, addr_inc=1):
+        self._time_bounds.origins[self.p_addr] = self._time_origin
+        super()._add_asm(inst, addr_inc=addr_inc)
 
     def append_macro(self, macro: Macro) -> None:
         """Append a native macro, retaining its behavior and repeat pulse validation.
@@ -623,6 +722,10 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
             self.label(name)
             self.extend_macros(asm)
             self.ret()
+        self.macro_list = [
+            macro if isinstance(macro, OpenLoop) else _Prepared(self._timeline_book, macro)
+            for macro in self.macro_list
+        ]
 
     @property
     def timing_layout(self) -> TimingLayout:
@@ -692,12 +795,15 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         )
 
     def delay_timeline(
-        self, t: float | QickParam, *, timeline: str = "default", tag: str | None = None
+        self, t: float | QickParam | str, *, timeline: str = "default", tag: str | None = None
     ) -> None:
-        """Add t us (ceiled to tProc cycles) to a timeline without moving reference.
+        """Add time to a timeline without advancing reference or channel timestamps.
 
-        tag exposes the resulting end as parameter 't'. Crossing zero or an
-        unprovable sweep floor raises ValueError during compile.
+        Scalars and QickParam use us, ceiled to tProc cycles. A string names an
+        existing nonnegative cycle register with compiler-known producer bounds.
+        Wait-only targets, unknown bounds and possible signed overflow raise
+        ValueError during compilation. tag exposes static ends as parameter 't';
+        runtime ends have no affine get_time_param value.
         """
         self.append_macro(_Advance(self._timeline_book, timeline, t, tag=tag))
 
