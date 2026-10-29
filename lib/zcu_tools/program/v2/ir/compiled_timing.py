@@ -6,6 +6,9 @@ from math import prod
 from operator import add, and_, or_, sub, xor
 from typing import Literal
 
+import numpy as np
+from numpy.typing import NDArray
+
 from .hw_semantics import WAVE_REGS
 from .instructions import (
     BaseInst,
@@ -16,7 +19,13 @@ from .instructions import (
     TimeInst,
     WaitInst,
 )
-from .io_instructions import DportWriteInst, PortWriteInst, TrigInst, WmemWriteInst
+from .io_instructions import (
+    DmemReadInst,
+    DportWriteInst,
+    PortWriteInst,
+    TrigInst,
+    WmemWriteInst,
+)
 from .labels import LabelRef
 from .linker import IRLinker
 from .operands import (
@@ -24,6 +33,7 @@ from .operands import (
     AluOp,
     Immediate,
     ImmValue,
+    MemAddr,
     Register,
     SrcKeyword,
     TimeOffset,
@@ -83,11 +93,22 @@ class TimingLayout:
 
 @dataclass(frozen=True)
 class CompiledTimingInput:
-    """Public linked prog_list/labels and shot layout; inputs are never mutated."""
+    """Public linked assembly, shot layout and optional compiled data memory.
+
+    prog_list and labels are the final linked compiler outputs; layout identifies
+    body boundaries and shot axes. dmem is the one-dimensional signed int32 word
+    array returned by ProgramResourcesMixin.compile_datamem(), or its transported
+    sequence of Python ints. Addresses are zero-based WORD offsets, not bytes.
+    None and an empty sequence mean no data is available, not zero-filled memory.
+    Analysis never mutates these inputs. Executed reads require a known in-range
+    address and a signed int32 word; missing/malformed data, unknown/out-of-range
+    addresses and unsupported memory effects (including writes) raise ValueError.
+    """
 
     prog_list: Sequence[Mapping[str, object]]
     labels: Mapping[str, object]
     layout: TimingLayout
+    dmem: Sequence[int] | NDArray[np.int32] | None = None
 
 
 @dataclass(frozen=True)
@@ -144,6 +165,7 @@ class TimingAnalysis:
 @dataclass
 class _Machine:
     labels: Mapping[str, object]
+    dmem: Sequence[int] | NDArray[np.int32] | None
     registers: dict[str, int | None] = field(default_factory=lambda: {"s0": 0})
     reference: int = 0
     flags: int | None = None
@@ -230,8 +252,11 @@ class _Machine:
             raise ValueError(f"Unknown label: {name}")
         return IRLinker.parse_label_addr(name, self.labels[name])
 
-    def register_write(self, inst: RegWriteInst, address: int) -> None:
+    def register_write(self, inst: RegWriteInst | DmemReadInst, address: int) -> None:
         if not self.condition(inst.if_cond):
+            return
+        if isinstance(inst, DmemReadInst):
+            self.read_dmem(inst)
             return
         if inst.wr or inst.ww or inst.wp or inst.port:
             raise ValueError("Unsupported register write side effects")
@@ -255,6 +280,33 @@ class _Machine:
         )
         if inst.uf:
             self.flags = value
+
+    def read_dmem(self, inst: DmemReadInst) -> None:
+        if inst.wr or inst.op or inst.lit or inst.uf:
+            raise ValueError("Unsupported dmem read side effects")
+        if not isinstance(inst.addr, (Register, MemAddr)):
+            raise ValueError("Missing dmem read address")
+        address = (
+            self.value(inst.addr)
+            if isinstance(inst.addr, Register)
+            else inst.addr.value
+        )
+        if self.dmem is None:
+            raise ValueError("Missing compiled dmem for read")
+        if isinstance(self.dmem, np.ndarray) and (
+            self.dmem.ndim != 1 or self.dmem.dtype != np.int32
+        ):
+            raise ValueError("Compiled dmem must be a one-dimensional int32 array")
+        if not 0 <= address < len(self.dmem):
+            raise ValueError(f"Dmem word address out of range: {address}")
+        word = self.dmem[address]
+        if (
+            isinstance(word, bool)
+            or not isinstance(word, (int, np.integer))
+            or not -(2**31) <= int(word) < 2**31
+        ):
+            raise ValueError(f"Dmem word is not signed int32 at address {address}")
+        self.registers[inst.dst.canonical_name] = int(word)
 
     def jump(self, inst: JumpInst, address: int) -> int:
         if inst.uf:
@@ -308,7 +360,7 @@ class _Machine:
         following = address + inst.addr_inc
         if isinstance(inst, NopInst):
             return following
-        if isinstance(inst, RegWriteInst):
+        if isinstance(inst, (RegWriteInst, DmemReadInst)):
             self.register_write(inst, address)
         elif isinstance(inst, TimeInst):
             self.advance(inst)
@@ -417,8 +469,11 @@ def analyze_timing(
     TIME inc_ref advances reference. WAIT time validates its operand but changes
     no reference. The terminal unconditional self-jump is program termination.
     Layout boundaries are observed before execution; loops only label shots.
-    Supports inc_ref, known immediate/ALU/label register writes, TEST, known
-    jumps, timed port outputs and plain wave-memory updates. ALU supports copy,
+    Supports inc_ref, known immediate/ALU/label register writes, read-only dmem
+    loads from known word addresses, TEST, known jumps, timed port outputs and
+    plain wave-memory updates. Dmem loads require compiled signed int32 words;
+    missing/malformed data, unknown/out-of-range addresses and memory writes or
+    read side effects raise ValueError. ALU supports copy,
     add/subtract, bitwise AND/OR/XOR, signed 32-bit unary ABS and hardware
     low-four-bit SR/ASR/SL shifts. ABS rejects -2147483648 because its overflow
     result is not specified by the assembler.
@@ -432,7 +487,7 @@ def analyze_timing(
     if max_steps <= 0:
         raise ValueError("max_steps must be positive")
     decoded, end_address = _decode(compiled)
-    machine = _Machine(compiled.labels)
+    machine = _Machine(compiled.labels, compiled.dmem)
     recorder = _Shots(compiled.layout)
     address = min(decoded)
     for _ in range(max_steps):
