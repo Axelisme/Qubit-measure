@@ -244,17 +244,17 @@ def test_new_point_inherits_setup_general_with_fresh_creation_time(
     assert entry.setup.general.ext.flux_unit == "mA"
 
 
-@pytest.mark.parametrize("clone_from", [None, "source"])
+@pytest.mark.parametrize("creation", ["inherit", "clone", "parameters_only"])
 def test_new_point_copies_forward_minor_source_yaml(
-    entry: ResultEntry, clone_from: str | None
+    entry: ResultEntry, creation: str
 ) -> None:
     entry.setup.add_component("Q1", kind="fake/drive/a", rate=5000.0)
     with entry.setup.edit() as draft:
         draft.set_meta("Q1.rate", {"comment": "source value", "stderr": 1.0})
-    if clone_from is not None:
-        entry.new_point(clone_from)
+    if creation == "clone":
+        entry.new_point("source")
     source = entry.result_path / (
-        "parameters.yaml" if clone_from is None else "points/source/parameters.yaml"
+        "points/source/parameters.yaml" if creation == "clone" else "parameters.yaml"
     )
     document = YAML(typ="rt").load(source.read_text())
     document["format_version"] = "2.1"
@@ -266,9 +266,15 @@ def test_new_point_copies_forward_minor_source_yaml(
     write_yaml(source, document)
     before = source.read_bytes()
 
-    point = entry.new_point(
-        "copy", mode="inherit" if clone_from is None else "clone", clone_from=clone_from
-    )
+    if creation == "parameters_only":
+        entry.new_point("copy", mode="empty")
+        point = entry.initialize_point_parameters("copy")
+    else:
+        point = entry.new_point(
+            "copy",
+            mode="clone" if creation == "clone" else "inherit",
+            clone_from="source" if creation == "clone" else None,
+        )
 
     stored = YAML(typ="safe").load(
         (entry.result_path / "points/copy/parameters.yaml").read_text()
@@ -365,11 +371,13 @@ def test_add_component_requires_complete_values_and_runs_original_model(
 
 
 @pytest.mark.parametrize("stored_defaults", [True, False])
+@pytest.mark.parametrize("parameters_only", [False, True])
 def test_seed_keeps_generated_default_values_across_independent_edits_and_reload(
     entry: ResultEntry,
     notebook_kind: str,
     entry_roots: tuple[Path, Path],
     stored_defaults: bool,
+    parameters_only: bool,
 ) -> None:
     entry.setup.add_component("C1", kind=notebook_kind, gain=1.0, title="template")
     if not stored_defaults:
@@ -378,7 +386,11 @@ def test_seed_keeps_generated_default_values_across_independent_edits_and_reload
         template["components"]["C1"].pop("token")
         template["components"]["C1"].pop("timing")
         write_yaml(source, template)
-    point = entry.new_point("a")
+    if parameters_only:
+        entry.new_point("a", mode="empty")
+        point = entry.initialize_point_parameters("a")
+    else:
+        point = entry.new_point("a")
     token = point.C1.token
     assert token == entry.setup.C1.token
     entry.setup.C1.title = "new template"

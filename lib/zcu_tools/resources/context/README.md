@@ -1,6 +1,6 @@
 # `zcu_tools.resources.context` point-local module library
 
-**Last updated:** 2026-10-29，entry 與 point 的缺席 library 對稱
+**Last updated:** 2026-10-29，缺席 library 與明確空庫初始化
 
 **讀者：** framework-dev。Point-local module library 的讀取、編輯與來源契約。
 
@@ -48,6 +48,7 @@ Body、schema、conflict 或 I/O 失敗不發布候選。Body 中的 snapshot �
 Caller 透過 `ResultEntry.module_library(label)` 開啟 library，建立 point 由 ResultEntry 負責。
 Inherit 與 clone 都經 copy_library 複製合法 Specs 與 forward-minor 容器欄位，不改來源檔、不匯入事件或附件。
 來源缺 library 時，目的也保持缺檔。
+`library_store.create_empty_library(path)` 明確建立空庫，只供 caller 自有且未發布的目錄使用。既存目的以 FileExistsError 拒絕，不覆寫內容。離線遷移用它固定空庫 baseline；普通 empty point、讀取與空 edit 仍不建立 library。
 缺失的 child reference 在使用該欄位時報錯，不 cascade、不補 defaults。
 舊 flat 文件由 root `migrations/` 的離線工具轉換後使用。
 

@@ -6,6 +6,7 @@ from dataclasses import replace
 from pathlib import Path
 from uuid import uuid4
 
+from zcu_tools.resources.context.library_store import create_empty_library
 from zcu_tools.resources.document_names import LIBRARY_FILENAME, PARAMETERS_FILENAME
 from zcu_tools.resources.entry import PointView, ResultEntry
 
@@ -217,7 +218,9 @@ def create_point(
         staged, final = _paths(session.manifest, item)
         if staged.exists():
             shutil.rmtree(staged)
-        entry.new_point(item.temporary_label)
+        entry.new_point(item.temporary_label, mode="empty")
+        entry.initialize_point_parameters(item.temporary_label)
+        create_empty_library(entry.module_library(item.temporary_label).source_path)
         documents: dict[str, DocumentBaseline] = {}
         for name, kind in (
             (PARAMETERS_FILENAME, "point"),

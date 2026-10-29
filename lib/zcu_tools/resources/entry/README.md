@@ -48,6 +48,8 @@ Caller 可在 general.ext.flux_value／general.ext.flux_unit 記錄 global flux�
 
 `new_point` 的 mode 預設為 `"inherit"`，複製建立當下的 entry 參數、library 與 aliases。參數保留 general.ext、metadata 與可接受的 forward-minor 未知欄位，再更新 created_at。`mode="clone"` 必須帶 clone_from，從已發布 point 複製文件。inherit 與 empty 禁止帶 clone_from，不提供隱含 clone。`mode="empty"` 只建最小有效 parameters，包含標頭、目前 schema_version 與新的 general，不繼承任何使用者值，不建 library 或 aliases。New point 的 description=None 保留 inherit／clone 描述，empty 則沒有描述。字串明確設定描述，包括空字串。設定在本次建立與失敗清理範圍內完成。Setup 與 point 的修改、引用與快照互不影響。
 
+`initialize_point_parameters(label)` 將既有 point 的參數重新初始化為當下 setup，供離線遷移在自有、未發布的 empty point 使用。它與 inherit 共用鎖內 refresh、驗證、原始 YAML 與未知欄位保真、component defaults 和新 created_at。它不複製 library 或 aliases，呼叫端擁有失敗清理與後續發布。
+
 `ParameterContent` 在 capture 與序列化時只移除直接的 `general.entry_id`，保留其他未使用或未知內容，包括 `general.ext`。這不驗證整份文件，也不改來源檔案。
 
 `SetupView.refresh(strict=True)` 與 `PointView.refresh(strict=True)` 完整驗證候選後才安裝。ContextService 的明確 reload 與 watcher 使用這個入口，失敗保留已發布內容、revision 與 binding。一般 refresh 仍按需驗證，不因未使用的 component 欄位失敗。

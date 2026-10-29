@@ -494,7 +494,25 @@ class ResultEntry:
         with (destination / PARAMETERS_FILENAME).open("x", encoding="utf-8") as stream:
             YAML(typ="rt").dump(document, stream)
 
-    def _seed_point(self, destination: Path) -> None:
+    def initialize_point_parameters(self, label: str) -> PointView:
+        """Replace an existing point's parameters with the current setup template.
+
+        Use after new_point(mode="empty") for caller-owned, unpublished points.
+        Copy parameters only; never read or copy library or aliases. Under the
+        template lock, refresh and validate setup components, preserve raw YAML
+        and forward-minor unknown fields, metadata, description and general.ext,
+        and persist generated component defaults with a new UTC created_at.
+        The source stays unchanged. Return a newly bound view; prior captures
+        are not refreshed. Invalid labels, missing points, invalid setup content
+        or I/O errors propagate. Creation/publication rollback belongs to the
+        caller: a failure after copying may leave replaced point parameters.
+        """
+        self.use_point(label)
+        destination = _entry_path(self._result_path / "points", label)
+        self._initialize_point_parameters(destination)
+        return self.use_point(label)
+
+    def _initialize_point_parameters(self, destination: Path) -> None:
         # Copy the validated YAML snapshot while the template lock is held.
         with self._setup_store.locked():
             self._setup_store.refresh()
@@ -513,6 +531,9 @@ class ResultEntry:
                 draft.general.created_at = (
                     datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
                 )
+
+    def _seed_point(self, destination: Path) -> None:
+        self._initialize_point_parameters(destination)
         from zcu_tools.resources.context.library_store import copy_library
 
         copy_library(
