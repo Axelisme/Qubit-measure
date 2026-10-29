@@ -23,10 +23,17 @@ from zcu_tools.program.v2.ir.instructions import (
 from zcu_tools.program.v2.ir.io_instructions import PortWriteInst
 from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 from zcu_tools.program.v2.modular import ModularProgramV2
-from zcu_tools.program.v2.modules import Branch, Repeat, SoftDelay
+from zcu_tools.program.v2.modules import Branch, Join, LoadWord, Repeat, SoftDelay
+from zcu_tools.program.v2.modules.base import Module
 from zcu_tools.program.v2.modules.pulse import Pulse, PulseCfg
+from zcu_tools.program.v2.modules.readout import (
+    PulseReadout,
+    PulseReadoutCfg,
+    TablePulseReadout,
+)
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.program.v2.timeline import TimelineProgramV2
+from zcu_tools.program.v2.utils import readout_freq_words
 
 
 def _program(path: str) -> tuple[MyProgramV2, Callable[[], None]]:
@@ -359,6 +366,101 @@ def test_legacy_shared_pulse_sources_follow_nested_module_emissions():
     assert not any(
         name.startswith("native:pulse:") for names in outputs for name in names
     )
+
+
+@pytest.mark.parametrize("native", [False, True])
+@pytest.mark.parametrize(
+    "form", ["fixed", "runtime", "table", "repeat", "branch", "join"]
+)
+def test_readout_snapshot_labels_semantic_owner_and_author_children(native, form):
+    soccfg = make_mock_soccfg()
+    cfg = PulseReadoutCfg(
+        gen_ch=0,
+        ro_ch=0,
+        nqz=1,
+        freq=100,
+        gain=0.1,
+        waveform=ConstWaveformCfg(length=0.1),
+        ro_length=0.1,
+    )
+    readout = cfg.build("readout")
+    modules: list[Module] = [readout]
+    gen, adc = readout_freq_words(
+        soccfg, [100, 200], gen_ch=0, ro_ch=0, mixer_freq=None, nqz=1
+    )
+    if form == "runtime":
+        modules = [
+            LoadWord("frequency", gen, "scan", "freq_word"),
+            LoadWord("adc", adc, "scan", "adc_word"),
+            LoadWord("gain", [3276, 6552], "scan", "gain_word"),
+            PulseReadout(
+                "readout",
+                cfg,
+                freq_val="freq_word",
+                ro_freq_val="adc_word",
+                gain_val="gain_word",
+            ),
+        ]
+    elif form == "table":
+        modules = [
+            TablePulseReadout(
+                "readout", cfg, idx_reg="scan", freq_words=gen, ro_freq_words=adc
+            )
+        ]
+    elif form == "repeat" and not native:
+        modules = [Repeat("control", 2).add_content(readout)]
+    elif form == "branch":
+        modules = [
+            Branch("control", readout, SoftDelay("pause", 0.2), compare_by="scan")
+        ]
+    elif form == "join":
+        child = Pulse(
+            "author_child",
+            PulseCfg(
+                ch=1, nqz=1, freq=80, gain=0.2, waveform=ConstWaveformCfg(length=0.2)
+            ),
+        )
+        modules = [Join(readout, child)]
+
+    class Program(TimelineProgramV2):
+        def _initialize(self, cfg):
+            self.add_loop("scan", 2)
+            for module in modules:
+                self.declare(module)
+
+        def _body(self, cfg):
+            if form == "repeat":
+                with self.repeat("control", 2):
+                    self.emit(readout)
+            else:
+                for module in modules:
+                    self.emit(module)
+
+    prog = (
+        Program(soccfg)
+        if native
+        else ModularProgramV2(soccfg, modules=modules, sweep=[("scan", 2)])
+    )
+    assert _port_sources(prog.compiled_stream) == (
+        ["readout", "readout", "author_child"]
+        if form == "join"
+        else ["readout", "readout"]
+    )
+
+
+def _port_sources(snapshot: ir.CompiledStream) -> list[str]:
+    scopes: list[str] = []
+    sources: list[str] = []
+    for record in snapshot.records:
+        inst = record.instruction
+        if isinstance(inst, MetaInst) and inst.type == "SOURCE_START":
+            scopes.append(inst.name)
+        elif isinstance(inst, MetaInst) and inst.type == "SOURCE_END":
+            assert scopes.pop() == inst.name
+        elif isinstance(inst, PortWriteInst):
+            sources.append(scopes[-1])
+    assert not scopes
+    return sources
 
 
 def test_legacy_body_boundaries_exclude_qick_final_wait_and_delay():
