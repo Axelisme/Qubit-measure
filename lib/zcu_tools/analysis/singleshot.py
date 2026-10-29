@@ -121,8 +121,6 @@ def analyze_reference_iq(
     split = ordered.shape[1] // 2
     training, evaluation = ordered[:, :split], ordered[:, split:]
     centroids = training.mean(axis=1)
-    if any(first == second for first, second in combinations(centroids, 2)):
-        raise ValueError("Reference centroids must be distinct")
     train_predictions = nearest_centroid3(training, *centroids)
     evaluation_predictions = nearest_centroid3(evaluation, *centroids)
     confusion = np.stack(
@@ -175,8 +173,6 @@ def classify_reference_iq(
         raise ValueError("Acquired IQ must have a nonempty shot axis and finite shots")
     if centroids.shape != (3,) or not np.isfinite(centroids).all():
         raise ValueError("Reference centroids must have shape (3,) and be finite")
-    if len(np.unique(centroids)) != 3:
-        raise ValueError("Reference centroids must be distinct")
     predictions = nearest_centroid3(signals, *centroids)
     return np.stack(
         [(predictions == label).mean(axis=-1) for label in range(3)], axis=-1
