@@ -43,8 +43,14 @@ from ._modules import (
     editable_spec,
     module_specs,
 )
-from ._seeds import disabled_model_defaults, persistent_input
-from ._types import annotated_type, branch_metadata, union_type
+from ._seeds import disabled_model_defaults, persistent_input, selected_model
+from ._types import (
+    annotated_type,
+    branch_metadata,
+    branch_tag,
+    replace_models,
+    union_type,
+)
 from ._types import members as _members
 from .device_name import device_suggestions
 from .fixed_elements import FixedElementsForm
@@ -275,7 +281,8 @@ class Section:
     model is the generated FormModel class. core, tree and path retain those
     declarations. children maps ordinary model fields to sections; lists maps
     model-list fields to their shared element section. element_seeds maps list
-    fields to per-position initial-value sections. modules maps module fields
+    fields to per-position initial-value sections. branches maps native tagged
+    union fields to their generated branch sections. modules maps module fields
     to their conversion declarations. These mappings remain owned here.
     """
 
@@ -297,6 +304,7 @@ class Section:
         self.path = path
         self.children: dict[str, Section] = {}
         self.lists: dict[str, Section] = {}
+        self.branches: dict[str, tuple[Section, ...]] = {}
         self.element_seeds: dict[str, tuple[Section, ...]] = {}
         self.modules: dict[str, ModuleField] = {}
         namespace: dict[str, object] = {"__module__": "zcu_tools.gui.form_adapter.form"}
@@ -415,7 +423,7 @@ class Section:
                 return self._model_list_annotation(name, element_type, node)
         child_core = _section_type(info.annotation)
         if child_core is None:
-            return info.annotation
+            return self._tagged_annotation(name, info)
         child_tree = node if isinstance(node, Mapping) else {}
         child = Section(child_core, child_tree, (*self.path, name))
         self.children[name] = child
@@ -423,6 +431,28 @@ class Section:
             child.model | None
             if type(None) in _members(info.annotation)
             else child.model
+        )
+
+    def _tagged_annotation(self, name: str, info: FieldInfo) -> object:
+        """Project native tagged branches without replacing handwritten FormModels."""
+        members = _members(info.annotation)
+        models = tuple(
+            member
+            for member in members
+            if isinstance(member, type)
+            and issubclass(member, BaseModel)
+            and not issubclass(member, FormModel)
+        )
+        if (
+            len(models) < 2
+            or len(models) != len(members) - (type(None) in members)
+            or branch_tag(models) is None
+        ):
+            return info.annotation
+        branches = tuple(Section(model, {}, (*self.path, name)) for model in models)
+        self.branches[name] = branches
+        return replace_models(
+            info.annotation, {branch.core: branch.model for branch in branches}
         )
 
     def _model_list_annotation(
@@ -484,8 +514,19 @@ class Section:
             and not (info.default is None and name not in self.tree)
         }
 
-    def _native_defaults(self, data: Mapping[str, JsonValue]) -> dict[str, JsonValue]:
+    def _native_branches(self, data: Mapping[str, JsonValue]) -> dict[str, JsonValue]:
+        """Project serialized native defaults through their declared active branch."""
         result: dict[str, JsonValue] = {}
+        for name, branches in self.branches.items():
+            item = data.get(name)
+            if isinstance(item, dict):
+                model = selected_model(self.core.model_fields[name].annotation, item)
+                branch = next(branch for branch in branches if branch.core is model)
+                result[name] = branch.native_data(item)
+        return result
+
+    def _native_defaults(self, data: Mapping[str, JsonValue]) -> dict[str, JsonValue]:
+        result = self._native_branches(data)
         for name, field in self.modules.items():
             native = data.get(name)
             if isinstance(native, dict):
@@ -560,6 +601,7 @@ class Section:
     def native_data(self, data: Mapping[str, JsonValue]) -> dict[str, JsonValue]:
         """Project a native element default recursively, without reading sources."""
         result = dict(data)
+        result.update(self._native_branches(data))
         for name, field in self.modules.items():
             item = result.get(name)
             if isinstance(item, dict):
@@ -651,7 +693,11 @@ class Section:
                 ) from exc
         for name, child in self.lists.items():
             child._share_hidden_paths(self.element_seeds.get(name, ()))
-        for child in (*self.children.values(), *self.lists.values()):
+        for child in (
+            *self.children.values(),
+            *self.lists.values(),
+            *(branch for branches in self.branches.values() for branch in branches),
+        ):
             child.bind_templates(catalog, adapter)
         for seeds in self.element_seeds.values():
             for seed in seeds:
@@ -690,6 +736,23 @@ class Section:
                 raw[name] = item.values
         return raw
 
+    def _branch_raw(
+        self,
+        value: BaseModel,
+        env: FormEnv,
+        errors: dict[FormWritePath, str],
+        prefix: FormWritePath,
+    ) -> dict[str, CfgInputValue]:
+        """Lower only the validated active branch of each generated native union."""
+        raw: dict[str, CfgInputValue] = {}
+        for name, branches in self.branches.items():
+            item: object = getattr(value, name)
+            for branch in branches:
+                if isinstance(item, branch.model):
+                    raw[name] = branch.to_raw(item, env, errors, (*prefix, name))
+                    break
+        return raw
+
     def to_raw(
         self,
         value: BaseModel,
@@ -719,6 +782,7 @@ class Section:
             item: object = getattr(value, name)
             if isinstance(item, BaseModel):
                 raw[name] = child.to_raw(item, env, errors, (*prefix, name))
+        raw.update(self._branch_raw(value, env, errors, prefix))
         for name, field in self.modules.items():
             item: object = getattr(value, name)
             if item is None:

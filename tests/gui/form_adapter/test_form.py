@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import typing
 from collections.abc import Mapping
-from typing import Annotated
+from typing import Annotated, Literal
 
 import pytest
 from pydantic import Field, JsonValue, create_model
@@ -19,6 +19,126 @@ class SweepSection(ConfigBase):
     """A sweep section is declared once, by the core."""
 
     freq: Annotated[SweepCfg, FieldMeta(label="Frequency", unit="MHz")]
+
+
+class FrequencyBranch(ConfigBase):
+    """A native tagged section with an editable frequency sweep."""
+
+    mode: Literal["frequency"] = "frequency"
+    sweep: SweepCfg
+
+
+class DelayBranch(ConfigBase):
+    """A second native branch with the same sweep contract."""
+
+    mode: Literal["delay"] = "delay"
+    sweep: SweepCfg
+
+
+class TaggedSweepCfg(ConfigBase):
+    branch: Annotated[FrequencyBranch | DelayBranch, Field(discriminator="mode")]
+
+
+class DirectSweepCfg(ConfigBase):
+    branch: FrequencyBranch
+
+
+@pytest.mark.parametrize("model", [DirectSweepCfg, TaggedSweepCfg])
+@pytest.mark.parametrize(
+    ("sweep", "fields"),
+    [
+        ({"kind": "linrange", "start": 10, "stop": 14, "n": 3}, ["start", "stop", "n"]),
+        ({"kind": "center", "center": 12, "span": 4, "n": 3}, ["center", "span", "n"]),
+        (
+            {"kind": "linrange_step", "start": 10, "stop": 14, "step": 2},
+            ["start", "stop", "step"],
+        ),
+        (
+            {"kind": "center_step", "center": 12, "span": 4, "step": 2},
+            ["center", "span", "step"],
+        ),
+    ],
+)
+def test_nested_sweep_projects_editable_coordinates_and_lowers_to_native(
+    model: type[DirectSweepCfg] | type[TaggedSweepCfg],
+    sweep: JsonValue,
+    fields: list[str],
+) -> None:
+    env = FormEnv()
+    form = form_adapter.Form(model, {})
+    state = FormState(
+        FormInput(
+            form.model,
+            {"branch": {"mode": "frequency", "sweep": sweep}},
+        )
+    )
+    assert [
+        child.name for child in state.describe(("branch", "sweep"), env).children
+    ] == fields
+    cfg = form.to_cfg(require_result(state, env), env)
+    assert cfg == model(
+        branch=FrequencyBranch(sweep=SweepCfg(start=10, stop=14, expts=3, step=2))
+    )
+
+
+class DefaultTaggedSweepCfg(ConfigBase):
+    branch: Annotated[FrequencyBranch | DelayBranch, Field(discriminator="mode")] = (
+        Field(
+            default_factory=lambda: FrequencyBranch(
+                sweep=SweepCfg(start=10, stop=14, expts=3, step=2)
+            )
+        )
+    )
+
+
+def test_native_tagged_default_projects_sweep_without_changing_coordinates() -> None:
+    env = FormEnv()
+    form = form_adapter.Form(DefaultTaggedSweepCfg, {})
+    state = FormState(form.default_input(env))
+    assert state.input.data == {
+        "branch": {
+            "mode": "frequency",
+            "sweep": {"kind": "linrange", "start": 10, "stop": 14, "n": 3},
+        }
+    }
+    assert form.to_cfg(require_result(state, env), env) == DefaultTaggedSweepCfg()
+
+
+class OptionalTaggedSweepCfg(ConfigBase):
+    branch: (
+        Annotated[FrequencyBranch | DelayBranch, Field(discriminator="mode")] | None
+    ) = None
+
+
+def test_tagged_branch_selection_uses_shared_sweep_conversions_and_missing_defaults() -> (
+    None
+):
+    env = FormEnv()
+    form = form_adapter.Form(OptionalTaggedSweepCfg, {})
+    state = FormState(form.default_input(env))
+    state.select(("branch",), {"mode": "frequency"}, env)
+    result = state.result(env)
+    assert isinstance(result, FormErrors)
+    assert set(result.messages) == {
+        ("branch", "sweep", name) for name in ("start", "stop", "n")
+    }
+    state.write(
+        {
+            ("branch", "sweep", "start"): 10,
+            ("branch", "sweep", "stop"): 14,
+            ("branch", "sweep", "n"): 3,
+        },
+        env,
+    )
+    state.select(("branch", "sweep"), {"kind": "center_step"}, env)
+    state.select(("branch",), {"mode": "delay"}, env)
+    assert state.input.data["branch"] == {
+        "mode": "delay",
+        "sweep": {"kind": "center_step", "center": 12, "span": 4, "step": 2},
+    }
+    assert form.to_cfg(require_result(state, env), env) == OptionalTaggedSweepCfg(
+        branch=DelayBranch(sweep=SweepCfg(start=10, stop=14, expts=3, step=2))
+    )
 
 
 class ScalarCfg(ConfigBase):
