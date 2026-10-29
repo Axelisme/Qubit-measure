@@ -109,6 +109,34 @@ Amplitude／Length Rabi 保留單 ADC raw IQ 與聯合 fit，未校準時只略�
 Pulse 更新 classifier，單 tone Mux 更新 tones.0.classifier，不支援多 tone 分析。
 Check 的 raw Run 不要求 classifier，到分析才從 saved cfg 要求 circle 與 radius。
 
+### Herald 規格與 host post-selection
+
+Library readout cfg 擁有 herald 使用的 classifier。
+單 qubit heralded T1 用同一個 `PulseReadout` instance 發射 herald 與最終讀出，兩者共用 readout 設定。
+判斷圓或 linear 參數取自該 readout 的 classifier，不另存一組 herald 校準。
+
+Readout 公開工具依自身發射序產生具名 `HeraldSpec`，作者明確交給 acquire。
+Acquisition 不掃 program registry，也不查 live library。
+Program acquisition 擁有 ground mask、通過數加權與每點統計。
+它先套 herald 遮罩，再處理 signal 的 IQ、typed classify 或 QICK threshold。
+硬體與模擬共用這段後選擇處理，沒有新增逐發持久資料。
+實際 API、資料形狀與失敗條件見 [program 契約](../../lib/zcu_tools/program/README.md#herald-declarations)。
+
+實驗層以獨立的 `heralding/*` 組合序列，不在既有實驗加入 Reset 模組。
+第一階段交付單 qubit pulse-readout T1。Program accessor 提供每點通過比例，實驗的 Result 保存同網格 `pass_fraction`。
+這是 host post-selection，不是 active reset；不包含 mux herald 或雙 qubit 四態聯合分類。
+操作與保存方式見 [Heralded T1 guide](../../zcu_lab/v2/heralding/t1/guide.md)。
+
+使用者於 2026-10-29 回答先做取數層 post-selection、直接做 FPGA active reset 或兩者並行的選項時裁決：
+「那不做active reset，讓底層支援post-selection，上層使用新實驗組，比如heralding/*」。
+同日，對分類參數由作者自取、acquire 自動掃描，或 readout 工具產生具名規格再由作者明傳三個選項，使用者選 C：「我也傾向C」。
+對只做 mux 或也做單 qubit pulse readout 的範圍問題，使用者選後者並要求先做單 qubit：「3我反而想先測試在單qubit，因為比較簡單，B」。
+對實驗層不存通過比例、Result 存同網格 `pass_fraction`，或只記整體平均三個選項，使用者選 B：「5B」。
+
+依賴沿用 [[0072]] 的分層與 `.importlinter` C8、C15、C16。
+Experiment 使用 program 的後選擇能力，lab core 不依賴 GUI，framework 不反向載入 lab。
+這些規則不改變真實 acquire 與模擬的執行邊界，也不新增依賴方向。
+
 ### Owner 不變，caller 不重建舊配置
 
 `cfg_model` 擁有 Spec、cfg 驗證、引用展開與參數設定。
