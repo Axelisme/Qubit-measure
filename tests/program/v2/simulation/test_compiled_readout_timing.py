@@ -1,6 +1,7 @@
 """Runtime readout timing through public native compile/request seams."""
 
 import pytest
+from qick.asm_v2 import QickSweep1D
 
 from tests.program.v2.simulation._compiled_support import program, request
 
@@ -141,6 +142,23 @@ def test_rep_carried_config_changing_readout_is_rejected(frequency, phase):
         ValueError, match=r"reps.*observable.*carried.*(register|memory).*"
     ):
         request(prog, env)
+
+
+def test_later_equal_config_preserves_previous_scan_points_config():
+    def initialize(p):
+        p.add_loop("scan", 2)
+
+    def body(p):
+        p.send_readoutconfig(0, "ro", t=QickSweep1D("scan", 0, 0.1))
+        p.pulse(0, "p", t=0)
+
+    prog, env = program(body, initialize, reps=1, config_time=None)
+    result = request(prog, env)
+    reads = [result.materialize_point(i).readouts[0] for i in range(2)]
+    assert [read.frequency_mhz[0] for read in reads] == pytest.approx(
+        [100, 100], abs=1e-5
+    )
+    assert [read.phase_deg[0] for read in reads] == [0, 0]
 
 
 def test_rep_carried_config_without_output_change_is_accepted():

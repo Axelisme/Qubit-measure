@@ -401,6 +401,10 @@ def _try_vector(
     outputs.begin(machine, np.arange(size, dtype=np.int64))
     for record in body:
         _located_execute(record, machine, outputs)
+    # Speculative lanes lack cross-point config state. Prove independence before
+    # resolving reads; otherwise only ordered execution can validate their windows.
+    if not outputs.configs_independent(machine):
+        return False
     try:
         outputs.finish(machine)
     except (ValueError, KeyError, IndexError) as exc:
