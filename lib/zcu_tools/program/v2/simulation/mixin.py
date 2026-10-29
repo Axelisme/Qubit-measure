@@ -1,6 +1,6 @@
 """Single synchronous simulation entry ahead of the original acquisition mixins."""
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from inspect import Signature, signature
 from typing import TYPE_CHECKING, Literal, overload
 
@@ -8,6 +8,7 @@ import numpy as np
 from numpy.typing import NDArray
 from qick.qick_asm import AcquireMixin
 
+from zcu_tools.cfg_model import ReadoutClassifier
 from zcu_tools.core.simulation import AcquireRequest, RoundStatistics
 from zcu_tools.program.acquisition import CancelFlagProtocol, ImproveAcquireMixin
 from zcu_tools.progress_bar import make_pbar
@@ -106,9 +107,8 @@ class SimulationAcquireMixin(ImproveAcquireMixin):
         assert self.acquire_params is not None
         assert self.loop_dims is not None
         params = self.acquire_params
-        self._simulation_needs_raw = any(
-            params.get(key) is not None
-            for key in ("threshold", "ge_radius", "trackers")
+        self._simulation_needs_raw = self._classify is not None or any(
+            params.get(key) is not None for key in ("threshold", "trackers")
         )
         self._simulation_normalization: list[tuple[int | None, float | None]] = []
         for ch, ro in self._program().ro_chs.items():
@@ -251,6 +251,7 @@ class SimulationAcquireMixin(ImproveAcquireMixin):
         *,
         rounds: int = 1,
         step_rounds: Literal[False] = False,
+        classify: Mapping[int, ReadoutClassifier] | None = None,
         **kwargs: object,
     ) -> list[NDArray[np.float64]]: ...
 
@@ -261,28 +262,47 @@ class SimulationAcquireMixin(ImproveAcquireMixin):
         *,
         rounds: int = 1,
         step_rounds: Literal[True],
+        classify: Mapping[int, ReadoutClassifier] | None = None,
         **kwargs: object,
     ) -> None: ...
 
     @overload
     def acquire(
-        self, soc: object, *args, rounds: int = 1, **kwargs
+        self,
+        soc: object,
+        *args,
+        rounds: int = 1,
+        classify: Mapping[int, ReadoutClassifier] | None = None,
+        **kwargs,
     ) -> list[NDArray[np.float64]] | None: ...
 
     def acquire(
-        self, soc, *args, rounds: int = 1, **kwargs
+        self,
+        soc,
+        *args,
+        rounds: int = 1,
+        classify: Mapping[int, ReadoutClassifier] | None = None,
+        **kwargs,
     ) -> list[NDArray[np.float64]] | None:
-        """Return averaged IQ for omitted/False step_rounds.
+        """Return averaged IQ or explicit classify populations, preserving ADC order.
 
-        True prepares hardware and returns None; SimulationSoc raises ValueError
+        classify maps every declared ADC number to circle/linear calibration.
+        Populations end in (g, e), using raw sums divided by ADC length without
+        offset subtraction. Omission retains IQ. Missing/extra ADC keys or a
+        circle without a Post radius raise ValueError before acquiring shots.
+        True step_rounds prepares hardware and returns None; SimulationSoc raises ValueError
         instead, before admission. Typing is precise with only soc positional;
         extra positional options or a dynamic bool retain the union.
         Other acquisition errors and cancellation follow the normal pipeline.
         """
         if not isinstance(soc, SimulationSoc):
-            return super().acquire(soc, *args, rounds=rounds, **kwargs)
+            return super().acquire(
+                soc, *args, rounds=rounds, classify=classify, **kwargs
+            )
         with self._simulation_call(soc, "integrated", kwargs):
-            return super().acquire(soc, *args, rounds=rounds, **kwargs)
+            return super().acquire(
+                soc, *args, rounds=rounds, classify=classify, **kwargs
+            )
 
     @overload
     def acquire_decimated(

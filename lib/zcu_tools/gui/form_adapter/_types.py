@@ -40,6 +40,28 @@ def annotated_type(annotation: object, metadata: object) -> object:
     return methodcaller("__getitem__", (annotation, metadata))(Annotated)
 
 
+def branch_tag(models: tuple[type[BaseModel], ...]) -> str | None:
+    """Find a shared Literal field whose values distinguish every model branch.
+
+    Return None without a common nonoverlapping tag. Ordinary constrained
+    Literal fields with overlapping values do not identify a union branch.
+    """
+    if not models:
+        return None
+    for name in models[0].model_fields:
+        choices = [
+            get_args(info.annotation)
+            if (info := model.model_fields.get(name)) is not None
+            and get_origin(info.annotation) is Literal
+            else ()
+            for model in models
+        ]
+        values = [value for tags in choices for value in tags]
+        if all(choices) and len(values) == len(set(values)):
+            return name
+    return None
+
+
 def type_tag(model: type[BaseModel]) -> str | None:
     info = model.model_fields.get("type")
     if info is not None and get_origin(info.annotation) is Literal:

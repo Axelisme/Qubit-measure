@@ -2,6 +2,7 @@
 
 from collections.abc import Generator, Mapping
 from inspect import signature
+from typing import Literal
 
 import pytest
 from pydantic import JsonValue
@@ -12,7 +13,7 @@ from zcu_tools.gui.app.measure.services.form_contracts import (
     CfgPreconditionReason,
 )
 from zcu_tools.gui.form import FormEnv, FormErrors, FormInput, FormInputRejected
-from zcu_tools.gui.form_adapter import Form, FormContext
+from zcu_tools.gui.form_adapter import FixedElements, Form, FormContext
 from zcu_tools.gui.session.context_types import SavedPoint
 from zcu_tools.gui.session.parameters import ParameterContext
 from zcu_tools.resources.context.library import (
@@ -26,6 +27,26 @@ from zcu_tools.resources.entry.schema import (
     PointDocument,
     PointGeneral,
 )
+
+from tests.gui.form_adapter._indexed_models import NativeGroup, NativeTone, indexed_tree
+
+
+class ExplicitChoiceTone(NativeTone):
+    # Literal choices retain explicit overrides without a generated union converter.
+    choice: Literal["first", "second"] = "first"
+
+
+class ExplicitChoiceGroup(NativeGroup):
+    tones: list[ExplicitChoiceTone]
+
+
+def explicit_choice_indexed_form() -> Form[ExplicitChoiceGroup]:
+    """Exercise host selection retention independently of generated union converters."""
+    return Form(
+        ExplicitChoiceGroup,
+        indexed_tree(),
+        fixed_elements=(FixedElements(("tones",), "name", ("participants",)),),
+    )
 
 
 def test_run_invalid_reason_counts_remaining_field_errors() -> None:
@@ -78,7 +99,7 @@ def test_run_invalid_reason_is_readonly_during_notification() -> None:
 
 
 def test_elements_aggregate_keeps_partial_values_and_errors_without_recapture():
-    from tests.gui.form_adapter._indexed_models import indexed_env, indexed_form
+    from tests.gui.form_adapter._indexed_models import indexed_env
 
     captures = []
 
@@ -87,7 +108,7 @@ def test_elements_aggregate_keeps_partial_values_and_errors_without_recapture():
         return resource_api.TabFormSources(indexed_env())
 
     resource = resource_api.TabFormResource(
-        lambda _ctx: indexed_form(),
+        lambda _ctx: explicit_choice_indexed_form(),
         capture=capture,
         mutation_allowed=lambda: True,
     )
@@ -98,7 +119,7 @@ def test_elements_aggregate_keeps_partial_values_and_errors_without_recapture():
         resource.write(
             {("tones", 0, "phase"): {"expr": "1 / 0"}, ("participants",): [1]}
         )
-        resource.select(("tones", 1, "sweep"), {"kind": "center"})
+        resource.select(("tones", 1, "choice"), "second")
         before, base = resource.input, resource.editor_state.base
         observed = resource.read_elements(("tones",))
         assert [(item.index, item.name, item.path) for item in observed.elements] == [
@@ -116,7 +137,8 @@ def test_elements_aggregate_keeps_partial_values_and_errors_without_recapture():
         assert hasattr(second, "selections"), (
             "Aggregate must retain authored selection overrides"
         )
-        assert second.selections == {("tones", 1, "sweep"): {"kind": "center"}}
+        assert second.selections == {("tones", 1, "choice"): "second"}
+        assert second.input["choice"] == "second"
         assert second.input["sweep"] == {
             "kind": "linrange",
             "start": 10,
@@ -443,23 +465,24 @@ def test_refresh_preserves_authored_expression_and_direct_defaults() -> None:
 def test_refresh_retains_explicit_selections_and_reports_missing_library_source() -> (
     None
 ):
-    from tests.gui.form_adapter._indexed_models import indexed_env, indexed_form
+    from tests.gui.form_adapter._indexed_models import indexed_env
 
     env = indexed_env()
     resource = resource_api.TabFormResource(
-        lambda _ctx: indexed_form(),
+        lambda _ctx: explicit_choice_indexed_form(),
         capture=lambda _aliases: resource_api.TabFormSources(env),
         mutation_allowed=lambda: True,
     )
     try:
-        resource.select(("tones", 1, "sweep"), {"kind": "center"})
+        resource.select(("tones", 1, "choice"), "second")
         resource.write({("tones", 0, "phase"): {"expr": "unfinished +"}})
         original = resource.input
+        assert original.selections == {("tones", 1, "choice"): "second"}
         env = FormEnv()
         resource.refresh_sources()
         assert resource.input.data == original.data
         assert resource.input.selections == original.selections
-        assert resource.input.selections[("tones", 1, "sweep")] == {"kind": "center"}
+        assert resource.input.selections[("tones", 1, "choice")] == "second"
         errors = resource.preview().errors
         assert errors is not None
         assert ("tones", 0, "phase") in errors.messages

@@ -1,6 +1,6 @@
 # `zcu_tools.program` — QICK integration
 
-**Last updated:** 2026-10-27
+**Last updated:** 2026-10-29
 
 **讀者：** framework-dev。QICK 整合、程式建構與 acquisition 依賴速查。
 
@@ -9,6 +9,26 @@
 ## Program 層定位
 
 `acquisition.py` 擴充 QICK 的 `AcquireMixin`，負責 acquisition 的型別封裝、追蹤、提前停止與 round hook。`v2/base.py` 定義 v2 program 基底 `MyProgramV2`；它使用這些 acquisition mixin，但負責的是 v2 program 結構，兩者不是同一種 base。
+
+## Explicit readout classification
+
+`acquire(soc, classify=...)` accepts a `Mapping[int, ReadoutClassifier]`.
+Keys are ADC channel numbers, not declaration positions, and must exactly match
+the declared ADCs. Missing or extra keys fail before transport acquisition.
+Omitting classify retains ordinary IQ acquisition. The old
+`g_center/e_center/ge_radius` acquisition keywords are removed.
+
+Authors call `program.v2.modules.readout.classification_parameters(cfg)` on
+their readout cfg and pass the result explicitly. Acquisition does not discover
+calibration through a program registry. Circle requires a Post radius and returns
+ground/excited populations; Other is `1-g-e`. Linear returns two populations,
+with excited defined by `real(IQ * exp(1j*angle)) > threshold`; equality is ground.
+Angle is radians, opposite QICK's projection-angle sign. Both modes normalize
+raw sums by each ADC's rounded integration length without subtracting IQ offset,
+regardless of `remove_offset`. Simulation materializes raw shots for this same
+classification pipeline instead of returning compact IQ means.
+`classification_parameters(cfg, require_other=True)` rejects linear and reports
+missing circle radius with a GE Post instruction.
 
 ## Shot time
 
@@ -35,7 +55,7 @@
 - 擴充掛點：
   - `TrackerMixin.finish_round()`：利用原生 `self.acc_buf`、`self.ro_chs`、`self.avg_level` 更新 tracker。
   - `RoundHookMixin.finish_round()`：每 completed round 呼叫 `round_hook`，輸入增量摘要資料與同一個 stop flag。
-  - `SingleShotMixin._process_accumulated()`：覆寫原生 threshold 路徑，新增 population radius 分類。
+  - `SingleShotMixin._process_accumulated()`：保留原生 IQ／threshold 路徑，明確傳入 classify 時回傳 g/e populations。
 - 相容性關鍵：
   - 擴充層維持 `AcquireMixin` 的 `extra_args` 傳遞模式，避免破壞原生 acquire 參數流。
   - 若非 `accumulated` 或有 threshold 時，部分統計路徑會顯式 `NotImplementedError`，這是刻意防呆。

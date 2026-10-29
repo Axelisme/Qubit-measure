@@ -8,7 +8,6 @@ from typing import Annotated, ClassVar, Literal
 import numpy as np
 from matplotlib.axes import Axes
 from numpy.typing import NDArray
-from pydantic import field_serializer
 from zcu_tools.analysis.fitting.singleshot_rabi import (
     RabiJointFitResult,
     fit_rabi_joint,
@@ -26,7 +25,10 @@ from zcu_tools.program.v2 import Pulse, Readout, Reset, SweepCfg
 
 from zcu_lab.v2.singleshot.plot_rabi import RabiJointPlotOptions, plot_rabi_joint
 from zcu_lab.v2.support import live_line
-from zcu_lab.v2.support.singleshot.util import raw_shots_to_signal
+from zcu_lab.v2.support.singleshot.util import (
+    rabi_preview_classifier,
+    raw_shots_to_signal,
+)
 
 
 @dataclass(frozen=True)
@@ -57,14 +59,6 @@ class LenRabiCfg(ConfigBase):
     readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
     length: Annotated[SweepCfg, FieldMeta(label="Length", unit="us")]
     shots: Annotated[int, FieldMeta(label="Shots")]
-    g_center: Annotated[complex, FieldMeta(label="Ground center")]
-    e_center: Annotated[complex, FieldMeta(label="Excited center")]
-    radius: Annotated[float, FieldMeta(label="Classification radius")]
-
-    @field_serializer("g_center", "e_center")
-    def serialize_center(self, value: complex) -> str:
-        """Keep experiment comments JSON-safe with a lossless complex literal."""
-        return str(value)
 
 
 @dataclass(frozen=True)
@@ -103,8 +97,9 @@ class LenRabiExp(Experiment[LenRabiResult, LenRabiCfg]):
         in us and complex IQ shaped (Nlength, shots), not averaged populations.
         Later analysis jointly fits Rabi dynamics and readout distributions.
 
-        Only const and flat_top waveforms are supported. cfg supplies distinct
-        finite G/E centers and a positive finite radius for the live preview.
+        Only const and flat_top waveforms are supported. cfg.readout supplies
+        an optional circle and radius for live preview. Without a classifier,
+        raw acquisition and joint fitting still work.
         Acquisition requires exactly one readout channel and raises on an
         unexpected shot-buffer shape.
         """
@@ -112,6 +107,7 @@ class LenRabiExp(Experiment[LenRabiResult, LenRabiCfg]):
         # Set up one raw-shot cloud per length without changing the caller cfg.
         soc, soccfg = context.soc, context.soccfg
         cfg = deepcopy(cfg)
+        classifier = rabi_preview_classifier(cfg.readout)
 
         assert cfg.qub_pulse.waveform.style in ["const", "flat_top"], (
             "This method only supports const and flat_top pulse style"
@@ -132,19 +128,25 @@ class LenRabiExp(Experiment[LenRabiResult, LenRabiCfg]):
                 line.set_label(label)
             ax.legend()
 
-        viewer = live_line(
-            context.plots,
-            "measurement",
-            "Length (us)",
-            "Signal",
-            num_lines=3,
-            configure_axes=configure_axes,
+        viewer = (
+            None
+            if classifier is None
+            else live_line(
+                context.plots,
+                "measurement",
+                "Length (us)",
+                "Signal",
+                num_lines=3,
+                configure_axes=configure_axes,
+            )
         )
 
         def update_view(raw_iq: NDArray[np.complex128]) -> None:
+            if viewer is None or classifier is None or classifier.radius is None:
+                return
             acquired_rows = np.all(np.isfinite(raw_iq), axis=1)
             populations = classify_rabi_iq(
-                raw_iq, cfg.g_center, cfg.e_center, cfg.radius
+                raw_iq, classifier.g_center, classifier.e_center, classifier.radius
             )
             populations[~acquired_rows] = np.nan
             other = 1.0 - populations.sum(axis=1)

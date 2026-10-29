@@ -504,9 +504,13 @@ Primary `fit_i` plots and Post `post_i` diagnostics. Check shot count and pulse
 selections in the fixed Run conditions.
 
 The recipe fits Primary and Post before asking about Apply. It then saves raw shots and completed artifacts.
-Primary candidates update `ext.readout_cal.fidelity`, `sigma`, `g_center` and
-`e_center`. Post candidates update `radius` and the per-qubit 3x3
-`confusion_matrix`. This is not a four-state joint assignment calibration.
+Each phase proposes one complete readout module replacement. Primary updates
+successful tones with center-only circle classifiers; Post includes radius and
+the 3×3 confusion matrix. Failed tones keep their library classifier. One Apply
+batch accepts Primary before Post. Separate Apply calls use the last complete
+replacement; Primary after Post removes radius and matrix. Fidelity and sigma
+remain analysis diagnostics, not point values. This is not a four-state joint
+assignment calibration.
 Review cluster separation and both analysis stages before
 [Apply](#save-review-and-apply).
 [The GE guide](../v2/mux/singleshot_ge/guide.md) explains the diagnostics.

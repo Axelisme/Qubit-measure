@@ -24,7 +24,7 @@ from zcu_lab.v2.singleshot.t1.t1_with_tone.core import (
     T1WithToneResult,
 )
 from zcu_lab.v2.singleshot.t1.t1_with_tone.form import make_form
-from zcu_lab.v2.support.measure.singleshot_shared import read_confusion_matrix
+from zcu_lab.v2.support.singleshot.util import readout_confusion_matrix
 
 # The numeric t1 is written to the t1_with_tone parameter context key.
 SsT1ToneRunResult: TypeAlias = RunRecord[T1WithToneCfg, T1WithToneResult]
@@ -33,7 +33,9 @@ SsT1ToneRunResult: TypeAlias = RunRecord[T1WithToneCfg, T1WithToneResult]
 def _analyze(
     req: AnalyzeRequest[SsT1ToneRunResult, None], *, plots: Plots
 ) -> T1WithToneAnalysis:
-    confusion = read_confusion_matrix(req.parameters)
+    confusion = readout_confusion_matrix(
+        None if req.run_result.cfg is None else req.run_result.cfg.readout
+    )
     return T1WithToneExp().analyze(
         req.run_result,
         T1WithToneAnalyzeOptions(confusion_matrix=confusion),

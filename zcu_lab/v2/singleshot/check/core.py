@@ -15,6 +15,7 @@ from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.acquisition import StoppedPartialAcquireError
 from zcu_tools.program.v2 import Pulse, Readout, Reset
+from zcu_tools.program.v2.modules.readout import PulseReadoutCfg, circle_classifier
 
 from zcu_lab.v2.singleshot.plot import plot_with_classified
 from zcu_lab.v2.support.singleshot.util import raw_shots_to_signal
@@ -51,9 +52,6 @@ class CheckCfg(ConfigBase):
 
 @dataclass(frozen=True)
 class CheckAnalyzeOptions:
-    g_center: complex
-    e_center: complex
-    radius: float
     max_point: int = 5000
 
 
@@ -74,8 +72,8 @@ class CheckExp(Experiment[CheckResult, CheckCfg]):
 
         Repeat optional reset, optional init pulse, probe pulse, then readout
         for cfg.shots shots. Return shot indices and one complex IQ per shot,
-        not an averaged response. Analyze classifies this cloud with supplied
-        G/E centers and radius to inspect preparation and readout separation.
+        not an averaged response. Analyze uses the saved readout's circle
+        to inspect preparation and readout separation. Raw Run needs no classifier.
 
         Acquisition uses one round and cfg.shots reps on a copied cfg, and
         raw-shot conversion requires exactly one readout channel.
@@ -124,8 +122,31 @@ class CheckExp(Experiment[CheckResult, CheckCfg]):
         *,
         plots: Plots,
     ) -> None:
+        """Publish a classified IQ scatter from saved cfg, returning no fit.
+
+        source supplies raw ADC/length IQ and the sole ADC's circle, without
+        subtracting offset. options.max_point bounds displayed points. Missing
+        cfg/classifier, linear, multiple ADCs or missing radius raise ValueError;
+        missing radius prompts GE Post. No captured or live point fills gaps.
+        """
         signals = source.result.signals
-        g_center, e_center, radius = options.g_center, options.e_center, options.radius
+        if source.cfg is None:
+            raise ValueError("Check analysis requires saved readout cfg")
+        readout = source.cfg.readout
+        if isinstance(readout, PulseReadoutCfg):
+            ro_ch = readout.ro_ch
+        else:
+            if len(readout.tones) != 1:
+                raise ValueError("Check analysis requires exactly one readout ADC")
+            ro_ch = readout.tones[0].ro_ch
+        classifier = circle_classifier(readout, ro_ch=ro_ch)
+        if classifier.radius is None:
+            raise ValueError("Check analysis requires radius; run singleshot GE Post")
+        g_center, e_center, radius = (
+            classifier.g_center,
+            classifier.e_center,
+            classifier.radius,
+        )
         _, ax = plots.subplots("fit", figsize=(6, 6))
 
         mask_g, mask_e, mask_o = classify_result(signals, g_center, e_center, radius)

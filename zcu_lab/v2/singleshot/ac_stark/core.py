@@ -8,7 +8,6 @@ import numpy as np
 from matplotlib.axes import Axes
 from matplotlib.image import NonUniformImage
 from numpy.typing import NDArray
-from pydantic import field_serializer
 from zcu_tools.analysis.singleshot import (
     calc_populations,
     correct_populations,
@@ -22,6 +21,7 @@ from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import GainSweep, Pulse, Readout, Reset, SweepCfg, sweep2param
+from zcu_tools.program.v2.modules.readout import classification_parameters
 from zcu_tools.utils.process import minus_background
 
 from zcu_lab.v2.support import live_heatmap, live_line
@@ -68,13 +68,6 @@ class AcStarkCfg(ConfigBase):
     readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
     gain: Annotated[GainSweep, FieldMeta(label="Gain", unit="a.u.")]
     freq: Annotated[SweepCfg, FieldMeta(label="Frequency", unit="MHz")]
-    g_center: Annotated[complex, FieldMeta(label="Ground center")]
-    e_center: Annotated[complex, FieldMeta(label="Excited center")]
-    radius: Annotated[float, FieldMeta(label="Classification radius")]
-
-    @field_serializer("g_center", "e_center")
-    def serialize_center(self, value: complex) -> str:
-        return str(value)
 
 
 @dataclass(frozen=True)
@@ -128,14 +121,15 @@ class AcStarkExp(Experiment[AcStarkResult, AcStarkCfg]):
         hardware rounding, and probe frequency on the board.
 
         Return gains (a.u.), probe frequencies (MHz), and classified G/E
-        fractions shaped (Ngain, Nfreq, 2). cfg supplies distinct finite IQ
-        centers and a positive finite radius. Other is 1-G-E, not a calibrated
+        fractions shaped (Ngain, Nfreq, 2). cfg.readout supplies circle
+        classifiers with positive radii for all declared ADCs. Other is 1-G-E, not a calibrated
         leakage population. Subsequent analysis extracts the Stark shift.
         """
 
         # Prepare the probe grid and a gain grid spaced in drive intensity.
         soc, soccfg = context.soc, context.soccfg
         cfg = deepcopy(cfg)
+        classification = classification_parameters(cfg.readout, require_other=True)
 
         gain_sweep = cfg.gain
 
@@ -241,9 +235,7 @@ class AcStarkExp(Experiment[AcStarkResult, AcStarkCfg]):
                     .build_and_acquire(
                         # Classify shots before averaging; do not classify mean IQ.
                         raw2signal_fn=raw_population_signal,
-                        g_center=cfg.g_center,
-                        e_center=cfg.e_center,
-                        ge_radius=cfg.radius,
+                        classify=classification,
                         rounds=cfg.rounds,
                     )
                 )

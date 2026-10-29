@@ -24,6 +24,21 @@ Form 的狀態可以 Invalid。Preview 只供呈現，不是 Apply 許可。Libr
 
 Adapter 的 `ModuleWriteback` 直接提供持久 `ModuleSpec`，不提供舊編輯樹或 editor identity。Child library key 保持 key。沒有現存 producer 的 waveform writeback 不保留；parameter 與 sample proposals 沿各自既有契約。
 
+`gui.app.measure.writeback.calibrated_module_writeback` 擁有中立的完整 module proposal 建構。
+Caller 提供固定 ParameterContext、Run 的 native module cfg、目標與精確欄位路徑及新值。
+Builder 以 `LibrarySnapshot.module_spec()` 的原 Spec 為底。
+它以 `get_module()` 與 program 既有 native converter 取得可比較 cfg，只忽略指定更新路徑。
+其他數值或結構不同時拒絕，列出 dotted 欄位。
+相同 materialized 值可接受不同 key 或 inline 來源，proposal 保留 library 原 child keys。
+Framework 不解讀 classifier，也不增加 Apply patch 或來源 capture。
+依賴沿用 C8 分層與 C9 無循環 contract。
+
+`resources.parameter_fields.set_model_value` 修改 detached Spec。
+它可經過既有 list 的 canonical 非負十進位 index，只寫既有元素，不擴 tuple／ndarray 或建立容器。
+Setter 與 projection reader 共用 index 驗證，cfg_model 在產生 proposal 前完整驗證 Spec。
+
+2026-10-29 裁決：「中立 builder 放 gui.app.measure.writeback：caller 指定要更新的精確欄位路徑與新值，builder 以 LibrarySnapshot.module_spec() 為底、用 get_module() 的 materialized cfg 比較其餘欄位，保留 library key，回傳完整 ModuleSpec replacement；framework 不寫 classifier 特例，不改 apply／patch／capture。」
+
 Analysis 與 Post-Analysis 各保存自己的 opaque draft。Remote 以 `(tab_id, subtab_id)` 定址 pane，再以 item session id 選項目。這個 id 只屬於 draft，不是 editor handle。`tab.writeback_set` 的 module edits 使用 Form 路徑陣列，回同一項目的 schema、input、values 與 errors。結構錯誤拒絕該 Form batch，普通 invalid 值留在 draft，Apply 與 `tab.writeback_write` 拒絕提交。
 
 Selected Apply 先準備所有選中項目的值與目的地。任一 module form Invalid 時，不 append accepted、不寫 target。準備成功後，既有 Context write owner 先 append accepted，再依目的地文件分組提交：point 一組、library 一組、樣本逐筆，組內順序保留。任一項無效整組不寫，首錯停止，保留 accepted evidence 與已提交組；不回復前組，也不保證跨檔 crash transaction。`tab.writeback_write` 依序調整 draft；後項失敗可保留前項 draft 修改，這不等於已寫入 target。

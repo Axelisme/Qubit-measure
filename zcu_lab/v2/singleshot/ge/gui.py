@@ -7,13 +7,13 @@ from pathlib import Path
 from typing import Annotated, Literal, TypeAlias
 
 from pydantic import BaseModel, Field
+from zcu_tools.cfg_model import CircleClassifier
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     Adapter,
     Analysis,
     AnalyzeRequest,
-    ParameterWriteback,
     ParamMeta,
     PostAnalysis,
     PostAnalyzeRequest,
@@ -21,6 +21,7 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackItem,
     WritebackRequest,
 )
+from zcu_tools.gui.app.measure.writeback import calibrated_module_writeback
 from zcu_tools.plotting.plots import Plots
 
 from zcu_lab.v2.singleshot.ge.core import (
@@ -172,37 +173,22 @@ def _writeback(
     result = req.analyze_result
     result.validate_calibration()
     note = ge_calibration_review_note(result)
-    # AcceptedWrite owns native complex conversion; producers keep numbers.
-    return [
-        ParameterWriteback(
-            target_name="$qubit.ext.readout_cal.fidelity",
-            description="Prepared-label assignment fidelity",
-            proposed_value=result.fidelity,
-            selected=note is None,
-            note=note,
-        ),
-        ParameterWriteback(
-            target_name="$qubit.ext.readout_cal.sigma",
-            description="Single-shot IQ cluster width (ADC units)",
-            proposed_value=result.ge_s,
-            selected=note is None,
-            note=note,
-        ),
-        ParameterWriteback(
-            target_name="$qubit.ext.readout_cal.g_center",
-            description="Single-shot |g> IQ cluster centre (complex)",
-            proposed_value=result.g_center,
-            selected=note is None,
-            note=note,
-        ),
-        ParameterWriteback(
-            target_name="$qubit.ext.readout_cal.e_center",
-            description="Single-shot |e> IQ cluster centre (complex)",
-            proposed_value=result.e_center,
-            selected=note is None,
-            note=note,
-        ),
-    ]
+    if req.ctx.parameters is None or req.run_result.cfg is None:
+        raise ValueError("GE writeback requires captured parameters and readout cfg")
+    item = calibrated_module_writeback(
+        req.ctx.parameters,
+        req.run_result.cfg.readout,
+        target="$resonator.module.readout",
+        description="Single-shot ground/excited centers",
+        field_updates={
+            "classifier": CircleClassifier(
+                g_center=result.g_center,
+                e_center=result.e_center,
+            )
+        },
+    )
+    item.selected, item.note = note is None, note
+    return [item]
 
 
 def _post_writeback(
@@ -210,22 +196,24 @@ def _post_writeback(
 ) -> Sequence[WritebackItem]:
     result = req.post_analyze_result.confusion
     note = ge_post_review_note(req.analyze_result, result.condition_number)
-    return [
-        ParameterWriteback(
-            target_name="$qubit.ext.readout_cal.radius",
-            description="Single-shot classification radius",
-            proposed_value=result.radius,
-            selected=note is None,
-            note=note,
-        ),
-        ParameterWriteback(
-            target_name="$qubit.ext.readout_cal.confusion_matrix",
-            description="Single-shot 3x3 confusion matrix (prepared->measured)",
-            proposed_value=result.matrix.tolist(),
-            selected=note is None,
-            note=note,
-        ),
-    ]
+    if req.ctx.parameters is None or req.run_result.cfg is None:
+        raise ValueError("GE writeback requires captured parameters and readout cfg")
+    item = calibrated_module_writeback(
+        req.ctx.parameters,
+        req.run_result.cfg.readout,
+        target="$resonator.module.readout",
+        description="Single-shot centers, radius and prepared-to-measured confusion",
+        field_updates={
+            "classifier": CircleClassifier(
+                g_center=req.analyze_result.g_center,
+                e_center=req.analyze_result.e_center,
+                radius=result.radius,
+                confusion_matrix=result.matrix.tolist(),
+            )
+        },
+    )
+    item.selected, item.note = note is None, note
+    return [item]
 
 
 def _run(cfg: GE_Cfg, *, context: RunContext) -> RunRecord[GE_Cfg, GE_Result]:

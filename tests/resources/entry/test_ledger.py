@@ -179,15 +179,15 @@ def test_accepted_complex_uses_tag_in_payload_and_persisted_ledger(
     value = complex(0.012345678901234567, -0.03456789012345678)
     tag = {"__complex__": [value.real, value.imag]}
     write = AcceptedWrite.model_validate(
-        {"path": "Q1.ext.readout_cal.g_center", "value": value}
+        {"path": "Q1.ext.response.origin", "value": value}
     )
     assert write.value == tag
     payload = AcceptedPayload.model_validate(
         {
             "writes": [
-                {"path": "Q1.ext.readout_cal.g_center", "value": value},
-                {"path": "Q1.ext.readout_cal.fidelity", "value": 0.93},
-                {"path": "Q1.ext.readout_cal.confusion_matrix", "value": [[1, 0]]},
+                {"path": "Q1.ext.response.origin", "value": value},
+                {"path": "Q1.ext.response.scale", "value": 0.93},
+                {"path": "Q1.ext.response.matrix", "value": [[1, 0]]},
             ],
         }
     )

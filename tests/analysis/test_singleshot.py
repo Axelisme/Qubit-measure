@@ -21,7 +21,8 @@ def test_population_conversion_and_readout_correction() -> None:
     measured = populations @ matrix
     np.testing.assert_allclose(correct_populations(measured, matrix), populations)
     assert correct_populations(populations, None) is populations
-    np.testing.assert_array_equal(raw_population_signal([ge[None, ...]]), ge)
+    other_adc = np.array([[[0.8, 0.1], [0.9, 0.0]]], dtype=np.float64)
+    np.testing.assert_array_equal(raw_population_signal([ge[None, ...], other_adc]), ge)
     with pytest.raises(np.linalg.LinAlgError):
         correct_populations(populations, np.zeros((3, 3)))
 

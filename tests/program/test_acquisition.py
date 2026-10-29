@@ -1,74 +1,22 @@
 """Public acquisition classifies normalized IQ without depending on lab cores."""
 
-import inspect
 import logging
 from threading import Event
 
 import numpy as np
 import pytest
 from zcu_tools.analysis.singleshot import classify_result
+from zcu_tools.cfg_model import CircleClassifier, LinearClassifier
 from zcu_tools.program.acquisition import (
     AcquisitionContractError,
     StoppedPartialAcquireError,
 )
+from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 from zcu_tools.program.v2.modular import ModularProgramV2
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 
-from tests.program._acquisition_soc import make_acquisition_soc
-
-
-@pytest.mark.parametrize("stepped", [False, True])
-def test_acquire_threshold_warning_identifies_the_public_caller(stepped: bool) -> None:
-    soc, soccfg = make_acquisition_soc()
-    program = ModularProgramV2(
-        soccfg,
-        modules=[
-            PulseReadoutCfg(
-                gen_ch=0,
-                nqz=1,
-                gain=0.1,
-                waveform=ConstWaveformCfg(length=1.0),
-                ro_ch=0,
-                ro_length=1.0,
-                freq=100.0,
-            ).build("readout")
-        ],
-        reps=1,
-    )
-    options = dict(threshold=1.0, ge_radius=0.5, progress=False)
-    call_lines: list[int] = []
-    if stepped:
-        program.acquire(
-            soc,
-            step_rounds=True,
-            **options,
-            rounds=2,
-        )
-        with pytest.warns(
-            UserWarning,
-            match="^Both threshold and ge_radius are set, threshold will be applied and ge_radius will be ignored$",
-        ) as recorded:
-            for _ in range(2):
-                call_lines.append(inspect.stack()[0].lineno + 1)
-                program.finish_round()
-        result = program.finish_acquire()
-    else:
-        with pytest.warns(
-            UserWarning,
-            match="^Both threshold and ge_radius are set, threshold will be applied and ge_radius will be ignored$",
-        ) as recorded:
-            call_lines.extend([inspect.stack()[0].lineno + 1] * 2)
-            result = program.acquire(
-                soc,
-                **options,
-                rounds=2,
-            )
-    assert len(recorded) == 2
-    assert all(warning.filename == __file__ for warning in recorded)
-    assert [warning.lineno for warning in recorded] == call_lines
-    assert result is not None
-    np.testing.assert_array_equal(result[0], np.zeros((1, 2)))
+from tests.program._acquisition_soc import AcquisitionSoc, make_acquisition_soc
 
 
 @pytest.mark.parametrize("radius", [0.5, 1.0, 1.5, 2.0, 3.0])
@@ -81,8 +29,7 @@ def test_acquire_population_matches_offline_classification(
     assert np.all(sum(mask.astype(int) for mask in expected) == 1)
     assert expected[2][2]  # An exact tie belongs to neither population.
     soc, soccfg = make_acquisition_soc()
-    offset = 0.25 if remove_offset else 0.0
-    soccfg["readouts"][0]["iq_offset"] = offset
+    soccfg["readouts"][0]["iq_offset"] = 0.25
     program = ModularProgramV2(
         soccfg,
         modules=[
@@ -100,8 +47,7 @@ def test_acquire_population_matches_offline_classification(
         reps=1,
     )
     raw = np.rint(
-        (np.stack((signals.real, signals.imag), axis=-1) + offset)
-        * program.ro_chs[0]["length"]
+        np.stack((signals.real, signals.imag), axis=-1) * program.ro_chs[0]["length"]
     ).astype(np.int64)
     delivered = False
 
@@ -115,15 +61,138 @@ def test_acquire_population_matches_offline_classification(
     monkeypatch.setattr(soc, "poll_data", poll_data)
     actual = program.acquire(
         soc,
-        g_center=-1,
-        e_center=1,
-        ge_radius=radius,
+        classify={
+            0: CircleClassifier(g_center=-1 + 0j, e_center=1 + 0j, radius=radius)
+        },
         remove_offset=remove_offset,
         progress=False,
     )
     assert actual is not None
     np.testing.assert_array_equal(actual[0][0], np.stack(expected[:2], axis=-1))
     assert actual[0].dtype == np.float64
+
+
+def test_typed_circle_uses_raw_coordinates_without_offset() -> None:
+    soc, soccfg = make_acquisition_soc()
+    soccfg["readouts"][0]["iq_offset"] = 10.0
+    cfg = PulseReadoutCfg(
+        gen_ch=0,
+        nqz=1,
+        gain=0.1,
+        waveform=ConstWaveformCfg(length=1.0),
+        ro_ch=0,
+        ro_length=1.0,
+        freq=100.0,
+    )
+    program = ModularProgramV2(soccfg, modules=[cfg.build("readout")], reps=2)
+    result = program.acquire(
+        soc,
+        classify={0: CircleClassifier(g_center=0j, e_center=1 + 0j, radius=0.5)},
+        remove_offset=True,
+        progress=False,
+    )
+    assert result is not None
+    np.testing.assert_array_equal(result[0], [[1.0, 0.0]])
+
+
+@pytest.mark.parametrize("angle", [np.pi / 2, -np.pi / 2])
+def test_linear_rotates_in_ge_theta_direction(
+    monkeypatch: pytest.MonkeyPatch, angle: float
+) -> None:
+    soc, soccfg = make_acquisition_soc()
+    cfg = PulseReadoutCfg(
+        gen_ch=0,
+        nqz=1,
+        gain=0.1,
+        waveform=ConstWaveformCfg(length=1.0),
+        ro_ch=0,
+        ro_length=soccfg.cycles2us(100, ro_ch=0),
+        freq=100.0,
+    )
+    program = ModularProgramV2(
+        soccfg, modules=[cfg.build("readout")], reps=1, sweep=[("sample", 3)]
+    )
+    raw = np.array([[0, 100], [0, -100], [0, 0]], dtype=np.int64)
+    monkeypatch.setattr(soc, "poll_data", lambda: [(3, ([raw], {}))])
+    result = program.acquire(
+        soc,
+        classify={0: LinearClassifier(angle=angle, threshold=0.0)},
+        progress=False,
+    )
+    expected = [[1, 0], [0, 1], [1, 0]] if angle > 0 else [[0, 1], [1, 0], [1, 0]]
+    assert result is not None
+    np.testing.assert_array_equal(result[0][0], expected)
+
+
+def test_classification_matches_adc_numbers_in_declaration_order() -> None:
+    soccfg = make_mock_soccfg(n_gens=2, n_readouts=2)
+    soc = AcquisitionSoc(soccfg.get_cfg())
+    program = ModularProgramV2(
+        soccfg,
+        reps=2,
+        modules=[
+            PulseReadoutCfg(
+                gen_ch=ch,
+                nqz=1,
+                gain=0.1,
+                freq=100.0,
+                ro_ch=ch,
+                waveform=ConstWaveformCfg(length=1.0),
+                ro_length=1.0,
+            ).build(f"readout_{ch}")
+            for ch in (1, 0)
+        ],
+    )
+    result = program.acquire(
+        soc,
+        progress=False,
+        classify={
+            0: CircleClassifier(g_center=0j, e_center=1 + 0j, radius=0.5),
+            1: LinearClassifier(angle=0.0, threshold=-0.5),
+        },
+    )
+    assert result is not None
+    np.testing.assert_array_equal(result, [[[0, 1]], [[1, 0]]])
+    iq = program.acquire(soc, progress=False)
+    assert iq is not None
+    np.testing.assert_array_equal(iq, 0)
+
+
+@pytest.mark.parametrize("channels", [[], [0, 1]])
+def test_classification_requires_exact_declared_adc_keys(
+    monkeypatch: pytest.MonkeyPatch, channels: list[int]
+) -> None:
+    soc, program = _make_chunk_acquisition()
+
+    def unexpected_poll():
+        pytest.fail("invalid classification reached acquisition transport")
+
+    monkeypatch.setattr(soc, "poll_data", unexpected_poll)
+    with pytest.raises(ValueError, match="ADC.*missing=.*unexpected="):
+        program.acquire(
+            soc,
+            classify={
+                ch: LinearClassifier(angle=0.0, threshold=0.0) for ch in channels
+            },
+            progress=False,
+        )
+
+
+def test_missing_circle_radius_is_rejected_before_transport(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    soc, program = _make_chunk_acquisition()
+
+    def unexpected_poll():
+        pytest.fail("incomplete calibration reached acquisition transport")
+
+    monkeypatch.setattr(soc, "poll_data", unexpected_poll)
+    with pytest.raises(ValueError, match="radius.*Post"):
+        program.acquire(
+            soc,
+            classify={0: CircleClassifier(g_center=0j, e_center=1 + 0j)},
+            progress=False,
+        )
 
 
 def _make_chunk_acquisition(*, reps: int = 4):

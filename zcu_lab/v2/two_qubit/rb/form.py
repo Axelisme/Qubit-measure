@@ -13,7 +13,7 @@ def make_form(ctx: FormContext) -> Form[RBCfg]:
     """Capture role identities, X90/CZ/readout slots and required named phase pair.
 
     Missing pulse/readout slots or correction fields stay Invalid, never zero
-    or simulator defaults. GE centers are optional saved analysis inputs.
+    or simulator defaults. Circle centers come only from the saved role-tone readout classifiers.
     All pulse and correction initial values remain operator-overridable; Run
     uses the accepted fixed capture, not current aliases or library.
     """
@@ -36,8 +36,6 @@ def make_form(ctx: FormContext) -> Form[RBCfg]:
             "readout",
             "drive",
             "phase_pair",
-            "f1_centers",
-            "f2_centers",
             "depths",
             "seeds",
             "reps",
@@ -60,17 +58,6 @@ def make_form(ctx: FormContext) -> Form[RBCfg]:
                 **names,
                 "correction_f1_deg": Expr("$coupler.ext.cz_phase.correction_f1_deg"),
                 "correction_f2_deg": Expr("$coupler.ext.cz_phase.correction_f2_deg"),
-            },
-            **{
-                f"{role}_centers": {
-                    "g": Expr(f"${role}.ext.readout_cal.g_center"),
-                    "e": Expr(f"${role}.ext.readout_cal.e_center"),
-                }
-                if ctx.parameters is not None
-                and ctx.parameters.lookup(f"${role}.ext.readout_cal.g_center").present
-                and ctx.parameters.lookup(f"${role}.ext.readout_cal.e_center").present
-                else None
-                for role in ("f1", "f2")
             },
         },
     ).with_seed_metadata(mux_readout_seed_metadata(readout))

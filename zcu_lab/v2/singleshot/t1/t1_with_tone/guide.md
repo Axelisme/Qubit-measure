@@ -8,7 +8,7 @@ Single-shot T1-with-tone: applies a π pulse and a simultaneous probe tone durin
 
 Open and Reset take a snapshot of the current aliases, parameters and module choices. Relax delay is 5 * `$qubit.t1`. Length stop uses 5 times the tone T1 time scale.
 
-Classification starts from `$qubit.ext.readout_cal.g_center`, `e_center` and `radius`. Missing calibration leaves these fields Invalid.
+Classification uses the readout module's circle classifier, visible under Readout → Advanced (per tone for Mux). Run requires a classifier on every declared ADC and a positive radius; missing radius prompts singleshot GE Post. Linear has no Other state and is rejected. Analyze corrects populations only with the saved readout cfg's confusion matrix. Historical cfg without a classifier or matrix skips correction.
 
 Pulse templates use `$qubit.freq`, `$qubit.wiring.ch`, `$resonator.freq`, `$resonator.wiring.ch` and `$resonator.wiring.ro_ch`. The readout trigger uses `$resonator.time_of_fly` + 0.05 us. Missing required sources leave the corresponding fields Invalid; supply them before Run.
 
@@ -28,6 +28,6 @@ Proposes the fitted T1 relaxation time under the probe tone at `$qubit.ext.t1_wi
 
 ## Recommended
 
-Set the classification calibration directly or seed it with 'singleshot/ge'. Use 'uniform=False' (default) to cluster points along the expected exponential decay while preserving the configured window and point count; use 'uniform=True' for a linear sweep. The probe-tone gain and frequency are set in the `probe_pulse` module slot.
+Run singleshot/ge Primary and Post, then Apply to the selected readout module. Use 'uniform=False' (default) to cluster points along the expected exponential decay while preserving the configured window and point count; use 'uniform=True' for a linear sweep. The probe-tone gain and frequency are set in the `probe_pulse` module slot.
 
-**Last updated:** 2026-10-21
+**Last updated:** 2026-10-29

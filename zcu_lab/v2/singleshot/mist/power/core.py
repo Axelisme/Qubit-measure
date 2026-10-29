@@ -7,7 +7,6 @@ from typing import Annotated, ClassVar
 import numpy as np
 from matplotlib.axes import Axes
 from numpy.typing import NDArray
-from pydantic import field_serializer
 from zcu_tools.analysis.singleshot import (
     calc_populations,
     correct_populations,
@@ -21,6 +20,7 @@ from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import GainSweep, Pulse, Readout, Reset, sweep2param
+from zcu_tools.program.v2.modules.readout import classification_parameters
 
 from zcu_lab.v2.support import live_line
 
@@ -60,13 +60,6 @@ class PowerCfg(ConfigBase):
     probe_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Probe Pulse")]
     readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
     gain: Annotated[GainSweep, FieldMeta(label="Probe gain", unit="a.u.")]
-    g_center: Annotated[complex, FieldMeta(label="Ground center")]
-    e_center: Annotated[complex, FieldMeta(label="Excited center")]
-    radius: Annotated[float, FieldMeta(label="Classification radius")]
-
-    @field_serializer("g_center", "e_center")
-    def serialize_center(self, value: complex) -> str:
-        return str(value)
 
 
 @dataclass(frozen=True)
@@ -99,7 +92,7 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
         shaped (Ngain, 2), averaged over shots and rounds. Gain is not
         calibrated power; analysis can convert it to photons with ac_coeff.
 
-        cfg supplies distinct finite IQ centers and a positive finite radius.
+        cfg.readout supplies a circle classifier per ADC with a positive radius.
         Other is 1-G-E, not calibrated leakage. Optional confusion correction
         and photon/log plotting are analysis choices, not acquisition steps.
         """
@@ -107,6 +100,7 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
         # Prepare the hardware gain grid before collecting populations.
         soc, soccfg = context.soc, context.soccfg
         cfg = deepcopy(cfg)
+        classification = classification_parameters(cfg.readout, require_other=True)
 
         gains = sweep2array(
             cfg.gain,
@@ -154,9 +148,7 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
                 .build_and_acquire(
                     # Classify individual shots, then average their G/E fractions.
                     raw2signal_fn=raw_population_signal,
-                    g_center=cfg.g_center,
-                    e_center=cfg.e_center,
-                    ge_radius=cfg.radius,
+                    classify=classification,
                     rounds=cfg.rounds,
                 )
             )

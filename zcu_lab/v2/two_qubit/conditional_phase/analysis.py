@@ -60,7 +60,12 @@ def analyze_phase(
     mean, counts, complete = _source_quadratures(cfg, data)
     nn, nf = len(cfg.gate_counts), len(data.frequencies)
     tone = cfg.roles.f1_tone if cfg.target == "f1" else cfg.roles.f2_tone
-    centers = cfg.f1_centers if cfg.target == "f1" else cfg.f2_centers
+    calibration_reason = None
+    try:
+        centers = cfg.f1_centers if cfg.target == "f1" else cfg.f2_centers
+    except ValueError as exc:
+        centers = None
+        calibration_reason = str(exc)
     branches: list[tuple[tuple[QuadraturePhase, ...], ...]] = []
     conditional = np.full((nn, nf), np.nan)
     for b in range(2):
@@ -73,9 +78,7 @@ def analyze_phase(
                         np.nan, None, "Missing complete X/Y projection rounds"
                     )
                 elif centers is None:
-                    point = QuadraturePhase(
-                        np.nan, None, "Missing saved target GE centers"
-                    )
+                    point = QuadraturePhase(np.nan, None, calibration_reason)
                 else:
                     point = quadrature_phase(
                         data.signals[b, 0, n, f, :, tone],

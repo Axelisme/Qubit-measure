@@ -13,11 +13,11 @@ from .core import ChevronCfg
 
 
 def make_form(ctx: FormContext) -> Form[ChevronCfg]:
-    """Capture roles, pulses and GE centers; scan endpoints require operator input.
+    """Capture roles and pulses; scan endpoints require operator input.
 
     Existing CZ slots are editable source pairs, not certified gate settings.
     Missing slots offer explicit cosine templates on captured role wiring.
-    Missing calibration stays Invalid. Open/Reset never performs acquisition.
+    Missing or linear role-tone classifiers stay Invalid; radius is not needed. Open/Reset never performs acquisition.
     """
     roles = captured_roles(ctx)
     drive = {}
@@ -48,8 +48,6 @@ def make_form(ctx: FormContext) -> Form[ChevronCfg]:
             "x180_f2",
             "readout",
             "drive",
-            "f1_centers",
-            "f2_centers",
             "frequency",
             "duration",
             "reps",
@@ -67,13 +65,5 @@ def make_form(ctx: FormContext) -> Form[ChevronCfg]:
             "drive": drive,
             "frequency": Range(None, None, expts=25),
             "duration": Range(None, None, expts=101),
-            "f1_centers": {
-                "g": Expr("$f1.ext.readout_cal.g_center"),
-                "e": Expr("$f1.ext.readout_cal.e_center"),
-            },
-            "f2_centers": {
-                "g": Expr("$f2.ext.readout_cal.g_center"),
-                "e": Expr("$f2.ext.readout_cal.e_center"),
-            },
         },
     ).with_seed_metadata(mux_readout_seed_metadata(readout))

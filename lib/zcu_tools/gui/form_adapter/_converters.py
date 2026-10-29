@@ -2,7 +2,7 @@
 
 from collections.abc import Mapping
 from functools import partial
-from typing import get_args, get_origin
+from typing import Literal, get_args, get_origin
 
 from pydantic import BaseModel, JsonValue
 
@@ -17,13 +17,14 @@ from zcu_tools.gui.form import (
     FormConversionResult,
     FormEnv,
     FormModel,
+    FormPath,
     InputConverter,
     static_defaults,
 )
 from zcu_tools.gui.form.commands import ReadonlyFormInput
 
 from ._seeds import inline_wrapper, selected_model, spec_annotation, supported_input
-from ._types import members
+from ._types import branch_metadata, branch_tag, members
 from .input_types import KeyRef
 
 _PERSISTENT = tuple(
@@ -208,6 +209,89 @@ def _convert(
         else static_defaults(target)
     )
     return FormConversionResult(wrapper, {"kind": "inline", "module": module})
+
+
+def _model_branch(
+    old: FormCommandSnapshot,
+    selection: ReadonlyFormInput,
+    _context: FormCommandContext,
+    *,
+    models: tuple[type[BaseModel], ...],
+    env: FormEnv,
+) -> FormConversionResult:
+    if selection is None:
+        return FormConversionResult(None, None)
+    if not isinstance(selection, Mapping) or not selection:
+        raise FormConversionError("Model selection needs a declared literal tag")
+    matches = [
+        model
+        for model in models
+        if all(
+            key in model.model_fields
+            and get_origin(model.model_fields[key].annotation) is Literal
+            and value in get_args(model.model_fields[key].annotation)
+            for key, value in selection.items()
+        )
+    ]
+    if len(matches) != 1:
+        raise FormConversionError("Model selection must identify one declared branch")
+    target = matches[0]
+    raw = old.copy_input()
+    if old.structure is target and isinstance(raw, dict):
+        data = raw
+    elif old.structure is not None and isinstance(raw, dict):
+        data = _inherit(old.structure, target, raw, env)
+    elif issubclass(target, FormModel):
+        data = target.defaults(env)
+    else:
+        data = static_defaults(target)
+    # Tags identify the target; other fields follow the shared raw inheritance.
+    for key, value in selection.items():
+        if isinstance(value, (str, int, float, bool)) or value is None:
+            data[key] = value
+    return FormConversionResult(target, data)
+
+
+def model_converters(
+    model: type[BaseModel], env: FormEnv
+) -> dict[FormPath, InputConverter]:
+    """Declare raw-inheriting switching for generated unions of tagged models.
+
+    Only fields with two or more model alternatives sharing a Literal tag are
+    selected. Scalar unions and generated ref/inline wrappers are excluded.
+    None disables the field. Branches inherit identically named, same-editable-
+    type raw fields; other fields use target defaults. Target validation reports
+    inherited values outside its constraints. Selecting the active branch keeps
+    its raw draft. Required values are not invented. Construction reads no
+    source; execution uses target defaults in the same fixed env.
+    """
+    result: dict[FormPath, InputConverter] = {}
+    for name, info in model.model_fields.items():
+        alternatives = tuple(
+            item for item in members(info.annotation) if item is not type(None)
+        )
+        models = tuple(
+            item
+            for item in alternatives
+            if isinstance(item, type) and issubclass(item, BaseModel)
+        )
+        if (
+            len(models) < 2
+            or len(models) != len(alternatives)
+            or inline_wrapper(info.annotation) is not None
+            or any(isinstance(item, InputConverter) for item in info.metadata)
+            or any(
+                isinstance(item, InputConverter)
+                for branch in models
+                for item in branch_metadata(info.annotation, branch)
+            )
+        ):
+            continue
+        if branch_tag(models) is not None:
+            result[(name,)] = InputConverter(
+                partial(_model_branch, models=models, env=env)
+            )
+    return result
 
 
 def module_converter(annotation: object, env: FormEnv) -> InputConverter:

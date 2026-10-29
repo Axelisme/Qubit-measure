@@ -15,7 +15,7 @@ from zcu_lab.v2.singleshot.reset_check.core import (
     ResetCheckResult,
 )
 from zcu_lab.v2.singleshot.reset_check.form import make_form
-from zcu_lab.v2.support.measure.singleshot_shared import read_confusion_matrix
+from zcu_lab.v2.support.singleshot.util import readout_confusion_matrix
 
 SsResetCheckRunResult = RunRecord[ResetCheckCfg, ResetCheckResult]
 
@@ -26,7 +26,9 @@ def _analyze(
     return ResetCheckExp().analyze(
         req.run_result,
         ResetCheckAnalyzeOptions(
-            confusion_matrix=read_confusion_matrix(req.parameters)
+            confusion_matrix=readout_confusion_matrix(
+                None if req.run_result.cfg is None else req.run_result.cfg.readout
+            )
         ),
         plots=plots,
     )

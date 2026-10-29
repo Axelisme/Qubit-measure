@@ -4,6 +4,8 @@ status: accepted
 
 # ADR-0074 — 獨立的平鋪 Readout module
 
+**讀者：** lab-author、framework-dev、agent。查閱 readout 配置、classifier 所有權與 module 引用的跨模組契約。
+
 ## 背景
 
 內嵌 Pulse 與 DirectReadout 讓作者重複填寫 generator 與 ADC 的頻率和通道。
@@ -60,6 +62,46 @@ FixedElements 的無 participants 模式只固定目前 inline 清單的槽位�
 本次取代 JSON leaf 候選，不擴充 InputPolicy，不新增持久 identity，也不提供硬體安全保證。
 
 2026-10-21 註：目前的表單設計採用固定 model-list 與逐欄編輯，JSON leaf 是已被取代的候選。
+
+### Classifier 隨 readout 保存
+
+Pulse readout 與 mux 的每筆 tone 各有可選 `classifier`，預設 None。
+數值由 library readout module 擁有，module 本身只保存而不使用分類參數。
+使用者於 2026-10-29 提出：「將center/radius/confusion matrix等資訊直接放到readout cfg裡的可選欄位中」，並說明「module本身不利用，但可以自然綁定到對應的readout module上」。
+
+Circle 保存 g/e 複數中心、可缺的 radius 與 3×3 confusion matrix。
+Linear 保存 radians 的 angle、threshold 與可缺的 2×2 confusion matrix。
+分類座標為原始積分 ADC 值除以積分長度，不扣 IQ offset；linear 以 `exp(1j*angle)` 旋轉。
+矩陣 rows 為真實／準備態，columns 為量到的態，circle 順序 g/e/other，linear 順序 g/e。
+矩陣只驗有限值與形狀，不轉置、不限制值域或 row sum。
+Radius 提供時須有限且 >0；None 表示尚未提供 Post 半徑校準。
+複數中心沿用 point 參數的 `{__complex__: [re, im]}` tag，由 `core.complex_codec` 編解碼。
+Core/native conversion、library 與 data.h5 cfg 都保留 classifier，不升容器版本。
+舊條目沒有 classifier 時讀為 None，不從其他參數補值。
+Point 的 `readout_cal` 停用，不再讀寫，也不把舊數值搬入 classifier。
+改版後重跑 singleshot GE 並 Apply 到 readout library module。
+使用者於 2026-10-29 對 library 所有權與不搬舊值的選項同意：「2A 3A 4同意」。
+
+Readout 工具從 cfg 產生以 ADC channel 為 key 的型別化 mapping，由作者明確交給 acquire。
+Acquire 不掃 program registry，mapping 必須完整覆蓋已宣告 ADC，不混合 IQ 與 population。
+未傳 classify 保留 IQ 路徑。Linear 以旋轉後實部大於 threshold 判 excited，等於時判 ground。
+
+單 qubit GE Primary 提出只有中心的 circle，Post 提出含中心、radius 與 matrix 的完整 circle。
+兩者都是完整 module replacement，同次批次依 Primary→Post 接受。
+分兩次 Apply 時最後一次生效，Post→Primary 會回到只有中心。
+需要 radius 的 consumer 因此提示做 Post。T1 需要 other，不接受 linear。
+舊 cfg 沒有 classifier 時，T1 分析略過 confusion 修正，不讀 point 校準。
+GE 以 run 的 readout slot 解析目標，proposal builder 與 materialized 比對契約見 [[0008]]。
+Mux GE 每個 phase 合成一個完整 proposal，只更新成功 tone 的精確 classifier 路徑。
+雙 qubit 的 nearest-GE 分析只從 saved readout cfg 的角色 tone 派生 circle centers，不要求 radius。
+Joint readout、chevron、constructive phase、CZ amplitude 在 cfg 驗證時拒絕 missing／linear。
+Conditional phase、local Z、RB 保留 raw acquisition，分析將 missing／linear 轉為帶原因的結果，不產生 population 或 fit。
+Readout owner 的單 ADC circle lookup 不理解 lab 角色，也不讀 live library。
+其餘 singleshot population consumers 同樣明傳完整 ADC mapping，confusion correction 只讀 saved cfg。
+Amplitude／Length Rabi 保留單 ADC raw IQ 與聯合 fit，未校準時只略過 live population preview。
+有效 Rabi fit 經同一中立 builder 更新 captured resonator readout 的完整 classifier，
+Pulse 更新 classifier，單 tone Mux 更新 tones.0.classifier，不支援多 tone 分析。
+Check 的 raw Run 不要求 classifier，到分析才從 saved cfg 要求 circle 與 radius。
 
 ### Owner 不變，caller 不重建舊配置
 

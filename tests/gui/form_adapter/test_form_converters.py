@@ -38,6 +38,28 @@ class SamplingInput(FormModel):
         return {("sampling",): fresh_branches(env, (Linear, Captured))}
 
 
+class Other(FormModel):
+    kind: Literal["other"] = "other"
+    start: float = 7.0
+
+
+class AuthoredSwitch(ConfigBase):
+    sampling: Annotated[
+        Linear | Other,
+        Field(discriminator="kind"),
+        fresh_branches(FormEnv(), (Linear, Other)),
+    ] = Linear()
+
+
+def test_authored_metadata_converter_overrides_generated_branch_inheritance() -> None:
+    env = FormEnv()
+    form = Form(AuthoredSwitch, {})
+    state = FormState(form.default_input(env))
+    state.write({("sampling", "start"): {"expr": "2 + 3"}}, env)
+    state.select(("sampling",), {"kind": "other"}, env)
+    assert state.input.data["sampling"] == {"kind": "other", "start": 7.0}
+
+
 class NativeInput(ConfigBase, SamplingInput):
     drive: PulseCfg
 

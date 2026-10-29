@@ -1,6 +1,6 @@
 # program/v2/modules — semantic program modules
 
-**Last updated:** 2026-10-26
+**Last updated:** 2026-10-29
 
 **讀者：** framework-dev。語意 program modules 的角色、組裝與邊界。
 
@@ -42,6 +42,20 @@ in `ModularProgramV2`, `ProgramBuilder.add`, `Repeat`, `Branch`, `Join` and
   uncompressed because consumers care about the exact word loaded into a register.
 
 ## Readout configuration
+
+Native conversion preserves the optional classifier on pulse readout and each
+mux tone. The shared cfg_model schemas define circle/linear calibration in
+normalized ADC coordinates without IQ-offset subtraction. Modules retain this
+data but do not apply classification during declaration or playback.
+`readout.classification_parameters(cfg, require_other=False)` returns detached
+calibration keyed by each pulse/tone ADC number. Authors pass that mapping to
+`acquire(classify=...)`. Missing calibration or circle radius raises an ADC-named
+error. `require_other=True` rejects two-state linear calibration. The helper does
+not read a program, registry or hardware.
+`readout.circle_classifier(cfg, ro_ch=...)` returns a detached circle for one
+ADC channel number, not a tone position. It accepts centers without radius or
+matrix and rejects unknown ADCs, missing classifiers and linear mode with an
+ADC-named ValueError. Its normalized raw ADC coordinates retain IQ offset.
 
 `PulseReadoutCfg` owns flat generator/ADC settings and a native waveform. One
 semantic `freq` configures both channels. `PulseReadout` declares and schedules

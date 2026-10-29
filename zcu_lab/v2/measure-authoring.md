@@ -2,7 +2,7 @@
 
 **讀者：** lab-author、framework-dev、agent。撰寫 Measure adapter、Form、recipe、operator guide 與校準 writeback。
 
-**Last updated:** 2026-10-27
+**Last updated:** 2026-10-29
 
 使用者入口見 [tutorial](../tutorial/README.md)。
 
@@ -337,26 +337,28 @@ Converter 將非有限數值轉為 null，Live RPC 的 `invalid` 列出路徑。
 兩個 flux_dep adapters 共用 Qt-free flux_pick_plugin 與 Qt-only flux_pick_frontend，
 service 擁有 session；adapter 不持有分析 operation 或 writeback draft。
 
-`singleshot/ge` 的 primary analysis 只產生 fit 產物：operator可選 backend、histogram log scale、
-T1 alignment、nullable shared length ratio 與 Initial State（ground / excited，預設 ground）；advanced population priors不進GUI。所選 backend擬合
-centres、`ge_s`與initial populations，右側顯示IQ distribution，並經`get_writeback_items()`提出
-`fid`、`ge_s`、`g_center`、`e_center`。它的零參數post-analysis是sole confusion路徑：使用primary
-fit資料計算`ge_radius`與3×3 confusion matrix，顯示完整confusion diagnostic，並經
-`get_post_writeback_items()`提出`ge_radius`、`confusion_matrix`；兩組proposal分屬不同pane的
-opaque draft，adapter不接觸Writeback implementation。
+`singleshot/ge` 的 Primary 擬合 centers、fidelity、theta、threshold 與 ge_s。
+Post 使用同次 Primary 計算 radius 與 3×3 confusion matrix。
+Primary 提出只有 g/e 中心的 circle，Post 提出完整 circle，各是一個完整 ModuleWriteback。
+Fidelity 與 ge_s 只留在分析結果，不另寫 point 參數。
+同批 Apply 固定 Primary→Post；分次 Apply 由最後一次完整 replacement 決定。
+Post 後再單獨 Apply Primary 會移除 radius 與 matrix，需要 radius 的 consumer 提示做 Post。
 
-`singleshot/len_rabi` 的analysis維持Figure-only summary，不展開額外GUI scalar diagnostics；Figure
-上方呈現measured populations與joint-fit curves，左下呈現第一點integrated-bin histogram fit，右下
-呈現derived confusion matrix。完整typed numeric fit留在adapter result內。只有backend valid且
-`g_center`、`e_center`、`ge_radius`、`confusion_matrix`四項全部finite時，adapter才同時提出四個
-獨立`ParameterWriteback` items；任一項無效就全數略過。Adapter只投影同一次domain analysis結果，
-不重跑fit、不重算stability，也不直接apply proposal。
+`singleshot/amp_rabi` 與 `singleshot/len_rabi` 保存單 ADC raw IQ，支援 Pulse 或單 tone Mux。
+已有 circle 與 radius 時用 saved readout 做 live G/E/Other preview。
+沒有 classifier 時省略 preview，仍可 Run 與聯合 fit，不先要求另一份校準。
+Backend valid 且中心、radius、matrix 全部 finite 時提出一個完整 readout ModuleWriteback。
+目標由 Run capture 的 `$resonator.module.readout` 解析，缺 cfg／capture 明確失敗。
+Pulse 更新 `classifier`，單 tone Mux 更新 `tones.0.classifier`。
+共用中立 builder 比對其餘 materialized 欄位並保留 library 原 Spec 的 waveform key。
+Adapter 不重跑 fit，不直接 Apply。
 
-`singleshot/amp_rabi` 與 `singleshot/reset_check` 的 `g_center`、`e_center`、`radius` 是正式 experiment cfg
-欄位，Form 初值 expression 指向 `$qubit.ext.readout_cal` 的 `g_center`、`e_center`、`radius`。
-缺值保持 invalid；operator 可改用 direct complex／float 值。Run 使用已解析的
-cfg 校正值，由各 adapter 呼叫 core，再把同次 cfg 與純 Result 配成 RunRecord。
-兩者都沿用可調整的 Reps／Rounds；Amp Rabi 串接各 round 的 raw IQ，reset-check 平均各 round 的 populations。
+其他需要 Other 的 singleshot consumers 從 readout cfg 取得完整 per-ADC circle mapping，
+由作者明確傳給 acquire 的 `classify=`，不注入獨立中心或半徑。
+缺 classifier／radius 或 linear 在需要分類時報錯。
+Confusion correction 只讀 saved cfg；舊 cfg 缺 classifier／matrix 就略過。
+`singleshot/check` 仍允許 raw Run，分析才要求 saved circle 與 radius。
+Amp Rabi 串接各 round 的 raw IQ，reset-check 平均各 round 的 populations。
 
 `singleshot/len_rabi`在analysis pane提供`decay: bool`，預設啟用衰減包絡；
 此選擇不屬於量測cfg，不改變len Rabi的raw-IQ acquisition。
@@ -674,10 +676,11 @@ analysis可讀取confusion_matrix修正，回報reset-only平均／最大excited
 不提供IQ校準writeback。Other不是校準後leakage，reset population不是reset-channel fidelity。
 
 `singleshot/amp_rabi`使用硬體gain sweep保存raw IQ。Reps是每gain每round的shots，
-Rounds的shots串接保存；不使用Shots或Shots per batch。本次resolved cfg的g_center、e_center、
-radius凍結在snapshot中供live分類，analysis與Len Rabi共用joint fit及三面板診斷圖，重新估計
-IQ centers與confusion matrix。Amp固定無衰減／零相位，提供Initial State，保留振幅、
-頻率與pi/pi2 gain摘要；四項校準writeback與Len Rabi共用有效性檢查。
+Rounds 的 shots 串接保存；不使用 Shots 或 Shots per batch。
+已有 readout circle／radius 才顯示 live populations，未校準仍可取得 raw IQ。
+Analysis 與 Len Rabi 共用 joint fit 及三面板診斷圖，重新估計 centers 與 confusion matrix。
+Amp 固定無衰減／零相位，提供 Initial State，保留振幅、頻率與 pi/pi2 gain 摘要。
+完整 module proposal 與 Len Rabi 共用有限值與 backend validity 檢查。
 舊population-only檔案不符合raw-IQ axes契約，無法據此重建shots或執行joint fit。
 
 ### cfg seed 與純量累積

@@ -7,10 +7,8 @@ from typing import Annotated, ClassVar
 import numpy as np
 from matplotlib.axes import Axes
 from numpy.typing import NDArray
-from pydantic import field_serializer
 from zcu_tools.analysis.singleshot import (
     calc_populations,
-    classify_result,
     correct_populations,
     raw_population_signal,
 )
@@ -29,6 +27,7 @@ from zcu_tools.program.v2 import (
     Reset,
     sweep2param,
 )
+from zcu_tools.program.v2.modules.readout import classification_parameters
 
 from zcu_lab.v2.support import live_line
 
@@ -58,14 +57,6 @@ class ResetCheckCfg(ConfigBase):
     tested_reset: Annotated[Reset.Cfg, FieldMeta(label="Tested Reset")]
     readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
     gain: Annotated[GainSweep, FieldMeta(label="Gain", unit="a.u.")]
-    g_center: Annotated[complex, FieldMeta(label="Ground center")]
-    e_center: Annotated[complex, FieldMeta(label="Excited center")]
-    radius: Annotated[float, FieldMeta(label="Classification radius")]
-
-    @field_serializer("g_center", "e_center")
-    def serialize_center(self, value: complex) -> str:
-        """Keep experiment comments JSON-safe with a lossless complex literal."""
-        return str(value)
 
 
 @dataclass(frozen=True)
@@ -139,9 +130,8 @@ class ResetCheckExp(Experiment[ResetCheckResult, ResetCheckCfg]):
         """
         # 1. Validate classification and prepare hardware-quantized gain points.
         soc, soccfg = context.soc, context.soccfg
-        g_center, e_center, radius = cfg.g_center, cfg.e_center, cfg.radius
-        classify_result(np.empty(0, dtype=np.complex128), g_center, e_center, radius)
         cfg = deepcopy(cfg)
+        classification = classification_parameters(cfg.readout, require_other=True)
         gains = sweep2array(
             cfg.gain,
             "gain",
@@ -198,9 +188,7 @@ class ResetCheckExp(Experiment[ResetCheckResult, ResetCheckCfg]):
             # 4. Average classified fractions over reps/rounds, preserving partial data.
             builder.build_and_acquire(
                 raw2signal_fn=raw_population_signal,
-                g_center=g_center,
-                e_center=e_center,
-                ge_radius=radius,
+                classify=classification,
                 rounds=cfg.rounds,
             )
             sched.trigger_update(flush=True)

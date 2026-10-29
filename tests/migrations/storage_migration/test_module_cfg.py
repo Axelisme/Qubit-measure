@@ -147,6 +147,7 @@ def test_historical_library_reconstructs_eight_modules_and_four_waveforms(
             "ro_ch": 1,
             "ro_length": 0.9,
             "trig_offset": 0.625,
+            "classifier": None,
         }
         assert library.get_module(f"C1.readout.{name}").type == "readout/pulse"
     for name, phase in (("reset_bath", -103.0), ("reset_bath_e", 77.0)):

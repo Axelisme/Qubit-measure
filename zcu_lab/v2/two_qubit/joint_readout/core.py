@@ -16,7 +16,8 @@ from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import Pulse
-from zcu_tools.program.v2.modules import MuxReadout
+from zcu_tools.program.v2.modules import MuxReadout, MuxReadoutCfg
+from zcu_tools.program.v2.modules.readout import circle_classifier
 
 from zcu_lab.v2.support import live_line
 
@@ -63,13 +64,26 @@ class GECenters(ConfigBase):
         return self
 
 
+def tone_centers(readout: MuxReadoutCfg, tone_index: int) -> GECenters:
+    """Read one original tone's circle centers in normalized raw ADC units.
+
+    readout is the saved full mux cfg; tone_index is the role's original tone
+    position, not an ADC number. Missing/linear classifiers raise ValueError.
+    Radius is not required. No capture, live library or manual override is read.
+    """
+    classifier = circle_classifier(readout, ro_ch=readout.tones[tone_index].ro_ch)
+    return GECenters(g=classifier.g_center, e=classifier.e_center)
+
+
 class JointReadoutCfg(ConfigBase):
     """Four thermal preparation branches, with reps shots per software round.
 
     B00/B01/B10/B11 apply I/Xπ to F1/F2 then acquire one mux read. There is no
     herald, reset, post-selection or pure-state initialization. All tones are
-    acquired in their original order. roles and GE centers come from the fixed
-    Open/Reset capture; pulses/readout remain editable calibrated inputs.
+    acquired in their original order. roles come from the fixed Open/Reset
+    capture; centers derive from each role's saved readout tone circle.
+    Missing/linear role classifiers fail validation; no radius is needed.
+    Pulses/readout remain editable calibrated inputs.
     Delays are µs, pulse frequency MHz and phase degrees. No DC device is driven.
     Keep this original cfg with Result: only the runner copy sets rounds=1.
     """
@@ -120,20 +134,22 @@ class JointReadoutCfg(ConfigBase):
         ),
     ]
     roles: JointRoles
-    f1_centers: Annotated[
-        GECenters,
-        FieldMeta(
-            label="F1 GE centers",
-            description="填入 singleshot/ge 取得的 F1 ground／excited complex IQ centers，使用 normalized raw ADC units。",
-        ),
-    ]
-    f2_centers: Annotated[
-        GECenters,
-        FieldMeta(
-            label="F2 GE centers",
-            description="填入 singleshot/ge 取得的 F2 ground／excited complex IQ centers，使用 normalized raw ADC units。",
-        ),
-    ]
+
+    @property
+    def f1_centers(self) -> GECenters:
+        """Derive F1's normalized raw GE centers from its saved readout tone.
+
+        Missing or linear calibration raises ValueError; radius is not required.
+        """
+        return tone_centers(self.readout, self.roles.f1_tone)
+
+    @property
+    def f2_centers(self) -> GECenters:
+        """Derive F2's normalized raw GE centers from its saved readout tone.
+
+        Missing or linear calibration raises ValueError; radius is not required.
+        """
+        return tone_centers(self.readout, self.roles.f2_tone)
 
     @model_validator(mode="after")
     def validate_pair(self) -> Self:
@@ -141,6 +157,7 @@ class JointReadoutCfg(ConfigBase):
         if self.x180_f1.ch == self.x180_f2.ch:
             raise ValueError("F1/F2 Xπ pulses require different charge generators")
         self.roles.validate_readout(self.readout)
+        _ = self.f1_centers, self.f2_centers
         return self
 
 

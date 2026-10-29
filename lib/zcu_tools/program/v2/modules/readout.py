@@ -10,6 +10,7 @@ from numpy.typing import NDArray
 from pydantic import BeforeValidator
 from qick.asm_v2 import QickParam
 
+from zcu_tools.cfg_model import CircleClassifier, ReadoutClassifier
 from zcu_tools.cfg_model import MuxReadoutCfg as CoreMuxReadoutCfg
 
 from ..macro.wmem import PatchWmemFromDmem
@@ -36,7 +37,9 @@ class PulseReadoutCfg(AbsReadoutCfg):
     an expanded native envelope (arb holds its absolute asset path). pre_delay
     and post_delay bracket generator playback in us; ro_length is the ADC window
     and trig_offset the trigger delay in us. Scalar knobs except mixer_freq accept
-    QICK sweeps. desc is optional prose. type is readout/pulse.
+    QICK sweeps. desc is optional prose. type is readout/pulse. classifier stores
+    offset-free normalized ADC calibration (including radians for linear angle);
+    None means no calibration is available. The module does not apply it.
     """
 
     type: Literal["readout/pulse"] = "readout/pulse"
@@ -52,6 +55,7 @@ class PulseReadoutCfg(AbsReadoutCfg):
     ro_ch: int
     ro_length: float | QickParam
     trig_offset: float | QickParam = 0.0
+    classifier: ReadoutClassifier | None = None
 
     def build(self, name: str) -> PulseReadout:
         """Capture this cfg as a named, blocking QICK readout module."""
@@ -114,6 +118,8 @@ class MuxReadoutCfg(CoreMuxReadoutCfg, AbsReadoutCfg):
 
     Inherited fields retain MHz, degrees, normalized gain and us units. build
     captures a copy for mixmux8/static PFBv4; every set_param call is rejected.
+    Each tone's optional classifier retains its offset-free normalized ADC
+    calibration; None means unavailable. The module does not apply it.
     """
 
     def build(self, name: str) -> MuxReadout:
@@ -122,6 +128,65 @@ class MuxReadoutCfg(CoreMuxReadoutCfg, AbsReadoutCfg):
 
 
 ReadoutCfg: TypeAlias = PulseReadoutCfg | MuxReadoutCfg
+
+
+def _classifier_entries(
+    cfg: ReadoutCfg,
+) -> list[tuple[int, ReadoutClassifier | None]]:
+    """List ADC numbers and borrowed classifiers in pulse/tone order."""
+    return (
+        [(cfg.ro_ch, cfg.classifier)]
+        if isinstance(cfg, PulseReadoutCfg)
+        else [(tone.ro_ch, tone.classifier) for tone in cfg.tones]
+    )
+
+
+def circle_classifier(cfg: ReadoutCfg, *, ro_ch: int) -> CircleClassifier:
+    """Return detached circle calibration for the specified ADC channel number.
+
+    cfg is a native Pulse or Mux readout; ro_ch identifies its declared ADC,
+    not a tone position. Centers use raw integrated ADC / readout length,
+    without IQ offset subtraction. Radius and confusion matrix may be absent.
+    Raise ValueError for an unknown ADC, missing classifier, or linear mode
+    (which stores no GE centers). No hardware or program registry is read.
+    """
+    for ch, classifier in _classifier_entries(cfg):
+        if ch == ro_ch:
+            if classifier is None:
+                raise ValueError(f"ADC {ch}: classifier missing; run singleshot GE")
+            if not isinstance(classifier, CircleClassifier):
+                raise ValueError(
+                    f"ADC {ch}: linear classifier has no GE centers; use circle"
+                )
+            return classifier.model_copy(deep=True)
+    raise ValueError(f"ADC {ro_ch}: not declared by readout")
+
+
+def classification_parameters(
+    cfg: ReadoutCfg, *, require_other: bool = False
+) -> dict[int, ReadoutClassifier]:
+    """Return detached per-ADC calibration for explicit acquire(classify=...).
+
+    cfg supplies normalized raw ADC calibration without offset subtraction.
+    Missing calibration or circle radius raises ValueError naming the ADC;
+    missing radius requires GE Post analysis. require_other rejects linear
+    because it has only g/e states. No program registry or hardware is read.
+    """
+    result: dict[int, ReadoutClassifier] = {}
+    for ch, classifier in _classifier_entries(cfg):
+        if classifier is None:
+            raise ValueError(f"ADC {ch}: classifier missing; run singleshot GE")
+        if isinstance(classifier, CircleClassifier):
+            if classifier.radius is None:
+                raise ValueError(
+                    f"ADC {ch}: circle radius missing; run GE Post analysis"
+                )
+        elif require_other:
+            raise ValueError(
+                f"ADC {ch}: linear classifier has no other state; use circle"
+            )
+        result[ch] = classifier.model_copy(deep=True)
+    return result
 
 
 class AbsReadout(Module):

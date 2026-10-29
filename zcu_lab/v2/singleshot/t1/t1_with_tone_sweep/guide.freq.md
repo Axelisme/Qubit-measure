@@ -8,7 +8,7 @@ Single-shot T1-with-tone, probe-frequency sweep: at each probe frequency it swee
 
 Open and Reset take a snapshot of the current aliases, parameters and module choices. Relax delay starts at 5*T1; length stop uses 5 times the tone T1 time scale. Frequency form sweeps `$resonator.freq` +/- 1.5 * `$resonator.kappa`; gain form sweeps 0 to 1. Each form exposes only one outer axis.
 
-Classification starts from `$qubit.ext.readout_cal.g_center`, `e_center` and `radius`. Missing calibration leaves these fields Invalid.
+Classification uses the readout module's circle classifier, visible under Readout → Advanced (per tone for Mux). Run requires a classifier on every declared ADC and a positive radius; missing radius prompts singleshot GE Post. Linear has no Other state and is rejected. Analyze corrects populations only with the saved readout cfg's confusion matrix. Historical cfg without a classifier or matrix skips correction.
 
 Pulse templates use `$qubit.freq`, `$qubit.wiring.ch`, `$resonator.freq`, `$resonator.wiring.ch` and `$resonator.wiring.ro_ch`. The readout trigger uses `$resonator.time_of_fly` + 0.05 us. Missing required sources leave the corresponding fields Invalid; supply them before Run.
 
@@ -28,6 +28,6 @@ This is a diagnostic only. Read the rate landscape from the grid; calibration pa
 
 ## Recommended
 
-Set the classification calibration directly or seed it with 'singleshot/ge'. Keep the frequency sweep coarse (the inner length sweep multiplies the run time). 'uniform=True' (default) uses a linear length sweep; set False to cluster points along the expected exponential decay while preserving the configured window and count.
+Run singleshot/ge Primary and Post, then Apply to the selected readout module. Keep the frequency sweep coarse (the inner length sweep multiplies the run time). 'uniform=True' (default) uses a linear length sweep; set False to cluster points along the expected exponential decay while preserving the configured window and count.
 
-**Last updated:** 2026-10-21
+**Last updated:** 2026-10-29

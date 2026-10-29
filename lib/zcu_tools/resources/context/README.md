@@ -35,6 +35,8 @@ Rename 不求值 child、不改其他引用，也不 cascade。Library 不產生
 
 `LibraryContent` 保存量測檔中的 opaque library 內容。`LibrarySnapshot.from_content` 不讀檔、不預驗未使用的 Specs。查詢一個 root 時才解碼該 Spec，列出 keys 時只讀取該 family 的名稱。缺少或格式不符的 used section 報錯，不代換成空 library。
 
+Library readout 的可選 `classifier` 保存分類校準，mux 各 tone 獨立保存。複數中心沿用 `{__complex__: [re, im]}` tag，library 維持 2.0。舊條目沒有 classifier 時讀為 None，讀取與無關編輯不補寫新 key。
+
 `ModuleLibrary.edit()` 沿用 DocumentStore 的單檔交易。Draft setter 嚴格驗證新值。
 Body、schema、conflict 或 I/O 失敗不發布候選。Body 中的 snapshot 反映前項寫入。
 `snapshot()` 只複製記憶體，`refresh()` 顯式重載，`subscribe()` 在 publication 後通知。

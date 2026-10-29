@@ -631,7 +631,14 @@ def test_mux_ref_to_inline_keeps_labels_and_detaches_json_edits() -> None:
     ref = form.read_module(state.input, ("readout",), env)
     assert not isinstance(ref, FormErrors), ref
     assert ref.value["tones"] == [
-        {"freq": 6020.0, "gain": 0.1, "phase": 0.0, "ro_ch": 7, "label": ""}
+        {
+            "freq": 6020.0,
+            "gain": 0.1,
+            "phase": 0.0,
+            "ro_ch": 7,
+            "label": "",
+            "classifier": None,
+        }
     ]
     state.run_command(("readout",), "to_inline", env)
     inline = form.read_module(state.input, ("readout",), FormEnv())

@@ -1,6 +1,6 @@
 """Fixed-capture roles and editable calibration inputs for joint readout."""
 
-from zcu_tools.cfg_model import Expr, Slot, Template
+from zcu_tools.cfg_model import Slot, Template
 from zcu_tools.gui.form_adapter import Form, FormContext
 
 from zcu_lab.v2.support.measure.mux_forms import mux_readout_seed_metadata
@@ -17,7 +17,7 @@ def make_form(ctx: FormContext) -> Form[JointReadoutCfg]:
     Missing capture, roles, required kinds or group membership raise ValueError;
     source and alias failures propagate. Never refresh or mutate the capture.
     Xπ slots are copied into editable inputs; readout references its library slot.
-    Missing pulses or GE centers remain Invalid; absent readout starts blank
+    Missing pulses remain Invalid; absent readout starts blank
     for manual calibration.
     Core validation requires its tone count to match the captured full group.
     """
@@ -34,8 +34,6 @@ def make_form(ctx: FormContext) -> Form[JointReadoutCfg]:
             "x180_f1",
             "x180_f2",
             "readout",
-            "f1_centers",
-            "f2_centers",
             "reps",
             "rounds",
             "relax_delay",
@@ -48,13 +46,5 @@ def make_form(ctx: FormContext) -> Form[JointReadoutCfg]:
             "x180_f1": Slot("$f1.module.x180", copy=True),
             "x180_f2": Slot("$f2.module.x180", copy=True),
             "readout": readout,
-            "f1_centers": {
-                "g": Expr("$f1.ext.readout_cal.g_center"),
-                "e": Expr("$f1.ext.readout_cal.e_center"),
-            },
-            "f2_centers": {
-                "g": Expr("$f2.ext.readout_cal.g_center"),
-                "e": Expr("$f2.ext.readout_cal.e_center"),
-            },
         },
     ).with_seed_metadata(mux_readout_seed_metadata(readout))

@@ -59,7 +59,11 @@ def _analyze(
 def _writeback(
     req: WritebackRequest[SsLenRabiRunResult, RabiJointFitResult],
 ) -> Sequence[WritebackItem]:
-    return rabi_calibration_writeback(req.analyze_result)
+    return rabi_calibration_writeback(
+        req.analyze_result,
+        None if req.run_result.cfg is None else req.run_result.cfg.readout,
+        req.ctx.parameters,
+    )
 
 
 def _run(

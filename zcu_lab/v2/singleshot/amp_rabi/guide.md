@@ -8,7 +8,7 @@ The hardware gain sweep preserves every raw IQ shot. Live view classifies Ground
 
 Open and Reset take a snapshot of the current aliases, parameters and module choices. Relax delay starts at 5*T1. Gain sweep runs from -0.3 to 1.0.
 
-Classification starts from `$qubit.ext.readout_cal.g_center`, `e_center` and `radius`. Missing calibration leaves these fields Invalid.
+Raw acquisition and joint fitting require one ADC: Pulse or a single-tone Mux. Live preview uses that readout's circle classifier under Readout → Advanced. Without a classifier, Run still collects raw IQ and Analyze still fits; only the population preview is skipped. A supplied linear classifier cannot show Other; a circle without radius prompts singleshot GE Post.
 
 Pulse templates use `$qubit.freq`, `$qubit.wiring.ch`, `$resonator.freq`, `$resonator.wiring.ch` and `$resonator.wiring.ro_ch`. The readout trigger uses `$resonator.time_of_fly` + 0.05 us. Missing required sources leave the corresponding fields Invalid; supply them before Run.
 
@@ -26,10 +26,10 @@ The qubit pulse uses the x180 module when present and the qub_probe template whe
 
 ## Typical writeback
 
-Reports pi/pi2 gain, frequency and amplitude. A joint fit that passes the readout-calibration validity checks proposes `$qubit.ext.readout_cal.g_center`, `$qubit.ext.readout_cal.e_center`, `$qubit.ext.readout_cal.radius` and `$qubit.ext.readout_cal.confusion_matrix` with the same validity requirements as single-shot Length Rabi.
+Reports pi/pi2 gain, frequency and amplitude. A backend-valid joint fit with finite centers, radius and confusion matrix proposes one complete readout-module replacement at `$resonator.module.readout`. Pulse updates `classifier`; a single-tone Mux updates `tones.0.classifier`. The proposal preserves library waveform keys and rejects differences in other tested settings. Missing saved cfg or parameter capture fails explicitly. Invalid or nonfinite fits produce no proposal.
 
 ## Recommended
 
 Sweep a full Rabi period. Initial State describes the predominant state before the drive, at zero gain, even if the first gain is nonzero. Reps are shots per gain per round; rounds concatenate shots and update live populations. Joint fitting requires a file containing raw IQ shots.
 
-**Last updated:** 2026-10-21
+**Last updated:** 2026-10-29

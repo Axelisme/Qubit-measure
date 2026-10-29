@@ -8,7 +8,7 @@ Single-shot T1: applies a π pulse, waits for a variable delay, reads out, and c
 
 Open and Reset take a snapshot of the current aliases, parameters and module choices. Relax delay and length stop are 5 * `$qubit.t1`.
 
-Classification starts from `$qubit.ext.readout_cal.g_center`, `e_center` and `radius`. Missing calibration leaves these fields Invalid.
+Classification uses the selected readout module's circle `classifier`. It divides raw ADC sums by integration length without subtracting IQ offset. Run rejects missing calibration or radius and asks for GE Post analysis. Linear has no Other state and cannot supply this three-state T1 measurement. Analyze uses the saved cfg's confusion matrix; old cfg without a classifier skips correction.
 
 Pulse templates use `$qubit.freq`, `$qubit.wiring.ch`, `$resonator.freq`, `$resonator.wiring.ch` and `$resonator.wiring.ro_ch`. The readout trigger uses `$resonator.time_of_fly` + 0.05 us. Missing required sources leave the corresponding fields Invalid; supply them before Run.
 
@@ -28,6 +28,6 @@ T1 appears in the plot title; calibration parameters stay unchanged. Use 'single
 
 ## Recommended
 
-Set the classification calibration directly or seed it with 'singleshot/ge'. A delay sweep reaching ~5*T1 lets the decay flatten. Missing T1 starts length stop and relax delay at 150 us; stored invalid T1 leaves both required and empty. Set 'uniform=True' to sweep linearly; leave False to cluster more points along the expected exponential decay while preserving the configured start/stop window and point count.
+Run 'singleshot/ge', apply Primary and Post to the readout module, then Reset this Form to capture that calibration. A delay sweep reaching ~5*T1 lets the decay flatten. Missing T1 starts length stop and relax delay at 150 us; stored invalid T1 leaves both required and empty. Set 'uniform=True' to sweep linearly; leave False to cluster more points along the expected exponential decay while preserving the configured start/stop window and point count.
 
-**Last updated:** 2026-10-21
+**Last updated:** 2026-10-29

@@ -6,7 +6,7 @@ the supplied edit context owns full-model validation and value publication.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Generator, Mapping
+from collections.abc import Callable, Generator, Mapping, Sequence
 from contextlib import AbstractContextManager, contextmanager
 from copy import deepcopy
 from typing import TypeGuard
@@ -342,24 +342,62 @@ def stage_model[T: BaseModel](model: T, publish: Callable[[T], None]) -> Generat
     publish(accepted)
 
 
+def sequence_index(value: Sequence[object], segment: str) -> int:
+    """Decode an existing canonical nonnegative ASCII decimal sequence index.
+
+    value supplies only the length; this does not choose readable or writable
+    container types. segment must be "0" or digits without leading zero, and
+    identify an existing element. Invalid syntax and overly long numbers are
+    rejected before integer conversion. All invalid or out-of-range indices
+    raise ValueError.
+    """
+    if (
+        not segment.isascii()
+        or not segment.isdecimal()
+        or (segment != "0" and segment.startswith("0"))
+        or len(segment) > len(str(len(value)))
+    ):
+        raise ValueError(f"Invalid sequence index: {segment!r}")
+    index = int(segment)
+    if index >= len(value):
+        raise ValueError(f"Sequence index out of range: {segment!r}")
+    return index
+
+
 def set_model_value(model: BaseModel, path: str, value: object) -> None:
     """Assign one dotted field in an independent candidate, without validation.
 
     model must be a detached candidate managed by stage_model or a DocumentStore
-    draft. path uses nonempty mapping/model segments, with no list indexing.
+    draft. path uses nonempty model/mapping segments or canonical nonnegative
+    ASCII indices through existing lists. Numeric mapping keys remain keys.
+    Lists allow existing elements only: no auto-create, append, insert, slice
+    or negative indexing. Tuple/ndarray writes are not supported.
     Native complex scalars use the shared persisted tag. Values are copied;
     model types and field presence are retained. Missing/non-container parents
-    raise KeyError/AttributeError. An undeclared field on a model that does not
-    allow extras raises ValidationError naming the full path, without invoking
-    model validators. The owner must validate the full model before publication.
+    raise KeyError/AttributeError. Invalid or out-of-range list indices raise
+    ValueError. An undeclared field on a model that does not allow extras raises
+    ValidationError naming the full path, without invoking model validators.
+    The owner must validate the full model before publication.
     No metadata or files are changed.
     """
     parts = parameter_path(path)
-    node: FieldNode = model
+    node: FieldNode | list[object] = model
     for index, name in enumerate(parts[:-1]):
         parent_path = ".".join(parts[:index])
-        child = read_field(node, name, parent_path)
+        if isinstance(node, list):
+            child = node[sequence_index(node, name)]
+        else:
+            child = read_field(node, name, parent_path)
         if isinstance(node, BaseModel):
             node.model_fields_set.add(name)
-        node = field_container(child, ".".join(parts[: index + 1]))
-    _write_field(node, parts[-1], value, path)
+        node = (
+            child
+            if isinstance(child, list)
+            else field_container(child, ".".join(parts[: index + 1]))
+        )
+    if isinstance(node, list):
+        node[sequence_index(node, parts[-1])] = deepcopy(
+            encode_complex(value) if isinstance(value, complex) else value
+        )
+    else:
+        _write_field(node, parts[-1], value, path)
