@@ -34,6 +34,7 @@ if TYPE_CHECKING:
     from zcu_tools.gui.session.types import SessionEnv
     from zcu_tools.plotting.plots import Plots
 
+    from ..artifacts import LayoutPlanner
     from ..state import State
     from ..writeback import WritebackService
 
@@ -73,7 +74,10 @@ class AnalyzeService(StagedAnalyzeService):
         bus: EventBus,
         writeback: WritebackService,
         handles: OperationHandles,
+        *,
+        plan_layout: LayoutPlanner | None = None,
     ) -> None:
+        """Borrow operation/WB owners; plan_layout=None leaves outputs unplanned."""
         # FIT analyze runs off-main with explicit operation plots (no progress
         # or cancellation scope). It takes **only a Handle, no exclusion**
         # (ADR-0066): analyze never conflicts with hardware, so it no longer fakes
@@ -82,6 +86,7 @@ class AnalyzeService(StagedAnalyzeService):
         # _fail), the per-tab token map of which lives in the base.
         super().__init__(state, runner, bus, handles)
         self._writeback = writeback
+        self._plan_layout = plan_layout
         # Tabs whose active token is an INTERACTIVE picker (no worker; settles only
         # on Done / cancel). FIT analyze shares the base's per-tab token map but is
         # NOT tracked here, so cancel_interactive cannot reach into a worker-backed
@@ -448,6 +453,7 @@ class AnalyzeService(StagedAnalyzeService):
                     writeback_draft=draft,
                     source_operation_id=self._active_tokens[tab_id],
                 ),
+                plan_layout=self._plan_layout,
             )
         except BaseException:
             if draft is not None:

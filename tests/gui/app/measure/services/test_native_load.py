@@ -100,7 +100,7 @@ def _native_controls(
         form_resources(session.state),
         lambda aliases: form_sources(session.state, aliases),
     )
-    load = LoadService(session.state)
+    load = LoadService(session.state, plan_layout=session.save_service.plan_layout)
     run = RunService(
         session.state,
         runner,
@@ -109,12 +109,23 @@ def _native_controls(
         gate=MagicMock(),
         devices=lambda: {},
         refresh_devices=lambda: None,
+        plan_layout=session.save_service.plan_layout,
     )
     analyze = AnalyzeService(
-        session.state, runner, session.bus, writeback, session.handles
+        session.state,
+        runner,
+        session.bus,
+        writeback,
+        session.handles,
+        plan_layout=session.save_service.plan_layout,
     )
     post = PostAnalyzeService(
-        session.state, runner, session.bus, session.handles, writeback
+        session.state,
+        runner,
+        session.bus,
+        session.handles,
+        writeback,
+        plan_layout=session.save_service.plan_layout,
     )
     commands = RunAnalyzeControlFacet(
         state=session.state,
@@ -156,7 +167,9 @@ def test_native_load_uses_recorded_parameters_without_prevalidating_unused_metad
     before = path.read_bytes()
     session.context.clear_context()
 
-    LoadService(session.state).load_result("tab", str(path))
+    LoadService(
+        session.state, plan_layout=session.save_service.plan_layout
+    ).load_result("tab", str(path))
 
     tab = session.state.get_tab("tab")
     assert tab.run.parameters is not None
@@ -184,7 +197,9 @@ def test_native_load_rejects_malformed_recorded_snapshot_without_empty_fallback(
     before = session.native_data_path.read_bytes()
 
     with pytest.raises(LoadDataError, match="parameter_snapshot") as caught:
-        LoadService(session.state).load_result("tab", str(session.native_data_path))
+        LoadService(
+            session.state, plan_layout=session.save_service.plan_layout
+        ).load_result("tab", str(session.native_data_path))
 
     assert str(session.native_data_path) in str(caught.value)
     assert tab.run is previous
@@ -211,7 +226,7 @@ def test_native_load_analysis_and_writeback_keep_historical_point_aliases_and_id
         )
     )
     rows = session.context.get_alias_rows()
-    service = LoadService(session.state)
+    service = LoadService(session.state, plan_layout=session.save_service.plan_layout)
 
     service.load_result("tab", str(path))
 
@@ -307,7 +322,7 @@ def test_native_load_ignores_missing_or_corrupted_external_source(
     )
     session.save()
     events = session.entry.ledger.events()
-    service = LoadService(session.state)
+    service = LoadService(session.state, plan_layout=session.save_service.plan_layout)
     if fault == "corrupt":
         source = (
             session.entry.result_path / "points" / str(history.point) / "point.yaml"
@@ -344,7 +359,7 @@ def test_native_load_uses_parameter_snapshot_names_not_history_summary(
     saved_metadata = require_record(tab.run).metadata
     events = session.entry.ledger.events()
     rows = session.context.get_alias_rows()
-    service = LoadService(session.state)
+    service = LoadService(session.state, plan_layout=session.save_service.plan_layout)
 
     service.load_result(
         "tab",
@@ -574,7 +589,9 @@ def test_native_load_retains_history_and_resaves_captured_source(
         path = session.native_data_path
         stored = load(path)
         events = session.entry.ledger.events()
-        service = LoadService(session.state)
+        service = LoadService(
+            session.state, plan_layout=session.save_service.plan_layout
+        )
         outcome = service.load_result("tab", str(path))
         original_capture = session.state.get_tab("tab").run.parameters
         other = ResultEntry.create(
@@ -620,7 +637,9 @@ def test_loaded_same_entry_different_point_resaves_original_run(
         control = session.context
         control.use_point(PointUseRequest("destination-point"))
         tab = session.state.get_tab("tab")
-        service = LoadService(session.state)
+        service = LoadService(
+            session.state, plan_layout=session.save_service.plan_layout
+        )
         service.load_result("tab", str(source))
         assert tab.run.confirmed_run_id is None
         planned_copies: tuple[Path, ...] = ()
@@ -645,7 +664,7 @@ def test_loaded_same_entry_different_point_resaves_original_run(
                 if output.format == "png"
                 and output.path.is_relative_to(session.entry.result_path)
             )
-            assert not planned_copies
+            assert planned_copies
             assert all(
                 path.parent
                 == session.entry.result_path
@@ -721,7 +740,9 @@ def test_loaded_foreign_selection_saves_recorded_names_and_historical_metadata(
         tab = session.state.get_tab("tab")
         captured = control.read_context().capture_storage()
         assert captured.point == "destination-point"
-        service = LoadService(session.state)
+        service = LoadService(
+            session.state, plan_layout=session.save_service.plan_layout
+        )
         service.load_result("tab", str(source))
         assert require_metadata(tab.run) == metadata_from_container(load(source))
         assert tab.run.parameters is not None and tab.run.parameters.target is None
@@ -743,7 +764,7 @@ def test_loaded_foreign_selection_saves_recorded_names_and_historical_metadata(
 
         assert report.run_id == history.run_id
         assert all(item.status == "saved" for item in report.outputs)
-        assert not planned_paths
+        assert planned_paths
         saved_data = next(
             item.output.path
             for item in report.outputs
@@ -781,7 +802,9 @@ def test_unselected_entry_load_and_save_use_recorded_history(
             if p.is_file()
         }
         events = session.entry.ledger.events()
-        service = LoadService(session.state)
+        service = LoadService(
+            session.state, plan_layout=session.save_service.plan_layout
+        )
 
         outcome = service.load_result("tab", str(path))
 
@@ -801,7 +824,7 @@ def test_unselected_entry_load_and_save_use_recorded_history(
         assert tab.post_analysis.result is None
         assert tab.artifacts.snapshot()
         assert all(
-            not member.outputs
+            member.outputs
             for section in tab.artifacts.snapshot()
             for artifact in section.artifacts
             for member in artifact.members
@@ -851,7 +874,9 @@ def test_native_experiment_mismatch_keeps_previous_result_and_history(
         session.save()
         path = session.native_data_path
         old_run = tab.run
-        service = LoadService(session.state)
+        service = LoadService(
+            session.state, plan_layout=session.save_service.plan_layout
+        )
 
         with pytest.raises(LoadDataError) as error:
             service.load_result("tab", str(path))
@@ -867,7 +892,9 @@ def test_unreadable_native_load_keeps_previous_result_and_history(
     with native_save_session(tmp_path, qapp) as session:
         tab = session.state.get_tab("tab")
         old_run = tab.run
-        service = LoadService(session.state)
+        service = LoadService(
+            session.state, plan_layout=session.save_service.plan_layout
+        )
 
         with pytest.raises(LoadDataError) as error:
             service.load_result("tab", str(tmp_path / "missing.h5"))

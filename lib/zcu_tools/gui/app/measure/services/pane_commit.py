@@ -13,7 +13,8 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from zcu_tools.experiment.artifacts import ArtifactRef
-from zcu_tools.resources.entry import ArtifactKey, SaveContext, SaveLayout
+from zcu_tools.experiment.metadata import MetadataFieldError
+from zcu_tools.resources.entry import ArtifactKey, SaveLayout
 
 from ..artifacts import ArtifactDeclaration, ArtifactTracker
 from ..state import (
@@ -27,6 +28,8 @@ from ..state import (
 
 if TYPE_CHECKING:
     from zcu_tools.plotting.plots import Plots
+
+    from ..artifacts import LayoutPlanner
 
 logger = logging.getLogger(__name__)
 
@@ -62,17 +65,24 @@ def retire_resources(retired: RetiredPaneResources) -> None:
             logger.exception("Retired pane plot release failed")
 
 
-def commit_run(state: State, tab_id: str, pane: RunPaneState) -> None:
+def commit_run(
+    state: State,
+    tab_id: str,
+    pane: RunPaneState,
+    *,
+    plan_layout: LayoutPlanner | None = None,
+) -> None:
     """Replace Run and invalidate Analysis/Post, then retire their resources.
 
-    pane fixes the result, acquisition evidence and storage destination; None
+    plan_layout supplies Save's output planner; None leaves outputs unplanned.
+    pane fixes the result and acquisition evidence; None
     result clears Run. Unknown tabs raise KeyError; off-owner calls raise
     RuntimeError before mutation. Planning and cleanup follow the module contract.
     """
     # This read validates owner-thread access before adapter/path planning.
     state.get_artifact_snapshots(tab_id)
     tab = state.get_tab(tab_id)
-    layout = _save_layout(pane, tab=tab)
+    layout = _save_layout(pane, tab=tab, plan_layout=plan_layout)
     artifacts = ArtifactTracker()
     if pane.result is not None:
         artifacts.replace_section(
@@ -93,10 +103,15 @@ def commit_run(state: State, tab_id: str, pane: RunPaneState) -> None:
 
 
 def commit_analysis(
-    state: State, tab_id: str, pane: AnalysisPaneState[Any, Any]
+    state: State,
+    tab_id: str,
+    pane: AnalysisPaneState[Any, Any],
+    *,
+    plan_layout: LayoutPlanner | None = None,
 ) -> None:
     """Replace primary Analysis, invalidate Post, and retire both old stages.
 
+    plan_layout supplies Save's output planner; None leaves outputs unplanned.
     pane contains the completed result/plots, editable params and optional draft.
     Snapshot params into result_params so later edits cannot change saved inputs.
     Unknown tabs and off-owner calls fail as for commit_run. Cleanup never rolls
@@ -105,7 +120,7 @@ def commit_analysis(
     state.get_artifact_snapshots(tab_id)
     tab = state.get_tab(tab_id)
     artifacts = deepcopy(tab.artifacts)
-    layout = _save_layout(tab.run, tab=tab)
+    layout = _save_layout(tab.run, tab=tab, plan_layout=plan_layout)
     artifacts.replace_section(
         "analysis", _pane_declarations("analysis", pane), layout=layout
     )
@@ -119,10 +134,15 @@ def commit_analysis(
 
 
 def commit_post_analysis(
-    state: State, tab_id: str, pane: PostAnalysisPaneState[Any, Any]
+    state: State,
+    tab_id: str,
+    pane: PostAnalysisPaneState[Any, Any],
+    *,
+    plan_layout: LayoutPlanner | None = None,
 ) -> None:
     """Replace Post without altering primary Analysis and retire the old Post.
 
+    plan_layout supplies Save's output planner; None leaves outputs unplanned.
     pane contains a completed Post result/plots, params and optional draft.
     Snapshot params into result_params. A missing primary raises RuntimeError
     before publication. Unknown tabs, owner-thread and failure rules match
@@ -135,7 +155,7 @@ def commit_post_analysis(
             f"Cannot record post-analysis for tab {tab_id!r}: no primary analyze result"
         )
     artifacts = deepcopy(tab.artifacts)
-    layout = _save_layout(tab.run, tab=tab)
+    layout = _save_layout(tab.run, tab=tab, plan_layout=plan_layout)
     artifacts.replace_section(
         "post_analysis", _pane_declarations("post_analysis", pane), layout=layout
     )
@@ -147,36 +167,20 @@ def commit_post_analysis(
 
 
 def _save_layout(
-    run: RunPaneState, *, tab: Session[Any, Any, Any, Any]
+    run: RunPaneState,
+    *,
+    tab: Session[Any, Any, Any, Any],
+    plan_layout: LayoutPlanner | None,
 ) -> SaveLayout | None:
-    """Plan against this result's source, never tab birth or live selection."""
-    metadata = None if run.result is None else run.result.metadata
-    storage = run.storage
-    if metadata is None or storage is None:
-        return None
-    saved_at = datetime.now().astimezone()
+    """Use Save's planner when both metadata and a planner are available."""
     record = run.result
-    stem = tab.adapter.save_stem(
-        SaveContext(
-            name=tab.adapter_name,
-            run_id=metadata.run_id,
-            point=metadata.snapshot.point,
-            roles=metadata.snapshot.roles,
-            cfg=(
-                None
-                if record is None or record.cfg is None
-                else record.cfg.model_dump(mode="json")
-            ),
-            saved_at=saved_at,
-        )
-    )
-    return SaveLayout(
-        result_path=storage.result_path,
-        database_path=storage.database_path,
-        stem=stem,
-        point=metadata.snapshot.point,
-        saved_at=saved_at,
-    )
+    if record is None or record.metadata is None or plan_layout is None:
+        return None
+    try:
+        return plan_layout(tab, record, datetime.now().astimezone()).layout
+    except MetadataFieldError:
+        # Historical naming fields can be unreadable without blocking Load.
+        return None
 
 
 def _pane_declarations(

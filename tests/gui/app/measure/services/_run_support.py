@@ -15,6 +15,7 @@ from zcu_tools.gui.app.measure.adapter import (
     ContextReadiness,
     RunRequest,
 )
+from zcu_tools.gui.app.measure.artifacts import LayoutPlanner
 from zcu_tools.gui.app.measure.events.run import RunFinishedPayload, RunStartedPayload
 from zcu_tools.gui.app.measure.events.tab import TabInteractionChangedPayload
 from zcu_tools.gui.app.measure.registry import RegisteredAdapter
@@ -172,6 +173,7 @@ def make_run_service(
     *,
     fail_submit: bool = False,
     devices: Mapping[str, BaseDevice[Any]] | None = None,
+    plan_layout: LayoutPlanner | None = None,
 ) -> tuple[RunService, OperationGate, FakeBg, OperationHandles]:
     bg = FakeBg(fail_submit=fail_submit)
     bus = bg.bus
@@ -187,6 +189,7 @@ def make_run_service(
         gate=gate,
         devices=lambda: {} if devices is None else devices,
         refresh_devices=lambda: None,
+        plan_layout=plan_layout,
     )
     return svc, gate, bg, handles
 

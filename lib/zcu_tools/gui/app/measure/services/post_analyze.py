@@ -30,6 +30,7 @@ if TYPE_CHECKING:
     from zcu_tools.gui.session.types import SessionEnv
     from zcu_tools.plotting.plots import Plots
 
+    from ..artifacts import LayoutPlanner
     from ..state import State
     from ..writeback import WritebackService
 
@@ -74,9 +75,13 @@ class PostAnalyzeService(StagedAnalyzeService):
         bus: EventBus,
         handles: OperationHandles,
         writeback: WritebackService,
+        *,
+        plan_layout: LayoutPlanner | None = None,
     ) -> None:
+        """Borrow operation/WB owners; plan_layout=None leaves outputs unplanned."""
         super().__init__(state, runner, bus, handles)
         self._writeback = writeback
+        self._plan_layout = plan_layout
 
     def start_post_analyze(
         self,
@@ -215,6 +220,7 @@ class PostAnalyzeService(StagedAnalyzeService):
                     source_operation_id=self._active_tokens[tab_id],
                     writeback_draft=draft,
                 ),
+                plan_layout=self._plan_layout,
             )
         except BaseException:
             if draft is not None:

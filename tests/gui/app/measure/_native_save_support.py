@@ -135,6 +135,7 @@ class NativeSaveSession:
     context: ContextService
     state: State
     control: SaveControlFacet
+    save_service: SaveService
     handles: OperationHandles
     bus: BaseEventBus
     metadata: RunMetadata
@@ -215,6 +216,9 @@ def native_save_session(
             cfg=make_form(SavingAdapter.make_form(FormContext(None)), state=state),
         ),
     )
+    service = SaveService(
+        state, bus, result_root=tmp_path / "result", database_root=tmp_path / "Database"
+    )
     commit_run(
         state,
         "tab",
@@ -223,12 +227,10 @@ def native_save_session(
             storage=captured.storage,
             parameters=captured,
         ),
+        plan_layout=service.plan_layout,
     )
     handles = OperationHandles()
     background = BackgroundRunner()
-    service = SaveService(
-        state, bus, result_root=tmp_path / "result", database_root=tmp_path / "Database"
-    )
     control = SaveControlFacet(
         state=state,
         save=service,
@@ -246,6 +248,7 @@ def native_save_session(
             context,
             state,
             control,
+            service,
             handles,
             bus,
             metadata,
@@ -274,10 +277,12 @@ def declare_panes(
         session.state,
         "tab",
         AnalysisPaneState(result=PaneSummary(), plots=plots, params=PaneParams(2.0)),
+        plan_layout=session.save_service.plan_layout,
     )
     commit_post_analysis(
         session.state,
         "tab",
         PostAnalysisPaneState(result=PostSummary(), plots=None, params=PaneParams(4.0)),
+        plan_layout=session.save_service.plan_layout,
     )
     return plots

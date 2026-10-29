@@ -132,7 +132,17 @@ GUI Native Load 由 LoadService 呼叫 datafile.load 讀成 Container，透過 e
 
 Load 接受任意位置的 data.h5，不讀目前 entry 或歷史 point 的外部文件。未使用的 metadata、參數與 library 區塊延後驗證，使用壞值時報來源與欄位，不降成空內容。Save、完整 metadata／component／document 投影與 edit 仍完整驗證。Leaf read 只執行請求欄位的 annotation、field validators，包括 before，與必要祖先檢查，不執行 model 層級 before／after validators。缺值沿該欄位的 default／default_factory，同文件重讀保持穩定。Whole-component projection、edit、seed 與 clone 執行完整 model，包括轉換與跨欄位檢查。需要跨欄位不變式的 consumer 使用 whole-component projection；只靠 model validator 的 legacy 轉換需明確 edit 或 parameter upgrade，不在 leaf read 補做。Header／major、schema_version、JSON／YAML 表示、實際使用的 attachment path 與 ledger 追加安全規則保持。
 
-沒有 storage 的 Run 仍保留 artifact／member declarations，首次 Save 前 outputs 可以為空，但狀態不是 Saved。Save report 發布實際路徑、成功或逐項失敗。Bound Run 的既有預覽保留，但不決定 Save 目的地；同 session 改名或改 roots 時，預覽可能不同於實際輸出。實際 Save 建立目錄並覆寫同名 data.h5、分析與圖，Result 圖副本放到記錄的 points/<point>/，缺 point 放 points/unnamed_point/。不新增 source.json 或另一份來源權威。
+Run 與 Load 的預覽及實際 Save 共用 SaveService 的公開 layout planner。
+Planner 使用目前 roots、metadata 記錄的 entry 名稱與 point，以及 adapter.save_stem 的結果，只呼叫一次 bind_run_outputs，回傳具名的 binding 與 layout。
+預覽只使用 layout，Save 以同一 layout 寫檔、以 binding.prepare_ledger 準備 ledger。
+正常 Load 完成後立即有預覽，Analyze／PostAnalyze 後也有預覽，不依賴 run.storage。
+缺 metadata 時仍保留 artifact／member declarations，但沒有輸出預覽。
+預覽不建立目錄，也不標為 Saved。
+預覽只隔離 experiment.metadata 的 MetadataFieldError，保留含壞命名欄位的歷史資料供 Load；錯誤帶欄位、文件路徑與原始原因。
+其他規劃錯誤照常傳出，Save 仍完整驗證 metadata，不將壞內容改成空快照。
+Save report 發布實際路徑、成功或逐項失敗。
+預覽與 Save 使用各自計畫時的保存時間；自訂 stem 若依時間改名，實際輸出仍由該次 Save 計畫決定。
+實際 Save 建立目錄並覆寫同名 data.h5、分析與圖，Result 圖副本放到記錄的 points/<point>/，缺 point 放 points/unnamed_point/。不新增 source.json 或另一份來源權威。
 
 Load Data 同時提供 File 選檔與 opened entry 的 native 檔案清單。清單掃描 `Database/<entry>/runs/*/data.h5`，完全不讀 ledger。Run 身分、experiment、point、開始／結束時間與 completion 來自各檔的 RunMetadata／RunSnapshot；未知歷史時間保持空白，completion 保留 unknown。清單透過 `datafile.read_doc` 讀 metadata，只解碼與驗證上述顯示欄位，不要求完整 RunMetadata 或 provenance，也不讀 cfg 或量測 arrays。清單可顯示不代表整份資料可載入。Metadata 讀取失敗時，run_id 為空字串，experiment、point、時間與 completion 欄位留空。清單保留 exact Path 與既有錯誤資訊，選取仍回傳 exact path，由既有 Load 路徑回報失敗。清單不解析新舊目錄名來補欄位，避免讓路徑命名成為第二份歷史身分來源。查詢不建立目錄或事件，遷移也不手造 ledger。
 

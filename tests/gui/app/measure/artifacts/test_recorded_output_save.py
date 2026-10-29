@@ -37,7 +37,10 @@ def test_storage_free_save_keeps_declarations_and_publishes_recorded_outputs(
     )
     original = require_record(session.state.get_tab("tab").run)
     commit_run(
-        session.state, "tab", RunPaneState(result=replace(original, metadata=metadata))
+        session.state,
+        "tab",
+        RunPaneState(result=replace(original, metadata=metadata)),
+        plan_layout=session.save_service.plan_layout,
     )
     plots = declare_panes(session)
     before = session.state.get_artifact_snapshots("tab")
@@ -52,7 +55,7 @@ def test_storage_free_save_keeps_declarations_and_publishes_recorded_outputs(
         for artifact in section.artifacts
     )
     assert all(
-        not member.outputs
+        member.outputs
         for section in before
         for artifact in section.artifacts
         for member in artifact.members
@@ -143,6 +146,33 @@ def test_storage_free_save_keeps_declarations_and_publishes_recorded_outputs(
         assert metadata_from_container(load(native.output.path)) == metadata
     finally:
         plots.release()
+
+
+def test_save_uses_validated_metadata_for_output_planning(
+    native_session: NativeSaveSession,
+) -> None:
+    session = native_session
+    original = require_record(session.state.get_tab("tab").run)
+    metadata = session.metadata.model_copy(
+        update={"snapshot": session.metadata.model_dump(mode="json")["snapshot"]}
+    )
+    # Saving validates model_copy updates, including valid serialized snapshots.
+    commit_run(
+        session.state, "tab", RunPaneState(result=replace(original, metadata=metadata))
+    )
+    report = session.save()
+    assert all(item.status == "saved" for item in report.outputs)
+    native = next(
+        item.output.path for item in report.outputs if item.output.format == "data_h5"
+    )
+    assert (
+        native
+        == session.entry.database_path
+        / "runs"
+        / f"saving_{metadata.run_id}"
+        / "data.h5"
+    )
+    assert metadata_from_container(load(native)) == session.metadata
 
 
 def test_open_with_only_setup_and_points_saves_before_first_ledger_append(

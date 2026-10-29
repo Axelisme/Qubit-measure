@@ -49,7 +49,6 @@ from zcu_tools.gui.session.types import ParameterContext
 from tests.gui.app.measure._cfg_fakes import parameter_capture
 from tests.gui.app.measure._form_fakes import make_form
 from tests.gui.app.measure._load_support import historical_metadata
-from tests.gui.app.measure._native_save_support import native_save_session
 from tests.gui.app.measure._synthetic import (
     SampleAdapter,
     SampleCfg,
@@ -386,21 +385,20 @@ def test_run_finished_emits_outcome_finished():
     )
 
 
-@pytest.fixture
-def native_parameters(tmp_path, qapp):
-    with native_save_session(tmp_path, qapp) as session:
-        yield session.state.get_tab("tab").run.parameters
-
-
 @pytest.mark.parametrize("cancel_requested", [False, True])
 def test_result_commit_failure_settles_run_as_failed(
-    native_parameters, caplog, cancel_requested: bool
+    native_session, caplog, cancel_requested: bool
 ) -> None:
     state, tab_id, adapter = make_state()
-    svc, _gate, bg, handles = make_run_service(state)
+    svc, _gate, bg, handles = make_run_service(
+        state, plan_layout=native_session.save_service.plan_layout
+    )
     plots = make_plots()
     plots.subplots("trace")
-    inputs = replace(make_inputs(state, tab_id, adapter), parameters=native_parameters)
+    inputs = replace(
+        make_inputs(state, tab_id, adapter),
+        parameters=native_session.state.get_tab("tab").run.parameters,
+    )
     token = svc.start_run(inputs, plots=plots)
     failure = RuntimeError("commit refused")
     adapter.save_stem.side_effect = failure

@@ -14,6 +14,7 @@ from zcu_tools.gui.session.parameter_capture import restore_parameters
 from zcu_tools.gui.session.parameters import ParameterContext
 
 if TYPE_CHECKING:
+    from zcu_tools.gui.app.measure.artifacts import LayoutPlanner
     from zcu_tools.gui.app.measure.state import State
 
 
@@ -67,9 +68,12 @@ class LoadService:
     initializes analyze params afterward so run-finish and load share that policy.
     """
 
-    def __init__(self, state: State) -> None:
-        """Inject the pane owner; Load requires no live context or storage."""
+    def __init__(
+        self, state: State, *, plan_layout: LayoutPlanner | None = None
+    ) -> None:
+        """Inject the pane owner; plan_layout=None leaves loaded outputs unplanned."""
         self._state = state
+        self._plan_layout = plan_layout
 
     def load_result(self, tab_id: str, data_path: str) -> LoadTabResultOutcome:
         """Load data_path into an existing tab after GuardService.check_load.
@@ -132,6 +136,7 @@ class LoadService:
                 parameters=parameters,
                 storage=None,
             ),
+            plan_layout=self._plan_layout,
         )
         return LoadTabResultOutcome(
             tab_id=tab_id,
