@@ -99,6 +99,37 @@ discards results after confirmation and restores tab inputs, not acquired data.
 A fresh process may restore inputs through the configured startup script.
 Load the saved native file to recover and reanalyze acquired data.
 
+## MCP recipe
+
+Use `recipe_guide(adapter="twotone/raman_gf")` to read this guide.
+The single `raman_gf` tool runs this adapter through Run, Analyze and Save.
+`carrier_mhz` is the operator-supplied spectroscopy center, not a model value.
+`drive_ref` selects a drive library module. `waveform_asset` supplies an existing
+sampled arbitrary asset key; it converts the drive and waveform to inline while
+preserving their family. Choose an arbitrary waveform source before setting
+that key. The default Raman Form already uses the arbitrary family.
+`readout_ref` selects the acquired centroid3 readout library module.
+
+`scan_mode` accepts frequency, area and frequency_area.
+`detuning_start_mhz`, `detuning_stop_mhz` and `detuning_n` set the detuning axis.
+`gain_start`, `gain_stop` and `gain_n` set the nonnegative native gain axis.
+Each `n` maps to its saved cfg `expts`. Frequency holds gain start; area holds
+detuning start. Detuning is two-photon MHz; a positive offset raises the single
+carrier by half that value. The area unit is gain² us, not a calibrated angle.
+`shots` counts raw IQ shots per point; `relax_delay_us` uses us.
+
+Omitted inputs retain Form values and sources; explicit null goes unchanged to
+the owner. Python KEEP marks omission and is not a JSON value. Ordered
+`overrides` apply after named inputs and before validation. Missing or invalid
+Form inputs stop before Run and retain owner paths and reasons.
+
+The report gives the saved confusion matrix condition number and minimum
+singular value. Full raw/corrected g/e/f arrays remain in the analysis summary
+and saved artifacts. There is no writeback proposal or question. Analysis
+failure still saves raw IQ; inspect each Save output receipt. Analysis never
+reads live calibration or collects fresh references. Restart the MCP server
+after changing recipe declarations; GUI Reload does not reload that process.
+
 ## Interpretation and limits
 
 Changing readout settings requires a new calibration; a stored classifier does

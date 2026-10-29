@@ -56,6 +56,41 @@ The heatmap color is the magnitude of mean acquired IQ.
 It is a Cartesian Pump × Stokes grid, not a paired one-dimensional sweep.
 After changing mode, fill its newly shown scan endpoints and point counts.
 
+## MCP recipe
+
+Use `recipe_guide(adapter="twotone/stirap")` to read this guide.
+The single `stirap` tool runs the same adapter through Run, Analyze and Save.
+Choose `scan_mode` explicitly; the recipe never chooses a mode or tunes controls.
+
+| Recipe input | delay | amplitude | detuning |
+| --- | --- | --- | --- |
+| `start`, `stop`, `n` | Stokes lead endpoints in us and point count | Common gain-scale endpoints and point count | Pump detuning endpoints in MHz and point count |
+| `stokes_start_mhz`, `stokes_stop_mhz`, `stokes_n` | Unused | Unused | Stokes detuning endpoints in MHz and point count |
+
+Delay checks pulse ordering. Amplitude changes both gains at fixed sigma.
+Detuning scans a Cartesian Pump × Stokes grid, with positive offsets added to
+operator-entered carriers. Each `n` maps to the corresponding saved cfg `expts`.
+Use `pump_freq_mhz` and `stokes_freq_mhz` for measured spectroscopy values.
+`width_us` is Gaussian sigma; `stokes_lead_us` sets the fixed lead outside delay
+mode. Positive lead means Stokes first. Gains use signed native units.
+`readout_ref` selects the acquired centroid3 readout library module.
+
+Omitted inputs retain Form values; explicit null goes unchanged to the owner.
+Python KEEP marks omission and is not a JSON value. Ordered `overrides` apply
+after named inputs and before validation. Missing or invalid Form inputs stop
+before Run and retain owner paths and reasons. No model spectrum supplies a
+missing frequency. There is no automatic reference acquisition or live-library
+calibration lookup during analysis.
+
+The report gives the saved confusion matrix condition number and minimum
+singular value. Full raw/corrected g/e/f arrays remain in the analysis summary
+and saved artifacts. There is no writeback proposal or question. Analysis
+failure still saves acquired raw IQ; inspect each Save output receipt rather
+than treating recipe completion as proof that every format was saved.
+Restart the MCP server after changing recipe declarations; GUI Reload does not
+reload that separate process. No separate diagnostic or qutrit-reference tool
+is registered.
+
 ## Run and saved results
 
 Run acquires the requested raw shots at every scan point.

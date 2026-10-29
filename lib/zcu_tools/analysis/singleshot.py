@@ -5,9 +5,11 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 from itertools import combinations
+from typing import Annotated
 
 import numpy as np
 from numpy.typing import NDArray
+from pydantic import PlainValidator
 
 from zcu_tools.cfg_model import Centroid3Classifier
 from zcu_tools.utils.shot_classification import classify_shots, nearest_centroid3
@@ -181,6 +183,30 @@ def classify_reference_iq(
     )
 
 
+def _centroid3_populations(value: object) -> NDArray[np.float64]:
+    try:
+        array = np.asarray(value, dtype=np.float64)
+    except TypeError as error:
+        raise ValueError("Expected float64-convertible population values") from error
+    if array.ndim < 1 or array.shape[-1] != 3:
+        raise ValueError("Population shape must be scan axes followed by g/e/f")
+    if not np.isfinite(array).all():
+        raise ValueError("Population values must be finite numbers")
+    return array
+
+
+def _centroid3_confusion(value: object) -> NDArray[np.float64]:
+    try:
+        array = np.asarray(value, dtype=np.float64)
+    except TypeError as error:
+        raise ValueError("Expected float64-convertible confusion values") from error
+    if array.shape != (3, 3):
+        raise ValueError("Confusion matrix shape must be (3, 3)")
+    if not np.isfinite(array).all():
+        raise ValueError("Confusion matrix values must be finite numbers")
+    return array
+
+
 @dataclass(frozen=True)
 class Centroid3IQAnalysis:
     """Fixed-calibration IQ fractions in preparation-label coordinates.
@@ -190,11 +216,21 @@ class Centroid3IQAnalysis:
     confusion_matrix copies calibration rows prepared g/e/f, columns measured
     g/e/f. condition_number is its 2-norm condition number;
     minimum_singular_value is its smallest singular value. No purity is inferred.
+    TypeAdapter decodes native summary numeric lists to finite float64 arrays:
+    populations require a final axis of three, confusion requires shape (3, 3).
+    Invalid dtype/shape or null/nonfinite array values raise validation errors.
+    Decoding preserves scan axes and unclipped corrected fractions.
     """
 
-    raw_populations: NDArray[np.float64]
-    corrected_populations: NDArray[np.float64]
-    confusion_matrix: NDArray[np.float64]
+    raw_populations: Annotated[
+        NDArray[np.float64], PlainValidator(_centroid3_populations)
+    ]
+    corrected_populations: Annotated[
+        NDArray[np.float64], PlainValidator(_centroid3_populations)
+    ]
+    confusion_matrix: Annotated[
+        NDArray[np.float64], PlainValidator(_centroid3_confusion)
+    ]
     condition_number: float
     minimum_singular_value: float
 
