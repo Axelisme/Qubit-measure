@@ -23,10 +23,17 @@ Readout binds generator 0 and ADC 0. No fast-flux route is enabled.
 The schema can represent a flux route, but generator 2 already belongs to
 Stokes in this template. Unknown or colliding routes fail before evolution.
 
-## Reference basis comparison
+## Shared default and historical reference basis
 
-The default oscillator cutoff is 80 and the retained DC space has 15 eigenstates.
-The characterization compared cutoffs 60, 80 and 100 with 15, 20 and 25 retained
+The default oscillator cutoff is 80 with 20 retained DC eigenstates.
+The Raman full-drive comparison required this increase from 15 levels.
+The bounded reference and STIRAP regressions below passed before the change.
+Existing working YAML files keep their own settings; updating this template does
+not change a running environment. Review the basis in the working YAML and
+restart after changing it.
+
+The historical reference-only characterization used 80/15.
+It compared cutoffs 60, 80 and 100 with 15, 20 and 25 retained
 levels. Its finite reference was 100/25. It held the controls, receiver and
 seed 20261029 fixed across comparisons. It used short 100 ns constant reference
 pulses for ground, π01 and π03 followed by π32. It did not recalibrate the pulse
@@ -64,9 +71,8 @@ These reference results apply only to this circuit at zero flux, the specified
 bath and short reference pulses. Cutoff 100 is a finite comparison, not an
 infinite-basis oracle. The bounded STIRAP comparisons below provide separate
 transfer, basis and full-drive evidence. They do not establish convergence for
-stronger drives or sampled-envelope Raman. Keep the default at 80/15.
-A default change needs new numerical evidence and approval of replacement
-thresholds.
+stronger drives or sampled-envelope Raman. The later Raman checks below
+support the 80/20 default only within their recorded controls.
 
 ## Readout settings and five checks
 
@@ -107,8 +113,19 @@ The selected 80/15 settings gave these results with seed 20261029:
 | Training confusion minimum singular value | ≥ 0.8 | 0.944051 |
 
 The evaluation half participated in selecting the settings. It is not an
-independent, unbiased performance estimate. Three-state readout acceptance
-must repeat these five checks with a fixed seed other than 20261029.
+independent, unbiased performance estimate.
+The 80/20 default regression used independent seed 20261105 and the same
+acquired reference controls. Each preparation again supplied 4096 shots,
+with the first 2048 for training and the remaining 2048 for evaluation.
+It did not select new controls or move shots between the halves.
+
+| Observable | Approved threshold | 80/20 regression |
+| --- | ---: | ---: |
+| Minimum pooled Mahalanobis separation | ≥ 2 | 2.97982357 |
+| Macro preparation-label error | ≤ 3% | 1.96940104% |
+| Each preparation-label error, g/e/f | ≤ 6% | 0.390625% / 0.244140625% / 5.2734375% |
+| Training confusion 2-norm condition | ≤ 1.5 | 1.05786181 |
+| Training confusion minimum singular value | ≥ 0.8 | 0.951923881 |
 
 The confusion matrix rows label requested ground, π01 and π03-then-π32
 preparations. They include preparation contamination, readout jumps and
@@ -183,6 +200,70 @@ energy-state populations. Keep negative and above-one estimates.
 Neither a transfer plateau nor its confusion correction establishes hardware
 gate fidelity.
 
+## Bounded 80/20 STIRAP acquisition regression
+
+At the recorded lead +0.3 us working point, 80/20 gave raw g/e/f fractions
+0.036376953125 / 0.03515625 / 0.928466796875.
+The corrected fractions were -0.0000180691 / 0.0328592004 / 0.9671588687.
+The maximum absolute corrected-fraction difference from the saved 80/15
+single-point run was 0.0002545872434, below the approved 0.005 limit.
+The controls, seed 20261106, 4096 shots and original reference calibration
+stayed fixed. This regression did not repeat or revalidate any scan grid.
+The historical STIRAP numbers above retain their original 80/15 scope.
+
+## Acquisition wall time
+
+One public legacy `ModularProgramV2.acquire` call at the same STIRAP lead
++0.3 us point took 1.290324 s at 80/15 and 20.510185 s at 80/20.
+These are single samples, not a performance threshold or a stable speed ratio.
+The timer starts immediately before acquire and stops when it returns.
+It includes simulator admission, numerical evolution, ADC sampling and buffer
+collection. It excludes imports, environment and program construction, public
+template capture, IQ conversion, analysis, plotting and file I/O.
+Both calls used the carriers, Gaussian sigma 0.2 us, gains 0.015/0.05,
+seed 20261106, 4096 shots and readout settings in the STIRAP table above.
+
+Each basis ran once in a fresh process and environment, with no acquire warmup.
+The existing source-namespaced Numba disk cache was retained.
+The 80/20 call ran first with 178 cache files present; the later 80/15 call
+started with 214. Compilation and disk-cache reuse can therefore contribute
+to the difference. Do not treat these samples as isolated basis-compute costs
+or predict a whole-grid duration by multiplying them.
+The host was an Intel Core Ultra 7 258V, 8 logical CPUs, Linux x86_64
+7.2.11-arch1-1, Python 3.13.11 and NumPy 2.4.6.
+OMP, OpenBLAS, MKL and Numba thread limits were all 1.
+The headless run used Qt offscreen and Matplotlib Agg, with displays unset.
+No repeated benchmark or performance scan was run.
+
+## Raman acquired-IQ characterization
+
+The recorded 12 points used two-photon detunings -50, 0 and +50 MHz with
+requested gains 0, 0.3, 0.6 and 0.9 at seed 20261106 and 4096 shots per point.
+The carrier center came from acquired spectroscopy as
+(f03 - f32) / 2 = 2065.3401267374416 MHz, not a Form default.
+The source waveform was sqrt(sin(pi*t/T)), T = 0.1 us, with 101 samples.
+Compilation produced a 0.09895833333333333 us drive, actual nonzero gains
+0.29997558444729294, 0.5999816883354697 and 0.8999877922236464,
+and carriers 2040.340126991272, 2065.3401260375977 and
+2090.3401279449463 MHz. Readout began at 0.10230654761904762 us
+in a 0.5045572916666667 us compiled timeline.
+The circuit, bath, receiver and reference calibration stayed fixed.
+
+| Acquired preparation-label observable | Approved threshold | Recorded result |
+| --- | ---: | ---: |
+| Resonant gain 0.9 raw / corrected f | Each ≥ 0.45 | 0.514892578125 / 0.535659660097 |
+| Increase over resonant zero gain, raw / corrected f | Each ≥ 0.45 | 0.510986328125 / 0.533112541518 |
+| All zero-drive and ±50 MHz points, maximum raw f / abs corrected f | Each ≤ 0.01 | 0.00390625 / 0.00254711857834 |
+| All 12 points, maximum abs corrected e-label | ≤ 0.002 | 0.000387550820873 |
+
+The original 4096-shot runs did not save a classifier. These estimates apply
+the same receiver's acquired and Apply-validated calibration offline.
+They characterize those IQ records, not the saved-run contract.
+Normal GUI Run, Save and native Load separately validate analysis from saved cfg.
+Correction retains negative values and returns preparation-label coordinates.
+The e label is not all higher-state leakage. Transfer is not gate fidelity.
+The [Raman guide](../../v2/twotone/raman_gf/guide.md) describes that workflow.
+
 ## STIRAP environment oracle, lab-author only
 
 Only the simulator/environment-validation owner uses the oracle in this section.
@@ -241,14 +322,46 @@ The sampled maximum is not a bound on the continuous-time maximum.
 The full-drive check at the positive-lead sampled peak does not turn the
 other sampled times into full-drive comparisons.
 
-These separate STIRAP checks support keeping the default at 80/15 for the
-tested working points. The short-reference checks above do not replace them.
+These historical STIRAP checks supported 80/15 at the tested working points.
+The later 80/20 regression did not repeat the historical seven-item acceptance.
+At lead +0.3 us, full-drive 80/20 versus the retained 100/25 results gave
+maximum zero-padded population differences 7.54545280e-6 at the
+1504.3712797619048 ns endpoint and 1.64302745e-5 at the already sampled
+752.1856398809524 ns peak. Both sides used effective Engine budget 1e-5.
+Both differences passed the approved 1e-4 limit. Only the missing 80/20 side
+was evolved; the peak time and 100/25 records stayed fixed.
+This does not validate the entire STIRAP grid at 80/20.
+The short-reference checks above do not replace these driven comparisons.
 100/25 remains a finite reference. The basis and solver evidence does not
 establish convergence at every point of any scan grid.
 Do not extend these thresholds to other controls, seeds, times, budgets,
 stronger drives, longer sequences, Raman or another circuit, loss model or
 receiver. An early pilot with sigma 0.05 us and gains 0.06/0.20 is outside
-this plateau acceptance scope. Raman needs its own numerical assessment.
+this plateau acceptance scope.
+
+## Raman environment oracle, lab-author only
+
+The same 12 compiled Raman controls were evolved through public Engine.evolve.
+Driven segments selected full-drive non-RWA dop853; idle segments used t4.
+The shaped_sambe candidate was rejected for the nine driven points.
+This is not acceptance of an approximate driven solver.
+YAML rtol/atol changes that gave zero difference are not DOP853 convergence
+proof. The comparisons below changed the effective Engine budget instead.
+
+| Complete population comparison, shorter vector zero-padded | Approved threshold | Maximum absolute difference |
+| --- | ---: | ---: |
+| 80/20 budget 1e-3 versus 1e-7 | ≤ 1e-4 | 6.15992704119e-5 |
+| 80/20 budget 1e-5 versus 1e-7 | ≤ 1e-6 | 6.10800183876e-7 |
+| 80/20 versus 100/25, both budgets 1e-5 | ≤ 1e-4 | 2.33183304376e-5 |
+
+80/15 versus 100/25 gave 2.27051325114e-3 at budget 1e-5 on both sides.
+It failed the unchanged 1e-4 basis limit. This is why the shared default now
+retains 20 levels. All three bounded reference/STIRAP regressions passed
+before the default changed. The 100/25 comparison remains a finite reference.
+These results cover only the recorded 12 points, waveform, compiled timing,
+receiver, seed and budgets. They do not establish convergence at longer pulses,
+higher gains, continuous detuning/area ranges or other circuit parameters.
+The oracle is author-only evidence, not a measurement Result or calibration.
 
 ## Solver and unsupported scope
 

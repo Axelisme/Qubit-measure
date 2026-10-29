@@ -120,6 +120,7 @@ from zcu_lab.v2.twotone.irb.gui import DEFINITION as IRB_DEFINITION
 from zcu_lab.v2.twotone.power_dep.gui import DEFINITION as POWER_DEP_DEFINITION
 from zcu_lab.v2.twotone.rabi.amp_rabi.gui import DEFINITION as AMP_RABI_DEFINITION
 from zcu_lab.v2.twotone.rabi.len_rabi.gui import DEFINITION as LEN_RABI_DEFINITION
+from zcu_lab.v2.twotone.raman_gf.gui import DEFINITION as RAMAN_GF_DEFINITION
 from zcu_lab.v2.twotone.rb.gui import DEFINITION as RB_DEFINITION
 from zcu_lab.v2.twotone.reset.bath.freq.gui import (
     DEFINITION as BATH_FREQ_GAIN_DEFINITION,
@@ -183,6 +184,7 @@ ADAPTERS: dict[str, object] = {
     "twotone/power_dep": POWER_DEP_DEFINITION,
     "twotone/rabi/len_rabi": LEN_RABI_DEFINITION,
     "twotone/rabi/amp_rabi": AMP_RABI_DEFINITION,
+    "twotone/raman_gf": RAMAN_GF_DEFINITION,
     "twotone/t1": T1_DEFINITION,
     "heralding/t1": HERALDING_T1_DEFINITION,
     "heralding/amp_rabi": HERALDING_AMP_RABI_DEFINITION,
