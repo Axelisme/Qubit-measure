@@ -414,17 +414,17 @@ class Controller:
         # ADR-0066: cross-thread interaction now uses per-op OperationChannel;
         # FeedbackInbox and set_feedback_inbox are removed.
         self._background_svc = services.background
-        self._progress_svc = services.progress
+        self._progress_svc = services.session.progress
         self._guard_svc = services.guard
-        self._dev_svc = services.device
-        self._device_control = services.device_control
-        self._soc_svc: SoCConnectionService = services.soc_connection
-        self._predictor_control = services.predictor_control
-        self._progress_control = services.progress_control
-        self._ctx_svc = services.context
-        self._context_control = services.context_control
-        self._setup_control = services.setup_control
-        self._soc_control = services.soc_control
+        self._dev_svc = services.session.device
+        self._device_control = services.session.device_control
+        self._soc_svc: SoCConnectionService = services.session.soc_connection
+        self._predictor_control = services.session.predictor_control
+        self._progress_control = services.session.progress_control
+        self._ctx_svc = services.session.context
+        self._context_control = services.session.context_control
+        self._setup_control = services.session.setup_control
+        self._soc_control = services.session.soc_control
         self._tab_forms = services.tab_forms
         self._tab_svc = services.tab
         self._tab_control = services.tab_control
@@ -438,8 +438,8 @@ class Controller:
         self._writeback_svc = services.writeback
         self._writeback_control = services.writeback_control
         self._workspace_svc = services.workspace
-        self._settings_svc = services.settings
-        self._arb_waveform_svc = services.arb_waveform
+        self._settings_svc = services.session.settings
+        self._arb_waveform_svc = services.session.arb_waveform
 
     def add_view(self, view: ViewProtocol) -> None:
         """Attach a full Qt View. It is a diagnostic sink (fan-out target) and

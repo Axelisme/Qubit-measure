@@ -18,7 +18,6 @@ from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.expected_error import InvalidInputError
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
 from zcu_tools.gui.session.aliases import AliasRow
-from zcu_tools.gui.session.context_control import ContextControlFacet
 from zcu_tools.gui.session.context_types import (
     ContextTarget,
     PointUseRequest,
@@ -120,9 +119,7 @@ def test_sample_write_receipt_reads_latest_jsonl_at_current_point(
 ) -> None:
     entry, context = context_at(tmp_path)
     context.set_alias_rows((AliasRow("flux_dev", "bias_at_run"),))
-    service = WritebackService(
-        ContextControlFacet(context=context), arb_names=lambda: ()
-    )
+    service = WritebackService(context, arb_names=lambda: ())
     draft = service.create_draft(
         [
             proposals.RecordWriteback(
@@ -195,9 +192,7 @@ def test_record_preview_selection_and_apply_preserve_adapter_json(
     entry, context = context_at(tmp_path)
     context.set_alias_rows((AliasRow("flux_dev", "bias_at_run"),))
     capture = context.read_context()
-    service = WritebackService(
-        ContextControlFacet(context=context), arb_names=lambda: ()
-    )
+    service = WritebackService(context, arb_names=lambda: ())
     draft = service.create_draft(
         [
             proposals.ParameterWriteback(
@@ -283,9 +278,7 @@ def test_preview_displays_adapter_note_and_current_manual_selection(
     original = proposals.ParameterWriteback("general.ext.fit", "fit", 5.0)
     original.selected = False
     original.note = "Fit needs manual review"
-    service = WritebackService(
-        ContextControlFacet(context=context), arb_names=lambda: ()
-    )
+    service = WritebackService(context, arb_names=lambda: ())
     draft = service.create_draft(
         [original],
         parameters=context.read_context(),
@@ -310,9 +303,7 @@ def test_preview_displays_adapter_note_and_current_manual_selection(
 
 def test_partial_failure_preserves_expected_cause_wire_category(tmp_path: Path) -> None:
     entry, context = context_at(tmp_path, rejecting=True)
-    service = WritebackService(
-        ContextControlFacet(context=context), arb_names=lambda: ()
-    )
+    service = WritebackService(context, arb_names=lambda: ())
     draft = service.create_draft(
         [
             proposals.ParameterWriteback(

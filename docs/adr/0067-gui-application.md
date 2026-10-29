@@ -6,13 +6,13 @@ status: accepted
 
 **狀態：** accepted。
 
-**Last updated:** 2026-10-29，workflow 嵌入 measure 與 headless owner；獨立 SoC dialog 與窄 control facets；predictor 與 experiment figure area 的控件 owner；腳本 session 所有權、動態資源與儀器 adapter 邊界
+**Last updated:** 2026-10-29，workflow 嵌入 measure 與 headless owner；獨立 SoC dialog 與窄 control ports；predictor 與 experiment figure area 的控件 owner；腳本 session 所有權、動態資源與儀器 adapter 邊界
 
 ## 問題與決策
 
 Measure 有 Qt 視窗與 remote 入口，Workflows 也複用量測 session。把業務狀態交給各前端管理，會使相同操作走不同的驗證和寫入路徑。本篇約束共享能力的 owner、前端反應及繪圖責任，不規定各 app 的 run loop 或 RPC 格式。
 
-GUI 與 remote 是 application 的 driving adapters。它們讀同一個 owner 公開的狀態或投影，寫入時呼叫 owning command，不另造一份可提交的業務狀態。這不表示各 GUI 都開放相同的 remote commands：dispersive 的 remote 入口目前只讀；fluxdep 與 Measure 的 remote 呼叫同一 owning commands。Measure 的 `Controller` 和 control facets 提供共用的應用入口；畫面預覽、canvas、焦點與 renderer 仍由 Qt 前端持有。Remote 的傳輸、診斷投遞及 wire 契約留給 Remote／Transport，不由本篇指定。
+GUI 與 remote 是 application 的 driving adapters。它們讀同一個 owner 公開的狀態或投影，寫入時呼叫 owning command，不另造一份可提交的業務狀態。這不表示各 GUI 都開放相同的 remote commands：dispersive 的 remote 入口目前只讀；fluxdep 與 Measure 的 remote 呼叫同一 owning commands。Measure 的 `Controller` 和窄 control ports 提供共用的應用入口；畫面預覽、canvas、焦點與 renderer 仍由 Qt 前端持有。Remote 的傳輸、診斷投遞及 wire 契約留給 Remote／Transport，不由本篇指定。
 
 ## GUI callback lifetime
 
@@ -39,13 +39,15 @@ Qt signal slot 的 QObject receiver 使用弱參照。EventFilter 經 scope 的 
 
 ## Session、狀態與協作
 
-`gui.session` 提供 context、SoC、device、操作機制與 dialog 所需的窄 control facets。Measure 的 experiment 與 workflow tabs 使用同一份 `SessionServices`，共用背景執行、operation gate 與 RUN lease。Session 不決定 workflow 或 tab 呈現。
+使用者於 2026-10-29 裁定：「候選8，需要評估trade-off, 候選11可以做，都允許你自己決定」。ContextService 與 PredictorService 直接滿足各自的窄 control port，省去不隱藏政策的純轉發層。欄位與參數仍以 Port 限制呼叫能力，結構相容由組裝點的型別檢查確認。Device、Setup、Soc 的 facet 保留組合或訂閱邏輯，Progress facet 不變。`current_point_label()` 由 ContextService 讀取已安裝的 selection，未選 point 時回傳 None，不做 I/O。AppServices 只列 app 自己建構的 service，session services 經 `services.session` 取用；Controller 的公開 properties 不變。
+
+`gui.session` 提供 context、SoC、device、操作機制與 dialog 所需的窄 control ports，Device、Setup、Soc 另有組合 facet。Measure 的 experiment 與 workflow tabs 使用同一份 `SessionServices`，共用背景執行、operation gate 與 RUN lease。Session 不決定 workflow 或 tab 呈現。
 
 `SessionServices.runner` 與 `SessionServices.progress` 保留 build 輸入的同一 instances。同 session 的 Measure Run、Analyze、PostAnalyze 與 operation control 從 bundle 取用，不另傳一份 infrastructure。Composition root 仍建立並注入基礎物件，operation policy、exclusion 和 owner-thread delivery 不變。Session 不反向 import 具體 app。
 
 SoC dialog 透過獨立 `SocControlPort` 提供連線與 soccfg 瀏覽，Setup 透過 `SetupControlPort` 管理 entry 與 working points；使用者於 2026-10-20 裁定：「我規劃將soc連線與顯示的邏輯從setup dialog獨立出來，成為獨立的dialog並有獨立入口按鈕，新setup dialog的working points移到原本soc區域的右側。」
 
-Setup 等 shared dialog 只依賴窄 control facet 表達一般能力（開啟 entry、選取 point、讀取記住的 Session Preference、連線），不知道 app 正在啟動、還原或關閉；control port 也不提供啟動專用的版本。Session Preference 只回答下次輸入預填什麼，不證明 entry 已開啟或儀器已連線。Fluxdep、dispersive 並未因此取得完整的 measurement session。
+Setup 等 shared dialog 只依賴窄 control port 表達一般能力（開啟 entry、選取 point、讀取記住的 Session Preference、連線），不知道 app 正在啟動、還原或關閉；control port 也不提供啟動專用的版本。Session Preference 只回答下次輸入預填什麼，不證明 entry 已開啟或儀器已連線。Fluxdep、dispersive 並未因此取得完整的 measurement session。
 
 可被多方讀取的 session 與 app 事實由 State 或其 owner 公開讀取投影。ContextService 私下持有 ResultEntry、point 與 library handles，是 GUI 參數與 library 的寫入權威。EMPTY 的 parameters 是 None。未開 entry 時沒有 entry metadata 或 source binding；開啟 entry 後仍為 EMPTY，不自選 point，但可讀 entry metadata、point list 與 setup source binding。選取或建立 point 後才使用 ACTIVE 的持久文件。SoC、device 與獨立 predictor 不因沒有參數而停用。SavedPoint 是唯一參數寫入目標，寫入經 resources owner 的 DocumentStore 單檔交易，成功後才發布目前 binding 的固定投影、版本與 fact。Parameter／library 寫入要求目前已有選取的 point。同 entry 的非選取 point 可寫入但不改目前 selection；跨 entry 拒絕。Schema、來源、衝突或 I/O 失敗不發布候選。
 

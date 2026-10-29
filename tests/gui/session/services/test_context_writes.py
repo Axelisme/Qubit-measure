@@ -13,7 +13,7 @@ from zcu_tools.cfg_model import ConstWaveformCfg, PulseSpec
 from zcu_tools.format_version import YamlMap, YamlValue
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.expected_error import FailedPreconditionError
-from zcu_tools.gui.session.context_control import ContextControlFacet
+from zcu_tools.gui.session.context_control import ContextControlPort
 from zcu_tools.gui.session.context_types import (
     ContextTarget,
     PointUseRequest,
@@ -48,7 +48,7 @@ AT = "2026-10-07T00:00:00Z"
 @dataclass
 class _Session:
     entry: ResultEntry
-    control: ContextControlFacet
+    control: ContextControlPort
     service: ContextService
     state: SessionState
     bus: BaseEventBus
@@ -63,11 +63,11 @@ def session(tmp_path: Path) -> _Session:
     bus = BaseEventBus()
     service = ContextService(state, bus, bind_assets=ArbWaveformDatabase.info_at)
     service.install_entry(entry)
-    return _Session(entry, ContextControlFacet(context=service), service, state, bus)
+    return _Session(entry, service, service, state, bus)
 
 
 def _write(
-    control: ContextControlFacet,
+    control: ContextControlPort,
     target: ContextTarget,
     kind: Kind,
     number: float,

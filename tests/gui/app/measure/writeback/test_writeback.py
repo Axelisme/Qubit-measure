@@ -25,7 +25,6 @@ from zcu_tools.gui.app.measure.writeback import (
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 from zcu_tools.gui.session.aliases import AliasRow
-from zcu_tools.gui.session.context_control import ContextControlFacet
 from zcu_tools.gui.session.context_types import PointUseRequest
 from zcu_tools.gui.session.library_entry import LibraryEntryInvalid, ModuleEntryForm
 from zcu_tools.gui.session.services.context import ContextService
@@ -67,7 +66,7 @@ def session(tmp_path: Path):
             bind_assets=ArbWaveformDatabase.info_at,
         )
         context.install_entry(entry)
-        control = ContextControlFacet(context=context)
+        control = context
         control.use_point(PointUseRequest("a"))
         control.add_component("Q1", "fake/drive/a", {})
         target = require_target(control.read_context())

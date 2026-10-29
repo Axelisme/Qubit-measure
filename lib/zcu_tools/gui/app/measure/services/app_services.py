@@ -21,20 +21,13 @@ from zcu_tools.gui.app.measure.startup_context import (
 from zcu_tools.gui.form import FormEnv
 from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
 from zcu_tools.gui.session.alias_presets import AliasPresets, validate_alias_presets
-from zcu_tools.gui.session.context_control import ContextControlFacet
 from zcu_tools.gui.session.operation_handles import OperationHandles
 from zcu_tools.gui.session.operation_runner import (
     OperationInfrastructure,
     OperationRunner,
 )
-from zcu_tools.gui.session.services.arb_waveform import ArbWaveformService
 from zcu_tools.gui.session.services.build import SessionServices, build_session_services
-from zcu_tools.gui.session.services.connection import SoCConnectionService
-from zcu_tools.gui.session.services.context import ContextService
-from zcu_tools.gui.session.services.device import DeviceService
-from zcu_tools.gui.session.services.predictor import PredictorService
 from zcu_tools.gui.session.services.progress import ProgressService
-from zcu_tools.gui.session.services.project_settings import ProjectSettingsService
 from zcu_tools.gui.session.types import ParameterContext
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
@@ -61,17 +54,12 @@ if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.registry import Registry
     from zcu_tools.gui.app.measure.state import State
     from zcu_tools.gui.event_bus import BaseEventBus as EventBus
-    from zcu_tools.gui.session.context_control import ContextControlPort
-    from zcu_tools.gui.session.device_control import DeviceControlPort
     from zcu_tools.gui.session.ports import (
         DeviceRegistryPort,
         DriverFactoryPort,
         OwnerScheduler,
         ProgressTransport,
     )
-    from zcu_tools.gui.session.predictor_control import PredictorControlPort
-    from zcu_tools.gui.session.progress_control import ProgressControlPort
-    from zcu_tools.gui.session.setup_control import SetupControlPort, SocControlPort
 
     from ..writeback import WritebackControlPort
     from .operation_control import OperationControlPort
@@ -93,15 +81,16 @@ class AppServices:
     A single OperationRunner (the kind-agnostic lifecycle mechanism, ADR-0066)
     is shared by run / analyze / post-analyze / device-setup operations.
 
-    session retains the original SessionServices bundle for embedded borrowers.
+    session is the sole access path to session-owned services and control ports.
+    It retains the original SessionServices bundle for embedded borrowers.
     workflow is the shared headless workflow registry and command facet; it uses
     that same session runner, progress and hardware lease. Borrowers must release
     their own subscriptions, not drain or disconnect this bundle.
 
-    soc_control is the non-null session control facet for the shared SoC dialog.
+    session.soc_control is the non-null control facet for the shared SoC dialog.
     Use it on the GUI owner thread for connection commands, cached preferences,
-    configuration reads and outcome subscriptions. Unlike soc_connection, the
-    owning connection service, this facet exposes only the dialog's narrow port.
+    configuration reads and outcome subscriptions. Unlike session.soc_connection,
+    the owning connection service, this facet exposes only the dialog's narrow port.
     """
 
     session: SessionServices
@@ -114,18 +103,7 @@ class AppServices:
     operation_control: OperationControlPort
     handles: OperationHandles
     background: BackgroundRunner
-    progress: ProgressService
     guard: GuardService
-    device: DeviceService
-    device_control: DeviceControlPort
-    soc_connection: SoCConnectionService
-    predictor: PredictorService
-    predictor_control: PredictorControlPort
-    progress_control: ProgressControlPort
-    context: ContextService
-    context_control: ContextControlPort
-    setup_control: SetupControlPort
-    soc_control: SocControlPort
     tab: TabService
     tab_forms: TabFormResources
     tab_control: TabControlPort
@@ -139,8 +117,6 @@ class AppServices:
     writeback: WritebackService
     writeback_control: WritebackControlPort
     workspace: WorkspaceService
-    settings: ProjectSettingsService
-    arb_waveform: ArbWaveformService
 
 
 # tolerated: State/registry, rendering ports and storage/reload/predictor/device injections have no reusable common input record.
@@ -232,7 +208,7 @@ def build_app_services(  # noqa: PLR0913
         mutation_allowed=lambda tab_id: not state.is_tab_busy(tab_id),
     )
     writeback = WritebackService(
-        ContextControlFacet(context=context),
+        context,
         arb_names=arb_waveform.list_data_keys,
     )
     # TabService composes the tab render model and needs the writeback owner
@@ -331,18 +307,7 @@ def build_app_services(  # noqa: PLR0913
         operation_control=operation_control,
         handles=handles,
         background=background,
-        progress=session.progress,
         guard=guard,
-        device=device,
-        device_control=session.device_control,
-        soc_connection=session.soc_connection,
-        predictor=session.predictor,
-        predictor_control=session.predictor_control,
-        progress_control=session.progress_control,
-        context=context,
-        context_control=session.context_control,
-        setup_control=session.setup_control,
-        soc_control=session.soc_control,
         tab=tab,
         tab_forms=tab_forms,
         tab_control=tab_control,
@@ -358,6 +323,4 @@ def build_app_services(  # noqa: PLR0913
         writeback=writeback,
         writeback_control=writeback_control,
         workspace=workspace,
-        settings=session.settings,
-        arb_waveform=arb_waveform,
     )

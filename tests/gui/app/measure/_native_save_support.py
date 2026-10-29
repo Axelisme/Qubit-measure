@@ -38,7 +38,6 @@ from zcu_tools.gui.app.measure.state import (
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
-from zcu_tools.gui.session.context_control import ContextControlFacet
 from zcu_tools.gui.session.context_types import CommandOrigin, PointUseRequest
 from zcu_tools.gui.session.operation_handles import OperationHandles
 from zcu_tools.gui.session.parameters import ParameterContext
@@ -184,7 +183,7 @@ def native_save_session(
     bus = BaseEventBus()
     context = ContextService(state, bus, bind_assets=ArbWaveformDatabase.info_at)
     context.install_entry(entry)
-    context_control = ContextControlFacet(context=context)
+    context_control = context
     context_control.use_point(PointUseRequest("p"))
     captured = context_control.read_context()
     storage = captured.capture_storage()

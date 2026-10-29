@@ -1,6 +1,6 @@
 # gui/session/ — 量測 session core
 
-**Last updated:** 2026-10-29
+**Last updated:** 2026-10-29，Context／Predictor owner 直接提供窄 control ports
 
 **讀者：** framework-dev。Session 層的資源綁定、operation 與共用對話框分工。
 
@@ -74,9 +74,9 @@ session/
 ├── operation_runner.py — OperationInfrastructure（app 組裝的 gate/background/runner/handles 明示注入組，不建立 owner 或改 operation policy）；OperationRunner（唯一 kind-agnostic operation 生命週期機制，ADR-0066：ensure_can_start→create→register→progress factory→submit→終局 settle）+ OperationSpec（各 op 把領域 policy 交給 runner）；`open_lease` 提供可跨 callback 保留的 token／settle／origin，`inline` 包裝 lexical 同步 body；lease lifetime 不保留 ambient origin，callback 只在執行期間進入 captured origin。run/analyze/device/SoC-connect 都是它的 client，runner 只認 port 不認行為，並隔離 terminal callback / cleanup 例外，確保 handle settle 與 exclusion release 仍 best-effort 執行；duplicate settle 是 logged no-op，不重複 cleanup 但會暴露 policy bug
 ├── scopes.py           — progress_ambient（session 層的 pbar ContextVar，無 Qt，ADR-0066）。Figure 使用 operation-owned Plots，不透過 ambient scope
 ├── device_control.py   — DeviceControlPort + DeviceControlFacet：device lifecycle/query/progress/event-subscription 的窄 control facet（DeviceService + ProgressService + BaseEventBus），供 shared DeviceDialog、PredictorDialog 與 main remote device handler 使用；cached numeric device-value query 只讀 State，不做 live hardware read；`poll_device_info()` 是可能更新 cache 的 live refresh，`try_poll_device_info() -> bool` 讓 guarded app / UI 明確取得 refresh 是否送出；不提供參數容器讀取
-├── predictor_control.py — Read-only explicit-parameter queries and entry predictor file selection for dialog and remote callers
+├── predictor_control.py — PredictorControlPort：PredictorService 直接提供 explicit-parameter queries 與 entry predictor file selection，供 dialog 與 remote 使用
 ├── progress_control.py — ProgressControlPort + ProgressControlFacet：owner-keyed progress subscribe/query 的窄 control facet（ProgressService），供 app-local run UI 使用；operation-id progress 查詢仍留在 app controller/remote operation handler
-├── context_control.py  — ContextControlPort + ContextControlFacet：固定 parameter read、entry/point cached queries、全域 alias 表讀寫與 value-source 的窄 facade，轉送 ContextService。未選 point 的 alias set 只改 memory；已選 point 的 set／Apply 都 write-through。單檔 reload、revision 檢查與同步狀態也由此介面轉接。
+├── context_control.py  — ContextControlPort：ContextService 直接實作的窄契約，提供固定 parameter read、entry/point cached queries、全域 alias 表讀寫與 value-source。未選 point 的 alias set 只改 memory；已選 point 的 set／Apply 都 write-through。單檔 reload、revision 檢查與同步狀態也經此介面使用。
 ├── library_entry.py    — LibraryEntryForm（Module／Waveform 兩個 family）、open_library_entry 與 new_library_entry：以共用 Form 生成器從持久 Spec 建表單，開啟時固定 FormEnv 與 host 給的 arb 名稱選項；子項 library key 保持 key，文字欄位 expression 在 result 時求成數字；put／replace 產生 LibraryChange，交 apply_library_change 寫入開啟時的 target。不依賴 app，writeback 也用同一建構方式。範本新建經公開 template_input，保留其 specialized input model 建新 State，Expr 與 Slot 解析由生成器負責
 ├── arb_waveform.py     — ArbWaveformPort／ArbWaveformKeys：entry-scoped arb 資產的 host 中立 port 與 preview 結果型別；session service 實作，共用 ARB 對話框、Inspect 與各 host 的 remote 面使用
 ├── setup_control.py    — SetupControlPort／SetupControlFacet 擁有 entry open/new、point use/new 與 cached setup preferences，公開 devices facet 供 cached label 建議。SocControlPort／SocControlFacet 獨立提供連線、connection preferences 與 soccfg 查詢；SocControlFacet 持有單一可替換的連線完成訂閱
@@ -95,7 +95,7 @@ session/
 ├── services/
 │   ├── connection.py   — SoCConnectionService（SoC connect op；硬體 facet、OperationRunner client、cancel_hook=None 無 cancellation point；終局經typed `ConnectionFinishedPayload`，無Qt）
 │   ├── predictor.py — Independent simulator queries and entry predictor file listing/loading through resources.predictor_file.
-│   ├── context.py      — ContextService：owner-thread entry/point binding、固定 parameter capture、全域 alias、source facts 與目前 entry 的 ledger capability。reload_file 驗證單檔候選，安裝後才發布內容 fact 與 POINT_FILE_CHANGED。非法候選只發布 error，未獲 admission 的 watcher 只發布 pending，兩者都不改資源或既有 capture
+│   ├── context.py      — ContextService：owner-thread entry/point binding、固定 parameter capture、全域 alias、source facts 與目前 entry 的 ledger capability。current_point_label 只讀已安裝的 selection，未選時回 None，不做 I/O。reload_file 驗證單檔候選，安裝後才發布內容 fact 與 POINT_FILE_CHANGED。非法候選只發布 error，未獲 admission 的 watcher 只發布 pending，兩者都不改資源或既有 capture
 │   ├── point_file_sync.py — PointFileSync：集中已安裝版本與磁碟 hash 的比較、草稿 revision 檢查及觀察狀態。reload 比對 installed base；check_file_revision 比對磁碟。資源格式驗證與安裝仍由 ContextService 決定，切 point 清除舊觀察
 │   ├── context_writeback.py — ContextWritebackTarget：把 ContextService commands 綁到既有有序 writeback 執行介面，不增加交易或重試
 │   ├── device.py       — DeviceService（connect/disconnect/setup off-main，**全 port 注入**：gate/bg/progress 必傳；connect/disconnect終局用`DeviceOperationFinishedPayload`，setup重用`DeviceSetupFinishedPayload`，無Qt）；`get_device_unit` 讀有效 YOKO／Fake cached Info 的 `value_unit`，分別為 A／V 與 native；缺 Info 的 UI／snapshot 標 none，不按 type 推測單位；strict binding 缺 Info 拋指名 device 的 `DeviceRegistrationError`，這些查詢不讀硬體、不改 connected／offline 狀態；`poll_device_info(name)` = best-effort off-main live-read（worker 純讀 driver、on_done 主線做 cache 比對+bump+DEVICE_CHANGED；memory-only/connect/disconnect skip，setup/ramp 允許 current-value refresh；單次讀失敗吞掉，不寫 State 於 worker）
@@ -105,7 +105,7 @@ session/
 │   ├── arb_waveform.py — ArbWaveformService：只依賴 SessionState，資產根目錄直接使用目前 entry 的 database path 下的 `arb_waveforms`；每次成功寫入 bump 共用 `arb_waveforms` version 一次；未設 project 時 list 回空，其他操作拒絕 no_project
 │   ├── value_sources.py — ValueSourceBinder：訂閱 Context/Device event，把 live SessionState 投影註冊進 `ValueRegistry`；provider 只讀 cached state（device value 只看 `DeviceState.info`，不 poll hardware），並用 owner-level replace/unregister 維護 lifecycle
 │   └── build.py        — SessionServices bundle 與 build_session_services：組裝 owning services/facets（含 arb_waveform），從 project_root 注入 result/Database roots，明確注入 entry-scoped asset binder
-└── ui/                 — 共用 dialog，依賴各 domain 的窄 control facets
+└── ui/                 — 共用 dialog，依賴各 domain 的窄 control ports
     ├── progress_bar.py   — LightweightProgressBar（native-free QWidget；`setValue` 只更新狀態並排程 repaint，避免高頻 progress 卡在 `QProgressBar.setValue`）
     ├── progress_stack.py — ProgressStack widget（唯一拉 Qt 的 progress 件；高頻 render 只對變更過的 maximum/format/value 寫入 LightweightProgressBar；可注入 profiling callback 拆量 derive / value writes）
     ├── alias_panel.py — AliasPanel：Inspect 的 Aliases 頁。每次儲存格完成編輯或 Remove 後，將有效有序 rows 經 ContextControlPort 原子保存。Add 的空列只留在畫面；無效列標紅。唯讀解析欄投影已安裝表。寫入失敗顯示 inline error，保留輸入與舊檔案。切換 point 丟棄未提交輸入，revision 衝突沿 PointFileBanner 的 Keep／Reload 流程
@@ -212,8 +212,8 @@ from these markers. The selected-device value poller keeps its independent lifet
   `ExclusionGate`、`BackgroundExecutor`、`ProgressHub` ports。
   `BackgroundExecutor` 只宣告 `submit`，`quiesce` 留在 concrete adapter。
 - **ExclusionGate str-keyed**：session `OperationKind`（soc/device kinds）+ app 自己的 kind（measure `RUN`）用 wire 字串比較，故兩 enum 同一 gate。共享硬體互斥規則住在 `RunBlocksHardwareGate`，app-local gate 只保留 RUN kind 與 import boundary。
-- **app 繼承/實作**：measure `State(SessionState)`；Controller 暴露 `setup_control: SetupControlPort` / `soc_control: SocControlPort` / `context_control: ContextControlPort` / `device_control: DeviceControlPort` / `predictor_control: PredictorControlPort` / `progress_control: ProgressControlPort` 供 shared dialog、main remote handler 與 app-local run UI 走窄 facets。
-- **Inspect 元件樹**：`ComponentTreeWidget` 透過 context facet 讀取 point／setup 文件並提交元件與參數命令。獨立的 general/ext 分支顯示所選文件的擴充欄位與巢狀 mapping，不把 general 當成 component。可定址欄位沿用 Value 就地編輯與唯讀限制。`ContextService` 擁有驗證與資源交易，widget 不寫檔。Setup 範本編輯不改現有 point 或 alias 表。Modules 與 Aliases 在明確完成編輯時 write-through，Invalid 與 local parse error 不寫入。Modules 子項 library key 保持 key，Name 與 Spec 一次 replace 保存；Delete 先固定 capture 再確認。
+- **app 繼承/實作**：measure `State(SessionState)`；Controller 暴露 `setup_control: SetupControlPort` / `soc_control: SocControlPort` / `context_control: ContextControlPort` / `device_control: DeviceControlPort` / `predictor_control: PredictorControlPort` / `progress_control: ProgressControlPort` 供 shared dialog、main remote handler 與 app-local run UI 走窄 ports。Context 與 Predictor 直接使用 owner service；Device、Setup、Soc 保留組合 facet，Progress facet 不變。SessionServices 的 context_control／predictor_control 與各自 owner 是同一物件，欄位與參數仍標 Port 型別。
+- **Inspect 元件樹**：`ComponentTreeWidget` 透過 ContextControlPort 讀取 point／setup 文件並提交元件與參數命令。獨立的 general/ext 分支顯示所選文件的擴充欄位與巢狀 mapping，不把 general 當成 component。可定址欄位沿用 Value 就地編輯與唯讀限制。`ContextService` 擁有驗證與資源交易，widget 不寫檔。Setup 範本編輯不改現有 point 或 alias 表。Modules 與 Aliases 在明確完成編輯時 write-through，Invalid 與 local parse error 不寫入。Modules 子項 library key 保持 key，Name 與 Spec 一次 replace 保存；Delete 先固定 capture 再確認。
 - **Entry binding**：GUI Setup 和 remote entry.new/open 使用同一個 ProjectSettingsService。EntryInfo 提供目錄名稱與 result／database 絕對路徑，不帶 UUID。Open 只開既有 entry，New 明確建立。成功發布 entry metadata，不自選 point、不碰硬體。失敗保留舊 binding；New 已建資源而安裝失敗時保留 entry，以 Open 恢復，不重試 New
 - **Entry 與 point**：ResultEntry 擁有 entry roots、setup 與 points。ProjectSettingsService 只負責明確 open/new 與 preferences，ContextService 安裝 binding。Point 操作作用在目前 opened entry，不從 chip／qubit／resonator 推導身分
 - **operation callback 邊界**：`OperationRunner` terminal delivery 會 catch/log policy callback 例外並把 operation settle failed；`settle()` 的 progress discard / handle settle / exclusion release 各自 best-effort 執行，避免 progress UI 或 cleanup 例外讓 handle 永遠 pending。第二次呼叫同一 settle closure 會記 error 並 no-op，讓 double-terminal policy bug 可診斷但不破壞 cleanup idempotence。`ProgressService` owner listener 逐一隔離，壞 listener 不阻斷其他 view 或 terminal cleanup。

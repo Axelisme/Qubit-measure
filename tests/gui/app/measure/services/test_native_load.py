@@ -49,7 +49,7 @@ from zcu_tools.gui.app.measure.writeback import (
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
 from zcu_tools.gui.session.aliases import AliasRow
-from zcu_tools.gui.session.context_control import ContextControlFacet
+from zcu_tools.gui.session.context_control import ContextControlPort
 from zcu_tools.gui.session.context_types import (
     CommandOrigin,
     PointUseRequest,
@@ -85,7 +85,7 @@ from tests.gui.app.measure._record_support import (
 def _native_controls(
     session: NativeSaveSession,
     writeback: WritebackService,
-    control: ContextControlFacet,
+    control: ContextControlPort,
 ) -> tuple[RunAnalyzeControlFacet, WritebackControlFacet]:
     """Compose real admission/load/analysis/WB owners; no Run is executed."""
 
@@ -196,7 +196,7 @@ def test_native_load_analysis_and_writeback_keep_historical_point_aliases_and_id
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     session = role_load_session
-    control = ContextControlFacet(context=session.context)
+    control = session.context
     tab = session.state.get_tab("tab")
     target = require_target(control.read_context())
     path = session.native_data_path
@@ -404,9 +404,7 @@ def context_free_load_session(
         point = other.new_point("foreign-point")
         point.add_component("Q1", kind="run-source/qubit", rate=5.0)
         session.context.install_entry(other)
-        ContextControlFacet(context=session.context).use_point(
-            PointUseRequest("foreign-point")
-        )
+        session.context.use_point(PointUseRequest("foreign-point"))
     elif source == "empty":
         session.context.clear_context()
     else:
@@ -440,7 +438,7 @@ def test_native_load_without_readable_source_allows_context_free_analysis(
     session = context_free_load_session
     tab = session.state.get_tab("tab")
     path = session.native_data_path
-    control = ContextControlFacet(context=session.context)
+    control = session.context
     writeback = WritebackService(control, arb_names=lambda: ())
     commands, wb = _native_controls(session, writeback, control)
     loaded = commands.load_tab_result("tab", str(path))
@@ -494,7 +492,7 @@ def test_public_writeback_targets_current_entry_not_historical_source(
     role_load_session: NativeSaveSession, tmp_path: Path
 ) -> None:
     session = role_load_session
-    control = ContextControlFacet(context=session.context)
+    control = session.context
     tab = session.state.get_tab("tab")
     parameters = tab.run.parameters
     assert parameters is not None and isinstance(parameters.target, SavedPoint)
@@ -586,9 +584,7 @@ def test_native_load_retains_history_and_resaves_captured_source(
         )
         other.new_point("other-point")
         session.context.install_entry(other)
-        ContextControlFacet(context=session.context).use_point(
-            PointUseRequest("other-point")
-        )
+        session.context.use_point(PointUseRequest("other-point"))
         tab = session.state.get_tab("tab")
         record = require_record(tab.run)
         assert isinstance(record, RunRecord)
@@ -621,7 +617,7 @@ def test_loaded_same_entry_different_point_resaves_original_run(
         stored = metadata_from_container(load(source))
         assert stored.snapshot.point == "p"
         session.entry.new_point("destination-point")
-        control = ContextControlFacet(context=session.context)
+        control = session.context
         control.use_point(PointUseRequest("destination-point"))
         tab = session.state.get_tab("tab")
         service = LoadService(session.state)
@@ -720,7 +716,7 @@ def test_loaded_foreign_selection_saves_recorded_names_and_historical_metadata(
         )
         destination.new_point("destination-point")
         session.context.install_entry(destination)
-        control = ContextControlFacet(context=session.context)
+        control = session.context
         control.use_point(PointUseRequest("destination-point"))
         tab = session.state.get_tab("tab")
         captured = control.read_context().capture_storage()
@@ -776,7 +772,7 @@ def test_unselected_entry_load_and_save_use_recorded_history(
         path = session.native_data_path
         stored = load(path)
         session.context.install_entry(session.entry)
-        control = ContextControlFacet(context=session.context)
+        control = session.context
         assert session.state.session_env.parameters is None
         tab = session.state.get_tab("tab")
         before = {

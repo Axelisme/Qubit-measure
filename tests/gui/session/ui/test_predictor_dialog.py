@@ -18,7 +18,6 @@ from qtpy.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
-from zcu_tools.gui.session.predictor_control import PredictorControlFacet
 from zcu_tools.gui.session.services.predictor import PredictorService
 from zcu_tools.gui.session.ui.eval_field import EvalNumericField
 from zcu_tools.gui.session.ui.predictor_curves import PredictorCurveTabs
@@ -43,7 +42,7 @@ def test_dialog_loads_frame_and_every_cached_device_value(qapp):
     )
 
     flux = PredictorFlux(0.2, {"coil": 2.0, "trim": -4.0}, {"coil": "A", "trim": "V"})
-    control = MagicMock(wraps=PredictorControlFacet(PredictorService()))
+    control = MagicMock(wraps=PredictorService())
     control.load_file.return_value = PredictorFile(
         "fluxonium", FluxoniumParams(), flux, PredictorSource(None, None)
     )
@@ -69,7 +68,7 @@ def test_curve_tabs_project_all_devices_onto_selected_axis(qapp):
     from tests.gui._user_input import ComponentDriver
 
     tabs = PredictorCurveTabs(
-        PredictorControlFacet(PredictorService()),
+        PredictorService(),
         on_follow=lambda _value: None,
         on_lock=lambda _value: None,
         on_status=lambda _text, _error: None,
@@ -107,7 +106,7 @@ def test_calibrate_adds_phi0_correction_to_nonzero_local_offset(qapp):
     from zcu_tools.simulate.transmon import TransmonParams
 
     params = TransmonParams(20.0, 0.3, 0.1)
-    dialog = PredictorDialog(PredictorControlFacet(PredictorService()), params=params)
+    dialog = PredictorDialog(PredictorService(), params=params)
     try:
         dialog.set_flux(
             PredictorFlux(0.2, {"coil": 2.0, "trim": -4.0}, {"coil": "A", "trim": "V"}),
@@ -129,7 +128,7 @@ def test_cache_restores_frame_values_and_axis_with_energy_trial(qapp, tmp_path):
 
     from tests.gui._user_input import ComponentDriver
 
-    port = PredictorControlFacet(PredictorService())
+    port = PredictorService()
     flux = PredictorFlux(0.23, {"coil": 2.0, "trim": -4.0}, {"coil": "A", "trim": "V"})
     dialog = PredictorDialog(port, params=FluxoniumParams())
     try:
@@ -187,9 +186,7 @@ def test_show_roundtrips_15_significant_digit_native_values_exactly(qapp):
 def test_supplied_frame_clears_stale_missing_frame_status(qapp):
     from zcu_tools.simulate.transmon import TransmonParams
 
-    dialog = PredictorDialog(
-        PredictorControlFacet(PredictorService()), params=TransmonParams(20.0, 0.3, 0.1)
-    )
+    dialog = PredictorDialog(PredictorService(), params=TransmonParams(20.0, 0.3, 0.1))
     try:
         assert "flux frame" in _status(dialog)
         dialog.set_flux(PredictorFlux(0.2, {"coil": 2.0}, {"coil": "A"}), {"coil": 0.3})
@@ -217,9 +214,7 @@ def test_empty_snapshot_replaces_a_previously_loaded_flux_frame(qapp):
 
 def _make_dialog(**kwargs) -> PredictorDialog:
     # These UI contracts do not require a completed numerical trial.
-    return PredictorDialog(
-        PredictorControlFacet(PredictorService()), params=FluxoniumParams(), **kwargs
-    )
+    return PredictorDialog(PredictorService(), params=FluxoniumParams(), **kwargs)
 
 
 def _table(dialog: PredictorDialog) -> QTableWidget:
@@ -431,7 +426,7 @@ def test_terminal_done_retires_file_flux_callback(qapp):
 
     initial = PredictorFlux(0.2, {"coil": 2.0}, {"coil": "A"})
     late = PredictorFlux(0.7, {"trim": -4.0}, {"trim": "V"})
-    control = MagicMock(wraps=PredictorControlFacet(PredictorService()))
+    control = MagicMock(wraps=PredictorService())
     control.load_file.return_value = PredictorFile(
         "fluxonium", FluxoniumParams(), late, PredictorSource(None, None)
     )

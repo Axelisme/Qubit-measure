@@ -9,7 +9,7 @@ from zcu_tools.cfg_model import ConstWaveformCfg
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.aliases import AliasRow
-from zcu_tools.gui.session.context_control import ContextControlFacet
+from zcu_tools.gui.session.context_control import ContextControlPort
 from zcu_tools.gui.session.context_types import PointUseRequest
 from zcu_tools.gui.session.events import AliasesChangedPayload
 from zcu_tools.gui.session.expression import evaluate_scalar_expr
@@ -28,7 +28,7 @@ from tests.resources.entry.fakes import register_fakes, registry_state, restore_
 class CaptureSession:
     entry: ResultEntry
     service: ContextService
-    control: ContextControlFacet
+    control: ContextControlPort
     state: SessionState
     bus: BaseEventBus
 
@@ -58,9 +58,7 @@ def session(tmp_path: Path) -> Generator[CaptureSession]:
         service.set_alias_rows(
             (AliasRow("driver", "Q1"), AliasRow("sense", "$driver.sense"))
         )
-        yield CaptureSession(
-            entry, service, ContextControlFacet(context=service), state, bus
-        )
+        yield CaptureSession(entry, service, service, state, bus)
         assert registry_state() == installed, "capture tests polluted registries"
     finally:
         restore_registry(before)

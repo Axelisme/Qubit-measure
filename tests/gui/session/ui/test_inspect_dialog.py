@@ -29,7 +29,7 @@ from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.form import FormErrors
 from zcu_tools.gui.form_adapter import module_form
 from zcu_tools.gui.session.aliases import AliasRow
-from zcu_tools.gui.session.context_control import ContextControlFacet
+from zcu_tools.gui.session.context_control import ContextControlPort
 from zcu_tools.gui.session.context_types import PointUseRequest
 from zcu_tools.gui.session.events import ContextSwitchedPayload
 from zcu_tools.gui.session.hardware_gate import RunBlocksHardwareGate
@@ -103,7 +103,7 @@ class _ArbNames:
 @dataclass
 class _Session:
     entry: ResultEntry
-    control: ContextControlFacet
+    control: ContextControlPort
     bus: BaseEventBus
     dialogs: list[QDialog] = field(default_factory=list)
     arb_opened: list[bool] = field(default_factory=list)
@@ -128,7 +128,7 @@ def session(qapp: QApplication, tmp_path: Path) -> Generator[_Session]:
         bind_assets=ArbWaveformDatabase.info_at,
     )
     service.install_entry(entry)
-    control = ContextControlFacet(context=service)
+    control = service
     control.use_point(PointUseRequest("point"))
     session = _Session(entry, control, bus)
     try:

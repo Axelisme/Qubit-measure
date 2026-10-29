@@ -1,10 +1,9 @@
-"""ContextControlFacet exposes the current parameter-owner contract."""
+"""Unselected context reads, alias edits and explicit command failures."""
 
 import pytest
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 from zcu_tools.gui.session.aliases import AliasRow
-from zcu_tools.gui.session.context_control import ContextControlFacet
 from zcu_tools.gui.session.context_types import SavedPoint
 from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.state import SessionState
@@ -14,16 +13,15 @@ from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
 
 @pytest.fixture
-def control() -> ContextControlFacet:
-    service = ContextService(
+def control() -> ContextService:
+    return ContextService(
         SessionState(SessionEnv(parameters=None, soc=None, soccfg=None)),
         BaseEventBus(),
         bind_assets=ArbWaveformDatabase.info_at,
     )
-    return ContextControlFacet(context=service)
 
 
-def test_empty_owner_reads_and_value_sources(control: ContextControlFacet) -> None:
+def test_empty_owner_reads_and_value_sources(control: ContextService) -> None:
     assert control.get_entry_info() is None
     assert control.list_points() == ()
     assert control.get_source_binding() is None
@@ -33,7 +31,7 @@ def test_empty_owner_reads_and_value_sources(control: ContextControlFacet) -> No
 
 
 def test_alias_table_can_be_edited_before_opening_an_entry(
-    control: ContextControlFacet,
+    control: ContextService,
 ) -> None:
     assert control.get_alias_rows() == ()
     rows = (AliasRow("qubit", "Q2"), AliasRow("resonator", "$qubit.resonator"))
@@ -54,7 +52,7 @@ def test_alias_table_can_be_edited_before_opening_an_entry(
     ],
 )
 def test_rejected_alias_submission_preserves_the_authored_table(
-    control: ContextControlFacet, rows: tuple[AliasRow, ...]
+    control: ContextService, rows: tuple[AliasRow, ...]
 ) -> None:
     original = (AliasRow("qubit", "Q1"), AliasRow("resonator", "$qubit.resonator"))
     control.set_alias_rows(original)
@@ -65,7 +63,7 @@ def test_rejected_alias_submission_preserves_the_authored_table(
 
 
 def test_empty_owner_capture_and_write_fail_explicitly(
-    control: ContextControlFacet,
+    control: ContextService,
 ) -> None:
     with pytest.raises(FailedPreconditionError) as capture:
         control.read_context()
