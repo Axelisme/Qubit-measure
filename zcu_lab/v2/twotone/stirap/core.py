@@ -8,12 +8,16 @@ from typing import Annotated, ClassVar, Literal, Self
 import numpy as np
 from numpy.typing import NDArray
 from pydantic import Field, model_validator
+from zcu_tools.analysis.singleshot import Centroid3IQAnalysis, analyze_centroid3_iq
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment
 from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
+from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.acquisition import StoppedPartialAcquireError
 from zcu_tools.program.v2 import Join, Pulse, PulseReadout, SoftDelay, SweepCfg
+from zcu_tools.program.v2.modules.readout import centroid3_classifier
 from zcu_tools.program.v2.modules.waveform import GaussWaveformCfg
 
 from zcu_lab.v2.support.singleshot.util import raw_shots_to_signal
@@ -237,4 +241,81 @@ class StirapExp(Experiment[StirapResult, StirapCfg]):
             ax.set_title("STIRAP acquired IQ (not fidelity)")
 
         context.plots.draw("measurement", draw)
+        return result
+
+    def analyze(
+        self,
+        source: RunRecord[StirapCfg, StirapResult],
+        options: None,
+        *,
+        plots: Plots,
+    ) -> Centroid3IQAnalysis:
+        """Classify raw shots with this run's saved centroid3 readout calibration.
+
+        Require source.cfg and its saved ADC classifier; missing/wrong-type
+        calibration fails explicitly. No current Form, library or simulator
+        truth is consulted. Return raw/unclipped corrected g/e/f fractions,
+        training confusion and its condition/minimum singular value. Plot
+        requested scan coordinates; preparation-label estimates are not fidelity.
+        Incomplete/nonfinite IQ or singular confusion fails in the analysis owner.
+        """
+        del options
+        cfg = source.cfg
+        if cfg is None:
+            raise ValueError("STIRAP analysis requires the saved run readout cfg")
+        calibration = centroid3_classifier(cfg.readout, ro_ch=cfg.readout.ro_ch)
+        result = analyze_centroid3_iq(source.result.signals, calibration)
+        detuning = cfg.scan.kind == "detuning"
+        plots.subplots(
+            "fit",
+            nrows=2 if detuning else 1,
+            ncols=3 if detuning else 2,
+            figsize=(11, 7) if detuning else (10, 5),
+            layout="constrained",
+        )
+
+        def populations(figure):
+            for row, (values, title) in enumerate(
+                (
+                    (result.raw_populations, "Raw g/e/f fractions"),
+                    (result.corrected_populations, "Corrected g/e/f (unclipped)"),
+                )
+            ):
+                if detuning:
+                    for label, state in enumerate(("g", "e", "f")):
+                        ax = figure.axes[row * 3 + label]
+                        image = ax.pcolormesh(
+                            source.result.x_values,
+                            source.result.y_values,
+                            values[..., label],
+                            shading="nearest",
+                        )
+                        figure.colorbar(image, ax=ax)
+                        ax.set(
+                            xlabel="Pump detuning (MHz)",
+                            ylabel="Stokes detuning (MHz)",
+                            title=f"{title}: {state}",
+                        )
+                else:
+                    ax = figure.axes[row]
+                    for label, state in enumerate(("g", "e", "f")):
+                        ax.plot(
+                            source.result.x_values,
+                            values[0, :, label],
+                            ".-",
+                            label=state,
+                        )
+                    ax.set(
+                        xlabel="Stokes lead (us; positive = Stokes first)"
+                        if cfg.scan.kind == "delay"
+                        else "Common amplitude scale (fixed sigma)",
+                        ylabel="Preparation-label fraction",
+                        title=title,
+                    )
+                    ax.legend()
+            figure.suptitle(
+                f"Saved readout: condition={result.condition_number:.4g}, minimum singular value={result.minimum_singular_value:.4g}\nPreparation-label estimates, not fidelity"
+            )
+
+        plots.draw("fit", populations)
         return result

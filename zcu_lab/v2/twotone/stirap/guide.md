@@ -1,4 +1,4 @@
-**Readers:** operator, agent. Configure two-generator STIRAP scans and inspect acquired IQ.
+**Readers:** operator, agent. Configure two-generator STIRAP scans and analyze acquired IQ with saved readout calibration.
 
 # STIRAP scans
 
@@ -7,8 +7,8 @@ Stokes drives the 2–3 transition. Pump drives the 0–3 transition.
 The two Gaussian pulses use different bound generators.
 Readout starts after both pulses finish.
 
-The current adapter acquires raw IQ only. Population analysis is not connected yet.
-Do not interpret the mean IQ curves or heatmap as populations or gate fidelity.
+Run saves raw acquired IQ. Analyze uses only the three-center classifier and training confusion from that run's saved readout configuration.
+Do not interpret mean IQ curves or heatmaps as populations or gate fidelity.
 
 ## Before opening the tab
 
@@ -17,7 +17,7 @@ Do not interpret the mean IQ curves or heatmap as populations or gate fidelity.
 3. Calibrate a pi pulse on 0–3 with Rabi. In `twotone/freq`, enable `init_pulse` and enter this pi03 preparation. Then scan the probe to find 3–2 from the prepared state.
 4. Record the measured 0–3 and 3–2 carriers in MHz. Enter them as Pump carrier and Stokes carrier. Neither field has a model-derived default.
 5. Confirm two separately bound charge-drive generators and their allowed gains. The displayed generator numbers are editable starting values, not proof of wiring.
-6. Prepare g/e/f readout references with `singleshot/qutrit_population`. Population analysis requires a three-center classifier with its training confusion matrix saved in the readout module. Circle rejection is not an f measurement.
+6. Prepare g/e/f readout references with `singleshot/qutrit_population`. Analyze the references and Apply the proposed centroid3 classifier to the captured readout library module. Confirm the target and its bound resonator slot before Apply. Reset or reopen STIRAP to capture that module, then Run. Circle rejection is not an f measurement.
 
 Open `New Tab → twotone → stirap`.
 A new tab stays Invalid until required carriers, gains, scan controls and readout inputs are filled.
@@ -37,7 +37,9 @@ A transfer plateau in a later population analysis must be compared against the r
 
 ## Scan modes
 
-Select the mode in the Scan mode row.
+Select delay, amplitude or detuning in the Scan mode row.
+Each sweep supports Range or Center/Span coordinates, with point count or step sampling.
+A fresh sweep starts with Range and point count. Its coordinates and count remain required.
 
 | Mode | Controls | Horizontal axis | Vertical axis |
 | --- | --- | --- | --- |
@@ -67,7 +69,18 @@ Unfinished points retain NaN instead of a fabricated result.
 A duplicate Pump/Stokes generator is invalid.
 Unbound generators fail rather than rerouting the pulse.
 Missing readout timing, invalid scan coordinates or out-of-range scaled gains must be corrected before running.
-The current raw-only adapter does not offer Analyze or calibration writeback.
+After Run or Load, open Analysis and click Analyze.
+Delay and amplitude show separate raw and corrected g/e/f curves.
+Detuning shows six heatmaps, with raw fractions above and corrected fractions below.
+The title reports the saved training confusion's condition number and minimum singular value.
+Analysis output also includes the full training confusion matrix.
+Correction keeps negative and above-one estimates. It does not clip or renormalize them.
+
+Missing saved cfg, missing classifier, circle/linear calibration, incomplete shots or singular training confusion fail explicitly.
+Changing the current Form or live library after Run does not change that run's analysis.
+Recalibrate, Reset to capture the new readout, and Run again to use new calibration.
+This consumer does not train a classifier or offer calibration writeback.
+Save All preserves native raw IQ, its cfg, analysis summary and figures. Load analyzes the saved cfg, not the current Form.
 
 ## Interpretation limits
 
