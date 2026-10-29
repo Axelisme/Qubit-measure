@@ -1,6 +1,6 @@
 # program/v2/modules — semantic program modules
 
-**Last updated:** 2026-10-29，宣告與 emission
+**Last updated:** 2026-10-29，宣告、emission 與原生 dmem loaders
 
 **讀者：** lab-author、framework-dev、agent。語意 program modules 的宣告、發射與 owner 邊界速查。
 
@@ -19,7 +19,7 @@ without leaking hardware register choreography into experiment classes.
 
 ## 原生寫法
 
-Pulse、Delay、SoftDelay、DelayAuto、PulseReadout 與 Reset 系列提供原生 lowering。
+Pulse、Delay、SoftDelay、DelayAuto、PulseReadout、Reset 系列、LoadValue 與 LoadWord 提供原生 lowering。
 每次 `emit` 建立一個 `timeline.ModuleEmission`，保存該次原生指令與 tag。
 Module 不是 QICK Macro，不能直接交給 `append_macro`。
 同一宣告物件可重複發射，舊 module 的 tag 與 block_mode 不控制新路徑。
@@ -87,6 +87,10 @@ in `ModularProgramV2`, `ProgramBuilder.add`, `Repeat`, `Branch`, `Join` and
   `0..2^32-1` word range; storage maps those words onto the signed int32 dmem
   representation while preserving the hardware bit pattern. It is intentionally
   uncompressed because consumers care about the exact word loaded into a register.
+- Both loaders support native `declare`/`emit` without advancing timeline ends.
+  `use_existed=True` leaves the destination declaration to the caller. An empty
+  `LoadValue` still declares its destination unless reused; an empty `LoadWord`
+  declares nothing. Neither empty loader allocates dmem or initializes a value.
 
 ## Readout configuration
 
