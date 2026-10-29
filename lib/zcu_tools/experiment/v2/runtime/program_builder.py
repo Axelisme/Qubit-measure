@@ -91,7 +91,6 @@ class SynchronousAcquireKeywords(TypedDict, Generic[T_KeywordRaw_contra]):
     the producer protocol's raw-result covariance.
     cancel_flag also carries external stop requests. Omitted step_rounds keeps
     synchronous operation; stepped preparation is outside this producer seam.
-    herald selects integrated shots; decimated producers may reject it.
     This protocol does not promise arbitrary keyword acceptance. The builder
     still forwards producer-specific keywords unchanged at runtime.
     """
@@ -103,6 +102,18 @@ class SynchronousAcquireKeywords(TypedDict, Generic[T_KeywordRaw_contra]):
     ]
     cancel_flag: CancelFlagProtocol
     step_rounds: NotRequired[Literal[False]]
+
+
+class SynchronousDecimatedAcquireKeywords(
+    SynchronousAcquireKeywords[T_KeywordRaw_contra]
+):
+    """Synchronous decimated options, including the existing herald keyword.
+
+    herald=None or an empty sequence leaves decimated IQ traces unchanged.
+    A nonempty sequence raises ValueError because decimated acquisition does
+    not support herald selection. Other keywords follow SynchronousAcquireKeywords.
+    """
+
     herald: NotRequired[Sequence[HeraldSpec] | None]
 
 
@@ -116,9 +127,11 @@ class ProgramProtocol(Protocol[T_AcquireRaw_co, T_DecimatedRaw_co]):
     and the supplied cancel_flag; they check that flag before starting another
     round. Return the final raw data, retaining completed rounds on cancellation.
     Raise StoppedPartialAcquireError if cancelled before any round completes.
-    herald is a typed producer option, forwarded unchanged by the builder;
-    decimated producers may reject it. This synchronous contract uses the default
-    step_rounds=False mode; stepped preparation is not a completed raw result.
+    acquire does not accept herald; use acquire_processed with a heralded
+    processor for shot selection. Only acquire_decimated retains the herald
+    keyword; a nonempty sequence raises ValueError. This synchronous contract
+    uses the default step_rounds=False mode; stepped preparation is not a
+    completed raw result.
     Other producer errors propagate to the builder's partial-result policy.
     """
 
@@ -131,7 +144,7 @@ class ProgramProtocol(Protocol[T_AcquireRaw_co, T_DecimatedRaw_co]):
     def acquire_decimated(
         self,
         soc: object,
-        **kwargs: Unpack[SynchronousAcquireKeywords[T_DecimatedRaw_co]],
+        **kwargs: Unpack[SynchronousDecimatedAcquireKeywords[T_DecimatedRaw_co]],
     ) -> T_DecimatedRaw_co: ...
 
 
