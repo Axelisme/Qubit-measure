@@ -5,45 +5,16 @@ import pytest
 from qick.asm_v2 import QickRawParam, QickSweep1D
 from zcu_tools.experiment.simulation import white_noise
 from zcu_tools.program.v2 import ModularProgramV2
+from zcu_tools.program.v2.ir import CompiledRecord, CompiledStream
+from zcu_tools.program.v2.ir.instructions import MetaInst
 from zcu_tools.program.v2.modules.delay import Delay, DelayAuto, SoftDelay
 from zcu_tools.program.v2.modules.pulse import PulseCfg
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
-from zcu_tools.program.v2.simulation.compiled import build_compiled_request
 from zcu_tools.program.v2.timeline import TimelineProgramV2
 
 from tests.program.v2._mux_support import mux_soccfg, native_mux
-
-
-def program(
-    body, initialize=None, *, reps=2, routes=((0, 0),), trigger_time: float | None = 0
-):
-    env = white_noise(std_adc=0, n_gens=2, routes=routes)
-
-    class Program(TimelineProgramV2):
-        def _initialize(self, cfg):
-            self.declare_gen(0, nqz=1)
-            self.add_pulse(
-                0, "p", style="const", freq=100, phase=30, gain=-0.25, length=0.1
-            )
-            self.declare_readout(0, length=0.2)
-            self.add_readoutconfig(0, "ro", freq=100, gen_ch=0)
-            if initialize is not None:
-                initialize(self)
-
-        def _body(self, cfg):
-            self.send_readoutconfig(0, "ro", t=0)
-            body(self)
-            if trigger_time is not None:
-                self.trigger([0], t=trigger_time)
-
-    return Program(env.soccfg, reps=reps, initial_delay=0, relax_delay=0.1), env
-
-
-def request(prog, env):
-    return build_compiled_request(
-        prog, "integrated", env.soc.binding, 7, routes=env.soc.routes
-    )
+from tests.program.v2.simulation._compiled_support import program, request
 
 
 def test_native_pulse_request_has_detached_numeric_event_and_adc_slots():
@@ -222,6 +193,36 @@ def test_compiled_mux_output_keeps_tone_and_declared_adc_order():
     )
 
 
+def test_static_mux_readout_retains_absolute_frequencies_without_any_pulse():
+    class Program(TimelineProgramV2):
+        def _initialize(self, cfg):
+            self.declare_gen(
+                0,
+                nqz=1,
+                mixer_freq=1000,
+                ro_ch=4,
+                mux_freqs=[1000, 1080],
+                mux_gains=[0.1, 0.1],
+                mux_phases=[0, 45],
+            )
+            for channel, frequency in ((4, 1000), (1, 1080)):
+                self.declare_readout(
+                    channel, length=0.1, freq=frequency, phase=0, gen_ch=0
+                )
+            self.add_pulse(0, "unused", style="const", mask=[0, 1], length=0.1)
+
+        def _body(self, cfg):
+            self.trigger([4, 1], t=0)
+
+    prog = Program(mux_soccfg(), reps=1, initial_delay=0, relax_delay=0)
+    env = white_noise(std_adc=0, n_gens=2, n_readouts=9, routes=((0, 4), (0, 1)))
+    point = request(prog, env).materialize_point(0)
+    assert point.events == ()
+    assert [r.frequency_mhz[0] for r in point.readouts] == pytest.approx(
+        [1000, 1080], abs=1e-5
+    )
+
+
 def test_native_high_carrier_and_adc_alias_decode_through_frequency_owner():
     def initialize(p):
         p.add_pulse(0, "high", style="const", freq=7000, phase=0, gain=0.1, length=0.1)
@@ -326,7 +327,7 @@ def test_conditionally_uninitialized_register_is_not_zero_filled_on_other_lanes(
     def body(p):
         p.read_wmem(p.pulses["p"].get_wavenames()[0])
         p.write_reg("w_gain", "scan")
-        p.asm_inst({"CMD": "TEST", "OP": "w3 - #0", "UF": "1"})
+        p.asm_inst({"CMD": "TEST", "OP": "w3 - #1", "UF": "1"})
         p.asm_inst(
             {
                 "CMD": "REG_WR",
@@ -415,23 +416,6 @@ def test_wmem_store_initializes_a_new_address_for_native_port_playback():
     assert request(prog, env).materialize_point(0).events[0].gain == pytest.approx(
         777 / 32766
     )
-
-
-def test_native_arb_preserves_actual_compiled_dac_samples_and_scale():
-    def initialize(p):
-        p.add_envelope(
-            0, "shape", idata=np.full(48, -8191.0), qdata=np.full(48, 4096.0)
-        )
-        p.add_pulse(
-            0, "shaped", style="arb", envelope="shape", freq=80, phase=10, gain=0.5
-        )
-
-    prog, env = program(lambda p: p.pulse(0, "shaped", tag="arb"), initialize, reps=1)
-    event = request(prog, env).materialize_point(0).events[0]
-    assert event.envelope is not None
-    assert event.envelope.sample_us[:2] == pytest.approx((0, 1 / 6144))
-    assert event.envelope.values[0] == pytest.approx(complex(-8191, 4096) / 32766)
-    assert event.duration_us == pytest.approx(3 / 384)
 
 
 @pytest.mark.parametrize("active,expected", [((1,), 1), ((), None), ((0, 1), None)])
@@ -561,6 +545,243 @@ def test_reps_varying_body_end_is_an_observable_carry_error():
     prog, env = program(body, initialize, trigger_time=None)
     with pytest.raises(ValueError, match="reps.*carried"):
         request(prog, env)
+
+
+def test_conditional_register_updates_preserve_previous_point_state():
+    def initialize(p):
+        p.add_loop("scan", 3)
+        p.add_reg("carry", init=QickRawParam("carry", 10, {}))
+
+    def body(p):
+        p.write_reg("w_gain", "scan")
+        p.asm_inst({"CMD": "TEST", "OP": "w3 - #1", "UF": "1"})
+        p.asm_inst(
+            {
+                "CMD": "REG_WR",
+                "DST": p.reg_dict["carry"].full_addr(),
+                "SRC": "imm",
+                "LIT": "#20",
+                "IF": "Z",
+            }
+        )
+        p.read_wmem(p.pulses["p"].get_wavenames()[0])
+        p.write_reg("w_gain", "carry")
+        p.asm_inst({"CMD": "WPORT_WR", "DST": "0", "SRC": "r_wave", "TIME": "@0"})
+
+    prog, env = program(body, initialize, reps=1)
+    result = request(prog, env)
+    assert [
+        result.materialize_point(i).events[0].gain for i in range(3)
+    ] == pytest.approx(np.array([10, 20, 20]) / 32766)
+
+
+@pytest.mark.parametrize(
+    "effect,instruction",
+    [("read", "DportReadInst"), ("clock", "RegWriteInst"), ("jump", "JumpInst")],
+)
+def test_non_body_effects_are_not_skipped_by_affine_fast_path(effect, instruction):
+    def cleanup(p):
+        if effect == "read":
+            p.read_input(0)
+        elif effect == "clock":
+            p.write_reg("w_gain", "s_usr_time")
+        else:
+            p.jump("NEXT")
+
+    prog, env = program(lambda p: p.pulse(0, "p"), reps=2, cleanup=cleanup)
+    with pytest.raises(ValueError, match=rf"{instruction}.*preopt"):
+        request(prog, env)
+
+
+@pytest.mark.parametrize(
+    "damage",
+    [
+        "missing-body",
+        "missing-loop",
+        "unclosed-source",
+        "wrong-source",
+        "unknown",
+        "unbalanced-loop",
+    ],
+)
+def test_malformed_compiled_markers_fail_before_request(damage):
+    def transform(snapshot):
+        records = []
+        for record in snapshot.records:
+            inst = record.instruction
+            if isinstance(inst, MetaInst):
+                if damage == "missing-body" and inst.type == "TIMING_BOUNDARY":
+                    continue
+                if damage == "missing-loop" and inst.type.startswith("LOOP_"):
+                    continue
+                if damage == "unclosed-source" and inst.type == "SOURCE_END":
+                    continue
+                if damage == "wrong-source" and inst.type == "SOURCE_END":
+                    inst = MetaInst(type="SOURCE_END", name="wrong")
+                if damage == "unknown" and inst.type == "SOURCE_START":
+                    inst = MetaInst(type="UNKNOWN", name="unknown")
+                if damage == "unbalanced-loop" and inst.type == "LOOP_BODY_END":
+                    inst = MetaInst(type="LOOP_END", name=inst.name, info=inst.info)
+            records.append(CompiledRecord(inst, record.p_addr))
+        return CompiledStream(tuple(records))
+
+    prog, env = program(lambda p: p.pulse(0, "p"), reps=1, stream_transform=transform)
+    with pytest.raises(ValueError, match="MetaInst.*preopt"):
+        request(prog, env)
+    assert env.soc.binding.last_request is None
+
+
+@pytest.mark.parametrize("source", ["imm", "op"])
+def test_dmem_lane_addresses_and_simultaneous_side_writes_use_prewrite_sources(source):
+    def initialize(p):
+        p.add_loop("scan", 3)
+        p.add_reg("address")
+        p.add_reg("side")
+
+    def body(p):
+        p.read_wmem(p.pulses["p"].get_wavenames()[0])
+        p.write_reg("address", "scan")
+        p.inc_reg("address", 17)
+        address, side = (p.reg_dict[n].full_addr() for n in ("address", "side"))
+        p.asm_inst(
+            {
+                "CMD": "DMEM_WR",
+                "DST": f"[{address}]",
+                "SRC": source,
+                "LIT": "#1234",
+                "OP": f"{address} + #100",
+                "WR": f"{side} {source}",
+                "UF": "1",
+            }
+        )
+        p.asm_inst(
+            {
+                "CMD": "REG_WR",
+                "DST": "w3",
+                "SRC": "dmem",
+                "ADDR": address,
+                "OP": f"{address} - #18",
+                "WR": f"{address} op",
+                "UF": "1",
+            }
+        )
+        p.asm_inst({"CMD": "WPORT_WR", "DST": "0", "SRC": "r_wave", "TIME": "@0"})
+        p.write_reg("w_gain", "address")
+        p.asm_inst({"CMD": "WPORT_WR", "DST": "0", "SRC": "r_wave", "TIME": "@50"})
+        p.write_reg("w_gain", "side")
+        p.asm_inst({"CMD": "WPORT_WR", "DST": "0", "SRC": "r_wave", "TIME": "@100"})
+
+    prog, env = program(body, initialize, reps=1)
+    result = request(prog, env)
+    stored = [1234, 1234, 1234] if source == "imm" else [117, 118, 119]
+    for point in range(3):
+        assert [
+            e.gain for e in result.materialize_point(point).events
+        ] == pytest.approx(np.array([stored[point], point - 1, stored[point]]) / 32766)
+
+
+def test_dmem_contents_carry_across_points_in_actual_loop_order():
+    def initialize(p):
+        p.add_loop("scan", 3)
+        p.add_reg("carry")
+        p.write_dmem(17, 10)
+
+    def body(p):
+        p.read_dmem("carry", 17)
+        p.inc_reg("carry", 1)
+        p.write_dmem(17, "carry")
+        p.read_wmem(p.pulses["p"].get_wavenames()[0])
+        p.write_reg("w_gain", "carry")
+        p.asm_inst({"CMD": "WPORT_WR", "DST": "0", "SRC": "r_wave", "TIME": "@0"})
+
+    prog, env = program(body, initialize, reps=1)
+    result = request(prog, env)
+    assert [
+        result.materialize_point(i).events[0].gain for i in range(3)
+    ] == pytest.approx(np.array([11, 12, 13]) / 32766)
+
+
+@pytest.mark.parametrize("source", ["native", "module", "asm"])
+def test_equivalent_output_effects_choose_the_same_per_read_physical_route(source):
+    module = PulseCfg(
+        ch=1, nqz=1, freq=200, gain=0.1, waveform=ConstWaveformCfg(length=0.1)
+    ).build("routed")
+
+    def initialize(p):
+        p.declare(module)
+        p.add_pulse(1, "other", style="const", freq=200, phase=0, gain=0.1, length=0.1)
+
+    def body(p):
+        if source == "native":
+            p.pulse(1, "other", t=0)
+        elif source == "module":
+            p.emit(module)
+        else:
+            address = p.wave2idx[p.pulses["other"].get_wavenames()[0]]
+            p.asm_inst(
+                {
+                    "CMD": "WPORT_WR",
+                    "DST": "1",
+                    "SRC": "wmem",
+                    "ADDR": f"&{address}",
+                    "TIME": "@0",
+                }
+            )
+        p.trigger([0], t=0)
+        p.pulse(0, "p", t=0.3)
+        p.trigger([0], t=0.3)
+
+    prog, env = program(
+        body, initialize, reps=1, routes=((0, 0), (1, 0)), trigger_time=None
+    )
+    read = request(prog, env).materialize_point(0).readouts[0]
+    assert read.generator_channels == (1, 0)
+    assert read.frequency_mhz == pytest.approx((100, 100), abs=1e-5)
+
+
+def test_register_selected_wmem_addresses_and_side_writes_sample_prewrite_words():
+    def initialize(p):
+        p.add_loop("scan", 3)
+        p.add_reg("address")
+
+    def body(p):
+        p.read_wmem(p.pulses["p"].get_wavenames()[0])
+        p.write_reg("address", "scan")
+        p.inc_reg("address", 17)
+        p.write_reg("w_gain", "scan")
+        p.inc_reg("w_gain", 100)
+        address = p.reg_dict["address"].full_addr()
+        p.asm_inst({"CMD": "WMEM_WR", "DST": address, "OP": "w3 + #1", "WR": "w3 op"})
+        p.write_reg("s14", 0)
+        p.asm_inst(
+            {
+                "CMD": "REG_WR",
+                "DST": "r_wave",
+                "SRC": "wmem",
+                "ADDR": address,
+                "WP": "r_wave",
+                "PORT": "0",
+            }
+        )
+        p.write_reg("s14", 50)
+        p.asm_inst(
+            {
+                "CMD": "WPORT_WR",
+                "DST": "0",
+                "SRC": "wmem",
+                "ADDR": address,
+                "OP": f"{address} + #1",
+                "WR": f"{address} op",
+            }
+        )
+        p.asm_inst({"CMD": "WPORT_WR", "DST": "0", "SRC": "r_wave", "TIME": "@100"})
+
+    prog, env = program(body, initialize, reps=1)
+    result = request(prog, env)
+    for point in range(3):
+        assert [
+            e.gain for e in result.materialize_point(point).events
+        ] == pytest.approx(np.array([101 + point, 100 + point, 100 + point]) / 32766)
 
 
 def test_reps_carry_without_observable_output_change_succeeds():

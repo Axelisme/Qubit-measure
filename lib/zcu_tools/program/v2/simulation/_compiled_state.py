@@ -8,7 +8,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from ..base import MyProgramV2
-from ..ir.instructions import RegWriteInst, TestInst, TimeInst
+from ..ir.instructions import ArithInst, DivInst, RegWriteInst, TestInst, TimeInst
 from ..ir.io_instructions import (
     DmemReadInst,
     DmemWriteInst,
@@ -34,6 +34,37 @@ BoolArray = NDArray[np.bool_]
 def signed32(value: IntArray) -> IntArray:
     """Return two's-complement signed 32-bit words in an int64 container."""
     return (value + 2**31) % 2**32 - 2**31
+
+
+def _binary_word(op: AluOp, a: IntArray, b: IntArray) -> IntArray:
+    binary = {
+        AluOp.ADD: np.add,
+        AluOp.SUB: np.subtract,
+        AluOp.AND: np.bitwise_and,
+        AluOp.AND_BIT: np.bitwise_and,
+        AluOp.OR: np.bitwise_or,
+        AluOp.OR_BIT: np.bitwise_or,
+        AluOp.XOR: np.bitwise_xor,
+        AluOp.XOR_BIT: np.bitwise_xor,
+    }
+    if op in binary:
+        return signed32(binary[op](a, b))
+    if op in (AluOp.CAT, AluOp.COLON2):
+        return signed32(((a & 0xFFFF) << 16) | (b & 0xFFFF))
+    if op == AluOp.ASR:
+        return signed32(a >> (b & 15))
+    if op in (AluOp.SL, AluOp.LSHIFT):
+        return signed32(a << (b & 15))
+    if op in (AluOp.SR, AluOp.RSHIFT):
+        return signed32((a & 0xFFFFFFFF) >> (b & 15))
+    raise ValueError(f"unsupported ALU operation {op.value}")
+
+
+def _parity(value: IntArray) -> IntArray:
+    parity = value & 0xFFFFFFFF
+    for shift in (16, 8, 4, 2, 1):
+        parity = parity ^ (parity >> shift)
+    return parity & 1
 
 
 type ModifiedInstruction = (
@@ -65,6 +96,7 @@ class Machine:
         self.size = size
         self.labels = labels
         self.registers: dict[str, IntArray] = {"s0": np.zeros(size, dtype=np.int64)}
+        self.arithmetic_result: IntArray | None = None
         self.flags: IntArray | None = None
         self.flags_valid = np.zeros(size, dtype=np.bool_)
         self.register_valid = {"s0": np.ones(size, dtype=np.bool_)}
@@ -103,6 +135,16 @@ class Machine:
             name = operand.canonical_name
             if name == "s11":
                 raise ValueError("tProc clock read s11 (s_usr_time)")
+            if name in ("s6", "s7"):
+                config = self.value(Register("s2"))
+                if (
+                    np.any(self.read_mask & ((config & 15) != 1))
+                    or self.arithmetic_result is None
+                ):
+                    raise ValueError(
+                        f"undefined core source for {name}; requires s_cfg source=arith"
+                    )
+                return signed32(self.arithmetic_result >> (32 if name == "s7" else 0))
             if name not in self.registers:
                 if not np.any(self.read_mask):
                     return np.zeros(self.size, dtype=np.int64)
@@ -126,30 +168,22 @@ class Machine:
         )
         if expr.op == AluOp.NONE:
             return a.copy()
-        unary = {AluOp.ABS: np.abs, AluOp.NOT: np.invert, AluOp.BANG: np.invert}
+        unary = {
+            AluOp.ABS: np.abs,
+            AluOp.NOT: np.invert,
+            AluOp.BANG: np.invert,
+            AluOp.MSH: lambda word: (word & 0xFFFFFFFF) >> 16,
+            AluOp.LSH: lambda word: word & 0xFFFF,
+            AluOp.SWP: lambda word: (
+                ((word & 0xFFFF) << 16) | ((word & 0xFFFFFFFF) >> 16)
+            ),
+            AluOp.PAR: _parity,
+        }
         if expr.op in unary:
             return signed32(unary[expr.op](a))
         if b is None:
             raise ValueError(f"unsupported ALU operation {expr.op.value}")
-        binary = {
-            AluOp.ADD: np.add,
-            AluOp.SUB: np.subtract,
-            AluOp.AND: np.bitwise_and,
-            AluOp.AND_BIT: np.bitwise_and,
-            AluOp.OR: np.bitwise_or,
-            AluOp.OR_BIT: np.bitwise_or,
-            AluOp.XOR: np.bitwise_xor,
-            AluOp.XOR_BIT: np.bitwise_xor,
-        }
-        if expr.op in binary:
-            return signed32(binary[expr.op](a, b))
-        if expr.op == AluOp.ASR:
-            return signed32(a >> (b & 15))
-        if expr.op in (AluOp.SL, AluOp.LSHIFT):
-            return signed32(a << (b & 15))
-        if expr.op in (AluOp.SR, AluOp.RSHIFT):
-            return signed32((a & 0xFFFFFFFF) >> (b & 15))
-        raise ValueError(f"unsupported ALU operation {expr.op.value}")
+        return _binary_word(expr.op, a, b)
 
     def condition(self, condition: str | None) -> BoolArray:
         """Return the active lanes selected by pre-instruction Z/S flags."""
@@ -165,10 +199,17 @@ class Machine:
         }[condition]
 
     def write(self, dst: Register, value: IntArray, active: BoolArray) -> None:
-        """Update selected lanes with a signed word; s0 remains the hardware zero."""
+        """Apply a CPU write, preserving read-only SFRs and cfg/address widths."""
         name = dst.canonical_name
-        if name == "s0":
+        if name in {"s0", "s1", "s3", "s4", "s5", "s6", "s7", "s8", "s9", "s10", "s11"}:
             return
+        if name == "s2":
+            value = value & 0xFF
+        elif name == "s15":
+            value = value & 0xFFFF
+        self._store_register(name, value, active)
+
+    def _store_register(self, name: str, value: IntArray, active: BoolArray) -> None:
         old = self.registers.get(name, np.zeros(self.size, dtype=np.int64))
         self.registers[name] = np.where(active, signed32(value), old)
         self.register_valid[name] = (
@@ -267,7 +308,9 @@ class Machine:
         | DmemWriteInst
         | WmemWriteInst
         | TestInst
-        | TimeInst,
+        | TimeInst
+        | ArithInst
+        | DivInst,
         position: int,
     ) -> None:
         """Apply compute/memory/time effects, sampling operands before side writes.
@@ -275,7 +318,17 @@ class Machine:
         Output-coupled variants require the caller to sample the port first.
         Undefined reads, unsupported effects and memory bounds raise ValueError.
         """
-        if isinstance(inst, TimeInst):
+        if isinstance(inst, ArithInst):
+            self._arithmetic(inst)
+        elif isinstance(inst, DivInst):
+            numerator = self.value(inst.num) & 0xFFFFFFFF
+            denominator = self.value(inst.den) & 0xFFFFFFFF
+            if np.any(denominator == 0):
+                raise ValueError("DIV denominator is zero")
+            active = np.ones(self.size, dtype=np.bool_)
+            self._store_register("s4", numerator // denominator, active)
+            self._store_register("s5", numerator % denominator, active)
+        elif isinstance(inst, TimeInst):
             self._advance(inst)
         elif isinstance(inst, TestInst):
             self.flags = self.expression(inst.op)
@@ -291,6 +344,28 @@ class Machine:
             else:
                 self.write_wave(inst.addr, effects.active)
             self._commit_alu(inst, effects)
+
+    def _arithmetic(self, inst: ArithInst) -> None:
+        # This bounded signed model does not claim DSP internal bit-exactness.
+        operands = [
+            self.value(r) for r in (inst.r1, inst.r2, inst.r3, inst.r4) if r is not None
+        ]
+        pre_adder = inst.c_op.startswith(("P", "M"))
+        offset = int(pre_adder)
+        a = (operands[offset] + 2**26) % 2**27 - 2**26
+        b = (operands[offset + 1] + 2**17) % 2**18 - 2**17
+        if pre_adder:
+            d = (operands[0] + 2**26) % 2**27 - 2**26
+            a = d + a if inst.c_op.startswith("P") else d - a
+            if np.any((a < -(2**26)) | (a >= 2**26)):
+                raise ValueError("ARITH pre-adder exceeds signed 27-bit range")
+        result = a * b
+        if len(operands) > offset + 2:
+            c = signed32(operands[offset + 2])
+            result = result + c if inst.c_op.endswith("P") else result - c
+        # |P| <= 2**26 * 2**17 + 2**31 < 2**45 after the pre-adder check.
+        self.arithmetic_result = result
+        self._store_register("s3", result, np.ones(self.size, dtype=np.bool_))
 
     def _advance(self, inst: TimeInst) -> None:
         if inst.c_op == "rst":

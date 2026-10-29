@@ -11,7 +11,9 @@ from zcu_tools.core.simulation import AcquireRequest, AcquisitionMode, ReadoutWi
 
 from ..base import MyProgramV2
 from ..ir.instructions import (
+    ArithInst,
     BaseInst,
+    DivInst,
     JumpInst,
     LabelInst,
     MetaInst,
@@ -31,7 +33,7 @@ from ..ir.io_instructions import (
 from ..ir.operands import ImmValue, Register, SrcKeyword
 from ._compiled_affine import AffineUpdates, prove_native_shell
 from ._compiled_output import Outputs
-from ._compiled_state import Machine
+from ._compiled_state import IntArray, Machine
 from ._compiled_stream import DecodedInstruction, NativeLoop, predecode
 from .binding import SimulationBinding
 
@@ -42,7 +44,16 @@ def _execute(record: DecodedInstruction, machine: Machine, outputs: Outputs) -> 
         return
     if isinstance(
         inst,
-        (RegWriteInst, DmemReadInst, DmemWriteInst, WmemWriteInst, TestInst, TimeInst),
+        (
+            RegWriteInst,
+            DmemReadInst,
+            DmemWriteInst,
+            WmemWriteInst,
+            TestInst,
+            TimeInst,
+            ArithInst,
+            DivInst,
+        ),
     ):
         if isinstance(inst, (RegWriteInst, WmemWriteInst)) and inst.wp is not None:
             if inst.port is None:
@@ -178,11 +189,28 @@ class _OrderedExecution:
         return pc + 1
 
 
+def _register_effects(inst: BaseInst) -> tuple[set[str], set[str]]:
+    reads, writes = set(inst.reg_read), set(inst.reg_write)
+    # IR s14 barriers describe reference changes, not reads of the output word.
+    if isinstance(inst, TimeInst):
+        return set(inst.r1.regs()) if inst.r1 is not None else set(), set()
+    if (
+        isinstance(inst, (PortWriteInst, DportWriteInst)) and inst.time is not None
+    ) or (isinstance(inst, RegWriteInst) and inst.src == SrcKeyword.WMEM):
+        reads.discard("s14")
+    if reads & {"s6", "s7"}:
+        reads.add("s2")
+    if isinstance(inst, ArithInst):
+        writes |= {"s6", "s7"}
+    return reads, writes
+
+
 def _live_inputs(
     records: Sequence[DecodedInstruction],
 ) -> tuple[set[str], set[str]] | None:
     defined: set[str] = set()
     inputs: set[str] = set()
+    written: set[str] = set()
     flags = False
     for record in records:
         inst = record.instruction
@@ -196,19 +224,13 @@ def _live_inputs(
             return None
         if getattr(inst, "if_cond", None) is not None and not flags:
             return None
-        reads, writes = set(inst.reg_read), set(inst.reg_write)
-        # IR uses s14 as a scheduling barrier for reference changes. The
-        # interpreter keeps that reference separately from the output-time word.
-        if isinstance(inst, TimeInst):
-            reads, writes = set(inst.r1.regs()) if inst.r1 is not None else set(), set()
-        elif (
-            isinstance(inst, (PortWriteInst, DportWriteInst)) and inst.time is not None
-        ) or (isinstance(inst, RegWriteInst) and inst.src == SrcKeyword.WMEM):
-            reads.discard("s14")
+        reads, writes = _register_effects(inst)
         inputs |= reads - defined
-        defined |= writes
-        flags |= isinstance(inst, TestInst) or bool(getattr(inst, "uf", False))
-    return inputs, defined
+        written |= writes
+        if getattr(inst, "if_cond", None) is None:
+            defined |= writes
+            flags |= isinstance(inst, TestInst) or bool(getattr(inst, "uf", False))
+    return inputs, written
 
 
 def _counter_jump(jump: JumpInst, counter: str) -> bool:
@@ -293,11 +315,45 @@ def _safe_tail(records: Sequence[DecodedInstruction], live: set[str]) -> bool:
         inst = record.instruction
         if isinstance(inst, (MetaInst, WaitInst)):
             continue
-        if not isinstance(inst, (RegWriteInst, TimeInst)) or (
-            isinstance(inst, RegWriteInst) and inst.dst.canonical_name in live
+        if not isinstance(inst, (RegWriteInst, TimeInst)):
+            return False
+        if isinstance(inst, RegWriteInst) and (
+            set(inst.reg_write) & live or inst.ww or inst.wp
         ):
             return False
     return True
+
+
+def _canonical_terminal(records: Sequence[DecodedInstruction]) -> bool:
+    instructions = [
+        r.instruction for r in records if not isinstance(r.instruction, MetaInst)
+    ]
+    if len(instructions) != 2:
+        return False
+    load, jump = instructions
+    return (
+        isinstance(load, RegWriteInst)
+        and load.dst.canonical_name == "s15"
+        and load.src == SrcKeyword.LABEL
+        and str(load.label) == "NEXT"
+        and not any((load.if_cond, load.wr, load.op, load.uf, load.ww, load.wp))
+        and isinstance(jump, JumpInst)
+        and isinstance(jump.addr, Register)
+        and jump.addr.canonical_name == "s15"
+        and jump.label is None
+        and not any((jump.if_cond, jump.wr, jump.op, jump.uf))
+    )
+
+
+def _native_grid(prog: MyProgramV2) -> tuple[tuple[str, ...], IntArray]:
+    names = tuple(n for n in prog.loop_dict if n != "reps")
+    dims = tuple(prog.loop_dict[n] for n in names)
+    grid = (
+        np.indices(dims, dtype=np.int64).reshape(len(dims), prod(dims))
+        if dims
+        else np.empty((0, 1), dtype=np.int64)
+    )
+    return names, grid
 
 
 def _try_vector(
@@ -320,8 +376,9 @@ def _try_vector(
     )
     if shells is None or inputs is None:
         return False
-    if not _safe_tail(
-        records[end + 1 : min(loop.body_end for loop in loops.values())], inputs[0]
+    tail = records[end + 1 : min(loop.body_end for loop in loops.values())]
+    if not _safe_tail(tail, inputs[0]) or not _canonical_terminal(
+        records[max(loop.end for loop in loops.values()) + 1 :]
     ):
         return False
     labels = {
@@ -329,14 +386,8 @@ def _try_vector(
         for r in records
         if isinstance(r.instruction, LabelInst)
     }
-    names = tuple(n for n in prog.loop_dict if n != "reps")
-    dims = tuple(prog.loop_dict[n] for n in names)
-    size = prod(dims)
-    grid = (
-        np.indices(dims, dtype=np.int64).reshape(len(dims), size)
-        if dims
-        else np.empty((0, 1), dtype=np.int64)
-    )
+    names, grid = _native_grid(prog)
+    size = outputs.size
     machine = Machine(prog, size, labels)
     for record in records[:start]:
         if not isinstance(
@@ -351,6 +402,8 @@ def _try_vector(
     for record in body:
         _located_execute(record, machine, outputs)
     outputs.finish(machine)
+    for record in tail:
+        _located_execute(record, machine, outputs)
     return True
 
 

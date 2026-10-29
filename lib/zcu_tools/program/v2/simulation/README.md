@@ -66,8 +66,23 @@ Runtime ADC words use overlapping output carriers to resolve their frequency ima
 Static ADC configuration uses the shared QICK `calc_ro_freq` adapter.
 
 This builder is not the acquire frontend. `_simulation_call` still uses the Module tree.
-The compiled interpreter is under construction. Its remaining ALU operations and
-same-timestamp generator waveform playback still need validation.
+The core interpreter supports register ALU operations, Z/S flags, DMEM/WMEM and
+native sweep/reps shells. Structured inner loops and branches remain separate work.
+ARITH uses signed A/D27, B18 and C32 inputs and rejects pre-adder overflow.
+Its bounded result fits signed46; s3 exposes low32 and the configured core source
+exposes low/high32. DIV uses unsigned32 quotient/remainder and rejects zero division.
+These are simulation models, not claims about unconfirmed DSP or divider boundaries.
+
+Ordinary axis_signal_gen_v6 commands start at the maximum of their timestamp and
+the previous command's end on the same generator. Same-timestamp flat-top segments
+therefore play consecutively. Generators keep independent schedules. This model
+omits dispatcher/CDC/pipeline delays and does not claim sample-exact DAC edges.
+Mux commands use their own tone/mask contract instead.
+Ordinary zero-output commands emit no event but still occupy their command duration.
+DDS output uses a unity envelope. Input output selection, periodic mode and phase
+reset raise before request construction. Holding the final sample is accepted only
+when that envelope sample is exactly zero. Phase reset would affect later commands,
+which requires DDS phase state outside the current numeric event contract.
 Do not infer support for every control form or registered experiment from this builder.
 
 ## Build and own an environment

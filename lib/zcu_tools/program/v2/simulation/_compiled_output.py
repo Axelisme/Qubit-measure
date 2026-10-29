@@ -19,7 +19,7 @@ from ..base import MyProgramV2
 from ..ir.io_instructions import DportWriteInst, PortWriteInst
 from ..ir.operands import Register, SrcKeyword
 from ..utils import generator_frequencies_from_words, readout_frequencies_from_words
-from ._compiled_state import IntArray, Machine
+from ._compiled_state import BoolArray, IntArray, Machine
 from ._envelope_pool import EnvelopeContent, EnvelopePool
 from ._mux import static_readout_parameters
 
@@ -77,6 +77,7 @@ class Outputs:
         self.read_count = dict.fromkeys(self.prog.ro_chs, 0)
         self.shot_events = set()
         self.current_end = np.zeros(machine.size, dtype=np.float64)
+        self.generator_end: dict[int, NDArray[np.float64]] = {}
 
     def _put(
         self, target: NDArray[np.float64], values: NDArray[np.float64], machine: Machine
@@ -113,8 +114,6 @@ class Outputs:
             + machine.value(inst.time if inst.time is not None else Register("s14"))
         ) / float(self.prog.tproccfg["f_time"])
         cfg = self.prog.soccfg["gens" if kind == "gen" else "readouts"][ch]
-        bits = int(cfg["b_dds"])
-        freq = (words[:, 0] % 2**bits) * float(cfg["f_dds"]) / 2**bits
         phase_bits = int(cfg.get("b_phase", 32))
         phase = (words[:, 1] % 2**phase_bits) * 360 / 2**phase_bits
         if kind == "ro":
@@ -123,6 +122,28 @@ class Outputs:
         if "mux_tones" in self.prog.gen_chs[ch]:
             self._mux_wave(machine, ch, words, position, source, start)
             return
+        self._ordinary_wave(machine, ch, words, position, source, start)
+
+    def _ordinary_wave(
+        self,
+        machine: Machine,
+        ch: int,
+        words: IntArray,
+        position: int,
+        source: str,
+        start: NDArray[np.float64],
+    ) -> None:
+        cfg = self.prog.soccfg["gens"][ch]
+        conf = words[:, 5] & 0xFFFF
+        if np.any(conf & 16):
+            raise ValueError("phrst=1 requires cross-command DDS phase state")
+        if np.any(conf & 4):
+            raise ValueError("mode=periodic cannot be represented by finite events")
+        if np.any((conf & 3) == 2):
+            raise ValueError("outsel=input has no numeric baseband contract")
+        active = (conf & 3) != 3
+        phase_bits = int(cfg.get("b_phase", 32))
+        phase = (words[:, 1] % 2**phase_bits) * 360 / 2**phase_bits
         freq = generator_frequencies_from_words(
             self.prog.soccfg,
             words[:, 0],
@@ -133,9 +154,17 @@ class Outputs:
             absolute_freqs=self.prog.ABSOLUTE_FREQS,
         )
         duration = (words[:, 4] & 65535) / float(cfg["f_fabric"])
+        # This serial playback model omits dispatcher/CDC/sample pipeline delays.
+        start = np.maximum(start, self.generator_end.get(ch, start))
+        self.generator_end[ch] = start + duration
         gain = ((words[:, 3] + 2**31) % 2**32 - 2**31) / float(cfg["maxv"])
+        self.current_end = np.maximum(self.current_end, start + duration)
+        if not np.any(active):
+            return
         key = (position, 0)
-        self._emit(machine, key, ch, source, (start, duration, freq, phase, gain))
+        self._emit(
+            machine, key, ch, source, (start, duration, freq, phase, gain, active)
+        )
         slot = self.events[key]
         candidates = list(slot.envelopes)
         for address, length, conf in np.unique(words[:, [2, 4, 5]], axis=0):
@@ -143,7 +172,15 @@ class Outputs:
             envelope = self._envelope(ch, int(address), int(length), int(conf))
             if envelope not in candidates:
                 candidates.append(envelope)
-            slot.envelope_index[self.points[selected]] = candidates.index(envelope)
+            indexes = self.points[selected & active]
+            candidate = candidates.index(envelope)
+            if np.any(
+                self.visited[indexes] & (slot.envelope_index[indexes] != candidate)
+            ):
+                raise ValueError(
+                    f"reps loop changes envelope; carried state: {sorted(machine.writes)}"
+                )
+            slot.envelope_index[indexes] = candidate
         self.events[key] = replace(slot, envelopes=tuple(candidates))
 
     def _mux_wave(
@@ -175,7 +212,7 @@ class Outputs:
                 (position, tone),
                 ch,
                 source,
-                (start, duration, frequency, phase, gain),
+                (start, duration, frequency, phase, gain, mask),
             )
             self.events[(position, tone)].active[self.points] = mask
 
@@ -191,6 +228,7 @@ class Outputs:
             NDArray[np.float64],
             NDArray[np.float64],
             NDArray[np.float64],
+            BoolArray,
         ],
     ) -> None:
         if key not in self.events:
@@ -217,18 +255,26 @@ class Outputs:
                 slot.phase_deg,
                 slot.gain,
             ),
-            values,
+            values[:5],
             strict=True,
         ):
-            self._put(target, value, machine)
-        slot.active[self.points] = True
+            self._put(target, np.where(values[5], value, 0), machine)
+        if np.any(self.visited[self.points] & (slot.active[self.points] != values[5])):
+            raise ValueError(
+                f"reps loop changes output activity; carried state: {sorted(machine.writes)}"
+            )
+        slot.active[self.points] = values[5]
         self.shot_events.add(key)
-        self.current_end = np.maximum(self.current_end, values[0] + values[1])
+        self.current_end = np.maximum(
+            self.current_end, np.where(values[5], values[0] + values[1], 0)
+        )
 
     def _envelope(
         self, ch: int, address: int, length: int, conf: int
     ) -> PulseEnvelope | None:
-        if conf & 3 == 1:
+        if conf & 3 in (1, 3):
+            if not conf & 8 and conf & 3 == 1:
+                raise ValueError("stdysel=last has nonzero final DDS envelope sample")
             return None
         if conf & 3 != 0:
             raise ValueError(f"unmodeled generator output selection {conf & 3}")
@@ -236,7 +282,9 @@ class Outputs:
         spc = int(cfg["samps_per_clk"])
         cache = (ch, address, length)
         if cache in self.envelopes:
-            return self.envelopes[cache]
+            envelope = self.envelopes[cache]
+            self._steady_output(conf, envelope)
+            return envelope
         start, count = (address & 0xFFFFFF) * spc, (length & 0xFFFF) * spc
         envelopes = self.prog.envelopes[ch]["envs"]
         if not isinstance(envelopes, dict):
@@ -265,9 +313,14 @@ class Outputs:
                         tuple(complex(v) for v in values),
                     )
                     self.pool.put(key, envelope)
+                self._steady_output(conf, envelope)
                 self.envelopes[cache] = envelope
                 return envelope
         raise ValueError(f"undefined DAC envelope range [{start}, {start + count})")
+
+    def _steady_output(self, conf: int, envelope: PulseEnvelope) -> None:
+        if not conf & 8 and envelope.values[-1] != 0:
+            raise ValueError("stdysel=last has nonzero final DAC envelope sample")
 
     def trigger(self, machine: Machine, inst: DportWriteInst) -> None:
         """Record ADC rising trigger effects, preserving declaration/read order."""
