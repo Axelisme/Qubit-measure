@@ -41,10 +41,7 @@ from zcu_tools.gui.session.value_lookup import (
     ValueRef,
     resolve_value_ref,
 )
-from zcu_tools.resources.context.library import (
-    LibrarySnapshot,
-    ModuleLibrary,
-)
+from zcu_tools.resources.context.library import ModuleLibrary
 from zcu_tools.resources.document_store import DocumentRevision
 from zcu_tools.resources.entry import (
     DestinationExistsError,
@@ -60,7 +57,7 @@ from zcu_tools.resources.entry.schema import (
     PointDocument,
     SetupDocument,
 )
-from zcu_tools.resources.entry.storage import PointStorageBinding, capture_point_storage
+from zcu_tools.resources.entry.storage import PointStorageBinding
 from zcu_tools.resources.entry.writeback import (
     LibraryUpdate,
     ModuleWriteback,
@@ -567,13 +564,7 @@ class ContextService:
         point = entry.use_point(target.point)
         assets = self._bind_assets(entry.database_path / "arb_waveforms")
         library = entry.module_library(target.point, assets=assets)
-        return ParameterContext(
-            point=parameter_content(point),
-            library=library.snapshot(),
-            target=target,
-            roles=roles,
-            storage=capture_point_storage(point),
-        )
+        return ParameterContext.from_point(point, library, target, roles=roles)
 
     def read_record(
         self, target: ContextTarget, component: str, run_id: str
@@ -791,7 +782,7 @@ class ContextService:
         selected = self._published_parameters()
         handle = self._write_library(entry, target, selected)
         with handle.edit() as draft:
-            candidate = self._library_change_candidate(draft.snapshot(), change)
+            candidate = change.apply(draft.snapshot())
             draft.replace_contents(candidate)
         if parameters.target != selected.target:
             return
@@ -806,25 +797,6 @@ class ContextService:
             ),
             parameter=False,
         )
-
-    def _library_change_candidate(
-        self, library: LibrarySnapshot, change: LibraryChange
-    ) -> LibrarySnapshot:
-        """Prepare one isolated structure change using the resource owner's operations."""
-        destination = change.new_path if change.new_path is not None else change.path
-        if change.action == "delete":
-            return library.deleted(change.path, kind=change.kind)
-        if change.action == "rename":
-            return library.renamed(change.path, destination, kind=change.kind)
-        if change.action == "replace":
-            library.entry_value(change.path, kind=change.kind)
-            if destination != change.path:
-                library = library.renamed(change.path, destination, kind=change.kind)
-        if change.module is not None:
-            return library.replaced_module(destination, change.module)
-        if change.waveform is not None:
-            return library.replaced_waveform(destination, change.waveform)
-        raise InvalidInputError("Library put/replace requires a Spec")
 
     def entry_ledger(self, entry_name: str) -> RecordsLedger:
         """Return only the currently opened entry's ledger; never append an event.
@@ -905,13 +877,10 @@ class ContextService:
             raise RuntimeError("Opened entry has no setup binding")
         assets = self._bind_assets(entry.database_path / "arb_waveforms")
         library = entry.module_library(label, assets=assets)
-        document = parameter_content(point)
-        parameters = ParameterContext(
-            point=document,
-            library=library.snapshot(),
-            target=SavedPoint(entry_name=entry.result_path.name, point=label),
-            roles=None,
-            storage=capture_point_storage(point),
+        parameters = ParameterContext.from_point(
+            point,
+            library,
+            SavedPoint(entry_name=entry.result_path.name, point=label),
         )
         sources = (
             ContextSource("setup", source_path(self._setup), None),

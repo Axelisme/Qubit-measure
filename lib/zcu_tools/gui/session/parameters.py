@@ -24,18 +24,20 @@ from zcu_tools.resources.entry import (
     ParameterContent,
     RoleResolutionError,
     document_value,
+    parameter_content,
     resolve_path,
 )
 from zcu_tools.resources.entry.aliases import AliasValue
 from zcu_tools.resources.entry.roles import resolve_names
-from zcu_tools.resources.entry.storage import PointStorageBinding
+from zcu_tools.resources.entry.storage import PointStorageBinding, capture_point_storage
 from zcu_tools.resources.projection import ProjectionPathError, projection_value
 
 _LIBRARY_PARTITIONS = ("pulses", "readout", "reset", "waveforms")
 
 if TYPE_CHECKING:
     from zcu_tools.gui.session.context_types import ContextSourceFault, ContextTarget
-    from zcu_tools.resources.entry import RoleSpec
+    from zcu_tools.resources.context.library import ModuleLibrary
+    from zcu_tools.resources.entry import PointView, RoleSpec
     from zcu_tools.resources.entry.schema import PointDocument
 
 
@@ -170,6 +172,32 @@ class ParameterContext:
                         spec.kind,
                         f"Captured target {name!r} is missing or has the wrong kind",
                     )
+
+    @classmethod
+    def from_point(
+        cls,
+        point: PointView,
+        library: ModuleLibrary,
+        target: ContextTarget,
+        *,
+        roles: RoleBinding | None = None,
+    ) -> ParameterContext:
+        """Capture cached point content, library and saved-point storage.
+
+        point and library are already opened resource views. target must match
+        point's saved origin; a mismatch raises ValueError. roles optionally
+        supplies fixed consumer names, subject to the constructor's validation.
+        Content and roles are detached. No view is refreshed, no files are
+        written and no session selection or events change. Resource snapshot
+        and storage-origin failures propagate.
+        """
+        return cls(
+            point=parameter_content(point),
+            library=library.snapshot(),
+            target=target,
+            roles=roles,
+            storage=capture_point_storage(point),
+        )
 
     @classmethod
     def empty(cls) -> ParameterContext:
