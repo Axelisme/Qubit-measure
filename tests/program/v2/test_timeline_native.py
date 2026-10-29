@@ -6,6 +6,8 @@ from zcu_tools.program.v2 import ir
 from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 from zcu_tools.program.v2.timeline import TimelineProgramV2
 
+from .timing_support import shots as _shots
+
 
 def _program(body, initialize=None):
     class Program(TimelineProgramV2):
@@ -177,7 +179,7 @@ def test_swept_floor_proves_sign_including_zero(start, stop, expected):
     ] == [[x] for x in expected]
 
 
-def test_crossing_swept_floor_is_rejected_instead_of_discarding_whole_sweep():
+def test_crossing_swept_floor_preserves_each_point():
     def initialize(prog):
         prog.add_loop("scan", 2)
 
@@ -188,11 +190,11 @@ def test_crossing_swept_floor_is_rejected_instead_of_discarding_whole_sweep():
         )
         prog.delay(10 / 430.08)
 
-    with pytest.raises(ValueError, match="drive.*delay_timeline"):
-        _program(body, initialize)
+    result = _shots(_program(body, initialize))
+    assert [s.body_end_cycle - s.start_cycle for s in result] == [10, 11]
 
 
-def test_crossing_swept_auto_maximum_is_rejected_pointwise():
+def test_crossing_swept_auto_maximum_places_at_each_points_later_end():
     def initialize(prog):
         prog.add_loop("scan", 2)
 
@@ -202,11 +204,20 @@ def test_crossing_swept_auto_maximum_is_rejected_pointwise():
         prog.delay_timeline(QickSweep1D("scan", 100 / 430.08, 0), timeline="drive")
         prog.pulse(0, "pulse", t="auto", timeline="drive")
 
-    with pytest.raises(ValueError, match="drive.*delay_timeline"):
-        _program(body, initialize)
+    result = _shots(_program(body, initialize))
+    assert [
+        [
+            event.cycle - shot.start_cycle
+            for event in shot.events
+            if event.kind == "wave"
+        ]
+        for shot in result
+    ] == [[0, 100], [100, 143]]
+    assert [shot.body_end_cycle - shot.start_cycle for shot in result] == [143, 186]
+    assert [shot.end_cycle - shot.start_cycle for shot in result] == [143, 186]
 
 
-def test_crossing_body_maximum_is_rejected_instead_of_guessing_one_timeline():
+def test_crossing_body_maximum_closes_at_each_points_latest_end():
     def initialize(prog):
         prog.add_loop("scan", 2)
 
@@ -217,5 +228,5 @@ def test_crossing_body_maximum_is_rejected_instead_of_guessing_one_timeline():
             QickSweep1D("scan", 30 / 430.08, 10 / 430.08), timeline="other"
         )
 
-    with pytest.raises(ValueError, match="other.*delay_timeline"):
-        _program(body, initialize)
+    result = _shots(_program(body, initialize))
+    assert [s.body_end_cycle - s.start_cycle for s in result] == [30, 30]
