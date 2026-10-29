@@ -138,3 +138,32 @@ self.delay_auto()                                 # 原生全域同步：參考�
 4. 方法介面是原生方法加 `timeline=` 參數，背後可以是不同的 macro 類別。
 
 我們的 module 因此不需要另一套串接規則：blocking Pulse 在目前 timeline 發射後 `delay_auto(timeline=目前)`，非 blocking 不推進，Join 從目前 timeline 分出子 timeline、結束時推到各子 timeline 的最大值。QICK 已有逐通道的公開 timestamp 方法（`get_timestamp`、`set_timestamp`、`decrement_timestamps`）。下一步是第四個丟棄式原型，只用 QICK 公開 API 驗證這個模型、與現行 `prog_list` 的逐位比對、指令數與模擬器的讀法。
+
+## 後記四（2026-10-29 傍晚，第四個原型與定案方向）
+
+### 第四個原型：具名 timeline
+
+依後記三的模型做第四個丟棄式原型（工作檔未入庫，依據 repo@b1cca2691、QICK 0.2.436），只用 QICK 公開 API，沒有私有屬性或 monkeypatch：
+
+- timeline 狀態放在我們的 program 基底，只在 preprocess 變動，每次 compile 重置。覆寫公開的 `decrement_timestamps`，原生 `delay`／`delay_auto()` 推進參考時間時，具名 timeline 跟著扣減並以參考時間為下限；四個混用例子的手算與實測一致。
+- 具名 timeline 前進只記帳，不發指令。頂層的 tag 與 `get_time_param` 可用。重疊例子中 readout 在 drive 結束時開始，不等 flux。
+- 模擬 frontend 直接讀 macro 已解析的時間，不再自己重算 delay。
+- timeline 核心約 100–120 行，比後記三估計的時間層 200–300 行小。
+
+### 掃描與指令數
+
+tProc v2 的時間可以是指令內的字面值，或先放進暫存器。掃描的時間只能用暫存器，每個時間暫存器要初始化、每點加步長、每圈歸位。現行 T1 掃 delay 用一條 `inc_ref r2` 把掃描值併進參考時間，之後的 readout config、trigger、readout pulse 都回到字面值，共 28 條。若同樣的序列留在具名 timeline 上，參考時間不動，掃描 offset 帶進之後每條指令的時間，需要 4 個時間暫存器與對應的搬移、更新、歸位，共 40 條。
+
+因此使用者採用兩項建議（「Timeline的12納入設計，採用建議」）：主流程放在預設 timeline，重疊的 pulse 放具名 timeline；提供 `sync(timeline=...)`，用一次 `inc_ref` 把參考時間移到指定 timeline，其他 timeline 一起換算。
+
+### blocking 與推進長度
+
+使用者：「我考慮移除block屬性，改利用timeline來實現重疊」，之後確認「1要移除」。module 發射後一律推進自己所在的 timeline，重疊全部以 timeline 表達；現行用 `block_mode=False` 的三個實驗（兩個 ac_stark 與 cpmg）遷移時改寫。
+
+推進長度比較了三種：(a) 沿用 `total_length`，pre／波形／post 各自進位，可與現行逐位相同；(b) 取 QICK 記錄的實際結束時間，整段向上取整一次；(c) 同 (b) 但照 QICK 原生四捨五入，原型測得最差提早 1.1 ns，違反「下一個不得早於上一個播完」，否決。使用者問「選b是不是比較自然？ A的優點是什麼？」。(a) 的優點是遷移時可用 `prog_list` 逐位比對、不依賴 QICK 捨入細節；(b) 語意與原生 `delay_auto` 一致、時間只有 QICK 一個來源（不再自算 `total_length`，模擬器也不重算），且較緊湊（T1 的 pi 從 @42 提前到 @39）。
+
+定案（「採用建議」）：採 (b)，遷移分兩步。先以 (a) 規則把 module 轉成 macro，用逐位比對證明轉換不改行為；再單獨切換到 (b)，為每個實驗產出 timeline 差異報告，只允許提前且每個元素最多數個 cycle。最終程式只留 (b)。
+
+### 仍待處理
+
+`wait_auto`／`resync` 對具名 timeline 的語意、多 readout 或 readout 窗口長於 pulse 時 post-delay 的基準、巢狀 tag、同一 instance 多次發射（heralding 的 `occurrence`）、QICK 版本耦合，以及 Repeat、Branch、LoadValue、TableLengthPulse 等的轉換，留給實作 spec。
