@@ -1,3 +1,5 @@
+# tolerated(file-size): PulseReadout, TablePulseReadout and MuxReadout own native
+# cfg adaptation plus declare/lower; no existing owner can take either part.
 from __future__ import annotations
 
 from abc import abstractmethod
