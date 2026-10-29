@@ -53,18 +53,6 @@ def replace_sweep(data, path, value):
     return data
 
 
-def test_select_center_preserves_interval_and_return(sweep_state):
-    state, path, env = sweep_state
-    before = state.input
-    state.select(path, {"kind": "center"}, env)
-    assert state.input.data == replace_sweep(
-        before.data, path, {"kind": "center", "center": 12, "span": 4, "n": 3}
-    )
-    state.select(path, {"kind": "linrange"}, env)
-    assert state.input.data == before.data
-    assert state.base.same_as(before)
-
-
 REPRESENTATIONS = [
     {"kind": "linrange", "start": 10, "stop": 14, "n": 3},
     {"kind": "center", "center": 12, "span": 4, "n": 3},
@@ -145,6 +133,18 @@ def test_select_converts_both_dimensions_and_roundtrips(sweep_state, source, tar
             {"kind": "linrange", "start": 10, "stop": 14},
             "center_step",
             {"kind": "center_step"},
+        ),
+        pytest.param(
+            {"kind": "linrange", "start": 10, "stop": 14, "n": 10**309},
+            "linrange_step",
+            {"kind": "linrange_step", "start": 10, "stop": 14},
+            id="overflow-same-coordinates",
+        ),
+        pytest.param(
+            {"kind": "linrange", "start": 10, "stop": 14, "n": 10**309},
+            "center_step",
+            {"kind": "center_step"},
+            id="overflow-cross-coordinates",
         ),
         (
             {"kind": "linrange", "start": 10, "stop": 14, "n": 1},

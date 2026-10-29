@@ -24,6 +24,8 @@ from zcu_tools.gui.form import (
 )
 from zcu_tools.gui.form.commands import ReadonlyFormInput, readonly_input
 
+from ._converters import inherit_raw
+
 
 def _data(snapshot: FormCommandSnapshot) -> dict[str, JsonValue]:
     data = snapshot.copy_input()
@@ -364,20 +366,27 @@ def _select_numeric(
         for name in participants
     ):
         raise FormCommandError("Sweep selection requires direct numeric participants")
-    if source_step != target_step:
-        raw = _sampling_change(old, context, to_step=target_step)
-        # The second command consumes the first command's detached numeric result,
-        # not the old context's coordinates or sampling.
-        old = FormCommandSnapshot(None, None, readonly_input(raw), True)
-        numeric = {
-            name: value
-            for name, value in raw.items()
-            if isinstance(value, (int, float))
-        }
-        context = FormCommandContext(lambda path: numeric[str(path[0])])
-    if source_center != target_center:
-        return (_range_data if source_center else _center_data)(old, context)
-    return raw
+    # Validate participants before the arithmetic boundary: provider failures
+    # must propagate, while invalid authored values still trigger raw inheritance.
+    numeric = {name: context.evaluate((name,)) for name in participants}
+    context = FormCommandContext(lambda path: numeric[str(path[0])])
+    try:
+        if source_step != target_step:
+            raw = _sampling_change(old, context, to_step=target_step)
+            # The second command consumes the first command's detached numeric result,
+            # not the old context's coordinates or sampling.
+            old = FormCommandSnapshot(None, None, readonly_input(raw), True)
+            numeric = {
+                name: value
+                for name, value in raw.items()
+                if isinstance(value, (int, float))
+            }
+            context = FormCommandContext(lambda path: numeric[str(path[0])])
+        if source_center != target_center:
+            return (_range_data if source_center else _center_data)(old, context)
+        return raw
+    except OverflowError as exc:
+        raise FormCommandError("Sweep selection arithmetic overflowed") from exc
 
 
 def sweep_converter(models: tuple[type[FormModel], ...]) -> InputConverter:
@@ -408,14 +417,7 @@ def sweep_converter(models: tuple[type[FormModel], ...]) -> InputConverter:
         if old.structure is None or not isinstance(raw, dict):
             return FormConversionResult(target, inherited)
         # Sweep branches have no numeric defaults; only matching raw fields survive.
-        for name, info in target.model_fields.items():
-            previous = old.structure.model_fields.get(name)
-            if (
-                previous is not None
-                and previous.annotation == info.annotation
-                and name in raw
-            ):
-                inherited[name] = raw[name]
+        inherited = inherit_raw(old.structure, target, raw, inherited)
         try:
             data = _select_numeric(old, kind, context)
         except FormCommandError:

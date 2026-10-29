@@ -1,6 +1,6 @@
 """Shared name-and-editable-type raw inheritance for generated selectors."""
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from functools import partial
 from typing import Literal, get_args, get_origin
 
@@ -150,6 +150,33 @@ def _inherit(
         if issubclass(target, FormModel)
         else static_defaults(target)
     )
+    return inherit_raw(
+        source,
+        target,
+        raw,
+        result,
+        inherit_value=lambda old, new, value: _inherit_value(old, new, value, env),
+    )
+
+
+def inherit_raw(
+    source: type[BaseModel],
+    target: type[BaseModel],
+    raw: Mapping[str, JsonValue],
+    initial: Mapping[str, JsonValue],
+    *,
+    inherit_value: Callable[[object, object, JsonValue], JsonValue] | None = None,
+) -> dict[str, JsonValue]:
+    """Overlay same-name, same-editable-type raw fields on target initial input.
+
+    Missing matching fields remain missing, including when initial has a value.
+    Expressions and invalid values survive without evaluation or validation.
+    initial and raw are not mutated. When supplied, inherit_value transforms
+    present matching values using source annotation, target annotation and raw
+    value; module/union callers use it for nested defaults in their fixed env.
+    Without it, matching values pass through unchanged, as sweep leaves require.
+    """
+    result = dict(initial)
     for name, info in target.model_fields.items():
         old_info = source.model_fields.get(name)
         if old_info is None or _editable_type(old_info.annotation) != _editable_type(
@@ -159,8 +186,10 @@ def _inherit(
         if name not in raw:
             result.pop(name, None)
         else:
-            result[name] = _inherit_value(
-                old_info.annotation, info.annotation, raw[name], env
+            result[name] = (
+                raw[name]
+                if inherit_value is None
+                else inherit_value(old_info.annotation, info.annotation, raw[name])
             )
     return result
 
