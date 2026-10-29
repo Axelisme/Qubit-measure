@@ -147,17 +147,6 @@ def test_qick_options_cover_all_adcs_once_in_first_declaration_order(case):
         assert options == {}
 
 
-def test_tone_parameters_keep_adc_numbers_not_tone_positions():
-    from tests.program.v2._mux_support import native_mux
-
-    cfg = native_mux((4, 1))
-    first = CircleClassifier(g_center=0j, e_center=1 + 0j, radius=0.5)
-    second = LinearClassifier(angle=1.0, threshold=2.0)
-    cfg.tones[0].classifier = first
-    cfg.tones[1].classifier = second
-    assert readout.classification_parameters(cfg) == {4: first, 1: second}
-
-
 def test_circle_lookup_uses_adc_and_accepts_centers_without_radius():
     from tests.program.v2._mux_support import native_mux
 
@@ -196,7 +185,7 @@ def centroid3():
     )
 
 
-def test_centroid3_lookup_and_mapping_are_detached_and_use_adc_numbers():
+def test_centroid3_lookup_is_detached_and_uses_adc_numbers():
     from tests.program.v2._mux_support import native_mux
 
     cfg = native_mux((4, 1))
@@ -209,12 +198,6 @@ def test_centroid3_lookup_and_mapping_are_detached_and_use_adc_numbers():
     detached = readout.centroid3_classifier(cfg, ro_ch=4)
     detached.confusion_matrix[0][0] = -99.0
     detached.f_center = 99j
-    mapping = readout.classification_parameters(cfg)
-    assert mapping == {4: first, 1: second}
-    mapped = mapping[1]
-    if not isinstance(mapped, Centroid3Classifier):
-        pytest.fail("classification_parameters lost the centroid3 type")
-    mapped.confusion_matrix[0][0] = -99.0
     assert readout.centroid3_classifier(cfg, ro_ch=4) == first
     assert readout.centroid3_classifier(cfg, ro_ch=1) == second
 
@@ -243,7 +226,7 @@ def test_centroid3_is_not_circle_other_or_herald_calibration():
     with pytest.raises(ValueError, match="centroid3.*circle"):
         readout.circle_classifier(cfg, ro_ch=2)
     with pytest.raises(ValueError, match="centroid3.*other"):
-        readout.classification_parameters(cfg, require_other=True)
+        readout.classification_processors(cfg, require_other=True)
     with pytest.raises(ValueError, match="centroid3.*herald"):
         herald_ground_mask(np.array([0j], dtype=np.complex128), centroid3())
     with pytest.raises(ValueError, match="centroid3.*herald"):
@@ -268,21 +251,3 @@ def test_processors_reject_unavailable_calibration(classifier, require_other, me
         readout.classification_processors(
             pulse(classifier), require_other=require_other
         )
-
-
-def test_readout_supplies_explicit_adc_classification():
-    calibration = CircleClassifier(g_center=0j, e_center=1 + 0j, radius=0.5)
-    assert readout.classification_parameters(pulse(calibration)) == {2: calibration}
-
-
-@pytest.mark.parametrize(
-    "classifier, message",
-    [
-        (None, "classifier.*missing"),
-        (CircleClassifier(g_center=0j, e_center=1 + 0j), "radius.*Post"),
-        (LinearClassifier(angle=0.0, threshold=0.5), "linear.*other"),
-    ],
-)
-def test_other_consumer_requires_complete_circle(classifier, message):
-    with pytest.raises(ValueError, match=message):
-        readout.classification_parameters(pulse(classifier), require_other=True)

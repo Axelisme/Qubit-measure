@@ -6,7 +6,6 @@ from zcu_tools.analysis.fitting.singleshot import transition_state_circle_probab
 from zcu_tools.analysis.singleshot import (
     analyze_centroid3_iq,
     analyze_reference_iq,
-    calc_populations,
     classify_rabi_iq,
     classify_reference_iq,
     classify_result,
@@ -36,16 +35,16 @@ def test_centroid3_iq_analysis_preserves_scan_axes_and_unclipped_estimates() -> 
     assert result.minimum_singular_value == pytest.approx(0.5)
 
 
-def test_population_conversion_and_readout_correction() -> None:
-    ge = np.array([[0.3, 0.5], [0.4, 0.4]], dtype=np.float64)
-    populations = calc_populations(ge)
-    np.testing.assert_allclose(populations, [[0.3, 0.5, 0.2], [0.4, 0.4, 0.2]])
+def test_population_signal_and_readout_correction() -> None:
+    populations = np.array([[0.3, 0.5, 0.2], [0.4, 0.4, 0.2]], dtype=np.float64)
     matrix = np.array([[0.8, 0.2, 0.0], [0.1, 0.9, 0.0], [0.0, 0.0, 1.0]])
     measured = populations @ matrix
     np.testing.assert_allclose(correct_populations(measured, matrix), populations)
     assert correct_populations(populations, None) is populations
     other_adc = np.array([[[0.8, 0.1], [0.9, 0.0]]], dtype=np.float64)
-    np.testing.assert_array_equal(raw_population_signal([ge[None, ...], other_adc]), ge)
+    np.testing.assert_array_equal(
+        raw_population_signal([populations[None, ...], other_adc]), populations
+    )
     with pytest.raises(np.linalg.LinAlgError):
         correct_populations(populations, np.zeros((3, 3)))
 

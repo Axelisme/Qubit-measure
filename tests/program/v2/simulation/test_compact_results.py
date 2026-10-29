@@ -4,7 +4,6 @@ from dataclasses import replace
 
 import numpy as np
 import pytest
-from zcu_tools.cfg_model import CircleClassifier, LinearClassifier
 from zcu_tools.core.simulation import (
     ChannelStatistics,
     RoundRequest,
@@ -13,7 +12,6 @@ from zcu_tools.core.simulation import (
     SamplingIdentity,
 )
 from zcu_tools.experiment.simulation import white_noise
-from zcu_tools.program.herald import HeraldSpec
 from zcu_tools.program.v2 import ModularProgramV2
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
@@ -154,83 +152,6 @@ def test_processed_materializes_retained_shots_matching_hardware(monkeypatch):
         env.devices.close_all_devices()
 
 
-@pytest.mark.parametrize("processing", ["iq", "classify", "threshold"])
-def test_herald_materializes_fixed_raw_shots_through_public_binding(processing):
-    env = white_noise(std_adc=0, seed=19)
-    prog = ModularProgramV2(
-        env.soccfg,
-        modules=[
-            PulseReadoutCfg(
-                gen_ch=0,
-                ro_ch=0,
-                nqz=1,
-                freq=100,
-                gain=0.1,
-                waveform=ConstWaveformCfg(length=0.1),
-                ro_length=0.1,
-            ).build(f"readout_{read}")
-            for read in range(2)
-        ],
-        reps=3,
-    )
-    length = prog.ro_chs[0]["length"]
-    literals = (
-        [[[-1, 0], [-1, 0]], [[1, 0], [1, 0]], [[1, 0], [1, 0]]],
-        [[[-1, 0], [1, 0]], [[-1, 0], [1, 0]], [[1, 0], [-1, 0]]],
-    )
-    executed = []
-    materialized = []
-
-    def execute(request):
-        executed.append(request.index)
-        raw = np.array(literals[request.index], dtype=np.int64) * length
-
-        class Raw:
-            def materialize(self, reps, avg_level):
-                assert reps == 3
-                assert avg_level == 0
-                materialized.append(request.index)
-                return {0: raw.copy()}
-
-        # Compact totals deliberately differ from the per-shot realization.
-        summary = RoundStatistics(
-            np.array([3], dtype=np.int64),
-            (
-                ChannelStatistics(
-                    0, np.zeros((2, 2)), np.zeros((2, 1, 2)), np.zeros((2, 2))
-                ),
-            ),
-            SamplingIdentity(
-                request.acquire.root_seed, (request.acquire.sequence, request.index, 1)
-            ),
-        )
-        return IntegratedRound(summary, Raw())
-
-    env.soc.binding.execute = execute
-    classifier = LinearClassifier(angle=0.0, threshold=0.0)
-    result = prog.acquire(
-        env.soc,
-        herald=[HeraldSpec(0, 0, classifier, 2)],
-        classify={0: classifier} if processing == "classify" else None,
-        threshold=0.0 if processing == "threshold" else None,
-        rounds=2,
-        progress=False,
-        remove_offset=False,
-    )
-    expected = {
-        "iq": [[1 / 3, 0]],
-        "classify": [[1 / 3, 2 / 3]],
-        "threshold": [[2 / 3, 0]],
-    }
-    np.testing.assert_allclose(result[0], expected[processing])
-    fractions = prog.get_herald_pass_fraction()
-    assert fractions is not None
-    np.testing.assert_array_equal(fractions[0], 0.5)
-    np.testing.assert_array_equal(raw_of(prog)[0], np.array(literals[-1]) * length)
-    assert executed == [0, 1]
-    assert materialized == [0, 1]
-
-
 def test_averaged_statistics_preserve_layout_offsets_hooks_and_deferred_raw():
     env = white_noise(std_adc=0, n_readouts=2, seed=19)
     prog = make_program(env)
@@ -288,7 +209,7 @@ def test_averaged_statistics_preserve_layout_offsets_hooks_and_deferred_raw():
     assert len(records) == 2  # program and SoC getters must not rerun the backend
 
 
-@pytest.mark.parametrize("processing", ["threshold", "classification", "tracker"])
+@pytest.mark.parametrize("processing", ["threshold", "tracker"])
 def test_shot_processing_uses_materialized_statistics(processing):
     env = white_noise(std_adc=0, n_readouts=2, seed=29)
     prog = make_program(
@@ -309,15 +230,6 @@ def test_shot_processing_uses_materialized_statistics(processing):
     env.soc.binding.execute = execute
     if processing == "threshold":
         result = prog.acquire(env.soc, progress=False, threshold=12.5)
-    elif processing == "classification":
-        result = prog.acquire(
-            env.soc,
-            progress=False,
-            classify={
-                ch: CircleClassifier(g_center=10 - 1j, e_center=11 - 1j, radius=0.1)
-                for ch in (1, 0)
-            },
-        )
     else:
         result = prog.acquire(env.soc, progress=False, trackers=[Tracker(), Tracker()])
     assert result is not None
@@ -328,8 +240,6 @@ def test_shot_processing_uses_materialized_statistics(processing):
     if processing == "threshold":
         np.testing.assert_array_equal(result[0][0, ..., 0], [[0, 0, 0], [1, 1, 1]])
         np.testing.assert_array_equal(result[0][..., 1], 0)
-    elif processing == "classification":
-        np.testing.assert_array_equal(result[0][0, 0], [[1, 0], [0, 1], [0, 0]])
     else:
         assert len(tracked) == 2
         expected = np.moveaxis(expected_raw[1], [-2, request.avg_level], [0, -2]) / 8

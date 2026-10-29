@@ -6,7 +6,7 @@ from threading import Event
 
 import numpy as np
 import pytest
-from zcu_tools.cfg_model import CircleClassifier, LinearClassifier
+from zcu_tools.cfg_model import LinearClassifier
 from zcu_tools.core.simulation import (
     ChannelStatistics,
     RoundStatistics,
@@ -55,24 +55,6 @@ def raw_of(prog):
     if raw is None:
         raise AssertionError("completed acquisition must retain raw buffers")
     return raw
-
-
-@pytest.mark.parametrize(
-    "classifier, expected",
-    [
-        (CircleClassifier(g_center=0j, e_center=1 + 0j, radius=0.5), [1.0, 0.0]),
-        (LinearClassifier(angle=np.pi / 2, threshold=-0.5), [0.0, 1.0]),
-    ],
-)
-def test_simulation_classifies_raw_instead_of_compact_iq(classifier, expected):
-    env = environment(std_adc=0, seed=123)
-    env.soccfg["readouts"][0]["iq_offset"] = 10.0
-    prog = program(env)
-    try:
-        result = prog.acquire(env.soc, classify={0: classifier}, progress=False)
-        np.testing.assert_array_equal(result[0], [expected])
-    finally:
-        env.devices.close_all_devices()
 
 
 def test_explicit_zero_noise_preserves_shapes_and_raw():

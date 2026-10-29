@@ -353,9 +353,11 @@ Pulse 更新 `classifier`，單 tone Mux 更新 `tones.0.classifier`。
 共用中立 builder 比對其餘 materialized 欄位並保留 library 原 Spec 的 waveform key。
 Adapter 不重跑 fit，不直接 Apply。
 
-其他需要 Other 的 singleshot consumers 從 readout cfg 取得完整 per-ADC circle mapping，
-由作者明確傳給 acquire 的 `classify=`，不注入獨立中心或半徑。
-缺 classifier／radius 或 linear 在需要分類時報錯。
+其他需要 Other 的 singleshot consumers 呼叫 `classification_processors(readout_cfg, require_other=True)`，
+取得完整 per-ADC circle processors。作者明傳給 `program.acquire_processed(processors=...)`，不注入獨立中心或半徑。
+Builder 使用 `build_and_acquire_processed` 或 `run_program_processed`，必須提供 `processed2signal_fn`。
+同一 converter 處理 cumulative round updates 與 final result，不使用預設 IQ converter。
+Circle payload 明列 `[g,e,other]`。缺 classifier／radius、linear 或 centroid3 在需要 Other 時報錯。
 Confusion correction 只讀 saved cfg；舊 cfg 缺 classifier／matrix 就略過。
 `singleshot/check` 仍允許 raw Run，分析才要求 saved circle 與 radius。
 Amp Rabi 串接各 round 的 raw IQ，reset-check 平均各 round 的 populations。

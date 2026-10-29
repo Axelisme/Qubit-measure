@@ -1,5 +1,3 @@
-# tolerated(file-size): Native readout cfg, emission and calibration adapters share
-# the Pulse/Mux cfg types here; splitting adapters would create back-references.
 from __future__ import annotations
 
 from abc import abstractmethod
@@ -196,33 +194,6 @@ def centroid3_classifier(cfg: ReadoutCfg, *, ro_ch: int) -> Centroid3Classifier:
     raise ValueError(f"ADC {ro_ch}: not declared by readout")
 
 
-def classification_parameters(
-    cfg: ReadoutCfg, *, require_other: bool = False
-) -> dict[int, ReadoutClassifier]:
-    """Return detached per-ADC calibration for explicit acquire(classify=...).
-
-    cfg supplies normalized raw ADC calibration without offset subtraction.
-    Missing calibration or circle radius raises ValueError naming the ADC;
-    missing radius requires GE Post analysis. require_other rejects linear
-    (only g/e) and centroid3 (its third state is f, not other). No program registry or hardware is read.
-    """
-    result: dict[int, ReadoutClassifier] = {}
-    for ch, classifier in _classifier_entries(cfg):
-        if classifier is None:
-            raise ValueError(f"ADC {ch}: classifier missing; run singleshot GE")
-        if isinstance(classifier, CircleClassifier):
-            if classifier.radius is None:
-                raise ValueError(
-                    f"ADC {ch}: circle radius missing; run GE Post analysis"
-                )
-        elif require_other:
-            raise ValueError(
-                f"ADC {ch}: {classifier.mode} classifier has no other state; use circle"
-            )
-        result[ch] = classifier.model_copy(deep=True)
-    return result
-
-
 def classification_processors(
     cfg: ReadoutCfg, *, require_other: bool = False
 ) -> dict[int, ShotProcessor]:
@@ -238,12 +209,21 @@ def classification_processors(
     Missing calibration/radius raises an ADC-named ValueError; require_other
     accepts only circle. Calibration changes after this call have no effect.
     """
-    return {
-        ch: _classification_processor(classifier)
-        for ch, classifier in classification_parameters(
-            cfg, require_other=require_other
-        ).items()
-    }
+    result: dict[int, ShotProcessor] = {}
+    for ch, classifier in _classifier_entries(cfg):
+        if classifier is None:
+            raise ValueError(f"ADC {ch}: classifier missing; run singleshot GE")
+        if isinstance(classifier, CircleClassifier):
+            if classifier.radius is None:
+                raise ValueError(
+                    f"ADC {ch}: circle radius missing; run GE Post analysis"
+                )
+        elif require_other:
+            raise ValueError(
+                f"ADC {ch}: {classifier.mode} classifier has no other state; use circle"
+            )
+        result[ch] = _classification_processor(classifier.model_copy(deep=True))
+    return result
 
 
 def _classification_processor(classifier: ReadoutClassifier) -> ShotProcessor:

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import replace
 
 import numpy as np
 import pytest
@@ -9,7 +8,6 @@ from numpy.typing import NDArray
 from zcu_tools.cfg_model import LinearClassifier
 from zcu_tools.experiment.scope import Scope
 from zcu_tools.experiment.script_host import CallContext, ScriptHost
-from zcu_tools.experiment.simulation import white_noise
 from zcu_tools.experiment.v2.runtime.program_builder import AcquireOptions
 from zcu_tools.experiment.v2.runtime.schedule import (
     Schedule,
@@ -17,9 +15,6 @@ from zcu_tools.experiment.v2.runtime.schedule import (
 )
 from zcu_tools.program.acquisition import CancelFlagProtocol, StoppedPartialAcquireError
 from zcu_tools.program.herald import HeraldSpec, herald_ratio, heralded
-from zcu_tools.program.v2 import ModularProgramV2
-from zcu_tools.program.v2.modules import ConstWaveformCfg, PulseReadout
-from zcu_tools.program.v2.simulation import IntegratedRound
 from zcu_tools.progress_bar import use_pbar_factory
 
 from tests.experiment.v2.runtime._flow_cfg import make_flow_cfg as _cfg
@@ -33,7 +28,6 @@ from tests.experiment.v2.runtime._flow_fakes import (
     recording_pbar_factory,
 )
 from tests.program._acquisition_soc import make_chunk_acquisition
-from tests.program.v2.simulation.support import FixedRawShots
 
 
 @pytest.mark.parametrize("build", [False, True])
@@ -343,85 +337,6 @@ def test_step_program_progress_closes_with_default_or_explicit_leave(
 
     assert all(bar.closed for bar in progress_bars)
     np.testing.assert_allclose(signals_buffer.array, [[2.0]])
-
-
-@pytest.mark.parametrize(
-    "ending", ["complete", "data_stop", "external_stop", "before_data"]
-)
-def test_caller_owned_program_forwards_herald_and_keeps_completed_rounds(
-    ending: str,
-) -> None:
-    env = white_noise(std_adc=0, seed=19)
-    source = env.soc.binding.execute
-    scope = Scope("run")
-    calls = 0
-
-    def execute(request):
-        nonlocal calls
-        calls += 1
-        if ending == "before_data":
-            scope.stop.set()
-            raise StoppedPartialAcquireError("no completed herald round")
-        delivery = source(request)
-        if not isinstance(delivery, IntegratedRound):
-            raise AssertionError("integrated request must return integrated data")
-        samples = request.acquire.readouts[0].samples
-        # Ground herald is -1; signal is +6. Without selection, default
-        # conversion would return the herald instead of the signal.
-        values = samples * np.array([[[-1.0, 0.0], [6.0, 0.0]]])
-        return replace(delivery, raw=FixedRawShots({0: values}))
-
-    env.soc.binding.execute = execute
-    readout_cfg = PulseReadout.Cfg(
-        gen_ch=0,
-        ro_ch=0,
-        nqz=1,
-        freq=100.0,
-        gain=0.1,
-        waveform=ConstWaveformCfg(length=0.5),
-        ro_length=1.0,
-        classifier=LinearClassifier(angle=0.0, threshold=0.0),
-    )
-    herald_readout = PulseReadout("herald", readout_cfg)
-    prog = ModularProgramV2(
-        env.soccfg,
-        [herald_readout, PulseReadout("signal", readout_cfg)],
-        sweep=[("point", 1)],
-        reps=2,
-    )
-    herald = herald_readout.herald_spec(prog, occurrence=0)
-    buffer = SignalBuffer((1,))
-
-    def signal(raw: list[NDArray[np.float64]]) -> NDArray[np.complex128]:
-        if ending == "external_stop":
-            scope.stop.set()
-        return raw[0][0].dot([1, 1j])
-
-    try:
-        with Schedule(_cfg(), buffer, scope=scope) as sched:
-            sched.prog_builder(env.soc, env.soccfg).run_program(
-                prog,
-                rounds=3,
-                herald=[herald],
-                raw2signal_fn=signal,
-                options=AcquireOptions(stop_condition=lambda: ending == "data_stop"),
-            )
-            assert sched.outcome.status == (
-                "stopped" if ending in {"external_stop", "before_data"} else "completed"
-            )
-        if ending == "before_data":
-            np.testing.assert_array_equal(buffer.array, [complex(np.nan, np.nan)])
-            assert prog.get_herald_pass_fraction() is None
-        else:
-            np.testing.assert_allclose(buffer.array, [6.0 + 0.0j])
-            passed = prog.get_herald_pass_fraction()
-            assert passed is not None
-            np.testing.assert_array_equal(passed[0], [1.0])
-        assert calls == (3 if ending == "complete" else 1)
-        assert scope.stop.partial_result == (ending in {"external_stop", "before_data"})
-    finally:
-        scope.release()
-        env.devices.close_all_devices()
 
 
 def test_run_program_reuses_caller_owned_program_cache():
