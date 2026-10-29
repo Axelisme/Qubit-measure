@@ -1,6 +1,6 @@
 # README - program/v2
 
-**Last updated:** 2026-10-30，逐點精確 ceil、selected playback 與 paired post
+**Last updated:** 2026-10-30，Branch 與平行 Module Join
 
 **讀者：** lab-author、framework-dev、agent。原生 V2 program 寫法與 module、readout、acquisition 契約速查。
 
@@ -199,6 +199,14 @@ Repeat owner 以公開 `fixed_loop_indices` 提供固定 counter 的名稱、點
 ScanWith 先載入 scalar，再依序執行 children。同一宣告可重複 emit，每次使用獨立 fixed counter，沿用原 table 與 destination。
 其 native lowering 使用 Repeat metadata，不傳 legacy `range_hint`。
 `LoadValue.lower_index` 接受本次 index，`emission_name` 只在 module lower 期間配置本次名稱。
+
+Module `Branch` lower 到原生 branch/case。Module `Join` 發射平行 sequences，與只記帳的 `prog.join` 不同。
+Join 的 program emission owner 檢查 lowered operations，保留每個 sequence 的內部次序。
+唯一會推進 reference 的 sequence 最後發射，其他 sequences 保持次序，從共同 origin 開始。
+兩個以上推進型 sequences 或未知 reference effects 拒絕編譯。
+需要交換時，owner 證明實際 register 與 wmem 資源沒有 RW、WR、WW 衝突，包含 aliases。
+未知 register/word effects 只在需要交換時拒絕。Wait-only parent 不能用內部 fork 繞過 placement 限制。
+這個 owner 不重排 sequence 內的事件，也不新增 scheduler。每個 generator 的 physical-end 與全部 case、Repeat backedge guards 保持原契約。
 
 Register n 使用既有 register 名字，必須提供作者保證的非負整數閉區間
 `range_hint=(minimum, maximum)`。Int n 不接受 range_hint。

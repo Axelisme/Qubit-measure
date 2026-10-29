@@ -201,6 +201,34 @@ class Join(Module):
                     "Table-length Join requires a shared index and table size"
                 )
 
+    @override
+    def declare(self, prog: TimelineProgramV2) -> None:
+        """Declare each child once; native timing uses no legacy duration table."""
+        for branch in self.join_modules:
+            for module in branch:
+                prog.declare(module)
+
+    @override
+    def lower(
+        self, prog: TimelineProgramV2, *, timeline: str | None, tag: str | None
+    ) -> None:
+        """Emit parallel branches from the selected end, then merge their ends.
+
+        Children within each branch execute sequentially. Each occurrence owns
+        fresh timeline names; selected playback and posts retain their child's
+        timing/provenance contract. tag identifies the first child in author
+        order. The program emission owner moves the unique reference-advancing
+        sequence last, rejects multiple advancing sequences, and certifies
+        exchanged register/word effects. Unknown effects fail conservatively.
+        Native child synchronization and physical-end guards are unchanged;
+        no reference rewind, padding or legacy block_mode scheduling is added.
+        """
+        prog.emit_parallel(
+            self.join_modules,
+            timeline=timeline if timeline is not None else "default",
+            tag=tag,
+        )
+
     def init(self, prog: ModularProgramV2) -> None:
         for list in self.join_modules:
             for m in list:
