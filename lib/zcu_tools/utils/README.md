@@ -1,6 +1,6 @@
 # zcu_tools.utils
 
-**Last updated:** 2026-10-21
+**Last updated:** 2026-10-29
 
 **讀者：** framework-dev。共用 helper、cache 與原子檔案替換機制。
 
@@ -54,4 +54,5 @@ wavelet threshold 設定。作用的 axis／axes 由各 caller 獨立指定，�
 （例如 `np.subtract`）來表達泛型 array 運算。這比在 `NDArray[T]` 上直接使用
 Python 運算子更容易讓 numpy stub 維持 dtype 關係，也避免用 `cast()` 補洞。
 
-Program 與離線分析共用 `shot_classification` 的互斥分類；等距與 radius 邊界不納入 g/e。Gaussian region 積分使用相同的圓與半平面交集。
+Program 與離線分析共用 `shot_classification`。Circle 的等距與 radius 邊界不納入 g/e，第三類是 other。Gaussian region 積分使用相同的圓與半平面交集。
+`nearest_centroid3(signals, g_center, e_center, f_center)` 保留 IQ array 形狀，回傳 int64 的 0/1/2 labels。Euclidean 距離等距時依 g/e/f 取第一個，沒有拒判區。它拒絕非有限 IQ／中心與重複中心，不做 normalization 或 offset subtraction。Reference 分析與 acquire 共用此規則。

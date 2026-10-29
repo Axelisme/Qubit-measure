@@ -6,6 +6,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 from zcu_tools.cfg_model import (
+    Centroid3Classifier,
     CircleClassifier,
     ConfigBase,
     LinearClassifier,
@@ -43,7 +44,7 @@ SPEC = AxesSpec(
 
 
 @pytest.mark.parametrize("family", ["pulse", "mux"])
-@pytest.mark.parametrize("mode", ["circle", "linear"])
+@pytest.mark.parametrize("mode", ["circle", "linear", "centroid3"])
 def test_classifier_survives_native_conversion_and_data_h5(
     tmp_path: Path, family: str, mode: str
 ):
@@ -55,6 +56,13 @@ def test_classifier_survives_native_conversion_and_data_h5(
             confusion_matrix=[[0.9, 0.1, 0.0], [0.2, 0.8, 0.0], [0.0, 0.0, 1.0]],
         )
         if mode == "circle"
+        else Centroid3Classifier(
+            g_center=1.0 - 2.0j,
+            e_center=-3.0 + 4.0j,
+            f_center=5.0 + 6.0j,
+            confusion_matrix=[[1.2, -0.2, 0.1], [0.3, 0.6, 0.2], [0.0, 0.1, 0.8]],
+        )
+        if mode == "centroid3"
         else LinearClassifier(
             angle=-0.75, threshold=0.25, confusion_matrix=[[0.9, 0.1], [0.2, 0.8]]
         )

@@ -17,10 +17,10 @@ from qick.qick_asm import (
     obtain,  # pyright: ignore[reportAttributeAccessIssue]
 )
 
-from zcu_tools.cfg_model import CircleClassifier, ReadoutClassifier
+from zcu_tools.cfg_model import Centroid3Classifier, CircleClassifier, ReadoutClassifier
 from zcu_tools.program.herald import HeraldSpec, herald_ground_mask
 from zcu_tools.progress_bar import make_pbar
-from zcu_tools.utils.shot_classification import classify_shots
+from zcu_tools.utils.shot_classification import classify_shots, nearest_centroid3
 
 __all__ = [
     "ImproveAcquireMixin",
@@ -401,6 +401,11 @@ def _classified_populations(
         ground, excited, _ = classify_shots(
             iq, classifier.g_center, classifier.e_center, classifier.radius
         )
+    elif isinstance(classifier, Centroid3Classifier):
+        labels = nearest_centroid3(
+            iq, classifier.g_center, classifier.e_center, classifier.f_center
+        )
+        ground, excited = labels == 0, labels == 1
     else:
         # GE theta rotates by exp(+i theta), opposite QICK's projection angle.
         excited = (iq * np.exp(1j * classifier.angle)).real > classifier.threshold
@@ -448,10 +453,12 @@ class SingleShotMixin(TypedAcquireMixin):
     ) -> list[NDArray[np.float64]] | None:
         """Acquire IQ, or g/e populations with explicit per-ADC calibration.
 
-        classify maps ADC channel numbers to circle/linear calibration in raw
+        classify maps ADC channel numbers to circle/linear/centroid3 calibration in raw
         sums divided by ADC length, without IQ-offset subtraction. None retains
         QICK IQ/threshold behavior. Circle requires a Post radius. Population
-        output ends in (g, e); other is implicit as 1-g-e. Linear excited
+        output ends in (g, e); 1-g-e is circle's other or centroid3's f.
+        Centroid3 chooses the nearest g/e/f center, ties in that order.
+        Linear excited
         means real(IQ * exp(1j*angle)) > threshold; equality belongs to ground.
         Keys must exactly match declared ADC channels or ValueError is raised
         before transport acquisition. No program registry supplies calibration.

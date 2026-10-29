@@ -3,6 +3,7 @@
 import pytest
 from pydantic import JsonValue
 from zcu_tools.cfg_model import (
+    Centroid3Classifier,
     CircleClassifier,
     ConfigBase,
     ConstWaveformCfg,
@@ -117,6 +118,12 @@ def test_native_model_union_selects_linear_then_circle_then_none() -> None:
     [
         CircleClassifier(g_center=1 + 2j, e_center=3 + 4j),
         LinearClassifier(angle=0.5, threshold=2.0),
+        Centroid3Classifier(
+            g_center=1 + 2j,
+            e_center=3 + 4j,
+            f_center=5 + 6j,
+            confusion_matrix=[[0.9, 0.1, 0.0], [0.1, 0.8, 0.1], [0.0, 0.1, 0.9]],
+        ),
     ],
 )
 def test_module_draft_preserves_existing_classifier_and_switches_branches(

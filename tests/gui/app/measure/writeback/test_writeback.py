@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 from zcu_tools.cfg_model import (
     ArbWaveformCfg,
+    Centroid3Classifier,
     CircleClassifier,
     ConstWaveformCfg,
     PulseReadoutSpec,
@@ -104,12 +105,22 @@ def readout_source(session):
     return captured, tested
 
 
+@pytest.mark.parametrize("three_state", [False, True])
 def test_calibration_proposal_preserves_library_children_and_ignores_replaced_field(
-    session, readout_source
+    session, readout_source, three_state
 ):
     _entry, control, service = session
     captured, tested = readout_source
-    calibration = CircleClassifier(g_center=0j, e_center=1 + 0j)
+    calibration = (
+        Centroid3Classifier(
+            g_center=0j,
+            e_center=1 + 0j,
+            f_center=1j,
+            confusion_matrix=[[1.0, 0.0, 0.0], [0.0, 0.9, 0.1], [0.1, 0.0, 0.9]],
+        )
+        if three_state
+        else CircleClassifier(g_center=0j, e_center=1 + 0j)
+    )
     item = writeback.calibrated_module_writeback(
         captured,
         tested,
@@ -125,6 +136,7 @@ def test_calibration_proposal_preserves_library_children_and_ignores_replaced_fi
     assert isinstance(actual, PulseReadoutSpec)
     assert actual.waveform == WAVEFORM
     assert actual.classifier == calibration
+    assert tested.classifier is None
     assert (
         captured.library.module_spec("Q1.readout.main").to_dict().get("classifier")
         is None

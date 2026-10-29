@@ -32,7 +32,7 @@ Whole `dict`／`Mapping` 欄位的 `Expr(...)` 在 `Form(...)` 宣告入口以 `
 
 一般 tagged-model union 也由生成器宣告 converter，不依欄位名選擇行為。None→分支使用目標初值，必填欄位保持未填。不同分支沿 ADR-0079 繼承同名同可編輯型別的 raw，其餘欄位使用目標初值。同分支重選保留 raw，不保存離開分支的草稿。作者的 metadata 或 model hook converter 優先。明確預設 None 的 model union 補入 null，讓初始選單顯示 None。此政策不改 `gui.form` 無 converter 時只切 selection 的契約。
 
-Readout 的可選 classifier 在 Advanced 群組，None、circle、linear 共用同一個選單。Pulse readout 與 mux 各 tone 的子欄位都可編輯，module Form 與 writeback draft 使用相同投影。Circle 的 centers 使用 complex tag；linear angle 顯示 rad，其他 Phase 欄位仍顯示 deg。兩模式間的 confusion_matrix 沿同名同可編輯型別規則繼承，形狀不符由目標 model 回報錯誤，不清空原稿。MCP 使用原始索引路徑，例如 `tones.1.classifier`，不按 picker 的選擇重新編號。
+Readout 的可選 classifier 在 Advanced 群組，None、circle、linear、centroid3 共用同一個選單。Pulse readout 與 mux 各 tone 的子欄位都可編輯，module Form 與 writeback draft 使用相同投影。Circle 與 centroid3 的 centers 使用 complex tag；linear angle 顯示 rad，其他 Phase 欄位仍顯示 deg。切換模式時，confusion_matrix 沿同名同可編輯型別規則繼承，形狀不符由目標 model 回報錯誤，不清空原稿。MCP 使用原始索引路徑，例如 `tones.1.classifier`，不按 picker 的選擇重新編號。
 
 生成的 `options(env)` 宣告可留空欄位的 None、依持久 Spec family 篩選的 captured library keys，以及每個可編輯 Inline kind。只有結構 tag 的 kind 不列為 Inline。對明確預設為 None 的 nullable module，生成器補入停用值，讓選單顯示 None 而非空白。只允許 None、卻沒有 None 預設的 required 欄位不自動停用。通用 Form 的 static defaults 仍省略 None，不影響 validator 推導值。所有 key input 使用 `{"kind": "ref", "name": key}`，inline 使用 `{"kind": "inline", "module": content}`，可留空時也接受 null。Options 的 value 只帶 key 或所選 kind 的 tag。fields 指向該 kind 的 wrapper 子表單，describe 所選欄位才列 children，不重複固定 tag。Ref 選項不帶 fields，也不顯示 entry 內容。切換由 `_converters.py` 集中處理，依 [ADR-0079](../../../../docs/adr/0079-form-field-transitions.md#共用-inline-政策) 共用同名同型別的 raw 繼承。
 
