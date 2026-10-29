@@ -142,7 +142,7 @@ class PulseReset(AbsReset):
     def lower(
         self, prog: TimelineProgramV2, *, timeline: str | None, tag: str | None
     ) -> None:
-        """Play the reset pulse and advance by its blocking total_length."""
+        """Play the reset pulse and ceil its actual end plus its post-delay."""
         self.reset_pulse.lower(prog, timeline=timeline, tag=tag)
 
 
@@ -182,11 +182,14 @@ class TwoPulseReset(AbsReset):
     def lower(
         self, prog: TimelineProgramV2, *, timeline: str | None, tag: str | None
     ) -> None:
-        """Start both pulses together, then advance their maximum total_length."""
+        """Start both pulses together and merge actual ends plus each child's post."""
         timeline = timeline if timeline is not None else "default"
-        self.reset_pulse1.play(prog, timeline=timeline, tag=tag)
-        self.reset_pulse2.play(prog, timeline=timeline)
-        prog.advance_module(self.total_length(prog), timeline=timeline)
+        first = prog.emission_name("reset_first")
+        second = prog.emission_name("reset_second")
+        prog.fork(timeline, into=[first, second])
+        self.reset_pulse1.lower(prog, timeline=first, tag=tag)
+        self.reset_pulse2.lower(prog, timeline=second, tag=None)
+        prog.join(first, second, into=timeline)
 
 
 class BathReset(AbsReset):
@@ -225,15 +228,16 @@ class BathReset(AbsReset):
     def lower(
         self, prog: TimelineProgramV2, *, timeline: str | None, tag: str | None
     ) -> None:
-        """Overlap cavity/qubit, place pi/2 after cavity, and advance total_length.
+        """Overlap cavity/qubit, then place pi/2 after the ceiled cavity end+post.
 
-        The cavity plus pi/2 duration is the legacy blocking rule, even when the
-        overlapping qubit tone lasts longer. tag identifies the cavity start.
+        Merge the qubit and pi/2 ends including their individual post-delays.
+        tag identifies the cavity start; no legacy block_mode is consulted.
         """
         timeline = timeline if timeline is not None else "default"
-        self.res_pulse.play(prog, timeline=timeline, tag=tag)
-        self.qub_pulse.play(prog, timeline=timeline)
-        self.pi2_pulse.play(
-            prog, timeline=timeline, t=self.res_pulse.total_length(prog)
-        )
-        prog.advance_module(self.total_length(prog), timeline=timeline)
+        cavity = prog.emission_name("reset_cavity")
+        qubit = prog.emission_name("reset_qubit")
+        prog.fork(timeline, into=[cavity, qubit])
+        self.res_pulse.lower(prog, timeline=cavity, tag=tag)
+        self.qub_pulse.lower(prog, timeline=qubit, tag=None)
+        self.pi2_pulse.lower(prog, timeline=cavity, tag=None)
+        prog.join(cavity, qubit, into=timeline)

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Self
+from typing import TYPE_CHECKING, Self, override
 
 from qick.asm_v2 import AsmInst, QickParam, WriteLabel
 
@@ -10,6 +10,9 @@ from zcu_tools.program.v2.modular import ModularProgramV2
 from ..ir.hw_semantics import ADDR_REG, needs_big_jump
 from ..ir.operands import parse_register
 from .base import Module, ModuleGroup, as_modules
+
+if TYPE_CHECKING:
+    from zcu_tools.program.v2.timeline import TimelineProgramV2
 
 logger = logging.getLogger(__name__)
 
@@ -124,7 +127,12 @@ class Branch(Module):
     Branches accept modules or sequences; None entries mean no module and are
     skipped. A None branch remains an empty selectable case.
 
-    Branch selection uses a dispatch-table island:
+    On TimelineProgramV2, declare registers the children and lower uses native
+    branch/case control with compare_reg as the sweep selector. Children execute
+    in order on the selected timeline, and each case closes its actual end
+    without padding to other cases. Measurement feedback is not supported.
+
+    Legacy init/run selection uses a dispatch-table island:
 
     1. compute ``s15 = &table_0 + compare_reg * entry_words``
     2. indirect jump into the table
@@ -147,6 +155,33 @@ class Branch(Module):
             raise ValueError("Branch requires at least 2 branches")
 
         self.branches: list[list[Module]] = [as_modules(branch) for branch in branches]
+
+    @override
+    def declare(self, prog: TimelineProgramV2) -> None:
+        """Declare every child in case order; shared declarations are reused.
+
+        prog must be in _initialize. Child declaration failures propagate.
+        """
+        for branch in self.branches:
+            for mod in branch:
+                prog.declare(mod)
+
+    @override
+    def lower(
+        self, prog: TimelineProgramV2, *, timeline: str | None, tag: str | None
+    ) -> None:
+        """Emit the sweep-selected case on timeline (default when None).
+
+        Preserve empty cases and child order. Native case closing advances
+        reference to the selected path's end, without cross-case padding.
+        tag identifies this emission; children remain separate emissions.
+        Invalid selectors, timelines and child lowering failures propagate.
+        """
+        with prog.branch(by=self.compare_reg) as cases:
+            for branch in self.branches:
+                with cases.case():
+                    for mod in branch:
+                        prog.emit(mod, timeline=timeline)
 
     def init(self, prog: ModularProgramV2) -> None:
         for branch in self.branches:

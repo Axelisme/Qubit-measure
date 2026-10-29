@@ -1,71 +1,45 @@
 """Native QICK programs with timeline ends relative to reference time."""
 
-import math
-from collections.abc import Generator
+from collections.abc import Generator, Mapping, Sequence
 from contextlib import contextmanager
-from dataclasses import dataclass, field
-from typing import Literal
+from typing import override
 
-from qick.asm_v2 import (
-    ConfigReadout,
-    Delay,
-    Macro,
-    Pulse,
-    QickParam,
-    TimedMacro,
-    Trigger,
+from qick.asm_v2 import AsmV2, ConfigReadout, Macro, OpenLoop, Pulse, QickParam, Trigger
+
+from ._timeline_bounds import CycleBounds, FixedLoopIndex, ProducerBounds
+from ._timeline_macros import (
+    BranchCases,
+    FixedRepeatLoop,
+    ModuleEmission,
+    PreparedTimelineMacro,
+    PreparedTimelineOpenLoop,
+    TimelineAdvance,
+    TimelineBoundary,
+    TimelineBranch,
+    TimelineFork,
+    TimelineJoin,
+    TimelineRepeatEnter,
+    TimelineRepeatExit,
+    TimelineRuntimeAdvance,
+    TimelineSync,
+    TimeProducer,
 )
-
-from ._timeline_guard import PulseGuard as _PulseGuard
-from ._timeline_guard import bounds as _bounds
+from ._timeline_outputs import (
+    TimelineObservedPulse,
+    TimelinePlacedConfig,
+    TimelinePlacedPulse,
+    TimelinePlacedTrigger,
+)
+from ._timeline_parallel import TimelineParallel
+from ._timeline_runtime import RuntimeEnd
+from ._timeline_selected import SelectedPlayback, TimelineSelectedPulse
+from ._timeline_state import TimelineBook
 from .base import MyProgramV2
 from .ir import TimingLayout, TimingLoop
 from .macro.delay import DelayRegAuto
+from .macro.table import TableSelection
 from .modules.base import Module
-from .modules.util import get_fclk
 from .resources import ProgramResourcesMixin
-
-
-def _maximum(a: float | QickParam, b: float | QickParam, name: str):
-    lower, upper = _bounds(a - b)
-    if lower >= -1e-12:
-        return a
-    if upper <= 1e-12:
-        return b
-    raise ValueError(
-        f"{name}: cannot prove timeline maximum at every sweep point; "
-        "use delay_timeline to arrange noncrossing ends"
-    )
-
-
-def _align_end(prog, value: float | QickParam) -> float | QickParam:
-    # Arithmetic on already integral tick values can land just above an integer.
-    # Do not turn that floating-point noise into another scheduled tick.
-    def ceil_tick(ticks: float) -> int:
-        nearest = round(ticks)
-        return (
-            nearest
-            if math.isclose(ticks, nearest, rel_tol=0, abs_tol=1e-10)
-            else math.ceil(ticks)
-        )
-
-    cycles = value * get_fclk(prog)
-    if isinstance(cycles, QickParam):
-        cycles = QickParam(
-            ceil_tick(cycles.start), {k: ceil_tick(v) for k, v in cycles.spans.items()}
-        )
-    else:
-        cycles = ceil_tick(cycles)
-    return _step_time(prog, cycles / get_fclk(prog))
-
-
-def _step_time(prog, value: float | QickParam) -> float | QickParam:
-    if not isinstance(value, QickParam):
-        return value
-    # Use QICK public conversion/rounding APIs, never inspect raw sweep internals.
-    param = QickParam(value.start, value.spans.copy())
-    prog.us2cycles(param)
-    return param.get_rounded(loop_counts=prog.loop_dict)
 
 
 def _repeat_minimum(name: str, n: int | str, range_hint: tuple[int, int] | None) -> int:
@@ -88,469 +62,6 @@ def _repeat_minimum(name: str, n: int | str, range_hint: tuple[int, int] | None)
     return n
 
 
-@dataclass
-class _RepeatFrame:
-    parent: str
-    external: dict[str, float | QickParam]
-    waiting: set[str]
-    native_gens: dict[int, float | QickParam]
-    native_ros: dict[int, float | QickParam]
-    advance: float | QickParam = 0.0
-    variable: bool = False
-    written_gens: set[int] = field(default_factory=set)
-    written_ros: set[int] = field(default_factory=set)
-    pulse_guards: dict[int, _PulseGuard] = field(default_factory=dict)
-
-    def rebase_native(self, prog, count: int) -> None:
-        """Debit external timestamps, preserving tails generated in the last iteration."""
-        generated_gens = {ch: prog.get_timestamp(gen_ch=ch) for ch in self.written_gens}
-        generated_ros = {ch: prog.get_timestamp(ro_ch=ch) for ch in self.written_ros}
-        for ch, end in self.native_gens.items():
-            prog.set_timestamp(end, gen_ch=ch)
-        for ch, end in self.native_ros.items():
-            prog.set_timestamp(end, ro_ch=ch)
-        prog.decrement_timestamps(self.advance * count)
-        for ch, end in generated_gens.items():
-            # With a zero minimum the body may not execute. Retain the later
-            # native timestamp; QICK owns native timestamp comparison policy.
-            value = end if count else max(end, prog.get_timestamp(gen_ch=ch))
-            prog.set_timestamp(value, gen_ch=ch)
-        for ch, end in generated_ros.items():
-            value = end if count else max(end, prog.get_timestamp(ro_ch=ch))
-            prog.set_timestamp(value, ro_ch=ch)
-
-
-class _TimelineBook:
-    """Store only relative ends, including the ordinary default timeline."""
-
-    def __init__(self):
-        self.ends: dict[str, float | QickParam] = {"default": 0.0}
-        self.waiting: set[str] = set()
-        self.repeats: list[_RepeatFrame] = []
-        self.native_only = False
-
-    def end(self, name: str, *, placement: bool = False) -> float | QickParam:
-        if name not in self.ends:
-            raise ValueError(f"{name}: unknown timeline; declare it with fork in _body")
-        if placement and name in self.waiting:
-            raise ValueError(
-                f"{name}: timeline can only wait after register repeat; "
-                "sync it or use join/fork to establish a conservative scheduling point"
-            )
-        return self.ends[name]
-
-    def decrement(self, t: float | QickParam, *, observe_pulses: bool = True) -> None:
-        if self.native_only:
-            return
-        if self.repeats:
-            frame = self.repeats[-1]
-            frame.advance += t
-            if observe_pulses:
-                for ch, guard in frame.pulse_guards.items():
-                    guard.then(_PulseGuard(ch, shifts=(-t,), floors=(0.0,)))
-        self.ends = {
-            name: _maximum(0.0, end - t, name) for name, end in self.ends.items()
-        }
-        self.waiting = {
-            name for name in self.waiting if _bounds(self.ends[name])[1] > 1e-12
-        }
-
-    def maximum(self) -> float | QickParam:
-        end: float | QickParam = 0.0
-        for name, candidate in self.ends.items():
-            end = _maximum(end, candidate, name)
-        return end
-
-
-class _Fork(Macro):
-    """Copy one declared end to fresh names at this preprocessing position."""
-
-    def __init__(self, book: _TimelineBook, source: str, targets: tuple[str, ...]):
-        self.book = book
-        self.source = source
-        self.targets = targets
-
-    def preprocess(self, prog) -> None:
-        super().preprocess(prog)
-        end = self.book.end(self.source)
-        if len(set(self.targets)) != len(self.targets) or any(
-            name in self.book.ends
-            or any(name in frame.external for frame in self.book.repeats)
-            for name in self.targets
-        ):
-            raise ValueError("fork requires new, distinct timeline names")
-        self.book.ends.update(dict.fromkeys(self.targets, end))
-
-    def translate(self, prog) -> None:
-        pass
-
-
-class _Join(Macro):
-    """Merge existing ends without emitting instructions or consuming sources."""
-
-    def __init__(self, book: _TimelineBook, sources: tuple[str, ...], into: str):
-        self.book = book
-        self.sources = sources
-        self.into = into
-
-    def preprocess(self, prog) -> None:
-        super().preprocess(prog)
-        end = self.book.end(self.into)
-        for source in self.sources:
-            end = _maximum(end, self.book.end(source), self.into)
-        self.book.ends[self.into] = end
-        self.book.waiting.discard(self.into)
-
-    def translate(self, prog) -> None:
-        pass
-
-
-class _RuntimeAdvance(Macro):
-    """Guard all ends against the static part of an unknown nonnegative advance."""
-
-    def __init__(self, book: _TimelineBook, source: DelayRegAuto):
-        self.book = book
-        self.source = source
-
-    def preprocess(self, prog) -> None:
-        if self.book.repeats:
-            raise ValueError(
-                "repeat per-iteration reference advance cannot be expressed at compile time "
-                "when using a runtime register delay"
-            )
-        ends = self.book.ends.copy()
-        waiting = self.book.waiting.copy()
-        # The native consumer resolves its rounded static time. Suspend only
-        # timeline bookkeeping until the proof, not native channel timestamps.
-        self.book.ends.clear()
-        self.book.waiting.clear()
-        try:
-            self.source.preprocess(prog)
-            static = self.source.get_time_param("auto_t")
-            if static is None:
-                static = 0.0
-            for name, end in ends.items():
-                if _bounds(end - static)[1] > 1e-12:
-                    raise ValueError(
-                        f"{name}: runtime register advance cannot prove end <= "
-                        "static advance at every sweep point; first sync this timeline"
-                    )
-        except Exception:
-            self.book.ends = ends
-            self.book.waiting = waiting
-            raise
-        self.book.ends = dict.fromkeys(ends, 0.0)
-
-    def translate(self, prog) -> None:
-        self.source.translate(prog)
-
-
-class _Boundary(Macro):
-    """Reset preprocessing state or emit a linked IR timing boundary."""
-
-    def __init__(self, book: _TimelineBook, section: str):
-        self.book = book
-        self.section = section
-
-    def preprocess(self, prog) -> None:
-        super().preprocess(prog)
-        if self.section == "reset":
-            self.book.ends = {"default": 0.0}
-            self.book.waiting.clear()
-            self.book.repeats.clear()
-            self.book.native_only = False
-
-    def translate(self, prog) -> None:
-        if self.section in ("body_start", "body_end"):
-            prog.record_meta(
-                type="TIMING_BOUNDARY", name=self.section, info={}, regs={}
-            )
-
-
-class _Advance(TimedMacro):
-    def __init__(self, book, timeline, duration, *, tag=None, aligned=False):
-        super().__init__(tag=tag)
-        self.book = book
-        self.timeline = timeline
-        self.duration = duration
-        self.aligned = aligned
-
-    def preprocess(self, prog) -> None:
-        duration = (
-            _step_time(prog, self.duration)
-            if self.aligned
-            else _align_end(prog, self.duration)
-        )
-        end = self.book.end(self.timeline, placement=True) + duration
-        self.book.ends[self.timeline] = _maximum(0.0, end, self.timeline)
-        self.resolved_time = end if isinstance(end, QickParam) else QickParam(end)
-
-    def list_time_params(self) -> list[str]:
-        return ["t"]
-
-    def get_time_param(self, name: str) -> QickParam:
-        if name != "t":
-            raise RuntimeError("timeline advances expose only the t parameter")
-        return self.resolved_time
-
-    def translate(self, prog) -> None:
-        pass
-
-
-class _Sync(Delay):
-    def __init__(self, book: _TimelineBook, timeline: str | None):
-        super().__init__(t=0, auto=False)
-        self.book = book
-        self.timeline = timeline
-
-    def preprocess(self, prog) -> None:
-        self.t = (
-            self.book.maximum()
-            if self.timeline is None
-            else self.book.end(self.timeline)
-        )
-        super().preprocess(prog)
-
-
-class _RepeatEnter(_Sync):
-    """Synchronize the parent, then isolate this iteration's local namespace."""
-
-    def __init__(self, book: _TimelineBook, timeline: str, counter: str | None = None):
-        super().__init__(book, timeline)
-        self.counter = counter
-
-    def preprocess(self, prog) -> None:
-        super().preprocess(prog)
-        if self.counter is not None:
-            prog.add_reg(self.counter)
-        parent = self.timeline
-        if parent is None:
-            raise ValueError("repeat requires a parent timeline")
-        external = self.book.ends.copy()
-        del external[parent]
-        self.book.repeats.append(
-            _RepeatFrame(
-                parent,
-                external,
-                self.book.waiting.copy(),
-                {ch: prog.get_timestamp(gen_ch=ch) for ch in prog.gen_chs},
-                {ch: prog.get_timestamp(ro_ch=ch) for ch in prog.ro_chs},
-                pulse_guards={ch: _PulseGuard(ch) for ch in prog.gen_chs},
-            )
-        )
-        self.book.ends = {parent: 0.0}
-        self.book.waiting.clear()
-
-
-class _RepeatExit(_Sync):
-    """Close one iteration, then rebase the outer namespace by all iterations."""
-
-    def __init__(
-        self, book: _TimelineBook, count: int, maximum: int, *, variable: bool = False
-    ):
-        super().__init__(book, None)
-        self.count = count
-        self.maximum = maximum
-        self.variable = variable
-
-    def preprocess(self, prog) -> None:
-        super().preprocess(prog)
-        frame = self.book.repeats.pop()
-        for ch, guard in frame.pulse_guards.items():
-            repeated = guard.repeated(self.count, self.maximum)
-            repeated.require((frame.native_gens[ch],), repeated.limits)
-            if self.book.repeats:
-                self.book.repeats[-1].pulse_guards[ch].then(repeated)
-        variable = self.variable or frame.variable
-        if variable and _bounds(frame.advance)[0] < -1e-12:
-            raise ValueError(
-                "repeat cannot prove minimum reference advance at every sweep point"
-            )
-        # Rebase native timestamps separately so external ends undergo exactly
-        # one pointwise floor proof and last-iteration output tails are preserved.
-        self.book.native_only = True
-        try:
-            frame.rebase_native(prog, self.count)
-        finally:
-            self.book.native_only = False
-        if self.book.repeats:
-            self.book.repeats[-1].written_gens.update(frame.written_gens)
-            self.book.repeats[-1].written_ros.update(frame.written_ros)
-        self.book.ends = frame.external
-        self.book.waiting = frame.waiting
-        # Pulse summaries already include every inner iteration's debit.
-        self.book.decrement(frame.advance * self.count, observe_pulses=False)
-        if variable:
-            self.book.waiting.update(
-                name for name, end in self.book.ends.items() if _bounds(end)[1] > 1e-12
-            )
-            if self.book.repeats:
-                self.book.repeats[-1].variable = True
-        self.book.ends[frame.parent] = 0.0
-
-
-class _ObservedPulse(Pulse):
-    """Delegate native pulse behavior, observing only its public timing inputs."""
-
-    def __init__(self, book: _TimelineBook, source: Pulse):
-        # Directly constructed QICK Pulse macros may omit the optional tag.
-        super().__init__(
-            ch=source.ch, name=source.name, tag=getattr(source, "tag", None)
-        )
-        self.book = book
-        self.source = source
-
-    def record(self, prog, t, limit: float | QickParam | None = None) -> None:
-        if self.book.repeats:
-            length = prog.pulses[self.name].get_length()
-            self.book.repeats[-1].pulse_guards[self.ch].then(
-                _PulseGuard(
-                    self.ch, (length,), (t + length,), () if limit is None else (limit,)
-                )
-            )
-
-    def preprocess(self, prog) -> None:
-        # Auto is resolved once during preprocess. Repeated instructions retain
-        # that scheduled time; the validation must not reschedule their outputs.
-        t = (
-            prog.get_timestamp(gen_ch=self.ch)
-            if self.source.t == "auto"
-            else self.source.t
-        )
-        self.source.preprocess(prog)
-        self.record(prog, t)
-
-    def translate(self, prog) -> None:
-        self.source.translate(prog)
-
-    def get_time_param(self, name: str) -> QickParam:
-        return self.source.get_time_param(name)
-
-    def list_time_params(self) -> list[str]:
-        return self.source.list_time_params()
-
-
-class _PlacedPulse(_ObservedPulse):
-    def __init__(self, book: _TimelineBook, timeline: str, source: Pulse):
-        if isinstance(source, _ObservedPulse):
-            source = source.source
-        super().__init__(book, source)
-        self.timeline = timeline
-        self.relative_t: float | QickParam | Literal["auto"] = source.t
-
-    def preprocess(self, prog) -> None:
-        end = self.book.end(self.timeline, placement=True)
-        if self.relative_t == "auto":
-            t = _maximum(end, prog.get_timestamp(gen_ch=self.ch), self.timeline)
-        else:
-            t = end + self.relative_t
-        previous_end = prog.get_timestamp(gen_ch=self.ch)
-        self.source.t = t
-        self.source.preprocess(prog)
-        actual_t = self.source.get_time_param("t")
-        if _bounds(actual_t - previous_end)[0] < -1e-12:
-            raise ValueError(
-                f"{self.timeline}: channel {self.ch} pulse overlap; cannot prove "
-                "start >= previous end at every sweep point; use delay_timeline"
-            )
-        self.record(prog, t, actual_t)
-        self.book.ends[self.timeline] = _align_end(
-            prog, actual_t + prog.pulses[self.name].get_length()
-        )
-
-
-class _PlacedConfig(ConfigReadout):
-    def __init__(self, book: _TimelineBook, timeline: str, source: ConfigReadout):
-        super().__init__(ch=source.ch, name=source.name, tag=source.tag)
-        self.book = book
-        self.timeline = timeline
-        self.source = source
-        self.relative_t: float | QickParam = source.t
-
-    def preprocess(self, prog) -> None:
-        self.source.t = self.book.end(self.timeline, placement=True) + self.relative_t
-        self.source.preprocess(prog)
-        self.book.ends[self.timeline] = _maximum(
-            0.0, self.source.get_time_param("t"), self.timeline
-        )
-
-    def translate(self, prog) -> None:
-        self.source.translate(prog)
-
-    def get_time_param(self, name: str) -> QickParam:
-        return self.source.get_time_param(name)
-
-    def list_time_params(self) -> list[str]:
-        return self.source.list_time_params()
-
-
-class _PlacedTrigger(Trigger):
-    def __init__(self, book: _TimelineBook, timeline: str, source: Trigger):
-        super().__init__(
-            ros=source.ros,
-            tts=source.tts,
-            pins=source.pins,
-            width=source.width,
-            ddr4=source.ddr4,
-            mr=source.mr,
-            tag=source.tag,
-        )
-        self.book = book
-        self.timeline = timeline
-        self.relative_t: float | QickParam = source.t
-
-    def preprocess(self, prog) -> None:
-        self.t = self.book.end(self.timeline, placement=True) + self.relative_t
-        super().preprocess(prog)
-        end = self.get_time_param("t") + self.get_time_param("width")
-        for ch in self.ros:
-            end = _maximum(end, prog.get_timestamp(ro_ch=ch), self.timeline)
-        self.book.ends[self.timeline] = _align_end(prog, end)
-
-
-class ModuleEmission(TimedMacro):
-    """One occurrence of a declared module, lowered through the shared compiler.
-
-    owner is the borrowed declaration object, macros are fresh native operations,
-    and tag identifies this occurrence's first timed operation in get_time_param.
-    Construction and timing placement are owned by TimelineProgramV2.emit.
-    """
-
-    def __init__(self, owner: Module, macros: list[Macro], tag: str | None):
-        super().__init__(tag=tag)
-        self.owner = owner
-        self.macros = macros
-
-    def preprocess(self, prog) -> None:
-        """Resolve internal events at one origin; only owner duration moves its end."""
-        for macro in self.macros:
-            if isinstance(macro, (_PlacedPulse, _PlacedConfig, _PlacedTrigger)):
-                start = macro.book.end(macro.timeline)
-                macro.preprocess(prog)
-                macro.book.ends[macro.timeline] = start
-            else:
-                macro.preprocess(prog)
-
-    def translate(self, prog) -> None:
-        """Translate lowered operations through the program's shared compiler."""
-        for macro in self.macros:
-            macro.translate(prog)
-
-    def get_time_param(self, name: str) -> QickParam:
-        """Return first-event timing; absent events/parameters raise RuntimeError."""
-        for macro in self.macros:
-            if isinstance(macro, TimedMacro):
-                return macro.get_time_param(name)
-        raise RuntimeError("this emission has no timed operations")
-
-    def list_time_params(self) -> list[str]:
-        """List first-event parameter names, or [] for an untimed emission."""
-        for macro in self.macros:
-            if isinstance(macro, TimedMacro):
-                return macro.list_time_params()
-        return []
-
-
 class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
     """Author native QICK hooks with optional timeline ends (times in us).
 
@@ -561,12 +72,81 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
     Simulation frontend migration is separate.
     """
 
+    macro_list: list[Macro]
+
     def __init__(self, *args, **kwargs):
-        self._timeline_book = _TimelineBook()
+        self._timeline_book = TimelineBook()
+        self._time_bounds = ProducerBounds()
+        self._time_origin: Macro | None = None
+        self._timing_table_owner = "native timeline"
+        self._timeline_register_pool: list[str] = []
+        self._timeline_math_active = False
         self._declared_modules: list[Module] = []
         self._declaring = False
         self._building_body = False
+        self._branch_serial = 0
+        self._emission_serial = 0
+        self._emission_scope: tuple[int, int] | None = None
         super().__init__(*args, **kwargs)
+
+    def _make_asm(self) -> None:
+        self._timeline_register_pool = []
+        self._time_bounds = ProducerBounds()
+        for macro in self.macro_list:
+            self._observe_time_producers(macro)
+        super()._make_asm()
+        self._time_bounds.audit(self)
+
+    def _pop_native[T: Macro](self, expected: type[T]) -> T:
+        source = self.macro_list.pop()
+        if not isinstance(source, expected):
+            raise RuntimeError(f"expected native {expected.__name__} macro")
+        return source
+
+    def _timeline_live_registers(self) -> set[str]:
+        values = [
+            *self._timeline_book.ends.values(),
+            *self._timeline_book.runtime_gens.values(),
+            *self._timeline_book.runtime_ros.values(),
+        ]
+        for frame in self._timeline_book.repeats:
+            values.extend(frame.external.values())
+        return self._timeline_book.pinned | {
+            value.register for value in values if isinstance(value, RuntimeEnd)
+        }
+
+    def _observe_time_producers(self, macro: Macro) -> None:
+        if isinstance(macro, PreparedTimelineMacro):
+            self._observe_time_producers(macro.source)
+            return
+        self._time_bounds.observe(macro)
+        if type(macro) is FixedRepeatLoop:
+            self._time_bounds.register_fixed_loop(macro.index, macro, macro.closing)
+        if isinstance(macro, TimeProducer):
+            if macro.selection is not None:
+                self._time_bounds.register_selection(
+                    macro.register, macro.selection, tuple(macro.macros)
+                )
+            self._time_bounds.register(
+                macro.register,
+                macro.limits,
+                tuple(macro.macros),
+                macro.dependencies,
+                macro.dependency_ranges,
+            )
+        if isinstance(macro, (ModuleEmission, TimeProducer, TimelineParallel)):
+            for child in macro.macros:
+                self._observe_time_producers(child)
+        if isinstance(macro, TimelineBranch):
+            for case in macro.cases:
+                for child in case:
+                    self._observe_time_producers(child)
+
+    def _add_asm(self, inst, addr_inc=1):
+        self._time_bounds.emission(
+            inst, self.p_addr, self._time_origin, arithmetic=self._timeline_math_active
+        )
+        super()._add_asm(inst, addr_inc=addr_inc)
 
     def append_macro(self, macro: Macro) -> None:
         """Append a native macro, retaining its behavior and repeat pulse validation.
@@ -575,8 +155,8 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         inputs, including pulses supplied directly rather than through pulse().
         Other macros pass through unchanged.
         """
-        if isinstance(macro, Pulse) and not isinstance(macro, _ObservedPulse):
-            macro = _ObservedPulse(self._timeline_book, macro)
+        if isinstance(macro, Pulse) and not isinstance(macro, TimelineObservedPulse):
+            macro = TimelineObservedPulse(self._timeline_book, macro)
         super().append_macro(macro)
 
     def make_program(self) -> None:
@@ -587,28 +167,30 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         """
         # QICK 0.2.436 provides no public shell boundary hooks.
         self._reset_resources()
+        self._emission_serial = 0
+        self._emission_scope = None
         self._declared_modules.clear()
-        self.append_macro(_Boundary(self._timeline_book, "reset"))
+        self.append_macro(TimelineBoundary(self._timeline_book, "reset"))
         self.set_ext_counter(addr=self.COUNTER_ADDR)
         self._declaring = True
         try:
             self._initialize(None)
         finally:
             self._declaring = False
-        self.append_macro(_Boundary(self._timeline_book, "initialize_end"))
+        self.append_macro(TimelineBoundary(self._timeline_book, "initialize_end"))
         self.delay_auto(self.initial_delay)
         for name, count, before, _after in self.loops:
             self.open_loop(count, name=name)
             if before is not None:
                 self.extend_macros(before)
-        self.append_macro(_Boundary(self._timeline_book, "body_start"))
+        self.append_macro(TimelineBoundary(self._timeline_book, "body_start"))
         self._building_body = True
         try:
             self._body(None)
         finally:
             self._building_body = False
-        self.append_macro(_Sync(self._timeline_book, None))
-        self.append_macro(_Boundary(self._timeline_book, "body_end"))
+        self.append_macro(TimelineSync(self._timeline_book, None))
+        self.append_macro(TimelineBoundary(self._timeline_book, "body_end"))
         self.wait_auto(self.final_wait, no_warn=True)
         if self.final_delay is not None:
             self.delay_auto(self.final_delay)
@@ -623,6 +205,12 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
             self.label(name)
             self.extend_macros(asm)
             self.ret()
+        self.macro_list = [
+            PreparedTimelineOpenLoop(self._timeline_book, macro)
+            if isinstance(macro, OpenLoop)
+            else PreparedTimelineMacro(self._timeline_book, macro)
+            for macro in self.macro_list
+        ]
 
     @property
     def timing_layout(self) -> TimingLayout:
@@ -635,6 +223,46 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
             self.meta_infos,
             tuple(TimingLoop(name, count) for name, count, _, _ in self.loops),
         )
+
+    @property
+    def sweep_loops(self) -> tuple[TimingLoop, ...]:
+        """Return declared top-level loop names/counts, including reps, in order.
+
+        Available during _initialize after add_loop, before QICK's loop discovery.
+        This immutable view excludes body-local Repeat counters and has no ASM
+        register addresses. Recompilation rebuilds it from native declarations.
+        """
+        return tuple(TimingLoop(name, count) for name, count, _, _ in self.loops)
+
+    def append_loop_after(self, name: str, *macros: Macro) -> None:
+        """Attach native operations after each iteration of a declared sweep loop.
+
+        Call during _initialize, after add_loop. Operations execute after shot
+        closure and before the loop test/backedge, in appended order. Unknown
+        names or calls outside declaration raise ValueError.
+        """
+        if not self._declaring:
+            raise ValueError("append_loop_after must be called in _initialize")
+        for index, (loop_name, count, before, after) in enumerate(self.loops):
+            if loop_name != name:
+                continue
+            if after is None:
+                after = AsmV2()
+                self.loops[index] = (loop_name, count, before, after)
+            for macro in macros:
+                after.append_macro(macro)
+            return
+        raise ValueError(f"sweep loop {name!r} is not declared")
+
+    @property
+    def fixed_loop_indices(self) -> tuple[FixedLoopIndex, ...]:
+        """Return Repeat-owned counter metadata in emission order after compile.
+
+        Includes nonempty fixed repeats nested in module emissions, separate
+        from QICK's top-level sweep loop_dict. No nested axis is added there.
+        A recompile rebuilds these immutable records with their native writers.
+        """
+        return tuple(self._time_bounds.fixed_loops.values())
 
     def declare(self, module: Module) -> None:
         """Declare a borrowed module in _initialize; repeat declarations are harmless.
@@ -655,19 +283,129 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         """Emit a declared module once, with a fresh timing/tag occurrence.
 
         Omitted timeline selects ordinary default, not reference time. Internal
-        events share its current end; rule-a duration advances that end only.
+        events share its current end; actual output ends plus owner post-delay
+        determine the ceiled end without moving reference time.
+        Branch/ScanWith retain native path/iteration reference synchronization.
         DelayAuto is native reference advance and rejects explicit timelines.
         Undeclared objects raise ValueError; owner lowering failures propagate.
         """
         if not any(module is declared for declared in self._declared_modules):
             raise ValueError(f"{module.name}: module must be declared before emit")
         start = len(self.macro_list)
+        previous_scope = self._emission_scope
+        emission_name = f"{module.name} emission {self._emission_serial}"
+        self._emission_scope = (self._emission_serial, 0)
+        self._emission_serial += 1
         try:
             module.lower(self, timeline=timeline, tag=tag)
             macros = self.macro_list[start:]
         finally:
+            self._emission_scope = previous_scope
             del self.macro_list[start:]
-        self.append_macro(ModuleEmission(module, macros, tag))
+        self.append_macro(
+            ModuleEmission(
+                module,
+                [PreparedTimelineMacro(self._timeline_book, macro) for macro in macros],
+                tag,
+                emission_name=emission_name,
+            )
+        )
+
+    def emit_parallel(
+        self,
+        branches: Sequence[Sequence[Module]],
+        *,
+        timeline: str,
+        tag: str | None = None,
+    ) -> None:
+        """Lower ordered Module sequences at one placement origin and merge ends.
+
+        Call from a declared Module's lower. Each complete branch keeps its
+        internal order. The unique reference-advancing sequence emits last;
+        multiple advancing sequences and unknown reference effects fail.
+        Exchanged branches require independent physical register/word effects.
+        A wait-only parent rejects placement, including empty branches. Existing
+        channel physical-end and structured case/backedge guards still apply.
+        tag belongs to the first child in author order, before any exchange.
+        """
+        names = [self.emission_name("join_branch") for _ in branches]
+        lowered: list[list[Macro]] = []
+        start = len(self.macro_list)
+        try:
+            for name, modules in zip(names, branches, strict=True):
+                branch_start = len(self.macro_list)
+                for module in modules:
+                    self.emit(module, timeline=name, tag=tag)
+                    tag = None
+                lowered.append(self.macro_list[branch_start:])
+        finally:
+            del self.macro_list[start:]
+        self.append_macro(
+            TimelineParallel(self._timeline_book, timeline, lowered, names)
+        )
+
+    def emission_name(self, stem: str) -> str:
+        """Allocate an internal register/loop name during a module's lower call.
+
+        stem labels the owner's internal resource. Each call gets a distinct
+        name in this emission, including nested emissions. Names reset on each
+        compile; they do not reserve resources or rename explicit native loops.
+        A collision with an explicit native name fails during compilation.
+        Outside lower raises ValueError. Failed/nested lower calls restore the
+        caller's naming scope, without changing declared module resources.
+        """
+        if self._emission_scope is None:
+            raise ValueError("emission_name requires an active module lower call")
+        emission, local = self._emission_scope
+        self._emission_scope = (emission, local + 1)
+        return f"__emission_{emission}_{local}_{stem}"
+
+    @contextmanager
+    def time_producer(
+        self,
+        register: str,
+        bounds: CycleBounds,
+        *,
+        dependencies: tuple[str, ...] = (),
+        dependency_ranges: Mapping[str, CycleBounds] | None = None,
+        selection: TableSelection | None = None,
+    ) -> Generator[None]:
+        """Certify framework-owned native operations that produce cycle values.
+
+        register receives the inclusive bounds on every execution of this scope.
+        dependencies names input registers whose producers must also be audited.
+        dependency_ranges additionally constrains producer inputs, such as a
+        table's valid indices. Its keys automatically join the audited inputs.
+        selection optionally binds selected playback to a declared scalar table
+        and captured index; only matching loader writers can write that relation.
+        Ordinary time producers do not enable this additional relation audit.
+        Checks use conservative whole-program bounds, including later writes,
+        so a subsequent index reset cannot hide an earlier invalid lookup.
+        This seam is for known table/runtime-length owners, not arbitrary author
+        macros. Only captured framework/native operations may write the result;
+        later or alternate unregistered writes invalidate the proof at compile.
+        Bounds are checked only if this result is consumed as time, so uint32
+        words retain their bit-pattern contract for non-time consumers.
+        """
+        start = len(self.macro_list)
+        yield
+        macros = self.macro_list[start:]
+        del self.macro_list[start:]
+        if any(
+            not type(macro).__module__.startswith(("qick.", "zcu_tools.program."))
+            for macro in macros
+        ):
+            raise ValueError("custom macro cannot certify a time producer")
+        self.append_macro(
+            TimeProducer(
+                register,
+                bounds,
+                macros,
+                dependencies,
+                dependency_ranges if dependency_ranges is not None else {},
+                selection,
+            )
+        )
 
     def advance_module(
         self,
@@ -682,7 +420,7 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         is not ceiled again. tag names the resolved end via get_time_param.
         """
         self.append_macro(
-            _Advance(
+            TimelineAdvance(
                 self._timeline_book,
                 timeline if timeline is not None else "default",
                 duration,
@@ -692,14 +430,23 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         )
 
     def delay_timeline(
-        self, t: float | QickParam, *, timeline: str = "default", tag: str | None = None
+        self,
+        t: float | QickParam | str,
+        *,
+        timeline: str = "default",
+        tag: str | None = None,
     ) -> None:
-        """Add t us (ceiled to tProc cycles) to a timeline without moving reference.
+        """Add time to a timeline without advancing reference or channel timestamps.
 
-        tag exposes the resulting end as parameter 't'. Crossing zero or an
-        unprovable sweep floor raises ValueError during compile.
+        Scalars and QickParam use us; the complete end plus t is ceiled to
+        tProc cycles. In an emission, pending actual output ends are included
+        before adding t as the owner post-delay. A string names an
+        existing nonnegative cycle register with compiler-known producer bounds.
+        Wait-only targets, unknown bounds and possible signed overflow raise
+        ValueError during compilation. tag exposes static ends as parameter 't';
+        runtime ends have no affine get_time_param value.
         """
-        self.append_macro(_Advance(self._timeline_book, timeline, t, tag=tag))
+        self.append_macro(TimelineAdvance(self._timeline_book, timeline, t, tag=tag))
 
     def set_timestamp(
         self,
@@ -724,38 +471,58 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         """Rebase all relative ends when QICK moves reference by t us.
 
         None is native auto with no selected channels and changes no ends.
-        A sweep must prove a uniform sign for each zero floor, otherwise compile
-        raises ValueError naming the timeline and suggesting delay_timeline.
+        Ends use a pointwise zero floor. A crossing floor promotes only that
+        expression to runtime cycles; signed overflow fails during compile.
         """
         super().decrement_timestamps(t)
         if t is not None:
             self._timeline_book.decrement(t)
 
     def delay_reg_auto(self, time_reg: str, *, gens=True, ros=True) -> None:
-        """Advance native reference by selected static ends plus register cycles.
+        """Advance reference by selected native ends plus register cycles.
 
-        time_reg contains nonnegative tProc cycles. Every timeline, including
-        default, must prove end <= static advance at every sweep point, otherwise
-        compile raises ValueError suggesting sync. Proven ends become zero.
+        time_reg contains nonnegative tProc cycles. Remaining ends debit the
+        actual advance using certified producer bounds. No bounds are needed
+        when the selected native ends already consume every timeline. This
+        native register reference operation remains forbidden inside Repeat.
         """
         super().delay_reg_auto(time_reg, gens=gens, ros=ros)
-        source = self.macro_list.pop()
-        self.append_macro(_RuntimeAdvance(self._timeline_book, source))
+        source = self._pop_native(DelayRegAuto)
+        self.append_macro(TimelineRuntimeAdvance(self._timeline_book, source))
 
     def fork(self, source: str, *, into: str | list[str]) -> None:
         """Declare new timeline names in _body, copying source end at this point.
 
         source must already exist; into is one new name or a list of distinct
-        new names. A wait-only source supplies its latest bound; new timelines
-        permit conservative placement while that source stays wait-only.
+        new names. A wait-only source supplies its actual remaining end; new
+        timelines permit placement while that source stays wait-only.
         Unknown source or duplicate targets raise ValueError during
         compile. Calling outside _body raises ValueError immediately. This emits
-        no instructions and does not advance reference. Each compile resets names.
+        no output and does not advance reference. Each compile resets names.
         """
         if not self._building_body:
             raise ValueError("fork must be called in _body")
         targets = (into,) if isinstance(into, str) else tuple(into)
-        self.append_macro(_Fork(self._timeline_book, source, targets))
+        self.append_macro(TimelineFork(self._timeline_book, source, targets))
+
+    @contextmanager
+    def branch(self, *, by: str) -> Generator[BranchCases]:
+        """Select one case per sweep point without padding paths to equal duration.
+
+        by is an existing sweep loop name. Provide exactly one case() per point.
+        Each case closes only timelines it uses. Different remaining ends become
+        wait-only; join/fork derive ordinary targets, while sync consumes them.
+        Forked names are case-local, even when every case uses the same spelling.
+        Their ends join the case closing maximum and names expire at its exit.
+        Measurement selectors raise ValueError. Call only while building _body.
+        """
+        if not self._building_body:
+            raise ValueError("branch must be called in _body")
+        cases = BranchCases(self)
+        name = f"_timeline_branch_{self._branch_serial}"
+        self._branch_serial += 1
+        yield cases
+        self.append_macro(TimelineBranch(self._timeline_book, by, cases.cases, name))
 
     @contextmanager
     def repeat(
@@ -770,17 +537,18 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
 
         Entry syncs the parent. Each iteration closes parent and local ends;
         exit discards local names and leaves parent zero. Fixed counts exactly
-        rebase outer ends. Register counts rebase by range minimum and leave
-        nonzero outer ends wait-only: join/fork establish ordinary conservative
-        scheduling points; full reference consumption restores placement. Only
+        rebase outer ends. Unknown counts or case advances debit outer ends on
+        the actual executed path. Nonzero outer ends remain wait-only; join/fork
+        establish placement targets and full consumption restores placement. Only
         parent and locally forked names may be used inside. name is
         the native loop/counter name. n is a nonnegative integer or existing
         register name. Register counts require an author-guaranteed closed
         nonnegative integer range_hint; integer counts forbid range_hint. No
         hardware range check is added. Invalid counts/ranges raise ValueError;
         unknown/inaccessible names fail during compile. Zero counts still sync
-        the parent but discard body operations. Runtime register reference delays
-        inside the body raise ValueError because iteration duration is unknown.
+        the parent but discard body operations. Register-valued timeline delays
+        and differing Branch advances are supported. Native delay_reg_auto inside
+        the body raises ValueError; it is not a timeline duration operation.
         """
         minimum = _repeat_minimum(name, n, range_hint)
         if n == 0:
@@ -792,39 +560,40 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
                 del self.macro_list[start:]
             return
         variable = isinstance(n, str)
-        self.append_macro(
-            _RepeatEnter(self._timeline_book, timeline, name if variable else None)
+        entry = TimelineRepeatEnter(
+            self._timeline_book, timeline, name if variable else None
         )
-        if isinstance(n, str):
+        self.append_macro(entry)
+        fixed_loop = FixedRepeatLoop(name, n) if isinstance(n, int) else None
+        if fixed_loop is None:
             self.open_inner_loop(name, name, n, range_hint=range_hint)
         else:
-            self.open_loop(n, name=name)
+            self.append_macro(fixed_loop)
         try:
             yield
         finally:
             self.append_macro(
-                _RepeatExit(
+                TimelineRepeatExit(
                     self._timeline_book,
                     minimum,
                     range_hint[1] if range_hint is not None else minimum,
-                    variable=variable,
+                    variable=range_hint is not None and minimum != range_hint[1],
                 )
             )
             if isinstance(n, str):
                 self.close_inner_loop(name, name, n)
-            else:
-                self.close_loop()
+            elif fixed_loop is not None:
+                self.append_macro(fixed_loop.closing)
 
     def join(self, *sources: str, into: str) -> None:
         """Merge existing sources and target into target's latest end (us).
 
-        Sources remain unchanged. Wait-only sources contribute their latest
-        bounds; the target becomes ordinary and permits conservative placement.
-        This emits no instructions and does not move reference. Unknown names
-        or crossing swept ends raise ValueError
-        during compile; declare names with fork before joining them.
+        Sources remain unchanged. Wait-only sources contribute actual ends;
+        the target becomes ordinary and permits placement. Crossing maxima use
+        runtime arithmetic without moving reference or emitting output. Unknown
+        names raise ValueError; declare names with fork before joining them.
         """
-        self.append_macro(_Join(self._timeline_book, sources, into))
+        self.append_macro(TimelineJoin(self._timeline_book, sources, into))
 
     def sync(self, *, timeline: str = "default") -> None:
         """Move reference to the chosen end and floor every rebased end at zero.
@@ -833,7 +602,7 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         Fully consumed wait-only bounds become ordinary zero ends again.
         Unknown names or unprovable swept floors raise ValueError during compile.
         """
-        self.append_macro(_Sync(self._timeline_book, timeline))
+        self.append_macro(TimelineSync(self._timeline_book, timeline))
 
     def send_readoutconfig(
         self, ch: int, name: str, *args, timeline: str | None = None, **kwargs
@@ -848,8 +617,76 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         """
         super().send_readoutconfig(ch, name, *args, **kwargs)
         if timeline is not None:
-            source = self.macro_list.pop()
-            self.append_macro(_PlacedConfig(self._timeline_book, timeline, source))
+            source = self._pop_native(ConfigReadout)
+            self.append_macro(
+                TimelinePlacedConfig(self._timeline_book, timeline, source)
+            )
+
+    def pulse_by_reg(
+        self,
+        ch: int,
+        addr_reg: str,
+        t: float | QickParam = 0.0,
+        *,
+        flat_top_pulse: bool = False,
+        timeline: str | None = None,
+        selection: SelectedPlayback | None = None,
+    ) -> None:
+        """Play native addresses, or place certified selected playback on timeline.
+
+        Native arguments retain their meanings. Timeline placement requires
+        framework selection metadata pairing the address producer and candidates.
+        Selector bounds, writes and overlap are checked during compilation.
+        """
+        if timeline is None:
+            super().pulse_by_reg(ch, addr_reg, t, flat_top_pulse=flat_top_pulse)
+            return
+        if selection is None or selection.register != addr_reg:
+            raise ValueError(
+                "timeline address playback requires matching selection metadata"
+            )
+        from .macro.pluse_reg import PulseByReg
+
+        self.append_macro(
+            PulseByReg.from_base(self, ch, addr_reg, t, flat_top_pulse=flat_top_pulse)
+        )
+        source = self._pop_native(PulseByReg)
+        self.append_macro(
+            TimelineSelectedPulse(self._timeline_book, timeline, source, selection)
+        )
+
+    @override
+    def pulse_from_length_reg(
+        self,
+        ch: int,
+        name: str,
+        *,
+        length_reg: str,
+        flat_top: bool,
+        t: float | QickParam = 0.0,
+        timeline: str | None = None,
+        selection: SelectedPlayback | None = None,
+    ) -> None:
+        """Play a native length register or certified timeline-selected lengths.
+
+        Native arguments are unchanged. Timeline placement requires matching
+        framework selection metadata; raw waveform length and post stay separate.
+        Invalid producer bounds, writes and overlap fail during compilation.
+        """
+        super().pulse_from_length_reg(
+            ch, name, length_reg=length_reg, flat_top=flat_top, t=t
+        )
+        if timeline is not None:
+            if selection is None or selection.register != length_reg:
+                raise ValueError(
+                    "timeline length playback requires matching selection metadata"
+                )
+            from .macro.wmem import PulseFromLengthReg
+
+            source = self._pop_native(PulseFromLengthReg)
+            self.append_macro(
+                TimelineSelectedPulse(self._timeline_book, timeline, source, selection)
+            )
 
     def pulse_from_regs(
         self, ch: int, name: str, *, timeline: str | None = None, **kwargs
@@ -861,8 +698,10 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         """
         super().pulse_from_regs(ch, name, **kwargs)
         if timeline is not None:
-            source = self.macro_list.pop()
-            self.append_macro(_PlacedPulse(self._timeline_book, timeline, source))
+            source = self._pop_native(Pulse)
+            self.append_macro(
+                TimelinePlacedPulse(self._timeline_book, timeline, source)
+            )
 
     def send_readoutconfig_from_regs(
         self, ch: int, name: str, *, timeline: str | None = None, **kwargs
@@ -877,8 +716,10 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         """
         super().send_readoutconfig_from_regs(ch, name, **kwargs)
         if timeline is not None:
-            source = self.macro_list.pop()
-            self.append_macro(_PlacedConfig(self._timeline_book, timeline, source))
+            source = self._pop_native(ConfigReadout)
+            self.append_macro(
+                TimelinePlacedConfig(self._timeline_book, timeline, source)
+            )
 
     def trigger(self, *args, timeline: str | None = None, **kwargs) -> None:
         """Trigger ADC/tt/pins at native t or timeline end+t and advance named end.
@@ -889,10 +730,12 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         """
         super().trigger(*args, **kwargs)
         if timeline is not None:
-            source = self.macro_list.pop()
+            source = self._pop_native(Trigger)
             if source.t is None:
                 raise ValueError("timeline trigger does not support t=None")
-            self.append_macro(_PlacedTrigger(self._timeline_book, timeline, source))
+            self.append_macro(
+                TimelinePlacedTrigger(self._timeline_book, timeline, source)
+            )
 
     def pulse(
         self, ch: int, name: str, *args, timeline: str | None = None, **kwargs
@@ -906,5 +749,7 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         """
         super().pulse(ch, name, *args, **kwargs)
         if timeline is not None:
-            source = self.macro_list.pop()
-            self.append_macro(_PlacedPulse(self._timeline_book, timeline, source))
+            source = self._pop_native(Pulse)
+            self.append_macro(
+                TimelinePlacedPulse(self._timeline_book, timeline, source)
+            )

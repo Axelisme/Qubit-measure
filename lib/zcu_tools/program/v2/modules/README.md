@@ -1,6 +1,6 @@
 # program/v2/modules — semantic program modules
 
-**Last updated:** 2026-10-29，宣告與 emission
+**Last updated:** 2026-10-30，原生 lowering 與 compiled timing 驗收
 
 **讀者：** lab-author、framework-dev、agent。語意 program modules 的宣告、發射與 owner 邊界速查。
 
@@ -19,27 +19,44 @@ without leaking hardware register choreography into experiment classes.
 
 ## 原生寫法
 
-Pulse、Delay、SoftDelay、DelayAuto、PulseReadout 與 Reset 系列提供原生 lowering。
+Pulse、Delay、SoftDelay、DelayAuto、PulseReadout、Reset 系列、LoadValue、LoadWord、ScanWith、Branch、Join、ComputedPulse、TableLengthPulse、TablePulseReadout 與 MuxReadout 提供原生 lowering。
 每次 `emit` 建立一個 `timeline.ModuleEmission`，保存該次原生指令與 tag。
 Module 不是 QICK Macro，不能直接交給 `append_macro`。
 同一宣告物件可重複發射，舊 module 的 tag 與 block_mode 不控制新路徑。
 
-一般發射將所選 timeline 的結尾加上 owner 的規則 a `total_length`，不移動 reference。
+Pulse 與 PulseReadout 以實際 waveform／ADC 事件的最大結束點，加一次 post-delay，再向上取整到 tProc cycle。
+Lowering 不用 `total_length` 重建時間，也不移動 reference。
 省略 timeline 時選 default。其他名字先在 `_body` 用 `fork("default", into="drive")` 宣告。
 同一 emission 內部事件共用起點，TwoPulseReset 的跨 channel 重疊不會被串成序列。
 同 channel 的提前發射則在編譯期報錯，即使改用另一條 timeline 也一樣。
-Owner 已對齊 tProc 的長度不再向上取整第二次。
+整數 register 起點也保留事件的分數尾段，直到加上 post-delay 才取整。
+TwoPulseReset 合併各 pulse end 加各自 post-delay。BathReset 的 pi/2 從向上取整後的 cavity end 加 post-delay 開始。
+BathReset 最後合併 qubit 與 pi/2 的實際結尾，包含各自 post-delay，不漏掉較長的 qubit。
+Scalar 與可精確表示的整數仿射 sweep 保留靜態時間。
+非仿射 sweep 由 program owner 以 dmem table 提供逐點精確 ceil，包含多 axis 與重複／nested emission。
+Index 使用 QICK 原生 sweep 初始化、回邊與 reset，並連同所依賴的 loop counter 接受時間 producer 的全流寫入稽核。
+表超過剩餘 dmem 容量時，編譯錯誤指出 emission 與所需 word 數。
 Delay 與 SoftDelay 都只加 timeline 結尾。`sync()` 或 body 收尾才推進 reference。
 
 DelayAuto 是唯一例外，未指定 timeline 時呼叫原生 delay_auto 或 delay_reg_auto。
 它保留 gens／ros 選取，移動 reference 並扣減全部 timeline 結尾。
 指定任何 timeline 名稱都在 emit 入口報錯，包含顯式 default。
-Register cycles 必須非負，所有結尾包含 default 都須逐點證明不大於靜態推進量。
-無法證明時，編譯會指出 timeline 並提示先 sync。
+Register cycles 必須非負。尚未被 native 部分完整消耗的 timeline，須以已知 producer bounds 扣除實際推進量。
+Repeat 內仍拒絕這個 native register reference 操作，具名 timeline 的 register 時間則可用。
 
 PulseReadout 的 runtime gain／generator frequency／ADC frequency words 沿用既有 consumer。
 時間 guard 不限制這些非時間 words。Legacy init／run／block 保留供舊 program 使用。
-其餘 module 的新 lowering 屬於後續階段，不因 legacy 可用就表示可直接 emit。
+未列出的 module 不因 legacy 可用就表示可直接 emit。
+
+Branch 保留 selector 與 case 次序，每個 case 只同步自身使用的 timeline，不補成共同最長長度。
+Module Join 發射平行 sequences，保留每個 sequence 內的 Module 次序，並合併實際 end。
+Program emission owner 依 lowered operations 彙總 reference effects，將唯一會推進 reference 的 sequence 移到最後。
+零個推進型 sequence 保留次序，兩個以上或未知 reference effect 都拒絕。
+交換時，owner 以實際 register 與 wmem identity 檢查 RW、WR、WW，包含 register aliases。
+未知 resource effects 拒絕交換。Compiler 配置的 register 不會自動視為 scratch，原有 producer provenance 與翻譯後全流稽核照常執行。
+同 generator 的 physical-end、全部 case 與 Repeat backedge guards 繼續檢查，不加 padding 或 reference rewind。
+TableLengthPulse Join 保留獨立 generators、共用 index 與相同 table count，逐 index 合併 runtime maximum。
+`prog.join` 只合併既有 timeline ends，不發射 children。
 
 同一個宣告物件可在 body 重複使用。例如以下 `TimelineProgramV2` hooks 只累加等待結尾：
 
@@ -61,6 +78,24 @@ def _body(self, cfg):
 兩次 emit 各有一個 emission 與 tag，不修改 module 的發射狀態。
 Fork／join／Repeat 與原生 pulse 混用的範例見 [program README](../README.md#原生寫法與具名-timeline)。
 設計理由與階段邊界見 [ADR-0083](../../../../../docs/adr/0083-program-macros-and-timelines.md)。
+
+## Compiled timing 驗收
+
+原生排程的驗收入口是 `ir.analyze_timing(ir.CompiledTimingInput(...))`。
+傳入同一次編譯的 `prog_list`、`labels`、`timing_layout` 與 `compile_datamem()`。
+Layout 提供 linked body boundaries 與 sweep axes，dmem 提供 table lookup 和 runtime dispatch 的實際輸入。
+不從 jump 形狀推測 boundaries，也不以 legacy 輸出作正確性預期。
+
+逐點核對 event 的實體 tProc port、cycle、`body_end_cycle` 與含 relax delay 的 `end_cycle`。
+Wave events 包含 readout config 與 flat-top segments，不是一個 Module 對應一個 event。
+分析結果保存 linked instruction address，不能把不同編譯的 address 當作穩定事件識別碼。
+
+Timing analysis 只計算排程與 reference，不計算 waveform duration 或 ADC integration end。
+驗收者須由輸入 waveform clocks、ADC window、post-delay 與時脈比例獨立算出結尾。
+例如 384 MHz generator 的 39 clocks 是 430.08 MHz tProc 的 43.68 cycles。
+起點 4 cycles 加 post-delay 0.0005 us 後，完整結尾是 `ceil(4 + 43.68 + 0.21504) = 48`。
+先把 waveform 與 post 各自取整會得到 49，不能作為預期。
+不同點的 end 必須逐點比較，不能用最長 entry 的 padding 隱藏 runtime 選擇或非仿射 ceil。
 
 ## Configuration names
 
@@ -87,6 +122,23 @@ in `ModularProgramV2`, `ProgramBuilder.add`, `Repeat`, `Branch`, `Join` and
   `0..2^32-1` word range; storage maps those words onto the signed int32 dmem
   representation while preserving the hardware bit pattern. It is intentionally
   uncompressed because consumers care about the exact word loaded into a register.
+- `ScanWith` supports native `declare`/`emit`. Each occurrence creates its own
+  fixed Repeat counter, loads the scalar, then executes children in order.
+  Repeated emissions reuse the declared table and destination register.
+  Repeat-owned metadata and matching-writer audits certify the index bounds;
+  native lowering does not pass the legacy `range_hint`.
+- `LoadValue.lower_index` accepts the index for the current occurrence.
+  `TimelineProgramV2.emission_name` allocates occurrence-local names only during
+  lowering, so repeated or nested scans do not share a counter.
+- Both loaders support native `declare`/`emit` without advancing timeline ends.
+  `use_existed=True` leaves the destination declaration to the caller. An empty
+  `LoadValue` still declares its destination unless reused; an empty `LoadWord`
+  declares nothing. Neither empty loader allocates dmem or initializes a value.
+- When a loaded value is consumed as time, the loader certifies its output range
+  and the index range `0..len(values)-1`. The compiler checks all registered index
+  writes, including later writes, Branch paths and loop backedges. A reset after
+  an invalid lookup cannot hide it. Non-time consumers retain their scalar or
+  raw-word contract without enabling the timing bounds checks.
 
 ## Readout configuration
 
@@ -164,7 +216,7 @@ physical simulation support.
   mutating a pulse shared through `PulseRegistry`; the rotated tables restore the
   first point before the next outer repetition.
 
-## Swept pulse blocking timing
+## Legacy swept pulse blocking timing
 
 `Pulse` aligns a swept blocking duration with QICK's registered waveform
 segments. Generator-cycle quantization and per-loop truncation precede
@@ -176,9 +228,10 @@ Scalar and pre/post-delay timing keep their existing rules.
 ## Runtime Pulse Length
 
 - `TableLengthPulse` owns the arbitrary pulse-length hardware sweep for `const`
-  and `flat_top`. It keeps one pulse template in wmem and loads both generator
-  length cycles and total tProcessor duration from dmem on each hardware-loop
-  point.
+  and `flat_top`. Native declaration keeps one template and a generator-length
+  table. Native playback resolves the actual selected waveform end, adds pre/post
+  once and ceils the aggregate once. Only legacy init/run uses a separate total
+  tProcessor duration table.
 - A const pulse patches the template's single `w4` length field. A flat-top pulse
   reuses its fixed ramp entries and patches only the middle flat segment; its
   segment WPORT writes remain contiguous.
@@ -186,7 +239,7 @@ Scalar and pre/post-delay timing keep their existing rules.
   build. Points below the generator's three-cycle minimum also fail fast. Runtime
   duration alignment places readout immediately after the selected pulse instead
   of padding every point to the maximum length.
-- `Join` accepts one `TableLengthPulse` per parallel branch, with independent
+- Legacy `Join` accepts one `TableLengthPulse` per parallel branch, with independent
   generators, a shared index register and equal table sizes. It emits all drives
   at one origin and loads one per-point maximum duration table for a common wait.
   The selected lengths, including pre/post delays, determine when readout starts;
@@ -194,6 +247,26 @@ Scalar and pre/post-delay timing keep their existing rules.
   branches and table-pulse sequences fail before build. Standalone table pulses
   retain their own wait. Hardware and semantic simulation use the same rounded
   duration tables.
+
+Native `ComputedPulse` selects each candidate waveform together with its own
+post-delay. Fractional playback ends and selected posts stay separate until the
+program owner ceils their aggregate. Candidate posts may differ or use native
+sweeps. Neither selected owner pads every point to the longest entry.
+Negative posts may put the aggregate before its origin. The physical channel end
+still guards subsequent playback. Internal offsets use signed32 cycles; register
+time consumers still require nonnegative cycles. Program owner compares raw
+selected ends and paired aggregate ends to retain a coverage debt. Known positive
+timeline advances consume that debt, so a compensating delay restores legal
+same-channel placement without changing the scheduled end or reference.
+
+`LoadValue.lower_selected` captures the index at the lookup position and returns
+the declared table relation. Timeline playback checks the actual address/length
+producer against that relation. Later author selector changes do not change the
+already selected playback or its post. Every write to the playback register and
+captured index must belong to that mapping, including Branch cases, backedges
+and resets. An in-range constant or different-table write still fails with the
+register and instruction position. Ordinary scalar and uint32 word consumers
+keep their existing contracts.
 
 ## Design Boundaries
 

@@ -430,7 +430,7 @@ class PulseReadout(AbsReadout):
     def lower(
         self, prog: TimelineProgramV2, *, timeline: str | None, tag: str | None
     ) -> None:
-        """Configure and trigger the ADC, play the pulse, then advance total_length.
+        """Configure/trigger/play at one origin, then ceil max end plus post_delay.
 
         All times are relative to the selected timeline. tag identifies the
         configuration event; generator pre_delay and ADC trig_offset are retained.
@@ -468,7 +468,7 @@ class PulseReadout(AbsReadout):
             )
         else:
             self.pulse.play(prog, timeline=timeline)
-        prog.advance_module(self.total_length(prog), timeline=timeline)
+        prog.delay_timeline(self.cfg.post_delay, timeline=timeline)
 
     def _run_readout_config_from_regs(
         self, prog: ModularProgramV2, name: str, t: float | QickParam
@@ -555,6 +555,42 @@ class TablePulseReadout(AbsReadout):
         self._freq_loader.init(prog)
         self._ro_freq_loader.init(prog)
         prog.add_reg(self._addr_reg)
+        self._append_updates(prog)
+
+    def declare(self, prog: TimelineProgramV2) -> None:
+        """Declare independent templates and paired words for a public sweep loop.
+
+        idx_reg must name a top-level native loop with exactly the table count;
+        missing loops or count mismatches raise ValueError before allocation.
+        Updates execute after each shot and wrap to the first pair.
+        """
+        matches = [loop for loop in prog.sweep_loops if loop.name == self.idx_reg]
+        if len(matches) != 1:
+            raise ValueError(
+                f"TablePulseReadout idx_reg={self.idx_reg!r} requires one sweep loop"
+            )
+        if matches[0].count != len(self.freq_words):
+            raise ValueError(
+                f"TablePulseReadout table length {len(self.freq_words)} does not "
+                f"match loop {self.idx_reg!r} count {matches[0].count}"
+            )
+        self._readout.declare(prog)
+        self._freq_loader.declare(prog)
+        self._ro_freq_loader.declare(prog)
+        prog.add_reg(self._addr_reg)
+        self._append_updates(prog)
+
+    def lower(
+        self, prog: TimelineProgramV2, *, timeline: str | None, tag: str | None
+    ) -> None:
+        """Play the current paired templates with fixed duration and rule-b end.
+
+        Hook updates affect only frequency words, not placement or duration.
+        timeline=None selects default; tag names this occurrence's config.
+        """
+        self._readout.lower(prog, timeline=timeline, tag=tag)
+
+    def _append_updates(self, prog: ModularProgramV2 | TimelineProgramV2) -> None:
         pulse_id = self._readout.pulse.pulse_id
         assert pulse_id is not None
         prog.append_loop_after(
@@ -626,11 +662,38 @@ class MuxReadout(AbsReadout):
         self._program: ModularProgramV2 | None = None
 
     def init(self, prog: ModularProgramV2) -> None:
-        """Validate cached hardware/routes, then declare all tones and ADC windows.
+        """Declare legacy playback and retain prog for IQ collection."""
+        self._declare_resources(prog)
+        self._program = prog
 
-        Raises ValueError with the module name for incompatible wiring/capacity
-        or illegal rounded durations. QICK frequency/format errors propagate.
+    def declare(self, prog: TimelineProgramV2) -> None:
+        """Declare tones/routes without enabling legacy raw-IQ collection.
+
+        Incompatible wiring, duplicate routes and illegal rounded durations raise
+        ValueError naming this module. QICK frequency/format errors propagate.
         """
+        self._declare_resources(prog)
+
+    def lower(
+        self, prog: TimelineProgramV2, *, timeline: str | None, tag: str | None
+    ) -> None:
+        """Play all tones and trigger all ADCs at one origin, then add post once.
+
+        The end covers the actual all-tone waveform and every rounded ADC window.
+        timeline=None selects default. Legacy collection remains unavailable.
+        """
+        timeline = timeline if timeline is not None else "default"
+        prog.pulse(
+            self.cfg.gen_ch, self.name, t=self.cfg.pre_delay, tag=tag, timeline=timeline
+        )
+        prog.trigger(
+            [tone.ro_ch for tone in self.cfg.tones],
+            t=self.cfg.trig_offset,
+            timeline=timeline,
+        )
+        prog.delay_timeline(self.cfg.post_delay, timeline=timeline)
+
+    def _declare_resources(self, prog: ModularProgramV2 | TimelineProgramV2) -> None:
         self._validate_generator(prog)
         self._validate_readouts(prog)
         cfg = self.cfg
@@ -661,9 +724,8 @@ class MuxReadout(AbsReadout):
         prog.protect_readout_routes(
             self.name, cfg.gen_ch, [tone.ro_ch for tone in cfg.tones]
         )
-        self._program = prog
 
-    def _validate_generator(self, prog: ModularProgramV2) -> None:
+    def _validate_generator(self, prog: ModularProgramV2 | TimelineProgramV2) -> None:
         ch = self.cfg.gen_ch
         gens = prog.soccfg["gens"]
         if ch >= len(gens):
@@ -689,7 +751,7 @@ class MuxReadout(AbsReadout):
                 f"{self.name}.length: generator {ch} rounded length must be 3..2**32-1 cycles"
             )
 
-    def _validate_readouts(self, prog: ModularProgramV2) -> None:
+    def _validate_readouts(self, prog: ModularProgramV2 | TimelineProgramV2) -> None:
         channels: set[int] = set()
         ports: set[int] = set()
         path: str | None = None
