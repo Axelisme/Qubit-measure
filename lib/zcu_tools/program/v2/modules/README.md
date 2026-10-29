@@ -1,6 +1,6 @@
 # program/v2/modules — semantic program modules
 
-**Last updated:** 2026-10-30，Branch 與平行 Join lowering
+**Last updated:** 2026-10-30，原生 lowering 與 compiled timing 驗收
 
 **讀者：** lab-author、framework-dev、agent。語意 program modules 的宣告、發射與 owner 邊界速查。
 
@@ -78,6 +78,24 @@ def _body(self, cfg):
 兩次 emit 各有一個 emission 與 tag，不修改 module 的發射狀態。
 Fork／join／Repeat 與原生 pulse 混用的範例見 [program README](../README.md#原生寫法與具名-timeline)。
 設計理由與階段邊界見 [ADR-0083](../../../../../docs/adr/0083-program-macros-and-timelines.md)。
+
+## Compiled timing 驗收
+
+原生排程的驗收入口是 `ir.analyze_timing(ir.CompiledTimingInput(...))`。
+傳入同一次編譯的 `prog_list`、`labels`、`timing_layout` 與 `compile_datamem()`。
+Layout 提供 linked body boundaries 與 sweep axes，dmem 提供 table lookup 和 runtime dispatch 的實際輸入。
+不從 jump 形狀推測 boundaries，也不以 legacy 輸出作正確性預期。
+
+逐點核對 event 的實體 tProc port、cycle、`body_end_cycle` 與含 relax delay 的 `end_cycle`。
+Wave events 包含 readout config 與 flat-top segments，不是一個 Module 對應一個 event。
+分析結果保存 linked instruction address，不能把不同編譯的 address 當作穩定事件識別碼。
+
+Timing analysis 只計算排程與 reference，不計算 waveform duration 或 ADC integration end。
+驗收者須由輸入 waveform clocks、ADC window、post-delay 與時脈比例獨立算出結尾。
+例如 384 MHz generator 的 39 clocks 是 430.08 MHz tProc 的 43.68 cycles。
+起點 4 cycles 加 post-delay 0.0005 us 後，完整結尾是 `ceil(4 + 43.68 + 0.21504) = 48`。
+先把 waveform 與 post 各自取整會得到 49，不能作為預期。
+不同點的 end 必須逐點比較，不能用最長 entry 的 padding 隱藏 runtime 選擇或非仿射 ceil。
 
 ## Configuration names
 
