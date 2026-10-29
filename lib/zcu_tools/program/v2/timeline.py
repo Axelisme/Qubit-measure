@@ -74,6 +74,7 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         self._timeline_book = TimelineBook()
         self._time_bounds = ProducerBounds()
         self._time_origin: Macro | None = None
+        self._timing_table_owner = "native timeline"
         self._timeline_register_pool: list[str] = []
         self._timeline_math_active = False
         self._declared_modules: list[Module] = []
@@ -283,6 +284,7 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
             raise ValueError(f"{module.name}: module must be declared before emit")
         start = len(self.macro_list)
         previous_scope = self._emission_scope
+        emission_name = f"{module.name} emission {self._emission_serial}"
         self._emission_scope = (self._emission_serial, 0)
         self._emission_serial += 1
         try:
@@ -296,6 +298,7 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
                 module,
                 [PreparedTimelineMacro(self._timeline_book, macro) for macro in macros],
                 tag,
+                emission_name=emission_name,
             )
         )
 

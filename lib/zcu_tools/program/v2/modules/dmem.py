@@ -13,6 +13,7 @@ if TYPE_CHECKING:
 
 
 from .._timeline_bounds import CycleBounds
+from ..macro.dmem import DmemLookup
 from .base import Module, ModuleGroup
 from .control import Repeat
 
@@ -179,12 +180,14 @@ class LoadValue(Module):
             word_reg = other_regs[0] if self._is_compressed else ""  # not use
 
             if not self._is_compressed:
-                # Use the index register plus the optional offset as the address.
-                if self.offset == 0:
-                    prog.write_reg(addr_reg, index)
-                else:
-                    prog.write_reg_op(addr_reg, index, "+", self.offset)
-                prog.read_dmem(dst=self.val_reg, addr=addr_reg)
+                prog.append_macro(
+                    DmemLookup(
+                        dst=self.val_reg,
+                        index=index,
+                        offset=self.offset,
+                        address=addr_reg,
+                    )
+                )
                 return
 
             # addr = (idx ASR #word_shift) [+ #offset]

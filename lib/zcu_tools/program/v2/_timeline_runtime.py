@@ -3,14 +3,24 @@
 import math
 from dataclasses import dataclass
 
+import numpy as np
 from qick.asm_v2 import AsmInst, Macro, QickParam, TimedMacro, WriteReg
 
+from ._timeline_bounds import CycleBounds
 from ._timeline_guard import bounds
+from .macro.dmem import DmemLookup, sweep_table_index
 from .macro.write_reg import WriteRegOp
 from .modules.util import get_fclk
 
 
-def align_end(prog, value: float | QickParam) -> float | QickParam:
+def align_end(prog, value: float | QickParam) -> "Time":
+    """Ceil a resolved aggregate in us at every native sweep point.
+
+    Call only at an aggregate or placement boundary during preprocessing.
+    Scalars and exact integer-affine sweeps remain static. Other point grids
+    become a certified dmem lookup at this operation, without advancing reference.
+    """
+
     # Arithmetic on already integral tick values can land just above an integer.
     # Do not turn that floating-point noise into another scheduled tick.
     def ceil_tick(ticks: float) -> int:
@@ -22,13 +32,32 @@ def align_end(prog, value: float | QickParam) -> float | QickParam:
         )
 
     cycles = value * get_fclk(prog)
-    if isinstance(cycles, QickParam):
-        cycles = QickParam(
-            ceil_tick(cycles.start), {k: ceil_tick(v) for k, v in cycles.spans.items()}
+    if not isinstance(cycles, QickParam) or not cycles.is_sweep():
+        scalar = cycles.start if isinstance(cycles, QickParam) else cycles
+        return ceil_tick(scalar) / get_fclk(prog)
+    missing = cycles.spans.keys() - prog.loop_dict.keys()
+    if missing:
+        raise ValueError(
+            f"{sorted(missing)}: missing native sweep axis for timeline end"
         )
-    else:
-        cycles = ceil_tick(cycles)
-    return step_time(prog, cycles / get_fclk(prog))
+    axes = {
+        name: count for name, count in prog.loop_dict.items() if name in cycles.spans
+    }
+    points = np.asarray(cycles.to_array(axes), dtype=float)
+    rounded = np.array([ceil_tick(float(point)) for point in points.flat]).reshape(
+        points.shape
+    )
+    start = int(rounded.flat[0])
+    spans: dict[str, int] = {}
+    for dimension, (axis, count) in enumerate(axes.items()):
+        origin = [0] * rounded.ndim
+        if count > 1:
+            origin[dimension] = 1
+            spans[axis] = (int(rounded[tuple(origin)]) - start) * (count - 1)
+    affine = QickParam(start, spans)
+    if np.array_equal(rounded, affine.to_array(axes, all_loops=True)):
+        return step_time(prog, affine / get_fclk(prog))
+    return prog._timeline_book.math.lookup(rounded.flatten().tolist(), axes)
 
 
 def placement_time(prog, value: float | QickParam) -> float | QickParam:
@@ -72,10 +101,14 @@ class EventEnd:
     offset includes resolved event start offset and waveform/ADC duration;
     a runtime offset is already an integer-cycle value.
     Keeping it separate defers ceil until the owner adds its post-delay.
+    rounded contains ceiled event boundaries used only for same-channel
+    no-overlap proof after a nonnegative post; it never supplies aggregate time.
     """
 
     origin: Time
     offset: Time
+    # The ceiled event boundary, retained only for same-channel no-overlap proof.
+    rounded: tuple["Time", ...] = ()
 
 
 def time_bounds(prog, value: Time) -> tuple[float, float]:
@@ -110,6 +143,38 @@ class RuntimeMath(TimedMacro):
         previous = prog._timeline_book.math if prog._timeline_book.preparing else None
         if previous is not None:
             self.claimed.update(previous.claimed)
+
+    def lookup(self, values: list[int], axes: dict[str, int]) -> RuntimeEnd:
+        """Materialize exact nonnegative cycle points over native sweep axes.
+
+        values is row-major in axes order, after owner aggregate rounding.
+        The table/index owner supplies native sweep initialization and lookup;
+        its dependencies participate in the same whole-stream timing audit.
+        """
+        lower, upper = min(values), max(values)
+        self.check(lower, upper)
+        if lower < 0:
+            raise ValueError("timeline end must be nonnegative cycles")
+        owner = self.prog._timing_table_owner
+        offset = self.prog.add_timing_dmem(values, owner=owner)
+        register = self.allocate()
+        index = sweep_table_index(
+            self.prog, axes, name=f"_timeline_index_{len(self.prog.reg_dict)}"
+        )
+        operation = DmemLookup(
+            dst=register, index=index, offset=offset, address=self.scratch(3)
+        )
+        proof = self.prog._time_bounds
+        # Native loop counters control how often the swept index advances;
+        # their whole-stream write provenance is part of the bounds proof.
+        proof.register(index, CycleBounds(0, len(values) - 1), (), tuple(axes))
+        limits = {index: CycleBounds(0, len(values) - 1)}
+        proof.register(register, CycleBounds(lower, upper), (operation,), (), limits)
+        proof.capture_inputs(self.prog, register, (), limits)
+        proof.defined.add(register)
+        proof.source(self.prog, register)
+        self.operations.append(operation)
+        return RuntimeEnd(register, lower, upper)
 
     def cycles(self, value: Time) -> RuntimeEnd:
         if isinstance(value, RuntimeEnd):
@@ -185,6 +250,11 @@ class RuntimeMath(TimedMacro):
             if right_minimum >= 0:
                 covers = (left, *left.covers)
         return RuntimeEnd(register, *limits, covers)
+
+    @staticmethod
+    def covers(end: Time, previous: Time) -> bool:
+        """Return whether an existing exact identity/coverage proves end >= previous."""
+        return _known_maximum(end, previous) is end
 
     def snapshot(self, value: RuntimeEnd) -> RuntimeEnd:
         register = self.allocate()

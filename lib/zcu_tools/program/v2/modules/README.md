@@ -32,7 +32,10 @@ Lowering 不用 `total_length` 重建時間，也不移動 reference。
 整數 register 起點也保留事件的分數尾段，直到加上 post-delay 才取整。
 TwoPulseReset 合併各 pulse end 加各自 post-delay。BathReset 的 pi/2 從向上取整後的 cavity end 加 post-delay 開始。
 BathReset 最後合併 qubit 與 pi/2 的實際結尾，包含各自 post-delay，不漏掉較長的 qubit。
-Scalar 與整數仿射 sweep 使用這條路徑。非仿射 sweep 的逐點精確 ceil／table fallback 尚未實作。
+Scalar 與可精確表示的整數仿射 sweep 保留靜態時間。
+非仿射 sweep 由 program owner 以 dmem table 提供逐點精確 ceil，包含多 axis 與重複／nested emission。
+Index 使用 QICK 原生 sweep 初始化、回邊與 reset，並連同所依賴的 loop counter 接受時間 producer 的全流寫入稽核。
+表超過剩餘 dmem 容量時，編譯錯誤指出 emission 與所需 word 數。
 Delay 與 SoftDelay 都只加 timeline 結尾。`sync()` 或 body 收尾才推進 reference。
 
 DelayAuto 是唯一例外，未指定 timeline 時呼叫原生 delay_auto 或 delay_reg_auto。

@@ -1,6 +1,6 @@
 # README - program/v2
 
-**Last updated:** 2026-10-29，event-end aggregate 與 ScanWith lowering
+**Last updated:** 2026-10-29，逐點精確 sweep ceil 與 dmem table fallback
 
 **讀者：** lab-author、framework-dev、agent。原生 V2 program 寫法與 module、readout、acquisition 契約速查。
 
@@ -136,8 +136,9 @@ Pulse／PulseReadout 的 emit 內部事件共用所選 timeline 的結尾作為�
 結尾取實際 waveform／ADC event end 的最大值，加一次 post-delay，整段向上取整一次。
 Runtime 整數 cycle 起點也保留分數 event tail 到加 post-delay 後才取整，不先各自取整。
 Reset 保留每個 child 的 post-delay。BathReset 的 pi/2 等待 cavity end 加 post-delay 向上取整後才開始，最後也計入 qubit 尾段。
-這些 owner 不從 `total_length` 重建 duration。Scalar 與可精確表示的整數仿射 sweep 已支援。
-非仿射 sweep 的逐點精確 ceil／table fallback 尚未實作。
+這些 owner 不從 `total_length` 重建 duration。Scalar 與可精確表示的整數仿射 sweep 保留靜態時間。
+編譯期已知的非仿射 sweep 由 program／timeline owner 以 dmem table 提供逐點精確 aggregate ceil，不加 padding。
+任意 runtime selector 與 selected-post 尚待整合。
 省略 timeline 選 default，但不移動 reference。
 以下是 `TimelineProgramV2` 子類別的 hooks。`drive_cfg` 是呼叫端提供、使用 channel 0 的 `Pulse.Cfg`。
 時間參數單位為 us，另一個 channel 1 的 native pulse 由原生 API 宣告。
