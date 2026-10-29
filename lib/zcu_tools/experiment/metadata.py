@@ -181,12 +181,29 @@ class RunMetadata(BaseModel):
         return value
 
 
+class MetadataFieldError(ValueError):
+    """A requested historical metadata field could not be decoded or validated.
+
+    Preview callers may isolate this error without hiding unrelated planning
+    failures. field is the RunMetadata field name, document_path is its absolute
+    /docs/metadata/<field> location, and the message retains the owner's cause.
+    Whole-document project() validation does not use this field-read error.
+    """
+
+    def __init__(self, field: str, cause: ValueError) -> None:
+        """Identify field's failed read; raise from cause to retain its traceback."""
+        self.field = field
+        self.document_path = f"/docs/metadata/{field}"
+        super().__init__(f"{self.document_path}: {cause}")
+
+
 class RunMetadataContent:
     """Detached historical metadata with validation at each requested field.
 
     document is an experiment-owned metadata mapping from an already-read file.
     Construction copies it without validating unused fields. Properties enforce
-    RunMetadata's field rules and name /docs/metadata/<field> on failure. snapshot
+    RunMetadata's field rules and raise MetadataFieldError with the field name,
+    /docs/metadata/<field> location and original cause on failure. snapshot
     and provenance request complete typed sections; parameter_snapshot retains
     resource-owned opaque contents. Missing optional fields use schema defaults.
     project() explicitly validates the complete document for Save or whole reads.
@@ -211,7 +228,7 @@ class RunMetadataContent:
             )
             return adapter.validate_python(value)
         except ValueError as error:
-            raise ValueError(f"/docs/metadata/{name}: {error}") from error
+            raise MetadataFieldError(name, error) from error
 
     @property
     def run_id(self) -> str:

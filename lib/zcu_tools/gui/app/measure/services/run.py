@@ -53,6 +53,7 @@ logger = logging.getLogger(__name__)
 _GUI_ORIGIN = CommandOrigin("gui")
 
 if TYPE_CHECKING:
+    from zcu_tools.gui.app.measure.artifacts import LayoutPlanner
     from zcu_tools.gui.event_bus import BaseEventBus as EventBus
     from zcu_tools.gui.session.ports import ExclusionGate
     from zcu_tools.gui.session.types import ParameterContext
@@ -101,14 +102,17 @@ class RunService:
         gate: ExclusionGate,
         devices: Callable[[], Mapping[str, BaseDevice[Any]]],
         refresh_devices: Callable[[], None],
+        plan_layout: LayoutPlanner | None = None,
     ) -> None:
         """Borrow drivers and a terminal observation command from the session.
 
+        plan_layout supplies Save's planner, or None for unplanned outputs.
         devices supplies connected drivers at admission. refresh_devices runs
         on the owner after terminal handling, on success, failure or cancellation;
         it schedules best-effort reads without changing run evidence or outcome.
         Its owner handles observation failures. No hardware I/O runs here.
         """
+        self._plan_layout = plan_layout
         self._refresh_devices = refresh_devices
         self._state = state
         self._devices = devices
@@ -182,6 +186,7 @@ class RunService:
                     parameters=op.parameters,
                     partial_result=op.partial_result,
                 ),
+                plan_layout=self._plan_layout,
             )
         except Exception as error:
             logger.exception("Run result publication failed: tab_id=%r", op.tab_id)
@@ -265,6 +270,7 @@ class RunService:
                 self._state,
                 op.tab_id,
                 RunPaneState(partial_result=op.stop_signal.partial_result),
+                plan_layout=self._plan_layout,
             )
             self._discard_plots(op, "Cancelled")
         elif not self._publish_run_result(op, result, settle):
@@ -296,7 +302,9 @@ class RunService:
         # notifications can reenter tab editing and closing.
         self._state.set_tab_running(tab_id, running=True)
         try:
-            commit_run(self._state, tab_id, RunPaneState())
+            commit_run(
+                self._state, tab_id, RunPaneState(), plan_layout=self._plan_layout
+            )
         except Exception:
             self._state.set_tab_running(tab_id, running=False)
             raise

@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from collections.abc import Callable
+from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -17,7 +18,7 @@ from zcu_tools.experiment.artifacts import (
     SaveReport,
     save_artifacts,
 )
-from zcu_tools.experiment.records import RunMetadata, RunRecord
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.catalog import ExperimentAccess
 from zcu_tools.gui.app.measure.events.completion import (
     SaveArtifactsFinishedPayload,
@@ -39,8 +40,27 @@ from zcu_tools.resources.entry import (
 )
 
 if TYPE_CHECKING:
-    from zcu_tools.gui.app.measure.state import State
+    from zcu_tools.gui.app.measure.state import Session, State
     from zcu_tools.gui.event_bus import BaseEventBus as EventBus
+
+
+@dataclass(frozen=True)
+class OutputPlan:
+    """One naming decision shared by preview and Save.
+
+    binding fixes the recorded entry/point beneath current roots and prepares
+    the ledger only when Save requests it. layout calculates artifact paths
+    from that binding, the adapter's stem and the supplied save timestamp.
+    Neither field implies that any output has been written.
+    """
+
+    binding: RunOutputBinding
+    layout: SaveLayout
+
+
+type LayoutPlanner = Callable[
+    [Session[Any, Any, Any, Any], RunRecord[Any, Any], datetime], OutputPlan
+]
 
 
 @dataclass(frozen=True)
@@ -80,6 +100,44 @@ class SaveService:
         self._result_root = result_root
         self._database_root = database_root
         self._access = access if access is not None else ExperimentAccess()
+
+    def plan_layout(
+        self,
+        tab: Session[Any, Any, Any, Any],
+        record: RunRecord[Any, Any],
+        saved_at: datetime,
+    ) -> OutputPlan:
+        """Return a binding and layout without writing files or changing status.
+
+        tab supplies the registered adapter and its name; record supplies cfg
+        and historical metadata, including entry, point, roles and run_id.
+        saved_at must be timezone-aware. Use the injected current roots, never
+        acquisition storage or live selection. Missing metadata, unsafe names
+        or an invalid adapter stem raise ValueError. Unreadable historical
+        fields raise MetadataFieldError. Read only metadata fields
+        needed for naming; full Save validation remains in the Save command.
+        """
+        metadata = record.metadata
+        if metadata is None:
+            raise ValueError("Run has no historical native metadata")
+        history = metadata.snapshot
+        stem = tab.adapter.save_stem(
+            SaveContext(
+                name=tab.adapter_name,
+                run_id=metadata.run_id,
+                point=history.point,
+                roles=history.roles,
+                cfg=None if record.cfg is None else record.cfg.model_dump(mode="json"),
+                saved_at=saved_at,
+            )
+        )
+        binding = bind_run_outputs(
+            result_root=self._result_root,
+            database_root=self._database_root,
+            entry_name=history.entry_name,
+            point=history.point,
+        )
+        return OutputPlan(binding, binding.layout(stem=stem, saved_at=saved_at))
 
     def require_save_available(self, tab_id: str) -> None:
         """Reject reload/shutdown or busy tabs without changing drafts or files.
@@ -145,31 +203,13 @@ class SaveService:
         comment: str | None,
         origin: CommandOrigin,
     ) -> _SavePlan:
-        record, metadata = self._capture_source(tab_id)
+        record = self._capture_source(tab_id)
         tab = self._state.get_tab(tab_id)
         try:
             selected = tab.artifacts.select(refs)
         except ValueError as exc:
             raise FailedPreconditionError(str(exc)) from exc
-        history = metadata.snapshot
-        saved_at = datetime.now().astimezone()
-        stem = tab.adapter.save_stem(
-            SaveContext(
-                name=tab.adapter_name,
-                run_id=metadata.run_id,
-                point=history.point,
-                roles=history.roles,
-                cfg=None if record.cfg is None else record.cfg.model_dump(mode="json"),
-                saved_at=saved_at,
-            )
-        )
-        outputs = bind_run_outputs(
-            result_root=self._result_root,
-            database_root=self._database_root,
-            entry_name=history.entry_name,
-            point=history.point,
-        )
-        layout = outputs.layout(stem=stem, saved_at=saved_at)
+        output_plan = self.plan_layout(tab, record, datetime.now().astimezone())
         annotation = tab.save.comment if comment is None else comment
         captured: list[SaveArtifact] = []
         for artifact in selected:
@@ -201,9 +241,16 @@ class SaveService:
                         )
                     )
             captured.append(SaveArtifact(ref, tuple(members)))
-        return _SavePlan(tuple(captured), layout, record, outputs, origin, annotation)
+        return _SavePlan(
+            tuple(captured),
+            output_plan.layout,
+            record,
+            output_plan.binding,
+            origin,
+            annotation,
+        )
 
-    def _capture_source(self, tab_id: str) -> tuple[RunRecord[Any, Any], RunMetadata]:
+    def _capture_source(self, tab_id: str) -> RunRecord[Any, Any]:
         """Capture native save evidence after admission checks."""
         if not self._state.has_tab(tab_id):
             raise FailedPreconditionError(
@@ -223,7 +270,7 @@ class SaveService:
                 "Run has no historical native metadata",
                 reason_code="storage_unavailable",
             )
-        return record, metadata.project()
+        return replace(record, metadata=metadata.project())
 
     def _capture_data(self, tab_id: str, key: ArtifactKey, comment: str) -> DataItem:
         tab = self._state.get_tab(tab_id)

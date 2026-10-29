@@ -216,7 +216,14 @@ def build_app_services(  # noqa: PLR0913
     tab = TabService(state, registry, writeback, tab_forms, form_sources)
     workspace = WorkspaceService(state, tab, bus)
     guard = GuardService(state, access=access)
-    load = LoadService(state)
+    save = SaveService(
+        state,
+        bus,
+        result_root=Path(project_root) / "result",
+        database_root=Path(project_root) / "Database",
+        access=access,
+    )
+    load = LoadService(state, plan_layout=save.plan_layout)
     run = RunService(
         state,
         session.runner,
@@ -225,17 +232,18 @@ def build_app_services(  # noqa: PLR0913
         gate=operation_gate,
         devices=device.get_connected_devices,
         refresh_devices=device.refresh_connected_device_info,
+        plan_layout=save.plan_layout,
     )
-    analyze = AnalyzeService(state, session.runner, bus, writeback, handles)
+    analyze = AnalyzeService(
+        state, session.runner, bus, writeback, handles, plan_layout=save.plan_layout
+    )
     post_analyze = PostAnalyzeService(
-        state, session.runner, bus, handles, writeback=writeback
-    )
-    save = SaveService(
         state,
+        session.runner,
         bus,
-        result_root=Path(project_root) / "result",
-        database_root=Path(project_root) / "Database",
-        access=access,
+        handles,
+        writeback=writeback,
+        plan_layout=save.plan_layout,
     )
     run_analyze_control = RunAnalyzeControlFacet(
         state=state,
