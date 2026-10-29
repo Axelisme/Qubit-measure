@@ -63,7 +63,9 @@ def _register_initialize(prog: TimelineProgramV2, value: int = 3):
 
 def _shots(prog: TimelineProgramV2):
     return ir.analyze_timing(
-        ir.CompiledTimingInput(prog.prog_list, prog.labels, prog.timing_layout)
+        ir.CompiledTimingInput(
+            prog.prog_list, prog.labels, prog.timing_layout, dmem=prog.compile_datamem()
+        )
     ).shots
 
 
@@ -364,6 +366,94 @@ def test_register_repeat_wait_source_stays_restricted_after_deriving_schedule_po
 
     with pytest.raises(ValueError, match="external.*wait"):
         _program(body, initialize)
+
+
+def _readout_register_initialize(prog: TimelineProgramV2):
+    _register_initialize(prog)
+    prog.declare_readout(0, length=0.4)
+    prog.add_readoutconfig(0, "ro", freq=100)
+
+
+def _repeat_with_external_wait(prog: TimelineProgramV2):
+    prog.fork("default", into="external")
+    prog.delay_timeline(100 / 430.08, timeline="external")
+    with prog.repeat("r", "count", range_hint=(2, 4)):
+        prog.delay_timeline(15 / 430.08)
+
+
+def _send_config(
+    prog: TimelineProgramV2, runtime_words: bool, offset: int, timeline: str | None
+):
+    if runtime_words:
+        prog.send_readoutconfig_from_regs(
+            0, "ro", freq_reg="count", t=offset / 430.08, timeline=timeline
+        )
+    else:
+        prog.send_readoutconfig(0, "ro", t=offset / 430.08, timeline=timeline)
+
+
+@pytest.mark.parametrize("runtime_words", [False, True])
+@pytest.mark.parametrize("offset", [0, 5])
+@pytest.mark.parametrize("transition", ["none", "join", "fork", "partial-native"])
+def test_register_repeat_wait_source_rejects_config_placement(
+    runtime_words, offset, transition
+):
+    def body(prog):
+        _repeat_with_external_wait(prog)
+        if transition == "join":
+            prog.join("external", into="default")
+        elif transition == "fork":
+            prog.fork("external", into="derived")
+        elif transition == "partial-native":
+            prog.delay(20 / 430.08)
+        _send_config(prog, runtime_words, offset, "external")
+
+    with pytest.raises(ValueError, match="external.*wait"):
+        _program(body, _readout_register_initialize)
+
+
+@pytest.mark.parametrize("runtime_words", [False, True])
+@pytest.mark.parametrize("offset", [0, 5])
+@pytest.mark.parametrize("transition", ["join", "fork", "sync", "native"])
+def test_register_repeat_ordinary_schedule_point_allows_config_placement(
+    runtime_words, offset, transition
+):
+    def body(prog):
+        _repeat_with_external_wait(prog)
+        target = "external"
+        if transition == "join":
+            prog.join("external", into="default")
+            target = "default"
+        elif transition == "fork":
+            prog.fork("external", into="derived")
+            target = "derived"
+        elif transition == "sync":
+            prog.sync(timeline="external")
+        else:
+            prog.delay(70 / 430.08)
+        _send_config(prog, runtime_words, offset, target)
+        prog.pulse(1, "p1", timeline=target)
+
+    (shot,) = _shots(_program(body, _readout_register_initialize))
+    # Actual ref45 plus conservative remainder70; config is instantaneous.
+    # The following 25-generator-tick pulse adds 28 tProc cycles.
+    assert _waves(shot) == [115 + offset, 115 + offset]
+    assert (shot.body_end_cycle, shot.end_cycle) == (143 + offset,) * 2
+
+
+@pytest.mark.parametrize("runtime_words", [False, True])
+@pytest.mark.parametrize("offset", [0, 5])
+def test_register_repeat_native_config_does_not_place_on_wait_source(
+    runtime_words, offset
+):
+    def body(prog):
+        _repeat_with_external_wait(prog)
+        _send_config(prog, runtime_words, offset, None)
+        prog.pulse(1, "p1", timeline="default")
+
+    (shot,) = _shots(_program(body, _readout_register_initialize))
+    assert _waves(shot) == [45 + offset, 45]
+    assert (shot.body_end_cycle, shot.end_cycle) == (115, 115)
 
 
 @pytest.mark.parametrize("actual", [0, 3])

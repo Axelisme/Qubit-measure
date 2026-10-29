@@ -167,12 +167,17 @@ Register Repeat 按 minimum 計算外部結尾的最晚等待上界。
 原 timeline 禁止繼續發射或 delay_timeline，直到 sync 或原生 reference 推進完整消耗上界。
 Join 目標與 fork 新名字則是普通 timeline，可以從該上界建立保守排程點。
 例如實際 reference=45、上界=70 時，新 timeline 的 pulse 可以排在115。
+原 wait-only timeline 上的兩種 readout config 入口也拒絕放置，包含 t=0。
+Join／fork 的普通結果，或 sync／原生推進消耗上界後的來源，可照常放置 config。
+不帶 timeline 的 config 呼叫保留原生行為。
 Repeat body 內的 DelayAuto(register) 與 delay_reg_auto 報錯，因每圈推進量無法在編譯期表達。
 迴圈外的 consumer 與以 register 控制次數、每圈長度可證明的 Repeat 保持可用。
 
 Body 收尾先同步全部 timeline，再放 body_end marker，然後進 shot 外殼。
 每次 compile 重置宣告與結尾。公開 `timing_layout` 由真 boundary metadata 取得 linked addresses 與 loop 座標。
 將它與 prog_list／labels 交給 `ir.analyze_timing`，可觀察逐點事件、body_end 與含外殼的 shot_end。
+Register Repeat 的編譯結果可能包含 DMEM dispatch，分析時以 `CompiledTimingInput.dmem`
+傳入公開 `compile_datamem()` 的結果，不在 caller 重建 table。
 Resync 讀取硬體 s11，analysis 會明確拒絕，不宣稱其後精確時序。
 
 `resources.ProgramResourcesMixin` 集中 dmem 配置與 readout route 保護。

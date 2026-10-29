@@ -56,7 +56,9 @@ def _program(
 
 def _shots(prog):
     return ir.analyze_timing(
-        ir.CompiledTimingInput(prog.prog_list, prog.labels, prog.timing_layout)
+        ir.CompiledTimingInput(
+            prog.prog_list, prog.labels, prog.timing_layout, dmem=prog.compile_datamem()
+        )
     ).shots
 
 

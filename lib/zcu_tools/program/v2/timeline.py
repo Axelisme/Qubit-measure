@@ -785,6 +785,8 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
 
         Native args are t=0, tag=None. A timeline end becomes the scheduled config
         instant; config length and unrelated ADC windows do not contribute.
+        Wait-only timelines reject placement even at t=0; first sync the bound
+        or establish an ordinary scheduling point with join/fork.
         Declaration and timing errors propagate.
         """
         super().send_readoutconfig(ch, name, *args, **kwargs)
@@ -811,8 +813,10 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         """Send runtime ADC words at native t or timeline end+t (us).
 
         kwargs are t, tag and freq_reg. A timeline end becomes the scheduled config
-        instant, independent of config length. Native patching and declaration/
-        register validation are unchanged.
+        instant, independent of config length. Wait-only timelines reject placement
+        even at t=0; first sync the bound or establish an ordinary scheduling
+        point with join/fork. Native patching and declaration/register validation
+        are unchanged.
         """
         super().send_readoutconfig_from_regs(ch, name, **kwargs)
         if timeline is not None:
