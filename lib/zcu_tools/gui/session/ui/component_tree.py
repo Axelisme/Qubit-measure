@@ -31,7 +31,7 @@ from qtpy.QtWidgets import (
 
 from zcu_tools.format_version import YamlMap, YamlValue
 from zcu_tools.gui.expected_error import FailedPreconditionError
-from zcu_tools.gui.session.context_types import PointFileRevision, SavedPoint
+from zcu_tools.gui.session.context_types import FileRevision, SavedPoint
 from zcu_tools.gui.session.ui.add_component_dialog import AddComponentDialog
 from zcu_tools.gui.session.ui.component_editing import (
     edit_choices,
@@ -41,7 +41,7 @@ from zcu_tools.gui.session.ui.component_editing import (
     set_error_foreground,
     show_error,
 )
-from zcu_tools.gui.session.ui.point_file_banner import PointFileBanner
+from zcu_tools.gui.session.ui.file_banner import FileBanner
 from zcu_tools.gui.session.ui.tree_filter import TreeFilter
 from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 from zcu_tools.resources.entry import (
@@ -86,7 +86,7 @@ class _EditTarget:
     completions: tuple[str, ...]
     initial: str
     write_depth: int
-    revision: PointFileRevision | None = None
+    revision: FileRevision | None = None
     setup: bool = False
     entry_name: str | None = None
     point: SavedPoint | None = None
@@ -144,9 +144,7 @@ class ComponentTreeWidget(QWidget):
         self._edit_targets: dict[_RowKey, _EditTarget] = {}
         self._drafts: dict[_RowKey, str] = {}
         layout = QVBoxLayout(self)
-        self._sync = PointFileBanner(
-            control, "parameters", self._reload_file, parent=self
-        )
+        self._sync = FileBanner(control, "parameters", self._reload_file, parent=self)
         layout.addWidget(self._sync)
         toolbar = QHBoxLayout()
         toolbar.addWidget(QLabel("Destination:"))

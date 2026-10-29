@@ -1,4 +1,4 @@
-"""Installed-versus-disk revision admission and selected-point observations."""
+"""Installed-versus-disk revision admission and installed-file observations."""
 
 from __future__ import annotations
 
@@ -12,11 +12,11 @@ from ruamel.yaml.error import YAMLError
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 from zcu_tools.gui.owner import OwnerThreadGuard
-from zcu_tools.gui.session.context_types import PointFileRevision, PointFileSyncStatus
-from zcu_tools.gui.session.events import PointFileChangedPayload
+from zcu_tools.gui.session.context_types import FileRevision, FileSyncStatus
+from zcu_tools.gui.session.events import FileChangedPayload
 
 
-class PointFileSync:
+class FileSync:
     """Coordinate revisions and observations, without interpreting document formats.
 
     ContextService supplies installed versions and one strict installation
@@ -29,8 +29,8 @@ class PointFileSync:
         self,
         bus: BaseEventBus,
         *,
-        installed: Callable[[], tuple[PointFileRevision, ...]],
-        install: Callable[[PointFileRevision], PointFileRevision],
+        installed: Callable[[], tuple[FileRevision, ...]],
+        install: Callable[[FileRevision], FileRevision],
     ) -> None:
         """Bind installed queries and strict install(file) to the context owner.
 
@@ -42,14 +42,14 @@ class PointFileSync:
         self._bus = bus
         self._installed = installed
         self._install = install
-        self._statuses: dict[Path, PointFileSyncStatus] = {}
+        self._statuses: dict[Path, FileSyncStatus] = {}
 
     def clear(self) -> None:
         """Forget observations on entry/point switch; never touch files."""
         self._owner.assert_owner()
         self._statuses.clear()
 
-    def statuses(self) -> tuple[PointFileSyncStatus, ...]:
+    def statuses(self) -> tuple[FileSyncStatus, ...]:
         """Project cached observations with current installed versions, without I/O.
 
         disk_revision retains the last observation, even after a later owner
@@ -63,18 +63,18 @@ class PointFileSync:
             if path in installed
         )
 
-    def _point_file(self, path: Path) -> PointFileRevision:
+    def _installed_file(self, path: Path) -> FileRevision:
         if path.is_absolute():
             for file in self._installed():
                 if file.path == path:
                     return file
         raise InvalidInputError(
-            f"{path}: not an absolute owner path of the selected point",
+            f"{path}: not an absolute installed owner path",
             reason_code="file_path_invalid",
         )
 
     @staticmethod
-    def _validate_base(file: PointFileRevision, revision: str | None) -> None:
+    def _validate_base(file: FileRevision, revision: str | None) -> None:
         if revision is None and file.document == "parameters":
             raise InvalidInputError(
                 f"{file.path}: a revision is required for {file.document}"
@@ -87,7 +87,7 @@ class PointFileSync:
         except FileNotFoundError:
             return None
 
-    def check_revision(self, expected: PointFileRevision) -> None:
+    def check_revision(self, expected: FileRevision) -> None:
         """Compare a draft's absolute owner path/version with disk, without effects.
 
         None expects an absent library or aliases file. Invalid paths/bases raise
@@ -95,7 +95,7 @@ class PointFileSync:
         revision_mismatch. Other I/O failures propagate; no candidate is installed.
         """
         self._owner.assert_owner()
-        file = self._point_file(expected.path)
+        file = self._installed_file(expected.path)
         if expected.document != file.document:
             raise InvalidInputError(f"{expected.path}: document owner mismatch")
         self._validate_base(file, expected.revision)
@@ -104,12 +104,12 @@ class PointFileSync:
                 f"{file.path}: disk revision mismatch", reason_code="revision_mismatch"
             )
 
-    def _record(self, status: PointFileSyncStatus) -> None:
+    def _record(self, status: FileSyncStatus) -> None:
         if self._statuses.get(status.file.path) != status:
             self._statuses[status.file.path] = status
-            self._bus.emit(PointFileChangedPayload(status=status))
+            self._bus.emit(FileChangedPayload(status=status))
 
-    def reload(self, path: Path, expected_revision: str | None) -> PointFileRevision:
+    def reload(self, path: Path, expected_revision: str | None) -> FileRevision:
         """Check the installed base, strictly install the file, then publish status.
 
         None expects an absent library or aliases base. Invalid paths/bases/candidates
@@ -119,7 +119,7 @@ class PointFileSync:
         admission; this method never bypasses the injected installation command.
         """
         self._owner.assert_owner()
-        file = self._point_file(path)
+        file = self._installed_file(path)
         self._validate_base(file, expected_revision)
         if file.revision != expected_revision:
             raise FailedPreconditionError(
@@ -133,15 +133,13 @@ class PointFileSync:
                 disk_revision = self._disk_revision(path)
             except OSError:
                 disk_revision = None
-            self._record(PointFileSyncStatus(file, disk_revision, "error", error))
+            self._record(FileSyncStatus(file, disk_revision, "error", error))
             raise InvalidInputError(error, reason_code="file_validation") from exc
-        self._record(
-            PointFileSyncStatus(installed, installed.revision, "reloaded", None)
-        )
+        self._record(FileSyncStatus(installed, installed.revision, "reloaded", None))
         return installed
 
     def synchronize(self, *, admit_reload: bool) -> None:
-        """Observe all selected-point files; admit external installation only if True.
+        """Observe all installed files; admit external installation only if True.
 
         False publishes pending without changing installed resources. Equal hashes
         ignore own writes. Duplicate observations are silent. Validation and I/O
@@ -152,19 +150,15 @@ class PointFileSync:
             try:
                 disk_revision = self._disk_revision(file.path)
             except OSError as exc:
-                self._record(
-                    PointFileSyncStatus(file, None, "error", f"{file.path}: {exc}")
-                )
+                self._record(FileSyncStatus(file, None, "error", f"{file.path}: {exc}"))
                 continue
             if disk_revision == file.revision:
                 previous = self._statuses.get(file.path)
                 if previous is not None and previous.state != "reloaded":
-                    self._record(
-                        PointFileSyncStatus(file, disk_revision, "reloaded", None)
-                    )
+                    self._record(FileSyncStatus(file, disk_revision, "reloaded", None))
                 continue
             if not admit_reload:
-                self._record(PointFileSyncStatus(file, disk_revision, "pending", None))
+                self._record(FileSyncStatus(file, disk_revision, "pending", None))
                 continue
             try:
                 self.reload(file.path, file.revision)

@@ -1,4 +1,4 @@
-"""Qt projection of point-file synchronization and explicit reload decisions."""
+"""Qt projection of installed-file synchronization and explicit reload decisions."""
 
 from __future__ import annotations
 
@@ -18,12 +18,12 @@ from qtpy.QtWidgets import (
 
 from zcu_tools.gui.expected_error import ExpectedError
 from zcu_tools.gui.session.context_control import ContextControlPort
-from zcu_tools.gui.session.context_types import PointFileRevision
+from zcu_tools.gui.session.context_types import FileRevision
 from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 
 
-class PointFileBanner(QWidget):
-    """Show one point document's pending/reloaded/error projection.
+class FileBanner(QWidget):
+    """Show one active document's pending/reloaded/error projection.
 
     control owns revision checks and reload validation. document selects the
     owner file; children are named 'inspect.<document>.sync.message',
@@ -47,7 +47,7 @@ class PointFileBanner(QWidget):
         self._control = control
         self._document = document
         self._on_reloaded = on_reloaded
-        self._notice_file: PointFileRevision | None = None
+        self._notice_file: FileRevision | None = None
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         self._message = QLabel()
@@ -71,8 +71,8 @@ class PointFileBanner(QWidget):
         layout.addLayout(actions)
         self.hide()
 
-    def capture(self) -> PointFileRevision | None:
-        """Return the installed selected-point file, or None without a point."""
+    def capture(self) -> FileRevision | None:
+        """Return the installed active file, or None without an entry."""
         return next(
             (
                 f
@@ -82,10 +82,10 @@ class PointFileBanner(QWidget):
             None,
         )
 
-    def check(self, expected: PointFileRevision | None) -> None:
+    def check(self, expected: FileRevision | None) -> None:
         """Check a loaded draft's disk revision; show and rethrow owner rejection.
 
-        None means no point was loaded, not a missing aliases revision. The
+        None means no entry was loaded, not a missing aliases revision. The
         normal writer still owns the no-context precondition in that case.
         """
         if expected is None:

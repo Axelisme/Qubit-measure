@@ -138,7 +138,7 @@ App composition 協調 Artifact 與 Writeback。
 
 ## Composition root
 
-`MeasureGuiBehavior` 組裝後啟用 point 檔案監看。Controller 從目前 holder 注入 admission：Local 僅發布 pending，Remote 才自動重載。Authority 改變時重查 pending 檔案。Controller.close 先解除 watcher 與 authority listener，再 drain 背景工作，避免關閉後重載。
+`MeasureGuiBehavior` 組裝後啟用同一個已安裝文件 watcher。它監看作用中三檔，選 point 時另監看仍由 Inspect 編輯的 entry 層文件。Controller 從目前 holder 注入 admission：Local 僅發布 pending，Remote 才自動重載。Authority 改變時重查 pending 檔案。Controller.close 先解除 watcher 與 authority listener，再 drain 背景工作，避免關閉後重載。
 
 `MeasureGuiBehavior` 明確接收 lab 與 keyword-only 程序設定。
 它依本 package 的 `lab.MeasureGuiLab` Protocol 消費 lab，不 import 使用者套件。

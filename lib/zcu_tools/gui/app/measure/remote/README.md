@@ -335,22 +335,29 @@ UI disabled rows, clone-source exclusion, tooltips and remote error presentation
 remain unchanged. Availability is not an extra precondition for use_point, Load,
 Save or other reads. Directory discovery errors still fail the request.
 
-## Point-file reload and guarded writes
+## Installed-file reload and guarded writes
 
-`entry.info.files` lists the selected point's absolute parameters, library and
-aliases paths and their installed SHA-256 revisions. Read this base before
+`entry.info.files` lists the active parameters, library and aliases absolute
+paths and their installed SHA-256 revisions, in that order. An opened entry
+always returns three files, using global without a point or the selected point
+set. Only a closed entry returns an empty list. There is no scope field.
+The same missing-file rules apply at both levels. Inspect still edits entry
+files while a point is active, and the single watcher observes both sets.
+Those inactive entry files are not listed; agents switch to global before
+editing global files. `context.reload` accepts any installed owner path. Read this base before
 editing a file. Edit that path, then call `context.reload` with its path and the
 previously installed `expected_revision`, not the edited disk hash. Supply the
 key explicitly. Use null when the library or aliases base has no file.
-A point with no library remains selectable. Its library is empty, its revision
+A global or point set with no library remains usable. Its library is empty, its revision
 is null and its path still names the expected absolute file. Reads create nothing.
 
 ```json
 {"method": "context.reload", "params": {"path": "/project/results/entry/points/base/aliases.yaml", "expected_revision": null}}
 ```
 
-The owner validates and installs the candidate, publishes source changes and
-returns `{document, path, revision}`. It never rewrites or repairs the edited
+The owner validates and installs the candidate and returns
+`{document, path, revision}`. Active changes publish source facts; an inactive
+entry reload updates only its installed state and Inspect observation. It never rewrites or repairs the edited
 file. Invalid paths or contents return `invalid_params` with the path and
 reason. A stale installed base returns `precondition_failed` with
 `reason=revision_mismatch`. A non-holder receives the existing `not_holder`

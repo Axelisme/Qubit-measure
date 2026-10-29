@@ -32,9 +32,9 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         "context_reload:h_context_reload",
         MethodSpec(
             10.0,
-            "Reload one edited file belonging to the currently selected point. "
-            "path must be the absolute parameters, library or aliases owner path "
-            "from entry.info.files. expected_revision must be explicitly supplied "
+            "Reload one edited file belonging to any installed document set. "
+            "path must be an absolute parameters, library or aliases owner path. "
+            "entry.info.files lists only the active set; switch to global before editing global files. expected_revision must be explicitly supplied "
             "and match the installed base, not the edited disk hash. Null expects "
             "a missing library or aliases base. Read/validate/install/publish once without "
             "writing or repairing disk. Return {document, path, revision}. "
@@ -43,7 +43,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "returns not_holder through dispatch. Failures retain installed state. "
             "No hidden retry, selection change or refresh of fixed tab captures.",
             (
-                required_string("path", "Absolute selected-point owner file path"),
+                required_string("path", "Absolute installed owner file path"),
                 ParamSpec(
                     "expected_revision",
                     JsonType.STRING,

@@ -26,8 +26,9 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             5.0,
             "Return {entry, files}: entry is null before opening, otherwise "
             "name/result_path/database_path from the cached owner identity. "
-            "files lists installed point {document, path, revision}, ordered "
-            "parameters/library/aliases; empty before point selection. Paths are "
+            "files lists active {document, path, revision}, ordered "
+            "parameters/library/aliases: three entries after opening, empty without an entry. "
+            "Uses the global set without a point, otherwise the selected point set. Paths are "
             "absolute and revisions are raw-byte SHA-256 (null for missing library or aliases). "
             "No disk read or implicit refresh.",
             readonly=True,

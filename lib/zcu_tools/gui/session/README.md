@@ -1,6 +1,6 @@
 # gui/session/ — 量測 session core
 
-**Last updated:** 2026-10-29，global／point 作用中文件組
+**Last updated:** 2026-10-29，global／point 已安裝文件監看
 
 **讀者：** framework-dev。Session 層的資源綁定、operation 與共用對話框分工。
 
@@ -42,7 +42,8 @@ Inspect 的 New 以目前 point 的同名 alias 解析目標填入 bindings。�
   公開 `read_context(aliases=None)` 每次固定 point/library/storage 與全表，GUI 不要求 consumer declarations 或 kind 檢查。`aliases={"qubit": "Q2"}` 只覆寫該次 capture 的具名列，保留 dependent authored links，不改全域 rows、版本或 selection。EMPTY 沿 `no_context` 失敗，缺或未綁定的 `$alias` 在讀取時指名報錯。
   歷史 `read_target(target, roles=...)` 使用已固定的 names，不展開目前全表。GUI adapter 不宣告角色，Tab、Run 與 Load 直接使用 alias-aware capture。App 的 EMPTY 無 override 讀取回 None，保留 context-free 與 deferred 路徑。非空 overrides 仍拒絕 no_context。省略 overrides、None 與 {} 等價。Notebook 的 role resolver 與 via 保留原契約。
 - **SessionEnv** 是已發布的 session environment。EMPTY 的 `parameters` 是 None。GLOBAL 與 POINT 都持有無 consumer roles 的固定 `ParameterContext`，且 `has_context()`／`is_active()` 都回 True。Global 的 `active_label` 為 None。它不提供 md/ml 欄位；SoC 與 cached value sources 保持各自 owner。
-- **作用中檔案版本**：`ContextService.get_file_revisions()` 依參數、library、aliases 順序回作用中文件的絕對路徑與原始 bytes SHA-256。未開 entry 回空 tuple；GLOBAL 與 POINT 都有三筆。缺少 library 或 aliases 檔時回 revision=None，讀取不建檔。Point library 在首次非空 edit 才建立。Aliases 的 hash 對應當次觀察到的 bytes，不保證內容有效。查詢不讀磁碟。`entry.info` 與 MCP `status` 將這份快取投影為 `files`。失敗不更新已安裝版本。
+- **作用中檔案版本**：`ContextService.get_file_revisions()` 依參數、library、aliases 順序回作用中文件的絕對路徑與原始 bytes SHA-256。未開 entry 回空 tuple；GLOBAL 與 POINT 都有三筆。缺少 library 或 aliases 檔時回 revision=None，讀取不建檔。Global 與 point library 都在首次非空 edit 才建立。Aliases 的 hash 對應當次觀察到的 bytes，不保證內容有效。查詢不讀磁碟。`entry.info` 與 MCP `status` 將這份快取投影為 `files`。失敗不更新已安裝版本。
+- **已安裝文件與 Inspect**：`get_installed_file_revisions()` 先列作用中三筆，POINT 時再列 entry 三筆。Watcher 以這份快取監看全部已安裝目錄，100 ms 去抖後批次比對 hash。`read_context(setup=True)` 與 `get_alias_rows(setup=True)` 只讀已安裝的 entry 內容，不讀磁碟候選，也不繞過 holder pending。非作用中的 entry reload 只發布 file status，不推進 active content version。舊 capture 不變。
 - **Run snapshot** 是依該次 Run 契約捕捉的輸入，接受後不因後續編輯或 refresh 改用新的 cfg。持有 live `SessionEnv` 不等於持有這份不可變證據；SoC、driver 等 live handles 也不作為普通資料整包凍結。
 
 DeviceState.info 與 ValueSourceBinder 的 device sources 是已發布 cache，供 dialog、defaults 與 resolve-once 輸入使用，不是 Run 的控制命令或硬體 snapshot。GUI Run 框架在 hardware lease 後、adapter.run 前讀一次全部已連線 device 的 get_info。任一讀取失敗拒絕 Run，不以 cache 補值；無 device 記 `{}`。這份實驗前 snapshot 隨 RunMetadata 保存，後續 sweep 或 Save 不重讀、不改寫。實驗層 helpers 操作選定 driver，RunContext 不提供 setters。DeviceService 的獨立手動 setup 與 best-effort poll 保留各自責任，不代替 Run snapshot。Run 終局後，host 另請 DeviceService 在背景讀一次已連線儀器。成功讀取由 State owner 更新 cache，失敗台保留原 cache，不改寫固定 snapshot、run 終局或 lease。
@@ -85,7 +86,7 @@ session/
 ├── pbar_host.py        — ProgressBar(worker)/ProgressBarModel(主線程 SSOT)，Qt-free；worker API 同時支援 incremental `update(delta)` 與 absolute `set_progress(n)`
 ├── devices/            — 明確登錄的儀器 adapters；base 定義 driver/panel 契約與 bias_source/user_connectable 能力。各儀器 module 同檔保存 adapter 與專屬 Qt panel，service 和 dialog 共用同一 catalog，未知 type 不建立 driver 或專屬 panel
 ├── adapters/
-│   ├── point_file_watcher.py — PointFileWatcher：監看目前 point 目錄，QTimer 去抖後交 ContextService 比對 hash。flush 可同步排空去抖，close 解除 timer、目錄監看與 binding 訂閱。宿主注入執行時 reload admission，不由 session 讀取 app authority。
+│   ├── file_watcher.py — FileWatcher：以同一 watcher 監看已安裝的 global／point 目錄，QTimer 去抖後交 ContextService 比對 hash。flush 可同步排空去抖，close 解除 timer、目錄監看與 binding 訂閱。宿主注入執行時 reload admission，不由 session 讀取 app authority。
 │   ├── manual_owner_scheduler.py — ManualOwnerScheduler（headless/test owner queue，由建立它的owner thread明確pump）
 │   ├── thread_pool_background.py — ThreadPoolBackgroundExecutor（純threading worker，terminal delivery經OwnerScheduler回owner；quiesce等待worker與delivery ack）
 │   ├── qt_owner_scheduler.py — QtOwnerScheduler（queued-signal owner-loop adapter）
@@ -95,8 +96,8 @@ session/
 ├── services/
 │   ├── connection.py   — SoCConnectionService（SoC connect op；硬體 facet、OperationRunner client、cancel_hook=None 無 cancellation point；終局經typed `ConnectionFinishedPayload`，無Qt）
 │   ├── predictor.py — Independent simulator queries and entry predictor file listing/loading through resources.predictor_file.
-│   ├── context.py      — ContextService：owner-thread entry/point binding、固定 parameter capture、全域 alias、source facts 與目前 entry 的 ledger capability。current_point_label 只讀已安裝的 selection，未選時回 None，不做 I/O。reload_file 驗證單檔候選，安裝後才發布內容 fact 與 POINT_FILE_CHANGED。非法候選只發布 error，未獲 admission 的 watcher 只發布 pending，兩者都不改資源或既有 capture
-│   ├── point_file_sync.py — PointFileSync：集中已安裝版本與磁碟 hash 的比較、草稿 revision 檢查及觀察狀態。reload 比對 installed base；check_file_revision 比對磁碟。資源格式驗證與安裝仍由 ContextService 決定，切 point 清除舊觀察
+│   ├── context.py      — ContextService：owner-thread entry/point binding、固定 parameter capture、全域 alias、source facts 與目前 entry 的 ledger capability。current_point_label 只讀已安裝的 selection，未選時回 None，不做 I/O。reload_file 驗證單檔候選，安裝後才發布 FILE_CHANGED；作用中文件另發布內容 fact。非法候選只發布 error，未獲 admission 的 watcher 只發布 pending，兩者都不改資源或既有 capture
+│   ├── file_sync.py — FileSync：集中已安裝版本與磁碟 hash 的比較、草稿 revision 檢查及觀察狀態。reload 比對 installed base；check_file_revision 比對磁碟。資源格式驗證與安裝仍由 ContextService 決定，切 point 清除舊觀察
 │   ├── context_writeback.py — ContextWritebackTarget：把 ContextService commands 綁到既有有序 writeback 執行介面，不增加交易或重試
 │   ├── device.py       — DeviceService（connect/disconnect/setup off-main，**全 port 注入**：gate/bg/progress 必傳；connect/disconnect終局用`DeviceOperationFinishedPayload`，setup重用`DeviceSetupFinishedPayload`，無Qt）；`get_device_unit` 讀有效 YOKO／Fake cached Info 的 `value_unit`，分別為 A／V 與 native；缺 Info 的 UI／snapshot 標 none，不按 type 推測單位；strict binding 缺 Info 拋指名 device 的 `DeviceRegistrationError`，這些查詢不讀硬體、不改 connected／offline 狀態；`poll_device_info(name)` = best-effort off-main live-read（worker 純讀 driver、on_done 主線做 cache 比對+bump+DEVICE_CHANGED；memory-only/connect/disconnect skip，setup/ramp 允許 current-value refresh；單次讀失敗吞掉，不寫 State 於 worker）
 │   ├── project_settings.py — ProjectSettingsService：以明確 result/Database roots 呼叫 ResultEntry.open/create，再交 ContextService.install_entry；記住的 entry/connection/device preferences 不證明來源已開啟。App Controller 直接向此 service 查詢記住的左面板寬度
@@ -108,7 +109,7 @@ session/
 └── ui/                 — 共用 dialog，依賴各 domain 的窄 control ports
     ├── progress_bar.py   — LightweightProgressBar（native-free QWidget；`setValue` 只更新狀態並排程 repaint，避免高頻 progress 卡在 `QProgressBar.setValue`）
     ├── progress_stack.py — ProgressStack widget（唯一拉 Qt 的 progress 件；高頻 render 只對變更過的 maximum/format/value 寫入 LightweightProgressBar；可注入 profiling callback 拆量 derive / value writes）
-    ├── alias_panel.py — AliasPanel：Inspect 的 Aliases 頁。每次儲存格完成編輯或 Remove 後，將有效有序 rows 經 ContextControlPort 原子保存。Add 的空列只留在畫面；無效列標紅。唯讀解析欄投影已安裝表。寫入失敗顯示 inline error，保留輸入與舊檔案。切換 point 丟棄未提交輸入，revision 衝突沿 PointFileBanner 的 Keep／Reload 流程
+    ├── alias_panel.py — AliasPanel：Inspect 的 Aliases 頁。每次儲存格完成編輯或 Remove 後，將有效有序 rows 經 ContextControlPort 原子保存。Add 的空列只留在畫面；無效列標紅。唯讀解析欄投影已安裝表。寫入失敗顯示 inline error，保留輸入與舊檔案。切換 point 丟棄未提交輸入，revision 衝突沿 FileBanner 的 Keep／Reload 流程
     ├── component_tree.py — ComponentTreeWidget：Field／Value／Unit／Metadata 四欄樹，Metadata 以單行 flow YAML 與多行 tooltip 顯示 caller 的 opaque mapping，不解讀 key；依 `component_field_specs` 列出全部欄位（未設定顯示 `(unset)`），Value 就地編輯；父欄位未設定時寫入最淺一層未設定祖先的巢狀 mapping。寫入走 owner，UI 不直接寫文件
     ├── soc_dialog.py — SocDialog 以 SocControlPort 提供 IP、Port、Connect、連線狀態與 soccfg 瀏覽。每次 explicit show 從 session cache 預填 connection preferences 並同步連線狀態與 soccfg，Disconnected 時清除舊內容；可見期間由 SocChanged 更新
     ├── setup_dialog.py — SetupDialog 由上到下為 Result entry、Working points 清單與兩列的 New working point；拉高視窗只增加清單高度。New entry／Open 與 point Switch／Create 都交既有 owner。Working points 清單顯示 description，Create 明確提交 Label、Clone from 與 Description。Track device 只用 cached value＋unit 建議可修改的 Label，不讀硬體、不綁裝置。Clone from 的 `(empty)` 表示新 point 使用 setup seed 與空 library。Reopen 使用 cached queries，不切 binding、不連硬體

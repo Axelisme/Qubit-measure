@@ -1,4 +1,4 @@
-"""Point-file reload wire contract and optional optimistic writer admission."""
+"""Installed-file reload wire contract and optimistic writer admission."""
 
 from __future__ import annotations
 
@@ -9,9 +9,9 @@ from typing import TYPE_CHECKING, Literal
 
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
-from zcu_tools.gui.session.context_types import PointFileRevision
+from zcu_tools.gui.session.context_types import FileRevision
 
-from .point import PointFile
+from .point import InstalledFile
 
 if TYPE_CHECKING:
     from ..service import RemoteControlAdapter
@@ -19,10 +19,10 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True)
 class ContextReloadParams:
-    """Validated wire request for one selected-point owner file.
+    """Validated wire request for one installed owner file.
 
     path is the caller's file path, checked by the session owner for absolute
-    selected-point membership. expected_revision is the installed base SHA-256,
+    installed-file membership. expected_revision is the installed base SHA-256,
     not the edited disk hash; None denotes a missing library or aliases base.
     """
 
@@ -47,7 +47,7 @@ class ContextReloadParams:
 
 def h_context_reload(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
-) -> PointFile:
+) -> InstalledFile:
     """Validate/install one edited disk file and return its installed revision.
 
     params requires path and expected_revision, which names the installed base,
@@ -92,7 +92,7 @@ def check_writer_revision(
     for file in adapter.context_control.get_file_revisions():
         if file.document == document:
             adapter.context_control.check_file_revision(
-                PointFileRevision(document, file.path, revision)
+                FileRevision(document, file.path, revision)
             )
             return
     raise FailedPreconditionError(

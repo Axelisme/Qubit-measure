@@ -33,8 +33,8 @@ class EntryListReply(TypedDict):
     entries: list[str]
 
 
-class PointFile(TypedDict):
-    """Installed point file: document kind, absolute path and raw-byte SHA-256.
+class InstalledFile(TypedDict):
+    """Installed active file: document kind, absolute path and raw-byte SHA-256.
 
     revision is None for an absent library or aliases file.
     """
@@ -45,10 +45,10 @@ class PointFile(TypedDict):
 
 
 class EntryInfoReply(TypedDict):
-    """entry is the opened identity or None; files lists installed point versions."""
+    """entry is the opened identity or None; files lists the active three versions."""
 
     entry: PointEntry | None
-    files: list[PointFile]
+    files: list[InstalledFile]
 
 
 def h_entry_list(
@@ -64,9 +64,11 @@ def h_entry_list(
 def h_entry_info(
     adapter: RemoteControlAdapter, _params: Mapping[str, object]
 ) -> EntryInfoReply:
-    """Read cached entry identity and installed point files as {entry, files}.
+    """Read cached entry identity and active file versions as {entry, files}.
 
-    params is empty. entry is None before opening; files is [] without a point.
+    params is empty. entry is None and files is [] before opening an entry.
+    An opened entry returns parameters/library/aliases in that order, from the
+    global set without a point or the selected point set. No scope field is added.
     Paths are absolute owner paths converted to strings. File revisions describe
     installed bytes, not unvalidated disk edits. No I/O or implicit refresh occurs.
     """
