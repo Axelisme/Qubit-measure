@@ -1,0 +1,455 @@
+"""Read-only scheduled-cycle analysis of linked tProc v2 assembly."""
+
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, field
+from math import prod
+from operator import add, and_, or_, sub, xor
+from typing import Literal
+
+from .hw_semantics import WAVE_REGS
+from .instructions import (
+    BaseInst,
+    JumpInst,
+    NopInst,
+    RegWriteInst,
+    TestInst,
+    TimeInst,
+    WaitInst,
+)
+from .io_instructions import DportWriteInst, PortWriteInst, TrigInst, WmemWriteInst
+from .labels import LabelRef
+from .linker import IRLinker
+from .operands import (
+    AluExpr,
+    AluOp,
+    Immediate,
+    ImmValue,
+    Register,
+    SrcKeyword,
+    TimeOffset,
+)
+
+
+@dataclass(frozen=True)
+class TimingLoop:
+    """One outer-to-inner coordinate axis: unique name and positive shot count."""
+
+    name: str
+    count: int
+
+
+@dataclass(frozen=True)
+class TimingLayout:
+    """Linked body boundaries and outer-to-inner shot axes (including reps).
+
+    Addresses denote the point BEFORE executing an instruction. body_end may
+    equal body_start for an empty body or the address just past the program.
+    Loops label shot ordinals only; assembly determines actual control flow.
+    """
+
+    body_start: int
+    body_end: int
+    loops: tuple[TimingLoop, ...] = ()
+
+    @classmethod
+    def from_metadata(
+        cls,
+        meta_infos: Sequence[Mapping[str, object]],
+        loops: tuple[TimingLoop, ...] = (),
+    ) -> "TimingLayout":
+        """Read final linked TIMING_BOUNDARY body_start/body_end meta records.
+
+        The producer emits each marker once through the existing meta channel.
+        Missing, duplicate or malformed boundaries raise ValueError.
+        """
+        boundaries: dict[str, int] = {}
+        for meta in meta_infos:
+            if meta.get("kind") != "meta" or meta.get("type") != "TIMING_BOUNDARY":
+                continue
+            name, address = meta.get("name"), meta.get("p_addr")
+            if name not in ("body_start", "body_end"):
+                raise ValueError(f"Unknown timing boundary: {name!r}")
+            if not isinstance(address, int):
+                raise ValueError(
+                    "Timing boundaries require names and integer addresses"
+                )
+            if name in boundaries:
+                raise ValueError(f"Duplicate timing boundary: {name}")
+            boundaries[name] = address
+        if boundaries.keys() != {"body_start", "body_end"}:
+            raise ValueError("Missing body_start/body_end timing boundaries")
+        return cls(boundaries["body_start"], boundaries["body_end"], loops)
+
+
+@dataclass(frozen=True)
+class CompiledTimingInput:
+    """Public linked prog_list/labels and shot layout; inputs are never mutated."""
+
+    prog_list: Sequence[Mapping[str, object]]
+    labels: Mapping[str, object]
+    layout: TimingLayout
+
+
+@dataclass(frozen=True)
+class TimingEvent:
+    """One scheduled output, in execution order, not sorted by time.
+
+    kind is wave (WPORT_WR, including config/segments), data (DPORT_WR) or
+    trigger (TRIG). port is the
+    physical tProc output port, NOT a logical generator/ADC channel. cycle is
+    absolute from the initial reference origin 0. address identifies the linked
+    instruction; value holds the data-port mask or trigger level, else None.
+    """
+
+    kind: Literal["wave", "data", "trigger"]
+    port: int
+    cycle: int
+    address: int
+    value: int | None = None
+
+
+@dataclass(frozen=True)
+class ShotTiming:
+    """One body execution and its shell, all reference times in tProc cycles.
+
+    index is the execution ordinal. loop_indices follow layout.loops order.
+    start_cycle is reference at body_start; body_end_cycle is reference before
+    body_end. end_cycle is reference at next body_start or program termination,
+    including final_wait/final_delay (WAIT does not advance reference).
+    events includes body and following shell outputs, in execution order.
+    """
+
+    index: int
+    loop_indices: tuple[int, ...]
+    start_cycle: int
+    body_end_cycle: int
+    end_cycle: int
+    events: tuple[TimingEvent, ...]
+
+
+@dataclass(frozen=True)
+class TimingAnalysis:
+    """shots in execution order; initialization outputs are separate from shots.
+
+    initial_events precede first body_start. end_cycle is final program reference.
+    These are scheduled times, not CPU latency, hardware completion or pulse
+    duration. No waveform lengths or module duration estimates are consulted.
+    """
+
+    shots: tuple[ShotTiming, ...]
+    initial_events: tuple[TimingEvent, ...]
+    end_cycle: int
+
+
+@dataclass
+class _Machine:
+    labels: Mapping[str, object]
+    registers: dict[str, int | None] = field(default_factory=lambda: {"s0": 0})
+    reference: int = 0
+    flags: int | None = None
+
+    def known_value(
+        self, operand: Register | Immediate | ImmValue | TimeOffset
+    ) -> int | None:
+        if isinstance(operand, Register):
+            if operand.canonical_name == "s11":
+                raise ValueError("Unknown hardware time source: s11 (s_usr_time)")
+            return self.registers.get(operand.canonical_name)
+        return operand.value
+
+    def value(self, operand: Register | Immediate | ImmValue | TimeOffset) -> int:
+        value = self.known_value(operand)
+        if value is None:
+            raise ValueError(f"Unknown register value: {operand}")
+        return value
+
+    def expression(self, expr: AluExpr) -> int | None:
+        lhs = self.known_value(expr.lhs)
+        rhs = (
+            self.known_value(expr.rhs)
+            if isinstance(expr.rhs, (Register, Immediate))
+            else None
+        )
+        if lhs is None or (expr.rhs is not None and rhs is None):
+            return None
+        if expr.op == AluOp.NONE:
+            return lhs
+        binary = {
+            AluOp.ADD: add,
+            AluOp.SUB: sub,
+            AluOp.AND: and_,
+            AluOp.AND_BIT: and_,
+            AluOp.OR: or_,
+            AluOp.OR_BIT: or_,
+            AluOp.XOR: xor,
+            AluOp.XOR_BIT: xor,
+        }
+        if rhs is None:
+            raise ValueError(f"Unsupported timing ALU expression: {expr}")
+        if expr.op in binary:
+            return _signed32(binary[expr.op](lhs, rhs))
+        if expr.op == AluOp.SR:
+            return _signed32((lhs & 0xFFFFFFFF) >> (rhs & 15))
+        if expr.op == AluOp.ASR:
+            return _signed32(lhs >> (rhs & 15))
+        if expr.op == AluOp.SL:
+            return _signed32(lhs << (rhs & 15))
+        raise ValueError(f"Unsupported timing ALU expression: {expr}")
+
+    def condition(self, condition: str | None) -> bool:
+        if condition in (None, "1"):
+            return True
+        if condition == "0":
+            return False
+        if self.flags is None:
+            raise ValueError("Unknown condition flags")
+        conditions = {
+            "Z": self.flags == 0,
+            "NZ": self.flags != 0,
+            "S": self.flags < 0,
+            "NS": self.flags >= 0,
+        }
+        if condition not in conditions:
+            raise ValueError(f"Unsupported control condition: {condition}")
+        return conditions[condition]
+
+    def label_address(self, label: LabelRef, address: int) -> int:
+        if label.is_pseudo():
+            offsets = {"HERE": 0, "NEXT": 1, "SKIP": 2, "PREV": -1}
+            return address + offsets[str(label)]
+        name = label.as_label().name
+        if name not in self.labels:
+            raise ValueError(f"Unknown label: {name}")
+        return IRLinker.parse_label_addr(name, self.labels[name])
+
+    def register_write(self, inst: RegWriteInst, address: int) -> None:
+        if not self.condition(inst.if_cond):
+            return
+        if inst.wr or inst.ww or inst.wp or inst.port:
+            raise ValueError("Unsupported register write side effects")
+        if inst.src == SrcKeyword.WMEM and inst.dst.name == "r_wave":
+            # Waveform contents do not determine scheduled output times.
+            for name in WAVE_REGS:
+                self.registers.pop(name, None)
+            if inst.uf:
+                self.flags = None
+            return
+        if inst.src == SrcKeyword.IMM and inst.lit is not None:
+            value = inst.lit.value
+        elif inst.src == SrcKeyword.OP and inst.op is not None:
+            value = self.expression(inst.op)
+        elif inst.src == SrcKeyword.LABEL and inst.label is not None:
+            value = self.label_address(inst.label, address)
+        else:
+            raise ValueError(f"Unsupported register write: {inst}")
+        self.registers[inst.dst.canonical_name] = (
+            None if value is None else _signed32(value)
+        )
+        if inst.uf:
+            self.flags = value
+
+    def jump(self, inst: JumpInst, address: int) -> int:
+        if inst.uf:
+            raise ValueError("Unsupported jump flag update")
+        taken = self.condition(inst.if_cond)
+        if inst.wr is not None:
+            if inst.wr.src_type != "op" or inst.op is None:
+                raise ValueError("Unsupported jump side write")
+            self.registers[inst.wr.dst.canonical_name] = self.expression(inst.op)
+        if not taken:
+            return address + inst.addr_inc
+        if inst.label is not None:
+            return self.label_address(inst.label, address)
+        if isinstance(inst.addr, Register):
+            return self.value(inst.addr)
+        raise ValueError("Missing jump target")
+
+    def advance(self, inst: TimeInst) -> None:
+        if inst.c_op != "inc_ref":
+            source = " (hardware time s11)" if inst.c_op == "updt" else ""
+            raise ValueError(f"Unsupported reference operation: {inst.c_op}{source}")
+        operand = inst.lit if inst.lit is not None else inst.r1
+        if operand is None:
+            raise ValueError("Missing reference increment")
+        self.reference += self.value(operand)
+
+    def output(
+        self, inst: PortWriteInst | DportWriteInst | TrigInst, address: int
+    ) -> TimingEvent | None:
+        if not isinstance(inst, TrigInst):
+            if not self.condition(inst.if_cond):
+                return None
+            if inst.wr or inst.op or inst.uf:
+                raise ValueError("Unsupported output side effects")
+        kind: Literal["wave", "data", "trigger"] = "wave"
+        value = None
+        if isinstance(inst, DportWriteInst):
+            kind, value = "data", self.value(inst.data)
+        elif isinstance(inst, TrigInst):
+            kind, value = "trigger", int(inst.src == "set")
+        offset = inst.time if inst.time is not None else Register("s14")
+        return TimingEvent(
+            kind,
+            self.value(inst.dst),
+            self.reference + self.value(offset),
+            address,
+            value,
+        )
+
+    def execute(self, inst: BaseInst, address: int) -> int:
+        following = address + inst.addr_inc
+        if isinstance(inst, NopInst):
+            return following
+        if isinstance(inst, RegWriteInst):
+            self.register_write(inst, address)
+        elif isinstance(inst, TimeInst):
+            self.advance(inst)
+        elif isinstance(inst, TestInst):
+            self.flags = self.expression(inst.op)
+        elif isinstance(inst, JumpInst):
+            return self.jump(inst, address)
+        elif isinstance(inst, WaitInst):
+            if inst.c_op != "time" or inst.time is None:
+                raise ValueError("Unsupported wait control")
+            self.value(inst.time)
+            if isinstance(inst.addr, Register) and self.value(inst.addr) != address + 1:
+                raise ValueError("WAIT target must be its internal polling jump")
+        elif isinstance(inst, WmemWriteInst):
+            self.condition(inst.if_cond)
+            if inst.time or inst.wr or inst.op or inst.uf or inst.wp:
+                raise ValueError("Unsupported wave memory side effects")
+        elif not isinstance(inst, (PortWriteInst, DportWriteInst, TrigInst)):
+            raise ValueError(f"Unsupported timing instruction: {inst}")
+        return following
+
+
+def _signed32(value: int) -> int:
+    return (value + 2**31) % 2**32 - 2**31
+
+
+def _coordinates(index: int, loops: tuple[TimingLoop, ...]) -> tuple[int, ...]:
+    result: list[int] = []
+    for loop in reversed(loops):
+        result.append(index % loop.count)
+        index //= loop.count
+    return tuple(reversed(result))
+
+
+@dataclass
+class _Shots:
+    layout: TimingLayout
+    shots: list[ShotTiming] = field(default_factory=list)
+    initial_events: list[TimingEvent] = field(default_factory=list)
+    events: list[TimingEvent] = field(default_factory=list)
+    start: int | None = None
+    body_end: int | None = None
+
+    def finish(self, reference: int) -> None:
+        if self.start is None:
+            return
+        if self.body_end is None:
+            raise ValueError("Shot did not execute body_end")
+        index = len(self.shots)
+        self.shots.append(
+            ShotTiming(
+                index,
+                _coordinates(index, self.layout.loops),
+                self.start,
+                self.body_end,
+                reference,
+                tuple(self.events),
+            )
+        )
+
+    def boundary(self, address: int, reference: int) -> None:
+        if address == self.layout.body_start:
+            self.finish(reference)
+            self.start = reference
+            self.body_end = None
+            self.events = []
+        if address == self.layout.body_end:
+            if self.start is None or self.body_end is not None:
+                raise ValueError("body_end outside a body execution")
+            self.body_end = reference
+
+    def event(self, event: TimingEvent) -> None:
+        (self.initial_events if self.start is None else self.events).append(event)
+
+
+def _decode(compiled: CompiledTimingInput) -> tuple[dict[int, BaseInst], int]:
+    layout = compiled.layout
+    if any(loop.count <= 0 for loop in layout.loops):
+        raise ValueError("Loop counts must be positive")
+    if len({loop.name for loop in layout.loops}) != len(layout.loops):
+        raise ValueError("Timing loop names must be unique")
+    decoded: dict[int, BaseInst] = {}
+    for raw in compiled.prog_list:
+        address = raw.get("P_ADDR")
+        if not isinstance(address, int) or address in decoded:
+            raise ValueError("Instructions require unique integer P_ADDR")
+        decoded[address] = BaseInst.from_dict(dict(raw))
+    if not decoded:
+        raise ValueError("Empty compiled program")
+    end_address = max(a + inst.addr_inc for a, inst in decoded.items())
+    if layout.body_start not in decoded or layout.body_end not in {
+        *decoded,
+        end_address,
+    }:
+        raise ValueError("Body boundaries must be linked instruction addresses")
+    return decoded, end_address
+
+
+def analyze_timing(
+    compiled: CompiledTimingInput, *, max_steps: int = 1_000_000
+) -> TimingAnalysis:
+    """Execute known assembly timing/control in-process without changing inputs.
+
+    Reference starts at cycle 0, independently of the s14 output-offset register.
+    Literal TIME fields override s14; absent TIME reads the known s14 offset.
+    TIME inc_ref advances reference. WAIT time validates its operand but changes
+    no reference. The terminal unconditional self-jump is program termination.
+    Layout boundaries are observed before execution; loops only label shots.
+    Supports inc_ref, known immediate/ALU/label register writes, TEST, known
+    jumps, timed port outputs and plain wave-memory updates. ALU supports copy,
+    add/subtract, bitwise AND/OR/XOR and hardware low-four-bit SR/ASR/SL shifts.
+    Wave data is unknown until overwritten; time/control cannot consume it.
+    Hardware s11 reads (including Resync) raise an error naming the source.
+    Unknown timing/control registers, unsupported instructions/side effects,
+    malformed boundaries, shot-count mismatches and exceeding positive max_steps
+    raise ValueError. Assembly decoding can also raise KeyError for missing fields.
+    Output times describe scheduling, not elapsed CPU or hardware execution.
+    """
+    if max_steps <= 0:
+        raise ValueError("max_steps must be positive")
+    decoded, end_address = _decode(compiled)
+    machine = _Machine(compiled.labels)
+    recorder = _Shots(compiled.layout)
+    address = min(decoded)
+    for _ in range(max_steps):
+        recorder.boundary(address, machine.reference)
+        if address == end_address:
+            break
+        if address not in decoded:
+            raise ValueError(f"Control flow to non-instruction address: {address}")
+        inst = decoded[address]
+        if isinstance(inst, (PortWriteInst, DportWriteInst, TrigInst)):
+            event = machine.output(inst, address)
+            if event is not None:
+                recorder.event(event)
+        following = machine.execute(inst, address)
+        if (
+            following == address
+            and isinstance(inst, JumpInst)
+            and inst.if_cond is None
+            and address + inst.addr_inc == end_address
+        ):
+            break
+        address = following
+    else:
+        raise ValueError("Timing analysis exceeded max_steps")
+    recorder.finish(machine.reference)
+    if len(recorder.shots) != prod(loop.count for loop in compiled.layout.loops):
+        raise ValueError("Executed shot count does not match layout loops")
+    return TimingAnalysis(
+        tuple(recorder.shots), tuple(recorder.initial_events), machine.reference
+    )

@@ -10,6 +10,7 @@ from .factory import IRLexer, IRParser
 from .instructions import BaseInst, Instruction, MetaInst, RegWriteInst
 from .labels import Label
 from .node import BasicBlockNode, IRNode
+from .timing_boundaries import anchor_boundaries, restore_boundaries
 
 logger = logging.getLogger(__name__)
 
@@ -486,8 +487,11 @@ class IRPipeLine:
         lexer = IRLexer()
         parser = IRParser(pmem_size=self.config.pmem_capacity)
 
+        # Boundaries are optimizer barriers, not structural regions.
+        anchored_insts, timing_anchors = anchor_boundaries(insts)
+
         # --- lex → ChunkList ---
-        chunks = lexer.lex(insts)
+        chunks = lexer.lex(anchored_insts)
 
         # --- ChunkList optimization (pre-parse) ---
         chunks = _run_chunklist_opt(
@@ -517,7 +521,7 @@ class IRPipeLine:
         bb_chunks = [c for c in flat_chunks if isinstance(c, BasicBlockNode)]
         _resolve_dmem_dispatch(bb_chunks, ctx)
 
-        return lexer.flatten(flat_chunks), ctx
+        return restore_boundaries(lexer.flatten(flat_chunks), timing_anchors), ctx
 
 
 # ---------------------------------------------------------------------------

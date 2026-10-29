@@ -1,6 +1,6 @@
 # IR architecture guide
 
-**Last updated:** 2026-10-21
+**Last updated:** 2026-10-29
 
 **讀者：** framework-dev。QICK ASM V2 的 IR 分層、分析與 lowering 契約。
 
@@ -30,6 +30,43 @@
 [labels.py](labels.py) 擁有 label value objects 與名稱配置。
 硬體角色性常量集中在 [hw_semantics.py](hw_semantics.py)，避免 magic string 散落各處。
 [analysis.py](analysis.py) 提供 cost/size 估算 helper 與 liveness 工具，pass 端優先使用。
+
+## Compiled timing analysis
+
+`analyze_timing(CompiledTimingInput(prog_list, labels, layout))` reads linked
+assembly without changing it. `TimingLayout` gives final body_start/body_end
+instruction addresses and outer-to-inner `TimingLoop(name, count)` axes,
+including reps. Axes label shot ordinals; assembly register updates and jumps
+determine execution.
+
+Producers emit `TIMING_BOUNDARY` meta records named `body_start` and
+`body_end`. The pipeline carries these through non-removable label anchors,
+then restores the metadata before final linking. `TimingLayout.from_metadata`
+reads the final addresses. Producers must not infer boundaries from opcodes or
+instruction counts. Boundaries act as optimizer barriers, so adding them can
+change instruction layout without changing the scheduled outputs.
+
+Results report every wave-port write, data-port mask and trigger edge, with its
+physical tProc port, linked instruction address and absolute scheduled cycle.
+Wave-port events include pulse segments and readout configs, not one event per
+module. Port numbers are not logical generator or ADC channel numbers. Events
+remain in execution order, which can differ from scheduled-time order.
+
+Reference starts at cycle zero. TIME inc_ref advances reference independently
+of the s14 output-offset register. A shot starts before body_start executes.
+Its end is reference at the next body_start, or program termination for the last
+shot. The shell final_wait/final_delay belongs to that interval. WAIT time does
+not advance reference. The result also reports reference at body_end and outputs
+before the first shot.
+
+Known register arithmetic, sweep updates/resets, literal/register event times
+and known loop branches are evaluated from assembly. Waveform contents are not
+modeled; unknown wave data propagates until it affects time or control.
+Unsupported instructions, unknown timing/control values and inconsistent layouts
+raise errors instead of returning partial or guessed timing. Native Resync reads
+hardware s_usr_time/s11 and raises an error naming that source. The analysis
+does not model CPU latency, waveform duration, hardware completion or measurement
+data. It does not replace gain/frequency consumer tests.
 
 ## Pipeline
 
