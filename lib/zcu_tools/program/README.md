@@ -64,6 +64,11 @@ Apply the ratio to final and round-hook results: the numerator alone is the
 attenuated mean, not the accepted-shot mean. The existing `acquire(classify=...)`
 and integrated `acquire(herald=...)` paths remain available during migration.
 
+`v2.modules.readout.classification_processors(cfg)` creates detached ADC-keyed
+processors with g/e/other, g/e or g/e/f columns for circle, linear or centroid3.
+The runtime builder's processed methods require `processed2signal_fn` for both
+round updates and final results. They never use a default IQ converter.
+
 ## Shot time
 
 `shot_time_s(rounds=..., reps=..., shot_lengths_us=..., relax_delay_us=...)`

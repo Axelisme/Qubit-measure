@@ -1,18 +1,27 @@
+# tolerated(file-size): Native readout cfg, emission and calibration adapters share
+# the Pulse/Mux cfg types here; splitting adapters would create back-references.
 from __future__ import annotations
 
 from abc import abstractmethod
 from collections.abc import Sequence
 from copy import deepcopy
-from typing import TYPE_CHECKING, Annotated, Literal, TypeAlias
+from typing import TYPE_CHECKING, Annotated, Literal, TypeAlias, TypedDict
 
 import numpy as np
 from numpy.typing import NDArray
 from pydantic import BeforeValidator
 from qick.asm_v2 import QickParam, Trigger
 
-from zcu_tools.cfg_model import Centroid3Classifier, CircleClassifier, ReadoutClassifier
+from zcu_tools.cfg_model import (
+    Centroid3Classifier,
+    CircleClassifier,
+    LinearClassifier,
+    ReadoutClassifier,
+)
 from zcu_tools.cfg_model import MuxReadoutCfg as CoreMuxReadoutCfg
+from zcu_tools.program.acquisition import ShotProcessor
 from zcu_tools.program.herald import HeraldSpec
+from zcu_tools.utils.shot_classification import classify_shots, nearest_centroid3
 
 from ..macro.readout import ReadoutEmission, readout_control_scope
 from ..macro.wmem import PatchWmemFromDmem
@@ -212,6 +221,113 @@ def classification_parameters(
             )
         result[ch] = classifier.model_copy(deep=True)
     return result
+
+
+def classification_processors(
+    cfg: ReadoutCfg, *, require_other: bool = False
+) -> dict[int, ShotProcessor]:
+    """Return detached processors keyed by declared ADC channel number.
+
+    cfg is native Pulse or Mux readout calibration in normalized ADC units,
+    without offset subtraction. Each callable accepts float64 (shots, reads, 2)
+    IQ and returns float64 (shots, reads, classes) without modifying its input.
+    Circle columns are g/e/other, with ties and radius boundaries in other.
+    Linear columns are g/e; real(IQ * exp(1j*angle)) > threshold is excited,
+    equality is ground. Centroid3 columns are g/e/f, nearest-center ties in
+    g/e/f order. No confusion correction is applied.
+    Missing calibration/radius raises an ADC-named ValueError; require_other
+    accepts only circle. Calibration changes after this call have no effect.
+    """
+    return {
+        ch: _classification_processor(classifier)
+        for ch, classifier in classification_parameters(
+            cfg, require_other=require_other
+        ).items()
+    }
+
+
+def _classification_processor(classifier: ReadoutClassifier) -> ShotProcessor:
+    def process(iq: NDArray[np.float64]) -> NDArray[np.float64]:
+        signals = iq[..., 0] + 1j * iq[..., 1]
+        if isinstance(classifier, CircleClassifier):
+            if classifier.radius is None:
+                raise ValueError("circle radius missing; run GE Post analysis")
+            return np.stack(
+                classify_shots(
+                    signals, classifier.g_center, classifier.e_center, classifier.radius
+                ),
+                axis=-1,
+            ).astype(np.float64)
+        if isinstance(classifier, LinearClassifier):
+            excited = (
+                signals * np.exp(1j * classifier.angle)
+            ).real > classifier.threshold
+            return np.stack([~excited, excited], axis=-1).astype(np.float64)
+        labels = nearest_centroid3(
+            signals, classifier.g_center, classifier.e_center, classifier.f_center
+        )
+        return np.eye(3, dtype=np.float64)[labels]
+
+    return process
+
+
+class QickThresholdOptions(TypedDict, total=False):
+    """Native acquire keywords; empty means ordinary IQ without projection.
+
+    threshold holds normalized ADC projection cutoffs in ADC declaration order.
+    angle holds matching QICK projection angles in radians. remove_offset=False
+    retains the calibration's normalized, unsubtracted ADC coordinates.
+    """
+
+    threshold: list[float]
+    angle: list[float]
+    remove_offset: Literal[False]
+
+
+def qick_threshold_options(
+    cfg: ReadoutCfg | Sequence[ReadoutCfg],
+) -> QickThresholdOptions:
+    """Convert readout calibration to optional native QICK projection keywords.
+
+    cfg is a native Pulse/Mux cfg or a sequence in declaration order. Repeated
+    ADCs with identical classifiers produce one entry at their first occurrence.
+    Empty input, any missing/unusable classifier or conflicting calibrations on
+    one ADC returns empty options for the entire acquisition.
+    Linear uses the opposite calibration angle and the same threshold; circle
+    uses the g/e perpendicular bisector, ignoring radius and other. Centroid3
+    or missing calibration returns empty options for ordinary IQ acquisition.
+    Result lists follow ADC declaration order. remove_offset=False preserves
+    normalized ADC calibration coordinates. No confusion correction is applied.
+    Caller must cover every program-declared ADC in declaration order: QICK
+    requires lists of exactly that length and uses that order. This helper does
+    not read a program, registry or live library to verify or guess its layout.
+    """
+    thresholds: list[float] = []
+    angles: list[float] = []
+    configs = [cfg] if isinstance(cfg, (PulseReadoutCfg, MuxReadoutCfg)) else cfg
+    classifiers: dict[int, ReadoutClassifier] = {}
+    for readout_cfg in configs:
+        for ch, classifier in _classifier_entries(readout_cfg):
+            if classifier is None or isinstance(classifier, Centroid3Classifier):
+                return {}
+            if ch in classifiers and classifiers[ch] != classifier:
+                return {}
+            classifiers[ch] = classifier
+    if not classifiers:
+        return {}
+    for classifier in classifiers.values():
+        if isinstance(classifier, LinearClassifier):
+            angle = -classifier.angle
+            threshold = classifier.threshold
+        elif isinstance(classifier, CircleClassifier):
+            angle = float(np.angle(classifier.e_center - classifier.g_center))
+            midpoint = (classifier.g_center + classifier.e_center) / 2
+            threshold = float((midpoint * np.exp(-1j * angle)).real)
+        else:
+            return {}
+        thresholds.append(threshold)
+        angles.append(angle)
+    return {"threshold": thresholds, "angle": angles, "remove_offset": False}
 
 
 class AbsReadout(Module):

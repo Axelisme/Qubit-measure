@@ -1,6 +1,6 @@
 # program/v2/modules — semantic program modules
 
-**Last updated:** 2026-10-29，宣告與 emission
+**Last updated:** 2026-10-30，readout processors 與 QICK projection
 
 **讀者：** lab-author、framework-dev、agent。語意 program modules 的宣告、發射與 owner 邊界速查。
 
@@ -103,6 +103,16 @@ not read a program, registry or hardware.
 ADC channel number, not a tone position. It accepts centers without radius or
 matrix and rejects unknown ADCs, missing classifiers and linear mode with an
 ADC-named ValueError. Its normalized raw ADC coordinates retain IQ offset.
+
+`readout.classification_processors(cfg, require_other=False)` returns detached
+ADC-keyed processors for `acquire_processed`. Circle emits g/e/other, linear
+emits g/e, and centroid3 emits g/e/f. `require_other=True` accepts only circle.
+`classification_parameters` retains the old integrated classification path.
+`readout.qick_threshold_options(cfg)` accepts a Pulse/Mux cfg or a cfg sequence.
+It converts linear/circle calibration to native QICK projection, without radius
+rejection or confusion correction. Missing, centroid3 or conflicting calibration
+returns empty options for the whole acquisition. The caller must supply every
+program ADC in declaration order; the helper does not inspect the program.
 
 `PulseReadoutCfg` owns flat generator/ADC settings and a native waveform. One
 semantic `freq` configures both channels. `PulseReadout` declares and schedules
