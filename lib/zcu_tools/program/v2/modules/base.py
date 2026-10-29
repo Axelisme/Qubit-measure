@@ -53,10 +53,11 @@ class Module(ABC):
     ) -> float | QickParam:
         """Run this legacy emission at t us, with this Module as its source.
 
-        Return run's blocking end in us. Composite Modules call emit on their
-        children so nested output uses the child's diagnostic name and restores
-        the parent scope afterward. Declaration must already have completed.
-        run errors propagate after closing the source annotation.
+        Return run's blocking end in us. Control Modules call emit on
+        author-provided children so each child keeps its diagnostic name and
+        restores the parent scope afterward. Internal helpers of one semantic
+        Module call run directly to retain the owner's source. Declaration must
+        already have completed. run errors close the source annotation and propagate.
         """
         with prog.source_scope(self.name):
             return self.run(prog, t)
