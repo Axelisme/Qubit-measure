@@ -196,6 +196,38 @@ def test_branch_validates_each_executed_lane_not_total_static_case_triggers():
     assert env.soc.binding.last_request is None
 
 
+def test_balanced_branch_repeats_match_each_adc_static_count_in_every_case():
+    def initialize(p):
+        p.add_loop("scan", 3)
+        p.declare_readout(1, length=0.1)
+        p.add_readoutconfig(1, "ro1", freq=100, gen_ch=0)
+
+    def body(p):
+        p.send_readoutconfig(1, "ro1", t=0)
+        with p.branch(by="scan") as branch:
+            for index in range(3):
+                with branch.case(), p.repeat(f"case_repeat_{index}", 3):
+                    p.trigger([0, 1], t=0)
+                    p.pulse(0, "p", timeline="default", tag=f"case-{index}")
+
+    prog, env = program(
+        body,
+        initialize,
+        n_readouts=2,
+        routes=((0, 0), (0, 1)),
+        trigger_time=None,
+    )
+    static = {ch: cfg["trigs"] for ch, cfg in prog.ro_chs.items()}
+    assert static == {0: 3, 1: 3}
+    result = request(prog, env)
+    for index in range(3):
+        point = result.materialize_point(index)
+        assert [e.source for e in point.events] == [f"case-{index}"] * 3
+        for readout in point.readouts:
+            assert readout.trigger_us == pytest.approx((0, 43 / 430.08, 86 / 430.08))
+    assert {ch: cfg["trigs"] for ch, cfg in prog.ro_chs.items()} == static
+
+
 @pytest.mark.parametrize("defect", ["missing-end", "case-order", "missing-selector"])
 def test_malformed_branch_metadata_fails_before_numeric_request(defect):
     def transform(snapshot):
