@@ -155,6 +155,11 @@ before Post. Separate Applies use the last complete replacement: Post then
 Primary removes radius/matrix, and radius consumers require GE Post again.
 Review cluster separation, quality, confusion diagnostics and destination.
 
+Changing readout settings does not clear or automatically invalidate stored tone classifiers.
+Re-run mux GE and Post-Analysis for the affected tones, then Apply their new calibration before using classification.
+The proposal's settings comparison protects the new writeback, not the validity of existing classifiers.
+Failed tones keep their old classifiers and still require recalibration.
+
 ## Results and saved sources
 
 Run draws one `measurement_i` IQ scatter per participant.

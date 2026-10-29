@@ -67,6 +67,10 @@ Gauss length=0.8、sigma=0.2 切 Drag 時保留 length／sigma，delta／alpha �
 
 使用者於2026-10-18裁決：「我認為Module間切換也可以採用類似的行為，這樣才一直，我甚至認為就單純的比對欄位名與形態來決定是否繼承值就好」。確認規則與例子後答「可以」。此規則取代先前配對政策。顧問同日釐清比較可編輯 Form 型別，並確認 ch／gen_ch 不搬移。
 
+2026-10-29，advisor 依夜間授權將既有裁決套用到生成的一般 tagged-model union。沒有作者 converter 覆蓋時，None→分支使用目標初值，同分支重選保留 raw，異分支繼承同名同可編輯型別的 raw。不保存離開分支的草稿；作者的 metadata 或 model hook converter 優先。此套用不改 module ref／inline 規則，也不改 `gui.form` 無 converter 時只切 selection 的契約。
+
+這是目前生效行為，也作用於 sweep。普通 select 從 linrange 切到 center 只繼承同名的 n，不換算或保存 start／stop；切回 linrange 要重填端點。保留數值區間須使用明確的座標換算 command。Sweep 的這項可見影響仍待使用者確認；此處記錄 advisor 的套用，不代表使用者已另行確認 sweep 影響。
+
 明確的 Convert to inline 保留，表示從固定來源複製內容。選項切換依目標型別及共用繼承規則產生子表單。兩個入口可以產生相同結果，不為了區別入口而改值。
 
 ### 保存與還原

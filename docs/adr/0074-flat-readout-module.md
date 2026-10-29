@@ -82,6 +82,12 @@ Point 的 `readout_cal` 停用，不再讀寫，也不把舊數值搬入 classif
 改版後重跑 singleshot GE 並 Apply 到 readout library module。
 使用者於 2026-10-29 對 library 所有權與不搬舊值的選項同意：「2A 3A 4同意」。
 
+Classifier 不保存校準時的 readout 設定，也沒有自動失效機制。
+修改 readout 設定不會清除既有 classifier，取用時也不比對校準設定是否仍適用。
+操作員須在修改 readout 後重跑 singleshot GE 與 Post，Apply 新校準後再使用分類。
+使用者於 2026-10-29 裁決：「QC3我認為分類參數比對需求還不確定，先A」。
+Writeback proposal 的 materialized 設定比對只防止把新校準寫給不同設定，不檢查既有 classifier 的有效性。
+
 Readout 工具從 cfg 產生以 ADC channel 為 key 的型別化 mapping，由作者明確交給 acquire。
 Acquire 不掃 program registry，mapping 必須完整覆蓋已宣告 ADC，不混合 IQ 與 population。
 未傳 classify 保留 IQ 路徑。Linear 以旋轉後實部大於 threshold 判 excited，等於時判 ground。
