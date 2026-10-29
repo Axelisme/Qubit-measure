@@ -1,6 +1,6 @@
 # FTF environment composition
 
-**Last updated:** 2026-10-29 (UTC), ADC negative population clipping
+**Last updated:** 2026-10-29 (UTC), explicit charge requirements
 
 **讀者：** lab-author、framework-dev、agent。FTF 環境的組裝、數值接線與 acquisition 設定。
 
@@ -109,6 +109,9 @@ limits without restoring startup values. Source identities survive session
 registry disconnects and name changes. Reconnection retrieves the original
 class-retained driver, preserving V/A units and current values.
 `execute` consumes detached templates.
+`open_acquire` rejects nonempty `AcquireRequest.charge_requirements` with
+`ValueError` before evolution. This environment does not yet support explicit
+charge admission. Empty requirements preserve ordinary acquisition.
 
 ### Acquisition clock and loss drift
 

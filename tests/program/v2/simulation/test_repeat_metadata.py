@@ -11,6 +11,7 @@ from hashlib import sha256
 import numpy as np
 import pytest
 from qick.asm_v2 import QickParam
+from zcu_tools.core.simulation import AcquireRequest
 from zcu_tools.experiment.simulation import white_noise
 from zcu_tools.program.v2 import ModularProgramV2
 from zcu_tools.program.v2.modules.base import Module
@@ -130,8 +131,8 @@ def repeated_program(env, case):
     )
 
 
-def request_digest(request):
-    """Hash values and exact ndarray bytes, never object identity or aliasing."""
+def request_digest(request: AcquireRequest):
+    """Hash numeric values and ndarray bytes, not admission metadata or aliasing."""
     digest = sha256()
 
     def visit(value):
@@ -149,7 +150,11 @@ def request_digest(request):
         else:
             digest.update(repr(value).encode())
 
-    visit(request)
+    for field in fields(request):
+        # Charge admission has its own acquire contract, outside these numeric pins.
+        if field.name != "charge_requirements":
+            digest.update(field.name.encode())
+            visit(getattr(request, field.name))
     return digest.hexdigest()
 
 

@@ -374,9 +374,9 @@ def test_writeback_baseline_captured_via_service(qapp, make_ctrl):
             i for i in items if i.target_name == "$resonator.ext.missing_key"
         )
         mod = next(i for i in items if i.target_name == "$resonator.readout.new_mod")
-        cur_rf, prop_rf = svc.get_summaries(draft, r_f_item.session_id)
-        cur_missing, _ = svc.get_summaries(draft, missing.session_id)
-        cur_mod, prop_mod = svc.get_summaries(draft, mod.session_id)
+        cur_rf, prop_rf = draft.get_summaries(r_f_item.session_id)
+        cur_missing, _ = draft.get_summaries(missing.session_id)
+        cur_mod, prop_mod = draft.get_summaries(mod.session_id)
         assert cur_rf is not None and "6000" in cur_rf
         assert prop_rf is not None and "6100" in prop_rf
         assert cur_missing == "—"

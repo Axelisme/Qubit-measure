@@ -111,7 +111,10 @@ def white_noise(
 
     Defaults bind each ADC to the same-index generator (requires enough gens).
     routes overrides wiring only, not clocks, DDS, channel types or memory sizes.
-    No physical pulse response is modeled. Invalid amplitude/seed/routes raise.
+    No physical pulse response is modeled. Charge-drive requirements are accepted
+    without validation: every generator produces only noise, so there is no
+    physical line model or incorrect physical response from a role mismatch.
+    Invalid amplitude/seed/routes raise.
     """
     source = WhiteNoise(std_adc)
     soccfg = make_mock_soccfg(n_gens, n_readouts)

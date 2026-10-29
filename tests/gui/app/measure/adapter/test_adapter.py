@@ -48,8 +48,8 @@ def test_parameter_writeback_valid():
     item = ParameterWriteback(target_name="freq", description="d", proposed_value=1)
     assert item.target_name == "freq"
     assert item.proposed_value == 1
-    # session_id is stamped by the service, not the adapter; editor identity is
-    # private to the service-owned draft.
+    # session_id is stamped by the draft, not the adapter; editor identity is
+    # private to that draft.
     assert item.session_id == ""
 
 

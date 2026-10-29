@@ -88,12 +88,12 @@ class WritebackHarness:
     def get_writeback_values_for_pane(
         self, tab_id: str, pane: str, *, session_id: str | None = None
     ):
-        return self.service.preview_values(self.draft, session_id=session_id)
+        return self.draft.preview_values(session_id=session_id)
 
     def write_writeback_for_pane(
         self, tab_id: str, pane: str, changes: tuple[WritebackEdit, ...]
     ):
-        return self.service.write_draft(self.draft, changes)
+        return self.draft.writeback_write(changes)
 
 
 def context_at(
@@ -228,7 +228,7 @@ def test_sample_write_receipt_reads_latest_jsonl_at_current_point(
     assert context.read_context().target == SavedPoint(
         entry_name=entry.result_path.name, point="b"
     )
-    assert service.get_all_applied(draft) == {"record-1": True}
+    assert draft.get_all_applied() == {"record-1": True}
 
 
 def test_record_preview_selection_and_apply_preserve_adapter_json(
@@ -289,7 +289,7 @@ def test_record_preview_selection_and_apply_preserve_adapter_json(
     ]
     expected_preview = [row | {"note": None} for row in expected_preview]
     assert preview["items"] == expected_preview
-    service.edit_draft(draft, "param-1", selected=False)
+    draft.edit("param-1", selected=False)
     receipt = dispatch_handler(
         harness, "tab.writeback_write", params | {"write": [{"id": "record-1"}]}
     )
@@ -309,7 +309,7 @@ def test_record_preview_selection_and_apply_preserve_adapter_json(
     assert context.read_context().target == SavedPoint(
         entry_name=entry.result_path.name, point="b"
     )
-    assert service.get_all_applied(draft) == {"param-1": False, "record-1": True}
+    assert draft.get_all_applied() == {"param-1": False, "record-1": True}
     assert dispatch_handler(harness, "tab.writeback_preview", params)["items"] == [
         expected_preview[0] | {"selected": False},
         expected_preview[1] | {"current": row},
@@ -335,7 +335,7 @@ def test_preview_displays_adapter_note_and_current_manual_selection(
     rows = TypeAdapter(list[dict[str, object]]).validate_python(preview["items"])
     assert rows[0]["selected"] is False
     assert rows[0]["note"] == "Fit needs manual review"
-    service.edit_draft(draft, "param-1", selected=True)
+    draft.edit("param-1", selected=True)
     selected = dispatch_handler(harness, "tab.writeback_preview", params)
     assert selected["items"] == [rows[0] | {"selected": True}]
     dispatch_handler(
@@ -381,7 +381,7 @@ def test_partial_failure_preserves_expected_cause_wire_category(tmp_path: Path) 
         "fit_rejected",
         None,
     )
-    assert service.get_all_applied(draft) == {
+    assert draft.get_all_applied() == {
         "param-1": False,
         "param-2": False,
         "param-3": False,

@@ -8,6 +8,7 @@ import pytest
 from numpy.typing import NDArray
 from zcu_tools.analysis.singleshot import classify_result
 from zcu_tools.cfg_model import Centroid3Classifier, CircleClassifier, LinearClassifier
+from zcu_tools.core.simulation import ChargeDriveRequirement
 from zcu_tools.program.acquisition import (
     AcquisitionContractError,
     ImproveAcquireMixin,
@@ -28,6 +29,31 @@ def _herald_fraction(
     fractions = program.get_herald_pass_fraction()
     assert fractions is not None, "completed herald round must publish pass fractions"
     return fractions[channel]
+
+
+def test_hardware_acquire_does_not_forward_or_validate_charge_requirements():
+    soc, soccfg = make_acquisition_soc()
+    program = ModularProgramV2(
+        soccfg,
+        modules=[
+            PulseReadoutCfg(
+                gen_ch=0,
+                ro_ch=0,
+                nqz=1,
+                freq=100,
+                gain=0.1,
+                waveform=ConstWaveformCfg(length=0.1),
+                ro_length=0.1,
+            ).build("readout")
+        ],
+        reps=2,
+    )
+    actual = program.acquire(
+        soc,
+        progress=False,
+        charge_requirements=(ChargeDriveRequirement("caller drive", 999),),
+    )
+    np.testing.assert_array_equal(actual[0], [[0, 0]])
 
 
 @pytest.mark.parametrize("radius", [0.5, 1.0, 1.5, 2.0, 3.0])
