@@ -4,6 +4,12 @@
 
 **Last updated:** 2026-10-21
 
+GE centers come only from the saved readout cfg at `roles.f1_tone` and
+`roles.f2_tone`. Circle classifiers need no radius for this analysis. There is
+no manual center override or point-parameter calibration lookup. Missing or
+linear role-tone classifiers make the cfg invalid. Calibrate mux singleshot GE
+under the readout conditions used here.
+
 Readout references `$mux.module.readout` when present, preserving the library's complete tones and scalar settings. Without a slot, fill every required readout field in the blank mux template.
 
 After changing the parameter source, use Reset to recapture initial values. Refresh only updates sources and choices while preserving authored inputs; Reset can overwrite unsaved inputs.

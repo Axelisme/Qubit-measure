@@ -23,7 +23,7 @@ from zcu_lab.v2.support import live_line
 
 from .._drive import DualLineCfg, dual_line_drive
 from .._readout import JointRoles, collect_joint_shots
-from ..joint_readout.core import GECenters
+from ..joint_readout.core import GECenters, tone_centers
 from .analysis import CZAmplitudeAnalysis, analyze_return
 
 
@@ -35,7 +35,8 @@ class CZAmplitudeCfg(ConfigBase):
     drive is the scalar two-line template (MHz, µs, degrees, signed gains).
     scales is a finite, strictly increasing nonnegative common gain multiplier;
     neither line's relative phase, waveform, frequency nor gain ratio changes.
-    f1_centers/f2_centers are saved nearest-GE centers; every shot is classified.
+    f1_centers/f2_centers derive from saved role-tone circle classifiers, without
+    radius. Missing/linear calibration fails validation; every shot is classified.
     reps shots per host round are retained in round-major order. No bias device,
     reset, radius filtering, confusion inversion or pure-state assumption is used.
     """
@@ -101,25 +102,28 @@ class CZAmplitudeCfg(ConfigBase):
             description="填入 common gain scale 起訖值。先用 chevron 選定 CZ pulse，再由操作者確認幅度範圍。",
         ),
     ]
-    f1_centers: Annotated[
-        GECenters,
-        FieldMeta(
-            label="F1 GE centers",
-            description="填入 singleshot/ge 取得的 F1 ground／excited complex IQ centers，使用 normalized raw ADC units。",
-        ),
-    ]
-    f2_centers: Annotated[
-        GECenters,
-        FieldMeta(
-            label="F2 GE centers",
-            description="填入 singleshot/ge 取得的 F2 ground／excited complex IQ centers，使用 normalized raw ADC units。",
-        ),
-    ]
+
+    @property
+    def f1_centers(self) -> GECenters:
+        """Derive F1's normalized raw GE centers from its saved readout tone.
+
+        Missing or linear calibration raises ValueError; radius is not required.
+        """
+        return tone_centers(self.readout, self.roles.f1_tone)
+
+    @property
+    def f2_centers(self) -> GECenters:
+        """Derive F2's normalized raw GE centers from its saved readout tone.
+
+        Missing or linear calibration raises ValueError; radius is not required.
+        """
+        return tone_centers(self.readout, self.roles.f2_tone)
 
     @model_validator(mode="after")
     def validate_pair(self) -> Self:
         """Reject tone/line mismatches and invalid or degenerate gain axes before I/O."""
         self.roles.validate_readout(self.readout)
+        _ = self.f1_centers, self.f2_centers
         if self.drive.f1.ch != self.x180_f1.ch or self.drive.f2.ch != self.x180_f2.ch:
             raise ValueError("Each CZ line must use its role's calibrated Xπ generator")
         scales = sweep2array(self.scales)

@@ -8,7 +8,6 @@ from zcu_tools.cfg_model import WaveformAssetInfo
 from zcu_tools.gui.app.measure.remote.handlers.point import PointListReply, h_point_new
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.remote.errors import ErrorCode, RemoteError
-from zcu_tools.gui.session.context_control import ContextControlFacet
 from zcu_tools.gui.session.context_types import (
     EntryInfo,
     EntryRequest,
@@ -219,7 +218,7 @@ def test_created_binding_failure_preserves_destination_and_recovers_with_use(
     service = ContextService(application.state, BaseEventBus(), bind_assets=bind_assets)
     service.install_entry(entry)
     service.use_point(PointUseRequest("previous"))
-    application.remote.context_control = ContextControlFacet(context=service)
+    application.remote.context_control = service
     before = service.read_context().target
     fail = True
     with pytest.raises(RemoteError) as failure:

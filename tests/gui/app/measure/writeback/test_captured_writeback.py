@@ -38,7 +38,7 @@ from zcu_tools.gui.expected_error import InvalidInputError
 from zcu_tools.gui.interactive import PluginDefinition
 from zcu_tools.gui.session.adapters.manual_owner_scheduler import ManualOwnerScheduler
 from zcu_tools.gui.session.aliases import AliasRow
-from zcu_tools.gui.session.context_control import ContextControlFacet
+from zcu_tools.gui.session.context_control import ContextControlPort
 from zcu_tools.gui.session.context_types import (
     CommandOrigin,
     PointUseRequest,
@@ -86,7 +86,7 @@ def saved_target(parameters: ParameterContext) -> SavedPoint:
 @dataclass
 class WritebackSession:
     entry: ResultEntry
-    control: ContextControlFacet
+    control: ContextControlPort
     service: WritebackService
 
 
@@ -110,7 +110,7 @@ def session(tmp_path: Path) -> Generator[WritebackSession]:
         entry.new_point("working")
         context.install_entry(entry)
         context.use_point(PointUseRequest("working"))
-        control = ContextControlFacet(context=context)
+        control = context
         control.add_component("Q1", "fake/drive/a", {})
         service = WritebackService(control, arb_names=lambda: ())
         yield WritebackSession(entry, control, service)
@@ -341,7 +341,7 @@ def test_accepted_retains_run_identity_with_or_without_save(
     tmp_path: Path, qapp: QApplication, save_before_accept: bool
 ) -> None:
     with native_save_session(tmp_path, qapp) as native:
-        control = ContextControlFacet(context=native.context)
+        control = native.context
         service = WritebackService(control, arb_names=lambda: ())
         tab = native.state.get_tab("tab")
         captured = control.read_context()
@@ -436,7 +436,7 @@ def test_analysis_draft_uses_start_run_identity(
             analysis=Analysis(fn=analyze, writeback=proposals),
             post_analysis=AnalysisSavingAdapter.post_analysis,
         )
-        control = ContextControlFacet(context=native.context)
+        control = native.context
         writeback = WritebackService(control, arb_names=lambda: ())
         runner = OperationRunner(
             None, native.handles, None, native.background, native.bus
@@ -514,7 +514,7 @@ def test_post_analysis_draft_retains_primary_identity(
                 tab.run.parameters = None
         captured = tab.run.parameters
         expected = native.metadata.run_id if source in ("run", "load") else None
-        control = ContextControlFacet(context=native.context)
+        control = native.context
         writeback = WritebackService(control, arb_names=lambda: ())
         primary_draft = (
             None
@@ -689,7 +689,7 @@ def test_complex_writeback_keeps_captured_role_path_but_writes_selected_point(
     session.control.add_component(
         "Q1",
         "fake/drive/a",
-        {"ext": {"readout_cal": {"g_center": {"__complex__": [0.2, -0.1]}}}},
+        {"ext": {"response": {"origin": {"__complex__": [0.2, -0.1]}}}},
     )
     captured = session.control.read_context().bind_roles(
         {"driver": RoleSpec("fake/drive/*")}, focus="Q1", explicit={}
@@ -699,14 +699,14 @@ def test_complex_writeback_keeps_captured_role_path_but_writes_selected_point(
     draft = session.service.create_draft(
         [
             ParameterWriteback(
-                "$driver.ext.readout_cal.g_center",
-                "Ground center",
+                "$driver.ext.response.origin",
+                "Response origin",
                 proposed_value=centers[0],
                 stderr=0.01,
             ),
             ParameterWriteback(
-                "$driver.ext.readout_cal.e_center",
-                "Excited center",
+                "$driver.ext.response.endpoint",
+                "Response endpoint",
                 proposed_value=centers[1],
                 stderr=0.02,
             ),
@@ -715,7 +715,7 @@ def test_complex_writeback_keeps_captured_role_path_but_writes_selected_point(
         experiment_name="test/writeback",
     )
     session.control.set_parameter(
-        first, "Q1.ext.readout_cal.g_center", {"__complex__": [0.6, 0.1]}
+        first, "Q1.ext.response.origin", {"__complex__": [0.6, 0.1]}
     )
     session.entry.new_point("b")
     second = session.control.use_point(PointUseRequest("b"))
@@ -724,31 +724,27 @@ def test_complex_writeback_keeps_captured_role_path_but_writes_selected_point(
         "Q1",
         "fake/drive/a",
         {
-            "ext": {"readout_cal": {"g_center": {"__complex__": [0.7, 0.2]}}},
+            "ext": {"response": {"origin": {"__complex__": [0.7, 0.2]}}},
         },
     )
     preview = session.service.preview_values(draft)
     assert preview["param-1"].current == {"__complex__": [0.7, 0.2]}
     assert preview["param-2"].current is None
     assert [preview[item].actual_path for item in ("param-1", "param-2")] == [
-        "Q1.ext.readout_cal.g_center",
-        "Q1.ext.readout_cal.e_center",
+        "Q1.ext.response.origin",
+        "Q1.ext.response.endpoint",
     ]
     assert [preview[item].proposed for item in ("param-1", "param-2")] == tags
     assert session.entry.ledger.events() == ()
     session.service.apply_draft(draft, origin=CommandOrigin("mcp"))
     current = session.control.read_target(second, roles=captured.roles)
-    assert session.control.read_target(first).value("Q1.ext.readout_cal.g_center") == {
+    assert session.control.read_target(first).value("Q1.ext.response.origin") == {
         "__complex__": [0.6, 0.1],
     }
-    paths = ("Q1.ext.readout_cal.g_center", "Q1.ext.readout_cal.e_center")
+    paths = ("Q1.ext.response.origin", "Q1.ext.response.endpoint")
     assert [current.value(path) for path in paths] == tags
-    assert (
-        evaluate_scalar_expr("$driver.ext.readout_cal.g_center", current) == centers[0]
-    )
-    assert captured.value("$driver.ext.readout_cal.g_center") == {
-        "__complex__": [0.2, -0.1]
-    }
+    assert evaluate_scalar_expr("$driver.ext.response.origin", current) == centers[0]
+    assert captured.value("$driver.ext.response.origin") == {"__complex__": [0.2, -0.1]}
     assert session.control.read_context().target == second
     event = session.entry.ledger.events()[-1]
     assert event.origin == "mcp"

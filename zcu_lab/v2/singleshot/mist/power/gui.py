@@ -23,8 +23,8 @@ from zcu_lab.v2.singleshot.mist.power.core import (
 from zcu_lab.v2.singleshot.mist.power.form import make_form
 from zcu_lab.v2.support.measure.singleshot_shared import (
     read_analysis_float,
-    read_confusion_matrix,
 )
+from zcu_lab.v2.support.singleshot.util import readout_confusion_matrix
 
 MistPowerRunResult: TypeAlias = RunRecord[PowerCfg, PowerResult]
 
@@ -44,7 +44,9 @@ def _analyze(
     options = PowerAnalyzeOptions(
         ac_coeff=read_analysis_float(req.parameters, "$qubit.ext.ac_stark_coeff"),
         log_scale=req.analyze_params.log_scale,
-        confusion_matrix=read_confusion_matrix(req.parameters),
+        confusion_matrix=readout_confusion_matrix(
+            None if req.run_result.cfg is None else req.run_result.cfg.readout
+        ),
     )
     PowerExp().analyze(req.run_result, options, plots=plots)
     return

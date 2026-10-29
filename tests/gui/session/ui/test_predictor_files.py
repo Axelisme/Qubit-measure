@@ -5,8 +5,6 @@ from pathlib import Path
 
 import pytest
 from zcu_tools.gui.event_bus import BaseEventBus
-from zcu_tools.gui.session.context_control import ContextControlFacet
-from zcu_tools.gui.session.predictor_control import PredictorControlFacet
 from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.services.predictor import PredictorService
 from zcu_tools.gui.session.state import SessionState
@@ -34,7 +32,7 @@ def test_save_as_writes_v2_energy_and_multidevice_frame(qapp, tmp_path: Path):
 
     flux = PredictorFlux(0.2, {"coil": 2.0, "trim": -4.0}, {"coil": "A", "trim": "V"})
     params = TransmonParams(20.0, 0.3, 0.1)
-    dialog = PredictorDialog(PredictorControlFacet(PredictorService()), params=params)
+    dialog = PredictorDialog(PredictorService(), params=params)
     try:
         dialog.set_flux(flux, {"coil": 0.3, "trim": -0.4})
         destination = tmp_path / "saved.json"
@@ -76,7 +74,7 @@ def test_entry_files_load_and_remain_manually_editable(qapp, tmp_path: Path):
         )
     context.install_entry(entry)
     dialog = PredictorDialog(
-        PredictorControlFacet(PredictorService(ContextControlFacet(context=context))),
+        PredictorService(context),
         params=FluxoniumParams(),
     )
     evidence = Path(os.environ.get("PREDICTOR_FILES_EVIDENCE", str(tmp_path)))
@@ -147,7 +145,7 @@ def multidevice_trial(qapp, tmp_path: Path):
     )
     context.install_entry(entry)
     dialog = PredictorDialog(
-        PredictorControlFacet(PredictorService(ContextControlFacet(context=context))),
+        PredictorService(context),
         params=FluxoniumParams(),
         device=make_device_control(cached={"coil": 0.3, "trim": -0.4}),
     )
@@ -295,9 +293,7 @@ def test_multidevice_calibrate_and_save_as_visible_flow(
 
 
 def test_no_entry_shows_empty_file_choice_and_hint(qapp, tmp_path: Path):
-    dialog = PredictorDialog(
-        PredictorControlFacet(PredictorService()), params=FluxoniumParams()
-    )
+    dialog = PredictorDialog(PredictorService(), params=FluxoniumParams())
     evidence = Path(os.environ.get("PREDICTOR_FILES_EVIDENCE", str(tmp_path)))
     try:
         dialog.show()

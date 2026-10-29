@@ -15,7 +15,7 @@ from zcu_tools.program.v2.modules import MuxReadoutCfg
 
 from ._drive import DualLineCfg
 from ._readout import JointRoles
-from .joint_readout.core import GECenters
+from .joint_readout.core import GECenters, tone_centers
 
 
 class DurationScanCfg(ConfigBase):
@@ -24,8 +24,9 @@ class DurationScanCfg(ConfigBase):
     duration is the requested positive envelope length in us on both lines.
     drive carries the source pair: common MHz frequency, signed gains, phases
     in degrees, explicit waveforms and timing. Only scalar length-settable
-    envelopes are supported; arbitrary assets are not resized. roles and GE
-    centers are saved capture values, never live lookup. Every shot is kept.
+    envelopes are supported; arbitrary assets are not resized. roles are saved
+    capture values. GE centers derive from the saved role-tone circles; missing
+    or linear calibration fails validation. No radius is needed. Every shot is kept.
     """
 
     reps: Annotated[
@@ -89,25 +90,28 @@ class DurationScanCfg(ConfigBase):
             description="填入兩條 charge-line 的共同 duration 起訖值，單位 us。先做 conditional spectroscopy 選頻，再由操作者確認 chevron 時間範圍。",
         ),
     ]
-    f1_centers: Annotated[
-        GECenters,
-        FieldMeta(
-            label="F1 GE centers",
-            description="填入 singleshot/ge 取得的 F1 normalized complex IQ centers。",
-        ),
-    ]
-    f2_centers: Annotated[
-        GECenters,
-        FieldMeta(
-            label="F2 GE centers",
-            description="填入 singleshot/ge 取得的 F2 normalized complex IQ centers。",
-        ),
-    ]
+
+    @property
+    def f1_centers(self) -> GECenters:
+        """Derive F1's normalized raw GE centers from its saved readout tone.
+
+        Missing or linear calibration raises ValueError; radius is not required.
+        """
+        return tone_centers(self.readout, self.roles.f1_tone)
+
+    @property
+    def f2_centers(self) -> GECenters:
+        """Derive F2's normalized raw GE centers from its saved readout tone.
+
+        Missing or linear calibration raises ValueError; radius is not required.
+        """
+        return tone_centers(self.readout, self.roles.f2_tone)
 
     @model_validator(mode="after")
     def validate_duration_scan(self) -> Self:
         """Reject invalid tones, routes, durations and unscalable waveforms."""
         self.roles.validate_readout(self.readout)
+        _ = self.f1_centers, self.f2_centers
         if self.drive.f1.ch != self.x180_f1.ch or self.drive.f2.ch != self.x180_f2.ch:
             raise ValueError("Each drive must use its role's calibrated Xπ generator")
         durations = sweep2array(self.duration)

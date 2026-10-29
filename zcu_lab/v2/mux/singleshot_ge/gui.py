@@ -10,20 +10,20 @@ from typing import TypeAlias
 import numpy as np
 from pydantic import BaseModel
 from zcu_tools.analysis.fitting import FitQuality
-from zcu_tools.core.element import ElementIdentity
+from zcu_tools.cfg_model import CircleClassifier
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     Adapter,
     Analysis,
     AnalyzeRequest,
-    ParameterWriteback,
     PostAnalysis,
     PostAnalyzeRequest,
     PostWritebackRequest,
     WritebackItem,
     WritebackRequest,
 )
+from zcu_tools.gui.app.measure.writeback import calibrated_module_writeback
 from zcu_tools.plotting.plots import Plots
 
 from zcu_lab.v2.singleshot.ge.core import GEAnalyzeOptions, GEPostAnalyzeOptions
@@ -150,20 +150,20 @@ def _post_analyze(
 def _get_writeback_items(
     req: WritebackRequest[MuxGERunResult, MuxGEAnalyzeResult],
 ) -> Sequence[WritebackItem]:
-    """Propose complete successful tones' primary IQ calibrations, never Apply.
+    """Propose one complete module with all successful tones' circle centers.
 
-    Resolve destinations only from this Run/Load capture; no capture means
-    no proposals. Validate the binding against any source cfg. Preserve GE's
-    calibration validity gate. Failed/partial rows contribute no items.
-    GE model-review gates control initial selection with a note; manual draft
-    changes remain possible. Low joint r2 is not calibration evidence.
+    Use the Run/Load readout slot and captured binding, never the current Form.
+    Failed/partial tones keep their library classifiers. Review notes from any
+    successful tone deselect the whole proposal for manual review. No Apply.
     """
     snapshot = req.run_result.cfg
-    names = None if snapshot is None else tuple(t.name for t in snapshot.tones)
-    qubits = captured_qubits(req.ctx.parameters, names)
+    if snapshot is None or req.ctx.parameters is None:
+        return []
+    qubits = captured_qubits(req.ctx.parameters, tuple(t.name for t in snapshot.tones))
     if qubits is None:
         return []
-    items: list[WritebackItem] = []
+    updates: dict[str, CircleClassifier] = {}
+    notes: list[str] = []
     for row, outcome in enumerate(req.analyze_result.outcomes):
         if (
             isinstance(outcome, MuxFitFailure)
@@ -173,27 +173,22 @@ def _get_writeback_items(
         primary = outcome.primary
         primary.validate_calibration()
         note = ge_calibration_review_note(primary)
-        qubit = qubits[outcome.index]
-        row_items: list[WritebackItem] = []
-        for field, value, description in (
-            ("fidelity", primary.fidelity, "Prepared-label assignment fidelity"),
-            ("sigma", primary.ge_s, "Single-shot IQ cluster width (ADC units)"),
-            ("g_center", primary.g_center, "Single-shot ground IQ center"),
-            ("e_center", primary.e_center, "Single-shot excited IQ center"),
-        ):
-            row_items.append(
-                ParameterWriteback(
-                    target_name=f"{qubit}.ext.readout_cal.{field}",
-                    description=description,
-                    proposed_value=value,
-                    selected=note is None,
-                    note=note,
-                )
-            )
-        for item in row_items:
-            item.element = ElementIdentity(index=outcome.index, name=qubit)
-        items.extend(row_items)
-    return items
+        if note is not None:
+            notes.append(f"{qubits[outcome.index]}: {note}")
+        updates[f"tones.{outcome.index}.classifier"] = CircleClassifier(
+            g_center=primary.g_center, e_center=primary.e_center
+        )
+    if not updates:
+        return []
+    item = calibrated_module_writeback(
+        req.ctx.parameters,
+        snapshot.readout,
+        target="$mux.module.readout",
+        description="Mux single-shot ground/excited centers",
+        field_updates=updates,
+    )
+    item.selected, item.note = not notes, "\n".join(notes) or None
+    return [item]
 
 
 def _get_post_writeback_items(
@@ -201,23 +196,22 @@ def _get_post_writeback_items(
         MuxGERunResult, MuxGEAnalyzeResult, MuxGEPostAnalyzeResult
     ],
 ) -> Sequence[WritebackItem]:
-    """Propose only same-source successful GE radius/confusion diagnostics.
+    """Propose one complete module with successful same-source Post classifiers.
 
-    Missing capture returns no items. Invalid bindings raise; failed/partial
-    rows contribute nothing. Targets retain GE's 3x3
-    diagnostic policy. Preselection requires primary GE review gates and a
-    finite post condition number <=10. Failed gates keep candidates with notes
-    for manual selection. No current Form/library lookup or Apply occurs here.
+    Keep failed/partial tones unchanged. Every updated circle contains its
+    primary centers and Post radius/3x3 prepared-to-measured confusion matrix.
+    Any primary or Post review note deselects the whole proposal. No Apply.
     """
-    result = req.post_analyze_result
     snapshot = req.run_result.cfg
-    names = None if snapshot is None else tuple(t.name for t in snapshot.tones)
-    qubits = captured_qubits(req.ctx.parameters, names)
+    if snapshot is None or req.ctx.parameters is None:
+        return []
+    qubits = captured_qubits(req.ctx.parameters, tuple(t.name for t in snapshot.tones))
     if qubits is None:
         return []
-    items: list[WritebackItem] = []
+    updates: dict[str, CircleClassifier] = {}
+    notes: list[str] = []
     for row, (outcome, primary) in enumerate(
-        zip(result.outcomes, req.analyze_result.outcomes, strict=True)
+        zip(req.post_analyze_result.outcomes, req.analyze_result.outcomes, strict=True)
     ):
         if (
             isinstance(outcome, MuxFitFailure)
@@ -225,33 +219,28 @@ def _get_post_writeback_items(
             or not np.isfinite(req.run_result.result.signals[row]).all()
         ):
             continue
-        qubit = qubits[outcome.index]
         note = ge_post_review_note(
             primary.primary, outcome.post.confusion.condition_number
         )
-        row_items: list[WritebackItem] = []
-        row_items.extend(
-            [
-                ParameterWriteback(
-                    target_name=f"{qubit}.ext.readout_cal.radius",
-                    description="Single-shot classification radius",
-                    proposed_value=outcome.post.confusion.radius,
-                    selected=note is None,
-                    note=note,
-                ),
-                ParameterWriteback(
-                    target_name=f"{qubit}.ext.readout_cal.confusion_matrix",
-                    description="Single-shot 3x3 confusion matrix",
-                    proposed_value=outcome.post.confusion.matrix.tolist(),
-                    selected=note is None,
-                    note=note,
-                ),
-            ]
+        if note is not None:
+            notes.append(f"{qubits[outcome.index]}: {note}")
+        updates[f"tones.{outcome.index}.classifier"] = CircleClassifier(
+            g_center=primary.primary.g_center,
+            e_center=primary.primary.e_center,
+            radius=outcome.post.confusion.radius,
+            confusion_matrix=outcome.post.confusion.matrix.tolist(),
         )
-        for item in row_items:
-            item.element = ElementIdentity(index=outcome.index, name=qubit)
-        items.extend(row_items)
-    return items
+    if not updates:
+        return []
+    item = calibrated_module_writeback(
+        req.ctx.parameters,
+        snapshot.readout,
+        target="$mux.module.readout",
+        description="Mux single-shot centers, radius and confusion",
+        field_updates=updates,
+    )
+    item.selected, item.note = not notes, "\n".join(notes) or None
+    return [item]
 
 
 def run(cfg: MuxGECfg, *, context: RunContext) -> RunRecord[MuxGECfg, MuxGEResult]:

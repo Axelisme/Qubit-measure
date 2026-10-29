@@ -6,7 +6,6 @@ from collections.abc import Callable
 from pathlib import Path
 
 from zcu_tools.gui.event_bus import BaseEventBus
-from zcu_tools.gui.session.context_control import ContextControlFacet
 from zcu_tools.gui.session.context_types import (
     CommandOrigin,
     EntryInfo,
@@ -23,14 +22,17 @@ from zcu_tools.gui.session.services.connection import (
     ConnectRequest,
     SoCConnectionService,
 )
+from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.services.project_settings import (
     ConnectionPreferences,
     ProjectSettingsService,
     SetupPreferences,
 )
 from zcu_tools.gui.session.setup_control import SetupControlFacet, SocControlFacet
-from zcu_tools.gui.session.types import SocCfgHandle
+from zcu_tools.gui.session.state import SessionState
+from zcu_tools.gui.session.types import SessionEnv, SocCfgHandle
 from zcu_tools.program.v2.mocksoc import make_mock_soccfg
+from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
 from tests.gui._control_fakes import CallLog, RecordedCall, RecordingSignal, call
 from tests.gui.app.measure.remote._helpers import Fixture
@@ -64,8 +66,13 @@ class RecordingSettings(ProjectSettingsService):
         self._log.add("settings", "remember_connection", req)
 
 
-class RecordingContext(ContextControlFacet):
+class RecordingContext(ContextService):
     def __init__(self, log: CallLog) -> None:
+        super().__init__(
+            SessionState(SessionEnv(parameters=None, soc=None, soccfg=None)),
+            BaseEventBus(),
+            bind_assets=ArbWaveformDatabase.info_at,
+        )
         self._log = log
 
     def use_point(self, request: PointUseRequest) -> SavedPoint:

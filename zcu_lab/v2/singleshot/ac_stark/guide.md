@@ -8,7 +8,7 @@ Single-shot AC-Stark calibration: drives a cavity Stark tone and a qubit probe t
 
 Open and Reset take a snapshot of the current aliases, parameters and module choices. Relax delay starts at 5*T1. Qubit sweep is `$qubit.freq` - 700 to `$qubit.freq` + 100 MHz. Qubit probe length/mixer use `$qubit.module.x180.waveform.length` and `$qubit.module.x180.mixer_freq`. Pre/post delay are 1.0/`$resonator.kappa` and 0.5/`$resonator.kappa`; cavity tone length adds 1.0/`$resonator.kappa` to the pi length.
 
-Classification starts from `$qubit.ext.readout_cal.g_center`, `e_center` and `radius`. Missing calibration leaves these fields Invalid.
+Classification uses the readout module's circle classifier, visible under Readout → Advanced (per tone for Mux). Run requires a classifier on every declared ADC and a positive radius; missing radius prompts singleshot GE Post. Linear has no Other state and is rejected. Analyze corrects populations only with the saved readout cfg's confusion matrix. Historical cfg without a classifier or matrix skips correction.
 
 Pulse templates use `$qubit.freq`, `$qubit.wiring.ch`, `$resonator.freq`, `$resonator.wiring.ch` and `$resonator.wiring.ro_ch`. The readout trigger uses `$resonator.time_of_fly` + 0.05 us. Missing required sources leave the corresponding fields Invalid; supply them before Run.
 
@@ -26,6 +26,6 @@ Proposes the fitted AC-Stark coefficient at `$qubit.ext.ac_stark_coeff`, in phot
 
 ## Recommended
 
-Set the classification calibration directly or seed it with 'singleshot/ge'; run after the dispersive-shift experiment has set '`$qubit.ext.chi`' / '`$resonator.kappa`'. Sweep the Stark gain across the onset and the probe frequency around the qubit line.
+Calibrate the readout with singleshot/ge Primary and Post; run after the dispersive-shift experiment has set '`$qubit.ext.chi`' / '`$resonator.kappa`'. Sweep the Stark gain across the onset and the probe frequency around the qubit line.
 
-**Last updated:** 2026-10-21
+**Last updated:** 2026-10-29

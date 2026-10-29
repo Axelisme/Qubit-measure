@@ -12,7 +12,7 @@
 
 `list_points` 依 `point.yaml` 列出 label，不要求 library 或 aliases。`point_description` 只讀 `general.description`，不解讀其他欄位。`validate_point_parameters` 只要求可讀的 YAML mapping、參數 header 與目前 schema version。局部 component 或 leaf 格式錯誤不使 point 不可用，使用該值或寫入時才報錯。解析與 I/O 錯誤仍交 caller 逐 point 隔離，不讀 library 或 aliases。
 
-`use_point` 的必需 `point.yaml` 或 `module_cfg.yaml` 缺失時回報公開 `MissingPointError`，它保留 `FileNotFoundError` 繼承關係。Schema、permission、其他 I/O 與額外引用檔缺失不歸類為 point 缺失。
+`use_point` 只要求 `point.yaml`。缺少它時回報公開 `MissingPointError`，它保留 `FileNotFoundError` 繼承關係。缺少 `module_cfg.yaml` 不阻擋選取，point library 為空且 revision=None，讀取不建檔。Schema、permission、其他 I/O 與額外引用檔缺失不歸類為 point 缺失。
 
 兩個入口都不檢查或建立 Database，只有 Result 也能開啟。第一次 Save 才建立所需輸出目錄；既有同名 Database 照用，混雜不另處理，見 [ADR-0063](../../../../docs/adr/0063-persistence-ownership.md#run-輸出位置與-writer-權責)。
 
@@ -54,9 +54,9 @@ PointView 的公開 constructor 必須提供 result_root 與 source，在建構�
 
 `new_point(clone_from=...)` 接受同條目 label、`<entry>/<point>` 或相同 Result root 的 PointView，Database root 可以不同。Clone 重讀來源位置當下已發布的 point 與 module_cfg，不用 view 的舊快照或 UUID，也不讀目的 setup。目的 point 保留來源的其他 general 資料，更新 created_at。參數值與 metadata 原樣複製，不查 ledger、不匯入事件、不改寫 source，也不加 cloned_from。
 
-`module_library(label=None, assets=...)` 開啟 entry 層 library，傳入 label 時開啟該 point 的 library。Assets 只供 materialization 使用。它不讀 point、不選 active point、不查 ledger，也不建立缺失文件。無 clone_from 的新 point 建立只有標頭的 library，不複製 setup library。
+`module_library(label=None, assets=...)` 開啟 entry 層 library，傳入 label 時開啟該 point 的 library。Assets 只供 materialization 使用。它不讀 point、不選 active point、不查 ledger，也不建立缺失文件。無 clone_from 的新 point 建立只有標頭的 library，不複製 setup library。Point library 缺檔時回空快照與 revision=None，第一次非空 edit 才建檔。若外部先建立，edit 報衝突且不覆寫；caller 可用 refresh 明確安裝外部文件。Setup library 缺檔仍報錯。
 
-Clone 由 library owner 複製合法 Specs 與 forward-minor 容器欄位，忽略舊 provenance，不改來源檔、不備份。跨 entry 不匯入事件或附件，同 entry 也不加來源標記。Data 與圖片不複製。Clone 不承諾 point 與 library 的跨檔 snapshot，失敗清理本次 point。
+來源缺 library 時，clone 的目的也不建立 library。Clone 由 library owner 複製合法 Specs 與 forward-minor 容器欄位，忽略舊 provenance，不改來源檔、不備份。跨 entry 不匯入事件或附件，同 entry 也不加來源標記。Data 與圖片不複製。Clone 不承諾 point 與 library 的跨檔 snapshot，失敗清理本次 point。
 
 
 ## 元件與定義

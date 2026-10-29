@@ -8,12 +8,11 @@ from typing import Annotated, ClassVar, Literal
 import numpy as np
 from matplotlib.axes import Axes
 from numpy.typing import NDArray
-from pydantic import field_serializer
 from zcu_tools.analysis.fitting.singleshot_rabi import (
     RabiJointFitResult,
     fit_rabi_joint,
 )
-from zcu_tools.analysis.singleshot import classify_rabi_iq, classify_result
+from zcu_tools.analysis.singleshot import classify_rabi_iq
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment, config
 from zcu_tools.experiment.context import RunContext
@@ -26,7 +25,10 @@ from zcu_tools.program.v2 import GainSweep, Pulse, Readout, Reset, sweep2param
 
 from zcu_lab.v2.singleshot.plot_rabi import RabiJointPlotOptions, plot_rabi_joint
 from zcu_lab.v2.support import live_line
-from zcu_lab.v2.support.singleshot.util import raw_shots_to_signal
+from zcu_lab.v2.support.singleshot.util import (
+    rabi_preview_classifier,
+    raw_shots_to_signal,
+)
 
 
 @dataclass(frozen=True)
@@ -68,14 +70,6 @@ class AmpRabiCfg(ConfigBase):
     qub_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Qub Pulse")]
     readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
     gain: Annotated[GainSweep, FieldMeta(label="Gain", unit="a.u.")]
-    g_center: Annotated[complex, FieldMeta(label="Ground center")]
-    e_center: Annotated[complex, FieldMeta(label="Excited center")]
-    radius: Annotated[float, FieldMeta(label="Classification radius")]
-
-    @field_serializer("g_center", "e_center")
-    def serialize_center(self, value: complex) -> str:
-        """Keep experiment comments JSON-safe with a lossless complex literal."""
-        return str(value)
 
 
 def _flatten_round_shots(raw: NDArray[np.complex128]) -> NDArray[np.complex128]:
@@ -136,9 +130,9 @@ class AmpRabiExp(Experiment[AmpRabiResult, AmpRabiCfg]):
         Return gains (a.u.) and complex IQ shaped (Ngain, reps * rounds);
         rounds are concatenated, never averaged into one IQ point.
 
-        cfg.g_center/e_center must be distinct finite centers and cfg.radius
-        positive and finite for the live G/E/Other classification. These live
-        fractions are not the saved data. The later raw-IQ joint fit estimates
+        The saved readout's circle/radius supplies live G/E/Other classification.
+        Without a classifier, skip preview but retain raw acquisition and fit.
+        These live fractions are not the saved data. The later raw-IQ joint fit estimates
         the oscillation period, pi/pi2 gains and readout calibration.
         Acquisition requires one readout channel and raises on an unexpected
         raw-shot buffer shape.
@@ -146,8 +140,7 @@ class AmpRabiExp(Experiment[AmpRabiResult, AmpRabiCfg]):
 
         # Validate live classification before acquiring any shots.
         soc, soccfg = context.soc, context.soccfg
-        g_center, e_center, radius = cfg.g_center, cfg.e_center, cfg.radius
-        classify_result(np.empty(0, dtype=np.complex128), g_center, e_center, radius)
+        classifier = rabi_preview_classifier(cfg.readout)
         cfg = deepcopy(cfg)
         rounds, cfg.rounds = cfg.rounds, 1
         gains = sweep2array(
@@ -174,22 +167,31 @@ class AmpRabiExp(Experiment[AmpRabiResult, AmpRabiCfg]):
                 line.set(**kwargs)
             ax.legend()
 
-        viewer = live_line(
-            context.plots,
-            "measurement",
-            "Pulse gain (a.u.)",
-            "Classified population",
-            num_lines=3,
-            configure_axes=configure_axes,
+        viewer = (
+            None
+            if classifier is None
+            else live_line(
+                context.plots,
+                "measurement",
+                "Pulse gain (a.u.)",
+                "Classified population",
+                num_lines=3,
+                configure_axes=configure_axes,
+            )
         )
 
         def update_view(raw: NDArray[np.complex128]) -> None:
+            if viewer is None or classifier is None or classifier.radius is None:
+                return
             shots = _flatten_round_shots(raw)
             complete = np.all(np.isfinite(shots), axis=0)
             populations = np.full((gains.size, 2), np.nan)
             if np.any(complete):
                 populations = classify_rabi_iq(
-                    shots[:, complete], g_center, e_center, radius
+                    shots[:, complete],
+                    classifier.g_center,
+                    classifier.e_center,
+                    classifier.radius,
                 )
             viewer.update(
                 gains, np.column_stack((populations, 1 - populations.sum(axis=1))).T

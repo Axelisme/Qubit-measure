@@ -14,7 +14,7 @@ The MuxGroup needs ordered `qubits` and `resonators` for every tone. Each qubit 
 
 Provide calibrated `$f1.module.x180` and `$f2.module.x180` pulses on different charge generators. Readout references `$mux.module.readout`, preserving the library's complete tones and scalar settings. If that slot is absent, fill the blank mux readout, including every bound tone. Confirm generator, mixer, ADC channels, integration window and trigger timing before running. Review these editable values against the authorized hardware limits.
 
-The two GE center pairs start from `$f1.ext.readout_cal.g_center` / `e_center` and the equivalent F2 leaves. Missing centers remain required fields. Nonfinite or coincident centers are invalid. Supply measured calibration for the actual readout conditions. GE centers must use the same readout route, gain, normalization and timing as this run.
+The two GE center pairs come only from the saved mux readout tone classifiers at `roles.f1_tone` and `roles.f2_tone`. Each role requires a circle classifier; missing or linear calibration makes the cfg invalid. Radius is not required. The Form offers no center override. Run mux singleshot GE under the actual readout conditions; nonfinite or coincident centers are invalid.
 
 `reps` is the shots per round for each branch. `rounds` is the number of software rounds per branch. Initial and relaxation delays use µs. Set DC devices externally before Run. Each branch starts from the thermal ensemble.
 

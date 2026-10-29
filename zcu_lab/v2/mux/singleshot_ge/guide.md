@@ -139,9 +139,20 @@ unselected with notes. Unrelated fixed-zero parameter issues do not reject them.
 You may select a candidate manually after inspecting the model and raw IQ.
 
 A successful, finite primary row must pass the GE calibration validity check.
-Its candidates update `ext.readout_cal.fidelity`, `sigma`, `g_center` and
-`e_center` on the captured qubit.
-Post candidates contain `radius` and the 3x3 `confusion_matrix`.
+Each phase proposes one complete library mux readout replacement, resolved from
+`$mux.module.readout` in the Run/Load capture. Primary replaces each successful
+tone's classifier with a circle containing only g/e centers. Post replaces it
+with the same centers plus radius and the 3x3 prepared-to-measured confusion
+matrix. Failed tones retain their library classifiers. Fidelity and sigma are
+not written to point parameters. Any successful tone's review note leaves the
+whole module unselected; review all included tones before selecting it.
+
+The proposal retains the original library Spec and its child keys. Only the
+updated `tones.<original index>.classifier` paths are excluded from comparing
+the run readout with the library. Frequency, ADC and other differences reject
+the proposal and name the differing paths. Same-batch Apply orders Primary
+before Post. Separate Applies use the last complete replacement: Post then
+Primary removes radius/matrix, and radius consumers require GE Post again.
 Review cluster separation, quality, confusion diagnostics and destination.
 
 ## Results and saved sources

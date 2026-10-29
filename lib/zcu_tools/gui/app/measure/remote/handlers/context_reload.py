@@ -23,7 +23,7 @@ class ContextReloadParams:
 
     path is the caller's file path, checked by the session owner for absolute
     selected-point membership. expected_revision is the installed base SHA-256,
-    not the edited disk hash; None is valid only for a missing aliases base.
+    not the edited disk hash; None denotes a missing library or aliases base.
     """
 
     path: Path
@@ -51,7 +51,7 @@ def h_context_reload(
     """Validate/install one edited disk file and return its installed revision.
 
     params requires path and expected_revision, which names the installed base,
-    not the candidate disk hash. Only a missing aliases base accepts null.
+    not the candidate disk hash. A missing library or aliases base accepts null.
     Owner path/validation errors include the path; stale bases propagate
     revision_mismatch. Failures preserve disk and installed state. Holder
     admission belongs to dispatch; no retry, repair or selection change occurs.
@@ -73,7 +73,8 @@ def check_writer_revision(
     """Check an optional wire base against the selected document's disk bytes.
 
     Omission preserves legacy writer admission without a disk check. Explicit
-    null means missing aliases, never omission; other documents reject null.
+    null means a missing library or aliases file, never omission; parameters
+    reject null. An existing optional file returns revision_mismatch.
     Malformed values raise INVALID_PARAMS. No point raises no_context. The
     session owner checks disk and raises revision_mismatch without installing,
     publishing or writing. The caller must invoke this before its mutation.
@@ -82,11 +83,11 @@ def check_writer_revision(
         return
     revision = params["expected_revision"]
     if not isinstance(revision, str) and not (
-        revision is None and document == "aliases"
+        revision is None and document in ("library", "aliases")
     ):
         raise RemoteError(
             ErrorCode.INVALID_PARAMS,
-            "'expected_revision' must be a string; only aliases accepts null",
+            "'expected_revision' must be a string; only library or aliases accepts null",
         )
     for file in adapter.context_control.get_file_revisions():
         if file.document == document:

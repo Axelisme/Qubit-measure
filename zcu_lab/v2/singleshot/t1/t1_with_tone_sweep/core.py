@@ -8,7 +8,6 @@ import numpy as np
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from pydantic import field_serializer
 from zcu_tools.analysis.fitting.multi_decay import fit_dual_transition_rates
 from zcu_tools.analysis.singleshot import (
     calc_populations,
@@ -34,6 +33,7 @@ from zcu_tools.program.v2 import (
     SweepCfg,
     TableLengthPulse,
 )
+from zcu_tools.program.v2.modules.readout import classification_parameters
 from zcu_tools.progress_bar import make_pbar
 
 from zcu_lab.v2.support import live_heatmap, live_line
@@ -171,13 +171,6 @@ class T1WithToneSweepCfg(ConfigBase):
     ]
     gain: Annotated[GainSweep | None, FieldMeta(label="Gain", unit="a.u.")] = None
     freq: Annotated[SweepCfg | None, FieldMeta(label="Frequency", unit="MHz")] = None
-    g_center: Annotated[complex, FieldMeta(label="Ground center")]
-    e_center: Annotated[complex, FieldMeta(label="Excited center")]
-    radius: Annotated[float, FieldMeta(label="Classification radius")]
-
-    @field_serializer("g_center", "e_center")
-    def serialize_center(self, value: complex) -> str:
-        return str(value)
 
 
 @dataclass(frozen=True)
@@ -286,10 +279,11 @@ class T1WithToneSweepExp(Experiment[T1WithToneSweepResult, T1WithToneSweepCfg]):
 
         Uniform sampling requires a SweepCfg. Non-uniform sampling accepts
         a SweepCfg or explicit lengths; invalid or non-positive lengths fail
-        before acquisition. Classification uses cfg.g_center/e_center/radius.
+        before acquisition. Classification uses every ADC's readout circle classifier.
         """
         # 1. Resolve the outer scan and quantize positive probe durations.
         cfg = deepcopy(cfg)
+        classification = classification_parameters(cfg.readout, require_other=True)
         soc, soccfg = context.soc, context.soccfg
         if cfg.uniform:
             length_sweep = cfg.length
@@ -370,9 +364,7 @@ class T1WithToneSweepExp(Experiment[T1WithToneSweepResult, T1WithToneSweepCfg]):
                     .declare_sweep("length", len(lengths))
                     .build_and_acquire(
                         raw2signal_fn=raw_population_signal,
-                        g_center=cfg.g_center,
-                        e_center=cfg.e_center,
-                        ge_radius=cfg.radius,
+                        classify=classification,
                         rounds=cfg.rounds,
                     )
                 )

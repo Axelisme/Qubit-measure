@@ -28,7 +28,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             "name/result_path/database_path from the cached owner identity. "
             "files lists installed point {document, path, revision}, ordered "
             "parameters/library/aliases; empty before point selection. Paths are "
-            "absolute and revisions are raw-byte SHA-256 (null only for missing aliases). "
+            "absolute and revisions are raw-byte SHA-256 (null for missing library or aliases). "
             "No disk read or implicit refresh.",
             readonly=True,
         ),

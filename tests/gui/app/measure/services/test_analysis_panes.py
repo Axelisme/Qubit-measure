@@ -296,10 +296,10 @@ def test_pane_primary_publishes_excited_fit_and_calibration_writeback(
     assert {
         item.target_name for item in panes.writeback.preview_draft(primary_draft)
     } == {
-        "$qubit.ext.readout_cal.fidelity",
-        "$qubit.ext.readout_cal.sigma",
-        "$qubit.ext.readout_cal.g_center",
-        "$qubit.ext.readout_cal.e_center",
+        "$qubit.ext.pane_sample.score",
+        "$qubit.ext.pane_sample.width",
+        "$qubit.ext.pane_sample.first",
+        "$qubit.ext.pane_sample.second",
     }
 
 
@@ -316,8 +316,8 @@ def test_pane_post_uses_adopted_fit_and_projects_separate_artifacts_and_writebac
     post_draft = tab.post_analysis.writeback_draft
     assert isinstance(post_draft, WritebackDraft)
     assert {item.target_name for item in panes.writeback.preview_draft(post_draft)} == {
-        "$qubit.ext.readout_cal.radius",
-        "$qubit.ext.readout_cal.confusion_matrix",
+        "$qubit.ext.pane_sample.extent",
+        "$qubit.ext.pane_sample.matrix",
     }
     snapshot = TabService(
         panes.state,

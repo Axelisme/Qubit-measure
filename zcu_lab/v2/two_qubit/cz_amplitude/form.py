@@ -13,7 +13,9 @@ from .core import CZAmplitudeCfg
 
 
 def make_form(ctx: FormContext) -> Form[CZAmplitudeCfg]:
-    """Capture roles and editable calibrated pulses/readout/GE centers once.
+    """Capture roles and editable calibrated pulses/readout once.
+
+    Centers derive from saved role-tone circles; missing/linear is Invalid.
 
     Coupler CZ slots supply ordinary pulse templates when present. Otherwise
     explicit cosine inputs require operator frequency/gain/duration/Nyquist zone;
@@ -48,8 +50,6 @@ def make_form(ctx: FormContext) -> Form[CZAmplitudeCfg]:
             "x180_f2",
             "readout",
             "drive",
-            "f1_centers",
-            "f2_centers",
             "scales",
             "reps",
             "rounds",
@@ -64,14 +64,6 @@ def make_form(ctx: FormContext) -> Form[CZAmplitudeCfg]:
             "x180_f1": Slot("$f1.module.x180", copy=True),
             "x180_f2": Slot("$f2.module.x180", copy=True),
             "readout": readout,
-            "f1_centers": {
-                "g": Expr("$f1.ext.readout_cal.g_center"),
-                "e": Expr("$f1.ext.readout_cal.e_center"),
-            },
-            "f2_centers": {
-                "g": Expr("$f2.ext.readout_cal.g_center"),
-                "e": Expr("$f2.ext.readout_cal.e_center"),
-            },
             "scales": Range(None, None, expts=101),
         },
     ).with_seed_metadata(mux_readout_seed_metadata(readout))

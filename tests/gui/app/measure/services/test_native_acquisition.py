@@ -31,7 +31,6 @@ from zcu_tools.gui.app.measure.state import State
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
 from zcu_tools.gui.session.aliases import AliasRow
-from zcu_tools.gui.session.context_control import ContextControlFacet
 from zcu_tools.gui.session.context_types import (
     CommandOrigin,
     EntryRequest,
@@ -167,7 +166,7 @@ def test_native_run_without_save_records_acquired_at_its_historical_entry(
     )
     other.new_point("q")
     session.context.install_entry(other)
-    ContextControlFacet(context=session.context).use_point(PointUseRequest("q"))
+    session.context.use_point(PointUseRequest("q"))
     origin = GUI_ORIGIN if frontend == "gui" else CommandOrigin("mcp")
     token, terminal = _acquire_to_terminal(session, monkeypatch, origin=origin)
     assert terminal.outcome == "finished"
@@ -235,11 +234,13 @@ def role_application(
     try:
         register_fakes()
         installed = registry_state()
-        services.setup_control.new_entry(EntryRequest("birth"))
-        services.context.new_point(PointCreateRequest("p", "birth point", GUI_ORIGIN))
+        services.session.setup_control.new_entry(EntryRequest("birth"))
+        services.session.context.new_point(
+            PointCreateRequest("p", "birth point", GUI_ORIGIN)
+        )
         for name in ("Q1", "Q2"):
-            services.context.add_component(name, "fake/drive/a", {"rate": 10.0})
-        services.context.set_alias_rows((AliasRow("driver", "Q1"),))
+            services.session.context.add_component(name, "fake/drive/a", {"rate": 10.0})
+        services.session.context.set_alias_rows((AliasRow("driver", "Q1"),))
         yield state, services, bus
         assert registry_state() == installed
     finally:
@@ -261,15 +262,15 @@ def test_run_save_retains_admission_source_after_global_entry_and_alias_changes(
     state, services, bus = role_application
     tab_id = services.tab.new_tab("role_saving")
     tab = state.get_tab(tab_id)
-    birth = services.context.read_context()
+    birth = services.session.context.read_context()
     birth_storage = birth.capture_storage()
-    services.setup_control.new_entry(EntryRequest("acquisition"))
-    services.context.new_point(
+    services.session.setup_control.new_entry(EntryRequest("acquisition"))
+    services.session.context.new_point(
         PointCreateRequest("run-point", "Run source", GUI_ORIGIN)
     )
     for name in ("Q1", "Q2"):
-        services.context.add_component(name, "fake/drive/a", {"rate": 20.0})
-    services.context.set_alias_rows(
+        services.session.context.add_component(name, "fake/drive/a", {"rate": 20.0})
+    services.session.context.set_alias_rows(
         (
             AliasRow("driver", "Q2" if target is None else "Q1"),
             AliasRow("custom", "Q1"),
@@ -309,9 +310,9 @@ def test_run_save_retains_admission_source_after_global_entry_and_alias_changes(
         for member in artifact.members
         for output in member.outputs
     )
-    services.context.set_parameter(require_target(parameters), "Q2.rate", 30.0)
-    services.context.set_alias_rows((AliasRow("driver", "Q1"),))
-    services.setup_control.new_entry(EntryRequest("later"))
+    services.session.context.set_parameter(require_target(parameters), "Q2.rate", 30.0)
+    services.session.context.set_alias_rows((AliasRow("driver", "Q1"),))
+    services.session.setup_control.new_entry(EntryRequest("later"))
     assert parameters.value("$driver.rate") == 20.0
     report = services.save_control.save_data(tab_id, origin=origin)
     assert all(output.status == "saved" for output in report.outputs)

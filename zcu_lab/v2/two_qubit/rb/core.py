@@ -22,7 +22,7 @@ from zcu_lab.v2.support import live_line
 
 from .._drive import DualLineCfg
 from .._readout import JointRoles, collect_joint_shots
-from ..joint_readout.core import GECenters
+from ..joint_readout.core import GECenters, tone_centers
 from .analysis import RBAnalysis, RBOptions, analyze_rb
 from .program import CZPhasePair, sequence_modules
 from .sequence import make_paired_sequences
@@ -53,8 +53,9 @@ class RBCfg(ConfigBase):
     nonnegative integers. seeds are explicit distinct integer random.Random
     identities, shared across depths/arms/rounds and fully persisted (no child
     entropy reconstruction). The 31-bit bound preserves exact native axes.
-    f1_centers/f2_centers are optional saved GE calibration; absent centers
-    allow raw acquisition but analysis returns an explicit missing-source reason.
+    f1_centers/f2_centers derive from saved role-tone circle classifiers without
+    radius. Missing or linear calibration permits raw acquisition, but analysis
+    returns the calibration reason without a population or fit.
     """
 
     reps: Annotated[
@@ -117,20 +118,22 @@ class RBCfg(ConfigBase):
     seeds: list[Annotated[int, Field(strict=True, ge=0, le=2**31 - 1)]] = Field(
         default_factory=lambda: [0, 1], min_length=1
     )
-    f1_centers: Annotated[
-        GECenters | None,
-        FieldMeta(
-            label="F1 GE centers",
-            description="填入 singleshot/ge 取得的 F1 ground／excited complex IQ centers，使用 normalized raw ADC units。",
-        ),
-    ] = None
-    f2_centers: Annotated[
-        GECenters | None,
-        FieldMeta(
-            label="F2 GE centers",
-            description="填入 singleshot/ge 取得的 F2 ground／excited complex IQ centers，使用 normalized raw ADC units。",
-        ),
-    ] = None
+
+    @property
+    def f1_centers(self) -> GECenters:
+        """Derive F1's normalized raw GE centers from its saved readout tone.
+
+        Missing or linear calibration raises ValueError; radius is not required.
+        """
+        return tone_centers(self.readout, self.roles.f1_tone)
+
+    @property
+    def f2_centers(self) -> GECenters:
+        """Derive F2's normalized raw GE centers from its saved readout tone.
+
+        Missing or linear calibration raises ValueError; radius is not required.
+        """
+        return tone_centers(self.readout, self.roles.f2_tone)
 
     @model_validator(mode="after")
     def validate_sequence_inputs(self) -> Self:

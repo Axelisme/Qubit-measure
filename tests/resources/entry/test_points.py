@@ -130,11 +130,10 @@ def test_leaf_reads_keep_field_normalization_and_stable_defaults_without_model_c
     assert point.sensor.title == "mixed case"
 
 
-@pytest.mark.parametrize("missing", ["point.yaml", "module_cfg.yaml"])
 def test_use_point_classifies_required_document_absence(
     entry: ResultEntry,
-    missing: str,
 ) -> None:
+    missing = "point.yaml"
     entry.new_point("incomplete")
     (entry.result_path / "points" / "incomplete" / missing).unlink()
     with pytest.raises(FileNotFoundError) as caught:
@@ -276,7 +275,7 @@ def test_list_points_sorts_parameter_documents_without_requiring_library(
     partial.mkdir()
     (partial / "point.yaml").touch()
     assert entry.list_points() == ["a (warm)", "partial", "z (cold)"]
-    with pytest.raises(FileNotFoundError):
+    with pytest.raises(ValueError, match="point.yaml"):
         entry.use_point("partial")
     assert entry.list_points() == ["a (warm)", "partial", "z (cold)"]
 

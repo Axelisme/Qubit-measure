@@ -18,7 +18,7 @@ live at `records/components/<target>.jsonl`; the event ledger stays at `records/
 
 ## Context snapshot
 
-`context.snapshot` 回傳固定 capture 的 target、point、library 與完整 aliases。Library 只投影持久 Specs，不回傳 `provenance`，也不 materialize assets。目前契約版本為 WIRE_VERSION 130、GUI_VERSION 163。
+`context.snapshot` 回傳固定 capture 的 target、point、library 與完整 aliases。Library 只投影持久 Specs，不回傳 `provenance`，也不 materialize assets。目前契約版本為 WIRE_VERSION 131、GUI_VERSION 164。
 
 省略 path 與 summaries 時，owner 驗證完整 schema，wire encoder 再驗證所有輸出值。`path` 使用 dotted keys 與 canonical 非負 list indices，只由 owner 讀驗所選部分，並優先於 summaries。選整個 component 或 subtree 時，該層的完整投影契約仍適用。未選 sibling 的壞 schema、nonfinite 或 library source fault 不再擋住正常 point leaf。Invalid path 保留第一個不可讀 segment，不先驗其他 sibling。
 
@@ -341,7 +341,9 @@ Save or other reads. Directory discovery errors still fail the request.
 aliases paths and their installed SHA-256 revisions. Read this base before
 editing a file. Edit that path, then call `context.reload` with its path and the
 previously installed `expected_revision`, not the edited disk hash. Supply the
-key explicitly. Use null only when the aliases base has no file.
+key explicitly. Use null when the library or aliases base has no file.
+A point with no library remains selectable. Its library is empty, its revision
+is null and its path still names the expected absolute file. Reads create nothing.
 
 ```json
 {"method": "context.reload", "params": {"path": "/project/results/entry/points/base/aliases.yaml", "expected_revision": null}}
@@ -359,7 +361,9 @@ Existing tabs keep their fixed captures until an explicit Refresh or Reset.
 `context.ml_create_from_role` accept optional `expected_revision`.
 If supplied, the session owner compares it with that document's current disk hash
 before writing. Explicit null checks for
-a missing aliases file; parameters and library reject null. Omission keeps the
+a missing library or aliases file; parameters reject null. A library writer
+creates the absent file on its first nonempty edit. If the file already exists,
+null returns `revision_mismatch` without overwriting it. Omission keeps the
 original unguarded writer contract. These checks are optimistic, without a
 cross-process lock or a multi-file transaction.
 

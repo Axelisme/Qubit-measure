@@ -74,13 +74,13 @@ FTF raw IQ 保存完整 tones 與 shots。Complex128 IQ 的陣列大小約為 `�
 | 4. 選定 DC 工作點後重跑 [resonator spectroscopy](../onetone/freq/guide.md) | 首次 bring-up 通常移到已辨識的 integer-flux 點，再看此處 resonance。選其他工作點時也須在該設定重校 readout。 | 人工設定並記錄 DC source values，再審閱新的 readout 頻率、linewidth 與 module proposal。Apply flux 位置校準與移動 source 是兩個獨立操作。 |
 | 5. [Qubit spectroscopy](../twotone/freq/guide.md) | 在確認的 passband 寬掃找 qubit feature，再窄掃看 Lorentzian／sinc fit。確認峰可辨識且屬於目標躍遷。 | Preview `qubit.freq`、`qubit.kappa`。x180/x90 pulse 另由 Rabi 校準。 |
 | 6. [Amplitude Rabi](../twotone/rabi/amp_rabi/guide.md) 或 [length Rabi](../twotone/rabi/len_rabi/guide.md) | 在已量得的 qubit 頻率固定 length 掃 gain，或固定 gain 掃 length。圖中需看得到振盪週期；只見斜率時先調範圍。 | Preview 來源 pulse 的 π／π/2 結果。Pulse 寫到 `qubit.pulses.pi_amp`／`pi2_amp`，`qubit.module.x180`／`x90` 是獨立 slot rows。核對 frequency、generator、waveform 與 gain／length，再勾選。 |
-| 7. [GE single-shot](../singleshot/ge/guide.md) | 用校準 π pulse 比較 probe off／on 的 IQ scatter、histogram 與 fit。確認兩中心有限、可區分且分支標記正確。Initial State 標記主要 population。 | Preview `qubit.ext.readout_cal` 的 `g_center`、`e_center`、`sigma`、`fidelity`。Radius 與 3×3 diagnostic 供單 qubit 判讀，FTF joint 分類使用下方的 4×4 matrix。 |
+| 7. [GE single-shot](../singleshot/ge/guide.md) | 用校準 π pulse 比較 probe off／on 的 IQ scatter、histogram 與 fit。確認兩中心有限、可區分且分支標記正確。Initial State 標記主要 population。 | Preview readout module 的 circle classifier。FTF 實際 mux 路徑另做 [mux GE](../mux/singleshot_ge/guide.md)，每個 tone 保存自己的 g/e centers；不寫 point 校準。Radius 與 3×3 diagnostic 不參與 FTF nearest-GE 分類。 |
 | 8. [T1](../twotone/time_domain/t1/guide.md) | 看 π pulse 後的 delay decay、fit 與誤差，時間窗涵蓋衰減至接近平坦的區域。 | Preview `qubit.t1` 與誤差。更新後 Reset 後續表單，重算依 T1 建立的等待初值。 |
 | 9. [T2 Ramsey](../twotone/time_domain/t2ramsey/guide.md) 與 [T2 echo](../twotone/time_domain/t2echo/guide.md) | Ramsey 看 fringe 與衰減，echo 看重聚焦後的總 delay decay。缺 T2 初值時人工填時間窗。 | Preview `qubit.t2r`／`t2e`。Ramsey 需來源 cfg、實際 detune 與 fringe fit 齊全才另提 frequency；echo 只提 T2。Pulse module 維持原值。 |
 
 Rabi 的 module 與 slot rows 可分開 Apply。確認 x180/x90 指向這次接受的 keys；只更新 module 時，slot 可能仍指向舊 pulse。Ramsey 更新 qubit frequency 後，也須核對後續實際 pulse frequency，scalar 與 library pulse 是獨立設定。
 
-記錄單 qubit GE 的 readout route、gain、frequency、積分窗口與其他讀出條件。Joint 分類需要與實際 mux IQ 相容的兩組 GE 中心，改讀出條件後要重新確認。後續 FTF 分支保留全部熱 population，從原始熱態開始，保留每個 shot 與其熱 population。單 qubit Rabi／T1／T2 使用上述既有實驗入口。
+記錄 GE 的 readout route、gain、frequency、積分窗口與其他讀出條件。Joint 分類只取 saved mux readout cfg 中角色 tone 的 circle centers，不從單 qubit point 校準搬值。改讀出條件後要重跑 mux GE。後續 FTF 分支保留全部熱 population，從原始熱態開始，保留每個 shot 與其熱 population。單 qubit Rabi／T1／T2 使用上述既有實驗入口。
 
 ## FTF 的四個角色與 tone 對應
 

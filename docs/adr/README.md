@@ -22,14 +22,14 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 ## GUI Service Architecture
 
 - [0076 — Device 活動快照與 run 後讀回](0076-device-activity-and-readback.md)：driver 記錄兩項活動狀態、DeviceManager 具名快照、GUI 定時讀取與標記、單 driver 單名稱及 closing driver 登記拒絕，以及獨立於 acquisition snapshot 的 run 後 cache 讀回。
-- [0067 — GUI 應用核心與前端邊界](0067-gui-application.md)：shared session、獨立 SoC dialog 與窄 control facets、腳本保存權威、動態 SoC／device 交接、明確儀器 adapter catalog 與專屬面板、interactive 與單層 undo、domain facts 與前端反應、Artifact／Writeback 子模組、pane 提交與退役清理、具名 draft 與 explicit plotting；Qt-free PredictorTrial 與 predictor editors／curves 的責任劃分、ExperimentFigureArea 的具體控件 owner；measure workflow 多 tab、單 toggle、Ask sub-tab 與 headless facet／pane 分工；歷史開 tab 的 factory 失敗隔離與 Load 失敗清理，以及 Results browser 的保存 cfg 唯讀檢視例外。
+- [0067 — GUI 應用核心與前端邊界](0067-gui-application.md)：shared session、獨立 SoC dialog 與窄 control ports、腳本保存權威、動態 SoC／device 交接、明確儀器 adapter catalog 與專屬面板、interactive 與單層 undo、domain facts 與前端反應、Artifact／Writeback 子模組、pane 提交與退役清理、具名 draft 與 explicit plotting；Qt-free PredictorTrial 與 predictor editors／curves 的責任劃分、ExperimentFigureArea 的具體控件 owner；measure workflow 多 tab、單 toggle、Ask sub-tab 與 headless facet／pane 分工；歷史開 tab 的 factory 失敗隔離與 Load 失敗清理，以及 Results browser 的保存 cfg 唯讀檢視例外。
 - [0064 — GUI process startup 與 app composition](0064-process-startup.md)：launcher／runtime／composition、可信 startup(ctx) 的 default／custom／clean 選擇、背景執行、on_close 與預設腳本的 session 保存責任。
 
 ## Cfg / Value Model
 
 - [0079 — Form 欄位轉換、固定元素與逐元素操作](0079-form-field-transitions.md)：已採用、待實作的中立 converter／scoped command、原子安裝、草稿還原、具名固定 list／原始索引 participants、非 participant tone 的 None 初值與一般 nullable 編輯、無 participants 的固定槽位，以及 indexed remote、逐元素 recipe 與 native tunables 的完整 model 提交邊界。
 
-- [0074 — 獨立的平鋪 Readout module](0074-flat-readout-module.md)：Pulse 與 mux Readout 自有 generator／ADC 欄位，分別保存單一頻率與有序 tones；規範 waveform 引用、label、Library 新建與表單路徑。
+- [0074 — 獨立的平鋪 Readout module](0074-flat-readout-module.md)：Pulse 與 mux Readout 自有 generator／ADC 欄位，分別保存單一頻率與有序 tones；規範 waveform 引用、label、Library 新建、表單路徑與 classifier 所有權；分類與 correction 只取 run cfg。
 
 - [0073 — Measure 表單從 core cfg 推導](0073-measure-form-derivation.md)：make_form、adapter input 與實驗 record 分離、固定捕捉、歷史 tab 的無 Form 狀態與 Reset 恢復、adapter 黑箱、共用初值政策的 domain helper 邊界、Hidden 合法供值與顯式路徑、持久範本、具名裝置欄位、sweep 四種座標／採樣表示與 opt-in Log／List 整數清單政策。
 - [0065 — Cfg 編輯模型與使用邊界](0065-cfg-editing.md)：共用 Form、sweep 座標／採樣指令與有效端點、持久 Spec、Library／Inspect／writeback 的提交邊界、有序 alias 清單編輯與固定讀回、固定來源、Refresh 保留 input／Reset 重算初值、腳本的 opaque TabInput 與共用 Inspect Aliases 頁。

@@ -17,7 +17,7 @@ from migrations.storage_migration import KeyRule, MigrationMapping, ModuleRule
 # Explicit legacy mappings preserve working units and fixed roots. Changes to rules, seeds,
 # roles or native declarations require new revisions for both kind profiles.
 # Never reuse a revision across profiles: resume compares this exact identity.
-_KIND_REVISIONS = {"qubit/fluxonium": "1.26", "qubit/transmon": "1.27"}
+_KIND_REVISIONS = {"qubit/fluxonium": "1.28", "qubit/transmon": "1.29"}
 
 _VALUE_PATHS = (
     ("r_f", "R1.freq"),
@@ -44,12 +44,6 @@ _VALUE_PATHS = (
     ("best_ro_freq", "Q1.ext.best_ro_freq"),
     ("best_ro_gain", "Q1.ext.best_ro_gain"),
     ("best_ro_length", "Q1.ext.best_ro_length"),
-    ("g_center", "Q1.ext.readout_cal.g_center"),
-    ("e_center", "Q1.ext.readout_cal.e_center"),
-    ("ge_radius", "Q1.ext.readout_cal.radius"),
-    ("ge_s", "Q1.ext.readout_cal.sigma"),
-    ("confusion_matrix", "Q1.ext.readout_cal.confusion_matrix"),
-    ("fid", "Q1.ext.readout_cal.fidelity"),
     ("reset_f", "Q1.ext.reset_f"),
     ("resetf_w", "Q1.ext.reset_fwhm"),
     ("reset_f1", "Q1.ext.reset_f1"),
@@ -149,8 +143,8 @@ def build_mapping(
     chip/qubit names. data_schemas is supplied by the composition root's fixed
     native declarations. native_tags explicitly renames selected historical
     pairs for native metadata only; omitted pairs keep the historical tag.
-    Seeds carry no guessed channels, flux units or pulse
-    values. Keep complete readout_cal ext containers for dotted value writes.
+    Seeds carry no guessed channels, flux units, pulse values or classifiers.
+    Historical single-shot calibration stays opaque, not a usable classifier.
     No entry registration or module cfg conversion occurs here. Unsupported
     kinds raise ValueError. Missing unit evidence is pending in the converter.
     """
@@ -214,7 +208,7 @@ def build_mapping(
         parameter_transform=_convert_parameter_batch,
         components={
             "R1": {"kind": "resonator"},
-            "Q1": {"kind": qubit_kind, "resonator": "R1", "ext": {"readout_cal": {}}},
+            "Q1": {"kind": qubit_kind, "resonator": "R1"},
             "J1": {"kind": "amplifier/jpa"},
         },
         roles={"qubit": "Q1", "resonator": "R1"},

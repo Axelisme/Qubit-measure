@@ -239,7 +239,7 @@ def test_pi_scalars_deduplicate_only_their_explicit_candidate_and_report_actual_
             assert row.source_keys == (key,)
             assert library.snapshot().value(leaf) == _SCALARS[key]
     view = entry.setup if point is None else entry.use_point(point)
-    assert document_value(snapshot(view), "Q1.ext") == {"readout_cal": {}}
+    assert document_value(snapshot(view), "Q1.ext") == {}
     # The runtime lock protects reads too; only its empty bytes are stable.
     sidecar = lock_path_for(library.source_path)
     assert sidecar.read_bytes() == b""
@@ -295,7 +295,7 @@ def test_unmatched_pi_scalars_keep_original_values_in_their_context(
     report = _convert(request, default_mapping)
     view = _entry(request).use_point("context")
     ext = document_value(snapshot(view), "Q1.ext")
-    assert ext == {"readout_cal": {}, **values}
+    assert ext == values
     for result in (dry, report):
         assert not [item for item in result.pending if item.source == source]
         rows = {

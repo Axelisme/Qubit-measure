@@ -8,7 +8,7 @@ MIST probe-power sweep: drives a probe pulse whose gain is swept and classifies 
 
 Open and Reset take a snapshot of the current aliases, parameters and module choices. Relax delay is 5 * `$qubit.t1`. Probe gain sweep runs from 0 to 1.
 
-Classification starts from `$qubit.ext.readout_cal.g_center`, `e_center` and `radius`. Missing calibration leaves these fields Invalid.
+Classification uses the readout module's circle classifier, visible under Readout → Advanced (per tone for Mux). Run requires a classifier on every declared ADC and a positive radius; missing radius prompts singleshot GE Post. Linear has no Other state and is rejected. Analyze corrects populations only with the saved readout cfg's confusion matrix. Historical cfg without a classifier or matrix skips correction.
 
 Pulse templates use `$qubit.freq`, `$qubit.wiring.ch`, `$resonator.freq`, `$resonator.wiring.ch` and `$resonator.wiring.ro_ch`. The readout trigger uses `$resonator.time_of_fly` + 0.05 us. Missing required sources leave the corresponding fields Invalid; supply them before Run.
 
@@ -26,6 +26,6 @@ This is a diagnostic only. Read the population curves from the plot; calibration
 
 ## Recommended
 
-Set the classification calibration directly or seed it with 'singleshot/ge'. Sweep the probe gain across the MIST onset; provide '`$qubit.ext.ac_stark_coeff`' (from the AC-Stark experiment) for a photon-number x-axis.
+Run singleshot/ge Primary and Post, then Apply to the selected readout module. Sweep the probe gain across the MIST onset; provide '`$qubit.ext.ac_stark_coeff`' (from the AC-Stark experiment) for a photon-number x-axis.
 
-**Last updated:** 2026-10-21
+**Last updated:** 2026-10-29

@@ -3,7 +3,6 @@
 import numpy as np
 import pytest
 from zcu_tools.gui.expected_error import FailedPreconditionError
-from zcu_tools.gui.session.predictor_control import PredictorControlFacet
 from zcu_tools.gui.session.predictor_trial import PredictorTrial
 from zcu_tools.gui.session.services.predictor import (
     CalibrateOffsetRequest,
@@ -41,7 +40,7 @@ def test_energy_drafts_preserve_finite_float_values(
 ) -> None:
     from zcu_tools.gui.session.predictor_trial import PredictorTrial
 
-    trial = PredictorTrial(PredictorControlFacet(PredictorService()))
+    trial = PredictorTrial(PredictorService())
     params = (
         FluxoniumParams(value, None, value)
         if model == "fluxonium"
@@ -73,7 +72,7 @@ def test_energy_drafts_preserve_finite_float_values(
 def test_snapshot_captures_nullable_energy_and_partial_native_inputs(
     model: str, value: float | None
 ) -> None:
-    trial = PredictorTrial(PredictorControlFacet(PredictorService()))
+    trial = PredictorTrial(PredictorService())
     params = (
         FluxoniumParams(value, None, value)
         if model == "fluxonium"
@@ -127,7 +126,7 @@ def test_restore_accepts_existing_v2_cache_and_replaces_all_trial_inputs(
             "axis_device": "trim",
         }
     )
-    trial = PredictorTrial(PredictorControlFacet(PredictorService()))
+    trial = PredictorTrial(PredictorService())
     trial.set_flux(PredictorFlux(0.2, {"stale": 3.0}, {"stale": "V"}), {"stale": 0.9})
     trial.restore(state)
     assert trial.model == model
@@ -154,7 +153,7 @@ def test_predictor_file_exports_only_energy_and_frame_with_unknown_source(
 ) -> None:
     from zcu_tools.resources.predictor_file import PredictorSource
 
-    trial = PredictorTrial(PredictorControlFacet(PredictorService()))
+    trial = PredictorTrial(PredictorService())
     trial.set_parameters(params)
     with pytest.raises(PredictorInputError, match="flux frame"):
         trial.predictor_file()
@@ -180,7 +179,7 @@ def test_predictor_file_exports_only_energy_and_frame_with_unknown_source(
 def test_snapshot_rejects_invalid_drafts_without_replacing_them(
     field: str, text: str
 ) -> None:
-    trial = PredictorTrial(PredictorControlFacet(PredictorService()))
+    trial = PredictorTrial(PredictorService())
     trial.set_flux(PredictorFlux(0.2, {"coil": 2.0}, {"coil": "A"}), {"coil": 0.3})
     if field == "energy":
         trial.set_energy_text("fluxonium", "EC", text)
@@ -204,7 +203,7 @@ def test_snapshot_rejects_invalid_drafts_without_replacing_them(
 
 @pytest.fixture
 def calibration_trial() -> PredictorTrial:
-    trial = PredictorTrial(PredictorControlFacet(PredictorService()))
+    trial = PredictorTrial(PredictorService())
     trial.set_flux(PredictorFlux(0.2, {"coil": 2.0}, {"coil": "A"}), {"coil": 0.3})
     return trial
 
@@ -429,7 +428,7 @@ def test_calibration_control_failure_propagates_without_draft_changes(
 ) -> None:
     service = RecordingQueries()
     service.failure = failure
-    trial = PredictorTrial(PredictorControlFacet(service))
+    trial = PredictorTrial(service)
     trial.set_flux(PredictorFlux(0.2, {"coil": 2.0}, {"coil": "A"}), {"coil": 0.3})
     with pytest.raises(type(failure)) as raised:
         trial.calibrate(4300.0)
@@ -440,7 +439,7 @@ def test_calibration_control_failure_propagates_without_draft_changes(
 
 def test_calibration_adds_correction_to_local_offset_with_explicit_inputs() -> None:
     service = RecordingQueries()
-    trial = PredictorTrial(PredictorControlFacet(service))
+    trial = PredictorTrial(service)
     trial.set_flux(
         PredictorFlux(0.2, {"coil": 2.0, "trim": -4.0}, {"coil": "A", "trim": "V"}),
         {"coil": 0.3, "trim": -0.4},
@@ -466,7 +465,7 @@ def test_calibration_adds_correction_to_local_offset_with_explicit_inputs() -> N
 @pytest.mark.parametrize("valid", [True, False])
 def test_table_batch_and_curve_coordinates_share_explicit_inputs(valid: bool) -> None:
     service = RecordingQueries()
-    trial = PredictorTrial(PredictorControlFacet(service))
+    trial = PredictorTrial(service)
     params = FluxoniumParams(5.0, 1.0, 0.5)
     trial.set_parameters(params)
     flux = PredictorFlux(0.2, {"coil": 2.0, "trim": -4.0}, {"coil": "A", "trim": "V"})
@@ -518,7 +517,7 @@ def test_table_expected_failures_are_unavailable_per_value(error: Exception) -> 
     from zcu_tools.gui.session.predictor_trial import PredictorTrial
 
     service = RecordingQueries()
-    trial = PredictorTrial(PredictorControlFacet(service))
+    trial = PredictorTrial(service)
     assert [
         (r.freq_mhz, r.mag_n, r.mag_phi)
         for r in trial.row_values(((0, 1), (1, 2)), 0.0)
@@ -547,7 +546,7 @@ def test_table_unexpected_failures_propagate(error: Exception, matrix: bool) -> 
     from zcu_tools.gui.session.predictor_trial import PredictorTrial
 
     service = RecordingQueries()
-    trial = PredictorTrial(PredictorControlFacet(service))
+    trial = PredictorTrial(service)
     trial.set_flux(PredictorFlux(0.2, {"coil": 2.0}, {"coil": "A"}), {"coil": 0.3})
     if matrix:
         service.matrix_failure = error
@@ -561,7 +560,7 @@ def test_table_unexpected_failures_propagate(error: Exception, matrix: bool) -> 
 def test_parameters_return_energy_only_trial() -> None:
     from zcu_tools.gui.session.predictor_trial import PredictorTrial
 
-    trial = PredictorTrial(PredictorControlFacet(PredictorService()))
+    trial = PredictorTrial(PredictorService())
     params = FluxoniumParams(EJ=6.3, EC=None, EL=0.7)
     trial.set_parameters(params)
     assert trial.parameters() == params
@@ -570,7 +569,7 @@ def test_parameters_return_energy_only_trial() -> None:
 def test_flux_formats_prefilled_and_updated_numeric_fields() -> None:
     from zcu_tools.gui.session.predictor_trial import PredictorTrial
 
-    trial = PredictorTrial(PredictorControlFacet(PredictorService()))
+    trial = PredictorTrial(PredictorService())
     trial.set_flux(
         PredictorFlux(0.22999999999999998, {"coil": 2.0}, {"coil": "A"}),
         {"coil": 0.22999999999999998},
@@ -620,7 +619,7 @@ def test_flux_formats_prefilled_and_updated_numeric_fields() -> None:
 def test_missing_frame_and_device_require_explicit_source() -> None:
     from zcu_tools.gui.session.predictor_trial import PredictorTrial
 
-    trial = PredictorTrial(PredictorControlFacet(PredictorService()))
+    trial = PredictorTrial(PredictorService())
     trial.set_parameters(TransmonParams(20.0, 0.3, 0.1))
     with pytest.raises(PredictorInputError, match="flux frame"):
         trial.predict_frequency()

@@ -88,8 +88,12 @@ def test_measure_terminal_reads_back_on_worker_and_commits_on_owner(
     flux.events.clear()
     unused.events.clear()
     flux.before_read = unused.before_read = lambda: read_threads.append(get_ident())
-    services.device_control.on_device_changed(lambda _: commits.append(get_ident()))
-    dialog = DeviceDialog(services.device_control, parameter_provider=lambda: None)
+    services.session.device_control.on_device_changed(
+        lambda _: commits.append(get_ident())
+    )
+    dialog = DeviceDialog(
+        services.session.device_control, parameter_provider=lambda: None
+    )
     try:
         inputs = make_inputs(state, tab_id, adapter)
         inputs = replace(
@@ -105,8 +109,8 @@ def test_measure_terminal_reads_back_on_worker_and_commits_on_owner(
         # This submitted, unblocked synthetic acquisition must deliver its terminal.
         qt_until(lambda: services.handles.poll(token) is not None, label="run terminal")
         assert services.background.quiesce(timeout_ms=30_000)
-        assert services.device_control.get_cached_device_value("flux") == 0.75
-        assert services.device_control.get_cached_device_value("unused") == 0.6
+        assert services.session.device_control.get_cached_device_value("flux") == 0.75
+        assert services.session.device_control.get_cached_device_value("unused") == 0.6
         assert flux.events == unused.events == ["read", "write", "read"]
         assert read_threads and all(thread != owner for thread in read_threads)
         assert commits == [owner]
