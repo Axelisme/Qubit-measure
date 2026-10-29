@@ -225,7 +225,7 @@ class PostAnalyzeService(StagedAnalyzeService):
         except BaseException:
             if draft is not None:
                 try:
-                    writeback.teardown_draft(draft)
+                    draft.teardown()
                 except Exception:
                     logger.exception("new post-analysis draft teardown failed")
             raise

@@ -85,7 +85,7 @@ def h_tab_writeback_preview(
     """Pure read of a pane's persistent writeback draft (not a dry-run).
 
     Requires (tab_id, subtab_id) with closed values analysis|post_analysis.
-    Each item includes the service-owned captured actual_path and existing
+    Each item includes the draft-owned captured actual_path and existing
     stderr (working units, or None), and the adapter's note (plain text or None).
     selected reflects current manual selection, initially the proposal's bool.
     destination_context is the active context

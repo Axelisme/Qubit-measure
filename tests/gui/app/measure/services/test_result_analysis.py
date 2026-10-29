@@ -91,8 +91,8 @@ def test_default_analysis_params_retain_result_source(
     service = TabService(
         state,
         MagicMock(),
-        MagicMock(),
         form_resources(state),
+        writeback=MagicMock(),
         form_sources=lambda aliases: form_sources(state, aliases),
     )
     preparation = service.prepare_result_analysis("tab")
