@@ -1,0 +1,190 @@
+"""Place timeline-managed outputs while retaining native QICK consumers."""
+
+from typing import Literal
+
+from qick.asm_v2 import ConfigReadout, Pulse, QickParam, Trigger
+
+from ._timeline_guard import PulseGuard as _PulseGuard
+from ._timeline_guard import bounds as _bounds
+from ._timeline_runtime import RuntimeEnd, Time, align_end, time_bounds
+from ._timeline_state import TimelineBook
+
+
+class TimelineObservedPulse(Pulse):
+    """Delegate native pulse behavior, observing only its public timing inputs."""
+
+    def __init__(self, book: TimelineBook, source: Pulse):
+        # Directly constructed QICK Pulse macros may omit the optional tag.
+        super().__init__(
+            ch=source.ch, name=source.name, tag=getattr(source, "tag", None)
+        )
+        self.book = book
+        self.source = source
+
+    def record(self, prog, t, limit: float | QickParam | None = None) -> None:
+        if self.book.repeats:
+            length = prog.pulses[self.name].get_length()
+            self.book.repeats[-1].pulse_guards[self.ch].then(
+                _PulseGuard(
+                    self.ch, (length,), (t + length,), () if limit is None else (limit,)
+                )
+            )
+
+    def preprocess(self, prog) -> None:
+        # Auto is resolved once during preprocess. Repeated instructions retain
+        # that scheduled time; the validation must not reschedule their outputs.
+        t = (
+            prog.get_timestamp(gen_ch=self.ch)
+            if self.source.t == "auto"
+            else self.source.t
+        )
+        self.source.preprocess(prog)
+        if self.source.t == "auto" and self.ch in self.book.runtime_gens:
+            start = self.book.runtime_gens[self.ch]
+            self.source.t_regs["t"] = start.register
+            self.book.runtime_gens[self.ch] = self.book.math.add(
+                start, align_end(prog, prog.pulses[self.name].get_length())
+            )
+        self.record(prog, t)
+
+    def translate(self, prog) -> None:
+        self.source.translate(prog)
+
+    def get_time_param(self, name: str) -> QickParam:
+        return self.source.get_time_param(name)
+
+    def list_time_params(self) -> list[str]:
+        return self.source.list_time_params()
+
+
+class TimelinePlacedPulse(TimelineObservedPulse):
+    def __init__(self, book: TimelineBook, timeline: str, source: Pulse):
+        if isinstance(source, TimelineObservedPulse):
+            source = source.source
+        super().__init__(book, source)
+        self.timeline = timeline
+        self.relative_t: float | QickParam | Literal["auto"] = source.t
+
+    def preprocess(self, prog) -> None:
+        end = self.book.end(self.timeline, placement=True)
+        previous = self.book.channel_end(prog, self.ch, generator=True)
+        if self.relative_t == "auto":
+            end = self.book.math.maximum(end, previous)
+        if isinstance(end, RuntimeEnd):
+            if self.relative_t != "auto" and (
+                (previous is end and _bounds(self.relative_t)[0] < -1e-12)
+                or (
+                    previous is not end
+                    and time_bounds(prog, end)[0] + _bounds(self.relative_t)[0]
+                    < time_bounds(prog, previous)[1] - 1e-12
+                )
+            ):
+                raise ValueError(
+                    f"{self.timeline}: channel {self.ch} pulse overlap; cannot prove runtime start >= previous end"
+                )
+            if self.relative_t == "auto":
+                start = end
+            else:
+                start = self.book.math.add(end, self.relative_t)
+            self.source.t = time_bounds(prog, start)[1]
+            self.source.preprocess(prog)
+            self.source.t_regs["t"] = self.book.math.cycles(start).register
+            finish = self.book.math.add(
+                start, align_end(prog, prog.pulses[self.name].get_length())
+            )
+            self.book.set_end(self.timeline, finish)
+            self.book.runtime_gens[self.ch] = finish
+            self.record(prog, time_bounds(prog, start)[1], time_bounds(prog, start)[0])
+            return
+        t = end if self.relative_t == "auto" else end + self.relative_t
+        previous_end = prog.get_timestamp(gen_ch=self.ch)
+        self.source.t = t
+        self.source.preprocess(prog)
+        actual_t = self.source.get_time_param("t")
+        if _bounds(actual_t - previous_end)[0] < -1e-12:
+            raise ValueError(
+                f"{self.timeline}: channel {self.ch} pulse overlap; cannot prove "
+                "start >= previous end at every sweep point; use delay_timeline"
+            )
+        self.record(prog, t, actual_t)
+        self.book.set_end(
+            self.timeline,
+            align_end(prog, actual_t + prog.pulses[self.name].get_length()),
+        )
+
+
+class TimelinePlacedConfig(ConfigReadout):
+    def __init__(self, book: TimelineBook, timeline: str, source: ConfigReadout):
+        super().__init__(ch=source.ch, name=source.name, tag=source.tag)
+        self.book = book
+        self.timeline = timeline
+        self.source = source
+        self.relative_t: float | QickParam = source.t
+
+    def preprocess(self, prog) -> None:
+        origin = self.book.end(self.timeline, placement=True)
+        if isinstance(origin, RuntimeEnd):
+            start = self.book.math.add(origin, self.relative_t)
+            self.source.t = time_bounds(prog, start)[1]
+            self.source.preprocess(prog)
+            self.source.t_regs["t"] = start.register
+            self.book.set_end(self.timeline, self.book.math.maximum(0.0, start))
+            return
+        self.source.t = origin + self.relative_t
+        self.source.preprocess(prog)
+        self.book.set_end(
+            self.timeline, self.book.math.maximum(0.0, self.source.get_time_param("t"))
+        )
+
+    def translate(self, prog) -> None:
+        self.source.translate(prog)
+
+    def get_time_param(self, name: str) -> QickParam:
+        return self.source.get_time_param(name)
+
+    def list_time_params(self) -> list[str]:
+        return self.source.list_time_params()
+
+
+class TimelinePlacedTrigger(Trigger):
+    def __init__(self, book: TimelineBook, timeline: str, source: Trigger):
+        super().__init__(
+            ros=source.ros,
+            tts=source.tts,
+            pins=source.pins,
+            width=source.width,
+            ddr4=source.ddr4,
+            mr=source.mr,
+            tag=source.tag,
+        )
+        self.book = book
+        self.timeline = timeline
+        self.relative_t: float | QickParam = source.t
+
+    def preprocess(self, prog) -> None:
+        origin = self.book.end(self.timeline, placement=True)
+        if isinstance(origin, RuntimeEnd):
+            start = self.book.math.add(origin, self.relative_t)
+            self.t = time_bounds(prog, start)[1]
+            super().preprocess(prog)
+            self.t_regs["t"] = start.register
+            end = self.book.math.add(start, self.get_time_param("width"))
+            for ch in self.ros:
+                length = (
+                    prog.ro_chs[ch]["length"] / prog.soccfg["readouts"][ch]["f_output"]
+                )
+                ro_end = self.book.math.add(start, align_end(prog, length))
+                self.book.runtime_ros[ch] = ro_end
+                end = self.book.math.maximum(end, ro_end)
+            self.book.set_end(self.timeline, end)
+            return
+        self.t = origin + self.relative_t
+        super().preprocess(prog)
+        end: Time = align_end(
+            prog, self.get_time_param("t") + self.get_time_param("width")
+        )
+        for ch in self.ros:
+            end = self.book.math.maximum(
+                end, align_end(prog, prog.get_timestamp(ro_ch=ch))
+            )
+        self.book.set_end(self.timeline, end)

@@ -12,6 +12,7 @@ if TYPE_CHECKING:
     from zcu_tools.program.v2.timeline import TimelineProgramV2
 
 
+from .._timeline_bounds import CycleBounds
 from .base import Module, ModuleGroup
 from .control import Repeat
 
@@ -104,7 +105,13 @@ class LoadValue(Module):
         lookup. timeline and tag belong to the emission and do not alter lookup.
         Unknown registers and allocation errors propagate from prog.
         """
-        self._emit_lookup(prog)
+        if self.values:
+            with prog.time_producer(
+                self.val_reg,
+                CycleBounds(min(self.values), max(self.values)),
+                dependency_ranges={self.idx_reg: CycleBounds(0, len(self.values) - 1)},
+            ):
+                self._emit_lookup(prog)
 
     @property
     def is_compressed(self) -> bool:
@@ -291,7 +298,13 @@ class LoadWord(Module):
         nothing. timeline and tag identify the emission, not a lookup time.
         Unknown registers and allocation errors propagate from prog.
         """
-        self._emit_lookup(prog)
+        if self.values:
+            with prog.time_producer(
+                self.val_reg,
+                CycleBounds(min(self.values), max(self.values)),
+                dependency_ranges={self.idx_reg: CycleBounds(0, len(self.values) - 1)},
+            ):
+                self._emit_lookup(prog)
 
     def init(self, prog: ModularProgramV2) -> None:
         if self._is_empty:

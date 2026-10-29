@@ -1,6 +1,6 @@
 # README - program/v2
 
-**Last updated:** 2026-10-29，原生 macro 與 timeline
+**Last updated:** 2026-10-29，runtime timeline 與 producer bounds
 
 **讀者：** lab-author、framework-dev、agent。原生 V2 program 寫法與 module、readout、acquisition 契約速查。
 
@@ -120,7 +120,14 @@ Config 是瞬時事件，結尾更新到發射時間 E+t，不加 config length 
 `delay_timeline(t, timeline="drive")` 只將結尾加 t，不移動 reference。
 `sync(timeline="drive")` 才將 reference 移到該結尾，並扣減全部 timeline，最低為零。
 原生 delay／delay_auto／resync 也經公開 timestamp decrement 扣減全部結尾。
-掃描 floor 與 max 必須逐點證明符號。會跨零或互相交叉時編譯報錯，提示改用 delay_timeline。
+可靜態決定的結尾保留 scalar／`QickParam`。跨零 floor、交叉 max 與 path-selected end 才物化成 runtime cycle register。
+Runtime 算術只用無 flag 的 ABS／ASR／加減。End 限於 `0..2**31-1`，中間值也須能證明符合 signed 32-bit range，否則編譯報錯。
+每個 sweep／shot 重新建立所需狀態。`delay_timeline("duration", ...)` 讀取非負 tProc cycle register，仍不推進 reference。
+Register 時間須有原生常數、sweep 或 framework table／長度 producer 的 bounds，不能把任意 custom Macro 初值當成證明。
+Framework owner 用 `time_producer(register, CycleBounds(...), dependencies=...)` 登記自己的 lowering writes。
+Table owner 以 `dependency_ranges` 登記合法 index 範圍，mapping keys 自動納入稽核。
+只有時間 consumer 啟用這些前置條件。證明涵蓋全部已登記 writes，不能用 lookup 後的合法 index 覆蓋先前非法讀取。
+翻譯後稽核 source、依賴與 compiler 時間 storage 的全流寫入，錯誤指出 register 與 instruction 位置；無關 raw words 不受影響。
 原生 delay／delay_auto／wait_auto／resync 不增加 timeline keyword。
 
 Module 先明確 declare，每次 emit 建立獨立的 `ModuleEmission` 與 tag。
@@ -153,12 +160,18 @@ def _body(self, cfg):
 
 DelayAuto 是唯一例外。未指定 timeline 時包裝原生 delay_auto／delay_reg_auto，保留 gens／ros。
 指定任何 timeline 名稱都在 emit 入口報錯，包含顯式 default。
-Runtime register 時間只走 delay_reg_auto。所有結尾包含 default 都須證明不大於靜態推進量，否則先 sync。
+原生 delay_reg_auto 先消耗選定 native channels，再推進 register cycles。尚未消耗的 timeline 以已知 producer bounds 扣除實際推進量。
+若 native 部分已完整消耗全部 timeline，register 部分沿用原生的非負時間契約。
 PulseReadout 的 gain／frequency runtime words 不受這項時間限制排除。
 
 Join 用 `join(*sources, into=target)` 合併既有結尾，保留來源與較晚的原目標。
 它只記帳，不移 reference，也不要求每條 fork 都 join 回來。
-掃描結尾必須能逐點證明大小，互相交叉時報錯。
+交叉或 runtime source 以逐點 maximum 合併，不把所有掃描點補成同一個長度。
+
+`with self.branch(by="scan") as branch:` 依 sweep selector 選 case，每個點必須有一個 `with branch.case():`。
+每個 case 只同步自身使用的 timeline 與局部 fork，不補齊其他 case 的長度。未使用的外部 long pulse 可以橫跨 Branch。
+Case 內的 fork 名字在 case 結束後失效，即使其他 case 使用同名也一樣。跨 Branch 的 timeline 須在入口前宣告。
+入口前既有 timeline 的 path ends 不同時，保留實際選中 end 並標為 wait-only。
 
 `with self.repeat(name, n, timeline="default", range_hint=None)` 先同步母 timeline，
 每圈再同步母 timeline 與局部結尾。內部只能用母 timeline，以及從母或局部 timeline
@@ -169,12 +182,12 @@ fork 的名字。退出後母 timeline 為0，局部名字失效，可以重新 
 Register n 使用既有 register 名字，必須提供作者保證的非負整數閉區間
 `range_hint=(minimum, maximum)`。Int n 不接受 range_hint。
 Register 名字不得與以 name 命名的 counter 相同。編譯器不從 register 初值推定 range。
-Register Repeat 按 minimum 計算外部結尾的最晚等待上界。
-原 timeline 禁止繼續發射或 delay_timeline，直到 sync 或原生 reference 推進完整消耗上界。
-Join 目標與 fork 新名字則是普通 timeline，可以從該上界建立保守排程點。
-例如實際 reference=45、上界=70 時，新 timeline 的 pulse 可以排在115。
+未知 count 或 case advance 以 runtime storage 逐圈扣除實際執行路徑，並對每個 external end 做 floor 0。
+相同且可靜態表示的 Branch paths 保留 static，不因出現 Branch 就物化。
+原 timeline 禁止繼續發射或 delay_timeline，直到 sync 或原生 reference 推進完整消耗該 end。
+Join 目標與 fork 新名字是普通 timeline，從實際 remaining end 建立排程點，不採 minimum count 的等待上界。
 原 wait-only timeline 上的兩種 readout config 入口也拒絕放置，包含 t=0。
-Join／fork 的普通結果，或 sync／原生推進消耗上界後的來源，可照常放置 config。
+Join／fork 的普通結果，或 sync／原生推進完整消耗後的來源，可照常放置 config。
 不帶 timeline 的 config 呼叫保留原生行為。
 例如沿用上面的宣告，以下 `_body` 先安排跨 channel 重疊，再重複發射 drive：
 
@@ -197,8 +210,9 @@ Register 次數改傳既有 register 名字，例如
 `with self.repeat("pair", "n_pair", range_hint=(2, 4)):`，body 可沿用上例。
 `n_pair` 須先由作者用公開 register API 準備，執行值必須符合作者保證的閉區間。
 
-Repeat body 內的 DelayAuto(register) 與 delay_reg_auto 報錯，因每圈推進量無法在編譯期表達。
-迴圈外的 consumer 與以 register 控制次數、每圈長度可證明的 Repeat 保持可用。
+Repeat body 內支援具名 timeline 的 register 時間與各 case 不同的 Branch advance。
+各 case 分別累積 pulse guard，回邊使用全路徑 envelope 證明不重疊。Envelope 只用於證明，不改實際 reference 或 body／shot end。
+Repeat body 內的 DelayAuto(register) 與 delay_reg_auto 仍報錯。迴圈外 consumer 不受這項限制。
 
 Body 收尾先同步全部 timeline，再放 body_end marker，然後進 shot 外殼。
 每次 compile 重置宣告與結尾。公開 `timing_layout` 由真 boundary metadata 取得 linked addresses 與 loop 座標。

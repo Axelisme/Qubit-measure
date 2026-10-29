@@ -384,7 +384,7 @@ def test_known_register_delay_auto_uses_static_proof_then_register_cycles(consum
 @pytest.mark.parametrize(
     "end", [90 / 430.08, QickSweep1D("scan", 60 / 430.08, 90 / 430.08)]
 )
-def test_runtime_guard_rejects_end_exceeding_static_at_any_point(timeline, end):
+def test_runtime_guard_rejects_unknown_custom_time_producer(timeline, end):
     pulse = _pulse(length=0.2)
 
     def initialize(prog):
@@ -398,7 +398,7 @@ def test_runtime_guard_rejects_end_exceeding_static_at_any_point(timeline, end):
         prog.pulse(0, pulse.pulse_id)
         prog.delay_reg_auto("wait_cycles")
 
-    with pytest.raises(ValueError, match=timeline + ".*sync"):
+    with pytest.raises(ValueError, match="wait_cycles.*unknown.*producer"):
         _program([pulse], body, initialize)
 
 

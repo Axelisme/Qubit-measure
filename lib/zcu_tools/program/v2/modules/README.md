@@ -1,6 +1,6 @@
 # program/v2/modules — semantic program modules
 
-**Last updated:** 2026-10-29，宣告、emission 與原生 dmem loaders
+**Last updated:** 2026-10-29，native dmem 與時間 producer bounds
 
 **讀者：** lab-author、framework-dev、agent。語意 program modules 的宣告、發射與 owner 邊界速查。
 
@@ -34,8 +34,8 @@ Delay 與 SoftDelay 都只加 timeline 結尾。`sync()` 或 body 收尾才推�
 DelayAuto 是唯一例外，未指定 timeline 時呼叫原生 delay_auto 或 delay_reg_auto。
 它保留 gens／ros 選取，移動 reference 並扣減全部 timeline 結尾。
 指定任何 timeline 名稱都在 emit 入口報錯，包含顯式 default。
-Register cycles 必須非負，所有結尾包含 default 都須逐點證明不大於靜態推進量。
-無法證明時，編譯會指出 timeline 並提示先 sync。
+Register cycles 必須非負。尚未被 native 部分完整消耗的 timeline，須以已知 producer bounds 扣除實際推進量。
+Repeat 內仍拒絕這個 native register reference 操作，具名 timeline 的 register 時間則可用。
 
 PulseReadout 的 runtime gain／generator frequency／ADC frequency words 沿用既有 consumer。
 時間 guard 不限制這些非時間 words。Legacy init／run／block 保留供舊 program 使用。
@@ -91,6 +91,11 @@ in `ModularProgramV2`, `ProgramBuilder.add`, `Repeat`, `Branch`, `Join` and
   `use_existed=True` leaves the destination declaration to the caller. An empty
   `LoadValue` still declares its destination unless reused; an empty `LoadWord`
   declares nothing. Neither empty loader allocates dmem or initializes a value.
+- When a loaded value is consumed as time, the loader certifies its output range
+  and the index range `0..len(values)-1`. The compiler checks all registered index
+  writes, including later writes, Branch paths and loop backedges. A reset after
+  an invalid lookup cannot hide it. Non-time consumers retain their scalar or
+  raw-word contract without enabling the timing bounds checks.
 
 ## Readout configuration
 
