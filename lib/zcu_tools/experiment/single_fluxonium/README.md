@@ -1,6 +1,6 @@
 # Single-fluxonium acquisition
 
-**Last updated:** 2026-10-29 (UTC), named microwave routes
+**Last updated:** 2026-10-29 (UTC), exact preflight plan reuse
 
 **Readers:** framework-dev, lab-author, agent. Compose complete fluxonium timelines with one physical readout cavity.
 
@@ -96,6 +96,15 @@ only terminal or only herald. Each ADC keeps empty grids for unobserved events.
 Preflight checks every template's projective count and each ADC's event/grid
 layout without building a model, evolving a density or solving an ADC response.
 Conflicts name the ADC, templates and layouts.
+One complete observation set can reuse its detached plans. The source rereads
+all borrowed array bytes on every lookup. Its key includes configured and
+effective settings, the full snapshot, numeric/dependency versions, readout
+kind, ordered receiver calibrations and request layout. The cache retains at
+most one set and 32 MiB, including array storage and Python records/containers.
+An oversized set still validates and executes without residency. A different
+key replaces the old set; source close releases it. Model construction does
+not evict a just-validated set. Each call binds the plans to the current request;
+no borrowed template arrays or sampling identity enter retained cache state.
 
 `prepare_readouts(preflight)` evolves one common `ProjectionReadout` and returns
 all `channels` and `raw.batches` in receiver order. ADCs observing the same event
