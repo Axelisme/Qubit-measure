@@ -231,7 +231,7 @@ def test_writeback_uses_global_after_reopen_then_current_selected_destination(
         assert require_target(control.read_context()).point == "c"
         assert len(entry_resource(application).ledger.events()) == 1
     finally:
-        service.teardown_draft(draft)
+        draft.teardown()
         application.state.get_tab(tab_id).analysis.writeback_draft = None
 
 
@@ -315,9 +315,9 @@ def parameter_writeback_pane(
     tab = TabService(
         application.state,
         registry,
-        service,
         form_resources(application.state),
         lambda aliases: form_sources(application.state, aliases),
+        writeback=service,
     )
     application.remote.tab_control = TabControlFacet(
         state=application.state,
@@ -329,5 +329,5 @@ def parameter_writeback_pane(
     try:
         yield tab_id, captured
     finally:
-        service.teardown_draft(draft)
+        draft.teardown()
         application.state.get_tab(tab_id).analysis.writeback_draft = None

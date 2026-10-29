@@ -55,8 +55,8 @@ class _DraftEntry:
     ``WritebackItem`` is an adapter proposal and intentionally does not carry
     an editing Form or presentation summaries. A module item's Form (None for
     other items and without a captured context) and S2 display-only baseline
-    summaries stay here, behind ``WritebackDraft`` and ``WritebackService``
-    (app/service-owned read model, not adapter contract).
+    summaries stay here, owned by ``WritebackDraft``
+    (app-local read model, not adapter contract).
     """
 
     item: WritebackItem
@@ -78,19 +78,52 @@ class _RunSource:
     )
 
 
-class WritebackDraft:
-    """Opaque, service-owned writeback draft.
+def _entries_to_apply(
+    entries: Sequence[_DraftEntry], item_ids: tuple[str, ...] | None
+) -> list[_DraftEntry]:
+    """Resolve explicit IDs independently of the GUI checkbox selection."""
+    if item_ids is None:
+        return [entry for entry in entries if entry.item.selected]
+    requested = set(item_ids)
+    if len(requested) != len(item_ids):
+        raise InvalidInputError("duplicate writeback item IDs")
+    unknown = requested - {entry.item.session_id for entry in entries}
+    if unknown:
+        raise InvalidInputError(f"unknown writeback item IDs: {sorted(unknown)}")
+    return [entry for entry in entries if entry.item.session_id in requested]
 
-    A draft is the only handle a workflow needs after handing proposal items to
-    :class:`WritebackService`. Its item list is a read-model projection; module
-    item Forms remain private to the service and reach viewers through
-    ``WritebackService.get_item_form``.
-    Mutations should use the service (or the small forwarding methods below), so
-    the same draft is shared by the UI and remote editing surfaces.
+
+@dataclass(frozen=True)
+class WritebackDraftApplication:
+    """One draft's application outcome, without rollback or automatic retry.
+
+    applied_ids lists confirmed committed IDs: draft order on full success,
+    committed-group order on partial failure.
+    written groups all prepared destination paths by parameter/ml_modules/records;
+    it describes the requested writes, including uncommitted paths after failure.
+    error is the original write failure after a confirmed prefix, or None.
+    values contains detached actual values and fixed destinations for committed
+    IDs when receipt capture was requested, otherwise an empty tuple.
+    """
+
+    applied_ids: tuple[str, ...]
+    written: dict[str, list[str]]
+    error: BaseException | None = None
+    values: tuple[WritebackApplied, ...] = ()
+
+
+class WritebackDraft:
+    """Own one pane's detached proposals, Forms, captured source and applied state.
+
+    Create through WritebackService.create_draft. Public operations require an
+    active draft; teardown is idempotent. Forms are draft-local, and app callers
+    must obtain control admission immediately before each Form access or edit.
+    Source evaluation stays fixed while preview and Apply use active documents.
     """
 
     __slots__ = (
-        "_service",
+        "_owner",
+        "_write",
         "_entries",
         "_closed",
         "_parameters",
@@ -100,26 +133,39 @@ class WritebackDraft:
 
     def __init__(
         self,
-        service: WritebackService,
-        entries: list[_DraftEntry],
+        owner: WritebackService,
+        write_port: ContextControlPort,
+        items: Iterable[WritebackItem],
         parameters: ParameterContext | None,
         *,
+        arb_names: Sequence[str],
         run_source: _RunSource,
-        unavailable_reasons: tuple[str, ...],
     ) -> None:
         self._run_source = copy.deepcopy(run_source)
-        self._unavailable_reasons = unavailable_reasons
-        self._service = service
-        self._entries = entries
+        self._unavailable_reasons: tuple[str, ...] = ()
+        self._owner = owner
+        self._write = write_port
+        self._entries: list[_DraftEntry] = []
         self._parameters = parameters
         self._closed = False
+        for raw_item in items:
+            item = self._copy_item(raw_item)
+            prefix = self._kind_prefix(item)
+            item.session_id = self._next_session_id(self._entries, prefix)
+            entry = _DraftEntry(item)
+            self._capture_baseline(entry, parameters)
+            if isinstance(item, ModuleWriteback) and parameters is not None:
+                entry.form = self._open_form(
+                    entry, item.proposal, parameters, arb_names
+                )
+            self._entries.append(entry)
 
     @property
     def parameters(self) -> ParameterContext | None:
         """Fixed creation capture, or None for a context-free empty draft.
 
-        This read-only source owns role bindings, library values and the write
-        target. Later selection changes never replace it.
+        This read-only source fixes role bindings and library values, not the
+        Apply destination. Later selection changes never replace it.
         """
         return self._parameters
 
@@ -157,38 +203,31 @@ class WritebackDraft:
         """Current item projection, without any editor identity."""
         return tuple(entry.item for entry in self._entries)
 
-    def require_owner(
-        self, service: WritebackService, *, allow_closed: bool = False
+    def validate_selection(
+        self, service: WritebackService, item_ids: tuple[str, ...] | None
     ) -> None:
-        """Require the creating service and an active draft before owner operations.
+        """Validate ownership, activity and IDs without reading or writing context.
 
-        A different service raises InvalidInputError. A closed draft raises
-        FailedPreconditionError unless allow_closed permits idempotent teardown.
-        This check has no side effects.
+        service is used only for identity against the creating service.
+        Foreign drafts raise InvalidInputError before closed drafts raise
+        FailedPreconditionError. None selects checked items; () selects none.
+        Explicit IDs ignore checkboxes and resolve in draft order, not ID order.
+        Duplicate or unknown IDs raise InvalidInputError. No values or
+        destinations are evaluated, and no snapshot or write is made.
+        Cross-draft coordinators use this before accept; app frontends still
+        obtain tab/pane admission through WritebackControlPort.
         """
-        if self._service is not service:
+        if self._owner is not service:
             raise InvalidInputError("unknown writeback draft")
-        if self._closed and not allow_closed:
+        self._selected_entries(item_ids)
+
+    def _require_active(self) -> None:
+        if self._closed:
             raise FailedPreconditionError("writeback draft has been torn down")
 
-    def entries_for(self, service: WritebackService) -> tuple[_DraftEntry, ...]:
-        """Lend item/Form associations to the creating service while active.
-
-        The tuple fixes order; the service may edit the contained associations.
-        Frontends use items or WritebackService.get_item_form instead.
-        Foreign/closed access raises as for require_owner.
-        """
-        self.require_owner(service)
-        return tuple(self._entries)
-
-    def close_for(self, service: WritebackService) -> None:
-        """Mark this draft closed for its creating service, idempotently.
-
-        Foreign access raises InvalidInputError. Closing releases no resources;
-        all later active owner operations raise FailedPreconditionError.
-        """
-        self.require_owner(service, allow_closed=True)
-        self._closed = True
+    def _selected_entries(self, item_ids: tuple[str, ...] | None) -> list[_DraftEntry]:
+        self._require_active()
+        return _entries_to_apply(self._entries, item_ids)
 
     @property
     def is_active(self) -> bool:
@@ -196,7 +235,80 @@ class WritebackDraft:
         return not self._closed
 
     def preview(self) -> list[WritebackItem]:
-        return self._service.preview_draft(self)
+        """Return ordered proposal projections; a closed draft raises."""
+        self._require_active()
+        return list(self.items)
+
+    def preview_values(
+        self, *, session_id: str | None = None
+    ) -> dict[str, WritebackValues]:
+        """Read the active document set, or current=None without an open entry.
+
+        Proposed module values evaluate against the creation capture, never
+        current focus, point, or slot references. Missing destinations have
+        current=None. An invalid module Form raises LibraryEntryInvalid.
+        session_id=None reads every item, including unselected items. A supplied
+        session_id reads only that item's facts, without lowering siblings; an
+        unknown ID raises KeyError before reading the destination. Empty bulk
+        reads return {}; empty item reads raise KeyError. Preview does not authorize
+        Apply: without an entry it still evaluates proposals from their fixed
+        source, but reports current=None. Inactive drafts are rejected.
+        Target/source/I/O and requested proposal validation errors propagate.
+        """
+        self._require_active()
+        items = self.items
+        if session_id is not None:
+            items = tuple(item for item in items if item.session_id == session_id)
+            if not items:
+                raise KeyError(session_id)
+        if not items:
+            return {}
+        parameters = self._require_parameters()
+        target = (
+            self._write.read_context().target
+            if self._write.get_entry_info() is not None
+            else None
+        )
+        current = None if target is None else self._write.read_target(target)
+        values: dict[str, WritebackValues] = {}
+        for item in items:
+            path = destination_path(item, parameters)
+            if isinstance(item, RecordWriteback):
+                proposed = item.record
+            elif isinstance(item, ParameterWriteback):
+                proposed = AcceptedWrite.model_validate(
+                    {"path": path, "value": item.proposed_value}
+                ).value
+            else:
+                entry = self._find_draft_entry(item.session_id)
+                proposed = self._module_spec(entry).model_dump(mode="python")
+            values[item.session_id] = WritebackValues(
+                actual_path=path,
+                current=(
+                    read_destination_value(self._write, self, item, current, path)
+                    if current is not None
+                    else None
+                ),
+                proposed=proposed,
+                unit=(
+                    document_unit(current.document(), path)
+                    if isinstance(item, ParameterWriteback) and current is not None
+                    else None
+                ),
+            )
+        return values
+
+    def _require_parameters(self) -> ParameterContext:
+        parameters = self.parameters
+        return ParameterContext.empty() if parameters is None else parameters
+
+    def _current_target(self) -> ContextTarget:
+        target = self._write.read_context().target
+        if target is None:
+            raise FailedPreconditionError(
+                "Open an entry first", reason_code="no_context"
+            )
+        return target
 
     def edit(
         self,
@@ -207,14 +319,84 @@ class WritebackDraft:
         proposed_value: Any = UNCHANGED,
         edits: Mapping[FormWritePath, JsonValue] | None = None,
     ) -> None:
-        self._service.edit_draft(
-            self,
-            session_id,
-            selected=selected,
-            target_name=target_name,
-            proposed_value=proposed_value,
-            edits=edits,
-        )
+        """Apply one draft-local edit, in the order selection, target, value, edits.
+
+        selected only changes the GUI default apply selection. target_name
+        retargets any item. proposed_value replaces a parameter proposal; other
+        items raise InvalidInputError. edits writes one batch into a module
+        item's Form with FormState.write semantics: the batch installs whole,
+        ordinary invalid values stay in the Form and are reported by preview
+        and apply, and structurally unknown paths raise InvalidInputError
+        naming the item without changing the Form. Edits on a non-module item
+        raise InvalidInputError; on a module item without a captured context,
+        FailedPreconditionError. Earlier changes in this call are kept when a
+        later one fails. Content changes mark the item unapplied.
+        """
+        self._require_active()
+        entry = self._find_draft_entry(session_id)
+        item = entry.item
+        if selected is not None and selected != item.selected:
+            item.selected = selected
+        if target_name is not None and target_name != item.target_name:
+            item.target_name = target_name
+            self._mark_unapplied(entry)
+            # Keep the bounded proposed summary in sync for a module retarget.
+            if isinstance(item, ModuleWriteback):
+                # Preserve original current_summary; recompute proposed_summary
+                # from new target (still bounded, not full cfg).
+                is_update = entry.current_summary == "present"
+                action = "update" if is_update else "create"
+                if item.role_id:
+                    entry.proposed_summary = f"{action} {item.role_id}"
+                else:
+                    entry.proposed_summary = f"{action} → {item.target_name}"
+        if proposed_value is not UNCHANGED:
+            if not isinstance(item, ParameterWriteback):
+                raise InvalidInputError(
+                    f"{session_id!r} is not a parameter item; proposed_value invalid"
+                )
+            if not self._values_equal(proposed_value, item.proposed_value):
+                item.proposed_value = copy.deepcopy(proposed_value)
+                entry.proposed_summary = self._format_value_summary(proposed_value)
+                self._mark_unapplied(entry)
+        if edits is not None:
+            self._write_form(entry, edits)
+
+    def _write_form(
+        self, entry: _DraftEntry, edits: Mapping[FormWritePath, JsonValue]
+    ) -> None:
+        """Write one batch into a module item's Form; see edit for errors."""
+        session_id = entry.item.session_id
+        if not isinstance(entry.item, ModuleWriteback):
+            raise InvalidInputError(
+                f"{session_id!r} is not a module item; edits invalid"
+            )
+        form = self._require_form(entry)
+        try:
+            form.state.write(edits, form.env)
+        except ValueError as exc:
+            # FormState rejects unknown/overlapping paths and missing sources
+            # before installing anything; report them as the agent's input error.
+            raise InvalidInputError(f"{session_id!r}: {exc}") from exc
+
+    def get_item_form(self, session_id: str) -> ModuleEntryForm:
+        """Return the module item's Form that edits, preview and apply all use.
+
+        Viewers write it with form.state.write(batch, form.env), execute
+        form.state.run_command(path, name, form.env), or use a FormEditor
+        on (form.state, form.env). Both operations publish through the same
+        state subscription and mark the item unapplied. App callers obtain
+        admission through get_writeback_item_form_for_pane immediately before
+        each operation, not just when opening the view. A non-module
+        item raises InvalidInputError; a module item without a captured
+        context raises FailedPreconditionError. Inactive drafts and
+        unknown IDs raise as for edit.
+        """
+        self._require_active()
+        entry = self._find_draft_entry(session_id)
+        if not isinstance(entry.item, ModuleWriteback):
+            raise InvalidInputError(f"{session_id!r} is not a module item; no Form")
+        return self._require_form(entry)
 
     def apply(
         self,
@@ -222,42 +404,370 @@ class WritebackDraft:
         item_ids: tuple[str, ...] | None = None,
         origin: CommandOrigin = _GUI_ORIGIN,
     ) -> dict[str, Any]:
-        return self._service.apply_draft(self, item_ids=item_ids, origin=origin)
+        """Evaluate against the draft capture, append accepted, then set in order.
+
+        Role paths resolve through the creation capture, never current focus.
+        All selected values, including module Specs from their Forms, are built
+        before the ledger append; an invalid module Form raises
+        LibraryEntryInvalid with its field paths and writes nothing. Append
+        failure writes nothing. On item failure, mark the successful prefix applied and re-raise
+        the original cause unchanged, retaining accepted evidence and writes.
+        Empty selection is a no-op without context. Nonempty writes require an
+        open entry and use its active global or point documents. GUI defaults
+        to the GUI origin; MCP callers explicitly identify the MCP frontend.
+        Unknown/duplicate IDs or concrete destinations fail before any write.
+        Accepted payload uses self.run_id;
+        application never re-reads Run or Save state to determine its identity.
+        Each parameter's metadata is replaced by {"stderr": x} when the item has
+        stderr, else by {}; no source, kind, run_id or time is written there.
+        """
+        result = self._apply_draft(item_ids=item_ids, origin=origin)
+        if result.error is not None:
+            raise result.error from result.error.__cause__
+        return {"applied_ids": list(result.applied_ids), "written": result.written}
+
+    def accept(
+        self,
+        item_ids: tuple[str, ...] | None,
+        *,
+        origin: CommandOrigin = _GUI_ORIGIN,
+    ) -> WritebackDraftApplication:
+        """Apply one draft and capture actual committed values for coordination.
+
+        None selects checked items; () selects none. Explicit IDs ignore
+        checkboxes and use draft order. Closed drafts, unknown/duplicate IDs,
+        invalid module Forms, malformed proposal values, duplicate destinations
+        and missing context raise before writing. Empty selection needs no
+        context. Source evaluation uses the fixed
+        capture; the destination is read now, not during validate_selection.
+        Append/admission failures propagate. A write-group failure, including
+        destination document validation, returns its original cause in error,
+        preserving accepted evidence, committed IDs
+        and their values. written still includes every prepared path, not just
+        the confirmed prefix. No rollback or retry occurs. GUI is the default
+        origin; MCP callers supply CommandOrigin("mcp").
+        This is the cross-draft coordinator seam, not frontend admission.
+        """
+        return self._apply_draft(item_ids=item_ids, origin=origin, capture_values=True)
+
+    def _apply_draft(
+        self,
+        *,
+        item_ids: tuple[str, ...] | None,
+        origin: CommandOrigin,
+        capture_values: bool = False,
+    ) -> WritebackDraftApplication:
+        self._require_active()
+        selected_entries = self._selected_entries(item_ids)
+        written: dict[str, list[str]] = {
+            "parameter": [],
+            "ml_modules": [],
+            "records": [],
+        }
+        if not selected_entries:
+            return WritebackDraftApplication((), written)
+        target = self._current_target()
+        parameters = self._require_parameters()
+        destinations: set[str] = set()
+        items: list[concrete.WritebackItem] = []
+        for entry in selected_entries:
+            item = entry.item
+            if isinstance(item, RecordWriteback):
+                path = item.target_name
+                items.append(concrete.RecordWriteback(path, item.record))
+                written["records"].append(path)
+            elif isinstance(item, ParameterWriteback):
+                path = destination_path(item, parameters)
+                write = AcceptedWrite.model_validate(
+                    {"path": path, "value": item.proposed_value}
+                )
+                metadata: YamlMap = (
+                    {"stderr": item.stderr} if item.stderr is not None else {}
+                )
+                items.append(concrete.ParameterWriteback(path, write.value, metadata))
+                written["parameter"].append(path)
+            else:
+                path = destination_path(item, parameters)
+                items.append(concrete.ModuleWriteback(path, self._module_spec(entry)))
+                written["ml_modules"].append(path)
+            if path in destinations:
+                raise InvalidInputError(f"duplicate writeback destination: {path!r}")
+            destinations.add(path)
+        try:
+            outcome = self._write.apply_writeback(
+                target,
+                tuple(items),
+                evidence=concrete.WritebackEvidence(
+                    origin=origin.origin,
+                    run_id=self.run_id,
+                ),
+            )
+        except concrete.WritebackApplyError as exc:
+            completed_entries = tuple(
+                selected_entries[item.index] for item in exc.result.committed
+            )
+            for entry in completed_entries:
+                entry.applied = True
+            # Keep GUI/wire classification and the producer's own cause chain.
+            cause = exc.__cause__
+            if cause is None:
+                raise RuntimeError(
+                    "WritebackApplyError requires its original cause"
+                ) from exc
+            return WritebackDraftApplication(
+                tuple(entry.item.session_id for entry in completed_entries),
+                written,
+                cause,
+                applied_values(
+                    target,
+                    tuple(entry.item for entry in selected_entries),
+                    exc.result,
+                )
+                if capture_values
+                else (),
+            )
+        for entry in selected_entries:
+            entry.applied = True
+        return WritebackDraftApplication(
+            tuple(entry.item.session_id for entry in selected_entries),
+            written,
+            values=applied_values(
+                target, tuple(entry.item for entry in selected_entries), outcome
+            )
+            if capture_values
+            else (),
+        )
+
+    def writeback_write(
+        self,
+        changes: tuple[WritebackEdit, ...],
+        *,
+        origin: CommandOrigin = _GUI_ORIGIN,
+        on_applied: Callable[[tuple[WritebackApplied, ...]], None] | None = None,
+    ) -> list[WritebackWritten]:
+        """Edit sequentially and return active-document before/after values.
+
+        Read the currently selected destination before application, then use each write
+        owner's committed value; no postcommit destination read is needed.
+        Targets in receipts are concrete paths resolved from the creation capture.
+        Empty changes are a no-op. Edit failures, including a listed module
+        whose Form is invalid (LibraryEntryInvalid), retain the successful
+        draft prefix without writes. Read/append/setter failures propagate; accepted
+        evidence and any successful writes remain. MCP supplies
+        CommandOrigin("mcp"); GUI uses the default. on_applied, when supplied,
+        receives the confirmed prefix before any write error propagates; it must
+        only record the detached receipt, not issue further mutations.
+        """
+        self._require_active()
+        if not changes:
+            return []
+        parameters = self._require_parameters()
+        ids = tuple(change.session_id for change in changes)
+        if len(set(ids)) != len(ids):
+            raise InvalidInputError("Repeated writeback IDs")
+        items = []
+        for change in changes:
+            self.edit(
+                change.session_id,
+                target_name=change.target_name,
+                proposed_value=change.proposed_value,
+                edits=change.edits,
+            )
+            entry = self._find_draft_entry(change.session_id)
+            if isinstance(entry.item, ModuleWriteback):
+                # Built only to reject invalid input before any context read or write.
+                self._module_spec(entry)
+            items.append(entry.item)
+        paths = [destination_path(item, parameters) for item in items]
+        current = self._write.read_target(self._current_target())
+        before = [
+            read_destination_value(self._write, self, item, current, path)
+            for item, path in zip(items, paths, strict=True)
+        ]
+        applied = self.accept(ids, origin=origin)
+        if on_applied is not None:
+            on_applied(applied.values)
+        if applied.error is not None:
+            raise applied.error from applied.error.__cause__
+        previous_values = {
+            item.session_id: previous
+            for item, previous in zip(items, before, strict=True)
+        }
+        return [
+            WritebackWritten(
+                id=committed.id,
+                kind=committed.kind,
+                target=committed.target,
+                before=previous_values[committed.id],
+                after=committed.value,
+            )
+            for committed in applied.values
+        ]
 
     def teardown(self) -> None:
-        self._service.teardown_draft(self)
+        """Close this draft idempotently; later active operations raise.
 
+        Item Forms hold no session or resource, so closing releases nothing.
+        """
+        self._closed = True
 
-def _entries_to_apply(
-    entries: Sequence[_DraftEntry], item_ids: tuple[str, ...] | None
-) -> list[_DraftEntry]:
-    """Resolve explicit IDs independently of the GUI checkbox selection."""
-    if item_ids is None:
-        return [entry for entry in entries if entry.item.selected]
-    requested = set(item_ids)
-    if len(requested) != len(item_ids):
-        raise InvalidInputError("duplicate writeback item IDs")
-    unknown = requested - {entry.item.session_id for entry in entries}
-    if unknown:
-        raise InvalidInputError(f"unknown writeback item IDs: {sorted(unknown)}")
-    return [entry for entry in entries if entry.item.session_id in requested]
+    @staticmethod
+    def _copy_item(item: WritebackItem) -> WritebackItem:
+        copied = copy.deepcopy(item)
+        copied.session_id = ""
+        return copied
 
+    @staticmethod
+    def _kind_prefix(item: WritebackItem) -> str:
+        for item_type, prefix in _KIND_PREFIX.items():
+            if isinstance(item, item_type):
+                return prefix
+        raise InvalidInputError(
+            f"unsupported writeback item type: {type(item).__name__}"
+        )
 
-@dataclass(frozen=True)
-class _DraftApplication:
-    applied_ids: tuple[str, ...]
-    written: dict[str, list[str]]
-    error: BaseException | None = None
-    values: tuple[WritebackApplied, ...] = ()
+    @staticmethod
+    def _next_session_id(entries: list[_DraftEntry], prefix: str) -> str:
+        count = sum(entry.item.session_id.startswith(f"{prefix}-") for entry in entries)
+        return f"{prefix}-{count + 1}"
+
+    def _find_draft_entry(self, session_id: str) -> _DraftEntry:
+        for entry in self._entries:
+            if entry.item.session_id == session_id:
+                return entry
+        raise InvalidInputError(f"unknown writeback session_id: {session_id!r}")
+
+    def _open_form(
+        self,
+        entry: _DraftEntry,
+        proposal: ModuleSpec,
+        parameters: ParameterContext,
+        arb_names: Sequence[str],
+    ) -> ModuleEntryForm:
+        form = ModuleEntryForm(proposal, parameters, arb_names=arb_names)
+        # The Form lives exactly as long as its entry, so the subscription is
+        # never removed and its unsubscribe handle is not kept.
+        form.state.subscribe(lambda: self._mark_unapplied(entry))
+        return form
+
+    @staticmethod
+    def _require_form(entry: _DraftEntry) -> ModuleEntryForm:
+        if entry.form is None:
+            raise FailedPreconditionError(
+                f"{entry.item.session_id!r} has no Form without a captured context"
+            )
+        return entry.form
+
+    def _module_spec(self, entry: _DraftEntry) -> ModuleSpec:
+        """Return the module item's Spec; an invalid Form raises LibraryEntryInvalid."""
+        return self._require_form(entry).spec()
+
+    # ------------------------------------------------------------------
+    # S2 — display-only baseline capture (read-only, single owner)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _format_value_summary(value: Any) -> str:
+        if value is None:
+            return "—"
+        if isinstance(value, float):
+            return f"{value:.6g}"
+        if isinstance(value, complex):
+            return f"{value.real:.4g}{value.imag:+.4g}j"
+        if isinstance(value, (list, tuple)):
+            return WritebackDraft._format_sequence_summary(value)
+        if isinstance(value, dict):
+            return f"map[{len(value)}]"
+        text = repr(value)
+        return text if len(text) <= 48 else f"{text[:45]}..."
+
+    @staticmethod
+    def _format_sequence_summary(value: list[object] | tuple[object, ...]) -> str:
+        """Summarize rectangular nonempty scalar rows as a matrix, else as a list."""
+        rows: list[list[object] | tuple[object, ...]] = []
+        for row in value:
+            if not isinstance(row, (list, tuple)):
+                return f"list[{len(value)}]"
+            rows.append(row)
+        if not rows:
+            return f"list[{len(value)}]"
+        row_lengths = {len(row) for row in rows}
+        scalar_cells = all(
+            not isinstance(cell, (list, tuple, dict)) for row in rows for cell in row
+        )
+        if len(row_lengths) == 1 and next(iter(row_lengths)) > 0 and scalar_cells:
+            return f"{len(value)} × {next(iter(row_lengths))} matrix"
+        return f"list[{len(value)}]"
+
+    def _capture_baseline(
+        self, entry: _DraftEntry, parameters: ParameterContext | None
+    ) -> None:
+        """Capture display-only summaries from the creation context."""
+        item = entry.item
+        if isinstance(item, RecordWriteback):
+            entry.current_summary = "entry record"
+            entry.proposed_summary = self._format_value_summary(item.record)
+        elif isinstance(item, ParameterWriteback):
+            current = (
+                None
+                if parameters is None
+                else destination_value(
+                    item, parameters, destination_path(item, parameters)
+                )
+            )
+            entry.current_summary = self._format_value_summary(current)
+            entry.proposed_summary = self._format_value_summary(item.proposed_value)
+        elif isinstance(item, ModuleWriteback):
+            exists = False
+            if parameters is not None:
+                path = destination_path(item, parameters)
+                exists = path in parameters.library.module_keys()
+            entry.current_summary = "present" if exists else "— not present"
+            action = "update" if exists else "create"
+            role = item.role_id
+            entry.proposed_summary = (
+                f"{action} {role}" if role else f"{action} → {item.target_name}"
+            )
+
+    # App-local Qt presentation projection (S2) — not wire/persistence.
+    def get_summaries(self, session_id: str) -> tuple[str | None, str | None]:
+        """Return (current_summary, proposed_summary) for one item."""
+        self._require_active()
+        entry = self._find_draft_entry(session_id)
+        return entry.current_summary, entry.proposed_summary
+
+    def get_all_summaries(self) -> dict[str, tuple[str | None, str | None]]:
+        """Return mapping session_id -> (current, proposed) for the draft."""
+        self._require_active()
+        return {
+            e.item.session_id: (e.current_summary, e.proposed_summary)
+            for e in self._entries
+        }
+
+    def get_all_applied(self) -> dict[str, bool]:
+        """Return the draft-owned applied state for presentation."""
+        self._require_active()
+        return {entry.item.session_id: entry.applied for entry in self._entries}
+
+    @staticmethod
+    def _values_equal(left: Any, right: Any) -> bool:
+        if left is right:
+            return True
+        try:
+            return bool(left == right)
+        except (TypeError, ValueError):
+            return False
+
+    @staticmethod
+    def _mark_unapplied(entry: _DraftEntry) -> None:
+        entry.applied = False
 
 
 class WritebackService:
-    """Own opaque transactional drafts and their module item Forms.
+    """Create independent drafts and coordinate ordered acceptance across drafts.
 
-    The primary interface is ``create_draft`` → ``preview_draft`` / ``edit_draft``
-    → ``apply_draft`` / ``teardown_draft``. It accepts already-computed proposal
-    items and has no knowledge of analysis stages, subtabs, figures, or adapter
-    hooks.
+    Persistent writes use the existing ContextControlPort supplied at creation.
+    Per-draft reads, edits, Apply and teardown belong to WritebackDraft.
     """
 
     def __init__(
@@ -333,309 +843,13 @@ class WritebackService:
             isinstance(item, ModuleWriteback) for item in proposals
         ):
             arb_names = tuple(self._arb_names())
-        entries: list[_DraftEntry] = []
-        unavailable_reasons: list[str] = []
-        for raw_item in proposals:
-            item = self._copy_item(raw_item)
-            prefix = self._kind_prefix(item)
-            item.session_id = self._next_session_id(entries, prefix)
-            entry = _DraftEntry(item)
-            # Baseline capture — display-only, app/service-owned.
-            self._capture_baseline(entry, parameters)
-            if isinstance(item, ModuleWriteback) and parameters is not None:
-                entry.form = self._open_form(
-                    entry, item.proposal, parameters, arb_names
-                )
-            entries.append(entry)
         return WritebackDraft(
             self,
-            entries,
+            self._write,
+            proposals,
             parameters,
+            arb_names=arb_names,
             run_source=_RunSource(experiment_name, run_id, device_snapshot),
-            unavailable_reasons=tuple(unavailable_reasons),
-        )
-
-    def preview_draft(self, draft: WritebackDraft) -> list[WritebackItem]:
-        self._require_draft(draft)
-        return list(draft.items)
-
-    def preview_values(
-        self, draft: WritebackDraft, *, session_id: str | None = None
-    ) -> dict[str, WritebackValues]:
-        """Read the active document set, or current=None without an open entry.
-
-        Proposed module values evaluate against the creation capture, never
-        current focus, point, or slot references. Missing destinations have
-        current=None. An invalid module Form raises LibraryEntryInvalid.
-        session_id=None reads every item, including unselected items. A supplied
-        session_id reads only that item's facts, without lowering siblings; an
-        unknown ID raises KeyError before reading the destination. Empty bulk
-        reads return {}; empty item reads raise KeyError. Preview does not authorize
-        Apply: without an entry it still evaluates proposals from their fixed
-        source, but reports current=None. Inactive/foreign drafts are rejected.
-        Target/source/I/O and requested proposal validation errors propagate.
-        """
-        self._require_draft(draft)
-        items = draft.items
-        if session_id is not None:
-            items = tuple(item for item in items if item.session_id == session_id)
-            if not items:
-                raise KeyError(session_id)
-        if not items:
-            return {}
-        parameters = self._require_parameters(draft)
-        target = (
-            self._write.read_context().target
-            if self._write.get_entry_info() is not None
-            else None
-        )
-        current = None if target is None else self._write.read_target(target)
-        values: dict[str, WritebackValues] = {}
-        for item in items:
-            path = destination_path(item, parameters)
-            if isinstance(item, RecordWriteback):
-                proposed = item.record
-            elif isinstance(item, ParameterWriteback):
-                proposed = AcceptedWrite.model_validate(
-                    {"path": path, "value": item.proposed_value}
-                ).value
-            else:
-                entry = self._find_draft_entry(draft, item.session_id)
-                proposed = self._module_spec(entry).model_dump(mode="python")
-            values[item.session_id] = WritebackValues(
-                actual_path=path,
-                current=(
-                    read_destination_value(self._write, draft, item, current, path)
-                    if current is not None
-                    else None
-                ),
-                proposed=proposed,
-                unit=(
-                    document_unit(current.document(), path)
-                    if isinstance(item, ParameterWriteback) and current is not None
-                    else None
-                ),
-            )
-        return values
-
-    @staticmethod
-    def _require_parameters(draft: WritebackDraft) -> ParameterContext:
-        parameters = draft.parameters
-        return ParameterContext.empty() if parameters is None else parameters
-
-    def _current_target(self) -> ContextTarget:
-        target = self._write.read_context().target
-        if target is None:
-            raise FailedPreconditionError(
-                "Open an entry first", reason_code="no_context"
-            )
-        return target
-
-    def edit_draft(
-        self,
-        draft: WritebackDraft,
-        session_id: str,
-        *,
-        selected: bool | None = None,
-        target_name: str | None = None,
-        proposed_value: Any = UNCHANGED,
-        edits: Mapping[FormWritePath, JsonValue] | None = None,
-    ) -> None:
-        """Apply one draft-local edit, in the order selection, target, value, edits.
-
-        selected only changes the GUI default apply selection. target_name
-        retargets any item. proposed_value replaces a parameter proposal; other
-        items raise InvalidInputError. edits writes one batch into a module
-        item's Form with FormState.write semantics: the batch installs whole,
-        ordinary invalid values stay in the Form and are reported by preview
-        and apply, and structurally unknown paths raise InvalidInputError
-        naming the item without changing the Form. Edits on a non-module item
-        raise InvalidInputError; on a module item without a captured context,
-        FailedPreconditionError. Earlier changes in this call are kept when a
-        later one fails. Content changes mark the item unapplied.
-        """
-        self._require_draft(draft)
-        entry = self._find_draft_entry(draft, session_id)
-        item = entry.item
-        if selected is not None and selected != item.selected:
-            item.selected = selected
-        if target_name is not None and target_name != item.target_name:
-            item.target_name = target_name
-            self._mark_unapplied(entry)
-            # Keep the bounded proposed summary in sync for a module retarget.
-            if isinstance(item, ModuleWriteback):
-                # Preserve original current_summary; recompute proposed_summary
-                # from new target (still bounded, not full cfg).
-                is_update = entry.current_summary == "present"
-                action = "update" if is_update else "create"
-                if item.role_id:
-                    entry.proposed_summary = f"{action} {item.role_id}"
-                else:
-                    entry.proposed_summary = f"{action} → {item.target_name}"
-        if proposed_value is not UNCHANGED:
-            if not isinstance(item, ParameterWriteback):
-                raise InvalidInputError(
-                    f"{session_id!r} is not a parameter item; proposed_value invalid"
-                )
-            if not self._values_equal(proposed_value, item.proposed_value):
-                item.proposed_value = copy.deepcopy(proposed_value)
-                entry.proposed_summary = self._format_value_summary(proposed_value)
-                self._mark_unapplied(entry)
-        if edits is not None:
-            self._write_form(entry, edits)
-
-    def _write_form(
-        self, entry: _DraftEntry, edits: Mapping[FormWritePath, JsonValue]
-    ) -> None:
-        """Write one batch into a module item's Form; see edit_draft for errors."""
-        session_id = entry.item.session_id
-        if not isinstance(entry.item, ModuleWriteback):
-            raise InvalidInputError(
-                f"{session_id!r} is not a module item; edits invalid"
-            )
-        form = self._require_form(entry)
-        try:
-            form.state.write(edits, form.env)
-        except ValueError as exc:
-            # FormState rejects unknown/overlapping paths and missing sources
-            # before installing anything; report them as the agent's input error.
-            raise InvalidInputError(f"{session_id!r}: {exc}") from exc
-
-    def get_item_form(self, draft: WritebackDraft, session_id: str) -> ModuleEntryForm:
-        """Return the module item's Form that edits, preview and apply all use.
-
-        Viewers write it with form.state.write(batch, form.env), execute
-        form.state.run_command(path, name, form.env), or use a FormEditor
-        on (form.state, form.env). Both operations publish through the same
-        state subscription and mark the item unapplied. App callers obtain
-        admission through get_writeback_item_form_for_pane immediately before
-        each operation, not just when opening the view. A non-module
-        item raises InvalidInputError; a module item without a captured
-        context raises FailedPreconditionError. Inactive/foreign drafts and
-        unknown IDs raise as for edit_draft.
-        """
-        self._require_draft(draft)
-        entry = self._find_draft_entry(draft, session_id)
-        if not isinstance(entry.item, ModuleWriteback):
-            raise InvalidInputError(f"{session_id!r} is not a module item; no Form")
-        return self._require_form(entry)
-
-    def apply_draft(
-        self,
-        draft: WritebackDraft,
-        *,
-        item_ids: tuple[str, ...] | None = None,
-        origin: CommandOrigin = _GUI_ORIGIN,
-    ) -> dict[str, Any]:
-        """Evaluate against the draft capture, append accepted, then set in order.
-
-        Role paths resolve through the creation capture, never current focus.
-        All selected values, including module Specs from their Forms, are built
-        before the ledger append; an invalid module Form raises
-        LibraryEntryInvalid with its field paths and writes nothing. Append
-        failure writes nothing. On item failure, mark the successful prefix applied and re-raise
-        the original cause unchanged, retaining accepted evidence and writes.
-        Empty selection is a no-op without context. Nonempty writes require an
-        open entry and use its active global or point documents. GUI defaults
-        to the GUI origin; MCP callers explicitly identify the MCP frontend.
-        Unknown/duplicate IDs or concrete destinations fail before any write.
-        Accepted payload uses draft.run_id;
-        application never re-reads Run or Save state to determine its identity.
-        Each parameter's metadata is replaced by {"stderr": x} when the item has
-        stderr, else by {}; no source, kind, run_id or time is written there.
-        """
-        result = self._apply_draft(draft, item_ids=item_ids, origin=origin)
-        if result.error is not None:
-            raise result.error from result.error.__cause__
-        return {"applied_ids": list(result.applied_ids), "written": result.written}
-
-    def _apply_draft(
-        self,
-        draft: WritebackDraft,
-        *,
-        item_ids: tuple[str, ...] | None,
-        origin: CommandOrigin,
-        capture_values: bool = False,
-    ) -> _DraftApplication:
-        self._require_draft(draft)
-        selected_entries = _entries_to_apply(draft.entries_for(self), item_ids)
-        written: dict[str, list[str]] = {
-            "parameter": [],
-            "ml_modules": [],
-            "records": [],
-        }
-        if not selected_entries:
-            return _DraftApplication((), written)
-        target = self._current_target()
-        parameters = self._require_parameters(draft)
-        destinations: set[str] = set()
-        items: list[concrete.WritebackItem] = []
-        for entry in selected_entries:
-            item = entry.item
-            if isinstance(item, RecordWriteback):
-                path = item.target_name
-                items.append(concrete.RecordWriteback(path, item.record))
-                written["records"].append(path)
-            elif isinstance(item, ParameterWriteback):
-                path = destination_path(item, parameters)
-                write = AcceptedWrite.model_validate(
-                    {"path": path, "value": item.proposed_value}
-                )
-                metadata: YamlMap = (
-                    {"stderr": item.stderr} if item.stderr is not None else {}
-                )
-                items.append(concrete.ParameterWriteback(path, write.value, metadata))
-                written["parameter"].append(path)
-            else:
-                path = destination_path(item, parameters)
-                items.append(concrete.ModuleWriteback(path, self._module_spec(entry)))
-                written["ml_modules"].append(path)
-            if path in destinations:
-                raise InvalidInputError(f"duplicate writeback destination: {path!r}")
-            destinations.add(path)
-        try:
-            outcome = self._write.apply_writeback(
-                target,
-                tuple(items),
-                evidence=concrete.WritebackEvidence(
-                    origin=origin.origin,
-                    run_id=draft.run_id,
-                ),
-            )
-        except concrete.WritebackApplyError as exc:
-            completed_entries = tuple(
-                selected_entries[item.index] for item in exc.result.committed
-            )
-            for entry in completed_entries:
-                entry.applied = True
-            # Keep GUI/wire classification and the producer's own cause chain.
-            cause = exc.__cause__
-            if cause is None:
-                raise RuntimeError(
-                    "WritebackApplyError requires its original cause"
-                ) from exc
-            return _DraftApplication(
-                tuple(entry.item.session_id for entry in completed_entries),
-                written,
-                cause,
-                applied_values(
-                    target,
-                    tuple(entry.item for entry in selected_entries),
-                    exc.result,
-                )
-                if capture_values
-                else (),
-            )
-        for entry in selected_entries:
-            entry.applied = True
-        return _DraftApplication(
-            tuple(entry.item.session_id for entry in selected_entries),
-            written,
-            values=applied_values(
-                target, tuple(entry.item for entry in selected_entries), outcome
-            )
-            if capture_values
-            else (),
         )
 
     def accept_drafts(
@@ -655,21 +869,17 @@ class WritebackService:
         seen: set[WritebackDraft] = set()
         for selection in selections:
             draft = selection.draft
-            self._require_draft(draft)
+            # A seen draft already passed owner/activity checks in this
+            # synchronous call. Preserve repeated-draft priority over bad IDs.
             if draft in seen:
                 raise InvalidInputError("Repeated captured writeback draft")
+            draft.validate_selection(self, selection.ids)
             seen.add(draft)
-            _entries_to_apply(draft.entries_for(self), selection.ids)
         applied: list[tuple[str, ...]] = [() for _ in selections]
         written: list[tuple[WritebackApplied, ...]] = [() for _ in selections]
         for index, selection in enumerate(selections):
             try:
-                result = self._apply_draft(
-                    selection.draft,
-                    item_ids=selection.ids,
-                    origin=origin,
-                    capture_values=True,
-                )
+                result = selection.draft.accept(selection.ids, origin=origin)
             except Exception as error:
                 # Isolate admission/ledger failure; earlier groups remain confirmed.
                 logger.exception("Captured writeback failed after confirmed groups")
@@ -681,257 +891,3 @@ class WritebackService:
                     tuple(applied), str(result.error), tuple(written)
                 )
         return WritebackAcceptance(tuple(applied), written=tuple(written))
-
-    def write_draft(
-        self,
-        draft: WritebackDraft,
-        changes: tuple[WritebackEdit, ...],
-        *,
-        origin: CommandOrigin = _GUI_ORIGIN,
-        on_applied: Callable[[tuple[WritebackApplied, ...]], None] | None = None,
-    ) -> list[WritebackWritten]:
-        """Edit sequentially and return active-document before/after values.
-
-        Read the currently selected destination before application, then use each write
-        owner's committed value; no postcommit destination read is needed.
-        Targets in receipts are concrete paths resolved from the creation capture.
-        Empty changes are a no-op. Edit failures, including a listed module
-        whose Form is invalid (LibraryEntryInvalid), retain the successful
-        draft prefix without writes. Read/append/setter failures propagate; accepted
-        evidence and any successful writes remain. MCP supplies
-        CommandOrigin("mcp"); GUI uses the default. on_applied, when supplied,
-        receives the confirmed prefix before any write error propagates; it must
-        only record the detached receipt, not issue further mutations.
-        """
-        self._require_draft(draft)
-        if not changes:
-            return []
-        parameters = self._require_parameters(draft)
-        ids = tuple(change.session_id for change in changes)
-        if len(set(ids)) != len(ids):
-            raise InvalidInputError("Repeated writeback IDs")
-        items = []
-        for change in changes:
-            self.edit_draft(
-                draft,
-                change.session_id,
-                target_name=change.target_name,
-                proposed_value=change.proposed_value,
-                edits=change.edits,
-            )
-            entry = self._find_draft_entry(draft, change.session_id)
-            if isinstance(entry.item, ModuleWriteback):
-                # Built only to reject invalid input before any context read or write.
-                self._module_spec(entry)
-            items.append(entry.item)
-        paths = [destination_path(item, parameters) for item in items]
-        current = self._write.read_target(self._current_target())
-        before = [
-            read_destination_value(self._write, draft, item, current, path)
-            for item, path in zip(items, paths, strict=True)
-        ]
-        applied = self._apply_draft(
-            draft, item_ids=ids, origin=origin, capture_values=True
-        )
-        if on_applied is not None:
-            on_applied(applied.values)
-        if applied.error is not None:
-            raise applied.error from applied.error.__cause__
-        previous_values = {
-            item.session_id: previous
-            for item, previous in zip(items, before, strict=True)
-        }
-        return [
-            WritebackWritten(
-                id=committed.id,
-                kind=committed.kind,
-                target=committed.target,
-                before=previous_values[committed.id],
-                after=committed.value,
-            )
-            for committed in applied.values
-        ]
-
-    def teardown_draft(self, draft: WritebackDraft) -> None:
-        """Close a draft; later calls are no-ops and later uses raise.
-
-        Item Forms hold no session or resource, so closing releases nothing.
-        """
-        self._require_draft(draft, allow_closed=True)
-        draft.close_for(self)
-
-    # Short behavior-oriented aliases for callers that already hold the opaque
-    # draft. They keep the public surface independent of stage/subtab vocabulary.
-    def preview(self, draft: WritebackDraft) -> list[WritebackItem]:
-        return self.preview_draft(draft)
-
-    def edit(self, draft: WritebackDraft, session_id: str, **changes: Any) -> None:
-        self.edit_draft(draft, session_id, **changes)
-
-    def apply(self, draft: WritebackDraft) -> dict[str, Any]:
-        return self.apply_draft(draft)
-
-    def teardown(self, draft: WritebackDraft) -> None:
-        self.teardown_draft(draft)
-
-    def _require_draft(
-        self, draft: WritebackDraft, *, allow_closed: bool = False
-    ) -> None:
-        draft.require_owner(self, allow_closed=allow_closed)
-
-    @staticmethod
-    def _copy_item(item: WritebackItem) -> WritebackItem:
-        copied = copy.deepcopy(item)
-        copied.session_id = ""
-        return copied
-
-    @staticmethod
-    def _kind_prefix(item: WritebackItem) -> str:
-        for item_type, prefix in _KIND_PREFIX.items():
-            if isinstance(item, item_type):
-                return prefix
-        raise InvalidInputError(
-            f"unsupported writeback item type: {type(item).__name__}"
-        )
-
-    @staticmethod
-    def _next_session_id(entries: list[_DraftEntry], prefix: str) -> str:
-        count = sum(entry.item.session_id.startswith(f"{prefix}-") for entry in entries)
-        return f"{prefix}-{count + 1}"
-
-    def _find_draft_entry(self, draft: WritebackDraft, session_id: str) -> _DraftEntry:
-        for entry in draft.entries_for(self):
-            if entry.item.session_id == session_id:
-                return entry
-        raise InvalidInputError(f"unknown writeback session_id: {session_id!r}")
-
-    def _open_form(
-        self,
-        entry: _DraftEntry,
-        proposal: ModuleSpec,
-        parameters: ParameterContext,
-        arb_names: Sequence[str],
-    ) -> ModuleEntryForm:
-        form = ModuleEntryForm(proposal, parameters, arb_names=arb_names)
-        # The Form lives exactly as long as its entry, so the subscription is
-        # never removed and its unsubscribe handle is not kept.
-        form.state.subscribe(lambda: self._mark_unapplied(entry))
-        return form
-
-    @staticmethod
-    def _require_form(entry: _DraftEntry) -> ModuleEntryForm:
-        if entry.form is None:
-            raise FailedPreconditionError(
-                f"{entry.item.session_id!r} has no Form without a captured context"
-            )
-        return entry.form
-
-    def _module_spec(self, entry: _DraftEntry) -> ModuleSpec:
-        """Return the module item's Spec; an invalid Form raises LibraryEntryInvalid."""
-        return self._require_form(entry).spec()
-
-    # ------------------------------------------------------------------
-    # S2 — display-only baseline capture (read-only, single owner)
-    # ------------------------------------------------------------------
-
-    @staticmethod
-    def _format_value_summary(value: Any) -> str:
-        if value is None:
-            return "—"
-        if isinstance(value, float):
-            return f"{value:.6g}"
-        if isinstance(value, complex):
-            return f"{value.real:.4g}{value.imag:+.4g}j"
-        if isinstance(value, (list, tuple)):
-            return WritebackService._format_sequence_summary(value)
-        if isinstance(value, dict):
-            return f"map[{len(value)}]"
-        text = repr(value)
-        return text if len(text) <= 48 else f"{text[:45]}..."
-
-    @staticmethod
-    def _format_sequence_summary(value: list[object] | tuple[object, ...]) -> str:
-        """Summarize rectangular nonempty scalar rows as a matrix, else as a list."""
-        rows: list[list[object] | tuple[object, ...]] = []
-        for row in value:
-            if not isinstance(row, (list, tuple)):
-                return f"list[{len(value)}]"
-            rows.append(row)
-        if not rows:
-            return f"list[{len(value)}]"
-        row_lengths = {len(row) for row in rows}
-        scalar_cells = all(
-            not isinstance(cell, (list, tuple, dict)) for row in rows for cell in row
-        )
-        if len(row_lengths) == 1 and next(iter(row_lengths)) > 0 and scalar_cells:
-            return f"{len(value)} × {next(iter(row_lengths))} matrix"
-        return f"list[{len(value)}]"
-
-    def _capture_baseline(
-        self, entry: _DraftEntry, parameters: ParameterContext | None
-    ) -> None:
-        """Capture display-only summaries from the creation context."""
-        item = entry.item
-        if isinstance(item, RecordWriteback):
-            entry.current_summary = "entry record"
-            entry.proposed_summary = self._format_value_summary(item.record)
-        elif isinstance(item, ParameterWriteback):
-            current = (
-                None
-                if parameters is None
-                else destination_value(
-                    item, parameters, destination_path(item, parameters)
-                )
-            )
-            entry.current_summary = self._format_value_summary(current)
-            entry.proposed_summary = self._format_value_summary(item.proposed_value)
-        elif isinstance(item, ModuleWriteback):
-            exists = False
-            if parameters is not None:
-                path = destination_path(item, parameters)
-                exists = path in parameters.library.module_keys()
-            entry.current_summary = "present" if exists else "— not present"
-            action = "update" if exists else "create"
-            role = item.role_id
-            entry.proposed_summary = (
-                f"{action} {role}" if role else f"{action} → {item.target_name}"
-            )
-
-    # App-local Qt presentation projection (S2) — not wire/persistence.
-    def get_summaries(
-        self, draft: WritebackDraft, session_id: str
-    ) -> tuple[str | None, str | None]:
-        """Return (current_summary, proposed_summary) for one item."""
-        self._require_draft(draft)
-        entry = self._find_draft_entry(draft, session_id)
-        return entry.current_summary, entry.proposed_summary
-
-    def get_all_summaries(
-        self, draft: WritebackDraft
-    ) -> dict[str, tuple[str | None, str | None]]:
-        """Return mapping session_id -> (current, proposed) for the draft."""
-        self._require_draft(draft)
-        return {
-            e.item.session_id: (e.current_summary, e.proposed_summary)
-            for e in draft.entries_for(self)
-        }
-
-    def get_all_applied(self, draft: WritebackDraft) -> dict[str, bool]:
-        """Return the draft-owned applied state for presentation."""
-        self._require_draft(draft)
-        return {
-            entry.item.session_id: entry.applied for entry in draft.entries_for(self)
-        }
-
-    @staticmethod
-    def _values_equal(left: Any, right: Any) -> bool:
-        if left is right:
-            return True
-        try:
-            return bool(left == right)
-        except (TypeError, ValueError):
-            return False
-
-    @staticmethod
-    def _mark_unapplied(entry: _DraftEntry) -> None:
-        entry.applied = False
