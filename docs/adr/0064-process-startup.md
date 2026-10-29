@@ -44,9 +44,11 @@ Composition 將選好的 `Path` 注入 `MeasureGuiBehavior`。Lib 不 import zcu
 
 Framework 只保存 `measure_layout_v1.json` 的視窗尺寸與左面板寬度。SoC、devices、entry／point、tabs 與輸入的重開政策由腳本決定，框架不保存、還原或遷移領域 session。RAM 的 `WorkspaceTab`／`WorkspaceSnapshot` 供 workspace 重建與實驗 reload 使用，不是磁碟 schema。
 
-預設 `default_startup.py` 擁有 user cache 根目錄下的 `measure-session.json`。它依序嘗試上次 SoC、各 device、entry／point，只有 entry／point 成功後才重開 tabs 並還原 input。Device 連線失敗時嘗試 remember 為未連線列。每項失敗記 log 並繼續，最後狀態列顯示一行摘要；略過的 tab 不會在稍後選來源時自動重試。腳本以 `on_close` 讀取當時 live state 並保存自己的檔案，不保存硬體設定或量測結果。
+預設 `default_startup.py` 擁有 user cache 根目錄下的 `measure-session.json`。它依序嘗試上次 SoC、各 device、entry／point。保存的 point 為 None 時，成功開 entry 即是 global，可重開 tabs 並還原 input。保存了 point label 時，還須成功選取該 point；失敗略過 tabs，不回退 global。Entry 開啟失敗也略過 tabs。
 
-Setup 與每個 point 各自保存 alias。選 point 載入其 `points/<label>/aliases.yaml`，Inspect Apply 寫回目前 point。預設腳本不另存、不恢復 alias，也不建立第二份 alias 權威。模擬腳本先建立 point，再以 `ctx.context.apply_alias_rows` 初始化其表。使用者於 2026-10-20 說明：「startup寫入在預設不會出現，simulation場景用來初始化alias內容用的」。
+Device 連線失敗時嘗試 remember 為未連線列。每項失敗記 log 並繼續，最後狀態列顯示一行摘要；略過的 tab 不會在稍後選來源時自動重試。腳本以 `on_close` 讀取當時 live state 並保存自己的檔案，不保存硬體設定或量測結果。
+
+Entry 與每個 point 各自保存 alias。開 entry 載入 global 的 `aliases.yaml`，選 point 載入其 `points/<label>/aliases.yaml`。Inspect 保存所選 Destination，startup 的 `ctx.context.apply_alias_rows` 寫作用中的表，未開 entry 時以 no_context 拒絕，不暫存 rows。預設腳本不另存、不恢復 alias，也不建立第二份 alias 權威。需要初始化表的腳本先開 entry，可再選 point，然後明確呼叫此入口。使用者於 2026-10-20 說明：「startup寫入在預設不會出現，simulation場景用來初始化alias內容用的」。2026-10-29 的 global 文件組規則讓開 entry 後也可初始化 alias，不再要求先建 point，見 [[0067]]。
 
 模板佔位符只由呼叫端在 `Template.bindings` 明填，session 與 startup 不提供預設值，也不保存或恢復模板綁定，見 [[0073]]。使用者於 2026-10-20 裁定：「你搞錯了吧，模板/alias是不同的東西，後者才是startup填的」。
 

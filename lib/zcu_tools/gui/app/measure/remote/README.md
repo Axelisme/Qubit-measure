@@ -1,6 +1,6 @@
 # `gui.app.measure.remote`
 
-**Last updated:** 2026-10-29
+**Last updated:** 2026-10-29，global 文件組的 wire 133／GUI 166
 
 **讀者：** framework-dev。量測 GUI 的 RPC 方法、控制權與來源投影契約。
 
@@ -33,7 +33,7 @@ Neither method returns a kind discriminator.
 
 ## Context snapshot
 
-`context.snapshot` 回傳固定 capture 的 target、point、library 與完整 aliases。Library 只投影持久 Specs，不回傳 `provenance`，也不 materialize assets。目前契約版本為 WIRE_VERSION 132、GUI_VERSION 165。Point files 的路徑使用 `parameters.yaml`／`library.yaml`／`aliases.yaml`；檔名改變因此升 wire 與 GUI 版本。
+`context.snapshot` 回傳固定 capture 的 target、point、library 與完整 aliases。Library 只投影持久 Specs，不回傳 `provenance`，也不 materialize assets。目前契約版本為 WIRE_VERSION 133、GUI_VERSION 166。本次升版涵蓋 global／point 的作用中三筆 files、EMPTY／GLOBAL／POINT readiness、point.use 的必填 nullable label 與無 kind 回覆，以及 writeback preview／receipt 只報 entry_name、point 的目的地。Entry 與 point 共用 `parameters.yaml`／`library.yaml`／`aliases.yaml`；前次檔名統一對應的版本是 132／165。
 
 省略 path 與 summaries 時，owner 驗證完整 schema，wire encoder 再驗證所有輸出值。`path` 使用 dotted keys 與 canonical 非負 list indices，只由 owner 讀驗所選部分，並優先於 summaries。選整個 component 或 subtree 時，該層的完整投影契約仍適用。未選 sibling 的壞 schema、nonfinite 或 library source fault 不再擋住正常 point leaf。Invalid path 保留第一個不可讀 segment，不先驗其他 sibling。
 

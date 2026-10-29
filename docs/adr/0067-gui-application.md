@@ -49,27 +49,39 @@ SoC dialog 透過獨立 `SocControlPort` 提供連線與 soccfg 瀏覽，Setup �
 
 Setup 等 shared dialog 只依賴窄 control port 表達一般能力（開啟 entry、選取 point、讀取記住的 Session Preference、連線），不知道 app 正在啟動、還原或關閉；control port 也不提供啟動專用的版本。Session Preference 只回答下次輸入預填什麼，不證明 entry 已開啟或儀器已連線。Fluxdep、dispersive 並未因此取得完整的 measurement session。
 
-可被多方讀取的 session 與 app 事實由 State 或其 owner 公開讀取投影。ContextService 私下持有 ResultEntry、point 與 library handles，是 GUI 參數與 library 的寫入權威。EMPTY 的 parameters 是 None。未開 entry 時沒有 entry metadata 或 source binding；開啟 entry 後仍為 EMPTY，不自選 point，但可讀 entry metadata、point list 與 setup source binding。選取或建立 point 後才使用 ACTIVE 的持久文件。SoC、device 與獨立 predictor 不因沒有參數而停用。SavedPoint 是唯一參數寫入目標，寫入經 resources owner 的 DocumentStore 單檔交易，成功後才發布目前 binding 的固定投影、版本與 fact。Parameter／library 寫入要求目前已有選取的 point。同 entry 的非選取 point 可寫入但不改目前 selection；跨 entry 拒絕。Schema、來源、衝突或 I/O 失敗不發布候選。
+可被多方讀取的 session 與 app 事實由 State 或其 owner 公開讀取投影。ContextService 持有 ResultEntry、entry／point 文件與 library handles，是 GUI 參數與 library 的寫入權威。Readiness 分為 EMPTY、GLOBAL、POINT。EMPTY 表示未開 entry，parameters 為 None，沒有 entry metadata 或 source binding。開 entry 即安裝 GLOBAL 的 parameters、library、aliases 與 storage，active_label 為 None，不自選 point。選取或建立 point 後整組換成 POINT；use_global 回到 entry 組，clear_context 才關閉 entry。兩個可用狀態都可 Run、Analyze、Save 與 writeback，不逐名稱回退。SoC、device 與獨立 predictor 保持自己的 admission。
+
+SavedEntry 與 SavedPoint 分別標識 entry 與 point 文件組。寫入經 resources owner 的 DocumentStore 單檔交易，成功後才發布對應固定投影、版本與 fact。同 entry 的非作用中組可寫入但不改 selection、作用中版本或舊 capture；跨 entry 拒絕。Schema、來源、衝突或 I/O 失敗不發布候選。
+
+2026-10-29 使用者提出：「沒有激活point就用全域的parameter.yaml/module_cfg/alias，有激活就用point內的，每個都是write-through」。使用者確認整組切換：「A，我目前先設計成整個作用域換成point，沒有個別的fallback邏輯」。現行檔名為 parameters.yaml、library.yaml、aliases.yaml。這取代開 entry 仍為 EMPTY、只允許 SavedPoint 寫入的規則。
 
 Measure 的 library editor 交未 lower 的 schema 與固定 ParameterContext。ContextService 透過 app 注入的 callbacks 準備 ModuleSpec／WaveformSpec，再提交一筆 library structure change。Rename 不級聯修改其他引用。
 
-WritebackService 先以分析來源的固定 capture 解析與 lower 全部選定 proposals，再依提案順序交 concrete items 給 `ContextService.apply_writeback`。Preview／Apply 從命令當下 read_context().target 取得 GUI 選定的 SavedPoint，不從歷史 capture 決定目的地。此入口驗證這個目標、綁定資源並交 resources 共用 executor。未選工作點時，application 在 append 前沿 no_context 拒絕，提示先選或建立工作點。空歷史環境不構成拒絕寫回的理由；底層 context 仍拒絕 caller 指定其他 entry 的 SavedPoint。Executor 追加 accepted 後依序提交 point 組、library 組與逐筆 samples，組內保留提案順序。任一項無效整組不寫，首錯停止，保留已提交組與事件，不提供跨檔 rollback 或 retry。Context owner 每個成功的 point／library 組發布一次。GUI 以 committed 的供應序 index 關聯 draft item ID，分組順序與成功項目數不能用來切供應序前綴。GUI 標記該前綴 applied 後原樣拋 producer cause，保留既有 wire 分類。Parameter 的 metadata 整份替換為 `{stderr: x}`，沒有 stderr 時為 `{}`，不寫 source、kind、run_id 或時間。Module 只保存 Spec，不保存 per-leaf stderr 或來源。Parameter／Module／Sample proposal、Form draft 與 selected Apply 的契約見 [[0008]]、[[0065]]；子模組搬遷不改成功前綴、權限、busy admission、欄位驗證或錯誤分類。
+WritebackService 先以分析來源的固定 capture 解析與 lower 全部選定 proposals，再依提案順序交 concrete items 給 `ContextService.apply_writeback`。
+
+Preview 顯示當下作用中位置，Apply 從當下 read_context().target 重新取得 SavedEntry 或 SavedPoint，不從歷史 capture 決定目的地。此入口驗證目標、綁定資源並交 resources 共用 executor。未開 entry 時仍可預覽合法 draft，destination_context 的 entry_name、point 與各項 current 為 null；非空 Apply 在 append 前以 no_context 拒絕。Global 的 point 為 null，已提交 receipt 的 entry_name 必為字串，destination 不含 kind。空歷史環境不構成拒絕寫回的理由；底層 context 仍拒絕其他 entry 的 target。
+
+Executor 追加 accepted 後依序提交 parameters 組、library 組與逐筆 records，組內保留提案順序。任一項無效整組不寫，首錯停止，保留已提交組與事件，不提供跨檔 rollback 或 retry。Context owner 每個成功的 parameters／library 組發布一次。GUI 以 committed 的供應序 index 關聯 draft item ID，分組順序與成功項目數不能用來切供應序前綴。GUI 標記該前綴 applied 後原樣拋 producer cause，保留既有 wire 分類。
+
+Parameter 的 metadata 整份替換為 `{stderr: x}`，沒有 stderr 時為 `{}`，不寫 source、kind、run_id 或時間。Module 只保存 Spec，不保存 per-leaf stderr 或來源。Parameter／Module／Sample proposal、Form draft 與 selected Apply 的契約見 [[0008]]、[[0065]]；子模組搬遷不改成功前綴、權限、busy admission、欄位驗證或錯誤分類。
 
 2026-10-28 使用者裁決：「我其實沒有要知道來源的需求，這功能純屬於錦上添花」「來源我一直以為只是metadata，沒想要解析」。Library 移除模組來源；accepted 事件與 record 的事件引用仍保留，見 [[0063]]。
 
-目前 point 的有序 alias 表由 ContextService 擁有。元件與 device 共用同表，每列保存名稱或引用前列的 `$` 軟連結，不做 kind 或名稱可用性預驗。Caller 以 `alias_presets` 提供具名 catalog，default rows 僅作為未開 entry 的 memory 初值。框架不宣告領域 preset，也不反向 import zcu_lab。
+作用中文件組的有序 alias 表由 ContextService 擁有。元件與 device 共用同表，每列保存名稱或引用前列的 `$` 軟連結，不做 kind 或名稱可用性預驗。框架不提供 memory-only rows 或 alias presets，也不反向 import zcu_lab。
 
-普通 `set_alias_rows` 在未選 point 時只改 memory；選定 point 後先保存該 point 的表，再安裝 memory 與發布 fact，見 [[0081]]。Dialog Apply、RPC 與 startup Apply 要求已選 point，否則以 `no_context` 拒絕。Apply 先原子驗證整表，再由 entry owner 保存該 point 的 `points/<label>/aliases.yaml`，成功後才安裝 memory 與發布 fact。失敗保舊表、舊檔與 dialog draft。開 entry 或 clear 清空表，選取 point 就換成該 point 的表。缺檔視為空，不回退 setup 或 preset，也不自填空列。這不寫 preference、setup alias、其他 point 容器或 ledger；保存分界見 [[0063]]。
+`apply_alias_rows` 先驗整表，再由 entry owner 保存作用中的 aliases.yaml，成功後才安裝 memory、revision 與發布 fact。未開 entry 以 no_context 拒絕，不暫存或自動開 entry。Startup 先開 entry 再明確呼叫此入口。`setup=True` 固定寫 entry 表。開 entry 載入 global 表，選 point 換成該 point 的表，回 Global 換回 entry 表，clear 才清空表。兩層缺檔都當空、revision 為 None，讀取不建檔，首次明確編輯才建檔。外部先建檔時報 revision 衝突，不回退或自填。缺參數檔仍是錯誤。保存分界見 [[0063]]，同步規則見 [[0081]]。
 
 使用者於 2026-10-20 裁定：「採用乙，alias. yaml的獨立檔案，找不到就視內容為空，與其他兩個資料容器並列」。Setup 與 point 的表獨立，建立時複製，之後不繼承。
 
-公開 `read_context(aliases=None)` 固定 point、library、storage 與全表，不檢查 consumer kind。GUI adapter、Tab、Run、Load 和 template create 直接使用它，不宣告角色。裸 `$alias` 回名稱，欄位路徑延後交讀取 owner 檢查。非空具名 overrides 只改本次 capture，不保存到 tab、全域表或檔案。EMPTY 無覆寫由 app 保留 None 的 context-free／deferred 路徑；非空覆寫拒絕 no_context。Notebook 保留自己的顯式 role kind 契約與 caller 提供的 bindings。
+公開 `read_context(aliases=None)` 固定作用中參數、library、storage 與全表，不檢查 consumer kind。GUI adapter、Tab、Run、Load 和 template create 直接使用它，不宣告角色。裸 `$alias` 回名稱，欄位路徑延後交讀取 owner 檢查。非空具名 overrides 只改本次 capture，不保存到 tab、全域表或檔案。EMPTY 無覆寫由 app 保留 None 的 context-free／deferred 路徑；非空覆寫拒絕 no_context。Notebook 保留自己的顯式 role kind 契約與 caller 提供的 bindings。
 
-Shared `gui.session.ui.alias_panel` 是 Measure 與 workflows 的 Inspect Aliases 編輯入口，不設 app-local wrapper。Alias draft 固定載入時的 entry／point，clean 時跟隨切換，dirty 時保留並拒絕跨 target Apply。Revert 或重開載入目前 point，避免舊草稿靜默覆寫另一個 point。同 target Apply 保持 Inspect 開啟，Cancel 不撤回已 Apply 的表。Tab 不顯示角色列，建立時固定目前 point／library、alias 表、cached device infos 與 value sources。Refresh 重新 capture 並保留 authored inputs，Reset 重新 capture 並重算 defaults。來源事件不自動刷新，Run 使用目前 tab 的有效 Form result 與固定來源。FIT、interactive、Post 與 Writeback 求值使用結果的固定來源，不因後來選取而改變分析環境。Writeback 的目的地是命令當下 GUI 選定的 point；Save 則以目前 roots 與 Run 記錄的名稱生成目的地。Native Load 的來源與保存規則見 [[0063]]，cfg acceptance 見 [[0065]]。
+Shared `gui.session.ui.alias_panel` 是 Measure 與 workflows 的 Inspect Aliases 編輯入口，不設 app-local wrapper。Inspect 三頁都可選 Active documents 或 Entry template。完成有效編輯後寫入所選 Destination，New library entry 也固定該 Destination 的 capture。失敗保留輸入與舊檔，同 target 通知保留 dirty draft 與原 revision；切換來源或關閉丟棄未提交輸入。選了 point 時，entry 寫入由 owner 更新 cache 與 revision，再發非作用中通知，不冒充外部 reload。非作用中 entry 的外部 reload 只發 file status。兩者都不改作用中版本或舊 capture。
+
+Tab 不顯示角色列，建立時固定作用中參數／library、alias 表、cached device infos 與 value sources。Refresh 重新 capture 並保留 authored inputs，Reset 重新 capture 並重算 defaults。來源事件不自動刷新，Run 使用目前 tab 的有效 Form result 與固定來源。FIT、interactive、Post 與 Writeback 求值使用結果的固定來源，不因後來選取而改變分析環境。Writeback 的目的地是 Apply 當下作用中的文件組；Save 則以目前 roots 與 Run 記錄的名稱生成目的地。Native Load 的來源與保存規則見 [[0063]]，cfg acceptance 見 [[0065]]。
 
 Device 的連線資訊、記得但未連線列與 cached DeviceInfo 在 `SessionState`，`DeviceService` 控制 driver 與 in-flight 工作。記哪些 device、重啟時嘗試哪些連線由腳本決定，framework 不從 domain session 快取回填。Setup preferences 只是 live 預填值。State 是否供多方觀察與資料是否重啟後保存是兩個問題，worker、lease 和 driver 的控制權不因有人需要觀察而交給 State。
 
-Measure framework 只保存 Qt 外觀，不保存或還原 SoC、devices、entry／point、tabs／input，也不提供 legacy session 遷移。預設腳本的重開與 on_close 保存見 [[0064]]。Setup 的 aliases.yaml 路徑維持不變，每個 point 另有自己的表。預設腳本不另存或恢復 alias，恢復 point 就自然載入。Workspace 的 RAM 快照只供目前程序重建與 reload，不是持久 session schema。
+Measure framework 只保存 Qt 外觀，不保存或還原 SoC、devices、entry／point、tabs／input，也不提供 legacy session 遷移。預設腳本的重開與 on_close 保存見 [[0064]]。Setup 的 aliases.yaml 路徑維持不變，每個 point 另有自己的表。預設腳本不另存或恢復 alias，開 entry 或選 point 就載入對應表。Workspace 的 RAM 快照只供目前程序重建與 reload，不是持久 session schema。
 
 RunContext 提供 devices 與 cancel_signal 等執行能力，不提供儀器設定方法。Device 層只提供 current／voltage、frequency／power、output 或 value 等操作，不知道 flux／RF 角色。使用者套件 helper 負責把角色用途與明示單位對應到 driver 操作；新增儀器接口不因此擴充 RunContext。這沿既有 C8 分層與 C9 無循環 contracts，experiment 使用 device，而非由 device 反向理解實驗。
 

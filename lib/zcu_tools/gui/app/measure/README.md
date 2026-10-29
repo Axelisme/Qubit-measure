@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure`
 
-**Last updated:** 2026-10-29, GLOBAL write-through 與 Inspect entry destination
+**Last updated:** 2026-10-29, GLOBAL startup restore 與 writeback destination
 
 **讀者：** framework-dev。量測 GUI 的組裝、分頁、tab admission 與 Run／Load／Save 分工。
 
@@ -243,7 +243,10 @@ The framework does not load lab environments or own script cache formats.
 
 The framework-owned [default script](default_startup.py) owns
 `measure-session.json` under `ctx.cache_root`. It attempts SoC, devices,
-entry/point, then tabs with input only when entry/point opened successfully.
+entry/point, then tabs with input. A saved point=None needs only a successful
+entry open, which selects Global. A saved point label must select successfully;
+failure skips tabs without falling back to Global. Entry-open failure also skips
+tabs.
 Each failure is logged; failed devices are remembered when possible, and skipped
 tabs are not retried after later source selection. Its on-close callback captures
 then-current state. Aliases are not in that cache. Opening an entry loads its
@@ -382,6 +385,9 @@ Entry New／Open 安裝 GLOBAL 參數、library、aliases 與 storage，不自�
 Run、WB 與 Inspect 編輯可直接使用 GLOBAL，不要求選 point。
 重新 Open 同 entry 回到 GLOBAL。Preview 與 Apply 的目的地是命令當下作用中的文件組。
 選了 point 時，Inspect 的 Entry template 只改 entry 文件，不改作用中 point 或既有 tab capture。
+Preview 的 destination_context 與 receipt destination 只報 entry_name、point，不含 kind。
+GLOBAL 的 point 為 null，POINT 為 label。未開 entry 仍可預覽合法 draft，兩個位置欄位與 current 都為 null；非空 Apply 仍以 no_context 拒絕。
+已提交 receipt 的 entry_name 必為字串。來源 capture 與 opaque actual_path 不變，preview 不鎖定 Apply 的目的地。
 Cfg/editor drafts 與 WB 候選 preview 保持各自的生命週期。
 
 `RecordWriteback` 只提出 adapter 組裝的 JSON object。

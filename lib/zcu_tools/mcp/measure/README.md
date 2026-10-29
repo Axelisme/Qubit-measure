@@ -1,6 +1,6 @@
 # `zcu_tools/mcp/measure/`
 
-**Last updated:** 2026-10-29
+**Last updated:** 2026-10-29，global files、point selection 與 writeback destination
 
 **讀者：** agent。量測 MCP 的啟動、表單、operation 與寫回契約。
 
@@ -39,7 +39,11 @@ creates its entry, first point and tab without a separate entry CLI or setup RPC
 作用中的 `parameters.yaml`、`library.yaml` 與 `aliases.yaml` 以磁碟檔案為權威。
 開 entry 後，未選 point 時使用 entry 層的 global 文件組，選 point 後整組換成該 point 的文件。
 選 point 時，Inspect 仍可編輯 entry 層文件，watcher 也繼續監看，但它們不列在 files。
-Agent 修改 global 前先切回 global，再取得 files 與 revision。既有資料先依[升級指南](../../../../docs/parameter-upgrades.md#先改檔名再升級內容)離線改名，runtime 不讀舊名。
+Agent 經 `rpc_call` 呼叫 `point.use`，params 傳 `{"label": null}` 切回 global，再取得 files 與 revision。
+label 必填，可為 point 字串或 null；省略為 invalid_params。回覆只含 `{entry_name, point}`，global 的 point 為 null，不含 kind。
+`point.new` 的 mode 預設 inherit，繼承 global 三檔；empty 只建最小有效 parameters，不建 library 或 aliases。
+clone 必須帶 clone_from，inherit 與 empty 禁止帶來源。GUI 與 `StartupSetup.use_global()` 使用相同選組規則。
+既有資料先依[升級指南](../../../../docs/parameter-upgrades.md#先改檔名再升級內容)離線改名，runtime 不讀舊名。
 GUI、writeback、recipe 與啟動腳本經 owner 寫入時，成功即落盤。
 Agent 直接讀寫這些檔案，固定工具不提供參數／modules／aliases 特化讀寫。
 `entry.info` 與 `context.reload` 是 RPC methods，經 `rpc_call` 呼叫，不另設固定工具。
@@ -50,7 +54,7 @@ Agent 直接讀寫這些檔案，固定工具不提供參數／modules／aliases
    Aliases 的 revision 是選取時觀察到的 bytes hash，不保證內容有效。
    壞 aliases 不擋參數與 library，使用 alias 時才報當次原錯。
    Library 或 aliases 尚無檔案時 revision 為 null，path 仍是預期的絕對位置。
-   缺 library 時內容為空，讀取不建檔，首次明確編輯才建檔。兩層規則相同。
+   缺 library 或 aliases 時內容為空，讀取不建檔，首次明確編輯才建檔。缺 parameters 仍是錯誤，兩層規則相同。
    開 entry 後 files 固定三筆，只列作用中那組，不加 scope。未開 entry 時 files 才是 []。
 2. 依 path 直接讀檔。外部候選尚未通過驗證時，磁碟內容可能與已安裝版本不同。
    Status 不讀檔，也不把未驗證候選當成現值。
@@ -67,7 +71,8 @@ Owner 驗證後才安裝，既有 Tab／Run capture 不變。
 GUI library 編輯或 writeback 首次觸及 library 時，owner 會在單檔交易內建立文件。
 若外部已先建檔，帶 null 的 library writer 回 `revision_mismatch`，不覆寫外部內容。
 `context.reload` 接受任一已安裝文件的絕對路徑，包括選 point 時的 entry 層文件。
-非作用中 entry 文件重載只更新 Inspect，不替換作用中的 point capture。
+非作用中 entry 文件重載只發布 file status，不推進作用中 content version 或改既有 capture。
+Inspect 對 entry 的明確寫入先更新 owner cache 與 revision，再發布非作用中通知，不冒充外部 reload。
 
 驗證失敗會回路徑與原因，owner 保留舊記憶體，不改磁碟候選。
 Revision 不符時重讀 files 與檔案，再決定是否修改，不自動覆寫或重試。
@@ -555,6 +560,10 @@ Recipe 的 captured 問答與這個當前 draft 工具不同。
 Recipe 只在 `accept_writeback(items)` 以已捕捉候選的 IDs 寫入當下 draft，
 回答本身不授權寫入。
 Destination.path 保留 owner actual_path，entry_name 與 point 只報 preview 當下位置。
+RPC preview 的 destination_context 與 receipt destination 只含 entry_name、point，不含 kind。
+Global 的 point 為 null；未開 entry 仍可預覽合法 draft，兩個位置欄位與 current 都為 null。
+已提交 receipt 的 entry_name 必為字串。Apply 重新選當下作用中文件組，未開 entry 的非空寫入以 no_context 拒絕。
+Recipe 型別與 execution 投影沿用這些欄位，固定來源與 opaque path 不變。
 元素 index／name 由 lab owner 明確提供，framework 不從 row offset 或 participants 猜 identity。
 Full 查詢保留原生候選與目的地，不把 preview 當成授權。
 
@@ -602,4 +611,4 @@ MCP server 結束時斷線並加入其 workers。它不關閉 GUI，也不保證
 
 `tests/mcp/measure/` 經 public tools/session 與 recording transport 驗證 recipe、分析、catalog、連線、holder admission 與 operation。GUI remote/service 測試驗證 socket 與 GUI-origin 路徑。離線選集只用 fake/mock，不啟動真儀器；fixture 與測試歸屬見 `tests/README.md`。
 
-Entry new/open 只建立或開啟 entry，不自選 point，也沒有參數環境。Agent 先明確呼叫 point.use 或 point.new，才能 Run、WB 或目前 point 的 Inspect writes；未選取時沿既有 failed precondition 拒絕。WB 的 Preview／Apply 使用命令當下 GUI 選定的 point；歷史 capture 只供提案求值，不決定目的地。空歷史環境本身不阻擋寫回。
+Entry new/open 安裝 GLOBAL 參數環境，不自選 point。GLOBAL 與 POINT 都可 Run、Analyze、Save、WB 與 Inspect 編輯，各項仍須通過自己的 holder、busy 與輸入檢查。WB 的 Preview 顯示當下作用中位置，Apply 重新取得作用中文件組；歷史 capture 只供提案求值，不決定目的地。空歷史環境本身不阻擋寫回。
