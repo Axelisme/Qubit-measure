@@ -54,6 +54,10 @@ Writeback resolves the Run's `$resonator.module.readout` slot to its library mod
 
 A batch applies Primary before Post and leaves the complete classifier. Separate Apply calls use the last replacement. Applying Primary after Post clears radius and matrix; apply Post again before a measurement that needs radius. Old point calibration values are not read or migrated. Re-run GE after this update.
 
+Changing readout settings does not clear or automatically invalidate the stored classifier.
+After a readout change, re-run GE and Post-Analysis, then Apply the new calibration before using classification.
+The proposal's settings comparison prevents writing new calibration to different settings; it does not check whether an existing classifier is still valid.
+
 ## Recommended
 
 Set Initial State to the predominant state after reset/init and before the probe pi-pulse.

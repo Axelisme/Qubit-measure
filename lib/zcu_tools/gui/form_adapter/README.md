@@ -141,6 +141,8 @@ form = Form(Group, {
 
 SweepCfg 生成 Range／Center × Expts／Step 四個 tagged branches，各自只保存 active 座標與 n 或 step。未指定初值的 fresh input 只選 Range + Expts，raw 為 `{"kind": "linrange"}`；start／stop／n 空白且必填。Range 的 None 端點與求值失敗的 Expr 初始端點保持未填且必填，缺少 input key 也不補 0／1。`gui.form_adapter.sweep` 擁有四種數值 model 與換算。指令掛在 sweep row，以共用 Form 的 readonly snapshot、局部 evaluate 與原子安裝執行，不由葉欄位修改 parent。Step 的有效端點與 floor count 由這些 model 的驗證產生，`to_cfg` 使用這份結果與原 step，不另算步長或截短。既有 SweepCfg 仍驗證單點與點數一致性。Memento 保存 FormInput，因此模式與新 expression 不依賴 Qt view，read／preview／result 不暗改原稿。
 
+普通 select 依一般 tagged-model union 的同名同型別 raw 繼承規則切換，不執行數值換算。例如 `{"kind": "linrange", "start": 10, "stop": 14, "n": 3}` 選成 center 後，raw 是 `{"kind": "center", "n": 3}`。Center／span 留空必填；切回 linrange 不會找回原 start／stop，必須重填。要保留同一數值區間，使用明確的座標換算 command，不用普通 select。
+
 完整的 sweep container logical edit 可以一次安裝 Range + Expts，不必讓舊 Center draft 可換算。Recipe 的完整 set_sweep 使用這條路徑；部分編輯仍只接受目前 active paths。
 
 Step 驗證保留 start 與 step，以 floor count 投影實際 stop／center／span。接近整數的商使用 1e-9 相對容差，不普遍 round。步長大於非零區間、零步長或方向錯誤保留錯誤草稿，不能縮成單點。Input 保存原稿，preview／result 提供有效端點，不回寫 input。不提供 explicit-list 分支。
