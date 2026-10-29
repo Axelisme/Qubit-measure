@@ -7,10 +7,18 @@ from threading import Event
 import numpy as np
 import pytest
 from zcu_tools.cfg_model import CircleClassifier, LinearClassifier
+from zcu_tools.core.simulation import (
+    ChannelStatistics,
+    RoundStatistics,
+    SamplingIdentity,
+)
 from zcu_tools.program.acquisition import StoppedPartialAcquireError
+from zcu_tools.program.herald import HeraldSpec, herald_ratio, heralded
 from zcu_tools.program.v2.modular import ModularProgramV2
 from zcu_tools.program.v2.modules.readout import PulseReadout, PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
+from zcu_tools.program.v2.simulation import IntegratedRound
+from zcu_tools.simulate.evolution import Cancelled
 
 
 def environment(**kwargs):
@@ -21,7 +29,7 @@ def environment(**kwargs):
     return importlib.import_module(name).white_noise(**kwargs)
 
 
-def program(env, *, reps=2, channels=(0,), samples=16):
+def program(env, *, reps=2, channels=(0,), samples=16, reads=1, sweep=None):
     return ModularProgramV2(
         env.soccfg,
         modules=[
@@ -33,10 +41,12 @@ def program(env, *, reps=2, channels=(0,), samples=16):
                 gain=0.1,
                 waveform=ConstWaveformCfg(length=0.1),
                 ro_length=env.soccfg.cycles2us(samples, ro_ch=ch),
-            ).build(f"readout_{ch}")
+            ).build(f"readout_{ch}_{read}")
+            for read in range(reads)
             for ch in channels
         ],
         reps=reps,
+        sweep=sweep,
     )
 
 
@@ -226,6 +236,134 @@ def test_mid_round_stop_discards_chunks_and_preserves_completed_rounds(cancel_ro
         env.devices.close_all_devices()
 
 
+def assert_herald_summary(value, completed):
+    """Check the worked weighted mean, including the completed zero-pass point."""
+    expected = (
+        [[[2 / 3, -2 / 3, 1 / 3], [0, 0, 0]]]
+        if completed == 1
+        else [[[4, -4, 0.5], [0, 0, 0]]]
+    )
+    assert value.shape == (1, 2, 3)
+    np.testing.assert_allclose(value, expected)
+    with np.errstate(all="raise"):
+        signal, fraction = herald_ratio(value)
+    np.testing.assert_array_equal(fraction, [1 / 3 if completed == 1 else 0.5, 0])
+    np.testing.assert_array_equal(signal[0, 0], [2, -2] if completed == 1 else [8, -8])
+    assert np.isnan(signal[0, 1]).all()
+
+
+@pytest.fixture
+def processed_environment():
+    env = environment(std_adc=0, seed=13)
+    try:
+        yield env
+    finally:
+        env.devices.close_all_devices()
+
+
+@pytest.mark.parametrize("cancel_at", [None, 0, 1, "hook"])
+def test_processed_herald_hooks_ratio_and_cancellation(
+    cancel_at, processed_environment
+):
+    env = processed_environment
+    prog = program(env, reps=3, reads=2, sweep=[("point", 2)])
+    length = prog.ro_chs[0]["length"]
+    literals = np.array(
+        [
+            [
+                [[[-1, 0], [2, -2]], [[1, 0], [90, -90]]],
+                [[[1, 0], [90, -90]], [[1, 0], [90, -90]]],
+                [[[1, 0], [90, -90]], [[1, 0], [90, -90]]],
+            ],
+            [
+                [[[-1, 0], [8, -8]], [[1, 0], [90, -90]]],
+                [[[-1, 0], [14, -14]], [[1, 0], [90, -90]]],
+                [[[1, 0], [90, -90]], [[1, 0], [90, -90]]],
+            ],
+        ],
+        dtype=np.int64,
+    )
+    stop = Event()
+    executed = []
+    materialized = []
+    hooks = []
+    requests = []
+    processor = heralded(
+        HeraldSpec(0, 0, LinearClassifier(angle=0.0, threshold=0.0), 2), np.copy
+    )
+
+    def execute(request):
+        executed.append(request.index)
+        requests.append(request.acquire)
+        if request.index == cancel_at:
+            stop.set()
+            raise Cancelled()
+
+        class Raw:
+            def materialize(self, reps, avg_level):
+                materialized.append(request.index)
+                return {0: literals[request.index].copy() * length}
+
+        summary = RoundStatistics(
+            np.full((2, 1), 3, dtype=np.int64),
+            (
+                ChannelStatistics(
+                    0, np.zeros((2, 2, 2)), np.zeros((2, 2, 1, 2)), np.zeros((2, 2))
+                ),
+            ),
+            SamplingIdentity(13, (request.acquire.sequence, request.index, 1)),
+        )
+        return IntegratedRound(summary, Raw())
+
+    def hook(count, data, flag):
+        hooks.append((count, [value.copy() for value in data]))
+        with pytest.raises(RuntimeError, match="active|reentr"):
+            prog.acquire_processed(env.soc, processors={0: processor}, progress=False)
+        if cancel_at == "hook":
+            flag.set()
+
+    env.soc.binding.execute = execute
+    if cancel_at == 0:
+        with pytest.raises(StoppedPartialAcquireError):
+            prog.acquire_processed(
+                env.soc,
+                processors={0: processor},
+                progress=False,
+                rounds=2,
+                cancel_flag=stop,
+                round_hook=hook,
+            )
+        assert hooks == []
+        assert prog.get_raw() is None
+        assert materialized == []
+        assert executed == [0]
+    else:
+        result = prog.acquire_processed(
+            env.soc,
+            processors={0: processor},
+            progress=False,
+            rounds=2,
+            cancel_flag=stop,
+            round_hook=hook,
+        )
+        assert result is not None
+        completed = 2 if cancel_at is None else 1
+        assert [count for count, _ in hooks] == list(range(1, completed + 1))
+        for count, values in hooks:
+            assert_herald_summary(values[0], count)
+        assert_herald_summary(result[0], completed)
+        np.testing.assert_array_equal(raw_of(prog)[0], literals[completed - 1] * length)
+        assert materialized == list(range(completed))
+        assert executed == ([0] if cancel_at == "hook" else [0, 1])
+        assert all(request is requests[0] for request in requests)
+    # Stop/failure and reentry must release admission for the next call.
+    stop.clear()
+    cancel_at = "hook"
+    retried = prog.acquire_processed(env.soc, processors={0: processor}, progress=False)
+    assert retried is not None
+    assert_herald_summary(retried[0], 1)
+
+
 def test_gaussian_sum_scaling_and_reproducible_independent_acquires():
     # 12000 independent quadratures: mean/std bounds exceed six sampling SEs.
     env = environment(std_adc=20, seed=41)
@@ -262,13 +400,20 @@ def test_decimated_companion_raw_uses_same_trace_and_adc_order():
         )
 
 
-@pytest.mark.parametrize("mode", ["acquire", "acquire_decimated"])
-def test_step_rounds_rejected_before_consuming_sequence(mode):
+@pytest.mark.parametrize(
+    "mode, options",
+    [
+        ("acquire", {}),
+        ("acquire_decimated", {}),
+        ("acquire_processed", {"processors": {0: np.copy}}),
+    ],
+)
+def test_step_rounds_rejected_before_consuming_sequence(mode, options):
     env = environment(seed=11)
     prog = program(env)
     with pytest.raises(ValueError, match="step_rounds"):
-        getattr(prog, mode)(env.soc, progress=False, step_rounds=True)
-    getattr(prog, mode)(env.soc, progress=False)
+        getattr(prog, mode)(env.soc, progress=False, step_rounds=True, **options)
+    getattr(prog, mode)(env.soc, progress=False, **options)
     assert env.soc.binding.last_request.sequence == 0
 
 

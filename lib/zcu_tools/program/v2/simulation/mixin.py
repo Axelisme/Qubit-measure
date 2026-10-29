@@ -108,7 +108,8 @@ class SimulationAcquireMixin(ImproveAcquireMixin):
         assert self.loop_dims is not None
         params = self.acquire_params
         self._simulation_needs_raw = (
-            self._herald_specs is not None
+            self._processors is not None
+            or self._herald_specs is not None
             or self._classify is not None
             or any(params.get(key) is not None for key in ("threshold", "trackers"))
         )

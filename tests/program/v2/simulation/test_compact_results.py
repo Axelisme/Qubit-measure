@@ -19,6 +19,7 @@ from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.program.v2.simulation import IntegratedRound
 
+from tests.program._acquisition_soc import AcquisitionSoc
 from tests.program.v2.simulation.support import FixedRawShots, raw_of, request_of
 
 
@@ -83,6 +84,74 @@ def statistics(request: RoundRequest) -> IntegratedRound:
         summary,
         FixedRawShots({ch.channel: ch.conditional_sums[..., 0, :] for ch in channels}),
     )
+
+
+def test_processed_materializes_retained_shots_matching_hardware(monkeypatch):
+    env = white_noise(std_adc=0, n_readouts=2, seed=19)
+    prog = make_program(env)
+    hardware = make_program(env)
+    soc = AcquisitionSoc(env.soccfg.get_cfg())
+    iq = np.arange(1, 25, dtype=np.float64).reshape(2, 3, 2, 2)
+    raw = {0: (iq * 8).astype(np.int64), 1: ((iq + 24) * 8).astype(np.int64)}
+    executed = []
+    materialized = []
+    received = []
+
+    class Raw:
+        def materialize(self, reps, avg_level):
+            materialized.append((reps, avg_level))
+            return {ch: value[None].copy() for ch, value in raw.items()}
+
+    def execute(request):
+        executed.append(request.index)
+        # Compact IQ totals intentionally disagree with the retained shots.
+        return replace(statistics(request), raw=Raw())
+
+    def payload(values):
+        received.append(values.copy())
+        return np.concatenate([values, values[..., :1] - values[..., 1:]], axis=-1)
+
+    processors = {0: lambda values: values[:, :1, :1], 1: payload}
+    env.soc.binding.execute = execute
+    monkeypatch.setattr(
+        soc,
+        "poll_data",
+        lambda: [(6, ([raw[ch].reshape(-1, 2) for ch in (1, 0)], {}))],
+    )
+    for ro in env.soccfg["readouts"]:
+        ro["iq_offset"] = 7.0
+    try:
+        expected = hardware.acquire_processed(
+            soc, processors=processors, progress=False, rounds=2
+        )
+        actual = prog.acquire_processed(
+            env.soc, processors=processors, progress=False, rounds=2
+        )
+        assert expected is not None and actual is not None
+        assert [value.shape for value in actual] == [(2, 2, 3, 3), (1, 2, 3, 1)]
+        for got, wanted in zip(actual, expected, strict=True):
+            np.testing.assert_array_equal(got, wanted)
+        np.testing.assert_array_equal(actual[1][0, ..., 0], [[1, 5, 9], [13, 17, 21]])
+        np.testing.assert_array_equal(
+            actual[0][0, 0], [[25, 26, -1], [29, 30, -1], [33, 34, -1]]
+        )
+        assert len(received) == 4
+        for values in received:
+            assert values.dtype == np.float64
+            np.testing.assert_array_equal(values, (iq + 24).reshape(6, 2, 2))
+        for values, ch in zip(raw_of(prog), (1, 0), strict=True):
+            assert values.dtype == np.int64
+            np.testing.assert_array_equal(values, raw[ch][None])
+        raw_of(prog)
+        assert executed == [0, 1]
+        assert materialized == [(1, 0), (1, 0)]
+        # An ordinary call still uses the independent compact IQ summary.
+        ordinary = prog.acquire(env.soc, progress=False, remove_offset=False)
+        np.testing.assert_array_equal(ordinary[0][0, 0, 0], [10, -1])
+        assert executed == [0, 1, 0]
+        assert materialized == [(1, 0), (1, 0)]
+    finally:
+        env.devices.close_all_devices()
 
 
 @pytest.mark.parametrize("processing", ["iq", "classify", "threshold"])
