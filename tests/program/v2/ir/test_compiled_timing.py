@@ -307,6 +307,71 @@ def test_native_absolute_unknown_time_sources_are_not_zero(value, message):
         ir.analyze_timing(compile_absolute_time(value))
 
 
+def compile_immediate_flags(operand: str, initial: int, literal: int, condition: str):
+    class Program(MyProgramV2):
+        def _initialize(self, cfg):
+            self.add_reg("value", addr=10)
+            self.write_reg("value", initial)
+
+        def _body(self, cfg):
+            self.meta_macro("TIMING_BOUNDARY", "body_start")
+            self.asm_inst(
+                {
+                    "CMD": "REG_WR",
+                    "DST": "r10",
+                    "SRC": "imm",
+                    "LIT": f"#{literal}",
+                    "OP": operand,
+                    "UF": "1",
+                }
+            )
+            self.asm_inst({"CMD": "JUMP", "LABEL": "selected", "IF": condition})
+            self.delay(7 / 430.08)
+            self.label("selected")
+            self.asm_inst({"CMD": "TIME", "C_OP": "inc_ref", "R1": "r10"})
+            self.asm_inst({"CMD": "TRIG", "DST": "2", "SRC": "set", "TIME": "@3"})
+            self.meta_macro("TIMING_BOUNDARY", "body_end")
+
+    prog = Program(make_mock_soccfg(), initial_delay=0, relax_delay=0)
+    return ir.CompiledTimingInput(
+        prog.prog_list, prog.labels, ir.TimingLayout.from_metadata(prog.meta_infos)
+    )
+
+
+@pytest.mark.parametrize(
+    "operand,initial,literal,condition,end",
+    [
+        ("s0", 9, 5, "Z", 5),
+        ("r10", 0, 5, "Z", 5),
+        ("r10", -3, 5, "S", 5),
+        ("r10", 9, 0, "NZ", 0),
+        ("r10", 9, 5, "Z", 12),
+    ],
+)
+def test_immediate_write_uses_prewrite_alu_flags_and_literal_destination(
+    operand, initial, literal, condition, end
+):
+    result = ir.analyze_timing(
+        compile_immediate_flags(operand, initial, literal, condition)
+    )
+    (shot,) = result.shots
+    # The ALU reads the old operand, independently of literal writeback.
+    # A taken branch skips seven cycles; reference then adds the new literal.
+    assert (shot.start_cycle, shot.body_end_cycle, shot.end_cycle) == (0, end, end)
+    assert [(e.kind, e.cycle) for e in shot.events] == [("trigger", end + 3)]
+
+
+@pytest.mark.parametrize(
+    "operand,message",
+    [("s11", "s11.*s_usr_time"), ("r20", "Unknown condition flags")],
+)
+def test_immediate_flag_alu_rejects_hardware_or_unknown_branch_sources(
+    operand, message
+):
+    with pytest.raises(ValueError, match=message):
+        ir.analyze_timing(compile_immediate_flags(operand, 0, 5, "Z"))
+
+
 class TriggerProgram(MyProgramV2):
     def _body(self, cfg):
         self.meta_macro("TIMING_BOUNDARY", "body_start")

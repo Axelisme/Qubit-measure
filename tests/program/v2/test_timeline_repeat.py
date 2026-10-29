@@ -3,10 +3,12 @@
 from collections.abc import Callable
 
 import pytest
-from qick.asm_v2 import Macro, QickSweep1D, WriteReg
-from zcu_tools.program.v2 import ir
+from qick.asm_v2 import Macro, Pulse, QickSweep1D, WriteReg
 from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 from zcu_tools.program.v2.timeline import TimelineProgramV2
+
+from tests.program.v2.timing_support import shots as _shots
+from tests.program.v2.timing_support import waves as _waves
 
 
 def _program(
@@ -59,18 +61,6 @@ def _register_initialize(prog: TimelineProgramV2, value: int = 3):
         gain=0.5,
         length=5 / 384,
     )  # Five generator ticks take 5.6 tProc cycles, ceiled to six.
-
-
-def _shots(prog: TimelineProgramV2):
-    return ir.analyze_timing(
-        ir.CompiledTimingInput(
-            prog.prog_list, prog.labels, prog.timing_layout, dmem=prog.compile_datamem()
-        )
-    ).shots
-
-
-def _waves(shot: ir.ShotTiming):
-    return [e.cycle - shot.start_cycle for e in shot.events if e.kind == "wave"]
 
 
 @pytest.mark.parametrize("parent", ["default", "drive"])
@@ -691,6 +681,200 @@ def test_nested_native_pulse_tails_survive_both_repeat_boundaries():
     (shot,) = _shots(_program(body))
     assert _waves(shot) == [0, 10, 20, 30]
     assert (shot.body_end_cycle, shot.end_cycle) == (40, 58)
+
+
+@pytest.mark.parametrize(
+    "count,hint", [(2, None), ("count", (0, 2)), ("count", (2, 2))]
+)
+@pytest.mark.parametrize("native_prefix", [False, True])
+def test_repeat_rejects_managed_pulse_overlap_across_backedge(
+    count, hint, native_prefix
+):
+    def initialize(prog):
+        _register_initialize(prog, 2)
+
+    def body(prog):
+        with prog.repeat("r", count, range_hint=hint):
+            if native_prefix:
+                prog.pulse(0, "p0")
+                prog.delay_timeline(28 / 430.08)
+            prog.pulse(0, "p0", timeline="default")
+            prog.pulse(0, "p0", t=(56 if native_prefix else 28) / 430.08)
+
+    with pytest.raises(ValueError, match="channel 0.*overlap"):
+        _program(body, initialize)
+
+
+@pytest.mark.parametrize("outer,inner", [(2, 1), (1, 2), (2, 2)])
+def test_nested_repeat_rejects_managed_pulse_overlap_at_either_backedge(outer, inner):
+    def body(prog):
+        with prog.repeat("outer", outer), prog.repeat("inner", inner):
+            prog.pulse(0, "p0", timeline="default")
+            prog.pulse(0, "p0", t=28 / 430.08)
+
+    with pytest.raises(ValueError, match="channel 0.*overlap"):
+        _program(body)
+
+
+@pytest.mark.parametrize("count,hint", [(0, None), (1, None), ("count", (0, 1))])
+def test_repeat_without_backedge_allows_native_tail_after_managed_pulse(count, hint):
+    def initialize(prog):
+        _register_initialize(prog, 1)
+
+    def body(prog):
+        with prog.repeat("r", count, range_hint=hint):
+            prog.pulse(0, "p0", timeline="default")
+            prog.pulse(0, "p0", t=28 / 430.08)
+
+    (shot,) = _shots(_program(body, initialize))
+    assert _waves(shot) == ([] if count == 0 else [0, 28])
+    assert (shot.body_end_cycle, shot.end_cycle) == ((0, 0) if count == 0 else (28, 56))
+
+
+@pytest.mark.parametrize("register", [False, True])
+def test_repeat_allows_managed_pulse_touching_previous_native_tail(register):
+    def initialize(prog):
+        _register_initialize(prog, 2)
+
+    def body(prog):
+        with prog.repeat(
+            "r", "count" if register else 2, range_hint=(0, 2) if register else None
+        ):
+            prog.pulse(0, "p0", timeline="default")
+            prog.pulse(0, "p0", t=28 / 430.08)
+            prog.delay_timeline(28 / 430.08)
+
+    (shot,) = _shots(_program(body, initialize))
+    assert _waves(shot) == [0, 28, 56, 84]
+    assert (shot.body_end_cycle, shot.end_cycle) == (112, 112)
+
+
+@pytest.mark.parametrize("actual", [0, 1, 2, 3, 4])
+def test_nested_register_range_preserves_legal_interior_counts(actual):
+    def initialize(prog):
+        _register_initialize(prog, actual)
+
+    def body(prog):
+        with prog.repeat("outer", 2), prog.repeat("inner", "count", range_hint=(0, 4)):
+            prog.pulse(0, "p0")
+            prog.delay_timeline(28 / 430.08)
+            prog.pulse(0, "p0", timeline="default")
+
+    (shot,) = _shots(_program(body, initialize))
+    expected = [t for i in range(2 * actual) for t in (56 * i, 56 * i + 28)]
+    assert _waves(shot) == expected
+    assert (shot.body_end_cycle, shot.end_cycle) == (112 * actual,) * 2
+
+
+@pytest.mark.parametrize("register", [False, True])
+@pytest.mark.parametrize("safe", [False, True])
+def test_repeat_guard_proves_swept_native_prefix_at_every_scan_point(register, safe):
+    def initialize(prog):
+        _register_initialize(prog, 2)
+        prog.add_loop("scan", 3)
+
+    def body(prog):
+        with (
+            prog.repeat("outer", 2),
+            prog.repeat(
+                "inner",
+                "count" if register else 2,
+                range_hint=(1, 3) if register else None,
+            ),
+        ):
+            prog.pulse(0, "p0")
+            prog.delay_timeline(QickSweep1D("scan", 28 / 430.08, 38 / 430.08))
+            prog.pulse(0, "p0", timeline="default")
+            prog.pulse(0, "p0", t=QickSweep1D("scan", 56 / 430.08, 66 / 430.08))
+            if safe:
+                prog.delay_timeline(28 / 430.08)
+
+    if not safe:
+        with pytest.raises(ValueError, match="channel 0.*overlap"):
+            _program(body, initialize)
+        return
+    shots = _shots(_program(body, initialize))
+    assert [_waves(s) for s in shots] == [
+        [0, 28, 56, 84, 112, 140, 168, 196, 224, 252, 280, 308],
+        [0, 33, 61, 89, 122, 150, 178, 211, 239, 267, 300, 328],
+        [0, 38, 66, 94, 132, 160, 188, 226, 254, 282, 320, 348],
+    ]
+    assert [s.body_end_cycle - s.start_cycle for s in shots] == [336, 356, 376]
+    assert [s.end_cycle - s.start_cycle for s in shots] == [336, 356, 376]
+
+
+@pytest.mark.parametrize("register", [False, True])
+def test_nested_native_sweep_can_cross_timestamp_floor_without_losing_managed_guard(
+    register,
+):
+    def initialize(prog):
+        _register_initialize(prog, 2)
+        prog.add_loop("scan", 3)
+
+    def body(prog):
+        with prog.repeat("outer", 2):
+            with prog.repeat(
+                "inner",
+                "count" if register else 2,
+                range_hint=(1, 3) if register else None,
+            ):
+                prog.pulse(0, "p0")
+                prog.delay_timeline(QickSweep1D("scan", 20 / 430.08, 40 / 430.08))
+            prog.pulse(0, "p0", t=30 / 430.08, timeline="default")
+
+    shots = _shots(_program(body, initialize))
+    # Inner iterations advance20/30/40; managed start is ref +30, length28.
+    assert [_waves(s) for s in shots] == [
+        [0, 20, 70, 98, 118, 168],
+        [0, 30, 90, 118, 148, 208],
+        [0, 40, 110, 138, 178, 248],
+    ]
+    assert [s.body_end_cycle - s.start_cycle for s in shots] == [196, 236, 276]
+    assert [s.end_cycle - s.start_cycle for s in shots] == [196, 236, 276]
+
+
+@pytest.mark.parametrize("native", ["macro", "runtime-words", "auto"])
+def test_repeat_guard_observes_native_pulse_entrypoints(native):
+    def body(prog):
+        with prog.repeat("r", 2):
+            prog.pulse(0, "p0", timeline="default")
+            if native == "macro":
+                prog.append_macro(Pulse(ch=0, name="p0", t=28 / 430.08))
+            elif native == "runtime-words":
+                prog.pulse_from_regs(0, "p0", gain_reg="count", t=28 / 430.08)
+            else:
+                prog.pulse(0, "p0", t="auto")
+
+    with pytest.raises(ValueError, match="channel 0.*overlap"):
+        _program(body, _register_initialize)
+
+
+def test_repeat_guard_protects_module_emission_after_native_tail():
+    from zcu_tools.program.v2.modules import Pulse as ModulePulse
+    from zcu_tools.program.v2.modules import PulseCfg
+    from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
+
+    pulse = ModulePulse(
+        "managed",
+        PulseCfg(
+            ch=0,
+            nqz=1,
+            freq=1000,
+            gain=0.5,
+            waveform=ConstWaveformCfg(length=25 / 384),
+        ),
+    )
+
+    def initialize(prog):
+        prog.declare(pulse)
+
+    def body(prog):
+        with prog.repeat("r", 2):
+            prog.emit(pulse)
+            prog.pulse(0, "p0", t=28 / 430.08)
+
+    with pytest.raises(ValueError, match="channel 0.*overlap"):
+        _program(body, initialize)
 
 
 def test_repeat_cannot_shadow_an_existing_external_name():

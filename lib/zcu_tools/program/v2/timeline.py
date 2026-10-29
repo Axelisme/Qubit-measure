@@ -95,6 +95,99 @@ def _repeat_minimum(name: str, n: int | str, range_hint: tuple[int, int] | None)
     return n
 
 
+def _guard_candidates(values: tuple[float | QickParam, ...]):
+    """Keep the pointwise maximum envelope without choosing crossing sweeps."""
+    result: list[float | QickParam] = []
+    for value in values:
+        if any(_bounds(old - value)[0] >= -1e-12 for old in result):
+            continue
+        result = [old for old in result if _bounds(value - old)[0] < -1e-12]
+        result.append(value)
+    return tuple(result)
+
+
+@dataclass
+class _PulseGuard:
+    """Validation-only timestamp transfer and managed-pulse entry limits.
+
+    F(x) = max(x + shifts, floors). Multiple candidates retain crossing sweep
+    envelopes exactly, rather than choosing one sweep endpoint for every point.
+    Every limit requires the entry timestamp x <= limit. No scheduling state is
+    changed here; native Pulse still owns timestamp updates.
+    """
+
+    channel: int
+    shifts: tuple[float | QickParam, ...] = (0.0,)
+    floors: tuple[float | QickParam, ...] = ()
+    limits: tuple[float | QickParam, ...] = ()
+
+    def require(self, ends, limits) -> None:
+        for end in ends:
+            for limit in limits:
+                if _bounds(limit - end)[0] < -1e-12:
+                    raise ValueError(
+                        f"repeat: channel {self.channel} pulse overlap; cannot prove "
+                        "start >= previous end at every sweep point; use delay_timeline"
+                    )
+
+    def then(self, other: "_PulseGuard") -> None:
+        """Compose a following transfer, pulling its guards back to our entry."""
+        self.require(self.floors, other.limits)
+        limits = self.limits + tuple(
+            limit - shift for limit in other.limits for shift in self.shifts
+        )
+        self.limits = tuple(-v for v in _guard_candidates(tuple(-v for v in limits)))
+        self.floors = _guard_candidates(
+            other.floors
+            + tuple(end + shift for end in self.floors for shift in other.shifts)
+        )
+        self.shifts = _guard_candidates(
+            tuple(a + b for a in self.shifts for b in other.shifts)
+        )
+
+    def repeated(self, minimum: int, maximum: int) -> "_PulseGuard":
+        """Compose every possible count without unrolling iterations.
+
+        F^n(x) has shifts n*a and floors b + max(0, (n-1)*a).
+        Guards at entries k=0..maximum-1 need x+k*a <= limit;
+        their constant floors need b+max(0, (maximum-2)*a) <= limit.
+        Each expression is affine in k, so its endpoints cover all interior
+        integer counts at each sweep point, even when candidate sweeps cross.
+        """
+        if maximum == 0:
+            return _PulseGuard(self.channel)
+        if maximum >= 2:
+            self.require(
+                self.floors
+                + tuple(
+                    end + (maximum - 2) * shift
+                    for end in self.floors
+                    for shift in self.shifts
+                ),
+                self.limits,
+            )
+        limits = self.limits + tuple(
+            limit - (maximum - 1) * shift
+            for limit in self.limits
+            for shift in self.shifts
+        )
+        return _PulseGuard(
+            self.channel,
+            _guard_candidates(
+                tuple(n * a for n in (minimum, maximum) for a in self.shifts)
+            ),
+            _guard_candidates(
+                self.floors
+                + tuple(
+                    end + (maximum - 1) * shift
+                    for end in self.floors
+                    for shift in self.shifts
+                )
+            ),
+            tuple(-v for v in _guard_candidates(tuple(-v for v in limits))),
+        )
+
+
 @dataclass
 class _RepeatFrame:
     parent: str
@@ -106,6 +199,7 @@ class _RepeatFrame:
     variable: bool = False
     written_gens: set[int] = field(default_factory=set)
     written_ros: set[int] = field(default_factory=set)
+    pulse_guards: dict[int, _PulseGuard] = field(default_factory=dict)
 
     def rebase_native(self, prog, count: int) -> None:
         """Debit external timestamps, preserving tails generated in the last iteration."""
@@ -145,11 +239,15 @@ class _TimelineBook:
             )
         return self.ends[name]
 
-    def decrement(self, t: float | QickParam) -> None:
+    def decrement(self, t: float | QickParam, *, observe_pulses: bool = True) -> None:
         if self.native_only:
             return
         if self.repeats:
-            self.repeats[-1].advance += t
+            frame = self.repeats[-1]
+            frame.advance += t
+            if observe_pulses:
+                for ch, guard in frame.pulse_guards.items():
+                    guard.then(_PulseGuard(ch, shifts=(-t,), floors=(0.0,)))
         self.ends = {
             name: _maximum(0.0, end - t, name) for name, end in self.ends.items()
         }
@@ -337,6 +435,7 @@ class _RepeatEnter(_Sync):
                 self.book.waiting.copy(),
                 {ch: prog.get_timestamp(gen_ch=ch) for ch in prog.gen_chs},
                 {ch: prog.get_timestamp(ro_ch=ch) for ch in prog.ro_chs},
+                pulse_guards={ch: _PulseGuard(ch) for ch in prog.gen_chs},
             )
         )
         self.book.ends = {parent: 0.0}
@@ -346,14 +445,22 @@ class _RepeatEnter(_Sync):
 class _RepeatExit(_Sync):
     """Close one iteration, then rebase the outer namespace by all iterations."""
 
-    def __init__(self, book: _TimelineBook, count: int, *, variable: bool = False):
+    def __init__(
+        self, book: _TimelineBook, count: int, maximum: int, *, variable: bool = False
+    ):
         super().__init__(book, None)
         self.count = count
+        self.maximum = maximum
         self.variable = variable
 
     def preprocess(self, prog) -> None:
         super().preprocess(prog)
         frame = self.book.repeats.pop()
+        for ch, guard in frame.pulse_guards.items():
+            repeated = guard.repeated(self.count, self.maximum)
+            repeated.require((frame.native_gens[ch],), repeated.limits)
+            if self.book.repeats:
+                self.book.repeats[-1].pulse_guards[ch].then(repeated)
         variable = self.variable or frame.variable
         if variable and _bounds(frame.advance)[0] < -1e-12:
             raise ValueError(
@@ -371,7 +478,8 @@ class _RepeatExit(_Sync):
             self.book.repeats[-1].written_ros.update(frame.written_ros)
         self.book.ends = frame.external
         self.book.waiting = frame.waiting
-        self.book.decrement(frame.advance * self.count)
+        # Pulse summaries already include every inner iteration's debit.
+        self.book.decrement(frame.advance * self.count, observe_pulses=False)
         if variable:
             self.book.waiting.update(
                 name for name, end in self.book.ends.items() if _bounds(end)[1] > 1e-12
@@ -381,12 +489,53 @@ class _RepeatExit(_Sync):
         self.book.ends[frame.parent] = 0.0
 
 
-class _PlacedPulse(Pulse):
-    def __init__(self, book: _TimelineBook, timeline: str, source: Pulse):
-        super().__init__(ch=source.ch, name=source.name, tag=source.tag)
+class _ObservedPulse(Pulse):
+    """Delegate native pulse behavior, observing only its public timing inputs."""
+
+    def __init__(self, book: _TimelineBook, source: Pulse):
+        # Directly constructed QICK Pulse macros may omit the optional tag.
+        super().__init__(
+            ch=source.ch, name=source.name, tag=getattr(source, "tag", None)
+        )
         self.book = book
-        self.timeline = timeline
         self.source = source
+
+    def record(self, prog, t, limit: float | QickParam | None = None) -> None:
+        if self.book.repeats:
+            length = prog.pulses[self.name].get_length()
+            self.book.repeats[-1].pulse_guards[self.ch].then(
+                _PulseGuard(
+                    self.ch, (length,), (t + length,), () if limit is None else (limit,)
+                )
+            )
+
+    def preprocess(self, prog) -> None:
+        # Auto is resolved once during preprocess. Repeated instructions retain
+        # that scheduled time; the validation must not reschedule their outputs.
+        t = (
+            prog.get_timestamp(gen_ch=self.ch)
+            if self.source.t == "auto"
+            else self.source.t
+        )
+        self.source.preprocess(prog)
+        self.record(prog, t)
+
+    def translate(self, prog) -> None:
+        self.source.translate(prog)
+
+    def get_time_param(self, name: str) -> QickParam:
+        return self.source.get_time_param(name)
+
+    def list_time_params(self) -> list[str]:
+        return self.source.list_time_params()
+
+
+class _PlacedPulse(_ObservedPulse):
+    def __init__(self, book: _TimelineBook, timeline: str, source: Pulse):
+        if isinstance(source, _ObservedPulse):
+            source = source.source
+        super().__init__(book, source)
+        self.timeline = timeline
         self.relative_t: float | QickParam | Literal["auto"] = source.t
 
     def preprocess(self, prog) -> None:
@@ -404,18 +553,10 @@ class _PlacedPulse(Pulse):
                 f"{self.timeline}: channel {self.ch} pulse overlap; cannot prove "
                 "start >= previous end at every sweep point; use delay_timeline"
             )
+        self.record(prog, t, actual_t)
         self.book.ends[self.timeline] = _align_end(
             prog, actual_t + prog.pulses[self.name].get_length()
         )
-
-    def translate(self, prog) -> None:
-        self.source.translate(prog)
-
-    def get_time_param(self, name: str) -> QickParam:
-        return self.source.get_time_param(name)
-
-    def list_time_params(self) -> list[str]:
-        return self.source.list_time_params()
 
 
 class _PlacedConfig(ConfigReadout):
@@ -526,6 +667,17 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         self._declaring = False
         self._building_body = False
         super().__init__(*args, **kwargs)
+
+    def append_macro(self, macro: Macro) -> None:
+        """Append a native macro, retaining its behavior and repeat pulse validation.
+
+        Pulse subclasses are observed through their public preprocess timing
+        inputs, including pulses supplied directly rather than through pulse().
+        Other macros pass through unchanged.
+        """
+        if isinstance(macro, Pulse) and not isinstance(macro, _ObservedPulse):
+            macro = _ObservedPulse(self._timeline_book, macro)
+        super().append_macro(macro)
 
     def make_program(self) -> None:
         """Build the QICK shell with linked body markers and all-timeline closure.
@@ -751,7 +903,12 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
             yield
         finally:
             self.append_macro(
-                _RepeatExit(self._timeline_book, minimum, variable=variable)
+                _RepeatExit(
+                    self._timeline_book,
+                    minimum,
+                    range_hint[1] if range_hint is not None else minimum,
+                    variable=variable,
+                )
             )
             if isinstance(n, str):
                 self.close_inner_loop(name, name, n)

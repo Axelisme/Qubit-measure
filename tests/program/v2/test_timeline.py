@@ -4,9 +4,11 @@ from collections.abc import Callable
 
 import pytest
 from qick.asm_v2 import QickSweep1D
-from zcu_tools.program.v2 import ir
 from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 from zcu_tools.program.v2.timeline import TimelineProgramV2
+
+from tests.program.v2.timing_support import shots as _shots
+from tests.program.v2.timing_support import waves as _waves
 
 
 def _program(
@@ -38,18 +40,6 @@ def _program(
     return Program(
         make_mock_soccfg(2, 1), reps=reps, initial_delay=0, relax_delay=relax_delay
     )
-
-
-def _shots(prog):
-    return ir.analyze_timing(
-        ir.CompiledTimingInput(
-            prog.prog_list, prog.labels, prog.timing_layout, dmem=prog.compile_datamem()
-        )
-    ).shots
-
-
-def _waves(shot):
-    return [e.cycle - shot.start_cycle for e in shot.events if e.kind == "wave"]
 
 
 @pytest.mark.parametrize("timeline", ["default", "drive"])

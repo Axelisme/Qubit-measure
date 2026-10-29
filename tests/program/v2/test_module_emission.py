@@ -4,7 +4,6 @@ from collections.abc import Callable, Sequence
 
 import pytest
 from qick.asm_v2 import Macro, QickParam, QickSweep1D, WriteReg
-from zcu_tools.program.v2 import ir
 from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 from zcu_tools.program.v2.modules import Module, Pulse, PulseCfg
 from zcu_tools.program.v2.modules.delay import Delay, DelayAuto, SoftDelay
@@ -16,6 +15,9 @@ from zcu_tools.program.v2.modules.reset import (
 )
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.program.v2.timeline import TimelineProgramV2
+
+from tests.program.v2.timing_support import shots as _shots
+from tests.program.v2.timing_support import waves as _waves
 
 
 def _pulse(name="drive", *, ch=0, length: float | QickParam = 0.1, **kwargs):
@@ -52,18 +54,6 @@ def _program(
                 body(self)
 
     return Program(make_mock_soccfg(3, 1), reps=2, initial_delay=0, relax_delay=0)
-
-
-def _shots(prog):
-    return ir.analyze_timing(
-        ir.CompiledTimingInput(
-            prog.prog_list, prog.labels, prog.timing_layout, dmem=prog.compile_datamem()
-        )
-    ).shots
-
-
-def _waves(shot):
-    return [e.cycle - shot.start_cycle for e in shot.events if e.kind == "wave"]
 
 
 @pytest.mark.parametrize("timeline", [None, "drive"])
