@@ -120,7 +120,7 @@ class HeraldingLenRabiExp(Experiment[HeraldingLenRabiResult, HeraldingLenRabiCfg
         """Acquire accepted mean IQ and pass fraction versus drive length in us.
 
         Sequence: optional reset, ground herald, optional initialization, drive,
-        terminal readout. Reuse one pulse-readout instance for both emissions.
+        terminal readout. Herald and signal instances share cfg.readout.
         Const/flat-top use a hardware sweep; other editable waveforms use a
         round-major host scan with a cached program per length. Arb is rejected.
         Acquisition owns classification and within-call count weighting. Host
@@ -158,21 +158,21 @@ class HeraldingLenRabiExp(Experiment[HeraldingLenRabiResult, HeraldingLenRabiCfg
             if hardware_sweep:
                 # Reset -> herald -> optional init -> swept drive -> signal.
                 cfg.qub_pulse.set_param("length", sweep2param("length", cfg.length))
-                readout = PulseReadout("readout", cfg.readout)
+                herald_readout = PulseReadout("herald", cfg.readout)
                 prog = ModularProgramV2(
                     soccfg,
                     modules=[
                         Reset("reset", cfg.reset),
-                        readout,
+                        herald_readout,
                         Pulse("init_pulse", cfg.init_pulse),
                         Pulse("qubit_pulse", cfg.qub_pulse),
-                        readout,
+                        PulseReadout("signal", cfg.readout),
                     ],
                     sweep=[("length", cfg.length)],
                     reps=cfg.reps,
                     relax_delay=cfg.relax_delay,
                 )
-                herald = readout.herald_spec(prog, occurrence=0)
+                herald = herald_readout.herald_spec(prog, occurrence=0)
                 try:
                     sched.prog_builder(soc, soccfg).run_program(
                         prog,
@@ -195,22 +195,22 @@ class HeraldingLenRabiExp(Experiment[HeraldingLenRabiResult, HeraldingLenRabiCfg
                         length = float(lengths[index])
                         if length not in programs:
                             step.cfg.qub_pulse.set_param("length", length)
-                            readout = PulseReadout("readout", step.cfg.readout)
+                            herald_readout = PulseReadout("herald", step.cfg.readout)
                             prog = ModularProgramV2(
                                 soccfg,
                                 modules=[
                                     Reset("reset", step.cfg.reset),
-                                    readout,
+                                    herald_readout,
                                     Pulse("init_pulse", step.cfg.init_pulse),
                                     Pulse("qubit_pulse", step.cfg.qub_pulse),
-                                    readout,
+                                    PulseReadout("signal", step.cfg.readout),
                                 ],
                                 reps=step.cfg.reps,
                                 relax_delay=step.cfg.relax_delay,
                             )
                             programs[length] = (
                                 prog,
-                                readout.herald_spec(prog, occurrence=0),
+                                herald_readout.herald_spec(prog, occurrence=0),
                             )
                         prog, herald = programs[length]
                         try:

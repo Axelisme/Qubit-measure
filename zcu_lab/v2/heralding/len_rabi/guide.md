@@ -12,7 +12,7 @@ Set Duration Start/Stop in us, Expts, Reps, Rounds and Relax delay. Select optio
 
 ## Run and inspect
 
-The sequence is optional reset → ground herald → optional initialization → length-swept drive → terminal readout. Both reads use the same pulse-readout instance and settings. The host retains only signal shots accepted by the herald classifier. This is post-selection, not active reset or joint heralding.
+The sequence is optional reset → ground herald → optional initialization → length-swept drive → terminal readout. Separate herald and signal pulse-readout instances share the same settings and classifier. The host retains only signal shots accepted by the herald classifier. This is post-selection, not active reset or joint heralding.
 
 Run displays the selected mean IQ projected onto a real trace. Reps counts attempted shots per length and round, not accepted shots. Across rounds, means are weighted by accepted counts. For host scans, zero-pass rounds contribute no weighted signal. Early-stop SNR is checked after a complete curve. Acquire retry retains the ordinary length-Rabi retry policy.
 
