@@ -161,6 +161,61 @@ def test_module_join_emits_parallel_sequences_while_program_join_only_merges_end
     assert [waves(s) for s in shots(emitted)] == expected_waves
 
 
+@pytest.mark.parametrize("nested", [False, True])
+@pytest.mark.parametrize("timeline", [None, "parallel"])
+def test_module_join_exposes_first_child_timing_for_each_occurrence(nested, timeline):
+    first = _pulse("first", 0, pre=7 / 430.08)
+    other = _pulse("other", 1, 50, pre=17 / 430.08)
+    joined = Join(None, [first, first], other)
+    if nested:
+        joined = Join(None, joined, _pulse("third", 2))
+
+    def body(prog):
+        if timeline is not None:
+            prog.fork("default", into=timeline)
+        prog.emit(joined, timeline=timeline, tag="first")
+        prog.emit(joined, timeline=timeline, tag="second")
+
+    prog = _program([joined], body, selector=None)
+    for _ in range(2):
+        # First sequence ends at 2*(7+28)=70, sibling at 17+56=73.
+        # The next occurrence starts at73, so its first event is at80.
+        assert prog.list_time_params("first") == ["t"]
+        assert prog.list_time_params("second") == ["t"]
+        assert prog.get_time_param("first", "t") * 430.08 == pytest.approx(7)
+        assert prog.get_time_param("second", "t") * 430.08 == pytest.approx(80)
+        prog.compile()
+
+
+@pytest.mark.parametrize("nested", [False, True])
+def test_module_join_tag_stays_with_author_first_child_after_exchange(nested):
+    first = _pulse("first", 0, pre=7 / 430.08)
+    scan = ScanWith("inner", [7, 9], "value").add_content(_pulse("scan_pulse", 0))
+    other = _pulse("other", 1, 50, pre=17 / 430.08)
+    advancing = Join([first, scan]) if nested else [first, scan]
+    joined = Join(advancing, other)
+
+    def body(prog):
+        prog.emit(joined, tag="first")
+        prog.delay_timeline(11 / 430.08)
+        prog.emit(joined, tag="second")
+
+    prog = _program([joined], body, selector=None)
+    for _ in range(2):
+        # Sibling emits first at17 but the tag belongs to the author-first
+        # pulse at7. Scan entry syncs at35; two28-cycle iterations end at91.
+        # The next emission starts11 cycles after that reference, at102.
+        assert prog.list_time_params("first") == ["t"]
+        assert prog.list_time_params("second") == ["t"]
+        assert prog.get_time_param("first", "t") * 430.08 == pytest.approx(7)
+        assert prog.get_time_param("second", "t") * 430.08 == pytest.approx(18)
+        assert [waves(s) for s in shots(prog)] == [
+            [17, 7, 35, 63, 119, 109, 137, 165]
+        ] * 2
+        assert [s.body_end_cycle - s.start_cycle for s in shots(prog)] == [193] * 2
+        prog.compile()
+
+
 def _table_pulse(
     name: str,
     ch: int,

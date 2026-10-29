@@ -10,8 +10,10 @@ from qick.asm_v2 import (
     IncReg,
     Macro,
     Pulse,
+    QickParam,
     QickProgramV2,
     ReadDmem,
+    TimedMacro,
     Trigger,
     WriteReg,
 )
@@ -134,7 +136,7 @@ def _unknown_control_write(macro: Macro) -> bool:
     return any(QickProgramV2.REG_ALIASES.get(name, name) in unknown for name in names)
 
 
-class TimelineParallel(Macro):
+class TimelineParallel(TimedMacro):
     """Emit whole lowered sequences from one origin, then merge actual ends.
 
     book owns timeline state. timeline is an existing placement target. branches
@@ -144,6 +146,7 @@ class TimelineParallel(Macro):
     Unknown reference effects always fail admission. Exchanged sequences require
     known, disjoint physical register/word effects. No scheduling is done within
     a sequence; existing physical-end, case and backedge guards remain active.
+    Time parameters come from the first child in author order, not emit order.
     """
 
     def __init__(
@@ -153,9 +156,19 @@ class TimelineParallel(Macro):
         branches: Sequence[list[Macro]],
         names: Sequence[str],
     ):
+        super().__init__()
         self.book = book
         self.timeline = timeline
         self.branches = list(branches)
+        self.timing_source = next(
+            (
+                macro
+                for branch in branches
+                for macro in branch
+                if isinstance(macro, TimedMacro)
+            ),
+            None,
+        )
         advancing = [
             index
             for index, branch in enumerate(branches)
@@ -194,6 +207,16 @@ class TimelineParallel(Macro):
     def translate(self, prog) -> None:
         for macro in self.macros:
             macro.translate(prog)
+
+    def list_time_params(self) -> list[str]:
+        """List the first author-order child's parameters, or [] if untimed."""
+        return self.timing_source.list_time_params() if self.timing_source else []
+
+    def get_time_param(self, name: str) -> QickParam:
+        """Return first-child timing; absent events/parameters raise RuntimeError."""
+        if self.timing_source is None:
+            raise RuntimeError("this parallel emission has no timed operations")
+        return self.timing_source.get_time_param(name)
 
 
 @dataclass
