@@ -930,6 +930,10 @@ class MainWindow(QMainWindow):
             self.show_error_dialog("Tab recovery failed", str(exc))
 
     def _present_reload_report(self, report: ReloadReport) -> None:
+        # Tabs mount while catalog switching still blocks admission. Reproject
+        # only after the reload service has released that gate.
+        for tab_id in self._tab_widgets:
+            self.refresh_tab_interaction(tab_id)
         self._toolbar.set_reload_recovery(
             retry_catalog=self._ctrl.can_retry_experiment_reload(),
             skipped_count=self._ctrl.skipped_experiment_tab_count(),
