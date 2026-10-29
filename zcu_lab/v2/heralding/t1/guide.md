@@ -1,5 +1,7 @@
 # Heralded T1
 
+**讀者：** operator、agent。使用 GUI 執行單 qubit heralded T1，分析並保存篩選後的結果。
+
 本頁給已校準單 qubit π pulse 與 pulse readout classifier 的操作員。實驗先讀出一次，只保留判為 ground 的 shot，再做 π → delay → signal readout。這是 host post-selection，沒有 active reset，也不檢查其他 qubit。
 
 ## 執行前

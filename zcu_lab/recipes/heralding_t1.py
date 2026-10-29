@@ -22,27 +22,27 @@ class HeraldingT1Inputs(RecipeInputs):
 
     readout_ref: str | None | Keep = Field(
         KEEP,
-        description="Pulse-readout library key including classifier; omission retains the Form value, null clears/disables it.",
+        description="Pulse-readout library key including classifier; omission retains the Form value. Null is passed unchanged to the Form owner, which may reject it.",
     )
     pi_ref: str | None | Keep = Field(
         KEEP,
-        description="Calibrated pi-pulse library key; omission retains the Form value, null clears/disables it.",
+        description="Calibrated pi-pulse library key; omission retains the Form value. Null is passed unchanged to the Form owner, which may reject it.",
     )
     max_delay_us: float | None | Keep = Field(
         KEEP,
-        description="Delay sweep stop in us; omission retains the Form value, null clears/disables it.",
+        description="Delay sweep stop in us; omission retains the Form value. Null is passed unchanged to the Form owner, which may reject it.",
     )
     points: int | None | Keep = Field(
         KEEP,
-        description="Sweep sample count; omission retains the Form value, null clears/disables it.",
+        description="Sweep sample count; omission retains the Form value. Null is passed unchanged to the Form owner, which may reject it.",
     )
     reps: int | None | Keep = Field(
         KEEP,
-        description="Acquisition repetition count; omission retains the Form value, null clears/disables it.",
+        description="Acquisition repetition count; omission retains the Form value. Null is passed unchanged to the Form owner, which may reject it.",
     )
     rounds: int | None | Keep = Field(
         KEEP,
-        description="Averaging round count; omission retains the Form value, null clears/disables it.",
+        description="Averaging round count; omission retains the Form value. Null is passed unchanged to the Form owner, which may reject it.",
     )
 
     dual_exp: bool | None | Keep = Field(
