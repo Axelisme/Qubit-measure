@@ -147,8 +147,7 @@ class ComponentTreeWidget(QWidget):
         self._drafts: dict[_RowKey, str] = {}
         layout = QVBoxLayout(self)
         self._sync = FileBanner(
-            control, "parameters", self._scope.callback(self._reload_file),
-            parent=self
+            control, "parameters", self._scope.callback(self._reload_file), parent=self
         )
         layout.addWidget(self._sync)
         toolbar = QHBoxLayout()
@@ -156,7 +155,9 @@ class ComponentTreeWidget(QWidget):
         self._destination = QComboBox()
         self._destination.setObjectName("inspect.parameters.destination")
         self._destination.addItems(["Active documents", "Entry template"])
-        self._scope.connect(self._destination.currentIndexChanged, self._destination_changed)
+        self._scope.connect(
+            self._destination.currentIndexChanged, self._destination_changed
+        )
         toolbar.addWidget(self._destination)
         toolbar.addStretch(1)
         self._add_btn = QPushButton("Add component…")
@@ -309,9 +310,13 @@ class ComponentTreeWidget(QWidget):
         return True
 
     def _destination_changed(self) -> None:
-        self._drafts.clear()
         self._sync.set_setup(setup=self._is_setup())
         self.refresh()
+        if self._drafts:
+            self._sync.show_conflict(
+                "Parameter draft retains its original destination and revision. "
+                "Reload to discard it and load this destination."
+            )
 
     def _is_setup(self) -> bool:
         return self._destination.currentIndex() == 1

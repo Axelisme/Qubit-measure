@@ -4,6 +4,7 @@ from collections.abc import Generator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
+from hashlib import sha256
 from pathlib import Path
 from typing import Literal
 
@@ -23,6 +24,8 @@ from zcu_tools.gui.session.context_types import (
 )
 from zcu_tools.gui.session.events import (
     ContextSwitchedPayload,
+    EntryDocumentsChangedPayload,
+    FileChangedPayload,
     MdChangedPayload,
     MlChangedPayload,
 )
@@ -161,21 +164,152 @@ def test_global_alias_edits_persist_and_keep_the_active_three_file_versions(
     assert session.control.get_alias_rows() == rows
 
 
+@pytest.mark.parametrize("kind", KINDS)
+def test_entry_writes_install_before_notification_and_leave_active_capture_fixed(
+    session: _Session, kind: Kind
+) -> None:
+    entry_target = require_target(session.control.read_context())
+    _write(session.control, entry_target, kind, 0.2)
+    selected = _select(session, "a")
+    captured = session.control.read_context(setup=True)
+    active = session.control.read_context()
+    active_files = session.control.get_file_revisions()
+    version = session.state.version.get("context")
+    observed: list[ParameterContext] = []
+    other_events: list[object] = []
+    session.bus.subscribe(
+        EntryDocumentsChangedPayload,
+        lambda _: observed.append(session.control.read_context(setup=True)),
+    )
+    for event in (MdChangedPayload, MlChangedPayload, FileChangedPayload):
+        session.bus.subscribe(event, other_events.append)
+
+    _write(session.control, entry_target, kind, 0.3)
+
+    assert [_value(item, kind) for item in observed] == [pytest.approx(0.3)]
+    assert _value(session.control.read_context(setup=True), kind) == pytest.approx(0.3)
+    assert _value(captured, kind) == pytest.approx(0.2)
+    assert _value(active, kind) == pytest.approx(0.2)
+    assert _value(session.control.read_context(), kind) == pytest.approx(0.2)
+    assert session.control.read_context().target == selected
+    assert session.control.get_file_revisions() == active_files
+    assert session.state.version.get("context") == version
+    assert other_events == []
+    document = "parameters" if kind == "parameter" else "library"
+    installed = next(
+        file
+        for file in session.control.get_installed_file_revisions()[3:]
+        if file.document == document
+    )
+    assert installed.revision == sha256(installed.path.read_bytes()).hexdigest()
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_pending_entry_candidates_leave_captures_fixed_and_fail_explicit_guards(
+    session: _Session, kind: Kind
+) -> None:
+    target = require_target(session.control.read_context())
+    _write(session.control, target, kind, 0.2)
+    _select(session, "a")
+    captured = session.control.read_context(setup=True)
+    document = "parameters" if kind == "parameter" else "library"
+    file = next(
+        file
+        for file in session.control.get_installed_file_revisions()[3:]
+        if file.document == document
+    )
+    candidate = file.path.read_text().replace("0.2", "0.7")
+    file.path.write_text(candidate)
+    session.service.synchronize_files(admit_reload=False)
+    observed: list[EntryDocumentsChangedPayload] = []
+    session.bus.subscribe(EntryDocumentsChangedPayload, observed.append)
+    assert _value(session.control.read_context(setup=True), kind) == pytest.approx(0.2)
+
+    with pytest.raises(FailedPreconditionError) as failure:
+        session.control.check_file_revision(file)
+    assert failure.value.reason_code == "revision_mismatch"
+
+    assert observed == []
+    assert file.path.read_text() == candidate
+    assert _value(session.control.read_context(setup=True), kind) == pytest.approx(0.2)
+    assert _value(captured, kind) == pytest.approx(0.2)
+    assert file in session.control.get_installed_file_revisions()
+
+
+@pytest.mark.parametrize("operation", ["component", "library", "aliases"])
+def test_entry_structure_writes_notify_after_cache_installation(
+    session: _Session, operation: str
+) -> None:
+    _select(session, "a")
+    captured = session.control.read_context(setup=True)
+    active = session.control.read_context()
+    version = session.state.version.get("context")
+    observed: list[ParameterContext] = []
+    session.bus.subscribe(
+        EntryDocumentsChangedPayload,
+        lambda _: observed.append(session.control.read_context(setup=True)),
+    )
+    before = registry_state()
+    try:
+        register_fakes()
+        if operation == "component":
+            session.control.add_component(
+                "Q1", "fake/drive/a", {"rate": 4300.0}, setup=True
+            )
+        elif operation == "library":
+            session.control.apply_library_change(
+                captured,
+                LibraryChange(
+                    "waveform",
+                    "put",
+                    "Q1.waveforms.base",
+                    waveform=ConstWaveformCfg(length=0.3),
+                ),
+            )
+        else:
+            session.control.apply_alias_rows((AliasRow("driver", "Q1"),), setup=True)
+        assert len(observed) == 1
+        if operation == "component":
+            assert observed[0].value("Q1.rate") == 4300.0
+            assert "Q1" not in captured.whole_document().components
+        elif operation == "library":
+            assert observed[0].library.waveform_keys() == ("Q1.waveforms.base",)
+            assert captured.library.waveform_keys() == ()
+        else:
+            assert observed[0].value("$driver") == "Q1"
+            assert captured.resolved_aliases() == ()
+        assert session.control.read_context().document() == active.document()
+        assert (
+            session.control.read_context().library.document()
+            == active.library.document()
+        )
+        assert session.control.get_alias_rows() == ()
+        assert session.state.version.get("context") == version
+    finally:
+        restore_registry(before)
+
+
 @pytest.mark.parametrize("setup", [False, True], ids=["active", "entry-template"])
 def test_global_component_add_and_template_edit_update_only_future_captures(
-    session: _Session, setup: bool,
+    session: _Session,
+    setup: bool,
 ) -> None:
     old = session.control.read_context()
     before = registry_state()
     try:
         register_fakes()
-        session.control.add_component("Q1", "fake/drive/a", {"rate": 4300.0}, setup=setup)
+        session.control.add_component(
+            "Q1", "fake/drive/a", {"rate": 4300.0}, setup=setup
+        )
         assert session.control.read_context().value("Q1.rate") == 4300.0
         session.control.set_setup_parameter("Q1.rate", 5250.0)
         assert session.control.read_context().value("Q1.rate") == 5250.0
         assert session.control.read_context().target == old.target
         assert "Q1" not in old.whole_document().components
-        assert snapshot(session.entry.setup).components["Q1"].model_dump()["rate"] == 5250.0
+        assert (
+            snapshot(session.entry.setup).components["Q1"].model_dump()["rate"]
+            == 5250.0
+        )
     finally:
         restore_registry(before)
 

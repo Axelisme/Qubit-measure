@@ -321,7 +321,9 @@ def test_startup_selects_global_and_creates_points_in_all_modes(startup_app, tmp
 
 
 @pytest.mark.parametrize("point", [None, "initial"], ids=["global", "point"])
-def test_startup_persists_aliases_in_the_active_document_set(startup_app, tmp_path, point):
+def test_startup_persists_aliases_in_the_active_document_set(
+    startup_app, tmp_path, point
+):
     _behavior, _assembly, ctrl, _window, _probe = startup_app
     before = registry_state()
     try:
@@ -332,8 +334,7 @@ def test_startup_persists_aliases_in_the_active_document_set(startup_app, tmp_pa
             "    ctx.setup.new_entry('created')\n"
             "    ctx.context.add_component('Q1', 'startup/qubit', {'freq': 5.25}, setup=True)\n"
             + ("    ctx.setup.new_point('initial')\n" if point is not None else "")
-            +
-            "    ctx.context.apply_alias_rows((AliasRow('qubit', 'Q1'),))\n",
+            + "    ctx.context.apply_alias_rows((AliasRow('qubit', 'Q1'),))\n",
         )
         token = ctrl.start_startup(path)
         qt_until(

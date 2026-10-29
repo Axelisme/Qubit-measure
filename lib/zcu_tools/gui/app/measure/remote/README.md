@@ -389,10 +389,11 @@ null returns `revision_mismatch` without overwriting it. Omission keeps the
 original unguarded writer contract. These checks are optimistic, without a
 cross-process lock or a multi-file transaction.
 
-Recipe and startup code still use the context owner facets. Startup must select
-or create a point before `ctx.context.apply_alias_rows(rows)`. That command
-validates and atomically saves the selected point's aliases before installing
-or publishing them. No extra save or subsequent reload is needed.
+Recipe and startup code still use the context owner facets. Startup opens an
+entry before `ctx.context.apply_alias_rows(rows)`. That command validates and
+atomically saves active aliases, entry-level in GLOBAL or selected-point in
+POINT, before installing rows and revisions. Without an entry it raises
+no_context and retains no pending rows. No extra save or reload is needed.
 
 ## Authority and dispatch
 

@@ -348,6 +348,7 @@ def test_parameter_draft_cannot_follow_destination(conflict_ui) -> None:
     ui.screenshot(evidence / "02-target-rejected.png")
     ui.choose_option("Entry template", value="Active documents")
     ui.click(object_name="inspect.parameters.sync.reload")
+    ui.screenshot(evidence / "reload-active.png")
     assert any(
         row.path == ("Q1", "rate") and row.columns[1] == "4300.0"
         for row in ui.visible().tree_rows

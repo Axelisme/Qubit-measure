@@ -122,7 +122,9 @@ def load_native_spectrum(
     )
     save_run(replace(RunRecord(cfg, result), metadata=metadata), path, spec=spec)
     fx.ctrl.run_analyze_control.load_tab_result(tab_id, str(path))
-    assert require_metadata(fx.state.get_tab(tab_id).run) == metadata
+    assert require_metadata(fx.state.get_tab(tab_id).run).model_dump(
+        mode="json"
+    ) == metadata.model_dump(mode="json")
 
 
 def start_mounted(

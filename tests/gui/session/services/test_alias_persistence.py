@@ -9,7 +9,10 @@ from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_types import PointUseRequest
-from zcu_tools.gui.session.events import AliasesChangedPayload
+from zcu_tools.gui.session.events import (
+    AliasesChangedPayload,
+    EntryDocumentsChangedPayload,
+)
 from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.state import SessionState
 from zcu_tools.gui.session.types import SessionEnv
@@ -143,6 +146,53 @@ def test_file_revisions_are_installed_snapshots_and_alias_writes_publish_after_d
     assert context.get_file_revisions()[2].revision != installed[2].revision
     context.clear_context()
     assert context.get_file_revisions() == ()
+
+
+def test_entry_alias_apply_updates_installed_revision_without_changing_point(
+    tmp_path: Path,
+) -> None:
+    context = service()
+    entry = entry_at(tmp_path)
+    context.install_entry(entry)
+    context.use_point(PointUseRequest("first"))
+    active = context.read_context()
+    captured = context.read_context(setup=True)
+    files = context.get_installed_file_revisions()
+
+    context.apply_alias_rows(AUTHORED, setup=True)
+
+    assert context.get_alias_rows(setup=True) == AUTHORED
+    assert context.read_context(setup=True).value("$driver.rate") == 4300.0
+    assert context.get_alias_rows() == ()
+    assert context.read_context().document() == active.document()
+    assert captured.resolved_aliases() == ()
+    installed = context.get_installed_file_revisions()
+    assert installed[:5] == files[:5]
+    assert installed[5].revision == sha256(installed[5].path.read_bytes()).hexdigest()
+    assert entry.load_aliases().aliases["driver"] == "Q1"
+    assert entry.load_aliases(point="first").aliases == {}
+
+
+def test_entry_alias_first_write_rejects_external_creation_without_success_fact(
+    tmp_path: Path,
+) -> None:
+    entry = entry_at(tmp_path)
+    events: list[EntryDocumentsChangedPayload] = []
+    bus = BaseEventBus()
+    context = service(bus)
+    context.install_entry(entry)
+    context.use_point(PointUseRequest("first"))
+    bus.subscribe(EntryDocumentsChangedPayload, events.append)
+    entry.save_aliases(EntryAliases(aliases={"external": "R1"}))
+
+    with pytest.raises(FailedPreconditionError) as failure:
+        context.apply_alias_rows(AUTHORED, setup=True)
+
+    assert failure.value.reason_code == "revision_mismatch"
+    assert events == []
+    assert context.get_alias_rows(setup=True) == ()
+    assert context.get_installed_file_revisions()[5].revision is None
+    assert entry.load_aliases().aliases == {"external": "R1"}
 
 
 def test_saved_table_loads_in_order_without_filling_empty_rows(tmp_path: Path) -> None:

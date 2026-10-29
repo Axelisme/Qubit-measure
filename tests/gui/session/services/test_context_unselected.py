@@ -56,9 +56,13 @@ def test_alias_edit_without_entry_rejects_without_retaining_the_request(
 def test_rejected_alias_submission_preserves_the_authored_table(
     control: ContextService, rows: tuple[AliasRow, ...], tmp_path: Path
 ) -> None:
-    control.install_entry(ResultEntry.create(
-        "entry", result_root=tmp_path / "result", database_root=tmp_path / "Database"
-    ))
+    control.install_entry(
+        ResultEntry.create(
+            "entry",
+            result_root=tmp_path / "result",
+            database_root=tmp_path / "Database",
+        )
+    )
     original = (AliasRow("qubit", "Q1"), AliasRow("resonator", "$qubit.resonator"))
     control.apply_alias_rows(original)
     with pytest.raises(InvalidInputError) as caught:

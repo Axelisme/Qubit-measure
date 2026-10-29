@@ -414,7 +414,9 @@ def test_one_run_target_resolves_dependencies_without_changing_global_rows_or_ve
     )
     context.install_entry(rich_entry)
     context.new_point(_new_request("first"))
-    context.apply_alias_rows((AliasRow("driver", ""), AliasRow("sense", "$driver.sense")))
+    context.apply_alias_rows(
+        (AliasRow("driver", ""), AliasRow("sense", "$driver.sense"))
+    )
     before = context.get_alias_rows()
     version = state.version.snapshot()
     temporary = context.read_context(aliases={"driver": "Q2"})

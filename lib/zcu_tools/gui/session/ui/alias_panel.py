@@ -56,7 +56,7 @@ class AliasPanel(QWidget):
     an empty Value is a legal unbound alias. Invalid rows are red and never
     write. Owner/storage errors keep the input and installed table unchanged.
     The read-only resolution column projects installed rows, not invalid input.
-    Without a point it stays blank; source faults appear in that column.
+    Without an entry it stays blank; source faults appear in that column.
     refresh discards local rows on point/entry switches and otherwise keeps
     uncommitted input for FileBanner's Keep/Reload revision flow.
     The panel has no Apply, Revert or close-time questions.
@@ -86,8 +86,7 @@ class AliasPanel(QWidget):
         toolbar.addStretch()
         layout.addLayout(toolbar)
         self._sync = FileBanner(
-            control, "aliases", self._scope.callback(self._load),
-            parent=self
+            control, "aliases", self._scope.callback(self._load), parent=self
         )
         layout.addWidget(self._sync)
         hint = QLabel(
@@ -327,7 +326,7 @@ class AliasPanel(QWidget):
                 item.setForeground(error_colour(self._table))
             return
         except FailedPreconditionError:
-            # No entry or selected point: there is no applied projection to show.
+            # No entry: there is no applied projection to show.
             return
         for index, row in enumerate(rows[: self._table.rowCount()]):
             item = self._result_item(index)

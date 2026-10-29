@@ -289,7 +289,6 @@ class StartupParameters:
     calls: OwnerCalls
     control: ContextControlPort
 
-
     def apply_alias_rows(self, rows: tuple[AliasRow, ...]) -> None:
         """Validate and persist ordered authored rows, then publish them in memory.
 

@@ -30,6 +30,7 @@ from zcu_tools.gui.session.context_types import (
 from zcu_tools.gui.session.events import (
     AliasesChangedPayload,
     ContextSwitchedPayload,
+    EntryDocumentsChangedPayload,
     MdChangedPayload,
     MlChangedPayload,
 )
@@ -459,7 +460,7 @@ class ContextService:
         """Return the cached setup template or current point document without I/O.
 
         setup=True reads the opened entry template; False reads the published
-        selected saved point. No entry/context raises FailedPreconditionError.
+        active GLOBAL or POINT document. No entry raises FailedPreconditionError.
         Returned data is isolated; changing it does not write.
         """
         self._owner.assert_owner()
@@ -477,10 +478,12 @@ class ContextService:
         """Add one component with working-unit fields using its registered kind.
 
         setup=True edits only the opened entry template. Otherwise edit the
-        selected saved point in one resource transaction.
+        active GLOBAL or POINT documents in one resource transaction.
         Invalid names/kinds/required fields/duplicates leave content unchanged.
         Success on the current point installs its source before publishing one
-        parameter change. Setup edits never change existing points or captures.
+        parameter change. A nonactive entry edit installs cache/revision before
+        an EntryDocumentsChangedPayload fact, without changing active content or
+        existing captures.
         No entry/context, schema, conflict and I/O errors propagate.
         """
         self._owner.assert_owner()
@@ -492,6 +495,7 @@ class ContextService:
                     "No setup is opened", reason_code="no_entry"
                 )
             self._setup.add_component(name, kind=kind, **fields)
+            self._bus.emit(EntryDocumentsChangedPayload())
             return
         parameters = self._published_parameters()
         active = self._point if self._point is not None else self._setup
@@ -575,7 +579,6 @@ class ContextService:
         self._owner.assert_owner()
         return (self._entry_aliases if setup else self._aliases).rows
 
-
     def _install_alias_rows(
         self, candidate: AliasTable, revision: DocumentRevision | None = None
     ) -> None:
@@ -588,29 +591,45 @@ class ContextService:
             self._state.version.bump("context")
             self._bus.emit(AliasesChangedPayload(rows=candidate.rows))
 
-    def apply_alias_rows(self, rows: tuple[AliasRow, ...]) -> None:
+    def apply_alias_rows(
+        self, rows: tuple[AliasRow, ...], *, setup: bool = False
+    ) -> None:
         """Validate and atomically save rows to the active aliases.yaml.
 
         Runs on the owner thread. Without an opened entry raise
         FailedPreconditionError(no_context) before validation or I/O. GLOBAL
         writes entry aliases; POINT writes only the selected point's aliases.
+        setup=True always writes entry aliases, updating its installed cache and
+        revision without changing an active point or existing captures.
         Validate syntax/order, save, then install the exact revision and publish
         changed rows. InvalidInputError(alias_invalid) and storage errors retain
-        rows, versions and the old file. Identical rows still save but publish no
-        event. No ledger or other document is written.
+        rows, versions and the old file. Identical active rows save without an
+        active content event. Nonactive entry commits publish
+        EntryDocumentsChangedPayload after cache installation. An installed
+        missing file created externally raises revision_mismatch rather than
+        overwriting it. No ledger or other document is written.
         """
         self._owner.assert_owner()
-        label = self._state.session_env.active_label
+        label = None if setup else self._state.session_env.active_label
         if self._entry is None:
             raise FailedPreconditionError(
                 "Open an entry first", reason_code="no_context"
             )
         candidate = AliasTable(rows)
+        installed = self._entry_aliases if setup else self._aliases
+        if installed.revision is not None and installed.revision.revision is None:
+            self.check_file_revision(
+                FileRevision("aliases", installed.revision.path, None)
+            )
         revision = self._entry.save_aliases(
             EntryAliases(aliases={row.alias: row.value for row in candidate.rows}),
             point=label,
         )
-        self._install_alias_rows(candidate, revision)
+        if setup and self._point is not None:
+            self._entry_aliases = AliasSnapshot(candidate, revision)
+            self._bus.emit(EntryDocumentsChangedPayload())
+        else:
+            self._install_alias_rows(candidate, revision)
 
     def capture_storage(self, parameters: ParameterContext) -> StorageBinding:
         """Return historical storage for a fixed capture on the owner sequence.
@@ -710,8 +729,10 @@ class ContextService:
         A nonselected target stays unselected.
         metadata=None keeps the path's opaque metadata; a mapping replaces it
         in the same commit ({} clears). No source, time or event is added.
-        Success publishes only when writing the selected target, after resource
-        commit/validation. Cross-entry, missing selection, path/schema/metadata
+        Active-target success publishes its content fact after resource commit.
+        A nonactive SavedEntry write updates installed cache/revision and emits
+        EntryDocumentsChangedPayload without changing active content or captures.
+        Cross-entry, missing entry, path/schema/metadata
         representation, conflict and I/O failures propagate without publishing
         a candidate. No retry or batch receipt.
         """
@@ -734,7 +755,9 @@ class ContextService:
         entry = self._require_write_target(target)
         parameters = self._published_parameters()
         if target.point is None:
-            point = entry.setup
+            if self._setup is None:
+                raise RuntimeError("Installed entry parameters disappeared")
+            point = self._setup
         elif target == parameters.target and self._point is not None:
             point = self._point
         else:
@@ -748,6 +771,8 @@ class ContextService:
             for info in self._points
         )
         if target != parameters.target:
+            if target.point is None:
+                self._bus.emit(EntryDocumentsChangedPayload())
             return actual
         self._publish_write(
             ParameterContext(
@@ -818,6 +843,8 @@ class ContextService:
         actual = commit_library_updates(handle, updates)
         library = handle.snapshot()
         if target != parameters.target:
+            if target.point is None:
+                self._bus.emit(EntryDocumentsChangedPayload())
             return actual
         self._publish_write(
             ParameterContext(
@@ -843,7 +870,10 @@ class ContextService:
         references. Replace checks source/destination and commits relocation
         plus value in one library transaction.
         Same-entry nonselected SavedPoint writes do not select or publish.
-        Cross-entry/missing selection/Spec family/source/conflict/I/O failures
+        SavedEntry uses the installed entry library handle. A nonactive entry
+        commit updates its cache/revision before EntryDocumentsChangedPayload;
+        the active point, version and existing captures remain unchanged.
+        Cross-entry/missing entry/Spec family/source/conflict/I/O failures
         propagate, leaving this command uncommitted and publishing no events.
         """
         self._owner.assert_owner()
@@ -859,6 +889,8 @@ class ContextService:
             candidate = change.apply(draft.snapshot())
             draft.replace_contents(candidate)
         if parameters.target != selected.target:
+            if target.point is None:
+                self._bus.emit(EntryDocumentsChangedPayload())
             return
         library = handle.snapshot()
         self._publish_write(
@@ -920,7 +952,9 @@ class ContextService:
     def _write_library(
         self, entry: ResultEntry, target: ContextTarget, parameters: ParameterContext
     ) -> ModuleLibrary:
-        """Use the selected handle for conflicts, or open a detached Spec-only handle."""
+        """Use installed entry/active handles, otherwise open a detached point handle."""
+        if target.point is None and self._entry_library is not None:
+            return self._entry_library
         if target == parameters.target and self._library is not None:
             return self._library
         return entry.module_library(target.point)

@@ -49,7 +49,7 @@ class ContextControlPort(Protocol):
         """Return the cached setup template or current point document without I/O.
 
         setup=True reads the opened entry template; False reads the published
-        selected saved point. No entry/context raises FailedPreconditionError.
+        active GLOBAL or POINT document. No entry raises FailedPreconditionError.
         Returned data is isolated; changing it does not write.
         """
         ...
@@ -60,10 +60,12 @@ class ContextControlPort(Protocol):
         """Add one component with working-unit fields using its registered kind.
 
         setup=True edits only the opened entry template. Otherwise edit the
-        selected saved point in one resource transaction.
+        active GLOBAL or POINT documents in one resource transaction.
         Invalid names/kinds/required fields/duplicates leave content unchanged.
         Success on the current point installs its source before publishing one
-        parameter change. Setup edits never change existing points or captures.
+        parameter change. A nonactive entry edit installs cache/revision before
+        an EntryDocumentsChangedPayload fact, without changing active content or
+        existing captures.
         No entry/context, schema, conflict and I/O errors propagate.
         """
         ...
@@ -185,7 +187,9 @@ class ContextControlPort(Protocol):
 
         Put/replace write the change's persistent Spec as given; rename/delete
         move or remove an existing root. The command runs in one library
-        transaction. Writes require a selected working point. Detached
+        transaction. Writes require an opened entry. SavedEntry uses installed
+        entry handles and notifies nonactive entry consumers without changing the
+        active point or its version. Detached
         SavedPoint writes do not select or publish. Invalid target, Spec
         family, conflict and I/O failures write and publish nothing.
         """
@@ -281,16 +285,20 @@ class ContextControlPort(Protocol):
         """
         ...
 
-
-    def apply_alias_rows(self, rows: tuple[AliasRow, ...]) -> None:
+    def apply_alias_rows(
+        self, rows: tuple[AliasRow, ...], *, setup: bool = False
+    ) -> None:
         """Confirm the ordered table on the owner thread.
 
         No opened entry raises FailedPreconditionError(no_context) before
         validation or I/O. Validate syntax/order, then atomically save active
         aliases.yaml (entry in GLOBAL, selected point in POINT) before installing
-        memory and revision. InvalidInputError or storage errors propagate,
+        memory and revision. setup=True always selects entry aliases, updating
+        its installed cache/revision without changing an active point or existing
+        captures. InvalidInputError or storage errors propagate,
         retaining old rows, versions and file. Empty rows are authoritative.
-        Identical rows still save but emit no change. No other point container,
+        Identical active rows still save but emit no change. Nonactive entry
+        commits publish EntryDocumentsChangedPayload after cache installation. No other point container,
         ledger or preferences write occurs.
         """
         ...

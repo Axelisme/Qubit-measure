@@ -44,7 +44,9 @@ from zcu_tools.gui.form import FormWritePath
 from zcu_tools.gui.lifetime import LifetimeScope
 from zcu_tools.gui.session.context_types import LibraryChange
 from zcu_tools.gui.session.events import (
+    AliasesChangedPayload,
     ContextSwitchedPayload,
+    EntryDocumentsChangedPayload,
     FileChangedPayload,
     MdChangedPayload,
     MlChangedPayload,
@@ -224,6 +226,16 @@ class InspectDialog(QDialog):
         )
         self._scope.add_cleanup(
             bus.subscribe(
+                EntryDocumentsChangedPayload, self._scope.callback(self._on_bus_refresh)
+            ).unsubscribe
+        )
+        self._scope.add_cleanup(
+            bus.subscribe(
+                AliasesChangedPayload, self._scope.callback(self._on_bus_refresh)
+            ).unsubscribe
+        )
+        self._scope.add_cleanup(
+            bus.subscribe(
                 FileChangedPayload, self._scope.callback(self._on_file_changed)
             ).unsubscribe
         )
@@ -262,7 +274,9 @@ class InspectDialog(QDialog):
         toolbar.addWidget(self._destination)
         toolbar.addStretch()
         layout.addLayout(toolbar)
-        self._scope.connect(self._destination.currentIndexChanged, self._destination_changed)
+        self._scope.connect(
+            self._destination.currentIndexChanged, self._destination_changed
+        )
         self._library_sync = FileBanner(
             self._ctrl,
             "library",

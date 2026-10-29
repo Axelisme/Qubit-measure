@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure`
 
-**Last updated:** 2026-10-29, captured parameter environments 與共用輸出預覽
+**Last updated:** 2026-10-29, GLOBAL write-through 與 Inspect entry destination
 
 **讀者：** framework-dev。量測 GUI 的組裝、分頁、tab admission 與 Run／Load／Save 分工。
 
@@ -246,8 +246,11 @@ The framework-owned [default script](default_startup.py) owns
 entry/point, then tabs with input only when entry/point opened successfully.
 Each failure is logged; failed devices are remembered when possible, and skipped
 tabs are not retried after later source selection. Its on-close callback captures
-then-current state. Aliases are not in that cache. Selecting a point loads its
-`points/<label>/aliases.yaml`; Inspect Apply saves that point's table.
+then-current state. Aliases are not in that cache. Opening an entry loads its
+global aliases; selecting a point loads `points/<label>/aliases.yaml`.
+Startup code opens an entry before `ctx.context.apply_alias_rows(rows)`.
+That command saves active aliases, global or point, without a separate reload.
+Without an opened entry it raises no_context and retains no pending rows.
 Templates use caller-authored `Template.bindings`.
 
 `Adapter.save_stem(context)` delegates to the adapter's spec.save_stem callback.
@@ -354,7 +357,7 @@ Reset uses the normal source capture and factory: success installs a real Form;
 any preparation failure propagates unchanged, leaving no Form and updating the
 visible reason, including capture, template binding and defaults failures. Native cfg
 never supplies form input. See ADR-0073 and ADR-0067.
-Live experiment reload uses detached `WorkspaceTab`／`WorkspaceSnapshot` RAM carriers and the shared `{data,selections}` codec. Rebuilding uses fresh captured defaults and Core recursive restoration, with dropped paths reported to the host. `TabSnapshot.cfg_input` remains live raw data. Framework disk persistence stores only window dimensions and left-panel width in `measure_layout_v1.json`; startup scripts own session save/restore policy. Setup and each point own independent alias files. Open/Refresh/Reset capture the selected point's table. Inspect Apply, RPC and startup Apply save only that point; without a selected point they fail with no_context. Missing files are empty, without setup or preset fallback. Inspect alias drafts capture entry/point identity. Clean drafts follow selection; dirty drafts reject Apply to another target until Revert loads the current point.
+Live experiment reload uses detached `WorkspaceTab`／`WorkspaceSnapshot` RAM carriers and the shared `{data,selections}` codec. Rebuilding uses fresh captured defaults and Core recursive restoration, with dropped paths reported to the host. `TabSnapshot.cfg_input` remains live raw data. Framework disk persistence stores only window dimensions and left-panel width in `measure_layout_v1.json`; startup scripts own session save/restore policy. Entry and each point own independent alias files. Open/Refresh/Reset capture the active document set and its table. RPC and startup Apply save that table; an opened entry is required, a point is not. Missing files are empty without fallback. Inspect offers Active documents and Entry template on all three pages. Completed valid edits write through to the selected destination. Same-target source notifications preserve dirty input and its original revision. Switching entries or closing discards unsubmitted input. Existing tabs keep their captures until explicit Refresh or Reset.
 Source events do not refresh existing forms. Device capture copies cached infos;
 it never queries a live driver.
 
@@ -371,14 +374,14 @@ Run／Load 的輸出預覽與 Save 共用 `SaveService.plan_layout`，依目前 
 正常 Load 後立即有預覽，Analyze／PostAnalyze 後也有預覽，不要求 storage，狀態仍為 Not saved。
 缺 metadata 時只有 artifact/member declarations，沒有輸出預覽。
 預覽只隔離 `MetadataFieldError`，保留 Load 的原始內容；Save 仍完整驗證 metadata。
-缺名稱使用 unnamed_entry，缺 point 使用 unnamed_point。Save report 發布實際 paths、成功與失敗。
+缺 entry 名稱使用 unnamed_entry。Point 為 null 的 global 或歷史結果將圖片副本放在 entry 層 figures/，不建立 unnamed_point。Save report 發布實際 paths、成功與失敗。
 Load 不新增 Run token 或量測歷史。
 純計算來源為 None，不回退到 session；新 Run 與 clear 清除舊來源。Analyze／Post-analyze 不攜帶 predictor。Predictor 是獨立查詢工具，不自動參與實驗。
 
-Entry New／Open 不建立參數環境，也不自選既有 point。
-Run、WB 與目前 point 的 Inspect Set 要先選取或建立工作點；GUI 停用操作並提示，application 也拒絕未選取狀態。
-重新 Open 同 entry 清除 selection，WB 必須再次選取任一 point 才能提交，
-Preview 與 Apply 的目的地就是命令當下 GUI 選定的 point。
+Entry New／Open 安裝 GLOBAL 參數、library、aliases 與 storage，不自選既有 point。
+Run、WB 與 Inspect 編輯可直接使用 GLOBAL，不要求選 point。
+重新 Open 同 entry 回到 GLOBAL。Preview 與 Apply 的目的地是命令當下作用中的文件組。
+選了 point 時，Inspect 的 Entry template 只改 entry 文件，不改作用中 point 或既有 tab capture。
 Cfg/editor drafts 與 WB 候選 preview 保持各自的生命週期。
 
 `RecordWriteback` 只提出 adapter 組裝的 JSON object。
@@ -403,7 +406,7 @@ Decision 包含 `allowed`、第一個拒絕的 `reason` 與共用 `message`，�
 | LOAD | tab busy |
 | ANALYZE | Run result → analysis capability → tab busy |
 | POST_ANALYZE | Primary result → post-analysis capability → tab busy |
-| WRITEBACK | selected working point → Primary result → tab busy |
+| WRITEBACK | opened entry → Primary result → tab busy |
 
 Run、Load 不要求 storage，Load 與 Analyze 不要求目前 context。
 Analyze 缺能力時回 `no_analysis`，不會把 `AnalysisMode.NONE` 送入 FIT worker。

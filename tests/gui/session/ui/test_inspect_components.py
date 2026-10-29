@@ -223,7 +223,9 @@ def test_general_ext_values_follow_destination_and_edit_policy(
     expected = before if read_only else "7.75"
     assert _general_values(ui).get(("calibration", "offset")) == expected
 
-    other = "Entry template" if destination == "Active documents" else "Active documents"
+    other = (
+        "Entry template" if destination == "Active documents" else "Active documents"
+    )
     ui.choose_option(destination, value=other)
     _expand_general(ui)
     ui.screenshot(evidence / "04-other-destination.png")

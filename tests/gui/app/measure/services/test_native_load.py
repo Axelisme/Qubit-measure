@@ -360,7 +360,7 @@ def test_native_load_uses_parameter_snapshot_names_not_history_summary(
         ),
     )
     session.save()
-    saved_metadata = require_record(tab.run).metadata
+    saved_metadata = require_metadata(tab.run)
     events = session.entry.ledger.events()
     rows = session.context.get_alias_rows()
     service = LoadService(session.state, plan_layout=session.save_service.plan_layout)
@@ -372,7 +372,9 @@ def test_native_load_uses_parameter_snapshot_names_not_history_summary(
 
     loaded = tab.run.parameters
     assert loaded is not None and loaded is not previous.parameters
-    assert require_metadata(tab.run) == saved_metadata
+    assert require_metadata(tab.run).model_dump(
+        mode="json"
+    ) == saved_metadata.model_dump(mode="json")
     assert loaded.value("$source_qubit") == "Q1"
     assert loaded.value("$source_qubit.rate") == 1.0
     assert previous.parameters is not None
@@ -798,7 +800,9 @@ def test_unselected_entry_load_and_save_use_recorded_history(
         stored = load(path)
         session.context.install_entry(session.entry)
         control = session.context
-        assert session.state.session_env.parameters is None
+        assert session.state.session_env.parameters is not None
+        assert session.state.session_env.parameters.target is not None
+        assert session.state.session_env.parameters.target.point is None
         tab = session.state.get_tab("tab")
         before = {
             p.relative_to(tmp_path): p.read_bytes()

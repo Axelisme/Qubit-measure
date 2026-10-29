@@ -30,7 +30,9 @@ def test_remote_creation_allows_empty_source_without_recapturing_later_aliases(
         ctrl.context_control.apply_alias_rows(rows)
         assert ctrl.context_control.get_alias_rows() == rows
         interaction = ctrl.tab_control.get_tab_snapshot(tab_id).interaction
-        assert interaction is not None and not interaction.has_context
+        assert interaction is not None and interaction.has_context
+        # Live readiness changes, but the tab keeps its empty captured source.
+        assert application.state.get_tab(tab_id).cfg.env.parameters is None
         assert ctrl.tab_control.list_tab_ids() == [tab_id]
     finally:
         assert background.quiesce()

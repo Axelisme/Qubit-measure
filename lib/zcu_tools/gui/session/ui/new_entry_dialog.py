@@ -52,7 +52,7 @@ class NewEntryDialog(QDialog):
     id as item data; inspect.new_entry.name is the Name QLineEdit;
     inspect.new_entry.scroll is the QScrollArea holding the FormEditor of the
     selected template; inspect.new_entry.error is a QLabel shown only when no
-    form can be built (for example, no working point is selected). The
+    form can be built (for example, no entry is opened). The
     buttons are "Create" and "Cancel".
 
     Choosing a template reads one fixed capture from ctrl and builds a fresh
@@ -83,7 +83,10 @@ class NewEntryDialog(QDialog):
     ) -> None:
         """Build the dialog and the form of the first template.
 
-        ctrl supplies captures and the library write; templates is the
+        setup=True fixes both template capture and Create to the entry cache;
+        False uses the active document set. Selection changes never redirect an
+        already captured draft. ctrl supplies captures and the library write;
+        templates is the
         persistent catalog by template id; arb_waveforms lists the arb asset
         names offered to arb data fields at each capture. Template placeholders
         bind to resolved targets of same-named aliases in that capture. Missing

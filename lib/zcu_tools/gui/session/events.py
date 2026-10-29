@@ -37,6 +37,7 @@ class SessionEvent(str, Enum):
     CONTEXT_SWITCHED = "context_switched"  # parameter binding switched
     ALIASES_CHANGED = "aliases_changed"
     FILE_CHANGED = "file_changed"
+    ENTRY_DOCUMENTS_CHANGED = "entry_documents_changed"
     SOC_CHANGED = "soc_changed"  # soc/soccfg connection changed
     DEVICE_CHANGED = "device_changed"  # device registered or dropped
     DEVICE_SETUP_STARTED = "device_setup_started"  # payload: DeviceSetupStartedPayload
@@ -61,6 +62,18 @@ class FileChangedPayload(SessionPayload):
 
     EVENT: ClassVar[SessionEvent] = SessionEvent.FILE_CHANGED
     status: FileSyncStatus
+
+
+@dataclass(frozen=True)
+class EntryDocumentsChangedPayload(SessionPayload):
+    """Installed entry documents committed successfully while a point is active.
+
+    The active point, its content version and existing captures are unchanged.
+    Consumers read the committed entry content/revisions through cached queries.
+    This is an explicit internal write fact, not an external reload observation.
+    """
+
+    EVENT: ClassVar[SessionEvent] = SessionEvent.ENTRY_DOCUMENTS_CHANGED
 
 
 @dataclass(frozen=True)

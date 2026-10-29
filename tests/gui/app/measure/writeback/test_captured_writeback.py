@@ -875,6 +875,7 @@ def test_each_parameter_write_replaces_metadata_with_its_own_stderr(
 def test_duplicate_concrete_role_destinations_fail_before_accepted(
     session: WritebackSession,
 ) -> None:
+    before = session.control.read_context().lookup("Q1.rate")
     captured = session.control.read_context().bind_roles(
         {"driver": RoleSpec("fake/drive/*")}, focus="Q1", explicit={}
     )
@@ -889,7 +890,7 @@ def test_duplicate_concrete_role_destinations_fail_before_accepted(
     with pytest.raises(InvalidInputError, match="duplicate writeback destination"):
         session.service.apply_draft(draft)
     assert session.entry.ledger.events() == ()
-    assert not session.control.read_context().lookup("Q1.rate").present
+    assert session.control.read_context().lookup("Q1.rate") == before
 
 
 def test_empty_draft_reads_and_writes_without_context(
