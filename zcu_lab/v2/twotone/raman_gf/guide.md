@@ -1,4 +1,4 @@
-**Readers:** operator, agent. Configure a single-carrier two-photon g/f scan and inspect acquired IQ.
+**Readers:** operator, agent. Run a single-carrier two-photon g/f scan and analyze acquired IQ with saved readout calibration.
 
 # Single-tone Raman g/f scan
 
@@ -19,7 +19,10 @@ This scan does not generate a second carrier or a pair of Lambda pulses.
 Calibrate the readout using singleshot/qutrit_population at the same readout
 settings. The final population analysis requires the saved readout module's
 three-center g/e/f classifier and confusion matrix.
-The current raw-IQ adapter has no population Analysis stage yet.
+Apply that acquired reference calibration to the readout library before opening
+or Resetting the Raman tab. Analysis requires the centroid3 classifier captured
+in this run's cfg. It rejects missing cfg, missing classifier, circle and linear
+classifiers. It never substitutes the current library or collects new references.
 Raw IQ is not a transfer probability or an experimental gate fidelity.
 
 ## Configure the form
@@ -74,10 +77,30 @@ authored input and previously resolved defaults.
 Reload experiments rebuilds the adapter and restores the existing tab.
 Restart the application after changing a fixed framework dependency.
 
+## Analyze and restore
+
+Open Analysis and click Analyze after Run. The measurement figure remains raw
+mean I/Q. Analysis shows raw g/e/f fractions and confusion-corrected g/e/f
+estimates separately. Frequency and area modes show two sets of three curves.
+Frequency-area mode shows six maps with actual detuning and source-area axes.
+The title reports the saved training matrix's condition number and minimum
+singular value. Correction solves in preparation-label coordinates and keeps
+negative and above-one values. It does not clip or renormalize them.
+
+The e curve is a leakage-label estimate. Preparation contamination remains part
+of the calibration, so these estimates are not pure energy-state populations
+or experimental gate fidelity. A circle classifier's third class is Other, not f.
+Analysis rejects incomplete or nonfinite IQ and singular confusion matrices.
+
+Save All preserves raw IQ and this run's readout cfg in native data.h5.
+Data → Load Data → File… restores that saved run for Analyze without recalibration.
+A later live library edit cannot change its classification. Reload experiments
+discards results after confirmation and restores tab inputs, not acquired data.
+A fresh process may restore inputs through the configured startup script.
+Load the saved native file to recover and reanalyze acquired data.
+
 ## Interpretation and limits
 
-Use acquired g/e/f readout classification to distinguish g/f response from
-e leakage. A circle classifier's third class is Other, not f.
 Changing readout settings requires a new calibration; a stored classifier does
 not automatically become invalid.
 

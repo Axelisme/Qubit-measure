@@ -11,6 +11,7 @@ import numpy as np
 from numpy.typing import NDArray
 from pydantic import Field
 from qick import QickConfig
+from zcu_tools.analysis.singleshot import Centroid3IQAnalysis, analyze_centroid3_iq
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.core.waveform_format import decode_npz
 from zcu_tools.experiment import Experiment
@@ -22,10 +23,13 @@ from zcu_tools.experiment.axes_spec import (
     VariableZSpec,
 )
 from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import round_zcu_freq, round_zcu_gain
+from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.acquisition import StoppedPartialAcquireError
 from zcu_tools.program.v2 import GainSweep, Pulse, PulseReadout, SweepCfg
+from zcu_tools.program.v2.modules.readout import centroid3_classifier
 from zcu_tools.program.v2.modules.waveform import ArbWaveformCfg
 
 from zcu_lab.v2.support.singleshot.util import raw_shots_to_signal
@@ -249,4 +253,87 @@ class RamanGFExp(Experiment[RamanGFResult, RamanGFCfg]):
             ax.legend()
 
         context.plots.draw("measurement", draw)
+        return result
+
+    def analyze(
+        self,
+        source: RunRecord[RamanGFCfg, RamanGFResult],
+        options: None,
+        *,
+        plots: Plots,
+    ) -> Centroid3IQAnalysis:
+        """Classify raw IQ with the saved run's three-center readout calibration.
+
+        Require source.cfg and its centroid3 ADC classifier. Missing cfg,
+        missing classifier or circle/linear mode raises ValueError. No live
+        Form, library, reference acquisition or simulator truth is consulted.
+        Return raw/unclipped corrected g/e/f preparation-label estimates and
+        training-matrix quality. The e label estimates leakage, not a pure
+        energy-state population or gate fidelity. Incomplete/nonfinite IQ and
+        singular confusion fail in the analysis owner. Plot actual coordinates.
+        """
+        del options
+        cfg = source.cfg
+        if cfg is None:
+            raise ValueError("Raman analysis requires the saved run readout cfg")
+        calibration = centroid3_classifier(cfg.readout, ro_ch=cfg.readout.ro_ch)
+        result = analyze_centroid3_iq(source.result.signals, calibration)
+        grid = cfg.scan_mode == "frequency_area"
+        plots.subplots(
+            "fit",
+            nrows=2 if grid else 1,
+            ncols=3 if grid else 2,
+            figsize=(11, 7) if grid else (10, 5),
+            layout="constrained",
+        )
+
+        def populations(figure):
+            for row, (values, title) in enumerate(
+                (
+                    (result.raw_populations, "Raw g/e/f fractions"),
+                    (result.corrected_populations, "Corrected g/e/f (unclipped)"),
+                )
+            ):
+                if grid:
+                    shape = (cfg.detuning.expts, cfg.gain.expts)
+                    detunings = source.result.detunings.reshape(shape)[:, 0]
+                    areas = source.result.areas.reshape(shape)[0, :]
+                    for label, state in enumerate(("g", "e leakage label", "f")):
+                        ax = figure.axes[row * 3 + label]
+                        image = ax.pcolormesh(
+                            areas,
+                            detunings,
+                            values[:, label].reshape(len(detunings), len(areas)),
+                            shading="nearest",
+                        )
+                        figure.colorbar(image, ax=ax)
+                        ax.set(
+                            xlabel="Two-photon area (gain^2 us)",
+                            ylabel="Two-photon detuning (MHz)",
+                            title=f"{title}: {state}",
+                        )
+                else:
+                    ax = figure.axes[row]
+                    for label, state in enumerate(("g", "e leakage label", "f")):
+                        ax.plot(
+                            source.result.detunings
+                            if cfg.scan_mode == "frequency"
+                            else source.result.areas,
+                            values[:, label],
+                            ".-",
+                            label=state,
+                        )
+                    ax.set(
+                        xlabel="Two-photon detuning (MHz)"
+                        if cfg.scan_mode == "frequency"
+                        else "Two-photon area (gain^2 us)",
+                        ylabel="Preparation-label fraction",
+                        title=title,
+                    )
+                    ax.legend()
+            figure.suptitle(
+                f"Saved readout: condition={result.condition_number:.4g}, minimum singular value={result.minimum_singular_value:.4g}\nPreparation-label estimates, not fidelity"
+            )
+
+        plots.draw("fit", populations)
         return result
