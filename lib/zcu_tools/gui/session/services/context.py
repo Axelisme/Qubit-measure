@@ -393,7 +393,7 @@ class ContextService:
         return SavedEntry(entry_name=fresh.result_path.name)
 
     def new_point(self, request: PointCreateRequest) -> SavedPoint:
-        """Create from setup or a same-entry clone, then install POINT.
+        """Create with the explicit inherit/empty/clone mode, then install POINT.
 
         No opened entry raises FailedPreconditionError(no_entry). Pass description
         unchanged to ResultEntry.new_point. An unsafe
@@ -421,7 +421,7 @@ class ContextService:
         try:
             point = entry.new_point(
                 request.label,
-                mode="inherit" if clone is None else "clone",
+                mode=request.mode,
                 clone_from=clone,
                 description=request.description,
             )

@@ -113,9 +113,10 @@ class SetupDialog(QDialog):
     open an entry or connect hardware. New/Open publish the owner binding and
     display its paths, elided in the middle with the full path as tooltip and
     an Open folder action. The working-point list shows labels only, marks the
-    current point with a bold "● " prefix and keeps the selection on it; the
-    selected point's description shows below the list. Switch/Create submit
-    the exact label, description and same-entry clone choice to the owner;
+    current selection with a bold "● " prefix, including the Global row.
+    The selected point description shows below the list. Switch selects Global
+    or a saved point. Create submits label, description and explicit
+    inherit/empty/clone mode with a same-entry clone source to the owner;
     a successful Create clears the form. Failures remain visible in the
     wrapped status label without retry; a missing result root is shown as a
     hint because New entry creates it. Track device only suggests an
@@ -138,7 +139,8 @@ class SetupDialog(QDialog):
         root_layout.addWidget(self._build_point_list(), stretch=1)
         root_layout.addWidget(self._build_new_point_group())
         QWidget.setTabOrder(self._label_edit, self._description_edit)
-        QWidget.setTabOrder(self._description_edit, self._clone_combo)
+        QWidget.setTabOrder(self._description_edit, self._mode_combo)
+        QWidget.setTabOrder(self._mode_combo, self._clone_combo)
         QWidget.setTabOrder(self._clone_combo, self._device_combo)
         QWidget.setTabOrder(self._device_combo, self._new_ctx_btn)
 
@@ -264,13 +266,7 @@ class SetupDialog(QDialog):
         new_form.addWidget(label_label, 0, 2)
         new_form.addWidget(self._label_edit, 0, 3, 1, 2)
 
-        self._clone_combo = QComboBox()
-        self._clone_combo.setObjectName("clone_from")
-        self._clone_combo.setMinimumWidth(160)
-        clone_label = QLabel("Clone from:")
-        clone_label.setBuddy(self._clone_combo)
-        new_form.addWidget(clone_label, 1, 0)
-        new_form.addWidget(self._clone_combo, 1, 1)
+        self._build_point_source_fields(new_form)
 
         self._description_edit = QLineEdit()
         self._description_edit.setObjectName("point_description")
@@ -284,8 +280,30 @@ class SetupDialog(QDialog):
         new_form.addWidget(self._new_ctx_btn, 1, 4)
         return new_group
 
+    def _build_point_source_fields(self, form: QGridLayout) -> None:
+        self._mode_combo = QComboBox()
+        self._mode_combo.setObjectName("point_mode")
+        self._mode_combo.addItem("Inherit Global", "inherit")
+        self._mode_combo.addItem("Empty", "empty")
+        self._mode_combo.addItem("Clone point", "clone")
+        mode_label = QLabel("Mode:")
+        mode_label.setBuddy(self._mode_combo)
+        form.addWidget(mode_label, 1, 0)
+        form.addWidget(self._mode_combo, 1, 1)
+        self._clone_combo = QComboBox()
+        self._clone_combo.setObjectName("clone_from")
+        self._clone_combo.setMinimumWidth(160)
+        clone_label = QLabel("Clone from:")
+        clone_label.setBuddy(self._clone_combo)
+        form.addWidget(clone_label, 2, 0)
+        form.addWidget(self._clone_combo, 2, 1)
+        self._clone_combo.setEnabled(False)
+
     def _connect_keyboard_actions(self) -> None:
         self._input_scope = LifetimeScope(self)
+        self._input_scope.connect(
+            self._mode_combo.currentIndexChanged, self._update_clone_enabled
+        )
         self._input_scope.connect(
             self._ctx_list.itemDoubleClicked, lambda: self._switch_btn.click()
         )
@@ -314,8 +332,14 @@ class SetupDialog(QDialog):
             button.setEnabled(not read_only)
         for field in (self._label_edit, self._description_edit):
             field.setReadOnly(read_only)
-        for combo in (self._entry_combo, self._device_combo, self._clone_combo):
+        for combo in (self._entry_combo, self._device_combo, self._mode_combo):
             combo.setEnabled(not read_only)
+        self._update_clone_enabled()
+
+    def _update_clone_enabled(self, _index: int = 0) -> None:
+        self._clone_combo.setEnabled(
+            not self._read_only and self._mode_combo.currentData() == "clone"
+        )
 
     def _cleanup_bus_subscriptions(self, *_args: object) -> None:
         if not self._bus_subs_active:
@@ -516,7 +540,10 @@ class SetupDialog(QDialog):
             return
         label = item.data(Qt.ItemDataRole.UserRole)
         try:
-            self._ctrl.use_point(PointUseRequest(label))
+            if label is None:
+                self._ctrl.use_global()
+            else:
+                self._ctrl.use_point(PointUseRequest(label))
         except Exception as exc:
             # Keep owner rejection visible without escaping the Qt callback.
             logger.exception("Failed to switch working point")
@@ -525,18 +552,27 @@ class SetupDialog(QDialog):
             )
             return
         self._refresh_context_list()
-        self._set_project_status(f"Switched to working point: {label}")
+        self._set_project_status(
+            "Switched to Global"
+            if label is None
+            else f"Switched to working point: {label}"
+        )
 
     def _on_new_ctx_clicked(self) -> None:
         if self._read_only:
             return
-        request = PointCreateRequest(
-            label=self._label_edit.text(),
-            description=self._description_edit.text(),
-            origin=CommandOrigin("gui"),
-            clone_from=self._clone_combo.currentData(),
-        )
         try:
+            request = PointCreateRequest(
+                label=self._label_edit.text(),
+                description=self._description_edit.text(),
+                origin=CommandOrigin("gui"),
+                mode=self._mode_combo.currentData(),
+                clone_from=(
+                    self._clone_combo.currentData()
+                    if self._mode_combo.currentData() == "clone"
+                    else None
+                ),
+            )
             self._ctrl.new_point(request)
         except Exception as exc:
             # PointBindingError may retain a created resource; do not retry New.
@@ -554,6 +590,7 @@ class SetupDialog(QDialog):
         self._label_edit.clear()
         self._label_edit.setModified(False)
         self._description_edit.clear()
+        self._mode_combo.setCurrentIndex(0)
         self._on_device_changed(self._device_combo.currentText())
 
     def _refresh_context_list(self) -> None:
@@ -562,6 +599,18 @@ class SetupDialog(QDialog):
         current = self._ctrl.current_point_label()
         self._point_descriptions = {p.label: p.description for p in points}
         current_item: QListWidgetItem | None = None
+        if self._ctrl.get_entry_info() is not None:
+            global_item = QListWidgetItem("● Global" if current is None else "Global")
+            global_item.setData(Qt.ItemDataRole.UserRole, None)
+            global_item.setToolTip(
+                "Use the entry-level parameters, library and aliases"
+            )
+            self._ctx_list.addItem(global_item)
+            if current is None:
+                font = global_item.font()
+                font.setBold(True)
+                global_item.setFont(font)
+                current_item = global_item
         for point in points:
             is_current = point.label == current
             caption = f"● {point.label}" if is_current else point.label
@@ -593,7 +642,14 @@ class SetupDialog(QDialog):
         if current is None:
             self._selected_description.setText("")
             return
-        description = self._point_descriptions[current.data(Qt.ItemDataRole.UserRole)]
+        label = current.data(Qt.ItemDataRole.UserRole)
+        if label is None:
+            self._selected_description.setText(
+                "Entry-level parameters, library and aliases"
+            )
+            reset_foreground(self._selected_description)
+            return
+        description = self._point_descriptions[label]
         if description:
             self._selected_description.setText(f"Description: {description}")
             reset_foreground(self._selected_description)
@@ -602,11 +658,11 @@ class SetupDialog(QDialog):
             set_foreground(self._selected_description, secondary_colour(self))
 
     def _refresh_clone_combo(self, labels: list[str]) -> None:
-        # "(empty)" uses the owner's setup seed and empty library, not unsaved session parameters.
+        # Sources list saved points only; mode owns inheritance and empty creation.
         prev: str | None = self._clone_combo.currentData()
         self._clone_combo.blockSignals(True)
         self._clone_combo.clear()
-        self._clone_combo.addItem("(empty)", userData=None)
+        self._clone_combo.addItem("Select source", userData=None)
         for label in labels:
             self._clone_combo.addItem(label, userData=label)
         self._clone_combo.blockSignals(False)

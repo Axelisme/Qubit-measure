@@ -18,6 +18,7 @@ if TYPE_CHECKING:
         EntryRequest,
         PointCreateRequest,
         PointUseRequest,
+        SavedEntry,
         SavedPoint,
         WorkingPointInfo,
     )
@@ -74,8 +75,12 @@ class SetupControlPort(Protocol):
         """Prepare/select a point in the opened entry; failure preserves binding."""
         ...
 
+    def use_global(self) -> SavedEntry:
+        """Select fresh entry-level documents; no_entry or preparation errors preserve binding."""
+        ...
+
     def new_point(self, request: PointCreateRequest) -> SavedPoint:
-        """Create from setup/clone then select; PointBindingError retains destination."""
+        """Create with inherit/empty/clone then select; binding failure retains destination."""
         ...
 
 
@@ -121,6 +126,10 @@ class SetupControlFacet(SetupControlPort):
 
     def use_point(self, request: PointUseRequest) -> SavedPoint:
         return self._context.use_point(request)
+
+    def use_global(self) -> SavedEntry:
+        """Select global through the context owner; propagate preparation failures."""
+        return self._context.use_global()
 
     def new_point(self, request: PointCreateRequest) -> SavedPoint:
         return self._context.new_point(request)

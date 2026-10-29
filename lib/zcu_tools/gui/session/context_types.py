@@ -214,15 +214,26 @@ class PointCreateRequest:
     the entry owner's exists message before writes. It rejects an unsafe label
     with InvalidInputError before any source reads or writes, including when
     clone_from is supplied.
-    description replaces the seed/clone description, including empty text.
-    origin attributes the resource command. clone_from is a same-entry label;
-    None copies setup components and uses an empty library.
+    description replaces the inherited/clone description, including empty text.
+    origin attributes the resource command. mode defaults to inherit, copying the
+    global documents. empty creates minimal parameters and no library/aliases.
+    clone requires clone_from, a same-entry label. Other modes reject clone_from.
+    Invalid mode/source combinations raise InvalidInputError before resource reads.
     """
 
     label: str
     description: str
     origin: CommandOrigin
     clone_from: str | None = None
+    mode: Literal["inherit", "empty", "clone"] = "inherit"
+
+    def __post_init__(self) -> None:
+        if self.mode not in ("inherit", "empty", "clone"):
+            raise InvalidInputError("mode must be inherit, empty or clone")
+        if (self.mode == "clone") != (self.clone_from is not None):
+            raise InvalidInputError(
+                "clone mode requires clone_from; other modes reject it"
+            )
 
 
 class PointBindingError(RuntimeError):

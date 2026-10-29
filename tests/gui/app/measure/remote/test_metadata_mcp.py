@@ -57,7 +57,10 @@ def test_md_rpc_shares_gui_values_and_rejects_reserved_keys(
         )
         invoke(
             "rpc_call",
-            {"method": "point.new", "params": {"label": "clone", "clone_from": "base"}},
+            {
+                "method": "point.new",
+                "params": {"label": "clone", "mode": "clone", "clone_from": "base"},
+            },
         )
         invoke("rpc_call", {"method": "point.use", "params": {"label": "base"}})
         assert (
