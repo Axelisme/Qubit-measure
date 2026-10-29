@@ -100,10 +100,12 @@ A visible Form is not proof of a valid cfg or a calibrated preparation.
 
 ## Numerical scope
 
-The default basis is oscillator cutoff 80 with 15 retained DC eigenstates.
-It passed seven basis checks against a finite 100/25 reference for short
-ground, π01 and π03-then-π32 reference sequences at zero flux.
-The readout passed five preparation-label checks on its selection dataset.
+The default basis is oscillator cutoff 80 with 20 retained DC eigenstates.
+Raman's full-drive comparison required this increase from 15 levels.
+The new default passed the five independent-seed reference readout checks
+and bounded STIRAP acquisition, endpoint and sampled-peak regressions.
+The historical seven reference-only basis checks used 80/15 against a finite
+100/25 reference. They are not a new whole-grid validation at 80/20.
 Separate STIRAP characterization records acquired preparation-label transfer,
 amplitude response and basis comparisons at fixed seed and controls.
 The [field guide](field-guide.md) records those values and thresholds.
@@ -114,7 +116,10 @@ Operators, GUI and MCP use acquired IQ, never those oracle populations.
 The STIRAP evidence applies only to its recorded working points, controls,
 seeds, times and numerical budgets. It does not establish convergence over
 an entire scan grid, at stronger drives or for Raman, and it does not measure
-experimental gate fidelity. Raman needs its own numerical assessment.
+experimental gate fidelity. The field guide separately records Raman's
+12-point acquired-IQ and full-drive numerical limits, plus single-point
+80/15 and 80/20 acquisition wall times. Existing working YAML files do not
+inherit a changed template; review their basis and restart after editing.
 The fixed circuit's synthetic f03 is about 7.24 GHz rather than the literature's
 6.86 GHz. Do not retune the circuit to match that number, and do not copy it
 into a Form or entry as calibration.

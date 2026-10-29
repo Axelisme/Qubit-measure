@@ -1,4 +1,4 @@
-# Synthetic Device D circuit; reference-only convergence is in field-guide.md.
+# Synthetic Device D circuit; bounded basis/readout checks are in field-guide.md.
 format: zcu.single-fluxonium
 version: 1
 
@@ -58,7 +58,7 @@ numerics:
   slow_envelope_segments_per_period: 20
   truncation:
     native_cutoff: 80
-    levels: 15 # Validated for short reference pulses, not strong STIRAP/Raman.
+    levels: 20 # Validated only for the recorded reference/STIRAP/Raman controls.
   solver:
     rtol: 0.0000001
     atol: 0.000000001

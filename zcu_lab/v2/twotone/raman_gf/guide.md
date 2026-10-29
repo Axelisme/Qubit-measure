@@ -107,4 +107,10 @@ not automatically become invalid.
 Strong-drive simulation requires full-drive non-RWA convergence checks.
 A successful acquisition alone does not establish solver accuracy.
 This adapter neither selects the evolution kernel nor changes solver settings.
-No numerical acceptance range or gate fidelity is claimed here.
+The integer-fluxonium environment defaults to oscillator cutoff 80 and
+20 retained levels. Its [field guide](../../../simulation_envs/integer_fluxonium/field-guide.md)
+records the bounded 12-point Raman characterization, the reference/STIRAP
+regressions and single-point acquire wall times at 80/15 and 80/20.
+Those checks do not validate other drives or establish gate fidelity.
+Existing working YAML files keep their own basis until reviewed and edited;
+restart the environment after changing them.
