@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Literal, TypeAlias
 from pydantic import BaseModel, ConfigDict
 
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
+from zcu_tools.resources.entry import validate_point_creation
 
 if TYPE_CHECKING:
     from zcu_tools.cfg_model import ModuleSpec, WaveformSpec
@@ -228,12 +229,10 @@ class PointCreateRequest:
     mode: Literal["inherit", "empty", "clone"] = "inherit"
 
     def __post_init__(self) -> None:
-        if self.mode not in ("inherit", "empty", "clone"):
-            raise InvalidInputError("mode must be inherit, empty or clone")
-        if (self.mode == "clone") != (self.clone_from is not None):
-            raise InvalidInputError(
-                "clone mode requires clone_from; other modes reject it"
-            )
+        try:
+            validate_point_creation(self.mode, self.clone_from)
+        except ValueError as error:
+            raise InvalidInputError(str(error)) from error
 
 
 class PointBindingError(RuntimeError):

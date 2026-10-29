@@ -66,6 +66,22 @@ if TYPE_CHECKING:
     from zcu_tools.resources.context.library import ModuleLibrary
 
 
+def validate_point_creation(
+    mode: Literal["inherit", "empty", "clone"],
+    clone_from: str | PointView | None,
+) -> None:
+    """Validate creation mode/source presence without reading or writing resources.
+
+    inherit and empty reject clone_from; clone requires a source label or view.
+    Unknown modes and invalid source combinations raise ValueError. Source
+    ownership and label validation remain with ResultEntry.new_point.
+    """
+    if mode not in ("inherit", "empty", "clone"):
+        raise ValueError(f"Unknown point creation mode: {mode!r}")
+    if (mode == "clone") != (clone_from is not None):
+        raise ValueError("clone mode requires clone_from; other modes forbid it")
+
+
 def _create_empty_library(path: Path) -> None:
     from zcu_tools.resources.context.library import (
         MODULE_LIBRARY_FORMAT,
@@ -441,10 +457,7 @@ class ResultEntry:
         Data and images are not copied or changed. Failure removes only the new
         point. No cross-file transaction is provided.
         """
-        if mode not in ("inherit", "empty", "clone"):
-            raise ValueError(f"Unknown point creation mode: {mode!r}")
-        if (mode == "clone") != (clone_from is not None):
-            raise ValueError("clone mode requires clone_from; other modes forbid it")
+        validate_point_creation(mode, clone_from)
         destination = _entry_path(
             self._result_path / "points", label, new_destination=True
         )

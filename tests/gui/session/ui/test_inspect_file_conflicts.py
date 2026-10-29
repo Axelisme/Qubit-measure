@@ -1,7 +1,7 @@
 """Inspect drafts reject external file revisions through real owner seams.
 
 All scenario interactions and observations use ComponentDriver. External edits
-model an editor writing the temporary point files, not a replacement owner.
+model an editor writing temporary entry/point files, not a replacement owner.
 """
 
 from __future__ import annotations
@@ -94,6 +94,9 @@ def conflict_ui(
     entry.new_point("point")
     with entry.module_library("point").edit() as draft:
         draft.set_waveform("Q1.waveforms.flat", ConstWaveformCfg(length=0.1))
+    if request.param == "entry-library":
+        with entry.module_library().edit() as draft:
+            draft.set_waveform("Q1.waveforms.flat", ConstWaveformCfg(length=0.1))
     bus = BaseEventBus()
     service = ContextService(
         SessionState(SessionEnv(parameters=None, soc=None, soccfg=None)),
@@ -110,12 +113,16 @@ def conflict_ui(
     control.set_parameter(require_target(control.read_context()), "Q1.rate", 5300.0)
     service.use_point(PointUseRequest("point"))
     # The missing-file case deliberately leaves aliases revision=None.
-    document = request.param
+    document = request.param.removeprefix("entry-")
     if document != "aliases-missing":
         control.apply_alias_rows((AliasRow("qubit", "Q1"),))
     path = next(
         file.path
-        for file in control.get_file_revisions()
+        for file in (
+            control.get_installed_file_revisions()[-3:]
+            if request.param.startswith("entry-")
+            else control.get_file_revisions()
+        )
         if file.document == document.removesuffix("-missing")
     )
     dialog = InspectDialog(
@@ -130,13 +137,133 @@ def conflict_ui(
     dialog.show()
     dialog.activateWindow()
     qapp.processEvents()
-    evidence = Path(os.environ.get("INSPECT_SYNC_EVIDENCE", str(tmp_path))) / document
+    evidence = (
+        Path(os.environ.get("INSPECT_SYNC_EVIDENCE", str(tmp_path))) / request.param
+    )
     try:
         yield ComponentDriver(dialog), path, evidence, service, dialog
     finally:
         dialog.hide()
         dialog.deleteLater()
         qapp.processEvents()
+
+
+def _select_entry_file(ui: ComponentDriver, document: str, evidence: Path) -> None:
+    ui.select_tab("Parameters" if document == "parameters" else "Modules")
+    ui.screenshot(evidence / "01-active.png")
+    ui.choose_option(
+        object_name=f"inspect.{document}.destination", value="Entry template"
+    )
+    ui.screenshot(evidence / "02-entry.png")
+    if document == "parameters":
+        ui.enter_text(
+            object_name="inspect.parameters.filter", value="Q1.rate", commit=False
+        )
+    else:
+        ui.select_tree_row(
+            ("waveforms", "Q1", "waveforms", "flat"), object_name="inspect.library"
+        )
+
+
+def _entry_value(ui: ComponentDriver, document: str) -> str:
+    if document == "library":
+        return ui.observe(object_name="form.input.length").text
+    return next(
+        row.columns[1] for row in ui.visible().tree_rows if row.path == ("Q1", "rate")
+    )
+
+
+def _edit_entry_value(
+    ui: ComponentDriver, document: str, value: str, *, commit: bool
+) -> None:
+    if document == "library":
+        ui.enter_text(object_name="form.input.length", value=value, commit=commit)
+    else:
+        ui.edit_tree_value(
+            ("Q1", "rate"), object_name="component_tree", value=value, commit=commit
+        )
+
+
+@pytest.mark.parametrize(
+    "conflict_ui", ["entry-parameters", "entry-library"], indirect=True
+)
+def test_inactive_entry_reload_refreshes_clean_views(conflict_ui) -> None:
+    ui, path, evidence, source, _ = conflict_ui
+    evidence = evidence / "clean-entry"
+    document = "parameters" if path.name == "parameters.yaml" else "library"
+    _select_entry_file(ui, document, evidence)
+    original = path.read_text()
+    old, new, accepted = (
+        ("1200.0", "4700.0", "4800.0")
+        if document == "parameters"
+        else ("0.1", "0.7", "0.8")
+    )
+    ui.screenshot(evidence / "03-installed.png")
+    assert _entry_value(ui, document) == old
+    candidate = original.replace(old, new)
+    path.write_text(candidate)
+    source.synchronize_files(admit_reload=False)
+    ui.screenshot(evidence / "04-pending.png")
+    assert _entry_value(ui, document) == old
+    path.write_text(candidate + "\ninvalid: [\n")
+    source.synchronize_files(admit_reload=True)
+    ui.screenshot(evidence / "05-invalid.png")
+    assert _entry_value(ui, document) == old
+    path.write_text(candidate)
+    source.synchronize_files(admit_reload=True)
+    ui.screenshot(evidence / "06-reloaded-clean.png")
+    assert _entry_value(ui, document) == new
+    assert not ui.observe(object_name=f"inspect.{document}.sync.message").visible
+
+    # A new edit must use the same installed version that supplied its display.
+    _edit_entry_value(ui, document, accepted, commit=True)
+    ui.screenshot(evidence / "07-new-edit-saved.png")
+    error_name = (
+        "component_error" if document == "parameters" else "inspect.entry.error"
+    )
+    assert not ui.observe(object_name=error_name).text
+    assert _entry_value(ui, document) == accepted
+
+
+@pytest.mark.parametrize(
+    "conflict_ui", ["entry-parameters", "entry-library"], indirect=True
+)
+def test_inactive_entry_reload_preserves_dirty_baseline(conflict_ui) -> None:
+    ui, path, evidence, source, _ = conflict_ui
+    evidence = evidence / "dirty-entry"
+    document = "parameters" if path.name == "parameters.yaml" else "library"
+    _select_entry_file(ui, document, evidence)
+    old, new, draft = (
+        ("1200.0", "4700.0", "9") if document == "parameters" else ("0.1", "0.7", "0.9")
+    )
+    error_name = (
+        "component_error" if document == "parameters" else "inspect.entry.error"
+    )
+    _edit_entry_value(ui, document, draft, commit=False)
+    ui.screenshot(evidence / "08-draft.png")
+    path.write_text(path.read_text().replace(old, new))
+    source.synchronize_files(admit_reload=True)
+    ui.screenshot(evidence / "09-reloaded-dirty.png")
+    if document == "parameters":
+        assert ui.focused_input().text == draft
+    else:
+        assert _entry_value(ui, document) == draft
+    if document == "library":
+        ui.press_key(Qt.Key.Key_Return, object_name="form.input.length")
+    else:
+        ui.press_key(Qt.Key.Key_Return)
+    ui.screenshot(evidence / "10-stale-rejected.png")
+    assert "revision" in ui.observe(object_name=error_name).text.lower()
+    ui.click(object_name=f"inspect.{document}.sync.keep")
+    ui.screenshot(evidence / "11-keep.png")
+    _edit_entry_value(
+        ui, document, "8" if document == "parameters" else "0.95", commit=True
+    )
+    ui.screenshot(evidence / "12-keep-stale-rejected.png")
+    assert "revision" in ui.observe(object_name=error_name).text.lower()
+    ui.click(object_name=f"inspect.{document}.sync.reload")
+    ui.screenshot(evidence / "13-discard-reloaded.png")
+    assert _entry_value(ui, document) == new
 
 
 @pytest.mark.parametrize("conflict_ui", ["library"], indirect=True)

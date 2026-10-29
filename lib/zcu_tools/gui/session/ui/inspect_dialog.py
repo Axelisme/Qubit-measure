@@ -708,8 +708,11 @@ class InspectDialog(QDialog):
         self._populate_from_context()
 
     def _on_file_changed(self, payload: FileChangedPayload) -> None:
-        del payload
-        # Source observations alone must not rebuild an active parameter editor.
+        if payload.status.state == "reloaded":
+            # Read installed cache only; refresh preserves drafts and their baselines.
+            self.refresh()
+            return
+        # Pending/error observations alone must not rebuild a parameter editor.
         self._library_sync.refresh(has_draft=self._has_library_draft())
         self._aliases.refresh()
         self._component_tree.refresh_file_status()

@@ -36,6 +36,7 @@ from .result_entry import (
     entry_component_paths,
     entry_predictor_paths,
     rename_entry,
+    validate_point_creation,
 )
 from .roles import RoleView, role_registry
 from .save_layout import (
