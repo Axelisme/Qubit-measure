@@ -155,6 +155,31 @@ def analyze_reference_iq(
     )
 
 
+def classify_reference_iq(
+    signals: NDArray[np.complex128], centroids: NDArray[np.complex128]
+) -> NDArray[np.float64]:
+    """Classify acquired shots using three fixed reference IQ centers.
+
+    signals has arbitrary leading scan axes and a nonempty final shot axis.
+    centroids has shape (3,) in label order (g,e,f), in the same ADC units as
+    signals, e.g. analyze_reference_iq(...).centroids. Centers must be distinct.
+    Return scan axes plus a final three-label fraction axis. Exact nearest-center
+    ties choose the lowest label. No retraining, correction or clipping occurs.
+    Empty/nonfinite shots or invalid centers raise ValueError. Preparation-label
+    fractions are not latent energy-state populations.
+    """
+    if signals.ndim < 1 or signals.shape[-1] == 0 or not np.isfinite(signals).all():
+        raise ValueError("Acquired IQ must have a nonempty shot axis and finite shots")
+    if centroids.shape != (3,) or not np.isfinite(centroids).all():
+        raise ValueError("Reference centroids must have shape (3,) and be finite")
+    if len(np.unique(centroids)) != 3:
+        raise ValueError("Reference centroids must be distinct")
+    predictions = np.argmin(abs(signals[..., None] - centroids), axis=-1)
+    return np.stack(
+        [(predictions == label).mean(axis=-1) for label in range(3)], axis=-1
+    )
+
+
 def classify_result(
     signals: NDArray[np.complex128],
     g_center: complex,
