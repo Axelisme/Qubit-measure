@@ -11,11 +11,14 @@ def program(
     *,
     reps=2,
     routes=((0, 0),),
+    n_readouts=1,
     trigger_time: float | None = 0,
+    config_time: float | None = 0,
+    readout_length: float = 0.2,
     cleanup=None,
     stream_transform=None,
 ):
-    env = white_noise(std_adc=0, n_gens=2, routes=routes)
+    env = white_noise(std_adc=0, n_gens=2, n_readouts=n_readouts, routes=routes)
 
     class Program(TimelineProgramV2):
         @property
@@ -28,13 +31,14 @@ def program(
             self.add_pulse(
                 0, "p", style="const", freq=100, phase=30, gain=-0.25, length=0.1
             )
-            self.declare_readout(0, length=0.2)
+            self.declare_readout(0, length=readout_length)
             self.add_readoutconfig(0, "ro", freq=100, gen_ch=0)
             if initialize is not None:
                 initialize(self)
 
         def _body(self, cfg):
-            self.send_readoutconfig(0, "ro", t=0)
+            if config_time is not None:
+                self.send_readoutconfig(0, "ro", t=config_time)
             body(self)
             if trigger_time is not None:
                 self.trigger([0], t=trigger_time)

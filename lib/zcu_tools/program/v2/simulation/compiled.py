@@ -401,10 +401,13 @@ def _try_vector(
     outputs.begin(machine, np.arange(size, dtype=np.int64))
     for record in body:
         _located_execute(record, machine, outputs)
-    outputs.finish(machine)
+    try:
+        outputs.finish(machine)
+    except (ValueError, KeyError, IndexError) as exc:
+        raise _failure(records[end], exc) from exc
     for record in tail:
         _located_execute(record, machine, outputs)
-    return True
+    return outputs.configs_independent(machine)
 
 
 def _located_execute(
@@ -444,6 +447,7 @@ def build_compiled_request(
     dims = tuple(prog.loop_dict[n] for n in names)
     outputs = Outputs(prog, prod(dims), routes, binding.envelope_pool)
     if not _try_vector(prog, records, loops, outputs):
+        outputs = Outputs(prog, prod(dims), routes, binding.envelope_pool)
         _OrderedExecution(prog, records, loops, outputs).run()
     template = outputs.template()
     windows = tuple(

@@ -1,6 +1,6 @@
 # Explicit acquisition environments
 
-**Last updated:** 2026-10-29
+**Last updated:** 2026-10-30
 
 **讀者：** framework-dev。模擬 acquisition 的 request、round 與 raw source 契約。
 
@@ -64,6 +64,16 @@ Other carried state follows instruction order across scan points.
 The builder rejects rep-varying outputs and unresolved readout routes before returning a request.
 Runtime ADC words use overlapping output carriers to resolve their frequency image.
 Static ADC configuration uses the shared QICK `calc_ro_freq` adapter.
+Runtime readout WPORT commands are instantaneous config updates. Each port's FIFO
+uses the maximum of the command timestamp and its previous effective time, without
+wave duration or pipeline delays. Each read uses the last update effective at its
+window start. A different frequency or phase inside the open window raises before
+request construction; an equal update is accepted. Missing start-time config also
+raises. Absolute config times and pending FIFO updates carry across points and reps.
+Vector execution requires every port to overwrite at the shot origin and drain
+before the next shot; otherwise ordered execution retains that carry. Readout
+frequency or phase changes across reps raise rather than changing request layout.
+This timing rule is a simulation model, not a sample-exact hardware claim.
 
 This builder is not the acquire frontend. `_simulation_call` still uses the Module tree.
 The core interpreter supports register ALU operations, Z/S flags, DMEM/WMEM and

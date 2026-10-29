@@ -52,7 +52,9 @@ class Outputs:
             if ctrl is not None:
                 self._port(int(ctrl), "ro", ch)
         self.events: dict[tuple[int, int], EventSlot] = {}
-        self.configs: dict[int, tuple[NDArray[np.float64], NDArray[np.float64]]] = {}
+        # Per-port FIFO rows: absolute effective us, uint32 frequency, phase degrees,
+        # and emitting preopt position. Absolute time retains pending shot carry.
+        self.configs: dict[int, list[NDArray[np.float64]]] = {}
         self.reads: dict[int, list[NDArray[np.float64]]] = {
             ch: [] for ch in prog.ro_chs
         }
@@ -108,16 +110,25 @@ class Outputs:
             )
         else:
             raise ValueError("unsupported wave port source")
-        start = (
-            machine.ref
-            - self.origin
-            + machine.value(inst.time if inst.time is not None else Register("s14"))
-        ) / float(self.prog.tproccfg["f_time"])
+        timestamp = machine.ref + machine.value(
+            inst.time if inst.time is not None else Register("s14")
+        )
+        start = (timestamp if kind == "ro" else timestamp - self.origin) / float(
+            self.prog.tproccfg["f_time"]
+        )
         cfg = self.prog.soccfg["gens" if kind == "gen" else "readouts"][ch]
         phase_bits = int(cfg.get("b_phase", 32))
         phase = (words[:, 1] % 2**phase_bits) * 360 / 2**phase_bits
         if kind == "ro":
-            self.configs[ch] = (words[:, 0].astype(np.float64), phase)
+            updates = self.configs.setdefault(ch, [])
+            if updates:
+                start = np.maximum(start, updates[-1][:, 0])
+            frequency = (words[:, 0] % 2**32).astype(np.float64)
+            updates.append(
+                np.column_stack(
+                    (start, frequency, phase, np.full(machine.size, float(position)))
+                )
+            )
             return
         if "mux_tones" in self.prog.gen_chs[ch]:
             self._mux_wave(machine, ch, words, position, source, start)
@@ -344,7 +355,11 @@ class Outputs:
                 raise ValueError(
                     f"ADC {ch}: static={self.prog.ro_chs[ch]['trigs']}, actual={index + 1} reads in this shot"
                 )
-            if ch not in self.configs and cfg.get("tproc_ctrl") is None:
+            while len(self.reads[ch]) <= index:
+                self.reads[ch].append(np.zeros((self.size, 3), dtype=np.float64))
+            read = self.reads[ch][index]
+            self._put(read[:, 0], start, machine)
+            if cfg.get("tproc_ctrl") is None:
                 gen = self.prog.ro_chs[ch]["gen_ch"]
                 mixer = float(
                     self.prog.gen_chs[gen].get("mixer_freq", {}).get("rounded", 0)
@@ -352,16 +367,8 @@ class Outputs:
                 frequency, phase = static_readout_parameters(
                     self.prog, ch, mixer_mhz=mixer
                 )
-                self.configs[ch] = (
-                    np.full(machine.size, frequency, dtype=np.float64),
-                    np.full(machine.size, phase, dtype=np.float64),
-                )
-            frequency, phase = self.configs[ch]
-            while len(self.reads[ch]) <= index:
-                self.reads[ch].append(np.zeros((self.size, 3), dtype=np.float64))
-            read = self.reads[ch][index]
-            for col, values in enumerate((start, frequency, phase)):
-                self._put(read[:, col], values, machine)
+                self._put(read[:, 1], np.full(machine.size, frequency), machine)
+                self._put(read[:, 2], np.full(machine.size, phase), machine)
             self.read_count[ch] += 1
             self.current_end = np.maximum(
                 self.current_end,
@@ -375,6 +382,7 @@ class Outputs:
                 raise ValueError(
                     f"ADC {ch}: static={self.prog.ro_chs[ch]['trigs']}, actual={count} reads in this shot"
                 )
+        self._resolve_configs(machine)
         end = (machine.ref - self.origin) / float(self.prog.tproccfg["f_time"])
         for pos, slot in self.events.items():
             if (
@@ -384,6 +392,62 @@ class Outputs:
                 raise ValueError("reps loop changes pulse presence")
         self._put(self.duration, np.maximum(self.current_end, end), machine)
         self.visited[self.points] = True
+
+    def _resolve_configs(self, machine: Machine) -> None:
+        for ch, reads in self.reads.items():
+            if self.prog.soccfg["readouts"][ch].get("tproc_ctrl") is None:
+                continue
+            duration = self.prog.ro_chs[ch]["length"] / float(
+                self.prog.soccfg["readouts"][ch]["f_output"]
+            )
+            for index, read in enumerate(reads):
+                start = read[self.points, 0] + self.origin / float(
+                    self.prog.tproccfg["f_time"]
+                )
+                frequency = np.full(machine.size, np.nan)
+                phase = np.full(machine.size, np.nan)
+                for config in self.configs.get(ch, []):
+                    active = config[:, 0] <= start
+                    frequency[active] = config[active, 1]
+                    phase[active] = config[active, 2]
+                if np.any(np.isnan(frequency)):
+                    lane = int(np.flatnonzero(np.isnan(frequency))[0])
+                    raise ValueError(
+                        f"ADC {ch} read {index} point {self.points[lane]}: no effective runtime config at window start {start[lane]}"
+                    )
+                for config in self.configs.get(ch, []):
+                    changed = (config[:, 1] != frequency) | (config[:, 2] != phase)
+                    conflict = (
+                        (start < config[:, 0])
+                        & (config[:, 0] < start + duration)
+                        & changed
+                    )
+                    if np.any(conflict):
+                        lane = int(np.flatnonzero(conflict)[0])
+                        raise ValueError(
+                            f"ADC {ch} read {index} window [{start[lane]}, {start[lane] + duration}): "
+                            f"config effective at {config[lane, 0]}, "
+                            f"PortWriteInst WPORT_WR at preopt {int(config[lane, 3])}; "
+                            f"initial=(frequency_word={frequency[lane]}, phase={phase[lane]}), "
+                            f"updated=(frequency_word={config[lane, 1]}, phase={config[lane, 2]})"
+                        )
+                self._put(read[:, 1], frequency, machine)
+                self._put(read[:, 2], phase, machine)
+
+    def configs_independent(self, machine: Machine) -> bool:
+        """Prove vector lanes overwrite runtime state before reads, with no pending carry.
+
+        Each port must first update at the shot origin and drain by the next shot.
+        Otherwise ordered execution retains pending FIFO updates across points/reps.
+        """
+        clock = float(self.prog.tproccfg["f_time"])
+        return all(
+            bool(
+                np.all(updates[0][:, 0] == self.origin / clock)
+                and np.all(updates[-1][:, 0] <= machine.ref / clock)
+            )
+            for updates in self.configs.values()
+        )
 
     def template(self) -> TimelineTemplate:
         """Return detached point arrays after resolving every read's physical route."""
