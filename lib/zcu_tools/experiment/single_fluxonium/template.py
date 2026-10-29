@@ -196,8 +196,8 @@ def plan_template(
     settings is validated physical/wiring data; snapshot supplies exactly the live
     DC source value in its native A/V unit. template arrays use us/MHz/degrees.
     Support uses the shared nearest-2-ns, ties-even conversion. Only the bound
-    microwave generator enters tracks. Fast-flux controls pass through
-    FilteredFlux including delay, signed complex envelopes and all exponential
+    microwave generators enter tracks under their own source names. Fast-flux
+    controls pass through FilteredFlux including delay, signed complex envelopes and all exponential
     tails. Absolute Phi0 waveform samples use a 2 ns grid plus event sides and
     readout endpoint; interpolation is linear. Quantized bath levels use
     midpoint flux at solver.bath_segment_ns intervals plus delayed events,
@@ -237,17 +237,21 @@ def plan_template(
     read_events = logical_event_contents(template, drive, windows[0], memo)
     contents = read_events[-1]
     microwave, fast_flux = [], []
-    for event in template.events:
+    drive_names = {line.gen_ch: line.name for line in settings.drive_lines.values()}
+    for index, event in enumerate(template.events):
         if event.gen_ch == drive.gen_ch:
             continue
-        if event.gen_ch == settings.drive_line.gen_ch:
-            microwave.append(drive_track(event, settings.drive_line.name, memo))
+        if event.gen_ch in drive_names:
+            microwave.append(drive_track(event, drive_names[event.gen_ch], memo))
         elif (
             settings.flux_line is not None and event.gen_ch == settings.flux_line.gen_ch
         ):
             fast_flux.append(drive_track(event, settings.flux_line.name, memo))
         else:
-            raise ValueError(f"unbound single-fluxonium generator {event.gen_ch}")
+            raise ValueError(
+                f"template.events.{index}.gen_ch: unbound single-fluxonium "
+                f"generator {event.gen_ch}; declare a drive_lines or flux_line binding"
+            )
     flux, waveform = _flux_inputs(settings, dc, tuple(fast_flux), contents.end_ns)
     return SingleFluxoniumPlan(
         TimelineBatch(

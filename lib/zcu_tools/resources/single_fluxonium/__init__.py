@@ -14,7 +14,9 @@ def parse_single_fluxonium(document: object) -> SingleFluxoniumSettings:
     """Validate a decoded external document into an immutable named snapshot.
 
     Accept a mapping or SingleFluxoniumSettings with the schema's required
-    sections and units. Unknown fields, invalid dimensions/units, nonfinite
+    sections and units. Legacy drive_line becomes one named drive_lines entry;
+    providing both forms fails. Returned settings and serialization use drive_lines.
+    Unknown fields, invalid dimensions/units, nonfinite
     numbers and colliding source names/generators raise ValueError with dotted
     field paths. No I/O, mutation, device creation or convergence check occurs.
     """
