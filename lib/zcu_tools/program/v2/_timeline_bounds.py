@@ -8,6 +8,7 @@ from qick.asm_v2 import CloseLoop, Macro, OpenLoop, QickParam, TimedMacro, Write
 
 from ._timeline_guard import bounds
 from .ir.instructions import BaseInst
+from .macro.structure import MarkedCloseLoop, MarkedOpenLoop
 
 
 @dataclass(frozen=True)
@@ -277,7 +278,10 @@ class ProducerBounds:
                 native_sweep = register is not None and register.init is not None
                 native_loop = name in prog.loop_dict
                 if (native_sweep or native_loop) and (
-                    origin is None or type(origin) in (OpenLoop, CloseLoop)
+                    # These exact wrappers only annotate the unchanged QICK shell.
+                    origin is None
+                    or type(origin)
+                    in (OpenLoop, CloseLoop, MarkedOpenLoop, MarkedCloseLoop)
                 ):
                     continue
                 raise ValueError(

@@ -49,6 +49,28 @@ current snapshot. Set public `binprog = None` before `compile()` to rebuild;
 the accessor raises `RuntimeError` while no compiled binary is available.
 This compiler artifact contains no simulation state or frontend dependency.
 
+The snapshot includes zero-word source scopes and native QICK loop annotations.
+`SOURCE_START` / `SOURCE_END` carry a Module diagnostic name or a native pulse
+source in `name`. Scopes nest; the innermost active scope labels each output,
+and its end restores the enclosing source. Native pulse sources use the explicit
+`tag`, or `native:pulse:<ordinal>` with a one-based call ordinal. Tagged native
+calls also advance the ordinal. Module lowering uses `source_scope(name)` and
+its internal pulse calls neither allocate native sources nor advance ordinals.
+Each actual recompile resets these scopes and ordinals.
+
+`MarkedOpenLoop` / `MarkedCloseLoop` preserve the four `LOOP_*` records. Their
+`info["native"] is True` declares that existing QICK instructions own the shell,
+including waveform/register sweep increments and resets. `LOOP_START` also
+records resolved `counter_reg`, trip count `n`, and `range_hint=None`.
+`LOOP_BODY_START` follows native counter initialization; `LOOP_BODY_END` precedes
+native sweep updates/backedge; `LOOP_END` follows the complete closing shell.
+The compiler snapshots the full logical stream, then gives the optimizer a new
+sequence excluding exactly `SOURCE_START` / `SOURCE_END` and these four native
+loop annotations. It keeps all instructions and labels. Unflagged structured
+loops and branches still use the existing IR parser/lowering. Unknown metadata
+still fails there. `TIMING_BOUNDARY` continues through the anchor/link path;
+`body_start` / `body_end` exclude final QICK shot wait/delay operations.
+
 ## Compiled timing analysis
 
 `analyze_timing(CompiledTimingInput(prog_list, labels, layout))` reads linked

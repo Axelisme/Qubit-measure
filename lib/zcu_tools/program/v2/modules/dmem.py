@@ -437,4 +437,4 @@ class ScanWith(Module):
     def run(
         self, prog: ModularProgramV2, t: float | QickParam = 0.0
     ) -> float | QickParam:
-        return self.repeat_mod.run(prog, t)
+        return self.repeat_mod.emit(prog, t)

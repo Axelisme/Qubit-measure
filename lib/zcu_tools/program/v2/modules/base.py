@@ -48,6 +48,19 @@ class Module(ABC):
         self, prog: ModularProgramV2, t: float | QickParam = 0.0
     ) -> float | QickParam: ...
 
+    def emit(
+        self, prog: ModularProgramV2, t: float | QickParam = 0.0
+    ) -> float | QickParam:
+        """Run this legacy emission at t us, with this Module as its source.
+
+        Return run's blocking end in us. Composite Modules call emit on their
+        children so nested output uses the child's diagnostic name and restores
+        the parent scope afterward. Declaration must already have completed.
+        run errors propagate after closing the source annotation.
+        """
+        with prog.source_scope(self.name):
+            return self.run(prog, t)
+
     def declare(self, prog: TimelineProgramV2) -> None:
         """Declare resources on prog before emission.
 

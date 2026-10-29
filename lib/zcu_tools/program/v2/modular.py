@@ -76,12 +76,14 @@ class ModularProgramV2(MyProgramV2, ProgramResourcesMixin):
 
     @override
     def _body(self, cfg: None) -> None:
+        self.meta_macro("TIMING_BOUNDARY", "body_start")
         t = 0.0
         for module in self.modules:
             if logger.isEnabledFor(logging.DEBUG):
                 self.debug_macro(f"{type(module).__name__}({module.name})", t)
-            t = module.run(self, t)
+            t = module.emit(self, t)
         self.delay(t=t)
+        self.meta_macro("TIMING_BOUNDARY", "body_end")
 
     def validate_module_execution(self) -> None:
         """Require setup/body behavior to be fully described by declared Modules.

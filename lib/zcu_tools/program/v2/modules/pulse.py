@@ -181,6 +181,8 @@ class Pulse(Module):
         if cfg is None:
             return t
 
+        if self.pulse_id is None:
+            raise RuntimeError(f"{self.name}: initialize the pulse before emission")
         prog.pulse(cfg.ch, self.pulse_id, t=t + cfg.pre_delay, tag=self.tag)
         if self.block_mode:
             return t + self.total_length(prog)
@@ -415,13 +417,13 @@ class TableLengthPulse(Module):
             self._duration_loader,
             self._runtime_pulse,
         ):
-            module.run(prog, t)
+            module.emit(prog, t)
 
     def run(
         self, prog: ModularProgramV2, t: float | QickParam = 0.0
     ) -> float | QickParam:
         self.play_parallel(prog, t)
-        return self._wait.run(prog, t)
+        return self._wait.emit(prog, t)
 
     def allow_rerun(self) -> bool:
         return True
