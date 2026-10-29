@@ -193,6 +193,7 @@ class InspectDialog(QDialog):
 
         self._tabs = QTabWidget()
         self._component_tree = ComponentTreeWidget(ctrl)
+        self._scope.add_cleanup(self._component_tree.detach)
         self._aliases = AliasPanel(ctrl)
         self._scope.add_cleanup(self._aliases.detach)
         self._tabs.addTab(self._component_tree, "Parameters")

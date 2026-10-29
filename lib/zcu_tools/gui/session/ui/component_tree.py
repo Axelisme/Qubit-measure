@@ -185,6 +185,14 @@ class ComponentTreeWidget(QWidget):
         layout.addWidget(self._hint)
         self.refresh()
 
+    def detach(self) -> None:
+        """Retire scoped callbacks before the host closes or replaces the widget.
+
+        Idempotent on the Qt owner thread. Cleanup failures propagate; the host
+        must wait for successful cleanup before deleting children.
+        """
+        self._scope.close()
+
     def set_read_only(self, *, read_only: bool) -> None:
         """Block Value editing and Add while preserving tree/destination browsing.
 

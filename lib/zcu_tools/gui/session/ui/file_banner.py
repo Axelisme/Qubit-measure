@@ -23,8 +23,10 @@ from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 
 
 class FileBanner(QWidget):
-    """Show one active document's pending/reloaded/error projection.
+    """Show one installed document's pending/reloaded/error projection.
 
+    setup=False selects the active document group (entry in GLOBAL, point in
+    POINT); setup=True selects the installed entry group in either state.
     control owns revision checks and reload validation. document selects the
     owner file; children are named 'inspect.<document>.sync.message',
     'inspect.<document>.sync.reload' and 'inspect.<document>.sync.keep'.
@@ -43,6 +45,12 @@ class FileBanner(QWidget):
         setup: bool = False,
         parent: QWidget | None = None,
     ) -> None:
+        """Bind document notices and reload actions to the selected installed group.
+
+        setup=False uses active documents; setup=True uses entry documents,
+        including while a point is active. on_reloaded runs after a successful
+        reload so the host can discard its draft. parent owns the Qt widget.
+        """
         super().__init__(parent)
         self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
         self._control = control

@@ -22,7 +22,7 @@ Availability 不作為 use_point、Load、Save 或其他讀取的額外前置條
 `ContextService.apply_writeback` 是底層 accept 入口。它驗證 caller 明示的 entry／point target，再綁定資源交共用 executor。Executor 先 append accepted event，再依序呼叫 `set_parameters` 提交參數組、`set_modules` 提交混合 module／waveform library 組，最後逐筆追加 records。每組保留供應順序。參數與 library 各用一次 edit，任一項無效整組不寫。`set_parameter`、`set_module`、`set_waveform` 與 `apply_library_change` 共用這些 target 規則。Global 的參數與 library 不要求選 point。Detached target 不改目前 selection。成功前綴與 accepted event 保留，首錯停止，不自動建點、回滾或重試。每個已提交文件只發布一次。Receipt 的 committed index 保留供應位置，不用成功項目數切供應序前綴。Record 的欄位驗證與 JSONL append 仍由 resource owner 負責。Application 的 proposal、目的地與 receipt 契約見 [writeback owner](../app/measure/writeback/README.md)。
 
 模板綁定由呼叫端在 `Template.bindings` 明填。
-Inspect 的 New 以目前 point 的同名 alias 解析目標填入 bindings。缺少、無法解析或綁定清單的 placeholder 顯示單一名稱綁定錯誤並停用 Create，切換範本重新載入。
+Inspect 的 New 使用所選 Destination 的固定 capture，以其中的同名 alias 解析目標填入 bindings。缺少、無法解析或綁定清單的 placeholder 顯示單一名稱綁定錯誤並停用 Create，切換範本重新載入。
 其他 library 新建 caller 仍須明填，缺 binding 在展開時報 `ValueError`。Measure RPC 的建立 caller 也使用固定 capture 的同名 resolved aliases，缺列或未綁定時先指名所需 alias，不由 entry 名稱推測角色。
 
 ## Context、session environment 與 Run snapshot
