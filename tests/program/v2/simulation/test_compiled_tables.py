@@ -82,6 +82,18 @@ def module_program(
 
 
 @pytest.mark.parametrize("native", [False, True])
+def test_shared_readout_cfg_keeps_each_semantic_source(native):
+    cfg = receiver()
+    prog, env = module_program(
+        [cfg.build("herald"), cfg.build("terminal")], native=native
+    )
+    point = request(prog, env).materialize_point(0)
+    assert [event.source for event in point.events] == ["herald", "terminal"]
+    assert [event.gen_ch for event in point.events] == [0, 0]
+    assert len(point.readouts[0].trigger_us) == 2
+
+
+@pytest.mark.parametrize("native", [False, True])
 @pytest.mark.parametrize("compressed", [False, True])
 def test_loadvalue_selects_compiled_waveform_from_declared_table(native, compressed):
     loader = LoadValue(
@@ -139,6 +151,7 @@ def test_loadword_preserves_uint32_patterns_for_pulse_and_adc_consumers(native):
     result = request(prog, env)
     for index, (frequency, gain) in enumerate([(100, 3276), (200, -6552)]):
         point = result.materialize_point(index)
+        assert point.events[0].source == "readout"
         assert point.events[0].frequency_mhz == pytest.approx(frequency, abs=1e-4)
         assert point.events[0].gain == pytest.approx(gain / 32766)
         assert point.readouts[0].frequency_mhz == pytest.approx((frequency,), abs=1e-4)
@@ -154,6 +167,11 @@ def test_table_readout_exec_after_updates_and_wrap_survive_outer_reps(native):
     )
     prog, env = module_program([table], native=native, sweep=(("scan", 3),), reps=3)
     result = request(prog, env)
+    assert [result.materialize_point(i).events[0].source for i in range(3)] == [
+        "readout",
+        "readout",
+        "readout",
+    ]
     assert [
         result.materialize_point(i).events[0].frequency_mhz for i in range(3)
     ] == pytest.approx([100, 250, 200], abs=1e-4)
@@ -179,6 +197,16 @@ def test_scanwith_uses_local_counter_to_select_each_candidate(native):
     assert [e.iterations[0][1] for e in events[:3]] == [0, 1, 2]
 
 
+@pytest.mark.parametrize("native", [False, True])
+def test_join_preserves_readout_owner_and_author_pulse_child(native):
+    joined = Join(receiver().build("readout"), drive(ch=1).build("author_child"))
+    prog, env = module_program([joined], native=native)
+    point = request(prog, env).materialize_point(0)
+    assert [event.source for event in point.events] == ["readout", "author_child"]
+    assert [event.gen_ch for event in point.events] == [0, 1]
+    assert point.readouts[0].generator_channels == (0,)
+
+
 def test_legacy_branch_dispatch_table_and_repeat_preserve_selected_sources():
     choice = Branch(
         "scan",
@@ -191,12 +219,12 @@ def test_legacy_branch_dispatch_table_and_repeat_preserve_selected_sources():
     result = request(prog, env)
     assert [e.source for e in result.materialize_point(0).events] == [
         "first",
-        "readout_pulse",
+        "readout",
     ]
     assert [e.source for e in result.materialize_point(1).events] == [
         "second",
         "second",
-        "readout_pulse",
+        "readout",
     ]
     assert [e.iterations for e in result.materialize_point(1).events[:2]] == [
         (("inner", 0),),
