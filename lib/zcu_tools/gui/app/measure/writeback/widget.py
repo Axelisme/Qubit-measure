@@ -436,7 +436,7 @@ class WritebackWidget(QWidget):
         *,
         unavailable_reasons: tuple[str, ...] = (),
     ) -> None:
-        """Render persistent items with service-owned captured preview facts.
+        """Render persistent items with draft-owned captured preview facts.
 
         values maps every item session_id to its current preview. Missing keys
         raise KeyError; the view never resolves a target or substitutes active

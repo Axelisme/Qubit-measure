@@ -16,7 +16,7 @@ Do not interpret mean IQ curves or heatmaps as populations or gate fidelity.
 2. At the intended bias, use `twotone/freq` to find 0–1 and 0–3 from ground. Narrow each scan before accepting its frequency.
 3. Calibrate a pi pulse on 0–3 with Rabi. In `twotone/freq`, enable `init_pulse` and enter this pi03 preparation. Then scan the probe to find 3–2 from the prepared state.
 4. Record the measured 0–3 and 3–2 carriers in MHz. Enter them as Pump carrier and Stokes carrier. Neither field has a model-derived default.
-5. Confirm two separately bound charge-drive generators and their allowed gains. The displayed generator numbers are editable starting values, not proof of wiring.
+5. Confirm two separately bound charge-drive generators and their allowed gains. The displayed generator numbers are editable starting values, not proof of wiring. In the single-fluxonium simulator, acquire explicitly requires Pump and Stokes to bind declared charge lines; a flux, readout or unbound generator is rejected before evolution. On real hardware, the operator must verify both physical channel roles. Hardware acquisition does not carry or execute this simulator-only check.
 6. Prepare g/e/f readout references with `singleshot/qutrit_population`. Analyze the references and Apply the proposed centroid3 classifier to the captured readout library module. Confirm the target and its bound resonator slot before Apply. Reset or reopen STIRAP to capture that module, then Run. Circle rejection is not an f measurement.
 
 Open `New Tab → twotone → stirap`.
@@ -55,6 +55,41 @@ Detuning mode adds each offset to its entered carrier.
 The heatmap color is the magnitude of mean acquired IQ.
 It is a Cartesian Pump × Stokes grid, not a paired one-dimensional sweep.
 After changing mode, fill its newly shown scan endpoints and point counts.
+
+## MCP recipe
+
+Use `recipe_guide(adapter="twotone/stirap")` to read this guide.
+The single `stirap` tool runs the same adapter through Run, Analyze and Save.
+Choose `scan_mode` explicitly; the recipe never chooses a mode or tunes controls.
+
+| Recipe input | delay | amplitude | detuning |
+| --- | --- | --- | --- |
+| `start`, `stop`, `n` | Stokes lead endpoints in us and point count | Common gain-scale endpoints and point count | Pump detuning endpoints in MHz and point count |
+| `stokes_start_mhz`, `stokes_stop_mhz`, `stokes_n` | Unused | Unused | Stokes detuning endpoints in MHz and point count |
+
+Delay checks pulse ordering. Amplitude changes both gains at fixed sigma.
+Detuning scans a Cartesian Pump × Stokes grid, with positive offsets added to
+operator-entered carriers. Each `n` maps to the corresponding saved cfg `expts`.
+Use `pump_freq_mhz` and `stokes_freq_mhz` for measured spectroscopy values.
+`width_us` is Gaussian sigma; `stokes_lead_us` sets the fixed lead outside delay
+mode. Positive lead means Stokes first. Gains use signed native units.
+`readout_ref` selects the acquired centroid3 readout library module.
+
+Omitted inputs retain Form values; explicit null goes unchanged to the owner.
+Python KEEP marks omission and is not a JSON value. Ordered `overrides` apply
+after named inputs and before validation. Missing or invalid Form inputs stop
+before Run and retain owner paths and reasons. No model spectrum supplies a
+missing frequency. There is no automatic reference acquisition or live-library
+calibration lookup during analysis.
+
+The report gives the saved confusion matrix condition number and minimum
+singular value. Full raw/corrected g/e/f arrays remain in the analysis summary
+and saved artifacts. There is no writeback proposal or question. Analysis
+failure still saves acquired raw IQ; inspect each Save output receipt rather
+than treating recipe completion as proof that every format was saved.
+Restart the MCP server after changing recipe declarations; GUI Reload does not
+reload that separate process. No separate diagnostic or qutrit-reference tool
+is registered.
 
 ## Run and saved results
 

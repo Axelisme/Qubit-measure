@@ -213,27 +213,52 @@ The historical STIRAP numbers above retain their original 80/15 scope.
 
 ## Acquisition wall time
 
-One public legacy `ModularProgramV2.acquire` call at the same STIRAP lead
-+0.3 us point took 1.290324 s at 80/15 and 20.510185 s at 80/20.
-These are single samples, not a performance threshold or a stable speed ratio.
+Paired public legacy `ModularProgramV2.acquire` timings cover two single points
+at both 80/15 and 80/20. Each condition has three cold and three warm samples.
+The table gives medians and minimum-to-maximum ranges, not standard deviations.
+
+| Working point | Basis | Cold median / s | Cold min to max / s | Warm median / ms | Warm min to max / ms |
+| --- | --- | ---: | --- | ---: | --- |
+| Raman resonant | 80/15 | 17.466256 | 17.071893 to 17.719279 | 5.286 | 4.773 to 5.953 |
+| Raman resonant | 80/20 | 16.771079 | 15.547812 to 18.682773 | 4.748 | 4.698 to 5.015 |
+| STIRAP lead +0.3 us | 80/15 | 30.204298 | 25.398835 to 31.043428 | 13.640 | 13.511 to 18.326 |
+| STIRAP lead +0.3 us | 80/20 | 26.204999 | 25.987266 to 27.547230 | 13.214 | 13.186 to 13.776 |
+
+Each of twelve serial fresh processes created a new environment and program,
+an empty runtime cache and an empty source-namespaced Numba disk cache.
+Cold is the first acquire, including first-use Numba compilation, with no prior
+evolution or acquire. Warm is the second acquire on the identical program and
+environment, after exactly one complete acquire with the same controls.
+It measures repeated identical acquisition, not the speed of a new scan point.
+The three trials alternated basis order as 80/15 then 80/20, 80/20 then 80/15,
+and 80/15 then 80/20. Each process recorded start/end timestamps and load averages.
+No other benchmark or heavy pytest ran concurrently. Other lanes could still
+run targeted tests, so host load was not controlled completely.
+
+Raman used the resonant single-tone carrier, requested gain 0.9 and retained
+0.1 us sampled envelope from its characterization. STIRAP used the carriers,
+Gaussian sigma 0.2 us and gains 0.015/0.05 from its characterization above.
+Both used seed 20261106, 4096 shots and their recorded readout settings.
+Only the retained-level count changed between bases.
 The timer starts immediately before acquire and stops when it returns.
 It includes simulator admission, numerical evolution, ADC sampling and buffer
 collection. It excludes imports, environment and program construction, public
 template capture, IQ conversion, analysis, plotting and file I/O.
-Both calls used the carriers, Gaussian sigma 0.2 us, gains 0.015/0.05,
-seed 20261106, 4096 shots and readout settings in the STIRAP table above.
-
-Each basis ran once in a fresh process and environment, with no acquire warmup.
-The existing source-namespaced Numba disk cache was retained.
-The 80/20 call ran first with 178 cache files present; the later 80/15 call
-started with 214. Compilation and disk-cache reuse can therefore contribute
-to the difference. Do not treat these samples as isolated basis-compute costs
-or predict a whole-grid duration by multiplying them.
 The host was an Intel Core Ultra 7 258V, 8 logical CPUs, Linux x86_64
-7.2.11-arch1-1, Python 3.13.11 and NumPy 2.4.6.
-OMP, OpenBLAS, MKL and Numba thread limits were all 1.
+7.2.11-arch1-1, Python 3.13.11, NumPy 2.4.6, SciPy 1.17.1 and Numba 0.65.1.
+OMP, OpenBLAS, MKL, Numba and NumExpr thread limits were all 1.
 The headless run used Qt offscreen and Matplotlib Agg, with displays unset.
-No repeated benchmark or performance scan was run.
+
+All four basis comparisons, Raman and STIRAP in cold and warm states, are noisy.
+In each comparison, the larger within-basis spread, maximum minus minimum,
+exceeds the absolute difference between basis medians.
+The paired timings did not resolve a higher acquisition cost for 80/20 than
+80/15. The default remains 80/20. This does not establish that 80/20 is faster,
+an isolated basis cost or a stable speed ratio.
+Do not predict a whole-grid duration by multiplying these samples.
+They replace the earlier cache-mismatched single timings; the original raw data
+and logs remain available. No performance threshold changed.
+These are simulator acquire timings, not measurement-agent evidence.
 
 ## Raman acquired-IQ characterization
 

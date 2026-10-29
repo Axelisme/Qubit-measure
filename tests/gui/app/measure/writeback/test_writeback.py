@@ -131,7 +131,7 @@ def test_calibration_proposal_preserves_library_children_and_ignores_replaced_fi
     draft = service.create_draft(
         [item], parameters=captured, experiment_name="synthetic"
     )
-    service.apply_draft(draft)
+    draft.apply()
     actual = control.read_context().library.module_spec("Q1.readout.main")
     assert isinstance(actual, PulseReadoutSpec)
     assert actual.waveform == WAVEFORM
@@ -196,7 +196,7 @@ def test_complete_classifier_replacements_follow_apply_order(
         )
     else:
         for index in (0, 1) if mode == "primary-post" else (1, 0):
-            service.apply_draft(drafts[index])
+            drafts[index].apply()
     actual = control.read_context().library.module_spec("Q1.readout.main")
     assert isinstance(actual, PulseReadoutSpec)
     assert actual.classifier == (primary if mode == "post-primary" else post)
@@ -265,19 +265,110 @@ def test_proposal_initial_selection_and_note_survive_manual_review(session, kind
         run_id="review-run",
         device_snapshot={"bias": {"value": 0.1, "value_unit": "V"}},
     )
-    (item,) = service.preview_draft(draft)
+    (item,) = draft.preview()
     assert not item.selected
     assert item.note == "Fit needs manual review"
-    assert service.apply_draft(draft)["applied_ids"] == []
-    service.edit_draft(draft, item.session_id, selected=True)
+    assert draft.apply()["applied_ids"] == []
+    draft.edit(item.session_id, selected=True)
     assert item.selected
     assert not original.selected
-    assert service.apply_draft(draft)["applied_ids"] == [item.session_id]
+    assert draft.apply()["applied_ids"] == [item.session_id]
     assert item.note == "Fit needs manual review"
-    assert service.get_all_applied(draft) == {item.session_id: True}
-    service.edit_draft(draft, item.session_id, selected=False)
+    assert draft.get_all_applied() == {item.session_id: True}
+    draft.edit(item.session_id, selected=False)
     assert not item.selected and item.note == "Fit needs manual review"
     assert not original.selected and original.note == "Fit needs manual review"
+
+
+def test_drafts_keep_ordered_entries_forms_and_applied_state_independent(session):
+    _entry, control, service = session
+    record_proposal = RecordWriteback("Q1", "record", {"fit": [3, 4]})
+    proposals = [
+        ModuleWriteback(PULSE, "pulse", pulse_proposal()),
+        ParameterWriteback("general.ext.value", "fit", [1, 2]),
+        record_proposal,
+    ]
+    captured = control.read_context()
+    evidence: dict[str, JsonObject] = {"bias": {"value": 0.1}}
+    first, second = (
+        service.create_draft(
+            proposals,
+            parameters=captured,
+            experiment_name="synthetic/independent",
+            run_id="fixed-run",
+            device_snapshot=evidence,
+        )
+        for _ in range(2)
+    )
+    assert [item.session_id for item in first.preview()] == [
+        "ml-1",
+        "param-1",
+        "record-1",
+    ]
+    first.edit("ml-1", edits={("gain",): 0.5})
+    first.edit("param-1", proposed_value=[9], selected=False)
+    record_proposal.record["fit"] = [99]
+    evidence["bias"] = {"value": 0.9}
+    assert second.preview_values()["ml-1"].proposed["gain"] == 0.2
+    assert second.preview_values()["param-1"].proposed == [1, 2]
+    assert second.preview_values()["record-1"].proposed == {"fit": [3, 4]}
+    assert second.preview()[1].selected
+    assert first.parameters is captured and second.parameters is captured
+    assert first.device_snapshot == second.device_snapshot == {"bias": {"value": 0.1}}
+    assert first.run_id == second.run_id == "fixed-run"
+    assert first.experiment_name == second.experiment_name == "synthetic/independent"
+    assert second.get_summaries("param-1")[1] == "list[2]"
+    assert first.apply(item_ids=("ml-1",))["applied_ids"] == ["ml-1"]
+    assert control.read_context().library.module_spec(PULSE).gain == 0.5
+    assert first.get_all_applied()["ml-1"]
+    assert second.get_all_applied() == {
+        "ml-1": False,
+        "param-1": False,
+        "record-1": False,
+    }
+    first.teardown()
+    assert second.apply(item_ids=("ml-1",))["applied_ids"] == ["ml-1"]
+    assert control.read_context().library.module_spec(PULSE).gain == 0.2
+
+
+@pytest.mark.parametrize("bad_ids", [("missing",), ("param-1", "param-1")])
+def test_repeated_draft_precedes_bad_ids_without_any_write(session, bad_ids):
+    entry, control, service = session
+    draft = service.create_draft(
+        [ParameterWriteback("general.ext.value", "fit", 5.0)],
+        parameters=control.read_context(),
+        experiment_name="synthetic",
+    )
+    before = entry.ledger.events()
+    with pytest.raises(InvalidInputError, match="Repeated captured writeback draft"):
+        service.accept_drafts(
+            (
+                WritebackSelection(draft, ("param-1",)),
+                WritebackSelection(draft, bad_ids),
+            )
+        )
+    assert entry.ledger.events() == before
+    assert not control.read_context().lookup("general.ext.value").present
+    assert draft.get_all_applied() == {"param-1": False}
+
+
+@pytest.mark.parametrize("foreign", [False, True])
+def test_acceptance_rejects_closed_or_foreign_draft_before_writing(session, foreign):
+    entry, control, service = session
+    factory = WritebackService(control, arb_names=lambda: ()) if foreign else service
+    draft = factory.create_draft(
+        [ParameterWriteback("general.ext.value", "fit", 5.0)],
+        parameters=control.read_context(),
+        experiment_name="synthetic",
+    )
+    draft.teardown()
+    before = entry.ledger.events()
+    expected = InvalidInputError if foreign else FailedPreconditionError
+    message = "unknown writeback draft" if foreign else "torn down"
+    with pytest.raises(expected, match=message):
+        service.accept_drafts((WritebackSelection(draft, ("param-1",)),))
+    assert entry.ledger.events() == before
+    assert not control.read_context().lookup("general.ext.value").present
 
 
 def test_record_append_preserves_adapter_json_without_coordinate_policy(session):
@@ -293,10 +384,10 @@ def test_record_append_preserves_adapter_json_without_coordinate_policy(session)
         experiment_name="synthetic/record",
         run_id="record-run",
     )
-    (item,) = service.preview_draft(draft)
+    (item,) = draft.preview()
     assert isinstance(item, RecordWriteback)
     assert item.record == record
-    service.apply_draft(draft)
+    draft.apply()
     rows = entry.records("Q1").read().to_dict(orient="records")
     assert len(rows) == 1
     assert rows[0] == record | {
@@ -317,7 +408,7 @@ def test_default_proposal_selection_and_optional_note(session):
         parameters=control.read_context(),
         experiment_name="test/review",
     )
-    (item,) = service.preview_draft(draft)
+    (item,) = draft.preview()
     assert item.selected
     assert getattr(item, "note", "missing") is None
     explicit = ParameterWriteback(
@@ -328,17 +419,16 @@ def test_default_proposal_selection_and_optional_note(session):
         parameters=control.read_context(),
         experiment_name="test/review",
     )
-    (row,) = service.preview_draft(review)
+    (row,) = review.preview()
     assert not row.selected and row.note == "Check fit"
-    service.edit_draft(
-        review,
+    review.edit(
         row.session_id,
         proposed_value=7.0,
         target_name="general.ext.edited",
         selected=True,
     )
     assert row.note == "Check fit"
-    assert service.apply_draft(review)["applied_ids"] == ["param-1"]
+    assert review.apply()["applied_ids"] == ["param-1"]
     assert control.read_context().value("general.ext.edited") == 7.0
     assert row.note == "Check fit"
     fresh = service.create_draft(
@@ -346,7 +436,7 @@ def test_default_proposal_selection_and_optional_note(session):
         parameters=control.read_context(),
         experiment_name="test/review",
     )
-    assert not service.preview_draft(fresh)[0].selected
+    assert not fresh.preview()[0].selected
 
 
 def test_module_preview_proposes_the_spec_in_the_current_shape(session):
@@ -358,7 +448,7 @@ def test_module_preview_proposes_the_spec_in_the_current_shape(session):
         parameters=capture,
         experiment_name="test/writeback",
     )
-    values = service.preview_values(draft)["ml-1"]
+    values = draft.preview_values()["ml-1"]
     assert values.actual_path == PULSE
     assert values.current == capture.library.entry_value(PULSE, kind="module")
     assert values.proposed == pulse_proposal(gain=0.4).model_dump(mode="python")
@@ -391,7 +481,7 @@ def test_module_form_edits_apply_the_edited_spec_and_keep_child_keys(session):
     assert written.waveform == WAVEFORM
     assert written.freq == 5100.0
     assert written.gain == pytest.approx(0.2)
-    assert service.get_all_applied(draft) == {"ml-1": True}
+    assert draft.get_all_applied() == {"ml-1": True}
 
 
 def test_invalid_module_edit_rejects_apply_with_field_paths(session):
@@ -407,10 +497,10 @@ def test_invalid_module_edit_rejects_apply_with_field_paths(session):
         draft.apply()
     assert set(error.value.errors.messages) == {("gain",)}
     with pytest.raises(LibraryEntryInvalid):
-        service.preview_values(draft)
+        draft.preview_values()
     assert len(entry.ledger.events()) == count
     assert PULSE not in control.read_context().library.module_keys()
-    assert service.get_all_applied(draft) == {"ml-1": False}
+    assert draft.get_all_applied() == {"ml-1": False}
 
 
 def test_structural_module_edit_is_rejected_without_changing_the_form(session):
@@ -420,10 +510,10 @@ def test_structural_module_edit_is_rejected_without_changing_the_form(session):
         parameters=control.read_context(),
         experiment_name="test/writeback",
     )
-    before = service.preview_values(draft)
+    before = draft.preview_values()
     with pytest.raises(InvalidInputError, match="ml-1"):
         draft.edit("ml-1", edits={("gain",): 0.5, ("unknown",): 1.0})
-    assert service.preview_values(draft) == before
+    assert draft.preview_values() == before
 
 
 def test_edits_require_a_module_item(session):
@@ -435,7 +525,7 @@ def test_edits_require_a_module_item(session):
     )
     with pytest.raises(InvalidInputError, match="not a module item"):
         draft.edit("param-1", edits={("gain",): 0.5})
-    assert service.get_all_applied(draft) == {"param-1": False}
+    assert draft.get_all_applied() == {"param-1": False}
 
 
 def test_context_free_module_draft_is_listed_but_not_editable(session):
@@ -449,7 +539,7 @@ def test_context_free_module_draft_is_listed_but_not_editable(session):
     with pytest.raises(FailedPreconditionError, match="captured context"):
         draft.edit("ml-1", edits={("gain",): 0.5})
     with pytest.raises(FailedPreconditionError, match="captured context"):
-        service.get_item_form(draft, "ml-1")
+        draft.get_item_form("ml-1")
 
 
 def test_item_form_is_the_shared_draft_and_its_changes_mark_unapplied(session):
@@ -460,12 +550,12 @@ def test_item_form_is_the_shared_draft_and_its_changes_mark_unapplied(session):
         experiment_name="test/writeback",
     )
     draft.apply()
-    assert service.get_all_applied(draft) == {"ml-1": True}
-    form = service.get_item_form(draft, "ml-1")
+    assert draft.get_all_applied() == {"ml-1": True}
+    form = draft.get_item_form("ml-1")
     assert isinstance(form, ModuleEntryForm)
     form.state.write({("gain",): 0.4}, form.env)
-    assert service.get_all_applied(draft) == {"ml-1": False}
-    proposed = service.preview_values(draft)["ml-1"].proposed
+    assert draft.get_all_applied() == {"ml-1": False}
+    proposed = draft.preview_values()["ml-1"].proposed
     assert isinstance(proposed, dict) and proposed["gain"] == 0.4
     draft.edit("ml-1", edits={("gain",): 0.6})
     assert form.state.input.data["gain"] == 0.6
@@ -484,11 +574,11 @@ def test_arb_names_are_captured_when_the_draft_is_created(session):
         experiment_name="test/writeback",
     )
     names.clear()
-    proposed = service.preview_values(draft)["ml-1"].proposed
+    proposed = draft.preview_values()["ml-1"].proposed
     assert isinstance(proposed, dict) and proposed["waveform"]["data"] == "first"
     draft.edit("ml-1", edits={("waveform", "module", "data"): "second"})
     with pytest.raises(LibraryEntryInvalid) as error:
-        service.preview_values(draft)
+        draft.preview_values()
     assert set(error.value.errors.messages) == {("waveform", "module", "data")}
 
 
@@ -501,9 +591,7 @@ def test_ordered_write_rejects_invalid_module_before_context_apply(session):
     )
     count = len(entry.ledger.events())
     with pytest.raises(LibraryEntryInvalid, match="gain"):
-        service.write_draft(
-            draft, (WritebackEdit("ml-1", edits={("gain",): "invalid"}),)
-        )
+        draft.writeback_write((WritebackEdit("ml-1", edits={("gain",): "invalid"}),))
     assert len(entry.ledger.events()) == count
     assert PULSE not in control.read_context().library.module_keys()
 
@@ -516,9 +604,7 @@ def test_ordered_module_write_returns_spec_values(session):
         parameters=control.read_context(),
         experiment_name="test/writeback",
     )
-    result = service.write_draft(
-        draft, (WritebackEdit("ml-1", edits={("gain",): 0.7}),)
-    )
+    result = draft.writeback_write((WritebackEdit("ml-1", edits={("gain",): 0.7}),))
     assert result == [
         WritebackWritten(
             "ml-1",
@@ -553,7 +639,7 @@ def test_apply_shared_flow_keeps_gui_selection_edits_and_failure_prefix(session)
     with pytest.raises(ValueError, match="description"):
         draft.apply()
     event = entry.ledger.events()[-1]
-    assert service.get_all_applied(draft) == {
+    assert draft.get_all_applied() == {
         "ml-1": False,
         "param-1": False,
         "param-2": False,
@@ -583,7 +669,7 @@ def test_draft_teardown_is_idempotent(session):
     draft.teardown()
     assert draft.is_active is False
     with pytest.raises(FailedPreconditionError):
-        service.preview_values(draft)
+        draft.preview_values()
 
 
 def test_non_scalar_current_and_proposed_summaries_use_the_same_bounded_shape(session):
@@ -601,7 +687,7 @@ def test_non_scalar_current_and_proposed_summaries_use_the_same_bounded_shape(se
         parameters=control.read_context(),
         experiment_name="test/writeback",
     )
-    assert service.get_summaries(draft, "param-1") == ("3 × 3 matrix", "3 × 3 matrix")
+    assert draft.get_summaries("param-1") == ("3 × 3 matrix", "3 × 3 matrix")
 
 
 @pytest.mark.parametrize(
@@ -622,7 +708,7 @@ def test_sequence_proposals_have_bounded_shape_summaries(session, value, summary
         parameters=control.read_context(),
         experiment_name="test/writeback",
     )
-    assert service.get_summaries(draft, "param-1")[1] == summary
+    assert draft.get_summaries("param-1")[1] == summary
     draft.teardown()
 
 
@@ -636,16 +722,16 @@ def test_applied_state_follows_successful_writes_and_content_edits(session):
         parameters=control.read_context(),
         experiment_name="test/writeback",
     )
-    assert service.get_all_applied(draft) == {"param-1": False, "param-2": False}
+    assert draft.get_all_applied() == {"param-1": False, "param-2": False}
     draft.edit("param-2", selected=False)
     draft.apply()
-    assert service.get_all_applied(draft) == {"param-1": True, "param-2": False}
+    assert draft.get_all_applied() == {"param-1": True, "param-2": False}
     draft.edit("param-1", selected=False)
-    assert service.get_all_applied(draft)["param-1"] is True
+    assert draft.get_all_applied()["param-1"] is True
     draft.edit("param-1", target_name="general.ext.r_f", proposed_value=1.0)
-    assert service.get_all_applied(draft)["param-1"] is True
+    assert draft.get_all_applied()["param-1"] is True
     draft.edit("param-1", proposed_value=3.0)
-    assert service.get_all_applied(draft)["param-1"] is False
+    assert draft.get_all_applied()["param-1"] is False
 
 
 def test_duplicate_selected_destination_is_rejected_before_write(session):
@@ -663,7 +749,7 @@ def test_duplicate_selected_destination_is_rejected_before_write(session):
         draft.apply()
     assert len(entry.ledger.events()) == count
     assert not control.read_context().lookup("general.ext.same").present
-    assert service.get_all_applied(draft) == {"param-1": False, "param-2": False}
+    assert draft.get_all_applied() == {"param-1": False, "param-2": False}
 
 
 def test_failed_and_empty_apply_do_not_mark_items_applied(session):
@@ -675,10 +761,10 @@ def test_failed_and_empty_apply_do_not_mark_items_applied(session):
     )
     with pytest.raises(ValueError, match="description"):
         draft.apply()
-    assert service.get_all_applied(draft) == {"param-1": False}
+    assert draft.get_all_applied() == {"param-1": False}
     draft.edit("param-1", selected=False)
     assert draft.apply()["applied_ids"] == []
-    assert service.get_all_applied(draft) == {"param-1": False}
+    assert draft.get_all_applied() == {"param-1": False}
 
 
 def test_explicit_apply_ignores_selection_without_changing_checkboxes(session):
@@ -698,7 +784,7 @@ def test_explicit_apply_ignores_selection_without_changing_checkboxes(session):
     assert current.value("general.ext.a") == 1.0
     assert not current.lookup("general.ext.b").present
     assert [item.selected for item in draft.items] == selection
-    assert service.get_all_applied(draft) == {"param-1": True, "param-2": False}
+    assert draft.get_all_applied() == {"param-1": True, "param-2": False}
 
 
 @pytest.mark.parametrize("item_ids", [("param-1", "missing"), ("param-1", "param-1")])
@@ -714,7 +800,7 @@ def test_explicit_apply_rejects_invalid_ids_before_any_write(session, item_ids):
         draft.apply(item_ids=item_ids)
     assert len(entry.ledger.events()) == count
     assert not control.read_context().lookup("general.ext.a").present
-    assert service.get_all_applied(draft) == {"param-1": False}
+    assert draft.get_all_applied() == {"param-1": False}
 
 
 def test_explicit_empty_apply_does_not_fall_back_to_selected_items(session):
@@ -728,7 +814,7 @@ def test_explicit_empty_apply_does_not_fall_back_to_selected_items(session):
     assert draft.apply(item_ids=())["applied_ids"] == []
     assert len(entry.ledger.events()) == count
     assert not control.read_context().lookup("general.ext.a").present
-    assert service.get_all_applied(draft) == {"param-1": False}
+    assert draft.get_all_applied() == {"param-1": False}
 
 
 def test_ordered_write_returns_actual_values_and_leaves_selection_alone(session):
@@ -745,8 +831,7 @@ def test_ordered_write_returns_actual_values_and_leaves_selection_alone(session)
         experiment_name="test/writeback",
     )
     draft.edit("param-1", selected=False)
-    result = service.write_draft(
-        draft,
+    result = draft.writeback_write(
         (
             WritebackEdit(
                 "param-1", target_name="general.ext.dest", proposed_value=None
@@ -760,7 +845,7 @@ def test_ordered_write_returns_actual_values_and_leaves_selection_alone(session)
     assert current.value("general.ext.dest") is None
     assert not current.lookup("general.ext.b").present
     assert [item.selected for item in draft.items] == [False, True]
-    assert service.get_all_applied(draft) == {"param-1": True, "param-2": False}
+    assert draft.get_all_applied() == {"param-1": True, "param-2": False}
 
 
 def test_ordered_write_stops_on_unknown_item_and_preserves_draft_prefix(session):
@@ -775,8 +860,7 @@ def test_ordered_write_stops_on_unknown_item_and_preserves_draft_prefix(session)
     )
     count = len(entry.ledger.events())
     with pytest.raises(InvalidInputError):
-        service.write_draft(
-            draft,
+        draft.writeback_write(
             (
                 WritebackEdit("param-1", proposed_value=11),
                 WritebackEdit("missing"),
@@ -790,4 +874,4 @@ def test_ordered_write_stops_on_unknown_item_and_preserves_draft_prefix(session)
     assert values == [11, 2]
     assert len(entry.ledger.events()) == count
     assert not control.read_context().lookup("general.ext.a").present
-    assert service.get_all_applied(draft) == {"param-1": False, "param-2": False}
+    assert draft.get_all_applied() == {"param-1": False, "param-2": False}
