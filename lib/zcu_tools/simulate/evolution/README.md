@@ -1,6 +1,6 @@
 # Segment evolution
 
-**Last updated:** 2026-10-27 (UTC), evolve-local preparation and routing-facts ownership
+**Last updated:** 2026-10-30, shaped/static timeline batching
 
 **讀者：** framework-dev、agent。Segment evolution 的公開輸入、路由與數值邊界。
 
@@ -573,8 +573,8 @@ timelines enter shared preparation. Local builders and repeated local keys strea
 one timeline at a time, with one static-map exception. A complete classified
 inventory containing only `t4` and `shaped_sambe`, both present and no deferred
 rows, can batch static keys within each timeline chunk. The default scheduler
-requires at least two timelines per worker and 64 rows per timeline, then uses
-one timeline chunk per worker. Prepare partitioning stays unchanged. Explicit
+requires at least two timelines per worker and an average of at least 64 rows
+per timeline, then uses one timeline chunk per worker. Prepare partitioning stays unchanged. Explicit
 `chunks_per_worker` keeps the previous streaming policy.
 
 In that narrow case, ordinary `t4` maps prepare once per complete local key in
