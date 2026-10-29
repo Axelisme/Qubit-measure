@@ -4,6 +4,7 @@ import numpy as np
 import pytest
 from zcu_tools.analysis.fitting.singleshot import transition_state_circle_probabilities
 from zcu_tools.analysis.singleshot import (
+    analyze_centroid3_iq,
     analyze_reference_iq,
     calc_populations,
     classify_rabi_iq,
@@ -13,6 +14,26 @@ from zcu_tools.analysis.singleshot import (
     raw_population_signal,
 )
 from zcu_tools.utils.shot_classification import gaussian_region_probability
+
+
+def test_centroid3_iq_analysis_preserves_scan_axes_and_unclipped_estimates() -> None:
+    from zcu_tools.cfg_model import Centroid3Classifier
+
+    calibration = Centroid3Classifier(
+        g_center=0j,
+        e_center=2 + 0j,
+        f_center=4 + 0j,
+        confusion_matrix=[[0.75, 0.25, 0], [0.25, 0.75, 0], [0, 0, 1]],
+    )
+    shots = np.array([[[0, 0, 0, 0], [0, 2, 4, 1]]], dtype=np.complex128)
+    result = analyze_centroid3_iq(shots, calibration)
+    np.testing.assert_allclose(result.raw_populations, [[[1, 0, 0], [0.5, 0.25, 0.25]]])
+    np.testing.assert_allclose(
+        result.corrected_populations, [[[1.5, -0.5, 0], [0.625, 0.125, 0.25]]]
+    )
+    np.testing.assert_allclose(result.confusion_matrix, calibration.confusion_matrix)
+    assert result.condition_number == pytest.approx(2)
+    assert result.minimum_singular_value == pytest.approx(0.5)
 
 
 def test_population_conversion_and_readout_correction() -> None:
