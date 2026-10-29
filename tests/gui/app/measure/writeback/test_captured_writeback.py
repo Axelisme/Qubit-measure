@@ -78,7 +78,7 @@ from tests.resources.entry.fakes import register_fakes, registry_state, restore_
 def saved_target(parameters: ParameterContext) -> SavedPoint:
     """Require a saved-point fixture capture for setup writes."""
     target = parameters.target
-    if target is None:
+    if not isinstance(target, SavedPoint):
         raise AssertionError("Fixture capture has no saved point")
     return target
 
