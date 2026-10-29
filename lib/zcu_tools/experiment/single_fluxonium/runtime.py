@@ -96,13 +96,17 @@ def _build_facts(
     settings: SingleFluxoniumSettings, model: SingleFluxoniumModel
 ) -> SingleFluxoniumFacts:
     qubit = settings.chip.qubit
-    coefficient = settings.drive_line.charge_drive_ghz_per_gain
     charge = model.charge_operator()
-    drive = DriveSource(
-        settings.drive_line.name, coefficient.real * charge, -coefficient.imag * charge
+    drives = tuple(
+        DriveSource(
+            line.name,
+            line.charge_drive_ghz_per_gain.real * charge,
+            -line.charge_drive_ghz_per_gain.imag * charge,
+        )
+        for line in settings.drive_lines.values()
     )
     source = model.model_source(
-        (drive,),
+        drives,
         noise=FluxoniumNoise(qubit.q_cap, qubit.q_ind, qubit.xqp, qubit.aphi),
         resonator=dispersive_resonator(settings),
         slow_envelope_segments_per_period=settings.numerics.slow_envelope_segments_per_period,
@@ -462,7 +466,11 @@ class SingleFluxoniumSource:
             )
             plans = tuple(
                 plan_template(
-                    settings, snapshot, template, readout_kind=self._readout_kind
+                    settings,
+                    snapshot,
+                    template,
+                    readout_kind=self._readout_kind,
+                    charge_requirements=request.charge_requirements,
                 )
                 for template in request.templates
             )
@@ -700,8 +708,8 @@ def single_fluxonium(
     configuration is validated settings or a physical YAML path, relative to cwd.
     Startup applies initial once in fixed A/V units. Returned SimulationEnvironment
     owns the manager; caller closes its devices, or transfers each to the GUI.
-    Source models/plans remain lazy. The microwave and readout generators, plus
-    the optional fast-flux generator, bind to the one ADC
+    Source models/plans remain lazy. Every configured microwave generator and
+    the readout generator, plus the optional fast-flux generator, bind to the one ADC
     for transport admission. The planner still requires readout-generator ADC
     windows; transport routes do not enable microwave/fast-flux readout physics.
     The backend evolves complete timelines and uses one physical ADC cavity.
@@ -743,7 +751,7 @@ def single_fluxonium(
             runtime=SingleFluxoniumRuntimeOptions(clock=sim_clock, truth_log=truth_log),
         )
         gens = (
-            settings.drive_line.gen_ch,
+            *(line.gen_ch for line in settings.drive_lines.values()),
             settings.readout.drive.gen_ch,
             *((settings.flux_line.gen_ch,) if settings.flux_line is not None else ()),
         )

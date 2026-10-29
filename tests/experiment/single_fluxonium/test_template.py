@@ -5,8 +5,87 @@ from dataclasses import replace
 
 import numpy as np
 import pytest
+from zcu_tools.core.simulation import (
+    AcquireRequest,
+    ChargeDriveRequirement,
+    PulseEnvelope,
+    ReadoutWindow,
+)
+from zcu_tools.device import DeviceManager
+from zcu_tools.experiment.single_fluxonium import SingleFluxoniumSource
+from zcu_tools.resources.single_fluxonium import parse_single_fluxonium
 
 from ._inputs import settings, snapshot, template
+
+
+@pytest.fixture
+def charge_preflight():
+    values = settings().model_dump(mode="json")
+    values["drive_lines"]["second"] = {
+        "name": "second_charge",
+        "gen_ch": 2,
+        "charge_drive_ghz_per_gain": {"real": 0.1, "imag": 0},
+    }
+    values["flux_line"]["gen_ch"] = 3
+    source = SingleFluxoniumSource(parse_single_fluxonium(values), DeviceManager())
+    original = template()
+    times = np.linspace(0, 0.008, 17)
+    gaussian = PulseEnvelope(
+        tuple(times),
+        tuple(complex(x) for x in np.exp(-(((times - 0.004) / 0.002) ** 2))),
+    )
+    flux_event = replace(original.events[1], gen_ch=3, envelopes=(gaussian,))
+    compiled = replace(
+        original,
+        points=np.array([0, 1], dtype=np.int64),
+        events=(original.events[0], flux_event, original.events[2]),
+    )
+    request = AcquireRequest(
+        "integrated",
+        (1, 2),
+        0,
+        (ReadoutWindow(0, 0, 4, 1000, (0.018,)),),
+        123,
+        0,
+        "test",
+        point_dims=(2,),
+        point_names=("scan",),
+        templates=(compiled,),
+        charge_requirements=(ChargeDriveRequirement("Stokes", 3),),
+    )
+    try:
+        yield source, request
+    finally:
+        source.close()
+
+
+@pytest.mark.parametrize("channel", [3, 0, 4])
+def test_preflight_rejects_charge_request_on_noncharge_generator(
+    charge_preflight, channel
+):
+    source, request = charge_preflight
+    request = replace(
+        request, charge_requirements=(ChargeDriveRequirement("Stokes", channel),)
+    )
+    with pytest.raises(ValueError, match=rf"Stokes.*{channel}.*charge drive line"):
+        source.preflight(request, snapshot())
+
+
+def test_preflight_accepts_named_charge_requirements_with_legal_fast_flux(
+    charge_preflight,
+):
+    source, request = charge_preflight
+    request = replace(
+        request,
+        charge_requirements=(
+            ChargeDriveRequirement("Pump", 1),
+            ChargeDriveRequirement("arbitrary label", 2),
+        ),
+    )
+    batch = source.preflight(request, snapshot()).plans[0][0].batch
+    assert [track.port for track in batch.tracks] == ["mw"]
+    assert batch.flux_waveform is not None
+    assert np.max(batch.flux_waveform.flux) > 0.5
 
 
 def test_plan_preserves_complete_timeline_and_filtered_flux() -> None:

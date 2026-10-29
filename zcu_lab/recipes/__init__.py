@@ -27,7 +27,9 @@ from .onetone_range_find import DEFINITION as ONETONE_RANGE_FIND
 from .onetone_spectrum import DEFINITION as ONETONE_SPECTRUM
 from .onetone_spectrum_over_flux import DEFINITION as ONETONE_FLUX
 from .onetone_spectrum_over_power import DEFINITION as ONETONE_POWER
+from .raman_gf import DEFINITION as RAMAN_GF
 from .singleshot_ge import DEFINITION as SINGLESHOT_GE
+from .stirap import DEFINITION as STIRAP
 from .t1 import DEFINITION as T1
 from .t2echo import DEFINITION as T2ECHO
 from .t2ramsey import DEFINITION as T2RAMSEY
@@ -70,4 +72,6 @@ RECIPES = (
     MUX_ONETONE_FLUX_LOCAL,
     MUX_TWOTONE_FLUX_GLOBAL,
     MUX_TWOTONE_FLUX_LOCAL,
+    STIRAP,
+    RAMAN_GF,
 )

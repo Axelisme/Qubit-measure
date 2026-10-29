@@ -7,7 +7,8 @@ import numpy as np
 import pytest
 from numpy.typing import NDArray
 from zcu_tools.analysis.singleshot import classify_result
-from zcu_tools.cfg_model import CircleClassifier, LinearClassifier
+from zcu_tools.cfg_model import Centroid3Classifier, CircleClassifier, LinearClassifier
+from zcu_tools.core.simulation import ChargeDriveRequirement
 from zcu_tools.program.acquisition import (
     AcquisitionContractError,
     ImproveAcquireMixin,
@@ -28,6 +29,31 @@ def _herald_fraction(
     fractions = program.get_herald_pass_fraction()
     assert fractions is not None, "completed herald round must publish pass fractions"
     return fractions[channel]
+
+
+def test_hardware_acquire_does_not_forward_or_validate_charge_requirements():
+    soc, soccfg = make_acquisition_soc()
+    program = ModularProgramV2(
+        soccfg,
+        modules=[
+            PulseReadoutCfg(
+                gen_ch=0,
+                ro_ch=0,
+                nqz=1,
+                freq=100,
+                gain=0.1,
+                waveform=ConstWaveformCfg(length=0.1),
+                ro_length=0.1,
+            ).build("readout")
+        ],
+        reps=2,
+    )
+    actual = program.acquire(
+        soc,
+        progress=False,
+        charge_requirements=(ChargeDriveRequirement("caller drive", 999),),
+    )
+    np.testing.assert_array_equal(actual[0], [[0, 0]])
 
 
 @pytest.mark.parametrize("radius", [0.5, 1.0, 1.5, 2.0, 3.0])
@@ -81,6 +107,47 @@ def test_acquire_population_matches_offline_classification(
     assert actual is not None
     np.testing.assert_array_equal(actual[0][0], np.stack(expected[:2], axis=-1))
     assert actual[0].dtype == np.float64
+
+
+@pytest.mark.parametrize("remove_offset", [False, True])
+def test_centroid3_acquire_averages_shots_without_offset_and_keeps_two_columns(
+    monkeypatch: pytest.MonkeyPatch, remove_offset: bool
+) -> None:
+    soc, soccfg = make_acquisition_soc()
+    soccfg["readouts"][0]["iq_offset"] = 10.0
+    cfg = PulseReadoutCfg(
+        gen_ch=0,
+        nqz=1,
+        gain=0.1,
+        freq=100.0,
+        ro_ch=0,
+        ro_length=soccfg.cycles2us(100, ro_ch=0),
+        waveform=ConstWaveformCfg(length=1.0),
+    )
+    program = ModularProgramV2(soccfg, modules=[cfg.build("readout")], reps=6)
+    # g, e, f, tie g/e, tie g/f, tie e/f -> g=3/6, e=2/6, f=1/6.
+    raw = np.array(
+        [[0, 0], [200, 0], [0, 200], [100, 0], [0, 100], [200, 200]], dtype=np.int64
+    )
+    monkeypatch.setattr(soc, "poll_data", lambda: [(6, ([raw], {}))])
+    calibration = Centroid3Classifier(
+        g_center=0j,
+        e_center=2 + 0j,
+        f_center=2j,
+        confusion_matrix=[[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+    )
+    actual = program.acquire(
+        soc, classify={0: calibration}, remove_offset=remove_offset, progress=False
+    )
+    assert actual is not None
+    np.testing.assert_allclose(actual[0], [[0.5, 1 / 3]])
+    np.testing.assert_allclose(1 - actual[0].sum(axis=-1), [1 / 6])
+    retained = program.get_raw()
+    assert retained is not None
+    np.testing.assert_array_equal(retained[0], raw[:, None, :])
+    iq = program.acquire(soc, remove_offset=False, progress=False)
+    assert iq is not None
+    np.testing.assert_allclose(iq[0], [[5 / 6, 5 / 6]])
 
 
 def test_typed_circle_uses_raw_coordinates_without_offset() -> None:

@@ -10,7 +10,7 @@ from numpy.typing import NDArray
 from pydantic import BeforeValidator
 from qick.asm_v2 import QickParam, Trigger
 
-from zcu_tools.cfg_model import CircleClassifier, ReadoutClassifier
+from zcu_tools.cfg_model import Centroid3Classifier, CircleClassifier, ReadoutClassifier
 from zcu_tools.cfg_model import MuxReadoutCfg as CoreMuxReadoutCfg
 from zcu_tools.program.herald import HeraldSpec
 
@@ -144,25 +144,51 @@ def _classifier_entries(
     )
 
 
+def _classifier_for_adc(
+    cfg: ReadoutCfg, ro_ch: int, *, calibration_hint: str
+) -> ReadoutClassifier:
+    """Find one ADC calibration and detach it, preserving caller-specific guidance."""
+    for ch, classifier in _classifier_entries(cfg):
+        if ch == ro_ch:
+            if classifier is None:
+                raise ValueError(f"ADC {ch}: classifier missing; {calibration_hint}")
+            return classifier.model_copy(deep=True)
+    raise ValueError(f"ADC {ro_ch}: not declared by readout")
+
+
 def circle_classifier(cfg: ReadoutCfg, *, ro_ch: int) -> CircleClassifier:
     """Return detached circle calibration for the specified ADC channel number.
 
     cfg is a native Pulse or Mux readout; ro_ch identifies its declared ADC,
     not a tone position. Centers use raw integrated ADC / readout length,
     without IQ offset subtraction. Radius and confusion matrix may be absent.
-    Raise ValueError for an unknown ADC, missing classifier, or linear mode
-    (which stores no GE centers). No hardware or program registry is read.
+    Raise ValueError for an unknown ADC, missing classifier, or non-circle mode. No hardware or program registry is read.
     """
-    for ch, classifier in _classifier_entries(cfg):
-        if ch == ro_ch:
-            if classifier is None:
-                raise ValueError(f"ADC {ch}: classifier missing; run singleshot GE")
-            if not isinstance(classifier, CircleClassifier):
-                raise ValueError(
-                    f"ADC {ch}: linear classifier has no GE centers; use circle"
-                )
-            return classifier.model_copy(deep=True)
-    raise ValueError(f"ADC {ro_ch}: not declared by readout")
+    classifier = _classifier_for_adc(cfg, ro_ch, calibration_hint="run singleshot GE")
+    if not isinstance(classifier, CircleClassifier):
+        raise ValueError(
+            f"ADC {ro_ch}: {classifier.mode} classifier is not circle; use circle GE centers"
+        )
+    return classifier
+
+
+def centroid3_classifier(cfg: ReadoutCfg, *, ro_ch: int) -> Centroid3Classifier:
+    """Return detached three-state calibration for the declared ADC number.
+
+    cfg is native Pulse or Mux readout; ro_ch is an ADC channel, not a tone
+    position. Centers use raw integrated ADC / rounded integration sample count
+    without IQ-offset subtraction. Training confusion rows are prepared g/e/f,
+    columns measured g/e/f. Unknown ADC, missing or non-centroid3 classifier
+    raises ValueError. No hardware, registry or live library is read.
+    """
+    classifier = _classifier_for_adc(
+        cfg, ro_ch, calibration_hint="run qutrit reference calibration"
+    )
+    if not isinstance(classifier, Centroid3Classifier):
+        raise ValueError(
+            f"ADC {ro_ch}: {classifier.mode} classifier; require centroid3"
+        )
+    return classifier
 
 
 def classification_parameters(
@@ -173,7 +199,7 @@ def classification_parameters(
     cfg supplies normalized raw ADC calibration without offset subtraction.
     Missing calibration or circle radius raises ValueError naming the ADC;
     missing radius requires GE Post analysis. require_other rejects linear
-    because it has only g/e states. No program registry or hardware is read.
+    (only g/e) and centroid3 (its third state is f, not other). No program registry or hardware is read.
     """
     result: dict[int, ReadoutClassifier] = {}
     for ch, classifier in _classifier_entries(cfg):
@@ -186,7 +212,7 @@ def classification_parameters(
                 )
         elif require_other:
             raise ValueError(
-                f"ADC {ch}: linear classifier has no other state; use circle"
+                f"ADC {ch}: {classifier.mode} classifier has no other state; use circle"
             )
         result[ch] = classifier.model_copy(deep=True)
     return result

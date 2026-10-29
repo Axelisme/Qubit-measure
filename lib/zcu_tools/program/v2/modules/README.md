@@ -186,6 +186,10 @@ average reps or rounds. To retain every round, collect in the completed-round
 hook. The method docstring specifies dtype, axes, units and failures. Mux has no
 physical simulation support.
 
+`centroid3_classifier(cfg, ro_ch=...)` 由 native Pulse 或 Mux cfg 取得 detached g/e/f 校準。
+它依 ADC 編號查詢，不使用 tone 位置或 live library。Missing、錯型與未知 ADC 都 raise ValueError。
+`classification_parameters` 支援 centroid3，但 `require_other=True` 與 heralding 拒絕它，因為其第三類是 f 而非 circle 的 other。
+
 ## Readout Runtime Words
 
 - `PulseReadout` accepts optional `gain_val`, `freq_val`, and `ro_freq_val`
