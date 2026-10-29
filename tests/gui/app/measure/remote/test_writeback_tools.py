@@ -94,6 +94,7 @@ def _ctrl() -> MagicMock:
         tab_id, _items(), has_writeback_draft=True
     )
     ctrl.get_session_env.return_value = MagicMock(
+        parameters=None,
         active_label="ctx001",
         database_path="/tmp/db",
         result_dir="/tmp/result",

@@ -196,7 +196,8 @@ Proposal、receipt 與 full details 的 structured mappings 各自分離，不�
 作者可檢查收據或呼叫 `receipt.raise_for_error()`，不可將 decision.accepted 當作寫入成功。
 Full details 的 writeback_receipts 保留每次接受的確認項目與錯誤，失敗後的 finally Save 仍執行。
 `WritebackDestination.path` 是 owner 原樣的 opaque actual_path，
-label 是 preview 當時 active context 的顯示標籤，不是 captured identity。
+entry_name 與 point 是 preview 當下作用中的位置，不是固定來源或寫入授權。
+Global 的 point 為 null，未開 entry 時兩欄皆為 null。Apply 重新取得作用中的文件組。
 
 `tab.save()` 只同步呼叫一次 `tab.save_artifacts(artifacts="all")`，
 保存 raw data、Labber 與全部已完成階段的 JSON／圖，每種輸出各一次。
@@ -553,7 +554,7 @@ Recipe `accept_writeback` 的 receipt 也保留 submission_id／recovery，逾�
 Recipe 的 captured 問答與這個當前 draft 工具不同。
 Recipe 只在 `accept_writeback(items)` 以已捕捉候選的 IDs 寫入當下 draft，
 回答本身不授權寫入。
-Destination.path 保留 owner actual_path，label 只作顯示。
+Destination.path 保留 owner actual_path，entry_name 與 point 只報 preview 當下位置。
 元素 index／name 由 lab owner 明確提供，framework 不從 row offset 或 participants 猜 identity。
 Full 查詢保留原生候選與目的地，不把 preview 當成授權。
 

@@ -308,9 +308,9 @@ class WritebackService:
         concrete persistent ModuleSpec raises TypeError and no draft is returned.
 
         parameters fixes expression/library resolution and baseline display,
-        not the write destination. Preview and Apply use the point selected
+        not the write destination. Preview and Apply use the active document set
         through write_port at that call. None provides no historical values;
-        concrete parameter/record proposals can still write to a selected point.
+        concrete parameter/record proposals can still write to an open entry.
         Module items without parameters have no Form and cannot be applied.
         experiment_name is the captured experiment name, never a frontend/event kind.
         run_id is the source RunMetadata.run_id, including unsaved Runs and
@@ -362,7 +362,7 @@ class WritebackService:
     def preview_values(
         self, draft: WritebackDraft, *, session_id: str | None = None
     ) -> dict[str, WritebackValues]:
-        """Read current values at the GUI's selected point without changing selection.
+        """Read the active document set, or current=None without an open entry.
 
         Proposed module values evaluate against the creation capture, never
         current focus, point, or slot references. Missing destinations have
@@ -370,8 +370,9 @@ class WritebackService:
         session_id=None reads every item, including unselected items. A supplied
         session_id reads only that item's facts, without lowering siblings; an
         unknown ID raises KeyError before reading the destination. Empty bulk
-        reads return {}; empty item reads raise KeyError. Nonempty reads require
-        a selected persistent point. Inactive/foreign drafts are rejected.
+        reads return {}; empty item reads raise KeyError. Preview does not authorize
+        Apply: without an entry it still evaluates proposals from their fixed
+        source, but reports current=None. Inactive/foreign drafts are rejected.
         Target/source/I/O and requested proposal validation errors propagate.
         """
         self._require_draft(draft)
@@ -383,7 +384,12 @@ class WritebackService:
         if not items:
             return {}
         parameters = self._require_parameters(draft)
-        current = self._write.read_target(self._current_target())
+        target = (
+            self._write.read_context().target
+            if self._write.get_entry_info() is not None
+            else None
+        )
+        current = None if target is None else self._write.read_target(target)
         values: dict[str, WritebackValues] = {}
         for item in items:
             path = destination_path(item, parameters)
@@ -398,11 +404,15 @@ class WritebackService:
                 proposed = self._module_spec(entry).model_dump(mode="python")
             values[item.session_id] = WritebackValues(
                 actual_path=path,
-                current=read_destination_value(self._write, draft, item, current, path),
+                current=(
+                    read_destination_value(self._write, draft, item, current, path)
+                    if current is not None
+                    else None
+                ),
                 proposed=proposed,
                 unit=(
                     document_unit(current.document(), path)
-                    if isinstance(item, ParameterWriteback)
+                    if isinstance(item, ParameterWriteback) and current is not None
                     else None
                 ),
             )
@@ -417,7 +427,7 @@ class WritebackService:
         target = self._write.read_context().target
         if target is None:
             raise FailedPreconditionError(
-                "Select or create a working point first", reason_code="no_context"
+                "Open an entry first", reason_code="no_context"
             )
         return target
 
@@ -525,8 +535,8 @@ class WritebackService:
         LibraryEntryInvalid with its field paths and writes nothing. Append
         failure writes nothing. On item failure, mark the successful prefix applied and re-raise
         the original cause unchanged, retaining accepted evidence and writes.
-        Empty selection is a no-op without context. Nonempty writes require a
-        GUI-selected SavedPoint at application time. GUI defaults
+        Empty selection is a no-op without context. Nonempty writes require an
+        open entry and use its active global or point documents. GUI defaults
         to the GUI origin; MCP callers explicitly identify the MCP frontend.
         Unknown/duplicate IDs or concrete destinations fail before any write.
         Accepted payload uses draft.run_id;
@@ -680,7 +690,7 @@ class WritebackService:
         origin: CommandOrigin = _GUI_ORIGIN,
         on_applied: Callable[[tuple[WritebackApplied, ...]], None] | None = None,
     ) -> list[WritebackWritten]:
-        """Edit sequentially and return selected-point before/after values.
+        """Edit sequentially and return active-document before/after values.
 
         Read the currently selected destination before application, then use each write
         owner's committed value; no postcommit destination read is needed.

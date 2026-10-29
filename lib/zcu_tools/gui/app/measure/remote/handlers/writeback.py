@@ -37,11 +37,10 @@ def _destination_context(adapter: RemoteControlAdapter) -> dict[str, object]:
     Does not compare or store source identity; draft source is opaque.
     """
     ctx = adapter.ctrl.get_session_env()
+    target = None if ctx.parameters is None else ctx.parameters.target
     return {
-        "active_label": ctx.active_label,
-        "database_path": ctx.database_path,
-        "result_dir": ctx.result_dir,
-        "has_active_context": bool(ctx.is_active()),
+        "entry_name": None if target is None else target.entry_name,
+        "point": None if target is None else target.point,
     }
 
 

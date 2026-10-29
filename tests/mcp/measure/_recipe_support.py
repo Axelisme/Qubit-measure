@@ -466,6 +466,6 @@ class LookbackGui:
                         "current": 0.1,
                     }
                 ],
-                "destination_context": {"active_label": "sample"},
+                "destination_context": {"entry_name": "entry", "point": "sample"},
             }
         raise AssertionError(method)

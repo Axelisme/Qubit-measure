@@ -105,6 +105,8 @@ creates files or locks, writes results, or changes entry/point selection.
 ## Captured writeback
 
 `tab.writeback_preview` 回 owner 當下的 draft 候選，不帶 revision。
+`destination_context` 只含當下的 `{entry_name, point}`。Global 的 point 為 null，未開 entry 時兩欄皆為 null。
+未開 entry 仍可預覽合法 tab，current 值為 null。Apply 仍以 no_context 拒絕。
 `tab.writeback_accept(tab_id, stages)` 接受有序的 `{subtab_id, ids}` 清單，不帶 `expected_revision`。
 Owner 在同一次 dispatch 核對 Primary／Post 全部選定 IDs，unknown／duplicate 在第一筆寫入前拒絕。
 通過後按 Primary、Post、各 pane 的候選順序寫入 owner 當下 draft 的值與目的地，不還原捕捉時的 proposal。
@@ -114,7 +116,8 @@ Owner 在同一次 dispatch 核對 Primary／Post 全部選定 IDs，unknown／d
 `tab.writeback_receipt(submission_id)` 唯讀回 `{submission_id, tab_id, status, completed, error}`。
 Status 是 pending、completed 或 failed。Pending 包含只 reserve 或仍執行，不能推論沒有副作用。
 Completed 的每列是 `{subtab_id, item:{id, kind, target, value, destination}}`。
-Destination 是固定的 `{kind: "saved_point", entry_name, point}`，value 是 owner 當次確認的實際值。
+Destination 是固定的 `{entry_name, point}`，value 是 owner 當次確認的實際值。
+Apply 使用提交當下作用中的文件組，global 的 point 為 null，已提交的 entry_name 必為字串。
 查詢不重讀當前 draft 或磁碟，僅保留 GUI 生命週期的記憶體 receipt。
 10 秒 handler 逾時不表示寫入失敗。Caller 先查該 ID 的狀態，再決定是否重送。
 Recipe receipt.items 是成功 ID 對應的原捕捉候選，實際值與目的地仍取提交當下的 draft。

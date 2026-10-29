@@ -87,11 +87,9 @@ class WritebackDestination(TypedDict):
     """Fixed persisted destination in the current Result root.
 
     entry_name names the entry directory. point is a saved point label, or None
-    for the entry-level global documents. kind retains the saved_point wire
-    discriminator; it does not distinguish internal entry and point targets.
+    for the entry-level global documents. This receipt always names an entry.
     """
 
-    kind: Literal["saved_point"]
     entry_name: str
     point: str | None
 

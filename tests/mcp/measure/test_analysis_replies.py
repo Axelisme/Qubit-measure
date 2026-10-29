@@ -153,8 +153,11 @@ def test_analysis_summary_retains_owner_raw_save_state_without_saving_raw(
 
 
 @pytest.mark.parametrize("stage", ["primary", "post"])
+@pytest.mark.parametrize(
+    "entry_name,point", [("entry", "original"), ("entry", None), (None, None)]
+)
 def test_analysis_captures_all_owner_writeback_without_live_queries(
-    tmp_path, clients, stage
+    tmp_path, clients, stage, entry_name, point
 ):
     pane = "analysis" if stage == "primary" else "post_analysis"
     proposal: AnalysisWriteback = {
@@ -177,10 +180,7 @@ def test_analysis_captures_all_owner_writeback_without_live_queries(
                 "selected": True,
             },
         ],
-        "destination_context": {
-            "active_label": "original",
-            "project_loaded": True,
-        },
+        "destination_context": {"entry_name": entry_name, "point": point},
     }
 
     def respond(method, params):
@@ -226,7 +226,8 @@ def test_analysis_captures_all_owner_writeback_without_live_queries(
         == []
     )
     assert initial.data["writeback"]["destination"] == {
-        "context": {"active_label": "original"},
+        "entry_name": entry_name,
+        "point": point,
     }
     full = client.call("status", {"execution": execution, "detail": "full"})
     assert full["writeback"] == proposal
@@ -235,7 +236,7 @@ def test_analysis_captures_all_owner_writeback_without_live_queries(
         {"tab_id": "t", "subtab_id": pane, "operation_id": 71}
     ]
     proposal["items"][0]["proposed"] = 999.0
-    proposal["destination_context"]["active_label"] = "newer"
+    proposal["destination_context"]["point"] = "newer"
     full["writeback"]["items"].clear()
     before = list(client.transport.sent)
     assert client.call("status", {"execution": execution}) == initial.data
@@ -715,7 +716,7 @@ def test_done_joins_original_completion_without_duplicate_saves(
     proposal: AnalysisWriteback = {
         "has_draft": False,
         "items": [],
-        "destination_context": {"active_label": "done-destination"},
+        "destination_context": {"entry_name": "entry", "point": "done-destination"},
     }
 
     def respond(method, params):
@@ -803,7 +804,8 @@ def test_done_joins_original_completion_without_duplicate_saves(
         summary = client.call("status", {"execution": execution})
         assert summary["writeback"]["stages"]["primary"][0]["proposed"] == 8.5
         assert summary["writeback"]["destination"] == {
-            "context": {"active_label": "done-destination"}
+            "entry_name": "entry",
+            "point": "done-destination",
         }
         _assert_figure(reply, present=True)
     else:

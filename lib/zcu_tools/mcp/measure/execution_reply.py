@@ -125,9 +125,9 @@ def _candidate(item: dict[str, Any]) -> dict[str, Any]:
 
 
 def _destination(native: dict[str, Any] | None) -> dict[str, Any]:
-    if native is None or "active_label" not in native:
+    if not native:
         return {}
-    return {"context": {"active_label": native["active_label"]}}
+    return {"entry_name": native["entry_name"], "point": native["point"]}
 
 
 def _writeback(snapshot: dict[str, Any]) -> dict[str, Any]:

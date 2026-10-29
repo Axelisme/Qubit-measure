@@ -68,7 +68,7 @@ def read_destination_value(
 ) -> object:
     """Read a fixed destination, including accepted Record row metadata.
 
-    current is the GUI-selected point captured for this call. path must already
+    current is the active document set captured for this call. path must already
     be concrete. Records read the draft's run-specific row, not a module.
     Missing persistent targets and I/O errors propagate.
     """
@@ -91,7 +91,7 @@ def applied_values(
     item even when document grouping changes commit order. result contains
     actual values formed by each write owner. No destination read, source
     refresh or proposal-value substitution occurs. target is the GUI-selected
-    point used for this submission and supplies the receipt's entry/point names.
+    document set used for this submission and supplies the receipt's entry/point names.
     """
     values: list[WritebackApplied] = []
     for committed in result.committed:
@@ -107,7 +107,6 @@ def applied_values(
                 target=committed.path,
                 value=deepcopy(committed.value),
                 destination={
-                    "kind": "saved_point",
                     "entry_name": target.entry_name,
                     "point": target.point,
                 },

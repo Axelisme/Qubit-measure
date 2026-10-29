@@ -104,8 +104,9 @@ class AnalysisWriteback(TypedDict):
     has_draft: Whether the owner published a draft; false is a confirmed absence.
     items: All native candidates, including selected=false; values and targets
         stay in the GUI owner's wire representation.
-    destination_context: Native destination identity and readiness at capture
-        time, not an observation or authorization for a later write.
+    destination_context: Native entry_name and point at preview time. Both
+        are None without an entry; point alone is None for global documents.
+        This display location does not authorize a later write.
     """
 
     has_draft: bool

@@ -114,6 +114,51 @@ def context_at(
     return entry, context
 
 
+@pytest.mark.parametrize("scope", ["global", "point", "empty"])
+def test_preview_projects_current_location_without_authorizing_apply(
+    tmp_path: Path, scope: str
+) -> None:
+    entry, context = context_at(tmp_path)
+    service = WritebackService(context, arb_names=lambda: ())
+    draft = service.create_draft(
+        [
+            proposals.ParameterWriteback(
+                "general.description", "Description", proposed_value="new"
+            )
+        ],
+        parameters=context.read_context(),
+        experiment_name="synthetic",
+    )
+    if scope == "global":
+        context.use_global()
+    elif scope == "empty":
+        context.clear_context()
+    harness = WritebackHarness(context, service, draft)
+    preview = dispatch_handler(
+        harness, "tab.writeback_preview", {"tab_id": "tab", "subtab_id": "analysis"}
+    )
+    assert preview["destination_context"] == {
+        "entry_name": None if scope == "empty" else "entry",
+        "point": "a" if scope == "point" else None,
+    }
+    items = TypeAdapter(list[dict[str, object]]).validate_python(preview["items"])
+    assert items[0]["proposed"] == "new"
+    if scope == "empty":
+        assert items[0]["current"] is None
+        with pytest.raises(RemoteError) as error:
+            dispatch_handler(
+                harness,
+                "tab.writeback_write",
+                {
+                    "tab_id": "tab",
+                    "subtab_id": "analysis",
+                    "write": [{"id": "param-1"}],
+                },
+            )
+        assert error.value.reason == "no_context"
+    assert entry.ledger.events() == ()
+
+
 def test_sample_write_receipt_reads_latest_jsonl_at_current_point(
     tmp_path: Path,
 ) -> None:
