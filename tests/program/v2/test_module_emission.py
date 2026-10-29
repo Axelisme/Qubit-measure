@@ -18,7 +18,7 @@ from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.program.v2.timeline import TimelineProgramV2
 
 
-def _pulse(name="drive", *, ch=0, length=0.1, **kwargs):
+def _pulse(name="drive", *, ch=0, length: float | QickParam = 0.1, **kwargs):
     return Pulse(
         name,
         PulseCfg(
@@ -94,6 +94,48 @@ def test_reused_scalar_pulse_has_independent_tags_and_common_end(
     expected = _shots(prog)
     prog.compile()
     assert _shots(prog) == expected
+
+
+@pytest.mark.parametrize("swept", [False, True])
+def test_joined_emissions_preserve_parallel_origins_and_rule_a_end(swept):
+    a = _pulse("a")
+    b = _pulse("b", ch=1, length=QickSweep1D("scan", 0.2, 0.4) if swept else 0.2)
+    tail = _pulse("tail", ch=2)
+
+    def initialize(prog):
+        if swept:
+            prog.add_loop("scan", 3)
+
+    def body(prog):
+        prog.fork("default", into=["a", "b"])
+        prog.emit(a, timeline="a")
+        prog.emit(b, timeline="b")
+        prog.join("a", "b", into="default")
+        prog.emit(tail)
+
+    shots = _shots(_program([a, b, tail], body, initialize))
+    expected = [[0, 0, 87], [0, 0, 130], [0, 0, 173]] if swept else [[0, 0, 87]]
+    assert [_waves(s) for s in shots] == expected * 2
+    ends = [131, 174, 217] if swept else [131]
+    assert [s.body_end_cycle - s.start_cycle for s in shots] == ends * 2
+    assert [s.end_cycle - s.start_cycle for s in shots] == ends * 2
+
+
+def test_repeat_emissions_keep_independent_tags_and_exact_rule_a_spacing():
+    pulse = _pulse()
+
+    def body(prog):
+        prog.emit(pulse, tag="before")
+        with prog.repeat("r", 2):
+            prog.emit(pulse, tag="inside")
+        prog.emit(pulse, tag="after")
+
+    prog = _program([pulse], body)
+    shots = _shots(prog)
+    assert [_waves(s) for s in shots] == [[0, 44, 88, 132]] * 2
+    assert [s.body_end_cycle - s.start_cycle for s in shots] == [176] * 2
+    assert [s.end_cycle - s.start_cycle for s in shots] == [176] * 2
+    assert prog.get_time_param("inside", "t") * 430.08 == pytest.approx(0)
 
 
 @pytest.mark.parametrize("sync", [False, True])

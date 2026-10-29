@@ -1,6 +1,9 @@
 """Native QICK programs with timeline ends relative to reference time."""
 
 import math
+from collections.abc import Generator
+from contextlib import contextmanager
+from dataclasses import dataclass, field
 from typing import Literal
 
 from qick.asm_v2 import (
@@ -72,20 +75,86 @@ def _step_time(prog, value: float | QickParam) -> float | QickParam:
     return param.get_rounded(loop_counts=prog.loop_dict)
 
 
+def _repeat_minimum(name: str, n: int | str, range_hint: tuple[int, int] | None) -> int:
+    """Validate the public count contract and return its guaranteed minimum."""
+    if isinstance(n, str):
+        if (
+            not isinstance(range_hint, tuple)
+            or len(range_hint) != 2
+            or any(type(value) is not int or value < 0 for value in range_hint)
+            or range_hint[0] > range_hint[1]
+        ):
+            raise ValueError("register repeat requires a valid nonnegative range_hint")
+        if n == name:
+            raise ValueError("repeat n must differ from its counter register name")
+        return range_hint[0]
+    if type(n) is not int or n < 0:
+        raise ValueError("repeat n must be a nonnegative integer or register name")
+    if range_hint is not None:
+        raise ValueError("integer repeat does not accept range_hint")
+    return n
+
+
+@dataclass
+class _RepeatFrame:
+    parent: str
+    external: dict[str, float | QickParam]
+    waiting: set[str]
+    native_gens: dict[int, float | QickParam]
+    native_ros: dict[int, float | QickParam]
+    advance: float | QickParam = 0.0
+    variable: bool = False
+    written_gens: set[int] = field(default_factory=set)
+    written_ros: set[int] = field(default_factory=set)
+
+    def rebase_native(self, prog, count: int) -> None:
+        """Debit external timestamps, preserving tails generated in the last iteration."""
+        generated_gens = {ch: prog.get_timestamp(gen_ch=ch) for ch in self.written_gens}
+        generated_ros = {ch: prog.get_timestamp(ro_ch=ch) for ch in self.written_ros}
+        for ch, end in self.native_gens.items():
+            prog.set_timestamp(end, gen_ch=ch)
+        for ch, end in self.native_ros.items():
+            prog.set_timestamp(end, ro_ch=ch)
+        prog.decrement_timestamps(self.advance * count)
+        for ch, end in generated_gens.items():
+            # With a zero minimum the body may not execute. Retain the later
+            # native timestamp; QICK owns native timestamp comparison policy.
+            value = end if count else max(end, prog.get_timestamp(gen_ch=ch))
+            prog.set_timestamp(value, gen_ch=ch)
+        for ch, end in generated_ros.items():
+            value = end if count else max(end, prog.get_timestamp(ro_ch=ch))
+            prog.set_timestamp(value, ro_ch=ch)
+
+
 class _TimelineBook:
     """Store only relative ends, including the ordinary default timeline."""
 
     def __init__(self):
         self.ends: dict[str, float | QickParam] = {"default": 0.0}
+        self.waiting: set[str] = set()
+        self.repeats: list[_RepeatFrame] = []
+        self.native_only = False
 
-    def end(self, name: str) -> float | QickParam:
+    def end(self, name: str, *, placement: bool = False) -> float | QickParam:
         if name not in self.ends:
             raise ValueError(f"{name}: unknown timeline; declare it with fork in _body")
+        if placement and name in self.waiting:
+            raise ValueError(
+                f"{name}: timeline can only wait after register repeat; "
+                "sync it or use join/fork to establish a conservative scheduling point"
+            )
         return self.ends[name]
 
     def decrement(self, t: float | QickParam) -> None:
+        if self.native_only:
+            return
+        if self.repeats:
+            self.repeats[-1].advance += t
         self.ends = {
             name: _maximum(0.0, end - t, name) for name, end in self.ends.items()
+        }
+        self.waiting = {
+            name for name in self.waiting if _bounds(self.ends[name])[1] > 1e-12
         }
 
     def maximum(self) -> float | QickParam:
@@ -107,10 +176,32 @@ class _Fork(Macro):
         super().preprocess(prog)
         end = self.book.end(self.source)
         if len(set(self.targets)) != len(self.targets) or any(
-            name in self.book.ends for name in self.targets
+            name in self.book.ends
+            or any(name in frame.external for frame in self.book.repeats)
+            for name in self.targets
         ):
             raise ValueError("fork requires new, distinct timeline names")
         self.book.ends.update(dict.fromkeys(self.targets, end))
+
+    def translate(self, prog) -> None:
+        pass
+
+
+class _Join(Macro):
+    """Merge existing ends without emitting instructions or consuming sources."""
+
+    def __init__(self, book: _TimelineBook, sources: tuple[str, ...], into: str):
+        self.book = book
+        self.sources = sources
+        self.into = into
+
+    def preprocess(self, prog) -> None:
+        super().preprocess(prog)
+        end = self.book.end(self.into)
+        for source in self.sources:
+            end = _maximum(end, self.book.end(source), self.into)
+        self.book.ends[self.into] = end
+        self.book.waiting.discard(self.into)
 
     def translate(self, prog) -> None:
         pass
@@ -124,10 +215,17 @@ class _RuntimeAdvance(Macro):
         self.source = source
 
     def preprocess(self, prog) -> None:
+        if self.book.repeats:
+            raise ValueError(
+                "repeat per-iteration reference advance cannot be expressed at compile time "
+                "when using a runtime register delay"
+            )
         ends = self.book.ends.copy()
+        waiting = self.book.waiting.copy()
         # The native consumer resolves its rounded static time. Suspend only
         # timeline bookkeeping until the proof, not native channel timestamps.
         self.book.ends.clear()
+        self.book.waiting.clear()
         try:
             self.source.preprocess(prog)
             static = self.source.get_time_param("auto_t")
@@ -141,6 +239,7 @@ class _RuntimeAdvance(Macro):
                     )
         except Exception:
             self.book.ends = ends
+            self.book.waiting = waiting
             raise
         self.book.ends = dict.fromkeys(ends, 0.0)
 
@@ -159,6 +258,9 @@ class _Boundary(Macro):
         super().preprocess(prog)
         if self.section == "reset":
             self.book.ends = {"default": 0.0}
+            self.book.waiting.clear()
+            self.book.repeats.clear()
+            self.book.native_only = False
 
     def translate(self, prog) -> None:
         if self.section in ("body_start", "body_end"):
@@ -181,7 +283,7 @@ class _Advance(TimedMacro):
             if self.aligned
             else _align_end(prog, self.duration)
         )
-        end = self.book.end(self.timeline) + duration
+        end = self.book.end(self.timeline, placement=True) + duration
         self.book.ends[self.timeline] = _maximum(0.0, end, self.timeline)
         self.resolved_time = end if isinstance(end, QickParam) else QickParam(end)
 
@@ -212,6 +314,73 @@ class _Sync(Delay):
         super().preprocess(prog)
 
 
+class _RepeatEnter(_Sync):
+    """Synchronize the parent, then isolate this iteration's local namespace."""
+
+    def __init__(self, book: _TimelineBook, timeline: str, counter: str | None = None):
+        super().__init__(book, timeline)
+        self.counter = counter
+
+    def preprocess(self, prog) -> None:
+        super().preprocess(prog)
+        if self.counter is not None:
+            prog.add_reg(self.counter)
+        parent = self.timeline
+        if parent is None:
+            raise ValueError("repeat requires a parent timeline")
+        external = self.book.ends.copy()
+        del external[parent]
+        self.book.repeats.append(
+            _RepeatFrame(
+                parent,
+                external,
+                self.book.waiting.copy(),
+                {ch: prog.get_timestamp(gen_ch=ch) for ch in prog.gen_chs},
+                {ch: prog.get_timestamp(ro_ch=ch) for ch in prog.ro_chs},
+            )
+        )
+        self.book.ends = {parent: 0.0}
+        self.book.waiting.clear()
+
+
+class _RepeatExit(_Sync):
+    """Close one iteration, then rebase the outer namespace by all iterations."""
+
+    def __init__(self, book: _TimelineBook, count: int, *, variable: bool = False):
+        super().__init__(book, None)
+        self.count = count
+        self.variable = variable
+
+    def preprocess(self, prog) -> None:
+        super().preprocess(prog)
+        frame = self.book.repeats.pop()
+        variable = self.variable or frame.variable
+        if variable and _bounds(frame.advance)[0] < -1e-12:
+            raise ValueError(
+                "repeat cannot prove minimum reference advance at every sweep point"
+            )
+        # Rebase native timestamps separately so external ends undergo exactly
+        # one pointwise floor proof and last-iteration output tails are preserved.
+        self.book.native_only = True
+        try:
+            frame.rebase_native(prog, self.count)
+        finally:
+            self.book.native_only = False
+        if self.book.repeats:
+            self.book.repeats[-1].written_gens.update(frame.written_gens)
+            self.book.repeats[-1].written_ros.update(frame.written_ros)
+        self.book.ends = frame.external
+        self.book.waiting = frame.waiting
+        self.book.decrement(frame.advance * self.count)
+        if variable:
+            self.book.waiting.update(
+                name for name, end in self.book.ends.items() if _bounds(end)[1] > 1e-12
+            )
+            if self.book.repeats:
+                self.book.repeats[-1].variable = True
+        self.book.ends[frame.parent] = 0.0
+
+
 class _PlacedPulse(Pulse):
     def __init__(self, book: _TimelineBook, timeline: str, source: Pulse):
         super().__init__(ch=source.ch, name=source.name, tag=source.tag)
@@ -221,7 +390,7 @@ class _PlacedPulse(Pulse):
         self.relative_t: float | QickParam | Literal["auto"] = source.t
 
     def preprocess(self, prog) -> None:
-        end = self.book.end(self.timeline)
+        end = self.book.end(self.timeline, placement=True)
         if self.relative_t == "auto":
             t = _maximum(end, prog.get_timestamp(gen_ch=self.ch), self.timeline)
         else:
@@ -258,7 +427,7 @@ class _PlacedConfig(ConfigReadout):
         self.relative_t: float | QickParam = source.t
 
     def preprocess(self, prog) -> None:
-        self.source.t = self.book.end(self.timeline) + self.relative_t
+        self.source.t = self.book.end(self.timeline, placement=True) + self.relative_t
         self.source.preprocess(prog)
         self.book.ends[self.timeline] = _maximum(
             0.0, self.source.get_time_param("t"), self.timeline
@@ -290,7 +459,7 @@ class _PlacedTrigger(Trigger):
         self.relative_t: float | QickParam = source.t
 
     def preprocess(self, prog) -> None:
-        self.t = self.book.end(self.timeline) + self.relative_t
+        self.t = self.book.end(self.timeline, placement=True) + self.relative_t
         super().preprocess(prog)
         end = self.get_time_param("t") + self.get_time_param("width")
         for ch in self.ros:
@@ -480,6 +649,25 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         """
         self.append_macro(_Advance(self._timeline_book, timeline, t, tag=tag))
 
+    def set_timestamp(
+        self,
+        val: float | QickParam,
+        gen_ch: int | None = None,
+        ro_ch: int | None = None,
+    ) -> None:
+        """Set a native channel timestamp in us using QICK's channel validation.
+
+        During repeat preprocessing, record channels with newly scheduled events.
+        Their last-iteration tails must not receive the external-duration debit.
+        """
+        super().set_timestamp(val, gen_ch=gen_ch, ro_ch=ro_ch)
+        if self._timeline_book.repeats and not self._timeline_book.native_only:
+            frame = self._timeline_book.repeats[-1]
+            if gen_ch is not None:
+                frame.written_gens.add(gen_ch)
+            if ro_ch is not None:
+                frame.written_ros.add(ro_ch)
+
     def decrement_timestamps(self, t: float | QickParam | None) -> None:
         """Rebase all relative ends when QICK moves reference by t us.
 
@@ -506,7 +694,9 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         """Declare new timeline names in _body, copying source end at this point.
 
         source must already exist; into is one new name or a list of distinct
-        new names. Unknown source or duplicate targets raise ValueError during
+        new names. A wait-only source supplies its latest bound; new timelines
+        permit conservative placement while that source stays wait-only.
+        Unknown source or duplicate targets raise ValueError during
         compile. Calling outside _body raises ValueError immediately. This emits
         no instructions and does not advance reference. Each compile resets names.
         """
@@ -515,10 +705,75 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         targets = (into,) if isinstance(into, str) else tuple(into)
         self.append_macro(_Fork(self._timeline_book, source, targets))
 
+    @contextmanager
+    def repeat(
+        self,
+        name: str,
+        n: int | str,
+        *,
+        timeline: str = "default",
+        range_hint: tuple[int, int] | None = None,
+    ) -> Generator[None]:
+        """Repeat a body n times on parent timeline (times remain in us).
+
+        Entry syncs the parent. Each iteration closes parent and local ends;
+        exit discards local names and leaves parent zero. Fixed counts exactly
+        rebase outer ends. Register counts rebase by range minimum and leave
+        nonzero outer ends wait-only: join/fork establish ordinary conservative
+        scheduling points; full reference consumption restores placement. Only
+        parent and locally forked names may be used inside. name is
+        the native loop/counter name. n is a nonnegative integer or existing
+        register name. Register counts require an author-guaranteed closed
+        nonnegative integer range_hint; integer counts forbid range_hint. No
+        hardware range check is added. Invalid counts/ranges raise ValueError;
+        unknown/inaccessible names fail during compile. Zero counts still sync
+        the parent but discard body operations. Runtime register reference delays
+        inside the body raise ValueError because iteration duration is unknown.
+        """
+        minimum = _repeat_minimum(name, n, range_hint)
+        if n == 0:
+            self.sync(timeline=timeline)
+            start = len(self.macro_list)
+            try:
+                yield
+            finally:
+                del self.macro_list[start:]
+            return
+        variable = isinstance(n, str)
+        self.append_macro(
+            _RepeatEnter(self._timeline_book, timeline, name if variable else None)
+        )
+        if isinstance(n, str):
+            self.open_inner_loop(name, name, n, range_hint=range_hint)
+        else:
+            self.open_loop(n, name=name)
+        try:
+            yield
+        finally:
+            self.append_macro(
+                _RepeatExit(self._timeline_book, minimum, variable=variable)
+            )
+            if isinstance(n, str):
+                self.close_inner_loop(name, name, n)
+            else:
+                self.close_loop()
+
+    def join(self, *sources: str, into: str) -> None:
+        """Merge existing sources and target into target's latest end (us).
+
+        Sources remain unchanged. Wait-only sources contribute their latest
+        bounds; the target becomes ordinary and permits conservative placement.
+        This emits no instructions and does not move reference. Unknown names
+        or crossing swept ends raise ValueError
+        during compile; declare names with fork before joining them.
+        """
+        self.append_macro(_Join(self._timeline_book, sources, into))
+
     def sync(self, *, timeline: str = "default") -> None:
         """Move reference to the chosen end and floor every rebased end at zero.
 
         Only default exists initially; other names require fork in _body.
+        Fully consumed wait-only bounds become ordinary zero ends again.
         Unknown names or unprovable swept floors raise ValueError during compile.
         """
         self.append_macro(_Sync(self._timeline_book, timeline))

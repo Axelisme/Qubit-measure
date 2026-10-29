@@ -149,6 +149,92 @@ def test_timeline_operations_reject_undeclared_names(operation):
         _program(body, initialize)
 
 
+def test_join_merges_only_selected_ends_without_advancing_reference():
+    def body(prog):
+        prog.delay_timeline(10 / 430.08)
+        prog.fork("default", into=["a", "b", "omitted"])
+        prog.delay_timeline(20 / 430.08, timeline="a")
+        prog.delay_timeline(30 / 430.08, timeline="b")
+        prog.delay_timeline(90 / 430.08, timeline="omitted")
+        prog.join("a", "b", into="default")
+        prog.pulse(0, "p0", timeline="default")
+        prog.pulse(1, "p1", timeline="a")
+        prog.join("a", into="b")  # The source a remains available.
+
+    (shot,) = _shots(_program(body))
+    assert _waves(shot) == [40, 30]
+    assert shot.body_end_cycle == 100
+    assert shot.end_cycle == 100
+
+
+def test_join_retains_later_target_and_does_not_consume_sources():
+    def body(prog):
+        prog.fork("default", into=["source", "target"])
+        prog.delay_timeline(10 / 430.08, timeline="source")
+        prog.delay_timeline(50 / 430.08, timeline="target")
+        prog.join("source", into="target")
+        prog.pulse(0, "p0", timeline="target")
+        prog.pulse(1, "p1", timeline="source")
+
+    (shot,) = _shots(_program(body))
+    assert _waves(shot) == [50, 10]
+    assert (shot.body_end_cycle, shot.end_cycle) == (93, 93)
+
+
+@pytest.mark.parametrize(
+    "source,target", [("missing", "default"), ("default", "missing")]
+)
+def test_join_rejects_undeclared_names(source, target):
+    with pytest.raises(ValueError, match="missing.*fork"):
+        _program(lambda p: p.join(source, into=target))
+
+
+def test_join_proves_swept_order_by_difference_and_resets_each_shot():
+    def initialize(prog):
+        prog.add_loop("scan", 3)
+
+    def body(prog):
+        prog.fork("default", into=["a", "b"])
+        prog.delay_timeline(QickSweep1D("scan", 10 / 430.08, 30 / 430.08), timeline="a")
+        prog.delay_timeline(QickSweep1D("scan", 20 / 430.08, 40 / 430.08), timeline="b")
+        prog.join("a", "b", into="default")
+        prog.pulse(0, "p0", timeline="default")
+        prog.pulse(1, "p1", timeline="a")
+
+    prog = _program(body, initialize, reps=2, relax_delay=5 / 430.08)
+    shots = _shots(prog)
+    assert [_waves(s) for s in shots] == [[20, 10], [30, 20], [40, 30]] * 2
+    assert [s.body_end_cycle - s.start_cycle for s in shots] == [63, 73, 83] * 2
+    assert [s.end_cycle - s.start_cycle for s in shots] == [68, 78, 88] * 2
+    prog.compile()
+    assert _shots(prog) == shots
+
+
+def test_join_rejects_crossing_swept_ends():
+    def initialize(prog):
+        prog.add_loop("scan", 3)
+
+    def body(prog):
+        prog.fork("default", into="a")
+        prog.delay_timeline(QickSweep1D("scan", 10 / 430.08, 30 / 430.08))
+        prog.delay_timeline(20 / 430.08, timeline="a")
+        prog.join("a", into="default")
+
+    with pytest.raises(ValueError, match="default.*cannot prove.*maximum"):
+        _program(body, initialize)
+
+
+def test_join_without_fork_rejoining_still_closes_all_body_ends():
+    def body(prog):
+        prog.fork("default", into="unjoined")
+        prog.delay_timeline(90 / 430.08, timeline="unjoined")
+        prog.pulse(0, "p0", timeline="default")
+
+    (shot,) = _shots(_program(body))
+    assert _waves(shot) == [0]
+    assert (shot.body_end_cycle, shot.end_cycle) == (90, 90)
+
+
 def test_fork_is_only_available_in_body():
     def initialize(prog):
         with pytest.raises(ValueError, match="_body"):

@@ -150,6 +150,26 @@ DelayAuto 是唯一例外。未指定 timeline 時包裝原生 delay_auto／dela
 Runtime register 時間只走 delay_reg_auto。所有結尾包含 default 都須證明不大於靜態推進量，否則先 sync。
 PulseReadout 的 gain／frequency runtime words 不受這項時間限制排除。
 
+Join 用 `join(*sources, into=target)` 合併既有結尾，保留來源與較晚的原目標。
+它只記帳，不移 reference，也不要求每條 fork 都 join 回來。
+掃描結尾必須能逐點證明大小，互相交叉時報錯。
+
+`with self.repeat(name, n, timeline="default", range_hint=None)` 先同步母 timeline，
+每圈再同步母 timeline 與局部結尾。內部只能用母 timeline，以及從母或局部 timeline
+fork 的名字。退出後母 timeline 為0，局部名字失效，可以重新 fork 同名。
+其他外部長 pulse 可以橫跨 Repeat，但不能在迴圈內使用它的 timeline。
+固定 n 是非負整數，退出時精確扣減外部結尾；n=0 仍同步入口，但不執行 body。
+
+Register n 使用既有 register 名字，必須提供作者保證的非負整數閉區間
+`range_hint=(minimum, maximum)`。Int n 不接受 range_hint。
+Register 名字不得與以 name 命名的 counter 相同。編譯器不從 register 初值推定 range。
+Register Repeat 按 minimum 計算外部結尾的最晚等待上界。
+原 timeline 禁止繼續發射或 delay_timeline，直到 sync 或原生 reference 推進完整消耗上界。
+Join 目標與 fork 新名字則是普通 timeline，可以從該上界建立保守排程點。
+例如實際 reference=45、上界=70 時，新 timeline 的 pulse 可以排在115。
+Repeat body 內的 DelayAuto(register) 與 delay_reg_auto 報錯，因每圈推進量無法在編譯期表達。
+迴圈外的 consumer 與以 register 控制次數、每圈長度可證明的 Repeat 保持可用。
+
 Body 收尾先同步全部 timeline，再放 body_end marker，然後進 shot 外殼。
 每次 compile 重置宣告與結尾。公開 `timing_layout` 由真 boundary metadata 取得 linked addresses 與 loop 座標。
 將它與 prog_list／labels 交給 `ir.analyze_timing`，可觀察逐點事件、body_end 與含外殼的 shot_end。
