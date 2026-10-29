@@ -18,15 +18,12 @@ def make_form(ctx: FormContext) -> Form[RamanGFCfg]:
     return Form(
         RamanGFCfg,
         field_order=(
+            "drive",
+            "readout",
             "carrier_mhz",
             "scan_mode",
             "detuning",
             "gain",
-            "drive",
-            "pi01",
-            "pi03",
-            "pi32",
-            "readout",
             "shots",
             "relax_delay",
             "initial_delay",
@@ -44,11 +41,6 @@ def make_form(ctx: FormContext) -> Form[RamanGFCfg]:
                     "waveform.style": "arb",
                 },
             ),
-            "pi01": Slot("$qubit.module.x180")
-            if ctx.has("$qubit.module.x180")
-            else Template("pi_pulse", bindings={"qubit": "$qubit"}),
-            "pi03": Template("pi_pulse", bindings={"qubit": "$qubit"}),
-            "pi32": Template("pi_pulse", bindings={"qubit": "$qubit"}),
             "readout": Slot("$resonator.module.readout")
             if ctx.has("$resonator.module.readout")
             else Template("readout", bindings={"resonator": "$resonator"}),

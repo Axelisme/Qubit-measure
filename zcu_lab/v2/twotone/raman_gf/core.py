@@ -1,4 +1,4 @@
-"""Single-carrier, two-photon g/f scans using acquired reference and signal IQ."""
+"""Single-carrier, two-photon g/f scans retaining raw acquired signal IQ."""
 
 from __future__ import annotations
 
@@ -36,15 +36,13 @@ class RamanGFResult:
     """Mean-sample ADC IQ, with no simulator state information.
 
     signals: (points,shots) complex IQ in detuning-major, gain-minor order.
-    references: (3,shots) IQ for g/no pulse, e/pi01, f/pi03 then pi32.
     detunings: (points,) actual two-photon detuning in MHz, positive above center.
     areas: (points,) gain squared times sampled envelope intensity integral, us.
     gains: (points,) actual nonnegative DAC gains. Areas are not rotation angles.
-    Partial/unacquired rows remain NaN. References describe preparations, not purity.
+    Partial/unacquired rows remain NaN. No calibration or state truth is acquired.
     """
 
     signals: NDArray[np.complex128]
-    references: NDArray[np.complex128]
     detunings: NDArray[np.float64]
     areas: NDArray[np.float64]
     gains: NDArray[np.float64]
@@ -58,7 +56,7 @@ class RamanGFCfg(ConfigBase):
     Frequency mode uses gain.start; area mode uses detuning.start; grid uses both.
     Gain sweeps change the two-photon area gain^2*integral(|envelope|^2 dt).
     The drive's freq/gain are supplied by the scan; its channel, NQZ, waveform,
-    phase and delays remain operator inputs. pi01/pi03/pi32 calibrate references.
+    phase and delays remain operator inputs. Calibration belongs to saved readout.
     """
 
     carrier_mhz: Annotated[
@@ -85,9 +83,6 @@ class RamanGFCfg(ConfigBase):
             description="Select a sampled sqrt(cos) arbitrary waveform. Frequency and gain come from the scan.",
         ),
     ]
-    pi01: Annotated[Pulse.Cfg, FieldMeta(label="Pi 01")]
-    pi03: Annotated[Pulse.Cfg, FieldMeta(label="Pi 03")]
-    pi32: Annotated[Pulse.Cfg, FieldMeta(label="Pi 32")]
     readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
     shots: Annotated[int, FieldMeta(label="Shots per point")] = Field(
         default=1024, ge=6
@@ -147,7 +142,6 @@ def restore_result(data: GroupedLoadData[RamanGFCfg]) -> RamanGFResult:
     """Restore all acquired IQ and actual coordinates without requiring a valid cfg."""
     return RamanGFResult(
         signals=np.asarray(data.variable("signal").z, dtype=np.complex128),
-        references=np.asarray(data.variable("reference").z, dtype=np.complex128),
         detunings=np.asarray(data.variable("detuning").z, dtype=np.float64),
         areas=np.asarray(data.variable("area").z, dtype=np.float64),
         gains=np.asarray(data.variable("gain").z, dtype=np.float64),
@@ -155,7 +149,7 @@ def restore_result(data: GroupedLoadData[RamanGFCfg]) -> RamanGFResult:
 
 
 class RamanGFExp(Experiment[RamanGFResult, RamanGFCfg]):
-    """Acquire three references and scan a single-tone two-photon g/f drive."""
+    """Scan a single-tone two-photon g/f drive and retain mean-sample ADC IQ."""
 
     AXES_SPEC: ClassVar[GroupedAxesSpec[RamanGFResult, RamanGFCfg]] = GroupedAxesSpec(
         variables=(
@@ -166,14 +160,6 @@ class RamanGFExp(Experiment[RamanGFResult, RamanGFCfg]):
                     VariableAxisSpec.generated_arange("Point", "None"),
                 ),
                 VariableZSpec("signals", "Signal IQ", "ADC", dtype=np.complex128),
-            ),
-            VariableSpec(
-                "reference",
-                (
-                    VariableAxisSpec.generated_arange("Shot", "None"),
-                    VariableAxisSpec.generated_arange("Preparation", "None"),
-                ),
-                VariableZSpec("references", "Reference IQ", "ADC", dtype=np.complex128),
             ),
             *(
                 VariableSpec(
@@ -197,7 +183,7 @@ class RamanGFExp(Experiment[RamanGFResult, RamanGFCfg]):
     )
 
     def run(self, cfg: RamanGFCfg, *, context: RunContext) -> RamanGFResult:
-        """Acquire references, then one Raman pulse and readout per scan point.
+        """Acquire one Raman pulse and readout per scan point, without references.
 
         Positive two-photon detuning raises the carrier by detuning/2 MHz.
         Each point starts after relaxation; there is no Lambda pair or reset.
@@ -209,29 +195,6 @@ class RamanGFExp(Experiment[RamanGFResult, RamanGFCfg]):
         cfg = deepcopy(cfg)
         point_frequencies, point_gains, integral = scan_points(cfg, context.soccfg)
         signals = SignalBuffer((len(point_gains), cfg.shots))
-        references = SignalBuffer((3, cfg.shots))
-
-        # Reference labels are requested preparations, never simulator populations.
-        with Schedule(cfg, references, scope=context.scope) as sched:
-            for label, step in sched.scan("preparation", [0, 1, 2]):
-                builder = step.prog_builder(
-                    context.soc,
-                    context.soccfg,
-                    reps=cfg.shots,
-                    initial_delay=cfg.initial_delay,
-                    relax_delay=cfg.relax_delay,
-                )
-                if label == 1:
-                    builder.add(Pulse("pi01", cfg.pi01))
-                elif label == 2:
-                    builder.add(Pulse("pi03", cfg.pi03), Pulse("pi32", cfg.pi32))
-                program = builder.add(PulseReadout("readout", cfg.readout)).build()
-                try:
-                    program.acquire(context.soc, progress=True, cancel_flag=step.stop)
-                except StoppedPartialAcquireError:
-                    step.set_stop()
-                    break
-                references[step].set(raw_shots_to_signal(program))
 
         # One carrier and one envelope, immediately followed by the same readout.
         with Schedule(cfg, signals, scope=context.scope) as sched:
@@ -260,17 +223,14 @@ class RamanGFExp(Experiment[RamanGFResult, RamanGFCfg]):
 
         result = RamanGFResult(
             signals=signals.array,
-            references=references.array,
             detunings=2 * (point_frequencies - cfg.carrier_mhz),
             areas=point_gains**2 * integral,
             gains=point_gains,
         )
-        context.plots.subplots(
-            "measurement", ncols=2, figsize=(10, 4), layout="constrained"
-        )
+        context.plots.subplots("measurement", layout="constrained")
 
         def draw(figure):
-            ax, reference_ax = figure.axes
+            ax = figure.axes[0]
             ax.plot(
                 np.arange(len(result.signals)),
                 result.signals.mean(axis=1).real,
@@ -287,16 +247,6 @@ class RamanGFExp(Experiment[RamanGFResult, RamanGFCfg]):
                 xlabel="Point (detuning-major, area-minor)", ylabel="Mean-sample ADC IQ"
             )
             ax.legend()
-            for label, row in zip(
-                ("g: no pulse", "e: pi01", "f: pi03 then pi32"),
-                result.references,
-                strict=True,
-            ):
-                reference_ax.scatter(row.real, row.imag, s=2, alpha=0.3, label=label)
-            reference_ax.set(
-                xlabel="I (ADC)", ylabel="Q (ADC)", title="Acquired references"
-            )
-            reference_ax.legend()
 
         context.plots.draw("measurement", draw)
         return result
