@@ -5,9 +5,17 @@ solver accuracy are user choices; successful validation does not certify
 convergence or the physical validity of a dispersive/Markov approximation.
 """
 
+from collections.abc import Mapping
+from types import MappingProxyType
 from typing import Annotated, Literal, Self
 
-from pydantic import Field, field_validator, model_validator
+from pydantic import (
+    AfterValidator,
+    Field,
+    PlainSerializer,
+    field_validator,
+    model_validator,
+)
 
 from zcu_tools.resources.simulation_schema import (
     ComplexCoefficient,
@@ -83,6 +91,14 @@ class DriveLine(Values):
     name: Name
     gen_ch: Index
     charge_drive_ghz_per_gain: ComplexCoefficient
+
+
+def _freeze_drive_lines(value: Mapping[str, DriveLine]) -> Mapping[str, DriveLine]:
+    return MappingProxyType(dict(value))
+
+
+def _serialize_drive_lines(value: Mapping[str, DriveLine]) -> dict[str, DriveLine]:
+    return dict(value)
 
 
 class DistortionTerm(Values):
@@ -246,7 +262,10 @@ class SingleFluxoniumSettings(Values):
 
     format: exactly 'zcu.single-fluxonium'; version: strict integer 1. chip:
     single circuit and temperature. dc_bias: one offset and live DC source.
-    drive_line: one microwave line. flux_line: one large-amplitude fast-flux
+    drive_lines: nonempty named map of microwave lines; keys label field paths,
+    each line.name identifies its numeric source. Legacy drive_line input becomes
+    one entry keyed by its name. Supplying both forms is rejected.
+    flux_line: one large-amplitude fast-flux
     line, or None/omitted for a DC-only circuit with no pulsed flux route.
     readout: one pulse generator/cavity/ADC. numerics: explicit basis and
     solver choices, optional seed/pacing. drift: optional per-loss log-OU sigma
@@ -263,11 +282,29 @@ class SingleFluxoniumSettings(Values):
     version: Literal[1]
     chip: Chip
     dc_bias: DCBias
-    drive_line: DriveLine
+    drive_lines: Annotated[
+        Mapping[Name, DriveLine],
+        Field(min_length=1),
+        AfterValidator(_freeze_drive_lines),
+        PlainSerializer(_serialize_drive_lines),
+    ]
     flux_line: FluxLine | None = None
     readout: Readout
     numerics: Numerics
     drift: CoherenceDrift | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _legacy_drive_line(cls, value: object) -> object:
+        if not isinstance(value, Mapping) or "drive_line" not in value:
+            return value
+        if "drive_lines" in value:
+            raise ValueError("drive_lines: cannot also supply drive_line")
+        document = dict(value)
+        line = document.pop("drive_line")
+        name = line.get("name") if isinstance(line, Mapping) else None
+        document["drive_lines"] = {name if isinstance(name, str) else "legacy": line}
+        return document
 
     @model_validator(mode="after")
     def _drift_losses(self) -> Self:
@@ -284,18 +321,23 @@ class SingleFluxoniumSettings(Values):
 
     @model_validator(mode="after")
     def _wiring(self) -> Self:
-        names = {self.dc_bias.source.name}
-        channels = {self.readout.drive.gen_ch}
+        names = {self.dc_bias.source.name: "dc_bias.source.name"}
+        channels = {self.readout.drive.gen_ch: "readout.drive.gen_ch"}
         for field, line in (
-            ("drive_line", self.drive_line),
+            *((f"drive_lines.{name}", line) for name, line in self.drive_lines.items()),
             ("flux_line", self.flux_line),
         ):
             if line is None:
                 continue
             if line.name in names:
-                raise ValueError(f"{field}.name: duplicate source name")
+                raise ValueError(
+                    f"{field}.name: duplicate source name also bound to {names[line.name]}"
+                )
             if line.gen_ch in channels:
-                raise ValueError(f"{field}.gen_ch: duplicate generator binding")
-            names.add(line.name)
-            channels.add(line.gen_ch)
+                raise ValueError(
+                    f"{field}.gen_ch: channel {line.gen_ch} is also bound to "
+                    f"{channels[line.gen_ch]}"
+                )
+            names[line.name] = f"{field}.name"
+            channels[line.gen_ch] = f"{field}.gen_ch"
         return self
