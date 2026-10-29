@@ -136,6 +136,12 @@ Single／six 的 `numerics.projection_prune_floor` 與 FTF 的 `numerics.project
 
 ### Module frontend 與小介面依賴
 
+原生 program macro 的 C 階段 frontend 遷移尚未實作，A 階段不切換本節的現行 Module frontend。
+2026-10-29 已採用的 C 遷移範圍涵蓋原生操作與 emission／module 型別，要求現有每種 module 的 macro 形式可模擬，且現有可模擬實驗不能失去支援。
+Runtime timeline 已列入 B，但不擴大 A 的靜態證明與只能等待模型。
+C 改讀編譯結果與向量直譯方案仍在討論，編譯結果模擬原型不是已採用架構。
+新 builder 與實驗遷移排在 C 之後，不屬於 A。分工與階段邊界見 [[0083]]。
+
 2026-10-14，使用者選擇「我也認為保持Module語義的解析比較可行」，並對 execution context／分段求解回答「可以」。Frontend 解釋 Module 語意，持有局部 register、sweep／loop、table 與時間排程 context，不建立通用 tProc ISA emulator 或全域 register table。未知操作與未定義 register 明確失敗。
 
 同日，使用者指定放置：「採用建議，然後考慮到這個模擬機制高度依賴program的Module，所以我認為其位置應該可以放在program/v2中的子模塊，但其他program模塊不可以依賴他，這樣方便維護的同時保持解耦。」隨後澄清：「那也可以只依賴Mixin，不是不能依賴，而是耦合度要小到只有幾個接口」。以澄清為準，不禁止所有依賴。

@@ -1,8 +1,8 @@
 # README - program/v2
 
-**Last updated:** 2026-10-29
+**Last updated:** 2026-10-29，原生 macro 與 timeline
 
-**讀者：** framework-dev。V2 program、module、readout 與 acquisition 契約。
+**讀者：** lab-author、framework-dev、agent。原生 V2 program 寫法與 module、readout、acquisition 契約速查。
 
 ## Testing & Type Checking Conventions
 
@@ -100,7 +100,8 @@ Encoding with `readout_freq_words` still takes those four explicit settings.
 
 ## 原生寫法與具名 timeline
 
-`timeline.TimelineProgramV2` 繼承 `MyProgramV2`，不經 `ModularProgramV2`。
+`timeline.TimelineProgramV2` 繼承 `MyProgramV2` 加 `resources.ProgramResourcesMixin`，不經 `ModularProgramV2`。
+跨 owner 分工、設計理由與階段邊界見 [ADR-0083](../../../../docs/adr/0083-program-macros-and-timelines.md)。
 作者在 `_initialize(cfg)` 宣告通道、pulse、readout config、module 與 loops。
 在 `_body(cfg)` 發射原生 QICK 操作或 `emit(module)`。
 建構子使用 `reps`、`initial_delay`、`relax_delay`。
@@ -126,9 +127,14 @@ Module 先明確 declare，每次 emit 建立獨立的 `ModuleEmission` 與 tag�
 Module 本身不是 QICK Macro，不能直接 append。
 一般 emit 內部事件共用所選 timeline 的結尾作為起點，再加規則 a 的 total_length。
 省略 timeline 選 default，但不移動 reference。
-例如 drive_cfg 使用 channel 0，另一個 channel 1 的 native pulse 已在初始化宣告時：
+以下是 `TimelineProgramV2` 子類別的 hooks。`drive_cfg` 是呼叫端提供、使用 channel 0 的 `Pulse.Cfg`。
+時間參數單位為 us，另一個 channel 1 的 native pulse 由原生 API 宣告。
 
 ```python
+from zcu_tools.program.v2.modules import Pulse
+from zcu_tools.program.v2.timeline import TimelineProgramV2
+
+
 def _initialize(self, cfg):
     self.drive = Pulse("drive", drive_cfg)
     self.declare(self.drive)
@@ -170,6 +176,27 @@ Join 目標與 fork 新名字則是普通 timeline，可以從該上界建立保
 原 wait-only timeline 上的兩種 readout config 入口也拒絕放置，包含 t=0。
 Join／fork 的普通結果，或 sync／原生推進消耗上界後的來源，可照常放置 config。
 不帶 timeline 的 config 呼叫保留原生行為。
+例如沿用上面的宣告，以下 `_body` 先安排跨 channel 重疊，再重複發射 drive：
+
+```python
+def _body(self, cfg):
+    self.fork("default", into="parallel")
+    self.emit(self.drive, tag="first")  # Channel 0, ordinary default end.
+    self.pulse(1, "native", t=0, timeline="parallel")
+    self.join("parallel", into="default")  # Accounting only.
+    self.sync()  # Both channels have finished before the next group.
+    with self.repeat("pair", 2):
+        self.fork("default", into="local")
+        self.emit(self.drive, timeline="local", tag="repeated")
+        self.delay_timeline(0.05, timeline="local")
+    # Parent default is zero. The local name is out of scope.
+```
+
+每圈結尾自動對齊 local 的 module 結尾加 0.05 us，不必在迴圈內手動 sync。
+Register 次數改傳既有 register 名字，例如
+`with self.repeat("pair", "n_pair", range_hint=(2, 4)):`，body 可沿用上例。
+`n_pair` 須先由作者用公開 register API 準備，執行值必須符合作者保證的閉區間。
+
 Repeat body 內的 DelayAuto(register) 與 delay_reg_auto 報錯，因每圈推進量無法在編譯期表達。
 迴圈外的 consumer 與以 register 控制次數、每圈長度可證明的 Repeat 保持可用。
 

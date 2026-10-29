@@ -1,8 +1,8 @@
 # program/v2/modules — semantic program modules
 
-**Last updated:** 2026-10-29
+**Last updated:** 2026-10-29，宣告與 emission
 
-**讀者：** framework-dev。語意 program modules 的角色、組裝與邊界。
+**讀者：** lab-author、framework-dev、agent。語意 program modules 的宣告、發射與 owner 邊界速查。
 
 High-level cheat-sheet for `program/v2/modules/`. Read before touching this
 package. Implementation detail belongs in code and tests; this file records module
@@ -39,6 +39,28 @@ Register cycles 必須非負，所有結尾包含 default 都須逐點證明不�
 
 PulseReadout 的 runtime gain／generator frequency／ADC frequency words 沿用既有 consumer。
 時間 guard 不限制這些非時間 words。Legacy init／run／block 保留供舊 program 使用。
+其餘 module 的新 lowering 屬於後續階段，不因 legacy 可用就表示可直接 emit。
+
+同一個宣告物件可在 body 重複使用。例如以下 `TimelineProgramV2` hooks 只累加等待結尾：
+
+```python
+from zcu_tools.program.v2.modules import Delay
+
+
+def _initialize(self, cfg):
+    self.gap = Delay("gap", 0.1)  # us
+    self.declare(self.gap)
+
+
+def _body(self, cfg):
+    self.emit(self.gap, tag="gap_1")
+    self.emit(self.gap, tag="gap_2")
+    self.sync()  # Advance reference by the two rounded gaps.
+```
+
+兩次 emit 各有一個 emission 與 tag，不修改 module 的發射狀態。
+Fork／join／Repeat 與原生 pulse 混用的範例見 [program README](../README.md#原生寫法與具名-timeline)。
+設計理由與階段邊界見 [ADR-0083](../../../../../docs/adr/0083-program-macros-and-timelines.md)。
 
 ## Configuration names
 
@@ -174,8 +196,8 @@ Scalar and pre/post-delay timing keep their existing rules.
 - Keep scalar values and raw hardware words as distinct module contracts. Expanding
   `LoadValue` to uint32 would make arithmetic/scalar users ambiguous and weaken
   compression assumptions.
-- Dmem buffer ownership remains in `ModularProgramV2`; modules append their table
-  and keep only the returned offset.
+- `ProgramResourcesMixin` owns the dmem buffer shared by `TimelineProgramV2`
+  and `ModularProgramV2`; modules append their table and keep only the returned offset.
 - A module that loads a register does not by itself define how a later pulse,
   readout, or simulator interprets that register. Add explicit consuming module
   contracts for those cases instead of relying on name conventions.
