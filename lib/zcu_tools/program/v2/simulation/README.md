@@ -68,6 +68,8 @@ Hardware acquisition does not call the binding or this clock.
 
 `simulation.compiled.build_compiled_request(prog, mode, binding, sequence, routes=soc.routes)`
 reads `prog.compiled_stream` and returns detached numeric slots without calling a backend.
+Its optional `charge_requirements` keyword preserves caller requirements in the
+request for environment-owned physical validation, without inferring drive roles.
 It predecodes the snapshot once. Proven native affine shells use array lanes.
 Other carried state follows instruction order across scan points.
 The builder rejects rep-varying outputs and unresolved readout routes before returning a request.

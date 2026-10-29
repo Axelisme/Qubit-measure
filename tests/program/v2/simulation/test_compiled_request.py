@@ -3,6 +3,7 @@
 import numpy as np
 import pytest
 from qick.asm_v2 import QickRawParam, QickSweep1D
+from zcu_tools.core.simulation import ChargeDriveRequirement
 from zcu_tools.experiment.simulation import white_noise
 from zcu_tools.program.v2 import ModularProgramV2
 from zcu_tools.program.v2.ir import CompiledRecord, CompiledStream
@@ -11,6 +12,7 @@ from zcu_tools.program.v2.modules.delay import Delay, DelayAuto, SoftDelay
 from zcu_tools.program.v2.modules.pulse import PulseCfg
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
+from zcu_tools.program.v2.simulation.compiled import build_compiled_request
 from zcu_tools.program.v2.timeline import TimelineProgramV2
 
 from tests.program.v2._mux_support import mux_soccfg, native_mux
@@ -36,6 +38,30 @@ def test_native_pulse_request_has_detached_numeric_event_and_adc_slots():
     assert read.samples == 61
     assert read.trigger_us == (0,)
     assert read.frequency_mhz == pytest.approx((100,), abs=1e-5)
+    assert env.soc.binding.last_request is None
+
+
+@pytest.mark.parametrize("mode", ["integrated", "decimated"])
+def test_compiled_request_preserves_call_local_charge_requirements(mode):
+    prog, env = program(lambda p: p.pulse(0, "p"))
+    requirements = (
+        ChargeDriveRequirement("pump", 1),
+        ChargeDriveRequirement("probe", 0),
+    )
+    result = build_compiled_request(
+        prog,
+        mode,
+        env.soc.binding,
+        7,
+        routes=env.soc.routes,
+        charge_requirements=requirements,
+    )
+    assert result.charge_requirements == requirements
+    ordinary = build_compiled_request(
+        prog, mode, env.soc.binding, 8, routes=env.soc.routes
+    )
+    assert ordinary.charge_requirements == ()
+    assert result.charge_requirements == requirements
     assert env.soc.binding.last_request is None
 
 
