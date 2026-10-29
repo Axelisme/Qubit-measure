@@ -4,6 +4,12 @@
 
 Single-shot T1-with-tone, probe-gain sweep: at each probe gain it sweeps the wait-plus-probe length from both |g> and |e> initial states (Branch), classifies each shot during acquisition against the |g>/|e> centres, fits the dual transition rates per gain, and renders the 3×3 rate landscape over (gain, time). Runs on real hardware.
 
+## Saved populations
+
+The saved `signals` array has axes `(gain, initial state, length, population state)`. The final axis contains the measured fractions `[g,e,other]`, with `population_states=[0,1,2]`. Other counts rejected shots, including ties, rather than a reconstructed remainder. Unmeasured points remain NaN.
+
+Older files saved only two population columns under the `GE Population` axis label. The new loader rejects that label because it expects `Population`. Those files cannot enter the new Analyze directly. Keep the old analysis version for those files; this version does not reconstruct Other or convert old results. The cfg schema remains 3.0 because the configuration fields did not change.
+
 ## Parameter sources
 
 Open and Reset take a snapshot of the current aliases, parameters and module choices. Relax delay starts at 5*T1; length stop uses 5 times the tone T1 time scale. Frequency form sweeps `$resonator.freq` +/- 1.5 * `$resonator.kappa`; gain form sweeps 0 to 1. Each form exposes only one outer axis.
