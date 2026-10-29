@@ -37,6 +37,77 @@ missing circle radius with a GE Post instruction.
 輸入時間單位為 µs，rounds 與 reps 為正整數；不計 acquisition 固定開銷與 flux ramp。
 模擬 binding 的 pacing 使用同一個公式，不累計 acquisition 的硬體總時間。
 
+## Herald declarations
+
+`PulseReadout.herald_spec(prog, occurrence=...)` derives one `program.herald.HeraldSpec`
+from a compiled program. The required occurrence counts this instance's emissions
+within each shot; the returned read_index counts all reads on its logical ADC.
+Initialize an instance once, then reuse its run method for herald and terminal
+reads. A later read on the same ADC is required. Any Repeat/Branch trigger on
+that ADC, count mismatches and missing calibration fail before acquisition.
+The control-flow restriction includes non-herald reads because QICK's static
+trigger counts cannot reliably determine dynamic read indices. Control flow on
+other ADCs remains supported. Circle calibration requires the GE Post radius.
+The method returns a classifier snapshot and does not register a herald.
+Acquisition receives the spec explicitly and admits at most one herald per ADC.
+`program.herald.herald_ground_mask` is the shared ground
+acceptance helper. It takes complex IQ divided by ADC integration length, without
+subtracting offsets. Circle uses the strict g circle and nearest-center region;
+linear rotates by exp(+1j*angle) and accepts values at or below threshold.
+
+## Herald post-selection
+
+After compilation, pass the declaration explicitly:
+
+```python
+spec = readout.herald_spec(prog, occurrence=0)
+data = prog.acquire(soc, herald=[spec], rounds=2, progress=False)
+fractions = prog.get_herald_pass_fraction()
+# After a completed round, fractions[spec.ro_ch] has the non-reps sweep shape.
+```
+
+`herald` accepts a sequence of `HeraldSpec`. Omission or an empty sequence keeps
+ordinary acquisition. Each ADC uses its own herald mask. ADCs without a herald
+keep all their shots and reads. The selected read must precede another read on
+that ADC. Duplicate ADC specs, undeclared ADCs, invalid read indices and a
+`reads_per_shot` mismatch raise `ValueError` before transport acquisition.
+`trackers` with herald and `acquire_decimated(..., herald=[...])` also raise
+`ValueError`.
+
+Acquisition classifies the herald in raw sums divided by ADC sample length,
+without subtracting IQ offset. It removes that read, selects accepted shots and
+then processes the remaining reads. Ordinary IQ retains the `remove_offset`
+policy. With typed `classify`, only accepted signal shots enter classification.
+The result ends in g/e populations, and typed classification takes precedence
+over QICK `threshold/angle`. Without typed classification, `threshold/angle`
+uses QICK's projection sign, radians, offset and equality rules on accepted
+shots. It returns excited fraction in I and zero in Q. Scalar and per-ADC-list
+projection options retain QICK declaration-order semantics.
+
+The return list stays in ADC declaration order. Each float64 array has shape
+`(remaining_reads, *point_dims, 2)`, with only herald reads removed. Acquisition
+adds accepted signal sums and counts across completed rounds, then divides by
+accepted count. It does not average round means equally. Zero-pass points have
+NaN in both components and acceptance fraction zero. Round hooks receive this
+same weighted running result.
+
+`get_herald_pass_fraction()` returns a detached dictionary keyed by herald ADC
+numbers. Each float64 array contains accepted/attempted shots on the non-reps
+point grid, without a read axis. An unswept program returns scalar arrays.
+The accessor returns `None` before any herald round completes, after an ordinary
+integrated or decimated acquire, or after cancellation before the first completed
+round. A new admitted acquire clears previous fractions. Cancellation during a
+round discards that round and retains completed-round data and fractions.
+Finalization raises `StoppedPartialAcquireError` when no round completed.
+
+`HeraldAcquireMixin` owns only grid-sized sums/counts. It precedes
+`RoundHookMixin` to replace the equal-round incremental summary. Existing tracker,
+classification and Stop mixin order stays unchanged. Hardware and simulation use
+the same shot-processing and weighted-summary methods. Herald forces simulation
+to materialize its last-round `RawShots`, even without classification or threshold.
+No new per-shot persistence or raw history is added. `get_raw()` retains the
+existing transport contract, including the herald read.
+
 ## 主要依賴面
 
 - `ImproveAcquireMixin` 直接擴充 `qick.qick_asm.AcquireMixin`，是 `program` 層最核心的 QICK 接點。
@@ -112,4 +183,4 @@ missing circle radius with a GE Post instruction.
   - `finish_round()` 回傳語意（是否仍為「還有下一 round」）
   - `_average_buf()` 的輸入 shape 假設
 - `EarlyStopMixin._finish_accumulated_round` 鏡射 QICK `AcquireMixin.finish_round` 的 accumulated branch，因為上游 loop 沒有提前退出的 seam。QICK 升版時，維護者須人工對照上游 `AcquireMixin.finish_round` 並移植相關變更。維護者也須透過現有公開介面的測試驗證 acquisition 與 early-stop 行為。
-- mixin 疊加順序有語意（`RoundHookMixin, TrackerMixin, SingleShotMixin, EarlyStopMixin`）；`tests/program/test_acquire_mro.py` 鎖住 `ImproveAcquireMixin` 與 `MyProgramV2` 的關鍵 MRO / `finish_round()` 解析鏈，改順序前先更新測試與行為判斷。
+- mixin 疊加順序有語意。`tests/program/test_acquire_mro.py` 保留既有 `finish_round()` 解析鏈與 `MyProgramV2` 相對順序測試；新增 mixin 時，以 `tests/program/test_acquisition.py` 的公開 acquisition 案例驗證加權、round hook 與取消行為，不固定完整 MRO 排列。

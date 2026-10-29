@@ -1,6 +1,6 @@
 # Explicit acquisition environments
 
-**Last updated:** 2026-10-27
+**Last updated:** 2026-10-29
 
 **讀者：** framework-dev。模擬 acquisition 的 request、round 與 raw source 契約。
 
@@ -226,9 +226,13 @@ Normal hardware compilation and the existing block_mode timing policy are unchan
   hit. Certificates live with the SoC and do not cross the core/backend boundary.
   Fixed request layouts and integrated normalization metadata are prepared once
   per acquire; this never freezes snapshots or certifies later backend values.
-  Without threshold, classification or trackers, it divides
+  Without threshold, classification, trackers or herald post-selection, it divides
   totals by reps and readout length, removes QICK offsets and moves reads first,
   without allocating `acc_buf`. Hooks receive the running mean of completed rounds.
+  Herald post-selection also materializes the environment's raw shots and uses
+  the hardware acquisition mask/weighted-summary pipeline. Each herald and signal
+  read comes from that same per-shot outcome history. The shared per-ADC sample
+  length applies to both. Compact totals never replace post-selected raw means.
   Threshold, classification, trackers and `get_raw()` materialize deterministic
   int64 shots from the retained last-round source. The environment owns signal,
   noise, rounding and loop layout. Every source call returns fresh arrays with

@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 from typing import Literal, overload
 
 import numpy as np
 from numpy.typing import NDArray
 from qick import QickConfig
 from qick.asm_v2 import AveragerProgramV2
+
+from zcu_tools.program.herald import HeraldSpec
 
 from .ir import IRCompileMixin
 from .macro import ImproveAsmV2
@@ -99,6 +102,7 @@ class MyProgramV2(  # pyright: ignore[reportIncompatibleMethodOverride]
         *,
         rounds: int = 1,
         step_rounds: Literal[False] = False,
+        herald: Sequence[HeraldSpec] | None = None,
         **kwargs: object,
     ) -> list[NDArray[np.float64]]: ...
 
@@ -109,21 +113,40 @@ class MyProgramV2(  # pyright: ignore[reportIncompatibleMethodOverride]
         *,
         rounds: int = 1,
         step_rounds: Literal[True],
+        herald: Sequence[HeraldSpec] | None = None,
         **kwargs: object,
     ) -> None: ...
 
     @overload
     def acquire(
-        self, soc: object, *args, rounds: int = 1, **kwargs
+        self,
+        soc: object,
+        *args,
+        rounds: int = 1,
+        herald: Sequence[HeraldSpec] | None = None,
+        **kwargs,
     ) -> list[NDArray[np.float64]] | None: ...
 
     def acquire(
-        self, soc, *args, rounds: int = 1, **kwargs
+        self,
+        soc,
+        *args,
+        rounds: int = 1,
+        herald: Sequence[HeraldSpec] | None = None,
+        **kwargs,
     ) -> list[NDArray[np.float64]] | None:
         """Acquire integrated IQ from soc over software-averaged rounds.
 
         rounds defaults to one and must be a positive integer, excluding bool.
         Invalid rounds raises ValueError before transport or simulation admission.
+        herald is an explicit sequence of HeraldSpec in ADC/trigger coordinates.
+        It removes each herald read and averages only shots accepted by that ADC's
+        classifier, weighting rounds by accepted count. Zero-pass points are NaN;
+        get_herald_pass_fraction returns completed-round acceptance grids. Herald
+        cannot be combined with trackers; invalid layouts raise ValueError.
+        classify returns g/e populations on accepted shots and takes precedence
+        over QICK threshold/angle. Otherwise threshold/angle returns excited
+        fractions in I and zero Q on accepted shots. Omitted herald retains IQ.
         Other options follow QICK and the acquisition mixins; pass them by keyword.
 
         Omitted or False step_rounds runs to completion and returns one float64
@@ -141,7 +164,7 @@ class MyProgramV2(  # pyright: ignore[reportIncompatibleMethodOverride]
         QICK argument/transport errors and hook errors propagate.
         """
         _require_positive_integer(rounds, "rounds")
-        return super().acquire(soc, *args, rounds=rounds, **kwargs)
+        return super().acquire(soc, *args, rounds=rounds, herald=herald, **kwargs)
 
     @overload
     def acquire_decimated(
@@ -150,6 +173,7 @@ class MyProgramV2(  # pyright: ignore[reportIncompatibleMethodOverride]
         *,
         rounds: int = 1,
         step_rounds: Literal[False] = False,
+        herald: Sequence[HeraldSpec] | None = None,
         **kwargs: object,
     ) -> list[NDArray[np.float64]]: ...
 
@@ -160,19 +184,32 @@ class MyProgramV2(  # pyright: ignore[reportIncompatibleMethodOverride]
         *,
         rounds: int = 1,
         step_rounds: Literal[True],
+        herald: Sequence[HeraldSpec] | None = None,
         **kwargs: object,
     ) -> None: ...
 
     @overload
     def acquire_decimated(
-        self, soc: object, *args, rounds: int = 1, **kwargs
+        self,
+        soc: object,
+        *args,
+        rounds: int = 1,
+        herald: Sequence[HeraldSpec] | None = None,
+        **kwargs,
     ) -> list[NDArray[np.float64]] | None: ...
 
     def acquire_decimated(
-        self, soc, *args, rounds: int = 1, **kwargs
+        self,
+        soc,
+        *args,
+        rounds: int = 1,
+        herald: Sequence[HeraldSpec] | None = None,
+        **kwargs,
     ) -> list[NDArray[np.float64]] | None:
         """Acquire decimated IQ traces from soc, averaged over software rounds.
 
+        Nonempty herald raises ValueError: post-selection requires integrated shots.
+        Ordinary calls clear prior herald pass fractions.
         rounds validation, keyword options, step_rounds ownership, cancellation,
         hooks and errors follow acquire(). Omitted or False step_rounds returns
         a list of float64 trace arrays, one per ADC, with a final length-two I/Q
@@ -182,4 +219,6 @@ class MyProgramV2(  # pyright: ignore[reportIncompatibleMethodOverride]
         repetitions and readouts retain QICK's trace layout.
         """
         _require_positive_integer(rounds, "rounds")
-        return super().acquire_decimated(soc, *args, rounds=rounds, **kwargs)
+        return super().acquire_decimated(
+            soc, *args, rounds=rounds, herald=herald, **kwargs
+        )

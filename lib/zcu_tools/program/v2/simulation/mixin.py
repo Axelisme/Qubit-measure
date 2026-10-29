@@ -107,8 +107,10 @@ class SimulationAcquireMixin(ImproveAcquireMixin):
         assert self.acquire_params is not None
         assert self.loop_dims is not None
         params = self.acquire_params
-        self._simulation_needs_raw = self._classify is not None or any(
-            params.get(key) is not None for key in ("threshold", "trackers")
+        self._simulation_needs_raw = (
+            self._herald_specs is not None
+            or self._classify is not None
+            or any(params.get(key) is not None for key in ("threshold", "trackers"))
         )
         self._simulation_normalization: list[tuple[int | None, float | None]] = []
         for ch, ro in self._program().ro_chs.items():
@@ -293,6 +295,11 @@ class SimulationAcquireMixin(ImproveAcquireMixin):
         True step_rounds prepares hardware and returns None; SimulationSoc raises ValueError
         instead, before admission. Typing is precise with only soc positional;
         extra positional options or a dynamic bool retain the union.
+        herald is forwarded as an explicit sequence of HeraldSpec. It forces raw
+        shots through the shared host mask and count-weighted summary, removes
+        herald reads and exposes get_herald_pass_fraction. It cannot be combined
+        with trackers. Classification takes precedence over QICK threshold/angle;
+        both process accepted signal shots only. No-pass points are NaN.
         Other acquisition errors and cancellation follow the normal pipeline.
         """
         if not isinstance(soc, SimulationSoc):
@@ -337,6 +344,8 @@ class SimulationAcquireMixin(ImproveAcquireMixin):
         True prepares hardware and returns None; SimulationSoc raises ValueError
         instead, before admission. Typing is precise with only soc positional;
         extra positional options or a dynamic bool retain the union.
+        Nonempty herald raises ValueError because post-selection needs integrated
+        shots. Ordinary calls clear prior herald acceptance fractions.
         Other acquisition errors and cancellation follow the normal pipeline.
         """
         if not isinstance(soc, SimulationSoc):
