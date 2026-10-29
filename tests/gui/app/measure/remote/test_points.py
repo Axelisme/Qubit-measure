@@ -36,6 +36,78 @@ def opened_resource(info: EntryInfo) -> ResultEntry:
     )
 
 
+@pytest.mark.parametrize("label", ["seed", None])
+def test_use_selects_point_or_global_with_destination_projection(
+    application: PointApplication, label: str | None
+) -> None:
+    info = application.open_entry()
+    application.result("point.new", new_params("seed"))
+    capture = application.controller.context_control.read_context()
+    assert application.result("point.use", {"label": label}) == {
+        "entry_name": info.name,
+        "point": label,
+    }
+    context = application.controller.context_control
+    assert context.current_point_label() == label
+    assert application.controller.get_session_env().readiness.value == (
+        "global" if label is None else "point"
+    )
+    assert context.read_context().target is not None
+    assert capture.target == SavedPoint(entry_name=info.name, point="seed")
+
+
+@pytest.mark.parametrize("params", [{}, {"label": False}, {"label": ""}])
+def test_use_invalid_label_preserves_selection(
+    application: PointApplication, params
+) -> None:
+    application.open_entry()
+    application.result("point.new", new_params("seed"))
+    reply = application.rpc("point.use", params)
+    assert reply["ok"] is False
+    error = reply["error"]
+    assert isinstance(error, dict)
+    assert error["code"] == ErrorCode.INVALID_PARAMS
+    assert application.controller.context_control.current_point_label() == "seed"
+
+
+@pytest.mark.parametrize(
+    "params",
+    [
+        {"clone_from": "seed"},
+        {"mode": "empty", "clone_from": "seed"},
+        {"mode": "clone"},
+        {"mode": "unknown"},
+    ],
+)
+def test_new_rejects_invalid_modes_without_changing_selection(
+    application: PointApplication, params
+) -> None:
+    application.open_entry()
+    application.result("point.new", new_params("seed"))
+    reply = application.rpc("point.new", new_params("rejected", **params))
+    assert reply["ok"] is False
+    error = reply["error"]
+    assert isinstance(error, dict)
+    assert error["code"] == ErrorCode.INVALID_PARAMS
+    assert application.controller.context_control.current_point_label() == "seed"
+    assert [
+        row.label
+        for row in application.controller.context_control.list_points(refresh=True)
+    ] == ["seed"]
+
+
+def test_new_empty_mode_omits_global_content(application: PointApplication) -> None:
+    application.open_entry()
+    context = application.controller.context_control
+    context.add_component("Q1", "fake/drive/a", {"rate": 10.0}, setup=True)
+    application.result(
+        "point.new", new_params("blank", mode="empty", description="fresh")
+    )
+    assert context.read_context().whole_document().components == {}
+    assert context.read_context().whole_document().general.description == "fresh"
+    assert [file.revision for file in context.get_file_revisions()][1:] == [None, None]
+
+
 def test_list_empty_and_refresh_persisted_metadata(
     application: PointApplication,
 ) -> None:
@@ -68,7 +140,7 @@ def test_new_uses_setup_and_clone_replaces_description(
     info = application.open_entry()
     context = application.controller.context_control
     context.add_component("Q1", "fake/drive/a", {"rate": 10.0}, setup=True)
-    expected = {"kind": "saved_point", "entry_name": info.name, "point": "seed"}
+    expected = {"entry_name": info.name, "point": "seed"}
     assert (
         application.result(
             "point.new", new_params("seed", description="seed description")
@@ -79,8 +151,9 @@ def test_new_uses_setup_and_clone_replaces_description(
     assert captured.target == SavedPoint(entry_name=info.name, point="seed")
     assert captured.lookup("Q1.rate").value == 10.0
     context.set_parameter(require_target(captured), "Q1.rate", 20.0)
-    assert application.result("point.new", new_params("clone", clone_from="seed")) == {
-        "kind": "saved_point",
+    assert application.result(
+        "point.new", new_params("clone", mode="clone", clone_from="seed")
+    ) == {
         "entry_name": info.name,
         "point": "clone",
     }
@@ -148,7 +221,6 @@ def test_mutations_use_current_entry_after_switch(
         opened_resource(current).new_point("selected")
 
     assert application.result(method, {"label": "selected"}) == {
-        "kind": "saved_point",
         "entry_name": current.name,
         "point": "selected",
     }
@@ -240,7 +312,6 @@ def test_created_binding_failure_preserves_destination_and_recovers_with_use(
     assert service.read_context().target == before
     fail = False
     assert application.result("point.use", {"label": "retained"}) == {
-        "kind": "saved_point",
         "entry_name": info.name,
         "point": "retained",
     }

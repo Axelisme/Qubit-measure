@@ -112,6 +112,67 @@ def entry_selector(dialog: SetupDialog) -> QComboBox:
     return combo
 
 
+def test_point_modes_and_global_round_trip_through_visible_controls(
+    entry_dialog: tuple[SetupDialog, Controller, State], tmp_path: Path
+) -> None:
+    dialog, _controller, _state = entry_dialog
+    driver = ComponentDriver(dialog)
+    evidence = Path(os.environ.get("SESSION_DIALOG_EVIDENCE", str(tmp_path)))
+    assert [row.text for row in driver.list_rows()] == ["● Global"]
+    assert driver.observe(object_name="point_mode").text == "Inherit Global"
+    assert not driver.observe(object_name="clone_from").enabled
+    driver.screenshot(evidence / "01-global.png")
+
+    driver.enter_text(value="inherited", object_name="point_label", commit=False)
+    driver.enter_text(
+        value="Global copy", object_name="point_description", commit=False
+    )
+    driver.click("Create")
+    assert [row.text for row in driver.list_rows()] == ["Global", "● inherited"]
+    driver.screenshot(evidence / "02-inherited.png")
+
+    driver.select_combo("Empty", object_name="point_mode")
+    driver.enter_text(value="blank", object_name="point_label", commit=False)
+    assert not driver.observe(object_name="clone_from").enabled
+    driver.screenshot(evidence / "03-empty-mode.png")
+    driver.click("Create")
+    assert [row.text for row in driver.list_rows()] == [
+        "Global",
+        "● blank",
+        "inherited",
+    ]
+    driver.screenshot(evidence / "04-empty-created.png")
+
+    driver.select_combo("Clone point", object_name="point_mode")
+    assert driver.observe(object_name="clone_from").enabled
+    driver.select_combo("inherited", object_name="clone_from")
+    driver.enter_text(value="cloned", object_name="point_label", commit=False)
+    driver.enter_text(value="Local copy", object_name="point_description", commit=False)
+    driver.screenshot(evidence / "05-clone-mode.png")
+    driver.click("Create")
+    assert [row.text for row in driver.list_rows()] == [
+        "Global",
+        "blank",
+        "● cloned",
+        "inherited",
+    ]
+    assert driver.observe(object_name="point_mode").text == "Inherit Global"
+    driver.screenshot(evidence / "06-clone-created.png")
+
+    driver.select_list_row("Global")
+    driver.click("Switch to selected")
+    assert [row.text for row in driver.list_rows()][0] == "● Global"
+    assert driver.observe(object_name="setup_status").text == "Switched to Global"
+    driver.screenshot(evidence / "07-back-to-global.png")
+    driver.double_click_list_row("cloned")
+    assert [row.text for row in driver.list_rows()][2] == "● cloned"
+    assert (
+        driver.observe(object_name="selected_point_description").text
+        == "Description: Local copy"
+    )
+    driver.screenshot(evidence / "08-back-to-point.png")
+
+
 @pytest.mark.parametrize("field", ["point_label", "point_description"])
 def test_enter_creates_point_from_single_line_field(
     entry_dialog: tuple[SetupDialog, Controller, State], field: str, tmp_path: Path
@@ -124,7 +185,7 @@ def test_enter_creates_point_from_single_line_field(
     )
     driver.press_key(Qt.Key.Key_Return, object_name=field)
     driver.screenshot(tmp_path / f"enter-{field}.png")
-    assert [row.text for row in driver.list_rows()] == ["● bias-enter"]
+    assert [row.text for row in driver.list_rows()] == ["Global", "● bias-enter"]
     assert driver.observe(object_name="point_label").text == ""
 
 
@@ -141,7 +202,7 @@ def test_double_click_switches_to_selected_point(
     driver = ComponentDriver(dialog)
     driver.double_click_list_row("first")
     driver.screenshot(tmp_path / "double-click.png")
-    assert [row.text for row in driver.list_rows()] == ["● first", "second"]
+    assert [row.text for row in driver.list_rows()] == ["Global", "● first", "second"]
 
 
 def test_tab_visits_new_point_fields_in_reading_order(
@@ -156,7 +217,7 @@ def test_tab_visits_new_point_fields_in_reading_order(
             break
         driver.press_key(Qt.Key.Key_Tab)
     assert driver.focused_input().object_name == "point_label"
-    for name in ("point_description", "clone_from", "track_device"):
+    for name in ("point_description", "point_mode", "track_device"):
         driver.press_key(Qt.Key.Key_Tab)
         driver.screenshot(
             Path(os.environ.get("SESSION_DIALOG_EVIDENCE", str(tmp_path)))
@@ -178,7 +239,7 @@ def test_taller_dialog_gives_extra_height_only_to_point_list(
         value="Near sweet spot", object_name="point_description", commit=False
     )
     driver.click("Create")
-    assert [row.text for row in driver.list_rows()] == ["● bias-a"]
+    assert [row.text for row in driver.list_rows()] == ["Global", "● bias-a"]
     assert driver.observe(object_name="selected_point_description").text == (
         "Description: Near sweet spot"
     )
@@ -366,14 +427,18 @@ def test_unavailable_point_shows_reason_while_another_point_remains_selectable(
     driver.click(text="Open")
     driver.screenshot(evidence / "unavailable-point.png")
     rows = driver.list_rows()
-    assert [row.text for row in rows] == ["bad (unavailable)", "good"]
-    assert "bad description" in rows[0].tooltip
-    assert str(source) in rows[0].tooltip
-    assert "schema_version" in rows[0].tooltip
+    assert [row.text for row in rows] == ["● Global", "bad (unavailable)", "good"]
+    assert "bad description" in rows[1].tooltip
+    assert str(source) in rows[1].tooltip
+    assert "schema_version" in rows[1].tooltip
     driver.select_list_row("good")
     driver.click(text="Switch to selected")
     driver.screenshot(evidence / "available-point-selected.png")
-    assert [row.text for row in driver.list_rows()] == ["bad (unavailable)", "● good"]
+    assert [row.text for row in driver.list_rows()] == [
+        "Global",
+        "bad (unavailable)",
+        "● good",
+    ]
     assert (
         driver.observe(object_name="selected_point_description").text
         == "Description: good description"
@@ -391,12 +456,12 @@ def test_working_point_switch_uses_label_and_displays_description(
         PointCreateRequest("bias-b", "away from sweet spot", CommandOrigin("gui"))
     )
     listing = point_list(dialog)
-    assert listing.count() == 2
-    first_item, second_item = listing.item(0), listing.item(1)
+    assert listing.count() == 3
+    first_item, second_item = listing.item(1), listing.item(2)
     assert first_item is not None and second_item is not None
     assert first_item.toolTip() == "near sweet spot"
     assert second_item.toolTip() == "away from sweet spot"
-    listing.setCurrentRow(0)
+    listing.setCurrentRow(1)
     entry_button(dialog, "Switch to selected").click()
     assert controller.context_control.read_context().target == first
     assert state.session_env.readiness == ContextReadiness.POINT
@@ -414,6 +479,7 @@ def test_working_point_create_clones_source_and_replaces_description(
         PointCreateRequest(source_label, "source description", CommandOrigin("gui"))
     )
     controller.context_control.set_parameter(source, "general.ext.flux_value", 0.27)
+    point_combo(dialog, "point_mode").setCurrentIndex(2)
     clone = point_combo(dialog, "clone_from")
     clone.setCurrentIndex(clone.findData(source_label))
     point_field(dialog, "point_label").setText("cloned")
@@ -430,12 +496,12 @@ def test_working_point_create_clones_source_and_replaces_description(
     assert state.session_env.readiness == ContextReadiness.POINT
 
 
-def test_working_point_empty_create_uses_setup_seed(
+def test_working_point_inherit_create_uses_global(
     entry_dialog: tuple[SetupDialog, Controller, State],
 ) -> None:
     dialog, controller, state = entry_dialog
     assert state.session_env.parameters is not None
-    assert point_combo(dialog, "clone_from").currentText() == "(empty)"
+    assert point_combo(dialog, "point_mode").currentText() == "Inherit Global"
     point_field(dialog, "point_label").setText("fresh")
     entry_button(dialog, "Create").click()
     capture = controller.context_control.read_context()
@@ -470,6 +536,7 @@ def test_working_point_missing_clone_preserves_binding(
     selected = controller.setup_control.new_point(
         PointCreateRequest("kept", "", CommandOrigin("gui"))
     )
+    point_combo(dialog, "point_mode").setCurrentIndex(2)
     clone = point_combo(dialog, "clone_from")
     clone.addItem("removed", "removed")
     clone.setCurrentIndex(clone.count() - 1)
@@ -491,10 +558,10 @@ def test_working_point_switch_missing_source_preserves_binding(
     )
     listing = point_list(dialog)
     # A stale cached row still passes the exact label to the owning command.
-    item = listing.item(0)
+    item = listing.item(1)
     assert item is not None
     item.setData(Qt.ItemDataRole.UserRole, "removed")
-    listing.setCurrentRow(0)
+    listing.setCurrentRow(1)
     entry_button(dialog, "Switch to selected").click()
     assert controller.context_control.read_context().target == selected
     assert "Failed" in setup_status(dialog)
@@ -510,7 +577,7 @@ def test_working_points_follow_entry_changes_and_reopen_without_selecting(
     )
     controller.setup_control.new_entry(EntryRequest("other"))
     listing = point_list(dialog)
-    assert listing.count() == 0
+    assert listing.count() == 1
     assert point_combo(dialog, "clone_from").count() == 1
     controller.setup_control.new_point(
         PointCreateRequest("new", "other entry", CommandOrigin("gui"))
@@ -520,8 +587,8 @@ def test_working_points_follow_entry_changes_and_reopen_without_selecting(
     dialog.hide()
     dialog.show()
     qapp.processEvents()
-    assert listing.count() == 1
-    item = listing.item(0)
+    assert listing.count() == 2
+    item = listing.item(1)
     assert item is not None and item.toolTip() == "other entry"
     assert controller.get_session_env() == before
     assert before.parameters is not None
@@ -688,12 +755,12 @@ def test_point_rows_show_labels_and_selected_description_below(
         PointCreateRequest("bias-b", "", CommandOrigin("gui"))
     )
     listing = point_list(dialog)
-    assert point_texts(dialog) == ["bias-a", "● bias-b"]
-    listing.setCurrentRow(0)
+    assert point_texts(dialog) == ["Global", "bias-a", "● bias-b"]
+    listing.setCurrentRow(1)
     view = selected_description(dialog)
     assert long_text.strip() in view.text()
     assert view.wordWrap()
-    listing.setCurrentRow(1)
+    listing.setCurrentRow(2)
     assert long_text.strip() not in view.text()
 
 
@@ -704,12 +771,12 @@ def test_selection_and_marker_follow_current_point(
     for label in ("p1", "p2", "p3"):
         point_field(dialog, "point_label").setText(label)
         entry_button(dialog, "Create").click()
-    assert point_texts(dialog) == ["p1", "p2", "● p3"]
+    assert point_texts(dialog) == ["Global", "p1", "p2", "● p3"]
     assert current_point_text(dialog) == "● p3"
     listing = point_list(dialog)
-    listing.setCurrentRow(1)
+    listing.setCurrentRow(2)
     entry_button(dialog, "Switch to selected").click()
-    assert point_texts(dialog) == ["p1", "● p2", "p3"]
+    assert point_texts(dialog) == ["Global", "p1", "● p2", "p3"]
     assert current_point_text(dialog) == "● p2"
     current = listing.currentItem()
     assert current is not None and current.font().bold()
@@ -723,7 +790,7 @@ def test_selection_and_marker_follow_current_point(
     assert current_point_text(dialog) == "● p1"
 
 
-def test_entry_without_selected_point_selects_no_row(
+def test_entry_without_selected_point_selects_global(
     entry_dialog: tuple[SetupDialog, Controller, State],
 ) -> None:
     dialog, controller, _state = entry_dialog
@@ -731,8 +798,8 @@ def test_entry_without_selected_point_selects_no_row(
         PointCreateRequest("p1", "", CommandOrigin("gui"))
     )
     controller.setup_control.open_entry(EntryRequest("remembered"))
-    assert point_texts(dialog) == ["p1"]
-    assert current_point_text(dialog) is None
+    assert point_texts(dialog) == ["● Global", "p1"]
+    assert current_point_text(dialog) == "● Global"
 
 
 def test_create_clears_form_on_success_and_keeps_it_on_failure(
@@ -889,10 +956,10 @@ def test_selected_description_restores_live_theme_inheritance(entry_dialog, qapp
         PointCreateRequest("empty", "", CommandOrigin("gui"))
     )
     listing = point_list(dialog)
-    listing.setCurrentRow(1)
+    listing.setCurrentRow(2)
     label = selected_description(dialog)
     assert label.text() == "No description"
-    listing.setCurrentRow(0)
+    listing.setCurrentRow(1)
     assert label.text() == "Description: A note"
     palette.setColor(QPalette.ColorRole.Window, QColor("#353535"))
     palette.setColor(QPalette.ColorRole.WindowText, QColor("white"))

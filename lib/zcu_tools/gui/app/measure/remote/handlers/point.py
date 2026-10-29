@@ -146,16 +146,15 @@ class PointListReply(TypedDict):
     points: list[PointSummary]
 
 
-class SavedPointReply(TypedDict):
-    """Persisted destination, not a binding generation or writable handle.
+class PointSelectionReply(TypedDict):
+    """Selected documents: entry_name is the opened directory name.
 
-    kind is always saved_point. entry_name is the opened entry's directory name.
-    point is the owner's validated single-segment label.
+    point is the selected single-segment label, or None for Global.
+    This projection carries no binding generation or writable handle.
     """
 
-    kind: Literal["saved_point"]
     entry_name: str
-    point: str
+    point: str | None
 
 
 def h_point_list(
@@ -188,13 +187,14 @@ def h_point_list(
 
 def h_point_new(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
-) -> SavedPointReply:
+) -> PointSelectionReply:
     """Create and select label in the currently opened entry.
 
-    Required label is a string. description defaults to empty text,
-    explicitly replacing seed/clone metadata. clone_from is None or a same-entry
-    label; None copies setup, only a saved point.
-    Return the SavedPoint destination. Malformed wire input is INVALID_PARAMS.
+    Required label is a string. description defaults to empty text, replacing
+    inherited/clone metadata. mode defaults to inherit, copying Global documents.
+    empty creates minimal parameters without library/aliases. clone requires a
+    same-entry clone_from label; other modes reject clone_from.
+    Return {entry_name, point}. Malformed wire input is INVALID_PARAMS.
     Unsafe destination labels raise the owner's typed input error, projected by
     shared dispatch as INVALID_PARAMS with reason point_label_invalid. Setup and
     clone rejection precedes source reads/writes and preserves selection/files.
@@ -207,6 +207,11 @@ def h_point_new(
     original cause and point; Use is recovery, never retry or delete New.
     Existing tabs retain their parameter capture; new tabs use this point.
     """
+    mode = params.get("mode", "inherit")
+    if mode not in ("inherit", "empty", "clone"):
+        raise RemoteError(
+            ErrorCode.INVALID_PARAMS, "mode must be inherit, empty or clone"
+        )
     label = params.get("label")
     description = params.get("description", "")
     clone_from = params.get("clone_from")
@@ -222,6 +227,7 @@ def h_point_new(
         label=label,
         description=description,
         origin=CommandOrigin("mcp"),
+        mode=mode,
         clone_from=clone_from,
     )
     try:
@@ -237,21 +243,26 @@ def h_point_new(
                 "created": exc.created,
             },
         ) from exc
-    return {"kind": point.kind, "entry_name": point.entry_name, "point": point.point}
+    return {"entry_name": point.entry_name, "point": point.point}
 
 
 def h_point_use(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
-) -> SavedPointReply:
-    """Select required label in the currently opened entry.
+) -> PointSelectionReply:
+    """Select required string label or None for the opened entry Global set.
 
-    label is a string. Return the selected SavedPoint destination.
-    Malformed wire input is INVALID_PARAMS. Owner no_entry/schema/source/I/O
+    Return {entry_name, point}, with point=None for Global. Missing label or
+    malformed wire input is INVALID_PARAMS. Owner no_entry/schema/source/I/O
     failures propagate without fallback and leave the old binding intact.
-    Existing tabs retain their parameter capture; new tabs use this point.
+    Existing tabs retain their parameter capture; new tabs use this selection.
     """
-    label = params.get("label")
+    if "label" not in params:
+        raise RemoteError(ErrorCode.INVALID_PARAMS, "missing 'label'")
+    label = params["label"]
+    if label is None:
+        target = adapter.context_control.use_global()
+        return {"entry_name": target.entry_name, "point": None}
     if not isinstance(label, str):
-        raise RemoteError(ErrorCode.INVALID_PARAMS, "'label' must be a string")
+        raise RemoteError(ErrorCode.INVALID_PARAMS, "'label' must be a string or null")
     point = adapter.context_control.use_point(PointUseRequest(label))
-    return {"kind": point.kind, "entry_name": point.entry_name, "point": point.point}
+    return {"entry_name": point.entry_name, "point": point.point}

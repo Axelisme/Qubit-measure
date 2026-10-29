@@ -16,6 +16,21 @@ The preview's `proposed_value` carries the adapter's JSON object unchanged.
 Wire version 123 removes the old sample names without aliases. Component records
 live at `records/components/<target>.jsonl`; the event ledger stays at `records/ledger.jsonl`.
 
+## Point selection
+
+`point.use` requires `label`: `{"label": "bias-a"}` selects that point;
+`{"label": null}` selects the opened entry Global documents. Omitting label is
+`invalid_params`. Both return `{entry_name, point}`, with point null for Global.
+Existing tab captures remain unchanged. Preparation failure preserves selection.
+
+`point.new` requires label and accepts mode `inherit` (default), `empty`, or
+`clone`. Inherit copies Global parameters, library and aliases. Empty creates
+minimal parameters with the requested description and no library or aliases.
+Clone requires a same-entry `clone_from`; other modes reject that source.
+For example, `{"label": "copy", "mode": "clone", "clone_from": "bias-a"}`
+creates and selects a copy. The response is `{entry_name, point}`.
+Neither method returns a kind discriminator.
+
 ## Context snapshot
 
 `context.snapshot` 回傳固定 capture 的 target、point、library 與完整 aliases。Library 只投影持久 Specs，不回傳 `provenance`，也不 materialize assets。目前契約版本為 WIRE_VERSION 132、GUI_VERSION 165。Point files 的路徑使用 `parameters.yaml`／`library.yaml`／`aliases.yaml`；檔名改變因此升 wire 與 GUI 版本。

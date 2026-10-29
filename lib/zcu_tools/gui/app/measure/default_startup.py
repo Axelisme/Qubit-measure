@@ -131,12 +131,11 @@ def _restore_tabs(ctx: StartupContext, saved: _Session, restore: _Restore) -> No
     entry_ready = entry is not None and restore.attempt(
         f"entry {entry}", partial(ctx.setup.open_entry, entry)
     )
-    point_ready = (
-        entry_ready
-        and point is not None
-        and restore.attempt(f"point {point}", partial(ctx.setup.use_point, point))
+    selection_ready = entry_ready and (
+        point is None
+        or restore.attempt(f"point {point}", partial(ctx.setup.use_point, point))
     )
-    if not point_ready:
+    if not selection_ready:
         restore.skipped += len(saved.tabs)
         if saved.tabs:
             logger.warning(
@@ -155,7 +154,8 @@ def startup(ctx: StartupContext) -> None:
 
     Called by the trusted script runner on a worker. SoC and each device failure
     is logged without dialogs; failed devices remain remembered for Reconnect.
-    Tabs open only after this run opens the saved entry and selects its point.
+    Tabs open after this run opens the saved entry and, when non-null, its point.
+    A null point uses Global. A failed explicit point never falls back to Global.
     No later source selection retries skipped tabs. On-close reads the then-live
     state, not this startup input. Force kill cannot guarantee a save.
     """

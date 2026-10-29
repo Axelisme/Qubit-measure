@@ -8,7 +8,7 @@
 
 | 元件 | 操作與責任 |
 | --- | --- |
-| `SetupDialog`、`SocDialog` | 分別透過 SetupControlPort 開啟 entry／切換 point，以及透過 SocControlPort 連線與瀏覽 soccfg。 |
+| `SetupDialog`、`SocDialog` | Setup 透過 SetupControlPort 開啟 entry、切換 Global／point，並以 inherit（預設）／empty／clone 建立 point。SoC 透過 SocControlPort 連線與瀏覽 soccfg。 |
 | `InspectDialog`、`AliasPanel`、`ComponentTreeWidget` | 顯示與編輯 context、library 與 alias，將提交交給 context owner。 |
 | `DeviceDialog` | 透過 DeviceControlPort 操作裝置，使用已登錄 adapter 的專屬 panel。 |
 | `ArbWaveformDialog` | 透過 arb waveform port 讀寫 entry-scoped waveform 資產。 |

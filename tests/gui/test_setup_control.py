@@ -146,7 +146,9 @@ def _facet() -> tuple[
 def test_setup_control_facet_forwards_deliberate_setup_dialog_contract() -> None:
     facet, _soc, log, bus, _connection = _facet()
     request = EntryRequest("chip")
-    point = PointCreateRequest("new", "", CommandOrigin("gui"), clone_from="base")
+    point = PointCreateRequest(
+        "new", "", CommandOrigin("gui"), clone_from="base", mode="clone"
+    )
     saved = SavedPoint(entry_name="entry", point="base")
     info = EntryInfo("chip", Path("/tmp/result/chip"), Path("/tmp/Database/chip"))
     cases: tuple[tuple[str, Callable[[], object], object, RecordedCall], ...] = (
