@@ -24,7 +24,7 @@ from zcu_tools.gui.app.measure.adapter import (
     Analysis,
     AnalyzeRequest,
 )
-from zcu_tools.gui.app.measure.artifacts import SaveStatus
+from zcu_tools.gui.app.measure.artifacts import LayoutPlanner, SaveStatus
 from zcu_tools.gui.app.measure.interactive_flux_pick import (
     FluxPickParams,
     FluxPickResult,
@@ -96,6 +96,7 @@ def _start_onetone_plugin(
     *,
     writeback: MagicMock | None = None,
     tab_id: str = "tab1",
+    plan_layout: LayoutPlanner | None = None,
 ) -> tuple[AnalyzeService, PluginDefinition[Any, Any], int]:
     adapter = state.get_tab(tab_id).adapter
     assert adapter is SpectrumAdapter
@@ -107,7 +108,13 @@ def _start_onetone_plugin(
         ),
         plots=plots,
     )
-    service, _bg = make_service(state, EventBus(), handles=handles, writeback=writeback)
+    service, _bg = make_service(
+        state,
+        EventBus(),
+        handles=handles,
+        writeback=writeback,
+        plan_layout=plan_layout,
+    )
     token = service.start_plugin(
         tab_id,
         plugin,
@@ -161,9 +168,15 @@ def test_typed_gui_analysis_publishes_typed_result_and_saveable_named_fit(
             storage=_flux_parameters(tab.run.parameters).storage,
             parameters=_flux_parameters(tab.run.parameters),
         ),
+        plan_layout=native_session.save_service.plan_layout,
     )
     handles = OperationHandles()
-    service, bg = make_service(state, EventBus(), handles=handles)
+    service, bg = make_service(
+        state,
+        EventBus(),
+        handles=handles,
+        plan_layout=native_session.save_service.plan_layout,
+    )
     plots = make_plots()
     token = service.start_analyze("tab", PaneParams(gain=3), plots=plots)
     assert bg.last_work is not None and bg.last_on_done is not None
@@ -230,13 +243,20 @@ def test_onetone_gui_done_uses_frontend_result_and_retains_named_pick(
             storage=_flux_parameters(tab.run.parameters).storage,
             parameters=_flux_parameters(tab.run.parameters),
         ),
+        plan_layout=native_session.save_service.plan_layout,
     )
     state.set_context(replace(state.session_env, parameters=tab.run.parameters))
     plots = make_plots()
     handles = OperationHandles()
     writeback = MagicMock()
     service, plugin, token = _start_onetone_plugin(
-        state, source, plots, handles, writeback=writeback, tab_id="tab"
+        state,
+        source,
+        plots,
+        handles,
+        writeback=writeback,
+        tab_id="tab",
+        plan_layout=native_session.save_service.plan_layout,
     )
     active = service.get_interactive("tab")
     assert active is not None
