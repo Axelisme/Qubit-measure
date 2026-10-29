@@ -25,6 +25,7 @@ from pydantic import (
 from zcu_tools.core.simulation import (
     AcquireRequest,
     AcquisitionMode,
+    ChargeDriveRequirement,
     EnvironmentSnapshot,
     EventSlot,
     PulseEnvelope,
@@ -190,6 +191,7 @@ class _RequestJSON(_NumericJSON):
     point_names: tuple[str, ...] = ()
     reps: int = 1
     templates: tuple[_TemplateJSON, ...] = ()
+    charge_requirements: tuple[ChargeDriveRequirement, ...] = ()
 
     def record(self) -> AcquireRequest:
         return AcquireRequest(
@@ -204,6 +206,7 @@ class _RequestJSON(_NumericJSON):
             point_names=self.point_names,
             reps=self.reps,
             templates=tuple(template.record() for template in self.templates),
+            charge_requirements=self.charge_requirements,
         )
 
 

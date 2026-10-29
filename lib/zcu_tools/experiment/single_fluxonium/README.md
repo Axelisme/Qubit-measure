@@ -1,6 +1,6 @@
 # Single-fluxonium acquisition
 
-**Last updated:** 2026-10-29 (UTC), named microwave routes
+**Last updated:** 2026-10-29 (UTC), named charge admission
 
 **Readers:** framework-dev, lab-author, agent. Compose complete fluxonium timelines with one physical readout cavity.
 
@@ -23,6 +23,11 @@ Transferring a driver to the GUI transfers only that driver's cleanup responsibi
 A null or omitted `settings.flux_line` keeps flux fixed at the live DC value.
 It binds no fast-flux generator and rejects foreign controls.
 Each `drive_lines` generator maps to its own named track, including overlapping events on different generators. Each source multiplies the full charge operator by its own complex calibration. Readout, fast-flux and microwave generator bindings must be distinct. Generator count is the largest bound index plus one; holes remain unbound. Unknown event generators fail in preflight with their event path and channel.
+Acquisition may carry named `ChargeDriveRequirement` records in its request.
+Preflight requires every requested generator to belong to `drive_lines`, rejecting
+flux, readout and unbound generators before waveform construction or evolution.
+Other legal fast-flux events keep their ordinary routing. Names are diagnostics,
+not role keys. An empty requirement tuple preserves ordinary planning.
 It converts QICK us/MHz/degrees into ns/GHz/radians. Shared
 `experiment.readout_plan.drive_track` preserves signed gains, complex envelopes
 and the common carrier origin. Each template remains one `TimelineBatch`.

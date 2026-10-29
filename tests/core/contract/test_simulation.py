@@ -73,6 +73,18 @@ def template_request():
     )
 
 
+@pytest.mark.parametrize("name", ["", "   "])
+def test_charge_requirement_rejects_empty_diagnostic_name(name):
+    with pytest.raises(ValueError, match="name"):
+        simulation.ChargeDriveRequirement(name, 1)
+
+
+@pytest.mark.parametrize("channel", [-1, True, 1.5])
+def test_charge_requirement_rejects_invalid_generator_index(channel):
+    with pytest.raises(ValueError, match="gen_ch"):
+        simulation.ChargeDriveRequirement("drive", channel)
+
+
 def test_materialize_point_selects_template_active_events_and_detaches_values():
     request = template_request()
     first = request.materialize_point(0)

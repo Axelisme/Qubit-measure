@@ -16,7 +16,8 @@ Qt 與 agent 都要編輯 tab cfg、Library entry 與分析產生的 writeback p
 
 - Measure tab 由 `TabFormResource` 持有 state、env 與 lifetime。Open／Reset 捕捉來源，Qt、remote 與 Run 使用同一資源。Run 只接受目前有效的 result，不重讀全域來源。
 - Library 與 Inspect 由 session 的 `LibraryEntryForm` 持有 state、固定 ParameterContext 與 arb 名稱。開啟既有 entry 時，生成器直接投影持久 Spec。Apply 取有效 Spec，交 `apply_library_change`，不經 runtime cfg 或 caller lowering。關閉時丟棄 form 即可，沒有 editor session registry、LRU 或 editor_id。
-- Writeback 由 `WritebackService` 持有 opaque draft。每個 module item 配一個 `ModuleEntryForm`，固定建立時的來源。Qt dialog 與 remote 都讀寫這個 state，dialog 是否存在不影響 draft。
+- 每個 `WritebackDraft` 擁有自己的 detached entries、固定來源、module Forms、summaries 與 applied state，以及 preview、edit、write、Apply 和 teardown。每個 module item 配一個 `ModuleEntryForm`，固定建立時的來源。Qt dialog 與 remote 都經 writeback control admission 讀寫同一 draft，dialog 是否存在不影響 draft。
+- `WritebackService` 建立 draft 並注入既有 `ContextControlPort` 寫入能力，只保留 `accept_drafts` 的跨 draft 預驗證與成功前綴協調。`WritebackControlFacet` 繼續負責 tab／pane admission、事件與 detached receipt，不另設 per-draft service 介面。
 
 Form 的狀態可以 Invalid。Preview 只供呈現，不是 Apply 許可。Library Apply 與 module writeback 提交都要求有效 result。文字解析錯誤若仍留在 view，宿主也要拒絕 Apply，不能提交 state 中較早的有效值。關閉 editor 丟棄未解析文字，不寫 Library。
 

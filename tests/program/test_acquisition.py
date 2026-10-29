@@ -6,6 +6,7 @@ from threading import Event
 import numpy as np
 import pytest
 from zcu_tools.cfg_model import LinearClassifier
+from zcu_tools.core.simulation import ChargeDriveRequirement
 from zcu_tools.program.acquisition import (
     AcquisitionContractError,
     StoppedPartialAcquireError,
@@ -13,6 +14,16 @@ from zcu_tools.program.acquisition import (
 from zcu_tools.program.herald import HeraldSpec
 
 from tests.program._acquisition_soc import make_chunk_acquisition
+
+
+def test_hardware_acquire_does_not_forward_or_validate_charge_requirements():
+    soc, program = make_chunk_acquisition(reps=2, reads=1)
+    actual = program.acquire(
+        soc,
+        progress=False,
+        charge_requirements=(ChargeDriveRequirement("caller drive", 999),),
+    )
+    np.testing.assert_array_equal(actual[0], [[0, 0]])
 
 
 def test_decimated_rejects_herald_before_transport(

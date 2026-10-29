@@ -68,3 +68,5 @@ Fluxdep native 載入與 dispersive 投影共用此規則。
 `classify_reference_iq(signals, centroids)` 將固定三中心套用到任意 scan axes 加最後 shot axis 的 acquired IQ，輸出 scan axes 加 g/e/f fraction axis。它也使用共用 nearest kernel。中心與 IQ 使用相同 ADC 單位，不重訓、不修正。Exact ties 歸最低 label。Caller 用 `correct_populations(..., clip=False)` 套用 reference training confusion；結果仍是 preparation-label 座標，不是 latent energy-state population。
 
 `analyze_centroid3_iq(signals, calibration)` 接收 caller 從 saved run cfg 取得的 `Centroid3Classifier`。它回傳 `Centroid3IQAnalysis`，包含 raw/unclipped corrected fractions、training confusion 副本及其 condition number/minimum singular value。它不讀 library、Form、program 或硬體，不重新訓練校準。STIRAP 與 Raman consumer 可共用此分析，不重宣告相同的數值結果型別。
+`Centroid3IQAnalysis` 的 owner 註解支援 TypeAdapter 從 native summary 重建 float64 ndarray。
+Population 保留任意 scan axes 加末軸 g/e/f，confusion matrix 必須為 3×3；壞 dtype、shape 或 null／非有限 array 值明確拒絕。解碼不裁切 corrected fractions，也不改 summary 或儲存格式。

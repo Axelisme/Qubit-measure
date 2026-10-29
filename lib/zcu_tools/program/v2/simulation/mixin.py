@@ -8,7 +8,11 @@ import numpy as np
 from numpy.typing import NDArray
 from qick.qick_asm import AcquireMixin
 
-from zcu_tools.core.simulation import AcquireRequest, RoundStatistics
+from zcu_tools.core.simulation import (
+    AcquireRequest,
+    ChargeDriveRequirement,
+    RoundStatistics,
+)
 from zcu_tools.program.acquisition import CancelFlagProtocol, ImproveAcquireMixin
 from zcu_tools.progress_bar import make_pbar
 
@@ -250,6 +254,7 @@ class SimulationAcquireMixin(ImproveAcquireMixin):
         *,
         rounds: int = 1,
         step_rounds: Literal[False] = False,
+        charge_requirements: tuple[ChargeDriveRequirement, ...] = (),
         **kwargs: object,
     ) -> list[NDArray[np.float64]]: ...
 
@@ -260,6 +265,7 @@ class SimulationAcquireMixin(ImproveAcquireMixin):
         *,
         rounds: int = 1,
         step_rounds: Literal[True],
+        charge_requirements: tuple[ChargeDriveRequirement, ...] = (),
         **kwargs: object,
     ) -> None: ...
 
@@ -269,6 +275,7 @@ class SimulationAcquireMixin(ImproveAcquireMixin):
         soc: object,
         *args,
         rounds: int = 1,
+        charge_requirements: tuple[ChargeDriveRequirement, ...] = (),
         **kwargs,
     ) -> list[NDArray[np.float64]] | None: ...
 
@@ -277,6 +284,7 @@ class SimulationAcquireMixin(ImproveAcquireMixin):
         soc,
         *args,
         rounds: int = 1,
+        charge_requirements: tuple[ChargeDriveRequirement, ...] = (),
         **kwargs,
     ) -> list[NDArray[np.float64]] | None:
         """Return native averaged IQ, preserving ADC declaration order.
@@ -288,10 +296,17 @@ class SimulationAcquireMixin(ImproveAcquireMixin):
         ValueError before admission. Extra positional options or a dynamic bool
         retain the list-or-None type. Errors and cancellation follow the normal
         acquisition pipeline.
+        charge_requirements names generators that must bind to physical charge
+        lines. Only simulations carry these records to their environment, which
+        validates or explicitly rejects unsupported requirements. White noise
+        accepts them without physical checks. Hardware drops this keyword before
+        the original acquisition pipeline; operators own physical wiring.
         """
         if not isinstance(soc, SimulationSoc):
             return super().acquire(soc, *args, rounds=rounds, **kwargs)
-        with self._simulation_call(soc, "integrated", kwargs):
+        with self._simulation_call(
+            soc, "integrated", kwargs, charge_requirements=charge_requirements
+        ):
             return super().acquire(soc, *args, rounds=rounds, **kwargs)
 
     @overload
@@ -337,7 +352,14 @@ class SimulationAcquireMixin(ImproveAcquireMixin):
             self._simulation_raw = None
             return super().acquire_decimated(soc, *args, rounds=rounds, **kwargs)
 
-    def _simulation_call(self, soc, mode, kwargs):
+    def _simulation_call(
+        self,
+        soc,
+        mode,
+        kwargs,
+        *,
+        charge_requirements: tuple[ChargeDriveRequirement, ...] = (),
+    ):
         from contextlib import contextmanager
 
         from .frontend import build_request
@@ -351,7 +373,13 @@ class SimulationAcquireMixin(ImproveAcquireMixin):
             sequence = soc.binding.begin()
             self._simulation_active = True
             try:
-                request = build_request(self, mode, soc.binding, sequence)
+                request = build_request(
+                    self,
+                    mode,
+                    soc.binding,
+                    sequence,
+                    charge_requirements=charge_requirements,
+                )
                 soc.install_request(
                     request,
                     pacing_cancel=kwargs.get("cancel_flag")

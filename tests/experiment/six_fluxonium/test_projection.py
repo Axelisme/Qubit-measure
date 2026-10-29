@@ -14,7 +14,15 @@ import pytest
 from numpy.typing import NDArray
 from scipy.linalg import expm
 from zcu_tools.cfg_model import MuxReadoutTone
-from zcu_tools.core.simulation import RoundRequest, RoundSignals
+from zcu_tools.core.simulation import (
+    AcquireRequest,
+    ChargeDriveRequirement,
+    PointTimeline,
+    PulseEvent,
+    ReadoutWindow,
+    RoundRequest,
+    RoundSignals,
+)
 from zcu_tools.experiment.simulation import SimulationEnvironment
 from zcu_tools.experiment.six_fluxonium import six_fluxonium
 from zcu_tools.experiment.six_fluxonium.routing import route_request
@@ -26,9 +34,46 @@ from zcu_tools.program.v2.modules.readout import MuxReadoutCfg
 from zcu_tools.program.v2.simulation import IntegratedRound
 from zcu_tools.resources.six_fluxonium import parse_six_fluxonium
 
+from tests.core._simulation import single_point_template
 from tests.resources._six_fluxonium_data import six_document
 
 pytestmark = pytest.mark.sim
+
+
+def test_routing_rejects_unsupported_charge_requirements_before_preparation():
+    settings = parse_six_fluxonium(six_document())
+    window = ReadoutWindow(
+        0,
+        0,
+        4,
+        1000,
+        (0.018,),
+        frequency_mhz=(6800,),
+        phase_deg=(0,),
+        generator_channels=(0,),
+    )
+    timeline = PointTimeline(
+        (),
+        (PulseEvent(0, 0.016, 0.008, 6800, 0, 0.1),),
+        (window,),
+        0.024,
+    )
+    ordinary = AcquireRequest(
+        "integrated",
+        (1,),
+        0,
+        (window,),
+        123,
+        0,
+        "test",
+        templates=(single_point_template(timeline),),
+    )
+    assert len(route_request(settings, ordinary)) == 1
+    requested = replace(
+        ordinary, charge_requirements=(ChargeDriveRequirement("control", 1),)
+    )
+    with pytest.raises(ValueError, match="six-fluxonium.*charge.*not supported"):
+        route_request(settings, requested)
 
 
 @pytest.fixture

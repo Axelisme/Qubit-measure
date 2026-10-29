@@ -9,7 +9,7 @@ Recipe 選來源、設參數，再決定 Run、Analyze 與 writeback 問答的�
 
 ## 宣告與註冊
 
-[__init__.py](__init__.py) 的 `RECIPES` 明列 29 個宣告，不掃描目錄。
+[__init__.py](__init__.py) 的 `RECIPES` 明列宣告，不掃描目錄。
 每個模組用 `@recipe(name, description)` 裝飾
 `async def (session: RecipeSession, inputs: Inputs) -> Report`。
 每個 recipe 的 `Inputs` 繼承 `RecipeInputs`，只加實驗欄位，逐欄寫單位、預設與 null 政策。
@@ -175,9 +175,12 @@ Recipe 可以串多個 adapter，宣告不另設單一 adapter mapping。
 | --- | --- | --- |
 | `mux_onetone` | `mux/onetone` | `participants` 收完整 readout 的原始整數 index，依清單順序執行，不以名稱查位置。`df:{start,stop}` 是共同 MHz offset，`n` 是共用點數。回覆每 tone 的 index、name、freq、kappa、fit_quality 與 identity 診斷。 |
 | `onetone_range_find` | `onetone/range_find` | 必填絕對 MHz `freq:{start,stop}` 與 `n`。可選 `resonators` 提供 picker 標籤與初始頻率升序配對，不進 acquisition cfg。省略保留分析名單，null 原樣交 owner，空清單做無名探索。單一 Interactive 入口使用靜態初始猜測，預設不平滑、prominence 倍率 5、FWHM 上限 25 MHz，以 depth / FWHM 排序。`min_separation` 為有限正數 MHz，初值 1 MHz，與名單經同一 Analyze updates 傳入。Recipe 等待 agent 經 `tab_interact` 調整或確認並送 done，才詢問 writeback，不自動送 done。回覆最終 name、freq、depth、fwhm、score 與 identity／writeback 診斷。手動非候選點的 metrics 為 null。 |
+| `stirap` | `twotone/stirap` | 必填 `scan_mode`：delay、amplitude 或 detuning。第一軸 `start/stop/n` 分別是 Stokes lead（us）、共同 gain scale（無單位）或 Pump detuning（MHz）；detuning 另用 `stokes_start_mhz/stokes_stop_mhz/stokes_n` 掃 Stokes 軸。操作者提供兩個 carrier，分析只用 Run 保存的 centroid3 readout。完整 Run、Analyze、Save，不提出 writeback。 |
+| `raman_gf` | `twotone/raman_gf` | `carrier_mhz` 由操作者提供，`waveform_asset` 指定已建立的 arbitrary envelope。`scan_mode` 沿用 frequency、area、frequency_area；detuning 使用 two-photon MHz，正值使單 carrier 增加一半 detuning。分析只用 Run 保存的 centroid3 readout，完整 Run、Analyze、Save，不提出 writeback。 |
 | `twotone_flux_dep` | `twotone/flux_dep` | 必填 drive 的 `center_mhz`、`span_mhz`、`freq_points` 及 native flux device、unit、端點、點數。互動 picker 完成後詢問寫回 qubit flux 校準。 |
 
-三者先 Run、Analyze，再依各 recipe 的條件詢問寫回，只接受回答選定的候選，最後 Save。
+有 writeback proposal 的流程先 Run、Analyze，再依各 recipe 的條件詢問寫回，只接受回答選定的候選，最後 Save。
+STIRAP 與 Raman 沒有 writeback proposal，不詢問寫回。兩者回報 saved confusion matrix 的 condition number 與 minimum singular value；完整 g/e/f raw/corrected arrays 留在 analysis summary 與保存產物。分析失敗仍 Save raw IQ。三態 reference 與 STIRAP 各 mode 不另加工具。
 四個 `mux_{onetone,twotone}_flux_{global,local}` recipe 共用 flat cfg 路徑，
 逐 participant 用原始 tone index 開啟 native picker，再分別詢問選定寫回。
 `df/n`、`sweeps/n` 與 `flux/flux_n`、`flux_sweeps/flux_n` 的形狀及預選線範例見

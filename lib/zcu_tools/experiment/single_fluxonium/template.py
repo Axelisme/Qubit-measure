@@ -6,7 +6,11 @@ from typing import Literal
 import numpy as np
 from numpy.typing import NDArray
 
-from zcu_tools.core.simulation import EnvironmentSnapshot, TimelineTemplate
+from zcu_tools.core.simulation import (
+    ChargeDriveRequirement,
+    EnvironmentSnapshot,
+    TimelineTemplate,
+)
 from zcu_tools.experiment.readout_plan import (
     ProjectiveRead,
     ReadoutContents,
@@ -190,6 +194,7 @@ def plan_template(
     template: TimelineTemplate,
     *,
     readout_kind: Literal["pulse", "mux"] = "pulse",
+    charge_requirements: tuple[ChargeDriveRequirement, ...] = (),
 ) -> SingleFluxoniumPlan:
     """Convert one complete QICK template to evolution and logical read events.
 
@@ -217,8 +222,18 @@ def plan_template(
     Earlier readout pulses are retained separately, not treated as microwaves.
     Unbound generators/receivers, invalid DC, crossing readout blocks or invalid
     numeric records raise ValueError. No ADC solver, density or RNG is used.
+    charge_requirements names generators that must bind to charge drive_lines,
+    even if already bound to flux or readout. Mismatches raise ValueError naming
+    the request and channel before waveform construction or evolution.
     Returned contents are detached; input buffers may subsequently be reused.
     """
+    drive_names = {line.gen_ch: line.name for line in settings.drive_lines.values()}
+    for requirement in charge_requirements:
+        if requirement.gen_ch not in drive_names:
+            raise ValueError(
+                f"{requirement.name}: generator {requirement.gen_ch} requires a "
+                "declared charge drive line"
+            )
     windows = tuple(
         window
         for window in template.readouts
@@ -237,7 +252,6 @@ def plan_template(
     read_events = logical_event_contents(template, drive, windows[0], memo)
     contents = read_events[-1]
     microwave, fast_flux = [], []
-    drive_names = {line.gen_ch: line.name for line in settings.drive_lines.values()}
     for index, event in enumerate(template.events):
         if event.gen_ch == drive.gen_ch:
             continue
