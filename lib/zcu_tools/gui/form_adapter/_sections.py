@@ -792,11 +792,13 @@ class Section:
                     raw[name] = field.materialize(item, env)
                 except (ValueError, TypeError) as exc:
                     errors[(*prefix, name)] = str(exc)
-        for name in self.core.model_fields:
+        for name, info in self.core.model_fields.items():
             if name not in value.__class__.model_fields:
                 continue
             item: object = getattr(value, name)
-            if isinstance(item, LinRange | CenterSpan | StepRange | StepCenter):
+            if SweepCfg in _members(info.annotation) and isinstance(
+                item, LinRange | CenterSpan | StepRange | StepCenter
+            ):
                 try:
                     sweep = SweepCfg(
                         start=item.start,

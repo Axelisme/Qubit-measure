@@ -141,6 +141,36 @@ def test_tagged_branch_selection_uses_shared_sweep_conversions_and_missing_defau
     )
 
 
+class SharedSweepBranch(ConfigBase):
+    mode: Literal["shared"] = "shared"
+    sweep: form_adapter.SweepInput
+
+
+class MixedSweepCfg(ConfigBase):
+    branch: Annotated[SharedSweepBranch | DelayBranch, Field(discriminator="mode")]
+
+
+def test_explicit_shared_sweep_inside_native_tagged_branch_keeps_declared_type() -> (
+    None
+):
+    env = FormEnv()
+    form = form_adapter.Form(MixedSweepCfg, {})
+    state = FormState(
+        FormInput(
+            form.model,
+            {
+                "branch": {
+                    "mode": "shared",
+                    "sweep": {"kind": "linrange", "start": 10, "stop": 14, "n": 3},
+                },
+            },
+        )
+    )
+    assert form.to_cfg(require_result(state, env), env) == MixedSweepCfg(
+        branch=SharedSweepBranch(sweep=form_adapter.LinRange(start=10, stop=14, n=3))
+    )
+
+
 class ScalarCfg(ConfigBase):
     """A synthetic cfg exercises section, omission and locked scalar rules."""
 
