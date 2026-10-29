@@ -113,8 +113,11 @@ Reference 分析與 centroid3 processor 共用 `utils.shot_classification` 的�
 
 2026-10-29，使用者對三態校準交接選 A，答「3A」：新增 readout classifier 型別，由三態 reference Apply 到 library，後續實驗讀 saved run cfg。
 對 acquire 輸出答「5A，但這不是長久之計，必須設計一個方案來回傳任意維度的數據。而不是2維」。
-使用者於 2026-10-29 後續選擇逐 shot 後處理方法，保留每 ADC 一個 ndarray 與單一可變長 payload 軸。
+使用者於 2026-10-29 說：「R1的A太複雜了，對於從原生qick來的人不友善，我傾向B的變種，一個帶有數據後處理，回傳任意維度的方法。R2需求上是A，我不確定B是否值得。」
+因此採逐 shot 後處理方法，保留每 ADC 一個 ndarray 與單一可變長 payload 軸，不引入 named record 或 sidecar。
 分類 processor 明列每個狀態，不從 g/e 重建第三類；`acquire_decimated` 不變。
+同日，對沿用 QICK 的 float64 `(shots, reads, 2)` IQ 或先轉成 complex128 的選項，使用者回答：「我想推進Program設計一致性，選A」。
+因此 processor 接收原生格式的 I/Q 分量，需要複數運算的 processor 自行轉換。
 
 單 qubit GE Primary 提出只有中心的 circle，Post 提出含中心、radius 與 matrix 的完整 circle。
 兩者都是完整 module replacement，同次批次依 Primary→Post 接受。
@@ -132,6 +135,25 @@ Amplitude／Length Rabi 保留單 ADC raw IQ 與聯合 fit，未校準時只略�
 有效 Rabi fit 經同一中立 builder 更新 captured resonator readout 的完整 classifier，
 Pulse 更新 classifier，單 tone Mux 更新 tones.0.classifier，不支援多 tone 分析。
 Check 的 raw Run 不要求 classifier，到分析才從 saved cfg 要求 circle 與 radius。
+
+### 原生 QICK projection 的 readout 與 caller 分工
+
+Readout owner 的 `qick_threshold_options(cfg)` 將既有 linear／circle classifier 轉成 QICK threshold／angle options。
+Helper 不執行 acquire，也不讀 program registry、硬體或 live library。
+Caller 依實驗語意決定是否把 options 傳給普通 `acquire`，並負責校準是否仍適用。
+原生 projection 將 excited fraction 放在 I，Q 為零，讓既有 IQ analysis 可使用這個等效 IQ。
+使用者於 2026-10-29 說：「1混入IQ是故意的，就是要變成等效IQ，好讓分析程序可以不用動。2所以是由實驗方手動傳遞3這是用戶責任。4目的是自帶0~1的合理範圍，這樣數據的值本身就有意義。」
+
+任一 ADC 缺少可用的 linear／circle classifier，包含 centroid3，helper 就回傳空 options，整次 acquire 保持普通 IQ，不只對部分 ADC 啟用 projection。
+使用者於 2026-10-29 對缺少分類的情境裁定：「有一個沒有不要抱錯，就當都沒有用」。
+這個 fallback 不適用於 `classification_processors`；要求 processed populations 的 caller 仍須提供完整可用的校準。
+
+Advisor 依使用者 2026-10-30 的代理授權，具體化 cfg sequence 的順序與 conflict／empty fallback。
+Helper 接受單一 Pulse／Mux cfg 或 cfg sequence，依 ADC 初次出現順序產生 options，相同 ADC 的相同校準只保留一份。
+同一 ADC 的校準衝突或 sequence 為空時，整體回傳空 options。
+Caller 必須提供涵蓋全部 program ADC 的 cfg，且順序符合 program 的 ADC 宣告順序。
+Helper 不讀 program，因此不替 caller 猜測或驗證這個對應。
+此分工沿用 [[0072]] 與 `.importlinter` C8、C15、C16 的依賴方向，不新增跨層入口。
 
 ### Herald 規格與 host post-selection
 
