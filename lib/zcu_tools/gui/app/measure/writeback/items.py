@@ -36,7 +36,7 @@ class WritebackItem(ABC):
     target_name: str
     description: str
     # ``session_id`` (``<kind>-<n>``, e.g. ``param-1``) is the stable identifier for
-    # UI/wire/dedup. Stamped once by WritebackService when items are computed at
+    # UI/wire/dedup. Stamped once by WritebackDraft when items are copied at
     # analyze time (never by the adapter), and decoupled from target_name so
     # retargeting does not change the id.
     session_id: str = field(default="", init=False)

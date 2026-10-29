@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
+from pathlib import Path
 from queue import Queue
 from unittest.mock import MagicMock
 
@@ -21,7 +22,13 @@ from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
+from zcu_tools.gui.session.context_types import (
+    CommandOrigin,
+    EntryRequest,
+    PointCreateRequest,
+)
 from zcu_tools.gui.session.types import SessionEnv
+from zcu_tools.program.v2 import make_mock_soccfg
 
 from tests.gui._dialog_fakes import RecordingDialogPresenter
 from tests.gui._user_input import ComponentDriver
@@ -43,7 +50,7 @@ class WindowApp:
 
 
 @pytest.fixture
-def window_app(qapp) -> Iterator[WindowApp]:
+def window_app(qapp, tmp_path: Path) -> Iterator[WindowApp]:
     state = State(SessionEnv(parameters=None, soc=None, soccfg=None))
     registry = Registry()
     registry.register("demo", OldAdapter)
@@ -54,6 +61,7 @@ def window_app(qapp) -> Iterator[WindowApp]:
         view=None,
         bus=BaseEventBus(),
         catalog_loader=loader,
+        project_root=str(tmp_path),
     )
     dialogs = RecordingDialogPresenter()
     window = MainWindow(ctrl, templates=lambda: {}, dialog_presenter=dialogs)
@@ -89,6 +97,32 @@ def test_reload_button_cancellation_and_successful_restore(
         == app.ctrl.tab_control.list_tab_ids()[0]
     )
     assert app.window.view_tab_ids() == app.ctrl.tab_control.list_tab_ids()
+    app.dialogs.assert_no_unexpected_messages()
+
+
+def test_restored_valid_tab_reenables_run_without_an_extra_form_action(
+    window_app: WindowApp,
+    tmp_path: Path,
+) -> None:
+    app = window_app
+    app.ctrl.setup_control.new_entry(EntryRequest("reload"))
+    app.ctrl.setup_control.new_point(
+        PointCreateRequest("point", "", CommandOrigin("gui"))
+    )
+    app.ctrl.session_services.soc_connection.install_soc(
+        MagicMock(), make_mock_soccfg()
+    )
+    driver = ComponentDriver(app.window)
+    driver.select_menu("New Tab ▾", ("demo",))
+    driver.enter_text(object_name="form.input.knob", value="11")
+    assert driver.observe("Run").enabled
+    driver.screenshot(tmp_path / "before-reload.png")
+    app.dialogs.queue_destructive_confirm(True)
+    driver.select_menu("More ▾", ("Reload experiments",))
+    driver.screenshot(tmp_path / "after-reload.png")
+    assert driver.status().text == "Restored 1 experiment tabs"
+    assert driver.observe(object_name="form.input.knob").text == "11"
+    assert driver.observe("Run").enabled, driver.observe("Run").tooltip
     app.dialogs.assert_no_unexpected_messages()
 
 

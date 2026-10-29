@@ -83,7 +83,7 @@ def test_static_unit_facts_follow_selected_point_and_captured_path_without_conve
             experiment_name="test/writeback",
         )
         try:
-            initial = service.preview_values(draft, session_id="param-1")["param-1"]
+            initial = draft.preview_values(session_id="param-1")["param-1"]
             assert (initial.actual_path, initial.unit) == ("U1.frequency", "MHz")
             assert (initial.current, initial.proposed) == (19.8, 20.09)
             control.set_parameter(target, "U1.frequency", 21.5)
@@ -92,15 +92,15 @@ def test_static_unit_facts_follow_selected_point_and_captured_path_without_conve
             control.add_component("Q2", "fake/drive/a", {})
             control.add_component("U1", kind, {"frequency": 30.0})
             control.apply_alias_rows((AliasRow("driver", "Q2"),))
-            refreshed = service.preview_values(draft)["param-1"]
+            refreshed = draft.preview_values()["param-1"]
             assert (refreshed.actual_path, refreshed.unit) == ("U1.frequency", "MHz")
             assert (refreshed.current, refreshed.proposed) == (30.0, 20.09)
             draft.edit("param-1", target_name="$driver.duration")
-            unset = service.preview_values(draft)["param-1"]
+            unset = draft.preview_values()["param-1"]
             assert (unset.actual_path, unset.unit) == ("U1.duration", "us")
             assert (unset.current, unset.proposed) == (None, 20.09)
             draft.edit("param-1", target_name="general.ext.value")
-            ext = service.preview_values(draft)["param-1"]
+            ext = draft.preview_values()["param-1"]
             assert (ext.actual_path, ext.unit) == ("general.ext.value", None)
             assert (ext.current, ext.proposed) == (None, 20.09)
             assert draft.items[0].stderr == 0.18
@@ -133,7 +133,7 @@ def test_concrete_destination_does_not_use_alias_or_historical_point_fallback(se
             experiment_name="test/writeback",
         )
         try:
-            initial = service.preview_values(draft, session_id="param-1")["param-1"]
+            initial = draft.preview_values(session_id="param-1")["param-1"]
             assert initial.actual_path == "coupler.module.cz_f2"
             assert initial.current == "coupler.pulses.original"
             assert initial.proposed == "coupler.pulses.calibrated"
@@ -146,7 +146,7 @@ def test_concrete_destination_does_not_use_alias_or_historical_point_fallback(se
                 "other_coupler", kind, {"module": {"cz_f2": "other.pulses.decoy"}}
             )
             control.apply_alias_rows((AliasRow("coupler", "other_coupler"),))
-            refreshed = service.preview_values(draft)["param-1"]
+            refreshed = draft.preview_values()["param-1"]
             assert refreshed.actual_path == "coupler.module.cz_f2"
             assert refreshed.current is None
             assert refreshed.proposed == "coupler.pulses.calibrated"
@@ -166,7 +166,7 @@ def test_values_follow_selected_point_retarget_edits_and_actual_current_values(s
         parameters=capture,
         experiment_name="test/writeback",
     )
-    first = service.preview_values(draft)["param-1"]
+    first = draft.preview_values()["param-1"]
     assert first.actual_path == "general.ext.value"
     assert first.current == [1, 2]
     assert first.proposed == [3, 4]
@@ -174,19 +174,19 @@ def test_values_follow_selected_point_retarget_edits_and_actual_current_values(s
     assert first.current == [1, 2]
     assert isinstance(first.proposed, list)
     first.proposed.append(99)
-    assert service.preview_values(draft)["param-1"].proposed == [3, 4]
-    assert service.preview_values(draft)["param-1"].current == [1, 2, 5]
+    assert draft.preview_values()["param-1"].proposed == [3, 4]
+    assert draft.preview_values()["param-1"].current == [1, 2, 5]
     draft.edit("param-1", target_name="general.ext.other")
-    assert service.preview_values(draft)["param-1"].current is None
+    assert draft.preview_values()["param-1"].current is None
     control.set_parameter(target, "general.ext.other", 7)
-    assert service.preview_values(draft)["param-1"].current == 7
+    assert draft.preview_values()["param-1"].current == 7
     entry.new_point("b")
     control.use_point(PointUseRequest("b"))
     control.set_parameter(control.read_context().target, "general.ext.other", 8)
-    retargeted = service.preview_values(draft)["param-1"]
+    retargeted = draft.preview_values()["param-1"]
     assert retargeted.actual_path == "general.ext.other"
     assert retargeted.current == 8
-    assert service.get_all_applied(draft) == {"param-1": False}
+    assert draft.get_all_applied() == {"param-1": False}
     assert draft.items[0].selected is True
 
 
@@ -205,25 +205,25 @@ def test_module_preview_contains_complete_current_and_live_form_values(session):
     draft = service.create_draft(
         [proposal], parameters=capture, experiment_name="test/writeback"
     )
-    preview = service.preview_values(draft)["ml-1"]
+    preview = draft.preview_values()["ml-1"]
     assert preview.actual_path == name
     assert preview.unit is None
     assert preview.current == capture.library.entry_value(name, kind="module")
     assert preview.proposed == preview.current
-    service.edit_draft(draft, "ml-1", edits={("freq",): 250.0})
-    live = service.preview_values(draft)["ml-1"]
+    draft.edit("ml-1", edits={("freq",): 250.0})
+    live = draft.preview_values()["ml-1"]
     assert isinstance(live.proposed, dict)
     assert live.proposed["freq"] == 250.0
     assert live.current == preview.current
     draft.edit("ml-1", target_name=name.replace("target", "new"))
-    missing = service.preview_values(draft)["ml-1"]
+    missing = draft.preview_values()["ml-1"]
     assert missing.actual_path == name.replace("target", "new")
     assert missing.unit is None
     assert missing.current is None
     assert missing.proposed == live.proposed
     draft.teardown()
     with pytest.raises(FailedPreconditionError):
-        service.preview_values(draft)
+        draft.preview_values()
 
 
 def test_item_preview_excludes_invalid_siblings_but_bulk_remains_strict(session):
@@ -249,30 +249,30 @@ def test_item_preview_excludes_invalid_siblings_but_bulk_remains_strict(session)
     try:
         first, second = draft.items
         second.selected = False
-        form = service.get_item_form(draft, second.session_id)
+        form = draft.get_item_form(second.session_id)
         form.state.write({("freq",): ""}, form.env)
-        selected = service.preview_values(draft, session_id=first.session_id)
+        selected = draft.preview_values(session_id=first.session_id)
         assert list(selected) == [first.session_id]
         fact = selected[first.session_id]
         assert fact.actual_path == first.target_name
         assert isinstance(fact.current, dict) and isinstance(fact.proposed, dict)
         assert fact.current["freq"] == fact.proposed["freq"] == 100.0
         with pytest.raises(LibraryEntryInvalid):
-            service.preview_values(draft)
+            draft.preview_values()
         with pytest.raises(LibraryEntryInvalid):
-            service.preview_values(draft, session_id=second.session_id)
+            draft.preview_values(session_id=second.session_id)
         with pytest.raises(KeyError):
-            service.preview_values(draft, session_id="missing")
+            draft.preview_values(session_id="missing")
         form.state.write({("freq",): 100.0}, form.env)
-        assert len(service.preview_values(draft)) == 2
+        assert len(draft.preview_values()) == 2
         assert second.selected is False
     finally:
         draft.teardown()
     empty = service.create_draft([], parameters=None, experiment_name="test/writeback")
     try:
-        assert service.preview_values(empty) == {}
+        assert empty.preview_values() == {}
         with pytest.raises(KeyError):
-            service.preview_values(empty, session_id="missing")
+            empty.preview_values(session_id="missing")
     finally:
         empty.teardown()
 
@@ -289,4 +289,4 @@ def test_preview_without_context_fails_instead_of_claiming_missing_targets():
         experiment_name="test/writeback",
     )
     with pytest.raises(FailedPreconditionError):
-        service.preview_values(draft)
+        draft.preview_values()

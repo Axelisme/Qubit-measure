@@ -58,8 +58,8 @@ def app() -> App:
     tabs = TabService(
         state,
         registry,
-        writeback,
         form_resources(state),
+        writeback=writeback,
         form_sources=lambda aliases: form_sources(state, aliases),
     )
     workspace = WorkspaceService(state, tabs, bus)

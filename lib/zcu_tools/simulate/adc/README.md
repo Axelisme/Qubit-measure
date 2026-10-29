@@ -1,6 +1,6 @@
 # ADC probability and readout contracts
 
-**Last updated:** 2026-10-28 (UTC), projection histories and emission-column mapping
+**Last updated:** 2026-10-29 (UTC), negative population clipping
 
 **讀者：** framework-dev、agent。ADC 機率、讀出訊號與 interval moment 契約。
 
@@ -53,11 +53,11 @@ measured shaped-kernel trace drift of 2.62e-8.
 Environment authors explicitly call `normalize_populations` after converting
 densities into readout-basis populations. This is the only probability repair
 operation. It checks finite values, a nonempty state axis, row sums in the closed
-float64 interval [1-1e-6, 1+1e-6], and entries at least -1e-6. It then sets tolerated
-negative entries to zero and divides each row by its sum, returning an owned
-array without changing its input. It never clips upper values or accepts rows
-outside tolerance. Invalid shapes raise `ValueError`. Row validation raises
-`PopulationValidationError`, a `ValueError` subclass whose `rejected_rows: int`
+float64 interval [1-1e-6, 1+1e-6]. It then clips every negative entry to zero
+and divides each row by its sum, returning an owned array without changing its
+input. There is no lower bound on negative entries. It never clips upper values
+or accepts row sums outside tolerance. Invalid shapes raise `ValueError`.
+Row validation raises `PopulationValidationError`, a `ValueError` subclass whose `rejected_rows: int`
 counts rows failing the first reported rule. It returns no partial results.
 Callers can retain this count without parsing error text.
 
