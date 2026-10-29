@@ -21,7 +21,6 @@ from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
 from zcu_tools.gui.session.ui.setup_dialog import SetupDialog
 
 from tests._lab import synthetic_lab
-from tests.gui.app.measure._synthetic import ALIAS_PRESET
 from tests.gui.app.measure.remote._helpers import mcp_client
 
 
@@ -66,7 +65,6 @@ def launched_measure_app(
     try:
         behavior = MeasureGuiBehavior(
             synthetic_lab(registry),
-            alias_presets={"default": ALIAS_PRESET},
             clean=True,
             project_root=str(tmp_path),
         )

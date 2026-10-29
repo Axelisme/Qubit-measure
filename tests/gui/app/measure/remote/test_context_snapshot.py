@@ -58,7 +58,7 @@ def test_active_point_label_and_real_window_follow_published_target_not_aliases(
         assert application.result("context.active", {}) == {"label": None}
         assert application.result("context.labels", {}) == {"labels": []}
         info = application.open_entry()
-        assert_visible_snapshot(info.name, "No point selected")
+        assert_visible_snapshot(info.name, "Global")
         context = controller.context_control
         context.add_component("Q1", "fake/drive/a", {"rate": 10.0}, setup=True)
         context.add_component("Q2", "fake/drive/a", {"rate": 20.0}, setup=True)
@@ -68,7 +68,7 @@ def test_active_point_label_and_real_window_follow_published_target_not_aliases(
             assert application.result("context.active", {}) == {"label": point}
             assert_visible_snapshot(info.name, point)
             for name in ("Q1", "Q2", ""):
-                context.set_alias_rows((AliasRow("driver", name),))
+                context.apply_alias_rows((AliasRow("driver", name),))
                 assert application.result("context.active", {}) == {"label": point}
                 assert_visible_snapshot(info.name, point)
         assert application.result("context.labels", {}) == {"labels": ["base", "next"]}
@@ -546,7 +546,7 @@ def browse_context(application: PointApplication) -> PointApplication:
             "empty": [],
         },
     )
-    context.set_alias_rows(
+    context.apply_alias_rows(
         (
             AliasRow("drive", "Q1"),
             AliasRow("sensor", "$drive.sense"),

@@ -9,11 +9,14 @@ from pydantic import ValidationError
 from zcu_tools.cfg_model import ConstWaveformCfg, PulseSpec
 from zcu_tools.resources.entry import (
     AcceptedPayload,
+    EntryWritebackTarget,
     PointView,
     ResultEntry,
+    capture_entry_storage,
     capture_point_storage,
     document_value,
     snapshot,
+    source_path,
 )
 from zcu_tools.resources.entry.storage import bind_record_table
 from zcu_tools.resources.entry.writeback import (
@@ -49,6 +52,32 @@ def evidence() -> WritebackEvidence:
     return WritebackEvidence(origin="notebook", run_id="run-1")
 
 
+def test_entry_writeback_commits_global_documents_without_changing_point(
+    entry: ResultEntry,
+) -> None:
+    entry.setup.add_component("Q1", kind="fake/drive/a", rate=5000.0)
+    point = entry.new_point("independent")
+    (entry.result_path / "library.yaml").unlink()
+    writer = EntryWritebackTarget(entry.setup, capture_entry_storage(entry))
+    result = apply_writeback(
+        (
+            ParameterWriteback("Q1.rate", 6100.0, {"note": "global edit"}),
+            WaveformWriteback("Q1.waveforms.pi", ConstWaveformCfg(length=0.2)),
+        ),
+        target=writer,
+        evidence=evidence(),
+    )
+    assert len(result.committed) == 2
+    assert entry.setup.Q1.rate == 6100.0
+    assert entry.setup.meta("Q1.rate") == {"note": "global edit"}
+    assert entry.module_library().snapshot().waveform_keys() == ("Q1.waveforms.pi",)
+    assert point.Q1.rate == 5000.0
+    assert entry.module_library("independent").snapshot().waveform_keys() == ()
+    assert writer.point is None
+    accepted = entry.ledger.get(result.event_id).event
+    assert accepted.kind == "accepted"
+
+
 def test_library_acceptance_keeps_audit_event_without_leaf_sources(
     point: PointView,
 ) -> None:
@@ -58,8 +87,7 @@ def test_library_acceptance_keeps_audit_event_without_leaf_sources(
         target=writer,
         evidence=evidence(),
     )
-    storage = capture_point_storage(point)
-    path = storage.result_path / "points" / storage.point / "library.yaml"
+    path = source_path(point).parent / "library.yaml"
     from ruamel.yaml import YAML
 
     stored = YAML(typ="safe").load(path.read_text())
@@ -75,7 +103,7 @@ def test_library_writeback_creates_missing_file_only_when_touched(
     point: PointView,
 ) -> None:
     storage = capture_point_storage(point)
-    path = storage.result_path / "points" / storage.point / "library.yaml"
+    path = source_path(point).parent / "library.yaml"
     path.unlink()
     writer = target(point)
     apply_writeback(

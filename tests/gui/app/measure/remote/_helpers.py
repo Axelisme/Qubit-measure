@@ -57,7 +57,7 @@ from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
 from tests.gui._qt_waits import qt_until
 from tests.gui.app.measure._form_fakes import form_sources
-from tests.gui.app.measure._synthetic import ALIAS_PRESET, SampleAdapter, register_all
+from tests.gui.app.measure._synthetic import SampleAdapter, register_all
 
 logger = logging.getLogger(__name__)
 
@@ -174,7 +174,6 @@ class Fixture:
         self.view = None if headless else make_view()
         self.bus = EventBus()
         self.ctrl = Controller(
-            alias_presets={"default": ALIAS_PRESET},
             state=self.state,
             registry=self.registry,
             view=self.view,

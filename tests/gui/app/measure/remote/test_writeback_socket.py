@@ -444,7 +444,7 @@ def test_native_preview_and_window_keep_captured_path_and_stderr(
         setup=True,
     )
     application.result("point.new", {"label": "a"})
-    context.set_alias_rows((AliasRow("driver", "Q1"),))
+    context.apply_alias_rows((AliasRow("driver", "Q1"),))
     captured = context.read_context().bind_roles(
         {"driver": RoleSpec("fake/drive/*")}, focus="Q1", explicit={}
     )
@@ -461,7 +461,7 @@ def test_native_preview_and_window_keep_captured_path_and_stderr(
     assert analyzed["status"] == "finished", analyzed
     context.set_parameter(require_target(captured), "Q1.ext.value", 19.9)
     application.result("point.new", {"label": "b"})
-    context.set_alias_rows((AliasRow("driver", "Q2"),))
+    context.apply_alias_rows((AliasRow("driver", "Q2"),))
     active = context.read_context().target
     window = MainWindow(controller, templates=lambda: {})
     window.add_tab_widget(tab, "pointed")
@@ -541,7 +541,7 @@ def coupler_load_application(qapp, tmp_path: Path, point_models, point_registry_
     assert entry_info is not None
     context.set_waveform(target, MODULE_PROPOSAL_WAVEFORM, ConstWaveformCfg(length=0.1))
     context.set_module(target, "coupler.pulses.cz_f2", _stored_pulse(gain=0.2))
-    context.set_alias_rows((AliasRow("coupler", "coupler"),))
+    context.apply_alias_rows((AliasRow("coupler", "coupler"),))
     path = tmp_path / "source.h5"
     write_native_file(path, tag=CapturedCouplerAdapter.experiment_tag or "", gain=0.4)
     stored = load(path)
@@ -594,7 +594,7 @@ def test_registered_source_only_load_analyze_preview_keeps_concrete_collision_ta
         "coupler.pulses.cz_f2",
         _stored_pulse(gain=0.8),
     )
-    context.set_alias_rows((AliasRow("coupler", "Q2"),))
+    context.apply_alias_rows((AliasRow("coupler", "Q2"),))
     active = context.read_context().target
     started = call(client, "tab.analyze", {"tab_id": tab})
     assert started["ok"], started

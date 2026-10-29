@@ -78,7 +78,7 @@ from tests.resources.entry.fakes import register_fakes, registry_state, restore_
 def saved_target(parameters: ParameterContext) -> SavedPoint:
     """Require a saved-point fixture capture for setup writes."""
     target = parameters.target
-    if target is None:
+    if not isinstance(target, SavedPoint):
         raise AssertionError("Fixture capture has no saved point")
     return target
 
@@ -154,7 +154,6 @@ def test_acceptance_retains_actual_values_and_fixed_destination_for_confirmed_pr
                 "target": "Q1.ext.accepted",
                 "value": 0.6,
                 "destination": {
-                    "kind": "saved_point",
                     "entry_name": "entry",
                     "point": "working",
                 },
@@ -176,7 +175,7 @@ def test_acceptance_retains_actual_values_and_fixed_destination_for_confirmed_pr
 def test_mixed_submission_receipts_and_applied_flags_follow_committed_indices(
     session: WritebackSession, fails: bool
 ) -> None:
-    session.control.set_alias_rows((AliasRow("coordinate", "device"),))
+    session.control.apply_alias_rows((AliasRow("coordinate", "device"),))
     captured = session.control.read_context()
     draft = session.service.create_draft(
         [
@@ -219,7 +218,7 @@ def test_mixed_submission_receipts_and_applied_flags_follow_committed_indices(
 def test_write_draft_associates_before_and_after_values_after_group_reordering(
     session: WritebackSession,
 ) -> None:
-    session.control.set_alias_rows((AliasRow("coordinate", "device"),))
+    session.control.apply_alias_rows((AliasRow("coordinate", "device"),))
     draft = session.service.create_draft(
         [
             RecordWriteback(
@@ -273,6 +272,71 @@ def test_acceptance_keeps_per_item_values_without_postcommit_readback(
     assert len(session.entry.ledger.events()) == 1
 
 
+@pytest.mark.parametrize("destination", ["global", "point"])
+def test_apply_uses_current_document_set_and_records_nullable_point(
+    session: WritebackSession, destination: str
+) -> None:
+    session.control.apply_alias_rows((AliasRow("qubit", "Q1"),))
+    point_source = session.control.read_context()
+    session.control.use_global()
+    session.control.add_component("Q1", "fake/drive/a", {})
+    session.control.apply_alias_rows((AliasRow("qubit", "Q1"),))
+    global_source = session.control.read_context()
+    session.entry.setup.refresh()
+    untouched_before = document_value(
+        snapshot(
+            session.entry.use_point("working")
+            if destination == "global"
+            else session.entry.setup
+        ),
+        "Q1",
+    )
+    source = point_source if destination == "global" else global_source
+    if destination == "global":
+        session.control.use_point(PointUseRequest("working"))
+    draft = session.service.create_draft(
+        [
+            ParameterWriteback("$qubit.ext.gain", "Gain", proposed_value=0.8),
+            RecordWriteback("Q1", "Sample", {"freq": 12.0}),
+        ],
+        parameters=source,
+        experiment_name="synthetic",
+        run_id="global-run",
+        device_snapshot={"device": {"value": 0.1, "value_unit": "V"}},
+    )
+    if destination == "point":
+        session.control.use_point(PointUseRequest("working"))
+    else:
+        session.control.use_global()
+    # A different live alias must not redirect the captured proposal.
+    session.control.apply_alias_rows((AliasRow("qubit", "Q2"),))
+    result = session.service.accept_drafts(
+        (WritebackSelection(draft, ("param-1", "record-1")),)
+    )
+    assert result.error is None
+    point = None if destination == "global" else "working"
+    assert [item.destination for item in result.written[0]] == [
+        {"entry_name": "entry", "point": point},
+        {"entry_name": "entry", "point": point},
+    ]
+    session.entry.setup.refresh()
+    global_doc = snapshot(session.entry.setup)
+    point_doc = snapshot(session.entry.use_point("working"))
+    written_doc, untouched_doc = (
+        (global_doc, point_doc) if destination == "global" else (point_doc, global_doc)
+    )
+    assert document_value(written_doc, "Q1.ext.gain") == 0.8
+    assert document_value(untouched_doc, "Q1") == untouched_before
+    events = session.entry.ledger.events()
+    assert len(events) == 1
+    assert events[0].kind == "accepted"
+    row = session.entry.records("Q1").latest("global-run")
+    assert row is not None
+    assert row["point"] == point
+    assert row["source"] == events[0].id
+    assert row["freq"] == 12.0
+
+
 @pytest.mark.parametrize("source", ["live", "snapshot", "empty", "absent"])
 def test_preview_and_apply_use_current_gui_point_not_analysis_origin(
     session: WritebackSession,
@@ -302,7 +366,6 @@ def test_preview_and_apply_use_current_gui_point_not_analysis_origin(
     result = session.service.accept_drafts((WritebackSelection(draft, ("param-1",)),))
     assert result.error is None
     assert result.written[0][0].destination == {
-        "kind": "saved_point",
         "entry_name": "entry",
         "point": "other",
     }
@@ -624,8 +687,9 @@ def test_post_analysis_draft_retains_primary_identity(
             writeback.teardown_draft(primary_draft)
 
 
+@pytest.mark.parametrize("destination", ["point", "global"])
 def test_writeback_evaluates_module_expression_from_creation_capture(
-    saved_session: WritebackSession,
+    saved_session: WritebackSession, destination: str
 ) -> None:
     session = saved_session
     initial = session.control.read_context()
@@ -650,6 +714,10 @@ def test_writeback_evaluates_module_expression_from_creation_capture(
     )
     draft.edit("ml-1", edits={("gain",): {"expr": "general.ext.flux_value"}})
     session.control.set_parameter(saved_target(captured), "general.ext.flux_value", 0.9)
+    if destination == "global":
+        session.control.use_global()
+        session.control.add_component("Q1", "fake/drive/a", {})
+        session.control.set_setup_parameter("general.ext.flux_value", 0.9)
     session.service.apply_draft(draft)
     current = session.control.read_context()
     written = current.library.module_spec("Q1.pulses.pi")
@@ -875,6 +943,7 @@ def test_each_parameter_write_replaces_metadata_with_its_own_stderr(
 def test_duplicate_concrete_role_destinations_fail_before_accepted(
     session: WritebackSession,
 ) -> None:
+    before = session.control.read_context().lookup("Q1.rate")
     captured = session.control.read_context().bind_roles(
         {"driver": RoleSpec("fake/drive/*")}, focus="Q1", explicit={}
     )
@@ -889,7 +958,7 @@ def test_duplicate_concrete_role_destinations_fail_before_accepted(
     with pytest.raises(InvalidInputError, match="duplicate writeback destination"):
         session.service.apply_draft(draft)
     assert session.entry.ledger.events() == ()
-    assert not session.control.read_context().lookup("Q1.rate").present
+    assert session.control.read_context().lookup("Q1.rate") == before
 
 
 def test_empty_draft_reads_and_writes_without_context(

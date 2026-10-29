@@ -14,8 +14,7 @@ from qtpy.QtWidgets import (
     QPushButton,
 )
 from zcu_tools.gui.app.measure.remote.dialogs import DialogName
-from zcu_tools.gui.expected_error import FailedPreconditionError
-from zcu_tools.gui.session.context_types import SavedPoint
+from zcu_tools.gui.session.context_types import SavedEntry, SavedPoint
 from zcu_tools.gui.session.ui.setup_dialog import SetupDialog
 from zcu_tools.mcp.core.rpc import GuiInvocationError
 from zcu_tools.mcp.measure.session import GuiRpcError
@@ -153,16 +152,14 @@ def test_entry_point_commands_show_in_reopened_setup_and_failures_keep_the_conte
         qapp.processEvents()
         app.invoke("rpc_call", {"method": "control.acquire"})
 
-        # A new entry publishes metadata without selecting a point; Setup shows its name.
+        # A new entry activates Global without selecting a point; Setup shows its name.
         changed = app.invoke(
             "rpc_call", {"method": "entry.new", "params": {"name": "chip-b"}}
         )
         assert changed["name"] == "chip-b"
         info = control.get_entry_info()
         assert info is not None and info.name == changed["name"]
-        with pytest.raises(FailedPreconditionError) as caught:
-            control.read_context()
-        assert caught.value.reason_code == "no_context"
+        assert control.read_context().target == SavedEntry(entry_name="chip-b")
         check_setup_entry("chip-b")
 
 

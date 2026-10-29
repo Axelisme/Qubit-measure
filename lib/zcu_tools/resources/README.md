@@ -1,12 +1,12 @@
 # `zcu_tools.resources` experiment work resources
 
-**Last updated:** 2026-10-29
+**Last updated:** 2026-10-29，global 與 point 文件組
 
 **讀者：** framework-dev。實驗資源的 scope、讀寫與持久化 owner 導覽。
 
 `resources/` 組織實驗工作資源的命名、讀寫與交換。`document_names.py` 集中 entry 與 point 共用的 parameters／library／aliases 檔名。`document_filename_upgrade.py` 透過原 parameter CLI 的 `--scope filenames` 提供不改 bytes 的明確離線改名；需要內容升級時先改名，再跑 components，見[升級指南](../../../docs/parameter-upgrades.md#先改檔名再升級內容)。資料檔格式與讀寫由 [datafile](../datafile/README.md) 擁有。
 
-- [`context/`](context/README.md) 管理 point-local typed ModuleLibrary。
+- [`context/`](context/README.md) 管理 entry／point scoped typed ModuleLibrary。
 - `predictor_file.py` 擁有 `zcu.predictor` v2 JSON 的具名讀寫。`PredictorFile.params` 只含 simulate 的 nullable 能量／asymmetry，`PredictorFile.flux` 是 `PredictorFlux(offset, period, unit)`。`PredictorFlux.from_mapping` 解碼與檔案相同的 offset／period／unit 格式，`to_dict()` 回傳 detached typed JSON 欄位。RPC 與檔案共用此 decoder，不另建驗證。Flux 透過 `to_frame()` 複用 `analysis.flux.FluxFrame` 與 `DevicePeriod` 的驗證，不在 resources 重寫仿射數學。此 resources→analysis 依賴沿用 C8 分層與 C9 無循環 contract。`encode_predictor_document` 驗證並回傳 detached `PredictorDocument`，供 save、validate 與離線 migration baseline 共用 v2 表示，不讓 caller 序列化 frozen mappings。`validate_predictor_file` 與 save／upgrade 保留嚴格完整規則，不建數值模型。Load 忽略 envelope、params、flux 與 source 的未知欄位，只將已知參數交給 simulate。`PredictorFile.source` 缺失或無法解析時為 None，無時區時間也投影為 None；可解析的來源保留原文。Writer 要求明確的合法 source。完整性與物理約束由 `params.build_predictor()` 驗證。V1 只透過純函式 `upgrade_predictor_document` 轉為 v2，runtime 拒讀並列出升級命令。`predictor_upgrade.py` 擁有明確升級的逐檔預覽、備份及替換。格式與還原見 [Predictor v2](../../../docs/storage-format-history/predictor-v2.md)。它不讀 component、alias 或舊 `params.json`。
 - `simulation_replay.py` owns opt-in private FTF and single-fluxonium input JSON, content integrity,
   atomic file I/O and acquire/round reference resolution. It retains detached
@@ -21,8 +21,8 @@
 - [`qubit_params.py`](qubit_params.py) 直接管理 result scope 的 typed `params.json` handoff。公開讀寫先重新讀取 JSON，寫入採原子替換；方法與 section 規則見 [qubit_params.md](qubit_params.md)。
 - [`record_table/`](record_table/README.md) 管理條目的只追加 JSONL 樣本歷史、CSV 匯出與 opt-in v2 欄位協定。它也擁有 explicit record upgrade 的逐列分類、原 bytes 備份與原子替換，CLI 只呼叫該公開接縫。
 - [`waveform_assets.py`](waveform_assets.py) 是 qubit-scoped arbitrary waveform asset 的公開入口。每個 Database instance 持有固定 root，capture capability 固定原目錄但每次讀現在 bytes；沒有全域 repository 選擇器。core.waveform_format 負責 NPZ samples codec；內部 data、formula 與 NPZ 模組分別負責 payload／preview、formula 語意／rendering 與實體 I/O；格式、方法與約束見 [waveform_assets.md](waveform_assets.md)。
-- [`document_store.py`](document_store.py) 提供 typed YAML 的記憶體快照、單檔樂觀交易與跨程序鎖。公開 `DocumentRevision(path, revision)` 記錄絕對路徑與已安裝原始 bytes 的 SHA-256。`DocumentStore` 與 `ModuleLibrary` 的 `document_revision` 屬性，以及 entry 的 `document_revision(view)` 函式都不重新讀檔。缺席 point library 的 revision 為 None，讀取不建檔。提交或 refresh 成功才更新版本，失敗保留舊版本。Entry、point-local ModuleLibrary 與 GUI／MCP 參數操作使用它。
-- [`entry/`](entry/README.md) 組合條目身分、setup 範本與獨立完整的 point。每個視圖綁自己的 DocumentStore，建立 point 時複製 seed。
+- [`document_store.py`](document_store.py) 提供 typed YAML 的記憶體快照、單檔樂觀交易與跨程序鎖。公開 `DocumentRevision(path, revision)` 記錄絕對路徑與已安裝原始 bytes 的 SHA-256。`DocumentStore` 與 `ModuleLibrary` 的 `document_revision` 屬性，以及 entry 的 `document_revision(view)` 函式都不重新讀檔。缺席 entry 或 point library 的 revision 為 None，讀取不建檔。提交或 refresh 成功才更新版本，失敗保留舊版本。Entry／point ModuleLibrary 與 GUI／MCP 參數操作使用它。
+- [`entry/`](entry/README.md) 組合條目身分、global 文件組與獨立完整的 point。每個視圖綁自己的 DocumentStore；新 point 預設繼承 global，也可明確建 empty 或 clone。
 - `upgrade_backup.py` 集中 parameter、predictor、record 與 spectrum 明確升級的備份定位。來源最近的 `result`／`Database` 所屬專案決定 `<專案根>-backup/`，鏡像相對路徑並加 UUID。CLI `--backup-root` 與 runner `backup_root` 可覆寫。解析後的根若直接含 `result`／`Database` 子目錄，名稱必須以 `-backup` 結尾；此名稱允許接續鏡像與遷移備份共處。未依此命名的空根首次產生鏡像後，後續 apply 會拒絕。Standalone 來源必須覆寫；資料樹內目的地、跳出鏡像根或導入另一資料樹的 symlink 在任何寫入前拒絕。它不依賴 migrations；操作規則見 [備份位置](../../../docs/parameter-upgrades.md#備份位置)。
 - `parameter_schema.py` 擁有 caller 注入的 `ParameterSchemaPolicy`。`parameter_upgrade.py` 提供具名文件、線性純函式升級鏈與 `main(argv, *, plan)`，預設 dry-run。Component CLI 接受檔案或 entry 目錄，目錄的 component 文件與 predictor JSON 由 entry owner 列舉。Predictor 檔案走獨立的 v1→v2 owner，不使用 component schema plan。Policy 的版本錯誤列出 Preview 與含 `--apply` 的 Apply 指令，目標由 caller 傳入，預設是來源檔。Lib 只讀版本、驗證連續性與管理單檔備份／replace，不知道 lab 欄位。完整舊格式分類、逐版本驗證與步驟由 caller 提供，未標版只在明確 upgrade 且分類成功後視為 v1。Runtime 讀取從不改檔。`UpgradePlan.notes` 列出整體操作警告；每份 `ParameterDocument.notes` 隨轉換傳到 `UpgradeResult.notes`，CLI 在該檔結果下呈現。Notes 不寫入 YAML，runner 不解析 caller 的欄位或診斷內容。
 
@@ -69,8 +69,8 @@ Load 讀 caller 指定的 exact path，缺檔與格式錯誤直接拋出。Save 
 
 各 owner 各自管理 scope、schema、commit 與失敗政策：
 
-- `ResultEntry` 只以 Result 構成條目，Database root 只設定輸出位置。Create／open 不檢查或建立 Database，首次 Save 才建立所需目錄。Rename 只移動 Result，舊 Database 輸出不動。Setup 是範本，point 是獨立的完整參數文件；ModuleLibrary 與 point 同目錄。
-- `ModuleLibrary` 綁定一個 point 的 module 與 waveform 文件。參數與 point 身分由 `entry/` 管理。
+- `ResultEntry` 只以 Result 構成條目，Database root 只設定輸出位置。Create／open 不檢查或建立 Database，首次 Save 才建立所需目錄。Rename 只移動 Result，舊 Database 輸出不動。Entry 與 point 各有 parameters、library、aliases 文件組，point 不逐名稱回退 entry。Entry 組同時供 global 工作與新 point 繼承；ModuleLibrary 可綁任一層。缺 library 或 aliases 都當空、revision 為 None，讀取不建檔；缺參數文件仍是錯誤。
+- `ModuleLibrary` 綁定 entry 或 point 的 module 與 waveform 文件。參數與 point 身分由 `entry/` 管理。
 - `QubitParams` 擁有 result scope 層級的 `params.json`，跨多個 point 共用。
 - `ResultEntry.records(component)` 綁定元件 JSONL 樣本歷史。v2 座標協定保持 opt-in。
 - `ArbWaveformDatabase` 是 qubit-scoped 的 asset repository，與 context 分開。

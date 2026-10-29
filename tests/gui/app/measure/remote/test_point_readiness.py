@@ -7,7 +7,7 @@ from qtpy.QtWidgets import QLabel, QPushButton
 from zcu_tools.gui.app.measure.adapter import ParameterWriteback
 from zcu_tools.gui.app.measure.catalog import ExperimentAccess
 from zcu_tools.gui.app.measure.registry import Registry
-from zcu_tools.gui.app.measure.services.guard import GuardService
+from zcu_tools.gui.app.measure.services.guard import GuardService, TabAction
 from zcu_tools.gui.app.measure.services.pane_commit import commit_analysis
 from zcu_tools.gui.app.measure.services.tab import TabService
 from zcu_tools.gui.app.measure.services.tab_control import TabControlFacet
@@ -19,8 +19,9 @@ from zcu_tools.gui.app.measure.writeback import WritebackControlFacet, Writeback
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.remote.errors import ErrorCode
-from zcu_tools.gui.session.context_types import EntryRequest
+from zcu_tools.gui.session.context_types import EntryRequest, SavedEntry
 from zcu_tools.gui.session.parameters import ParameterContext
+from zcu_tools.gui.session.types import ContextReadiness
 from zcu_tools.gui.session.ui.component_tree import ComponentTreeWidget
 from zcu_tools.resources.entry import ResultEntry
 
@@ -42,15 +43,15 @@ def entry_resource(application: PointApplication) -> ResultEntry:
 
 
 @pytest.mark.parametrize("command", ["new", "open"])
-def test_entry_commands_require_explicit_point_before_application_and_wire_reads(
+def test_entry_commands_activate_global_for_application_and_wire_reads(
     application: PointApplication, command: str
 ) -> None:
     if command == "open":
         application.open_entry()
         application.result("point.new", {"label": "existing"})
     application.result(f"entry.{command}", {"name": "entry"})
-    assert application.state.session_env.parameters is None
-    assert application.state.session_env.active_label == ""
+    assert application.state.session_env.readiness is ContextReadiness.GLOBAL
+    assert application.state.session_env.active_label is None
     assert application.controller.context_control.get_entry_info() is not None
     labels = application.result("point.list", {})["points"]
     assert labels == (
@@ -61,24 +62,21 @@ def test_entry_commands_require_explicit_point_before_application_and_wire_reads
         ]
     )
     control = application.controller.context_control
-    with pytest.raises(FailedPreconditionError) as caught:
-        control.read_context()
-    assert caught.value.reason_code == "no_context"
-    with pytest.raises(FailedPreconditionError) as caught:
-        control.add_component("Q1", "fake/drive/a", {})
-    assert caught.value.reason_code == "no_context"
-    error = application.rpc("context.snapshot", {})["error"]
-    assert isinstance(error, dict)
-    assert error["code"] == ErrorCode.PRECONDITION_FAILED
-    assert error["reason"] == "no_context"
+    assert control.read_context().target == SavedEntry(entry_name="entry")
+    control.add_component("Q1", "fake/drive/a", {})
+    snapshot = application.result("context.snapshot", {})
+    assert snapshot["target"] == SavedEntry(entry_name="entry").model_dump()
+    assert control.read_context().component("Q1").kind == "fake/drive/a"
     tab_id = application.controller.tab_control.new_tab("pointed")
     with pytest.raises(FailedPreconditionError) as caught:
         application.controller.run_analyze_control.start_run(tab_id)
-    assert caught.value.reason_code == "no_active_context"
+    # Global satisfies context admission; the independent SoC prerequisite remains.
+    assert caught.value.reason_code == "no_soc"
     reply = application.rpc("tab.run_start", {"tab_id": tab_id})
     assert reply["ok"] is False
     assert isinstance(reply["error"], dict)
     assert reply["error"]["code"] == ErrorCode.PRECONDITION_FAILED
+    assert reply["error"]["reason"] == "no_soc"
     application.result(
         "point.new" if command == "new" else "point.use",
         {"label": "selected" if command == "new" else "existing"},
@@ -91,7 +89,7 @@ def test_entry_commands_require_explicit_point_before_application_and_wire_reads
     )
 
 
-def test_unselected_point_disables_run_writeback_and_inspect_with_next_step(
+def test_global_allows_writeback_and_inspect_while_empty_requires_entry(
     application: PointApplication, qapp
 ) -> None:
     application.open_entry()
@@ -122,20 +120,32 @@ def test_unselected_point_disables_run_writeback_and_inspect_with_next_step(
         assert run.toolTip().strip()
         tab = window.findChild(ExpTabWidget)
         assert tab is not None
+        guard = GuardService(application.state, access=ExperimentAccess())
+        assert guard.admit(tab_id, TabAction.WRITEBACK).allowed
+        # No draft is installed, independently of destination readiness.
         assert not tab.writeback_widget.isEnabled()
-        assert tab.writeback_widget.toolTip().strip()
-        # Without a point the tree shows the owner's next step as a hint.
+        # Global has active parameters even without a point.
         hint = editor.findChild(QLabel, "component_hint")
         assert hint is not None
-        assert not hint.isHidden()
-        assert hint.text().strip()
+        assert hint.isHidden()
         add = next(
             button
             for button in editor.findChildren(QPushButton)
             if button.text().startswith("Add component")
         )
+        assert add.isEnabled()
+        assert editor.edit_parameter("general.ext.flux_value", 1.0)
+        application.controller.session_services.context.clear_context()
+        editor.refresh()
+        assert guard.admit(tab_id, TabAction.WRITEBACK).reason == "no_context"
+        assert not tab.writeback_widget.isEnabled()
+        assert tab.writeback_widget.toolTip().strip()
+        assert not run.isEnabled()
+        assert not hint.isHidden()
+        assert hint.text().strip()
         assert not add.isEnabled()
         assert not editor.edit_parameter("general.ext.flux_value", 1.0)
+        application.controller.setup_control.open_entry(EntryRequest("entry"))
         application.result("point.new", {"label": "selected"})
         editor.refresh()
         assert add.isEnabled()
@@ -147,7 +157,7 @@ def test_unselected_point_disables_run_writeback_and_inspect_with_next_step(
 
 
 @pytest.mark.parametrize("frontend", ["application", "wire"])
-def test_writeback_requires_selection_after_reopen_then_uses_selected_destination(
+def test_writeback_uses_global_after_reopen_then_current_selected_destination(
     application: PointApplication, frontend: str
 ) -> None:
     application.open_entry()
@@ -181,13 +191,12 @@ def test_writeback_requires_selection_after_reopen_then_uses_selected_destinatio
             writeback_draft=draft,
         ),
     )
+
     application.controller.setup_control.open_entry(EntryRequest("entry"))
     before = entry_resource(application).ledger.events()
     try:
         if frontend == "application":
-            with pytest.raises(FailedPreconditionError) as caught:
-                facet.apply_writeback_for_pane(tab_id, "analysis")
-            assert caught.value.reason_code == "no_context"
+            facet.apply_writeback_for_pane(tab_id, "analysis")
         else:
             reply = application.rpc(
                 "tab.writeback_write",
@@ -200,12 +209,11 @@ def test_writeback_requires_selection_after_reopen_then_uses_selected_destinatio
                     "write": [{"id": "param-1"}],
                 },
             )
-            assert reply["ok"] is False
-            error = reply["error"]
-            assert isinstance(error, dict)
-            assert error["code"] == ErrorCode.PRECONDITION_FAILED
-        assert entry_resource(application).ledger.events() == before
-        application.result("point.new", {"label": "b"})
+            assert reply["ok"] is True, reply
+        assert control.read_context().target == SavedEntry(entry_name="entry")
+        assert control.read_context().value("general.ext.flux_value") == 2.0
+        assert len(entry_resource(application).ledger.events()) == len(before) + 1
+        application.result("point.new", {"label": "b", "mode": "empty"})
         facet.apply_writeback_for_pane(tab_id, "analysis")
         assert (
             not control.read_target(require_target(captured))
@@ -215,7 +223,7 @@ def test_writeback_requires_selection_after_reopen_then_uses_selected_destinatio
         selected = control.read_context()
         assert selected.value("general.ext.flux_value") == 2.0
         assert require_target(selected).point == "b"
-        assert len(entry_resource(application).ledger.events()) == len(before) + 1
+        assert len(entry_resource(application).ledger.events()) == len(before) + 2
         application.controller.setup_control.new_entry(EntryRequest("other"))
         application.result("point.new", {"label": "c"})
         facet.apply_writeback_for_pane(tab_id, "analysis")
@@ -225,6 +233,42 @@ def test_writeback_requires_selection_after_reopen_then_uses_selected_destinatio
     finally:
         service.teardown_draft(draft)
         application.state.get_tab(tab_id).analysis.writeback_draft = None
+
+
+@pytest.mark.parametrize("frontend", ["application", "wire"])
+def test_writeback_without_entry_rejects_before_appending_ledger(
+    application: PointApplication,
+    parameter_writeback_pane: tuple[str, ParameterContext],
+    frontend: str,
+) -> None:
+    tab_id, _ = parameter_writeback_pane
+    entry = entry_resource(application)
+    before = entry.ledger.events()
+    application.controller.session_services.context.clear_context()
+    if frontend == "application":
+        with pytest.raises(FailedPreconditionError) as caught:
+            application.remote.writeback_control.apply_writeback_for_pane(
+                tab_id, "analysis"
+            )
+        assert caught.value.reason_code == "no_context"
+    else:
+        reply = application.rpc(
+            "tab.writeback_write",
+            {
+                "tab_id": tab_id,
+                "subtab_id": "analysis",
+                "submission_id": application.result(
+                    "tab.writeback_begin", {"tab_id": tab_id}
+                )["submission_id"],
+                "write": [{"id": "param-1"}],
+            },
+        )
+        assert reply["ok"] is False
+        error = reply["error"]
+        assert isinstance(error, dict)
+        assert error["code"] == ErrorCode.PRECONDITION_FAILED
+        assert error["reason"] == "no_context"
+    assert entry.ledger.events() == before
 
 
 @pytest.fixture

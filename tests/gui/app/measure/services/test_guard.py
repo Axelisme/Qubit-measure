@@ -64,7 +64,7 @@ def _make_state(
     state = State(
         SessionEnv(
             parameters=parameter_capture()
-            if readiness is ContextReadiness.ACTIVE
+            if readiness is not ContextReadiness.EMPTY
             else None,
             soc=soc,
             soccfg=soccfg,
@@ -92,6 +92,12 @@ def _make_state(
     return state, tab_id
 
 
+def test_global_context_is_file_backed_for_run_admission() -> None:
+    state, tab_id = _make_state(readiness=ContextReadiness.POINT)
+    state.set_context(replace(state.session_env, readiness=ContextReadiness.GLOBAL))
+    assert _make_guard(state).admit(tab_id, guard_api.TabAction.RUN).allowed
+
+
 def test_run_admission_orders_readiness_cfg_soc_and_busy() -> None:
     state, tab_id = _make_state(
         readiness=ContextReadiness.EMPTY, soc_attached=False, lowering_raises=True
@@ -100,7 +106,7 @@ def test_run_admission_orders_readiness_cfg_soc_and_busy() -> None:
     guard = _make_guard(state)
     decision = guard.admit(tab_id, guard_api.TabAction.RUN)
     assert not decision.allowed and decision.reason == "no_active_context"
-    state.set_context(replace(state.session_env, readiness=ContextReadiness.ACTIVE))
+    state.set_context(replace(state.session_env, readiness=ContextReadiness.POINT))
     decision = guard.admit(tab_id, guard_api.TabAction.RUN)
     assert not decision.allowed and decision.reason == "not_valid"
     assert decision.message.startswith("gain: ")
@@ -240,7 +246,7 @@ def test_load_admission_requires_known_idle_tab_not_storage_or_context() -> None
 def test_capture_keeps_execution_time_notification_error_after_readonly_admission() -> (
     None
 ):
-    state, tab_id = _make_state(readiness=ContextReadiness.ACTIVE)
+    state, tab_id = _make_state(readiness=ContextReadiness.POINT)
     cfg = make_form(Form(GainCfg, {"gain": 0.25}), state=state)
     state.get_tab(tab_id).cfg = cfg
     guard = _make_guard(state)
@@ -260,7 +266,7 @@ def test_capture_keeps_execution_time_notification_error_after_readonly_admissio
 
 def test_run_inputs_issued_for_active_valid_cfg():
     adapter = MagicMock()
-    state, tab_id = _make_state(readiness=ContextReadiness.ACTIVE, adapter=adapter)
+    state, tab_id = _make_state(readiness=ContextReadiness.POINT, adapter=adapter)
     guard = _make_guard(state)
 
     inputs = guard.capture_run_inputs(tab_id)
@@ -276,7 +282,7 @@ def test_run_inputs_issued_for_active_valid_cfg():
 
 
 def test_run_inputs_freezes_published_expression_and_provenance() -> None:
-    state, tab_id = _make_state(readiness=ContextReadiness.ACTIVE)
+    state, tab_id = _make_state(readiness=ContextReadiness.POINT)
     state.set_context(
         replace(state.session_env, parameters=parameter_capture(gain=0.25))
     )
@@ -296,7 +302,7 @@ def test_run_inputs_freezes_published_expression_and_provenance() -> None:
 
 def test_run_inputs_rejects_invalid_expression() -> None:
     adapter = MagicMock()
-    state, tab_id = _make_state(readiness=ContextReadiness.ACTIVE, adapter=adapter)
+    state, tab_id = _make_state(readiness=ContextReadiness.POINT, adapter=adapter)
     cfg = make_form(
         Form(GainCfg, {"gain": Expr("general.ext.missing_gain")}), state=state
     )
@@ -309,7 +315,7 @@ def test_run_inputs_rejects_invalid_expression() -> None:
 
 
 def test_run_inputs_detaches_reference_shape_and_values() -> None:
-    state, tab_id = _make_state(readiness=ContextReadiness.ACTIVE)
+    state, tab_id = _make_state(readiness=ContextReadiness.POINT)
     cfg = make_form(Form(ModuleAdmissionCfg, {}), state=state)
     state.get_tab(tab_id).cfg = cfg
     cfg.write(
@@ -352,7 +358,7 @@ def test_run_inputs_admits_live_devices_without_valid_cached_settings(
     status: DeviceStatus,
     cached: Literal["missing", "invalid"],
 ) -> None:
-    state, tab_id = _make_state(readiness=ContextReadiness.ACTIVE)
+    state, tab_id = _make_state(readiness=ContextReadiness.POINT)
     info = (
         None
         if cached == "missing"
@@ -395,7 +401,7 @@ def test_run_inputs_rejected_when_not_active(readiness: ContextReadiness):
 def test_run_inputs_rejected_on_invalid_cfg():
     adapter = MagicMock()
     state, tab_id = _make_state(
-        readiness=ContextReadiness.ACTIVE, lowering_raises=True, adapter=adapter
+        readiness=ContextReadiness.POINT, lowering_raises=True, adapter=adapter
     )
     guard = _make_guard(state)
 
@@ -407,7 +413,7 @@ def test_run_inputs_rejected_on_invalid_cfg():
 def test_run_inputs_rejected_when_soc_required_but_missing():
     adapter = MagicMock()
     state, tab_id = _make_state(
-        readiness=ContextReadiness.ACTIVE,
+        readiness=ContextReadiness.POINT,
         soc_attached=False,
         adapter=adapter,
     )
@@ -418,7 +424,7 @@ def test_run_inputs_rejected_when_soc_required_but_missing():
 
 
 def test_run_inputs_rejected_for_unknown_tab():
-    state, _ = _make_state(readiness=ContextReadiness.ACTIVE)
+    state, _ = _make_state(readiness=ContextReadiness.POINT)
     guard = _make_guard(state)
 
     with pytest.raises(GuardError, match="Unknown tab"):
@@ -466,7 +472,7 @@ def test_check_analyze_issued_without_live_context_dependency_and_result(
 
 
 def test_check_analyze_rejected_without_run_result():
-    state, tab_id = _make_state(readiness=ContextReadiness.ACTIVE, run_result=None)
+    state, tab_id = _make_state(readiness=ContextReadiness.POINT, run_result=None)
     guard = _make_guard(state)
 
     with pytest.raises(GuardError, match="No run result"):
@@ -474,12 +480,12 @@ def test_check_analyze_rejected_without_run_result():
 
 
 # ---------------------------------------------------------------------------
-# Writeback check (requires a selected point)
+# Writeback check (requires an opened entry's document set)
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize("readiness", list(ContextReadiness))
-def test_check_writeback_requires_selected_point_and_analyze(
+def test_check_writeback_requires_document_set_and_analyze(
     readiness: ContextReadiness,
 ):
     state, tab_id = _make_state(readiness=readiness)
@@ -494,7 +500,7 @@ def test_check_writeback_requires_selected_point_and_analyze(
 
 
 def test_check_writeback_rejected_without_analyze_result():
-    state, tab_id = _make_state(readiness=ContextReadiness.ACTIVE, analyze_result=None)
+    state, tab_id = _make_state(readiness=ContextReadiness.POINT, analyze_result=None)
     guard = _make_guard(state)
 
     with pytest.raises(GuardError, match="No analyze result"):
@@ -505,7 +511,7 @@ def test_check_writeback_rejected_without_analyze_result():
     "operation", ["check_load", "check_analyze", "check_writeback"]
 )
 def test_check_rejects_unknown_tab_with_original_reason(operation: str) -> None:
-    state, _ = _make_state(readiness=ContextReadiness.ACTIVE)
+    state, _ = _make_state(readiness=ContextReadiness.POINT)
     guard = _make_guard(state)
     with pytest.raises(GuardError) as caught:
         getattr(guard, operation)("unknown")

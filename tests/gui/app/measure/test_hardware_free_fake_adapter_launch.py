@@ -112,7 +112,7 @@ def hw_fixture(qapp, tmp_path):
             "ext": {"time_of_fly": 0.5},
         },
     )
-    ctrl.context_control.set_alias_rows((AliasRow("resonator", "R1"),))
+    ctrl.context_control.apply_alias_rows((AliasRow("resonator", "R1"),))
     window.show()
     qapp.processEvents()
     try:

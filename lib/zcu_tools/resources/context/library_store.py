@@ -1,4 +1,4 @@
-"""Library disk admission shared by handles and point cloning, without writes."""
+"""Library disk admission, explicit empty initialization and point cloning."""
 
 from copy import copy, deepcopy
 from pathlib import Path
@@ -71,6 +71,27 @@ def _read_document(document: YamlMap, version: FormatVersion) -> YamlMap:
                 raw_partitions[partition] = entries
     document["invalid_entries"] = invalid
     return document
+
+
+def create_empty_library(path: Path) -> None:
+    """Create an empty 2.0 library in a caller-owned unpublished directory.
+
+    The parent must exist. This explicit initialization is separate from
+    read/empty-edit, which never create a missing library. Existing destinations
+    raise FileExistsError without changing bytes, including nonempty libraries.
+    No source, aliases or parameters are read or modified. Serialization or I/O
+    failures propagate and remove only the file created by this call. Callers
+    publish the enclosing directory after initialization; no multi-file or
+    concurrent-reader transaction is provided.
+    """
+    document = ModuleLibraryDocument(format=MODULE_LIBRARY_FORMAT, format_version="2.0")
+    stream = path.open("x", encoding="utf-8")
+    try:
+        with stream:
+            YAML(typ="rt").dump(document.model_dump(mode="python"), stream)
+    except BaseException:
+        path.unlink()
+        raise
 
 
 def copy_library(source: Path, destination: Path) -> None:

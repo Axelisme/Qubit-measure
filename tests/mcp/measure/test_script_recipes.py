@@ -192,8 +192,19 @@ def test_invalid_inputs_fail_before_binding_gui(tmp_path: Path) -> None:
         client.context.session.close()
 
 
-def test_writeback_question_validates_before_accept_and_save(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    "entry_name,point", [("entry", "point"), ("entry", None), (None, None)]
+)
+def test_writeback_question_validates_before_accept_and_save(
+    tmp_path: Path, entry_name: str | None, point: str | None
+) -> None:
     gui = SyntheticGui()
+
+    def respond(method: str, params: dict[str, object]) -> dict[str, object]:
+        reply = gui.respond(method, params)
+        if method == "tab.writeback_preview":
+            reply["destination_context"] = {"entry_name": entry_name, "point": point}
+        return reply
 
     @recipe("synthetic", "Ask before writing")
     async def synthetic(session: RecipeSession, inputs: Inputs) -> Report:
@@ -206,14 +217,16 @@ def test_writeback_question_validates_before_accept_and_save(tmp_path: Path) -> 
             receipt = tab.accept_writeback(decision.items)
             assert receipt.status == "completed"
             assert receipt.items[0].destination.path == "Q1.freq"
-            assert receipt.items[0].destination.label == "preview-context"
+            assert receipt.items[0].destination.entry_name == entry_name
+            assert receipt.items[0].destination.point == point
         tab.save()
         return Report(count=inputs.count)
 
-    client = make_client(tmp_path, gui.respond, recipes=(synthetic,))
+    client = make_client(tmp_path, respond, recipes=(synthetic,))
     try:
         execution = start(client, "synthetic")
         execution.wait(3)
+        assert execution.snapshot().error is None
         pending = execution.snapshot().pending_question
         assert pending is not None
         question = pending.question
@@ -864,7 +877,7 @@ def test_mapping_writeback_round_trips_without_guessing_or_mutating_owner_values
                         "proposed": proposed,
                     }
                 ],
-                "destination_context": {"active_label": "current"},
+                "destination_context": {"entry_name": "entry", "point": "current"},
             }
         return gui.respond(method, params)
 

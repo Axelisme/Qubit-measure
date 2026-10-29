@@ -11,6 +11,23 @@ from zcu_tools.resources.entry import ResultEntry
 from ._point_application import PointApplication
 
 
+def _global_files(root: Path) -> list[dict[str, object]]:
+    return [
+        {
+            "document": document,
+            "path": str(root / name),
+            "revision": sha256((root / name).read_bytes()).hexdigest()
+            if (root / name).exists()
+            else None,
+        }
+        for document, name in (
+            ("parameters", "parameters.yaml"),
+            ("library", "library.yaml"),
+            ("aliases", "aliases.yaml"),
+        )
+    ]
+
+
 def test_empty_entry_queries_and_explicit_new_leave_point_unselected(
     application: PointApplication, tmp_path: Path
 ) -> None:
@@ -25,10 +42,13 @@ def test_empty_entry_queries_and_explicit_new_leave_point_unselected(
         "result_path": str(tmp_path / "result" / "cooldown-A"),
         "database_path": str(tmp_path / "Database" / "cooldown-A"),
     }
-    assert application.result("entry.info", {}) == {"entry": reply, "files": []}
+    assert application.result("entry.info", {}) == {
+        "entry": reply,
+        "files": _global_files(Path(str(reply["result_path"]))),
+    }
     assert application.result("entry.list", {}) == {"entries": ["cooldown-A"]}
-    assert application.state.session_env.readiness == ContextReadiness.EMPTY
-    assert application.state.session_env.parameters is None
+    assert application.state.session_env.readiness == ContextReadiness.GLOBAL
+    assert application.state.session_env.parameters is not None
     assert application.result("point.list", {}) == {"entry": reply, "points": []}
     assert application.state.session_env.soc is None
     assert application.state.session_env.soccfg is None
@@ -71,19 +91,21 @@ def test_open_existing_entry_clears_point_and_new_point_uses_current_entry(
     }
     opened = application.result("entry.open", {"name": "arbitrary-name"})
     assert opened["name"] == second.result_path.name
-    assert application.state.session_env.readiness == ContextReadiness.EMPTY
-    assert application.state.session_env.parameters is None
+    assert application.state.session_env.readiness == ContextReadiness.GLOBAL
+    assert application.state.session_env.parameters is not None
     selected = application.result("point.use", {"label": "existing"})
     assert selected == {
-        "kind": "saved_point",
         "entry_name": second.result_path.name,
         "point": "existing",
     }
     created = application.result("point.new", {"label": "next"})
     assert created["entry_name"] == second.result_path.name
     application.result("entry.open", {"name": "first"})
-    assert application.result("entry.info", {}) == {"entry": first, "files": []}
-    assert application.state.session_env.readiness == ContextReadiness.EMPTY
+    assert application.result("entry.info", {}) == {
+        "entry": first,
+        "files": _global_files(Path(str(first["result_path"]))),
+    }
+    assert application.state.session_env.readiness == ContextReadiness.GLOBAL
     assert application.result("point.list", {})["points"] == [
         {"label": "bias", "description": "", "available": True, "error": None}
     ]
@@ -112,7 +134,7 @@ def test_rejected_entry_request_preserves_selected_point(
     assert rejected["ok"] is False, rejected
     assert application.result("entry.info", {}) == info
     assert application.controller.context_control.read_context().target == before.target
-    assert application.state.session_env.readiness == ContextReadiness.ACTIVE
+    assert application.state.session_env.readiness == ContextReadiness.POINT
     assert application.result("entry.list", {}) == {"entries": ["first"]}
 
 
@@ -140,7 +162,7 @@ def test_new_install_failure_keeps_created_entry_for_open_recovery(
     monkeypatch.setattr(ContextService, "install_entry", original)
     opened = application.result("entry.open", {"name": "retained"})
     assert opened["name"] == retained.result_path.name
-    assert application.state.session_env.readiness == ContextReadiness.EMPTY
+    assert application.state.session_env.readiness == ContextReadiness.GLOBAL
 
 
 def test_discovery_io_error_is_not_reported_as_cached_success(
@@ -159,4 +181,7 @@ def test_discovery_io_error_is_not_reported_as_cached_success(
     assert isinstance(error, dict)
     assert error["code"] == "controller_error"
     assert error["message"] == "entry discovery unavailable"
-    assert application.result("entry.info", {}) == {"entry": opened, "files": []}
+    assert application.result("entry.info", {}) == {
+        "entry": opened,
+        "files": _global_files(Path(str(opened["result_path"]))),
+    }

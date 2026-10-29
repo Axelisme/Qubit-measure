@@ -42,7 +42,7 @@ def test_project_context_preserves_injected_value_lookup(tmp_path) -> None:
         )
     )
     assert state.session_env.values is registry
-    assert state.session_env.readiness is ContextReadiness.EMPTY
+    assert state.session_env.readiness is ContextReadiness.GLOBAL
 
 
 def test_use_context_preserves_lookup_when_io_returns_fresh_context(tmp_path) -> None:
@@ -59,7 +59,7 @@ def test_use_context_preserves_lookup_when_io_returns_fresh_context(tmp_path) ->
     svc.use_point(PointUseRequest("flux_0.0_A"))
     assert state.session_env.values is registry
     assert state.session_env.active_label == "flux_0.0_A"
-    assert state.session_env.readiness is ContextReadiness.ACTIVE
+    assert state.session_env.readiness is ContextReadiness.POINT
 
 
 def test_new_context_preserves_lookup_when_io_returns_fresh_context(tmp_path) -> None:
@@ -76,11 +76,13 @@ def test_new_context_preserves_lookup_when_io_returns_fresh_context(tmp_path) ->
     value, unit = 1.0, "V"
     label = f"flux_{value}_{unit}"
     svc.new_point(
-        PointCreateRequest(label, "", CommandOrigin("gui"), clone_from="base")
+        PointCreateRequest(
+            label, "", CommandOrigin("gui"), clone_from="base", mode="clone"
+        )
     )
     assert state.session_env.values is registry
     assert state.session_env.active_label == "flux_1.0_V"
-    assert state.session_env.readiness is ContextReadiness.ACTIVE
+    assert state.session_env.readiness is ContextReadiness.POINT
 
 
 def test_context_service_lists_and_reads_value_sources() -> None:

@@ -82,7 +82,7 @@ def test_create_edit_seed_and_clone_use_caller_schema_version(
         )
         created.setup.add_component("S1", kind="fake/sensor")
         created.new_point("seed")
-        created.new_point("clone", clone_from="seed")
+        created.new_point("clone", mode="clone", clone_from="seed")
         for path in (
             created.result_path / "parameters.yaml",
             *created.result_path.glob("points/*/parameters.yaml"),

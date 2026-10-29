@@ -84,9 +84,8 @@ if TYPE_CHECKING:
 
     from zcu_tools.device.base import BaseDevice, BaseDeviceInfo
     from zcu_tools.experiment.artifacts import SaveReport
-    from zcu_tools.gui.session.adapters.point_file_watcher import PointFileWatcher
+    from zcu_tools.gui.session.adapters.file_watcher import FileWatcher
     from zcu_tools.gui.session.adapters.qt_shutdown_driver import QtShutdownDriver
-    from zcu_tools.gui.session.alias_presets import AliasPresets
     from zcu_tools.gui.session.arb_waveform import ArbWaveformPort
     from zcu_tools.gui.session.context_control import ContextControlPort
     from zcu_tools.gui.session.device_control import DeviceControlPort
@@ -308,7 +307,6 @@ class Controller:
         catalog_loader: ExperimentCatalogLoader | None = None,
         owner_scheduler: OwnerScheduler | None = None,
         *,
-        alias_presets: AliasPresets | None = None,
         device_registry: DeviceRegistryPort | None = None,
         driver_factory: DriverFactoryPort | None = None,
     ) -> None:
@@ -318,17 +316,8 @@ class Controller:
         factory. Tests may inject a hardware-free constructor. device_registry
         supplies registered drivers, which close_hardware eventually closes.
 
-        ``alias_presets`` maps names to ordered caller-owned alias rows. None
-        or omission means no catalog and an empty initial table. A supplied
-        mapping must contain "default" (possibly empty), or raise ValueError.
-        Invalid table syntax raises InvalidInputError. Default rows initialize
-        entries without saved aliases; saved tables, including empty ones, win.
-        Softlinks and empty bindings stay authored. The session
-        uses the role registry's unique focus candidate once for the primary
-        empty row on the first nonempty component snapshot; later point changes
-        do not reset rows. Explicit table edits disable that initialization.
-        Invalid syntax, duplicates or forward links raise
-        InvalidInputError(alias_invalid). No device or cache is used to bind rows.
+        Aliases are file-backed. Startup scripts open an entry, then call
+        ctx.context.apply_alias_rows to initialize the active table explicitly.
         """
         self.control_identity = ControlIdentity()
         self._state = state
@@ -379,7 +368,6 @@ class Controller:
             owner_scheduler=owner_scheduler,
             project_root=self._project_root,
             catalog_loader=catalog_loader,
-            alias_presets=alias_presets,
             device_registry=device_registry,
             driver_factory=driver_factory,
         )
@@ -392,8 +380,8 @@ class Controller:
         # without a Qt event loop (tests construct a bare Controller). The driver
         # is a Qt adapter owning the QTimer that pumps the Qt-free coordinator.
         self._shutdown_driver: QtShutdownDriver | None = None
-        self._point_file_watcher: PointFileWatcher | None = None
-        self._stop_point_authority_watch: Callable[[], None] | None = None
+        self._file_watcher: FileWatcher | None = None
+        self._stop_file_authority_watch: Callable[[], None] | None = None
         self._hardware_close_attempted = False
         bus.subscribe(RunFinishedPayload, self._on_run_finished)
         bus.subscribe(TabInteractionChangedPayload, self._on_tab_interaction_changed)
@@ -804,32 +792,32 @@ class Controller:
         decide whether to discard data, disconnect devices, or establish RF safety;
         use begin_shutdown for operation cancellation before final teardown.
         """
-        if self._stop_point_authority_watch is not None:
-            self._stop_point_authority_watch()
-            self._stop_point_authority_watch = None
-        if self._point_file_watcher is not None:
-            self._point_file_watcher.close()
+        if self._stop_file_authority_watch is not None:
+            self._stop_file_authority_watch()
+            self._stop_file_authority_watch = None
+        if self._file_watcher is not None:
+            self._file_watcher.close()
         self._background_svc.stop_accepting()
         if not self._background_svc.quiesce(timeout_ms):
             raise TimeoutError("Controller background work did not drain in time")
 
-    def start_point_file_sync(self) -> None:
-        """Attach point watching once after Qt assembly; close owns its teardown.
+    def start_file_sync(self) -> None:
+        """Attach installed-file watching once after Qt assembly; close owns its teardown.
 
         Remote holder admits automatic reload; Local only publishes pending
         observations. Authority changes retry pending files on the owner loop.
         """
-        if self._point_file_watcher is not None:
+        if self._file_watcher is not None:
             return
-        from zcu_tools.gui.session.adapters.point_file_watcher import PointFileWatcher
+        from zcu_tools.gui.session.adapters.file_watcher import FileWatcher
 
-        watcher = PointFileWatcher(
+        watcher = FileWatcher(
             self._ctx_svc,
             self._bus,
             admit_reload=lambda: self.control_identity.status().holder != "gui",
         )
-        self._point_file_watcher = watcher
-        self._stop_point_authority_watch = self.control_identity.watch(
+        self._file_watcher = watcher
+        self._stop_file_authority_watch = self.control_identity.watch(
             lambda _status: watcher.flush()
         )
 

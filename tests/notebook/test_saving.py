@@ -566,7 +566,7 @@ def test_save_run_rejects_cross_point_roles_before_outputs_and_events(
         result_root=tmp_path / "results",
         database_root=tmp_path / "Database",
     )
-    other_point = entry.new_point("other", clone_from=accept_point)
+    other_point = entry.new_point("other", mode="clone", clone_from=accept_point)
     roles = other_point.resolve(("notebook_target",), notebook_target="D2")
     assert roles.components == {"notebook_target": "D2"}
     exp = experiment()

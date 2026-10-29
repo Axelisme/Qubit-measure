@@ -167,3 +167,112 @@ tProc v2 的時間可以是指令內的字面值，或先放進暫存器。掃�
 ### 仍待處理
 
 `wait_auto`／`resync` 對具名 timeline 的語意、多 readout 或 readout 窗口長於 pulse 時 post-delay 的基準、巢狀 tag、同一 instance 多次發射（heralding 的 `occurrence`）、QICK 版本耦合，以及 Repeat、Branch、LoadValue、TableLengthPulse 等的轉換，留給實作 spec。
+
+## 後記五（2026-10-29 晚，A 階段細節與 builder 重新設計）
+
+### A 階段的前置決定
+
+- 新基底直接繼承 QICK 的 program，dmem 緩衝與 route 保護改為新舊共用；可以覆寫 QICK 方法，以可維護為準（使用者：「可以適當的重寫qick方法，只要夠好維護」）。
+- reps 與 shot body 的辨識：覆寫 `make_program`，照 QICK 的順序執行，在初始化結束、body 開始、body 結束插入不產生指令的邊界標記，迴圈結構讀 `self.loops`；模擬器只解讀兩個標記之間，外殼的 `final_wait`／`final_delay` 等只驗型別。
+- body 內在具名 timeline 上不支援 `wait_auto`／`resync`（第一版報錯）；`make_program` 外殼的 `final_wait` 不受限。
+- program 層的控制結構用 `with`：`with self.join() as j: with j.branch(): ...`、`with self.repeat(...)`、`with self.branch(by=...) as b: with b.case(): ...`；dmem 表在 `_initialize` 宣告、body 使用（使用者：「A可以，示意寫法沒問題」）。
+- retry、early stop、進度屬於 builder 的功能，自己寫 program 的作者自行實作（使用者：「retry/early_stop等可以算是builder提供的功能，想自己寫program的作者要自己實現對應功能」）。
+
+### builder 重新設計
+
+使用者：「我覺得新原生寫法的可讀性比目前builder的寫法好，對於包裝的工具來說這是很尷尬的，可以考慮重新設計」。現行 builder 做四件事：描述序列（`.add(...)`）、宣告掃描（`declare_sweep`）、執行取數（rounds、retry、early stop、進度、Stop、Schedule 整合）與隔離（deepcopy cfg）。
+
+討論過的方向：
+
+- builder 只當執行器、序列一律寫 program：使用者指出「Builder的優勢是不用init與body分開，以及inline的pulse sequence宣告」，不採。
+- 在 program 層 emit 時自動宣告：使用者「我覺得不太好，用program寫法就該接近原生的寫法」，不採。
+- 採用：「builder才該設計成一個with scope，內部是像body的寫法」。
+
+```python
+with sched.builder(soc, soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay) as b:
+    length = b.sweep("length", cfg.length)        # 範圍內任何位置宣告
+    b.emit(Reset("reset", cfg.reset))
+    b.emit(Pulse("pi_pulse", cfg.pi_pulse))
+    b.delay(length)
+    b.emit(Readout("readout", cfg.readout))
+# 離開 with：依記錄產生 program——宣告放 _initialize、掃描變成迴圈、發射依序放 _body
+
+data = b.acquire(rounds=cfg.rounds, retry=cfg.acquire_retry, stop=...)
+```
+
+使用者確認（「可以」）：program 層接近原生、不自動宣告；builder 是先記錄、離開範圍時才產生 program 的 `with` 範圍，錯誤在離開時報出；`acquire` 寫在範圍之後；builder 範圍內的方法與 program 層完全同名（含 `timeline=` 與 `join`／`repeat`／`branch`）；新 builder 與既有實驗的改寫排在模擬器改讀 macro 之後，逐一以 `prog_list` 比對遷移。
+
+## 後記六（2026-10-29 晚，A 階段實作中的修正與 timeline 模型）
+
+依據 repo@f93a2d859 與 QICK 0.2.436。A 階段實作的檢查結果與測試證據在未入庫的工作檔，必要事實寫在本節。
+
+### module 身分與作者入口
+
+- module 是宣告物件。作者在 `_initialize` 建立 module 並用 `self.declare(module)` 宣告，在 `_body` 用 `self.emit(module, timeline=...)` 發射。每次發射產生一個新的 emission macro，時間與 tag 屬於那次發射，同一物件可以發射多次。module 物件本身不放進 macro 序列（使用者：「那用A好了，但代價應該就是會出現很多新macro與module」）。
+- 所有 module 共用一個通用 emission macro，各 module 提供自己的 lowering，類別數不會加倍。只有 preprocess 或 expand 行為真的不同時才另立 macro 類別。
+- 曾考慮讓 `declare` 直接收 cfg，作者不建 module 物件。現有 cfg 型別只涵蓋 Pulse、Readout、Reset 三族；`Pulse` 另有不在 cfg 裡的參數；`TableLengthPulse`、`LoadWord` 等需要長度表、index 暫存器等非 cfg 參數。所以沒有一致的 `declare(cfg)`。使用者：「A'的機制可能比較複雜，收益相比A比較小，除非有很一致且簡單的declare機制，否則還是顯式module好了」。
+- 新基底改為繼承現有的 `MyProgramV2`。第一版直接繼承 QICK 的 program，少了 IR 編譯管線、模擬取數與分類取數的擴充，同一段原生寫法編出的結果和現有 program 不同。constructor 沿用 `MyProgramV2` 的 `reps`、`initial_delay`、`relax_delay`。
+- module 的方法在 A 階段新舊並存，新路徑用 `declare` 與 `lower`。`init`、`run`、`block_mode` 在刪除舊路徑時移除。
+
+### 驗收基準改為預期行為
+
+後記四的第一步要求新路徑和現行 module 版逐位相同。實作時遇到三個反例：
+
+- Pulse 後接掃描的 Delay：新路徑每個 module 實際推進一次參考時間，多一條 `inc_ref`。舊路徑在 Python 層把 cursor 和掃描值相加，只有一條。
+- SoftDelay：舊路徑用兩個時間暫存器、25 條指令，新路徑用一個、23 條，時間相同。
+- Pulse 後接 DelayAuto：新路徑晚 1 個 cycle。舊路徑對 pulse 結束點有兩種算法：cursor 用 `total_length` 向上取整得 44，DelayAuto 卻忽略 cursor，改用 QICK timestamp 四捨五入得 43。後者讓間隔比作者要求的短約 56 ps。
+
+要在 IR 還原舊的暫存器排法，必須讀 QICK 標為內部用途的 sweep 資料，並在編譯期重建 cursor。使用者：「第一件選A，語意與行為一致就可以了，舊設計的怪癖不一定要對齊」「我沒有要求必須與舊的一致，我要求的是與預期行為一致」。
+
+定案：
+
+- 正式測試用新的 IR 時序計算器讀編譯結果，包括暫存器初值、迴圈步長、`inc_ref` 與時間欄位，逐掃描點檢查每個 pulse、trigger 的絕對 cycle 和 shot 結束點，是否等於照 timeline 規則手算的值。
+- 新舊比較改成一次性的遷移差異報告，每項差異標明是舊設計的怪癖還是新路徑的缺陷，缺陷要修。
+- 指令數和暫存器排法不是驗收項目。合併掃描推進的 IR 優化列為待辦。
+- 原生 `resync` 在硬體上讀當下時間再推進，編譯結果無法決定推進量。計算器遇到時報錯，不假設為零。
+- 規則 (b) 從最後一步提前到 B 階段，因為 B 本來就要改完所有 module 並移除 block。A 階段沿用 (a)，最後階段只刪舊路徑（使用者：「採用建議」）。
+
+### timeline 模型：不綁定參考時間，只存結尾
+
+使用者指出：「原生qick其實有timeline機制，只是其timeline固定綁定到channel, 且與ref_time是分開的，delay操作的是ref time，然後計算每個ch的timeline的等校尾端時間，而我們新設計的timeline，其實就是不綁定channel的原生timeline」。照這個角度，QICK 的參考時間本身不是一條時間線，後記三第 1 點「預設 timeline 就是參考時間」是我們額外加的。使用者補充「只要存當前結尾就好，不用存開始」，並選擇預設 timeline 不綁定參考時間。
+
+定案的模型取代後記三的第 1、2、4 點，以及後記四的「主流程用預設 timeline」：
+
+- 原生方法完全照 QICK。`delay`、`delay_auto`、`wait_auto`、`resync` 不接受 timeline 參數，只移動參考時間（使用者：「還是保留原生delay的行為，用delay_timelime來實現指定timeline的操作？」）。
+- 每條 timeline 只存一個數字：相對參考時間的目前結尾，下限 0，和 QICK 的 channel timestamp 同義。名為 `"default"` 的預設 timeline 也一樣。參考時間移動 d 時，每條 timeline 變成 max(0, 結尾 − d)。
+- `emit(m, timeline=X)` 以 X 的結尾作為這次發射的共同起點，放好 m 的所有事件後把 X 推到 m 的結束點。不帶 timeline 時用 `"default"`。
+- 帶 timeline 的 `pulse`、`trigger` 放在 X 的結尾加 t，再把 X 推到結束點，相當於 QICK 的 `t="auto"`。不帶 timeline 時照 QICK 從參考時間起算。
+- `delay_timeline(t, X)` 把 X 的結尾加 t。`sync(X)` 把參考時間移到 X 的結尾。參考時間只由原生 delay 類指令、`sync` 和下面的結構規則移動。
+- 同一條 timeline 上連續的 pulse 依序排列。要並排就用 join 的分支，或另一條 timeline。
+- 曾提出的 `delay_auto_timeline` 取消：timeline 只存結尾，「等 X 結束再加 t」和「X 往後推 t」變成同一件事。timeline 不分 generator 和 readout，原生 `delay_auto(gens=, ros=)` 照舊。
+
+```python
+self.emit(self.pi)       # "default" 推到 pi 結束，參考時間不動
+self.delay_auto(t)       # QICK 原生：等所有 channel 結束再加 t，參考時間移動
+self.emit(self.ro)       # 從 pi 結束加 t 開始
+```
+
+掃描值碰到下限 0 時，如果各掃描點的正負號不同，結果是折線，一個線性的時間暫存器表達不出來。QICK 自己的做法是：掃描的最小值大於 0 才保留整條，否則整條歸零。在 pulse 帶 `post_delay`、delay 從 0 開始掃的 T1 裡，前幾個點的間隔會少於 `post_delay`。使用者：「Qick原生寫法可能是bug，可以採用你的建議」。定案：無法逐點證明同號時在編譯期報錯，提示改用 `delay_timeline`。能編譯的程式每個點都精確。
+
+結構規則：
+
+- join 從母 timeline 的結尾分出各分支，離開時把各分支結尾的最大值回饋到母 timeline（使用者：「join結尾應該預期把最大時間回饋到母timeline裡」）。
+- branch 每條 timeline 取各 case 結尾的最大值。某個 case 移動了參考時間時，較短的 case 補 `inc_ref`。
+- repeat 的每次迭代結尾，以及每個 shot 的 body 結尾，把參考時間移到用到的 timeline 的最大結尾，這些 timeline 歸零，讓每次迭代和每個 shot 從同樣的狀態開始。body 結尾先對齊，再進外殼的 `final_wait`、`final_delay`，最後一個 module 的 `post_delay` 才不會被原生 `delay_auto` 忽略。
+- 進入 repeat 時，如果有迴圈內沒用到、但還沒結束的 timeline，就報錯並提示先 `sync`，因為每圈推進參考時間都會再扣它一次。
+- 由暫存器決定的推進只能用原生 `delay_reg_auto`。所有 timeline 的結尾都必須能證明不超過推進量的靜態部分，否則報錯。
+
+module 的推進：A 階段用 `total_length`。B 階段的 lowering 以 `delay_timeline(post_delay, X)` 結尾，由 timeline 自己記錄的結束點決定推進，module 不必另外回報長度。
+
+不做「每個 channel 一條預設 timeline」，理由有三：「等這個 channel 空了再放」原生已有 `pulse(t="auto")`；channel timeline 會被任何 timeline 上的 pulse 更新，形成第二種更新規則；如果可以寫入，又會改變原生 `delay_auto` 的等待時間。日後需要「對齊到某個 channel 空閒」時，再以唯讀來源加入（使用者：「可以，採用建議」）。
+
+### 模擬器的範圍
+
+C 階段支援的 macro 子集包含原生宣告（`declare_gen`、`add_pulse`、`declare_readout`），原生的 `pulse`、`delay`、`delay_auto`、`trigger`、`send_readoutconfig` 與 `add_loop` 掃描，以及 `delay_timeline`、`sync`、我們的 emission macro 和 `join`、`repeat`、`branch`、`declare_table`、`load_word`、`scan_with`。runtime 暫存器運算與跳轉（包括依量測結果分支的 `read_and_jump`）、`asm_inst`、table macro 以外的 dmem 讀寫、`wait`、`wait_auto`、`resync` 會在產生資料前報錯，並指出 macro 類型與位置（使用者：「採用建議」）。時間直接讀 QICK 解析後的值。
+
+現有實驗都只由 module 組成，直接操作暫存器、dmem 與跳轉的程式碼只出現在我們的 module 裡，所以沒有實驗會因此變成無法模擬。C 階段的驗收要求現有每種 module 的 macro 形式都能模擬。
+
+### 仍待處理
+
+- 掃描值放在具名 timeline 上，之後每個 pulse 都要用暫存器給時間（後記四的 28 條對 40 條）。主流程的掃描等待建議用原生 `delay_auto(sweep)`，要寫進作者指引，也可以做成 IR 優化。
+- B 階段 spec：其餘 module 的 lowering、移除 block、規則 (b) 與差異報告。

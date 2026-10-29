@@ -78,7 +78,7 @@ def controller(qapp, tmp_path: Path):
         ctrl.setup_control.new_point(
             PointCreateRequest("working", "", CommandOrigin("gui"))
         )
-        ctrl.context_control.set_alias_rows((AliasRow("qubit", "Q1"),))
+        ctrl.context_control.apply_alias_rows((AliasRow("qubit", "Q1"),))
         capture = ctrl.context_control.read_context()
         ctrl.context_control.set_parameter(
             require_target(capture), "Q1.ext.freq", 6123.0

@@ -20,7 +20,6 @@ from zcu_tools.gui.app.measure.startup_context import (
 )
 from zcu_tools.gui.form import FormEnv
 from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
-from zcu_tools.gui.session.alias_presets import AliasPresets, validate_alias_presets
 from zcu_tools.gui.session.operation_handles import OperationHandles
 from zcu_tools.gui.session.operation_runner import (
     OperationInfrastructure,
@@ -131,7 +130,6 @@ def build_app_services(  # noqa: PLR0913
     owner_scheduler: OwnerScheduler,
     project_root: str,
     catalog_loader: ExperimentCatalogLoader | None = None,
-    alias_presets: AliasPresets | None = None,
     device_registry: DeviceRegistryPort | None = None,
     driver_factory: DriverFactoryPort | None = None,
 ) -> AppServices:
@@ -140,18 +138,9 @@ def build_app_services(  # noqa: PLR0913
     driver_factory supplies drivers for device_registry. None selects the
     hardware factory; tests may inject a hardware-free constructor.
 
-    ``alias_presets`` maps names to ordered caller-owned rows. Omitted or None
-    means no catalog and an empty initial table. A supplied mapping must contain
-    "default" (possibly empty), or raise ValueError. All tables are validated;
-    default initializes entries only when no saved aliases exist. Saved empty
-    and nonempty tables take precedence. Softlinks and unbound rows are kept;
-    the first nonempty component snapshot uses the role registry's unique focus
-    candidate for the primary empty row. Explicit table edits disable that
-    one-time initialization. Invalid syntax, duplicate aliases or forward links
-    raise InvalidInputError(alias_invalid) during construction. No device or
-    cache lookup is performed, and each bundle owns its own alias table.
+    Aliases are file-backed. Startup scripts open an entry, then call
+    ctx.context.apply_alias_rows to initialize the active table explicitly.
     """
-    validate_alias_presets(alias_presets)
     access = ExperimentAccess()
     operation_gate = OperationGate(bus)
     handles = OperationHandles()
@@ -175,7 +164,6 @@ def build_app_services(  # noqa: PLR0913
         progress=progress,
         bind_assets=ArbWaveformDatabase.info_at,
         project_root=project_root,
-        alias_rows=() if alias_presets is None else alias_presets["default"],
     )
     session.device.publish_initial_devices()
     context = session.context

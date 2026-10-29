@@ -39,7 +39,7 @@ def history_ui(
             MagicMock(), make_mock_soccfg()
         )
         ctrl.context_control.add_component("Q1", "history/source", {})
-        ctrl.context_control.set_alias_rows((AliasRow("history", "Q1"),))
+        ctrl.context_control.apply_alias_rows((AliasRow("history", "Q1"),))
         window.show()
         qapp.processEvents()
         ctrl.tab_control.open_tab_from_file("history", str(path))

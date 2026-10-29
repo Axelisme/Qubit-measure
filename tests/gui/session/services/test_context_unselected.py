@@ -1,5 +1,7 @@
 """Unselected context reads, alias edits and explicit command failures."""
 
+from pathlib import Path
+
 import pytest
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
@@ -9,6 +11,7 @@ from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.state import SessionState
 from zcu_tools.gui.session.types import SessionEnv
 from zcu_tools.gui.session.value_lookup import MissingValue
+from zcu_tools.resources.entry import ResultEntry
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
 
@@ -30,17 +33,16 @@ def test_empty_owner_reads_and_value_sources(control: ContextService) -> None:
         control.read_value_source("device.flux.value", "float")
 
 
-def test_alias_table_can_be_edited_before_opening_an_entry(
+def test_alias_edit_without_entry_rejects_without_retaining_the_request(
     control: ContextService,
 ) -> None:
-    assert control.get_alias_rows() == ()
     rows = (AliasRow("qubit", "Q2"), AliasRow("resonator", "$qubit.resonator"))
-    control.set_alias_rows(rows)
-    assert control.get_alias_rows() == rows
+    with pytest.raises(FailedPreconditionError) as failure:
+        control.apply_alias_rows(rows)
+    assert failure.value.reason_code == "no_context"
+    assert control.get_alias_rows() == ()
     assert control.get_entry_info() is None
     assert control.get_source_binding() is None
-    control.set_alias_rows(())
-    assert control.get_alias_rows() == ()
 
 
 @pytest.mark.parametrize(
@@ -52,12 +54,19 @@ def test_alias_table_can_be_edited_before_opening_an_entry(
     ],
 )
 def test_rejected_alias_submission_preserves_the_authored_table(
-    control: ContextService, rows: tuple[AliasRow, ...]
+    control: ContextService, rows: tuple[AliasRow, ...], tmp_path: Path
 ) -> None:
+    control.install_entry(
+        ResultEntry.create(
+            "entry",
+            result_root=tmp_path / "result",
+            database_root=tmp_path / "Database",
+        )
+    )
     original = (AliasRow("qubit", "Q1"), AliasRow("resonator", "$qubit.resonator"))
-    control.set_alias_rows(original)
+    control.apply_alias_rows(original)
     with pytest.raises(InvalidInputError) as caught:
-        control.set_alias_rows(rows)
+        control.apply_alias_rows(rows)
     assert caught.value.reason_code == "alias_invalid"
     assert control.get_alias_rows() == original
 

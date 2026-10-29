@@ -121,7 +121,7 @@ def test_clone_copies_values_without_importing_library_events(
     argument = (
         point if source_mode == "view" else ("source" if same_entry else "other/source")
     )
-    cloned = destination.new_point("library-copy", clone_from=argument)
+    cloned = destination.new_point("library-copy", mode="clone", clone_from=argument)
     stored = DocumentStore(
         destination.result_path / "points/library-copy/library.yaml",
         ModuleLibraryDocument,
@@ -151,7 +151,7 @@ def test_clone_skips_invalid_specs_without_rewriting_source(
     source.write_text(json.dumps(document))
     original = source.read_bytes()
 
-    entry.new_point("filtered-copy", clone_from="other/source")
+    entry.new_point("filtered-copy", mode="clone", clone_from="other/source")
 
     copied = entry.module_library("filtered-copy").snapshot()
     assert copied.module_keys() == ()
@@ -173,7 +173,7 @@ def test_library_clone_failure_cleans_destination_and_keeps_source(
     source.write_text(json.dumps(document))
     before = source.read_bytes()
     with pytest.raises((ValueError, FileNotFoundError)):
-        entry.new_point("failed-library", clone_from="other/source")
+        entry.new_point("failed-library", mode="clone", clone_from="other/source")
     assert not (entry.result_path / "points/failed-library").exists()
     assert entry.list_points() == []
     assert source.read_bytes() == before
@@ -203,7 +203,7 @@ def test_clone_preserves_forward_minor_point_metadata(
     original_metadata = source_store.snapshot().metadata["Q1.rate"]
     destination = foreign if same_entry else entry
 
-    cloned = destination.new_point("future-copy", clone_from=source_point)
+    cloned = destination.new_point("future-copy", mode="clone", clone_from=source_point)
 
     stored = DocumentStore(
         destination.result_path / "points/future-copy/parameters.yaml",
@@ -240,7 +240,7 @@ def test_cross_entry_clone_uses_published_values_and_copies_metadata(
     # Clone does not depend on the destination setup.
     (results / "entry/parameters.yaml").write_text("invalid: [", encoding="utf-8")
     source_arg = "other/source" if source_mode == "label" else stale_point
-    clone = entry.new_point("target", clone_from=source_arg)
+    clone = entry.new_point("target", mode="clone", clone_from=source_arg)
     assert clone.Q1.rate == 5400.0
     assert clone.Q1.duration == 12.0
     assert clone.description == "source environment"
@@ -272,7 +272,7 @@ def test_foreign_source_failure_does_not_publish_destination_or_modify_source(
     before = source.read_bytes()
     ledger_before = ledger_path.read_bytes()
     with pytest.raises((ValueError, FileNotFoundError)):
-        entry.new_point("failed", clone_from="other/source")
+        entry.new_point("failed", mode="clone", clone_from="other/source")
     assert not (results / "entry/points/failed").exists()
     assert entry.list_points() == []
     assert source.read_bytes() == before
@@ -293,7 +293,7 @@ def test_clone_stale_view_reads_current_contents_at_source_location(
     replacement.setup.add_component("Q1", kind="fake/drive/a", rate=6100.0)
     replacement.new_point("source")
 
-    cloned = entry.new_point("current-copy", clone_from=stale)
+    cloned = entry.new_point("current-copy", mode="clone", clone_from=stale)
 
     assert cloned.Q1.rate == 6100.0
     assert replacement.use_point("source").Q1.rate == 6100.0
@@ -313,7 +313,7 @@ def test_foreign_view_with_other_result_root_is_rejected_without_publishing(
     )
     point = foreign.new_point("source")
     with pytest.raises(ValueError, match="root"):
-        entry.new_point("failed", clone_from=point)
+        entry.new_point("failed", mode="clone", clone_from=point)
     assert not (results / "entry/points/failed").exists()
     assert entry.ledger.events() == ()
 
@@ -360,7 +360,7 @@ def test_clone_accepts_point_identity_with_different_database_root(
         ).use_point("source")
 
     try:
-        cloned = entry.new_point("copy", clone_from=view)
+        cloned = entry.new_point("copy", mode="clone", clone_from=view)
     except ValueError as error:
         pytest.fail(f"Database root is not a Point clone identity boundary: {error}")
 
@@ -381,7 +381,7 @@ def test_existing_cross_entry_destination_is_not_merged(
     source = results / "entry/points/target/parameters.yaml"
     before = source.read_bytes()
     with pytest.raises(FileExistsError):
-        entry.new_point("target", clone_from="other/source")
+        entry.new_point("target", mode="clone", clone_from="other/source")
     assert source.read_bytes() == before
     assert entry.ledger.events() == ()
 
@@ -409,7 +409,7 @@ def test_constructor_bound_view_clones_without_later_identity_registration(
         database_root=database,
     )
     destination = foreign if same_entry else entry
-    cloned = destination.new_point("manual-view-copy", clone_from=manual)
+    cloned = destination.new_point("manual-view-copy", mode="clone", clone_from=manual)
     assert cloned.Q1.rate == 5300.0
     assert len(foreign.ledger.events()) == 1
     for path in ("Q1.rate", "Q1.duration"):

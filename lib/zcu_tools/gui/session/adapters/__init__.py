@@ -6,6 +6,6 @@ side of a port), so import them only when building the UI, after the matplotlib
 backend is selected.
 """
 
-from .point_file_watcher import PointFileWatcher
+from .file_watcher import FileWatcher
 
-__all__ = ["PointFileWatcher"]
+__all__ = ["FileWatcher"]

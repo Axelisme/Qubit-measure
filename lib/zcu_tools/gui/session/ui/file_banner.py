@@ -1,4 +1,4 @@
-"""Qt projection of point-file synchronization and explicit reload decisions."""
+"""Qt projection of installed-file synchronization and explicit reload decisions."""
 
 from __future__ import annotations
 
@@ -18,13 +18,15 @@ from qtpy.QtWidgets import (
 
 from zcu_tools.gui.expected_error import ExpectedError
 from zcu_tools.gui.session.context_control import ContextControlPort
-from zcu_tools.gui.session.context_types import PointFileRevision
+from zcu_tools.gui.session.context_types import FileRevision
 from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 
 
-class PointFileBanner(QWidget):
-    """Show one point document's pending/reloaded/error projection.
+class FileBanner(QWidget):
+    """Show one installed document's pending/reloaded/error projection.
 
+    setup=False selects the active document group (entry in GLOBAL, point in
+    POINT); setup=True selects the installed entry group in either state.
     control owns revision checks and reload validation. document selects the
     owner file; children are named 'inspect.<document>.sync.message',
     'inspect.<document>.sync.reload' and 'inspect.<document>.sync.keep'.
@@ -40,14 +42,22 @@ class PointFileBanner(QWidget):
         document: Literal["parameters", "library", "aliases"],
         on_reloaded: Callable[[], None],
         *,
+        setup: bool = False,
         parent: QWidget | None = None,
     ) -> None:
+        """Bind document notices and reload actions to the selected installed group.
+
+        setup=False uses active documents; setup=True uses entry documents,
+        including while a point is active. on_reloaded runs after a successful
+        reload so the host can discard its draft. parent owns the Qt widget.
+        """
         super().__init__(parent)
         self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
         self._control = control
         self._document = document
+        self._setup = setup
         self._on_reloaded = on_reloaded
-        self._notice_file: PointFileRevision | None = None
+        self._notice_file: FileRevision | None = None
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         self._message = QLabel()
@@ -71,21 +81,30 @@ class PointFileBanner(QWidget):
         layout.addLayout(actions)
         self.hide()
 
-    def capture(self) -> PointFileRevision | None:
-        """Return the installed selected-point file, or None without a point."""
-        return next(
-            (
-                f
-                for f in self._control.get_file_revisions()
-                if f.document == self._document
-            ),
-            None,
-        )
+    def capture(self) -> FileRevision | None:
+        """Return this scope's cached file, or None without an entry.
 
-    def check(self, expected: PointFileRevision | None) -> None:
+        Installed ordering is active three, then entry three in POINT. Taking
+        the last group selects entry in both GLOBAL and POINT without disk I/O.
+        """
+        files = (
+            self._control.get_installed_file_revisions()[-3:]
+            if self._setup
+            else self._control.get_file_revisions()
+        )
+        return next((file for file in files if file.document == self._document), None)
+
+    def set_setup(self, *, setup: bool) -> None:
+        """Select entry scope when True; False uses the active document group.
+
+        The next capture/refresh uses the new scope without reading disk.
+        """
+        self._setup = setup
+
+    def check(self, expected: FileRevision | None) -> None:
         """Check a loaded draft's disk revision; show and rethrow owner rejection.
 
-        None means no point was loaded, not a missing aliases revision. The
+        None means no entry was loaded, not a missing aliases revision. The
         normal writer still owns the no-context precondition in that case.
         """
         if expected is None:

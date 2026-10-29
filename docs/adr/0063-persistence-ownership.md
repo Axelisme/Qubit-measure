@@ -60,7 +60,9 @@ Entry 只由 `result/<name>/` 構成。`resources.entry.ResultEntry` 提供條�
 
 A 包含新建 entry 不產生 UUID。Setup／point 接受有或沒有 entry_id 的舊檔並忽略其值，下次明確寫入去掉。新 ledger／量測 metadata 與公開 wire 不再包含 entry_id，setup 換檔也不因 UUID 拒絕。Run ID 與 ledger 事件 ID 不受影響。
 
-Setup 同名替換後，經公開 SetupView.refresh 或會重讀 setup 的 ResultEntry.new_point、重新開啟 entry 取得新內容，不以 UUID 拒絕。這不新增 setup 自動監看，既有 point files 的 wire、讀取失敗、格式錯誤、安全與 watcher 生命週期契約保持。
+Setup 同名替換後，可經公開 SetupView.refresh、ResultEntry.new_point 或重新開啟 entry 取得新內容，不以 UUID 拒絕。GUI 的 entry 與 point 已安裝文件由同一個批次 watcher 監看，嚴格驗證後才安裝；holder pending、revision 與失敗保留舊內容的規則見 [[0081]]。
+
+2026-10-29 使用者要求：「setup與point要有一致的檢測行為」。這取代先前不新增 setup 自動監看的安排，不改 UUID 移除規則。
 
 Point 是實驗語意下具有一致環境參數的單位，不限於 flux。2026-10-28 使用者定義：「一個point不是一個flux點的意思，而是在其中的實驗語義下，具有一致的環境參數的意思，不只包含flux。而對於實驗本身就在掃某個環境參數，其一致性要求本來就不包含那個參數，所以哪個參數不會影響一致性」。
 
@@ -68,7 +70,7 @@ Point 是實驗語意下具有一致環境參數的單位，不限於 flux。202
 
 使用者於 2026-10-20 裁決：「甲，簡單的機制加一致的規則比非預期的兼容邏輯好維護與使用，同樣名字的Database會混雜屬於有意不處理的設計。」對改名裁決：「改名時Database不動，Database是輸出位置，不是什麼要綁定的目錄」。
 
-`bind_run_outputs` 在 resources.entry 內依目前 Result／Database roots 與 Run 記錄的 entry 名稱、point 綁定輸出位置，不開 ResultEntry、不要求 entry 或 point 存在。缺名稱使用 unnamed_entry，缺 point 使用 unnamed_point。GUI Save 不使用 live selection、捕捉時的 storage 或原檔位置決定目的地。
+`bind_run_outputs` 在 resources.entry 內依目前 Result／Database roots 與 Run 記錄的 entry 名稱、point 綁定輸出位置，不開 ResultEntry、不要求 entry 或 point 存在。缺名稱使用 unnamed_entry，缺 point 保持 None，Result 圖副本放 entry 層 `figures/`。GUI Save 不使用 live selection、捕捉時的 storage 或原檔位置決定目的地。
 
 `SaveLayout` 接收 exact entry paths、caller 產生的 stem、point 與保存時間，再按 artifact key 計算 exact outputs。它不建立目錄或寫檔，不補前綴或 run_id，也不正規化 stem。Stem 必須是安全的單一路徑段，非法值直接拒絕。C8 分層與 C9 無循環 contract 涵蓋 experiment 使用 datafile／resources 的方向。
 
@@ -94,13 +96,15 @@ Workflow 本身的兩側目錄維持 `workflows/<workflow名>_<run_id>/`，保�
 
 `experiment.native_persistence.prepare_run_data` 從 typed RunRecord 與 axes spec 建立同一份 SI／離散 payload 和 cfg snapshot。Native 與 Labber writers 分別消費它，不先寫 native 再讀回轉成 Labber，也不互相呼叫。Datafile writer 只處理自己的格式與 caller 指定的目的地，不選路徑、不擷取 live context、不決定 batch。`experiment.artifacts` 的共用保存編排負責 artifact 選集、輸出順序與逐輸出失敗隔離，一個 writer 失敗不阻擋其他輸出。
 
-RunMetadata 的 run_id、時間、completion、RunSnapshot 與 SoftwareProvenance 是 caller 提供的歷史事實。RunSnapshot 保存 entry_name、point 與 roles，不帶 entry UUID。Experiment 的 ParameterSnapshot 保存 resources 擁有的 point 參數內容、library Specs、authored aliases 與 fixed names。Session 的 capture／restore adapter 連接這兩個 owner，不讓 resources 或通用 ParameterContext 依賴 experiment。C8 分層、C9 無循環與 parameter-context-no-experiment contract 保護這個方向。
+RunMetadata 的 run_id、時間、completion、RunSnapshot 與 SoftwareProvenance 是 caller 提供的歷史事實。RunSnapshot 保存 entry_name、point 與 roles，不帶 entry UUID。Experiment 的 ParameterSnapshot 保存 resources 擁有的作用中參數內容、library Specs、authored aliases 與 fixed names。Session 的 capture／restore adapter 連接這兩個 owner，不讓 resources 或通用 ParameterContext 依賴 experiment。C8 分層、C9 無循環與 parameter-context-no-experiment contract 保護這個方向。
 
-GUI 在 Run admission 固定參數環境。Save 使用 metadata 內的快照，不重新讀 live point。Load 只還原檔內快照；缺快照回沒有 general、created_at、SavedPoint 或 storage 的空內容，不補造歷史資訊。Analyze／Post 使用這份內容。寫回提案仍從歷史內容求值及解析 alias／slot，但 Preview／Apply 的 target 取命令當下 GUI 選定的 point。未選 point 時拒絕，空歷史環境不是拒絕理由。
+GUI 在 Run admission 固定作用中文件組的參數環境，global 與 point 都可 Run、Analyze 與 Save。Global run 的 snapshot.point 為 None。Save 使用 metadata 內的快照，不重新讀 live 文件。Load 只還原檔內快照；缺快照回沒有 general、created_at、target 或 storage 的空內容，不補造歷史資訊。Analyze／Post 使用這份內容。寫回提案從歷史內容求值及解析 alias／slot，Apply 則重新取得當下作用中的文件組。Global 寫 entry 層，POINT 寫選定 point；未開 entry 才以 no_context 拒絕非空寫回，空歷史環境不是拒絕理由。
 
 2026-10-28 使用者說明 Load 的來源：「我認為run R確實可以記錄是哪個entry與point，但Load為什麼要看entry/point資訊？他又不需要，他只需要當時capture的環境就好？」對沒有快照的舊量測補充：「沒有快照的舊量測，可以用空環境來生成分析參數預設值，而不是不能分析。」當時的「1A 2A」裁決中，寫回選擇 GUI 目前選的 point。
 
-Save 目的地隨後改採記錄的 entry／point。2026-10-28 使用者要求：「我希望load只需要給data.h5的路徑，不要求其在對應的儲存位置，但再儲存的目標就是內部記錄的entry與point。」「我認為Save的部分，應該不用找？」「直接生成路徑，然後覆寫就好」。缺名稱與 point 的處理分別是「我認為沒有記錄entry_name，那就用unnamed_entry之類的」「point應該也可以比照辦理，unnamed_point」。這項 Save 裁決取代存到目前開啟 entry 的方案，不改寫檔內歷史 metadata。
+Save 目的地隨後改採記錄的 entry／point。2026-10-28 使用者要求：「我希望load只需要給data.h5的路徑，不要求其在對應的儲存位置，但再儲存的目標就是內部記錄的entry與point。」「我認為Save的部分，應該不用找？」「直接生成路徑，然後覆寫就好」。缺名稱與 point 的處理分別是「我認為沒有記錄entry_name，那就用unnamed_entry之類的」「point應該也可以比照辦理，unnamed_point」。這項 Save 裁決取代存到目前開啟 entry 的方案，不改寫檔內歷史 metadata。下述 2026-10-29 規則只取代其中缺 point 使用 unnamed_point 的部分。
+
+2026-10-29，使用者對無 point 量測與圖副本位置回答：「1我認為可以改成可以，Database本來就不看point，全域figures的位置也比照point內的 2應該也可以 3可以，用inspect改 4預設從全域繼承，或是指定empty或是clone其他point 5我有考慮統一名字」。對舊 run 缺 point 也放 entry 層 figures、移除 unnamed_point 的方案回覆：「A1 B採用建議」。因此 global 與舊 run 的空 point 都使用 entry 層 `figures/`，unnamed_entry 保留。
 
 新檔由 [[0080]] 的 zcu.container 3.0 保存，實驗欄位進入 docs/metadata。`started_at` 接受 UTC ISO 字串或 None，`completion` 接受 complete、partial、stopped 或 unknown。None 與 unknown 表示缺少歷史證據，不從檔案時間、檔名或 run_id 補造。正常量測路徑仍必填開始時間，只產生已知完成狀態。
 
@@ -142,7 +146,12 @@ Planner 使用目前 roots、metadata 記錄的 entry 名稱與 point，以及 a
 其他規劃錯誤照常傳出，Save 仍完整驗證 metadata，不將壞內容改成空快照。
 Save report 發布實際路徑、成功或逐項失敗。
 預覽與 Save 使用各自計畫時的保存時間；自訂 stem 若依時間改名，實際輸出仍由該次 Save 計畫決定。
-實際 Save 建立目錄並覆寫同名 data.h5、分析與圖，Result 圖副本放到記錄的 points/<point>/，缺 point 放 points/unnamed_point/。不新增 source.json 或另一份來源權威。
+實際 Save 建立目錄並覆寫同名 data.h5、分析與圖。Result 圖副本放到記錄的 `points/<point>/figures/`，缺 point 放 entry 層 `figures/`。不新增 source.json 或另一份來源權威。
+
+2026-10-29，先前方案保留已綁定 Run 的路徑預覽，讓無 storage 的 Run 首次 Save 前只有 declarations、沒有 outputs。
+使用者回答是否保留這項安排時說「1A, 但第一次save前沒預覽很怪」。
+隨後，使用者對預覽與 Save 共用路徑計算、讓 Load 首次 Save 前也有預覽的修正方案回覆「1做」。
+這項修正取代無 storage 時預覽為空的安排，已綁定 Run 的路徑保持不變。
 
 Load Data 同時提供 File 選檔與 opened entry 的 native 檔案清單。清單掃描 `Database/<entry>/runs/*/data.h5`，完全不讀 ledger。Run 身分、experiment、point、開始／結束時間與 completion 來自各檔的 RunMetadata／RunSnapshot；未知歷史時間保持空白，completion 保留 unknown。清單透過 `datafile.read_doc` 讀 metadata，只解碼與驗證上述顯示欄位，不要求完整 RunMetadata 或 provenance，也不讀 cfg 或量測 arrays。清單可顯示不代表整份資料可載入。Metadata 讀取失敗時，run_id 為空字串，experiment、point、時間與 completion 欄位留空。清單保留 exact Path 與既有錯誤資訊，選取仍回傳 exact path，由既有 Load 路徑回報失敗。清單不解析新舊目錄名來補欄位，避免讓路徑命名成為第二份歷史身分來源。查詢不建立目錄或事件，遷移也不手造 ledger。
 
@@ -150,7 +159,11 @@ Load Data 同時提供 File 選檔與 opened entry 的 native 檔案清單。清
 
 ### Setup 與 point alias 表
 
-Setup 的 alias 位於 `<entry>/aliases.yaml`。每個 point 的 alias 位於 `<entry>/points/<p>/aliases.yaml`，與 `parameters.yaml`、`library.yaml` 並列。從 setup 新建 point 時有檔才複製，clone 則只複製來源 point 的檔。各表之後獨立修改，不繼承或覆寫 setup。既有 point 缺檔視為空表，不自動複製、不回退 setup。
+Entry 的 global alias 位於 `<entry>/aliases.yaml`。每個 point 的 alias 位於 `<entry>/points/<p>/aliases.yaml`，兩層都與 `parameters.yaml`、`library.yaml` 並列。新 point 預設 inherit global 三檔，library 經 copy_library；也可明確選 empty 或 clone。Empty 只建最小有效參數文件，不繼承使用者值，也不建 library 或 aliases。Clone 必須提供來源，只複製來源 point 的文件；其他模式禁止帶來源。來源缺 library 或 aliases 時目的也保持缺席。各組之後獨立修改，選 point 後整組替換 global，不逐名稱回退。
+
+兩層缺 library 或 aliases 都當空、revision 為 None，讀取不建檔，首次明確編輯才建檔。外部先建檔時 writer 報 revision 衝突，不覆寫候選。缺參數文件仍是錯誤。
+
+2026-10-29 使用者說明：「行為須一致，沒有就當空」，並確認：「A，我目前先設計成整個作用域換成point，沒有個別的fallback邏輯」。
 
 使用者於 2026-10-20 裁定：「採用乙，alias. yaml的獨立檔案，找不到就視內容為空，與其他兩個資料容器並列」。
 
@@ -166,9 +179,9 @@ Setup 的 alias 位於 `<entry>/aliases.yaml`。每個 point 的 alias 位於 `<
 
 2026-10-29，使用者對 alias 錯誤隔離、owner 分工與 observed revision 的文件補充回覆「同意」。這項隔離實作下方的按需讀取原則，不放寬 alias writer 的驗證。
 
-Dialog Apply 先驗整表，再由 entry owner 寫 sibling temporary 並 atomic replace，成功後才安裝 memory 和發布變更 fact。失敗保舊表、舊檔與 dialog draft，可修正後再 Apply。未選 point 時 Apply 以 `FailedPreconditionError(no_context)` 拒絕，不寫 setup。普通 `set_alias_rows` 在未選 point 時只改 memory；選定 point 後與 Apply 一樣，先保存該 point 的表，再安裝 memory 與發布 fact，見 [[0081]]。兩者都不修改 setup alias。Apply 不關閉 dialog，Cancel 不撤回先前已 Apply 的內容。
+`apply_alias_rows` 先驗整表，再由 entry owner 寫 sibling temporary 並 atomic replace，成功後才安裝 memory 和發布變更 fact。GLOBAL 寫 entry 表，POINT 寫選定 point 表；`setup=True` 固定選 entry 表。未開 entry 時以 `FailedPreconditionError(no_context)` 拒絕，不暫存、不自動開 entry。Startup 先開 entry，再呼叫此入口；不提供 memory-only alias 初值或 presets。Inspect 完成有效編輯後保存所選 Destination，失敗保留輸入、舊表與舊檔，關閉不撤回已保存內容，見 [[0081]]。
 
-切換 point 載入該 point 的表，Open／Reset 捕捉目前 point 的 alias。已保存的空表或空列不自填。Run 保留原 capture，後續改表或切 entry 不改歷史 Analyze／Writeback／Save 的來源。這個單檔替換不承諾跨檔交易、多 writer merge 或掉電恢復。
+開 entry 載入 global 表，切換 point 載入該 point 的表，回 Global 則重新使用 entry 表。Open／Refresh／Reset 捕捉作用中組的 alias，已保存的空表或空列不自填。選 point 時，Inspect 仍可編輯 entry 表，但不改作用中 point 或舊 capture。Run 保留原 capture，後續改表或切 entry 不改歷史 Analyze／Writeback／Save 的來源。這個單檔替換不承諾跨檔交易、多 writer merge 或掉電恢復。
 
 ### 資料表示與完整性
 
@@ -246,7 +259,11 @@ Lab 擁有目前版本、步驟與真實舊文件形狀。`scripts/upgrade_param
 
 ### 失敗、路徑與遷移邊界
 
-2026-10-23 使用者對同一份文件一次 edit 的方案裁定：「同意」。Run accept 先追加一筆 accepted，再依目的地文件分組提交，組內順序保留。提交順序為 point 參數一組、library module／waveform 一組、樣本逐筆。Point 與 library 各使用一次 edit，任一項無效整組不寫。Executor 回 `WritebackResult`，含 accepted event_id 與逐項 committed values。組失敗以 `WritebackApplyError.result` 保留已提交組的全部項目，並公開 event_id、applied 與原始 cause，保留前組與事件，停止後組。applied 仍計項目數，失敗組計零。Notebook 直接看到此錯誤；GUI context owner 發布實際成功前綴，GUI service 標記前綴後原樣拋 cause，wire 不改原 producer 分類。GUI writeback 只接受 SavedPoint，未選點時在 append 前拒絕，提示先選或建立點，不自動建點或寫 point=null 樣本。一般 sample append 的 point 選填契約不受影響。
+2026-10-23 使用者對同一份文件一次 edit 的方案裁定：「同意」。Run accept 先追加一筆 accepted，再依目的地文件分組提交，組內順序保留。提交順序為 parameters 一組、library module／waveform 一組、樣本逐筆。Parameters 與 library 各使用一次 edit，任一項無效整組不寫。Executor 回 `WritebackResult`，含 accepted event_id 與逐項 committed values。組失敗以 `WritebackApplyError.result` 保留已提交組的全部項目，並公開 event_id、applied 與原始 cause，保留前組與事件，停止後組。applied 仍計項目數，失敗組計零。Notebook 直接看到此錯誤；GUI context owner 發布實際成功前綴，GUI service 標記前綴後原樣拋 cause，wire 不改原 producer 分類。
+
+GUI writeback 接受當下作用中的 SavedEntry 或 SavedPoint，不自動建 point。Global 的 acquired ledger 與 record row 都可保存 point=null，沿既有 nullable 欄位契約，不新增格式版本。這取代原本 GUI 禁止 point=null 樣本的限制。
+
+Preview 的 destination_context 與已提交 receipt 的 destination 只含 entry_name、point，不含 kind。GLOBAL 的 point 為 null，POINT 為 label；已提交 receipt 的 entry_name 必為字串。未開 entry 仍可預覽合法 draft，destination_context 兩欄與 current 都為 null，但預覽不授權 Apply。MCP 保留 opaque actual_path 與固定來源證據，Apply 不以 preview 的位置鎖定目的地。
 
 2026-10-23 裁定：「resources／context 的 writeback executor 回具名結果：accepted event_id 加逐項 confirmed committed values」「值由實際寫入的 owner 當筆形成，GUI 只關聯 item ID／pane／目的地，不再整批後 readback、不用 proposal 冒充 actual」。Point／library 批次 setter 在 draft 逐項驗證後捕捉隔離值，整組 commit 成功才回傳；sample append 回傳當筆實際序列化的完整 row。Executor 依實際提交順序保留這些值，accepted payload 的 writes 仍保留供應順序。CommittedWrite.index 是該項在供應 tuple 的位置，GUI 用它關聯 draft item ID，不以 path 或前綴長度配對。父／子路徑後續覆寫不改首筆收據。GUI 不重開目的地讀回。每個 batch 仍只追加一筆 accepted event，不增加 per-item callback、worker、retry、rollback 或第二次 readback。
 

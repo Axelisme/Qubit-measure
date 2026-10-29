@@ -53,7 +53,7 @@ def test_tab_snapshot_is_single_pure_render_model() -> None:
             parameters=parameter_capture(),
             soc=MagicMock(),
             soccfg=MagicMock(),
-            readiness=ContextReadiness.ACTIVE,
+            readiness=ContextReadiness.POINT,
         )
     )
     analyze_params = object()
@@ -237,7 +237,7 @@ def _active_state() -> State:
             parameters=parameter_capture(),
             soc=MagicMock(),
             soccfg=MagicMock(),
-            readiness=ContextReadiness.ACTIVE,
+            readiness=ContextReadiness.POINT,
         )
     )
 

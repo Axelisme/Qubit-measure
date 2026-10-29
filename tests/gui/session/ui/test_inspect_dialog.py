@@ -704,7 +704,7 @@ def test_new_entry_uses_point_aliases_and_recovers_after_missing_bindings(
     rows: tuple[AliasRow, ...],
     loaded: bool,
 ) -> None:
-    session.control.set_alias_rows(rows)
+    session.control.apply_alias_rows(rows)
     templates = {
         "aliased": TemplateDef(
             PulseSpec,

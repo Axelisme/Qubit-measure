@@ -55,7 +55,7 @@ def session(tmp_path: Path) -> Generator[CaptureSession]:
         service = ContextService(state, bus, bind_assets=ArbWaveformDatabase.info_at)
         service.install_entry(entry)
         service.use_point(PointUseRequest("first"))
-        service.set_alias_rows(
+        service.apply_alias_rows(
             (AliasRow("driver", "Q1"), AliasRow("sense", "$driver.sense"))
         )
         yield CaptureSession(entry, service, service, state, bus)
@@ -68,7 +68,7 @@ def test_default_capture_reads_all_aliases_without_kind_declarations(
     session: CaptureSession,
 ) -> None:
     rows = (AliasRow("driver", "R1"), AliasRow("custom", "Q2"))
-    session.control.set_alias_rows(rows)
+    session.control.apply_alias_rows(rows)
     captured = session.control.read_context()
     assert captured.aliases == rows
     assert captured.value("$driver.rate") == 6123.0
@@ -87,7 +87,7 @@ def test_capture_keeps_point_library_storage_and_rows_after_later_changes(
     assert captured.aliases == control.get_alias_rows()
     control.set_parameter(target, "Q1.rate", 4700.0)
     control.set_waveform(target, "Q1.waveforms.base", ConstWaveformCfg(length=0.10))
-    control.set_alias_rows(
+    control.apply_alias_rows(
         (AliasRow("driver", "Q2"), AliasRow("sense", "$driver.sense"))
     )
     session.entry.save_aliases(
@@ -147,7 +147,7 @@ def test_named_override_keeps_dependent_links_without_global_side_effects(
 def test_alias_failures_name_requested_alias_without_concrete_fallback(
     session: CaptureSession, rows: tuple[AliasRow, ...], alias: str
 ) -> None:
-    session.control.set_alias_rows(rows)
+    session.control.apply_alias_rows(rows)
     captured = session.control.read_context()
     assert captured.aliases == rows
     assert captured.value("driver.rate") == 123.0
@@ -160,7 +160,7 @@ def test_unknown_alias_name_is_readable_but_its_component_field_is_not(
     session: CaptureSession,
 ) -> None:
     rows = (AliasRow("driver", "absent"),)
-    session.control.set_alias_rows(rows)
+    session.control.apply_alias_rows(rows)
     captured = session.control.read_context()
     assert captured.aliases == rows
     assert captured.value("driver.rate") == 123.0
@@ -177,7 +177,7 @@ def test_read_target_preserves_historical_names_in_saved_reads(
     captured = control.read_context()
     assert captured.aliases == control.get_alias_rows()
     history = captured.roles
-    control.set_alias_rows(
+    control.apply_alias_rows(
         (AliasRow("driver", "Q2"), AliasRow("sense", "$driver.sense"))
     )
     fixed = control.read_target(require_target(captured), roles=history)
@@ -211,7 +211,7 @@ def test_manual_history_keeps_fixed_names_storage_and_unbound_errors(
     target = require_target(session.control.read_context())
     binding = RoleBinding(None, {}, names, explicit)
     fixed = session.control.read_target(target, roles=binding)
-    session.control.set_alias_rows((AliasRow("driver", "Q1"),))
+    session.control.apply_alias_rows((AliasRow("driver", "Q1"),))
     assert fixed.roles == binding
     assert dict(binding.explicit) == explicit
     assert dict(fixed.capture_storage().roles) == names
@@ -248,7 +248,7 @@ def test_named_published_reads_keep_fixed_names_and_values_without_source_io(
     assert dict(captured.capture_storage().roles) == names
     assert captured.resolve_path("$driver.rate") == f"{names['driver']}.rate"
     assert captured.value("$driver.rate") == old_value
-    control.set_alias_rows((AliasRow("driver", "R2"),))
+    control.apply_alias_rows((AliasRow("driver", "R2"),))
     assert dict(control.read_context(aliases=names).capture_storage().roles) == names
     control.use_point(PointUseRequest("second"))
     source_path(first).unlink()

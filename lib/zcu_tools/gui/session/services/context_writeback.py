@@ -8,7 +8,7 @@ if TYPE_CHECKING:
     from datetime import datetime
 
     from zcu_tools.format_version import YamlMap, YamlValue
-    from zcu_tools.gui.session.context_types import SavedPoint
+    from zcu_tools.gui.session.context_types import ContextTarget
     from zcu_tools.gui.session.services.context import ContextService
     from zcu_tools.resources.entry import ResultEntry
     from zcu_tools.resources.entry.ledger_models import JsonObject
@@ -16,17 +16,17 @@ if TYPE_CHECKING:
 
 
 class ContextWritebackTarget:
-    """Bind a captured saved point to resources.entry.writeback.WritebackTarget.
+    """Bind a fixed entry/point target to resources.entry.writeback.WritebackTarget.
 
     context is the owner-thread service used for parameter/library writes.
-    target fixes the entry name and safe point label; entry must be that
+    target fixes the entry name and point label (None for global); entry must be that
     target's open ResultEntry. Binding stores these handles without reading or
     writing files. It neither follows later selection nor creates an entry.
     Caller must supply matching handles; binding does not validate them.
 
     Public fields describe the bound destination: ledger is the owning
     RecordsLedger for accepted events, and point is the
-    captured nonempty point label. Treat these fields as read-only.
+    captured point label, or None for global. Treat these fields as read-only.
 
     set_parameters/set_modules implement the nonempty ordered batch contract
     of WritebackTarget. Each commits one file and returns one detached actual
@@ -44,7 +44,7 @@ class ContextWritebackTarget:
     """
 
     def __init__(
-        self, context: ContextService, target: SavedPoint, entry: ResultEntry
+        self, context: ContextService, target: ContextTarget, entry: ResultEntry
     ) -> None:
         """Bind matching context/target/entry handles as described by the class."""
         self._context = context

@@ -63,36 +63,53 @@ def test_point_and_library_revisions_follow_each_independent_owner(
     assert library.document_revision != installed
 
 
-def test_first_edit_creates_absent_point_library(entry: ResultEntry) -> None:
-    entry.new_point("portable")
-    path = entry.result_path / "points/portable/library.yaml"
+@pytest.mark.parametrize("label", [None, "portable"])
+def test_first_edit_creates_absent_library(
+    entry: ResultEntry, label: str | None
+) -> None:
+    if label is not None:
+        entry.new_point(label)
+    directory = (
+        entry.result_path if label is None else entry.result_path / "points" / label
+    )
+    path = directory / "library.yaml"
     path.unlink()
-    library = entry.module_library("portable")
+    library = entry.module_library(label)
+    assert library.snapshot().waveform_keys() == ()
+    assert library.document_revision.revision is None
     with library.edit():
         pass
     assert not path.exists()
     with library.edit() as draft:
         draft.set_waveform("Q1.waveforms.base", ConstWaveformCfg(length=0.05))
     assert library.document_revision.revision == sha256(path.read_bytes()).hexdigest()
-    assert entry.module_library("portable").snapshot().waveform_keys() == (
+    assert entry.module_library(label).snapshot().waveform_keys() == (
         "Q1.waveforms.base",
     )
 
 
+@pytest.mark.parametrize("label", [None, "portable"])
 @pytest.mark.parametrize("created_during_edit", [False, True])
 @pytest.mark.parametrize("invalid_external", [False, True])
 def test_absent_library_edit_conflicts_with_external_creation(
-    entry: ResultEntry, created_during_edit: bool, invalid_external: bool
+    entry: ResultEntry,
+    label: str | None,
+    created_during_edit: bool,
+    invalid_external: bool,
 ) -> None:
-    entry.new_point("portable")
-    path = entry.result_path / "points/portable/library.yaml"
+    if label is not None:
+        entry.new_point(label)
+    directory = (
+        entry.result_path if label is None else entry.result_path / "points" / label
+    )
+    path = directory / "library.yaml"
     external = (
         b"invalid: [\n"
         if invalid_external
         else path.read_bytes() + b"# externally created\n"
     )
     path.unlink()
-    library = entry.module_library("portable")
+    library = entry.module_library(label)
     if not created_during_edit:
         path.write_bytes(external)
 
@@ -122,7 +139,7 @@ def test_clone_preserves_absent_library(entry: ResultEntry) -> None:
     path.unlink()
     source.description = "portable point"
 
-    cloned = entry.new_point("copy", clone_from=source)
+    cloned = entry.new_point("copy", mode="clone", clone_from=source)
 
     assert cloned.description == "portable point"
     assert not (entry.result_path / "points/copy/library.yaml").exists()
@@ -130,13 +147,7 @@ def test_clone_preserves_absent_library(entry: ResultEntry) -> None:
     assert not path.exists()
 
 
-def test_setup_library_still_requires_its_file(entry: ResultEntry) -> None:
-    (entry.result_path / "library.yaml").unlink()
-    with pytest.raises(FileNotFoundError):
-        entry.module_library()
-
-
-def test_setup_library_is_initialized_independently_of_new_points(
+def test_new_point_inherits_global_library_independently(
     entry: ResultEntry,
 ) -> None:
     assert (entry.result_path / "library.yaml").is_file()
@@ -152,7 +163,14 @@ def test_setup_library_is_initialized_independently_of_new_points(
         "Q1.waveforms.base",
     )
     entry.new_point("a")
-    assert entry.module_library("a").snapshot().waveform_keys() == ()
+    assert entry.module_library("a").snapshot().waveform_keys() == (
+        "Q1.waveforms.base",
+    )
+    with library.edit() as draft:
+        draft.set_waveform("Q1.waveforms.base", ConstWaveformCfg(length=0.1))
+    assert entry.module_library("a").snapshot().waveform_spec(
+        "Q1.waveforms.base"
+    ) == ConstWaveformCfg(length=0.05)
 
 
 def test_point_local_library_uses_entry_scope_without_reading_point_or_assets(

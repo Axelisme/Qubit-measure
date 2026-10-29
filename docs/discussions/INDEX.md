@@ -18,7 +18,7 @@
 
 ## 模擬量測環境
 
-- 2026-10-29 [Module 改 QICK Macro 與模擬 frontend 改讀 macro](2026-10-29-module-to-macro.md)：延後解析的時間層經原型逐位重現現行 ASM；`Module.init()` 搬不進 macro，不立即全面遷移；模擬 frontend 改讀語意 macro 或底層 macro 兩案待第二個原型比較，2026-10-14 裁決暫不改。後記二：目標改為底層原生 QICK 寫法加我們的 macro、上層 builder 由作者自選，模擬器支援 macro 型別子集。後記三：兩層寫法經第三個原型逐位重現；時間模型改採具名 timeline（M1 精神、以 QICK 參考時間實現）。後記四：具名 timeline 經第四個原型以公開 API 驗證；移除 block、主流程用預設 timeline、提供 sync，推進長度取實際結束時間，遷移分兩步。
+- 2026-10-29 [Module 改 QICK Macro 與模擬 frontend 改讀 macro](2026-10-29-module-to-macro.md)：延後解析的時間層經原型逐位重現現行 ASM；`Module.init()` 搬不進 macro，不立即全面遷移；模擬 frontend 改讀語意 macro 或底層 macro 兩案待第二個原型比較，2026-10-14 裁決暫不改。後記二：目標改為底層原生 QICK 寫法加我們的 macro、上層 builder 由作者自選，模擬器支援 macro 型別子集。後記三：兩層寫法經第三個原型逐位重現；時間模型改採具名 timeline（M1 精神、以 QICK 參考時間實現）。後記四：具名 timeline 經第四個原型以公開 API 驗證；移除 block、主流程用預設 timeline、提供 sync，推進長度取實際結束時間，遷移分兩步。後記五：program 層接近原生，builder 改為先記錄、離開時產生 program 的 with 範圍。後記六：module 是宣告物件、每次發射一個 macro；驗收改為預期行為，新舊差異改成一次性報告；timeline 不綁定參考時間、只存結尾，原生方法維持 QICK 行為，以 `delay_timeline` 與 `sync` 操作 timeline；模擬器支援原生 macro 子集，現有實驗都能模擬。
 - 2026-10-28 [FTF 固定 DC flux ramp 的截斷與成本界限](2026-10-28-ftf-fixed-dc-flux-benchmark.md)：未認證，僅界限。M8/M16 的共同 DC K8 population L1 差為 0.359636；M16 只是最大成功尺寸，M24 首點與 M32 reference 的 quadrature 失敗，不能認證大幅 excursion 或 reset fidelity。
 
 - 2026-10-21 [CKP reduced closure 研究：精度過但成本 42 倍](2026-10-21-ckp-reduced-closure-study.md)：flip 非真空腔激發必須保留；displaced-Fock N2 精度過但成本 41.9 倍，Gaussian 否決；半古典先 partial land，下一步走 joint Fock 性能研究。

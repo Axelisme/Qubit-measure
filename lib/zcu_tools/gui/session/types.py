@@ -62,14 +62,16 @@ SocCfgHandle: TypeAlias = SocCfgProtocol
 
 
 class ContextReadiness(Enum):
-    """Working-point readiness, independent of entry metadata availability.
+    """Published document scope, independent of hardware availability.
 
-    EMPTY means no saved point is selected, including after entry open/new.
-    ACTIVE means a saved point parameter environment is published.
+    EMPTY means no entry is open and parameters is None. GLOBAL uses the opened
+    entry's documents with no point label. POINT uses a saved point's documents.
+    Both GLOBAL and POINT provide a file-backed parameter environment.
     """
 
     EMPTY = "empty"
-    ACTIVE = "active"
+    GLOBAL = "global"
+    POINT = "point"
 
 
 @dataclass(frozen=True)
@@ -77,10 +79,11 @@ class SessionEnv:
     """Published parameters plus independent live session capabilities.
 
     parameters is None for EMPTY, otherwise a fixed capture without consumer
-    roles targeting SavedPoint. soc/soccfg remain
-    live capabilities, not Run evidence. Paths are cached session
-    metadata; active_label is empty before point selection. readiness gates
-    ACTIVE-only Run/save. values reads the published value-source cache.
+    roles targeting SavedEntry or SavedPoint. soc/soccfg remain live capabilities,
+    not Run evidence. result_dir/database_path cache opened entry paths, empty
+    without an entry. active_label is the saved point label in POINT and None in
+    EMPTY/GLOBAL. readiness distinguishes those three scopes; GLOBAL and POINT
+    both provide a file-backed context. values reads published value-source cache.
     Retaining an environment does not update its parameter capture.
     """
 
@@ -89,19 +92,19 @@ class SessionEnv:
     soccfg: SocCfgHandle | None
     result_dir: str = ""
     database_path: str = ""
-    active_label: str = ""
+    active_label: str | None = None
     readiness: ContextReadiness = ContextReadiness.EMPTY
     values: ValueLookup = field(default_factory=EmptyValueLookup)
 
     # -- readiness predicates (the context answers about itself) -----------
 
     def has_context(self) -> bool:
-        """Return whether a saved working point is selected."""
+        """Return whether an entry-level or point-level environment is installed."""
         return self.readiness is not ContextReadiness.EMPTY
 
     def is_active(self) -> bool:
         """File-backed context eligible for run and save."""
-        return self.readiness is ContextReadiness.ACTIVE
+        return self.readiness in (ContextReadiness.GLOBAL, ContextReadiness.POINT)
 
     def has_soc(self) -> bool:
         return self.soc is not None

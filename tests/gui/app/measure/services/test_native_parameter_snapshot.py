@@ -42,6 +42,7 @@ def test_native_save_load_uses_captured_environment_after_source_removal(
     session = role_load_session
     control = session.context
     target = require_target(control.read_context())
+    assert target.point is not None, "Fixture must select a point before reloading it"
     control.set_module(
         target,
         "Q1.pulses.pi",

@@ -296,12 +296,14 @@ class WritebackDestination:
     """Owner's concrete destination path and preview-time display context.
 
     path is the opaque captured actual_path string, never a logical Form path.
-    label is destination_context.active_label at preview time, not the captured
-    entry/point identity or permission to write. Neither value is reconstructed.
+    entry_name and point report the active entry and optional point at preview
+    time; both are None without an open entry. They are not the source capture
+    or permission to write. Apply selects the then-active document set.
     """
 
     path: str
-    label: str
+    entry_name: str | None
+    point: str | None
 
 
 @dataclass(frozen=True)

@@ -68,7 +68,7 @@ def test_alias_apply_returns_authored_rows_without_requiring_resolution(
         {"alias": "control", "value": "$driver.sense"},
         {"alias": "empty", "value": ""},
     ]
-    if selection != "point":
+    if selection == "no_entry":
         original = control.get_alias_rows()
         error = rpc_error(application, "context.aliases_set", {"rows": rows})
         assert (error["code"], error["reason"]) == (
@@ -85,23 +85,17 @@ def test_alias_apply_returns_authored_rows_without_requiring_resolution(
     )
     if info is not None:
         entry = entry_resource(info)
-        stored = entry.load_aliases(point="base")
+        stored = entry.load_aliases(point=control.current_point_label())
         assert list(stored.aliases.items()) == [
             ("driver", "missing"),
             ("control", "$driver.sense"),
             ("empty", ""),
         ]
         assert entry.ledger.events() == ()
-    if selection != "point":
-        error = rpc_error(application, "context.snapshot", {"path": "aliases"})
-        assert (error["code"], error["reason"]) == (
-            ErrorCode.PRECONDITION_FAILED,
-            "no_context",
-        )
     assert application.result("context.aliases_set", {"rows": []}) == {"rows": []}
     assert control.get_alias_rows() == ()
     if info is not None:
-        stored = entry_resource(info).load_aliases(point="base")
+        stored = entry_resource(info).load_aliases(point=control.current_point_label())
         assert stored.aliases == {}
 
 
@@ -142,7 +136,7 @@ def test_alias_apply_storage_failure_does_not_install_candidate(
     control = application.controller.context_control
     original = (AliasRow("driver", "original"),)
     application.result("point.new", {"label": "base"})
-    control.set_alias_rows(original)
+    control.apply_alias_rows(original)
     # A directory destination forces the real entry's atomic replacement to fail.
     alias_path = info.result_path / "points" / "base" / "aliases.yaml"
     alias_path.unlink()
@@ -234,11 +228,22 @@ def test_parameter_set_absent_before_and_nested_yaml_are_not_post_write_readback
 
 
 @pytest.mark.parametrize("opened", [False, True])
-def test_parameter_set_without_point_preserves_failed_precondition(
+def test_parameter_set_requires_entry_but_not_point(
     application: PointApplication, opened: bool
 ) -> None:
     if opened:
         application.open_entry()
+        assert application.result(
+            "context.set_parameter",
+            {"path": "general.description", "value": "new"},
+        ) == {"path": "general.description", "before": None, "value": "new"}
+        assert (
+            application.controller.context_control.read_context().value(
+                "general.description"
+            )
+            == "new"
+        )
+        return
     error = rpc_error(
         application,
         "context.set_parameter",

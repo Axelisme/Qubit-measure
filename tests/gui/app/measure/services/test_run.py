@@ -116,7 +116,7 @@ def test_run_publishes_admitted_source_despite_later_global_change(
     context_free: bool,
     cancelled: bool,
 ) -> None:
-    state, tab_id, adapter = make_state(readiness=ContextReadiness.ACTIVE)
+    state, tab_id, adapter = make_state(readiness=ContextReadiness.POINT)
     q1, q2 = result_sources
     captured = None if context_free else q1
     tab = state.get_tab(tab_id)
@@ -182,7 +182,7 @@ def test_run_publishes_admitted_source_despite_later_global_change(
 def test_run_metadata_fixes_parameter_capture_before_worker_execution(
     result_sources: tuple[ParameterContext, ParameterContext],
 ) -> None:
-    state, tab_id, adapter = make_state(readiness=ContextReadiness.ACTIVE)
+    state, tab_id, adapter = make_state(readiness=ContextReadiness.POINT)
     captured, later = result_sources
     state.set_context(replace(state.session_env, parameters=captured))
     inputs = replace(
@@ -206,7 +206,7 @@ def test_run_metadata_fixes_parameter_capture_before_worker_execution(
 def test_cancelled_run_without_data_keeps_no_previous_source(
     result_sources: tuple[ParameterContext, ParameterContext],
 ) -> None:
-    state, tab_id, adapter = make_state(readiness=ContextReadiness.ACTIVE)
+    state, tab_id, adapter = make_state(readiness=ContextReadiness.POINT)
     q1, q2 = result_sources
     tab = state.get_tab(tab_id)
     commit_run(
@@ -249,7 +249,7 @@ def test_start_run_acquires_lease_and_submits_to_bg():
 
 
 def test_worker_executes_permit_after_model_changes_and_releases_lease():
-    state, tab_id, adapter = make_state(readiness=ContextReadiness.ACTIVE)
+    state, tab_id, adapter = make_state(readiness=ContextReadiness.POINT)
     state.set_context(
         replace(state.session_env, parameters=parameter_capture(gain=0.25))
     )
@@ -308,7 +308,7 @@ def test_artifact_snapshot_keeps_accepted_cfg_after_source_republication() -> No
         post_analysis=SampleAdapter.post_analysis,
     )
 
-    state, tab_id, _adapter = make_state(readiness=ContextReadiness.ACTIVE)
+    state, tab_id, _adapter = make_state(readiness=ContextReadiness.POINT)
     adapter = RecordingSnapshotAdapter
     state.set_context(
         replace(state.session_env, parameters=parameter_capture(gain=0.25))

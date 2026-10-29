@@ -446,7 +446,7 @@ def test_run_and_native_save_keep_admitted_device_alias_after_rebinding(
     from zcu_tools.gui.session.aliases import AliasRow
 
     with native_save_session(tmp_path, qapp) as session:
-        session.context.set_alias_rows((AliasRow("flux_dev", "yoko1"),))
+        session.context.apply_alias_rows((AliasRow("flux_dev", "yoko1"),))
         captured = session.context.read_context()
         state = session.state
         adapter = SnapshotAdapter
@@ -472,7 +472,7 @@ def test_run_and_native_save_keep_admitted_device_alias_after_rebinding(
             experiment_tag=adapter.experiment_tag,
         )
         token = service.start_run(inputs, plots=make_plots())
-        session.context.set_alias_rows((AliasRow("flux_dev", "yoko2"),))
+        session.context.apply_alias_rows((AliasRow("flux_dev", "yoko2"),))
         background.run_work()
         outcome = handles.poll(token)
         assert outcome is not None and outcome.status == "finished"

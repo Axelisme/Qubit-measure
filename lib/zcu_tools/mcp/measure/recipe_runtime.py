@@ -172,7 +172,8 @@ class _Candidate(BaseModel):
 
 
 class _DestinationContext(BaseModel):
-    active_label: str
+    entry_name: str | None
+    point: str | None
 
 
 class _Preview(BaseModel):
@@ -655,7 +656,7 @@ class RecipeRuntime:
             self._images.append(validated_png(base64.b64decode(encoded, validate=True)))
 
     def writeback_proposal(self, tab: str) -> WritebackProposal:
-        """Capture candidates from completed stages; labels are preview-time display only."""
+        """Capture candidates and preview-time location, without authorizing Apply."""
         with self._failure_phase("writeback_read"):
             retained: list[tuple[WritebackItem, str]] = []
             for stage, pane in (("primary", "analysis"), ("post", "post_analysis")):
@@ -674,7 +675,8 @@ class RecipeRuntime:
                         candidate.target_name,
                         WritebackDestination(
                             candidate.actual_path,
-                            preview.destination_context.active_label,
+                            preview.destination_context.entry_name,
+                            preview.destination_context.point,
                         ),
                         candidate.proposed,
                         None,

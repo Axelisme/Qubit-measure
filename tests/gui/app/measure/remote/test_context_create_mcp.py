@@ -34,19 +34,22 @@ def test_context_create_named_clone_and_invalid_source_do_not_change_active(
         invoke("connect", {"port": fx.service.port})
         entry = invoke("rpc_call", {"method": "entry.new", "params": {"name": "q"}})
         assert invoke("rpc_call", {"method": "point.list"})["points"] == []
-        assert fx.ctrl.get_session_env().parameters is None
+        assert fx.ctrl.get_session_env().readiness.value == "global"
         assert invoke(
             "rpc_call",
             {"method": "point.new", "params": {"label": "base", "clone_from": None}},
-        ) == {"kind": "saved_point", "entry_name": entry["name"], "point": "base"}
+        ) == {"entry_name": entry["name"], "point": "base"}
         context = fx.ctrl.context_control
         context.set_parameter(
             require_target(context.read_context()), "general.ext.freq", 5.0
         )
         assert invoke(
             "rpc_call",
-            {"method": "point.new", "params": {"label": "copy", "clone_from": "base"}},
-        ) == {"kind": "saved_point", "entry_name": entry["name"], "point": "copy"}
+            {
+                "method": "point.new",
+                "params": {"label": "copy", "mode": "clone", "clone_from": "base"},
+            },
+        ) == {"entry_name": entry["name"], "point": "copy"}
         assert (
             call(sock, "context.snapshot", {"path": "point.general.ext.freq"})[
                 "result"
@@ -55,7 +58,11 @@ def test_context_create_named_clone_and_invalid_source_do_not_change_active(
         )
         assert selection(invoke) == {"active": "copy", "labels": ["base", "copy"]}
 
-        failed = call(sock, "point.new", {"label": "bad", "clone_from": "missing"})
+        failed = call(
+            sock,
+            "point.new",
+            {"label": "bad", "mode": "clone", "clone_from": "missing"},
+        )
         assert failed["ok"] is False
         assert "missing" in failed["error"]["message"]
         assert selection(invoke) == {"active": "copy", "labels": ["base", "copy"]}
@@ -67,7 +74,7 @@ def test_context_create_named_clone_and_invalid_source_do_not_change_active(
 
         assert invoke(
             "rpc_call", {"method": "point.use", "params": {"label": "base"}}
-        ) == {"kind": "saved_point", "entry_name": entry["name"], "point": "base"}
+        ) == {"entry_name": entry["name"], "point": "base"}
         unknown = call(sock, "point.use", {"label": "ghost"})
         assert unknown["ok"] is False
         assert "ghost" in unknown["error"]["message"]
@@ -106,7 +113,15 @@ def test_duplicate_point_returns_invalid_params_without_side_effects(
             for root in roots
             for path in root.rglob("*")
         }
-        failed = call(sock, "point.new", {"label": "copy", "clone_from": clone})
+        failed = call(
+            sock,
+            "point.new",
+            {
+                "label": "copy",
+                "mode": "clone" if clone is not None else "inherit",
+                "clone_from": clone,
+            },
+        )
         assert failed["ok"] is False
         assert failed["error"]["code"] == "invalid_params"
         assert "exist" in failed["error"]["message"]
@@ -179,7 +194,15 @@ def test_unsafe_point_label_returns_invalid_params_without_side_effects(
             for root in roots
             for path in root.rglob("*")
         }
-        failed = call(sock, "point.new", {"label": label, "clone_from": clone})
+        failed = call(
+            sock,
+            "point.new",
+            {
+                "label": label,
+                "mode": "clone" if clone is not None else "inherit",
+                "clone_from": clone,
+            },
+        )
         assert failed["ok"] is False
         assert failed["error"]["code"] == "invalid_params"
         if label == "":
@@ -263,7 +286,11 @@ def test_invalid_context_source_and_occupied_directory_preserve_selection(
                 "rpc_call",
                 {
                     "method": "point.new",
-                    "params": {"label": "failed", "clone_from": "source"},
+                    "params": {
+                        "label": "failed",
+                        "mode": "clone",
+                        "clone_from": "source",
+                    },
                 },
             )
         assert call(sock, "context.active", {})["result"]["label"] == "active"
@@ -317,11 +344,14 @@ def test_missing_library_allows_clone_and_use_without_creating_files(
         library_copy = library_source.parent.parent / "copy" / library_source.name
 
         for method, params, label in (
-            ("point.new", {"label": "copy", "clone_from": "source"}, "copy"),
+            (
+                "point.new",
+                {"label": "copy", "mode": "clone", "clone_from": "source"},
+                "copy",
+            ),
             ("point.use", {"label": "source"}, "source"),
         ):
             assert invoke("rpc_call", {"method": method, "params": params}) == {
-                "kind": "saved_point",
                 "entry_name": entry["name"],
                 "point": label,
             }
@@ -364,7 +394,7 @@ def test_context_create_default_without_active_is_empty_and_explicit_null_skips_
         assert invoke(
             "rpc_call",
             {"method": "point.new", "params": {"label": "base", "clone_from": None}},
-        ) == {"kind": "saved_point", "entry_name": entry["name"], "point": "base"}
+        ) == {"entry_name": entry["name"], "point": "base"}
         assert (
             call(sock, "context.snapshot", {})["result"]["point"]["general"]["ext"]
             == {}
@@ -376,7 +406,7 @@ def test_context_create_default_without_active_is_empty_and_explicit_null_skips_
         assert invoke(
             "rpc_call",
             {"method": "point.new", "params": {"label": "empty", "clone_from": None}},
-        ) == {"kind": "saved_point", "entry_name": entry["name"], "point": "empty"}
+        ) == {"entry_name": entry["name"], "point": "empty"}
         assert (
             call(sock, "context.snapshot", {})["result"]["point"]["general"]["ext"]
             == {}
