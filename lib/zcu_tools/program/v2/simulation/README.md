@@ -77,7 +77,17 @@ This timing rule is a simulation model, not a sample-exact hardware claim.
 
 This builder is not the acquire frontend. `_simulation_call` still uses the Module tree.
 The core interpreter supports register ALU operations, Z/S flags, DMEM/WMEM and
-native sweep/reps shells. Structured inner loops and branches remain separate work.
+native sweep/reps shells, marked inner loops and register-selected branches.
+Body boundaries distinguish acquisition axes from body-local Repeat counters,
+including loops emitted during Module lowering after QICK loop discovery.
+Inner iterations produce separate slots and retain their nested coordinates.
+Branch dispatch follows compiled register/flag effects and only enters its selected
+marked case. Raw jumps inside case bodies remain unsupported.
+Each ADC must execute its declared static trigger count in every point/shot;
+matching scan totals cannot compensate for a per-shot mismatch. A mismatch raises
+with ADC channel, static count and actual count before returning a request.
+Table lookups and runtime timeline arithmetic use the same register/memory effects,
+including selected waveform ends, timeline maxima, floors and reference debits.
 ARITH uses signed A/D27, B18 and C32 inputs and rejects pre-adder overflow.
 Its bounded result fits signed46; s3 exposes low32 and the configured core source
 exposes low/high32. DIV uses unsigned32 quotient/remainder and rejects zero division.

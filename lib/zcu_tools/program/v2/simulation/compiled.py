@@ -34,7 +34,12 @@ from ..ir.operands import ImmValue, Register, SrcKeyword
 from ._compiled_affine import AffineUpdates, prove_native_shell
 from ._compiled_output import Outputs
 from ._compiled_state import IntArray, Machine
-from ._compiled_stream import DecodedInstruction, NativeLoop, predecode
+from ._compiled_stream import (
+    DecodedInstruction,
+    NativeLoop,
+    StructuredBranch,
+    predecode,
+)
 from .binding import SimulationBinding
 
 
@@ -83,7 +88,7 @@ def _execute(record: DecodedInstruction, machine: Machine, outputs: Outputs) -> 
 
 def _failure(record: DecodedInstruction, cause: Exception) -> ValueError:
     return ValueError(
-        f"{type(record.instruction).__name__} at preopt {record.position}, loops={record.loops}, source={record.source!r}: {cause}"
+        f"{type(record.instruction).__name__} at preopt {record.position}, loops={record.loops}, cases={record.cases}, source={record.source!r}: {cause}"
     )
 
 
@@ -94,18 +99,28 @@ class _OrderedExecution:
         records: tuple[DecodedInstruction, ...],
         loops: dict[str, NativeLoop],
         outputs: Outputs,
+        branches: tuple[StructuredBranch, ...],
     ) -> None:
         self.records, self.loops, self.outputs = records, loops, outputs
+        outputs.loop_positions = {
+            name: records[loop.start].position for name, loop in loops.items()
+        }
         labels = {
             str(r.instruction.name): r.position
             for r in records
             if isinstance(r.instruction, LabelInst)
         }
         self.machine = Machine(prog, 1, labels)
-        self.names = tuple(n for n in prog.loop_dict if n != "reps")
+        self.names = _point_names(records, loops)
         self.dims = tuple(prog.loop_dict[n] for n in self.names)
-        self.coordinates = dict.fromkeys(loops, 0)
+        self.coordinates: dict[str, int] = {}
+        self.branch_jumps: dict[int, tuple[StructuredBranch, bool]] = {}
+        self.selected: dict[str, int] = {}
+        self.branch_starts = {branch.start: branch for branch in branches}
+        for branch in branches:
+            self._branch_shell(branch)
         self.jumps: dict[int, NativeLoop] = {}
+        self.guards: dict[int, NativeLoop] = {}
         for loop in loops.values():
             closing = [
                 i
@@ -117,6 +132,10 @@ class _OrderedExecution:
                     f"JumpInst at preopt native loop {loop.name}: missing/ambiguous backedge"
                 )
             self.jumps[closing[0]] = loop
+            if not loop.native:
+                for index in range(loop.start + 1, loop.body_start):
+                    if isinstance(records[index].instruction, JumpInst):
+                        self.guards[index] = loop
 
     def run(self) -> None:
         pc = 0
@@ -124,6 +143,8 @@ class _OrderedExecution:
             record = self.records[pc]
             try:
                 inst = record.instruction
+                if pc in self.branch_starts:
+                    self._select(self.branch_starts[pc])
                 if isinstance(inst, MetaInst):
                     self._marker(inst)
                 elif isinstance(inst, JumpInst):
@@ -138,6 +159,12 @@ class _OrderedExecution:
     def _marker(self, inst: MetaInst) -> None:
         if inst.type == "LOOP_START":
             self.coordinates[inst.name] = 0
+        elif inst.type == "LOOP_BODY_START":
+            if self.records[self.loops[inst.name].start].body:
+                self._iterations()
+        elif inst.type == "LOOP_END":
+            self.coordinates.pop(inst.name, None)
+            self._iterations()
         elif inst.type == "TIMING_BOUNDARY":
             if inst.name == "body_start":
                 coordinates = tuple(self.coordinates[n] for n in self.names)
@@ -150,6 +177,13 @@ class _OrderedExecution:
             else:
                 self.outputs.finish(self.machine)
 
+    def _iterations(self) -> None:
+        self.outputs.iterations = tuple(
+            (name, index)
+            for name, index in self.coordinates.items()
+            if self.records[self.loops[name].start].body
+        )
+
     def _target(self, inst: JumpInst, position: int) -> int:
         if inst.label is None:
             return int(self.machine.value(inst.addr)[0])
@@ -160,6 +194,12 @@ class _OrderedExecution:
 
     def _jump(self, inst: JumpInst, pc: int) -> int:
         record = self.records[pc]
+        if pc in self.branch_jumps:
+            return self._branch_jump(inst, pc)
+        if pc in self.guards:
+            return self._inner_jump(inst, pc, self.guards[pc], guard=True)
+        if pc in self.jumps and not self.jumps[pc].native:
+            return self._inner_jump(inst, pc, self.jumps[pc], guard=False)
         if pc not in self.jumps:
             if record.body or record.loops or pc != len(self.records) - 2:
                 raise ValueError("unmarked arbitrary jump")
@@ -185,8 +225,71 @@ class _OrderedExecution:
             self.machine.flags = result
         if taken[0]:
             self.coordinates[loop.name] += 1
+            self._iterations()
             return loop.body_start + 1
         return pc + 1
+
+    def _branch_shell(self, branch: StructuredBranch) -> None:
+        header = range(branch.start + 1, branch.cases[0][0])
+        for index in header:
+            if isinstance(self.records[index].instruction, JumpInst):
+                self.branch_jumps[index] = (branch, True)
+        for case_index, (_, end) in enumerate(branch.cases):
+            next_start = (
+                branch.cases[case_index + 1][0]
+                if case_index + 1 < len(branch.cases)
+                else branch.end
+            )
+            for index in range(end + 1, next_start):
+                if isinstance(self.records[index].instruction, JumpInst):
+                    self.branch_jumps[index] = (branch, False)
+
+    def _select(self, branch: StructuredBranch) -> None:
+        selected = int(self.machine.value(Register(branch.compare))[0])
+        if not 0 <= selected < len(branch.cases):
+            raise ValueError(
+                f"branch {branch.name} selector {selected} has no marked case"
+            )
+        self.selected[branch.name] = selected
+
+    def _branch_jump(self, inst: JumpInst, pc: int) -> int:
+        branch, header = self.branch_jumps[pc]
+        if inst.wr is not None or inst.uf or inst.op is not None:
+            raise ValueError("unsupported branch jump side effects")
+        if not self.machine.condition(inst.if_cond)[0]:
+            return pc + 1
+        target = self._target(inst, self.records[pc].position)
+        if header:
+            case_start = branch.cases[self.selected[branch.name]][0]
+            if target == self.records[case_start].position:
+                return case_start
+            # A marked dispatch table may contain forward-only jump stubs.
+            for index in range(pc + 1, branch.cases[0][0]):
+                if self.records[index].position == target:
+                    return index
+        elif target == self.records[branch.end].position:
+            return branch.end
+        raise ValueError(f"branch {branch.name} jump escapes its selected marked case")
+
+    def _inner_jump(
+        self, inst: JumpInst, pc: int, loop: NativeLoop, *, guard: bool
+    ) -> int:
+        boundary = loop.end if guard else loop.body_start
+        if (
+            self._target(inst, self.records[pc].position)
+            != self.records[boundary].position
+        ):
+            raise ValueError("structured loop jump escapes its marked boundary")
+        if inst.wr is not None or inst.uf or inst.op is not None:
+            raise ValueError("unsupported structured loop jump side effects")
+        if not self.machine.condition(inst.if_cond)[0]:
+            return pc + 1
+        if not guard:
+            self.coordinates[loop.name] = int(
+                self.machine.value(Register(loop.counter))[0]
+            )
+            self._iterations()
+        return boundary
 
 
 def _register_effects(inst: BaseInst) -> tuple[set[str], set[str]]:
@@ -214,6 +317,8 @@ def _live_inputs(
     flags = False
     for record in records:
         inst = record.instruction
+        if isinstance(inst, JumpInst):
+            return None
         if not isinstance(inst, BaseInst):
             continue
         if (
@@ -296,6 +401,8 @@ def _vector_shells(
     loops: dict[str, NativeLoop],
     inputs: tuple[set[str], set[str]],
 ) -> dict[str, AffineUpdates] | None:
+    if any(records[loop.start].body for loop in loops.values()):
+        return None
     if inputs[0] & inputs[1]:
         return None
     shells: dict[str, AffineUpdates] = {}
@@ -342,6 +449,16 @@ def _canonical_terminal(records: Sequence[DecodedInstruction]) -> bool:
         and jump.addr.canonical_name == "s15"
         and jump.label is None
         and not any((jump.if_cond, jump.wr, jump.op, jump.uf))
+    )
+
+
+def _point_names(
+    records: tuple[DecodedInstruction, ...], loops: dict[str, NativeLoop]
+) -> tuple[str, ...]:
+    return tuple(
+        name
+        for name, loop in loops.items()
+        if name != "reps" and not records[loop.start].body
     )
 
 
@@ -441,18 +558,18 @@ def build_compiled_request(
     Acquisition still uses the separate Module frontend until its migration.
     """
     prog.compile()
-    records, loops = predecode(prog)
+    records, loops, branches = predecode(prog)
     for channel, config in prog.ro_chs.items():
         if config["trigs"] == 0:
             raise ValueError(
                 f"ADC {channel}: zero-read declaration has no compiled triggers"
             )
-    names = tuple(n for n in prog.loop_dict if n != "reps")
+    names = _point_names(records, loops)
     dims = tuple(prog.loop_dict[n] for n in names)
     outputs = Outputs(prog, prod(dims), routes, binding.envelope_pool)
     if not _try_vector(prog, records, loops, outputs):
         outputs = Outputs(prog, prod(dims), routes, binding.envelope_pool)
-        _OrderedExecution(prog, records, loops, outputs).run()
+        _OrderedExecution(prog, records, loops, outputs, branches).run()
     template = outputs.template()
     windows = tuple(
         ReadoutWindow(

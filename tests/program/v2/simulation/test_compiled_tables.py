@@ -1,0 +1,224 @@
+"""Table and reset effects read from public compiled programs, not Module trees."""
+
+import pytest
+from zcu_tools.experiment.simulation import white_noise
+from zcu_tools.program.v2 import ModularProgramV2
+from zcu_tools.program.v2.mocksoc import make_mock_soccfg
+from zcu_tools.program.v2.modules import LoadValue, LoadWord, ScanWith
+from zcu_tools.program.v2.modules.computed_pulse import ComputedPulse
+from zcu_tools.program.v2.modules.control import Branch, Repeat
+from zcu_tools.program.v2.modules.pulse import PulseCfg, TableLengthPulse
+from zcu_tools.program.v2.modules.readout import (
+    PulseReadout,
+    PulseReadoutCfg,
+    TablePulseReadout,
+)
+from zcu_tools.program.v2.modules.reset import (
+    BathResetCfg,
+    PulseResetCfg,
+    TwoPulseResetCfg,
+)
+from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
+from zcu_tools.program.v2.timeline import TimelineProgramV2
+from zcu_tools.program.v2.utils import readout_freq_words
+
+from tests.program.v2.simulation._compiled_support import request
+
+
+def drive(length=0.1, gain=0.2, *, ch=1, post: float = 0):
+    return PulseCfg(
+        ch=ch,
+        nqz=1,
+        freq=80,
+        gain=gain,
+        waveform=ConstWaveformCfg(length=length),
+        post_delay=post,
+    )
+
+
+def receiver():
+    return PulseReadoutCfg(
+        gen_ch=0,
+        ro_ch=0,
+        nqz=1,
+        freq=100,
+        gain=0.1,
+        waveform=ConstWaveformCfg(length=0.1),
+        ro_length=0.1,
+    )
+
+
+def module_program(modules, *, native=True, sweep=(), reps=2):
+    env = white_noise(std_adc=0, n_gens=3, routes=((0, 0),))
+    if not native:
+        return ModularProgramV2(
+            env.soccfg,
+            modules=modules,
+            sweep=list(sweep),
+            reps=reps,
+            initial_delay=0,
+            relax_delay=0.1,
+        ), env
+
+    class Program(TimelineProgramV2):
+        def _initialize(self, cfg):
+            for name, count in sweep:
+                self.add_loop(name, count)
+            for module in modules:
+                self.declare(module)
+
+        def _body(self, cfg):
+            for module in modules:
+                self.emit(module)
+
+    return Program(env.soccfg, reps=reps, initial_delay=0, relax_delay=0.1), env
+
+
+@pytest.mark.parametrize("native", [False, True])
+@pytest.mark.parametrize("compressed", [False, True])
+def test_loadvalue_selects_compiled_waveform_from_declared_table(native, compressed):
+    loader = LoadValue(
+        "select", [1, 0] * 16, "scan", "selected", auto_compress=compressed
+    )
+    computed = ComputedPulse(
+        "choice", val_reg="selected", pulses=[drive(0.1, 0.2), drive(0.3, -0.4)]
+    )
+    prog, env = module_program(
+        [loader, computed, receiver().build("readout")],
+        native=native,
+        sweep=(("scan", 32),),
+    )
+    result = request(prog, env)
+    assert result.point_dims == (32,)
+    for index in range(32):
+        event = result.materialize_point(index).events[0]
+        assert event.gain == pytest.approx(-0.4 if index % 2 == 0 else 0.2, abs=1e-4)
+        assert event.duration_us == pytest.approx((115 if index % 2 == 0 else 38) / 384)
+
+
+@pytest.mark.parametrize("native", [False, True])
+def test_tablelength_places_next_emission_after_each_selected_quantized_length(native):
+    table = TableLengthPulse("length", drive(), lengths=[0.1, 0.3], idx_reg="scan")
+    prog, env = module_program(
+        [table, receiver().build("readout")], native=native, sweep=(("scan", 2),)
+    )
+    result = request(prog, env)
+    # Legacy lowering keeps its existing duration-table timestamp policy.
+    ends = [43, 129] if native else [44, 130]
+    for index, (duration, end) in enumerate(zip([38, 115], ends, strict=True)):
+        events = result.materialize_point(index).events
+        assert events[0].duration_us == pytest.approx(duration / 384)
+        assert events[1].start_us == pytest.approx(end / 430.08)
+
+
+@pytest.mark.parametrize("native", [False, True])
+def test_loadword_preserves_uint32_patterns_for_pulse_and_adc_consumers(native):
+    gen, adc = readout_freq_words(
+        make_mock_soccfg(), [100, 200], gen_ch=0, ro_ch=0, mixer_freq=None, nqz=1
+    )
+    modules = [
+        LoadWord("frequency", gen, "scan", "freq_word"),
+        LoadWord("adc", adc, "scan", "adc_word"),
+        LoadWord("gain", [3276, (-6552) % 2**32], "scan", "gain_word"),
+        PulseReadout(
+            "readout",
+            receiver(),
+            freq_val="freq_word",
+            ro_freq_val="adc_word",
+            gain_val="gain_word",
+        ),
+    ]
+    prog, env = module_program(modules, native=native, sweep=(("scan", 2),))
+    result = request(prog, env)
+    for index, (frequency, gain) in enumerate([(100, 3276), (200, -6552)]):
+        point = result.materialize_point(index)
+        assert point.events[0].frequency_mhz == pytest.approx(frequency, abs=1e-4)
+        assert point.events[0].gain == pytest.approx(gain / 32766)
+        assert point.readouts[0].frequency_mhz == pytest.approx((frequency,), abs=1e-4)
+
+
+@pytest.mark.parametrize("native", [False, True])
+def test_table_readout_exec_after_updates_and_wrap_survive_outer_reps(native):
+    gen, adc = readout_freq_words(
+        make_mock_soccfg(), [100, 250, 200], gen_ch=0, ro_ch=0, mixer_freq=None, nqz=1
+    )
+    table = TablePulseReadout(
+        "readout", receiver(), idx_reg="scan", freq_words=gen, ro_freq_words=adc
+    )
+    prog, env = module_program([table], native=native, sweep=(("scan", 3),), reps=3)
+    result = request(prog, env)
+    assert [
+        result.materialize_point(i).events[0].frequency_mhz for i in range(3)
+    ] == pytest.approx([100, 250, 200], abs=1e-4)
+    assert [
+        result.materialize_point(i).readouts[0].frequency_mhz[0] for i in range(3)
+    ] == pytest.approx([100, 250, 200], abs=1e-4)
+    assert request(prog, env).materialize_point(0) == result.materialize_point(0)
+
+
+@pytest.mark.parametrize("native", [False, True])
+def test_scanwith_uses_local_counter_to_select_each_candidate(native):
+    choice = ComputedPulse(
+        "choice",
+        val_reg="selected",
+        pulses=[drive(gain=0.1), drive(gain=0.2), drive(gain=0.3)],
+    )
+    scan = ScanWith("local", [2, 0, 1], val_reg="selected").add_content(choice)
+    prog, env = module_program([scan, receiver().build("readout")], native=native)
+    result = request(prog, env)
+    events = result.materialize_point(0).events
+    assert [e.gain for e in events[:3]] == pytest.approx([0.3, 0.1, 0.2], abs=1e-4)
+    assert result.point_dims == ()
+    assert [e.iterations[0][1] for e in events[:3]] == [0, 1, 2]
+
+
+def test_legacy_branch_dispatch_table_and_repeat_preserve_selected_sources():
+    choice = Branch(
+        "scan",
+        drive(gain=0.2).build("first"),
+        Repeat("inner", 2).add_content(drive(gain=-0.4).build("second")),
+    )
+    prog, env = module_program(
+        [choice, receiver().build("readout")], native=False, sweep=(("scan", 2),)
+    )
+    result = request(prog, env)
+    assert [e.source for e in result.materialize_point(0).events] == [
+        "first",
+        "readout_pulse",
+    ]
+    assert [e.source for e in result.materialize_point(1).events] == [
+        "second",
+        "second",
+        "readout_pulse",
+    ]
+    assert [e.iterations for e in result.materialize_point(1).events[:2]] == [
+        (("inner", 0),),
+        (("inner", 1),),
+    ]
+
+
+@pytest.mark.parametrize("kind", ["single", "parallel", "bath"])
+def test_native_reset_forms_expand_physical_pulses_and_paired_post_delays(kind):
+    cavity = drive(0.1, ch=1, post=0.02)
+    qubit = drive(0.3, ch=2)
+    if kind == "single":
+        reset = PulseResetCfg(pulse_cfg=cavity).build("reset")
+        expected = [(1, 0)]
+        readout_start = 52
+    elif kind == "parallel":
+        reset = TwoPulseResetCfg(pulse1_cfg=cavity, pulse2_cfg=qubit).build("reset")
+        expected = [(1, 0), (2, 0)]
+        readout_start = 129
+    else:
+        reset = BathResetCfg(
+            cavity_tone_cfg=cavity, qubit_tone_cfg=qubit, pi2_cfg=drive(0.05, ch=1)
+        ).build("reset")
+        expected = [(1, 0), (2, 0), (1, 52)]
+        readout_start = 129
+    prog, env = module_program([reset, receiver().build("readout")])
+    events = request(prog, env).materialize_point(0).events
+    assert [e.gen_ch for e in events[:-1]] == [ch for ch, _ in expected]
+    assert [e.start_us for e in events[:-1]] == pytest.approx(
+        [t / 430.08 for _, t in expected]
+    )
+    assert events[-1].start_us == pytest.approx(readout_start / 430.08)

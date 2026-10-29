@@ -51,7 +51,9 @@ class Outputs:
             ctrl = prog.soccfg["readouts"][ch].get("tproc_ctrl")
             if ctrl is not None:
                 self._port(int(ctrl), "ro", ch)
-        self.events: dict[tuple[int, int], EventSlot] = {}
+        self.iterations: tuple[tuple[str, int], ...] = ()
+        self.loop_positions: dict[str, int] = {}
+        self.events: dict[tuple[int, int, tuple[tuple[str, int], ...]], EventSlot] = {}
         # Per-port FIFO rows: absolute effective us, uint32 frequency, phase degrees,
         # and emitting preopt position. Absolute time retains pending shot carry.
         self.configs: dict[int, list[NDArray[np.float64]]] = {}
@@ -63,7 +65,7 @@ class Outputs:
         self.points = np.arange(size, dtype=np.int64)
         self.origin = np.zeros(size, dtype=np.int64)
         self.read_count: dict[int, int] = {}
-        self.shot_events: set[tuple[int, int]] = set()
+        self.shot_events: set[tuple[int, int, tuple[tuple[str, int], ...]]] = set()
 
     def _port(self, port: int, kind: str, ch: int) -> None:
         if port in self.ports:
@@ -172,7 +174,7 @@ class Outputs:
         self.current_end = np.maximum(self.current_end, start + duration)
         if not np.any(active):
             return
-        key = (position, 0)
+        key = (position, 0, self.iterations)
         self._emit(
             machine, key, ch, source, (start, duration, freq, phase, gain, active)
         )
@@ -220,17 +222,17 @@ class Outputs:
             )
             self._emit(
                 machine,
-                (position, tone),
+                (position, tone, self.iterations),
                 ch,
                 source,
                 (start, duration, frequency, phase, gain, mask),
             )
-            self.events[(position, tone)].active[self.points] = mask
+            self.events[(position, tone, self.iterations)].active[self.points] = mask
 
     def _emit(
         self,
         machine: Machine,
-        key: tuple[int, int],
+        key: tuple[int, int, tuple[tuple[str, int], ...]],
         ch: int,
         source: str,
         values: tuple[
@@ -247,7 +249,7 @@ class Outputs:
             self.events[key] = EventSlot(
                 ch,
                 source,
-                (),
+                self.iterations,
                 zero.copy(),
                 zero.copy(),
                 zero.copy(),
@@ -351,10 +353,6 @@ class Outputs:
             if not np.all(active):
                 raise ValueError("lane-dependent trigger layout")
             index = self.read_count[ch]
-            if index >= self.prog.ro_chs[ch]["trigs"]:
-                raise ValueError(
-                    f"ADC {ch}: static={self.prog.ro_chs[ch]['trigs']}, actual={index + 1} reads in this shot"
-                )
             while len(self.reads[ch]) <= index:
                 self.reads[ch].append(np.zeros((self.size, 3), dtype=np.float64))
             read = self.reads[ch][index]
@@ -473,10 +471,20 @@ class Outputs:
             )
         return TimelineTemplate(
             np.arange(self.size, dtype=np.int64),
-            tuple(self.events.values()),
+            tuple(
+                self.events[key] for key in sorted(self.events, key=self._event_order)
+            ),
             tuple(slots),
             self.duration.copy(),
         )
+
+    def _event_order(
+        self, key: tuple[int, int, tuple[tuple[str, int], ...]]
+    ) -> tuple[tuple[int, int], ...]:
+        position, tone, iterations = key
+        return tuple(
+            (self.loop_positions[name], index) for name, index in iterations
+        ) + ((position, tone),)
 
     def _runtime_frequencies(
         self, ch: int, values: NDArray[np.float64], routes: IntArray
