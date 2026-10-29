@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 
+from ..base import MyProgramV2
 from ..modular import ModularProgramV2
 from ..modules.readout import MuxReadout
 
@@ -36,24 +37,37 @@ def mux_parameters(
     mixer = float(gen["mixer_freq"]["rounded"])
     result = []
     for tone, compiled in zip(module.cfg.tones, gen["mux_tones"], strict=True):
-        ro = prog.ro_chs[tone.ro_ch]
-        registers = ro["ro_config"].copy()
-        prog.soccfg.calc_ro_freq(
-            prog.soccfg["readouts"][tone.ro_ch],
-            ro,
-            registers,
-            prog.ABSOLUTE_FREQS,
-            mixer,
-            prog.FLIP_DOWNCONVERSION,
-        )
+        frequency, phase = static_readout_parameters(prog, tone.ro_ch, mixer_mhz=mixer)
         result.append(
             MuxToneParameters(
                 tone.ro_ch,
                 float(compiled["freq_rounded"]),
                 float(compiled["phase_rounded"]),
                 float(compiled["gain_rounded"]),
-                float(registers["f_rounded"]),
-                float(registers["phase_rounded"]),
+                frequency,
+                phase,
             )
         )
     return tuple(result)
+
+
+def static_readout_parameters(
+    prog: MyProgramV2, channel: int, *, mixer_mhz: float
+) -> tuple[float, float]:
+    """Return resolved static ADC demodulation MHz/degrees without hardware I/O.
+
+    channel indexes a declared non-tProc-controlled ADC; its ro_config must have
+    been compiled by QICK. mixer_mhz is the generator's already-rounded mixer.
+    Missing declaration/configuration propagates as KeyError.
+    """
+    ro = prog.ro_chs[channel]
+    registers = ro["ro_config"].copy()
+    prog.soccfg.calc_ro_freq(
+        prog.soccfg["readouts"][channel],
+        ro,
+        registers,
+        prog.ABSOLUTE_FREQS,
+        mixer_mhz,
+        prog.FLIP_DOWNCONVERSION,
+    )
+    return float(registers["f_rounded"]), float(registers["phase_rounded"])

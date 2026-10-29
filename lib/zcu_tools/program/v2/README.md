@@ -28,6 +28,9 @@ revision. Generators are `axis_signal_gen_v6`, with 32-bit DDS/phase,
 12288 MHz DDS, 384 MHz fabric, 16 envelope samples/clock, max gain word 32766
 and 65536 envelope samples. ADCs are `axis_readout_v2`, with 32-bit DDS,
 2457.6 MHz DDS, 307.2 MHz output and 8192-sample accumulated/decimated buffers.
+Generator `tproc_ch` and ADC `tproc_ctrl` occupy distinct wave-output ports.
+ADC `tproc_ch` indexes readback inputs, a separate namespace.
+Ordinary ADCs use distinct bits on their shared trigger output port.
 The ordinary profile does not offer mixers, mux channels or weighted readouts.
 `make_mux_mock_soccfg(n_gens, n_readouts, gen_ch=..., ro_chs=...)` separately
 selects one fixed mixmux8 generator and 1..8 unique static PFBv4 output routes.
@@ -81,6 +84,12 @@ The scalar, paired and array decoders in `utils` take `cfg=PulseReadoutCfg`.
 They borrow its generator/ADC channels, mixer frequency and Nyquist zone directly;
 they do not change the cfg or use its waveform, gain or readout-window settings.
 Encoding with `readout_freq_words` still takes those four explicit settings.
+`generator_frequencies_from_words` accepts an already-rounded physical mixer
+frequency and generator channel, without constructing a readout cfg.
+`readout_frequencies_from_words` accepts a declared ADC channel and an explicit,
+same-shaped physical reference array. It selects the nearest ADC-DDS image.
+The compiled request builder supplies references from actual output effects.
+The cfg-based APIs delegate to these same word decoders.
 
 ## Architecture
 

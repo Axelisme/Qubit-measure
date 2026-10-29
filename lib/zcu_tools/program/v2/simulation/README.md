@@ -55,6 +55,21 @@ construction. Single-fluxonium uses it to freeze losses once per acquisition.
 Preparation failures propagate and release admission without consuming a sequence.
 Hardware acquisition does not call the binding or this clock.
 
+## Compiled request builder
+
+`simulation.compiled.build_compiled_request(prog, mode, binding, sequence, routes=soc.routes)`
+reads `prog.compiled_stream` and returns detached numeric slots without calling a backend.
+It predecodes the snapshot once. Proven native affine shells use array lanes.
+Other carried state follows instruction order across scan points.
+The builder rejects rep-varying outputs and unresolved readout routes before returning a request.
+Runtime ADC words use overlapping output carriers to resolve their frequency image.
+Static ADC configuration uses the shared QICK `calc_ro_freq` adapter.
+
+This builder is not the acquire frontend. `_simulation_call` still uses the Module tree.
+The compiled interpreter is under construction. Its remaining ALU operations and
+same-timestamp generator waveform playback still need validation.
+Do not infer support for every control form or registered experiment from this builder.
+
 ## Build and own an environment
 
 An environment file is trusted Python, not a sandbox or a configuration DSL.

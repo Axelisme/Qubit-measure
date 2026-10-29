@@ -91,11 +91,11 @@ def _build_mock_cfg(n_gens: int = 2, n_readouts: int = 1) -> dict[str, object]:
             "has_weights": False,
             "has_outsel": True,
             "iq_offset": 0.0,
-            "tproc_ctrl": ch_idx,
+            "tproc_ctrl": n_gens + ch_idx,
             "tproc_ch": ch_idx,
             "trigger_type": "dport",
             "trigger_port": 0,
-            "trigger_bit": 0,
+            "trigger_bit": ch_idx,
         }
 
     dac_names = [f"{i:02d}" for i in range(n_gens)]
