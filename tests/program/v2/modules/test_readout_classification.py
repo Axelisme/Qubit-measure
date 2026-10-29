@@ -1,7 +1,7 @@
 """Readout calibration becomes explicit, per-ADC acquisition parameters."""
 
 import pytest
-from zcu_tools.cfg_model import CircleClassifier, LinearClassifier
+from zcu_tools.cfg_model import Centroid3Classifier, CircleClassifier, LinearClassifier
 from zcu_tools.program.v2.modules import readout
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 
@@ -57,6 +57,69 @@ def test_circle_lookup_uses_adc_and_accepts_centers_without_radius():
 def test_circle_lookup_rejects_unavailable_centers(classifier, ro_ch, message):
     with pytest.raises(ValueError, match=message):
         readout.circle_classifier(pulse(classifier), ro_ch=ro_ch)
+
+
+def centroid3():
+    return Centroid3Classifier(
+        g_center=0j,
+        e_center=2 + 0j,
+        f_center=2j,
+        confusion_matrix=[[0.8, 0.1, 0.1], [0.2, 0.7, 0.1], [0.0, 0.1, 0.9]],
+    )
+
+
+def test_centroid3_lookup_and_mapping_are_detached_and_use_adc_numbers():
+    from tests.program.v2._mux_support import native_mux
+
+    cfg = native_mux((4, 1))
+    first = centroid3()
+    second = first.with_updates(f_center=3j)
+    cfg.tones[0].classifier = first
+    cfg.tones[1].classifier = second
+    assert readout.centroid3_classifier(cfg, ro_ch=1) == second
+    assert readout.centroid3_classifier(pulse(first), ro_ch=2) == first
+    detached = readout.centroid3_classifier(cfg, ro_ch=4)
+    detached.confusion_matrix[0][0] = -99.0
+    detached.f_center = 99j
+    mapping = readout.classification_parameters(cfg)
+    assert mapping == {4: first, 1: second}
+    mapped = mapping[1]
+    if not isinstance(mapped, Centroid3Classifier):
+        pytest.fail("classification_parameters lost the centroid3 type")
+    mapped.confusion_matrix[0][0] = -99.0
+    assert readout.centroid3_classifier(cfg, ro_ch=4) == first
+    assert readout.centroid3_classifier(cfg, ro_ch=1) == second
+
+
+@pytest.mark.parametrize(
+    "classifier, ro_ch, message",
+    [
+        (None, 2, "ADC 2: classifier missing"),
+        (CircleClassifier(g_center=0j, e_center=1j), 2, "ADC 2: circle.*centroid3"),
+        (LinearClassifier(angle=0.0, threshold=0.0), 2, "ADC 2: linear.*centroid3"),
+        (None, 7, "ADC 7: not declared"),
+    ],
+)
+def test_centroid3_lookup_rejects_missing_wrong_type_and_unknown_adc(
+    classifier, ro_ch, message
+):
+    with pytest.raises(ValueError, match=message):
+        readout.centroid3_classifier(pulse(classifier), ro_ch=ro_ch)
+
+
+def test_centroid3_is_not_circle_other_or_herald_calibration():
+    import numpy as np
+    from zcu_tools.program.herald import HeraldSpec, herald_ground_mask
+
+    cfg = pulse(centroid3())
+    with pytest.raises(ValueError, match="centroid3.*circle"):
+        readout.circle_classifier(cfg, ro_ch=2)
+    with pytest.raises(ValueError, match="centroid3.*other"):
+        readout.classification_parameters(cfg, require_other=True)
+    with pytest.raises(ValueError, match="centroid3.*herald"):
+        herald_ground_mask(np.array([0j], dtype=np.complex128), centroid3())
+    with pytest.raises(ValueError, match="centroid3.*herald"):
+        HeraldSpec(2, 0, centroid3(), 2)
 
 
 def test_readout_supplies_explicit_adc_classification():
