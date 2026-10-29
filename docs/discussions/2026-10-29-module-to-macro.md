@@ -167,3 +167,37 @@ tProc v2 的時間可以是指令內的字面值，或先放進暫存器。掃�
 ### 仍待處理
 
 `wait_auto`／`resync` 對具名 timeline 的語意、多 readout 或 readout 窗口長於 pulse 時 post-delay 的基準、巢狀 tag、同一 instance 多次發射（heralding 的 `occurrence`）、QICK 版本耦合，以及 Repeat、Branch、LoadValue、TableLengthPulse 等的轉換，留給實作 spec。
+
+## 後記五（2026-10-29 晚，A 階段細節與 builder 重新設計）
+
+### A 階段的前置決定
+
+- 新基底直接繼承 QICK 的 program，dmem 緩衝與 route 保護改為新舊共用；可以覆寫 QICK 方法，以可維護為準（使用者：「可以適當的重寫qick方法，只要夠好維護」）。
+- reps 與 shot body 的辨識：覆寫 `make_program`，照 QICK 的順序執行，在初始化結束、body 開始、body 結束插入不產生指令的邊界標記，迴圈結構讀 `self.loops`；模擬器只解讀兩個標記之間，外殼的 `final_wait`／`final_delay` 等只驗型別。
+- body 內在具名 timeline 上不支援 `wait_auto`／`resync`（第一版報錯）；`make_program` 外殼的 `final_wait` 不受限。
+- program 層的控制結構用 `with`：`with self.join() as j: with j.branch(): ...`、`with self.repeat(...)`、`with self.branch(by=...) as b: with b.case(): ...`；dmem 表在 `_initialize` 宣告、body 使用（使用者：「A可以，示意寫法沒問題」）。
+- retry、early stop、進度屬於 builder 的功能，自己寫 program 的作者自行實作（使用者：「retry/early_stop等可以算是builder提供的功能，想自己寫program的作者要自己實現對應功能」）。
+
+### builder 重新設計
+
+使用者：「我覺得新原生寫法的可讀性比目前builder的寫法好，對於包裝的工具來說這是很尷尬的，可以考慮重新設計」。現行 builder 做四件事：描述序列（`.add(...)`）、宣告掃描（`declare_sweep`）、執行取數（rounds、retry、early stop、進度、Stop、Schedule 整合）與隔離（deepcopy cfg）。
+
+討論過的方向：
+
+- builder 只當執行器、序列一律寫 program：使用者指出「Builder的優勢是不用init與body分開，以及inline的pulse sequence宣告」，不採。
+- 在 program 層 emit 時自動宣告：使用者「我覺得不太好，用program寫法就該接近原生的寫法」，不採。
+- 採用：「builder才該設計成一個with scope，內部是像body的寫法」。
+
+```python
+with sched.builder(soc, soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay) as b:
+    length = b.sweep("length", cfg.length)        # 範圍內任何位置宣告
+    b.emit(Reset("reset", cfg.reset))
+    b.emit(Pulse("pi_pulse", cfg.pi_pulse))
+    b.delay(length)
+    b.emit(Readout("readout", cfg.readout))
+# 離開 with：依記錄產生 program——宣告放 _initialize、掃描變成迴圈、發射依序放 _body
+
+data = b.acquire(rounds=cfg.rounds, retry=cfg.acquire_retry, stop=...)
+```
+
+使用者確認（「可以」）：program 層接近原生、不自動宣告；builder 是先記錄、離開範圍時才產生 program 的 `with` 範圍，錯誤在離開時報出；`acquire` 寫在範圍之後；builder 範圍內的方法與 program 層完全同名（含 `timeline=` 與 `join`／`repeat`／`branch`）；新 builder 與既有實驗的改寫排在模擬器改讀 macro 之後，逐一以 `prog_list` 比對遷移。
