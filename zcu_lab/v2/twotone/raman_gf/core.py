@@ -10,6 +10,7 @@ from typing import Annotated, ClassVar, Literal
 import numpy as np
 from numpy.typing import NDArray
 from pydantic import Field
+from qick import QickConfig
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.core.waveform_format import decode_npz
 from zcu_tools.experiment import Experiment
@@ -99,6 +100,49 @@ class RamanGFCfg(ConfigBase):
     )
 
 
+def scan_points(
+    cfg: RamanGFCfg, soccfg: QickConfig
+) -> tuple[NDArray[np.float64], NDArray[np.float64], float]:
+    """Return flat carrier MHz, DAC gains and envelope intensity integral in us.
+
+    Points are detuning-major and gain-minor. Quantize scalar carriers/gains
+    independently using the selected generator and mixer. Reject a non-arbitrary
+    or zero-intensity envelope, and negative area-scan gains, before acquisition.
+    The integral describes source samples, not a calibrated rotation angle.
+    """
+    if not isinstance(cfg.drive.waveform, ArbWaveformCfg):
+        raise ValueError(
+            "Raman drive requires a sampled arbitrary sqrt(cos)-type envelope"
+        )
+    if min(cfg.gain.start, cfg.gain.stop) < 0:
+        raise ValueError("Raman area scan requires nonnegative drive gains")
+    samples = decode_npz(Path(cfg.drive.waveform.path).read_bytes()).samples
+    intensity = samples.idata**2
+    if samples.qdata is not None:
+        intensity = intensity + samples.qdata**2
+    integral = float(np.trapezoid(intensity, samples.time))
+    if integral <= 0:
+        raise ValueError("Raman envelope must have nonzero integrated intensity")
+    detunings = np.linspace(cfg.detuning.start, cfg.detuning.stop, cfg.detuning.expts)
+    gains = np.linspace(cfg.gain.start, cfg.gain.stop, cfg.gain.expts)
+    if cfg.scan_mode == "area":
+        detunings = detunings[:1]
+    elif cfg.scan_mode == "frequency":
+        gains = gains[:1]
+    frequencies = round_zcu_freq(
+        cfg.carrier_mhz + detunings / 2,
+        soccfg,
+        cfg.drive.ch,
+        mixer_freq=cfg.drive.mixer_freq,
+    )
+    gains = round_zcu_gain(gains, soccfg, cfg.drive.ch)
+    return (
+        np.repeat(frequencies, len(gains)),
+        np.tile(gains, len(frequencies)),
+        integral,
+    )
+
+
 def restore_result(data: GroupedLoadData[RamanGFCfg]) -> RamanGFResult:
     """Restore all acquired IQ and actual coordinates without requiring a valid cfg."""
     return RamanGFResult(
@@ -163,36 +207,7 @@ class RamanGFExp(Experiment[RamanGFResult, RamanGFCfg]):
         interpolation/quantization is not an experimental rotation calibration.
         """
         cfg = deepcopy(cfg)
-        if not isinstance(cfg.drive.waveform, ArbWaveformCfg):
-            raise ValueError(
-                "Raman drive requires a sampled arbitrary sqrt(cos)-type envelope"
-            )
-        if min(cfg.gain.start, cfg.gain.stop) < 0:
-            raise ValueError("Raman area scan requires nonnegative drive gains")
-        samples = decode_npz(Path(cfg.drive.waveform.path).read_bytes()).samples
-        intensity = samples.idata**2
-        if samples.qdata is not None:
-            intensity = intensity + samples.qdata**2
-        integral = float(np.trapezoid(intensity, samples.time))
-        if integral <= 0:
-            raise ValueError("Raman envelope must have nonzero integrated intensity")
-        detunings = np.linspace(
-            cfg.detuning.start, cfg.detuning.stop, cfg.detuning.expts
-        )
-        gains = np.linspace(cfg.gain.start, cfg.gain.stop, cfg.gain.expts)
-        if cfg.scan_mode == "area":
-            detunings = detunings[:1]
-        elif cfg.scan_mode == "frequency":
-            gains = gains[:1]
-        frequencies = round_zcu_freq(
-            cfg.carrier_mhz + detunings / 2,
-            context.soccfg,
-            cfg.drive.ch,
-            mixer_freq=cfg.drive.mixer_freq,
-        )
-        gains = round_zcu_gain(gains, context.soccfg, cfg.drive.ch)
-        point_frequencies = np.repeat(frequencies, len(gains))
-        point_gains = np.tile(gains, len(frequencies))
+        point_frequencies, point_gains, integral = scan_points(cfg, context.soccfg)
         signals = SignalBuffer((len(point_gains), cfg.shots))
         references = SignalBuffer((3, cfg.shots))
 
