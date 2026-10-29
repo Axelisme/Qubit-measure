@@ -41,7 +41,9 @@ def nearest_centroid3(
     if not np.isfinite(signals).all() or not np.isfinite(centers).all():
         raise ValueError("Three-state classification requires finite IQ and centers")
     if len(set(centers)) != 3:
-        raise ValueError("Three-state classification requires distinct reference IQ centers")
+        raise ValueError(
+            "Three-state classification requires distinct reference IQ centers"
+        )
     return np.asarray(
         np.argmin(np.abs(signals[..., None] - centers), axis=-1), dtype=np.int64
     )
