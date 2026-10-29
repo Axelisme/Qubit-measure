@@ -13,6 +13,7 @@ from scipy.integrate import solve_ivp
 from zcu_tools.core.simulation import (
     AcquireRequest,
     AcquisitionMode,
+    ChargeDriveRequirement,
     ReadoutSlot,
     ReadoutWindow,
     RoundRequest,
@@ -456,7 +457,14 @@ def test_overlapping_named_drives_acquire_and_respond_to_each_calibration():
                 ],
                 reps=100_000,
             )
-            average = program.acquire(env.soc, progress=False)
+            average = program.acquire(
+                env.soc,
+                progress=False,
+                charge_requirements=(
+                    ChargeDriveRequirement("first drive", 1),
+                    ChargeDriveRequirement("second drive", 5),
+                ),
+            )
             assert average is not None
             means.append(np.asarray(average))
         finally:

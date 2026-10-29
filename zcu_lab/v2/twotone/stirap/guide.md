@@ -16,7 +16,7 @@ Do not interpret mean IQ curves or heatmaps as populations or gate fidelity.
 2. At the intended bias, use `twotone/freq` to find 0–1 and 0–3 from ground. Narrow each scan before accepting its frequency.
 3. Calibrate a pi pulse on 0–3 with Rabi. In `twotone/freq`, enable `init_pulse` and enter this pi03 preparation. Then scan the probe to find 3–2 from the prepared state.
 4. Record the measured 0–3 and 3–2 carriers in MHz. Enter them as Pump carrier and Stokes carrier. Neither field has a model-derived default.
-5. Confirm two separately bound charge-drive generators and their allowed gains. The displayed generator numbers are editable starting values, not proof of wiring.
+5. Confirm two separately bound charge-drive generators and their allowed gains. The displayed generator numbers are editable starting values, not proof of wiring. In the single-fluxonium simulator, acquire explicitly requires Pump and Stokes to bind declared charge lines; a flux, readout or unbound generator is rejected before evolution. On real hardware, the operator must verify both physical channel roles. Hardware acquisition does not carry or execute this simulator-only check.
 6. Prepare g/e/f readout references with `singleshot/qutrit_population`. Analyze the references and Apply the proposed centroid3 classifier to the captured readout library module. Confirm the target and its bound resonator slot before Apply. Reset or reopen STIRAP to capture that module, then Run. Circle rejection is not an f measurement.
 
 Open `New Tab → twotone → stirap`.

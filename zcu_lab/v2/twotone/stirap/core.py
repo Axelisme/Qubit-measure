@@ -10,6 +10,7 @@ from numpy.typing import NDArray
 from pydantic import Field, model_validator
 from zcu_tools.analysis.singleshot import Centroid3IQAnalysis, analyze_centroid3_iq
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
+from zcu_tools.core.simulation import ChargeDriveRequirement
 from zcu_tools.experiment import AxesSpec, Experiment
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
@@ -48,7 +49,7 @@ class DetuningScan(ConfigBase):
 class StirapCfg(ConfigBase):
     """Measured carriers in MHz, Gaussian sigma/lead/timing in us and signed gains.
 
-    pump_ch/stokes_ch must be different bound generators. Pump drives 0–3;
+    pump_ch/stokes_ch must be different charge-drive generators. Pump drives 0–3;
     Stokes drives 2–3. Pulses last six sigma with zero extra pre/post delays.
     stokes_lead is fixed outside delay mode; positive means Stokes first.
     scan changes only lead, common gain scale or two carrier detunings.
@@ -142,7 +143,8 @@ class StirapExp(Experiment[StirapResult, StirapCfg]):
         every mode. Delay/amplitude scans have Ny=1; detuning is Pump x Stokes.
         Coordinates are requested values; the board quantizes pulse timing,
         frequency and gain. Return every raw shot; cancellation leaves NaNs.
-        Unbound generators fail in simulator preflight, not by rerouting a pulse.
+        Single-fluxonium preflight requires both generators to bind charge lines.
+        Hardware wiring roles remain the operator responsibility.
         """
         scan = cfg.scan
         if scan.kind == "delay":
@@ -215,7 +217,13 @@ class StirapExp(Experiment[StirapResult, StirapCfg]):
                     )
                     try:
                         program.acquire(
-                            context.soc, progress=True, cancel_flag=step.stop
+                            context.soc,
+                            progress=True,
+                            cancel_flag=step.stop,
+                            charge_requirements=(
+                                ChargeDriveRequirement("Pump", cfg.pump_ch),
+                                ChargeDriveRequirement("Stokes", cfg.stokes_ch),
+                            ),
                         )
                     except StoppedPartialAcquireError:
                         step.set_stop()

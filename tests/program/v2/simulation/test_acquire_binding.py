@@ -8,6 +8,7 @@ from collections.abc import Iterator
 import numpy as np
 import pytest
 from qick.qick_asm import AcquireMixin
+from zcu_tools.core.simulation import ChargeDriveRequirement
 from zcu_tools.experiment.simulation import SimulationEnvironment, white_noise
 from zcu_tools.program.v2 import ModularProgramV2
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
@@ -65,6 +66,21 @@ def acquisition() -> Iterator[tuple[SimulationEnvironment, ModularProgramV2]]:
             rounds=2,
         )
         env.devices.close_all_devices()
+
+
+def test_acquire_transmits_charge_requirements_without_leaking_to_next_call(
+    acquisition,
+):
+    env, prog = acquisition
+    requirements = (
+        ChargeDriveRequirement("Pump", 1),
+        ChargeDriveRequirement("Stokes", 999),
+    )
+    result = prog.acquire(env.soc, progress=False, charge_requirements=requirements)
+    assert result[0].shape[-1] == 2
+    assert request_of(env).charge_requirements == requirements
+    prog.acquire(env.soc, progress=False)
+    assert request_of(env).charge_requirements == ()
 
 
 def test_acquire_reuses_callable_metadata_across_programs_without_retaining_self(
