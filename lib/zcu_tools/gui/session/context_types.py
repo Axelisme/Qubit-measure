@@ -13,6 +13,7 @@ from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputEr
 
 if TYPE_CHECKING:
     from zcu_tools.cfg_model import ModuleSpec, WaveformSpec
+    from zcu_tools.resources.context.library import LibrarySnapshot
 
 
 class SavedPoint(BaseModel):
@@ -72,6 +73,31 @@ class LibraryChange:
             raise InvalidInputError("Only module put/replace require a module Spec")
         if (self.waveform is not None) != (writes and self.kind == "waveform"):
             raise InvalidInputError("Only waveform put/replace require a waveform Spec")
+
+    def apply(self, library: LibrarySnapshot) -> LibrarySnapshot:
+        """Return a changed snapshot without mutating the supplied library.
+
+        Put creates or overwrites path. Replace requires an existing path and
+        writes its Spec at new_path, relocating first when the paths differ.
+        Rename relocates without evaluating children; delete does not cascade.
+        Child library keys remain keys. The library owner reports KeyError for
+        missing sources and ValueError for invalid families or destinations.
+        Put/replace without a Spec raises InvalidInputError.
+        """
+        destination = self.new_path if self.new_path is not None else self.path
+        if self.action == "delete":
+            return library.deleted(self.path, kind=self.kind)
+        if self.action == "rename":
+            return library.renamed(self.path, destination, kind=self.kind)
+        if self.action == "replace":
+            library.entry_value(self.path, kind=self.kind)
+            if destination != self.path:
+                library = library.renamed(self.path, destination, kind=self.kind)
+        if self.module is not None:
+            return library.replaced_module(destination, self.module)
+        if self.waveform is not None:
+            return library.replaced_waveform(destination, self.waveform)
+        raise InvalidInputError("Library put/replace requires a Spec")
 
 
 @dataclass(frozen=True)
