@@ -6,7 +6,13 @@ from threading import Event
 
 import numpy as np
 import pytest
-from zcu_tools.simulate.evolution import Engine, EnvelopeSpec
+from zcu_tools.simulate.evolution import (
+    Engine,
+    EnvelopeSpec,
+    ModelSource,
+    SecularDrive,
+    SecularModel,
+)
 from zcu_tools.simulate.evolution.kernel import ApplyContext, KernelContext
 
 from ._engine import RecordingKernel, batch, source, track
@@ -128,3 +134,60 @@ def test_small_gate_inventory_keeps_existing_chunk_strategy():
     _, legacy_calls = evolve_train(21, 6, gates=2)
     _, selected_calls = evolve_train(21, None, gates=2)
     assert selected_calls == legacy_calls
+
+
+def test_long_shaped_timelines_preserve_independent_phases_and_densities():
+    count, pulses, duration = 4, 32, 20.0
+    operator = np.array([[0, 0.012], [0.012, 0]], dtype=complex)
+    model = SecularModel(
+        (0,),
+        "independent-shaped-timelines",
+        np.array([0.0, 0.1]),
+        np.eye(2, dtype=complex),
+        (SecularDrive("drive", operator, np.zeros_like(operator)),),
+        np.array([[0.0, 1e-5], [0.0, 0.0]]),
+        np.zeros((2, 2)),
+    )
+    phases = np.arange(count) * 0.7
+    gaps = 2.0 + np.arange(count)
+    initial = np.array(
+        [
+            [[0.6, 0.1 * np.exp(1j * phase)], [0.1 * np.exp(-1j * phase), 0.4]]
+            for phase in phases
+        ]
+    )
+    envelope = EnvelopeSpec(
+        "sampled",
+        np.array([0.0, 1.0, 0.02], dtype=complex),
+        np.array([0.0, duration / 2, duration]),
+    )
+    timeline = replace(
+        batch(count),
+        tracks=tuple(
+            replace(
+                track(count, envelope, duration=duration),
+                start_ns=gaps + pulse * (duration + gaps),
+                phase_rad=phases,
+            )
+            for pulse in range(pulses)
+        ),
+        end_ns=pulses * (duration + gaps) + gaps,
+        start_ns=np.zeros(count),
+        initial_densities=initial,
+    )
+    results = []
+    with closing(ModelSource(initial[0], lambda _: model)) as src:
+        for workers, chunks in ((1, 6), (1, None), (2, None)):
+            with closing(Engine(workers, chunks_per_worker=chunks)) as engine:
+                results.append(engine.evolve(src, (timeline,), cancel=Event()))
+    expected = results[0]
+    assert expected.paths.segments_by_kernel == {
+        "t4": count * (pulses + 1),
+        "shaped_sambe": count * pulses,
+    }
+    assert not np.allclose(expected.densities[0], expected.densities[1])
+    for actual in results[1:]:
+        np.testing.assert_allclose(
+            actual.densities, expected.densities, rtol=1e-8, atol=1e-10
+        )
+        assert actual.paths.segments_by_kernel == expected.paths.segments_by_kernel

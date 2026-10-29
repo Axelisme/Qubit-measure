@@ -25,8 +25,8 @@ from zcu_tools.experiment.single_fluxonium.runtime import (
     SingleFluxoniumSource,
     single_fluxonium,
 )
-from zcu_tools.program.v2 import ModularProgramV2
-from zcu_tools.program.v2.modules.delay import Join
+from zcu_tools.program.v2 import LoadValue, ModularProgramV2, Repeat
+from zcu_tools.program.v2.modules.delay import Delay, Join
 from zcu_tools.program.v2.modules.pulse import PulseCfg
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
@@ -664,6 +664,101 @@ def test_dc_only_single_source_acquires_without_a_fast_flux_route():
         average = program.acquire(env.soc, progress=False)
         assert average is not None and np.linalg.norm(average[0]) > 1
         assert program.get_raw() is not None
+    finally:
+        if env.close_backend is not None:
+            env.close_backend()
+        env.devices.close_all_devices()
+
+
+@pytest.mark.parametrize(
+    "case, expected",
+    [
+        ("absent", [[972.5758438077908, -0.25173123177691964]]),
+        (
+            "inactive",
+            [
+                [972.5535136297327, -0.23690658344665044],
+                [972.5616134942782, -0.30040715262673],
+            ],
+        ),
+        (
+            "mixed",
+            [
+                [972.5535136297327, -0.23690658344665044],
+                [972.5616134942782, -0.30040715262673],
+            ],
+        ),
+        ("active", [[972.5755645388051, -0.22000655695600715]]),
+        ("delayed", [[972.5752852698197, -0.18828188213509472]]),
+        ("distorted", [[972.5755645388051, -0.22000655695600715]]),
+        ("tail", [[972.5423259988822, -0.26112572853973454]]),
+    ],
+)
+def test_fixed_seed_acquire_preserves_flux_controls(case, expected):
+    # Known-good public acquire means, including ADC noise, from the unchanged
+    # planner. Exact equality protects this planning-only optimization.
+    values = physical_settings().model_dump(mode="json")
+    if case == "active":
+        values["flux_line"].update(delay_ns=0.0, tau_ns=0.0)
+    elif case == "delayed":
+        values["flux_line"]["delay_ns"] = 6.0
+    elif case == "distorted":
+        values["flux_line"]["distortion_terms"] = [{"amplitude": 0.3, "tau_ns": 12.0}]
+    elif case == "tail":
+        values["flux_line"]["tau_ns"] = 20.0
+    env = single_fluxonium(parse_single_fluxonium(values))
+    try:
+        microwave = PulseCfg(
+            ch=1,
+            nqz=1,
+            freq=580,
+            gain=0.2,
+            waveform=ConstWaveformCfg(length=0.032),
+        )
+        fast_flux = PulseCfg(
+            ch=2,
+            nqz=1,
+            freq=0,
+            gain=0.4,
+            waveform=ConstWaveformCfg(length=0.008),
+        )
+        readout = PulseReadoutCfg(
+            gen_ch=0,
+            ro_ch=0,
+            nqz=1,
+            freq=7000,
+            gain=0.1,
+            waveform=ConstWaveformCfg(length=0.024),
+            ro_length=0.016,
+            trig_offset=0.002,
+        )
+        flux_modules = []
+        if case in ("inactive", "mixed"):
+            counts = [0, 0] if case == "inactive" else [0, 1]
+            flux_modules = [
+                LoadValue("count", counts, "axis", "n"),
+                Repeat("ff_repeat", "n", range_hint=(0, 1)).add_content(
+                    fast_flux.build("ff")
+                ),
+            ]
+        elif case != "absent":
+            flux_modules = [fast_flux.build("ff")]
+        program = ModularProgramV2(
+            env.soccfg,
+            modules=[
+                microwave.build("mw"),
+                *flux_modules,
+                Delay("wait", 0.004),
+                readout.build("ro"),
+            ],
+            sweep=[("axis", 2)] if case in ("inactive", "mixed") else None,
+            reps=8,
+            initial_delay=0.0,
+            relax_delay=0.0,
+        )
+        average = program.acquire(env.soc, rounds=1, progress=False)
+        assert average is not None
+        np.testing.assert_array_equal(np.asarray(average).reshape(-1, 2), expected)
     finally:
         if env.close_backend is not None:
             env.close_backend()
