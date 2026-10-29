@@ -13,6 +13,8 @@ if TYPE_CHECKING:
 
 
 from .._timeline_bounds import CycleBounds
+from ..macro.dmem import DmemLookup
+from ..macro.table import DeclaredTable, TableSelection
 from .base import Module, ModuleGroup
 from .control import Repeat
 
@@ -92,6 +94,7 @@ class LoadValue(Module):
         """
         if not self.use_existed:
             prog.add_reg(self.val_reg)
+        self._table = DeclaredTable(tuple(self.values))
         if not self._is_empty:
             self.offset = prog.add_dmem(self._packed_values)
 
@@ -128,6 +131,36 @@ class LoadValue(Module):
                 dependency_ranges={index: CycleBounds(0, len(self.values) - 1)},
             ):
                 self._emit_lookup(prog, index)
+
+    def lower_selected(self, prog: TimelineProgramV2) -> TableSelection:
+        """Load a selected-playback scalar and capture its index at this position.
+
+        Declaration must precede this call. The returned immutable relation binds
+        actual playback to this table and its exact writers. A loader-owned
+        capture survives later author selector changes. Repeated emissions reuse
+        registers, with each occurrence loading and capturing before playback.
+        Empty tables fail. Ordinary lower/lower_index keep their scalar contract.
+        """
+        if not self.values:
+            raise ValueError(f"{self.name}: selected playback needs a nonempty table")
+        captured = prog.add_reg(f"{self.name}_selected_index", allow_reuse=True)
+        relation = TableSelection(self._table, self.val_reg, captured)
+        index_limits = CycleBounds(0, len(self.values) - 1)
+        with prog.time_producer(
+            captured,
+            index_limits,
+            dependency_ranges={self.idx_reg: index_limits},
+            selection=relation,
+        ):
+            prog.write_reg(captured, self.idx_reg)
+        with prog.time_producer(
+            self.val_reg,
+            CycleBounds(min(self.values), max(self.values)),
+            dependency_ranges={captured: index_limits},
+            selection=relation,
+        ):
+            self._emit_lookup(prog, captured)
+        return relation
 
     @property
     def is_compressed(self) -> bool:
@@ -179,12 +212,14 @@ class LoadValue(Module):
             word_reg = other_regs[0] if self._is_compressed else ""  # not use
 
             if not self._is_compressed:
-                # Use the index register plus the optional offset as the address.
-                if self.offset == 0:
-                    prog.write_reg(addr_reg, index)
-                else:
-                    prog.write_reg_op(addr_reg, index, "+", self.offset)
-                prog.read_dmem(dst=self.val_reg, addr=addr_reg)
+                prog.append_macro(
+                    DmemLookup(
+                        dst=self.val_reg,
+                        index=index,
+                        offset=self.offset,
+                        address=addr_reg,
+                    )
+                )
                 return
 
             # addr = (idx ASR #word_shift) [+ #offset]

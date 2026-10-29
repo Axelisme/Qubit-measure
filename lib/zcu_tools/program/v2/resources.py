@@ -88,6 +88,22 @@ class ProgramResourcesMixin(QickProgramV2):
         self._dmem_buffer.extend(values)
         return offset
 
+    def add_timing_dmem(self, values: Sequence[int], *, owner: str) -> int:
+        """Append exact cycle words, or fail before exceeding hardware capacity.
+
+        owner identifies the emission requesting the table. Existing allocations
+        count against the same QICK dmem_size word limit. No words are appended
+        on failure; the error names owner, requested size and available capacity.
+        """
+        capacity = self.tproccfg["dmem_size"]
+        available = capacity - len(self._dmem_buffer)
+        if len(values) > available:
+            raise ValueError(
+                f"{owner}: timing table requires {len(values)} dmem words; "
+                f"{available} available of {capacity}"
+            )
+        return self.add_dmem(values)
+
     # tolerated: QICK infers None from its empty base implementation; compile_datamem documents ndarray or None.
     def compile_datamem(  # pyright: ignore[reportIncompatibleMethodOverride]
         self,

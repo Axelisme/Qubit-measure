@@ -9,6 +9,7 @@ from qick.asm_v2 import CloseLoop, Macro, OpenLoop, QickParam, TimedMacro, Write
 from ._timeline_guard import bounds
 from .ir.instructions import BaseInst
 from .macro.structure import MarkedCloseLoop, MarkedOpenLoop
+from .macro.table import TableSelection
 
 
 @dataclass(frozen=True)
@@ -69,6 +70,33 @@ class ProducerBounds:
         self.origins: dict[int, Macro | None] = {}
         self.generated: dict[str, set[int]] = {}
         self.sweep_times: set[str] = set()
+        self.selection_writers: dict[
+            str, list[tuple[TableSelection, tuple[Macro, ...]]]
+        ] = {}
+        self.selected: dict[str, TableSelection] = {}
+        self.signed_sources: set[str] = set()
+
+    def register_selection(
+        self, register: str, selection: TableSelection, writers: tuple[Macro, ...]
+    ) -> None:
+        """Bind exact loader writers to one declared mapping and captured index."""
+        self.selection_writers.setdefault(register, []).append((selection, writers))
+
+    def require_selection(self, prog, selection: TableSelection) -> None:
+        """Activate table-relation auditing for actual playback and its capture.
+
+        General constant producers remain legal elsewhere. For these two
+        registers only, every translated write must belong to this mapping.
+        The captured index binds lookup, playback and finisher at execution.
+        """
+        for name in (selection.register, selection.selector):
+            self.source(prog, name)
+            previous = self.selected.get(name)
+            if previous is not None and previous.table is not selection.table:
+                raise ValueError(
+                    f"{name}: conflicting selected playback table relation"
+                )
+            self.selected[name] = selection
 
     def observe(self, macro: Macro) -> None:
         """Register the bounds and write identity of a native constant producer."""
@@ -150,7 +178,24 @@ class ProducerBounds:
         raise ValueError. Loop counters and QICK sweep registers are initialized
         by their native loop machinery, including back-edges and resets.
         """
-        result = self._resolve(prog, name, check_defined=check_defined)
+        return self._source(prog, name, check_defined=check_defined, signed=False)
+
+    def watch_signed(
+        self, prog, name: str, *, check_defined: bool = True
+    ) -> CycleBounds:
+        """Audit a framework-generated signed32 intermediate, not a time consumer.
+
+        Only exact lookup/arithmetic owners use this entry. Ordinary source()
+        still rejects negative cycle registers, even if watched here earlier.
+        Dependencies retain their ordinary nonnegative input proofs.
+        """
+        self.signed_sources.add(name)
+        return self._source(prog, name, check_defined=check_defined, signed=True)
+
+    def _source(
+        self, prog, name: str, *, check_defined: bool, signed: bool
+    ) -> CycleBounds:
+        result = self._resolve(prog, name, check_defined=check_defined, signed=signed)
         pending = [name]
         seen: set[str] = set()
         while pending:
@@ -159,7 +204,12 @@ class ProducerBounds:
                 continue
             seen.add(current)
             if not check_defined:
-                self._resolve(prog, current, check_defined=False)
+                self._resolve(
+                    prog,
+                    current,
+                    check_defined=False,
+                    signed=signed and current == name,
+                )
             if errors := self.input_errors.get(current):
                 raise ValueError(errors[0])
             self.sources.add(current)
@@ -176,7 +226,9 @@ class ProducerBounds:
                     )
         return result
 
-    def _resolve(self, prog, name: str, *, check_defined: bool) -> CycleBounds:
+    def _resolve(
+        self, prog, name: str, *, check_defined: bool, signed: bool = False
+    ) -> CycleBounds:
         try:
             prog._get_reg(name)
         except KeyError as exc:
@@ -201,10 +253,10 @@ class ProducerBounds:
             result = CycleBounds(
                 min(r.minimum for r in ranges), max(r.maximum for r in ranges)
             )
-        if result.minimum < 0 or result.maximum > 2**31 - 1:
-            raise ValueError(
-                f"{name}: time producer exceeds nonnegative signed 32-bit cycles"
-            )
+        minimum = -(2**31) if signed else 0
+        if result.minimum < minimum or result.maximum > 2**31 - 1:
+            contract = "signed 32-bit" if signed else "nonnegative signed 32-bit"
+            raise ValueError(f"{name}: time producer exceeds {contract} cycles")
         return result
 
     def emission(
@@ -238,6 +290,22 @@ class ProducerBounds:
                     f"{name}: signed 32-bit sweep backedge/reset intermediate overflow"
                 )
 
+    def _audit_selection(self, name: str, origin: Macro | None, address: int) -> None:
+        if name not in self.selected:
+            return
+        expected = self.selected[name]
+        valid = any(
+            relation.table is expected.table
+            and relation.selector == expected.selector
+            and relation.register == expected.register
+            and any(origin is writer for writer in writers)
+            for relation, writers in self.selection_writers.get(name, ())
+        )
+        if not valid:
+            raise ValueError(
+                f"{name}: invalid selected playback selection write at instruction {address}"
+            )
+
     def audit(self, prog) -> None:
         """Audit every translated write, including unreachable alternate paths.
 
@@ -245,7 +313,10 @@ class ProducerBounds:
         unregistered writer invalidates a time source or its dependencies.
         """
         for name in tuple(self.sources):
-            self.source(prog, name, check_defined=False)
+            if name in self.signed_sources:
+                self.watch_signed(prog, name, check_defined=False)
+            else:
+                self.source(prog, name, check_defined=False)
         self._audit_sweeps(prog)
         watched = {
             register.full_addr(): name
@@ -272,6 +343,7 @@ class ProducerBounds:
                     raise ValueError(
                         f"{name}: unregistered fixed Repeat counter write at instruction {address}"
                     )
+                self._audit_selection(name, origin, address)
                 if name in self.allowed.get(id(origin), set()):
                     continue
                 register = prog.reg_dict.get(name)

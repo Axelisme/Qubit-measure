@@ -1,6 +1,6 @@
 # program/v2/modules — semantic program modules
 
-**Last updated:** 2026-10-29，event-end lowering 與 ScanWith，native dmem 與時間 producer bounds
+**Last updated:** 2026-10-30，selected playback、paired post 與全流 table-relation 稽核
 
 **讀者：** lab-author、framework-dev、agent。語意 program modules 的宣告、發射與 owner 邊界速查。
 
@@ -19,7 +19,7 @@ without leaking hardware register choreography into experiment classes.
 
 ## 原生寫法
 
-Pulse、Delay、SoftDelay、DelayAuto、PulseReadout、Reset 系列、LoadValue、LoadWord 與 ScanWith 提供原生 lowering。
+Pulse、Delay、SoftDelay、DelayAuto、PulseReadout、Reset 系列、LoadValue、LoadWord、ScanWith、ComputedPulse、TableLengthPulse、TablePulseReadout 與 MuxReadout 提供原生 lowering。
 每次 `emit` 建立一個 `timeline.ModuleEmission`，保存該次原生指令與 tag。
 Module 不是 QICK Macro，不能直接交給 `append_macro`。
 同一宣告物件可重複發射，舊 module 的 tag 與 block_mode 不控制新路徑。
@@ -32,7 +32,10 @@ Lowering 不用 `total_length` 重建時間，也不移動 reference。
 整數 register 起點也保留事件的分數尾段，直到加上 post-delay 才取整。
 TwoPulseReset 合併各 pulse end 加各自 post-delay。BathReset 的 pi/2 從向上取整後的 cavity end 加 post-delay 開始。
 BathReset 最後合併 qubit 與 pi/2 的實際結尾，包含各自 post-delay，不漏掉較長的 qubit。
-Scalar 與整數仿射 sweep 使用這條路徑。非仿射 sweep 的逐點精確 ceil／table fallback 尚未實作。
+Scalar 與可精確表示的整數仿射 sweep 保留靜態時間。
+非仿射 sweep 由 program owner 以 dmem table 提供逐點精確 ceil，包含多 axis 與重複／nested emission。
+Index 使用 QICK 原生 sweep 初始化、回邊與 reset，並連同所依賴的 loop counter 接受時間 producer 的全流寫入稽核。
+表超過剩餘 dmem 容量時，編譯錯誤指出 emission 與所需 word 數。
 Delay 與 SoftDelay 都只加 timeline 結尾。`sync()` 或 body 收尾才推進 reference。
 
 DelayAuto 是唯一例外，未指定 timeline 時呼叫原生 delay_auto 或 delay_reg_auto。
@@ -193,9 +196,10 @@ Scalar and pre/post-delay timing keep their existing rules.
 ## Runtime Pulse Length
 
 - `TableLengthPulse` owns the arbitrary pulse-length hardware sweep for `const`
-  and `flat_top`. It keeps one pulse template in wmem and loads both generator
-  length cycles and total tProcessor duration from dmem on each hardware-loop
-  point.
+  and `flat_top`. Native declaration keeps one template and a generator-length
+  table. Native playback resolves the actual selected waveform end, adds pre/post
+  once and ceils the aggregate once. Only legacy init/run uses a separate total
+  tProcessor duration table.
 - A const pulse patches the template's single `w4` length field. A flat-top pulse
   reuses its fixed ramp entries and patches only the middle flat segment; its
   segment WPORT writes remain contiguous.
@@ -203,7 +207,7 @@ Scalar and pre/post-delay timing keep their existing rules.
   build. Points below the generator's three-cycle minimum also fail fast. Runtime
   duration alignment places readout immediately after the selected pulse instead
   of padding every point to the maximum length.
-- `Join` accepts one `TableLengthPulse` per parallel branch, with independent
+- Legacy `Join` accepts one `TableLengthPulse` per parallel branch, with independent
   generators, a shared index register and equal table sizes. It emits all drives
   at one origin and loads one per-point maximum duration table for a common wait.
   The selected lengths, including pre/post delays, determine when readout starts;
@@ -211,6 +215,26 @@ Scalar and pre/post-delay timing keep their existing rules.
   branches and table-pulse sequences fail before build. Standalone table pulses
   retain their own wait. Hardware and semantic simulation use the same rounded
   duration tables.
+
+Native `ComputedPulse` selects each candidate waveform together with its own
+post-delay. Fractional playback ends and selected posts stay separate until the
+program owner ceils their aggregate. Candidate posts may differ or use native
+sweeps. Neither selected owner pads every point to the longest entry.
+Negative posts may put the aggregate before its origin. The physical channel end
+still guards subsequent playback. Internal offsets use signed32 cycles; register
+time consumers still require nonnegative cycles. Program owner compares raw
+selected ends and paired aggregate ends to retain a coverage debt. Known positive
+timeline advances consume that debt, so a compensating delay restores legal
+same-channel placement without changing the scheduled end or reference.
+
+`LoadValue.lower_selected` captures the index at the lookup position and returns
+the declared table relation. Timeline playback checks the actual address/length
+producer against that relation. Later author selector changes do not change the
+already selected playback or its post. Every write to the playback register and
+captured index must belong to that mapping, including Branch cases, backedges
+and resets. An in-range constant or different-table write still fails with the
+register and instruction position. Ordinary scalar and uint32 word consumers
+keep their existing contracts.
 
 ## Design Boundaries
 

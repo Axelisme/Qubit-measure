@@ -26,17 +26,21 @@ from ._timeline_outputs import (
     TimelinePlacedTrigger,
 )
 from ._timeline_runtime import (
+    DeferredCoverage,
     EventEnd,
     RuntimeEnd,
     RuntimeMath,
+    SelectedEventEnd,
     Time,
     align_end,
     step_time,
     time_bounds,
 )
+from ._timeline_selected import TimelineSelectedPulse
 from ._timeline_state import RepeatFrame, TimelineBook
 from .macro.delay import DelayRegAuto
 from .macro.structure import MarkedCloseLoop, MarkedOpenLoop
+from .macro.table import TableSelection
 from .modules.base import Module
 from .modules.util import get_fclk
 
@@ -160,7 +164,7 @@ class TimelineAdvance(TimedMacro):
         self.timeline = timeline
         self.duration = duration
         self.aligned = aligned
-        self.event_ends: tuple[EventEnd, ...] = ()
+        self.event_ends: tuple[EventEnd | SelectedEventEnd, ...] = ()
 
     def preprocess(self, prog) -> None:
         if isinstance(self.duration, str):
@@ -171,21 +175,7 @@ class TimelineAdvance(TimedMacro):
         else:
             duration = step_time(prog, self.duration) if self.aligned else self.duration
         previous = self.book.end(self.timeline, placement=True)
-        events = [EventEnd(previous, 0.0)]
-        for event in self.event_ends:
-            for index, candidate in enumerate(events):
-                if event.origin is candidate.origin or (
-                    isinstance(event.origin, (int, float))
-                    and isinstance(candidate.origin, (int, float))
-                    and event.origin == candidate.origin
-                ):
-                    events[index] = EventEnd(
-                        candidate.origin,
-                        self.book.math.maximum(candidate.offset, event.offset),
-                    )
-                    break
-            else:
-                events.append(event)
+        events = self._events(previous)
         end = self._finish(prog, events[0], duration)
         for event in events[1:]:
             # max(ceil(Ei+post)) equals ceil(max(Ei)+post).
@@ -193,7 +183,87 @@ class TimelineAdvance(TimedMacro):
         self.book.set_end(self.timeline, self.book.math.maximum(0.0, end))
         self.resolved_time = end
 
-    def _finish(self, prog, event: EventEnd, duration: Time) -> Time:
+    def _events(self, previous: Time) -> list[EventEnd | SelectedEventEnd]:
+        """Keep the raw fractional maximum envelope before adding any post."""
+        events: list[EventEnd | SelectedEventEnd] = []
+        # A selected event already pairs the chosen waveform with its post.
+        # An unposted origin is not another child, including for negative posts.
+        if not any(isinstance(event, SelectedEventEnd) for event in self.event_ends):
+            events.append(EventEnd(previous, 0.0))
+        for event in self.event_ends:
+            for index, candidate in enumerate(events):
+                if isinstance(event, SelectedEventEnd) or isinstance(
+                    candidate, SelectedEventEnd
+                ):
+                    continue
+                same_origin = event.origin is candidate.origin or (
+                    isinstance(event.origin, (int, float))
+                    and isinstance(candidate.origin, (int, float))
+                    and event.origin == candidate.origin
+                )
+                if (
+                    not same_origin
+                    or isinstance(event.offset, RuntimeEnd)
+                    or isinstance(candidate.offset, RuntimeEnd)
+                ):
+                    continue
+                lo, hi = _bounds(event.offset - candidate.offset)
+                if lo >= -1e-12 or hi <= 1e-12:
+                    larger = event if lo >= -1e-12 else candidate
+                    events[index] = EventEnd(
+                        larger.origin, larger.offset, candidate.rounded + event.rounded
+                    )
+                    break
+            else:
+                # Crossing fractional sweeps must retain their tails until post
+                # has been added; a runtime max here would round too early.
+                events.append(event)
+        return events
+
+    def _finish_selected(self, event: SelectedEventEnd, duration: Time) -> RuntimeEnd:
+        if isinstance(duration, RuntimeEnd):
+            raise ValueError("selected post aggregate requires a scalar or swept post")
+        offsets = tuple(
+            offset + post + duration
+            for offset, post in zip(event.offsets, event.posts, strict=True)
+        )
+        physical_offsets = event.offsets
+        completed_offsets = offsets
+        if not isinstance(event.origin, RuntimeEnd):
+            physical_offsets = tuple(event.origin + offset for offset in event.offsets)
+            completed_offsets = tuple(event.origin + offset for offset in offsets)
+        if isinstance(event.origin, RuntimeEnd):
+            selected = self.book.math.selected_end(event.selector, completed_offsets)
+            selected_result = self.book.math.add(
+                event.origin, selected, target=selected.register
+            )
+        else:
+            selected_result = self.book.math.selected_end(
+                event.selector, completed_offsets
+            )
+        debt = self.book.math.coverage_debt(physical_offsets, completed_offsets)
+        if debt == 0:
+            return RuntimeEnd(
+                selected_result.register,
+                selected_result.minimum,
+                selected_result.maximum,
+                (*selected_result.covers, *event.rounded),
+                selected_result.deferred,
+            )
+        return RuntimeEnd(
+            selected_result.register,
+            selected_result.minimum,
+            selected_result.maximum,
+            selected_result.covers,
+            (
+                *selected_result.deferred,
+                *(DeferredCoverage(boundary, debt) for boundary in event.rounded),
+            ),
+        )
+
+    def _finish(self, prog, event: EventEnd | SelectedEventEnd, duration: Time) -> Time:
+        if isinstance(event, SelectedEventEnd):
+            return self._finish_selected(event, duration)
         fractional: float | QickParam = 0.0
         registers: list[RuntimeEnd] = []
         for value in (event.origin, event.offset, duration):
@@ -204,6 +274,22 @@ class TimelineAdvance(TimedMacro):
         result: Time = fractional if self.aligned else align_end(prog, fractional)
         for register in registers:
             result = self.book.math.add(register, result)
+        if (
+            isinstance(result, RuntimeEnd)
+            and event.rounded
+            and time_bounds(prog, duration)[0] >= 0
+        ):
+            covers = [*result.covers, *event.rounded]
+            for previous in event.rounded:
+                if isinstance(previous, RuntimeEnd):
+                    covers.extend(previous.covers)
+            result = RuntimeEnd(
+                result.register,
+                result.minimum,
+                result.maximum,
+                tuple(covers),
+                result.deferred,
+            )
         return result
 
     def list_time_params(self) -> list[str]:
@@ -430,39 +516,55 @@ class ModuleEmission(TimedMacro):
 
     owner is the borrowed declaration object, macros are fresh native operations,
     and tag identifies this occurrence's first timed operation in get_time_param.
+    emission_name identifies this occurrence in timing-resource errors.
     Construction and timing placement are owned by TimelineProgramV2.emit.
     """
 
-    def __init__(self, owner: Module, macros: list[Macro], tag: str | None):
+    def __init__(
+        self, owner: Module, macros: list[Macro], tag: str | None, *, emission_name: str
+    ):
         super().__init__(tag=tag)
+        self.emission_name = emission_name
         self.owner = owner
         self.macros = macros
         self.finishers: list[PreparedTimelineMacro] = []
 
     def preprocess(self, prog) -> None:
         """Collect actual ends at a common origin; an advance adds post then rounds."""
-        pending: dict[str, list[EventEnd]] = {}
-        self.finishers = []
-        for macro in self.macros:
-            source = macro.source if isinstance(macro, PreparedTimelineMacro) else macro
-            if isinstance(
-                source,
-                (TimelinePlacedPulse, TimelinePlacedConfig, TimelinePlacedTrigger),
-            ):
-                start = source.book.end(source.timeline)
-                macro.preprocess(prog)
-                pending.setdefault(source.timeline, []).append(source.event_end)
-                source.book.ends[source.timeline] = start
-            else:
-                if isinstance(source, TimelineAdvance):
-                    source.event_ends = tuple(pending.pop(source.timeline, ()))
-                macro.preprocess(prog)
-        for timeline, ends in pending.items():
-            advance = TimelineAdvance(prog._timeline_book, timeline, 0.0)
-            advance.event_ends = tuple(ends)
-            finisher = PreparedTimelineMacro(prog._timeline_book, advance)
-            finisher.preprocess(prog)
-            self.finishers.append(finisher)
+        previous_owner = prog._timing_table_owner
+        prog._timing_table_owner = self.emission_name
+        try:
+            pending: dict[str, list[EventEnd | SelectedEventEnd]] = {}
+            self.finishers = []
+            for macro in self.macros:
+                source = (
+                    macro.source if isinstance(macro, PreparedTimelineMacro) else macro
+                )
+                if isinstance(
+                    source,
+                    (
+                        TimelinePlacedPulse,
+                        TimelinePlacedConfig,
+                        TimelinePlacedTrigger,
+                        TimelineSelectedPulse,
+                    ),
+                ):
+                    start = source.book.end(source.timeline)
+                    macro.preprocess(prog)
+                    pending.setdefault(source.timeline, []).append(source.event_end)
+                    source.book.ends[source.timeline] = start
+                else:
+                    if isinstance(source, TimelineAdvance):
+                        source.event_ends = tuple(pending.pop(source.timeline, ()))
+                    macro.preprocess(prog)
+            for timeline, ends in pending.items():
+                advance = TimelineAdvance(prog._timeline_book, timeline, 0.0)
+                advance.event_ends = tuple(ends)
+                finisher = PreparedTimelineMacro(prog._timeline_book, advance)
+                finisher.preprocess(prog)
+                self.finishers.append(finisher)
+        finally:
+            prog._timing_table_owner = previous_owner
 
     def translate(self, prog) -> None:
         """Translate lowered operations through the program's shared compiler."""
@@ -611,21 +713,25 @@ class PreparedTimelineOpenLoop(PreparedTimelineMacro, OpenLoop):
 class TimeProducer(Macro):
     def __init__(
         self,
-        book: TimelineBook,
         register: str,
         limits: CycleBounds,
         macros: list[Macro],
         dependencies: tuple[str, ...],
         dependency_ranges: Mapping[str, CycleBounds],
+        selection: TableSelection | None = None,
     ):
+        self.selection = selection
         self.register = register
         self.limits = limits
         self.macros = macros
         self.dependencies = dependencies
         self.dependency_ranges = dict(dependency_ranges)
-        self.prepared = [PreparedTimelineMacro(book, macro) for macro in macros]
+        self.prepared: list[PreparedTimelineMacro] = []
 
     def preprocess(self, prog) -> None:
+        self.prepared = [
+            PreparedTimelineMacro(prog._timeline_book, macro) for macro in self.macros
+        ]
         prog._time_bounds.capture_inputs(
             prog, self.register, self.dependencies, self.dependency_ranges
         )

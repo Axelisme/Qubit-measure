@@ -177,26 +177,15 @@ def test_empty_values_short_circuit():
 # ---------------------------------------------------------------------------
 
 
-def test_load_value_run_uncompressed_zero_offset_uses_write_reg():
-    lv = LoadValue("x", [10, 20, 30], idx_reg="i", val_reg="v")
-    prog = _make_dmem_prog()
-    lv.init(prog)
-    lv.offset = 0
-    lv.run(prog)
-
-    prog.write_reg.assert_called_once_with("r10", "i")
-    prog.read_dmem.assert_called_once_with(dst="v", addr="r10")
-
-
-def test_load_value_run_uncompressed_nonzero_offset_uses_write_reg_op():
-    lv = LoadValue("x", [10, 20, 30], idx_reg="i", val_reg="v")
-    prog = _make_dmem_prog()
-    lv.init(prog)
-    lv.offset = 5
-    lv.run(prog)
-
-    prog.write_reg_op.assert_any_call("r10", "i", "+", 5)
-    prog.read_dmem.assert_called_once_with(dst="v", addr="r10")
+@pytest.mark.parametrize("padding", [False, True])
+def test_uncompressed_scalar_lookup_reaches_legacy_register_consumer(padding):
+    values = [10, 20, 30]
+    modules = [LoadValue("padding", [31, 17, 9], "idx", "unused")] if padding else []
+    modules.append(LoadValue("lookup", values, "idx", "value"))
+    program = ModularProgramV2(
+        make_mock_soccfg(), modules, sweep=[("idx", len(values))], reps=1
+    )
+    assert [_execute_lookup_body(program, index) for index in range(3)] == values
 
 
 def test_load_value_run_uncompressed_returns_t():
