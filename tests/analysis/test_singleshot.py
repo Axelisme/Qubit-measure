@@ -4,6 +4,7 @@ import numpy as np
 import pytest
 from zcu_tools.analysis.fitting.singleshot import transition_state_circle_probabilities
 from zcu_tools.analysis.singleshot import (
+    analyze_reference_iq,
     calc_populations,
     classify_rabi_iq,
     classify_result,
@@ -25,6 +26,98 @@ def test_population_conversion_and_readout_correction() -> None:
     np.testing.assert_array_equal(raw_population_signal([ge[None, ...], other_adc]), ge)
     with pytest.raises(np.linalg.LinAlgError):
         correct_populations(populations, np.zeros((3, 3)))
+
+
+def test_correction_can_preserve_unphysical_estimates_without_changing_default() -> (
+    None
+):
+    matrix = np.array([[0.8, 0.2, 0.0], [0.1, 0.9, 0.0], [0.0, 0.0, 1.0]])
+    measured = np.array([[0.0, 1.0, 0.0]])
+    np.testing.assert_allclose(
+        correct_populations(measured, matrix, clip=False), [[-1 / 7, 8 / 7, 0]]
+    )
+    np.testing.assert_allclose(correct_populations(measured, matrix), [[0, 1, 0]])
+    assert correct_populations(measured, None, clip=False) is measured
+
+
+def test_reference_iq_uses_training_only_and_reports_heldout_label_fractions() -> None:
+    training = np.array([0, 10, 10j])[:, None] + np.array([1, -1, 1j, -1j])
+    evaluation = np.array([[0, 0, 0, 0], [10, 10, 10, 10], [10j, 10j, 10j, 0]])
+    signals = np.concatenate((training, evaluation), axis=1)
+    result = analyze_reference_iq(signals, np.array([0, 1, 2]))
+    np.testing.assert_allclose(result.centroids, [0, 10, 10j])
+    np.testing.assert_allclose(result.confusion_matrix, np.eye(3))
+    np.testing.assert_allclose(
+        result.raw_populations, [[1, 0, 0], [0, 1, 0], [0.25, 0, 0.75]]
+    )
+    np.testing.assert_allclose(result.corrected_populations, result.raw_populations)
+    np.testing.assert_allclose(result.label_errors, [0, 0, 0.25])
+    assert result.macro_error == pytest.approx(1 / 12)
+    assert result.minimum_separation == pytest.approx(np.sqrt(150))
+    assert result.condition_number == pytest.approx(1)
+    assert result.minimum_singular_value == pytest.approx(1)
+    assert result.training_shots == result.evaluation_shots == 4
+
+
+@pytest.mark.parametrize(
+    ("signals", "labels"),
+    [
+        (np.ones((2, 8), dtype=complex), np.array([0, 1])),
+        (np.ones((3, 5), dtype=complex), np.array([0, 1, 2])),
+        (np.ones((3, 8), dtype=complex), np.array([0, 0, 2])),
+        (np.ones((3, 8), dtype=complex), np.array([0.0, 1.5, 2.0])),
+        (np.full((3, 8), complex(np.nan, 0)), np.array([0, 1, 2])),
+        (np.ones((3, 8), dtype=complex), np.array([0, 1, 2])),
+    ],
+)
+def test_reference_iq_rejects_invalid_or_unidentifiable_references(
+    signals, labels
+) -> None:
+    with pytest.raises(ValueError, match="reference|Reference"):
+        analyze_reference_iq(signals, labels)
+
+
+def test_reference_iq_sorts_labels_and_keeps_odd_remainder_for_evaluation() -> None:
+    signals = np.array([0, 10, 10j])[:, None] + np.array(
+        [1, -1, 1j, -1j, 0, 0, 0, 0, 0]
+    )
+    result = analyze_reference_iq(signals[[2, 0, 1]], np.array([2, 0, 1]))
+    np.testing.assert_allclose(result.centroids, [0, 10, 10j])
+    np.testing.assert_allclose(result.raw_populations, np.eye(3))
+    assert result.training_shots == 4
+    assert result.evaluation_shots == 5
+
+
+def test_reference_correction_uses_training_rows_without_clipping() -> None:
+    offsets = np.array([1, -1, 1j, -1j, 1, -1, 1j, -1j])
+    training = np.array([0, 10, 10j])[:, None] + offsets
+    training[2, :2] = [1, -1]
+    evaluation = np.repeat(np.array([0, 10, 10j])[:, None], 8, axis=1)
+    result = analyze_reference_iq(
+        np.concatenate((training, evaluation), axis=1), np.array([0, 1, 2])
+    )
+    np.testing.assert_allclose(
+        result.confusion_matrix, [[1, 0, 0], [0, 1, 0], [0.25, 0, 0.75]]
+    )
+    np.testing.assert_allclose(
+        result.corrected_populations, [[1, 0, 0], [0, 1, 0], [-1 / 3, 0, 4 / 3]]
+    )
+
+
+def test_reference_iq_rejects_singular_within_cloud_covariance() -> None:
+    signals = np.array([0, 10, 20])[:, None] + np.arange(8, dtype=complex)
+    with pytest.raises(ValueError, match="covariance"):
+        analyze_reference_iq(signals, np.array([0, 1, 2]))
+
+
+def test_reference_diagnostics_do_not_depend_on_adc_unit_scale() -> None:
+    signals = 1e-9 * (
+        np.array([0, 10, 10j], dtype=np.complex128)[:, None]
+        + np.array([1, -1, 1j, -1j, 0, 0, 0, 0], dtype=np.complex128)
+    )
+    result = analyze_reference_iq(signals, np.array([0, 1, 2]))
+    assert result.minimum_separation == pytest.approx(np.sqrt(150))
+    np.testing.assert_allclose(result.confusion_matrix, np.eye(3))
 
 
 def test_rabi_classification_reports_per_coordinate_fractions() -> None:

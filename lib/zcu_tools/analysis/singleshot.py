@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import dataclass
+from itertools import combinations
 
 import numpy as np
 from numpy.typing import NDArray
@@ -32,6 +34,8 @@ def calc_populations(signals: NDArray[np.float64]) -> NDArray[np.float64]:
 def correct_populations(
     populations: NDArray[np.float64],
     confusion_matrix: NDArray[np.float64] | None,
+    *,
+    clip: bool = True,
 ) -> NDArray[np.float64]:
     # Apply readout confusion-matrix correction. None -> returned unchanged
     # (deliberate no-op contract). A singular/non-square matrix raises via
@@ -40,8 +44,9 @@ def correct_populations(
 
     populations has arbitrary leading dimensions and a final state axis.
     confusion_matrix holds true-state rows and measured-state columns; None
-    returns populations unchanged. Otherwise solve its transpose and clip to
-    [0, 1], returning float64 with the same shape. Singular/non-square or
+    returns populations unchanged. Otherwise solve its transpose, returning
+    float64 with the same shape. clip=True limits estimates to [0, 1];
+    clip=False preserves negative and above-one estimates. Singular/non-square or
     incompatible matrices raise NumPy linear-algebra/value errors."""
     if confusion_matrix is None:
         return populations
@@ -51,7 +56,103 @@ def correct_populations(
     flat_populations = populations.reshape(-1, state_count)
     corrected = np.linalg.solve(matrix.T, flat_populations.T).T
     corrected = corrected.reshape(populations.shape)
-    return np.asarray(np.clip(corrected, 0.0, 1.0), dtype=np.float64)
+    return np.asarray(
+        np.clip(corrected, 0.0, 1.0) if clip else corrected, dtype=np.float64
+    )
+
+
+@dataclass(frozen=True)
+class ReferenceIQAnalysis:
+    """Three-label nearest-centroid calibration and held-out diagnostics.
+
+    All state axes use label order (0, 1, 2), not input row order.
+    centroids: three complex means in input IQ units, trained on the first half.
+    confusion_matrix: (3,3) training fractions, preparation rows / prediction columns.
+    raw_populations: (3,3) evaluation fractions with the same axis convention.
+    corrected_populations: evaluation fractions solved in preparation-label
+        coordinates, including negative and above-one estimates. These are not
+        latent energy-state populations when preparations are contaminated.
+    label_errors: three evaluation misassignment fractions, including preparation error.
+    macro_error: equally weighted mean label error, not pure-state readout infidelity.
+    minimum_separation: minimum pairwise pooled Mahalanobis distance from training.
+    condition_number: training confusion matrix 2-norm condition number.
+    minimum_singular_value: training confusion matrix minimum singular value.
+    training_shots/evaluation_shots: disjoint per-label sample counts.
+    """
+
+    centroids: NDArray[np.complex128]
+    confusion_matrix: NDArray[np.float64]
+    raw_populations: NDArray[np.float64]
+    corrected_populations: NDArray[np.float64]
+    label_errors: NDArray[np.float64]
+    macro_error: float
+    minimum_separation: float
+    condition_number: float
+    minimum_singular_value: float
+    training_shots: int
+    evaluation_shots: int
+
+
+def analyze_reference_iq(
+    signals: NDArray[np.complex128], labels: NDArray[np.int64]
+) -> ReferenceIQAnalysis:
+    """Train and evaluate a three-label classifier using only acquired IQ.
+
+    signals is finite complex IQ of shape (3,N), in any consistent ADC units;
+    labels is a permutation of integers (0,1,2) naming the corresponding rows.
+    N must be >=6. First floor(N/2) shots per row train centroids and confusion;
+    the remaining shots evaluate assignment and unclipped correction. Exact
+    nearest-centroid ties choose the lowest label. Output axes are label-sorted.
+    Pooled covariance is the equally weighted mean of unbiased within-training
+    IQ covariances. Degenerate centers/covariance, singular confusion, invalid
+    labels or incomplete/nonfinite data raise ValueError or LinAlgError.
+    No state-purity inference or clipping is performed.
+    """
+    if signals.ndim != 2 or signals.shape[0] != 3 or signals.shape[1] < 6:
+        raise ValueError("Reference IQ must have shape (3,N) with N >= 6")
+    if labels.shape != (3,) or not np.array_equal(np.sort(labels), [0, 1, 2]):
+        raise ValueError("Reference labels must be a permutation of (0,1,2)")
+    if not np.isfinite(signals).all():
+        raise ValueError("Reference IQ must contain only finite shots")
+    ordered = signals[np.argsort(labels)]
+    split = ordered.shape[1] // 2
+    training, evaluation = ordered[:, :split], ordered[:, split:]
+    centroids = training.mean(axis=1)
+    if any(first == second for first, second in combinations(centroids, 2)):
+        raise ValueError("Reference centroids must be distinct")
+    train_predictions = np.argmin(abs(training[..., None] - centroids), axis=-1)
+    evaluation_predictions = np.argmin(abs(evaluation[..., None] - centroids), axis=-1)
+    confusion = np.stack(
+        [(train_predictions == i).mean(axis=1) for i in range(3)], axis=1
+    )
+    raw = np.stack(
+        [(evaluation_predictions == i).mean(axis=1) for i in range(3)], axis=1
+    )
+    covariance = np.mean(
+        [np.cov(np.stack((row.real, row.imag))) for row in training], axis=0
+    )
+    if np.linalg.matrix_rank(covariance) != 2:
+        raise ValueError("Reference pooled IQ covariance must be nonsingular")
+    separations = []
+    for first, second in combinations(centroids, 2):
+        difference = np.array([(first - second).real, (first - second).imag])
+        separations.append(
+            float(np.sqrt(difference @ np.linalg.solve(covariance, difference)))
+        )
+    errors = 1 - np.diag(raw)
+    return ReferenceIQAnalysis(
+        centroids=centroids,
+        confusion_matrix=confusion,
+        raw_populations=raw,
+        corrected_populations=correct_populations(raw, confusion, clip=False),
+        label_errors=errors,
+        macro_error=float(errors.mean()),
+        minimum_separation=min(separations),
+        condition_number=float(np.linalg.cond(confusion)),
+        minimum_singular_value=float(np.linalg.svd(confusion, compute_uv=False).min()),
+        training_shots=split,
+        evaluation_shots=ordered.shape[1] - split,
+    )
 
 
 def classify_result(

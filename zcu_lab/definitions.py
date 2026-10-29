@@ -74,6 +74,9 @@ from zcu_lab.v2.singleshot.mist.power_freq.gui import (
 from zcu_lab.v2.singleshot.mist.pre_freq.gui import (
     DEFINITION as MIST_PRE_FREQ_DEFINITION,
 )
+from zcu_lab.v2.singleshot.qutrit_population.gui import (
+    DEFINITION as QUTRIT_POPULATION_DEFINITION,
+)
 from zcu_lab.v2.singleshot.reset_check.gui import (
     DEFINITION as SS_RESET_CHECK_DEFINITION,
 )
@@ -187,6 +190,7 @@ ADAPTERS: dict[str, object] = {
     "twotone/t2ramsey": T2_RAMSEY_DEFINITION,
     "twotone/t2echo": T2_ECHO_DEFINITION,
     "singleshot/ge": GE_DEFINITION,
+    "singleshot/qutrit_population": QUTRIT_POPULATION_DEFINITION,
     "singleshot/check": CHECK_DEFINITION,
     "singleshot/len_rabi": SS_LEN_RABI_DEFINITION,
     "singleshot/amp_rabi": SS_AMP_RABI_DEFINITION,
