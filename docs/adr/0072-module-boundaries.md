@@ -44,7 +44,15 @@ status: accepted
 
 真實硬體的 acquire 路徑不執行任何模擬模組，包含 `simulate` 與 `program.v2.simulation` 的排程器。共用時間成本計算放在中性的 `program` 工具，不讓真實 acquire 為了估時走模擬排程。2026-10-26，使用者裁決：「我不太希望真实 acquire 还会走模拟的模块。」
 
-既有 `.importlinter` 的 `program-simulation-entry` contract 限制 program classes 直接依賴 simulation frontend、timeline 與 adapter internals，只能經模擬入口使用。這是依賴檢查，不是 runtime 隔離的完整保證；真實 acquire 不執行模擬模組仍須在審閱執行路徑時確認。不新增 contract。
+Charge admission 是 caller 對 generator 必須綁定 charge drive line 的明確要求。Caller 以 `core.simulation.ChargeDriveRequirement` 傳入診斷名稱與 generator index，不查 environment settings 或判斷 physical membership。名稱不是 role registry 的 key。Program 的模擬入口只把需求放進 `AcquireRequest.charge_requirements`；resources 的 replay 保存同一個 core record，不重做物理驗證。
+
+知道實體線路的 environment 擁有驗證。Single-fluxonium 每次 acquire 都在 preflight 檢查 `drive_lines`，早於 waveform 建構、preparation reuse 與 evolution。Generator 已綁 flux 或 readout 也不能滿足 charge 需求。這不改變其他合法 fast-flux 事件的路由。
+
+硬體入口取走這個 keyword，不轉送 QICK、不建立 simulation request，也不執行此物理驗證。Operator 負責核對實機線路。`white_noise` 沒有物理線路模型，各 generator 只產生雜訊，因此接受需求而不驗證。未支援 charge admission 的物理環境收到非空需求時，在 evolution 前明確拒絕；six-fluxonium 與 FTF 目前採此行為，空需求維持原有流程。不以清空需求、猜測 waveform 角色或擴充共用 `QubitWiringSchema` 代替驗證，也不新增通用 protocol 或 `RunContext` capability。
+
+2026-10-30，advisor 依使用者代理授權「可以按需排task，我授權你代理」裁定上述分工。Advisor 的技術裁定原話為：「驗證 owner 是 single_fluxonium 環境，在既有拒絕 unbound generator 的 preflight 位置一起檢查，早於任何 evolution。」
+
+跨 package 資料沿既有 program／experiment／resources → core 方向傳遞，由 C8、C9、C12、C19 維持分層與 core 的無狀態邊界。既有 `.importlinter` 的 `program-simulation-entry` contract 限制 program classes 直接依賴 simulation frontend、timeline 與 adapter internals，只能經模擬入口使用。這是依賴檢查，不是 runtime 隔離的完整保證；真實 acquire 不執行模擬模組仍須在審閱執行路徑時確認。不新增 contract。
 
 ### Manifold 衰減模與分析診斷的 owner
 
