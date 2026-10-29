@@ -102,8 +102,6 @@ def _annotation(macro: Macro) -> bool:
 
 
 def _advances(macro: Macro) -> bool:
-    if _annotation(macro):
-        return False
     if type(macro) in (
         PreparedTimelineMacro,
         TimelineObservedPulse,
@@ -126,7 +124,9 @@ def _advances(macro: Macro) -> bool:
         return True
     if type(macro) in _REFERENCE_ADVANCE:
         return True
-    if type(macro) in _REFERENCE_STABLE and not _unknown_control_write(macro):
+    if (
+        _annotation(macro) or type(macro) in _REFERENCE_STABLE
+    ) and not _unknown_control_write(macro):
         return False
     raise ValueError(
         f"parallel admission: unknown reference effect of {type(macro).__name__}"
@@ -330,8 +330,6 @@ def _patch_resource(prog, macro) -> _Effects:
 
 
 def _leaf_resource(prog, macro: Macro) -> _Effects | None:
-    if _annotation(macro):
-        return _Effects(set(), set(), set())
     if type(macro) in (WriteReg, WriteRegOp, IncReg, ReadDmem, DmemLookup):
         return _register_resource(prog, macro)
     if type(macro) in (
@@ -340,7 +338,7 @@ def _leaf_resource(prog, macro: Macro) -> _Effects | None:
         TimelinePlacedConfig,
     ):
         return _resource(prog, macro.source)
-    if type(macro) in (
+    if _annotation(macro) or type(macro) in (
         TimelineFork,
         TimelineJoin,
         TimelineAdvance,
@@ -366,7 +364,7 @@ def _leaf_resource(prog, macro: Macro) -> _Effects | None:
 
 
 def _timeline_resource(prog, macro) -> _Effects:
-    if type(macro) in (TimelineFork, TimelineJoin):
+    if _annotation(macro) or type(macro) in (TimelineFork, TimelineJoin):
         return _Effects(set(), set(), set())
     if type(macro) is TimelineAdvance:
         return _Effects(
