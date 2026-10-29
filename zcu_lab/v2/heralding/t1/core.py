@@ -21,6 +21,7 @@ from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.experiment.v2.utils.t1_sampling import materialize_nonuniform_t1_delays
 from zcu_tools.plotting.plots import Plots
+from zcu_tools.program.herald import herald_ratio, heralded
 from zcu_tools.program.v2 import (
     Delay,
     DelayAuto,
@@ -131,6 +132,15 @@ class HeraldingT1Exp(Experiment[HeraldingT1Result, HeraldingT1Cfg]):
             on_update=lambda data: viewer.update(lengths, np.abs(data)),
         )
         fractions = np.full(len(lengths), np.nan, dtype=np.float64)
+
+        def processed_to_signal(
+            raw: list[NDArray[np.float64]],
+        ) -> NDArray[np.complex128]:
+            """Store pass fractions and return conditional IQ on this sweep's grid."""
+            iq, fraction = herald_ratio(raw[0])
+            fractions[:] = fraction
+            return iq[0, ..., 0] + 1j * iq[0, ..., 1]
+
         with Schedule(cfg, buffer, scope=context.scope) as sched:
             cfg = sched.cfg
             herald_readout = PulseReadout("herald", cfg.readout)
@@ -172,13 +182,12 @@ class HeraldingT1Exp(Experiment[HeraldingT1Result, HeraldingT1Cfg]):
             )
             herald = herald_readout.herald_spec(prog, occurrence=0)
             builder = sched.prog_builder(context.soc, soccfg)
-            try:
-                builder.run_program(prog, rounds=cfg.rounds, herald=[herald])
-            finally:
-                # Cancellation keeps the last completed-round summary, if any.
-                passed = prog.get_herald_pass_fraction()
-                if passed is not None:
-                    fractions[:] = passed[herald.ro_ch]
+            builder.run_program_processed(
+                prog,
+                rounds=cfg.rounds,
+                processors={herald.ro_ch: heralded(herald, np.copy)},
+                processed2signal_fn=processed_to_signal,
+            )
 
         return HeraldingT1Result(lengths, buffer.array, fractions)
 
