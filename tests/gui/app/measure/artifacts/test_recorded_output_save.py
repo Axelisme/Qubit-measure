@@ -103,16 +103,13 @@ def test_storage_free_save_keeps_declarations_and_publishes_recorded_outputs(
             if item.output.path.is_relative_to(tmp_path / "result")
         ]
         assert copies
-        assert all(
-            item.output.path.parent
-            == tmp_path
-            / "result"
-            / (entry_name or "unnamed_entry")
-            / "points"
-            / (point or "unnamed_point")
-            / "figures"
-            for item in copies
+        result_entry = tmp_path / "result" / (entry_name or "unnamed_entry")
+        figure_parent = (
+            result_entry / "figures"
+            if point is None
+            else result_entry / "points" / point / "figures"
         )
+        assert all(item.output.path.parent == figure_parent for item in copies)
         after = session.state.get_artifact_snapshots("tab")
         assert all(
             member.outputs

@@ -15,7 +15,7 @@ from zcu_tools.gui.app.measure.catalog import ExperimentAccess
 from zcu_tools.gui.app.measure.registry import RegisteredAdapter
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.types import ContextReadiness, ParameterContext
-from zcu_tools.resources.entry import PointStorageBinding
+from zcu_tools.resources.entry import StorageBinding
 
 from .tab_form import AcceptedFormConfig
 
@@ -95,7 +95,7 @@ class RunInputs:
     accepted_cfg: AcceptedFormConfig
     snapshot: RunSnapshot | None = None
     experiment_tag: str | None = None
-    storage: PointStorageBinding | None = None
+    storage: StorageBinding | None = None
     parameters: ParameterContext | None = None
 
 

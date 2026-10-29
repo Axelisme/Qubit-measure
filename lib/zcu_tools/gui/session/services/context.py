@@ -57,7 +57,7 @@ from zcu_tools.resources.entry.schema import (
     PointDocument,
     SetupDocument,
 )
-from zcu_tools.resources.entry.storage import PointStorageBinding
+from zcu_tools.resources.entry.storage import StorageBinding
 from zcu_tools.resources.entry.writeback import (
     LibraryUpdate,
     ModuleWriteback,
@@ -348,6 +348,7 @@ class ContextService:
         try:
             point = entry.new_point(
                 request.label,
+                mode="inherit" if clone is None else "clone",
                 clone_from=clone,
                 description=request.description,
             )
@@ -539,7 +540,7 @@ class ContextService:
         )
         self._install_alias_rows(candidate, revision)
 
-    def capture_storage(self, parameters: ParameterContext) -> PointStorageBinding:
+    def capture_storage(self, parameters: ParameterContext) -> StorageBinding:
         """Return historical storage for a fixed capture on the owner sequence.
 
         Current entry and point are not read. Source faults propagate;

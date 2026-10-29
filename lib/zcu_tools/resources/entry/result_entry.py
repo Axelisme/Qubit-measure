@@ -9,7 +9,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 from uuid import uuid4
 
 from pydantic import TypeAdapter, ValidationError
@@ -413,6 +413,7 @@ class ResultEntry:
         self,
         label: str,
         *,
+        mode: Literal["inherit", "empty", "clone"] = "inherit",
         clone_from: str | PointView | None = None,
         description: str | None = None,
     ) -> PointView:
@@ -420,14 +421,18 @@ class ResultEntry:
 
         label is a safe single path segment; existing destinations raise
         DestinationExistsError before writes.
-        Copy the complete published source YAML: parameters.yaml without clone_from,
-        otherwise the source parameters.yaml. Renew created_at in the independent copy.
+        mode='inherit' (default) copies global parameters, library and aliases.
+        mode='empty' creates only minimal parameters with fresh general defaults,
+        no components, metadata or optional files. Neither mode accepts clone_from.
+        mode='clone' requires clone_from and copies that point's three documents.
+        Invalid modes or mode/source combinations raise ValueError before writes.
+        Renew created_at in every independent copy.
         clone_from is a same-entry label, <entry>/<point>, or a ResultEntry-bound
         PointView using the same resolved result/database roots. Reload published
         point parameters and library and renew creation time. Copy aliases.yaml from
         setup when seeding, or from the source point when cloning, only if present.
         Missing source aliases or library stay absent, without setup fallback
-        during clone. Seeding without clone_from creates a header-only library.
+        during clone or inherit. Library copies go through the library owner.
         All alias tables remain independent after creation. Point values and
         opaque metadata copy verbatim. Library Specs copy without source records,
         ledger events or attachments. Invalid disk Specs are skipped in the copy;
@@ -436,6 +441,10 @@ class ResultEntry:
         Data and images are not copied or changed. Failure removes only the new
         point. No cross-file transaction is provided.
         """
+        if mode not in ("inherit", "empty", "clone"):
+            raise ValueError(f"Unknown point creation mode: {mode!r}")
+        if (mode == "clone") != (clone_from is not None):
+            raise ValueError("clone mode requires clone_from; other modes forbid it")
         destination = _entry_path(
             self._result_path / "points", label, new_destination=True
         )
@@ -443,6 +452,8 @@ class ResultEntry:
         try:
             if clone_from is not None:
                 self._clone_point(destination, clone_from)
+            elif mode == "empty":
+                self._empty_point(destination, description=description)
             else:
                 self._seed_point(destination)
             point = self.use_point(label)
@@ -453,6 +464,22 @@ class ResultEntry:
         except BaseException:
             shutil.rmtree(destination)
             raise
+
+    def _empty_point(self, destination: Path, *, description: str | None) -> None:
+        policy = component_registry.require_schema_policy()
+        document = {
+            "format": PARAMETER_FORMAT,
+            "format_version": f"{PARAMETER_VERSION.major}.{PARAMETER_VERSION.minor}",
+            "schema_version": policy.current_version,
+            "general": {
+                "created_at": datetime.now(timezone.utc)
+                .isoformat()
+                .replace("+00:00", "Z"),
+                "description": description,
+            },
+        }
+        with (destination / PARAMETERS_FILENAME).open("x", encoding="utf-8") as stream:
+            YAML(typ="rt").dump(document, stream)
 
     def _seed_point(self, destination: Path) -> None:
         # Copy the validated YAML snapshot while the template lock is held.
@@ -473,7 +500,11 @@ class ResultEntry:
                 draft.general.created_at = (
                     datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
                 )
-        _create_empty_library(destination / LIBRARY_FILENAME)
+        from zcu_tools.resources.context.library_store import copy_library
+
+        copy_library(
+            self._result_path / LIBRARY_FILENAME, destination / LIBRARY_FILENAME
+        )
         aliases = self._result_path / ALIASES_FILENAME
         if aliases.exists():
             shutil.copyfile(aliases, destination / ALIASES_FILENAME)
@@ -563,8 +594,9 @@ class ResultEntry:
 
         None selects entry/library.yaml; a label selects its point library
         under use_point's safe path rules. assets is optional for Spec-only use.
-        A missing point library is empty with revision None; the first nonempty
-        edit creates it. A missing setup library still raises FileNotFoundError.
+        A missing library at either scope is empty with revision None; the
+        first nonempty edit creates it. External creation conflicts with edits
+        until refresh installs that candidate.
         Invalid disk Specs are skipped and reported by snapshot.invalid_entries.
         Header/container/I/O errors propagate. Opening never writes or creates
         files, reads point/assets, or selects an active point. Drafts stay strict.
@@ -577,7 +609,7 @@ class ResultEntry:
             else _entry_path(self._result_path / "points", label)
         )
         return ModuleLibrary(
-            directory / LIBRARY_FILENAME, assets=assets, allow_absent=label is not None
+            directory / LIBRARY_FILENAME, assets=assets, allow_absent=True
         )
 
     def _validate_parameter_read(self, document: YamlMap, source: Path) -> None:

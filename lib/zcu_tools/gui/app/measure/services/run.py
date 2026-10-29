@@ -43,7 +43,7 @@ from zcu_tools.gui.session.operation_runner import (
 )
 from zcu_tools.gui.session.parameter_capture import capture_parameters
 from zcu_tools.gui.session.scopes import progress_ambient
-from zcu_tools.resources.entry import AcquiredPayload, LedgerEvent, PointStorageBinding
+from zcu_tools.resources.entry import AcquiredPayload, LedgerEvent, StorageBinding
 
 from .guard import RunInputs
 from .operation_gate import OperationKind
@@ -77,7 +77,7 @@ class _RunOperation:
     cancel_requested: threading.Event
     origin: CommandOrigin
     adapter_name: str
-    storage: PointStorageBinding | None
+    storage: StorageBinding | None
     parameters: ParameterContext | None
     partial_result: bool = False
 

@@ -9,9 +9,31 @@ from zcu_tools.format_version import YamlMap
 from zcu_tools.resources.entry import (
     ResultEntry,
     UnknownKindError,
+    document_revision,
     snapshot,
 )
 from zcu_tools.resources.entry.views import FieldView
+
+
+def test_strict_refresh_rejects_invalid_global_candidate_and_retains_publication(
+    entry: ResultEntry,
+) -> None:
+    entry.setup.add_component("R1", kind="fake/sensor", rate=6500.0)
+    source = entry.result_path / "parameters.yaml"
+    installed = document_revision(entry.setup)
+    write_setup_component(source, "R1", {"kind": "fake/sensor", "rate": "bad"})
+    candidate = source.read_bytes()
+
+    with pytest.raises(ValidationError, match="rate"):
+        entry.setup.refresh(strict=True)
+
+    assert entry.setup.R1.rate == 6500.0
+    assert document_revision(entry.setup) == installed
+    assert source.read_bytes() == candidate
+    write_setup_component(source, "R1", {"kind": "fake/sensor", "rate": 6600.0})
+    entry.setup.refresh(strict=True)
+    assert entry.setup.R1.rate == 6600.0
+    assert document_revision(entry.setup) != installed
 
 
 def field_view(value: object) -> FieldView:

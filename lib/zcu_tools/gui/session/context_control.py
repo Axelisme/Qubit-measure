@@ -27,7 +27,7 @@ if TYPE_CHECKING:
     from zcu_tools.gui.session.value_lookup import ScalarValue, ValueInfo
     from zcu_tools.resources.entry.ledger_models import JsonObject
     from zcu_tools.resources.entry.schema import PointDocument, SetupDocument
-    from zcu_tools.resources.entry.storage import PointStorageBinding
+    from zcu_tools.resources.entry.storage import StorageBinding
     from zcu_tools.resources.entry.writeback import (
         WritebackEvidence,
         WritebackItem,
@@ -88,7 +88,7 @@ class ContextControlPort(Protocol):
         """
         ...
 
-    def capture_storage(self, parameters: ParameterContext) -> PointStorageBinding:
+    def capture_storage(self, parameters: ParameterContext) -> StorageBinding:
         """Return historical origin/roles on the owner thread without I/O.
 
         Source faults propagate. Unbound captures raise

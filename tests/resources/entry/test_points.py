@@ -87,6 +87,45 @@ def write_yaml(source: Path, document: object) -> None:
         YAML(typ="rt").dump(document, stream)
 
 
+def test_empty_point_uses_owner_defaults_without_inheriting_global_values(
+    entry: ResultEntry,
+) -> None:
+    entry.setup.add_component("Q1", kind="fake/drive/a", rate=5000.0)
+    with entry.setup.edit() as draft:
+        draft.description = "global description"
+        draft.set("general.ext", {"operator": "global"})
+        draft.set_meta("Q1.rate", {"note": "global"})
+    setup_bytes = (entry.result_path / "parameters.yaml").read_bytes()
+    point = entry.new_point("blank", mode="empty", description="new description")
+
+    content = snapshot(point)
+    assert content.components == {}
+    assert content.metadata == {}
+    assert content.general.description == "new description"
+    assert content.general.ext == {}
+    assert content.general.created_at
+    directory = entry.result_path / "points/blank"
+    assert sorted(path.name for path in directory.iterdir()) == ["parameters.yaml"]
+    assert entry.module_library("blank").document_revision.revision is None
+    assert entry.load_aliases_with_revision(point="blank")[1].revision is None
+    assert (entry.result_path / "parameters.yaml").read_bytes() == setup_bytes
+
+
+@pytest.mark.parametrize(
+    "mode,source",
+    [("inherit", "source"), ("empty", "source"), ("clone", None)],
+)
+def test_new_point_rejects_mode_source_mismatch_before_creating_destination(
+    entry: ResultEntry,
+    mode: Literal["inherit", "empty", "clone"],
+    source: str | None,
+) -> None:
+    entry.new_point("source")
+    with pytest.raises(ValueError, match="clone"):
+        entry.new_point("invalid", mode=mode, clone_from=source)
+    assert entry.list_points() == ["source"]
+
+
 def test_point_reads_only_requested_leaf_and_rejects_invalid_document_edits(
     entry: ResultEntry, range_kind: str
 ) -> None:
@@ -227,7 +266,9 @@ def test_new_point_copies_forward_minor_source_yaml(
     write_yaml(source, document)
     before = source.read_bytes()
 
-    point = entry.new_point("copy", clone_from=clone_from)
+    point = entry.new_point(
+        "copy", mode="inherit" if clone_from is None else "clone", clone_from=clone_from
+    )
 
     stored = YAML(typ="safe").load(
         (entry.result_path / "points/copy/parameters.yaml").read_text()
@@ -347,7 +388,7 @@ def test_seed_keeps_generated_default_values_across_independent_edits_and_reload
     assert point.C1.title == "template"
     assert entry.setup.C1.gain == 1.0
     assert entry.use_point("a").C1.token == token
-    cloned = entry.new_point("b", clone_from=point)
+    cloned = entry.new_point("b", mode="clone", clone_from=point)
     assert cloned.C1.token == token
     assert field_view(cloned.C1.timing).width == field_view(point.C1.timing).width
     assert field_view(cloned.C1.timing).note == field_view(point.C1.timing).note
@@ -573,7 +614,7 @@ def test_clone_copies_only_complete_point_and_module_without_reading_setup(
     (source / "image.png").write_bytes(b"not cloned")
     (root / "parameters.yaml").write_text("invalid: [", encoding="utf-8")
     source_arg = "source" if source_mode == "label" else point
-    cloned = entry.new_point("target", clone_from=source_arg)
+    cloned = entry.new_point("target", mode="clone", clone_from=source_arg)
     assert cloned.Q1.rate == 5000.0
     assert cloned.Q1.duration == 12.0
     assert cloned.description == "source environment"
@@ -590,7 +631,7 @@ def test_clone_copies_only_complete_point_and_module_without_reading_setup(
     assert stored["components"]["Q1"]["duration"] == 12.0
     before = (destination / "parameters.yaml").read_bytes()
     with pytest.raises(FileExistsError):
-        entry.new_point("target", clone_from=source_arg)
+        entry.new_point("target", mode="clone", clone_from=source_arg)
     assert (destination / "parameters.yaml").read_bytes() == before
     assert entry.list_points() == ["source", "target"]
 
@@ -620,7 +661,7 @@ def test_yaml_extensions_survive_seed_clone_reload_and_keep_metadata_units(
     with point.edit() as draft:
         draft.set("R1.ext.noise", 12.0)
         draft.set_meta("R1.ext.noise", {"stderr": 2.0})
-    clone = entry.new_point("b", clone_from="a")
+    clone = entry.new_point("b", mode="clone", clone_from="a")
     field_view(clone.R1.ext).blob = {"independent": False}
     clone.general.ext["_misc-key"] = None
     reopened = ResultEntry.open(
@@ -664,13 +705,13 @@ def test_clone_copy_failure_cleans_new_directory_and_keeps_source(
     with monkeypatch.context() as patch:
         patch.setattr(shutil, "copyfile", block_library_destination)
         with pytest.raises(OSError, match="library") as failure:
-            entry.new_point("b", clone_from=working_point)
+            entry.new_point("b", mode="clone", clone_from=working_point)
         assert failure.value.filename == str(root / "points/b/library.yaml")
     assert not (root / "points/b").exists()
     assert entry.list_points() == ["a"]
     assert {name: (source / name).read_bytes() for name in before} == before
     assert working_point.Q1.duration == 12.0
-    assert entry.new_point("b", clone_from="a").Q1.duration == 12.0
+    assert entry.new_point("b", mode="clone", clone_from="a").Q1.duration == 12.0
 
 
 def test_independent_handles_merge_different_leaves_in_one_point(
@@ -730,7 +771,10 @@ def test_point_description_is_set_within_create_and_preserves_source(
     source = entry.new_point("source")
     source.description = "source description"
     created = entry.new_point(
-        "destination", clone_from=clone_from, description=description
+        "destination",
+        mode="inherit" if clone_from is None else "clone",
+        clone_from=clone_from,
+        description=description,
     )
     expected = (
         description

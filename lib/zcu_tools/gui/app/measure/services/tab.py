@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.registry import Registry
     from zcu_tools.gui.app.measure.state import PaneTransitionPreview, State
-    from zcu_tools.resources.entry import PointStorageBinding
+    from zcu_tools.resources.entry import StorageBinding
 
     from ..writeback import WritebackService
     from .tab_form import TabFormResources, TabFormSources
@@ -351,7 +351,7 @@ class TabService:
         return self._state.get_tab(tab_id).post_analysis.result
 
 
-def _display_bases(storage: PointStorageBinding | None) -> tuple[Path, ...]:
+def _display_bases(storage: StorageBinding | None) -> tuple[Path, ...]:
     """Parents of the Run's result/database roots, or () without storage."""
     if storage is None:
         return ()

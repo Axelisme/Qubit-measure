@@ -225,7 +225,9 @@ def test_same_entry_clone_copies_values_and_metadata_verbatim(
         for path, mapping in metadata.items():
             draft.set_meta(path, mapping)
     clone = entry.new_point(
-        "clone", clone_from="original" if clone_from == "label" else original
+        "clone",
+        mode="clone",
+        clone_from="original" if clone_from == "label" else original,
     )
     assert clone.Q1.rate == 5300.0
     for path, mapping in metadata.items():

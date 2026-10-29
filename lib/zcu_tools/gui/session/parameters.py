@@ -29,7 +29,7 @@ from zcu_tools.resources.entry import (
 )
 from zcu_tools.resources.entry.aliases import AliasValue
 from zcu_tools.resources.entry.roles import resolve_names
-from zcu_tools.resources.entry.storage import PointStorageBinding, capture_point_storage
+from zcu_tools.resources.entry.storage import StorageBinding, capture_point_storage
 from zcu_tools.resources.projection import ProjectionPathError, projection_value
 
 _LIBRARY_PARTITIONS = ("pulses", "readout", "reset", "waveforms")
@@ -108,7 +108,7 @@ class ParameterContext:
         target: ContextTarget | None,
         roles: RoleBinding | None,
         source_faults: tuple[ContextSourceFault, ...] = (),
-        storage: PointStorageBinding | None = None,
+        storage: StorageBinding | None = None,
     ) -> None:
         """Detach input data and retain the immutable library projection.
 
@@ -319,7 +319,7 @@ class ParameterContext:
         return tuple(rows)
 
     @property
-    def storage(self) -> PointStorageBinding | None:
+    def storage(self) -> StorageBinding | None:
         """Return the fixed origin capability, or None for synthetic unbound captures.
 
         Its roots, ledger and description belong to capture time. This projection
@@ -333,7 +333,7 @@ class ParameterContext:
         names = {} if roles is None else dict(roles.names)
         return replace(self._storage, roles=MappingProxyType(names))
 
-    def capture_storage(self) -> PointStorageBinding:
+    def capture_storage(self) -> StorageBinding:
         """Return storage at this capture's origin, never the current selection.
 
         Necessary source faults raise ContextSourceUnavailableError. Synthetic

@@ -1,6 +1,6 @@
 # `zcu_tools.resources.context` point-local module library
 
-**Last updated:** 2026-10-29
+**Last updated:** 2026-10-29，entry 與 point 的缺席 library 對稱
 
 **讀者：** framework-dev。Point-local module library 的讀取、編輯與來源契約。
 
@@ -10,8 +10,8 @@
 
 `library.py` 擁有 `library.yaml` 的文件、查詢與編輯。`library_store.py` 擁有磁碟讀取與 clone 複製。
 文件格式維持 `zcu.module-library` 2.0，header-only 文件表示空 library。
-`ResultEntry.module_library(label)` 允許 point library 缺席，回空快照與 revision=None。
-讀取不建立檔案或父目錄，setup library 缺檔仍報錯。
+`ResultEntry.module_library(label)` 與不傳 label 的 entry library 都允許缺席，回空快照與 revision=None。
+讀取不建立檔案或父目錄。
 版本只跟容器結構走，不隨 Spec 欄位演進升版，見 ADR-0072。Forward minor 保留容器層未知欄位。
 
 讀取不寫檔、不備份，也不查 ledger。舊 `provenance:` 不論內容都忽略。
@@ -46,7 +46,7 @@ Body、schema、conflict 或 I/O 失敗不發布候選。Body 中的 snapshot �
 `refresh(strict=True)` 可安裝外部新建的合法 library，無效候選保留已發布內容。
 
 Caller 透過 `ResultEntry.module_library(label)` 開啟 library，建立 point 由 ResultEntry 負責。
-Clone 複製合法 Specs 與 forward-minor 容器欄位，不改來源檔、不匯入事件或附件。
+Inherit 與 clone 都經 copy_library 複製合法 Specs 與 forward-minor 容器欄位，不改來源檔、不匯入事件或附件。
 來源缺 library 時，目的也保持缺檔。
 缺失的 child reference 在使用該欄位時報錯，不 cascade、不補 defaults。
 舊 flat 文件由 root `migrations/` 的離線工具轉換後使用。

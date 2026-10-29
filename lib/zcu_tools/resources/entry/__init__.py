@@ -55,9 +55,10 @@ from .schema_fields import (
     role_candidates,
 )
 from .storage import (
-    PointStorageBinding,
     RunOutputBinding,
+    StorageBinding,
     bind_run_outputs,
+    capture_entry_storage,
     capture_point_storage,
 )
 from .template import EntryTemplate, load_entry_template
@@ -78,6 +79,7 @@ from .views import (
 )
 from .writeback import (
     CommittedWrite,
+    EntryWritebackTarget,
     ModuleWriteback,
     ParameterWriteback,
     PointWritebackTarget,
