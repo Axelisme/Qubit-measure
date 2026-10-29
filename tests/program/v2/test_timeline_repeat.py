@@ -1,0 +1,887 @@
+"""Repeat boundaries through native compilation and linked timing analysis."""
+
+from collections.abc import Callable
+
+import pytest
+from qick.asm_v2 import Macro, Pulse, QickSweep1D, WriteReg
+from zcu_tools.program.v2.mocksoc import make_mock_soccfg
+from zcu_tools.program.v2.timeline import TimelineProgramV2
+
+from tests.program.v2.timing_support import shots as _shots
+from tests.program.v2.timing_support import waves as _waves
+
+
+def _program(
+    body: Callable[[TimelineProgramV2], None],
+    initialize: Callable[[TimelineProgramV2], None] | None = None,
+    *,
+    reps: int = 1,
+) -> TimelineProgramV2:
+    class Program(TimelineProgramV2):
+        def _initialize(self, cfg):
+            for ch in range(2):
+                self.declare_gen(ch, nqz=1)
+                self.add_pulse(
+                    ch,
+                    f"p{ch}",
+                    style="const",
+                    freq=1000,
+                    phase=0,
+                    gain=0.5,
+                    length=25 / 384,
+                )  # 25 generator ticks = 28 tProc ticks.
+            if initialize is not None:
+                initialize(self)
+
+        def _body(self, cfg):
+            body(self)
+
+    return Program(make_mock_soccfg(2, 1), reps=reps, initial_delay=0, relax_delay=0)
+
+
+class _CountRegister(Macro):
+    def __init__(self, value: int):
+        self.value = value
+
+    def preprocess(self, prog):
+        prog.add_reg("count")
+
+    def translate(self, prog):
+        WriteReg(dst="count", src=self.value).translate(prog)
+
+
+def _register_initialize(prog: TimelineProgramV2, value: int = 3):
+    prog.append_macro(_CountRegister(value))
+    prog.add_pulse(
+        0,
+        "short",
+        style="const",
+        freq=1000,
+        phase=0,
+        gain=0.5,
+        length=5 / 384,
+    )  # Five generator ticks take 5.6 tProc cycles, ceiled to six.
+
+
+@pytest.mark.parametrize("parent", ["default", "drive"])
+def test_repeat_synchronizes_parent_before_first_iteration_and_closes_each_iteration(
+    parent,
+):
+    def body(prog):
+        if parent != "default":
+            prog.fork("default", into=parent)
+        prog.pulse(0, "p0", timeline=parent)
+        with prog.repeat("repeat", 2, timeline=parent):
+            prog.pulse(0, "p0", timeline=parent)
+            prog.delay_timeline(7 / 430.08, timeline=parent)
+        prog.pulse(0, "p0", timeline=parent)
+
+    (shot,) = _shots(_program(body))
+    assert _waves(shot) == [0, 28, 63, 98]
+    assert (shot.body_end_cycle, shot.end_cycle) == (126, 126)
+
+
+@pytest.mark.parametrize("advance", [0, 20])
+def test_fixed_repeat_rebases_long_external_pulse_and_reuses_parent_and_local_names(
+    advance,
+):
+    def initialize(prog):
+        prog.add_loop("scan", 2)
+        prog.add_pulse(
+            1,
+            "flux",
+            style="const",
+            freq=1000,
+            phase=0,
+            gain=0.5,
+            length=125 / 384,
+        )  # 125 generator ticks = 140 tProc ticks.
+
+    def body(prog):
+        prog.fork("default", into="flux")
+        prog.pulse(1, "flux", timeline="flux")
+        prog.delay_timeline(advance / 430.08)
+        with prog.repeat("r", 2):
+            prog.fork("default", into=["a", "b"])
+            prog.pulse(0, "p0", timeline="a")
+            prog.delay_timeline(7 / 430.08, timeline="a")
+            prog.join("a", "b", into="default")
+        prog.pulse(1, "p1", timeline="flux")
+        prog.fork("default", into="a")
+        prog.pulse(0, "p0", timeline="a")
+
+    prog = _program(body, initialize, reps=2)
+    shots = _shots(prog)
+    assert [_waves(s) for s in shots] == [
+        [0, advance, advance + 35, 140, advance + 70]
+    ] * 4
+    assert [s.body_end_cycle - s.start_cycle for s in shots] == [168] * 4
+    assert [s.end_cycle - s.start_cycle for s in shots] == [168] * 4
+    prog.compile()
+    assert _shots(prog) == shots
+
+
+@pytest.mark.parametrize("inner_parent", ["default", "local"])
+def test_nested_repeat_syncs_chosen_parent_and_expires_inner_locals(inner_parent):
+    def body(prog):
+        with prog.repeat("outer", 2):
+            prog.fork("default", into="local")
+            prog.delay_timeline(10 / 430.08, timeline=inner_parent)
+            with prog.repeat("inner", 2, timeline=inner_parent):
+                prog.fork(inner_parent, into="inner_local")
+                prog.pulse(0, "p0", timeline="inner_local")
+            prog.fork(inner_parent, into="inner_local")
+            prog.pulse(0, "p0", timeline=inner_parent)
+
+    (shot,) = _shots(_program(body))
+    assert _waves(shot) == [10, 38, 66, 104, 132, 160]
+    assert (shot.body_end_cycle, shot.end_cycle) == (188, 188)
+
+
+@pytest.mark.parametrize(
+    "operation", ["pulse", "trigger", "delay", "sync", "join", "fork"]
+)
+def test_repeat_rejects_using_nonparent_external_timeline(operation):
+    def body(prog):
+        prog.fork("default", into="external")
+        with prog.repeat("r", 2):
+            if operation == "pulse":
+                prog.pulse(0, "p0", timeline="external")
+            elif operation == "trigger":
+                prog.trigger(timeline="external")
+            elif operation == "delay":
+                prog.delay_timeline(0, timeline="external")
+            elif operation == "sync":
+                prog.sync(timeline="external")
+            elif operation == "join":
+                prog.join("external", into="default")
+            else:
+                prog.fork("external", into="local")
+
+    with pytest.raises(ValueError, match="external.*timeline"):
+        _program(body)
+
+
+def test_repeat_local_timeline_is_undeclared_after_exit():
+    def body(prog):
+        with prog.repeat("r", 2):
+            prog.fork("default", into="local")
+            prog.pulse(0, "p0", timeline="local")
+        prog.sync(timeline="local")
+
+    with pytest.raises(ValueError, match="local.*fork"):
+        _program(body)
+
+
+def test_fixed_repeat_swept_duration_debits_outer_end_at_each_scan_point():
+    def initialize(prog):
+        prog.add_loop("scan", 3)
+
+    def body(prog):
+        prog.fork("default", into="external")
+        prog.delay_timeline(100 / 430.08, timeline="external")
+        with prog.repeat("r", 2):
+            prog.delay_timeline(QickSweep1D("scan", 10 / 430.08, 20 / 430.08))
+            prog.pulse(0, "p0", timeline="default")
+        prog.pulse(1, "p1", timeline="external")
+
+    shots = _shots(_program(body, initialize, reps=2))
+    assert [_waves(s) for s in shots] == [
+        [10, 48, 100],
+        [15, 58, 100],
+        [20, 68, 100],
+    ] * 2
+    assert [s.body_end_cycle - s.start_cycle for s in shots] == [128] * 6
+    assert [s.end_cycle - s.start_cycle for s in shots] == [128] * 6
+
+
+def test_fixed_repeat_rejects_crossing_external_floor():
+    def initialize(prog):
+        prog.add_loop("scan", 3)
+
+    def body(prog):
+        prog.fork("default", into="external")
+        prog.delay_timeline(30 / 430.08, timeline="external")
+        with prog.repeat("r", 2):
+            prog.delay_timeline(QickSweep1D("scan", 10 / 430.08, 20 / 430.08))
+
+    with pytest.raises(ValueError, match="external.*cannot prove"):
+        _program(body, initialize)
+
+
+def test_zero_repeat_syncs_parent_but_does_not_execute_or_declare_body():
+    def body(prog):
+        prog.pulse(0, "p0", timeline="default")
+        with prog.repeat("zero", 0):
+            prog.fork("default", into="local")
+            prog.pulse(1, "p1", timeline="local")
+        prog.fork("default", into="local")
+        prog.pulse(0, "p0", timeline="local")
+
+    (shot,) = _shots(_program(body))
+    assert _waves(shot) == [0, 28]
+    assert (shot.body_end_cycle, shot.end_cycle) == (56, 56)
+
+
+@pytest.mark.parametrize("count", [-1, True, False])
+def test_repeat_rejects_invalid_integer_count(count):
+    def body(prog):
+        with prog.repeat("r", count):
+            pass
+
+    with pytest.raises(ValueError, match="nonnegative integer"):
+        _program(body)
+
+
+@pytest.mark.parametrize(
+    "count,hint",
+    [
+        (2, (1, 3)),
+        ("n", None),
+        ("n", (-1, 3)),
+        ("n", (3, 2)),
+        ("n", (True, 3)),
+    ],
+)
+def test_repeat_rejects_missing_or_invalid_range_hint(count, hint):
+    def body(prog):
+        with prog.repeat("r", count, range_hint=hint):
+            pass
+
+    with pytest.raises(ValueError, match="range_hint"):
+        _program(body)
+
+
+def test_repeat_register_count_cannot_alias_its_counter():
+    def body(prog):
+        with prog.repeat("same", "same", range_hint=(0, 3)):
+            pass
+
+    with pytest.raises(ValueError, match="differ.*counter"):
+        _program(body)
+
+
+def test_repeat_preserves_trigger_cycles_and_adc_window_closure():
+    def initialize(prog):
+        prog.declare_readout(0, length=25 / 307.2)
+
+    def body(prog):
+        with prog.repeat("r", 2):
+            prog.trigger([0], t=5 / 430.08, width=10 / 430.08, timeline="default")
+            prog.pulse(0, "p0", timeline="default")
+
+    (shot,) = _shots(_program(body, initialize))
+    # 25 ADC ticks = 35 tProc ticks, so trigger end=40 and pulse end=68.
+    assert [(e.cycle, e.value) for e in shot.events if e.kind == "data"] == [
+        (5, 1),
+        (15, 0),
+        (73, 1),
+        (83, 0),
+    ]
+    assert _waves(shot) == [40, 108]
+    assert (shot.body_end_cycle, shot.end_cycle) == (136, 136)
+
+
+@pytest.mark.parametrize("inner_parent", ["default", "local"])
+def test_nested_repeat_cannot_use_outer_nonparent_timeline(inner_parent):
+    other = "local" if inner_parent == "default" else "default"
+
+    def body(prog):
+        with prog.repeat("outer", 2):
+            prog.fork("default", into="local")
+            with prog.repeat("inner", 2, timeline=inner_parent):
+                prog.fork(other, into="forbidden")
+
+    with pytest.raises(ValueError, match=f"{other}.*timeline"):
+        _program(body)
+
+
+@pytest.mark.parametrize("consumer", ["body", "join", "fork", "sync"])
+def test_register_repeat_uses_range_minimum_for_conservative_wait_consumers(consumer):
+    def body(prog):
+        prog.fork("default", into="external")
+        prog.delay_timeline(100 / 430.08, timeline="external")
+        with prog.repeat("r", "count", range_hint=(2, 4)):
+            prog.pulse(0, "short", timeline="default")
+            prog.delay_timeline(9 / 430.08)
+        if consumer == "join":
+            prog.join("external", into="default")
+            prog.pulse(1, "p1", timeline="default")
+        elif consumer == "fork":
+            prog.fork("external", into="derived")
+            prog.pulse(1, "p1", timeline="derived")
+        elif consumer == "sync":
+            prog.sync(timeline="external")
+            prog.pulse(1, "p1", timeline="external")
+
+    shots = _shots(_program(body, _register_initialize, reps=2))
+    # Actual reference is 3*15=45; latest remainder uses min count:100-2*15=70.
+    expected = [0, 15, 30] if consumer == "body" else [0, 15, 30, 115]
+    end = 115 if consumer == "body" else 143
+    assert [_waves(s) for s in shots] == [expected] * 2
+    assert [s.body_end_cycle - s.start_cycle for s in shots] == [end] * 2
+    assert [s.end_cycle - s.start_cycle for s in shots] == [end] * 2
+
+
+@pytest.mark.parametrize("operation", ["pulse", "trigger", "emit", "delay"])
+@pytest.mark.parametrize("derive", ["none", "join", "fork"])
+def test_register_repeat_wait_source_stays_restricted_after_deriving_schedule_point(
+    operation, derive
+):
+    from zcu_tools.program.v2.modules.delay import SoftDelay
+
+    delay = SoftDelay("delay", 0.01)
+
+    def initialize(prog):
+        _register_initialize(prog)
+        prog.declare(delay)
+
+    def body(prog):
+        prog.fork("default", into="external")
+        prog.delay_timeline(100 / 430.08, timeline="external")
+        with prog.repeat("r", "count", range_hint=(2, 4)):
+            prog.delay_timeline(15 / 430.08)
+        if derive == "join":
+            prog.join("external", into="default")
+        elif derive == "fork":
+            prog.fork("external", into="derived")
+        if operation == "pulse":
+            prog.pulse(1, "p1", timeline="external")
+        elif operation == "trigger":
+            prog.trigger(timeline="external")
+        elif operation == "emit":
+            prog.emit(delay, timeline="external")
+        else:
+            prog.delay_timeline(0, timeline="external")
+
+    with pytest.raises(ValueError, match="external.*wait"):
+        _program(body, initialize)
+
+
+def _readout_register_initialize(prog: TimelineProgramV2):
+    _register_initialize(prog)
+    prog.declare_readout(0, length=0.4)
+    prog.add_readoutconfig(0, "ro", freq=100)
+
+
+def _repeat_with_external_wait(prog: TimelineProgramV2):
+    prog.fork("default", into="external")
+    prog.delay_timeline(100 / 430.08, timeline="external")
+    with prog.repeat("r", "count", range_hint=(2, 4)):
+        prog.delay_timeline(15 / 430.08)
+
+
+def _send_config(
+    prog: TimelineProgramV2, runtime_words: bool, offset: int, timeline: str | None
+):
+    if runtime_words:
+        prog.send_readoutconfig_from_regs(
+            0, "ro", freq_reg="count", t=offset / 430.08, timeline=timeline
+        )
+    else:
+        prog.send_readoutconfig(0, "ro", t=offset / 430.08, timeline=timeline)
+
+
+@pytest.mark.parametrize("runtime_words", [False, True])
+@pytest.mark.parametrize("offset", [0, 5])
+@pytest.mark.parametrize("transition", ["none", "join", "fork", "partial-native"])
+def test_register_repeat_wait_source_rejects_config_placement(
+    runtime_words, offset, transition
+):
+    def body(prog):
+        _repeat_with_external_wait(prog)
+        if transition == "join":
+            prog.join("external", into="default")
+        elif transition == "fork":
+            prog.fork("external", into="derived")
+        elif transition == "partial-native":
+            prog.delay(20 / 430.08)
+        _send_config(prog, runtime_words, offset, "external")
+
+    with pytest.raises(ValueError, match="external.*wait"):
+        _program(body, _readout_register_initialize)
+
+
+@pytest.mark.parametrize("runtime_words", [False, True])
+@pytest.mark.parametrize("offset", [0, 5])
+@pytest.mark.parametrize("transition", ["join", "fork", "sync", "native"])
+def test_register_repeat_ordinary_schedule_point_allows_config_placement(
+    runtime_words, offset, transition
+):
+    def body(prog):
+        _repeat_with_external_wait(prog)
+        target = "external"
+        if transition == "join":
+            prog.join("external", into="default")
+            target = "default"
+        elif transition == "fork":
+            prog.fork("external", into="derived")
+            target = "derived"
+        elif transition == "sync":
+            prog.sync(timeline="external")
+        else:
+            prog.delay(70 / 430.08)
+        _send_config(prog, runtime_words, offset, target)
+        prog.pulse(1, "p1", timeline=target)
+
+    (shot,) = _shots(_program(body, _readout_register_initialize))
+    # Actual ref45 plus conservative remainder70; config is instantaneous.
+    # The following 25-generator-tick pulse adds 28 tProc cycles.
+    assert _waves(shot) == [115 + offset, 115 + offset]
+    assert (shot.body_end_cycle, shot.end_cycle) == (143 + offset,) * 2
+
+
+@pytest.mark.parametrize("runtime_words", [False, True])
+@pytest.mark.parametrize("offset", [0, 5])
+def test_register_repeat_native_config_does_not_place_on_wait_source(
+    runtime_words, offset
+):
+    def body(prog):
+        _repeat_with_external_wait(prog)
+        _send_config(prog, runtime_words, offset, None)
+        prog.pulse(1, "p1", timeline="default")
+
+    (shot,) = _shots(_program(body, _readout_register_initialize))
+    assert _waves(shot) == [45 + offset, 45]
+    assert (shot.body_end_cycle, shot.end_cycle) == (115, 115)
+
+
+@pytest.mark.parametrize("actual", [0, 3])
+def test_register_repeat_zero_minimum_preserves_parent_scheduling(actual):
+    def initialize(prog):
+        _register_initialize(prog, actual)
+
+    def body(prog):
+        prog.fork("default", into="external")
+        prog.delay_timeline(100 / 430.08, timeline="external")
+        with prog.repeat("r", "count", range_hint=(0, 4)):
+            prog.pulse(0, "short", timeline="default")
+            prog.delay_timeline(9 / 430.08)
+        prog.pulse(0, "p0", timeline="default")
+
+    (shot,) = _shots(_program(body, initialize))
+    expected = [0] if actual == 0 else [0, 15, 30, 45]
+    assert _waves(shot) == expected
+    assert (shot.body_end_cycle, shot.end_cycle) == (100 + actual * 15,) * 2
+
+
+@pytest.mark.parametrize("advance", [20, 69])
+def test_partial_native_advance_keeps_wait_only_source_restricted(advance):
+    def body(prog):
+        prog.fork("default", into="external")
+        prog.delay_timeline(100 / 430.08, timeline="external")
+        with prog.repeat("r", "count", range_hint=(2, 4)):
+            prog.delay_timeline(15 / 430.08)
+        prog.delay(advance / 430.08)
+        prog.delay_timeline(0, timeline="external")
+
+    with pytest.raises(ValueError, match="external.*wait"):
+        _program(body, _register_initialize)
+
+
+@pytest.mark.parametrize("consumer", ["sync", "native", "repeat"])
+def test_consuming_full_bound_restores_original_timeline_for_placement(consumer):
+    def body(prog):
+        prog.fork("default", into="external")
+        prog.delay_timeline(100 / 430.08, timeline="external")
+        with prog.repeat("r", "count", range_hint=(2, 4)):
+            prog.delay_timeline(15 / 430.08)
+        if consumer == "sync":
+            prog.sync(timeline="external")
+        elif consumer == "native":
+            prog.delay(70 / 430.08)
+        else:
+            with prog.repeat("after", 2, timeline="external"):
+                prog.pulse(1, "p1", timeline="external")
+        prog.pulse(1, "p1", timeline="external")
+
+    (shot,) = _shots(_program(body, _register_initialize))
+    expected = [115, 143, 171] if consumer == "repeat" else [115]
+    end = 199 if consumer == "repeat" else 143
+    assert _waves(shot) == expected
+    assert (shot.body_end_cycle, shot.end_cycle) == (end, end)
+
+
+def test_native_register_advance_consumes_wait_bound_before_restoring_placement():
+    def initialize(prog):
+        _register_initialize(prog)
+        prog.add_pulse(
+            1,
+            "flux",
+            style="const",
+            freq=1000,
+            phase=0,
+            gain=0.5,
+            length=125 / 384,
+        )  # 140 tProc cycles.
+
+    def body(prog):
+        prog.fork("default", into="external")
+        prog.pulse(1, "flux", timeline="external")
+        with prog.repeat("r", "count", range_hint=(2, 4)):
+            prog.pulse(0, "short", timeline="default")
+            prog.delay_timeline(9 / 430.08)
+        prog.delay_reg_auto("count")
+        prog.pulse(1, "p1", timeline="external")
+
+    (shot,) = _shots(_program(body, initialize))
+    # Native static bound110 plus count register's three cycles follow actualref45.
+    assert _waves(shot) == [0, 0, 15, 30, 158]
+    assert (shot.body_end_cycle, shot.end_cycle) == (186, 186)
+
+
+def test_register_repeat_swept_duration_proves_latest_wait_at_each_point():
+    def initialize(prog):
+        _register_initialize(prog)
+        prog.add_loop("scan", 3)
+
+    def body(prog):
+        prog.fork("default", into="external")
+        prog.delay_timeline(100 / 430.08, timeline="external")
+        with prog.repeat("r", "count", range_hint=(2, 4)):
+            prog.delay_timeline(QickSweep1D("scan", 10 / 430.08, 20 / 430.08))
+        prog.join("external", into="default")
+        prog.pulse(1, "p1", timeline="default")
+
+    shots = _shots(_program(body, initialize, reps=2))
+    assert [_waves(s) for s in shots] == [[110], [115], [120]] * 2
+    assert [s.body_end_cycle - s.start_cycle for s in shots] == [138, 143, 148] * 2
+    assert [s.end_cycle - s.start_cycle for s in shots] == [138, 143, 148] * 2
+
+
+@pytest.mark.parametrize("consume_after", [False, True])
+def test_register_repeat_rejects_crossing_wait_bound_or_partial_consumption(
+    consume_after,
+):
+    def initialize(prog):
+        _register_initialize(prog)
+        prog.add_loop("scan", 3)
+
+    def body(prog):
+        prog.fork("default", into="external")
+        prog.delay_timeline(
+            (100 if consume_after else 30) / 430.08, timeline="external"
+        )
+        with prog.repeat("r", "count", range_hint=(2, 4)):
+            prog.delay_timeline(QickSweep1D("scan", 10 / 430.08, 20 / 430.08))
+        if consume_after:
+            prog.delay(75 / 430.08)
+
+    with pytest.raises(ValueError, match="external.*cannot prove"):
+        _program(body, initialize)
+
+
+def test_register_count_updates_and_resets_across_scan_and_shots():
+    def initialize(prog):
+        _register_initialize(prog)
+        prog.add_loop("scan", 3)
+
+    def body(prog):
+        prog.write_reg_op("count", "scan", "+", 1)
+        prog.fork("default", into="external")
+        prog.delay_timeline(100 / 430.08, timeline="external")
+        with prog.repeat("r", "count", range_hint=(1, 3)):
+            prog.pulse(0, "short", timeline="default")
+            prog.delay_timeline(9 / 430.08)
+        prog.join("external", into="default")
+        prog.pulse(1, "p1", timeline="default")
+
+    prog = _program(body, initialize, reps=2)
+    shots = _shots(prog)
+    assert [_waves(s) for s in shots] == [[0, 100], [0, 15, 115], [0, 15, 30, 130]] * 2
+    assert [s.body_end_cycle - s.start_cycle for s in shots] == [128, 143, 158] * 2
+    assert [s.end_cycle - s.start_cycle for s in shots] == [128, 143, 158] * 2
+    prog.compile()
+    assert _shots(prog) == shots
+
+
+@pytest.mark.parametrize("register_outer", [False, True])
+def test_nested_register_repeat_preserves_minimum_advance_for_outer_wait_bound(
+    register_outer,
+):
+    def body(prog):
+        prog.fork("default", into="external")
+        prog.delay_timeline(100 / 430.08, timeline="external")
+        with prog.repeat(
+            "outer",
+            "count" if register_outer else 2,
+            range_hint=(2, 4) if register_outer else None,
+        ):
+            prog.fork("default", into="local")
+            with prog.repeat(
+                "inner",
+                2 if register_outer else "count",
+                timeline="local",
+                range_hint=None if register_outer else (2, 4),
+            ):
+                prog.delay_timeline(15 / 430.08, timeline="local")
+        prog.join("external", into="default")
+        prog.pulse(1, "p1", timeline="default")
+
+    (shot,) = _shots(_program(body, _register_initialize))
+    # Six actual iterations advance90; four guaranteed iterations advance60.
+    assert _waves(shot) == [130]
+    assert (shot.body_end_cycle, shot.end_cycle) == (158, 158)
+
+
+def test_native_pulse_tail_after_last_repeat_iteration_is_not_debited_again():
+    def body(prog):
+        with prog.repeat("r", 2):
+            prog.pulse(0, "p0")  # Native events do not advance default.
+            prog.delay_timeline(10 / 430.08)
+
+    (shot,) = _shots(_program(body))
+    assert _waves(shot) == [0, 10]
+    assert (shot.body_end_cycle, shot.end_cycle) == (20, 38)
+
+
+@pytest.mark.parametrize("entry", ["native", "module"])
+@pytest.mark.parametrize("external_end", [0, 100])
+def test_repeat_rejects_runtime_reference_advance_even_with_zero_external_ends(
+    entry, external_end
+):
+    from zcu_tools.program.v2.modules.delay import DelayAuto
+
+    auto = DelayAuto("auto", "count")
+
+    def initialize(prog):
+        _register_initialize(prog)
+        prog.declare(auto)
+
+    def body(prog):
+        prog.fork("default", into="external")
+        prog.delay_timeline(external_end / 430.08, timeline="external")
+        with prog.repeat("r", 2):
+            if entry == "native":
+                prog.delay_reg_auto("count")
+            else:
+                prog.emit(auto)
+
+    with pytest.raises(ValueError, match="repeat.*per-iteration.*compile"):
+        _program(body, initialize)
+
+
+def test_wrong_repeat_pulse_offset_is_detected_by_independent_timing_oracle():
+    def body(prog):
+        with prog.repeat("r", 2):
+            prog.pulse(0, "p0", t=1 / 430.08, timeline="default")
+
+    (shot,) = _shots(_program(body))
+    assert _waves(shot) == [1, 30]
+    with pytest.raises(AssertionError):
+        assert _waves(shot) == [0, 28]
+
+
+def test_nested_native_pulse_tails_survive_both_repeat_boundaries():
+    def body(prog):
+        with prog.repeat("outer", 2), prog.repeat("inner", 2):
+            prog.pulse(0, "p0")
+            prog.delay_timeline(10 / 430.08)
+
+    (shot,) = _shots(_program(body))
+    assert _waves(shot) == [0, 10, 20, 30]
+    assert (shot.body_end_cycle, shot.end_cycle) == (40, 58)
+
+
+@pytest.mark.parametrize(
+    "count,hint", [(2, None), ("count", (0, 2)), ("count", (2, 2))]
+)
+@pytest.mark.parametrize("native_prefix", [False, True])
+def test_repeat_rejects_managed_pulse_overlap_across_backedge(
+    count, hint, native_prefix
+):
+    def initialize(prog):
+        _register_initialize(prog, 2)
+
+    def body(prog):
+        with prog.repeat("r", count, range_hint=hint):
+            if native_prefix:
+                prog.pulse(0, "p0")
+                prog.delay_timeline(28 / 430.08)
+            prog.pulse(0, "p0", timeline="default")
+            prog.pulse(0, "p0", t=(56 if native_prefix else 28) / 430.08)
+
+    with pytest.raises(ValueError, match="channel 0.*overlap"):
+        _program(body, initialize)
+
+
+@pytest.mark.parametrize("outer,inner", [(2, 1), (1, 2), (2, 2)])
+def test_nested_repeat_rejects_managed_pulse_overlap_at_either_backedge(outer, inner):
+    def body(prog):
+        with prog.repeat("outer", outer), prog.repeat("inner", inner):
+            prog.pulse(0, "p0", timeline="default")
+            prog.pulse(0, "p0", t=28 / 430.08)
+
+    with pytest.raises(ValueError, match="channel 0.*overlap"):
+        _program(body)
+
+
+@pytest.mark.parametrize("count,hint", [(0, None), (1, None), ("count", (0, 1))])
+def test_repeat_without_backedge_allows_native_tail_after_managed_pulse(count, hint):
+    def initialize(prog):
+        _register_initialize(prog, 1)
+
+    def body(prog):
+        with prog.repeat("r", count, range_hint=hint):
+            prog.pulse(0, "p0", timeline="default")
+            prog.pulse(0, "p0", t=28 / 430.08)
+
+    (shot,) = _shots(_program(body, initialize))
+    assert _waves(shot) == ([] if count == 0 else [0, 28])
+    assert (shot.body_end_cycle, shot.end_cycle) == ((0, 0) if count == 0 else (28, 56))
+
+
+@pytest.mark.parametrize("register", [False, True])
+def test_repeat_allows_managed_pulse_touching_previous_native_tail(register):
+    def initialize(prog):
+        _register_initialize(prog, 2)
+
+    def body(prog):
+        with prog.repeat(
+            "r", "count" if register else 2, range_hint=(0, 2) if register else None
+        ):
+            prog.pulse(0, "p0", timeline="default")
+            prog.pulse(0, "p0", t=28 / 430.08)
+            prog.delay_timeline(28 / 430.08)
+
+    (shot,) = _shots(_program(body, initialize))
+    assert _waves(shot) == [0, 28, 56, 84]
+    assert (shot.body_end_cycle, shot.end_cycle) == (112, 112)
+
+
+@pytest.mark.parametrize("actual", [0, 1, 2, 3, 4])
+def test_nested_register_range_preserves_legal_interior_counts(actual):
+    def initialize(prog):
+        _register_initialize(prog, actual)
+
+    def body(prog):
+        with prog.repeat("outer", 2), prog.repeat("inner", "count", range_hint=(0, 4)):
+            prog.pulse(0, "p0")
+            prog.delay_timeline(28 / 430.08)
+            prog.pulse(0, "p0", timeline="default")
+
+    (shot,) = _shots(_program(body, initialize))
+    expected = [t for i in range(2 * actual) for t in (56 * i, 56 * i + 28)]
+    assert _waves(shot) == expected
+    assert (shot.body_end_cycle, shot.end_cycle) == (112 * actual,) * 2
+
+
+@pytest.mark.parametrize("register", [False, True])
+@pytest.mark.parametrize("safe", [False, True])
+def test_repeat_guard_proves_swept_native_prefix_at_every_scan_point(register, safe):
+    def initialize(prog):
+        _register_initialize(prog, 2)
+        prog.add_loop("scan", 3)
+
+    def body(prog):
+        with (
+            prog.repeat("outer", 2),
+            prog.repeat(
+                "inner",
+                "count" if register else 2,
+                range_hint=(1, 3) if register else None,
+            ),
+        ):
+            prog.pulse(0, "p0")
+            prog.delay_timeline(QickSweep1D("scan", 28 / 430.08, 38 / 430.08))
+            prog.pulse(0, "p0", timeline="default")
+            prog.pulse(0, "p0", t=QickSweep1D("scan", 56 / 430.08, 66 / 430.08))
+            if safe:
+                prog.delay_timeline(28 / 430.08)
+
+    if not safe:
+        with pytest.raises(ValueError, match="channel 0.*overlap"):
+            _program(body, initialize)
+        return
+    shots = _shots(_program(body, initialize))
+    assert [_waves(s) for s in shots] == [
+        [0, 28, 56, 84, 112, 140, 168, 196, 224, 252, 280, 308],
+        [0, 33, 61, 89, 122, 150, 178, 211, 239, 267, 300, 328],
+        [0, 38, 66, 94, 132, 160, 188, 226, 254, 282, 320, 348],
+    ]
+    assert [s.body_end_cycle - s.start_cycle for s in shots] == [336, 356, 376]
+    assert [s.end_cycle - s.start_cycle for s in shots] == [336, 356, 376]
+
+
+@pytest.mark.parametrize("register", [False, True])
+def test_nested_native_sweep_can_cross_timestamp_floor_without_losing_managed_guard(
+    register,
+):
+    def initialize(prog):
+        _register_initialize(prog, 2)
+        prog.add_loop("scan", 3)
+
+    def body(prog):
+        with prog.repeat("outer", 2):
+            with prog.repeat(
+                "inner",
+                "count" if register else 2,
+                range_hint=(1, 3) if register else None,
+            ):
+                prog.pulse(0, "p0")
+                prog.delay_timeline(QickSweep1D("scan", 20 / 430.08, 40 / 430.08))
+            prog.pulse(0, "p0", t=30 / 430.08, timeline="default")
+
+    shots = _shots(_program(body, initialize))
+    # Inner iterations advance20/30/40; managed start is ref +30, length28.
+    assert [_waves(s) for s in shots] == [
+        [0, 20, 70, 98, 118, 168],
+        [0, 30, 90, 118, 148, 208],
+        [0, 40, 110, 138, 178, 248],
+    ]
+    assert [s.body_end_cycle - s.start_cycle for s in shots] == [196, 236, 276]
+    assert [s.end_cycle - s.start_cycle for s in shots] == [196, 236, 276]
+
+
+@pytest.mark.parametrize("native", ["macro", "runtime-words", "auto"])
+def test_repeat_guard_observes_native_pulse_entrypoints(native):
+    def body(prog):
+        with prog.repeat("r", 2):
+            prog.pulse(0, "p0", timeline="default")
+            if native == "macro":
+                prog.append_macro(Pulse(ch=0, name="p0", t=28 / 430.08))
+            elif native == "runtime-words":
+                prog.pulse_from_regs(0, "p0", gain_reg="count", t=28 / 430.08)
+            else:
+                prog.pulse(0, "p0", t="auto")
+
+    with pytest.raises(ValueError, match="channel 0.*overlap"):
+        _program(body, _register_initialize)
+
+
+def test_repeat_guard_protects_module_emission_after_native_tail():
+    from zcu_tools.program.v2.modules import Pulse as ModulePulse
+    from zcu_tools.program.v2.modules import PulseCfg
+    from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
+
+    pulse = ModulePulse(
+        "managed",
+        PulseCfg(
+            ch=0,
+            nqz=1,
+            freq=1000,
+            gain=0.5,
+            waveform=ConstWaveformCfg(length=25 / 384),
+        ),
+    )
+
+    def initialize(prog):
+        prog.declare(pulse)
+
+    def body(prog):
+        with prog.repeat("r", 2):
+            prog.emit(pulse)
+            prog.pulse(0, "p0", t=28 / 430.08)
+
+    with pytest.raises(ValueError, match="channel 0.*overlap"):
+        _program(body, initialize)
+
+
+def test_repeat_cannot_shadow_an_existing_external_name():
+    def body(prog):
+        prog.fork("default", into="external")
+        with prog.repeat("r", 2):
+            prog.fork("default", into="external")
+
+    with pytest.raises(ValueError, match="new.*timeline"):
+        _program(body)

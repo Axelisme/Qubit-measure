@@ -13,6 +13,7 @@ from .util import calc_max_length
 
 if TYPE_CHECKING:
     from zcu_tools.program.v2.modular import ModularProgramV2
+    from zcu_tools.program.v2.timeline import TimelineProgramV2
 
 
 PulseOrRef: TypeAlias = Annotated[PulseCfg, BeforeValidator(resolve_module_ref)]
@@ -121,16 +122,28 @@ class PulseReset(AbsReset):
         self.cfg = deepcopy(cfg)
         self.reset_pulse = Pulse(name=f"{name}_pulse", cfg=self.cfg.pulse_cfg)
 
-    def init(self, prog: ModularProgramV2) -> None:
+    def init(self, prog: ModularProgramV2 | TimelineProgramV2) -> None:
         self.reset_pulse.init(prog)
 
-    def total_length(self, prog: ModularProgramV2) -> float | QickParam:
+    def total_length(
+        self, prog: ModularProgramV2 | TimelineProgramV2
+    ) -> float | QickParam:
         return self.reset_pulse.total_length(prog)
 
     def run(
         self, prog: ModularProgramV2, t: float | QickParam = 0.0
     ) -> float | QickParam:
         return self.reset_pulse.run(prog, t)
+
+    def declare(self, prog: TimelineProgramV2) -> None:
+        """Declare the reset pulse's resources on prog."""
+        self.init(prog)
+
+    def lower(
+        self, prog: TimelineProgramV2, *, timeline: str | None, tag: str | None
+    ) -> None:
+        """Play the reset pulse and advance by its blocking total_length."""
+        self.reset_pulse.lower(prog, timeline=timeline, tag=tag)
 
 
 class TwoPulseReset(AbsReset):
@@ -144,11 +157,13 @@ class TwoPulseReset(AbsReset):
         self.reset_pulse1 = Pulse(name=f"{name}_pulse1", cfg=self.cfg.pulse1_cfg)
         self.reset_pulse2 = Pulse(name=f"{name}_pulse2", cfg=self.cfg.pulse2_cfg)
 
-    def init(self, prog: ModularProgramV2) -> None:
+    def init(self, prog: ModularProgramV2 | TimelineProgramV2) -> None:
         self.reset_pulse1.init(prog)
         self.reset_pulse2.init(prog)
 
-    def total_length(self, prog: ModularProgramV2) -> float | QickParam:
+    def total_length(
+        self, prog: ModularProgramV2 | TimelineProgramV2
+    ) -> float | QickParam:
         return calc_max_length(
             self.reset_pulse1.total_length(prog), self.reset_pulse2.total_length(prog)
         )
@@ -159,6 +174,19 @@ class TwoPulseReset(AbsReset):
         pulse1_t = self.reset_pulse1.run(prog, t)
         pulse2_t = self.reset_pulse2.run(prog, t)
         return calc_max_length(pulse1_t, pulse2_t)
+
+    def declare(self, prog: TimelineProgramV2) -> None:
+        """Declare both reset pulses on prog."""
+        self.init(prog)
+
+    def lower(
+        self, prog: TimelineProgramV2, *, timeline: str | None, tag: str | None
+    ) -> None:
+        """Start both pulses together, then advance their maximum total_length."""
+        timeline = timeline if timeline is not None else "default"
+        self.reset_pulse1.play(prog, timeline=timeline, tag=tag)
+        self.reset_pulse2.play(prog, timeline=timeline)
+        prog.advance_module(self.total_length(prog), timeline=timeline)
 
 
 class BathReset(AbsReset):
@@ -173,12 +201,14 @@ class BathReset(AbsReset):
         self.qub_pulse = Pulse(name=f"{name}_qub_pulse", cfg=self.cfg.qubit_tone_cfg)
         self.pi2_pulse = Pulse(name=f"{name}_pi2_pulse", cfg=self.cfg.pi2_cfg)
 
-    def init(self, prog: ModularProgramV2) -> None:
+    def init(self, prog: ModularProgramV2 | TimelineProgramV2) -> None:
         self.res_pulse.init(prog)
         self.qub_pulse.init(prog)
         self.pi2_pulse.init(prog)
 
-    def total_length(self, prog: ModularProgramV2) -> float | QickParam:
+    def total_length(
+        self, prog: ModularProgramV2 | TimelineProgramV2
+    ) -> float | QickParam:
         return self.res_pulse.total_length(prog) + self.pi2_pulse.total_length(prog)
 
     def run(
@@ -187,3 +217,23 @@ class BathReset(AbsReset):
         res_t = self.res_pulse.run(prog, t)
         self.qub_pulse.run(prog, t)
         return self.pi2_pulse.run(prog, res_t)
+
+    def declare(self, prog: TimelineProgramV2) -> None:
+        """Declare the cavity, qubit and final pi/2 pulses on prog."""
+        self.init(prog)
+
+    def lower(
+        self, prog: TimelineProgramV2, *, timeline: str | None, tag: str | None
+    ) -> None:
+        """Overlap cavity/qubit, place pi/2 after cavity, and advance total_length.
+
+        The cavity plus pi/2 duration is the legacy blocking rule, even when the
+        overlapping qubit tone lasts longer. tag identifies the cavity start.
+        """
+        timeline = timeline if timeline is not None else "default"
+        self.res_pulse.play(prog, timeline=timeline, tag=tag)
+        self.qub_pulse.play(prog, timeline=timeline)
+        self.pi2_pulse.play(
+            prog, timeline=timeline, t=self.res_pulse.total_length(prog)
+        )
+        prog.advance_module(self.total_length(prog), timeline=timeline)

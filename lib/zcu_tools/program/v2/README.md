@@ -1,8 +1,8 @@
 # README - program/v2
 
-**Last updated:** 2026-10-25
+**Last updated:** 2026-10-29，原生 macro 與 timeline
 
-**讀者：** framework-dev。V2 program、module、readout 與 acquisition 契約。
+**讀者：** lab-author、framework-dev、agent。原生 V2 program 寫法與 module、readout、acquisition 契約速查。
 
 ## Testing & Type Checking Conventions
 
@@ -98,6 +98,118 @@ Encoding with `readout_freq_words` still takes those four explicit settings.
   program 的控制參數仍由建構子接收。
 - `ir/`: Contains the Intermediate Representation for tProc v2 instructions, allowing for optimization passes and cross-module label resolution.
 
+## 原生寫法與具名 timeline
+
+`timeline.TimelineProgramV2` 繼承 `MyProgramV2` 加 `resources.ProgramResourcesMixin`，不經 `ModularProgramV2`。
+跨 owner 分工、設計理由與階段邊界見 [ADR-0083](../../../../docs/adr/0083-program-macros-and-timelines.md)。
+作者在 `_initialize(cfg)` 宣告通道、pulse、readout config、module 與 loops。
+在 `_body(cfg)` 發射原生 QICK 操作或 `emit(module)`。
+建構子使用 `reps`、`initial_delay`、`relax_delay`。
+Shot 外殼為 `final_wait=0`、`final_delay=relax_delay`。
+全部輸出共用既有 IR compiler。Boundary metadata 可能改變指令排列，不要求新舊逐位相同。
+Builder 與模擬 frontend 尚未切換，既有 acquire 擴充仍由共同基底提供。
+
+每條 timeline 只保存相對 reference 的結尾。
+Default 是普通 timeline，不是 reference。其他名字先在 `_body` 用 `fork(source, into=...)` 宣告。
+Source 必須存在，into 接受一個新名字或名字 list。未知來源、重名與未宣告使用都報錯。
+帶 timeline 的 pulse／trigger 在結尾加 t 發射，然後更新結尾。
+同 channel 的 pulse 提前開始時編譯報錯，不能用另一條 timeline 繞過。
+Config 是瞬時事件，結尾更新到發射時間 E+t，不加 config length 或其他 ADC window。
+未帶 timeline 的原生指令保留 QICK 行為。
+
+`delay_timeline(t, timeline="drive")` 只將結尾加 t，不移動 reference。
+`sync(timeline="drive")` 才將 reference 移到該結尾，並扣減全部 timeline，最低為零。
+原生 delay／delay_auto／resync 也經公開 timestamp decrement 扣減全部結尾。
+掃描 floor 與 max 必須逐點證明符號。會跨零或互相交叉時編譯報錯，提示改用 delay_timeline。
+原生 delay／delay_auto／wait_auto／resync 不增加 timeline keyword。
+
+Module 先明確 declare，每次 emit 建立獨立的 `ModuleEmission` 與 tag。
+Module 本身不是 QICK Macro，不能直接 append。
+一般 emit 內部事件共用所選 timeline 的結尾作為起點，再加規則 a 的 total_length。
+省略 timeline 選 default，但不移動 reference。
+以下是 `TimelineProgramV2` 子類別的 hooks。`drive_cfg` 是呼叫端提供、使用 channel 0 的 `Pulse.Cfg`。
+時間參數單位為 us，另一個 channel 1 的 native pulse 由原生 API 宣告。
+
+```python
+from zcu_tools.program.v2.modules import Pulse
+from zcu_tools.program.v2.timeline import TimelineProgramV2
+
+
+def _initialize(self, cfg):
+    self.drive = Pulse("drive", drive_cfg)
+    self.declare(self.drive)
+    self.declare_gen(1, nqz=1)
+    self.add_pulse(1, "native", style="const", freq=1000,
+                   phase=0, gain=0.5, length=0.1)
+
+def _body(self, cfg):
+    self.emit(self.drive)
+    self.pulse(1, "native", t=0)  # Relative to the original reference.
+    self.sync()
+    self.pulse(1, "native", t=0)  # Relative to the drive end.
+    self.fork("default", into="drive")
+    self.emit(self.drive, timeline="drive")
+```
+
+DelayAuto 是唯一例外。未指定 timeline 時包裝原生 delay_auto／delay_reg_auto，保留 gens／ros。
+指定任何 timeline 名稱都在 emit 入口報錯，包含顯式 default。
+Runtime register 時間只走 delay_reg_auto。所有結尾包含 default 都須證明不大於靜態推進量，否則先 sync。
+PulseReadout 的 gain／frequency runtime words 不受這項時間限制排除。
+
+Join 用 `join(*sources, into=target)` 合併既有結尾，保留來源與較晚的原目標。
+它只記帳，不移 reference，也不要求每條 fork 都 join 回來。
+掃描結尾必須能逐點證明大小，互相交叉時報錯。
+
+`with self.repeat(name, n, timeline="default", range_hint=None)` 先同步母 timeline，
+每圈再同步母 timeline 與局部結尾。內部只能用母 timeline，以及從母或局部 timeline
+fork 的名字。退出後母 timeline 為0，局部名字失效，可以重新 fork 同名。
+其他外部長 pulse 可以橫跨 Repeat，但不能在迴圈內使用它的 timeline。
+固定 n 是非負整數，退出時精確扣減外部結尾；n=0 仍同步入口，但不執行 body。
+
+Register n 使用既有 register 名字，必須提供作者保證的非負整數閉區間
+`range_hint=(minimum, maximum)`。Int n 不接受 range_hint。
+Register 名字不得與以 name 命名的 counter 相同。編譯器不從 register 初值推定 range。
+Register Repeat 按 minimum 計算外部結尾的最晚等待上界。
+原 timeline 禁止繼續發射或 delay_timeline，直到 sync 或原生 reference 推進完整消耗上界。
+Join 目標與 fork 新名字則是普通 timeline，可以從該上界建立保守排程點。
+例如實際 reference=45、上界=70 時，新 timeline 的 pulse 可以排在115。
+原 wait-only timeline 上的兩種 readout config 入口也拒絕放置，包含 t=0。
+Join／fork 的普通結果，或 sync／原生推進消耗上界後的來源，可照常放置 config。
+不帶 timeline 的 config 呼叫保留原生行為。
+例如沿用上面的宣告，以下 `_body` 先安排跨 channel 重疊，再重複發射 drive：
+
+```python
+def _body(self, cfg):
+    self.fork("default", into="parallel")
+    self.emit(self.drive, tag="first")  # Channel 0, ordinary default end.
+    self.pulse(1, "native", t=0, timeline="parallel")
+    self.join("parallel", into="default")  # Accounting only.
+    self.sync()  # Both channels have finished before the next group.
+    with self.repeat("pair", 2):
+        self.fork("default", into="local")
+        self.emit(self.drive, timeline="local", tag="repeated")
+        self.delay_timeline(0.05, timeline="local")
+    # Parent default is zero. The local name is out of scope.
+```
+
+每圈結尾自動對齊 local 的 module 結尾加 0.05 us，不必在迴圈內手動 sync。
+Register 次數改傳既有 register 名字，例如
+`with self.repeat("pair", "n_pair", range_hint=(2, 4)):`，body 可沿用上例。
+`n_pair` 須先由作者用公開 register API 準備，執行值必須符合作者保證的閉區間。
+
+Repeat body 內的 DelayAuto(register) 與 delay_reg_auto 報錯，因每圈推進量無法在編譯期表達。
+迴圈外的 consumer 與以 register 控制次數、每圈長度可證明的 Repeat 保持可用。
+
+Body 收尾先同步全部 timeline，再放 body_end marker，然後進 shot 外殼。
+每次 compile 重置宣告與結尾。公開 `timing_layout` 由真 boundary metadata 取得 linked addresses 與 loop 座標。
+將它與 prog_list／labels 交給 `ir.analyze_timing`，可觀察逐點事件、body_end 與含外殼的 shot_end。
+Register Repeat 的編譯結果可能包含 DMEM dispatch，分析時以 `CompiledTimingInput.dmem`
+傳入公開 `compile_datamem()` 的結果，不在 caller 重建 table。
+Resync 讀取硬體 s11，analysis 會明確拒絕，不宣稱其後精確時序。
+
+`resources.ProgramResourcesMixin` 集中 dmem 配置與 readout route 保護。
+TimelineProgramV2 與 ModularProgramV2 共用它，傳輸時由 MyProgramV2 將 dmem 轉為 list[int]。
+
 ## Macro Layer
 
 ### Runtime and table-backed waveform updates
@@ -143,7 +255,7 @@ pulse_by_reg(ch, wmem_reg, ...)
 
 **flat_top**：table 中存的是每個 flat_top 候選的**第一個** wmem entry（ramp_up），`pulse_by_reg(flat_top_pulse=True)` 從此 index 自動連讀 3 個 entry（ramp_up / flat / ramp_down）。
 
-**dmem 共用**：`ModularProgramV2._dmem_buffer` 是全程式共享的順序 buffer，`add_dmem()` 回傳的 `offset` 是 slice 起點，`compile_datamem()` 最後轉為 `np.int32` 陣列。
+**dmem 共用**：`ProgramResourcesMixin` 擁有全程式共享的順序 buffer，`add_dmem()` 回傳的 `offset` 是 slice 起點，`compile_datamem()` 最後轉為 `np.int32` 陣列。
 
 **dmem 傳輸邊界**：`compile_datamem()` 維持 QICK 規定的 `np.int32` array contract；`MyProgramV2` 在完整 binary program 建立後，將送往 remote SoC 的 dmem 正規化為一維 built-in `list[int]`。跨 Python／NumPy 版本的傳輸使用 built-in 容器，保留 signed int32 與 two's-complement bit pattern。
 

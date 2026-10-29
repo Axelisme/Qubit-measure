@@ -22,6 +22,7 @@ from .waveform import (
 
 if TYPE_CHECKING:
     from zcu_tools.program.v2.modular import ModularProgramV2
+    from zcu_tools.program.v2.timeline import TimelineProgramV2
 
 
 class PulseCfg(AbsModuleCfg):
@@ -87,7 +88,7 @@ class Pulse(Module):
         self.pulse_id = pulse_id
         self.ro_ch = ro_ch
 
-    def init(self, prog: ModularProgramV2) -> None:
+    def init(self, prog: ModularProgramV2 | TimelineProgramV2) -> None:
         if self.cfg is None:
             return
 
@@ -101,7 +102,9 @@ class Pulse(Module):
         else:  # if provided pulse_id, always init pulse (no reuse)
             self.init_pulse(prog, self.pulse_id)
 
-    def init_pulse(self, prog: ModularProgramV2, pulse_id: str) -> None:
+    def init_pulse(
+        self, prog: ModularProgramV2 | TimelineProgramV2, pulse_id: str
+    ) -> None:
         cfg = self.cfg
         assert cfg is not None
 
@@ -124,7 +127,9 @@ class Pulse(Module):
             **self.waveform.to_wav_kwargs(),
         )
 
-    def total_length(self, prog: ModularProgramV2) -> float | QickParam:
+    def total_length(
+        self, prog: ModularProgramV2 | TimelineProgramV2
+    ) -> float | QickParam:
         """Return blocking duration in us after init has registered this pulse.
 
         prog must contain this pulse and its declared loops. Swept playback
@@ -180,6 +185,50 @@ class Pulse(Module):
         if self.block_mode:
             return t + self.total_length(prog)
         return t
+
+    def declare(self, prog: TimelineProgramV2) -> None:
+        """Register the pulse template on prog; QICK declaration errors propagate."""
+        self.init(prog)
+
+    def lower(
+        self, prog: TimelineProgramV2, *, timeline: str | None, tag: str | None
+    ) -> None:
+        """Play at the current timeline plus pre_delay and advance total_length.
+
+        Legacy block_mode and tag do not affect this occurrence. Empty cfg has
+        zero duration and no playback. QICK resource/timing errors propagate.
+        """
+        timeline = timeline if timeline is not None else "default"
+        self.play(prog, timeline=timeline, tag=tag)
+        prog.advance_module(self.total_length(prog), timeline=timeline)
+
+    def play(
+        self,
+        prog: TimelineProgramV2,
+        *,
+        timeline: str | None,
+        tag: str | None = None,
+        t: float | QickParam = 0.0,
+    ) -> None:
+        """Lower playback at t plus pre_delay, without adding owner duration.
+
+        Composite owners call this inside one emission, which holds their events
+        at the same timeline origin. Outside emission, timeline pulse placement
+        advances its end normally. t is relative us. Empty cfg emits nothing;
+        undeclared pulses raise ValueError. tag names only this playback occurrence.
+        """
+        if self.cfg is None:
+            return
+        pulse_id = self.pulse_id
+        if pulse_id is None:
+            raise ValueError(f"{self.name}: pulse must be declared before playback")
+        prog.pulse(
+            self.cfg.ch,
+            pulse_id,
+            t=t + self.cfg.pre_delay,
+            tag=tag,
+            timeline=timeline,
+        )
 
     def allow_rerun(self) -> bool:
         return True

@@ -11,6 +11,7 @@ from .util import merge_max_length, round_timestamp
 
 if TYPE_CHECKING:
     from zcu_tools.program.v2.modular import ModularProgramV2
+    from zcu_tools.program.v2.timeline import TimelineProgramV2
 
     from .pulse import TableLengthPulse
 
@@ -34,6 +35,17 @@ class Delay(Module):
 
         return 0.0  # reset reference time
 
+    def declare(self, prog: TimelineProgramV2) -> None:
+        """Delay needs no hardware resources; prog owns the emission timeline."""
+
+    def lower(
+        self, prog: TimelineProgramV2, *, timeline: str | None, tag: str | None
+    ) -> None:
+        """Add rounded delay us to the selected end (default if None); do not move reference."""
+        prog.advance_module(
+            round_timestamp(prog, self.delay), timeline=timeline, tag=tag
+        )
+
     def allow_rerun(self) -> bool:
         return self.tag is None
 
@@ -50,6 +62,17 @@ class SoftDelay(Module):
         self, prog: ModularProgramV2, t: float | QickParam = 0.0
     ) -> float | QickParam:
         return round_timestamp(prog, t + self.delay)
+
+    def declare(self, prog: TimelineProgramV2) -> None:
+        """SoftDelay needs no hardware resources on prog."""
+
+    def lower(
+        self, prog: TimelineProgramV2, *, timeline: str | None, tag: str | None
+    ) -> None:
+        """Add rounded delay us to the selected end, exactly like Delay in this path."""
+        prog.advance_module(
+            round_timestamp(prog, self.delay), timeline=timeline, tag=tag
+        )
 
     def allow_rerun(self) -> bool:
         return True
@@ -96,6 +119,29 @@ class DelayAuto(Module):
         else:
             prog.delay_auto(t=self.t, gens=self.gens, ros=self.ros, tag=self.tag)
         return 0.0
+
+    def declare(self, prog: TimelineProgramV2) -> None:
+        """DelayAuto consumes existing channel/register declarations on prog."""
+
+    def lower(
+        self, prog: TimelineProgramV2, *, timeline: str | None, tag: str | None
+    ) -> None:
+        """Move native reference by selected channel ends plus t, not a duration.
+
+        timeline must be None; explicit names (including default) raise ValueError
+        at emission. Register t holds nonnegative tProc cycles and requires every
+        timeline end <= static advance. Scalar/QickParam t is extra us.
+        """
+        if timeline is not None:
+            raise ValueError(
+                "DelayAuto cannot select a timeline; use native delay_auto or delay_timeline"
+            )
+        if isinstance(self.t, str):
+            if tag is not None:
+                raise ValueError("DelayAuto with a register time cannot have a tag")
+            prog.delay_reg_auto(time_reg=self.t, gens=self.gens, ros=self.ros)
+        else:
+            prog.delay_auto(t=self.t, gens=self.gens, ros=self.ros, tag=tag)
 
     def allow_rerun(self) -> bool:
         return self.tag is None

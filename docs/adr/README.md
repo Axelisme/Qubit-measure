@@ -52,6 +52,7 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 
 ## Experiment runtime／Workflows
 
+- [0083 — Program macro 與具名 timeline](0083-program-macros-and-timelines.md)：MyProgramV2 基底、顯式 module 宣告與每次 emission、B1 結尾與 reference 分離、fork／join 記帳、Repeat 局部 scope 與只能等待上界、IR analysis 與公開編譯輸入，以及 A／B／C／D 的交付邊界。A 已交付，runtime timeline 與規則 b 屬於 B，C frontend 遷移未實作且改讀編譯結果仍在討論。
 - [0062 — 實驗執行與 workflow 編排](0062-experiment-workflow.md)：單一 async workflow、一 run 一 operation、Pause 中斷及同 request 重試、live tunables、core 同簽名 env.run、operation facts 與作者自存 commit 目錄。
 - [0069 — 實驗核心、前端包裝與具名圖形產物](0069-experiment-core-and-frontends.md)：無跨次狀態的實驗核心、RunRecord／AnalysisRecord、共用 from_stored 與資料優先 nullable cfg、Notebook native load 與 Labber 匯出、GUI opaque result、具名原生圖及 RunContext／CfgEnv。
 

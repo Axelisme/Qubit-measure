@@ -24,6 +24,7 @@ from .waveform import WaveformCfg, resolve_waveform_ref
 
 if TYPE_CHECKING:
     from zcu_tools.program.v2.modular import ModularProgramV2
+    from zcu_tools.program.v2.timeline import TimelineProgramV2
 
 
 class AbsReadoutCfg(AbsModuleCfg):
@@ -312,7 +313,7 @@ class PulseReadout(AbsReadout):
         """Registered ADC template name, also used for table-backed word updates."""
         return f"{self.name}_adc"
 
-    def init(self, prog: ModularProgramV2) -> None:
+    def init(self, prog: ModularProgramV2 | TimelineProgramV2) -> None:
         """Declare the generator, ADC window and fixed/runtime configuration templates."""
         self.pulse.init(prog)
         prog.declare_readout(ch=self.cfg.ro_ch, length=self.cfg.ro_length)
@@ -339,7 +340,9 @@ class PulseReadout(AbsReadout):
                 gen_ch=self.cfg.gen_ch,
             )
 
-    def total_length(self, prog: ModularProgramV2) -> float | QickParam:
+    def total_length(
+        self, prog: ModularProgramV2 | TimelineProgramV2
+    ) -> float | QickParam:
         """Return blocking us after init, covering generator delays and ADC window.
 
         Trigger offset and ADC length follow their respective clock rounding;
@@ -393,6 +396,53 @@ class PulseReadout(AbsReadout):
                 gain_reg=self.gain_val,
             )
         return t + self.total_length(prog)
+
+    def declare(self, prog: TimelineProgramV2) -> None:
+        """Declare generator/ADC templates on prog before emission."""
+        self.init(prog)
+
+    def lower(
+        self, prog: TimelineProgramV2, *, timeline: str | None, tag: str | None
+    ) -> None:
+        """Configure and trigger the ADC, play the pulse, then advance total_length.
+
+        All times are relative to the selected timeline. tag identifies the
+        configuration event; generator pre_delay and ADC trig_offset are retained.
+        Declaration and QICK timing errors propagate.
+        """
+        timeline = timeline if timeline is not None else "default"
+        if self.ro_freq_val is None:
+            prog.send_readoutconfig(
+                self.cfg.ro_ch, self.adc_name, t=0, tag=tag, timeline=timeline
+            )
+        else:
+            runtime_ro_name = self._runtime_ro_name
+            if runtime_ro_name is None:
+                raise ValueError(f"{self.name}: runtime ADC template is not declared")
+            prog.send_readoutconfig_from_regs(
+                self.cfg.ro_ch,
+                runtime_ro_name,
+                t=0,
+                tag=tag,
+                freq_reg=self.ro_freq_val,
+                timeline=timeline,
+            )
+        prog.trigger([self.cfg.ro_ch], t=self.cfg.trig_offset, timeline=timeline)
+        if self._uses_runtime_pulse:
+            runtime_pulse = self._runtime_pulse
+            if runtime_pulse is None or runtime_pulse.pulse_id is None:
+                raise ValueError(f"{self.name}: runtime pulse template is not declared")
+            prog.pulse_from_regs(
+                self.cfg.gen_ch,
+                runtime_pulse.pulse_id,
+                t=self.cfg.pre_delay,
+                freq_reg=self.freq_val,
+                gain_reg=self.gain_val,
+                timeline=timeline,
+            )
+        else:
+            self.pulse.play(prog, timeline=timeline)
+        prog.advance_module(self.total_length(prog), timeline=timeline)
 
     def _run_readout_config_from_regs(
         self, prog: ModularProgramV2, name: str, t: float | QickParam

@@ -1,8 +1,8 @@
 # program/v2/modules — semantic program modules
 
-**Last updated:** 2026-10-29
+**Last updated:** 2026-10-29，宣告與 emission
 
-**讀者：** framework-dev。語意 program modules 的角色、組裝與邊界。
+**讀者：** lab-author、framework-dev、agent。語意 program modules 的宣告、發射與 owner 邊界速查。
 
 High-level cheat-sheet for `program/v2/modules/`. Read before touching this
 package. Implementation detail belongs in code and tests; this file records module
@@ -10,10 +10,57 @@ roles and design boundaries.
 
 ## Purpose
 
-`Module` objects are the semantic building blocks consumed by `ModularProgramV2`.
-Each module owns a small piece of program setup in `init()` and time-ordered
-runtime emission in `run()`. The module layer should preserve experiment meaning
+`Module` objects are declarations consumed by `TimelineProgramV2`, and semantic
+building blocks consumed by `ModularProgramV2`. On the native path, authors call
+`declare(module)` in `_initialize` and `emit(module, timeline=..., tag=...)` in
+`_body`. Each owner supplies resource declaration and native lowering. The legacy
+path still uses `init()` and time-ordered `run()`. The module layer should preserve experiment meaning
 without leaking hardware register choreography into experiment classes.
+
+## 原生寫法
+
+Pulse、Delay、SoftDelay、DelayAuto、PulseReadout 與 Reset 系列提供原生 lowering。
+每次 `emit` 建立一個 `timeline.ModuleEmission`，保存該次原生指令與 tag。
+Module 不是 QICK Macro，不能直接交給 `append_macro`。
+同一宣告物件可重複發射，舊 module 的 tag 與 block_mode 不控制新路徑。
+
+一般發射將所選 timeline 的結尾加上 owner 的規則 a `total_length`，不移動 reference。
+省略 timeline 時選 default。其他名字先在 `_body` 用 `fork("default", into="drive")` 宣告。
+同一 emission 內部事件共用起點，TwoPulseReset 的跨 channel 重疊不會被串成序列。
+同 channel 的提前發射則在編譯期報錯，即使改用另一條 timeline 也一樣。
+Owner 已對齊 tProc 的長度不再向上取整第二次。
+Delay 與 SoftDelay 都只加 timeline 結尾。`sync()` 或 body 收尾才推進 reference。
+
+DelayAuto 是唯一例外，未指定 timeline 時呼叫原生 delay_auto 或 delay_reg_auto。
+它保留 gens／ros 選取，移動 reference 並扣減全部 timeline 結尾。
+指定任何 timeline 名稱都在 emit 入口報錯，包含顯式 default。
+Register cycles 必須非負，所有結尾包含 default 都須逐點證明不大於靜態推進量。
+無法證明時，編譯會指出 timeline 並提示先 sync。
+
+PulseReadout 的 runtime gain／generator frequency／ADC frequency words 沿用既有 consumer。
+時間 guard 不限制這些非時間 words。Legacy init／run／block 保留供舊 program 使用。
+其餘 module 的新 lowering 屬於後續階段，不因 legacy 可用就表示可直接 emit。
+
+同一個宣告物件可在 body 重複使用。例如以下 `TimelineProgramV2` hooks 只累加等待結尾：
+
+```python
+from zcu_tools.program.v2.modules import Delay
+
+
+def _initialize(self, cfg):
+    self.gap = Delay("gap", 0.1)  # us
+    self.declare(self.gap)
+
+
+def _body(self, cfg):
+    self.emit(self.gap, tag="gap_1")
+    self.emit(self.gap, tag="gap_2")
+    self.sync()  # Advance reference by the two rounded gaps.
+```
+
+兩次 emit 各有一個 emission 與 tag，不修改 module 的發射狀態。
+Fork／join／Repeat 與原生 pulse 混用的範例見 [program README](../README.md#原生寫法與具名-timeline)。
+設計理由與階段邊界見 [ADR-0083](../../../../../docs/adr/0083-program-macros-and-timelines.md)。
 
 ## Configuration names
 
@@ -149,8 +196,8 @@ Scalar and pre/post-delay timing keep their existing rules.
 - Keep scalar values and raw hardware words as distinct module contracts. Expanding
   `LoadValue` to uint32 would make arithmetic/scalar users ambiguous and weaken
   compression assumptions.
-- Dmem buffer ownership remains in `ModularProgramV2`; modules append their table
-  and keep only the returned offset.
+- `ProgramResourcesMixin` owns the dmem buffer shared by `TimelineProgramV2`
+  and `ModularProgramV2`; modules append their table and keep only the returned offset.
 - A module that loads a register does not by itself define how a later pulse,
   readout, or simulator interprets that register. Add explicit consuming module
   contracts for those cases instead of relying on name conventions.
