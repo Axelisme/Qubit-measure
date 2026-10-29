@@ -183,4 +183,4 @@ existing transport contract, including the herald read.
   - `finish_round()` 回傳語意（是否仍為「還有下一 round」）
   - `_average_buf()` 的輸入 shape 假設
 - `EarlyStopMixin._finish_accumulated_round` 鏡射 QICK `AcquireMixin.finish_round` 的 accumulated branch，因為上游 loop 沒有提前退出的 seam。QICK 升版時，維護者須人工對照上游 `AcquireMixin.finish_round` 並移植相關變更。維護者也須透過現有公開介面的測試驗證 acquisition 與 early-stop 行為。
-- mixin 疊加順序有語意（`RoundHookMixin, TrackerMixin, SingleShotMixin, EarlyStopMixin`）；`tests/program/test_acquire_mro.py` 鎖住 `ImproveAcquireMixin` 與 `MyProgramV2` 的關鍵 MRO / `finish_round()` 解析鏈，改順序前先更新測試與行為判斷。
+- mixin 疊加順序有語意。`tests/program/test_acquire_mro.py` 保留既有 `finish_round()` 解析鏈與 `MyProgramV2` 相對順序測試；新增 mixin 時，以 `tests/program/test_acquisition.py` 的公開 acquisition 案例驗證加權、round hook 與取消行為，不固定完整 MRO 排列。
