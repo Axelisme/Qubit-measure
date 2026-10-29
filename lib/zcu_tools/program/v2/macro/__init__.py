@@ -105,26 +105,13 @@ class AdditionalMacroMixin(QickProgramV2):
         at ``addr_reg``, flat at ``+1``, ramp_down at ``+2``) sharing the same
         TIME. The +1/+2 addresses are pre-computed into nested temp regs
         """
-        if flat_top_pulse:
-            # axis_sg_int4_v1/v2 generators emit a 4-entry stride for flat_top
-            # (extra dummy entry); the +1/+2 stride assumed below would land
-            # on the wrong entry, so reject explicitly rather than corrupt
-            # the pulse silently.
-            gen_type = self.soccfg["gens"][ch].get("type")
-            if gen_type in ("axis_sg_int4_v1", "axis_sg_int4_v2"):
-                raise NotImplementedError(
-                    f"pulse_by_reg(flat_top_pulse=True) is not supported on "
-                    f"generator type {gen_type!r}: int4 flat_top uses a "
-                    f"4-entry wmem stride, not 3. ch={ch}"
-                )
-            with self.acquire_temp_reg(2) as (addr_reg2, addr_reg3):
-                self.write_reg_op(addr_reg2, addr_reg, "+", 1)
-                self.write_reg_op(addr_reg3, addr_reg, "+", 2)
-                self.append_macro(
-                    PulseByReg(ch=ch, t=t, addr_regs=[addr_reg, addr_reg2, addr_reg3])
-                )
-        else:
-            self.append_macro(PulseByReg(ch=ch, t=t, addr_regs=[addr_reg]))
+        source = PulseByReg.from_base(
+            self, ch, addr_reg, t, flat_top_pulse=flat_top_pulse
+        )
+        with self.acquire_temp_reg(source.address_scratch_count) as registers:
+            for operation in source.prepare_addresses(self, tuple(registers)):
+                self.append_macro(operation)
+            self.append_macro(source)
 
     def pulse_from_regs(
         self,

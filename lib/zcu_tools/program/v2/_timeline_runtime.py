@@ -13,6 +13,16 @@ from .macro.write_reg import WriteRegOp
 from .modules.util import get_fclk
 
 
+def ceil_tick(ticks: float) -> int:
+    """Ceil cycle values, ignoring floating noise within 1e-10 of an integer."""
+    nearest = round(ticks)
+    return (
+        nearest
+        if math.isclose(ticks, nearest, rel_tol=0, abs_tol=1e-10)
+        else math.ceil(ticks)
+    )
+
+
 def align_end(prog, value: float | QickParam) -> "Time":
     """Ceil a resolved aggregate in us at every native sweep point.
 
@@ -20,16 +30,6 @@ def align_end(prog, value: float | QickParam) -> "Time":
     Scalars and exact integer-affine sweeps remain static. Other point grids
     become a certified dmem lookup at this operation, without advancing reference.
     """
-
-    # Arithmetic on already integral tick values can land just above an integer.
-    # Do not turn that floating-point noise into another scheduled tick.
-    def ceil_tick(ticks: float) -> int:
-        nearest = round(ticks)
-        return (
-            nearest
-            if math.isclose(ticks, nearest, rel_tol=0, abs_tol=1e-10)
-            else math.ceil(ticks)
-        )
 
     cycles = value * get_fclk(prog)
     if not isinstance(cycles, QickParam) or not cycles.is_sweep():
@@ -75,18 +75,35 @@ def step_time(prog, value: float | QickParam) -> float | QickParam:
 
 
 @dataclass(frozen=True)
+class DeferredCoverage:
+    """Proof that adding cycles to an aggregate covers one physical boundary.
+
+    boundary identifies the same emission's physical end; it is never read as a
+    timing operand. cycles is a nonnegative conservative debt in tProc ticks.
+    Captured selection and raw paired posts establish it before any propagation.
+    """
+
+    boundary: "Time"
+    cycles: int
+
+
+@dataclass(frozen=True)
 class RuntimeEnd:
     """Relative cycle end stored in register, with inclusive minimum/maximum.
 
     register is a compiler-owned data-register name. minimum/maximum bound the
-    value on every executable path. covers lists ends proven no later than this
+    value on every executable path. Arithmetic intermediates may be signed32;
+    final timeline ends must be nonnegative. covers lists ends proven no later than this
     value, allowing a following sync to consume them without new arithmetic.
+    deferred records physical boundaries covered only after an additional proven
+    nonnegative cycle advance; negative operations and reference debits drop it.
     """
 
     register: str
     minimum: int
     maximum: int
     covers: tuple["Time", ...] = ()
+    deferred: tuple[DeferredCoverage, ...] = ()
 
 
 Time = float | QickParam | RuntimeEnd
@@ -109,6 +126,22 @@ class EventEnd:
     offset: Time
     # The ceiled event boundary, retained only for same-channel no-overlap proof.
     rounded: tuple["Time", ...] = ()
+
+
+@dataclass(frozen=True)
+class SelectedEventEnd:
+    """Raw selected output offsets and paired posts, relative to origin (us).
+
+    selector is a certified zero-based register. offsets and posts have equal
+    nonzero lengths in selector order. rounded carries physical channel ends
+    solely for coverage proof; it is never the aggregate timing source.
+    """
+
+    origin: Time
+    selector: str
+    offsets: tuple[float | QickParam, ...]
+    posts: tuple[float | QickParam, ...]
+    rounded: tuple[Time, ...] = ()
 
 
 def time_bounds(prog, value: Time) -> tuple[float, float]:
@@ -172,7 +205,100 @@ class RuntimeMath(TimedMacro):
         proof.register(register, CycleBounds(lower, upper), (operation,), (), limits)
         proof.capture_inputs(self.prog, register, (), limits)
         proof.defined.add(register)
-        proof.source(self.prog, register)
+        proof.watch_signed(self.prog, register)
+        self.operations.append(operation)
+        return RuntimeEnd(register, lower, upper)
+
+    def _selected_axes(self, values: tuple[float | QickParam, ...]) -> dict[str, int]:
+        spans = set().union(
+            *(v.spans.keys() for v in values if isinstance(v, QickParam))
+        )
+        missing = spans - self.prog.loop_dict.keys()
+        if missing:
+            raise ValueError(
+                f"{sorted(missing)}: missing native sweep axis for selected end"
+            )
+        return {
+            name: count for name, count in self.prog.loop_dict.items() if name in spans
+        }
+
+    def _selected_points(
+        self, values: tuple[float | QickParam, ...], axes: dict[str, int]
+    ) -> list[int]:
+        points: list[int] = []
+        for value in values:
+            param = value if isinstance(value, QickParam) else QickParam(value)
+            points.extend(
+                ceil_tick(float(p) * get_fclk(self.prog))
+                for p in np.broadcast_to(
+                    np.asarray(param.to_array(axes, all_loops=True)),
+                    tuple(axes.values()),
+                ).flat
+            )
+        return points
+
+    def coverage_debt(
+        self,
+        raw: tuple[float | QickParam, ...],
+        completed: tuple[float | QickParam, ...],
+    ) -> int:
+        """Prove a conservative tick debt from paired raw and aggregate ends.
+
+        Both tuples use the same captured selection and origin. Evaluate the
+        shared exact-ceil rule on their common native grid, without emitting
+        instructions or using rounded physical metadata as a timing source.
+        """
+        axes = self._selected_axes(raw + completed)
+        physical = self._selected_points(raw, axes)
+        aggregate = self._selected_points(completed, axes)
+        return max(0, *(a - b for a, b in zip(physical, aggregate, strict=True)))
+
+    def selected_end(
+        self, selector: str, values: tuple[float | QickParam, ...]
+    ) -> RuntimeEnd:
+        """Ceil raw us offsets once, selected by a certified arbitrary register.
+
+        Native axes inside each candidate remain native axes; selector is a
+        separate table dimension. Bounds and initialization are checked at this
+        execution position and every selector/dependency write is audited.
+        Offsets may be signed32; the aggregate owner checks the final end.
+        """
+        axes = self._selected_axes(values)
+        count = math.prod(axes.values())
+        points = self._selected_points(values, axes)
+        lower, upper = min(points), max(points)
+        self.check(lower, upper)
+        proof = self.prog._time_bounds
+        limits = {selector: CycleBounds(0, len(values) - 1)}
+        index = self.scratch(0)
+        # Index arithmetic is compiler-owned. It does not certify the author
+        # selector as a native sweep or relax the selector's input proof.
+        native = None
+        if axes:
+            native = sweep_table_index(
+                self.prog, axes, name=f"_selected_grid_{len(self.prog.reg_dict)}"
+            )
+            proof.register(native, CycleBounds(0, count - 1), (), tuple(axes))
+            limits[native] = CycleBounds(0, count - 1)
+        self.check(0, len(values) * count - 1)
+        self.operations.append(WriteReg(dst=index, src=selector))
+        for bit in bin(count)[3:]:
+            self.operations.append(WriteRegOp(dst=index, lhs=index, op="+", rhs=index))
+            if bit == "1":
+                self.operations.append(
+                    WriteRegOp(dst=index, lhs=index, op="+", rhs=selector)
+                )
+        if native is not None:
+            self.operations.append(WriteRegOp(dst=index, lhs=index, op="+", rhs=native))
+        offset = self.prog.add_timing_dmem(points, owner=self.prog._timing_table_owner)
+        register = self.allocate()
+        operation = DmemLookup(
+            dst=register, index=index, offset=offset, address=self.scratch(1)
+        )
+        proof.register(register, CycleBounds(lower, upper), (operation,), (), limits)
+        proof.capture_inputs(self.prog, register, (), limits)
+        proof.defined.add(register)
+        proof.watch_signed(self.prog, register)
         self.operations.append(operation)
         return RuntimeEnd(register, lower, upper)
 
@@ -245,11 +371,18 @@ class RuntimeMath(TimedMacro):
             )
         )
         covers: tuple[Time, ...] = ()
+        deferred: list[DeferredCoverage] = []
         if operator == "+":
             right_minimum = right.minimum if isinstance(right, RuntimeEnd) else right
             if right_minimum >= 0:
                 covers = (left, *left.covers)
-        return RuntimeEnd(register, *limits, covers)
+                for proof in left.deferred:
+                    remaining = max(0, proof.cycles - right_minimum)
+                    if remaining:
+                        deferred.append(DeferredCoverage(proof.boundary, remaining))
+                    else:
+                        covers += (proof.boundary,)
+        return RuntimeEnd(register, *limits, covers, tuple(deferred))
 
     @staticmethod
     def covers(end: Time, previous: Time) -> bool:
@@ -259,9 +392,11 @@ class RuntimeMath(TimedMacro):
     def snapshot(self, value: RuntimeEnd) -> RuntimeEnd:
         register = self.allocate()
         self.operations.append(WriteReg(dst=register, src=value.register))
-        return RuntimeEnd(register, value.minimum, value.maximum, value.covers)
+        return RuntimeEnd(
+            register, value.minimum, value.maximum, value.covers, value.deferred
+        )
 
-    def add(self, a: Time, b: Time) -> RuntimeEnd:
+    def add(self, a: Time, b: Time, *, target: str | None = None) -> RuntimeEnd:
         if isinstance(b, QickParam) and not b.is_sweep():
             b = b.start
         left = self.cycles(a)
@@ -272,7 +407,11 @@ class RuntimeMath(TimedMacro):
             if amount == 0:
                 return left
             return self.op(
-                left, "+", amount, limits=(left.minimum + amount, left.maximum + amount)
+                left,
+                "+",
+                amount,
+                limits=(left.minimum + amount, left.maximum + amount),
+                target=target,
             )
         right = self.cycles(b)
         if right.minimum == right.maximum == 0:
@@ -282,6 +421,7 @@ class RuntimeMath(TimedMacro):
             "+",
             right,
             limits=(left.minimum + right.minimum, left.maximum + right.maximum),
+            target=target,
         )
 
     def subtract(self, a: Time, b: Time) -> RuntimeEnd:
@@ -310,6 +450,14 @@ class RuntimeMath(TimedMacro):
             return a
         if right.minimum >= left.maximum:
             return b
+        destination = self.allocate() if target is None else target
+        # A fresh result can hold intermediates. An explicitly aliased target
+        # must preserve both input operands until the final addition.
+        work = (
+            destination
+            if destination not in (left.register, right.register)
+            else self.scratch(2)
+        )
         delta = self.op(
             left,
             "-",
@@ -337,7 +485,7 @@ class RuntimeMath(TimedMacro):
             "ASR",
             1,
             limits=(delta.minimum // 2, delta.maximum // 2),
-            target=self.scratch(2),
+            target=work,
         )
         abs_half = self.op(
             RuntimeEnd(absolute, 0, max(abs(delta.minimum), abs(delta.maximum))),
@@ -359,21 +507,21 @@ class RuntimeMath(TimedMacro):
             "+",
             abs_half,
             limits=(min(0, delta.minimum), max(0, delta.maximum)),
-            target=self.scratch(2),
+            target=work,
         )
         positive = self.op(
             total,
             "+",
             parity,
             limits=(max(0, delta.minimum), max(0, delta.maximum)),
-            target=self.scratch(2),
+            target=work,
         )
         result = self.op(
             right,
             "+",
             positive,
             limits=(max(left.minimum, right.minimum), max(left.maximum, right.maximum)),
-            target=target,
+            target=destination,
         )
         covers = (
             a,
@@ -381,7 +529,15 @@ class RuntimeMath(TimedMacro):
             *(a.covers if isinstance(a, RuntimeEnd) else ()),
             *(b.covers if isinstance(b, RuntimeEnd) else ()),
         )
-        return RuntimeEnd(result.register, result.minimum, result.maximum, covers)
+        # max(a,b) is no earlier than either input, so either input's deferred
+        # physical boundary remains covered after the same additional debt.
+        deferred = (
+            *(a.deferred if isinstance(a, RuntimeEnd) else ()),
+            *(b.deferred if isinstance(b, RuntimeEnd) else ()),
+        )
+        return RuntimeEnd(
+            result.register, result.minimum, result.maximum, covers, deferred
+        )
 
     def floor(self, end: Time, advance: Time) -> Time:
         key = (id(end), id(advance))
