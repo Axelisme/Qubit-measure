@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 from zcu_tools.core.simulation import (
     AcquireRequest,
+    ChargeDriveRequirement,
     EnvironmentSnapshot,
     PointTimeline,
     PulseEnvelope,
@@ -17,8 +18,10 @@ from tests.core._simulation import single_point_template
 from tests.resources._ftf_data import ftf_document
 
 
+@pytest.mark.parametrize("requirements", [(), (ChargeDriveRequirement("drive", 2),)])
 def test_replay_retains_complex_samples_and_deduplicated_acquire(
     tmp_path: Path,
+    requirements: tuple[ChargeDriveRequirement, ...],
 ) -> None:
     from zcu_tools.resources.simulation_replay import (
         ReplayAcquire,
@@ -40,6 +43,7 @@ def test_replay_retains_complex_samples_and_deduplicated_acquire(
         17,
         "test-rng-v1",
         templates=(single_point_template(timeline),),
+        charge_requirements=requirements,
     )
     fixed = ReplayAcquire(
         settings=parse_ftf(ftf_document()),
@@ -52,6 +56,7 @@ def test_replay_retains_complex_samples_and_deduplicated_acquire(
     second = save_replay(tmp_path, fixed, b, 1)
     restored = read_replay(first)
     assert restored.acquire.request.materialize_point(0) == request.materialize_point(0)
+    assert restored.acquire.request.charge_requirements == requirements
     assert restored.round.snapshot == a
     assert read_replay(second).round.snapshot == b
     assert restored.round.acquire_identity == read_replay(second).round.acquire_identity

@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 from ruamel.yaml import YAML
 from zcu_tools.cfg_model import (
+    Centroid3Classifier,
     CircleClassifier,
     LinearClassifier,
     MuxReadoutSpec,
@@ -26,7 +27,7 @@ def library_path(tmp_path: Path) -> Path:
 
 
 @pytest.mark.parametrize("family", ["pulse", "mux"])
-@pytest.mark.parametrize("mode", ["circle", "linear"])
+@pytest.mark.parametrize("mode", ["circle", "linear", "centroid3"])
 def test_readout_classifier_survives_library_edit_and_reopen(
     library_path: Path, family: str, mode: str
 ) -> None:
@@ -38,6 +39,13 @@ def test_readout_classifier_survives_library_edit_and_reopen(
             confusion_matrix=[[0.9, 0.1, 0.0], [0.2, 0.8, 0.0], [0.0, 0.0, 1.0]],
         )
         if mode == "circle"
+        else Centroid3Classifier(
+            g_center=1.0 - 2.0j,
+            e_center=-3.0 + 4.0j,
+            f_center=5.0 + 6.0j,
+            confusion_matrix=[[1.2, -0.2, 0.1], [0.3, 0.6, 0.2], [0.0, 0.1, 0.8]],
+        )
+        if mode == "centroid3"
         else LinearClassifier(
             angle=-0.75, threshold=0.25, confusion_matrix=[[0.9, 0.1], [0.2, 0.8]]
         )

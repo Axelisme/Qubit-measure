@@ -252,6 +252,26 @@ class TimelineTemplate:
 
 
 @dataclass(frozen=True)
+class ChargeDriveRequirement:
+    """Caller requirement that one generator bind to a physical charge drive.
+
+    name: nonempty diagnostic label, never interpreted as a role or registry key.
+    gen_ch: nonnegative integer generator index, not an ADC channel.
+    Physical environments validate membership; invalid name/index raises
+    ValueError here. Boolean indices and all-whitespace names are invalid.
+    """
+
+    name: str
+    gen_ch: int
+
+    def __post_init__(self) -> None:
+        if type(self.name) is not str or not self.name.strip():
+            raise ValueError("charge requirement name must be a nonempty string")
+        if type(self.gen_ch) is not int or self.gen_ch < 0:
+            raise ValueError("charge requirement gen_ch must be a nonnegative integer")
+
+
+@dataclass(frozen=True)
 class AcquireRequest:
     """Fixed compiled controls/layout and private sampling identity for one call.
 
@@ -301,6 +321,13 @@ class AcquireRequest:
     reps: int = 1
     templates: tuple[TimelineTemplate, ...] = ()
     relax_delay_us: float = 0.0
+    charge_requirements: tuple[ChargeDriveRequirement, ...] = ()
+    """Explicit named charge bindings; empty preserves ordinary acquisition.
+
+    Single-fluxonium validates against its settings before evolution. White
+    noise accepts them without physical checks. Unsupported physical backends
+    reject nonempty requirements rather than silently ignoring them.
+    """
 
     def __post_init__(self) -> None:
         if self.templates and len(self.point_names) != len(self.point_dims):

@@ -27,7 +27,7 @@ def make_form(ctx: FormContext) -> Form[FreqCfg]:
         ),
         tree={
             "reset": Slot("$qubit.module.reset"),
-            "init_pulse": Hidden(),
+            "init_pulse": None,
             "qub_pulse": Template(
                 "qub_probe",
                 bindings={"qubit": "$qubit"},

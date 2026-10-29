@@ -1,0 +1,329 @@
+"""Two-generator Gaussian STIRAP scans through legacy Modules."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Annotated, ClassVar, Literal, Self
+
+import numpy as np
+from numpy.typing import NDArray
+from pydantic import Field, model_validator
+from zcu_tools.analysis.singleshot import Centroid3IQAnalysis, analyze_centroid3_iq
+from zcu_tools.cfg_model import ConfigBase, FieldMeta
+from zcu_tools.core.simulation import ChargeDriveRequirement
+from zcu_tools.experiment import AxesSpec, Experiment
+from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.records import RunRecord
+from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
+from zcu_tools.plotting.plots import Plots
+from zcu_tools.program.acquisition import StoppedPartialAcquireError
+from zcu_tools.program.v2 import Join, Pulse, PulseReadout, SoftDelay, SweepCfg
+from zcu_tools.program.v2.modules.readout import centroid3_classifier
+from zcu_tools.program.v2.modules.waveform import GaussWaveformCfg
+
+from zcu_lab.v2.support.singleshot.util import raw_shots_to_signal
+
+
+class DelayScan(ConfigBase):
+    """Sweep Stokes lead in us; positive means Stokes starts before Pump."""
+
+    kind: Literal["delay"] = "delay"
+    stokes_lead: Annotated[SweepCfg, FieldMeta(label="Stokes lead", unit="us")]
+
+
+class AmplitudeScan(ConfigBase):
+    """Multiply both configured gains by each dimensionless scale; width stays fixed."""
+
+    kind: Literal["amplitude"] = "amplitude"
+    scale: Annotated[SweepCfg, FieldMeta(label="Common amplitude scale")]
+
+
+class DetuningScan(ConfigBase):
+    """Sweep Pump detuning (x) by Stokes detuning (y), both in MHz."""
+
+    kind: Literal["detuning"] = "detuning"
+    pump: Annotated[SweepCfg, FieldMeta(label="Pump detuning", unit="MHz")]
+    stokes: Annotated[SweepCfg, FieldMeta(label="Stokes detuning", unit="MHz")]
+
+
+class StirapCfg(ConfigBase):
+    """Measured carriers in MHz, Gaussian sigma/lead/timing in us and signed gains.
+
+    pump_ch/stokes_ch must be different charge-drive generators. Pump drives 0–3;
+    Stokes drives 2–3. Pulses last six sigma with zero extra pre/post delays.
+    stokes_lead is fixed outside delay mode; positive means Stokes first.
+    scan changes only lead, common gain scale or two carrier detunings.
+    shots counts raw IQ shots per scan point, acquired in one round.
+    readout collects one ADC after both branches; relax_delay follows each shot.
+    """
+
+    pump_ch: Annotated[int, FieldMeta(label="Pump generator")] = Field(default=1, ge=0)
+    stokes_ch: Annotated[int, FieldMeta(label="Stokes generator")] = Field(
+        default=2, ge=0
+    )
+    pump_freq: Annotated[float, FieldMeta(label="Pump carrier 0–3", unit="MHz")] = (
+        Field(gt=0)
+    )
+    stokes_freq: Annotated[float, FieldMeta(label="Stokes carrier 3–2", unit="MHz")] = (
+        Field(gt=0)
+    )
+    pump_gain: Annotated[float, FieldMeta(label="Pump gain", unit="a.u.")] = Field(
+        ge=-1, le=1
+    )
+    stokes_gain: Annotated[float, FieldMeta(label="Stokes gain", unit="a.u.")] = Field(
+        ge=-1, le=1
+    )
+    width: Annotated[float, FieldMeta(label="Gaussian sigma", unit="us")] = Field(
+        default=0.05, gt=0
+    )
+    stokes_lead: Annotated[float, FieldMeta(label="Fixed Stokes lead", unit="us")] = (
+        0.05
+    )
+    scan: Annotated[
+        DelayScan | AmplitudeScan | DetuningScan,
+        Field(discriminator="kind"),
+        FieldMeta(label="Scan mode"),
+    ]
+    readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
+    shots: Annotated[int, FieldMeta(label="Shots per point")] = Field(
+        default=4096, ge=1
+    )
+    relax_delay: Annotated[float, FieldMeta(label="Relax delay", unit="us")] = Field(
+        default=1.0, ge=0
+    )
+
+    @model_validator(mode="after")
+    def _validate_drives(self) -> Self:
+        if self.pump_ch == self.stokes_ch:
+            raise ValueError("Pump and Stokes require different bound generators")
+        if self.scan.kind == "amplitude":
+            for scale in (self.scan.scale.start, self.scan.scale.stop):
+                if max(abs(self.pump_gain * scale), abs(self.stokes_gain * scale)) > 1:
+                    raise ValueError("Scaled Pump/Stokes gains must stay within [-1,1]")
+        return self
+
+
+@dataclass(frozen=True)
+class StirapResult:
+    """signals: raw mean-sample ADC IQ, shaped (Ny,Nx,shots), not populations.
+
+    x_values: requested lead/us, common amplitude scale, or Pump detuning/MHz.
+    y_values: [0] except detuning mode, where it is Stokes detuning/MHz.
+    shot_indices: zero-based shot coordinate. Saved cfg identifies scan mode.
+    Unfinished points remain NaN. No intermediate-state oracle is included.
+    """
+
+    x_values: NDArray[np.float64]
+    y_values: NDArray[np.float64]
+    shot_indices: NDArray[np.int64]
+    signals: NDArray[np.complex128]
+
+
+class StirapExp(Experiment[StirapResult, StirapCfg]):
+    """Acquire the same two-branch STIRAP sequence under three scan modes."""
+
+    AXES_SPEC: ClassVar[AxesSpec[StirapResult, StirapCfg]] = AxesSpec(
+        axes=(
+            AxesSpec.Axis("shot_indices", "Shot Index", "None", dtype=np.int64),
+            AxesSpec.Axis("x_values", "Scan x (see cfg)", "None", dtype=np.float64),
+            AxesSpec.Axis("y_values", "Scan y (see cfg)", "None", dtype=np.float64),
+        ),
+        z=AxesSpec.Z("signals", "Raw IQ", "a.u.", dtype=np.complex128),
+        result_type=StirapResult,
+        cfg_type=StirapCfg,
+        cfg_schema_version="3.0",
+        tag="twotone/stirap",
+    )
+
+    def run(self, cfg: StirapCfg, *, context: RunContext) -> StirapResult:
+        """Start from relaxed g, overlap Stokes/Pump Gaussians, then acquire IQ.
+
+        Positive lead delays Pump, negative lead delays Stokes. Join waits for
+        both independent generator branches before readout. Width is fixed in
+        every mode. Delay/amplitude scans have Ny=1; detuning is Pump x Stokes.
+        Coordinates are requested values; the board quantizes pulse timing,
+        frequency and gain. Return every raw shot; cancellation leaves NaNs.
+        Single-fluxonium preflight requires both generators to bind charge lines.
+        Hardware wiring roles remain the operator responsibility.
+        """
+        scan = cfg.scan
+        if scan.kind == "delay":
+            x_sweep, y_sweep = scan.stokes_lead, None
+            x_label = "Stokes lead (us; positive = Stokes first)"
+        elif scan.kind == "amplitude":
+            x_sweep, y_sweep = scan.scale, None
+            x_label = "Common amplitude scale (fixed sigma)"
+        else:
+            x_sweep, y_sweep = scan.pump, scan.stokes
+            x_label = "Pump detuning (MHz)"
+        xs = np.linspace(x_sweep.start, x_sweep.stop, x_sweep.expts)
+        ys = (
+            np.array([0.0])
+            if y_sweep is None
+            else np.linspace(y_sweep.start, y_sweep.stop, y_sweep.expts)
+        )
+        buffer = SignalBuffer((len(ys), len(xs), cfg.shots))
+        with Schedule(cfg, buffer, scope=context.scope) as sched:
+            for y, row in sched.scan("stokes_detuning", ys.tolist()):
+                for x, step in row.scan("scan_x", xs.tolist()):
+                    lead, scale = cfg.stokes_lead, 1.0
+                    pump_detuning, stokes_detuning = 0.0, 0.0
+                    if scan.kind == "delay":
+                        lead = x
+                    elif scan.kind == "amplitude":
+                        scale = x
+                    else:
+                        pump_detuning, stokes_detuning = x, y
+                    # Both Gaussians have the same fixed sigma and six-sigma support.
+                    pump = Pulse.Cfg(
+                        ch=cfg.pump_ch,
+                        nqz=1,
+                        freq=cfg.pump_freq + pump_detuning,
+                        gain=cfg.pump_gain * scale,
+                        waveform=GaussWaveformCfg(
+                            length=6 * cfg.width, sigma=cfg.width
+                        ),
+                    )
+                    stokes = Pulse.Cfg(
+                        ch=cfg.stokes_ch,
+                        nqz=1,
+                        freq=cfg.stokes_freq + stokes_detuning,
+                        gain=cfg.stokes_gain * scale,
+                        waveform=GaussWaveformCfg(
+                            length=6 * cfg.width, sigma=cfg.width
+                        ),
+                    )
+                    program = (
+                        step.prog_builder(
+                            context.soc,
+                            context.soccfg,
+                            reps=cfg.shots,
+                            relax_delay=cfg.relax_delay,
+                        )
+                        .add(
+                            Join(
+                                [
+                                    SoftDelay("stokes_start", max(-lead, 0.0)),
+                                    Pulse("stokes", stokes),
+                                ],
+                                [
+                                    SoftDelay("pump_start", max(lead, 0.0)),
+                                    Pulse("pump", pump),
+                                ],
+                            ),
+                            PulseReadout("readout", step.cfg.readout),
+                        )
+                        .build()
+                    )
+                    try:
+                        program.acquire(
+                            context.soc,
+                            progress=True,
+                            cancel_flag=step.stop,
+                            charge_requirements=(
+                                ChargeDriveRequirement("Pump", cfg.pump_ch),
+                                ChargeDriveRequirement("Stokes", cfg.stokes_ch),
+                            ),
+                        )
+                    except StoppedPartialAcquireError:
+                        step.set_stop()
+                        break
+                    buffer[step].set(raw_shots_to_signal(program))
+        result = StirapResult(
+            xs, ys, np.arange(cfg.shots, dtype=np.int64), buffer.array
+        )
+        context.plots.subplots("measurement", layout="constrained")
+
+        def draw(figure):
+            ax = figure.axes[0]
+            mean = result.signals.mean(axis=-1)
+            if scan.kind == "detuning":
+                image = ax.pcolormesh(xs, ys, abs(mean), shading="nearest")
+                figure.colorbar(image, ax=ax, label="Mean IQ magnitude (ADC)")
+                ax.set(xlabel=x_label, ylabel="Stokes detuning (MHz)")
+            else:
+                ax.plot(xs, mean[0].real, ".-", label="Mean I")
+                ax.plot(xs, mean[0].imag, ".-", label="Mean Q")
+                ax.set(xlabel=x_label, ylabel="Mean-sample ADC IQ")
+                ax.legend()
+            ax.set_title("STIRAP acquired IQ (not fidelity)")
+
+        context.plots.draw("measurement", draw)
+        return result
+
+    def analyze(
+        self,
+        source: RunRecord[StirapCfg, StirapResult],
+        options: None,
+        *,
+        plots: Plots,
+    ) -> Centroid3IQAnalysis:
+        """Classify raw shots with this run's saved centroid3 readout calibration.
+
+        Require source.cfg and its saved ADC classifier; missing/wrong-type
+        calibration fails explicitly. No current Form, library or simulator
+        truth is consulted. Return raw/unclipped corrected g/e/f fractions,
+        training confusion and its condition/minimum singular value. Plot
+        requested scan coordinates; preparation-label estimates are not fidelity.
+        Incomplete/nonfinite IQ or singular confusion fails in the analysis owner.
+        """
+        del options
+        cfg = source.cfg
+        if cfg is None:
+            raise ValueError("STIRAP analysis requires the saved run readout cfg")
+        calibration = centroid3_classifier(cfg.readout, ro_ch=cfg.readout.ro_ch)
+        result = analyze_centroid3_iq(source.result.signals, calibration)
+        detuning = cfg.scan.kind == "detuning"
+        plots.subplots(
+            "fit",
+            nrows=2 if detuning else 1,
+            ncols=3 if detuning else 2,
+            figsize=(11, 7) if detuning else (10, 5),
+            layout="constrained",
+        )
+
+        def populations(figure):
+            for row, (values, title) in enumerate(
+                (
+                    (result.raw_populations, "Raw g/e/f fractions"),
+                    (result.corrected_populations, "Corrected g/e/f (unclipped)"),
+                )
+            ):
+                if detuning:
+                    for label, state in enumerate(("g", "e", "f")):
+                        ax = figure.axes[row * 3 + label]
+                        image = ax.pcolormesh(
+                            source.result.x_values,
+                            source.result.y_values,
+                            values[..., label],
+                            shading="nearest",
+                        )
+                        figure.colorbar(image, ax=ax)
+                        ax.set(
+                            xlabel="Pump detuning (MHz)",
+                            ylabel="Stokes detuning (MHz)",
+                            title=f"{title}: {state}",
+                        )
+                else:
+                    ax = figure.axes[row]
+                    for label, state in enumerate(("g", "e", "f")):
+                        ax.plot(
+                            source.result.x_values,
+                            values[0, :, label],
+                            ".-",
+                            label=state,
+                        )
+                    ax.set(
+                        xlabel="Stokes lead (us; positive = Stokes first)"
+                        if cfg.scan.kind == "delay"
+                        else "Common amplitude scale (fixed sigma)",
+                        ylabel="Preparation-label fraction",
+                        title=title,
+                    )
+                    ax.legend()
+            figure.suptitle(
+                f"Saved readout: condition={result.condition_number:.4g}, minimum singular value={result.minimum_singular_value:.4g}\nPreparation-label estimates, not fidelity"
+            )
+
+        plots.draw("fit", populations)
+        return result

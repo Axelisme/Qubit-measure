@@ -7,7 +7,12 @@ from math import prod
 
 import numpy as np
 
-from zcu_tools.core.simulation import AcquireRequest, AcquisitionMode, ReadoutWindow
+from zcu_tools.core.simulation import (
+    AcquireRequest,
+    AcquisitionMode,
+    ChargeDriveRequirement,
+    ReadoutWindow,
+)
 
 from ..base import MyProgramV2
 from ..ir.instructions import (
@@ -547,12 +552,15 @@ def build_compiled_request(
     sequence: int,
     *,
     routes: Sequence[tuple[int, int]],
+    charge_requirements: tuple[ChargeDriveRequirement, ...] = (),
 ) -> AcquireRequest:
     """Detach compiled instructions into numeric slots without calling a backend.
 
     prog is a compiled native or Modular v2 program. routes is the SimulationSoc's
     explicit (generator, ADC) wiring, not program declarations. mode chooses sums
-    or traces; binding and sequence supply sampling identity. Unsupported effects,
+    or traces; binding and sequence supply sampling identity. charge_requirements
+    is forwarded unchanged for environment-owned physical validation; the builder
+    does not infer drive roles from names or instructions. Unsupported effects,
     malformed markers, ambiguous routing and rep-varying outputs raise ValueError
     with instruction type, pre-optimization position and available source/loops.
     Acquisition still uses the separate Module frontend until its migration.
@@ -599,4 +607,5 @@ def build_compiled_request(
         prog.loop_dict["reps"],
         (template,),
         prog.relax_delay,
+        charge_requirements=charge_requirements,
     )
