@@ -12,7 +12,7 @@ Choose the Rabi pulse frequency, waveform and fixed duration. A prior pi amplitu
 
 ## Run and analyze
 
-1. Select an optional Reset module if needed. The experiment then emits a herald readout, the optional init pulse, the gain-swept drive and the terminal readout. Both readouts use the same pulse-readout instance and classifier settings. Heralding itself adds no active reset or joint-qubit classification.
+1. Select an optional Reset module if needed. The experiment then emits a herald readout, the optional init pulse, the gain-swept drive and the terminal readout. The herald and signal readouts use separate instances with the same pulse/ADC settings and classifier. Heralding itself adds no active reset or joint-qubit classification.
 2. Click Run. Each point averages only signal shots whose herald was classified as ground. Rounds are weighted by their accepted-shot counts. The live plot shows selected IQ magnitude versus the hardware-quantized gain.
 3. Open Analysis and set Skip points if leading gain points should be excluded. Skip applies to the original grid. Analyze removes nonfinite gain/IQ points before calling the ordinary amplitude-Rabi fit. Pass fraction is not a fit weight. Too few finite points cannot produce a usable fit.
 4. Inspect the rotated-IQ fit, pi/pi2 markers, uncertainties and fit quality. These estimates calibrate pulse amplitudes; they do not measure gate fidelity.

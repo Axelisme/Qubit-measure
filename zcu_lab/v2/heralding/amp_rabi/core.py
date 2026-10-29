@@ -101,8 +101,8 @@ class HeraldingAmpRabiExp(Experiment[HeraldingAmpRabiResult, HeraldingAmpRabiCfg
         """Acquire selected mean IQ and pass fraction versus hardware-quantized gain.
 
         After optional reset, herald ground, apply the optional init pulse and
-        fixed-duration gain-swept drive, then read signal IQ. Both emissions use
-        the same PulseReadout instance and cfg classifier. Missing classifier or
+        fixed-duration gain-swept drive, then read signal IQ. The herald and signal
+        readouts share cfg.readout, including its classifier. Missing classifier or
         circle radius fails before acquisition. The acquisition owner weights
         rounds by accepted counts. Zero-pass points have NaN IQ and fraction
         zero; unmeasured points remain NaN. No active reset is added. cfg is not
@@ -123,22 +123,23 @@ class HeraldingAmpRabiExp(Experiment[HeraldingAmpRabiResult, HeraldingAmpRabiCfg
         with Schedule(cfg, buffer, scope=context.scope) as sched:
             cfg = sched.cfg
             cfg.qub_pulse.set_param("gain", sweep2param("gain", cfg.gain))
-            readout = PulseReadout("readout", cfg.readout)
-            # Borrow one instance twice; occurrence=0 selects only the first emission.
+            herald_readout = PulseReadout("herald", cfg.readout)
+            signal_readout = PulseReadout("signal", cfg.readout)
+            # Borrow the emitted herald instance so occurrence=0 selects its readout.
             prog = ModularProgramV2(
                 soccfg,
                 modules=[
                     Reset("reset", cfg.reset),
-                    readout,
+                    herald_readout,
                     Pulse("init_pulse", cfg.init_pulse),
                     Pulse("qubit_pulse", cfg.qub_pulse),
-                    readout,
+                    signal_readout,
                 ],
                 sweep=[("gain", cfg.gain)],
                 reps=cfg.reps,
                 relax_delay=cfg.relax_delay,
             )
-            herald = readout.herald_spec(prog, occurrence=0)
+            herald = herald_readout.herald_spec(prog, occurrence=0)
             builder = sched.prog_builder(context.soc, soccfg)
             try:
                 builder.run_program(prog, rounds=cfg.rounds, herald=[herald])
