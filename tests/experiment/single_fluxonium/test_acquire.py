@@ -13,6 +13,7 @@ from scipy.integrate import solve_ivp
 from zcu_tools.core.simulation import (
     AcquireRequest,
     AcquisitionMode,
+    ChargeDriveRequirement,
     ReadoutSlot,
     ReadoutWindow,
     RoundRequest,
@@ -20,10 +21,12 @@ from zcu_tools.core.simulation import (
     TimelineTemplate,
 )
 from zcu_tools.experiment.single_fluxonium.runtime import (
+    SingleFluxoniumRuntimeOptions,
     SingleFluxoniumSource,
     single_fluxonium,
 )
 from zcu_tools.program.v2 import ModularProgramV2
+from zcu_tools.program.v2.modules.delay import Join
 from zcu_tools.program.v2.modules.pulse import PulseCfg
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
@@ -35,6 +38,7 @@ from zcu_tools.resources.simulation_replay import (
     save_replay,
 )
 from zcu_tools.resources.single_fluxonium import parse_single_fluxonium
+from zcu_tools.simulate.evolution import Engine
 
 from ._inputs import settings, slot
 
@@ -345,6 +349,134 @@ def test_round_replay_and_raw_outlive_source(tmp_path: Path, mode):
         replay.replay_round(path)
 
 
+def named_drive_settings():
+    values = physical_settings().model_dump(mode="json")
+    values["flux_line"] = None
+    values["drive_lines"] = {
+        "first": {
+            "name": "primary",
+            "gen_ch": 1,
+            "charge_drive_ghz_per_gain": {"real": 0.1, "imag": -0.02},
+        },
+        "second": {
+            "name": "auxiliary",
+            "gen_ch": 5,
+            "charge_drive_ghz_per_gain": {"real": -0.05, "imag": 0.1},
+        },
+    }
+    return parse_single_fluxonium(values)
+
+
+def test_preflight_routes_overlapping_events_to_their_own_named_source():
+    config = named_drive_settings()
+    env = single_fluxonium(config)
+    source = SingleFluxoniumSource(config, env.devices)
+    try:
+        request = request_for(source, "rabi")
+        compiled = request.templates[0]
+        second = slot(5, 8, 24, frequency_mhz=820, phase_deg=60, gain=-0.35)
+        compiled = replace(compiled, events=(*compiled.events, second))
+        request = replace(request, templates=(compiled,))
+        validated = source.preflight(request, source.snapshot())
+        tracks = validated.plans[0][0].batch.tracks
+        assert [track.port for track in tracks] == ["primary", "auxiliary"]
+        np.testing.assert_array_equal(tracks[0].start_ns, [0, 0])
+        np.testing.assert_array_equal(tracks[1].start_ns, [8, 8])
+        np.testing.assert_array_equal(tracks[1].duration_ns, [24, 24])
+        np.testing.assert_allclose(tracks[1].frequency_ghz, [0.82, 0.82])
+        np.testing.assert_allclose(tracks[1].phase_rad, [np.pi / 3, np.pi / 3])
+        np.testing.assert_allclose(tracks[1].amplitude, [-0.35, -0.35])
+    finally:
+        source.close()
+        if env.close_backend is not None:
+            env.close_backend()
+        env.devices.close_all_devices()
+
+
+@pytest.mark.parametrize("channel", [3, 6])
+def test_preflight_rejects_unknown_generator_with_event_path(channel):
+    config = named_drive_settings()
+    env = single_fluxonium(config)
+    source = SingleFluxoniumSource(config, env.devices)
+    try:
+        request = request_for(source, "rabi")
+        compiled = request.templates[0]
+        events = (replace(compiled.events[0], gen_ch=channel), *compiled.events[1:])
+        request = replace(request, templates=(replace(compiled, events=events),))
+        with pytest.raises(
+            ValueError,
+            match=rf"template.events.0.gen_ch.*unbound.*generator {channel}",
+        ):
+            source.preflight(request, source.snapshot())
+    finally:
+        source.close()
+        if env.close_backend is not None:
+            env.close_backend()
+        env.devices.close_all_devices()
+
+
+def test_overlapping_named_drives_acquire_and_respond_to_each_calibration():
+    means = []
+    for disabled in (None, "first", "second"):
+        configured = named_drive_settings().model_dump(mode="json")
+        if disabled is not None:
+            configured["drive_lines"][disabled]["charge_drive_ghz_per_gain"] = {
+                "real": 0.0,
+                "imag": 0.0,
+            }
+        env = single_fluxonium(parse_single_fluxonium(configured))
+        try:
+            first = PulseCfg(
+                ch=1,
+                nqz=1,
+                freq=580,
+                gain=0.2,
+                waveform=ConstWaveformCfg(length=0.032),
+            )
+            second = PulseCfg(
+                ch=5,
+                nqz=1,
+                freq=580,
+                phase=60,
+                gain=0.35,
+                waveform=ConstWaveformCfg(length=0.024),
+            )
+            readout = PulseReadoutCfg(
+                gen_ch=0,
+                ro_ch=0,
+                nqz=1,
+                freq=7000,
+                gain=0.1,
+                waveform=ConstWaveformCfg(length=0.024),
+                ro_length=0.016,
+                trig_offset=0.002,
+            )
+            program = ModularProgramV2(
+                env.soccfg,
+                modules=[
+                    Join(first.build("first"), second.build("second")),
+                    readout.build("ro"),
+                ],
+                reps=100_000,
+            )
+            average = program.acquire(
+                env.soc,
+                progress=False,
+                charge_requirements=(
+                    ChargeDriveRequirement("first drive", 1),
+                    ChargeDriveRequirement("second drive", 5),
+                ),
+            )
+            assert average is not None
+            means.append(np.asarray(average))
+        finally:
+            if env.close_backend is not None:
+                env.close_backend()
+            env.devices.close_all_devices()
+    assert np.max(np.abs(means[0] - means[1])) > 1e-3
+    assert np.max(np.abs(means[0] - means[2])) > 1e-3
+
+
 def test_program_acquire_raw_decimated_and_live_round_refresh():
     env = single_fluxonium(physical_settings())
     try:
@@ -552,6 +684,59 @@ def test_source_rejects_nonterminal_cavity_pulses_before_evolution():
             source.execute(RoundRequest(request, source.snapshot(), 0))
     finally:
         source.close()
+        env.devices.close_all_devices()
+
+
+class EvolutionObserver(Engine):
+    """Count calls at the injected evolution boundary without replacing admission."""
+
+    def __init__(self):
+        super().__init__(workers=1)
+        self.evolutions = 0
+
+    def evolve(self, source, batches, **kwargs):
+        self.evolutions += 1
+        return super().evolve(source, batches, **kwargs)
+
+
+def test_new_acquire_rechecks_charge_admission_before_reusing_numeric_preparation():
+    config = physical_settings()
+    env = single_fluxonium(config)
+    engine = EvolutionObserver()
+    source = SingleFluxoniumSource(
+        config, env.devices, runtime=SingleFluxoniumRuntimeOptions(engine=engine)
+    )
+    try:
+        ordinary = replace(
+            request_for(source, "rabi", reps=2),
+            charge_requirements=(ChargeDriveRequirement("Stokes", 1),),
+        )
+        snapshot = source.snapshot()
+        first = expect_integrated(
+            source.open_acquire(ordinary).sample_round(snapshot, 0)
+        )
+        np.testing.assert_array_equal(
+            first.statistics.state_counts.sum(axis=-1), [2, 2]
+        )
+        completed_evolutions = engine.evolutions
+        assert completed_evolutions > 0
+        if config.flux_line is None:
+            raise AssertionError("reuse acceptance requires a bound flux generator")
+        wrong_role = replace(
+            ordinary,
+            charge_requirements=(
+                ChargeDriveRequirement("Stokes", config.flux_line.gen_ch),
+            ),
+        )
+        with pytest.raises(
+            ValueError, match=rf"Stokes.*{config.flux_line.gen_ch}.*charge drive line"
+        ):
+            source.open_acquire(wrong_role).sample_round(snapshot, 0)
+        assert engine.evolutions == completed_evolutions
+    finally:
+        source.close()
+        if env.close_backend is not None:
+            env.close_backend()
         env.devices.close_all_devices()
 
 

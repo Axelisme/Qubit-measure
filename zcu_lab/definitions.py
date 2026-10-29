@@ -74,6 +74,9 @@ from zcu_lab.v2.singleshot.mist.power_freq.gui import (
 from zcu_lab.v2.singleshot.mist.pre_freq.gui import (
     DEFINITION as MIST_PRE_FREQ_DEFINITION,
 )
+from zcu_lab.v2.singleshot.qutrit_population.gui import (
+    DEFINITION as QUTRIT_POPULATION_DEFINITION,
+)
 from zcu_lab.v2.singleshot.reset_check.gui import (
     DEFINITION as SS_RESET_CHECK_DEFINITION,
 )
@@ -117,6 +120,7 @@ from zcu_lab.v2.twotone.irb.gui import DEFINITION as IRB_DEFINITION
 from zcu_lab.v2.twotone.power_dep.gui import DEFINITION as POWER_DEP_DEFINITION
 from zcu_lab.v2.twotone.rabi.amp_rabi.gui import DEFINITION as AMP_RABI_DEFINITION
 from zcu_lab.v2.twotone.rabi.len_rabi.gui import DEFINITION as LEN_RABI_DEFINITION
+from zcu_lab.v2.twotone.raman_gf.gui import DEFINITION as RAMAN_GF_DEFINITION
 from zcu_lab.v2.twotone.rb.gui import DEFINITION as RB_DEFINITION
 from zcu_lab.v2.twotone.reset.bath.freq.gui import (
     DEFINITION as BATH_FREQ_GAIN_DEFINITION,
@@ -154,6 +158,7 @@ from zcu_lab.v2.twotone.ro_optimize.length.gui import (
 from zcu_lab.v2.twotone.ro_optimize.power.gui import (
     DEFINITION as RO_OPT_POWER_DEFINITION,
 )
+from zcu_lab.v2.twotone.stirap.gui import DEFINITION as STIRAP_DEFINITION
 from zcu_lab.v2.twotone.time_domain.cpmg.gui import DEFINITION as CPMG_DEFINITION
 from zcu_lab.v2.twotone.time_domain.t1.gui import DEFINITION as T1_DEFINITION
 from zcu_lab.v2.twotone.time_domain.t2echo.gui import DEFINITION as T2_ECHO_DEFINITION
@@ -174,10 +179,12 @@ ADAPTERS: dict[str, object] = {
     "onetone/power_dep": ONE_TONE_POWER_DEP_DEFINITION,
     "onetone/flux_dep": ONE_TONE_FLUX_DEP_DEFINITION,
     "twotone/freq": FREQ_DEFINITION,
+    "twotone/stirap": STIRAP_DEFINITION,
     "twotone/flux_dep": FLUX_DEP_DEFINITION,
     "twotone/power_dep": POWER_DEP_DEFINITION,
     "twotone/rabi/len_rabi": LEN_RABI_DEFINITION,
     "twotone/rabi/amp_rabi": AMP_RABI_DEFINITION,
+    "twotone/raman_gf": RAMAN_GF_DEFINITION,
     "twotone/t1": T1_DEFINITION,
     "heralding/t1": HERALDING_T1_DEFINITION,
     "heralding/amp_rabi": HERALDING_AMP_RABI_DEFINITION,
@@ -187,6 +194,7 @@ ADAPTERS: dict[str, object] = {
     "twotone/t2ramsey": T2_RAMSEY_DEFINITION,
     "twotone/t2echo": T2_ECHO_DEFINITION,
     "singleshot/ge": GE_DEFINITION,
+    "singleshot/qutrit_population": QUTRIT_POPULATION_DEFINITION,
     "singleshot/check": CHECK_DEFINITION,
     "singleshot/len_rabi": SS_LEN_RABI_DEFINITION,
     "singleshot/amp_rabi": SS_AMP_RABI_DEFINITION,

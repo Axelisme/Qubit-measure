@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 from zcu_tools.core.simulation import (
     AcquireRequest,
     AcquisitionMode,
+    ChargeDriveRequirement,
     ReadoutWindow,
 )
 
@@ -23,11 +24,15 @@ def build_request(
     mode: AcquisitionMode,
     binding: SimulationBinding,
     sequence: int,
+    *,
+    charge_requirements: tuple[ChargeDriveRequirement, ...] = (),
 ) -> AcquireRequest:
     """Freeze all compiled loop controls before executing a backend round.
 
     prog must be a compiled ModularProgramV2 using supported semantic Modules.
     mode selects ADC sums or traces; binding/sequence supply private RNG identity.
+    charge_requirements is forwarded unchanged for environment-owned physical
+    validation; the frontend does not infer drive roles from modules or names.
     Unsupported operations and inconsistent ADC layouts raise ValueError before
     any backend call. Returned records retain no mutable Module state.
     """
@@ -73,4 +78,5 @@ def build_request(
         reps=loops["reps"],
         templates=templates,
         relax_delay_us=prog.relax_delay,
+        charge_requirements=charge_requirements,
     )

@@ -654,10 +654,13 @@ class FTFSource:
         inputs before the engine runs; a closed source raises RuntimeError.
         Active pulse and mux readout generators are mutually exclusive across
         all request templates. Mixing them raises ValueError naming both indices.
-        Separate requests may select different readout paths.
+        Separate requests may select different readout paths. Nonempty charge
+        requirements raise ValueError: physical charge admission is not supported.
         """
         if self._closed:
             raise RuntimeError("FTF source is closed")
+        if request.charge_requirements:
+            raise ValueError("FTF charge drive requirements are not supported")
         if not request.templates:
             raise ValueError("FTF requires timeline templates")
         if request.rng_version != f"PCG64/SeedSequence-v2/numpy-{np.__version__}":

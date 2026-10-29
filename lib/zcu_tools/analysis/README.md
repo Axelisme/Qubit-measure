@@ -1,6 +1,6 @@
 # `zcu_tools.analysis` 模塊重點文檔
 
-**Last updated:** 2026-10-28
+**Last updated:** 2026-10-30
 
 **讀者：** framework-dev。分析核心、純數值工具與前端 adapter 的分工速查。
 
@@ -62,3 +62,11 @@ Fluxdep native 載入與 dispersive 投影共用此規則。
 - `fitting/`：擬合模型、shared/fixed fitting、singleshot 與 resonance fitting。契約見 [fitting README](fitting/README.md)。
 
 `singleshot.py` 擁有純數值 shot 分類、Rabi 分類比例及 population 換算。QICK raw buffer 的 accumulator normalization 留在 caller 的實驗 helper；本模組不讀 program metadata。
+
+`analyze_reference_iq` 只收三組 acquired IQ 與準備標籤。它與 classified acquire 共用 `utils.shot_classification.nearest_centroid3` 的 g/e/f 最近中心與等距規則。前半訓練 nearest-centroid classifier 與 confusion matrix，後半獨立計算 raw/corrected fractions 與準備標籤錯誤率。品質指標使用訓練 covariance、condition number 與 singular value。Correction 回到準備標籤座標，保留負值與大於 1 的值，不推論參考態純度。`correct_populations` 的既有預設仍 clipping；caller 可用 `clip=False` 保留線性解。
+
+`classify_reference_iq(signals, centroids)` 將固定三中心套用到任意 scan axes 加最後 shot axis 的 acquired IQ，輸出 scan axes 加 g/e/f fraction axis。它也使用共用 nearest kernel。中心與 IQ 使用相同 ADC 單位，不重訓、不修正。Exact ties 歸最低 label。Caller 用 `correct_populations(..., clip=False)` 套用 reference training confusion；結果仍是 preparation-label 座標，不是 latent energy-state population。
+
+`analyze_centroid3_iq(signals, calibration)` 接收 caller 從 saved run cfg 取得的 `Centroid3Classifier`。它回傳 `Centroid3IQAnalysis`，包含 raw/unclipped corrected fractions、training confusion 副本及其 condition number/minimum singular value。它不讀 library、Form、program 或硬體，不重新訓練校準。STIRAP 與 Raman consumer 可共用此分析，不重宣告相同的數值結果型別。
+`Centroid3IQAnalysis` 的 owner 註解支援 TypeAdapter 從 native summary 重建 float64 ndarray。
+Population 保留任意 scan axes 加末軸 g/e/f，confusion matrix 必須為 3×3；壞 dtype、shape 或 null／非有限 array 值明確拒絕。解碼不裁切 corrected fractions，也不改 summary 或儲存格式。

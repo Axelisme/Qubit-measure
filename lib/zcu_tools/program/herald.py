@@ -5,7 +5,7 @@ from dataclasses import dataclass
 import numpy as np
 from numpy.typing import NDArray
 
-from zcu_tools.cfg_model import CircleClassifier, ReadoutClassifier
+from zcu_tools.cfg_model import Centroid3Classifier, CircleClassifier, ReadoutClassifier
 from zcu_tools.utils.shot_classification import classify_shots
 
 
@@ -22,8 +22,11 @@ def herald_ground_mask(
     raises ValueError requesting GE Post calibration; invalid circle geometry
     also raises ValueError. Linear accepts real(signals*exp(1j*angle)) <= threshold
     (the g side), with angle in radians and threshold in these same ADC units.
+    Centroid3 raises ValueError: three-state heralding is unsupported.
     Calibration and signals are not mutated.
     """
+    if isinstance(classifier, Centroid3Classifier):
+        raise ValueError("centroid3 classifier is unsupported for herald selection")
     if isinstance(classifier, CircleClassifier):
         if classifier.radius is None:
             raise ValueError("Herald circle requires radius; run GE Post calibration")
@@ -56,5 +59,5 @@ class HeraldSpec:
     reads_per_shot: int
 
     def __post_init__(self) -> None:
-        """Reject incomplete or invalid circle calibration before acquisition."""
+        """Reject centroid3 or incomplete/invalid circle calibration before acquisition."""
         herald_ground_mask(np.empty(0, dtype=np.complex128), self.classifier)

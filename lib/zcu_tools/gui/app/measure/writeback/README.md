@@ -25,7 +25,8 @@ are accepted. The proposal preserves the library's original child keys.
 Only the exact updated paths are excluded from comparison. Updating
 `tones.1.classifier` still checks that tone's frequency and ADC.
 `resources.parameter_fields.set_model_value` writes existing indexed elements;
-Spec validation remains with cfg_model. The builder has no classifier policy.
+Spec validation remains with cfg_model. Circle and centroid3 proposals use the same builder and Apply contract.
+The builder has no classifier policy.
 It does not read the live target, write files or change Apply semantics.
 
 Primary and Post remain complete replacements. One batch accepts Primary before

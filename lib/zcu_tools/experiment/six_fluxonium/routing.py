@@ -186,7 +186,11 @@ def route_request(
     Untriggered cavity drives, mixed pulse/mux routes, foreign generators, ties
     and absent terminal tones fail before any evolution or sampling. Microwave
     controls remain with their own circuit; they never drive another qubit.
+    Nonempty charge requirements raise ValueError before projection or evolution:
+    this environment does not yet support physical charge admission.
     """
+    if request.charge_requirements:
+        raise ValueError("six-fluxonium charge drive requirements are not supported")
     bare = np.array(
         [q.readout.resonator.frequency_ghz * 1000 for q in settings.qubits.ordered()]
     )

@@ -1,9 +1,15 @@
 """Readout calibration data, independent of acquisition and file I/O."""
 
 from math import isfinite
-from typing import Annotated, Literal
+from typing import Annotated, Literal, Self
 
-from pydantic import ConfigDict, Field, field_serializer, field_validator
+from pydantic import (
+    ConfigDict,
+    Field,
+    field_serializer,
+    field_validator,
+    model_validator,
+)
 
 from zcu_tools.core.complex_codec import ComplexTag, decode_complex, encode_complex
 
@@ -86,7 +92,57 @@ class LinearClassifier(ConfigBase):
     ) = None
 
 
+class Centroid3Classifier(ConfigBase):
+    """Three-state nearest-center calibration in mean-sample ADC coordinates.
+
+    mode is fixed to "centroid3". Required g_center/e_center/f_center are finite,
+    pairwise distinct complex centers in raw integrated ADC / rounded integration
+    sample count, without IQ-offset subtraction. Complex values serialize as
+    {"__complex__": [real, imaginary]}. Required confusion_matrix is finite 3x3:
+    prepared g/e/f rows, measured g/e/f columns. Values are stored unchanged,
+    without transposition, normalization, range or row-sum restrictions.
+    Classification chooses the Euclidean nearest center, ties in g/e/f order,
+    with no rejection region. Acquire stores [g,e]; the third fraction is f.
+    """
+
+    model_config = ConfigDict(strict=True, allow_inf_nan=False)
+
+    mode: Literal["centroid3"] = "centroid3"
+    g_center: complex
+    e_center: complex
+    f_center: complex
+    confusion_matrix: Annotated[
+        list[Annotated[list[float], Field(min_length=3, max_length=3)]],
+        Field(min_length=3, max_length=3),
+    ]
+
+    @field_validator("g_center", "e_center", "f_center", mode="before")
+    @classmethod
+    def _decode_center(cls, value: object) -> object:
+        return decode_complex(value) if isinstance(value, dict) else value
+
+    @field_validator("g_center", "e_center", "f_center")
+    @classmethod
+    def _finite_center(cls, value: complex) -> complex:
+        if not isfinite(value.real) or not isfinite(value.imag):
+            raise ValueError(
+                "Classifier centers must have finite real and imaginary parts"
+            )
+        return value
+
+    @model_validator(mode="after")
+    def _distinct_centers(self) -> Self:
+        if len({self.g_center, self.e_center, self.f_center}) != 3:
+            raise ValueError("Classifier centers must be distinct")
+        return self
+
+    @field_serializer("g_center", "e_center", "f_center")
+    def _encode_center(self, value: complex) -> ComplexTag:
+        return encode_complex(value)
+
+
 type ReadoutClassifier = Annotated[
-    CircleClassifier | LinearClassifier, Field(discriminator="mode")
+    CircleClassifier | LinearClassifier | Centroid3Classifier,
+    Field(discriminator="mode"),
 ]
-"""Readout calibration selected by the required circle/linear mode in mappings."""
+"""Readout calibration selected by the required circle/linear/centroid3 mode."""

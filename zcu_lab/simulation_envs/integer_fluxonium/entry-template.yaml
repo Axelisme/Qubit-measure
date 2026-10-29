@@ -1,0 +1,35 @@
+# Nominal synthetic inputs, not measured calibration or a pulse library.
+format: zcu.entry-template
+format_version: "1.0"
+schema_version: 3
+components:
+  Q1:
+    kind: qubit/fluxonium
+    EJ: 6.78 # GHz
+    EC: 1.47
+    EL: 0.22
+    freq: null # Operator supplies measured spectroscopy, never model frequencies.
+    resonator: R1
+    flux_dev: flux_bias
+    flux:
+      offset: 0.0
+      period:
+        flux_bias: 1.0 # A/Phi0
+    wiring:
+      ch: 1 # Pump. Specify Stokes generator 2 in experiment Forms.
+  R1:
+    kind: resonator
+    freq: 7460.0 # MHz; nominal synthetic cavity input.
+    kappa: 15.0 # MHz; total kappa/(2*pi).
+    time_of_fly: 0.0 # us; no receiver propagation delay.
+    wiring:
+      ch: 0
+      ro_ch: 0
+  flux_bias:
+    kind: device/current_source
+aliases:
+  format: zcu.aliases
+  format_version: "1.0"
+  aliases:
+    qubit: Q1
+    resonator: $qubit.resonator

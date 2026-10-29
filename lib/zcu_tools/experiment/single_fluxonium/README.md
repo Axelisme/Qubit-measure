@@ -1,12 +1,12 @@
 # Single-fluxonium acquisition
 
-**Last updated:** 2026-10-28 (UTC), projective readout rules and preparation lifetime
+**Last updated:** 2026-10-29 (UTC), named charge admission
 
 **Readers:** framework-dev, lab-author, agent. Compose complete fluxonium timelines with one physical readout cavity.
 
 `single_fluxonium(path_or_settings, *, private_replay=None)` returns the normal
 `SimulationEnvironment`. It creates one fixed-unit DC FakeDevice, a mock SoC,
-one microwave route, an optional fast-flux route and one readout generator/ADC route.
+one route per named microwave line, an optional fast-flux route and one readout generator/ADC route.
 All generators bind to that ADC for transport admission. Only the configured
 readout generator supplies physical readout pulses. No real hardware or numeric
 warmup runs at construction.
@@ -22,6 +22,12 @@ Transferring a driver to the GUI transfers only that driver's cleanup responsibi
 `readout_kind="mux"` accepts coherent terminal tones on the same physical cavity.
 A null or omitted `settings.flux_line` keeps flux fixed at the live DC value.
 It binds no fast-flux generator and rejects foreign controls.
+Each `drive_lines` generator maps to its own named track, including overlapping events on different generators. Each source multiplies the full charge operator by its own complex calibration. Readout, fast-flux and microwave generator bindings must be distinct. Generator count is the largest bound index plus one; holes remain unbound. Unknown event generators fail in preflight with their event path and channel.
+Acquisition may carry named `ChargeDriveRequirement` records in its request.
+Preflight requires every requested generator to belong to `drive_lines`, rejecting
+flux, readout and unbound generators before waveform construction or evolution.
+Other legal fast-flux events keep their ordinary routing. Names are diagnostics,
+not role keys. An empty requirement tuple preserves ordinary planning.
 It converts QICK us/MHz/degrees into ns/GHz/radians. Shared
 `experiment.readout_plan.drive_track` preserves signed gains, complex envelopes
 and the common carrier origin. Each template remains one `TimelineBatch`.
@@ -77,7 +83,7 @@ sampling path, including RNG consumption.
 startup driver object. `snapshot()` reads its current A/V value and checks the
 fixed unit and inclusive limits. Registry removal or renaming does not restore
 startup values. `model_facts(snapshot)` builds the retained projection, Gibbs
-initial density, full-charge drive, directional baths and one physical ADC model.
+initial density, full-charge drives, directional baths and one physical ADC model.
 The charge calibration uses `Re[c*z] = Re(c)*Re(z) - Im(c)*Im(z)`.
 
 Evolution returns densities in DC energy coordinates. The source supplies
