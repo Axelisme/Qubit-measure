@@ -6,7 +6,7 @@ from collections.abc import Sequence
 from copy import deepcopy
 from dataclasses import dataclass, field
 
-from .instructions import BaseInst, Instruction
+from .instructions import Instruction
 from .linker import IRLinker
 
 
@@ -61,18 +61,11 @@ class CompiledStream:
         Linker errors (such as duplicate labels) propagate. The input and its
         nested operands/metadata are never retained as mutable aliases.
         """
-        logical = list(instructions)
-        program, _, markers, _ = IRLinker().link(logical)
-        instruction_addresses = iter(item["P_ADDR"] for item in program)
-        marker_addresses = iter(item["p_addr"] for item in markers)
-        records: list[CompiledRecord] = []
-        for instruction in logical:
-            address = next(
-                instruction_addresses
-                if isinstance(instruction, BaseInst)
-                else marker_addresses
+        # A snapshot retains positions, not the cursor used for further linking.
+        positioned, _ = IRLinker().position(instructions)
+        return cls(
+            tuple(
+                CompiledRecord(record.instruction, record.p_addr)
+                for record in positioned
             )
-            if not isinstance(address, int):
-                raise TypeError("IRLinker returned a noninteger program address")
-            records.append(CompiledRecord(instruction, address))
-        return cls(tuple(records))
+        )

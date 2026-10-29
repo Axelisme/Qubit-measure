@@ -1,6 +1,6 @@
 # IR architecture guide
 
-**Last updated:** 2026-10-29
+**Last updated:** 2026-10-29，typed linker positioning
 
 **讀者：** framework-dev。QICK ASM V2 的 IR 分層、分析與 lowering 契約。
 
@@ -10,7 +10,8 @@
 
 1. `IRLinker` ([linker.py](linker.py))
    - 負責 `list[Instruction]` 與 `prog_list + labels + meta_infos` 的互轉。
-   - `link()` 是唯一會寫入 `P_ADDR` 與 `LINE` 的地方。
+   - `position()` 統一計算 word address、assembler line 與 end cursor，拒絕重複 label。它回傳保留 input reference 的 `PositionedInstruction` views，不建立 snapshot。
+   - `link()` 序列化這些位置，是唯一會寫入 `P_ADDR` 與 `LINE` 的地方。Compile snapshot 直接讀取位置 views，再自行 defensive-copy payload。
 2. `IRLexer` ([factory.py](factory.py))
    - 負責 `list[Instruction] ↔ list[BasicBlockNode | MetaInst]`。
    - `MetaInst` 在 chunked stream 中獨立於 `BasicBlockNode` 存在。
