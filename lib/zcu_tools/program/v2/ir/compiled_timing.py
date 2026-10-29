@@ -172,7 +172,15 @@ class _Machine:
         )
         if lhs is None or (expr.rhs is not None and rhs is None):
             return None
-        if expr.op == AluOp.NONE:
+        if expr.rhs is None and expr.op in (AluOp.NONE, AluOp.ABS):
+            if expr.op == AluOp.ABS:
+                # tprocv2_assembler v3 rev23 encodes unary ABS as 1000.
+                # Registers are signed 32-bit; the assembler does not specify the
+                # minimum word's overflow result, so do not guess wrap or saturation.
+                lhs = _signed32(lhs)
+                if lhs == -(2**31):
+                    raise ValueError("ABS input -2147483648 has unspecified overflow")
+                lhs = -lhs if lhs < 0 else lhs
             return lhs
         binary = {
             AluOp.ADD: add,
@@ -411,7 +419,9 @@ def analyze_timing(
     Layout boundaries are observed before execution; loops only label shots.
     Supports inc_ref, known immediate/ALU/label register writes, TEST, known
     jumps, timed port outputs and plain wave-memory updates. ALU supports copy,
-    add/subtract, bitwise AND/OR/XOR and hardware low-four-bit SR/ASR/SL shifts.
+    add/subtract, bitwise AND/OR/XOR, signed 32-bit unary ABS and hardware
+    low-four-bit SR/ASR/SL shifts. ABS rejects -2147483648 because its overflow
+    result is not specified by the assembler.
     Wave data is unknown until overwritten; time/control cannot consume it.
     Hardware s11 reads (including Resync) raise an error naming the source.
     Unknown timing/control registers, unsupported instructions/side effects,
