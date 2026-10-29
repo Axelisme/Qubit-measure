@@ -39,6 +39,24 @@ Its coordinates are the reference preparation labels, not guaranteed pure energy
 Negative and above-one estimates remain visible because finite calibration shots and preparation contamination can produce them.
 Do not call the preparation-label assignment score pure readout fidelity.
 
+## Apply calibration to readout
+
+Before Run, save the tested readout as a library module and bind the resonator's readout slot to its key.
+Select that captured readout in the Form without changing its non-classifier settings.
+After **Analysis → Analyze**, inspect the module proposal's g/e/f centers and training confusion, then click **Apply Selected**.
+Apply replaces the complete captured readout module but changes only its classifier. It preserves the waveform key and all other fields.
+It does not create a missing library target or choose one from the current Form.
+Analyze reports a failure if the Run had no captured target, the slot is unresolved, or any non-classifier setting differs from the captured library module.
+Save and bind the intended settings, then Run again to fix those failures.
+
+Reopen a consumer after Apply to capture the new library calibration.
+The classifier uses Euclidean nearest centers with no rejection region. Exact ties choose g, then e, then f.
+Classified acquire stores two columns, g and e. Recover f as `1-g-e` for this classifier only.
+Circle calibration's third class remains other. Circle-only consumers and heralding reject the three-center classifier.
+Saved run cfg retains its own centers and training confusion. Later live-library edits do not change that run's classification or correction.
+There is no automatic calibration invalidation. Repeat reference acquisition and Apply after changing readout pulse, ADC window, receiver or preparation settings.
+Training confusion includes preparation contamination, so correction reports preparation-label coordinates, not pure-state fidelity.
+
 ## Quality and failure conditions
 
 For the short-reference integer-fluxonium setting, inspect minimum pooled Mahalanobis separation >=2, macro preparation-label error <=3%, each label error <=6%, training confusion 2-norm condition <=1.5 and minimum singular value >=0.8.

@@ -9,7 +9,7 @@ from itertools import combinations
 import numpy as np
 from numpy.typing import NDArray
 
-from zcu_tools.utils.shot_classification import classify_shots
+from zcu_tools.utils.shot_classification import classify_shots, nearest_centroid3
 
 
 def raw_population_signal(
@@ -120,8 +120,8 @@ def analyze_reference_iq(
     centroids = training.mean(axis=1)
     if any(first == second for first, second in combinations(centroids, 2)):
         raise ValueError("Reference centroids must be distinct")
-    train_predictions = np.argmin(abs(training[..., None] - centroids), axis=-1)
-    evaluation_predictions = np.argmin(abs(evaluation[..., None] - centroids), axis=-1)
+    train_predictions = nearest_centroid3(training, *centroids)
+    evaluation_predictions = nearest_centroid3(evaluation, *centroids)
     confusion = np.stack(
         [(train_predictions == i).mean(axis=1) for i in range(3)], axis=1
     )

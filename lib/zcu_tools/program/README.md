@@ -23,11 +23,16 @@ their readout cfg and pass the result explicitly. Acquisition does not discover
 calibration through a program registry. Circle requires a Post radius and returns
 ground/excited populations; Other is `1-g-e`. Linear returns two populations,
 with excited defined by `real(IQ * exp(1j*angle)) > threshold`; equality is ground.
-Angle is radians, opposite QICK's projection-angle sign. Both modes normalize
+Centroid3 selects the nearest g/e/f center per shot, with ties in that order.
+Its two columns are [g,e] and f is `1-g-e`; circle's third class remains other.
+Angle is radians, opposite QICK's projection-angle sign. All modes normalize
 raw sums by each ADC's rounded integration length without subtracting IQ offset,
 regardless of `remove_offset`. Simulation materializes raw shots for this same
 classification pipeline instead of returning compact IQ means.
-`classification_parameters(cfg, require_other=True)` rejects linear and reports
+`centroid3_classifier(cfg, ro_ch=...)` returns a detached calibration from native
+Pulse or Mux cfg, keyed by ADC number. Missing calibration, wrong type and unknown
+ADC raise ValueError. It never reads the live library.
+`classification_parameters(cfg, require_other=True)` rejects linear and centroid3 and reports
 missing circle radius with a GE Post instruction.
 
 ## Shot time
@@ -58,6 +63,7 @@ Acquisition receives the spec explicitly and admits at most one herald per ADC.
 acceptance helper. It takes complex IQ divided by ADC integration length, without
 subtracting offsets. Circle uses the strict g circle and nearest-center region;
 linear rotates by exp(+1j*angle) and accepts values at or below threshold.
+HeraldSpec and herald_ground_mask reject centroid3 before acquisition.
 
 ## Herald post-selection
 

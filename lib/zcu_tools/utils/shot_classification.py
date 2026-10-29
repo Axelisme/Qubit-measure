@@ -1,4 +1,4 @@
-"""Shared nearest-center, radius-limited single-shot classification."""
+"""Shared circle and three-state nearest-center single-shot classification."""
 
 import numpy as np
 from numpy.typing import NDArray
@@ -22,6 +22,29 @@ def classify_shots(
     ground = (g_dist < radius) & (g_dist < e_dist)
     excited = (e_dist < radius) & (e_dist < g_dist)
     return ground, excited, ~(ground | excited)
+
+
+def nearest_centroid3(
+    signals: NDArray[np.complex128],
+    g_center: complex,
+    e_center: complex,
+    f_center: complex,
+) -> NDArray[np.int64]:
+    """Return nearest g/e/f labels (0/1/2), preserving signals.shape.
+
+    signals and centers share any consistent complex IQ units. Euclidean
+    distance selects one center with no rejection region; exact ties choose
+    the first in g/e/f order. Nonfinite signals/centers or non-distinct centers
+    raise ValueError. Inputs are not changed, normalized or offset-subtracted.
+    """
+    centers = np.asarray([g_center, e_center, f_center], dtype=np.complex128)
+    if not np.isfinite(signals).all() or not np.isfinite(centers).all():
+        raise ValueError("Three-state classification requires finite IQ and centers")
+    if len(set(centers)) != 3:
+        raise ValueError("Three-state classification requires distinct centers")
+    return np.asarray(
+        np.argmin(np.abs(signals[..., None] - centers), axis=-1), dtype=np.int64
+    )
 
 
 def gaussian_region_probability(
