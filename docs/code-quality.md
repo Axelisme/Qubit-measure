@@ -98,6 +98,7 @@ Suppression 留在診斷行。理由寫同行，放不下時放正上方的 `# t
 既有 `cast` 與設定項也先嘗試清除。保留時分別用 `# tolerated(cast): <reason>` 與
 `# tolerated(config): <reason>`，放原行行尾或正上方。保留設定值不變，不新增 `cast`，不新增或放寬設定。
 File-size／radon／capability 保留項用 `# tolerated(<metric>): <reason>`，放相關行或檔案開頭。
+新跨過檔案行數上限的內聚模組也用 `# tolerated(file-size): <reason>`，判準見[審查裁決](#審查裁決)。
 理由只寫原地，不交容忍名冊。Review 逐項確認嘗試證據、指定標記與理由。
 
 Ruff 的 RUF100 與 Pyright 的 reportUnnecessaryTypeIgnoreComment 檢查過期 suppression。
@@ -166,6 +167,10 @@ lib 與 tools 不得假設 zcu_lab 的欄位名、段落名、實驗名或 cfg �
 這些指標包括參數、分支、statement 數、C901／radon 複雜度與檔案行數。
 原本已超標、改後仍超標的項目不算退步，可以照常修改；不要求 statement／body 的 bytes 或 hash 稽核，
 也不要求順手拆分。新超標依本文件判準拆出內聚職責，不為降低數字硬拆或加 suppression。
+檔案行數新超標時，先拆出能解耦、而且有現成 owner 的部分。剩下的模組若內聚，就在檔案開頭加
+`# tolerated(file-size): <reason>`，不再硬拆。內聚以維護者的視角判斷：改一個功能只需要改這一個模組；
+拆開會讓同一次修改跨兩個模組，或留下回頭引用與純轉發。理由寫出這個模組擁有的功能與共用的狀態。
+2026-10-29 使用者裁決：「真內聚的模塊，超過行數就加tolerence好了」、「是否內聚應該是看維護者的視角，改一個功能只要改一個模塊」。
 此判準可能讓既有超標項目繼續變複雜，這類債由專門的品質改善工作處理。
 型別錯誤、import 規則等非門檻診斷不因此放寬，新增問題仍須修正。機械 gate 的 exit 如實回報，不改設定規避。
 
