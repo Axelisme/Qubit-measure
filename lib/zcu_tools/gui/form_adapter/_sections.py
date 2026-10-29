@@ -56,7 +56,7 @@ from .log_points import (
     PositiveIntegerPointsInput,
     PositiveLogIntegerPoints,
 )
-from .sweep import CenterSpan, LinRange, StepCenter, StepRange
+from .sweep import CenterSpan, LinRange, StepCenter, StepRange, sweep_converter
 
 
 def _sweep_branch(
@@ -112,7 +112,9 @@ def _sweep_model(node: FormNode, info: FieldInfo) -> object:
         _sweep_branch(base, node, decimals, meta.unit if meta is not None else None)
         for base in (LinRange, CenterSpan, StepRange, StepCenter)
     )
-    annotation: object = Annotated[union_type(branches), Field(discriminator="kind")]
+    annotation: object = Annotated[
+        union_type(branches), Field(discriminator="kind"), sweep_converter(branches)
+    ]
     for item in branch_metadata(info.annotation, SweepCfg):
         annotation = annotated_type(annotation, item)
     return (

@@ -1,6 +1,7 @@
 """Signed sweep coordinates, sampling and atomic representation changes."""
 
 import math
+from collections.abc import Mapping
 from functools import cached_property
 from typing import Annotated, ClassVar, Literal, Self
 
@@ -12,11 +13,18 @@ from zcu_tools.gui.form import (
     FormCommandError,
     FormCommandResult,
     FormCommandSnapshot,
+    FormConversionError,
+    FormConversionResult,
+    FormInput,
     FormModel,
     InputCommand,
+    InputConverter,
     InputDefault,
     field_error,
 )
+from zcu_tools.gui.form.commands import ReadonlyFormInput, readonly_input
+
+from ._converters import inherit_raw
 
 
 def _data(snapshot: FormCommandSnapshot) -> dict[str, JsonValue]:
@@ -47,9 +55,9 @@ def _converted(data: dict[str, JsonValue]) -> FormCommandResult:
     return FormCommandResult({"kind": kind}, kinds[kind], data)
 
 
-def _to_center(
+def _center_data(
     snapshot: FormCommandSnapshot, context: FormCommandContext
-) -> FormCommandResult:
+) -> dict[str, JsonValue]:
     data = _data(snapshot)
     start, stop = _number(context, "start"), _number(context, "stop")
     sampling = "step" if data.get("kind") == "linrange_step" else "n"
@@ -60,12 +68,18 @@ def _to_center(
     }
     if sampling in data:
         result[sampling] = data[sampling]
-    return _converted(result)
+    return result
 
 
-def _to_range(
+def _to_center(
     snapshot: FormCommandSnapshot, context: FormCommandContext
 ) -> FormCommandResult:
+    return _converted(_center_data(snapshot, context))
+
+
+def _range_data(
+    snapshot: FormCommandSnapshot, context: FormCommandContext
+) -> dict[str, JsonValue]:
     data = _data(snapshot)
     center, span = _number(context, "center"), _number(context, "span")
     sampling = "step" if data.get("kind") == "center_step" else "n"
@@ -76,7 +90,13 @@ def _to_range(
     }
     if sampling in data:
         result[sampling] = data[sampling]
-    return _converted(result)
+    return result
+
+
+def _to_range(
+    snapshot: FormCommandSnapshot, context: FormCommandContext
+) -> FormCommandResult:
+    return _converted(_range_data(snapshot, context))
 
 
 def _step_count(span: float, step: float) -> int:
@@ -330,14 +350,99 @@ class StepCenter(FormModel):
         return _step_count(self.span, self.step)
 
 
+def _select_numeric(
+    old: FormCommandSnapshot, kind: str, context: FormCommandContext
+) -> dict[str, JsonValue]:
+    raw = _data(old)
+    source_center = raw.get("kind") in ("center", "center_step")
+    target_center = kind in ("center", "center_step")
+    source_step = raw.get("kind") in ("linrange_step", "center_step")
+    target_step = kind in ("linrange_step", "center_step")
+    participants = ["center", "span"] if source_center else ["start", "stop"]
+    if source_step != target_step:
+        participants.append("step" if source_step else "n")
+    if any(
+        not isinstance(raw.get(name), (int, float)) or isinstance(raw.get(name), bool)
+        for name in participants
+    ):
+        raise FormCommandError("Sweep selection requires direct numeric participants")
+    # Validate participants before the arithmetic boundary: provider failures
+    # must propagate, while invalid authored values still trigger raw inheritance.
+    numeric = {name: context.evaluate((name,)) for name in participants}
+    context = FormCommandContext(lambda path: numeric[str(path[0])])
+    try:
+        if source_step != target_step:
+            raw = _sampling_change(old, context, to_step=target_step)
+            # The second command consumes the first command's detached numeric result,
+            # not the old context's coordinates or sampling.
+            old = FormCommandSnapshot(None, None, readonly_input(raw), True)
+            numeric = {
+                name: value
+                for name, value in raw.items()
+                if isinstance(value, (int, float))
+            }
+            context = FormCommandContext(lambda path: numeric[str(path[0])])
+        if source_center != target_center:
+            return (_range_data if source_center else _center_data)(old, context)
+        return raw
+    except OverflowError as exc:
+        raise FormCommandError("Sweep selection arithmetic overflowed") from exc
+
+
+def sweep_converter(models: tuple[type[FormModel], ...]) -> InputConverter:
+    """Convert direct coordinates and sampling between supplied sweep models.
+
+    Models are the four sweep branches or their generated subclasses. Invalid,
+    missing or expression participants fall back to same-name, same-type raw
+    inheritance. Selecting the active branch preserves its complete draft;
+    null disables it. Unknown selections raise FormConversionError.
+    """
+    kinds = {model.model_fields["kind"].default: model for model in models}
+
+    def convert(
+        old: FormCommandSnapshot,
+        selection: ReadonlyFormInput,
+        context: FormCommandContext,
+    ) -> FormConversionResult:
+        if selection is None:
+            return FormConversionResult(None, None)
+        kind = selection.get("kind") if isinstance(selection, Mapping) else None
+        if not isinstance(kind, str) or kind not in kinds:
+            raise FormConversionError("Sweep selection must identify a declared branch")
+        target = kinds[kind]
+        raw = old.copy_input()
+        if old.structure is target and isinstance(raw, dict):
+            return FormConversionResult(target, raw)
+        inherited: dict[str, JsonValue] = {"kind": target.model_fields["kind"].default}
+        if old.structure is None or not isinstance(raw, dict):
+            return FormConversionResult(target, inherited)
+        # Sweep branches have no numeric defaults; only matching raw fields survive.
+        inherited = inherit_raw(old.structure, target, raw, inherited)
+        try:
+            data = _select_numeric(old, kind, context)
+        except FormCommandError:
+            data = inherited
+        else:
+            try:
+                # Command arithmetic can overflow even with finite authored inputs.
+                # Use Core's JSON admission before select commits, so it can fall back.
+                data = FormInput(target, data).data
+            except ValueError:
+                data = inherited
+        return FormConversionResult(target, data)
+
+    return InputConverter(convert)
+
+
 def _fresh_sweep() -> JsonValue:
     return {"kind": "linrange"}
 
 
-type SweepInput = Annotated[
+SweepInput = Annotated[
     LinRange | CenterSpan | StepRange | StepCenter,
     Field(discriminator="kind"),
     Display(selector=False),
     InputDefault(_fresh_sweep),
+    sweep_converter((LinRange, CenterSpan, StepRange, StepCenter)),
 ]
 """Four sweep branches; fresh handwritten fields start with Range + Expts defaults."""

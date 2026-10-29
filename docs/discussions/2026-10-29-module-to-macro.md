@@ -74,3 +74,20 @@ advisor 給的選項是 A 現在做原型、B 晚點評估、C 不做，建議 B
 - 作者端程式：標準 zcu_lab 寫法在方案 1 預估 0 行改動；library 端仍要保留 `Module.init()` 的宣告時機、更新 factory，並處理 `run()` 回傳時間的契約、同一 instance 重用與 tag 相容。
 - 規模估計：方案 1 的模擬 frontend 約 800–1,200 行，Module／Macro 整合與時間層另約 400–700 行；方案 2 約 1,500–2,500 行，而且需要另訂發射來源的契約才能補回遺失的資訊。
 - 原型建議方案 1。是否修改 2026-10-14 的模擬器裁決，仍待使用者決定。
+
+## 後記二（2026-10-29 中午，方向修正）
+
+使用者先選方案 1（「4可以方案一」），接著說明真正的動機：「Module轉macro的目的是我有感目前在原生qick建program的語法上自己建一層module層語法，使用者要多學一次，如果只是類似原生qick的macro擴充，理解與上手難度就很低」，以及「可能要考慮可以與原生macro附用的設計，不然效益不大，前者才是真正的macro化」。
+
+所以目標不再只是「Module 繼承 Macro、作者寫法不變」，而是降低作者要學的東西。advisor 列出兩種作者 API：直接寫原生 QICK program、把我們的 module 當成可在 `_body` 呼叫的 macro；或保留 builder 的 `.add()` 當薄層。使用者：「關於macro, 我預期讓底層qick寫法支援reset之類的操作，上層可以再包一層builder層來簡化寫法，但用那種是作者決定」。
+
+修正後的方向：
+
+- 底層是原生 QICK program 寫法。Reset、Pulse、Readout、Join 等是 QICK Macro，可以和原生指令、原生 macro 混用。
+- 上層保留 builder，它產生的就是底層同一組 macro。用哪一層由作者決定；只用 builder 的作者，寫法不變。
+- SweepCfg 轉 QICK sweep、retry、early stop 與 round 進度放在底層 program 基底與 acquire 參數，builder 只轉呼叫。
+- 模擬器支援的範圍以 program 實際產生的 macro 型別定義，是原生 macro 類別的一個明確子集加上我們的 macro，不以 `pulse()`、`delay()` 等函數名稱定義（使用者：「模擬器要支援的應該是macro的子集才對，不是函數呼叫」）。子集以外的 macro 型別在 backend 前報錯；2026-10-14 裁決的封閉支援集與不做資料相依 feedback 照舊。
+
+這使上一段「作者端 0 行改動」只對 builder 使用者成立。第二個原型方案 2 遇到的發射來源問題（兩個 Pulse 共用 cfg 時 source 還原錯誤），在作者直接寫原生 program 時同樣會出現，需要「每次發射記錄來源」的契約。
+
+下一步是第三個丟棄式原型：T1 用底層與 builder 各寫一次並與現行 `prog_list` 逐位比對、原生 macro 與 Reset／Readout 混用的時間銜接、一個 Join 或 Repeat 例、以 macro 型別子集運作的模擬 frontend，以及實作規模估計。
