@@ -1,16 +1,16 @@
 # Single-fluxonium YAML values
 
-**Last updated:** 2026-10-28
+**Last updated:** 2026-10-29
 
 **讀者：** framework-dev。查閱 single-fluxonium YAML 的載入入口、欄位單位與驗證規則。
 
 `load_single_fluxonium(path)` reads UTF-8 YAML. `parse_single_fluxonium(document)` validates a decoded document. Both return immutable `SingleFluxoniumSettings` and reject invalid values with dotted field paths. Neither creates devices or numerical models.
 
-The format is `zcu.single-fluxonium`, integer version `1`. The schema has one fluxonium, one DC source, one microwave line, an optional fast-flux line and one pulse-readout cavity/ADC. Direct records enforce these counts. There is no coupler, second qubit or mux readout. The field contracts and units are on the types in [schema.py](schema.py).
+The format is `zcu.single-fluxonium`, integer version `1`. The schema has one fluxonium, one DC source, one or more named microwave lines, an optional fast-flux line and one pulse-readout cavity/ADC. Direct records enforce these counts. There is no coupler, second qubit or mux readout. The field contracts and units are on the types in [schema.py](schema.py).
 
 - `chip.qubit` holds energies in H/h GHz and loss parameters. `chip.temperature_k` is the common temperature.
 - `dc_bias` combines a reduced-flux offset with one named A/V source. Initial values apply at startup; live values determine each round's DC flux.
-- `drive_line` calibrates the full charge operator in complex GHz/gain. `flux_line` calibrates reduced flux per gain and includes delay, a base response time and signed exponential distortion terms. Set it to null or omit it for DC-only flux. No pulsed flux generator is bound in that case.
+- `drive_lines` is a nonempty map of line records, each with `name`, `gen_ch` and `charge_drive_ghz_per_gain`. Map keys label diagnostic paths; each line's unique `name` identifies its numeric source. Every coefficient calibrates the same full charge operator in complex GHz/gain. Legacy `drive_line` input becomes one map entry keyed by its `name`; supplying both fields fails. Serialization always emits `drive_lines`. `flux_line` calibrates reduced flux per gain and includes delay, a base response time and signed exponential distortion terms. Set it to null or omit it for DC-only flux. No pulsed flux generator is bound in that case.
 - `readout` separates incident field, cavity and receiver calibrations. ADC noise is a two-sided spectral density, not sample covariance.
 - Optional `drift` selects `q_cap`, `xqp` and/or `aphi` log-OU processes. Each takes finite `sigma >= 0` in ln(loss) and finite `tau_s > 0` seconds. A selected loss must be strictly positive, so disabled `q_cap: null` or zero `xqp`/`aphi` cannot drift. Omitted parameters stay constant. Omitted/null `drift` disables the feature without a format/version change. The stationary log mean is ln(the configured loss). Each environment starts at the configured losses, not at a random stationary draw.
 - `numerics.projection_prune_floor` is a finite global outcome-weight threshold in `[0, 1)`, default `1e-9`. Zero disables pruning. Execution drops weights below it after each projective read and normalizes survivors per point. If every outcome is dropped, execution raises `ValueError` naming that point and the floor.

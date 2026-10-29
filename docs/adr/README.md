@@ -10,7 +10,7 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 
 ## Module Boundaries
 
-- [0072 — 模組定位與依賴邊界](0072-module-boundaries.md)：各 package 的定位、實驗計算歸 core 與 GUI 接線規則、五層、單一 lab 描述與各入口最小 Protocol、logging-before-construction、analysis selection 與兩個 module-only MCP 例外、使用者元件子模組與模擬環境定位、穩定工具與有狀態模組的分類、分析 app 的 entry/component owner 與 native 光譜選擇、analysis 的 native 投影、device snapshot 標量解讀、模擬損耗漂移的 simulate／resources／experiment 分工、manifold 衰減模與 t1_curve 分析診斷的分工、core 共用 waveform 格式、cfg_model 契約、library 容器版本政策、依 kind 宣告的 component wiring、lab mux group 的具名 coil 來源與 active selection 邊界、債務清單。分層、無循環與 core 只依賴 utils 由 .importlinter C8–C13／C19 檢查，C15 保護使用者 core 的 GUI independence，C16 禁止 framework 反向 import 使用者套件；離線遷移專用程式只放 `migrations/`。剩餘債務以 `ignore_imports` 記帳。
+- [0072 — 模組定位與依賴邊界](0072-module-boundaries.md)：各 package 的定位、實驗計算歸 core 與 GUI 接線規則、五層、單一 lab 描述與各入口最小 Protocol、logging-before-construction、analysis selection 與兩個 module-only MCP 例外、使用者元件子模組與模擬環境定位、charge admission 的 caller／program／environment 分工與硬體隔離、穩定工具與有狀態模組的分類、分析 app 的 entry/component owner 與 native 光譜選擇、analysis 的 native 投影、device snapshot 標量解讀、模擬損耗漂移的 simulate／resources／experiment 分工、manifold 衰減模與 t1_curve 分析診斷的分工、core 共用 waveform 格式、cfg_model 契約、library 容器版本政策、依 kind 宣告的 component wiring、lab mux group 的具名 coil 來源與 active selection 邊界、債務清單。分層、無循環與 core 只依賴 utils 由 .importlinter C8–C13／C19 檢查，C15 保護使用者 core 的 GUI independence，C16 禁止 framework 反向 import 使用者套件；離線遷移專用程式只放 `migrations/`。剩餘債務以 `ignore_imports` 記帳。
 
 ## Concurrency / Lifecycle
 
@@ -29,7 +29,7 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 
 - [0079 — Form 欄位轉換、固定元素與逐元素操作](0079-form-field-transitions.md)：已採用、待實作的中立 converter／scoped command、原子安裝、草稿還原、一般 tagged-model union 的同名同型別 raw 繼承、普通 select 與明確數值換算 command 的區別、具名固定 list／原始索引 participants、非 participant tone 的 None 初值與一般 nullable 編輯、無 participants 的固定槽位，以及 indexed remote、逐元素 recipe 與 native tunables 的完整 model 提交邊界。
 
-- [0074 — 獨立的平鋪 Readout module](0074-flat-readout-module.md)：Pulse 與 mux Readout 自有 generator／ADC 欄位，分別保存單一頻率與有序 tones；規範 waveform 引用、label、Library 新建、表單路徑與 classifier 所有權；分類與 correction 只取 run cfg；readout 工具產生 herald 規格、作者明傳 acquire；program 擁有單次 acquire 的 host post-selection，lab 合併跨 acquire 結果；單 qubit heralding 實驗組保存每點通過比例，第二階段成員沿用普通版 writeback 目標。
+- [0074 — 獨立的平鋪 Readout module](0074-flat-readout-module.md)：Pulse 與 mux Readout 自有 generator／ADC 欄位，分別保存單一頻率與有序 tones；規範 waveform 引用、label、Library 新建、表單路徑與 classifier 所有權；分類與 correction 只取 run cfg；三中心 g/e/f 最近分類器以三態 reference Apply 到 readout library，兩欄 acquire 的第三類依型別區分 f 與 other；readout 工具產生 herald 規格、作者明傳 acquire；program 擁有單次 acquire 的 host post-selection，lab 合併跨 acquire 結果；單 qubit heralding 實驗組保存每點通過比例，第二階段成員沿用普通版 writeback 目標。
 
 - [0073 — Measure 表單從 core cfg 推導](0073-measure-form-derivation.md)：make_form、adapter input 與實驗 record 分離、固定捕捉、歷史 tab 的無 Form 狀態與 Reset 恢復、adapter 黑箱、共用初值政策的 domain helper 邊界、Hidden 合法供值與顯式路徑、持久範本、具名裝置欄位、sweep 四種座標／採樣表示與 opt-in Log／List 整數清單政策。
 - [0065 — Cfg 編輯模型與使用邊界](0065-cfg-editing.md)：共用 Form、sweep 座標／採樣指令與有效端點、持久 Spec、Library／Inspect／writeback 的提交邊界、有序 alias 清單編輯與固定讀回、固定來源、Refresh 保留 input／Reset 重算初值、腳本的 opaque TabInput 與共用 Inspect Aliases 頁。

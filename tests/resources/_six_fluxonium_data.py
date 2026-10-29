@@ -66,7 +66,8 @@ def six_document() -> SixDocument:
             coil_offset=-0.15 * coil_period,
             coil_period=coil_period,
         )
-        value["drive_line"].update(name=f"mw_{index}", gen_ch=index + 1)
+        drive_line = value.pop("drive_lines")["mw"]
+        drive_line.update(name=f"mw_{index}", gen_ch=index + 1)
         value["readout"]["resonator"].update(frequency_ghz=6.8 + 0.125 * index)
         value["readout"]["adc"].update(ro_ch=index, gain=10000)
         value["numerics"].update(time_scale=0)
@@ -75,7 +76,7 @@ def six_document() -> SixDocument:
             version=value["version"],
             chip=value["chip"],
             dc_bias=value["dc_bias"],
-            drive_line=value["drive_line"],
+            drive_line=drive_line,
             readout=value["readout"],
             numerics=value["numerics"],
             drift=None,

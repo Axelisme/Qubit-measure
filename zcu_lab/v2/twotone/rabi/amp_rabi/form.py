@@ -37,7 +37,7 @@ def make_form(ctx: FormContext) -> Form[AmpRabiCfg]:
             "readout": Slot("$resonator.module.readout")
             if ctx.has("$resonator.module.readout")
             else Template("readout", bindings={"resonator": "$resonator"}),
-            "init_pulse": Hidden(),
+            "init_pulse": None,
             "gain": Range(-0.3, 1.0, expts=51),
             "relax_delay": t1_initial_time(ctx.parameters, multiplier=5),
             "reps": 1000,

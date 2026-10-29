@@ -1,5 +1,6 @@
 """Single-fluxonium settings validate external values before resource creation."""
 
+from collections.abc import MutableMapping
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -130,11 +131,79 @@ def _bound_flux(settings: "SingleFluxoniumSettings") -> "FluxLine":
     return settings.flux_line
 
 
+def test_named_drive_lines_and_legacy_input_share_immutable_replay_format(
+    tmp_path: Path,
+) -> None:
+    legacy = _parse(yaml.safe_load(DOCUMENT))
+    document = yaml.safe_load(DOCUMENT)
+    line = document.pop("drive_line")
+    document["drive_lines"] = {
+        "mw": line,
+        "auxiliary": {
+            "name": "second",
+            "gen_ch": 5,
+            "charge_drive_ghz_per_gain": {"real": -0.04, "imag": 0.03},
+        },
+    }
+    parsed = _parse(document)
+    values = parsed.model_dump(mode="json")
+    assert (
+        values["drive_lines"]["mw"]
+        == legacy.model_dump(mode="json")["drive_lines"]["mw"]
+    )
+    assert values["drive_lines"]["auxiliary"]["name"] == "second"
+    assert values["drive_lines"]["auxiliary"]["charge_drive_ghz_per_gain"] == {
+        "real": -0.04,
+        "imag": 0.03,
+    }
+    assert _parse(values) == parsed
+    path = tmp_path / "multiple.yaml"
+    path.write_text(yaml.safe_dump(document), encoding="utf-8")
+    assert _load(path) == parsed
+    assert not isinstance(parsed.drive_lines, MutableMapping)
+
+
+@pytest.mark.parametrize(
+    "field,value,diagnostic",
+    [
+        ("name", "mw", r"drive_lines.second.name.*drive_lines.mw.name"),
+        ("name", "bias", r"drive_lines.second.name.*dc_bias.source.name"),
+        ("gen_ch", 1, r"drive_lines.second.gen_ch.*channel 1.*drive_lines.mw.gen_ch"),
+        ("gen_ch", 0, r"drive_lines.second.gen_ch.*channel 0.*readout.drive.gen_ch"),
+        ("gen_ch", 2, r"flux_line.gen_ch.*channel 2.*drive_lines.second.gen_ch"),
+    ],
+)
+def test_named_drive_lines_reject_collisions_with_both_binding_paths(
+    field, value, diagnostic
+) -> None:
+    document = yaml.safe_load(DOCUMENT)
+    document["drive_lines"] = {"mw": document.pop("drive_line")}
+    document["drive_lines"]["second"] = {
+        "name": "second",
+        "gen_ch": 5,
+        "charge_drive_ghz_per_gain": {"real": 0.1, "imag": 0.0},
+    }
+    document["drive_lines"]["second"][field] = value
+    with pytest.raises(ValueError, match=diagnostic):
+        _parse(document)
+
+
+def test_drive_line_formats_are_exclusive_and_named_map_must_be_nonempty() -> None:
+    document = yaml.safe_load(DOCUMENT)
+    document["drive_lines"] = {"mw": document["drive_line"]}
+    with pytest.raises(ValueError, match=r"drive_lines.*drive_line"):
+        _parse(document)
+    del document["drive_line"]
+    document["drive_lines"] = {}
+    with pytest.raises(ValueError, match="drive_lines"):
+        _parse(document)
+
+
 def test_parse_returns_named_immutable_settings_and_replayable_values() -> None:
     settings = _parse(yaml.safe_load(DOCUMENT))
     assert settings.chip.qubit.ej_ghz == 4.0
     assert settings.dc_bias.source.flux_per_unit == 100.0
-    assert settings.drive_line.charge_drive_ghz_per_gain.imag == -0.02
+    assert settings.drive_lines["mw"].charge_drive_ghz_per_gain.imag == -0.02
     assert _bound_flux(settings).distortion_terms[0].amplitude == -0.1
     assert settings.readout.adc.noise_psd_adc2_ns == ((1.0, 0.5), (0.5, 0.25))
     assert settings.numerics.truncation.levels == 4
@@ -173,9 +242,9 @@ def test_load_reads_utf8_and_honors_yaml_merge_overrides(tmp_path: Path) -> None
         ("initial: 0.001", "initial: 1.0", "dc_bias.source.initial"),
         ("[-0.02, 0.02]", "[0.02, -0.02]", "dc_bias.source.limits"),
         ("ramp_step: 0.000001", "ramp_step: 0", "dc_bias.source.ramp_step"),
-        ("name: mw", "name: bias", "drive_line.name"),
+        ("name: mw", "name: bias", "drive_lines.bias.name"),
         ("name: ff", "name: mw", "flux_line.name"),
-        ("gen_ch: 1", "gen_ch: 0", "drive_line.gen_ch"),
+        ("gen_ch: 1", "gen_ch: 0", "drive_lines.mw.gen_ch"),
         ("gen_ch: 2", "gen_ch: 1", "flux_line.gen_ch"),
         ("gen_ch: 2", "gen_ch: -1", "flux_line.gen_ch"),
         ("delay_ns: 3.0", "delay_ns: -1", "flux_line.delay_ns"),
