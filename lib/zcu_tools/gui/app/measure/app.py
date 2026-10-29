@@ -130,7 +130,7 @@ class MeasureGuiBehavior[C](GuiRuntimeBehavior):
 
         self._controller = ctrl
         self._window = window
-        ctrl.start_point_file_sync()
+        ctrl.start_file_sync()
 
         adapter = None
         if control is not None:

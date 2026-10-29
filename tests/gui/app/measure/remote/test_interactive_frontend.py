@@ -236,7 +236,11 @@ def test_mcp_interactive_uses_mounted_plugin_and_original_operation(
             assert source.snapshot.entry_name == "fake_qubit"
             fx.ctrl.context_control.new_point(
                 PointCreateRequest(
-                    "later", "", CommandOrigin("gui"), clone_from=source.snapshot.point
+                    "later",
+                    "",
+                    CommandOrigin("gui"),
+                    mode="clone",
+                    clone_from=source.snapshot.point,
                 )
             )
             result = call(
@@ -435,7 +439,11 @@ def test_mcp_done_writeback_save_and_close_share_the_gui_result(
         ][0]
         fx.ctrl.context_control.new_point(
             PointCreateRequest(
-                "later", "", CommandOrigin("gui"), clone_from=source.snapshot.point
+                "later",
+                "",
+                CommandOrigin("gui"),
+                mode="clone",
+                clone_from=source.snapshot.point,
             )
         )
         saved = SaveSnapshotWire.model_validate(

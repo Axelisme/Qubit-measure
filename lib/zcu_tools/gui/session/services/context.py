@@ -1,3 +1,5 @@
+# tolerated(file-size): Entry/point installation, cached captures and inactive reloads
+# share the same entry/setup/point/library/aliases handles and publication transaction.
 """Owner-thread entry/point bindings and fixed session parameter reads."""
 
 from __future__ import annotations
@@ -17,10 +19,10 @@ from zcu_tools.gui.session.context_types import (
     ContextSource,
     ContextSourceBinding,
     EntryInfo,
+    FileRevision,
+    FileSyncStatus,
     LibraryChange,
     PointBindingError,
-    PointFileRevision,
-    PointFileSyncStatus,
     SavedEntry,
     SavedPoint,
     WorkingPointInfo,
@@ -32,7 +34,7 @@ from zcu_tools.gui.session.events import (
     MlChangedPayload,
 )
 from zcu_tools.gui.session.services.context_writeback import ContextWritebackTarget
-from zcu_tools.gui.session.services.point_file_sync import PointFileSync
+from zcu_tools.gui.session.services.file_sync import FileSync
 from zcu_tools.gui.session.types import ContextReadiness, ParameterContext, RoleBinding
 from zcu_tools.gui.session.value_lookup import (
     MissingValue,
@@ -130,12 +132,14 @@ class ContextService:
         self._setup: SetupView | None = None
         self._point: PointView | None = None
         self._library: ModuleLibrary | None = None
+        self._entry_library: ModuleLibrary | None = None
+        self._entry_aliases = AliasSnapshot(AliasTable())
         self._points: tuple[WorkingPointInfo, ...] = ()
         self._source_binding: ContextSourceBinding | None = None
         self._binding_id = 0
         self._aliases = AliasSnapshot(AliasTable())
-        self._file_sync = PointFileSync(
-            bus, installed=self.get_file_revisions, install=self._reload_point_file
+        self._file_sync = FileSync(
+            bus, installed=self.get_installed_file_revisions, install=self._reload_file
         )
         if state.session_env.values is not self._values:
             state.set_context(replace(state.session_env, values=self._values))
@@ -174,6 +178,8 @@ class ContextService:
         self._setup = setup
         self._point = None
         self._library = library
+        self._entry_library = library
+        self._entry_aliases = aliases
         self._points = points
         self._aliases = aliases
         self._publish(parameters, sources, ContextReadiness.GLOBAL, active_label=None)
@@ -190,7 +196,7 @@ class ContextService:
         """
         return deepcopy(self._source_binding)
 
-    def get_file_revisions(self) -> tuple[PointFileRevision, ...]:
+    def get_file_revisions(self) -> tuple[FileRevision, ...]:
         """Return the active three file versions, or () without an opened entry.
 
         Paths are absolute. Aliases use the observed bytes hash even when their
@@ -206,34 +212,62 @@ class ContextService:
         library = self._library.document_revision
         aliases = self._aliases.revision
         return (
-            PointFileRevision("parameters", parameters.path, parameters.revision),
-            PointFileRevision("library", library.path, library.revision),
-            PointFileRevision("aliases", aliases.path, aliases.revision),
+            FileRevision("parameters", parameters.path, parameters.revision),
+            FileRevision("library", library.path, library.revision),
+            FileRevision("aliases", aliases.path, aliases.revision),
         )
 
-    def get_file_sync_status(self) -> tuple[PointFileSyncStatus, ...]:
-        """Return recent selected-point observations without I/O; switches clear them."""
+    def get_installed_file_revisions(self) -> tuple[FileRevision, ...]:
+        """Return cached active versions, then entry versions when a point is active.
+
+        Each set is ordered parameters/library/aliases. Paths are absolute;
+        missing library/aliases revisions are None. No entry returns (). This
+        query does no I/O or refresh, including while external edits are pending.
+        Watcher and Inspect use these versions; entry.info uses active-only
+        get_file_revisions instead.
+        """
+        self._owner.assert_owner()
+        active = self.get_file_revisions()
+        if self._point is None:
+            return active
+        if self._setup is None or self._entry_library is None:
+            raise RuntimeError("Installed entry resources disappeared")
+        aliases = self._entry_aliases.revision
+        if aliases is None:
+            raise RuntimeError("Installed entry aliases have no owner revision")
+        parameters = document_revision(self._setup)
+        library = self._entry_library.document_revision
+        return active + (
+            FileRevision("parameters", parameters.path, parameters.revision),
+            FileRevision("library", library.path, library.revision),
+            FileRevision("aliases", aliases.path, aliases.revision),
+        )
+
+    def get_file_sync_status(self) -> tuple[FileSyncStatus, ...]:
+        """Return installed-file observations without I/O; switches clear them."""
         return self._file_sync.statuses()
 
-    def check_file_revision(self, expected: PointFileRevision) -> None:
-        """Compare a draft with disk; see PointFileSync.check_revision for failures."""
+    def check_file_revision(self, expected: FileRevision) -> None:
+        """Compare a draft with disk; see FileSync.check_revision for failures."""
         self._file_sync.check_revision(expected)
 
-    def reload_file(
-        self, path: Path, expected_revision: str | None
-    ) -> PointFileRevision:
-        """Strictly install one owner file; see PointFileSync.reload for failures.
+    def reload_file(self, path: Path, expected_revision: str | None) -> FileRevision:
+        """Strictly install one owner file; see FileSync.reload for failures.
 
-        Content facts follow installation. Old captures remain fixed. Caller
-        owns holder admission. No repair, backup or document writes occur.
+        Accept any absolute installed path, including inactive entry files.
+        Active content facts follow installation; inactive entry reloads publish
+        only file status and preserve the active content version and selection.
+        Old captures remain fixed. Caller owns holder admission. No repair, backup or document writes occur.
         """
         return self._file_sync.reload(path, expected_revision)
 
     def synchronize_files(self, *, admit_reload: bool) -> None:
-        """Scan point files with host execution-time admission; no repair or writes."""
+        """Scan installed files with host execution-time admission; no repair or writes."""
         self._file_sync.synchronize(admit_reload=admit_reload)
 
-    def _reload_point_file(self, file: PointFileRevision) -> PointFileRevision:
+    def _reload_file(self, file: FileRevision) -> FileRevision:
+        if self._point is not None and file not in self.get_file_revisions():
+            return self._reload_entry_file(file)
         parameters = self._published_parameters()
         target = parameters.target
         active = self._point if self._point is not None else self._setup
@@ -264,6 +298,26 @@ class ContextService:
             item for item in self.get_file_revisions() if item.path == file.path
         )
 
+    def _reload_entry_file(self, file: FileRevision) -> FileRevision:
+        """Strictly install an inactive entry candidate without active content facts."""
+        if self._setup is None or self._entry_library is None:
+            raise RuntimeError("Installed entry resources disappeared")
+        if file.document == "parameters":
+            self._setup.refresh(strict=True)
+        elif file.document == "library":
+            self._entry_library.refresh(strict=True)
+        else:
+            saved, revision = self._require_open_entry().load_aliases_with_revision()
+            table = AliasTable(
+                tuple(AliasRow(name, value) for name, value in saved.aliases.items())
+            )
+            self._entry_aliases = AliasSnapshot(table, revision)
+        return next(
+            item
+            for item in self.get_installed_file_revisions()
+            if item.path == file.path
+        )
+
     def get_predictors_path(self) -> Path | None:
         """Return the opened entry predictor directory, or None without an entry.
 
@@ -274,7 +328,7 @@ class ContextService:
     def get_entry_info(self) -> EntryInfo | None:
         """Return cached entry metadata, or None when no entry is opened.
 
-        An opened entry remains readable in EMPTY before point selection.
+        An opened entry is readable in both GLOBAL and POINT.
         This query performs no I/O and never refreshes or selects a point.
         """
         return deepcopy(self._entry_info)
@@ -337,7 +391,7 @@ class ContextService:
         return SavedEntry(entry_name=fresh.result_path.name)
 
     def new_point(self, request: PointCreateRequest) -> SavedPoint:
-        """Create from setup or a same-entry clone, then install POINT.
+        """Create with the explicit inherit/empty/clone mode, then install POINT.
 
         No opened entry raises FailedPreconditionError(no_entry). Pass description
         unchanged to ResultEntry.new_point. An unsafe
@@ -365,7 +419,7 @@ class ContextService:
         try:
             point = entry.new_point(
                 request.label,
-                mode="inherit" if clone is None else "clone",
+                mode=request.mode,
                 clone_from=clone,
                 description=request.description,
             )
@@ -395,6 +449,8 @@ class ContextService:
         self._setup = None
         self._point = None
         self._library = None
+        self._entry_library = None
+        self._entry_aliases = AliasSnapshot(AliasTable())
         self._points = ()
         self._aliases = AliasSnapshot(AliasTable())
         self._publish(None, (), ContextReadiness.EMPTY, active_label=None)
@@ -466,9 +522,13 @@ class ContextService:
         self.set_parameter(SavedEntry(entry_name=entry.result_path.name), path, value)
 
     def read_context(
-        self, *, aliases: Mapping[str, str] | None = None
+        self, *, aliases: Mapping[str, str] | None = None, setup: bool = False
     ) -> ParameterContext:
-        """Capture the active global or point documents/storage and all alias rows.
+        """Capture installed documents/storage and all alias rows without I/O.
+
+        setup=True captures the entry set even with a selected point. False
+        captures the active set. Entry captures use the installed owner handles,
+        never disk candidates, and do not change selection or bypass pending.
 
         aliases maps temporary component/device names to authored rows for this
         capture only, retaining dependent links. Names need not exist in catalogs.
@@ -483,23 +543,37 @@ class ContextService:
         """
         self._owner.assert_owner()
         parameters = self._state.session_env.parameters
+        saved_aliases = self._aliases
+        if setup:
+            if self._entry is None or self._entry_library is None:
+                raise FailedPreconditionError(
+                    "No entry is opened", reason_code="no_context"
+                )
+            parameters = ParameterContext.from_entry(
+                self._entry,
+                self._entry_library,
+                SavedEntry(entry_name=self._entry.result_path.name),
+            )
+            saved_aliases = self._entry_aliases
         if parameters is None:
             raise FailedPreconditionError(
                 "Select or create a working point first", reason_code="no_context"
             )
-        table = self._aliases.table
+        table = saved_aliases.table
         for alias, component in (aliases or {}).items():
             table = table.with_override(alias, component)
-        return parameters.bind_aliases(table.rows, {}, alias_error=self._aliases.error)
+        return parameters.bind_aliases(table.rows, {}, alias_error=saved_aliases.error)
 
-    def get_alias_rows(self) -> tuple[AliasRow, ...]:
+    def get_alias_rows(self, *, setup: bool = False) -> tuple[AliasRow, ...]:
         """Read installed authored rows without expansion or I/O.
 
-        Without an entry return (). An invalid active alias file raises its
-        captured original error. Missing files supply empty rows without fallback.
+        setup=True selects the installed entry table, even with a selected point;
+        False selects the active table. Pending external candidates are not read.
+        No entry returns empty rows. Invalid aliases raise their captured error.
+        Missing files supply empty rows without fallback.
         """
         self._owner.assert_owner()
-        return self._aliases.rows
+        return (self._entry_aliases if setup else self._aliases).rows
 
 
     def _install_alias_rows(
@@ -508,6 +582,8 @@ class ContextService:
         previous = self._aliases.table.rows
         had_error = self._aliases.error is not None
         self._aliases = AliasSnapshot(candidate, revision)
+        if self._point is None:
+            self._entry_aliases = self._aliases
         if candidate.rows != previous or had_error:
             self._state.version.bump("context")
             self._bus.emit(AliasesChangedPayload(rows=candidate.rows))

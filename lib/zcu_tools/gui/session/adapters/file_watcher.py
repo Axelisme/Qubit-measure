@@ -1,4 +1,4 @@
-"""Qt directory notifications drive owner-controlled, hash-based point reloads."""
+"""Qt directory notifications drive owner-controlled, hash-based installed-file reloads."""
 
 from __future__ import annotations
 
@@ -14,8 +14,8 @@ if TYPE_CHECKING:
     from zcu_tools.gui.session.services.context import ContextService
 
 
-class PointFileWatcher(QObject):
-    """Watch current point directories with trailing-edge debounce.
+class FileWatcher(QObject):
+    """Watch installed entry/point directories with trailing-edge debounce.
 
     The context owns paths, hashes, parsing, installation and facts. The host
     supplies admit_reload, evaluated on the owner thread when work executes,
@@ -62,13 +62,16 @@ class PointFileWatcher(QObject):
         if previous:
             self._watcher.removePaths(previous)
         directories = sorted(
-            {str(file.path.parent) for file in self._context.get_file_revisions()}
+            {
+                str(file.path.parent)
+                for file in self._context.get_installed_file_revisions()
+            }
         )
         if directories:
             self._watcher.addPaths(directories)
 
     def flush(self) -> None:
-        """Drain debounce now, observing all selected-point files once.
+        """Drain debounce now, observing all installed files once.
 
         Reevaluate host admission even without a queued filesystem notification,
         allowing a host authority transition to retry pending changes. Equal

@@ -76,7 +76,9 @@ def test_new_context_preserves_lookup_when_io_returns_fresh_context(tmp_path) ->
     value, unit = 1.0, "V"
     label = f"flux_{value}_{unit}"
     svc.new_point(
-        PointCreateRequest(label, "", CommandOrigin("gui"), clone_from="base")
+        PointCreateRequest(
+            label, "", CommandOrigin("gui"), clone_from="base", mode="clone"
+        )
     )
     assert state.session_env.values is registry
     assert state.session_env.active_label == "flux_1.0_V"

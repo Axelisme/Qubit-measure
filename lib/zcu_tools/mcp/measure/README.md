@@ -36,8 +36,10 @@ creates its entry, first point and tab without a separate entry CLI or setup RPC
 
 ## Point 檔案讀寫
 
-目前 point 的 `parameters.yaml`、`library.yaml` 與 `aliases.yaml` 以磁碟檔案為權威。
-Entry 層使用同一組檔名。既有資料先依[升級指南](../../../../docs/parameter-upgrades.md#先改檔名再升級內容)離線改名，runtime 不讀舊名。
+作用中的 `parameters.yaml`、`library.yaml` 與 `aliases.yaml` 以磁碟檔案為權威。
+開 entry 後，未選 point 時使用 entry 層的 global 文件組，選 point 後整組換成該 point 的文件。
+選 point 時，Inspect 仍可編輯 entry 層文件，watcher 也繼續監看，但它們不列在 files。
+Agent 修改 global 前先切回 global，再取得 files 與 revision。既有資料先依[升級指南](../../../../docs/parameter-upgrades.md#先改檔名再升級內容)離線改名，runtime 不讀舊名。
 GUI、writeback、recipe 與啟動腳本經 owner 寫入時，成功即落盤。
 Agent 直接讀寫這些檔案，固定工具不提供參數／modules／aliases 特化讀寫。
 `entry.info` 與 `context.reload` 是 RPC methods，經 `rpc_call` 呼叫，不另設固定工具。
@@ -47,8 +49,9 @@ Agent 直接讀寫這些檔案，固定工具不提供參數／modules／aliases
    Path 是絕對路徑，revision 是已安裝 bytes 的 SHA-256。
    Aliases 的 revision 是選取時觀察到的 bytes hash，不保證內容有效。
    壞 aliases 不擋參數與 library，使用 alias 時才報當次原錯。
-   Point library 或 aliases 尚無檔案時 revision 為 null，path 仍是預期的絕對位置。
-   缺 library 的 point 可以選用，library 內容為空，讀取不建檔。未選 point 時 files 為 []。
+   Library 或 aliases 尚無檔案時 revision 為 null，path 仍是預期的絕對位置。
+   缺 library 時內容為空，讀取不建檔，首次明確編輯才建檔。兩層規則相同。
+   開 entry 後 files 固定三筆，只列作用中那組，不加 scope。未開 entry 時 files 才是 []。
 2. 依 path 直接讀檔。外部候選尚未通過驗證時，磁碟內容可能與已安裝版本不同。
    Status 不讀檔，也不把未驗證候選當成現值。
 3. 修改前確認自己是 holder，保留該筆已安裝 revision，然後編輯對應檔案。
@@ -58,12 +61,13 @@ Agent 直接讀寫這些檔案，固定工具不提供參數／modules／aliases
    Owner 比對已安裝版本，再讀取、驗證、安裝磁碟候選並發布事件。
    成功回 `{document, path, revision}`，revision 是新安裝版本。
 
-首次建立 point library 時，先取得 revision=null，再於該 path 寫入完整合法的
+首次建立 global 或 point library 時，先取得 revision=null，再於該 path 寫入完整合法的
 `zcu.module-library` 2.0 文件，接著以 `expected_revision: null` 呼叫 `context.reload`。
 Owner 驗證後才安裝，既有 Tab／Run capture 不變。
 GUI library 編輯或 writeback 首次觸及 library 時，owner 會在單檔交易內建立文件。
 若外部已先建檔，帶 null 的 library writer 回 `revision_mismatch`，不覆寫外部內容。
-Setup library 缺檔行為不變，不自動補建。
+`context.reload` 接受任一已安裝文件的絕對路徑，包括選 point 時的 entry 層文件。
+非作用中 entry 文件重載只更新 Inspect，不替換作用中的 point capture。
 
 驗證失敗會回路徑與原因，owner 保留舊記憶體，不改磁碟候選。
 Revision 不符時重讀 files 與檔案，再決定是否修改，不自動覆寫或重試。

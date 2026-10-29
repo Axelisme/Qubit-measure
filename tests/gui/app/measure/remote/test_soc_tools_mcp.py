@@ -60,7 +60,6 @@ def test_soc_tools_observe_gui_connection_without_hardware(
                 "params": {"label": "base", "clone_from": None},
             },
         ) == {
-            "kind": "saved_point",
             "entry_name": entry["name"],
             "point": "base",
         }

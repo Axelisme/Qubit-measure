@@ -15,10 +15,10 @@ if TYPE_CHECKING:
         ContextSourceBinding,
         ContextTarget,
         EntryInfo,
+        FileRevision,
+        FileSyncStatus,
         LibraryChange,
         PointCreateRequest,
-        PointFileRevision,
-        PointFileSyncStatus,
         PointUseRequest,
         SavedEntry,
         SavedPoint,
@@ -77,9 +77,12 @@ class ContextControlPort(Protocol):
         ...
 
     def read_context(
-        self, *, aliases: Mapping[str, str] | None = None
+        self, *, aliases: Mapping[str, str] | None = None, setup: bool = False
     ) -> ParameterContext:
-        """Fix point/library/storage and all alias rows without I/O or kind checks.
+        """Fix installed documents/storage and aliases without I/O or kind checks.
+
+        setup=True selects the entry cache, even with a selected point; False
+        uses the active set. Pending disk candidates are never read.
 
         aliases maps alias names to temporary concrete components, preserving
         dependent links without changing global state. Later edits do not change
@@ -192,15 +195,23 @@ class ContextControlPort(Protocol):
         """Return the opened entry predictor directory, or None; no I/O or creation."""
         ...
 
-    def get_file_revisions(self) -> tuple[PointFileRevision, ...]:
+    def get_file_revisions(self) -> tuple[FileRevision, ...]:
         """Read the active global/point file versions, or (); no I/O or refresh."""
         ...
 
-    def get_file_sync_status(self) -> tuple[PointFileSyncStatus, ...]:
+    def get_installed_file_revisions(self) -> tuple[FileRevision, ...]:
+        """Read active versions plus entry versions in POINT, without I/O.
+
+        Each set is ordered parameters/library/aliases. Paths are absolute;
+        missing library/aliases revisions are None. No entry returns ().
+        """
+        ...
+
+    def get_file_sync_status(self) -> tuple[FileSyncStatus, ...]:
         """Return recent external observations without I/O; cleared on point switch."""
         ...
 
-    def check_file_revision(self, expected: PointFileRevision) -> None:
+    def check_file_revision(self, expected: FileRevision) -> None:
         """Compare draft path/version with disk; mismatch rejects without mutation.
 
         None expects an absent library or aliases file. Invalid paths/base raise
@@ -208,13 +219,11 @@ class ContextControlPort(Protocol):
         """
         ...
 
-    def reload_file(
-        self, path: Path, expected_revision: str | None
-    ) -> PointFileRevision:
+    def reload_file(self, path: Path, expected_revision: str | None) -> FileRevision:
         """Strictly install one absolute current owner file, then publish facts.
 
         Compare expected_revision with the installed base, None only for absent
-        aliases. Invalid paths/candidates raise InvalidInputError with path/reason;
+        library or aliases. Invalid paths/candidates raise InvalidInputError with path/reason;
         stale base raises FailedPreconditionError(revision_mismatch). Failure
         retains memory/disk; caller owns holder admission. Captures stay fixed.
         """
@@ -261,8 +270,11 @@ class ContextControlPort(Protocol):
         """Read detached source facts without I/O."""
         ...
 
-    def get_alias_rows(self) -> tuple[AliasRow, ...]:
+    def get_alias_rows(self, *, setup: bool = False) -> tuple[AliasRow, ...]:
         """Read installed authored rows on the owner thread without I/O.
+
+        setup=True selects the entry cache, otherwise the active table.
+        Pending disk candidates never replace the installed rows.
 
         Links remain authored strings, not resolved component names. No entry
         returns (). Entry/point selection loads its own table without fallback.

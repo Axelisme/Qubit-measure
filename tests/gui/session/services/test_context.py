@@ -46,6 +46,41 @@ from tests.resources.entry.fakes import (
 )
 
 
+@pytest.mark.parametrize(
+    "mode, clone", [("inherit", "source"), ("empty", "source"), ("clone", None)]
+)
+def test_new_rejects_incompatible_mode_and_source_before_reads(
+    rich_entry: ResultEntry, context: ContextService, mode, clone
+) -> None:
+    context.install_entry(rich_entry)
+    before = context.read_context().target
+    with pytest.raises(InvalidInputError):
+        context.new_point(
+            PointCreateRequest("rejected", "", CommandOrigin("gui"), clone, mode=mode)
+        )
+    assert context.read_context().target == before
+    assert context.list_points(refresh=True) == ()
+
+
+def test_new_empty_does_not_inherit_global_values(
+    rich_entry: ResultEntry, context: ContextService
+) -> None:
+    rich_entry.save_aliases(EntryAliases(aliases={"driver": "Q1"}))
+    with rich_entry.module_library().edit() as draft:
+        draft.set_waveform("Q1.waveforms.base", ConstWaveformCfg(length=0.1))
+    context.install_entry(rich_entry)
+    context.new_point(
+        PointCreateRequest("blank", "fresh", CommandOrigin("gui"), mode="empty")
+    )
+
+    capture = context.read_context()
+    assert capture.whole_document().components == {}
+    assert capture.whole_document().general.description == "fresh"
+    assert capture.library.waveform_keys() == ()
+    assert context.get_alias_rows() == ()
+    assert [file.revision for file in context.get_file_revisions()][1:] == [None, None]
+
+
 def test_open_entry_captures_global_parameters_library_aliases_and_storage(
     rich_entry: ResultEntry, context: ContextService
 ) -> None:
@@ -289,7 +324,13 @@ def _entry(tmp_path: Path, name: str = "entry") -> ResultEntry:
 
 
 def _new_request(label: str, *, clone: str | None = None) -> PointCreateRequest:
-    return PointCreateRequest(label, "session description", CommandOrigin("gui"), clone)
+    return PointCreateRequest(
+        label,
+        "session description",
+        CommandOrigin("gui"),
+        clone,
+        mode="clone" if clone is not None else "inherit",
+    )
 
 
 def _entry_command(context: ContextService, command: str, entry_name: str) -> object:

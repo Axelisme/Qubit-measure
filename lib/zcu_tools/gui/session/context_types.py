@@ -124,8 +124,8 @@ class EntryRequest:
 
 
 @dataclass(frozen=True)
-class PointFileSyncStatus:
-    """Most recent external observation of one selected-point file.
+class FileSyncStatus:
+    """Most recent external observation of one installed entry/point file.
 
     file is the installed owner version. disk_revision is the observed raw-byte
     SHA-256, or None for a missing file. state is pending when admission denies
@@ -133,15 +133,15 @@ class PointFileSyncStatus:
     has a nonempty error string, including the path and rejection reason.
     """
 
-    file: PointFileRevision
+    file: FileRevision
     disk_revision: str | None
     state: Literal["pending", "reloaded", "error"]
     error: str | None
 
 
 @dataclass(frozen=True)
-class PointFileRevision:
-    """One installed selected-point document, without reading disk.
+class FileRevision:
+    """One installed entry/point document, without reading disk.
 
     document is parameters, library or aliases, in that order in file lists.
     path is the absolute owner file. revision is the installed raw-byte SHA-256
@@ -214,15 +214,26 @@ class PointCreateRequest:
     the entry owner's exists message before writes. It rejects an unsafe label
     with InvalidInputError before any source reads or writes, including when
     clone_from is supplied.
-    description replaces the seed/clone description, including empty text.
-    origin attributes the resource command. clone_from is a same-entry label;
-    None copies setup components and uses an empty library.
+    description replaces the inherited/clone description, including empty text.
+    origin attributes the resource command. mode defaults to inherit, copying the
+    global documents. empty creates minimal parameters and no library/aliases.
+    clone requires clone_from, a same-entry label. Other modes reject clone_from.
+    Invalid mode/source combinations raise InvalidInputError before resource reads.
     """
 
     label: str
     description: str
     origin: CommandOrigin
     clone_from: str | None = None
+    mode: Literal["inherit", "empty", "clone"] = "inherit"
+
+    def __post_init__(self) -> None:
+        if self.mode not in ("inherit", "empty", "clone"):
+            raise InvalidInputError("mode must be inherit, empty or clone")
+        if (self.mode == "clone") != (self.clone_from is not None):
+            raise InvalidInputError(
+                "clone mode requires clone_from; other modes reject it"
+            )
 
 
 class PointBindingError(RuntimeError):

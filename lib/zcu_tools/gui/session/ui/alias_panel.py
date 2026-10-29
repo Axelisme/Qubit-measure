@@ -31,7 +31,7 @@ from zcu_tools.gui.session.context_types import (
     SavedEntry,
     SavedPoint,
 )
-from zcu_tools.gui.session.ui.point_file_banner import PointFileBanner
+from zcu_tools.gui.session.ui.file_banner import FileBanner
 from zcu_tools.gui.widgets import error_colour, secondary_colour
 from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 from zcu_tools.resources.entry.aliases import AliasValue
@@ -58,7 +58,7 @@ class AliasPanel(QWidget):
     The read-only resolution column projects installed rows, not invalid input.
     Without a point it stays blank; source faults appear in that column.
     refresh discards local rows on point/entry switches and otherwise keeps
-    uncommitted input for PointFileBanner's Keep/Reload revision flow.
+    uncommitted input for FileBanner's Keep/Reload revision flow.
     The panel has no Apply, Revert or close-time questions.
     """
 
@@ -85,7 +85,7 @@ class AliasPanel(QWidget):
         toolbar.addWidget(self._destination)
         toolbar.addStretch()
         layout.addLayout(toolbar)
-        self._sync = PointFileBanner(
+        self._sync = FileBanner(
             control, "aliases", self._scope.callback(self._load),
             parent=self
         )

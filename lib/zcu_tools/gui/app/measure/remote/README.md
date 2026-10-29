@@ -16,6 +16,21 @@ The preview's `proposed_value` carries the adapter's JSON object unchanged.
 Wire version 123 removes the old sample names without aliases. Component records
 live at `records/components/<target>.jsonl`; the event ledger stays at `records/ledger.jsonl`.
 
+## Point selection
+
+`point.use` requires `label`: `{"label": "bias-a"}` selects that point;
+`{"label": null}` selects the opened entry Global documents. Omitting label is
+`invalid_params`. Both return `{entry_name, point}`, with point null for Global.
+Existing tab captures remain unchanged. Preparation failure preserves selection.
+
+`point.new` requires label and accepts mode `inherit` (default), `empty`, or
+`clone`. Inherit copies Global parameters, library and aliases. Empty creates
+minimal parameters with the requested description and no library or aliases.
+Clone requires a same-entry `clone_from`; other modes reject that source.
+For example, `{"label": "copy", "mode": "clone", "clone_from": "bias-a"}`
+creates and selects a copy. The response is `{entry_name, point}`.
+Neither method returns a kind discriminator.
+
 ## Context snapshot
 
 `context.snapshot` 回傳固定 capture 的 target、point、library 與完整 aliases。Library 只投影持久 Specs，不回傳 `provenance`，也不 materialize assets。目前契約版本為 WIRE_VERSION 132、GUI_VERSION 165。Point files 的路徑使用 `parameters.yaml`／`library.yaml`／`aliases.yaml`；檔名改變因此升 wire 與 GUI 版本。
@@ -335,22 +350,29 @@ UI disabled rows, clone-source exclusion, tooltips and remote error presentation
 remain unchanged. Availability is not an extra precondition for use_point, Load,
 Save or other reads. Directory discovery errors still fail the request.
 
-## Point-file reload and guarded writes
+## Installed-file reload and guarded writes
 
-`entry.info.files` lists the selected point's absolute parameters, library and
-aliases paths and their installed SHA-256 revisions. Read this base before
+`entry.info.files` lists the active parameters, library and aliases absolute
+paths and their installed SHA-256 revisions, in that order. An opened entry
+always returns three files, using global without a point or the selected point
+set. Only a closed entry returns an empty list. There is no scope field.
+The same missing-file rules apply at both levels. Inspect still edits entry
+files while a point is active, and the single watcher observes both sets.
+Those inactive entry files are not listed; agents switch to global before
+editing global files. `context.reload` accepts any installed owner path. Read this base before
 editing a file. Edit that path, then call `context.reload` with its path and the
 previously installed `expected_revision`, not the edited disk hash. Supply the
 key explicitly. Use null when the library or aliases base has no file.
-A point with no library remains selectable. Its library is empty, its revision
+A global or point set with no library remains usable. Its library is empty, its revision
 is null and its path still names the expected absolute file. Reads create nothing.
 
 ```json
 {"method": "context.reload", "params": {"path": "/project/results/entry/points/base/aliases.yaml", "expected_revision": null}}
 ```
 
-The owner validates and installs the candidate, publishes source changes and
-returns `{document, path, revision}`. It never rewrites or repairs the edited
+The owner validates and installs the candidate and returns
+`{document, path, revision}`. Active changes publish source facts; an inactive
+entry reload updates only its installed state and Inspect observation. It never rewrites or repairs the edited
 file. Invalid paths or contents return `invalid_params` with the path and
 reason. A stale installed base returns `precondition_failed` with
 `reason=revision_mismatch`. A non-holder receives the existing `not_holder`

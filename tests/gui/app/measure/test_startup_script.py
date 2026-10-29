@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 import threading
@@ -239,6 +240,84 @@ def test_close_drains_startup_owner_delivery_before_callbacks_and_hardware(
     probe.release.set()
     behavior.close(assembly)
     assert probe.calls == ["worker finished", "callback", "hardware", "view released"]
+
+
+@pytest.mark.parametrize(
+    "entry, point, restored",
+    [
+        ("synthetic", None, True),
+        ("synthetic", "first", True),
+        ("synthetic", "missing", False),
+        ("missing", None, False),
+    ],
+)
+def test_default_startup_restores_tabs_only_when_saved_selection_is_ready(
+    startup_app, tmp_path, entry, point, restored
+):
+    _behavior, _assembly, ctrl, _window, _probe = startup_app
+    tab = ctrl.tab_control.new_tab("sample")
+    resource = ctrl.cfg_resources.lookup(tab)
+    resource.write({("gain",): 0.35})
+    authored = resource.input.to_json()
+    ctrl.tab_control.close_tab(tab)
+    cache = tmp_path / "startup-cache"
+    cache.mkdir()
+    (cache / "measure-session.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "entry": entry,
+                "point": point,
+                "tabs": [{"adapter": "sample", "input": authored}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    run_script(
+        ctrl,
+        write_script(
+            tmp_path,
+            "    from dataclasses import replace\n"
+            "    from pathlib import Path\n"
+            "    from zcu_tools.gui.app.measure.default_startup import startup\n"
+            f"    startup(replace(ctx, cache_root=Path({str(cache)!r})))\n",
+        ),
+    )
+    tabs = ctrl.tab_control.list_tab_ids()
+    if restored:
+        assert len(tabs) == 1
+        assert ctrl.cfg_resources.lookup(tabs[0]).input.to_json() == authored
+        assert ctrl.context_control.current_point_label() == point
+    else:
+        assert tabs == []
+
+
+def test_startup_selects_global_and_creates_points_in_all_modes(startup_app, tmp_path):
+    _behavior, _assembly, ctrl, _window, _probe = startup_app
+    path = write_script(
+        tmp_path,
+        "    ctx.setup.new_entry('modes')\n"
+        "    ctx.setup.new_point('seed', description='Global copy')\n"
+        "    ctx.setup.new_point('blank', mode='empty', description='Blank')\n"
+        "    ctx.setup.new_point('copy', mode='clone', clone_from='seed', description='Clone')\n"
+        "    ctx.setup.use_global()\n",
+    )
+    token = ctrl.start_startup(path)
+    qt_until(
+        lambda: ctrl.operation_control.await_operation(token, 0).reason == "completed",
+        label="startup modes",
+    )
+    outcome = ctrl.operation_control.await_operation(token, 0).outcome
+    assert outcome is not None and outcome.status == "finished"
+    assert ctrl.context_control.current_point_label() is None
+    assert ctrl.context_control.get_session_env().readiness.value == "global"
+    assert {
+        row.label: row.description for row in ctrl.context_control.list_points()
+    } == {
+        "seed": "Global copy",
+        "blank": "Blank",
+        "copy": "Clone",
+    }
 
 
 @pytest.mark.parametrize("point", [None, "initial"], ids=["global", "point"])

@@ -8,7 +8,7 @@ import pytest
 from zcu_tools.cfg_model import ConstWaveformCfg, PulseSpec, TemplateDef
 from zcu_tools.gui.remote.errors import ErrorCode
 from zcu_tools.gui.session.aliases import AliasRow
-from zcu_tools.gui.session.context_types import PointFileRevision
+from zcu_tools.gui.session.context_types import FileRevision
 
 from tests.gui.app.measure._record_support import require_target
 
@@ -27,7 +27,7 @@ def application_templates() -> dict[str, TemplateDef]:
 
 
 @pytest.fixture
-def point_files(application: PointApplication) -> dict[Document, PointFileRevision]:
+def point_files(application: PointApplication) -> dict[Document, FileRevision]:
     application.open_entry()
     control = application.controller.context_control
     control.add_component("Q1", "fake/drive/a", {"rate": 10.0}, setup=True)
@@ -52,7 +52,7 @@ def error_reply(
     return error
 
 
-def external_edit(file: PointFileRevision) -> bytes:
+def external_edit(file: FileRevision) -> bytes:
     if file.document == "aliases":
         candidate = (
             b'format: zcu.aliases\nformat_version: "1.0"\naliases:\n  driver: Q1\n'
@@ -68,7 +68,7 @@ def external_edit(file: PointFileRevision) -> bytes:
 @pytest.mark.parametrize("document", ["parameters", "library", "aliases"])
 def test_reload_installs_edited_disk_using_installed_base_revision(
     application: PointApplication,
-    point_files: dict[Document, PointFileRevision],
+    point_files: dict[Document, FileRevision],
     document: Document,
 ) -> None:
     file = point_files[document]
@@ -167,7 +167,7 @@ def test_absent_library_reports_null_and_reloads_external_file(
 
 
 def test_reload_rejects_disk_hash_instead_of_installed_base(
-    application: PointApplication, point_files: dict[Document, PointFileRevision]
+    application: PointApplication, point_files: dict[Document, FileRevision]
 ) -> None:
     file = point_files["parameters"]
     candidate = external_edit(file)
@@ -192,7 +192,7 @@ def test_reload_rejects_disk_hash_instead_of_installed_base(
 @pytest.mark.parametrize("document", ["parameters", "library", "aliases"])
 def test_reload_validation_failure_names_file_and_preserves_installation(
     application: PointApplication,
-    point_files: dict[Document, PointFileRevision],
+    point_files: dict[Document, FileRevision],
     document: Document,
 ) -> None:
     control = application.controller.context_control
@@ -215,10 +215,10 @@ def test_reload_validation_failure_names_file_and_preserves_installation(
     assert file.path.read_bytes() == candidate
 
 
-@pytest.mark.parametrize("path_kind", ["relative", "outside", "setup"])
+@pytest.mark.parametrize("path_kind", ["relative", "outside", "unselected"])
 def test_reload_rejects_paths_outside_selected_point_owners(
     application: PointApplication,
-    point_files: dict[Document, PointFileRevision],
+    point_files: dict[Document, FileRevision],
     tmp_path: Path,
     path_kind: str,
 ) -> None:
@@ -226,7 +226,7 @@ def test_reload_rejects_paths_outside_selected_point_owners(
     path = {
         "relative": Path(file.path.name),
         "outside": tmp_path / "outside.yaml",
-        "setup": file.path.parents[2] / "parameters.yaml",
+        "unselected": file.path.parents[1] / "other/parameters.yaml",
     }[path_kind]
     before = file.path.read_bytes()
     error = error_reply(
@@ -239,8 +239,59 @@ def test_reload_rejects_paths_outside_selected_point_owners(
     assert file.path.read_bytes() == before
 
 
+@pytest.mark.parametrize("global_active", [False, True])
+def test_reload_entry_while_point_active_keeps_active_files_and_version(
+    application: PointApplication, global_active: bool
+) -> None:
+    info = application.open_entry()
+    control = application.controller.context_control
+    control.add_component("Q1", "fake/drive/a", {"rate": 10.0}, setup=True)
+    if not global_active:
+        application.result("point.new", {"label": "base"})
+    active_files = application.result("entry.info", {})["files"]
+    path = info.result_path / "parameters.yaml"
+    file = next(
+        item for item in control.get_installed_file_revisions() if item.path == path
+    )
+    version = application.state.version.get("context")
+    candidate = path.read_bytes().replace(b"10.0", b"20.0")
+    path.write_bytes(candidate)
+    application.result("control.release", {})
+    rejected = error_reply(
+        application,
+        "context.reload",
+        {
+            "path": str(path),
+            "expected_revision": file.revision,
+        },
+    )
+    assert rejected.get("reason") == "not_holder"
+    assert application.state.version.get("context") == version
+    assert application.result("entry.info", {})["files"] == active_files
+    application.result("control.acquire", {})
+    assert application.result(
+        "context.reload",
+        {
+            "path": str(path),
+            "expected_revision": file.revision,
+        },
+    ) == {
+        "document": "parameters",
+        "path": str(path),
+        "revision": sha256(candidate).hexdigest(),
+    }
+    assert control.read_context(setup=True).value("Q1.rate") == 20.0
+    if global_active:
+        assert application.state.version.get("context") == version + 1
+        assert control.read_context().value("Q1.rate") == 20.0
+    else:
+        assert application.state.version.get("context") == version
+        assert application.result("entry.info", {})["files"] == active_files
+        assert control.read_context().value("Q1.rate") == 10.0
+
+
 def test_reload_requires_holder_before_installing_external_edit(
-    application: PointApplication, point_files: dict[Document, PointFileRevision]
+    application: PointApplication, point_files: dict[Document, FileRevision]
 ) -> None:
     file = point_files["parameters"]
     candidate = external_edit(file)
@@ -265,7 +316,7 @@ def test_reload_requires_holder_before_installing_external_edit(
 )
 def test_reload_requires_explicit_string_base_for_existing_parameter_file(
     application: PointApplication,
-    point_files: dict[Document, PointFileRevision],
+    point_files: dict[Document, FileRevision],
     expected: dict[str, object],
 ) -> None:
     file = point_files["parameters"]
@@ -302,7 +353,7 @@ WRITERS: tuple[tuple[str, Document, dict[str, object]], ...] = (
 @pytest.mark.parametrize(("method", "document", "params"), WRITERS)
 def test_optional_writer_revision_rejects_stale_disk_without_side_effects(
     application: PointApplication,
-    point_files: dict[Document, PointFileRevision],
+    point_files: dict[Document, FileRevision],
     method: str,
     document: Document,
     params: dict[str, object],
@@ -331,7 +382,7 @@ def test_optional_writer_revision_rejects_stale_disk_without_side_effects(
 )
 def test_optional_writer_revision_accepts_matching_disk_and_checks_null(
     application: PointApplication,
-    point_files: dict[Document, PointFileRevision],
+    point_files: dict[Document, FileRevision],
     method: str,
     document: Document,
     params: dict[str, object],
@@ -356,7 +407,7 @@ def test_optional_writer_revision_accepts_matching_disk_and_checks_null(
 
 
 def test_alias_writer_explicit_null_does_not_skip_missing_file_guard(
-    application: PointApplication, point_files: dict[Document, PointFileRevision]
+    application: PointApplication, point_files: dict[Document, FileRevision]
 ) -> None:
     file = point_files["aliases"]
     candidate = external_edit(file)

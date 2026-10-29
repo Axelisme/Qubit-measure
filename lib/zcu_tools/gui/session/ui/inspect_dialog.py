@@ -45,9 +45,9 @@ from zcu_tools.gui.lifetime import LifetimeScope
 from zcu_tools.gui.session.context_types import LibraryChange
 from zcu_tools.gui.session.events import (
     ContextSwitchedPayload,
+    FileChangedPayload,
     MdChangedPayload,
     MlChangedPayload,
-    PointFileChangedPayload,
     SessionPayload,
 )
 from zcu_tools.gui.session.library_entry import (
@@ -59,8 +59,8 @@ from zcu_tools.gui.session.library_entry import (
 )
 from zcu_tools.gui.session.ui.alias_panel import AliasPanel
 from zcu_tools.gui.session.ui.component_tree import ComponentTreeWidget
+from zcu_tools.gui.session.ui.file_banner import FileBanner
 from zcu_tools.gui.session.ui.new_entry_dialog import NewEntryDialog
-from zcu_tools.gui.session.ui.point_file_banner import PointFileBanner
 from zcu_tools.gui.session.ui.tree_filter import TreeFilter
 from zcu_tools.gui.widgets import set_foreground, success_colour
 from zcu_tools.gui.widgets.form import FormEditor
@@ -127,7 +127,7 @@ class InspectDialog(QDialog):
     Spec together through apply_library_change. Typing alone never writes.
     Invalid text stays marked in the form. Owner/revision failures appear in
     inspect.entry.error and keep the input editable without changing the file.
-    PointFileBanner offers Keep/Reload for stale revisions. Switching entries or
+    FileBanner offers Keep/Reload for stale revisions. Switching entries or
     points, deleting, or closing discards uncommitted input without questions.
     Successful writes keep the mounted form and focus; no undo is retained.
 
@@ -224,7 +224,7 @@ class InspectDialog(QDialog):
         )
         self._scope.add_cleanup(
             bus.subscribe(
-                PointFileChangedPayload, self._scope.callback(self._on_file_changed)
+                FileChangedPayload, self._scope.callback(self._on_file_changed)
             ).unsubscribe
         )
         for button in self.findChildren(QPushButton):
@@ -263,7 +263,7 @@ class InspectDialog(QDialog):
         toolbar.addStretch()
         layout.addLayout(toolbar)
         self._scope.connect(self._destination.currentIndexChanged, self._destination_changed)
-        self._library_sync = PointFileBanner(
+        self._library_sync = FileBanner(
             self._ctrl,
             "library",
             self._scope.callback(self._reload_library),
@@ -692,7 +692,7 @@ class InspectDialog(QDialog):
         self._close_entry()
         self._populate_from_context()
 
-    def _on_file_changed(self, payload: PointFileChangedPayload) -> None:
+    def _on_file_changed(self, payload: FileChangedPayload) -> None:
         del payload
         # Source observations alone must not rebuild an active parameter editor.
         self._library_sync.refresh(has_draft=self._has_library_draft())

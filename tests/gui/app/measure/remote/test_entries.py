@@ -95,7 +95,6 @@ def test_open_existing_entry_clears_point_and_new_point_uses_current_entry(
     assert application.state.session_env.parameters is not None
     selected = application.result("point.use", {"label": "existing"})
     assert selected == {
-        "kind": "saved_point",
         "entry_name": second.result_path.name,
         "point": "existing",
     }
