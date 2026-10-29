@@ -79,13 +79,13 @@ class TimelinePlacedPulse(TimelineObservedPulse):
         if self.relative_t == "auto":
             end = self.book.math.maximum(end, previous)
         if isinstance(end, RuntimeEnd):
-            if self.relative_t != "auto" and (
-                (previous is end and _bounds(self.relative_t)[0] < -1e-12)
-                or (
-                    previous is not end
-                    and time_bounds(prog, end)[0] + _bounds(self.relative_t)[0]
-                    < time_bounds(prog, previous)[1] - 1e-12
+            if self.relative_t != "auto" and not (
+                (
+                    _bounds(self.relative_t)[0] >= -1e-12
+                    and self.book.math.covers(end, previous)
                 )
+                or time_bounds(prog, end)[0] + _bounds(self.relative_t)[0]
+                >= time_bounds(prog, previous)[1] - 1e-12
             ):
                 raise ValueError(
                     f"{self.timeline}: channel {self.ch} pulse overlap; cannot prove runtime start >= previous end"
@@ -105,7 +105,9 @@ class TimelinePlacedPulse(TimelineObservedPulse):
                 if self.relative_t == "auto"
                 else placement_time(prog, self.relative_t)
             )
-            self.event_end = EventEnd(end, offset + prog.pulses[self.name].get_length())
+            self.event_end = EventEnd(
+                end, offset + prog.pulses[self.name].get_length(), (finish,)
+            )
             self.book.set_end(self.timeline, finish)
             self.book.runtime_gens[self.ch] = finish
             self.record(prog, time_bounds(prog, start)[1], time_bounds(prog, start)[0])
@@ -122,8 +124,11 @@ class TimelinePlacedPulse(TimelineObservedPulse):
             )
         self.record(prog, t, actual_t)
         actual_end = actual_t + prog.pulses[self.name].get_length()
-        self.event_end = EventEnd(0.0, actual_end)
-        self.book.set_end(self.timeline, align_end(prog, actual_end))
+        finish = align_end(prog, actual_end)
+        self.event_end = EventEnd(0.0, actual_end, (finish,))
+        self.book.set_end(self.timeline, finish)
+        if isinstance(finish, RuntimeEnd):
+            self.book.runtime_gens[self.ch] = finish
 
 
 class TimelinePlacedConfig(ConfigReadout):
