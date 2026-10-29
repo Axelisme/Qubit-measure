@@ -4,6 +4,7 @@
 
 | 格式變更 | 辨識方式 | 舊資料處理 |
 | --- | --- | --- |
+| [Entry／point 文件檔名](document-file-names.md) | 兩層使用 `parameters.yaml`、`library.yaml`、`aliases.yaml` | 先用原 CLI 的 `--scope filenames` 備份改名，再按需升級內容；runtime 不讀舊名 |
 | [Fluxdep spectrums v2](fluxdep-spectrums-v2.md) | HDF5 根 attrs `format=zcu.fluxdep-spectrums`、`version=2` | `scripts/upgrade_spectrums.py` 預設預覽，`--apply` 先備份再換算 |
 | [Record component 信封](record-component.md) | JSONL 列含 `component` | 舊列照常讀取，不補寫 |
 | [Record device 值歸屬](record-devices.md) | 逐列看 flat pair 或 `devices.<name>.value/value_unit` | 同一長期 upgrade CLI 由 operator 宣告名稱，不補 frame/component |

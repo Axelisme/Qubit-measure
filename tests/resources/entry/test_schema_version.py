@@ -16,7 +16,7 @@ from zcu_tools.resources.parameter_schema import ParameterSchemaPolicy
 def test_runtime_rejects_missing_or_noncurrent_schema_without_writing(
     entry: ResultEntry, version: object
 ) -> None:
-    path = entry.result_path / "setup.yaml"
+    path = entry.result_path / "parameters.yaml"
     yaml = YAML()
     document = yaml.load(path)
     if version is None:
@@ -42,10 +42,10 @@ def test_runtime_hint_targets_whole_entry(
     entry: ResultEntry, point: str | None
 ) -> None:
     if point is None:
-        path = entry.result_path / "setup.yaml"
+        path = entry.result_path / "parameters.yaml"
     else:
         entry.new_point(point)
-        path = entry.result_path / "points" / point / "point.yaml"
+        path = entry.result_path / "points" / point / "parameters.yaml"
     yaml = YAML()
     document = yaml.load(path)
     document.pop("schema_version")
@@ -84,8 +84,8 @@ def test_create_edit_seed_and_clone_use_caller_schema_version(
         created.new_point("seed")
         created.new_point("clone", clone_from="seed")
         for path in (
-            created.result_path / "setup.yaml",
-            *created.result_path.glob("points/*/point.yaml"),
+            created.result_path / "parameters.yaml",
+            *created.result_path.glob("points/*/parameters.yaml"),
         ):
             document = YAML(typ="safe").load(path)
             assert document["schema_version"] == 4

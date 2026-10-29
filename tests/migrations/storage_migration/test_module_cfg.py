@@ -234,7 +234,8 @@ def test_module_unknown_content_is_visible_without_duplicate_converted_leaves(
     assert all(item.new_path is None for item in rows)
     assert all(
         item.new_file
-        == entry.result_path / ("points/context/point.yaml" if point else "setup.yaml")
+        == entry.result_path
+        / ("points/context/parameters.yaml" if point else "parameters.yaml")
         for item in rows
     )
     assert any(
@@ -250,7 +251,10 @@ def test_module_unknown_content_is_visible_without_duplicate_converted_leaves(
     assert_difference(
         lambda: _convert(replace(request, resume=True), library_mapping),
         request,
-        [entry.result_path / ("points/context/point.yaml" if point else "setup.yaml")],
+        [
+            entry.result_path
+            / ("points/context/parameters.yaml" if point else "parameters.yaml")
+        ],
     )
     edited = _entry(request)
     edited_view = edited.setup if point is None else edited.use_point(point)
@@ -382,7 +386,7 @@ def test_parameters_publish_canonical_specs_references_units_and_manual_sources(
     entry = _entry(request)
     library = entry.module_library("context")
     snapshot = library.snapshot()
-    assert library.source_path == entry.result_path / "points/context/module_cfg.yaml"
+    assert library.source_path == entry.result_path / "points/context/library.yaml"
     assert snapshot.module_keys() == ("C1.pulses.pi", "C1.readout.main")
     assert snapshot.waveform_keys() == (
         "C1.waveforms.base",
@@ -530,7 +534,7 @@ def test_unconvertible_entries_stay_located_pending_beside_successful_file(
             and item.source_keys == keys
             and item.destination_keys == ("general", "ext", "legacy_module_cfg", *keys)
             and item.new_file
-            == _entry(request).result_path / "points/context/point.yaml"
+            == _entry(request).result_path / "points/context/parameters.yaml"
             for item in report.key_mappings
         )
     assert all(item.reason for item in pending)

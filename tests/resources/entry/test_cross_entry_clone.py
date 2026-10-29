@@ -56,7 +56,7 @@ def foreign_recorded_point(
         draft.set_meta("Q1.rate", {"source": event.id, "kind": "fit", "stderr": 0.18})
         draft.set_meta("Q1.duration", {"source": "outside/run", "stderr": -1})
         draft.description = "source environment"
-    (results / "other/points/source/module_cfg.yaml").write_text(
+    (results / "other/points/source/library.yaml").write_text(
         "format: zcu.module-library\nformat_version: '2.0'\ncomponents: {Q1: {}}\n",
         encoding="utf-8",
     )
@@ -95,7 +95,7 @@ def write_source_library(
             "stderr": 0.01,
         }
     }
-    (entry.result_path / "points/source/module_cfg.yaml").write_text(
+    (entry.result_path / "points/source/library.yaml").write_text(
         json.dumps(stored), encoding="utf-8"
     )
     return value
@@ -115,7 +115,7 @@ def test_clone_copies_values_without_importing_library_events(
     aliases = EntryAliases(aliases={"drive": "Q1", "copy": "$drive"})
     foreign.save_aliases(aliases, point="source")
     source_document = write_source_library(foreign, event)
-    source_file = foreign.result_path / "points/source/module_cfg.yaml"
+    source_file = foreign.result_path / "points/source/library.yaml"
     before = source_file.read_bytes()
     destination = foreign if same_entry else entry
     argument = (
@@ -123,7 +123,7 @@ def test_clone_copies_values_without_importing_library_events(
     )
     cloned = destination.new_point("library-copy", clone_from=argument)
     stored = DocumentStore(
-        destination.result_path / "points/library-copy/module_cfg.yaml",
+        destination.result_path / "points/library-copy/library.yaml",
         ModuleLibraryDocument,
         format=MODULE_LIBRARY_FORMAT,
         supported_version=MODULE_LIBRARY_VERSION,
@@ -145,7 +145,7 @@ def test_clone_skips_invalid_specs_without_rewriting_source(
 ) -> None:
     foreign, _point, event = foreign_recorded_point
     write_source_library(foreign, event)
-    source = foreign.result_path / "points/source/module_cfg.yaml"
+    source = foreign.result_path / "points/source/library.yaml"
     document = json.loads(source.read_text())
     document["components"]["Q1"]["pulses"]["pi"]["mask"] = 3
     source.write_text(json.dumps(document))
@@ -167,7 +167,7 @@ def test_library_clone_failure_cleans_destination_and_keeps_source(
 ) -> None:
     foreign, _point, event = foreign_recorded_point
     write_source_library(foreign, event)
-    source = foreign.result_path / "points/source/module_cfg.yaml"
+    source = foreign.result_path / "points/source/library.yaml"
     document = json.loads(source.read_text())
     document["format_version"] = "1.0"
     source.write_text(json.dumps(document))
@@ -186,7 +186,7 @@ def test_clone_preserves_forward_minor_point_metadata(
     same_entry: bool,
 ) -> None:
     foreign, source_point, _event = foreign_recorded_point
-    source_file = foreign.result_path / "points/source/point.yaml"
+    source_file = foreign.result_path / "points/source/parameters.yaml"
     source_store = DocumentStore(
         source_file,
         PointDocument,
@@ -206,7 +206,7 @@ def test_clone_preserves_forward_minor_point_metadata(
     cloned = destination.new_point("future-copy", clone_from=source_point)
 
     stored = DocumentStore(
-        destination.result_path / "points/future-copy/point.yaml",
+        destination.result_path / "points/future-copy/parameters.yaml",
         PointDocument,
         format=PARAMETER_FORMAT,
         supported_version=PARAMETER_VERSION,
@@ -235,17 +235,17 @@ def test_cross_entry_clone_uses_published_values_and_copies_metadata(
     source_path = results / "other/points/source"
     before = {
         name: (source_path / name).read_bytes()
-        for name in ("point.yaml", "module_cfg.yaml")
+        for name in ("parameters.yaml", "library.yaml")
     }
     # Clone does not depend on the destination setup.
-    (results / "entry/setup.yaml").write_text("invalid: [", encoding="utf-8")
+    (results / "entry/parameters.yaml").write_text("invalid: [", encoding="utf-8")
     source_arg = "other/source" if source_mode == "label" else stale_point
     clone = entry.new_point("target", clone_from=source_arg)
     assert clone.Q1.rate == 5400.0
     assert clone.Q1.duration == 12.0
     assert clone.description == "source environment"
-    assert (results / "entry/points/target/module_cfg.yaml").read_bytes() == before[
-        "module_cfg.yaml"
+    assert (results / "entry/points/target/library.yaml").read_bytes() == before[
+        "library.yaml"
     ]
     for path in ("Q1.rate", "Q1.duration", "general.description"):
         assert clone.meta(path) == fresh.meta(path)
@@ -263,7 +263,7 @@ def test_foreign_source_failure_does_not_publish_destination_or_modify_source(
     results, _database = entry_roots
     foreign, _point, event = foreign_recorded_point
     write_source_library(foreign, event)
-    source = results / "other/points/source/point.yaml"
+    source = results / "other/points/source/parameters.yaml"
     ledger_path = results / "other/records/ledger.jsonl"
     document = YAML(typ="rt").load(source.read_text())
     document["components"]["Q1"]["rate"] = "invalid"
@@ -339,7 +339,7 @@ def test_clone_accepts_point_identity_with_different_database_root(
     source_entry.new_point("source")
     other_output = tmp_path / "different-output"
     if constructor_bound:
-        source = source_entry.result_path / "points/source/point.yaml"
+        source = source_entry.result_path / "points/source/parameters.yaml"
         view = PointView(
             DocumentStore(
                 source,
@@ -378,7 +378,7 @@ def test_existing_cross_entry_destination_is_not_merged(
 ) -> None:
     results, _database = entry_roots
     entry.new_point("target")
-    source = results / "entry/points/target/point.yaml"
+    source = results / "entry/points/target/parameters.yaml"
     before = source.read_bytes()
     with pytest.raises(FileExistsError):
         entry.new_point("target", clone_from="other/source")
@@ -395,7 +395,7 @@ def test_constructor_bound_view_clones_without_later_identity_registration(
 ) -> None:
     foreign, view, _event = foreign_recorded_point
     results, database = entry_roots
-    source = results / "other/points/source/point.yaml"
+    source = results / "other/points/source/parameters.yaml"
     store = DocumentStore(
         source,
         PointDocument,

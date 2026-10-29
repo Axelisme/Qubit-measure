@@ -4,7 +4,7 @@
 
 ## 先確認版本與資料範圍
 
-長期入口是 `scripts/upgrade_parameters.py`，處理 native `setup.yaml`、`points/<label>/point.yaml` 與 entry template，預設 dry-run，不操作儀器。
+長期入口是 `scripts/upgrade_parameters.py`，處理 native `parameters.yaml`、`points/<label>/parameters.yaml` 與 entry template，預設 dry-run，不操作儀器。
 Runtime 與升級目標都是 `schema_version: 3`。Runtime 不讀舊 component 形狀，不自動升級。
 先在副本核對轉換，不要手改版本標頭避開檢查。
 
@@ -134,7 +134,7 @@ Upgrade CLI 與 `migrate_storage` 都逐實際目的位置報告 `unnamed_device
 
 ```bash
 uv run --directory /absolute/checkout --no-sync -- python scripts/upgrade_parameters.py \
-  /offline-copy/setup.yaml /offline-copy/points/*/point.yaml
+  /offline-copy/parameters.yaml /offline-copy/points/*/parameters.yaml
 ```
 
 Dry-run 不建檔、不建鎖、不備份。
@@ -146,7 +146,7 @@ Dry-run 不建檔、不建鎖、不備份。
 
 ```bash
 uv run --directory /absolute/checkout --no-sync -- python scripts/upgrade_parameters.py \
-  /offline-copy/setup.yaml /offline-copy/points/*/point.yaml --apply
+  /offline-copy/parameters.yaml /offline-copy/points/*/parameters.yaml --apply
 ```
 
 每份合法候選在同名 `.lock` 下重讀，先建原 bytes 的唯一 `.bak`，再以同目錄 temporary 檔原子替換。

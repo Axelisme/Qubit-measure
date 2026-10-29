@@ -1,4 +1,4 @@
-"""Upgrade entry components and predictors, or operator-declared record devices."""
+"""Explicitly upgrade document filenames, entry content or record devices."""
 
 from collections.abc import Sequence
 

@@ -139,8 +139,8 @@ def test_conversion_notes_reach_report_for_seed_setup_and_point_batches(
     report = migrate(request_data, mapping)
     destination = request_data.results_root / request_data.name
     assert set(report.notes) == {
-        f"{destination / 'setup.yaml'}: C1.frequency: check the declared source",
-        f"{destination / 'points/point-a/point.yaml'}: C1.frequency: check the declared source",
+        f"{destination / 'parameters.yaml'}: C1.frequency: check the declared source",
+        f"{destination / 'points/point-a/parameters.yaml'}: C1.frequency: check the declared source",
     }
     assert report.pending == ()
 

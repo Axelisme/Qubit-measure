@@ -4,7 +4,7 @@
 
 ## 版本與目前限制
 
-`setup.yaml`、每個 `points/<label>/point.yaml` 與 entry template 都有整份文件的 `schema_version: N`。它描述 component schema。`format` 與 `format_version` 仍描述 YAML 容器，兩種版本不互相代替。
+`parameters.yaml`、每個 `points/<label>/parameters.yaml` 與 entry template 都有整份文件的 `schema_version: N`。它描述 component schema。`format` 與 `format_version` 仍描述 YAML 容器，兩種版本不互相代替。
 
 GUI／MCP 只讀 lab 宣告的目前版本。缺版或不同版本會在讀取處報錯，列出來源路徑、文件版本與目前版本。`Preview:` 一行預覽差異，`Apply:` 一行含 `--apply`，備份後改檔。Setup 或 point 的兩行指令都以整個 entry 目錄為目標，entry template 則以該檔案為目標。指令會 quote 含空白的路徑，可直接複製執行。讀取不改檔。不要為了消除錯誤手改版本標頭。
 
@@ -12,9 +12,38 @@ GUI／MCP 只讀 lab 宣告的目前版本。缺版或不同版本會在讀取�
 
 先在副本核對 dry-run 與備份，再安排正式資料升級。合法 v3 先完整驗證，再顯示 `skipped`。未標版文件只有通過完整 v1 分類後才視為 v1，不需要 operator 補標頭。Half 分支、缺名佔位、逐目的位置診斷、storage 來源與重校提醒見 [flux 升級指南](flux-migration.md)。
 
+## 先改檔名，再升級內容
+
+Runtime 只讀 entry 與 point 的 `parameters.yaml`、`library.yaml`、`aliases.yaml`。
+舊 entry 的 `setup.yaml`、point 的 `point.yaml` 都改為 `parameters.yaml`。
+兩層的 `module_cfg.yaml` 都改為 `library.yaml`，aliases 不變。
+檔名變更不增加 schema_version 或容器版本。
+
+先關閉會寫這些文件的工作階段，再預覽與套用改名：
+
+```bash
+uv run --directory /absolute/checkout --no-sync -- python scripts/upgrade_parameters.py \
+  --scope filenames /data/project/result/device
+uv run --directory /absolute/checkout --no-sync -- python scripts/upgrade_parameters.py \
+  --scope filenames /data/project/result/device --apply
+```
+
+此 scope 接受 entry 目錄或精確舊檔路徑。Entry 目錄須含舊 setup 或新 parameters。
+它只掃 entry 根與直屬 `points/*/`，不解析 YAML，也不升級 predictor。
+Dry-run 列出舊路徑與新路徑，不建立檔案或鎖。
+Apply 先保存原 bytes 備份，再建立新名稱並移除舊名稱，內容逐 byte 不變。
+新舊並存或多個舊名指向同一新名時，整個選集在寫入前拒絕，不比較內容或覆寫。
+重跑已改名的 entry 沒有待改項，回傳 0；已移走的精確舊檔路徑則回報缺檔。
+Apply 中途 I/O 失敗可能留下已改名的前項，沒有多檔交易或掉電復原保證。
+備份位置沿用下方共用規則。要還原名稱，先移走新名，再將備份複製回舊路徑。
+
+需要內容升級時，先完成上述 `filenames`，再執行下方 `components`，預設 scope 仍為 components。
+Components 只枚舉新檔名，不代做改名或讀取舊名。
+改名歷程見 [文件檔名統一](storage-format-history/document-file-names.md)。
+
 ## 預覽與套用
 
-從 checkout root 執行，使用該 worktree 的 interpreter。給 entry 目錄即可選取 `setup.yaml`、所有 `points/*/point.yaml` 與 `predictors/*.json`，不必先開啟 entry 或補版本。目錄須含 `setup.yaml`，否則 CLI 報錯。也可混合傳入多個 entry 目錄與明確 YAML 檔案路徑，或用 shell glob 選取檔案。
+從 checkout root 執行，使用該 worktree 的 interpreter。給 entry 目錄即可選取 `parameters.yaml`、所有 `points/*/parameters.yaml` 與 `predictors/*.json`，不必先開啟 entry 或補版本。目錄須含 `parameters.yaml`，否則 CLI 報錯。也可混合傳入多個 entry 目錄與明確 YAML 檔案路徑，或用 shell glob 選取檔案。
 
 ```bash
 uv run --directory /absolute/checkout --no-sync -- python scripts/upgrade_parameters.py \
@@ -36,7 +65,7 @@ Apply 先檢查備份位置，再取得 [per-user runtime lock](../lib/zcu_tools
 
 ### 備份位置
 
-Component、predictor、record 與 processed spectrum 升級共用備份規則。工具從來源向上找最近的 `result` 或 `Database` 目錄，其父目錄是資料專案根。備份位於 `<專案根>-backup/`，不是工具 checkout 旁，也不寫進資料項目。它鏡像來源相對於專案根的路徑，並加 UUID 防止覆寫。例如 `/data/project/result/device/setup.yaml` 備份為 `/data/project-backup/result/device/setup.yaml.<UUID>.bak`。此根目錄也供 storage migration 使用。
+檔名、component、predictor、record 與 processed spectrum 升級共用備份規則。工具從來源向上找最近的 `result` 或 `Database` 目錄，其父目錄是資料專案根。備份位於 `<專案根>-backup/`，不是工具 checkout 旁，也不寫進資料項目。它鏡像來源相對於專案根的路徑，並加 UUID 防止覆寫。例如 `/data/project/result/device/parameters.yaml` 備份為 `/data/project-backup/result/device/parameters.yaml.<UUID>.bak`。此根目錄也供 storage migration 使用。
 
 `--backup-root /absolute/archive-backup` 可覆寫備份根目錄。有專案根時仍鏡像相對路徑。來源不在 `result`／`Database` 下時，apply 必須提供此選項，備份直接放在 `<backup-root>/<原檔名>.<UUID>.bak`。例如升級 checkout 中的 entry template 時，指定 checkout 外的備份目錄。公開 runner 接受對應的 `backup_root=Path(...)`。
 

@@ -3,6 +3,13 @@
 from dataclasses import dataclass, replace
 from pathlib import Path
 
+from zcu_tools.resources.document_names import (
+    ALIASES_FILENAME,
+    LEGACY_LIBRARY_FILENAME,
+    LIBRARY_FILENAME,
+    PARAMETERS_FILENAME,
+)
+
 from migrations.sample_csv import plan_sample_csv
 
 from .errors import MigrationInputError
@@ -19,9 +26,9 @@ from .state import MigrationSession, clear_pending, file_hash, record_pending
 
 _RESULT_RESERVED = frozenset(
     {
-        "setup.yaml",
-        "module_cfg.yaml",
-        "aliases.yaml",
+        PARAMETERS_FILENAME,
+        LIBRARY_FILENAME,
+        ALIASES_FILENAME,
         "points",
         "records",
         "figures",
@@ -32,7 +39,7 @@ _RESULT_RESERVED = frozenset(
         "runs",
     }
 )
-_POINT_RESERVED = frozenset({"point.yaml", "module_cfg.yaml", "figures"})
+_POINT_RESERVED = frozenset({PARAMETERS_FILENAME, LIBRARY_FILENAME, "figures"})
 _DATABASE_RESERVED = frozenset({"runs", "Labber"})
 
 
@@ -69,7 +76,7 @@ def _result_target(
             if plan.pending
             else None
         )
-    if path.name in ("meta_info.json", "module_cfg.yaml") and (
+    if path.name in ("meta_info.json", LEGACY_LIBRARY_FILENAME) and (
         len(parts) == 1
         or (len(parts) == 2 and (path.parent / "meta_info.json").is_file())
         or (len(parts) == 3 and parts[0] == "exps")
@@ -159,7 +166,8 @@ def _check_existing(
     if target.point is not None:
         point = destination.result_path / "points" / target.point
         if point.exists() and not (
-            (point / "point.yaml").is_file() and (point / "module_cfg.yaml").is_file()
+            (point / PARAMETERS_FILENAME).is_file()
+            and (point / LIBRARY_FILENAME).is_file()
         ):
             raise FileExistsError(
                 f"{target.source} -> {path}: occupied incomplete point directory {point}"
@@ -247,8 +255,8 @@ def _publish_target(session: MigrationSession, target: _CopyTarget) -> None:
     if target.point is not None:
         root = session.manifest.report.destination.result_path
         point = root / "points" / target.point
-        ready = (point / "point.yaml").is_file() and (
-            point / "module_cfg.yaml"
+        ready = (point / PARAMETERS_FILENAME).is_file() and (
+            point / LIBRARY_FILENAME
         ).is_file()
         if not ready and not (session.dry_run and session.manifest.parameters_complete):
             record_pending(

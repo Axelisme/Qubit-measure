@@ -65,7 +65,7 @@ def test_point_and_library_revisions_follow_each_independent_owner(
 
 def test_first_edit_creates_absent_point_library(entry: ResultEntry) -> None:
     entry.new_point("portable")
-    path = entry.result_path / "points/portable/module_cfg.yaml"
+    path = entry.result_path / "points/portable/library.yaml"
     path.unlink()
     library = entry.module_library("portable")
     with library.edit():
@@ -85,7 +85,7 @@ def test_absent_library_edit_conflicts_with_external_creation(
     entry: ResultEntry, created_during_edit: bool, invalid_external: bool
 ) -> None:
     entry.new_point("portable")
-    path = entry.result_path / "points/portable/module_cfg.yaml"
+    path = entry.result_path / "points/portable/library.yaml"
     external = (
         b"invalid: [\n"
         if invalid_external
@@ -118,20 +118,20 @@ def test_absent_library_edit_conflicts_with_external_creation(
 
 def test_clone_preserves_absent_library(entry: ResultEntry) -> None:
     source = entry.new_point("source")
-    path = entry.result_path / "points/source/module_cfg.yaml"
+    path = entry.result_path / "points/source/library.yaml"
     path.unlink()
     source.description = "portable point"
 
     cloned = entry.new_point("copy", clone_from=source)
 
     assert cloned.description == "portable point"
-    assert not (entry.result_path / "points/copy/module_cfg.yaml").exists()
+    assert not (entry.result_path / "points/copy/library.yaml").exists()
     assert entry.module_library("copy").document_revision.revision is None
     assert not path.exists()
 
 
 def test_setup_library_still_requires_its_file(entry: ResultEntry) -> None:
-    (entry.result_path / "module_cfg.yaml").unlink()
+    (entry.result_path / "library.yaml").unlink()
     with pytest.raises(FileNotFoundError):
         entry.module_library()
 
@@ -139,7 +139,7 @@ def test_setup_library_still_requires_its_file(entry: ResultEntry) -> None:
 def test_setup_library_is_initialized_independently_of_new_points(
     entry: ResultEntry,
 ) -> None:
-    assert (entry.result_path / "module_cfg.yaml").is_file()
+    assert (entry.result_path / "library.yaml").is_file()
     library = entry.module_library()
     with library.edit() as draft:
         draft.set_waveform("Q1.waveforms.base", ConstWaveformCfg(length=0.05))
@@ -162,9 +162,9 @@ def test_point_local_library_uses_entry_scope_without_reading_point_or_assets(
     entry.new_point("a")
     entry.new_point("b")
     source = entry.result_path / "points/a"
-    (source / "point.yaml").write_text("invalid: [", encoding="utf-8")
+    (source / "parameters.yaml").write_text("invalid: [", encoding="utf-8")
     library = entry.module_library("a", assets=library_assets)
-    assert library.source_path == (source / "module_cfg.yaml").resolve()
+    assert library.source_path == (source / "library.yaml").resolve()
     assert library.snapshot().module_keys() == ()
     with library.edit() as draft:
         draft.set_module(
@@ -181,7 +181,7 @@ def test_point_local_library_uses_entry_scope_without_reading_point_or_assets(
     assert (
         entry.module_library("b", assets=library_assets).snapshot().module_keys() == ()
     )
-    assert (source / "point.yaml").read_text(encoding="utf-8") == "invalid: ["
+    assert (source / "parameters.yaml").read_text(encoding="utf-8") == "invalid: ["
 
 
 @pytest.mark.parametrize("label", ["", ".", "..", "a/b", "/absolute"])
@@ -210,7 +210,7 @@ def test_point_without_library_can_be_selected_without_creating_files(
     entry: ResultEntry,
 ) -> None:
     entry.new_point("portable")
-    path = entry.result_path / "points/portable/module_cfg.yaml"
+    path = entry.result_path / "points/portable/library.yaml"
     path.unlink()
     before = sorted(entry.result_path.rglob("*"))
 

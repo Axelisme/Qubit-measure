@@ -115,7 +115,7 @@ def test_unavailable_name_capture_propagates_source_fault_instead_of_old_names()
 ):
     base = parameter_capture()
     fault = ContextSourceFault(
-        "point", Path("point.yaml"), "OSError", "Unreadable point"
+        "point", Path("parameters.yaml"), "OSError", "Unreadable point"
     )
     captured = ParameterContext(
         point=base.document(),

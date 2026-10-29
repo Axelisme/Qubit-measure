@@ -8,6 +8,7 @@ from typing import Literal
 from pydantic import TypeAdapter
 from zcu_tools.cfg_model import validate_device_name
 from zcu_tools.format_version import FormatVersion, YamlMap, validate_header
+from zcu_tools.resources.document_names import PARAMETERS_FILENAME
 from zcu_tools.resources.entry.aliases import parse_entry_aliases
 from zcu_tools.resources.entry.schema import PointDocument, PointGeneral, SetupGeneral
 from zcu_tools.resources.parameter_metadata import validate_parameter_header
@@ -68,7 +69,7 @@ def _source(fields: YamlMap, path: str) -> str:
 def _validate_container(
     document: ParameterDocument, components: dict[str, YamlMap]
 ) -> None:
-    source = document.source_path or Path("point.yaml")
+    source = document.source_path or Path(PARAMETERS_FILENAME)
     if document.data.get("format") == "zcu.entry-template":
         validate_header(
             document.data,
@@ -82,7 +83,7 @@ def _validate_container(
     else:
         version = validate_parameter_header(document.data, source=source)
         general = document.data.get("general")
-        if source.name == "setup.yaml":
+        if source.parent.parent.name != "points":
             SetupGeneral.model_validate(general)
         else:
             PointGeneral.model_validate(general)

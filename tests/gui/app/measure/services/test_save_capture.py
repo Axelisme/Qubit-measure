@@ -153,7 +153,7 @@ def test_storage_requires_saved_origin_and_readable_sources(
 ) -> None:
     saved = session.control.read_context()
     fault = ContextSourceFault(
-        "point", Path("/unavailable/point.yaml"), "ValueError", "broken"
+        "point", Path("/unavailable/parameters.yaml"), "ValueError", "broken"
     )
     unavailable = ParameterContext(
         point=saved.document(),

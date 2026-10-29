@@ -26,7 +26,7 @@ def plan() -> UpgradePlan:
 def entry(tmp_path: Path) -> Path:
     root = tmp_path / "project" / "result" / "entry with spaces"
     root.mkdir(parents=True)
-    (root / "setup.yaml").write_text("schema_version: 1\n", encoding="utf-8")
+    (root / "parameters.yaml").write_text("schema_version: 1\n", encoding="utf-8")
     predictors = root / "predictors"
     predictors.mkdir()
     (predictors / "qubit.json").write_text(

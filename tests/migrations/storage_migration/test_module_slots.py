@@ -120,7 +120,7 @@ def test_slots_only_reference_published_specs_in_partial_or_pending_library(
         == ("general", "ext", "legacy_module_cfg", "modules", "unsupported")
         and item.new_file
         == entry.result_path
-        / ("setup.yaml" if point is None else "points/context/point.yaml")
+        / ("parameters.yaml" if point is None else "points/context/parameters.yaml")
         for item in report.key_mappings
     )
     if not has_success:
@@ -188,13 +188,13 @@ def test_published_slots_preserve_point_inheritance_overrides_and_completed_edit
         and item.source_keys == ("modules", "unsupported")
         and item.destination_keys
         == ("general", "ext", "legacy_module_cfg", "modules", "unsupported")
-        and item.new_file == entry.result_path / "points/override/point.yaml"
+        and item.new_file == entry.result_path / "points/override/parameters.yaml"
         for item in report.key_mappings
     )
     assert_difference(
         lambda: _convert(replace(request, resume=True), slot_mapping),
         request,
-        [entry.result_path / "setup.yaml"],
+        [entry.result_path / "parameters.yaml"],
     )
     entry = _entry(request)
     for label in (None, "inherited", "override"):
@@ -222,7 +222,7 @@ def test_slots_are_not_published_when_library_commit_fails(
     real_replace = os.replace
 
     def reject_library(source_path: str | Path, destination: str | Path) -> None:
-        if Path(destination).name == "module_cfg.yaml" and Path(destination).exists():
+        if Path(destination).name == "library.yaml" and Path(destination).exists():
             raise OSError("library publication failed")
         real_replace(source_path, destination)
 

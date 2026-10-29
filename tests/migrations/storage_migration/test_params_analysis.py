@@ -276,7 +276,7 @@ def test_analysis_file_resume_validates_unfinished_and_preserves_completed_edits
     copyfile = shutil.copyfile
 
     def interrupt(src: Path, dst: Path, *, follow_symlinks: bool = True) -> Path:
-        if src == destination / "setup.yaml" and dst.name == "point.yaml":
+        if src == destination / "parameters.yaml" and dst.name == "parameters.yaml":
             raise OSError("analysis checkpoint interrupted")
         return copyfile(src, dst, follow_symlinks=follow_symlinks)
 
@@ -320,7 +320,7 @@ def test_unfinished_t1_resume_rejects_new_active_null_channel(
     copyfile = shutil.copyfile
 
     def interrupt(src: Path, dst: Path, *, follow_symlinks: bool = True) -> Path:
-        if src == destination / "setup.yaml" and dst.name == "point.yaml":
+        if src == destination / "parameters.yaml" and dst.name == "parameters.yaml":
             raise OSError("T1 checkpoint interrupted")
         return copyfile(src, dst, follow_symlinks=follow_symlinks)
 

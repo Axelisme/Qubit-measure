@@ -26,8 +26,9 @@ from __future__ import annotations
 # Entry info, point bindings and writeback targets use folder names, without UUIDs.
 # Loaded Runs expose recorded parameter content independently of live storage.
 # Point library revisions may be null; library writers accept an explicit null base.
-WIRE_VERSION = 131
+# Point file paths use the shared parameters.yaml/library.yaml document names.
+WIRE_VERSION = 132
 
 # Bump for meaningful GUI code changes that need a reload signal.
 # Wire-contract changes bump both versions.
-GUI_VERSION = 164
+GUI_VERSION = 165

@@ -551,7 +551,7 @@ class PointPublication:
     """One tool-owned point staging directory and its fixed first contents.
 
     label is the final safe point label; temporary_label is the manifest-owned
-    safe sibling label. documents maps relative point.yaml/module_cfg.yaml paths
+    safe sibling label. documents maps relative parameters.yaml/library.yaml paths
     to typed baselines after preparation; None means creation is not prepared.
     hashes/directories fix all other owner-created content and directories.
     published records the final rename; existing formal points are never adopted.

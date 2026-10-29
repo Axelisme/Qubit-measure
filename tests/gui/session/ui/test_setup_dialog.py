@@ -354,7 +354,7 @@ def test_unavailable_point_shows_reason_while_another_point_remains_selectable(
         controller.setup_control.new_point(
             PointCreateRequest(label, f"{label} description", CommandOrigin("gui"))
         )
-    source = tmp_path / "result/remembered/points/bad/point.yaml"
+    source = tmp_path / "result/remembered/points/bad/parameters.yaml"
     yaml = YAML(typ="safe")
     document = yaml.load(source.read_text())
     document["schema_version"] = 0

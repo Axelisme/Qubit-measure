@@ -191,7 +191,7 @@ def test_invalid_branch_default_leaves_the_branch_field_unfilled() -> None:
 
 def test_unavailable_captured_source_still_raises() -> None:
     fault = ContextSourceFault(
-        "point", Path("/unavailable/point.yaml"), "OSError", "unreadable"
+        "point", Path("/unavailable/parameters.yaml"), "OSError", "unreadable"
     )
     env = environment(4.0, faults=(fault,))
     with pytest.raises(ContextSourceUnavailableError):

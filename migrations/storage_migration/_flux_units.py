@@ -5,6 +5,7 @@ from pathlib import Path
 
 from pydantic import TypeAdapter
 from zcu_tools.datafile import JsonObject
+from zcu_tools.resources.document_names import PARAMETERS_FILENAME
 from zcu_tools.resources.document_store import YamlMap, YamlValue
 from zcu_tools.resources.entry import EditView, document_value, snapshot
 from zcu_tools.resources.parameter_upgrade import ParameterDocument
@@ -171,7 +172,12 @@ def _converted_updates(
         )
     )
     converted = prepare_parameter_batch(
-        ParameterDocument(raw, Path("point.yaml" if is_point else "setup.yaml")),
+        ParameterDocument(
+            raw,
+            Path("points/context") / PARAMETERS_FILENAME
+            if is_point
+            else Path(PARAMETERS_FILENAME),
+        ),
         transform=mapping.parameter_transform,
         values=tuple(ParameterValue(path, value) for path, value in updates),
     )

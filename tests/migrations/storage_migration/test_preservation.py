@@ -210,7 +210,7 @@ def test_same_result_root_creates_independent_entry_and_keeps_other_entries(
         validate_native=noop_validation,
     )
     assert report.destination.result_path == request.result_root / request.name
-    assert (report.destination.result_path / "points/context/point.yaml").is_file()
+    assert (report.destination.result_path / "points/context/parameters.yaml").is_file()
     assert unrelated.read_bytes() == b"unrelated entry"
     assert not (request.result_root / "chip/qubit").exists()
     assert not (request.database_root / "chip/qubit").exists()
@@ -367,15 +367,15 @@ def test_all_labber_originals_share_one_layout_independent_of_native_success(
 @pytest.mark.parametrize(
     "root,relative",
     [
-        ("result", "setup.yaml"),
-        ("result", "setup.yaml/child.bin"),
+        ("result", "parameters.yaml"),
+        ("result", "parameters.yaml/child.bin"),
         ("result", "points"),
         ("result", "points/context/blob.bin"),
         ("result", "records/unknown.bin"),
         ("result", "runs/unknown.bin"),
         ("result", "samples/unknown.bin"),
         ("result", "predictors/unknown.bin"),
-        ("result", "exps/context/point.yaml"),
+        ("result", "exps/context/parameters.yaml"),
         ("result", "exps/context/figures/unknown.bin"),
         ("Database", "runs/unknown.bin"),
         ("Database", "Labber/unknown.bin"),

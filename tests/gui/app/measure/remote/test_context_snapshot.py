@@ -428,7 +428,7 @@ def test_snapshot_point_path_does_not_consume_unselected_library_source_fault(
         roles=None,
         source_faults=(
             ContextSourceFault(
-                "module_cfg", tmp_path / "module_cfg.yaml", "OSError", "library fault"
+                "module_cfg", tmp_path / "library.yaml", "OSError", "library fault"
             ),
         ),
     )
@@ -464,7 +464,7 @@ def test_invalid_snapshot_target_path_precedes_unselected_point_source_fault(
         roles=None,
         source_faults=(
             ContextSourceFault(
-                "point", tmp_path / "point.yaml", "OSError", "point fault"
+                "point", tmp_path / "parameters.yaml", "OSError", "point fault"
             ),
         ),
     )

@@ -19,7 +19,7 @@ _ID = "340b3db4-a422-4b1c-98b5-00413aed0d1d"
 
 @pytest.fixture
 def setup(tmp_path: Path) -> Path:
-    source = tmp_path / "entry" / "setup.yaml"
+    source = tmp_path / "entry" / "parameters.yaml"
     source.parent.mkdir()
     source.write_text(
         'format: zcu.parameter-container\nformat_version: "2.0"\n'

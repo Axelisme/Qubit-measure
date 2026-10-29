@@ -9,6 +9,7 @@ from uuid import UUID, uuid4
 from pydantic import TypeAdapter
 from zcu_tools.datafile import JsonObject, json_values_equal
 from zcu_tools.resources.context.library import library_key_kind
+from zcu_tools.resources.document_names import LIBRARY_FILENAME, PARAMETERS_FILENAME
 from zcu_tools.resources.entry import (
     ResultEntry,
 )
@@ -429,12 +430,15 @@ def prepare_session(
     session = MigrationSession(path, manifest, dry_run=request.dry_run)
     if not path.is_file() and entry is not None and not request.dry_run:
         capture_document(
-            session, source.result_path, destination.result_path / "setup.yaml", "setup"
+            session,
+            source.result_path,
+            destination.result_path / PARAMETERS_FILENAME,
+            "setup",
         )
         capture_document(
             session,
             source.result_path,
-            destination.result_path / "module_cfg.yaml",
+            destination.result_path / LIBRARY_FILENAME,
             "library",
         )
     validate_owned_state(session, entry=entry)
