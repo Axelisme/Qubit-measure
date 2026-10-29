@@ -216,17 +216,18 @@ class Join(Module):
 
         Children within each branch execute sequentially. Each occurrence owns
         fresh timeline names; selected playback and posts retain their child's
-        timing/provenance contract. tag identifies the first child emission.
-        No reference advance or legacy block_mode scheduling is added.
+        timing/provenance contract. tag identifies the first child in author
+        order. The program emission owner moves the unique reference-advancing
+        sequence last, rejects multiple advancing sequences, and certifies
+        exchanged register/word effects. Unknown effects fail conservatively.
+        Native child synchronization and physical-end guards are unchanged;
+        no reference rewind, padding or legacy block_mode scheduling is added.
         """
-        timeline = timeline if timeline is not None else "default"
-        branches = [prog.emission_name("join_branch") for _ in self.join_modules]
-        prog.fork(timeline, into=branches)
-        for name, modules in zip(branches, self.join_modules, strict=True):
-            for module in modules:
-                prog.emit(module, timeline=name, tag=tag)
-                tag = None
-        prog.join(*branches, into=timeline)
+        prog.emit_parallel(
+            self.join_modules,
+            timeline=timeline if timeline is not None else "default",
+            tag=tag,
+        )
 
     def init(self, prog: ModularProgramV2) -> None:
         for list in self.join_modules:

@@ -3,6 +3,10 @@
 from collections.abc import Callable, Sequence
 
 import pytest
+from qick.asm_v2 import Delay as NativeDelay
+from qick.asm_v2 import Macro, QickParam, QickSweep1D
+from qick.asm_v2 import Pulse as NativePulse
+from zcu_tools.program.v2.macro.wmem import PatchWmemFromRegs
 from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 from zcu_tools.program.v2.modules import (
     Branch,
@@ -11,8 +15,9 @@ from zcu_tools.program.v2.modules import (
     PulseCfg,
     TableLengthPulse,
 )
-from zcu_tools.program.v2.modules.delay import Join
-from zcu_tools.program.v2.modules.dmem import LoadValue
+from zcu_tools.program.v2.modules.delay import Join, SoftDelay
+from zcu_tools.program.v2.modules.dmem import LoadValue, ScanWith
+from zcu_tools.program.v2.modules.readout import PulseReadout, PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import (
     ConstWaveformCfg,
     FlatTopWaveformCfg,
@@ -23,7 +28,14 @@ from zcu_tools.program.v2.timeline import TimelineProgramV2
 from .timing_support import shots, waves
 
 
-def _pulse(name: str, ch: int, fabric_cycles: int = 25) -> Pulse:
+def _pulse(
+    name: str,
+    ch: int,
+    fabric_cycles: int = 25,
+    *,
+    pre: float | QickParam = 0.0,
+    post: float = 0.0,
+) -> Pulse:
     return Pulse(
         name,
         PulseCfg(
@@ -32,6 +44,8 @@ def _pulse(name: str, ch: int, fabric_cycles: int = 25) -> Pulse:
             freq=1000,
             gain=0.5,
             waveform=ConstWaveformCfg(length=fabric_cycles / 384),
+            pre_delay=pre,
+            post_delay=post,
         ),
     )
 
@@ -40,11 +54,14 @@ def _program(
     modules: Sequence[Module],
     body: Callable[[TimelineProgramV2], None],
     *,
+    initialize: Callable[[TimelineProgramV2], None] | None = None,
     selector: str | None = "scan",
     data_registers: int = 16,
 ) -> TimelineProgramV2:
     class Program(TimelineProgramV2):
         def _initialize(self, cfg):
+            if initialize is not None:
+                initialize(self)
             if selector is not None:
                 self.add_loop(selector, 3)
             for module in modules:
@@ -266,6 +283,348 @@ def test_module_join_retains_table_parallel_input_restrictions(invalid, message)
         groups = [[left, right]]
     with pytest.raises(ValueError, match=message):
         Join(*groups)
+
+
+@pytest.mark.parametrize("position", ["first", "last", "nested"])
+def test_module_join_scan_sequence_keeps_load_and_loop_order_at_parallel_origin(
+    position,
+):
+    scan = ScanWith("inner", [7, 9], "value").add_content(_pulse("a", 0))
+    other = _pulse("b", 1, 50)
+    advancing = Join(None, scan) if position == "nested" else scan
+    joined = Join(other, advancing) if position == "last" else Join(advancing, other)
+    prog = _program([joined], lambda prog: prog.emit(joined))
+    result = shots(prog)
+    # The scan loads two points before their pulses at 0 and 28; B occupies
+    # [0,56) concurrently. Its origin must not become the scan end, 56.
+    assert [waves(s) for s in result] == [[0, 0, 28]] * 6
+    assert [s.body_end_cycle - s.start_cycle for s in result] == [56] * 6
+    assert [s.end_cycle - s.start_cycle for s in result] == [56] * 6
+    prog.compile()
+    assert shots(prog) == result
+
+
+def test_module_join_rejects_unknown_native_pulse_reference_effect_before_compiling():
+    class CustomPulse(NativePulse):
+        pass
+
+    template = _pulse("custom", 0)
+
+    class CustomOutput(SoftDelay):
+        def declare(self, prog):
+            prog.declare(template)
+
+        def lower(self, prog, *, timeline, tag):
+            prog.append_macro(CustomPulse(ch=0, name=template.pulse_id, t=0))
+
+    joined = Join(CustomOutput("custom_output", 0), _pulse("b", 1))
+    with pytest.raises(
+        ValueError, match="parallel admission.*unknown reference effect.*CustomPulse"
+    ):
+        _program([joined], lambda prog: prog.emit(joined))
+
+
+def _declare_registers(*names: str) -> Callable[[TimelineProgramV2], None]:
+    def declare(prog: TimelineProgramV2) -> None:
+        for name in names:
+            prog.add_reg(name)
+
+    return declare
+
+
+class _NativeSequence(SoftDelay):
+    """Synthetic Module that lowers caller-supplied native operations."""
+
+    def __init__(self, name, operations):
+        super().__init__(name, 0)
+        self.operations = operations
+
+    def lower(self, prog, *, timeline, tag):
+        self.operations(prog)
+
+
+@pytest.mark.parametrize("nested", [False, True])
+def test_module_join_counts_whole_advancing_sequences_without_splitting_them(nested):
+    choice = Branch("scan", _pulse("a", 0), None, _pulse("long_a", 0, 50))
+    advancing = Join(choice) if nested else choice
+    joined = Join([advancing, choice], _pulse("b", 1))
+    result = shots(_program([joined], lambda prog: prog.emit(joined)))
+    assert [waves(s) for s in result] == [[0, 0, 28], [0], [0, 0, 56]] * 2
+    assert [s.body_end_cycle - s.start_cycle for s in result] == [56, 28, 112] * 2
+    assert [s.end_cycle - s.start_cycle for s in result] == [56, 28, 112] * 2
+
+
+@pytest.mark.parametrize("nested", [False, True])
+def test_module_join_rejects_two_advancing_parallel_sequences(nested):
+    left = Branch("scan", _pulse("a", 0), None, None)
+    right = ScanWith("inner", [7, 9], "value").add_content(_pulse("b", 1))
+    joined = Join(Join(left) if nested else left, [right, right])
+    with pytest.raises(
+        ValueError, match="parallel admission.*multiple reference-advancing branches"
+    ):
+        _program([joined], lambda prog: prog.emit(joined))
+
+
+@pytest.mark.parametrize("inside_case", [False, True])
+def test_module_join_checks_unknown_effects_even_after_an_advancing_operation(
+    inside_case,
+):
+    unknown = _NativeSequence("unknown", lambda prog: prog.append_macro(Macro()))
+    choice = (
+        Branch("scan", [_pulse("a", 0), unknown], None, None)
+        if inside_case
+        else Branch("scan", _pulse("a", 0), None, None)
+    )
+    joined = Join(choice if inside_case else [choice, unknown], _pulse("b", 1))
+    with pytest.raises(
+        ValueError, match="parallel admission.*unknown reference effect.*Macro"
+    ):
+        _program([joined], lambda prog: prog.emit(joined))
+
+
+@pytest.mark.parametrize("access", ["RR", "RW", "WR", "WW"])
+@pytest.mark.parametrize("alias", [False, True])
+def test_module_join_exchange_checks_physical_register_dependencies(access, alias):
+    def initialize(prog):
+        for name in ("shared", "left_sink", "right_sink"):
+            prog.add_reg(name)
+
+    def operation(mode, sink, use_alias):
+        def lower(prog):
+            name = prog.reg_dict["shared"].full_addr() if use_alias else "shared"
+            if mode == "R":
+                prog.write_reg(sink, name)
+            else:
+                prog.write_reg(name, 7)
+
+        return lower
+
+    left = _NativeSequence("left", operation(access[0], "left_sink", False))
+    right = _NativeSequence("right", operation(access[1], "right_sink", alias))
+    choice = Branch("scan", _pulse("a", 0), None, _pulse("long_a", 0, 50))
+    joined = Join([left, choice], [right, _pulse("b", 1)])
+
+    def body(prog):
+        prog.emit(joined)
+
+    if access == "RR":
+        result = shots(_program([joined], body, initialize=initialize))
+        assert [waves(s) for s in result] == [[0, 0], [0], [0, 0]] * 2
+        assert [s.body_end_cycle - s.start_cycle for s in result] == [28, 28, 56] * 2
+    else:
+        with pytest.raises(
+            ValueError, match="parallel exchange.*register/word conflict.*r0"
+        ):
+            _program([joined], body, initialize=initialize)
+
+
+@pytest.mark.parametrize("shared_wave", [False, True])
+def test_module_join_exchange_checks_persistent_wave_words(shared_wave):
+    a, b = _pulse("a", 0), _pulse("b", 1)
+
+    def patch(template):
+        return _NativeSequence(
+            "patch",
+            lambda prog: prog.append_macro(
+                PatchWmemFromRegs(name=template.pulse_id, freq_reg="frequency")
+            ),
+        )
+
+    choice = Branch("scan", a, None, a)
+    joined = Join([patch(a), choice], [patch(a if shared_wave else b), b])
+    initialize = _declare_registers("frequency")
+    if shared_wave:
+        with pytest.raises(
+            ValueError, match="parallel exchange.*register/word conflict.*wmem"
+        ):
+            _program([joined], lambda prog: prog.emit(joined), initialize=initialize)
+    else:
+        result = shots(
+            _program([joined], lambda prog: prog.emit(joined), initialize=initialize)
+        )
+        assert [waves(s) for s in result] == [[0, 0], [0], [0, 0]] * 2
+        assert [s.body_end_cycle - s.start_cycle for s in result] == [28] * 6
+
+
+@pytest.mark.parametrize("swapped", [False, True])
+def test_module_join_unknown_word_effects_only_reject_when_exchange_is_needed(swapped):
+    choice = Branch("scan", _pulse("a", 0), None, None)
+    # Native trigger has known stable reference semantics. Its output/port
+    # effects are not certified by the parallel register/word summary.
+    output = _NativeSequence("output", lambda prog: prog.trigger(t=0))
+    joined = Join(choice, output) if swapped else Join(output, choice)
+    if swapped:
+        with pytest.raises(
+            ValueError, match="parallel exchange.*unknown register/word effects"
+        ):
+            _program([joined], lambda prog: prog.emit(joined))
+    else:
+        assert len(shots(_program([joined], lambda prog: prog.emit(joined)))) == 6
+
+
+@pytest.mark.parametrize("empty", [False, True])
+def test_module_join_cannot_bypass_wait_only_parent_via_internal_forks(empty):
+    choice = Branch("scan", _pulse("a", 0), None, _pulse("long_a", 0, 50))
+    joined = Join(None if empty else _pulse("b", 1))
+
+    def body(prog):
+        prog.fork("default", into="waiting")
+        prog.delay_timeline(100 / 430.08, timeline="waiting")
+        prog.emit(choice)
+        prog.emit(joined, timeline="waiting")
+
+    with pytest.raises(ValueError, match="timeline can only wait"):
+        _program([choice, joined], body)
+
+
+@pytest.mark.parametrize("bad_case", [0, 1, 2])
+def test_module_join_rejects_reverse_generator_fifo_in_every_branch_case(bad_case):
+    cases: list[Module | None] = [None, None, None]
+    cases[bad_case] = _pulse("a", 0)
+    choice = Branch("scan", *cases)
+    joined = Join(choice, _pulse("late", 0, pre=100 / 430.08))
+    with pytest.raises(ValueError, match="channel 0 pulse overlap"):
+        _program([joined], lambda prog: prog.emit(joined))
+
+
+def test_module_join_rejects_reverse_generator_fifo_across_entire_sweep():
+    choice = Branch("scan", *[_pulse("a", 0, pre=50 / 430.08)] * 3)
+    late = _pulse("swept", 0, pre=QickSweep1D("scan", 0, 100 / 430.08))
+    joined = Join(choice, late)
+    # At the first point B ends28 before A50. Later points overlap or enqueue
+    # B100 before A50. Compilation must prove all points, not sample the first.
+    with pytest.raises(ValueError, match="channel 0 pulse overlap"):
+        _program([joined], lambda prog: prog.emit(joined))
+
+
+@pytest.mark.parametrize("register", [False, True])
+@pytest.mark.parametrize("safe", [False, True])
+def test_module_join_preserves_repeat_backedge_guards_without_padding(register, safe):
+    a = _pulse("a", 0, 50, post=0 if safe else -28 / 430.08)
+    choice = Branch("scan", a, a, a)
+    joined = Join(choice, _pulse("b", 1))
+
+    def body(prog):
+        prog.write_reg("count", 2)
+        with prog.repeat(
+            "pair", "count" if register else 2, range_hint=(2, 3) if register else None
+        ):
+            prog.emit(joined)
+
+    def compile_program():
+        return _program([joined], body, initialize=_declare_registers("count"))
+
+    if safe:
+        result = shots(compile_program())
+        assert [waves(s) for s in result] == [[0, 0, 56, 56]] * 6
+        assert [s.body_end_cycle - s.start_cycle for s in result] == [112] * 6
+        assert [s.end_cycle - s.start_cycle for s in result] == [112] * 6
+    else:
+        with pytest.raises(ValueError, match="channel 0 pulse overlap"):
+            compile_program()
+
+
+@pytest.mark.parametrize("swapped", [False, True])
+def test_module_join_does_not_inspect_unknown_native_scratch_without_exchange(swapped):
+    update = _NativeSequence("update", lambda prog: prog.inc_reg("value", 2**24))
+    choice = Branch("scan", update, update, update)
+    other = _pulse("b", 1)
+    joined = Join(choice, other) if swapped else Join(other, choice)
+    initialize = _declare_registers("value")
+    if swapped:
+        with pytest.raises(
+            ValueError, match="parallel exchange.*unknown register/word effects"
+        ):
+            _program([joined], lambda prog: prog.emit(joined), initialize=initialize)
+    else:
+        result = shots(
+            _program([joined], lambda prog: prog.emit(joined), initialize=initialize)
+        )
+        assert [waves(s) for s in result] == [[0]] * 6
+        assert [s.body_end_cycle - s.start_cycle for s in result] == [28] * 6
+
+
+@pytest.mark.parametrize("alias", ["w0", "w_freq"])
+def test_module_join_does_not_exclude_native_wave_scratch_with_external_readers(alias):
+    read = _NativeSequence("read", lambda prog: prog.write_reg("value", alias))
+    choice = Branch("scan", _pulse("a", 0), None, None)
+    joined = Join(choice, [read, _pulse("b", 1)])
+    with pytest.raises(
+        ValueError, match="parallel exchange.*register/word conflict.*w0"
+    ):
+        _program(
+            [joined],
+            lambda prog: prog.emit(joined),
+            initialize=_declare_registers("value"),
+        )
+
+
+def test_module_join_rejects_unknown_reference_hidden_by_native_delay_adapter():
+    class CustomDelay(NativeDelay):
+        pass
+
+    unknown = _NativeSequence(
+        "unknown",
+        lambda prog: prog.append_macro(
+            CustomDelay(t=0, auto=True, gens=True, ros=True)
+        ),
+    )
+    joined = Join(unknown, _pulse("b", 1))
+    with pytest.raises(
+        ValueError, match="parallel admission.*unknown reference effect.*CustomDelay"
+    ):
+        _program([joined], lambda prog: prog.emit(joined))
+
+
+def test_module_join_preserves_known_readout_provenance_and_parallel_origin():
+    readout = PulseReadout(
+        "read",
+        PulseReadoutCfg(
+            gen_ch=1,
+            nqz=1,
+            freq=1000,
+            gain=0.5,
+            waveform=ConstWaveformCfg(length=0.3),
+            pre_delay=0.05,
+            post_delay=0.02,
+            ro_ch=0,
+            ro_length=0.4,
+            trig_offset=0.1,
+        ),
+    )
+    choice = Branch("scan", _pulse("a", 0), None, _pulse("long_a", 0, 50))
+    joined = Join(readout, choice)
+    result = shots(_program([joined], lambda prog: prog.emit(joined)))
+    # Readout config0, playback22 and ADC43..215.2 plus post8.6016
+    # finish at224, independent of the shorter Branch's28/0/56 advance.
+    assert [waves(s) for s in result] == [[0, 22, 0], [0, 22], [0, 22, 0]] * 2
+    assert [s.body_end_cycle - s.start_cycle for s in result] == [224] * 6
+    assert [s.end_cycle - s.start_cycle for s in result] == [224] * 6
+
+
+@pytest.mark.parametrize("register", ["s2", "s_cfg", "s_ctrl"])
+def test_module_join_rejects_unknown_processor_control_register_effects(register):
+    control = _NativeSequence("control", lambda prog: prog.write_reg(register, 0))
+    joined = Join(control, _pulse("b", 1))
+    with pytest.raises(
+        ValueError, match="parallel admission.*unknown reference effect"
+    ):
+        _program([joined], lambda prog: prog.emit(joined))
+
+
+@pytest.mark.parametrize("register", ["s1", "s_rand", "s11", "s_usr_time"])
+def test_module_join_cannot_exchange_volatile_register_reads_as_pure_reads(register):
+    read = _NativeSequence("read", lambda prog: prog.write_reg("value", register))
+    choice = Branch("scan", _pulse("a", 0), None, None)
+    joined = Join(choice, read)
+    with pytest.raises(
+        ValueError, match="parallel exchange.*unknown register/word effects"
+    ):
+        _program(
+            [joined],
+            lambda prog: prog.emit(joined),
+            initialize=_declare_registers("value"),
+        )
 
 
 def test_module_join_reference_advancing_child_preserves_parallel_origin():

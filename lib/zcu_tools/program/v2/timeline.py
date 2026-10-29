@@ -1,6 +1,6 @@
 """Native QICK programs with timeline ends relative to reference time."""
 
-from collections.abc import Generator, Mapping
+from collections.abc import Generator, Mapping, Sequence
 from contextlib import contextmanager
 from typing import override
 
@@ -30,6 +30,7 @@ from ._timeline_outputs import (
     TimelinePlacedPulse,
     TimelinePlacedTrigger,
 )
+from ._timeline_parallel import TimelineParallel
 from ._timeline_runtime import RuntimeEnd
 from ._timeline_selected import SelectedPlayback, TimelineSelectedPulse
 from ._timeline_state import TimelineBook
@@ -133,7 +134,7 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
                 macro.dependencies,
                 macro.dependency_ranges,
             )
-        if isinstance(macro, (ModuleEmission, TimeProducer)):
+        if isinstance(macro, (ModuleEmission, TimeProducer, TimelineParallel)):
             for child in macro.macros:
                 self._observe_time_producers(child)
         if isinstance(macro, TimelineBranch):
@@ -284,6 +285,7 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         Omitted timeline selects ordinary default, not reference time. Internal
         events share its current end; actual output ends plus owner post-delay
         determine the ceiled end without moving reference time.
+        Branch/ScanWith retain native path/iteration reference synchronization.
         DelayAuto is native reference advance and rejects explicit timelines.
         Undeclared objects raise ValueError; owner lowering failures propagate.
         """
@@ -307,6 +309,39 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
                 tag,
                 emission_name=emission_name,
             )
+        )
+
+    def emit_parallel(
+        self,
+        branches: Sequence[Sequence[Module]],
+        *,
+        timeline: str,
+        tag: str | None = None,
+    ) -> None:
+        """Lower ordered Module sequences at one placement origin and merge ends.
+
+        Call from a declared Module's lower. Each complete branch keeps its
+        internal order. The unique reference-advancing sequence emits last;
+        multiple advancing sequences and unknown reference effects fail.
+        Exchanged branches require independent physical register/word effects.
+        A wait-only parent rejects placement, including empty branches. Existing
+        channel physical-end and structured case/backedge guards still apply.
+        tag belongs to the first child in author order, before any exchange.
+        """
+        names = [self.emission_name("join_branch") for _ in branches]
+        lowered: list[list[Macro]] = []
+        start = len(self.macro_list)
+        try:
+            for name, modules in zip(names, branches, strict=True):
+                branch_start = len(self.macro_list)
+                for module in modules:
+                    self.emit(module, timeline=name, tag=tag)
+                    tag = None
+                lowered.append(self.macro_list[branch_start:])
+        finally:
+            del self.macro_list[start:]
+        self.append_macro(
+            TimelineParallel(self._timeline_book, timeline, lowered, names)
         )
 
     def emission_name(self, stem: str) -> str:

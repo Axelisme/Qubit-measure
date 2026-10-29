@@ -1,6 +1,6 @@
 # program/v2/modules — semantic program modules
 
-**Last updated:** 2026-10-30，selected playback、paired post 與全流 table-relation 稽核
+**Last updated:** 2026-10-30，Branch 與平行 Join lowering
 
 **讀者：** lab-author、framework-dev、agent。語意 program modules 的宣告、發射與 owner 邊界速查。
 
@@ -19,7 +19,7 @@ without leaking hardware register choreography into experiment classes.
 
 ## 原生寫法
 
-Pulse、Delay、SoftDelay、DelayAuto、PulseReadout、Reset 系列、LoadValue、LoadWord、ScanWith、ComputedPulse、TableLengthPulse、TablePulseReadout 與 MuxReadout 提供原生 lowering。
+Pulse、Delay、SoftDelay、DelayAuto、PulseReadout、Reset 系列、LoadValue、LoadWord、ScanWith、Branch、Join、ComputedPulse、TableLengthPulse、TablePulseReadout 與 MuxReadout 提供原生 lowering。
 每次 `emit` 建立一個 `timeline.ModuleEmission`，保存該次原生指令與 tag。
 Module 不是 QICK Macro，不能直接交給 `append_macro`。
 同一宣告物件可重複發射，舊 module 的 tag 與 block_mode 不控制新路徑。
@@ -46,7 +46,17 @@ Repeat 內仍拒絕這個 native register reference 操作，具名 timeline 的
 
 PulseReadout 的 runtime gain／generator frequency／ADC frequency words 沿用既有 consumer。
 時間 guard 不限制這些非時間 words。Legacy init／run／block 保留供舊 program 使用。
-其餘 module 的新 lowering 屬於後續階段，不因 legacy 可用就表示可直接 emit。
+未列出的 module 不因 legacy 可用就表示可直接 emit。
+
+Branch 保留 selector 與 case 次序，每個 case 只同步自身使用的 timeline，不補成共同最長長度。
+Module Join 發射平行 sequences，保留每個 sequence 內的 Module 次序，並合併實際 end。
+Program emission owner 依 lowered operations 彙總 reference effects，將唯一會推進 reference 的 sequence 移到最後。
+零個推進型 sequence 保留次序，兩個以上或未知 reference effect 都拒絕。
+交換時，owner 以實際 register 與 wmem identity 檢查 RW、WR、WW，包含 register aliases。
+未知 resource effects 拒絕交換。Compiler 配置的 register 不會自動視為 scratch，原有 producer provenance 與翻譯後全流稽核照常執行。
+同 generator 的 physical-end、全部 case 與 Repeat backedge guards 繼續檢查，不加 padding 或 reference rewind。
+TableLengthPulse Join 保留獨立 generators、共用 index 與相同 table count，逐 index 合併 runtime maximum。
+`prog.join` 只合併既有 timeline ends，不發射 children。
 
 同一個宣告物件可在 body 重複使用。例如以下 `TimelineProgramV2` hooks 只累加等待結尾：
 
