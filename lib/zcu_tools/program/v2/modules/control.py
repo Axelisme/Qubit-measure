@@ -104,7 +104,7 @@ class Repeat(Module):
 
         cur_t = 0.0
         for mod in self.sub_modules:
-            cur_t = mod.run(prog, cur_t)
+            cur_t = mod.emit(prog, cur_t)
         prog.delay(t=cur_t)
         prog.delay_auto(t=0.0)
 
@@ -174,7 +174,7 @@ class Branch(Module):
                     prog.debug_macro(
                         f"{type(mod).__name__}({mod.name})", cur_t, prefix="\t"
                     )
-                cur_t = mod.run(prog, cur_t)
+                cur_t = mod.emit(prog, cur_t)
 
             # Swept-duration branches cannot be balanced with one scalar tail delay.
             if isinstance(cur_t, QickParam):

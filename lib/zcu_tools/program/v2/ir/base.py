@@ -6,6 +6,7 @@ from typing import Any
 from qick.asm_v2 import QickProgramV2
 
 from .compiled_stream import CompiledStream
+from .instructions import MetaInst
 from .linker import IRLinker
 from .pipeline import make_default_pipeline
 
@@ -96,7 +97,29 @@ class IRCompileMixin(QickProgramV2):
         dmem_base = len(getattr(self, "_dmem_buffer", []))
 
         pipeline = make_default_pipeline(pmem_capacity=self.tproccfg["pmem_size"])
-        opt_insts, ctx = pipeline(logical_insts, dmem_base_offset=dmem_base)
+        # QICK owns native sweep increments/resets. These artifact annotations
+        # must not ask IRParser to discard and rebuild that control shell.
+        optimizer_insts = [
+            inst
+            for inst in logical_insts
+            if not (
+                isinstance(inst, MetaInst)
+                and (
+                    inst.type in {"SOURCE_START", "SOURCE_END"}
+                    or (
+                        inst.type
+                        in {
+                            "LOOP_START",
+                            "LOOP_BODY_START",
+                            "LOOP_BODY_END",
+                            "LOOP_END",
+                        }
+                        and inst.info.get("native") is True
+                    )
+                )
+            )
+        ]
+        opt_insts, ctx = pipeline(optimizer_insts, dmem_base_offset=dmem_base)
 
         opt_prog_list, opt_labels, opt_meta_infos, cursor = linker.link(opt_insts)
 

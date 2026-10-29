@@ -236,8 +236,8 @@ class Join(Module):
             with prog.disable_delay():
                 for pulse in self.table_pulses:
                     pulse.play_parallel(prog)
-            self._duration_loader.run(prog)
-            return self._wait.run(prog)
+            self._duration_loader.emit(prog)
+            return self._wait.emit(prog)
 
         logger.debug(
             "Join.run: %d parallel branches, t=%s",
@@ -278,7 +278,7 @@ class Join(Module):
                         f"{type(mod).__name__}({mod.name})", cur_t, prefix="\t"
                     )
 
-                cur_t_list[i] = mod.run(prog, cur_t)
+                cur_t_list[i] = mod.emit(prog, cur_t)
 
         return merge_max_length(*cur_t_list)
 

@@ -214,6 +214,13 @@ Scalar and pre/post-delay timing keep their existing rules.
 
 ## Design Boundaries
 
+Legacy programs and composite Modules call `Module.emit(prog, t)` after `init`.
+It runs the existing `run` behavior inside `prog.source_scope(module.name)`.
+Each child emission gets its own nested diagnostic source, even when pulse
+registration shares a waveform or `PulseCfg`. Ending a child restores its
+parent source. These annotations add no machine instructions. The snapshot and
+optimizer-input distinction is defined in [IR compile snapshot](../ir/README.md#pre-optimization-compile-snapshot).
+
 - Keep scalar values and raw hardware words as distinct module contracts. Expanding
   `LoadValue` to uint32 would make arithmetic/scalar users ambiguous and weaken
   compression assumptions.

@@ -379,7 +379,7 @@ class PulseReadout(AbsReadout):
             self._run_readout_config_from_regs(prog, runtime_ro_name, t)
 
         if not self._uses_runtime_pulse:
-            self.pulse.run(prog, t)
+            self.pulse.emit(prog, t)
         else:
             runtime_pulse = self._runtime_pulse
             assert runtime_pulse is not None
@@ -555,7 +555,7 @@ class TablePulseReadout(AbsReadout):
     def run(
         self, prog: ModularProgramV2, t: float | QickParam = 0.0
     ) -> float | QickParam:
-        return self._readout.run(prog, t)
+        return self._readout.emit(prog, t)
 
     def allow_rerun(self) -> bool:
         return True
