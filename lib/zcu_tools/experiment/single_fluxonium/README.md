@@ -113,6 +113,8 @@ independent. `ConditionalSums.event_indices` retains original logical event IDs,
 so a terminal-only ADC does not relabel terminal as event zero. Preflight binds
 the current settings and snapshot. Changing source settings before preparation
 raises `ValueError`; request arrays must remain unchanged between those calls.
+Preparation uses this preflight call's template digests without hashing again.
+The next preflight rereads all array bytes, including after a cache hit.
 
 Standalone `prepare(request, snapshot)` uses the same owner with one receiver.
 Its `channel` property returns that receiver. Multi-ADC callers use `channels`;

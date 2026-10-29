@@ -201,6 +201,8 @@ class SingleFluxoniumPreflight:
     settings: exact source settings at validation; changing them invalidates this record.
     receivers: ordered calibrations, one per requested ADC, with unique ro_ch.
     plans: corresponding per-receiver template plans on the common logical event axis.
+    template_digests: exact template-content hashes from this validation call,
+        in request order. Preparation uses them under the unchanged-array contract.
     Construct with SingleFluxoniumSource.preflight, then pass unchanged to
     prepare_readouts on that source. Borrowed request arrays must remain unchanged.
     """
@@ -210,6 +212,7 @@ class SingleFluxoniumPreflight:
     settings: SingleFluxoniumSettings
     receivers: tuple[Receiver, ...]
     plans: tuple[tuple[SingleFluxoniumPlan, ...], ...]
+    template_digests: tuple[bytes, ...]
 
 
 @dataclass(frozen=True)
@@ -493,29 +496,15 @@ class SingleFluxoniumSource:
             raise ValueError(
                 "single fluxonium requires the complete calibrated receiver set"
             )
-        digest = sha256(
-            repr(
-                (
-                    self.settings.model_dump_json(),
-                    self.effective_settings.model_dump_json(),
-                    snapshot,
-                    replay.replay_versions(),
-                    self._readout_kind,
-                    tuple(receiver.model_dump_json() for receiver in receivers),
-                    request.readouts,
-                    request.point_dims,
-                    request.loop_dims,
-                    request.avg_level,
-                    request.mode,
-                )
-            ).encode()
-        )
-        for template in request.templates:
-            digest.update(_template_digest(template))
-        key = digest.digest()
+        key, template_digests = self._preflight_digest(request, snapshot, receivers)
         if self._preflight_key == key:
             return SingleFluxoniumPreflight(
-                request, snapshot, self.settings, receivers, self._preflight_plans
+                request,
+                snapshot,
+                self.settings,
+                receivers,
+                self._preflight_plans,
+                template_digests,
             )
         self._preflight_key = None
         self._preflight_plans = ()
@@ -548,8 +537,44 @@ class SingleFluxoniumSource:
             self._preflight_key = key
             self._preflight_plans = observation_set
         return SingleFluxoniumPreflight(
-            request, snapshot, self.settings, receivers, observation_set
+            request,
+            snapshot,
+            self.settings,
+            receivers,
+            observation_set,
+            template_digests,
         )
+
+    def _preflight_digest(
+        self,
+        request: AcquireRequest,
+        snapshot: EnvironmentSnapshot,
+        receivers: tuple[Receiver, ...],
+    ) -> tuple[bytes, tuple[bytes, ...]]:
+        """Read content once for plan lookup and the ensuing unchanged preparation."""
+        digest = sha256(
+            repr(
+                (
+                    self.settings.model_dump_json(),
+                    self.effective_settings.model_dump_json(),
+                    snapshot,
+                    replay.replay_versions(),
+                    self._readout_kind,
+                    tuple(receiver.model_dump_json() for receiver in receivers),
+                    request.readouts,
+                    request.point_dims,
+                    request.loop_dims,
+                    request.avg_level,
+                    request.mode,
+                )
+            ).encode()
+        )
+        template_digests = tuple(
+            _template_digest(template) for template in request.templates
+        )
+        for template_digest in template_digests:
+            digest.update(template_digest)
+        return digest.digest(), template_digests
 
     def prepare(
         self,
@@ -578,6 +603,8 @@ class SingleFluxoniumSource:
         All receivers share physical paths, but retain their own calibration and
         emitted read columns. Different ADC noise remains independent.
         Changed settings raise ValueError. No receiver is synthesized.
+        Preflight's per-template digests remain valid only while the borrowed
+        request arrays stay unchanged; preparation does not rehash those arrays.
 
         Prepare noiseless ADC inputs; used by the serialized acquire session.
 
@@ -615,8 +642,8 @@ class SingleFluxoniumSource:
                     )
                 ).encode()
             )
-            for template in request.templates:
-                digest.update(_template_digest(template))
+            for template_digest in validated.template_digests:
+                digest.update(template_digest)
             key = digest.digest()
             if (
                 self._prepared is not None
