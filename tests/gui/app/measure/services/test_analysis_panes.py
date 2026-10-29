@@ -322,6 +322,7 @@ def test_pane_post_uses_adopted_fit_and_projects_separate_artifacts_and_writebac
         MagicMock(),
         form_resources(panes.state),
         MagicMock(),
+        writeback=panes.writeback,
     ).get_snapshot(panes.tab_id)
     assert snapshot.analysis is not None and snapshot.post_analysis is not None
     assert snapshot.analysis.figures is panes.fit_plots

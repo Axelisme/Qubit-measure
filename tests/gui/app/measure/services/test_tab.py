@@ -32,8 +32,16 @@ from zcu_tools.gui.app.measure.state import (
     Session,
     State,
 )
-from zcu_tools.gui.app.measure.writeback import WritebackDraft, WritebackService
+from zcu_tools.gui.app.measure.writeback import (
+    ParameterWriteback,
+    WritebackService,
+)
+from zcu_tools.gui.event_bus import BaseEventBus
+from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
+from zcu_tools.gui.session.services.context import ContextService
+from zcu_tools.gui.session.state import SessionState
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
+from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
 from tests.gui.app.measure._cfg_fakes import (
     parameter_capture,
@@ -76,6 +84,7 @@ def test_tab_snapshot_is_single_pure_render_model() -> None:
         MagicMock(),
         form_resources(state),
         form_sources=lambda aliases: form_sources(state, aliases),
+        writeback=MagicMock(),
     )
 
     snapshot = service.get_snapshot("tab")
@@ -126,6 +135,7 @@ def test_snapshot_projects_analysis_presence(publication: str, stage: str) -> No
         MagicMock(),
         form_resources(state),
         form_sources=lambda aliases: form_sources(state, aliases),
+        writeback=MagicMock(),
     )
 
     snapshot = service.get_snapshot("tab")
@@ -137,11 +147,46 @@ def test_snapshot_projects_analysis_presence(publication: str, stage: str) -> No
     assert pane.figures is plots
 
 
+def _writeback_factory() -> WritebackService:
+    context = ContextService(
+        SessionState(SessionEnv(parameters=None, soc=None, soccfg=None)),
+        BaseEventBus(),
+        bind_assets=ArbWaveformDatabase.info_at,
+    )
+    return WritebackService(context, arb_names=lambda: ())
+
+
+@pytest.mark.parametrize("stage", ["analysis", "post_analysis"])
+@pytest.mark.parametrize("closed", [False, True])
+def test_snapshot_rejects_foreign_draft(stage: str, closed: bool) -> None:
+    state = _active_state()
+    local, other = _writeback_factory(), _writeback_factory()
+    foreign = other.create_draft(
+        [ParameterWriteback("general.ext.a", "foreign", proposed_value=9)],
+        parameters=None,
+        experiment_name="synthetic",
+    )
+    state.add_tab(
+        "tab", Session(adapter_name="synthetic", adapter=MagicMock(), cfg=MagicMock())
+    )
+    if closed:
+        foreign.teardown()
+    getattr(state.get_tab("tab"), stage).writeback_draft = foreign
+    tabs = TabService(
+        state,
+        MagicMock(),
+        form_resources(state),
+        form_sources=lambda aliases: form_sources(state, aliases),
+        writeback=local,
+    )
+    with pytest.raises(InvalidInputError, match="unknown writeback draft"):
+        tabs.get_snapshot("tab")
+
+
 def test_snapshot_projects_empty_writeback_draft_existence() -> None:
     state = _active_state()
-    draft = WritebackService(MagicMock(), arb_names=lambda: ()).create_draft(
-        [], parameters=None, experiment_name="fake"
-    )
+    factory = _writeback_factory()
+    draft = factory.create_draft([], parameters=None, experiment_name="fake")
     state.add_tab(
         "tab",
         Session(
@@ -156,6 +201,7 @@ def test_snapshot_projects_empty_writeback_draft_existence() -> None:
         MagicMock(),
         form_resources(state),
         form_sources=lambda aliases: form_sources(state, aliases),
+        writeback=factory,
     ).get_snapshot("tab")
 
     assert snapshot.analysis is not None
@@ -163,10 +209,11 @@ def test_snapshot_projects_empty_writeback_draft_existence() -> None:
     assert snapshot.analysis.writeback_items == ()
 
 
-def test_snapshot_propagates_writeback_preview_failure() -> None:
+def test_snapshot_rejects_closed_owned_draft() -> None:
     state = _active_state()
-    draft = MagicMock(spec=WritebackDraft)
-    draft.preview.side_effect = RuntimeError("broken draft")
+    factory = _writeback_factory()
+    draft = factory.create_draft([], parameters=None, experiment_name="synthetic")
+    draft.teardown()
     state.add_tab(
         "tab",
         Session(
@@ -176,12 +223,13 @@ def test_snapshot_propagates_writeback_preview_failure() -> None:
             analysis=AnalysisPaneState(writeback_draft=draft),
         ),
     )
-    with pytest.raises(RuntimeError, match="broken draft"):
+    with pytest.raises(FailedPreconditionError, match="torn down"):
         TabService(
             state,
             MagicMock(),
             form_resources(state),
             form_sources=lambda aliases: form_sources(state, aliases),
+            writeback=factory,
         ).get_snapshot("tab")
 
 
@@ -202,6 +250,7 @@ def test_snapshot_projects_running_owner_without_session_run_flag() -> None:
         MagicMock(),
         form_resources(state),
         form_sources=lambda aliases: form_sources(state, aliases),
+        writeback=MagicMock(),
     )
 
     running = service.get_snapshot("running").interaction
@@ -253,6 +302,7 @@ def test_snapshot_carries_post_analyze_fields() -> None:
         MagicMock(),
         form_resources(state),
         form_sources=lambda aliases: form_sources(state, aliases),
+        writeback=MagicMock(),
     )
 
     snapshot = service.get_snapshot("tab")
@@ -285,6 +335,7 @@ def test_initialize_post_analyze_params_seeds_from_primary_result() -> None:
         MagicMock(),
         form_resources(state),
         form_sources=lambda aliases: form_sources(state, aliases),
+        writeback=MagicMock(),
     )
 
     out = service.initialize_tab_post_analyze_params("tab")
@@ -312,6 +363,7 @@ def test_initialize_post_analyze_params_fast_fails_without_primary_result() -> N
         MagicMock(),
         form_resources(state),
         form_sources=lambda aliases: form_sources(state, aliases),
+        writeback=MagicMock(),
     )
 
     with pytest.raises(RuntimeError, match="primary analyze result"):
@@ -324,6 +376,7 @@ def _native_snapshot(session: NativeSaveSession) -> TabSnapshot:
         registry=MagicMock(),
         cfg_resources=MagicMock(),
         form_sources=MagicMock(),
+        writeback=MagicMock(),
     ).get_snapshot("tab")
 
 

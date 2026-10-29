@@ -203,6 +203,7 @@ def test_tab_without_context_saves_recorded_names_not_later_selection(
             empty_state,
             registry,
             form_resources(empty_state),
+            writeback=MagicMock(),
             form_sources=lambda aliases: form_sources(empty_state, aliases),
         )
         tab_id = tabs.new_tab("pure")

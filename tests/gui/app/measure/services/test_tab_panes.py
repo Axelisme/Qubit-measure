@@ -17,6 +17,7 @@ from zcu_tools.gui.app.measure.state import (
     AnalysisPaneState,
     PostAnalysisPaneState,
 )
+from zcu_tools.gui.app.measure.writeback import ParameterWriteback, WritebackService
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from zcu_tools.resources.entry import ArtifactKey
 
@@ -51,7 +52,15 @@ def test_snapshot_exposes_independent_panes_and_paths(
     post_plots = Plots(NonPresentingHost())
     post_plots.subplots("fit")
     post_plots.finish()
-    primary_draft, post_draft = MagicMock(), MagicMock()
+    writeback = WritebackService(session.context, arb_names=lambda: ())
+    primary_draft, post_draft = (
+        writeback.create_draft(
+            [ParameterWriteback("general.ext.a", description, proposed_value=value)],
+            parameters=session.context.read_context(),
+            experiment_name="synthetic",
+        )
+        for description, value in (("primary", 1), ("post", 2))
+    )
     commit_analysis(
         state,
         tab_id,
@@ -72,15 +81,19 @@ def test_snapshot_exposes_independent_panes_and_paths(
             writeback_draft=post_draft,
         ),
     )
-    primary_draft.preview.return_value = ["primary-item"]
-    post_draft.preview.return_value = ["post-item"]
-    tabs = TabService(state, MagicMock(), form_resources(state), MagicMock())
+    tabs = TabService(
+        state, MagicMock(), form_resources(state), MagicMock(), writeback=writeback
+    )
     snapshot = tabs.get_snapshot(tab_id)
     assert snapshot.run is not None and snapshot.run.result is run_result
     assert snapshot.analysis is not None and snapshot.analysis.result is primary
     assert snapshot.post_analysis is not None and snapshot.post_analysis.result is post
-    assert snapshot.analysis.writeback_items == ("primary-item",)
-    assert snapshot.post_analysis.writeback_items == ("post-item",)
+    assert [item.description for item in snapshot.analysis.writeback_items] == [
+        "primary"
+    ]
+    assert [item.description for item in snapshot.post_analysis.writeback_items] == [
+        "post"
+    ]
     assert [
         artifact.ref for section in snapshot.artifacts for artifact in section.artifacts
     ] == [
@@ -146,7 +159,9 @@ def test_named_panes_project_paths_and_retire_original_collections(
     commit_post_analysis(
         state, tab_id, PostAnalysisPaneState(result=PostSummary(), plots=post)
     )
-    tabs = TabService(state, MagicMock(), form_resources(state), MagicMock())
+    tabs = TabService(
+        state, MagicMock(), form_resources(state), MagicMock(), writeback=MagicMock()
+    )
     snapshot = tabs.get_snapshot(tab_id)
     assert (
         snapshot.analysis is not None

@@ -35,6 +35,7 @@ if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.state import PaneTransitionPreview, State
     from zcu_tools.resources.entry import StorageBinding
 
+    from ..writeback import WritebackService
     from .tab_form import TabFormResources, TabFormSources
 
 
@@ -69,17 +70,22 @@ class TabService:
         registry: Registry,
         cfg_resources: TabFormResources,
         form_sources: Callable[[Mapping[str, str] | None], TabFormSources],
+        *,
+        writeback: WritebackService,
     ) -> None:
         """Inject one owner-sequence form source capture for Open and Reset only.
 
         form_sources captures parameters/library/devices/value cache with optional
         named aliases overrides. It performs no hardware I/O.
+        writeback identifies the factory allowed to supply pane drafts; foreign
+        drafts fail snapshot reads with InvalidInputError before preview.
         Errors propagate before registering a new tab.
         """
         self._state = state
         self._registry = registry
         self._cfg_resources = cfg_resources
         self._form_sources = form_sources
+        self._writeback = writeback
 
     def preview_pane_transition(
         self, tab_id: str, stage: Literal["analysis", "post_analysis"]
@@ -109,6 +115,7 @@ class TabService:
             draft = pane.writeback_draft
             if draft is None:
                 return ()
+            draft.validate_selection(self._writeback, ())
             return tuple(draft.preview())
 
         analysis_items = _items_for_pane(tab.analysis)

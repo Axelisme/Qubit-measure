@@ -185,6 +185,7 @@ class WritebackControlFacet:
         """
         self._guard.require_admission(tab_id, TabAction.WRITEBACK)
         draft = self._draft_for_pane(tab_id, pane)
+        draft.validate_selection(self._writeback, ())
         return draft.get_item_form(session_id)
 
     def set_writeback_item_for_pane(
@@ -192,6 +193,7 @@ class WritebackControlFacet:
     ) -> None:
         self._guard.require_admission(tab_id, TabAction.WRITEBACK)
         draft = self._draft_for_pane(tab_id, pane)
+        draft.validate_selection(self._writeback, ())
         draft.edit(session_id, **changes)
         self._emit_draft_changed(tab_id)
 
@@ -205,6 +207,7 @@ class WritebackControlFacet:
         self._guard.require_admission(tab_id, TabAction.WRITEBACK)
         draft = self._draft_for_pane(tab_id, pane)
         try:
+            draft.validate_selection(self._writeback, ())
             return draft.apply(item_ids=item_ids)
         finally:
             # The shared flow may have committed a successful prefix.
@@ -230,6 +233,7 @@ class WritebackControlFacet:
                     )
 
             try:
+                draft.validate_selection(self._writeback, ())
                 return draft.writeback_write(changes, on_applied=retain)
             finally:
                 self._emit_draft_changed(tab_id)
@@ -298,6 +302,7 @@ class WritebackControlFacet:
         propagate. Facts belong to this pane's creation capture, not active focus.
         """
         draft = self._draft_for_pane(tab_id, pane)
+        draft.validate_selection(self._writeback, ())
         return draft.preview_values(session_id=session_id)
 
     def get_writeback_summaries_for_pane(
@@ -309,6 +314,7 @@ class WritebackControlFacet:
             draft = self._draft_for_pane(tab_id, pane)
         except FailedPreconditionError:
             return {}
+        draft.validate_selection(self._writeback, ())
         return draft.get_all_summaries()
 
     def get_writeback_applied_for_pane(
@@ -318,6 +324,7 @@ class WritebackControlFacet:
             draft = self._draft_for_pane(tab_id, pane)
         except FailedPreconditionError:
             return {}
+        draft.validate_selection(self._writeback, ())
         return draft.get_all_applied()
 
     def _emit_draft_changed(self, tab_id: str) -> None:

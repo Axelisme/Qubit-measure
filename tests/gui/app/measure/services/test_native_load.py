@@ -99,6 +99,7 @@ def _native_controls(
         MagicMock(),
         form_resources(session.state),
         lambda aliases: form_sources(session.state, aliases),
+        writeback=writeback,
     )
     load = LoadService(session.state, plan_layout=session.save_service.plan_layout)
     run = RunService(
