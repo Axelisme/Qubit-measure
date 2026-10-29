@@ -18,6 +18,7 @@ from qick.qick_asm import (
 )
 
 from zcu_tools.cfg_model import Centroid3Classifier, CircleClassifier, ReadoutClassifier
+from zcu_tools.program._shot_processing import validated_payload
 from zcu_tools.program.herald import HeraldSpec, herald_ground_mask
 from zcu_tools.progress_bar import make_pbar
 from zcu_tools.utils.shot_classification import classify_shots, nearest_centroid3
@@ -28,6 +29,7 @@ __all__ = [
     "StoppedPartialAcquireError",
     "AcquisitionContractError",
     "TrackerProtocol",
+    "ShotProcessor",
 ]
 
 
@@ -54,6 +56,10 @@ class _LocalCancelFlag:
 
     def set(self) -> None:
         self._is_set = True
+
+
+# Per-shot normalized [I,Q] (shots, reads, 2) -> float64 (shots, out_reads, N).
+ShotProcessor: TypeAlias = Callable[[NDArray[np.float64]], NDArray[np.float64]]
 
 
 RoundHookType: TypeAlias = Callable[
@@ -890,4 +896,83 @@ class HeraldAcquireMixin(RoundHookMixin, SingleShotMixin):
 
 class ImproveAcquireMixin(
     HeraldAcquireMixin, TrackerMixin, SingleShotMixin, EarlyStopMixin
-): ...
+):
+    _processors: Mapping[int, ShotProcessor] | None = None
+
+    def acquire(
+        self, *args, _processors: Mapping[int, ShotProcessor] | None = None, **kwargs
+    ):
+        """Acquire through the existing IQ, classification and herald modifiers.
+
+        Omit _processors for ordinary acquisition. acquire_processed uses that
+        reserved dispatch option to replace per-shot processing. QICK options,
+        round hooks, cancellation and stepped ownership follow the existing
+        acquire pipeline; each new acquire resets processor output dimensions.
+        """
+        self._processors = _processors
+        self._processor_shapes: dict[int, tuple[int, ...]] = {}
+        return super().acquire(*args, **kwargs)
+
+    def acquire_processed(
+        self,
+        soc: object,
+        *,
+        processors: Mapping[int, ShotProcessor],
+        rounds: int = 1,
+        step_rounds: bool = False,
+        **qick_options: object,
+    ) -> list[NDArray[np.float64]] | None:
+        """Process each completed round's shots before averaging repetitions.
+
+        processors maps every declared ADC number to a callable receiving all
+        normalized float64 (shots, reads, 2) IQ, without offset subtraction.
+        Each returns float64 (shots, out_reads, N), with positive output axes
+        fixed per ADC through this acquire. Results follow ADC declaration order
+        and have shape (out_reads, *point_dims, N). Equal-size rounds have equal
+        weight; round_hook receives their cumulative mean and the cancel flag.
+        Ordinary QICK options are forwarded except threshold/angle and herald,
+        which raise ValueError. Invalid mappings or payloads raise ValueError;
+        processor exceptions propagate without publishing the failed round.
+        step_rounds=True prepares only and returns None; use finish_round,
+        prepare_round and finish_acquire to drive hardware rounds. Cancellation
+        discards incomplete rounds; no completed round raises
+        StoppedPartialAcquireError. Raw integer sums remain available via get_raw.
+        """
+        assert isinstance(self, qick_asm.AbsQickProgram)
+        for option in ("threshold", "angle", "herald"):
+            if option in qick_options:
+                raise ValueError(f"acquire_processed does not accept {option}")
+        if any(type(ch) is not int for ch in processors):
+            raise ValueError("processors ADC keys must be integers")
+        if processors.keys() != self.ro_chs.keys():
+            raise ValueError("processors ADC keys must exactly match declared ADCs")
+        if any(not callable(processor) for processor in processors.values()):
+            raise ValueError("processors must contain one callable per ADC")
+        return self.acquire(
+            soc,
+            _processors=dict(processors),
+            rounds=rounds,
+            step_rounds=step_rounds,
+            **qick_options,
+        )
+
+    def _process_accumulated(self, acc_buf) -> list[NDArray[np.float64]]:
+        if self._processors is None:
+            return super()._process_accumulated(acc_buf)
+        assert isinstance(self, qick_asm.AbsQickProgram)
+        assert self.loop_dims is not None
+        assert self.avg_level is not None
+        result = []
+        for raw, (ch, ro) in zip(acc_buf, self.ro_chs.items(), strict=True):
+            iq = raw.reshape(-1, ro["trigs"], 2) / ro["length"]
+            payload = validated_payload(self._processors[ch](iq), shots=iq.shape[0])
+            shape = payload.shape[1:]
+            expected = self._processor_shapes.get(ch, shape)
+            if shape != expected:
+                raise ValueError(
+                    f"ADC {ch}: processor output shape changed from {expected} to {shape}"
+                )
+            self._processor_shapes[ch] = shape
+            grid = payload.reshape(*self.loop_dims, *payload.shape[1:])
+            result.append(np.moveaxis(grid.mean(axis=self.avg_level), -2, 0))
+        return result

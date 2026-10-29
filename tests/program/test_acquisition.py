@@ -19,7 +19,11 @@ from zcu_tools.program.v2.modular import ModularProgramV2
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 
-from tests.program._acquisition_soc import AcquisitionSoc, make_acquisition_soc
+from tests.program._acquisition_soc import (
+    AcquisitionSoc,
+    make_acquisition_soc,
+    make_chunk_acquisition,
+)
 
 
 def _herald_fraction(
@@ -214,7 +218,7 @@ def test_classification_matches_adc_numbers_in_declaration_order() -> None:
 def test_classification_requires_exact_declared_adc_keys(
     monkeypatch: pytest.MonkeyPatch, channels: list[int]
 ) -> None:
-    soc, program = _make_chunk_acquisition()
+    soc, program = make_chunk_acquisition()
 
     def unexpected_poll():
         pytest.fail("invalid classification reached acquisition transport")
@@ -233,7 +237,7 @@ def test_classification_requires_exact_declared_adc_keys(
 def test_missing_circle_radius_is_rejected_before_transport(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    soc, program = _make_chunk_acquisition()
+    soc, program = make_chunk_acquisition()
 
     def unexpected_poll():
         pytest.fail("incomplete calibration reached acquisition transport")
@@ -252,7 +256,7 @@ def test_herald_weights_completed_rounds_by_passed_shots(
     monkeypatch: pytest.MonkeyPatch,
     remove_offset: bool,
 ) -> None:
-    soc, program = _make_chunk_acquisition(reps=3)
+    soc, program = make_chunk_acquisition(reps=3)
     program.soccfg["readouts"][0]["iq_offset"] = 0.25
     length = program.ro_chs[0]["length"]
     # Round one passes one shot (signal 2); round two passes two (4 and 6).
@@ -293,7 +297,7 @@ def test_herald_masks_shots_before_population_classification(
     monkeypatch: pytest.MonkeyPatch,
     classifier,
 ) -> None:
-    soc, program = _make_chunk_acquisition(reps=3)
+    soc, program = make_chunk_acquisition(reps=3)
     program.soccfg["readouts"][0]["iq_offset"] = 100.0
     length = program.ro_chs[0]["length"]
     rounds = iter(
@@ -331,7 +335,7 @@ def test_herald_rejects_incompatible_options_and_layout_before_transport(
     case: str,
     message: str,
 ) -> None:
-    soc, program = _make_chunk_acquisition()
+    soc, program = make_chunk_acquisition()
     classifier = LinearClassifier(angle=0.0, threshold=0.0)
     spec = HeraldSpec(0, 0, classifier, 2)
 
@@ -364,7 +368,7 @@ def test_herald_preserves_qick_projection_and_typed_classify_precedence(
     typed_classify: bool,
     angle: float,
 ) -> None:
-    soc, program = _make_chunk_acquisition(reps=3, sweep=[("point", 2)])
+    soc, program = make_chunk_acquisition(reps=3, sweep=[("point", 2)])
     program.soccfg["readouts"][0]["iq_offset"] = 2.0
     length = program.ro_chs[0]["length"]
     herald_values = ([[-1, 1], [1, 1], [1, 1]], [[-1, 1], [-1, 1], [1, 1]])
@@ -406,7 +410,7 @@ def test_herald_preserves_grid_and_other_reads_with_zero_pass_points(
     monkeypatch: pytest.MonkeyPatch,
     stepped: bool,
 ) -> None:
-    soc, program = _make_chunk_acquisition(
+    soc, program = make_chunk_acquisition(
         reps=2, reads=3, sweep=[("outer", 2), ("inner", 2)]
     )
     assert program.get_herald_pass_fraction() is None
@@ -490,7 +494,7 @@ def test_herald_cancellation_keeps_only_completed_round_statistics(
     monkeypatch: pytest.MonkeyPatch,
     completed_round: bool,
 ) -> None:
-    soc, program = _make_chunk_acquisition(reps=3)
+    soc, program = make_chunk_acquisition(reps=3)
     stop = Event()
     length = program.ro_chs[0]["length"]
     full = (
@@ -579,39 +583,11 @@ def test_herald_uses_adc_numbers_and_never_masks_other_adcs(
         np.testing.assert_array_equal(fraction, 0.5)
 
 
-def _make_chunk_acquisition(
-    *,
-    reps: int = 4,
-    reads: int = 2,
-    sweep: list[tuple[str, int]] | None = None,
-):
-    soc, soccfg = make_acquisition_soc()
-    readouts = [
-        PulseReadoutCfg(
-            gen_ch=0,
-            nqz=1,
-            gain=0.1 * (index + 1),
-            waveform=ConstWaveformCfg(length=1.0),
-            ro_ch=0,
-            ro_length=1.0,
-            freq=100.0,
-        ).build(f"readout_{index}")
-        for index in range(reads)
-    ]
-    program = ModularProgramV2(
-        soccfg,
-        modules=readouts,
-        reps=reps,
-        sweep=None if sweep is None else [(name, count) for name, count in sweep],
-    )
-    return soc, program
-
-
 @pytest.mark.parametrize("stepped", [False, True])
 def test_acquire_preserves_chunk_offsets_and_read_order(
     monkeypatch: pytest.MonkeyPatch, stepped: bool
 ) -> None:
-    soc, program = _make_chunk_acquisition()
+    soc, program = make_chunk_acquisition()
     raw = np.array(
         [
             [10, -10],
@@ -649,10 +625,31 @@ def test_acquire_preserves_chunk_offsets_and_read_order(
     )
 
 
+@pytest.mark.parametrize("option_list", [False, True])
+def test_ordinary_acquire_preserves_native_projection_sign_offset_and_equality(
+    monkeypatch: pytest.MonkeyPatch, option_list: bool
+) -> None:
+    soc, program = make_chunk_acquisition(reps=3, reads=1)
+    program.soccfg["readouts"][0]["iq_offset"] = 1.0
+    raw = (
+        np.array([[0, 0], [0, 1], [0, 2]], dtype=np.int64) * program.ro_chs[0]["length"]
+    )
+    monkeypatch.setattr(soc, "poll_data", lambda: [(3, ([raw], {}))])
+    result = program.acquire(
+        soc,
+        threshold=[0.0] if option_list else 0.0,
+        angle=[np.pi / 2] if option_list else np.pi / 2,
+        remove_offset=True,
+        progress=False,
+    )
+    assert result is not None
+    np.testing.assert_allclose(result[0], [[1 / 3, 0]])
+
+
 def test_acquire_logs_size_mismatch_but_keeps_numpy_broadcasting(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
-    soc, program = _make_chunk_acquisition(reps=3)
+    soc, program = make_chunk_acquisition(reps=3)
     batches = iter(
         [
             [(2, ([np.array([[11, -11]], dtype=np.int64)], {}))],
@@ -682,7 +679,7 @@ def test_acquire_logs_size_mismatch_but_keeps_numpy_broadcasting(
 def test_acquire_rejects_shot_overrun_before_writing_chunk(
     monkeypatch: pytest.MonkeyPatch, stepped: bool, rows: int
 ) -> None:
-    soc, program = _make_chunk_acquisition(reps=3)
+    soc, program = make_chunk_acquisition(reps=3)
     first = np.array([[11, -11], [12, -12]], dtype=np.int64)
     batches = iter(
         [
@@ -720,7 +717,7 @@ def test_acquire_rejects_shot_overrun_before_writing_chunk(
 def test_cancel_discards_partial_chunks_and_retains_only_completed_rounds(
     monkeypatch: pytest.MonkeyPatch, completed_round: bool
 ) -> None:
-    soc, program = _make_chunk_acquisition(reps=3)
+    soc, program = make_chunk_acquisition(reps=3)
     stop = Event()
     full = np.array([[10, -10], [20, -20]] * 3, dtype=np.int64)
     batches = iter(

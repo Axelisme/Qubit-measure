@@ -1,6 +1,6 @@
 # `zcu_tools.program` — QICK integration
 
-**Last updated:** 2026-10-29，herald instance 與跨 acquire 分工
+**Last updated:** 2026-10-30，processed acquisition 與 herald processors
 
 **讀者：** framework-dev。QICK 整合、程式建構與 acquisition 依賴速查。
 
@@ -34,6 +34,35 @@ Pulse or Mux cfg, keyed by ADC number. Missing calibration, wrong type and unkno
 ADC raise ValueError. It never reads the live library.
 `classification_parameters(cfg, require_other=True)` rejects linear and centroid3 and reports
 missing circle radius with a GE Post instruction.
+
+## Processed acquisition
+
+`acquire_processed(soc, processors=..., rounds=1, step_rounds=False, **qick_options)`
+accepts exactly one `acquisition.ShotProcessor` callable per declared ADC number.
+Each completed round supplies all normalized float64 `(shots, reads, 2)` IQ,
+including any herald read, in C-order shot layout. Coordinates are raw sums
+divided by rounded integration length, without offset subtraction or rotation.
+A processor returns float64 `(shots, out_reads, N)` with positive output axes.
+The output dimensions stay fixed per ADC through the acquire but may differ
+between ADCs. Invalid mappings or payloads raise `ValueError`.
+
+Results follow ADC declaration order and have shape `(out_reads, *point_dims, N)`.
+The pipeline averages repetitions, then software rounds equally. Round hooks
+receive the cumulative processed result. Cancellation retains completed rounds
+and discards an incomplete round; stopping before any completed round raises
+`StoppedPartialAcquireError`. Hardware stepped acquisition keeps the existing
+`finish_round`/`prepare_round`/`finish_acquire` ownership. `get_raw()` retains QICK
+integer sums. Explicit `threshold`, `angle`, or `herald` options raise `ValueError`
+before transport; ordinary `acquire` retains native QICK projection.
+
+`herald.heralded(spec, inner)` removes the specified herald read before passing
+signal reads to `inner`. It zeros rejected payloads, including rejected NaNs,
+and appends the same acceptance component to every output read.
+After averaging, `herald.herald_ratio(result)` returns conditional payloads and
+per-point pass fractions. Zero acceptance gives NaN without divide warnings.
+Apply the ratio to final and round-hook results: the numerator alone is the
+attenuated mean, not the accepted-shot mean. The existing `acquire(classify=...)`
+and integrated `acquire(herald=...)` paths remain available during migration.
 
 ## Shot time
 
