@@ -10,7 +10,6 @@ from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from zcu_tools.analysis.fitting.multi_decay import fit_dual_transition_rates
 from zcu_tools.analysis.singleshot import (
-    calc_populations,
     correct_populations,
     raw_population_signal,
 )
@@ -33,7 +32,7 @@ from zcu_tools.program.v2 import (
     SweepCfg,
     TableLengthPulse,
 )
-from zcu_tools.program.v2.modules.readout import classification_parameters
+from zcu_tools.program.v2.modules.readout import classification_processors
 from zcu_tools.progress_bar import make_pbar
 
 from zcu_lab.v2.support import live_heatmap, live_line
@@ -113,7 +112,7 @@ def _default_initial_states() -> NDArray[np.int64]:
 
 
 def _default_population_states() -> NDArray[np.int64]:
-    return np.array([0, 1], dtype=np.int64)
+    return np.array([0, 1, 2], dtype=np.int64)
 
 
 def _require_positive_lengths(lengths: NDArray[np.float64]) -> None:
@@ -127,6 +126,12 @@ def _require_positive_lengths(lengths: NDArray[np.float64]) -> None:
 
 @dataclass(frozen=True)
 class T1WithToneSweepResult:
+    """Mean G/E/Other fractions in (outer value, initial state, length, population state) order.
+
+    Lengths are in us. Initial states are 0/1 for I/pi preparation;
+    population states are 0/1/2 for g/e/other. Unmeasured entries are NaN.
+    """
+
     xs: NDArray[np.float64]
     lengths: NDArray[np.float64]
     signals: NDArray[np.float64]
@@ -187,7 +192,7 @@ class T1WithToneSweepExp(Experiment[T1WithToneSweepResult, T1WithToneSweepCfg]):
 
     AXES_SPEC: ClassVar[AxesSpec[T1WithToneSweepResult, T1WithToneSweepCfg]] = AxesSpec(
         axes=(
-            AxesSpec.Axis("population_states", "GE Population", "None", dtype=np.int64),
+            AxesSpec.Axis("population_states", "Population", "None", dtype=np.int64),
             AxesSpec.Axis("lengths", "Time", "s", scale=1e-6, dtype=np.float64),
             AxesSpec.Axis("initial_states", "Initial State", "None", dtype=np.int64),
             AxesSpec.Axis("xs", "Sweep Value", "a.u.", dtype=np.float64),
@@ -274,7 +279,7 @@ class T1WithToneSweepExp(Experiment[T1WithToneSweepResult, T1WithToneSweepCfg]):
 
         For each outer sweep value, prepare without/with a pi pulse, apply
         the probe for each table-driven length, then read out. Return classified
-        g/e fractions with axes (outer value, initial g/e, length, measured g/e).
+        g/e/other fractions with axes (outer value, initial g/e, length, state).
         Lengths are in us; missing acquisitions remain NaN.
 
         Uniform sampling requires a SweepCfg. Non-uniform sampling accepts
@@ -283,7 +288,7 @@ class T1WithToneSweepExp(Experiment[T1WithToneSweepResult, T1WithToneSweepCfg]):
         """
         # 1. Resolve the outer scan and quantize positive probe durations.
         cfg = deepcopy(cfg)
-        classification = classification_parameters(cfg.readout, require_other=True)
+        processors = classification_processors(cfg.readout, require_other=True)
         soc, soccfg = context.soc, context.soccfg
         if cfg.uniform:
             length_sweep = cfg.length
@@ -309,9 +314,8 @@ class T1WithToneSweepExp(Experiment[T1WithToneSweepResult, T1WithToneSweepCfg]):
         )
         current_index = 0
 
-        def plot_fn(data: NDArray[np.float64]) -> None:
+        def plot_fn(populations: NDArray[np.float64]) -> None:
             i = current_index
-            populations = calc_populations(data)
 
             gg_2d.update(xs, lengths, populations[:, 0, :, 0])
             ge_2d.update(xs, lengths, populations[:, 0, :, 1])
@@ -323,7 +327,7 @@ class T1WithToneSweepExp(Experiment[T1WithToneSweepResult, T1WithToneSweepCfg]):
             e_1d.update(lengths, populations[i, 1].T)
 
         buffer = SignalBuffer(
-            (len(xs), 2, len(lengths), 2),
+            (len(xs), 2, len(lengths), 3),
             dtype=np.float64,
             on_update=plot_fn,
         )
@@ -362,9 +366,9 @@ class T1WithToneSweepExp(Experiment[T1WithToneSweepResult, T1WithToneSweepCfg]):
                     )
                     .declare_sweep("ge", 2)
                     .declare_sweep("length", len(lengths))
-                    .build_and_acquire(
-                        raw2signal_fn=raw_population_signal,
-                        classify=classification,
+                    .build_and_acquire_processed(
+                        processed2signal_fn=raw_population_signal,
+                        processors=processors,
                         rounds=cfg.rounds,
                     )
                 )
@@ -400,8 +404,6 @@ class T1WithToneSweepExp(Experiment[T1WithToneSweepResult, T1WithToneSweepCfg]):
         valid_mask = np.all(np.isfinite(populations), axis=(1, 2, 3))
         xs = xs[valid_mask]
         populations = populations[valid_mask]
-
-        populations = calc_populations(populations)  # (xs, 2, Ts, 3)
 
         populations = correct_populations(populations, confusion_matrix)
 

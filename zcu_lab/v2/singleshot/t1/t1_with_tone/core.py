@@ -12,7 +12,6 @@ from zcu_tools.analysis.fitting.multi_decay import (
     fit_dual_transition_rates,
 )
 from zcu_tools.analysis.singleshot import (
-    calc_populations,
     correct_populations,
     raw_population_signal,
 )
@@ -35,7 +34,7 @@ from zcu_tools.program.v2 import (
     SweepCfg,
     sweep2param,
 )
-from zcu_tools.program.v2.modules.readout import classification_parameters
+from zcu_tools.program.v2.modules.readout import classification_processors
 
 from zcu_lab.v2.support import LinePlot, live_line
 
@@ -45,7 +44,7 @@ def _default_initial_states() -> NDArray[np.int64]:
 
 
 def _default_population_states() -> NDArray[np.int64]:
-    return np.array([0, 1], dtype=np.int64)
+    return np.array([0, 1, 2], dtype=np.int64)
 
 
 def _average_rounds(data: NDArray[np.float64]) -> NDArray[np.float64]:
@@ -61,6 +60,12 @@ def _average_rounds(data: NDArray[np.float64]) -> NDArray[np.float64]:
 
 @dataclass(frozen=True)
 class T1WithToneResult:
+    """Mean G/E/Other fractions in (length, initial state, population state) order.
+
+    Lengths are in us. Initial states are 0/1 for I/pi preparation;
+    population states are 0/1/2 for g/e/other. Unmeasured entries are NaN.
+    """
+
     lengths: NDArray[np.float64]
     signals: NDArray[np.float64]
     initial_states: NDArray[np.int64] = field(default_factory=_default_initial_states)
@@ -112,7 +117,7 @@ class T1WithToneExp(Experiment[T1WithToneResult, T1WithToneCfg]):
 
     AXES_SPEC: ClassVar[AxesSpec[T1WithToneResult, T1WithToneCfg]] = AxesSpec(
         axes=(
-            AxesSpec.Axis("population_states", "GE Population", "None", dtype=np.int64),
+            AxesSpec.Axis("population_states", "Population", "None", dtype=np.int64),
             AxesSpec.Axis("initial_states", "Initial State", "None", dtype=np.int64),
             AxesSpec.Axis("lengths", "Time", "s", scale=1e-6, dtype=np.float64),
         ),
@@ -156,12 +161,12 @@ class T1WithToneExp(Experiment[T1WithToneResult, T1WithToneCfg]):
         )
 
     def run(self, cfg: T1WithToneCfg, *, context: RunContext) -> T1WithToneResult:
-        """Measure G/E populations versus probe-tone duration from two preparations.
+        """Measure G/E/Other populations versus probe duration from two preparations.
 
         Each shot resets, applies the optional init pulse, prepares with I or pi,
         plays the probe tone, then reads out. Uniform SweepCfg lengths run on
         the FPGA; non-uniform lengths run on the host and omit the tone at zero.
-        Return lengths in us and populations shaped (length, preparation, G/E),
+        Return lengths in us and populations shaped (length, preparation, G/E/Other),
         averaged over rounds. Cancellation leaves unmeasured entries as NaN.
         cfg supplies the pulses and per-ADC readout classifiers; context
         supplies hardware, plots and cancellation. Uniform mode requires SweepCfg;
@@ -169,7 +174,7 @@ class T1WithToneExp(Experiment[T1WithToneResult, T1WithToneCfg]):
         """
         # 1. Quantize durations without changing the caller's pulse settings.
         cfg = deepcopy(cfg)
-        classification = classification_parameters(cfg.readout, require_other=True)
+        processors = classification_processors(cfg.readout, require_other=True)
         soc, soccfg = context.soc, context.soccfg
         if cfg.uniform:
             length_sweep = cfg.length
@@ -188,14 +193,13 @@ class T1WithToneExp(Experiment[T1WithToneResult, T1WithToneCfg]):
 
         init_g, init_e = self._make_viewers(context.plots)
 
-        def plot_fn(data: NDArray[np.float64]) -> None:
-            populations = calc_populations(data)  # (N, 2, 3)
+        def plot_fn(populations: NDArray[np.float64]) -> None:
             init_g.update(lengths, populations[:, 0].T)
             init_e.update(lengths, populations[:, 1].T)
 
         if cfg.uniform:
             buffer = SignalBuffer(
-                (len(lengths), 2, 2), dtype=np.float64, on_update=plot_fn
+                (len(lengths), 2, 3), dtype=np.float64, on_update=plot_fn
             )
             with Schedule(cfg, buffer, scope=context.scope) as sched:
                 inner_length_sweep = sched.cfg.length
@@ -223,9 +227,9 @@ class T1WithToneExp(Experiment[T1WithToneResult, T1WithToneCfg]):
                     )
                     .declare_sweep("length", inner_length_sweep)
                     .declare_sweep("ge", 2)
-                    .build_and_acquire(
-                        raw2signal_fn=raw_population_signal,
-                        classify=classification,
+                    .build_and_acquire_processed(
+                        processed2signal_fn=raw_population_signal,
+                        processors=processors,
                         rounds=cfg.rounds,
                     )
                 )
@@ -236,7 +240,7 @@ class T1WithToneExp(Experiment[T1WithToneResult, T1WithToneCfg]):
             run_cfg = cfg.model_copy(deep=True)
             run_cfg.rounds = 1
             round_buffer = SignalBuffer(
-                (rounds, len(lengths), 2, 2),
+                (rounds, len(lengths), 2, 3),
                 dtype=np.float64,
                 on_update=lambda data: plot_fn(_average_rounds(data)),
             )
@@ -267,10 +271,10 @@ class T1WithToneExp(Experiment[T1WithToneResult, T1WithToneCfg]):
                         length_key = float(length)
                         if length_key not in programs:
                             programs[length_key] = builder.build()
-                        _ = builder.run_program(
+                        _ = builder.run_program_processed(
                             programs[length_key],
-                            raw2signal_fn=raw_population_signal,
-                            classify=classification,
+                            processed2signal_fn=raw_population_signal,
+                            processors=processors,
                             rounds=cfg.rounds,
                         )
 
@@ -300,8 +304,6 @@ class T1WithToneExp(Experiment[T1WithToneResult, T1WithToneCfg]):
 
         lens = lens[skip:]
         populations = populations[skip:]
-
-        populations = calc_populations(populations)  # (N, 2, 3)
 
         populations = correct_populations(populations, confusion_matrix)
 
