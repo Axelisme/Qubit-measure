@@ -27,6 +27,7 @@ from ._timeline_outputs import (
     TimelinePlacedTrigger,
 )
 from ._timeline_runtime import (
+    EventEnd,
     RuntimeEnd,
     RuntimeMath,
     Time,
@@ -159,6 +160,7 @@ class TimelineAdvance(TimedMacro):
         self.timeline = timeline
         self.duration = duration
         self.aligned = aligned
+        self.event_ends: tuple[EventEnd, ...] = ()
 
     def preprocess(self, prog) -> None:
         if isinstance(self.duration, str):
@@ -167,19 +169,42 @@ class TimelineAdvance(TimedMacro):
                 RuntimeEnd(self.duration, limits.minimum, limits.maximum)
             )
         else:
-            duration = (
-                step_time(prog, self.duration)
-                if self.aligned
-                else align_end(prog, self.duration)
-            )
+            duration = step_time(prog, self.duration) if self.aligned else self.duration
         previous = self.book.end(self.timeline, placement=True)
-        end = (
-            self.book.math.add(previous, duration)
-            if isinstance(previous, RuntimeEnd) or isinstance(duration, RuntimeEnd)
-            else previous + duration
-        )
+        events = [EventEnd(previous, 0.0)]
+        for event in self.event_ends:
+            for index, candidate in enumerate(events):
+                if event.origin is candidate.origin or (
+                    isinstance(event.origin, (int, float))
+                    and isinstance(candidate.origin, (int, float))
+                    and event.origin == candidate.origin
+                ):
+                    events[index] = EventEnd(
+                        candidate.origin,
+                        self.book.math.maximum(candidate.offset, event.offset),
+                    )
+                    break
+            else:
+                events.append(event)
+        end = self._finish(prog, events[0], duration)
+        for event in events[1:]:
+            # max(ceil(Ei+post)) equals ceil(max(Ei)+post).
+            end = self.book.math.maximum(end, self._finish(prog, event, duration))
         self.book.set_end(self.timeline, self.book.math.maximum(0.0, end))
         self.resolved_time = end
+
+    def _finish(self, prog, event: EventEnd, duration: Time) -> Time:
+        fractional: float | QickParam = 0.0
+        registers: list[RuntimeEnd] = []
+        for value in (event.origin, event.offset, duration):
+            if isinstance(value, RuntimeEnd):
+                registers.append(value)
+            else:
+                fractional += value
+        result: Time = fractional if self.aligned else align_end(prog, fractional)
+        for register in registers:
+            result = self.book.math.add(register, result)
+        return result
 
     def list_time_params(self) -> list[str]:
         return ["t"]
@@ -412,9 +437,12 @@ class ModuleEmission(TimedMacro):
         super().__init__(tag=tag)
         self.owner = owner
         self.macros = macros
+        self.finishers: list[PreparedTimelineMacro] = []
 
     def preprocess(self, prog) -> None:
-        """Resolve internal events at one origin; only owner duration moves its end."""
+        """Collect actual ends at a common origin; an advance adds post then rounds."""
+        pending: dict[str, list[EventEnd]] = {}
+        self.finishers = []
         for macro in self.macros:
             source = macro.source if isinstance(macro, PreparedTimelineMacro) else macro
             if isinstance(
@@ -423,13 +451,22 @@ class ModuleEmission(TimedMacro):
             ):
                 start = source.book.end(source.timeline)
                 macro.preprocess(prog)
+                pending.setdefault(source.timeline, []).append(source.event_end)
                 source.book.ends[source.timeline] = start
             else:
+                if isinstance(source, TimelineAdvance):
+                    source.event_ends = tuple(pending.pop(source.timeline, ()))
                 macro.preprocess(prog)
+        for timeline, ends in pending.items():
+            advance = TimelineAdvance(prog._timeline_book, timeline, 0.0)
+            advance.event_ends = tuple(ends)
+            finisher = PreparedTimelineMacro(prog._timeline_book, advance)
+            finisher.preprocess(prog)
+            self.finishers.append(finisher)
 
     def translate(self, prog) -> None:
         """Translate lowered operations through the program's shared compiler."""
-        for macro in self.macros:
+        for macro in [*self.macros, *self.finishers]:
             macro.translate(prog)
 
     def get_time_param(self, name: str) -> QickParam:

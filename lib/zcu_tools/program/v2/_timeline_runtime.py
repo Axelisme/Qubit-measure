@@ -31,6 +31,11 @@ def align_end(prog, value: float | QickParam) -> float | QickParam:
     return step_time(prog, cycles / get_fclk(prog))
 
 
+def placement_time(prog, value: float | QickParam) -> float | QickParam:
+    """Resolve QICK nearest-cycle placement, including scalar and sweep steps."""
+    return step_time(prog, value if isinstance(value, QickParam) else QickParam(value))
+
+
 def step_time(prog, value: float | QickParam) -> float | QickParam:
     if not isinstance(value, QickParam):
         return value
@@ -57,6 +62,20 @@ class RuntimeEnd:
 
 Time = float | QickParam | RuntimeEnd
 LIMIT = 2**31 - 1
+
+
+@dataclass(frozen=True)
+class EventEnd:
+    """Unrounded output end as an origin plus a fractional offset in us.
+
+    origin is the timeline placement point, possibly an integer-cycle register.
+    offset includes resolved event start offset and waveform/ADC duration;
+    a runtime offset is already an integer-cycle value.
+    Keeping it separate defers ceil until the owner adds its post-delay.
+    """
+
+    origin: Time
+    offset: Time
 
 
 def time_bounds(prog, value: Time) -> tuple[float, float]:

@@ -193,14 +193,15 @@ class Pulse(Module):
     def lower(
         self, prog: TimelineProgramV2, *, timeline: str | None, tag: str | None
     ) -> None:
-        """Play at the current timeline plus pre_delay and advance total_length.
+        """Play at timeline plus pre_delay; ceil actual end plus post_delay once.
 
         Legacy block_mode and tag do not affect this occurrence. Empty cfg has
         zero duration and no playback. QICK resource/timing errors propagate.
         """
         timeline = timeline if timeline is not None else "default"
         self.play(prog, timeline=timeline, tag=tag)
-        prog.advance_module(self.total_length(prog), timeline=timeline)
+        if self.cfg is not None:
+            prog.delay_timeline(self.cfg.post_delay, timeline=timeline)
 
     def play(
         self,

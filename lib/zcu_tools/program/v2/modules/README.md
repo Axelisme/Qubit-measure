@@ -1,6 +1,6 @@
 # program/v2/modules — semantic program modules
 
-**Last updated:** 2026-10-29，native dmem 與時間 producer bounds
+**Last updated:** 2026-10-29，event-end lowering 與 ScanWith，native dmem 與時間 producer bounds
 
 **讀者：** lab-author、framework-dev、agent。語意 program modules 的宣告、發射與 owner 邊界速查。
 
@@ -19,16 +19,20 @@ without leaking hardware register choreography into experiment classes.
 
 ## 原生寫法
 
-Pulse、Delay、SoftDelay、DelayAuto、PulseReadout、Reset 系列、LoadValue 與 LoadWord 提供原生 lowering。
+Pulse、Delay、SoftDelay、DelayAuto、PulseReadout、Reset 系列、LoadValue、LoadWord 與 ScanWith 提供原生 lowering。
 每次 `emit` 建立一個 `timeline.ModuleEmission`，保存該次原生指令與 tag。
 Module 不是 QICK Macro，不能直接交給 `append_macro`。
 同一宣告物件可重複發射，舊 module 的 tag 與 block_mode 不控制新路徑。
 
-一般發射將所選 timeline 的結尾加上 owner 的規則 a `total_length`，不移動 reference。
+Pulse 與 PulseReadout 以實際 waveform／ADC 事件的最大結束點，加一次 post-delay，再向上取整到 tProc cycle。
+Lowering 不用 `total_length` 重建時間，也不移動 reference。
 省略 timeline 時選 default。其他名字先在 `_body` 用 `fork("default", into="drive")` 宣告。
 同一 emission 內部事件共用起點，TwoPulseReset 的跨 channel 重疊不會被串成序列。
 同 channel 的提前發射則在編譯期報錯，即使改用另一條 timeline 也一樣。
-Owner 已對齊 tProc 的長度不再向上取整第二次。
+整數 register 起點也保留事件的分數尾段，直到加上 post-delay 才取整。
+TwoPulseReset 合併各 pulse end 加各自 post-delay。BathReset 的 pi/2 從向上取整後的 cavity end 加 post-delay 開始。
+BathReset 最後合併 qubit 與 pi/2 的實際結尾，包含各自 post-delay，不漏掉較長的 qubit。
+Scalar 與整數仿射 sweep 使用這條路徑。非仿射 sweep 的逐點精確 ceil／table fallback 尚未實作。
 Delay 與 SoftDelay 都只加 timeline 結尾。`sync()` 或 body 收尾才推進 reference。
 
 DelayAuto 是唯一例外，未指定 timeline 時呼叫原生 delay_auto 或 delay_reg_auto。
@@ -87,6 +91,14 @@ in `ModularProgramV2`, `ProgramBuilder.add`, `Repeat`, `Branch`, `Join` and
   `0..2^32-1` word range; storage maps those words onto the signed int32 dmem
   representation while preserving the hardware bit pattern. It is intentionally
   uncompressed because consumers care about the exact word loaded into a register.
+- `ScanWith` supports native `declare`/`emit`. Each occurrence creates its own
+  fixed Repeat counter, loads the scalar, then executes children in order.
+  Repeated emissions reuse the declared table and destination register.
+  Repeat-owned metadata and matching-writer audits certify the index bounds;
+  native lowering does not pass the legacy `range_hint`.
+- `LoadValue.lower_index` accepts the index for the current occurrence.
+  `TimelineProgramV2.emission_name` allocates occurrence-local names only during
+  lowering, so repeated or nested scans do not share a counter.
 - Both loaders support native `declare`/`emit` without advancing timeline ends.
   `use_existed=True` leaves the destination declaration to the caller. An empty
   `LoadValue` still declares its destination unless reused; an empty `LoadWord`
@@ -169,7 +181,7 @@ physical simulation support.
   mutating a pulse shared through `PulseRegistry`; the rotated tables restore the
   first point before the next outer repetition.
 
-## Swept pulse blocking timing
+## Legacy swept pulse blocking timing
 
 `Pulse` aligns a swept blocking duration with QICK's registered waveform
 segments. Generator-cycle quantization and per-loop truncation precede

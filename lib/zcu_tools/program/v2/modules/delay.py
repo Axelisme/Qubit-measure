@@ -41,9 +41,11 @@ class Delay(Module):
     def lower(
         self, prog: TimelineProgramV2, *, timeline: str | None, tag: str | None
     ) -> None:
-        """Add rounded delay us to the selected end (default if None); do not move reference."""
-        prog.advance_module(
-            round_timestamp(prog, self.delay), timeline=timeline, tag=tag
+        """Ceil the selected end plus delay us; do not move reference."""
+        prog.delay_timeline(
+            self.delay,
+            timeline=timeline if timeline is not None else "default",
+            tag=tag,
         )
 
     def allow_rerun(self) -> bool:
@@ -69,9 +71,11 @@ class SoftDelay(Module):
     def lower(
         self, prog: TimelineProgramV2, *, timeline: str | None, tag: str | None
     ) -> None:
-        """Add rounded delay us to the selected end, exactly like Delay in this path."""
-        prog.advance_module(
-            round_timestamp(prog, self.delay), timeline=timeline, tag=tag
+        """Ceil the selected end plus delay us, exactly like Delay in this path."""
+        prog.delay_timeline(
+            self.delay,
+            timeline=timeline if timeline is not None else "default",
+            tag=tag,
         )
 
     def allow_rerun(self) -> bool:

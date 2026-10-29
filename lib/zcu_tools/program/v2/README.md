@@ -1,6 +1,6 @@
 # README - program/v2
 
-**Last updated:** 2026-10-29，runtime timeline 與 producer bounds
+**Last updated:** 2026-10-29，event-end aggregate 與 ScanWith lowering
 
 **讀者：** lab-author、framework-dev、agent。原生 V2 program 寫法與 module、readout、acquisition 契約速查。
 
@@ -132,7 +132,12 @@ Table owner 以 `dependency_ranges` 登記合法 index 範圍，mapping keys 自
 
 Module 先明確 declare，每次 emit 建立獨立的 `ModuleEmission` 與 tag。
 Module 本身不是 QICK Macro，不能直接 append。
-一般 emit 內部事件共用所選 timeline 的結尾作為起點，再加規則 a 的 total_length。
+Pulse／PulseReadout 的 emit 內部事件共用所選 timeline 的結尾作為起點。
+結尾取實際 waveform／ADC event end 的最大值，加一次 post-delay，整段向上取整一次。
+Runtime 整數 cycle 起點也保留分數 event tail 到加 post-delay 後才取整，不先各自取整。
+Reset 保留每個 child 的 post-delay。BathReset 的 pi/2 等待 cavity end 加 post-delay 向上取整後才開始，最後也計入 qubit 尾段。
+這些 owner 不從 `total_length` 重建 duration。Scalar 與可精確表示的整數仿射 sweep 已支援。
+非仿射 sweep 的逐點精確 ceil／table fallback 尚未實作。
 省略 timeline 選 default，但不移動 reference。
 以下是 `TimelineProgramV2` 子類別的 hooks。`drive_cfg` 是呼叫端提供、使用 channel 0 的 `Pulse.Cfg`。
 時間參數單位為 us，另一個 channel 1 的 native pulse 由原生 API 宣告。
@@ -178,6 +183,12 @@ Case 內的 fork 名字在 case 結束後失效，即使其他 case 使用同名
 fork 的名字。退出後母 timeline 為0，局部名字失效，可以重新 fork 同名。
 其他外部長 pulse 可以橫跨 Repeat，但不能在迴圈內使用它的 timeline。
 固定 n 是非負整數，退出時精確扣減外部結尾；n=0 仍同步入口，但不執行 body。
+Repeat owner 以公開 `fixed_loop_indices` 提供固定 counter 的名稱、點數與 writer metadata。
+時間 producer 的 bounds 只接受相符的初始化、回邊與重設寫入，不把 nested loops 加入 QICK 的 top-level sweep metadata。
+
+ScanWith 先載入 scalar，再依序執行 children。同一宣告可重複 emit，每次使用獨立 fixed counter，沿用原 table 與 destination。
+其 native lowering 使用 Repeat metadata，不傳 legacy `range_hint`。
+`LoadValue.lower_index` 接受本次 index，`emission_name` 只在 module lower 期間配置本次名稱。
 
 Register n 使用既有 register 名字，必須提供作者保證的非負整數閉區間
 `range_hint=(minimum, maximum)`。Int n 不接受 range_hint。
