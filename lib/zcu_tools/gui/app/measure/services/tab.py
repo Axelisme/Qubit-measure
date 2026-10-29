@@ -35,7 +35,6 @@ if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.state import PaneTransitionPreview, State
     from zcu_tools.resources.entry import StorageBinding
 
-    from ..writeback import WritebackService
     from .tab_form import TabFormResources, TabFormSources
 
 
@@ -68,7 +67,6 @@ class TabService:
         self,
         state: State,
         registry: Registry,
-        writeback: WritebackService,
         cfg_resources: TabFormResources,
         form_sources: Callable[[Mapping[str, str] | None], TabFormSources],
     ) -> None:
@@ -80,8 +78,6 @@ class TabService:
         """
         self._state = state
         self._registry = registry
-        # Writeback owns draft previews; pane_commit owns retirement on close.
-        self._writeback = writeback
         self._cfg_resources = cfg_resources
         self._form_sources = form_sources
 
@@ -113,7 +109,7 @@ class TabService:
             draft = pane.writeback_draft
             if draft is None:
                 return ()
-            return tuple(self._writeback.preview_draft(draft))
+            return tuple(draft.preview())
 
         analysis_items = _items_for_pane(tab.analysis)
         post_items = _items_for_pane(tab.post_analysis)

@@ -83,42 +83,40 @@ class RecordingGuard:
         self._log.add("guard", "check_writeback", tab_id)
 
 
+class RecordingDraft:
+    def __init__(self, log: CallLog) -> None:
+        self._log = log
+        self.is_active = True
+
+    def get_item_form(self, session_id: str) -> object:
+        self._log.add("draft", "get_item_form", self, session_id)
+        return {"draft": self, "session_id": session_id}
+
+    def edit(self, session_id: str, **changes: Any) -> None:
+        self._log.add("draft", "edit", self, session_id, **changes)
+
+    def apply(self, *, item_ids: tuple[str, ...] | None = None) -> dict[str, Any]:
+        self._log.add("draft", "apply", self, item_ids=item_ids)
+        return {"applied_ids": ["pane-item"], "written": {}}
+
+    def writeback_write(self, changes, *, on_applied):
+        self._log.add("draft", "writeback_write", self, changes)
+        return []
+
+    def get_all_applied(self) -> dict[str, bool]:
+        self._log.add("draft", "get_all_applied", self)
+        return {"pane-item": True}
+
+
 class RecordingWriteback:
     def __init__(self, log: CallLog) -> None:
         self._log = log
-        self.items = [object()]
-        service = WritebackService(MagicMock(), arb_names=lambda: ())
-        self.analysis_draft = service.create_draft(
-            [], parameters=None, experiment_name="test/analysis"
-        )
-        self.post_draft = service.create_draft(
-            [], parameters=None, experiment_name="test/post-analysis"
-        )
-
-    def get_item_form(self, draft: object, session_id: str) -> object:
-        self._log.add("writeback", "get_item_form", draft, session_id)
-        return {"draft": draft, "session_id": session_id}
-
-    def edit_draft(self, draft: object, session_id: str, **changes: Any) -> None:
-        self._log.add("writeback", "edit_draft", draft, session_id, **changes)
-
-    def apply_draft(
-        self, draft: object, *, item_ids: tuple[str, ...] | None = None
-    ) -> dict[str, Any]:
-        self._log.add("writeback", "apply_draft", draft, item_ids=item_ids)
-        return {"applied_ids": ["pane-item"], "written": {}}
-
-    def write_draft(self, draft, changes, *, on_applied):
-        self._log.add("writeback", "write_draft", draft, changes)
-        return []
+        self.analysis_draft = RecordingDraft(log)
+        self.post_draft = RecordingDraft(log)
 
     def accept_drafts(self, groups):
         self._log.add("writeback", "accept_drafts", groups)
         return WritebackAcceptance(())
-
-    def get_all_applied(self, draft: object) -> dict[str, bool]:
-        self._log.add("writeback", "get_all_applied", draft)
-        return {"pane-item": True}
 
 
 def _facet(
@@ -149,7 +147,7 @@ def _facet(
                     log, state, decision or AdmissionDecision(True, None, "")
                 ),
             ),
-            # tolerated(cast): RecordingWriteback records draft calls without a full WritebackService.
+            # tolerated(cast): RecordingWriteback records cross-draft acceptance without context writes.
             writeback=cast(Any, writeback),
             resource_versions=lambda: versions,
             bus=bus,
@@ -216,11 +214,9 @@ def test_pane_writeback_reads_edits_and_applies_its_own_draft(
         "written": {},
     }
 
-    assert call("writeback", "get_item_form", draft, "param-1") in log.calls
-    assert (
-        call("writeback", "edit_draft", draft, "param-1", selected=False) in log.calls
-    )
-    assert call("writeback", "apply_draft", draft, item_ids=None) in log.calls
+    assert call("draft", "get_item_form", draft, "param-1") in log.calls
+    assert call("draft", "edit", draft, "param-1", selected=False) in log.calls
+    assert call("draft", "apply", draft, item_ids=None) in log.calls
     assert [event.fact for event in events] == [
         TabInteractionFact.WRITEBACK_DRAFT_CHANGED,
         TabInteractionFact.WRITEBACK_DRAFT_CHANGED,
@@ -228,15 +224,12 @@ def test_pane_writeback_reads_edits_and_applies_its_own_draft(
 
 
 @pytest.mark.parametrize("item_ids", [("param-1",), ()])
-def test_explicit_item_ids_reach_the_pane_owned_service(item_ids) -> None:
+def test_explicit_item_ids_reach_the_pane_owned_draft(item_ids) -> None:
     facet, log, _state, writeback, _versions, _bus = _facet()
 
     facet.apply_writeback_for_pane("tab-1", "post_analysis", item_ids=item_ids)
 
-    assert (
-        call("writeback", "apply_draft", writeback.post_draft, item_ids=item_ids)
-        in log.calls
-    )
+    assert call("draft", "apply", writeback.post_draft, item_ids=item_ids) in log.calls
 
 
 def test_applied_projection_reads_the_pane_owned_draft() -> None:
@@ -245,7 +238,7 @@ def test_applied_projection_reads_the_pane_owned_draft() -> None:
     assert facet.get_writeback_applied_for_pane("tab-1", "analysis") == {
         "pane-item": True
     }
-    assert call("writeback", "get_all_applied", writeback.analysis_draft) in log.calls
+    assert call("draft", "get_all_applied", writeback.analysis_draft) in log.calls
 
 
 @pytest.mark.parametrize("pane", ["analysis", "post_analysis"])
@@ -326,7 +319,7 @@ def test_batch_write_publishes_shared_draft_even_after_partial_failure(
             (
                 event.tab_id,
                 event.fact,
-                service.preview_values(draft)["param-1"].proposed,
+                draft.preview_values()["param-1"].proposed,
             )
         ),
     )

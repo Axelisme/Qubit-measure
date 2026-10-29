@@ -32,7 +32,7 @@ from zcu_tools.gui.app.measure.state import (
     Session,
     State,
 )
-from zcu_tools.gui.app.measure.writeback import WritebackService
+from zcu_tools.gui.app.measure.writeback import WritebackDraft, WritebackService
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 
 from tests.gui.app.measure._cfg_fakes import (
@@ -68,15 +68,12 @@ def test_tab_snapshot_is_single_pure_render_model() -> None:
             save=SavePaneState(comment="draft note"),
         ),
     )
-    writeback = MagicMock()
-    writeback.preview_draft.return_value = []
-    # TabService's render model depends only on State + a writeback query port;
-    # readiness / save paths come off State's aggregates, not sibling
+    # TabService's render model reads State and each pane's draft directly.
+    # Readiness / save paths come off State's aggregates, not sibling
     # app-services. The registry is unused by get_snapshot.
     service = TabService(
         state,
         MagicMock(),
-        writeback,
         form_resources(state),
         form_sources=lambda aliases: form_sources(state, aliases),
     )
@@ -127,7 +124,6 @@ def test_snapshot_projects_analysis_presence(publication: str, stage: str) -> No
     service = TabService(
         state,
         MagicMock(),
-        MagicMock(),
         form_resources(state),
         form_sources=lambda aliases: form_sources(state, aliases),
     )
@@ -155,13 +151,9 @@ def test_snapshot_projects_empty_writeback_draft_existence() -> None:
             analysis=AnalysisPaneState(writeback_draft=draft),
         ),
     )
-    writeback = MagicMock()
-    writeback.preview_draft.return_value = []
-
     snapshot = TabService(
         state,
         MagicMock(),
-        writeback,
         form_resources(state),
         form_sources=lambda aliases: form_sources(state, aliases),
     ).get_snapshot("tab")
@@ -173,9 +165,8 @@ def test_snapshot_projects_empty_writeback_draft_existence() -> None:
 
 def test_snapshot_propagates_writeback_preview_failure() -> None:
     state = _active_state()
-    draft = WritebackService(MagicMock(), arb_names=lambda: ()).create_draft(
-        [], parameters=None, experiment_name="fake"
-    )
+    draft = MagicMock(spec=WritebackDraft)
+    draft.preview.side_effect = RuntimeError("broken draft")
     state.add_tab(
         "tab",
         Session(
@@ -185,14 +176,10 @@ def test_snapshot_propagates_writeback_preview_failure() -> None:
             analysis=AnalysisPaneState(writeback_draft=draft),
         ),
     )
-    writeback = MagicMock()
-    writeback.preview_draft.side_effect = RuntimeError("broken draft")
-
     with pytest.raises(RuntimeError, match="broken draft"):
         TabService(
             state,
             MagicMock(),
-            writeback,
             form_resources(state),
             form_sources=lambda aliases: form_sources(state, aliases),
         ).get_snapshot("tab")
@@ -210,12 +197,9 @@ def test_snapshot_projects_running_owner_without_session_run_flag() -> None:
             ),
         )
     state.set_tab_running("running", running=True)
-    writeback = MagicMock()
-    writeback.preview_draft.return_value = []
     service = TabService(
         state,
         MagicMock(),
-        writeback,
         form_resources(state),
         form_sources=lambda aliases: form_sources(state, aliases),
     )
@@ -264,12 +248,9 @@ def test_snapshot_carries_post_analyze_fields() -> None:
             ),
         ),
     )
-    writeback = MagicMock()
-    writeback.preview_draft.return_value = []
     service = TabService(
         state,
         MagicMock(),
-        writeback,
         form_resources(state),
         form_sources=lambda aliases: form_sources(state, aliases),
     )
@@ -302,7 +283,6 @@ def test_initialize_post_analyze_params_seeds_from_primary_result() -> None:
     service = TabService(
         state,
         MagicMock(),
-        MagicMock(),
         form_resources(state),
         form_sources=lambda aliases: form_sources(state, aliases),
     )
@@ -330,7 +310,6 @@ def test_initialize_post_analyze_params_fast_fails_without_primary_result() -> N
     service = TabService(
         state,
         MagicMock(),
-        MagicMock(),
         form_resources(state),
         form_sources=lambda aliases: form_sources(state, aliases),
     )
@@ -343,7 +322,6 @@ def _native_snapshot(session: NativeSaveSession) -> TabSnapshot:
     return TabService(
         session.state,
         registry=MagicMock(),
-        writeback=MagicMock(),
         cfg_resources=MagicMock(),
         form_sources=MagicMock(),
     ).get_snapshot("tab")

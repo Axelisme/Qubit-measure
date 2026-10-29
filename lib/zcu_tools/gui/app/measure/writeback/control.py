@@ -53,14 +53,14 @@ class WritebackControlPort(Protocol):
         Every call checks writeback permission, tab idle and current draft
         ownership. Call again immediately before each state.write or
         state.run_command; retaining a Form does not retain admission.
-        See WritebackService.get_item_form for the Form's editing effects.
+        See WritebackDraft.get_item_form for the Form's editing effects.
         """
         ...
 
     def set_writeback_item_for_pane(
         self, tab_id: str, pane: WritebackPane, session_id: str, **changes: Any
     ) -> None:
-        """Edit one item; changes follow WritebackService.edit_draft."""
+        """Edit one item; changes follow WritebackDraft.edit."""
         ...
 
     def apply_writeback_for_pane(
@@ -185,14 +185,14 @@ class WritebackControlFacet:
         """
         self._guard.require_admission(tab_id, TabAction.WRITEBACK)
         draft = self._draft_for_pane(tab_id, pane)
-        return self._writeback.get_item_form(draft, session_id)
+        return draft.get_item_form(session_id)
 
     def set_writeback_item_for_pane(
         self, tab_id: str, pane: WritebackPane, session_id: str, **changes: Any
     ) -> None:
         self._guard.require_admission(tab_id, TabAction.WRITEBACK)
         draft = self._draft_for_pane(tab_id, pane)
-        self._writeback.edit_draft(draft, session_id, **changes)
+        draft.edit(session_id, **changes)
         self._emit_draft_changed(tab_id)
 
     def apply_writeback_for_pane(
@@ -205,7 +205,7 @@ class WritebackControlFacet:
         self._guard.require_admission(tab_id, TabAction.WRITEBACK)
         draft = self._draft_for_pane(tab_id, pane)
         try:
-            return self._writeback.apply_draft(draft, item_ids=item_ids)
+            return draft.apply(item_ids=item_ids)
         finally:
             # The shared flow may have committed a successful prefix.
             self._emit_draft_changed(tab_id)
@@ -230,7 +230,7 @@ class WritebackControlFacet:
                     )
 
             try:
-                return self._writeback.write_draft(draft, changes, on_applied=retain)
+                return draft.writeback_write(changes, on_applied=retain)
             finally:
                 self._emit_draft_changed(tab_id)
 
@@ -298,18 +298,18 @@ class WritebackControlFacet:
         propagate. Facts belong to this pane's creation capture, not active focus.
         """
         draft = self._draft_for_pane(tab_id, pane)
-        return self._writeback.preview_values(draft, session_id=session_id)
+        return draft.preview_values(session_id=session_id)
 
     def get_writeback_summaries_for_pane(
         self, tab_id: str, pane: WritebackPane
     ) -> dict[str, tuple[str | None, str | None]]:
-        # Summaries are display-only, read through the service-owned draft;
+        # Summaries are display-only, read from the pane's draft;
         # no guard needed beyond existence check (read-only).
         try:
             draft = self._draft_for_pane(tab_id, pane)
         except FailedPreconditionError:
             return {}
-        return self._writeback.get_all_summaries(draft)
+        return draft.get_all_summaries()
 
     def get_writeback_applied_for_pane(
         self, tab_id: str, pane: WritebackPane
@@ -318,7 +318,7 @@ class WritebackControlFacet:
             draft = self._draft_for_pane(tab_id, pane)
         except FailedPreconditionError:
             return {}
-        return self._writeback.get_all_applied(draft)
+        return draft.get_all_applied()
 
     def _emit_draft_changed(self, tab_id: str) -> None:
         self._bus.emit(

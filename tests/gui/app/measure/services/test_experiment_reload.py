@@ -58,7 +58,6 @@ def app() -> App:
     tabs = TabService(
         state,
         registry,
-        writeback,
         form_resources(state),
         form_sources=lambda aliases: form_sources(state, aliases),
     )

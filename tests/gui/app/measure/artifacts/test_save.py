@@ -954,7 +954,6 @@ def test_tab_snapshot_reads_committed_sections_without_payload_or_path_planning(
     tab_service = TabService(
         session.state,
         registry=MagicMock(),
-        writeback=MagicMock(),
         cfg_resources=MagicMock(),
         form_sources=MagicMock(),
     )

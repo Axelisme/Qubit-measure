@@ -202,7 +202,6 @@ def test_tab_without_context_saves_recorded_names_not_later_selection(
         tabs = TabService(
             empty_state,
             registry,
-            MagicMock(),
             form_resources(empty_state),
             form_sources=lambda aliases: form_sources(empty_state, aliases),
         )

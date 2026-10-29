@@ -97,7 +97,6 @@ def _native_controls(
     tab = TabService(
         session.state,
         MagicMock(),
-        writeback,
         form_resources(session.state),
         lambda aliases: form_sources(session.state, aliases),
     )
@@ -281,9 +280,8 @@ def test_native_load_analysis_and_writeback_keep_historical_point_aliases_and_id
     assert isinstance(draft, WritebackDraft)
     assert draft.parameters is loaded
     assert draft.run_id == session.metadata.run_id
-    assert writeback.preview_values(draft)["param-1"].current == 40.0
-    assert writeback.write_draft(
-        draft,
+    assert draft.preview_values()["param-1"].current == 40.0
+    assert draft.writeback_write(
         (WritebackEdit("param-1"),),
         origin=CommandOrigin("mcp"),
     ) == [WritebackWritten("param-1", "parameter", "Q1.rate", 40.0, 12.0)]
@@ -297,7 +295,7 @@ def test_native_load_analysis_and_writeback_keep_historical_point_aliases_and_id
     assert control.read_context().value("Q2.rate") == 50.0
     assert control.read_target(target).value("Q1.rate") == 10.0
     assert session.context.get_alias_rows() == rows
-    writeback.teardown_draft(draft)
+    draft.teardown()
 
 
 @pytest.mark.parametrize("fault", ["missing", "corrupt"])
@@ -483,7 +481,7 @@ def test_native_load_without_readable_source_allows_context_free_analysis(
     events = session.entry.ledger.events()
     assert_empty_writeback_admission(wb, selected=source != "empty")
     assert session.entry.ledger.events() == events
-    writeback.teardown_draft(draft)
+    draft.teardown()
     rejected = writeback.create_draft(
         [ParameterWriteback("Q1.rate", "rate", 99.0)],
         parameters=None,
@@ -506,7 +504,7 @@ def test_native_load_without_readable_source_allows_context_free_analysis(
         assert control.get_source_binding() == selection
         assert rejected.is_active
     finally:
-        writeback.teardown_draft(rejected)
+        rejected.teardown()
 
 
 def test_public_writeback_targets_current_entry_not_historical_source(
@@ -561,7 +559,7 @@ def test_public_writeback_targets_current_entry_not_historical_source(
         control.use_point(PointUseRequest(parameters.target.point))
         assert control.read_context().lookup("Q1.rate").value == 7.0
     finally:
-        writeback.teardown_draft(draft)
+        draft.teardown()
 
 
 @pytest.mark.parametrize("started_at", [None, "2026-10-08T00:00:00+00:00"])

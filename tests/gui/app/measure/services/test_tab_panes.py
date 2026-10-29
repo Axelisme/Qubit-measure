@@ -72,11 +72,9 @@ def test_snapshot_exposes_independent_panes_and_paths(
             writeback_draft=post_draft,
         ),
     )
-    writeback = MagicMock()
-    writeback.preview_draft.side_effect = lambda draft: (
-        ["primary-item"] if draft is primary_draft else ["post-item"]
-    )
-    tabs = TabService(state, MagicMock(), writeback, form_resources(state), MagicMock())
+    primary_draft.preview.return_value = ["primary-item"]
+    post_draft.preview.return_value = ["post-item"]
+    tabs = TabService(state, MagicMock(), form_resources(state), MagicMock())
     snapshot = tabs.get_snapshot(tab_id)
     assert snapshot.run is not None and snapshot.run.result is run_result
     assert snapshot.analysis is not None and snapshot.analysis.result is primary
@@ -148,9 +146,7 @@ def test_named_panes_project_paths_and_retire_original_collections(
     commit_post_analysis(
         state, tab_id, PostAnalysisPaneState(result=PostSummary(), plots=post)
     )
-    tabs = TabService(
-        state, MagicMock(), MagicMock(), form_resources(state), MagicMock()
-    )
+    tabs = TabService(state, MagicMock(), form_resources(state), MagicMock())
     snapshot = tabs.get_snapshot(tab_id)
     assert (
         snapshot.analysis is not None

@@ -91,7 +91,6 @@ def test_default_analysis_params_retain_result_source(
     service = TabService(
         state,
         MagicMock(),
-        MagicMock(),
         form_resources(state),
         form_sources=lambda aliases: form_sources(state, aliases),
     )
