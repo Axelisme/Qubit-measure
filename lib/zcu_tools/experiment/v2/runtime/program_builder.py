@@ -54,6 +54,7 @@ if TYPE_CHECKING:
     from zcu_tools.program.herald import HeraldSpec
 
 T_Raw = TypeVar("T_Raw")
+T_KeywordRaw_contra = TypeVar("T_KeywordRaw_contra", contravariant=True)
 T_AcquireRaw_co = TypeVar("T_AcquireRaw_co", covariant=True)
 T_DecimatedRaw_co = TypeVar("T_DecimatedRaw_co", covariant=True)
 SignalArray: TypeAlias = NDArray[Any]
@@ -78,23 +79,27 @@ class _CallbackError(Exception):
         self.error = error
 
 
-class SynchronousAcquireKeywords(TypedDict, Generic[T_Raw]):
+class SynchronousAcquireKeywords(TypedDict, Generic[T_KeywordRaw_contra]):
     """Keywords required by a synchronous builder-managed acquisition.
 
     rounds is the software average count and progress controls native progress.
     round_hook receives each completed-round summary and its cancel flag.
     Its keyword entry is read-only: consumers call the supplied hook without
-    replacing it, preserving the producer's raw-result covariance.
+    replacing it. The callback consumes raw data, making these keywords
+    contravariant in that data. Passing them as method arguments preserves
+    the producer protocol's raw-result covariance.
     cancel_flag also carries external stop requests. Omitted step_rounds keeps
     synchronous operation; stepped preparation is outside this producer seam.
     herald selects integrated shots; decimated producers may reject it.
-    Producer-specific keywords are forwarded by the builder at runtime but are
-    not required by this structural protocol.
+    This protocol does not promise arbitrary keyword acceptance. The builder
+    still forwards producer-specific keywords unchanged at runtime.
     """
 
     rounds: int
     progress: bool
-    round_hook: ReadOnly[Callable[[int, T_Raw, CancelFlagProtocol], object]]
+    round_hook: ReadOnly[
+        Callable[[int, T_KeywordRaw_contra, CancelFlagProtocol], object]
+    ]
     cancel_flag: CancelFlagProtocol
     step_rounds: NotRequired[Literal[False]]
     herald: NotRequired[Sequence[HeraldSpec] | None]
@@ -103,16 +108,17 @@ class SynchronousAcquireKeywords(TypedDict, Generic[T_Raw]):
 class ProgramProtocol(Protocol[T_AcquireRaw_co, T_DecimatedRaw_co]):
     """Synchronous producer accepted by the builder's run methods.
 
-    rounds supplies the positive integer software average count. Both methods receive
-    the caller's soc, native progress policy and extra acquisition keywords.
+    rounds supplies the positive integer software average count. Both methods
+    receive the caller's soc and native progress policy. Only the declared
+    synchronous keywords are required by this static contract.
     They call round_hook with a one-based completed round, cumulative raw data
     and the supplied cancel_flag; they check that flag before starting another
     round. Return the final raw data, retaining completed rounds on cancellation.
     Raise StoppedPartialAcquireError if cancelled before any round completes.
     herald is a typed producer option, forwarded unchanged by the builder;
     decimated producers may reject it. This synchronous contract uses the default
-    step_rounds=False mode; stepped preparation is not a completed raw result. Other producer errors propagate
-    to the builder's partial-result policy.
+    step_rounds=False mode; stepped preparation is not a completed raw result.
+    Other producer errors propagate to the builder's partial-result policy.
     """
 
     def acquire(
