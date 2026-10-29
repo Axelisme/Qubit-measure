@@ -2,6 +2,7 @@
 
 from collections.abc import Generator, Mapping
 from contextlib import contextmanager
+from typing import override
 
 from qick.asm_v2 import AsmV2, ConfigReadout, Macro, OpenLoop, Pulse, QickParam, Trigger
 
@@ -30,10 +31,12 @@ from ._timeline_outputs import (
     TimelinePlacedTrigger,
 )
 from ._timeline_runtime import RuntimeEnd
+from ._timeline_selected import SelectedPlayback, TimelineSelectedPulse
 from ._timeline_state import TimelineBook
 from .base import MyProgramV2
 from .ir import TimingLayout, TimingLoop
 from .macro.delay import DelayRegAuto
+from .macro.table import TableSelection
 from .modules.base import Module
 from .resources import ProgramResourcesMixin
 
@@ -119,6 +122,10 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         if type(macro) is FixedRepeatLoop:
             self._time_bounds.register_fixed_loop(macro.index, macro, macro.closing)
         if isinstance(macro, TimeProducer):
+            if macro.selection is not None:
+                self._time_bounds.register_selection(
+                    macro.register, macro.selection, tuple(macro.macros)
+                )
             self._time_bounds.register(
                 macro.register,
                 macro.limits,
@@ -326,6 +333,7 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         *,
         dependencies: tuple[str, ...] = (),
         dependency_ranges: Mapping[str, CycleBounds] | None = None,
+        selection: TableSelection | None = None,
     ) -> Generator[None]:
         """Certify framework-owned native operations that produce cycle values.
 
@@ -333,6 +341,9 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         dependencies names input registers whose producers must also be audited.
         dependency_ranges additionally constrains producer inputs, such as a
         table's valid indices. Its keys automatically join the audited inputs.
+        selection optionally binds selected playback to a declared scalar table
+        and captured index; only matching loader writers can write that relation.
+        Ordinary time producers do not enable this additional relation audit.
         Checks use conservative whole-program bounds, including later writes,
         so a subsequent index reset cannot hide an earlier invalid lookup.
         This seam is for known table/runtime-length owners, not arbitrary author
@@ -352,12 +363,12 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
             raise ValueError("custom macro cannot certify a time producer")
         self.append_macro(
             TimeProducer(
-                self._timeline_book,
                 register,
                 bounds,
                 macros,
                 dependencies,
                 dependency_ranges if dependency_ranges is not None else {},
+                selection,
             )
         )
 
@@ -574,6 +585,72 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
             source = self._pop_native(ConfigReadout)
             self.append_macro(
                 TimelinePlacedConfig(self._timeline_book, timeline, source)
+            )
+
+    def pulse_by_reg(
+        self,
+        ch: int,
+        addr_reg: str,
+        t: float | QickParam = 0.0,
+        *,
+        flat_top_pulse: bool = False,
+        timeline: str | None = None,
+        selection: SelectedPlayback | None = None,
+    ) -> None:
+        """Play native addresses, or place certified selected playback on timeline.
+
+        Native arguments retain their meanings. Timeline placement requires
+        framework selection metadata pairing the address producer and candidates.
+        Selector bounds, writes and overlap are checked during compilation.
+        """
+        if timeline is None:
+            super().pulse_by_reg(ch, addr_reg, t, flat_top_pulse=flat_top_pulse)
+            return
+        if selection is None or selection.register != addr_reg:
+            raise ValueError(
+                "timeline address playback requires matching selection metadata"
+            )
+        from .macro.pluse_reg import PulseByReg
+
+        self.append_macro(
+            PulseByReg.from_base(self, ch, addr_reg, t, flat_top_pulse=flat_top_pulse)
+        )
+        source = self._pop_native(PulseByReg)
+        self.append_macro(
+            TimelineSelectedPulse(self._timeline_book, timeline, source, selection)
+        )
+
+    @override
+    def pulse_from_length_reg(
+        self,
+        ch: int,
+        name: str,
+        *,
+        length_reg: str,
+        flat_top: bool,
+        t: float | QickParam = 0.0,
+        timeline: str | None = None,
+        selection: SelectedPlayback | None = None,
+    ) -> None:
+        """Play a native length register or certified timeline-selected lengths.
+
+        Native arguments are unchanged. Timeline placement requires matching
+        framework selection metadata; raw waveform length and post stay separate.
+        Invalid producer bounds, writes and overlap fail during compilation.
+        """
+        super().pulse_from_length_reg(
+            ch, name, length_reg=length_reg, flat_top=flat_top, t=t
+        )
+        if timeline is not None:
+            if selection is None or selection.register != length_reg:
+                raise ValueError(
+                    "timeline length playback requires matching selection metadata"
+                )
+            from .macro.wmem import PulseFromLengthReg
+
+            source = self._pop_native(PulseFromLengthReg)
+            self.append_macro(
+                TimelineSelectedPulse(self._timeline_book, timeline, source, selection)
             )
 
     def pulse_from_regs(

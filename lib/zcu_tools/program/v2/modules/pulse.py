@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Annotated, Literal, TypeAlias
 from pydantic import BeforeValidator
 from qick.asm_v2 import QickParam, QickRawParam
 
+from .._timeline_selected import PlaybackChoice, SelectedPlayback
 from .base import AbsModuleCfg, Module
 from .delay import DelayAuto
 from .dmem import LoadValue
@@ -357,6 +358,40 @@ class TableLengthPulse(Module):
             val_reg=self._length_reg,
         )
         self._length_loader.declare(prog)
+
+    def lower(
+        self, prog: TimelineProgramV2, *, timeline: str | None, tag: str | None
+    ) -> None:
+        """Play the selected actual generator length; count pre/post once.
+
+        The caller initializes idx_reg with certified in-range producers.
+        Timeline owner resolves flat-top ramps, exact end rounding and audits.
+        """
+        del tag  # ModuleEmission owns the occurrence tag.
+        relation = self._length_loader.lower_selected(prog)
+        name = self._template.pulse_id
+        if name is None:
+            raise ValueError(f"{self.name}: undeclared runtime pulse template")
+        prog.pulse_from_length_reg(
+            self.cfg.ch,
+            name,
+            length_reg=self._length_reg,
+            flat_top=isinstance(self.cfg.waveform, FlatTopWaveformCfg),
+            t=self.cfg.pre_delay,
+            timeline="default" if timeline is None else timeline,
+            selection=SelectedPlayback(
+                relation.selector,
+                relation.register,
+                tuple(
+                    PlaybackChoice(name, length_cycles=cycles)
+                    for cycles in relation.table.values
+                ),
+                relation,
+            ),
+        )
+        prog.delay_timeline(
+            self.cfg.post_delay, timeline="default" if timeline is None else timeline
+        )
 
     def _wave_length_cycles(
         self, prog: ModularProgramV2 | TimelineProgramV2, length: float

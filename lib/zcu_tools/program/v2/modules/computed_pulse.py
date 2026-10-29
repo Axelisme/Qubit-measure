@@ -10,6 +10,8 @@ from zcu_tools.program.v2.modules.base import Module
 from zcu_tools.program.v2.modules.dmem import LoadValue
 from zcu_tools.program.v2.modules.pulse import Pulse, PulseCfg
 
+from .._timeline_selected import PlaybackChoice, SelectedPlayback
+
 if TYPE_CHECKING:
     from zcu_tools.program.v2.modular import ModularProgramV2
     from zcu_tools.program.v2.timeline import TimelineProgramV2
@@ -68,6 +70,32 @@ class ComputedPulse(Module):
             val_reg=f"{self.name}_wmem_index",
         )
         self._address_loader.declare(prog)
+
+    def lower(
+        self, prog: TimelineProgramV2, *, timeline: str | None, tag: str | None
+    ) -> None:
+        """Play the selected declared waveform with its own post, without padding.
+
+        The borrowed selector must have certified in-range producers on every
+        path. Address/selector writes and same-channel overlap fail at compile.
+        """
+        del tag  # ModuleEmission owns the occurrence tag.
+        relation = self._address_loader.lower_selected(prog)
+        choices = tuple(
+            PlaybackChoice(pulse.pulse_id, pulse.cfg.post_delay)
+            for pulse in self.pulse_modules
+            if pulse.pulse_id is not None and pulse.cfg is not None
+        )
+        prog.pulse_by_reg(
+            self.ref_cfg.ch,
+            self._address_loader.val_reg,
+            t=self.ref_cfg.pre_delay,
+            flat_top_pulse=self._is_flat_top,
+            timeline="default" if timeline is None else timeline,
+            selection=SelectedPlayback(
+                relation.selector, relation.register, choices, relation
+            ),
+        )
 
     def init(self, prog: ModularProgramV2) -> None:
         base_idxs = self._declare_candidates(prog)

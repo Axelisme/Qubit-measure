@@ -1,6 +1,6 @@
 # README - program/v2
 
-**Last updated:** 2026-10-29，逐點精確 sweep ceil 與 dmem table fallback
+**Last updated:** 2026-10-30，逐點精確 ceil、selected playback 與 paired post
 
 **讀者：** lab-author、framework-dev、agent。原生 V2 program 寫法與 module、readout、acquisition 契約速查。
 
@@ -138,7 +138,7 @@ Runtime 整數 cycle 起點也保留分數 event tail 到加 post-delay 後才�
 Reset 保留每個 child 的 post-delay。BathReset 的 pi/2 等待 cavity end 加 post-delay 向上取整後才開始，最後也計入 qubit 尾段。
 這些 owner 不從 `total_length` 重建 duration。Scalar 與可精確表示的整數仿射 sweep 保留靜態時間。
 編譯期已知的非仿射 sweep 由 program／timeline owner 以 dmem table 提供逐點精確 aggregate ceil，不加 padding。
-任意 runtime selector 與 selected-post 尚待整合。
+ComputedPulse 與 TableLengthPulse 使用捕捉的任意 selector 選擇實際 playback，並保留相配的 post 到 aggregate 才取整。Flat-top 的全部 segment 地址由 playback owner 在最後準備步驟產生，時間 storage 的全流稽核也涵蓋這些衍生地址。
 省略 timeline 選 default，但不移動 reference。
 以下是 `TimelineProgramV2` 子類別的 hooks。`drive_cfg` 是呼叫端提供、使用 channel 0 的 `Pulse.Cfg`。
 時間參數單位為 us，另一個 channel 1 的 native pulse 由原生 API 宣告。
@@ -246,7 +246,7 @@ target port. They do not persist the patched bundle to wmem. This keeps runtime
 updates atomic at playback and leaves the fixed template stable across points.
 
 `TablePulseReadout` uses a different contract for arbitrary frequency sweeps: the
-body plays ordinary wmem-backed templates, while `ModularProgramV2` attaches dmem
+body plays ordinary wmem-backed templates, while the program attaches dmem
 lookup + wmem patch macros to QICK's loop exec-after hook. The update therefore
 lands after the shot timing and before the loop test/jump, matching native
 `QickParam` sweep placement without enabling DDS phase reset.
@@ -269,7 +269,9 @@ prog.meta_macro(
 
 ## ComputedPulse — DMEM Lookup 機制
 
-`ComputedPulse` 在 `init()` 時收集每個候選 pulse 的起始 wmem index，透過 `prog.add_dmem(base_idxs)` 寫入 dmem table 並記錄 `dmem_offset`。`run()` 時透過 `read_dmem` 動態查找：
+新路徑在 `declare` 宣告候選 waveform 與 wmem-index table。每次 `emit` 先捕捉 selector，再由同次選擇決定 playback 與該候選的 post-delay。Program owner 保留原始 waveform 分數尾段，加入所選 post 後取整一次，不使用候選最大 duration。實際 address producer、捕捉的 selector 與其依賴都接受全流寫入稽核。
+
+Legacy `ComputedPulse` 在 `init()` 時收集每個候選 pulse 的起始 wmem index，透過 `prog.add_dmem(base_idxs)` 寫入 dmem table 並記錄 `dmem_offset`。`run()` 時透過 `read_dmem` 動態查找：
 
 ```python
 addr_reg = val_reg + dmem_offset   # address of table[val_reg]
