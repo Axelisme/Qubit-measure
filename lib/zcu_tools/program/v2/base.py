@@ -147,6 +147,10 @@ class MyProgramV2(  # pyright: ignore[reportIncompatibleMethodOverride]
         classify returns g/e populations on accepted shots and takes precedence
         over QICK threshold/angle. Otherwise threshold/angle returns excited
         fractions in I and zero Q on accepted shots. Omitted herald retains IQ.
+        charge_requirements is a tuple of core.simulation.ChargeDriveRequirement
+        records. The simulation entry forwards it for environment validation;
+        hardware consumes the keyword without checking physical roles or passing
+        it to QICK. Operators remain responsible for real wiring.
         Other options follow QICK and the acquisition mixins; pass them by keyword.
 
         Omitted or False step_rounds runs to completion and returns one float64

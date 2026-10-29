@@ -71,7 +71,9 @@ Pulse readout 與 mux 的每筆 tone 各有可選 `classifier`，預設 None。
 
 Circle 保存 g/e 複數中心、可缺的 radius 與 3×3 confusion matrix。
 Linear 保存 radians 的 angle、threshold 與可缺的 2×2 confusion matrix。
-分類座標為原始積分 ADC 值除以積分長度，不扣 IQ offset；linear 以 `exp(1j*angle)` 旋轉。
+`Centroid3Classifier` 使用 `mode="centroid3"`，保存必填的 g_center、e_center、f_center 與 3×3 confusion_matrix。
+三中心須有限且彼此不同。Matrix rows 為準備態 g/e/f，columns 為量到的 g/e/f。
+分類座標為原始積分 ADC 值除以 rounded integration sample count，不扣 IQ offset；linear 以 `exp(1j*angle)` 旋轉。
 矩陣 rows 為真實／準備態，columns 為量到的態，circle 順序 g/e/other，linear 順序 g/e。
 矩陣只驗有限值與形狀，不轉置、不限制值域或 row sum。
 Radius 提供時須有限且 >0；None 表示尚未提供 Post 半徑校準。
@@ -84,24 +86,41 @@ Point 的 `readout_cal` 停用，不再讀寫，也不把舊數值搬入 classif
 
 Classifier 不保存校準時的 readout 設定，也沒有自動失效機制。
 修改 readout 設定不會清除既有 classifier，取用時也不比對校準設定是否仍適用。
-操作員須在修改 readout 後重跑 singleshot GE 與 Post，Apply 新校準後再使用分類。
+操作員須在修改 readout 後重跑對應校準，circle 使用 singleshot GE 與 Post，centroid3 使用三態 reference。Apply 新校準後再使用分類。
 使用者於 2026-10-29 裁決：「QC3我認為分類參數比對需求還不確定，先A」。
 Writeback proposal 的 materialized 設定比對只防止把新校準寫給不同設定，不檢查既有 classifier 的有效性。
 
 Readout 工具從 cfg 產生以 ADC channel 為 key 的型別化 mapping，由作者明確交給 acquire。
 Acquire 不掃 program registry，mapping 必須完整覆蓋已宣告 ADC，不混合 IQ 與 population。
 未傳 classify 保留 IQ 路徑。Linear 以旋轉後實部大於 threshold 判 excited，等於時判 ground。
+Centroid3 每 shot 選 Euclidean 距離最近的中心，等距時依 g/e/f 順序選第一個，沒有拒判區。
+Acquire 最後一軸維持長度 2，依序保存 [g,e]。Centroid3 的 f＝1−g−e，circle 的第三類仍是 other。
+`require_other` 與 heralding 明確拒絕 centroid3，本次不新增三態 heralding。
+
+三態 reference 只用 acquired IQ 與 preparation labels 建立中心及 training confusion。
+它經既有完整 readout module proposal／Apply 流程，只更新 Run 捕捉的 library 目標的 classifier，保留其他欄位與 child keys。
+沒有捕捉的 library 目標或非更新欄位與實測 readout 不符時明確失敗，不自動建立或猜測目標。
+Training confusion 包含準備污染，correction 回到 preparation-label 座標，保留負值與大於 1 的結果。
+這不是 pure energy-state population 或 readout fidelity。
+STIRAP 與單頻 g↔f Raman 從該次 run 保存的 readout cfg 要求 centroid3。
+缺少 classifier、型別不符或未知 ADC 明確失敗，不退回 circle、不從 live library 補值、不讀 simulator truth。
+校準沿 Spec、native cfg、library 與 data.h5 的 run cfg 保存，不另建 experiment calibration storage。
+Reference 分析與 acquire 共用 `utils.shot_classification` 的最近中心規則。
+
+2026-10-29，使用者對三態校準交接選 A，答「3A」：新增 readout classifier 型別，由三態 reference Apply 到 library，後續實驗讀 saved run cfg。
+對 acquire 輸出答「5A，但這不是長久之計，必須設計一個方案來回傳任意維度的數據。而不是2維」。
+本次沿用 [g,e] 兩欄，任意維度輸出另做設計，不在本實作預留抽象。
 
 單 qubit GE Primary 提出只有中心的 circle，Post 提出含中心、radius 與 matrix 的完整 circle。
 兩者都是完整 module replacement，同次批次依 Primary→Post 接受。
 分兩次 Apply 時最後一次生效，Post→Primary 會回到只有中心。
-需要 radius 的 consumer 因此提示做 Post。T1 需要 other，不接受 linear。
+需要 radius 的 consumer 因此提示做 Post。T1 需要 other，不接受 linear 或 centroid3。
 舊 cfg 沒有 classifier 時，T1 分析略過 confusion 修正，不讀 point 校準。
 GE 以 run 的 readout slot 解析目標，proposal builder 與 materialized 比對契約見 [[0008]]。
 Mux GE 每個 phase 合成一個完整 proposal，只更新成功 tone 的精確 classifier 路徑。
 雙 qubit 的 nearest-GE 分析只從 saved readout cfg 的角色 tone 派生 circle centers，不要求 radius。
-Joint readout、chevron、constructive phase、CZ amplitude 在 cfg 驗證時拒絕 missing／linear。
-Conditional phase、local Z、RB 保留 raw acquisition，分析將 missing／linear 轉為帶原因的結果，不產生 population 或 fit。
+Joint readout、chevron、constructive phase、CZ amplitude 在 cfg 驗證時拒絕 missing／非 circle。
+Conditional phase、local Z、RB 保留 raw acquisition，分析將 missing／非 circle 轉為帶原因的結果，不產生 population 或 fit。
 Readout owner 的單 ADC circle lookup 不理解 lab 角色，也不讀 live library。
 其餘 singleshot population consumers 同樣明傳完整 ADC mapping，confusion correction 只讀 saved cfg。
 Amplitude／Length Rabi 保留單 ADC raw IQ 與聯合 fit，未校準時只略過 live population preview。

@@ -95,7 +95,7 @@ def _single_settings(
                 flux_per_unit=0.0,
             ),
         ),
-        drive_line=qubit.drive_line,
+        drive_lines={qubit.drive_line.name: qubit.drive_line},
         flux_line=None,
         readout=qubit.readout.model_copy(
             update={

@@ -1,6 +1,6 @@
 # Explicit acquisition environments
 
-**Last updated:** 2026-10-29
+**Last updated:** 2026-10-29, explicit charge requirements
 
 **讀者：** framework-dev。模擬 acquisition 的 request、round 與 raw source 契約。
 
@@ -36,6 +36,15 @@ including pacing. It runs before admission releases. Observer errors warn at
 most once and cannot mask acquisition failures, even under warning-as-error
 filters. An omitted on_end avoids this observer and its acquire-level clocks. FTF uses the
 callback to persist its own local routing reports; program knows no file format.
+Integrated `acquire(..., charge_requirements=(ChargeDriveRequirement(name, gen_ch), ...))`
+passes named physical charge requirements through the simulation request. The
+record lives in `core.simulation`; names are diagnostics, not dispatch keys.
+Single-fluxonium validates membership before evolution. White noise accepts
+requirements without physical checks because it has no physical line model.
+Six-fluxonium and FTF reject nonempty requirements before evolution until they
+support this contract. Empty requirements retain each environment's behavior.
+The entry consumes this keyword without forwarding it on hardware calls; hardware
+wiring roles remain the operator's responsibility. Requirements are call-local.
 Other SoC objects use the original path. Integrated simulation configures the
 compiled program and readouts without serializing DAC/weight arrays for no-op
 transport. Requested uploads still validate int16 envelope and weight dtypes;

@@ -1,5 +1,6 @@
 """Annotation operations at the dynamic core-to-form translation boundary."""
 
+from collections.abc import Mapping
 from operator import methodcaller
 from types import UnionType
 from typing import Annotated, Literal, TypeAliasType, Union, get_args, get_origin
@@ -38,6 +39,25 @@ def union_type(items: tuple[object, ...]) -> object:
 
 def annotated_type(annotation: object, metadata: object) -> object:
     return methodcaller("__getitem__", (annotation, metadata))(Annotated)
+
+
+def replace_models(
+    annotation: object, replacements: Mapping[type[BaseModel], type[BaseModel]]
+) -> object:
+    """Replace model members while preserving union/branch metadata placement."""
+    if isinstance(annotation, TypeAliasType):
+        return replace_models(annotation.__value__, replacements)
+    args = get_args(annotation)
+    if get_origin(annotation) is Annotated:
+        result = replace_models(args[0], replacements)
+        for metadata in args[1:]:
+            result = annotated_type(result, metadata)
+        return result
+    if get_origin(annotation) in (UnionType, Union):
+        return union_type(tuple(replace_models(arg, replacements) for arg in args))
+    if isinstance(annotation, type) and issubclass(annotation, BaseModel):
+        return replacements.get(annotation, annotation)
+    return annotation
 
 
 def branch_tag(models: tuple[type[BaseModel], ...]) -> str | None:
