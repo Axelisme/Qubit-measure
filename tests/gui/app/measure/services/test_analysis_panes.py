@@ -278,7 +278,7 @@ def analysis_panes(native_session: NativeSaveSession):
         post_plots.release()
         current_draft = tab.analysis.writeback_draft
         if isinstance(current_draft, WritebackDraft):
-            writeback.teardown_draft(current_draft)
+            current_draft.teardown()
 
 
 def test_pane_primary_publishes_excited_fit_and_calibration_writeback(
@@ -293,9 +293,7 @@ def test_pane_primary_publishes_excited_fit_and_calibration_writeback(
     assert tuple(panes.fit_plots) == ("fit",)
     primary_draft = tab.analysis.writeback_draft
     assert isinstance(primary_draft, WritebackDraft)
-    assert {
-        item.target_name for item in panes.writeback.preview_draft(primary_draft)
-    } == {
+    assert {item.target_name for item in primary_draft.preview()} == {
         "$qubit.ext.pane_sample.score",
         "$qubit.ext.pane_sample.width",
         "$qubit.ext.pane_sample.first",
@@ -315,16 +313,16 @@ def test_pane_post_uses_adopted_fit_and_projects_separate_artifacts_and_writebac
     assert tuple(panes.post_plots) == ("post",)
     post_draft = tab.post_analysis.writeback_draft
     assert isinstance(post_draft, WritebackDraft)
-    assert {item.target_name for item in panes.writeback.preview_draft(post_draft)} == {
+    assert {item.target_name for item in post_draft.preview()} == {
         "$qubit.ext.pane_sample.extent",
         "$qubit.ext.pane_sample.matrix",
     }
     snapshot = TabService(
         panes.state,
         MagicMock(),
-        panes.writeback,
         form_resources(panes.state),
         MagicMock(),
+        writeback=panes.writeback,
     ).get_snapshot(panes.tab_id)
     assert snapshot.analysis is not None and snapshot.post_analysis is not None
     assert snapshot.analysis.figures is panes.fit_plots

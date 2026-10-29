@@ -114,6 +114,8 @@ The cfg-based APIs delegate to these same word decoders.
 作者在 `_initialize(cfg)` 宣告通道、pulse、readout config、module 與 loops。
 在 `_body(cfg)` 發射原生 QICK 操作或 `emit(module)`。
 建構子使用 `reps`、`initial_delay`、`relax_delay`。
+建構子沿用 `MyProgramV2` 的型別契約，不承接 `AveragerProgramV2` 的全部選項。
+`initial_delay` 的型別為 `float`，不接受 `None`。
 Shot 外殼為 `final_wait=0`、`final_delay=relax_delay`。
 全部輸出共用既有 IR compiler。Boundary metadata 可能改變指令排列，不要求新舊逐位相同。
 Builder 與模擬 frontend 尚未切換，既有 acquire 擴充仍由共同基底提供。

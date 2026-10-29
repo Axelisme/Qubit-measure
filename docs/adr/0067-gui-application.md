@@ -57,7 +57,7 @@ SavedEntry 與 SavedPoint 分別標識 entry 與 point 文件組。寫入經 res
 
 Measure 的 library editor 交未 lower 的 schema 與固定 ParameterContext。ContextService 透過 app 注入的 callbacks 準備 ModuleSpec／WaveformSpec，再提交一筆 library structure change。Rename 不級聯修改其他引用。
 
-WritebackService 先以分析來源的固定 capture 解析與 lower 全部選定 proposals，再依提案順序交 concrete items 給 `ContextService.apply_writeback`。
+WritebackDraft 先以分析來源的固定 capture 解析與 lower 全部選定 proposals，再依提案順序交 concrete items 給 `ContextService.apply_writeback`。
 
 Preview 顯示當下作用中位置，Apply 從當下 read_context().target 重新取得 SavedEntry 或 SavedPoint，不從歷史 capture 決定目的地。此入口驗證目標、綁定資源並交 resources 共用 executor。未開 entry 時仍可預覽合法 draft，destination_context 的 entry_name、point 與各項 current 為 null；非空 Apply 在 append 前以 no_context 拒絕。Global 的 point 為 null，已提交 receipt 的 entry_name 必為字串，destination 不含 kind。空歷史環境不構成拒絕寫回的理由；底層 context 仍拒絕其他 entry 的 target。
 
@@ -215,7 +215,12 @@ Results browser 的分組、filter、圖庫、細節與比較只讀保存內容�
 
 ## Adapter capability 與事件
 
-Measure 的 `artifacts` package 擁有 ArtifactTracker、SaveService、SaveControl、保存中心與 ArtifactHandover。Run 與 restore 的公開契約使用 RunRecord envelope。RunService 只將 acquisition metadata 裝進 record，持有並轉交它。cfg 與 Result 仍由 adapter 擁有，GUI 不探測其欄位或 shape。Acquired 沿 record.metadata 寫入，不保存 cfg。分析結果仍是 opaque handle，不收窄 workflow 的任意回傳值。Pane 的 draft 使用 WritebackService 擁有的具名 `WritebackDraft`，沒有 draft 時為 None。
+Measure 的 `artifacts` package 擁有 ArtifactTracker、SaveService、SaveControl、保存中心與 ArtifactHandover。Run 與 restore 的公開契約使用 RunRecord envelope。RunService 只將 acquisition metadata 裝進 record，持有並轉交它。cfg 與 Result 仍由 adapter 擁有，GUI 不探測其欄位或 shape。Acquired 沿 record.metadata 寫入，不保存 cfg。分析結果仍是 opaque handle，不收窄 workflow 的任意回傳值。
+
+Pane 各自保存具名 `WritebackDraft`，沒有 draft 時為 None。
+每個 draft 擁有 detached entries、module Forms、固定來源、summaries、applied state 與 per-draft 操作。
+`WritebackService` 建立 draft，注入既有 `ContextControlPort` 寫入能力，並保留 `accept_drafts` 的跨 draft 預驗證與成功前綴協調。
+Control facet 仍負責 tab／pane admission、事件與 detached receipt。UI 和 remote 不直接操作 draft。
 
 使用者於 2026-10-22 裁定：「存讀檔接口也不用RunRecord外的資訊了」。Metadata 與資料使用同一個 envelope，避免宿主保存兩份可能錯配的來源；不保留 opaque Run fallback。
 

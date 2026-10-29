@@ -211,9 +211,14 @@ class TimelinePlacedTrigger(Trigger):
             return
         self.t = origin + self.relative_t
         super().preprocess(prog)
-        end: Time = self.get_time_param("t") + self.get_time_param("width")
+        actual_t = self.get_time_param("t")
+        end: Time = actual_t + self.get_time_param("width")
         for ch in self.ros:
-            end = self.book.math.maximum(end, prog.get_timestamp(ro_ch=ch))
+            length = prog.ro_chs[ch]["length"] / prog.soccfg["readouts"][ch]["f_output"]
+            # QICK's timestamp uses the requested trigger time, not its rounded placement.
+            ro_end = actual_t + length
+            self.book.native_timestamp(prog, ro_end, ro_ch=ch)
+            end = self.book.math.maximum(end, ro_end)
         self.event_end = EventEnd(0.0, end)
         self.book.set_end(
             self.timeline,

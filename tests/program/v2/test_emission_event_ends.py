@@ -88,6 +88,70 @@ def test_pulse_ceil_covers_actual_playback_plus_post_once(
     assert shots(prog) == result
 
 
+@pytest.mark.parametrize("origin", [0, 40])
+@pytest.mark.parametrize("swept_trigger", [False, True])
+@pytest.mark.parametrize(
+    "offset, post, end", [(0.0013, 0.0005, 20), (0.0011, 0.0012, 19)]
+)
+def test_readout_end_uses_quantized_trigger_before_adding_adc_window_and_post(
+    origin, swept_trigger, offset, post, end
+):
+    trigger = (
+        QickSweep1D("scan", offset, offset + 2 / 430.08) if swept_trigger else offset
+    )
+    readout = PulseReadout(
+        "read",
+        PulseReadoutCfg(
+            gen_ch=0,
+            nqz=1,
+            freq=1000,
+            gain=0.5,
+            waveform=ConstWaveformCfg(length=10 / 384),
+            pre_delay=0,
+            post_delay=post,
+            ro_ch=0,
+            ro_length=13 / 307.2,
+            trig_offset=trigger,
+        ),
+    )
+
+    def initialize(prog):
+        prog.append_macro(_AllocateDuration())
+        if swept_trigger:
+            prog.add_loop("scan", 3)
+
+    def body(prog):
+        if origin:
+            prog.write_reg("duration", origin)
+            prog.delay_timeline("duration")
+        prog.emit(readout)
+
+    result = shots(_program([readout], body, initialize))
+    # Trigger .559104 rounds up to 1; .473088 rounds down to 0.
+    # 13 ADC clocks span 18.2 cycles, dominating pulse end 11.2 and width 10.
+    # Aggregate ceil: 1+18.2+.21504 =>20, or 0+18.2+.516096 =>19.
+    # Each sweep point adds one trigger cycle; register origin adds exactly 40.
+    steps = [0, 1, 2] if swept_trigger else [0]
+    trigger_start = 1 if offset == 0.0013 else 0
+    assert [
+        [
+            (event.cycle - shot.start_cycle, event.value)
+            for event in shot.events
+            if event.kind == "data"
+        ]
+        for shot in result
+    ] == [
+        [(origin + trigger_start + step, 1), (origin + trigger_start + step + 10, 0)]
+        for step in steps
+    ] * 2
+    assert [shot.body_end_cycle - shot.start_cycle for shot in result] == [
+        origin + end + step for step in steps
+    ] * 2
+    assert [shot.end_cycle - shot.start_cycle for shot in result] == [
+        origin + end + step + 9 for step in steps
+    ] * 2
+
+
 class _AllocateDuration(Macro):
     """Declare a native QICK register at preprocessing, before its writes."""
 

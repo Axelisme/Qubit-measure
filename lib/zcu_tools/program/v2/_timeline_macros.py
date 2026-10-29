@@ -1,6 +1,6 @@
 """Preprocess timeline operations and translate their flag-free cycle plans."""
 
-from collections.abc import Generator, Mapping
+from collections.abc import Generator, Mapping, Sequence
 from contextlib import contextmanager
 from copy import deepcopy
 
@@ -37,7 +37,7 @@ from ._timeline_runtime import (
     time_bounds,
 )
 from ._timeline_selected import TimelineSelectedPulse
-from ._timeline_state import RepeatFrame, TimelineBook
+from ._timeline_state import RepeatFrame, RepeatFrameSnapshot, TimelineBook
 from .macro.delay import DelayRegAuto
 from .macro.structure import MarkedCloseLoop, MarkedOpenLoop
 from .macro.table import TableSelection
@@ -767,7 +767,7 @@ class BranchCases:
             self.active = False
 
 
-def _same_times(values: list[Time]) -> bool:
+def _same_times(values: Sequence[Time]) -> bool:
     first = values[0]
     return all(
         value is first
@@ -814,7 +814,7 @@ class TimelineBranch(Macro):
         results: list[dict[str, Time]] = []
         native_gens: list[dict[int, Time]] = []
         native_ros: list[dict[int, Time]] = []
-        paths = []
+        paths: list[list[RepeatFrameSnapshot]] = []
         self.prepared = []
         for case in self.cases:
             self._restore_frames(frames)
@@ -928,42 +928,42 @@ class TimelineBranch(Macro):
                 ro_ch=None if generator else ch,
             )
 
-    def _save_frames(self):
+    def _save_frames(self) -> list[RepeatFrameSnapshot]:
         return [
-            (
-                frame.advance,
-                frame.variable,
-                frame.written_gens.copy(),
-                frame.written_ros.copy(),
-                deepcopy(frame.pulse_guards),
+            RepeatFrameSnapshot(
+                advance=frame.advance,
+                variable=frame.variable,
+                written_gens=frame.written_gens.copy(),
+                written_ros=frame.written_ros.copy(),
+                pulse_guards=deepcopy(frame.pulse_guards),
             )
             for frame in self.book.repeats
         ]
 
-    def _restore_frames(self, snapshots) -> None:
-        for frame, (advance, variable, gens, ros, guards) in zip(
-            self.book.repeats, snapshots, strict=True
-        ):
-            frame.advance, frame.variable = advance, variable
-            frame.written_gens, frame.written_ros = gens.copy(), ros.copy()
-            frame.pulse_guards = deepcopy(guards)
+    def _restore_frames(self, snapshots: list[RepeatFrameSnapshot]) -> None:
+        for frame, snapshot in zip(self.book.repeats, snapshots, strict=True):
+            frame.advance = snapshot.advance
+            frame.variable = snapshot.variable
+            frame.written_gens = snapshot.written_gens.copy()
+            frame.written_ros = snapshot.written_ros.copy()
+            frame.pulse_guards = deepcopy(snapshot.pulse_guards)
 
-    def _merge_frames(self, paths) -> None:
+    def _merge_frames(self, paths: list[list[RepeatFrameSnapshot]]) -> None:
         for index, frame in enumerate(self.book.repeats):
             snapshots = [path[index] for path in paths]
-            advances = [snapshot[0] for snapshot in snapshots]
+            advances = [snapshot.advance for snapshot in snapshots]
             frame.advance = (
                 advances[0]
                 if _same_times(advances)
                 else min(_bounds(value)[0] for value in advances)
             )
             frame.variable = any(
-                snapshot[1] for snapshot in snapshots
+                snapshot.variable for snapshot in snapshots
             ) or not _same_times(advances)
-            frame.written_gens = set.union(*(snapshot[2] for snapshot in snapshots))
-            frame.written_ros = set.union(*(snapshot[3] for snapshot in snapshots))
+            frame.written_gens = set.union(*(path.written_gens for path in snapshots))
+            frame.written_ros = set.union(*(path.written_ros for path in snapshots))
             for ch in frame.pulse_guards:
-                guards = [snapshot[4][ch] for snapshot in snapshots]
+                guards = [snapshot.pulse_guards[ch] for snapshot in snapshots]
                 frame.pulse_guards[ch] = _PulseGuard(
                     ch,
                     tuple(value for guard in guards for value in guard.shifts),

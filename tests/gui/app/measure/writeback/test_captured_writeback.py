@@ -200,18 +200,28 @@ def test_mixed_submission_receipts_and_applied_flags_follow_committed_indices(
         device_snapshot={"device": {"value": 0.1, "value_unit": "V"}},
     )
     ids = tuple(item.session_id for item in draft.items)
-    result = session.service.accept_drafts((WritebackSelection(draft, ids),))
+    result = draft.accept(ids)
     expected_ids = ("param-1", "param-2", "ml-1") + (() if fails else ("record-1",))
-    assert tuple(item.id for item in result.written[0]) == expected_ids
-    assert set(result.applied_ids[0]) == set(expected_ids)
-    assert session.service.get_all_applied(draft) == {
+    assert tuple(item.id for item in result.values) == expected_ids
+    assert result.applied_ids == (
+        expected_ids if fails else ("ml-1", "record-1", "param-1", "param-2")
+    )
+    assert result.written == {
+        "parameter": ["Q1.ext.gain", "Q1.ext.rate"],
+        "ml_modules": ["Q1.pulses.pi"],
+        "records": ["invalid/component" if fails else "Q1"],
+    }
+    assert draft.get_all_applied() == {
         "ml-1": True,
         "record-1": not fails,
         "param-1": True,
         "param-2": True,
     }
-    assert [item.value for item in result.written[0][:2]] == [0.4, 5000.0]
-    assert result.written[0][2].kind == "module"
+    assert [item.value for item in result.values[:2]] == [0.4, 5000.0]
+    assert result.values[2].kind == "module"
+    assert session.control.read_context().value("Q1.ext.gain") == 0.4
+    assert session.control.read_context().value("Q1.ext.rate") == 5000.0
+    assert session.entry.ledger.events()[-1].kind == "accepted"
     assert (result.error is not None) == fails
 
 
@@ -233,8 +243,8 @@ def test_write_draft_associates_before_and_after_values_after_group_reordering(
         run_id="run-1",
         device_snapshot={"device": {"value": 0.1, "value_unit": "V"}},
     )
-    receipts = session.service.write_draft(
-        draft, tuple(WritebackEdit(item.session_id) for item in draft.items)
+    receipts = draft.writeback_write(
+        tuple(WritebackEdit(item.session_id) for item in draft.items)
     )
     assert [item.id for item in receipts] == ["param-1", "record-1"]
     by_id = {item.id: item for item in receipts}
@@ -361,7 +371,7 @@ def test_preview_and_apply_use_current_gui_point_not_analysis_origin(
     session.control.add_component("Q1", "fake/drive/a", {})
     selected = session.control.read_context()
     session.control.set_parameter(saved_target(selected), "Q1.ext.gain", 0.2)
-    values = session.service.preview_values(draft)
+    values = draft.preview_values()
     assert values["param-1"].current == 0.2
     result = session.service.accept_drafts((WritebackSelection(draft, ("param-1",)),))
     assert result.error is None
@@ -391,12 +401,12 @@ def test_draft_detaches_author_element_identity(session: WritebackSession) -> No
     try:
         identity["name"] = "later"
         identity["index"] = 0
-        assert session.service.preview_draft(draft)[0].element == {
+        assert draft.preview()[0].element == {
             "index": 2,
             "name": "Q3",
         }
     finally:
-        session.service.teardown_draft(draft)
+        draft.teardown()
 
 
 @pytest.mark.parametrize("save_before_accept", [False, True])
@@ -426,7 +436,7 @@ def test_accepted_retains_run_identity_with_or_without_save(
             require_record(tab.run),
             metadata=native.metadata.model_copy(update={"run_id": "later-run"}),
         )
-        service.apply_draft(draft)
+        draft.apply()
         event = native.entry.ledger.events()[-1]
         assert event.kind == "accepted"
         assert isinstance(event.payload, AcceptedPayload)
@@ -434,7 +444,7 @@ def test_accepted_retains_run_identity_with_or_without_save(
         current = control.read_target(saved_target(captured))
         assert document_meta(current.document(), "general.ext.flux_value") == {}
         assert draft.run_id == source_run_id
-        service.teardown_draft(draft)
+        draft.teardown()
 
 
 @pytest.mark.parametrize("interactive", [False, True])
@@ -542,7 +552,7 @@ def test_analysis_draft_uses_start_run_identity(
         if not interactive:
             assert len(seen_analyze) == 1
             assert seen_analyze[0].parameters is captured
-        writeback.teardown_draft(draft)
+        draft.teardown()
 
 
 @pytest.mark.parametrize("save_before_accept", [False, True], ids=["unsaved", "saved"])
@@ -682,9 +692,9 @@ def test_post_analysis_draft_retains_primary_identity(
         assert [proposal.ctx.parameters is captured for proposal in seen_proposals] == [
             True
         ]
-        writeback.teardown_draft(draft)
+        draft.teardown()
         if primary_draft is not None:
-            writeback.teardown_draft(primary_draft)
+            primary_draft.teardown()
 
 
 @pytest.mark.parametrize("destination", ["point", "global"])
@@ -718,7 +728,7 @@ def test_writeback_evaluates_module_expression_from_creation_capture(
         session.control.use_global()
         session.control.add_component("Q1", "fake/drive/a", {})
         session.control.set_setup_parameter("general.ext.flux_value", 0.9)
-    session.service.apply_draft(draft)
+    draft.apply()
     current = session.control.read_context()
     written = current.library.module_spec("Q1.pulses.pi")
     assert isinstance(written, PulseSpec) and written.gain == 0.5
@@ -744,7 +754,7 @@ def test_append_failure_leaves_parameter_untouched(
 
     monkeypatch.setattr(RecordsLedger, "append", fail_append)
     with pytest.raises(OSError, match="ledger unavailable"):
-        session.service.apply_draft(draft)
+        draft.apply()
     assert not session.control.read_context().lookup("general.ext.flux_value").present
     assert session.entry.ledger.events() == ()
 
@@ -795,7 +805,7 @@ def test_complex_writeback_keeps_captured_role_path_but_writes_selected_point(
             "ext": {"response": {"origin": {"__complex__": [0.7, 0.2]}}},
         },
     )
-    preview = session.service.preview_values(draft)
+    preview = draft.preview_values()
     assert preview["param-1"].current == {"__complex__": [0.7, 0.2]}
     assert preview["param-2"].current is None
     assert [preview[item].actual_path for item in ("param-1", "param-2")] == [
@@ -804,7 +814,7 @@ def test_complex_writeback_keeps_captured_role_path_but_writes_selected_point(
     ]
     assert [preview[item].proposed for item in ("param-1", "param-2")] == tags
     assert session.entry.ledger.events() == ()
-    session.service.apply_draft(draft, origin=CommandOrigin("mcp"))
+    draft.apply(origin=CommandOrigin("mcp"))
     current = session.control.read_target(second, roles=captured.roles)
     assert session.control.read_target(first).value("Q1.ext.response.origin") == {
         "__complex__": [0.6, 0.1],
@@ -852,10 +862,10 @@ def test_receipt_reads_actual_role_target_after_point_change(
     second = session.control.use_point(PointUseRequest("b"))
     session.control.add_component("Q2", "fake/drive/a", {"rate": 0.9})
     session.control.add_component("Q1", "fake/drive/a", {"rate": 0.8})
-    assert session.service.preview_values(draft)["param-1"].current == 0.8
+    assert draft.preview_values()["param-1"].current == 0.8
     draft.edit("param-1", selected=False)
-    written = session.service.write_draft(
-        draft, (WritebackEdit("param-1"),), origin=CommandOrigin("mcp")
+    written = draft.writeback_write(
+        (WritebackEdit("param-1"),), origin=CommandOrigin("mcp")
     )
     assert written == [WritebackWritten("param-1", "parameter", "Q1.rate", 0.8, 0.2)]
     assert captured.value("$driver.rate") == 0.1
@@ -863,7 +873,7 @@ def test_receipt_reads_actual_role_target_after_point_change(
     assert session.control.read_context().value("Q1.rate") == 0.2
     assert session.control.read_target(first).value("Q1.rate") == 0.6
     assert not draft.items[0].selected
-    assert session.service.get_all_applied(draft) == {"param-1": True}
+    assert draft.get_all_applied() == {"param-1": True}
     event = session.entry.ledger.events()[-1]
     assert event.origin == "mcp"
     target = session.control.read_target(second)
@@ -895,10 +905,10 @@ def test_library_receipt_reads_actual_raw_entry_and_uses_capture_for_proposal(
     )
     draft.edit(item_id, edits={(field,): {"expr": "general.ext.flux_value"}})
     session.control.set_parameter(saved_target(captured), "general.ext.flux_value", 9.0)
-    preview = session.service.preview_values(draft)[item_id]
+    preview = draft.preview_values()[item_id]
     assert isinstance(preview.current, dict) and preview.current[field] == 0.6
     assert isinstance(preview.proposed, dict) and preview.proposed[field] == 0.2
-    receipt = session.service.write_draft(draft, (WritebackEdit(item_id),))[0]
+    receipt = draft.writeback_write((WritebackEdit(item_id),))[0]
     assert receipt.target == item.target_name
     assert isinstance(receipt.before, dict) and receipt.before[field] == 0.6
     assert isinstance(receipt.after, dict) and receipt.after[field] == 0.2
@@ -928,7 +938,7 @@ def test_each_parameter_write_replaces_metadata_with_its_own_stderr(
         parameters=captured,
         experiment_name="test/writeback",
     )
-    session.service.apply_draft(draft)
+    draft.apply()
     document = session.control.read_context().document()
     assert [
         document_meta(document, path)
@@ -956,7 +966,7 @@ def test_duplicate_concrete_role_destinations_fail_before_accepted(
         experiment_name="test/writeback",
     )
     with pytest.raises(InvalidInputError, match="duplicate writeback destination"):
-        session.service.apply_draft(draft)
+        draft.apply()
     assert session.entry.ledger.events() == ()
     assert session.control.read_context().lookup("Q1.rate") == before
 
@@ -967,9 +977,9 @@ def test_empty_draft_reads_and_writes_without_context(
     draft = session.service.create_draft(
         [], parameters=None, experiment_name="test/writeback"
     )
-    assert session.service.preview_values(draft) == {}
-    assert session.service.write_draft(draft, ()) == []
-    assert session.service.apply_draft(draft)["applied_ids"] == []
+    assert draft.preview_values() == {}
+    assert draft.writeback_write(()) == []
+    assert draft.apply()["applied_ids"] == []
     assert session.entry.ledger.events() == ()
 
 
@@ -981,8 +991,8 @@ def test_preview_proposed_data_is_isolated_at_validation_boundary(
         parameters=session.control.read_context(),
         experiment_name="test/writeback",
     )
-    preview = session.service.preview_values(draft)["param-1"]
+    preview = draft.preview_values()["param-1"]
     assert preview.current is None and preview.proposed == [1, 2]
     assert isinstance(preview.proposed, list)
     preview.proposed.append(3)
-    assert session.service.preview_values(draft)["param-1"].proposed == [1, 2]
+    assert draft.preview_values()["param-1"].proposed == [1, 2]
