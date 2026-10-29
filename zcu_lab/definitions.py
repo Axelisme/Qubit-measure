@@ -18,6 +18,7 @@ from zcu_lab.v2.heralding.amp_rabi.gui import (
     DEFINITION as HERALDING_AMP_RABI_DEFINITION,
 )
 from zcu_lab.v2.heralding.t1.gui import DEFINITION as HERALDING_T1_DEFINITION
+from zcu_lab.v2.heralding.t2echo.gui import DEFINITION as HERALDING_T2ECHO_DEFINITION
 from zcu_lab.v2.jpa.auto_optimize.gui import DEFINITION as JPA_AUTO_OPTIMIZE_DEFINITION
 from zcu_lab.v2.jpa.check.gui import DEFINITION as JPA_CHECK_DEFINITION
 from zcu_lab.v2.jpa.flux.gui import DEFINITION as JPA_FLUX_DEFINITION
@@ -174,6 +175,7 @@ ADAPTERS: dict[str, object] = {
     "twotone/t1": T1_DEFINITION,
     "heralding/t1": HERALDING_T1_DEFINITION,
     "heralding/amp_rabi": HERALDING_AMP_RABI_DEFINITION,
+    "heralding/t2echo": HERALDING_T2ECHO_DEFINITION,
     "twotone/t2ramsey": T2_RAMSEY_DEFINITION,
     "twotone/t2echo": T2_ECHO_DEFINITION,
     "singleshot/ge": GE_DEFINITION,

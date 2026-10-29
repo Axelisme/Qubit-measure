@@ -1,0 +1,155 @@
+"""Measure ground-heralded spin-echo decay versus total delay to estimate refocused coherence.
+
+Recipe points → expts: scan sample counts map to the GUI sweep Expts field.
+"""
+
+from typing import Literal
+
+from pydantic import Field
+from zcu_tools.mcp.measure.recipe_api import (
+    KEEP,
+    Keep,
+    RecipeInputs,
+    RecipeReport,
+    RecipeSession,
+    recipe,
+    report_number,
+)
+
+from zcu_lab.v2.twotone.time_domain.t2echo.gui import T2EchoSummary
+
+
+class HeraldingT2EchoInputs(RecipeInputs):
+    """Inputs for heralding_t2echo; all units and null policies are declared per field."""
+
+    readout_ref: str | None | Keep = Field(
+        KEEP,
+        description="Pulse-readout library key including classifier; omission retains the Form value, null is passed unchanged to the Form owner, which may reject it.",
+    )
+    use_reset: str | None | Keep = Field(
+        KEEP,
+        description="Preparation module option; omission retains the Form value, null is passed unchanged to the Form owner, which may reject it.",
+    )
+    pi_ref: str | None | Keep = Field(
+        KEEP,
+        description="Calibrated pi-pulse library key; omission retains the Form value, null is passed unchanged to the Form owner, which may reject it.",
+    )
+    pi2_ref: str | None | Keep = Field(
+        KEEP,
+        description="Calibrated pi/2-pulse library key; omission retains the Form value, null is passed unchanged to the Form owner, which may reject it.",
+    )
+    max_delay_us: float | None | Keep = Field(
+        KEEP,
+        description="Total echo-delay stop in us, not half-delay; omission retains the Form value, null is passed unchanged to the Form owner, which may reject it.",
+    )
+    detune_ratio: float | None | Keep = Field(
+        KEEP,
+        description="Final-pulse phase-ramp ratio, dimensionless; omission retains the Form value, null is passed unchanged to the Form owner, which may reject it.",
+    )
+    points: int | None | Keep = Field(
+        KEEP,
+        description="Sweep sample count; omission retains the Form value, null is passed unchanged to the Form owner, which may reject it.",
+    )
+    reps: int | None | Keep = Field(
+        KEEP,
+        description="Acquisition repetition count; omission retains the Form value, null is passed unchanged to the Form owner, which may reject it.",
+    )
+    rounds: int | None | Keep = Field(
+        KEEP,
+        description="Averaging round count; omission retains the Form value, null is passed unchanged to the Form owner, which may reject it.",
+    )
+
+    fit_method: Literal["fringe", "decay"] | None | Keep = Field(
+        KEEP,
+        description="Fit method; omission retains the analysis value; null is passed to the analysis owner. Analysis only.",
+    )
+    fit_phase: bool | None | Keep = Field(
+        KEEP,
+        description="Fit phase offset (fringe only); omission retains the analysis value; null is passed to the analysis owner. Analysis only.",
+    )
+
+
+class HeraldingT2EchoReport(RecipeReport):
+    """T2 Echo results and failure reason; cancellation returns no report."""
+
+    t2echo_us: float | None = Field(
+        description="Refocused coherence time in us; null means not estimable."
+    )
+    t2echo_err_us: float | None = Field(
+        description="Refocused coherence uncertainty in us; null means not estimable."
+    )
+
+
+@recipe(
+    "heralding_t2echo",
+    description="Run ground-heralded Echo; save selected IQ, pass fraction and analysis.",
+)
+async def heralding_t2echo(
+    session: RecipeSession, inputs: HeraldingT2EchoInputs
+) -> HeraldingT2EchoReport:
+    """Measure refocused qubit coherence with a spin-echo delay sweep.
+
+    After optional reset and ground herald, apply pi/2, wait half the total delay, apply pi, wait
+    the other half, then apply a phase-shifted pi/2 pulse and read out.
+    Average only accepted signal shots; fit the decay with the ordinary Echo owner.
+    No active reset or joint herald is performed. Fringe fitting remains optional.
+    Ask before applying the proposed calibration, then save selected IQ, pass fraction and analysis.
+    Skipping writes nothing.
+
+    points → expts sets the sweep sample count.
+    Analysis controls: fit_method, fit_phase. Omission retains each analysis value; null is passed to its owner.
+    Missing Form values stop before acquisition; completed Run data is saved even if analysis fails.
+    """
+    tab = session.open_tab(
+        "heralding/t2echo",
+        target={"qubit": inputs.target},
+        reuse=inputs.reuse_tab_id,
+    )
+    tab.select("reset", inputs.use_reset)
+    tab.select("readout", inputs.readout_ref)
+    tab.select("pi_pulse", inputs.pi_ref)
+    tab.select("pi2_pulse", inputs.pi2_ref)
+    tab.set("length.stop", inputs.max_delay_us)
+    tab.set("length.n", inputs.points)
+    tab.set("detune_ratio", inputs.detune_ratio)
+    tab.set("reps", inputs.reps)
+    tab.set("rounds", inputs.rounds)
+    for edit in inputs.overrides:
+        tab.set(edit.path, edit.value)
+    tab.check_ready()
+
+    await tab.run()
+    try:
+        analysis = await tab.analyze(
+            "primary",
+            result=T2EchoSummary,
+            updates={
+                "fit_method": inputs.fit_method,
+                "fit_phase": inputs.fit_phase,
+            },
+        )
+        if analysis.result is None:
+            return HeraldingT2EchoReport(
+                t2echo_us=None,
+                t2echo_err_us=None,
+                writeback_applied=False,
+                analysis_failure=analysis.reason,
+            )
+
+        decision = await tab.ask_writeback()
+        writeback_applied = False
+        if decision.accepted:
+            receipt = tab.accept_writeback(decision.items)
+            receipt.raise_for_error()
+            writeback_applied = bool(receipt.items)
+
+        return HeraldingT2EchoReport(
+            t2echo_us=report_number(analysis.result.t2e),
+            t2echo_err_us=report_number(analysis.result.t2e_err),
+            writeback_applied=writeback_applied,
+        )
+    finally:
+        tab.save()
+
+
+DEFINITION = heralding_t2echo
