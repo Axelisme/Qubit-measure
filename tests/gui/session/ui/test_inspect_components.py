@@ -188,7 +188,7 @@ def _expand_general(ui: ComponentDriver) -> None:
 
 
 @pytest.mark.parametrize("read_only", [False, True], ids=["editable", "readonly"])
-@pytest.mark.parametrize("destination", ["Current point", "Setup template"])
+@pytest.mark.parametrize("destination", ["Active documents", "Entry template"])
 def test_general_ext_values_follow_destination_and_edit_policy(
     general_ext_ui: ComponentDriver,
     read_only: bool,
@@ -200,19 +200,19 @@ def test_general_ext_values_follow_destination_and_edit_policy(
     evidence /= (
         f"{destination.replace(' ', '-')}-{'readonly' if read_only else 'editable'}"
     )
-    ui.choose_option("Current point", value=destination)
+    ui.choose_option("Active documents", value=destination)
     _expand_general(ui)
     ui.screenshot(evidence / "01-values.png")
-    expected_note = "point note" if destination == "Current point" else "setup note"
+    expected_note = "point note" if destination == "Active documents" else "setup note"
     assert _general_values(ui).get(("note",)) == expected_note
     assert _general_values(ui).get(("legacy.key",)) == "literal key"
     assert _general_values(ui).get(("flags",)) == (
-        "[false, null]" if destination == "Current point" else "[true, null]"
+        "[false, null]" if destination == "Active documents" else "[true, null]"
     )
 
     ui.expand_tree(("general", "ext", "calibration"), object_name="component_tree")
     ui.screenshot(evidence / "02-nested.png")
-    before = "1.25" if destination == "Current point" else "3.5"
+    before = "1.25" if destination == "Active documents" else "3.5"
     assert _general_values(ui).get(("calibration", "offset")) == before
     ui.edit_tree_value(
         ("general", "ext", "calibration", "offset"),
@@ -223,12 +223,12 @@ def test_general_ext_values_follow_destination_and_edit_policy(
     expected = before if read_only else "7.75"
     assert _general_values(ui).get(("calibration", "offset")) == expected
 
-    other = "Setup template" if destination == "Current point" else "Current point"
+    other = "Entry template" if destination == "Active documents" else "Active documents"
     ui.choose_option(destination, value=other)
     _expand_general(ui)
     ui.screenshot(evidence / "04-other-destination.png")
     assert _general_values(ui).get(("calibration", "offset")) == (
-        "3.5" if destination == "Current point" else "1.25"
+        "3.5" if destination == "Active documents" else "1.25"
     )
     ui.choose_option(other, value=destination)
     ui.click("Refresh")
@@ -245,9 +245,9 @@ def test_inspect_template_edits_do_not_change_current_point(inspector) -> None:
     destination = next(
         combo
         for combo in editor.findChildren(QComboBox)
-        if combo.findText("Setup template") >= 0
+        if combo.findText("Entry template") >= 0
     )
-    destination.setCurrentText("Setup template")
+    destination.setCurrentText("Entry template")
     assert editor.add_component(
         "Template", "fake/drive/a", {"rate": 5000.0}, setup=True
     )

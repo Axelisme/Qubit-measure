@@ -78,6 +78,7 @@ class NewEntryDialog(QDialog):
         *,
         arb_waveforms: ArbWaveformKeys,
         dialog_presenter: DialogPresenter,
+        setup: bool = False,
         parent: QWidget | None = None,
     ) -> None:
         """Build the dialog and the form of the first template.
@@ -95,6 +96,7 @@ class NewEntryDialog(QDialog):
         """
         super().__init__(parent)
         self._ctrl = ctrl
+        self._setup = setup
         self._templates = templates
         self._arb_waveforms = arb_waveforms
         self._presenter = dialog_presenter
@@ -172,7 +174,7 @@ class NewEntryDialog(QDialog):
             self._show_error("No templates are available.")
             return
         try:
-            parameters = self._ctrl.read_context()
+            parameters = self._ctrl.read_context(setup=self._setup)
         except FailedPreconditionError as exc:
             self._show_error(str(exc))
             return

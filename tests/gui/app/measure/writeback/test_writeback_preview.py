@@ -91,7 +91,7 @@ def test_static_unit_facts_follow_selected_point_and_captured_path_without_conve
             control.use_point(PointUseRequest("b"))
             control.add_component("Q2", "fake/drive/a", {})
             control.add_component("U1", kind, {"frequency": 30.0})
-            control.set_alias_rows((AliasRow("driver", "Q2"),))
+            control.apply_alias_rows((AliasRow("driver", "Q2"),))
             refreshed = service.preview_values(draft)["param-1"]
             assert (refreshed.actual_path, refreshed.unit) == ("U1.frequency", "MHz")
             assert (refreshed.current, refreshed.proposed) == (30.0, 20.09)
@@ -119,7 +119,7 @@ def test_concrete_destination_does_not_use_alias_or_historical_point_fallback(se
         control.add_component(
             "coupler", kind, {"module": {"cz_f2": "coupler.pulses.original"}}
         )
-        control.set_alias_rows((AliasRow("coupler", "coupler"),))
+        control.apply_alias_rows((AliasRow("coupler", "coupler"),))
         captured = control.read_context()
         draft = service.create_draft(
             [
@@ -145,7 +145,7 @@ def test_concrete_destination_does_not_use_alias_or_historical_point_fallback(se
             control.add_component(
                 "other_coupler", kind, {"module": {"cz_f2": "other.pulses.decoy"}}
             )
-            control.set_alias_rows((AliasRow("coupler", "other_coupler"),))
+            control.apply_alias_rows((AliasRow("coupler", "other_coupler"),))
             refreshed = service.preview_values(draft)["param-1"]
             assert refreshed.actual_path == "coupler.module.cz_f2"
             assert refreshed.current is None

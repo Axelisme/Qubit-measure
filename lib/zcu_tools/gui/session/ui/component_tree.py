@@ -31,7 +31,8 @@ from qtpy.QtWidgets import (
 
 from zcu_tools.format_version import YamlMap, YamlValue
 from zcu_tools.gui.expected_error import FailedPreconditionError
-from zcu_tools.gui.session.context_types import PointFileRevision, SavedPoint
+from zcu_tools.gui.lifetime import LifetimeScope
+from zcu_tools.gui.session.context_types import ContextTarget, PointFileRevision
 from zcu_tools.gui.session.ui.add_component_dialog import AddComponentDialog
 from zcu_tools.gui.session.ui.component_editing import (
     edit_choices,
@@ -89,7 +90,7 @@ class _EditTarget:
     revision: PointFileRevision | None = None
     setup: bool = False
     entry_name: str | None = None
-    point: SavedPoint | None = None
+    point: ContextTarget | None = None
     draft: str | None = None
 
 
@@ -140,19 +141,22 @@ class ComponentTreeWidget(QWidget):
         """
         super().__init__(parent)
         self._control = control
+        self._scope = LifetimeScope(self)
         self._read_only = False
         self._edit_targets: dict[_RowKey, _EditTarget] = {}
         self._drafts: dict[_RowKey, str] = {}
         layout = QVBoxLayout(self)
         self._sync = PointFileBanner(
-            control, "parameters", self._reload_file, parent=self
+            control, "parameters", self._scope.callback(self._reload_file),
+            parent=self
         )
         layout.addWidget(self._sync)
         toolbar = QHBoxLayout()
         toolbar.addWidget(QLabel("Destination:"))
         self._destination = QComboBox()
-        self._destination.addItems(["Current point", "Setup template"])
-        self._destination.currentIndexChanged.connect(self.refresh)
+        self._destination.setObjectName("inspect.parameters.destination")
+        self._destination.addItems(["Active documents", "Entry template"])
+        self._scope.connect(self._destination.currentIndexChanged, self._destination_changed)
         toolbar.addWidget(self._destination)
         toolbar.addStretch(1)
         self._add_btn = QPushButton("Add component…")
@@ -232,9 +236,6 @@ class ComponentTreeWidget(QWidget):
 
     def refresh_file_status(self) -> None:
         """Update source notices without closing an active or rejected draft."""
-        if self._is_setup() and not self._drafts:
-            self._sync.hide()
-            return
         self._sync.refresh(has_draft=bool(self._drafts))
 
     def _reload_file(self) -> None:
@@ -282,7 +283,7 @@ class ComponentTreeWidget(QWidget):
         value: YamlValue,
         *,
         setup: bool = False,
-        target: SavedPoint | None = None,
+        target: ContextTarget | None = None,
     ) -> bool:
         """Edit a concrete field through its owner; report errors as for Add.
 
@@ -306,6 +307,11 @@ class ComponentTreeWidget(QWidget):
             return False
         self.refresh()
         return True
+
+    def _destination_changed(self) -> None:
+        self._drafts.clear()
+        self._sync.set_setup(setup=self._is_setup())
+        self.refresh()
 
     def _is_setup(self) -> bool:
         return self._destination.currentIndex() == 1
@@ -542,7 +548,7 @@ class ComponentTreeWidget(QWidget):
                 setup=setup,
                 entry_name=None if entry is None else entry.name,
                 point=None if setup else self._control.read_context().target,
-                revision=None if setup else self._sync.capture(),
+                revision=self._sync.capture(),
             )
             self._edit_targets[key] = target
             self._drafts[key] = target.initial

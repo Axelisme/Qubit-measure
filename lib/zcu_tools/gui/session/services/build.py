@@ -33,7 +33,6 @@ from zcu_tools.gui.session.value_lookup import ValueLookup, ValueRegistry
 if TYPE_CHECKING:
     from zcu_tools.cfg_model import WaveformAssetInfo
     from zcu_tools.gui.event_bus import BaseEventBus
-    from zcu_tools.gui.session.aliases import AliasRow
     from zcu_tools.gui.session.context_control import ContextControlPort
     from zcu_tools.gui.session.device_control import DeviceControlPort
     from zcu_tools.gui.session.operation_runner import OperationRunner
@@ -107,7 +106,6 @@ def build_session_services(  # noqa: PLR0913
     project_root: str = "",
     driver_factory: DriverFactoryPort | None = None,
     device_registry: DeviceRegistryPort | None = None,
-    alias_rows: tuple[AliasRow, ...] = (),
 ) -> SessionServices:
     """Construct the session services from the app-provided infrastructure.
 
@@ -124,12 +122,8 @@ def build_session_services(  # noqa: PLR0913
     ``driver_factory`` defaults to the device service's built-in hardware factory
     when omitted; ``device_registry`` defaults to a new session-owned
     DeviceManager. Callers sharing drivers must supply the same registry.
-    alias_rows supplies the caller's ordered fallback for each entry without a
-    saved alias table. ContextService initializes an empty primary row on that
-    entry's first nonempty point from the registered sole candidate. Saved tables
-    are authoritative, including empty rows. Explicit Apply saves to the entry;
-    ordinary set_alias_rows remains memory-only. Empty defaults enable no aliases.
-    Syntax/order errors propagate at construction.
+    Aliases stay empty until an entry is opened. Entry and point tables are
+    file-backed without preset fallback; explicit alias edits require an entry.
     """
     value_registry = ValueRegistry()
     device = DeviceService(
@@ -146,7 +140,6 @@ def build_session_services(  # noqa: PLR0913
         bus,
         values=value_registry,
         bind_assets=bind_assets,
-        alias_rows=alias_rows,
     )
     context_control: ContextControlPort = context
     predictor = PredictorService(context_control)

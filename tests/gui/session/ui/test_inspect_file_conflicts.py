@@ -112,7 +112,7 @@ def conflict_ui(
     # The missing-file case deliberately leaves aliases revision=None.
     document = request.param
     if document != "aliases-missing":
-        control.set_alias_rows((AliasRow("qubit", "Q1"),))
+        control.apply_alias_rows((AliasRow("qubit", "Q1"),))
     path = next(
         file.path
         for file in control.get_file_revisions()
@@ -304,7 +304,7 @@ def test_parameter_rejection_retains_visible_draft(conflict_ui, submit: str) -> 
     if submit == "enter":
         ui.press_key(Qt.Key.Key_Return)
     else:
-        ui.choose_option("Current point", value="Current point")
+        ui.choose_option("Active documents", value="Active documents")
     assert ui.observe(object_name="component_error").text
     rows = ui.visible().tree_rows
     assert any(row.path == ("Q1", "rate") and row.columns[1] == "9" for row in rows)
@@ -338,7 +338,7 @@ def test_parameter_draft_cannot_follow_destination(conflict_ui) -> None:
     ui.screenshot(evidence / "01-rejected.png")
     # Restore the source baseline so only target pinning can prevent redirection.
     path.write_bytes(original)
-    ui.choose_option("Current point", value="Setup template")
+    ui.choose_option("Active documents", value="Entry template")
     ui.edit_tree_value(("Q1", "rate"), object_name="component_tree", value="8")
     assert ui.observe(object_name="component_error").text
     assert any(
@@ -346,13 +346,13 @@ def test_parameter_draft_cannot_follow_destination(conflict_ui) -> None:
         for row in ui.visible().tree_rows
     )
     ui.screenshot(evidence / "02-target-rejected.png")
-    ui.choose_option("Setup template", value="Current point")
+    ui.choose_option("Entry template", value="Active documents")
     ui.click(object_name="inspect.parameters.sync.reload")
     assert any(
         row.path == ("Q1", "rate") and row.columns[1] == "4300.0"
         for row in ui.visible().tree_rows
     )
-    ui.choose_option("Current point", value="Setup template")
+    ui.choose_option("Active documents", value="Entry template")
     assert any(
         row.path == ("Q1", "rate") and row.columns[1] == "1200.0"
         for row in ui.visible().tree_rows

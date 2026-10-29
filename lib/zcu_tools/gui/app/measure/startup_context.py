@@ -268,21 +268,14 @@ class StartupParameters:
     calls: OwnerCalls
     control: ContextControlPort
 
-    def set_alias_rows(self, rows: tuple[AliasRow, ...]) -> None:
-        """Replace ordered authored aliases in memory, without saving aliases.yaml.
-
-        Invalid rows propagate without changing the old table. Point-local
-        disk aliases remain governed by Inspect Apply. Worker/owner safe.
-        """
-        self.calls.call(lambda: self.control.set_alias_rows(rows))
 
     def apply_alias_rows(self, rows: tuple[AliasRow, ...]) -> None:
         """Validate and persist ordered authored rows, then publish them in memory.
 
-        Save the selected point's aliases.yaml, then install memory. Without a
-        selected point raise FailedPreconditionError(no_context) before I/O.
-        Unlike set_alias_rows, this commits point-local aliases. Invalid
-        rows and storage errors propagate, preserving the prior table/file.
+        Save the active aliases.yaml (entry when global, otherwise the selected
+        point), then install its revision and rows. Without an opened entry
+        raise FailedPreconditionError(no_context) before validation or I/O.
+        Invalid rows and storage errors preserve the prior table/file.
         The context owner manages validation and atomic file replacement.
         Synchronous from a worker or owner callback.
         """

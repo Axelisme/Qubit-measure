@@ -176,7 +176,7 @@ def test_acceptance_retains_actual_values_and_fixed_destination_for_confirmed_pr
 def test_mixed_submission_receipts_and_applied_flags_follow_committed_indices(
     session: WritebackSession, fails: bool
 ) -> None:
-    session.control.set_alias_rows((AliasRow("coordinate", "device"),))
+    session.control.apply_alias_rows((AliasRow("coordinate", "device"),))
     captured = session.control.read_context()
     draft = session.service.create_draft(
         [
@@ -219,7 +219,7 @@ def test_mixed_submission_receipts_and_applied_flags_follow_committed_indices(
 def test_write_draft_associates_before_and_after_values_after_group_reordering(
     session: WritebackSession,
 ) -> None:
-    session.control.set_alias_rows((AliasRow("coordinate", "device"),))
+    session.control.apply_alias_rows((AliasRow("coordinate", "device"),))
     draft = session.service.create_draft(
         [
             RecordWriteback(

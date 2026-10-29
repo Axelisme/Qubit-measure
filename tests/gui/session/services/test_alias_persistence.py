@@ -44,7 +44,6 @@ def service(bus: BaseEventBus | None = None) -> ContextService:
         SessionState(SessionEnv(parameters=None, soc=None, soccfg=None)),
         bus if bus is not None else BaseEventBus(),
         bind_assets=ArbWaveformDatabase.info_at,
-        alias_rows=PRESET,
     )
 
 
@@ -108,7 +107,7 @@ def test_list_apply_reopen_capture_storage_and_failed_save(
     assert fresh.get_alias_rows() == rows
     assert (entry.result_path / "points/first/aliases.yaml").read_bytes() == old_file
     assert events == []
-    context.set_alias_rows((AliasRow("participants", []),))
+    context.apply_alias_rows((AliasRow("participants", []),))
     with pytest.raises(RoleResolutionError, match="not bound"):
         context.read_context().value("$participants")
     assert captured.value("$participants") == ["R1", "Q1"]
@@ -125,7 +124,7 @@ def test_file_revisions_are_installed_snapshots_and_alias_writes_publish_after_d
     assert context.get_file_revisions() == ()
     entry = entry_at(tmp_path)
     context.install_entry(entry)
-    assert context.get_file_revisions() == ()
+    assert len(context.get_file_revisions()) == 3
     context.use_point(PointUseRequest("first"))
     files = context.get_file_revisions()
     assert [item.document for item in files] == ["parameters", "library", "aliases"]
@@ -133,7 +132,7 @@ def test_file_revisions_are_installed_snapshots_and_alias_writes_publish_after_d
     assert files[2].revision is None
     for item in files[:2]:
         assert item.revision == sha256(item.path.read_bytes()).hexdigest()
-    context.set_alias_rows(AUTHORED)
+    context.apply_alias_rows(AUTHORED)
     installed = context.get_file_revisions()
     assert installed[:2] == files[:2]
     assert installed[2].revision == sha256(installed[2].path.read_bytes()).hexdigest()
@@ -174,10 +173,10 @@ def test_switch_point_reloads_local_table_without_setup_or_preset_fallback(
     entry.save_aliases(EntryAliases(aliases={"driver": "R1"}), point="second")
     context = service()
     context.install_entry(entry)
-    assert context.get_alias_rows() == ()
+    assert context.get_alias_rows() == (AliasRow("setup_only", "Q1"),)
     context.use_point(PointUseRequest("first"))
     assert context.get_alias_rows() == ()
-    context.set_alias_rows(AUTHORED)
+    context.apply_alias_rows(AUTHORED)
     context.use_point(PointUseRequest("second"))
     assert context.get_alias_rows() == (AliasRow("driver", "R1"),)
     assert context.read_context().value("$driver.rate") == 6500.0
@@ -250,7 +249,7 @@ def test_apply_round_trip_entry_isolation_and_write_through_set(tmp_path: Path) 
         ("sense", "$driver.sense"),
         ("spare", ""),
     ]
-    context.set_alias_rows((AliasRow("transient", "Q1"),))
+    context.apply_alias_rows((AliasRow("transient", "Q1"),))
     assert first.load_aliases(point="first").aliases == {"transient": "Q1"}
     reopened = ResultEntry.open(
         "one", result_root=tmp_path / "result", database_root=tmp_path / "Database"
@@ -302,21 +301,16 @@ def test_apply_failure_preserves_file_rows_and_events_then_retries(
     assert len(events) == 1
 
 
-@pytest.mark.parametrize("opened", [False, True])
-def test_apply_without_point_fails_without_changing_memory_or_setup(
+def test_apply_without_entry_fails_without_changing_rows_or_an_unopened_entry(
     tmp_path: Path,
-    opened: bool,
 ) -> None:
     context = service()
     entry = entry_at(tmp_path)
     entry.save_aliases(EntryAliases(aliases={"setup": "Q1"}))
-    if opened:
-        context.install_entry(entry)
-    context.set_alias_rows(AUTHORED)
     with pytest.raises(FailedPreconditionError) as failure:
-        context.apply_alias_rows(())
+        context.apply_alias_rows(AUTHORED)
     assert failure.value.reason_code == "no_context"
-    assert context.get_alias_rows() == AUTHORED
+    assert context.get_alias_rows() == ()
     assert entry.load_aliases().aliases == {"setup": "Q1"}
     context.clear_context()
     assert context.get_alias_rows() == ()
@@ -357,7 +351,7 @@ def test_temporary_capture_and_historical_storage_stay_fixed(tmp_path: Path) -> 
     entry = entry_at(tmp_path, "one")
     context.install_entry(entry)
     context.use_point(PointUseRequest("first"))
-    context.set_alias_rows(AUTHORED)
+    context.apply_alias_rows(AUTHORED)
     capture = context.read_context()
     storage = context.capture_storage(capture)
     temporary = context.read_context(aliases={"driver": "R1"})

@@ -8,6 +8,7 @@ from pydantic import TypeAdapter, ValidationError
 from qtpy.QtCore import QSignalBlocker, Qt
 from qtpy.QtWidgets import (
     QAbstractItemView,
+    QComboBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -26,6 +27,8 @@ from zcu_tools.gui.session.aliases import AliasRow, AliasTable
 from zcu_tools.gui.session.context_control import ContextControlPort
 from zcu_tools.gui.session.context_types import (
     ContextSourceUnavailableError,
+    ContextTarget,
+    SavedEntry,
     SavedPoint,
 )
 from zcu_tools.gui.session.ui.point_file_banner import PointFileBanner
@@ -70,12 +73,21 @@ class AliasPanel(QWidget):
         self._scope = LifetimeScope(self)
         self._control = control
         self._base: tuple[AliasRow, ...] = ()
-        self._target: SavedPoint | None = None
+        self._target: ContextTarget | None = None
         self._applying = False
         self._read_only = False
         layout = QVBoxLayout(self)
+        self._destination = QComboBox()
+        self._destination.setObjectName("inspect.aliases.destination")
+        self._destination.addItems(["Active documents", "Entry template"])
+        toolbar = QHBoxLayout()
+        toolbar.addWidget(QLabel("Destination:"))
+        toolbar.addWidget(self._destination)
+        toolbar.addStretch()
+        layout.addLayout(toolbar)
         self._sync = PointFileBanner(
-            control, "aliases", self._scope.callback(self._load), parent=self
+            control, "aliases", self._scope.callback(self._load),
+            parent=self
         )
         layout.addWidget(self._sync)
         hint = QLabel(
@@ -114,6 +126,7 @@ class AliasPanel(QWidget):
         layout.addWidget(self._error)
         self._load()
         self._scope.connect(self._table.cellChanged, self._cell_finished)
+        self._scope.connect(self._destination.currentIndexChanged, self._load)
 
     def _action_button(self, text: str, name: str) -> QPushButton:
         button = QPushButton(text, self)
@@ -139,7 +152,7 @@ class AliasPanel(QWidget):
         try:
             rows = self._validated_rows()
             self._sync.check(self._revision)
-            self._control.apply_alias_rows(rows)
+            self._control.apply_alias_rows(rows, setup=self._is_setup())
         except (FailedPreconditionError, InvalidInputError, OSError) as error:
             if not self._scope.closed:
                 self._error.setText(str(error))
@@ -154,9 +167,10 @@ class AliasPanel(QWidget):
         self._refresh_resolutions()
 
     def _load(self) -> None:
-        """Discard local input and load the currently selected point."""
+        """Discard local input and load the selected destination."""
+        self._sync.set_setup(setup=self._is_setup())
         self._target = self._current_target()
-        self._base = self._control.get_alias_rows()
+        self._base = self._control.get_alias_rows(setup=self._is_setup())
         self._revision = self._sync.capture()
         self._show_rows(self._base)
         self._refresh_resolutions()
@@ -179,11 +193,16 @@ class AliasPanel(QWidget):
             self._load()
         self._sync.refresh(has_draft=self._has_draft())
 
-    def _current_target(self) -> SavedPoint | None:
+    def _is_setup(self) -> bool:
+        return self._destination.currentIndex() == 1
+
+    def _current_target(self) -> ContextTarget | None:
         info = self._control.get_entry_info()
         label = self._control.current_point_label()
-        if info is None or label is None:
+        if info is None:
             return None
+        if self._is_setup() or label is None:
+            return SavedEntry(entry_name=info.name)
         return SavedPoint(entry_name=info.name, point=label)
 
     def set_read_only(self, *, read_only: bool) -> None:
@@ -298,7 +317,7 @@ class AliasPanel(QWidget):
             item.setToolTip("")
             item.setForeground(self._table.palette().text())
         try:
-            rows = self._control.read_context().resolved_aliases()
+            rows = self._control.read_context(setup=self._is_setup()).resolved_aliases()
         except ContextSourceUnavailableError as error:
             # A source fault prevents the whole projection; keep it visible.
             for index in range(self._table.rowCount()):

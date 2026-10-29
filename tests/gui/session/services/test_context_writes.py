@@ -13,6 +13,7 @@ from zcu_tools.cfg_model import ConstWaveformCfg, PulseSpec
 from zcu_tools.format_version import YamlMap, YamlValue
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.expected_error import FailedPreconditionError
+from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.gui.session.context_control import ContextControlPort
 from zcu_tools.gui.session.context_types import (
     ContextTarget,
@@ -41,6 +42,7 @@ from zcu_tools.resources.entry import (
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
 from tests.gui.app.measure._record_support import require_target
+from tests.resources.entry.fakes import register_fakes, registry_state, restore_registry
 
 Kind = Literal["parameter", "module", "waveform"]
 KINDS: tuple[Kind, ...] = ("parameter", "module", "waveform")
@@ -135,6 +137,47 @@ def test_read_target_observes_detached_writes_without_selecting_or_publishing(
     assert session.control.read_context().document() == selected.document()
     assert session.state.version.get("context") == version
     assert events == []
+
+
+def test_global_alias_edits_persist_and_keep_the_active_three_file_versions(
+    session: _Session,
+) -> None:
+    before = session.control.read_context()
+    files = session.control.get_file_revisions()
+    rows = (AliasRow("driver", "Q1"),)
+
+    session.control.apply_alias_rows(rows)
+
+    assert session.entry.load_aliases().aliases == {"driver": "Q1"}
+    assert session.control.get_alias_rows() == rows
+    assert session.control.read_context().value("$driver") == "Q1"
+    assert before.resolved_aliases() == ()
+    installed = session.control.get_file_revisions()
+    assert [item.document for item in installed] == ["parameters", "library", "aliases"]
+    assert installed[:2] == files[:2]
+    assert installed[2].revision is not None
+    assert installed[2].path == (session.entry.result_path / "aliases.yaml").resolve()
+    session.service.install_entry(session.entry)
+    assert session.control.get_alias_rows() == rows
+
+
+@pytest.mark.parametrize("setup", [False, True], ids=["active", "entry-template"])
+def test_global_component_add_and_template_edit_update_only_future_captures(
+    session: _Session, setup: bool,
+) -> None:
+    old = session.control.read_context()
+    before = registry_state()
+    try:
+        register_fakes()
+        session.control.add_component("Q1", "fake/drive/a", {"rate": 4300.0}, setup=setup)
+        assert session.control.read_context().value("Q1.rate") == 4300.0
+        session.control.set_setup_parameter("Q1.rate", 5250.0)
+        assert session.control.read_context().value("Q1.rate") == 5250.0
+        assert session.control.read_context().target == old.target
+        assert "Q1" not in old.whole_document().components
+        assert snapshot(session.entry.setup).components["Q1"].model_dump()["rate"] == 5250.0
+    finally:
+        restore_registry(before)
 
 
 def test_global_parameter_writes_commit_once_and_detached_reads_do_not_select(

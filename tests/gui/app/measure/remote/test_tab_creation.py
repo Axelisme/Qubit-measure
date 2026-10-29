@@ -8,7 +8,7 @@ from zcu_tools.gui.session.context_types import EntryRequest
 from tests.gui.app.measure.remote._helpers import Fixture
 
 
-def test_remote_creation_allows_empty_source_and_keeps_global_aliases(
+def test_remote_creation_allows_empty_source_without_recapturing_later_aliases(
     qapp, tmp_path, monkeypatch
 ) -> None:
     background = BackgroundRunner()
@@ -19,7 +19,6 @@ def test_remote_creation_allows_empty_source_and_keeps_global_aliases(
     application = Fixture(project_root=str(tmp_path), headless=True, empty_project=True)
     ctrl = application.ctrl
     rows = (AliasRow("qubit", "Q2"), AliasRow("resonator", "$qubit.resonator"))
-    ctrl.context_control.set_alias_rows(rows)
     try:
         created = h_tab_new(application.service, {"adapter_name": "fake"})
         tab_id = created["tab_id"]
@@ -27,8 +26,9 @@ def test_remote_creation_allows_empty_source_and_keeps_global_aliases(
         assert ctrl.tab_control.list_tab_ids() == [tab_id]
         interaction = ctrl.tab_control.get_tab_snapshot(tab_id).interaction
         assert interaction is not None and not interaction.has_context
-        assert ctrl.context_control.get_alias_rows() == rows
         ctrl.setup_control.new_entry(EntryRequest("entry"))
+        ctrl.context_control.apply_alias_rows(rows)
+        assert ctrl.context_control.get_alias_rows() == rows
         interaction = ctrl.tab_control.get_tab_snapshot(tab_id).interaction
         assert interaction is not None and not interaction.has_context
         assert ctrl.tab_control.list_tab_ids() == [tab_id]

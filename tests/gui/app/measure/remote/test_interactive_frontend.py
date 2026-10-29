@@ -49,7 +49,7 @@ def mounted_fx(qapp, tmp_path):
         fixture.ctrl.context_control.add_component(
             "Q1", "qubit/fluxonium", {"resonator": "R1"}
         )
-        fixture.ctrl.context_control.set_alias_rows(
+        fixture.ctrl.context_control.apply_alias_rows(
             (AliasRow("qubit", "Q1"), AliasRow("resonator", "$qubit.resonator"))
         )
         fixture.state.set_context(

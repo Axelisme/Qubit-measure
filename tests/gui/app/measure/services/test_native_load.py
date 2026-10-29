@@ -220,7 +220,7 @@ def test_native_load_analysis_and_writeback_keep_historical_point_aliases_and_id
     other = control.use_point(PointUseRequest("other"))
     control.add_component("Q1", "run-source/qubit", {"rate": 40.0})
     control.add_component("Q2", "run-source/qubit", {"rate": 50.0})
-    session.context.set_alias_rows(
+    session.context.apply_alias_rows(
         (
             AliasRow("source_qubit", "Q2"),
             AliasRow("custom", "Q1"),
@@ -542,7 +542,7 @@ def test_public_writeback_targets_current_entry_not_historical_source(
     selected.add_component("Q1", kind="run-source/qubit", rate=5.0)
     session.context.install_entry(other)
     control.use_point(PointUseRequest("other"))
-    session.context.set_alias_rows((AliasRow("source_qubit", "Q1"),))
+    session.context.apply_alias_rows((AliasRow("source_qubit", "Q1"),))
     original_events = session.entry.ledger.events()
     foreign_events = other.ledger.events()
     selection = control.get_source_binding()

@@ -15,7 +15,6 @@ from zcu_tools.gui.runtime import (
     GuiRuntimeBehavior,
     GuiRuntimeSpec,
 )
-from zcu_tools.gui.session.alias_presets import AliasPresets, validate_alias_presets
 
 from .lab import MeasureGuiLab
 
@@ -55,9 +54,8 @@ class MeasureGuiBehavior[C](GuiRuntimeBehavior):
         clean: bool = False,
         startup_script: Path | None = None,
         project_root: str | None = None,
-        alias_presets: AliasPresets | None = None,
     ) -> None:
-        """Build lab catalogs and retain complete alias data for assembly.
+        """Build lab catalogs and retain startup settings for assembly.
 
         lab.register_components installs models/roles into the shared process
         registry, then lab.register_experiments fills a fresh Registry holding
@@ -72,14 +70,8 @@ class MeasureGuiBehavior[C](GuiRuntimeBehavior):
         a background worker after the Qt loop starts. Errors keep completed
         commands and show path/line diagnostics. Callback teardown runs on-owner.
         ``project_root`` anchors default paths, or uses the working directory.
-        ``alias_presets`` maps preset names to ordered authored rows. Omitted
-        or None means no catalog and an empty initial table. An explicit mapping
-        must contain "default" (its rows may be empty), or raise ValueError.
-        Invalid table syntax, duplicates or forward links raise InvalidInputError.
-        The public ``alias_presets`` field retains the caller's catalog, not a
-        file location. Assembly uses default rows as the memory-only initial
-        table before an entry opens. Opening an entry clears it; selecting a
-        point loads only that point's table. No device or cache binding occurs.
+        Aliases are file-backed. Startup scripts open an entry, then call
+        ctx.context.apply_alias_rows to initialize the active table explicitly.
         """
         from zcu_tools.gui.app.measure.ui.error_handler import show_error_dialog
         from zcu_tools.gui.app.measure.utils.error_handler import (
@@ -88,7 +80,6 @@ class MeasureGuiBehavior[C](GuiRuntimeBehavior):
 
         if clean and startup_script is not None:
             raise ValueError("--clean and --script are mutually exclusive")
-        validate_alias_presets(alias_presets)
         install_global_exception_hook(show_error_dialog)
         from zcu_tools.gui.app.measure.catalog_loader import (
             SourceExperimentCatalogLoader,
@@ -110,7 +101,6 @@ class MeasureGuiBehavior[C](GuiRuntimeBehavior):
         self._clean = clean
         self._startup_script = startup_script
         self._project_root = project_root
-        self.alias_presets: AliasPresets | None = alias_presets
         self._workflow_attachments = lab.workflow_attachments
         self._assembled = False
         self._controller: Controller | None = None
@@ -249,7 +239,6 @@ class MeasureGuiBehavior[C](GuiRuntimeBehavior):
             bus=bus,
             project_root=project_root,
             catalog_loader=self._catalog_loader,
-            alias_presets=self.alias_presets,
         )
 
         self._controller = ctrl

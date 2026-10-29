@@ -136,7 +136,7 @@ def snapshot_controller(
                 waveform="const",
             ),
         )
-        context.set_alias_rows((AliasRow("driver", "Q1"),))
+        context.apply_alias_rows((AliasRow("driver", "Q1"),))
         controller.session_services.soc_connection.install_soc(
             MagicMock(), make_mock_soccfg()
         )

@@ -262,32 +262,21 @@ class ContextControlPort(Protocol):
         ...
 
     def get_alias_rows(self) -> tuple[AliasRow, ...]:
-        """Read immutable authored global rows on the owner thread without I/O.
+        """Read installed authored rows on the owner thread without I/O.
 
-        Links remain authored strings, not resolved component names. No point
-        is required. Entry installation/clearing resets the table to empty;
-        selecting a point loads its saved rows without setup/preset fallback.
+        Links remain authored strings, not resolved component names. No entry
+        returns (). Entry/point selection loads its own table without fallback.
         """
         ...
 
-    def set_alias_rows(self, rows: tuple[AliasRow, ...]) -> None:
-        """Submit authored rows, saving first when a point is selected.
-
-        Run on the owner thread. Before point selection this only sets memory
-        initial rows; a selected point uses apply_alias_rows write-through.
-        Invalid syntax/order and storage failures preserve rows and versions.
-        Changed rows publish AliasesChangedPayload after installation; identical
-        submissions publish nothing. No preferences or ledger records are written.
-        """
-        ...
 
     def apply_alias_rows(self, rows: tuple[AliasRow, ...]) -> None:
         """Confirm the ordered table on the owner thread.
 
-        No selected point raises FailedPreconditionError(no_context) before
-        validation or I/O. Validate syntax/order, then atomically save the
-        selected point's aliases.yaml before memory/event installation.
-        Never write setup aliases. InvalidInputError or storage errors propagate,
+        No opened entry raises FailedPreconditionError(no_context) before
+        validation or I/O. Validate syntax/order, then atomically save active
+        aliases.yaml (entry in GLOBAL, selected point in POINT) before installing
+        memory and revision. InvalidInputError or storage errors propagate,
         retaining old rows, versions and file. Empty rows are authoritative.
         Identical rows still save but emit no change. No other point container,
         ledger or preferences write occurs.

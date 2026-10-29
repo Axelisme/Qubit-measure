@@ -83,7 +83,7 @@ def test_storage_retains_entry_point_description_and_roles_after_switch(
     session.control.set_parameter(target, "general.description", "original")
     capture = _bound(session)
     session.control.set_parameter(target, "general.description", "edited")
-    session.control.set_alias_rows((AliasRow("driver", "Q2"),))
+    session.control.apply_alias_rows((AliasRow("driver", "Q2"),))
     session.entry.new_point("q")
     session.control.use_point(PointUseRequest("q"))
     other = ResultEntry.create(

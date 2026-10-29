@@ -279,7 +279,6 @@ def context() -> ContextService:
         SessionState(SessionEnv(parameters=None, soc=None, soccfg=None)),
         BaseEventBus(),
         bind_assets=ArbWaveformDatabase.info_at,
-        alias_rows=(AliasRow("driver", ""), AliasRow("sense", "$driver.sense")),
     )
 
 
@@ -301,12 +300,14 @@ def _entry_command(context: ContextService, command: str, entry_name: str) -> ob
     return context.entry_ledger(entry_name)
 
 
-def test_global_alias_changes_install_before_the_fact_and_reject_invalid_batches() -> (
-    None
-):
+def test_global_alias_changes_install_before_the_fact_and_reject_invalid_batches(
+    tmp_path: Path,
+) -> None:
     state = SessionState(SessionEnv(parameters=None, soc=None, soccfg=None))
     bus = BaseEventBus()
     service = ContextService(state, bus, bind_assets=ArbWaveformDatabase.info_at)
+    service.install_entry(_entry(tmp_path))
+    version = state.version.get("context")
     observed: list[tuple[tuple[AliasRow, ...], int]] = []
 
     def on_aliases(event: AliasesChangedPayload) -> None:
@@ -315,17 +316,17 @@ def test_global_alias_changes_install_before_the_fact_and_reject_invalid_batches
 
     bus.subscribe(AliasesChangedPayload, on_aliases)
     rows = (AliasRow("driver", "Q1"), AliasRow("sense", "$driver.sense"))
-    service.set_alias_rows(rows)
-    assert observed == [(rows, 1)]
+    service.apply_alias_rows(rows)
+    assert observed == [(rows, version + 1)]
     with pytest.raises(InvalidInputError):
-        service.set_alias_rows(
+        service.apply_alias_rows(
             (AliasRow("driver", "Q2"), AliasRow("sense", "$sense.sense"))
         )
     assert service.get_alias_rows() == rows
-    assert state.version.snapshot().get("context") == 1
-    service.set_alias_rows(rows)
-    assert observed == [(rows, 1)]
-    assert state.version.snapshot().get("context") == 1
+    assert state.version.snapshot().get("context") == version + 1
+    service.apply_alias_rows(rows)
+    assert observed == [(rows, version + 1)]
+    assert state.version.snapshot().get("context") == version + 1
 
 
 def test_current_alias_captures_follow_point_and_rows_but_prior_capture_stays_fixed(
@@ -335,7 +336,7 @@ def test_current_alias_captures_follow_point_and_rows_but_prior_capture_stays_fi
     context.install_entry(rich_entry)
     target = context.new_point(_new_request("first"))
     assert context.get_alias_rows() == ()
-    context.set_alias_rows(
+    context.apply_alias_rows(
         (AliasRow("driver", "Q1"), AliasRow("sense", "$driver.sense"))
     )
     first = context.read_context()
@@ -346,7 +347,7 @@ def test_current_alias_captures_follow_point_and_rows_but_prior_capture_stays_fi
     assert first.value("$driver.rate") == 4300.0
     assert current.value("$driver.rate") == 4400.0
     context.new_point(_new_request("second"))
-    context.set_alias_rows(
+    context.apply_alias_rows(
         (AliasRow("driver", "Q2"), AliasRow("sense", "$driver.sense"))
     )
     second = context.read_context()
@@ -369,11 +370,10 @@ def test_one_run_target_resolves_dependencies_without_changing_global_rows_or_ve
         state,
         BaseEventBus(),
         bind_assets=ArbWaveformDatabase.info_at,
-        alias_rows=(AliasRow("driver", ""), AliasRow("sense", "$driver.sense")),
     )
     context.install_entry(rich_entry)
     context.new_point(_new_request("first"))
-    context.set_alias_rows((AliasRow("driver", ""), AliasRow("sense", "$driver.sense")))
+    context.apply_alias_rows((AliasRow("driver", ""), AliasRow("sense", "$driver.sense")))
     before = context.get_alias_rows()
     version = state.version.snapshot()
     temporary = context.read_context(aliases={"driver": "Q2"})
@@ -388,7 +388,7 @@ def test_one_run_target_resolves_dependencies_without_changing_global_rows_or_ve
     assert current is not None
     assert current.roles is not None
     assert current.roles.names == {}
-    context.set_alias_rows(
+    context.apply_alias_rows(
         (AliasRow("driver", "Q1"), AliasRow("sense", "$driver.sense"))
     )
     assert temporary.value("$driver.rate") == 5100.0
@@ -414,7 +414,7 @@ def test_historical_target_reads_keep_resolved_alias_names_when_point_links_chan
 ) -> None:
     context.install_entry(rich_entry)
     target = context.new_point(_new_request("first"))
-    context.set_alias_rows(
+    context.apply_alias_rows(
         (AliasRow("driver", "Q1"), AliasRow("sense", "$driver.sense"))
     )
     captured = context.read_context()
@@ -446,7 +446,7 @@ def test_parameter_write_preserves_global_aliases(
 ) -> None:
     context.install_entry(rich_entry)
     target = context.new_point(_new_request("a"))
-    context.set_alias_rows((AliasRow("driver", "Q1"),))
+    context.apply_alias_rows((AliasRow("driver", "Q1"),))
     rows = context.get_alias_rows()
     context.set_parameter(target, "Q1.rate", 4500.0)
     assert context.get_alias_rows() == rows
@@ -460,10 +460,7 @@ def test_empty_queries_have_no_entry_point_or_component_selection(
     assert not context.is_active_context()
     assert context.get_entry_info() is None
     assert context.list_points() == ()
-    assert context.get_alias_rows() == (
-        AliasRow("driver", ""),
-        AliasRow("sense", "$driver.sense"),
-    )
+    assert context.get_alias_rows() == ()
 
 
 def test_empty_read_rejects_instead_of_returning_default_parameters(
@@ -490,7 +487,6 @@ def test_install_entry_preserves_nonparameter_capabilities_without_selecting_poi
         SessionState(SessionEnv(parameters=None, soc=None, soccfg=None)),
         BaseEventBus(),
         bind_assets=ArbWaveformDatabase.info_at,
-        alias_rows=(AliasRow("driver", ""), AliasRow("sense", "$driver.sense")),
     )
     entry = _entry(tmp_path)
     old = context.get_session_env()

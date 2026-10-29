@@ -141,7 +141,7 @@ def application(
                 waveform=ConstWaveformCfg(length=0.05),
             ),
         )
-        context.set_alias_rows((AliasRow("driver", "Q1"),))
+        context.apply_alias_rows((AliasRow("driver", "Q1"),))
         remote = RemoteControlAdapter(
             controller, ControlOptions(port=0), controller.owner_scheduler
         )
@@ -158,7 +158,7 @@ def test_named_aliases_apply_to_parameter_and_library_queries_without_mutating_s
     application: TargetApplication,
 ) -> None:
     context = application.controller.context_control
-    context.set_alias_rows(
+    context.apply_alias_rows(
         (
             AliasRow("other", "Q1"),
             AliasRow("driver", "Q1"),

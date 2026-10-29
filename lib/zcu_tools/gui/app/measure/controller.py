@@ -86,7 +86,6 @@ if TYPE_CHECKING:
     from zcu_tools.experiment.artifacts import SaveReport
     from zcu_tools.gui.session.adapters.point_file_watcher import PointFileWatcher
     from zcu_tools.gui.session.adapters.qt_shutdown_driver import QtShutdownDriver
-    from zcu_tools.gui.session.alias_presets import AliasPresets
     from zcu_tools.gui.session.arb_waveform import ArbWaveformPort
     from zcu_tools.gui.session.context_control import ContextControlPort
     from zcu_tools.gui.session.device_control import DeviceControlPort
@@ -308,7 +307,6 @@ class Controller:
         catalog_loader: ExperimentCatalogLoader | None = None,
         owner_scheduler: OwnerScheduler | None = None,
         *,
-        alias_presets: AliasPresets | None = None,
         device_registry: DeviceRegistryPort | None = None,
         driver_factory: DriverFactoryPort | None = None,
     ) -> None:
@@ -318,17 +316,8 @@ class Controller:
         factory. Tests may inject a hardware-free constructor. device_registry
         supplies registered drivers, which close_hardware eventually closes.
 
-        ``alias_presets`` maps names to ordered caller-owned alias rows. None
-        or omission means no catalog and an empty initial table. A supplied
-        mapping must contain "default" (possibly empty), or raise ValueError.
-        Invalid table syntax raises InvalidInputError. Default rows initialize
-        entries without saved aliases; saved tables, including empty ones, win.
-        Softlinks and empty bindings stay authored. The session
-        uses the role registry's unique focus candidate once for the primary
-        empty row on the first nonempty component snapshot; later point changes
-        do not reset rows. Explicit table edits disable that initialization.
-        Invalid syntax, duplicates or forward links raise
-        InvalidInputError(alias_invalid). No device or cache is used to bind rows.
+        Aliases are file-backed. Startup scripts open an entry, then call
+        ctx.context.apply_alias_rows to initialize the active table explicitly.
         """
         self.control_identity = ControlIdentity()
         self._state = state
@@ -379,7 +368,6 @@ class Controller:
             owner_scheduler=owner_scheduler,
             project_root=self._project_root,
             catalog_loader=catalog_loader,
-            alias_presets=alias_presets,
             device_registry=device_registry,
             driver_factory=driver_factory,
         )

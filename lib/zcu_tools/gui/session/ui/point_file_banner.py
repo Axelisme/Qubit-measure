@@ -40,12 +40,14 @@ class PointFileBanner(QWidget):
         document: Literal["parameters", "library", "aliases"],
         on_reloaded: Callable[[], None],
         *,
+        setup: bool = False,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
         self._control = control
         self._document = document
+        self._setup = setup
         self._on_reloaded = on_reloaded
         self._notice_file: PointFileRevision | None = None
         layout = QVBoxLayout(self)
@@ -72,15 +74,24 @@ class PointFileBanner(QWidget):
         self.hide()
 
     def capture(self) -> PointFileRevision | None:
-        """Return the installed selected-point file, or None without a point."""
-        return next(
-            (
-                f
-                for f in self._control.get_file_revisions()
-                if f.document == self._document
-            ),
-            None,
+        """Return this scope's cached file, or None without an entry.
+
+        Installed ordering is active three, then entry three in POINT. Taking
+        the last group selects entry in both GLOBAL and POINT without disk I/O.
+        """
+        files = (
+            self._control.get_installed_file_revisions()[-3:]
+            if self._setup
+            else self._control.get_file_revisions()
         )
+        return next((file for file in files if file.document == self._document), None)
+
+    def set_setup(self, *, setup: bool) -> None:
+        """Select entry scope when True; False uses the active document group.
+
+        The next capture/refresh uses the new scope without reading disk.
+        """
+        self._setup = setup
 
     def check(self, expected: PointFileRevision | None) -> None:
         """Check a loaded draft's disk revision; show and rethrow owner rejection.

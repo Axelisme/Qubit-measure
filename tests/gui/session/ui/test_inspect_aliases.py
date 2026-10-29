@@ -54,12 +54,11 @@ class _Session:
     owner: ContextService | None = None
 
 
-def _service(bus: BaseEventBus, rows: tuple[AliasRow, ...] = ()) -> ContextService:
+def _service(bus: BaseEventBus) -> ContextService:
     return ContextService(
         SessionState(SessionEnv(parameters=None, soc=None, soccfg=None)),
         bus,
         bind_assets=ArbWaveformDatabase.info_at,
-        alias_rows=rows,
     )
 
 
@@ -83,7 +82,7 @@ def memory_session(qapp: QApplication, tmp_path: Path) -> Generator[_Session]:
     service.install_entry(entry)
     service.use_point(PointUseRequest("working"))
     control = service
-    control.set_alias_rows(
+    control.apply_alias_rows(
         (AliasRow("qubit", "Q1"), AliasRow("resonator", "$qubit.resonator"))
     )
     session = _Session(control, bus)
@@ -104,7 +103,7 @@ def entry_session(qapp: QApplication, tmp_path: Path) -> Generator[_Session]:
     entry.new_point("working")
     service.install_entry(entry)
     service.use_point(PointUseRequest("working"))
-    service.set_alias_rows((AliasRow("qubit", "Q1"),))
+    service.apply_alias_rows((AliasRow("qubit", "Q1"),))
     session = _Session(service, bus, entry, owner=service)
     try:
         yield session
@@ -128,7 +127,7 @@ def resolved_session(qapp: QApplication, tmp_path: Path) -> Generator[_Session]:
     control.use_point(PointUseRequest("working"))
     control.add_component("R1", "fake/sensor", {})
     control.add_component("Q1", "fake/drive/a", {"sense": "R1"})
-    control.set_alias_rows(
+    control.apply_alias_rows(
         (
             AliasRow("qubit", "Q1"),
             AliasRow("resonator", "$qubit.sense"),
@@ -252,25 +251,25 @@ def test_alias_cell_completion_add_and_remove_write_through(
     assert _fresh_rows(entry_session.entry) == (AliasRow("qubit", "Q2"),)
 
 
-def test_edit_without_point_shows_actionable_error(
+def test_edit_without_entry_shows_actionable_error(
     qapp: QApplication, tmp_path: Path
 ) -> None:
     bus = BaseEventBus()
-    control = _service(bus, (AliasRow("qubit", "Q1"),))
+    control = _service(bus)
     session = _Session(control, bus)
     try:
         ui = ComponentDriver(_open(session))
         ui.select_tab("Aliases")
-        ui.edit_table_value(
-            "Q1", "Q2", object_name="inspect.aliases.table", column="Value"
-        )
+        ui.click(object_name="inspect.aliases.add")
+        ui.type_text("qubit")
+        ui.press_key(Qt.Key.Key_Return)
         ui.screenshot(
             Path(os.environ.get("INSPECT_IMPLICIT_EVIDENCE", str(tmp_path)))
             / "aliases-no-point-error.png"
         )
         error = ui.observe(object_name="inspect.aliases.error")
         assert error.visible
-        assert "Select or create a working point" in error.text
+        assert "Open an entry first" in error.text
     finally:
         _close_all(session, qapp)
 
@@ -470,20 +469,6 @@ def test_resolution_column_shows_owner_projection_and_read_only_cells(
         assert not _cell(table, row, 2).flags() & Qt.ItemFlag.ItemIsEditable
     for column in (0, 1):
         assert _cell(table, 0, column).flags() & Qt.ItemFlag.ItemIsEditable
-
-
-def test_resolution_without_selected_point_is_empty(qapp: QApplication) -> None:
-    bus = BaseEventBus()
-    control = _service(bus, (AliasRow("qubit", "Q1"),))
-    session = _Session(control, bus)
-    dialog = _open(session)
-    table = _table(_aliases_page(dialog))
-    assert table.rowCount() > 0
-    for row in range(table.rowCount()):
-        result = _cell(table, row, 2)
-        assert result.text() == ""
-        assert not result.flags() & Qt.ItemFlag.ItemIsEditable
-    _close_all(session, qapp)
 
 
 def test_added_resolution_cell_is_read_only_and_updates_on_completion(

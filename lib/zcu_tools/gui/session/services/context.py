@@ -108,7 +108,6 @@ class ContextService:
         values: ValueLookup | None = None,
         *,
         bind_assets: Callable[[Path], WaveformAssetInfo],
-        alias_rows: tuple[AliasRow, ...] = (),
     ) -> None:
         """Use owner State/bus, optional value facade, and explicit asset binding.
 
@@ -116,7 +115,6 @@ class ContextService:
         installation. Its capability stays with the library capture, not a
         global Database selection. Binding errors abort publication. values
         defaults to State's facade and does not change parameter content/version.
-        alias_rows supplies initial memory-only rows before an entry is opened.
         Entry installation loads global saved rows; clearing resets the table.
         Selecting or creating a point replaces rows with that point's saved
         table. Missing aliases means empty, without cross-scope or preset
@@ -135,7 +133,7 @@ class ContextService:
         self._points: tuple[WorkingPointInfo, ...] = ()
         self._source_binding: ContextSourceBinding | None = None
         self._binding_id = 0
-        self._aliases = AliasSnapshot(AliasTable(alias_rows))
+        self._aliases = AliasSnapshot(AliasTable())
         self._file_sync = PointFileSync(
             bus, installed=self.get_file_revisions, install=self._reload_point_file
         )
@@ -432,7 +430,7 @@ class ContextService:
         self._owner.assert_owner()
         if self._entry is None:
             raise FailedPreconditionError("No entry is opened", reason_code="no_entry")
-        if setup:
+        if setup and self._point is not None:
             if self._setup is None:
                 raise FailedPreconditionError(
                     "No setup is opened", reason_code="no_entry"
@@ -440,15 +438,13 @@ class ContextService:
             self._setup.add_component(name, kind=kind, **fields)
             return
         parameters = self._published_parameters()
-        if self._point is None:
-            raise FailedPreconditionError(
-                "Select or create a working point first", reason_code="no_context"
-            )
-        self._point.add_component(name, kind=kind, **fields)
-        document = snapshot(self._point)
+        active = self._point if self._point is not None else self._setup
+        if active is None:
+            raise RuntimeError("Active parameter resource disappeared")
+        active.add_component(name, kind=kind, **fields)
         self._publish_write(
             ParameterContext(
-                point=document,
+                point=parameter_content(active),
                 library=parameters.library,
                 target=parameters.target,
                 roles=None,
@@ -466,8 +462,8 @@ class ContextService:
         self._owner.assert_owner()
         if self._setup is None:
             raise FailedPreconditionError("No entry is opened", reason_code="no_entry")
-        with self._setup.edit() as draft:
-            draft.set(path, value)
+        entry = self._require_open_entry()
+        self.set_parameter(SavedEntry(entry_name=entry.result_path.name), path, value)
 
     def read_context(
         self, *, aliases: Mapping[str, str] | None = None
@@ -497,28 +493,14 @@ class ContextService:
         return parameters.bind_aliases(table.rows, {}, alias_error=self._aliases.error)
 
     def get_alias_rows(self) -> tuple[AliasRow, ...]:
-        """Read authored rows without expansion or I/O, even without a point.
+        """Read installed authored rows without expansion or I/O.
 
-        Entry installation/clearing leaves an empty table; explicit memory-only
-        set_alias_rows may populate it before selecting a point. An invalid
-        selected-point alias file raises its captured original error.
+        Without an entry return (). An invalid active alias file raises its
+        captured original error. Missing files supply empty rows without fallback.
         """
         self._owner.assert_owner()
         return self._aliases.rows
 
-    def set_alias_rows(self, rows: tuple[AliasRow, ...]) -> None:
-        """Install authored rows, saving first when a point is selected.
-
-        Before point selection this sets memory-only initial rows. Otherwise it
-        follows apply_alias_rows' write-through and failure contract. Invalid
-        syntax/order preserves rows and versions. Changed rows publish once
-        after installation; identical rows publish nothing.
-        """
-        self._owner.assert_owner()
-        if self._point is not None:
-            self.apply_alias_rows(rows)
-            return
-        self._install_alias_rows(AliasTable(rows))
 
     def _install_alias_rows(
         self, candidate: AliasTable, revision: DocumentRevision | None = None
@@ -531,22 +513,21 @@ class ContextService:
             self._bus.emit(AliasesChangedPayload(rows=candidate.rows))
 
     def apply_alias_rows(self, rows: tuple[AliasRow, ...]) -> None:
-        """Validate and atomically save authored rows to the selected point.
+        """Validate and atomically save rows to the active aliases.yaml.
 
-        Runs on the owner thread. Without an opened entry and selected point,
-        raise FailedPreconditionError(no_context) before validation or I/O.
-        Otherwise validate syntax/order, save that point's aliases.yaml, then
-        install memory and publish changes. Never write setup aliases.
-        InvalidInputError(alias_invalid) and storage errors preserve rows,
-        versions and the old file; causes propagate unchanged. Identical rows
-        still save but publish no event. No ledger or other point-container
-        write occurs; set_alias_rows uses this path when a point is selected.
+        Runs on the owner thread. Without an opened entry raise
+        FailedPreconditionError(no_context) before validation or I/O. GLOBAL
+        writes entry aliases; POINT writes only the selected point's aliases.
+        Validate syntax/order, save, then install the exact revision and publish
+        changed rows. InvalidInputError(alias_invalid) and storage errors retain
+        rows, versions and the old file. Identical rows still save but publish no
+        event. No ledger or other document is written.
         """
         self._owner.assert_owner()
         label = self._state.session_env.active_label
-        if self._entry is None or self._point is None or not label:
+        if self._entry is None:
             raise FailedPreconditionError(
-                "Select or create a working point first", reason_code="no_context"
+                "Open an entry first", reason_code="no_context"
             )
         candidate = AliasTable(rows)
         revision = self._entry.save_aliases(
