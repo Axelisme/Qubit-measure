@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Sequence
-from copy import deepcopy
+from dataclasses import replace
 from pathlib import Path
 from typing import TypeAlias
 
@@ -14,17 +14,19 @@ from zcu_tools.gui.app.measure.adapter import (
     Adapter,
     Analysis,
     AnalyzeRequest,
-    ParameterWriteback,
-    RecordWriteback,
     WritebackItem,
     WritebackRequest,
 )
-from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.v2.support.flux import record_flux_frame
-from zcu_lab.v2.support.measure.record_frame import captured_qubit_flux
-from zcu_lab.v2.twotone.time_domain.t2ramsey.core import T2RamseyAnalyzeOptions
+from zcu_lab.v2.twotone.time_domain.t2ramsey.core import (
+    T2RamseyAnalyzeOptions,
+    T2RamseyCfg,
+    T2RamseyResult,
+)
+from zcu_lab.v2.twotone.time_domain.t2ramsey.gui import (
+    DEFINITION as T2_RAMSEY,
+)
 from zcu_lab.v2.twotone.time_domain.t2ramsey.gui import T2RamseyAnalyzeResult
 
 from .core import (
@@ -61,83 +63,30 @@ def _T2Ramsey_analyze(
 def _T2Ramsey_get_writeback_items(
     req: WritebackRequest[T2RamseyRunResult, T2RamseyAnalyzeResult],
 ) -> Sequence[WritebackItem]:
-    """Propose captured qubit.t2r, plus qubit.freq for a sourced fringe fit.
+    """Reuse ordinary writeback rules and captured Run facts, labeled Heralded.
 
-    req supplies the committed fit, source record and captured context.
-    Frequency is source pi/2 frequency + realized detune - fitted detune;
-    it is omitted for decay fits, cfg=None or unknown realized detune.
-    Non-scalar source frequency raises ValueError. WritebackService resolves
-    destinations on req.ctx.parameters and rejects missing captures/unbound
-    roles. With a capture, also propose t2r_us/t2r_err_us for the Run's
-    resolved $qubit; an unbound alias raises RoleResolutionError. Without
-    a capture, retain parameter proposals only so loaded data can still be
-    analyzed. The adapter copies all Run devices into its record. Missing
-    metadata or snapshot logs "no device snapshot" and omits only the record.
-    No live calibration lookup, device access or write occurs here.
+    Convert only cfg/result types and retain metadata, including device snapshot
+    and run identity. Missing cfg/capture follows the ordinary adapter policy.
+    No calibration is applied here.
     """
-    metadata = req.run_result.metadata
-    devices = (
-        None
-        if metadata is None or metadata.device_snapshot is None
-        else deepcopy(dict(metadata.device_snapshot))
-    )
-    if devices is None:
-        logging.warning("no device snapshot")
-    result = req.analyze_result
-    items: list[WritebackItem] = [
-        ParameterWriteback(
-            target_name="$qubit.t2r",
-            description="Heralded T2 Ramsey time (us)",
-            proposed_value=result.t2r,
+    source = req.run_result
+    ordinary = RunRecord(
+        cfg=(
+            None
+            if source.cfg is None
+            else T2RamseyCfg.model_validate(source.cfg.model_dump())
         ),
-    ]
-
-    # Frequency correction uses only the source run, never current calibration.
-    snapshot = req.run_result.cfg
-    if (
-        result.fit_fringe
-        and snapshot is not None
-        and req.run_result.result.true_activate_detune is not None
-    ):
-        source_freq = snapshot.pi2_pulse.freq
-        if not isinstance(source_freq, float):
-            raise ValueError(
-                "qubit.freq writeback requires a scalar source pi/2 frequency"
-            )
-        q_f = source_freq + req.run_result.result.true_activate_detune - result.detune
-        items.append(
-            ParameterWriteback(
-                target_name="$qubit.freq",
-                description="Heralded qubit frequency (MHz)",
-                proposed_value=q_f,
-            )
-        )
-
-    parameters = req.ctx.parameters
-    if parameters is not None and metadata is not None and devices is not None:
-        frame = record_flux_frame(captured_qubit_flux(parameters), devices)
-        items.append(
-            RecordWriteback(
-                target_name=parameters.resolve_path("$qubit"),
-                description="Heralded T2 Ramsey record at the captured bias",
-                record={
-                    "devices": {name: deepcopy(info) for name, info in devices.items()},
-                    "flux_frame": frame,
-                    "run": {
-                        "run_id": metadata.run_id,
-                        "experiment": metadata.experiment,
-                    },
-                    "t2r_us": result.t2r,
-                    "t2r_err_us": result.t2r_err,
-                },
-            )
-        )
-    return items
-
-
-def _T2Ramsey_make_form(ctx: FormContext) -> Form[HeraldingT2RamseyInput]:
-    """Build this adapter's definition using captured Open/Reset sources."""
-    return make_form(ctx)
+        result=T2RamseyResult(
+            source.result.times,
+            source.result.signals,
+            source.result.true_activate_detune,
+        ),
+        metadata=source.metadata,
+    )
+    items = T2_RAMSEY.get_writeback_items(
+        WritebackRequest(ordinary, req.analyze_result, req.ctx)
+    )
+    return [replace(item, description=f"Heralded {item.description}") for item in items]
 
 
 def _run(
@@ -176,7 +125,7 @@ def _run(
 
 DEFINITION = Adapter(
     spec=HeraldingT2RamseyExp.AXES_SPEC,
-    make_form=_T2Ramsey_make_form,
+    make_form=make_form,
     run=_run,
     guide=Path(__file__).with_name("guide.md"),
     analysis=Analysis(

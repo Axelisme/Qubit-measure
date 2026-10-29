@@ -1,7 +1,9 @@
 """Single-qubit length Rabi with ground-herald post-selection."""
 
+from collections.abc import Sequence
 from copy import deepcopy
 from dataclasses import dataclass
+from functools import partial
 from typing import Annotated, ClassVar
 
 import numpy as np
@@ -17,7 +19,10 @@ from zcu_tools.experiment import (
 )
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
-from zcu_tools.experiment.v2.runtime.program_builder import AcquireOptions
+from zcu_tools.experiment.v2.runtime.program_builder import (
+    AcquireOptions,
+    default_raw2signal_fn,
+)
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.experiment.v2.utils.snr import snr_checker
@@ -86,6 +91,22 @@ def _combine_host_rounds(
     combined = np.full(signals.shape[1], np.nan, dtype=np.float64)
     np.divide(accepted, attempted, out=combined, where=attempted > 0)
     return means, combined
+
+
+def _selected_signal_with_fraction(
+    raw: Sequence[NDArray[np.float64]],
+    *,
+    program: ModularProgramV2,
+    herald: HeraldSpec,
+    fraction_slot: NDArray[np.float64],
+) -> NDArray[np.complex128]:
+    """Record acceptance only when the builder delivers this acquisition's IQ."""
+    signal = default_raw2signal_fn(raw)
+    # A pre-acquire stop leaves cached program stats intact, but delivers no raw.
+    passed = program.get_herald_pass_fraction()
+    if passed is not None:
+        fraction_slot[:] = passed[herald.ro_ch]
+    return signal
 
 
 class HeraldingLenRabiExp(Experiment[HeraldingLenRabiResult, HeraldingLenRabiCfg]):
@@ -213,23 +234,27 @@ class HeraldingLenRabiExp(Experiment[HeraldingLenRabiResult, HeraldingLenRabiCfg
                                 herald_readout.herald_spec(prog, occurrence=0),
                             )
                         prog, herald = programs[length]
+
                         try:
                             step.prog_builder(soc, soccfg).run_program(
                                 prog,
                                 rounds=1,
                                 herald=[herald],
+                                raw2signal_fn=partial(
+                                    _selected_signal_with_fraction,
+                                    program=prog,
+                                    herald=herald,
+                                    fraction_slot=round_fractions[
+                                        round_index, index : index + 1
+                                    ],
+                                ),
                                 options=AcquireOptions(retry=cfg.acquire_retry),
                             )
                         finally:
-                            passed = prog.get_herald_pass_fraction()
-                            if passed is not None:
-                                round_fractions[round_index, index] = passed[
-                                    herald.ro_ch
-                                ]
-                                means, fractions = _combine_host_rounds(
-                                    acquisition_buffer.array, round_fractions, cfg.reps
-                                )
-                                buffer.set(means)
+                            means, fractions = _combine_host_rounds(
+                                acquisition_buffer.array, round_fractions, cfg.reps
+                            )
+                            buffer.set(means)
                     if check_snr():
                         break
                 viewer.update(lengths, rabi_signal2real(buffer.array))

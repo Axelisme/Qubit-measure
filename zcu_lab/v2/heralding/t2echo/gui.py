@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Sequence
-from copy import deepcopy
+from dataclasses import replace
 from pathlib import Path
 from typing import TypeAlias
 
@@ -14,20 +14,18 @@ from zcu_tools.gui.app.measure.adapter import (
     Adapter,
     Analysis,
     AnalyzeRequest,
-    ParameterWriteback,
-    RecordWriteback,
     WritebackItem,
     WritebackRequest,
 )
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.v2.support.flux import record_flux_frame
-from zcu_lab.v2.support.measure.record_frame import captured_qubit_flux
 from zcu_lab.v2.twotone.time_domain.t2echo.core import (
     T2EchoAnalysis,
     T2EchoAnalyzeOptions,
+    T2EchoCfg,
+    T2EchoResult,
 )
-from zcu_lab.v2.twotone.time_domain.t2echo.gui import coherence_review_note
+from zcu_lab.v2.twotone.time_domain.t2echo.gui import DEFINITION as T2_ECHO
 
 from .core import HeraldingT2EchoCfg, HeraldingT2EchoExp, HeraldingT2EchoResult
 from .form import HeraldingT2EchoInput, make_form
@@ -54,60 +52,30 @@ def analyze(
 def writeback(
     req: WritebackRequest[HeraldingT2EchoRunResult, T2EchoAnalysis],
 ) -> Sequence[WritebackItem]:
-    """Propose fitted T2E in us and a record for the Run's resolved $qubit.
+    """Reuse ordinary writeback rules and captured Run facts, labeled Heralded.
 
-    req supplies the result and its captured context; source.cfg may be None.
-    WritebackService resolves the role and destination on req.ctx.parameters
-    and rejects a missing capture or unbound role. Without a capture,
-    retain parameter proposals only so loaded data can still be analyzed.
-    With a capture, unbound $qubit raises RoleResolutionError. The adapter
-    copies Run device facts; missing snapshot logs "no device snapshot" and
-    omits only the record. This
-    Run leaves devices fixed; no live lookup, device access, frequency/module
-    update or write occurs here.
+    Convert only cfg/result types and retain metadata, including device snapshot
+    and run identity. Missing cfg/capture follows the ordinary adapter policy.
+    No calibration is applied here.
     """
-    metadata = req.run_result.metadata
-    devices = (
-        None
-        if metadata is None or metadata.device_snapshot is None
-        else deepcopy(dict(metadata.device_snapshot))
-    )
-    if devices is None:
-        logging.warning("no device snapshot")
-    result = req.analyze_result
-    quality = None if result.fit_quality is None else result.fit_quality.get("fit")
-    note = coherence_review_note(result.t2e, result.t2e_err, quality)
-    items: list[WritebackItem] = [
-        ParameterWriteback(
-            target_name="$qubit.t2e",
-            description="Heralded T2 Echo time (us)",
-            proposed_value=result.t2e,
-            selected=note is None,
-            note=note,
+    source = req.run_result
+    ordinary = RunRecord(
+        cfg=(
+            None
+            if source.cfg is None
+            else T2EchoCfg.model_validate(source.cfg.model_dump())
         ),
-    ]
-    parameters = req.ctx.parameters
-    if parameters is not None and metadata is not None and devices is not None:
-        frame = record_flux_frame(captured_qubit_flux(parameters), devices)
-        items.append(
-            RecordWriteback(
-                target_name=parameters.resolve_path("$qubit"),
-                description="Heralded T2 Echo record at the captured bias",
-                record={
-                    "devices": {name: deepcopy(info) for name, info in devices.items()},
-                    "flux_frame": frame,
-                    "run": {
-                        "run_id": metadata.run_id,
-                        "experiment": metadata.experiment,
-                    },
-                    "t2e_us": result.t2e,
-                    "t2e_err_us": result.t2e_err,
-                },
-                selected=note is None,
-                note=note,
-            )
-        )
-    return items
+        result=T2EchoResult(
+            source.result.times,
+            source.result.signals,
+            source.result.true_activate_detune,
+        ),
+        metadata=source.metadata,
+    )
+    items = T2_ECHO.get_writeback_items(
+        WritebackRequest(ordinary, req.analyze_result, req.ctx)
+    )
+    return [replace(item, description=f"Heralded {item.description}") for item in items]
 
 
 def run(
