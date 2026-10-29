@@ -224,6 +224,7 @@ def live_ui(
                 else original.run.parameters.storage,
                 parameters=original.run.parameters,
             ),
+            plan_layout=session.save_service.plan_layout,
         )
         window = MainWindow(
             ctrl, templates=lambda: {}, dialog_presenter=RecordingDialogPresenter()

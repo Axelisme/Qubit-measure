@@ -29,7 +29,7 @@ from .tracker import (
 
 if TYPE_CHECKING:
     from .control import SaveControlFacet, SaveControlPort, SavedRunInfo
-    from .save import SaveService
+    from .save import LayoutPlanner, OutputPlan, SaveService
     from .save_center import ArtifactSaveCenter
 
 __all__ = [
@@ -50,6 +50,8 @@ __all__ = [
     "SaveControlPort",
     "SavedRunInfo",
     "SaveService",
+    "LayoutPlanner",
+    "OutputPlan",
     "ArtifactSaveCenter",
 ]
 
@@ -58,6 +60,8 @@ _EXPORT_MODULES = {
     "SaveControlPort": ".control",
     "SavedRunInfo": ".control",
     "SaveService": ".save",
+    "LayoutPlanner": ".save",
+    "OutputPlan": ".save",
     "ArtifactSaveCenter": ".save_center",
 }
 

@@ -41,6 +41,7 @@ if TYPE_CHECKING:
     from .base import Experiment
     from .metadata import (
         CfgSnapshot,
+        MetadataFieldError,
         RunMetadata,
         RunSnapshot,
         SoftwareProvenance,
@@ -69,6 +70,7 @@ __all__ = [
     "validate_cfg_snapshot",
     "SoftwareProvenance",
     "RunMetadata",
+    "MetadataFieldError",
     "CfgSnapshot",
     "AnalysisDocument",
     "encode_analysis_document",
@@ -120,6 +122,7 @@ _EXPORT_MODULES = {
     "validate_cfg_snapshot": ".metadata",
     "SoftwareProvenance": ".metadata",
     "RunMetadata": ".metadata",
+    "MetadataFieldError": ".metadata",
     "CfgSnapshot": ".metadata",
     "AnalysisDocument": ".artifacts",
     "encode_analysis_document": ".artifacts",

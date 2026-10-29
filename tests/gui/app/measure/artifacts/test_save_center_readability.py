@@ -66,6 +66,7 @@ def saving_view(
                 else original.run.parameters.storage,
                 parameters=original.run.parameters,
             ),
+            plan_layout=session.save_service.plan_layout,
         )
         ctrl.update_tab_analyze_param_instance(tab_id, PaneParams())
         window = MainWindow(
@@ -125,6 +126,7 @@ def unbound_saving_view(
         )
         ctrl.add_view(window)
         window.add_tab_widget(tab_id, "saving")
+        window.refresh_tab_analyze_form(tab_id)
         window.resize(1600, 900)
         window.show()
         qapp.processEvents()
@@ -152,10 +154,38 @@ def test_loaded_unbound_declarations_and_actual_save_outputs(
     assert any(w.text == "○ NOT SAVED" for w in visible)
     assert driver.observe("Save All").enabled
     assert driver.observe("Save").enabled
-    assert not any("data.h5" in w.text or "runs/" in w.text for w in visible)
+    assert any(w.text == "data.h5" for w in visible)
+    assert any("runs/" in w.text or "runs/" in w.tooltip for w in visible)
 
+    driver.select_tab("Analysis")
+    driver.screenshot(images / "02-analysis-ready.png")
+    driver.click("Analyze")
+    qt_until(
+        lambda: driver.observe("Analyze").enabled, label="loaded analysis finished"
+    )
+    driver.screenshot(images / "03-analysis-finished.png")
+    driver.select_tab("Data")
+    driver.screenshot(images / "04-analysis-preview.png")
+    assert any(w.text == "analysis.json" for w in driver.visible().widgets)
+    assert any(w.text == "○ NOT SAVED" for w in driver.visible().widgets)
+    driver.select_tab("Post-Analysis")
+    driver.screenshot(images / "05-post-ready.png")
+    driver.click("Run Post-Analysis")
+    qt_until(
+        lambda: driver.observe("Run Post-Analysis").enabled,
+        label="loaded post-analysis finished",
+    )
+    driver.screenshot(images / "06-post-finished.png")
+    driver.select_tab("Data")
+    driver.screenshot(images / "07-post-preview.png")
+    assert any(w.text == "post_analysis.json" for w in driver.visible().widgets)
+    preview_paths = {
+        w.tooltip
+        for w in driver.visible().widgets
+        if w.kind == "QLineEdit" and w.tooltip
+    }
     driver.click("Save All")
-    driver.screenshot(images / "02-save-report.png")
+    driver.screenshot(images / "08-save-report.png")
     visible = driver.visible().widgets
     assert any(w.text == "data.h5" for w in visible)
     assert any(
@@ -167,14 +197,17 @@ def test_loaded_unbound_declarations_and_actual_save_outputs(
     if partial:
         assert any(w.text == "◐ PARTIALLY SAVED" for w in visible)
         assert driver.observe("Save All").enabled
-        assert driver.observe("Save").enabled
-        assert "Saved 1 of 2 files" in driver.status().text
+        assert all(w.enabled for w in visible if w.text == "Save")
+        assert "Saved 3 of 4 files" in driver.status().text
         assert "1 failed" in driver.status().text
     else:
-        assert "Saved 2 files" in driver.status().text
+        assert "Saved 4 files" in driver.status().text
         assert any(w.text == "✓ SAVED" for w in visible)
         assert not driver.observe("Save All").enabled
-        assert not driver.observe("Save").enabled
+        assert all(not w.enabled for w in visible if w.text == "Save")
+    assert preview_paths == {
+        w.tooltip for w in visible if w.kind == "QLineEdit" and w.tooltip
+    }
 
 
 def test_single_artifact_title_and_output_filenames(saving_view) -> None:
@@ -183,6 +216,7 @@ def test_single_artifact_title_and_output_filenames(saving_view) -> None:
         session.state,
         tab_id,
         AnalysisPaneState(result=PaneSummary(), plots=None, params=PaneParams()),
+        plan_layout=session.save_service.plan_layout,
     )
     window.refresh_tab_interaction(tab_id)
     labels = [label.text() for label in center.findChildren(QLabel)]
@@ -240,7 +274,7 @@ def test_multiple_artifact_titles_retain_names(saving_view) -> None:
     assert "Analysis results" in [label.text() for label in center.findChildren(QLabel)]
 
 
-def test_paths_use_run_storage_after_switching_entry(
+def test_paths_keep_recorded_names_after_switching_entry(
     saving_view, tmp_path, qapp
 ) -> None:
     from zcu_tools.plotting.plots import NonPresentingHost, Plots
@@ -253,6 +287,7 @@ def test_paths_use_run_storage_after_switching_entry(
         session.state,
         tab_id,
         AnalysisPaneState(result=PaneSummary(), plots=plots, params=PaneParams()),
+        plan_layout=session.save_service.plan_layout,
     )
     other = ResultEntry.create(
         "different",

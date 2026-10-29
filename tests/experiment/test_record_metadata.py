@@ -14,6 +14,7 @@ import zcu_tools.experiment as experiment
 from pydantic import JsonValue, TypeAdapter
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.datafile import DataVariable, JsonObject, load, save
+from zcu_tools.experiment import metadata as metadata_owner
 from zcu_tools.experiment.native_persistence import read_run_metadata
 
 
@@ -42,6 +43,22 @@ def historical_metadata(
         ),
         device_snapshot={"bias": {"value": 0.25, "unit": "A"}},
     )
+
+
+@pytest.mark.parametrize("field", ["snapshot", "run_id", "completion", "provenance"])
+def test_metadata_field_error_identifies_failed_read(field: str) -> None:
+    document = historical_metadata().model_dump(mode="json")
+    document[field] = "malformed"
+    content = metadata_owner.RunMetadataContent(document)
+    with pytest.raises(ValueError, match=f"/docs/metadata/{field}") as caught:
+        getattr(content, field)
+    error = caught.value
+    assert isinstance(error, metadata_owner.MetadataFieldError)
+    assert error.field == field
+    assert error.document_path == f"/docs/metadata/{field}"
+    assert error.__cause__ is not None
+    assert str(error.__cause__) in str(error)
+    assert error.document_path in str(error)
 
 
 @dataclass

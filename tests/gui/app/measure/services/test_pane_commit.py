@@ -59,7 +59,9 @@ def test_run_commit_retires_dependents_and_replans_native_artifacts(session):
         result=record, parameters=tab.run.parameters, storage=tab.run.storage
     )
 
-    pane_commit.commit_run(state, "tab", pane)
+    pane_commit.commit_run(
+        state, "tab", pane, plan_layout=session.save_service.plan_layout
+    )
 
     assert tab.run is pane
     assert tab.analysis.result is None and tab.post_analysis.result is None
@@ -98,7 +100,9 @@ def test_analysis_commit_retires_both_stages_and_clears_post_artifacts(session):
     params = {"gain": 2}
     pane = AnalysisPaneState(result={"mean": 3}, params=params)
 
-    pane_commit.commit_analysis(state, "tab", pane)
+    pane_commit.commit_analysis(
+        state, "tab", pane, plan_layout=session.save_service.plan_layout
+    )
 
     assert tab.analysis is pane
     assert tab.analysis.figures_replaced
@@ -294,11 +298,15 @@ def test_cleanup_failure_is_logged_without_rollback_or_skipping_other_resources(
 
     if stage == "run":
         pane = RunPaneState()
-        pane_commit.commit_run(state, "tab", pane)
+        pane_commit.commit_run(
+            state, "tab", pane, plan_layout=session.save_service.plan_layout
+        )
         assert tab.run is pane
     elif stage == "analysis":
         pane = AnalysisPaneState(result="replacement")
-        pane_commit.commit_analysis(state, "tab", pane)
+        pane_commit.commit_analysis(
+            state, "tab", pane, plan_layout=session.save_service.plan_layout
+        )
         assert tab.analysis is pane
     else:
         pane = PostAnalysisPaneState(result="replacement")

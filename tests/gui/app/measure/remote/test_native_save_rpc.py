@@ -68,14 +68,21 @@ def native_save_rpc(
                 source_operation_id=101,
                 parameters=tab.run.parameters,
             ),
+            plan_layout=session.save_service.plan_layout,
         )
         declare_panes(session)
         post = tab.post_analysis
         commit_analysis(
-            session.state, "tab", replace(tab.analysis, source_operation_id=201)
+            session.state,
+            "tab",
+            replace(tab.analysis, source_operation_id=201),
+            plan_layout=session.save_service.plan_layout,
         )
         commit_post_analysis(
-            session.state, "tab", replace(post, source_operation_id=301)
+            session.state,
+            "tab",
+            replace(post, source_operation_id=301),
+            plan_layout=session.save_service.plan_layout,
         )
         adapter = AnalysisSavingAdapter
         if analysis_options_failure:
@@ -180,10 +187,28 @@ def assert_loaded_rpc_save_preserves_complete_data(
 ) -> None:
     """Save restored data even when analysis options failed or storage is absent."""
     events = session.entry.ledger.events()
+    snapshot = call(sock, "tab.snapshot", {"tab_id": tab_id})
+    assert snapshot["ok"], snapshot
+    preview = SaveSnapshotWire.model_validate(snapshot["result"]["tabs"][0])
+    assert preview.run_id is None
+    artifact = preview.artifacts["run"]["measurement_data"]
+    assert artifact.status == "Not saved"
+    outputs = artifact.members["data"]
+    assert [output.format for output in outputs] == ["data_h5", "labber"]
+    assert Path(outputs[0].path) == path
+    assert all(
+        output.status == "reserved" and output.error is None for output in outputs
+    )
     reply = call(sock, "tab.save_data", {"tab_id": tab_id})
     assert reply["ok"], reply
     report = SaveSnapshotWire.model_validate(reply["result"])
     assert report.run_id == metadata.run_id
+    saved = report.artifacts["run"]["measurement_data"]
+    assert saved.status == "Saved"
+    assert [output.path for output in saved.members["data"]] == [
+        output.path for output in outputs
+    ]
+    assert all(output.status == "saved" for output in saved.members["data"])
     stored = load(path)
     assert metadata_from_container(stored) == metadata
     np.testing.assert_array_equal(
@@ -274,13 +299,6 @@ def test_native_load_rpc_retains_history_on_analysis_partial_failure(
         if unbound_capture:
             assert tab.run.parameters is not None
             assert tab.run.storage is None
-            assert tab.artifacts.snapshot()
-            assert all(
-                not member.outputs
-                for section in tab.artifacts.snapshot()
-                for artifact in section.artifacts
-                for member in artifact.members
-            )
         assert session.entry.ledger.events() == events
         assert_loaded_rpc_save_preserves_complete_data(
             session, sock, "tab", path, metadata_from_container(stored)
@@ -331,14 +349,6 @@ def test_native_open_file_rpc_retains_history_after_explicit_context_read(
         assert tab.run.confirmed_run_id is None
         assert tab.run.parameters is not None
         assert tab.run.storage is None
-        if unbound_capture:
-            assert tab.artifacts.snapshot()
-            assert all(
-                not member.outputs
-                for section in tab.artifacts.snapshot()
-                for artifact in section.artifacts
-                for member in artifact.members
-            )
         assert session.state.active_tab_id == new_id
         assert session.entry.ledger.events() == events
         assert_loaded_rpc_save_preserves_complete_data(
@@ -533,6 +543,7 @@ def test_save_rpc_rejects_replaced_sources_even_after_a_fresh_snapshot(
                     source_operation_id=102,
                     parameters=tab.run.parameters,
                 ),
+                plan_layout=session.save_service.plan_layout,
             )
             params = {
                 "tab_id": "tab",
@@ -542,13 +553,17 @@ def test_save_rpc_rejects_replaced_sources_even_after_a_fresh_snapshot(
         else:
             if selection == "analysis":
                 commit_analysis(
-                    session.state, "tab", replace(tab.analysis, source_operation_id=202)
+                    session.state,
+                    "tab",
+                    replace(tab.analysis, source_operation_id=202),
+                    plan_layout=session.save_service.plan_layout,
                 )
             else:
                 commit_post_analysis(
                     session.state,
                     "tab",
                     replace(tab.post_analysis, source_operation_id=302),
+                    plan_layout=session.save_service.plan_layout,
                 )
             params = {
                 "tab_id": "tab",

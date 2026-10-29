@@ -371,6 +371,7 @@ def test_tab_snapshot_loaded_artifacts_have_no_success_record(
             parameters=run.parameters,
             storage=run.storage,
         ),
+        plan_layout=session.save_service.plan_layout,
     )
     snapshot = _native_snapshot(session)
 
@@ -432,6 +433,7 @@ def test_tab_snapshot_tracks_actual_success_and_draft_or_result_drift(
             storage=None if run.parameters is None else run.parameters.storage,
             parameters=run.parameters,
         ),
+        plan_layout=session.save_service.plan_layout,
     )
     assert (
         _native_snapshot(session).artifacts[0].artifacts[0].status
@@ -446,6 +448,7 @@ def test_tab_snapshot_tracks_actual_success_and_draft_or_result_drift(
             parameters=run.parameters,
             storage=run.storage,
         ),
+        plan_layout=session.save_service.plan_layout,
     )
     loaded = _native_snapshot(session)
     assert loaded.run is not None and loaded.run.source_path == "imported.hdf5"

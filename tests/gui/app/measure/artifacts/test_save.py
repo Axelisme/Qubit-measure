@@ -590,6 +590,13 @@ def test_missing_native_evidence_rejects_before_operation_or_files(
                 require_record(session.state.get_tab("tab").run), metadata=None
             )
         ),
+        plan_layout=session.save_service.plan_layout,
+    )
+    assert all(
+        not member.outputs
+        for section in session.state.get_artifact_snapshots("tab")
+        for artifact in section.artifacts
+        for member in artifact.members
     )
     with pytest.raises(FailedPreconditionError):
         session.control.save_data("tab", origin=GUI_ORIGIN)

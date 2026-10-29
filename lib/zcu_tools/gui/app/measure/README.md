@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure`
 
-**Last updated:** 2026-10-29, captured parameter environments 與 recorded-name Save
+**Last updated:** 2026-10-29, captured parameter environments 與共用輸出預覽
 
 **讀者：** framework-dev。量測 GUI 的組裝、分頁、tab admission 與 Run／Load／Save 分工。
 
@@ -367,10 +367,11 @@ RunInputs 固定 admission 的 ParameterContext，RunPaneState 隨 result 保存
 Native Load 保留檔案 metadata，從 parameter_snapshot 還原當次 point、library 與 alias。
 Load 接受任意位置的檔案，不讀 live point，也不依 entry 身分選來源。
 缺快照時使用沒有 general、target 或 storage 的空內容，分析可以使用自己的預設值。
-無 storage 的 Run 保留 artifact/member declarations，首次 Save 前 outputs 可為空，狀態仍為 Not saved。
-SaveService 依目前 roots 與 metadata 記錄的 entry／point 取得 resources 輸出 binding。
+Run／Load 的輸出預覽與 Save 共用 `SaveService.plan_layout`，依目前 roots、記錄的 entry／point 與 adapter stem 計畫 paths。
+正常 Load 後立即有預覽，Analyze／PostAnalyze 後也有預覽，不要求 storage，狀態仍為 Not saved。
+缺 metadata 時只有 artifact/member declarations，沒有輸出預覽。
+預覽只隔離 `MetadataFieldError`，保留 Load 的原始內容；Save 仍完整驗證 metadata。
 缺名稱使用 unnamed_entry，缺 point 使用 unnamed_point。Save report 發布實際 paths、成功與失敗。
-Bound Run 的舊預覽保留，但不能決定實際 Save 位置。
 Load 不新增 Run token 或量測歷史。
 純計算來源為 None，不回退到 session；新 Run 與 clear 清除舊來源。Analyze／Post-analyze 不攜帶 predictor。Predictor 是獨立查詢工具，不自動參與實驗。
 

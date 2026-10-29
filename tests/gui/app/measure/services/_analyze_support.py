@@ -8,6 +8,7 @@ from unittest.mock import MagicMock
 
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import ContextReadiness
+from zcu_tools.gui.app.measure.artifacts import LayoutPlanner
 from zcu_tools.gui.app.measure.services.analyze import AnalyzeService
 from zcu_tools.gui.app.measure.services.pane_commit import commit_run
 from zcu_tools.gui.app.measure.state import RunPaneState, Session, SessionEnv, State
@@ -87,12 +88,14 @@ def make_service(
     fail_submit: bool = False,
     handles: OperationHandles | None = None,
     writeback: MagicMock | None = None,
+    plan_layout: LayoutPlanner | None = None,
 ) -> tuple[AnalyzeService, FakeBg]:
     """Wire a fresh service and recording executor to the supplied state and bus.
 
     Use supplied handles and writeback mocks when present, or create fresh ones.
     Reset create_draft's return value to None. fail_submit makes the executor
     reject submissions with RuntimeError; no real background work is started.
+    Supply Save's planner for cases that publish output previews.
     """
     bg = FakeBg(fail_submit=fail_submit)
     handles = handles or OperationHandles()
@@ -100,7 +103,9 @@ def make_service(
     writeback = writeback if writeback is not None else MagicMock()
     writeback.create_draft.return_value = None
     runner = OperationRunner(MagicMock(), handles, progress, bg, bus)
-    svc = AnalyzeService(state, runner, bus, writeback, handles)
+    svc = AnalyzeService(
+        state, runner, bus, writeback, handles, plan_layout=plan_layout
+    )
     return svc, bg
 
 
