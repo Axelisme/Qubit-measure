@@ -12,7 +12,6 @@ if TYPE_CHECKING:
         PredictFreqRequest,
         PredictMatrixCurveRequest,
         PredictMatrixCurveResult,
-        PredictorService,
     )
     from zcu_tools.resources.predictor_file import PredictorFile
     from zcu_tools.simulate.predictor import CalibrationResult, PredictorParams
@@ -54,40 +53,3 @@ class PredictorControlPort(Protocol):
     ) -> PredictMatrixCurveResult:
         """Query optional matrix rows; see PredictorService.predict_matrix_element_curve."""
         ...
-
-
-class PredictorControlFacet:
-    """Forward typed queries to PredictorService; no state or event subscription."""
-
-    def __init__(self, predictor: PredictorService) -> None:
-        self._predictor = predictor
-
-    def list_files(self) -> tuple[str, ...]:
-        """List current entry predictor filenames; empty without an entry."""
-        return self._predictor.list_files()
-
-    def load_file(self, filename: str) -> PredictorFile:
-        """Read one entry predictor filename; see PredictorService.load_file."""
-        return self._predictor.load_file(filename)
-
-    def predict_freq(self, params: PredictorParams, req: PredictFreqRequest) -> float:
-        """Return MHz; see PredictorService.predict_freq."""
-        return self._predictor.predict_freq(params, req)
-
-    def calibrate_offset(
-        self, params: PredictorParams, req: CalibrateOffsetRequest
-    ) -> CalibrationResult:
-        """Return additive Phi0 offset correction, actual MHz and clamped status; see PredictorService.calibrate_offset."""
-        return self._predictor.calibrate_offset(params, req)
-
-    def predict_freq_curve(
-        self, params: PredictorParams, req: PredictCurveRequest
-    ) -> PredictCurveResult:
-        """Return MHz rows; see PredictorService.predict_freq_curve."""
-        return self._predictor.predict_freq_curve(params, req)
-
-    def predict_matrix_element_curve(
-        self, params: PredictorParams, req: PredictMatrixCurveRequest
-    ) -> PredictMatrixCurveResult:
-        """Return matrix rows; see PredictorService.predict_matrix_element_curve."""
-        return self._predictor.predict_matrix_element_curve(params, req)

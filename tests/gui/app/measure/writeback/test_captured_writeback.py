@@ -38,7 +38,7 @@ from zcu_tools.gui.expected_error import InvalidInputError
 from zcu_tools.gui.interactive import PluginDefinition
 from zcu_tools.gui.session.adapters.manual_owner_scheduler import ManualOwnerScheduler
 from zcu_tools.gui.session.aliases import AliasRow
-from zcu_tools.gui.session.context_control import ContextControlFacet
+from zcu_tools.gui.session.context_control import ContextControlPort
 from zcu_tools.gui.session.context_types import (
     CommandOrigin,
     PointUseRequest,
@@ -86,7 +86,7 @@ def saved_target(parameters: ParameterContext) -> SavedPoint:
 @dataclass
 class WritebackSession:
     entry: ResultEntry
-    control: ContextControlFacet
+    control: ContextControlPort
     service: WritebackService
 
 
@@ -110,7 +110,7 @@ def session(tmp_path: Path) -> Generator[WritebackSession]:
         entry.new_point("working")
         context.install_entry(entry)
         context.use_point(PointUseRequest("working"))
-        control = ContextControlFacet(context=context)
+        control = context
         control.add_component("Q1", "fake/drive/a", {})
         service = WritebackService(control, arb_names=lambda: ())
         yield WritebackSession(entry, control, service)
@@ -341,7 +341,7 @@ def test_accepted_retains_run_identity_with_or_without_save(
     tmp_path: Path, qapp: QApplication, save_before_accept: bool
 ) -> None:
     with native_save_session(tmp_path, qapp) as native:
-        control = ContextControlFacet(context=native.context)
+        control = native.context
         service = WritebackService(control, arb_names=lambda: ())
         tab = native.state.get_tab("tab")
         captured = control.read_context()
@@ -436,7 +436,7 @@ def test_analysis_draft_uses_start_run_identity(
             analysis=Analysis(fn=analyze, writeback=proposals),
             post_analysis=AnalysisSavingAdapter.post_analysis,
         )
-        control = ContextControlFacet(context=native.context)
+        control = native.context
         writeback = WritebackService(control, arb_names=lambda: ())
         runner = OperationRunner(
             None, native.handles, None, native.background, native.bus
@@ -514,7 +514,7 @@ def test_post_analysis_draft_retains_primary_identity(
                 tab.run.parameters = None
         captured = tab.run.parameters
         expected = native.metadata.run_id if source in ("run", "load") else None
-        control = ContextControlFacet(context=native.context)
+        control = native.context
         writeback = WritebackService(control, arb_names=lambda: ())
         primary_draft = (
             None

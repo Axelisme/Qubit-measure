@@ -21,7 +21,6 @@ from zcu_tools.gui.app.measure.writeback import (
 from zcu_tools.gui.app.measure.writeback.control import WritebackControlFacet
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.expected_error import InvalidInputError
-from zcu_tools.gui.session.context_control import ContextControlFacet
 from zcu_tools.gui.session.context_types import ContextTarget, PointUseRequest
 from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.state import SessionState
@@ -78,7 +77,7 @@ class WritebackGui(SyntheticGui):
         )
         self.context.install_entry(entry)
         self.context.use_point(PointUseRequest("point"))
-        control = ContextControlFacet(context=self.context)
+        control = self.context
         control.add_component("Q1", "fake/drive/a", {})
         self.service = WritebackService(control, arb_names=lambda: ())
         self.drafts = {

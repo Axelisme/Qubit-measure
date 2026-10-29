@@ -7,7 +7,7 @@ import pytest
 from pydantic import ValidationError
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.session.aliases import AliasRow
-from zcu_tools.gui.session.context_control import ContextControlFacet
+from zcu_tools.gui.session.context_control import ContextControlPort
 from zcu_tools.gui.session.context_types import CommandOrigin, PointCreateRequest
 from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.state import SessionState
@@ -25,7 +25,7 @@ class RequiredComponent(ComponentSchema):
 @pytest.fixture
 def component_session(
     tmp_path: Path,
-) -> Generator[tuple[ContextControlFacet, ResultEntry]]:
+) -> Generator[tuple[ContextControlPort, ResultEntry]]:
     before = registry_state()
     try:
         register_fakes()
@@ -42,7 +42,7 @@ def component_session(
             bind_assets=ArbWaveformDatabase.info_at,
         )
         service.install_entry(entry)
-        yield ContextControlFacet(context=service), entry
+        yield service, entry
         assert registry_state() == installed
     finally:
         restore_registry(before)

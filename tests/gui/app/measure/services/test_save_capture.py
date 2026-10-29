@@ -16,7 +16,7 @@ from zcu_tools.gui.app.measure.state import RunPaneState, State
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.aliases import AliasRow
-from zcu_tools.gui.session.context_control import ContextControlFacet
+from zcu_tools.gui.session.context_control import ContextControlPort
 from zcu_tools.gui.session.context_types import (
     ContextSourceFault,
     ContextSourceUnavailableError,
@@ -39,7 +39,7 @@ from tests.resources.entry.fakes import register_fakes, registry_state, restore_
 class SaveSession:
     entry: ResultEntry
     context: ContextService
-    control: ContextControlFacet
+    control: ContextControlPort
     state: State
     bus: BaseEventBus
 
@@ -62,7 +62,7 @@ def session(tmp_path: Path) -> Generator[SaveSession]:
         bus = BaseEventBus()
         context = ContextService(state, bus, bind_assets=ArbWaveformDatabase.info_at)
         context.install_entry(entry)
-        control = ContextControlFacet(context=context)
+        control = context
         control.use_point(PointUseRequest("p"))
         yield SaveSession(entry, context, control, state, bus)
         assert registry_state() == installed

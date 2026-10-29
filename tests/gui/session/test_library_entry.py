@@ -15,7 +15,7 @@ from zcu_tools.cfg_model import (
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 from zcu_tools.gui.form import FormErrors
-from zcu_tools.gui.session.context_control import ContextControlFacet
+from zcu_tools.gui.session.context_control import ContextControlPort
 from zcu_tools.gui.session.context_types import PointUseRequest
 from zcu_tools.gui.session.events import MlChangedPayload
 from zcu_tools.gui.session.library_entry import (
@@ -40,7 +40,7 @@ WAVEFORM = "Q1.waveforms.base"
 class LibrarySession:
     entry: ResultEntry
     context: ContextService
-    control: ContextControlFacet
+    control: ContextControlPort
     state: SessionState
     bus: BaseEventBus
 
@@ -54,9 +54,7 @@ def session(tmp_path: Path) -> LibrarySession:
     bus = BaseEventBus()
     context = ContextService(state, bus, bind_assets=ArbWaveformDatabase.info_at)
     context.install_entry(entry)
-    return LibrarySession(
-        entry, context, ContextControlFacet(context=context), state, bus
-    )
+    return LibrarySession(entry, context, context, state, bus)
 
 
 def _select(session: LibrarySession, label: str) -> None:

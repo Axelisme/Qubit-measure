@@ -23,7 +23,7 @@ from qtpy.QtWidgets import (
 )
 from zcu_tools.format_version import YamlMap
 from zcu_tools.gui.event_bus import BaseEventBus
-from zcu_tools.gui.session.context_control import ContextControlFacet
+from zcu_tools.gui.session.context_control import ContextControlPort
 from zcu_tools.gui.session.context_types import (
     CommandOrigin,
     PointCreateRequest,
@@ -128,7 +128,7 @@ def _close(qapp, widget: QWidget) -> None:
 @pytest.fixture
 def component_widget(
     qapp, tmp_path: Path, owner: ContextService
-) -> Generator[tuple[ComponentTreeWidget, ContextControlFacet]]:
+) -> Generator[tuple[ComponentTreeWidget, ContextControlPort]]:
     entry = ResultEntry.create(
         "entry",
         result_root=tmp_path / "results",
@@ -138,7 +138,7 @@ def component_widget(
     entry.new_point("working")
     owner.install_entry(entry)
     owner.use_point(PointUseRequest("working"))
-    control = ContextControlFacet(context=owner)
+    control = owner
     widget = ComponentTreeWidget(control)
     widget.resize(900, 700)
     widget.show()
@@ -520,7 +520,7 @@ def test_extra_document_data_outside_the_schema_stays_visible_and_editable(
 def test_without_parameter_context_the_tree_clears_and_add_is_disabled(
     qapp, tmp_path: Path, owner: ContextService
 ):
-    control = ContextControlFacet(context=owner)
+    control = owner
     widget = ComponentTreeWidget(control)
     try:
         assert _tree(widget).topLevelItemCount() == 0

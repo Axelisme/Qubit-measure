@@ -26,7 +26,7 @@ from zcu_tools.gui.app.measure.state import Session, SessionEnv, State
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
-from zcu_tools.gui.session.context_control import ContextControlFacet
+from zcu_tools.gui.session.context_control import ContextControlPort
 from zcu_tools.gui.session.context_types import CommandOrigin, PointUseRequest
 from zcu_tools.gui.session.operation_handles import OperationHandles
 from zcu_tools.gui.session.operation_runner import OperationRunner
@@ -66,7 +66,7 @@ class RunHost:
     state: State
     service: RunService
     background: BackgroundRunner
-    context: ContextControlFacet
+    context: ContextControlPort
     bus: BaseEventBus
     handles: OperationHandles
 
@@ -87,7 +87,7 @@ def host(tmp_path: Path, qapp: QApplication) -> Iterator[RunHost]:
     bus = BaseEventBus()
     context = ContextService(state, bus, bind_assets=ArbWaveformDatabase.info_at)
     context.install_entry(entry)
-    control = ContextControlFacet(context=context)
+    control = context
     control.use_point(PointUseRequest("p"))
     background = BackgroundRunner()
     handles = OperationHandles()
