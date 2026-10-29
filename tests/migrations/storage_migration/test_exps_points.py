@@ -138,7 +138,7 @@ def test_exps_child_becomes_complete_point_with_independent_meta_and_library(
         and item.source_keys == ("waveforms", "expression")
         and item.destination_keys
         == ("general", "ext", "legacy_module_cfg", "waveforms", "expression")
-        and item.new_file == entry.result_path / "points/070716_0.500/point.yaml"
+        and item.new_file == entry.result_path / "points/070716_0.500/parameters.yaml"
         for item in report.key_mappings
     )
     assert any(
@@ -240,7 +240,7 @@ def test_data_publishes_point_figures_once_without_archiving_or_unproven_associa
     assert_difference(
         lambda: _convert(replace(request, part="all", resume=True), mapping),
         request,
-        [entry.result_path / "points/070716_0.500/point.yaml"],
+        [entry.result_path / "points/070716_0.500/parameters.yaml"],
     )
     assert _entry(request).use_point("070716_0.500").C1.frequency == 99.0
     assert target.read_bytes() == retained_figure.read_bytes()
@@ -333,7 +333,9 @@ def test_dry_run_maps_exps_without_creating_destinations_or_changing_sources(
     assert len(rows) == 1
     assert rows[0].new_path == "C1.frequency"
     assert rows[0].new_file == (
-        request_data.results_root / request_data.name / "points/070716_0.500/point.yaml"
+        request_data.results_root
+        / request_data.name
+        / "points/070716_0.500/parameters.yaml"
     )
     assert not any(item.source == figure for item in report.pending)
     assert not request_data.results_root.exists()

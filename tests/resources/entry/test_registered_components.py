@@ -76,10 +76,10 @@ def test_open_invalid_component_reports_source_and_original_validation(
 ) -> None:
     entry, results, database = create_entry(tmp_path)
     entry.setup.add_component("N1", kind=required_kind, rate=1.0, title="ready")
-    source = results / "entry" / "setup.yaml"
+    source = results / "entry" / "parameters.yaml"
     if owner == "point":
         entry.new_point("working")
-        source = results / "entry" / "points" / "working" / "point.yaml"
+        source = results / "entry" / "points" / "working" / "parameters.yaml"
     yaml = YAML(typ="rt")
     stored = yaml.load(source)
     stored["components"]["N1"]["rate"] = "not a rate"
@@ -132,9 +132,9 @@ def test_registered_legacy_rename_preserves_metadata_until_explicit_replacement(
         entry.setup.add_component("N1", kind=kind, modern=7)
         view = entry.setup if owner == "setup" else entry.new_point("working")
         source = (
-            results / "entry/setup.yaml"
+            results / "entry/parameters.yaml"
             if owner == "setup"
-            else results / "entry/points/working/point.yaml"
+            else results / "entry/points/working/parameters.yaml"
         )
         with view.edit() as draft:
             draft.set_meta("N1.modern", {"comment": "original"})
@@ -380,7 +380,7 @@ def test_path_writes_reject_undeclared_fields_before_model_migration(
             draft.set_meta("Q1.rate", {"comment": "unchanged"})
         before = snapshot(entry.setup)
         metadata = entry.setup.meta("Q1.rate")
-        source = results / "entry" / "setup.yaml"
+        source = results / "entry" / "parameters.yaml"
         disk = source.read_bytes()
 
         with entry.setup.edit() as draft:
@@ -431,7 +431,7 @@ def test_nested_kind_is_required_in_complete_components(
             entry.setup.add_component("N1", kind=kind, details={})
         entry.setup.add_component("N1", kind=kind, details={"kind": "initial"})
         assert field_view(entry.setup.N1.details).kind == "initial"
-        source = results / "entry" / "setup.yaml"
+        source = results / "entry" / "parameters.yaml"
         document = YAML(typ="safe").load(source.read_text(encoding="utf-8"))
         assert document["components"]["N1"]["details"] == {"kind": "initial"}
 
@@ -497,7 +497,7 @@ def test_nullable_numeric_field_round_trip(tmp_path: Path) -> None:
     with registered_model("notebook/nullable-unit", NullableFrequency) as kind:
         entry, results, database = create_entry(tmp_path)
         entry.setup.add_component("N1", kind=kind, rate=10.0)
-        source = results / "entry" / "setup.yaml"
+        source = results / "entry" / "parameters.yaml"
         document = YAML(typ="safe").load(source.read_text(encoding="utf-8"))
         assert document["components"]["N1"]["rate"] == 10.0
         assert entry.setup.N1.rate == 10.0
@@ -537,7 +537,7 @@ def test_nullable_nested_rounding_publishes_normalized_values(
     with registered_model("notebook/nested-rounded", RoundedSchema) as kind:
         entry, results, database = create_entry(tmp_path)
         entry.setup.add_component("N1", kind=kind, timing={"rate": 0.143})
-        source = results / "entry" / "setup.yaml"
+        source = results / "entry" / "parameters.yaml"
         assert field_view(entry.setup.N1.timing).rate == 0.14
         assert YAML(typ="safe").load(source)["components"]["N1"]["timing"] == {
             "rate": 0.14
@@ -566,7 +566,7 @@ def test_numeric_rounding_survives_reload(
     with registered_model("notebook/rounded", RoundedSchema) as kind:
         entry, results, database = create_entry(tmp_path)
         entry.setup.add_component("N1", kind=kind, rate=0.143)
-        source = results / "entry" / "setup.yaml"
+        source = results / "entry" / "parameters.yaml"
         assert YAML(typ="safe").load(source)["components"]["N1"]["rate"] == 0.14
         assert entry.setup.N1.rate == 0.14
         reopened = ResultEntry.open(
@@ -614,7 +614,7 @@ def test_original_model_runs_field_validators_and_validates_defaults(
 
     with registered_model("notebook/normalized", NormalizedSchema) as kind:
         entry, results, database = create_entry(tmp_path)
-        source = results / "entry" / "setup.yaml"
+        source = results / "entry" / "parameters.yaml"
         before_add = source.read_bytes()
         with pytest.raises(ValidationError, match="title"):
             entry.setup.add_component("N1", kind=kind)
@@ -647,7 +647,7 @@ def test_optional_container_does_not_make_a_supplied_required_leaf_nullable(
         entry.setup.add_component(
             "N1", kind=kind, timing={"label": "prepared", "width": 1.0}
         )
-        setup_path = results / "entry" / "setup.yaml"
+        setup_path = results / "entry" / "parameters.yaml"
         before = setup_path.read_bytes()
         with pytest.raises(ValidationError, match="width"):
             entry.setup.N1.timing = {"label": "prepared", "width": value}
@@ -703,7 +703,7 @@ def test_optional_nested_typos_preserve_values_metadata_and_disk(
         )
         with entry.setup.edit() as draft:
             draft.set_meta("N1.timing.width", {"stderr": 0.1})
-        setup_path = results / "entry" / "setup.yaml"
+        setup_path = results / "entry" / "parameters.yaml"
         before = setup_path.read_bytes()
         accepted = entry.setup.meta("N1.timing.width")
         assert accepted == {"stderr": 0.1}
@@ -744,7 +744,7 @@ def test_optional_nested_complete_values_round_trip_in_working_units(
                 and field_view(draft.N1.timing).width == 10.0
             )
 
-        setup_path = results / "entry" / "setup.yaml"
+        setup_path = results / "entry" / "parameters.yaml"
         assert YAML(typ="safe").load(setup_path)["components"]["N1"]["timing"][
             "width"
         ] == pytest.approx(10.0)
@@ -773,7 +773,7 @@ def test_nested_model_views_and_dotted_edits_preserve_draft_isolation(
     entry.setup.add_component(
         "N1", kind=nested_kind, timing={"label": "prepared", "width": 1.0}
     )
-    setup_path = results / "entry" / "setup.yaml"
+    setup_path = results / "entry" / "parameters.yaml"
     before = setup_path.read_bytes()
     with entry.setup.edit() as draft:
         draft.set("N1.timing.width", 10.0)
@@ -805,7 +805,7 @@ def test_required_component_values_reject_invalid_edits(
 ) -> None:
     entry, results, _ = create_entry(tmp_path)
     entry.setup.add_component("N1", kind=required_kind, rate=5000.0, title="initial")
-    setup_file = results / "entry" / "setup.yaml"
+    setup_file = results / "entry" / "parameters.yaml"
     before = setup_file.read_bytes()
     with pytest.raises(ValidationError, match="rate"):
         entry.setup.N1.rate = value

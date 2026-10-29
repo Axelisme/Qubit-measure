@@ -110,7 +110,7 @@ def copy_library(source: Path, destination: Path) -> None:
 def open_library_store(
     path: Path, *, allow_absent: bool = False
 ) -> DocumentStore[ModuleLibraryDocument]:
-    """Open module_cfg.yaml without modifying it or consulting a ledger.
+    """Open library.yaml without modifying it or consulting a ledger.
 
     Invalid disk Specs are omitted from the snapshot and recorded by root in
     invalid_entries. Header/container errors propagate. Strict refresh rejects

@@ -42,8 +42,8 @@ def prepare_parameter_batch(
     """Convert a detached full seed/value batch and validate the current schema.
 
     document contains a complete parameter-container mapping, including general,
-    components and schema_version. source_path names setup.yaml for a setup;
-    other names select a point. transform is the caller-owned pure conversion,
+    components and schema_version. source_path under points/<label>/ selects a
+    point; another supplied path selects setup. An absent path selects a point. transform is the caller-owned pure conversion,
     or None for an already current batch. It must preserve unrelated fields and
     must not perform I/O. Validate only its output, so historical fields need
     not be accepted by current component models. Return a detached typed model
@@ -71,7 +71,7 @@ def prepare_parameter_batch(
     model = (
         SetupDocument
         if document.source_path is not None
-        and document.source_path.name == "setup.yaml"
+        and document.source_path.parent.parent.name != "points"
         else PointDocument
     )
     validated = model.model_validate(deepcopy(candidate.data))

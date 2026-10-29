@@ -14,7 +14,7 @@ if TYPE_CHECKING:
 class PointOrigin:
     """Owning identity and output configuration bound when constructing a view.
 
-    source is the bound point.yaml path.
+    source is the bound parameters.yaml path.
     result_root is the resolved root used for clone identity. database_root
     is the resolved Save output root, not a clone boundary. Identity does not
     depend on later ResultEntry registration.

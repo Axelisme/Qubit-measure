@@ -422,7 +422,7 @@ def test_selectors_do_not_open_arbitrary_paths(project: Path) -> None:
         with pytest.raises(KeyError, match="figure"):
             index.read_figure(run.key, selector)
     with pytest.raises(KeyError, match="analysis"):
-        index.read_analysis(run.key, "../../setup.yaml")
+        index.read_analysis(run.key, "../../parameters.yaml")
     with pytest.raises(KeyError, match="run"):
         index.get_run("../escape")
 
@@ -543,7 +543,7 @@ def test_entry_read_failures_do_not_hide_other_results(
     project: Path, damage: str
 ) -> None:
     entry = project / "result" / "alpha"
-    setup = entry / "setup.yaml"
+    setup = entry / "parameters.yaml"
     ledger = entry / "records" / "ledger.jsonl"
     if damage == "missing_setup":
         setup.unlink()

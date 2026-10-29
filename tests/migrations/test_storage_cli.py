@@ -118,7 +118,9 @@ def test_cli_identical_rerun_prints_skipped_and_keeps_all_files(
     assert call(again) == 0, "Owned CLI rerun must automatically verify and skip"
     report = json.loads(capsys.readouterr().out)
     assert report["migration_id"] == first["migration_id"]
-    assert any(row["destination"].endswith("/setup.yaml") for row in report["skipped"])
+    assert any(
+        row["destination"].endswith("/parameters.yaml") for row in report["skipped"]
+    )
     assert any(
         row["destination"].endswith("/figures/image/fit.png")
         for row in report["skipped"]
@@ -139,7 +141,9 @@ def test_cli_conflict_exits_two_with_located_diagnostic_without_writing(
     capsys.readouterr()
     root = tmp_path / "repo/result/converted"
     target = root / (
-        "setup.yaml" if conflict == "legal-edit" else "records/migration-state.json"
+        "parameters.yaml"
+        if conflict == "legal-edit"
+        else "records/migration-state.json"
     )
     if conflict == "legal-edit":
         from zcu_tools.resources.entry import ResultEntry

@@ -123,7 +123,7 @@ def test_factory_context_source_fault_is_not_absence() -> None:
     )
     fault = ContextSourceFault(
         document="module_cfg",
-        path=Path("module_cfg.yaml"),
+        path=Path("library.yaml"),
         error_type="ValueError",
         message="broken source",
     )

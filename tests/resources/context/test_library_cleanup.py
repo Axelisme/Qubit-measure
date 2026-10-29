@@ -12,7 +12,7 @@ GOOD = {"style": "const", "length": 0.1}
 
 
 def test_legacy_sources_do_not_reject_specs_or_change_disk(tmp_path: Path) -> None:
-    path = tmp_path / "module_cfg.yaml"
+    path = tmp_path / "library.yaml"
     path.write_text(
         HEADER
         + "components: {Q1: {waveforms: {pi: {style: const, length: 0.2}}}}\n"
@@ -35,7 +35,7 @@ def test_legacy_sources_do_not_reject_specs_or_change_disk(tmp_path: Path) -> No
 def test_bad_specs_are_skipped_without_changing_disk(
     tmp_path: Path, partition: str, bad: object
 ) -> None:
-    path = tmp_path / "module_cfg.yaml"
+    path = tmp_path / "library.yaml"
     partitions: dict[str, dict[str, object]] = {"waveforms": {"pi_half": GOOD}}
     partitions.setdefault(partition, {})["bad"] = bad
     path.write_text(
@@ -59,7 +59,7 @@ def test_bad_specs_are_skipped_without_changing_disk(
 def test_retired_source_contents_are_not_interpreted(
     tmp_path: Path, legacy: str
 ) -> None:
-    path = tmp_path / "module_cfg.yaml"
+    path = tmp_path / "library.yaml"
     path.write_text(HEADER + f"provenance: {legacy}\n")
     original = path.read_bytes()
     library = ModuleLibrary(path)
@@ -80,7 +80,7 @@ def test_retired_source_contents_are_not_interpreted(
     ],
 )
 def test_container_errors_do_not_change_disk(tmp_path: Path, content: str) -> None:
-    path = tmp_path / "module_cfg.yaml"
+    path = tmp_path / "library.yaml"
     path.write_text(HEADER + content + "\n")
     original = path.read_bytes()
     with pytest.raises(ValueError, match="components|[Ii]nvalid|library"):
@@ -89,7 +89,7 @@ def test_container_errors_do_not_change_disk(tmp_path: Path, content: str) -> No
 
 
 def test_shared_yaml_partition_reports_each_invalid_root(tmp_path: Path) -> None:
-    path = tmp_path / "module_cfg.yaml"
+    path = tmp_path / "library.yaml"
     path.write_text(
         HEADER + "components:\n"
         "  Q1:\n    waveforms: &shared {bad: null, good: {style: const, length: 0.1}}\n"
@@ -105,7 +105,7 @@ def test_shared_yaml_partition_reports_each_invalid_root(tmp_path: Path) -> None
 def test_nonempty_edit_drops_legacy_sources_and_preserves_future_fields(
     tmp_path: Path,
 ) -> None:
-    path = tmp_path / "module_cfg.yaml"
+    path = tmp_path / "library.yaml"
     path.write_text(
         "format: zcu.module-library\nformat_version: '2.9'\nfuture: {x: 1}\n"
         "components: {Q1: {future_partition: {x: 2}, waveforms: {pi: {style: const, length: 0.1}}}}\n"

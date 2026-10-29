@@ -211,10 +211,10 @@ def test_unsafe_point_label_returns_invalid_params_without_side_effects(
 @pytest.mark.parametrize(
     ("source_file", "invalid_content"),
     [
-        ("module_cfg.yaml", "modules: [\n"),
-        ("point.yaml", None),
-        ("point.yaml", "{broken"),
-        ("point.yaml", "null"),
+        ("library.yaml", "modules: [\n"),
+        ("parameters.yaml", None),
+        ("parameters.yaml", "{broken"),
+        ("parameters.yaml", "null"),
     ],
 )
 def test_invalid_context_source_and_occupied_directory_preserve_selection(
@@ -249,7 +249,7 @@ def test_invalid_context_source_and_occupied_directory_preserve_selection(
 
         source, other_file = (
             (library_source, point_source)
-            if source_file == "module_cfg.yaml"
+            if source_file == "library.yaml"
             else (point_source, library_source)
         )
         assert source.is_file()

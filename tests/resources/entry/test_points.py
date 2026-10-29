@@ -92,7 +92,7 @@ def test_point_reads_only_requested_leaf_and_rejects_invalid_document_edits(
 ) -> None:
     entry.setup.add_component("sensor", kind=range_kind, low=1.0, high=2.0)
     entry.new_point("partial")
-    path = entry.result_path / "points" / "partial" / "point.yaml"
+    path = entry.result_path / "points" / "partial" / "parameters.yaml"
     raw = YAML(typ="safe").load(path)
     raw["components"]["sensor"]["high"] = ["not a number"]
     write_yaml(path, raw)
@@ -114,7 +114,7 @@ def test_leaf_reads_keep_field_normalization_and_stable_defaults_without_model_c
 ) -> None:
     entry.setup.add_component("sensor", kind=notebook_kind, gain=1.0, title="seed")
     entry.new_point("defaults")
-    path = entry.result_path / "points" / "defaults" / "point.yaml"
+    path = entry.result_path / "points" / "defaults" / "parameters.yaml"
     raw = YAML(typ="safe").load(path)
     raw["components"]["sensor"]["gain"] = ["bad sibling"]
     raw["components"]["sensor"]["title"] = "  Mixed CASE  "
@@ -133,7 +133,7 @@ def test_leaf_reads_keep_field_normalization_and_stable_defaults_without_model_c
 def test_use_point_classifies_required_document_absence(
     entry: ResultEntry,
 ) -> None:
-    missing = "point.yaml"
+    missing = "parameters.yaml"
     entry.new_point("incomplete")
     (entry.result_path / "points" / "incomplete" / missing).unlink()
     with pytest.raises(FileNotFoundError) as caught:
@@ -160,7 +160,7 @@ def test_new_point_copies_complete_components_and_keeps_independent_values(
     assert point.description is None
     assert entry.list_points() == ["stable (cold)"]
     root = entry_roots[0] / "entry"
-    source = root / "points/stable (cold)/point.yaml"
+    source = root / "points/stable (cold)/parameters.yaml"
     document = YAML(typ="safe").load(source.read_text())
     assert document["components"]["Q1"]["kind"] == "fake/drive/a"
     assert document["components"]["Q1"]["rate"] == 5000.0
@@ -189,14 +189,14 @@ def test_new_point_inherits_setup_general_with_fresh_creation_time(
     with entry.setup.edit() as draft:
         draft.set("general.created_at", "2000-01-01T00:00:00Z")
         draft.set("general.ext", {"flux_value": 0.5, "flux_unit": "mA"})
-    source = entry.result_path / "setup.yaml"
+    source = entry.result_path / "parameters.yaml"
     before = source.read_bytes()
 
     point = entry.new_point("inherited")
 
     assert snapshot(point).general.ext == {"flux_value": 0.5, "flux_unit": "mA"}
     stored = YAML(typ="safe").load(
-        (entry.result_path / "points/inherited/point.yaml").read_text()
+        (entry.result_path / "points/inherited/parameters.yaml").read_text()
     )
 
     assert stored["general"]["created_at"] > "2000-01-01T00:00:00Z"
@@ -215,7 +215,7 @@ def test_new_point_copies_forward_minor_source_yaml(
     if clone_from is not None:
         entry.new_point(clone_from)
     source = entry.result_path / (
-        "setup.yaml" if clone_from is None else "points/source/point.yaml"
+        "parameters.yaml" if clone_from is None else "points/source/parameters.yaml"
     )
     document = YAML(typ="rt").load(source.read_text())
     document["format_version"] = "2.1"
@@ -230,7 +230,7 @@ def test_new_point_copies_forward_minor_source_yaml(
     point = entry.new_point("copy", clone_from=clone_from)
 
     stored = YAML(typ="safe").load(
-        (entry.result_path / "points/copy/point.yaml").read_text()
+        (entry.result_path / "points/copy/parameters.yaml").read_text()
     )
     assert stored["general"]["created_at"] > "2000-01-01T00:00:00Z"
     stored["general"]["created_at"] = document["general"]["created_at"]
@@ -244,7 +244,7 @@ def test_seed_accepts_omitted_components_without_rewriting_setup(
     entry: ResultEntry, entry_roots: tuple[Path, Path]
 ) -> None:
     results, database = entry_roots
-    source = results / "entry/setup.yaml"
+    source = results / "entry/parameters.yaml"
     template = YAML(typ="rt").load(source.read_text())
     template.pop("components")
     write_yaml(source, template)
@@ -258,9 +258,9 @@ def test_seed_accepts_omitted_components_without_rewriting_setup(
     assert reopened.use_point("empty").description is None
     assert reopened.list_points() == ["empty"]
     point_root = results / "entry/points/empty"
-    stored = YAML(typ="safe").load((point_root / "point.yaml").read_text())
+    stored = YAML(typ="safe").load((point_root / "parameters.yaml").read_text())
     assert stored["components"] == {}
-    module = YAML(typ="safe").load((point_root / "module_cfg.yaml").read_text())
+    module = YAML(typ="safe").load((point_root / "library.yaml").read_text())
     assert module["format"] == "zcu.module-library"
     assert module["format_version"] == "2.0"
     assert source.read_bytes() == before
@@ -273,9 +273,9 @@ def test_list_points_sorts_parameter_documents_without_requiring_library(
     entry.new_point("a (warm)")
     partial = entry_roots[0] / "entry/points/partial"
     partial.mkdir()
-    (partial / "point.yaml").touch()
+    (partial / "parameters.yaml").touch()
     assert entry.list_points() == ["a (warm)", "partial", "z (cold)"]
-    with pytest.raises(ValueError, match="point.yaml"):
+    with pytest.raises(ValueError, match="parameters.yaml"):
         entry.use_point("partial")
     assert entry.list_points() == ["a (warm)", "partial", "z (cold)"]
 
@@ -299,7 +299,7 @@ def test_add_component_requires_complete_values_and_runs_original_model(
     source = (
         entry_roots[0]
         / "entry"
-        / ("setup.yaml" if target == "setup" else "points/a/point.yaml")
+        / ("parameters.yaml" if target == "setup" else "points/a/parameters.yaml")
     )
     before = source.read_bytes()
     with pytest.raises(ValidationError, match="gain"):
@@ -332,7 +332,7 @@ def test_seed_keeps_generated_default_values_across_independent_edits_and_reload
 ) -> None:
     entry.setup.add_component("C1", kind=notebook_kind, gain=1.0, title="template")
     if not stored_defaults:
-        source = entry_roots[0] / "entry/setup.yaml"
+        source = entry_roots[0] / "entry/parameters.yaml"
         template = YAML(typ="rt").load(source.read_text())
         template["components"]["C1"].pop("token")
         template["components"]["C1"].pop("timing")
@@ -362,8 +362,8 @@ def test_point_add_component_only_changes_its_own_document(
 ) -> None:
     point = entry.new_point("a")
     entry.setup.add_component("R1", kind="fake/sensor")
-    source = entry_roots[0] / "entry/points/a/point.yaml"
-    setup_source = entry_roots[0] / "entry/setup.yaml"
+    source = entry_roots[0] / "entry/points/a/parameters.yaml"
+    setup_source = entry_roots[0] / "entry/parameters.yaml"
     before = setup_source.read_bytes()
     point.add_component("Q1", kind="fake/drive/a", sense="R1", rate=5000.0)
     assert YAML(typ="safe").load(source)["components"]["Q1"]["sense"] == "R1"
@@ -379,7 +379,7 @@ def test_point_edit_only_changes_its_document(
 ) -> None:
     entry.setup.add_component("Q1", kind="fake/drive/a", rate=5000.0)
     point = entry.new_point("a")
-    setup_source = entry_roots[0] / "entry/setup.yaml"
+    setup_source = entry_roots[0] / "entry/parameters.yaml"
     before = setup_source.read_bytes()
     with point.edit() as draft:
         draft.Q1.rate = 5100.0
@@ -394,7 +394,9 @@ def test_point_edit_only_changes_its_document(
     results, database = entry_roots
     reloaded = ResultEntry.open("entry", result_root=results, database_root=database)
     assert reloaded.use_point("a").Q1.duration == 12.0
-    stored = YAML(typ="safe").load((results / "entry/points/a/point.yaml").read_text())
+    stored = YAML(typ="safe").load(
+        (results / "entry/points/a/parameters.yaml").read_text()
+    )
     assert stored["components"]["Q1"]["rate"] == 5100.0
     assert stored["components"]["Q1"]["duration"] == 12.0
 
@@ -410,7 +412,7 @@ def test_point_reload_uses_only_its_file_and_keeps_snapshot_on_failure(
     other.use_point("a").Q1.rate = 5100.0
     assert point.Q1.rate == 5000.0
     root = results / "entry"
-    (root / "setup.yaml").write_text("invalid: [", encoding="utf-8")
+    (root / "parameters.yaml").write_text("invalid: [", encoding="utf-8")
     reload_point = (
         point.refresh if operation == "refresh" else lambda: entry.use_point("a")
     )
@@ -421,7 +423,7 @@ def test_point_reload_uses_only_its_file_and_keeps_snapshot_on_failure(
     assert entry.setup.Q1.rate == 5000.0
     point.Q1.duration = 12.0
     assert point.Q1.duration == 12.0
-    source = root / "points/a/point.yaml"
+    source = root / "points/a/parameters.yaml"
     stored = YAML(typ="rt").load(source.read_text())
     stored["components"]["Q1"]["rate"] = "invalid"
     write_yaml(source, stored)
@@ -442,7 +444,7 @@ def test_point_edit_rejects_invalid_reload_before_exposing_draft(
 ) -> None:
     entry.setup.add_component("R1", kind=range_kind, low=1.0, high=2.0)
     point = entry.new_point("a")
-    point_source = entry_roots[0] / "entry/points/a/point.yaml"
+    point_source = entry_roots[0] / "entry/points/a/parameters.yaml"
     stored = YAML(typ="rt").load(point_source.read_text())
     stored["components"]["R1"].pop("low")
     write_yaml(point_source, stored)
@@ -463,8 +465,8 @@ def test_point_unknown_kind_reports_own_source_without_publishing(
     entry_roots: tuple[Path, Path],
     operation: str,
 ) -> None:
-    source = entry_roots[0] / "entry/points/a/point.yaml"
-    setup_source = entry_roots[0] / "entry/setup.yaml"
+    source = entry_roots[0] / "entry/points/a/parameters.yaml"
+    setup_source = entry_roots[0] / "entry/parameters.yaml"
     stored = YAML(typ="rt").load(source.read_text())
     stored["components"]["Q1"]["kind"] = "missing/point-kind"
     write_yaml(source, stored)
@@ -510,8 +512,8 @@ def test_point_invalid_component_name_reports_own_source_without_publishing(
     entry_roots: tuple[Path, Path],
     operation: str,
 ) -> None:
-    source = entry_roots[0] / "entry/points/a/point.yaml"
-    setup_source = entry_roots[0] / "entry/setup.yaml"
+    source = entry_roots[0] / "entry/points/a/parameters.yaml"
+    setup_source = entry_roots[0] / "entry/parameters.yaml"
     stored = YAML(typ="rt").load(source.read_text())
     stored["components"]["edit"] = stored["components"].pop("Q1")
     write_yaml(source, stored)
@@ -543,7 +545,7 @@ def test_point_invalid_component_name_reports_own_source_without_publishing(
 def test_setup_commit_does_not_validate_or_modify_existing_points(
     working_point: PointView, entry: ResultEntry, entry_roots: tuple[Path, Path]
 ) -> None:
-    point_source = entry_roots[0] / "entry/points/a/point.yaml"
+    point_source = entry_roots[0] / "entry/points/a/parameters.yaml"
     point_source.write_text("invalid: [", encoding="utf-8")
     before = point_source.read_bytes()
     with entry.setup.edit() as draft:
@@ -564,12 +566,12 @@ def test_clone_copies_only_complete_point_and_module_without_reading_setup(
         draft.description = "source environment"
     root = entry_roots[0] / "entry"
     source = root / "points/source"
-    (source / "module_cfg.yaml").write_text(
+    (source / "library.yaml").write_text(
         "format: zcu.module-library\nformat_version: '2.0'\ncomponents: {Q1: {}}\n"
     )
     (source / "data.h5").write_bytes(b"not cloned")
     (source / "image.png").write_bytes(b"not cloned")
-    (root / "setup.yaml").write_text("invalid: [", encoding="utf-8")
+    (root / "parameters.yaml").write_text("invalid: [", encoding="utf-8")
     source_arg = "source" if source_mode == "label" else point
     cloned = entry.new_point("target", clone_from=source_arg)
     assert cloned.Q1.rate == 5000.0
@@ -577,19 +579,19 @@ def test_clone_copies_only_complete_point_and_module_without_reading_setup(
     assert cloned.description == "source environment"
     destination = root / "points/target"
     assert {path.name for path in destination.iterdir() if path.suffix != ".lock"} == {
-        "point.yaml",
-        "module_cfg.yaml",
+        "parameters.yaml",
+        "library.yaml",
     }
-    assert (destination / "module_cfg.yaml").read_bytes() == (
-        source / "module_cfg.yaml"
+    assert (destination / "library.yaml").read_bytes() == (
+        source / "library.yaml"
     ).read_bytes()
-    stored = YAML(typ="safe").load((destination / "point.yaml").read_text())
+    stored = YAML(typ="safe").load((destination / "parameters.yaml").read_text())
     assert stored["components"]["Q1"]["kind"] == "fake/drive/a"
     assert stored["components"]["Q1"]["duration"] == 12.0
-    before = (destination / "point.yaml").read_bytes()
+    before = (destination / "parameters.yaml").read_bytes()
     with pytest.raises(FileExistsError):
         entry.new_point("target", clone_from=source_arg)
-    assert (destination / "point.yaml").read_bytes() == before
+    assert (destination / "parameters.yaml").read_bytes() == before
     assert entry.list_points() == ["source", "target"]
 
 
@@ -645,7 +647,8 @@ def test_clone_copy_failure_cleans_new_directory_and_keeps_source(
     root = entry_roots[0] / "entry"
     source = root / "points/a"
     before = {
-        name: (source / name).read_bytes() for name in ("point.yaml", "module_cfg.yaml")
+        name: (source / name).read_bytes()
+        for name in ("parameters.yaml", "library.yaml")
     }
     copyfile = shutil.copyfile
 
@@ -653,16 +656,16 @@ def test_clone_copy_failure_cleans_new_directory_and_keeps_source(
         source: str | Path, target: str | Path, *, follow_symlinks: bool = True
     ) -> str | Path:
         copied = copyfile(source, target, follow_symlinks=follow_symlinks)
-        if Path(target) == root / "points/b/point.yaml":
+        if Path(target) == root / "points/b/parameters.yaml":
             # The point now exists; make the subsequent library write fail on disk.
-            (root / "points/b/module_cfg.yaml").mkdir()
+            (root / "points/b/library.yaml").mkdir()
         return copied
 
     with monkeypatch.context() as patch:
         patch.setattr(shutil, "copyfile", block_library_destination)
-        with pytest.raises(OSError, match="module_cfg") as failure:
+        with pytest.raises(OSError, match="library") as failure:
             entry.new_point("b", clone_from=working_point)
-        assert failure.value.filename == str(root / "points/b/module_cfg.yaml")
+        assert failure.value.filename == str(root / "points/b/library.yaml")
     assert not (root / "points/b").exists()
     assert entry.list_points() == ["a"]
     assert {name: (source / name).read_bytes() for name in before} == before
@@ -695,7 +698,7 @@ def test_same_leaf_conflict_rejects_whole_point_transaction(
     other = ResultEntry.open(
         "entry", result_root=results, database_root=database
     ).use_point("a")
-    source = results / "entry/points/a/point.yaml"
+    source = results / "entry/points/a/parameters.yaml"
     with ExitStack() as transaction:
         draft = transaction.enter_context(working_point.edit())
         draft.Q1.rate = 5100.0

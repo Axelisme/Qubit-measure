@@ -4,6 +4,7 @@ import json
 import re
 from pathlib import Path
 
+from zcu_tools.resources.document_names import LEGACY_LIBRARY_FILENAME
 from zcu_tools.resources.entry import ArtifactKey, ResultEntry, SaveLayout
 
 from .documents import difference, validate_document_baselines
@@ -197,7 +198,7 @@ def _validate_module_publication(
             or source.parent.parent == source_root
             or source.parent.parent == source_root / "exps"
         )
-        or source.name != "module_cfg.yaml"
+        or source.name != LEGACY_LIBRARY_FILENAME
     ):
         raise MigrationInputError("manifest: invalid point-local module source")
     validate_segment(source.parent.name, "context label")

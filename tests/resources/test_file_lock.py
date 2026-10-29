@@ -28,7 +28,7 @@ def test_runtime_lock_identity_and_private_root(
     root = runtime / "qubit-measure" / "locks"
     assert not root.exists()
 
-    lock = lock_path_for(Path("data/setup.yaml"))
+    lock = lock_path_for(Path("data/parameters.yaml"))
 
     assert lock.parent == root
     assert root.is_dir()
@@ -38,11 +38,11 @@ def test_runtime_lock_identity_and_private_root(
     assert len(lock.stem) == 64
     assert all(character in "0123456789abcdef" for character in lock.stem)
     assert not lock.exists(), "choosing a path must not acquire or create a lock file"
-    assert lock_path_for(data / "setup.yaml") == lock
-    assert lock_path_for(alias / "setup.yaml") == lock
-    assert lock_path_for(data / "../data/setup.yaml") == lock
-    assert lock_path_for(data / "point.yaml") != lock
-    assert lock_path_for(tmp_path / "setup.yaml") != lock
+    assert lock_path_for(data / "parameters.yaml") == lock
+    assert lock_path_for(alias / "parameters.yaml") == lock
+    assert lock_path_for(data / "../data/parameters.yaml") == lock
+    assert lock_path_for(data / "library.yaml") != lock
+    assert lock_path_for(tmp_path / "parameters.yaml") != lock
 
 
 @pytest.mark.parametrize("runtime_state", ["unset", "missing", "file", "empty"])
@@ -63,7 +63,7 @@ def test_unavailable_runtime_uses_per_user_temporary_root(
             runtime.touch()
         monkeypatch.setenv("XDG_RUNTIME_DIR", str(runtime))
 
-    lock = lock_path_for(tmp_path / "setup.yaml")
+    lock = lock_path_for(tmp_path / "parameters.yaml")
 
     root = temporary / f"qubit-measure-{getpass.getuser()}" / "locks"
     assert lock.parent == root

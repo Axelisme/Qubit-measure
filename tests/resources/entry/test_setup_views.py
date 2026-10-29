@@ -24,7 +24,7 @@ def test_newer_minor_preserves_unknown_fields_while_known_values_use_working_uni
     entry_roots: tuple[Path, Path], entry: ResultEntry
 ) -> None:
     results, database = entry_roots
-    setup_path = results / "entry" / "setup.yaml"
+    setup_path = results / "entry" / "parameters.yaml"
     entry.setup.add_component("R1", kind="fake/sensor", rate=6500.0)
     write_forward_setup(setup_path)
     document = YAML(typ="safe").load(setup_path)
@@ -65,7 +65,7 @@ def test_newer_minor_keeps_unknown_fields_outside_the_public_typed_interface(
     entry_roots: tuple[Path, Path], entry: ResultEntry, operation: str, path: str
 ) -> None:
     results, database = entry_roots
-    setup_path = results / "entry" / "setup.yaml"
+    setup_path = results / "entry" / "parameters.yaml"
     entry.setup.add_component("R1", kind="fake/sensor", rate=6500.0)
     write_forward_setup(setup_path)
     reopened = ResultEntry.open("entry", result_root=results, database_root=database)
@@ -111,7 +111,7 @@ def test_newer_minor_still_validates_known_values_and_kinds(
     error: type[Exception],
 ) -> None:
     results, database = entry_roots
-    setup_path = results / "entry" / "setup.yaml"
+    setup_path = results / "entry" / "parameters.yaml"
     entry.setup.add_component("R1", kind="fake/sensor", rate=6500.0)
     write_forward_setup(setup_path)
     document = YAML(typ="safe").load(setup_path)
@@ -167,7 +167,7 @@ def test_dotted_path_typos_preserve_the_draft_and_sources(
 ) -> None:
     results, _database = entry_roots
     entry.setup.add_component("R1", kind="fake/sensor", rate=6500.0)
-    setup_path = results / "entry" / "setup.yaml"
+    setup_path = results / "entry" / "parameters.yaml"
     before = setup_path.read_bytes()
     previous = entry.setup.meta("R1.rate")
     with entry.setup.edit() as draft:
@@ -212,7 +212,7 @@ def test_path_set_and_attribute_edits_use_the_same_shared_draft(
     entry_roots: tuple[Path, Path], entry: ResultEntry
 ) -> None:
     results, database = entry_roots
-    setup_path = results / "entry" / "setup.yaml"
+    setup_path = results / "entry" / "parameters.yaml"
     entry.setup.add_component("R1", kind="fake/sensor", rate=6500.0, wiring={"ch": 1})
     before = setup_path.read_bytes()
     with entry.setup.edit() as draft:
@@ -238,7 +238,7 @@ def test_general_extensions_support_direct_and_shared_draft_writes_without_scali
     entry_roots: tuple[Path, Path], entry: ResultEntry
 ) -> None:
     results, database = entry_roots
-    setup_path = results / "entry" / "setup.yaml"
+    setup_path = results / "entry" / "parameters.yaml"
     assert entry.setup.general.description is None
     entry.setup.general.description = "prepared metadata"
     assert entry.setup.description == "prepared metadata"
@@ -273,7 +273,7 @@ def test_component_draft_edits_publish_together_only_after_context_exit(
     entry_roots: tuple[Path, Path], entry: ResultEntry
 ) -> None:
     results, database = entry_roots
-    setup_path = results / "entry" / "setup.yaml"
+    setup_path = results / "entry" / "parameters.yaml"
     entry.setup.add_component("R1", kind="fake/sensor", rate=6500.0, wiring={"ch": 1})
     entry.setup.add_component("R2", kind="fake/sensor", rate=6600.0)
     before = setup_path.read_bytes()
@@ -314,7 +314,7 @@ def test_reference_chains_survive_reopening_and_can_be_rewired(
     assert reopened.setup.R1.booster == "A1"
     assert reopened.setup.R1.rate == pytest.approx(6500.0)
     assert reopened.setup.I2.level == pytest.approx(-0.4)
-    document = YAML(typ="safe").load(results / "entry" / "setup.yaml")
+    document = YAML(typ="safe").load(results / "entry" / "parameters.yaml")
     assert document["components"]["Q1"]["sense"] == "R2"
     assert document["components"]["Q1"]["source"] == "I2"
     assert document["components"]["R1"]["booster"] == "A1"
@@ -328,7 +328,7 @@ def test_device_current_round_trips_without_using_the_entry_name(
     assert entry.setup.I1.level == pytest.approx(0.25)
     entry.setup.I1.level = -0.4
 
-    document = YAML(typ="safe").load(results / "entry" / "setup.yaml")
+    document = YAML(typ="safe").load(results / "entry" / "parameters.yaml")
     assert document["components"]["I1"]["level"] == pytest.approx(-0.4)
     reopened = ResultEntry.open("entry", result_root=results, database_root=database)
     assert reopened.setup.I1.kind == "fake/supply"
@@ -339,7 +339,7 @@ def test_component_extensions_preserve_arbitrary_yaml_values_without_unit_conver
     entry_roots: tuple[Path, Path], entry: ResultEntry
 ) -> None:
     results, database = entry_roots
-    setup_path = results / "entry" / "setup.yaml"
+    setup_path = results / "entry" / "parameters.yaml"
     entry.setup.add_component("R1", kind="fake/sensor", rate=6500.0, ext={"rate": 12.3})
     extension = field_view(entry.setup.R1.ext)
     assert extension.rate == 12.3
@@ -369,7 +369,7 @@ def test_wiring_channels_reject_explicit_null_without_losing_the_valid_snapshot(
     entry_roots: tuple[Path, Path], entry: ResultEntry, field: str, operation: str
 ) -> None:
     results, database = entry_roots
-    setup_path = results / "entry" / "setup.yaml"
+    setup_path = results / "entry" / "parameters.yaml"
     entry.setup.add_component("R1", kind="fake/sensor", wiring={field: 2})
     if operation == "open":
         write_setup_component(
@@ -401,7 +401,7 @@ def test_wiring_fields_stay_separate_and_use_their_declared_working_units(
     entry_roots: tuple[Path, Path], entry: ResultEntry
 ) -> None:
     results, database = entry_roots
-    setup_path = results / "entry" / "setup.yaml"
+    setup_path = results / "entry" / "parameters.yaml"
     entry.setup.add_component(
         "R1",
         kind="fake/sensor",
@@ -429,7 +429,7 @@ def test_component_names_cannot_shadow_public_view_members(
     entry_roots: tuple[Path, Path], entry: ResultEntry, name: str, operation: str
 ) -> None:
     results, database = entry_roots
-    setup_path = results / "entry" / "setup.yaml"
+    setup_path = results / "entry" / "parameters.yaml"
     if operation == "open":
         write_setup_component(setup_path, name, {"kind": "fake/sensor"})
     before = setup_path.read_bytes()
@@ -450,7 +450,7 @@ def test_absent_optional_physical_fields_use_the_declared_default_without_writes
 ) -> None:
     results, _database = entry_roots
     entry.setup.add_component("R1", kind="fake/sensor")
-    document = YAML(typ="safe").load(results / "entry" / "setup.yaml")
+    document = YAML(typ="safe").load(results / "entry" / "parameters.yaml")
     assert "rate" not in document["components"]["R1"]
     assert entry.setup.R1.rate is None
 
@@ -460,7 +460,7 @@ def test_forbidden_component_fields_preserve_values_sources_and_disk(
     entry_roots: tuple[Path, Path], entry: ResultEntry, operation: str
 ) -> None:
     results, database = entry_roots
-    setup_path = results / "entry" / "setup.yaml"
+    setup_path = results / "entry" / "parameters.yaml"
     entry.setup.add_component("R1", kind="fake/sensor", rate=6500.0)
     if operation == "open":
         write_setup_component(
@@ -497,7 +497,7 @@ def test_unknown_kinds_report_the_source_component_and_a_close_name(
     entry_roots: tuple[Path, Path], entry: ResultEntry, operation: str
 ) -> None:
     results, database = entry_roots
-    setup_path = results / "entry" / "setup.yaml"
+    setup_path = results / "entry" / "parameters.yaml"
     if operation == "open":
         write_setup_component(setup_path, "R1", {"kind": "fake/sensr"})
     before = setup_path.read_bytes()
@@ -525,7 +525,7 @@ def test_component_frequency_round_trips_in_working_units(
     entry_roots: tuple[Path, Path], entry: ResultEntry
 ) -> None:
     results, database = entry_roots
-    setup_path = results / "entry" / "setup.yaml"
+    setup_path = results / "entry" / "parameters.yaml"
     entry.setup.add_component("R1", kind="fake/sensor", rate=6500.0)
     sensor = entry.setup.R1
     assert sensor.rate == 6500.0
@@ -546,7 +546,7 @@ def test_added_component_survives_reopening_with_its_declared_kind(
 
     reopened = ResultEntry.open("entry", result_root=results, database_root=database)
     assert reopened.setup.R1.kind == "fake/sensor"
-    document = YAML(typ="safe").load(results / "entry" / "setup.yaml")
+    document = YAML(typ="safe").load(results / "entry" / "parameters.yaml")
     assert document["components"]["R1"]["ext"]["note"] == "sense line"
 
 

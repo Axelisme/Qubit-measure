@@ -293,11 +293,13 @@ def test_resume_rejects_changed_jpa_assumption_before_writes(
     request = declare_request(request_data, assume_jpa_flux_unit="V")
     write_meta(request, "", {"best_jpa_flux": 0.2})
     migrate(request, metadata_mapping)
-    before = (request.results_root / request.name / "setup.yaml").read_bytes()
+    before = (request.results_root / request.name / "parameters.yaml").read_bytes()
     changed = declare_request(request, assume_jpa_flux_unit="A", resume=True)
     with pytest.raises(MigrationInputError, match="declarations"):
         migrate(changed, metadata_mapping)
-    assert (request.results_root / request.name / "setup.yaml").read_bytes() == before
+    assert (
+        request.results_root / request.name / "parameters.yaml"
+    ).read_bytes() == before
 
 
 @pytest.mark.parametrize("unit", ["mA", "unknown", "", True])

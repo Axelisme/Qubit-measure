@@ -737,7 +737,7 @@ class SetupView:
 
     @contextmanager
     def edit(self) -> Generator[EditView]:
-        """Yield one value/metadata draft and commit only setup.yaml on normal exit."""
+        """Yield one value/metadata draft and commit only parameters.yaml on normal exit."""
         with self._edit_document() as draft:
             yield EditView(draft)
 

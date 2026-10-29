@@ -73,7 +73,7 @@ def test_point_capture_reads_good_leaf_with_bad_sibling(
     rich_entry: ResultEntry, context: ContextService
 ) -> None:
     rich_entry.new_point("partial")
-    path = rich_entry.result_path / "points" / "partial" / "point.yaml"
+    path = rich_entry.result_path / "points" / "partial" / "parameters.yaml"
     raw = YAML(typ="safe").load(path)
     raw["components"]["Q1"]["sense"] = ["bad sibling"]
     with path.open("w", encoding="utf-8") as stream:
@@ -95,13 +95,13 @@ def test_point_availability_accepts_parseable_partial_components_and_isolates_ba
 ) -> None:
     rich_entry.new_point("partial")
     rich_entry.new_point("unparseable")
-    path = rich_entry.result_path / "points" / "partial" / "point.yaml"
+    path = rich_entry.result_path / "points" / "partial" / "parameters.yaml"
     raw = YAML(typ="safe").load(path)
     raw["components"]["Q1"]["sense"] = ["bad sibling"]
     raw["components"]["unused"] = ["bad component"]
     with path.open("w", encoding="utf-8") as stream:
         YAML(typ="rt").dump(raw, stream)
-    broken = rich_entry.result_path / "points" / "unparseable" / "point.yaml"
+    broken = rich_entry.result_path / "points" / "unparseable" / "parameters.yaml"
     broken.write_text("components: [", encoding="utf-8")
     context.install_entry(rich_entry)
 
@@ -414,7 +414,7 @@ def test_install_entry_isolates_bad_point_parameters_without_reading_other_files
     entry = _entry(tmp_path)
     entry.new_point("good", description="usable point")
     entry.new_point("bad", description="retained description")
-    source = entry.result_path / "points/bad/point.yaml"
+    source = entry.result_path / "points/bad/parameters.yaml"
     yaml = YAML(typ="safe")
     document = yaml.load(source.read_text())
     if damage == "schema":
@@ -431,11 +431,9 @@ def test_install_entry_isolates_bad_point_parameters_without_reading_other_files
     for label in ("good", "bad"):
         directory = entry.result_path / "points" / label
         if label == "good":
-            (directory / "module_cfg.yaml").unlink()
+            (directory / "library.yaml").unlink()
         else:
-            (directory / "module_cfg.yaml").write_text(
-                "[invalid YAML", encoding="utf-8"
-            )
+            (directory / "library.yaml").write_text("[invalid YAML", encoding="utf-8")
         (directory / "aliases.yaml").write_text("[invalid YAML", encoding="utf-8")
     before = {
         path: path.read_bytes()
@@ -465,8 +463,8 @@ def test_install_entry_isolates_bad_point_parameters_without_reading_other_files
         if path.is_file()
     } == before
     # Restore only the files selection currently needs, outside the probe.
-    (entry.result_path / "points/good/module_cfg.yaml").write_bytes(
-        (entry.result_path / "module_cfg.yaml").read_bytes()
+    (entry.result_path / "points/good/library.yaml").write_bytes(
+        (entry.result_path / "library.yaml").read_bytes()
     )
     (entry.result_path / "points/good/aliases.yaml").unlink()
     context.use_point(PointUseRequest("good"))

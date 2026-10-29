@@ -656,7 +656,7 @@ def test_initial_window_yaml_formatting_is_skipped_without_rewriting(
 ) -> None:
     assert interrupted_initialization.is_file(), "initialization must be owned"
     entry_path = request_data.results_root / request_data.name
-    paths = [entry_path / "setup.yaml", entry_path / "module_cfg.yaml"]
+    paths = [entry_path / "parameters.yaml", entry_path / "library.yaml"]
     for path in paths:
         raw = YAML(typ="safe").load(path.read_text())
         with path.open("w") as stream:
@@ -689,7 +689,7 @@ def test_initialization_conflicts_leave_all_owned_content_untouched(
     elif change == "source":
         (request.result_root / "chip/qubit/new.bin").write_bytes(b"new source")
     else:
-        path = request.results_root / request.name / "setup.yaml"
+        path = request.results_root / request.name / "parameters.yaml"
         raw = YAML(typ="safe").load(path.read_text())
         if change == "value":
             raw["general"]["description"] = "edited"

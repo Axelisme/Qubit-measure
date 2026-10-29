@@ -15,6 +15,23 @@ from zcu_tools.resources.entry import (
 from tests._filesystem import symlink_or_skip
 
 
+def test_open_legacy_only_entry_names_old_file_and_upgrade_command(
+    entry: ResultEntry, entry_roots: tuple[Path, Path]
+) -> None:
+    canonical = entry.result_path / "parameters.yaml"
+    legacy = entry.result_path / "setup.yaml"
+    if canonical.exists():
+        canonical.rename(legacy)
+    original = legacy.read_bytes()
+    with pytest.raises(
+        ValueError, match=r"setup\.yaml.*upgrade_parameters\.py.*--scope filenames"
+    ):
+        ResultEntry.open(
+            "entry", result_root=entry_roots[0], database_root=entry_roots[1]
+        )
+    assert legacy.read_bytes() == original
+
+
 def test_create_accepts_a_fixed_identity_without_changing_default_creation(
     entry_roots: tuple[Path, Path],
 ) -> None:
@@ -66,8 +83,8 @@ def test_legacy_entry_identity_is_ignored_until_explicit_write(
     point = entry.new_point("working")
     yaml = YAML(typ="safe")
     paths = [
-        entry.result_path / "setup.yaml",
-        entry.result_path / "points/working/point.yaml",
+        entry.result_path / "parameters.yaml",
+        entry.result_path / "points/working/parameters.yaml",
     ]
     for path in paths:
         document = yaml.load(path.read_text(encoding="utf-8"))
@@ -130,7 +147,7 @@ def test_setup_reads_use_memory_even_when_the_file_is_unavailable(
 ) -> None:
     results, _database = entry_roots
     entry.setup.description = "cached annotation"
-    setup_path = results / "entry" / "setup.yaml"
+    setup_path = results / "entry" / "parameters.yaml"
     setup_path.unlink()
 
     assert entry.setup.description == "cached annotation"
@@ -145,7 +162,7 @@ def test_setup_edit_discards_body_failure_and_allows_the_next_transaction(
 ) -> None:
     results, _database = entry_roots
     entry.setup.description = "committed annotation"
-    setup_path = results / "entry" / "setup.yaml"
+    setup_path = results / "entry" / "parameters.yaml"
     before = setup_path.read_bytes()
 
     def abort_transaction() -> None:
@@ -171,7 +188,7 @@ def test_setup_refresh_publishes_replacement_content_ignoring_legacy_identity(
 ) -> None:
     results, _database = entry_roots
     entry.setup.description = "original annotation"
-    setup_path = results / "entry" / "setup.yaml"
+    setup_path = results / "entry" / "parameters.yaml"
     yaml = YAML(typ="safe")
     document = yaml.load(setup_path.read_text(encoding="utf-8"))
     document["general"]["entry_id"] = legacy
@@ -209,7 +226,7 @@ def test_setup_description_uses_one_transaction_for_direct_and_edit_writes(
     assert entry.setup.description == "updated annotation"
     reopened = ResultEntry.open("entry", result_root=results, database_root=database)
     assert reopened.setup.description == "updated annotation"
-    with (results / "entry" / "setup.yaml").open(encoding="utf-8") as stream:
+    with (results / "entry" / "parameters.yaml").open(encoding="utf-8") as stream:
         document = YAML(typ="safe").load(stream)
     assert document["general"]["description"] == "updated annotation"
 
@@ -229,7 +246,7 @@ def test_created_at_is_validated_on_use_without_rewriting_setup(
     invalid: str,
 ) -> None:
     results, database = entry_roots
-    setup_path = results / "entry" / "setup.yaml"
+    setup_path = results / "entry" / "parameters.yaml"
     yaml = YAML(typ="safe")
     with setup_path.open(encoding="utf-8") as stream:
         document = yaml.load(stream)
@@ -394,7 +411,7 @@ def test_open_rejects_missing_setup_with_actual_path(
 ) -> None:
     results, database = entry_roots
     ResultEntry.create("entry", result_root=results, database_root=database)
-    missing_path = results / "entry/setup.yaml"
+    missing_path = results / "entry/parameters.yaml"
     missing_path.unlink()
 
     with pytest.raises(FileNotFoundError) as failure:
@@ -410,7 +427,7 @@ def test_open_accepts_setup_without_point_or_record_directories(
     entry = ResultEntry.create("entry", result_root=results, database_root=database)
     (entry.result_path / "points").rmdir()
     (entry.result_path / "records").rmdir()
-    (entry.result_path / "module_cfg.yaml").unlink()
+    (entry.result_path / "library.yaml").unlink()
     before = read_entry_files(entry.result_path)
 
     opened = ResultEntry.open("entry", result_root=results, database_root=database)
@@ -428,7 +445,7 @@ def test_open_reads_existing_identity_without_rewriting_setup(tmp_path: Path) ->
     entry = ResultEntry.create(
         "plain (label)", result_root=results, database_root=database
     )
-    setup_path = results / "plain (label)" / "setup.yaml"
+    setup_path = results / "plain (label)" / "parameters.yaml"
     before = setup_path.read_bytes()
 
     reopened = ResultEntry.open(
@@ -518,7 +535,7 @@ def test_create_builds_new_format_entry_with_utc_creation_time(
     assert (result_path / "points").is_dir()
     assert entry.database_path == database / "Q12_2D[3]"
     assert not database.exists()
-    with (result_path / "setup.yaml").open(encoding="utf-8") as stream:
+    with (result_path / "parameters.yaml").open(encoding="utf-8") as stream:
         document = YAML(typ="safe").load(stream)
     assert document["format"] == "zcu.parameter-container"
     assert document["format_version"] == "2.0"

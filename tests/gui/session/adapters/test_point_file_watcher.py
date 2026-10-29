@@ -54,7 +54,7 @@ def test_directory_event_installs_new_library_after_absent_selection(
     from zcu_tools.gui.session.adapters import PointFileWatcher
 
     context, bus, entry = selected
-    path = entry.result_path / "points/first/module_cfg.yaml"
+    path = entry.result_path / "points/first/library.yaml"
     path.unlink()
     context.use_point(PointUseRequest("first"))
     captured = context.read_context()

@@ -70,7 +70,7 @@ def test_rpc_preserves_reply_and_sends_one_request(tmp_path: Path) -> None:
                 "files": [
                     {
                         "document": "parameters",
-                        "path": "/entry/points/base/point.yaml",
+                        "path": "/entry/points/base/parameters.yaml",
                         "revision": "a" * 64,
                     }
                 ],
@@ -79,12 +79,12 @@ def test_rpc_preserves_reply_and_sends_one_request(tmp_path: Path) -> None:
         (
             "context.reload",
             {
-                "path": "/entry/points/base/point.yaml",
+                "path": "/entry/points/base/parameters.yaml",
                 "expected_revision": "a" * 64,
             },
             {
                 "document": "parameters",
-                "path": "/entry/points/base/point.yaml",
+                "path": "/entry/points/base/parameters.yaml",
                 "revision": "b" * 64,
             },
         ),

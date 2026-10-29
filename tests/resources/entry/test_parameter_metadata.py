@@ -21,8 +21,8 @@ def container(
     entry = ResultEntry.create("entry", result_root=root, database_root=tmp_path / "db")
     entry.setup.add_component("Q1", kind="fake/drive/a", rate=5000.0)
     if request.param == "setup":
-        return entry, entry.setup, root / "entry/setup.yaml"
-    return entry, entry.new_point("a"), root / "entry/points/a/point.yaml"
+        return entry, entry.setup, root / "entry/parameters.yaml"
+    return entry, entry.new_point("a"), root / "entry/points/a/parameters.yaml"
 
 
 def reopen(tmp_path: Path, view: SetupView | PointView) -> SetupView | PointView:
@@ -231,7 +231,7 @@ def test_same_entry_clone_copies_values_and_metadata_verbatim(
     for path, mapping in metadata.items():
         assert clone.meta(path) == mapping
     stored = YAML(typ="safe").load(
-        (tmp_path / "results/entry/points/clone/point.yaml").read_text()
+        (tmp_path / "results/entry/points/clone/parameters.yaml").read_text()
     )
     assert stored["metadata"] == metadata
     with clone.edit() as draft:
@@ -252,9 +252,9 @@ def test_old_parameter_documents_are_rejected_with_path_and_versions(
     )
     entry.new_point("a")
     source = tmp_path / (
-        "results/entry/setup.yaml"
+        "results/entry/parameters.yaml"
         if document == "setup"
-        else "results/entry/points/a/point.yaml"
+        else "results/entry/points/a/parameters.yaml"
     )
     stored = YAML(typ="safe").load(source.read_text())
     stored["format_version"] = version

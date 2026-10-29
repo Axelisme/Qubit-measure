@@ -26,6 +26,7 @@ from pydantic_core import (
 )
 
 from zcu_tools.format_version import YamlMap, YamlValue
+from zcu_tools.resources.document_names import PARAMETERS_FILENAME
 from zcu_tools.resources.parameter_fields import (
     mapping_shape,
     model_field_schema,
@@ -150,7 +151,7 @@ class _ParameterDocument(BaseModel):
     """Shared typed component boundary for complete parameter documents."""
 
     model_config = ConfigDict(extra="forbid")
-    _source: ClassVar[Path] = Path("setup.yaml")
+    _source: ClassVar[Path] = Path(PARAMETERS_FILENAME)
     _upgrade_target: ClassVar[Path | None] = None
 
     format: str
@@ -712,5 +713,5 @@ class PointDocument(_ParameterDocument):
     Forward-minor preservation applies only to unknown container fields.
     """
 
-    _source: ClassVar[Path] = Path("point.yaml")
+    _source: ClassVar[Path] = Path(PARAMETERS_FILENAME)
     general: PointGeneral

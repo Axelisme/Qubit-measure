@@ -70,7 +70,7 @@ class ComponentLibrary(BaseModel):
 
 
 class ModuleLibraryDocument(BaseModel):
-    """Full working-unit YAML shape for a point's module_cfg.yaml.
+    """Full working-unit YAML shape for a point's library.yaml.
 
     format is zcu.module-library; format_version is the major.minor header
     interpreted by DocumentStore. components maps nonempty dot-free component
@@ -604,7 +604,7 @@ class ModuleLibrary:
         assets: WaveformAssetInfo | None = None,
         allow_absent: bool = False,
     ) -> None:
-        """Open module_cfg.yaml without writes or ledger dependencies.
+        """Open library.yaml without writes or ledger dependencies.
 
         assets is optional for Spec-only operations; Arb materialization needs a
         provider. Invalid disk Specs are skipped with invalid_entries diagnostics.
@@ -620,7 +620,7 @@ class ModuleLibrary:
 
     @property
     def source_path(self) -> Path:
-        """Return the absolute module_cfg.yaml path for external watchers."""
+        """Return the absolute library.yaml path for external watchers."""
         return self._path
 
     @property

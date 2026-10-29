@@ -19,7 +19,7 @@
 
 `register_all` 同時註冊 `parameter_upgrades.PARAMETER_SCHEMA_POLICY`，目前為 `schema_version: 3`。Setup、point 與 entry template 都使用這個整份文件版本，容器版本不變。結構變更的版本宣告、完整舊格式分類與純函式步驟由本 package 擁有。通用執行與 I/O 由 resources 擁有，見 [ADR-0063](../../docs/adr/0063-persistence-ownership.md#component-文件版本與明確升級)。
 
-長期入口是 `scripts/upgrade_parameters.py`。`parameter_upgrade_plan()` 保留完整分類與 v1→v2→v3 純函式步驟。未標版文件只在完整 v1 分類成功後視為 v1。升級 target 與 runtime 都為 3。Runtime 不接受舊版，也不在載入時升級。`flux_upgrade.py` 驗證名稱語法與歷史校準，不做 I/O 或 device catalog 查詢。V2 保留每台儀器的 half／integer／period 與 `flux_source`。V2→v3 才改名為 `flux_dev`，並保留主儀器的 half 分支，扣除其他儀器的 integer／period，不做 mod 1。V1 coil 只保留 signed period，原 half／int 進報告。V2 中間值為 integer 0、half = period／2，不在 v3 恢復其 offset 貢獻。
+長期入口是 `scripts/upgrade_parameters.py`。既有 entry 的舊檔名先用 `--scope filenames` 改成 `parameters.yaml`／`library.yaml`，bytes 不變，再執行預設 components 做內容升級，見[操作順序](../../docs/parameter-upgrades.md#先改檔名再升級內容)。`parameter_upgrade_plan()` 保留完整分類與 v1→v2→v3 純函式步驟。未標版文件只在完整 v1 分類成功後視為 v1。升級 target 與 runtime 都為 3。Runtime 不接受舊版，也不在載入時升級。`flux_upgrade.py` 驗證名稱語法與歷史校準，不做 I/O 或 device catalog 查詢。V2 保留每台儀器的 half／integer／period 與 `flux_source`。V2→v3 才改名為 `flux_dev`，並保留主儀器的 half 分支，扣除其他儀器的 integer／period，不做 mod 1。V1 coil 只保留 signed period，原 half／int 進報告。V2 中間值為 integer 0、half = period／2，不在 v3 恢復其 offset 貢獻。
 
 `storage_mapping` 經中性完整文件 batch callback 重用轉換。
 完整有效且明示來源的 point 校準取代繼承 offset 與同儀器 period，其他 periods 保留。

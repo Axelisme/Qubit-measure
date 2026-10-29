@@ -6,6 +6,7 @@ from datetime import datetime
 from pathlib import Path
 from types import MappingProxyType
 
+from zcu_tools.resources.document_names import PARAMETERS_FILENAME
 from zcu_tools.resources.record_table import JsonlRecordTable
 
 from ._path_segments import validate_path_segment
@@ -146,9 +147,11 @@ def capture_point_storage(
     if (
         len(relative.parts) != 4
         or relative.parts[1] != "points"
-        or relative.parts[3] != "point.yaml"
+        or relative.parts[3] != PARAMETERS_FILENAME
     ):
-        raise ValueError("Point origin must be <entry>/points/<point>/point.yaml")
+        raise ValueError(
+            f"Point origin must be <entry>/points/<point>/{PARAMETERS_FILENAME}"
+        )
     entry_name, _, point, _ = relative.parts
     validate_path_segment(entry_name, field="entry_name")
     validate_path_segment(point, field="point")
