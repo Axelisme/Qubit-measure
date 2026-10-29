@@ -458,7 +458,7 @@ class AnalyzeService(StagedAnalyzeService):
         except BaseException:
             if draft is not None:
                 try:
-                    self._writeback.teardown_draft(draft)
+                    draft.teardown()
                 except Exception:
                     logger.exception("new analyze draft teardown failed")
             raise
