@@ -6,7 +6,7 @@
 
 先準備校準的 π/2 pulse 與單音 pulse readout。Pi/2 Pulse 使用 `$qubit.module.x90`，Readout 使用 `$resonator.module.readout`。缺 slot 時表單提供範本，未校準的必填值保持 Invalid。Mux 不適用。
 
-Readout 必須包含 classifier。Linear 使用 angle 與 threshold，angle 的單位是 radians。Circle 使用 g/e centers 與 radius，缺 radius 時先完成 GE Post。分類座標是未扣 offset 的 normalized ADC IQ。Circle 接受 g 圓內且比 e 更近的 shot，Linear 接受 ground 一側。兩次讀出使用同一個 PulseReadout instance 與設定。
+Readout 必須包含 classifier。Linear 使用 angle 與 threshold，angle 的單位是 radians。Circle 使用 g/e centers 與 radius，缺 radius 時先完成 GE Post。分類座標是未扣 offset 的 normalized ADC IQ。Circle 接受 g 圓內且比 e 更近的 shot，Linear 接受 ground 一側。Herald 與 signal 使用兩個 PulseReadout instance，共用同一 readout 設定與 classifier。
 
 Reset 是選用的前置 reset，缺 slot 時停用。Herald 本身只做 host post-selection，不做 FPGA feedback 或 active reset。模擬讀出仍受 dispersive validity guard 限制，不能直接套用其他讀出線的 gain 界限。
 

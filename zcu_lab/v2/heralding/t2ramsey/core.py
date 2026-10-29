@@ -103,8 +103,9 @@ class HeraldingT2RamseyExp(Experiment[HeraldingT2RamseyResult, HeraldingT2Ramsey
         """Acquire selected mean IQ and pass fraction versus free-evolution delay.
 
         cfg uses us and MHz. Optional reset precedes herald; post-selection
-        itself is not active reset. The same PulseReadout instance emits herald
-        and signal. Missing classifier or circle radius fails before acquire.
+        itself is not active reset. Herald and signal use two PulseReadout
+        instances sharing cfg.readout, including its classifier. Missing
+        classifier or circle radius fails before acquire.
         Rounds are weighted by accepted counts by the acquisition owner.
         Zero-pass IQ is NaN with fraction zero; unmeasured points stay NaN.
         detune ramps the final pulse phase, not the drive frequency.
@@ -135,14 +136,15 @@ class HeraldingT2RamseyExp(Experiment[HeraldingT2RamseyResult, HeraldingT2Ramsey
         with Schedule(cfg, buffer, scope=context.scope) as sched:
             cfg = sched.cfg
             length_param = sweep2param("length", cfg.length)
-            readout = PulseReadout("readout", cfg.readout)
+            herald_readout = PulseReadout("herald", cfg.readout)
+            signal_readout = PulseReadout("signal", cfg.readout)
 
-            # Borrow this readout instance so occurrence addresses emitted reads.
+            # Borrow the herald instance so occurrence addresses its emitted read.
             prog = ModularProgramV2(
                 soccfg,
                 modules=[
                     Reset("reset", cfg.reset),
-                    readout,
+                    herald_readout,
                     Pulse("pi2_pulse1", cfg.pi2_pulse),
                     Delay("t2_delay", delay=length_param),
                     Pulse(
@@ -151,13 +153,13 @@ class HeraldingT2RamseyExp(Experiment[HeraldingT2RamseyResult, HeraldingT2Ramsey
                             phase=cfg.pi2_pulse.phase + 360 * cfg.detune * length_param
                         ),
                     ),
-                    readout,
+                    signal_readout,
                 ],
                 sweep=[("length", cfg.length)],
                 reps=cfg.reps,
                 relax_delay=cfg.relax_delay,
             )
-            herald = readout.herald_spec(prog, occurrence=0)
+            herald = herald_readout.herald_spec(prog, occurrence=0)
             builder = sched.prog_builder(context.soc, soccfg)
             try:
                 builder.run_program(
