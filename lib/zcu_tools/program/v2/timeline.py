@@ -244,7 +244,8 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         """Emit a declared module once, with a fresh timing/tag occurrence.
 
         Omitted timeline selects ordinary default, not reference time. Internal
-        events share its current end; rule-a duration advances that end only.
+        events share its current end; actual output ends plus owner post-delay
+        determine the ceiled end without moving reference time.
         DelayAuto is native reference advance and rejects explicit timelines.
         Undeclared objects raise ValueError; owner lowering failures propagate.
         """
@@ -358,7 +359,9 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
     ) -> None:
         """Add time to a timeline without advancing reference or channel timestamps.
 
-        Scalars and QickParam use us, ceiled to tProc cycles. A string names an
+        Scalars and QickParam use us; the complete end plus t is ceiled to
+        tProc cycles. In an emission, pending actual output ends are included
+        before adding t as the owner post-delay. A string names an
         existing nonnegative cycle register with compiler-known producer bounds.
         Wait-only targets, unknown bounds and possible signed overflow raise
         ValueError during compilation. tag exposes static ends as parameter 't';

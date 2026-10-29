@@ -404,7 +404,7 @@ class PulseReadout(AbsReadout):
     def lower(
         self, prog: TimelineProgramV2, *, timeline: str | None, tag: str | None
     ) -> None:
-        """Configure and trigger the ADC, play the pulse, then advance total_length.
+        """Configure/trigger/play at one origin, then ceil max end plus post_delay.
 
         All times are relative to the selected timeline. tag identifies the
         configuration event; generator pre_delay and ADC trig_offset are retained.
@@ -442,7 +442,7 @@ class PulseReadout(AbsReadout):
             )
         else:
             self.pulse.play(prog, timeline=timeline)
-        prog.advance_module(self.total_length(prog), timeline=timeline)
+        prog.delay_timeline(self.cfg.post_delay, timeline=timeline)
 
     def _run_readout_config_from_regs(
         self, prog: ModularProgramV2, name: str, t: float | QickParam

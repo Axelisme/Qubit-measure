@@ -60,8 +60,8 @@ def _program(
 @pytest.mark.parametrize(
     "delays, events, duration",
     [
-        ((0, 0), [0, 44], 88),
-        ((0.01, 0.02), [4, 62], 116),
+        ((0, 0), [0, 43], 86),
+        ((0.01, 0.02), [4, 60], 112),
     ],
 )
 def test_reused_scalar_pulse_has_independent_tags_and_common_end(
@@ -77,8 +77,8 @@ def test_reused_scalar_pulse_has_independent_tags_and_common_end(
         prog.emit(pulse, timeline=timeline, tag="second")
 
     prog = _program([pulse], body)
-    # pre_delay ceil=5, pulse ceil(ceil(.1*384)/384*430.08)=44,
-    # post_delay ceil=9: rule-a duration 58; playback pre_delay rounds to4.
+    # Native .1-us playback is38 generator clocks =42.56 tProc cycles.
+    # With pre/post: ceil(4+42.56+.02*430.08)=56, without them ceil42.56=43.
     assert [_waves(s) for s in _shots(prog)] == [events] * 2
     assert [s.body_end_cycle - s.start_cycle for s in _shots(prog)] == [duration] * 2
     assert prog.get_time_param("first", "t") * 430.08 == pytest.approx(events[0])
@@ -89,9 +89,12 @@ def test_reused_scalar_pulse_has_independent_tags_and_common_end(
 
 
 @pytest.mark.parametrize("swept", [False, True])
-def test_joined_emissions_preserve_parallel_origins_and_rule_a_end(swept):
+def test_joined_emissions_preserve_parallel_origins_and_event_end(swept):
     a = _pulse("a")
-    b = _pulse("b", ch=1, length=QickSweep1D("scan", 0.2, 0.4) if swept else 0.2)
+    # 25 generator clocks per step is exactly28 tProc cycles.
+    b = _pulse(
+        "b", ch=1, length=QickSweep1D("scan", 77 / 384, 127 / 384) if swept else 0.2
+    )
     tail = _pulse("tail", ch=2)
 
     def initialize(prog):
@@ -106,14 +109,14 @@ def test_joined_emissions_preserve_parallel_origins_and_rule_a_end(swept):
         prog.emit(tail)
 
     shots = _shots(_program([a, b, tail], body, initialize))
-    expected = [[0, 0, 87], [0, 0, 130], [0, 0, 173]] if swept else [[0, 0, 87]]
+    expected = [[0, 0, 87], [0, 0, 115], [0, 0, 143]] if swept else [[0, 0, 87]]
     assert [_waves(s) for s in shots] == expected * 2
-    ends = [131, 174, 217] if swept else [131]
+    ends = [130, 158, 186] if swept else [130]
     assert [s.body_end_cycle - s.start_cycle for s in shots] == ends * 2
     assert [s.end_cycle - s.start_cycle for s in shots] == ends * 2
 
 
-def test_repeat_emissions_keep_independent_tags_and_exact_rule_a_spacing():
+def test_repeat_emissions_keep_independent_tags_and_actual_end_spacing():
     pulse = _pulse()
 
     def body(prog):
@@ -124,9 +127,9 @@ def test_repeat_emissions_keep_independent_tags_and_exact_rule_a_spacing():
 
     prog = _program([pulse], body)
     shots = _shots(prog)
-    assert [_waves(s) for s in shots] == [[0, 44, 88, 132]] * 2
-    assert [s.body_end_cycle - s.start_cycle for s in shots] == [176] * 2
-    assert [s.end_cycle - s.start_cycle for s in shots] == [176] * 2
+    assert [_waves(s) for s in shots] == [[0, 43, 86, 129]] * 2
+    assert [s.body_end_cycle - s.start_cycle for s in shots] == [172] * 2
+    assert [s.end_cycle - s.start_cycle for s in shots] == [172] * 2
     assert prog.get_time_param("inside", "t") * 430.08 == pytest.approx(0)
 
 
@@ -141,8 +144,8 @@ def test_default_emit_only_moves_end_until_sync(sync):
         prog.pulse(0, pulse.pulse_id)
 
     shots = _shots(_program([pulse], body))
-    assert [_waves(s) for s in shots] == [[0, 44 if sync else 0]] * 2
-    assert [s.body_end_cycle - s.start_cycle for s in shots] == [44] * 2
+    assert [_waves(s) for s in shots] == [[0, 43 if sync else 0]] * 2
+    assert [s.body_end_cycle - s.start_cycle for s in shots] == [43] * 2
 
 
 def _readout(**kwargs):
@@ -167,7 +170,7 @@ def _readout(**kwargs):
 @pytest.mark.parametrize("delay_type", [Delay, SoftDelay])
 @pytest.mark.parametrize("swept", [False, True])
 @pytest.mark.parametrize("timeline", [None, "drive"])
-def test_t1_including_readout_uses_rule_a_at_each_scan_point(
+def test_t1_including_readout_uses_event_end_at_each_scan_point(
     delay_type, swept, timeline
 ):
     delay = QickSweep1D("wait", 0.2, 0.8) if swept else 0.2
@@ -184,11 +187,10 @@ def test_t1_including_readout_uses_rule_a_at_each_scan_point(
             prog.emit(module, timeline=timeline)
 
     shots = _shots(_program(modules, body, initialize))
-    # Drive rule-a=44; wait start=87, span=259 truncated to86 per step.
-    # Readout config at 131+86*k, trigger at +43, playback at +22.
-    # ADC ceil(.4*307.2)=123, trigger ceil(.1*430.08)=44:
-    # readout rule-a ceil(44+123/307.2*430.08)=217.
-    offsets = [131, 217, 303, 389] if swept else [131]
+    # Drive ceil(38/384*430.08)=43; wait starts87, step86.
+    # Readout config at130+86*k, trigger+43, playback+22.
+    # ADC end43+123/307.2*430.08=215.2; plus post8.6016 =>ceil224.
+    offsets = [130, 216, 302, 388] if swept else [130]
     assert [_waves(s) for s in shots] == [
         [0, offset, offset + 22] for offset in offsets
     ] * 2
@@ -197,10 +199,10 @@ def test_t1_including_readout_uses_rule_a_at_each_scan_point(
         for s in shots
     ] == [[(offset + 43, 1), (offset + 53, 0)] for offset in offsets] * 2
     assert [s.body_end_cycle - s.start_cycle for s in shots] == [
-        offset + 217 for offset in offsets
+        offset + 224 for offset in offsets
     ] * 2
     assert [s.end_cycle - s.start_cycle for s in shots] == [
-        offset + 217 for offset in offsets
+        offset + 224 for offset in offsets
     ] * 2
 
 
@@ -236,9 +238,9 @@ def test_wrong_pulse_time_is_detected_by_independent_timing_expectation():
 @pytest.mark.parametrize(
     "kind, reset_waves, length",
     [
-        ("pulse", [9], 101),
-        ("two_pulse", [9, 9], 101),
-        ("bath", [9, 9, 110], 138),
+        ("pulse", [9], 100),
+        ("two_pulse", [9, 9], 100),
+        ("bath", [9, 9, 109], 135),
     ],
 )
 @pytest.mark.parametrize("timeline", [None, "reset"])
@@ -273,13 +275,13 @@ def test_reset_composite_keeps_internal_overlap(kind, reset_waves, length, timel
         prog.emit(readout, timeline=timeline)
 
     shots = _shots(_program([reset, readout], body))
-    # ceil pre/post=9/5; .2-us pulse ->77 generator ticks ->86.24 tProc,
-    # .05-us pi/2 ->20 generator ticks ->22.4 tProc: durations101 and37.
+    # Pulse ceil(9+77*1.12+.01*430.08)=100.
+    # Pi/2 ceil(9+19*1.12+.01*430.08)=35, starts at100+9.
     assert [_waves(s) for s in shots] == [
         [10 + t for t in reset_waves] + [length + 10, length + 32]
     ] * 2
-    assert [s.body_end_cycle - s.start_cycle for s in shots] == [length + 227] * 2
-    assert [s.end_cycle - s.start_cycle for s in shots] == [length + 227] * 2
+    assert [s.body_end_cycle - s.start_cycle for s in shots] == [length + 234] * 2
+    assert [s.end_cycle - s.start_cycle for s in shots] == [length + 234] * 2
     assert [
         [e.cycle - s.start_cycle for e in s.events if e.kind == "data"] for s in shots
     ] == [[length + 53, length + 63]] * 2
@@ -344,7 +346,7 @@ def test_delay_auto_owner_is_native_reference_advance_not_timeline_duration(
     shots = _shots(_program([pulse, auto], body, initialize))
     assert [_waves(s) for s in shots] == [[0, t, t] for t in expected] * 2
     assert [s.body_end_cycle - s.start_cycle for s in shots] == [
-        t + 44 for t in expected
+        t + 43 for t in expected
     ] * 2
 
 
@@ -469,7 +471,7 @@ def test_runtime_words_bind_requested_registers_to_output_fields(words, timeline
             )
             assert (output["DST"], output["SRC"]) == (str(port), "r_wave")
     assert [_waves(s) for s in _shots(prog)] == [[0, 22]] * 2
-    assert [s.body_end_cycle - s.start_cycle for s in _shots(prog)] == [217] * 2
+    assert [s.body_end_cycle - s.start_cycle for s in _shots(prog)] == [224] * 2
 
 
 @pytest.mark.parametrize("timeline", ["default", "other"])

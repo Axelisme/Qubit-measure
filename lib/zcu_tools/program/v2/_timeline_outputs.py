@@ -6,7 +6,14 @@ from qick.asm_v2 import ConfigReadout, Pulse, QickParam, Trigger
 
 from ._timeline_guard import PulseGuard as _PulseGuard
 from ._timeline_guard import bounds as _bounds
-from ._timeline_runtime import RuntimeEnd, Time, align_end, time_bounds
+from ._timeline_runtime import (
+    EventEnd,
+    RuntimeEnd,
+    Time,
+    align_end,
+    placement_time,
+    time_bounds,
+)
 from ._timeline_state import TimelineBook
 
 
@@ -64,6 +71,7 @@ class TimelinePlacedPulse(TimelineObservedPulse):
         super().__init__(book, source)
         self.timeline = timeline
         self.relative_t: float | QickParam | Literal["auto"] = source.t
+        self.event_end = EventEnd(0.0, 0.0)
 
     def preprocess(self, prog) -> None:
         end = self.book.end(self.timeline, placement=True)
@@ -92,6 +100,12 @@ class TimelinePlacedPulse(TimelineObservedPulse):
             finish = self.book.math.add(
                 start, align_end(prog, prog.pulses[self.name].get_length())
             )
+            offset = (
+                0.0
+                if self.relative_t == "auto"
+                else placement_time(prog, self.relative_t)
+            )
+            self.event_end = EventEnd(end, offset + prog.pulses[self.name].get_length())
             self.book.set_end(self.timeline, finish)
             self.book.runtime_gens[self.ch] = finish
             self.record(prog, time_bounds(prog, start)[1], time_bounds(prog, start)[0])
@@ -107,10 +121,9 @@ class TimelinePlacedPulse(TimelineObservedPulse):
                 "start >= previous end at every sweep point; use delay_timeline"
             )
         self.record(prog, t, actual_t)
-        self.book.set_end(
-            self.timeline,
-            align_end(prog, actual_t + prog.pulses[self.name].get_length()),
-        )
+        actual_end = actual_t + prog.pulses[self.name].get_length()
+        self.event_end = EventEnd(0.0, actual_end)
+        self.book.set_end(self.timeline, align_end(prog, actual_end))
 
 
 class TimelinePlacedConfig(ConfigReadout):
@@ -120,11 +133,13 @@ class TimelinePlacedConfig(ConfigReadout):
         self.timeline = timeline
         self.source = source
         self.relative_t: float | QickParam = source.t
+        self.event_end = EventEnd(0.0, 0.0)
 
     def preprocess(self, prog) -> None:
         origin = self.book.end(self.timeline, placement=True)
         if isinstance(origin, RuntimeEnd):
             start = self.book.math.add(origin, self.relative_t)
+            self.event_end = EventEnd(origin, placement_time(prog, self.relative_t))
             self.source.t = time_bounds(prog, start)[1]
             self.source.preprocess(prog)
             self.source.t_regs["t"] = start.register
@@ -132,6 +147,7 @@ class TimelinePlacedConfig(ConfigReadout):
             return
         self.source.t = origin + self.relative_t
         self.source.preprocess(prog)
+        self.event_end = EventEnd(0.0, self.source.get_time_param("t"))
         self.book.set_end(
             self.timeline, self.book.math.maximum(0.0, self.source.get_time_param("t"))
         )
@@ -160,6 +176,7 @@ class TimelinePlacedTrigger(Trigger):
         self.book = book
         self.timeline = timeline
         self.relative_t: float | QickParam = source.t
+        self.event_end = EventEnd(0.0, 0.0)
 
     def preprocess(self, prog) -> None:
         origin = self.book.end(self.timeline, placement=True)
@@ -168,23 +185,32 @@ class TimelinePlacedTrigger(Trigger):
             self.t = time_bounds(prog, start)[1]
             super().preprocess(prog)
             self.t_regs["t"] = start.register
-            end = self.book.math.add(start, self.get_time_param("width"))
+            duration = self.get_time_param("width")
+            end = self.book.math.add(start, duration)
             for ch in self.ros:
                 length = (
                     prog.ro_chs[ch]["length"] / prog.soccfg["readouts"][ch]["f_output"]
                 )
+                duration = self.book.math.maximum(duration, length)
                 ro_end = self.book.math.add(start, align_end(prog, length))
                 self.book.runtime_ros[ch] = ro_end
                 end = self.book.math.maximum(end, ro_end)
+            offset = placement_time(prog, self.relative_t)
+            self.event_end = EventEnd(
+                origin,
+                self.book.math.add(duration, offset)
+                if isinstance(duration, RuntimeEnd)
+                else offset + duration,
+            )
             self.book.set_end(self.timeline, end)
             return
         self.t = origin + self.relative_t
         super().preprocess(prog)
-        end: Time = align_end(
-            prog, self.get_time_param("t") + self.get_time_param("width")
-        )
+        end: Time = self.get_time_param("t") + self.get_time_param("width")
         for ch in self.ros:
-            end = self.book.math.maximum(
-                end, align_end(prog, prog.get_timestamp(ro_ch=ch))
-            )
-        self.book.set_end(self.timeline, end)
+            end = self.book.math.maximum(end, prog.get_timestamp(ro_ch=ch))
+        self.event_end = EventEnd(0.0, end)
+        self.book.set_end(
+            self.timeline,
+            end if isinstance(end, RuntimeEnd) else align_end(prog, end),
+        )
