@@ -130,6 +130,17 @@ class MuxReadoutCfg(CoreMuxReadoutCfg, AbsReadoutCfg):
 ReadoutCfg: TypeAlias = PulseReadoutCfg | MuxReadoutCfg
 
 
+def _classifier_entries(
+    cfg: ReadoutCfg,
+) -> list[tuple[int, ReadoutClassifier | None]]:
+    """List ADC numbers and borrowed classifiers in pulse/tone order."""
+    return (
+        [(cfg.ro_ch, cfg.classifier)]
+        if isinstance(cfg, PulseReadoutCfg)
+        else [(tone.ro_ch, tone.classifier) for tone in cfg.tones]
+    )
+
+
 def circle_classifier(cfg: ReadoutCfg, *, ro_ch: int) -> CircleClassifier:
     """Return detached circle calibration for the specified ADC channel number.
 
@@ -139,12 +150,7 @@ def circle_classifier(cfg: ReadoutCfg, *, ro_ch: int) -> CircleClassifier:
     Raise ValueError for an unknown ADC, missing classifier, or linear mode
     (which stores no GE centers). No hardware or program registry is read.
     """
-    entries = (
-        [(cfg.ro_ch, cfg.classifier)]
-        if isinstance(cfg, PulseReadoutCfg)
-        else [(tone.ro_ch, tone.classifier) for tone in cfg.tones]
-    )
-    for ch, classifier in entries:
+    for ch, classifier in _classifier_entries(cfg):
         if ch == ro_ch:
             if classifier is None:
                 raise ValueError(f"ADC {ch}: classifier missing; run singleshot GE")
@@ -166,13 +172,8 @@ def classification_parameters(
     missing radius requires GE Post analysis. require_other rejects linear
     because it has only g/e states. No program registry or hardware is read.
     """
-    entries = (
-        [(cfg.ro_ch, cfg.classifier)]
-        if isinstance(cfg, PulseReadoutCfg)
-        else [(tone.ro_ch, tone.classifier) for tone in cfg.tones]
-    )
     result: dict[int, ReadoutClassifier] = {}
-    for ch, classifier in entries:
+    for ch, classifier in _classifier_entries(cfg):
         if classifier is None:
             raise ValueError(f"ADC {ch}: classifier missing; run singleshot GE")
         if isinstance(classifier, CircleClassifier):
