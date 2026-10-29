@@ -23,6 +23,7 @@ from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.experiment.v2.utils.snr import snr_checker
 from zcu_tools.plotting.plots import Plots
+from zcu_tools.program.herald import herald_ratio, heralded
 from zcu_tools.program.v2 import (
     Delay,
     ModularProgramV2,
@@ -159,6 +160,15 @@ class HeraldingT2EchoExp(Experiment[HeraldingT2EchoResult, HeraldingT2EchoCfg]):
             on_update=lambda data: viewer.update(lengths, t2echo_signal2real(data)),
         )
         fractions = np.full(len(lengths), np.nan, dtype=np.float64)
+
+        def processed_to_signal(
+            raw: list[NDArray[np.float64]],
+        ) -> NDArray[np.complex128]:
+            """Store pass fractions and return conditional IQ on this sweep's grid."""
+            iq, fraction = herald_ratio(raw[0])
+            fractions[:] = fraction
+            return iq[0, ..., 0] + 1j * iq[0, ..., 1]
+
         with Schedule(cfg, buffer, scope=context.scope) as sched:
             cfg = sched.cfg
             length_param = sweep2param("length", cfg.length)
@@ -189,23 +199,18 @@ class HeraldingT2EchoExp(Experiment[HeraldingT2EchoResult, HeraldingT2EchoCfg]):
             )
             herald = herald_readout.herald_spec(prog, occurrence=0)
             builder = sched.prog_builder(context.soc, soccfg)
-            try:
-                builder.run_program(
-                    prog,
-                    rounds=cfg.rounds,
-                    herald=[herald],
-                    options=AcquireOptions(
-                        retry=cfg.acquire_retry,
-                        stop_condition=snr_checker(
-                            buffer.at(), cfg.earlystop_snr, t2echo_signal2real
-                        ),
+            builder.run_program_processed(
+                prog,
+                rounds=cfg.rounds,
+                processors={herald.ro_ch: heralded(herald, np.copy)},
+                processed2signal_fn=processed_to_signal,
+                options=AcquireOptions(
+                    retry=cfg.acquire_retry,
+                    stop_condition=snr_checker(
+                        buffer.at(), cfg.earlystop_snr, t2echo_signal2real
                     ),
-                )
-            finally:
-                # Cancellation retains the last completed-round summary, if any.
-                passed = prog.get_herald_pass_fraction()
-                if passed is not None:
-                    fractions[:] = passed[herald.ro_ch]
+                ),
+            )
 
         return HeraldingT2EchoResult(lengths, buffer.array, fractions, true_detune)
 

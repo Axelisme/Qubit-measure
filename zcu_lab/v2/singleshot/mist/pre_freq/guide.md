@@ -22,12 +22,24 @@ Relax delay starts at five times the captured T1. Missing or null T1 uses a 30 u
 2. Check preparation, pi, MIST probe and readout settings. Enable the pi pulse only when it is part of the intended sequence.
 3. Set the preparation-frequency span and shot count. Reset rebuilds defaults from a fresh source snapshot.
 4. Preview the configuration, then Run. Analyze shows the corrected populations when a confusion matrix is available.
-5. Save the run and figures. Saved data retain the rounded preparation-frequency axis and G/E fractions shaped Nfreq by 2. Other remains derived.
+5. Save the run and figures. Saved data retain the rounded preparation-frequency axis and measured G/E/Other fractions shaped Nfreq by 3.
 
 Analyze reads the confusion matrix from that result's saved readout cfg. Later alias, library or form edits do not change its correction.
 
 Load displays native populations offline and keeps the current form unchanged. Correction uses only the file's saved readout classifier. Missing historical cfg, classifier or matrix skips correction. No live point supplies a fallback.
 
 The operator chooses pulse conditions and interprets the population curves manually; calibration parameters stay unchanged.
+
+## Saved populations
+
+Save keeps `signals` shaped `(Nfreq, 3)` in `[g,e,other]` order, with
+`population_states=[0,1,2]`. Other counts shots outside the accepted circles
+or tied between them. It is not a calibrated leakage population.
+Sweep coordinates and units are unchanged. Cfg schema remains 3.0.
+
+Old two-column G/E files are not supported by the three-state analysis.
+Load rejects files with the former `GE Population` axis label. If a file loads
+with two columns, Analyze rejects it before correction or fitting. Acquire a
+new run. Load and Analyze do not reconstruct Other from G/E.
 
 **Last updated:** 2026-10-29

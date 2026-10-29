@@ -28,4 +28,16 @@ This is a diagnostic only. Read the population curves from the plot; calibration
 
 Run singleshot/ge Primary and Post, then Apply to the selected readout module. A frequency span around the resonator line captures the MIST response; use a large enough shot count (reps) for clean populations.
 
+## Saved populations
+
+Save keeps `signals` shaped `(Nfreq, 3)` in `[g,e,other]` order, with
+`population_states=[0,1,2]`. Other counts shots outside the accepted circles
+or tied between them. It is not a calibrated leakage population.
+Sweep coordinates and units are unchanged. Cfg schema remains 3.0.
+
+Old two-column G/E files are not supported by the three-state analysis.
+Load rejects files with the former `GE Population` axis label. If a file loads
+with two columns, Analyze rejects it before correction or fitting. Acquire a
+new run. Load and Analyze do not reconstruct Other from G/E.
+
 **Last updated:** 2026-10-29

@@ -1,6 +1,6 @@
 # `zcu_tools.program` — QICK integration
 
-**Last updated:** 2026-10-29，herald instance 與跨 acquire 分工
+**Last updated:** 2026-10-30，native IQ 與 processor-only herald 契約
 
 **讀者：** framework-dev。QICK 整合、程式建構與 acquisition 依賴速查。
 
@@ -10,30 +10,58 @@
 
 `acquisition.py` 擴充 QICK 的 `AcquireMixin`，負責 acquisition 的型別封裝、追蹤、提前停止與 round hook。`v2/base.py` 定義 v2 program 基底 `MyProgramV2`；它使用這些 acquisition mixin，但負責的是 v2 program 結構，兩者不是同一種 base。`v2/timeline.py` 的 `TimelineProgramV2` 繼承 `MyProgramV2`，不經 `ModularProgramV2`。它保留原生作者 hooks，提供可選的具名 timeline，所有指令共用既有 IR 管線與 acquire 擴充。Builder 與模擬 frontend 尚未切換。它與 `ModularProgramV2` 共用 dmem 配置及 readout route 保護。
 
-## Explicit readout classification
+## Native acquisition
 
-`acquire(soc, classify=...)` accepts a `Mapping[int, ReadoutClassifier]`.
-Keys are ADC channel numbers, not declaration positions, and must exactly match
-the declared ADCs. Missing or extra keys fail before transport acquisition.
-Omitting classify retains ordinary IQ acquisition. The old
-`g_center/e_center/ge_radius` acquisition keywords are removed.
+`acquire(soc, rounds=1, ...)` returns physical IQ in ADC declaration order,
+with final axis `[I,Q]`. It retains QICK's `remove_offset` policy and native
+`threshold`/`angle` projection. Projection returns excited fraction in I and
+zero in Q, using QICK's angle sign, offset and equality rules.
+`v2.modules.readout.qick_threshold_options(cfg)` converts stored linear/circle
+calibration to native projection options. The caller opts in and supplies all
+declared ADCs in declaration order. Missing, centroid3 or conflicting
+calibration returns empty options for ordinary IQ.
 
-Authors call `program.v2.modules.readout.classification_parameters(cfg)` on
-their readout cfg and pass the result explicitly. Acquisition does not discover
-calibration through a program registry. Circle requires a Post radius and returns
-ground/excited populations; Other is `1-g-e`. Linear returns two populations,
-with excited defined by `real(IQ * exp(1j*angle)) > threshold`; equality is ground.
-Centroid3 selects the nearest g/e/f center per shot, with ties in that order.
-Its two columns are [g,e] and f is `1-g-e`; circle's third class remains other.
-Angle is radians, opposite QICK's projection-angle sign. All modes normalize
-raw sums by each ADC's rounded integration length without subtracting IQ offset,
-regardless of `remove_offset`. Simulation materializes raw shots for this same
-classification pipeline instead of returning compact IQ means.
-`centroid3_classifier(cfg, ro_ch=...)` returns a detached calibration from native
-Pulse or Mux cfg, keyed by ADC number. Missing calibration, wrong type and unknown
-ADC raise ValueError. It never reads the live library.
-`classification_parameters(cfg, require_other=True)` rejects linear and centroid3 and reports
-missing circle radius with a GE Post instruction.
+Host classification uses `acquire_processed`, not an acquire option.
+`centroid3_classifier(cfg, ro_ch=...)` returns detached g/e/f calibration
+from native Pulse or Mux cfg by ADC number. Missing calibration, wrong type and
+unknown ADC raise ValueError. It never reads the live library.
+
+## Processed acquisition
+
+`acquire_processed(soc, processors=..., rounds=1, step_rounds=False, **qick_options)`
+accepts exactly one `acquisition.ShotProcessor` callable per declared ADC number.
+Each completed round supplies all normalized float64 `(shots, reads, 2)` IQ,
+including any herald read, in C-order shot layout. Coordinates are raw sums
+divided by rounded integration length, without offset subtraction or rotation.
+A processor returns float64 `(shots, out_reads, N)` with positive output axes.
+The output dimensions stay fixed per ADC through the acquire but may differ
+between ADCs. Processors must not mutate their input.
+Invalid mappings or payloads raise `ValueError`.
+
+Results follow ADC declaration order and have shape `(out_reads, *point_dims, N)`.
+The pipeline averages repetitions, then software rounds equally. Round hooks
+receive the cumulative processed result. Cancellation retains completed rounds
+and discards an incomplete round; stopping before any completed round raises
+`StoppedPartialAcquireError`. Hardware stepped acquisition keeps the existing
+`finish_round`/`prepare_round`/`finish_acquire` ownership. `get_raw()` retains QICK
+integer sums. Explicit `threshold`, `angle`, or `herald` options raise `ValueError`
+before transport; ordinary `acquire` retains native QICK projection.
+
+`herald.heralded(spec, inner)` removes the specified herald read before passing
+signal reads to `inner`. It zeros rejected payloads, including rejected NaNs,
+and appends the same acceptance component to every output read.
+After averaging, `herald.herald_ratio(result)` returns conditional payloads and
+per-point pass fractions. Zero acceptance gives NaN without divide warnings.
+Apply the ratio to final and round-hook results: the numerator alone is the
+attenuated mean, not the accepted-shot mean. Neither `acquire` nor
+`acquire_processed` accepts an integrated herald option.
+
+`v2.modules.readout.classification_processors(cfg)` creates detached ADC-keyed
+processors with g/e/other, g/e or g/e/f columns for circle, linear or centroid3.
+Circle's third class is other; centroid3's third class is f. `require_other=True`
+accepts only circle, and missing calibration or circle radius raises ValueError.
+The runtime builder's processed methods require `processed2signal_fn` for both
+round updates and final results. They never use a default IQ converter.
 
 ## Shot time
 
@@ -58,7 +86,7 @@ The control-flow restriction includes non-herald reads because QICK's static
 trigger counts cannot reliably determine dynamic read indices. Control flow on
 other ADCs remains supported. Circle calibration requires the GE Post radius.
 The method returns a classifier snapshot and does not register a herald.
-Acquisition receives the spec explicitly and admits at most one herald per ADC.
+The caller wraps that ADC's signal processor with `heralded(spec, inner)`.
 `program.herald.herald_ground_mask` is the shared ground
 acceptance helper. It takes complex IQ divided by ADC integration length, without
 subtracting offsets. Circle uses the strict g circle and nearest-center region;
@@ -67,60 +95,52 @@ HeraldSpec and herald_ground_mask reject centroid3 before acquisition.
 
 ## Herald post-selection
 
-After compilation, pass the declaration explicitly:
+After compilation, compose the processor explicitly:
 
 ```python
+import numpy as np
+from zcu_tools.program.herald import heralded, herald_ratio
+
 spec = readout.herald_spec(prog, occurrence=0)
-data = prog.acquire(soc, herald=[spec], rounds=2, progress=False)
-fractions = prog.get_herald_pass_fraction()
-# After a completed round, fractions[spec.ro_ch] has the non-reps sweep shape.
+data = prog.acquire_processed(
+    soc, processors={spec.ro_ch: heralded(spec, np.copy)},
+    rounds=2, progress=False,
+)
+conditional_iq, pass_fraction = herald_ratio(data[0])
 ```
 
-`herald` accepts a sequence of `HeraldSpec`. Omission or an empty sequence keeps
-ordinary acquisition. Each ADC uses its own herald mask. ADCs without a herald
-keep all their shots and reads. The selected read must precede another read on
-that ADC. Duplicate ADC specs, undeclared ADCs, invalid read indices and a
-`reads_per_shot` mismatch raise `ValueError` before transport acquisition.
-`trackers` with herald and `acquire_decimated(..., herald=[...])` also raise
-`ValueError`.
+This single-ADC example keeps signal IQ. Each ADC must have a processor;
+ADCs without a herald can use their ordinary signal processor.
+`heralded(spec: HeraldSpec, inner: ShotProcessor) -> ShotProcessor` accepts
+all normalized reads and calls inner with the selected herald read removed.
+The result is `[weighted values..., acc]`, where acc is 0 or 1 per shot.
+`herald_ratio(result) -> (conditional_values, pass_fraction)` accepts a float64
+ndarray and returns two float64 ndarrays. It divides the averaged numerator by
+acceptance. The conditional shape is
+`(out_reads, *point_dims, N)`; fraction has shape `point_dims`.
+An unswept fraction is a scalar array. Zero acceptance returns NaN signal
+without a divide warning, with fraction zero.
 
-Acquisition classifies the herald in raw sums divided by ADC sample length,
-without subtracting IQ offset. It removes that read, selects accepted shots and
-then processes the remaining reads. Ordinary IQ retains the `remove_offset`
-policy. With typed `classify`, only accepted signal shots enter classification.
-The result ends in g/e populations, and typed classification takes precedence
-over QICK `threshold/angle`. Without typed classification, `threshold/angle`
-uses QICK's projection sign, radians, offset and equality rules on accepted
-shots. It returns excited fraction in I and zero in Q. Scalar and per-ADC-list
-projection options retain QICK declaration-order semantics.
+For K completed equal-size rounds of R shots, the framework averages both
+components over K R attempts. Their ratio is
+`sum(value * acc) / sum(acc)`, so rounds with different accepted counts receive
+the correct weight. Apply the same ratio to cumulative round-hook arrays.
+The builder converter writes the returned fraction to the experiment-owned
+`pass_fraction` slot and returns conditional signal values. A stop before any
+completed round leaves the prefilled NaNs unchanged.
 
-The return list stays in ADC declaration order. Each float64 array has shape
-`(remaining_reads, *point_dims, 2)`, with only herald reads removed. Within one
-acquire, acquisition adds accepted signal sums and counts across completed
-rounds, then divides by accepted count. It does not average round means equally.
-Zero-pass points have NaN in both components and acceptance fraction zero. Round hooks receive this
-same weighted running result.
+The five heralding Results keep their `signals` and per-point `pass_fraction`
+variables, and their MCP recipe calls do not change. Host scans own combination
+across separate acquires, weighting only delivered results by accepted counts.
+Program keeps no integrated mask, count buffer or pass-fraction accessor.
+Simulation materializes each processed round's retained shots through the
+same processor path as hardware, without another backend call or herald mode.
+`get_raw()` retains integer transport sums, including the herald read.
 
-`get_herald_pass_fraction()` returns a detached dictionary keyed by herald ADC
-numbers. Each float64 array contains accepted/attempted shots on the non-reps
-point grid, without a read axis. An unswept program returns scalar arrays.
-The accessor returns `None` before any herald round completes, after an ordinary
-integrated or decimated acquire, or after cancellation before the first completed
-round. A new admitted acquire clears previous fractions. Cancellation during a
-round discards that round and retains completed-round data and fractions.
-Finalization raises `StoppedPartialAcquireError` when no round completed.
-A host scan that combines separate acquires owns that combination and weights
-only delivered results by their accepted counts. If a builder skips acquire
-because of a stop request, the cached program has no new acquisition summary;
-its previous fractions must not be counted as another completed acquisition.
-
-`HeraldAcquireMixin` owns only grid-sized sums/counts. It precedes
-`RoundHookMixin` to replace the equal-round incremental summary. Existing tracker,
-classification and Stop mixin order stays unchanged. Hardware and simulation use
-the same shot-processing and weighted-summary methods. Herald forces simulation
-to materialize its last-round `RawShots`, even without classification or threshold.
-No new per-shot persistence or raw history is added. `get_raw()` retains the
-existing transport contract, including the herald read.
+`acquire_decimated` keeps its signature, IQ trace layout, lookback, cancellation
+and failure behavior. Nonempty `herald` raises ValueError because post-selection
+requires integrated shots; omission or an empty sequence keeps ordinary
+decimated acquisition.
 
 ## 主要依賴面
 
@@ -130,7 +150,7 @@ existing transport contract, including the herald read.
   - 型別友善封裝（`TypedAcquireMixin`）：補強 `acquire()` / `acquire_decimated()` / `get_raw()` 等回傳型別。
   - 統計追蹤（`TrackerMixin`）：在 `finish_round()` 內注入 tracker 更新流程。
   - 提前停止（`EarlyStopMixin`）：透過單一 `cancel_flag` 在 `finish_round()` 內中止後續 rounds；accumulated acquisition的內部reps進度走共用`progress_bar.make_pbar` factory，GUI ambient factory與terminal fallback使用同一生命週期，正常或停止都會close並移除暫時進度項。
-  - 每輪 callback（`RoundHookMixin`）與 single-shot population/threshold（`SingleShotMixin`）。`round_hook(round_count, raw, cancel_flag)` 只收到 completed round，可呼叫 `cancel_flag.set()` 表示不開始下一 round。
+  - 每輪 callback（`RoundHookMixin`）與逐 shot payload（`ImproveAcquireMixin`）。`round_hook(round_count, raw, cancel_flag)` 只收到 completed round，可呼叫 `cancel_flag.set()` 表示不開始下一 round。
 
 ## `AcquireMixin` 行為對照（常見踩點）
 
@@ -140,7 +160,7 @@ existing transport contract, including the herald read.
 - 擴充掛點：
   - `TrackerMixin.finish_round()`：利用原生 `self.acc_buf`、`self.ro_chs`、`self.avg_level` 更新 tracker。
   - `RoundHookMixin.finish_round()`：每 completed round 呼叫 `round_hook`，輸入增量摘要資料與同一個 stop flag。
-  - `SingleShotMixin._process_accumulated()`：保留原生 IQ／threshold 路徑，明確傳入 classify 時回傳 g/e populations。
+  - `ImproveAcquireMixin._process_accumulated()`：明傳 processors 時處理 payload，其餘委派原生 IQ／threshold 路徑。
 - 相容性關鍵：
   - 擴充層維持 `AcquireMixin` 的 `extra_args` 傳遞模式，避免破壞原生 acquire 參數流。
   - 若非 `accumulated` 或有 threshold 時，部分統計路徑會顯式 `NotImplementedError`，這是刻意防呆。
@@ -153,7 +173,7 @@ existing transport contract, including the herald read.
 ## 快速查表（需求 -> 優先看哪裡）
 
 - 想改「每回合後做什麼」：先看 `ImproveAcquireMixin` 各 `finish_round()`，再對照 `AcquireMixin.finish_round()`。
-- 想改「accumulated 輸出格式」：看 `SingleShotMixin._process_accumulated()` 與 `AcquireMixin._average_buf()`。
+- 想改「accumulated 輸出格式」：看 `ImproveAcquireMixin._process_accumulated()` 與 `AcquireMixin._average_buf()`。
 - 想改「時間軸或原始資料格式」：看 `AcquireMixin.get_time_axis()`、`get_raw()`。
 - 想改「執行控制（early stop）」：看 `EarlyStopMixin.acquire()` 的 `cancel_flag` 參數與 `finish_round()`。
 

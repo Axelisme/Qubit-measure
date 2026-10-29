@@ -1,12 +1,17 @@
 """Explicit host-side herald declarations in normalized ADC coordinates."""
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import numpy as np
 from numpy.typing import NDArray
 
 from zcu_tools.cfg_model import Centroid3Classifier, CircleClassifier, ReadoutClassifier
+from zcu_tools.program._shot_processing import validated_payload
 from zcu_tools.utils.shot_classification import classify_shots
+
+if TYPE_CHECKING:
+    from zcu_tools.program.acquisition import ShotProcessor
 
 
 def herald_ground_mask(
@@ -61,3 +66,77 @@ class HeraldSpec:
     def __post_init__(self) -> None:
         """Reject centroid3 or incomplete/invalid circle calibration before acquisition."""
         herald_ground_mask(np.empty(0, dtype=np.complex128), self.classifier)
+
+
+def heralded(spec: HeraldSpec, inner: "ShotProcessor") -> "ShotProcessor":
+    """Wrap a signal processor with one read's ground acceptance.
+
+    The returned callable accepts normalized float64 (shots, reads, 2) IQ.
+    It requires reads == spec.reads_per_shot, at least two reads and a valid
+    read_index, otherwise raises ValueError. It removes that read before calling
+    inner, which must return float64 (shots, out_reads, N) with positive output
+    axes. Inner errors propagate. The result is (shots, out_reads, N+1): accepted
+    payloads followed by acceptance 1; rejected payloads are zero even for NaN
+    inner values, followed by acceptance 0. Neither input nor calibration is
+    mutated. Use herald_ratio after acquisition averaging to recover the
+    conditional signal and per-point pass fraction.
+    """
+
+    def process(iq: NDArray[np.float64]) -> NDArray[np.float64]:
+        if iq.ndim != 3 or iq.shape[-1] != 2 or iq.dtype != np.float64:
+            raise ValueError("heralded input must be float64 (shots, reads, 2) IQ")
+        reads = iq.shape[1]
+        if reads != spec.reads_per_shot or reads < 2:
+            raise ValueError(
+                "heralded reads must match reads_per_shot and be at least two"
+            )
+        if type(spec.read_index) is not int or not 0 <= spec.read_index < reads:
+            raise ValueError("heralded read_index must identify an input read")
+        herald_iq = iq[:, spec.read_index]
+        accepted = herald_ground_mask(
+            herald_iq[:, 0] + 1j * herald_iq[:, 1], spec.classifier
+        )[:, None, None]
+        signal = np.delete(iq, spec.read_index, axis=1)
+        payload = validated_payload(inner(signal), shots=iq.shape[0])
+        weighted = np.where(accepted, payload, 0.0)
+        acceptance = np.broadcast_to(accepted, (*payload.shape[:2], 1)).astype(
+            np.float64
+        )
+        return np.concatenate([weighted, acceptance], axis=-1)
+
+    return process
+
+
+def herald_ratio(
+    result: NDArray[np.float64],
+) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+    """Recover conditional payloads and pass fraction from averaged heralded data.
+
+    result is float64 (out_reads, *point_dims, N+1), with acceptance as its last
+    component repeated for every read. Return conditional values of shape
+    (out_reads, *point_dims, N) and fraction of shape point_dims from the first
+    read. Zero acceptance yields NaN values without divide warnings. Input is
+    not mutated. Non-float64/non-ndarray input, rank below two, empty read axis
+    or fewer than two final components raises ValueError.
+    """
+    result = _validated_ratio_input(result)
+    acceptance = result[..., -1:]
+    values = np.divide(
+        result[..., :-1],
+        acceptance,
+        out=np.full_like(result[..., :-1], np.nan),
+        where=acceptance != 0,
+    )
+    return values, np.array(result[0, ..., -1], dtype=np.float64, copy=True)
+
+
+def _validated_ratio_input(result: object) -> NDArray[np.float64]:
+    if (
+        not isinstance(result, np.ndarray)
+        or result.dtype != np.float64
+        or result.ndim < 2
+        or result.shape[0] == 0
+        or result.shape[-1] < 2
+    ):
+        raise ValueError("herald_ratio requires float64 (out_reads, *point_dims, N+1)")
+    return result
