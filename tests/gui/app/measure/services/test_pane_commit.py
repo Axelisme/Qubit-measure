@@ -1,6 +1,7 @@
 """Pane publication owns retirement; use real State, drafts and plot producers."""
 
 from dataclasses import replace
+from unittest.mock import MagicMock
 
 import pytest
 from matplotlib.figure import Figure
@@ -10,7 +11,7 @@ from zcu_tools.gui.app.measure.state import (
     PostAnalysisPaneState,
     RunPaneState,
 )
-from zcu_tools.gui.app.measure.writeback import WritebackService
+from zcu_tools.gui.app.measure.writeback import WritebackDraft, WritebackService
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from zcu_tools.resources.entry import ArtifactKey
 
@@ -272,20 +273,15 @@ def test_transition_preview_is_read_only_and_matches_commit(
     pane_commit.commit_run(state, "tab", RunPaneState())
 
 
-class FailingWriteback(WritebackService):
-    def teardown_draft(self, draft):
-        raise RuntimeError("draft teardown failed")
-
-
 @pytest.mark.parametrize("stage", ["run", "analysis", "post_analysis"])
 def test_cleanup_failure_is_logged_without_rollback_or_skipping_other_resources(
     session, caplog, stage
 ):
     state = session.state
     tab = state.get_tab("tab")
-    failing = FailingWriteback(session.context, arb_names=lambda: ())
     healthy = WritebackService(session.context, arb_names=lambda: ())
-    bad_draft = failing.create_draft([], parameters=None, experiment_name="saving")
+    bad_draft = MagicMock(spec=WritebackDraft)
+    bad_draft.teardown.side_effect = RuntimeError("draft teardown failed")
     good_draft = healthy.create_draft([], parameters=None, experiment_name="saving")
     host = RecordingHost(fail_release=True)
     plots = Plots(host)

@@ -2,8 +2,10 @@
 
 import numpy as np
 import pytest
+from pydantic import JsonValue, TypeAdapter, ValidationError
 from zcu_tools.analysis.fitting.singleshot import transition_state_circle_probabilities
 from zcu_tools.analysis.singleshot import (
+    Centroid3IQAnalysis,
     analyze_centroid3_iq,
     analyze_reference_iq,
     calc_populations,
@@ -13,6 +15,8 @@ from zcu_tools.analysis.singleshot import (
     correct_populations,
     raw_population_signal,
 )
+from zcu_tools.cfg_model import Centroid3Classifier
+from zcu_tools.gui.app.measure.summary import summarize_analysis
 from zcu_tools.utils.shot_classification import gaussian_region_probability
 
 
@@ -34,6 +38,71 @@ def test_centroid3_iq_analysis_preserves_scan_axes_and_unclipped_estimates() -> 
     np.testing.assert_allclose(result.confusion_matrix, calibration.confusion_matrix)
     assert result.condition_number == pytest.approx(2)
     assert result.minimum_singular_value == pytest.approx(0.5)
+
+
+@pytest.mark.parametrize("scan_shape", [(), (2,), (2, 3)])
+def test_centroid3_analysis_summary_decodes_to_owner_arrays(
+    scan_shape: tuple[int, ...],
+) -> None:
+    calibration = Centroid3Classifier(
+        g_center=0j,
+        e_center=2 + 0j,
+        f_center=4 + 0j,
+        confusion_matrix=[[0.75, 0.25, 0], [0.25, 0.75, 0], [0, 0, 1]],
+    )
+    result = analyze_centroid3_iq(
+        np.zeros((*scan_shape, 4), dtype=np.complex128), calibration
+    )
+    summary = summarize_analysis(result)
+    decoded = TypeAdapter(Centroid3IQAnalysis).validate_python(summary.summary)
+
+    for array, expected in (
+        (decoded.raw_populations, np.broadcast_to([1, 0, 0], (*scan_shape, 3))),
+        (
+            decoded.corrected_populations,
+            np.broadcast_to([1.5, -0.5, 0], (*scan_shape, 3)),
+        ),
+        (decoded.confusion_matrix, calibration.confusion_matrix),
+    ):
+        assert array.dtype == np.float64
+        np.testing.assert_array_equal(array, expected)
+    assert decoded.raw_populations.shape == (*scan_shape, 3)
+    assert decoded.corrected_populations.shape == (*scan_shape, 3)
+    assert decoded.confusion_matrix.shape == (3, 3)
+    assert decoded.condition_number == pytest.approx(2)
+    assert decoded.minimum_singular_value == pytest.approx(0.5)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("raw_populations", 1.0),
+        ("raw_populations", [[0, 1]]),
+        ("corrected_populations", [[0, 1, 0, 0]]),
+        ("confusion_matrix", [1, 0, 0]),
+        ("confusion_matrix", [[1, 0, 0], [0, 1, 0]]),
+        ("raw_populations", [["bad", 0, 1]]),
+        ("corrected_populations", [[0, "bad", 1]]),
+        ("confusion_matrix", [[1, 0, 0], [0, "bad", 0], [0, 0, 1]]),
+        ("raw_populations", [[None, 0, 1]]),
+        ("corrected_populations", [[0, None, 1]]),
+        ("confusion_matrix", [[1, 0, 0], [0, None, 0], [0, 0, 1]]),
+    ],
+)
+def test_centroid3_summary_rejects_invalid_array_fields(
+    field: str, value: JsonValue
+) -> None:
+    result = Centroid3IQAnalysis(
+        raw_populations=np.array([[1, 0, 0]], dtype=np.float64),
+        corrected_populations=np.array([[1.5, -0.5, 0]], dtype=np.float64),
+        confusion_matrix=np.eye(3),
+        condition_number=1,
+        minimum_singular_value=1,
+    )
+    summary = summarize_analysis(result).summary
+    summary[field] = value
+    with pytest.raises(ValidationError, match=field):
+        TypeAdapter(Centroid3IQAnalysis).validate_python(summary)
 
 
 def test_population_conversion_and_readout_correction() -> None:

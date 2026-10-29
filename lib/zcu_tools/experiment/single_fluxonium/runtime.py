@@ -466,7 +466,11 @@ class SingleFluxoniumSource:
             )
             plans = tuple(
                 plan_template(
-                    settings, snapshot, template, readout_kind=self._readout_kind
+                    settings,
+                    snapshot,
+                    template,
+                    readout_kind=self._readout_kind,
+                    charge_requirements=request.charge_requirements,
                 )
                 for template in request.templates
             )

@@ -199,9 +199,8 @@ def build_app_services(  # noqa: PLR0913
         context,
         arb_names=arb_waveform.list_data_keys,
     )
-    # TabService composes the tab render model and needs the writeback owner
-    # (built above) — built after writeback (read-model dependency, ADR-0067).
-    tab = TabService(state, registry, writeback, tab_forms, form_sources)
+    # TabService composes the tab render model from State and pane drafts.
+    tab = TabService(state, registry, tab_forms, form_sources, writeback=writeback)
     workspace = WorkspaceService(state, tab, bus)
     guard = GuardService(state, access=access)
     save = SaveService(

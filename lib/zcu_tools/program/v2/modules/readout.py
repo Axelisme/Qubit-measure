@@ -144,6 +144,18 @@ def _classifier_entries(
     )
 
 
+def _classifier_for_adc(
+    cfg: ReadoutCfg, ro_ch: int, *, calibration_hint: str
+) -> ReadoutClassifier:
+    """Find one ADC calibration and detach it, preserving caller-specific guidance."""
+    for ch, classifier in _classifier_entries(cfg):
+        if ch == ro_ch:
+            if classifier is None:
+                raise ValueError(f"ADC {ch}: classifier missing; {calibration_hint}")
+            return classifier.model_copy(deep=True)
+    raise ValueError(f"ADC {ro_ch}: not declared by readout")
+
+
 def circle_classifier(cfg: ReadoutCfg, *, ro_ch: int) -> CircleClassifier:
     """Return detached circle calibration for the specified ADC channel number.
 
@@ -152,16 +164,12 @@ def circle_classifier(cfg: ReadoutCfg, *, ro_ch: int) -> CircleClassifier:
     without IQ offset subtraction. Radius and confusion matrix may be absent.
     Raise ValueError for an unknown ADC, missing classifier, or non-circle mode. No hardware or program registry is read.
     """
-    for ch, classifier in _classifier_entries(cfg):
-        if ch == ro_ch:
-            if classifier is None:
-                raise ValueError(f"ADC {ch}: classifier missing; run singleshot GE")
-            if not isinstance(classifier, CircleClassifier):
-                raise ValueError(
-                    f"ADC {ch}: {classifier.mode} classifier is not circle; use circle GE centers"
-                )
-            return classifier.model_copy(deep=True)
-    raise ValueError(f"ADC {ro_ch}: not declared by readout")
+    classifier = _classifier_for_adc(cfg, ro_ch, calibration_hint="run singleshot GE")
+    if not isinstance(classifier, CircleClassifier):
+        raise ValueError(
+            f"ADC {ro_ch}: {classifier.mode} classifier is not circle; use circle GE centers"
+        )
+    return classifier
 
 
 def centroid3_classifier(cfg: ReadoutCfg, *, ro_ch: int) -> Centroid3Classifier:
@@ -173,18 +181,14 @@ def centroid3_classifier(cfg: ReadoutCfg, *, ro_ch: int) -> Centroid3Classifier:
     columns measured g/e/f. Unknown ADC, missing or non-centroid3 classifier
     raises ValueError. No hardware, registry or live library is read.
     """
-    for ch, classifier in _classifier_entries(cfg):
-        if ch == ro_ch:
-            if classifier is None:
-                raise ValueError(
-                    f"ADC {ch}: classifier missing; run qutrit reference calibration"
-                )
-            if not isinstance(classifier, Centroid3Classifier):
-                raise ValueError(
-                    f"ADC {ch}: {classifier.mode} classifier; require centroid3"
-                )
-            return classifier.model_copy(deep=True)
-    raise ValueError(f"ADC {ro_ch}: not declared by readout")
+    classifier = _classifier_for_adc(
+        cfg, ro_ch, calibration_hint="run qutrit reference calibration"
+    )
+    if not isinstance(classifier, Centroid3Classifier):
+        raise ValueError(
+            f"ADC {ro_ch}: {classifier.mode} classifier; require centroid3"
+        )
+    return classifier
 
 
 def classification_parameters(

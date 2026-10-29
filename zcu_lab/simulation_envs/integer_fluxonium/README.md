@@ -98,6 +98,30 @@ writeback. After editing source parameters or library slots, Reset recaptures
 them and may replace unsaved Form inputs. Refresh preserves authored inputs.
 A visible Form is not proof of a valid cfg or a calibrated preparation.
 
+## Experiments and MCP
+
+New Tab exposes all three experiments together:
+
+- [Qutrit population guide](../../v2/singleshot/qutrit_population/guide.md): acquire
+  g/e/f references, analyze them and Apply the centroid3 readout calibration.
+- [STIRAP guide](../../v2/twotone/stirap/guide.md): choose delay, amplitude or
+  Pump × Stokes detuning within the same Form.
+- [Raman guide](../../v2/twotone/raman_gf/guide.md): scan a single carrier's
+  two-photon frequency, area or both using a sampled envelope.
+
+Complete spectroscopy in the order above before entering their carriers.
+Apply the acquired reference readout, then Open or Reset STIRAP/Raman so the
+next Run captures it. Analysis uses that Run's saved centroid3 readout, not a
+later library edit. Missing inputs remain Invalid instead of using model values.
+
+MCP provides only `stirap` and `raman_gf`, each with Run, Analyze and Save.
+STIRAP requires an explicit scan mode; there are no separate diagnostic tools
+or qutrit-reference recipe. Neither recipe tunes controls or asks for a
+writeback that its analysis does not propose. Restart the MCP server after
+adding recipe declarations and inspect `tools/list`; GUI Reload does not
+update that process. `recipe_guide(adapter="twotone/stirap")` and
+`recipe_guide(adapter="twotone/raman_gf")` return the guides linked above.
+
 ## Numerical scope
 
 The default basis is oscillator cutoff 80 with 20 retained DC eigenstates.
