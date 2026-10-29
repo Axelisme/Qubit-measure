@@ -31,6 +31,23 @@
 硬體角色性常量集中在 [hw_semantics.py](hw_semantics.py)，避免 magic string 散落各處。
 [analysis.py](analysis.py) 提供 cost/size 估算 helper 與 liveness 工具，pass 端優先使用。
 
+## Pre-optimization compile snapshot
+
+`program.compiled_stream` returns a `CompiledStream` after successful compilation
+on both `ModularProgramV2` and `TimelineProgramV2`. Its `records` tuple preserves
+logical instructions, labels and metadata before the optimizer consumes them.
+Each `CompiledRecord.p_addr` is a pre-optimization program-memory word offset,
+not an optimized address. Metadata and labels can share positions.
+
+`record.instruction` returns a detached typed IR deep copy on each access.
+Changing that copy cannot change the snapshot, program or optimizer. Consumers
+should read each record once per request build and retain the copies for
+pre-decoding, rather than reading the property per lane or loop iteration.
+Saved snapshots survive recompilation. QICK cached `compile()` calls retain the
+current snapshot. Set public `binprog = None` before `compile()` to rebuild;
+the accessor raises `RuntimeError` while no compiled binary is available.
+This compiler artifact contains no simulation state or frontend dependency.
+
 ## Compiled timing analysis
 
 `analyze_timing(CompiledTimingInput(prog_list, labels, layout))` reads linked

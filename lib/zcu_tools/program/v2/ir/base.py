@@ -5,6 +5,7 @@ from typing import Any
 
 from qick.asm_v2 import QickProgramV2
 
+from .compiled_stream import CompiledStream
 from .linker import IRLinker
 from .pipeline import make_default_pipeline
 
@@ -14,7 +15,25 @@ logger = logging.getLogger(__name__)
 class IRCompileMixin(QickProgramV2):
     def __init__(self, *args: Any, **kwargs: Any):
         self.meta_infos: list[dict[str, Any]] = []
+        self._compiled_stream: CompiledStream | None = None
+        self._pending_stream: CompiledStream | None = None
         super().__init__(*args, **kwargs)
+
+    @property
+    def compiled_stream(self) -> CompiledStream:
+        """Return the immutable pre-optimization artifact of the current binary.
+
+        Both program paths publish this after successful binary construction.
+        QICK cached compile() calls retain the artifact without recompiling.
+        Set public binprog to None before compile() to request actual rebuilding;
+        a rebuild invalidates this access point before assembly. Saved snapshots
+        remain readable and unchanged. Raise RuntimeError if compilation has
+        not completed or binprog was invalidated, including after a failed
+        rebuild at any stage.
+        """
+        if self._compiled_stream is None or not self.binprog:
+            raise RuntimeError("no completed compilation has published an IR stream")
+        return self._compiled_stream
 
     def _add_label(self, label: str) -> None:
         self.meta_infos.append(dict(kind="label", name=label, p_addr=self.p_addr))
@@ -55,10 +74,13 @@ class IRCompileMixin(QickProgramV2):
     def compile(self) -> None:
         # Reset structural metadata on each compile to avoid stale markers.
         self.meta_infos = []
+        self._compiled_stream = None
+        self._pending_stream = None
 
         self._make_asm()
         self.optimize_asm()
         self._make_binprog()
+        self._compiled_stream = self._pending_stream
 
     def optimize_asm(self) -> None:
         insts: list[dict[str, Any]] = self.prog_list
@@ -67,6 +89,7 @@ class IRCompileMixin(QickProgramV2):
 
         linker = IRLinker()
         logical_insts = linker.unlink(insts, labels, meta_infos)
+        self._pending_stream = CompiledStream.from_instructions(logical_insts)
 
         # dmem dispatch tables are appended after the IR layer; tell
         # the pipeline where in dmem they may start (current buffer length).
