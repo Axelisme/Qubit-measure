@@ -4,9 +4,9 @@ from collections.abc import Callable, Sequence
 
 import pytest
 from qick.asm_v2 import QickParam
+from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 from zcu_tools.program.v2.modules import Module, Pulse, PulseCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
-from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 from zcu_tools.program.v2.timeline import TimelineProgramV2
 
 from tests.program.v2.timing_support import shots, waves
@@ -51,7 +51,9 @@ def _program(
 @pytest.mark.parametrize("post, spacing", [(0.0005, 48), (0.001, 49)])
 @pytest.mark.parametrize("block_mode", [False, True])
 @pytest.mark.parametrize("timeline", [None, "drive"])
-def test_pulse_ceil_covers_actual_playback_plus_post_once(post, spacing, block_mode, timeline):
+def test_pulse_ceil_covers_actual_playback_plus_post_once(
+    post, spacing, block_mode, timeline
+):
     pulse = Pulse("drive", _pulse_cfg(post=post), block_mode=block_mode)
 
     def body(prog):
@@ -68,8 +70,12 @@ def test_pulse_ceil_covers_actual_playback_plus_post_once(post, spacing, block_m
     # Rule a instead ceils pre/playback/post separately: 5+44+1=50.
     result = shots(prog)
     assert [waves(shot) for shot in result] == [[4, spacing + 4]] * 2
-    assert [shot.body_end_cycle - shot.start_cycle for shot in result] == [2 * spacing] * 2
-    assert [shot.end_cycle - shot.start_cycle for shot in result] == [2 * spacing + 9] * 2
+    assert [shot.body_end_cycle - shot.start_cycle for shot in result] == [
+        2 * spacing
+    ] * 2
+    assert [shot.end_cycle - shot.start_cycle for shot in result] == [
+        2 * spacing + 9
+    ] * 2
     assert prog.get_time_param("second", "t") * 430.08 == pytest.approx(spacing + 4)
     prog.compile()
     assert shots(prog) == result
