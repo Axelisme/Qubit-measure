@@ -1,6 +1,6 @@
 # Single-fluxonium acquisition
 
-**Last updated:** 2026-10-29 (UTC), exact preflight plan reuse
+**Last updated:** 2026-10-29 (UTC), named microwave routes
 
 **Readers:** framework-dev, lab-author, agent. Compose complete fluxonium timelines with one physical readout cavity.
 
@@ -96,15 +96,6 @@ only terminal or only herald. Each ADC keeps empty grids for unobserved events.
 Preflight checks every template's projective count and each ADC's event/grid
 layout without building a model, evolving a density or solving an ADC response.
 Conflicts name the ADC, templates and layouts.
-One complete observation set can reuse its detached plans. The source rereads
-all borrowed array bytes on every lookup. Its key includes configured and
-effective settings, the full snapshot, numeric/dependency versions, readout
-kind, ordered receiver calibrations and request layout. The cache retains at
-most one set and 32 MiB, including array storage and Python records/containers.
-An oversized set still validates and executes without residency. A different
-key replaces the old set; source close releases it. Model construction does
-not evict a just-validated set. Each call binds the plans to the current request;
-no borrowed template arrays or sampling identity enter retained cache state.
 
 `prepare_readouts(preflight)` evolves one common `ProjectionReadout` and returns
 all `channels` and `raw.batches` in receiver order. ADCs observing the same event
@@ -113,8 +104,6 @@ independent. `ConditionalSums.event_indices` retains original logical event IDs,
 so a terminal-only ADC does not relabel terminal as event zero. Preflight binds
 the current settings and snapshot. Changing source settings before preparation
 raises `ValueError`; request arrays must remain unchanged between those calls.
-Preparation uses this preflight call's template digests without hashing again.
-The next preflight rereads all array bytes, including after a cache hit.
 
 Standalone `prepare(request, snapshot)` uses the same owner with one receiver.
 Its `channel` property returns that receiver. Multi-ADC callers use `channels`;
