@@ -121,7 +121,11 @@ def test_public_snapshot_and_source_path_preserve_cached_binding_and_isolation(
         expected = (
             results
             / "entry"
-            / ("setup.yaml" if owner == "setup" else "points/working/point.yaml")
+            / (
+                "parameters.yaml"
+                if owner == "setup"
+                else "points/working/parameters.yaml"
+            )
         )
         assert source_path(view) == expected
         captured = snapshot(view)

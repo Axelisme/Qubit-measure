@@ -310,7 +310,10 @@ def test_native_load_ignores_missing_or_corrupted_external_source(
     service = LoadService(session.state)
     if fault == "corrupt":
         source = (
-            session.entry.result_path / "points" / str(history.point) / "point.yaml"
+            session.entry.result_path
+            / "points"
+            / str(history.point)
+            / "parameters.yaml"
         )
         source.write_text("format: invalid\\n", encoding="utf-8")
     outcome = service.load_result("tab", str(session.native_data_path))

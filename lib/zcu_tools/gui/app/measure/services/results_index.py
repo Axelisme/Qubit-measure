@@ -9,6 +9,7 @@ from types import MappingProxyType
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
 from zcu_tools.datafile import JsonObject, read_doc
+from zcu_tools.resources.document_names import PARAMETERS_FILENAME
 from zcu_tools.resources.entry import (
     AcquiredPayload,
     LedgerAcquisition,
@@ -242,7 +243,7 @@ def _entry_events(
     root: Path, entry: str, issues: list[str]
 ) -> tuple[LedgerEventContent, ...]:
     result = root / "result"
-    setup = result / entry / "setup.yaml"
+    setup = result / entry / PARAMETERS_FILENAME
     try:
         _inside(result, result)
         _inside(result / entry, result / entry)

@@ -36,7 +36,8 @@ creates its entry, first point and tab without a separate entry CLI or setup RPC
 
 ## Point 檔案讀寫
 
-目前 point 的參數、library 與 aliases 以磁碟檔案為權威。
+目前 point 的 `parameters.yaml`、`library.yaml` 與 `aliases.yaml` 以磁碟檔案為權威。
+Entry 層使用同一組檔名。既有資料先依[升級指南](../../../../docs/parameter-upgrades.md#先改檔名再升級內容)離線改名，runtime 不讀舊名。
 GUI、writeback、recipe 與啟動腳本經 owner 寫入時，成功即落盤。
 Agent 直接讀寫這些檔案，固定工具不提供參數／modules／aliases 特化讀寫。
 `entry.info` 與 `context.reload` 是 RPC methods，經 `rpc_call` 呼叫，不另設固定工具。

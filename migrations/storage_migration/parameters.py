@@ -10,6 +10,11 @@ from zcu_tools.datafile import (
     JsonObject,
 )
 from zcu_tools.resources.context.library import LibrarySnapshot
+from zcu_tools.resources.document_names import (
+    LEGACY_LIBRARY_FILENAME,
+    LIBRARY_FILENAME,
+    PARAMETERS_FILENAME,
+)
 from zcu_tools.resources.document_store import DocumentStore, YamlMap, YamlValue
 from zcu_tools.resources.entry import (
     EditView,
@@ -63,11 +68,11 @@ def _seed_components(
     )
     data["components"] = _YAML_MAP.validate_python(mapping.components)
     seeded_document = prepare_parameter_batch(
-        ParameterDocument(data, entry.result_path / "setup.yaml"),
+        ParameterDocument(data, entry.result_path / PARAMETERS_FILENAME),
         transform=mapping.parameter_transform,
     )
     record_parameter_notes(
-        session, entry.result_path / "setup.yaml", seeded_document.notes
+        session, entry.result_path / PARAMETERS_FILENAME, seeded_document.notes
     )
     for name, seed in seeded_document.document.components.items():
         fields = _YAML_MAP.validate_python(
@@ -88,7 +93,7 @@ def _seed_components(
                 kind: str = kind,
                 fields: YamlMap = fields,
             ) -> None:
-                shutil.copyfile(entry.result_path / "setup.yaml", path)
+                shutil.copyfile(entry.result_path / PARAMETERS_FILENAME, path)
                 seeded = SetupView(
                     DocumentStore(
                         path,
@@ -103,7 +108,7 @@ def _seed_components(
             publish_document(
                 session,
                 session.manifest.report.source.result_path,
-                entry.result_path / "setup.yaml",
+                entry.result_path / PARAMETERS_FILENAME,
                 "setup",
                 build,
             )
@@ -197,7 +202,7 @@ def _map_module_scalar(
                 replace(
                     row,
                     action="remove",
-                    new_file=row.new_file.parent / "module_cfg.yaml",
+                    new_file=row.new_file.parent / LIBRARY_FILENAME,
                     new_path=candidate,
                     destination_keys=tuple(candidate.split(".")),
                     library_kind="module",
@@ -499,9 +504,9 @@ def _convert_context(
     label = candidate.name
     validate_segment(label, "context label")
     target = (
-        destination_root / "setup.yaml"
+        destination_root / PARAMETERS_FILENAME
         if is_setup
-        else destination_root / "points" / label / "point.yaml"
+        else destination_root / "points" / label / PARAMETERS_FILENAME
     )
     view = None
     if entry is not None and not session.dry_run:
@@ -523,7 +528,7 @@ def _convert_context(
         session,
         entry=entry,
         label=None if is_setup else label,
-        source=candidate / "module_cfg.yaml",
+        source=candidate / LEGACY_LIBRARY_FILENAME,
         mapping=mapping,
         dry_view=dry_context,
     )
@@ -553,7 +558,8 @@ def _context_directories(source_root: Path) -> list[Path]:
             )
         children.append(child)
     if any(
-        (source_root / name).is_file() for name in ("meta_info.json", "module_cfg.yaml")
+        (source_root / name).is_file()
+        for name in ("meta_info.json", LEGACY_LIBRARY_FILENAME)
     ):
         children.insert(0, source_root)
     return children
@@ -592,13 +598,13 @@ def convert_parameters(
                     },
                     "components": _YAML_MAP.validate_python(mapping.components),
                 },
-                session.manifest.report.destination.result_path / "setup.yaml",
+                session.manifest.report.destination.result_path / PARAMETERS_FILENAME,
             ),
             transform=mapping.parameter_transform,
         )
         record_parameter_notes(
             session,
-            session.manifest.report.destination.result_path / "setup.yaml",
+            session.manifest.report.destination.result_path / PARAMETERS_FILENAME,
             prepared.notes,
         )
         dry_setup = EditView(prepared.document)

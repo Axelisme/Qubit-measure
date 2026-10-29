@@ -669,7 +669,7 @@ def test_point_consumers_ignore_unused_library_source_fault(
     source: tuple[PointDocument, LibrarySnapshot], tmp_path: Path
 ) -> None:
     fault = ContextSourceFault(
-        "module_cfg", tmp_path / "module_cfg.yaml", "OSError", "unreadable"
+        "module_cfg", tmp_path / "library.yaml", "OSError", "unreadable"
     )
     context = capture(source, faults=(fault,))
 
@@ -694,7 +694,7 @@ def test_library_consumers_report_their_own_source_fault(
     source: tuple[PointDocument, LibrarySnapshot], tmp_path: Path, method: str
 ) -> None:
     fault = ContextSourceFault(
-        "module_cfg", tmp_path / "module_cfg.yaml", "OSError", "unreadable"
+        "module_cfg", tmp_path / "library.yaml", "OSError", "unreadable"
     )
     context = capture(source, faults=(fault,))
 
@@ -710,7 +710,7 @@ def test_parameter_capture_rejects_setup_diagnostics(
     tmp_path: Path,
 ) -> None:
     fault = ContextSourceFault(
-        "setup", tmp_path / "setup.yaml", "OSError", "unreadable"
+        "setup", tmp_path / "parameters.yaml", "OSError", "unreadable"
     )
     with pytest.raises(ValueError, match="point/module_cfg"):
         capture(source, faults=(fault,))
@@ -769,7 +769,7 @@ def test_fault_capture_refuses_data_but_keeps_diagnostics(
     source: tuple[PointDocument, LibrarySnapshot], tmp_path: Path, method: str
 ) -> None:
     fault = ContextSourceFault(
-        "point", tmp_path / "point.yaml", "OSError", "unreadable"
+        "point", tmp_path / "parameters.yaml", "OSError", "unreadable"
     )
     healthy = capture(source)
     broken = capture(source, faults=(fault,))
@@ -896,7 +896,7 @@ def test_alias_projection_source_fault_fails_the_whole_read(
     tmp_path: Path,
 ) -> None:
     fault = ContextSourceFault(
-        "point", tmp_path / "point.yaml", "OSError", "source fault"
+        "point", tmp_path / "parameters.yaml", "OSError", "source fault"
     )
     context = capture(
         source,

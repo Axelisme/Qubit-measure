@@ -679,7 +679,7 @@ def interrupted_predictor(
     copyfile = shutil.copyfile
 
     def interrupted_copy(src: Path, dst: Path, *, follow_symlinks: bool = True) -> Path:
-        if src == destination / "setup.yaml" and dst.name == "point.yaml":
+        if src == destination / "parameters.yaml" and dst.name == "parameters.yaml":
             raise OSError("parameter copy interrupted")
         return copyfile(src, dst, follow_symlinks=follow_symlinks)
 

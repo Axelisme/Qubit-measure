@@ -47,7 +47,7 @@ class PointView:
     ) -> None:
         """Bind one validated working-unit store without I/O.
 
-        source is store's point.yaml path under the owning entry's points/label.
+        source is store's parameters.yaml path under the owning entry's points/label.
         The store owns single-file validation, conflict checks and persistence.
         ResultEntry supplies these dependencies; construction does not reload or
         revalidate field values. Binding rejects components shadowing any public
@@ -119,7 +119,7 @@ class PointView:
     def edit(self) -> Generator[EditView]:
         """Yield a working-unit draft and commit one document on normal exit.
 
-        Reload only point.yaml on entry. Values and opaque metadata in the
+        Reload only parameters.yaml on entry. Values and opaque metadata in the
         draft commit together. Required fields, original field validators and
         model hooks must validate. Body, schema, metadata representation, custom
         validation, conflict or I/O failures keep the previous file and snapshot.
@@ -162,7 +162,7 @@ class PointView:
         return document_meta(cached_parameter_content(self), path)
 
     def refresh(self, *, strict: bool = False) -> None:
-        """Reload point.yaml, validating the full candidate when strict=True.
+        """Reload parameters.yaml, validating the full candidate when strict=True.
 
         Ordinary refresh leaves unused fields unvalidated until projected.
         Watcher/reload installation must pass strict=True. Missing files,

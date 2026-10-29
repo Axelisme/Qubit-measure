@@ -107,7 +107,7 @@ def test_status_indexes_gui_operations_and_session_executions(
             "files": [
                 {
                     "document": "parameters",
-                    "path": "/results/cooldown-A/points/bias/point.yaml",
+                    "path": "/results/cooldown-A/points/bias/parameters.yaml",
                     "revision": "installed-sha",
                 }
             ],

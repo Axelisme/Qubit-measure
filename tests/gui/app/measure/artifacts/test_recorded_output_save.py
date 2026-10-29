@@ -152,7 +152,7 @@ def test_open_with_only_setup_and_points_saves_before_first_ledger_append(
     records = session.entry.result_path / "records"
     if records.exists():
         rmtree(records)
-    (session.entry.result_path / "module_cfg.yaml").unlink()
+    (session.entry.result_path / "library.yaml").unlink()
     opened = ResultEntry.open(
         session.entry.result_path.name,
         result_root=session.entry.result_path.parent,

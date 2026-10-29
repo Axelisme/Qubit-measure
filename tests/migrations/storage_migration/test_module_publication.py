@@ -115,7 +115,7 @@ def test_library_io_failure_is_reported_and_never_changes_sources(
 
     def reject_library(source_path: str | Path, destination: str | Path) -> None:
         target = Path(destination)
-        if target.name == "module_cfg.yaml" and target.exists():
+        if target.name == "library.yaml" and target.exists():
             raise OSError("synthetic library replace failure")
         real_replace(source_path, destination)
 
@@ -226,7 +226,7 @@ def test_partial_parameter_resume_does_not_rewrite_recorded_library(
     def fail_second(source_path: str | Path, destination: str | Path) -> None:
         target = Path(destination)
         if (
-            target.name == "module_cfg.yaml"
+            target.name == "library.yaml"
             and target.parent.name == "b"
             and target.exists()
         ):

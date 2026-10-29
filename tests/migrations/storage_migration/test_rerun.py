@@ -96,7 +96,7 @@ def test_completed_rerun_verifies_without_writing(
     assert report.migration_id == first.migration_id
     assert {
         first.destination.result_path / name
-        for name in ("setup.yaml", "points/bias/point.yaml", "opaque.bin")
+        for name in ("parameters.yaml", "points/bias/parameters.yaml", "opaque.bin")
     } <= {row.destination for row in report.skipped}
     assert (
         files_under(first.destination.result_path, first.destination.database_path)
@@ -118,7 +118,9 @@ def test_legal_completed_edit_is_located_and_does_not_change_reports(
     view = entry.use_point("bias") if point else entry.setup
     with view.edit() as draft:
         draft.set("C1.frequency", 18.0)
-    target = entry.result_path / ("points/bias/point.yaml" if point else "setup.yaml")
+    target = entry.result_path / (
+        "points/bias/parameters.yaml" if point else "parameters.yaml"
+    )
     assert first.backup_path is not None
     before = files_under(entry.result_path, entry.database_path, first.backup_path)
     with pytest.raises(MigrationInputError) as caught:
@@ -136,7 +138,7 @@ def test_owner_yaml_formatting_is_not_a_difference_but_unknown_raw_is(
     request_data: MigrationRequest, mapping: MigrationMapping
 ) -> None:
     first = convert(request_data, mapping)
-    target = first.destination.result_path / "setup.yaml"
+    target = first.destination.result_path / "parameters.yaml"
     raw = YAML(typ="safe").load(target.read_text())
     # JSON is YAML, but has a different layout and key order.
     target.write_text(json.dumps(raw, sort_keys=True))
@@ -179,7 +181,7 @@ def test_replayed_source_is_compared_and_never_cleaned_twice(
     else:
         rerun = convert(replace(request_data, resume=True), mapping)
         assert any(
-            row.destination == report.destination.result_path / "setup.yaml"
+            row.destination == report.destination.result_path / "parameters.yaml"
             for row in rerun.skipped
         )
     assert (
@@ -216,7 +218,7 @@ def test_point_prepared_publication_resumes_fixed_time_and_formal_binding(
     state = json.loads(manifest.read_text())
     publication = state["points"][0]
     temporary = target.parent / publication["temporary_label"]
-    prepared = (target if after_rename else temporary) / "point.yaml"
+    prepared = (target if after_rename else temporary) / "parameters.yaml"
     created_at = YAML(typ="safe").load(prepared.read_text())["general"]["created_at"]
     report = convert(request_data, mapping)
     entry = ResultEntry.open(
@@ -225,11 +227,13 @@ def test_point_prepared_publication_resumes_fixed_time_and_formal_binding(
         database_root=request_data.database_root,
     )
     point = entry.use_point("bias")
-    assert source_path(point) == target / "point.yaml"
+    assert source_path(point) == target / "parameters.yaml"
     assert point.general.created_at == created_at
     assert point.C1.frequency == 4.0
     assert not temporary.exists()
-    assert any(row.new_file == target / "point.yaml" for row in report.key_mappings)
+    assert any(
+        row.new_file == target / "parameters.yaml" for row in report.key_mappings
+    )
 
 
 @pytest.mark.parametrize(
@@ -306,7 +310,7 @@ def test_prepared_document_recovers_fixed_owner_intent(
     monkeypatch: pytest.MonkeyPatch,
     after_replace: bool,
 ) -> None:
-    target = request_data.results_root / request_data.name / "setup.yaml"
+    target = request_data.results_root / request_data.name / "parameters.yaml"
     original = os.replace
 
     def interrupt(source: str | Path, destination: str | Path) -> None:

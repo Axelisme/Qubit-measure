@@ -20,6 +20,7 @@ from zcu_tools.resources.context.library import (
     LibrarySnapshot,
     ModuleLibraryDocument,
 )
+from zcu_tools.resources.document_names import PARAMETERS_FILENAME
 from zcu_tools.resources.document_store import DocumentStore
 from zcu_tools.resources.entry import ResultEntry, document_value, snapshot
 from zcu_tools.resources.entry.views import EditView
@@ -379,7 +380,9 @@ def convert_module_cfg(
             )
         values = _JSON.validate_python(envelope, strict=True)
         context_target = session.manifest.report.destination.result_path / (
-            "setup.yaml" if label is None else f"points/{label}/point.yaml"
+            PARAMETERS_FILENAME
+            if label is None
+            else f"points/{label}/{PARAMETERS_FILENAME}"
         )
         if session.dry_run:
             candidate, retained = _prepare_library(

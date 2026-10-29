@@ -105,7 +105,7 @@ def test_data_resume_reports_valid_user_edit_without_overwriting(
             validate_native=noop_validation,
         ),
         request_data,
-        [entry.result_path / "points/context/point.yaml"],
+        [entry.result_path / "points/context/parameters.yaml"],
     )
     assert entry.use_point("context").C1.frequency == 19.0
 
@@ -125,7 +125,7 @@ def test_invalid_current_point_is_not_restored(
         / request_data.name
         / "points"
         / "context"
-        / "point.yaml"
+        / "parameters.yaml"
     )
     point.write_text("invalid: true")
     with pytest.raises(ValueError, match="format|general|validation"):
@@ -379,7 +379,7 @@ def test_unsupported_module_candidates_preserve_source_without_slot(
             and item.new_file
             == request_data.results_root
             / request_data.name
-            / "points/context/point.yaml"
+            / "points/context/parameters.yaml"
             and item.new_path is None
             for item in report.key_mappings
         )

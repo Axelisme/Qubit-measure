@@ -280,7 +280,7 @@ Datafile／resources → core 的方向由 C8、C9、C12 約束。此函式只�
 - **內容**：`ConfigBase`；module 與 waveform 的 cfg schema（欄位、驗證、`set_param`）；有狀態模組之間溝通用的 Protocol，例如 `ModuleResolver`（依名稱取 module 或 waveform cfg）與 `WaveformAssetInfo`（依名稱查波形長度）。
 - **依賴**：cfg_model 只依賴外部函式庫、utils、core.waveform_format 與 core.complex_codec，不讀寫檔案。Classifier 的複數中心共用既有 tag codec，不另定 library 格式。
 - **准入**：型別只有在兩個以上有狀態模組都需要時才放進來。
-- **改動**：核心 schema 會寫進檔案，例如每個工作點的 `module_cfg.yaml`。Library 的 format／format_version 只描述 header 與容器結構，不描述個別 module／waveform Spec 的欄位。新增、刪除或修改 Spec 欄位不自動升 library 版本。目前 library 維持 2.0，不遷移、不加相容讀取；entry schema 仍依現行定義驗證，不能以 forward minor 放寬 extra 策略。
+- **改動**：核心 schema 會寫進檔案，例如每個工作點的 `library.yaml`。Library 的 format／format_version 只描述 header 與容器結構，不描述個別 module／waveform Spec 的欄位。新增、刪除或修改 Spec 欄位不自動升 library 版本。目前 library 維持 2.0，不遷移、不加相容讀取；entry schema 仍依現行定義驗證，不能以 forward minor 放寬 extra 策略。
 
 使用者於 2026-10-15 裁決：「只是改Module而已真的需要升Library版本嗎？就像加一個Component原件定義，不應該讓舊版本不能讀對吧」「不要一次驗證，而是best-effort」「1可以，2A，3保留2.0」。Library 逐條驗證既有資料，合法條目不因另一筆 Spec 過時而失去可讀性。無效 Spec 的略過與原因查詢，以及讀取不改檔的規則由 [[0063]] 規定。
 

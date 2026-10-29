@@ -57,7 +57,9 @@ def test_unknown_meta_has_literal_preservation_rows_and_survives_resume(
     report = migrate(request_data, metadata_mapping)
     entry = open_entry(request_data)
     view = entry.use_point("bias") if context else entry.setup
-    target = entry.result_path / ("points/bias/point.yaml" if context else "setup.yaml")
+    target = entry.result_path / (
+        "points/bias/parameters.yaml" if context else "parameters.yaml"
+    )
     assert not [item for item in report.pending if item.source == source]
     ext = document_value(snapshot(view), "general.ext")
     assert ext == {
@@ -158,7 +160,7 @@ def test_qubit_channel_alias_is_deduplicated_only_against_selected_wiring(
     assert row.source_keys == ("qub_ch",)
     assert row.action == ("remove" if same else "preserved")
     if same:
-        assert row.new_file == open_entry(request_data).result_path / "setup.yaml"
+        assert row.new_file == open_entry(request_data).result_path / "parameters.yaml"
         assert row.new_path == "Q1.wiring.ch"
         assert "same" in row.reason.lower()
     else:
@@ -204,7 +206,9 @@ def test_removed_meta_keys_preserve_unmatched_values_and_report_proven_duplicate
                 row.new_path
                 == {"readout_f": "R1.freq", "flx_bias": "Q1.ext.flux_bias"}[key]
             )
-            assert row.new_file == open_entry(request_data).result_path / "setup.yaml"
+            assert (
+                row.new_file == open_entry(request_data).result_path / "parameters.yaml"
+            )
             assert "same" in row.reason.lower()
         else:
             assert row.action == "preserved"
@@ -242,7 +246,9 @@ def test_unknown_meta_collision_keeps_formal_value_and_reports_exact_destination
     report = migrate(request_data, metadata_mapping)
     entry = open_entry(request_data)
     view = entry.use_point("bias") if context else entry.setup
-    target = entry.result_path / ("points/bias/point.yaml" if context else "setup.yaml")
+    target = entry.result_path / (
+        "points/bias/parameters.yaml" if context else "parameters.yaml"
+    )
     assert document_value(snapshot(view), "general.ext.flux_value") == 0.4
     row = next(
         row
@@ -325,7 +331,7 @@ def test_point_unknown_collision_protects_only_successful_setup_projection(
     assert rows["arbitrary"].destination_keys == ("general", "ext", "arbitrary")
     row = rows["flux_value"]
     assert row.source_keys == ("flux_value",)
-    assert row.new_file == entry.result_path / "points/bias/point.yaml"
+    assert row.new_file == entry.result_path / "points/bias/parameters.yaml"
     if raw_value == 0.4:
         assert row.action == "remove"
         assert row.new_path == "general.ext.flux_value"
@@ -380,7 +386,8 @@ def test_raw_params_preservation_is_typed_located_and_durable(
     for row in preserved:
         assert row.old_file == source
         assert (
-            row.new_file == request_data.results_root / request_data.name / "setup.yaml"
+            row.new_file
+            == request_data.results_root / request_data.name / "parameters.yaml"
         )
         assert row.new_path is None
         assert row.source_keys is not None
@@ -457,8 +464,8 @@ def test_raw_params_preservation_is_typed_located_and_durable(
         with view.edit() as draft:
             draft.set("Qlegacy.ext.legacy_params", {"user.edit": ["keep"]})
     paths = [
-        entry.result_path / "setup.yaml",
-        entry.result_path / "points/bias/point.yaml",
+        entry.result_path / "parameters.yaml",
+        entry.result_path / "points/bias/parameters.yaml",
     ]
     before = [path.read_bytes() for path in paths]
     assert_difference(
@@ -652,8 +659,8 @@ def test_completed_resume_reports_user_edits_without_overwriting(
     entry.setup.Qlegacy.EJ = 12.0
     entry.use_point("bias").Qlegacy.EJ = 13.0
     paths = [
-        entry.result_path / "setup.yaml",
-        entry.result_path / "points/bias/point.yaml",
+        entry.result_path / "parameters.yaml",
+        entry.result_path / "points/bias/parameters.yaml",
     ]
     before = [path.read_bytes() for path in paths]
     assert_difference(

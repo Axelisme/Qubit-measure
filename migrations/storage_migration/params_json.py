@@ -6,6 +6,7 @@ from pathlib import Path
 
 from pydantic import JsonValue, TypeAdapter
 from zcu_tools.datafile import JsonObject, json_values_equal
+from zcu_tools.resources.document_names import PARAMETERS_FILENAME
 from zcu_tools.resources.document_store import YamlMap, YamlValue
 from zcu_tools.resources.entry import (
     ResultEntry,
@@ -70,7 +71,7 @@ def _setup_context(
         raise ValueError(f"{name}: seed requires kind")
     model = component_registry.get(kind).model_validate(seed)
     return _Context(
-        target=session.manifest.report.destination.result_path / "setup.yaml",
+        target=session.manifest.report.destination.result_path / PARAMETERS_FILENAME,
         session=session,
         source=session.manifest.report.source.result_path / "params.json",
         view=entry.setup if entry is not None and not session.dry_run else None,

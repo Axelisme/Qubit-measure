@@ -6,6 +6,7 @@ from dataclasses import replace
 from pathlib import Path
 from uuid import uuid4
 
+from zcu_tools.resources.document_names import LIBRARY_FILENAME, PARAMETERS_FILENAME
 from zcu_tools.resources.entry import PointView, ResultEntry
 
 from .backup import inventory_paths
@@ -95,8 +96,8 @@ def _validate_prepared_point(
     manifest: MigrationManifest, item: PointPublication, staged: Path, final: Path
 ) -> None:
     if item.documents is None or set(item.documents) != {
-        "point.yaml",
-        "module_cfg.yaml",
+        PARAMETERS_FILENAME,
+        LIBRARY_FILENAME,
     }:
         raise difference(
             manifest.report.source.result_path,
@@ -108,7 +109,7 @@ def _validate_prepared_point(
     for name, baseline in item.documents.items():
         if (
             baseline.destination != final / name
-            or baseline.kind != ("point" if name == "point.yaml" else "library")
+            or baseline.kind != ("point" if name == PARAMETERS_FILENAME else "library")
             or baseline.phase != "published"
         ):
             raise difference(
@@ -218,7 +219,10 @@ def create_point(
             shutil.rmtree(staged)
         entry.new_point(item.temporary_label)
         documents: dict[str, DocumentBaseline] = {}
-        for name, kind in (("point.yaml", "point"), ("module_cfg.yaml", "library")):
+        for name, kind in (
+            (PARAMETERS_FILENAME, "point"),
+            (LIBRARY_FILENAME, "library"),
+        ):
             path = final / name
             documents[name] = DocumentBaseline(
                 source=source,

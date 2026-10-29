@@ -103,7 +103,7 @@ def test_library_writer_null_checks_absence_before_first_creation(
 ) -> None:
     info = application.open_entry()
     application.result("point.new", {"label": "portable"})
-    path = info.result_path / "points/portable/module_cfg.yaml"
+    path = info.result_path / "points/portable/library.yaml"
     external = path.read_bytes() + b"# external creation\n"
     path.unlink()
     application.result("point.use", {"label": "portable"})
@@ -142,7 +142,7 @@ def test_absent_library_reports_null_and_reloads_external_file(
 ) -> None:
     info = application.open_entry()
     application.result("point.new", {"label": "portable"})
-    path = info.result_path / "points/portable/module_cfg.yaml"
+    path = info.result_path / "points/portable/library.yaml"
     body = path.read_bytes()
     path.unlink()
     application.result("point.use", {"label": "portable"})
@@ -226,7 +226,7 @@ def test_reload_rejects_paths_outside_selected_point_owners(
     path = {
         "relative": Path(file.path.name),
         "outside": tmp_path / "outside.yaml",
-        "setup": file.path.parents[2] / "setup.yaml",
+        "setup": file.path.parents[2] / "parameters.yaml",
     }[path_kind]
     before = file.path.read_bytes()
     error = error_reply(

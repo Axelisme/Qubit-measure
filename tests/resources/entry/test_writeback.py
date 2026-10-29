@@ -59,7 +59,7 @@ def test_library_acceptance_keeps_audit_event_without_leaf_sources(
         evidence=evidence(),
     )
     storage = capture_point_storage(point)
-    path = storage.result_path / "points" / storage.point / "module_cfg.yaml"
+    path = storage.result_path / "points" / storage.point / "library.yaml"
     from ruamel.yaml import YAML
 
     stored = YAML(typ="safe").load(path.read_text())
@@ -75,7 +75,7 @@ def test_library_writeback_creates_missing_file_only_when_touched(
     point: PointView,
 ) -> None:
     storage = capture_point_storage(point)
-    path = storage.result_path / "points" / storage.point / "module_cfg.yaml"
+    path = storage.result_path / "points" / storage.point / "library.yaml"
     path.unlink()
     writer = target(point)
     apply_writeback(

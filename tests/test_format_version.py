@@ -12,7 +12,7 @@ from zcu_tools.format_version import (
 
 
 def validate_synthetic_header(
-    document: YamlMap, source: Path = Path("entry/setup.yaml")
+    document: YamlMap, source: Path = Path("entry/parameters.yaml")
 ) -> FormatVersion:
     return validate_header(
         document,
@@ -39,7 +39,7 @@ def test_header_accepts_supported_and_newer_minor(minor: int) -> None:
 
 @pytest.mark.parametrize("actual_format", ["wrong.format", None])
 def test_header_reports_format_mismatch(actual_format: str | None) -> None:
-    source = Path("entry/setup.yaml")
+    source = Path("entry/parameters.yaml")
     document: YamlMap = {"format": actual_format, "format_version": "1.0"}
 
     with pytest.raises(FormatError, match="format: expected") as caught:
@@ -54,7 +54,7 @@ def test_header_reports_format_mismatch(actual_format: str | None) -> None:
 
 @pytest.mark.parametrize("major", [0, 2])
 def test_header_reports_unsupported_major(major: int) -> None:
-    source = Path("entry/setup.yaml")
+    source = Path("entry/parameters.yaml")
     document: YamlMap = {"format": "zcu.synthetic", "format_version": f"{major}.0"}
 
     with pytest.raises(VersionError) as caught:
@@ -72,7 +72,7 @@ def test_header_reports_unsupported_major(major: int) -> None:
     [None, 1, [], "1", "1.0.0", "one.0", "1.-1", "1.2e3", "+1.0", "1.0\n"],
 )
 def test_header_rejects_malformed_version(raw_version: YamlValue) -> None:
-    source = Path("entry/setup.yaml")
+    source = Path("entry/parameters.yaml")
     document: YamlMap = {"format": "zcu.synthetic", "format_version": raw_version}
 
     with pytest.raises(VersionError) as caught:
