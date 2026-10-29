@@ -59,6 +59,15 @@ shot. The shell final_wait/final_delay belongs to that interval. WAIT time does
 not advance reference. The result also reports reference at body_end and outputs
 before the first shot.
 
+Pass `CompiledTimingInput(..., dmem=prog.compile_datamem())` for programs with
+read-only data-memory loads, including compiler-generated dispatch tables.
+`dmem` accepts the public one-dimensional NumPy int32 array or its transported
+Python integer sequence. Addresses are zero-based word offsets, not byte offsets.
+None or empty data supplies no words. Analysis reads known in-range addresses
+and follows known register jumps without modifying assembly or memory.
+Missing data, malformed words, unknown/out-of-range addresses, writes and read
+side effects raise errors; memory is never implicitly zero-filled.
+
 Known register arithmetic, sweep updates/resets, literal/register event times
 and known loop branches are evaluated from assembly. Waveform contents are not
 modeled; unknown wave data propagates until it affects time or control.
