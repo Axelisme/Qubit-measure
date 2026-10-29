@@ -12,6 +12,7 @@ from zcu_tools.experiment.native_persistence import metadata_from_container
 from zcu_tools.gui.app.measure.artifacts import SaveStatus
 from zcu_tools.gui.app.measure.services.pane_commit import commit_run
 from zcu_tools.gui.app.measure.state import RunPaneState
+from zcu_tools.resources.document_names import LIBRARY_FILENAME
 from zcu_tools.resources.entry import ResultEntry
 
 from tests.gui.app.measure._native_save_support import NativeSaveSession, declare_panes
@@ -182,7 +183,7 @@ def test_open_with_only_setup_and_points_saves_before_first_ledger_append(
     records = session.entry.result_path / "records"
     if records.exists():
         rmtree(records)
-    (session.entry.result_path / "library.yaml").unlink()
+    (session.entry.result_path / LIBRARY_FILENAME).unlink()
     opened = ResultEntry.open(
         session.entry.result_path.name,
         result_root=session.entry.result_path.parent,

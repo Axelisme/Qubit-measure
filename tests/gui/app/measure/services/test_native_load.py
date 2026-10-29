@@ -58,6 +58,7 @@ from zcu_tools.gui.session.context_types import (
 from zcu_tools.gui.session.operation_runner import OperationRunner
 from zcu_tools.gui.session.parameter_capture import capture_parameters
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
+from zcu_tools.resources.document_names import PARAMETERS_FILENAME
 from zcu_tools.resources.entry import (
     AcceptedPayload,
     ResultEntry,
@@ -328,7 +329,7 @@ def test_native_load_ignores_missing_or_corrupted_external_source(
             session.entry.result_path
             / "points"
             / str(history.point)
-            / "parameters.yaml"
+            / PARAMETERS_FILENAME
         )
         source.write_text("format: invalid\\n", encoding="utf-8")
     outcome = service.load_result("tab", str(session.native_data_path))
