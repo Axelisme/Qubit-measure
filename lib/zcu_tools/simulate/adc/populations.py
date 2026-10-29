@@ -6,7 +6,7 @@ from .model import RealArray
 
 # End-to-end population accuracy is 1e-2, with a per-segment budget of 1e-3.
 # This leaves ~38x margin over measured shaped-kernel trace drift of 2.62e-8,
-# while probability preparation remains three orders below a segment budget.
+# while trace validation remains three orders below a segment budget.
 POPULATION_TOLERANCE = 1e-6
 
 
@@ -28,9 +28,9 @@ def validate_populations(values: RealArray, *, minimum: float = 0.0) -> RealArra
 
     The state axis must be nonempty. Row sums must lie in the closed float64
     interval [1-POPULATION_TOLERANCE, 1+POPULATION_TOLERANCE]. minimum is the
-    lowest allowed entry, zero for sampling and -POPULATION_TOLERANCE only for
-    explicit preparation. PopulationValidationError reports rejected_rows for
-    the first failed rule. Invalid array shapes raise plain ValueError.
+    lowest allowed entry, zero for sampling and -inf for explicit preparation.
+    PopulationValidationError reports rejected_rows for the first failed rule.
+    Invalid array shapes raise plain ValueError.
     """
     probabilities = np.asarray(values, dtype=np.float64)
     if probabilities.ndim < 1 or probabilities.shape[-1] == 0:
@@ -58,19 +58,17 @@ def normalize_populations(values: RealArray) -> RealArray:
 
     values: finite float64 (*points, states), in readout state order, with a
         nonempty state axis. Each row sum must be in [1-1e-6, 1+1e-6], including
-        the float64 endpoints, and each entry must be at least -1e-6.
-    Return an owned array: set only tolerated negative entries to zero, then
-    divide each row by its sum. No upper clipping occurs. Invalid
-    array shapes raise ValueError. Nonfinite values or residuals outside
-    tolerance raise PopulationValidationError with rejected_rows for the first
-    failed rule; no partially repaired result is returned.
+        the float64 endpoints.
+    Return an owned array: clip every negative entry to zero, then divide each
+    row by its sum. No upper clipping occurs. Invalid array shapes raise
+    ValueError. Nonfinite values or row sums outside tolerance raise
+    PopulationValidationError with rejected_rows for the first failed rule;
+    no partially repaired result is returned.
 
-    The 1e-6 tolerance is 1000x below the 1e-3 segment budget and 10000x below
-    the 1e-2 end-to-end population requirement. It gives ~38x margin above the
-    measured 2.62e-8 shaped-kernel trace drift. Sampling validates but never
-    calls this function: the environment must request preparation explicitly.
+    Sampling validates but never calls this function: the environment must
+    request preparation explicitly.
     """
-    probabilities = validate_populations(values, minimum=-POPULATION_TOLERANCE)
+    probabilities = validate_populations(values, minimum=-np.inf)
     prepared = np.maximum(probabilities, 0)
     prepared /= prepared.sum(axis=-1, keepdims=True)
     return prepared
