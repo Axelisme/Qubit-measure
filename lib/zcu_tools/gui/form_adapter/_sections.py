@@ -14,6 +14,7 @@ from zcu_tools.cfg_model import (
     CfgInputValue,
     ConfigBase,
     Expr,
+    FieldMeta,
     FormNode,
     Hidden,
     LogPoints,
@@ -43,7 +44,12 @@ from ._modules import (
     editable_spec,
     module_specs,
 )
-from ._seeds import disabled_model_defaults, persistent_input, selected_model
+from ._seeds import (
+    disabled_model_defaults,
+    persistent_input,
+    selected_model,
+    template_metadata,
+)
 from ._types import (
     annotated_type,
     branch_metadata,
@@ -221,9 +227,20 @@ class SpecSection:
         self.children: dict[str, Section] = {}
         self.modules: dict[str, ModuleField] = {}
 
-    def seed_origins(self, prefix: FormWritePath = ()) -> dict[FormWritePath, str]:
+    def seed_origins(
+        self, env: FormEnv, prefix: FormWritePath = ()
+    ) -> dict[FormWritePath, str]:
         """Return no authored source origins for an empty persistent-Spec tree."""
-        del prefix
+        del env, prefix
+        return {}
+
+    def select_sources(self, env: FormEnv, *, force: bool = False) -> None:
+        """Keep the persistent-Spec projection, which has no authored source nodes."""
+        del env, force
+
+    def template_metadata(self, env: FormEnv) -> dict[FormWritePath, FieldMeta]:
+        """Return no template metadata for an empty persistent-Spec tree."""
+        del env
         return {}
 
     def bind_templates(self, catalog: Mapping[str, TemplateDef], adapter: str) -> None:
@@ -488,20 +505,36 @@ class Section:
             )
         return list[child.model]
 
-    def seed_origins(self, prefix: FormWritePath = ()) -> dict[FormWritePath, str]:
-        """Return declared source ancestry without defaults, evaluation or capture."""
+    def seed_origins(
+        self, env: FormEnv, prefix: FormWritePath = ()
+    ) -> dict[FormWritePath, str]:
+        """Return selected source ancestry using the fixed capture."""
         result: dict[FormWritePath, str] = {}
         for name, module in self.modules.items():
-            node = module.node
+            node = module.selected_node(env)
             if isinstance(node, Slot):
                 result[(*prefix, name)] = node.path
             elif isinstance(node, Template):
                 result[(*prefix, name)] = f"template:{node.id}"
         for name, child in self.children.items():
-            result.update(child.seed_origins((*prefix, name)))
+            result.update(child.seed_origins(env, (*prefix, name)))
         for name, positions in self.element_seeds.items():
             for index, child in enumerate(positions):
-                result.update(child.seed_origins((*prefix, name, index)))
+                result.update(child.seed_origins(env, (*prefix, name, index)))
+        return result
+
+    def template_metadata(self, env: FormEnv) -> dict[FormWritePath, FieldMeta]:
+        """Collect root-relative metadata from only the selected Templates."""
+        result: dict[FormWritePath, FieldMeta] = {}
+        for module in self.modules.values():
+            node = module.selected_node(env)
+            if isinstance(node, Template):
+                result.update(template_metadata(node, module.catalog, env))
+        for child in self.children.values():
+            result.update(child.template_metadata(env))
+        for positions in self.element_seeds.values():
+            for child in positions:
+                result.update(child.template_metadata(env))
         return result
 
     def _sweep_defaults(self) -> dict[str, JsonValue]:
@@ -628,36 +661,44 @@ class Section:
                 }
         return result
 
-    def _module_hidden_paths(self) -> dict[tuple[str, ...], frozenset[str] | None]:
+    def _module_hidden_paths(
+        self, env: FormEnv | None = None
+    ) -> dict[tuple[str, ...], frozenset[str] | None]:
         """Collect visibility; explicit nullable None declares no module policy."""
         paths: dict[tuple[str, ...], frozenset[str] | None] = {}
         for name, field in self.modules.items():
-            if field.nullable and self.tree.get(name, PydanticUndefined) is None:
+            node = field.node if env is None else field.selected_node(env)
+            if (field.nullable and self.tree.get(name, PydanticUndefined) is None) or (
+                env is None and isinstance(node, Slot) and node.fallback is not None
+            ):
+                # A fallback's list visibility is known only after capture.
                 paths[(name,)] = None
             else:
                 paths[(name,)] = (
                     frozenset(
                         path
-                        for path, seed in field.node.set.items()
+                        for path, seed in node.set.items()
                         if isinstance(seed, Hidden)
                     )
-                    if field.node is not None
+                    if node is not None
                     else frozenset()
                 )
         for name, child in self.children.items():
             paths.update(
                 {
                     (name, *path): hidden
-                    for path, hidden in child._module_hidden_paths().items()
+                    for path, hidden in child._module_hidden_paths(env).items()
                 }
             )
         return paths
 
-    def _share_hidden_paths(self, positions: tuple["Section", ...]) -> None:
+    def _share_hidden_paths(
+        self, positions: tuple["Section", ...], env: FormEnv | None = None
+    ) -> None:
         """Install a homogeneous list policy; position defaults remain independent."""
         if not positions:
             return
-        policies = [position._module_hidden_paths() for position in positions]
+        policies = [position._module_hidden_paths(env) for position in positions]
         for path in policies[0]:
             declarations = [
                 (index, hidden)
@@ -704,6 +745,20 @@ class Section:
                 seed.bind_templates(catalog, adapter)
         for field in self.modules.values():
             field.catalog = catalog
+        self.model.model_rebuild(force=True)
+
+    def select_sources(self, env: FormEnv, *, force: bool = False) -> None:
+        """Rebind fallback projections using only the supplied fixed capture."""
+        for field in self.modules.values():
+            field.select_sources(env, force=force)
+        for child in self.children.values():
+            child.select_sources(env, force=force)
+        for name, child in self.lists.items():
+            positions = self.element_seeds.get(name, ())
+            child._share_hidden_paths(positions, env)
+            child.select_sources(env, force=True)
+            for position in positions:
+                position.select_sources(env, force=force)
         self.model.model_rebuild(force=True)
 
     def _list_raw(

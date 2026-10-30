@@ -1,6 +1,6 @@
 # `zcu_tools.experiment` — 實驗層
 
-**Last updated:** 2026-10-30（固定值存檔軸）
+**Last updated:** 2026-10-30（固定值存檔軸與分組 probe 比較）
 
 **讀者：** framework-dev。實驗介面、Run 資料、持久化映射與裝置操作邊界。
 
@@ -122,8 +122,11 @@ decimated outputs.
 Caller 仍負責環境的 backend 與 devices 清理，probe 不更改 seed 或接線。
 `ProbeReport` 保留 Result 欄位的 shape／dtype、讀回比較、分析摘要、PNG 路徑與階段秒數。
 `probe.compare_roundtrip(original, restored, *, spec)` 也可比較 caller 已還原的 Result。
-Shape 與 dtype 必須相同。AxesSpec 中 scale≠1 且比例有限非零的浮點欄位，容許每個實數／虛數分量相對誤差 ≤2·eps，absolute tolerance 為0。
-NaN 分量位置與 infinity 符號必須相同，其他欄位及 GroupedAxesSpec 保持 exact 比較。
+Shape 與 dtype 必須相同。AxesSpec 與 GroupedAxesSpec 各組宣告中，scale≠1 且比例有限非零的浮點 Result 欄位，容許每個實數／虛數分量相對誤差 ≤2·eps，absolute tolerance 為0。
+eps 取實際實數分量 dtype 的 machine epsilon，不隨 scale 大小改變。此上界涵蓋以同一 scale 各乘、除一次的正常有限值捨入，不放寬 underflow 或 overflow。
+固定或自動產生的軸沒有 Result 欄位，不加入縮放欄位映射。
+NaN 分量位置與 infinity 符號必須相同，其他欄位及整數陣列保持 exact 比較。
+同一 Result 欄位在分組宣告使用不同 scale 時，compare_roundtrip 拋出 ValueError，訊息列出欄位與各 scale。
 階段失敗時回傳原始 exception 與 failed_stage，並記錄 traceback；成功前已產生的檔案保留。
 
 `probe.main(argv)` 載入 caller 指定的可信任 `module:class`，依 AXES_SPEC 的 cfg 型別驗證 YAML／JSON，
