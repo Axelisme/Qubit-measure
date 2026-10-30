@@ -96,14 +96,18 @@ Predictor 使用 entry 的 `predictors/*.json` 或手動參數，不從實驗室
 實驗定義改動，包含 live plot 與分析圖的畫面改動，依 [UI 驗證的實驗定義規則](../tests/README.md#實驗定義) 執行離線 probe。
 該節列出報告檢查與 agent 逐張 PNG 判讀的完成條件。框架 UI 的 ComponentDriver 驗收仍依該頁的框架 UI 分支。
 
-在 repo worktree 中執行以下範例。先將 `<task-id>` 換成任務名稱，並在 scratch 準備 `cfg.yaml`。
+在目前 worktree 中執行以下範例。`repo` 指向目前 worktree，供 `uv --directory` 選用該 worktree 的 interpreter。
+`main_repo` 是 Git common dir 的上層主 checkout，任務 scratch 放在這裡，清除 lane 後仍保留。
+先將 `<task-id>` 換成既有任務名稱，並在該任務的 scratch 準備 `cfg.yaml`。
 此例選用 `FreqExp`，cfg 必須是它的完整 core Cfg，不是 GUI Form 輸入或尚未解析的 library 引用。
 改測其他實驗時，替換可信任的 `module:class`，該類別須可無參數建立且提供 `AXES_SPEC`。
 依 cfg 實際 generator／ADC 通道調整 `--n-gens`、`--n-readouts` 與每條 `--route GEN:ADC`，不要照抄接線。
 
 ```bash
 repo="$(git rev-parse --show-toplevel)"
-scratch="$repo/.agent_state/plans/<task-id>/scratch/experiment-probe"
+git_common_dir="$(git rev-parse --path-format=absolute --git-common-dir)"
+main_repo="$(dirname "$git_common_dir")"
+scratch="$main_repo/.agent_state/plans/<task-id>/scratch/experiment-probe"
 mkdir -p "$scratch"
 # Prepare cfg.yaml in scratch before running this command.
 env -u QT_QPA_PLATFORMTHEME QT_QPA_PLATFORM=offscreen MPLBACKEND=Agg \
