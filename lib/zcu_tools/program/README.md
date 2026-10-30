@@ -1,6 +1,6 @@
 # `zcu_tools.program` — QICK integration
 
-**Last updated:** 2026-10-30，native IQ 與 processor-only herald 契約
+**Last updated:** 2026-10-30，joint-ADC shot sums 與 read-axis labels
 
 **讀者：** framework-dev。QICK 整合、程式建構與 acquisition 依賴速查。
 
@@ -62,6 +62,52 @@ Circle's third class is other; centroid3's third class is f. `require_other=True
 accepts only circle, and missing calibration or circle radius raises ValueError.
 The runtime builder's processed methods require `processed2signal_fn` for both
 round updates and final results. They never use a default IQ converter.
+
+## Summed acquisition
+
+`acquire_summed(soc, processor=..., rounds=1, step_rounds=False, **qick_options)`
+passes every declared ADC to one `acquisition.ShotSumProcessor`. Each float64
+array has shape `(points, reps, reads, 2)`: integer ADC integrals divided by the
+rounded integration length, without IQ-offset subtraction. Non-reps loops are
+flattened in C order. The processor returns float64 `(points, *axes)` per-point
+sums. The framework snapshots each completed round and adds its sums without
+averaging reps or rounds. Final data and round hooks have shape
+`(*point_dims, *axes)`. Invalid dtype, point count, zero-length output axes or
+changing output shape raises ValueError with expected and actual values.
+
+Hardware and simulation share this processing and accumulation path. Cancellation
+discards incomplete rounds and preserves completed sums; no completed round raises
+`StoppedPartialAcquireError`. Hardware stepped acquisition returns None at
+preparation, then `finish_acquire()` returns the summed ndarray. Simulation keeps
+its existing stepped-acquisition rejection. Explicit `threshold`, `angle` and
+`herald` options are rejected. Native `acquire` and per-ADC `acquire_processed`
+retain their existing contracts.
+
+`v2.shot_sums(prog, axes)` resolves reads after compilation. Each `v2.Classify`
+axis contributes a one-hot vector, while `v2.IQ` contributes `(1, I, Q)`. The
+processor sums their ordered outer products over reps. Repeat a read axis to
+obtain second moments. Classify uses a detached explicit classifier or the
+readout cfg's classifier. Mux axes require the cfg tone position; pulse axes
+require `tone=None`. Circle requires GE Post radius and emits g/e/other; linear
+emits g/e; centroid3 emits g/e/f. Classification boundaries match
+`v2.modules.readout.classification_processor`.
+
+Timeline read labels use emit tags, falling back to module names for untagged
+emissions. Legacy modular programs use module names. Missing or ambiguous labels
+raise ValueError listing available labels. Explicit tags retain QICK's global
+compile-time uniqueness check and RuntimeError, including collisions with native
+timed macros. Any Repeat/Branch trigger on a selected ADC or a declared/actual
+read-count mismatch is rejected. Other ADCs may still use control flow.
+`v2.split_sums(sums)` splits a final IQ axis into counts and complex conditional
+means; zero-count means are NaN without divide warnings.
+
+Build first, then resolve labels and acquire through
+`ProgramBuilder.run_program_summed(program, processor=...,
+ sums2signal_fn=..., rounds=..., options=...)`. The required converter receives
+both cumulative and final sums. It owns any normalization and signal-slot shape.
+Retry, progress and stop-condition behavior follows `run_program_processed`.
+There is no build-and-acquire summed shortcut because label resolution requires
+the compiled program.
 
 ## Shot time
 

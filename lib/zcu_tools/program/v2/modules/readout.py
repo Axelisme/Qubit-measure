@@ -228,11 +228,25 @@ def classification_processors(
             raise ValueError(
                 f"ADC {ch}: {classifier.mode} classifier has no other state; use circle"
             )
-        result[ch] = _classification_processor(classifier.model_copy(deep=True))
+        result[ch] = classification_processor(classifier)
     return result
 
 
-def _classification_processor(classifier: ReadoutClassifier) -> ShotProcessor:
+def classification_processor(classifier: ReadoutClassifier) -> ShotProcessor:
+    """Snapshot calibration as a normalized-IQ to one-hot shot processor.
+
+    classifier is circle (g/e/other), linear (g/e), or centroid3 (g/e/f).
+    Input float64 (..., 2) contains raw ADC integrals divided by readout length,
+    without offset removal. Output float64 (..., k) preserves all leading axes.
+    Circle uses strict radius and nearest-center regions; ties are other.
+    Missing circle radius raises ValueError requesting GE Post calibration.
+    Linear rotates by exp(+1j*angle), with equality assigned ground. Centroid3
+    chooses nearest center, breaking ties in g/e/f order. No cfg is mutated.
+    """
+    if isinstance(classifier, CircleClassifier) and classifier.radius is None:
+        raise ValueError("circle radius missing; run GE Post analysis")
+    classifier = classifier.model_copy(deep=True)
+
     def process(iq: NDArray[np.float64]) -> NDArray[np.float64]:
         signals = iq[..., 0] + 1j * iq[..., 1]
         if isinstance(classifier, CircleClassifier):
@@ -535,6 +549,7 @@ class PulseReadout(AbsReadout):
         Declaration and QICK timing errors propagate.
         """
         timeline = timeline if timeline is not None else "default"
+        prog.append_macro(ReadoutEmission(self, self.cfg.ro_ch, tag))
         if self.ro_freq_val is None:
             prog.send_readoutconfig(
                 self.cfg.ro_ch, self.adc_name, t=0, tag=tag, timeline=timeline
@@ -781,6 +796,7 @@ class MuxReadout(AbsReadout):
         timeline=None selects default. Legacy collection remains unavailable.
         """
         timeline = timeline if timeline is not None else "default"
+        prog.append_macro(ReadoutEmission(self, self.cfg.tones[0].ro_ch, tag))
         prog.pulse(
             self.cfg.gen_ch, self.name, t=self.cfg.pre_delay, tag=tag, timeline=timeline
         )
@@ -922,6 +938,7 @@ class MuxReadout(AbsReadout):
         playback is supported, but cfg/program must be rebuilt for any update.
         """
         length = self.total_length(prog)
+        prog.append_macro(ReadoutEmission(self, self.cfg.tones[0].ro_ch))
         prog.pulse(ch=self.cfg.gen_ch, name=self.name, t=t + self.cfg.pre_delay)
         prog.trigger(
             [tone.ro_ch for tone in self.cfg.tones], t=t + self.cfg.trig_offset

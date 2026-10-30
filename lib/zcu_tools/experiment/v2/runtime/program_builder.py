@@ -31,6 +31,7 @@ from zcu_tools.program.acquisition import (
     AcquisitionContractError,
     CancelFlagProtocol,
     ShotProcessor,
+    ShotSumProcessor,
     StoppedPartialAcquireError,
 )
 from zcu_tools.program.v2 import (
@@ -169,6 +170,28 @@ class ProcessedProgramProtocol(ProgramProtocol[object, object], Protocol):
         step_rounds: bool = False,
         **qick_options: object,
     ) -> list[NDArray[np.float64]] | None: ...
+
+
+class SummedProgramProtocol(ProgramProtocol[object, object], Protocol):
+    """Program with one joint-ADC processor returning per-point shot sums.
+
+    processor receives ADC-keyed normalized float64 (points, reps, reads, 2)
+    arrays and returns float64 (points, *axes). Completed rounds add without
+    normalization. round_hook and final data have shape (*point_dims, *axes).
+    rounds, step_rounds, native keywords and cancellation follow ProgramProtocol;
+    step_rounds=True prepares only, returning None. threshold, angle and herald
+    raise ValueError. See program.acquire_summed for shape/dtype validation.
+    """
+
+    def acquire_summed(
+        self,
+        soc: object,
+        *,
+        processor: ShotSumProcessor,
+        rounds: int = 1,
+        step_rounds: bool = False,
+        **qick_options: object,
+    ) -> NDArray[np.float64] | None: ...
 
 
 ProcessedProgramT = TypeVar("ProcessedProgramT", bound=ProcessedProgramProtocol)
@@ -524,6 +547,43 @@ class ProgramBuilder(ModuleFacade, Generic[ProgramT]):
             default_raw2signal_fn=convert,
             options=AcquireOptions() if options is None else options,
             acquire_kwargs=dict(acquire_kwargs, processors=processors),
+        )
+
+    def run_program_summed(
+        self,
+        program: SummedProgramProtocol,
+        *,
+        processor: ShotSumProcessor,
+        sums2signal_fn: Callable[[NDArray[np.float64]], SignalArray],
+        rounds: int = 1,
+        options: AcquireOptions | None = None,
+        **acquire_kwargs: object,
+    ) -> SignalArray:
+        """Run a compiled program with one processor and an explicit sum converter.
+
+        Build program first, then resolve any read labels in processor.
+        sums2signal_fn converts cumulative and final (*point_dims, *axes) sums
+        to the default signal slot's array shape. No IQ or builder-wide converter
+        is selected. rounds is a positive software round count. options controls
+        retry, progress and data stop exactly as run_program; native
+        acquire_kwargs pass through unchanged. Retries reuse program and reset
+        acquisition sums. None results raise ValueError during conversion because
+        this runner requires synchronous acquisition. Cancellation retains
+        completed-round slot data; a stop before any data retains initial NaNs.
+        """
+
+        def convert(raw: NDArray[np.float64] | None) -> SignalArray:
+            if raw is None:
+                raise ValueError("summed builder requires synchronous acquisition")
+            return sums2signal_fn(raw)
+
+        return self._run_program(
+            acquire=program.acquire_summed,
+            rounds=rounds,
+            raw2signal_fn=convert,
+            default_raw2signal_fn=convert,
+            options=AcquireOptions() if options is None else options,
+            acquire_kwargs=dict(acquire_kwargs, processor=processor),
         )
 
     def run_program_decimated(

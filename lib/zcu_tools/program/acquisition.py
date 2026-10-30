@@ -17,7 +17,7 @@ from qick.qick_asm import (
     obtain,  # pyright: ignore[reportAttributeAccessIssue]
 )
 
-from zcu_tools.program._shot_processing import validated_payload
+from zcu_tools.program._shot_processing import validated_payload, validated_sums
 from zcu_tools.progress_bar import make_pbar
 
 __all__ = [
@@ -27,6 +27,7 @@ __all__ = [
     "AcquisitionContractError",
     "TrackerProtocol",
     "ShotProcessor",
+    "ShotSumProcessor",
 ]
 
 
@@ -57,6 +58,11 @@ class _LocalCancelFlag:
 
 # Per-shot normalized [I,Q] (shots, reads, 2) -> float64 (shots, out_reads, N).
 ShotProcessor: TypeAlias = Callable[[NDArray[np.float64]], NDArray[np.float64]]
+
+# All declared ADCs, normalized (points, reps, reads, 2), to (points, *axes) sums.
+ShotSumProcessor: TypeAlias = Callable[
+    [Mapping[int, NDArray[np.float64]]], NDArray[np.float64]
+]
 
 
 RoundHookType: TypeAlias = Callable[
@@ -579,9 +585,15 @@ class RoundHookMixin(TypedAcquireMixin):
 
 class ImproveAcquireMixin(RoundHookMixin, TrackerMixin, EarlyStopMixin):
     _processors: Mapping[int, ShotProcessor] | None = None
+    _sum_processor: ShotSumProcessor | None = None
+    _summed_stepped: bool = False
 
     def acquire(
-        self, *args, _processors: Mapping[int, ShotProcessor] | None = None, **kwargs
+        self,
+        *args,
+        _processors: Mapping[int, ShotProcessor] | None = None,
+        _sum_processor: ShotSumProcessor | None = None,
+        **kwargs,
     ):
         """Acquire through the native IQ pipeline or explicit shot processors.
 
@@ -591,8 +603,28 @@ class ImproveAcquireMixin(RoundHookMixin, TrackerMixin, EarlyStopMixin):
         acquire pipeline; each new acquire resets processor output dimensions.
         """
         self._processors = _processors
+        self._sum_processor = _sum_processor
+        self._sum_shape: tuple[int, ...] | None = None
+        self._summed_stepped = _sum_processor is not None and kwargs.get(
+            "step_rounds", False
+        )
         self._processor_shapes: dict[int, tuple[int, ...]] = {}
         return super().acquire(*args, **kwargs)
+
+    def acquire_decimated(self, *args, **kwargs):
+        """Acquire native ADC traces, clearing previous summed-acquire dispatch.
+
+        Positional args and kwargs follow TypedAcquireMixin.acquire_decimated:
+        soc is required, rounds controls software averaging, and step_rounds=True
+        prepares only (None). Synchronous/finish_acquire results are ADC-ordered
+        float64 trace arrays. Native QICK timing, lookback, remove_offset,
+        round_hook and cancel_flag options pass through unchanged. Nonempty
+        herald raises ValueError. Cancellation retains completed rounds or raises
+        StoppedPartialAcquireError if none completed; transport errors propagate.
+        """
+        self._sum_processor = None
+        self._summed_stepped = False
+        return super().acquire_decimated(*args, **kwargs)
 
     def acquire_processed(
         self,
@@ -632,12 +664,123 @@ class ImproveAcquireMixin(RoundHookMixin, TrackerMixin, EarlyStopMixin):
         return self.acquire(
             soc,
             _processors=dict(processors),
+            _sum_processor=None,
             rounds=rounds,
             step_rounds=step_rounds,
             **qick_options,
         )
 
+    def acquire_summed(
+        self,
+        soc: object,
+        *,
+        processor: ShotSumProcessor,
+        rounds: int = 1,
+        step_rounds: bool = False,
+        **qick_options: object,
+    ) -> NDArray[np.float64] | None:
+        """Sum one joint-ADC processor's per-point output over completed rounds.
+
+        processor receives all declared ADCs as normalized float64 arrays of
+        shape (points, reps, reads, 2), in C-order non-reps loop order. Divide
+        integer integrals by ADC length without removing IQ offsets. Return
+        float64 (points, *axes), with positive axes fixed during this acquire.
+        Results and round_hook data have shape (*point_dims, *axes), without
+        division by reps or rounds. Invalid outputs raise ValueError with the
+        expected and actual dtype/shape. Processor exceptions propagate.
+        threshold, angle and herald options raise ValueError; other QICK options
+        are forwarded. Cancellation discards incomplete rounds, retains completed
+        sums, and raises StoppedPartialAcquireError if none completed.
+        step_rounds=True prepares hardware only and returns None; finish_round /
+        prepare_round drive rounds, and finish_acquire returns the final ndarray.
+        Simulation retains its existing rejection of stepped acquisition.
+        """
+        for option in ("threshold", "angle", "herald"):
+            if option in qick_options:
+                raise ValueError(
+                    f"acquire_summed expected {option} omitted; actual {qick_options[option]!r}"
+                )
+        round_hook = qick_options.pop("round_hook", None)
+        if round_hook is not None:
+            if not callable(round_hook):
+                raise ValueError(f"round_hook expected callable; actual {round_hook!r}")
+
+            def hook(count, data, cancel_flag):
+                round_hook(count, data[0], cancel_flag)
+
+            qick_options["round_hook"] = hook
+        result = self.acquire(
+            soc,
+            _sum_processor=processor,
+            _processors=None,
+            rounds=rounds,
+            step_rounds=step_rounds,
+            **qick_options,
+        )
+        return None if result is None else result[0]
+
+    def finish_acquire(self):
+        """Return completed acquisition data after manually driving hardware rounds.
+
+        Stepped acquire_summed returns float64 (*point_dims, *axes) sums; native
+        and processed acquisition retain ADC-ordered lists. Cancelled incomplete
+        rounds are discarded. No completed round on cancellation raises
+        StoppedPartialAcquireError. Call after finish_round has returned False.
+        """
+        result = super().finish_acquire()
+        return result[0] if self._summed_stepped and result is not None else result
+
+    def _summarize_accumulated(self, rounds_buf) -> list[NDArray[np.float64]]:
+        if self._sum_processor is not None:
+            return [
+                np.asarray(
+                    np.sum([data[0] for data in rounds_buf], axis=0, dtype=np.float64)
+                )
+            ]
+        return super()._summarize_accumulated(rounds_buf)
+
+    def _inc_summarize_accumulated(self, rounds_buf):
+        if self._sum_processor is not None:
+            if self._inc_sum_state is None:
+                self._inc_sum_state = [np.zeros_like(rounds_buf[-1][0])]
+            self._inc_sum_state[0] += rounds_buf[-1][0]
+            return [self._inc_sum_state[0].copy()]
+        return super()._inc_summarize_accumulated(rounds_buf)
+
+    def _process_summed(self, acc_buf) -> list[NDArray[np.float64]]:
+        assert isinstance(self, qick_asm.AbsQickProgram)
+        assert self.loop_dims is not None and self.avg_level is not None
+        assert self._sum_processor is not None
+        point_dims = tuple(
+            n for i, n in enumerate(self.loop_dims) if i != self.avg_level
+        )
+        points = int(np.prod(point_dims))
+        reps = self.loop_dims[self.avg_level]
+        normalized = {
+            ch: np.moveaxis(raw / ro["length"], self.avg_level, -3).reshape(
+                points, reps, ro["trigs"], 2
+            )
+            for raw, (ch, ro) in zip(acc_buf, self.ro_chs.items(), strict=True)
+        }
+        payload = validated_sums(self._sum_processor(normalized))
+        expected = self._sum_shape
+        if expected is None:
+            self._sum_shape = payload.shape
+        if (
+            payload.ndim < 1
+            or payload.shape[0] != points
+            or any(size < 1 for size in payload.shape[1:])
+            or (expected is not None and payload.shape != expected)
+        ):
+            raise ValueError(
+                f"processor expected shape {expected or f'({points}, *positive_axes)'}; "
+                f"actual shape {payload.shape}"
+            )
+        return [payload.reshape(point_dims + payload.shape[1:]).copy()]
+
     def _process_accumulated(self, acc_buf) -> list[NDArray[np.float64]]:
+        if self._sum_processor is not None:
+            return self._process_summed(acc_buf)
         if self._processors is None:
             return super()._process_accumulated(acc_buf)
         assert isinstance(self, qick_asm.AbsQickProgram)

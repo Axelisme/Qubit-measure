@@ -30,6 +30,87 @@ from tests.experiment.v2.runtime._flow_fakes import (
 from tests.program._acquisition_soc import make_chunk_acquisition
 
 
+@pytest.mark.parametrize(
+    "ending", ["complete", "data_stop", "external_stop", "before_data", "retry"]
+)
+def test_summed_builder_converts_cumulative_and_final_sums_and_keeps_run_policy(
+    monkeypatch: pytest.MonkeyPatch,
+    ending: str,
+) -> None:
+    soc, source = make_chunk_acquisition(reps=2)
+    scope = Scope("run")
+    signals = SignalBuffer((1,))
+    converted = []
+    calls = 0
+    progress_bars: list[RecordingProgressBar] = []
+
+    def poll():
+        nonlocal calls
+        calls += 1
+        if ending == "before_data":
+            scope.stop.set()
+            return []
+        if ending == "retry" and calls == 1:
+            raise RuntimeError("transport unavailable")
+        first = calls == (2 if ending == "retry" else 1)
+        raw = np.full((4, 2), 3 if first else 9, dtype=np.int64)
+        return [(2, ([raw * source.ro_chs[0]["length"]], {}))]
+
+    def processor(iq):
+        values = iq[0][:, :, 0]
+        return np.concatenate([np.ones((*values.shape[:-1], 1)), values], axis=-1).sum(
+            axis=1
+        )
+
+    monkeypatch.setattr(soc, "poll_data", poll)
+    result = signals.array
+    with (
+        use_pbar_factory(recording_pbar_factory(progress_bars)),
+        Schedule(_cfg(), signals, scope=scope) as sched,
+    ):
+        builder = sched.prog_builder(soc, source.soccfg, reps=2).add(*source.modules)
+        prog = builder.build()
+
+        def convert(sums: NDArray[np.float64]) -> NDArray[np.complex128]:
+            converted.append(sums.copy())
+            if ending == "external_stop":
+                scope.stop.set()
+            return np.array([sums[1] / sums[0]], dtype=np.complex128)
+
+        def wrong_converter(_payload):
+            pytest.fail("summed data reached the builder-wide IQ converter")
+
+        builder.set_raw2signal_fn(wrong_converter)
+        result = builder.run_program_summed(
+            prog,
+            processor=processor,
+            sums2signal_fn=convert,
+            rounds=2,
+            options=AcquireOptions(
+                retry=1,
+                stop_condition=lambda: ending == "data_stop",
+                progress_label="sum rounds",
+            ),
+        )
+        assert sched.outcome.status == (
+            "stopped" if ending in {"external_stop", "before_data"} else "completed"
+        )
+    if ending == "before_data":
+        assert converted == []
+        assert np.isnan(result).all()
+    else:
+        np.testing.assert_array_equal(converted[0], [2, 6, 6])
+        complete = ending in {"complete", "retry"}
+        np.testing.assert_array_equal(result, [6 if complete else 3])
+        assert len(converted) == (3 if complete else 2 if ending == "data_stop" else 1)
+        if complete:
+            np.testing.assert_array_equal(converted[-1], [4, 24, 24])
+    rounds_bar = next(bar for bar in progress_bars if bar.desc == "sum rounds")
+    assert rounds_bar.total == 2
+    assert rounds_bar.reset_count == (2 if ending == "retry" else 1)
+    assert rounds_bar.closed
+
+
 @pytest.mark.parametrize("build", [False, True])
 @pytest.mark.parametrize(
     "ending", ["complete", "data_stop", "external_stop", "before_data"]

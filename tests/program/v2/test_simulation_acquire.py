@@ -50,6 +50,78 @@ def program(env, *, reps=2, channels=(0,), samples=16, reads=1, sweep=None):
     )
 
 
+def test_summed_simulation_materializes_joint_shots_and_retains_completed_rounds():
+    env = environment(std_adc=0, seed=123, n_gens=2, n_readouts=2)
+    prog = program(env, reps=3, channels=(1, 0), sweep=[("point", 2)])
+    inputs = []
+    hooks = []
+
+    def processor(iq):
+        inputs.append(iq)
+        return np.full((2, 2, 3), 3.0, dtype=np.float64)
+
+    def hook(count, sums, stop):
+        hooks.append(sums.copy())
+        if count == 2:
+            stop.set()
+
+    result = prog.acquire_summed(
+        env.soc, processor=processor, rounds=3, round_hook=hook, progress=False
+    )
+    np.testing.assert_array_equal(result, np.full((2, 2, 3), 6.0))
+    np.testing.assert_array_equal(hooks[0], np.full((2, 2, 3), 3.0))
+    assert len(inputs) == 2
+    assert list(inputs[0]) == [1, 0]
+    for values in inputs[0].values():
+        assert values.shape == (2, 3, 1, 2)
+        assert values.dtype == np.float64
+        np.testing.assert_array_equal(values, 0)
+    stopped = Event()
+    stopped.set()
+    with pytest.raises(StoppedPartialAcquireError):
+        prog.acquire_summed(
+            env.soc, processor=processor, cancel_flag=stopped, progress=False
+        )
+
+
+@pytest.mark.parametrize("completed", [False, True])
+def test_summed_simulation_discards_interrupted_round(completed):
+    env = environment(std_adc=0, seed=123)
+    prog = program(env)
+    execute = env.soc.binding.execute
+    stop = Event()
+    hooks = []
+
+    def source(request):
+        if request.index == int(completed):
+            stop.set()
+            raise Cancelled()
+        return execute(request)
+
+    env.soc.binding.execute = source
+    try:
+
+        def acquire():
+            return prog.acquire_summed(
+                env.soc,
+                processor=lambda iq: np.full((1, 3), 2.0),
+                rounds=3,
+                progress=False,
+                cancel_flag=stop,
+                round_hook=lambda count, data, flag: hooks.append(data.copy()),
+            )
+
+        if completed:
+            np.testing.assert_array_equal(acquire(), [2, 2, 2])
+            np.testing.assert_array_equal(hooks, [[2, 2, 2]])
+        else:
+            with pytest.raises(StoppedPartialAcquireError):
+                acquire()
+            assert hooks == []
+    finally:
+        env.devices.close_all_devices()
+
+
 def raw_of(prog):
     raw = prog.get_raw()
     if raw is None:

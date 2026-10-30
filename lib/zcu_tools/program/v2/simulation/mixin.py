@@ -110,8 +110,10 @@ class SimulationAcquireMixin(ImproveAcquireMixin):
         assert self.acquire_params is not None
         assert self.loop_dims is not None
         params = self.acquire_params
-        self._simulation_needs_raw = self._processors is not None or any(
-            params.get(key) is not None for key in ("threshold", "trackers")
+        self._simulation_needs_raw = (
+            self._processors is not None
+            or self._sum_processor is not None
+            or any(params.get(key) is not None for key in ("threshold", "trackers"))
         )
         self._simulation_normalization: list[tuple[int | None, float | None]] = []
         for ch, ro in self._program().ro_chs.items():
