@@ -1,21 +1,40 @@
 """Relative timeline state, native channel tails and repeat scope bookkeeping."""
 
 import warnings
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from qick.asm_v2 import QickParam, WriteReg
 
-from ._timeline_expression import CycleVariable, LinearTime, expression_bounds
+from ._timeline_expression import (
+    CycleVariable,
+    LinearTime,
+    TimeExpression,
+    add_time,
+    choose_time,
+    exact_bounds,
+    expression_axes,
+    multiply_time,
+    projected_expression_bounds,
+    reduce_loop_time,
+    scale_time,
+    select_time,
+    slack_variables,
+)
 from ._timeline_guard import PulseGuard as _PulseGuard
 from ._timeline_guard import bounds
 from ._timeline_runtime import (
     RuntimeEnd,
     RuntimeMath,
     Time,
+    bounded_source_expression,
+    lookup_expression,
     projected_bounds,
-    runtime_expression,
+    source_expression,
     time_bounds,
+    time_expression,
 )
+from .macro.table import TableSelection
+from .macro.write_reg import WriteRegOp
 
 
 @dataclass(frozen=True)
@@ -32,6 +51,7 @@ class RepeatFrameSnapshot:
     written_gens: set[int]
     written_ros: set[int]
     pulse_guards: dict[int, _PulseGuard]
+    expression_advance: TimeExpression
 
 
 @dataclass
@@ -54,6 +74,89 @@ class RepeatFrame:
     tail_ros: dict[int, RuntimeEnd] = field(default_factory=dict)
     initial_runtime_gens: dict[int, RuntimeEnd] = field(default_factory=dict)
     initial_runtime_ros: dict[int, RuntimeEnd] = field(default_factory=dict)
+    expression_advance: TimeExpression = field(default_factory=LinearTime)
+
+    def restore_expressions(
+        self,
+        prog,
+        count: TimeExpression,
+        generated_gens: dict[int, Time],
+        generated_ros: dict[int, Time],
+        *,
+        axis: str,
+    ) -> None:
+        """Restore total Repeat debit provenance without changing register plans.
+
+        External tails lose count times the iteration's actual advance. Events
+        generated inside the loop instead keep their last-iteration remainder.
+        """
+        total = (
+            reduce_loop_time(self.expression_advance, axis)
+            if axis in expression_axes(self.expression_advance)
+            else multiply_time(self.expression_advance, count)
+        )
+        book = prog._timeline_book
+        for outer in book.repeats:
+            outer.expression_advance = add_time(
+                outer.expression_advance,
+                add_time(total, scale_time(self.expression_advance, -1)),
+            )
+        for name, initial in self.initial_external.items():
+            current = book.ends[name]
+            if isinstance(current, RuntimeEnd):
+                expression = choose_time(
+                    LinearTime(),
+                    add_time(time_expression(prog, initial), scale_time(total, -1)),
+                )
+                book.ends[name] = replace(current, expression=expression)
+        for native, initial_runtime, current, generated, written in (
+            (
+                self.native_gens,
+                self.initial_runtime_gens,
+                book.runtime_gens,
+                generated_gens,
+                self.written_gens,
+            ),
+            (
+                self.native_ros,
+                self.initial_runtime_ros,
+                book.runtime_ros,
+                generated_ros,
+                self.written_ros,
+            ),
+        ):
+            for ch, end in current.items():
+                initial = initial_runtime.get(ch, native[ch])
+                expression = (
+                    select_time(
+                        choose_time(LinearTime(1), count, maximum=False),
+                        (
+                            time_expression(prog, initial),
+                            time_expression(prog, generated[ch]),
+                        ),
+                    )
+                    if ch in written
+                    else choose_time(
+                        LinearTime(),
+                        add_time(time_expression(prog, initial), scale_time(total, -1)),
+                    )
+                )
+                current[ch] = replace(end, expression=expression)
+        for name, expression in book.source_expressions.items():
+            if axis in expression_axes(expression):
+                book.source_expressions[name] = reduce_loop_time(
+                    expression, axis, last=True
+                )
+        book.source_expressions[axis] = LinearTime(0)
+
+    def merge_expression_advance(
+        self, prog, selector: str, snapshots: list[RepeatFrameSnapshot]
+    ) -> None:
+        """Retain the branch-selected iteration advance on the selector's axis."""
+        self.expression_advance = select_time(
+            source_expression(prog, selector),
+            tuple(s.expression_advance for s in snapshots),
+        )
 
     def promote(
         self, prog, generated_gens: dict[int, Time], generated_ros: dict[int, Time]
@@ -173,7 +276,12 @@ class TimelineBook:
 
     def __init__(self):
         self.ends: dict[str, Time] = {"default": 0.0}
+        self.shell_wait_bound: int | None = None
         self.cycle_axes: dict[str, CycleVariable] = {}
+        self.source_expressions: dict[str, TimeExpression] = {}
+        self.source_branches: list[
+            tuple[dict[str, TimeExpression], list[dict[str, TimeExpression]]]
+        ] = []
         self.math: RuntimeMath
         self.preparing = 0
         self.pinned: set[str] = set()
@@ -183,6 +291,102 @@ class TimelineBook:
         self.repeats: list[RepeatFrame] = []
         self.native_only = False
         self.used: set[str] | None = None
+
+    def repeat_count(
+        self, prog, iterations: int | str, minimum: int, maximum: int
+    ) -> TimeExpression:
+        """Describe count points without requiring a bounds-only count producer."""
+        return (
+            bounded_source_expression(prog, iterations, minimum, maximum)
+            if isinstance(iterations, str)
+            else LinearTime(iterations)
+        )
+
+    def observe_selection(
+        self, prog, register: str, selection: TableSelection | None
+    ) -> None:
+        """Capture ordinary/selected table values after a valid producer occurrence.
+
+        Invalid or undefined inputs remain the producer audit's deferred error;
+        non-time lookups must not gain a new timing initialization requirement.
+        """
+        if selection is None or selection.register != register:
+            return
+        if prog._time_bounds.input_errors.get(register):
+            self.source_expressions.pop(register, None)
+            return
+        self.source_expressions[register] = lookup_expression(
+            prog, register, selection.table.values, selection.selector
+        )
+
+    def selected_expression(
+        self, prog, selector: str, values: list[Time]
+    ) -> TimeExpression:
+        """Select path ends at their common sweep index without interval union."""
+        return select_time(
+            source_expression(prog, selector),
+            tuple(time_expression(prog, v) for v in values),
+        )
+
+    def begin_branch_sources(self) -> None:
+        """Save incoming source expressions and start collecting branch cases."""
+        self.source_branches.append((self.source_expressions.copy(), []))
+
+    def restore_branch_sources(self) -> None:
+        """Start a case with the same incoming source values as its siblings."""
+        self.source_expressions = self.source_branches[-1][0].copy()
+
+    def record_branch_sources(self) -> None:
+        """Capture source values after this case's local timeline closure."""
+        self.source_branches[-1][1].append(self.source_expressions.copy())
+
+    def finish_branch_sources(self, prog, selector: str) -> None:
+        """Merge only register sources defined on every branch path."""
+        _, snapshots = self.source_branches.pop()
+        self.source_expressions = {
+            name: select_time(
+                source_expression(prog, selector),
+                tuple(snapshot[name] for snapshot in snapshots),
+            )
+            for name in set.intersection(*(set(snapshot) for snapshot in snapshots))
+        }
+
+    def observe_write(self, prog, macro) -> None:
+        """Keep current native constant/copy/add/subtract point metadata in sync."""
+        if type(macro) is WriteReg:
+            if isinstance(macro.src, int):
+                self.source_expressions[macro.dst] = LinearTime(macro.src)
+            elif isinstance(macro.src, str) and self._known_source(prog, macro.src):
+                self.source_expressions[macro.dst] = source_expression(prog, macro.src)
+            else:
+                self.source_expressions.pop(macro.dst, None)
+        elif type(macro) is WriteRegOp:
+            self._observe_alu(prog, macro)
+
+    def _known_source(self, prog, name: str) -> bool:
+        register = prog.reg_dict.get(name)
+        return (
+            name in self.source_expressions
+            or name in prog.loop_dict
+            or (register is not None and register.init is not None)
+        )
+
+    def _observe_alu(self, prog, macro: WriteRegOp) -> None:
+        if macro.op not in ("+", "-") or not self._known_source(prog, macro.lhs):
+            self.source_expressions.pop(macro.dst, None)
+            return
+        right = macro.rhs
+        if isinstance(right, int):
+            rhs = LinearTime(right)
+        elif isinstance(right, str) and self._known_source(prog, right):
+            rhs = source_expression(prog, right)
+        else:
+            self.source_expressions.pop(macro.dst, None)
+            return
+        self.source_expressions[macro.dst] = add_time(
+            source_expression(prog, macro.lhs),
+            rhs if macro.op == "+" else scale_time(rhs, -1),
+        )
 
     def set_end(self, name: str, end: Time) -> None:
         self.math.check_end(end)
@@ -246,6 +450,9 @@ class TimelineBook:
             if observe_pulses:
                 for active in self.repeats:
                     active.debits.append((self.math, t))
+                    active.expression_advance = add_time(
+                        active.expression_advance, time_expression(self.math.prog, t)
+                    )
             frame = self.repeats[-1]
             proof_advance = (
                 time_bounds(self.math.prog, t)[0] if isinstance(t, RuntimeEnd) else t
@@ -304,33 +511,35 @@ class TimelineBook:
         return result
 
     def check_shell_wait(self, prog) -> None:
-        """Diagnose a linear ADC WAIT remainder after final body closure.
+        """Project final ADC WAIT and diagnose slack after all body cancellation.
 
-        This checkpoint covers a single ADC expression only. General pointwise
-        maxima need the pending actual-minimum domain decision.
+        Known producers use exact legal-point extrema. A bounds-only unknown
+        emits an explicitly conservative warning and never triggers the relax
+        guard. This check emits no runtime instructions.
         """
-        if len(prog.ro_chs) != 1:
+        if not prog.ro_chs:
             return
-        (ch,) = prog.ro_chs
-        end = self.channel_end(prog, ch, generator=False)
-        if not isinstance(end, RuntimeEnd):
-            return
-        expression = runtime_expression(end)
-        if not isinstance(expression, LinearTime):
-            return
-        lower, upper = expression_bounds(expression)
+        expression = choose_time(
+            *(
+                time_expression(prog, self.channel_end(prog, ch, generator=False))
+                for ch in prog.ro_chs
+            )
+        )
+        exact = exact_bounds(expression)
+        lower, upper = exact or projected_expression_bounds(expression)
+        # Keep native timestamps untouched: final_delay must still use its
+        # original pointwise reference advance, not the scalar shell WAIT.
+        self.shell_wait_bound = upper
         slack = upper - lower
         if slack > 0:
-            variables = sorted(
-                variable.name
-                for variable, _ in expression.terms
-                if variable.minimum != variable.maximum
-            )
+            variables = slack_variables(expression)
             message = (
                 f"Shell WAIT static bound: variables={variables}, slack={slack} cycles"
             )
             relax = prog.us2cycles(prog.relax_delay)
-            if slack > relax:
+            if exact is None:
+                message += " (slack upper bound, not actual slack)"
+            elif slack > relax:
                 raise ValueError(f"{message}, relax={relax} cycles")
             warnings.warn(message, UserWarning, stacklevel=2)
 

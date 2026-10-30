@@ -129,6 +129,7 @@ class LoadValue(Module):
                 self.val_reg,
                 CycleBounds(min(self.values), max(self.values)),
                 dependency_ranges={index: CycleBounds(0, len(self.values) - 1)},
+                selection=TableSelection(self._table, self.val_reg, index),
             ):
                 self._emit_lookup(prog, index)
 

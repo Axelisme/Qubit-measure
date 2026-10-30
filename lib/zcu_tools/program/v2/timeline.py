@@ -30,6 +30,7 @@ from ._timeline_macros import (
     TimelineRepeatEnter,
     TimelineRepeatExit,
     TimelineRuntimeAdvance,
+    TimelineShellWait,
     TimelineSync,
     TimeProducer,
 )
@@ -231,7 +232,7 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
             self._building_body = False
         self.append_macro(TimelineSync(self._timeline_book, None))
         self.append_macro(TimelineBoundary(self._timeline_book, "body_end"))
-        self.wait_auto(self.final_wait, no_warn=True)
+        self.append_macro(TimelineShellWait(self._timeline_book, self.final_wait))
         if self.final_delay is not None:
             self.delay_auto(self.final_delay)
         self.inc_ext_counter(addr=self.COUNTER_ADDR)
@@ -559,6 +560,8 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         selection optionally binds selected playback to a declared scalar table
         and captured index; only matching loader writers can write that relation.
         Ordinary time producers do not enable this additional relation audit.
+        The same selection metadata also retains unpacked lookup values and
+        the current index for exact legal-point timing of ordinary scalar loads.
         Checks use conservative whole-program bounds, including later writes,
         so a subsequent index reset cannot hide an earlier invalid lookup.
         This seam is for known table/runtime-length owners, not arbitrary author
@@ -770,6 +773,8 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
                     minimum,
                     range_hint[1] if range_hint is not None else minimum,
                     variable=range_hint is not None and minimum != range_hint[1],
+                    iterations=n,
+                    axis=name,
                 )
             )
             if isinstance(n, str):

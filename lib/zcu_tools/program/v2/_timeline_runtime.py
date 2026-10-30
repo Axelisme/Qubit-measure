@@ -13,7 +13,9 @@ from ._timeline_expression import (
     TimeExpression,
     add_time,
     choose_time,
-    expression_bounds,
+    evaluate_time,
+    expression_axes,
+    projected_expression_bounds,
     scale_time,
 )
 from ._timeline_guard import bounds
@@ -143,9 +145,98 @@ def runtime_expression(value: RuntimeEnd) -> TimeExpression:
 def projected_bounds(prog, value: "Time") -> tuple[float, float]:
     """Project correlated cycle bounds only at a native timestamp boundary."""
     if isinstance(value, RuntimeEnd):
-        lower, upper = expression_bounds(runtime_expression(value))
+        expression = runtime_expression(value)
+        lower, upper = projected_expression_bounds(expression)
         return lower / get_fclk(prog), upper / get_fclk(prog)
     return bounds(value)
+
+
+def parameter_expression(
+    prog, value: float | QickParam, *, cycles: bool = False
+) -> TimeExpression:
+    """Describe an already-rounded native parameter without emitting instructions.
+
+    Inputs normally use us; cycles=True describes raw register initialization.
+    Shared loop names use the same compiler-owned variable identity.
+    """
+    factor = 1 if cycles else get_fclk(prog)
+    if not isinstance(value, QickParam):
+        return LinearTime(round(value * factor))
+    axes = prog._timeline_book.cycle_axes
+    terms: list[tuple[CycleVariable, int]] = []
+    for name, span in value.spans.items():
+        count = prog.loop_dict[name]
+        if count > 1:
+            if name not in axes:
+                axes[name] = CycleVariable(name, 0, count - 1, ((name, count),))
+            terms.append((axes[name], round(span * factor / (count - 1))))
+    return LinearTime(round(value.start * factor), tuple(terms))
+
+
+def time_expression(prog, value: "Time") -> TimeExpression:
+    """Describe a relative end in integer cycles without register allocation."""
+    return (
+        runtime_expression(value)
+        if isinstance(value, RuntimeEnd)
+        else parameter_expression(prog, value)
+    )
+
+
+def source_expression(prog, name: str) -> TimeExpression:
+    """Return a register's current point provenance, or its certified unknown range."""
+    book = prog._timeline_book
+    if name in book.source_expressions:
+        return book.source_expressions[name]
+    if name in prog.loop_dict:
+        count = prog.loop_dict[name]
+        if name not in book.cycle_axes:
+            book.cycle_axes[name] = CycleVariable(name, 0, count - 1, ((name, count),))
+        return LinearTime(terms=((book.cycle_axes[name], 1),))
+    register = prog.reg_dict.get(name)
+    if register is not None and register.init is not None:
+        raw = register.init
+        return parameter_expression(prog, QickParam(raw.start, raw.spans), cycles=True)
+    limits = prog._time_bounds.describe(prog, name)
+    if limits.minimum == limits.maximum:
+        return LinearTime(limits.minimum)
+    return LinearTime(terms=((CycleVariable(name, limits.minimum, limits.maximum), 1),))
+
+
+def bounded_source_expression(
+    prog, name: str, minimum: int, maximum: int
+) -> TimeExpression:
+    """Describe a Repeat count using known points or its author-guaranteed range."""
+    register = prog.reg_dict.get(name)
+    if (
+        name in prog._timeline_book.source_expressions
+        or name in prog.loop_dict
+        or (register is not None and register.init is not None)
+    ):
+        return source_expression(prog, name)
+    return (
+        LinearTime(minimum)
+        if minimum == maximum
+        else LinearTime(terms=((CycleVariable(name, minimum, maximum), 1),))
+    )
+
+
+def lookup_expression(
+    prog, name: str, values: tuple[int, ...], selector: str
+) -> TimeExpression:
+    """Preserve one lookup's legal points using the selector at this occurrence."""
+    index = source_expression(prog, selector)
+    axes = expression_axes(index)
+    points = evaluate_time(index, axes)
+    if points is None:
+        return LinearTime(terms=((CycleVariable(name, min(values), max(values)), 1),))
+    selected = np.asarray(values, dtype=np.int64)[points]
+    lower, upper = int(selected.min()), int(selected.max())
+    if lower == upper:
+        return LinearTime(lower)
+    variable = CycleVariable(
+        name, lower, upper, tuple(axes.items()), tuple(int(v) for v in selected.flat)
+    )
+    return LinearTime(terms=((variable, 1),))
 
 
 Time = float | QickParam | RuntimeEnd
@@ -219,6 +310,16 @@ class RuntimeMath(TimedMacro):
         if previous is not None:
             self.claimed.update(previous.claimed)
 
+    def source(self, name: str) -> RuntimeEnd:
+        """Describe a certified register at this consumer, retaining known points."""
+        limits = self.prog._time_bounds.source(self.prog, name)
+        return RuntimeEnd(
+            name,
+            limits.minimum,
+            limits.maximum,
+            expression=source_expression(self.prog, name),
+        )
+
     def lookup(self, values: list[int], axes: dict[str, int]) -> RuntimeEnd:
         """Materialize exact nonnegative cycle points over native sweep axes.
 
@@ -249,7 +350,17 @@ class RuntimeMath(TimedMacro):
         proof.defined.add(register)
         proof.watch_signed(self.prog, register)
         self.operations.append(operation)
-        return RuntimeEnd(register, lower, upper)
+        expression = LinearTime(
+            terms=(
+                (
+                    CycleVariable(
+                        register, lower, upper, tuple(axes.items()), tuple(values)
+                    ),
+                    1,
+                ),
+            )
+        )
+        return RuntimeEnd(register, lower, upper, expression=expression)
 
     def _selected_axes(self, values: tuple[float | QickParam, ...]) -> dict[str, int]:
         spans = set().union(
@@ -357,19 +468,7 @@ class RuntimeMath(TimedMacro):
         self.check(lower, upper)
         operand = self.t_regs[key]
         if isinstance(operand, str):
-            axes = self.prog._timeline_book.cycle_axes
-            terms: list[tuple[CycleVariable, int]] = []
-            for name, span in rounded.spans.items():
-                count = self.prog.loop_dict[name]
-                if count > 1:
-                    if name not in axes:
-                        axes[name] = CycleVariable(name, 0, count - 1)
-                    terms.append(
-                        (axes[name], round(span * get_fclk(self.prog) / (count - 1)))
-                    )
-            expression = LinearTime(
-                round(rounded.start * get_fclk(self.prog)), tuple(terms)
-            )
+            expression = parameter_expression(self.prog, rounded)
             return RuntimeEnd(operand, lower, upper, expression=expression)
         if operand == 0:
             return RuntimeEnd("s0", 0, 0)

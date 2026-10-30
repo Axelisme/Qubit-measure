@@ -170,6 +170,15 @@ class ProducerBounds:
             except ValueError as exc:
                 self.input_errors.setdefault(name, []).append(str(exc))
 
+    def describe(self, prog, name: str) -> CycleBounds:
+        """Read current producer bounds without activating a timing audit.
+
+        Metadata capture for non-time scalar lookups must not turn them into
+        timing consumers. Actual consumers still call source() for full proof.
+        Unknown or uninitialized sources raise ValueError.
+        """
+        return self._resolve(prog, name, check_defined=True)
+
     def source(self, prog, name: str, *, check_defined: bool = True) -> CycleBounds:
         """Resolve a nonnegative cycle source and all of its producer dependencies.
 

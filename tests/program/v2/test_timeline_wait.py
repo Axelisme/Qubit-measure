@@ -11,7 +11,7 @@ from zcu_tools.program.v2.mocksoc import make_mock_soccfg, make_mux_mock_soccfg
 from zcu_tools.program.v2.modules import DelayAuto, LoadValue
 from zcu_tools.program.v2.modules.readout import MuxReadoutCfg, PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
-from zcu_tools.program.v2.timeline import TimelineProgramV2
+from zcu_tools.program.v2.timeline import CycleBounds, TimelineProgramV2
 
 from .timing_support import shots, waves
 
@@ -312,6 +312,169 @@ def test_shell_wait_slack_equal_to_relax_warns_without_rejection():
 def test_constant_shell_wait_has_zero_slack_even_with_no_relax(tail):
     prog = variable_tail_program(relax_cycles=0, tail_cycles=(tail, tail))
     assert shell_wait(prog) == tail
+
+
+def opposing_tail_program(
+    values: tuple[int, ...], *, relax_cycles: int = 100, feedback: bool = False
+):
+    """Two ADCs share an index but use opposite table origins; body ends at zero."""
+    left = LoadValue("left", values, "axis", "left_cycles")
+    right = LoadValue("right", [100 - x for x in values], "axis", "right_cycles")
+
+    class Program(TimelineProgramV2):
+        def _initialize(self, cfg):
+            self.add_loop("axis", len(values))
+            self.declare(left)
+            self.declare(right)
+            for ch in (0, 1):
+                self.declare_readout(ch, length=50 / 307.2)
+            if feedback:
+                self.add_reg("feedback_cycles")
+
+        def _body(self, cfg):
+            self.fork("default", into="other")
+            for loader, register, timeline, ro in (
+                (left, "left_cycles", "default", 0),
+                (right, "right_cycles", "other", 1),
+            ):
+                self.emit(loader)
+                self.delay_timeline(register, timeline=timeline)
+                self.trigger(ros=[ro], width=1 / 430.08, timeline=timeline)
+                self.delay_timeline(-200 / 430.08, timeline=timeline)
+            if feedback:
+                with self.time_producer("feedback_cycles", CycleBounds(0, 31)):
+                    self.write_reg_op("feedback_cycles", "s11", "AND", 31)
+                self.delay_timeline("feedback_cycles")
+
+    return Program(
+        make_mock_soccfg(0, 2), initial_delay=0, relax_delay=relax_cycles / 430.08
+    )
+
+
+def test_shared_axis_lookup_maximum_warns_with_exact_discrete_slack():
+    with pytest.warns(
+        UserWarning, match=r"WAIT.*left_cycles.*right_cycles.*slack=50 cycles"
+    ):
+        prog = opposing_tail_program((0, 50, 100))
+    assert shell_wait(prog) == 170
+    result = shots(prog)
+    assert [s.body_end_cycle - s.start_cycle for s in result] == [0, 0, 0]
+
+
+@pytest.mark.filterwarnings("error")
+def test_shared_axis_lookup_maximum_is_constant_on_two_legal_points():
+    prog = opposing_tail_program((0, 100), relax_cycles=0)
+    assert shell_wait(prog) == 170
+
+
+def test_unknown_wait_warns_with_slack_bound_without_rejecting_above_relax():
+    with pytest.warns(
+        UserWarning,
+        match=r"WAIT.*feedback_cycles.*slack=31 cycles.*upper bound.*not actual",
+    ):
+        prog = opposing_tail_program((0, 100), relax_cycles=0, feedback=True)
+    assert shell_wait(prog) == 170
+
+
+def test_shell_bound_does_not_replace_native_swept_final_reference_advance():
+    class Program(TimelineProgramV2):
+        def _initialize(self, cfg):
+            self.add_loop("axis", 3)
+            for ch in (0, 1):
+                self.declare_readout(ch, length=50 / 307.2)
+
+        def _body(self, cfg):
+            self.trigger(
+                ros=[0], t=QickSweep1D("axis", 0, 100 / 430.08), width=1 / 430.08
+            )
+            self.trigger(
+                ros=[1], t=QickSweep1D("axis", 100 / 430.08, 0), width=1 / 430.08
+            )
+
+    with pytest.warns(UserWarning, match=r"WAIT.*axis.*slack=50 cycles"):
+        prog = Program(
+            make_mock_soccfg(0, 2), initial_delay=0, relax_delay=100 / 430.08
+        )
+    assert shell_wait(prog) == 170
+    assert [s.end_cycle - s.start_cycle for s in shots(prog)] == [270, 220, 270]
+
+
+def test_table_derived_repeat_count_keeps_exact_wait_slack():
+    origin = LoadValue("origin", [40, 40, 40], "axis", "origin_cycles")
+    count = LoadValue("counts", [1, 3, 2], "axis", "count_cycles")
+
+    class Program(TimelineProgramV2):
+        def _initialize(self, cfg):
+            self.add_loop("axis", 3)
+            self.declare(origin)
+            self.declare(count)
+            self.declare_readout(0, length=50 / 307.2)
+
+        def _body(self, cfg):
+            self.emit(origin)
+            self.emit(count)
+            self.delay_timeline("origin_cycles")
+            self.trigger(ros=[0], width=1 / 430.08, timeline="default")
+            self.delay_timeline(-200 / 430.08)
+            with self.repeat("repeat", "count_cycles", range_hint=(1, 3)):
+                self.delay_timeline(10 / 430.08)
+
+    with pytest.warns(
+        UserWarning, match=r"WAIT.*count_cycles.*slack=20 cycles"
+    ) as caught:
+        prog = Program(make_mock_soccfg(0, 1), initial_delay=0, relax_delay=20 / 430.08)
+    assert all("not actual" not in str(w.message) for w in caught)
+    assert shell_wait(prog) == 100
+    assert [s.body_end_cycle - s.start_cycle for s in shots(prog)] == [10, 30, 20]
+
+
+@pytest.mark.filterwarnings("error")
+@pytest.mark.parametrize("reuse_after", [False, True])
+def test_fixed_repeat_table_advance_sums_legal_iterations_before_wait_projection(
+    reuse_after,
+):
+    delays = LoadValue("delays", [10, 20], "inner", "delay_cycles")
+
+    class Program(TimelineProgramV2):
+        def _initialize(self, cfg):
+            self.declare(delays)
+            self.declare_readout(0, length=50 / 307.2)
+
+        def _body(self, cfg):
+            self.trigger(ros=[0], width=1 / 430.08)
+            with self.repeat("inner", 2):
+                self.emit(delays)
+                self.delay_timeline("delay_cycles")
+            if reuse_after:
+                self.delay_timeline("delay_cycles")
+
+    prog = Program(make_mock_soccfg(0, 1), initial_delay=0, relax_delay=0)
+    assert shell_wait(prog) == (20 if reuse_after else 40)
+    assert [s.body_end_cycle - s.start_cycle for s in shots(prog)] == [
+        50 if reuse_after else 30
+    ]
+
+
+@pytest.mark.filterwarnings("error")
+def test_fixed_repeat_readout_keeps_only_the_last_iteration_adc_tail():
+    delays = LoadValue("delays", [10, 20], "inner", "delay_cycles")
+
+    class Program(TimelineProgramV2):
+        def _initialize(self, cfg):
+            self.declare(delays)
+            self.declare_readout(0, length=50 / 307.2)
+
+        def _body(self, cfg):
+            with self.repeat("inner", 2):
+                self.emit(delays)
+                self.delay_timeline(60 / 430.08)
+                self.trigger(ros=[0], width=1 / 430.08, timeline="default")
+                self.delay_timeline(-40 / 430.08)
+                self.delay_timeline("delay_cycles")
+
+    prog = Program(make_mock_soccfg(0, 1), initial_delay=0, relax_delay=0)
+    assert shell_wait(prog) == 20
+    assert [s.body_end_cycle - s.start_cycle for s in shots(prog)] == [210]
 
 
 def test_crossing_body_maximum_retains_positive_adc_remainder():

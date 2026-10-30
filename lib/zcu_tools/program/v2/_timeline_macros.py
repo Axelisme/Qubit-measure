@@ -1,5 +1,8 @@
 """Preprocess timeline operations and translate their flag-free cycle plans."""
 
+# tolerated(file-size): Branch/Repeat preparation shares TimelineBook frame and
+# provenance state; snapshot/restore wiring must follow the same preparation order.
+
 from collections.abc import Generator, Mapping, Sequence
 from contextlib import contextmanager
 from copy import deepcopy
@@ -15,6 +18,7 @@ from qick.asm_v2 import (
     OpenLoop,
     QickParam,
     TimedMacro,
+    Wait,
     WriteReg,
 )
 
@@ -125,8 +129,7 @@ class TimelineRuntimeAdvance(Macro):
         ):
             self.book.decrement(advance)
             return
-        limits = prog._time_bounds.source(prog, self.source.time_reg)
-        runtime = RuntimeEnd(self.source.time_reg, limits.minimum, limits.maximum)
+        runtime = self.book.math.source(self.source.time_reg)
         self.book.decrement(self.book.math.add(runtime, advance))
 
     def translate(self, prog) -> None:
@@ -145,6 +148,9 @@ class TimelineBoundary(Macro):
         if self.section == "reset":
             self.book.ends = {"default": 0.0}
             self.book.cycle_axes.clear()
+            self.book.source_expressions.clear()
+            self.book.source_branches.clear()
+            self.book.shell_wait_bound = None
             self.book.waiting.clear()
             self.book.repeats.clear()
             self.book.native_only = False
@@ -161,6 +167,21 @@ class TimelineBoundary(Macro):
             )
 
 
+class TimelineShellWait(Wait):
+    """Project only the final WAIT literal, leaving native reference debits alone."""
+
+    def __init__(self, book: TimelineBook, t: float):
+        super().__init__(t=t, auto=True, gens=False, ros=True, no_warn=True)
+        self.book = book
+        self.offset = t
+
+    def preprocess(self, prog) -> None:
+        bound = self.book.shell_wait_bound
+        self.auto = bound is None
+        self.t = self.offset if bound is None else self.offset + bound / get_fclk(prog)
+        super().preprocess(prog)
+
+
 class TimelineAdvance(TimedMacro):
     def __init__(self, book, timeline, duration, *, tag=None, aligned=False):
         super().__init__(tag=tag)
@@ -172,10 +193,7 @@ class TimelineAdvance(TimedMacro):
 
     def preprocess(self, prog) -> None:
         if isinstance(self.duration, str):
-            limits = prog._time_bounds.source(prog, self.duration)
-            duration = self.book.math.snapshot(
-                RuntimeEnd(self.duration, limits.minimum, limits.maximum)
-            )
+            duration = self.book.math.snapshot(self.book.math.source(self.duration))
         else:
             duration = step_time(prog, self.duration) if self.aligned else self.duration
         previous = self.book.end(self.timeline, placement=True)
@@ -376,9 +394,18 @@ class TimelineRepeatExit(TimelineSync):
     """Close one iteration, then rebase the outer namespace by all iterations."""
 
     def __init__(
-        self, book: TimelineBook, count: int, maximum: int, *, variable: bool = False
+        self,
+        book: TimelineBook,
+        count: int,
+        maximum: int,
+        *,
+        variable: bool = False,
+        iterations: int | str = 1,
+        axis: str,
     ):
         super().__init__(book, None)
+        self.axis = axis
+        self.iterations = iterations
         self.count = count
         self.maximum = maximum
         self.variable = variable
@@ -451,6 +478,13 @@ class TimelineRepeatExit(TimelineSync):
                 self.book.repeats[-1].variable = True
         self.book.ends[frame.parent] = 0.0
         self._restore_native(prog, frame, variable=variable)
+        frame.restore_expressions(
+            prog,
+            self.book.repeat_count(prog, self.iterations, self.count, self.maximum),
+            generated_gens,
+            generated_ros,
+            axis=self.axis,
+        )
 
     def _restore_native(self, prog, frame: RepeatFrame, *, variable: bool) -> None:
         for tails, initial, current, written, generator in (
@@ -648,6 +682,7 @@ class PreparedTimelineMacro(TimedMacro):
             if isinstance(timing_source, TimedMacro):
                 prog._time_bounds.time_parameters(timing_source)
             prog._time_bounds.activate(self.source)
+            self.book.observe_write(prog, self.source)
         finally:
             prog._time_origin = previous_origin
             self.book.preparing -= 1
@@ -729,6 +764,7 @@ class TimeProducer(Macro):
         for macro in self.prepared:
             macro.preprocess(prog)
         prog._time_bounds.defined.add(self.register)
+        prog._timeline_book.observe_selection(prog, self.register, self.selection)
 
     def translate(self, prog) -> None:
         for macro in self.prepared:
@@ -789,6 +825,7 @@ class TimelineBranch(Macro):
         if len(self.cases) != prog.loop_dict[self.by]:
             raise ValueError("Branch must provide one case per selector point")
         initial = self.book.ends.copy()
+        self.book.begin_branch_sources()
         waiting = self.book.waiting.copy()
         initial_gens = {ch: prog.get_timestamp(gen_ch=ch) for ch in prog.gen_chs}
         initial_ros = {ch: prog.get_timestamp(ro_ch=ch) for ch in prog.ro_chs}
@@ -839,8 +876,9 @@ class TimelineBranch(Macro):
             self.book.pinned.update(prog._timeline_live_registers())
             if outer_used is not None:
                 outer_used.update(self.book.used & initial.keys())
-        self._merge_frames(paths)
+        self._merge_frames(prog, paths)
         prog._time_bounds.defined = set.intersection(*definitions)
+        self.book.finish_branch_sources(prog, self.by)
         self.book.used, self.book.waiting = outer_used, waiting
         self.tails = [RuntimeMath(prog) for _ in results]
         self.book.ends = {}
@@ -866,6 +904,7 @@ class TimelineBranch(Macro):
         )
         closer.preprocess(prog)
         prepared.append(closer)
+        self.book.record_branch_sources()
         return prepared
 
     def _merge_values(self, prog, values: list[Time]) -> Time:
@@ -876,6 +915,7 @@ class TimelineBranch(Macro):
             prog.add_reg(),
             round(min(lo for lo, _ in limits) * get_fclk(prog)),
             round(max(hi for _, hi in limits) * get_fclk(prog)),
+            expression=self.book.selected_expression(prog, self.by, values),
         )
         for tail, value in zip(self.tails, values, strict=True):
             operand = tail.cycles(value)
@@ -927,21 +967,25 @@ class TimelineBranch(Macro):
                 written_gens=frame.written_gens.copy(),
                 written_ros=frame.written_ros.copy(),
                 pulse_guards=deepcopy(frame.pulse_guards),
+                expression_advance=frame.expression_advance,
             )
             for frame in self.book.repeats
         ]
 
     def _restore_frames(self, snapshots: list[RepeatFrameSnapshot]) -> None:
+        self.book.restore_branch_sources()
         for frame, snapshot in zip(self.book.repeats, snapshots, strict=True):
             frame.advance = snapshot.advance
+            frame.expression_advance = snapshot.expression_advance
             frame.variable = snapshot.variable
             frame.written_gens = snapshot.written_gens.copy()
             frame.written_ros = snapshot.written_ros.copy()
             frame.pulse_guards = deepcopy(snapshot.pulse_guards)
 
-    def _merge_frames(self, paths: list[list[RepeatFrameSnapshot]]) -> None:
+    def _merge_frames(self, prog, paths: list[list[RepeatFrameSnapshot]]) -> None:
         for index, frame in enumerate(self.book.repeats):
             snapshots = [path[index] for path in paths]
+            frame.merge_expression_advance(prog, self.by, snapshots)
             advances = [snapshot.advance for snapshot in snapshots]
             frame.advance = (
                 advances[0]
