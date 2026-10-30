@@ -387,6 +387,7 @@ class TimelineRepeatEnter(TimelineSync):
                 initial_runtime_gens=self.book.runtime_gens.copy(),
                 initial_runtime_ros=self.book.runtime_ros.copy(),
                 initial_native_expressions=self.book.snapshot_native_expressions(prog),
+                initial_source_expressions=self.book.source_expressions.copy(),
             )
         )
         self.book.ends = {parent: 0.0}

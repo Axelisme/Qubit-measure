@@ -78,6 +78,7 @@ class RepeatFrame:
     initial_native_expressions: dict[tuple[bool, int], TimeExpression] = field(
         default_factory=dict
     )
+    initial_source_expressions: dict[str, TimeExpression] = field(default_factory=dict)
 
     def restore_expressions(
         self,
@@ -161,12 +162,31 @@ class RepeatFrame:
                     LinearTime(), add_time(initial, scale_time(total, -1))
                 )
             book.native_expressions[key] = expression
+        self.restore_sources(book, count, axis=axis)
+        book.source_expressions[axis] = LinearTime(0)
+
+    def restore_sources(
+        self, book: "TimelineBook", count: TimeExpression, *, axis: str
+    ) -> None:
+        """Keep entry values at zero iterations, otherwise the last body write."""
+        minimum, maximum = projected_expression_bounds(count)
+        if maximum == 0:
+            book.source_expressions = self.initial_source_expressions.copy()
+            return
+        executed = choose_time(LinearTime(1), count, maximum=False)
+        restored = {}
         for name, expression in book.source_expressions.items():
             if axis in expression_axes(expression):
-                book.source_expressions[name] = reduce_loop_time(
-                    expression, axis, last=True
+                expression = reduce_loop_time(expression, axis, last=True)
+            if minimum == 0:
+                if name not in self.initial_source_expressions:
+                    # A body-only definition is not available on the zero path.
+                    continue
+                expression = select_time(
+                    executed, (self.initial_source_expressions[name], expression)
                 )
-        book.source_expressions[axis] = LinearTime(0)
+            restored[name] = expression
+        book.source_expressions = restored
 
     def merge_expression_advance(
         self, prog, selector: str, snapshots: list[RepeatFrameSnapshot]
