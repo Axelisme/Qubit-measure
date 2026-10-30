@@ -78,6 +78,52 @@ def test_classified_and_mixed_axes_preserve_class_rules_and_axis_order(
     np.testing.assert_array_equal(process(iq), [[4, 0]])
 
 
+@pytest.mark.parametrize(
+    ("classifier", "values", "expected"),
+    [
+        (
+            CircleClassifier(g_center=0j, e_center=2 + 0j, radius=2.0),
+            [[0, 0], [2, 0], [1, 0], [0, 2]],
+            [[1, 0, 0], [0, 1, 0], [0, 0, 1], [0, 0, 1]],
+        ),
+        (
+            LinearClassifier(angle=np.pi / 2, threshold=-0.5),
+            [[0, 1], [0, -1], [0, 0.5]],
+            [[1, 0], [0, 1], [1, 0]],
+        ),
+        (
+            Centroid3Classifier(
+                g_center=0j,
+                e_center=2 + 0j,
+                f_center=2j,
+                confusion_matrix=np.eye(3).tolist(),
+            ),
+            [[0, 0], [2, 0], [0, 2], [1, 0], [0, 1], [2, 2]],
+            [[1, 0, 0], [0, 1, 0], [0, 0, 1], [1, 0, 0], [1, 0, 0], [0, 1, 0]],
+        ),
+    ],
+)
+def test_classified_sums_keep_boundary_rules_and_detached_cfg(
+    classifier, values, expected
+):
+    ro = readout(classifier=classifier)
+    prog = v2.ModularProgramV2(v2.make_mock_soccfg(), [ro])
+    process = v2.shot_sums(prog, [v2.Classify("readout")])
+    if isinstance(ro.cfg.classifier, CircleClassifier):
+        ro.cfg.classifier.g_center = 99j
+        ro.cfg.classifier.radius = 0.1
+    elif isinstance(ro.cfg.classifier, LinearClassifier):
+        ro.cfg.classifier.threshold = 100.0
+    elif isinstance(ro.cfg.classifier, Centroid3Classifier):
+        ro.cfg.classifier.f_center = 99j
+    iq = np.array(values, dtype=np.float64).reshape(-1, 1, 1, 2)
+    original = iq.copy()
+    result = process({0: iq})
+    np.testing.assert_array_equal(result, expected)
+    assert result.dtype == np.float64
+    np.testing.assert_array_equal(iq, original)
+
+
 @pytest.mark.parametrize("timeline", [False, True])
 @pytest.mark.parametrize("mux", [False, True])
 def test_labels_resolve_adc_trigger_order_and_repeated_emissions(timeline, mux):
@@ -210,13 +256,38 @@ def test_any_control_flow_trigger_on_selected_adc_is_rejected(
         v2.shot_sums(prog, [v2.IQ(label)])
 
 
+@pytest.mark.parametrize("control", ["Repeat", "Branch"])
+def test_control_flow_on_other_adc_preserves_selected_read_sums(control):
+    selected = readout()
+    other = readout("other", ch=1)
+    scope = (
+        Repeat("repeat_scope", 2).add_content(other)
+        if control == "Repeat"
+        else Branch("choice", other, None)
+    )
+    prog = v2.ModularProgramV2(
+        v2.make_mock_soccfg(n_readouts=2),
+        [scope, selected],
+        sweep=[("choice", 2)],
+    )
+    process = v2.shot_sums(prog, [v2.IQ("readout")])
+    result = process(
+        {
+            0: np.array([[[[4.0, 5.0]]]]),
+            1: np.zeros((1, 1, 1, 2), dtype=np.float64),
+        }
+    )
+    np.testing.assert_array_equal(result, [[1, 4, 5]])
+
+
 def test_split_sums_returns_counts_and_nan_means_without_warnings():
     sums = np.array(
-        [[[2, 6, -4], [0, 0, 0]], [[1, -3, 7], [0, 0, 0]]], dtype=np.float64
+        [[[2, 6, -4], [0, 0, 0]], [[1, -3, 7], [np.nan, np.nan, np.nan]]],
+        dtype=np.float64,
     )
     with np.errstate(all="raise"):
         counts, means = v2.split_sums(sums)
-    np.testing.assert_array_equal(counts, [[2, 0], [1, 0]])
+    np.testing.assert_array_equal(counts, [[2, 0], [1, np.nan]])
     np.testing.assert_array_equal(
         means, [[3 - 2j, complex(np.nan, np.nan)], [-3 + 7j, complex(np.nan, np.nan)]]
     )

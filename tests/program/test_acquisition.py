@@ -5,13 +5,11 @@ from threading import Event
 
 import numpy as np
 import pytest
-from zcu_tools.cfg_model import LinearClassifier
 from zcu_tools.core.simulation import ChargeDriveRequirement
 from zcu_tools.program.acquisition import (
     AcquisitionContractError,
     StoppedPartialAcquireError,
 )
-from zcu_tools.program.herald import HeraldSpec
 
 from tests.program._acquisition_soc import make_chunk_acquisition
 
@@ -30,14 +28,13 @@ def test_decimated_rejects_herald_before_transport(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     soc, program = make_chunk_acquisition()
-    spec = HeraldSpec(0, 0, LinearClassifier(angle=0.0, threshold=0.0), 2)
 
     def unexpected_poll():
         pytest.fail("invalid herald acquisition reached transport")
 
     monkeypatch.setattr(soc, "poll_data", unexpected_poll)
     with pytest.raises(ValueError, match="decimated.*herald"):
-        program.acquire_decimated(soc, herald=[spec], progress=False)
+        program.acquire_decimated(soc, herald=[object()], progress=False)
 
 
 @pytest.mark.parametrize("stepped", [False, True])
