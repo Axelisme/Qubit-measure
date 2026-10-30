@@ -12,6 +12,8 @@ from types import MappingProxyType
 
 from pydantic_core import PydanticUndefined, PydanticUndefinedType
 
+from .field_meta import FieldMeta
+
 type TemplateLiteral = str | int | float | bool | complex | None
 
 
@@ -50,7 +52,10 @@ class Template:
     their shape and fields against that Spec. ``bindings`` maps
     plain placeholder names to authored replacement text. Explicit bindings
     override captured registry defaults and may use unregistered names; omitted
-    bindings are empty.
+    bindings are empty. ``seed_metadata`` maps root-relative canonical Form paths
+    (including module wrappers and list indexes) to FieldMeta source descriptions
+    and calibration hints. Forms merge it only when adopting this Template;
+    explicit Form.with_seed_metadata values win on the same path.
 
     Construction detaches the mappings. Consumers validate the ID, module family,
     path compatibility and placeholder syntax; this node does not read sources.
@@ -59,10 +64,16 @@ class Template:
     id: str
     set: Mapping[str, TemplateSeed] = field(default_factory=dict)
     bindings: Mapping[str, str] = field(default_factory=dict)
+    seed_metadata: Mapping[tuple[str | int, ...], FieldMeta] = field(
+        default_factory=dict, kw_only=True
+    )
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "set", MappingProxyType(dict(self.set)))
         object.__setattr__(self, "bindings", MappingProxyType(dict(self.bindings)))
+        object.__setattr__(
+            self, "seed_metadata", MappingProxyType(dict(self.seed_metadata))
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -75,22 +86,30 @@ class Slot:
     dotted paths to initial literal, Expr, Slot, Hidden(value), or typed
     model-list seeds validated against the original Spec. Hidden
     supplies a validated literal and hides that inline field. When the slot
-    is unset, dangling or its alias is unbound, forms leave input absent: required
-    core fields are Invalid; nullable core fields with a None default remain
-    disabled and Valid. Set is initialization-only.
+    is unset, dangling or its alias is unbound, ``fallback`` selects a Template
+    instead, including that Template's own seeds and seed metadata. A resolved
+    Slot ignores the fallback. Without fallback, forms leave input absent:
+    required core fields are Invalid; nullable core fields with a None default
+    remain disabled and Valid. Set is initialization-only and applies only to
+    Slot copies, not to the fallback.
 
     Construction detaches mappings and rejects an empty path with ValueError.
     TemplateDef expansion changes only path placeholders, not Form options or
     references. The library creation catalog accepts Slot(path), but rejects
     Slot.copy/set with TypeError. Bound unset/dangling sources keep nested
     structural defaults; unbound aliases stay linked empty. Each consumer owns
-    source lookup and schema compatibility failures. Form authors choose alternate
-    sources in make_form(ctx), not in this declaration.
+    source lookup and schema compatibility failures; an incompatible captured
+    family still raises instead of selecting the fallback.
+
+    ADR-0073 records the 2026-10-30 ruling: the user chose “9A” (Slot fallback
+    with Template-owned metadata) and confirmed “Q9A” to replace the earlier
+    requirement for explicit if/else source selection.
     """
 
     path: str
     copy: bool = False
     set: Mapping[str, TemplateSeed] = field(default_factory=dict)
+    fallback: Template | None = field(default=None, kw_only=True)
 
     def __post_init__(self) -> None:
         if not self.path.strip():

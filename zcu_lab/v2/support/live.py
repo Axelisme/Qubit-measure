@@ -1,6 +1,13 @@
-"""Lab live plotting tools backed by explicit owner-managed updates.
+"""Lab local artist tools and legacy owner-managed updates.
 
-Shared live-helper contract
+Attached helpers take an Axes as the first argument. They add only artists and
+return local tools whose set methods return changed artists. They do not
+register axes, check claims against other helpers (including legacy helpers),
+create figures, label axes, dispatch, refresh or present. Authors coordinate
+artists, autoscale and color limits when sharing axes, and call set inside
+@plots.on_plot_thread after display. These tools do not bind a Plots lifetime.
+
+Legacy live-helper contract
 --------------------------
 Pass an active ``plots`` collection and a nonempty ``name``. With ``axes=None``,
 each helper creates and registers a new native Figure under that unused name.
@@ -37,7 +44,7 @@ figures remain usable after release.
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Literal
+from typing import Literal, overload
 
 import numpy as np
 from matplotlib.axes import Axes
@@ -45,6 +52,7 @@ from matplotlib.figure import Figure
 from zcu_tools.plotting import LiveUpdate
 from zcu_tools.plotting.plots import PlotHost, Plots
 
+from ._live_attached import AttachedHeatmap, AttachedLine, AttachedScatter
 from ._live_format import (
     HeatmapFormat,
     LineFormat,
@@ -63,7 +71,12 @@ from ._live_handles import (
 )
 
 
-def live_line(  # noqa: PLR0913  # tolerated: Preserve public labels, style, owner-side configuration and existing-axes options.
+@overload
+def live_line(plots: Axes, *, num_lines: int = 1) -> AttachedLine: ...
+
+
+@overload
+def live_line(
     plots: Plots,
     name: str,
     xlabel: str,
@@ -73,9 +86,32 @@ def live_line(  # noqa: PLR0913  # tolerated: Preserve public labels, style, own
     num_lines: int = 1,
     configure_axes: Callable[[Axes], None] | None = None,
     axes: Axes | None = None,
-) -> LinePlot:
-    """Create or attach a live line plot and return a LinePlot update handle.
+) -> LinePlot: ...
 
+
+def live_line(  # noqa: PLR0913  # tolerated: Preserve public labels, style, owner-side configuration and existing-axes options.
+    plots: Plots | Axes,
+    name: str | None = None,
+    xlabel: str | None = None,
+    ylabel: str | None = None,
+    *,
+    title: str | None = None,
+    num_lines: int = 1,
+    configure_axes: Callable[[Axes], None] | None = None,
+    axes: Axes | None = None,
+) -> LinePlot | AttachedLine:
+    """Attach local lines, or preserve the legacy owner-managed line handle.
+
+    ``live_line(ax, num_lines=1)`` returns a local tool with ``set(xs, signals)``.
+    It adds only artists, leaving labels and title unchanged, and returns changed
+    lines from set on the caller thread. It does not dispatch, refresh, present
+    or bind a Plots lifetime. No axes-claim check is made, including against
+    legacy tools. Authors coordinate shared artists, autoscale and color limits.
+    Use set inside @plots.on_plot_thread after display. AttachedLine documents
+    input validation and removed-artist errors. Label, title, configure_axes and
+    axes arguments belong only to the legacy signature; mixing raises TypeError.
+
+    Legacy signature: pass Plots, name, xlabel and ylabel.
     Follow this module's shared live-helper contract for ``plots``, ``name``,
     owner execution, presentation, lifetime and errors. With ``axes=None``,
     create one axes in a new named Figure. Otherwise attach to the supplied
@@ -94,6 +130,14 @@ def live_line(  # noqa: PLR0913  # tolerated: Preserve public labels, style, own
     An update title replaces this axes title. Invalid data raises ValueError;
     the shared contract describes copying, refresh and RuntimeError cases.
     """
+    if isinstance(plots, Axes):
+        if any(value is not None for value in (name, xlabel, ylabel, title, axes)):
+            raise TypeError("Attached lines take axes and num_lines only")
+        if configure_axes is not None:
+            raise TypeError("Configure attached axes directly before creating lines")
+        return AttachedLine(plots, num_lines=num_lines)
+    if name is None or xlabel is None or ylabel is None:
+        raise TypeError("Legacy live_line requires name, xlabel and ylabel")
     plots.ensure_active()
     if num_lines < 1:
         raise ValueError("Line count must be positive")
@@ -118,6 +162,11 @@ def live_line(  # noqa: PLR0913  # tolerated: Preserve public labels, style, own
     return plots.create_live(name, create, axes=None if axes is None else (axes,))
 
 
+@overload
+def live_scatter(plots: Axes) -> AttachedScatter: ...
+
+
+@overload
 def live_scatter(
     plots: Plots,
     name: str,
@@ -126,9 +175,30 @@ def live_scatter(
     *,
     title: str | None = None,
     axes: Axes | None = None,
-) -> ScatterPlot:
-    """Create or attach scalar-colored points and return a ScatterPlot handle.
+) -> ScatterPlot: ...
 
+
+def live_scatter(
+    plots: Plots | Axes,
+    name: str | None = None,
+    xlabel: str | None = None,
+    ylabel: str | None = None,
+    *,
+    title: str | None = None,
+    axes: Axes | None = None,
+) -> ScatterPlot | AttachedScatter:
+    """Attach local points, or preserve the legacy owner-managed scatter handle.
+
+    ``live_scatter(ax)`` returns a caller-thread tool whose
+    ``set(xs, ys, colors=colors)`` returns changed artists. It leaves labels
+    and title unchanged, without dispatch, refresh, presentation or a Plots
+    lifetime. No axes-claim check is made, including against legacy tools.
+    Authors coordinate shared artists, autoscale and color limits. Use set
+    inside @plots.on_plot_thread after display. AttachedScatter documents data
+    validation and removed-artist errors. Name, labels, title and axes belong
+    only to the legacy signature; mixing them with an Axes raises TypeError.
+
+    Legacy signature: pass Plots, name, xlabel and ylabel.
     Follow this module's shared live-helper contract for ``plots``, ``name``,
     owner execution, presentation, lifetime and errors. With ``axes=None``,
     create one axes in a new named Figure. Otherwise attach to the supplied
@@ -143,6 +213,12 @@ def live_scatter(
     Invalid data raises ValueError; the shared contract describes copying,
     refresh and RuntimeError cases.
     """
+    if isinstance(plots, Axes):
+        if any(value is not None for value in (name, xlabel, ylabel, title, axes)):
+            raise TypeError("Attached scatter takes axes only")
+        return AttachedScatter(plots)
+    if name is None or xlabel is None or ylabel is None:
+        raise TypeError("Legacy live_scatter requires name, xlabel and ylabel")
     plots.ensure_active()
 
     def create(
@@ -163,7 +239,14 @@ def live_scatter(
     return plots.create_live(name, create, axes=None if axes is None else (axes,))
 
 
-def live_heatmap(  # noqa: PLR0913  # tolerated: Preserve public labels, grid choice, color limits and existing-axes options.
+@overload
+def live_heatmap(
+    plots: Axes, *, uniform: bool = True, clim: tuple[float, float] | None = None
+) -> AttachedHeatmap: ...
+
+
+@overload
+def live_heatmap(
     plots: Plots,
     name: str,
     xlabel: str,
@@ -173,9 +256,32 @@ def live_heatmap(  # noqa: PLR0913  # tolerated: Preserve public labels, grid ch
     uniform: bool = True,
     clim: tuple[float, float] | None = None,
     axes: Axes | None = None,
-) -> HeatmapPlot:
-    """Create or attach one live heatmap and return a HeatmapPlot handle.
+) -> HeatmapPlot: ...
 
+
+def live_heatmap(  # noqa: PLR0913  # tolerated: Preserve public labels, grid choice, color limits and existing-axes options.
+    plots: Plots | Axes,
+    name: str | None = None,
+    xlabel: str | None = None,
+    ylabel: str | None = None,
+    *,
+    title: str | None = None,
+    uniform: bool = True,
+    clim: tuple[float, float] | None = None,
+    axes: Axes | None = None,
+) -> HeatmapPlot | AttachedHeatmap:
+    """Attach a local heatmap, or preserve the legacy owner-managed handle.
+
+    ``live_heatmap(ax, uniform=True, clim=None)`` returns a caller-thread tool
+    with ``set(xs, ys, signals)`` returning its changed image. It leaves labels
+    and title unchanged, without dispatch, refresh, presentation or a Plots
+    lifetime. No axes-claim check is made, including against legacy tools.
+    Authors coordinate shared artists, autoscale and color limits. Use set
+    inside @plots.on_plot_thread after display. AttachedHeatmap documents data
+    validation and removed-image errors. Name, labels, title and axes belong
+    only to the legacy signature; mixing them with an Axes raises TypeError.
+
+    Legacy signature: pass Plots, name, xlabel and ylabel.
     Follow this module's shared live-helper contract for ``plots``, ``name``,
     owner execution, presentation, lifetime and errors. With ``axes=None``,
     create one axes in a new named Figure. Otherwise attach to the supplied
@@ -194,6 +300,12 @@ def live_heatmap(  # noqa: PLR0913  # tolerated: Preserve public labels, grid ch
     this axes title. Invalid data raises ValueError; the shared contract
     describes copying, refresh and RuntimeError cases.
     """
+    if isinstance(plots, Axes):
+        if any(value is not None for value in (name, xlabel, ylabel, title, axes)):
+            raise TypeError("Attached heatmaps take axes, uniform and clim only")
+        return AttachedHeatmap(plots, uniform=uniform, clim=clim)
+    if name is None or xlabel is None or ylabel is None:
+        raise TypeError("Legacy live_heatmap requires name, xlabel and ylabel")
     plots.ensure_active()
 
     def create(

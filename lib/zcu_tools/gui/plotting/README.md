@@ -1,6 +1,6 @@
 # GUI plotting
 
-**Last updated:** 2026-10-24
+**Last updated:** 2026-10-31
 
 **讀者：** framework-dev。Matplotlib／Qt 圖形呈現、更新與釋放契約。
 
@@ -19,6 +19,12 @@ refresh 立即 flush 最新圖，不等待下一次呈現。RPC PNG 讀同一份
 Qt canvas 與 Figure 的生命週期分開。Release 取消待呈現工作並釋放 presentation，保留原圖及 Agg canvas，
 caller 仍可修改 artists 或 savefig。
 
+`plots.subplots(2, 2, num="fit")` 不呈現。`fig.show()` 透過 host 首次 attach，
+重複呼叫不增加 canvas。框架 manager 跟隨 Qt canvas 交換，show 不改用 pyplot。
+Finish 後 show 一律 raise RuntimeError，release 後也相同。
+Release 還原帶框架 manager 的 Agg canvas，manager 不再保留舊 Plots。
+另一 host 可透過 `present(figure)` 接上這張原生圖。
+
 FigureContainer 包裝 QStackedWidget 與 placeholder，並擁有容器 membership 與
 Qt wrapper 存活狀態的唯讀查詢。host.py 透過容器介面維護 weak-key
 Figure-to-container registry，不讀取容器內部 layout，並透過 GUI-thread QObject
@@ -30,7 +36,10 @@ Figure-to-container registry，不讀取容器內部 layout，並透過 GUI-thre
 ## Thread 與 rendering 邊界
 
 Host 必須先在 GUI thread 初始化。Runtime 與 FigureContainer 建構都確保此條件。
-Qt widget 操作與通用 LiveUpdate callback 都透過 host owner 在 GUI thread 執行。
+Qt widget 操作、`@plots.on_plot_thread` 本體與通用 LiveUpdate callback
+都透過 host owner 在 GUI thread 執行。Decorator 從 worker 同步等待 owner，並對已呈現
+的根圖去重 refresh，沿用 host 的 50 ms 繪製合併。Show 前只保留 artist 修改，
+不呼叫 host.refresh，也不呈現。圖顯示後的原生修改一律經此 decorator。
 LiveUpdate 在送入 owner 前複製 caller 的資料，host 不選擇線圖、熱圖或其他格式。
 Lab 的繪圖工具提供格式與 callback，lib 只管理具名圖、更新與呈現。
 Shared mathtext lock／prewarm 保護字型解析，不代表任意 Matplotlib 操作都 thread-safe。

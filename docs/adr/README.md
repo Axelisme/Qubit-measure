@@ -67,7 +67,7 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 
 ## Plotting
 
-具名圖與通用 owner 更新契約見 [plotting README](../../lib/zcu_tools/plotting/README.md)。Live 工具與格式歸 lab，邊界見 [[0072]]；GUI 的 worker／Qt 繪圖責任見 [[0067]]。
+具名圖與通用 owner 更新契約見 [plotting README](../../lib/zcu_tools/plotting/README.md)。原生更新用 `@plots.on_plot_thread`，只 refresh 已呈現的根圖。Live 工具與格式歸 lab，新 helper 在 caller thread 回傳 changed artists，邊界見 [[0072]]；GUI 的 worker／Qt 繪圖責任見 [[0067]]。
 
 ## Agents
 

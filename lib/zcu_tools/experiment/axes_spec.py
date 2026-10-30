@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass, fields, is_dataclass
+from dataclasses import dataclass, field, fields, is_dataclass
 from typing import Generic, Literal, TypeVar
 
 import numpy as np
@@ -55,15 +55,47 @@ MHZ_TO_HZ = 1e6
 US_TO_S = 1e-6
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, init=False)
 class Axis:
-    """One sweep axis of an experiment Result."""
+    """Declare a field-backed or fixed sweep axis in memory units.
 
-    field_name: str  # the Result field holding this axis array (in memory units)
+    Supply exactly one of field_name (a Result array) or values (fixed numeric
+    coordinates), otherwise construction raises ValueError. label and unit are
+    required disk names. scale maps disk = memory * scale; dtype is the memory
+    dtype used on save/load. Fixed axes are not passed to the Result constructor
+    on load. All axes must be 1D and match z dimensions when saving.
+    Positional field_name/label/unit/scale/dtype remain accepted until migration.
+    """
+
+    field_name: str | None  # Result array name, or None for fixed coordinates
     label: str  # on-disk axis display name
     unit: str  # on-disk unit
     scale: float = IDENTITY  # disk = memory * scale
-    dtype: type = np.float64  # in-memory dtype the loaded axis is cast back to
+    dtype: type = np.float64  # reconstructed memory dtype
+    values: ArrayLike | None = field(
+        default=None, kw_only=True
+    )  # fixed memory coordinates
+
+    def __init__(
+        self,
+        field_name: str | None = None,
+        label: str | None = None,
+        unit: str | None = None,
+        scale: float = IDENTITY,
+        dtype: type = np.float64,
+        *,
+        values: ArrayLike | None = None,
+    ) -> None:
+        if (field_name is None) == (values is None):
+            raise ValueError("Axis requires exactly one of field_name or values")
+        if label is None or unit is None:
+            raise TypeError("Axis requires label and unit")
+        object.__setattr__(self, "field_name", field_name)
+        object.__setattr__(self, "label", label)
+        object.__setattr__(self, "unit", unit)
+        object.__setattr__(self, "scale", scale)
+        object.__setattr__(self, "dtype", dtype)
+        object.__setattr__(self, "values", values)
 
 
 @dataclass(frozen=True)
@@ -89,7 +121,7 @@ class ZSpec:
 class AxesSpec(Generic[T_Result, T_Config]):
     """Map a Result dataclass and cfg model to one stable variable identity.
 
-    axes are inner-first memory-field/label/unit/scale declarations; z selects
+    axes are inner-first field or fixed-value/label/unit/scale declarations; z selects
     the signal field and its memory dtype/unit conversion. result_type rebuilds
     Result; cfg_type validates cfg. tag is the persisted experiment identity.
     data_variable is the explicit native group key, defaulting to data, never
@@ -125,7 +157,9 @@ class AxesSpec(Generic[T_Result, T_Config]):
         if not is_dataclass(result_type):
             raise TypeError(f"result_type {result_type!r} must be a dataclass")
         result_fields = {f.name for f in fields(result_type)}
-        declared = {ax.field_name for ax in self.axes} | {self.z.field_name}
+        declared = {ax.field_name for ax in self.axes if ax.field_name is not None} | {
+            self.z.field_name
+        }
         missing = declared - result_fields
         if missing:
             raise ValueError(
@@ -139,8 +173,11 @@ class VariableAxisSpec:
     """Declare one inner-first axis for a grouped Data Variable.
 
     label/unit identify the persisted axis. field_name selects a 1D Result field;
-    generated="arange" instead derives indices from the corresponding z dimension.
-    Exactly one source is required. Nonzero scale multiplies memory values on save
+    generated="arange" instead derives indices from the corresponding z dimension;
+    values supplies fixed 1D coordinates in memory units without a Result field.
+    Exactly one of field_name, generated or values is required. Fixed coordinates
+    appear in loaded axes for the Result builder to use or omit. Shape mismatches
+    raise ValueError when saving. Nonzero scale multiplies memory values on save
     and divides persisted values on load. dtype is the reconstructed memory dtype.
     Invalid source selection or zero scale raises ValueError at construction.
     """
@@ -151,6 +188,9 @@ class VariableAxisSpec:
     scale: float = IDENTITY
     dtype: type = np.float64
     generated: Literal["arange"] | None = None
+    values: ArrayLike | None = field(
+        default=None, kw_only=True
+    )  # fixed memory coordinates
 
     @classmethod
     def generated_arange(
@@ -164,9 +204,15 @@ class VariableAxisSpec:
         return cls(label=label, unit=unit, dtype=dtype, generated="arange")
 
     def __post_init__(self) -> None:
-        if (self.field_name is None) == (self.generated is None):
+        if (
+            sum(
+                source is not None
+                for source in (self.field_name, self.generated, self.values)
+            )
+            != 1
+        ):
             raise ValueError(
-                "VariableAxisSpec requires exactly one of field_name or generated"
+                "VariableAxisSpec requires exactly one of field_name, generated or values"
             )
         if self.scale == 0.0:
             raise ValueError("VariableAxisSpec scale must be non-zero")
@@ -394,16 +440,20 @@ class VariableSpec:
                 )
             return np.arange(z_shape[-1 - axis_index], dtype=np.dtype(axis.dtype))
 
-        assert axis.field_name is not None
+        if axis.values is not None:
+            coordinates = axis.values
+        elif axis.field_name is not None:
+            coordinates = getattr(result, axis.field_name)
+        else:
+            raise ValueError(f"{context}: axis {axis.label!r} has no coordinates")
         values = _cast_memory_values(
-            getattr(result, axis.field_name),
+            coordinates,
             axis.dtype,
-            context=f"{context} result axis field {axis.field_name!r}",
+            context=f"{context} axis {axis.label!r}",
         )
         if values.ndim != 1:
             raise ValueError(
-                f"{context} result axis field {axis.field_name!r} is "
-                f"{values.ndim}D; expected 1D"
+                f"{context} axis {axis.label!r} is {values.ndim}D; expected 1D"
             )
         return np.asarray(values * axis.scale)
 

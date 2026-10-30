@@ -7,10 +7,6 @@ from zcu_tools.experiment.scope import Scope
 from zcu_tools.experiment.workflows import Failed
 from zcu_tools.program.v2 import SweepCfg
 
-from zcu_lab.v2.support.lifetime_models import (
-    LifetimeModelRecord,
-    show_lifetime_comparison,
-)
 from zcu_lab.v2.twotone.time_domain.t1.core import T1Cfg, T1Exp
 from zcu_lab.v2.twotone.time_domain.t2echo.core import T2EchoCfg, T2EchoExp
 from zcu_lab.workflows.common.analysis import (
@@ -22,6 +18,10 @@ from zcu_lab.workflows.common.analysis import (
 from zcu_lab.workflows.common.calibration_results import StageStatus
 from zcu_lab.workflows.common.gain import GainClamp, clamp_gain
 from zcu_lab.workflows.common.gates import Gate, gate
+from zcu_lab.workflows.common.lifetime_models import (
+    LifetimeModelRecord,
+    show_lifetime_comparison,
+)
 from zcu_lab.workflows.common.stages import NativeOutput, StageEnv, acquire_saved
 from zcu_lab.workflows.overnight.analysis import analyze_t2echo
 from zcu_lab.workflows.overnight.pulses import FixedPulses

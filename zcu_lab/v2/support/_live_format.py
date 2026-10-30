@@ -72,7 +72,10 @@ class LineFormat:
             ax.set_title(self.title)
         if self.show_grid:
             ax.grid()
+        self.attach_ax(ax)
 
+    def attach_ax(self, ax: Axes) -> None:
+        """Add this format's lines without changing labels, title or ticks."""
         lines = []
         for kwargs in self.line_kwargs:
             assert kwargs is not None
@@ -159,7 +162,10 @@ class HeatmapFormat:
         formatter.set_powerlimits((-2, 2))  # 超出此範圍就改用科學記號
         ax.xaxis.set_major_formatter(formatter)
         ax.yaxis.set_major_formatter(formatter)
+        self.attach_ax(ax)
 
+    def attach_ax(self, ax: Axes) -> None:
+        """Add the image without changing labels, title or tick formatters."""
         self.im = ax.imshow(
             np.full((1, 2), np.nan),
             aspect="auto",
@@ -249,6 +255,14 @@ class NonUniformHeatmapFormat:
         if self.title is not None:
             ax.set_title(self.title)
 
+        self.attach_ax(ax, cmap=cmap)
+
+    def attach_ax(self, ax: Axes, *, cmap: str | Colormap = "RdBu_r") -> None:
+        """Add a nearest-sample image without changing labels or title.
+
+        cmap is a registered Matplotlib name or Colormap. Invalid names raise
+        ValueError before the image is attached.
+        """
         self.im = NonUniformImage(ax, cmap=cmap, interpolation="nearest")
         self.im.set_extent((0, 1, 0, 1))
         self.im.set_data([0, 1], [0, 1], np.full((2, 2), np.nan))
@@ -324,6 +338,10 @@ class ScatterFormat:
         if self.show_grid:
             ax.grid()
 
+        self.attach_ax(ax)
+
+    def attach_ax(self, ax: Axes) -> None:
+        """Add points without changing labels, title or grid settings."""
         self.scatter = ax.scatter([], [], marker=".", s=2)
 
     def update(
