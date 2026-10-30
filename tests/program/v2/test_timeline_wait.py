@@ -661,7 +661,13 @@ def wait_recipes(seed: int) -> list[WaitRecipe]:
                 recipes.append(
                     WaitRecipe(
                         sweep_steps=tuple(rng.randint(5, 30) for _ in range(axes)),
-                        pulse_samples=(rng.randint(20, 70), rng.randint(10, 50)),
+                        # Two-axis schedules reserve registers for both sweeps
+                        # and control flow by using a noncrossing fork maximum.
+                        # One-axis schedules also exercise crossing pulse ends.
+                        pulse_samples=(
+                            rng.randint(20, 70) if axes == 1 else rng.randint(10, 20),
+                            rng.randint(10, 50) if axes == 1 else rng.randint(30, 50),
+                        ),
                         adc_samples=adc_samples,
                         fixed_count=rng.randint(1, 3),
                         counts=tuple(rng.sample((0, 1, 3), 3)),
