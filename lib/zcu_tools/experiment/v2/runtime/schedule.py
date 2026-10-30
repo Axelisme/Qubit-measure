@@ -22,6 +22,7 @@ from typing_extensions import TypeVar
 from zcu_tools.experiment.scope import Scope
 from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.experiment.v2.runtime._path import get_path, set_target, writable_view
+from zcu_tools.experiment.v2.runtime.managed_acquire import ManagedAcquisitionMixin
 from zcu_tools.experiment.v2.runtime.outcome import (
     RunStatus as RunStatus,
 )
@@ -135,7 +136,7 @@ class SignalSlot:
         self.buffer.trigger_update()
 
 
-class Schedule(Generic[T_Cfg, T_Env]):
+class Schedule(ManagedAcquisitionMixin, Generic[T_Cfg, T_Env]):
     """Runtime scope for Python-like measurement orchestration.
 
     ScheduleStep and ProgramBuilder use the owner-aware cooperation methods to
@@ -369,6 +370,10 @@ class Schedule(Generic[T_Cfg, T_Env]):
                 relax_delay=relax_delay,
             ),
         )
+
+    @property
+    def _acquisition_owner(self) -> Schedule[T_Cfg, T_Env]:
+        return self
 
     def ensure_active(self) -> None:
         """Raise RuntimeError unless this schedule's context is currently active.
@@ -749,7 +754,7 @@ class Schedule(Generic[T_Cfg, T_Env]):
 
 
 @dataclass(frozen=True)
-class ScheduleStep(Generic[T_Cfg, T_Value, T_Env]):
+class ScheduleStep(ManagedAcquisitionMixin, Generic[T_Cfg, T_Value, T_Env]):
     schedule: Schedule[T_Cfg, T_Env]
     name: str
     index: Hashable
@@ -764,6 +769,10 @@ class ScheduleStep(Generic[T_Cfg, T_Value, T_Env]):
     @property
     def data(self) -> Any:
         return self.schedule.get_data_for(self)
+
+    @property
+    def _acquisition_owner(self) -> ScheduleStep[T_Cfg, T_Value, T_Env]:
+        return self
 
     @property
     def array_data(self) -> NDArray[Any]:
