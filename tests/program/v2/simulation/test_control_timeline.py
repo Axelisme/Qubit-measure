@@ -1,4 +1,8 @@
-"""Semantic loop/table scheduling through real program acquisition."""
+"""Semantic loop/table scheduling through real program acquisition.
+
+Remove the scalar diagnostic reset parameter when the Module-tree interpreter
+is deleted. Keep the acquisition case on the public acquisition route.
+"""
 
 import numpy as np
 import pytest
@@ -22,6 +26,7 @@ from zcu_tools.program.v2.modules.reset import (
     TwoPulseResetCfg,
 )
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
+from zcu_tools.program.v2.simulation.timeline import TimelineInterpreter
 from zcu_tools.program.v2.utils import readout_freq_words
 
 from tests.program.v2.simulation.support import raw_of, request_of
@@ -301,6 +306,68 @@ def test_reset_wrappers_expand_only_actual_parallel_pulses():
     assert request.materialize_point(0).events[-1].start_us == pytest.approx(
         0.2, abs=0.004
     )
+
+
+@pytest.mark.parametrize("seam", ["acquire", "scalar_diagnostic"])
+def test_two_pulse_reset_swept_lengths_use_machine_blocking_end(seam):
+    env = white_noise(std_adc=0, n_gens=3, routes=((0, 0), (1, 0), (2, 0)))
+    pulses = [
+        PulseCfg(
+            ch=ch,
+            nqz=1,
+            freq=80,
+            gain=0.2,
+            pre_delay=0.01,
+            post_delay=0.02,
+            waveform=ConstWaveformCfg(length=QickParam(0.05, {"length": 0.1})),
+        )
+        for ch in (1, 2)
+    ]
+    reset = TwoPulseResetCfg(pulse1_cfg=pulses[0], pulse2_cfg=pulses[1])
+    readout = PulseReadoutCfg(
+        gen_ch=0,
+        ro_ch=0,
+        nqz=1,
+        freq=100,
+        gain=0.1,
+        waveform=ConstWaveformCfg(length=0.2),
+        pre_delay=0.01,
+        post_delay=0.02,
+        trig_offset=0.03,
+        ro_length=0.1,
+    )
+    try:
+        prog = ModularProgramV2(
+            env.soccfg,
+            modules=[reset.build("reset"), readout.build("readout")],
+            sweep=[("length", 3)],
+        )
+        if seam == "acquire":
+            prog.acquire(env.soc, progress=False)
+            request = request_of(env)
+            timelines = [request.materialize_point(point) for point in range(3)]
+        else:
+            interpreter = TimelineInterpreter(prog)
+            timelines = [
+                interpreter.run_point({"reps": 0, "length": point})
+                for point in range(3)
+            ]
+        # Machine scheduling emits literal tProc timestamps 84, 93 and 181.
+        # The two swept waveforms remain 19, 38 and 57 generator clocks long.
+        for point, timeline in enumerate(timelines):
+            assert [event.source for event in timeline.events] == [
+                "reset",
+                "reset",
+                "readout",
+            ]
+            assert [
+                event.duration_us for event in timeline.events[:2]
+            ] == pytest.approx([([19, 38, 57][point] / 384)] * 2)
+            assert timeline.events[-1].start_us == pytest.approx(84 / 430.08)
+            assert timeline.readouts[0].trigger_us == pytest.approx((93 / 430.08,))
+            assert timeline.duration_us == pytest.approx(181 / 430.08)
+    finally:
+        env.devices.close_all_devices()
 
 
 def test_join_cross_branch_register_dependency_rejected_before_backend():

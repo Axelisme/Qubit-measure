@@ -25,7 +25,7 @@ from ..modules.dmem import LoadValue, LoadWord, ScanWith
 from ..modules.pulse import Pulse, TableLengthPulse
 from ..modules.readout import MuxReadout, PulseReadout, TablePulseReadout
 from ..modules.reset import BathReset, PulseReset, TwoPulseReset
-from ..modules.util import round_timestamp
+from ..modules.util import calc_max_length, round_timestamp
 from ..modules.waveform import ConstWaveformCfg, FlatTopWaveformCfg
 from ..utils import is_qick_param, readout_freq_from_word, readout_freq_from_words
 from ._envelope_pool import EnvelopeContent, EnvelopePool
@@ -285,7 +285,7 @@ class TimelineInterpreter:
         if type(module) is PulseReset:
             end = self.pulse(module.reset_pulse, t)
         elif type(module) is TwoPulseReset:
-            end = max(
+            end = calc_max_length(
                 self.pulse(module.reset_pulse1, t), self.pulse(module.reset_pulse2, t)
             )
         elif type(module) is BathReset:
