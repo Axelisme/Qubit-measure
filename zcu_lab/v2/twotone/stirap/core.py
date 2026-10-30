@@ -148,7 +148,7 @@ class StirapExp(Experiment[StirapResult, StirapCfg]):
             VariableSpec(
                 "counts",
                 (
-                    VariableAxisSpec.generated_arange("State (g/e/f)", "None"),
+                    VariableAxisSpec.generated_arange("State", "None"),
                     VariableAxisSpec("Scan x (see cfg)", "None", field_name="x_values"),
                     VariableAxisSpec(
                         "Stokes detuning (MHz)", "None", field_name="y_values"
