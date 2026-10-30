@@ -8,20 +8,35 @@ from typing import Annotated, ClassVar, Literal, Self
 import numpy as np
 from numpy.typing import NDArray
 from pydantic import Field, model_validator
-from zcu_tools.analysis.singleshot import Centroid3IQAnalysis, analyze_centroid3_iq
+from zcu_tools.analysis.singleshot import (
+    Centroid3IQAnalysis,
+    analyze_centroid3_populations,
+)
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.core.simulation import ChargeDriveRequirement
-from zcu_tools.experiment import AxesSpec, Experiment
+from zcu_tools.experiment import Experiment
+from zcu_tools.experiment.axes_spec import (
+    GroupedAxesSpec,
+    GroupedLoadData,
+    VariableAxisSpec,
+    VariableSpec,
+    VariableZSpec,
+)
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.acquisition import StoppedPartialAcquireError
-from zcu_tools.program.v2 import Join, Pulse, PulseReadout, SoftDelay, SweepCfg
+from zcu_tools.program.v2 import (
+    Classify,
+    Join,
+    Pulse,
+    PulseReadout,
+    SoftDelay,
+    SweepCfg,
+    shot_sums,
+)
 from zcu_tools.program.v2.modules.readout import centroid3_classifier
 from zcu_tools.program.v2.modules.waveform import GaussWaveformCfg
-
-from zcu_lab.v2.support.singleshot.util import raw_shots_to_signal
 
 
 class DelayScan(ConfigBase):
@@ -53,7 +68,7 @@ class StirapCfg(ConfigBase):
     Stokes drives 2–3. Pulses last six sigma with zero extra pre/post delays.
     stokes_lead is fixed outside delay mode; positive means Stokes first.
     scan changes only lead, common gain scale or two carrier detunings.
-    shots counts raw IQ shots per scan point, acquired in one round.
+    shots sets repetitions per scan point, classified into g/e/f in one round.
     readout collects one ADC after both branches; relax_delay follows each shot.
     """
 
@@ -105,47 +120,66 @@ class StirapCfg(ConfigBase):
 
 @dataclass(frozen=True)
 class StirapResult:
-    """signals: raw mean-sample ADC IQ, shaped (Ny,Nx,shots), not populations.
+    """counts: g/e/f shot counts, shaped (Ny,Nx,3), not corrected populations.
 
     x_values: requested lead/us, common amplitude scale, or Pump detuning/MHz.
     y_values: [0] except detuning mode, where it is Stokes detuning/MHz.
-    shot_indices: zero-based shot coordinate. Saved cfg identifies scan mode.
+    The final axis has g/e/f order. Saved cfg identifies scan mode.
     Unfinished points remain NaN. No intermediate-state oracle is included.
     """
 
     x_values: NDArray[np.float64]
     y_values: NDArray[np.float64]
-    shot_indices: NDArray[np.int64]
-    signals: NDArray[np.complex128]
+    counts: NDArray[np.float64]
+
+
+def restore_result(data: GroupedLoadData[StirapCfg]) -> StirapResult:
+    """Restore coordinates and g/e/f counts; missing counts raises ValueError."""
+    counts = data.variable("counts")
+    return StirapResult(
+        x_values=np.asarray(counts.axes[1], dtype=np.float64),
+        y_values=np.asarray(counts.axes[2], dtype=np.float64),
+        counts=np.asarray(counts.z, dtype=np.float64),
+    )
 
 
 class StirapExp(Experiment[StirapResult, StirapCfg]):
     """Acquire the same two-branch STIRAP sequence under three scan modes."""
 
-    AXES_SPEC: ClassVar[AxesSpec[StirapResult, StirapCfg]] = AxesSpec(
-        axes=(
-            AxesSpec.Axis("shot_indices", "Shot Index", "None", dtype=np.int64),
-            AxesSpec.Axis("x_values", "Scan x (see cfg)", "None", dtype=np.float64),
-            AxesSpec.Axis("y_values", "Scan y (see cfg)", "None", dtype=np.float64),
+    AXES_SPEC: ClassVar[GroupedAxesSpec[StirapResult, StirapCfg]] = GroupedAxesSpec(
+        variables=(
+            VariableSpec(
+                "counts",
+                (
+                    VariableAxisSpec.generated_arange("State", "None"),
+                    VariableAxisSpec("Scan x (see cfg)", "None", field_name="x_values"),
+                    VariableAxisSpec(
+                        "Stokes detuning (MHz)", "None", field_name="y_values"
+                    ),
+                ),
+                VariableZSpec("counts", "Shot count", "None", dtype=np.float64),
+            ),
         ),
-        z=AxesSpec.Z("signals", "Raw IQ", "a.u.", dtype=np.complex128),
         result_type=StirapResult,
         cfg_type=StirapCfg,
+        result_builder=restore_result,
         cfg_schema_version="3.0",
         tag="twotone/stirap",
     )
 
     def run(self, cfg: StirapCfg, *, context: RunContext) -> StirapResult:
-        """Start from relaxed g, overlap Stokes/Pump Gaussians, then acquire IQ.
+        """Start from relaxed g, overlap Stokes/Pump Gaussians, then count g/e/f.
 
         Positive lead delays Pump, negative lead delays Stokes. Join waits for
         both independent generator branches before readout. Width is fixed in
         every mode. Delay/amplitude scans have Ny=1; detuning is Pump x Stokes.
         Coordinates are requested values; the board quantizes pulse timing,
-        frequency and gain. Return every raw shot; cancellation leaves NaNs.
-        Single-fluxonium preflight requires both generators to bind charge lines.
+        frequency and gain. Classify cfg.shots repetitions in one round per point;
+        cancellation leaves unfinished counts as NaN. Require centroid3 before
+        acquisition. Single-fluxonium preflight requires both generators to bind charge lines.
         Hardware wiring roles remain the operator responsibility.
         """
+        centroid3_classifier(cfg.readout, ro_ch=cfg.readout.ro_ch)
         scan = cfg.scan
         if scan.kind == "delay":
             x_sweep, y_sweep = scan.stokes_lead, None
@@ -162,7 +196,7 @@ class StirapExp(Experiment[StirapResult, StirapCfg]):
             if y_sweep is None
             else np.linspace(y_sweep.start, y_sweep.stop, y_sweep.expts)
         )
-        buffer = SignalBuffer((len(ys), len(xs), cfg.shots))
+        buffer = SignalBuffer((len(ys), len(xs), 3), dtype=np.float64)
         with Schedule(cfg, buffer, scope=context.scope) as sched:
             for y, row in sched.scan("stokes_detuning", ys.tolist()):
                 for x, step in row.scan("scan_x", xs.tolist()):
@@ -193,60 +227,50 @@ class StirapExp(Experiment[StirapResult, StirapCfg]):
                             length=6 * cfg.width, sigma=cfg.width
                         ),
                     )
-                    program = (
-                        step.prog_builder(
-                            context.soc,
-                            context.soccfg,
-                            reps=cfg.shots,
-                            relax_delay=cfg.relax_delay,
-                        )
-                        .add(
-                            Join(
-                                [
-                                    SoftDelay("stokes_start", max(-lead, 0.0)),
-                                    Pulse("stokes", stokes),
-                                ],
-                                [
-                                    SoftDelay("pump_start", max(lead, 0.0)),
-                                    Pulse("pump", pump),
-                                ],
-                            ),
-                            PulseReadout("readout", step.cfg.readout),
-                        )
-                        .build()
+                    builder = step.prog_builder(
+                        context.soc,
+                        context.soccfg,
+                        reps=cfg.shots,
+                        relax_delay=cfg.relax_delay,
+                    ).add(
+                        Join(
+                            [
+                                SoftDelay("stokes_start", max(-lead, 0.0)),
+                                Pulse("stokes", stokes),
+                            ],
+                            [
+                                SoftDelay("pump_start", max(lead, 0.0)),
+                                Pulse("pump", pump),
+                            ],
+                        ),
+                        PulseReadout("readout", step.cfg.readout),
                     )
-                    try:
-                        program.acquire(
-                            context.soc,
-                            progress=True,
-                            cancel_flag=step.stop,
-                            charge_requirements=(
-                                ChargeDriveRequirement("Pump", cfg.pump_ch),
-                                ChargeDriveRequirement("Stokes", cfg.stokes_ch),
-                            ),
-                        )
-                    except StoppedPartialAcquireError:
-                        step.set_stop()
-                        break
-                    buffer[step].set(raw_shots_to_signal(program))
-        result = StirapResult(
-            xs, ys, np.arange(cfg.shots, dtype=np.int64), buffer.array
-        )
+                    program = builder.build()
+                    builder.run_program_summed(
+                        program,
+                        processor=shot_sums(program, [Classify("readout")]),
+                        sums2signal_fn=lambda sums: sums.reshape(3),
+                        charge_requirements=(
+                            ChargeDriveRequirement("Pump", cfg.pump_ch),
+                            ChargeDriveRequirement("Stokes", cfg.stokes_ch),
+                        ),
+                    )
+        result = StirapResult(xs, ys, buffer.array)
         context.plots.subplots("measurement", layout="constrained")
 
         def draw(figure):
             ax = figure.axes[0]
-            mean = result.signals.mean(axis=-1)
+            fractions = result.counts / result.counts.sum(axis=-1, keepdims=True)
             if scan.kind == "detuning":
-                image = ax.pcolormesh(xs, ys, abs(mean), shading="nearest")
-                figure.colorbar(image, ax=ax, label="Mean IQ magnitude (ADC)")
+                image = ax.pcolormesh(xs, ys, fractions[..., 2], shading="nearest")
+                figure.colorbar(image, ax=ax, label="Raw f fraction")
                 ax.set(xlabel=x_label, ylabel="Stokes detuning (MHz)")
             else:
-                ax.plot(xs, mean[0].real, ".-", label="Mean I")
-                ax.plot(xs, mean[0].imag, ".-", label="Mean Q")
-                ax.set(xlabel=x_label, ylabel="Mean-sample ADC IQ")
+                for label, state in enumerate(("g", "e", "f")):
+                    ax.plot(xs, fractions[0, :, label], ".-", label=state)
+                ax.set(xlabel=x_label, ylabel="Preparation-label fraction")
                 ax.legend()
-            ax.set_title("STIRAP acquired IQ (not fidelity)")
+            ax.set_title("STIRAP acquired fractions (not fidelity)")
 
         context.plots.draw("measurement", draw)
         return result
@@ -258,21 +282,27 @@ class StirapExp(Experiment[StirapResult, StirapCfg]):
         *,
         plots: Plots,
     ) -> Centroid3IQAnalysis:
-        """Classify raw shots with this run's saved centroid3 readout calibration.
+        """Normalize acquired counts and correct with the saved readout confusion.
 
         Require source.cfg and its saved ADC classifier; missing/wrong-type
         calibration fails explicitly. No current Form, library or simulator
         truth is consulted. Return raw/unclipped corrected g/e/f fractions,
         training confusion and its condition/minimum singular value. Plot
         requested scan coordinates; preparation-label estimates are not fidelity.
-        Incomplete/nonfinite IQ or singular confusion fails in the analysis owner.
+        Incomplete/nonfinite or empty counts and singular confusion fail explicitly.
         """
         del options
         cfg = source.cfg
         if cfg is None:
             raise ValueError("STIRAP analysis requires the saved run readout cfg")
         calibration = centroid3_classifier(cfg.readout, ro_ch=cfg.readout.ro_ch)
-        result = analyze_centroid3_iq(source.result.signals, calibration)
+        counts = source.result.counts
+        if not np.isfinite(counts).all() or np.any(counts.sum(axis=-1) <= 0):
+            raise ValueError(
+                "STIRAP analysis requires finite, nonempty counts at every point"
+            )
+        raw = counts / counts.sum(axis=-1, keepdims=True)
+        result = analyze_centroid3_populations(raw, calibration)
         detuning = cfg.scan.kind == "detuning"
         plots.subplots(
             "fit",

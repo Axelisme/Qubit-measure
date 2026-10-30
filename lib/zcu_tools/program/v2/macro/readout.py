@@ -32,15 +32,17 @@ class ReadoutEmission(Macro):
     """Associate the following ADC trigger with its emitting module instance.
 
     owner is an opaque module identity, borrowed for the lifetime of the program.
-    ro_ch is its logical ADC channel number. This marker emits no instructions
+    ro_ch is its logical ADC channel number (first tone for mux). label is the
+    optional emit tag; None selects the owner's module name. This marker emits no instructions
     and does not change trigger counts, timing, or acquisition configuration.
     """
 
-    def __init__(self, owner: object, ro_ch: int) -> None:
-        """Capture an emitting instance and ADC immediately before its trigger."""
+    def __init__(self, owner: object, ro_ch: int, label: str | None = None) -> None:
+        """Capture the borrowed owner, first ADC and optional emission label."""
         super().__init__()
         self.owner = owner
         self.ro_ch = ro_ch
+        self.label = label
 
     def translate(self, prog: object) -> None:
         """Leave the compiled program unchanged; provenance stays in macro_list."""

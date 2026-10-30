@@ -6,6 +6,7 @@ import json
 import logging
 from collections.abc import Generator, Sequence
 from contextlib import contextmanager
+from copy import deepcopy
 from dataclasses import dataclass, field, fields, is_dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -167,9 +168,10 @@ def probe(
 ) -> ProbeReport:
     """Run, save native, restore and analyze one supplied offline experiment.
 
-    cfg must match the experiment's Cfg type; options is passed to analyze
-    unchanged (None when omitted). AXES_SPEC is required. Use caller-created
-    SimulationEnvironment resources; never reseed, rewire or close them here.
+    cfg must match the experiment's Cfg type. Run and analyze receive isolated
+    copies of cfg and options; options defaults to None. AXES_SPEC is required.
+    Use caller-created SimulationEnvironment resources; never reseed, rewire or
+    close them here.
     Create output_dir and overwrite data.h5 and same-named PNGs on rerun. Figures
     use Agg canvases and no QApplication. PNG names contain live/analysis and
     URL-escaped figure names. Return shapes, exact Result round-trip comparison,
@@ -204,7 +206,7 @@ def probe(
             report.roundtrip_equal = _equal(record.result, restored.result)
         with _timed(report, "analyze"):
             report.analysis_summary = short_repr(
-                experiment.analyze(restored, options, plots=analysis)
+                experiment.analyze(restored, deepcopy(options), plots=analysis)
             )
         with _timed(report, "analysis_png"):
             _export(analysis, "analysis", report, output_dir)

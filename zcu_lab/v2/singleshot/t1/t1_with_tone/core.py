@@ -11,11 +11,9 @@ from zcu_tools.analysis.fitting.multi_decay import (
     calc_lambdas,
     fit_dual_transition_rates,
 )
-from zcu_tools.analysis.singleshot import (
-    correct_populations,
-    raw_population_signal,
-)
+from zcu_tools.analysis.singleshot import correct_populations
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
+from zcu_tools.datafile import DataVariable
 from zcu_tools.experiment import AxesSpec, Experiment
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
@@ -27,14 +25,16 @@ from zcu_tools.experiment.v2.utils.t1_sampling import (
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     Branch,
+    Classify,
     ModularProgramV2,
     Pulse,
     Readout,
     Reset,
     SweepCfg,
+    shot_sums,
     sweep2param,
 )
-from zcu_tools.program.v2.modules.readout import classification_processors
+from zcu_tools.program.v2.modules.readout import PulseReadoutCfg, circle_classifier
 
 from zcu_lab.v2.support import LinePlot, live_line
 
@@ -47,27 +47,23 @@ def _default_population_states() -> NDArray[np.int64]:
     return np.array([0, 1, 2], dtype=np.int64)
 
 
-def _average_rounds(data: NDArray[np.float64]) -> NDArray[np.float64]:
-    values = np.asarray(data)
-    valid_axes = tuple(range(2, values.ndim))
-    valid = np.any(~np.isnan(values), axis=valid_axes)
-    completed = np.any(valid, axis=0)
-    averaged = np.full(values.shape[1:], np.nan, dtype=np.float64)
-    if np.any(completed):
-        averaged[completed] = np.nanmean(values[:, completed], axis=0)
-    return averaged
+def _sum_rounds(data: NDArray[np.float64]) -> NDArray[np.float64]:
+    """Sum acquired host rounds, leaving entirely unmeasured cells as NaN."""
+    acquired = np.any(np.isfinite(data), axis=0)
+    totals = np.nansum(data, axis=0)
+    return np.where(acquired, totals, np.nan)
 
 
 @dataclass(frozen=True)
 class T1WithToneResult:
-    """Mean G/E/Other fractions in (length, initial state, population state) order.
+    """G/E/Other shot counts summed over acquired rounds in (length, initial state, population state) order.
 
     Lengths are in us. Initial states are 0/1 for I/pi preparation;
     population states are 0/1/2 for g/e/other. Unmeasured entries are NaN.
     """
 
     lengths: NDArray[np.float64]
-    signals: NDArray[np.float64]
+    counts: NDArray[np.float64]
     initial_states: NDArray[np.int64] = field(default_factory=_default_initial_states)
     population_states: NDArray[np.int64] = field(
         default_factory=_default_population_states
@@ -121,7 +117,8 @@ class T1WithToneExp(Experiment[T1WithToneResult, T1WithToneCfg]):
             AxesSpec.Axis("initial_states", "Initial State", "None", dtype=np.int64),
             AxesSpec.Axis("lengths", "Time", "s", scale=1e-6, dtype=np.float64),
         ),
-        z=AxesSpec.Z("signals", "Population", "a.u.", dtype=np.float64),
+        z=AxesSpec.Z("counts", "Class counts", "count", dtype=np.float64),
+        data_variable=DataVariable("counts"),
         result_type=T1WithToneResult,
         cfg_type=T1WithToneCfg,
         cfg_schema_version="3.0",
@@ -166,15 +163,24 @@ class T1WithToneExp(Experiment[T1WithToneResult, T1WithToneCfg]):
         Each shot resets, applies the optional init pulse, prepares with I or pi,
         plays the probe tone, then reads out. Uniform SweepCfg lengths run on
         the FPGA; non-uniform lengths run on the host and omit the tone at zero.
-        Return lengths in us and populations shaped (length, preparation, G/E/Other),
-        averaged over rounds. Cancellation leaves unmeasured entries as NaN.
-        cfg supplies the pulses and per-ADC readout classifiers; context
+        Return lengths in us and counts shaped (length, preparation, G/E/Other),
+        summed over acquired rounds. Cancellation leaves unmeasured entries as NaN.
+        cfg supplies the pulses and first-tone circle readout classifier; context
         supplies hardware, plots and cancellation. Uniform mode requires SweepCfg;
         non-uniform lengths must stay distinct on the probe generator's grid.
         """
         # 1. Quantize durations without changing the caller's pulse settings.
         cfg = deepcopy(cfg)
-        processors = classification_processors(cfg.readout, require_other=True)
+        pulse_readout = isinstance(cfg.readout, PulseReadoutCfg)
+        ro_ch = (
+            cfg.readout.ro_ch
+            if isinstance(cfg.readout, PulseReadoutCfg)
+            else cfg.readout.tones[0].ro_ch
+        )
+        classifier = circle_classifier(cfg.readout, ro_ch=ro_ch)
+        axis = Classify(
+            "readout", tone=None if pulse_readout else 0, classifier=classifier
+        )
         soc, soccfg = context.soc, context.soccfg
         if cfg.uniform:
             length_sweep = cfg.length
@@ -193,7 +199,8 @@ class T1WithToneExp(Experiment[T1WithToneResult, T1WithToneCfg]):
 
         init_g, init_e = self._make_viewers(context.plots)
 
-        def plot_fn(populations: NDArray[np.float64]) -> None:
+        def plot_fn(counts: NDArray[np.float64]) -> None:
+            populations = counts / counts.sum(axis=-1, keepdims=True)
             init_g.update(lengths, populations[:, 0].T)
             init_e.update(lengths, populations[:, 1].T)
 
@@ -211,7 +218,7 @@ class T1WithToneExp(Experiment[T1WithToneResult, T1WithToneCfg]):
                 )
 
                 # 2a. Sweep tone duration and I/pi preparation inside each shot round.
-                _ = (
+                builder = (
                     sched.prog_builder(
                         soc,
                         soccfg,
@@ -227,13 +234,15 @@ class T1WithToneExp(Experiment[T1WithToneResult, T1WithToneCfg]):
                     )
                     .declare_sweep("length", inner_length_sweep)
                     .declare_sweep("ge", 2)
-                    .build_and_acquire_processed(
-                        processed2signal_fn=raw_population_signal,
-                        processors=processors,
-                        rounds=cfg.rounds,
-                    )
                 )
-            populations = buffer.array
+                program = builder.build()
+                builder.run_program_summed(
+                    program,
+                    processor=shot_sums(program, [axis]),
+                    sums2signal_fn=lambda sums: sums,
+                    rounds=cfg.rounds,
+                )
+            counts = buffer.array
         else:
             # 2b. Repeat host scans, reusing one compiled program per duration.
             rounds = cfg.rounds
@@ -242,7 +251,7 @@ class T1WithToneExp(Experiment[T1WithToneResult, T1WithToneCfg]):
             round_buffer = SignalBuffer(
                 (rounds, len(lengths), 2, 3),
                 dtype=np.float64,
-                on_update=lambda data: plot_fn(_average_rounds(data)),
+                on_update=lambda data: plot_fn(_sum_rounds(data)),
             )
             programs: dict[float, ModularProgramV2] = {}
             with Schedule(run_cfg, round_buffer, scope=context.scope) as sched:
@@ -271,17 +280,18 @@ class T1WithToneExp(Experiment[T1WithToneResult, T1WithToneCfg]):
                         length_key = float(length)
                         if length_key not in programs:
                             programs[length_key] = builder.build()
-                        _ = builder.run_program_processed(
-                            programs[length_key],
-                            processed2signal_fn=raw_population_signal,
-                            processors=processors,
-                            rounds=cfg.rounds,
+                        program = programs[length_key]
+                        _ = builder.run_program_summed(
+                            program,
+                            processor=shot_sums(program, [axis]),
+                            sums2signal_fn=lambda sums: sums,
+                            rounds=1,
                         )
 
-            # 3. Average only acquired host data; preserve NaN for missing lengths.
-            populations = _average_rounds(round_buffer.array)
+            # 3. Sum acquired host rounds; preserve NaN for missing lengths.
+            counts = _sum_rounds(round_buffer.array)
 
-        return T1WithToneResult(lengths=lengths, signals=populations)
+        return T1WithToneResult(lengths=lengths, counts=counts)
 
     def analyze(
         self,
@@ -292,7 +302,7 @@ class T1WithToneExp(Experiment[T1WithToneResult, T1WithToneCfg]):
     ) -> T1WithToneAnalysis:
         """Fit transitions between G, E and Other during the applied probe tone.
 
-        Use source populations after options.skip, optionally corrected by the
+        Normalize source counts per row after options.skip, optionally corrected by the
         supplied confusion matrix. Fit both I/pi preparations together, return
         the two decay times in us, and publish their population curves to plots.
         """
@@ -300,7 +310,10 @@ class T1WithToneExp(Experiment[T1WithToneResult, T1WithToneCfg]):
         result = source.result
         skip, confusion_matrix = options.skip, options.confusion_matrix
 
-        lens, populations = result.lengths, result.signals
+        lens, populations = (
+            result.lengths,
+            result.counts / result.counts.sum(axis=-1, keepdims=True),
+        )
 
         lens = lens[skip:]
         populations = populations[skip:]

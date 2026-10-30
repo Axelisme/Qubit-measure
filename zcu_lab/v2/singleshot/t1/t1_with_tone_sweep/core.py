@@ -9,11 +9,9 @@ from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from zcu_tools.analysis.fitting.multi_decay import fit_dual_transition_rates
-from zcu_tools.analysis.singleshot import (
-    correct_populations,
-    raw_population_signal,
-)
+from zcu_tools.analysis.singleshot import correct_populations
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
+from zcu_tools.datafile import DataVariable
 from zcu_tools.experiment import AxesSpec, Experiment
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
@@ -25,14 +23,16 @@ from zcu_tools.experiment.v2.utils.t1_sampling import (
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     Branch,
+    Classify,
     GainSweep,
     Pulse,
     Readout,
     Reset,
     SweepCfg,
     TableLengthPulse,
+    shot_sums,
 )
-from zcu_tools.program.v2.modules.readout import classification_processors
+from zcu_tools.program.v2.modules.readout import PulseReadoutCfg, circle_classifier
 from zcu_tools.progress_bar import make_pbar
 
 from zcu_lab.v2.support import live_heatmap, live_line
@@ -126,7 +126,7 @@ def _require_positive_lengths(lengths: NDArray[np.float64]) -> None:
 
 @dataclass(frozen=True)
 class T1WithToneSweepResult:
-    """Mean G/E/Other fractions in (outer value, initial state, length, population state) order.
+    """G/E/Other shot counts summed over acquired rounds in (outer value, initial state, length, population state) order.
 
     Lengths are in us. Initial states are 0/1 for I/pi preparation;
     population states are 0/1/2 for g/e/other. Unmeasured entries are NaN.
@@ -134,7 +134,7 @@ class T1WithToneSweepResult:
 
     xs: NDArray[np.float64]
     lengths: NDArray[np.float64]
-    signals: NDArray[np.float64]
+    counts: NDArray[np.float64]
     initial_states: NDArray[np.int64] = field(default_factory=_default_initial_states)
     population_states: NDArray[np.int64] = field(
         default_factory=_default_population_states
@@ -197,7 +197,8 @@ class T1WithToneSweepExp(Experiment[T1WithToneSweepResult, T1WithToneSweepCfg]):
             AxesSpec.Axis("initial_states", "Initial State", "None", dtype=np.int64),
             AxesSpec.Axis("xs", "Sweep Value", "a.u.", dtype=np.float64),
         ),
-        z=AxesSpec.Z("signals", "Population", "a.u.", dtype=np.float64),
+        z=AxesSpec.Z("counts", "Class counts", "count", dtype=np.float64),
+        data_variable=DataVariable("counts"),
         result_type=T1WithToneSweepResult,
         cfg_type=T1WithToneSweepCfg,
         cfg_schema_version="3.0",
@@ -275,16 +276,25 @@ class T1WithToneSweepExp(Experiment[T1WithToneSweepResult, T1WithToneSweepCfg]):
 
         For each outer sweep value, prepare without/with a pi pulse, apply
         the probe for each table-driven length, then read out. Return classified
-        g/e/other fractions with axes (outer value, initial g/e, length, state).
+        g/e/other counts summed over rounds with axes (outer value, initial g/e, length, state).
         Lengths are in us; missing acquisitions remain NaN.
 
         Uniform sampling requires a SweepCfg. Non-uniform sampling accepts
         a SweepCfg or explicit lengths; invalid or non-positive lengths fail
-        before acquisition. Classification uses every ADC's readout circle classifier.
+        before acquisition. Classification uses the first readout tone's circle classifier.
         """
         # 1. Resolve the outer scan and quantize positive probe durations.
         cfg = deepcopy(cfg)
-        processors = classification_processors(cfg.readout, require_other=True)
+        pulse_readout = isinstance(cfg.readout, PulseReadoutCfg)
+        ro_ch = (
+            cfg.readout.ro_ch
+            if isinstance(cfg.readout, PulseReadoutCfg)
+            else cfg.readout.tones[0].ro_ch
+        )
+        classifier = circle_classifier(cfg.readout, ro_ch=ro_ch)
+        axis = Classify(
+            "readout", tone=None if pulse_readout else 0, classifier=classifier
+        )
         soc, soccfg = context.soc, context.soccfg
         if cfg.uniform:
             length_sweep = cfg.length
@@ -310,7 +320,8 @@ class T1WithToneSweepExp(Experiment[T1WithToneSweepResult, T1WithToneSweepCfg]):
         )
         current_index = 0
 
-        def plot_fn(populations: NDArray[np.float64]) -> None:
+        def plot_fn(counts: NDArray[np.float64]) -> None:
+            populations = counts / counts.sum(axis=-1, keepdims=True)
             i = current_index
 
             gg_2d.update(xs, lengths, populations[:, 0, :, 0])
@@ -342,7 +353,7 @@ class T1WithToneSweepExp(Experiment[T1WithToneSweepResult, T1WithToneSweepCfg]):
                 current_index = value_idx
 
                 # Read out at each actual probe end, without longest-point padding.
-                _ = (
+                builder = (
                     step.prog_builder(
                         soc,
                         soccfg,
@@ -362,15 +373,17 @@ class T1WithToneSweepExp(Experiment[T1WithToneSweepResult, T1WithToneSweepCfg]):
                     )
                     .declare_sweep("ge", 2)
                     .declare_sweep("length", len(lengths))
-                    .build_and_acquire_processed(
-                        processed2signal_fn=raw_population_signal,
-                        processors=processors,
-                        rounds=cfg.rounds,
-                    )
+                )
+                program = builder.build()
+                builder.run_program_summed(
+                    program,
+                    processor=shot_sums(program, [axis]),
+                    sums2signal_fn=lambda sums: sums,
+                    rounds=cfg.rounds,
                 )
 
-        # 4. Keep round-averaged fractions, including partial rows, in saved-axis order.
-        return T1WithToneSweepResult(xs=xs, lengths=lengths, signals=buffer.array)
+        # 4. Keep cumulative counts, including partial rows, in saved-axis order.
+        return T1WithToneSweepResult(xs=xs, lengths=lengths, counts=buffer.array)
 
     def analyze(
         self,
@@ -381,7 +394,7 @@ class T1WithToneSweepExp(Experiment[T1WithToneSweepResult, T1WithToneSweepCfg]):
     ) -> None:
         """Plot three-state transition rates from both initial-state decays.
 
-        Use complete outer-sweep rows from source, apply the optional confusion
+        Normalize complete outer-sweep rows from source, apply the optional confusion
         matrix, and fit rates in inverse us. options.ac_coeff converts the outer
         axis to photon number as ac_coeff * xs**2; options.xlabel overrides its
         label. Publish population maps and rate panels to plots; return no value.
@@ -395,7 +408,11 @@ class T1WithToneSweepExp(Experiment[T1WithToneSweepResult, T1WithToneSweepCfg]):
             options.xlabel,
         )
 
-        xs, Ts, populations = result.xs, result.lengths, result.signals
+        xs, Ts, populations = (
+            result.xs,
+            result.lengths,
+            result.counts / result.counts.sum(axis=-1, keepdims=True),
+        )
 
         valid_mask = np.all(np.isfinite(populations), axis=(1, 2, 3))
         xs = xs[valid_mask]

@@ -87,13 +87,15 @@ class HeraldingAmpRabiReport(RecipeReport):
 
 @recipe(
     "heralding_amp_rabi",
-    description="Run ground-heralded gain Rabi and save selected IQ, pass fraction and analysis.",
+    description="Run ground-heralded gain Rabi and save per-class shot sums and analysis.",
 )
 async def heralding_amp_rabi(
     session: RecipeSession, inputs: HeraldingAmpRabiInputs
 ) -> HeraldingAmpRabiReport:
     """Sweep drive gain at fixed pulse length to calibrate pi and pi/2 rotations.
 
+    Store per-class shot sums; compute herald-g conditional IQ for fitting.
+    Readout must include a GE Post circle classifier with calibrated radius.
     After optional reset, herald ground with the saved readout classifier,
     apply the drive pulse and read out at each gain. Average only accepted shots.
     No active reset or joint herald is added. Fit the Rabi oscillations to estimate pi and pi/2 gains,

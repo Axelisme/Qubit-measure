@@ -1,6 +1,6 @@
 # Explicit acquisition environments
 
-**Last updated:** 2026-10-30，processor-only herald and explicit charge requirements
+**Last updated:** 2026-10-30，joint-ADC shot sums and explicit charge requirements
 
 **讀者：** framework-dev。模擬 acquisition 的 request、round 與 raw source 契約。
 
@@ -238,17 +238,14 @@ Normal hardware compilation and the existing block_mode timing policy are unchan
   Without processors, threshold or trackers,
   it divides totals by reps and readout length, removes QICK offsets and moves reads first,
   without allocating `acc_buf`. Hooks receive the running mean of completed rounds.
-  Every `acquire_processed` round materializes retained raw shots and uses the
-  same per-shot processor pipeline as hardware. `heralded` is an ordinary
-  processor wrapper here, with no separate simulation mode. Compact totals do
-  not determine processor payloads. Each processor receives float64
-  `(shots, reads, 2)` normalized IQ and returns `(shots, out_reads, N)` payloads.
-  Herald and signal reads come from the same outcome history and share each
-  ADC's rounded integration length, without IQ-offset subtraction.
-  `heralded(spec, inner)` appends acceptance to weighted signal components.
-  `herald_ratio` divides both final and cumulative round-hook numerators by
-  acceptance, giving accepted-count weighting and NaN without divide warnings
-  at zero acceptance. The builder converter writes the fraction to the Lab Result.
+  Every `acquire_summed` round materializes retained raw shots and uses the
+  same joint-ADC processor and accumulation path as hardware. The processor
+  receives ADC-keyed float64 `(points, reps, reads, 2)` normalized IQ without
+  IQ-offset subtraction. It returns `(points, *axes)` sums; completed rounds
+  add without normalization. Compact totals do not determine these sums.
+  Herald and terminal reads retain paired outcome histories. Read-axis labels
+  and classifiers follow the [program contract](../../README.md#summed-acquisition).
+  Round hooks and the builder converter receive accumulated sums, not averages.
   Threshold, trackers and `get_raw()` materialize deterministic
   int64 shots from the retained last-round source. The environment owns signal,
   noise, rounding and loop layout. Every source call returns fresh arrays with

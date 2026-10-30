@@ -238,8 +238,28 @@ def analyze_centroid3_iq(
         [calibration.g_center, calibration.e_center, calibration.f_center],
         dtype=np.complex128,
     )
-    matrix = np.asarray(calibration.confusion_matrix, dtype=np.float64)
     raw = classify_reference_iq(signals, centers)
+    return analyze_centroid3_populations(raw, calibration)
+
+
+def analyze_centroid3_populations(
+    populations: NDArray[np.float64], calibration: Centroid3Classifier
+) -> Centroid3IQAnalysis:
+    """Correct measured g/e/f fractions with one saved readout calibration.
+
+    populations contains normalized measured fractions, with arbitrary scan axes
+    and a final g/e/f axis of length three. The caller normalizes shot counts
+    before calling. calibration is the saved-run centroid3 classifier; its
+    confusion rows are prepared g/e/f and columns are measured g/e/f.
+    Return raw fractions (borrowed), unclipped corrected preparation-label
+    estimates, a detached training matrix and its 2-norm condition number and
+    minimum singular value. Negative and above-one estimates are retained;
+    no purity is inferred. Wrong-shaped/nonfinite fractions raise ValueError;
+    singular confusion raises LinAlgError. Inputs are unchanged. No library,
+    program, hardware, classification or retraining is used.
+    """
+    raw = _centroid3_populations(populations)
+    matrix = np.asarray(calibration.confusion_matrix, dtype=np.float64)
     return Centroid3IQAnalysis(
         raw_populations=raw,
         corrected_populations=correct_populations(raw, matrix, clip=False),
