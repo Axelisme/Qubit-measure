@@ -612,6 +612,7 @@ Core import `Pulse`、`Readout`、`Reset` 等實際使用的模組，欄位型�
 
 ## Signal/Raw 處理慣例
 
+- 除了用來產生分類參數的 `singleshot/ge`、`mux/singleshot_ge`、`singleshot/qutrit_population`、`singleshot/amp_rabi`、`singleshot/len_rabi`、`singleshot/check`，實驗不保存逐 shot 資料。分類在取數時做，Result 存計數或總和，避免為事後分類保存整批 IQ。校準實驗仍保留逐 shot 分布，供分類參數的擬合與驗證使用。
 - **`raw` 格式**：QICK 回傳的 raw 一般是 `list[ndarray]`，第一個元素 shape 為 `(nro, ..., 2)`（IQ 兩個實數）。
 - **`default_raw2signal_fn`**：Schedule 路徑使用 `zcu_tools.experiment.v2.runtime.schedule` 的預設轉換：`raw[0][0].dot([1, 1j])`，取第 0 個 RO channel、該 channel 的第 0 次 readout，再把 IQ 轉成 complex。
 - **客製化 `raw2signal_fn`**：integrated acquire 用 `build_and_acquire(raw2signal_fn=...)` / `run_program(raw2signal_fn=...)`；decimated trace 用 `build_and_acquire_decimated(raw2signal_fn=...)` / `run_program_decimated(raw2signal_fn=...)`。`ProgramBuilder.set_raw2signal_fn(...)` 可設定同一個 builder 的預設轉換。
