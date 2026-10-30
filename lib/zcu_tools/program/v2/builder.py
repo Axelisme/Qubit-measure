@@ -1,0 +1,262 @@
+"""Record timeline actions without acquiring data or touching hardware."""
+
+from collections.abc import Callable, Sequence
+from typing import Literal, TypedDict, Unpack, override
+
+from qick import QickConfig
+from qick.asm_v2 import QickParam
+
+from .modules.base import Module
+from .sweep import SweepCfg
+from .timeline import TimelineProgramV2
+from .utils import sweep2param
+
+_Action = Callable[[TimelineProgramV2], None]
+
+
+class _TriggerOptions(TypedDict, total=False):
+    """Optional trigger controls, with native defaults when omitted.
+
+    ddr4/mr enable the corresponding capture buffers (default False).
+    tag names this occurrence for time lookup (default None).
+    timeline places at its end plus t; None retains native reference timing.
+    """
+
+    ddr4: bool
+    mr: bool
+    tag: str | None
+    timeline: str | None
+
+
+class _RecordedProgram(TimelineProgramV2):
+    """Replay initialization and body actions on every compilation."""
+
+    def __init__(
+        self,
+        soccfg: QickConfig,
+        initialize: Sequence[_Action],
+        body: Sequence[_Action],
+        **kwargs,
+    ) -> None:
+        self._initialize_actions = tuple(initialize)
+        self._body_actions = tuple(body)
+        super().__init__(soccfg, **kwargs)
+
+    @override
+    def _initialize(self, cfg: None) -> None:
+        for action in self._initialize_actions:
+            action(self)
+
+    @override
+    def _body(self, cfg: None) -> None:
+        for action in self._body_actions:
+            action(self)
+
+
+class TimelineBuilder:
+    """Record a program, automatically declaring modules on their first emit.
+
+    soccfg is a QICK compile profile, not a connected SoC. reps counts shots;
+    initial_delay and relax_delay are us. Module objects are borrowed by identity:
+    do not mutate them after recording. Loops replay in call order, outside in;
+    body actions replay in call order. build freezes this builder and compiles a
+    TimelineProgramV2, with no acquisition or Schedule dependency. Later recording
+    or build calls raise ValueError. Compiler/owner errors propagate.
+    """
+
+    def __init__(
+        self,
+        soccfg: QickConfig,
+        *,
+        reps: int = 1,
+        initial_delay: float = 1.0,
+        relax_delay: float = 1.0,
+    ) -> None:
+        """Capture the compile profile and shot controls without compiling."""
+        self._soccfg = soccfg
+        self._reps = reps
+        self._initial_delay = initial_delay
+        self._relax_delay = relax_delay
+        self._initialize_actions: list[_Action] = []
+        self._body_actions: list[_Action] = []
+        self._modules: list[Module] = []
+        self._built = False
+        self._loop_names = {"reps"}
+
+    def _ensure_recording(self) -> None:
+        if self._built:
+            raise ValueError("TimelineBuilder is frozen after build")
+
+    def _record(self, action: _Action) -> None:
+        self._ensure_recording()
+        self._body_actions.append(action)
+
+    def add_loop(self, name: str, count: int) -> None:
+        """Record count points, outermost first; duplicate names raise ValueError.
+
+        The shot loop reserves "reps". Loop count validation belongs to QICK at
+        build; recording after build raises ValueError.
+        """
+        self._ensure_recording()
+        if name in self._loop_names:
+            raise ValueError(f"loop name already used: {name!r}")
+        self._loop_names.add(name)
+        self._initialize_actions.append(lambda prog: prog.add_loop(name, count))
+
+    def add_sweep(self, name: str, spec: SweepCfg) -> QickParam:
+        """Record spec.expts loop points and return its uniform QICK parameter.
+
+        spec supplies inclusive start/stop values in the consumer's units.
+        The returned parameter can be placed in module cfg before emit.
+        Duplicate/reserved loop names or calls after build raise ValueError.
+        """
+        self.add_loop(name, spec.expts)
+        return sweep2param(name, spec)
+
+    def emit(
+        self, module: Module, *, timeline: str | None = None, tag: str | None = None
+    ) -> None:
+        """Record an emission and declare this object once during initialization.
+
+        None selects default timeline. tag names this occurrence, not the module.
+        Module declaration/lowering errors surface at build.
+        """
+        self._ensure_recording()
+        self._declare(module)
+        self._record(lambda prog: prog.emit(module, timeline=timeline, tag=tag))
+
+    def _declare(self, module: Module) -> None:
+        if not any(module is declared for declared in self._modules):
+            self._modules.append(module)
+            self._initialize_actions.append(lambda prog: prog.declare(module))
+
+    def emit_parallel(
+        self,
+        branches: Sequence[Sequence[Module]],
+        *,
+        timeline: str,
+        tag: str | None = None,
+    ) -> None:
+        """Record ordered branches at one timeline origin and merge their ends.
+
+        Each branch is an ordered module sequence; first encounters declare
+        objects in branch/child order. The sequences are captured, modules are
+        borrowed. tag belongs to the first child in author order. Multiple
+        reference-advancing branches or unsafe reordering fail at build under
+        TimelineProgramV2.emit_parallel's contract.
+        """
+        self._ensure_recording()
+        recorded = tuple(tuple(branch) for branch in branches)
+        for branch in recorded:
+            for module in branch:
+                self._declare(module)
+        self._record(
+            lambda prog: prog.emit_parallel(recorded, timeline=timeline, tag=tag)
+        )
+
+    def delay(self, t: float | QickParam, tag: str | None = None) -> None:
+        """Record native reference advance by t us; tag exposes resolved time."""
+        self._record(lambda prog: prog.delay(t, tag=tag))
+
+    def delay_auto(
+        self,
+        t: float | QickParam = 0,
+        *,
+        gens: bool = True,
+        ros: bool = True,
+        tag: str | None = None,
+    ) -> None:
+        """Record native advance to selected generator/ADC ends plus t us.
+
+        gens/ros select channel families; tag exposes the resolved advance.
+        Compilation propagates native QICK timing failures.
+        """
+        self._record(lambda prog: prog.delay_auto(t, gens=gens, ros=ros, tag=tag))
+
+    def delay_timeline(
+        self,
+        t: float | QickParam | str,
+        *,
+        timeline: str = "default",
+        tag: str | None = None,
+    ) -> None:
+        """Record end += t without moving reference; tag exposes static end.
+
+        t is us, a QICK parameter, or a certified nonnegative cycle register
+        name. Unknown/wait-only timelines, unknown bounds and overflow fail
+        during build, as in TimelineProgramV2.delay_timeline.
+        """
+        self._record(lambda prog: prog.delay_timeline(t, timeline=timeline, tag=tag))
+
+    def sync(self, *, timeline: str = "default") -> None:
+        """Record reference advance to timeline end; unknown names fail at build."""
+        self._record(lambda prog: prog.sync(timeline=timeline))
+
+    def pulse(
+        self,
+        ch: int,
+        name: str,
+        t: float | QickParam | Literal["auto"] = 0,
+        tag: str | None = None,
+        *,
+        timeline: str | None = None,
+    ) -> None:
+        """Record playback of a declared pulse template on generator ch.
+
+        name identifies a template declared by an emitted module. t is us or
+        "auto"; tag identifies this occurrence. None timeline retains native
+        reference placement, otherwise place at timeline end plus t and advance
+        that end. Missing declarations/unsafe overlap fail at build.
+        """
+        self._record(lambda prog: prog.pulse(ch, name, t, tag, timeline=timeline))
+
+    def trigger(
+        self,
+        ros: Sequence[int] | None = None,
+        tts: Sequence[int] | None = None,
+        pins: Sequence[int] | None = None,
+        t: float | QickParam | None = 0,
+        width: float | QickParam | None = None,
+        **options: Unpack[_TriggerOptions],
+    ) -> None:
+        """Record ADC/time-tagger/pin triggers with native or timeline timing.
+
+        ros/tts/pins are channel lists; None selects none. t is us (default 0),
+        or native None for the current time register. width is us or a QICK
+        parameter; None selects QICK's 10-cycle default. Keyword-only ddr4/mr
+        enable capture buffers, default
+        False. tag names the occurrence, default None. timeline defaults to
+        None (native reference); a name places at its end plus t and advances
+        through ADC/trigger completion. Named t=None, unknown resources and
+        invalid timing fail at build. Unknown keywords raise TypeError now.
+        """
+        self._ensure_recording()
+        unknown = options.keys() - {"ddr4", "mr", "tag", "timeline"}
+        if unknown:
+            raise TypeError(f"unexpected trigger keyword(s): {sorted(unknown)}")
+        recorded_ros = None if ros is None else tuple(ros)
+        recorded_tts = None if tts is None else tuple(tts)
+        recorded_pins = None if pins is None else tuple(pins)
+        self._record(
+            lambda prog: prog.trigger(
+                recorded_ros, recorded_tts, recorded_pins, t, width, **options
+            )
+        )
+
+    def build(self) -> TimelineProgramV2:
+        """Freeze and compile; subsequent recording/build calls raise ValueError.
+
+        The program retains the recorded actions without depending on builder
+        state. Owner/compiler errors propagate, leaving the builder frozen even
+        when compilation fails.
+        """
+        self._ensure_recording()
+        self._built = True
+        return _RecordedProgram(
+            self._soccfg,
+            self._initialize_actions,
+            self._body_actions,
+            reps=self._reps,
+            initial_delay=self._initial_delay,
+            relax_delay=self._relax_delay,
+        )

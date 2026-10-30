@@ -1,6 +1,6 @@
 # README - program/v2
 
-**Last updated:** 2026-10-30，Branch 與平行 Module Join
+**Last updated:** 2026-10-30，TimelineBuilder 與平行 Module Join
 
 **讀者：** lab-author、framework-dev、agent。原生 V2 program 寫法與 module、readout、acquisition 契約速查。
 
@@ -109,7 +109,18 @@ Encoding with `readout_freq_words` still takes those four explicit settings.
 `initial_delay` 的型別為 `float`，不接受 `None`。
 Shot 外殼為 `final_wait=0`、`final_delay=relax_delay`。
 全部輸出共用既有 IR compiler。Boundary metadata 可能改變指令排列，不要求新舊逐位相同。
-Builder 與模擬 frontend 尚未切換，既有 acquire 擴充仍由共同基底提供。
+`TimelineBuilder` 從 package root 匯出，只記錄動作，`build()` 產生並編譯 `TimelineProgramV2`。
+它不接收 SoC，不取數，也不依賴 experiment runtime。
+Builder 依物件身分在第一次 emit／emit_parallel 時記錄 module 宣告。
+同一物件重複 emit 沿用宣告，build 後所有錄製與 build 呼叫都 raise ValueError。
+Builder 與 program 的 `add_sweep(name, spec)` 宣告一個 top-level loop，回傳均勻掃描的 QICK 參數。
+Builder 的原生布林控制選項只接受 keyword，其餘參數沿用同名 program 方法。
+模擬 frontend 尚未切換，既有 acquire 擴充仍由共同基底提供。
+
+`TimelineProgramV2.declare` 將不可共用的 ADC／register 宣告歸屬到 module 物件。
+不同物件衝突時錯誤列出兩個名稱與物件。
+明示 register 借用與 Pulse registry 共用 generator／template 的規則不變。
+Body 可直接呼叫 `emit_parallel`，program 配置其命名 scope；module lowering 內沿用既有 scope。
 
 每條 timeline 只保存相對 reference 的結尾。
 Default 是普通 timeline，不是 reference。其他名字先在 `_body` 用 `fork(source, into=...)` 宣告。
