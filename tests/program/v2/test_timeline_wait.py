@@ -655,11 +655,18 @@ def wait_recipes(seed: int) -> list[WaitRecipe]:
 
     One-axis recipes include fractional-cycle DAC lengths and crossing forks.
     Two-axis recipes use integral-cycle lengths and a noncrossing fork to leave
-    registers for both sweeps. Two-axis branch-readout cases omit the Repeats;
-    other two-axis cases omit Branch. One-axis cases combine all structures.
-    Unrestricted
-    recipes exhausted the same 16 slots and failed allocation 17 both before
-    and after the shell-WAIT changes.
+    registers for both sweeps. The measured whole-shape budgets below apply
+    to this seed, not additive costs of individual constructs:
+
+    Axes  Read position       Branch  Fixed/runtime Repeat  Peak registers
+    1     all                 yes     both                  8..16
+    2     before              no      neither               8..14
+    2     branch              yes     neither               8..11
+    2     fixed/runtime/after no      both                 10..16
+
+    Unrestricted recipes exhausted the same 16 slots and failed allocation 17
+    both before and after the shell-WAIT changes. Capacity errors are not caught
+    or skipped by the property test.
     """
     rng = random.Random(seed)
     recipes = []
@@ -686,7 +693,9 @@ def wait_recipes(seed: int) -> list[WaitRecipe]:
     return recipes
 
 
-def compile_wait_recipe(recipe: WaitRecipe, relax_cycles: int = 1000):
+def compile_wait_recipe(
+    recipe: WaitRecipe, relax_cycles: int = 1000
+) -> TimelineProgramV2:
     """Compile a legal mixed schedule without consulting compiler timing state."""
     count = LoadValue("counts", recipe.counts, "axis0", "count_cycles")
 
@@ -744,7 +753,7 @@ def compile_wait_recipe(recipe: WaitRecipe, relax_cycles: int = 1000):
                             if recipe.read_at == "branch":
                                 self.read()
                             self.delay_timeline(delay / 430.08)
-            if len(self.gaps) == 1 or recipe.read_at != "branch":
+            if len(self.gaps) == 1 or recipe.read_at not in ("branch", "before"):
                 with self.repeat("fixed", recipe.fixed_count):
                     if recipe.read_at == "fixed":
                         self.read()
@@ -769,7 +778,7 @@ WAIT_RECIPE_SEED = 0x5EED
     wait_recipes(WAIT_RECIPE_SEED),
     ids=lambda recipe: f"seed={WAIT_RECIPE_SEED}-{recipe!r}",
 )
-def test_mixed_schedules_shell_wait_matches_every_legal_point(recipe):
+def test_mixed_schedules_shell_wait_matches_every_legal_point(recipe: WaitRecipe):
     # The public analyzer executes linked instructions. It supplies event starts
     # and reference only, so lengths come independently from mock clock specs:
     # 430.08/307.2 = 7/5 ADC cycles; 430.08/384 = 28/25 DAC cycles.
