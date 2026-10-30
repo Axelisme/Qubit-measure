@@ -16,10 +16,12 @@ from typing import Any, TypeVar
 from urllib.parse import quote
 
 import numpy as np
+from matplotlib import style
 from pydantic import TypeAdapter
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.datafile import load
+from zcu_tools.plotting import DEFAULT_STYLE
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from zcu_tools.resources.yaml import load_yaml
 
@@ -173,8 +175,10 @@ def probe(
     Use caller-created SimulationEnvironment resources; never reseed, rewire or
     close them here.
     Create output_dir and overwrite data.h5 and same-named PNGs on rerun. Figures
-    use Agg canvases and no QApplication. PNG names contain live/analysis and
-    URL-escaped figure names. Return shapes, exact Result round-trip comparison,
+    use Agg canvases and no QApplication. Apply the shared Matplotlib style to
+    process-wide rcParams before creating Plots; native arguments and style
+    contexts inside the experiment can override it. PNG names contain live/analysis
+    and URL-escaped figure names. Return shapes, exact Result round-trip comparison,
     analysis repr and timings. Stage failures are logged with traceback and
     returned as failed_stage/exception without replacing the original exception.
     Missing AXES_SPEC raises ValueError before starting. Caller owns environment
@@ -184,6 +188,7 @@ def probe(
     if spec is None:
         raise ValueError("Probe requires experiment.AXES_SPEC")
     report = ProbeReport(environment.description, output_dir / "data.h5")
+    style.use(DEFAULT_STYLE)
     live = Plots(NonPresentingHost())
     analysis = Plots(NonPresentingHost())
     try:
