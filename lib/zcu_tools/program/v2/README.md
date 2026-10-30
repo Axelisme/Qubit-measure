@@ -1,6 +1,6 @@
 # README - program/v2
 
-**Last updated:** 2026-10-30，TimelineBuilder 與平行 Module Join
+**Last updated:** 2026-10-30，TimelineBuilder 巢狀錄製與平行 Module Join
 
 **讀者：** lab-author、framework-dev、agent。原生 V2 program 寫法與 module、readout、acquisition 契約速查。
 
@@ -115,6 +115,12 @@ Builder 依物件身分在第一次 emit／emit_parallel 時記錄 module 宣告
 同一物件重複 emit 沿用宣告，build 後所有錄製與 build 呼叫都 raise ValueError。
 Builder 與 program 的 `add_sweep(name, spec)` 宣告一個 top-level loop，回傳均勻掃描的 QICK 參數。
 Builder 的原生布林控制選項只接受 keyword，其餘參數沿用同名 program 方法。
+Builder 的 `fork(source, into=...)` 與 `join(*sources, into=...)` 是普通記帳方法。
+`with builder.repeat(...)` 與 `with builder.branch(by=...)` 錄製巢狀動作。
+Branch 回傳公開的 `BuilderBranchCases` handle，用 `with branch.case():` 錄製每個 sweep 點的動作。
+在 case 內仍呼叫原 builder 的 emit、delay 或其他 body 方法。
+關閉全部錄製 context 後才能 build，否則 raise ValueError，builder 仍可繼續錄製。
+Build 重播 program 的 context，沿用其 timeline 回饋、局部名字生命週期與錯誤訊息。
 模擬 frontend 尚未切換，既有 acquire 擴充仍由共同基底提供。
 
 `TimelineProgramV2.declare` 將不可共用的 ADC／register 宣告歸屬到 module 物件。

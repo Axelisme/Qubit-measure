@@ -73,6 +73,286 @@ def test_builder_sweep_reused_readout_and_timing_match_native(mock_soccfg: QickC
     assert actual.prog_list == expected.prog_list
 
 
+def test_builder_nested_fixed_repeat_matches_native_and_reuses_declarations(
+    mock_soccfg,
+):
+    builder = v2.TimelineBuilder(mock_soccfg, initial_delay=0, relax_delay=0)
+    readout = _readout()
+    builder.emit(readout, tag="before")
+    with builder.repeat("outer", 2):
+        builder.emit(readout, tag="outer_read")
+        with builder.repeat("inner", 3):
+            builder.delay_timeline(0.1)
+            builder.emit(readout, tag="inner_read")
+    builder.emit(readout, tag="after")
+    actual = builder.build()
+
+    class Native(v2.TimelineProgramV2):
+        def _initialize(self, cfg):
+            self.declare(readout)
+
+        def _body(self, cfg):
+            self.emit(readout, tag="before")
+            with self.repeat("outer", 2):
+                self.emit(readout, tag="outer_read")
+                with self.repeat("inner", 3):
+                    self.delay_timeline(0.1)
+                    self.emit(readout, tag="inner_read")
+            self.emit(readout, tag="after")
+
+    expected = Native(mock_soccfg, initial_delay=0, relax_delay=0)
+    assert actual.prog_list == expected.prog_list
+    actual.compile()
+    assert actual.prog_list == expected.prog_list
+
+
+def test_builder_branch_reference_advances_inside_repeat_match_native(mock_soccfg):
+    builder = v2.TimelineBuilder(mock_soccfg, initial_delay=0, relax_delay=0)
+    builder.add_loop("scan", 2)
+    readout = _readout()
+    with builder.repeat("pairs", 2), builder.branch(by="scan") as branch:
+        with branch.case():
+            builder.emit(readout)
+            builder.delay(0.1)
+        with branch.case():
+            builder.delay_timeline(0.4)
+            builder.sync()
+            builder.emit(readout)
+            builder.delay_auto(0.1)
+    builder.emit(readout)
+    actual = builder.build()
+
+    class Native(v2.TimelineProgramV2):
+        def _initialize(self, cfg):
+            self.add_loop("scan", 2)
+            self.declare(readout)
+
+        def _body(self, cfg):
+            with self.repeat("pairs", 2), self.branch(by="scan") as branch:
+                with branch.case():
+                    self.emit(readout)
+                    self.delay(0.1)
+                with branch.case():
+                    self.delay_timeline(0.4)
+                    self.sync()
+                    self.emit(readout)
+                    self.delay_auto(0.1)
+            self.emit(readout)
+
+    expected = Native(mock_soccfg, initial_delay=0, relax_delay=0)
+    assert actual.prog_list == expected.prog_list
+    actual.compile()
+    assert actual.prog_list == expected.prog_list
+
+
+def test_builder_fork_emit_join_matches_native_and_captures_target_names(mock_soccfg):
+    builder = v2.TimelineBuilder(mock_soccfg, initial_delay=0, relax_delay=0)
+    readout, pulse = _readout(), _pulse("drive")
+    targets = ["read", "drive"]
+    builder.fork("default", into=targets)
+    targets.clear()
+    builder.emit(readout, timeline="read")
+    builder.emit(pulse, timeline="drive")
+    builder.join("read", "drive", into="default")
+    builder.sync()
+    builder.emit(readout)
+    actual = builder.build()
+
+    class Native(v2.TimelineProgramV2):
+        def _initialize(self, cfg):
+            self.declare(readout)
+            self.declare(pulse)
+
+        def _body(self, cfg):
+            self.fork("default", into=["read", "drive"])
+            self.emit(readout, timeline="read")
+            self.emit(pulse, timeline="drive")
+            self.join("read", "drive", into="default")
+            self.sync()
+            self.emit(readout)
+
+    expected = Native(mock_soccfg, initial_delay=0, relax_delay=0)
+    assert actual.prog_list == expected.prog_list
+    actual.compile()
+    assert actual.prog_list == expected.prog_list
+
+
+@pytest.mark.parametrize("structure", ["repeat", "branch"])
+def test_builder_build_requires_closed_recording_contexts(mock_soccfg, structure):
+    builder = v2.TimelineBuilder(mock_soccfg)
+    context = (
+        builder.repeat("body", 2)
+        if structure == "repeat"
+        else builder.branch(by="scan")
+    )
+    if structure == "branch":
+        builder.add_loop("scan", 1)
+    with context as branch:
+        with pytest.raises(ValueError, match="(open|close|context)"):
+            builder.build()
+        if branch is not None:
+            with branch.case():
+                builder.delay_timeline(0.1)
+        else:
+            builder.delay_timeline(0.1)
+    # Failed admission must not freeze or discard the unfinished recording.
+    assert builder.build().prog_list
+
+
+def _invalid_structure(
+    program: v2.TimelineBuilder | v2.TimelineProgramV2, scenario: str
+) -> None:
+    if scenario == "external-repeat":
+        program.fork("default", into="external")
+        with program.repeat("body", 2):
+            program.delay_timeline(0.1, timeline="external")
+    elif scenario == "expired-local":
+        with program.repeat("body", 2):
+            program.fork("default", into="local")
+        program.sync(timeline="local")
+    elif scenario == "negative-repeat":
+        with program.repeat("body", -1):
+            pass
+    elif scenario == "fixed-range":
+        with program.repeat("body", 2, range_hint=(1, 2)):
+            pass
+    elif scenario == "unknown-join":
+        program.join("missing", into="default")
+    elif scenario == "duplicate-fork":
+        program.fork("default", into=["same", "same"])
+    elif scenario == "selector":
+        with program.branch(by="measurement") as branch, branch.case():
+            program.delay(0.1)
+    elif scenario == "case-count":
+        with program.branch(by="scan") as branch, branch.case():
+            program.delay(0.1)
+    else:
+        raise ValueError(f"unknown scenario: {scenario}")
+
+
+@pytest.mark.parametrize(
+    ("scenario", "message"),
+    [
+        ("external-repeat", "external"),
+        ("expired-local", "local: unknown timeline"),
+        ("negative-repeat", "repeat n"),
+        ("fixed-range", "range_hint"),
+        ("unknown-join", "missing: unknown timeline"),
+        ("duplicate-fork", "new, distinct"),
+        ("selector", "selector"),
+        ("case-count", "one case per selector point"),
+    ],
+)
+def test_builder_structure_errors_propagate_program_messages_at_build(
+    mock_soccfg, scenario, message
+):
+    builder = v2.TimelineBuilder(mock_soccfg)
+    builder.add_loop("scan", 2)
+    _invalid_structure(builder, scenario)
+
+    class Native(v2.TimelineProgramV2):
+        def _initialize(self, cfg):
+            self.add_loop("scan", 2)
+
+        def _body(self, cfg):
+            _invalid_structure(self, scenario)
+
+    with pytest.raises(ValueError, match=message) as expected:
+        Native(mock_soccfg)
+    with pytest.raises(ValueError, match=message) as actual:
+        builder.build()
+    assert str(actual.value) == str(expected.value)
+
+
+@pytest.mark.parametrize("count", [0, 2])
+def test_builder_repeat_rebases_external_end_and_expires_local_names(
+    mock_soccfg, count
+):
+    builder = v2.TimelineBuilder(mock_soccfg, initial_delay=0, relax_delay=0)
+    readout = _readout()
+    builder.fork("default", into=["external", "parent"])
+    builder.delay_timeline(2.0, timeline="external")
+    builder.delay_timeline(0.1, timeline="parent")
+    with builder.repeat("body", count, timeline="parent"):
+        builder.fork("parent", into="local")
+        builder.emit(readout, timeline="local")
+    builder.fork("parent", into="local")
+    builder.join("external", into="local")
+    builder.emit(readout, timeline="local")
+    actual = builder.build()
+
+    class Native(v2.TimelineProgramV2):
+        def _initialize(self, cfg):
+            self.declare(readout)
+
+        def _body(self, cfg):
+            self.fork("default", into=["external", "parent"])
+            self.delay_timeline(2.0, timeline="external")
+            self.delay_timeline(0.1, timeline="parent")
+            with self.repeat("body", count, timeline="parent"):
+                self.fork("parent", into="local")
+                self.emit(readout, timeline="local")
+            self.fork("parent", into="local")
+            self.join("external", into="local")
+            self.emit(readout, timeline="local")
+
+    assert (
+        actual.prog_list
+        == Native(mock_soccfg, initial_delay=0, relax_delay=0).prog_list
+    )
+
+
+def test_builder_register_repeat_forwards_bounds_and_preserves_remaining_end(
+    mock_soccfg,
+):
+    builder = v2.TimelineBuilder(mock_soccfg, initial_delay=0, relax_delay=0)
+    builder.add_loop("scan", 2)
+    loader = v2.LoadValue("count", [2, 3], idx_reg="scan", val_reg="n")
+    readout = _readout()
+    builder.emit(loader)
+    builder.fork("default", into="external")
+    builder.delay_timeline(2.0, timeline="external")
+    with builder.repeat("body", "n", range_hint=(2, 3)):
+        builder.emit(readout)
+    builder.join("external", into="default")
+    builder.emit(readout)
+    actual = builder.build()
+
+    class Native(v2.TimelineProgramV2):
+        def _initialize(self, cfg):
+            self.add_loop("scan", 2)
+            self.declare(loader)
+            self.declare(readout)
+
+        def _body(self, cfg):
+            self.emit(loader)
+            self.fork("default", into="external")
+            self.delay_timeline(2.0, timeline="external")
+            with self.repeat("body", "n", range_hint=(2, 3)):
+                self.emit(readout)
+            self.join("external", into="default")
+            self.emit(readout)
+
+    expected = Native(mock_soccfg, initial_delay=0, relax_delay=0)
+    assert actual.prog_list == expected.prog_list
+    np.testing.assert_array_equal(actual.compile_datamem(), expected.compile_datamem())
+
+
+def test_builder_case_handle_rejects_overlap_and_expires_on_exit(mock_soccfg):
+    builder = v2.TimelineBuilder(mock_soccfg)
+    builder.add_loop("scan", 1)
+    with builder.branch(by="scan") as branch, branch.case():
+        with pytest.raises(ValueError, match="overlap"), branch.case():
+            pass
+        with builder.repeat("body", 2):
+            builder.delay_timeline(0.1)
+    with pytest.raises(ValueError, match="open"), branch.case():
+        pass
+    assert builder.build().prog_list
+    with pytest.raises(ValueError, match="frozen"), branch.case():
+        pass
+
+
 def test_native_add_sweep_declares_axis_and_returns_uniform_parameter(mock_soccfg):
     class Native(v2.TimelineProgramV2):
         def _initialize(self, cfg):
@@ -116,6 +396,10 @@ def test_native_add_sweep_declares_axis_and_returns_uniform_parameter(mock_soccf
         "auto",
         "end",
         "sync",
+        "fork",
+        "join",
+        "repeat",
+        "branch",
     ],
 )
 def test_builder_freezes_after_build(mock_soccfg, operation):
@@ -135,6 +419,10 @@ def test_builder_freezes_after_build(mock_soccfg, operation):
         "auto": builder.delay_auto,
         "end": lambda: builder.delay_timeline(0.1),
         "sync": builder.sync,
+        "fork": lambda: builder.fork("default", into="later"),
+        "join": lambda: builder.join("default", into="default"),
+        "repeat": lambda: builder.repeat("later", 2),
+        "branch": lambda: builder.branch(by="later"),
     }
     with pytest.raises(ValueError, match="(frozen|built)"):
         actions[operation]()

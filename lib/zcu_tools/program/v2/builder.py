@@ -1,6 +1,7 @@
 """Record timeline actions without acquiring data or touching hardware."""
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Generator, Sequence
+from contextlib import AbstractContextManager, contextmanager
 from typing import Literal, TypedDict, Unpack, override
 
 from qick import QickConfig
@@ -53,6 +54,33 @@ class _RecordedProgram(TimelineProgramV2):
             action(self)
 
 
+class BuilderBranchCases:
+    """Recording handle yielded by TimelineBuilder.branch, not a runtime selector.
+
+    Use case() once per point of the selected sweep, in point order. Record body
+    operations on the originating builder inside each case. Handles are valid
+    only inside their branch context; cases cannot overlap on the same handle.
+    Timeline selection, timing and case-count validation belong to the program
+    compiler at build, not this handle.
+    """
+
+    def __init__(self, record_case: Callable[[], AbstractContextManager[None]]) -> None:
+        """Use record_case to open a case; normally yielded by builder.branch().
+
+        The callback captures operations on its builder and enforces recording
+        lifetime/overlap constraints. It returns a context yielding None.
+        """
+        self._record_case = record_case
+
+    def case(self) -> AbstractContextManager[None]:
+        """Record the next sweep point's body; nesting cases raises ValueError.
+
+        Record through the owning builder. Calls after branch exit or build
+        raise ValueError. Nested branch/repeat structures remain allowed.
+        """
+        return self._record_case()
+
+
 class TimelineBuilder:
     """Record a program, automatically declaring modules on their first emit.
 
@@ -79,6 +107,7 @@ class TimelineBuilder:
         self._relax_delay = relax_delay
         self._initialize_actions: list[_Action] = []
         self._body_actions: list[_Action] = []
+        self._action_stack = [self._body_actions]
         self._modules: list[Module] = []
         self._built = False
         self._loop_names = {"reps"}
@@ -89,7 +118,120 @@ class TimelineBuilder:
 
     def _record(self, action: _Action) -> None:
         self._ensure_recording()
-        self._body_actions.append(action)
+        self._action_stack[-1].append(action)
+
+    @contextmanager
+    def _capture(self) -> Generator[list[_Action]]:
+        self._ensure_recording()
+        actions: list[_Action] = []
+        self._action_stack.append(actions)
+        try:
+            yield actions
+        finally:
+            self._action_stack.pop()
+
+    def repeat(
+        self,
+        name: str,
+        n: int | str,
+        *,
+        timeline: str = "default",
+        range_hint: tuple[int, int] | None = None,
+    ) -> AbstractContextManager[None]:
+        """Record a repeated body; replay program-owned timing rules at build.
+
+        name names the counter. n is a nonnegative integer or an existing
+        register name. Register counts require a guaranteed closed nonnegative
+        integer range_hint; fixed counts forbid it. Entry syncs timeline, each
+        iteration closes parent/local ends, and exit expires local names. Only
+        parent and local timelines may be used inside. Zero still syncs entry
+        but discards body operations. Invalid counts, ranges and timeline uses
+        fail at build with the program error. Recording after build raises
+        ValueError. Close all recording contexts before build.
+        """
+        self._ensure_recording()
+        return self._repeat(name, n, timeline, range_hint)
+
+    @contextmanager
+    def _repeat(
+        self,
+        name: str,
+        n: int | str,
+        timeline: str,
+        range_hint: tuple[int, int] | None,
+    ) -> Generator[None]:
+        with self._capture() as actions:
+            yield
+        recorded = tuple(actions)
+
+        def replay(prog: TimelineProgramV2) -> None:
+            with prog.repeat(name, n, timeline=timeline, range_hint=range_hint):
+                for action in recorded:
+                    action(prog)
+
+        self._record(replay)
+
+    def branch(self, *, by: str) -> AbstractContextManager[BuilderBranchCases]:
+        """Record sweep-selected cases without equal-duration padding.
+
+        by names an existing sweep loop. The yielded handle's case() records one
+        body per sweep point, in order. Each case closes only used/local ends;
+        local names expire at its exit and differing external ends stay
+        wait-only. Unknown selectors, wrong case counts and timeline errors
+        propagate from the program at build. Calls after build raise ValueError.
+        Close this context before build; its handle expires on exit.
+        """
+        self._ensure_recording()
+        return self._branch(by)
+
+    @contextmanager
+    def _branch(self, by: str) -> Generator[BuilderBranchCases]:
+        self._ensure_recording()
+        cases: list[tuple[_Action, ...]] = []
+        is_open = True
+        case_active = False
+
+        def ensure_case() -> None:
+            self._ensure_recording()
+            if not is_open:
+                raise ValueError("branch.case requires an open builder branch")
+            if case_active:
+                raise ValueError("branch.case cannot overlap another case")
+
+        @contextmanager
+        def capture_case() -> Generator[None]:
+            nonlocal case_active
+            ensure_case()
+            case_active = True
+            try:
+                with self._capture() as case_actions:
+                    yield
+                cases.append(tuple(case_actions))
+            finally:
+                case_active = False
+
+        def record_case() -> AbstractContextManager[None]:
+            ensure_case()
+            return capture_case()
+
+        try:
+            with self._capture() as actions:
+                yield BuilderBranchCases(record_case)
+        finally:
+            is_open = False
+        recorded = tuple(actions)
+        recorded_cases = tuple(cases)
+
+        def replay(prog: TimelineProgramV2) -> None:
+            with prog.branch(by=by) as branch:
+                for action in recorded:
+                    action(prog)
+                for case in recorded_cases:
+                    with branch.case():
+                        for action in case:
+                            action(prog)
+
+        self._record(replay)
 
     def add_loop(self, name: str, count: int) -> None:
         """Record count points, outermost first; duplicate names raise ValueError.
@@ -188,6 +330,28 @@ class TimelineBuilder:
         """
         self._record(lambda prog: prog.delay_timeline(t, timeline=timeline, tag=tag))
 
+    def fork(self, source: str, *, into: str | list[str]) -> None:
+        """Record new timeline names copying source's current end.
+
+        source must exist; into is one fresh name or a list of distinct fresh
+        names, captured now. Wait-only sources produce ordinary placement
+        targets. No reference advance or output occurs. Unknown/duplicate names
+        fail at build, and recording after build raises ValueError.
+        """
+        self._ensure_recording()
+        recorded = into if isinstance(into, str) else list(into)
+        self._record(lambda prog: prog.fork(source, into=recorded))
+
+    def join(self, *sources: str, into: str) -> None:
+        """Record max of existing sources and target into target's end.
+
+        Sources remain unchanged; the target becomes ordinary, including when
+        sources are wait-only. This is bookkeeping, not a context manager; it
+        emits no output or reference advance. Unknown names fail at build with
+        the program error. Recording after build raises ValueError.
+        """
+        self._record(lambda prog: prog.join(*sources, into=into))
+
     def sync(self, *, timeline: str = "default") -> None:
         """Record reference advance to timeline end; unknown names fail at build."""
         self._record(lambda prog: prog.sync(timeline=timeline))
@@ -247,10 +411,13 @@ class TimelineBuilder:
         """Freeze and compile; subsequent recording/build calls raise ValueError.
 
         The program retains the recorded actions without depending on builder
-        state. Owner/compiler errors propagate, leaving the builder frozen even
+        state. Open recording contexts raise ValueError without freezing.
+        Owner/compiler errors propagate, leaving the builder frozen even
         when compilation fails.
         """
         self._ensure_recording()
+        if len(self._action_stack) != 1:
+            raise ValueError("close all recording contexts before build")
         self._built = True
         return _RecordedProgram(
             self._soccfg,
