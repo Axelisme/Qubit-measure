@@ -6,6 +6,7 @@ from typing import Literal
 import pytest
 from qick.asm_v2 import QickSweep1D
 from zcu_tools.cfg_model import MuxReadoutTone
+from zcu_tools.program.v2 import SweepCfg
 from zcu_tools.program.v2.mocksoc import make_mock_soccfg, make_mux_mock_soccfg
 from zcu_tools.program.v2.modules import DelayAuto, LoadValue
 from zcu_tools.program.v2.modules.readout import MuxReadoutCfg, PulseReadoutCfg
@@ -169,6 +170,80 @@ def test_coherence_shell_wait_matches_pointwise_scheduling_oracle(mux, sequence)
     assert [waves(s) for s in result] == expected_waves
     assert [s.body_end_cycle - s.start_cycle for s in result] == expected_body
     # At every point body closure is ten cycles later than the ceiled ADC end.
+    assert shell_wait(prog) == max(remaining)
+
+
+@pytest.mark.filterwarnings("error")
+def test_overlapping_pulses_swept_start_keeps_exact_wait_after_all_timeline_sync():
+    readout = PulseReadoutCfg(
+        gen_ch=2,
+        nqz=1,
+        ro_ch=0,
+        freq=100,
+        gain=0.1,
+        waveform=ConstWaveformCfg(length=0.1),
+        ro_length=127 / 307.2,
+        trig_offset=12 / 430.08,
+        post_delay=10 / 430.08,
+    ).build("read")
+
+    class Program(TimelineProgramV2):
+        def _initialize(self, cfg):
+            self.start = self.add_sweep(
+                "start",
+                SweepCfg(
+                    start=28 / 430.08,
+                    stop=84 / 430.08,
+                    step=28 / 430.08,
+                    expts=3,
+                ),
+            )
+            for ch, length in ((0, 100 / 384), (1, 50 / 384)):
+                self.declare_gen(ch, nqz=1)
+                self.add_pulse(
+                    ch,
+                    f"drive{ch}",
+                    style="const",
+                    freq=1000,
+                    phase=0,
+                    gain=0.5,
+                    length=length,
+                )
+            self.declare(readout)
+
+        def _body(self, cfg):
+            self.fork("default", into="other")
+            self.pulse(0, "drive0", timeline="default")
+            self.pulse(1, "drive1", t=self.start, timeline="other")
+            self.join("other", into="default")
+            self.sync()
+            self.emit(readout)
+
+    prog = Program(make_mock_soccfg(3, 1), initial_delay=0, relax_delay=1)
+    result = shots(prog)
+    # A lasts 112 tProc cycles; B lasts 56. All three points overlap A.
+    # max(112, t + 56) is 112, 112, 140: left side, corner, right side.
+    # Readout emits a pulse and config at that maximum, then triggers at +12.
+    assert [waves(s) for s in result] == [
+        [0, 28, 112, 112],
+        [0, 56, 112, 112],
+        [0, 84, 140, 140],
+    ]
+    trigger_starts = [
+        e.cycle - s.start_cycle
+        for s in result
+        for e in s.events
+        if e.kind == "data" and e.value
+    ]
+    assert trigger_starts == [124, 124, 152]
+    body_ends = [s.body_end_cycle - s.start_cycle for s in result]
+    # The ADC lasts 177.8 cycles. Its ceiled end is ten before body closure.
+    assert body_ends == [312, 312, 340]
+    remaining = [
+        max(0, math.ceil(trigger + 177.8) - body)
+        for trigger, body in zip(trigger_starts, body_ends, strict=True)
+    ]
+    assert remaining == [0, 0, 0]
     assert shell_wait(prog) == max(remaining)
 
 
