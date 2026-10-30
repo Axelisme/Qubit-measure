@@ -167,6 +167,47 @@ def test_centroid3_lookup_rejects_missing_wrong_type_and_unknown_adc(
         readout.centroid3_classifier(pulse(classifier), ro_ch=ro_ch)
 
 
+@pytest.mark.parametrize("mux", [False, True])
+def test_circle_requirement_accepts_complete_calibration_for_every_adc(mux):
+    from tests.program.v2._mux_support import native_mux
+
+    circle = CircleClassifier(g_center=0j, e_center=2 + 0j, radius=1.0)
+    cfg = native_mux((4, 1)) if mux else pulse(circle)
+    if isinstance(cfg, readout.MuxReadoutCfg):
+        for tone in cfg.tones:
+            tone.classifier = circle.model_copy(deep=True)
+    original = cfg.model_copy(deep=True)
+    readout.require_circle_classifiers(cfg)
+    assert cfg == original
+
+
+@pytest.mark.parametrize("bad_adc", [2, 4, 1])
+@pytest.mark.parametrize(
+    ("classifier", "message"),
+    [
+        (None, "classifier missing"),
+        (LinearClassifier(angle=0.0, threshold=0.5), "linear.*not circle"),
+        (centroid3(), "centroid3.*not circle"),
+        (CircleClassifier(g_center=0j, e_center=2 + 0j), "radius missing.*GE Post"),
+    ],
+)
+def test_circle_requirement_rejects_incomplete_or_wrong_mode_on_any_adc(
+    bad_adc, classifier, message
+):
+    from tests.program.v2._mux_support import native_mux
+
+    cfg = pulse(classifier) if bad_adc == 2 else native_mux((4, 1))
+    if isinstance(cfg, readout.MuxReadoutCfg):
+        for tone in cfg.tones:
+            tone.classifier = (
+                classifier
+                if tone.ro_ch == bad_adc
+                else CircleClassifier(g_center=0j, e_center=2 + 0j, radius=1.0)
+            )
+    with pytest.raises(ValueError, match=rf"ADC {bad_adc}: {message}"):
+        readout.require_circle_classifiers(cfg)
+
+
 def test_centroid3_is_not_circle_calibration():
     with pytest.raises(ValueError, match="centroid3.*circle"):
         readout.circle_classifier(pulse(centroid3()), ro_ch=2)
