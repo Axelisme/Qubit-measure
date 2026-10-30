@@ -16,10 +16,12 @@ from typing import Any, TypeVar
 from urllib.parse import quote
 
 import numpy as np
+from matplotlib import style
 from pydantic import TypeAdapter
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.datafile import load
+from zcu_tools.plotting import DEFAULT_STYLE
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from zcu_tools.resources.yaml import load_yaml
 
@@ -29,6 +31,7 @@ from .acquisition import (
     capture_software_provenance,
     new_run_id,
 )
+from .axes_spec import AxesSpec, GroupedAxesSpec
 from .base import Experiment
 from .context import RunContext
 from .metadata import RunMetadata, RunSnapshot
@@ -56,8 +59,8 @@ class ProbeReport:
     environment is the supplied environment's public description. native_path is
     the intended native destination; a prior probe's file may exist after failure.
     fields/restored_fields map Result dataclass field names to in-memory array
-    descriptors, before/after native restore. roundtrip_equal is exact Result
-    shape/dtype/value equality with NaNs equal, or None before comparison.
+    descriptors, before/after native restore. roundtrip_equal is the Result
+    comparison defined by compare_roundtrip, or None before comparison.
     analysis_summary is a
     bounded repr of analyze's return, or None before it returns. png_paths lists
     successfully written live/analysis PNGs. timings maps attempted stages to
@@ -100,13 +103,93 @@ def _describe(result: Any) -> dict[str, ResultField]:
     }
 
 
-def _equal(original: Any, restored: Any) -> bool:
+def _scaled_component_equal(before: np.ndarray, after: np.ndarray) -> bool:
+    if not np.array_equal(np.isnan(before), np.isnan(after)):
+        return False
+    finite = np.isfinite(before)
+    if not np.array_equal(finite, np.isfinite(after)):
+        return False
+    infinite = np.isinf(before)
+    if not np.array_equal(before[infinite], after[infinite]):
+        return False
+    # Widen before subtraction/division so small tolerance products cannot
+    # underflow to a rounded absolute allowance for subnormal inputs.
+    left = before[finite].astype(np.longdouble)
+    right = after[finite].astype(np.longdouble)
+    with np.errstate(over="ignore", invalid="ignore", divide="ignore"):
+        relative = np.abs(left - right) / np.abs(left)
+    return bool(np.all((left == right) | (relative <= 2 * np.finfo(before.dtype).eps)))
+
+
+def _scaled_fields(
+    spec: AxesSpec[_Result, _Cfg] | GroupedAxesSpec[_Result, _Cfg],
+) -> set[str]:
+    """Select AxesSpec fields whose declared scale permits relative comparison."""
+    if not isinstance(spec, AxesSpec):
+        return set()
+    return {
+        declaration.field_name
+        for declaration in (*spec.axes, spec.z)
+        if declaration.field_name is not None
+        and np.isfinite(declaration.scale)
+        and declaration.scale not in (0, 1)
+    }
+
+
+def compare_roundtrip(
+    original: _Result,
+    restored: _Result,
+    *,
+    spec: AxesSpec[_Result, _Cfg] | GroupedAxesSpec[_Result, _Cfg],
+) -> bool:
+    """Compare in-memory Results before save and after native restore.
+
+    Both inputs must be dataclass instances of spec.result_type with the same
+    fields; otherwise raise TypeError. Compare every field, including fields
+    not named by the persistence declaration.
+    Return False for any differing field shape or dtype. AxesSpec fields with a
+    finite, nonzero scale other than 1 allow relative error <= 2*eps, atol=0, for
+    floating values (each real/imaginary component for complex arrays). eps is
+    the actual real storage dtype's machine epsilon. NaN component positions
+    must match and infinities must match sign. Zero has no absolute allowance.
+    Other fields, integer/discrete arrays and GroupedAxesSpec remain exact,
+    with NaNs equal under NumPy array_equal semantics.
+
+    For round-to-nearest arithmetic with the same represented scale s, one
+    multiplication and division give fl(fl(x*s)/s) = x*(1+d1)*(1+d2).
+    If both operations stay in the normal finite range, |di| <= u = eps/2,
+    hence relative error <= 2*u + u**2 < 2*eps. This assumes no additional
+    lossy dtype conversion. Underflow, overflow and invalid scales do not have
+    this guarantee; they receive no enlarged tolerance or repaired values.
+    This comparison does not validate the persistence declaration or do I/O.
+    """
+    if (
+        not is_dataclass(original)
+        or isinstance(original, type)
+        or not isinstance(original, spec.result_type)
+        or not is_dataclass(restored)
+        or isinstance(restored, type)
+        or not isinstance(restored, spec.result_type)
+    ):
+        raise TypeError("Roundtrip Results must match spec.result_type")
+    if {item.name for item in fields(original)} != {
+        item.name for item in fields(restored)
+    }:
+        raise TypeError("Roundtrip Results must have the same fields")
+    scaled_fields = _scaled_fields(spec)
     for item in fields(original):
         before = np.asarray(getattr(original, item.name))
         after = np.asarray(getattr(restored, item.name))
-        if before.dtype != after.dtype or not np.array_equal(
-            before, after, equal_nan=before.dtype.kind in "fc"
-        ):
+        if before.shape != after.shape or before.dtype != after.dtype:
+            return False
+        if item.name in scaled_fields and before.dtype.kind in "fc":
+            if not _scaled_component_equal(np.real(before), np.real(after)):
+                return False
+            if before.dtype.kind == "c" and not _scaled_component_equal(
+                np.imag(before), np.imag(after)
+            ):
+                return False
+        elif not np.array_equal(before, after, equal_nan=before.dtype.kind in "fc"):
             return False
     return True
 
@@ -173,8 +256,10 @@ def probe(
     Use caller-created SimulationEnvironment resources; never reseed, rewire or
     close them here.
     Create output_dir and overwrite data.h5 and same-named PNGs on rerun. Figures
-    use Agg canvases and no QApplication. PNG names contain live/analysis and
-    URL-escaped figure names. Return shapes, exact Result round-trip comparison,
+    use Agg canvases and no QApplication. Apply the shared Matplotlib style to
+    process-wide rcParams before creating Plots; native arguments and style
+    contexts inside the experiment can override it. PNG names contain live/analysis
+    and URL-escaped figure names. Return shapes, compare_roundtrip's Result comparison,
     analysis repr and timings. Stage failures are logged with traceback and
     returned as failed_stage/exception without replacing the original exception.
     Missing AXES_SPEC raises ValueError before starting. Caller owns environment
@@ -184,6 +269,7 @@ def probe(
     if spec is None:
         raise ValueError("Probe requires experiment.AXES_SPEC")
     report = ProbeReport(environment.description, output_dir / "data.h5")
+    style.use(DEFAULT_STYLE)
     live = Plots(NonPresentingHost())
     analysis = Plots(NonPresentingHost())
     try:
@@ -203,7 +289,9 @@ def probe(
                 load(report.native_path), spec=spec
             ).record
             report.restored_fields = _describe(restored.result)
-            report.roundtrip_equal = _equal(record.result, restored.result)
+            report.roundtrip_equal = compare_roundtrip(
+                record.result, restored.result, spec=spec
+            )
         with _timed(report, "analyze"):
             report.analysis_summary = short_repr(
                 experiment.analyze(restored, deepcopy(options), plots=analysis)

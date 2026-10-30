@@ -10,7 +10,7 @@ from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment, config
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
-from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
+from zcu_tools.experiment.v2.runtime.schedule import Schedule
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
@@ -21,9 +21,8 @@ from zcu_tools.program.v2 import (
     SweepCfg,
     sweep2param,
 )
-from zcu_tools.utils.process import rotate2real
 
-from zcu_lab.v2.support import live_line
+from zcu_lab.v2.support.reset import reset_scan_buffer, reset_signal2real
 
 
 @dataclass(frozen=True)
@@ -32,10 +31,6 @@ class LengthResult:
 
     lengths: NDArray[np.float64]
     signals: NDArray[np.complex128]
-
-
-def reset_length_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
-    return rotate2real(signals).real
 
 
 class LengthCfg(ConfigBase):
@@ -94,13 +89,7 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
         )
 
         # Retain complex IQ while displaying the duration-dependent projection.
-        viewer = live_line(context.plots, "measurement", "Length (us)", "Amplitude")
-        signals_buffer = SignalBuffer(
-            (len(lengths),),
-            on_update=lambda data: viewer.update(
-                lengths, reset_length_signal2real(data)
-            ),
-        )
+        signals_buffer = reset_scan_buffer(context.plots, lengths, xlabel="Length (us)")
 
         # Sweep only the tested reset length after the optional preparation.
         with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
@@ -145,7 +134,7 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
         lens = lens[val_mask]
         signals = signals[val_mask]
 
-        real_signals = reset_length_signal2real(signals)
+        real_signals = reset_signal2real(signals)
 
         fig, ax = plots.subplots("fit", figsize=config.figsize)
         ax.plot(lens, real_signals, marker=".")

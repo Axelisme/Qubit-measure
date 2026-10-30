@@ -163,6 +163,7 @@ class AnalyzeFormWidget(QWidget):
 
         Only blank optional text means None. Nonblank unparseable text is retained
         and raises ValueError with a field-labelled reason; no params are returned.
+        Constructor constraints also raise ValueError and appear below the fields.
         An unpopulated form raises RuntimeError. Reading emits neither signal.
         """
         if self._params_cls is None:
@@ -190,7 +191,13 @@ class AnalyzeFormWidget(QWidget):
         self._error_hint.setVisible(bool(errors))
         if errors:
             raise ValueError(message)
-        return reconstruct_params(self._params_cls, raw)
+        try:
+            return reconstruct_params(self._params_cls, raw)
+        except ValueError as exc:
+            self._error_hint.setText(str(exc))
+            set_foreground(self._error_hint, error_colour(self))
+            self._error_hint.show()
+            raise
 
     def populate_values(self, instance: object) -> None:
         """Restore widget values from a dataclass instance of the same type."""

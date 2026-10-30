@@ -5,6 +5,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Literal, TypeAlias
 
+import numpy as np
 from pydantic import BaseModel, JsonValue
 from zcu_tools.analysis.fitting import FitQuality
 from zcu_tools.cfg_model import MuxReadoutSpec
@@ -23,7 +24,6 @@ from zcu_tools.gui.session.parameters import ParameterContext
 from zcu_tools.plotting.plots import Plots
 
 from zcu_lab.v2.mux.onetone.core import (
-    MuxOnetoneAnalysis,
     MuxOnetoneAnalyzeOptions,
     MuxOnetoneCfg,
     MuxOnetoneExp,
@@ -35,7 +35,7 @@ from zcu_lab.v2.mux.onetone.core import (
 from zcu_lab.v2.mux.onetone.form import make_form
 from zcu_lab.v2.onetone.freq.gui import OneToneFreqAnalyzeParams
 from zcu_lab.v2.support.measure.mux_save_names import mux_readout_save_stem
-from zcu_lab.v2.support.resonator import route_matched_delay
+from zcu_lab.v2.support.resonator import finite_real, route_matched_delay
 
 MuxOnetoneRunResult: TypeAlias = RunRecord[MuxOnetoneCfg, MuxOnetoneResult]
 
@@ -87,8 +87,20 @@ class MuxOnetoneSummary(BaseModel):
     resonators_diagnostic: str | None
 
 
+@dataclass(frozen=True)
+class ToneAnalyzeSuccess(ToneFitSuccess):
+    """A fitted tone with adapter-owned delay seed provenance and writeback gate.
+
+    edelay_source is manual, calibrated (captured route prior), or global.
+    edelay_persistable is True for a seeded fit or nonuniform fitting grid.
+    """
+
+    edelay_source: Literal["global", "calibrated", "manual"]
+    edelay_persistable: bool
+
+
 @dataclass
-class MuxOnetoneAnalyzeResult(MuxOnetoneAnalysis):
+class MuxOnetoneAnalyzeResult:
     """Core outcomes with the GUI's complete Run/Load resonator capture.
 
     resonators contains the complete N bindings, or None when absent/mismatched.
@@ -96,6 +108,7 @@ class MuxOnetoneAnalyzeResult(MuxOnetoneAnalysis):
     suppressing successful module proposals. No live context is retained.
     """
 
+    outcomes: tuple[ToneAnalyzeSuccess | ToneFitFailure, ...]
     resonators: tuple[str, ...] | None
     resonators_diagnostic: str | None
 
@@ -143,16 +156,14 @@ def _analyze(
     # 1. Validate numeric inputs before resolving capture-dependent sources.
     cfg = validate_analysis_source(req.run_result)
     params = req.analyze_params
-    options = MuxOnetoneAnalyzeOptions(
-        model_type=params.model_type,
-        fit_bg_amp_slope=params.fit_bg_amp_slope,
-        fit_bg_phase_curvature=params.fit_bg_phase_curvature,
-        edelay=params.edelay,
-    )
+    manual_seed = finite_real(params.edelay)
+    if params.edelay is not None and manual_seed is None:
+        raise ValueError("edelay must be a finite real scalar or None")
     resonators, diagnostic = _resonators(req.parameters, len(cfg.readout.tones))
 
     # 2. Resolve route priors from the fixed capture, never the current point.
-    priors: list[float | None] = []
+    seeds: list[float | None] = []
+    sources: list[Literal["global", "calibrated", "manual"]] = []
     for index in req.run_result.result.tone_indices:
         prior = None
         if (
@@ -164,11 +175,36 @@ def _analyze(
             raw = req.parameters.lookup(f"{resonators[index]}.ext.edelay")
             if raw.present:
                 prior = route_matched_delay(raw.value, (cfg.readout.gen_ch, tone.ro_ch))
-        priors.append(prior)
-    analysis = MuxOnetoneExp().analyze(
-        req.run_result, options, route_priors=priors, plots=plots
+        seeds.append(manual_seed if manual_seed is not None else prior)
+        sources.append(
+            "manual"
+            if manual_seed is not None
+            else "calibrated"
+            if prior is not None
+            else "global"
+        )
+    options = MuxOnetoneAnalyzeOptions(
+        edelay_seeds=tuple(seeds),
+        model_type=params.model_type,
+        fit_bg_amp_slope=params.fit_bg_amp_slope,
+        fit_bg_phase_curvature=params.fit_bg_phase_curvature,
     )
-    return MuxOnetoneAnalyzeResult(analysis.outcomes, resonators, diagnostic)
+    analysis = MuxOnetoneExp().analyze(req.run_result, options, plots=plots)
+    steps = np.abs(np.diff(req.run_result.result.dfs[1:-1]))
+    nonuniform = not bool(np.allclose(steps, np.median(steps), rtol=1e-8, atol=0.0))
+    outcomes = tuple(
+        ToneAnalyzeSuccess(
+            outcome.index,
+            outcome.label,
+            outcome.fit,
+            sources[column],
+            seeds[column] is not None or nonuniform,
+        )
+        if isinstance(outcome, ToneFitSuccess)
+        else outcome
+        for column, outcome in enumerate(analysis.outcomes)
+    )
+    return MuxOnetoneAnalyzeResult(outcomes, resonators, diagnostic)
 
 
 def _get_writeback_items(

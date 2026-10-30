@@ -2,14 +2,16 @@
 
 from datetime import UTC, datetime, timedelta, tzinfo
 from pathlib import Path
-from typing import assert_type
+from typing import Annotated, assert_type
 from unittest.mock import Mock
 
 import numpy as np
 import pytest
 from matplotlib.figure import Figure
+from pydantic import Field
+from pydantic.dataclasses import dataclass as validated_dataclass
 from zcu_tools.device import DeviceManager, FakeDevice
-from zcu_tools.experiment import AcquisitionEvidence
+from zcu_tools.experiment import AcquisitionEvidence, Experiment
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.stop_signal import ScheduleOutcomeError
@@ -108,6 +110,35 @@ def test_analysis_returns_explicit_source_and_isolates_working_options() -> None
     np.testing.assert_array_equal(
         record.figures["fit"].axes[0].lines[0].get_ydata(), [6.0]
     )
+
+
+@validated_dataclass(frozen=True)
+class _BoundedOptions:
+    scale: Annotated[float, Field(ge=0)] = 1.0
+
+
+def test_notebook_analyze_accepts_validated_options_without_hardware() -> None:
+    class BoundedCore(Experiment[float, _Cfg]):
+        def analyze(
+            self,
+            source: RunRecord[_Cfg, float],
+            options: _BoundedOptions,
+            *,
+            plots: Plots,
+        ) -> float:
+            return source.result * options.scale
+
+    adapter = NotebookAdapter(host=NonPresentingHost())(BoundedCore())
+    source = RunRecord[_Cfg, float](cfg=None, result=3.0)
+    options = _BoundedOptions(scale=2.0)
+    record = adapter.analyze(options, source=source)
+    assert record.source is source
+    assert record.options == options
+    assert record.result == 6.0
+
+    with pytest.raises(ValueError, match="greater than or equal to 0"):
+        adapter.analyze(_BoundedOptions(scale=-1.0), source=source)
+    assert adapter.analysis is record
 
 
 def test_nullable_analysis_options_are_delegated_and_retained() -> None:

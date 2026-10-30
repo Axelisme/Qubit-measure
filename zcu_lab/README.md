@@ -34,6 +34,15 @@ GUI 啟動時 alias 表是空的，沒有 preset 檔。Alias 只存在各 point 
 
 Source package 路徑由 `zcu_lab.__file__` 與 `zcu_tools.__file__` 推得。
 Templates 發布後不修改其內容；frozen dataclass 不會遞迴凍結範本。
+
+`flux_reset` 範本建立 `reset/pulse`，可存到 qubit 的 reset library 分組，再由
+`$qubit.module.reset` 指向該 module。它在 `$qubit.wiring.lo_flux_ch` 播放 frequency
+0 MHz 的 const 方波，gain 讀 `$qubit.ext.flux_reset_gain`，長度讀
+`$qubit.ext.flux_reset_length`（us）。缺少來源時，對應欄位保持 Invalid。
+`pulse_cfg.post_delay` 是回程後等待 flux 尾巴穩定的時間（us），沿用 `PulseSpec`
+的 0.0 預設值，0 代表不等待。實機應依 flux 尾巴量測（例如
+`fastflux/distortion`）設成足夠長，不能把預設 0 當成已穩定。
+
 各入口的最小 Protocol 與依賴理由見 [ADR-0072](../docs/adr/0072-module-boundaries.md#lab-定義與組合根)。
 
 Measure behavior 先註冊 components，再以 `lab.templates` 建 Registry，呼叫 `lab.register_experiments` 填入 adapters。
