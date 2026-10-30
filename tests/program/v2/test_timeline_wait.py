@@ -653,10 +653,12 @@ class WaitRecipe:
 def wait_recipes(seed: int) -> list[WaitRecipe]:
     """Generate 30 recipes within the mock tProc's 16-data-register limit.
 
-    Stratify readout placement and axes. Integral-cycle DAC lengths avoid
-    fractional-tail lookup registers; two-axis forks have a noncrossing maximum.
-    One-axis forks can cross. Unrestricted recipes exhausted the same 16 slots
-    and failed allocation 17 both before and after the shell-WAIT changes.
+    One-axis recipes include fractional-cycle DAC lengths and crossing forks.
+    Two-axis recipes use integral-cycle lengths and a noncrossing fork to leave
+    registers for both sweeps. Their branch-readout cases flatten the fixed
+    delay-only loop; other recipes exercise both Repeat forms. Unrestricted
+    recipes exhausted the same 16 slots and failed allocation 17 both before
+    and after the shell-WAIT changes.
     """
     rng = random.Random(seed)
     recipes = []
@@ -664,13 +666,12 @@ def wait_recipes(seed: int) -> list[WaitRecipe]:
         for axes in (1, 2):
             for read_at in ("before", "fixed", "runtime", "branch", "after"):
                 adc_samples = rng.choice((50, 100, 150))
+                sweep_steps = tuple(rng.randint(5, 30) for _ in range(axes))
+                fractional_samples = (rng.randint(20, 70), rng.randint(10, 50))
                 recipes.append(
                     WaitRecipe(
-                        sweep_steps=tuple(rng.randint(5, 30) for _ in range(axes)),
-                        pulse_samples=(
-                            rng.choice((25, 50, 75)) if axes == 1 else 25,
-                            rng.choice((25, 50)) if axes == 1 else 50,
-                        ),
+                        sweep_steps=sweep_steps,
+                        pulse_samples=fractional_samples if axes == 1 else (25, 50),
                         adc_samples=adc_samples,
                         fixed_count=rng.randint(1, 3),
                         counts=tuple(rng.sample((0, 1, 3), 3)),
@@ -741,10 +742,15 @@ def compile_wait_recipe(recipe: WaitRecipe, relax_cycles: int = 1000):
                         if recipe.read_at == "branch":
                             self.read()
                         self.delay_timeline(delay / 430.08)
-            with self.repeat("fixed", recipe.fixed_count):
-                if recipe.read_at == "fixed":
-                    self.read()
-                self.delay_timeline(recipe.loop_delay / 430.08)
+            if len(self.gaps) == 2 and recipe.read_at == "branch":
+                # Flatten only this constant delay-only loop to reserve a
+                # register for branch-selected ADC tails on two sweep axes.
+                self.delay_timeline(recipe.fixed_count * recipe.loop_delay / 430.08)
+            else:
+                with self.repeat("fixed", recipe.fixed_count):
+                    if recipe.read_at == "fixed":
+                        self.read()
+                    self.delay_timeline(recipe.loop_delay / 430.08)
             with self.repeat("runtime", "count_cycles", range_hint=(0, 3)):
                 if recipe.read_at == "runtime":
                     self.read()
