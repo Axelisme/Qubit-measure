@@ -7,11 +7,9 @@ from typing import Annotated, ClassVar
 import numpy as np
 from matplotlib.axes import Axes
 from numpy.typing import NDArray
-from zcu_tools.analysis.singleshot import (
-    correct_populations,
-    raw_population_signal,
-)
+from zcu_tools.analysis.singleshot import correct_populations
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
+from zcu_tools.datafile import DataVariable
 from zcu_tools.experiment import AxesSpec, Experiment
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
@@ -20,13 +18,15 @@ from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     Branch,
+    Classify,
     GainSweep,
     Pulse,
     Readout,
     Reset,
+    shot_sums,
     sweep2param,
 )
-from zcu_tools.program.v2.modules.readout import classification_processors
+from zcu_tools.program.v2.modules.readout import PulseReadoutCfg, circle_classifier
 
 from zcu_lab.v2.support import live_line
 
@@ -60,14 +60,14 @@ class ResetCheckCfg(ConfigBase):
 
 @dataclass(frozen=True)
 class ResetCheckResult:
-    """G/E/Other fractions in (gain, reset_state, population_state) order.
+    """G/E/Other shot counts in (gain, reset_state, population_state) order.
 
     Branches are independent preparations, not paired shot trajectories.
     """
 
     gains: NDArray[np.float64]
     reset_states: NDArray[np.int64]
-    signals: NDArray[np.float64]
+    counts: NDArray[np.float64]
     population_states: NDArray[np.int64] = field(
         default_factory=lambda: np.array([0, 1, 2], dtype=np.int64)
     )
@@ -105,7 +105,8 @@ class ResetCheckExp(Experiment[ResetCheckResult, ResetCheckCfg]):
             AxesSpec.Axis("reset_states", "Reset State", "None", dtype=np.int64),
             AxesSpec.Axis("gains", "Gain", "a.u.", dtype=np.float64),
         ),
-        z=AxesSpec.Z("signals", "Population", "a.u.", dtype=np.float64),
+        z=AxesSpec.Z("counts", "Class counts", "count", dtype=np.float64),
+        data_variable=DataVariable("counts"),
         result_type=ResetCheckResult,
         cfg_type=ResetCheckCfg,
         cfg_schema_version="3.0",
@@ -123,14 +124,23 @@ class ResetCheckExp(Experiment[ResetCheckResult, ResetCheckCfg]):
         Each independent branch starts with optional reset and a gain-swept
         Rabi pulse, then applies no tested reset, tested reset alone, or tested
         reset followed by the same Rabi pulse, before readout. Return quantized
-        gains and mean G/E/Other fractions in (gain, branch, population) order.
+        gains and summed G/E/Other shot counts in (gain, branch, population) order.
         These populations are not paired trajectories or reset-channel fidelity.
         Invalid classification centers or radius raise ValueError.
         """
         # 1. Validate classification and prepare hardware-quantized gain points.
         soc, soccfg = context.soc, context.soccfg
         cfg = deepcopy(cfg)
-        processors = classification_processors(cfg.readout, require_other=True)
+        pulse_readout = isinstance(cfg.readout, PulseReadoutCfg)
+        ro_ch = (
+            cfg.readout.ro_ch
+            if isinstance(cfg.readout, PulseReadoutCfg)
+            else cfg.readout.tones[0].ro_ch
+        )
+        classifier = circle_classifier(cfg.readout, ro_ch=ro_ch)
+        axis = Classify(
+            "readout", tone=None if pulse_readout else 0, classifier=classifier
+        )
         gains = sweep2array(
             cfg.gain,
             "gain",
@@ -155,7 +165,10 @@ class ResetCheckExp(Experiment[ResetCheckResult, ResetCheckCfg]):
         buffer = SignalBuffer(
             (gains.size, 3, 3),
             dtype=np.float64,
-            on_update=lambda data: viewer.update(gains, data.reshape(gains.size, 9).T),
+            on_update=lambda data: viewer.update(
+                gains,
+                (data / data.sum(axis=-1, keepdims=True)).reshape(gains.size, 9).T,
+            ),
         )
         with Schedule(cfg, buffer, scope=context.scope) as sched:
             # 3. Sweep gain outside the three-way hardware branch loop.
@@ -182,17 +195,19 @@ class ResetCheckExp(Experiment[ResetCheckResult, ResetCheckCfg]):
                 .declare_sweep("reset_sel", 3)
             )
 
-            # 4. Average classified fractions over reps/rounds, preserving partial data.
-            builder.build_and_acquire_processed(
-                processed2signal_fn=raw_population_signal,
-                processors=processors,
+            # 4. Retain cumulative class counts, including completed partial rounds.
+            program = builder.build()
+            builder.run_program_summed(
+                program,
+                sums2signal_fn=lambda sums: sums,
+                processor=shot_sums(program, [axis]),
                 rounds=cfg.rounds,
             )
             sched.trigger_update(flush=True)
         return ResetCheckResult(
             gains=gains,
             reset_states=np.arange(3, dtype=np.int64),
-            signals=buffer.array,
+            counts=buffer.array,
         )
 
     def analyze(
@@ -205,7 +220,7 @@ class ResetCheckExp(Experiment[ResetCheckResult, ResetCheckCfg]):
         """Summarize reset-only excited and Other populations across sampled gains.
 
         Apply options.confusion_matrix when supplied, otherwise use classified
-        fractions from source.result. Return corrected G/E/Other fractions and
+        fractions normalized per row from source.result.counts. Return corrected G/E/Other fractions and
         reset-only mean/worst sampled populations, and plot all three branches.
         Invalid axes or no finite reset-only samples raise ValueError.
         """
@@ -213,14 +228,15 @@ class ResetCheckExp(Experiment[ResetCheckResult, ResetCheckCfg]):
         result = source.result
         confusion_matrix = options.confusion_matrix
         if (
-            result.signals.shape != (result.gains.size, 3, 3)
+            result.counts.shape != (result.gains.size, 3, 3)
             or not np.array_equal(result.reset_states, [0, 1, 2])
             or not np.array_equal(result.population_states, [0, 1, 2])
         ):
             raise ValueError(
                 "Reset check requires (gain, branch, G/E/Other) populations"
             )
-        populations = correct_populations(result.signals, confusion_matrix)
+        populations = result.counts / result.counts.sum(axis=-1, keepdims=True)
+        populations = correct_populations(populations, confusion_matrix)
 
         # 2. Summarize finite reset-only samples, not reset-channel fidelity.
         reset_e = populations[:, 1, 1]
