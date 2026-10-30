@@ -1,4 +1,4 @@
-"""Fresh-interpreter import boundary for NotebookPlotHost's optional backend."""
+"""Verify first-import effects in a fresh interpreter, not a reused module cache."""
 
 import os
 import subprocess
@@ -8,85 +8,55 @@ from textwrap import dedent
 
 import pytest
 
+pytestmark = pytest.mark.requires_subprocess
 
+
+@pytest.mark.parametrize("backend", ["Agg", None])
 @pytest.mark.parametrize("interactive", [False, True])
-def test_first_notebook_presentation_preserves_selected_backend_and_pyplot_figures(
-    interactive: bool, tmp_path: Path
+def test_notebook_import_is_lazy_and_first_presentation_selects_ipympl(
+    backend: str | None, interactive: bool, tmp_path: Path
 ) -> None:
     source = dedent("""
         import sys
         import matplotlib
         import matplotlib.pyplot as plt
 
-        matplotlib.use("Agg")
-        matplotlib.interactive(sys.argv[1] == "True")
-        retained = plt.figure("caller-owned")
-        before = (matplotlib.get_backend(auto_select=False),
-                  plt.get_fignums(), matplotlib.is_interactive())
+        if sys.argv[1] == "Agg":
+            matplotlib.use("Agg")
+        matplotlib.interactive(sys.argv[2] == "True")
+        retained = plt.figure("caller-owned") if sys.argv[1] == "Agg" else None
+        before_backend = matplotlib.get_backend(auto_select=False)
+        before_figures = plt.get_fignums()
+        before_interactive = matplotlib.is_interactive()
+        assert before_backend == ("Agg" if retained is not None else None)
         assert "ipympl" not in sys.modules
+
+        import zcu_tools.notebook
         from zcu_tools.notebook.plotting import NotebookPlotHost
         from zcu_tools.plotting.plots import Plots
 
         plots = Plots(NotebookPlotHost())
         try:
             figure, _ = plots.subplots(num="operation")
+            assert "ipympl" not in sys.modules
+            assert matplotlib.get_backend(auto_select=False) == before_backend
             figure.show()
-            after = (matplotlib.get_backend(auto_select=False),
-                     plt.get_fignums(), matplotlib.is_interactive())
-            assert after == before, (before, after)
-            assert plt.figure("caller-owned") is retained
+            assert matplotlib.get_backend(auto_select=False) == "module://ipympl.backend_nbagg"
+            assert plt.get_fignums() == before_figures
+            assert matplotlib.is_interactive() == before_interactive
+            if retained is not None:
+                assert plt.figure("caller-owned") is retained
             plots.finish()
         finally:
             plots.finish(present=False)
             plots.release()
-            plt.close(retained)
-    """)
-    result = subprocess.run(
-        [sys.executable, "-c", source, str(interactive)],
-        env={**os.environ, "MPLCONFIGDIR": str(tmp_path)},
-        capture_output=True,
-        text=True,
-        timeout=15,
-        check=False,
-    )
-    assert result.returncode == 0, result.stdout + result.stderr
-
-
-def test_unselected_backend_is_rejected_without_loading_ipympl_or_selecting_backend(
-    tmp_path: Path,
-) -> None:
-    source = dedent("""
-        import sys
-        import matplotlib
-        import matplotlib.pyplot as plt
-
-        assert matplotlib.get_backend(auto_select=False) is None
-        before_interactive = matplotlib.is_interactive()
-        before_figures = plt.get_fignums()
-        from zcu_tools.notebook.plotting import NotebookPlotHost
-        from zcu_tools.plotting.plots import Plots
-
-        plots = Plots(NotebookPlotHost())
-        try:
-            figure, _ = plots.subplots(num="unselected")
-            try:
-                figure.show()
-            except RuntimeError as error:
-                assert "backend" in str(error).lower(), str(error)
-            else:
-                raise AssertionError("An unselected backend must fail before ipympl import")
-            assert matplotlib.get_backend(auto_select=False) is None
-            assert "ipympl" not in sys.modules
-            assert matplotlib.is_interactive() == before_interactive
-            assert plt.get_fignums() == before_figures
-        finally:
-            plots.finish(present=False)
-            plots.release()
+            if retained is not None:
+                plt.close(retained)
     """)
     environment = {**os.environ, "MPLCONFIGDIR": str(tmp_path)}
     environment.pop("MPLBACKEND", None)
     result = subprocess.run(
-        [sys.executable, "-c", source],
+        [sys.executable, "-c", source, str(backend), str(interactive)],
         env=environment,
         capture_output=True,
         text=True,

@@ -28,6 +28,10 @@ class NotebookPlotHost:
     with another presentation manager must be released by that owner first.
     Framework FigureShowManager is accepted and restored on the released Agg
     canvas. The ipympl manager delegates show to that original operation.
+    Module import and construction do not load ipympl. The first presentation
+    imports it, selecting the widget pyplot backend without restoration. An
+    unselected backend is allowed. Existing pyplot figures remain registered;
+    this host does not register its own figures with pyplot.
     """
 
     def __init__(self) -> None:
