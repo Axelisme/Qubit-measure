@@ -91,6 +91,14 @@ mux/onetone 的逐 tone 數值計算、outcomes 與單 tone 失敗隔離由 core
 gui.py 保留來源與 route prior 解析，以及 writeback。
 此規則以直接審閱確認，不新增靜態內容測試；core 不依賴 GUI 的方向仍由 C15 保護。
 
+Workflow 的替代壽命模型比較與疊圖由 `zcu_lab/workflows/common` 擁有。Mux T1／T2echo core 只回本次選定模型的擬合，不為 workflow 額外比較模型。使用者於 2026-10-30 選擇「18A」，將這項診斷留在使用它的 workflow。
+
+Mux onetone core 只接收每 tone 的 edelay 種子並回傳擬合結果。Adapter 決定手動值、capture prior 與全域搜尋的優先序，記錄來源並判斷 writeback。使用者於 2026-10-30 指出「這不對勁，聽起來像是adapter的邏輯漏進core」，並選擇「A」。
+
+各實驗獨立完成 analyze 與畫圖，不組假 source 呼叫另一個實驗的 analyze。實驗可共用數值分析工具，不共用分析圖的畫法。使用者於 2026-10-30 裁定「不能獨立重複分析嗎？可以共用分析工具，但畫圖就有點超過了，不利於客製化」。Mux GE 因而逐 tone 呼叫既有數值工具並自行畫圖。
+
+以上分工沿用 lab → analysis／plotting 的依賴方向。Framework 不反向 import lab 由 C16 保護，core 不依賴 GUI 由 C15 保護，分層與無循環由 C8、C9 檢查。
+
 Local flux reset 沿用 `reset/pulse`，由 lab 的 library 範本與 `twotone/reset/flux/{gain,length}` 實驗組裝及校準。
 所需脈衝已能由既有 reset 模組播放，因此框架不新增 reset 型別。驗收重用既有 reset check，不另建專用檢查實驗。
 範本名稱與參數留在 lab 範本及 [gain](../../zcu_lab/v2/twotone/reset/flux/gain/guide.md)、[length](../../zcu_lab/v2/twotone/reset/flux/length/guide.md) 操作文件，不成為框架規則。
