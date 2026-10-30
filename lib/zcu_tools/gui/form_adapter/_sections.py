@@ -14,6 +14,7 @@ from zcu_tools.cfg_model import (
     CfgInputValue,
     ConfigBase,
     Expr,
+    FieldMeta,
     FormNode,
     Hidden,
     LogPoints,
@@ -43,7 +44,12 @@ from ._modules import (
     editable_spec,
     module_specs,
 )
-from ._seeds import disabled_model_defaults, persistent_input, selected_model
+from ._seeds import (
+    disabled_model_defaults,
+    persistent_input,
+    selected_model,
+    template_metadata,
+)
 from ._types import (
     annotated_type,
     branch_metadata,
@@ -221,9 +227,16 @@ class SpecSection:
         self.children: dict[str, Section] = {}
         self.modules: dict[str, ModuleField] = {}
 
-    def seed_origins(self, prefix: FormWritePath = ()) -> dict[FormWritePath, str]:
+    def seed_origins(
+        self, env: FormEnv, prefix: FormWritePath = ()
+    ) -> dict[FormWritePath, str]:
         """Return no authored source origins for an empty persistent-Spec tree."""
-        del prefix
+        del env, prefix
+        return {}
+
+    def template_metadata(self, env: FormEnv) -> dict[FormWritePath, FieldMeta]:
+        """Return no template metadata for an empty persistent-Spec tree."""
+        del env
         return {}
 
     def bind_templates(self, catalog: Mapping[str, TemplateDef], adapter: str) -> None:
@@ -488,20 +501,36 @@ class Section:
             )
         return list[child.model]
 
-    def seed_origins(self, prefix: FormWritePath = ()) -> dict[FormWritePath, str]:
-        """Return declared source ancestry without defaults, evaluation or capture."""
+    def seed_origins(
+        self, env: FormEnv, prefix: FormWritePath = ()
+    ) -> dict[FormWritePath, str]:
+        """Return selected source ancestry using the fixed capture."""
         result: dict[FormWritePath, str] = {}
         for name, module in self.modules.items():
-            node = module.node
+            node = module.selected_node(env)
             if isinstance(node, Slot):
                 result[(*prefix, name)] = node.path
             elif isinstance(node, Template):
                 result[(*prefix, name)] = f"template:{node.id}"
         for name, child in self.children.items():
-            result.update(child.seed_origins((*prefix, name)))
+            result.update(child.seed_origins(env, (*prefix, name)))
         for name, positions in self.element_seeds.items():
             for index, child in enumerate(positions):
-                result.update(child.seed_origins((*prefix, name, index)))
+                result.update(child.seed_origins(env, (*prefix, name, index)))
+        return result
+
+    def template_metadata(self, env: FormEnv) -> dict[FormWritePath, FieldMeta]:
+        """Collect root-relative metadata from only the selected Templates."""
+        result: dict[FormWritePath, FieldMeta] = {}
+        for module in self.modules.values():
+            node = module.selected_node(env)
+            if isinstance(node, Template):
+                result.update(template_metadata(node, module.catalog, env))
+        for child in self.children.values():
+            result.update(child.template_metadata(env))
+        for positions in self.element_seeds.values():
+            for child in positions:
+                result.update(child.template_metadata(env))
         return result
 
     def _sweep_defaults(self) -> dict[str, JsonValue]:

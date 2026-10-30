@@ -701,8 +701,18 @@ class ModuleField:
             kind_fields.append((kind, fields))
         return _module_options(key_commands, kind_fields, nullable=self.nullable)
 
+    def selected_node(self, env: FormEnv) -> Slot | Template | None:
+        """Select the fallback only when the fixed capture cannot resolve the Slot."""
+        if (
+            isinstance(self.node, Slot)
+            and self.node.fallback is not None
+            and slot_key(self.node, env) is None
+        ):
+            return self.node.fallback
+        return self.node
+
     def validate_templates(self, catalog: Mapping[str, TemplateDef]) -> None:
-        template = self.node if isinstance(self.node, Template) else None
+        template = self.node.fallback if isinstance(self.node, Slot) else self.node
         seeds: dict[str, JsonValue] = {}
         if template is not None:
             template_input(template, catalog, self.editable, None)
@@ -731,23 +741,22 @@ class ModuleField:
             bind_template_defaults(self.editable, template, catalog)
 
     def initial_input(self, env: FormEnv) -> dict[str, JsonValue] | None:
-        if isinstance(self.node, Template):
+        node = self.selected_node(env)
+        if isinstance(node, Template):
             return {
                 "kind": "inline",
                 "module": self._project(
-                    template_input(self.node, self.catalog, self.editable, env)
+                    template_input(node, self.catalog, self.editable, env)
                 ),
             }
-        if self.node is None:
+        if node is None:
             return None
-        key = slot_key(self.node, env)
+        key = slot_key(node, env)
         if key is not None and env.library is not None:
             spec = env.library.module_spec(key)
             if not isinstance(spec, self.specs):
-                raise ValueError(
-                    f"Slot {self.node.path!r} has incompatible module family"
-                )
-            if not self.node.copy:
+                raise ValueError(f"Slot {node.path!r} has incompatible module family")
+            if not node.copy:
                 return {"kind": "ref", "name": key}
             model = next(
                 model for model in self.editable if type_tag(model) == spec.type
@@ -758,7 +767,7 @@ class ModuleField:
             )
         else:
             return None
-        for path, value in self.node.set.items():
+        for path, value in node.set.items():
             set_slot_path(model, module, path, scalar_seed(value), env)
         selected = next(
             model for model in self.editable if type_tag(model) == module.get("type")
@@ -826,7 +835,8 @@ class ModuleField:
 
     def fresh_inline_input(self, env: FormEnv) -> dict[str, JsonValue]:
         """Build fresh Template/blank input without copying any prior ref."""
-        template = self.node if isinstance(self.node, Template) else None
+        node = self.selected_node(env)
+        template = node if isinstance(node, Template) else None
         if template is not None:
             module = template_input(template, self.catalog, self.editable, env)
         elif len(self.editable) == 1:

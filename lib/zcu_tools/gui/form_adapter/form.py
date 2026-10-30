@@ -124,6 +124,9 @@ class Form[C: ConfigBase]:
             raise ValueError("field_order is supported only for core-cfg Forms")
         self.seed_metadata: Mapping[FormWritePath, FieldMeta] = MappingProxyType({})
         self.seed_sources: Mapping[FormWritePath, SeedSource] = MappingProxyType({})
+        self._template_seed_metadata: Mapping[FormWritePath, FieldMeta] = (
+            MappingProxyType({})
+        )
         self._core_cfg = core_cfg
         self._initial_values = initial_values
         self._section: Section | SpecSection = (
@@ -192,7 +195,10 @@ class Form[C: ConfigBase]:
             raw.update(deepcopy(dict(values)))
         input = self.model.default_input(env, defaults=raw)
         self.seed_sources = MappingProxyType(
-            capture_seed_sources(raw, input.data, self._section.seed_origins())
+            capture_seed_sources(raw, input.data, self._section.seed_origins(env))
+        )
+        self._template_seed_metadata = MappingProxyType(
+            self._section.template_metadata(env)
         )
         return input
 
@@ -209,7 +215,11 @@ class Form[C: ConfigBase]:
         """
         self._check_logical_input(input)
         return field_diagnostics(
-            input, env, errors, self.seed_sources, self.seed_metadata
+            input,
+            env,
+            errors,
+            self.seed_sources,
+            {**self._template_seed_metadata, **self.seed_metadata},
         )
 
     def _check_logical_input(self, input: FormInput[FormModel]) -> None:
