@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import gc
 import os
 import threading
 from collections.abc import Callable, Iterator
 from io import BytesIO
 from pathlib import Path
+from weakref import ref
 
 import numpy as np
 import pytest
@@ -401,6 +403,12 @@ def test_clearing_finished_container_preserves_show_lifetime(
             figure.show()
     finally:
         plots.release()
+    operation = ref(plots)
+    del plots
+    gc.collect()
+    assert operation() is None
+    with pytest.raises(RuntimeError, match="operation.*finished"):
+        figure.show()
 
 
 def test_clearing_container_preserves_caller_replaced_canvas(qapp, hosts) -> None:
