@@ -651,7 +651,11 @@ class WaitRecipe:
 
 
 def wait_recipes(seed: int) -> list[WaitRecipe]:
-    """Generate 30 bounded recipes, stratified by readout placement and axes."""
+    """Generate 30 recipes within the mock tProc's 16-data-register limit.
+
+    Stratify readout placement and axes. Integral-cycle DAC lengths avoid
+    fractional-tail lookup registers, leaving room for both control structures.
+    """
     rng = random.Random(seed)
     recipes = []
     for repeat in range(3):
@@ -661,12 +665,9 @@ def wait_recipes(seed: int) -> list[WaitRecipe]:
                 recipes.append(
                     WaitRecipe(
                         sweep_steps=tuple(rng.randint(5, 30) for _ in range(axes)),
-                        # Two-axis schedules reserve registers for both sweeps
-                        # and control flow by using a noncrossing fork maximum.
-                        # One-axis schedules also exercise crossing pulse ends.
                         pulse_samples=(
-                            rng.randint(20, 70) if axes == 1 else rng.randint(10, 20),
-                            rng.randint(10, 50) if axes == 1 else rng.randint(30, 50),
+                            rng.choice((25, 50, 75)),
+                            rng.choice((25, 50)),
                         ),
                         adc_samples=adc_samples,
                         fixed_count=rng.randint(1, 3),
