@@ -496,6 +496,12 @@ Module 的 default timeline 與 QICK reference 分開。
 原生 `delay` 與 `delay_auto` 仍只推進 reference，不受 timeline 範圍影響。
 未進範圍時，省略 timeline 的 module emit 使用 default，原生 pulse／trigger 保留原生 reference timing。
 
+選擇 delay 方法時，也要考慮指令成本。
+若後續一組 pulse 都需要同一個掃描時間位移，先以掃描值推進 reference，可將這次位移集中成一次時間加總。
+若把掃描值留在 timeline，後續各 pulse 可能都需要以暫存器計算發射時間，增加指令數。
+先按排程需求決定是否推進共用 reference，再比較編譯結果的成本；這些方法的效果不同，不能只按指令數互換。
+作者自行選擇 `delay`、`delay_auto` 或 `delay_timeline`，builder 不自動替換或優化。
+
 以下是同一 builder 在 build 前的 body 片段。`drive` 是這次 build 新建的 module。
 手寫 program 可在 `_body` 將 `builder` 換成 `self`，使用已 declare 的 `self.drive`。
 
