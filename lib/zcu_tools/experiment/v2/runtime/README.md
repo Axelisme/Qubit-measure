@@ -1,6 +1,6 @@
 # `zcu_tools.experiment.v2.runtime` — experiment runtime
 
-**Last updated:** 2026-10-30
+**Last updated:** 2026-10-30，Schedule managed acquisition
 
 **讀者：** framework-dev。Schedule、buffer、program acquire、停止與重試契約。
 
@@ -109,9 +109,31 @@ with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
 - 正常離開 scope 時（包含 requested stop），`Schedule` 對 root `SignalBuffer` 呼叫 `flush_pending_update()`，交付最後尚未呈現的資料。已顯式 flush 或已經呈現的更新不重複發布。Body 拋出例外或 `KeyboardInterrupt` 時不做自動 flush；正常退出的 callback 錯誤會傳播，但 scope 仍關閉。
 - 自動 flush 不擴充 `BufferProtocol`，也不對其它實作廣播 root update。`ResultTree` 維持由 caller 顯式 flush，以保留既有 env 與 path 事件語意。
 
+### Schedule managed acquisition
+
+`Schedule` 與 scan step 提供 `managed_acquire(program, soc, ...)`、
+`managed_acquire_summed(program, soc, processor=..., ...)` 與
+`managed_acquire_decimated(program, soc, ...)`。三個方法不建立 program，也不經過
+`ProgramBuilder`。Caller 可傳入手寫或 builder 產生的 program，只需提供對應的同步
+acquire 方法。
+
+Managed 代表寫入目前 scope 的 slot 並觸發 live update、依 retry 重試，以及依
+stop_condition 停止目前 acquire。`ManageOptions[T_Raw]` 提供 retry、progress、
+stop_condition 與 converter。`rounds` 等 native 參數直接傳給 managed 方法。
+Integrated 的預設 converter 將第一個 ADC/readout 的 IQ 轉成複數，summed 直接寫入
+累積總和，decimated 將第一個 ADC 的 trace 轉成複數並保留 repetitions 與 sample axes。
+
+`managed_acquire.py` 的 mixin 只集中 Schedule 與 Step 的三個入口，不持有 scope、slot
+或 outcome。`acquisition.py` 的 `AcquisitionRunner` 集中 round hook、retry、stop、
+partial-result、overrun 與 progress；新入口與舊 builder 共用這份執行邏輯。
+`AcquireOptions`、同步 producer keyword 型別與 raw converters 也由該模組提供，舊匯入位置保留。
+
 ### `ProgramBuilder`
 
-`program_builder.py` 擁有完整的 QICK program 組裝與同步 acquire：`ProgramBuilder`、`ModuleFacade`、`AcquireOptions`、producer 型別契約與 raw conversion。`schedule.py` 保留 Schedule／Step、buffer／slot 與 run lifecycle。Builder 透過 Schedule 的公開合作方法選擇 slot、記錄 outcome 與處理 retry reset。Runtime package 入口仍匯出既有公開名稱。
+`program_builder.py` 擁有 QICK program 組裝與舊 acquire 入口：`ProgramBuilder`、
+`ModuleFacade` 與舊 producer 型別契約。`schedule.py` 保留 Schedule／Step、buffer／slot
+與 run lifecycle。共用 runner 透過 Schedule 的公開合作方法選擇 slot、記錄 outcome
+與處理 retry reset。Runtime package 入口仍匯出既有公開名稱。
 
 `acquire_cancel.py` 合成 acquire child 的取消與作者的 data stop condition。Data stop 是正常完成，不設 scope event，也不標記 partial。
 
@@ -181,6 +203,10 @@ with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
 
 ## 測試
 
+`test_managed_acquire.py` 經 Schedule 公開入口覆蓋三種 acquisition 的 simulator 路徑、
+slot/live update、converter、retry、data stop、取消、部分 round 與 callback 錯誤。
+`test_managed_timeline.py` 以 deterministic transport 跑 emit program 的一般 QICK
+acquisition pipeline，不宣稱 legacy simulator 支援 emit 寫法。
 `tests/experiment/v2/runtime/test_program_builder.py` 覆蓋顯式 program 控制、Schedule cfg 隔離、
 modules／sweep 隔離，以及兩種 acquire 的 rounds、retry 與 progress。
 `test_program_acquire.py` 覆蓋 integrated／decimated acquire、program cache、progress 與 raw conversion；

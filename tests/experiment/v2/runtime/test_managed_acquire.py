@@ -1,6 +1,7 @@
 """Schedule-owned acquisition, independently of program construction."""
 
 from collections.abc import Callable, Iterator
+from functools import partial
 
 import numpy as np
 import pytest
@@ -9,6 +10,7 @@ from zcu_tools.experiment.acquisition_facts import StopDecision
 from zcu_tools.experiment.scope import Scope
 from zcu_tools.experiment.simulation import SimulationEnvironment, white_noise
 from zcu_tools.experiment.v2.runtime import ManageOptions, Schedule, SignalBuffer
+from zcu_tools.program.acquisition import CancelFlagProtocol
 from zcu_tools.program.v2 import ModularProgramV2
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
@@ -46,10 +48,14 @@ def test_managed_integrated_writes_scan_slot_and_notifies_live_buffer(
 ) -> None:
     env, program = simulated_program
     updates = []
+    bars: list[RecordingProgressBar] = []
     buffer = SignalBuffer(
         (2, 1), on_update=lambda data: updates.append(data.copy()), update_interval=1
     )
-    with Schedule({}, buffer, scope=Scope("run")) as schedule:
+    with (
+        use_pbar_factory(recording_pbar_factory(bars)),
+        Schedule({}, buffer, scope=Scope("run")) as schedule,
+    ):
         for _, step in schedule.scan("point", [10, 20]):
             result = step.managed_acquire(program, env.soc, rounds=2)
             np.testing.assert_array_equal(result, [0j])
@@ -57,6 +63,9 @@ def test_managed_integrated_writes_scan_slot_and_notifies_live_buffer(
     np.testing.assert_array_equal(buffer.array, [[0j], [0j]])
     assert len(updates) == 6  # Two completed rounds plus final per point.
     assert np.isnan(updates[0][1]).all()
+    rounds_bars = [bar for bar in bars if bar.desc == "rounds"]
+    assert len(rounds_bars) == 2
+    assert all(not bar.leave and bar.closed for bar in rounds_bars)
 
 
 def test_managed_summed_writes_raw_cumulative_sums_by_default(
@@ -247,3 +256,137 @@ def test_managed_integrated_policy_keeps_completed_rounds_and_outcomes(
     assert any(
         "stop value 12.5, completed rounds 1" in message for message in messages
     ) == (ending == "data_stop")
+
+
+@pytest.mark.parametrize("mode", ["integrated", "summed", "decimated"])
+@pytest.mark.parametrize("rounds", [0, -1, True, 1.5, "2"])
+def test_managed_rejects_invalid_rounds_before_acquisition(
+    simulated_program: tuple[SimulationEnvironment, ModularProgramV2],
+    mode: str,
+    rounds: object,
+) -> None:
+    env, program = simulated_program
+    buffer = SignalBuffer((1,))
+    with Schedule({}, buffer, scope=Scope("run")) as schedule:
+        if mode == "integrated":
+            acquire = partial(schedule.managed_acquire, program, env.soc)
+        elif mode == "decimated":
+            acquire = partial(schedule.managed_acquire_decimated, program, env.soc)
+        else:
+            acquire = partial(
+                schedule.managed_acquire_summed,
+                program,
+                env.soc,
+                processor=lambda iq: np.ones((1, 1)),
+            )
+        with pytest.raises(ValueError, match="rounds must be a positive integer"):
+            acquire(rounds=rounds)
+        assert schedule.outcome.status == "completed"
+        assert not schedule.stop.is_set()
+    assert np.isnan(buffer.array).all()
+
+
+@pytest.mark.parametrize("mode", ["integrated", "summed", "decimated"])
+def test_managed_rejects_negative_retry(
+    simulated_program: tuple[SimulationEnvironment, ModularProgramV2],
+    mode: str,
+) -> None:
+    env, program = simulated_program
+    buffer = SignalBuffer((1,))
+    with Schedule({}, buffer, scope=Scope("run")) as schedule:
+        if mode == "integrated":
+            acquire = partial(schedule.managed_acquire, program, env.soc)
+        elif mode == "decimated":
+            acquire = partial(schedule.managed_acquire_decimated, program, env.soc)
+        else:
+            acquire = partial(
+                schedule.managed_acquire_summed,
+                program,
+                env.soc,
+                processor=lambda iq: np.ones((1, 1)),
+            )
+        with pytest.raises(ValueError, match="retry must be non-negative"):
+            acquire(options=ManageOptions(retry=-1))
+        assert schedule.outcome.status == "completed"
+    assert np.isnan(buffer.array).all()
+
+
+@pytest.mark.parametrize("failure_site", ["round", "final", "update"])
+def test_managed_callback_failure_propagates_without_retry_or_failed_outcome(
+    monkeypatch: pytest.MonkeyPatch,
+    failure_site: str,
+) -> None:
+    soc, program = make_chunk_acquisition(reps=2, reads=1)
+    cause = RuntimeError("conversion or live update failed")
+    calls = 0
+    converted = 0
+    root = Scope("run")
+
+    def poll():
+        nonlocal calls
+        calls += 1
+        raw = np.zeros((2, 2), dtype=np.int64)
+        return [(2, ([raw], {}))]
+
+    def convert(raw: list[NDArray[np.float64]]) -> NDArray[np.complex128]:
+        nonlocal converted
+        converted += 1
+        if failure_site == "round" or (failure_site == "final" and converted == 2):
+            raise cause
+        return np.array([1j])
+
+    def update(data):
+        if failure_site == "update":
+            raise cause
+
+    buffer = SignalBuffer((1,), update_interval=1, on_update=update)
+    schedule = Schedule({}, buffer, scope=root)
+    monkeypatch.setattr(soc, "poll_data", poll)
+    with pytest.raises(RuntimeError) as caught, schedule:
+        schedule.managed_acquire(
+            program, soc, options=ManageOptions(converter=convert, retry=2)
+        )
+    assert caught.value is cause
+    assert calls == 1
+    assert schedule.outcome.status == "completed"
+    assert root.stop.error is None
+
+
+def test_managed_accepts_acquire_only_program_and_forwards_native_keywords() -> None:
+    transport = object()
+    buffer = SignalBuffer((1,))
+
+    class AcquireOnly:
+        """A producer with only integrated acquisition, not a legacy program facade."""
+
+        def acquire(
+            self,
+            soc: object,
+            *,
+            rounds: int,
+            progress: bool,
+            round_hook: Callable[
+                [int, list[NDArray[np.float64]], CancelFlagProtocol], object
+            ],
+            cancel_flag: CancelFlagProtocol,
+            **qick_options: object,
+        ) -> list[NDArray[np.float64]]:
+            assert soc is transport
+            assert progress
+            assert rounds == 2
+            assert qick_options == {"custom_native": 19}
+            raw = [np.array([[[7.0, -2.0]]])]
+            round_hook(1, raw, cancel_flag)
+            round_hook(2, raw, cancel_flag)
+            return raw
+
+    with Schedule({}, buffer, scope=Scope("run")) as schedule:
+        result = schedule.managed_acquire(
+            AcquireOnly(),
+            transport,
+            rounds=2,
+            custom_native=19,
+            options=ManageOptions(progress=True),
+        )
+        np.testing.assert_array_equal(result, [7 - 2j])
+        assert schedule.outcome.status == "completed"

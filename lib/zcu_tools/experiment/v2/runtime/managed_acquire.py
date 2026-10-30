@@ -137,8 +137,7 @@ class ManagedAcquisitionMixin(ABC):
         program supplies synchronous acquire; soc is its borrowed transport.
         options controls retry, native progress, stop and raw conversion. With
         no converter, the first ADC/readout's final-axis IQ pairs become complex.
-        Native
-        qick_options are forwarded; rounds defaults to one and must be a positive
+        Native qick_options are forwarded. rounds defaults to one and must be a positive
         integer excluding bool. Return the live slot, including partial data on
         cancellation/failure. Converter and update errors propagate without retry.
         """
@@ -176,8 +175,8 @@ class ManagedAcquisitionMixin(ABC):
         program supplies synchronous acquire_decimated; soc is its transport.
         options controls retry, native progress, stop and raw conversion. With
         no converter, the first ADC's final-axis IQ becomes complex, retaining
-        repetitions and sample axes. Native
-        qick_options are forwarded; rounds defaults to one and must be a positive
+        repetitions and sample axes. Native qick_options are forwarded.
+        rounds defaults to one and must be a positive
         integer excluding bool. Return the live slot, including partial data on
         cancellation/failure. Converter and update errors propagate without retry.
         """
@@ -217,9 +216,9 @@ class ManagedAcquisitionMixin(ABC):
         normalized ADC-keyed (points, reps, reads, 2) IQ to float64 (points, *axes).
         options selects retry/progress/stop and conversion; converter=None writes
         cumulative and final sums directly without averaging. Native qick_options
-        are forwarded; rounds
-        defaults to one and must be a positive integer excluding bool. Return the live
-        slot, retaining completed rounds on stop/failure. None producer results,
+        are forwarded. rounds defaults to one and must be a positive integer
+        excluding bool. Return the live slot, retaining completed rounds on
+        stop/failure. None producer results,
         conversion and update failures propagate without retry.
         """
         owner = self._acquisition_owner
