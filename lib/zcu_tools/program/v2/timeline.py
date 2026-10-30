@@ -2,9 +2,18 @@
 
 from collections.abc import Generator, Mapping, Sequence
 from contextlib import contextmanager
-from typing import override
+from typing import TypedDict, override
 
-from qick.asm_v2 import AsmV2, ConfigReadout, Macro, OpenLoop, Pulse, QickParam, Trigger
+from qick.asm_v2 import (
+    AsmV2,
+    ConfigReadout,
+    Macro,
+    OpenLoop,
+    Pulse,
+    QickParam,
+    QickRawParam,
+    Trigger,
+)
 
 from ._timeline_bounds import CycleBounds, FixedLoopIndex, ProducerBounds
 from ._timeline_macros import (
@@ -40,6 +49,8 @@ from .macro.delay import DelayRegAuto
 from .macro.table import TableSelection
 from .modules.base import Module
 from .resources import ProgramResourcesMixin
+from .sweep import SweepCfg
+from .utils import sweep2param
 
 
 def _repeat_minimum(name: str, n: int | str, range_hint: tuple[int, int] | None) -> int:
@@ -62,6 +73,14 @@ def _repeat_minimum(name: str, n: int | str, range_hint: tuple[int, int] | None)
     return n
 
 
+class _RegisterOptions(TypedDict, total=False):
+    """Non-null QICK allocation inputs, omitted to request automatic allocation."""
+
+    name: str
+    addr: int
+    init: QickRawParam
+
+
 class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
     """Author native QICK hooks with optional timeline ends (times in us).
 
@@ -82,6 +101,8 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         self._timeline_register_pool: list[str] = []
         self._timeline_math_active = False
         self._declared_modules: list[Module] = []
+        self._declaration_module: Module | None = None
+        self._resource_owners: dict[tuple[str, str | int], Module] = {}
         self._declaring = False
         self._building_body = False
         self._branch_serial = 0
@@ -170,6 +191,8 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         self._emission_serial = 0
         self._emission_scope = None
         self._declared_modules.clear()
+        self._declaration_module = None
+        self._resource_owners.clear()
         self.append_macro(TimelineBoundary(self._timeline_book, "reset"))
         self.set_ext_counter(addr=self.COUNTER_ADDR)
         self._declaring = True
@@ -234,6 +257,18 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         """
         return tuple(TimingLoop(name, count) for name, count, _, _ in self.loops)
 
+    def add_sweep(self, name: str, spec: SweepCfg) -> QickParam:
+        """Declare a new uniform top-level loop and return its QICK parameter.
+
+        Call in _initialize. spec.expts gives the number of points; inclusive
+        start/stop use the consuming parameter's units. Loops are outer-to-inner
+        in call order after reps. Duplicate loop names raise ValueError.
+        """
+        if any(loop.name == name for loop in self.sweep_loops):
+            raise ValueError(f"loop name already used: {name!r}")
+        self.add_loop(name, spec.expts)
+        return sweep2param(name, spec)
+
     def append_loop_after(self, name: str, *macros: Macro) -> None:
         """Attach native operations after each iteration of a declared sweep loop.
 
@@ -268,14 +303,109 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         """Declare a borrowed module in _initialize; repeat declarations are harmless.
 
         Do not mutate it afterward. Outside _initialize raises ValueError;
-        unsupported module types raise NotImplementedError.
+        unsupported module types raise NotImplementedError. ADC/register conflicts
+        between distinct modules raise ValueError naming both objects. Explicit
+        register borrowing and module-family Pulse registry sharing are retained.
         """
         if not self._declaring:
             raise ValueError("declare must be called in _initialize")
         if any(module is declared for declared in self._declared_modules):
             return
-        module.declare(self)
+        previous = self._declaration_module
+        self._declaration_module = module
+        try:
+            module.declare(self)
+        finally:
+            self._declaration_module = previous
         self._declared_modules.append(module)
+
+    def _check_resource_owner(self, kind: str, key: str | int) -> None:
+        owner = self._resource_owners.get((kind, key))
+        module = self._declaration_module
+        if owner is not None and module is not None and owner is not module:
+            raise ValueError(
+                f"{kind} {key!r}: {module.name} ({module!r}) conflicts with "
+                f"{owner.name} ({owner!r})"
+            )
+
+    def _remember_resource_owner(self, kind: str, key: str | int) -> None:
+        if self._declaration_module is not None:
+            self._resource_owners.setdefault((kind, key), self._declaration_module)
+
+    @override
+    def declare_readout(self, ch: int, *args, **kwargs) -> None:
+        """Declare an ADC, rejecting distinct module owners of the same channel.
+
+        Native QICK arguments pass unchanged. During declare(module), ownership
+        follows object identity; conflicts name both modules and their objects.
+        Calls outside module declaration retain native route protection.
+        """
+        self._check_resource_owner("readout", ch)
+        super().declare_readout(ch, *args, **kwargs)
+        self._remember_resource_owner("readout", ch)
+
+    @override
+    def declare_gen(self, ch: int, *args, **kwargs) -> None:
+        """Declare a generator, retaining module-family registry sharing.
+
+        QICK arguments pass unchanged. Protected readout generators reject
+        distinct owners with both module names/objects. Unprotected generators
+        retain native declaration and Pulse registry semantics.
+        """
+        if ch in self._protected_gen_routes:
+            self._check_resource_owner("generator", ch)
+        super().declare_gen(ch, *args, **kwargs)
+
+    @override
+    def protect_readout_routes(
+        self, owner: str, gen_ch: int, ro_chs: Sequence[int]
+    ) -> None:
+        """Protect declared generator/ADC routes under their declaring module.
+
+        owner is the diagnostic label; gen_ch and ro_chs are declared logical
+        channels. Native protection errors propagate without changing ownership.
+        During declare(module), future conflicts identify this protector object,
+        not earlier unprotected generator users. Outside module declaration the
+        inherited string-owner protection contract is unchanged.
+        """
+        super().protect_readout_routes(owner, gen_ch, ro_chs)
+        if self._declaration_module is not None:
+            self._resource_owners[("generator", gen_ch)] = self._declaration_module
+
+    @override
+    def add_reg(
+        self,
+        name: str | None = None,
+        addr: int | None = None,
+        init: QickRawParam | None = None,
+        allow_reuse: bool = False,
+    ) -> str:
+        """Allocate a native register, tracking module name and address ownership.
+
+        name/addr request an unused logical name/physical data-register address;
+        None asks QICK to choose. init is QICK's optional swept initial value.
+        Distinct module owners conflict with both names/objects in ValueError.
+        Explicit allow_reuse retains QICK's scratch-register borrowing contract
+        (addr/init must be None). Reading an existing register never claims it.
+        Native calls outside declare(module) retain QICK validation.
+        """
+        if not allow_reuse:
+            if name is not None:
+                self._check_resource_owner("register", name)
+            if addr is not None:
+                self._check_resource_owner("register address", addr)
+        # QICK's annotations omit None although omission requests automatic allocation.
+        options: _RegisterOptions = {}
+        if name is not None:
+            options["name"] = name
+        if addr is not None:
+            options["addr"] = addr
+        if init is not None:
+            options["init"] = init
+        result = super().add_reg(**options, allow_reuse=allow_reuse)
+        self._remember_resource_owner("register", result)
+        self._remember_resource_owner("register address", self.reg_dict[result].addr)
+        return result
 
     def emit(
         self, module: Module, *, timeline: str | None = None, tag: str | None = None
@@ -320,7 +450,8 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
     ) -> None:
         """Lower ordered Module sequences at one placement origin and merge ends.
 
-        Call from a declared Module's lower. Each complete branch keeps its
+        Call from the body or a declared Module's lower. Body calls allocate
+        their own emission naming scope. Each complete branch keeps its
         internal order. The unique reference-advancing sequence emits last;
         multiple advancing sequences and unknown reference effects fail.
         Exchanged branches require independent physical register/word effects.
@@ -328,21 +459,28 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         channel physical-end and structured case/backedge guards still apply.
         tag belongs to the first child in author order, before any exchange.
         """
-        names = [self.emission_name("join_branch") for _ in branches]
-        lowered: list[list[Macro]] = []
+        previous_scope = self._emission_scope
+        if previous_scope is None:
+            self._emission_scope = (self._emission_serial, 0)
+            self._emission_serial += 1
         start = len(self.macro_list)
         try:
-            for name, modules in zip(names, branches, strict=True):
-                branch_start = len(self.macro_list)
-                for module in modules:
-                    self.emit(module, timeline=name, tag=tag)
-                    tag = None
-                lowered.append(self.macro_list[branch_start:])
+            names = [self.emission_name("join_branch") for _ in branches]
+            lowered: list[list[Macro]] = []
+            try:
+                for name, modules in zip(names, branches, strict=True):
+                    branch_start = len(self.macro_list)
+                    for module in modules:
+                        self.emit(module, timeline=name, tag=tag)
+                        tag = None
+                    lowered.append(self.macro_list[branch_start:])
+            finally:
+                del self.macro_list[start:]
+            self.append_macro(
+                TimelineParallel(self._timeline_book, timeline, lowered, names)
+            )
         finally:
-            del self.macro_list[start:]
-        self.append_macro(
-            TimelineParallel(self._timeline_book, timeline, lowered, names)
-        )
+            self._emission_scope = previous_scope
 
     def emission_name(self, stem: str) -> str:
         """Allocate an internal register/loop name during a module's lower call.
