@@ -64,7 +64,7 @@ class RamanGFInputs(RecipeInputs):
     )
     shots: int | None | Keep = Field(
         KEEP,
-        description="Raw IQ shots per point.",
+        description="Repetitions per point, classified into saved g/e/f counts.",
     )
     relax_delay_us: float | None | Keep = Field(
         KEEP,
@@ -87,7 +87,7 @@ class RamanGFReport(RecipeReport):
 
 @recipe(
     "raman_gf",
-    description="Run a single-tone two-photon g/f scan, analyze saved centroid3 IQ and save raw data and analysis.",
+    description="Run a single-tone two-photon g/f scan, analyze g/e/f counts and save counts and analysis.",
 )
 async def raman_gf(session: RecipeSession, inputs: RamanGFInputs) -> RamanGFReport:
     """Play one sampled Raman pulse then readout at each scan point, analyze and save.
@@ -106,7 +106,7 @@ async def raman_gf(session: RecipeSession, inputs: RamanGFInputs) -> RamanGFRepo
     Ordered overrides follow the named inputs. Missing/invalid inputs are
     reported by the Form before Run. Analyze uses only this run's saved
     readout centroid3 calibration, not live calibration or simulator truth.
-    No writeback is proposed or requested. Analysis failure still saves raw IQ;
+    No writeback is proposed or requested. Analysis failure still saves g/e/f counts;
     owner errors propagate after Save. Save receipts identify failed outputs.
     """
     tab = session.open_tab(
