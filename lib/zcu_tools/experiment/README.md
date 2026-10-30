@@ -118,7 +118,10 @@ decimated outputs.
 建立的 `SimulationEnvironment` 執行公開 run、native save、restore 與 analyze。
 每次建立新的 Scope 與 headless Plots，以 Agg canvas 保存 live／analysis PNG，不建立 Qt application。
 Caller 仍負責環境的 backend 與 devices 清理，probe 不更改 seed 或接線。
-`ProbeReport` 保留 Result 欄位的 shape／dtype、NaN 視為相等的逐值讀回比較、分析摘要、PNG 路徑與階段秒數。
+`ProbeReport` 保留 Result 欄位的 shape／dtype、讀回比較、分析摘要、PNG 路徑與階段秒數。
+`probe.compare_roundtrip(original, restored, *, spec)` 也可比較 caller 已還原的 Result。
+Shape 與 dtype 必須相同。AxesSpec 中 scale≠1 且比例有限非零的浮點欄位，容許每個實數／虛數分量相對誤差 ≤2·eps，absolute tolerance 為0。
+NaN 分量位置與 infinity 符號必須相同，其他欄位及 GroupedAxesSpec 保持 exact 比較。
 階段失敗時回傳原始 exception 與 failed_stage，並記錄 traceback；成功前已產生的檔案保留。
 
 `probe.main(argv)` 載入 caller 指定的可信任 `module:class`，依 AXES_SPEC 的 cfg 型別驗證 YAML／JSON，

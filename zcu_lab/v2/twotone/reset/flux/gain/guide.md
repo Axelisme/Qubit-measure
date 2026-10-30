@@ -43,6 +43,11 @@ The exact relation is `p1=(1-r)/2+r*p0`.
 Four mean IQs alone cannot identify p0 and p1 separately.
 This experiment assumes the reset hardly heats g, so p0 is small, and reports `residual_estimate=(1-r)/2`.
 In general this estimate is `(p1-p0)/(1-2*p0)`, not absolute p1.
+A thermally excited idle point, such as fluxonium near half flux, invalidates the p0≈0 approximation.
+The fixed offline model used for validation has idle first-excited-state population about 0.358.
+Only after an initial reset makes p0 small can the estimate represent absolute residual excitation, with the other assumptions still required.
+Offline validation checks run, save, restore, analyze, PNG output and selection. It does not establish physical reset effectiveness.
+Do not use model populations to calibrate the estimate or to change the four-branch formula or selection.
 Imperfect pi pulses, readout changes and failure of the two-state approximation can bias it.
 It cannot exclude leakage or establish reset fidelity.
 Estimates outside [0,1] stay visible. Analysis does not clip noise or assumption failures into a probability.
