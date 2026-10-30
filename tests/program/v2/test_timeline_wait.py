@@ -11,7 +11,13 @@ from qick.asm_v2 import QickSweep1D
 from zcu_tools.cfg_model import MuxReadoutTone
 from zcu_tools.program.v2 import SweepCfg
 from zcu_tools.program.v2.mocksoc import make_mock_soccfg, make_mux_mock_soccfg
-from zcu_tools.program.v2.modules import ComputedPulse, DelayAuto, LoadValue, PulseCfg
+from zcu_tools.program.v2.modules import (
+    ComputedPulse,
+    DelayAuto,
+    LoadValue,
+    LoadWord,
+    PulseCfg,
+)
 from zcu_tools.program.v2.modules.readout import MuxReadoutCfg, PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.program.v2.timeline import CycleBounds, TimelineProgramV2
@@ -116,6 +122,47 @@ def test_fractional_native_adc_tail_never_rounds_below_physical_end():
     physical_tail = 51 / 307.2 * 430.08 - 42
     assert shell_wait(prog) >= physical_tail
     assert shell_wait(prog) == math.ceil(physical_tail) == 30
+
+
+@pytest.mark.parametrize("relax_cycles", [9, 10])
+def test_loadword_overwrite_keeps_exact_table_tail_and_relax_guard(relax_cycles):
+    loader = LoadWord("words", [10, 20], "index", "duration", use_existed=True)
+
+    class Program(TimelineProgramV2):
+        def _initialize(self, cfg):
+            self.add_loop("index", 2)
+            self.add_reg("duration")
+            self.declare(loader)
+            self.declare_readout(0, length=50 / 307.2)
+
+        def _body(self, cfg):
+            self.write_reg("duration", 20)
+            self.emit(loader)
+            self.trigger(ros=[0], t=0, width=1 / 430.08)
+            self.delay_timeline("duration")
+
+    if relax_cycles < 10:
+        with pytest.raises(
+            ValueError, match=r"WAIT.*duration.*slack=10 cycles.*relax=9 cycles"
+        ):
+            Program(make_mock_soccfg(0, 1), initial_delay=0, relax_delay=9 / 430.08)
+    else:
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            prog = Program(
+                make_mock_soccfg(0, 1), initial_delay=0, relax_delay=10 / 430.08
+            )
+        result = shots(prog)
+        body = [shot.body_end_cycle - shot.start_cycle for shot in result]
+        assert body == [10, 20]
+        # Independent ADC length: 50 samples at 307.2 MHz = 70 tProc cycles.
+        tails = [50 / 307.2 * 430.08 - end for end in body]
+        assert tails == pytest.approx([60, 50])
+        messages = [str(warning.message) for warning in caught]
+        assert shell_wait(prog) == math.ceil(max(tails)) == 60, messages
+        assert len(messages) == 1
+        assert "duration" in messages[0] and "slack=10 cycles" in messages[0]
+        assert "upper bound" not in messages[0]
 
 
 @pytest.mark.parametrize("mux", [False, True], ids=["single", "mux"])
