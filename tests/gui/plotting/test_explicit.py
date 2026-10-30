@@ -131,6 +131,28 @@ def _native_callbacks(
     return set_caption, push
 
 
+def _finish_actions(
+    plots: Plots, figure: Figure, container: FigureContainer, status: QLabel
+) -> tuple[Callable[[], None], Callable[[], None], Callable[[], None]]:
+    def finish_and_clear() -> None:
+        plots.finish()
+        container.clear_dynamic_canvases()
+        status.setText("Finished and cleared")
+
+    def try_finished_show() -> None:
+        try:
+            figure.show()
+        except RuntimeError as error:
+            status.setText(str(error))
+
+    def finish() -> None:
+        plots.finish()
+        plots.release()
+        status.setText("Released")
+
+    return finish_and_clear, try_finished_show, finish
+
+
 @pytest.fixture
 def explicit_show_driver(qapp) -> Iterator[ComponentDriver]:
     window = QWidget()
@@ -174,22 +196,9 @@ def explicit_show_driver(qapp) -> Iterator[ComponentDriver]:
         host.refresh(plots["legacy"], final=True)
         status.setText("Legacy shown")
 
-    def finish_and_clear() -> None:
-        plots.finish()
-        container.clear_dynamic_canvases()
-        status.setText("Finished and cleared")
-
-    def try_finished_show() -> None:
-        try:
-            figure.show()
-        except RuntimeError as error:
-            status.setText(str(error))
-
-    def finish() -> None:
-        plots.finish()
-        plots.release()
-        status.setText("Released")
-
+    finish_and_clear, try_finished_show, finish = _finish_actions(
+        plots, figure, container, status
+    )
     for caption, action in (
         ("Show figure", show),
         ("Prime before show", lambda: update(3.0)),
