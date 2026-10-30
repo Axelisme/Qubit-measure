@@ -6,7 +6,7 @@
 
 Use `heralding/amp_rabi` after calibrating the qubit frequency and pulse readout at the intended operating point. Bind `qubit` and its `resonator`, then Open or Reset the tab to capture those sources. Later alias or library edits do not change an existing Run source.
 
-Readout must be a pulse readout with a saved classifier. Linear classification needs its angle and threshold. Circle classification needs ground/excited centers and a positive radius in the same integrated-IQ coordinates as this readout. Missing calibration stops Run. Changing readout frequency, gain, duration, ADC window or receiver settings can invalidate the classifier; review or recalibrate it before proceeding.
+Readout must be a pulse readout with a GE Post circle classifier: ground/excited centers and a positive radius in the same integrated-IQ coordinates as this readout. Linear and centroid3 classifiers are not supported. Missing calibration stops Run. Changing readout frequency, gain, duration, ADC window or receiver settings can invalidate the classifier; review or recalibrate it before proceeding.
 
 Choose the Rabi pulse frequency, waveform and fixed duration. A prior pi amplitude is not required. Set Gain start/stop and Expts to cover visible oscillations within your approved drive limits. Confirm Reps, Rounds and Relax delay. The suggested form values are editable starting values, not hardware-safety approval.
 
@@ -19,11 +19,11 @@ Choose the Rabi pulse frequency, waveform and fixed duration. A prior pi amplitu
 
 ## Pass fraction and saving
 
-`pass_fraction` is accepted herald shots divided by attempted shots at each gain. It shares the saved gain grid with `signals`. Zero accepted shots give fraction zero and NaN signal IQ. Unmeasured points remain NaN. Low acceptance reduces the effective sample count even when Reps is large.
+Pass fraction is the herald-g count divided by the total class count at each gain. It is computed for analysis or live presentation, not stored. Zero accepted shots give fraction zero and NaN signal IQ. Unmeasured points remain NaN. Low acceptance reduces the effective sample count even when Reps is large.
 
 The classified fraction is not an independent measurement of ground purity. It depends on classifier errors and on whether calibration and acquisition use matching IQ coordinates.
 
-Save All writes native selected IQ, pass fraction and cfg, including the classifier. Load Data restores the saved grid and classifier rather than rebuilding them from the current Form. Analyze can run again on the loaded record. Review each save output's status; successful native saving does not imply every export format succeeded.
+Save All writes native `sums` with shape (Ngain, 3, 3) and cfg, including the classifier. The final axes are herald_states (g/e/other) and components (count/sum I/sum Q). Old files without `sums` fail with a missing-variable error. Load Data restores the saved grid and classifier rather than rebuilding them from the current Form. Analyze can run again on the loaded record. Review each save output's status; successful native saving does not imply every export format succeeded.
 
 ## Review writeback
 
