@@ -654,7 +654,9 @@ def wait_recipes(seed: int) -> list[WaitRecipe]:
     """Generate 30 recipes within the mock tProc's 16-data-register limit.
 
     Stratify readout placement and axes. Integral-cycle DAC lengths avoid
-    fractional-tail lookup registers, leaving room for both control structures.
+    fractional-tail lookup registers; two-axis forks have a noncrossing maximum.
+    One-axis forks can cross. Unrestricted recipes exhausted the same 16 slots
+    and failed allocation 17 both before and after the shell-WAIT changes.
     """
     rng = random.Random(seed)
     recipes = []
@@ -666,8 +668,8 @@ def wait_recipes(seed: int) -> list[WaitRecipe]:
                     WaitRecipe(
                         sweep_steps=tuple(rng.randint(5, 30) for _ in range(axes)),
                         pulse_samples=(
-                            rng.choice((25, 50, 75)),
-                            rng.choice((25, 50)),
+                            rng.choice((25, 50, 75)) if axes == 1 else 25,
+                            rng.choice((25, 50)) if axes == 1 else 50,
                         ),
                         adc_samples=adc_samples,
                         fixed_count=rng.randint(1, 3),
