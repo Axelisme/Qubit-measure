@@ -30,7 +30,7 @@ from .form import make_form
 def run(
     cfg: HeraldingAmpRabiCfg, *, context: RunContext
 ) -> RunRecord[HeraldingAmpRabiCfg, HeraldingAmpRabiResult]:
-    """Acquire selected IQ and retain the acquisition cfg, including classifier."""
+    """Acquire all herald-class count/IQ sums and retain cfg with classifier."""
     return RunRecord(cfg=cfg, result=HeraldingAmpRabiExp().run(cfg, context=context))
 
 

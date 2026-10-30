@@ -1,8 +1,8 @@
 # Heralded T1
 
-**讀者：** operator、agent。使用 GUI 執行單 qubit heralded T1，分析並保存篩選後的結果。
+**讀者：** operator、agent。使用 GUI 執行單 qubit heralded T1，分析 g 類條件平均並保存各類總和。
 
-本頁給已校準單 qubit π pulse 與 pulse readout classifier 的操作員。實驗先讀出一次，只保留判為 ground 的 shot，再做 π → delay → signal readout。這是 host post-selection，沒有 active reset，也不檢查其他 qubit。
+本頁給已校準單 qubit π pulse 與 pulse readout classifier 的操作員。實驗先做 herald readout，再做 π → delay → signal readout。取數保存 g、e、other 各類的 count 與 IQ 總和，即時圖與擬合只取 g 類的 signal 條件平均。這是 host post-selection，沒有 active reset，也不檢查其他 qubit。
 
 ## 執行前
 
@@ -18,7 +18,7 @@ Delay 使用 us。Uniform 開啟時掃描線性延遲；關閉時使用共用 T1
 
 Reps 是每點每 round 的 shots，Rounds 是軟體 rounds。Relax delay 是每 shot 結束後的等待。序列依序為 herald readout、π pulse、delay、signal readout。沒有額外的 reset pulse。
 
-Run 的 measurement 顯示通過 shot 的平均 IQ magnitude。跨 round 依通過數加權，不平均各 round 的平均值。沒有 shot 通過的點為 NaN，通過比例 為 0；取消前未完成的點保留 NaN。
+Run 的 measurement 顯示通過 shot 的平均 IQ magnitude。跨 round 依通過數加權，不平均各 round 的平均值。沒有 shot 通過的點為 NaN，通過比例為 0；取消前未完成的點保留 NaN。
 
 Analyze 沿用普通 T1 的 IQ rotation 與單／雙 exponential fit。Skip leading points 先從原網格移除前幾點，之後再排除非有限 time/IQ，才做 rotation 與 fit。Pass fraction 不當作 fit weight。有效點不足時分析會失敗。Apply 只在操作員確認後寫回 `$qubit.t1`。
 

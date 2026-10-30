@@ -81,7 +81,11 @@ def restore_result(
 
 
 class HeraldingAmpRabiExp(Experiment[HeraldingAmpRabiResult, HeraldingAmpRabiCfg]):
-    """Herald ground, apply the gain-swept drive, then read accepted signal shots."""
+    """Herald ground, sweep drive gain, and store per-class count/IQ sums.
+
+    Store all herald classes, g/e/other. Live plots and fits use only the
+    herald-g conditional mean IQ.
+    """
 
     Options: ClassVar[type[AmpRabiAnalyzeOptions]] = AmpRabiAnalyzeOptions
     AXES_SPEC: ClassVar[

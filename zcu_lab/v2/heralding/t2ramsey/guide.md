@@ -20,7 +20,7 @@ Reps 是每點每 round 的 shots，Rounds 是軟體 rounds。Acquire retry 控�
 
 序列是 optional reset → herald readout → π/2 → delay → phase-shifted π/2 → signal readout。Detune ratio 是每個 delay step 的 fringe 週期數，預設 0.05。實際相位斜率以 ratio / step 換成 MHz，只改最後一個 pulse 的 phase，不改 drive frequency。非零 ratio 搭配零 step 會在取數前報錯。
 
-Run 的 measurement 顯示通過 shot 的平均 IQ 投影。取數層跨 round 依通過數加權。零通過點的 IQ 為 NaN，通過比例 為 0。未完成點保留 NaN。
+Run 的 measurement 顯示通過 shot 的平均 IQ 投影。取數層跨 round 依通過數加權。零通過點的 IQ 為 NaN，通過比例為 0。未完成點保留 NaN。
 
 ## Analyze 與寫回
 
