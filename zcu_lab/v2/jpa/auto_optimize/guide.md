@@ -18,6 +18,6 @@ Analysis proposes the signal-maximizing settings as three separate drafts: `$jpa
 
 ## Recommended
 
-For each sweep, start/stop set the search bounds and expts gives a relative resolution hint. The optimizer compares all three hints to allocate its phase-1 flux slices and points per slice; the actual sample counts follow that allocation. Global optimizer points (`num_points`, at least 4, default 1001) sets the total evaluation budget. Raise it for wider bounds or lower it for a quick search. Analysis reports the best evaluated point using fixed settings.
+For each sweep, start/stop set the search bounds and expts gives a relative resolution hint. The optimizer compares all three hints to allocate its phase-1 flux slices and points per slice; the actual sample counts follow that allocation. Global optimizer points (`num_points`, at least 4, default 1001) sets the total evaluation budget. Raise it for wider bounds or lower it for a quick search. Optimizer seed fixes the Latin hypercube sampler and the Bayesian optimizer: with the same seed and the same measured SNRs, a run proposes the same points; leave it empty to draw a new search each run. Analysis reports the best evaluated point using fixed settings.
 
 **Last updated:** 2026-10-21

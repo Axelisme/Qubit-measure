@@ -121,6 +121,16 @@ class JPAOptCfg(ConfigBase):
             description="Nonnegative SNR skew penalty.",
         ),
     ] = Field(default=0.0, ge=0.0)
+    seed: Annotated[
+        int | None,
+        FieldMeta(
+            label="Optimizer seed",
+            description=(
+                "Fixes the sampler and optimizer candidate points for a given "
+                "acquisition; empty draws a new search each run."
+            ),
+        ),
+    ] = None
 
 
 JPA_AUTO_FLUX_VARIABLE = "jpa_flux"
@@ -298,7 +308,9 @@ class AutoOptimizeExp(Experiment[JPAOptimizeResult, JPAOptCfg]):
         freq_sweep = cfg.jpa_freq
         gain_sweep = cfg.jpa_power
 
-        optimizer = JPAOptimizer(flux_sweep, freq_sweep, gain_sweep, num_points)
+        optimizer = JPAOptimizer(
+            flux_sweep, freq_sweep, gain_sweep, num_points, cfg.seed
+        )
         params = np.full((num_points, 3), np.nan, dtype=np.float64)
         phases = np.zeros(num_points, dtype=np.int32)
         point_indices = np.arange(num_points, dtype=np.float64)
