@@ -204,7 +204,14 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
         Under calibrated ideal pi, identical readout and a two-state model,
         p1=(1-r)/2+r*p0 exactly. Four IQs cannot identify p0 separately.
         Return the unclipped estimate (1-r)/2 assuming reset hardly heats g
-        (p0≈0). This cannot exclude leakage or establish reset fidelity.
+        (p0≈0). A thermally excited idle point, such as fluxonium near half
+        flux, invalidates this approximation. The fixed offline validation
+        model has idle first-excited-state population about 0.358. Only after
+        an initial reset makes p0 small, with the other assumptions satisfied,
+        can the estimate represent absolute residual excitation.
+        Offline validation checks run, save, restore, analyze, PNG output and
+        selection/no-solution handling, not physical reset effectiveness.
+        This cannot exclude leakage or establish reset fidelity.
         Zero d0 or nonfinite IQ/contrasts/estimates are not candidates. Select the
         shortest quantized length with residual ≤ options.epsilon only if every
         longer measured finite point also passes. Scan order is irrelevant.
