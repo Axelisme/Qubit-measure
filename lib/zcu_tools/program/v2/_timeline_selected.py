@@ -159,6 +159,7 @@ class TimelineSelectedPulse(TimedMacro):
         )
         self.book.set_end(self.timeline, finish)
         self.book.runtime_gens[self.source.ch] = finish
+        self.book.record_native(prog, self.source.ch, finish, generator=True)
         self.book.native_timestamp(
             prog, time_bounds(prog, finish)[1], gen_ch=self.source.ch
         )

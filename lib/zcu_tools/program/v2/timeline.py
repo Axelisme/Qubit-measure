@@ -652,12 +652,18 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         Their last-iteration tails must not receive the external-duration debit.
         """
         super().set_timestamp(val, gen_ch=gen_ch, ro_ch=ro_ch)
-        if self._timeline_book.repeats and not self._timeline_book.native_only:
-            frame = self._timeline_book.repeats[-1]
+        book = self._timeline_book
+        if not book.native_only:
             if gen_ch is not None:
-                frame.written_gens.add(gen_ch)
+                book.record_native(self, gen_ch, val, generator=True)
             if ro_ch is not None:
-                frame.written_ros.add(ro_ch)
+                book.record_native(self, ro_ch, val, generator=False)
+            if book.repeats:
+                frame = book.repeats[-1]
+                if gen_ch is not None:
+                    frame.written_gens.add(gen_ch)
+                if ro_ch is not None:
+                    frame.written_ros.add(ro_ch)
 
     def decrement_timestamps(self, t: float | QickParam | None) -> None:
         """Rebase all relative ends when QICK moves reference by t us.

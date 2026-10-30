@@ -75,6 +75,9 @@ class RepeatFrame:
     initial_runtime_gens: dict[int, RuntimeEnd] = field(default_factory=dict)
     initial_runtime_ros: dict[int, RuntimeEnd] = field(default_factory=dict)
     expression_advance: TimeExpression = field(default_factory=LinearTime)
+    initial_native_expressions: dict[tuple[bool, int], TimeExpression] = field(
+        default_factory=dict
+    )
 
     def restore_expressions(
         self,
@@ -142,6 +145,22 @@ class RepeatFrame:
                     )
                 )
                 current[ch] = replace(end, expression=expression)
+        for key, initial in self.initial_native_expressions.items():
+            generator, ch = key
+            written = self.written_gens if generator else self.written_ros
+            if ch in written:
+                generated = book.native_expressions[key]
+                if axis in expression_axes(generated):
+                    generated = reduce_loop_time(generated, axis, last=True)
+                expression = select_time(
+                    choose_time(LinearTime(1), count, maximum=False),
+                    (initial, generated),
+                )
+            else:
+                expression = choose_time(
+                    LinearTime(), add_time(initial, scale_time(total, -1))
+                )
+            book.native_expressions[key] = expression
         for name, expression in book.source_expressions.items():
             if axis in expression_axes(expression):
                 book.source_expressions[name] = reduce_loop_time(
@@ -287,6 +306,16 @@ class TimelineBook:
         self.pinned: set[str] = set()
         self.runtime_gens: dict[int, RuntimeEnd] = {}
         self.runtime_ros: dict[int, RuntimeEnd] = {}
+        # Compile-only event tails. Runtime stores and QICK timestamps keep
+        # their existing scheduling roles; these expressions never emit code.
+        # Keys are (is_generator, channel_id).
+        self.native_expressions: dict[tuple[bool, int], TimeExpression] = {}
+        self.native_branches: list[
+            tuple[
+                dict[tuple[bool, int], TimeExpression],
+                list[dict[tuple[bool, int], TimeExpression]],
+            ]
+        ] = []
         self.waiting: set[str] = set()
         self.repeats: list[RepeatFrame] = []
         self.native_only = False
@@ -328,20 +357,31 @@ class TimelineBook:
             tuple(time_expression(prog, v) for v in values),
         )
 
-    def begin_branch_sources(self) -> None:
-        """Save incoming source expressions and start collecting branch cases."""
+    def begin_branch_sources(self, prog) -> None:
+        """Save incoming source/channel expressions before collecting branch cases."""
         self.source_branches.append((self.source_expressions.copy(), []))
+        self.native_branches.append((self.snapshot_native_expressions(prog), []))
 
     def restore_branch_sources(self) -> None:
         """Start a case with the same incoming source values as its siblings."""
         self.source_expressions = self.source_branches[-1][0].copy()
+        self.native_expressions = self.native_branches[-1][0].copy()
 
-    def record_branch_sources(self) -> None:
-        """Capture source values after this case's local timeline closure."""
+    def record_branch_sources(self, prog) -> None:
+        """Capture source/channel values after this case's local timeline closure."""
         self.source_branches[-1][1].append(self.source_expressions.copy())
+        self.native_branches[-1][1].append(self.snapshot_native_expressions(prog))
 
     def finish_branch_sources(self, prog, selector: str) -> None:
-        """Merge only register sources defined on every branch path."""
+        """Select channel tails and register sources defined on every branch path."""
+        _, native_paths = self.native_branches.pop()
+        self.native_expressions = {
+            key: select_time(
+                source_expression(prog, selector),
+                tuple(path[key] for path in native_paths),
+            )
+            for key in native_paths[0]
+        }
         _, snapshots = self.source_branches.pop()
         self.source_expressions = {
             name: select_time(
@@ -411,6 +451,12 @@ class TimelineBook:
     def decrement(self, t: Time, *, observe_pulses: bool = True) -> None:
         if self.native_only:
             return
+        if observe_pulses:
+            advance = time_expression(self.math.prog, t)
+            self.native_expressions = {
+                key: choose_time(LinearTime(), add_time(end, scale_time(advance, -1)))
+                for key, end in self.native_expressions.items()
+            }
         consumed = self._debit_native(t) if observe_pulses else set()
         self._debit_repeats(t, observe_pulses=observe_pulses, consumed=consumed)
         self.ends = {name: self.math.floor(end, t) for name, end in self.ends.items()}
@@ -482,6 +528,27 @@ class TimelineBook:
         finally:
             self.native_only = previous
 
+    def snapshot_native_expressions(
+        self, prog
+    ) -> dict[tuple[bool, int], TimeExpression]:
+        """Capture all declared channel tails for a Repeat or Branch entry/path."""
+        return {
+            (generator, ch): self.native_expression(prog, ch, generator=generator)
+            for generator, channels in ((True, prog.gen_chs), (False, prog.ro_chs))
+            for ch in channels
+        }
+
+    def record_native(self, prog, ch: int, end: Time, *, generator: bool) -> None:
+        """Capture an actual event end in cycles, without changing native storage."""
+        self.native_expressions[generator, ch] = time_expression(prog, end)
+
+    def native_expression(self, prog, ch: int, *, generator: bool) -> TimeExpression:
+        """Return the compile-only tail, or the initial native end before any event."""
+        key = (generator, ch)
+        if key in self.native_expressions:
+            return self.native_expressions[key]
+        return time_expression(prog, self.channel_end(prog, ch, generator=generator))
+
     def channel_end(self, prog, ch: int, *, generator: bool) -> Time:
         """Return a declared native channel's exact runtime end or static timestamp."""
         runtime = self.runtime_gens if generator else self.runtime_ros
@@ -520,10 +587,7 @@ class TimelineBook:
         if not prog.ro_chs:
             return
         expression = choose_time(
-            *(
-                time_expression(prog, self.channel_end(prog, ch, generator=False))
-                for ch in prog.ro_chs
-            )
+            *(self.native_expression(prog, ch, generator=False) for ch in prog.ro_chs)
         )
         exact = exact_bounds(expression)
         lower, upper = exact or projected_expression_bounds(expression)

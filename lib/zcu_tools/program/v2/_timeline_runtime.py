@@ -15,8 +15,10 @@ from ._timeline_expression import (
     choose_time,
     evaluate_time,
     expression_axes,
+    point_time,
     projected_expression_bounds,
     scale_time,
+    select_time,
 )
 from ._timeline_guard import bounds
 from .macro.dmem import DmemLookup, sweep_table_index
@@ -453,7 +455,22 @@ class RuntimeMath(TimedMacro):
         proof.defined.add(register)
         proof.watch_signed(self.prog, register)
         self.operations.append(operation)
-        return RuntimeEnd(register, lower, upper)
+        candidates = tuple(
+            point_time(
+                selector,
+                axes,
+                np.asarray(points[start : start + count], dtype=np.int64).reshape(
+                    tuple(axes.values())
+                ),
+            )
+            for start in range(0, len(points), count)
+        )
+        return RuntimeEnd(
+            register,
+            lower,
+            upper,
+            expression=select_time(source_expression(self.prog, selector), candidates),
+        )
 
     def cycles(self, value: Time) -> RuntimeEnd:
         if isinstance(value, RuntimeEnd):

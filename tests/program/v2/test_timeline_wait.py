@@ -8,7 +8,7 @@ from qick.asm_v2 import QickSweep1D
 from zcu_tools.cfg_model import MuxReadoutTone
 from zcu_tools.program.v2 import SweepCfg
 from zcu_tools.program.v2.mocksoc import make_mock_soccfg, make_mux_mock_soccfg
-from zcu_tools.program.v2.modules import DelayAuto, LoadValue
+from zcu_tools.program.v2.modules import ComputedPulse, DelayAuto, LoadValue, PulseCfg
 from zcu_tools.program.v2.modules.readout import MuxReadoutCfg, PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.program.v2.timeline import CycleBounds, TimelineProgramV2
@@ -475,6 +475,78 @@ def test_fixed_repeat_readout_keeps_only_the_last_iteration_adc_tail():
     prog = Program(make_mock_soccfg(0, 1), initial_delay=0, relax_delay=0)
     assert shell_wait(prog) == 20
     assert [s.body_end_cycle - s.start_cycle for s in shots(prog)] == [210]
+
+
+@pytest.mark.parametrize("branch", [False, True])
+def test_native_scalar_adc_retains_table_reference_debit(branch):
+    delays = LoadValue("delays", [100, 110], "scan", "delay_cycles")
+
+    class Program(TimelineProgramV2):
+        def _initialize(self, cfg):
+            self.add_loop("scan", 2)
+            self.declare(delays)
+            self.declare_readout(0, length=50 / 307.2)
+
+        def _body(self, cfg):
+            self.trigger(ros=[0], t=60 / 430.08, width=1 / 430.08)
+            self.emit(delays)
+            if branch:
+                with self.branch(by="scan") as cases:
+                    for case in range(2):
+                        with cases.case():
+                            self.delay_timeline("delay_cycles")
+                            self.delay_timeline(case * 5 / 430.08)
+            else:
+                self.delay_timeline("delay_cycles")
+
+    slack = 15 if branch else 10
+    with pytest.warns(UserWarning, match=rf"slack={slack} cycles"):
+        prog = Program(
+            make_mock_soccfg(0, 1), initial_delay=0, relax_delay=slack / 430.08
+        )
+    assert shell_wait(prog) == 30
+    assert [s.body_end_cycle - s.start_cycle for s in shots(prog)] == [
+        100,
+        115 if branch else 110,
+    ]
+
+
+def test_selected_playback_keeps_known_selector_in_exact_relax_guard():
+    selector = LoadValue("selector", [0, 1], "scan", "selected")
+    playback = ComputedPulse(
+        "playback",
+        val_reg="selected",
+        pulses=[
+            PulseCfg(
+                ch=0,
+                nqz=1,
+                freq=100,
+                gain=0.1,
+                waveform=ConstWaveformCfg(length=length / 307.2),
+            )
+            for length in (50, 100)
+        ],
+    )
+
+    class Program(TimelineProgramV2):
+        def _initialize(self, cfg):
+            self.add_loop("scan", 2)
+            self.declare(selector)
+            self.declare(playback)
+            self.declare_readout(0, length=150 / 307.2)
+
+        def _body(self, cfg):
+            self.trigger(ros=[0], width=1 / 430.08)
+            self.emit(selector)
+            self.emit(playback)
+
+    # Native waveform rounding gives aggregate ends 71 and 140 cycles.
+    with pytest.raises(ValueError, match=r"selected.*slack=69 cycles.*relax=68 cycles"):
+        Program(make_mock_soccfg(1, 1), initial_delay=0, relax_delay=68 / 430.08)
+    with pytest.warns(UserWarning, match=r"selected.*slack=69 cycles"):
+        prog = Program(make_mock_soccfg(1, 1), initial_delay=0, relax_delay=69 / 430.08)
+    assert [s.body_end_cycle - s.start_cycle for s in shots(prog)] == [71, 140]
+    assert shell_wait(prog) == 139
 
 
 def test_crossing_body_maximum_retains_positive_adc_remainder():

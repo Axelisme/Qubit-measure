@@ -150,12 +150,14 @@ class TimelineBoundary(Macro):
             self.book.cycle_axes.clear()
             self.book.source_expressions.clear()
             self.book.source_branches.clear()
+            self.book.native_branches.clear()
             self.book.shell_wait_bound = None
             self.book.waiting.clear()
             self.book.repeats.clear()
             self.book.native_only = False
             self.book.runtime_gens.clear()
             self.book.runtime_ros.clear()
+            self.book.native_expressions.clear()
             self.book.pinned.clear()
         elif self.section == "body_end":
             self.book.check_shell_wait(prog)
@@ -384,6 +386,7 @@ class TimelineRepeatEnter(TimelineSync):
                 entry_math=self.book.math,
                 initial_runtime_gens=self.book.runtime_gens.copy(),
                 initial_runtime_ros=self.book.runtime_ros.copy(),
+                initial_native_expressions=self.book.snapshot_native_expressions(prog),
             )
         )
         self.book.ends = {parent: 0.0}
@@ -825,7 +828,7 @@ class TimelineBranch(Macro):
         if len(self.cases) != prog.loop_dict[self.by]:
             raise ValueError("Branch must provide one case per selector point")
         initial = self.book.ends.copy()
-        self.book.begin_branch_sources()
+        self.book.begin_branch_sources(prog)
         waiting = self.book.waiting.copy()
         initial_gens = {ch: prog.get_timestamp(gen_ch=ch) for ch in prog.gen_chs}
         initial_ros = {ch: prog.get_timestamp(ro_ch=ch) for ch in prog.ro_chs}
@@ -904,7 +907,7 @@ class TimelineBranch(Macro):
         )
         closer.preprocess(prog)
         prepared.append(closer)
-        self.book.record_branch_sources()
+        self.book.record_branch_sources(prog)
         return prepared
 
     def _merge_values(self, prog, values: list[Time]) -> Time:
