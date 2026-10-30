@@ -82,18 +82,20 @@ class HeraldingT2EchoReport(RecipeReport):
 
 @recipe(
     "heralding_t2echo",
-    description="Run ground-heralded Echo; save selected IQ, pass fraction and analysis.",
+    description="Run ground-heralded Echo; save per-class shot sums and analysis.",
 )
 async def heralding_t2echo(
     session: RecipeSession, inputs: HeraldingT2EchoInputs
 ) -> HeraldingT2EchoReport:
     """Measure refocused qubit coherence with a spin-echo delay sweep.
 
+    Store per-class shot sums; compute herald-g conditional IQ for fitting.
+    Readout must include a GE Post circle classifier with calibrated radius.
     After optional reset and ground herald, apply pi/2, wait half the total delay, apply pi, wait
     the other half, then apply a phase-shifted pi/2 pulse and read out.
     Average only accepted signal shots; fit the decay with the ordinary Echo owner.
     No active reset or joint herald is performed. Fringe fitting remains optional.
-    Ask before applying the proposed calibration, then save selected IQ, pass fraction and analysis.
+    Ask before applying the proposed calibration, then save per-class shot sums and analysis.
     Skipping writes nothing.
 
     points → expts sets the sweep sample count.

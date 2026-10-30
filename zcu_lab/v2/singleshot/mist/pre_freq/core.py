@@ -9,14 +9,23 @@ from matplotlib.axes import Axes
 from numpy.typing import NDArray
 from zcu_tools.analysis.singleshot import correct_populations
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
+from zcu_tools.datafile import DataVariable
 from zcu_tools.experiment import AxesSpec, Experiment
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import Pulse, Readout, Reset, SweepCfg, sweep2param
-from zcu_tools.program.v2.modules.readout import classification_processors
+from zcu_tools.program.v2 import (
+    Classify,
+    Pulse,
+    Readout,
+    Reset,
+    SweepCfg,
+    shot_sums,
+    sweep2param,
+)
+from zcu_tools.program.v2.modules.readout import PulseReadoutCfg, circle_classifier
 
 from zcu_lab.v2.support import live_line
 
@@ -27,14 +36,15 @@ def _default_population_states() -> NDArray[np.int64]:
 
 @dataclass(frozen=True)
 class PreFreqResult:
-    """Rounded preparation freqs in MHz and measured signals (Nfreq, 3).
+    """Rounded preparation freqs in MHz and class counts (Nfreq, 3).
 
     The final state axis is [g,e,other], labeled by population_states=[0,1,2].
+    Counts sum over shots and completed rounds, without normalization.
     Unmeasured points remain NaN after cancellation.
     """
 
     freqs: NDArray[np.float64]
-    signals: NDArray[np.float64]
+    counts: NDArray[np.float64]
     population_states: NDArray[np.int64] = field(
         default_factory=_default_population_states
     )
@@ -84,9 +94,10 @@ class PreFreqExp(Experiment[PreFreqResult, PreFreqCfg]):
                 dtype=np.float64,
             ),
         ),
-        z=AxesSpec.Z("signals", "Population", "a.u.", dtype=np.float64),
+        z=AxesSpec.Z("counts", "Counts", "shots", dtype=np.float64),
         result_type=PreFreqResult,
         cfg_type=PreFreqCfg,
+        data_variable=DataVariable("counts"),
         cfg_schema_version="3.0",
         tag="singleshot/mist/pre_freq",
     )
@@ -97,7 +108,7 @@ class PreFreqExp(Experiment[PreFreqResult, PreFreqCfg]):
         After optional reset, sweep init_pulse frequency on the board, apply
         the optional pi pulse, then the fixed probe pulse and readout.
         Return rounded preparation frequencies (MHz) and classified G/E/Other
-        fractions shaped (Nfreq, 3), averaged over shots and rounds.
+        counts shaped (Nfreq, 3), summed over shots and completed rounds.
 
         cfg.readout supplies a circle classifier per ADC with a positive radius.
         Other counts unclassified shots, not calibrated leakage.
@@ -107,7 +118,18 @@ class PreFreqExp(Experiment[PreFreqResult, PreFreqCfg]):
         # Sweep the preparation tone, not the later MIST probe.
         soc, soccfg = context.soc, context.soccfg
         cfg = deepcopy(cfg)
-        processors = classification_processors(cfg.readout, require_other=True)
+        # Keep the G/E/Other contract for every declared ADC.
+        readout_channels = (
+            [cfg.readout.ro_ch]
+            if isinstance(cfg.readout, PulseReadoutCfg)
+            else [tone.ro_ch for tone in cfg.readout.tones]
+        )
+        for ro_ch in readout_channels:
+            if circle_classifier(cfg.readout, ro_ch=ro_ch).radius is None:
+                raise ValueError(f"ADC {ro_ch}: radius missing; run singleshot GE Post")
+        read_axis = Classify(
+            "readout", tone=None if isinstance(cfg.readout, PulseReadoutCfg) else 0
+        )
 
         freqs = sweep2array(
             cfg.freq,
@@ -135,7 +157,9 @@ class PreFreqExp(Experiment[PreFreqResult, PreFreqCfg]):
         buffer = SignalBuffer(
             (len(freqs), 3),
             dtype=np.float64,
-            on_update=lambda data: viewer.update(freqs, data.T),
+            on_update=lambda data: viewer.update(
+                freqs, (data / data.sum(axis=-1, keepdims=True)).T
+            ),
         )
         with Schedule(cfg, buffer, scope=context.scope) as sched:
             run_cfg = sched.cfg
@@ -143,7 +167,7 @@ class PreFreqExp(Experiment[PreFreqResult, PreFreqCfg]):
             run_cfg.init_pulse.set_param("freq", sweep2param("freq", freq_sweep))
 
             # Vary initialization before the optional pi pulse and fixed probe.
-            _ = (
+            builder = (
                 sched.prog_builder(
                     soc, soccfg, reps=sched.cfg.reps, relax_delay=sched.cfg.relax_delay
                 )
@@ -153,18 +177,19 @@ class PreFreqExp(Experiment[PreFreqResult, PreFreqCfg]):
                 .add_pulse("probe_pulse", run_cfg.probe_pulse)
                 .add_readout("readout", run_cfg.readout)
                 .declare_sweep("freq", freq_sweep)
-                .build_and_acquire_processed(
-                    # First ADC/read, with all G/E/Other columns.
-                    processed2signal_fn=lambda processed: processed[0][0],
-                    processors=processors,
-                    rounds=cfg.rounds,
-                )
+            )
+            prog = builder.build()
+            builder.run_program_summed(
+                prog,
+                processor=shot_sums(prog, [read_axis]),
+                sums2signal_fn=lambda sums: sums,
+                rounds=cfg.rounds,
             )
 
-        # Keep the measured G/E/Other columns in the saved Result.
-        signals = buffer.array
+        # Keep the unnormalized G/E/Other counts in the saved Result.
+        counts = buffer.array
 
-        return PreFreqResult(freqs=freqs, signals=signals)
+        return PreFreqResult(freqs=freqs, counts=counts)
 
     def analyze(
         self,
@@ -175,13 +200,14 @@ class PreFreqExp(Experiment[PreFreqResult, PreFreqCfg]):
     ) -> None:
         """Plot G/E/Other populations versus preparation frequency in MHz.
 
-        Use the explicit run's G/E/Other fractions and apply the optional
+        Normalize the explicit run's G/E/Other counts and apply the optional
         confusion matrix. Publish a named fit figure without estimating scalars.
         Three-column data can be analyzed without cfg. Legacy G/E data raise
         ValueError.
         """
         result = source.result
-        freqs, populations = result.freqs, result.signals
+        freqs, populations = result.freqs, result.counts
+        populations = populations / populations.sum(axis=-1, keepdims=True)
         if populations.shape[-1] != 3:
             raise ValueError(
                 "Expected [g,e,other] populations; legacy G/E files are unsupported. "

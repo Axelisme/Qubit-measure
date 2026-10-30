@@ -10,14 +10,24 @@ from matplotlib.image import NonUniformImage
 from numpy.typing import NDArray
 from zcu_tools.analysis.singleshot import correct_populations
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
+from zcu_tools.datafile import DataVariable
 from zcu_tools.experiment import AxesSpec, Experiment
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import GainSweep, Pulse, Readout, Reset, SweepCfg, sweep2param
-from zcu_tools.program.v2.modules.readout import classification_processors
+from zcu_tools.program.v2 import (
+    Classify,
+    GainSweep,
+    Pulse,
+    Readout,
+    Reset,
+    SweepCfg,
+    shot_sums,
+    sweep2param,
+)
+from zcu_tools.program.v2.modules.readout import PulseReadoutCfg, circle_classifier
 from zcu_tools.utils.process import minus_background
 
 from zcu_lab.v2.support import live_heatmap, live_line
@@ -30,17 +40,18 @@ def _default_population_states() -> NDArray[np.int64]:
 
 @dataclass(frozen=True)
 class AcStarkResult:
-    """Measured populations (Ngain, Nfreq, 3) on rounded gain/frequency grids.
+    """Measured class counts (Ngain, Nfreq, 3) on rounded gain/frequency grids.
 
     Gains are in a.u.; frequencies are in MHz.
 
     The final state axis is [g,e,other], labeled by population_states=[0,1,2].
+    Counts sum over shots and completed rounds, without normalization.
     Unmeasured points remain NaN after cancellation.
     """
 
     gains: NDArray[np.float64]
     freqs: NDArray[np.float64]
-    populations: NDArray[np.float64]
+    counts: NDArray[np.float64]
     population_states: NDArray[np.int64] = field(
         default_factory=_default_population_states
     )
@@ -103,9 +114,10 @@ class AcStarkExp(Experiment[AcStarkResult, AcStarkCfg]):
             AxesSpec.Axis("freqs", "Frequency", "Hz", scale=1e6, dtype=np.float64),
             AxesSpec.Axis("gains", "Stark Pulse Gain", "a.u.", dtype=np.float64),
         ),
-        z=AxesSpec.Z("populations", "Population", "a.u.", dtype=np.float64),
+        z=AxesSpec.Z("counts", "Counts", "shots", dtype=np.float64),
         result_type=AcStarkResult,
         cfg_type=AcStarkCfg,
+        data_variable=DataVariable("counts"),
         cfg_schema_version="3.0",
         tag="singleshot/ac_stark",
     )
@@ -125,7 +137,7 @@ class AcStarkExp(Experiment[AcStarkResult, AcStarkCfg]):
         hardware rounding, and probe frequency on the board.
 
         Return gains (a.u.), probe frequencies (MHz), and classified G/E/Other
-        fractions shaped (Ngain, Nfreq, 3). cfg.readout supplies circle
+        counts shaped (Ngain, Nfreq, 3). cfg.readout supplies circle
         classifiers with positive radii for all declared ADCs. Other counts
         unclassified shots, not calibrated leakage.
         Subsequent analysis extracts the Stark shift.
@@ -134,7 +146,18 @@ class AcStarkExp(Experiment[AcStarkResult, AcStarkCfg]):
         # Prepare the probe grid and a gain grid spaced in drive intensity.
         soc, soccfg = context.soc, context.soccfg
         cfg = deepcopy(cfg)
-        processors = classification_processors(cfg.readout, require_other=True)
+        # Keep the G/E/Other contract for every declared ADC.
+        readout_channels = (
+            [cfg.readout.ro_ch]
+            if isinstance(cfg.readout, PulseReadoutCfg)
+            else [tone.ro_ch for tone in cfg.readout.tones]
+        )
+        for ro_ch in readout_channels:
+            if circle_classifier(cfg.readout, ro_ch=ro_ch).radius is None:
+                raise ValueError(f"ADC {ro_ch}: radius missing; run singleshot GE Post")
+        read_axis = Classify(
+            "readout", tone=None if isinstance(cfg.readout, PulseReadoutCfg) else 0
+        )
 
         gain_sweep = cfg.gain
 
@@ -194,7 +217,8 @@ class AcStarkExp(Experiment[AcStarkResult, AcStarkCfg]):
         )
         current_index = 0
 
-        def plot_fn(populations: NDArray[np.float64]) -> None:
+        def plot_fn(counts: NDArray[np.float64]) -> None:
+            populations = counts / counts.sum(axis=-1, keepdims=True)
             i = current_index
 
             g_2d.update(gains, freqs, populations[..., 0])
@@ -218,7 +242,7 @@ class AcStarkExp(Experiment[AcStarkResult, AcStarkCfg]):
                 current_index = gain_idx
 
                 # Start the cavity tone nonblocking so the qubit probe can overlap.
-                _ = (
+                builder = (
                     step.prog_builder(
                         soc,
                         soccfg,
@@ -235,17 +259,18 @@ class AcStarkExp(Experiment[AcStarkResult, AcStarkCfg]):
                     .add_pulse("stark_pulse2", step.cfg.stark_pulse2)
                     .add_readout("readout", step.cfg.readout)
                     .declare_sweep("freq", step.cfg.freq)
-                    .build_and_acquire_processed(
-                        # First ADC/read, with all G/E/Other columns.
-                        processed2signal_fn=lambda processed: processed[0][0],
-                        processors=processors,
-                        rounds=cfg.rounds,
-                    )
+                )
+                prog = builder.build()
+                builder.run_program_summed(
+                    prog,
+                    processor=shot_sums(prog, [read_axis]),
+                    sums2signal_fn=lambda sums: sums,
+                    rounds=cfg.rounds,
                 )
 
-        # Preserve measured G/E/Other fractions in the Result.
-        signals = buffer.array
-        return AcStarkResult(gains=gains, freqs=freqs, populations=signals)
+        # Preserve unnormalized G/E/Other counts in the Result.
+        counts = buffer.array
+        return AcStarkResult(gains=gains, freqs=freqs, counts=counts)
 
     def analyze(
         self,
@@ -256,7 +281,8 @@ class AcStarkExp(Experiment[AcStarkResult, AcStarkCfg]):
     ) -> AcStarkAnalysis:
         """Fit the saved three-state map and return photons per gain squared.
 
-        source supplies gains in a.u., frequencies in MHz and [g,e,other];
+        source supplies gains in a.u., frequencies in MHz and [g,e,other] counts;
+        normalize each point before confusion correction.
         cfg may be None. options supplies chi/kappa in MHz, optional confusion
         correction and an exclusive gain cutoff. Publish the fit to plots.
         Legacy G/E data raise ValueError before correction or fitting.
@@ -265,7 +291,8 @@ class AcStarkExp(Experiment[AcStarkResult, AcStarkCfg]):
         chi, kappa = options.chi, options.kappa
         confusion_matrix, cutoff = options.confusion_matrix, options.cutoff
 
-        gains, freqs, populations = result.gains, result.freqs, result.populations
+        gains, freqs, populations = result.gains, result.freqs, result.counts
+        populations = populations / populations.sum(axis=-1, keepdims=True)
         if populations.shape[-1] != 3:
             raise ValueError(
                 "Expected [g,e,other] populations; legacy G/E files are unsupported. "
@@ -357,7 +384,7 @@ class AcStarkExp(Experiment[AcStarkResult, AcStarkCfg]):
     ) -> None:
         """Plot the saved [g,e,other] map against photon number and MHz.
 
-        source supplies the saved map; cfg may be None. options supplies
+        Normalize the saved counts per point. cfg may be None. options supplies
         photons per gain squared, optional confusion correction and an exclusive
         gain cutoff. Publish the populations figure to plots.
         Legacy G/E data raise ValueError before correction or plotting.
@@ -366,7 +393,8 @@ class AcStarkExp(Experiment[AcStarkResult, AcStarkCfg]):
         ac_coeff = options.ac_coeff
         confusion_matrix, cutoff = options.confusion_matrix, options.cutoff
 
-        gains, freqs, populations = result.gains, result.freqs, result.populations
+        gains, freqs, populations = result.gains, result.freqs, result.counts
+        populations = populations / populations.sum(axis=-1, keepdims=True)
         if populations.shape[-1] != 3:
             raise ValueError(
                 "Expected [g,e,other] populations; legacy G/E files are unsupported. "
