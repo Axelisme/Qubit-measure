@@ -13,7 +13,7 @@ def make_form(ctx: FormContext) -> Form[GainCfg]:
         GainCfg,
         tree={
             "reset": Slot("$qubit.module.reset"),
-            "init_pulse": Slot("$qubit.module.x180")
+            "pi_pulse": Slot("$qubit.module.x180")
             if ctx.has("$qubit.module.x180")
             else Template("pi_pulse", bindings={"qubit": "$qubit"}),
             "tested_reset": Template(

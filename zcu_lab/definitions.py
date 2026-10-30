@@ -138,6 +138,9 @@ from zcu_lab.v2.twotone.reset.dual_tone.length.gui import (
 from zcu_lab.v2.twotone.reset.dual_tone.power.gui import (
     DEFINITION as DUAL_TONE_POWER_DEFINITION,
 )
+from zcu_lab.v2.twotone.reset.flux.gain.gui import (
+    DEFINITION as FLUX_RESET_GAIN_DEFINITION,
+)
 from zcu_lab.v2.twotone.reset.rabi_check.gui import DEFINITION as RABI_CHECK_DEFINITION
 from zcu_lab.v2.twotone.reset.single_tone.freq.gui import (
     DEFINITION as SINGLE_TONE_FREQ_DEFINITION,
@@ -229,6 +232,7 @@ ADAPTERS: dict[str, object] = {
     "twotone/reset/bath/length": BATH_LENGTH_DEFINITION,
     "twotone/reset/bath/phase": BATH_PHASE_DEFINITION,
     "twotone/reset/check": RABI_CHECK_DEFINITION,
+    "twotone/reset/flux/gain": FLUX_RESET_GAIN_DEFINITION,
     "mux/onetone": MUX_ONETONE_DEFINITION,
     "mux/onetone_flux_global": ONETONE_FLUX_GLOBAL_DEFINITION,
     "mux/onetone_flux_local": ONETONE_FLUX_LOCAL_DEFINITION,

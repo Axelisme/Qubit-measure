@@ -1,5 +1,8 @@
 """Mean-IQ display mechanics shared by reset calibration scans."""
 
+from collections.abc import Callable
+from math import prod
+
 import numpy as np
 from numpy.typing import NDArray
 from zcu_tools.experiment.v2.runtime.schedule import SignalBuffer
@@ -15,16 +18,27 @@ def reset_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
 
 
 def reset_scan_buffer(
-    plots: Plots, coordinates: NDArray[np.float64], *, xlabel: str
+    plots: Plots,
+    coordinates: NDArray[np.float64],
+    *,
+    xlabel: str,
+    branch_shape: tuple[int, ...] = (),
+    signal2real: Callable[
+        [NDArray[np.complex128]], NDArray[np.float64]
+    ] = reset_signal2real,
 ) -> SignalBuffer:
-    """Retain a 1D complex IQ scan and publish its projection as measurement.
+    """Retain complex IQ scans and publish caller-selected real display curves.
 
-    coordinates contains the hardware-rounded scan values. xlabel names their
-    quantity and unit. Unmeasured points remain NaN; the display projection has
-    no calibrated ground/excited direction and must not select a reset optimum.
+    coordinates contains hardware-rounded scan values; xlabel names their unit.
+    branch_shape gives leading IQ dimensions, defaulting to one unbranched scan.
+    signal2real maps that buffer to (prod(branch_shape), len(coordinates)), or a
+    1D curve for one line. The default is an uncalibrated response-axis projection.
+    Unmeasured points stay NaN. Display conversion never selects a reset optimum.
     """
-    viewer = live_line(plots, "measurement", xlabel, "Amplitude")
+    viewer = live_line(
+        plots, "measurement", xlabel, "Amplitude", num_lines=prod(branch_shape)
+    )
     return SignalBuffer(
-        (len(coordinates),),
-        on_update=lambda data: viewer.update(coordinates, reset_signal2real(data)),
+        (*branch_shape, len(coordinates)),
+        on_update=lambda data: viewer.update(coordinates, signal2real(data)),
     )
