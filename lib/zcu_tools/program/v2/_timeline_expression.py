@@ -157,9 +157,7 @@ def exact_bounds(value: TimeExpression) -> CycleBounds | None:
     if limits.minimum == limits.maximum:
         return limits
     points = evaluate_time(value, expression_axes(value))
-    return (
-        None if points is None else CycleBounds(int(points.min()), int(points.max()))
-    )
+    return None if points is None else CycleBounds(int(points.min()), int(points.max()))
 
 
 def bound_unknowns(value: TimeExpression, *, upper: bool) -> TimeExpression:
@@ -289,9 +287,7 @@ def interval_time(
     return LinearTime(terms=((variable, 1),))
 
 
-def interval_arrays(
-    value: TimeExpression, axes: dict[str, int]
-) -> CycleIntervalGrid:
+def interval_arrays(value: TimeExpression, axes: dict[str, int]) -> CycleIntervalGrid:
     """Bound each coordinate in integer tProc cycles on the ordered axes grid.
 
     Substitute unknown inputs without discarding known coordinates. Raise
