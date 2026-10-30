@@ -149,8 +149,7 @@ class TimelineBoundary(Macro):
             self.book.ends = {"default": 0.0}
             self.book.cycle_axes.clear()
             self.book.source_expressions.clear()
-            self.book.source_branches.clear()
-            self.book.native_branches.clear()
+            self.book.branch_provenance.clear()
             self.book.shell_wait_bound = None
             self.book.waiting.clear()
             self.book.repeats.clear()
