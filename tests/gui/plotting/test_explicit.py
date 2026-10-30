@@ -109,7 +109,6 @@ def explicit_show_driver(qapp) -> Iterator[ComponentDriver]:
     window = QWidget()
     layout = QVBoxLayout(window)
     status = QLabel("Ready")
-    status.setObjectName("plot-status")
     layout.addWidget(status)
     stack = QStackedWidget()
     placeholder = QLabel("No figure shown")
@@ -137,7 +136,15 @@ def explicit_show_driver(qapp) -> Iterator[ComponentDriver]:
                 "Frequency (MHz)",
                 "Signal (mV)",
                 axes=axes,
-                title="Updated from worker",
+            )
+            host.call(
+                lambda: axes.text(
+                    0.5,
+                    0.9,
+                    "Updated from worker",
+                    transform=axes.transAxes,
+                    ha="center",
+                )
             )
             viewer.update((np.array([0.0, 1.0, 2.0]), np.array([1.0, 3.0, 2.0])))
             return threading.get_ident()
@@ -189,7 +196,7 @@ def test_component_driver_explicit_show_worker_update_and_legacy_live(
     assert driver.plots().axes == ()
     driver.screenshot(evidence / "01-unshown.png")
     driver.click("Show figure")
-    assert driver.observe(object_name="plot-status").text == "Shown"
+    assert driver.observe("Shown").visible
     assert driver.plots().axes[0].xlabel == "Frequency (MHz)"
     assert driver.plots().axes[0].visible_curves == 0
     driver.screenshot(evidence / "02-shown.png")
@@ -197,17 +204,17 @@ def test_component_driver_explicit_show_worker_update_and_legacy_live(
     assert len(driver.plots().axes) == 1
     driver.screenshot(evidence / "03-repeat-show.png")
     driver.click("Update from worker")
-    assert driver.observe(object_name="plot-status").text == "Worker complete"
+    assert driver.observe("Worker complete").visible
     assert driver.plots().axes[0].visible_curves == 1
     assert "Updated from worker" in driver.plots().axes[0].annotations
     driver.screenshot(evidence / "04-worker-update.png")
     driver.click("Legacy live")
-    assert driver.observe(object_name="plot-status").text == "Legacy shown"
+    assert driver.observe("Legacy shown").visible
     assert driver.plots().axes[0].ylabel == "Legacy signal"
     assert driver.plots().axes[0].visible_curves == 1
     driver.screenshot(evidence / "05-legacy-live.png")
     driver.click("Finish and release")
-    assert driver.observe(object_name="plot-status").text == "Released"
+    assert driver.observe("Released").visible
     assert driver.plots().axes == ()
     driver.screenshot(evidence / "06-released.png")
 
