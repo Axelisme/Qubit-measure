@@ -74,19 +74,22 @@ def build_run_analyze_tools(ctx: MeasureToolContext) -> dict[str, dict[str, Any]
     return {
         "tab_interact": {
             "handler": partial(tab_interact, ctx),
-            "description": "Read the active interactive plugin's committed state, commands, info and figure without changing focus. Supply payload={command,args} to execute one command and follow the Analysis pane. done settles the original operation and returns the shared execution summary; cancel uses cancel(op). Best-effort last commit wins; no seen guard, hidden reads or retry. Available figure bytes attach as in-memory MCP image content, without a file path; preview_active distinguishes local preview from committed state. Later tab.get_figure reads the live GUI image, not a saved capture.",
+            "description": "Interact with the active analysis plugin. Omit payload to read committed state, commands, info and image without changing focus. Commands follow Analysis; done joins original completion and recipe continuation. preview_active marks local preview. Last commit wins; no retry.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "tab": {"type": "string"},
-                    "payload": {"type": "object"},
+                    "payload": {
+                        "type": "object",
+                        "description": "One plugin action: {command, args}. Use commands from the committed state.",
+                    },
                 },
                 "required": ["tab"],
             },
         },
         "tab_analyze": {
             "handler": partial(tab_analyze, ctx),
-            "description": "Analyze the GUI tab with shared parameters. Wait briefly for an execution summary with effective params, per-pane analysis/save steps and in-memory MCP image content. Analysis presentation retains source run_id, stage, native figure_names and figures_replaced for the same pane; this flag does not claim saved files were overwritten. Mux summaries retain original tone positions with Q names. Save old comparison images before reanalysis. Complete synchronous Save reports are in artifacts, including JSON and all PNG outputs. Use status(execution, detail=full) for captured native detail; otherwise wait by execution. Interactive analysis immediately reads and returns the active state, commands and available image with tab/op. Post result-read failures retain source-bound recovery RPC/params and original op/stage. First compare tab.snapshot post_analysis_state.source_operation_id with recovery.params.operation_id; if different, report superseded. Otherwise rpc_call the supplied route; it rejects replacement races. Never rerun analysis to recover a read. Post read budgets come from the owner (5 seconds plus 5 per tone, maximum 60; absent=5). No hidden pre-reads or retry.",
+            "description": "Analyze existing tab data, save analysis artifacts and return an execution summary/images. Interactive analysis returns state, commands and tab/op. presentation records source run_id and replaced pane figures, not file overwrites. Post result-read failures retain source-bound recovery; follow the run-measure-gui recovery procedure, not reanalysis.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -96,7 +99,10 @@ def build_run_analyze_tools(ctx: MeasureToolContext) -> dict[str, dict[str, Any]
                         "enum": ["primary", "post"],
                         "default": "primary",
                     },
-                    "params": {"type": "object"},
+                    "params": {
+                        "type": "object",
+                        "description": "Named analysis parameter updates in native units. Omit to retain current values.",
+                    },
                 },
                 "required": ["tab"],
             },
