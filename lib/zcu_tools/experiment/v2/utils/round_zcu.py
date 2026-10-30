@@ -8,7 +8,8 @@ from typing import Any, Literal, TypeVar
 import numpy as np
 from numpy.typing import NDArray
 from qick import QickConfig
-from qick.asm_v2 import QickParam
+from qick.asm_v2 import QickParam, QickSweep1D
+from qick.helpers import to_int
 
 from zcu_tools.program.v2 import SweepCfg
 
@@ -146,15 +147,110 @@ def round_zcu_phase(
 def round_zcu_gain(
     gain: T_Value, soccfg: QickConfig, gen_ch: int, scaler: float = 1.0
 ) -> T_Value:
-    maxv = soccfg.get_maxv(gen_ch)
+    """Return scalar or array gain coordinates that compile to their target words.
+
+    ``gen_ch`` selects a generator in ``soccfg``. Gains are normalized fractions
+    after multiplication by finite nonzero ``scaler`` (negative is allowed).
+    Target words retain truncation toward zero using ``soccfg.get_maxv``.
+    Each returned float is nearest to word / (scaler * maxv) and reproduces
+    that word through QICK's constant-pulse conversion. Array shape is retained.
+    Zero words return 0.0. Raise ValueError for invalid scaler or generator scale,
+    or RuntimeError if eight outward ULP adjustments cannot reproduce a word.
+    """
+    maxv, qick_scale = _gain_scales(soccfg, gen_ch, scaler)
 
     def _convert_gain(g: float) -> float:
-        # qick didn't provide gain2reg function, so implement it manually
-        return int(np.trunc(scaler * g * maxv)) / (scaler * maxv)
+        word = int(np.trunc(scaler * g * maxv))
+        return _stable_gain(word, maxv, scaler, qick_scale)
 
     if isinstance(gain, (Number, float)):
         return _convert_gain(float(gain))
     return np.vectorize(_convert_gain)(gain)
+
+
+def _gain_scales(soccfg: QickConfig, gen_ch: int, scaler: float) -> tuple[int, float]:
+    if not math.isfinite(scaler) or scaler == 0.0:
+        raise ValueError("gain scaler must be finite and nonzero")
+    maxv = soccfg.get_maxv(gen_ch)
+    gen = soccfg["gens"][gen_ch]
+    qick_scale = gen["maxv"] * gen["maxv_scale"]
+    if maxv <= 0 or not math.isfinite(qick_scale) or qick_scale <= 0:
+        raise ValueError("generator gain scale must be finite and positive")
+    return maxv, qick_scale
+
+
+def _stable_gain(word: int, maxv: float, scaler: float, qick_scale: float) -> float:
+    if word == 0:
+        return 0.0
+    candidate = word / (scaler * maxv)
+    direction = math.copysign(math.inf, candidate)
+    # Search in float order so the first match is the nearest to the ideal.
+    for adjustment in range(9):
+        if to_int(scaler * candidate, qick_scale, parname="gain", trunc=True) == word:
+            return float(candidate)
+        if adjustment == 8:
+            break
+        candidate = np.nextafter(candidate, direction)
+    raise RuntimeError(f"Gain word {word} is not stable within eight ULP adjustments")
+
+
+def _gain_sweep_words(sweep: SweepCfg, maxv: int, scaler: float) -> tuple[int, int]:
+    start = int(np.trunc(scaler * sweep.start * maxv))
+    if sweep.expts == 1:
+        return start, 0
+    requested_step = (sweep.stop - sweep.start) / (sweep.expts - 1)
+    step = int(np.trunc(scaler * requested_step * maxv))
+    if step == 0:
+        raise ValueError(_format_zero_step_error(sweep, "gain", requested_step, 0.0))
+    return start, step
+
+
+def _host_gain_grid(
+    sweep: SweepCfg, soccfg: QickConfig, gen_ch: int, scaler: float = 1.0
+) -> NDArray[np.float64]:
+    maxv, qick_scale = _gain_scales(soccfg, gen_ch, scaler)
+    start, step = _gain_sweep_words(sweep, maxv, scaler)
+    return np.asarray(
+        [
+            _stable_gain(start + i * step, maxv, scaler, qick_scale)
+            for i in range(sweep.expts)
+        ],
+        dtype=np.float64,
+    )
+
+
+def _round_gain_sweep(
+    sweep: SweepCfg, soccfg: QickConfig, gen_ch: int, scaler: float = 1.0
+) -> SweepCfg:
+    maxv, qick_scale = _gain_scales(soccfg, gen_ch, scaler)
+    start_word, step_word = _gain_sweep_words(sweep, maxv, scaler)
+    start = _stable_gain(start_word, maxv, scaler, qick_scale)
+    if sweep.expts == 1:
+        return SweepCfg(start=start, stop=start, expts=1, step=0.0)
+    span_word = (sweep.expts - 1) * step_word
+    # Stabilize the span before endpoint addition: near cancellation, stop's
+    # ULP can be too small to change the span recovered by stop - start.
+    span = _stable_gain(span_word, qick_scale, scaler, qick_scale)
+    stop = start + span
+    direction = math.copysign(math.inf, span_word / scaler)
+    # QickSweep1D subtracts endpoints before scaling its span. Stabilizing the
+    # step alone cannot protect that subtraction or the subsequent truncation.
+    for adjustment in range(9):
+        param = scaler * QickSweep1D("gain", start, stop)
+        raw = param.to_int(qick_scale, quantize=1, parname="gain", trunc=True)
+        if raw.start == start_word and raw.spans["gain"] == span_word:
+            return SweepCfg(
+                start=start,
+                stop=stop,
+                expts=sweep.expts,
+                step=(stop - start) / (sweep.expts - 1),
+            )
+        if adjustment == 8:
+            break
+        stop = float(np.nextafter(stop, direction))
+    raise RuntimeError(
+        f"Gain sweep span word {span_word} is not stable within eight ULP adjustments"
+    )
 
 
 def apply_round(
@@ -225,10 +321,18 @@ def round_sweep_dict(
 
     ``round_info`` supplies the selected rounder's clock/channel and scaler.
     Time/frequency sweeps use QICK's start/span and signed step quantization.
-    Raise ValueError when adjacent requested points collapse on that grid.
+    Gain sweeps truncate start and derived step to words, then stabilize the
+    endpoints so QICK compiles that start and the exact integer-word span.
+    Its internal span uses the generator's constant-pulse conversion factor,
+    which may differ from the floored ``get_maxv`` used for target words.
+    Gain scaler may be negative but must be finite and nonzero. Raise
+    RuntimeError if eight endpoint ULP adjustments cannot reproduce the span.
+    Raise ValueError when adjacent requested points collapse on the grid.
     """
     if round_info is None:
         round_info = {}
+    if round_type == "gain":
+        return _round_gain_sweep(sweep, **round_info)
     if round_type == "time":
         return _round_time_sweep(sweep, **round_info)
     if round_type == "freq":
@@ -267,7 +371,10 @@ def sweep2array[T_SweepItem](
     list or ndarray. A regular sweep uses ``round_sweep_dict`` to rebuild its
     grid from ``start``, ``stop`` and ``expts``, not its stored ``step``. Time
     and frequency grids use QICK start/span and signed step quantization.
-    Other modes round the start and the step derived from the span. Even
+    Gain grids truncate start and derived step separately to integer words,
+    then return each word's nearest QICK-stable scalar coordinate. They do
+    not interpolate floats or re-truncate the resulting points. Phase rounds
+    the start and the step derived from the span. Even
     ``round_type="none"`` rebuilds the step, without hardware quantization.
     A single-point regular sweep returns only its rounded start.
 
@@ -292,12 +399,16 @@ def sweep2array[T_SweepItem](
     round type, or a regular sweep whose derived step is effectively zero
     or whose adjacent points collide after hardware quantization. Conversion
     errors and selected-rounder errors propagate, including missing or invalid
-    rounder kwargs. Custom arrays do not receive regular-grid collision checks.
+    rounder kwargs. Gain conversion raises RuntimeError when eight ULP
+    adjustments cannot reproduce a target word. Custom arrays do not receive
+    regular-grid collision checks.
     """
     if round_info is None:
         round_info = {}
 
     if isinstance(sweep, SweepCfg):
+        if round_type == "gain":
+            return _host_gain_grid(sweep, **round_info)
         round_sweep = round_sweep_dict(sweep, round_type, round_info)
 
         return round_sweep.start + np.linspace(
