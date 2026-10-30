@@ -375,17 +375,23 @@ class VectorInterpreter:
         )
 
     def _reset(self, module: Module, t: Time) -> Time:
+        start = len(self._events)
         if type(module) is PulseReset:
-            return self._pulse(module.reset_pulse, t)
-        if type(module) is TwoPulseReset:
-            return max(
+            end = self._pulse(module.reset_pulse, t)
+        elif type(module) is TwoPulseReset:
+            end = max(
                 self._pulse(module.reset_pulse1, t), self._pulse(module.reset_pulse2, t)
             )
-        if type(module) is BathReset:
-            end = self._pulse(module.res_pulse, t)
+        elif type(module) is BathReset:
+            cavity_end = self._pulse(module.res_pulse, t)
             self._pulse(module.qub_pulse, t)
-            return self._pulse(module.pi2_pulse, end)
-        raise ValueError(f"{type(module).__name__} simulation unsupported")
+            end = self._pulse(module.pi2_pulse, cavity_end)
+        else:
+            raise ValueError(f"{type(module).__name__} simulation unsupported")
+        for index in range(start, len(self._events)):
+            event, presence = self._events[index]
+            self._events[index] = (replace(event, source=module.name), presence)
+        return end
 
     def _repeat(self, module: Repeat, t: Time) -> float:
         self._advance(t)
@@ -532,7 +538,7 @@ class VectorInterpreter:
             slots.append(self._events.pop()[0])
         self._events.append(
             (
-                select_candidates(slots, index, source=slots[0].source),
+                select_candidates(slots, index, source=module.name),
                 self._presence.copy(),
             )
         )

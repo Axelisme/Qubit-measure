@@ -477,13 +477,13 @@ class TableLengthPulse(Module):
             self._duration_loader,
             self._runtime_pulse,
         ):
-            module.emit(prog, t)
+            module.run(prog, t)
 
     def run(
         self, prog: ModularProgramV2, t: float | QickParam = 0.0
     ) -> float | QickParam:
         self.play_parallel(prog, t)
-        return self._wait.emit(prog, t)
+        return self._wait.run(prog, t)
 
     def allow_rerun(self) -> bool:
         return True

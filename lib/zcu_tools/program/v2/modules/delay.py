@@ -263,9 +263,10 @@ class Join(Module):
             prog.delay_auto(t=0.0)
             with prog.disable_delay():
                 for pulse in self.table_pulses:
-                    pulse.play_parallel(prog)
-            self._duration_loader.emit(prog)
-            return self._wait.emit(prog)
+                    with prog.source_scope(pulse.name):
+                        pulse.play_parallel(prog)
+            self._duration_loader.run(prog)
+            return self._wait.run(prog)
 
         logger.debug(
             "Join.run: %d parallel branches, t=%s",

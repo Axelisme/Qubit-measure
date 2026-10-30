@@ -16,7 +16,11 @@ from zcu_tools.program.v2.modules.readout import (
     PulseReadoutCfg,
     TablePulseReadout,
 )
-from zcu_tools.program.v2.modules.reset import TwoPulseResetCfg
+from zcu_tools.program.v2.modules.reset import (
+    BathResetCfg,
+    PulseResetCfg,
+    TwoPulseResetCfg,
+)
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.program.v2.utils import readout_freq_words
 
@@ -127,6 +131,7 @@ def test_tablelength_uses_selected_duration_and_sweeps_use_quantized_controls():
         request.materialize_point(p).events
         for p in range(int(np.prod(request.point_dims)))
     ):
+        assert events[0].source == "length"
         assert events[0].duration_us == pytest.approx([0.1, 0.3][i % 2], abs=0.003)
         assert events[1].start_us == pytest.approx([0.1, 0.3][i % 2], abs=0.006)
         assert events[1].gain == pytest.approx([0.1, 0.2][i % 2], abs=1e-4)
@@ -175,7 +180,15 @@ def test_join_table_lengths_start_together_and_wait_for_each_points_longest_bran
     waits = [0.15, 0.35] if branches == 1 else [0.2, 0.35]
     for point, expected_wait in enumerate(waits):
         events = request.materialize_point(point).events
-        first_event = next(e for e in events if e.source == "first_template")
+        actual_sources = [event.source for event in events]
+        expected_sources = (
+            (["reset"] if preceding_pulse else [])
+            + ["first"] * (3 if flat_top else 1)
+            + (["second"] if branches == 2 else [])
+            + ["readout"]
+        )
+        assert actual_sources == expected_sources
+        first_event = next(e for e in events if e.source == "first")
         readout = next(e for e in events if e.gen_ch == 0)
         assert first_event.start_us == pytest.approx(origin + 0.02, abs=0.003)
         if branches == 2:
@@ -252,6 +265,27 @@ def test_table_readout_initial_template_exec_after_and_outer_wrap_are_not_index_
             for p in range(int(np.prod(request.point_dims)))
         )
     ] == pytest.approx([100, 300], abs=1e-4)
+
+
+@pytest.mark.parametrize(
+    ("kind", "count"), [("single", 1), ("parallel", 2), ("bath", 3)]
+)
+def test_reset_request_events_keep_authored_wrapper_name(kind, count):
+    cavity = drive()
+    qubit = drive().model_copy(update={"ch": 0})
+    if kind == "single":
+        cfg = PulseResetCfg(pulse_cfg=cavity)
+    elif kind == "parallel":
+        cfg = TwoPulseResetCfg(pulse1_cfg=cavity, pulse2_cfg=qubit)
+    else:
+        cfg = BathResetCfg(
+            cavity_tone_cfg=cavity, qubit_tone_cfg=qubit, pi2_cfg=drive()
+        )
+    request, _, _ = acquire([cfg.build("authored_reset"), receiver().build("readout")])
+    assert [event.source for event in request.materialize_point(0).events] == [
+        *(["authored_reset"] * count),
+        "readout",
+    ]
 
 
 def test_reset_wrappers_expand_only_actual_parallel_pulses():

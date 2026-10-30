@@ -126,6 +126,7 @@ def test_tablelength_places_next_emission_after_each_selected_quantized_length(n
     ends = [43, 129] if native else [44, 130]
     for index, (duration, end) in enumerate(zip([38, 115], ends, strict=True)):
         events = result.materialize_point(index).events
+        assert events[0].source == "length"
         assert events[0].duration_us == pytest.approx(duration / 384)
         assert events[1].start_us == pytest.approx(end / 430.08)
 
@@ -207,6 +208,23 @@ def test_join_preserves_readout_owner_and_author_pulse_child(native):
     assert point.readouts[0].generator_channels == (0,)
 
 
+def test_legacy_table_join_compiled_request_keeps_each_authored_source():
+    joined = Join(
+        TableLengthPulse("left", drive(), lengths=[0.1, 0.2], idx_reg="scan"),
+        TableLengthPulse("right", drive(ch=2), lengths=[0.2, 0.1], idx_reg="scan"),
+    )
+    prog, env = module_program(
+        [joined, receiver().build("readout")], native=False, sweep=(("scan", 2),)
+    )
+    result = request(prog, env)
+    for index in range(2):
+        assert [event.source for event in result.materialize_point(index).events] == [
+            "left",
+            "right",
+            "readout",
+        ]
+
+
 def test_legacy_branch_dispatch_table_and_repeat_preserve_selected_sources():
     choice = Branch(
         "scan",
@@ -255,6 +273,28 @@ def test_legacy_branch_uses_loaded_selector_not_acquisition_lane_order():
     assert [
         result.materialize_point(i).events[0].gain for i in range(3)
     ] == pytest.approx([0.3, 0.1, 0.2], abs=1e-4)
+
+
+@pytest.mark.parametrize(
+    ("kind", "count"), [("single", 1), ("parallel", 2), ("bath", 3)]
+)
+def test_legacy_reset_compiled_events_keep_wrapper_owner(kind, count):
+    cavity, qubit = drive(ch=1), drive(ch=2)
+    if kind == "single":
+        reset = PulseResetCfg(pulse_cfg=cavity)
+    elif kind == "parallel":
+        reset = TwoPulseResetCfg(pulse1_cfg=cavity, pulse2_cfg=qubit)
+    else:
+        reset = BathResetCfg(
+            cavity_tone_cfg=cavity, qubit_tone_cfg=qubit, pi2_cfg=drive(ch=1)
+        )
+    prog, env = module_program(
+        [reset.build("authored_reset"), receiver().build("readout")], native=False
+    )
+    events = request(prog, env).materialize_point(0).events
+    assert [event.source for event in events] == ["authored_reset"] * count + [
+        "readout"
+    ]
 
 
 @pytest.mark.parametrize("kind", ["single", "parallel", "bath"])
