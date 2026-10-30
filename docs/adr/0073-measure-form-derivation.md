@@ -89,8 +89,8 @@ LogPoints 與 Range 使用相同的樹上初值邊界，依 advisor 2026-10-19 �
 
 Module 節點分為兩種。
 
-- `Slot(path, copy=False, set={})` 使用捕捉的 library 槽位。Copy 產生 inline input。
-- `Template(id, set={})` 從注入的持久範本建 fresh inline input。
+- `Slot(path, copy=False, set={}, fallback=None)` 使用捕捉的 library 槽位。Copy 產生 inline input。來源不可解析時可採用 fallback Template。
+- `Template(id, set={}, seed_metadata={})` 從注入的持久範本建 fresh inline input。Seed metadata 以 root-relative canonical paths 指向來源說明與校準狀態。
 
 Slot／Template 不提供 lock 參數，也不提供 `Locked` 節點。List 各位置可有不同的唯讀初值。
 
@@ -117,15 +117,21 @@ Bath reset phase 仍可編輯。這個入口不擴充 nested readonly，不複�
 路徑不一致時明確報錯。共享的只有隱藏路徑，各位置的值與來源獨立，不新增作者 API。
 普通位置 tree 直接放 Hidden 仍受 [[0079]] 的共同元素宣告限制。
 
-缺 Slot 來源時，optional 欄位停用且有效，required 欄位留空且 Invalid。
-沒有 Slot fallback 或 init 模式。需要選來源時，make_form 明寫 if／else。
+`Slot(path, fallback=Template(...))` 在固定 capture 可解析時使用原 Slot；來源缺席、懸空或 alias 未綁定時才採用 Template。
+來源可解析但 family 不相容時仍報錯，不回退。沒有 fallback 時，optional 欄位停用且有效，required 欄位留空且 Invalid。
+Template 的 seed metadata 只在實際採用該 Template 時合併，使用與 `Form.with_seed_metadata` 相同的 root-relative canonical paths。
+同一路徑的顯式 `Form.with_seed_metadata` 值優先。顯式 if／else 寫法仍可使用，不提供另一個 init 模式。
+
+使用者於 2026-10-30 選擇「9A」，採用 Slot fallback 與 Template 自有 metadata，以免重複來源路徑並將 seed 說明留在範本旁。
+同日針對本段先前禁止 fallback 的規則，使用者確認「Q9A」，維持新寫法並修訂本段。
 
 ```python
 def make_form(ctx: FormContext) -> Form[FreqCfg]:
     return Form(FreqCfg, {
         "modules": {
-            "readout": Slot("$resonator.module.readout")
-            if ctx.has("$resonator.module.readout") else Template("readout"),
+            "readout": Slot(
+                "$resonator.module.readout", fallback=Template("readout")
+            ),
         },
         "sweep": {"freq": Range.around("$qubit.freq", "1.5 * $qubit.kappa", expts=301)},
         "reps": 1000,

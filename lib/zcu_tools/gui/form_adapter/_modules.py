@@ -701,53 +701,86 @@ class ModuleField:
             kind_fields.append((kind, fields))
         return _module_options(key_commands, kind_fields, nullable=self.nullable)
 
+    def selected_node(self, env: FormEnv) -> Slot | Template | None:
+        """Select the fallback only when the fixed capture cannot resolve the Slot."""
+        if (
+            isinstance(self.node, Slot)
+            and self.node.fallback is not None
+            and slot_key(self.node, env) is None
+        ):
+            return self.node.fallback
+        return self.node
+
     def validate_templates(self, catalog: Mapping[str, TemplateDef]) -> None:
-        template = self.node if isinstance(self.node, Template) else None
+        if isinstance(self.node, Slot) and self.node.fallback is not None:
+            template_input(self.node.fallback, catalog, self.editable, None)
+        self._bind_projection(self.node, catalog)
+
+    def select_sources(self, env: FormEnv, *, force: bool = False) -> None:
+        """Install the selected branch's projection without changing wrapper identity."""
+        node = self.node
+        has_fallback = isinstance(node, Slot) and node.fallback is not None
+        if isinstance(node, Template):
+            seeds = dict(self.catalog[node.id].seeds) | dict(node.set)
+            has_fallback = any(
+                isinstance(seed, Slot) and seed.fallback is not None
+                for seed in seeds.values()
+            )
+        if has_fallback or force:
+            self._bind_projection(self.selected_node(env), self.catalog, env)
+
+    def _bind_projection(
+        self,
+        node: Slot | Template | None,
+        catalog: Mapping[str, TemplateDef],
+        env: FormEnv | None = None,
+    ) -> None:
+        template = node if isinstance(node, Template) else None
         seeds: dict[str, JsonValue] = {}
         if template is not None:
             template_input(template, catalog, self.editable, None)
-            seeds = template_seed_tree(template, catalog)
-        if isinstance(self.node, Slot):
-            for path, value in self.node.set.items():
+            seeds = template_seed_tree(template, catalog, env)
+        if isinstance(node, Slot):
+            for path, value in node.set.items():
                 set_path(seeds, path, declaration_seed(value))
         for path in self.shared_hidden_paths:
             set_path(seeds, path, {"hidden": True})
-        if seeds:
-            self.editable = tuple(editable_spec(spec, seeds) for spec in self.specs)
-            module = union_type(self.editable)
-            if len(self.specs) > 1:
-                module = annotated_type(module, Field(discriminator="type"))
-            # Parse the annotation without mutating FieldInfo.annotation; keep the
-            # inline class identity borrowed by the section and value form.
-            parsed = create_model(
-                self.inline.__name__,
-                __base__=self.inline,
-                __module__=__name__,
-                module=(module, deepcopy(self.inline.model_fields["module"])),
-            )
-            self.inline.model_fields["module"] = parsed.model_fields["module"]
-            self.inline.model_rebuild(force=True)
+        self.editable = tuple(editable_spec(spec, seeds) for spec in self.specs)
+        module = union_type(self.editable)
+        if len(self.specs) > 1:
+            module = annotated_type(module, Field(discriminator="type"))
+        # Keep the wrapper borrowed by parent/value Forms, but replace its
+        # child projection so an unselected branch cannot leak Hidden or Expr.
+        parsed = create_model(
+            self.inline.__name__,
+            __base__=self.inline,
+            __module__=__name__,
+            module=(module, deepcopy(self.inline.model_fields["module"])),
+        )
+        self.inline.model_fields["module"] = parsed.model_fields["module"]
+        self.inline.model_rebuild(force=True)
+        self.value_model.model_rebuild(force=True)
+        self._inline_fields.clear()
         if template is not None:
             bind_template_defaults(self.editable, template, catalog)
 
     def initial_input(self, env: FormEnv) -> dict[str, JsonValue] | None:
-        if isinstance(self.node, Template):
+        node = self.selected_node(env)
+        if isinstance(node, Template):
             return {
                 "kind": "inline",
                 "module": self._project(
-                    template_input(self.node, self.catalog, self.editable, env)
+                    template_input(node, self.catalog, self.editable, env)
                 ),
             }
-        if self.node is None:
+        if node is None:
             return None
-        key = slot_key(self.node, env)
+        key = slot_key(node, env)
         if key is not None and env.library is not None:
             spec = env.library.module_spec(key)
             if not isinstance(spec, self.specs):
-                raise ValueError(
-                    f"Slot {self.node.path!r} has incompatible module family"
-                )
-            if not self.node.copy:
+                raise ValueError(f"Slot {node.path!r} has incompatible module family")
+            if not node.copy:
                 return {"kind": "ref", "name": key}
             model = next(
                 model for model in self.editable if type_tag(model) == spec.type
@@ -758,7 +791,7 @@ class ModuleField:
             )
         else:
             return None
-        for path, value in self.node.set.items():
+        for path, value in node.set.items():
             set_slot_path(model, module, path, scalar_seed(value), env)
         selected = next(
             model for model in self.editable if type_tag(model) == module.get("type")
@@ -826,7 +859,8 @@ class ModuleField:
 
     def fresh_inline_input(self, env: FormEnv) -> dict[str, JsonValue]:
         """Build fresh Template/blank input without copying any prior ref."""
-        template = self.node if isinstance(self.node, Template) else None
+        node = self.selected_node(env)
+        template = node if isinstance(node, Template) else None
         if template is not None:
             module = template_input(template, self.catalog, self.editable, env)
         elif len(self.editable) == 1:

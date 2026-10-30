@@ -1,11 +1,13 @@
 # cfg_model — 共享配置核心
 
-**Last updated:** 2026-10-29
+**Last updated:** 2026-10-30
 
 **讀者：** framework-dev。配置模型、持久 Spec 與 materialization 邊界速查。
 
 `cfg_model` 提供純資料配置模型與具名依賴契約，執行與 I/O 由 consumer 負責。
 Caller 從 package root import 公開名稱。
+
+`Slot.fallback` 可宣告缺來源時使用的 `Template`。`Template.seed_metadata` 以 root-relative canonical Form paths 宣告來源與校準提示。這些節點只保存宣告，Form consumer 在固定 capture 決定採用來源與 metadata；TemplateDef 展開仍只改 Slot path。
 
 `Template.bindings` 提供任意具名替換，是模板佔位符唯一的綁定來源。
 `TemplateDef.placeholder_names()` 列出展開 seeds 所需的 binding 名稱，包含 nested format specs，不包含 escaped braces 或 Slot 的 consumer options。
