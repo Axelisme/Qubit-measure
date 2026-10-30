@@ -5,6 +5,23 @@ from dataclasses import dataclass
 import numpy as np
 from numpy.typing import NDArray
 
+from ._timeline_bounds import CycleBounds
+
+
+@dataclass(frozen=True)
+class CycleIntervalGrid:
+    """Coordinate-aware inclusive bounds in integer tProc cycles.
+
+    minimum and maximum are int64 arrays broadcastable to the caller's ordered
+    loop-axis grid. At every coordinate minimum <= maximum. These endpoints
+    bound unknown inputs, not necessarily attainable values. One result keeps
+    the paired grids and their units together for all expression consumers.
+    Construction stores arrays without copying or changing them.
+    """
+
+    minimum: NDArray[np.int64]
+    maximum: NDArray[np.int64]
+
 
 @dataclass(frozen=True, eq=False)
 class CycleVariable:
@@ -59,18 +76,21 @@ class TimeChoice:
 TimeExpression = LinearTime | TimeChoice
 
 
-def expression_bounds(value: TimeExpression) -> tuple[int, int]:
+def expression_bounds(value: TimeExpression) -> CycleBounds:
     """Bound cycles after cancellation, without assuming independent max paths."""
     if isinstance(value, TimeChoice):
         limits = [expression_bounds(item) for item in value.alternatives]
         select = max if value.maximum else min
-        return select(lo for lo, _ in limits), select(hi for _, hi in limits)
+        return CycleBounds(
+            select(limit.minimum for limit in limits),
+            select(limit.maximum for limit in limits),
+        )
     lower = upper = value.constant
     for variable, coefficient in value.terms:
         endpoints = coefficient * variable.minimum, coefficient * variable.maximum
         lower += min(endpoints)
         upper += max(endpoints)
-    return lower, upper
+    return CycleBounds(lower, upper)
 
 
 def time_variables(value: TimeExpression) -> tuple[CycleVariable, ...]:
@@ -127,17 +147,19 @@ def evaluate_time(
     return result
 
 
-def exact_bounds(value: TimeExpression) -> tuple[int, int] | None:
+def exact_bounds(value: TimeExpression) -> CycleBounds | None:
     """Return exact legal-point extrema, or None for a nonconstant unknown input.
 
     Algebraic constants use no Cartesian allocation. Other expressions evaluate
     only the appearing loop axes, not all of the program's sweep dimensions.
     """
-    lower, upper = expression_bounds(value)
-    if lower == upper:
-        return lower, upper
+    limits = expression_bounds(value)
+    if limits.minimum == limits.maximum:
+        return limits
     points = evaluate_time(value, expression_axes(value))
-    return None if points is None else (int(points.min()), int(points.max()))
+    return (
+        None if points is None else CycleBounds(int(points.min()), int(points.max()))
+    )
 
 
 def bound_unknowns(value: TimeExpression, *, upper: bool) -> TimeExpression:
@@ -167,26 +189,25 @@ def bound_unknowns(value: TimeExpression, *, upper: bool) -> TimeExpression:
     return LinearTime(constant, tuple(terms))
 
 
-def projected_expression_bounds(value: TimeExpression) -> tuple[int, int]:
-    """Keep legal-point correlation while bounding any genuinely unknown values."""
+def projected_expression_bounds(value: TimeExpression) -> CycleBounds:
+    """Bound tProc cycles over legal points, preserving known-axis correlation.
+
+    Unknown inputs use conservative endpoints, not actual extrema. Raise
+    RuntimeError if an unknown survives interval substitution.
+    """
     exact = exact_bounds(value)
     if exact is not None:
         return exact
-    lower = exact_bounds(bound_unknowns(value, upper=False))
-    upper = exact_bounds(bound_unknowns(value, upper=True))
-    if lower is None or upper is None:
-        raise RuntimeError("unknown input survived interval substitution")
-    return lower[0], upper[1]
+    grids = interval_arrays(value, expression_axes(value))
+    return CycleBounds(int(grids.minimum.min()), int(grids.maximum.max()))
 
 
 def slack_variables(value: TimeExpression) -> list[str]:
     """Name unknown sources and known producers on axes that change the tail."""
     axes = expression_axes(value)
     changing: set[str] = set()
-    for upper in (False, True):
-        points = evaluate_time(bound_unknowns(value, upper=upper), axes)
-        if points is None:
-            raise RuntimeError("unknown input survived interval substitution")
+    grids = interval_arrays(value, axes)
+    for points in (grids.minimum, grids.maximum):
         points = np.broadcast_to(points, tuple(axes.values()))
         for dimension, name in enumerate(axes):
             if np.any(np.diff(points, axis=dimension)):
@@ -244,14 +265,8 @@ def reduce_loop_time(
     points = evaluate_time(value, axes)
     if points is not None:
         return point_time(name, remaining, reduce(points))
-    endpoints = []
-    for upper in (False, True):
-        points = evaluate_time(bound_unknowns(value, upper=upper), axes)
-        if points is None:
-            raise RuntimeError("unknown input survived interval substitution")
-        endpoints.append(reduce(points))
-    lower, upper = endpoints
-    return interval_time(name, remaining, lower, upper)
+    grids = interval_arrays(value, axes)
+    return interval_time(name, remaining, reduce(grids.minimum), reduce(grids.maximum))
 
 
 def interval_time(
@@ -276,13 +291,17 @@ def interval_time(
 
 def interval_arrays(
     value: TimeExpression, axes: dict[str, int]
-) -> tuple[NDArray[np.int64], NDArray[np.int64]]:
-    """Return coordinate-aware conservative endpoints for known/unknown mixtures."""
+) -> CycleIntervalGrid:
+    """Bound each coordinate in integer tProc cycles on the ordered axes grid.
+
+    Substitute unknown inputs without discarding known coordinates. Raise
+    RuntimeError if an unknown survives substitution; missing axes raise KeyError.
+    """
     lower = evaluate_time(bound_unknowns(value, upper=False), axes)
     upper = evaluate_time(bound_unknowns(value, upper=True), axes)
     if lower is None or upper is None:
         raise RuntimeError("unknown input survived interval substitution")
-    return lower, upper
+    return CycleIntervalGrid(lower, upper)
 
 
 def multiply_time(left: TimeExpression, right: TimeExpression) -> TimeExpression:
@@ -298,8 +317,12 @@ def multiply_time(left: TimeExpression, right: TimeExpression) -> TimeExpression
     )
     if a is not None and b is not None:
         return point_time(name, axes, a * b)
+    left_grids = interval_arrays(left, axes)
+    right_grids = interval_arrays(right, axes)
     products = [
-        a * b for a in interval_arrays(left, axes) for b in interval_arrays(right, axes)
+        a * b
+        for a in (left_grids.minimum, left_grids.maximum)
+        for b in (right_grids.minimum, right_grids.maximum)
     ]
     grids = np.broadcast_arrays(*products)
     return interval_time(name, axes, np.minimum.reduce(grids), np.maximum.reduce(grids))
@@ -318,9 +341,9 @@ def select_time(
     name = ", ".join(
         sorted({v.name for value in (selector, *values) for v in time_variables(value)})
     )
-    lower_grids, upper_grids = zip(
-        *(interval_arrays(value, axes) for value in values), strict=True
-    )
+    grids = [interval_arrays(value, axes) for value in values]
+    lower_grids = [grid.minimum for grid in grids]
+    upper_grids = [grid.maximum for grid in grids]
     if index is None:
         lower = np.minimum.reduce(np.broadcast_arrays(*lower_grids))
         upper = np.maximum.reduce(np.broadcast_arrays(*upper_grids))
@@ -344,10 +367,15 @@ def choose_time(*values: TimeExpression, maximum: bool = True) -> TimeExpression
             alternatives.append(value)
     unique = tuple(dict.fromkeys(alternatives))
     limits = [expression_bounds(value) for value in unique]
-    for index, (lower, upper) in enumerate(limits):
+    for index, limit in enumerate(limits):
         if all(
-            index == other or (lower >= hi if maximum else upper <= lo)
-            for other, (lo, hi) in enumerate(limits)
+            index == other
+            or (
+                limit.minimum >= alternative.maximum
+                if maximum
+                else limit.maximum <= alternative.minimum
+            )
+            for other, alternative in enumerate(limits)
         ):
             return unique[index]
     return TimeChoice(unique, maximum)

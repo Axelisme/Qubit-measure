@@ -170,8 +170,8 @@ class RepeatFrame:
         self, book: "TimelineBook", count: TimeExpression, *, axis: str
     ) -> None:
         """Keep entry values at zero iterations, otherwise the last body write."""
-        minimum, maximum = projected_expression_bounds(count)
-        if maximum == 0:
+        limits = projected_expression_bounds(count)
+        if limits.maximum == 0:
             book.source_expressions = self.initial_source_expressions.copy()
             return
         executed = choose_time(LinearTime(1), count, maximum=False)
@@ -179,7 +179,7 @@ class RepeatFrame:
         for name, expression in book.source_expressions.items():
             if axis in expression_axes(expression):
                 expression = reduce_loop_time(expression, axis, last=True)
-            if minimum == 0:
+            if limits.minimum == 0:
                 if name not in self.initial_source_expressions:
                     # A body-only definition is not available on the zero path.
                     continue
@@ -311,6 +311,32 @@ class RepeatFrame:
             prog.set_timestamp(value, ro_ch=ch)
 
 
+@dataclass(frozen=True)
+class BranchProvenance:
+    """Register and channel expressions captured at the same branch position.
+
+    sources maps register names to integer tProc-cycle expressions. native maps
+    (is_generator, channel_id) to relative integer-cycle tails. Both mappings
+    are detached snapshots, so preparing another case cannot mutate this path.
+    """
+
+    sources: dict[str, TimeExpression]
+    native: dict[tuple[bool, int], TimeExpression]
+
+
+@dataclass
+class BranchProvenanceFrame:
+    """One active branch's entry snapshot and completed case snapshots.
+
+    entry restores both provenance domains before each case. paths stores one
+    paired snapshot per completed case, in selector order. A single stack frame
+    owns their common begin/restore/record/finish lifetime, including nesting.
+    """
+
+    entry: BranchProvenance
+    paths: list[BranchProvenance] = field(default_factory=list)
+
+
 class TimelineBook:
     """Store only relative ends, including the ordinary default timeline."""
 
@@ -319,9 +345,7 @@ class TimelineBook:
         self.shell_wait_bound: int | None = None
         self.cycle_axes: dict[str, CycleVariable] = {}
         self.source_expressions: dict[str, TimeExpression] = {}
-        self.source_branches: list[
-            tuple[dict[str, TimeExpression], list[dict[str, TimeExpression]]]
-        ] = []
+        self.branch_provenance: list[BranchProvenanceFrame] = []
         self.math: RuntimeMath
         self.preparing = 0
         self.pinned: set[str] = set()
@@ -331,12 +355,6 @@ class TimelineBook:
         # their existing scheduling roles; these expressions never emit code.
         # Keys are (is_generator, channel_id).
         self.native_expressions: dict[tuple[bool, int], TimeExpression] = {}
-        self.native_branches: list[
-            tuple[
-                dict[tuple[bool, int], TimeExpression],
-                list[dict[tuple[bool, int], TimeExpression]],
-            ]
-        ] = []
         self.waiting: set[str] = set()
         self.repeats: list[RepeatFrame] = []
         self.native_only = False
@@ -380,36 +398,42 @@ class TimelineBook:
 
     def begin_branch_sources(self, prog) -> None:
         """Save incoming source/channel expressions before collecting branch cases."""
-        self.source_branches.append((self.source_expressions.copy(), []))
-        self.native_branches.append((self.snapshot_native_expressions(prog), []))
+        self.branch_provenance.append(
+            BranchProvenanceFrame(self.snapshot_branch_provenance(prog))
+        )
 
     def restore_branch_sources(self) -> None:
         """Start a case with the same incoming source values as its siblings."""
-        self.source_expressions = self.source_branches[-1][0].copy()
-        self.native_expressions = self.native_branches[-1][0].copy()
+        entry = self.branch_provenance[-1].entry
+        self.source_expressions = entry.sources.copy()
+        self.native_expressions = entry.native.copy()
 
     def record_branch_sources(self, prog) -> None:
         """Capture source/channel values after this case's local timeline closure."""
-        self.source_branches[-1][1].append(self.source_expressions.copy())
-        self.native_branches[-1][1].append(self.snapshot_native_expressions(prog))
+        self.branch_provenance[-1].paths.append(self.snapshot_branch_provenance(prog))
+
+    def snapshot_branch_provenance(self, prog) -> BranchProvenance:
+        """Copy current register sources and all declared native channel tails."""
+        return BranchProvenance(
+            self.source_expressions.copy(), self.snapshot_native_expressions(prog)
+        )
 
     def finish_branch_sources(self, prog, selector: str) -> None:
         """Select channel tails and register sources defined on every branch path."""
-        _, native_paths = self.native_branches.pop()
+        frame = self.branch_provenance.pop()
         self.native_expressions = {
             key: select_time(
                 source_expression(prog, selector),
-                tuple(path[key] for path in native_paths),
+                tuple(path.native[key] for path in frame.paths),
             )
-            for key in native_paths[0]
+            for key in frame.paths[0].native
         }
-        _, snapshots = self.source_branches.pop()
         self.source_expressions = {
             name: select_time(
                 source_expression(prog, selector),
-                tuple(snapshot[name] for snapshot in snapshots),
+                tuple(path.sources[name] for path in frame.paths),
             )
-            for name in set.intersection(*(set(snapshot) for snapshot in snapshots))
+            for name in set.intersection(*(set(path.sources) for path in frame.paths))
         }
 
     def observe_write(self, prog, macro) -> None:
@@ -503,7 +527,7 @@ class TimelineBook:
                         consumed.add(ch)
                 self.native_timestamp(
                     self.math.prog,
-                    projected_bounds(self.math.prog, remaining)[1],
+                    projected_bounds(self.math.prog, remaining).maximum,
                     gen_ch=ch if generator else None,
                     ro_ch=None if generator else ch,
                 )
@@ -613,11 +637,11 @@ class TimelineBook:
             *(self.native_expression(prog, ch, generator=False) for ch in prog.ro_chs)
         )
         exact = exact_bounds(expression)
-        lower, upper = exact or projected_expression_bounds(expression)
+        limits = exact or projected_expression_bounds(expression)
         # Keep native timestamps untouched: final_delay must still use its
         # original pointwise reference advance, not the scalar shell WAIT.
-        self.shell_wait_bound = upper
-        slack = upper - lower
+        self.shell_wait_bound = limits.maximum
+        slack = limits.maximum - limits.minimum
         if slack > 0:
             variables = slack_variables(expression)
             message = (

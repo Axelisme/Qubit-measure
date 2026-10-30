@@ -13,11 +13,14 @@ from .macro.table import TableSelection
 
 @dataclass(frozen=True)
 class CycleBounds:
-    """Inclusive range of a producer's integer tProc cycle value.
+    """Inclusive ordered bounds for integer tProc-cycle values or expressions.
 
-    minimum and maximum bound every executable write, across cases, loop
-    back-edges and sweep resets. Values used as time must be nonnegative and
-    no larger than 2147483647. Non-time words need not satisfy that restriction.
+    minimum and maximum are signed cycle endpoints. Producer bounds cover every
+    executable write, including cases, back-edges and sweep resets; expression
+    bounds cover every legal point and any unknown inputs conservatively.
+    Values used as time must be nonnegative and no larger than 2147483647.
+    Non-time words need not satisfy that restriction. Reversed endpoints raise
+    ValueError during construction.
     """
 
     minimum: int

@@ -144,13 +144,34 @@ def runtime_expression(value: RuntimeEnd) -> TimeExpression:
     return value.expression
 
 
-def projected_bounds(prog, value: "Time") -> tuple[float, float]:
-    """Project correlated cycle bounds only at a native timestamp boundary."""
+@dataclass(frozen=True)
+class MicrosecondBounds:
+    """Inclusive native timestamp bounds in microseconds, possibly signed.
+
+    minimum and maximum bound every legal point after cycle projection. They
+    are conservative for unknown inputs and exact otherwise. The projection
+    owner uses this pair to keep us separate from integer-cycle bounds.
+    Construction stores endpoints unchanged; callers supply ordered values.
+    """
+
+    minimum: float
+    maximum: float
+
+
+def projected_bounds(prog, value: "Time") -> MicrosecondBounds:
+    """Project correlated bounds to us at a native timestamp boundary.
+
+    Unknown inputs remain conservative. Expression substitution failures
+    propagate as RuntimeError; static values use their native parameter bounds.
+    """
     if isinstance(value, RuntimeEnd):
         expression = runtime_expression(value)
-        lower, upper = projected_expression_bounds(expression)
-        return lower / get_fclk(prog), upper / get_fclk(prog)
-    return bounds(value)
+        limits = projected_expression_bounds(expression)
+        return MicrosecondBounds(
+            limits.minimum / get_fclk(prog), limits.maximum / get_fclk(prog)
+        )
+    lower, upper = bounds(value)
+    return MicrosecondBounds(lower, upper)
 
 
 def parameter_expression(
