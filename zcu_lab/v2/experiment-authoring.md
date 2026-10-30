@@ -14,6 +14,7 @@
 - [目錄佈局](#目錄佈局)
 - [實驗特有的分析與保存](#實驗特有的分析與保存)
 - [典型 Exp.run 範本](#典型-exprun-範本以-onetonefreqcorepy-為例)
+- [Timeline program 與 Schedule 取數](#timeline-program-與-schedule-取數)
 - [v2 cfg 組合慣例](#v2-cfg-組合慣例)
 - [Signal/Raw 處理慣例](#signalraw-處理慣例)
 - [v2 工具與實驗輔助](#v2-工具與實驗輔助)
@@ -372,6 +373,230 @@ dmem 載入 pulse length 與實際 duration；const/flat-top 共用單一 wmem t
 - **Raw-shot program 設定**：`singleshot/ge`、`singleshot/check`、`singleshot/len_rabi` 與 `mux/singleshot_ge` 的實驗 cfg 不含 reps／rounds。`run()` 直接將 `reps=cfg.shots` 與 `relax_delay=cfg.relax_delay` 交給 builder，acquire 明確使用 `rounds=1`。有宣告 initial_delay 的實驗同樣明傳。Lookback 固定 `reps=1`，`run_program_decimated(rounds=cfg.rounds)` 沿用可編輯的軟體平均次數。這些 runtime 固定值不出現在 Form。
 
 ---
+
+## Timeline program 與 Schedule 取數
+
+`TimelineBuilder` 只記錄 program 動作，`build()` 產生並編譯 `TimelineProgramV2`。
+它不接收 soc，不取數，也不是 context manager。
+需要自訂 register 運算或 dmem 操作時，改寫 `TimelineProgramV2` 子類別。
+兩種寫法都把 program 交給 Schedule 或 scan step 的 `run_acquire*`。
+
+舊 `ProgramBuilder`、`sched.prog_builder(...)` 與 `AcquireOptions` 仍可並存。
+本節不要求遷移現有實驗。**目前 legacy simulator 不支援 emit 寫法**，
+承接 `acquire*` 介面不代表能在該 simulator 執行。
+編譯與 IR timing analysis 不需要取數，實際執行則需要相容的 acquisition backend。
+支援邊界見 [ADR-0083](../../docs/adr/0083-program-macros-and-timelines.md)。
+
+Runtime 查表的時間經 sync 後，shell 收尾可能採用過大的 native WAIT 上界，讓 CPU 多等。
+Builder 與手寫 program 都受此臨時限制。
+Scheduled timing analysis 不驗證 CPU 等待與跨 shot 實機排程。
+
+### 用 TimelineBuilder 寫序列
+
+以下片段放在實驗 `run(config, *, context)` 中。
+`config` 提供 `length: SweepCfg`、`pi_pulse: Pulse.Cfg`、`readout: Readout.Cfg`，
+以及 `reps`、`rounds`、`relax_delay`、`acquire_retry` 與 `earlystop_snr`。
+`on_update` 是本次實驗的 live plot callback，接收完整 signal array。
+
+```python
+import numpy as np
+from zcu_tools.experiment.v2.runtime import RunOptions, Schedule, SignalBuffer
+from zcu_tools.experiment.v2.utils.snr import snr_checker
+from zcu_tools.program.v2 import Pulse, Readout, TimelineBuilder
+
+signals = SignalBuffer((config.length.expts,), on_update=on_update)
+with Schedule(config, signals, scope=context.scope) as sched:
+    cfg = sched.cfg
+    builder = TimelineBuilder(
+        context.soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay,
+    )
+    delay = builder.add_sweep("length", cfg.length)
+
+    drive = Pulse("pi_pulse", cfg.pi_pulse)
+    readout = Readout("readout", cfg.readout)
+    builder.emit(drive)
+    builder.delay_timeline(delay)
+    builder.emit(readout, tag="terminal")
+
+    prog = builder.build()
+    sched.run_acquire(
+        prog, context.soc, rounds=cfg.rounds,
+        options=RunOptions(
+            retry=cfg.acquire_retry,
+            stop_condition=snr_checker(signals.at(), cfg.earlystop_snr, np.abs),
+        ),
+    )
+```
+
+`add_sweep` 同時宣告 loop 並回傳 `QickParam`，所以獨立寫一行，不藏在 module 建構子中。
+多個 loop 依宣告順序由外到內。非均勻掃描用 `add_loop(name, count)` 加
+`LoadValue` 或 `ScanWith`，不要把不等距點轉成 `add_sweep`。
+Builder 的 `emit`、`emit_parallel`、`delay`、`delay_auto`、`delay_timeline`、
+`sync`、`pulse`、`trigger`、`fork`、`join`、`timeline`、`repeat` 與 `branch`
+沿用 program 層的同名 API。原生布林控制選項用 keyword，例如
+`builder.delay_auto(0.1, gens=False, ros=True)`。
+`build()` 後 builder 凍結，再記錄動作或再次 build 都會 raise ValueError。
+
+### 手寫 TimelineProgramV2
+
+手寫版本在 `_initialize` 建立 module 並 `declare`，在 `_body` 發射。
+下例與上例使用相同的輸入欄位，每次建構都複製 cfg 並建立新的 module。
+
+```python
+from copy import deepcopy
+
+from zcu_tools.program.v2 import Pulse, Readout, TimelineProgramV2
+
+
+class T1Program(TimelineProgramV2):
+    def __init__(self, soccfg, cfg):
+        self.inputs = deepcopy(cfg)
+        super().__init__(
+            soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay,
+        )
+
+    def _initialize(self, _cfg):
+        cfg = self.inputs
+        self.delay_param = self.add_sweep("length", cfg.length)
+
+        self.drive = Pulse("pi_pulse", cfg.pi_pulse)
+        self.readout = Readout("readout", cfg.readout)
+        self.declare(self.drive)
+        self.declare(self.readout)
+
+    def _body(self, _cfg):
+        self.emit(self.drive)
+        self.delay_timeline(self.delay_param)
+        self.emit(self.readout, tag="terminal")
+
+
+signals = SignalBuffer((config.length.expts,), on_update=on_update)
+with Schedule(config, signals, scope=context.scope) as sched:
+    prog = T1Program(context.soccfg, sched.cfg)
+
+    sched.run_acquire(
+        prog, context.soc, rounds=sched.cfg.rounds,
+        options=RunOptions(retry=sched.cfg.acquire_retry),
+    )
+```
+
+**每個 program 或 build 都要建立全新的 module 物件。** 不把已被 built program 使用的
+module 傳給另一個 program，也不從 cache 拿出 module 重新 build。
+目前宣告結果仍保存在 module 上，跨 program 共用會混入前一個 program 的資源狀態。
+將宣告狀態搬進 program 是後續工作。
+同一 program 內可以多次 emit 同一物件，宣告只做一次，每次 emission 的時間與 tag 各自獨立。
+重複 readout 用不同 tag 區分，例如 `"herald"` 與 `"terminal"`。
+相同 ADC 或 register 不能由兩個不同物件重複占用，衝突會在編譯時指出兩個物件。
+Pulse 家族原有的 generator 與 template 共用規則不變。
+
+### Timeline 範圍只切換預設名字
+
+Module 的 default timeline 與 QICK reference 分開。
+`delay_timeline` 只加 timeline 結尾，`sync` 才把 reference 推到該結尾。
+原生 `delay` 與 `delay_auto` 仍只推進 reference，不受 timeline 範圍影響。
+未進範圍時，省略 timeline 的 module emit 使用 default，原生 pulse／trigger 保留原生 reference timing。
+
+以下是同一 builder 在 build 前的 body 片段。`drive` 是這次 build 新建的 module。
+手寫 program 可在 `_body` 將 `builder` 換成 `self`，使用已 declare 的 `self.drive`。
+
+```python
+builder.fork("default", into=["drive", "other"])
+
+with builder.timeline("drive"):
+    builder.emit(drive)
+    builder.delay_timeline(0.1, timeline="default")  # Explicit name wins.
+
+    with builder.timeline("other"):
+        builder.delay_timeline(0.2)
+
+    builder.delay_timeline(0.05)  # Restores drive after the nested scope.
+    with builder.repeat("pairs", 2):
+        builder.emit(drive)
+
+builder.join("drive", "other", into="default")
+builder.sync()
+```
+
+名字須先存在，只有 `"default"` 預先存在，其餘須先 `fork`。
+`timeline(name)` 不 fork、不自行 join，離開範圍也不移動 reference。
+省略 `timeline=` 或傳入 `None` 會選目前範圍，顯式名字優先，巢狀範圍離開後還原外層。
+`emit`、`emit_parallel`、`pulse`、`trigger`、`delay_timeline`、`sync` 與
+`repeat` 的預設母 timeline 都遵守這條規則。
+`fork` 與 `join` 是普通方法，只有 `timeline`、`repeat` 與 `branch` 使用 `with`。
+`branch` 只有 `by` 參數，例如 `with builder.branch(by="scan") as cases:`。
+Case 內仍對原 builder 呼叫 emit，省略名字時沿用當下 timeline 範圍。
+Case 只同步自身使用的 timeline 與局部 fork，不把不等長 case 補成共同長度。
+Repeat 內只可使用母 timeline 及其局部 fork，不能操作另一條外部 timeline。
+
+`DelayAuto` module 是例外，它只可在範圍外且未指定 timeline 時 emit。
+它包裝原生 reference advance，不能用來增加具名 timeline 的結尾。
+在範圍內要推 reference，直接呼叫原生 `delay_auto`。
+完整控制流與時間單位見 [program 作者 API](../../lib/zcu_tools/program/v2/README.md#原生寫法與具名-timeline)。
+
+### 用 run_acquire* 寫入與停止
+
+Schedule 與 scan step 都提供以下入口，接受 builder 產生或手寫的 program：
+
+| 入口 | 預設寫入 slot 的資料 |
+| --- | --- |
+| `run_acquire(prog, soc, ...)` | 第一個 ADC 的第一次 read，IQ 轉 complex |
+| `run_acquire_summed(prog, soc, processor=..., ...)` | 累積總和，不除 reps 或 rounds |
+| `run_acquire_decimated(prog, soc, ...)` | 第一個 ADC 的 complex trace，保留 repetitions 與 samples 軸 |
+
+`run` 把轉換後的資料寫進目前 Schedule 或 step 的 slot，並觸發 buffer 的 live update。
+Scan step 使用自身 path 選 slot，所以在 host loop 中呼叫 `step.run_acquire(...)`。
+每次 completed round 都先轉換與寫入，再檢查 `RunOptions.stop_condition`。
+Callback 不收參數，可讀 slot，回傳 True 或 `StopDecision(met=True)` 就停止目前 acquire。
+Data stop 保留已完成 rounds，Schedule 仍是 completed，不會取消後續 host loop。
+外部 stop 則透過 Schedule scope 傳入 acquire，保留已完成資料，其餘 slot 維持 NaN。
+失敗或中斷可能留下 partial data，回傳後仍須檢查本次 `context.scope.stop.raise_if_error()`。
+
+`RunOptions.retry` 是額外嘗試次數，預設 0。Shot overrun 至少重試一次，並先還原取數前的 slot。
+外部 stop 與 interruption 不重試。Converter 或 live update 的例外直接傳播，不走 acquisition retry。
+`progress` 控制 native 取數進度，`converter` 同時處理各輪累積值與最終值。
+`rounds` 等 QICK 原生參數直接傳給 run 方法，`rounds` 必須為正整數，不接受 bool。
+不要把 `rounds` 放進 `RunOptions`。
+
+Summed 範例先 build 再解析 read label。以下是上方 builder 範例的替代取數段，
+使用同一個 `prog`，但 slot 改為 float64 的 count、sum I、sum Q 三欄。
+
+```python
+from zcu_tools.program.v2 import IQ, shot_sums
+
+processor = shot_sums(prog, [IQ("terminal")])
+sums = SignalBuffer((config.length.expts, 3), dtype=np.float64)
+
+with Schedule(config, sums, scope=context.scope) as sched:
+    sched.run_acquire_summed(
+        prog, context.soc, processor=processor, rounds=sched.cfg.rounds,
+        options=RunOptions(retry=sched.cfg.acquire_retry),
+    )
+```
+
+需要不同形狀或 conditional mean 時，用 `RunOptions(converter=...)` 明確轉換。
+`shot_sums`、分類軸與 `split_sums` 見 [program acquisition](../../lib/zcu_tools/program/README.md#summed-acquisition)。
+Mux 多 ADC 的 run 也要提供符合 slot 形狀的 converter，不能沿用只取第一個 ADC 的預設。
+新 emit 路徑不支援 legacy `MuxReadout.collect_raw_iq`，不要用該方法作 converter。
+
+Decimated 範例不使用 sweep。`trace_buffer` 由 caller 按這次 rounded readout window
+預先配置，形狀須符合 backend 的 repetitions 與 samples 軸，並可提供 `on_update`。
+這次建構建立新的 readout，不重用前一個 built program 的物件。
+
+```python
+trace_builder = TimelineBuilder(context.soccfg, reps=1)
+trace_builder.emit(Readout("readout", config.readout))
+trace_prog = trace_builder.build()
+
+with Schedule(config, trace_buffer, scope=context.scope) as sched:
+    sched.run_acquire_decimated(
+        trace_prog, context.soc, rounds=sched.cfg.rounds,
+        options=RunOptions(progress=True),
+    )
+```
+
+Program 本身的 `acquire`、`acquire_summed` 與 `acquire_decimated` 只取數並回傳。
+它們不寫 Schedule slot，不管理 live update、retry 或 Schedule stop_condition。
+直接呼叫時，caller 自己傳入 cancel flag 並處理結果。
 
 ## v2 cfg 組合慣例
 
