@@ -57,12 +57,21 @@ class NotebookPlotHost:
         # tolerated: PlotHost requires this keyword; both modes draw synchronously.
         final: bool = False,  # noqa: ARG002
     ) -> None:
+        from ipympl.backend_nbagg import Canvas
+
         manager = self._managers.get(figure)
         if manager is None:
             raise ValueError("Figure is not presented by this host")
+        canvas = manager.canvas
+        if not isinstance(canvas, Canvas):
+            raise TypeError("Presented figure lost its ipympl canvas")
         # Idle draws require frontend requests that can wait until the cell ends.
         # Both ordinary updates and final draws use the synchronous path.
-        manager.canvas.draw()
+        # The frontend's base-image request waits for the busy cell too, so a diff
+        # frame would land on a blank canvas; send a complete frame every time.
+        # tolerated: ipympl offers full-frame mode only through this trait.
+        canvas._force_full = True  # pyright: ignore[reportPrivateUsage]
+        canvas.draw()
 
     def release(self, figure: Figure) -> None:
         manager = self._managers.get(figure)

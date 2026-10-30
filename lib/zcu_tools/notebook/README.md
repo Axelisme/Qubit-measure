@@ -1,6 +1,6 @@
 # `zcu_tools.notebook`
 
-**Last updated:** 2026-10-28
+**Last updated:** 2026-10-30（notebook liveplot 完整 frame）
 
 **讀者：** lab-author。Notebook 實驗入口、互動分析與支援模組導覽。
 
@@ -91,7 +91,7 @@ GUI／MCP 的 temporary aliases 或 target 不改這個保存 handle。
 - GE 的 run／FIT／save／load 使用 `nb_adapter(GE_Exp())` 與核心 typed cfg／options。Caller-owned `GEPostAnalyzer` 是獨立 post 工具，明確接收 `GEPrimaryRecord` 與 post options。Primary 是共用 AnalysisRecord；post record 從 primary 取得同一來源，保留其 calibration、options 與純圖。工具不讀 Adapter 的 current run／FIT，不重新 fitting。成功收尾後才發布 post record 與 presentation handle；失敗保留舊成果，舊原生圖仍可保存。
 - Caller-owned `flux_dep.FluxDepAnalyzer.start(source, inputs, options)` 明確接收 opaque RunRecord 與獨立 FluxPickInputs，不從具體實驗結果抽取 spectra。Done 保存捕捉的 source、實際終態 FluxPickState、數值與純具名 `pick` Figure。工具另持有 Plots presentation handle。Cancel 或失敗保留舊成果；Adapter 的 run／load 不清除此工具的分析。Notebook 拖曳預覽與 measure click-follow frontend 各自保留 gesture／lifecycle。
 - [`utils.py`](utils.py)：提供圖檔保存與設備資訊等 Notebook 輔助函式。Sweep 建構使用 `experiment.utils.make_sweep`，與核心實驗共用框架入口。`dump_device_info` 與 `reconnect_devices` 接收 caller 的 DeviceManager，不查全域 registry。
-- [`plotting.py`](plotting.py)：`NotebookPlotHost` 實作共用 `PlotHost`，直接以 ipympl widget 呈現原生 Figure。不登記 pyplot manager，也不切換全域 backend。普通圖與 liveplot 的呈現時機由 `Plots` 控制，host 不偵測 browser 是否可用，不降級 widget 錯誤。
+- [`plotting.py`](plotting.py)：`NotebookPlotHost` 實作共用 `PlotHost`，直接以 ipympl widget 呈現原生 Figure。不登記 pyplot manager，也不切換全域 backend。普通圖與 liveplot 的呈現時機由 `Plots` 控制，host 不偵測 browser 是否可用，不降級 widget 錯誤。每次 refresh 都送完整 frame：cell 執行中前端要求底圖的訊息要等 cell 結束才處理，只送差異像素會疊在空白畫布上，格線與 tick 留下殘影。
 
 ## 共用責任與目前邊界
 
