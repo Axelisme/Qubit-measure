@@ -52,7 +52,7 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 
 ## Experiment runtime／Workflows
 
-- [0083 — Program macro 與具名 timeline](0083-program-macros-and-timelines.md)：MyProgramV2 基底、顯式 module 宣告與每次 emission、B1 結尾與 reference 分離、規則 b 與逐點精確 ceil、runtime producer bounds 與寫入稽核、Branch／Repeat 實際路徑與 wait-only、Module Join 與 program join 分工，以及 IR timing analysis。A、B 已交付；C frontend 遷移與 D 舊路徑移除另行交付。
+- [0083 — Program macro 與具名 timeline](0083-program-macros-and-timelines.md)：MyProgramV2 基底、module identity／resource owner 與每次 emission、TimelineBuilder 組序列與 Schedule run_acquire* 取數的分工、timeline 範圍預設、B1 結尾與 reference 分離、規則 b 與逐點精確 ceil、runtime producer bounds 與寫入稽核、Branch／Repeat 實際路徑與 wait-only、Module Join 與 program join 分工，以及 IR timing analysis。A、B 與 builder 已交付；C frontend、實驗遷移與 D 舊路徑移除另行交付。
 - [0062 — 實驗執行與 workflow 編排](0062-experiment-workflow.md)：單一 async workflow、一 run 一 operation、Pause 中斷及同 request 重試、live tunables、core 同簽名 env.run、operation facts 與作者自存 commit 目錄。
 - [0069 — 實驗核心、前端包裝與具名圖形產物](0069-experiment-core-and-frontends.md)：無跨次狀態的實驗核心、RunRecord／AnalysisRecord、共用 from_stored 與資料優先 nullable cfg、Notebook native load 與 Labber 匯出、GUI opaque result、具名原生圖及 RunContext／CfgEnv。
 
