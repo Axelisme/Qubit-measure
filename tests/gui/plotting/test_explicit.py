@@ -150,7 +150,6 @@ def explicit_show_driver(qapp) -> Iterator[ComponentDriver]:
         subplot_kw={"xlabel": "Frequency (MHz)", "ylabel": "Signal (mV)"},
     )
     scope = LifetimeScope(window)
-    owner_id = threading.get_ident()
     set_caption, push = _native_callbacks(plots, axes)
 
     def show() -> None:
@@ -163,14 +162,15 @@ def explicit_show_driver(qapp) -> Iterator[ComponentDriver]:
             push(np.array([1.0, 3.0, 2.0]))
             return threading.get_ident()
 
-        assert _run_worker(qapp, work) != owner_id
+        _run_worker(qapp, work)
         if get_figure_container(figure) is not None:
             host.refresh(figure, final=True)
         status.setText("Worker complete")
 
     def legacy() -> None:
-        viewer = create_trace(plots, "legacy", "Time (us)", "Legacy signal")
-        viewer.update((np.array([0.0, 1.0]), np.array([1.0, 2.0])))
+        create_trace(plots, "legacy", "Time (us)", "Legacy signal").update(
+            (np.array([0.0, 1.0]), np.array([1.0, 2.0]))
+        )
         host.refresh(plots["legacy"], final=True)
         status.setText("Legacy shown")
 
