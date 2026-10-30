@@ -1,6 +1,6 @@
 # GUI plotting
 
-**Last updated:** 2026-10-24
+**Last updated:** 2026-10-30
 
 **讀者：** framework-dev。Matplotlib／Qt 圖形呈現、更新與釋放契約。
 
@@ -18,6 +18,12 @@ refresh 立即 flush 最新圖，不等待下一次呈現。RPC PNG 讀同一份
 不從已呈現的畫面反推資料。
 Qt canvas 與 Figure 的生命週期分開。Release 取消待呈現工作並釋放 presentation，保留原圖及 Agg canvas，
 caller 仍可修改 artists 或 savefig。
+
+`plots.subplots(2, 2, num="fit")` 不呈現。`fig.show()` 透過 host 首次 attach，
+重複呼叫不增加 canvas。框架 manager 跟隨 Qt canvas 交換，show 不改用 pyplot。
+Finish 後 show 一律 raise RuntimeError，release 後也相同。
+Release 還原帶框架 manager 的 Agg canvas，manager 不再保留舊 Plots。
+另一 host 可透過 `present(figure)` 接上這張原生圖。
 
 FigureContainer 包裝 QStackedWidget 與 placeholder，並擁有容器 membership 與
 Qt wrapper 存活狀態的唯讀查詢。host.py 透過容器介面維護 weak-key

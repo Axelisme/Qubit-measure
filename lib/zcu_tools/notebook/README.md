@@ -119,7 +119,12 @@ NotebookExperiment 隔離 caller cfg／options 與核心工作輸入，不深拷
 
 明確 Notebook host 同步執行 caller 的操作，caller 負責順序。Host 在發布前完成
 widget 初始化，普通更新與最後刷新都同步繪製，不等待 cell 結束才處理前端請求。
-已有 manager 的 Figure 不能由另一 host 接管。完成操作不自動關閉圖，建立新操作也不關閉舊圖；caller 明確
+已有其他 presentation manager 的 Figure 不能由另一 host 接管。
+`Plots.subplots(2, 2, num="fit")` 不發布 widget，`fig.show()` 才首次呈現。
+Host 接受框架 manager，換成 ipympl manager 後仍將 show 交回同一 operation。
+重複 show 不重複發布。Finish 後 show 一律 raise RuntimeError，release 後也相同。
+Release 還原帶框架 manager 的 Agg canvas，並解除它對舊 Plots 的參照。
+另一 host 可經自己的 `present(figure)` 呈現保留的圖。完成操作不自動關閉圖，建立新操作也不關閉舊圖；caller 明確
 呼叫 `Plots.release()` 才釋放 canvas／toolbar，原 Figure 仍可 `savefig`。直接建立
 widget 而不登記 pyplot manager，避免 cell 結束時額外自動呈現。共用 NotebookAdapter 與 FluxDepAnalyzer 使用此 host。Host 不取代
 這些入口的狀態與分析契約。

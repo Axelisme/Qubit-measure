@@ -75,6 +75,37 @@ def notebook_plots(
         plots.release()
 
 
+def test_figure_show_survives_notebook_manager_replacement(
+    notebook_plots: tuple[Callable[[], Plots], list[Canvas]],
+) -> None:
+    create, published = notebook_plots
+    plots = create()
+    figure, axes = plots.subplots(num="explicit")
+    axes.plot([0, 1], [2, 3])
+    backend, numbers = matplotlib.get_backend(), plt.get_fignums()
+    assert published == []
+    figure.show()
+    assert published == [figure.canvas]
+    figure.show()
+    assert published == [figure.canvas]
+    plots.finish()
+    with pytest.raises(RuntimeError, match="finished"):
+        figure.show()
+    assert matplotlib.get_backend() == backend
+    assert plt.get_fignums() == numbers
+    plots.release()
+    with pytest.raises(RuntimeError, match="operation.*finished"):
+        figure.show()
+    another_host = NotebookPlotHost()
+    try:
+        another_host.present(figure)
+        assert published == [published[0], figure.canvas]
+        with pytest.raises(RuntimeError, match="operation.*finished"):
+            figure.show()
+    finally:
+        another_host.release(figure)
+
+
 def test_initial_frame_is_ready_before_widget_publication(
     notebook_plots: tuple[Callable[[], Plots], list[Canvas]],
     monkeypatch: pytest.MonkeyPatch,
@@ -238,7 +269,8 @@ def test_toolbar_release_error_still_closes_canvas_and_keeps_figure_savable(
     assert toolbar.comm is None
     assert toolbar.layout.comm is None
     assert figure.canvas is not canvas
-    assert figure.canvas.manager is None
+    with pytest.raises(RuntimeError, match="finished"):
+        figure.show()
     output = BytesIO()
     figure.savefig(output, format="png")
     assert output.getvalue().startswith(b"\x89PNG")
@@ -348,13 +380,15 @@ def test_manager_failure_releases_acquired_widgets_and_restores_savefig(
     acquired: list[Canvas] = []
     error = RuntimeError("manager construction failed")
 
-    def fail_manager(canvas: Canvas, num: int) -> FigureManager:
+    initialize = FigureManager.__init__
+
+    def fail_manager(manager: FigureManager, canvas: Canvas, num: int) -> None:
         acquired.append(canvas)
         if stage == "toolbar":
-            FigureManager(canvas, num)
+            initialize(manager, canvas, num)
         raise error
 
-    monkeypatch.setattr("ipympl.backend_nbagg.FigureManager", fail_manager)
+    monkeypatch.setattr(FigureManager, "__init__", fail_manager)
     plots = create()
     with pytest.raises(RuntimeError, match="manager construction failed") as exc:
         create_trace(plots, "live", "x", "y")
@@ -367,7 +401,7 @@ def test_manager_failure_releases_acquired_widgets_and_restores_savefig(
         assert canvas.toolbar.comm is None
         assert canvas.toolbar.layout.comm is None
     assert plots["live"].canvas is not canvas
-    assert plots["live"].canvas.manager is None
+    assert plots["live"].canvas.manager is not None
     plots.finish(present=False)
     plots.release()
     output = BytesIO()

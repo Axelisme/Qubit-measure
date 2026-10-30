@@ -7,8 +7,11 @@
 `figures.FigureCollection` 擁有具名原生 Figure。同名同物件登記等冪，名稱衝突、
 同圖別名及跨存活 owner 接管一律拒絕。`seal()` 固定集合，不凍結 artist，
 不 close canvas，也不代表操作成功。登記表不延長集合生命週期。
-`subplots(name, ...)` 直接建立原生 Figure／Axes 與 Agg canvas，保留 Matplotlib
-shape／layout，不登記 pyplot manager 或切換全域 backend。
+`subplots(2, 2, num="fit")` 接受 Matplotlib 的列數、欄數、sharing 與 layout 參數，
+回傳原生 Figure／Axes，保留 scalar／array shape。`num` 是集合內唯一的字串名字，
+重複名字 raise ValueError。省略時依序取下一個未使用的 `figure_N`。
+第一個位置參數為字串的 `subplots("fit", ...)` 保留為遷移相容寫法。
+建圖使用 Agg canvas，不登記 pyplot manager 或切換全域 backend。
 
 ## 預設外觀
 
@@ -31,6 +34,12 @@ GUI runtime、`NotebookPlotHost` 建構與離線 probe 在建立實驗圖前，�
 並負責 present、refresh 與 release。Shared plotting 不 import Qt 或 lab。
 GUI 注入 [QtPlotHost](../gui/plotting/README.md)，Notebook 注入自己的呈現 host。
 `NonPresentingHost` 直接執行 callback，不開視窗或安排繪製，仍支援 artists 與 savefig。
+
+`Plots.subplots` 不呈現圖。作者呼叫 `fig.show()` 時，框架的 FigureManagerBase 子類
+透過 host 同步呈現，同一張圖重複 show 不重建 presentation。
+Qt canvas 交換及 Notebook ipympl manager 替換後，show 仍走同一個 operation。
+NonPresentingHost 的 show 在 operation 尚未 finish 時不做事。
+這條路徑不使用 `plt.show()`。未 show 的圖仍在 `finish(present=True)` 時呈現。
 
 `Plots.create_live(name, initialize, ...)` 在 owner 建圖或接上既有 axes，呼叫作者的
 initializer，成功後立即呈現。Initializer 收到 host、figure、claimed axes 與 active
@@ -67,6 +76,9 @@ Caller 先停止 producer，再呼叫 `finish()`。Finish 固定 membership、�
 回傳的 `NamedFigures` 只有具名 Mapping 介面，保留原生圖及登記 owner。
 Presentation owner 另持有 Plots，透過 `release()` 釋放呈現，不銷毀保留的圖。
 Release 逐圖嘗試，彙整失敗；失敗的項目可以重試。
+Finish 後的 `fig.show()` 一律 raise RuntimeError，release 前後相同。
+Release 還原帶框架 manager 的 Agg canvas，並解除 manager 對舊 Plots 的參照。
+另一 host 可以經自己的 `present(figure)` 呈現保留的圖，但不恢復已結束 operation 的 show。
 `fork()` 建立同 host 的獨立通用 Plots，不共享名稱、handle 或 finish／release。
 
 ## 格式與診斷圖的 owner

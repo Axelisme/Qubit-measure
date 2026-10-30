@@ -9,9 +9,11 @@ from typing import Protocol, TypeVar
 
 from matplotlib import rc_context
 from matplotlib.axes import Axes
+from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib.figure import Figure
 
 from .figures import FigureCollection, NamedFigures
+from .presentation import FigureShowManager
 
 _T = TypeVar("_T")
 
@@ -24,6 +26,8 @@ class PlotHost(Protocol):
     thread dispatch. present(figure) attaches its view; refresh(figure) requests
     rendering, with final=True flushing the latest frame before return.
     release(figure) detaches presentation without destroying the native figure.
+    Hosts preserve FigureShowManager across canvas swaps and restore it on the
+    released Agg canvas; replacement backend managers delegate show to it.
     Host errors propagate to the producer. No method infers a current figure.
     """
 
@@ -56,8 +60,11 @@ class Plots(FigureCollection):
     """One producer's plotting lifetime, shared by frontend adapters.
 
     Stop the producer before finish. Host calls are synchronous and preserve
-    that producer's order. General figures stay unpresented until finish unless
-    drawn. Live factories and the first successful draw present immediately.
+    that producer's order. subplots accepts Matplotlib dimensions and optional
+    unique num names, without presenting. Figure.show presents once through the
+    host, even after a canvas swap. It raises RuntimeError after finish, including
+    after release. Release drops the manager's reference to this operation.
+    Legacy live factories and the first successful draw present immediately.
     Finishing fixes membership and stops typed updates; it does not declare
     analysis success. Release presentation separately
     after finishing. Neither finish nor release destroys retained Figure objects.
@@ -71,6 +78,18 @@ class Plots(FigureCollection):
         self._finished = False
         self._finished_figures: NamedFigures | None = None
         self._released: set[Figure] = set()
+
+    def _create_canvas(self, figure: Figure) -> None:
+        FigureShowManager(FigureCanvasAgg(figure), lambda: self._show(figure))
+
+    def _show(self, figure: Figure) -> None:
+        self.ensure_active()
+
+        def present() -> None:
+            self.ensure_active()
+            self._present_live(figure)
+
+        self._host.call(present)
 
     def fork(self) -> Plots:
         """Return an empty independent producer using this same presentation host.
@@ -293,6 +312,9 @@ class Plots(FigureCollection):
                 except Exception as error:  # noqa: BLE001
                     errors.append(error)
                 else:
+                    manager = figure.canvas.manager
+                    if isinstance(manager, FigureShowManager):
+                        manager.retire()
                     self._released.add(figure)
             if errors:
                 raise ExceptionGroup("Failed to release plot presentation", errors)

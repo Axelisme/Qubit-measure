@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import os
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from io import BytesIO
 from pathlib import Path
 
@@ -12,7 +13,15 @@ from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib.figure import Figure
 from matplotlib.lines import Line2D
 from qtpy.QtCore import QCoreApplication, QEvent, QEventLoop, QTimer
-from qtpy.QtWidgets import QApplication, QLabel, QStackedWidget
+from qtpy.QtWidgets import (
+    QApplication,
+    QLabel,
+    QPushButton,
+    QStackedWidget,
+    QVBoxLayout,
+    QWidget,
+)
+from zcu_tools.gui.lifetime import LifetimeScope
 from zcu_tools.gui.plotting import FigureContainer, get_figure_container
 from zcu_tools.gui.plotting.explicit import QtPlotHost
 from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
@@ -20,6 +29,7 @@ from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
 from zcu_tools.plotting.plots import Plots
 
 from tests._plotting import create_trace
+from tests.gui._user_input import ComponentDriver
 
 
 @pytest.fixture
@@ -66,6 +76,140 @@ def _run_worker(qapp: QApplication, work: Callable[[], int]) -> int:
         assert background.quiesce()
         background.deleteLater()
         qapp.processEvents()
+
+
+def test_figure_show_survives_qt_canvas_swap(qapp, hosts) -> None:
+    stacks, containers, adapters = hosts
+    plots = Plots(adapters[0])
+    figure, axes = plots.subplots(num="explicit")
+    axes.plot([0, 1], [2, 3])
+    assert stacks[0].count() == 1
+    figure.show()
+    canvas = figure.canvas
+    assert get_figure_container(figure) is containers[0]
+    assert stacks[0].count() == 2
+    figure.show()
+    assert figure.canvas is canvas
+    assert stacks[0].count() == 2
+    plots.finish()
+    with pytest.raises(RuntimeError, match="finished"):
+        figure.show()
+    plots.release()
+    with pytest.raises(RuntimeError, match="operation.*finished"):
+        figure.show()
+    adapters[1].present(figure)
+    assert get_figure_container(figure) is containers[1]
+    with pytest.raises(RuntimeError, match="operation.*finished"):
+        figure.show()
+    adapters[1].release(figure)
+
+
+@pytest.fixture
+def explicit_show_driver(qapp) -> Iterator[ComponentDriver]:
+    window = QWidget()
+    layout = QVBoxLayout(window)
+    status = QLabel("Ready")
+    status.setObjectName("plot-status")
+    layout.addWidget(status)
+    stack = QStackedWidget()
+    placeholder = QLabel("No figure shown")
+    stack.addWidget(placeholder)
+    layout.addWidget(stack, stretch=1)
+    container = FigureContainer(stack, placeholder)
+    owner = QtOwnerScheduler()
+    host = QtPlotHost(container, owner)
+    plots = Plots(host)
+    figure, axes = plots.subplots(
+        num="explicit",
+        subplot_kw={"xlabel": "Frequency (MHz)", "ylabel": "Signal (mV)"},
+    )
+    scope = LifetimeScope(window)
+
+    def show() -> None:
+        figure.show()
+        status.setText("Shown")
+
+    def update() -> None:
+        def work() -> int:
+            viewer = create_trace(
+                plots,
+                "explicit",
+                "Frequency (MHz)",
+                "Signal (mV)",
+                axes=axes,
+                title="Updated from worker",
+            )
+            viewer.update((np.array([0.0, 1.0, 2.0]), np.array([1.0, 3.0, 2.0])))
+            return threading.get_ident()
+
+        _run_worker(qapp, work)
+        host.refresh(figure, final=True)
+        status.setText("Worker complete")
+
+    def legacy() -> None:
+        viewer = create_trace(plots, "legacy", "Time (us)", "Legacy signal")
+        viewer.update((np.array([0.0, 1.0]), np.array([1.0, 2.0])))
+        host.refresh(plots["legacy"], final=True)
+        status.setText("Legacy shown")
+
+    def finish() -> None:
+        plots.finish()
+        plots.release()
+        status.setText("Released")
+
+    for caption, action in (
+        ("Show figure", show),
+        ("Update from worker", update),
+        ("Legacy live", legacy),
+        ("Finish and release", finish),
+    ):
+        button = QPushButton(caption)
+        layout.addWidget(button)
+        scope.connect(button.clicked, action)
+    window.show()
+    try:
+        yield ComponentDriver(window)
+    finally:
+        plots.finish(present=False)
+        plots.release()
+        scope.close()
+        container.clear_dynamic_canvases()
+        window.close()
+        window.deleteLater()
+        owner.deleteLater()
+        qapp.processEvents()
+
+
+def test_component_driver_explicit_show_worker_update_and_legacy_live(
+    explicit_show_driver: ComponentDriver, tmp_path: Path
+) -> None:
+    driver = explicit_show_driver
+    driver.resize_window(800, 650)
+    evidence = Path(os.environ.get("PLOT_SHOW_EVIDENCE", str(tmp_path)))
+    assert driver.plots().axes == ()
+    driver.screenshot(evidence / "01-unshown.png")
+    driver.click("Show figure")
+    assert driver.observe(object_name="plot-status").text == "Shown"
+    assert driver.plots().axes[0].xlabel == "Frequency (MHz)"
+    assert driver.plots().axes[0].visible_curves == 0
+    driver.screenshot(evidence / "02-shown.png")
+    driver.click("Show figure")
+    assert len(driver.plots().axes) == 1
+    driver.screenshot(evidence / "03-repeat-show.png")
+    driver.click("Update from worker")
+    assert driver.observe(object_name="plot-status").text == "Worker complete"
+    assert driver.plots().axes[0].visible_curves == 1
+    assert "Updated from worker" in driver.plots().axes[0].annotations
+    driver.screenshot(evidence / "04-worker-update.png")
+    driver.click("Legacy live")
+    assert driver.observe(object_name="plot-status").text == "Legacy shown"
+    assert driver.plots().axes[0].ylabel == "Legacy signal"
+    assert driver.plots().axes[0].visible_curves == 1
+    driver.screenshot(evidence / "05-legacy-live.png")
+    driver.click("Finish and release")
+    assert driver.observe(object_name="plot-status").text == "Released"
+    assert driver.plots().axes == ()
+    driver.screenshot(evidence / "06-released.png")
 
 
 def test_worker_live_artists_run_on_owner_and_regular_figures_wait(

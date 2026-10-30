@@ -11,6 +11,7 @@ from qtpy.QtCore import QTimer
 from qtpy.QtWidgets import QWidget
 
 from zcu_tools.gui.session.ports import OwnerScheduler
+from zcu_tools.plotting.presentation import FigureShowManager
 
 from . import host
 from .container import FigureContainer
@@ -49,7 +50,10 @@ class QtPlotHost:
         previous = host.get_figure_container(figure)
         if previous is not None and previous is not self._container:
             raise ValueError("Figure is presented by another container")
+        manager = figure.canvas.manager
         host.attach_existing_figure_to_container(figure, self._container)
+        if isinstance(manager, FigureShowManager):
+            manager.attach(figure.canvas)
         figure.canvas.draw_idle()
 
     def refresh(self, figure: Figure, *, final: bool = False) -> None:
@@ -97,5 +101,8 @@ class QtPlotHost:
         canvas = figure.canvas
         if not isinstance(canvas, QWidget):
             raise RuntimeError("Presented Figure has no Qt canvas")
+        manager = figure.canvas.manager
         host.remove_canvas(canvas)
-        FigureCanvasAgg(figure)
+        replacement = FigureCanvasAgg(figure)
+        if isinstance(manager, FigureShowManager):
+            manager.attach(replacement)

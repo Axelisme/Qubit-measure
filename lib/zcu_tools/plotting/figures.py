@@ -32,6 +32,7 @@ class FigureCollection(Mapping[str, Figure]):
     def __init__(self) -> None:
         self._figures: dict[str, Figure] = {}
         self._sealed = False
+        self._figure_number = 0
 
     def __getitem__(self, name: str) -> Figure:
         with _registration_lock:
@@ -75,10 +76,41 @@ class FigureCollection(Mapping[str, Figure]):
     @overload
     def subplots(
         self,
+        nrows: Literal[1] = 1,
+        ncols: Literal[1] = 1,
+        *,
+        num: str | None = None,
+        sharex: bool | Literal["none", "all", "row", "col"] = False,
+        sharey: bool | Literal["none", "all", "row", "col"] = False,
+        squeeze: Literal[True] = True,
+        subplot_kw: dict[str, Any] | None = None,
+        gridspec_kw: dict[str, Any] | None = None,
+        **figure_kwargs: Any,
+    ) -> tuple[Figure, Axes]: ...
+
+    @overload
+    def subplots(
+        self,
+        nrows: int = 1,
+        ncols: int = 1,
+        *,
+        num: str | None = None,
+        sharex: bool | Literal["none", "all", "row", "col"] = False,
+        sharey: bool | Literal["none", "all", "row", "col"] = False,
+        squeeze: bool = True,
+        subplot_kw: dict[str, Any] | None = None,
+        gridspec_kw: dict[str, Any] | None = None,
+        **figure_kwargs: Any,
+    ) -> tuple[Figure, Axes | NDArray[np.object_]]: ...
+
+    @overload
+    def subplots(
+        self,
         name: str,
         *,
         nrows: Literal[1] = 1,
         ncols: Literal[1] = 1,
+        num: str | None = None,
         sharex: bool | Literal["none", "all", "row", "col"] = False,
         sharey: bool | Literal["none", "all", "row", "col"] = False,
         squeeze: Literal[True] = True,
@@ -94,6 +126,7 @@ class FigureCollection(Mapping[str, Figure]):
         *,
         nrows: int = 1,
         ncols: int = 1,
+        num: str | None = None,
         sharex: bool | Literal["none", "all", "row", "col"] = False,
         sharey: bool | Literal["none", "all", "row", "col"] = False,
         squeeze: bool = True,
@@ -105,10 +138,10 @@ class FigureCollection(Mapping[str, Figure]):
     # tolerated: Keep native Matplotlib shape, sharing and layout options explicit.
     def subplots(  # noqa: PLR0913
         self,
-        name: str,
-        *,
+        *args: int | str,
         nrows: int = 1,
         ncols: int = 1,
+        num: str | None = None,
         sharex: bool | Literal["none", "all", "row", "col"] = False,
         sharey: bool | Literal["none", "all", "row", "col"] = False,
         squeeze: bool = True,
@@ -116,15 +149,38 @@ class FigureCollection(Mapping[str, Figure]):
         gridspec_kw: dict[str, Any] | None = None,
         **figure_kwargs: Any,
     ) -> tuple[Figure, Axes | NDArray[np.object_]]:
-        """Build and register native subplots without opening a presentation.
+        """Create native subplots without presenting or registering with pyplot.
 
-        Shape, shared axes and styling follow Figure.subplots/Figure. The Agg
-        canvas makes the figure saveable without choosing a process-wide backend
-        or registering a pyplot manager. An adapter can attach its own canvas
-        after the producing operation completes.
+        Accept Matplotlib's positional nrows/ncols and keyword sharing, squeeze,
+        subplot, gridspec and Figure options. num is a nonempty unique string;
+        omitted names use the next unused figure_N in creation order. Conflicts
+        raise ValueError. A leading string remains a legacy name and cannot be
+        combined with num. Adding figures after seal raises RuntimeError.
+        Return a Figure and Matplotlib's scalar, 1-D or 2-D axes shape.
         """
+        if args and isinstance(args[0], str):
+            # Migration compatibility: remove the leading string name at contraction.
+            if len(args) != 1 or num is not None:
+                raise TypeError(
+                    "A legacy name cannot be combined with num or dimensions"
+                )
+            num = args[0]
+        else:
+            if len(args) > 2 or any(not isinstance(arg, int) for arg in args):
+                raise TypeError("Expected at most two integer dimensions")
+            if args:
+                nrows = int(args[0])
+            if len(args) == 2:
+                ncols = int(args[1])
+        if num is None:
+            self._figure_number += 1
+            while f"figure_{self._figure_number}" in self:
+                self._figure_number += 1
+            num = f"figure_{self._figure_number}"
+        if not num:
+            raise ValueError("Figure name must be a nonempty string")
         figure = Figure(**figure_kwargs)
-        FigureCanvasAgg(figure)
+        self._create_canvas(figure)
         axes = figure.subplots(
             nrows=nrows,
             ncols=ncols,
@@ -134,8 +190,11 @@ class FigureCollection(Mapping[str, Figure]):
             subplot_kw=subplot_kw,
             gridspec_kw=gridspec_kw,
         )
-        self.adopt(name, figure)
+        self.adopt(num, figure)
         return figure, axes
+
+    def _create_canvas(self, figure: Figure) -> None:
+        FigureCanvasAgg(figure)
 
     def seal(self) -> None:
         """Stop accepting new figures while retaining native figure references."""
