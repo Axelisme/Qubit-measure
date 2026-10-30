@@ -50,3 +50,47 @@ def test_first_notebook_presentation_preserves_selected_backend_and_pyplot_figur
         check=False,
     )
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_unselected_backend_is_rejected_without_loading_ipympl_or_selecting_backend(
+    tmp_path: Path,
+) -> None:
+    source = dedent("""
+        import sys
+        import matplotlib
+        import matplotlib.pyplot as plt
+
+        assert matplotlib.get_backend(auto_select=False) is None
+        before_interactive = matplotlib.is_interactive()
+        before_figures = plt.get_fignums()
+        from zcu_tools.notebook.plotting import NotebookPlotHost
+        from zcu_tools.plotting.plots import Plots
+
+        plots = Plots(NotebookPlotHost())
+        try:
+            figure, _ = plots.subplots(num="unselected")
+            try:
+                figure.show()
+            except RuntimeError as error:
+                assert "backend" in str(error).lower(), str(error)
+            else:
+                raise AssertionError("An unselected backend must fail before ipympl import")
+            assert matplotlib.get_backend(auto_select=False) is None
+            assert "ipympl" not in sys.modules
+            assert matplotlib.is_interactive() == before_interactive
+            assert plt.get_fignums() == before_figures
+        finally:
+            plots.finish(present=False)
+            plots.release()
+    """)
+    environment = {**os.environ, "MPLCONFIGDIR": str(tmp_path)}
+    environment.pop("MPLBACKEND", None)
+    result = subprocess.run(
+        [sys.executable, "-c", source],
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=15,
+        check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
