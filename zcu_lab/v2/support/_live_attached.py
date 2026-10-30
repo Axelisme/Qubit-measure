@@ -2,12 +2,18 @@
 
 import numpy as np
 from matplotlib.axes import Axes
+from matplotlib.collections import PathCollection
 from matplotlib.image import AxesImage
 from matplotlib.lines import Line2D
 from numpy.typing import NDArray
 
-from ._live_format import HeatmapFormat, LineFormat, NonUniformHeatmapFormat
-from ._live_handles import heatmap_data, line_data
+from ._live_format import (
+    HeatmapFormat,
+    LineFormat,
+    NonUniformHeatmapFormat,
+    ScatterFormat,
+)
+from ._live_handles import heatmap_data, line_data, scatter_data
 
 
 class AttachedLine:
@@ -102,3 +108,43 @@ class AttachedHeatmap:
         if image is None:
             raise RuntimeError("Image not initialized")
         return (image,)
+
+
+class AttachedScatter:
+    """Scalar-colored points on caller-owned axes, updated with set.
+
+    Add only artists, preserving labels, title and grid settings. Construction
+    and set run on the caller thread without dispatch, refresh or presentation.
+    Use set inside @plots.on_plot_thread after display. No axes-claim check is
+    made, including against legacy tools. Authors coordinate shared artists,
+    autoscale and color limits. This tool does not bind a Plots lifetime.
+    Removing its artists or axes makes set raise RuntimeError. Matplotlib
+    errors propagate without rollback.
+    """
+
+    def __init__(self, axes: Axes) -> None:
+        """Attach an empty scalar-colored point collection to axes."""
+        self._axes = axes
+        self._format = ScatterFormat("", "")
+        self._format.attach_ax(axes)
+
+    def set(
+        self,
+        xs: NDArray[np.float64],
+        ys: NDArray[np.float64],
+        *,
+        colors: NDArray[np.float64],
+    ) -> tuple[PathCollection, ...]:
+        """Replace nonempty real 1D xs, ys and scalar colors of equal length.
+
+        NaN marks unmeasured samples. Autoscale spatial and color limits to the
+        new data and return the changed collection. Invalid dimensions, shape
+        or complex input raises ValueError before mutation. Do not change
+        labels or title, dispatch or refresh.
+        """
+        data = scatter_data(xs, ys, colors)
+        self._format.update(self._axes, data.xs, data.ys, colors=data.colors)
+        scatter = self._format.scatter
+        if scatter is None:
+            raise RuntimeError("Scatter not initialized")
+        return (scatter,)

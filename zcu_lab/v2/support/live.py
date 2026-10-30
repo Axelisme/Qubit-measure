@@ -52,7 +52,7 @@ from matplotlib.figure import Figure
 from zcu_tools.plotting import LiveUpdate
 from zcu_tools.plotting.plots import PlotHost, Plots
 
-from ._live_attached import AttachedHeatmap, AttachedLine
+from ._live_attached import AttachedHeatmap, AttachedLine, AttachedScatter
 from ._live_format import (
     HeatmapFormat,
     LineFormat,
@@ -162,6 +162,11 @@ def live_line(  # noqa: PLR0913  # tolerated: Preserve public labels, style, own
     return plots.create_live(name, create, axes=None if axes is None else (axes,))
 
 
+@overload
+def live_scatter(plots: Axes) -> AttachedScatter: ...
+
+
+@overload
 def live_scatter(
     plots: Plots,
     name: str,
@@ -170,9 +175,30 @@ def live_scatter(
     *,
     title: str | None = None,
     axes: Axes | None = None,
-) -> ScatterPlot:
-    """Create or attach scalar-colored points and return a ScatterPlot handle.
+) -> ScatterPlot: ...
 
+
+def live_scatter(
+    plots: Plots | Axes,
+    name: str | None = None,
+    xlabel: str | None = None,
+    ylabel: str | None = None,
+    *,
+    title: str | None = None,
+    axes: Axes | None = None,
+) -> ScatterPlot | AttachedScatter:
+    """Attach local points, or preserve the legacy owner-managed scatter handle.
+
+    ``live_scatter(ax)`` returns a caller-thread tool whose
+    ``set(xs, ys, colors=colors)`` returns changed artists. It leaves labels
+    and title unchanged, without dispatch, refresh, presentation or a Plots
+    lifetime. No axes-claim check is made, including against legacy tools.
+    Authors coordinate shared artists, autoscale and color limits. Use set
+    inside @plots.on_plot_thread after display. AttachedScatter documents data
+    validation and removed-artist errors. Name, labels, title and axes belong
+    only to the legacy signature; mixing them with an Axes raises TypeError.
+
+    Legacy signature: pass Plots, name, xlabel and ylabel.
     Follow this module's shared live-helper contract for ``plots``, ``name``,
     owner execution, presentation, lifetime and errors. With ``axes=None``,
     create one axes in a new named Figure. Otherwise attach to the supplied
@@ -187,6 +213,12 @@ def live_scatter(
     Invalid data raises ValueError; the shared contract describes copying,
     refresh and RuntimeError cases.
     """
+    if isinstance(plots, Axes):
+        if any(value is not None for value in (name, xlabel, ylabel, title, axes)):
+            raise TypeError("Attached scatter takes axes only")
+        return AttachedScatter(plots)
+    if name is None or xlabel is None or ylabel is None:
+        raise TypeError("Legacy live_scatter requires name, xlabel and ylabel")
     plots.ensure_active()
 
     def create(

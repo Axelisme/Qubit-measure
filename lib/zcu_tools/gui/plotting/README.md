@@ -1,6 +1,6 @@
 # GUI plotting
 
-**Last updated:** 2026-10-30
+**Last updated:** 2026-10-31
 
 **讀者：** framework-dev。Matplotlib／Qt 圖形呈現、更新與釋放契約。
 
@@ -36,7 +36,10 @@ Figure-to-container registry，不讀取容器內部 layout，並透過 GUI-thre
 ## Thread 與 rendering 邊界
 
 Host 必須先在 GUI thread 初始化。Runtime 與 FigureContainer 建構都確保此條件。
-Qt widget 操作與通用 LiveUpdate callback 都透過 host owner 在 GUI thread 執行。
+Qt widget 操作、`@plots.on_plot_thread` 本體與通用 LiveUpdate callback
+都透過 host owner 在 GUI thread 執行。Decorator 從 worker 同步等待 owner，並對已呈現
+的根圖去重 refresh，沿用 host 的 50 ms 繪製合併。Show 前只保留 artist 修改，
+不呼叫 host.refresh，也不呈現。圖顯示後的原生修改一律經此 decorator。
 LiveUpdate 在送入 owner 前複製 caller 的資料，host 不選擇線圖、熱圖或其他格式。
 Lab 的繪圖工具提供格式與 callback，lib 只管理具名圖、更新與呈現。
 Shared mathtext lock／prewarm 保護字型解析，不代表任意 Matplotlib 操作都 thread-safe。

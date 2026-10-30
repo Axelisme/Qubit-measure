@@ -1,6 +1,6 @@
 # `zcu_tools.notebook`
 
-**Last updated:** 2026-10-30（顯式 show 與首次 ipympl 載入）
+**Last updated:** 2026-10-31（原生 artist 更新）
 
 **讀者：** lab-author。Notebook 實驗入口、互動分析與支援模組導覽。
 
@@ -121,6 +121,10 @@ NotebookExperiment 隔離 caller cfg／options 與核心工作輸入，不深拷
 widget 初始化，普通更新與最後刷新都同步繪製，不等待 cell 結束才處理前端請求。
 已有其他 presentation manager 的 Figure 不能由另一 host 接管。
 `Plots.subplots(2, 2, num="fit")` 不發布 widget，`fig.show()` 才首次呈現。
+圖顯示後的原生修改一律經 `@plots.on_plot_thread`。本體在 caller thread 同步執行，
+回傳 changed artists 後由框架去重 refresh 已呈現的根圖，每次送完整 frame。
+Show 前可先更新，只保留 artist 修改，不 refresh、不載入 ipympl。之後 show 或
+finish(present=True) 顯示最新內容。
 Host 接受框架 manager，換成 ipympl manager 後仍將 show 交回同一 operation。
 重複 show 不重複發布。Finish 後 show 一律 raise RuntimeError，release 後也相同。
 Release 還原帶框架 manager 的 Agg canvas，並解除它對舊 Plots 的參照。

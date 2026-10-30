@@ -39,7 +39,8 @@ def heatmap_data(
     """Validate real nonempty 1D axes and signals shaped (len(xs), len(ys)).
 
     Return float64 arrays without changing the inputs. Invalid dimensions,
-    shape or complex data raises ValueError. title is forwarded unchanged.
+    shape or complex data raises ValueError. title=None preserves the current
+    title; a string replaces the heatmap title when the data is applied.
     """
     if any(np.iscomplexobj(data) for data in (xs, ys, signals)):
         raise ValueError("Heatmap updates require real-valued data")
@@ -59,7 +60,13 @@ def line_data(
     num_lines: int,
     title: str | None = None,
 ) -> LineData:
-    """Validate the shared attached/legacy line input without mutating it."""
+    """Return validated float64 line data without mutating the input arrays.
+
+    xs is real 1D; signals has shape (num_lines, len(xs)). For num_lines=1,
+    signals may also be 1D. num_lines is the factory's positive line count.
+    title=None preserves the current title; a string replaces it when applied.
+    Invalid dimensions, shape or complex data raises ValueError.
+    """
     if np.iscomplexobj(xs) or np.iscomplexobj(signals):
         raise ValueError("Line plot updates require real-valued data")
     x_data = np.asarray(xs, dtype=np.float64)
@@ -104,6 +111,33 @@ class LinePlot:
         self._updates.refresh()
 
 
+def scatter_data(
+    xs: NDArray[np.float64],
+    ys: NDArray[np.float64],
+    colors: NDArray[np.float64],
+    title: str | None = None,
+) -> ScatterData:
+    """Return float64 scatter data for nonempty real 1D xs, ys and colors.
+
+    All three arrays must have equal length. Colors are scalar coordinates.
+    title=None preserves the current title; a string replaces it when applied.
+    Invalid dimensions, shape or complex data raises ValueError before mutation.
+    """
+    if any(np.iscomplexobj(data) for data in (xs, ys, colors)):
+        raise ValueError("Scatter updates require real-valued data")
+    x_data, y_data, color_data = (
+        np.asarray(data, dtype=np.float64) for data in (xs, ys, colors)
+    )
+    if (
+        x_data.ndim != 1
+        or x_data.size == 0
+        or y_data.shape != x_data.shape
+        or color_data.shape != x_data.shape
+    ):
+        raise ValueError("Scatter data must be nonempty vectors of equal length")
+    return ScatterData(x_data, y_data, color_data, title)
+
+
 class ScatterPlot:
     """Owner-updated scalar-colored points created by live_scatter."""
 
@@ -128,21 +162,7 @@ class ScatterPlot:
         Finish rejects further updates; host/drawing errors propagate.
         """
         self._updates.ensure_active()
-        if any(np.iscomplexobj(data) for data in (xs, ys, colors)):
-            raise ValueError("Scatter updates require real-valued data")
-        x_data, y_data, color_data = (
-            np.asarray(data, dtype=np.float64) for data in (xs, ys, colors)
-        )
-        if (
-            x_data.ndim != 1
-            or x_data.size == 0
-            or y_data.shape != x_data.shape
-            or color_data.shape != x_data.shape
-        ):
-            raise ValueError("Scatter data must be nonempty vectors of equal length")
-        self._updates.update(
-            ScatterData(x_data, y_data, color_data, title), refresh=refresh
-        )
+        self._updates.update(scatter_data(xs, ys, colors, title), refresh=refresh)
 
 
 class HeatmapPlot:

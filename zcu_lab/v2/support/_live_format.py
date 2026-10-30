@@ -338,6 +338,10 @@ class ScatterFormat:
         if self.show_grid:
             ax.grid()
 
+        self.attach_ax(ax)
+
+    def attach_ax(self, ax: Axes) -> None:
+        """Add points without changing labels, title or grid settings."""
         self.scatter = ax.scatter([], [], marker=".", s=2)
 
     def update(
