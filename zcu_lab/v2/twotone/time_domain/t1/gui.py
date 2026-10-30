@@ -62,9 +62,6 @@ class T1Summary(BaseModel):
 def _T1_analyze(
     req: AnalyzeRequest[T1RunResult, T1AnalyzeOptions], *, plots: Plots
 ) -> T1Analysis:
-    params = req.analyze_params
-    if params.skip < 0:
-        raise ValueError("Skip leading points must be nonnegative")
     return T1Exp().analyze(
         req.run_result,
         req.analyze_params,

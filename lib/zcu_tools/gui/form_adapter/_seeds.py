@@ -9,6 +9,7 @@ from pydantic_core import PydanticUndefinedType
 from zcu_tools.cfg_model import (
     ConfigBase,
     Expr,
+    FieldMeta,
     Hidden,
     Slot,
     Template,
@@ -16,7 +17,7 @@ from zcu_tools.cfg_model import (
     TemplateSeed,
     expand_path,
 )
-from zcu_tools.gui.form import FormEnv, static_defaults
+from zcu_tools.gui.form import FormEnv, FormWritePath, static_defaults
 from zcu_tools.gui.session.parameters import ModuleSlotError
 from zcu_tools.resources.entry.roles import RoleResolutionError
 
@@ -419,32 +420,46 @@ def template_input(
             )
             if not allowed:
                 raise ValueError(f"Slot seed requires a module field: {path!r}")
+            if seed.fallback is not None:
+                template_input(seed.fallback, catalog, allowed, None)
             if (
                 env is not None
-                and (value := nested_slot(seed, allowed, env)) is not None
+                and (value := nested_slot(seed, allowed, env, catalog)) is not None
             ):
                 set_path(data, path, value)
     return _complete_template_input(model, data, template.id)
 
 
 def template_seed_tree(
-    template: Template, catalog: Mapping[str, TemplateDef]
+    template: Template, catalog: Mapping[str, TemplateDef], env: FormEnv | None = None
 ) -> dict[str, JsonValue]:
-    """Describe authored defaults without reading sources.
+    """Derive field requirements from the selected branch, not actual input.
 
-    Call after template_input validates IDs, families and paths.
-    This tree is only for deriving field requirements, never for Slot presence
-    or actual input. Literal overrides replace earlier Expr seeds.
+    Call after template_input validates IDs, families and paths. env is the
+    fixed capture used to select nested Slot fallbacks and expand their paths;
+    None validates the authored declaration without resolving sources.
+    Literal overrides replace earlier Expr seeds.
     """
     # Requirements depend on the authored seed kinds, not replacement values.
-    seeds = dict(catalog[template.id].seeds)
+    seeds = (
+        dict(catalog[template.id].seeds)
+        if env is None
+        else catalog[template.id].expanded_seeds(bindings=template.bindings)
+    )
     seeds.update(template.set)
     data: dict[str, JsonValue] = {}
     for path, seed in seeds.items():
         if isinstance(seed, Slot):
-            nested: dict[str, JsonValue] = {}
-            for child_path, value in seed.set.items():
-                set_path(nested, child_path, declaration_seed(value))
+            if (
+                env is not None
+                and seed.fallback is not None
+                and slot_key(seed, env) is None
+            ):
+                nested = template_seed_tree(seed.fallback, catalog, env)
+            else:
+                nested: dict[str, JsonValue] = {}
+                for child_path, value in seed.set.items():
+                    set_path(nested, child_path, declaration_seed(value))
             set_path(data, path, nested)
         else:
             set_path(data, path, declaration_seed(seed))
@@ -455,6 +470,7 @@ def nested_slot(
     slot: Slot,
     expected: tuple[type[BaseModel], ...],
     env: FormEnv,
+    catalog: Mapping[str, TemplateDef],
 ) -> JsonValue:
     key = slot_key(slot, env)
     if key is not None and env.library is not None:
@@ -473,4 +489,27 @@ def nested_slot(
         for path, seed in slot.set.items():
             set_slot_path(selected, data, path, scalar_seed(seed), env)
         return data
+    if slot.fallback is not None:
+        return template_input(slot.fallback, catalog, expected, env)
     return None
+
+
+def template_metadata(
+    template: Template, catalog: Mapping[str, TemplateDef], env: FormEnv
+) -> dict[FormWritePath, FieldMeta]:
+    """Collect root-relative metadata from this adopted template and its fallbacks.
+
+    Nested fallback metadata applies only when its Slot cannot resolve in env.
+    The template catalog and declaration mappings are not changed.
+    """
+    result = dict(template.seed_metadata)
+    seeds = catalog[template.id].expanded_seeds(bindings=template.bindings)
+    seeds.update(template.set)
+    for seed in seeds.values():
+        if (
+            isinstance(seed, Slot)
+            and seed.fallback is not None
+            and slot_key(seed, env) is None
+        ):
+            result.update(template_metadata(seed.fallback, catalog, env))
+    return result

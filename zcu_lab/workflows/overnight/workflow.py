@@ -17,10 +17,10 @@ from zcu_tools.experiment.workflows import (
 from zcu_tools.program.v2.modules import PulseCfg, PulseReadoutCfg
 
 from zcu_lab.components.qubit import QubitFluxSchema
-from zcu_lab.v2.support.lifetime_models import LifetimeModelRecord
 from zcu_lab.workflows.common.calibration_results import StageStatus
 from zcu_lab.workflows.common.devices import set_flux
 from zcu_lab.workflows.common.gain import GainClamp
+from zcu_lab.workflows.common.lifetime_models import LifetimeModelRecord
 from zcu_lab.workflows.common.relaxation import echo_relaxation
 from zcu_lab.workflows.common.stages import StageEnv
 from zcu_lab.workflows.common.summary import RunSummary, SummaryAccumulator

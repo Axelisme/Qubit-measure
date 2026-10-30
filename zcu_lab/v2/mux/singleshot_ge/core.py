@@ -29,6 +29,7 @@ from functools import partial
 from typing import Annotated, ClassVar
 
 import numpy as np
+from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from pydantic import StrictInt, model_validator
 from qick.asm_v2 import QickParam
@@ -53,7 +54,6 @@ from zcu_lab.v2.support.mux_sweep_cfg import (
     require_tone_value,
     validate_participants,
 )
-from zcu_lab.v2.support.singleshot.plot import draw_ge_scatter
 
 from .analysis import (
     MuxGEAnalysis,
@@ -327,14 +327,40 @@ class MuxGEExp(Experiment[MuxGEResult, MuxGECfg]):
         shots = np.arange(cfg.shots, dtype=np.int64)
 
         # 2. Show both preparations without averaging away their IQ spread.
+        for index in indices:
+            context.plots.subplots(f"measurement_{index}")
+
         def update(data: NDArray[np.complex128]) -> None:
+            snapshot = data.copy()
             for row, index in enumerate(indices):
-                draw_ge_scatter(
-                    context.plots,
-                    f"measurement_{index}",
-                    data[:, :, row],
-                    title=f"{index}: {cfg.tones[index].name}",
-                )
+
+                def draw(figure: Figure, row: int = row, index: int = index) -> None:
+                    axes = figure.axes[0]
+                    axes.clear()
+                    for cloud, label, color in zip(
+                        snapshot[:, :, row],
+                        ("g preparation (probe off)", "e preparation (probe on)"),
+                        ("tab:blue", "tab:red"),
+                        strict=True,
+                    ):
+                        axes.scatter(
+                            cloud.real,
+                            cloud.imag,
+                            s=8,
+                            alpha=0.5,
+                            color=color,
+                            label=label,
+                        )
+                    axes.set(
+                        xlabel="I (a.u.)",
+                        ylabel="Q (a.u.)",
+                        title=f"{index}: {cfg.tones[index].name}",
+                    )
+                    axes.set_aspect("equal", adjustable="datalim")
+                    axes.grid()
+                    axes.legend()
+
+                context.plots.draw(f"measurement_{index}", draw)
 
         buffer = SignalBuffer((2, cfg.shots, len(indices)), on_update=update)
         with Schedule(cfg, buffer, scope=context.scope) as sched:
