@@ -16,7 +16,6 @@ from zcu_tools.experiment.v2.runtime.acquisition import (
     SignalArray,
     StopCondition,
     SynchronousAcquireKeywords,
-    SynchronousDecimatedAcquireKeywords,
     default_decimated_raw2signal_fn,
     default_raw2signal_fn,
     require_positive_rounds,
@@ -72,14 +71,13 @@ class DecimatedProgram(Protocol[T_Raw_co]):
     """Producer requiring only synchronous acquire_decimated.
 
     Raw cumulative traces and round hooks follow IntegratedProgram. Native
-    keywords follow SynchronousDecimatedAcquireKeywords; nonempty herald
-    selection is unsupported.
+    keywords follow SynchronousAcquireKeywords.
     """
 
     def acquire_decimated(
         self,
         soc: object,
-        **kwargs: Unpack[SynchronousDecimatedAcquireKeywords[T_Raw_co]],
+        **kwargs: Unpack[SynchronousAcquireKeywords[T_Raw_co]],
     ) -> T_Raw_co: ...
 
 

@@ -35,7 +35,6 @@ if TYPE_CHECKING:
         ScheduleStep,
         SignalSlot,
     )
-    from zcu_tools.program.herald import HeraldSpec
 
 T_Raw = TypeVar("T_Raw")
 T_KeywordRaw_contra = TypeVar("T_KeywordRaw_contra", contravariant=True)
@@ -86,19 +85,6 @@ class SynchronousAcquireKeywords(TypedDict, Generic[T_KeywordRaw_contra]):
     ]
     cancel_flag: CancelFlagProtocol
     step_rounds: NotRequired[Literal[False]]
-
-
-class SynchronousDecimatedAcquireKeywords(
-    SynchronousAcquireKeywords[T_KeywordRaw_contra]
-):
-    """Synchronous decimated options, including the existing herald keyword.
-
-    herald=None or an empty sequence leaves decimated IQ traces unchanged.
-    A nonempty sequence raises ValueError because decimated acquisition does
-    not support herald selection. Other keywords follow SynchronousAcquireKeywords.
-    """
-
-    herald: NotRequired[Sequence[HeraldSpec] | None]
 
 
 def default_raw2signal_fn(raw: Sequence[NDArray[np.float64]]) -> NDArray[np.complex128]:

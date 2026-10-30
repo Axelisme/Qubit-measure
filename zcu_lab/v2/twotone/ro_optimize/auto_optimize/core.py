@@ -61,6 +61,7 @@ class ReadoutOptimizer:
         gain_sweep: SweepCfg,
         length_sweep: SweepCfg,
         num_points: int,
+        seed: int | None,
     ) -> None:
         self.num_points = num_points
 
@@ -85,6 +86,8 @@ class ReadoutOptimizer:
             # core is faster per iter and leaves CPU for the UI.
             n_jobs=1,
             acq_optimizer="auto",
+            # None draws from NumPy's global RNG, so the search differs per run.
+            random_state=seed,
         )
         self.last_param = None
 
@@ -141,6 +144,16 @@ class AutoOptCfg(ConfigBase):
         default=0.0, ge=0.0
     )
     num_points: Annotated[int, FieldMeta(label="Optimizer points")] = Field(gt=0)
+    seed: Annotated[
+        int | None,
+        FieldMeta(
+            label="Optimizer seed",
+            description=(
+                "Fixes the optimizer's initial and later candidate points for a "
+                "given acquisition; empty draws a new search each run."
+            ),
+        ),
+    ] = None
 
 
 RO_AUTO_READOUT_FREQ_VARIABLE = "readout_freq"
@@ -295,6 +308,7 @@ class AutoOptExp(Experiment[AutoOptResult, AutoOptCfg]):
             run_cfg.gain,
             run_cfg.length,
             num_points,
+            run_cfg.seed,
         )
         params = np.full((num_points, 3), np.nan, dtype=np.float64)
         point_indices = np.arange(num_points, dtype=np.float64)

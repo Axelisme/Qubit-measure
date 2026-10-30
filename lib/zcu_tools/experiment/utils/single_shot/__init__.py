@@ -55,7 +55,10 @@ def fit_singleshot2d(
 
     MAX_FIT_POINTS = 1e4
     if len(xs) > MAX_FIT_POINTS:
-        idx = np.random.choice(len(xs), int(MAX_FIT_POINTS), replace=False)
+        # A fixed subsample keeps the result reproducible from saved data.
+        idx = np.random.default_rng(0).choice(
+            len(xs), int(MAX_FIT_POINTS), replace=False
+        )
         fit_xs = xs[idx]
         fit_ys = ys[idx]
     else:
@@ -84,7 +87,8 @@ def fit_singleshot2d(
     # 限制最大顯示點數以提高性能
     MAX_POINTS = 1e5
     if len(xs) > MAX_POINTS:
-        idx = np.random.choice(len(xs), int(MAX_POINTS), replace=False)
+        # A fixed subsample keeps the result reproducible from saved data.
+        idx = np.random.default_rng(0).choice(len(xs), int(MAX_POINTS), replace=False)
         plot_xs = xs[idx]
         plot_ys = ys[idx]
     else:

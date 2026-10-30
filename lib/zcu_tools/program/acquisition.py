@@ -17,7 +17,7 @@ from qick.qick_asm import (
     obtain,  # pyright: ignore[reportAttributeAccessIssue]
 )
 
-from zcu_tools.program._shot_processing import validated_payload, validated_sums
+from zcu_tools.program._shot_processing import validated_sums
 from zcu_tools.progress_bar import make_pbar
 
 __all__ = [
@@ -26,7 +26,6 @@ __all__ = [
     "StoppedPartialAcquireError",
     "AcquisitionContractError",
     "TrackerProtocol",
-    "ShotProcessor",
     "ShotSumProcessor",
 ]
 
@@ -55,9 +54,6 @@ class _LocalCancelFlag:
     def set(self) -> None:
         self._is_set = True
 
-
-# Per-shot normalized [I,Q] (shots, reads, 2) -> float64 (shots, out_reads, N).
-ShotProcessor: TypeAlias = Callable[[NDArray[np.float64]], NDArray[np.float64]]
 
 # All declared ADCs, normalized (points, reps, reads, 2), to (points, *axes) sums.
 ShotSumProcessor: TypeAlias = Callable[
@@ -584,31 +580,26 @@ class RoundHookMixin(TypedAcquireMixin):
 
 
 class ImproveAcquireMixin(RoundHookMixin, TrackerMixin, EarlyStopMixin):
-    _processors: Mapping[int, ShotProcessor] | None = None
     _sum_processor: ShotSumProcessor | None = None
     _summed_stepped: bool = False
 
     def acquire(
         self,
         *args,
-        _processors: Mapping[int, ShotProcessor] | None = None,
         _sum_processor: ShotSumProcessor | None = None,
         **kwargs,
     ):
-        """Acquire through the native IQ pipeline or explicit shot processors.
+        """Acquire native IQ or dispatch one joint-ADC shot-sum processor.
 
-        Omit _processors for ordinary acquisition. acquire_processed uses that
-        reserved dispatch option to replace per-shot processing. QICK options,
-        round hooks, cancellation and stepped ownership follow the existing
-        acquire pipeline; each new acquire resets processor output dimensions.
+        acquire_summed supplies the reserved _sum_processor option. QICK options,
+        round hooks, cancellation and stepped ownership follow the native
+        pipeline; each new acquire resets processor output dimensions.
         """
-        self._processors = _processors
         self._sum_processor = _sum_processor
         self._sum_shape: tuple[int, ...] | None = None
         self._summed_stepped = _sum_processor is not None and kwargs.get(
             "step_rounds", False
         )
-        self._processor_shapes: dict[int, tuple[int, ...]] = {}
         return super().acquire(*args, **kwargs)
 
     def acquire_decimated(self, *args, **kwargs):
@@ -625,50 +616,6 @@ class ImproveAcquireMixin(RoundHookMixin, TrackerMixin, EarlyStopMixin):
         self._sum_processor = None
         self._summed_stepped = False
         return super().acquire_decimated(*args, **kwargs)
-
-    def acquire_processed(
-        self,
-        soc: object,
-        *,
-        processors: Mapping[int, ShotProcessor],
-        rounds: int = 1,
-        step_rounds: bool = False,
-        **qick_options: object,
-    ) -> list[NDArray[np.float64]] | None:
-        """Process each completed round's shots before averaging repetitions.
-
-        processors maps every declared ADC number to a callable receiving all
-        normalized float64 (shots, reads, 2) IQ, without offset subtraction.
-        Each returns float64 (shots, out_reads, N), with positive output axes
-        fixed per ADC through this acquire. Results follow ADC declaration order
-        and have shape (out_reads, *point_dims, N). Equal-size rounds have equal
-        weight; round_hook receives their cumulative mean and the cancel flag.
-        Ordinary QICK options are forwarded except threshold/angle and herald,
-        which raise ValueError. Invalid mappings or payloads raise ValueError;
-        processor exceptions propagate without publishing the failed round.
-        step_rounds=True prepares only and returns None; use finish_round,
-        prepare_round and finish_acquire to drive hardware rounds. Cancellation
-        discards incomplete rounds; no completed round raises
-        StoppedPartialAcquireError. Raw integer sums remain available via get_raw.
-        """
-        assert isinstance(self, qick_asm.AbsQickProgram)
-        for option in ("threshold", "angle", "herald"):
-            if option in qick_options:
-                raise ValueError(f"acquire_processed does not accept {option}")
-        if any(type(ch) is not int for ch in processors):
-            raise ValueError("processors ADC keys must be integers")
-        if processors.keys() != self.ro_chs.keys():
-            raise ValueError("processors ADC keys must exactly match declared ADCs")
-        if any(not callable(processor) for processor in processors.values()):
-            raise ValueError("processors must contain one callable per ADC")
-        return self.acquire(
-            soc,
-            _processors=dict(processors),
-            _sum_processor=None,
-            rounds=rounds,
-            step_rounds=step_rounds,
-            **qick_options,
-        )
 
     def acquire_summed(
         self,
@@ -712,7 +659,6 @@ class ImproveAcquireMixin(RoundHookMixin, TrackerMixin, EarlyStopMixin):
         result = self.acquire(
             soc,
             _sum_processor=processor,
-            _processors=None,
             rounds=rounds,
             step_rounds=step_rounds,
             **qick_options,
@@ -723,7 +669,7 @@ class ImproveAcquireMixin(RoundHookMixin, TrackerMixin, EarlyStopMixin):
         """Return completed acquisition data after manually driving hardware rounds.
 
         Stepped acquire_summed returns float64 (*point_dims, *axes) sums; native
-        and processed acquisition retain ADC-ordered lists. Cancelled incomplete
+        acquisition retains ADC-ordered lists. Cancelled incomplete
         rounds are discarded. No completed round on cancellation raises
         StoppedPartialAcquireError. Call after finish_round has returned False.
         """
@@ -781,22 +727,4 @@ class ImproveAcquireMixin(RoundHookMixin, TrackerMixin, EarlyStopMixin):
     def _process_accumulated(self, acc_buf) -> list[NDArray[np.float64]]:
         if self._sum_processor is not None:
             return self._process_summed(acc_buf)
-        if self._processors is None:
-            return super()._process_accumulated(acc_buf)
-        assert isinstance(self, qick_asm.AbsQickProgram)
-        assert self.loop_dims is not None
-        assert self.avg_level is not None
-        result = []
-        for raw, (ch, ro) in zip(acc_buf, self.ro_chs.items(), strict=True):
-            iq = raw.reshape(-1, ro["trigs"], 2) / ro["length"]
-            payload = validated_payload(self._processors[ch](iq), shots=iq.shape[0])
-            shape = payload.shape[1:]
-            expected = self._processor_shapes.get(ch, shape)
-            if shape != expected:
-                raise ValueError(
-                    f"ADC {ch}: processor output shape changed from {expected} to {shape}"
-                )
-            self._processor_shapes[ch] = shape
-            grid = payload.reshape(*self.loop_dims, *payload.shape[1:])
-            result.append(np.moveaxis(grid.mean(axis=self.avg_level), -2, 0))
-        return result
+        return super()._process_accumulated(acc_buf)

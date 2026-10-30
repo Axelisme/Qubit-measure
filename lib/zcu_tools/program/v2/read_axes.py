@@ -1,6 +1,6 @@
 """Compile read labels into joint shot-vector outer-product sums."""
 
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 
 import numpy as np
@@ -8,7 +8,7 @@ from numpy.typing import NDArray
 from qick.asm_v2 import Macro, Trigger
 
 from zcu_tools.cfg_model import ReadoutClassifier
-from zcu_tools.program.acquisition import ShotProcessor, ShotSumProcessor
+from zcu_tools.program.acquisition import ShotSumProcessor
 
 from ._timeline_macros import (
     ModuleEmission,
@@ -165,7 +165,7 @@ def _resolve_axis(
     labels: _LabelReads,
     counts: dict[int, int],
     unsupported: dict[int, str],
-) -> tuple[int, int, ShotProcessor | None]:
+) -> tuple[int, int, Callable[[NDArray[np.float64]], NDArray[np.float64]] | None]:
     """Validate a label/tone and snapshot its optional classifier before acquisition."""
     matches = labels.get(axis.read, [])
     if len(matches) != 1:
@@ -212,7 +212,8 @@ def split_sums(
     sums contains float64 shot sums. Its last axis must have length three or
     ValueError reports the actual shape. Return counts with that axis removed
     (a borrowed view) and detached complex128 means of the same shape. Empty
-    cells give NaN real and imaginary components, without divide warnings.
+    cells and unmeasured NaN counts give NaN real and imaginary components,
+    without divide warnings. NaN counts remain NaN.
     No input values are changed; counts are not normalized.
     """
     if sums.ndim < 1 or sums.shape[-1] != 3:
@@ -221,5 +222,10 @@ def split_sums(
         )
     counts = sums[..., 0]
     means = np.full(counts.shape, complex(np.nan, np.nan), dtype=np.complex128)
-    np.divide(sums[..., 1] + 1j * sums[..., 2], counts, out=means, where=counts != 0)
+    np.divide(
+        sums[..., 1] + 1j * sums[..., 2],
+        counts,
+        out=means,
+        where=(counts != 0) & ~np.isnan(counts),
+    )
     return counts, means

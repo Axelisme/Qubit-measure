@@ -17,6 +17,7 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackRequest,
 )
 from zcu_tools.plotting.plots import Plots
+from zcu_tools.program.v2 import split_sums
 
 from zcu_lab.v2.twotone.rabi.len_rabi.core import (
     LenRabiAnalysis,
@@ -59,7 +60,9 @@ def writeback(
             if source.cfg is None
             else LenRabiCfg.model_validate(source.cfg.model_dump())
         ),
-        result=LenRabiResult(source.result.lengths, source.result.signals),
+        result=LenRabiResult(
+            source.result.lengths, split_sums(source.result.sums)[1][..., 0]
+        ),
         metadata=source.metadata,
     )
     items = LEN_RABI.get_writeback_items(

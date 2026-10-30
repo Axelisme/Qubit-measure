@@ -2,7 +2,7 @@
 
 **讀者：** lab-author、framework-dev、agent。撰寫實驗 core，查閱 records、資料形狀、執行與保存慣例。
 
-**Last updated:** 2026-10-29
+**Last updated:** 2026-10-30
 
 使用者入口見 [tutorial](../tutorial/README.md)。
 
@@ -311,7 +311,10 @@ Singleshot Len Rabi的length軸由host-side `Schedule.scan`逐點執行；每個
 Len Rabi numeric analysis以backend minimum validity作為finite calibration與writeback的前置條件。raw-IQ initializer以pooled PCA two-cluster assignment取得各群median center、群內pooled MAD noise scale與per-length粗略population；high-shot histogram超過coarse resolution時，同時保留quantile initializer作為另一個deterministic basin，先比較較粗的integrated-bin likelihood，再以較佳candidate回到原始共同bins求最終minimum，必要時才嘗試另一個candidate。coarse stage不取代或放寬final validity。各預設Migrad在invalid時最多續跑一次；caller提供explicit `max_calls`時略過coarse stage且只執行一次Migrad，不把該budget延伸成restart。Analysis Figure由experiment Module負責，以上方population estimates/global fit、左下第一個acquired point的integrated-bin histogram decomposition及右下derived confusion matrix呈現同一份joint-fit證據；valid histogram依cfg acquisition length與fitted length ratio顯示effective T1，並列出該point落入G/E classification circles與circle外L區域的observed fractions，不顯示Rabi pulse length。layout在GUI preview與fixed-size save geometry都維持panel、labels與annotations分離；invalid結果保留observed histogram，但不顯示fitted decomposition、effective T1或calibration matrix。
 
 Singleshot consumers 的分類參數由 RunRecord.cfg.readout 的 classifier 提供。
-Population acquisition 透過 `acquire_processed` 明傳完整 per-ADC processors，所有 ADC 都須有 circle 與 radius，不能用 linear 表達 Other。
+分類取數先 build program，再用 `shot_sums(prog, [Classify("readout")])` 解析讀出 label，交給 `run_program_summed`。
+Result 的 `counts` 保存各 round 的 class counts 總和，形狀與原有狀態軸相同；分析與 live plot 才按每點總計數轉成比例。
+需要 Other 的讀出須有 circle 與 radius，不能用 linear 或 centroid3 表達 Other。
+舊比例存檔缺少 counts 時明確拒絕，不以比例推算計數。
 GUI confusion correction 只取 saved readout cfg 的 matrix；缺 cfg／classifier／matrix 時略過。
 Rabi 與 Check 保留單 ADC raw IQ。Rabi 無 classifier 仍可 Run／fit，Check 在分析才要求 circle／radius。
 Classifier 的複數持久格式由 cfg_model 與 core complex codec 擁有，lab 不另加 serializer。

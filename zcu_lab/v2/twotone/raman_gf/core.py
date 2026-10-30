@@ -1,4 +1,4 @@
-"""Single-carrier, two-photon g/f scans retaining raw acquired signal IQ."""
+"""Single-carrier, two-photon g/f scans retaining classified shot counts."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ import numpy as np
 from numpy.typing import NDArray
 from pydantic import Field
 from qick import QickConfig
-from zcu_tools.analysis.singleshot import Centroid3IQAnalysis, analyze_centroid3_iq
+from zcu_tools.analysis.singleshot import Centroid3IQAnalysis, correct_populations
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.core.waveform_format import decode_npz
 from zcu_tools.experiment import Experiment
@@ -27,26 +27,30 @@ from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import round_zcu_freq, round_zcu_gain
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.acquisition import StoppedPartialAcquireError
-from zcu_tools.program.v2 import GainSweep, Pulse, PulseReadout, SweepCfg
+from zcu_tools.program.v2 import (
+    Classify,
+    GainSweep,
+    Pulse,
+    PulseReadout,
+    SweepCfg,
+    shot_sums,
+)
 from zcu_tools.program.v2.modules.readout import centroid3_classifier
 from zcu_tools.program.v2.modules.waveform import ArbWaveformCfg
-
-from zcu_lab.v2.support.singleshot.util import raw_shots_to_signal
 
 
 @dataclass(frozen=True)
 class RamanGFResult:
-    """Mean-sample ADC IQ, with no simulator state information.
+    """Classified shot counts, with no simulator state information.
 
-    signals: (points,shots) complex IQ in detuning-major, gain-minor order.
+    counts: (points,3) g/e/f counts in detuning-major, gain-minor order.
     detunings: (points,) actual two-photon detuning in MHz, positive above center.
     areas: (points,) gain squared times sampled envelope intensity integral, us.
     gains: (points,) actual nonnegative DAC gains. Areas are not rotation angles.
     Partial/unacquired rows remain NaN. No calibration or state truth is acquired.
     """
 
-    signals: NDArray[np.complex128]
+    counts: NDArray[np.float64]
     detunings: NDArray[np.float64]
     areas: NDArray[np.float64]
     gains: NDArray[np.float64]
@@ -143,9 +147,9 @@ def scan_points(
 
 
 def restore_result(data: GroupedLoadData[RamanGFCfg]) -> RamanGFResult:
-    """Restore all acquired IQ and actual coordinates without requiring a valid cfg."""
+    """Restore g/e/f counts and actual coordinates; missing counts raises ValueError."""
     return RamanGFResult(
-        signals=np.asarray(data.variable("signal").z, dtype=np.complex128),
+        counts=np.asarray(data.variable("counts").z, dtype=np.float64),
         detunings=np.asarray(data.variable("detuning").z, dtype=np.float64),
         areas=np.asarray(data.variable("area").z, dtype=np.float64),
         gains=np.asarray(data.variable("gain").z, dtype=np.float64),
@@ -153,17 +157,17 @@ def restore_result(data: GroupedLoadData[RamanGFCfg]) -> RamanGFResult:
 
 
 class RamanGFExp(Experiment[RamanGFResult, RamanGFCfg]):
-    """Scan a single-tone two-photon g/f drive and retain mean-sample ADC IQ."""
+    """Scan a single-tone two-photon g/f drive and retain g/e/f counts."""
 
     AXES_SPEC: ClassVar[GroupedAxesSpec[RamanGFResult, RamanGFCfg]] = GroupedAxesSpec(
         variables=(
             VariableSpec(
-                "signal",
+                "counts",
                 (
-                    VariableAxisSpec.generated_arange("Shot", "None"),
+                    VariableAxisSpec.generated_arange("State", "None"),
                     VariableAxisSpec.generated_arange("Point", "None"),
                 ),
-                VariableZSpec("signals", "Signal IQ", "ADC", dtype=np.complex128),
+                VariableZSpec("counts", "Shot count", "None", dtype=np.float64),
             ),
             *(
                 VariableSpec(
@@ -191,42 +195,38 @@ class RamanGFExp(Experiment[RamanGFResult, RamanGFCfg]):
 
         Positive two-photon detuning raises the carrier by detuning/2 MHz.
         Each point starts after relaxation; there is no Lambda pair or reset.
-        Use one round of raw shots through legacy Module/Schedule acquisition.
-        Require an arbitrary sampled envelope and nonnegative gains before I/O.
+        Classify cfg.shots repetitions in one round into g/e/f counts per point.
+        Require a centroid3 readout, arbitrary sampled envelope and nonnegative
+        gains before acquisition. Unfinished points retain NaN counts.
         Returned areas use the source samples' intensity integral; QICK timing
         interpolation/quantization is not an experimental rotation calibration.
         """
+        centroid3_classifier(cfg.readout, ro_ch=cfg.readout.ro_ch)
         cfg = deepcopy(cfg)
         point_frequencies, point_gains, integral = scan_points(cfg, context.soccfg)
-        signals = SignalBuffer((len(point_gains), cfg.shots))
+        counts = SignalBuffer((len(point_gains), 3), dtype=np.float64)
 
         # One carrier and one envelope, immediately followed by the same readout.
-        with Schedule(cfg, signals, scope=context.scope) as sched:
+        with Schedule(cfg, counts, scope=context.scope) as sched:
             for point, step in sched.scan("point", range(len(point_gains))):
                 cfg.drive.freq = float(point_frequencies[point])
                 cfg.drive.gain = float(point_gains[point])
-                program = (
-                    step.prog_builder(
-                        context.soc,
-                        context.soccfg,
-                        reps=cfg.shots,
-                        initial_delay=cfg.initial_delay,
-                        relax_delay=cfg.relax_delay,
-                    )
-                    .add(
-                        Pulse("raman", cfg.drive), PulseReadout("readout", cfg.readout)
-                    )
-                    .build()
+                builder = step.prog_builder(
+                    context.soc,
+                    context.soccfg,
+                    reps=cfg.shots,
+                    initial_delay=cfg.initial_delay,
+                    relax_delay=cfg.relax_delay,
+                ).add(Pulse("raman", cfg.drive), PulseReadout("readout", cfg.readout))
+                program = builder.build()
+                builder.run_program_summed(
+                    program,
+                    processor=shot_sums(program, [Classify("readout")]),
+                    sums2signal_fn=lambda sums: sums.reshape(3),
                 )
-                try:
-                    program.acquire(context.soc, progress=True, cancel_flag=step.stop)
-                except StoppedPartialAcquireError:
-                    step.set_stop()
-                    break
-                signals[step].set(raw_shots_to_signal(program))
 
         result = RamanGFResult(
-            signals=signals.array,
+            counts=counts.array,
             detunings=2 * (point_frequencies - cfg.carrier_mhz),
             areas=point_gains**2 * integral,
             gains=point_gains,
@@ -235,20 +235,17 @@ class RamanGFExp(Experiment[RamanGFResult, RamanGFCfg]):
 
         def draw(figure):
             ax = figure.axes[0]
-            ax.plot(
-                np.arange(len(result.signals)),
-                result.signals.mean(axis=1).real,
-                "o-",
-                label="Mean I",
-            )
-            ax.plot(
-                np.arange(len(result.signals)),
-                result.signals.mean(axis=1).imag,
-                "o-",
-                label="Mean Q",
-            )
+            fractions = result.counts / result.counts.sum(axis=-1, keepdims=True)
+            for label, state in enumerate(("g", "e", "f")):
+                ax.plot(
+                    np.arange(len(result.counts)),
+                    fractions[:, label],
+                    "o-",
+                    label=state,
+                )
             ax.set(
-                xlabel="Point (detuning-major, area-minor)", ylabel="Mean-sample ADC IQ"
+                xlabel="Point (detuning-major, area-minor)",
+                ylabel="Preparation-label fraction",
             )
             ax.legend()
 
@@ -262,22 +259,35 @@ class RamanGFExp(Experiment[RamanGFResult, RamanGFCfg]):
         *,
         plots: Plots,
     ) -> Centroid3IQAnalysis:
-        """Classify raw IQ with the saved run's three-center readout calibration.
+        """Normalize acquired counts and correct with the saved readout confusion.
 
         Require source.cfg and its centroid3 ADC classifier. Missing cfg,
         missing classifier or circle/linear mode raises ValueError. No live
         Form, library, reference acquisition or simulator truth is consulted.
         Return raw/unclipped corrected g/e/f preparation-label estimates and
         training-matrix quality. The e label estimates leakage, not a pure
-        energy-state population or gate fidelity. Incomplete/nonfinite IQ and
-        singular confusion fail in the analysis owner. Plot actual coordinates.
+        energy-state population or gate fidelity. Incomplete/nonfinite or empty
+        counts and singular confusion fail explicitly. Plot actual coordinates.
         """
         del options
         cfg = source.cfg
         if cfg is None:
             raise ValueError("Raman analysis requires the saved run readout cfg")
         calibration = centroid3_classifier(cfg.readout, ro_ch=cfg.readout.ro_ch)
-        result = analyze_centroid3_iq(source.result.signals, calibration)
+        counts = source.result.counts
+        if not np.isfinite(counts).all() or np.any(counts.sum(axis=-1) <= 0):
+            raise ValueError(
+                "Raman analysis requires finite, nonempty counts at every point"
+            )
+        raw = counts / counts.sum(axis=-1, keepdims=True)
+        matrix = np.asarray(calibration.confusion_matrix, dtype=np.float64)
+        result = Centroid3IQAnalysis(
+            raw_populations=raw,
+            corrected_populations=correct_populations(raw, matrix, clip=False),
+            confusion_matrix=matrix,
+            condition_number=float(np.linalg.cond(matrix)),
+            minimum_singular_value=float(np.linalg.svd(matrix, compute_uv=False).min()),
+        )
         grid = cfg.scan_mode == "frequency_area"
         plots.subplots(
             "fit",

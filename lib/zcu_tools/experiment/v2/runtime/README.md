@@ -144,21 +144,17 @@ partial-result、overrun 與 progress；新入口與舊 builder 共用這份執�
 - `build_and_acquire()` 是 `build()` 後立刻 `run_program(...)` 的 convenience。
 - Decimated trace 使用獨立方法：`run_program_decimated(program)` 與
   `build_and_acquire_decimated()`。
-- Processed payload 使用 `run_program_processed(program)` 與
-  `build_and_acquire_processed()`。兩者都要求 `processors` 和 `processed2signal_fn`。
-  同一 converter 處理 cumulative round updates 和 final result，不使用 builder-wide 或預設 IQ converter。
-  Heralded converter 呼叫 `herald_ratio`，將 fraction 寫入實驗擁有的 slot，再回傳 conditional signal。
 - `run_program_summed(program)` 要求單一 `processor` 與 `sums2signal_fn`。
   Caller 先 build，再解析讀出 label。Converter 收累積與最終總和，不使用 IQ 預設轉換。
   這條路徑沿用相同的 retry、progress 與 stop_condition，不提供 build-and-acquire shortcut。
-- 七個 build/run acquire 方法都收具名 `rounds=1`，同時控制 producer 與 rounds progress。
+- 五個 build/run acquire 方法都收具名 `rounds=1`，同時控制 producer 與 rounds progress。
   Retry 重用同一個 rounds 值。`reps` 與 `rounds` 必須為正整數，拒絕 bool。
   Builder 不投影或覆寫 cfg；`program_cls` factory 接 soccfg 與具名控制參數、modules、sweep、編譯選項。
 - `set_raw2signal_fn(...)` 或 acquire 方法的 `raw2signal_fn=...` 可覆寫 raw
   conversion；integrated acquire 預設使用 `default_raw2signal_fn`，decimated acquire
   預設使用 `default_decimated_raw2signal_fn`。
 - `program_cls=` 是測試 seam；常規實驗不傳，預設使用 `ModularProgramV2`。
-- 七個 build/run acquire 方法共用 `options=AcquireOptions(...)`。省略時 retry=0、
+- 五個 build/run acquire 方法共用 `options=AcquireOptions(...)`。省略時 retry=0、
   progress=False、progress_label="rounds"、progress_leave=None、stop_condition=None。
   `progress_label` 覆寫 rounds bar label；`progress_leave=None` 保留 root-vs-step 的
   close/retain policy。`progress` 控制 native acquisition progress，不控制 rounds bar。

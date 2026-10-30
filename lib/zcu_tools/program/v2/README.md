@@ -1,6 +1,6 @@
 # README - program/v2
 
-**Last updated:** 2026-10-30，TimelineBuilder 與原生 program 的 timeline 範圍
+**Last updated:** 2026-10-30，TimelineBuilder、timeline 範圍、joint-ADC shot sums 與 read labels
 
 **讀者：** lab-author、framework-dev、agent。原生 V2 program 寫法與 module、readout、acquisition 契約速查。
 
@@ -94,6 +94,10 @@ Encoding with `readout_freq_words` still takes those four explicit settings.
   `initial_delay=1.0`、`relax_delay=1.0`，兩個 delay 的單位為 us。
 - `acquire(..., rounds=1)` 與 `acquire_decimated(..., rounds=1)` 接收軟體平均次數。
   `reps` 與 `rounds` 必須為正整數，bool 不算整數。無效值在編譯或 acquire admission 前 raise ValueError。
+- `acquire_summed` 以單一 processor 處理所有 ADC 的正規化 IQ，跨 round 只加總。
+  `shot_sums(prog, axes)` 在 compile 後以讀出 label 解析 `Classify` 與 `IQ` 軸。
+  Timeline 以 emit tag 或未標記 module 名稱識別讀出，modular 以 module 名稱識別。
+  外積總和與取消契約見 [program](../README.md#summed-acquisition)。
 - `BaseCustomProgramV2.make_modules()` 回傳 modules。作者自行保存組裝 modules 所需的輸入，
   program 的控制參數仍由建構子接收。
 - `ir/`: Contains the Intermediate Representation for tProc v2 instructions, allowing for optimization passes and cross-module label resolution.

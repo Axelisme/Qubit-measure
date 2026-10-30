@@ -5,7 +5,6 @@ from collections.abc import Callable
 import numpy as np
 import pytest
 from numpy.typing import NDArray
-from zcu_tools.cfg_model import LinearClassifier
 from zcu_tools.experiment.scope import Scope
 from zcu_tools.experiment.script_host import CallContext, ScriptHost
 from zcu_tools.experiment.v2.runtime.program_builder import AcquireOptions
@@ -14,7 +13,6 @@ from zcu_tools.experiment.v2.runtime.schedule import (
     SignalBuffer,
 )
 from zcu_tools.program.acquisition import CancelFlagProtocol, StoppedPartialAcquireError
-from zcu_tools.program.herald import HeraldSpec, herald_ratio, heralded
 from zcu_tools.progress_bar import use_pbar_factory
 
 from tests.experiment.v2.runtime._flow_cfg import make_flow_cfg as _cfg
@@ -109,93 +107,6 @@ def test_summed_builder_converts_cumulative_and_final_sums_and_keeps_run_policy(
     assert rounds_bar.total == 2
     assert rounds_bar.reset_count == (2 if ending == "retry" else 1)
     assert rounds_bar.closed
-
-
-@pytest.mark.parametrize("build", [False, True])
-@pytest.mark.parametrize(
-    "ending", ["complete", "data_stop", "external_stop", "before_data"]
-)
-def test_processed_builder_uses_explicit_converter_for_rounds_and_final(
-    monkeypatch: pytest.MonkeyPatch, build: bool, ending: str
-) -> None:
-    soc, program = make_chunk_acquisition(reps=2)
-    scope = Scope("run")
-    signals = SignalBuffer((1,))
-    fractions = SignalBuffer((1,), dtype=np.float64)
-    converted = []
-    calls = 0
-
-    def poll():
-        nonlocal calls
-        calls += 1
-        if ending == "before_data":
-            scope.stop.set()
-            return []
-        # First round accepts one shot (signal 6), second accepts both (12, 18).
-        iq = (
-            [[[-1, 0], [6, 0]], [[1, 0], [100, 0]]]
-            if calls == 1
-            else [[[-1, 0], [12, 0]], [[-1, 0], [18, 0]]]
-        )
-        raw = (np.asarray(iq) * program.ro_chs[0]["length"]).astype(np.int64)
-        return [(2, ([raw.reshape(-1, 2)], {}))]
-
-    monkeypatch.setattr(soc, "poll_data", poll)
-    spec = HeraldSpec(0, 0, LinearClassifier(angle=0.0, threshold=0.0), 2)
-    processors = {0: heralded(spec, np.copy)}
-
-    with Schedule(_cfg(), signals, scope=scope) as sched:
-        fraction_slot = fractions.at()
-
-        def convert(payload: list[NDArray[np.float64]]) -> NDArray[np.complex128]:
-            conditional, fraction = herald_ratio(payload[0])
-            fraction_slot.set(fraction.reshape(1))
-            converted.append((conditional.copy(), fraction.copy()))
-            if ending == "external_stop":
-                scope.stop.set()
-            return conditional[0].dot([1, 1j]).reshape(1)
-
-        def wrong_converter(_payload):
-            pytest.fail("processed payload reached builder-wide IQ converter")
-
-        builder = sched.prog_builder(soc, program.soccfg, reps=2)
-        builder.set_raw2signal_fn(wrong_converter)
-        if build:
-            builder.add(*program.modules)
-            result = builder.build_and_acquire_processed(
-                processors=processors,
-                rounds=2,
-                processed2signal_fn=convert,
-                options=AcquireOptions(stop_condition=lambda: ending == "data_stop"),
-            )
-        else:
-            result = builder.run_program_processed(
-                program,
-                processors=processors,
-                rounds=2,
-                processed2signal_fn=convert,
-                options=AcquireOptions(stop_condition=lambda: ending == "data_stop"),
-            )
-        assert sched.outcome.status == (
-            "stopped" if ending in {"external_stop", "before_data"} else "completed"
-        )
-        if ending == "before_data":
-            assert converted == []
-            np.testing.assert_array_equal(result, [complex(np.nan, np.nan)])
-            np.testing.assert_array_equal(fractions.array, [np.nan])
-        else:
-            expected = 12.0 if ending == "complete" else 6.0
-            np.testing.assert_allclose(result, [expected])
-            np.testing.assert_allclose(signals.array, [expected])
-            np.testing.assert_allclose(
-                fractions.array, [0.75 if ending == "complete" else 0.5]
-            )
-            np.testing.assert_allclose(converted[0][0], [[6, 0]])
-            np.testing.assert_allclose(converted[0][1], 0.5)
-            assert len(converted) == (
-                3 if ending == "complete" else 2 if ending == "data_stop" else 1
-            )
-    assert calls == (2 if ending == "complete" else 1)
 
 
 @pytest.mark.parametrize("decimated", [False, True])

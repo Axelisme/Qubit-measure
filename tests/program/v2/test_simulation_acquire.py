@@ -13,10 +13,10 @@ from zcu_tools.core.simulation import (
     SamplingIdentity,
 )
 from zcu_tools.program.acquisition import StoppedPartialAcquireError
-from zcu_tools.program.herald import HeraldSpec, herald_ratio, heralded
 from zcu_tools.program.v2.modular import ModularProgramV2
 from zcu_tools.program.v2.modules.readout import PulseReadout, PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
+from zcu_tools.program.v2.read_axes import IQ, Classify, shot_sums, split_sums
 from zcu_tools.program.v2.simulation import IntegratedRound
 from zcu_tools.simulate.evolution import Cancelled
 
@@ -290,24 +290,23 @@ def test_mid_round_stop_discards_chunks_and_preserves_completed_rounds(cancel_ro
         env.devices.close_all_devices()
 
 
-def assert_herald_summary(value, completed):
-    """Check the worked weighted mean, including the completed zero-pass point."""
+def assert_conditional_sums(value, completed):
+    """Check counts and weighted IQ, including the completed zero-count point."""
     expected = (
-        [[[2 / 3, -2 / 3, 1 / 3], [0, 0, 0]]]
+        [[[1, 2, -2], [2, 180, -180]], [[0, 0, 0], [3, 270, -270]]]
         if completed == 1
-        else [[[4, -4, 0.5], [0, 0, 0]]]
+        else [[[3, 24, -24], [3, 270, -270]], [[0, 0, 0], [6, 540, -540]]]
     )
-    assert value.shape == (1, 2, 3)
-    np.testing.assert_allclose(value, expected)
+    np.testing.assert_array_equal(value, expected)
     with np.errstate(all="raise"):
-        signal, fraction = herald_ratio(value)
-    np.testing.assert_array_equal(fraction, [1 / 3 if completed == 1 else 0.5, 0])
-    np.testing.assert_array_equal(signal[0, 0], [2, -2] if completed == 1 else [8, -8])
-    assert np.isnan(signal[0, 1]).all()
+        counts, means = split_sums(value)
+    np.testing.assert_array_equal(counts[:, 0], [1 if completed == 1 else 3, 0])
+    assert means[0, 0] == (2 - 2j if completed == 1 else 8 - 8j)
+    assert np.isnan(means[1, 0].real) and np.isnan(means[1, 0].imag)
 
 
 @pytest.fixture
-def processed_environment():
+def conditional_environment():
     env = environment(std_adc=0, seed=13)
     try:
         yield env
@@ -316,10 +315,10 @@ def processed_environment():
 
 
 @pytest.mark.parametrize("cancel_at", [None, 0, 1, "hook"])
-def test_processed_herald_hooks_ratio_and_cancellation(
-    cancel_at, processed_environment
+def test_summed_conditional_hooks_means_and_cancellation(
+    cancel_at, conditional_environment
 ):
-    env = processed_environment
+    env = conditional_environment
     prog = program(env, reps=3, reads=2, sweep=[("point", 2)])
     length = prog.ro_chs[0]["length"]
     literals = np.array(
@@ -342,8 +341,14 @@ def test_processed_herald_hooks_ratio_and_cancellation(
     materialized = []
     hooks = []
     requests = []
-    processor = heralded(
-        HeraldSpec(0, 0, LinearClassifier(angle=0.0, threshold=0.0), 2), np.copy
+    processor = shot_sums(
+        prog,
+        [
+            Classify(
+                "readout_0_0", classifier=LinearClassifier(angle=0.0, threshold=0.0)
+            ),
+            IQ("readout_0_1"),
+        ],
     )
 
     def execute(request):
@@ -370,18 +375,18 @@ def test_processed_herald_hooks_ratio_and_cancellation(
         return IntegratedRound(summary, Raw())
 
     def hook(count, data, flag):
-        hooks.append((count, [value.copy() for value in data]))
+        hooks.append((count, data.copy()))
         with pytest.raises(RuntimeError, match="active|reentr"):
-            prog.acquire_processed(env.soc, processors={0: processor}, progress=False)
+            prog.acquire_summed(env.soc, processor=processor, progress=False)
         if cancel_at == "hook":
             flag.set()
 
     env.soc.binding.execute = execute
     if cancel_at == 0:
         with pytest.raises(StoppedPartialAcquireError):
-            prog.acquire_processed(
+            prog.acquire_summed(
                 env.soc,
-                processors={0: processor},
+                processor=processor,
                 progress=False,
                 rounds=2,
                 cancel_flag=stop,
@@ -392,9 +397,9 @@ def test_processed_herald_hooks_ratio_and_cancellation(
         assert materialized == []
         assert executed == [0]
     else:
-        result = prog.acquire_processed(
+        result = prog.acquire_summed(
             env.soc,
-            processors={0: processor},
+            processor=processor,
             progress=False,
             rounds=2,
             cancel_flag=stop,
@@ -404,8 +409,8 @@ def test_processed_herald_hooks_ratio_and_cancellation(
         completed = 2 if cancel_at is None else 1
         assert [count for count, _ in hooks] == list(range(1, completed + 1))
         for count, values in hooks:
-            assert_herald_summary(values[0], count)
-        assert_herald_summary(result[0], completed)
+            assert_conditional_sums(values, count)
+        assert_conditional_sums(result, completed)
         np.testing.assert_array_equal(raw_of(prog)[0], literals[completed - 1] * length)
         assert materialized == list(range(completed))
         assert executed == ([0] if cancel_at == "hook" else [0, 1])
@@ -413,9 +418,9 @@ def test_processed_herald_hooks_ratio_and_cancellation(
     # Stop/failure and reentry must release admission for the next call.
     stop.clear()
     cancel_at = "hook"
-    retried = prog.acquire_processed(env.soc, processors={0: processor}, progress=False)
+    retried = prog.acquire_summed(env.soc, processor=processor, progress=False)
     assert retried is not None
-    assert_herald_summary(retried[0], 1)
+    assert_conditional_sums(retried, 1)
 
 
 def test_gaussian_sum_scaling_and_reproducible_independent_acquires():
@@ -459,7 +464,7 @@ def test_decimated_companion_raw_uses_same_trace_and_adc_order():
     [
         ("acquire", {}),
         ("acquire_decimated", {}),
-        ("acquire_processed", {"processors": {0: np.copy}}),
+        ("acquire_summed", {"processor": lambda iq: iq[0][:, :, 0].sum(axis=1)}),
     ],
 )
 def test_step_rounds_rejected_before_consuming_sequence(mode, options):

@@ -51,9 +51,11 @@ Save and bind the intended settings, then Run again to fix those failures.
 
 Reopen a consumer after Apply to capture the new library calibration.
 The classifier uses Euclidean nearest centers with no rejection region. Exact ties choose g, then e, then f.
-`acquire_processed` with the centroid3 processor returns three columns, `[g,e,f]`.
+Consumers build a program, then use `shot_sums(prog, [Classify("readout")])`
+with the saved centroid3 calibration and `acquire_summed` to collect `[g,e,f]` counts.
+Acquisition adds completed rounds. Analysis divides each row by its total count.
 Use the explicit f column; do not reconstruct it from g/e.
-Circle calibration's third class remains other. Circle-only consumers and heralding reject the three-center classifier.
+Circle calibration's third class remains other. Consumers that require Other must use circle calibration, not centroid3.
 Saved run cfg retains its own centers and training confusion. Later live-library edits do not change that run's classification or correction.
 There is no automatic calibration invalidation. Repeat reference acquisition and Apply after changing readout pulse, ADC window, receiver or preparation settings.
 Training confusion includes preparation contamination, so correction reports preparation-label coordinates, not pure-state fidelity.
