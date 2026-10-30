@@ -314,3 +314,20 @@ def test_fit_func_fixed_parameter_preserves_bounds_and_covariance(
     assert np.all(np.isfinite(p_cov))
     np.testing.assert_array_equal(p_cov[1, :], [0.0, 0.0])
     np.testing.assert_array_equal(p_cov[:, 1], [0.0, 0.0])
+
+
+def test_dual_gaussian_gmm_repeats_exactly_for_the_same_signals() -> None:
+    rng = np.random.default_rng(23)
+    signals = np.concatenate([rng.normal(-1.0, 0.8, 400), rng.normal(1.0, 0.8, 400)])
+
+    state = np.random.get_state()
+    try:
+        fits = []
+        for global_seed in range(5):
+            np.random.seed(global_seed)  # the global RNG must not change the fit
+            fits.append(fit_dual_gauss_gmm(signals))
+    finally:
+        np.random.set_state(state)
+
+    for fit in fits[1:]:
+        np.testing.assert_array_equal(fits[0], fit)
