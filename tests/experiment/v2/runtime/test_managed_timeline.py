@@ -7,26 +7,31 @@ import pytest
 from numpy.typing import NDArray
 from zcu_tools.experiment.scope import Scope
 from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
-from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
+from zcu_tools.program.v2 import TimelineBuilder
+from zcu_tools.program.v2.modules.readout import PulseReadout, PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.program.v2.timeline import TimelineProgramV2
 
 from tests.program._acquisition_soc import make_acquisition_soc
 
 
+def _make_readout() -> PulseReadout:
+    return PulseReadoutCfg(
+        gen_ch=0,
+        nqz=1,
+        gain=0.1,
+        waveform=ConstWaveformCfg(length=0.1),
+        ro_ch=0,
+        ro_length=0.1,
+        freq=100.0,
+    ).build("readout")
+
+
 class ReadoutTimeline(TimelineProgramV2):
     """Hand-written native program declaring and emitting one receiver module."""
 
     def _initialize(self, cfg):
-        self.readout = PulseReadoutCfg(
-            gen_ch=0,
-            nqz=1,
-            gain=0.1,
-            waveform=ConstWaveformCfg(length=0.1),
-            ro_ch=0,
-            ro_length=0.1,
-            freq=100.0,
-        ).build("readout")
+        self.readout = _make_readout()
         self.declare(self.readout)
 
     def _body(self, cfg):
@@ -37,13 +42,20 @@ def _sum_iq(iq: Mapping[int, NDArray[np.float64]]) -> NDArray[np.float64]:
     return iq[0][:, :, 0, :].sum(axis=1)
 
 
+@pytest.mark.parametrize("source", ["handwritten", "builder"])
 @pytest.mark.parametrize("mode", ["integrated", "summed", "decimated"])
-def test_handwritten_timeline_acquires_through_schedule_and_real_qick_pipeline(
+def test_timeline_acquires_through_schedule_and_real_qick_pipeline(
     monkeypatch: pytest.MonkeyPatch,
     mode: str,
+    source: str,
 ) -> None:
     soc, soccfg = make_acquisition_soc()
-    program = ReadoutTimeline(soccfg, reps=2)
+    if source == "builder":
+        builder = TimelineBuilder(soccfg, reps=2)
+        builder.emit(_make_readout())
+        program = builder.build()
+    else:
+        program = ReadoutTimeline(soccfg, reps=2)
     samples = program.ro_chs[0]["length"]
 
     def poll():
