@@ -133,7 +133,7 @@ class PulseReset(AbsReset):
     def run(
         self, prog: ModularProgramV2, t: float | QickParam = 0.0
     ) -> float | QickParam:
-        return self.reset_pulse.emit(prog, t)
+        return self.reset_pulse.run(prog, t)
 
     def declare(self, prog: TimelineProgramV2) -> None:
         """Declare the reset pulse's resources on prog."""
@@ -171,8 +171,8 @@ class TwoPulseReset(AbsReset):
     def run(
         self, prog: ModularProgramV2, t: float | QickParam = 0.0
     ) -> float | QickParam:
-        pulse1_t = self.reset_pulse1.emit(prog, t)
-        pulse2_t = self.reset_pulse2.emit(prog, t)
+        pulse1_t = self.reset_pulse1.run(prog, t)
+        pulse2_t = self.reset_pulse2.run(prog, t)
         return calc_max_length(pulse1_t, pulse2_t)
 
     def declare(self, prog: TimelineProgramV2) -> None:
@@ -217,9 +217,9 @@ class BathReset(AbsReset):
     def run(
         self, prog: ModularProgramV2, t: float | QickParam = 0.0
     ) -> float | QickParam:
-        res_t = self.res_pulse.emit(prog, t)
-        self.qub_pulse.emit(prog, t)
-        return self.pi2_pulse.emit(prog, res_t)
+        res_t = self.res_pulse.run(prog, t)
+        self.qub_pulse.run(prog, t)
+        return self.pi2_pulse.run(prog, res_t)
 
     def declare(self, prog: TimelineProgramV2) -> None:
         """Declare the cavity, qubit and final pi/2 pulses on prog."""

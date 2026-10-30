@@ -25,7 +25,7 @@ from ..modules.dmem import LoadValue, LoadWord, ScanWith
 from ..modules.pulse import Pulse, TableLengthPulse
 from ..modules.readout import MuxReadout, PulseReadout, TablePulseReadout
 from ..modules.reset import BathReset, PulseReset, TwoPulseReset
-from ..modules.util import round_timestamp
+from ..modules.util import calc_max_length, round_timestamp
 from ..modules.waveform import ConstWaveformCfg, FlatTopWaveformCfg
 from ..utils import is_qick_param, readout_freq_from_word, readout_freq_from_words
 from ._envelope_pool import EnvelopeContent, EnvelopePool
@@ -281,17 +281,22 @@ class TimelineInterpreter:
 
     def reset(self, module: Module, t: float | QickParam) -> float | QickParam:
         """Expand reset wrappers into real pulses only; never set a quantum state."""
+        start = len(self.events)
         if type(module) is PulseReset:
-            return self.pulse(module.reset_pulse, t)
-        if type(module) is TwoPulseReset:
-            return max(
+            end = self.pulse(module.reset_pulse, t)
+        elif type(module) is TwoPulseReset:
+            end = calc_max_length(
                 self.pulse(module.reset_pulse1, t), self.pulse(module.reset_pulse2, t)
             )
-        if type(module) is BathReset:
-            end = self.pulse(module.res_pulse, t)
+        elif type(module) is BathReset:
+            cavity_end = self.pulse(module.res_pulse, t)
             self.pulse(module.qub_pulse, t)
-            return self.pulse(module.pi2_pulse, end)
-        raise ValueError(f"{type(module).__name__} simulation unsupported")
+            end = self.pulse(module.pi2_pulse, cavity_end)
+        else:
+            raise ValueError(f"{type(module).__name__} simulation unsupported")
+        for index in range(start, len(self.events)):
+            self.events[index] = replace(self.events[index], source=module.name)
+        return end
 
     def table_length(
         self, module: TableLengthPulse, t: float | QickParam, *, wait: bool = True
@@ -319,6 +324,7 @@ class TimelineInterpreter:
             duration += total - template_length
         previous_end = self.gen_end.get(module.cfg.ch, 0.0)
         self.pulse(template, t, duration=duration)
+        self.events[-1] = replace(self.events[-1], source=module.name)
         # PulseFromLengthReg deliberately does not update compile-time timestamps.
         # Its duration table, not template length, owns the reference increment.
         if wait:

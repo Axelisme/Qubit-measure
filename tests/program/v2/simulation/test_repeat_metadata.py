@@ -1,7 +1,7 @@
 """Bitwise frontend characterization for repeated pulse metadata.
 
-Digests cover the full numeric request, including inactive placeholders, candidate
-arrays and lowered flat-top envelopes. Semantic checks make the Repeat contract
+Digests cover request content, including source labels, inactive placeholders,
+candidate arrays and lowered flat-top envelopes. Semantic checks make the Repeat contract
 visible without depending on the interpreter's cache or private helpers.
 """
 
@@ -190,7 +190,8 @@ def request_digest(request: AcquireRequest):
             "computed_flat_top",
             "7d08fa57c36b1fd498be2150abf7ebc87bb8568e91fa7fa46923ccfab10bf182",
         ),
-        ("dynamic", "58fbed217601aeaa18033bccd5bec43aeec50f268ed4806604be0dae2cc47291"),
+        # TableLengthPulse owns its source; only the former helper label changed.
+        ("dynamic", "1c3345ca38bd34d4cfaa5d4aa1a1ba160977099783017bed0fec8791f2d4f02b"),
         ("branch", "283718448f03e2272ffe4ed594bc92af6a5028bcf9e19809a1a0fae6eb5fb9a7"),
     ],
 )
@@ -209,6 +210,10 @@ def test_repeated_request_preserves_all_numeric_content(environment, case, expec
             np.testing.assert_array_equal(
                 slot.active, np.asarray([0, 2, 1])[template.points] > outer[1]
             )
+    if case == "dynamic":
+        assert {
+            event.source for template in request.templates for event in template.events
+        } == {"dynamic", "readout"}
     if case.startswith("computed_"):
         assert not any(
             event.source == "gate" for event in request.materialize_point(0).events

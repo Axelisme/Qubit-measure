@@ -716,7 +716,7 @@ class TablePulseReadout(AbsReadout):
     def run(
         self, prog: ModularProgramV2, t: float | QickParam = 0.0
     ) -> float | QickParam:
-        return self._readout.emit(prog, t)
+        return self._readout.run(prog, t)
 
     def allow_rerun(self) -> bool:
         return True

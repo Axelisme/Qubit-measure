@@ -20,12 +20,19 @@ from zcu_tools.program.v2.ir.instructions import (
     RegWriteInst,
     WaitInst,
 )
-from zcu_tools.program.v2.ir.io_instructions import PortWriteInst
+from zcu_tools.program.v2.ir.io_instructions import DmemReadInst, PortWriteInst
 from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 from zcu_tools.program.v2.modular import ModularProgramV2
-from zcu_tools.program.v2.modules import Branch, Join, LoadWord, Repeat, SoftDelay
+from zcu_tools.program.v2.modules import (
+    Branch,
+    Join,
+    LoadWord,
+    Repeat,
+    ScanWith,
+    SoftDelay,
+)
 from zcu_tools.program.v2.modules.base import Module
-from zcu_tools.program.v2.modules.pulse import Pulse, PulseCfg
+from zcu_tools.program.v2.modules.pulse import Pulse, PulseCfg, TableLengthPulse
 from zcu_tools.program.v2.modules.readout import (
     PulseReadout,
     PulseReadoutCfg,
@@ -479,11 +486,109 @@ def test_readout_snapshot_labels_semantic_owner_and_author_children(native, form
     )
     if form == "table":
         _assert_table_snapshot(prog, gen, adc)
+        assert [
+            meta.name
+            for meta in _markers(prog.compiled_stream)
+            if meta.type == "SOURCE_START"
+        ] == ["readout"]
     assert _port_sources(prog.compiled_stream) == (
         ["readout", "readout", "author_child"]
         if form == "join"
         else ["readout", "readout"]
     )
+
+
+def test_legacy_scan_loop_and_loader_keep_scan_owner_and_child_restores_it():
+    scan = ScanWith("scan_owner", [2, 0, 1], "selected").add_content(
+        SoftDelay("authored", 0.01)
+    )
+    parent = Repeat("outer", 2).add_content([scan, SoftDelay("after", 0.02)])
+    prog = ModularProgramV2(make_mock_soccfg(), modules=[parent])
+    scopes: list[str] = []
+    starts: list[str] = []
+    scan_owners: list[tuple[str, ...]] = []
+    loader_owners: list[tuple[str, ...]] = []
+    for record in prog.compiled_stream.records:
+        inst = record.instruction
+        if isinstance(inst, MetaInst) and inst.type == "SOURCE_START":
+            scopes.append(inst.name)
+            starts.append(inst.name)
+        elif isinstance(inst, MetaInst) and inst.type == "SOURCE_END":
+            assert scopes.pop() == inst.name
+        elif isinstance(inst, MetaInst) and inst.name == "scan_owner_count":
+            scan_owners.append(tuple(scopes))
+        elif isinstance(inst, DmemReadInst):
+            loader_owners.append(tuple(scopes))
+    assert starts == ["outer", "scan_owner", "authored", "after"]
+    assert scan_owners
+    assert all(owner == ("outer", "scan_owner") for owner in scan_owners)
+    assert loader_owners == [("outer", "scan_owner")]
+    assert not scopes
+
+
+def test_repeat_rejects_internal_module_that_is_not_its_child():
+    child = SoftDelay("same_name", 0.01)
+    stranger = SoftDelay("same_name", 0.01)
+
+    class InvalidOwner(Repeat):
+        def run(
+            self,
+            prog: ModularProgramV2,
+            t: float | QickParam = 0.0,
+            *,
+            internal_modules: tuple[Module, ...] = (),
+        ) -> float | QickParam:
+            return super().run(prog, t, internal_modules=(stranger,))
+
+    owner = InvalidOwner("owner", 2).add_content(child)
+    with pytest.raises(ValueError, match="internal_modules.*children"):
+        ModularProgramV2(make_mock_soccfg(), modules=[owner])
+
+
+@pytest.mark.parametrize("joined", [False, True])
+def test_legacy_table_scopes_keep_authored_children_and_anonymous_scheduling(joined):
+    def table(name, ch):
+        cfg = PulseCfg(
+            ch=ch,
+            nqz=1,
+            freq=80,
+            gain=0.2,
+            waveform=ConstWaveformCfg(length=0.1),
+        )
+        return TableLengthPulse(name, cfg, lengths=[0.1, 0.2], idx_reg="scan")
+
+    left = table("left", 0)
+    content = Join(left, table("right", 1)) if joined else left
+    parent = Repeat("outer", 2).add_content([content, SoftDelay("after", 0.01)])
+    prog = ModularProgramV2(make_mock_soccfg(), modules=[parent], sweep=[("scan", 2)])
+    starts = [
+        meta.name
+        for meta in _markers(prog.compiled_stream)
+        if meta.type == "SOURCE_START"
+    ]
+    assert starts == (
+        ["outer", "", "left", "right", "after"]
+        if joined
+        else ["outer", "left", "after"]
+    )
+    assert _port_sources(prog.compiled_stream) == (
+        ["left", "right"] if joined else ["left"]
+    )
+    scopes: list[str] = []
+    schedule: list[tuple[str, ...]] = []
+    for record in prog.compiled_stream.records:
+        inst = record.instruction
+        if isinstance(inst, MetaInst) and inst.type == "SOURCE_START":
+            scopes.append(inst.name)
+        elif isinstance(inst, MetaInst) and inst.type == "SOURCE_END":
+            assert scopes.pop() == inst.name
+        elif isinstance(inst, RegWriteInst) and scopes and scopes[-1] == "":
+            schedule.append(tuple(scopes))
+    if joined:
+        # Join's duration loader and common wait restore the anonymous owner.
+        assert schedule
+        assert set(schedule) == {("outer", "")}
+    assert not scopes
 
 
 def _port_sources(snapshot: ir.CompiledStream) -> list[str]:
