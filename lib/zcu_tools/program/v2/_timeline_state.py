@@ -28,6 +28,7 @@ from ._timeline_runtime import (
     Time,
     bounded_source_expression,
     lookup_expression,
+    native_event_expression,
     projected_bounds,
     source_expression,
     time_bounds,
@@ -560,14 +561,16 @@ class TimelineBook:
 
     def record_native(self, prog, ch: int, end: Time, *, generator: bool) -> None:
         """Capture an actual event end in cycles, without changing native storage."""
-        self.native_expressions[generator, ch] = time_expression(prog, end)
+        self.native_expressions[generator, ch] = native_event_expression(prog, end)
 
     def native_expression(self, prog, ch: int, *, generator: bool) -> TimeExpression:
         """Return the compile-only tail, or the initial native end before any event."""
         key = (generator, ch)
         if key in self.native_expressions:
             return self.native_expressions[key]
-        return time_expression(prog, self.channel_end(prog, ch, generator=generator))
+        return native_event_expression(
+            prog, self.channel_end(prog, ch, generator=generator)
+        )
 
     def channel_end(self, prog, ch: int, *, generator: bool) -> Time:
         """Return a declared native channel's exact runtime end or static timestamp."""

@@ -184,6 +184,29 @@ def time_expression(prog, value: "Time") -> TimeExpression:
     )
 
 
+def native_event_expression(prog, value: "Time") -> TimeExpression:
+    """Capture a physical event end with a safe integer-cycle projection.
+
+    Raw us ends may include fractional waveform/ADC cycles. Ceil each legal
+    point here, before integer reference debits; do not round a physical end
+    like a register initialization. RuntimeEnd already stores integer cycles
+    and retains its expression unchanged. This emits no instructions and does
+    not participate in the module owner's separate event-plus-post rounding.
+    Missing native sweep dimensions raise KeyError.
+    """
+    if isinstance(value, RuntimeEnd):
+        return runtime_expression(value)
+    ticks = value * get_fclk(prog)
+    if not isinstance(ticks, QickParam):
+        return LinearTime(ceil_tick(ticks))
+    axes = {name: prog.loop_dict[name] for name in ticks.spans}
+    raw = np.asarray(ticks.to_array(axes, all_loops=True), dtype=float)
+    points = np.asarray(
+        [ceil_tick(float(point)) for point in raw.flat], dtype=np.int64
+    ).reshape(raw.shape)
+    return point_time(", ".join(axes), axes, points)
+
+
 def source_expression(prog, name: str) -> TimeExpression:
     """Return a register's current point provenance, or its certified unknown range."""
     book = prog._timeline_book
