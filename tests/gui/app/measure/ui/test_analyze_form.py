@@ -5,6 +5,8 @@ from pathlib import Path
 from typing import Annotated, Literal
 
 import pytest
+from pydantic import Field
+from pydantic.dataclasses import dataclass as validated_dataclass
 from qtpy import QtWidgets
 from qtpy.QtCore import Qt
 from qtpy.QtWidgets import QLineEdit
@@ -67,6 +69,52 @@ def test_core_options_and_param_meta_share_visible_form(qapp, tmp_path: Path):
     finally:
         form.close()
         form.deleteLater()
+
+
+@validated_dataclass(frozen=True)
+class _ConstrainedOptions:
+    skip: Annotated[int, FieldMeta(label="Skip points"), Field(ge=0)] = 0
+
+
+def test_constrained_options_show_error_and_recover(qapp, tmp_path: Path):
+    """Constructor constraints share the parse-error UI and block publication."""
+    window = QtWidgets.QWidget()
+    layout = QtWidgets.QVBoxLayout(window)
+    form = AnalyzeFormWidget()
+    form.populate(_ConstrainedOptions())
+    published = QtWidgets.QLabel("No parameters published")
+    published.setObjectName("publishedParams")
+    action = QtWidgets.QPushButton("Analyze")
+    form.params_changed.connect(
+        lambda params: published.setText(f"Published skip: {params.skip}")
+    )
+    form.validity_changed.connect(action.setEnabled)
+    layout.addWidget(form)
+    layout.addWidget(published)
+    layout.addWidget(action)
+    window.resize(640, 320)
+    window.show()
+    qapp.processEvents()
+    driver = ComponentDriver(window)
+    try:
+        driver.screenshot(tmp_path / "01-defaults.png")
+        driver.enter_text("Skip points:", "-1")
+        driver.screenshot(tmp_path / "02-constraint-error.png")
+        visible = {item.object_name: item for item in driver.visible().widgets}
+        assert "skip" in visible["analysisParameterError"].text
+        assert "greater than or equal to 0" in visible["analysisParameterError"].text
+        assert visible["publishedParams"].text == "No parameters published"
+        assert not next(item for item in driver.visible().widgets if item.text == "Analyze").enabled
+
+        driver.enter_text("Skip points:", "2")
+        driver.screenshot(tmp_path / "03-recovered.png")
+        visible = {item.object_name: item for item in driver.visible().widgets}
+        assert "analysisParameterError" not in visible
+        assert visible["publishedParams"].text == "Published skip: 2"
+        assert next(item for item in driver.visible().widgets if item.text == "Analyze").enabled
+    finally:
+        window.close()
+        window.deleteLater()
 
 
 def test_analyze_form_round_trips_values(qapp):
