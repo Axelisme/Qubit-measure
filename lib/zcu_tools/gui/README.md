@@ -1,6 +1,6 @@
 # `zcu_tools.gui` — GUI framework cheat-sheet
 
-**Last updated:** 2026-10-28
+**Last updated:** 2026-10-30
 
 **讀者：** framework-dev。共用 GUI 層、app 邊界與生命週期速查。
 
@@ -102,7 +102,12 @@ controller error與traceback。
 
 Complex 表示轉換直接使用 `core.complex_codec`。Measure 的來源 provenance 與 precondition 型別由 `app/measure/services/form_contracts.py` 擁有，remote 錯誤轉譯由 `app/measure/remote/form_errors.py` 擁有。編輯入口由 `gui.form`、`gui.form_adapter` 與 `widgets/form` 提供。
 
-## Process Runtime (`runtime.py`)
+## Process runtime (`runtime.py`)
+
+Rendering 初始化在 mathtext prewarm 之前，以 `matplotlib.style.use` 套用
+[共用樣式](../plotting/README.md#預設外觀)。後續新圖使用共用字級、格線與 tight layout。
+這一步不切換 backend，也不登記 pyplot figure。App 或作者在初始化後，以原生
+Matplotlib 呼叫參數或 `plt.style.context(...)` 覆寫外觀。
 
 `gui.runtime` owns process-level startup mechanics for launchable GUI apps:
 logging, `QApplication` creation, rendering initialization, shared plot-host

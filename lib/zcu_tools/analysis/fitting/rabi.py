@@ -4,6 +4,8 @@ import numpy as np
 from numpy.typing import NDArray
 
 from .base import cosfunc, decaycos, fitcos, fitdecaycos
+from .quality import compute_fit_quality
+from .results import RabiFit
 
 
 def fit_rabi(
@@ -13,16 +15,7 @@ def fit_rabi(
     *,
     decay: bool = False,
     init_phase: float | None = None,
-) -> tuple[
-    float,
-    float,
-    float,
-    float,
-    float,
-    float,
-    NDArray[np.float64],
-    tuple[tuple[float, ...], NDArray[np.float64]],
-]:
+) -> RabiFit:
     """Fit a real Rabi trace and derive pi and pi/2 pulse coordinates.
 
     ``xs`` and ``real_signals`` are matching 1D float64 arrays of sweep
@@ -34,15 +27,16 @@ def fit_rabi(
     ``init_phase`` fixes the phase in degrees when supplied; None fits it freely.
     Both options must be passed by keyword.
 
-    Return (pi_x, pi_x_err, pi2_x, pi2_x_err, freq, freq_err, fit_signals,
-    (pOpt, pCov)). Coordinates and their standard errors use the units of xs;
+    Return a named RabiFit. Tuple unpacking (pi_x, pi_x_err, pi2_x,
+    pi2_x_err, freq, freq_err, fit_signals, (pOpt, pCov)) is transitional
+    compatibility and will be removed after callers migrate to named access.
+    Coordinates and their standard errors use the units of xs;
     frequency uses inverse xs units. Parameters are (offset, amplitude, frequency,
     phase_degrees[, decay_time]); covariance follows that order. Fitted samples
     follow the input order.
 
     Invalid data can raise ValueError from initialization or fitting. Optimizer
-    non-convergence emits RuntimeWarning and returns the initial-parameter
-    fallback with infinite covariance. A zero fitted frequency cannot yield
+    non-convergence raises AnalysisFailed. A zero fitted frequency cannot yield
     finite pulse coordinates and can raise ZeroDivisionError.
     """
 
@@ -95,13 +89,28 @@ def fit_rabi(
 
     pOpt = tuple(pOpt)
 
-    return (
-        float(pi_x),
-        pi_x_err,
-        float(pi2_x),
-        pi2_x_err,
-        float(freq),
-        freq_err,
+    names = (
+        ("y0", "yscale", "freq", "phase", "decay_time")
+        if decay
+        else ("y0", "yscale", "freq", "phase")
+    )
+    quality = compute_fit_quality(
+        real_signals,
         fit_signals,
-        (pOpt, pCov),
+        dict(zip(names, pOpt, strict=True)),
+        pCov,
+        fixed_parameters=("phase",) if init_phase is not None else (),
+    )
+    return RabiFit(
+        (
+            float(pi_x),
+            pi_x_err,
+            float(pi2_x),
+            pi2_x_err,
+            float(freq),
+            freq_err,
+            fit_signals,
+            (pOpt, pCov),
+        ),
+        quality=quality,
     )

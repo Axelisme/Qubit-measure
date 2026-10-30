@@ -147,6 +147,18 @@ TEMPLATES: dict[str, TemplateDef] = {
         pulse(gain=0.2, length=1.0, at="pulse_cfg"),
         default_name="reset_10",
     ),
+    "flux_reset": TemplateDef(
+        PulseResetSpec,
+        "Flux reset",
+        pulse(
+            freq=0.0,
+            ch=Expr("{qubit}.wiring.lo_flux_ch"),
+            gain=Expr("{qubit}.ext.flux_reset_gain"),
+            length=Expr("{qubit}.ext.flux_reset_length"),
+            at="pulse_cfg",
+        ),
+        default_name="flux_reset",
+    ),
     "two_pulse_reset": TemplateDef(
         TwoPulseResetSpec,
         "Two-pulse reset",

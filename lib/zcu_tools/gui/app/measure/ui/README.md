@@ -1,6 +1,6 @@
 # Measure Qt views
 
-**Last updated:** 2026-10-28
+**Last updated:** 2026-10-30
 
 **讀者：** framework-dev。量測 Qt views、對話框與呈現生命週期。
 
@@ -94,7 +94,9 @@ refreshes and tab selection preserve unrelated bottom-status messages. They do
 not cover the tab or figure area with a cfg diagnostic. Load behavior is unchanged.
 
 `AnalyzeFormWidget` keeps invalid optional scalar text visible. Only blank text
-means None. A committed parse failure shows a field-labelled error and publishes
+means None. Dataclass constructor constraints, including pydantic field limits,
+show their validation error below the fields and do not publish params.
+A committed parse failure shows a field-labelled error and publishes
 `validity_changed(False)` without publishing params. Valid edits publish a typed
 params instance and `validity_changed(True)`. For a populated form, the tab
 combines current validity with readiness and authority to gate Analyze and
