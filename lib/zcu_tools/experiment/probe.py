@@ -130,7 +130,9 @@ def _scaled_fields(
     return {
         declaration.field_name
         for declaration in (*spec.axes, spec.z)
-        if np.isfinite(declaration.scale) and declaration.scale not in (0, 1)
+        if declaration.field_name is not None
+        and np.isfinite(declaration.scale)
+        and declaration.scale not in (0, 1)
     }
 
 
