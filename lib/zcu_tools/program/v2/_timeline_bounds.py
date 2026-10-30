@@ -154,12 +154,14 @@ class ProducerBounds:
         """Retain each producer's input proof at its actual execution position.
 
         Structured owners restore/intersect defined on Branch/Repeat paths.
-        Snapshot errors survive later initialization, overwrites and other cases.
-        They become errors only when name participates in a time dependency;
-        non-time table consumers keep their existing runtime contract.
+        Snapshot errors include dependency failures and survive later initialization,
+        overwrites and other cases. They become errors only when name participates
+        in a time dependency. Non-time table consumers keep their runtime contract.
         """
         for dependency in set(dependencies) | requirements.keys():
             try:
+                if errors := self.input_errors.get(dependency):
+                    raise ValueError(errors[0])
                 actual = self._resolve(prog, dependency, check_defined=True)
                 allowed = requirements.get(dependency)
                 if allowed is not None and (
