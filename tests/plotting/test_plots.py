@@ -73,10 +73,28 @@ def test_subplots_accepts_matplotlib_dimensions_and_unique_optional_names() -> N
     plots.release()
 
 
-@pytest.mark.parametrize("host", [RecordingHost(), NonPresentingHost()])
-def test_figure_show_presents_once_and_rejects_finished_operations(
-    host: RecordingHost | NonPresentingHost,
+@pytest.mark.parametrize(
+    ("dimensions", "keywords"),
+    [((2,), {"nrows": 3}), ((2, 2), {"ncols": 3})],
+)
+def test_subplots_rejects_duplicate_native_dimensions_without_registering_a_figure(
+    dimensions: tuple[int, ...], keywords: dict[str, int]
 ) -> None:
+    plots = Plots(NonPresentingHost())
+    try:
+        with pytest.raises(TypeError, match="multiple values"):
+            plots.subplots(*dimensions, **keywords)
+        assert not plots
+    finally:
+        plots.finish(present=False)
+        plots.release()
+
+
+@pytest.mark.parametrize("host_type", [RecordingHost, NonPresentingHost])
+def test_figure_show_presents_once_and_rejects_finished_operations(
+    host_type: type[RecordingHost] | type[NonPresentingHost],
+) -> None:
+    host = host_type()
     plots = Plots(host)
     figure, _ = plots.subplots()
     if isinstance(host, RecordingHost):

@@ -135,12 +135,9 @@ class FigureCollection(Mapping[str, Figure]):
         **figure_kwargs: Any,
     ) -> tuple[Figure, Axes | NDArray[np.object_]]: ...
 
-    # tolerated: Keep native Matplotlib shape, sharing and layout options explicit.
-    def subplots(  # noqa: PLR0913
+    def subplots(
         self,
         *args: int | str,
-        nrows: int = 1,
-        ncols: int = 1,
         num: str | None = None,
         sharex: bool | Literal["none", "all", "row", "col"] = False,
         sharey: bool | Literal["none", "all", "row", "col"] = False,
@@ -165,33 +162,39 @@ class FigureCollection(Mapping[str, Figure]):
                     "A legacy name cannot be combined with num or dimensions"
                 )
             num = args[0]
+            dimensions: tuple[int, ...] = ()
         else:
-            if len(args) > 2 or any(not isinstance(arg, int) for arg in args):
-                raise TypeError("Expected at most two integer dimensions")
-            if args:
-                nrows = int(args[0])
-            if len(args) == 2:
-                ncols = int(args[1])
-        if num is None:
-            self._figure_number += 1
-            while f"figure_{self._figure_number}" in self:
+            if any(not isinstance(arg, int) for arg in args):
+                raise TypeError("Expected integer dimensions")
+            dimensions = tuple(int(arg) for arg in args)
+
+        def create(
+            nrows: int = 1, ncols: int = 1, **kwargs: Any
+        ) -> tuple[Figure, Axes | NDArray[np.object_]]:
+            # Native argument binding rejects duplicate dimensions before creating.
+            name = num
+            if name is None:
                 self._figure_number += 1
-            num = f"figure_{self._figure_number}"
-        if not num:
-            raise ValueError("Figure name must be a nonempty string")
-        figure = Figure(**figure_kwargs)
-        self._create_canvas(figure)
-        axes = figure.subplots(
-            nrows=nrows,
-            ncols=ncols,
-            sharex=sharex,
-            sharey=sharey,
-            squeeze=squeeze,
-            subplot_kw=subplot_kw,
-            gridspec_kw=gridspec_kw,
-        )
-        self.adopt(num, figure)
-        return figure, axes
+                while f"figure_{self._figure_number}" in self:
+                    self._figure_number += 1
+                name = f"figure_{self._figure_number}"
+            if not name:
+                raise ValueError("Figure name must be a nonempty string")
+            figure = Figure(**kwargs)
+            self._create_canvas(figure)
+            axes = figure.subplots(
+                nrows=nrows,
+                ncols=ncols,
+                sharex=sharex,
+                sharey=sharey,
+                squeeze=squeeze,
+                subplot_kw=subplot_kw,
+                gridspec_kw=gridspec_kw,
+            )
+            self.adopt(name, figure)
+            return figure, axes
+
+        return create(*dimensions, **figure_kwargs)
 
     def _create_canvas(self, figure: Figure) -> None:
         FigureCanvasAgg(figure)
