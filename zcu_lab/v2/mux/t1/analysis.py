@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import numpy as np
+from numpy.typing import NDArray
 from zcu_tools.analysis.failure import AnalysisFailed
 from zcu_tools.analysis.fitting import (
     compute_fit_quality,
@@ -15,12 +16,6 @@ from zcu_tools.analysis.fitting import (
 )
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.v2.support.lifetime_models import (
-    LifetimeComparison,
-    LifetimeCurve,
-    compare_lifetime_models,
-    draw_lifetime_comparison,
-)
 from zcu_lab.v2.support.mux import MuxFitFailure
 from zcu_lab.v2.twotone.time_domain.t1.core import (
     T1Analysis,
@@ -37,14 +32,17 @@ class MuxT1Fit:
     """Original full-tone index and existing single-qubit T1 numerical analysis.
 
     fit holds t1/t1_err in us, optional second decay component in us and the
-    existing fit quality mapping under 'fit'. comparison records the primary
-    and dual model in single-exponential mode, or None in explicit dual mode.
+    existing fit quality mapping under 'fit'. times is the float64 (N,) delay
+    axis in us after skip/finite filtering. observed and fitted are float64
+    (N,) projected IQ and primary predictions in signal units, aligned to times.
     It owns no figures or source cfg.
     """
 
     index: int
     fit: T1Analysis
-    comparison: LifetimeComparison | None = None
+    times: NDArray[np.float64]
+    observed: NDArray[np.float64]
+    fitted: NDArray[np.float64]
 
 
 def _validate_result(result: MuxT1Result) -> None:
@@ -73,7 +71,6 @@ def analyze_t1(
     options: T1AnalyzeOptions,
     *,
     plots: Plots,
-    max_model_window_factor: float = 2.0,
 ) -> tuple[MuxT1Fit | MuxFitFailure, ...]:
     """Fit each IQ row against shared requested us after skip/finite filtering.
 
@@ -84,10 +81,9 @@ def analyze_t1(
     fitters and quality consume only acquired points. Numeric failures return
     indexed MuxFitFailure reasons; plotting and resource errors propagate.
     plots owns fit_i, independent of duplicate readout labels; caller
-    finishes/releases figures. In single mode, also fit/record/plot the dual
-    model without replacing fit.t1. max_model_window_factor (default 2) marks
-    diagnostic times above factor*max(xs) as discarded. Secondary numerical
-    failures stay in comparison. No cfg or hardware is read.
+    finishes/releases figures. Draw only the selected primary model and return
+    its acquired delays, projected observations and predictions for caller-owned
+    diagnostics. No cfg or hardware is read.
     """
     _validate_result(result)
     times, indices, signals = result.times, result.tone_indices, result.signals
@@ -133,19 +129,12 @@ def analyze_t1(
                 covariance,
                 decay_bounds=decay_time_bounds(xs),
             )
-            comparison = None
-            if not options.dual_exp:
-                comparison = compare_lifetime_models(
-                    xs,
-                    real,
-                    LifetimeCurve("exponential", (t1,), (err,), fitted, quality, 3),
-                    max_window_factor=max_model_window_factor,
-                    t1=True,
-                )
             outcome = MuxT1Fit(
                 index,
                 T1Analysis(float(t1), float(err), t1b, errb, {"fit": quality}),
-                comparison,
+                xs,
+                real,
+                fitted,
             )
         except (
             AnalysisFailed,
@@ -160,10 +149,7 @@ def analyze_t1(
         else:
             outcomes.append(outcome)
             ax.plot(xs, real, "o", label="measured")
-            if outcome.comparison is not None:
-                draw_lifetime_comparison(ax, xs, outcome.comparison)
-            else:
-                ax.plot(xs, fitted, label=f"T1={t1:.4g} ± {err:.2g} us")
+            ax.plot(xs, fitted, label=f"T1={t1:.4g} ± {err:.2g} us")
             if options.dual_exp:
                 ax.set_title(f"Second decay: {t1b:.4g} ± {errb:.2g} us")
         ax.legend()

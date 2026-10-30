@@ -11,11 +11,16 @@ from zcu_tools.program.v2 import SweepCfg
 
 from zcu_lab.v2.mux.t1.core import MuxT1Cfg, MuxT1Exp, MuxT1ToneCfg
 from zcu_lab.v2.mux.t2echo.core import MuxEchoToneCfg, MuxT2EchoCfg, MuxT2EchoExp
-from zcu_lab.v2.support.lifetime_models import LifetimeModelRecord
 from zcu_lab.v2.support.mux import MuxFitFailure
 from zcu_lab.workflows.common.analysis import lifetime_rejection
 from zcu_lab.workflows.common.calibration_results import StageStatus
 from zcu_lab.workflows.common.gates import Gate, gate
+from zcu_lab.workflows.common.lifetime_models import (
+    LifetimeCurve,
+    LifetimeModelRecord,
+    compare_lifetime_models,
+    show_lifetime_comparison,
+)
 from zcu_lab.workflows.common.saving import save_native
 from zcu_lab.workflows.common.stages import StageEnv
 from zcu_lab.workflows.common.summary import observe_operation
@@ -250,41 +255,55 @@ async def measure_mux_t1(
             record.value,
             MuxT1Exp.Options(skip=0, dual_exp=False),
             plots=fit_plots,
-            max_model_window_factor=settings.max_model_window_factor,
         )
+        qubits: list[QubitFitResult] = []
+        for fit in fits:
+            if isinstance(fit, MuxFitFailure):
+                qubits.append(
+                    QubitFitResult(index=fit.index, status="failed", reason=fit.reason)
+                )
+                continue
+            quality = (fit.fit.fit_quality or {})["fit"]
+            comparison = compare_lifetime_models(
+                fit.times,
+                fit.observed,
+                LifetimeCurve(
+                    "exponential",
+                    (fit.fit.t1,),
+                    (fit.fit.t1_err,),
+                    fit.fitted,
+                    quality,
+                    3,
+                ),
+                max_window_factor=settings.max_model_window_factor,
+                t1=True,
+            )
+            show_lifetime_comparison(
+                fit_plots, f"fit_{fit.index}", fit.times, fit.observed, comparison
+            )
+            reason, gates = _acceptance(
+                fit.fit.t1,
+                fit.fit.t1_err,
+                quality,
+                settings,
+                "T1",
+                fit.times,
+            )
+            qubits.append(
+                QubitFitResult(
+                    index=fit.index,
+                    status="accepted" if reason is None else "rejected",
+                    reason=reason,
+                    lifetime_us=fit.fit.t1 if reason is None else None,
+                    error_us=fit.fit.t1_err if reason is None else None,
+                    models=comparison.records,
+                    gates=gates,
+                )
+            )
+        return MuxT1StageResult(file="t1.h5", qubits=tuple(qubits))
     finally:
         fit_plots.finish(present=False)
         fit_plots.release()
-    qubits: list[QubitFitResult] = []
-    for row, fit in enumerate(fits):
-        if isinstance(fit, MuxFitFailure):
-            qubits.append(
-                QubitFitResult(index=fit.index, status="failed", reason=fit.reason)
-            )
-            continue
-        quality = (
-            fit.fit.fit_quality["fit"] if fit.fit.fit_quality is not None else None
-        )
-        reason, gates = _acceptance(
-            fit.fit.t1,
-            fit.fit.t1_err,
-            quality,
-            settings,
-            "T1",
-            record.value.result.times[np.isfinite(record.value.result.signals[row])],
-        )
-        qubits.append(
-            QubitFitResult(
-                index=fit.index,
-                status="accepted" if reason is None else "rejected",
-                reason=reason,
-                lifetime_us=fit.fit.t1 if reason is None else None,
-                error_us=fit.fit.t1_err if reason is None else None,
-                models=fit.comparison.records if fit.comparison is not None else (),
-                gates=gates,
-            )
-        )
-    return MuxT1StageResult(file="t1.h5", qubits=tuple(qubits))
 
 
 async def measure_mux_echo(
@@ -352,37 +371,50 @@ async def measure_mux_echo(
             record.value,
             MuxT2EchoExp.Options(fit_method="decay"),
             plots=fit_plots,
-            max_model_window_factor=settings.max_model_window_factor,
         )
+        qubits: list[QubitFitResult] = []
+        for fit in fits:
+            if isinstance(fit, MuxFitFailure):
+                qubits.append(
+                    QubitFitResult(index=fit.index, status="failed", reason=fit.reason)
+                )
+                continue
+            comparison = compare_lifetime_models(
+                fit.times,
+                fit.observed,
+                LifetimeCurve(
+                    "exponential",
+                    (fit.t2,),
+                    (fit.t2_err,),
+                    fit.fitted,
+                    fit.quality,
+                    3,
+                ),
+                max_window_factor=settings.max_model_window_factor,
+            )
+            show_lifetime_comparison(
+                fit_plots, f"fit_{fit.index}", fit.times, fit.observed, comparison
+            )
+            reason, gates = _acceptance(
+                fit.t2,
+                fit.t2_err,
+                fit.quality,
+                settings,
+                "T2 Echo",
+                fit.times,
+            )
+            qubits.append(
+                QubitFitResult(
+                    index=fit.index,
+                    status="accepted" if reason is None else "rejected",
+                    reason=reason,
+                    lifetime_us=fit.t2 if reason is None else None,
+                    error_us=fit.t2_err if reason is None else None,
+                    models=comparison.records,
+                    gates=gates,
+                )
+            )
+        return MuxEchoStageResult(file="t2echo.h5", qubits=tuple(qubits))
     finally:
         fit_plots.finish(present=False)
         fit_plots.release()
-    qubits: list[QubitFitResult] = []
-    for row, fit in enumerate(fits):
-        if isinstance(fit, MuxFitFailure):
-            qubits.append(
-                QubitFitResult(index=fit.index, status="failed", reason=fit.reason)
-            )
-            continue
-        reason, gates = _acceptance(
-            fit.t2,
-            fit.t2_err,
-            fit.quality,
-            settings,
-            "T2 Echo",
-            record.value.result.times[1:][
-                np.isfinite(record.value.result.signals[row, 1:])
-            ],
-        )
-        qubits.append(
-            QubitFitResult(
-                index=fit.index,
-                status="accepted" if reason is None else "rejected",
-                reason=reason,
-                lifetime_us=fit.t2 if reason is None else None,
-                error_us=fit.t2_err if reason is None else None,
-                models=fit.comparison.records if fit.comparison is not None else (),
-                gates=gates,
-            )
-        )
-    return MuxEchoStageResult(file="t2echo.h5", qubits=tuple(qubits))

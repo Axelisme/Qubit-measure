@@ -18,7 +18,6 @@ RunRecord and save/load contracts: lib/zcu_tools/experiment/README.md.
 
 from __future__ import annotations
 
-from dataclasses import replace
 from typing import Annotated, ClassVar
 
 import numpy as np
@@ -49,11 +48,6 @@ from zcu_tools.program.v2.modules import (
 
 from zcu_lab.v2.support import live_line
 from zcu_lab.v2.support.acquire import mux_snr_checker
-from zcu_lab.v2.support.lifetime_models import (
-    LifetimeCurve,
-    compare_lifetime_models,
-    draw_lifetime_comparison,
-)
 from zcu_lab.v2.support.mux import MuxFitFailure, averaged_mux_signal
 from zcu_lab.v2.support.mux_coherence import (
     MuxCoherenceResult,
@@ -304,7 +298,6 @@ class MuxT2EchoExp(Experiment[MuxCoherenceResult, MuxT2EchoCfg]):
         options: T2EchoAnalyzeOptions,
         *,
         plots: Plots,
-        max_model_window_factor: float = 2.0,
     ) -> tuple[MuxCoherenceFit | MuxFitFailure, ...]:
         """Fit each source tone's Echo decay or fringes against requested delay.
 
@@ -315,12 +308,9 @@ class MuxT2EchoExp(Experiment[MuxCoherenceResult, MuxT2EchoCfg]):
         Explicit decay needs no detune. fit_phase frees fringe phase (otherwise zero).
         Omit the first point and missing IQ. Return per-tone T2E in us, fringe
         rate in MHz, uncertainties and fit quality, or a fit failure reason.
-        comparison records a second Gaussian-envelope fit on the same samples,
-        using the same fixed/free phase. max_model_window_factor (default 2)
-        marks implausible diagnostic lifetimes relative to max fitted delay;
-        it does not change the primary scalar or quality. Draw both available
-        curves in fit_i. Secondary numerical failure stays in its record.
-        Invalid sources or fit methods raise.
+        Each fit includes acquired delays, projected observations and primary
+        predictions for caller-owned diagnostics. Draw only the primary curve
+        in fit_i. Invalid sources or fit methods raise.
         """
         # 1. Omit the first requested point before removing missing IQ.
         if options.fit_method not in ("fringe", "decay"):
@@ -377,22 +367,7 @@ class MuxT2EchoExp(Experiment[MuxCoherenceResult, MuxT2EchoCfg]):
                 outcomes.append(MuxFitFailure(trace.index, str(exc)))
             else:
                 ax.plot(trace.times, real, "o", label="measured")
-                comparison = compare_lifetime_models(
-                    trace.times,
-                    real,
-                    LifetimeCurve(
-                        "exponential_fringe" if fit_fringe else "exponential",
-                        (outcome.t2,),
-                        (outcome.t2_err,),
-                        fitted,
-                        outcome.quality,
-                        (5 if phase is None else 4) if fit_fringe else 3,
-                        fixed_phase=phase if fit_fringe else None,
-                    ),
-                    max_window_factor=max_model_window_factor,
-                )
-                outcome = replace(outcome, comparison=comparison)
-                draw_lifetime_comparison(ax, trace.times, comparison)
+                ax.plot(trace.times, fitted, label="primary fit")
                 ax.set_title(
                     f"T2 = {outcome.t2:.4g} ± {outcome.t2_err:.2g} us; "
                     f"fringe = {outcome.detune:.4g} MHz"
