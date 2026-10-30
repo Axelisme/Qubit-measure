@@ -1,6 +1,6 @@
 # IR architecture guide
 
-**Last updated:** 2026-10-29，typed linker positioning
+**Last updated:** 2026-10-30，resolved loop sweep and table definitions
 
 **讀者：** framework-dev。QICK ASM V2 的 IR 分層、分析與 lowering 契約。
 
@@ -62,6 +62,15 @@ Each actual recompile resets these scopes and ordinals.
 `info["native"] is True` declares that existing QICK instructions own the shell,
 including waveform/register sweep increments and resets. `LOOP_START` also
 records resolved `counter_reg`, trip count `n`, and `range_hint=None`.
+Its `sweeps` dict has `registers` and `waves` maps. Registers use canonical
+addresses; waves use zero-based WMEM word addresses and field indexes 0..5
+(freq, phase, env, gain, length, conf). Each field contains integer `start` and
+per-loop-iteration `step` words from resolved QICK definitions. Inner IR loops
+emit empty maps. Native `tables` maps WMEM word/field indexes to DMEM word
+offsets for declared deterministic hooks. The tables contain rotated exec-after
+values: point zero retains initial WMEM, later points read offset + index - 1,
+and the last table word restores the initial field. The waveform macro owns
+target resolution. Loop producers collect only the resolved numeric definitions.
 `LOOP_BODY_START` follows native counter initialization; `LOOP_BODY_END` precedes
 native sweep updates/backedge; `LOOP_END` follows the complete closing shell.
 The compiler snapshots the full logical stream, then gives the optimizer a new

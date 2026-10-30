@@ -100,7 +100,8 @@ class Machine:
         self.flags: IntArray | None = None
         self.flags_valid = np.zeros(size, dtype=np.bool_)
         self.register_valid = {"s0": np.ones(size, dtype=np.bool_)}
-        self.read_mask = np.ones(size, dtype=np.bool_)
+        self.active = np.ones(size, dtype=np.bool_)
+        self.read_mask = self.active.copy()
         self.ref = np.zeros(size, dtype=np.int64)
         self.wmem_capacity = int(prog.tproccfg["wmem_size"])
         self.wmem = {
@@ -188,7 +189,7 @@ class Machine:
     def condition(self, condition: str | None) -> BoolArray:
         """Return the active lanes selected by pre-instruction Z/S flags."""
         if condition is None:
-            return np.ones(self.size, dtype=np.bool_)
+            return self.active.copy()
         if self.flags is None or np.any(self.read_mask & ~self.flags_valid):
             raise ValueError("undefined ALU flags")
         return {
@@ -196,7 +197,7 @@ class Machine:
             "NZ": self.flags != 0,
             "S": self.flags < 0,
             "NS": self.flags >= 0,
-        }[condition]
+        }[condition] & self.active
 
     def write(self, dst: Register, value: IntArray, active: BoolArray) -> None:
         """Apply a CPU write, preserving read-only SFRs and cfg/address widths."""
@@ -228,8 +229,9 @@ class Machine:
         """Copy current WMEM words, rejecting uninitialized per-lane addresses."""
         index = self.address(operand, self.wmem_capacity)
         result = np.empty((self.size, 6), dtype=np.int64)
-        for address in np.unique(index):
-            selected = index == address
+        result.fill(0)
+        for address in np.unique(index[self.read_mask]):
+            selected = (index == address) & self.read_mask
             if int(address) not in self.wmem or not np.all(
                 self.wmem_valid[int(address)][selected]
             ):
@@ -288,7 +290,7 @@ class Machine:
             )
             self.flags = np.where(effects.active, effects.result, old)
             self.flags_valid |= effects.active
-        self.read_mask = np.ones(self.size, dtype=np.bool_)
+        self.read_mask = self.active.copy()
 
     def port_effects(self, inst: PortWriteInst | DportWriteInst) -> None:
         """Apply ALU/side-register/WW effects after sampling the port output.
@@ -323,16 +325,19 @@ class Machine:
         elif isinstance(inst, DivInst):
             numerator = self.value(inst.num) & 0xFFFFFFFF
             denominator = self.value(inst.den) & 0xFFFFFFFF
-            if np.any(denominator == 0):
+            if np.any(self.active & (denominator == 0)):
                 raise ValueError("DIV denominator is zero")
-            active = np.ones(self.size, dtype=np.bool_)
-            self._store_register("s4", numerator // denominator, active)
-            self._store_register("s5", numerator % denominator, active)
+            denominator = np.where(self.active, denominator, 1)
+            self._store_register("s4", numerator // denominator, self.active)
+            self._store_register("s5", numerator % denominator, self.active)
         elif isinstance(inst, TimeInst):
             self._advance(inst)
         elif isinstance(inst, TestInst):
-            self.flags = self.expression(inst.op)
-            self.flags_valid[:] = True
+            result = self.expression(inst.op)
+            self.flags = np.where(
+                self.active, result, 0 if self.flags is None else self.flags
+            )
+            self.flags_valid |= self.active
         else:
             effects = self._alu_effects(inst)
             if isinstance(inst, RegWriteInst):
@@ -357,25 +362,29 @@ class Machine:
         if pre_adder:
             d = (operands[0] + 2**26) % 2**27 - 2**26
             a = d + a if inst.c_op.startswith("P") else d - a
-            if np.any((a < -(2**26)) | (a >= 2**26)):
+            if np.any(self.active & ((a < -(2**26)) | (a >= 2**26))):
                 raise ValueError("ARITH pre-adder exceeds signed 27-bit range")
         result = a * b
         if len(operands) > offset + 2:
             c = signed32(operands[offset + 2])
             result = result + c if inst.c_op.endswith("P") else result - c
         # |P| <= 2**26 * 2**17 + 2**31 < 2**45 after the pre-adder check.
-        self.arithmetic_result = result
-        self._store_register("s3", result, np.ones(self.size, dtype=np.bool_))
+        self.arithmetic_result = np.where(
+            self.active,
+            result,
+            0 if self.arithmetic_result is None else self.arithmetic_result,
+        )
+        self._store_register("s3", result, self.active)
 
     def _advance(self, inst: TimeInst) -> None:
         if inst.c_op == "rst":
-            self.ref[:] = 0
+            self.ref[self.active] = 0
             return
         value = self.value(inst.lit or inst.r1)
         if inst.c_op == "inc_ref":
-            self.ref += value
+            self.ref += np.where(self.active, value, 0)
         elif inst.c_op == "set_ref":
-            self.ref = value.copy()
+            self.ref = np.where(self.active, value, self.ref)
         else:
             raise ValueError(f"clock-dependent TIME {inst.c_op}")
 

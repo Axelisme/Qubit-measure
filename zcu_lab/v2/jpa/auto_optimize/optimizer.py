@@ -127,7 +127,11 @@ class JPAOptimizer:
         freq_sweep: SweepCfg,
         gain_sweep: SweepCfg,
         total_points: int,
+        seed: int | None,
     ) -> None:
+        # None draws fresh entropy, so the search differs per run.
+        self._seed = seed
+
         # Initialize bounds
         self.bounds = ParameterBounds(
             flux=self._normalized_bounds(flux_sweep),
@@ -174,7 +178,7 @@ class JPAOptimizer:
         self._phase_budget = phase1_budget
 
         # LHS sampler for 2D (freq, power) space
-        self._lhs_sampler = qmc.LatinHypercube(d=2)
+        self._lhs_sampler = qmc.LatinHypercube(d=2, rng=seed)
 
         # 2D Bayesian optimizer (initialized when needed)
         self._optimizer_2d: Optimizer | None = None
@@ -349,6 +353,7 @@ class JPAOptimizer:
             n_initial_points=0,
             n_jobs=-1,
             acq_optimizer="auto",
+            random_state=self._seed,
         )
 
         # Only use data from THIS flux value (avoid model pollution)

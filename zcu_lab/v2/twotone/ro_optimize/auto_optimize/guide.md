@@ -20,4 +20,4 @@ Proposes the optimizer's best readout frequency, gain and length to `$qubit.ext.
 
 ## Recommended
 
-The three sweep axes set the optimizer's search bounds. Keep frequency within a fraction of a linewidth and choose reviewed gain and length bounds so the search converges. 'Optimizer points' (~1000) sets how many evaluations to spend; raise it for wider bounds, lower it for a quick search. Analyze reports the best evaluated point directly.
+The three sweep axes set the optimizer's search bounds. Keep frequency within a fraction of a linewidth and choose reviewed gain and length bounds so the search converges. 'Optimizer points' (~1000) sets how many evaluations to spend; raise it for wider bounds, lower it for a quick search. 'Optimizer seed' fixes the optimizer's candidate sequence: with the same seed and the same measured SNRs, a run proposes the same points; leave it empty to draw a new search each run. Analyze reports the best evaluated point directly.

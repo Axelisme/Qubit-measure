@@ -270,7 +270,7 @@ def test_malformed_branch_metadata_fails_before_numeric_request(defect):
 
 
 @pytest.mark.parametrize("reps", [1, 2])
-def test_structured_branch_memory_updates_carry_in_actual_point_and_rep_order(reps):
+def test_structured_branch_memory_live_in_is_rejected(reps):
     def initialize(p):
         p.add_loop("scan", 2)
         p.add_reg("carry", init=QickRawParam("carry", 0, {}))
@@ -287,15 +287,9 @@ def test_structured_branch_memory_updates_carry_in_actual_point_and_rep_order(re
         p.pulse(0, "p")
 
     prog, env = program(body, initialize, reps=reps)
-    if reps == 1:
-        result = request(prog, env)
-        assert [
-            result.materialize_point(i).events[0].gain for i in range(2)
-        ] == pytest.approx([1 / 32766, 3 / 32766])
-    else:
-        with pytest.raises(ValueError, match="reps loop changes.*carried.*WMEM"):
-            request(prog, env)
-        assert env.soc.binding.last_request is None
+    with pytest.raises(ValueError, match="preopt.*cross-shot.*live-in"):
+        request(prog, env)
+    assert env.soc.binding.last_request is None
 
 
 @pytest.mark.parametrize(

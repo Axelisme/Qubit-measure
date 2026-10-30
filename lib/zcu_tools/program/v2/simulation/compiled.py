@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from copy import deepcopy
 from math import prod
+from typing import Any
 
 import numpy as np
 
@@ -36,9 +38,9 @@ from ..ir.io_instructions import (
     WmemWriteInst,
 )
 from ..ir.operands import ImmValue, Register, SrcKeyword
-from ._compiled_affine import AffineUpdates, prove_native_shell
+from ._compiled_guard import guard_live_in
 from ._compiled_output import Outputs
-from ._compiled_state import IntArray, Machine
+from ._compiled_state import IntArray, Machine, signed32
 from ._compiled_stream import (
     DecodedInstruction,
     NativeLoop,
@@ -97,366 +99,6 @@ def _failure(record: DecodedInstruction, cause: Exception) -> ValueError:
     )
 
 
-class _OrderedExecution:
-    def __init__(
-        self,
-        prog: MyProgramV2,
-        records: tuple[DecodedInstruction, ...],
-        loops: dict[str, NativeLoop],
-        outputs: Outputs,
-        branches: tuple[StructuredBranch, ...],
-    ) -> None:
-        self.records, self.loops, self.outputs = records, loops, outputs
-        outputs.loop_positions = {
-            name: records[loop.start].position for name, loop in loops.items()
-        }
-        labels = {
-            str(r.instruction.name): r.position
-            for r in records
-            if isinstance(r.instruction, LabelInst)
-        }
-        self.machine = Machine(prog, 1, labels)
-        self.names = _point_names(records, loops)
-        self.dims = tuple(prog.loop_dict[n] for n in self.names)
-        self.coordinates: dict[str, int] = {}
-        self.branch_jumps: dict[int, tuple[StructuredBranch, bool]] = {}
-        self.selected: dict[str, int] = {}
-        self.branch_starts = {branch.start: branch for branch in branches}
-        for branch in branches:
-            self._branch_shell(branch)
-        self.jumps: dict[int, NativeLoop] = {}
-        self.guards: dict[int, NativeLoop] = {}
-        for loop in loops.values():
-            closing = [
-                i
-                for i in range(loop.body_end + 1, loop.end)
-                if isinstance(records[i].instruction, JumpInst)
-            ]
-            if len(closing) != 1:
-                raise ValueError(
-                    f"JumpInst at preopt native loop {loop.name}: missing/ambiguous backedge"
-                )
-            self.jumps[closing[0]] = loop
-            if not loop.native:
-                for index in range(loop.start + 1, loop.body_start):
-                    if isinstance(records[index].instruction, JumpInst):
-                        self.guards[index] = loop
-
-    def run(self) -> None:
-        pc = 0
-        while pc < len(self.records):
-            record = self.records[pc]
-            try:
-                inst = record.instruction
-                if pc in self.branch_starts:
-                    self._select(self.branch_starts[pc])
-                if isinstance(inst, MetaInst):
-                    self._marker(inst)
-                elif isinstance(inst, JumpInst):
-                    pc = self._jump(inst, pc)
-                    continue
-                else:
-                    _execute(record, self.machine, self.outputs)
-            except (ValueError, KeyError, IndexError) as exc:
-                raise _failure(record, exc) from exc
-            pc += 1
-
-    def _marker(self, inst: MetaInst) -> None:
-        if inst.type == "LOOP_START":
-            self.coordinates[inst.name] = 0
-        elif inst.type == "LOOP_BODY_START":
-            if self.records[self.loops[inst.name].start].body:
-                self._iterations()
-        elif inst.type == "LOOP_END":
-            self.coordinates.pop(inst.name, None)
-            self._iterations()
-        elif inst.type == "TIMING_BOUNDARY":
-            if inst.name == "body_start":
-                coordinates = tuple(self.coordinates[n] for n in self.names)
-                point = (
-                    int(np.ravel_multi_index(coordinates, self.dims))
-                    if self.dims
-                    else 0
-                )
-                self.outputs.begin(self.machine, np.asarray([point], dtype=np.int64))
-            else:
-                self.outputs.finish(self.machine)
-
-    def _iterations(self) -> None:
-        self.outputs.iterations = tuple(
-            (name, index)
-            for name, index in self.coordinates.items()
-            if self.records[self.loops[name].start].body
-        )
-
-    def _target(self, inst: JumpInst, position: int) -> int:
-        if inst.label is None:
-            return int(self.machine.value(inst.addr)[0])
-        name = str(inst.label)
-        if inst.label.is_pseudo():
-            return position + {"HERE": 0, "NEXT": 1, "SKIP": 2, "PREV": -1}[name]
-        return self.machine.labels[name]
-
-    def _jump(self, inst: JumpInst, pc: int) -> int:
-        record = self.records[pc]
-        if pc in self.branch_jumps:
-            return self._branch_jump(inst, pc)
-        if pc in self.guards:
-            return self._inner_jump(inst, pc, self.guards[pc], guard=True)
-        if pc in self.jumps and not self.jumps[pc].native:
-            return self._inner_jump(inst, pc, self.jumps[pc], guard=False)
-        if pc not in self.jumps:
-            if record.body or record.loops or pc != len(self.records) - 2:
-                raise ValueError("unmarked arbitrary jump")
-            if (
-                self._target(inst, record.position) != record.position
-                or inst.if_cond
-                or inst.wr
-                or inst.op
-            ):
-                raise ValueError("unsupported program terminal jump")
-            return pc + 1
-        loop = self.jumps[pc]
-        taken = self.machine.condition(inst.if_cond)
-        result = (
-            self.machine.expression(inst.op) if inst.wr is not None or inst.uf else None
-        )
-        target = self._target(inst, record.position)
-        if target != self.machine.labels[loop.name]:
-            raise ValueError("native loop backedge does not target its marked loop")
-        if result is not None and inst.wr is not None:
-            self.machine.write(inst.wr.dst, result, np.ones(1, dtype=np.bool_))
-        if inst.uf:
-            self.machine.flags = result
-        if taken[0]:
-            self.coordinates[loop.name] += 1
-            self._iterations()
-            return loop.body_start + 1
-        return pc + 1
-
-    def _branch_shell(self, branch: StructuredBranch) -> None:
-        header = range(branch.start + 1, branch.cases[0][0])
-        for index in header:
-            if isinstance(self.records[index].instruction, JumpInst):
-                self.branch_jumps[index] = (branch, True)
-        for case_index, (_, end) in enumerate(branch.cases):
-            next_start = (
-                branch.cases[case_index + 1][0]
-                if case_index + 1 < len(branch.cases)
-                else branch.end
-            )
-            for index in range(end + 1, next_start):
-                if isinstance(self.records[index].instruction, JumpInst):
-                    self.branch_jumps[index] = (branch, False)
-
-    def _select(self, branch: StructuredBranch) -> None:
-        selected = int(self.machine.value(Register(branch.compare))[0])
-        if not 0 <= selected < len(branch.cases):
-            raise ValueError(
-                f"branch {branch.name} selector {selected} has no marked case"
-            )
-        self.selected[branch.name] = selected
-
-    def _branch_jump(self, inst: JumpInst, pc: int) -> int:
-        branch, header = self.branch_jumps[pc]
-        if inst.wr is not None or inst.uf or inst.op is not None:
-            raise ValueError("unsupported branch jump side effects")
-        if not self.machine.condition(inst.if_cond)[0]:
-            return pc + 1
-        target = self._target(inst, self.records[pc].position)
-        if header:
-            case_start = branch.cases[self.selected[branch.name]][0]
-            if target == self.records[case_start].position:
-                return case_start
-            # A marked dispatch table may contain forward-only jump stubs.
-            for index in range(pc + 1, branch.cases[0][0]):
-                if self.records[index].position == target:
-                    return index
-        elif target == self.records[branch.end].position:
-            return branch.end
-        raise ValueError(f"branch {branch.name} jump escapes its selected marked case")
-
-    def _inner_jump(
-        self, inst: JumpInst, pc: int, loop: NativeLoop, *, guard: bool
-    ) -> int:
-        boundary = loop.end if guard else loop.body_start
-        if (
-            self._target(inst, self.records[pc].position)
-            != self.records[boundary].position
-        ):
-            raise ValueError("structured loop jump escapes its marked boundary")
-        if inst.wr is not None or inst.uf or inst.op is not None:
-            raise ValueError("unsupported structured loop jump side effects")
-        if not self.machine.condition(inst.if_cond)[0]:
-            return pc + 1
-        if not guard:
-            self.coordinates[loop.name] = int(
-                self.machine.value(Register(loop.counter))[0]
-            )
-            self._iterations()
-        return boundary
-
-
-def _register_effects(inst: BaseInst) -> tuple[set[str], set[str]]:
-    reads, writes = set(inst.reg_read), set(inst.reg_write)
-    # IR s14 barriers describe reference changes, not reads of the output word.
-    if isinstance(inst, TimeInst):
-        return set(inst.r1.regs()) if inst.r1 is not None else set(), set()
-    if (
-        isinstance(inst, (PortWriteInst, DportWriteInst)) and inst.time is not None
-    ) or (isinstance(inst, RegWriteInst) and inst.src == SrcKeyword.WMEM):
-        reads.discard("s14")
-    if reads & {"s6", "s7"}:
-        reads.add("s2")
-    if isinstance(inst, ArithInst):
-        writes |= {"s6", "s7"}
-    return reads, writes
-
-
-def _live_inputs(
-    records: Sequence[DecodedInstruction],
-) -> tuple[set[str], set[str]] | None:
-    defined: set[str] = set()
-    inputs: set[str] = set()
-    written: set[str] = set()
-    flags = False
-    for record in records:
-        inst = record.instruction
-        if isinstance(inst, JumpInst):
-            return None
-        if not isinstance(inst, BaseInst):
-            continue
-        if (
-            isinstance(inst, (DmemWriteInst, WmemWriteInst))
-            or (isinstance(inst, RegWriteInst) and (inst.ww or inst.wp))
-            or (isinstance(inst, PortWriteInst) and inst.ww)
-        ):
-            return None
-        if getattr(inst, "if_cond", None) is not None and not flags:
-            return None
-        reads, writes = _register_effects(inst)
-        inputs |= reads - defined
-        written |= writes
-        if getattr(inst, "if_cond", None) is None:
-            defined |= writes
-            flags |= isinstance(inst, TestInst) or bool(getattr(inst, "uf", False))
-    return inputs, written
-
-
-def _counter_jump(jump: JumpInst, counter: str) -> bool:
-    return (
-        jump.if_cond == "NZ"
-        and jump.wr is not None
-        and jump.wr.dst.canonical_name == counter
-        and jump.wr.src_type == "op"
-        and not jump.uf
-        and jump.op is not None
-        and str(jump.op) == f"{counter} + #1"
-    )
-
-
-def _shell(
-    prog: MyProgramV2, records: tuple[DecodedInstruction, ...], loop: NativeLoop
-) -> AffineUpdates | None:
-    closing = [
-        i
-        for i in range(loop.body_end + 1, loop.end)
-        if isinstance(records[i].instruction, JumpInst)
-    ]
-    if len(closing) != 1:
-        return None
-    backedge = closing[0]
-    jump = records[backedge].instruction
-    if not isinstance(jump, JumpInst) or not _counter_jump(jump, loop.counter):
-        return None
-    test = records[backedge - 1].instruction
-    count = prog.loop_dict[loop.name]
-    if (
-        not isinstance(test, TestInst)
-        or str(test.op) != f"{loop.counter} - #{count - 1}"
-    ):
-        return None
-    labels = [
-        r.instruction
-        for r in records[loop.body_end + 1 : backedge]
-        if isinstance(r.instruction, RegWriteInst)
-        and r.instruction.dst.canonical_name == "s15"
-    ]
-    target = (
-        str(jump.label)
-        if jump.label is not None
-        else str(labels[-1].label)
-        if labels
-        else ""
-    )
-    if target != loop.name:
-        return None
-    return prove_native_shell(
-        [r.instruction for r in records[loop.start + 1 : loop.body_start]],
-        [r.instruction for r in records[loop.body_end + 1 : backedge]],
-        [r.instruction for r in records[backedge + 1 : loop.end]],
-        counter=loop.counter,
-        count=count,
-    )
-
-
-def _vector_shells(
-    prog: MyProgramV2,
-    records: tuple[DecodedInstruction, ...],
-    loops: dict[str, NativeLoop],
-    inputs: tuple[set[str], set[str]],
-) -> dict[str, AffineUpdates] | None:
-    if any(records[loop.start].body for loop in loops.values()):
-        return None
-    if inputs[0] & inputs[1]:
-        return None
-    shells: dict[str, AffineUpdates] = {}
-    for name, loop in loops.items():
-        shell = _shell(prog, records, loop)
-        if shell is None or shell.scratch & inputs[0] or loop.counter in inputs[1]:
-            return None
-        shells[name] = shell
-    reps = shells["reps"]
-    if reps.registers or reps.waves or loops["reps"].counter in inputs[0]:
-        return None
-    return shells
-
-
-def _safe_tail(records: Sequence[DecodedInstruction], live: set[str]) -> bool:
-    for record in records:
-        inst = record.instruction
-        if isinstance(inst, (MetaInst, WaitInst)):
-            continue
-        if not isinstance(inst, (RegWriteInst, TimeInst)):
-            return False
-        if isinstance(inst, RegWriteInst) and (
-            set(inst.reg_write) & live or inst.ww or inst.wp
-        ):
-            return False
-    return True
-
-
-def _canonical_terminal(records: Sequence[DecodedInstruction]) -> bool:
-    instructions = [
-        r.instruction for r in records if not isinstance(r.instruction, MetaInst)
-    ]
-    if len(instructions) != 2:
-        return False
-    load, jump = instructions
-    return (
-        isinstance(load, RegWriteInst)
-        and load.dst.canonical_name == "s15"
-        and load.src == SrcKeyword.LABEL
-        and str(load.label) == "NEXT"
-        and not any((load.if_cond, load.wr, load.op, load.uf, load.ww, load.wp))
-        and isinstance(jump, JumpInst)
-        and isinstance(jump.addr, Register)
-        and jump.addr.canonical_name == "s15"
-        and jump.label is None
-        and not any((jump.if_cond, jump.wr, jump.op, jump.uf))
-    )
-
-
 def _point_names(
     records: tuple[DecodedInstruction, ...], loops: dict[str, NativeLoop]
 ) -> tuple[str, ...]:
@@ -467,23 +109,450 @@ def _point_names(
     )
 
 
-def _native_grid(prog: MyProgramV2) -> tuple[tuple[str, ...], IntArray]:
-    names = tuple(n for n in prog.loop_dict if n != "reps")
+def _native_grid(prog: MyProgramV2, names: tuple[str, ...]) -> IntArray:
     dims = tuple(prog.loop_dict[n] for n in names)
-    grid = (
+    return (
         np.indices(dims, dtype=np.int64).reshape(len(dims), prod(dims))
         if dims
         else np.empty((0, 1), dtype=np.int64)
     )
-    return names, grid
 
 
-def _try_vector(
+def _loop_info(
+    records: tuple[DecodedInstruction, ...], loop: NativeLoop
+) -> dict[str, Any]:
+    marker = records[loop.start].instruction
+    if not isinstance(marker, MetaInst):
+        raise ValueError("missing LOOP_START")
+    return marker.info
+
+
+def _validate_loop(records: tuple[DecodedInstruction, ...], loop: NativeLoop) -> None:
+    """Check the marked counter and backedge, without inferring sweep values."""
+    closing = [
+        r
+        for r in records[loop.body_end + 1 : loop.end]
+        if isinstance(r.instruction, JumpInst)
+    ]
+    if len(closing) != 1:
+        raise _failure(
+            records[loop.start], ValueError("missing/ambiguous loop backedge")
+        )
+    record = closing[0]
+    jump = record.instruction
+    if not isinstance(jump, JumpInst):
+        raise _failure(record, ValueError("missing loop backedge"))
+    info = _loop_info(records, loop)
+    n = info["n"]
+    if loop.native:
+        tests = [
+            r.instruction
+            for r in records[loop.body_end + 1 : loop.end]
+            if isinstance(r.instruction, TestInst)
+        ]
+        if (
+            len(tests) != 1
+            or str(tests[0].op) != f"{loop.counter} - #{n - 1}"
+            or jump.if_cond != "NZ"
+            or jump.wr is None
+            or jump.wr.dst.canonical_name != loop.counter
+            or str(jump.op) != f"{loop.counter} + #1"
+        ):
+            raise _failure(
+                record, ValueError("loop counter/count disagrees with marker")
+            )
+        labels = [
+            r.instruction
+            for r in records[loop.body_end + 1 : loop.end]
+            if isinstance(r.instruction, RegWriteInst)
+            and r.instruction.src == SrcKeyword.LABEL
+        ]
+        target = (
+            str(jump.label)
+            if jump.label is not None
+            else str(labels[-1].label)
+            if labels
+            else ""
+        )
+        if target != loop.name:
+            raise _failure(record, ValueError("loop backedge disagrees with marker"))
+    else:
+        _validate_inner_loop(records, loop, jump)
+
+
+def _validate_inner_loop(
+    records: tuple[DecodedInstruction, ...], loop: NativeLoop, jump: JumpInst
+) -> None:
+    n = _loop_info(records, loop)["n"]
+    count = n if isinstance(n, str) else f"#{n}"
+    closing = records[loop.body_end + 1 : loop.end]
+    tests = [r.instruction for r in closing if isinstance(r.instruction, TestInst)]
+    loads = [
+        r.instruction
+        for r in closing
+        if isinstance(r.instruction, RegWriteInst)
+        and r.instruction.src == SrcKeyword.LABEL
+    ]
+    target = (
+        str(jump.label)
+        if jump.label is not None
+        else str(loads[-1].label)
+        if loads
+        else ""
+    )
+    header = records[loop.start + 1 : loop.body_start]
+    labels = {
+        str(r.instruction.name): r.position
+        for r in header
+        if isinstance(r.instruction, LabelInst)
+    }
+    initial = [
+        r.instruction
+        for r in header
+        if isinstance(r.instruction, RegWriteInst)
+        and r.instruction.dst.canonical_name == loop.counter
+        and r.instruction.src == SrcKeyword.IMM
+        and r.instruction.lit is not None
+        and r.instruction.lit.value == 0
+    ]
+    if (
+        len(tests) != 1
+        or str(tests[0].op) != f"{loop.counter} - {count}"
+        or jump.if_cond != "S"
+        or jump.wr is not None
+        or jump.uf
+        or jump.op
+        or labels.get(target) != records[loop.body_start].position
+        or len(initial) != 1
+    ):
+        raise _failure(
+            records[loop.start],
+            ValueError("inner loop counter/count/backedge disagrees with marker"),
+        )
+
+
+def _validate_definition(info: dict[str, Any], machine: Machine) -> None:
+    registers, waves = info["sweeps"]["registers"], info["sweeps"]["waves"]
+    for name, definition in registers.items():
+        if not np.all(
+            machine.value(Register(name)) == signed32(np.array([definition["start"]]))
+        ):
+            raise ValueError(
+                f"sweep initial register {name} disagrees with compiled word"
+            )
+        if not isinstance(definition["step"], int):
+            raise ValueError("sweep step must be integer words")
+    for address, fields in waves.items():
+        for field, definition in fields.items():
+            if not 0 <= field < 6 or not np.all(
+                machine.wmem[address][:, field] % 2**32 == definition["start"] % 2**32
+            ):
+                raise ValueError("sweep initial waveform disagrees with compiled word")
+            if not isinstance(definition["step"], int):
+                raise ValueError("sweep step must be integer words")
+
+
+def _shell_compute(record: DecodedInstruction, machine: Machine) -> None:
+    inst = record.instruction
+    if isinstance(inst, (MetaInst, LabelInst, NopInst, WaitInst)):
+        return
+    if not isinstance(
+        inst, (RegWriteInst, DmemReadInst, WmemWriteInst, TestInst, TimeInst)
+    ):
+        raise _failure(record, ValueError("unsupported acquisition shell effect"))
+    if isinstance(inst, (RegWriteInst, WmemWriteInst)) and inst.wp is not None:
+        raise _failure(record, ValueError("output inside acquisition shell"))
+    machine.execute(inst, record.position)
+
+
+def _check_update(
+    info: dict[str, Any],
+    before: Machine,
+    after: Machine,
+    multiplier: int,
+    scratch: set[str],
+) -> None:
+    registers, waves = info["sweeps"]["registers"], info["sweeps"]["waves"]
+    allowed = set(registers) | scratch
+    allowed |= {f"WMEM[{address}]" for address in waves}
+    if after.writes - allowed:
+        raise ValueError(
+            f"shell writes undeclared state: {sorted(after.writes - allowed)}"
+        )
+    for name, definition in registers.items():
+        expected = signed32(
+            before.value(Register(name)) + multiplier * definition["step"]
+        )
+        if np.any(after.value(Register(name)) != expected):
+            raise ValueError(f"sweep update for {name} disagrees with shell")
+    for address, fields in waves.items():
+        expected = before.wmem[address].copy()
+        for field, definition in fields.items():
+            expected[:, field] += multiplier * definition["step"]
+            expected[:, field] %= 2 ** (16 if field == 5 else 32)
+        if np.any(after.wmem[address] % 2**32 != expected % 2**32):
+            raise ValueError("wave sweep update disagrees with shell")
+
+
+def _validate_native_sweeps(
     prog: MyProgramV2,
     records: tuple[DecodedInstruction, ...],
     loops: dict[str, NativeLoop],
+    seed: Machine,
+) -> None:
+    scratch = {"s15", *(f"w{i}" for i in range(6))}
+    if "scratch" in prog.reg_dict:
+        scratch.add(prog.reg_dict["scratch"].full_addr())
+    for loop in loops.values():
+        if not loop.native:
+            continue
+        info = _loop_info(records, loop)
+        try:
+            _validate_definition(info, seed)
+            if loop.name == "reps" and any(
+                (info["sweeps"]["registers"], info["sweeps"]["waves"], info["tables"])
+            ):
+                raise ValueError("reps shell may only update its own counter")
+            actual = deepcopy(seed)
+            actual.write(
+                Register(loop.counter), np.zeros(1, dtype=np.int64), actual.active
+            )
+            actual.writes.clear()
+            closing = records[loop.body_end + 1 : loop.end]
+            jump_index = next(
+                i for i, r in enumerate(closing) if isinstance(r.instruction, JumpInst)
+            )
+            for record in closing[:jump_index]:
+                _shell_compute(record, actual)
+            _check_update(info, seed, actual, 1, scratch)
+            actual.writes.clear()
+            for record in closing[jump_index + 1 :]:
+                _shell_compute(record, actual)
+            _check_update(info, seed, actual, -(info["n"] - 1), scratch)
+        except (ValueError, KeyError, IndexError, TypeError) as exc:
+            raise _failure(
+                records[loop.start], ValueError(f"sweep shell disagrees: {exc}")
+            ) from exc
+
+
+def _timing_writes(records: Sequence[DecodedInstruction]) -> set[str]:
+    """Identify tail scratch writes consumed by the shot's reference advance."""
+    needed: set[str] = set()
+    timing: set[str] = set()
+    for record in reversed(records):
+        inst = record.instruction
+        if isinstance(inst, TimeInst) and inst.r1 is not None:
+            needed.update(inst.r1.regs())
+        elif isinstance(inst, RegWriteInst) and set(inst.reg_write) & needed:
+            timing.update(inst.reg_write)
+            needed -= set(inst.reg_write)
+            needed.update(inst.reg_read)
+    return timing
+
+
+def _check_table_hook(info: dict[str, Any], seed: Machine, actual: Machine) -> None:
+    """Validate declared table fields against compiled DMEM, including wrap."""
+    for address, fields in info["tables"].items():
+        expected = seed.wmem[address].copy()
+        for field, offset in fields.items():
+            if (
+                address in info["sweeps"]["waves"]
+                and field in info["sweeps"]["waves"][address]
+            ):
+                raise ValueError("conflicting table and sweep field")
+            if not 0 <= field < 6:
+                raise ValueError("invalid table field")
+            if (
+                int(seed.dmem[offset + info["n"] - 1][0]) % 2**32
+                != int(expected[0, field]) % 2**32
+            ):
+                raise ValueError("table wrap disagrees with initial WMEM")
+            expected[:, field] = seed.dmem[offset] % 2**32
+        if np.any(actual.wmem[address] % 2**32 != expected % 2**32):
+            raise ValueError(
+                "table hook disagrees with declared DMEM offset/WMEM field"
+            )
+
+
+def _validate_hooks(
+    records: tuple[DecodedInstruction, ...],
+    loops: dict[str, NativeLoop],
+    seed: Machine,
+    body_end: int,
+    live: set[str],
+) -> None:
+    axes = [loop for loop in loops.values() if not records[loop.start].body]
+    for index, loop in enumerate(axes):
+        first = axes[index + 1].end + 1 if index + 1 < len(axes) else body_end + 1
+        info = _loop_info(records, loop)
+        try:
+            tables = info["tables"]
+            actual = deepcopy(seed)
+            actual.writes.clear()
+            for record in records[first : loop.body_end]:
+                inst = record.instruction
+                if isinstance(inst, (MetaInst, LabelInst, NopInst, TimeInst, WaitInst)):
+                    continue
+                if tables:
+                    _shell_compute(record, actual)
+                elif isinstance(inst, RegWriteInst) and inst.wp is None:
+                    actual.writes.update(inst.reg_write)
+                else:
+                    raise _failure(
+                        record, ValueError("undeclared acquisition shell effect")
+                    )
+            allowed_memory = {f"WMEM[{address}]" for address in tables}
+            memory_writes = {
+                name for name in actual.writes if name.startswith(("DMEM[", "WMEM["))
+            }
+            timing = _timing_writes(records[first : loop.body_end])
+            registers = actual.writes - memory_writes - {"s12", "s15"} - timing
+            if (
+                memory_writes - allowed_memory
+                or registers & live
+                or registers
+                and not tables
+            ):
+                raise ValueError(
+                    f"{loop.name} shell writes undeclared/cross-shot state: {sorted(actual.writes)}"
+                )
+            if "s12" in live:
+                raise ValueError("cross-shot live-in s12 is updated by the shot shell")
+            _check_table_hook(info, seed, actual)
+        except (ValueError, KeyError, IndexError, TypeError) as exc:
+            raise _failure(
+                records[loop.start], ValueError(f"table/shot shell disagrees: {exc}")
+            ) from exc
+
+
+def _apply_tables(
+    info: dict[str, Any],
+    machine: Machine,
+    indexes: IntArray,
+) -> None:
+    for address, fields in info["tables"].items():
+        for field, offset in fields.items():
+            for point in range(1, info["n"]):
+                active = indexes == point
+                machine.wmem[address][active, field] = (
+                    machine.dmem[offset + point - 1][active] % 2**32
+                )
+
+
+def _apply_sweeps(
+    records: tuple[DecodedInstruction, ...],
+    loops: dict[str, NativeLoop],
+    names: tuple[str, ...],
+    grid: IntArray,
+    machine: Machine,
+) -> None:
+    for name, loop in loops.items():
+        info = _loop_info(records, loop)
+        try:
+            registers, waves = info["sweeps"]["registers"], info["sweeps"]["waves"]
+            if records[loop.start].body:
+                continue
+            indexes = (
+                grid[names.index(name)]
+                if name in names
+                else np.zeros(machine.size, dtype=np.int64)
+            )
+            machine.write(Register(loop.counter), indexes, machine.active)
+            for register, definition in registers.items():
+                machine.registers[register] = signed32(
+                    machine.registers[register] + indexes * definition["step"]
+                )
+            for address, fields in waves.items():
+                for field, definition in fields.items():
+                    machine.wmem[address][:, field] += indexes * definition["step"]
+                    machine.wmem[address][:, field] %= 2 ** (32 if field != 5 else 16)
+            _apply_tables(info, machine, indexes)
+        except (KeyError, TypeError, IndexError, ValueError) as exc:
+            raise _failure(
+                records[loop.start],
+                ValueError(f"invalid loop sweep/table definition: {exc}"),
+            ) from exc
+
+
+def _run_body(
+    records: tuple[DecodedInstruction, ...],
+    loops: dict[str, NativeLoop],
+    branches: tuple[StructuredBranch, ...],
+    machine: Machine,
     outputs: Outputs,
-) -> bool:
+    bounds: tuple[int, int],
+) -> None:
+    local = {loop.start: loop for loop in loops.values() if records[loop.start].body}
+    branch_starts = {b.start: b for b in branches}
+
+    def run(first: int, last: int) -> None:
+        index = first
+        while index < last:
+            if not np.any(machine.active):
+                return
+            record = records[index]
+            if index in local:
+                loop = local[index]
+                count = _loop_info(records, loop)["n"]
+                n = (
+                    machine.value(Register(count))
+                    if isinstance(count, str)
+                    else np.full(machine.size, count, dtype=np.int64)
+                )
+                if np.any(machine.active & (n < 0)):
+                    raise _failure(record, ValueError("negative loop count"))
+                outer = machine.active.copy()
+                iterations = outputs.iterations
+                machine.write(
+                    Register(loop.counter),
+                    np.zeros(machine.size, dtype=np.int64),
+                    outer,
+                )
+                for iteration in range(int(np.max(n[outer], initial=0))):
+                    machine.active = outer & (iteration < n)
+                    machine.read_mask = machine.active.copy()
+                    machine.write(
+                        Register(loop.counter),
+                        np.full(machine.size, iteration, dtype=np.int64),
+                        machine.active,
+                    )
+                    outputs.iterations = (*iterations, (loop.name, iteration))
+                    run(loop.body_start + 1, loop.body_end)
+                outputs.iterations = iterations
+                machine.active = outer
+                machine.read_mask = outer.copy()
+                machine.write(Register(loop.counter), n, outer)
+                index = loop.end + 1
+                continue
+            if index in branch_starts:
+                branch = branch_starts[index]
+                selector = machine.value(Register(branch.compare))
+                outer = machine.active.copy()
+                if np.any(outer & ((selector < 0) | (selector >= len(branch.cases)))):
+                    raise _failure(
+                        record, ValueError("branch selector has no marked case")
+                    )
+                for case, (a, b) in enumerate(branch.cases):
+                    machine.active = outer & (selector == case)
+                    machine.read_mask = machine.active.copy()
+                    run(a + 1, b)
+                machine.active = outer
+                machine.read_mask = outer.copy()
+                index = branch.end + 1
+                continue
+            _located_execute(record, machine, outputs)
+            index += 1
+
+    run(*bounds)
+
+
+def _build_lanes(
+    prog: MyProgramV2,
+    records: tuple[DecodedInstruction, ...],
+    loops: dict[str, NativeLoop],
+    branches: tuple[StructuredBranch, ...],
+    outputs: Outputs,
+) -> None:
     boundaries = [
         i
         for i, r in enumerate(records)
@@ -491,58 +560,110 @@ def _try_vector(
         and r.instruction.type == "TIMING_BOUNDARY"
     ]
     start, end = boundaries
-    body = records[start + 1 : end]
-    inputs = _live_inputs(body)
-    shells = (
-        _vector_shells(prog, records, loops, inputs) if inputs is not None else None
-    )
-    if shells is None or inputs is None:
-        return False
-    tail = records[end + 1 : min(loop.body_end for loop in loops.values())]
-    if not _safe_tail(tail, inputs[0]) or not _canonical_terminal(
-        records[max(loop.end for loop in loops.values()) + 1 :]
-    ):
-        return False
+    for loop in loops.values():
+        _validate_loop(records, loop)
     labels = {
         str(r.instruction.name): r.position
         for r in records
         if isinstance(r.instruction, LabelInst)
     }
-    names, grid = _native_grid(prog)
-    size = outputs.size
-    machine = Machine(prog, size, labels)
+    machine = Machine(prog, outputs.size, labels)
+    outputs.loop_positions = {
+        name: records[loop.start].position for name, loop in loops.items()
+    }
     for record in records[:start]:
-        if not isinstance(
-            record.instruction, (RegWriteInst, TimeInst, MetaInst, LabelInst, NopInst)
+        _located_execute(record, machine, outputs)
+    seed = Machine(prog, 1, labels)
+    seed_outputs = Outputs(prog, 1, outputs.routes, outputs.pool)
+    for record in records[:start]:
+        _located_execute(record, seed, seed_outputs)
+    live = guard_live_in(
+        records,
+        loops,
+        branches,
+        (start + 1, end),
+        seed,
+        reject_carry=outputs.size * prog.loop_dict["reps"] > 1,
+    )
+    _validate_native_sweeps(prog, records, loops, seed)
+    _validate_hooks(records, loops, seed, end, live)
+    names = _point_names(records, loops)
+    grid = _native_grid(prog, names)
+    _apply_sweeps(records, loops, names, grid, machine)
+    outputs.begin(machine, np.arange(outputs.size, dtype=np.int64))
+    _run_body(records, loops, branches, machine, outputs, (start + 1, end))
+    outputs.finish(machine)
+    _finish_shell(records, loops, machine, outputs, end)
+
+
+def _finish_shell(
+    records: tuple[DecodedInstruction, ...],
+    loops: dict[str, NativeLoop],
+    machine: Machine,
+    outputs: Outputs,
+    end: int,
+) -> None:
+    # Shot timing and progress counter are outside the user body. Native closing
+    # shells are validated, not iterated; reps never enter the execution path.
+    tail_end = min(
+        loop.body_end for loop in loops.values() if not records[loop.start].body
+    )
+    table_addresses = {
+        address
+        for loop in loops.values()
+        if loop.native
+        for address in _loop_info(records, loop)["tables"]
+    }
+    timing = _timing_writes(records[end + 1 : tail_end])
+    for record in records[end + 1 : tail_end]:
+        inst = record.instruction
+        if table_addresses and isinstance(
+            inst, (RegWriteInst, DmemReadInst, WmemWriteInst)
         ):
-            return False
+            if isinstance(inst, WmemWriteInst):
+                continue
+            if isinstance(
+                inst, DmemReadInst
+            ) or inst.dst.canonical_name not in timing | {"s12", "s15"}:
+                continue
         _located_execute(record, machine, outputs)
-    for name, indexes in zip(names, grid, strict=True):
-        shells[name].apply(machine, indexes)
-        machine.registers[loops[name].counter] = indexes.copy()
-    outputs.begin(machine, np.arange(size, dtype=np.int64))
-    for record in body:
+    outputs.validate_fifo(machine)
+    terminal = next(r for r in reversed(records) if isinstance(r.instruction, BaseInst))
+    for record in records[max(loop.end for loop in loops.values()) + 1 :]:
+        inst = record.instruction
+        if (
+            record is terminal
+            and isinstance(inst, JumpInst)
+            and not record.body
+            and not inst.if_cond
+            and not inst.wr
+            and not inst.op
+        ):
+            target = (
+                machine.value(inst.addr)
+                if inst.label is None
+                else np.full(machine.size, machine.labels.get(str(inst.label), -1))
+            )
+            if np.all(target == record.position):
+                continue
         _located_execute(record, machine, outputs)
-    # Speculative lanes lack cross-point config state. Prove independence before
-    # resolving reads; otherwise only ordered execution can validate their windows.
-    if not outputs.configs_independent(machine):
-        return False
-    try:
-        outputs.finish(machine)
-    except (ValueError, KeyError, IndexError) as exc:
-        raise _failure(records[end], exc) from exc
-    for record in tail:
-        _located_execute(record, machine, outputs)
-    return outputs.configs_independent(machine)
 
 
 def _located_execute(
     record: DecodedInstruction, machine: Machine, outputs: Outputs
 ) -> None:
+    outer = machine.active
     try:
+        condition = getattr(record.instruction, "if_cond", None)
+        if condition is not None:
+            machine.active = machine.condition(condition)
+            machine.read_mask = machine.active.copy()
         _execute(record, machine, outputs)
     except (ValueError, KeyError, IndexError) as exc:
         raise _failure(record, exc) from exc
+    finally:
+        machine.active = outer
+        machine.read_mask = outer.copy()
 
 
 def build_compiled_request(
@@ -561,7 +682,8 @@ def build_compiled_request(
     or traces; binding and sequence supply sampling identity. charge_requirements
     is forwarded unchanged for environment-owned physical validation; the builder
     does not infer drive roles from names or instructions. Unsupported effects,
-    malformed markers, ambiguous routing and rep-varying outputs raise ValueError
+    malformed/missing loop definitions, cross-shot state or pending config carry,
+    and ambiguous routing raise ValueError
     with instruction type, pre-optimization position and available source/loops.
     Acquisition still uses the separate Module frontend until its migration.
     """
@@ -575,9 +697,7 @@ def build_compiled_request(
     names = _point_names(records, loops)
     dims = tuple(prog.loop_dict[n] for n in names)
     outputs = Outputs(prog, prod(dims), routes, binding.envelope_pool)
-    if not _try_vector(prog, records, loops, outputs):
-        outputs = Outputs(prog, prod(dims), routes, binding.envelope_pool)
-        _OrderedExecution(prog, records, loops, outputs, branches).run()
+    _build_lanes(prog, records, loops, branches, outputs)
     template = outputs.template()
     windows = tuple(
         ReadoutWindow(

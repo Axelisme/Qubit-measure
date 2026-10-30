@@ -97,7 +97,7 @@ def test_native_sweep_shell_preserves_two_axes_wave_and_register_updates():
     )
 
 
-def test_register_and_wmem_state_carry_across_points_in_hardware_loop_order():
+def test_register_and_wmem_live_in_is_rejected_across_points():
     def initialize(p):
         p.add_loop("scan", 3)
         p.add_reg("carry", init=QickRawParam("carry", 10, {}))
@@ -111,10 +111,9 @@ def test_register_and_wmem_state_carry_across_points_in_hardware_loop_order():
         p.pulse(0, "p", tag="accumulated")
 
     prog, env = program(body, initialize, reps=1)
-    result = request(prog, env)
-    assert [
-        result.materialize_point(i).events[0].gain for i in range(3)
-    ] == pytest.approx(np.array([11, 12, 13]) / 32766)
+    with pytest.raises(ValueError, match="preopt.*cross-shot.*live-in"):
+        request(prog, env)
+    assert env.soc.binding.last_request is None
 
 
 @pytest.mark.parametrize(
@@ -292,7 +291,7 @@ def test_reps_varying_pulse_rejects_carried_register_and_memory_context():
     register = prog.reg_dict["carry"].full_addr()
     with pytest.raises(
         ValueError,
-        match=rf"PortWriteInst.*preopt.*reps.*{register}.*WMEM|PortWriteInst.*preopt.*reps.*WMEM.*{register}",
+        match=rf"RegWriteInst.*preopt.*cross-shot.*WMEM.*{register}",
     ):
         request(prog, env)
     assert env.soc.binding.last_request is None
@@ -368,7 +367,8 @@ def test_conditionally_uninitialized_register_is_not_zero_filled_on_other_lanes(
 
     prog, env = program(body, initialize, reps=1)
     with pytest.raises(
-        ValueError, match=rf"undefined register {prog.reg_dict['temp'].full_addr()}"
+        ValueError,
+        match=rf"preopt.*cross-shot.*live-in.*{prog.reg_dict['temp'].full_addr()}",
     ):
         request(prog, env)
 
@@ -569,11 +569,11 @@ def test_reps_varying_body_end_is_an_observable_carry_error():
         )
 
     prog, env = program(body, initialize, trigger_time=None)
-    with pytest.raises(ValueError, match="reps.*carried"):
+    with pytest.raises(ValueError, match="preopt.*cross-shot.*live-in"):
         request(prog, env)
 
 
-def test_conditional_register_updates_preserve_previous_point_state():
+def test_conditional_register_live_in_is_rejected():
     def initialize(p):
         p.add_loop("scan", 3)
         p.add_reg("carry", init=QickRawParam("carry", 10, {}))
@@ -595,17 +595,16 @@ def test_conditional_register_updates_preserve_previous_point_state():
         p.asm_inst({"CMD": "WPORT_WR", "DST": "0", "SRC": "r_wave", "TIME": "@0"})
 
     prog, env = program(body, initialize, reps=1)
-    result = request(prog, env)
-    assert [
-        result.materialize_point(i).events[0].gain for i in range(3)
-    ] == pytest.approx(np.array([10, 20, 20]) / 32766)
+    with pytest.raises(ValueError, match="preopt.*cross-shot.*live-in"):
+        request(prog, env)
+    assert env.soc.binding.last_request is None
 
 
 @pytest.mark.parametrize(
     "effect,instruction",
     [("read", "DportReadInst"), ("clock", "RegWriteInst"), ("jump", "JumpInst")],
 )
-def test_non_body_effects_are_not_skipped_by_affine_fast_path(effect, instruction):
+def test_cleanup_effects_are_validated_before_request(effect, instruction):
     def cleanup(p):
         if effect == "read":
             p.read_input(0)
@@ -706,7 +705,7 @@ def test_dmem_lane_addresses_and_simultaneous_side_writes_use_prewrite_sources(s
         ] == pytest.approx(np.array([stored[point], point - 1, stored[point]]) / 32766)
 
 
-def test_dmem_contents_carry_across_points_in_actual_loop_order():
+def test_dmem_live_in_is_rejected_across_points():
     def initialize(p):
         p.add_loop("scan", 3)
         p.add_reg("carry")
@@ -721,10 +720,9 @@ def test_dmem_contents_carry_across_points_in_actual_loop_order():
         p.asm_inst({"CMD": "WPORT_WR", "DST": "0", "SRC": "r_wave", "TIME": "@0"})
 
     prog, env = program(body, initialize, reps=1)
-    result = request(prog, env)
-    assert [
-        result.materialize_point(i).events[0].gain for i in range(3)
-    ] == pytest.approx(np.array([11, 12, 13]) / 32766)
+    with pytest.raises(ValueError, match="preopt.*cross-shot.*live-in"):
+        request(prog, env)
+    assert env.soc.binding.last_request is None
 
 
 @pytest.mark.parametrize("source", ["native", "module", "asm"])
@@ -810,7 +808,7 @@ def test_register_selected_wmem_addresses_and_side_writes_sample_prewrite_words(
         ] == pytest.approx(np.array([101 + point, 100 + point, 100 + point]) / 32766)
 
 
-def test_reps_carry_without_observable_output_change_succeeds():
+def test_unused_register_live_in_is_rejected_across_reps():
     def initialize(p):
         p.add_reg("unused", init=QickRawParam("unused", 0, {}))
 
@@ -819,6 +817,6 @@ def test_reps_carry_without_observable_output_change_succeeds():
         p.pulse(0, "p")
 
     prog, env = program(body, initialize, reps=5)
-    assert request(prog, env).materialize_point(0).events[0].gain == pytest.approx(
-        -0.25, abs=1 / 32766
-    )
+    with pytest.raises(ValueError, match="preopt.*cross-shot.*live-in"):
+        request(prog, env)
+    assert env.soc.binding.last_request is None
