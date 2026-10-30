@@ -2,10 +2,13 @@ from __future__ import annotations
 
 from dataclasses import asdict
 from types import SimpleNamespace
+from typing import Annotated
 from unittest.mock import MagicMock
 
 import pytest
-from zcu_tools.gui.app.measure.adapter import AnalysisMode
+from pydantic import Field
+from pydantic.dataclasses import dataclass as validated_dataclass
+from zcu_tools.gui.app.measure.adapter import Adapter, Analysis, AnalysisMode
 from zcu_tools.gui.app.measure.remote.handlers.analysis import (
     h_tab_analyze,
     h_tab_post_analyze,
@@ -14,7 +17,12 @@ from zcu_tools.gui.app.measure.state import PaneTransitionPreview
 from zcu_tools.gui.remote.errors import RemoteError
 
 from tests.gui._qt_waits import qt_until
-from tests.gui.app.measure._synthetic import ChoiceParams
+from tests.gui.app.measure._synthetic import (
+    ChoiceParams,
+    SampleAdapter,
+    SampleAdapter_analyze,
+    SampleParams,
+)
 
 from ._helpers import Fixture, call, open_client
 
@@ -50,6 +58,42 @@ def test_analyze_params_wire_generates_definitions_after_run(qapp, tmp_path):
             lambda: fx.ctrl.active_operation_count() == 0,
             label="sample analysis terminal",
         )
+    finally:
+        sock.close()
+        fx.stop()
+
+
+@validated_dataclass
+class _BoundedParams(SampleParams):
+    threshold: Annotated[float, Field(ge=0)] = 0.5
+
+
+def test_remote_rpc_reports_constructor_constraint_as_invalid_params(qapp, tmp_path):
+    fx = Fixture(project_root=str(tmp_path / "project"))
+    fx.registry.register(
+        "bounded",
+        Adapter(
+            spec=SampleAdapter.spec,
+            make_form=SampleAdapter.make_form,
+            run=SampleAdapter.run,
+            guide=None,
+            analysis=Analysis(
+                fn=SampleAdapter_analyze,
+                options=lambda source, env: _BoundedParams(),
+            ),
+        ),
+    )
+    fx.start()
+    sock = open_client(fx.service.port)
+    try:
+        tab_id = fx.ctrl.tab_control.new_tab("bounded")
+        fx.ctrl.run_analyze_control.start_run(tab_id)
+        qt_until(lambda: fx.ctrl.active_operation_count() == 0, label="bounded Run terminal")
+        rejected = call(sock, "tab.analyze", {"tab_id": tab_id, "updates": {"threshold": -1.0}})
+        assert rejected["ok"] is False
+        assert rejected["error"]["code"] == "invalid_params"
+        assert "threshold" in rejected["error"]["message"]
+        assert "greater than or equal to 0" in rejected["error"]["message"]
     finally:
         sock.close()
         fx.stop()

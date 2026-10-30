@@ -98,7 +98,7 @@ def test_constrained_options_show_error_and_recover(qapp, tmp_path: Path):
     driver = ComponentDriver(window)
     try:
         driver.screenshot(tmp_path / "01-defaults.png")
-        driver.enter_text("Skip points:", "-1")
+        driver.enter_text(object_name="qt_spinbox_lineedit", value="-1")
         driver.screenshot(tmp_path / "02-constraint-error.png")
         visible = {item.object_name: item for item in driver.visible().widgets}
         assert "skip" in visible["analysisParameterError"].text
@@ -106,7 +106,7 @@ def test_constrained_options_show_error_and_recover(qapp, tmp_path: Path):
         assert visible["publishedParams"].text == "No parameters published"
         assert not next(item for item in driver.visible().widgets if item.text == "Analyze").enabled
 
-        driver.enter_text("Skip points:", "2")
+        driver.enter_text(object_name="qt_spinbox_lineedit", value="2")
         driver.screenshot(tmp_path / "03-recovered.png")
         visible = {item.object_name: item for item in driver.visible().widgets}
         assert "analysisParameterError" not in visible

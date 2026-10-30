@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from typing import Annotated, Literal
 
 import pytest
+from pydantic import Field, TypeAdapter
+from pydantic.dataclasses import dataclass as validated_dataclass
 from zcu_tools.cfg_model import FieldMeta
 from zcu_tools.gui.app.measure.adapter import ParamMeta
 from zcu_tools.gui.app.measure.adapter.analyze_params import (
@@ -17,6 +19,37 @@ class _CoreOptions:
     mode: Annotated[Literal["lor", "sinc"], FieldMeta(label="Model type")] = "lor"
     cutoff: Annotated[float | None, FieldMeta(label="Gain cutoff", decimals=3)] = None
     enabled: Annotated[bool, FieldMeta()] = True
+
+
+@validated_dataclass(frozen=True)
+class _ValidatedOptions:
+    skip: Annotated[int, FieldMeta(label="Skip points"), Field(ge=0)] = 0
+
+
+@dataclass(frozen=True)
+class _PlainOptions:
+    skip: Annotated[int, FieldMeta(label="Skip points")] = 0
+
+
+@pytest.mark.parametrize("options_type", [_PlainOptions, _ValidatedOptions])
+def test_dataclass_options_share_description_and_reconstruction(options_type):
+    assert describe_analyze_params(options_type) == [
+        {"name": "skip", "type": "int", "label": "Skip points", "default": 0}
+    ]
+    assert reconstruct_params(options_type, {"skip": 2}) == options_type(skip=2)
+
+
+@pytest.mark.parametrize(
+    "construct",
+    [
+        lambda: _ValidatedOptions(skip=-1),
+        lambda: reconstruct_params(_ValidatedOptions, {"skip": -1}),
+        lambda: TypeAdapter(_ValidatedOptions).validate_python({"skip": -1}),
+    ],
+)
+def test_options_constraints_reject_invalid_values_at_construction(construct):
+    with pytest.raises(ValueError, match="greater than or equal to 0"):
+        construct()
 
 
 def test_describe_core_options_uses_field_metadata():
