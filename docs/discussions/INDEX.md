@@ -58,5 +58,6 @@
 
 ## 量測策略
 
+- 2026-10-30 [Readout 優化指標：用兩次讀出的一、二次矩算 SNR 與 QND](2026-10-30-readout-optimization-metrics.md)：不需分類參數，由兩種製備下 R1 的平均差與變異數得到 Δ² = m₁² + 4v，算出 SNR、熱布居；R2 對比與 R1 之比給 QND；中間 π 在理想模型下沒有新資訊，用來看量測造成的 leakage 與量測後 π 失準；參考分支總是打開，優化先畫 Pareto 前緣由人選。
 - 2026-10-29 [Heralding：取數層 post-selection，不做 FPGA active reset](2026-10-29-heralding-post-selection.md)：QICK 的平均本來就在 host 用整個 round 的逐發資料計算，所以在取數層依 herald 篩選再平均不需存逐發資料；FPGA 回饋因延遲未知、ALU 無乘法與模擬器限制否決；上層新增 `heralding/*`，先做單 qubit。
 - 2026-10-27 [T1/T2 over flux 量測策略：哪些機制有效](2026-10-27-coherence-strategy-levers.md)：自適應 flux 選點沒有增益；唯一有效的是每條曲線的穩健 delay 取樣（σ 約 0.73 倍）；不需新 workflow，建議在 `coherence_fluxdep` 加 delay 模式。
