@@ -216,6 +216,9 @@ def run_gui_runtime(
 ) -> int:
     """Run behavior on Qt, then log live threads after app-owned resources close.
 
+    Rendering initialization applies the shared Matplotlib style to process-wide
+    rcParams before assembling the app. Authors can override it with native
+    Matplotlib arguments or style contexts after initialization.
     exit_diagnostics optionally arms a process-exit watchdog after close;
     None records only the thread summary. The launcher supplies diagnostics
     using the resolved GUI log path. Quit callbacks are disconnected after
@@ -292,13 +295,17 @@ def _start_control_adapter(
 
 
 def _initialize_rendering(app: QApplication, scope: LifetimeScope) -> None:
+    from matplotlib import style
+
     from zcu_tools.gui.plotting import (
         ensure_host,
         install_mathtext_lock,
         prewarm_mathtext,
         set_shutting_down,
     )
+    from zcu_tools.plotting import DEFAULT_STYLE
 
+    style.use(DEFAULT_STYLE)
     ensure_host()
     scope.connect(app.aboutToQuit, lambda: set_shutting_down(value=True))
     install_mathtext_lock()

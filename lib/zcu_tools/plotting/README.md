@@ -1,6 +1,6 @@
 # `zcu_tools.plotting` — 圖管理與 owner 更新
 
-**Last updated:** 2026-10-25
+**Last updated:** 2026-10-30
 
 **讀者：** framework-dev。具名原生圖、通用更新 handle 與診斷圖的分工。
 
@@ -9,6 +9,21 @@
 不 close canvas，也不代表操作成功。登記表不延長集合生命週期。
 `subplots(name, ...)` 直接建立原生 Figure／Axes 與 Agg canvas，保留 Matplotlib
 shape／layout，不登記 pyplot manager 或切換全域 backend。
+
+## 預設外觀
+
+`zcu_tools.plotting.DEFAULT_STYLE` 指向隨套件安裝的 `experiment.mplstyle`。
+GUI runtime、`NotebookPlotHost` 建構與離線 probe 在建立實驗圖前，呼叫
+`matplotlib.style.use(DEFAULT_STYLE)`，設定後續新圖的字級、格線與 tight layout。
+樣式不設定 `savefig.*` 或 backend，不登記 pyplot manager，也不修改既有 artists。
+直接建立 `FigureCollection` 或 `Plots` 不套用樣式。
+
+作者用原生 Matplotlib 參數覆寫單一 artist，例如
+`ax.set_xlabel("Frequency (MHz)", fontsize=16)`。
+要覆寫一組新圖，在入口初始化後使用
+`with plt.style.context({"axes.grid": False}): ...`。
+測試或其他需要隔離全域 rcParams 的 caller，將入口與繪圖包在
+`matplotlib.rc_context()` 中。
 
 ## 操作與呈現
 
