@@ -72,6 +72,16 @@ class PowerCfg(ConfigBase):
             description="Nonnegative SNR skew penalty.",
         ),
     ] = Field(default=0.0, ge=0.0)
+    seed: Annotated[
+        int | None,
+        FieldMeta(
+            label="Scan-order seed",
+            description=(
+                "Fixes the shuffled order of interior powers; empty draws a new "
+                "order each run."
+            ),
+        ),
+    ] = None
 
 
 class PowerExp(Experiment[PowerResult, PowerCfg]):
@@ -100,7 +110,7 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
         cfg = deepcopy(cfg)
         soc, soccfg = context.soc, context.soccfg
         jpa_powers = sweep2array(cfg.jpa_power, allow_array=True)
-        np.random.shuffle(jpa_powers[1:-1])
+        np.random.default_rng(cfg.seed).shuffle(jpa_powers[1:-1])
 
         def configure_axes(ax: Axes) -> None:
             ax.lines[0].set_linestyle("None")

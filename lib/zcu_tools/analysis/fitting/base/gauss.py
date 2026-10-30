@@ -181,7 +181,8 @@ def fit_dual_gauss_gmm(
     if len(signals.shape) == 1:
         signals = signals[:, None]
 
-    gmm = GaussianMixture(n_components=2, covariance_type="spherical")
+    # A fixed initialization keeps the fit reproducible from saved data.
+    gmm = GaussianMixture(n_components=2, covariance_type="spherical", random_state=0)
     gmm.fit(signals)
 
     means = gmm.means_
