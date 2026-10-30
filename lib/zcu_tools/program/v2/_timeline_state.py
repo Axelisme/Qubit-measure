@@ -4,9 +4,16 @@ from dataclasses import dataclass, field
 
 from qick.asm_v2 import QickParam, WriteReg
 
+from ._timeline_expression import CycleVariable
 from ._timeline_guard import PulseGuard as _PulseGuard
 from ._timeline_guard import bounds
-from ._timeline_runtime import RuntimeEnd, RuntimeMath, Time, time_bounds
+from ._timeline_runtime import (
+    RuntimeEnd,
+    RuntimeMath,
+    Time,
+    projected_bounds,
+    time_bounds,
+)
 
 
 @dataclass(frozen=True)
@@ -164,6 +171,7 @@ class TimelineBook:
 
     def __init__(self):
         self.ends: dict[str, Time] = {"default": 0.0}
+        self.cycle_axes: dict[str, CycleVariable] = {}
         self.math: RuntimeMath
         self.preparing = 0
         self.pinned: set[str] = set()
@@ -222,7 +230,7 @@ class TimelineBook:
                         consumed.add(ch)
                 self.native_timestamp(
                     self.math.prog,
-                    time_bounds(self.math.prog, remaining)[1],
+                    projected_bounds(self.math.prog, remaining)[1],
                     gen_ch=ch if generator else None,
                     ro_ch=None if generator else ch,
                 )

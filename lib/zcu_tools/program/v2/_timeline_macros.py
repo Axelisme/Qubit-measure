@@ -3,6 +3,7 @@
 from collections.abc import Generator, Mapping, Sequence
 from contextlib import contextmanager
 from copy import deepcopy
+from dataclasses import replace
 
 from qick.asm_v2 import (
     CloseLoop,
@@ -143,6 +144,7 @@ class TimelineBoundary(Macro):
         super().preprocess(prog)
         if self.section == "reset":
             self.book.ends = {"default": 0.0}
+            self.book.cycle_axes.clear()
             self.book.waiting.clear()
             self.book.repeats.clear()
             self.book.native_only = False
@@ -243,19 +245,12 @@ class TimelineAdvance(TimedMacro):
             )
         debt = self.book.math.coverage_debt(physical_offsets, completed_offsets)
         if debt == 0:
-            return RuntimeEnd(
-                selected_result.register,
-                selected_result.minimum,
-                selected_result.maximum,
-                (*selected_result.covers, *event.rounded),
-                selected_result.deferred,
+            return replace(
+                selected_result, covers=(*selected_result.covers, *event.rounded)
             )
-        return RuntimeEnd(
-            selected_result.register,
-            selected_result.minimum,
-            selected_result.maximum,
-            selected_result.covers,
-            (
+        return replace(
+            selected_result,
+            deferred=(
                 *selected_result.deferred,
                 *(DeferredCoverage(boundary, debt) for boundary in event.rounded),
             ),
@@ -283,13 +278,7 @@ class TimelineAdvance(TimedMacro):
             for previous in event.rounded:
                 if isinstance(previous, RuntimeEnd):
                     covers.extend(previous.covers)
-            result = RuntimeEnd(
-                result.register,
-                result.minimum,
-                result.maximum,
-                tuple(covers),
-                result.deferred,
-            )
+            result = replace(result, covers=tuple(covers))
         return result
 
     def list_time_params(self) -> list[str]:
