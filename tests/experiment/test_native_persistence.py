@@ -1,12 +1,14 @@
 """Typed native mapping and data-first configuration restoration contracts."""
 
 import json
+import time
 import warnings
 from copy import deepcopy
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import ClassVar, Literal
 
+import h5py
 import numpy as np
 import pytest
 from pydantic import BaseModel, ConfigDict, ValidationError, model_validator
@@ -40,6 +42,7 @@ from zcu_tools.experiment import (
     load_run_with_metadata,
     prepare_run_data,
     restore_run,
+    save_labber,
     save_run,
 )
 
@@ -83,8 +86,8 @@ SINGLE = AxesSpec(
 
 def test_axes_namespace_maps_memory_units_to_native_values():
     spec = AxesSpec(
-        axes=(AxesSpec.Axis("frequency", "Frequency", "Hz", scale=1e6),),
-        z=AxesSpec.Z("signal", "Signal", "V", scale=1e-3),
+        axes=(AxesSpec.Axis("frequency", label="Frequency", unit="Hz", scale=1e6),),
+        z=AxesSpec.Z("signal", label="Signal", unit="V", scale=1e-3),
         result_type=SingleResult,
         cfg_type=NativeCfg,
         tag="test/namespace",
@@ -100,6 +103,256 @@ def test_axes_namespace_maps_memory_units_to_native_values():
     variable = prepared.container.vars["data"]
     np.testing.assert_array_equal(variable.axes[0].values, [100e6, 200e6])
     np.testing.assert_allclose(variable.values, [0.001 + 0.002j, 0.003 + 0.004j])
+
+
+@dataclass
+class PopulationResult:
+    frequency: np.ndarray
+    population: np.ndarray
+    signal: np.ndarray
+
+
+def hdf5_value(value: object, file: h5py.File) -> object:
+    """Resolve file-local dimension references to their persisted target paths."""
+    if isinstance(value, h5py.Reference):
+        return file[value].name if value else None
+    if isinstance(value, (np.ndarray, np.generic)):
+        return (
+            value.dtype,
+            value.shape,
+            hdf5_value(value.tolist(), file)
+            if value.dtype.hasobject
+            else value.tobytes(),
+        )
+    if isinstance(value, (tuple, list)):
+        return tuple(hdf5_value(item, file) for item in value)
+    return value
+
+
+def assert_saved_content_equal(first: Path, second: Path) -> None:
+    """Compare every persisted node/attribute without HDF5 allocation metadata."""
+    with h5py.File(first, "r") as left, h5py.File(second, "r") as right:
+        left_paths, right_paths = ["/"], ["/"]
+        left.visit(left_paths.append)
+        right.visit(right_paths.append)
+        assert left_paths == right_paths
+        for path in left_paths:
+            actual, expected = left[path], right[path]
+            assert type(actual) is type(expected)
+            assert set(actual.attrs) == set(expected.attrs)
+            for name in actual.attrs:
+                assert hdf5_value(actual.attrs[name], left) == hdf5_value(
+                    expected.attrs[name], right
+                )
+            if isinstance(actual, h5py.Dataset) and isinstance(expected, h5py.Dataset):
+                assert actual.dtype == expected.dtype
+                assert actual.dtype.metadata == expected.dtype.metadata
+                assert actual.shape == expected.shape
+                if actual.dtype.hasobject:
+                    # Vlen strings read as byte objects, not their pointer bytes.
+                    assert hdf5_value(actual[()], left) == hdf5_value(
+                        expected[()], right
+                    )
+                else:
+                    assert (
+                        np.asarray(actual[()]).tobytes()
+                        == np.asarray(expected[()]).tobytes()
+                    )
+
+
+def build_fixed_population(data: GroupedLoadData[NativeCfg]) -> SingleResult:
+    variable = data.variable("population")
+    return SingleResult(variable.axes[1], variable.z)
+
+
+def build_field_population(data: GroupedLoadData[NativeCfg]) -> PopulationResult:
+    variable = data.variable("population")
+    return PopulationResult(variable.axes[1], variable.axes[0], variable.z)
+
+
+def population_specs(
+    grouped: bool,
+) -> tuple[
+    AxesSpec[SingleResult, NativeCfg] | GroupedAxesSpec[SingleResult, NativeCfg],
+    AxesSpec[PopulationResult, NativeCfg]
+    | GroupedAxesSpec[PopulationResult, NativeCfg],
+]:
+    """Equivalent declarations, one without a Result population field."""
+    fixed_spec: (
+        AxesSpec[SingleResult, NativeCfg] | GroupedAxesSpec[SingleResult, NativeCfg]
+    )
+    field_spec: (
+        AxesSpec[PopulationResult, NativeCfg]
+        | GroupedAxesSpec[PopulationResult, NativeCfg]
+    )
+    single_spec = AxesSpec(
+        axes=(
+            AxesSpec.Axis(
+                values=(0, 1, 2),
+                label="Population",
+                unit="None",
+                dtype=np.int64,
+                scale=2.0,
+            ),
+            AxesSpec.Axis("frequency", label="Frequency", unit="Hz", scale=1e6),
+        ),
+        z=AxesSpec.Z("signal", label="Signal", unit="V", scale=0.125),
+        result_type=SingleResult,
+        cfg_type=NativeCfg,
+        tag="test/population",
+    )
+    if grouped:
+        variable = VariableSpec(
+            "population",
+            (
+                VariableAxisSpec(
+                    "Population", "None", values=(0, 1, 2), dtype=np.int64, scale=2.0
+                ),
+                VariableAxisSpec("Frequency", "Hz", "frequency", scale=1e6),
+            ),
+            VariableZSpec("signal", "Signal", "V", scale=0.125, dtype=np.complex128),
+        )
+        fixed_spec = GroupedAxesSpec(
+            variables=(variable,),
+            result_type=SingleResult,
+            cfg_type=NativeCfg,
+            tag=single_spec.tag,
+            result_builder=build_fixed_population,
+        )
+        field_spec = GroupedAxesSpec(
+            variables=(
+                replace(
+                    variable,
+                    axes=(
+                        VariableAxisSpec(
+                            "Population", "None", "population", 2.0, np.int64
+                        ),
+                        variable.axes[1],
+                    ),
+                ),
+            ),
+            result_type=PopulationResult,
+            result_builder=build_field_population,
+            cfg_type=NativeCfg,
+            tag=single_spec.tag,
+        )
+    else:
+        fixed_spec = single_spec
+        field_spec = AxesSpec(
+            axes=(
+                Axis("population", "Population", "None", 2.0, np.int64),
+                single_spec.axes[1],
+            ),
+            result_type=PopulationResult,
+            z=single_spec.z,
+            cfg_type=NativeCfg,
+            tag=single_spec.tag,
+        )
+    return fixed_spec, field_spec
+
+
+@pytest.mark.parametrize("grouped", [False, True], ids=["single", "grouped"])
+def test_fixed_axis_saves_like_field_axis_and_restores_without_field(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, grouped: bool
+) -> None:
+    fixed_spec, field_spec = population_specs(grouped)
+    frequency = np.array([4000.0, 5000.0])
+    signal = np.array([[1 + 2j, 3 - 4j, 5 + 6j], [7 - 8j, 9 + 10j, 11 - 12j]])
+    metadata = native_metadata(fixed_spec.tag)
+    fixed_record = RunRecord(NativeCfg(), SingleResult(frequency, signal), metadata)
+    field_record = RunRecord(
+        NativeCfg(), PopulationResult(frequency, np.array([0, 1, 2]), signal), metadata
+    )
+    fixed_path, field_path = tmp_path / "fixed.h5", tmp_path / "field.h5"
+    save_run(fixed_record, fixed_path, spec=fixed_spec)
+    save_run(field_record, field_path, spec=field_spec)
+    assert_saved_content_equal(fixed_path, field_path)
+    for path in (fixed_path, field_path):
+        restored = load_run_with_metadata(path, spec=fixed_spec)
+        assert restored.cfg == fixed_record.cfg
+        np.testing.assert_array_equal(restored.result.frequency, frequency)
+        np.testing.assert_array_equal(restored.result.signal, signal)
+    with_field = load_run_with_metadata(fixed_path, spec=field_spec)
+    np.testing.assert_array_equal(with_field.result.population, [0, 1, 2])
+    assert with_field.result.population.dtype == np.int64
+
+    fixed_dir, field_dir = tmp_path / "fixed", tmp_path / "field"
+    fixed_dir.mkdir()
+    field_dir.mkdir()
+    fixed_labber, field_labber = (
+        fixed_dir / "population.hdf5",
+        field_dir / "population.hdf5",
+    )
+    with monkeypatch.context() as clock:
+        clock.setattr(time, "time", lambda: 1700000000.0)
+        clock.setattr(time, "strftime", lambda *args: "2026-10-30 12:00:00")
+        save_labber(fixed_record, fixed_labber, spec=fixed_spec)
+        save_labber(field_record, field_labber, spec=field_spec)
+    assert_saved_content_equal(fixed_labber, field_labber)
+
+
+def test_keyword_and_positional_axes_have_identical_saved_content(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    keyword = replace(
+        SINGLE,
+        axes=(AxesSpec.Axis("frequency", label="Frequency", unit="Hz", scale=1e6),),
+        z=AxesSpec.Z("signal", label="Signal", unit="V", scale=1e-3),
+    )
+    source = single_record()
+    positional_path, keyword_path = tmp_path / "positional.h5", tmp_path / "keyword.h5"
+    save_run(source, positional_path, spec=SINGLE)
+    save_run(source, keyword_path, spec=keyword)
+    assert_saved_content_equal(positional_path, keyword_path)
+    loaded = load_run_with_metadata(keyword_path, spec=keyword)
+    np.testing.assert_array_equal(loaded.result.frequency, source.result.frequency)
+    np.testing.assert_allclose(loaded.result.signal, source.result.signal)
+    positional_dir, keyword_dir = tmp_path / "positional", tmp_path / "keyword"
+    positional_dir.mkdir()
+    keyword_dir.mkdir()
+    positional_labber, keyword_labber = (
+        positional_dir / "data.hdf5",
+        keyword_dir / "data.hdf5",
+    )
+    with monkeypatch.context() as clock:
+        clock.setattr(time, "time", lambda: 1700000000.0)
+        clock.setattr(time, "strftime", lambda *args: "2026-10-30 12:00:00")
+        save_labber(source, positional_labber, spec=SINGLE)
+        save_labber(source, keyword_labber, spec=keyword)
+    assert_saved_content_equal(positional_labber, keyword_labber)
+
+
+@pytest.mark.parametrize("grouped", [False, True], ids=["single", "grouped"])
+@pytest.mark.parametrize("native", [False, True], ids=["labber", "native"])
+def test_fixed_axis_shape_mismatch_fails_before_writing(
+    tmp_path: Path, grouped: bool, native: bool
+) -> None:
+    spec, _ = population_specs(grouped)
+    source = RunRecord(
+        NativeCfg(),
+        SingleResult(np.array([4000.0, 5000.0]), np.ones((3, 2))),
+        native_metadata(spec.tag),
+    )
+    path = tmp_path / ("bad.h5" if native else "bad.hdf5")
+    save_record = save_run if native else save_labber
+    with pytest.raises(ValueError, match="axis lengths disagree with z dimensions"):
+        save_record(source, path, spec=spec)
+    assert not path.exists()
+
+
+@pytest.mark.parametrize("grouped", [False, True], ids=["single", "grouped"])
+@pytest.mark.parametrize("field_name,values", [(None, None), ("population", (0, 1, 2))])
+def test_axis_declaration_requires_exactly_one_source(
+    grouped: bool, field_name: str | None, values: tuple[int, ...] | None
+) -> None:
+    axis_type = VariableAxisSpec if grouped else AxesSpec.Axis
+    with pytest.raises(ValueError, match="exactly one"):
+        axis_type(field_name=field_name, label="Population", unit="None", values=values)
+
+
+def test_fixed_coordinates_cannot_also_be_generated() -> None:
+    with pytest.raises(ValueError, match="exactly one"):
+        VariableAxisSpec("Population", "None", generated="arange", values=(0, 1, 2))
 
 
 class SingleExperiment(Experiment[SingleResult, NativeCfg]):

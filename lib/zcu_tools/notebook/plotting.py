@@ -3,8 +3,12 @@
 from collections.abc import Callable
 from typing import TYPE_CHECKING, TypeVar, cast
 
+from matplotlib import style
 from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib.figure import Figure
+
+from zcu_tools.plotting import DEFAULT_STYLE
+from zcu_tools.plotting.presentation import FigureShowManager
 
 if TYPE_CHECKING:
     from ipympl.backend_nbagg import Canvas, FigureManager
@@ -17,13 +21,23 @@ _T = TypeVar("_T")
 class NotebookPlotHost:
     """Initialize and synchronously render widgets until explicitly released.
 
+    Construction applies the shared Matplotlib style to process-wide rcParams
+    for subsequent figures. Apply native style overrides after construction.
     Calls run synchronously on the caller's thread. Callers serialize operations;
     this host does not schedule work or detect frontend availability. Figures
-    with an existing manager must be released by that owner before presentation.
+    with another presentation manager must be released by that owner first.
+    Framework FigureShowManager is accepted and restored on the released Agg
+    canvas. The ipympl manager delegates show to that original operation.
+    Module import and construction do not load ipympl. The first presentation
+    imports it, selecting the widget pyplot backend without restoration. An
+    unselected backend is allowed. Existing pyplot figures remain registered;
+    this host does not register its own figures with pyplot.
     """
 
     def __init__(self) -> None:
+        style.use(DEFAULT_STYLE)
         self._managers: dict[Figure, FigureManager] = {}
+        self._show_managers: dict[Figure, FigureShowManager] = {}
 
     def call(self, callback: Callable[[], _T]) -> _T:
         return callback()
@@ -31,7 +45,8 @@ class NotebookPlotHost:
     def present(self, figure: Figure) -> None:
         if figure in self._managers:
             return
-        if figure.canvas.manager is not None:
+        previous = figure.canvas.manager
+        if previous is not None and not isinstance(previous, FigureShowManager):
             raise ValueError("Figure already has a presentation manager")
 
         from ipympl.backend_nbagg import Canvas, FigureManager
@@ -40,12 +55,29 @@ class NotebookPlotHost:
         # Construct directly: pyplot/Gcf registration would redisplay at cell end.
         canvas = Canvas(figure)
         try:
-            manager = FigureManager(canvas, num=0)
+            if isinstance(previous, FigureShowManager):
+
+                class _NotebookManager(FigureManager):
+                    """Keep native show routed through the operation manager."""
+
+                    def show(self) -> None:
+                        """Delegate show, including the finished-operation error."""
+                        previous.show()
+
+                manager = _NotebookManager(canvas, num=0)
+            else:
+                manager = FigureManager(canvas, num=0)
             _initialize_canvas(canvas)
         except Exception:
             # Release acquired widgets without downgrading the original failure.
-            _release_canvas(canvas)
+            try:
+                _release_canvas(canvas)
+            finally:
+                if isinstance(previous, FigureShowManager):
+                    previous.attach(figure.canvas)
             raise
+        if isinstance(previous, FigureShowManager):
+            self._show_managers[figure] = previous
         self._managers[figure] = manager
         # Retain the manager even if publishing fails, so release can clean up.
         display(canvas)
@@ -83,6 +115,9 @@ class NotebookPlotHost:
             _release_canvas(cast("Canvas", manager.canvas))
         finally:
             del self._managers[figure]
+            previous = self._show_managers.pop(figure, None)
+            if previous is not None:
+                previous.attach(figure.canvas)
 
 
 def finish_failed_plots(

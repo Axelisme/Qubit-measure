@@ -102,9 +102,13 @@ class Form[C: ConfigBase]:
     core cfg Forms. Named mode supplies identity admission and participants
     validation, rejecting duplicate default names with indices. Slot mode fixes
     only an active list's length and leaves all element values editable.
-    seed_metadata maps canonical paths to author-declared source descriptions and
-    calibration. seed_sources retains the last default_input Open/Reset facts;
-    a host preserving input across Refresh must also preserve this mapping.
+    seed_metadata maps canonical paths to explicit source descriptions and
+    calibration, with priority over Template metadata. template_seed_metadata is
+    a read-only path mapping of FieldMeta hints from Templates actually adopted
+    at the last default_input Open/Reset, empty before that call. seed_sources
+    retains the same Open/Reset provenance facts. A host preserving input across
+    Refresh transfers all three public mappings unchanged to the replacement
+    Form; Reset recomputes template_seed_metadata and seed_sources.
     """
 
     def __init__(
@@ -124,6 +128,9 @@ class Form[C: ConfigBase]:
             raise ValueError("field_order is supported only for core-cfg Forms")
         self.seed_metadata: Mapping[FormWritePath, FieldMeta] = MappingProxyType({})
         self.seed_sources: Mapping[FormWritePath, SeedSource] = MappingProxyType({})
+        self.template_seed_metadata: Mapping[FormWritePath, FieldMeta] = (
+            MappingProxyType({})
+        )
         self._core_cfg = core_cfg
         self._initial_values = initial_values
         self._section: Section | SpecSection = (
@@ -174,6 +181,18 @@ class Form[C: ConfigBase]:
         """
         self._section.bind_templates(MappingProxyType(dict(templates)), adapter)
 
+    def select_sources(self, env: FormEnv) -> None:
+        """Select captured Slot/Template projections without producing fresh input.
+
+        Call after bind_templates and before attaching retained input on Refresh.
+        Hidden fields and expression requiredness follow the selected branch.
+        This updates the generated model, not authored input, initial_values or
+        seed provenance. No defaults are evaluated and no sources are mutated.
+        Source resolution and projection failures propagate; hosts must prepare
+        a replacement Form before installation to preserve their current state.
+        """
+        self._section.select_sources(env)
+
     def default_input(self, env: FormEnv) -> FormInput[FormModel]:
         """Build fresh input from captured env; required unresolved names stay absent.
 
@@ -184,6 +203,7 @@ class Form[C: ConfigBase]:
         The shared core evaluates expression defaults once into direct
         input against this env. Unresolved or invalid defaults stay absent.
         """
+        self.select_sources(env)
         raw = self.model.defaults(env)
         if self._initial_values is not None:
             values = self._initial_values(env)
@@ -192,7 +212,10 @@ class Form[C: ConfigBase]:
             raw.update(deepcopy(dict(values)))
         input = self.model.default_input(env, defaults=raw)
         self.seed_sources = MappingProxyType(
-            capture_seed_sources(raw, input.data, self._section.seed_origins())
+            capture_seed_sources(raw, input.data, self._section.seed_origins(env))
+        )
+        self.template_seed_metadata = MappingProxyType(
+            self._section.template_metadata(env)
         )
         return input
 
@@ -209,7 +232,11 @@ class Form[C: ConfigBase]:
         """
         self._check_logical_input(input)
         return field_diagnostics(
-            input, env, errors, self.seed_sources, self.seed_metadata
+            input,
+            env,
+            errors,
+            self.seed_sources,
+            {**self.template_seed_metadata, **self.seed_metadata},
         )
 
     def _check_logical_input(self, input: FormInput[FormModel]) -> None:

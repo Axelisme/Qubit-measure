@@ -17,6 +17,8 @@ from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib.figure import Figure
 from qtpy.QtWidgets import QStackedWidget, QWidget
 
+from zcu_tools.plotting.presentation import FigureShowManager
+
 from . import host as _host
 
 
@@ -105,6 +107,9 @@ class FigureContainer:
             if isinstance(figure, Figure):
                 _host.drop_from_registry(figure)
                 if isinstance(widget, FigureCanvasBase) and figure.canvas is widget:
-                    FigureCanvasAgg(figure)
+                    manager = widget.manager
+                    replacement = FigureCanvasAgg(figure)
+                    if isinstance(manager, FigureShowManager):
+                        manager.attach(replacement)
             widget.deleteLater()
         self._stack.setCurrentWidget(self._placeholder)

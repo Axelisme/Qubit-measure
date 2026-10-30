@@ -37,6 +37,7 @@ from typing import Annotated
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.program.v2 import GainSweep, Pulse, Readout, Reset, SweepCfg
 
+
 class PowerMapCfg(ConfigBase):
     reset: Reset.Cfg | None = None
     qub_pulse: Pulse.Cfg
@@ -55,8 +56,8 @@ Run 明傳 builder 的 reps／relax_delay，acquire 明傳 rounds。
 這次不改資料形狀。`PowerMapResult` 保留 `gains`、以 MHz 表示的 `freqs`，
 以及 shape 為 `(Ngain, Nfreq)` 的 complex IQ `signals`。
 把 `AXES_SPEC.tag` 改成 `"twotone/power_map"`，並讓 `result_type`、`cfg_type` 指向新型別。
-Axes 保持 inner-first 的 `freqs`、`gains`。宣告寫 `AxesSpec.Axis("freqs", "Frequency", "Hz", scale=1e6)`，將 MHz 換成檔案中的 Hz。
-Gain 軸省略 scale，預設保留原值。Signal 寫 `AxesSpec.Z("signals", "Signal", "a.u.")`。
+Axes 保持 inner-first 的 `freqs`、`gains`。宣告寫 `AxesSpec.Axis("freqs", label="Frequency", unit="Hz", scale=1e6)`，將 MHz 換成檔案中的 Hz。
+Gain 軸省略 scale，預設保留原值。Signal 寫 `AxesSpec.Z("signals", label="Signal", unit="a.u.")`。
 之後若改 Result 欄位、軸序或單位，也要一起改 spec，見 [資料形狀](../v2/experiment-authoring.md#版本實驗的資料形狀)。
 
 `run(cfg, *, context)` 先保留原序列。它對每個 host gain 掃描 FPGA frequency，
@@ -84,12 +85,23 @@ frequency 點數改為 `101`。這些只是新表單的起始值，不代表硬�
   保留 freq／gain 的 `Hidden(0.0)`，因為 `run` 會用 sweep 座標覆寫它們。
 - `Slot("$resonator.module.readout")` 使用綁定 resonator 已選的 library module。
   Alias `resonator: $qubit.resonator` 讓讀出跟隨目前 qubit 的 resonator，不讀 qubit 上的舊 readout slot。
-  來源不存在時，原範本改用 `Template("readout", bindings={"resonator": "$resonator"})`。
+  原範本仍用 if／else 選來源。新 leaf 可改成下例，fallback 的來源與 metadata 規則見[寫法慣例](../v2/experiment-authoring.md#slot-fallback-與分類-read-axis)。
 - `Slot("$qubit.module.reset")` 是選用的 reset 來源。`init_pulse` 繼續隱藏。
   不要為了開表單而建立假的 library reference。
 
+```python
+from zcu_tools.cfg_model import Slot, Template
+
+
+readout = Slot(
+    "$resonator.module.readout",
+    fallback=Template("readout", bindings={"resonator": "$resonator"}),
+)
+```
+
+把這個 node 放在 `Form(..., tree={"readout": readout, ...})` 的 readout 欄位。
 新增欄位時，先在 core cfg 定義型別與 FieldMeta，再在 tree 指定初值或顯示方式。
-用 `field_order=("reset", "qub_pulse", "readout", "gain", "freq", "reps", "rounds", "relax_delay")` 排列表單。
+本例依前節 cfg 的宣告順序顯示，不另寫 `field_order`。命名、排序與取數欄位的規則見[寫法慣例](../v2/experiment-authoring.md#cfg-名稱順序與取數欄位)。
 模組保留 selector 與子表單，掃描保留 `SweepCfg` 子表單，不再包 Modules／Sweep group。
 Pulse 的 Advanced group 仍將 NQZ、Phase、Pre-delay、Post-delay 與 Mixer freq 放在可摺疊區塊。
 Tree 不另定義一份 cfg shape。Expression、Slot／Template 與 Reset 的契約見
@@ -115,8 +127,10 @@ from zcu_tools.gui.app.measure.adapter import Adapter
 
 from .form import make_form
 
+
 def run(cfg: PowerMapCfg, *, context: RunContext) -> RunRecord[PowerMapCfg, PowerMapResult]:
     return RunRecord(cfg=cfg, result=PowerMapExp().run(cfg, context=context))
+
 
 DEFINITION = Adapter(
     spec=PowerMapExp.AXES_SPEC,

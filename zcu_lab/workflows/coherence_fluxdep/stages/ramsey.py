@@ -8,7 +8,6 @@ from zcu_tools.experiment.scope import Scope
 from zcu_tools.experiment.workflows import Failed
 from zcu_tools.program import shot_time_s
 
-from zcu_lab.v2.support.lifetime_models import LifetimeModelRecord
 from zcu_lab.v2.twotone.time_domain.t2ramsey.core import T2RamseyCfg, T2RamseyExp
 from zcu_lab.workflows.coherence_fluxdep.acquire import run_t2ramsey
 from zcu_lab.workflows.coherence_fluxdep.analysis import analyze_t2ramsey
@@ -27,6 +26,7 @@ from zcu_lab.workflows.common.analysis import compare_decay_fit
 from zcu_lab.workflows.common.calibration_results import StageStatus
 from zcu_lab.workflows.common.gain import GainClamp, clamp_gain
 from zcu_lab.workflows.common.gates import Gate
+from zcu_lab.workflows.common.lifetime_models import LifetimeModelRecord
 from zcu_lab.workflows.common.stages import NativeOutput, StageEnv, acquire_saved
 
 

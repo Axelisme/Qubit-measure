@@ -5,10 +5,22 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
+import matplotlib
 import numpy as np
 import pytest
+from matplotlib import pyplot as plt
 from numpy.typing import NDArray
-from zcu_tools.experiment import AxesSpec, Axis, ZSpec, native_persistence
+from zcu_tools.experiment import (
+    AxesSpec,
+    Axis,
+    Experiment,
+    GroupedAxesSpec,
+    VariableAxisSpec,
+    VariableSpec,
+    VariableZSpec,
+    ZSpec,
+    native_persistence,
+)
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.probe import compare_roundtrip, main, probe
 from zcu_tools.experiment.records import RunRecord
@@ -17,6 +29,49 @@ from zcu_tools.plotting.plots import Plots
 
 from tests.experiment._probe_support import ProbeExperiment
 from tests.experiment._saving_support import SavingCfg, SavingCore, SavingResult
+
+
+@pytest.fixture(autouse=True)
+def restore_rc_params():
+    with matplotlib.rc_context():
+        yield
+
+
+def test_probe_applies_style_before_run_and_preserves_native_overrides(tmp_path: Path):
+    observed: list[float | str] = []
+
+    class StyledExperiment(ProbeExperiment):
+        def run(self, config: SavingCfg, *, context: RunContext) -> SavingResult:
+            _, axes = context.plots.subplots("style-default")
+            observed.append(axes.xaxis.label.get_fontsize())
+            axes.set_xlabel("Frequency", fontsize=23)
+            assert axes.xaxis.label.get_fontsize() == 23
+            return super().run(config, context=context)
+
+        def analyze(
+            self,
+            source: RunRecord[SavingCfg, SavingResult],
+            options: Any,
+            *,
+            plots: Plots,
+        ) -> dict[str, object]:
+            _, axes = plots.subplots("style-default")
+            observed.append(axes.xaxis.label.get_fontsize())
+            with plt.style.context({"axes.labelsize": 31}):
+                _, custom = plots.subplots("style-override")
+                assert custom.xaxis.label.get_fontsize() == 31
+            return super().analyze(source, options, plots=plots)
+
+    environment = white_noise(seed=17)
+    try:
+        with matplotlib.rc_context({"axes.labelsize": 37}):
+            report = probe(StyledExperiment(), SavingCfg(), environment, tmp_path)
+            assert report.failed_stage is None
+            assert report.exception is None
+            assert len(observed) == 2
+            assert all(size != 37 for size in observed)
+    finally:
+        environment.devices.close_all_devices()
 
 
 def test_probe_roundtrips_result_and_exports_live_and_analysis_pngs(tmp_path: Path):
@@ -76,6 +131,54 @@ def test_probe_accepts_single_scale_native_roundoff(tmp_path: Path):
         environment.devices.close_all_devices()
 
 
+def test_probe_reports_grouped_scale_native_roundoff_as_equal(tmp_path: Path):
+    class GroupedScaledExperiment(Experiment[SavingResult, SavingCfg]):
+        AXES_SPEC = GroupedAxesSpec(
+            variables=(
+                VariableSpec(
+                    "response",
+                    axes=(
+                        VariableAxisSpec("coordinate", "s", "frequency", scale=1e-6),
+                    ),
+                    z=VariableZSpec("signal", "signal", "V", dtype=np.complex128),
+                ),
+            ),
+            result_type=SavingResult,
+            cfg_type=SavingCfg,
+            tag="test/grouped_probe",
+            result_builder=lambda data: SavingResult(
+                frequency=data.variable("response").axes[0],
+                signal=data.variable("response").z,
+            ),
+        )
+
+        def run(self, config: SavingCfg, *, context: RunContext) -> SavingResult:
+            return SavingResult(
+                frequency=np.array([0.122, 0.244, 0.366]),
+                signal=np.array([1 + 2j, 3 - 4j, 5 + 6j]),
+            )
+
+        def analyze(
+            self,
+            source: RunRecord[SavingCfg, SavingResult],
+            options: Any,
+            *,
+            plots: Plots,
+        ) -> float:
+            return float(source.result.frequency[-1])
+
+    environment = white_noise(seed=17)
+    try:
+        report = probe(GroupedScaledExperiment(), SavingCfg(), environment, tmp_path)
+        assert report.failed_stage is None
+        assert report.exception is None
+        assert report.restored_fields == report.fields
+        assert report.roundtrip_equal is True
+        assert report.analysis_summary is not None
+    finally:
+        environment.devices.close_all_devices()
+
+
 @dataclass
 class _ComparisonResult:
     coordinate: NDArray[np.generic]
@@ -84,13 +187,139 @@ class _ComparisonResult:
 
 
 @pytest.fixture
-def comparison_spec() -> AxesSpec[_ComparisonResult, SavingCfg]:
+def single_comparison_spec() -> AxesSpec[_ComparisonResult, SavingCfg]:
     return AxesSpec(
         axes=(Axis("coordinate", "coordinate", "s", scale=1e-6),),
         z=ZSpec("signal", "signal", "V", scale=1e-3),
         result_type=_ComparisonResult,
         cfg_type=SavingCfg,
         tag="test/comparison",
+    )
+
+
+_ComparisonSpec = (
+    AxesSpec[_ComparisonResult, SavingCfg]
+    | GroupedAxesSpec[_ComparisonResult, SavingCfg]
+)
+
+
+@pytest.fixture(params=["single", "grouped"])
+def comparison_spec(
+    request: pytest.FixtureRequest,
+    single_comparison_spec: AxesSpec[_ComparisonResult, SavingCfg],
+    grouped_comparison_spec: GroupedAxesSpec[_ComparisonResult, SavingCfg],
+) -> _ComparisonSpec:
+    return (
+        single_comparison_spec if request.param == "single" else grouped_comparison_spec
+    )
+
+
+@pytest.fixture
+def grouped_comparison_spec() -> GroupedAxesSpec[_ComparisonResult, SavingCfg]:
+    return GroupedAxesSpec(
+        variables=(
+            VariableSpec(
+                "response",
+                axes=(VariableAxisSpec("coordinate", "s", "coordinate", scale=1e-6),),
+                z=VariableZSpec("signal", "signal", "V", scale=1e-3),
+            ),
+            VariableSpec(
+                "coordinate_copy",
+                axes=(VariableAxisSpec.generated_arange("sample", ""),),
+                z=VariableZSpec("coordinate", "coordinate", "s", scale=1e-6),
+            ),
+        ),
+        result_type=_ComparisonResult,
+        cfg_type=SavingCfg,
+        tag="test/grouped_comparison",
+        result_builder=lambda data: _ComparisonResult(
+            coordinate=data.variable("response").axes[0],
+            signal=data.variable("response").z,
+            index=np.array([0, 1], dtype=np.int64),
+        ),
+    )
+
+
+def test_grouped_scaled_fields_accept_bounded_roundoff(
+    grouped_comparison_spec: GroupedAxesSpec[_ComparisonResult, SavingCfg],
+    comparison_result: _ComparisonResult,
+):
+    restored = replace(
+        comparison_result,
+        coordinate=np.array(
+            [1 + 2 * np.finfo(np.float64).eps, np.nan, np.inf, -np.inf, 0]
+        ),
+        signal=np.array(
+            [
+                1 + 2j + 2 * np.finfo(np.float64).eps,
+                complex(np.nan, 3),
+                complex(4, np.nan),
+            ]
+        ),
+    )
+    assert compare_roundtrip(comparison_result, restored, spec=grouped_comparison_spec)
+
+
+@pytest.mark.parametrize("conflicting_scale", [1.0, 1e3, -1e-6])
+def test_grouped_comparison_rejects_conflicting_scales_for_one_field(
+    grouped_comparison_spec: GroupedAxesSpec[_ComparisonResult, SavingCfg],
+    comparison_result: _ComparisonResult,
+    conflicting_scale: float,
+):
+    response, coordinate_copy = grouped_comparison_spec.variables
+    spec = replace(
+        grouped_comparison_spec,
+        variables=(
+            response,
+            replace(
+                coordinate_copy, z=replace(coordinate_copy.z, scale=conflicting_scale)
+            ),
+        ),
+    )
+    with pytest.raises(ValueError, match="coordinate") as caught:
+        compare_roundtrip(comparison_result, comparison_result, spec=spec)
+    message = str(caught.value)
+    assert str(1e-6) in message
+    assert str(conflicting_scale) in message
+
+
+@pytest.mark.parametrize("scale", [1.0, np.inf, np.nan])
+def test_grouped_identity_and_invalid_scales_remain_exact(
+    grouped_comparison_spec: GroupedAxesSpec[_ComparisonResult, SavingCfg],
+    comparison_result: _ComparisonResult,
+    scale: float,
+):
+    response = grouped_comparison_spec.variables[0]
+    spec = replace(
+        grouped_comparison_spec,
+        variables=(replace(response, z=replace(response.z, scale=scale)),),
+    )
+    signal = comparison_result.signal.copy()
+    signal[0] += np.finfo(np.float64).eps
+    assert not compare_roundtrip(
+        comparison_result, replace(comparison_result, signal=signal), spec=spec
+    )
+
+
+@pytest.mark.parametrize("generated", [False, True], ids=["fixed", "generated"])
+def test_grouped_axes_without_result_fields_do_not_relax_undeclared_arrays(
+    grouped_comparison_spec: GroupedAxesSpec[_ComparisonResult, SavingCfg],
+    comparison_result: _ComparisonResult,
+    generated: bool,
+):
+    response = grouped_comparison_spec.variables[0]
+    axis = (
+        replace(VariableAxisSpec.generated_arange("sample", ""), scale=1e-6)
+        if generated
+        else VariableAxisSpec("sample", "", values=(0, 1, 2), scale=1e-6)
+    )
+    spec = replace(
+        grouped_comparison_spec, variables=(replace(response, axes=(axis,)),)
+    )
+    coordinate = comparison_result.coordinate.copy()
+    coordinate[0] = np.nextafter(1.0, 2.0)
+    assert not compare_roundtrip(
+        comparison_result, replace(comparison_result, coordinate=coordinate), spec=spec
     )
 
 
@@ -106,7 +335,7 @@ def comparison_result() -> _ComparisonResult:
 @pytest.mark.parametrize("dtype", [np.float32, np.float64, np.complex64, np.complex128])
 @pytest.mark.parametrize("steps, expected", [(2, True), (3, False)])
 def test_scaled_comparison_enforces_relative_bound_at_storage_precision(
-    comparison_spec: AxesSpec[_ComparisonResult, SavingCfg],
+    comparison_spec: _ComparisonSpec,
     comparison_result: _ComparisonResult,
     dtype: type[np.floating] | type[np.complexfloating],
     steps: int,
@@ -141,7 +370,7 @@ def test_scaled_comparison_enforces_relative_bound_at_storage_precision(
     ],
 )
 def test_scaled_comparison_rejects_axis_corruption_and_layout_changes(
-    comparison_spec: AxesSpec[_ComparisonResult, SavingCfg],
+    comparison_spec: _ComparisonSpec,
     comparison_result: _ComparisonResult,
     coordinate: NDArray[np.generic],
 ):
@@ -155,7 +384,7 @@ def test_scaled_comparison_rejects_axis_corruption_and_layout_changes(
     ids=["finite-component-corruption", "nan-component-position"],
 )
 def test_scaled_complex_nan_does_not_hide_other_component_changes(
-    comparison_spec: AxesSpec[_ComparisonResult, SavingCfg],
+    comparison_spec: _ComparisonSpec,
     comparison_result: _ComparisonResult,
     changed: complex,
 ):
@@ -166,7 +395,7 @@ def test_scaled_complex_nan_does_not_hide_other_component_changes(
 
 
 def test_scaled_comparison_accepts_matching_special_components(
-    comparison_spec: AxesSpec[_ComparisonResult, SavingCfg],
+    comparison_spec: _ComparisonSpec,
     comparison_result: _ComparisonResult,
 ):
     assert compare_roundtrip(comparison_result, comparison_result, spec=comparison_spec)
@@ -174,15 +403,28 @@ def test_scaled_comparison_accepts_matching_special_components(
 
 @pytest.mark.parametrize("field", ["coordinate", "signal", "index"])
 def test_unscaled_and_undeclared_fields_remain_exact(
-    comparison_spec: AxesSpec[_ComparisonResult, SavingCfg],
+    comparison_spec: _ComparisonSpec,
     comparison_result: _ComparisonResult,
     field: str,
 ):
-    spec = replace(
-        comparison_spec,
-        axes=(replace(comparison_spec.axes[0], scale=1),),
-        z=replace(comparison_spec.z, scale=1),
-    )
+    if isinstance(comparison_spec, AxesSpec):
+        spec = replace(
+            comparison_spec,
+            axes=(replace(comparison_spec.axes[0], scale=1),),
+            z=replace(comparison_spec.z, scale=1),
+        )
+    else:
+        spec = replace(
+            comparison_spec,
+            variables=tuple(
+                replace(
+                    variable,
+                    axes=tuple(replace(axis, scale=1) for axis in variable.axes),
+                    z=replace(variable.z, scale=1),
+                )
+                for variable in comparison_spec.variables
+            ),
+        )
     changed = getattr(comparison_result, field).copy()
     changed[0] += np.finfo(np.float64).eps if field != "index" else 1
     restored = replace(comparison_result, **{field: changed})
@@ -190,7 +432,7 @@ def test_unscaled_and_undeclared_fields_remain_exact(
 
 
 def test_scaled_integer_axis_remains_exact(
-    comparison_spec: AxesSpec[_ComparisonResult, SavingCfg],
+    comparison_spec: _ComparisonSpec,
     comparison_result: _ComparisonResult,
 ):
     original = replace(comparison_result, coordinate=np.array([2**60], dtype=np.int64))
@@ -200,12 +442,13 @@ def test_scaled_integer_axis_remains_exact(
 
 @pytest.mark.parametrize("scale", [0.0, np.inf, np.nan])
 def test_invalid_axis_scale_does_not_enable_tolerance(
-    comparison_spec: AxesSpec[_ComparisonResult, SavingCfg],
+    single_comparison_spec: AxesSpec[_ComparisonResult, SavingCfg],
     comparison_result: _ComparisonResult,
     scale: float,
 ):
     spec = replace(
-        comparison_spec, axes=(replace(comparison_spec.axes[0], scale=scale),)
+        single_comparison_spec,
+        axes=(replace(single_comparison_spec.axes[0], scale=scale),),
     )
     coordinate = comparison_result.coordinate.copy()
     coordinate[0] = np.nextafter(1.0, 2.0)
@@ -214,7 +457,7 @@ def test_invalid_axis_scale_does_not_enable_tolerance(
 
 
 def test_subnormal_difference_gets_no_absolute_allowance(
-    comparison_spec: AxesSpec[_ComparisonResult, SavingCfg],
+    comparison_spec: _ComparisonSpec,
     comparison_result: _ComparisonResult,
 ):
     smallest = np.nextafter(0.0, 1.0)
@@ -233,7 +476,7 @@ def test_subnormal_difference_gets_no_absolute_allowance(
     ],
 )
 def test_complex_infinity_does_not_hide_finite_component_changes(
-    comparison_spec: AxesSpec[_ComparisonResult, SavingCfg],
+    comparison_spec: _ComparisonSpec,
     comparison_result: _ComparisonResult,
     signal: complex,
     expected: bool,

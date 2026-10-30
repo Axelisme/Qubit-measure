@@ -1,6 +1,6 @@
 # zcu_tools.analysis.fitting
 
-**Last updated:** 2026-10-25
+**Last updated:** 2026-10-30
 
 **讀者：** lab-author。擬合模型、數值輸入、結果與失敗契約速查。
 
@@ -33,6 +33,39 @@ Prominence 須同時超過相對 ptp 門檻與 `min_snr * σ`。
 寬度只記窗內可觀察部分，不外推完整線寬。
 工具不選主峰、不擬合模型，也不決定候選能否用於校準。
 負向特徵須由 caller 先翻轉。Caller 決定投影方式、候選選擇、局部擬合與接受門檻。
+
+## Named fitting results
+
+`fit_decay`、`fit_dual_decay`、`fit_decay_fringe` 與 `fit_rabi` 回傳 frozen NamedTuple 子類。
+以屬性讀取值與標準誤差，不需手動拆 tuple：
+
+```python
+from zcu_tools.analysis.fitting import fit_decay
+
+fit = fit_decay(delays, observations)
+time, stderr = fit.decay_time, fit.decay_time_err
+curve, params, covariance, quality = fit.curve, fit.params, fit.cov, fit.quality
+```
+
+| Fitter | 結果型別 | 值與標準誤差屬性 | 過渡 tuple 長度 |
+| --- | --- | --- | --- |
+| `fit_decay` | `DecayFit` | `decay_time`, `decay_time_err` | 4 |
+| `fit_dual_decay` | `DualDecayFit` | `decay_time1`, `decay_time1_err`, `decay_time2`, `decay_time2_err` | 6 |
+| `fit_decay_fringe` | `DecayFringeFit` | `decay_time`, `decay_time_err`, `freq`, `freq_err` | 6 |
+| `fit_rabi` | `RabiFit` | `pi_x`, `pi_x_err`, `pi2_x`, `pi2_x_err`, `freq`, `freq_err` | 8 |
+
+所有結果都提供 `curve`、`params`、`cov` 與 `quality`。時間與脈衝座標沿用輸入座標的單位，
+頻率使用其反單位，曲線沿用 observations 的單位。參數順序與每個欄位的單位見結果型別 docstring。
+Dual decay 的 time1 是較長時間，time2 是較短時間；參數、covariance 與 fixed flags 一起重排。
+
+`quality` 以實際 observations 與同座標的曲線呼叫 `compute_fit_quality`，保留明確固定的參數。
+三個 decay fitter 套用 `decay_time_bounds` 診斷；Rabi 不套用這組界限。
+Quality 不新增 tuple 位置，既有解構與最後一項 `(params, cov)` 保持原樣。
+Tuple 解構只供過渡相容，caller 遷移成具名存取後會移除。
+
+欄位與 quality 不可重新指定或刪除。陣列保留既有可變性。
+`copy.copy`、`copy.deepcopy` 與 pickle 往返保留所有 tuple 欄位與 quality。
+`_make` 與 `_replace` 拋出 `TypeError`，要求重跑 fitter，讓改值後的 quality 與結果一致。
 
 ## fitting helpers
 

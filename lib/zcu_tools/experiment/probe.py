@@ -16,10 +16,12 @@ from typing import Any, TypeVar
 from urllib.parse import quote
 
 import numpy as np
+from matplotlib import style
 from pydantic import TypeAdapter
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.datafile import load
+from zcu_tools.plotting import DEFAULT_STYLE
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from zcu_tools.resources.yaml import load_yaml
 
@@ -122,13 +124,34 @@ def _scaled_component_equal(before: np.ndarray, after: np.ndarray) -> bool:
 def _scaled_fields(
     spec: AxesSpec[_Result, _Cfg] | GroupedAxesSpec[_Result, _Cfg],
 ) -> set[str]:
-    """Select AxesSpec fields whose declared scale permits relative comparison."""
-    if not isinstance(spec, AxesSpec):
-        return set()
+    """Select Result fields whose declared scale permits relative comparison."""
+    declarations = (
+        (*spec.axes, spec.z)
+        if isinstance(spec, AxesSpec)
+        else tuple(
+            declaration
+            for variable in spec.variables
+            for declaration in (*variable.axes, variable.z)
+        )
+    )
+    scales_by_field: dict[str, set[float]] = {}
+    for declaration in declarations:
+        if declaration.field_name is not None:
+            scales_by_field.setdefault(declaration.field_name, set()).add(
+                declaration.scale
+            )
+    if isinstance(spec, GroupedAxesSpec):
+        for name, scales in scales_by_field.items():
+            if len(scales) > 1:
+                raise ValueError(
+                    f"Conflicting scales for Result field {name!r}: {sorted(scales)}"
+                )
     return {
         declaration.field_name
-        for declaration in (*spec.axes, spec.z)
-        if np.isfinite(declaration.scale) and declaration.scale not in (0, 1)
+        for declaration in declarations
+        if declaration.field_name is not None
+        and np.isfinite(declaration.scale)
+        and declaration.scale not in (0, 1)
     }
 
 
@@ -143,12 +166,14 @@ def compare_roundtrip(
     Both inputs must be dataclass instances of spec.result_type with the same
     fields; otherwise raise TypeError. Compare every field, including fields
     not named by the persistence declaration.
-    Return False for any differing field shape or dtype. AxesSpec fields with a
-    finite, nonzero scale other than 1 allow relative error <= 2*eps, atol=0, for
+    Return False for any differing field shape or dtype. AxesSpec and
+    GroupedAxesSpec fields with a finite, nonzero scale other than 1 allow
+    relative error <= 2*eps, atol=0, for
     floating values (each real/imaginary component for complex arrays). eps is
     the actual real storage dtype's machine epsilon. NaN component positions
     must match and infinities must match sign. Zero has no absolute allowance.
-    Other fields, integer/discrete arrays and GroupedAxesSpec remain exact,
+    Fixed/generated axes without a Result field are excluded.
+    Other fields and integer/discrete arrays remain exact,
     with NaNs equal under NumPy array_equal semantics.
 
     For round-to-nearest arithmetic with the same represented scale s, one
@@ -157,7 +182,9 @@ def compare_roundtrip(
     hence relative error <= 2*u + u**2 < 2*eps. This assumes no additional
     lossy dtype conversion. Underflow, overflow and invalid scales do not have
     this guarantee; they receive no enlarged tolerance or repaired values.
-    This comparison does not validate the persistence declaration or do I/O.
+    Conflicting scales for one Result field across grouped declarations raise
+    ValueError naming the field and scales, even when both Results are identical.
+    Other persistence validation and I/O remain the caller's responsibility.
     """
     if (
         not is_dataclass(original)
@@ -252,8 +279,10 @@ def probe(
     Use caller-created SimulationEnvironment resources; never reseed, rewire or
     close them here.
     Create output_dir and overwrite data.h5 and same-named PNGs on rerun. Figures
-    use Agg canvases and no QApplication. PNG names contain live/analysis and
-    URL-escaped figure names. Return shapes, compare_roundtrip's Result comparison,
+    use Agg canvases and no QApplication. Apply the shared Matplotlib style to
+    process-wide rcParams before creating Plots; native arguments and style
+    contexts inside the experiment can override it. PNG names contain live/analysis
+    and URL-escaped figure names. Return shapes, compare_roundtrip's Result comparison,
     analysis repr and timings. Stage failures are logged with traceback and
     returned as failed_stage/exception without replacing the original exception.
     Missing AXES_SPEC raises ValueError before starting. Caller owns environment
@@ -263,6 +292,7 @@ def probe(
     if spec is None:
         raise ValueError("Probe requires experiment.AXES_SPEC")
     report = ProbeReport(environment.description, output_dir / "data.h5")
+    style.use(DEFAULT_STYLE)
     live = Plots(NonPresentingHost())
     analysis = Plots(NonPresentingHost())
     try:

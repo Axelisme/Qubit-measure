@@ -4,6 +4,7 @@ import gc
 from collections.abc import Callable
 from io import BytesIO
 from typing import TypeVar
+from weakref import ref
 
 import numpy as np
 import pytest
@@ -45,6 +46,83 @@ class RecordingHost(NonPresentingHost):
 def collect_plot_cycles():
     yield
     gc.collect()
+
+
+def test_subplots_accepts_matplotlib_dimensions_and_unique_optional_names() -> None:
+    host = RecordingHost()
+    plots = Plots(host)
+    figure, axes = plots.subplots(2, 2, num="grid", sharex=True, figsize=(8, 6))
+    assert np.asarray(axes, dtype=object).shape == (2, 2)
+    assert len(figure.axes) == 4
+    assert figure.get_size_inches().tolist() == [8, 6]
+    assert figure.axes[0].get_shared_x_axes().joined(figure.axes[0], figure.axes[3])
+    plots.subplots(num="figure_1")
+    first, _ = plots.subplots()
+    second, _ = plots.subplots(nrows=2, ncols=1)
+    legacy, _ = plots.subplots("legacy", nrows=2)
+    assert plots["grid"] is figure
+    assert plots["figure_2"] is first
+    assert plots["figure_3"] is second
+    assert plots["legacy"] is legacy
+    with pytest.raises(ValueError, match="already belongs"):
+        plots.subplots(num="grid")
+    with pytest.raises(TypeError):
+        plots.subplots("old", num="new")
+    assert host.presented == []
+    plots.finish(present=False)
+    plots.release()
+
+
+@pytest.mark.parametrize(
+    ("dimensions", "keywords"),
+    [((2,), {"nrows": 3}), ((2, 2), {"ncols": 3})],
+)
+def test_subplots_rejects_duplicate_native_dimensions_without_registering_a_figure(
+    dimensions: tuple[int, ...], keywords: dict[str, int]
+) -> None:
+    plots = Plots(NonPresentingHost())
+    try:
+        with pytest.raises(TypeError, match="multiple values"):
+            plots.subplots(*dimensions, **keywords)
+        assert not plots
+    finally:
+        plots.finish(present=False)
+        plots.release()
+
+
+@pytest.mark.parametrize("host_type", [RecordingHost, NonPresentingHost])
+def test_figure_show_presents_once_and_rejects_finished_operations(
+    host_type: type[RecordingHost] | type[NonPresentingHost],
+) -> None:
+    host = host_type()
+    plots = Plots(host)
+    figure, _ = plots.subplots()
+    if isinstance(host, RecordingHost):
+        assert host.presented == []
+    figure.show()
+    figure.show()
+    if isinstance(host, RecordingHost):
+        assert host.presented == [figure]
+    plots.finish()
+    if isinstance(host, RecordingHost):
+        assert host.presented == [figure]
+    with pytest.raises(RuntimeError, match="finished"):
+        figure.show()
+    plots.release()
+
+
+def test_release_retires_show_without_retaining_the_finished_operation() -> None:
+    plots = Plots(NonPresentingHost())
+    figure, _ = plots.subplots()
+    figure.show()
+    plots.finish()
+    plots.release()
+    operation = ref(plots)
+    del plots
+    gc.collect()
+    assert operation() is None
+    with pytest.raises(RuntimeError, match="operation.*finished"):
+        figure.show()
 
 
 def test_live_updates_and_native_save_work_without_presentation() -> None:

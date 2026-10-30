@@ -9,13 +9,13 @@ from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import SweepCfg
 
 from zcu_lab.v2.support import LinePlot, live_line
-from zcu_lab.v2.support.lifetime_models import (
-    LifetimeComparison,
-    draw_lifetime_comparison,
-)
 from zcu_lab.workflows.coherence_fluxdep.t2 import T2EchoTunables
 from zcu_lab.workflows.common.analysis import DecayFit, lifetime_rejection
 from zcu_lab.workflows.common.gates import Gate, gate
+from zcu_lab.workflows.common.lifetime_models import (
+    LifetimeComparison,
+    draw_lifetime_comparison,
+)
 
 
 @dataclass(frozen=True)

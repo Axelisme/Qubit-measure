@@ -1,6 +1,6 @@
 # `zcu_tools.notebook`
 
-**Last updated:** 2026-10-30（notebook liveplot 完整 frame）
+**Last updated:** 2026-10-31（原生 artist 更新）
 
 **讀者：** lab-author。Notebook 實驗入口、互動分析與支援模組導覽。
 
@@ -78,6 +78,14 @@ Caller 明確提供 Notebook 自己的 bindings，RoleView 保留顯式 kind／v
 GUI 的 `aliases.yaml` 與 Measure alias preset 由 GUI 使用。
 GUI／MCP 的 temporary aliases 或 target 不改這個保存 handle。
 
+## 圖的預設外觀
+
+`NotebookPlotHost()` 建構時以 `matplotlib.style.use` 套用
+[共用樣式](../plotting/README.md#預設外觀)，後續新圖使用相同字級、格線與 tight layout。
+建構不切換 backend，也不登記 pyplot figure。
+作者可用 `ax.set_xlabel("Frequency (MHz)", fontsize=16)` 覆寫單一標籤。
+整組圖的 `plt.style.context(...)` 應放在 host 建構之後，避免入口再次套用預設樣式。
+
 ## 工作家族
 
 - [`adapter.py`](adapter.py)：共用環境綁定、每實驗 records 與操作收尾。每次 run 新建 RunContext、Plots 與 run 根 Scope，同步分析另建 Plots。入口借用 drivers，不管理其連線生命週期。
@@ -91,7 +99,7 @@ GUI／MCP 的 temporary aliases 或 target 不改這個保存 handle。
 - GE 的 run／FIT／save／load 使用 `nb_adapter(GE_Exp())` 與核心 typed cfg／options。Caller-owned `GEPostAnalyzer` 是獨立 post 工具，明確接收 `GEPrimaryRecord` 與 post options。Primary 是共用 AnalysisRecord；post record 從 primary 取得同一來源，保留其 calibration、options 與純圖。工具不讀 Adapter 的 current run／FIT，不重新 fitting。成功收尾後才發布 post record 與 presentation handle；失敗保留舊成果，舊原生圖仍可保存。
 - Caller-owned `flux_dep.FluxDepAnalyzer.start(source, inputs, options)` 明確接收 opaque RunRecord 與獨立 FluxPickInputs，不從具體實驗結果抽取 spectra。Done 保存捕捉的 source、實際終態 FluxPickState、數值與純具名 `pick` Figure。工具另持有 Plots presentation handle。Cancel 或失敗保留舊成果；Adapter 的 run／load 不清除此工具的分析。Notebook 拖曳預覽與 measure click-follow frontend 各自保留 gesture／lifecycle。
 - [`utils.py`](utils.py)：提供圖檔保存與設備資訊等 Notebook 輔助函式。Sweep 建構使用 `experiment.utils.make_sweep`，與核心實驗共用框架入口。`dump_device_info` 與 `reconnect_devices` 接收 caller 的 DeviceManager，不查全域 registry。
-- [`plotting.py`](plotting.py)：`NotebookPlotHost` 實作共用 `PlotHost`，直接以 ipympl widget 呈現原生 Figure。不登記 pyplot manager，也不切換全域 backend。普通圖與 liveplot 的呈現時機由 `Plots` 控制，host 不偵測 browser 是否可用，不降級 widget 錯誤。每次 refresh 都送完整 frame：cell 執行中前端要求底圖的訊息要等 cell 結束才處理，只送差異像素會疊在空白畫布上，格線與 tick 留下殘影。
+- [`plotting.py`](plotting.py)：`NotebookPlotHost` 實作共用 `PlotHost`，直接以 ipympl widget 呈現原生 Figure，不登記 pyplot manager。Import 模組與建構 host 不載入 ipympl。第一次呈現才載入，ipympl 會把 pyplot backend 切為 widget，框架不還原。既有 pyplot figure 保留編號與物件，未選 backend 也能直接呈現。普通圖與 liveplot 的呈現時機由 `Plots` 控制，host 不偵測 browser 是否可用，不降級 widget 錯誤。每次 refresh 都送完整 frame：cell 執行中前端要求底圖的訊息要等 cell 結束才處理，只送差異像素會疊在空白畫布上，格線與 tick 留下殘影。
 
 ## 共用責任與目前邊界
 
@@ -111,7 +119,16 @@ NotebookExperiment 隔離 caller cfg／options 與核心工作輸入，不深拷
 
 明確 Notebook host 同步執行 caller 的操作，caller 負責順序。Host 在發布前完成
 widget 初始化，普通更新與最後刷新都同步繪製，不等待 cell 結束才處理前端請求。
-已有 manager 的 Figure 不能由另一 host 接管。完成操作不自動關閉圖，建立新操作也不關閉舊圖；caller 明確
+已有其他 presentation manager 的 Figure 不能由另一 host 接管。
+`Plots.subplots(2, 2, num="fit")` 不發布 widget，`fig.show()` 才首次呈現。
+圖顯示後的原生修改一律經 `@plots.on_plot_thread`。本體在 caller thread 同步執行，
+回傳 changed artists 後由框架去重 refresh 已呈現的根圖，每次送完整 frame。
+Show 前可先更新，只保留 artist 修改，不 refresh、不載入 ipympl。之後 show 或
+finish(present=True) 顯示最新內容。
+Host 接受框架 manager，換成 ipympl manager 後仍將 show 交回同一 operation。
+重複 show 不重複發布。Finish 後 show 一律 raise RuntimeError，release 後也相同。
+Release 還原帶框架 manager 的 Agg canvas，並解除它對舊 Plots 的參照。
+另一 host 可經自己的 `present(figure)` 呈現保留的圖。完成操作不自動關閉圖，建立新操作也不關閉舊圖；caller 明確
 呼叫 `Plots.release()` 才釋放 canvas／toolbar，原 Figure 仍可 `savefig`。直接建立
 widget 而不登記 pyplot manager，避免 cell 結束時額外自動呈現。共用 NotebookAdapter 與 FluxDepAnalyzer 使用此 host。Host 不取代
 這些入口的狀態與分析契約。
