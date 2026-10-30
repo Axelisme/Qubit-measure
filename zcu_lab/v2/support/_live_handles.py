@@ -48,6 +48,24 @@ def _heatmap_data(
     return HeatmapData(x_data, y_data, signal_data, title)
 
 
+def line_data(
+    xs: NDArray[np.float64],
+    signals: NDArray[np.float64],
+    num_lines: int,
+    title: str | None = None,
+) -> LineData:
+    """Validate the shared attached/legacy line input without mutating it."""
+    if np.iscomplexobj(xs) or np.iscomplexobj(signals):
+        raise ValueError("Line plot updates require real-valued data")
+    x_data = np.asarray(xs, dtype=np.float64)
+    y_data = np.asarray(signals, dtype=np.float64)
+    if y_data.ndim == 1:
+        y_data = y_data[None, :]
+    if x_data.ndim != 1 or y_data.ndim != 2 or y_data.shape != (num_lines, x_data.size):
+        raise ValueError("Line plot data must match the line count and x length")
+    return LineData(x_data, y_data, title)
+
+
 class LinePlot:
     """Live line updates created by live_line; artists remain on the host owner."""
 
@@ -72,19 +90,9 @@ class LinePlot:
         further updates with RuntimeError. Host/drawing errors propagate.
         """
         self._updates.ensure_active()
-        if np.iscomplexobj(xs) or np.iscomplexobj(signals):
-            raise ValueError("Line plot updates require real-valued data")
-        x_data = np.asarray(xs, dtype=np.float64)
-        y_data = np.asarray(signals, dtype=np.float64)
-        if y_data.ndim == 1:
-            y_data = y_data[None, :]
-        if (
-            x_data.ndim != 1
-            or y_data.ndim != 2
-            or y_data.shape != (self._num_lines, x_data.size)
-        ):
-            raise ValueError("Line plot data must match the line count and x length")
-        self._updates.update(LineData(x_data, y_data, title), refresh=refresh)
+        self._updates.update(
+            line_data(xs, signals, self._num_lines, title), refresh=refresh
+        )
 
     def refresh(self) -> None:
         """Refresh this live figure on its owner; raise RuntimeError after finish."""

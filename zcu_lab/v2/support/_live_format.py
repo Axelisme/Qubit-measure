@@ -72,7 +72,10 @@ class LineFormat:
             ax.set_title(self.title)
         if self.show_grid:
             ax.grid()
+        self.attach_ax(ax)
 
+    def attach_ax(self, ax: Axes) -> None:
+        """Add this format's lines without changing labels, title or ticks."""
         lines = []
         for kwargs in self.line_kwargs:
             assert kwargs is not None
