@@ -8,6 +8,7 @@ import pytest
 from pydantic import JsonValue
 from zcu_tools.cfg_model import (
     ConfigBase,
+    ConstWaveformCfg,
     Expr,
     FieldMeta,
     Hidden,
@@ -531,6 +532,99 @@ def test_refresh_retains_adopted_template_metadata_until_reset(override: bool) -
         assert gain.seed_source == ("Explicit source" if override else "Q.pulses.pi")
     finally:
         resource.revoke()
+
+
+@pytest.mark.usefixtures("factory_component")
+@pytest.mark.parametrize("available", [False, True])
+@pytest.mark.parametrize("projection", ["hidden", "expression"])
+def test_refresh_fallback_projection_matches_explicit_branch_without_reseeding(
+    available: bool, projection: str
+) -> None:
+    class PulseInput(ConfigBase):
+        pulse: PulseCfg
+
+    pulse = PulseSpec(
+        ch=0, nqz=1, freq=200.0, gain=0.3, waveform=ConstWaveformCfg(length=0.2)
+    )
+    library = LibrarySnapshot(
+        ModuleLibraryDocument(
+            format="zcu.module-library",
+            format_version="2.0",
+            components={"Q1": ComponentLibrary(pulses={"pi": pulse})},
+        )
+    )
+    latest = factory_env(2.0, library=library if available else None)
+    fallback = Template(
+        "pulse",
+        set={"gain": Hidden(0.2)}
+        if projection == "hidden"
+        else {"phase": Expr("general.ext.missing")},
+    )
+    initializations: list[str] = []
+
+    def make_form(ctx: FormContext, *, explicit: bool = False) -> Form[PulseInput]:
+        node = (
+            (Slot("Q1.pulses.pi", copy=True) if ctx.has("Q1.pulses.pi") else fallback)
+            if explicit
+            else Slot("Q1.pulses.pi", copy=True, fallback=fallback)
+        )
+        form = Form(
+            PulseInput,
+            {"pulse": node},
+            initial_values=lambda _env: initializations.append("fresh") or {},
+        )
+        form.bind_templates(
+            {
+                "pulse": TemplateDef(
+                    PulseSpec,
+                    "Pulse",
+                    {
+                        "ch": 0,
+                        "nqz": 1,
+                        "freq": 100.0,
+                        "gain": 0.1,
+                        "waveform.style": "const",
+                        "waveform.length": 0.1,
+                    },
+                )
+            },
+            adapter="synthetic-refresh-projection",
+        )
+        return form
+
+    resource, explicit = (
+        resource_api.TabFormResource(
+            factory,
+            capture=lambda _aliases: resource_api.TabFormSources(latest),
+            mutation_allowed=lambda: True,
+        )
+        for factory in (make_form, lambda ctx: make_form(ctx, explicit=True))
+    )
+    try:
+        before = resource.input.to_json()
+        provenance = {
+            row.path: (row.seed_source, row.seed_status, row.uncalibrated)
+            for row in resource.diagnostics()
+        }
+        if projection == "expression" and not available:
+            assert isinstance(resource.result(), FormErrors)
+        for has_source in (available, not available, available):
+            latest = factory_env(2.0, library=library if has_source else None)
+            resource.refresh_sources()
+            explicit.refresh_sources()
+            assert resource.input.to_json() == explicit.input.to_json() == before
+            assert resource.describe(("pulse", "module")) == explicit.describe(
+                ("pulse", "module")
+            )
+            assert resource.result() == explicit.result()
+            assert {
+                row.path: (row.seed_source, row.seed_status, row.uncalibrated)
+                for row in resource.diagnostics()
+            } == provenance
+        assert initializations == ["fresh", "fresh"]
+    finally:
+        resource.revoke()
+        explicit.revoke()
 
 
 def test_refresh_preserves_authored_expression_and_direct_defaults() -> None:

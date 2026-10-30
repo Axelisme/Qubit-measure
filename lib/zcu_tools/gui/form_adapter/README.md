@@ -179,7 +179,7 @@ Log→List 帶入實際清單，List→Log 回填最大值與清單長度。切�
 
 `Form.with_seed_metadata(mapping)` 回傳帶逐位置 metadata 的新 Form，原 Form 不變。Mapping 以 canonical typed paths 指向 FieldMeta，來源公式使用 description，calibration 接受 uncalibrated／None。後一次呼叫取代整份 mapping。只有實際產生推導初值的 Form 需要這項宣告，不將動態 seed 的校準狀態綁到 core 靜態欄位。
 
-`default_input` 保存一次 raw seed 宣告及其求值結果。`seed_sources` 是唯讀 path mapping，保存 expression、slot 或 template 來源與 missing／available／literal 狀態。`template_seed_metadata` 是同次 Open／Reset 實際採用範本的唯讀 FieldMeta mapping。保留 input 的 host 在 Refresh 換 Form 時轉交 `seed_sources`、`seed_metadata` 與 `template_seed_metadata` 三份公開 mapping；Reset 才重算來源與範本快照。`Form.diagnostics(input, env, errors)` 把 caller 提供的 canonical errors 與全部目前／seed 欄位合併成 FieldDiagnostic。它不重新驗證或 lower cfg，也不呼叫 defaults 或 capture。欄位的 message 可為 None，name／index 來自同一 input 的 model-list description。Uncalibrated 只讀作者 metadata，未知為 None。Candidate preflight 可交同一 Form 的 detached input 與驗證 errors 使用這個入口。
+`default_input` 保存一次 raw seed 宣告及其求值結果。`seed_sources` 是唯讀 path mapping，保存 expression、slot 或 template 來源與 missing／available／literal 狀態。`template_seed_metadata` 是同次 Open／Reset 實際採用範本的唯讀 FieldMeta mapping。保留 input 的 host 在 Refresh 換 Form 時，先呼叫 `Form.select_sources(env)`，使 Hidden 與 Expr requiredness 採用新 capture 選中的分支。這一步不求初值、不呼叫 `initial_values`，也不重算 seed 快照。Host 再轉交 `seed_sources`、`seed_metadata` 與 `template_seed_metadata` 三份公開 mapping；Reset 才重算來源與範本快照。`Form.diagnostics(input, env, errors)` 把 caller 提供的 canonical errors 與全部目前／seed 欄位合併成 FieldDiagnostic。它不重新驗證或 lower cfg，也不呼叫 defaults 或 capture。欄位的 message 可為 None，name／index 來自同一 input 的 model-list description。Uncalibrated 只讀作者 metadata，未知為 None。Candidate preflight 可交同一 Form 的 detached input 與驗證 errors 使用這個入口。
 
 ## 依賴方向
 

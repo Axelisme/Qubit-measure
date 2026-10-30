@@ -748,7 +748,7 @@ class Section:
         self.model.model_rebuild(force=True)
 
     def select_sources(self, env: FormEnv, *, force: bool = False) -> None:
-        """Rebind fallback projections using only the fixed Open/Reset capture."""
+        """Rebind fallback projections using only the supplied fixed capture."""
         for field in self.modules.values():
             field.select_sources(env, force=force)
         for child in self.children.values():

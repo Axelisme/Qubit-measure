@@ -592,7 +592,9 @@ class TabFormResource:
         Call on the owner thread. aliases optionally overrides named bindings
         for this capture only; it never changes the global table. Expression
         drafts, explicit selections, resolved direct defaults and their original
-        seed sources/metadata stay intact, including invalid input. Subscribers receive one publication
+        seed sources/metadata stay intact, including invalid input. Hidden and
+        expression requiredness follow the newly captured branch without reseeding.
+        Subscribers receive one publication
         and can preview against the new capture. Capture or form-factory failures
         preserve the previous input, definition and sources. Busy, revoked and
         notification-reentrant calls raise CfgPreconditionError.
@@ -602,6 +604,7 @@ class TabFormResource:
             form = self._make_form(FormContext(sources.env.parameters))
             if isinstance(form, FormFactoryFailure):
                 raise form.error
+            form.select_sources(sources.env)
             current = self._state.input
             form.seed_sources = self._form.seed_sources
             form.seed_metadata = self._form.seed_metadata
