@@ -43,9 +43,11 @@ class Classify:
     """A one-hot classified read axis, in g/e/other, g/e, or g/e/f order.
 
     read names one compiled emission. tone is None for PulseReadout or a
-    zero-based MuxReadout cfg tone position. classifier overrides that read's
-    calibration; None selects its cfg calibration. Missing calibration and circle
-    radius raise ValueError at shot_sums construction. Calibration is detached.
+    zero-based MuxReadout cfg tone position. None also selects a mux's only tone;
+    multi-tone mux requires an explicit position and lists available tones on error.
+    classifier overrides that read's calibration; None selects its cfg calibration.
+    Missing calibration and circle radius raise ValueError at shot_sums construction.
+    Calibration is detached.
     """
 
     read: str
@@ -183,11 +185,19 @@ def _resolve_axis(
             )
         ch, classifier = owner.cfg.ro_ch, owner.cfg.classifier
     else:
-        if type(axis.tone) is not int or not 0 <= axis.tone < len(owner.cfg.tones):
+        tone_index = axis.tone
+        if (
+            isinstance(axis, Classify)
+            and tone_index is None
+            and len(owner.cfg.tones) == 1
+        ):
+            tone_index = 0
+        if type(tone_index) is not int or not 0 <= tone_index < len(owner.cfg.tones):
             raise ValueError(
-                f"label {axis.read!r}: mux expects tone in [0, {len(owner.cfg.tones)}); actual {axis.tone!r}"
+                f"label {axis.read!r}: mux expects tone in [0, {len(owner.cfg.tones)}); "
+                f"actual {axis.tone!r}; available tones: {list(range(len(owner.cfg.tones)))}"
             )
-        tone = owner.cfg.tones[axis.tone]
+        tone = owner.cfg.tones[tone_index]
         ch, classifier = tone.ro_ch, tone.classifier
     if ch in unsupported:
         raise ValueError(
