@@ -7,7 +7,9 @@ from pathlib import Path
 from threading import Event, Thread
 from typing import ClassVar, TextIO
 
+import matplotlib
 import pytest
+from matplotlib.figure import Figure
 from PyQt6.QtCore import QObject, pyqtSignal
 from zcu_tools.gui import plotting, runtime
 from zcu_tools.gui.remote.rpc_endpoint import ControlOptions
@@ -29,9 +31,28 @@ def restore_plotting_shutdown_state():
     # These tests reuse qapp instead of exiting the process (ADR-0064).
     before = plotting.is_shutting_down()
     try:
-        yield
+        with matplotlib.rc_context():
+            yield
     finally:
         plotting.set_shutting_down(value=before)
+
+
+def test_runtime_initializes_style_before_app_builds_figures(
+    monkeypatch: pytest.MonkeyPatch, rendering_events: list[str]
+) -> None:
+    app = _App(rendering_events)
+    monkeypatch.setattr(runtime, "_get_or_create_qapplication", lambda: app)
+
+    class StyledBehavior(_Behavior):
+        def assemble(self, control: ControlOptions | None) -> GuiAssembly:
+            axes = Figure().subplots()
+            assert axes.xaxis.label.get_fontsize() != 37
+            axes.set_xlabel("Frequency", fontsize=23)
+            assert axes.xaxis.label.get_fontsize() == 23
+            return super().assemble(control)
+
+    with matplotlib.rc_context({"axes.labelsize": 37}):
+        assert run_gui_runtime(StyledBehavior(rendering_events), None) == 0
 
 
 def test_build_control_options_disabled() -> None:

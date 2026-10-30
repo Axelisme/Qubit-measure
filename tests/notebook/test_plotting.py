@@ -2,6 +2,7 @@ from collections.abc import Callable, Iterator
 from io import BytesIO
 
 import IPython.display
+import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 import pytest
@@ -32,8 +33,25 @@ def module_widget_registry_guard() -> Iterator[None]:
 @pytest.fixture(autouse=True)
 def widget_registry_guard() -> Iterator[None]:
     before = widget_ids()
-    yield
+    with matplotlib.rc_context():
+        yield
     assert widget_ids() == before
+
+
+def test_host_initialization_styles_new_figures_and_allows_native_overrides() -> None:
+    with matplotlib.rc_context({"axes.labelsize": 37}):
+        plots = Plots(NotebookPlotHost())
+        try:
+            _, axes = plots.subplots("styled")
+            assert axes.xaxis.label.get_fontsize() != 37
+            axes.set_xlabel("Frequency", fontsize=23)
+            assert axes.xaxis.label.get_fontsize() == 23
+            with plt.style.context({"axes.labelsize": 31}):
+                _, custom = plots.subplots("custom")
+                assert custom.xaxis.label.get_fontsize() == 31
+        finally:
+            plots.finish(present=False)
+            plots.release()
 
 
 @pytest.fixture

@@ -292,6 +292,10 @@ def _start_control_adapter(
 
 
 def _initialize_rendering(app: QApplication, scope: LifetimeScope) -> None:
+    from matplotlib import style
+
+    from zcu_tools.plotting import DEFAULT_STYLE
+
     from zcu_tools.gui.plotting import (
         ensure_host,
         install_mathtext_lock,
@@ -299,6 +303,7 @@ def _initialize_rendering(app: QApplication, scope: LifetimeScope) -> None:
         set_shutting_down,
     )
 
+    style.use(DEFAULT_STYLE)
     ensure_host()
     scope.connect(app.aboutToQuit, lambda: set_shutting_down(value=True))
     install_mathtext_lock()

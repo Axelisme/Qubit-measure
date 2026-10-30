@@ -4,7 +4,9 @@ import json
 from pathlib import Path
 from typing import Any
 
+import matplotlib
 import pytest
+from matplotlib import pyplot as plt
 from zcu_tools.experiment import native_persistence
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.probe import main, probe
@@ -14,6 +16,49 @@ from zcu_tools.plotting.plots import Plots
 
 from tests.experiment._probe_support import ProbeExperiment
 from tests.experiment._saving_support import SavingCfg, SavingResult
+
+
+@pytest.fixture(autouse=True)
+def restore_rc_params():
+    with matplotlib.rc_context():
+        yield
+
+
+def test_probe_applies_style_before_run_and_preserves_native_overrides(tmp_path: Path):
+    observed: list[float] = []
+
+    class StyledExperiment(ProbeExperiment):
+        def run(self, config: SavingCfg, *, context: RunContext) -> SavingResult:
+            _, axes = context.plots.subplots("style-default")
+            observed.append(axes.xaxis.label.get_fontsize())
+            axes.set_xlabel("Frequency", fontsize=23)
+            assert axes.xaxis.label.get_fontsize() == 23
+            return super().run(config, context=context)
+
+        def analyze(
+            self,
+            source: RunRecord[SavingCfg, SavingResult],
+            options: Any,
+            *,
+            plots: Plots,
+        ) -> dict[str, object]:
+            _, axes = plots.subplots("style-default")
+            observed.append(axes.xaxis.label.get_fontsize())
+            with plt.style.context({"axes.labelsize": 31}):
+                _, custom = plots.subplots("style-override")
+                assert custom.xaxis.label.get_fontsize() == 31
+            return super().analyze(source, options, plots=plots)
+
+    environment = white_noise(seed=17)
+    try:
+        with matplotlib.rc_context({"axes.labelsize": 37}):
+            report = probe(StyledExperiment(), SavingCfg(), environment, tmp_path)
+            assert report.failed_stage is None
+            assert report.exception is None
+            assert len(observed) == 2
+            assert all(size != 37 for size in observed)
+    finally:
+        environment.devices.close_all_devices()
 
 
 def test_probe_roundtrips_result_and_exports_live_and_analysis_pngs(tmp_path: Path):

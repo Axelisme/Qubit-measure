@@ -3,8 +3,11 @@
 from collections.abc import Callable
 from typing import TYPE_CHECKING, TypeVar, cast
 
+from matplotlib import style
 from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib.figure import Figure
+
+from zcu_tools.plotting import DEFAULT_STYLE
 
 if TYPE_CHECKING:
     from ipympl.backend_nbagg import Canvas, FigureManager
@@ -23,6 +26,7 @@ class NotebookPlotHost:
     """
 
     def __init__(self) -> None:
+        style.use(DEFAULT_STYLE)
         self._managers: dict[Figure, FigureManager] = {}
 
     def call(self, callback: Callable[[], _T]) -> _T:
