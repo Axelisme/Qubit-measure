@@ -79,7 +79,8 @@ def shot_sums(
     """Resolve compiled read labels and return a per-point shot-sum processor.
 
     prog is a compiled ModularProgramV2 or TimelineProgramV2. axes lists vectors
-    in output-axis order; repeat a read for second moments. Timeline labels are
+    in output-axis order; repeat a read for second moments. Empty axes raise
+    ValueError before read-label resolution or acquisition. Timeline labels are
     emit tags, or module names when untagged. Modular labels are module names.
     Each label must identify one emission; missing/ambiguous labels raise
     ValueError listing available labels. QICK rejects duplicate explicit tags
@@ -91,6 +92,8 @@ def shot_sums(
     (points, reps, reads, 2) and returns (points, *axes), summing outer products
     over reps. It borrows inputs without mutation and rejects read-count changes.
     """
+    if not axes:
+        raise ValueError("axes must contain at least one read")
     labels, counts, unsupported = _collect_reads(prog)
     resolved = [_resolve_axis(prog, axis, labels, counts, unsupported) for axis in axes]
 

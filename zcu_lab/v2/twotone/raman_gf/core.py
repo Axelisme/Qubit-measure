@@ -11,7 +11,10 @@ import numpy as np
 from numpy.typing import NDArray
 from pydantic import Field
 from qick import QickConfig
-from zcu_tools.analysis.singleshot import Centroid3IQAnalysis, correct_populations
+from zcu_tools.analysis.singleshot import (
+    Centroid3IQAnalysis,
+    analyze_centroid3_populations,
+)
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.core.waveform_format import decode_npz
 from zcu_tools.experiment import Experiment
@@ -280,14 +283,7 @@ class RamanGFExp(Experiment[RamanGFResult, RamanGFCfg]):
                 "Raman analysis requires finite, nonempty counts at every point"
             )
         raw = counts / counts.sum(axis=-1, keepdims=True)
-        matrix = np.asarray(calibration.confusion_matrix, dtype=np.float64)
-        result = Centroid3IQAnalysis(
-            raw_populations=raw,
-            corrected_populations=correct_populations(raw, matrix, clip=False),
-            confusion_matrix=matrix,
-            condition_number=float(np.linalg.cond(matrix)),
-            minimum_singular_value=float(np.linalg.svd(matrix, compute_uv=False).min()),
-        )
+        result = analyze_centroid3_populations(raw, calibration)
         grid = cfg.scan_mode == "frequency_area"
         plots.subplots(
             "fit",

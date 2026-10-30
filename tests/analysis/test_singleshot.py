@@ -7,6 +7,7 @@ from zcu_tools.analysis.fitting.singleshot import transition_state_circle_probab
 from zcu_tools.analysis.singleshot import (
     Centroid3IQAnalysis,
     analyze_centroid3_iq,
+    analyze_centroid3_populations,
     analyze_reference_iq,
     classify_rabi_iq,
     classify_reference_iq,
@@ -37,6 +38,59 @@ def test_centroid3_iq_analysis_preserves_scan_axes_and_unclipped_estimates() -> 
     np.testing.assert_allclose(result.confusion_matrix, calibration.confusion_matrix)
     assert result.condition_number == pytest.approx(2)
     assert result.minimum_singular_value == pytest.approx(0.5)
+
+
+@pytest.mark.parametrize("scan_shape", [(), (2,), (2, 3)])
+def test_centroid3_population_analysis_uses_saved_matrix_orientation(
+    scan_shape: tuple[int, ...],
+) -> None:
+    calibration = Centroid3Classifier(
+        g_center=0j,
+        e_center=2 + 0j,
+        f_center=4 + 0j,
+        confusion_matrix=[[0.5, 0.5, 0], [0, 1, 0], [0, 0, 1]],
+    )
+    raw = np.broadcast_to([1.0, 0, 0], (*scan_shape, 3)).copy()
+    result = analyze_centroid3_populations(raw, calibration)
+    np.testing.assert_array_equal(result.raw_populations, raw)
+    np.testing.assert_allclose(
+        result.corrected_populations, np.broadcast_to([2, -1, 0], (*scan_shape, 3))
+    )
+    # Singular values of this triangular matrix are 1.144123, 1, 0.437016.
+    assert result.condition_number == pytest.approx(2.618033988749895)
+    assert result.minimum_singular_value == pytest.approx(0.43701602444882104)
+    np.testing.assert_array_equal(result.confusion_matrix, calibration.confusion_matrix)
+    np.testing.assert_array_equal(raw, np.broadcast_to([1, 0, 0], (*scan_shape, 3)))
+    result.confusion_matrix[0, 0] = 99
+    assert calibration.confusion_matrix[0][0] == 0.5
+
+
+@pytest.mark.parametrize("iq_input", [False, True])
+def test_centroid3_analysis_rejects_singular_saved_confusion(iq_input: bool) -> None:
+    calibration = Centroid3Classifier(
+        g_center=0j,
+        e_center=2 + 0j,
+        f_center=4 + 0j,
+        confusion_matrix=[[1, 0, 0], [1, 0, 0], [0, 0, 1]],
+    )
+    if iq_input:
+        with pytest.raises(np.linalg.LinAlgError):
+            analyze_centroid3_iq(np.zeros((2, 4), dtype=np.complex128), calibration)
+    else:
+        with pytest.raises(np.linalg.LinAlgError):
+            analyze_centroid3_populations(np.array([[1.0, 0, 0]]), calibration)
+
+
+@pytest.mark.parametrize("raw", [np.array([1.0, 0]), np.array([np.nan, 0, 0])])
+def test_centroid3_population_analysis_rejects_incomplete_fractions(raw) -> None:
+    calibration = Centroid3Classifier(
+        g_center=0j,
+        e_center=2 + 0j,
+        f_center=4 + 0j,
+        confusion_matrix=np.eye(3).tolist(),
+    )
+    with pytest.raises(ValueError, match="Population"):
+        analyze_centroid3_populations(raw, calibration)
 
 
 @pytest.mark.parametrize("scan_shape", [(), (2,), (2, 3)])
