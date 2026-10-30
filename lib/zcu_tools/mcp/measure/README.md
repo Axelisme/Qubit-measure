@@ -1,6 +1,6 @@
 # `zcu_tools/mcp/measure/`
 
-**Last updated:** 2026-10-30，MCP 索引、Library template 與 tab cfg 協定
+**Last updated:** 2026-10-30，MCP 文字分工與 recipe wire schema
 
 **讀者：** agent。量測 MCP 的啟動、表單、operation 與寫回契約。
 
@@ -34,6 +34,13 @@ creates its entry, first point and tab without a separate entry CLI or setup RPC
 ## 固定工具與 RPC
 
 `mcp_servers/measure.py` 把使用者的 `RecipeDeclaration` 清單注入 session 與 `assembly.py`。`@recipe(name, description)` 從 async 函式的 inputs model 產生 MCP JSON schema；工具表拒絕不一致的注入及重名。Framework 不反向 import 使用者 recipes，也不從 GUI catalog 產生 tools。共用工具為 `connect`、`status`、`wait`、`cancel`、`rpc_list`、`rpc_describe`、`rpc_call`、`tab_analyze`、`tab_interact`、`tab_close`、`answer` 與 `apply_writeback`，以及 `device_setup`、`recipe_guide`。
+
+Server instructions 保留入口索引與共用 execution 生命週期，recipe description 只寫該 recipe 的用途。
+Tool description 與 schema 說明參數、回覆與錯誤，第一句寫用途與搜尋關鍵字。
+一般 tool description 的中位數約 150 字元是寫作目標，不是 gate 的硬上限。
+硬預算與檢查命令見 [Measure MCP text budget](../../../../tools/README.md#measure-mcp-text-budget)。
+操作程序與判斷放在 `run-measure-gui` skill，量測策略放在 `measure-task` skill，
+檔案與協定契約放在本 README。Launch 授權硬規則仍在 instructions 或 `connect` description 留一句。
 
 ## Point 檔案讀寫
 
@@ -278,7 +285,12 @@ JSON schema 不列 Keep、不輸出 KEEP default，欄位可省略。
 target／reuse_tab_id 是 Open／Reset 控制，不是 Form 欄位，null 語意依上節。
 
 `FieldEdit(path=..., value=...)` 只攜帶 dotted path 與原生值，供 overrides 使用。
-JSON object 保留 expression tag、structured sweep 與巢狀內容，直接交 owner 驗證。
+Wire schema 的 `value` 接受任意 JSON，expression 使用 `{"expr": "2 + 3"}`。
+這個欄位不展開 FormValue／YamlValue／Expr／BaseModel 的遞迴 `$defs`。
+Runtime 仍以 FormValue 驗證，再將原生值交給 GUI Form owner 驗證。
+JSON object 保留 expression tag、structured sweep 與巢狀內容。
+其他具名參數保留型別與 required。Recipe schema 省略自動產生的 property titles，
+作者明寫的 titles 仍保留。
 set 不接受以 object 替換 generated selector，選來源仍用 select。
 overrides 省略為空 list，不接受 null。主體在實驗值之後依序呼叫 set，
 重複路徑不去重，null 也會套用。全部操作完成後才 check_ready：
