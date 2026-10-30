@@ -174,6 +174,17 @@ def explicit_show_driver(qapp) -> Iterator[ComponentDriver]:
         host.refresh(plots["legacy"], final=True)
         status.setText("Legacy shown")
 
+    def finish_and_clear() -> None:
+        plots.finish()
+        container.clear_dynamic_canvases()
+        status.setText("Finished and cleared")
+
+    def try_finished_show() -> None:
+        try:
+            figure.show()
+        except RuntimeError as error:
+            status.setText(str(error))
+
     def finish() -> None:
         plots.finish()
         plots.release()
@@ -184,6 +195,8 @@ def explicit_show_driver(qapp) -> Iterator[ComponentDriver]:
         ("Prime before show", lambda: update(3.0)),
         ("Update from worker", lambda: update(5.0)),
         ("Legacy live", legacy),
+        ("Finish and clear", finish_and_clear),
+        ("Try finished show", try_finished_show),
         ("Finish and release", finish),
     ):
         button = QPushButton(caption)
@@ -231,10 +244,22 @@ def test_component_driver_explicit_show_worker_update_and_legacy_live(
     assert driver.plots().axes[0].ylabel == "Legacy signal"
     assert driver.plots().axes[0].visible_curves == 1
     driver.screenshot(evidence / "05-legacy-live.png")
+    driver.click("Finish and clear")
+    assert driver.observe("Finished and cleared").visible
+    assert driver.plots().axes == ()
+    driver.screenshot(evidence / "06-cleared.png")
+    driver.click("Try finished show")
+    assert driver.observe("Plot operation has finished").visible
+    assert driver.plots().axes == ()
+    driver.screenshot(evidence / "07-finished-show-rejected.png")
     driver.click("Finish and release")
     assert driver.observe("Released").visible
     assert driver.plots().axes == ()
-    driver.screenshot(evidence / "06-released.png")
+    driver.screenshot(evidence / "08-released.png")
+    driver.click("Try finished show")
+    assert driver.observe("Plot operation has finished").visible
+    assert driver.plots().axes == ()
+    driver.screenshot(evidence / "09-released-show-rejected.png")
 
 
 def test_worker_live_artists_run_on_owner_and_regular_figures_wait(
@@ -348,8 +373,12 @@ def test_clearing_container_keeps_figures_saveable_and_representable(
     assert stacks[0].count() == stacks[1].count() == 1
 
 
-@pytest.mark.parametrize("release", [False, True], ids=["before-release", "after-release"])
-def test_clearing_finished_container_preserves_show_lifetime(hosts, release: bool) -> None:
+@pytest.mark.parametrize(
+    "release", [False, True], ids=["before-release", "after-release"]
+)
+def test_clearing_finished_container_preserves_show_lifetime(
+    hosts, release: bool
+) -> None:
     _stacks, containers, adapters = hosts
     plots = Plots(adapters[0])
     figure, axes = plots.subplots(num="finished")
