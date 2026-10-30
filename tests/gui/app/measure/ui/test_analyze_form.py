@@ -101,6 +101,7 @@ def test_constrained_options_show_error_and_recover(qapp, tmp_path: Path):
         driver.enter_text(object_name="qt_spinbox_lineedit", value="-1")
         driver.screenshot(tmp_path / "02-constraint-error.png")
         visible = {item.object_name: item for item in driver.visible().widgets}
+        assert "analysisParameterError" in visible, visible
         assert "skip" in visible["analysisParameterError"].text
         assert "greater than or equal to 0" in visible["analysisParameterError"].text
         assert visible["publishedParams"].text == "No parameters published"
