@@ -51,6 +51,23 @@ class RunOptions(Generic[T_Raw]):
     converter: Callable[[T_Raw], SignalArray] | None = None
 
 
+def _adapt_run_options(
+    options: RunOptions[T_Raw] | None, qick_options: dict[str, object]
+) -> tuple[RunOptions[T_Raw], int, AcquireOptions]:
+    """Select policy, consume validated rounds and adapt the runner options."""
+    selected = RunOptions[T_Raw]() if options is None else options
+    rounds = require_positive_rounds(qick_options.pop("rounds", 1))
+    return (
+        selected,
+        rounds,
+        AcquireOptions(
+            retry=selected.retry,
+            progress=selected.progress,
+            stop_condition=selected.stop_condition,
+        ),
+    )
+
+
 class IntegratedProgram(Protocol[T_Raw_co]):
     """Producer requiring only synchronous acquire, not other acquisition modes.
 
@@ -142,8 +159,7 @@ class RunAcquisitionMixin(ABC):
         cancellation/failure. Converter and update errors propagate without retry.
         """
         owner = self._acquisition_owner
-        selected = RunOptions() if options is None else options
-        rounds = require_positive_rounds(qick_options.pop("rounds", 1))
+        selected, rounds, acquire_options = _adapt_run_options(options, qick_options)
         return AcquisitionRunner(owner, soc).run(
             acquire=program.acquire,
             rounds=rounds,
@@ -152,11 +168,7 @@ class RunAcquisitionMixin(ABC):
                 if selected.converter is None
                 else selected.converter
             ),
-            options=AcquireOptions(
-                retry=selected.retry,
-                progress=selected.progress,
-                stop_condition=selected.stop_condition,
-            ),
+            options=acquire_options,
             acquire_kwargs=qick_options,
         )
 
@@ -183,8 +195,7 @@ class RunAcquisitionMixin(ABC):
         cancellation/failure. Converter and update errors propagate without retry.
         """
         owner = self._acquisition_owner
-        selected = RunOptions() if options is None else options
-        rounds = require_positive_rounds(qick_options.pop("rounds", 1))
+        selected, rounds, acquire_options = _adapt_run_options(options, qick_options)
         return AcquisitionRunner(owner, soc).run(
             acquire=program.acquire_decimated,
             rounds=rounds,
@@ -193,11 +204,7 @@ class RunAcquisitionMixin(ABC):
                 if selected.converter is None
                 else selected.converter
             ),
-            options=AcquireOptions(
-                retry=selected.retry,
-                progress=selected.progress,
-                stop_condition=selected.stop_condition,
-            ),
+            options=acquire_options,
             acquire_kwargs=qick_options,
         )
 
@@ -226,8 +233,7 @@ class RunAcquisitionMixin(ABC):
         conversion and update failures propagate without retry.
         """
         owner = self._acquisition_owner
-        selected = RunOptions() if options is None else options
-        rounds = require_positive_rounds(qick_options.pop("rounds", 1))
+        selected, rounds, acquire_options = _adapt_run_options(options, qick_options)
 
         def convert(raw: NDArray[np.float64] | None) -> SignalArray:
             if raw is None:
@@ -238,10 +244,6 @@ class RunAcquisitionMixin(ABC):
             acquire=program.acquire_summed,
             rounds=rounds,
             signal_fn=convert,
-            options=AcquireOptions(
-                retry=selected.retry,
-                progress=selected.progress,
-                stop_condition=selected.stop_condition,
-            ),
+            options=acquire_options,
             acquire_kwargs=dict(qick_options, processor=processor),
         )

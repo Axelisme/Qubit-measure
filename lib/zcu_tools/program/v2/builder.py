@@ -1,7 +1,7 @@
 """Record timeline actions without acquiring data or touching hardware."""
 
 from collections.abc import Callable, Generator, Sequence
-from contextlib import AbstractContextManager, contextmanager
+from contextlib import AbstractContextManager, contextmanager, nullcontext
 from typing import Literal, TypedDict, Unpack, override
 
 from qick import QickConfig
@@ -86,9 +86,13 @@ class TimelineBuilder:
 
     soccfg is a QICK compile profile, not a connected SoC. reps counts shots;
     initial_delay and relax_delay are us. Module objects are borrowed by identity:
-    do not mutate them after recording. Loops replay in call order, outside in;
-    body actions replay in call order. build freezes this builder and compiles a
-    TimelineProgramV2, with no acquisition or Schedule dependency. Later recording
+    do not mutate them after recording. Use fresh module objects for each
+    program/build; repeated emits may reuse an object within that build only.
+    Cross-program reuse is currently unsupported because declaration mutates
+    module resource state, including waveform and pulse identifiers.
+    Loops replay in call order, outside in; body actions replay in call order.
+    build freezes this builder and compiles a TimelineProgramV2, with no
+    acquisition or Schedule dependency. Later recording
     or build calls raise ValueError. Compiler/owner errors propagate.
     """
 
@@ -111,6 +115,7 @@ class TimelineBuilder:
         self._modules: list[Module] = []
         self._built = False
         self._loop_names = {"reps"}
+        self._timeline_name: str | None = None
 
     def _ensure_recording(self) -> None:
         if self._built:
@@ -145,8 +150,13 @@ class TimelineBuilder:
 
     @contextmanager
     def _timeline(self, name: str) -> Generator[None]:
-        with self._capture() as actions:
-            yield
+        previous = self._timeline_name
+        self._timeline_name = name
+        try:
+            with self._capture() as actions:
+                yield
+        finally:
+            self._timeline_name = previous
         recorded = tuple(actions)
 
         def replay(prog: TimelineProgramV2) -> None:
@@ -214,7 +224,7 @@ class TimelineBuilder:
     @contextmanager
     def _branch(self, by: str) -> Generator[BuilderBranchCases]:
         self._ensure_recording()
-        cases: list[tuple[_Action, ...]] = []
+        cases: list[tuple[str | None, tuple[_Action, ...]]] = []
         is_open = True
         case_active = False
 
@@ -230,10 +240,12 @@ class TimelineBuilder:
             nonlocal case_active
             ensure_case()
             case_active = True
+            timeline = self._timeline_name
             try:
                 with self._capture() as case_actions:
                     yield
-                cases.append(tuple(case_actions))
+                # Cases replay separately from the branch's surrounding actions.
+                cases.append((timeline, tuple(case_actions)))
             finally:
                 case_active = False
 
@@ -253,8 +265,11 @@ class TimelineBuilder:
             with prog.branch(by=by) as branch:
                 for action in recorded:
                     action(prog)
-                for case in recorded_cases:
-                    with branch.case():
+                for timeline, case in recorded_cases:
+                    with (
+                        branch.case(),
+                        nullcontext() if timeline is None else prog.timeline(timeline),
+                    ):
                         for action in case:
                             action(prog)
 

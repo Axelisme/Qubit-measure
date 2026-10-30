@@ -945,6 +945,49 @@ def test_empty_timeline_scopes_do_not_fork_join_or_close_branch_ends(
     assert actual.prog_list == expected.prog_list
 
 
+def test_builder_timeline_between_branch_and_cases_matches_native(mock_soccfg):
+    builder = v2.TimelineBuilder(mock_soccfg, initial_delay=0, relax_delay=0)
+    builder.add_loop("scan", 2)
+    pause = v2.Delay("pause", 0.1)
+    builder.fork("default", into="work")
+    builder.delay_timeline(0.3, timeline="work")
+    with builder.branch(by="scan") as branch:
+        with builder.timeline("work"), branch.case():
+            builder.emit(pause)
+            builder.emit(pause, timeline="default")
+            with builder.timeline("default"):
+                builder.emit(pause)
+            builder.emit(pause)
+        with branch.case():
+            builder.emit(pause)
+    builder.emit(pause)
+    actual = builder.build()
+
+    class Explicit(v2.TimelineProgramV2):
+        def _initialize(self, cfg):
+            self.add_loop("scan", 2)
+            self.pause = v2.Delay("pause", 0.1)
+            self.declare(self.pause)
+
+        def _body(self, cfg):
+            self.fork("default", into="work")
+            self.delay_timeline(0.3, timeline="work")
+            with self.branch(by="scan") as branch:
+                with branch.case():
+                    self.emit(self.pause, timeline="work")
+                    self.emit(self.pause, timeline="default")
+                    self.emit(self.pause, timeline="default")
+                    self.emit(self.pause, timeline="work")
+                with branch.case():
+                    self.emit(self.pause, timeline="default")
+            self.emit(self.pause, timeline="default")
+
+    expected = Explicit(mock_soccfg, initial_delay=0, relax_delay=0)
+    assert actual.prog_list == expected.prog_list
+    actual.compile()
+    assert actual.prog_list == expected.prog_list
+
+
 def test_builder_rejects_unknown_trigger_keywords_at_recording(mock_soccfg):
     builder = v2.TimelineBuilder(mock_soccfg)
     operation: Callable[..., None] = builder.trigger
