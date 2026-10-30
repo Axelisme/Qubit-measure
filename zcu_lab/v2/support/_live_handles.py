@@ -30,12 +30,17 @@ class HeatmapData:
     title: str | None
 
 
-def _heatmap_data(
+def heatmap_data(
     xs: NDArray[np.float64],
     ys: NDArray[np.float64],
     signals: NDArray[np.float64],
     title: str | None,
 ) -> HeatmapData:
+    """Validate real nonempty 1D axes and signals shaped (len(xs), len(ys)).
+
+    Return float64 arrays without changing the inputs. Invalid dimensions,
+    shape or complex data raises ValueError. title is forwarded unchanged.
+    """
     if any(np.iscomplexobj(data) for data in (xs, ys, signals)):
         raise ValueError("Heatmap updates require real-valued data")
     x_data, y_data, signal_data = (
@@ -164,7 +169,7 @@ class HeatmapPlot:
         further updates; host/drawing errors propagate.
         """
         self._updates.ensure_active()
-        self._updates.update(_heatmap_data(xs, ys, signals, title), refresh=refresh)
+        self._updates.update(heatmap_data(xs, ys, signals, title), refresh=refresh)
 
 
 class HeatmapLinePlot(HeatmapPlot):

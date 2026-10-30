@@ -2,11 +2,12 @@
 
 import numpy as np
 from matplotlib.axes import Axes
+from matplotlib.image import AxesImage
 from matplotlib.lines import Line2D
 from numpy.typing import NDArray
 
-from ._live_format import LineFormat
-from ._live_handles import line_data
+from ._live_format import HeatmapFormat, LineFormat, NonUniformHeatmapFormat
+from ._live_handles import heatmap_data, line_data
 
 
 class AttachedLine:
@@ -46,3 +47,58 @@ class AttachedLine:
         if lines is None:
             raise RuntimeError("Lines not initialized")
         return tuple(lines)
+
+
+class AttachedHeatmap:
+    """Heatmap attached to caller-owned axes, updated with set(xs, ys, signals).
+
+    Add only an image, preserving labels and title. Construction and set run
+    on the caller thread without dispatch, refresh or presentation. Use set
+    inside @plots.on_plot_thread after display. No axes-claim check is made,
+    including against legacy tools. Authors coordinate shared artists,
+    autoscale and color limits. This tool does not bind a Plots lifetime.
+    Removing its image or axes makes set raise RuntimeError. Matplotlib errors
+    propagate without rollback.
+    """
+
+    def __init__(
+        self,
+        axes: Axes,
+        *,
+        uniform: bool = True,
+        clim: tuple[float, float] | None = None,
+    ) -> None:
+        """Add a nearest-sample image to axes with fixed or automatic color limits.
+
+        uniform=True spans the endpoints evenly; False supports monotonic,
+        uneven centers in either scan direction. clim fixes (min, max);
+        None rescales to each update's finite data range.
+        """
+        self._axes = axes
+        vmin, vmax = clim if clim is not None else (None, None)
+        self._format = (
+            HeatmapFormat("", "", vmin=vmin, vmax=vmax)
+            if uniform
+            else NonUniformHeatmapFormat("", "", vmin=vmin, vmax=vmax)
+        )
+        self._format.attach_ax(axes)
+
+    def set(
+        self,
+        xs: NDArray[np.float64],
+        ys: NDArray[np.float64],
+        signals: NDArray[np.float64],
+    ) -> tuple[AxesImage, ...]:
+        """Replace real signals shaped (len(xs), len(ys)), returning the image.
+
+        xs and ys must be nonempty real 1D arrays. NaN marks unmeasured samples.
+        Invalid dimensions, shape or complex input raises ValueError before
+        mutation. Update spatial extent and color limits without changing
+        labels or title, refreshing or dispatching.
+        """
+        data = heatmap_data(xs, ys, signals, None)
+        self._format.update(self._axes, data.xs, data.ys, data.signals)
+        image = self._format.im
+        if image is None:
+            raise RuntimeError("Image not initialized")
+        return (image,)

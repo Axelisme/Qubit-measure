@@ -52,7 +52,7 @@ from matplotlib.figure import Figure
 from zcu_tools.plotting import LiveUpdate
 from zcu_tools.plotting.plots import PlotHost, Plots
 
-from ._live_attached import AttachedLine
+from ._live_attached import AttachedHeatmap, AttachedLine
 from ._live_format import (
     HeatmapFormat,
     LineFormat,
@@ -207,7 +207,14 @@ def live_scatter(
     return plots.create_live(name, create, axes=None if axes is None else (axes,))
 
 
-def live_heatmap(  # noqa: PLR0913  # tolerated: Preserve public labels, grid choice, color limits and existing-axes options.
+@overload
+def live_heatmap(
+    plots: Axes, *, uniform: bool = True, clim: tuple[float, float] | None = None
+) -> AttachedHeatmap: ...
+
+
+@overload
+def live_heatmap(
     plots: Plots,
     name: str,
     xlabel: str,
@@ -217,9 +224,32 @@ def live_heatmap(  # noqa: PLR0913  # tolerated: Preserve public labels, grid ch
     uniform: bool = True,
     clim: tuple[float, float] | None = None,
     axes: Axes | None = None,
-) -> HeatmapPlot:
-    """Create or attach one live heatmap and return a HeatmapPlot handle.
+) -> HeatmapPlot: ...
 
+
+def live_heatmap(  # noqa: PLR0913  # tolerated: Preserve public labels, grid choice, color limits and existing-axes options.
+    plots: Plots | Axes,
+    name: str | None = None,
+    xlabel: str | None = None,
+    ylabel: str | None = None,
+    *,
+    title: str | None = None,
+    uniform: bool = True,
+    clim: tuple[float, float] | None = None,
+    axes: Axes | None = None,
+) -> HeatmapPlot | AttachedHeatmap:
+    """Attach a local heatmap, or preserve the legacy owner-managed handle.
+
+    ``live_heatmap(ax, uniform=True, clim=None)`` returns a caller-thread tool
+    with ``set(xs, ys, signals)`` returning its changed image. It leaves labels
+    and title unchanged, without dispatch, refresh, presentation or a Plots
+    lifetime. No axes-claim check is made, including against legacy tools.
+    Authors coordinate shared artists, autoscale and color limits. Use set
+    inside @plots.on_plot_thread after display. AttachedHeatmap documents data
+    validation and removed-image errors. Name, labels, title and axes belong
+    only to the legacy signature; mixing them with an Axes raises TypeError.
+
+    Legacy signature: pass Plots, name, xlabel and ylabel.
     Follow this module's shared live-helper contract for ``plots``, ``name``,
     owner execution, presentation, lifetime and errors. With ``axes=None``,
     create one axes in a new named Figure. Otherwise attach to the supplied
@@ -238,6 +268,12 @@ def live_heatmap(  # noqa: PLR0913  # tolerated: Preserve public labels, grid ch
     this axes title. Invalid data raises ValueError; the shared contract
     describes copying, refresh and RuntimeError cases.
     """
+    if isinstance(plots, Axes):
+        if any(value is not None for value in (name, xlabel, ylabel, title, axes)):
+            raise TypeError("Attached heatmaps take axes, uniform and clim only")
+        return AttachedHeatmap(plots, uniform=uniform, clim=clim)
+    if name is None or xlabel is None or ylabel is None:
+        raise TypeError("Legacy live_heatmap requires name, xlabel and ylabel")
     plots.ensure_active()
 
     def create(
