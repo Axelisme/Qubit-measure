@@ -233,6 +233,46 @@ def test_custom_sweep_array_policy_preserves_values(
         sweep2array(sweep, allow_array=False)
 
 
+@pytest.mark.parametrize("scaler", [1.0, -1.0])
+def test_unreachable_gain_word_fails_after_bounded_adjustment(scaler: float) -> None:
+    soccfg = make_mock_soccfg()
+    soccfg["gens"][0]["maxv_scale"] = 0.9
+    with pytest.raises(RuntimeError, match="Gain word .*eight ULP adjustments"):
+        round_zcu_gain(3.0, soccfg, 0, scaler=scaler)
+
+
+@pytest.mark.parametrize("scaler", [1.0, -1.0])
+def test_unreachable_array_gain_word_fails_after_bounded_adjustment(
+    scaler: float,
+) -> None:
+    soccfg = make_mock_soccfg()
+    soccfg["gens"][0]["maxv_scale"] = 0.9
+    with pytest.raises(RuntimeError, match="Gain word .*eight ULP adjustments"):
+        round_zcu_gain(np.asarray([0.0, 3.0]), soccfg, 0, scaler=scaler)
+
+
+def test_single_point_gain_sweep_matches_scalar_coordinate() -> None:
+    soccfg = make_mock_soccfg()
+    sweep = make_sweep(0.3, 0.3, expts=1)
+    info = {"soccfg": soccfg, "gen_ch": 0}
+    np.testing.assert_array_equal(
+        sweep2array(sweep, "gain", info), [round_zcu_gain(0.3, soccfg, 0)]
+    )
+
+
+def test_gain_sweep_rejects_collapsed_step() -> None:
+    soccfg = make_mock_soccfg()
+    sweep = make_sweep(0.3, 0.30001, expts=4)
+    with pytest.raises(ValueError, match="step becomes zero"):
+        sweep2array(sweep, "gain", {"soccfg": soccfg, "gen_ch": 0})
+
+
+@pytest.mark.parametrize("scaler", [0.0, np.nan, np.inf])
+def test_gain_rejects_invalid_scaler(scaler) -> None:
+    with pytest.raises(ValueError, match="gain scaler must be finite and nonzero"):
+        round_zcu_gain(0.3, make_mock_soccfg(), 0, scaler=scaler)
+
+
 def test_custom_time_sweep_quantizes_each_array_point(soccfg: QickConfig) -> None:
     requested = np.asarray([-0.03, 0.0, 0.03])
 
