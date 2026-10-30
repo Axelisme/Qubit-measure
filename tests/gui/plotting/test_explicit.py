@@ -125,7 +125,7 @@ def _native_callbacks(
         curve.set_data([0.0, 1.0, 2.0], values)
         axes.relim()
         axes.autoscale_view()
-        annotation.set_text("Updated from worker")
+        annotation.set_text(f"Worker peak {values[1]:g} mV")
         return (curve, annotation, axes)
 
     return set_caption, push
@@ -157,9 +157,9 @@ def explicit_show_driver(qapp) -> Iterator[ComponentDriver]:
         figure.show()
         status.setText("Shown")
 
-    def update() -> None:
+    def update(peak: float) -> None:
         def work() -> int:
-            push(np.array([1.0, 3.0, 2.0]))
+            push(np.array([1.0, peak, 2.0]))
             return threading.get_ident()
 
         _run_worker(qapp, work)
@@ -181,7 +181,8 @@ def explicit_show_driver(qapp) -> Iterator[ComponentDriver]:
 
     for caption, action in (
         ("Show figure", show),
-        ("Update from worker", update),
+        ("Prime before show", lambda: update(3.0)),
+        ("Update from worker", lambda: update(5.0)),
         ("Legacy live", legacy),
         ("Finish and release", finish),
     ):
@@ -210,7 +211,7 @@ def test_component_driver_explicit_show_worker_update_and_legacy_live(
     evidence = Path(os.environ.get("PLOT_SHOW_EVIDENCE", str(tmp_path)))
     assert driver.plots().axes == ()
     driver.screenshot(evidence / "01-unshown.png")
-    driver.click("Update from worker")
+    driver.click("Prime before show")
     assert driver.observe("Worker complete").visible
     assert driver.plots().axes == ()
     driver.screenshot(evidence / "01b-updated-before-show.png")
@@ -218,12 +219,12 @@ def test_component_driver_explicit_show_worker_update_and_legacy_live(
     assert driver.observe("Shown").visible
     assert driver.plots().axes[0].xlabel == "Frequency (MHz)"
     assert driver.plots().axes[0].visible_curves == 1
-    assert "Updated from worker" in driver.plots().axes[0].annotations
+    assert "Worker peak 3 mV" in driver.plots().axes[0].annotations
     driver.screenshot(evidence / "02-shown.png")
     driver.click("Update from worker")
     assert driver.observe("Worker complete").visible
     assert driver.plots().axes[0].visible_curves == 1
-    assert "Updated from worker" in driver.plots().axes[0].annotations
+    assert "Worker peak 5 mV" in driver.plots().axes[0].annotations
     driver.screenshot(evidence / "04-worker-update.png")
     driver.click("Legacy live")
     assert driver.observe("Legacy shown").visible

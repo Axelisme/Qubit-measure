@@ -151,6 +151,7 @@ def test_decorator_empty_and_missing_return_do_not_refresh(
     decorated_plots: tuple[Plots, OwnerHost],
 ) -> None:
     plots, host = decorated_plots
+    plots["frame"].show()
 
     @plots.on_plot_thread
     def empty(_: int) -> Iterable[Artist]:
@@ -164,13 +165,16 @@ def test_decorator_empty_and_missing_return_do_not_refresh(
     with pytest.raises(TypeError, match="return.*iterable.*artists"):
         missing(0)
     assert host.refreshed == []
-    assert host.presented == []
+    assert host.presented == [plots["frame"]]
 
 
+@pytest.mark.parametrize("presented", [False, True])
 def test_decorator_validates_all_returned_figures_before_refresh(
-    decorated_plots: tuple[Plots, OwnerHost],
+    decorated_plots: tuple[Plots, OwnerHost], presented: bool
 ) -> None:
     plots, host = decorated_plots
+    if presented:
+        plots["frame"].show()
     foreign = Figure()
     (foreign_line,) = foreign.subplots().plot([], [])
 
@@ -182,13 +186,14 @@ def test_decorator_validates_all_returned_figures_before_refresh(
     with pytest.raises(ValueError, match="belong to this Plots"):
         update(0)
     assert host.refreshed == []
-    assert host.presented == []
+    assert host.presented == ([plots["frame"]] if presented else [])
 
 
 def test_decorator_body_exception_propagates_without_refresh(
     decorated_plots: tuple[Plots, OwnerHost],
 ) -> None:
     plots, host = decorated_plots
+    plots["frame"].show()
     error = LookupError("cannot draw")
 
     @plots.on_plot_thread

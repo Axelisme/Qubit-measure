@@ -183,8 +183,8 @@ class Plots(FigureCollection):
         Before show, only retain mutations: do not present, refresh or load a
         backend. Later show or finish(present=True) displays the latest content.
         Mixed results refresh only presented figures. An empty iterable does
-        not refresh. None raises TypeError; artists
-        outside this Plots raise ValueError. Validate all results before any
+        not refresh. None raises TypeError; artists outside this Plots raise
+        ValueError. Validate all results before any
         refresh. Errors do not roll back mutations. Binding claims no axes.
         Use the same decorator for repeated updates and one-off mutations.
         """
