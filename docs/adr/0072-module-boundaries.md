@@ -91,6 +91,11 @@ mux/onetone 的逐 tone 數值計算、outcomes 與單 tone 失敗隔離由 core
 gui.py 保留來源與 route prior 解析，以及 writeback。
 此規則以直接審閱確認，不新增靜態內容測試；core 不依賴 GUI 的方向仍由 C15 保護。
 
+Local flux reset 沿用 `reset/pulse`，由 lab 的 library 範本與 `twotone/reset/flux/{gain,length}` 實驗組裝及校準。
+所需脈衝已能由既有 reset 模組播放，因此框架不新增 reset 型別。驗收重用既有 reset check，不另建專用檢查實驗。
+範本名稱與參數留在 lab 範本及 [gain](../../zcu_lab/v2/twotone/reset/flux/gain/guide.md)、[length](../../zcu_lab/v2/twotone/reset/flux/length/guide.md) 操作文件，不成為框架規則。
+2026-10-30，使用者選擇：「1A 2同意 3感覺復用reset/check就好？倒是reset/可以加一個flux_reset，4同意」，並對上述組裝與校準方式回覆「確認」。
+
 ### 即時圖工具與機制
 
 使用者於 2026-10-24 裁定：「框架與機制留在lib可以，live_line的定位應該是工具，可按需求擴充，但放在lib裡很難改。以及liveplot模塊應該可以考慮刪除，我以為plotting已經取代他了。」
