@@ -227,7 +227,9 @@ class GainExp(Experiment[GainResult, GainCfg]):
         )
 
         # Keep the measured branches visible beside the uncalibrated estimate.
-        fig, _ = plots.subplots("fit", nrows=4, sharex=True, figsize=(10, 10))
+        fig, _ = plots.subplots(
+            "fit", nrows=4, sharex=True, figsize=(10, 10), layout="constrained"
+        )
         axes = fig.axes
         for a in range(2):
             for b in range(2):
@@ -246,11 +248,11 @@ class GainExp(Experiment[GainResult, GainCfg]):
         axes[0].set_title(
             "No finite candidate; no writeback"
             if selected is None
-            else f"Selected gain = {selected:.6g} a.u. | p0≈0; not reset fidelity"
+            else f"Selected gain = {selected:.6g} a.u. | p0≈0; not reset fidelity",
+            fontsize=10,
         )
         for ax in axes:
             ax.grid(True)
             if selected is not None:
                 ax.axvline(selected, color="gray", linestyle="--")
-        fig.tight_layout()
         return GainAnalysis(d0, d1, ratio, residual, selected)
