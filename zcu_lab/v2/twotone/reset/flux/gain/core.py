@@ -187,7 +187,14 @@ class GainExp(Experiment[GainResult, GainCfg]):
         Under calibrated ideal pi, identical readout and a two-state model,
         p1=(1-r)/2+r*p0 exactly. Four IQs cannot identify p0 separately.
         Return the unclipped estimate (1-r)/2 assuming reset hardly heats g
-        (p0≈0). This cannot exclude leakage or establish reset fidelity.
+        (p0≈0). A thermally excited idle point, such as fluxonium near half
+        flux, invalidates this approximation. The fixed offline model used for
+        validation has idle first-excited-state population about 0.358. Only
+        after an initial reset makes p0 small can the estimate represent absolute
+        residual excitation, with the other assumptions still required.
+        Offline validation checks run/save/restore/analyze/PNG and selection,
+        not physical reset effectiveness. Do not use model populations to
+        calibrate this estimate. It cannot exclude leakage or establish fidelity.
         Zero d0 or nonfinite IQ/contrasts/estimates are not candidates. Ties
         choose the first gain in scan order; no candidate gives selected_gain=None.
         Publish raw I/Q, r and residual curves. source.cfg may be None.
