@@ -25,7 +25,10 @@ from zcu_tools.program.v2 import (
     shot_sums,
     sweep2param,
 )
-from zcu_tools.program.v2.modules.readout import PulseReadoutCfg, circle_classifier
+from zcu_tools.program.v2.modules.readout import (
+    PulseReadoutCfg,
+    require_circle_classifiers,
+)
 
 from zcu_lab.v2.support import live_line
 
@@ -111,14 +114,7 @@ class FreqDepExp(Experiment[FreqResult, FreqCfg]):
         soc, soccfg = context.soc, context.soccfg
         cfg = deepcopy(cfg)
         # Keep the G/E/Other contract for every declared ADC.
-        readout_channels = (
-            [cfg.readout.ro_ch]
-            if isinstance(cfg.readout, PulseReadoutCfg)
-            else [tone.ro_ch for tone in cfg.readout.tones]
-        )
-        for ro_ch in readout_channels:
-            if circle_classifier(cfg.readout, ro_ch=ro_ch).radius is None:
-                raise ValueError(f"ADC {ro_ch}: radius missing; run singleshot GE Post")
+        require_circle_classifiers(cfg.readout)
         read_axis = Classify(
             "readout", tone=None if isinstance(cfg.readout, PulseReadoutCfg) else 0
         )

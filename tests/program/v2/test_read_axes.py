@@ -179,6 +179,17 @@ def test_labels_resolve_adc_trigger_order_and_repeated_emissions(timeline, mux):
     np.testing.assert_array_equal(result, expected)
 
 
+@pytest.mark.parametrize("timeline", [False, True])
+def test_empty_axes_fail_when_constructing_processor(timeline):
+    prog = (
+        v2.TimelineProgramV2(v2.make_mock_soccfg())
+        if timeline
+        else v2.ModularProgramV2(v2.make_mock_soccfg(), [readout()])
+    )
+    with pytest.raises(ValueError, match="axes must contain at least one read"):
+        v2.shot_sums(prog, [])
+
+
 @pytest.mark.parametrize("reads", [0, 2])
 def test_processor_rejects_adc_read_count_mismatch(reads):
     prog = v2.ModularProgramV2(v2.make_mock_soccfg(), [readout()])

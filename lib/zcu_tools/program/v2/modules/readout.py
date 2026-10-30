@@ -177,6 +177,21 @@ def circle_classifier(cfg: ReadoutCfg, *, ro_ch: int) -> CircleClassifier:
     return classifier
 
 
+def require_circle_classifiers(cfg: ReadoutCfg) -> None:
+    """Require circle classification with a radius on every declared ADC.
+
+    cfg is a native Pulse or Mux readout. Check the pulse ADC or all mux tones
+    in declaration order, not just the tone selected for acquisition. Missing
+    classifiers, non-circle mode or absent radius raise ValueError naming the
+    ADC; missing radius requests singleshot GE Post calibration. Circle emits
+    g/e/other, not the g/e/f labels of centroid3. The cfg is unchanged; no
+    hardware, program or live library is read. Returns None on success.
+    """
+    for ro_ch, _ in _classifier_entries(cfg):
+        if circle_classifier(cfg, ro_ch=ro_ch).radius is None:
+            raise ValueError(f"ADC {ro_ch}: radius missing; run singleshot GE Post")
+
+
 def centroid3_classifier(cfg: ReadoutCfg, *, ro_ch: int) -> Centroid3Classifier:
     """Return detached three-state calibration for the declared ADC number.
 
