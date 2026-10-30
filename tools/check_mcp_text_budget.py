@@ -56,33 +56,69 @@ def check_text_budget(
     tools/list result. recipe_names contains exact catalog declaration names, not
     prefixes. Limits are inclusive: instructions 2000, recipes 200, other tools
     400, and schema property descriptions 100. Missing descriptions count as zero.
-    Invalid wire items raise rather than being treated as empty input.
+    Null descriptions also count as zero. Invalid text or required tool structure
+    raises ValueError rather than being treated as empty input. Visited schema
+    nodes must be objects or booleans, with string/null descriptions and correctly
+    shaped schema containers. Instance data and other schema keywords are not
+    validated; this is not a general JSON Schema validator.
     """
     overages: list[Overage] = []
-    instructions_length = len(instructions or "")
+    instructions_length = _text_length(instructions, "instructions")
     if instructions_length > 2000:
         overages.append(Overage("instructions", instructions_length, 2000))
-    for tool in tools:
+    for tool in _validated_tools(tools):
         path = f"tools/{tool['name']}"
         limit = 200 if tool["name"] in recipe_names else 400
-        length = len(tool.get("description") or "")
+        length = _text_length(tool.get("description"), f"{path}/description")
         if length > limit:
             overages.append(Overage(f"{path}/description", length, limit))
         overages.extend(_schema_overages(tool["inputSchema"], f"{path}/inputSchema"))
     return BudgetReport(instructions_length, len(tools), tuple(overages))
 
 
-def _schema_overages(schema: dict[str, Any], path: str) -> Iterator[Overage]:
-    for child_path, child, is_property in _subschemas(schema, path):
-        length = len(child.get("description") or "")
-        if is_property and length > 100:
-            yield Overage(f"{child_path}/description", length, 100)
-        yield from _schema_overages(child, child_path)
+def _validated_tools(value: object) -> list[WireTool]:
+    if not isinstance(value, Sequence) or isinstance(value, (str, bytes, bytearray)):
+        raise ValueError("tools must be a sequence of tool objects")
+    tools: list[WireTool] = []
+    for index, tool in enumerate(value):
+        if not isinstance(tool, dict) or not isinstance(tool.get("name"), str):
+            raise ValueError(f"tools/{index} must be an object with a string name")
+        name = tool["name"]
+        schema = tool.get("inputSchema")
+        if not isinstance(schema, dict):
+            raise ValueError(f"tools/{name}/inputSchema must be an object")
+        description = tool.get("description")
+        if description is not None and not isinstance(description, str):
+            raise ValueError(f"tools/{name}/description must be a string or null")
+        tools.append(WireTool(name=name, description=description, inputSchema=schema))
+    return tools
+
+
+def _text_length(value: object, path: str) -> int:
+    if value is None:
+        return 0
+    if not isinstance(value, str):
+        raise ValueError(f"{path} must be a string or null")
+    return len(value)
+
+
+def _schema_overages(
+    schema: object, path: str, *, is_property: bool = False
+) -> Iterator[Overage]:
+    if isinstance(schema, bool):
+        return
+    if not isinstance(schema, dict):
+        raise ValueError(f"{path} must be a schema object or boolean")
+    length = _text_length(schema.get("description"), f"{path}/description")
+    if is_property and length > 100:
+        yield Overage(f"{path}/description", length, 100)
+    for child_path, child, child_is_property in _subschemas(schema, path):
+        yield from _schema_overages(child, child_path, is_property=child_is_property)
 
 
 def _subschemas(
     schema: dict[str, Any], path: str
-) -> Iterator[tuple[str, dict[str, Any], bool]]:
+) -> Iterator[tuple[str, object, bool]]:
     # Visit schema keywords, not JSON instance data in defaults/examples/const/enum.
     for keyword in (
         "properties",
@@ -91,9 +127,13 @@ def _subschemas(
         "patternProperties",
         "dependentSchemas",
     ):
-        for name, child in schema.get(keyword, {}).items():
-            if isinstance(child, dict):
-                yield f"{path}/{keyword}/{name}", child, keyword == "properties"
+        if keyword not in schema:
+            continue
+        children = schema[keyword]
+        if not isinstance(children, dict):
+            raise ValueError(f"{path}/{keyword} must be an object of schemas")
+        for name, child in children.items():
+            yield f"{path}/{keyword}/{name}", child, keyword == "properties"
     for keyword in (
         "items",
         "additionalProperties",
@@ -106,13 +146,16 @@ def _subschemas(
         "then",
         "else",
     ):
-        child = schema.get(keyword)
-        if isinstance(child, dict):
-            yield f"{path}/{keyword}", child, False
+        if keyword in schema:
+            yield f"{path}/{keyword}", schema[keyword], False
     for keyword in ("anyOf", "allOf", "oneOf", "prefixItems"):
-        for index, child in enumerate(schema.get(keyword, [])):
-            if isinstance(child, dict):
-                yield f"{path}/{keyword}/{index}", child, False
+        if keyword not in schema:
+            continue
+        children = schema[keyword]
+        if not isinstance(children, list):
+            raise ValueError(f"{path}/{keyword} must be an array of schemas")
+        for index, child in enumerate(children):
+            yield f"{path}/{keyword}/{index}", child, False
 
 
 def _read_wire(timeout: float) -> tuple[str | None, list[WireTool]]:
@@ -131,8 +174,11 @@ def _read_wire(timeout: float) -> tuple[str | None, list[WireTool]]:
         {"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
     )
     root = Path(__file__).resolve().parents[1]
-    # The stdio loop handles requests in order, then drains on EOF. communicate
-    # bounds the whole exchange and kills/reaps the server if the timeout expires.
+    # This fixed, read-only collector targets the known same-repo stdio server,
+    # not arbitrary MCP peers. Its three messages are processed in order and EOF
+    # drains the server. subprocess.run bounds the exchange and kills/reaps on
+    # timeout. A full async MCP SDK dependency adds little for this use; reconsider
+    # it for interactive tool calls, heterogeneous servers, or notification routing.
     result = subprocess.run(
         [sys.executable, str(root / "mcp_servers/measure.py")],
         cwd=root,
@@ -146,18 +192,55 @@ def _read_wire(timeout: float) -> tuple[str | None, list[WireTool]]:
     responses: dict[int, dict[str, Any]] = {}
     for line in result.stdout.splitlines():
         response = json.loads(line)
+        if not isinstance(response, dict):
+            raise ValueError("MCP response must be an object")
         if "error" in response:
             raise ValueError(f"MCP request failed: {response['error']}")
-        if "id" in response:
-            responses[response["id"]] = response["result"]
-    return responses[1].get("instructions"), responses[2]["tools"]
+        if "id" not in response:
+            continue
+        response_id = response["id"]
+        if type(response_id) is not int or response_id not in (1, 2):
+            raise ValueError("MCP response id must be 1 or 2")
+        payload = response.get("result")
+        if not isinstance(payload, dict):
+            raise ValueError(f"MCP response {response_id} result must be an object")
+        responses[response_id] = payload
+    if 1 not in responses or 2 not in responses:
+        raise ValueError("MCP initialize and tools/list responses are required")
+    tools = responses[2].get("tools")
+    if not isinstance(tools, list):
+        raise ValueError("MCP tools/list result/tools must be an array")
+    return responses[1].get("instructions"), tools
+
+
+def collect_text_budget(
+    recipe_names: Set[str], *, timeout: float = 60.0
+) -> BudgetReport:
+    """Collect and measure the same-repo measure server's decoded stdio text.
+
+    recipe_names contains exact catalog names used for the recipe budget. timeout
+    is a positive, finite number of seconds bounding the whole subprocess exchange.
+    Start the server with this interpreter, send three read-only messages, and
+    close stdin with EOF. A timeout kills and reaps the child. No GUI connection,
+    tool call, or hardware operation occurs. Return the measured BudgetReport.
+    Raise ValueError for invalid timeout, decoded wire structure, or text;
+    OSError for launch failures; subprocess.SubprocessError for timeout/nonzero exit.
+    """
+    instructions, tools = _read_wire(_validated_seconds(timeout))
+    return check_text_budget(instructions, tools, recipe_names)
+
+
+def _validated_seconds(seconds: float) -> float:
+    if not math.isfinite(seconds) or seconds <= 0:
+        raise ValueError("timeout must be positive and finite")
+    return seconds
 
 
 def _positive_seconds(value: str) -> float:
-    seconds = float(value)
-    if not math.isfinite(seconds) or seconds <= 0:
-        raise argparse.ArgumentTypeError("timeout must be positive and finite")
-    return seconds
+    try:
+        return _validated_seconds(float(value))
+    except ValueError as error:
+        raise argparse.ArgumentTypeError(str(error)) from error
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -178,8 +261,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     recipe_names = {recipe.name for recipe in lab_definitions().recipes}
     try:
-        instructions, tools = _read_wire(args.timeout)
-        report = check_text_budget(instructions, tools, recipe_names)
+        report = collect_text_budget(recipe_names, timeout=args.timeout)
     except (
         OSError,
         subprocess.SubprocessError,
