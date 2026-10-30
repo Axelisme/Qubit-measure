@@ -1,0 +1,246 @@
+"""Typed Schedule acquisition entrypoints without program assembly."""
+
+from __future__ import annotations
+
+from abc import ABC, abstractmethod
+from collections.abc import Callable
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any, Generic, Protocol, TypeVar, Unpack
+
+import numpy as np
+from numpy.typing import NDArray
+
+from zcu_tools.experiment.v2.runtime.acquisition import (
+    AcquireOptions,
+    AcquisitionRunner,
+    SignalArray,
+    StopCondition,
+    SynchronousAcquireKeywords,
+    SynchronousDecimatedAcquireKeywords,
+    default_decimated_raw2signal_fn,
+    default_raw2signal_fn,
+    require_positive_rounds,
+)
+from zcu_tools.program.acquisition import ShotSumProcessor
+
+if TYPE_CHECKING:
+    from zcu_tools.experiment.v2.runtime.schedule import Schedule, ScheduleStep
+
+T_Raw = TypeVar("T_Raw")
+T_Raw_co = TypeVar("T_Raw_co", covariant=True)
+
+
+@dataclass(frozen=True)
+class ManageOptions(Generic[T_Raw]):
+    """Policy for Schedule-owned acquisition and slot conversion.
+
+    retry is the nonnegative number of extra attempts (default zero). Shot
+    overrun gets at least one retry and restores the pre-acquire slot. External
+    stop and interruption never retry. progress=False hides native acquisition
+    progress; the rounds bar uses label "rounds" and remains visible only at the
+    root. stop_condition is a no-argument callback run after each completed round
+    has been converted and written. True or StopDecision(met=True) stops this
+    acquire, not the Schedule. Finite StopDecision values are logged on early
+    completion. converter maps cumulative and final raw payloads to the owner's
+    slot shape. None selects the method's default converter. Converter and live
+    update exceptions propagate without retry or a failed acquisition outcome.
+    """
+
+    retry: int = 0
+    progress: bool = False
+    stop_condition: StopCondition | None = None
+    converter: Callable[[T_Raw], SignalArray] | None = None
+
+
+class IntegratedProgram(Protocol[T_Raw_co]):
+    """Producer requiring only synchronous acquire, not other acquisition modes.
+
+    Return cumulative raw data and call round_hook after each completed round
+    with one-based round index, cumulative raw data and the supplied cancel flag.
+    Check cancel_flag before another round. Cancellation retains completed data;
+    before any round raise StoppedPartialAcquireError. Native keywords follow
+    SynchronousAcquireKeywords. Other producer exceptions use the runner's retry
+    and partial-result policy.
+    """
+
+    def acquire(
+        self, soc: object, **kwargs: Unpack[SynchronousAcquireKeywords[T_Raw_co]]
+    ) -> T_Raw_co: ...
+
+
+class DecimatedProgram(Protocol[T_Raw_co]):
+    """Producer requiring only synchronous acquire_decimated.
+
+    Raw cumulative traces and round hooks follow IntegratedProgram. Native
+    keywords follow SynchronousDecimatedAcquireKeywords; nonempty herald
+    selection is unsupported.
+    """
+
+    def acquire_decimated(
+        self,
+        soc: object,
+        **kwargs: Unpack[SynchronousDecimatedAcquireKeywords[T_Raw_co]],
+    ) -> T_Raw_co: ...
+
+
+class SummedProgram(Protocol):
+    """Producer requiring only joint-ADC acquire_summed.
+
+    processor maps normalized ADC-keyed (points, reps, reads, 2) IQ to float64
+    (points, *axes). Return cumulative unnormalized (*point_dims, *axes) sums,
+    or None only in unsupported stepped mode. Round hooks, cancellation and
+    failures follow IntegratedProgram's synchronous contract.
+    """
+
+    def acquire_summed(
+        self,
+        soc: object,
+        *,
+        processor: ShotSumProcessor,
+        rounds: int = 1,
+        step_rounds: bool = False,
+        **qick_options: object,
+    ) -> NDArray[np.float64] | None: ...
+
+
+class ManagedAcquisitionMixin(ABC):
+    """Schedule and step acquisition methods sharing one execution policy.
+
+    Subclasses provide the existing owner via _acquisition_owner; this mixin owns
+    no scope, slot or outcome state. Each managed call writes converted data into
+    that owner's default slot and triggers live updates, retries producer errors
+    and applies acquire-local data stops. It requires an active Schedule and a
+    writable SignalBuffer slot. Cancellation/interruption/exhausted errors return
+    partial data with a Schedule outcome; conversion/update errors propagate.
+    """
+
+    @property
+    @abstractmethod
+    def _acquisition_owner(
+        self,
+    ) -> Schedule[Any, Any] | ScheduleStep[Any, Any, Any]:
+        """Return this Schedule or step; all state remains owned by that object."""
+        ...
+
+    def managed_acquire(
+        self,
+        program: IntegratedProgram[list[NDArray[np.float64]]],
+        soc: object,
+        *,
+        options: ManageOptions[list[NDArray[np.float64]]] | None = None,
+        **qick_options: object,
+    ) -> SignalArray:
+        """Acquire IQ, write this scope's slot and trigger live updates.
+
+        Managed means slot/live updates, automatic retry and data-driven stop.
+        Requires an active Schedule and a writable default SignalBuffer slot.
+        program supplies synchronous acquire; soc is its borrowed transport.
+        options controls retry, native progress, stop and raw conversion. With
+        no converter, the first ADC/readout's final-axis IQ pairs become complex.
+        Native
+        qick_options are forwarded; rounds defaults to one and must be a positive
+        integer excluding bool. Return the live slot, including partial data on
+        cancellation/failure. Converter and update errors propagate without retry.
+        """
+        owner = self._acquisition_owner
+        selected = ManageOptions() if options is None else options
+        rounds = require_positive_rounds(qick_options.pop("rounds", 1))
+        return AcquisitionRunner(owner, soc).run(
+            acquire=program.acquire,
+            rounds=rounds,
+            signal_fn=(
+                default_raw2signal_fn
+                if selected.converter is None
+                else selected.converter
+            ),
+            options=AcquireOptions(
+                retry=selected.retry,
+                progress=selected.progress,
+                stop_condition=selected.stop_condition,
+            ),
+            acquire_kwargs=qick_options,
+        )
+
+    def managed_acquire_decimated(
+        self,
+        program: DecimatedProgram[list[NDArray[np.float64]]],
+        soc: object,
+        *,
+        options: ManageOptions[list[NDArray[np.float64]]] | None = None,
+        **qick_options: object,
+    ) -> SignalArray:
+        """Acquire traces, write this scope's slot and trigger live updates.
+
+        Managed means slot/live updates, automatic retry and data-driven stop.
+        Requires an active Schedule and a writable default SignalBuffer slot.
+        program supplies synchronous acquire_decimated; soc is its transport.
+        options controls retry, native progress, stop and raw conversion. With
+        no converter, the first ADC's final-axis IQ becomes complex, retaining
+        repetitions and sample axes. Native
+        qick_options are forwarded; rounds defaults to one and must be a positive
+        integer excluding bool. Return the live slot, including partial data on
+        cancellation/failure. Converter and update errors propagate without retry.
+        """
+        owner = self._acquisition_owner
+        selected = ManageOptions() if options is None else options
+        rounds = require_positive_rounds(qick_options.pop("rounds", 1))
+        return AcquisitionRunner(owner, soc).run(
+            acquire=program.acquire_decimated,
+            rounds=rounds,
+            signal_fn=(
+                default_decimated_raw2signal_fn
+                if selected.converter is None
+                else selected.converter
+            ),
+            options=AcquireOptions(
+                retry=selected.retry,
+                progress=selected.progress,
+                stop_condition=selected.stop_condition,
+            ),
+            acquire_kwargs=qick_options,
+        )
+
+    def managed_acquire_summed(
+        self,
+        program: SummedProgram,
+        soc: object,
+        *,
+        processor: ShotSumProcessor,
+        options: ManageOptions[NDArray[np.float64]] | None = None,
+        **qick_options: object,
+    ) -> SignalArray:
+        """Acquire shot sums, write this scope's slot and trigger live updates.
+
+        Managed means slot/live updates, automatic retry and data-driven stop.
+        Requires an active Schedule and a writable default SignalBuffer slot.
+        program needs only acquire_summed; soc is its transport. processor maps
+        normalized ADC-keyed (points, reps, reads, 2) IQ to float64 (points, *axes).
+        options selects retry/progress/stop and conversion; converter=None writes
+        cumulative and final sums directly without averaging. Native qick_options
+        are forwarded; rounds
+        defaults to one and must be a positive integer excluding bool. Return the live
+        slot, retaining completed rounds on stop/failure. None producer results,
+        conversion and update failures propagate without retry.
+        """
+        owner = self._acquisition_owner
+        selected = ManageOptions() if options is None else options
+        rounds = require_positive_rounds(qick_options.pop("rounds", 1))
+
+        def convert(raw: NDArray[np.float64] | None) -> SignalArray:
+            if raw is None:
+                raise ValueError(
+                    "managed summed acquisition requires synchronous results"
+                )
+            return raw if selected.converter is None else selected.converter(raw)
+
+        return AcquisitionRunner(owner, soc).run(
+            acquire=program.acquire_summed,
+            rounds=rounds,
+            signal_fn=convert,
+            options=AcquireOptions(
+                retry=selected.retry,
+                progress=selected.progress,
+                stop_condition=selected.stop_condition,
+            ),
+            acquire_kwargs=dict(qick_options, processor=processor),
+        )

@@ -1,4 +1,5 @@
 from zcu_tools.experiment.stop_signal import ScheduleOutcomeError, StopSignal
+from zcu_tools.experiment.v2.runtime.managed_acquire import ManageOptions
 from zcu_tools.experiment.v2.runtime.program_builder import (
     AcquireOptions,
     ProgramBuilder,
@@ -22,6 +23,7 @@ from zcu_tools.experiment.v2.runtime.schedule import (
 __all__ = [
     "AcquireOptions",
     "BufferProtocol",
+    "ManageOptions",
     "ProgramBuilder",
     "ResultNode",
     "ResultTree",
