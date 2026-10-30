@@ -124,6 +124,40 @@ Assignment aliases、動態分派與包裝不追蹤，可能造成漏報或拒�
 出現實際失敗類別再擴充，不藉此新增作者排程 API。
 同 process 合成 source／fixture 驗證在 `tests/tools/test_check_script_awaits.py`。
 
+## Measure MCP text budget
+
+```bash
+uv run --directory <worktree> --no-sync -- python tools/check_mcp_text_budget.py
+```
+
+`check_mcp_text_budget.py` 用目前 interpreter 啟動 `mcp_servers/measure.py`，經 stdio
+送出 `initialize`、`notifications/initialized` 與 `tools/list`，讀完回覆後以 EOF 關閉
+server。它不啟動或連接 GUI，也不呼叫量測工具或硬體。`--timeout SECONDS` 限制 stdio
+子程序的總時間，預設 60 秒，逾時會終止並回收子程序。
+
+檢查以解碼後的字元數計量，不計 UTF-8 bytes 或 JSON escape 字元。上限包含等號：
+
+| Wire 文字 | 上限 |
+| --- | ---: |
+| Server instructions | 2,000 |
+| Recipe tool description | 200 |
+| 其他 tool description | 400 |
+| Schema property description | 100 |
+
+Recipe 身分來自與 server 相同的 `zcu_lab.assembly.lab_definitions().recipes`，以
+`RecipeDeclaration.name` 精確比對 tool name，不寫死名稱，也不從前綴推測。
+Property 檢查包含巢狀 object、array、union 及 `$defs` 中的欄位。不重複展開 `$ref`，
+也不把 schema 頂層／型別說明或 `default`、`examples` 內的資料當成 property 說明。
+
+stdout 的 JSON receipt 包含 `instructions_length`、`tool_count`、`overage_count`，以及
+每筆超額的 `item`、`length`、`limit`。stderr 同時列出每筆超額的 wire 路徑、字元數與上限。
+無超額回傳 0，有超額回傳 1；stdio 啟動、逾時或回覆解碼失敗回傳 2。
+Lab 宣告載入錯誤直接拋出。此檢查目前獨立執行，尚未接入 `gate.py`。
+
+`check_text_budget(instructions, tools, recipe_names)` 可直接 import，回傳
+`BudgetReport`，其 `exit_code` 與 `overages` 分別提供 pass/fail 和全部超額項目。
+`tests/tools/test_check_mcp_text_budget.py` 使用合成 wire inputs 驗證此契約，不載入 lab 或真 server。
+
 ## 品質快照與熱點報表
 
 三個主要入口各有責任：`gate.py` 串接日常檢查，`check_ratchet.py` 判定相對 base 的
