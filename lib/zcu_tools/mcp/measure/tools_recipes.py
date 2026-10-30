@@ -84,7 +84,7 @@ def build_recipe_tools(
     return {
         "answer": {
             "handler": partial(answer, context),
-            "description": "Answer the current question using its request_id and named answer fields from pending_question.answer_schema. A stale answer never consumes a question or writes. Only the recipe's explicit accept_writeback writes. Terminal replies retain execution; failures include failure.phase and human failure.reason. Wait up to 300 seconds for the next handoff; timeout never cancels.",
+            "description": "Answer a paused recipe question. Use pending_question.request_id and answer_schema. Stale answers leave the question paused and return accepted=false, reason and pending_request_id.",
             "inputSchema": {
                 "type": "object",
                 "properties": {

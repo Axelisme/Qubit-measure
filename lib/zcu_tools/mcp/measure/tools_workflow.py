@@ -109,7 +109,7 @@ def build_workflow_tools(ctx: MeasureToolContext) -> ToolTable:
         "workflow_start": _tool(
             ctx,
             "workflow.start",
-            "Submit workflow under the shared RUN lease. run_id is required and must be 32 lowercase hexadecimal characters (e.g. uuid4().hex); local GUI Start generates it. Invalid IDs are rejected before operation admission or hardware access. Omit/null plan/tunables to use shared GUI drafts. Explicit batches, including [], use fresh captured defaults. Returns pending handle, not acceptance; wait(op=handle) observes terminal delivery.",
+            "Start a workflow under the shared RUN lease. run_id requires 32 lowercase hex characters, e.g. uuid4().hex; invalid IDs fail before hardware access. Omit/null plan/tunables for shared drafts; explicit batches, including [], use fresh defaults. Returns pending handle, not acceptance; wait(op=handle) for terminal delivery.",
             {
                 "tab_id": _STRING,
                 "run_id": _STRING,

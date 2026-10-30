@@ -1,6 +1,6 @@
 # `zcu_tools/mcp/measure/`
 
-**Last updated:** 2026-10-29，global files、point selection 與 writeback destination
+**Last updated:** 2026-10-30，MCP 索引、Library template 與 tab cfg 協定
 
 **讀者：** agent。量測 MCP 的啟動、表單、operation 與寫回契約。
 
@@ -26,6 +26,7 @@ selects a separate data root. Omit `project_root` to use the repo root. MCP
 forwards path strings unchanged; the launcher validates the data directory
 before assembly. Entry owners create `result/` and `Database/` when needed.
 Code, catalogs, logs and script-path resolution keep their existing roots.
+Entry names remain single path segments.
 An explicit data root on attach fails with `project_root_requires_new_gui`.
 The [FTF startup example](../../../../zcu_lab/simulation_envs/FTF/README.md)
 creates its entry, first point and tab without a separate entry CLI or setup RPC.
@@ -89,6 +90,24 @@ Live catalog 的 `value.read`／`value.list`、`tab.parameter_read`、
 Recipe 內部仍走 owner API，無須改成直接編輯檔案。
 各檔獨立提交，不提供跨檔交易或自動合併。
 
+## Library template RPC
+
+從 owner template 建立 Library 項目時，先經 `rpc_call` 呼叫
+`context.ml_list_roles`，再呼叫 `context.ml_create_from_role`。
+Params 提供 `role_id` 與未使用的 `name`，例如 `R1.readout.mux`。
+可選 `edits` 與 `context.ml_edit` 同形狀，path 是 model-field 陣列：
+
+```json
+{"role_id": "readout/mux:blank", "name": "R1.readout.mux",
+ "edits": [{"path": ["tones"], "value": [{"freq": 100.0, "gain": 0.2, "ro_ch": 0}]}]}
+```
+
+Template 有必填欄位時，先在 edits 補齊，例如 blank mux 的 tones。
+Expression 使用 `{"expr": "<text>"}`。GUI 先把 edits 套到 template input，
+再驗證並寫入合法 Spec。錯誤 path、value 或 Form result 回
+`invalid_params`，`data.errors` 列 `{path, message}`，Library 不變。
+成功回 `{created: name}`。直接編輯 Library 檔案時仍走上節 reload 流程。
+
 ## Setup 工具
 
 `recipe_guide(adapter)` 以明填的 adapter 名查詢 GUI `adapter.guide`，回傳 adapter 與 `guide: {markdown, resource_dir}`。Recipe 可以操作多個 adapter，工具不推測 recipe 到 adapter 的 mapping。Markdown 保留全文；resource_dir 是 GUI host 的絕對目錄字串，未宣告 guide 時是 null。Guide 中的圖片使用相對路徑，agent 需要時自行從該目錄讀取。工具不讀圖、不附圖；跨機 agent 可能無法存取這個路徑。全域 status 不讀或投影 installed predictor。
@@ -128,6 +147,41 @@ Calibrate 回 `{offset_correction, frequency_mhz, clamped}`，不寫元件、dia
 filename 與 inline params 必須恰一個非 null。省略與 null 都視為未給。皆未給或皆給非 null 回 `invalid_params/invalid_predictor_source`。檔名或內容無效回 `invalid_params/invalid_predictor_file`。檔案無法讀取回 `precondition_failed/predictor_file_unavailable`；未開 entry 回 `precondition_failed/no_entry`。直接能量參數格式、物理值或儀器值無效回 `invalid_predictor_params`。Inline 缺 flux 回 `missing_predictor_flux`，flux 格式無效回 `invalid_predictor_flux`。Filename 另傳 flux 回 `invalid_predictor_source`。計算缺能量欄位回 `missing_predictor_params`，message 與 data.missing 列出缺項。工具沿 GUI 的 live catalog 描述與錯誤傳遞，不另建參數或寫回邏輯。沒有 target、load/set/clear 或 installed model。
 
 Raw RPC 不提供高層工具的結果聚合或 PNG 解碼。例如 `device.setup` 回傳 handle，caller 用 `wait(op)` 等待後再讀 `device.snapshot`。`tab.save_data` 與 `tab.save_artifacts` 同步返回當次完整 Save report，不回 Save handle。Report 的 run_id 沿用 Run 時產生的同一個 ID，即使全部輸出失敗也不為 null。Caller 用各路徑的 status 與 error 判斷保存成功，不以 run_id 是否存在判斷。Report 保留全部 members，不用 await 或再次讀 snapshot。Readonly snapshot 的 confirmed run_id 仍只表示已有持久輸出成功。
+
+## Tab cfg 協定
+
+經 `rpc_call` 呼叫 `tab.get_cfg`、`tab.edit_cfg`、`tab.reset_cfg` 與
+`tab.use_inline`，回覆是 Form 的 input／values／errors，不附整棵 schema。
+先用 `tab.describe_cfg(path=[])` 查 root，再以完整 model-field path 查一層
+metadata 與 direct children。Options 是 label／value 與 commands，不是 fields；
+依回覆順序讀 options，寫入整個 option value 選擇，不從 union 猜選項。
+Owner 回報 selected。單一普通 wrapper 可能在 children 扁平顯示，path 仍含 wrapper。
+Ref option 沒有 children，generated tag leaf 不是 recipe logical path。
+
+Describe 的 input_present／input／value 與局部 Form preview errors 來自同一次 owner turn。
+Lowered cfg errors 看 get_cfg 或 Run admission。兩個 read 都回全表 diagnostics，
+包括原始 tone 的 name／index、seed_source、seed_status 與 uncalibrated。
+初值 provenance 不因補值重寫，缺值不代表未校準，詳見下方 Runtime 與回覆。
+
+普通字串是 literal，expression 用 `{"expr": "text"}`，complex 用可逆 `__complex__`
+tag。Library key 使用實際 key。編輯 model-field leaf；inline path 包含 module。
+Range 的 start／stop／n 分開寫。無效 input 保留供修正並附 errors。
+`tab.use_inline` 執行 owner 的 guarded to_inline command，來源是固定 Library capture。
+
+Open 與明確 Reset 各捕捉來源一次。Recipe 建立或重用 tab 後都先 Reset 再編輯。
+Reset 的 aliases 是單次來源覆寫，不改全域 aliases 或保存 input。
+Parameter read、cfg、edit 與 Run 沿用 capture，直到下一次明確 Refresh／Reset。
+`tab.parameter_read` 與 get_cfg 不收 aliases。
+`tab.run_start` 在焦點或 operation 效果前拒絕非空 aliases；
+None 或 {} 使用目前顯示值。Run 只接受目前合法 Form values。
+Load 只恢復 results 與分析來源，不回填 Form input；歷史 native cfg 另讀結果。
+
+Recipe `tab.read` 每次只送一個原子的 read_recipe_field RPC，沿固定來源讀取。
+回覆 locked 綜合 selection_fixed、fixed 與 readonly。
+Recipe Form 省略保留值，null 清空／關閉 nullable 欄位。
+Overrides 依序在實驗值之後、check_ready 之前套用，重複 path 與 null 都保留。
+Check_ready 只讀全部 Form 與 lowered cfg errors，不改值、recapture 或啟動 Run。
+驗證失敗不回滾較早的 selection／edit；Run admission 也檢查完整 Form errors。
 
 ## Recipe 與 execution
 
@@ -329,6 +383,8 @@ Host 已退出但 owner 尚未 finalization 時，接受 Stop 仍可使終態為
 作者 finally 在同一 worker 照跑，同步 Save 可保留已取得資料；不在 finally 開新的 await。
 Recipe 終態為 `RecipeOutcome(status="cancelled", report=None, runs=[...])`。
 ScriptCancelled 不記入 error，真實 owner、作者或 cleanup 例外仍保留診斷。
+Standalone analysis 取消會停止後續接續；未登記的 cancel(op) 仍走直接 GUI operation hook。
+取消不重寫已發布的終態 execution 結果。
 Completed 不代表所有輸出已保存。
 
 Analyze 的預期擬合失敗回 `AnalysisResult(result=None, status="failed", reason=...)`。
