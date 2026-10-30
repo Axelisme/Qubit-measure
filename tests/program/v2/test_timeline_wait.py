@@ -1,6 +1,9 @@
 """Shell WAIT bounds through public timeline compilation and point scheduling."""
 
 import math
+import random
+import warnings
+from dataclasses import dataclass
 from typing import Literal
 
 import pytest
@@ -623,3 +626,174 @@ def test_crossing_body_maximum_retains_positive_adc_remainder():
             remaining.append(max(0, origin + 70 - body))
     assert [s.body_end_cycle - s.start_cycle for s in shots(prog)] == expected_body
     assert shell_wait(prog) == max(remaining) == 30
+
+
+@dataclass(frozen=True)
+class WaitRecipe:
+    """Reproducible public program inputs; all delays/tails are tProc cycles.
+
+    sweep_steps has one step per three-point axis. counts and branch_delays
+    share axis0's index. pulse_samples holds the two native DAC lengths at
+    384 MHz; adc_samples is the ADC length at 307.2 MHz. read_at selects the
+    trigger's position; tail subtracts from its timeline end, not its ADC end.
+    fixed_count and counts give the fixed and table-selected Repeat counts.
+    """
+
+    sweep_steps: tuple[int, ...]
+    pulse_samples: tuple[int, int]
+    adc_samples: int
+    fixed_count: int
+    counts: tuple[int, ...]
+    branch_delays: tuple[int, ...]
+    loop_delay: int
+    read_at: Literal["before", "fixed", "runtime", "branch", "after"]
+    tail: int
+
+
+def wait_recipes(seed: int) -> list[WaitRecipe]:
+    """Generate 30 bounded recipes, stratified by readout placement and axes."""
+    rng = random.Random(seed)
+    recipes = []
+    for repeat in range(3):
+        for axes in (1, 2):
+            for read_at in ("before", "fixed", "runtime", "branch", "after"):
+                adc_samples = rng.choice((50, 100, 150))
+                recipes.append(
+                    WaitRecipe(
+                        sweep_steps=tuple(rng.randint(5, 30) for _ in range(axes)),
+                        pulse_samples=(rng.randint(20, 70), rng.randint(10, 50)),
+                        adc_samples=adc_samples,
+                        fixed_count=rng.randint(1, 3),
+                        counts=tuple(rng.sample((0, 1, 3), 3)),
+                        branch_delays=tuple(rng.sample(range(5, 40), 3)),
+                        loop_delay=rng.randint(5, 25),
+                        read_at=read_at,
+                        # Include fully consumed ADCs as well as positive tails.
+                        tail=0 if repeat == 0 else rng.randint(10, adc_samples),
+                    )
+                )
+    return recipes
+
+
+def compile_wait_recipe(recipe: WaitRecipe, relax_cycles: int = 1000):
+    """Compile a legal mixed schedule without consulting compiler timing state."""
+    count = LoadValue("counts", recipe.counts, "axis0", "count_cycles")
+
+    class Program(TimelineProgramV2):
+        def _initialize(self, cfg):
+            self.gaps = [
+                self.add_sweep(
+                    f"axis{axis}",
+                    SweepCfg(
+                        start=step / 430.08,
+                        stop=3 * step / 430.08,
+                        step=step / 430.08,
+                        expts=3,
+                    ),
+                )
+                for axis, step in enumerate(recipe.sweep_steps)
+            ]
+            self.declare(count)
+            self.declare_readout(0, length=recipe.adc_samples / 307.2)
+            for ch, samples in enumerate(recipe.pulse_samples):
+                self.declare_gen(ch, nqz=1)
+                self.add_pulse(
+                    ch,
+                    f"pulse{ch}",
+                    style="const",
+                    freq=100,
+                    phase=0,
+                    gain=0.1,
+                    length=samples / 384,
+                )
+
+        def read(self):
+            """Schedule one ADC, then leave the requested tail beyond body end."""
+            self.trigger(ros=[0], width=1 / 430.08, timeline="default")
+            self.delay_timeline(-recipe.tail / 430.08)
+
+        def _body(self, cfg):
+            self.emit(count)
+            if recipe.read_at == "before":
+                self.read()
+            self.fork("default", into="parallel")
+            self.pulse(0, "pulse0", timeline="default")
+            self.delay_timeline(self.gaps[0], timeline="parallel")
+            self.pulse(1, "pulse1", timeline="parallel")
+            self.join("parallel", into="default")
+            self.sync()
+            if len(self.gaps) == 2:
+                self.delay_timeline(self.gaps[1])
+            with self.branch(by="axis0") as branch:
+                for delay in recipe.branch_delays:
+                    with branch.case():
+                        if recipe.read_at == "branch":
+                            self.read()
+                        self.delay_timeline(delay / 430.08)
+            with self.repeat("fixed", recipe.fixed_count):
+                if recipe.read_at == "fixed":
+                    self.read()
+                self.delay_timeline(recipe.loop_delay / 430.08)
+            with self.repeat("runtime", "count_cycles", range_hint=(0, 3)):
+                if recipe.read_at == "runtime":
+                    self.read()
+                self.delay_timeline(recipe.loop_delay / 430.08)
+            if recipe.read_at == "after":
+                self.read()
+
+    return Program(
+        make_mock_soccfg(2, 1), initial_delay=0, relax_delay=relax_cycles / 430.08
+    )
+
+
+WAIT_RECIPE_SEED = 0x5EED
+
+
+@pytest.mark.parametrize(
+    "recipe",
+    wait_recipes(WAIT_RECIPE_SEED),
+    ids=lambda recipe: f"seed={WAIT_RECIPE_SEED}-{recipe!r}",
+)
+def test_mixed_schedules_shell_wait_matches_every_legal_point(recipe):
+    # The public analyzer executes linked instructions. It supplies event starts
+    # and reference only, so lengths come independently from mock clock specs:
+    # 430.08/307.2 = 7/5 ADC cycles; 430.08/384 = 28/25 DAC cycles.
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        prog = compile_wait_recipe(recipe)
+    result = shots(prog)
+    assert len(result) == 3 ** len(recipe.sweep_steps)
+    remainders = []
+    for shot in result:
+        triggers = [e.cycle for e in shot.events if e.kind == "data" and e.value]
+        adc_end = max(
+            (start + (recipe.adc_samples * 7 + 4) // 5 for start in triggers),
+            default=shot.start_cycle,
+        )
+        remainders.append(max(0, adc_end - shot.body_end_cycle))
+        # Both drive pulses finish before later control structures. Use their
+        # known lengths, not waveform objects or compiler timestamp estimates.
+        for start, samples in zip(waves(shot), recipe.pulse_samples, strict=True):
+            assert (
+                shot.start_cycle + start + (samples * 28 + 24) // 25
+                <= shot.body_end_cycle
+            ), (shot.loop_indices, recipe)
+    upper, lower = max(remainders), min(remainders)
+    wait = shell_wait(prog)
+    diagnostic = (recipe, remainders, wait, [str(w.message) for w in caught])
+    assert wait >= upper, diagnostic
+    assert wait == upper, diagnostic
+    bound_warnings = [str(w.message) for w in caught if "WAIT" in str(w.message)]
+    if upper == lower:
+        assert not bound_warnings, diagnostic
+    else:
+        assert len(bound_warnings) == 1, diagnostic
+        assert f"slack={upper - lower} cycles" in bound_warnings[0], diagnostic
+        assert "variables=" in bound_warnings[0], diagnostic
+        assert "upper bound" not in bound_warnings[0], diagnostic
+        # Test both guard boundaries using the independent legal-point extrema.
+        with pytest.warns(UserWarning, match=rf"slack={upper - lower} cycles"):
+            equal_relax = compile_wait_recipe(recipe, relax_cycles=upper - lower)
+        assert shell_wait(equal_relax) == upper, diagnostic
+        with pytest.raises(ValueError, match=rf"slack={upper - lower} cycles"):
+            compile_wait_recipe(recipe, relax_cycles=upper - lower - 1)
