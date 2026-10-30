@@ -1,6 +1,6 @@
 # 0083 — Program macro 與具名 timeline
 
-日期：2026-10-29。B 與 builder 契約更新：2026-10-30。
+日期：2026-10-29。B 與 builder 契約更新：2026-10-30。收尾 WAIT 與 native 結尾記帳更新：2026-10-31。
 狀態：Accepted。A、B 與 builder 已交付；C frontend 遷移、實驗遷移與 D 舊路徑移除另行交付。
 相關：[[0072]]、[[0074]]、[[0078]]
 
@@ -135,10 +135,46 @@ Table index、bounds 與 writes 沿用所屬 producer 的介面及稽核，不�
 因此靜態值的選擇取決於能否精確表示，不只是能否在編譯期知道各點時間。
 不加入一般 interval／CFG analysis。
 
+編譯期另以 `c0 + Σ ci·Ri` 保存 runtime 時間的線性式，與既有 tProc register 指令並存。
+加減合併同一來源的係數，讓共同起點抵銷；max 保留候選式，不先投影成互不相關的範圍。
+整數 cycle 項的取整只作用於常數項。非線性結果仍保留編譯期已知的逐點來源關係。
+Sweep register 保留 loop index 的仿射關係，table 值與 table-derived Repeat count 保留所屬軸與逐點值。
+同軸來源在每點共用同一 index，不把相關來源當成獨立區間。
+
+Program／timeline owner 也為每個 native channel 保存編譯期結尾式子，涵蓋 scalar 與 runtime 起點。
+只在真正發射事件時記錄，reference 推進時逐點扣除並 floor 0，Repeat／Branch 也保留相應路徑與迭代的結尾。
+它只是編譯期 metadata，不是第二個 scheduler，不新增 register 或改變 runtime 指令與既有 native timestamp 職責。
+這項 native channel 記帳細節由 advisor 於 2026-10-31 依代理授權裁定，避免已知結尾在 WAIT 投影前遺失。
+
 使用者於 2026-10-29 指出：「可以先簡單做法，但我確實想探索runtime timeline機制，使用abs實作max語法，用於無法編譯器決定的時間」。
 對將 runtime timeline 納入 B 的範圍，使用者回答：「1可以」。
 對硬體指令假設，使用者裁定：「ABs/asr是安全可用的，可以不用測」。
 因此 ABS／ASR 視為可用，不要求額外硬體 smoke test；這不是已完成實機驗證的聲明。
+
+### 收尾 WAIT 與 slack 護欄
+
+`sync` 的 runtime 結尾仍由 tProc register 每點取 maximum，精確推進 reference。
+Shell 收尾 WAIT 使用編譯期常數，不以靜態上界替代 runtime sync 或改變其指令。
+剩餘時間可抵銷為常數時，WAIT 使用精確值，不發 warning，即使該常數大於 `relax_delay` 也不拒絕。
+例如 ADC 結尾為 `O+190`、body 收尾為 `O+200` 時，剩餘時間是 0，不因 O 的掃描範圍增加等待。
+
+剩餘時間不能直接證明為常數、但來源逐點值已知時，編譯器只枚舉式子出現的合法 loop 軸之笛卡兒積。
+它依保留的同軸關係求每點剩餘時間，再取精確 min／max，WAIT 使用 max。
+`slack=max-min` 是所有合法點的實際差距，單位為 tProc cycles，不能用保守下界冒充實際 min。
+Slack 為 0 時不警告，大於 0 時 warning 指出變數與差距。
+Slack 超過該 program 的 `relax_delay` 時編譯 raise ValueError，訊息指出變數、差距與 relax；等於時只警告，不拒絕。
+逐點求值的成本與出現的合法點數乘式子大小成正比，不加入一般 interval／CFG analysis。
+
+量測回饋時間或只有範圍、沒有逐點值的來源若仍無法抵銷，編譯器使用安全上界並發 warning 指出變數。
+Warning 明說 slack 只有 upper bound，不是實際差距；即使該上界超過 relax，也不據此 raise。
+算不出實際差距，就不能據此斷言下一 shot 必晚發。
+可逐點求值的部分仍保留精確來源，不因另有未知值就丟掉已知 provenance。
+
+使用者於 2026-10-30 對靜態上界、warning 與 relax 護欄的方案選擇：「A」。
+使用者補充：「WAIT可以用常數，但sync要考慮runtime」。
+對未知 slack 只發 warning、不以其上界拒絕的選項，使用者同日回答：「A」。
+合法點精確 min／max 與 provenance 的求法由 advisor 於 2026-10-30 依代理授權裁定。
+執行期等待留待有實驗需要每點精確 WAIT 時再評估，不在此契約中自動切換等待方式。
 
 ### Fork、join 與 Repeat 邊界
 
@@ -217,6 +253,11 @@ Shot_end 取下次 body_start 前的 reference，最後一個取程式結束時�
 事件 cycle 的原點是初始 reference 0，analysis 不模擬 CPU latency。
 Resync 讀硬體 s_usr_time／s11，analysis 明確拒絕，不預設為 0，也不宣稱其後精確時序。
 編譯期可知的 register 時間與唯讀 dmem 照常分析，不套用硬體時間例外。
+
+Analysis 沒有 waveform／ADC 積分長度，不能單獨算出 event end，也不作 production WAIT guard 的 oracle。
+WAIT 驗收從公開逐點事件與 body_end 出發，另以已知硬體時鐘和播放／積分長度獨立計算剩餘時間。
+隨機 program 與固定回歸案例檢查 WAIT 不小於任何合法點的剩餘時間，已知逐點來源時等於精確 max。
+已知合法點的剩餘相同時須精確且無 warning；變動時檢查實際 slack、warning 與 relax 的拒絕邊界。
 
 使用者於 2026-10-29 裁定：「第一件選A，語意與行為一致就可以了，舊設計的怪癖不一定要對齊」，並強調：「我沒有要求必須與舊的一致，我要求的是與預期行為一致」。
 因此驗收從具體輸入與現行 B1／規則 b 獨立手算逐掃描點的 pulse／trigger 絕對 cycle、body_end 與 shot_end，不由受測 total_length 或新舊輸出生成 expected。
