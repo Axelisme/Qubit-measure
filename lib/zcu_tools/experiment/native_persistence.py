@@ -381,6 +381,7 @@ def restore_run(
         fields: dict[str, np.ndarray] = {
             axis.field_name: values
             for axis, values in zip(spec.axes, variable.axes, strict=True)
+            if axis.field_name is not None
         }
         fields[spec.z.field_name] = variable.z
         result = spec.result_type(**fields)
@@ -428,6 +429,7 @@ def _variable_specs(
                     unit=axis.unit,
                     scale=axis.scale,
                     dtype=axis.dtype,
+                    values=axis.values,
                 )
                 for axis in spec.axes
             ),
