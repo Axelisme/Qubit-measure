@@ -179,7 +179,7 @@ def _gain_scales(soccfg: QickConfig, gen_ch: int, scaler: float) -> tuple[int, f
     return maxv, qick_scale
 
 
-def _stable_gain(word: int, maxv: int, scaler: float, qick_scale: float) -> float:
+def _stable_gain(word: int, maxv: float, scaler: float, qick_scale: float) -> float:
     if word == 0:
         return 0.0
     candidate = word / (scaler * maxv)
@@ -228,7 +228,10 @@ def _round_gain_sweep(
     if sweep.expts == 1:
         return SweepCfg(start=start, stop=start, expts=1, step=0.0)
     span_word = (sweep.expts - 1) * step_word
-    stop = start + span_word / (scaler * qick_scale)
+    # Stabilize the span before endpoint addition: near cancellation, stop's
+    # ULP can be too small to change the span recovered by stop - start.
+    span = _stable_gain(span_word, qick_scale, scaler, qick_scale)
+    stop = start + span
     direction = math.copysign(math.inf, span_word / scaler)
     # QickSweep1D subtracts endpoints before scaling its span. Stabilizing the
     # step alone cannot protect that subtraction or the subsequent truncation.

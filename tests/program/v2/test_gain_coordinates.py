@@ -38,6 +38,25 @@ def _compile_scalar_word(soccfg: QickConfig, gain: float) -> int:
     return round(actual * factor)
 
 
+def _compile_sweep_words(
+    soccfg: QickConfig, sweep: SweepCfg, scaler: float
+) -> np.ndarray:
+    pulse = Pulse(
+        "drive",
+        PulseCfg(
+            ch=0,
+            nqz=1,
+            freq=100.0,
+            gain=scaler * sweep2param("gain", sweep),
+            waveform=ConstWaveformCfg(length=0.1),
+        ),
+    )
+    prog = ModularProgramV2(soccfg, [pulse], sweep=[("gain", sweep)])
+    actual = prog.get_pulse_param(pulse.pulse_id, "gain", as_array=True)
+    factor = soccfg["gens"][0]["maxv"] * soccfg["gens"][0]["maxv_scale"]
+    return np.rint(actual * factor).astype(int)
+
+
 @pytest.mark.parametrize("scaler", [1.0, 2.0, 0.3, -1.0, -0.3])
 @pytest.mark.parametrize("sign", [1, -1])
 def test_signed_gain_returns_nearest_coordinate_that_compiles(
@@ -99,19 +118,7 @@ def test_hardware_gain_sweep_compiles_to_host_word_grid(
     )
     info = {"soccfg": soccfg, "gen_ch": 0, "scaler": scaler}
     rounded = round_sweep_dict(sweep, "gain", info)
-    pulse = Pulse(
-        "drive",
-        PulseCfg(
-            ch=0,
-            nqz=1,
-            freq=100.0,
-            gain=scaler * sweep2param("gain", rounded),
-            waveform=ConstWaveformCfg(length=0.1),
-        ),
-    )
-    prog = ModularProgramV2(soccfg, [pulse], sweep=[("gain", rounded)])
-    actual = prog.get_pulse_param(pulse.pulse_id, "gain", as_array=True)
-    words = np.rint(actual * soccfg.get_maxv(0)).astype(int)
+    words = _compile_sweep_words(soccfg, rounded, scaler)
     np.testing.assert_array_equal(words, expected)
     host = sweep2array(sweep, "gain", info)
     np.testing.assert_array_equal(
@@ -137,20 +144,9 @@ def test_fractional_hardware_span_matches_full_scale_host_words(
     )
     info = {"soccfg": soccfg, "gen_ch": 0, "scaler": scaler}
     rounded = round_sweep_dict(sweep, "gain", info)
-    pulse = Pulse(
-        "drive",
-        PulseCfg(
-            ch=0,
-            nqz=1,
-            freq=100.0,
-            gain=scaler * sweep2param("gain", rounded),
-            waveform=ConstWaveformCfg(length=0.1),
-        ),
+    np.testing.assert_array_equal(
+        _compile_sweep_words(soccfg, rounded, scaler), expected
     )
-    prog = ModularProgramV2(soccfg, [pulse], sweep=[("gain", rounded)])
-    actual = prog.get_pulse_param(pulse.pulse_id, "gain", as_array=True)
-    factor = 32766 * 0.8
-    np.testing.assert_array_equal(np.rint(actual * factor).astype(int), expected)
     host = sweep2array(sweep, "gain", info)
     np.testing.assert_array_equal(
         [_compile_scalar_word(soccfg, scaler * float(g)) for g in host], expected
@@ -197,6 +193,38 @@ def test_integer_boundary_keeps_original_input_truncation(sign) -> None:
     actual = round_zcu_gain(requested, soccfg, 0)
     words = [_compile_scalar_word(soccfg, float(g)) for g in actual]
     np.testing.assert_array_equal(words, [sign * 58, sign * 59])
+
+
+@pytest.mark.parametrize(
+    ("start_word", "stop_word"), [(-59, 0), (59, 0), (0, 59), (0, -59)]
+)
+@pytest.mark.parametrize("scaler", [1.0, -1.0, 0.3, 2.0])
+def test_hardware_gain_span_near_zero_preserves_word_grid(
+    start_word, stop_word, scaler
+) -> None:
+    soccfg = make_mock_soccfg()
+    soccfg["gens"][0]["maxv"] = 30000
+    start = (
+        np.sign(start_word) * (abs(start_word) + 0.5) / (30000 * scaler)
+        if start_word
+        else 0.0
+    )
+    stop = (
+        np.sign(stop_word) * (abs(stop_word) + 0.5) / (30000 * scaler)
+        if stop_word
+        else 0.0
+    )
+    sweep = SweepCfg(start=start, stop=stop, expts=2, step=stop - start)
+    info = {"soccfg": soccfg, "gen_ch": 0, "scaler": scaler}
+    rounded = round_sweep_dict(sweep, "gain", info)
+    expected = [start_word, stop_word]
+    np.testing.assert_array_equal(
+        _compile_sweep_words(soccfg, rounded, scaler), expected
+    )
+    host = sweep2array(sweep, "gain", info)
+    np.testing.assert_array_equal(
+        [_compile_scalar_word(soccfg, scaler * float(g)) for g in host], expected
+    )
 
 
 def test_host_gain_axis_matches_compiled_words_with_frequency_sweep() -> None:
