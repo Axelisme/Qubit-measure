@@ -109,9 +109,7 @@ def test_fractional_native_adc_tail_never_rounds_below_physical_end():
             self.trigger(ros=[0], t=0, width=1 / 430.08)
             self.delay_timeline(42 / 430.08)
 
-    prog = Program(
-        make_mock_soccfg(0, 1), initial_delay=0, final_wait=0, relax_delay=0
-    )
+    prog = Program(make_mock_soccfg(0, 1), initial_delay=0, relax_delay=0)
     (shot,) = shots(prog)
     assert shot.body_end_cycle - shot.start_cycle == 42
     # Independent ADC-clock oracle: 51 samples end at 71.4 tProc cycles.
