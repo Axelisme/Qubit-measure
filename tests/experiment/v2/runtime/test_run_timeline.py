@@ -79,15 +79,15 @@ def test_timeline_acquires_through_schedule_and_real_qick_pipeline(
     expected = np.full(shape, np.nan, dtype=dtype)
     with Schedule({}, buffer, scope=Scope("run")) as schedule:
         if mode == "integrated":
-            result = schedule.managed_acquire(program, soc, rounds=2)
+            result = schedule.run_acquire(program, soc, rounds=2)
             expected = np.array([3 + 4j])
         elif mode == "summed":
-            result = schedule.managed_acquire_summed(
+            result = schedule.run_acquire_summed(
                 program, soc, rounds=2, processor=_sum_iq
             )
             expected = np.array([12.0, 16.0])
         else:
-            result = schedule.managed_acquire_decimated(program, soc, rounds=2)
+            result = schedule.run_acquire_decimated(program, soc, rounds=2)
             expected = np.full((2, samples), 3 + 4j)
         np.testing.assert_array_equal(result, expected)
         assert np.shares_memory(result, buffer.array)
