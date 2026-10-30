@@ -723,7 +723,9 @@ def compile_wait_recipe(recipe: WaitRecipe, relax_cycles: int = 1000):
             self.join("parallel", into="default")
             self.sync()
             if len(self.gaps) == 2:
-                self.delay_timeline(self.gaps[1])
+                # Both forked timelines are consumed. Advance the reference
+                # directly to keep this mixed program within 16 data registers.
+                self.delay(self.gaps[1])
             with self.branch(by="axis0") as branch:
                 for delay in recipe.branch_delays:
                     with branch.case():
