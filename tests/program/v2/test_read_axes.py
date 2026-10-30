@@ -389,6 +389,33 @@ def test_parallel_readout_emissions_keep_labels_without_changing_admission():
     np.testing.assert_array_equal(process(iq), [[[2, 4, 4], [2, 4, 4], [2, 4, 4]]])
 
 
+@pytest.mark.parametrize("tone", [None, 0])
+def test_single_tone_mux_classify_resolves_implicit_and_explicit_tone(tone):
+    cfg = native_mux((4,))
+    cfg.tones[0].classifier = LinearClassifier(angle=0.0, threshold=1.0)
+    prog = v2.ModularProgramV2(mux_soccfg(), [cfg.build("readout")])
+    iq = {
+        4: np.array([[-1, 0], [0, 0], [1, 0], [2, 0]], dtype=np.float64).reshape(
+            1, 4, 1, 2
+        )
+    }
+    process = v2.shot_sums(prog, [v2.Classify("readout", tone=tone)])
+    np.testing.assert_array_equal(process(iq), [[3, 1]])
+
+
+def test_multi_tone_mux_classify_requires_tone_and_lists_available_positions():
+    prog = v2.ModularProgramV2(mux_soccfg(), [native_mux((4, 1)).build("readout")])
+    with pytest.raises(ValueError, match=r"readout.*available tones.*0.*1"):
+        v2.shot_sums(
+            prog,
+            [
+                v2.Classify(
+                    "readout", classifier=LinearClassifier(angle=0.0, threshold=0.0)
+                )
+            ],
+        )
+
+
 def test_mux_classify_only_axes_produce_joint_counts():
     cfg = native_mux((4, 1))
     for tone in cfg.tones:
