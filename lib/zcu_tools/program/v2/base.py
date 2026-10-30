@@ -1,15 +1,12 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Sequence
 from typing import Literal, overload
 
 import numpy as np
 from numpy.typing import NDArray
 from qick import QickConfig
 from qick.asm_v2 import AveragerProgramV2
-
-from zcu_tools.program.herald import HeraldSpec
 
 from .ir import IRCompileMixin
 from .macro import ImproveAsmV2
@@ -166,7 +163,6 @@ class MyProgramV2(  # pyright: ignore[reportIncompatibleMethodOverride]
         *,
         rounds: int = 1,
         step_rounds: Literal[False] = False,
-        herald: Sequence[HeraldSpec] | None = None,
         **kwargs: object,
     ) -> list[NDArray[np.float64]]: ...
 
@@ -177,7 +173,6 @@ class MyProgramV2(  # pyright: ignore[reportIncompatibleMethodOverride]
         *,
         rounds: int = 1,
         step_rounds: Literal[True],
-        herald: Sequence[HeraldSpec] | None = None,
         **kwargs: object,
     ) -> None: ...
 
@@ -187,7 +182,6 @@ class MyProgramV2(  # pyright: ignore[reportIncompatibleMethodOverride]
         soc: object,
         *args,
         rounds: int = 1,
-        herald: Sequence[HeraldSpec] | None = None,
         **kwargs,
     ) -> list[NDArray[np.float64]] | None: ...
 
@@ -196,7 +190,6 @@ class MyProgramV2(  # pyright: ignore[reportIncompatibleMethodOverride]
         soc,
         *args,
         rounds: int = 1,
-        herald: Sequence[HeraldSpec] | None = None,
         **kwargs,
     ) -> list[NDArray[np.float64]] | None:
         """Acquire decimated IQ traces from soc, averaged over software rounds.
@@ -211,6 +204,4 @@ class MyProgramV2(  # pyright: ignore[reportIncompatibleMethodOverride]
         repetitions and readouts retain QICK's trace layout.
         """
         _require_positive_integer(rounds, "rounds")
-        return super().acquire_decimated(
-            soc, *args, rounds=rounds, herald=herald, **kwargs
-        )
+        return super().acquire_decimated(soc, *args, rounds=rounds, **kwargs)

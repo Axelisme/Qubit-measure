@@ -18,6 +18,7 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackRequest,
 )
 from zcu_tools.plotting.plots import Plots
+from zcu_tools.program.v2 import split_sums
 
 from zcu_lab.v2.twotone.time_domain.t2ramsey.core import (
     T2RamseyAnalyzeOptions,
@@ -78,7 +79,7 @@ def _T2Ramsey_get_writeback_items(
         ),
         result=T2RamseyResult(
             source.result.times,
-            source.result.signals,
+            split_sums(source.result.sums)[1][..., 0],
             source.result.true_activate_detune,
         ),
         metadata=source.metadata,

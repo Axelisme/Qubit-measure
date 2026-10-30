@@ -84,7 +84,7 @@ def statistics(request: RoundRequest) -> IntegratedRound:
     )
 
 
-def test_processed_materializes_retained_shots_matching_hardware(monkeypatch):
+def test_summed_materializes_retained_shots_matching_hardware(monkeypatch):
     env = white_noise(std_adc=0, n_readouts=2, seed=19)
     prog = make_program(env)
     hardware = make_program(env)
@@ -105,11 +105,18 @@ def test_processed_materializes_retained_shots_matching_hardware(monkeypatch):
         # Compact IQ totals intentionally disagree with the retained shots.
         return replace(statistics(request), raw=Raw())
 
-    def payload(values):
-        received.append(values.copy())
-        return np.concatenate([values, values[..., :1] - values[..., 1:]], axis=-1)
+    def processor(values):
+        received.append(values[1].copy())
+        # One output combines both ADCs while retaining their different reads.
+        return np.stack(
+            [
+                values[0][:, :, 0, 0],
+                values[1][:, :, 0, 0],
+                values[1][:, :, 1, 0] - values[1][:, :, 1, 1],
+            ],
+            axis=-1,
+        ).sum(axis=1)
 
-    processors = {0: lambda values: values[:, :1, :1], 1: payload}
     env.soc.binding.execute = execute
     monkeypatch.setattr(
         soc,
@@ -119,24 +126,23 @@ def test_processed_materializes_retained_shots_matching_hardware(monkeypatch):
     for ro in env.soccfg["readouts"]:
         ro["iq_offset"] = 7.0
     try:
-        expected = hardware.acquire_processed(
-            soc, processors=processors, progress=False, rounds=2
+        expected = hardware.acquire_summed(
+            soc, processor=processor, progress=False, rounds=2
         )
-        actual = prog.acquire_processed(
-            env.soc, processors=processors, progress=False, rounds=2
+        actual = prog.acquire_summed(
+            env.soc, processor=processor, progress=False, rounds=2
         )
         assert expected is not None and actual is not None
-        assert [value.shape for value in actual] == [(2, 2, 3, 3), (1, 2, 3, 1)]
-        for got, wanted in zip(actual, expected, strict=True):
-            np.testing.assert_array_equal(got, wanted)
-        np.testing.assert_array_equal(actual[1][0, ..., 0], [[1, 5, 9], [13, 17, 21]])
+        assert actual.shape == (2, 3, 3)
+        np.testing.assert_array_equal(actual, expected)
+        np.testing.assert_array_equal(actual[..., 0], [[2, 10, 18], [26, 34, 42]])
         np.testing.assert_array_equal(
-            actual[0][0, 0], [[25, 26, -1], [29, 30, -1], [33, 34, -1]]
+            actual[0], [[2, 50, -2], [10, 58, -2], [18, 66, -2]]
         )
         assert len(received) == 4
         for values in received:
             assert values.dtype == np.float64
-            np.testing.assert_array_equal(values, (iq + 24).reshape(6, 2, 2))
+            np.testing.assert_array_equal(values, (iq + 24).reshape(6, 1, 2, 2))
         for values, ch in zip(raw_of(prog), (1, 0), strict=True):
             assert values.dtype == np.int64
             np.testing.assert_array_equal(values, raw[ch][None])

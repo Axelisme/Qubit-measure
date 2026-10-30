@@ -2,7 +2,7 @@
 
 **讀者：** lab-author、framework-dev、agent。撰寫 Measure adapter、Form、recipe、operator guide 與校準 writeback。
 
-**Last updated:** 2026-10-29
+**Last updated:** 2026-10-30
 
 使用者入口見 [tutorial](../tutorial/README.md)。
 
@@ -353,14 +353,20 @@ Pulse 更新 `classifier`，單 tone Mux 更新 `tones.0.classifier`。
 共用中立 builder 比對其餘 materialized 欄位並保留 library 原 Spec 的 waveform key。
 Adapter 不重跑 fit，不直接 Apply。
 
-其他需要 Other 的 singleshot consumers 呼叫 `classification_processors(readout_cfg, require_other=True)`，
-取得完整 per-ADC circle processors。作者明傳給 `program.acquire_processed(processors=...)`，不注入獨立中心或半徑。
-Builder 使用 `build_and_acquire_processed` 或 `run_program_processed`，必須提供 `processed2signal_fn`。
-同一 converter 處理 cumulative round updates 與 final result，不使用預設 IQ converter。
-Circle payload 明列 `[g,e,other]`。缺 classifier／radius、linear 或 centroid3 在需要 Other 時報錯。
-Confusion correction 只讀 saved cfg；舊 cfg 缺 classifier／matrix 就略過。
+其他需要 Other 的 singleshot consumers 先從 readout cfg 要求 circle 與 radius。
+作者先 `prog = builder.build()`，再以 `shot_sums(prog, [Classify("readout")])`
+解析讀出 label，交給 `builder.run_program_summed(prog, processor=..., sums2signal_fn=...)`。
+Modular program 的 label 是 module 名稱；timeline 使用 emit tag，未給 tag 才用 module 名稱。
+Mux 軸另指定 cfg tone 位置。Circle 明列 `[g,e,other]`，缺 radius 時提示做 GE Post。
+同一 converter 收到 cumulative round updates 與 final sums，不使用預設 IQ converter。
+Result 保存每點 class counts，不除以 reps 或 rounds；分析與 live plot 才除以該點總計數。
+需要 herald 條件平均時列出 `[Classify("herald"), IQ("signal")]`，
+再以 `split_sums` 取得各 herald 類別的 counts 與平均 IQ。
+零計數與未測 NaN 計數的平均 IQ 為 NaN，不發除法 warning。
+Confusion correction 只讀 saved cfg；缺 cfg／classifier／matrix 就略過。
 `singleshot/check` 仍允許 raw Run，分析才要求 saved circle 與 radius。
-Amp Rabi 串接各 round 的 raw IQ，reset-check 平均各 round 的 populations。
+Amp Rabi 串接各 round 的 raw IQ，reset-check 累加各 round 的 class counts。
+舊比例檔案缺少 counts 變數時拒絕載入，不補造計數。
 
 `singleshot/len_rabi`在analysis pane提供`decay: bool`，預設啟用衰減包絡；
 此選擇不屬於量測cfg，不改變len Rabi的raw-IQ acquisition。
@@ -673,8 +679,8 @@ reset-only殘餘振盪與offset、二次諧波振幅、各分支residual RMS，�
 這些平均IQ指標不等於reset fidelity，也不唯一識別coherence或population機制；不提出
 writeback。cfg只設定一個`rabi_pulse`，兩次pulse使用相同波形與gain。
 
-`singleshot/reset_check`使用硬體gain／branch sweep，保存G/E populations；
-analysis可讀取confusion_matrix修正，回報reset-only平均／最大excited及最大Other，
+`singleshot/reset_check`使用硬體gain／branch sweep，保存G/E/Other counts；
+analysis先按每列總計數轉成比例，再讀取confusion_matrix修正，回報reset-only平均／最大excited及最大Other，
 不提供IQ校準writeback。Other不是校準後leakage，reset population不是reset-channel fidelity。
 
 `singleshot/amp_rabi`使用硬體gain sweep保存raw IQ。Reps是每gain每round的shots，

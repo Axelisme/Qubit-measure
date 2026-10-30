@@ -20,8 +20,17 @@ from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.herald import herald_ratio, heralded
-from zcu_tools.program.v2 import GainSweep, ModularProgramV2, Pulse, Reset, sweep2param
+from zcu_tools.program.v2 import (
+    IQ,
+    Classify,
+    GainSweep,
+    ModularProgramV2,
+    Pulse,
+    Reset,
+    shot_sums,
+    split_sums,
+    sweep2param,
+)
 from zcu_tools.program.v2.modules import PulseReadout
 
 from zcu_lab.v2.support import live_line
@@ -35,11 +44,14 @@ from zcu_lab.v2.twotone.rabi.amp_rabi.core import (
 
 @dataclass(frozen=True)
 class HeraldingAmpRabiResult:
-    """Gain, selected mean IQ and accepted-shot fraction, each shaped (Ngain,)."""
+    """amps is the sweep grid (native gain); sums has shape (points, 3, 3).
+
+    Herald states are g/e/other; components are count/sum I/sum Q.
+    Unmeasured sums are NaN. Conditional means at zero count are NaN.
+    """
 
     amps: NDArray[np.float64]
-    signals: NDArray[np.complex128]
-    pass_fraction: NDArray[np.float64]
+    sums: NDArray[np.float64]
 
 
 class HeraldingAmpRabiCfg(ConfigBase):
@@ -60,35 +72,37 @@ class HeraldingAmpRabiCfg(ConfigBase):
 def restore_result(
     data: GroupedLoadData[HeraldingAmpRabiCfg],
 ) -> HeraldingAmpRabiResult:
-    """Restore selected IQ and pass fraction on the same saved gain grid."""
-    signals = data.variable("signals")
-    fractions = data.variable("pass_fraction")
-    if not np.array_equal(signals.axes[0], fractions.axes[0]):
-        raise ValueError("Signal and pass fraction must share the same gain grid")
+    """Restore per-class shot sums; old files fail naming the missing sums variable."""
+    sums = data.variable("sums")
     return HeraldingAmpRabiResult(
-        amps=signals.axes[0].astype(np.float64),
-        signals=signals.z.astype(np.complex128),
-        pass_fraction=fractions.z.astype(np.float64),
+        amps=sums.axes[2].astype(np.float64),
+        sums=sums.z.astype(np.float64),
     )
 
 
 class HeraldingAmpRabiExp(Experiment[HeraldingAmpRabiResult, HeraldingAmpRabiCfg]):
-    """Herald ground, apply the gain-swept drive, then read accepted signal shots."""
+    """Herald ground, sweep drive gain, and store per-class count/IQ sums.
+
+    Store all herald classes, g/e/other. Live plots and fits use only the
+    herald-g conditional mean IQ.
+    """
 
     Options: ClassVar[type[AmpRabiAnalyzeOptions]] = AmpRabiAnalyzeOptions
     AXES_SPEC: ClassVar[
         GroupedAxesSpec[HeraldingAmpRabiResult, HeraldingAmpRabiCfg]
     ] = GroupedAxesSpec(
-        variables=tuple(
+        variables=(
             VariableSpec(
-                variable=name,
-                axes=(VariableAxisSpec("Gain", "", field_name="amps"),),
-                z=VariableZSpec(field_name=name, label=label, unit="a.u.", dtype=dtype),
-            )
-            for name, label, dtype in (
-                ("signals", "Signal", np.complex128),
-                ("pass_fraction", "Herald pass fraction", np.float64),
-            )
+                variable="sums",
+                axes=(
+                    VariableAxisSpec.generated_arange("components", ""),
+                    VariableAxisSpec.generated_arange("herald_states", ""),
+                    VariableAxisSpec("Gain", "", field_name="amps"),
+                ),
+                z=VariableZSpec(
+                    field_name="sums", label="Shot sums", unit="", dtype=np.float64
+                ),
+            ),
         ),
         result_type=HeraldingAmpRabiResult,
         cfg_type=HeraldingAmpRabiCfg,
@@ -99,16 +113,20 @@ class HeraldingAmpRabiExp(Experiment[HeraldingAmpRabiResult, HeraldingAmpRabiCfg
     def run(
         self, cfg: HeraldingAmpRabiCfg, *, context: RunContext
     ) -> HeraldingAmpRabiResult:
-        """Acquire selected mean IQ and pass fraction versus hardware-quantized gain.
+        """Acquire (Ngain, 3, 3) shot sums versus hardware-quantized gain.
 
-        After optional reset, herald ground, apply the optional init pulse and
-        fixed-duration gain-swept drive, then read signal IQ. The herald and signal
-        readouts share cfg.readout, including its classifier. Missing classifier or
-        circle radius fails before acquisition. The acquisition owner weights
-        rounds by accepted counts. Zero-pass points have NaN IQ and fraction
-        zero; unmeasured points remain NaN. No active reset is added. cfg is not
-        mutated; pulse duration is in us and gain is in native amplitude units.
+        After optional reset, herald, apply optional init and fixed-duration
+        gain-swept drive, then read signal. Both readouts share cfg.readout and
+        its GE Post circle classifier. Classes are g/e/other; components are
+        count/sum I/sum Q. Rounds add sums. Live and analyze use herald-g
+        conditional IQ; zero-count means are NaN. Unmeasured sums remain NaN.
+        cfg is not mutated. Pulse duration uses us, gain uses native units.
+        Heralding itself adds no active reset.
         """
+        if cfg.readout.classifier is None or cfg.readout.classifier.mode != "circle":
+            raise ValueError(
+                "Heralding requires a circle classifier with g/e/other; run GE Post"
+            )
         cfg = deepcopy(cfg)
         soccfg = context.soccfg
         gains = sweep2array(
@@ -118,24 +136,19 @@ class HeraldingAmpRabiExp(Experiment[HeraldingAmpRabiResult, HeraldingAmpRabiCfg
             context.plots, "measurement", "Pulse gain", "IQ magnitude (a.u.)"
         )
         buffer = SignalBuffer(
-            (len(gains),), on_update=lambda data: viewer.update(gains, np.abs(data))
+            (len(gains), 3, 3),
+            dtype=np.float64,
+            on_update=lambda data: viewer.update(
+                gains, np.abs(split_sums(data)[1][..., 0])
+            ),
         )
-        fractions = np.full(len(gains), np.nan, dtype=np.float64)
-
-        def processed_to_signal(
-            raw: list[NDArray[np.float64]],
-        ) -> NDArray[np.complex128]:
-            """Store pass fractions and return conditional IQ on this sweep's grid."""
-            iq, fraction = herald_ratio(raw[0])
-            fractions[:] = fraction
-            return iq[0, ..., 0] + 1j * iq[0, ..., 1]
 
         with Schedule(cfg, buffer, scope=context.scope) as sched:
             cfg = sched.cfg
             cfg.qub_pulse.set_param("gain", sweep2param("gain", cfg.gain))
             herald_readout = PulseReadout("herald", cfg.readout)
             signal_readout = PulseReadout("signal", cfg.readout)
-            # Borrow the emitted herald instance so occurrence=0 selects its readout.
+            # Unique readout names resolve the herald and signal shot-sum axes.
             prog = ModularProgramV2(
                 soccfg,
                 modules=[
@@ -149,16 +162,15 @@ class HeraldingAmpRabiExp(Experiment[HeraldingAmpRabiResult, HeraldingAmpRabiCfg
                 reps=cfg.reps,
                 relax_delay=cfg.relax_delay,
             )
-            herald = herald_readout.herald_spec(prog, occurrence=0)
             builder = sched.prog_builder(context.soc, soccfg)
-            builder.run_program_processed(
+            builder.run_program_summed(
                 prog,
                 rounds=cfg.rounds,
-                processors={herald.ro_ch: heralded(herald, np.copy)},
-                processed2signal_fn=processed_to_signal,
+                processor=shot_sums(prog, [Classify("herald"), IQ("signal")]),
+                sums2signal_fn=np.copy,
             )
 
-        return HeraldingAmpRabiResult(gains, buffer.array, fractions)
+        return HeraldingAmpRabiResult(gains, buffer.array)
 
     def analyze(
         self,
@@ -177,7 +189,7 @@ class HeraldingAmpRabiExp(Experiment[HeraldingAmpRabiResult, HeraldingAmpRabiCfg
         if options.skip < 0:
             raise ValueError("Skip leading points must be nonnegative")
         gains = source.result.amps[options.skip :]
-        signals = source.result.signals[options.skip :]
+        signals = split_sums(source.result.sums)[1][..., 0][options.skip :]
         finite = np.isfinite(gains) & np.isfinite(signals)
         fit_source = RunRecord(
             cfg=None, result=AmpRabiResult(amps=gains[finite], signals=signals[finite])
