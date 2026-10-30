@@ -47,7 +47,7 @@ def tool_connect(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str
 
 CONNECT_TOOL: dict[str, Any] = {
     "handler": tool_connect,
-    "description": "Connect to the GUI; launch only with authorization and trusted startup scripts. Returns control and global status even when locked or held by another client. Reconnect retains omitted identity; changing it reopens the socket. Readonly never acquires. Authentication and wire incompatibility fail separately.",
+    "description": "Connect to the measurement GUI: attach to an existing GUI or launch a new one only with authorization and trusted startup scripts. Returns control and global status even when locked or held by another client. Reconnect retains omitted identity; changing it reopens the socket. Readonly never acquires. Authentication and wire incompatibility fail separately.",
     "inputSchema": {
         "type": "object",
         "properties": {
