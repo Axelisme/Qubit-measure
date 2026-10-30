@@ -117,6 +117,8 @@ decimated outputs.
 `probe.probe(experiment, cfg, environment, output_dir, *, options=None)` 用 caller
 建立的 `SimulationEnvironment` 執行公開 run、native save、restore 與 analyze。
 每次建立新的 Scope 與 headless Plots，以 Agg canvas 保存 live／analysis PNG，不建立 Qt application。
+建立 Plots 前以 `matplotlib.style.use` 套用[共用樣式](../plotting/README.md#預設外觀)，
+不切換 backend 或登記 pyplot figure。實驗內的原生 Matplotlib 參數與 `style.context` 可覆寫外觀。
 Caller 仍負責環境的 backend 與 devices 清理，probe 不更改 seed 或接線。
 `ProbeReport` 保留 Result 欄位的 shape／dtype、NaN 視為相等的逐值讀回比較、分析摘要、PNG 路徑與階段秒數。
 階段失敗時回傳原始 exception 與 failed_stage，並記錄 traceback；成功前已產生的檔案保留。

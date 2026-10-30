@@ -25,7 +25,7 @@ def restore_rc_params():
 
 
 def test_probe_applies_style_before_run_and_preserves_native_overrides(tmp_path: Path):
-    observed: list[float] = []
+    observed: list[float | str] = []
 
     class StyledExperiment(ProbeExperiment):
         def run(self, config: SavingCfg, *, context: RunContext) -> SavingResult:

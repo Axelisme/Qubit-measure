@@ -33,12 +33,12 @@ def module_widget_registry_guard() -> Iterator[None]:
 @pytest.fixture(autouse=True)
 def widget_registry_guard() -> Iterator[None]:
     before = widget_ids()
-    with matplotlib.rc_context():
-        yield
+    yield
     assert widget_ids() == before
 
 
 def test_host_initialization_styles_new_figures_and_allows_native_overrides() -> None:
+    backend, managers = matplotlib.get_backend(), plt.get_fignums()
     with matplotlib.rc_context({"axes.labelsize": 37}):
         plots = Plots(NotebookPlotHost())
         try:
@@ -49,6 +49,8 @@ def test_host_initialization_styles_new_figures_and_allows_native_overrides() ->
             with plt.style.context({"axes.labelsize": 31}):
                 _, custom = plots.subplots("custom")
                 assert custom.xaxis.label.get_fontsize() == 31
+            assert matplotlib.get_backend() == backend
+            assert plt.get_fignums() == managers
         finally:
             plots.finish(present=False)
             plots.release()

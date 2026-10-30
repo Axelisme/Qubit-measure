@@ -20,6 +20,8 @@ _T = TypeVar("_T")
 class NotebookPlotHost:
     """Initialize and synchronously render widgets until explicitly released.
 
+    Construction applies the shared Matplotlib style to process-wide rcParams
+    for subsequent figures. Apply native style overrides after construction.
     Calls run synchronously on the caller's thread. Callers serialize operations;
     this host does not schedule work or detect frontend availability. Figures
     with an existing manager must be released by that owner before presentation.

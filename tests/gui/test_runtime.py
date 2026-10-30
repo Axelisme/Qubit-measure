@@ -9,6 +9,7 @@ from typing import ClassVar, TextIO
 
 import matplotlib
 import pytest
+from matplotlib import pyplot as plt
 from matplotlib.figure import Figure
 from PyQt6.QtCore import QObject, pyqtSignal
 from zcu_tools.gui import plotting, runtime
@@ -37,11 +38,10 @@ def restore_plotting_shutdown_state():
         plotting.set_shutting_down(value=before)
 
 
-def test_runtime_initializes_style_before_app_builds_figures(
-    monkeypatch: pytest.MonkeyPatch, rendering_events: list[str]
-) -> None:
-    app = _App(rendering_events)
-    monkeypatch.setattr(runtime, "_get_or_create_qapplication", lambda: app)
+def test_runtime_initializes_style_before_app_builds_figures(qapp) -> None:
+    from qtpy.QtCore import QTimer
+
+    backend, managers = matplotlib.get_backend(), plt.get_fignums()
 
     class StyledBehavior(_Behavior):
         def assemble(self, control: ControlOptions | None) -> GuiAssembly:
@@ -51,8 +51,13 @@ def test_runtime_initializes_style_before_app_builds_figures(
             assert axes.xaxis.label.get_fontsize() == 23
             return super().assemble(control)
 
+        def after_show(self, assembly: GuiAssembly) -> None:
+            QTimer.singleShot(0, qapp.quit)
+
     with matplotlib.rc_context({"axes.labelsize": 37}):
-        assert run_gui_runtime(StyledBehavior(rendering_events), None) == 0
+        assert run_gui_runtime(StyledBehavior([]), None) == 0
+        assert matplotlib.get_backend() == backend
+        assert plt.get_fignums() == managers
 
 
 def test_build_control_options_disabled() -> None:
