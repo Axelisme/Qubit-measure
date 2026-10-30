@@ -655,8 +655,9 @@ def wait_recipes(seed: int) -> list[WaitRecipe]:
 
     One-axis recipes include fractional-cycle DAC lengths and crossing forks.
     Two-axis recipes use integral-cycle lengths and a noncrossing fork to leave
-    registers for both sweeps. Their branch-readout cases flatten the fixed
-    delay-only loop; other recipes exercise both Repeat forms. Unrestricted
+    registers for both sweeps. Two-axis branch-readout cases omit the Repeats;
+    other two-axis cases omit Branch. One-axis cases combine all structures.
+    Unrestricted
     recipes exhausted the same 16 slots and failed allocation 17 both before
     and after the shell-WAIT changes.
     """
@@ -736,25 +737,22 @@ def compile_wait_recipe(recipe: WaitRecipe, relax_cycles: int = 1000):
                 # Both forked timelines are consumed. Advance the reference
                 # directly to keep this mixed program within 16 data registers.
                 self.delay(self.gaps[1])
-            with self.branch(by="axis0") as branch:
-                for delay in recipe.branch_delays:
-                    with branch.case():
-                        if recipe.read_at == "branch":
-                            self.read()
-                        self.delay_timeline(delay / 430.08)
-            if len(self.gaps) == 2 and recipe.read_at == "branch":
-                # Flatten only this constant delay-only loop to reserve a
-                # register for branch-selected ADC tails on two sweep axes.
-                self.delay_timeline(recipe.fixed_count * recipe.loop_delay / 430.08)
-            else:
+            if len(self.gaps) == 1 or recipe.read_at == "branch":
+                with self.branch(by="axis0") as branch:
+                    for delay in recipe.branch_delays:
+                        with branch.case():
+                            if recipe.read_at == "branch":
+                                self.read()
+                            self.delay_timeline(delay / 430.08)
+            if len(self.gaps) == 1 or recipe.read_at != "branch":
                 with self.repeat("fixed", recipe.fixed_count):
                     if recipe.read_at == "fixed":
                         self.read()
                     self.delay_timeline(recipe.loop_delay / 430.08)
-            with self.repeat("runtime", "count_cycles", range_hint=(0, 3)):
-                if recipe.read_at == "runtime":
-                    self.read()
-                self.delay_timeline(recipe.loop_delay / 430.08)
+                with self.repeat("runtime", "count_cycles", range_hint=(0, 3)):
+                    if recipe.read_at == "runtime":
+                        self.read()
+                    self.delay_timeline(recipe.loop_delay / 430.08)
             if recipe.read_at == "after":
                 self.read()
 
