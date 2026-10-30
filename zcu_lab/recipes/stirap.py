@@ -81,7 +81,10 @@ class StirapInputs(RecipeInputs):
         KEEP,
         description="Readout library key with acquired centroid3 calibration.",
     )
-    shots: int | None | Keep = Field(KEEP, description="Raw IQ shots per scan point.")
+    shots: int | None | Keep = Field(
+        KEEP,
+        description="Repetitions per scan point, classified into saved g/e/f counts.",
+    )
     relax_delay_us: float | None | Keep = Field(
         KEEP,
         description="Relaxation interval in us for ground preparation.",
@@ -103,7 +106,7 @@ class StirapReport(RecipeReport):
 
 @recipe(
     "stirap",
-    description="Run an operator-selected STIRAP scan, analyze saved centroid3 IQ and save raw data and analysis.",
+    description="Run an operator-selected STIRAP scan, analyze g/e/f counts and save counts and analysis.",
 )
 async def stirap(session: RecipeSession, inputs: StirapInputs) -> StirapReport:
     """Overlap Stokes/Pump Gaussians, read out after both, analyze and save.
@@ -123,7 +126,7 @@ async def stirap(session: RecipeSession, inputs: StirapInputs) -> StirapReport:
     inputs, then the Form reports missing/invalid inputs before Run. Analysis
     uses only this run's saved readout centroid3 calibration, never live
     calibration or simulator truth. No writeback is proposed or requested.
-    Analysis failure still saves raw IQ; owner errors propagate after Save.
+    Analysis failure still saves g/e/f counts; owner errors propagate after Save.
     Save receipts identify failed outputs, not just completion of the recipe.
     """
     tab = session.open_tab(

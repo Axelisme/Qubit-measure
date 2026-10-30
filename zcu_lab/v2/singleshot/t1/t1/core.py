@@ -11,11 +11,9 @@ from zcu_tools.analysis.fitting.multi_decay import (
     calc_lambdas,
     fit_dual_transition_rates,
 )
-from zcu_tools.analysis.singleshot import (
-    correct_populations,
-    raw_population_signal,
-)
+from zcu_tools.analysis.singleshot import correct_populations
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
+from zcu_tools.datafile import DataVariable
 from zcu_tools.experiment import AxesSpec, Experiment
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
@@ -25,6 +23,7 @@ from zcu_tools.experiment.v2.utils.t1_sampling import materialize_nonuniform_t1_
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     Branch,
+    Classify,
     Delay,
     DelayAuto,
     LoadValue,
@@ -32,9 +31,10 @@ from zcu_tools.program.v2 import (
     Readout,
     Reset,
     SweepCfg,
+    shot_sums,
     sweep2param,
 )
-from zcu_tools.program.v2.modules.readout import classification_processors
+from zcu_tools.program.v2.modules.readout import PulseReadoutCfg, circle_classifier
 
 from zcu_lab.v2.support import LinePlot, live_line
 from zcu_lab.v2.support.singleshot.util import readout_confusion_matrix
@@ -50,14 +50,14 @@ def _default_population_states() -> NDArray[np.int64]:
 
 @dataclass(frozen=True)
 class T1Result:
-    """Mean G/E/Other fractions in (delay, initial state, population state) order.
+    """G/E/Other shot counts summed over acquired rounds in (delay, initial state, population state) order.
 
     Lengths are in us. Initial states are 0/1 for I/pi preparation;
     population states are 0/1/2 for g/e/other. Unmeasured entries are NaN.
     """
 
     lengths: NDArray[np.float64]
-    signals: NDArray[np.float64]
+    counts: NDArray[np.float64]
     initial_states: NDArray[np.int64] = field(default_factory=_default_initial_states)
     population_states: NDArray[np.int64] = field(
         default_factory=_default_population_states
@@ -104,7 +104,8 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
             AxesSpec.Axis("initial_states", "Initial State", "None", dtype=np.int64),
             AxesSpec.Axis("lengths", "Time", "s", scale=1e-6, dtype=np.float64),
         ),
-        z=AxesSpec.Z("signals", "Population", "a.u.", dtype=np.float64),
+        z=AxesSpec.Z("counts", "Class counts", "count", dtype=np.float64),
+        data_variable=DataVariable("counts"),
         result_type=T1Result,
         cfg_type=T1Cfg,
         cfg_schema_version="3.0",
@@ -147,16 +148,25 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
         """Measure relaxation from both the unflipped and pi-prepared states.
 
         Reset, apply I or pi, wait a variable delay, then classify readout shots
-        using each ADC's corresponding readout classifier in raw normalized ADC
-        coordinates. Analyze only the first readout result. Return quantized
-        delays in us and G/E/Other populations with shape
+        using the first readout tone's circle classifier in raw normalized ADC
+        coordinates. Only that readout contributes to the saved class counts. Return quantized
+        delays in us and summed G/E/Other counts with shape
         (delay, initial state, population state).
         Uniform sampling requires a SweepCfg; nonuniform sampling also accepts
         an explicit delay list and rejects collisions on the hardware time grid.
         """
         # 1. Prepare the delay axis on the hardware grid without changing cfg.
         cfg = deepcopy(cfg)
-        processors = classification_processors(cfg.readout, require_other=True)
+        pulse_readout = isinstance(cfg.readout, PulseReadoutCfg)
+        ro_ch = (
+            cfg.readout.ro_ch
+            if isinstance(cfg.readout, PulseReadoutCfg)
+            else cfg.readout.tones[0].ro_ch
+        )
+        classifier = circle_classifier(cfg.readout, ro_ch=ro_ch)
+        axis = Classify(
+            "readout", tone=None if pulse_readout else 0, classifier=classifier
+        )
         soc, soccfg = context.soc, context.soccfg
         delay_table = None
         if cfg.uniform:
@@ -173,7 +183,8 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
         # 2. Display and retain G/E/Other for both preparations.
         init_g, init_e = self._make_viewers(context.plots)
 
-        def plot_fn(populations: NDArray[np.float64]) -> None:
+        def plot_fn(counts: NDArray[np.float64]) -> None:
+            populations = counts / counts.sum(axis=-1, keepdims=True)
             init_g.update(lengths, populations[:, 0].T)
             init_e.update(lengths, populations[:, 1].T)
 
@@ -234,14 +245,16 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
                     .declare_sweep("ge", 2)
                 )
 
-            # 4. Classify shots and average rounds, preserving cancelled partial data.
-            _ = builder.build_and_acquire_processed(
-                processed2signal_fn=raw_population_signal,
-                processors=processors,
+            # 4. Sum classified shots across rounds, preserving partial counts.
+            program = builder.build()
+            _ = builder.run_program_summed(
+                program,
+                sums2signal_fn=lambda sums: sums,
+                processor=shot_sums(program, [axis]),
                 rounds=cfg.rounds,
             )
 
-        return T1Result(lengths=lengths, signals=buffer.array)
+        return T1Result(lengths=lengths, counts=buffer.array)
 
     def analyze(
         self,
@@ -252,7 +265,7 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
     ) -> None:
         """Plot relaxation fits and T1/T1_b from both preparation populations.
 
-        source supplies delay times in us and G/E/Other populations. Skip the first
+        source supplies delay times in us and G/E/Other counts, normalized per row. Skip the first
         options.skip points, optionally correct readout with the saved cfg classifier's
         confusion matrix, and fit the two traces together. Publish the fit in
         plots; fitting errors propagate.
@@ -264,7 +277,10 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
             None if source.cfg is None else source.cfg.readout
         )
 
-        lens, populations = result.lengths, result.signals
+        lens, populations = (
+            result.lengths,
+            result.counts / result.counts.sum(axis=-1, keepdims=True),
+        )
 
         lens = lens[skip:]
         populations = populations[skip:]

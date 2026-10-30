@@ -1,4 +1,4 @@
-**Readers:** operator, agent. Run a single-carrier two-photon g/f scan and analyze acquired IQ with saved readout calibration.
+**Readers:** operator, agent. Run a single-carrier two-photon g/f scan and analyze acquired g/e/f counts with saved readout calibration.
 
 # Single-tone Raman g/f scan
 
@@ -20,10 +20,10 @@ Calibrate the readout using singleshot/qutrit_population at the same readout
 settings. The final population analysis requires the saved readout module's
 three-center g/e/f classifier and confusion matrix.
 Apply that acquired reference calibration to the readout library before opening
-or Resetting the Raman tab. Analysis requires the centroid3 classifier captured
-in this run's cfg. It rejects missing cfg, missing classifier, circle and linear
-classifiers. It never substitutes the current library or collects new references.
-Raw IQ is not a transfer probability or an experimental gate fidelity.
+or Resetting the Raman tab. Run requires the centroid3 classifier captured
+in this run's cfg and rejects missing, circle and linear classifiers before acquisition.
+Analysis uses the saved confusion matrix. It never substitutes the current library
+or collects new references. Preparation-label fractions are not gate fidelity.
 
 ## Configure the form
 
@@ -64,11 +64,12 @@ by readout. There is no reset or same-run reference preparation.
 
 ## Run and save
 
-Run acquires mean-sample ADC IQ with shape (points, shots).
+Run classifies each point's repetitions into g/e/f counts with shape (points, 3).
+The shots field sets repetitions per point in one round, not a saved shot axis.
 Points are ordered by detuning first, then gain.
-The measurement plot shows mean I and Q versus point.
+The measurement plot shows counts divided by the total count at each point.
 Stop retains completed rows and leaves unfinished rows as NaN.
-Save keeps raw IQ, actual detuning, gain and area together with this run's cfg.
+Save keeps counts, actual detuning, gain and area together with this run's cfg.
 It does not copy a later library change into an existing result.
 
 After changing source parameters or library bindings, Reset captures them again
@@ -79,8 +80,8 @@ Restart the application after changing a fixed framework dependency.
 
 ## Analyze and restore
 
-Open Analysis and click Analyze after Run. The measurement figure remains raw
-mean I/Q. Analysis shows raw g/e/f fractions and confusion-corrected g/e/f
+Open Analysis and click Analyze after Run. The measurement figure retains raw
+g/e/f fractions. Analysis normalizes counts and shows raw and confusion-corrected g/e/f
 estimates separately. Frequency and area modes show two sets of three curves.
 Frequency-area mode shows six maps with actual detuning and source-area axes.
 The title reports the saved training matrix's condition number and minimum
@@ -90,9 +91,10 @@ negative and above-one values. It does not clip or renormalize them.
 The e curve is a leakage-label estimate. Preparation contamination remains part
 of the calibration, so these estimates are not pure energy-state populations
 or experimental gate fidelity. A circle classifier's third class is Other, not f.
-Analysis rejects incomplete or nonfinite IQ and singular confusion matrices.
+Analysis rejects incomplete, nonfinite or empty counts and singular confusion matrices.
 
-Save All preserves raw IQ and this run's readout cfg in native data.h5.
+Save All preserves g/e/f counts and this run's readout cfg in native data.h5.
+Old raw-shot files are rejected with an error naming the missing counts variable.
 Data → Load Data → File… restores that saved run for Analyze without recalibration.
 A later live library edit cannot change its classification. Reload experiments
 discards results after confirmation and restores tab inputs, not acquired data.
@@ -116,7 +118,7 @@ that key. The default Raman Form already uses the arbitrary family.
 Each `n` maps to its saved cfg `expts`. Frequency holds gain start; area holds
 detuning start. Detuning is two-photon MHz; a positive offset raises the single
 carrier by half that value. The area unit is gain² us, not a calibrated angle.
-`shots` counts raw IQ shots per point; `relax_delay_us` uses us.
+`shots` sets repetitions per point; `relax_delay_us` uses us.
 
 Omitted inputs retain Form values and sources; explicit null goes unchanged to
 the owner. Python KEEP marks omission and is not a JSON value. Ordered
@@ -126,7 +128,7 @@ Form inputs stop before Run and retain owner paths and reasons.
 The report gives the saved confusion matrix condition number and minimum
 singular value. Full raw/corrected g/e/f arrays remain in the analysis summary
 and saved artifacts. There is no writeback proposal or question. Analysis
-failure still saves raw IQ; inspect each Save output receipt. Analysis never
+failure still saves g/e/f counts; inspect each Save output receipt. Analysis never
 reads live calibration or collects fresh references. Restart the MCP server
 after changing recipe declarations; GUI Reload does not reload that process.
 

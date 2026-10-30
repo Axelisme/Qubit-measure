@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Sequence
 from copy import deepcopy
 from dataclasses import dataclass
 from logging import getLogger
@@ -30,7 +30,7 @@ from zcu_tools.experiment.v2.runtime.acquire_cancel import AcquireCancelFlag
 from zcu_tools.program.acquisition import (
     AcquisitionContractError,
     CancelFlagProtocol,
-    ShotProcessor,
+    ShotSumProcessor,
     StoppedPartialAcquireError,
 )
 from zcu_tools.program.v2 import (
@@ -52,7 +52,6 @@ if TYPE_CHECKING:
         ScheduleStep,
         SignalSlot,
     )
-    from zcu_tools.program.herald import HeraldSpec
 
 T_Raw = TypeVar("T_Raw")
 T_KeywordRaw_contra = TypeVar("T_KeywordRaw_contra", contravariant=True)
@@ -104,19 +103,6 @@ class SynchronousAcquireKeywords(TypedDict, Generic[T_KeywordRaw_contra]):
     step_rounds: NotRequired[Literal[False]]
 
 
-class SynchronousDecimatedAcquireKeywords(
-    SynchronousAcquireKeywords[T_KeywordRaw_contra]
-):
-    """Synchronous decimated options, including the existing herald keyword.
-
-    herald=None or an empty sequence leaves decimated IQ traces unchanged.
-    A nonempty sequence raises ValueError because decimated acquisition does
-    not support herald selection. Other keywords follow SynchronousAcquireKeywords.
-    """
-
-    herald: NotRequired[Sequence[HeraldSpec] | None]
-
-
 class ProgramProtocol(Protocol[T_AcquireRaw_co, T_DecimatedRaw_co]):
     """Synchronous producer accepted by the builder's run methods.
 
@@ -127,10 +113,9 @@ class ProgramProtocol(Protocol[T_AcquireRaw_co, T_DecimatedRaw_co]):
     and the supplied cancel_flag; they check that flag before starting another
     round. Return the final raw data, retaining completed rounds on cancellation.
     Raise StoppedPartialAcquireError if cancelled before any round completes.
-    acquire does not accept herald; use acquire_processed with a heralded
-    processor for shot selection. Only acquire_decimated retains the herald
-    keyword; a nonempty sequence raises ValueError. This synchronous contract
-    uses the default step_rounds=False mode; stepped preparation is not a
+    Use acquire_summed with read axes for joint classification and selection.
+    This synchronous contract uses the default step_rounds=False mode;
+    stepped preparation is not a
     completed raw result.
     Other producer errors propagate to the builder's partial-result policy.
     """
@@ -144,34 +129,32 @@ class ProgramProtocol(Protocol[T_AcquireRaw_co, T_DecimatedRaw_co]):
     def acquire_decimated(
         self,
         soc: object,
-        **kwargs: Unpack[SynchronousDecimatedAcquireKeywords[T_DecimatedRaw_co]],
+        **kwargs: Unpack[SynchronousAcquireKeywords[T_DecimatedRaw_co]],
     ) -> T_DecimatedRaw_co: ...
 
 
-class ProcessedProgramProtocol(ProgramProtocol[object, object], Protocol):
-    """Program with per-ADC shot processing in addition to IQ acquisition.
+class SummedProgramProtocol(ProgramProtocol[object, object], Protocol):
+    """Program with one joint-ADC processor returning per-point shot sums.
 
-    processors maps ADC numbers to normalized float64 (shots, reads, 2) IQ
-    processors returning (shots, out_reads, N). rounds is the software average
-    count. With step_rounds=False, return ADC-ordered cumulative arrays of shape
-    (out_reads, *point_dims, N); True prepares only and returns None. Native
-    options include progress, round_hook and cancel_flag as in ProgramProtocol.
-    threshold, angle and herald are not supported. See program.acquire_processed
-    for payload failures, normalization and completed-round cancellation policy.
+    processor receives ADC-keyed normalized float64 (points, reps, reads, 2)
+    arrays and returns float64 (points, *axes). Completed rounds add without
+    normalization. round_hook and final data have shape (*point_dims, *axes).
+    rounds, step_rounds, native keywords and cancellation follow ProgramProtocol;
+    step_rounds=True prepares only, returning None. threshold, angle and herald
+    raise ValueError. See program.acquire_summed for shape/dtype validation.
     """
 
-    def acquire_processed(
+    def acquire_summed(
         self,
         soc: object,
         *,
-        processors: Mapping[int, ShotProcessor],
+        processor: ShotSumProcessor,
         rounds: int = 1,
         step_rounds: bool = False,
         **qick_options: object,
-    ) -> list[NDArray[np.float64]] | None: ...
+    ) -> NDArray[np.float64] | None: ...
 
 
-ProcessedProgramT = TypeVar("ProcessedProgramT", bound=ProcessedProgramProtocol)
 ProgramT = TypeVar("ProgramT", bound=ProgramProtocol[Any, Any])
 ProgramFactory: TypeAlias = Callable[..., ProgramT]
 
@@ -455,75 +438,41 @@ class ProgramBuilder(ModuleFacade, Generic[ProgramT]):
             acquire_kwargs=acquire_kwargs,
         )
 
-    def build_and_acquire_processed(
-        self: ProgramBuilder[ProcessedProgramT],
-        *,
-        processors: Mapping[int, ShotProcessor],
-        processed2signal_fn: Callable[[list[NDArray[np.float64]]], SignalArray],
-        rounds: int = 1,
-        options: AcquireOptions | None = None,
-        **acquire_kwargs: object,
-    ) -> SignalArray:
-        """Build once and run processed acquisition with an explicit converter.
-
-        processors maps declared ADC numbers to ShotProcessor callables.
-        processed2signal_fn converts ADC-ordered (out_reads, *point_dims, N)
-        payloads to the owner's slot shape, for both completed rounds and final
-        data. No builder-wide or default IQ converter is used. For heralded
-        payloads the converter calls herald_ratio and owns any fraction slot.
-        rounds must be a positive integer excluding bool. options controls
-        retry, progress and stop; acquire_kwargs forwards native QICK options.
-        See the class contract for build errors, cancellation and partial data.
-        """
-        self._schedule.ensure_active()
-        self._ensure_modules()
-        _require_positive_rounds(rounds)
-        selected_options = AcquireOptions() if options is None else options
-        if selected_options.retry < 0:
-            raise ValueError("retry must be non-negative")
-        if self._schedule.check_stop_requested():
-            return self._default_slot().view
-        return self.run_program_processed(
-            self._build_program(),
-            processors=processors,
-            processed2signal_fn=processed2signal_fn,
-            rounds=rounds,
-            options=selected_options,
-            **acquire_kwargs,
-        )
-
-    def run_program_processed(
+    def run_program_summed(
         self,
-        program: ProcessedProgramProtocol,
+        program: SummedProgramProtocol,
         *,
-        processors: Mapping[int, ShotProcessor],
-        processed2signal_fn: Callable[[list[NDArray[np.float64]]], SignalArray],
+        processor: ShotSumProcessor,
+        sums2signal_fn: Callable[[NDArray[np.float64]], SignalArray],
         rounds: int = 1,
         options: AcquireOptions | None = None,
         **acquire_kwargs: object,
     ) -> SignalArray:
-        """Run caller-owned processed acquisition, reusing it across retries.
+        """Run a compiled program with one processor and an explicit sum converter.
 
-        processors and required processed2signal_fn follow
-        build_and_acquire_processed. The same converter receives cumulative
-        round updates and final data; IQ defaults and builder-wide conversion
-        are never selected. rounds, options, native keywords and partial-result
-        policy follow run_program. This method requires synchronous results;
-        a producer returning None raises ValueError during conversion.
+        Build program first, then resolve any read labels in processor.
+        sums2signal_fn converts cumulative and final (*point_dims, *axes) sums
+        to the default signal slot's array shape. No IQ or builder-wide converter
+        is selected. rounds is a positive software round count. options controls
+        retry, progress and data stop exactly as run_program; native
+        acquire_kwargs pass through unchanged. Retries reuse program and reset
+        acquisition sums. None results raise ValueError during conversion because
+        this runner requires synchronous acquisition. Cancellation retains
+        completed-round slot data; a stop before any data retains initial NaNs.
         """
 
-        def convert(raw: list[NDArray[np.float64]] | None) -> SignalArray:
+        def convert(raw: NDArray[np.float64] | None) -> SignalArray:
             if raw is None:
-                raise ValueError("processed builder requires synchronous acquisition")
-            return processed2signal_fn(raw)
+                raise ValueError("summed builder requires synchronous acquisition")
+            return sums2signal_fn(raw)
 
         return self._run_program(
-            acquire=program.acquire_processed,
+            acquire=program.acquire_summed,
             rounds=rounds,
             raw2signal_fn=convert,
             default_raw2signal_fn=convert,
             options=AcquireOptions() if options is None else options,
-            acquire_kwargs=dict(acquire_kwargs, processors=processors),
+            acquire_kwargs=dict(acquire_kwargs, processor=processor),
         )
 
     def run_program_decimated(

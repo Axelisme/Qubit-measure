@@ -1,6 +1,6 @@
 # zcu_lab
 
-**Last updated:** 2026-10-28，lab 描述與組合根
+**Last updated:** 2026-10-30，實驗定義的離線驗收
 
 **讀者：** lab-author、agent。查找實驗室定義的套件邊界、註冊入口與操作文件。
 
@@ -96,6 +96,50 @@ Analyze 預期擬合失敗回 AnalysisResult(result=None, status="failed", reaso
 
 有擬合的分析在 summary 附 `fit_quality`，建議使用 `zcu_tools.analysis.fitting.compute_fit_quality`。實驗定義者負責選擇各 fit 的資料、參數及 covariance；GE 的 joint、ground、excited 可分開回報。這是實驗定義者的約定，框架不檢查、不特別解讀品質，也不修改 optimizer 或 writeback 政策。
 
-本套件的實驗定義不寫個別測試。Framework owner 用最小合成 workflow／adapter 驗證 runtime、NotebookAdapter、GUI、MCP 與共用工具，不 import 本套件。刪掉 `zcu_lab/` 後，整套 pytest 仍須通過，包含 slow；實驗定義錯誤由 GUI 啟動或載入直接回報。Import-linter C16 禁止 `zcu_tools` 反向依賴本套件。
+本套件的實驗定義不寫個別測試。Framework owner 用最小合成 workflow／adapter 驗證 runtime、NotebookAdapter、GUI、MCP 與共用工具，不 import 本套件。刪掉 `zcu_lab/` 後，整套 pytest 仍須通過，包含 slow。Import-linter C16 禁止 `zcu_tools` 反向依賴本套件。
 
 Predictor 使用 entry 的 `predictors/*.json` 或手動參數，不從實驗室 component 轉換輸入。
+
+## 實驗定義的離線驗收
+
+實驗定義改動，包含 live plot 與分析圖的畫面改動，依 [UI 驗證的實驗定義規則](../tests/README.md#實驗定義) 執行離線 probe。
+該節列出報告檢查與 agent 逐張 PNG 判讀的完成條件。框架 UI 的 ComponentDriver 驗收仍依該頁的框架 UI 分支。
+
+在目前 worktree 中執行以下範例。`repo` 指向目前 worktree，供 `uv --directory` 選用該 worktree 的 interpreter。
+`main_repo` 是 Git common dir 的上層主 checkout，任務 scratch 放在這裡，清除 lane 後仍保留。
+先將 `<task-id>` 換成既有任務名稱，並在該任務的 scratch 準備 `cfg.yaml`。
+此例選用 `FreqExp`，cfg 必須是它的完整 core Cfg，不是 GUI Form 輸入或尚未解析的 library 引用。
+改測其他實驗時，替換可信任的 `module:class`，該類別須可無參數建立且提供 `AXES_SPEC`。
+依 cfg 實際 generator／ADC 通道調整 `--n-gens`、`--n-readouts` 與每條 `--route GEN:ADC`，不要照抄接線。
+
+```bash
+repo="$(git rev-parse --show-toplevel)"
+git_common_dir="$(git rev-parse --path-format=absolute --git-common-dir)"
+main_repo="$(dirname "$git_common_dir")"
+scratch="$main_repo/.agent_state/plans/<task-id>/scratch/experiment-probe"
+mkdir -p "$scratch"
+# Prepare cfg.yaml in scratch before running this command.
+env -u QT_QPA_PLATFORMTHEME QT_QPA_PLATFORM=offscreen MPLBACKEND=Agg \
+  OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMBA_NUM_THREADS=1 \
+  uv run --directory "$repo" --no-sync -- python -m zcu_tools.experiment.probe \
+  zcu_lab.v2.onetone.freq.core:FreqExp \
+  --cfg "$scratch/cfg.yaml" \
+  --environment white_noise --std-adc 1.0 --seed 7 \
+  --n-gens 2 --n-readouts 1 --route 0:0 \
+  --output-dir "$scratch/output" \
+  > "$scratch/report.json" 2> "$scratch/probe.log"
+status=$?
+printf '%s\n' "$status" > "$scratch/exit-status.txt"
+```
+
+`--cfg` 接受 YAML 或 JSON，入口依實驗的 cfg 型別驗證。要指定分析選項時，加入 `--options "$scratch/options.yaml"`，也可使用 JSON。
+入口依類別宣告的 `Options` 型別驗證選項，未宣告時傳入解碼資料。省略選項時，有 `Options` 就建立 `Options()`，否則傳 `None`。
+需要物理模擬時，把 white-noise 的環境與接線參數換成 `--environment single_fluxonium --environment-config "$scratch/environment.yaml"`。
+設定檔格式見 [single_fluxonium](../lib/zcu_tools/experiment/single_fluxonium/README.md)。
+
+入口不建立 GUI，會自行關閉它建立的環境。改用 Python 的 `probe()` 時，由 caller 在 `finally` 清理 backend 與 devices，包含失敗路徑。
+輸出目錄含 native `data.h5` 與以 `live-`／`analysis-` 開頭的 PNG。同目錄重跑會覆寫同名輸出，請為不同驗收案例選不同目錄。
+`report.json` 包含 Result shape／dtype、讀回比較、分析摘要、PNG 路徑與各階段耗時。
+階段失敗時，JSON 的 `failed_stage` 與 `exception` 保留失敗階段、例外型別及訊息，traceback 留在 `probe.log`，module shell 回非零 exit status。
+Import、cfg／options 驗證或環境建立失敗會直接拋錯，此時可能沒有 JSON 報告，應先讀錯誤輸出。
+Exit 0 仍須依驗收規則確認 `roundtrip_equal` 為 true，並由 agent 親自看完每張 PNG，把判讀寫入 task scratch。

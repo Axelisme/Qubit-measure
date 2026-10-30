@@ -92,13 +92,15 @@ class HeraldingLenRabiReport(RecipeReport):
 
 @recipe(
     "heralding_len_rabi",
-    description="Run ground-heralded length Rabi; save selected IQ, pass fraction and analysis.",
+    description="Run ground-heralded length Rabi; save per-class shot sums and analysis.",
 )
 async def heralding_len_rabi(
     session: RecipeSession, inputs: HeraldingLenRabiInputs
 ) -> HeraldingLenRabiReport:
     """Sweep pulse length at fixed gain to calibrate pi and pi/2 rotations.
 
+    Store per-class shot sums; compute herald-g conditional IQ for fitting.
+    Readout must include a GE Post circle classifier with calibrated radius.
     After optional reset, herald ground with the saved readout classifier, apply
     optional initialization and the drive, then read accepted signal shots at each
     length. Fit the Rabi oscillations to estimate pi and pi/2

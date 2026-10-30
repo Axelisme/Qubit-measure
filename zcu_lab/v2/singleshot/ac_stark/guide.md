@@ -28,16 +28,18 @@ Proposes the fitted AC-Stark coefficient at `$qubit.ext.ac_stark_coeff`, in phot
 
 Calibrate the readout with singleshot/ge Primary and Post; run after the dispersive-shift experiment has set '`$qubit.ext.chi`' / '`$resonator.kappa`'. Sweep the Stark gain across the onset and the probe frequency around the qubit line.
 
-## Saved populations
+## Saved counts
 
-Save keeps `populations` shaped `(Ngain, Nfreq, 3)` in `[g,e,other]` order, with
+Save keeps `counts` shaped `(Ngain, Nfreq, 3)` in `[g,e,other]` order, with
 `population_states=[0,1,2]`. Other counts shots outside the accepted circles
 or tied between them. It is not a calibrated leakage population.
-Sweep coordinates and units are unchanged. Cfg schema remains 3.0.
+Each point sums to the shots acquired across completed rounds. Live plots and
+Analyze divide each point by its total before displaying populations or applying
+the saved confusion matrix. Sweep coordinates and units are unchanged. Cfg schema
+remains 3.0.
 
-Old two-column G/E files are not supported by the three-state analysis.
-Load rejects files with the former `GE Population` axis label. If a file loads
-with two columns, Analyze rejects it before correction or fitting. Acquire a
-new run. Load and Analyze do not reconstruct Other from G/E.
+Old files storing `populations` instead of `counts` are unsupported. Load reports
+the missing `counts` variable. Acquire a new run; Load does not convert stored
+fractions to counts.
 
 **Last updated:** 2026-10-29
