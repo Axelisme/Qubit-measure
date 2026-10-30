@@ -20,7 +20,7 @@ class _TriggerOptions(TypedDict, total=False):
 
     ddr4/mr enable the corresponding capture buffers (default False).
     tag names this occurrence for time lookup (default None).
-    timeline places at its end plus t; None retains native reference timing.
+    timeline places at its end plus t; None uses scope or native reference timing.
     """
 
     ddr4: bool
@@ -130,16 +130,43 @@ class TimelineBuilder:
         finally:
             self._action_stack.pop()
 
+    def timeline(self, name: str) -> AbstractContextManager[None]:
+        """Record a scoped default for omitted timeline arguments.
+
+        Applies to emit, emit_parallel, pulse, trigger, delay_timeline, sync and
+        the repeat parent. Branch case emissions use the same default.
+        name must exist at replay (default or forked); errors surface at build.
+        Explicit names win, nested scopes override and exit restores the prior
+        default. No fork/join or native delay/delay_auto change occurs. Close
+        before build; recording after build raises ValueError.
+        """
+        self._ensure_recording()
+        return self._timeline(name)
+
+    @contextmanager
+    def _timeline(self, name: str) -> Generator[None]:
+        with self._capture() as actions:
+            yield
+        recorded = tuple(actions)
+
+        def replay(prog: TimelineProgramV2) -> None:
+            with prog.timeline(name):
+                for action in recorded:
+                    action(prog)
+
+        self._record(replay)
+
     def repeat(
         self,
         name: str,
         n: int | str,
         *,
-        timeline: str = "default",
+        timeline: str | None = None,
         range_hint: tuple[int, int] | None = None,
     ) -> AbstractContextManager[None]:
         """Record a repeated body; replay program-owned timing rules at build.
 
+        None timeline selects the scoped name, or default outside a scope.
         name names the counter. n is a nonnegative integer or an existing
         register name. Register counts require a guaranteed closed nonnegative
         integer range_hint; fixed counts forbid it. Entry syncs timeline, each
@@ -157,7 +184,7 @@ class TimelineBuilder:
         self,
         name: str,
         n: int | str,
-        timeline: str,
+        timeline: str | None,
         range_hint: tuple[int, int] | None,
     ) -> Generator[None]:
         with self._capture() as actions:
@@ -260,7 +287,8 @@ class TimelineBuilder:
     ) -> None:
         """Record an emission and declare this object once during initialization.
 
-        None selects default timeline. tag names this occurrence, not the module.
+        None selects the scoped name, or default outside a scope.
+        tag names this occurrence, not the module.
         Module declaration/lowering errors surface at build.
         """
         self._ensure_recording()
@@ -276,11 +304,12 @@ class TimelineBuilder:
         self,
         branches: Sequence[Sequence[Module]],
         *,
-        timeline: str,
+        timeline: str | None = None,
         tag: str | None = None,
     ) -> None:
         """Record ordered branches at one timeline origin and merge their ends.
 
+        None selects the scoped name, or default outside a scope.
         Each branch is an ordered module sequence; first encounters declare
         objects in branch/child order. The sequences are captured, modules are
         borrowed. tag belongs to the first child in author order. Multiple
@@ -319,11 +348,12 @@ class TimelineBuilder:
         self,
         t: float | QickParam | str,
         *,
-        timeline: str = "default",
+        timeline: str | None = None,
         tag: str | None = None,
     ) -> None:
         """Record end += t without moving reference; tag exposes static end.
 
+        None timeline selects the scoped name, or default outside a scope.
         t is us, a QICK parameter, or a certified nonnegative cycle register
         name. Unknown/wait-only timelines, unknown bounds and overflow fail
         during build, as in TimelineProgramV2.delay_timeline.
@@ -352,8 +382,11 @@ class TimelineBuilder:
         """
         self._record(lambda prog: prog.join(*sources, into=into))
 
-    def sync(self, *, timeline: str = "default") -> None:
-        """Record reference advance to timeline end; unknown names fail at build."""
+    def sync(self, *, timeline: str | None = None) -> None:
+        """Record reference advance to the selected end; unknown names fail at build.
+
+        None selects the scoped name, or default outside a scope.
+        """
         self._record(lambda prog: prog.sync(timeline=timeline))
 
     def pulse(
@@ -368,9 +401,9 @@ class TimelineBuilder:
         """Record playback of a declared pulse template on generator ch.
 
         name identifies a template declared by an emitted module. t is us or
-        "auto"; tag identifies this occurrence. None timeline retains native
-        reference placement, otherwise place at timeline end plus t and advance
-        that end. Missing declarations/unsafe overlap fail at build.
+        "auto"; tag identifies this occurrence. None uses the scoped name, or
+        native reference placement outside a scope. Names place at end plus t
+        and advance that end. Missing declarations/unsafe overlap fail at build.
         """
         self._record(lambda prog: prog.pulse(ch, name, t, tag, timeline=timeline))
 
@@ -390,8 +423,8 @@ class TimelineBuilder:
         parameter; None selects QICK's 10-cycle default. Keyword-only ddr4/mr
         enable capture buffers, default
         False. tag names the occurrence, default None. timeline defaults to
-        None (native reference); a name places at its end plus t and advances
-        through ADC/trigger completion. Named t=None, unknown resources and
+        None (scoped name, or native reference outside a scope); a name places
+        at its end plus t and advances through ADC/trigger completion. Named t=None, unknown resources and
         invalid timing fail at build. Unknown keywords raise TypeError now.
         """
         self._ensure_recording()

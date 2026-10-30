@@ -81,6 +81,21 @@ class _RegisterOptions(TypedDict, total=False):
     init: QickRawParam
 
 
+class _TimelineScope(Macro):
+    """Validate a lexical default without marking it used or changing any ends."""
+
+    def __init__(self, book: TimelineBook, name: str):
+        self.book = book
+        self.name = name
+
+    def preprocess(self, prog) -> None:
+        super().preprocess(prog)
+        self.book.require(self.name)
+
+    def translate(self, prog) -> None:
+        pass
+
+
 class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
     """Author native QICK hooks with optional timeline ends (times in us).
 
@@ -105,6 +120,7 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         self._resource_owners: dict[tuple[str, str | int], Module] = {}
         self._declaring = False
         self._building_body = False
+        self._timeline_default: str | None = None
         self._branch_serial = 0
         self._emission_serial = 0
         self._emission_scope: tuple[int, int] | None = None
@@ -188,6 +204,7 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         """
         # QICK 0.2.436 provides no public shell boundary hooks.
         self._reset_resources()
+        self._timeline_default = None
         self._emission_serial = 0
         self._emission_scope = None
         self._declared_modules.clear()
@@ -407,12 +424,33 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         self._remember_resource_owner("register address", self.reg_dict[result].addr)
         return result
 
+    @contextmanager
+    def timeline(self, name: str) -> Generator[None]:
+        """Select an existing name for omitted timeline arguments in this scope.
+
+        Applies to emit, emit_parallel, pulse, trigger, delay_timeline, sync and
+        the repeat parent. Branch case emissions use the same default. Nested
+        scopes override it and restore it on exit, including exceptions.
+        Explicit names win, including default. This neither forks
+        nor joins and does not affect native delay/delay_auto. Call in _body;
+        unknown names fail during compile, like other timeline operations.
+        """
+        if not self._building_body:
+            raise ValueError("timeline must be called in _body")
+        self.append_macro(_TimelineScope(self._timeline_book, name))
+        previous = self._timeline_default
+        self._timeline_default = name
+        try:
+            yield
+        finally:
+            self._timeline_default = previous
+
     def emit(
         self, module: Module, *, timeline: str | None = None, tag: str | None = None
     ) -> None:
         """Emit a declared module once, with a fresh timing/tag occurrence.
 
-        Omitted timeline selects ordinary default, not reference time. Internal
+        None selects the scoped name, or ordinary default outside a scope. Internal
         events share its current end; actual output ends plus owner post-delay
         determine the ceiled end without moving reference time.
         Branch/ScanWith retain native path/iteration reference synchronization.
@@ -421,6 +459,7 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         """
         if not any(module is declared for declared in self._declared_modules):
             raise ValueError(f"{module.name}: module must be declared before emit")
+        timeline = timeline if timeline is not None else self._timeline_default
         start = len(self.macro_list)
         previous_scope = self._emission_scope
         emission_name = f"{module.name} emission {self._emission_serial}"
@@ -445,11 +484,12 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         self,
         branches: Sequence[Sequence[Module]],
         *,
-        timeline: str,
+        timeline: str | None = None,
         tag: str | None = None,
     ) -> None:
         """Lower ordered Module sequences at one placement origin and merge ends.
 
+        None selects the scoped name, or default outside a scope.
         Call from the body or a declared Module's lower. Body calls allocate
         their own emission naming scope. Each complete branch keeps its
         internal order. The unique reference-advancing sequence emits last;
@@ -459,6 +499,8 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         channel physical-end and structured case/backedge guards still apply.
         tag belongs to the first child in author order, before any exchange.
         """
+        selected = timeline if timeline is not None else self._timeline_default
+        parent = selected if selected is not None else "default"
         previous_scope = self._emission_scope
         if previous_scope is None:
             self._emission_scope = (self._emission_serial, 0)
@@ -477,7 +519,7 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
             finally:
                 del self.macro_list[start:]
             self.append_macro(
-                TimelineParallel(self._timeline_book, timeline, lowered, names)
+                TimelineParallel(self._timeline_book, parent, lowered, names)
             )
         finally:
             self._emission_scope = previous_scope
@@ -571,11 +613,12 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         self,
         t: float | QickParam | str,
         *,
-        timeline: str = "default",
+        timeline: str | None = None,
         tag: str | None = None,
     ) -> None:
         """Add time to a timeline without advancing reference or channel timestamps.
 
+        None selects the scoped name, or default outside a scope.
         Scalars and QickParam use us; the complete end plus t is ceiled to
         tProc cycles. In an emission, pending actual output ends are included
         before adding t as the owner post-delay. A string names an
@@ -584,7 +627,15 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         ValueError during compilation. tag exposes static ends as parameter 't';
         runtime ends have no affine get_time_param value.
         """
-        self.append_macro(TimelineAdvance(self._timeline_book, timeline, t, tag=tag))
+        selected = timeline if timeline is not None else self._timeline_default
+        self.append_macro(
+            TimelineAdvance(
+                self._timeline_book,
+                selected if selected is not None else "default",
+                t,
+                tag=tag,
+            )
+        )
 
     def set_timestamp(
         self,
@@ -668,11 +719,12 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         name: str,
         n: int | str,
         *,
-        timeline: str = "default",
+        timeline: str | None = None,
         range_hint: tuple[int, int] | None = None,
     ) -> Generator[None]:
         """Repeat a body n times on parent timeline (times remain in us).
 
+        None selects the scoped name, or default outside a scope.
         Entry syncs the parent. Each iteration closes parent and local ends;
         exit discards local names and leaves parent zero. Fixed counts exactly
         rebase outer ends. Unknown counts or case advances debit outer ends on
@@ -688,6 +740,8 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         and differing Branch advances are supported. Native delay_reg_auto inside
         the body raises ValueError; it is not a timeline duration operation.
         """
+        selected = timeline if timeline is not None else self._timeline_default
+        timeline = selected if selected is not None else "default"
         minimum = _repeat_minimum(name, n, range_hint)
         if n == 0:
             self.sync(timeline=timeline)
@@ -733,14 +787,20 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         """
         self.append_macro(TimelineJoin(self._timeline_book, sources, into))
 
-    def sync(self, *, timeline: str = "default") -> None:
+    def sync(self, *, timeline: str | None = None) -> None:
         """Move reference to the chosen end and floor every rebased end at zero.
 
+        None selects the scoped name, or default outside a scope.
         Only default exists initially; other names require fork in _body.
         Fully consumed wait-only bounds become ordinary zero ends again.
         Unknown names or unprovable swept floors raise ValueError during compile.
         """
-        self.append_macro(TimelineSync(self._timeline_book, timeline))
+        selected = timeline if timeline is not None else self._timeline_default
+        self.append_macro(
+            TimelineSync(
+                self._timeline_book, selected if selected is not None else "default"
+            )
+        )
 
     def send_readoutconfig(
         self, ch: int, name: str, *args, timeline: str | None = None, **kwargs
@@ -862,10 +922,13 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
     def trigger(self, *args, timeline: str | None = None, **kwargs) -> None:
         """Trigger ADC/tt/pins at native t or timeline end+t and advance named end.
 
+        None uses the scoped name, or native reference timing outside a scope.
+
         Native args select ros/tts/pins, t, width (us), ddr4/mr and tag. Named end
         includes ADC integration and trigger width, rounded up to tProc cycles.
         Named t=None raises ValueError at entry; native special values are unchanged.
         """
+        timeline = timeline if timeline is not None else self._timeline_default
         super().trigger(*args, **kwargs)
         if timeline is not None:
             source = self._pop_native(Trigger)
@@ -880,11 +943,14 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
     ) -> None:
         """Play a pulse at native t or timeline end+t, advancing a named end.
 
+        None uses the scoped name, or native reference timing outside a scope.
+
         Native args are t=0 (us or 'auto'), tag=None. Named 'auto' takes the
         provably later timeline/channel end. Named end includes waveform length,
         rounded up to tProc cycles. Crossing swept maxima raise ValueError with
         a delay_timeline hint; native declaration errors propagate.
         """
+        timeline = timeline if timeline is not None else self._timeline_default
         super().pulse(ch, name, *args, **kwargs)
         if timeline is not None:
             source = self._pop_native(Pulse)

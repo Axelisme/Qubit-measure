@@ -178,9 +178,13 @@ class TimelineBook:
         self.math.check_end(end)
         self.ends[name] = end
 
-    def end(self, name: str, *, placement: bool = False) -> Time:
+    def require(self, name: str) -> None:
+        """Reject unknown names without marking a timeline used or changing its end."""
         if name not in self.ends:
             raise ValueError(f"{name}: unknown timeline; declare it with fork in _body")
+
+    def end(self, name: str, *, placement: bool = False) -> Time:
+        self.require(name)
         if self.used is not None:
             self.used.add(name)
         if placement and name in self.waiting:

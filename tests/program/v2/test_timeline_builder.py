@@ -4,7 +4,7 @@ The handwritten parity oracle remains until TimelineProgramV2 author hooks are
 retired; changes to the common compiler must preserve parity, not old ASM bytes.
 """
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 
 import numpy as np
 import pytest
@@ -177,14 +177,15 @@ def test_builder_fork_emit_join_matches_native_and_captures_target_names(mock_so
     assert actual.prog_list == expected.prog_list
 
 
-@pytest.mark.parametrize("structure", ["repeat", "branch"])
+@pytest.mark.parametrize("structure", ["repeat", "branch", "timeline"])
 def test_builder_build_requires_closed_recording_contexts(mock_soccfg, structure):
     builder = v2.TimelineBuilder(mock_soccfg)
-    context = (
-        builder.repeat("body", 2)
-        if structure == "repeat"
-        else builder.branch(by="scan")
-    )
+    if structure == "repeat":
+        context = builder.repeat("body", 2)
+    elif structure == "branch":
+        context = builder.branch(by="scan")
+    else:
+        context = builder.timeline("default")
     if structure == "branch":
         builder.add_loop("scan", 1)
     with context as branch:
@@ -400,6 +401,7 @@ def test_native_add_sweep_declares_axis_and_returns_uniform_parameter(mock_soccf
         "join",
         "repeat",
         "branch",
+        "timeline",
     ],
 )
 def test_builder_freezes_after_build(mock_soccfg, operation):
@@ -423,6 +425,7 @@ def test_builder_freezes_after_build(mock_soccfg, operation):
         "join": lambda: builder.join("default", into="default"),
         "repeat": lambda: builder.repeat("later", 2),
         "branch": lambda: builder.branch(by="later"),
+        "timeline": lambda: builder.timeline("default"),
     }
     with pytest.raises(ValueError, match="(frozen|built)"):
         actions[operation]()
@@ -480,7 +483,7 @@ def test_conflicting_module_objects_name_both_owners(mock_soccfg, resource, fron
         assert repr(module) in str(error.value)
 
 
-def _pulse(name, ch=1):
+def _pulse(name, ch=1, *, pulse_id: str | None = None):
     return v2.Pulse(
         name,
         v2.PulseCfg(
@@ -490,6 +493,7 @@ def _pulse(name, ch=1):
             gain=0.5,
             waveform=ConstWaveformCfg(length=0.1),
         ),
+        pulse_id=pulse_id,
     )
 
 
@@ -706,6 +710,239 @@ def test_failed_build_also_freezes_builder(mock_soccfg):
         builder.build()
     with pytest.raises(ValueError, match="frozen"):
         builder.emit(_readout("later"))
+
+
+def _compile_scoped(
+    soccfg: QickConfig,
+    frontend: str,
+    body: Callable[[v2.TimelineBuilder | v2.TimelineProgramV2], None],
+    modules: Sequence[v2.Module] = (),
+    *,
+    loops: Sequence[tuple[str, int]] = (),
+) -> v2.TimelineProgramV2:
+    if frontend == "builder":
+        builder = v2.TimelineBuilder(soccfg, initial_delay=0, relax_delay=0)
+        for name, count in loops:
+            builder.add_loop(name, count)
+        body(builder)
+        return builder.build()
+
+    class Native(v2.TimelineProgramV2):
+        def _initialize(self, cfg):
+            for name, count in loops:
+                self.add_loop(name, count)
+            for module in modules:
+                self.declare(module)
+
+        def _body(self, cfg):
+            body(self)
+
+    return Native(soccfg, initial_delay=0, relax_delay=0)
+
+
+@pytest.mark.parametrize("frontend", ["builder", "native"])
+def test_timeline_scope_nested_override_and_restore_match_explicit_program(
+    mock_soccfg, frontend
+):
+    pause = v2.Delay("pause", 0.2)
+
+    def scoped(program: v2.TimelineBuilder | v2.TimelineProgramV2) -> None:
+        program.fork("default", into=["outer", "inner"])
+        with program.timeline("outer"):
+            program.delay_timeline(0.1)
+            program.emit(pause)
+            program.delay_timeline(0.3, timeline="default")
+            with program.timeline("inner"):
+                program.emit(pause, timeline=None)
+                program.emit(pause, timeline="outer")
+                program.sync()
+            program.delay_timeline(0.4)
+            program.sync()
+        program.delay_timeline(0.5)
+        program.sync()
+
+    class Explicit(v2.TimelineProgramV2):
+        def _initialize(self, cfg):
+            self.declare(pause)
+
+        def _body(self, cfg):
+            self.fork("default", into=["outer", "inner"])
+            self.delay_timeline(0.1, timeline="outer")
+            self.emit(pause, timeline="outer")
+            self.delay_timeline(0.3, timeline="default")
+            self.emit(pause, timeline="inner")
+            self.emit(pause, timeline="outer")
+            self.sync(timeline="inner")
+            self.delay_timeline(0.4, timeline="outer")
+            self.sync(timeline="outer")
+            self.delay_timeline(0.5, timeline="default")
+            self.sync(timeline="default")
+
+    expected = Explicit(mock_soccfg, initial_delay=0, relax_delay=0)
+    actual = _compile_scoped(mock_soccfg, frontend, scoped, (pause,))
+    assert actual.prog_list == expected.prog_list
+    actual.compile()
+    assert actual.prog_list == expected.prog_list
+
+
+@pytest.mark.parametrize("frontend", ["builder", "native"])
+def test_timeline_scope_parallel_native_outputs_and_reference_delays_match_explicit(
+    mock_soccfg, frontend
+):
+    readout, drive = _readout(), _pulse("drive", pulse_id="scoped_drive")
+
+    def scoped(program: v2.TimelineBuilder | v2.TimelineProgramV2) -> None:
+        program.fork("default", into="work")
+        with program.timeline("work"):
+            program.delay_timeline(0.1)
+            program.emit_parallel([[readout], [drive]])
+            program.pulse(1, "scoped_drive", t=0.1, tag="scoped_pulse")
+            program.trigger(ros=[0], t=0.05, tag="scoped_trigger")
+            program.delay(0.02, tag="native_delay")
+            program.delay_auto(0.03, tag="native_auto")
+            program.pulse(1, "scoped_drive", timeline="default", tag="override")
+        program.delay_auto()
+        program.pulse(1, "scoped_drive", tag="native_after")
+
+    class Explicit(v2.TimelineProgramV2):
+        def _initialize(self, cfg):
+            self.declare(readout)
+            self.declare(drive)
+
+        def _body(self, cfg):
+            self.fork("default", into="work")
+            self.delay_timeline(0.1, timeline="work")
+            self.emit_parallel([[readout], [drive]], timeline="work")
+            self.pulse(1, "scoped_drive", t=0.1, timeline="work", tag="scoped_pulse")
+            self.trigger(ros=[0], t=0.05, timeline="work", tag="scoped_trigger")
+            self.delay(0.02, tag="native_delay")
+            self.delay_auto(0.03, tag="native_auto")
+            self.pulse(1, "scoped_drive", timeline="default", tag="override")
+            self.delay_auto()
+            self.pulse(1, "scoped_drive", tag="native_after")
+
+    expected = Explicit(mock_soccfg, initial_delay=0, relax_delay=0)
+    actual = _compile_scoped(mock_soccfg, frontend, scoped, (readout, drive))
+    assert actual.prog_list == expected.prog_list
+    actual.compile()
+    assert actual.prog_list == expected.prog_list
+
+
+@pytest.mark.parametrize("frontend", ["builder", "native"])
+def test_timeline_scope_repeat_parent_and_case_emissions_match_explicit_program(
+    mock_soccfg, frontend
+):
+    readout = _readout()
+
+    def scoped(program: v2.TimelineBuilder | v2.TimelineProgramV2) -> None:
+        program.fork("default", into="work")
+        with program.timeline("work"):
+            program.delay_timeline(0.1)
+            with program.repeat("body", 2), program.branch(by="scan") as branch:
+                with branch.case():
+                    program.emit(readout)
+                    program.delay(0.02)
+                with branch.case():
+                    program.delay_timeline(0.3)
+                    program.sync()
+                    program.emit(readout, timeline=None)
+            with program.repeat("override", 2, timeline="default"):
+                program.delay_timeline(0.05, timeline="default")
+        program.emit(readout)
+
+    class Explicit(v2.TimelineProgramV2):
+        def _initialize(self, cfg):
+            self.add_loop("scan", 2)
+            self.declare(readout)
+
+        def _body(self, cfg):
+            self.fork("default", into="work")
+            self.delay_timeline(0.1, timeline="work")
+            with (
+                self.repeat("body", 2, timeline="work"),
+                self.branch(by="scan") as branch,
+            ):
+                with branch.case():
+                    self.emit(readout, timeline="work")
+                    self.delay(0.02)
+                with branch.case():
+                    self.delay_timeline(0.3, timeline="work")
+                    self.sync(timeline="work")
+                    self.emit(readout, timeline="work")
+            with self.repeat("override", 2, timeline="default"):
+                self.delay_timeline(0.05, timeline="default")
+            self.emit(readout, timeline="default")
+
+    expected = Explicit(mock_soccfg, initial_delay=0, relax_delay=0)
+    actual = _compile_scoped(
+        mock_soccfg, frontend, scoped, (readout,), loops=(("scan", 2),)
+    )
+    assert actual.prog_list == expected.prog_list
+    actual.compile()
+    assert actual.prog_list == expected.prog_list
+
+
+@pytest.mark.parametrize("frontend", ["builder", "native"])
+@pytest.mark.parametrize("scenario", ["missing", "future", "expired", "empty-name"])
+def test_timeline_scope_requires_a_currently_declared_name_even_when_empty(
+    mock_soccfg, frontend, scenario
+):
+    def scoped(program: v2.TimelineBuilder | v2.TimelineProgramV2) -> None:
+        name = "" if scenario == "empty-name" else "work"
+        if scenario == "expired":
+            with program.repeat("body", 1):
+                program.fork("default", into=name)
+        with program.timeline(name):
+            pass
+        if scenario == "future":
+            program.fork("default", into=name)
+
+    with pytest.raises(ValueError, match="unknown timeline; declare it with fork"):
+        _compile_scoped(mock_soccfg, frontend, scoped)
+
+
+@pytest.mark.parametrize("frontend", ["builder", "native"])
+def test_empty_timeline_scopes_do_not_fork_join_or_close_branch_ends(
+    mock_soccfg, frontend
+):
+    pause = v2.Delay("pause", 0.1)
+
+    def scoped(program: v2.TimelineBuilder | v2.TimelineProgramV2) -> None:
+        with program.timeline("default"):
+            pass
+        program.fork("default", into="work")
+        program.delay_timeline(0.5, timeline="work")
+        with program.timeline("work"), program.branch(by="scan") as branch:
+            with branch.case(), program.timeline("work"):
+                pass
+            with branch.case():
+                program.emit(pause, timeline="default")
+        program.sync(timeline="default")
+        program.join("work", into="default")
+
+    class Explicit(v2.TimelineProgramV2):
+        def _initialize(self, cfg):
+            self.add_loop("scan", 2)
+            self.declare(pause)
+
+        def _body(self, cfg):
+            self.fork("default", into="work")
+            self.delay_timeline(0.5, timeline="work")
+            with self.branch(by="scan") as branch:
+                with branch.case():
+                    pass
+                with branch.case():
+                    self.emit(pause, timeline="default")
+            self.sync(timeline="default")
+            self.join("work", into="default")
+
+    expected = Explicit(mock_soccfg, initial_delay=0, relax_delay=0)
+    actual = _compile_scoped(
+        mock_soccfg, frontend, scoped, (pause,), loops=(("scan", 2),)
+    )
+    assert actual.prog_list == expected.prog_list
+    actual.compile()
+    assert actual.prog_list == expected.prog_list
 
 
 def test_builder_rejects_unknown_trigger_keywords_at_recording(mock_soccfg):

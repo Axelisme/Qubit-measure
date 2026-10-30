@@ -1,6 +1,6 @@
 # README - program/v2
 
-**Last updated:** 2026-10-30，TimelineBuilder 巢狀錄製與平行 Module Join
+**Last updated:** 2026-10-30，TimelineBuilder 與原生 program 的 timeline 範圍
 
 **讀者：** lab-author、framework-dev、agent。原生 V2 program 寫法與 module、readout、acquisition 契約速查。
 
@@ -134,7 +134,28 @@ Source 必須存在，into 接受一個新名字或名字 list。未知來源、
 帶 timeline 的 pulse／trigger 在結尾加 t 發射，然後更新結尾。
 同 channel 的 pulse 提前開始時編譯報錯，不能用另一條 timeline 繞過。
 Config 是瞬時事件，結尾更新到發射時間 E+t，不加 config length 或其他 ADC window。
-未帶 timeline 的原生指令保留 QICK 行為。
+未進入 timeline 範圍且未帶 timeline 的原生指令保留 QICK 行為。
+
+`with builder.timeline(name)` 與 `with self.timeline(name)` 選擇範圍內的預設 timeline。
+省略 `timeline=` 或傳入 `None` 的 `emit`、`emit_parallel`、`pulse`、`trigger`、`delay_timeline`、`sync` 都使用此名字。
+`repeat` 省略母 timeline 時也使用此名字。
+顯式名字優先，包含 `"default"`。巢狀範圍覆蓋外層，離開後還原。
+名字必須是 default 或已 fork 的 timeline，空範圍也會在編譯時驗證名字。
+範圍不 fork、不 join，也不移動 reference。
+`branch` 仍只有 `by` 參數，case 內的發射沿用當下範圍。
+範圍不改變 case used/local 同步與不等長規則。
+原生 `delay` 與 `delay_auto` 仍只推進 reference，不受範圍影響。
+
+```python
+builder.fork("default", into="drive")
+with builder.timeline("drive"):
+    builder.emit(drive)
+    builder.delay_timeline(0.1)
+    with builder.repeat("pairs", 2):
+        builder.emit(drive)
+    builder.sync()
+builder.emit(drive)  # Uses default again.
+```
 
 `delay_timeline(t, timeline="drive")` 只將結尾加 t，不移動 reference。
 `sync(timeline="drive")` 才將 reference 移到該結尾，並扣減全部 timeline，最低為零。
@@ -158,7 +179,7 @@ Reset 保留每個 child 的 post-delay。BathReset 的 pi/2 等待 cavity end �
 這些 owner 不從 `total_length` 重建 duration。Scalar 與可精確表示的整數仿射 sweep 保留靜態時間。
 編譯期已知的非仿射 sweep 由 program／timeline owner 以 dmem table 提供逐點精確 aggregate ceil，不加 padding。
 ComputedPulse 與 TableLengthPulse 使用捕捉的任意 selector 選擇實際 playback，並保留相配的 post 到 aggregate 才取整。Flat-top 的全部 segment 地址由 playback owner 在最後準備步驟產生，時間 storage 的全流稽核也涵蓋這些衍生地址。
-省略 timeline 選 default，但不移動 reference。
+未進入 timeline 範圍時，省略 timeline 選 default，但不移動 reference。
 以下是 `TimelineProgramV2` 子類別的 hooks。`drive_cfg` 是呼叫端提供、使用 channel 0 的 `Pulse.Cfg`。
 時間參數單位為 us，另一個 channel 1 的 native pulse 由原生 API 宣告。
 
@@ -183,8 +204,9 @@ def _body(self, cfg):
     self.emit(self.drive, timeline="drive")
 ```
 
-DelayAuto 是唯一例外。未指定 timeline 時包裝原生 delay_auto／delay_reg_auto，保留 gens／ros。
-指定任何 timeline 名稱都在 emit 入口報錯，包含顯式 default。
+DelayAuto 是唯一例外。在 timeline 範圍外省略 timeline 時，它包裝原生 delay_auto／delay_reg_auto，保留 gens／ros。
+任何 timeline 名稱都在 emit 入口報錯，包含顯式 default 與範圍選出的名字。
+在 timeline 範圍內需要推進 reference 時，直接呼叫原生 `delay_auto`。
 原生 delay_reg_auto 先消耗選定 native channels，再推進 register cycles。尚未消耗的 timeline 以已知 producer bounds 扣除實際推進量。
 若 native 部分已完整消耗全部 timeline，register 部分沿用原生的非負時間契約。
 PulseReadout 的 gain／frequency runtime words 不受這項時間限制排除。
