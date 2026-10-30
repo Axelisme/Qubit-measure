@@ -693,81 +693,86 @@ def wait_recipes(seed: int) -> list[WaitRecipe]:
     return recipes
 
 
-def compile_wait_recipe(
-    recipe: WaitRecipe, relax_cycles: int = 1000
-) -> TimelineProgramV2:
-    """Compile a legal mixed schedule without consulting compiler timing state."""
-    count = LoadValue("counts", recipe.counts, "axis0", "count_cycles")
+class MixedWaitProgram(TimelineProgramV2):
+    """Compile a generated recipe; relax_cycles controls the shell slack guard."""
 
-    class Program(TimelineProgramV2):
-        def _initialize(self, cfg):
-            self.gaps = [
-                self.add_sweep(
-                    f"axis{axis}",
-                    SweepCfg(
-                        start=step / 430.08,
-                        stop=3 * step / 430.08,
-                        step=step / 430.08,
-                        expts=3,
-                    ),
-                )
-                for axis, step in enumerate(recipe.sweep_steps)
-            ]
-            self.declare(count)
-            self.declare_readout(0, length=recipe.adc_samples / 307.2)
-            for ch, samples in enumerate(recipe.pulse_samples):
-                self.declare_gen(ch, nqz=1)
-                self.add_pulse(
-                    ch,
-                    f"pulse{ch}",
-                    style="const",
-                    freq=100,
-                    phase=0,
-                    gain=0.1,
-                    length=samples / 384,
-                )
+    def __init__(self, recipe: WaitRecipe, *, relax_cycles: int = 1000):
+        self.recipe = recipe
+        super().__init__(
+            make_mock_soccfg(2, 1), initial_delay=0, relax_delay=relax_cycles / 430.08
+        )
 
-        def read(self):
-            """Schedule one ADC, then leave the requested tail beyond body end."""
-            self.trigger(ros=[0], width=1 / 430.08, timeline="default")
-            self.delay_timeline(-recipe.tail / 430.08)
+    def _initialize(self, cfg):
+        recipe = self.recipe
+        self.gaps = [
+            self.add_sweep(
+                f"axis{axis}",
+                SweepCfg(
+                    start=step / 430.08,
+                    stop=3 * step / 430.08,
+                    step=step / 430.08,
+                    expts=3,
+                ),
+            )
+            for axis, step in enumerate(recipe.sweep_steps)
+        ]
+        self.counts = LoadValue("counts", recipe.counts, "axis0", "count_cycles")
+        self.declare(self.counts)
+        self.declare_readout(0, length=recipe.adc_samples / 307.2)
+        for ch, samples in enumerate(recipe.pulse_samples):
+            self.declare_gen(ch, nqz=1)
+            self.add_pulse(
+                ch,
+                f"pulse{ch}",
+                style="const",
+                freq=100,
+                phase=0,
+                gain=0.1,
+                length=samples / 384,
+            )
 
-        def _body(self, cfg):
-            self.emit(count)
-            if recipe.read_at == "before":
-                self.read()
-            self.fork("default", into="parallel")
-            self.pulse(0, "pulse0", timeline="default")
-            self.delay_timeline(self.gaps[0], timeline="parallel")
-            self.pulse(1, "pulse1", timeline="parallel")
-            self.join("parallel", into="default")
-            self.sync()
-            if len(self.gaps) == 2:
-                # Both forked timelines are consumed. Advance the reference
-                # directly to keep this mixed program within 16 data registers.
-                self.delay(self.gaps[1])
-            if len(self.gaps) == 1 or recipe.read_at == "branch":
-                with self.branch(by="axis0") as branch:
-                    for delay in recipe.branch_delays:
-                        with branch.case():
-                            if recipe.read_at == "branch":
-                                self.read()
-                            self.delay_timeline(delay / 430.08)
-            if len(self.gaps) == 1 or recipe.read_at not in ("branch", "before"):
-                with self.repeat("fixed", recipe.fixed_count):
-                    if recipe.read_at == "fixed":
-                        self.read()
-                    self.delay_timeline(recipe.loop_delay / 430.08)
-                with self.repeat("runtime", "count_cycles", range_hint=(0, 3)):
-                    if recipe.read_at == "runtime":
-                        self.read()
-                    self.delay_timeline(recipe.loop_delay / 430.08)
-            if recipe.read_at == "after":
-                self.read()
+    def read(self):
+        """Schedule one ADC, then leave the requested tail beyond body end."""
+        self.trigger(ros=[0], width=1 / 430.08, timeline="default")
+        self.delay_timeline(-self.recipe.tail / 430.08)
 
-    return Program(
-        make_mock_soccfg(2, 1), initial_delay=0, relax_delay=relax_cycles / 430.08
-    )
+    def emit_controls(self):
+        """Emit the recipe's budgeted unequal Branch and fixed/runtime Repeats."""
+        recipe = self.recipe
+        if len(self.gaps) == 1 or recipe.read_at == "branch":
+            with self.branch(by="axis0") as branch:
+                for delay in recipe.branch_delays:
+                    with branch.case():
+                        if recipe.read_at == "branch":
+                            self.read()
+                        self.delay_timeline(delay / 430.08)
+        if len(self.gaps) == 1 or recipe.read_at not in ("branch", "before"):
+            with self.repeat("fixed", recipe.fixed_count):
+                if recipe.read_at == "fixed":
+                    self.read()
+                self.delay_timeline(recipe.loop_delay / 430.08)
+            with self.repeat("runtime", "count_cycles", range_hint=(0, 3)):
+                if recipe.read_at == "runtime":
+                    self.read()
+                self.delay_timeline(recipe.loop_delay / 430.08)
+
+    def _body(self, cfg):
+        self.emit(self.counts)
+        if self.recipe.read_at == "before":
+            self.read()
+        self.fork("default", into="parallel")
+        self.pulse(0, "pulse0", timeline="default")
+        self.delay_timeline(self.gaps[0], timeline="parallel")
+        self.pulse(1, "pulse1", timeline="parallel")
+        self.join("parallel", into="default")
+        self.sync()
+        if len(self.gaps) == 2:
+            # Both forked timelines are consumed. Advance the reference
+            # directly to keep this mixed program within 16 data registers.
+            self.delay(self.gaps[1])
+        self.emit_controls()
+        if self.recipe.read_at == "after":
+            self.read()
 
 
 WAIT_RECIPE_SEED = 0x5EED
@@ -784,7 +789,7 @@ def test_mixed_schedules_shell_wait_matches_every_legal_point(recipe: WaitRecipe
     # 430.08/307.2 = 7/5 ADC cycles; 430.08/384 = 28/25 DAC cycles.
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
-        prog = compile_wait_recipe(recipe)
+        prog = MixedWaitProgram(recipe)
     result = shots(prog)
     assert len(result) == 3 ** len(recipe.sweep_steps)
     remainders = []
@@ -817,7 +822,7 @@ def test_mixed_schedules_shell_wait_matches_every_legal_point(recipe: WaitRecipe
         assert "upper bound" not in bound_warnings[0], diagnostic
         # Test both guard boundaries using the independent legal-point extrema.
         with pytest.warns(UserWarning, match=rf"slack={upper - lower} cycles"):
-            equal_relax = compile_wait_recipe(recipe, relax_cycles=upper - lower)
+            equal_relax = MixedWaitProgram(recipe, relax_cycles=upper - lower)
         assert shell_wait(equal_relax) == upper, diagnostic
         with pytest.raises(ValueError, match=rf"slack={upper - lower} cycles"):
-            compile_wait_recipe(recipe, relax_cycles=upper - lower - 1)
+            MixedWaitProgram(recipe, relax_cycles=upper - lower - 1)
