@@ -826,3 +826,93 @@ def test_mixed_schedules_shell_wait_matches_every_legal_point(recipe: WaitRecipe
         assert shell_wait(equal_relax) == upper, diagnostic
         with pytest.raises(ValueError, match=rf"slack={upper - lower} cycles"):
             MixedWaitProgram(recipe, relax_cycles=upper - lower - 1)
+
+
+class SweptLengthWaitProgram(TimelineProgramV2):
+    """Sweep ten consecutive DAC lengths, starting at samples (384 MHz clocks).
+
+    post_tenths adds tenths of one tProc cycle after the pulse. relax_cycles
+    bounds allowed shell slack. A 100-sample ADC starts at the pulse origin.
+    """
+
+    def __init__(self, samples: int, post_tenths: int, *, relax_cycles: int = 1000):
+        self.samples = samples
+        self.post_tenths = post_tenths
+        super().__init__(
+            make_mock_soccfg(1, 1), initial_delay=0, relax_delay=relax_cycles / 430.08
+        )
+
+    def _initialize(self, cfg):
+        length = self.add_sweep(
+            "length",
+            SweepCfg(
+                start=self.samples / 384,
+                stop=(self.samples + 9) / 384,
+                step=1 / 384,
+                expts=10,
+            ),
+        )
+        self.drive = PulseCfg(
+            ch=0,
+            nqz=1,
+            freq=100,
+            gain=0.1,
+            waveform=ConstWaveformCfg(length=length),
+            post_delay=self.post_tenths / (10 * 430.08),
+        ).build("drive")
+        self.declare(self.drive)
+        self.declare_readout(0, length=100 / 307.2)
+
+    def _body(self, cfg):
+        self.trigger(ros=[0], width=1 / 430.08)
+        self.emit(self.drive)
+
+
+def fractional_length_cases(seed: int) -> list[tuple[int, int]]:
+    """Pick six shallow sweeps whose ten points cross fractional ceil steps.
+
+    No Branch or Repeat consumes data registers here, leaving space for the
+    nonaffine aggregate-ceil lookup at the 384/430.08 MHz clock seam.
+    """
+    rng = random.Random(seed)
+    return [(samples, rng.randint(1, 9)) for samples in rng.sample(range(20, 60), 6)]
+
+
+@pytest.mark.parametrize(
+    ("samples", "post_tenths"),
+    fractional_length_cases(WAIT_RECIPE_SEED + 1),
+    ids=lambda value: f"seed={WAIT_RECIPE_SEED + 1}-{value}",
+)
+def test_fractional_length_shell_wait_uses_exact_nonaffine_point_tails(
+    samples: int, post_tenths: int
+):
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        prog = SweptLengthWaitProgram(samples, post_tenths)
+    result = shots(prog)
+    assert len(result) == 10
+    tails = []
+    for index, shot in enumerate(result):
+        (start,) = waves(shot)
+        # ceil((samples + index) * 28/25 + post_tenths/10), once, not
+        # separate waveform/post ceils. ADC duration is 100 * 7/5 = 140.
+        duration = ((samples + index) * 280 + post_tenths * 25 + 249) // 250
+        assert shot.body_end_cycle == shot.start_cycle + start + duration
+        (trigger,) = [e.cycle for e in shot.events if e.kind == "data" and e.value]
+        tails.append(max(0, trigger + 140 - shot.body_end_cycle))
+    upper, lower = max(tails), min(tails)
+    diagnostic = (WAIT_RECIPE_SEED + 1, samples, post_tenths, tails)
+    assert shell_wait(prog) >= upper, diagnostic
+    assert shell_wait(prog) == upper, diagnostic
+    messages = [str(w.message) for w in caught if "WAIT" in str(w.message)]
+    assert len(messages) == 1, diagnostic
+    assert f"slack={upper - lower} cycles" in messages[0], diagnostic
+    assert "variables=" in messages[0], diagnostic
+    assert "upper bound" not in messages[0], diagnostic
+    with pytest.warns(UserWarning, match=rf"slack={upper - lower} cycles"):
+        equal_relax = SweptLengthWaitProgram(
+            samples, post_tenths, relax_cycles=upper - lower
+        )
+    assert shell_wait(equal_relax) == upper, diagnostic
+    with pytest.raises(ValueError, match=rf"slack={upper - lower} cycles"):
+        SweptLengthWaitProgram(samples, post_tenths, relax_cycles=upper - lower - 1)
