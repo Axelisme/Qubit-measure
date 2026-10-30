@@ -21,18 +21,18 @@ class TwotoneFluxDepInputs(RecipeInputs):
 
     readout_ref: str | None | Keep = Field(
         KEEP,
-        description="Readout library key; omission retains the Form value; null clears/disables it.",
+        description="Readout library key.",
     )
     center_mhz: float = Field(
         description="Required drive-frequency sweep center in MHz."
     )
     span_mhz: float = Field(
         gt=0,
-        description="Full frequency span in MHz; endpoints are center minus/plus span/2. Required positive drive-frequency full span.",
+        description="Required positive drive-frequency full span in MHz; endpoints are center minus/plus span/2.",
     )
     gain: float | None | Keep = Field(
         KEEP,
-        description="Fixed qubit-drive pulse amplitude in native gain units; omission retains the Form value; null clears/disables it.",
+        description="Fixed qubit-drive pulse amplitude in native gain units.",
     )
     flux_device: DeviceName = Field(
         description="Registered flux-device name; read only its cached snapshot, without connecting."
@@ -57,11 +57,11 @@ class TwotoneFluxDepInputs(RecipeInputs):
     )
     reps: int | None | Keep = Field(
         KEEP,
-        description="Acquisition repetition count; omission retains the Form value; null clears/disables it.",
+        description="Acquisition repetition count.",
     )
     rounds: int | None | Keep = Field(
         KEEP,
-        description="Averaging round count; omission retains the Form value; null clears/disables it.",
+        description="Averaging round count.",
     )
 
 

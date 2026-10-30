@@ -23,7 +23,7 @@ class MistDriveFrequencyInputs(RecipeInputs):
     gain_range: list[float] = Field(
         min_length=2,
         max_length=2,
-        description="Two native gain endpoints; omission retains the Form value; null clears/disables it.",
+        description="Two native gain endpoints.",
     )
     points: Annotated[int, Field(ge=2)] | None | Keep = Field(
         KEEP, description="Sample count on each map axis, at least two."

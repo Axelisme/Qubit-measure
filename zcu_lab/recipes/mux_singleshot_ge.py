@@ -26,28 +26,28 @@ class MuxSingleshotGEInputs(RecipeInputs):
 
     participants: list[StrictInt] | None | Keep = Field(
         default=KEEP,
-        description="Unique original tone indices in acquisition order; omission keeps the Form selection; null clears it.",
+        description="Unique original tone indices in acquisition order.",
     )
 
     initial_state: Literal["ground", "excited"] | None | Keep = Field(
         default=KEEP,
-        description="Prepared state for GE separation. Omission keeps analysis settings; null is passed to the analysis owner.",
+        description="Prepared state for GE separation. Analysis only; omitted keeps value, null passes to owner.",
     )
     backend: Literal["pca", "center"] | None | Keep = Field(
         default=KEEP,
-        description="Rotation and threshold fit backend. Omission keeps analysis settings; null is passed to the analysis owner.",
+        description="Rotation and threshold fit backend. Analysis only; omitted keeps value, null passes to owner.",
     )
     logscale: bool | None | Keep = Field(
         default=KEEP,
-        description="Plot histograms on a logarithmic scale. Omission keeps analysis settings; null is passed to the analysis owner.",
+        description="Plot histograms on a logarithmic scale. Analysis only; omitted keeps value, null passes to owner.",
     )
     align_t1: bool | None | Keep = Field(
         default=KEEP,
-        description="Align the GE model with captured T1. Omission keeps analysis settings; null is passed to the analysis owner.",
+        description="Align the GE model with captured T1. Analysis only; omitted keeps value, null passes to owner.",
     )
     length_ratio: float | None | Keep = Field(
         default=KEEP,
-        description="Integration length ratio for GE fitting. Omission keeps analysis settings; null is passed to the analysis owner.",
+        description="Integration length ratio for GE fitting. Analysis only; omitted keeps value, null passes to owner.",
     )
 
 

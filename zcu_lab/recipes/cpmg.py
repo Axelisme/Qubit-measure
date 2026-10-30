@@ -26,68 +26,68 @@ class CPMGInputs(RecipeInputs):
 
     readout_ref: str | None | Keep = Field(
         KEEP,
-        description="Readout library key; omission retains the Form value; null clears/disables it. Sources are chosen by the Form.",
+        description="Readout library key. Sources are chosen by the Form.",
     )
     use_reset: str | None | Keep = Field(
         KEEP,
-        description="Reset module option; omission retains the Form selection, null disables it.",
+        description="Reset module option.",
     )
     pi_ref: str | None | Keep = Field(
         KEEP,
-        description="Calibrated pi-pulse library key; omission retains the Form value; null clears/disables it.",
+        description="Calibrated pi-pulse library key.",
     )
     pi2_ref: str | None | Keep = Field(
         KEEP,
-        description="Calibrated pi/2-pulse library key; omission retains the Form value; null clears/disables it.",
+        description="Calibrated pi/2-pulse library key.",
     )
     max_n: int | None | Keep = Field(
         KEEP,
-        description="Maximum positive refocusing count for a geometric count grid; supply together with points. Omission retains the count grid; null clears it.",
+        description="Maximum positive refocusing count for a geometric count grid; supply together with points.",
     )
     points: int | None | Keep = Field(
         KEEP,
-        description="Positive geometric-count sample request; supply with max_n. Rounding and deduplication may reduce the count; max_n=1 permits one point.",
+        description="Geometric count points with max_n; rounding/dedup may reduce count. max_n=1 allows one point.",
     )
     times: list[int] | None | Keep = Field(
         KEEP,
-        description="Explicit positive refocusing counts; mutually exclusive with max_n/points. Omission retains the Form counts; null clears them.",
+        description="Explicit positive refocusing counts; mutually exclusive with max_n/points.",
     )
     min_length_us: float | None | Keep = Field(
         KEEP,
-        description="Shared minimum total evolution time in us; omission retains the Form value; null clears/disables it.",
+        description="Shared minimum total evolution time in us.",
     )
     max_length_us: float | None | Keep = Field(
         KEEP,
-        description="Shared maximum total evolution time in us; omission retains the Form value; null clears/disables it.",
+        description="Shared maximum total evolution time in us.",
     )
     length_points: int | None | Keep = Field(
         KEEP,
-        description="Shared total-time sample count, at least two; omission retains the Form value; null clears/disables it.",
+        description="Shared total-time sample count, at least two.",
     )
     detune_ratio: float | None | Keep = Field(
         KEEP,
-        description="Final-pulse phase-ramp ratio, dimensionless; omission retains the Form value; null clears/disables it.",
+        description="Final-pulse phase-ramp ratio, dimensionless.",
     )
     reps: int | None | Keep = Field(
         KEEP,
-        description="Acquisition repetition count; omission retains the Form value; null clears/disables it.",
+        description="Acquisition repetition count.",
     )
     rounds: int | None | Keep = Field(
         KEEP,
-        description="Averaging round count; omission retains the Form value; null clears/disables it.",
+        description="Averaging round count.",
     )
 
     fit_fringe: bool | None | Keep = Field(
         KEEP,
-        description="Fit fringes; omission retains the analysis value; null is passed to the analysis owner. Analysis only.",
+        description="Fit fringes. Analysis only; omitted keeps value, null passes to owner.",
     )
     t2r: float | None | Keep = Field(
         KEEP,
-        description="Ramsey T2 reference (us); omission retains the analysis value; null is passed to the analysis owner. Analysis only.",
+        description="Ramsey T2 reference (us). Analysis only; omitted keeps value, null passes to owner.",
     )
     t1: float | None | Keep = Field(
         KEEP,
-        description="T1 reference (us); omission retains the analysis value; null is passed to the analysis owner. Analysis only.",
+        description="T1 reference (us). Analysis only; omitted keeps value, null passes to owner.",
     )
 
 

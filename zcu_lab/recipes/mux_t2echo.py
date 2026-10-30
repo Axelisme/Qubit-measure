@@ -28,16 +28,16 @@ class MuxT2EchoInputs(RecipeInputs):
 
     participants: list[StrictInt] | None | Keep = Field(
         default=KEEP,
-        description="Unique original tone indices in acquisition order; omission keeps the Form selection; null clears it.",
+        description="Unique original tone indices in acquisition order.",
     )
 
     fit_method: Literal["fringe", "decay"] | None | Keep = Field(
         default=KEEP,
-        description="Fit fringes or a pure decay envelope. Omission keeps analysis settings; null is passed to the analysis owner.",
+        description="Fit fringes or a pure decay envelope. Analysis only; omitted keeps value, null passes to owner.",
     )
     fit_phase: bool | None | Keep = Field(
         default=KEEP,
-        description="Fit the phase offset in fringe mode. Omission keeps analysis settings; null is passed to the analysis owner.",
+        description="Fit the phase offset in fringe mode. Analysis only; omitted keeps value, null passes to owner.",
     )
 
 

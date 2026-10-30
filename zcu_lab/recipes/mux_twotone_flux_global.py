@@ -36,7 +36,7 @@ class MuxTwotoneFluxGlobalInputs(MuxTwotoneFluxInputs):
 
     flux: ToneRangeInputs | None | Keep = Field(
         default=KEEP,
-        description="Native coil start/stop; omission keeps the Form range; null clears its bounds. No unit conversion.",
+        description="Native coil start/stop. No unit conversion.",
     )
 
 

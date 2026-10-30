@@ -307,7 +307,7 @@ def build_operation_tools(ctx: MeasureToolContext) -> dict[str, dict[str, Any]]:
     return {
         "status": {
             "handler": partial(status, ctx),
-            "description": "Read execution summary or explicit full detail; global status indexes active executions and the 10 most recently finished recipes in recent_terminal_executions (execution, recipe, status, UTC finished_at), newest first. Terminal recipe replies retain execution; failures include failure.phase and failure.reason. Global ready.can_run checks environment readiness (entry, active context, SoC and any tab), not Form validity. Before Run, read the target tab.get_cfg input/values/errors even when ready.can_run is true. Artifacts preserve complete native Save reports. Global files mirrors entry.info with ordered parameters/library/aliases document, absolute path and installed SHA-256 revision; missing aliases uses null, no selected point returns []. For direct-file edits use rpc_call(context.reload) with the installed base revision. Queries do not refresh guards, read files or attach images.",
+            "description": "Read execution progress/full evidence or global GUI status. Global status lists operations, active executions, terminal_count and 10 recent terminal recipes. ready.can_run is environment readiness, not Form validity: read tab.get_cfg before Run. files lists active document paths/revisions, not disk contents. No images or implicit refresh.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -326,7 +326,7 @@ def build_operation_tools(ctx: MeasureToolContext) -> dict[str, dict[str, Any]]:
         },
         "wait": {
             "handler": partial(_wait_tool, ctx),
-            "description": "Wait for one operation or execution; timeout does not cancel. Terminal recipes retain execution; failed recipes include failure.phase and the human failure.reason without a traceback. Execution replies may attach in-memory image content without session files. Complete native Save outputs are in artifacts; use status(execution, detail=full) for captured native detail.",
+            "description": "Wait for a GUI operation or full execution continuation. Timeout stops waiting, not work. Execution replies may attach in-memory images; artifacts retains complete native Save reports.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -347,7 +347,7 @@ def build_operation_tools(ctx: MeasureToolContext) -> dict[str, dict[str, Any]]:
         },
         "cancel": {
             "handler": partial(cancel, ctx),
-            "description": "Omit scope to stop the target root. Select a live kind, kind#N, operation:name or exact full live_paths path; ambiguous matches return full-path candidates. Recipe run requires an active tab.run. Acknowledgement does not imply cleanup completed.",
+            "description": "Cancel an execution, workflow run_id or GUI op. Omit scope to stop its root. Select kind, kind#N, operation:name or exact live_paths path; ambiguity returns candidates. Recipe run requires active tab.run. Acknowledgement is not cleanup completion.",
             "inputSchema": {
                 "type": "object",
                 "properties": {

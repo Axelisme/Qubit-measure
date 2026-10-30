@@ -88,246 +88,35 @@ from zcu_tools.mcp.measure.tool_context import MeasureToolContext  # noqa: E402
 MCP_VERSION = 126
 
 _SERVER_INSTRUCTIONS = """\
-Attach to the live qubit-measure GUI with connect. This does not connect hardware.
-Use launch='if_missing'/'new' only when authorized to start a GUI. Pass token if
-required, keep it secret, and inspect connect.status before acting. The user may
-also edit the GUI. Reconnection reloads its live catalog; incompatible wire
-versions fail before forwarding an action.
+Attach with connect and inspect connect.status before acting. Launch a GUI only
+with authorization; startup scripts may connect hardware. Keep tokens secret.
 
-For routine measurement, prefer the recipe matching the experimental goal.
-Read its tool schema and adapter guide through recipe_guide(adapter).
-For analysis of existing data, use tab_analyze and tab_interact rather than
-starting another measurement. If tools are deferred by the client, discover
-the recipe or shared analysis/control tool first. Routine work and diagnosis
-are guidance, not modes or permissions. For detailed setup, cfg, save,
-writeback or diagnosis, use rpc_list(domain?), rpc_describe(method), then
-rpc_call(method, params). Every listed public method remains callable even
-when a recipe or shared tool covers it. Raw RPC does not aggregate tool
-results, decode PNG replies, or run the analysis artifact save pipeline.
+Prefer the recipe matching the measurement goal; read its schema and
+recipe_guide(adapter). Analyze existing data with tab_analyze and tab_interact.
+For other setup, cfg, save, writeback or diagnosis, use rpc_list, rpc_describe,
+then rpc_call. All public catalog methods remain callable.
 
-Read active parameters, library and aliases directly from disk. Global status()
-or rpc_call(method="entry.info") returns top-level files, ordered parameters,
-library, aliases, each with document, absolute path and installed revision.
-An opened entry always has three files: global without a point, otherwise the
-selected point set. No entry returns files=[]. Non-active entry files are not
-listed; switch back to global before editing global files. There is no scope field.
-Revision is the installed bytes' SHA-256; missing library or aliases uses null.
-Status does not read or validate disk candidates.
-Before editing, confirm you hold control and retain the installed revision.
-After editing a file, call rpc_call(method="context.reload",
-params={"path": path, "expected_revision": revision}). The base is the installed
-revision, not the edited bytes' hash. expected_revision must be present; null
-means library or aliases was missing. The owner validates, installs and publishes, returning
-{document, path, revision}. Invalid input names the path and cause, preserves
-installed memory and leaves the disk candidate untouched. Revision mismatch
-requires rereading files and content before deciding; holder rejection requires
-control. Do not overwrite or retry automatically. The watcher may already have
-installed a valid edit while the agent holds control; compare current revisions.
-While a human holds control, external edits remain pending. Inspect drafts offer
-reload/keep. Existing Tab/Run captures stay fixed until explicit Refresh/Reset.
-There are no specialized fixed parameter/modules/aliases tools. entry.info and
-context.reload are RPC methods, not fixed tools. Existing value.read/value.list,
-tab.parameter_read, context.set_parameter, context.ml_* and context.aliases_set
-remain callable via rpc_call. Recipes continue to use owner APIs internally.
+Recipes admit one nonterminal execution. Calls and answer wait up to 300 seconds;
+timeout does not cancel. Keep execution IDs. status(execution) reads progress;
+detail="full" adds captured native evidence. wait(execution) includes downstream
+reads, saves and image delivery; wait(op) observes only the GUI operation.
+Terminal replies retain execution, status, report and runs; failed replies add
+failure.phase and failure.reason. needs_parameters returns missing paths and
+outcome=null; parameter_errors supplies owner paths/reasons. pending_question
+carries request_id, evidence and answer_schema: use answer with that request_id.
+Answering does not write; only explicit recipe accept_writeback writes.
+Interactive pending={tab,stage,op} continues through tab_interact on that tab.
+cancel requests stop; use wait/status to confirm completion.
 
-For an authorized launch, connect with launch='new' and script set to a trusted
-Python file defining startup(ctx). It replaces the default startup script;
-clean=True skips all scripts and cannot be combined with script. Scripts may
-connect hardware, so review the selected script and obtain authorization first.
-For offline FTF use zcu_lab/simulation_envs/FTF/startup.py after preparing its YAML.
-Add project_root to isolate result/Database data; it must be an absolute path to
-an existing directory. Omit it to use the repo root. Code, catalogs and script
-paths keep their existing resolution. Explicit script or project_root options
-are refused when attaching; the existing GUI stays unchanged and no startup is
-rerun. Close it before selecting another script or data root. Entry names remain
-single path segments.
-device_setup(name, cfg) accepts a partial Info patch, reads before, merges full
-cfg, submits once and waits at most 300 seconds. It has no timeout argument.
-When before Info stores value_unit, value patches require caller-supplied
-value_unit; output/rampstep-only patches do not. RPC Info validators own
-field/limit/mode-unit validation.
-For asynchronous setup or a shorter wait, read device.snapshot, build complete
-Info cfg, call device.setup(name, cfg), wait(op), then read device.snapshot.
-Raw RPC requires every Info model-required field and never merges cached values.
-YOKO mode is required; raw RPC may omit value_unit, generated by Info from mode.
-Inspect stages, native operation, requested full candidate and before/after
-cached facts. Requested.cfg is null until before-read and merge complete; a
-candidate is not a validation receipt. Timeout returns running with a known op,
-without cancelling. Unknown receipts do not prove no side effects. No unit
-conversion, automatic reconnect, retry or rollback; use wait(op) to continue.
+Before GUI work, launch, timeout recovery or user takeover, read
+.agents/skills/run-measure-gui/SKILL.md. It covers authorization, control,
+execution tracking and safe continuation. Never automatically replay a mutation.
+For measurement goals, policy, rounds and judgement, read
+.agents/skills/measure-task/SKILL.md.
 
-A recipe call waits up to 300 seconds before returning a still-running execution;
-missing parameters, failures and interactive handoffs return earlier. Configure
-the client deadline above 300 seconds with room for transport and reply overhead.
-The stdio server is synchronous: another request on that connection is not
-guaranteed service during the first wait. A client timeout is not cancellation.
-Never automatically rerun a recipe or mutation after timeout, disconnect or busy.
-Inspect current state and confirmed files before deciding.
-
-Use global status for GUI operations, non-terminal executions and terminal count.
-Keep known execution IDs for later queries; global status does not embed history.
-status(execution) reads progress and the live scope path without reconnecting.
-Completed, failed and cancelled recipe wait summaries contain only status,
-authored report and runs. Status adds active_path and structured live_paths, including at terminal.
-A failure's diagnostic is available in status(execution, detail="full").
-Nonterminal summaries include execution. A paused question supplies
-pending_question with request_id, evidence and answer_schema. Interactive
-analysis supplies pending={tab,stage,op}; complete that same GUI operation with
-tab_interact. Missing parameters return needs_parameters, missing paths and
-outcome=null, not a failed RecipeOutcome. Cfg preflight also returns
-parameter_errors=[{path,message}] with all typed indexed paths and owner reasons.
-Recipe Form fields may be omitted to retain their values; explicit null clears
-or disables nullable fields. Ordered overrides run after experiment values,
-one set per edit, including repeated paths and null values. check_ready reads
-all owner Form and lowered cfg errors without mutation, recapture or Run.
-Earlier selections and edits remain after validation failure. Run also checks
-the complete Form errors before starting acquisition.
-Full recipe detail retains per-Run/tab/operation conditions from the owner's
-fixed Form observation, native analysis estimates and invalid paths, and explicit
-writeback candidates. Reading detail never reruns analysis, writes or saves.
-Runs retain acquisition run_id and every explicit Save attempt, even failed
-outputs. Output status/error, not run_id, determines save success.
-Post result reads use the owner's start-receipt budget: 5 seconds plus 5 per
-measured tone, capped at 60 seconds; an absent budget uses 5 seconds.
-A result_read failure retains recovery with rpc, params, original op and stage.
-First read tab.snapshot and compare post_analysis_state.source_operation_id with
-recovery.params.operation_id. If different, report superseded and do not deliver
-the replacement as the old result. Otherwise rpc_call the supplied source-bound
-route; replacement races return result_superseded. Do not rerun analysis to
-recover a result read. GUI Post read handlers have a 60-second ceiling.
-Standalone analysis retains its native summary and Save reports. Artifacts
-preserve producer sections, names, members, paths, formats, statuses and errors. Synchronous tab.save_data and
-tab.save_artifacts return the complete current report, not a Save handle. No Save
-await or snapshot reread is needed. Reserved destinations are not saved files.
-A resave replaces the selected artifacts with that attempt, not a saved prefix.
-Status never attaches images; wait(op) observes only the GUI operation;
-wait(execution) includes downstream reads, saves and current image delivery.
-Failed outcomes are data. A wait timeout stops waiting,
-not the operation or its continuation. Operation handles belong to one GUI
-connection generation; execution IDs belong to this MCP server session and
-are not durable recovery tokens. After GUI reconnect, discover current handles
-through status; do not reuse an old op.
-
-cancel(execution) requests root recipe stop; native workflow roots use scope="workflow".
-The next await raises the shared ordinary Exception ScriptCancelled. An in-flight
-Run drains and retains run_id/partial/completion facts before raising. The author
-continues synchronous finally cleanup; no new await operation starts after root stop.
-Synchronous edits and explicit saves still run. The terminal status is cancelled
-with report=null and retained runs. cancel accepts exactly one of execution,
-run_id (native workflow), or op. Narrow scopes preserve their parents:
-- acquire stops one acquisition; the next acquire in the same Schedule is clean.
-- schedule stops this Schedule and its later acquires; the next operation is clean.
-- iteration skips the current point (跳過目前這一點). Releasing it lets the next
-  iteration start clean. Authors continue the main loop or return from a point helper;
-  a synchronous finally commit preserves the point without awaiting during cleanup.
-- run stops the current operation. Recipe admits only an active tab.run; analysis
-  and questions continue. Workflow admits any operation. operation is its label.
-Without a recipe Run, run/schedule/acquire return cancelled=false with reason
-"no run in progress". Status includes active_path. For example,
-cancel(execution="recipe-...", scope="acquire", expected=3) accepts only acquire#3
-within the current GUI Run root. Sequences may restart in the next Run. For exact
-cross-Run targeting use cancel(op=17, scope="acquire", expected=3) with the observed
-Run handle; stale fine-scope op targets return "scope not active", never cancel
-the next Run. Generic cancel(op=17) retains script Stop behavior.
-Status active_path is the single root-to-first-fork chain. live_paths is a list
-of every live leaf full path, not a comma-joined string. Select by kind, kind#N,
-operation:<name>, operation:<name>#N, or an exact full path from live_paths.
-Multiple matches return cancelled=false, reason="ambiguous", and full-path candidates.
-Use #N for same-parent same-name operations; cross-parent kind#N may remain ambiguous,
-so use the exact full path. No latest-child or callable-reflection selection occurs.
-expected and N are positive integers, not bool, and must agree if both supplied.
-Malformed syntax is invalid_params; inactive selectors and stale numbers return
-scope not active or sequence mismatch. Roots have no sequence.
-Accepted requests return cancelled=true, reason="scope cancellation requested".
-This is not cleanup completion; use wait/status. Recipe schedule/acquire use the
-exact GUI Run handle; its active_path appends the GUI tail to local scopes.
-live_paths and acknowledgement candidates use the same projection. It is not atomic
-across processes. Expected analysis fitting failures return status="failed", result=null
-and reason for the author to decide; arbitrary programming or recording errors still raise.
-ScriptCancelled is not recorded as an error; genuine cleanup/owner failures are retained.
-Standalone analysis cancellation
-stops its continuation. Unregistered cancel(op) keeps the direct GUI operation hook.
-Terminal execution results are not rewritten.
-
-For owner-generated Library templates, use the existing RPC
-rpc_call(method="context.ml_create_from_role", params=...).
-For direct Library file edits, use the active-file reload workflow above.
-List templates with context.ml_list_roles. Provide role_id and a new name such as
-"R1.readout.mux". Optional edits use the same shape as context.ml_edit:
-[{"path": ["tones"], "value": [{"freq": 100.0, "gain": 0.2, "ro_ch": 0}]}].
-Roles with required fields, such as readout/mux:blank's tones, need these edits
-before creation. Expressions use {"expr": "<text>"}. The GUI applies edits to
-template input before validation and writes only a valid Spec. Invalid paths,
-values or Form results return invalid_params with data.errors: [{path, message}]
-and leave the library unchanged. Success returns {created: name}.
-
-Tab get_cfg, edit_cfg, reset_cfg and use_inline return Form input/values/errors,
-without schema. Use tab.describe_cfg(path=[]) for root fields, then request a
-child's full model-field path for its metadata and direct children. Options
-contain label/value and commands, not fields; the owner reports selected.
-Select by writing the option's whole value once. A single ordinary wrapper may
-be flattened in children, but paths still include it. Ref options have no children.
-Describe replies include current local input_present/input/value and Form preview
-errors from one owner turn. For lowered cfg errors use get_cfg or Run admission. get_cfg and describe_cfg
-also return full-form diagnostics for every original tone, independent of picker
-or describe path. Each row carries path/message, name/index, seed_source,
-seed_status (missing/available/literal at Open/Reset), and author-declared
-uncalibrated (true/false/null for unknown). Filling a field does not rewrite its
-seed provenance, and missing input never implies uncalibrated.
-Recipe tab.read makes one atomic read_recipe_field RPC per call from fixed
-sources. Its locked flag includes selection_fixed, fixed and readonly.
-Ordinary strings are literal; expressions use {expr: text}, complex uses the
-reversible __complex__ tag, and library keys are actual keys. Read description
-options in order; do not infer choices from unions. Invalid input remains editable.
-Generated tag leaves are not recipe logical paths.
-Inline leaf paths include module. use_inline runs the owner's guarded to_inline
-command against fixed library capture, not a private copy path.
-Edit unique model-field leaf paths;
-write range start/stop/n separately. Invalid input remains editable with errors.
-Open and explicit Reset capture sources once. Recipe preparation always Reset
-before edits, including new tabs. Reset(aliases=...) is the single-use source
-override; it changes neither global aliases nor saved input. Parameter reads,
-cfg, edits and Run use that fixed capture until the next Reset. parameter_read
-and get_cfg take no aliases. run_start rejects nonempty aliases before focus or
-operation effects; None and {} use displayed values. Run accepts only current
-valid Form values. Load restores results and analysis sources, not Form input;
-inspect the result's native cfg separately. Load replies report result/analysis
-facts, not cfg backfill. apply_writeback(tab, items) selects current
-Primary/Post candidates by stable target_name. Omit items for all; an empty array
-writes none. It ignores checkboxes and rejects unknown or ambiguous names before
-any write, using current IDs rather than proposal IDs. It does not answer recipes.
-apply_writeback stops on the first error and reports confirmed
-progress without retry or rollback. Each attempted pane has a GUI-lifetime
-submission_id in submissions, and recovery queries tab.writeback_receipt.
-A write timeout returns unknown with the ID and partial-write warning, not a
-failed-write outcome. Check status before deciding whether to resubmit. Receipt
-queries return confirmed IDs, actual values and fixed entry/point destinations.
-Recipe acceptance retains the same submission_id/recovery in its receipt.
-Inspect proposals and the destination first.
-
-When a recipe is paused, answer(execution, request_id, answer) supplies named
-fields described by pending_question.answer_schema. request_id is required.
-Stale or absent requests return accepted=false, reason and pending_request_id
-(null without a pending request). Rejection does not consume the question.
-Answer is not a write or permission; only explicit tab.accept_writeback writes.
-Only one nonterminal recipe is admitted.
-
-tab_interact without payload reads committed state and available commands.
-Send payload={command,args} for one action. Later owner-loop commits win.
-Reads preserve focus; commands follow Analysis.
-done joins the original completion. For a recipe-owned analysis it waits for
-that recipe's next result or question; standalone analysis retains its execution.
-preview_active is a local interactive preview, not committed state. Current tool
-replies may attach in-memory image content without session PNG files. To see a
-figure later, use tab.get_figure for the GUI's current image; it is not guaranteed
-to be the earlier image. Persistent outputs are recorded only in artifacts.
-Recipes do not automatically close tabs. Use tab_close explicitly; busy cannot
-be bypassed with discard_unsaved. app.shutdown via RPC requests graceful exit;
-its reply is not proof that the responding process has exited.
-
-The server disconnects and joins its workers on exit. It does not close the GUI
-or promise to stop hardware. There are no subscribed MCP events: read snapshots or wait instead. Follow run-measure-gui
-for hardware safety, task policy and measurement workflow.
+Before point-file edits, Library template creation, tab cfg editing or detailed
+receipt interpretation, read lib/zcu_tools/mcp/measure/README.md.
+Server exit disconnects; it does not close the GUI or promise to stop hardware.
 """
 
 

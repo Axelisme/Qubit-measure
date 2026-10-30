@@ -27,37 +27,37 @@ class OnetoneSpectrumOverPowerInputs(RecipeInputs):
 
     readout_ref: str | None | Keep = Field(
         KEEP,
-        description="Readout library key; omission retains the Form value; null clears/disables it. Sources are chosen by the Form.",
+        description="Readout library key. Sources are chosen by the Form.",
     )
     center_mhz: float | None | Keep = Field(
         KEEP,
-        description="Sweep center in MHz. Supply with span_mhz; omission retains the Form range, null clears it.",
+        description="Sweep center in MHz. Supply with span_mhz.",
     )
     span_mhz: Annotated[float, Field(gt=0)] | None | Keep = Field(
         KEEP,
-        description="Full frequency span in MHz; endpoints are center minus/plus span/2. Supply with center_mhz; omission retains the Form range, null clears it.",
+        description="Full frequency span in MHz; endpoints are center minus/plus span/2. Supply with center_mhz.",
     )
     freq_points: Annotated[int, Field(ge=2)] | None | Keep = Field(
         KEEP,
-        description="Frequency sample count; omission retains the Form value; null clears/disables it.",
+        description="Frequency sample count.",
     )
     gain_points: int | None | Keep = Field(
         KEEP,
-        description="Gain sample count; omission retains the Form value; null clears/disables it.",
+        description="Gain sample count.",
     )
     gain_range: (
         Annotated[list[float], Field(min_length=2, max_length=2)] | None | Keep
     ) = Field(
         KEEP,
-        description="Two native gain endpoints; omission retains the Form value; null clears/disables it.",
+        description="Two native gain endpoints.",
     )
     reps: int | None | Keep = Field(
         KEEP,
-        description="Acquisition repetition count; omission retains the Form value; null clears/disables it.",
+        description="Acquisition repetition count.",
     )
     rounds: int | None | Keep = Field(
         KEEP,
-        description="Averaging round count; omission retains the Form value; null clears/disables it.",
+        description="Averaging round count.",
     )
 
 

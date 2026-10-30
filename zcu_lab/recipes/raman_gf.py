@@ -20,55 +20,55 @@ class RamanGFInputs(RecipeInputs):
 
     readout_ref: str | None | Keep = Field(
         KEEP,
-        description="Readout library key with acquired centroid3 calibration. Omit to retain; null goes unchanged to the Form.",
+        description="Readout library key with acquired centroid3 calibration.",
     )
     drive_ref: str | None | Keep = Field(
         KEEP,
-        description="Single Raman drive library key. Omit to retain; null goes unchanged to the Form.",
+        description="Single Raman drive library key.",
     )
     waveform_asset: str | None | Keep = Field(
         KEEP,
-        description="Sampled arbitrary waveform asset key, such as an operator-prepared sqrt(cos) envelope. Omit to retain; null clears the key.",
+        description="Sampled arbitrary waveform asset key, such as an operator-prepared sqrt(cos) envelope.",
     )
     carrier_mhz: float | None | Keep = Field(
         KEEP,
-        description="Operator-supplied (measured f03 - measured f32)/2 in MHz. No model lookup. Omit to retain; null clears it.",
+        description="Operator-supplied (measured f03 - measured f32)/2 in MHz. No model lookup.",
     )
     scan_mode: Literal["frequency", "area", "frequency_area"] | None | Keep = Field(
         KEEP,
-        description="Frequency, area or Cartesian frequency-area scan. Omit to retain; null goes unchanged to the Form.",
+        description="Frequency, area or Cartesian frequency-area scan.",
     )
     detuning_start_mhz: float | None | Keep = Field(
         KEEP,
-        description="Two-photon detuning start in MHz: 2*f_drive - 2*carrier_mhz. Omit to retain; null clears it.",
+        description="Two-photon detuning start in MHz: 2*f_drive - 2*carrier_mhz.",
     )
     detuning_stop_mhz: float | None | Keep = Field(
         KEEP,
-        description="Two-photon detuning stop in MHz; positive raises the single carrier by half the detuning. Omit to retain; null clears it.",
+        description="Two-photon detuning stop in MHz; positive raises the single carrier by half the detuning.",
     )
     detuning_n: int | None | Keep = Field(
         KEEP,
-        description="Detuning sample count, Form detuning.n to cfg detuning.expts. Omit to retain; null clears it.",
+        description="Detuning sample count, Form detuning.n to cfg detuning.expts.",
     )
     gain_start: float | None | Keep = Field(
         KEEP,
-        description="Nonnegative drive-gain start in native units; frequency mode holds this gain. Omit to retain; null clears it.",
+        description="Nonnegative drive-gain start in native units; frequency mode holds this gain.",
     )
     gain_stop: float | None | Keep = Field(
         KEEP,
-        description="Nonnegative drive-gain stop in native units. Area is gain squared times envelope intensity integral in us, not a rotation calibration. Omit to retain; null clears it.",
+        description="Native nonnegative gain stop; area = gain squared times envelope intensity integral (us), not angle.",
     )
     gain_n: int | None | Keep = Field(
         KEEP,
-        description="Gain sample count, Form gain.n to cfg gain.expts. Omit to retain; null clears it.",
+        description="Gain sample count, Form gain.n to cfg gain.expts.",
     )
     shots: int | None | Keep = Field(
         KEEP,
-        description="Raw IQ shots per point. Omit to retain; null clears it.",
+        description="Raw IQ shots per point.",
     )
     relax_delay_us: float | None | Keep = Field(
         KEEP,
-        description="Relaxation interval in us for ground preparation. Omit to retain; null clears it.",
+        description="Relaxation interval in us for ground preparation.",
     )
 
 

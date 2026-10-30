@@ -64,6 +64,11 @@ STATUS_CHECKS: Final = (
         (sys.executable, str(_TOOLS_DIR / "check_script_awaits.py")),
         "violation_count",
     ),
+    Check(
+        "mcp text budget",
+        (sys.executable, str(_TOOLS_DIR / "check_mcp_text_budget.py")),
+        "overage_count",
+    ),
     Check("ruff", ("ruff", "check", "--output-format", "json", "."), "__len__"),
     Check(
         "file size",
@@ -150,6 +155,12 @@ def steps(base: str, files: tuple[str, ...], *, fix: bool) -> tuple[Step, ...]:
         Step(
             "script awaits",
             (sys.executable, str(_TOOLS_DIR / "check_script_awaits.py")),
+        )
+    )
+    found.append(
+        Step(
+            "mcp text budget",
+            (sys.executable, str(_TOOLS_DIR / "check_mcp_text_budget.py")),
         )
     )
     found.append(

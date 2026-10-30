@@ -24,48 +24,48 @@ class HeraldingT2EchoInputs(RecipeInputs):
 
     readout_ref: str | None | Keep = Field(
         KEEP,
-        description="Pulse-readout library key including classifier; omission retains the Form value, null is passed unchanged to the Form owner, which may reject it.",
+        description="Pulse-readout library key including classifier. Null passes to the Form owner.",
     )
     use_reset: str | None | Keep = Field(
         KEEP,
-        description="Preparation module option; omission retains the Form value, null is passed unchanged to the Form owner, which may reject it.",
+        description="Preparation module option. Null passes to the Form owner.",
     )
     pi_ref: str | None | Keep = Field(
         KEEP,
-        description="Calibrated pi-pulse library key; omission retains the Form value, null is passed unchanged to the Form owner, which may reject it.",
+        description="Calibrated pi-pulse library key. Null passes to the Form owner.",
     )
     pi2_ref: str | None | Keep = Field(
         KEEP,
-        description="Calibrated pi/2-pulse library key; omission retains the Form value, null is passed unchanged to the Form owner, which may reject it.",
+        description="Calibrated pi/2-pulse library key. Null passes to the Form owner.",
     )
     max_delay_us: float | None | Keep = Field(
         KEEP,
-        description="Total echo-delay stop in us, not half-delay; omission retains the Form value, null is passed unchanged to the Form owner, which may reject it.",
+        description="Total echo-delay stop in us, not half-delay. Null passes to the Form owner.",
     )
     detune_ratio: float | None | Keep = Field(
         KEEP,
-        description="Final-pulse phase-ramp ratio, dimensionless; omission retains the Form value, null is passed unchanged to the Form owner, which may reject it.",
+        description="Final-pulse phase-ramp ratio, dimensionless. Null passes to the Form owner.",
     )
     points: int | None | Keep = Field(
         KEEP,
-        description="Sweep sample count; omission retains the Form value, null is passed unchanged to the Form owner, which may reject it.",
+        description="Sweep sample count. Null passes to the Form owner.",
     )
     reps: int | None | Keep = Field(
         KEEP,
-        description="Acquisition repetition count; omission retains the Form value, null is passed unchanged to the Form owner, which may reject it.",
+        description="Acquisition repetition count. Null passes to the Form owner.",
     )
     rounds: int | None | Keep = Field(
         KEEP,
-        description="Averaging round count; omission retains the Form value, null is passed unchanged to the Form owner, which may reject it.",
+        description="Averaging round count. Null passes to the Form owner.",
     )
 
     fit_method: Literal["fringe", "decay"] | None | Keep = Field(
         KEEP,
-        description="Fit method; omission retains the analysis value; null is passed to the analysis owner. Analysis only.",
+        description="Fit method. Analysis only; omitted keeps value, null passes to owner.",
     )
     fit_phase: bool | None | Keep = Field(
         KEEP,
-        description="Fit phase offset (fringe only); omission retains the analysis value; null is passed to the analysis owner. Analysis only.",
+        description="Fit phase offset (fringe only). Analysis only; omitted keeps value, null passes to owner.",
     )
 
 

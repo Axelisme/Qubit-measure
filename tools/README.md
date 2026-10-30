@@ -35,7 +35,7 @@ uv run --directory <worktree> --no-sync -- python tools/gate.py --base <lane 起
 ```
 
 `gate.py` 是日常入口。它依序執行：受影響檔案的 ruff import 排序與 formatter、
-`lint-imports`、lab script await guardrail、然後 ratchet。
+`lint-imports`、lab script await guardrail、measure MCP 文字預算、然後 ratchet。
 
 省略 `--base` 時回報現況，列出全樹的絕對數字：
 
@@ -123,6 +123,53 @@ Helper 的 async def 本文也受檢查，未被呼叫的 async def 亦在選集
 Assignment aliases、動態分派與包裝不追蹤，可能造成漏報或拒絕合法 helper。
 出現實際失敗類別再擴充，不藉此新增作者排程 API。
 同 process 合成 source／fixture 驗證在 `tests/tools/test_check_script_awaits.py`。
+
+## Measure MCP text budget
+
+```bash
+uv run --directory <worktree> --no-sync -- python tools/check_mcp_text_budget.py
+```
+
+`check_mcp_text_budget.py` 用目前 interpreter 啟動 `mcp_servers/measure.py`，經 stdio
+送出 `initialize`、`notifications/initialized` 與 `tools/list`，讀完回覆後以 EOF 關閉
+server。它不啟動或連接 GUI，也不呼叫量測工具或硬體。`--timeout SECONDS` 限制 stdio
+子程序的總時間，預設 60 秒，逾時會終止並回收子程序。
+
+這個 collector 只對同 repo 的已知 stdio server 固定送三則只讀訊息，不是通用 MCP
+client。這個用途不引入完整 async MCP SDK 依賴，也不改寫為 async。若未來需要互動
+工具呼叫、支援異質 server 或通知路由，再評估使用 SDK。
+
+檢查以解碼後的字元數計量，不計 UTF-8 bytes 或 JSON escape 字元。上限包含等號：
+
+| Wire 文字 | 上限 |
+| --- | ---: |
+| Server instructions | 2,000 |
+| Recipe tool description | 200 |
+| 其他 tool description | 400 |
+| Schema property description | 100 |
+
+Recipe 身分來自與 server 相同的 `zcu_lab.assembly.lab_definitions().recipes`，以
+`RecipeDeclaration.name` 精確比對 tool name，不寫死名稱，也不從前綴推測。
+Property 檢查包含巢狀 object、array、union 及 `$defs` 中的欄位。不重複展開 `$ref`，
+也不把 schema 頂層／型別說明或 `default`、`examples` 內的資料當成 property 說明。
+
+stdout 的 JSON receipt 包含 `instructions_length`、`tool_count`、`overage_count`，以及
+每筆超額的 `item`、`length`、`limit`。stderr 同時列出每筆超額的 wire 路徑、字元數與上限。
+無超額回傳 0，有超額回傳 1；stdio 啟動、逾時或回覆解碼失敗回傳 2。
+必要回覆結構、文字型別或被走訪的 schema 結構不合法也回傳 2，不用空值掩蓋錯誤。
+省略或 null 的 descriptions 計為零；boolean subschemas 合法。只驗證計量所走訪的
+schema 節點，不驗證 `default`、`examples`、`const`、`enum` 中的 instance data，
+也不作通用 JSON Schema 驗證。
+Lab 宣告載入錯誤直接拋出。`gate.py --base <ref>` 每次都執行此檢查，沒有 Python
+檔案變更也不跳過。超額或執行失敗都使 gate 回傳 1。無 `--base` 的現況表以
+`mcp text budget` 列出 `overage_count`。現況模式仍回傳 0，不判定變更是否通過。
+
+`check_text_budget(instructions, tools, recipe_names)` 可直接 import，回傳
+`BudgetReport`，其 `exit_code` 與 `overages` 分別提供 pass/fail 和全部超額項目。
+`collect_text_budget(recipe_names, *, timeout=60.0)` 收集 wire 後回傳同一種 report，
+不載入 lab；`main` 負責取得 lab 的 recipe names 與轉譯 collection errors。
+`tests/tools/test_check_mcp_text_budget.py` 使用合成 wire inputs 驗證計量契約，並在外部
+subprocess 邊界替換回覆以驗證 collection errors，不載入 lab 或真 server。
 
 ## 品質快照與熱點報表
 

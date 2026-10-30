@@ -3,6 +3,8 @@
 from collections.abc import Sequence
 from functools import partial
 
+from pydantic.json_schema import GenerateJsonSchema
+
 from zcu_tools.mcp.core.reply import ToolReply
 from zcu_tools.mcp.core.stdio_server import ToolTable
 from zcu_tools.mcp.measure.execution_reply import project_execution
@@ -10,6 +12,15 @@ from zcu_tools.mcp.measure.recipe_api import RecipeDeclaration
 from zcu_tools.mcp.measure.tool_context import MeasureToolContext
 
 INITIAL_WAIT_SECONDS = 300.0
+
+
+class RecipeInputSchema(GenerateJsonSchema):
+    """Present recipe properties without generated titles; keep authored titles."""
+
+    def field_title_should_be_set(self, schema: object) -> bool:
+        """Ignore schema; leave property titles to explicit author declarations."""
+        del schema
+        return False
 
 
 def run_recipe(
@@ -73,7 +84,7 @@ def build_recipe_tools(
     return {
         "answer": {
             "handler": partial(answer, context),
-            "description": "Answer the current question using its request_id and named answer fields from pending_question.answer_schema. A stale answer never consumes a question or writes. Only the recipe's explicit accept_writeback writes. Terminal replies retain execution; failures include failure.phase and human failure.reason. Wait up to 300 seconds for the next handoff; timeout never cancels.",
+            "description": "Answer a paused recipe question. Use pending_question.request_id and answer_schema. Stale answers leave the question paused and return accepted=false, reason and pending_request_id.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -88,9 +99,10 @@ def build_recipe_tools(
         **{
             definition.name: {
                 "handler": partial(run_recipe, context, definition),
-                "description": definition.description
-                + " Returns execution, status, authored report and runs. Failed recipes also return failure.phase (operation, result_read, image_save, figure_read or writeback_read) and human failure.reason without a traceback. Explicit questions require answer(execution, request_id, answer). Interactive analysis hands off pending(tab,stage,op). Use status(execution, detail=full) for captured owner evidence; waiting never cancels.",
-                "inputSchema": definition.inputs.model_json_schema(),
+                "description": definition.description,
+                "inputSchema": definition.inputs.model_json_schema(
+                    schema_generator=RecipeInputSchema
+                ),
             }
             for definition in recipes
         },

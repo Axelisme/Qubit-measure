@@ -22,36 +22,36 @@ class HeraldingT1Inputs(RecipeInputs):
 
     readout_ref: str | None | Keep = Field(
         KEEP,
-        description="Pulse-readout library key including classifier; omission retains the Form value. Null is passed unchanged to the Form owner, which may reject it.",
+        description="Pulse-readout library key including classifier. Null passes to the Form owner.",
     )
     pi_ref: str | None | Keep = Field(
         KEEP,
-        description="Calibrated pi-pulse library key; omission retains the Form value. Null is passed unchanged to the Form owner, which may reject it.",
+        description="Calibrated pi-pulse library key. Null passes to the Form owner.",
     )
     max_delay_us: float | None | Keep = Field(
         KEEP,
-        description="Delay sweep stop in us; omission retains the Form value. Null is passed unchanged to the Form owner, which may reject it.",
+        description="Delay sweep stop in us. Null passes to the Form owner.",
     )
     points: int | None | Keep = Field(
         KEEP,
-        description="Sweep sample count; omission retains the Form value. Null is passed unchanged to the Form owner, which may reject it.",
+        description="Sweep sample count. Null passes to the Form owner.",
     )
     reps: int | None | Keep = Field(
         KEEP,
-        description="Acquisition repetition count; omission retains the Form value. Null is passed unchanged to the Form owner, which may reject it.",
+        description="Acquisition repetition count. Null passes to the Form owner.",
     )
     rounds: int | None | Keep = Field(
         KEEP,
-        description="Averaging round count; omission retains the Form value. Null is passed unchanged to the Form owner, which may reject it.",
+        description="Averaging round count. Null passes to the Form owner.",
     )
 
     dual_exp: bool | None | Keep = Field(
         KEEP,
-        description="Dual exponential; omission retains the analysis value; null is passed to the analysis owner. Analysis only.",
+        description="Dual exponential. Analysis only; omitted keeps value, null passes to owner.",
     )
     skip: int | None | Keep = Field(
         KEEP,
-        description="Skip leading points; omission retains the analysis value; null is passed to the analysis owner. Analysis only.",
+        description="Skip leading points. Analysis only; omitted keeps value, null passes to owner.",
     )
 
 

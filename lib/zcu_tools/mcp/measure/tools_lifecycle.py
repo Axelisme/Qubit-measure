@@ -47,7 +47,7 @@ def tool_connect(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str
 
 CONNECT_TOOL: dict[str, Any] = {
     "handler": tool_connect,
-    "description": "Attach to the live GUI or launch one when requested. Initially label=agent and mode=owner; readonly never acquires. Reconnect retains omitted identity options; changing them reopens the socket. Return native control status even when the GUI is locked or another holder controls it. Supply token if required. Startup scripts may connect hardware; launch only trusted scripts with authorization. Authentication and incompatible wire contracts are distinct errors.",
+    "description": "Connect to the measurement GUI: attach to an existing GUI or launch a new one only with authorization and trusted startup scripts. Returns control and global status even when locked or held by another client. Reconnect retains omitted identity; changing it reopens the socket. Readonly never acquires. Authentication and wire incompatibility fail separately.",
     "inputSchema": {
         "type": "object",
         "properties": {
@@ -65,11 +65,11 @@ CONNECT_TOOL: dict[str, Any] = {
             "script": {
                 "type": "string",
                 "minLength": 1,
-                "description": "Trusted Python path defining startup(ctx); replaces the default script only when launching a new GUI. Attach with a path is rejected.",
+                "description": "Trusted startup(ctx) Python path, replacing the default. New GUI only; rejected on attach.",
             },
             "project_root": {
                 "type": "string",
-                "description": "Data project root for a new GUI. Must be an absolute path to an existing directory; the launcher validates it. Attach with a root is rejected. Omit to use the repo root.",
+                "description": "Existing absolute data directory for a new GUI only. Omit for repo root; rejected on attach.",
             },
             "label": {"type": "string", "minLength": 1, "default": "agent"},
             "mode": {

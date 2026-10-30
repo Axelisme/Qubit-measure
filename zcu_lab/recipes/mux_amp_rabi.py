@@ -34,20 +34,20 @@ class MuxAmpRabiInputs(RecipeInputs):
 
     participants: list[StrictInt] | None | Keep = Field(
         default=KEEP,
-        description="Unique original tone indices in acquisition order; omission keeps the Form selection; null clears it.",
+        description="Unique original tone indices in acquisition order.",
     )
     sweeps: list[ToneRangeInputs] | None | Keep = Field(
         default=KEEP,
-        description="Start/stop for every tone in original order, including nonparticipants; omission keeps ranges; null clears their bounds. No per-tone n.",
+        description="Start/stop for every tone in original order, including nonparticipants. No per-tone n.",
     )
     n: Annotated[int, Field(strict=True, gt=0)] | None | Keep = Field(
         default=KEEP,
-        description="Positive hardware scan point count shared by all tones; omission keeps Expts; null clears it.",
+        description="Positive hardware scan point count shared by all tones.",
     )
 
     skip: int | None | Keep = Field(
         default=KEEP,
-        description="Points to skip before fitting the gain oscillation. Omission keeps analysis settings; null is passed to the analysis owner.",
+        description="Leading gain-fit points to skip. Omitted keeps analysis value; null passes to owner.",
     )
 
 
