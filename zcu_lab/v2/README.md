@@ -1,10 +1,11 @@
 # v2 experiments
 
-**Last updated:** 2026-10-28，flux offset／period writeback
+**Last updated:** 2026-10-30，離線驗收入口
 
 **讀者：** lab-author、agent。查找實驗的檔案分工、作者契約與各家族入口。
 
 先從 [tutorial](../tutorial/README.md) 新增實驗，再按下列入口查契約與操作。
+實驗定義改動的驗收方式與命令範例見 [離線驗收](../README.md#實驗定義的離線驗收)。
 
 ## Reading routes
 

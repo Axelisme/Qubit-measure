@@ -1,6 +1,6 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-10-29（worker、marker、targeted 選集與 Numba cache 操作）
+**Last updated:** 2026-10-30（框架 UI 與實驗定義的驗收分流）
 
 **讀者：** framework-dev、agent。查閱測試的 owner、fixture、執行方式與搬遷驗收契約。
 
@@ -45,7 +45,11 @@ Root session fixture 將 `tempfile.tempdir` 指向 `tmp_path_factory` 建立的�
 
 ## UI 驗證
 
-有 UI 改動的票，驗收須包含元件驅動情境。情境使用
+框架 UI 改動依下方元件情境驗收。`zcu_lab/` 實驗定義改動，包含 live plot 與分析圖的畫面改動，依下方離線 probe 驗收，不要求 ComponentDriver 走查。同時修改兩者時，分別完成兩種驗收。
+
+### 框架 UI
+
+框架 UI 改動的驗收須包含元件驅動情境。情境使用
 [`ComponentDriver`](gui/_user_input/)，依使用者可見文字或既有 objectName 找元件，
 以真實鍵盤／滑鼠事件操作。Disabled、hidden 或完全被 scroll viewport 裁掉的元件不繞過。
 可見性依 Qt visible region 判斷，不偵測 OS 層的其他視窗遮蔽。
@@ -59,10 +63,31 @@ Root session fixture 將 `tempfile.tempdir` 指向 `tmp_path_factory` 建立的�
 背景工作依下方的 [Qt owner-loop 等待](#qt-owner-loop-等待)規則，用公開終局條件等待。
 
 框架情境用合成 adapter，放在對應 owner 的 `tests/` 路徑。
-實驗定義的走查腳本用同一個 driver，放在各 task scratch，不 commit。
 每一步將視窗截圖存為 PNG 到呼叫端指定的 task scratch 或測試 `tmp_path`。
 Agent 在 review-done 前須跑完情境並親自看過每步截圖，留下精確重跑命令、截圖路徑與判讀結論。
 使用者走查只判斷外觀與操作手感，不承擔行為測試。
+
+### 實驗定義
+
+對變更影響的 Experiment，以符合其 Cfg 型別的完整 cfg 與明確接線的離線模擬環境，呼叫公開的
+[`probe.probe` 或 `probe.main`](../lib/zcu_tools/experiment/README.md#offline-experiment-probe)。
+Probe 執行公開 `run` → native `save_run` → 讀回並 `restore_run` → 以讀回的 RunRecord 呼叫 `analyze`，
+並輸出 live／analysis PNG。實驗須提供 `AXES_SPEC`，分析需要的 options 由呼叫端明填。
+命令範例與環境參數見 [zcu_lab 驗收說明](../zcu_lab/README.md#實驗定義的離線驗收)。
+
+Agent 在 review-done 前完成下列檢查，將證據留在各 task scratch，不新增個別實驗的 durable tests：
+
+1. 保存精確重跑命令、cfg、options、環境設定、exit status、報告與錯誤輸出。使用 Python API 時，另保存 scratch 腳本。
+2. 檢查 `report.failed_stage` 與 `report.exception` 都是 `None`，且 `report.roundtrip_equal is True`。
+   核對 `fields`／`restored_fields` 的 shape、dtype 與預期資料形狀，並記錄 `analysis_summary` 的判讀。
+   階段失敗時記錄階段與原始例外；不要以殘留的 native 檔或 PNG 當作本次成功證據。
+3. 親自開啟 `report.png_paths` 的每張 PNG，逐張記錄路徑、預期畫面與實際判讀。
+   核對曲線或熱圖、軸標、單位、圖例及本次變更影響的外觀。只有檔案存在或數值報告通過不算看圖驗收。
+   預期有圖卻未產生時，記錄為驗收缺口。
+
+直接呼叫 `probe()` 的 caller 擁有環境生命週期，須在 `finally` 清理 backend 與 devices，失敗時也一樣。
+`main(argv)`／`python -m` 入口建立並清理自己的環境。Probe 不重設 caller 的 seed、不改接線，也不連硬體。
+離線驗收不代表實機校準或物理模型已獲驗證。
 
 ## 搬遷驗收
 
