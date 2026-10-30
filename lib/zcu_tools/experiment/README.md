@@ -1,6 +1,6 @@
 # `zcu_tools.experiment` — 實驗層
 
-**Last updated:** 2026-10-29
+**Last updated:** 2026-10-30
 
 **讀者：** framework-dev。實驗介面、Run 資料、持久化映射與裝置操作邊界。
 
@@ -111,6 +111,19 @@ Pruning thresholds and diagnostics belong to the
 [FTF](ftf/README.md#cavity-drives) settings/runtime contracts.
 Templates without projective reads retain their existing raw, integrated and
 decimated outputs.
+
+## Offline experiment probe
+
+`probe.probe(experiment, cfg, environment, output_dir, *, options=None)` 用 caller
+建立的 `SimulationEnvironment` 執行公開 run、native save、restore 與 analyze。
+每次建立新的 Scope 與 headless Plots，以 Agg canvas 保存 live／analysis PNG，不建立 Qt application。
+Caller 仍負責環境的 backend 與 devices 清理，probe 不更改 seed 或接線。
+`ProbeReport` 保留 Result 欄位的 shape／dtype、NaN 視為相等的逐值讀回比較、分析摘要、PNG 路徑與階段秒數。
+階段失敗時回傳原始 exception 與 failed_stage，並記錄 traceback；成功前已產生的檔案保留。
+
+`probe.main(argv)` 載入 caller 指定的可信任 `module:class`，依 AXES_SPEC 的 cfg 型別驗證 YAML／JSON，
+建立並清理 white_noise 或 single_fluxonium 環境。它印出 JSON 並回傳同型報告。
+`python -m zcu_tools.experiment.probe --help` 列出參數；module shell 以 exit status 區分成功與階段失敗。
 
 ## 實驗介面與資料
 
