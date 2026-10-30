@@ -431,27 +431,35 @@ def template_input(
 
 
 def template_seed_tree(
-    template: Template, catalog: Mapping[str, TemplateDef]
+    template: Template, catalog: Mapping[str, TemplateDef], env: FormEnv | None = None
 ) -> dict[str, JsonValue]:
-    """Describe authored defaults without reading sources.
+    """Derive field requirements from the selected branch, not actual input.
 
-    Call after template_input validates IDs, families and paths.
-    This tree is only for deriving field requirements, never for Slot presence
-    or actual input. Literal overrides replace earlier Expr seeds.
+    Call after template_input validates IDs, families and paths. env is the
+    fixed capture used to select nested Slot fallbacks and expand their paths;
+    None validates the authored declaration without resolving sources.
+    Literal overrides replace earlier Expr seeds.
     """
     # Requirements depend on the authored seed kinds, not replacement values.
-    seeds = dict(catalog[template.id].seeds)
+    seeds = (
+        dict(catalog[template.id].seeds)
+        if env is None
+        else catalog[template.id].expanded_seeds(bindings=template.bindings)
+    )
     seeds.update(template.set)
     data: dict[str, JsonValue] = {}
     for path, seed in seeds.items():
         if isinstance(seed, Slot):
-            nested: dict[str, JsonValue] = (
-                template_seed_tree(seed.fallback, catalog)
-                if seed.fallback is not None
-                else {}
-            )
-            for child_path, value in seed.set.items():
-                set_path(nested, child_path, declaration_seed(value))
+            if (
+                env is not None
+                and seed.fallback is not None
+                and slot_key(seed, env) is None
+            ):
+                nested = template_seed_tree(seed.fallback, catalog, env)
+            else:
+                nested: dict[str, JsonValue] = {}
+                for child_path, value in seed.set.items():
+                    set_path(nested, child_path, declaration_seed(value))
             set_path(data, path, nested)
         else:
             set_path(data, path, declaration_seed(seed))

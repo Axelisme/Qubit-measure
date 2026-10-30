@@ -605,6 +605,7 @@ class TabFormResource:
             current = self._state.input
             form.seed_sources = self._form.seed_sources
             form.seed_metadata = self._form.seed_metadata
+            form.template_seed_metadata = self._form.template_seed_metadata
             state = FormState(
                 FormInput(form.model, current.data, selections=current.selections)
             )

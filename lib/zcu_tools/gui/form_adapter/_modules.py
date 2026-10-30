@@ -712,31 +712,55 @@ class ModuleField:
         return self.node
 
     def validate_templates(self, catalog: Mapping[str, TemplateDef]) -> None:
-        template = self.node.fallback if isinstance(self.node, Slot) else self.node
+        if isinstance(self.node, Slot) and self.node.fallback is not None:
+            template_input(self.node.fallback, catalog, self.editable, None)
+        self._bind_projection(self.node, catalog)
+
+    def select_sources(self, env: FormEnv, *, force: bool = False) -> None:
+        """Install the selected branch's projection without changing wrapper identity."""
+        node = self.node
+        has_fallback = isinstance(node, Slot) and node.fallback is not None
+        if isinstance(node, Template):
+            seeds = dict(self.catalog[node.id].seeds) | dict(node.set)
+            has_fallback = any(
+                isinstance(seed, Slot) and seed.fallback is not None
+                for seed in seeds.values()
+            )
+        if has_fallback or force:
+            self._bind_projection(self.selected_node(env), self.catalog, env)
+
+    def _bind_projection(
+        self,
+        node: Slot | Template | None,
+        catalog: Mapping[str, TemplateDef],
+        env: FormEnv | None = None,
+    ) -> None:
+        template = node if isinstance(node, Template) else None
         seeds: dict[str, JsonValue] = {}
         if template is not None:
             template_input(template, catalog, self.editable, None)
-            seeds = template_seed_tree(template, catalog)
-        if isinstance(self.node, Slot):
-            for path, value in self.node.set.items():
+            seeds = template_seed_tree(template, catalog, env)
+        if isinstance(node, Slot):
+            for path, value in node.set.items():
                 set_path(seeds, path, declaration_seed(value))
         for path in self.shared_hidden_paths:
             set_path(seeds, path, {"hidden": True})
-        if seeds:
-            self.editable = tuple(editable_spec(spec, seeds) for spec in self.specs)
-            module = union_type(self.editable)
-            if len(self.specs) > 1:
-                module = annotated_type(module, Field(discriminator="type"))
-            # Parse the annotation without mutating FieldInfo.annotation; keep the
-            # inline class identity borrowed by the section and value form.
-            parsed = create_model(
-                self.inline.__name__,
-                __base__=self.inline,
-                __module__=__name__,
-                module=(module, deepcopy(self.inline.model_fields["module"])),
-            )
-            self.inline.model_fields["module"] = parsed.model_fields["module"]
-            self.inline.model_rebuild(force=True)
+        self.editable = tuple(editable_spec(spec, seeds) for spec in self.specs)
+        module = union_type(self.editable)
+        if len(self.specs) > 1:
+            module = annotated_type(module, Field(discriminator="type"))
+        # Keep the wrapper borrowed by parent/value Forms, but replace its
+        # child projection so an unselected branch cannot leak Hidden or Expr.
+        parsed = create_model(
+            self.inline.__name__,
+            __base__=self.inline,
+            __module__=__name__,
+            module=(module, deepcopy(self.inline.model_fields["module"])),
+        )
+        self.inline.model_fields["module"] = parsed.model_fields["module"]
+        self.inline.model_rebuild(force=True)
+        self.value_model.model_rebuild(force=True)
+        self._inline_fields.clear()
         if template is not None:
             bind_template_defaults(self.editable, template, catalog)
 

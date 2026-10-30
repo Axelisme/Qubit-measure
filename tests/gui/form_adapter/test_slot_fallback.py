@@ -6,6 +6,7 @@ from zcu_tools.cfg_model import (
     ConfigBase,
     Expr,
     FieldMeta,
+    Hidden,
     PulseSpec,
     Slot,
     Template,
@@ -103,12 +104,15 @@ class ResetCore(ConfigBase):
     "path", ["Q.pulses.probe", "Q.pulses.missing", "$unbound.module.probe"]
 )
 @pytest.mark.parametrize("copy", [False, True])
-def test_slot_fallback_matches_explicit_source_selection(path: str, copy: bool) -> None:
-    env = environment()
+@pytest.mark.parametrize("sources", [False, True])
+def test_slot_fallback_matches_explicit_source_selection(
+    path: str, copy: bool, sources: bool
+) -> None:
+    env = environment() if sources else FormEnv()
     fallback = Template("pulse", set={"gain": 0.25})
     form = bound_form(Slot(path, copy=copy, fallback=fallback))
     explicit = bound_form(
-        Slot(path, copy=copy) if path == "Q.pulses.probe" else fallback
+        Slot(path, copy=copy) if sources and path == "Q.pulses.probe" else fallback
     )
     input = form.default_input(env)
     expected = explicit.default_input(env)
@@ -121,6 +125,101 @@ def test_slot_fallback_matches_explicit_source_selection(path: str, copy: bool) 
     assert not isinstance(value, FormErrors), value
     assert not isinstance(expected_value, FormErrors), expected_value
     assert form.to_cfg(value, env) == explicit.to_cfg(expected_value, env)
+
+
+@pytest.mark.parametrize("available", [False, True])
+@pytest.mark.parametrize("hidden_branch", ["slot", "template"])
+def test_slot_and_fallback_keep_their_own_hidden_projection(
+    available: bool, hidden_branch: str
+) -> None:
+    fallback = Template(
+        "pulse", set={"gain": Hidden(0.2)} if hidden_branch == "template" else {}
+    )
+    slot = Slot(
+        "Q.pulses.probe" if available else "Q.pulses.missing",
+        copy=True,
+        set={"gain": Hidden(0.2)} if hidden_branch == "slot" else {},
+        fallback=fallback,
+    )
+    form = bound_form(slot)
+    explicit = bound_form(
+        Slot(slot.path, copy=True, set=slot.set) if available else fallback
+    )
+    env = environment()
+    state = FormState(form.default_input(env))
+    expected = FormState(explicit.default_input(env))
+    assert state.input.data == expected.input.data
+    actual_fields = state.describe(("probe", "module"), env).children
+    expected_fields = expected.describe(("probe", "module"), env).children
+    assert [(field.path, field.hidden) for field in actual_fields] == [
+        (field.path, field.hidden) for field in expected_fields
+    ]
+
+
+def test_list_hidden_policy_uses_adopted_fallback_not_unused_slot() -> None:
+    class Group(ConfigBase):
+        tones: list[Core]
+
+    form = Form(
+        Group,
+        {
+            "tones": [
+                {
+                    "probe": Slot(
+                        "Q.pulses.missing",
+                        copy=True,
+                        set={"gain": Hidden(0.2)},
+                        fallback=Template("pulse"),
+                    )
+                },
+                {"probe": Template("pulse")},
+            ]
+        },
+    )
+    explicit = Form(
+        Group,
+        {
+            "tones": [
+                {"probe": Template("pulse")},
+                {"probe": Template("pulse")},
+            ]
+        },
+    )
+    for candidate in (form, explicit):
+        candidate.bind_templates(templates(), adapter="synthetic-list-fallback")
+    env = environment()
+    state = FormState(form.default_input(env))
+    expected = FormState(explicit.default_input(env))
+    assert state.input.data == expected.input.data
+    for index in (0, 1):
+        path = ("tones", index, "probe", "module")
+        assert [
+            (field.path, field.hidden) for field in state.describe(path, env).children
+        ] == [
+            (field.path, field.hidden)
+            for field in expected.describe(path, env).children
+        ]
+
+
+def test_slot_copy_overrides_do_not_supply_failed_fallback_defaults() -> None:
+    env = environment()
+    fallback = Template("pulse", set={"waveform.length": Expr("$unbound.value")})
+    form = bound_form(
+        Slot(
+            "Q.pulses.missing",
+            copy=True,
+            set={"waveform.length": 0.75},
+            fallback=fallback,
+        )
+    )
+    explicit = bound_form(fallback)
+    input = form.default_input(env)
+    expected = explicit.default_input(env)
+    assert input.data == expected.data
+    result = FormState(input).result(env)
+    expected_result = FormState(expected).result(env)
+    assert isinstance(result, FormErrors)
+    assert result == expected_result
 
 
 @pytest.mark.parametrize("path", ["Q.pulses.probe", "Q.pulses.missing"])
@@ -183,14 +282,14 @@ def test_nested_slot_adopts_its_template_and_metadata_only_when_missing(
                 "cavity_tone_cfg": Slot("Q.pulses.probe"),
                 "qubit_tone_cfg": Slot("Q.pulses.probe"),
                 "pi2_cfg": Slot(
-                    "Q.pulses.probe" if available else "$unbound.module.probe",
+                    "{drive}.pulses.probe" if available else "{drive}.pulses.missing",
                     fallback=fallback,
                 ),
             },
         )
     }
     env = environment()
-    form = Form(ResetCore, {"reset": Template("reset")})
+    form = Form(ResetCore, {"reset": Template("reset", bindings={"drive": "Q"})})
     form.bind_templates(catalog, adapter="synthetic-nested-fallback")
     input = form.default_input(env)
     value = FormState(input).result(env)

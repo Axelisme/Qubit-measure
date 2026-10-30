@@ -108,7 +108,7 @@ Bath reset phase 維持可編輯。決策見 [ADR-0073](../../../../docs/adr/007
 
 所有位置共用元素宣告，各位置可提供不同的唯讀初值。位置 tree 直接放 `Hidden` 仍在建立 Form 時拒絕。
 位置的 `Template.set`／`Slot.set` 可用 `Hidden(value)`。同一 module 欄位的所有非 None 位置必須宣告相同的 Hidden Spec 路徑，
-`bind_templates` 才把隱藏政策套到共享元素 model；路徑不同時，錯誤列出 list 路徑與不一致的 indices。
+`bind_templates` 把隱藏政策套到共享元素 model；有 Slot fallback 時，`default_input` 先依固定 capture 選中分支，再套用該分支的隱藏政策。路徑不同時，錯誤列出 list 路徑與不一致的 indices。
 明示為 None 的 nullable module 不宣告 Hidden 政策，不參與該 module 的比較，也不免除同位置其他 module 的比較。
 全為 None 時沒有額外隱藏路徑。省略初值或非 nullable module 的 None 仍照原規則比較。
 共享 model 只取得隱藏路徑，不取得第一個位置的值、來源、bindings 或其他 defaults。
@@ -179,7 +179,7 @@ Log→List 帶入實際清單，List→Log 回填最大值與清單長度。切�
 
 `Form.with_seed_metadata(mapping)` 回傳帶逐位置 metadata 的新 Form，原 Form 不變。Mapping 以 canonical typed paths 指向 FieldMeta，來源公式使用 description，calibration 接受 uncalibrated／None。後一次呼叫取代整份 mapping。只有實際產生推導初值的 Form 需要這項宣告，不將動態 seed 的校準狀態綁到 core 靜態欄位。
 
-`default_input` 保存一次 raw seed 宣告及其求值結果。`seed_sources` 是唯讀 path mapping，保存 expression、slot 或 template 來源與 missing／available／literal 狀態。保留 input 的 host 在 Refresh 換 Form 時也保留這份 mapping，Reset 才重算。`Form.diagnostics(input, env, errors)` 把 caller 提供的 canonical errors 與全部目前／seed 欄位合併成 FieldDiagnostic。它不重新驗證或 lower cfg，也不呼叫 defaults 或 capture。欄位的 message 可為 None，name／index 來自同一 input 的 model-list description。Uncalibrated 只讀作者 metadata，未知為 None。Candidate preflight 可交同一 Form 的 detached input 與驗證 errors 使用這個入口。
+`default_input` 保存一次 raw seed 宣告及其求值結果。`seed_sources` 是唯讀 path mapping，保存 expression、slot 或 template 來源與 missing／available／literal 狀態。`template_seed_metadata` 是同次 Open／Reset 實際採用範本的唯讀 FieldMeta mapping。保留 input 的 host 在 Refresh 換 Form 時轉交 `seed_sources`、`seed_metadata` 與 `template_seed_metadata` 三份公開 mapping；Reset 才重算來源與範本快照。`Form.diagnostics(input, env, errors)` 把 caller 提供的 canonical errors 與全部目前／seed 欄位合併成 FieldDiagnostic。它不重新驗證或 lower cfg，也不呼叫 defaults 或 capture。欄位的 message 可為 None，name／index 來自同一 input 的 model-list description。Uncalibrated 只讀作者 metadata，未知為 None。Candidate preflight 可交同一 Form 的 detached input 與驗證 errors 使用這個入口。
 
 ## 依賴方向
 

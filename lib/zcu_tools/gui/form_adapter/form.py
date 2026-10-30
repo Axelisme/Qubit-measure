@@ -102,9 +102,13 @@ class Form[C: ConfigBase]:
     core cfg Forms. Named mode supplies identity admission and participants
     validation, rejecting duplicate default names with indices. Slot mode fixes
     only an active list's length and leaves all element values editable.
-    seed_metadata maps canonical paths to author-declared source descriptions and
-    calibration. seed_sources retains the last default_input Open/Reset facts;
-    a host preserving input across Refresh must also preserve this mapping.
+    seed_metadata maps canonical paths to explicit source descriptions and
+    calibration, with priority over Template metadata. template_seed_metadata is
+    a read-only path mapping of FieldMeta hints from Templates actually adopted
+    at the last default_input Open/Reset, empty before that call. seed_sources
+    retains the same Open/Reset provenance facts. A host preserving input across
+    Refresh transfers all three public mappings unchanged to the replacement
+    Form; Reset recomputes template_seed_metadata and seed_sources.
     """
 
     def __init__(
@@ -124,7 +128,7 @@ class Form[C: ConfigBase]:
             raise ValueError("field_order is supported only for core-cfg Forms")
         self.seed_metadata: Mapping[FormWritePath, FieldMeta] = MappingProxyType({})
         self.seed_sources: Mapping[FormWritePath, SeedSource] = MappingProxyType({})
-        self._template_seed_metadata: Mapping[FormWritePath, FieldMeta] = (
+        self.template_seed_metadata: Mapping[FormWritePath, FieldMeta] = (
             MappingProxyType({})
         )
         self._core_cfg = core_cfg
@@ -187,6 +191,7 @@ class Form[C: ConfigBase]:
         The shared core evaluates expression defaults once into direct
         input against this env. Unresolved or invalid defaults stay absent.
         """
+        self._section.select_sources(env)
         raw = self.model.defaults(env)
         if self._initial_values is not None:
             values = self._initial_values(env)
@@ -197,7 +202,7 @@ class Form[C: ConfigBase]:
         self.seed_sources = MappingProxyType(
             capture_seed_sources(raw, input.data, self._section.seed_origins(env))
         )
-        self._template_seed_metadata = MappingProxyType(
+        self.template_seed_metadata = MappingProxyType(
             self._section.template_metadata(env)
         )
         return input
@@ -219,7 +224,7 @@ class Form[C: ConfigBase]:
             env,
             errors,
             self.seed_sources,
-            {**self._template_seed_metadata, **self.seed_metadata},
+            {**self.template_seed_metadata, **self.seed_metadata},
         )
 
     def _check_logical_input(self, input: FormInput[FormModel]) -> None:

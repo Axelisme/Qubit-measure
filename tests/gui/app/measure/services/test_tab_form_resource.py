@@ -6,7 +6,17 @@ from typing import Literal
 
 import pytest
 from pydantic import JsonValue
-from zcu_tools.cfg_model import ConfigBase, Expr, FieldMeta, Hidden, PulseSpec
+from zcu_tools.cfg_model import (
+    ConfigBase,
+    Expr,
+    FieldMeta,
+    Hidden,
+    PulseCfg,
+    PulseSpec,
+    Slot,
+    Template,
+    TemplateDef,
+)
 from zcu_tools.gui.app.measure.services import tab_form as resource_api
 from zcu_tools.gui.app.measure.services.form_contracts import (
     CfgPreconditionError,
@@ -423,6 +433,104 @@ def test_refresh_retains_seed_metadata_and_sources_until_reset() -> None:
     assert row.seed_source == "general.ext.amount"
     assert row.seed_status == "available"
     assert row.uncalibrated is None
+
+
+@pytest.mark.parametrize("override", [False, True])
+def test_refresh_retains_adopted_template_metadata_until_reset(override: bool) -> None:
+    class PulseInput(ConfigBase):
+        pulse: PulseCfg
+
+    latest = FormEnv()
+
+    def make_form(_ctx: FormContext) -> Form[PulseInput]:
+        form = Form(
+            PulseInput,
+            {
+                "pulse": Slot(
+                    "Q.pulses.pi",
+                    copy=True,
+                    fallback=Template(
+                        "pulse",
+                        seed_metadata={
+                            ("pulse", "module", "gain"): FieldMeta(
+                                description="Template gain", calibration="uncalibrated"
+                            )
+                        },
+                    ),
+                )
+            },
+        )
+        form.bind_templates(
+            {
+                "pulse": TemplateDef(
+                    PulseSpec,
+                    "Pulse",
+                    {
+                        "ch": 0,
+                        "nqz": 1,
+                        "freq": 100.0,
+                        "gain": 0.1,
+                        "waveform.style": "const",
+                        "waveform.length": 0.1,
+                    },
+                )
+            },
+            adapter="synthetic-refresh",
+        )
+        return (
+            form.with_seed_metadata(
+                {("pulse", "module", "gain"): FieldMeta(description="Explicit source")}
+            )
+            if override
+            else form
+        )
+
+    resource = resource_api.TabFormResource(
+        make_form,
+        capture=lambda _aliases: resource_api.TabFormSources(latest),
+        mutation_allowed=lambda: True,
+    )
+    try:
+        original = resource.diagnostics()
+        gain = next(row for row in original if row.path == ("pulse", "module", "gain"))
+        assert gain.uncalibrated is (None if override else True)
+        latest = FormEnv(
+            library=LibrarySnapshot(
+                ModuleLibraryDocument(
+                    format="zcu.module-library",
+                    format_version="2.0",
+                    components={
+                        "Q": ComponentLibrary(
+                            pulses={
+                                "pi": PulseSpec.model_validate(
+                                    {
+                                        "ch": 0,
+                                        "nqz": 1,
+                                        "freq": 200.0,
+                                        "gain": 0.3,
+                                        "waveform": {"style": "const", "length": 0.2},
+                                    }
+                                )
+                            }
+                        )
+                    },
+                )
+            )
+        )
+        before = resource.input.data
+        resource.refresh_sources()
+        assert resource.input.data == before
+        assert resource.diagnostics() == original
+        resource.reset()
+        gain = next(
+            row
+            for row in resource.diagnostics()
+            if row.path == ("pulse", "module", "gain")
+        )
+        assert gain.uncalibrated is None
+        assert gain.seed_source == ("Explicit source" if override else "Q.pulses.pi")
+    finally:
+        resource.revoke()
 
 
 def test_refresh_preserves_authored_expression_and_direct_defaults() -> None:
