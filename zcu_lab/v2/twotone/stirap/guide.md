@@ -1,4 +1,4 @@
-**Readers:** operator, agent. Configure two-generator STIRAP scans and analyze acquired IQ with saved readout calibration.
+**Readers:** operator, agent. Configure two-generator STIRAP scans and analyze acquired g/e/f counts with saved readout calibration.
 
 # STIRAP scans
 
@@ -7,8 +7,9 @@ Stokes drives the 2–3 transition. Pump drives the 0–3 transition.
 The two Gaussian pulses use different bound generators.
 Readout starts after both pulses finish.
 
-Run saves raw acquired IQ. Analyze uses only the three-center classifier and training confusion from that run's saved readout configuration.
-Do not interpret mean IQ curves or heatmaps as populations or gate fidelity.
+Run requires a centroid3 readout classifier before acquisition and saves g/e/f counts.
+Analyze normalizes counts and uses only the training confusion from that run's saved readout configuration.
+Preparation-label fractions are not gate fidelity.
 
 ## Before opening the tab
 
@@ -43,8 +44,8 @@ A fresh sweep starts with Range and point count. Its coordinates and count remai
 
 | Mode | Controls | Horizontal axis | Vertical axis |
 | --- | --- | --- | --- |
-| delay | Stokes lead start, stop and points | Requested Stokes lead in us | Mean I and Q in ADC units |
-| amplitude | Common scale start, stop and points; fixed Stokes lead | Dimensionless common scale | Mean I and Q in ADC units |
+| delay | Stokes lead start, stop and points | Requested Stokes lead in us | Raw g/e/f fractions |
+| amplitude | Common scale start, stop and points; fixed Stokes lead | Dimensionless common scale | Raw g/e/f fractions |
 | detuning | Pump and Stokes detuning ranges in MHz; fixed Stokes lead | Pump detuning in MHz | Stokes detuning in MHz |
 
 Amplitude mode multiplies the independently entered Pump gain and Stokes gain by the same scale.
@@ -52,7 +53,7 @@ Gaussian sigma stays fixed. All scaled gains must remain within [-1, 1].
 To change the Pump/Stokes ratio, edit the two base gains and repeat the scan.
 
 Detuning mode adds each offset to its entered carrier.
-The heatmap color is the magnitude of mean acquired IQ.
+The heatmap color is the raw f fraction (f count divided by total count).
 It is a Cartesian Pump × Stokes grid, not a paired one-dimensional sweep.
 After changing mode, fill its newly shown scan endpoints and point counts.
 
@@ -85,7 +86,7 @@ calibration lookup during analysis.
 The report gives the saved confusion matrix condition number and minimum
 singular value. Full raw/corrected g/e/f arrays remain in the analysis summary
 and saved artifacts. There is no writeback proposal or question. Analysis
-failure still saves acquired raw IQ; inspect each Save output receipt rather
+failure still saves acquired g/e/f counts; inspect each Save output receipt rather
 than treating recipe completion as proof that every format was saved.
 Restart the MCP server after changing recipe declarations; GUI Reload does not
 reload that separate process. No separate diagnostic or qutrit-reference tool
@@ -93,9 +94,10 @@ is registered.
 
 ## Run and saved results
 
-Run acquires the requested raw shots at every scan point.
-The measurement plot shows the mean of those shots.
-Saved raw IQ has axes Stokes-detuning row, scan-x column and shot.
+Run classifies the requested repetitions at every scan point into g/e/f counts.
+The shots field sets repetitions per point in one round, not a saved shot axis.
+The measurement plot shows raw g/e/f fractions, or raw f fraction in detuning mode.
+Saved counts have shape (Ny, Nx, 3): Stokes-detuning row, scan-x column and g/e/f.
 Delay and amplitude modes have one row.
 The configuration records which quantity scan x represents.
 Requested coordinates can differ from hardware-quantized timing, gain and frequency.
@@ -111,15 +113,18 @@ The title reports the saved training confusion's condition number and minimum si
 Analysis output also includes the full training confusion matrix.
 Correction keeps negative and above-one estimates. It does not clip or renormalize them.
 
-Missing saved cfg, missing classifier, circle/linear calibration, incomplete shots or singular training confusion fail explicitly.
+Run rejects missing or circle/linear classifiers before acquisition.
+Analysis rejects missing saved cfg, incomplete/nonfinite or empty counts, and singular training confusion.
 Changing the current Form or live library after Run does not change that run's analysis.
 Recalibrate, Reset to capture the new readout, and Run again to use new calibration.
 This consumer does not train a classifier or offer calibration writeback.
-Save All preserves native raw IQ, its cfg, analysis summary and figures. Load analyzes the saved cfg, not the current Form.
+Save All preserves native g/e/f counts, its cfg, analysis summary and figures.
+Load analyzes the saved cfg, not the current Form.
+Old raw-shot files are rejected with an error naming the missing counts variable.
 
 ## Interpretation limits
 
-Mean IQ can change because of transfer, leakage, readout overlap or preparation error.
+Measured fractions can change because of transfer, leakage, readout overlap or preparation error.
 A three-center classifier reports preparation-label fractions, not certified energy-state populations.
 Confusion correction does not remove errors in reference-state preparation.
 Simulation results describe the configured model, receiver and noise.

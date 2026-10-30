@@ -1,16 +1,14 @@
-# tolerated(file-size): PulseReadout, TablePulseReadout and MuxReadout own native
-# cfg adaptation plus declare/lower; no existing owner can take either part.
 from __future__ import annotations
 
 from abc import abstractmethod
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from copy import deepcopy
 from typing import TYPE_CHECKING, Annotated, Literal, TypeAlias, TypedDict
 
 import numpy as np
 from numpy.typing import NDArray
 from pydantic import BeforeValidator
-from qick.asm_v2 import QickParam, Trigger
+from qick.asm_v2 import QickParam
 
 from zcu_tools.cfg_model import (
     Centroid3Classifier,
@@ -19,11 +17,9 @@ from zcu_tools.cfg_model import (
     ReadoutClassifier,
 )
 from zcu_tools.cfg_model import MuxReadoutCfg as CoreMuxReadoutCfg
-from zcu_tools.program.acquisition import ShotProcessor
-from zcu_tools.program.herald import HeraldSpec
 from zcu_tools.utils.shot_classification import classify_shots, nearest_centroid3
 
-from ..macro.readout import ReadoutEmission, readout_control_scope
+from ..macro.readout import ReadoutEmission
 from ..macro.wmem import PatchWmemFromDmem
 from .base import AbsModuleCfg, Module
 from .dmem import LoadWord
@@ -181,6 +177,21 @@ def circle_classifier(cfg: ReadoutCfg, *, ro_ch: int) -> CircleClassifier:
     return classifier
 
 
+def require_circle_classifiers(cfg: ReadoutCfg) -> None:
+    """Require circle classification with a radius on every declared ADC.
+
+    cfg is a native Pulse or Mux readout. Check the pulse ADC or all mux tones
+    in declaration order, not just the tone selected for acquisition. Missing
+    classifiers, non-circle mode or absent radius raise ValueError naming the
+    ADC; missing radius requests singleshot GE Post calibration. Circle emits
+    g/e/other, not the g/e/f labels of centroid3. The cfg is unchanged; no
+    hardware, program or live library is read. Returns None on success.
+    """
+    for ro_ch, _ in _classifier_entries(cfg):
+        if circle_classifier(cfg, ro_ch=ro_ch).radius is None:
+            raise ValueError(f"ADC {ro_ch}: radius missing; run singleshot GE Post")
+
+
 def centroid3_classifier(cfg: ReadoutCfg, *, ro_ch: int) -> Centroid3Classifier:
     """Return detached three-state calibration for the declared ADC number.
 
@@ -200,39 +211,23 @@ def centroid3_classifier(cfg: ReadoutCfg, *, ro_ch: int) -> Centroid3Classifier:
     return classifier
 
 
-def classification_processors(
-    cfg: ReadoutCfg, *, require_other: bool = False
-) -> dict[int, ShotProcessor]:
-    """Return detached processors keyed by declared ADC channel number.
+def classification_processor(
+    classifier: ReadoutClassifier,
+) -> Callable[[NDArray[np.float64]], NDArray[np.float64]]:
+    """Snapshot calibration as a normalized-IQ to one-hot shot processor.
 
-    cfg is native Pulse or Mux readout calibration in normalized ADC units,
-    without offset subtraction. Each callable accepts float64 (shots, reads, 2)
-    IQ and returns float64 (shots, reads, classes) without modifying its input.
-    Circle columns are g/e/other, with ties and radius boundaries in other.
-    Linear columns are g/e; real(IQ * exp(1j*angle)) > threshold is excited,
-    equality is ground. Centroid3 columns are g/e/f, nearest-center ties in
-    g/e/f order. No confusion correction is applied.
-    Missing calibration/radius raises an ADC-named ValueError; require_other
-    accepts only circle. Calibration changes after this call have no effect.
+    classifier is circle (g/e/other), linear (g/e), or centroid3 (g/e/f).
+    Input float64 (..., 2) contains raw ADC integrals divided by readout length,
+    without offset removal. Output float64 (..., k) preserves all leading axes.
+    Circle uses strict radius and nearest-center regions; ties are other.
+    Missing circle radius raises ValueError requesting GE Post calibration.
+    Linear rotates by exp(+1j*angle), with equality assigned ground. Centroid3
+    chooses nearest center, breaking ties in g/e/f order. No cfg is mutated.
     """
-    result: dict[int, ShotProcessor] = {}
-    for ch, classifier in _classifier_entries(cfg):
-        if classifier is None:
-            raise ValueError(f"ADC {ch}: classifier missing; run singleshot GE")
-        if isinstance(classifier, CircleClassifier):
-            if classifier.radius is None:
-                raise ValueError(
-                    f"ADC {ch}: circle radius missing; run GE Post analysis"
-                )
-        elif require_other:
-            raise ValueError(
-                f"ADC {ch}: {classifier.mode} classifier has no other state; use circle"
-            )
-        result[ch] = _classification_processor(classifier.model_copy(deep=True))
-    return result
+    if isinstance(classifier, CircleClassifier) and classifier.radius is None:
+        raise ValueError("circle radius missing; run GE Post analysis")
+    classifier = classifier.model_copy(deep=True)
 
-
-def _classification_processor(classifier: ReadoutClassifier) -> ShotProcessor:
     def process(iq: NDArray[np.float64]) -> NDArray[np.float64]:
         signals = iq[..., 0] + 1j * iq[..., 1]
         if isinstance(classifier, CircleClassifier):
@@ -369,69 +364,6 @@ class PulseReadout(AbsReadout):
         self._runtime_pulse: Pulse | None = None
         self._runtime_ro_name: str | None = None
 
-    def herald_spec(self, prog: ModularProgramV2, *, occurrence: int) -> HeraldSpec:
-        """Describe one emitted read for explicit host-side herald selection.
-
-        Call after prog has compiled. occurrence is the required zero-based
-        emission ordinal of this instance within a shot, not the global ADC
-        index. The returned read_index counts all triggers on cfg.ro_ch in
-        emission order, including other instances. This instance must be emitted
-        at least occurrence+1 times and the selected read must precede another
-        read on the same ADC. init must run once per instance before any run;
-        repeated run calls are supported. Do not mutate cfg after emission.
-
-        Return an independent classifier snapshot in a HeraldSpec. Missing or
-        incomplete calibration (circle needs GE Post radius), invalid occurrence,
-        Repeat/Branch placement, mismatched declared/actual read counts, or no
-        later same-ADC read raises ValueError. No acquisition or registration
-        occurs; pass the returned value explicitly to the acquire consumer.
-        That consumer admits at most one herald per ADC in the first phase.
-
-        Conservatively reject every trigger on this ADC inside Repeat or Branch,
-        even non-herald reads, naming its macro position and enclosing scope.
-        QICK's static read counts cannot reliably determine dynamic read_index
-        through those constructs. Control flow on other ADCs remains unrestricted.
-        """
-        if type(occurrence) is not int or occurrence < 0:
-            raise ValueError(f"{self.name}: occurrence must be a nonnegative integer")
-        indices: list[int] = []
-        read_count = 0
-        for index, macro in enumerate(prog.macro_list):
-            if isinstance(macro, ReadoutEmission) and macro.owner is self:
-                indices.append(read_count)
-            if isinstance(macro, Trigger) and self.cfg.ro_ch in macro.ros:
-                scope = readout_control_scope(prog.macro_list[:index])
-                if scope is not None:
-                    raise ValueError(
-                        f"{self.name}: ADC {self.cfg.ro_ch} trigger at macro {index} "
-                        f"inside {scope} is unsupported for herald selection"
-                    )
-                read_count += 1
-        classifier = self.cfg.classifier
-        if classifier is None:
-            raise ValueError(f"{self.name}: herald requires a classifier")
-        if occurrence >= len(indices):
-            raise ValueError(
-                f"{self.name}: occurrence {occurrence} not emitted; "
-                f"this instance has {len(indices)} emissions"
-            )
-        declared = prog.ro_chs[self.cfg.ro_ch]["trigs"]
-        if declared != read_count:
-            raise ValueError(
-                f"{self.name}: ADC {self.cfg.ro_ch} declares {declared} reads per shot "
-                f"but emitted {read_count} triggers"
-            )
-        if indices[occurrence] >= read_count - 1:
-            raise ValueError(
-                f"{self.name}: herald requires a later read on ADC {self.cfg.ro_ch}"
-            )
-        return HeraldSpec(
-            ro_ch=self.cfg.ro_ch,
-            read_index=indices[occurrence],
-            classifier=deepcopy(classifier),
-            reads_per_shot=read_count,
-        )
-
     @property
     def adc_name(self) -> str:
         """Registered ADC template name, also used for table-backed word updates."""
@@ -535,6 +467,7 @@ class PulseReadout(AbsReadout):
         Declaration and QICK timing errors propagate.
         """
         timeline = timeline if timeline is not None else "default"
+        prog.append_macro(ReadoutEmission(self, self.cfg.ro_ch, tag))
         if self.ro_freq_val is None:
             prog.send_readoutconfig(
                 self.cfg.ro_ch, self.adc_name, t=0, tag=tag, timeline=timeline
@@ -781,6 +714,7 @@ class MuxReadout(AbsReadout):
         timeline=None selects default. Legacy collection remains unavailable.
         """
         timeline = timeline if timeline is not None else "default"
+        prog.append_macro(ReadoutEmission(self, self.cfg.tones[0].ro_ch, tag))
         prog.pulse(
             self.cfg.gen_ch, self.name, t=self.cfg.pre_delay, tag=tag, timeline=timeline
         )
@@ -922,6 +856,7 @@ class MuxReadout(AbsReadout):
         playback is supported, but cfg/program must be rebuilt for any update.
         """
         length = self.total_length(prog)
+        prog.append_macro(ReadoutEmission(self, self.cfg.tones[0].ro_ch))
         prog.pulse(ch=self.cfg.gen_ch, name=self.name, t=t + self.cfg.pre_delay)
         prog.trigger(
             [tone.ro_ch for tone in self.cfg.tones], t=t + self.cfg.trig_offset

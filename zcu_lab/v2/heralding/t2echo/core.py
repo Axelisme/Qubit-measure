@@ -23,13 +23,16 @@ from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.experiment.v2.utils.snr import snr_checker
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.herald import herald_ratio, heralded
 from zcu_tools.program.v2 import (
+    IQ,
+    Classify,
     Delay,
     ModularProgramV2,
     Pulse,
     Reset,
     SweepCfg,
+    shot_sums,
+    split_sums,
     sweep2param,
 )
 from zcu_tools.program.v2.modules import PulseReadout
@@ -47,15 +50,15 @@ from zcu_lab.v2.twotone.time_domain.t2echo.core import (
 
 @dataclass(frozen=True)
 class HeraldingT2EchoResult:
-    """Total delays in us, selected mean IQ and accepted/attempted shot fraction.
+    """times is the sweep grid (us); sums has shape (points, 3, 3).
 
-    All arrays share the delay grid. Zero-pass IQ is NaN. Actual phase-ramp
-    frequency is in MHz and is run-only metadata, None after native load.
+    Herald states are g/e/other; components are count/sum I/sum Q.
+    Unmeasured sums are NaN. Conditional means at zero count are NaN.
+    true_activate_detune is run-only MHz metadata, None after native load.
     """
 
     times: NDArray[np.float64]
-    signals: NDArray[np.complex128]
-    pass_fraction: NDArray[np.float64]
+    sums: NDArray[np.float64]
     true_activate_detune: float | None = None
 
 
@@ -86,15 +89,11 @@ class HeraldingT2EchoCfg(ConfigBase):
 
 
 def restore_result(data: GroupedLoadData[HeraldingT2EchoCfg]) -> HeraldingT2EchoResult:
-    """Restore selected IQ and fractions on the same native total-delay grid."""
-    signals = data.variable("signals")
-    fractions = data.variable("pass_fraction")
-    if not np.array_equal(signals.axes[0], fractions.axes[0]):
-        raise ValueError("Signal and pass fraction must share the same time grid")
+    """Restore per-class shot sums; old files fail naming the missing sums variable."""
+    sums = data.variable("sums")
     return HeraldingT2EchoResult(
-        times=signals.axes[0].astype(np.float64),
-        signals=signals.z.astype(np.complex128),
-        pass_fraction=fractions.z.astype(np.float64),
+        times=sums.axes[2].astype(np.float64),
+        sums=sums.z.astype(np.float64),
     )
 
 
@@ -104,20 +103,18 @@ class HeraldingT2EchoExp(Experiment[HeraldingT2EchoResult, HeraldingT2EchoCfg]):
     Options: ClassVar[type[T2EchoAnalyzeOptions]] = T2EchoAnalyzeOptions
     AXES_SPEC: ClassVar[GroupedAxesSpec[HeraldingT2EchoResult, HeraldingT2EchoCfg]] = (
         GroupedAxesSpec(
-            variables=tuple(
+            variables=(
                 VariableSpec(
-                    variable=name,
+                    variable="sums",
                     axes=(
+                        VariableAxisSpec.generated_arange("components", ""),
+                        VariableAxisSpec.generated_arange("herald_states", ""),
                         VariableAxisSpec("Time", "s", field_name="times", scale=1e-6),
                     ),
                     z=VariableZSpec(
-                        field_name=name, label=label, unit="a.u.", dtype=dtype
+                        field_name="sums", label="Shot sums", unit="", dtype=np.float64
                     ),
-                )
-                for name, label, dtype in (
-                    ("signals", "Signal", np.complex128),
-                    ("pass_fraction", "Herald pass fraction", np.float64),
-                )
+                ),
             ),
             result_type=HeraldingT2EchoResult,
             cfg_type=HeraldingT2EchoCfg,
@@ -129,15 +126,20 @@ class HeraldingT2EchoExp(Experiment[HeraldingT2EchoResult, HeraldingT2EchoCfg]):
     def run(
         self, cfg: HeraldingT2EchoCfg, *, context: RunContext
     ) -> HeraldingT2EchoResult:
-        """Acquire selected IQ and pass fraction versus total delay in us.
+        """Acquire (Nt, 3, 3) shot sums versus total delay in us.
 
-        Optional reset precedes herald. Echo is pi/2 → half delay → pi → half
-        delay → pi/2 → signal readout. detune (MHz) ramps only the final pi/2
-        phase. Both readouts use cfg.readout and its classifier, with host
-        selection, not active reset. Across rounds the acquisition owner weights
-        by accepted counts. Zero-pass IQ stays NaN; unmeasured points stay NaN.
-        Half-delay rounding and actual detune follow ordinary Echo. cfg is copied.
+        Optional reset precedes herald. Echo is pi/2, half delay, pi, half delay,
+        pi/2, signal readout. detune in MHz ramps only the final pi/2 phase.
+        Readouts share the GE Post circle classifier; classes are g/e/other.
+        Components are count/sum I/sum Q. Rounds add sums. Live and analyze
+        select herald-g conditional IQ; zero-count means are NaN.
+        Unmeasured sums remain NaN. Half-delay rounding and actual detune follow
+        ordinary Echo. cfg is copied; heralding itself adds no active reset.
         """
+        if cfg.readout.classifier is None or cfg.readout.classifier.mode != "circle":
+            raise ValueError(
+                "Heralding requires a circle classifier with g/e/other; run GE Post"
+            )
         cfg = deepcopy(cfg)
         soccfg = context.soccfg
         lengths = sweep2array(cfg.length, "time", {"soccfg": soccfg, "scaler": 0.5})
@@ -156,18 +158,12 @@ class HeraldingT2EchoExp(Experiment[HeraldingT2EchoResult, HeraldingT2EchoCfg]):
             title=f"Heralded T2 Echo (detune={true_detune:.3f}MHz)",
         )
         buffer = SignalBuffer(
-            (len(lengths),),
-            on_update=lambda data: viewer.update(lengths, t2echo_signal2real(data)),
+            (len(lengths), 3, 3),
+            dtype=np.float64,
+            on_update=lambda data: viewer.update(
+                lengths, t2echo_signal2real(split_sums(data)[1][..., 0])
+            ),
         )
-        fractions = np.full(len(lengths), np.nan, dtype=np.float64)
-
-        def processed_to_signal(
-            raw: list[NDArray[np.float64]],
-        ) -> NDArray[np.complex128]:
-            """Store pass fractions and return conditional IQ on this sweep's grid."""
-            iq, fraction = herald_ratio(raw[0])
-            fractions[:] = fraction
-            return iq[0, ..., 0] + 1j * iq[0, ..., 1]
 
         with Schedule(cfg, buffer, scope=context.scope) as sched:
             cfg = sched.cfg
@@ -175,7 +171,7 @@ class HeraldingT2EchoExp(Experiment[HeraldingT2EchoResult, HeraldingT2EchoCfg]):
             herald_readout = PulseReadout("herald", cfg.readout)
             signal_readout = PulseReadout("signal", cfg.readout)
 
-            # Keep the emitted instance for the public herald declaration.
+            # Unique readout names resolve the herald and signal shot-sum axes.
             prog = ModularProgramV2(
                 soccfg,
                 modules=[
@@ -197,22 +193,23 @@ class HeraldingT2EchoExp(Experiment[HeraldingT2EchoResult, HeraldingT2EchoCfg]):
                 reps=cfg.reps,
                 relax_delay=cfg.relax_delay,
             )
-            herald = herald_readout.herald_spec(prog, occurrence=0)
             builder = sched.prog_builder(context.soc, soccfg)
-            builder.run_program_processed(
+            builder.run_program_summed(
                 prog,
                 rounds=cfg.rounds,
-                processors={herald.ro_ch: heralded(herald, np.copy)},
-                processed2signal_fn=processed_to_signal,
+                processor=shot_sums(prog, [Classify("herald"), IQ("signal")]),
+                sums2signal_fn=np.copy,
                 options=AcquireOptions(
                     retry=cfg.acquire_retry,
                     stop_condition=snr_checker(
-                        buffer.at(), cfg.earlystop_snr, t2echo_signal2real
+                        buffer.at(),
+                        cfg.earlystop_snr,
+                        lambda data: t2echo_signal2real(split_sums(data)[1][..., 0]),
                     ),
                 ),
             )
 
-        return HeraldingT2EchoResult(lengths, buffer.array, fractions, true_detune)
+        return HeraldingT2EchoResult(lengths, buffer.array, true_detune)
 
     def analyze(
         self,
@@ -229,10 +226,11 @@ class HeraldingT2EchoExp(Experiment[HeraldingT2EchoResult, HeraldingT2EchoCfg]):
         the analysis owner; no alternate fit is attempted here.
         """
         result = source.result
-        finite = np.isfinite(result.times) & np.isfinite(result.signals)
+        signals = split_sums(result.sums)[1][..., 0]
+        finite = np.isfinite(result.times) & np.isfinite(signals)
         fit_result = T2EchoResult(
             times=result.times[finite],
-            signals=result.signals[finite],
+            signals=signals[finite],
             true_activate_detune=(
                 source.cfg.detune
                 if source.cfg is not None

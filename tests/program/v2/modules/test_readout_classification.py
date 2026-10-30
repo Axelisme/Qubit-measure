@@ -1,4 +1,4 @@
-"""Readout calibration becomes explicit, per-ADC acquisition parameters."""
+"""Readout calibration lookup and native QICK projection contracts."""
 
 import numpy as np
 import pytest
@@ -18,57 +18,6 @@ def pulse(classifier):
         waveform=ConstWaveformCfg(length=1.0),
         classifier=classifier,
     )
-
-
-def test_circle_processor_preserves_reads_other_and_detached_adc_calibration():
-    from tests.program.v2._mux_support import native_mux
-
-    cfg = native_mux((4, 1))
-    cfg.tones[0].classifier = CircleClassifier(g_center=0j, e_center=2 + 0j, radius=2.0)
-    cfg.tones[1].classifier = CircleClassifier(g_center=0j, e_center=2j, radius=0.5)
-    processors = readout.classification_processors(cfg, require_other=True)
-    cfg.tones[0].classifier.g_center = 99j
-    cfg.tones[0].classifier.radius = 0.1
-    iq = np.array([[[0, 0], [2, 0]], [[1, 0], [0, 2]]], dtype=np.float64)
-    original = iq.copy()
-    assert list(processors) == [4, 1]
-    result = processors[4](iq)
-    np.testing.assert_array_equal(
-        result, [[[1, 0, 0], [0, 1, 0]], [[0, 0, 1], [0, 0, 1]]]
-    )
-    assert result.dtype == np.float64
-    np.testing.assert_array_equal(
-        processors[1](iq), [[[1, 0, 0], [0, 0, 1]], [[0, 0, 1], [0, 1, 0]]]
-    )
-    np.testing.assert_array_equal(iq, original)
-
-
-@pytest.mark.parametrize("mode", ["linear", "centroid3"])
-def test_processor_emits_ordered_populations_with_ground_first_ties(mode):
-    classifier = (
-        LinearClassifier(angle=np.pi / 2, threshold=-0.5)
-        if mode == "linear"
-        else centroid3()
-    )
-    cfg = pulse(classifier)
-    process = readout.classification_processors(cfg)[2]
-    if isinstance(classifier, LinearClassifier):
-        classifier.threshold = 100.0
-        iq = np.array([[[0, 1], [0, -1], [0, 0.5]]], dtype=np.float64)
-        expected = [[[1, 0], [0, 1], [1, 0]]]
-    else:
-        classifier.f_center = 99j
-        iq = np.array(
-            [[[0, 0], [2, 0], [0, 2]], [[1, 0], [0, 1], [2, 2]]],
-            dtype=np.float64,
-        )
-        expected = [
-            [[1, 0, 0], [0, 1, 0], [0, 0, 1]],
-            [[1, 0, 0], [1, 0, 0], [0, 1, 0]],
-        ]
-    result = process(iq)
-    np.testing.assert_array_equal(result, expected)
-    assert result.dtype == np.float64
 
 
 @pytest.mark.parametrize("mode", ["linear", "circle"])
@@ -101,7 +50,7 @@ def test_qick_options_project_native_shots_without_offset_and_match_shared_domai
     expected = [0, 1, 0, 1]
     np.testing.assert_array_equal(projected[0][0, :, 0], expected)
     np.testing.assert_array_equal(projected[0][0, :, 1], 0)
-    classified = readout.classification_processors(cfg)[0](iq)[:, 0]
+    classified = readout.classification_processor(calibration)(iq)[:, 0]
     shared = 4 if mode == "linear" else 2
     np.testing.assert_array_equal(projected[0][0, :shared, 0], classified[:shared, 1])
     if mode == "circle":
@@ -218,36 +167,47 @@ def test_centroid3_lookup_rejects_missing_wrong_type_and_unknown_adc(
         readout.centroid3_classifier(pulse(classifier), ro_ch=ro_ch)
 
 
-def test_centroid3_is_not_circle_other_or_herald_calibration():
-    import numpy as np
-    from zcu_tools.program.herald import HeraldSpec, herald_ground_mask
+@pytest.mark.parametrize("mux", [False, True])
+def test_circle_requirement_accepts_complete_calibration_for_every_adc(mux):
+    from tests.program.v2._mux_support import native_mux
 
-    cfg = pulse(centroid3())
-    with pytest.raises(ValueError, match="centroid3.*circle"):
-        readout.circle_classifier(cfg, ro_ch=2)
-    with pytest.raises(ValueError, match="centroid3.*other"):
-        readout.classification_processors(cfg, require_other=True)
-    with pytest.raises(ValueError, match="centroid3.*herald"):
-        herald_ground_mask(np.array([0j], dtype=np.complex128), centroid3())
-    with pytest.raises(ValueError, match="centroid3.*herald"):
-        HeraldSpec(2, 0, centroid3(), 2)
+    circle = CircleClassifier(g_center=0j, e_center=2 + 0j, radius=1.0)
+    cfg = native_mux((4, 1)) if mux else pulse(circle)
+    if isinstance(cfg, readout.MuxReadoutCfg):
+        for tone in cfg.tones:
+            tone.classifier = circle.model_copy(deep=True)
+    original = cfg.model_copy(deep=True)
+    readout.require_circle_classifiers(cfg)
+    assert cfg == original
 
 
+@pytest.mark.parametrize("bad_adc", [2, 4, 1])
 @pytest.mark.parametrize(
-    "classifier, require_other, message",
+    ("classifier", "message"),
     [
-        (None, False, "ADC 2: classifier missing"),
-        (
-            CircleClassifier(g_center=0j, e_center=1j),
-            False,
-            "ADC 2: circle radius.*Post",
-        ),
-        (LinearClassifier(angle=0.0, threshold=0.0), True, "ADC 2: linear.*other"),
-        (centroid3(), True, "ADC 2: centroid3.*other"),
+        (None, "classifier missing"),
+        (LinearClassifier(angle=0.0, threshold=0.5), "linear.*not circle"),
+        (centroid3(), "centroid3.*not circle"),
+        (CircleClassifier(g_center=0j, e_center=2 + 0j), "radius missing.*GE Post"),
     ],
 )
-def test_processors_reject_unavailable_calibration(classifier, require_other, message):
-    with pytest.raises(ValueError, match=message):
-        readout.classification_processors(
-            pulse(classifier), require_other=require_other
-        )
+def test_circle_requirement_rejects_incomplete_or_wrong_mode_on_any_adc(
+    bad_adc, classifier, message
+):
+    from tests.program.v2._mux_support import native_mux
+
+    cfg = pulse(classifier) if bad_adc == 2 else native_mux((4, 1))
+    if isinstance(cfg, readout.MuxReadoutCfg):
+        for tone in cfg.tones:
+            tone.classifier = (
+                classifier
+                if tone.ro_ch == bad_adc
+                else CircleClassifier(g_center=0j, e_center=2 + 0j, radius=1.0)
+            )
+    with pytest.raises(ValueError, match=rf"ADC {bad_adc}: {message}"):
+        readout.require_circle_classifiers(cfg)
+
+
+def test_centroid3_is_not_circle_calibration():
+    with pytest.raises(ValueError, match="centroid3.*circle"):
+        readout.circle_classifier(pulse(centroid3()), ro_ch=2)

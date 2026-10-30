@@ -2,19 +2,19 @@
 
 **Readers:** operator, agent. How to compare single-shot reset branches from the GUI or MCP and interpret the results.
 
-Hardware gain and three-branch sweep: Rabi / Rabi + reset / Rabi + reset + Rabi. Both pulses share the swept gain. Saves classified G/E/Other populations; live view and analysis show Ground / Excited / Other with color for state and solid / dashed / dotted lines for branch.
+Hardware gain and three-branch sweep: Rabi / Rabi + reset / Rabi + reset + Rabi. Both pulses share the swept gain. Saves G/E/Other class counts; live view and analysis show Ground / Excited / Other with color for state and solid / dashed / dotted lines for branch.
 
-## Saved populations
+## Saved counts
 
-The saved `signals` array has axes `(gain, reset branch, population state)`. The final axis contains the measured fractions `[g,e,other]`, with `population_states=[0,1,2]`. Other counts rejected shots, including ties, rather than a reconstructed remainder. Unmeasured points remain NaN.
+The saved `counts` array has axes `(gain, reset branch, population state)`. The final axis contains class counts `[g,e,other]` summed over acquired rounds, with `population_states=[0,1,2]`. Other counts rejected shots, including ties, rather than a reconstructed remainder. Unmeasured points remain NaN.
 
-Older files saved only two population columns under the `GE Population` axis label. The new loader rejects that label because it expects `Population`. Those files cannot enter the new Analyze directly. Keep the old analysis version for those files; this version does not reconstruct Other or convert old results. The cfg schema remains 3.0 because the configuration fields did not change.
+Live plots and Analyze divide each row by its total count before displaying populations or applying confusion correction. A completed row sums to reps × rounds. Older files without the `counts` variable fail to load with a missing `counts` error. No conversion is provided. The cfg schema remains 3.0 because the configuration fields did not change.
 
 ## Parameter sources
 
 Open and Reset take a snapshot of the current aliases, parameters and module choices. Relax delay is 5 * `$qubit.t1`; the gain sweep ends at 4 * `$qubit.module.x180.gain`.
 
-Classification uses the readout module's circle classifier, visible under Readout → Advanced (per tone for Mux). Run requires a classifier on every declared ADC and a positive radius; missing radius prompts singleshot GE Post. Linear has no Other state and is rejected. Analyze corrects populations only with the saved readout cfg's confusion matrix. Historical cfg without a classifier or matrix skips correction.
+Classification uses the readout module's circle classifier, visible under Readout → Advanced (per tone for Mux). Run requires a circle classifier with a positive radius on the selected readout (the first tone for Mux); missing radius prompts singleshot GE Post. Linear has no Other state and is rejected. Analyze corrects populations only with the saved readout cfg's confusion matrix. Historical cfg without a classifier or matrix skips correction.
 
 Pulse templates use `$qubit.freq`, `$qubit.wiring.ch`, `$resonator.freq`, `$resonator.wiring.ch` and `$resonator.wiring.ro_ch`. The readout trigger uses `$resonator.time_of_fly` + 0.05 us. Missing required sources leave the corresponding fields Invalid; supply them before Run.
 
@@ -28,7 +28,7 @@ Rabi uses `$qubit.module.x180` or pi_pulse. Tested reset uses `$qubit.module.res
 
 ## Typical writeback
 
-This is a diagnostic only; calibration parameters stay unchanged. It reports the reset-only mean and worst sampled excited population and the maximum Other fraction. Saved data contain classified populations, so readout refitting requires a separate raw-IQ acquisition. Interpret these summaries as sampled populations rather than histogram confidence intervals.
+This is a diagnostic only; calibration parameters stay unchanged. It reports the reset-only mean and worst sampled excited population and the maximum Other fraction. Saved data contain class counts, so readout refitting requires a separate raw-IQ acquisition. Interpret these summaries as sampled populations rather than histogram confidence intervals.
 
 ## Recommended
 

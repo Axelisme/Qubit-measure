@@ -1,4 +1,4 @@
-"""GUI wiring for Raman raw-IQ scans and saved-readout population analysis."""
+"""GUI wiring for Raman count scans and saved-readout population analysis."""
 
 from pathlib import Path
 
