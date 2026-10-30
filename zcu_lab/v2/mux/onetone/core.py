@@ -37,15 +37,15 @@ class MuxOnetoneAnalyzeOptions:
 
     model_type selects hanger (hm, default), transmission (t), or auto.
     fit_bg_amp_slope defaults True; fit_bg_phase_curvature defaults False.
-    edelay is an optional finite inverse-MHz branch seed, not a fixed delay.
-    None uses each tone's route prior, then a 100 us global search if absent.
+    edelay_seeds supplies one finite inverse-MHz branch seed or None per active
+    column, in participants order. None uses a 100 us global search.
     Invalid models, non-bool switches and nonfinite/non-real seeds raise ValueError.
     """
 
+    edelay_seeds: tuple[float | None, ...]
     model_type: Literal["hm", "t", "auto"] = "hm"
     fit_bg_amp_slope: bool = True
     fit_bg_phase_curvature: bool = False
-    edelay: float | None = None
 
     def __post_init__(self) -> None:
         if self.model_type not in ("hm", "t", "auto"):
@@ -55,8 +55,10 @@ class MuxOnetoneAnalyzeOptions:
             or type(self.fit_bg_phase_curvature) is not bool
         ):
             raise ValueError("Background fit options must be bool")
-        if self.edelay is not None and finite_real(self.edelay) is None:
-            raise ValueError("edelay must be a finite real scalar or None")
+        if any(
+            seed is not None and finite_real(seed) is None for seed in self.edelay_seeds
+        ):
+            raise ValueError("edelay_seeds must contain finite real scalars or None")
 
 
 @dataclass(frozen=True)
@@ -66,15 +68,11 @@ class ToneFitSuccess:
     index is the original tones[index]; label is display-only and may repeat.
     fit contains MHz frequency/linewidth, rad theta0, inverse-MHz delay and
     typed diagnostic fit_quality on this tone's trimmed absolute-frequency IQ.
-    edelay_source records global search, captured route prior, or manual seed.
-    edelay_persistable follows seeded-or-nonuniform single-tone policy.
     """
 
     index: int
     label: str
     fit: ResonanceFit
-    edelay_source: Literal["global", "calibrated", "manual"]
-    edelay_persistable: bool
 
 
 @dataclass(frozen=True)
@@ -283,7 +281,7 @@ def _fit_tone(
     source: RunRecord[MuxOnetoneCfg, MuxOnetoneResult],
     params: MuxOnetoneAnalyzeOptions,
     column: int,
-    prior: float | None,
+    seed: float | None,
     plots: Plots,
 ) -> ToneFitSuccess | ToneFitFailure:
     # The entry point already validated cfg, indices, columns and shared options.
@@ -295,12 +293,6 @@ def _fit_tone(
     freqs = tone.freq + source.result.dfs
     fig, _ = plots.subplots(f"fit_{index}", figsize=(9, 8))
     try:
-        seed = prior
-        delay_source: Literal["global", "calibrated", "manual"] = (
-            "calibrated" if prior is not None else "global"
-        )
-        if params.edelay is not None:
-            seed, delay_source = params.edelay, "manual"
         fit = fit_resonance(
             freqs,
             source.result.signals[:, column],
@@ -327,11 +319,7 @@ def _fit_tone(
         fig.suptitle(f"tone {index}: {tone.label or f'tone {index}'} — FIT failed")
         return ToneFitFailure(index, tone.label, reason)
     fig.suptitle(f"tone {index}: {tone.label or f'tone {index}'}")
-    steps = np.abs(np.diff(freqs[1:-1]))
-    nonuniform = not bool(np.allclose(steps, np.median(steps), rtol=1e-8, atol=0.0))
-    return ToneFitSuccess(
-        index, tone.label, fit, delay_source, seed is not None or nonuniform
-    )
+    return ToneFitSuccess(index, tone.label, fit)
 
 
 class MuxOnetoneExp(Experiment[MuxOnetoneResult, MuxOnetoneCfg]):
@@ -362,32 +350,25 @@ class MuxOnetoneExp(Experiment[MuxOnetoneResult, MuxOnetoneCfg]):
         source: RunRecord[MuxOnetoneCfg, MuxOnetoneResult],
         options: MuxOnetoneAnalyzeOptions,
         *,
-        route_priors: Sequence[float | None] | None = None,
         plots: Plots,
     ) -> MuxOnetoneAnalysis:
         """Fit saved absolute-MHz spectra independently, preserving original indices.
 
         source must retain its complete cfg, matching participants and (Ndf,K)
-        IQ. options controls the shared model/background and manual delay seed.
-        route_priors supplies one parsed finite inverse-MHz seed or None per
-        active column, in participants order; omitted means no route priors.
-        Manual edelay overrides priors. This core never resolves capture sources.
-        plots receives fit_i for each original tone i. Invalid source/priors raise
-        ValueError. Numerical fit failures retain their reason without stopping
-        other tones. Successful delay persists only if seeded or nonuniform.
+        IQ. options controls the shared model/background and supplies one delay
+        seed or None per active column. This core never resolves capture sources
+        or decides writeback. plots receives fit_i for each original tone i.
+        Invalid source or seed count raises ValueError. Numerical fit failures
+        retain their reason without stopping other tones.
         """
         validate_analysis_source(source)
-        if route_priors is None:
-            route_priors = [None] * len(source.result.tone_indices)
-        if len(route_priors) != len(source.result.tone_indices) or any(
-            prior is not None and finite_real(prior) is None for prior in route_priors
-        ):
+        if len(options.edelay_seeds) != len(source.result.tone_indices):
             raise ValueError(
-                "route_priors must contain one finite real seed or None per active tone"
+                "edelay_seeds must contain one seed or None per active tone"
             )
         outcomes = tuple(
-            _fit_tone(source, options, column, prior, plots)
-            for column, prior in enumerate(route_priors)
+            _fit_tone(source, options, column, seed, plots)
+            for column, seed in enumerate(options.edelay_seeds)
         )
         return MuxOnetoneAnalysis(outcomes)
 
