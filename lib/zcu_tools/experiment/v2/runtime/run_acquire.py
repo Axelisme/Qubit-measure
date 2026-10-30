@@ -31,8 +31,8 @@ T_Raw_co = TypeVar("T_Raw_co", covariant=True)
 
 
 @dataclass(frozen=True)
-class ManageOptions(Generic[T_Raw]):
-    """Policy for Schedule-owned acquisition and slot conversion.
+class RunOptions(Generic[T_Raw]):
+    """Policy for Schedule run acquisition and slot conversion.
 
     retry is the nonnegative number of extra attempts (default zero). Shot
     overrun gets at least one retry and restores the pre-acquire slot. External
@@ -103,11 +103,11 @@ class SummedProgram(Protocol):
     ) -> NDArray[np.float64] | None: ...
 
 
-class ManagedAcquisitionMixin(ABC):
+class RunAcquisitionMixin(ABC):
     """Schedule and step acquisition methods sharing one execution policy.
 
     Subclasses provide the existing owner via _acquisition_owner; this mixin owns
-    no scope, slot or outcome state. Each managed call writes converted data into
+    no scope, slot or outcome state. Each run call writes converted data into
     that owner's default slot and triggers live updates, retries producer errors
     and applies acquire-local data stops. It requires an active Schedule and a
     writable SignalBuffer slot. Cancellation/interruption/exhausted errors return
@@ -122,17 +122,19 @@ class ManagedAcquisitionMixin(ABC):
         """Return this Schedule or step; all state remains owned by that object."""
         ...
 
-    def managed_acquire(
+    def run_acquire(
         self,
         program: IntegratedProgram[list[NDArray[np.float64]]],
         soc: object,
         *,
-        options: ManageOptions[list[NDArray[np.float64]]] | None = None,
+        options: RunOptions[list[NDArray[np.float64]]] | None = None,
         **qick_options: object,
     ) -> SignalArray:
         """Acquire IQ, write this scope's slot and trigger live updates.
 
-        Managed means slot/live updates, automatic retry and data-driven stop.
+        Run means slot/live updates, automatic retry via options.retry, and
+        data-driven stopping via options.stop_condition. Native program acquire
+        only returns data; this method owns the Schedule run side effects.
         Requires an active Schedule and a writable default SignalBuffer slot.
         program supplies synchronous acquire; soc is its borrowed transport.
         options controls retry, native progress, stop and raw conversion. With
@@ -142,7 +144,7 @@ class ManagedAcquisitionMixin(ABC):
         cancellation/failure. Converter and update errors propagate without retry.
         """
         owner = self._acquisition_owner
-        selected = ManageOptions() if options is None else options
+        selected = RunOptions() if options is None else options
         rounds = require_positive_rounds(qick_options.pop("rounds", 1))
         return AcquisitionRunner(owner, soc).run(
             acquire=program.acquire,
@@ -160,17 +162,19 @@ class ManagedAcquisitionMixin(ABC):
             acquire_kwargs=qick_options,
         )
 
-    def managed_acquire_decimated(
+    def run_acquire_decimated(
         self,
         program: DecimatedProgram[list[NDArray[np.float64]]],
         soc: object,
         *,
-        options: ManageOptions[list[NDArray[np.float64]]] | None = None,
+        options: RunOptions[list[NDArray[np.float64]]] | None = None,
         **qick_options: object,
     ) -> SignalArray:
         """Acquire traces, write this scope's slot and trigger live updates.
 
-        Managed means slot/live updates, automatic retry and data-driven stop.
+        Run means slot/live updates, automatic retry via options.retry, and
+        data-driven stopping via options.stop_condition. Native program acquire
+        only returns data; this method owns the Schedule run side effects.
         Requires an active Schedule and a writable default SignalBuffer slot.
         program supplies synchronous acquire_decimated; soc is its transport.
         options controls retry, native progress, stop and raw conversion. With
@@ -181,7 +185,7 @@ class ManagedAcquisitionMixin(ABC):
         cancellation/failure. Converter and update errors propagate without retry.
         """
         owner = self._acquisition_owner
-        selected = ManageOptions() if options is None else options
+        selected = RunOptions() if options is None else options
         rounds = require_positive_rounds(qick_options.pop("rounds", 1))
         return AcquisitionRunner(owner, soc).run(
             acquire=program.acquire_decimated,
@@ -199,18 +203,20 @@ class ManagedAcquisitionMixin(ABC):
             acquire_kwargs=qick_options,
         )
 
-    def managed_acquire_summed(
+    def run_acquire_summed(
         self,
         program: SummedProgram,
         soc: object,
         *,
         processor: ShotSumProcessor,
-        options: ManageOptions[NDArray[np.float64]] | None = None,
+        options: RunOptions[NDArray[np.float64]] | None = None,
         **qick_options: object,
     ) -> SignalArray:
         """Acquire shot sums, write this scope's slot and trigger live updates.
 
-        Managed means slot/live updates, automatic retry and data-driven stop.
+        Run means slot/live updates, automatic retry via options.retry, and
+        data-driven stopping via options.stop_condition. Native program acquire
+        only returns data; this method owns the Schedule run side effects.
         Requires an active Schedule and a writable default SignalBuffer slot.
         program needs only acquire_summed; soc is its transport. processor maps
         normalized ADC-keyed (points, reps, reads, 2) IQ to float64 (points, *axes).
@@ -222,14 +228,12 @@ class ManagedAcquisitionMixin(ABC):
         conversion and update failures propagate without retry.
         """
         owner = self._acquisition_owner
-        selected = ManageOptions() if options is None else options
+        selected = RunOptions() if options is None else options
         rounds = require_positive_rounds(qick_options.pop("rounds", 1))
 
         def convert(raw: NDArray[np.float64] | None) -> SignalArray:
             if raw is None:
-                raise ValueError(
-                    "managed summed acquisition requires synchronous results"
-                )
+                raise ValueError("run summed acquisition requires synchronous results")
             return raw if selected.converter is None else selected.converter(raw)
 
         return AcquisitionRunner(owner, soc).run(

@@ -9,7 +9,7 @@ from numpy.typing import NDArray
 from zcu_tools.experiment.acquisition_facts import StopDecision
 from zcu_tools.experiment.scope import Scope
 from zcu_tools.experiment.simulation import SimulationEnvironment, white_noise
-from zcu_tools.experiment.v2.runtime import ManageOptions, Schedule, SignalBuffer
+from zcu_tools.experiment.v2.runtime import RunOptions, Schedule, SignalBuffer
 from zcu_tools.program.acquisition import CancelFlagProtocol
 from zcu_tools.program.v2 import ModularProgramV2
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
@@ -43,7 +43,7 @@ def simulated_program() -> Iterator[tuple[SimulationEnvironment, ModularProgramV
         env.devices.close_all_devices()
 
 
-def test_managed_integrated_writes_scan_slot_and_notifies_live_buffer(
+def test_run_integrated_writes_scan_slot_and_notifies_live_buffer(
     simulated_program: tuple[SimulationEnvironment, ModularProgramV2],
 ) -> None:
     env, program = simulated_program
@@ -57,7 +57,7 @@ def test_managed_integrated_writes_scan_slot_and_notifies_live_buffer(
         Schedule({}, buffer, scope=Scope("run")) as schedule,
     ):
         for _, step in schedule.scan("point", [10, 20]):
-            result = step.managed_acquire(program, env.soc, rounds=2)
+            result = step.run_acquire(program, env.soc, rounds=2)
             np.testing.assert_array_equal(result, [0j])
             assert np.shares_memory(result, buffer.array)
     np.testing.assert_array_equal(buffer.array, [[0j], [0j]])
@@ -68,7 +68,7 @@ def test_managed_integrated_writes_scan_slot_and_notifies_live_buffer(
     assert all(not bar.leave and bar.closed for bar in rounds_bars)
 
 
-def test_managed_summed_writes_raw_cumulative_sums_by_default(
+def test_run_summed_writes_raw_cumulative_sums_by_default(
     simulated_program: tuple[SimulationEnvironment, ModularProgramV2],
 ) -> None:
     env, program = simulated_program
@@ -84,7 +84,7 @@ def test_managed_summed_writes_raw_cumulative_sums_by_default(
         return np.ones((*iq[0].shape[:2], 1), dtype=np.float64).sum(axis=1)
 
     with Schedule({}, buffer, scope=Scope("run")) as schedule:
-        result = schedule.managed_acquire_summed(
+        result = schedule.run_acquire_summed(
             program, env.soc, processor=count_shots, rounds=2
         )
         np.testing.assert_array_equal(result, [4.0])
@@ -92,7 +92,7 @@ def test_managed_summed_writes_raw_cumulative_sums_by_default(
     np.testing.assert_array_equal(updates, [[2.0], [4.0], [4.0]])
 
 
-def test_managed_decimated_writes_default_complex_trace_and_live_updates(
+def test_run_decimated_writes_default_complex_trace_and_live_updates(
     simulated_program: tuple[SimulationEnvironment, ModularProgramV2],
 ) -> None:
     env, program = simulated_program
@@ -104,7 +104,7 @@ def test_managed_decimated_writes_default_complex_trace_and_live_updates(
         update_interval=1,
     )
     with Schedule({}, buffer, scope=Scope("run")) as schedule:
-        result = schedule.managed_acquire_decimated(program, env.soc, rounds=2)
+        result = schedule.run_acquire_decimated(program, env.soc, rounds=2)
         np.testing.assert_array_equal(result, np.zeros((2, samples), dtype=complex))
         assert np.shares_memory(result, buffer.array)
     assert len(updates) == 3
@@ -112,7 +112,7 @@ def test_managed_decimated_writes_default_complex_trace_and_live_updates(
 
 
 @pytest.mark.parametrize("mode", ["integrated", "decimated", "summed"])
-def test_managed_converter_is_selected_by_none_not_callable_truthiness(
+def test_run_converter_is_selected_by_none_not_callable_truthiness(
     simulated_program: tuple[SimulationEnvironment, ModularProgramV2],
     mode: str,
 ) -> None:
@@ -130,19 +130,19 @@ def test_managed_converter_is_selected_by_none_not_callable_truthiness(
 
     with Schedule({}, buffer, scope=Scope("run")) as schedule:
         if mode == "integrated":
-            result = schedule.managed_acquire(
-                program, env.soc, options=ManageOptions(converter=Converter())
+            result = schedule.run_acquire(
+                program, env.soc, options=RunOptions(converter=Converter())
             )
         elif mode == "decimated":
-            result = schedule.managed_acquire_decimated(
-                program, env.soc, options=ManageOptions(converter=Converter())
+            result = schedule.run_acquire_decimated(
+                program, env.soc, options=RunOptions(converter=Converter())
             )
         else:
-            result = schedule.managed_acquire_summed(
+            result = schedule.run_acquire_summed(
                 program,
                 env.soc,
                 processor=lambda iq: np.ones((1, 1)),
-                options=ManageOptions(converter=Converter()),
+                options=RunOptions(converter=Converter()),
             )
         np.testing.assert_array_equal(result, [-7.0])
 
@@ -187,7 +187,7 @@ def _policy_poll(
         "failure",
     ],
 )
-def test_managed_integrated_policy_keeps_completed_rounds_and_outcomes(
+def test_run_integrated_policy_keeps_completed_rounds_and_outcomes(
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
     ending: str,
@@ -216,11 +216,11 @@ def test_managed_integrated_policy_keeps_completed_rounds_and_outcomes(
         use_pbar_factory(recording_pbar_factory(bars)),
         Schedule({}, buffer, scope=root) as schedule,
     ):
-        result = schedule.managed_acquire(
+        result = schedule.run_acquire(
             program,
             soc,
             rounds=2,
-            options=ManageOptions(
+            options=RunOptions(
                 retry=int(ending == "retry"), converter=convert, stop_condition=stop
             ),
         )
@@ -260,7 +260,7 @@ def test_managed_integrated_policy_keeps_completed_rounds_and_outcomes(
 
 @pytest.mark.parametrize("mode", ["integrated", "summed", "decimated"])
 @pytest.mark.parametrize("rounds", [0, -1, True, 1.5, "2"])
-def test_managed_rejects_invalid_rounds_before_acquisition(
+def test_run_rejects_invalid_rounds_before_acquisition(
     simulated_program: tuple[SimulationEnvironment, ModularProgramV2],
     mode: str,
     rounds: object,
@@ -269,12 +269,12 @@ def test_managed_rejects_invalid_rounds_before_acquisition(
     buffer = SignalBuffer((1,))
     with Schedule({}, buffer, scope=Scope("run")) as schedule:
         if mode == "integrated":
-            acquire = partial(schedule.managed_acquire, program, env.soc)
+            acquire = partial(schedule.run_acquire, program, env.soc)
         elif mode == "decimated":
-            acquire = partial(schedule.managed_acquire_decimated, program, env.soc)
+            acquire = partial(schedule.run_acquire_decimated, program, env.soc)
         else:
             acquire = partial(
-                schedule.managed_acquire_summed,
+                schedule.run_acquire_summed,
                 program,
                 env.soc,
                 processor=lambda iq: np.ones((1, 1)),
@@ -287,7 +287,7 @@ def test_managed_rejects_invalid_rounds_before_acquisition(
 
 
 @pytest.mark.parametrize("mode", ["integrated", "summed", "decimated"])
-def test_managed_rejects_negative_retry(
+def test_run_rejects_negative_retry(
     simulated_program: tuple[SimulationEnvironment, ModularProgramV2],
     mode: str,
 ) -> None:
@@ -295,24 +295,24 @@ def test_managed_rejects_negative_retry(
     buffer = SignalBuffer((1,))
     with Schedule({}, buffer, scope=Scope("run")) as schedule:
         if mode == "integrated":
-            acquire = partial(schedule.managed_acquire, program, env.soc)
+            acquire = partial(schedule.run_acquire, program, env.soc)
         elif mode == "decimated":
-            acquire = partial(schedule.managed_acquire_decimated, program, env.soc)
+            acquire = partial(schedule.run_acquire_decimated, program, env.soc)
         else:
             acquire = partial(
-                schedule.managed_acquire_summed,
+                schedule.run_acquire_summed,
                 program,
                 env.soc,
                 processor=lambda iq: np.ones((1, 1)),
             )
         with pytest.raises(ValueError, match="retry must be non-negative"):
-            acquire(options=ManageOptions(retry=-1))
+            acquire(options=RunOptions(retry=-1))
         assert schedule.outcome.status == "completed"
     assert np.isnan(buffer.array).all()
 
 
 @pytest.mark.parametrize("failure_site", ["round", "final", "update"])
-def test_managed_callback_failure_propagates_without_retry_or_failed_outcome(
+def test_run_callback_failure_propagates_without_retry_or_failed_outcome(
     monkeypatch: pytest.MonkeyPatch,
     failure_site: str,
 ) -> None:
@@ -343,8 +343,8 @@ def test_managed_callback_failure_propagates_without_retry_or_failed_outcome(
     schedule = Schedule({}, buffer, scope=root)
     monkeypatch.setattr(soc, "poll_data", poll)
     with pytest.raises(RuntimeError) as caught, schedule:
-        schedule.managed_acquire(
-            program, soc, options=ManageOptions(converter=convert, retry=2)
+        schedule.run_acquire(
+            program, soc, options=RunOptions(converter=convert, retry=2)
         )
     assert caught.value is cause
     assert calls == 1
@@ -352,7 +352,7 @@ def test_managed_callback_failure_propagates_without_retry_or_failed_outcome(
     assert root.stop.error is None
 
 
-def test_managed_accepts_acquire_only_program_and_forwards_native_keywords() -> None:
+def test_run_accepts_acquire_only_program_and_forwards_native_keywords() -> None:
     transport = object()
     buffer = SignalBuffer((1,))
 
@@ -381,12 +381,12 @@ def test_managed_accepts_acquire_only_program_and_forwards_native_keywords() -> 
             return raw
 
     with Schedule({}, buffer, scope=Scope("run")) as schedule:
-        result = schedule.managed_acquire(
+        result = schedule.run_acquire(
             AcquireOnly(),
             transport,
             rounds=2,
             custom_native=19,
-            options=ManageOptions(progress=True),
+            options=RunOptions(progress=True),
         )
         np.testing.assert_array_equal(result, [7 - 2j])
         assert schedule.outcome.status == "completed"
