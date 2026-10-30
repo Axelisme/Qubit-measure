@@ -6,7 +6,7 @@
 
 先準備校準的 π/2 pulse 與單音 pulse readout。Pi/2 Pulse 使用 `$qubit.module.x90`，Readout 使用 `$resonator.module.readout`。缺 slot 時表單提供範本，未校準的必填值保持 Invalid。Mux 不適用。
 
-Readout 必須包含 classifier。Linear 使用 angle 與 threshold，angle 的單位是 radians。Circle 使用 g/e centers 與 radius，缺 radius 時先完成 GE Post。分類座標是未扣 offset 的 normalized ADC IQ。Circle 接受 g 圓內且比 e 更近的 shot，Linear 接受 ground 一側。Herald 與 signal 使用兩個 PulseReadout instance，共用同一 readout 設定與 classifier。
+Readout 必須包含 GE Post circle classifier，具有 g/e centers 與 radius。分類座標是未扣 offset 的 normalized ADC IQ。Linear 與 centroid3 不適用。Herald 與 signal 使用兩個 PulseReadout instance，共用同一 readout 設定與 classifier。
 
 Reset 是選用的前置 reset，缺 slot 時停用。Herald 本身只做 host post-selection，不做 FPGA feedback 或 active reset。模擬讀出仍受 dispersive validity guard 限制，不能直接套用其他讀出線的 gain 界限。
 
@@ -20,11 +20,11 @@ Reps 是每點每 round 的 shots，Rounds 是軟體 rounds。Acquire retry 控�
 
 序列是 optional reset → herald readout → π/2 → delay → phase-shifted π/2 → signal readout。Detune ratio 是每個 delay step 的 fringe 週期數，預設 0.05。實際相位斜率以 ratio / step 換成 MHz，只改最後一個 pulse 的 phase，不改 drive frequency。非零 ratio 搭配零 step 會在取數前報錯。
 
-Run 的 measurement 顯示通過 shot 的平均 IQ 投影。取數層跨 round 依通過數加權。零通過點的 IQ 為 NaN，`pass_fraction` 為 0。未完成點保留 NaN。
+Run 的 measurement 顯示通過 shot 的平均 IQ 投影。取數層跨 round 依通過數加權。零通過點的 IQ 為 NaN，通過比例 為 0。未完成點保留 NaN。
 
 ## Analyze 與寫回
 
-Analyze 先排除非有限 delay/IQ，再交普通 Ramsey 的 IQ rotation 與 decay/fringe fitting。`pass_fraction` 不當作 fit weight。有效資料不足或無法擬合時分析會失敗。
+Analyze 先排除非有限 delay/IQ，再交普通 Ramsey 的 IQ rotation 與 decay/fringe fitting。通過比例 不當作 fit weight。有效資料不足或無法擬合時分析會失敗。
 
 Fit fringe 預設開啟。Fit phase offset 預設開啟，允許自由 fringe phase；關閉時由近零 delay 的訊號選固定 0°／180°。要做純 decay，可將 Detune ratio 設為 0 並關閉 Fit fringe。
 
@@ -37,7 +37,7 @@ Fit fringe 預設開啟。Fit phase offset 預設開啟，允許自由 fringe ph
 
 ## Save、Load 與 MCP
 
-Save 將 `signals` 與同一 time grid 的 `pass_fraction` 寫入 native `data.h5`。檔案時間使用 seconds，載回恢復 us。Cfg 保存此次 readout classifier。Load 不用目前表單或 classifier 替換歷史資料。
+Save 將 `sums` 寫入 native `data.h5`，形狀為 (Nt, 3, 3)，後兩軸為 herald_states（g、e、other）與 components（count、ΣI、ΣQ）。通過比例只在分析或即時呈現時以 g 計數除以總計數，不另存變數。舊格式缺少 `sums` 時明確報錯。檔案時間使用 seconds，載回恢復 us。Cfg 保存此次 readout classifier。Load 不用目前表單或 classifier 替換歷史資料。
 
 Load 後可再 Analyze。與普通 Ramsey 一樣，native load 不恢復 run-only realized detune，因此不提出 frequency 修正；t2r 與符合來源條件的 record 提案仍可用。
 

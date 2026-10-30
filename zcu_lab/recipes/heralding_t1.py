@@ -74,14 +74,16 @@ class HeraldingT1Report(RecipeReport):
 
 @recipe(
     "heralding_t1",
-    description="Run single-qubit ground-heralded T1; save selected IQ, pass fraction and analysis.",
+    description="Run single-qubit ground-heralded T1; save per-class shot sums and analysis.",
 )
 async def heralding_t1(
     session: RecipeSession, inputs: HeraldingT1Inputs
 ) -> HeraldingT1Report:
     """Measure T1 from the decay of the qubit's excited-state population.
 
-    Herald using the saved pulse-readout classifier, apply a calibrated pi
+    Store per-class shot sums; compute herald-g conditional IQ for fitting.
+    Readout must include a GE Post circle classifier with calibrated radius.
+    Herald using the saved GE Post circle classifier, apply a calibrated pi
     pulse, wait the swept delay, then average only accepted signal shots.
     No active reset or joint herald is performed. Fit finite IQ to estimate the relaxation
     time, and ask before applying the proposed T1; skipping writes nothing.

@@ -1,9 +1,7 @@
 """Single-qubit length Rabi with ground-herald post-selection."""
 
-from collections.abc import Sequence
 from copy import deepcopy
 from dataclasses import dataclass
-from functools import partial
 from typing import Annotated, ClassVar
 
 import numpy as np
@@ -24,8 +22,16 @@ from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.experiment.v2.utils.snr import snr_checker
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.herald import HeraldSpec, herald_ratio, heralded
-from zcu_tools.program.v2 import ModularProgramV2, Pulse, Reset, sweep2param
+from zcu_tools.program.v2 import (
+    IQ,
+    Classify,
+    ModularProgramV2,
+    Pulse,
+    Reset,
+    shot_sums,
+    split_sums,
+    sweep2param,
+)
 from zcu_tools.program.v2.modules import PulseReadout
 
 from zcu_lab.v2.support import live_line
@@ -41,11 +47,14 @@ from zcu_lab.v2.twotone.rabi.len_rabi.core import (
 
 @dataclass(frozen=True)
 class HeraldingLenRabiResult:
-    """Same-grid lengths (us), selected mean IQ and accepted/attempted fractions."""
+    """lengths is the sweep grid (us); sums has shape (points, 3, 3).
+
+    Herald states are g/e/other; components are count/sum I/sum Q.
+    Unmeasured sums are NaN. Conditional means at zero count are NaN.
+    """
 
     lengths: NDArray[np.float64]
-    signals: NDArray[np.complex128]
-    pass_fraction: NDArray[np.float64]
+    sums: NDArray[np.float64]
 
 
 class HeraldingLenRabiCfg(LenRabiCfg):
@@ -57,53 +66,12 @@ class HeraldingLenRabiCfg(LenRabiCfg):
 def restore_result(
     data: GroupedLoadData[HeraldingLenRabiCfg],
 ) -> HeraldingLenRabiResult:
-    """Restore selected IQ and acceptance on the same saved length grid in us."""
-    signals = data.variable("signals")
-    fractions = data.variable("pass_fraction")
-    if not np.array_equal(signals.axes[0], fractions.axes[0]):
-        raise ValueError("Signal and pass fraction must share the same length grid")
+    """Restore per-class shot sums; old files fail naming the missing sums variable."""
+    sums = data.variable("sums")
     return HeraldingLenRabiResult(
-        lengths=signals.axes[0].astype(np.float64),
-        signals=signals.z.astype(np.complex128),
-        pass_fraction=fractions.z.astype(np.float64),
+        lengths=sums.axes[2].astype(np.float64),
+        sums=sums.z.astype(np.float64),
     )
-
-
-def _combine_host_rounds(
-    signals: NDArray[np.complex128], fractions: NDArray[np.float64], reps: int
-) -> tuple[NDArray[np.complex128], NDArray[np.float64]]:
-    """Combine completed one-round acquisitions without reclassifying any shots."""
-    completed = np.isfinite(fractions)
-    counts = np.where(completed, fractions * reps, 0.0)
-    if not np.all(np.isclose(counts, np.rint(counts), rtol=0, atol=1e-6)):
-        raise ValueError("Herald fraction does not recover an integer shot count")
-    counts = np.rint(counts)
-    accepted = np.sum(counts, axis=0)
-    attempted = np.sum(completed, axis=0) * reps
-    # A zero-pass mean is NaN; multiplying it by zero would poison the sum.
-    weighted = np.zeros_like(signals)
-    np.multiply(signals, counts, out=weighted, where=counts > 0)
-    means = np.full(signals.shape[1], np.nan, dtype=np.complex128)
-    np.divide(np.sum(weighted, axis=0), accepted, out=means, where=accepted > 0)
-    combined = np.full(signals.shape[1], np.nan, dtype=np.float64)
-    np.divide(accepted, attempted, out=combined, where=attempted > 0)
-    return means, combined
-
-
-def _selected_signal_with_fraction(
-    raw: Sequence[NDArray[np.float64]],
-    *,
-    fraction_slot: NDArray[np.float64],
-) -> NDArray[np.complex128]:
-    """Store delivered pass fractions, then return conditional complex signal IQ.
-
-    raw contains ADC-ordered weighted IQ with acceptance as the last component.
-    fraction_slot is the sweep grid or one host point's writable fraction view.
-    Both cumulative round updates and final results use the same conversion.
-    """
-    iq, fraction = herald_ratio(raw[0])
-    fraction_slot[:] = fraction
-    return iq[0, ..., 0] + 1j * iq[0, ..., 1]
 
 
 class HeraldingLenRabiExp(Experiment[HeraldingLenRabiResult, HeraldingLenRabiCfg]):
@@ -113,18 +81,18 @@ class HeraldingLenRabiExp(Experiment[HeraldingLenRabiResult, HeraldingLenRabiCfg
     AXES_SPEC: ClassVar[
         GroupedAxesSpec[HeraldingLenRabiResult, HeraldingLenRabiCfg]
     ] = GroupedAxesSpec(
-        variables=tuple(
+        variables=(
             VariableSpec(
-                variable=name,
+                variable="sums",
                 axes=(
+                    VariableAxisSpec.generated_arange("components", ""),
+                    VariableAxisSpec.generated_arange("herald_states", ""),
                     VariableAxisSpec("Length", "s", field_name="lengths", scale=1e-6),
                 ),
-                z=VariableZSpec(field_name=name, label=label, unit="a.u.", dtype=dtype),
-            )
-            for name, label, dtype in (
-                ("signals", "Signal", np.complex128),
-                ("pass_fraction", "Herald pass fraction", np.float64),
-            )
+                z=VariableZSpec(
+                    field_name="sums", label="Shot sums", unit="", dtype=np.float64
+                ),
+            ),
         ),
         result_type=HeraldingLenRabiResult,
         cfg_type=HeraldingLenRabiCfg,
@@ -135,22 +103,26 @@ class HeraldingLenRabiExp(Experiment[HeraldingLenRabiResult, HeraldingLenRabiCfg
     def run(
         self, cfg: HeraldingLenRabiCfg, *, context: RunContext
     ) -> HeraldingLenRabiResult:
-        """Acquire accepted mean IQ and pass fraction versus drive length in us.
+        """Acquire (Nl, 3, 3) shot sums versus drive length in us.
 
-        Sequence: optional reset, ground herald, optional initialization, drive,
-        terminal readout. Herald and signal instances share cfg.readout.
-        Const/flat-top use a hardware sweep; other editable waveforms use a
-        round-major host scan with a cached program per length. Arb is rejected.
-        Acquisition owns classification and within-call count weighting. Host
-        rounds combine selected means using the public acceptance fractions.
-        Early-stop SNR is checked after each full curve, as in ordinary Len Rabi.
-        Zero-pass points retain NaN IQ; unmeasured points retain NaN fractions.
-        Missing classifiers fail before acquisition. cfg is not mutated.
+        Sequence: optional reset, herald, optional init, drive, signal readout.
+        Readouts share cfg.readout with its GE Post circle classifier.
+        Classes are g/e/other; components are count/sum I/sum Q.
+        Const/flat-top use a hardware sweep. Other editable waveforms use a
+        round-major host scan with cached programs; arb is rejected.
+        Both hardware rounds and host segments add their sums directly.
+        Live and analyze use herald-g conditional IQ; zero-count means are NaN.
+        Unmeasured sums remain NaN. Early-stop SNR follows each full curve.
+        cfg is not mutated; heralding itself adds no active reset.
         """
         if cfg.qub_pulse.waveform.style == "arb":
             raise ValueError(
                 "Len Rabi cannot sweep an arb waveform's asset-derived length. "
                 "Select a waveform with an editable length instead."
+            )
+        if cfg.readout.classifier is None or cfg.readout.classifier.mode != "circle":
+            raise ValueError(
+                "Heralding requires a circle classifier with g/e/other; run GE Post"
             )
         cfg = deepcopy(cfg)
         soc, soccfg = context.soc, context.soccfg
@@ -163,13 +135,21 @@ class HeraldingLenRabiExp(Experiment[HeraldingLenRabiResult, HeraldingLenRabiCfg
 
         viewer = live_line(context.plots, "measurement", "Length (us)", "Signal")
         buffer = SignalBuffer(
-            (len(lengths),),
-            on_update=lambda data: viewer.update(lengths, rabi_signal2real(data)),
+            (len(lengths), 3, 3),
+            dtype=np.float64,
+            on_update=lambda data: viewer.update(
+                lengths, rabi_signal2real(split_sums(data)[1][..., 0])
+            ),
         )
-        fractions = np.full(len(lengths), np.nan, dtype=np.float64)
-        check_snr = snr_checker(buffer.at(), cfg.earlystop_snr, rabi_signal2real)
+        check_snr = snr_checker(
+            buffer.at(),
+            cfg.earlystop_snr,
+            lambda data: rabi_signal2real(split_sums(data)[1][..., 0]),
+        )
         acquisition_buffer = (
-            buffer if hardware_sweep else SignalBuffer((cfg.rounds, len(lengths)))
+            buffer
+            if hardware_sweep
+            else SignalBuffer((cfg.rounds, len(lengths), 3, 3), dtype=np.float64)
         )
         with Schedule(cfg, acquisition_buffer, scope=context.scope) as sched:
             cfg = sched.cfg
@@ -190,23 +170,19 @@ class HeraldingLenRabiExp(Experiment[HeraldingLenRabiResult, HeraldingLenRabiCfg
                     reps=cfg.reps,
                     relax_delay=cfg.relax_delay,
                 )
-                herald = herald_readout.herald_spec(prog, occurrence=0)
-                sched.prog_builder(soc, soccfg).run_program_processed(
+                sched.prog_builder(soc, soccfg).run_program_summed(
                     prog,
                     rounds=cfg.rounds,
-                    processors={herald.ro_ch: heralded(herald, np.copy)},
-                    processed2signal_fn=partial(
-                        _selected_signal_with_fraction, fraction_slot=fractions
-                    ),
+                    processor=shot_sums(prog, [Classify("herald"), IQ("signal")]),
+                    sums2signal_fn=np.copy,
                     options=AcquireOptions(
                         retry=cfg.acquire_retry, stop_condition=check_snr
                     ),
                 )
             else:
                 # Each host round scans all lengths before checking curve SNR.
-                round_fractions = np.full((cfg.rounds, len(lengths)), np.nan)
-                programs: dict[float, tuple[ModularProgramV2, HeraldSpec]] = {}
-                for round_index, rep in sched.repeat("round", cfg.rounds):
+                programs: dict[float, ModularProgramV2] = {}
+                for _, rep in sched.repeat("round", cfg.rounds):
                     for index, step in rep.scan("length", list(range(len(lengths)))):
                         length = float(lengths[index])
                         if length not in programs:
@@ -224,34 +200,30 @@ class HeraldingLenRabiExp(Experiment[HeraldingLenRabiResult, HeraldingLenRabiCfg
                                 reps=step.cfg.reps,
                                 relax_delay=step.cfg.relax_delay,
                             )
-                            programs[length] = (
-                                prog,
-                                herald_readout.herald_spec(prog, occurrence=0),
-                            )
-                        prog, herald = programs[length]
+                            programs[length] = prog
+                        prog = programs[length]
 
                         try:
-                            step.prog_builder(soc, soccfg).run_program_processed(
+                            step.prog_builder(soc, soccfg).run_program_summed(
                                 prog,
                                 rounds=1,
-                                processors={herald.ro_ch: heralded(herald, np.copy)},
-                                processed2signal_fn=partial(
-                                    _selected_signal_with_fraction,
-                                    fraction_slot=round_fractions[
-                                        round_index, index : index + 1
-                                    ],
+                                processor=shot_sums(
+                                    prog, [Classify("herald"), IQ("signal")]
                                 ),
+                                sums2signal_fn=np.copy,
                                 options=AcquireOptions(retry=cfg.acquire_retry),
                             )
                         finally:
-                            means, fractions = _combine_host_rounds(
-                                acquisition_buffer.array, round_fractions, cfg.reps
-                            )
-                            buffer.set(means)
+                            segments = acquisition_buffer.array
+                            completed = np.any(np.isfinite(segments), axis=0)
+                            combined = np.nansum(segments, axis=0)
+                            buffer.set(np.where(completed, combined, np.nan))
                     if check_snr():
                         break
-                viewer.update(lengths, rabi_signal2real(buffer.array))
-        return HeraldingLenRabiResult(lengths, buffer.array, fractions)
+                viewer.update(
+                    lengths, rabi_signal2real(split_sums(buffer.array)[1][..., 0])
+                )
+        return HeraldingLenRabiResult(lengths, buffer.array)
 
     def analyze(
         self,
@@ -267,11 +239,12 @@ class HeraldingLenRabiExp(Experiment[HeraldingLenRabiResult, HeraldingLenRabiCfg
         retain the ordinary fit semantics; insufficient data fails in that owner.
         """
         result = source.result
-        finite = np.isfinite(result.lengths) & np.isfinite(result.signals)
+        signals = split_sums(result.sums)[1][..., 0]
+        finite = np.isfinite(result.lengths) & np.isfinite(signals)
         return LenRabiExp().analyze(
             RunRecord(
                 cfg=None,
-                result=LenRabiResult(result.lengths[finite], result.signals[finite]),
+                result=LenRabiResult(result.lengths[finite], signals[finite]),
             ),
             options,
             plots=plots,

@@ -13,6 +13,7 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackRequest,
 )
 from zcu_tools.plotting.plots import Plots
+from zcu_tools.program.v2 import split_sums
 
 from zcu_lab.v2.twotone.rabi.amp_rabi.core import (
     AmpRabiAnalysis,
@@ -63,7 +64,9 @@ def writeback(
         return []
     ordinary = RunRecord(
         cfg=AmpRabiCfg.model_validate(source.cfg.model_dump()),
-        result=AmpRabiResult(source.result.amps, source.result.signals),
+        result=AmpRabiResult(
+            source.result.amps, split_sums(source.result.sums)[1][..., 0]
+        ),
         metadata=source.metadata,
     )
     items = AMP_RABI.get_writeback_items(

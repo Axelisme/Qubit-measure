@@ -21,14 +21,17 @@ from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.experiment.v2.utils.t1_sampling import materialize_nonuniform_t1_delays
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.herald import herald_ratio, heralded
 from zcu_tools.program.v2 import (
+    IQ,
+    Classify,
     Delay,
     DelayAuto,
     LoadValue,
     ModularProgramV2,
     Pulse,
     SweepCfg,
+    shot_sums,
+    split_sums,
     sweep2param,
 )
 from zcu_tools.program.v2.modules import PulseReadout
@@ -44,9 +47,14 @@ from zcu_lab.v2.twotone.time_domain.t1.core import (
 
 @dataclass(frozen=True)
 class HeraldingT1Result:
+    """times is the sweep grid (us); sums has shape (points, 3, 3).
+
+    Herald states are g/e/other; components are count/sum I/sum Q.
+    Unmeasured sums are NaN. Conditional means at zero count are NaN.
+    """
+
     times: NDArray[np.float64]
-    signals: NDArray[np.complex128]
-    pass_fraction: NDArray[np.float64]
+    sums: NDArray[np.float64]
 
 
 class HeraldingT1Cfg(ConfigBase):
@@ -62,15 +70,11 @@ class HeraldingT1Cfg(ConfigBase):
 
 
 def restore_result(data: GroupedLoadData[HeraldingT1Cfg]) -> HeraldingT1Result:
-    """Restore both variables on the same saved time grid, in us."""
-    signals = data.variable("signals")
-    fractions = data.variable("pass_fraction")
-    if not np.array_equal(signals.axes[0], fractions.axes[0]):
-        raise ValueError("Signal and pass fraction must share the same time grid")
+    """Restore per-class shot sums; old files fail naming the missing sums variable."""
+    sums = data.variable("sums")
     return HeraldingT1Result(
-        times=signals.axes[0].astype(np.float64),
-        signals=signals.z.astype(np.complex128),
-        pass_fraction=fractions.z.astype(np.float64),
+        times=sums.axes[2].astype(np.float64),
+        sums=sums.z.astype(np.float64),
     )
 
 
@@ -80,20 +84,18 @@ class HeraldingT1Exp(Experiment[HeraldingT1Result, HeraldingT1Cfg]):
     Options: ClassVar[type[T1AnalyzeOptions]] = T1AnalyzeOptions
     AXES_SPEC: ClassVar[GroupedAxesSpec[HeraldingT1Result, HeraldingT1Cfg]] = (
         GroupedAxesSpec(
-            variables=tuple(
+            variables=(
                 VariableSpec(
-                    variable=name,
+                    variable="sums",
                     axes=(
+                        VariableAxisSpec.generated_arange("components", ""),
+                        VariableAxisSpec.generated_arange("herald_states", ""),
                         VariableAxisSpec("Time", "s", field_name="times", scale=1e-6),
                     ),
                     z=VariableZSpec(
-                        field_name=name, label=label, unit="a.u.", dtype=dtype
+                        field_name="sums", label="Shot sums", unit="", dtype=np.float64
                     ),
-                )
-                for name, label, dtype in (
-                    ("signals", "Signal", np.complex128),
-                    ("pass_fraction", "Herald pass fraction", np.float64),
-                )
+                ),
             ),
             result_type=HeraldingT1Result,
             cfg_type=HeraldingT1Cfg,
@@ -103,16 +105,20 @@ class HeraldingT1Exp(Experiment[HeraldingT1Result, HeraldingT1Cfg]):
     )
 
     def run(self, cfg: HeraldingT1Cfg, *, context: RunContext) -> HeraldingT1Result:
-        """Acquire post-selected mean IQ and accepted-shot fraction versus delay.
+        """Acquire (Nt, 3, 3) shot sums versus delay in us.
 
-        Times use us. Both readouts use the same pulse/ADC settings and classifier
-        from cfg.readout. Missing calibration fails before acquisition. The host
-        selects shots, not FPGA feedback; no active reset is performed. Rounds
-        are weighted by accepted counts by the acquisition owner. Zero-pass
-        points retain NaN IQ and fraction zero; unmeasured points remain NaN.
+        Herald classes are g/e/other; components are count/sum I/sum Q.
+        Both readouts share cfg.readout with its GE Post circle classifier.
+        Host post-selection adds no active reset. Rounds add sums without
+        normalization. Live and analyze use the herald-g conditional IQ.
+        Zero-count means are NaN; unmeasured sums remain NaN.
         Uniform mode requires SweepCfg. Nonuniform delays use the shared T1
         hardware-grid owner and reject colliding points. cfg is not mutated.
         """
+        if cfg.readout.classifier is None or cfg.readout.classifier.mode != "circle":
+            raise ValueError(
+                "Heralding requires a circle classifier with g/e/other; run GE Post"
+            )
         cfg = deepcopy(cfg)
         soccfg = context.soccfg
         delay_table = None
@@ -128,18 +134,12 @@ class HeraldingT1Exp(Experiment[HeraldingT1Result, HeraldingT1Cfg]):
             context.plots, "measurement", "Time (us)", "IQ magnitude (a.u.)"
         )
         buffer = SignalBuffer(
-            (len(lengths),),
-            on_update=lambda data: viewer.update(lengths, np.abs(data)),
+            (len(lengths), 3, 3),
+            dtype=np.float64,
+            on_update=lambda data: viewer.update(
+                lengths, np.abs(split_sums(data)[1][..., 0])
+            ),
         )
-        fractions = np.full(len(lengths), np.nan, dtype=np.float64)
-
-        def processed_to_signal(
-            raw: list[NDArray[np.float64]],
-        ) -> NDArray[np.complex128]:
-            """Store pass fractions and return conditional IQ on this sweep's grid."""
-            iq, fraction = herald_ratio(raw[0])
-            fractions[:] = fraction
-            return iq[0, ..., 0] + 1j * iq[0, ..., 1]
 
         with Schedule(cfg, buffer, scope=context.scope) as sched:
             cfg = sched.cfg
@@ -166,7 +166,7 @@ class HeraldingT1Exp(Experiment[HeraldingT1Result, HeraldingT1Cfg]):
                 ]
                 delay = DelayAuto("t1_delay", t="t1_delay_cycle")
                 sweep = [("length_idx", len(delay_table.cycles))]
-            # Borrow these instances so herald_spec addresses the emitted readout.
+            # Unique readout names resolve the herald and signal shot-sum axes.
             prog = ModularProgramV2(
                 soccfg,
                 modules=[
@@ -180,16 +180,15 @@ class HeraldingT1Exp(Experiment[HeraldingT1Result, HeraldingT1Cfg]):
                 reps=cfg.reps,
                 relax_delay=cfg.relax_delay,
             )
-            herald = herald_readout.herald_spec(prog, occurrence=0)
             builder = sched.prog_builder(context.soc, soccfg)
-            builder.run_program_processed(
+            builder.run_program_summed(
                 prog,
                 rounds=cfg.rounds,
-                processors={herald.ro_ch: heralded(herald, np.copy)},
-                processed2signal_fn=processed_to_signal,
+                processor=shot_sums(prog, [Classify("herald"), IQ("signal")]),
+                sums2signal_fn=np.copy,
             )
 
-        return HeraldingT1Result(lengths, buffer.array, fractions)
+        return HeraldingT1Result(lengths, buffer.array)
 
     def analyze(
         self,
@@ -208,7 +207,7 @@ class HeraldingT1Exp(Experiment[HeraldingT1Result, HeraldingT1Cfg]):
         if options.skip < 0:
             raise ValueError("Skip leading points must be nonnegative")
         times = source.result.times[options.skip :]
-        signals = source.result.signals[options.skip :]
+        signals = split_sums(source.result.sums)[1][..., 0][options.skip :]
         finite = np.isfinite(times) & np.isfinite(signals)
         fit_source = RunRecord(
             cfg=None, result=T1Result(times=times[finite], signals=signals[finite])
