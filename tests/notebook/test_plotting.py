@@ -1,4 +1,6 @@
+import threading
 from collections.abc import Callable, Iterator
+from concurrent.futures import ThreadPoolExecutor
 from io import BytesIO
 
 import IPython.display
@@ -8,6 +10,7 @@ import numpy as np
 import pytest
 from ipympl.backend_nbagg import Canvas, FigureManager, Toolbar
 from ipywidgets import Widget
+from matplotlib.artist import Artist
 from matplotlib.figure import Figure
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.notebook import NotebookAdapter
@@ -177,6 +180,65 @@ def test_live_and_ordinary_figures_present_once_without_pyplot_registration(
     assert live_frames[-1] == [5.0, 6.0]
     assert plt.get_fignums() == before
     assert plt.get_backend() == backend
+
+
+@pytest.mark.parametrize("worker", [False, True])
+def test_decorated_updates_run_on_caller_and_send_full_frames_only_after_show(
+    notebook_plots: tuple[Callable[[], Plots], list[Canvas]],
+    monkeypatch: pytest.MonkeyPatch,
+    worker: bool,
+) -> None:
+    create, published = notebook_plots
+    plots = create()
+    figure, axes = plots.subplots(num="decorated")
+    (curve,) = axes.plot([], [], "o-")
+    frames: list[bytes] = []
+    body_threads: list[int] = []
+    send_binary = Canvas.send_binary
+
+    def record_frame(canvas: Canvas, data: bytes) -> None:
+        send_binary(canvas, data)
+        frames.append(data)
+
+    monkeypatch.setattr(Canvas, "send_binary", record_frame)
+
+    @plots.on_plot_thread
+    def push(value: int) -> tuple[Artist, ...]:
+        body_threads.append(threading.get_ident())
+        curve.set_data([0, 1, 2], [0, value, 0])
+        axes.relim()
+        axes.autoscale_view()
+        return (curve, axes, figure)
+
+    def produce(value: int) -> int:
+        push(value)
+        return threading.get_ident()
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+
+        def call(value: int) -> int:
+            return pool.submit(produce, value).result() if worker else produce(value)
+
+        caller = call(1)
+        assert body_threads == [caller]
+        assert published == []
+        assert frames == []
+        figure.show()
+        np.testing.assert_array_equal(curve.get_ydata(), [0, 1, 0])
+        frames.clear()
+        assert call(3) == caller
+        assert call(5) == caller
+    assert body_threads == [caller, caller, caller]
+    assert len(frames) == 2  # Duplicate artists still produce just one frame per push.
+    assert published == [figure.canvas]
+    for data in frames:
+        alpha = plt.imread(BytesIO(data), format="png")[..., 3]
+        assert np.all(alpha == 1.0)
+    np.testing.assert_array_equal(curve.get_ydata(), [0, 5, 0])
+    plots.finish()
+    plots.release()
+    with pytest.raises(RuntimeError, match="finished"):
+        push(7)
 
 
 def test_every_live_refresh_sends_a_complete_opaque_frame(

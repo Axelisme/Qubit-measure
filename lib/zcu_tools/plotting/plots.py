@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from copy import copy
+from collections.abc import Callable, Iterable
+from copy import copy, deepcopy
+from functools import wraps
 from pathlib import Path
 from typing import Protocol, TypeVar
 
 from matplotlib import rc_context
+from matplotlib.artist import Artist
 from matplotlib.axes import Axes
 from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib.figure import Figure
@@ -163,6 +165,53 @@ class Plots(FigureCollection):
             return handle
 
         return self._host.call(create)
+
+    def on_plot_thread(
+        self, callback: Callable[[_T], Iterable[Artist] | None]
+    ) -> Callable[[_T], None]:
+        """Decorate a one-payload matplotlib update for synchronous owner execution.
+
+        Use ``@plots.on_plot_thread`` without arguments. The resulting function
+        accepts one deepcopy-compatible payload and returns None. It checks the
+        operation lifetime before copying and again on the host owner, then
+        calls the body with the snapshot. Copy, body and host errors propagate.
+        Finish/release rejects calls with RuntimeError, before copying data.
+
+        The body must return an iterable of changed Artists (Figure included),
+        and should mutate only figures belonging to those returned artists.
+        Refresh each distinct root figure already presented by this Plots once.
+        Before show, only retain mutations: do not present, refresh or load a
+        backend. Later show or finish(present=True) displays the latest content.
+        Mixed results refresh only presented figures. An empty iterable does
+        not refresh. None raises TypeError; artists
+        outside this Plots raise ValueError. Validate all results before any
+        refresh. Errors do not roll back mutations. Binding claims no axes.
+        Use the same decorator for repeated updates and one-off mutations.
+        """
+
+        @wraps(callback)
+        def push(data: _T) -> None:
+            self.ensure_active()
+            snapshot = deepcopy(data)
+
+            def apply() -> None:
+                self.ensure_active()
+                changed = callback(snapshot)
+                if changed is None:
+                    raise TypeError("Plot callback must return an iterable of artists")
+                figures: dict[Figure, None] = {}
+                for artist in changed:
+                    figure = artist.get_figure(root=True)
+                    if not isinstance(figure, Figure) or figure not in self.values():
+                        raise ValueError("Changed artist must belong to this Plots")
+                    figures[figure] = None
+                for figure in figures:
+                    if figure in self._live:
+                        self._host.refresh(figure)
+
+            self._host.call(apply)
+
+        return push
 
     def draw(self, name: str, callback: Callable[[Figure], None]) -> None:
         """Draw on an existing named figure, then refresh on the host owner.

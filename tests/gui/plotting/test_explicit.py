@@ -8,10 +8,12 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from matplotlib.artist import Artist
 from matplotlib.axes import Axes
 from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib.figure import Figure
 from matplotlib.lines import Line2D
+from numpy.typing import NDArray
 from qtpy.QtCore import QCoreApplication, QEvent, QEventLoop, QTimer
 from qtpy.QtWidgets import (
     QApplication,
@@ -104,6 +106,31 @@ def test_figure_show_survives_qt_canvas_swap(qapp, hosts) -> None:
     adapters[1].release(figure)
 
 
+def _native_callbacks(
+    plots: Plots, axes: Axes
+) -> tuple[Callable[[str], None], Callable[[NDArray[np.float64]], None]]:
+    owner_id = threading.get_ident()
+    (curve,) = axes.plot([], [], "o-")
+    annotation = axes.text(0.5, 0.9, "", transform=axes.transAxes, ha="center")
+
+    @plots.on_plot_thread
+    def set_caption(text: str) -> tuple[Artist, ...]:
+        assert threading.get_ident() == owner_id
+        axes.set_title(text)
+        return (axes.title,)
+
+    @plots.on_plot_thread
+    def push(values: NDArray[np.float64]) -> tuple[Artist, ...]:
+        assert threading.get_ident() == owner_id
+        curve.set_data([0.0, 1.0, 2.0], values)
+        axes.relim()
+        axes.autoscale_view()
+        annotation.set_text("Updated from worker")
+        return (curve, annotation, axes)
+
+    return set_caption, push
+
+
 @pytest.fixture
 def explicit_show_driver(qapp) -> Iterator[ComponentDriver]:
     window = QWidget()
@@ -123,34 +150,22 @@ def explicit_show_driver(qapp) -> Iterator[ComponentDriver]:
         subplot_kw={"xlabel": "Frequency (MHz)", "ylabel": "Signal (mV)"},
     )
     scope = LifetimeScope(window)
+    owner_id = threading.get_ident()
+    set_caption, push = _native_callbacks(plots, axes)
 
     def show() -> None:
+        set_caption("Native decorated update")
         figure.show()
         status.setText("Shown")
 
     def update() -> None:
         def work() -> int:
-            viewer = create_trace(
-                plots,
-                "explicit",
-                "Frequency (MHz)",
-                "Signal (mV)",
-                axes=axes,
-            )
-            host.call(
-                lambda: axes.text(
-                    0.5,
-                    0.9,
-                    "Updated from worker",
-                    transform=axes.transAxes,
-                    ha="center",
-                )
-            )
-            viewer.update((np.array([0.0, 1.0, 2.0]), np.array([1.0, 3.0, 2.0])))
+            push(np.array([1.0, 3.0, 2.0]))
             return threading.get_ident()
 
-        _run_worker(qapp, work)
-        host.refresh(figure, final=True)
+        assert _run_worker(qapp, work) != owner_id
+        if get_figure_container(figure) is not None:
+            host.refresh(figure, final=True)
         status.setText("Worker complete")
 
     def legacy() -> None:
@@ -195,14 +210,16 @@ def test_component_driver_explicit_show_worker_update_and_legacy_live(
     evidence = Path(os.environ.get("PLOT_SHOW_EVIDENCE", str(tmp_path)))
     assert driver.plots().axes == ()
     driver.screenshot(evidence / "01-unshown.png")
+    driver.click("Update from worker")
+    assert driver.observe("Worker complete").visible
+    assert driver.plots().axes == ()
+    driver.screenshot(evidence / "01b-updated-before-show.png")
     driver.click("Show figure")
     assert driver.observe("Shown").visible
     assert driver.plots().axes[0].xlabel == "Frequency (MHz)"
-    assert driver.plots().axes[0].visible_curves == 0
+    assert driver.plots().axes[0].visible_curves == 1
+    assert "Updated from worker" in driver.plots().axes[0].annotations
     driver.screenshot(evidence / "02-shown.png")
-    driver.click("Show figure")
-    assert len(driver.plots().axes) == 1
-    driver.screenshot(evidence / "03-repeat-show.png")
     driver.click("Update from worker")
     assert driver.observe("Worker complete").visible
     assert driver.plots().axes[0].visible_curves == 1

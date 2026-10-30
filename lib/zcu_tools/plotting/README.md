@@ -2,7 +2,7 @@
 
 **Last updated:** 2026-10-30
 
-**讀者：** framework-dev。具名原生圖、通用更新 handle 與診斷圖的分工。
+**讀者：** framework-dev。具名原生圖、owner 更新與診斷圖的分工。
 
 `figures.FigureCollection` 擁有具名原生 Figure。同名同物件登記等冪，名稱衝突、
 同圖別名及跨存活 owner 接管一律拒絕。`seal()` 固定集合，不凍結 artist，
@@ -56,7 +56,24 @@ Caller 不得保留 active artists 供 worker 直接修改。Callback 可以清�
 保存時沿用既有 layout engine，沒有 engine 時套 tight layout。保存成功或失敗都還原
 顯示尺寸、layout 與 axes 位置。不 refresh，finish 前後皆可用。
 
-## 通用即時更新
+## 原生 matplotlib 更新
+
+用 `@plots.on_plot_thread` 裝飾接受單一 payload 的函式。呼叫時先檢查 lifetime，再 deepcopy
+payload，在 host owner 執行本體。本體回傳 changed artists 的 iterable，Figure 也可回傳。
+框架驗證所有 artists 屬於此 Plots，再對已呈現的根圖去重 refresh。None 回傳 raise TypeError，
+外來圖 raise ValueError，空 iterable 不 refresh。Copy、本體與 host 例外傳回 caller，
+本體失敗不 refresh，不回滾已做的修改。Finish／release 後呼叫 raise RuntimeError。
+
+即時更新與一次性改動都用這個入口。圖顯示後的改動一律經此入口。
+Show 前可先呼叫，修改只保留在 artists，不呈現、不 refresh、不載入 backend。
+後續 `fig.show()` 或 `finish(present=True)` 顯示最新內容。回傳混合的圖時只刷新已呈現者，
+但未呈現的外來圖仍拒絕。Decorator 不登記或佔用 axes，本體只應改回傳 artists 所屬的圖。
+
+Lab 的 `live_line(ax)`、`live_heatmap(ax)` 與 `live_scatter(ax)` 是可選的本地 artist 工具。
+它們的 `set(...)` 回傳 changed artists，可直接在裝飾後的本體中回傳。
+它們不切執行緒、不 refresh、不 present，也不檢查 axes 佔用。
+
+## 舊通用即時更新
 
 從 `zcu_tools.plotting` import `LiveUpdate[T]`。在 create_live initializer 中，
 以其 host、figure、active checker 與接受 T 的繪圖 callback 建立 handle。
