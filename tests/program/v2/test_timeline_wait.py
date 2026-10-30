@@ -428,6 +428,46 @@ def test_table_derived_repeat_count_keeps_exact_wait_slack():
     assert [s.body_end_cycle - s.start_cycle for s in shots(prog)] == [10, 30, 20]
 
 
+@pytest.mark.parametrize("relax_cycles", [10, 9])
+def test_zero_count_repeat_preserves_entry_source_and_exact_wait_guard(relax_cycles):
+    counts = LoadValue("counts", [0, 1], "scan", "count_cycles")
+
+    class Program(TimelineProgramV2):
+        def _initialize(self, cfg):
+            self.add_loop("scan", 2)
+            self.declare(counts)
+            self.add_reg("duration")
+            self.declare_readout(0, length=50 / 307.2)
+
+        def _body(self, cfg):
+            self.emit(counts)
+            self.write_reg("duration", 10)
+            self.trigger(ros=[0], width=1 / 430.08)
+            with self.repeat("inner", "count_cycles", range_hint=(0, 1)):
+                self.write_reg("duration", 20)
+            self.delay_timeline("duration")
+
+    if relax_cycles < 10:
+        with pytest.raises(
+            ValueError, match=r"WAIT.*count_cycles.*slack=10 cycles.*relax=9 cycles"
+        ):
+            Program(make_mock_soccfg(0, 1), initial_delay=0, relax_delay=9 / 430.08)
+    else:
+        with pytest.warns(
+            UserWarning, match=r"WAIT.*count_cycles.*slack=10 cycles"
+        ) as caught:
+            prog = Program(
+                make_mock_soccfg(0, 1), initial_delay=0, relax_delay=10 / 430.08
+            )
+        assert all("upper bound" not in str(item.message) for item in caught)
+        body = [s.body_end_cycle - s.start_cycle for s in shots(prog)]
+        assert body == [10, 20]
+        # The ADC ends at 70: skipping the write leaves a 60-cycle tail.
+        tails = [70 - end for end in body]
+        assert tails == [60, 50]
+        assert shell_wait(prog) == max(tails) == 60
+
+
 @pytest.mark.filterwarnings("error")
 @pytest.mark.parametrize("reuse_after", [False, True])
 def test_fixed_repeat_table_advance_sums_legal_iterations_before_wait_projection(
