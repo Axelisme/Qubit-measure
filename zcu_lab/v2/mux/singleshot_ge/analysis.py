@@ -254,69 +254,60 @@ def _plot_confusion_matrix(
     fig, _ = plots.subplots(
         figure_name, nrows=2, ncols=2, figsize=(8, 8), layout="constrained"
     )
-    ax1, ax4, ax2, ax3 = fig.axes
+    g_iq_ax, initial_populations_ax, e_iq_ax, confusion_matrix_ax = fig.axes
 
     g_label = r"$|0\rangle$"
     e_label = r"$|1\rangle$"
     l_label = r"$|L\rangle$"
-    _plot_classified(ax1, g_signals, primary, confusion.radius)
-    _plot_classified(ax2, e_signals, primary, confusion.radius)
+    _plot_classified(g_iq_ax, g_signals, primary, confusion.radius)
+    _plot_classified(e_iq_ax, e_signals, primary, confusion.radius)
 
     n_gg, n_ge, n_go = confusion.g_classification
     n_eg, n_ee, n_eo = confusion.e_classification
-    ax1.set_title(
+    g_iq_ax.set_title(
         f"{g_label}: {n_gg:.1%}, {e_label}: {n_ge:.1%}, {l_label}: {n_go:.1%}"
     )
-    ax2.set_title(
+    e_iq_ax.set_title(
         f"{g_label}: {n_eg:.1%}, {e_label}: {n_ee:.1%}, {l_label}: {n_eo:.1%}"
     )
-    ax1.set_xlabel("")
+    g_iq_ax.set_xlabel("")
 
-    im = ax4.imshow(confusion.init_matrix, cmap="Blues", vmin=0, vmax=1)
-    fig.colorbar(im, cax=ax4.inset_axes((1.04, 0, 0.06, 1)))
-    for i in range(confusion.init_matrix.shape[0]):
-        for j in range(confusion.init_matrix.shape[1]):
-            val = confusion.init_matrix[i, j]
-            ax4.text(
-                j,
-                i,
-                f"{val:.2%}",
-                fontsize=8,
-                ha="center",
-                va="center",
-                color="white" if val > 0.5 else "black",
-            )
+    for matrix_ax, matrix in (
+        (initial_populations_ax, confusion.init_matrix),
+        (confusion_matrix_ax, confusion.matrix),
+    ):
+        im = matrix_ax.imshow(matrix, cmap="Blues", vmin=0, vmax=1)
+        fig.colorbar(im, cax=matrix_ax.inset_axes((1.04, 0, 0.06, 1)))
+        for i in range(matrix.shape[0]):
+            for j in range(matrix.shape[1]):
+                val = matrix[i, j]
+                matrix_ax.text(
+                    j,
+                    i,
+                    f"{val:.2%}",
+                    fontsize=8,
+                    ha="center",
+                    va="center",
+                    color="white" if val > 0.5 else "black",
+                )
 
-    ax4.set_xticks([0, 1, 2])
-    ax4.set_yticks([0, 1, 2])
-    ax4.set_xticklabels([g_label, e_label, l_label])
-    ax4.set_yticklabels([g_label, e_label, l_label])
-    ax4.set_xlabel("Actual State")
-    ax4.set_ylabel("Prepared State")
-    ax4.set_title("Initial Populations")
+    initial_populations_ax.set_xticks([0, 1, 2])
+    initial_populations_ax.set_yticks([0, 1, 2])
+    initial_populations_ax.set_xticklabels([g_label, e_label, l_label])
+    initial_populations_ax.set_yticklabels([g_label, e_label, l_label])
+    initial_populations_ax.set_xlabel("Actual State")
+    initial_populations_ax.set_ylabel("Prepared State")
+    initial_populations_ax.set_title("Initial Populations")
 
-    im = ax3.imshow(confusion.matrix, cmap="Blues", vmin=0, vmax=1)
-    fig.colorbar(im, cax=ax3.inset_axes((1.04, 0, 0.06, 1)))
-    for i in range(confusion.matrix.shape[0]):
-        for j in range(confusion.matrix.shape[1]):
-            val = confusion.matrix[i, j]
-            ax3.text(
-                j,
-                i,
-                f"{val:.2%}",
-                fontsize=8,
-                ha="center",
-                va="center",
-                color="white" if val > 0.5 else "black",
-            )
-
-    ax3.set_xticks([0, 1, 2])
-    ax3.set_yticks([0, 1, 2])
-    ax3.set_xticklabels([g_label, e_label, l_label])
-    ax3.set_yticklabels([g_label, e_label, l_label])
-    ax3.set_xlabel("Measured State")
-    ax3.set_ylabel("Actual State")
-    ax3.set_title(f"Confusion Matrix (cond: {confusion.condition_number:.1f})")
+    confusion_matrix_ax.set_xticks([0, 1, 2])
+    confusion_matrix_ax.set_yticks([0, 1, 2])
+    confusion_matrix_ax.set_xticklabels([g_label, e_label, l_label])
+    confusion_matrix_ax.set_yticklabels([g_label, e_label, l_label])
+    confusion_matrix_ax.set_xlabel("Measured State")
+    confusion_matrix_ax.set_ylabel("Actual State")
+    confusion_matrix_ax.set_title(
+        f"Confusion Matrix (cond: {confusion.condition_number:.1f})"
+    )
 
 
 def _plot_classified(
