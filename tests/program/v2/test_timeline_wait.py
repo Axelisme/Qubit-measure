@@ -247,6 +247,73 @@ def test_overlapping_pulses_swept_start_keeps_exact_wait_after_all_timeline_sync
     assert shell_wait(prog) == max(remaining)
 
 
+def variable_tail_program(
+    *, relax_cycles: int = 100, tail_cycles: tuple[int, int] = (10, 30)
+) -> TimelineProgramV2:
+    """Leave the chosen ADC tail after a shared runtime origin cancels."""
+    origin = LoadValue("origin", [40, 60, 50], "origin_axis", "origin_cycles")
+
+    class Program(TimelineProgramV2):
+        def _initialize(self, cfg):
+            self.add_loop("origin_axis", 3)
+            self.add_loop("post_axis", 3)
+            self.declare(origin)
+            self.declare_readout(0, length=50 / 307.2)
+
+        def _body(self, cfg):
+            self.emit(origin)
+            self.delay_timeline("origin_cycles")
+            self.trigger(ros=[0], width=1 / 430.08, timeline="default")
+            self.delay_timeline(
+                QickSweep1D(
+                    "post_axis", -tail_cycles[0] / 430.08, -tail_cycles[1] / 430.08
+                )
+            )
+
+    return Program(
+        make_mock_soccfg(0, 1), initial_delay=0, relax_delay=relax_cycles / 430.08
+    )
+
+
+def test_variable_shell_wait_warns_with_only_uncancelled_axis_and_cycle_slack():
+    with pytest.warns(UserWarning, match=r"WAIT.*post_axis.*slack=20 cycles") as caught:
+        prog = variable_tail_program()
+    assert all("origin" not in str(item.message) for item in caught)
+    assert shell_wait(prog) == 30
+    # ADC end is origin + 70, while the negative post closes the body earlier.
+    assert [s.body_end_cycle - s.start_cycle for s in shots(prog)] == [
+        100,
+        90,
+        80,
+        120,
+        110,
+        100,
+        110,
+        100,
+        90,
+    ]
+
+
+def test_shell_wait_slack_above_relax_rejects_at_compile_time():
+    with pytest.raises(
+        ValueError, match=r"WAIT.*post_axis.*slack=20 cycles.*relax=19 cycles"
+    ):
+        variable_tail_program(relax_cycles=19)
+
+
+def test_shell_wait_slack_equal_to_relax_warns_without_rejection():
+    with pytest.warns(UserWarning, match=r"WAIT.*post_axis.*slack=20 cycles"):
+        prog = variable_tail_program(relax_cycles=20)
+    assert shell_wait(prog) == 30
+
+
+@pytest.mark.filterwarnings("error")
+@pytest.mark.parametrize("tail", [0, 30])
+def test_constant_shell_wait_has_zero_slack_even_with_no_relax(tail):
+    prog = variable_tail_program(relax_cycles=0, tail_cycles=(tail, tail))
+    assert shell_wait(prog) == tail
+
+
 def test_crossing_body_maximum_retains_positive_adc_remainder():
     origins = (40, 60, 50)
     others = (30, 140, 200)

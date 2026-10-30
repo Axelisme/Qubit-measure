@@ -1,10 +1,11 @@
 """Relative timeline state, native channel tails and repeat scope bookkeeping."""
 
+import warnings
 from dataclasses import dataclass, field
 
 from qick.asm_v2 import QickParam, WriteReg
 
-from ._timeline_expression import CycleVariable
+from ._timeline_expression import CycleVariable, LinearTime, expression_bounds
 from ._timeline_guard import PulseGuard as _PulseGuard
 from ._timeline_guard import bounds
 from ._timeline_runtime import (
@@ -12,6 +13,7 @@ from ._timeline_runtime import (
     RuntimeMath,
     Time,
     projected_bounds,
+    runtime_expression,
     time_bounds,
 )
 
@@ -300,6 +302,37 @@ class TimelineBook:
                         value if result is None else self.math.maximum(result, value)
                     )
         return result
+
+    def check_shell_wait(self, prog) -> None:
+        """Diagnose a linear ADC WAIT remainder after final body closure.
+
+        This checkpoint covers a single ADC expression only. General pointwise
+        maxima need the pending actual-minimum domain decision.
+        """
+        if len(prog.ro_chs) != 1:
+            return
+        (ch,) = prog.ro_chs
+        end = self.channel_end(prog, ch, generator=False)
+        if not isinstance(end, RuntimeEnd):
+            return
+        expression = runtime_expression(end)
+        if not isinstance(expression, LinearTime):
+            return
+        lower, upper = expression_bounds(expression)
+        slack = upper - lower
+        if slack > 0:
+            variables = sorted(
+                variable.name
+                for variable, _ in expression.terms
+                if variable.minimum != variable.maximum
+            )
+            message = (
+                f"Shell WAIT static bound: variables={variables}, slack={slack} cycles"
+            )
+            relax = prog.us2cycles(prog.relax_delay)
+            if slack > relax:
+                raise ValueError(f"{message}, relax={relax} cycles")
+            warnings.warn(message, UserWarning, stacklevel=2)
 
     def maximum(self) -> Time:
         end: Time = 0.0

@@ -151,6 +151,8 @@ class TimelineBoundary(Macro):
             self.book.runtime_gens.clear()
             self.book.runtime_ros.clear()
             self.book.pinned.clear()
+        elif self.section == "body_end":
+            self.book.check_shell_wait(prog)
 
     def translate(self, prog) -> None:
         if self.section in ("body_start", "body_end"):
