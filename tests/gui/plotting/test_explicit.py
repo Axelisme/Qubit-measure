@@ -348,6 +348,23 @@ def test_clearing_container_keeps_figures_saveable_and_representable(
     assert stacks[0].count() == stacks[1].count() == 1
 
 
+@pytest.mark.parametrize("release", [False, True], ids=["before-release", "after-release"])
+def test_clearing_finished_container_preserves_show_lifetime(hosts, release: bool) -> None:
+    _stacks, containers, adapters = hosts
+    plots = Plots(adapters[0])
+    figure, axes = plots.subplots(num="finished")
+    axes.plot([0, 1], [2, 3])
+    plots.finish()
+    containers[0].clear_dynamic_canvases()
+    try:
+        if release:
+            plots.release()
+        with pytest.raises(RuntimeError, match="operation.*finished"):
+            figure.show()
+    finally:
+        plots.release()
+
+
 def test_clearing_container_preserves_caller_replaced_canvas(qapp, hosts) -> None:
     stacks, containers, adapters = hosts
     plots = Plots(adapters[0])
