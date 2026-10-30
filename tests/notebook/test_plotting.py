@@ -128,6 +128,36 @@ def test_live_and_ordinary_figures_present_once_without_pyplot_registration(
     assert plt.get_backend() == backend
 
 
+def test_every_live_refresh_sends_a_complete_opaque_frame(
+    notebook_plots: tuple[Callable[[], Plots], list[Canvas]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A busy cell delays the frontend's base-image request, so a diff frame would
+    # composite over a blank canvas; each refresh must therefore stand alone.
+    frames: list[bytes] = []
+    send_binary = Canvas.send_binary
+
+    def record_frame(canvas: Canvas, data: bytes) -> None:
+        send_binary(canvas, data)
+        frames.append(data)
+
+    monkeypatch.setattr(Canvas, "send_binary", record_frame)
+    create, _ = notebook_plots
+    plots = create()
+    live = create_trace(plots, "live", "x", "y")
+    frames.clear()
+
+    for count in range(2, 6):
+        xs = np.arange(count, dtype=float)
+        live.update((xs, xs**2))
+
+    assert len(frames) == 4
+    for data in frames:
+        assert data.startswith(b"\x89PNG")
+        alpha = plt.imread(BytesIO(data), format="png")[..., 3]
+        assert np.all(alpha == 1.0)
+
+
 def test_release_closes_widgets_and_preserves_other_operation_and_savefig(
     notebook_plots: tuple[Callable[[], Plots], list[Canvas]],
 ) -> None:
