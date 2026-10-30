@@ -3,8 +3,11 @@
 from collections.abc import Callable
 from typing import TYPE_CHECKING, TypeVar, cast
 
+from matplotlib import style
 from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib.figure import Figure
+
+from zcu_tools.plotting import DEFAULT_STYLE
 
 if TYPE_CHECKING:
     from ipympl.backend_nbagg import Canvas, FigureManager
@@ -17,12 +20,15 @@ _T = TypeVar("_T")
 class NotebookPlotHost:
     """Initialize and synchronously render widgets until explicitly released.
 
+    Construction applies the shared Matplotlib style to process-wide rcParams
+    for subsequent figures. Apply native style overrides after construction.
     Calls run synchronously on the caller's thread. Callers serialize operations;
     this host does not schedule work or detect frontend availability. Figures
     with an existing manager must be released by that owner before presentation.
     """
 
     def __init__(self) -> None:
+        style.use(DEFAULT_STYLE)
         self._managers: dict[Figure, FigureManager] = {}
 
     def call(self, callback: Callable[[], _T]) -> _T:

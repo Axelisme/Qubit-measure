@@ -1,6 +1,6 @@
 # `zcu_tools.notebook`
 
-**Last updated:** 2026-10-30（notebook liveplot 完整 frame）
+**Last updated:** 2026-10-30（notebook liveplot 與預設樣式）
 
 **讀者：** lab-author。Notebook 實驗入口、互動分析與支援模組導覽。
 
@@ -77,6 +77,14 @@ if metadata is not None and metadata.device_snapshot is not None:
 Caller 明確提供 Notebook 自己的 bindings，RoleView 保留顯式 kind／via 契約。
 GUI 的 `aliases.yaml` 與 Measure alias preset 由 GUI 使用。
 GUI／MCP 的 temporary aliases 或 target 不改這個保存 handle。
+
+## 圖的預設外觀
+
+`NotebookPlotHost()` 建構時以 `matplotlib.style.use` 套用
+[共用樣式](../plotting/README.md#預設外觀)，後續新圖使用相同字級、格線與 tight layout。
+建構不切換 backend，也不登記 pyplot figure。
+作者可用 `ax.set_xlabel("Frequency (MHz)", fontsize=16)` 覆寫單一標籤。
+整組圖的 `plt.style.context(...)` 應放在 host 建構之後，避免入口再次套用預設樣式。
 
 ## 工作家族
 
