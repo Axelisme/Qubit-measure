@@ -83,7 +83,10 @@ class OpenInnerLoop(Macro):
                 type="LOOP_START",
                 name=self.name,
                 info=dict(
-                    counter_reg=mapped_counter, n=mapped_n, range_hint=self.range_hint
+                    counter_reg=mapped_counter,
+                    n=mapped_n,
+                    range_hint=self.range_hint,
+                    sweeps={"registers": {}, "waves": {}},
                 ),
             ),
         ]

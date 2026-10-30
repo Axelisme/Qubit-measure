@@ -67,6 +67,34 @@ def _program(path: str) -> tuple[MyProgramV2, Callable[[], None]]:
     return native, update_native
 
 
+def _assert_table_snapshot(
+    prog: ModularProgramV2 | TimelineProgramV2, gen: list[int], adc: list[int]
+) -> None:
+    loop = next(
+        meta
+        for meta in _markers(prog.compiled_stream)
+        if meta.type == "LOOP_START" and meta.name == "scan"
+    )
+    tables = loop.info["tables"]
+    dmem = prog.compile_datamem()
+    if dmem is None:
+        pytest.fail("table hooks require compiled DMEM")
+    assert len(tables) == 2
+    pairs = []
+    for address, fields in tables.items():
+        assert set(fields) == {0}
+        offset = fields[0]
+        pairs.append(
+            (
+                int(prog.waves[address].freq) % 2**32,
+                [int(word) % 2**32 for word in dmem[offset : offset + 2]],
+            )
+        )
+    assert sorted(pairs) == sorted(
+        [(gen[0], [gen[1], gen[0]]), (adc[0], [adc[1], adc[0]])]
+    )
+
+
 def _invalidate_binary(prog: AbsQickProgram) -> None:
     # The QICK base owns the nullable public compile cache.
     prog.binprog = None
@@ -94,6 +122,7 @@ def test_compile_snapshot_preserves_typed_loop_and_detaches_mutable_payload(path
     assert loop_start.name == "inner"
     assert loop_start.info["n"] == 3
     assert loop_start.info["range_hint"] == (1, 4)
+    assert loop_start.info["sweeps"] == {"registers": {}, "waves": {}}
     assert [
         inst.type
         for inst in markers
@@ -276,6 +305,13 @@ def test_native_loop_markers_preserve_qick_sweep_updates_and_inner_structure():
         ("LOOP_BODY_END", "reps"),
         ("LOOP_END", "reps"),
     ]
+    sweep = starts[1].info["sweeps"]
+    # The pulse start and DelayAuto end both sweep, in tProc cycles.
+    assert list(sweep["registers"].values()) == [
+        {"start": 0, "step": 43},
+        {"start": 44, "step": 43},
+    ]
+    assert list(sweep["waves"].values()) == [{3: {"start": 3276, "step": 6553}}]
     original = build(UnmarkedLoops)
     assert prog.prog_list == original.prog_list
     np.testing.assert_equal(prog.binprog, original.binprog)
@@ -441,6 +477,8 @@ def test_readout_snapshot_labels_semantic_owner_and_author_children(native, form
         if native
         else ModularProgramV2(soccfg, modules=modules, sweep=[("scan", 2)])
     )
+    if form == "table":
+        _assert_table_snapshot(prog, gen, adc)
     assert _port_sources(prog.compiled_stream) == (
         ["readout", "readout", "author_child"]
         if form == "join"

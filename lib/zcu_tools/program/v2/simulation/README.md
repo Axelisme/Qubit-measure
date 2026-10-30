@@ -1,6 +1,6 @@
 # Explicit acquisition environments
 
-**Last updated:** 2026-10-30, compiled requests, shot processing and charge requirements
+**Last updated:** 2026-10-30, independent compiled lanes and shot-state admission
 
 **讀者：** framework-dev。模擬 acquisition 的 request、round 與 raw source 契約。
 
@@ -70,9 +70,17 @@ Hardware acquisition does not call the binding or this clock.
 reads `prog.compiled_stream` and returns detached numeric slots without calling a backend.
 Its optional `charge_requirements` keyword preserves caller requirements in the
 request for environment-owned physical validation, without inferring drive roles.
-It predecodes the snapshot once. Proven native affine shells use array lanes.
-Other carried state follows instruction order across scan points.
-The builder rejects rep-varying outputs and unresolved readout routes before returning a request.
+It predecodes the snapshot once and evaluates scan points as independent array
+lanes. `LOOP_START` provides resolved register/wave start and step words, plus
+rotated DMEM table hooks. The builder checks these definitions against the
+compiled initial words and loop shells; missing keys or inconsistent metadata
+raise before request construction. Reps remain request metadata and are not
+executed. Marked shot-local loops iterate across lanes with `index < n` masks,
+including zero and register-driven counts, without expanding the instruction stream.
+A static live-in guard rejects registers or memory that a shot reads before
+initialization and also writes across points/reps, even for equal-valued or
+unobserved updates. Prologue-only constants and shot-local initialization remain
+supported. The builder also rejects unresolved readout routes.
 Runtime ADC words use overlapping output carriers to resolve their frequency image.
 Static ADC configuration uses the shared QICK `calc_ro_freq` adapter.
 Runtime readout WPORT commands are instantaneous config updates. Each port's FIFO
@@ -80,10 +88,11 @@ uses the maximum of the command timestamp and its previous effective time, witho
 wave duration or pipeline delays. Each read uses the last update effective at its
 window start. A different frequency or phase inside the open window raises before
 request construction; an equal update is accepted. Missing start-time config also
-raises. Absolute config times and pending FIFO updates carry across points and reps.
-Vector execution requires every port to overwrite at the shot origin and drain
-before the next shot; otherwise ordered execution retains that carry. Readout
-frequency or phase changes across reps raise rather than changing request layout.
+raises. Shot-local configuration writes must supply every read on that port and
+drain before the next shot. A port configured only in the prologue can remain
+constant. A read cannot use a prologue or previous-shot config once its port is
+mutable in the shot, even when later updates have equal values. Pending FIFO
+updates cannot carry across points/reps.
 This timing rule is a simulation model, not a sample-exact hardware claim.
 
 This builder is not the acquire frontend. `_simulation_call` still uses the Module tree.

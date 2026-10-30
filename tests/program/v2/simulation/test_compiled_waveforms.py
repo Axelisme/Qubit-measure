@@ -217,9 +217,7 @@ def test_reps_varying_envelope_selection_fails_before_request():
         p.inc_reg("envaddr", 3)
 
     prog, env = program(body, initialize)
-    with pytest.raises(
-        ValueError, match="PortWriteInst.*preopt.*reps.*envelope.*carried"
-    ):
+    with pytest.raises(ValueError, match="RegWriteInst.*preopt.*cross-shot.*live-in"):
         request(prog, env)
 
 
