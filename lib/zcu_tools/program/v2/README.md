@@ -1,6 +1,6 @@
 # README - program/v2
 
-**Last updated:** 2026-10-30，TimelineBuilder、timeline 範圍、joint-ADC shot sums 與 read labels
+**Last updated:** 2026-10-31，shell WAIT 契約與編譯期時間來源
 
 **讀者：** lab-author、framework-dev、agent。原生 V2 program 寫法與 module、readout、acquisition 契約速查。
 
@@ -280,6 +280,13 @@ Repeat body 內支援具名 timeline 的 register 時間與各 case 不同的 Br
 Repeat body 內的 DelayAuto(register) 與 delay_reg_auto 仍報錯。迴圈外 consumer 不受這項限制。
 
 Body 收尾先同步全部 timeline，再放 body_end marker，然後進 shot 外殼。
+`sync` 保持每點 runtime maximum；shell WAIT 才使用編譯期常數上界。
+Program／timeline owner 保留已知 loop／table 的逐點來源關係與 native channel 結尾式子，供收尾 WAIT 計算使用。
+這些式子只作編譯期記帳，不是第二個 scheduler，也不改 runtime register 或指令。
+能證明所有合法點的剩餘時間相同時，WAIT 精確且不警告。
+已知點的 `slack=max-min` 大於 0 時會 warning。
+已知 slack 超過 `relax_delay` 時 raise ValueError，等於時不拒絕；真正未知的 slack 只警告上界，不以該上界拒絕。
+來源相關性、精確 min／max 與未知值政策見 [ADR-0083](../../../../docs/adr/0083-program-macros-and-timelines.md#收尾-wait-與-slack-護欄)。
 每次 compile 重置宣告與結尾。公開 `timing_layout` 由真 boundary metadata 取得 linked addresses 與 loop 座標。
 將它與 prog_list／labels 交給 `ir.analyze_timing`，可觀察逐點事件、body_end 與含外殼的 shot_end。
 Register Repeat 的編譯結果可能包含 DMEM dispatch，分析時以 `CompiledTimingInput.dmem`

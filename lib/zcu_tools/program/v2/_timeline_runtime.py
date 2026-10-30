@@ -1,4 +1,4 @@
-"""Cycle-valued expressions for timeline ends that are not affine sweeps."""
+"""Runtime cycle emission plans with correlated compile-time time expressions."""
 
 import math
 from dataclasses import dataclass
@@ -7,6 +7,19 @@ import numpy as np
 from qick.asm_v2 import AsmInst, Macro, QickParam, TimedMacro, WriteReg
 
 from ._timeline_bounds import CycleBounds
+from ._timeline_expression import (
+    CycleVariable,
+    LinearTime,
+    TimeExpression,
+    add_time,
+    choose_time,
+    evaluate_time,
+    expression_axes,
+    point_time,
+    projected_expression_bounds,
+    scale_time,
+    select_time,
+)
 from ._timeline_guard import bounds
 from .macro.dmem import DmemLookup, sweep_table_index
 from .macro.write_reg import WriteRegOp
@@ -97,6 +110,10 @@ class RuntimeEnd:
     value, allowing a following sync to consume them without new arithmetic.
     deferred records physical boundaries covered only after an additional proven
     nonnegative cycle advance; negative operations and reference debits drop it.
+    expression carries correlated integer-cycle algebra for native timestamp
+    projection only. None creates a fresh bounded value (or an exact constant);
+    copying a value must preserve its expression, not its recycled register name.
+    The original intervals still control register arithmetic and overflow checks.
     """
 
     register: str
@@ -104,6 +121,168 @@ class RuntimeEnd:
     maximum: int
     covers: tuple["Time", ...] = ()
     deferred: tuple[DeferredCoverage, ...] = ()
+    expression: TimeExpression | None = None
+
+    def __post_init__(self) -> None:
+        if self.expression is None:
+            value = (
+                LinearTime(self.minimum)
+                if self.minimum == self.maximum
+                else LinearTime(
+                    terms=(
+                        (CycleVariable(self.register, self.minimum, self.maximum), 1),
+                    )
+                )
+            )
+            object.__setattr__(self, "expression", value)
+
+
+def runtime_expression(value: RuntimeEnd) -> TimeExpression:
+    """Return the immutable value identity, independent of mutable register storage."""
+    if value.expression is None:
+        raise RuntimeError("runtime end has no compile-time cycle expression")
+    return value.expression
+
+
+@dataclass(frozen=True)
+class MicrosecondBounds:
+    """Inclusive native timestamp bounds in microseconds, possibly signed.
+
+    minimum and maximum bound every legal point after cycle projection. They
+    are conservative for unknown inputs and exact otherwise. The projection
+    owner uses this pair to keep us separate from integer-cycle bounds.
+    Construction stores endpoints unchanged; callers supply ordered values.
+    """
+
+    minimum: float
+    maximum: float
+
+
+def projected_bounds(prog, value: "Time") -> MicrosecondBounds:
+    """Project correlated bounds to us at a native timestamp boundary.
+
+    Unknown inputs remain conservative. Expression substitution failures
+    propagate as RuntimeError; static values use their native parameter bounds.
+    """
+    if isinstance(value, RuntimeEnd):
+        expression = runtime_expression(value)
+        limits = projected_expression_bounds(expression)
+        return MicrosecondBounds(
+            limits.minimum / get_fclk(prog), limits.maximum / get_fclk(prog)
+        )
+    lower, upper = bounds(value)
+    return MicrosecondBounds(lower, upper)
+
+
+def parameter_expression(
+    prog, value: float | QickParam, *, cycles: bool = False
+) -> TimeExpression:
+    """Describe an already-rounded native parameter without emitting instructions.
+
+    Inputs normally use us; cycles=True describes raw register initialization.
+    Shared loop names use the same compiler-owned variable identity.
+    """
+    factor = 1 if cycles else get_fclk(prog)
+    if not isinstance(value, QickParam):
+        return LinearTime(round(value * factor))
+    axes = prog._timeline_book.cycle_axes
+    terms: list[tuple[CycleVariable, int]] = []
+    for name, span in value.spans.items():
+        count = prog.loop_dict[name]
+        if count > 1:
+            if name not in axes:
+                axes[name] = CycleVariable(name, 0, count - 1, ((name, count),))
+            terms.append((axes[name], round(span * factor / (count - 1))))
+    return LinearTime(round(value.start * factor), tuple(terms))
+
+
+def time_expression(prog, value: "Time") -> TimeExpression:
+    """Describe a relative end in integer cycles without register allocation."""
+    return (
+        runtime_expression(value)
+        if isinstance(value, RuntimeEnd)
+        else parameter_expression(prog, value)
+    )
+
+
+def native_event_expression(prog, value: "Time") -> TimeExpression:
+    """Capture a physical event end with a safe integer-cycle projection.
+
+    Raw us ends may include fractional waveform/ADC cycles. Ceil each legal
+    point here, before integer reference debits; do not round a physical end
+    like a register initialization. RuntimeEnd already stores integer cycles
+    and retains its expression unchanged. This emits no instructions and does
+    not participate in the module owner's separate event-plus-post rounding.
+    Missing native sweep dimensions raise KeyError.
+    """
+    if isinstance(value, RuntimeEnd):
+        return runtime_expression(value)
+    ticks = value * get_fclk(prog)
+    if not isinstance(ticks, QickParam):
+        return LinearTime(ceil_tick(ticks))
+    axes = {name: prog.loop_dict[name] for name in ticks.spans}
+    raw = np.asarray(ticks.to_array(axes, all_loops=True), dtype=float)
+    points = np.asarray(
+        [ceil_tick(float(point)) for point in raw.flat], dtype=np.int64
+    ).reshape(raw.shape)
+    return point_time(", ".join(axes), axes, points)
+
+
+def source_expression(prog, name: str) -> TimeExpression:
+    """Return a register's current point provenance, or its certified unknown range."""
+    book = prog._timeline_book
+    if name in book.source_expressions:
+        return book.source_expressions[name]
+    if name in prog.loop_dict:
+        count = prog.loop_dict[name]
+        if name not in book.cycle_axes:
+            book.cycle_axes[name] = CycleVariable(name, 0, count - 1, ((name, count),))
+        return LinearTime(terms=((book.cycle_axes[name], 1),))
+    register = prog.reg_dict.get(name)
+    if register is not None and register.init is not None:
+        raw = register.init
+        return parameter_expression(prog, QickParam(raw.start, raw.spans), cycles=True)
+    limits = prog._time_bounds.describe(prog, name)
+    if limits.minimum == limits.maximum:
+        return LinearTime(limits.minimum)
+    return LinearTime(terms=((CycleVariable(name, limits.minimum, limits.maximum), 1),))
+
+
+def bounded_source_expression(
+    prog, name: str, minimum: int, maximum: int
+) -> TimeExpression:
+    """Describe a Repeat count using known points or its author-guaranteed range."""
+    register = prog.reg_dict.get(name)
+    if (
+        name in prog._timeline_book.source_expressions
+        or name in prog.loop_dict
+        or (register is not None and register.init is not None)
+    ):
+        return source_expression(prog, name)
+    return (
+        LinearTime(minimum)
+        if minimum == maximum
+        else LinearTime(terms=((CycleVariable(name, minimum, maximum), 1),))
+    )
+
+
+def lookup_expression(
+    prog, name: str, values: tuple[int, ...], selector: str
+) -> TimeExpression:
+    """Preserve one lookup's legal points using the selector at this occurrence."""
+    index = source_expression(prog, selector)
+    axes = expression_axes(index)
+    points = evaluate_time(index, axes)
+    if points is None:
+        return LinearTime(terms=((CycleVariable(name, min(values), max(values)), 1),))
+    selected = np.asarray(values, dtype=np.int64)[points]
+    lower, upper = int(selected.min()), int(selected.max())
+    if lower == upper:
+        return LinearTime(lower)
+    variable = CycleVariable(
+        name, lower, upper, tuple(axes.items()), tuple(int(v) for v in selected.flat)
+    )
+    return LinearTime(terms=((variable, 1),))
 
 
 Time = float | QickParam | RuntimeEnd
@@ -177,6 +356,16 @@ class RuntimeMath(TimedMacro):
         if previous is not None:
             self.claimed.update(previous.claimed)
 
+    def source(self, name: str) -> RuntimeEnd:
+        """Describe a certified register at this consumer, retaining known points."""
+        limits = self.prog._time_bounds.source(self.prog, name)
+        return RuntimeEnd(
+            name,
+            limits.minimum,
+            limits.maximum,
+            expression=source_expression(self.prog, name),
+        )
+
     def lookup(self, values: list[int], axes: dict[str, int]) -> RuntimeEnd:
         """Materialize exact nonnegative cycle points over native sweep axes.
 
@@ -207,7 +396,17 @@ class RuntimeMath(TimedMacro):
         proof.defined.add(register)
         proof.watch_signed(self.prog, register)
         self.operations.append(operation)
-        return RuntimeEnd(register, lower, upper)
+        expression = LinearTime(
+            terms=(
+                (
+                    CycleVariable(
+                        register, lower, upper, tuple(axes.items()), tuple(values)
+                    ),
+                    1,
+                ),
+            )
+        )
+        return RuntimeEnd(register, lower, upper, expression=expression)
 
     def _selected_axes(self, values: tuple[float | QickParam, ...]) -> dict[str, int]:
         spans = set().union(
@@ -300,7 +499,22 @@ class RuntimeMath(TimedMacro):
         proof.defined.add(register)
         proof.watch_signed(self.prog, register)
         self.operations.append(operation)
-        return RuntimeEnd(register, lower, upper)
+        candidates = tuple(
+            point_time(
+                selector,
+                axes,
+                np.asarray(points[start : start + count], dtype=np.int64).reshape(
+                    tuple(axes.values())
+                ),
+            )
+            for start in range(0, len(points), count)
+        )
+        return RuntimeEnd(
+            register,
+            lower,
+            upper,
+            expression=select_time(source_expression(self.prog, selector), candidates),
+        )
 
     def cycles(self, value: Time) -> RuntimeEnd:
         if isinstance(value, RuntimeEnd):
@@ -315,7 +529,8 @@ class RuntimeMath(TimedMacro):
         self.check(lower, upper)
         operand = self.t_regs[key]
         if isinstance(operand, str):
-            return RuntimeEnd(operand, lower, upper)
+            expression = parameter_expression(self.prog, rounded)
+            return RuntimeEnd(operand, lower, upper, expression=expression)
         if operand == 0:
             return RuntimeEnd("s0", 0, 0)
         register = self.allocate()
@@ -372,6 +587,17 @@ class RuntimeMath(TimedMacro):
         )
         covers: tuple[Time, ...] = ()
         deferred: list[DeferredCoverage] = []
+        expression = None
+        if operator in ("+", "-"):
+            rhs = (
+                runtime_expression(right)
+                if isinstance(right, RuntimeEnd)
+                else LinearTime(right)
+            )
+            expression = add_time(
+                runtime_expression(left),
+                rhs if operator == "+" else scale_time(rhs, -1),
+            )
         if operator == "+":
             right_minimum = right.minimum if isinstance(right, RuntimeEnd) else right
             if right_minimum >= 0:
@@ -382,7 +608,7 @@ class RuntimeMath(TimedMacro):
                         deferred.append(DeferredCoverage(proof.boundary, remaining))
                     else:
                         covers += (proof.boundary,)
-        return RuntimeEnd(register, *limits, covers, tuple(deferred))
+        return RuntimeEnd(register, *limits, covers, tuple(deferred), expression)
 
     @staticmethod
     def covers(end: Time, previous: Time) -> bool:
@@ -393,7 +619,12 @@ class RuntimeMath(TimedMacro):
         register = self.allocate()
         self.operations.append(WriteReg(dst=register, src=value.register))
         return RuntimeEnd(
-            register, value.minimum, value.maximum, value.covers, value.deferred
+            register,
+            value.minimum,
+            value.maximum,
+            value.covers,
+            value.deferred,
+            runtime_expression(value),
         )
 
     def add(self, a: Time, b: Time, *, target: str | None = None) -> RuntimeEnd:
@@ -536,7 +767,12 @@ class RuntimeMath(TimedMacro):
             *(b.deferred if isinstance(b, RuntimeEnd) else ()),
         )
         return RuntimeEnd(
-            result.register, result.minimum, result.maximum, covers, deferred
+            result.register,
+            result.minimum,
+            result.maximum,
+            covers,
+            deferred,
+            choose_time(runtime_expression(left), runtime_expression(right)),
         )
 
     def floor(self, end: Time, advance: Time) -> Time:

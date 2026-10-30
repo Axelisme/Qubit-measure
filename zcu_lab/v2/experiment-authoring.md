@@ -634,8 +634,10 @@ dmem 載入 pulse length 與實際 duration；const/flat-top 共用單一 wmem t
 編譯與 IR timing analysis 不需要取數，實際執行則需要相容的 acquisition backend。
 支援邊界見 [ADR-0083](../../docs/adr/0083-program-macros-and-timelines.md)。
 
-Runtime 查表的時間經 sync 後，shell 收尾可能採用過大的 native WAIT 上界，讓 CPU 多等。
-Builder 與手寫 program 都受此臨時限制。
+`sync` 依每個掃描點的 runtime 結尾推進 reference，shell 收尾 WAIT 使用編譯期常數。
+已知合法掃描點間的剩餘時間差距大於 0 時編譯發 warning，超過 `relax_delay` 時 raise ValueError。
+未知差距只警告上界，不以該上界拒絕編譯。
+兩種寫法共用 [ADR-0083 的收尾 WAIT 契約](../../docs/adr/0083-program-macros-and-timelines.md#收尾-wait-與-slack-護欄)。
 Scheduled timing analysis 不驗證 CPU 等待與跨 shot 實機排程。
 
 ### 用 TimelineBuilder 寫序列
