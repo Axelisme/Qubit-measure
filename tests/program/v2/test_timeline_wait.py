@@ -99,6 +99,27 @@ def shell_wait(prog: TimelineProgramV2) -> int:
     return int(str(wait["TIME"]).removeprefix("@"))
 
 
+@pytest.mark.filterwarnings("error")
+def test_fractional_native_adc_tail_never_rounds_below_physical_end():
+    class Program(TimelineProgramV2):
+        def _initialize(self, cfg):
+            self.declare_readout(0, length=51 / 307.2)
+
+        def _body(self, cfg):
+            self.trigger(ros=[0], t=0, width=1 / 430.08)
+            self.delay_timeline(42 / 430.08)
+
+    prog = Program(
+        make_mock_soccfg(0, 1), initial_delay=0, final_wait=0, relax_delay=0
+    )
+    (shot,) = shots(prog)
+    assert shot.body_end_cycle - shot.start_cycle == 42
+    # Independent ADC-clock oracle: 51 samples end at 71.4 tProc cycles.
+    physical_tail = 51 / 307.2 * 430.08 - 42
+    assert shell_wait(prog) >= physical_tail
+    assert shell_wait(prog) == math.ceil(physical_tail) == 30
+
+
 @pytest.mark.parametrize("mux", [False, True], ids=["single", "mux"])
 def test_uniform_t1_shell_wait_cancels_shared_readout_origin(mux):
     prog = t1_program(mux)
