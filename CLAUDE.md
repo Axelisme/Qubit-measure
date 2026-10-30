@@ -94,7 +94,7 @@ Worktree 只隔離檔案，不隔離 ZCU／儀器、GUI subprocess 或固定 por
 
 ### 4. 實作與測試
 
-有 UI 改動時，實作與 review 前讀 [UI 驗證](tests/README.md#ui-驗證)，依元件情境驗收。
+框架 UI 或 `zcu_lab/` 實驗定義有改動時，實作與 review 前讀 [UI 驗證](tests/README.md#ui-驗證)，依框架 ComponentDriver／實驗定義離線 probe 分支驗收。實驗定義的畫面改動也走 probe 分支；兩者都改時，兩種驗收都要做。
 
 優先使用內建工具。子字串替換先用 function 或 MCP 工具，其次用 Python script，不用 `sed`。
 
