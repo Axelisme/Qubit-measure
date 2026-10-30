@@ -128,9 +128,13 @@ Fluxdep 所需非均勻背景由自己的私有 renderer 擁有，不依賴 lab 
 - `zcu_tools` 不 import `zcu_lab`。定義由組合根注入，框架不反向載入使用者實驗。
 - tests 不依賴 `zcu_lab`，不 import、不綁定實驗流程或預設值。
 
-框架測試使用最小合成 workflow／adapter，不綁定實驗流程或預設值。實驗定義錯誤由 GUI 啟動或載入時回報，不另維護個別實驗測試。使用者於 2026-10-12 裁定：「我給你一個判斷方法，如果我刪除zcu_lab測試會報錯，那測試就是寫錯了。」
+框架測試使用最小合成 workflow／adapter，不綁定實驗流程或預設值。Tests 不 import `zcu_lab`，也不增加個別實驗的 durable 測試。使用者於 2026-10-12 裁定：「我給你一個判斷方法，如果我刪除zcu_lab測試會報錯，那測試就是寫錯了。」
 
 使用者於 2026-10-16 改定驗收方式：「算了，我認為不用真的測試ZCU_LAB移開後會不會出現錯誤。這中東西直接看有沒有import就好，偷偷做的在review也會被抓到，感覺是浪費時間測試」。Tests 不依賴 `zcu_lab` 的原則不變，由 review 檢查 import，必要時以 grep 輔助。不再暫移 `zcu_lab/` 跑 pytest，也不新增 `ZCU_LAB` 環境變數或 import hook。
+
+實驗定義（`zcu_lab`）的改動，包含畫面改動，使用 `experiment` 層的共用離線 probe 驗收。Probe 只依賴框架型別，依序執行公開 run → native 存檔 → 讀回 → analyze，將 live plot 與分析圖輸出成 PNG。Agent 看圖並記錄判讀，probe 腳本與結果留在 task scratch，不 commit 成 durable 測試。框架 UI 改動仍使用 ComponentDriver 情境。操作與完成條件由 [UI 驗證](../../tests/README.md#ui-驗證) 擁有。
+
+2026-10-30 使用者提出：「關於測試實驗定義的方式，用ui跑e2e有點太重量級了，我認為可以修改規則，透過建立context的方式測試run與analysis」。當時比較 A（只改驗收規則）、B（改規則並提供共用 probe）、C（再加 `zcu_lab` 自有的 durable 測試）。使用者回答：「B」。採用共用 probe，讓各實驗只需提供實驗與 cfg，不再各自組裝離線驗收流程；durable lab 測試不在此決定範圍。
 
 ### Lab 定義與組合根
 
