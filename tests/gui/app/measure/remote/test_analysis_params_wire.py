@@ -88,8 +88,12 @@ def test_remote_rpc_reports_constructor_constraint_as_invalid_params(qapp, tmp_p
     try:
         tab_id = fx.ctrl.tab_control.new_tab("bounded")
         fx.ctrl.run_analyze_control.start_run(tab_id)
-        qt_until(lambda: fx.ctrl.active_operation_count() == 0, label="bounded Run terminal")
-        rejected = call(sock, "tab.analyze", {"tab_id": tab_id, "updates": {"threshold": -1.0}})
+        qt_until(
+            lambda: fx.ctrl.active_operation_count() == 0, label="bounded Run terminal"
+        )
+        rejected = call(
+            sock, "tab.analyze", {"tab_id": tab_id, "updates": {"threshold": -1.0}}
+        )
         assert rejected["ok"] is False
         assert rejected["error"]["code"] == "invalid_params"
         assert "threshold" in rejected["error"]["message"]

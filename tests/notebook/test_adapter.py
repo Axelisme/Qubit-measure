@@ -7,9 +7,9 @@ from unittest.mock import Mock
 
 import numpy as np
 import pytest
+from matplotlib.figure import Figure
 from pydantic import Field
 from pydantic.dataclasses import dataclass as validated_dataclass
-from matplotlib.figure import Figure
 from zcu_tools.device import DeviceManager, FakeDevice
 from zcu_tools.experiment import AcquisitionEvidence, Experiment
 from zcu_tools.experiment.context import RunContext
