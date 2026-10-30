@@ -35,7 +35,7 @@ uv run --directory <worktree> --no-sync -- python tools/gate.py --base <lane 起
 ```
 
 `gate.py` 是日常入口。它依序執行：受影響檔案的 ruff import 排序與 formatter、
-`lint-imports`、lab script await guardrail、然後 ratchet。
+`lint-imports`、lab script await guardrail、measure MCP 文字預算、然後 ratchet。
 
 省略 `--base` 時回報現況，列出全樹的絕對數字：
 
@@ -152,7 +152,9 @@ Property 檢查包含巢狀 object、array、union 及 `$defs` 中的欄位。�
 stdout 的 JSON receipt 包含 `instructions_length`、`tool_count`、`overage_count`，以及
 每筆超額的 `item`、`length`、`limit`。stderr 同時列出每筆超額的 wire 路徑、字元數與上限。
 無超額回傳 0，有超額回傳 1；stdio 啟動、逾時或回覆解碼失敗回傳 2。
-Lab 宣告載入錯誤直接拋出。此檢查目前獨立執行，尚未接入 `gate.py`。
+Lab 宣告載入錯誤直接拋出。`gate.py --base <ref>` 每次都執行此檢查，沒有 Python
+檔案變更也不跳過。超額或執行失敗都使 gate 回傳 1。無 `--base` 的現況表以
+`mcp text budget` 列出 `overage_count`。現況模式仍回傳 0，不判定變更是否通過。
 
 `check_text_budget(instructions, tools, recipe_names)` 可直接 import，回傳
 `BudgetReport`，其 `exit_code` 與 `overages` 分別提供 pass/fail 和全部超額項目。
