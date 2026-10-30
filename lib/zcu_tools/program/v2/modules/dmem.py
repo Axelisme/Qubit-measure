@@ -338,6 +338,7 @@ class LoadWord(Module):
         """
         if self._is_empty:
             return
+        self._table = DeclaredTable(tuple(self.values))
         self.offset = prog.add_dmem(self._encoded_values)
         if not self.use_existed:
             prog.add_reg(self.val_reg)
@@ -357,6 +358,7 @@ class LoadWord(Module):
                 self.val_reg,
                 CycleBounds(min(self.values), max(self.values)),
                 dependency_ranges={self.idx_reg: CycleBounds(0, len(self.values) - 1)},
+                selection=TableSelection(self._table, self.val_reg, self.idx_reg),
             ):
                 self._emit_lookup(prog)
 
