@@ -49,6 +49,44 @@ def test_probe_roundtrips_result_and_exports_live_and_analysis_pngs(tmp_path: Pa
         environment.devices.close_all_devices()
 
 
+@pytest.mark.parametrize("fail_analysis", [False, True], ids=["success", "failure"])
+def test_probe_isolates_nested_caller_options_even_when_analysis_fails(
+    tmp_path: Path, fail_analysis: bool
+):
+    error = RuntimeError("analysis failed after mutating options")
+
+    class MutatingExperiment(ProbeExperiment):
+        def analyze(
+            self,
+            source: RunRecord[SavingCfg, SavingResult],
+            options: Any,
+            *,
+            plots: Plots,
+        ) -> dict[str, object]:
+            options["window"]["samples"].append(7)
+            if fail_analysis:
+                raise error
+            return {"sample_count": len(options["window"]["samples"])}
+
+    options = {"window": {"samples": [2, 4]}}
+    environment = white_noise(seed=17)
+    try:
+        report = probe(
+            MutatingExperiment(), SavingCfg(), environment, tmp_path, options=options
+        )
+        if fail_analysis:
+            assert report.failed_stage == "analyze"
+            assert report.exception is error
+            assert report.analysis_summary is None
+        else:
+            assert report.failed_stage is None
+            assert report.exception is None
+            assert report.analysis_summary == "{'sample_count': 3}"
+        assert options == {"window": {"samples": [2, 4]}}
+    finally:
+        environment.devices.close_all_devices()
+
+
 @pytest.mark.parametrize("cfg_format", ["json", "yaml"])
 def test_main_validates_cfg_and_produces_probe_report_in_process(
     tmp_path: Path, capsys: pytest.CaptureFixture[str], cfg_format: str
