@@ -125,26 +125,20 @@ def carried_config_program(*, phase=0, frequency=200, points=1, reps=1):
 
 
 @pytest.mark.parametrize("frequency, phase", [(200, 0), (100, 90)])
-def test_runtime_config_carries_across_scan_points(frequency, phase):
+def test_runtime_config_live_in_is_rejected_across_scan_points(frequency, phase):
     prog, env = carried_config_program(frequency=frequency, phase=phase, points=3)
-    result = request(prog, env)
-    reads = [result.materialize_point(i).readouts[0] for i in range(3)]
-    assert [r.frequency_mhz[0] for r in reads] == pytest.approx(
-        [100, frequency, frequency], abs=1e-5
-    )
-    assert [r.phase_deg[0] for r in reads] == [0, phase, phase]
+    with pytest.raises(ValueError, match="preopt.*cross-shot.*config"):
+        request(prog, env)
 
 
 @pytest.mark.parametrize("frequency, phase", [(200, 0), (100, 90)])
 def test_rep_carried_config_changing_readout_is_rejected(frequency, phase):
     prog, env = carried_config_program(frequency=frequency, phase=phase, reps=2)
-    with pytest.raises(
-        ValueError, match=r"reps.*observable.*carried.*(register|memory).*"
-    ):
+    with pytest.raises(ValueError, match=r"preopt.*cross-shot.*config"):
         request(prog, env)
 
 
-def test_later_equal_config_preserves_previous_scan_points_config():
+def test_delayed_equal_config_cannot_supply_a_previous_points_start():
     def initialize(p):
         p.add_loop("scan", 2)
 
@@ -153,21 +147,14 @@ def test_later_equal_config_preserves_previous_scan_points_config():
         p.pulse(0, "p", t=0)
 
     prog, env = program(body, initialize, reps=1, config_time=None)
-    result = request(prog, env)
-    reads = [result.materialize_point(i).readouts[0] for i in range(2)]
-    assert [read.frequency_mhz[0] for read in reads] == pytest.approx(
-        [100, 100], abs=1e-5
-    )
-    assert [read.phase_deg[0] for read in reads] == [0, 0]
+    with pytest.raises(ValueError, match="ADC 0.*no.*config.*start"):
+        request(prog, env)
 
 
-def test_rep_carried_config_without_output_change_is_accepted():
+def test_equal_rep_carried_config_is_rejected():
     prog, env = carried_config_program(frequency=100, reps=3, points=2)
-    result = request(prog, env)
-    assert result.reps == 3
-    assert result.materialize_point(1).readouts[0].frequency_mhz == pytest.approx(
-        (100,), abs=1e-5
-    )
+    with pytest.raises(ValueError, match="preopt.*cross-shot.*config"):
+        request(prog, env)
 
 
 def test_pending_config_fifo_carries_into_later_rep_window():
@@ -179,7 +166,7 @@ def test_pending_config_fifo_carries_into_later_rep_window():
         p.pulse(0, "p", t=0)
 
     prog, env = program(body, initialize, reps=4)
-    with pytest.raises(ValueError, match=r"ADC 0 read 0 window.*config effective"):
+    with pytest.raises(ValueError, match=r"preopt.*cross-shot.*pending config FIFO"):
         request(prog, env)
 
 

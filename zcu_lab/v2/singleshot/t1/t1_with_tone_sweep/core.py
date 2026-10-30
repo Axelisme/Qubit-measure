@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass, field
-from typing import Annotated, ClassVar
+from typing import Annotated, ClassVar, Literal
 
 import numpy as np
 from matplotlib.axes import Axes
@@ -207,18 +207,14 @@ class T1WithToneSweepExp(Experiment[T1WithToneSweepResult, T1WithToneSweepCfg]):
     def _resolve_outer_sweep(
         self, cfg: T1WithToneSweepCfg, soccfg
     ) -> tuple[str, NDArray[np.float64]]:
-        sweep_dict = cfg.model_dump(exclude_none=True)
-        sweep_keys = [name for name in sweep_dict if name != "length"]
-        if len(sweep_keys) != 1:
-            raise ValueError(
-                f"Expected exactly one sweep key besides 'length', got {sweep_keys!r}"
-            )
-        sweep_name = sweep_keys[0]
-        if sweep_name not in ("gain", "freq"):
-            raise ValueError(f"Unsupported sweep key: {sweep_name}")
-        x_sweep = sweep_dict[sweep_name]
-        if isinstance(x_sweep, dict):
-            x_sweep = SweepCfg.model_validate(x_sweep)
+        # The outer scan is the probe gain or frequency field, set exclusively.
+        sweep_name: Literal["gain", "freq"]
+        if cfg.gain is not None and cfg.freq is None:
+            sweep_name, x_sweep = "gain", cfg.gain
+        elif cfg.freq is not None and cfg.gain is None:
+            sweep_name, x_sweep = "freq", cfg.freq
+        else:
+            raise ValueError("Set exactly one outer sweep: gain or freq")
         xs = sweep2array(
             x_sweep,
             sweep_name,

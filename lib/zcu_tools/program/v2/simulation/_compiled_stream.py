@@ -70,6 +70,56 @@ class _BranchScope:
     active: bool = False
 
 
+def _loop_definitions(inst: MetaInst) -> None:
+    """Require resolved word definitions before consuming any loop metadata."""
+    try:
+        n = inst.info["n"]
+        if not isinstance(n, (int, str)) or isinstance(n, int) and n < 0:
+            raise ValueError("invalid loop count")
+        sweeps = inst.info["sweeps"]
+        if not isinstance(sweeps, dict):
+            raise ValueError("missing sweep definitions")
+        registers, waves = sweeps["registers"], sweeps["waves"]
+        if not isinstance(registers, dict) or not isinstance(waves, dict):
+            raise ValueError("invalid sweep definitions")
+        definitions = list(registers.values())
+        for address, fields in waves.items():
+            if (
+                not isinstance(address, int)
+                or address < 0
+                or not isinstance(fields, dict)
+            ):
+                raise ValueError("invalid waveform sweep address")
+            definitions.extend(fields.values())
+        for definition in definitions:
+            if not isinstance(definition, dict) or not all(
+                isinstance(definition[key], int) for key in ("start", "step")
+            ):
+                raise ValueError("invalid sweep start/step words")
+        _table_definitions(inst)
+    except KeyError as exc:
+        raise ValueError(f"missing loop definition key {exc}") from exc
+
+
+def _table_definitions(inst: MetaInst) -> None:
+    if inst.info.get("native") is not True:
+        return
+    tables = inst.info["tables"]
+    if not isinstance(tables, dict):
+        raise ValueError("invalid table definitions")
+    for address, fields in tables.items():
+        if not isinstance(address, int) or address < 0 or not isinstance(fields, dict):
+            raise ValueError("invalid table WMEM address")
+        if not fields or not all(
+            isinstance(field, int)
+            and 0 <= field < 6
+            and isinstance(offset, int)
+            and offset >= 0
+            for field, offset in fields.items()
+        ):
+            raise ValueError("invalid table fields/DMEM offsets")
+
+
 @dataclass
 class _Scopes:
     sources: list[str] = field(default_factory=list)
@@ -155,6 +205,7 @@ class _Scopes:
             counter = inst.info.get("counter_reg")
             if not isinstance(counter, str):
                 raise ValueError("missing loop counter register")
+            _loop_definitions(inst)
             self.loops.append(inst.name)
             self.parts[inst.name] = [index]
             self.counters[inst.name] = counter
