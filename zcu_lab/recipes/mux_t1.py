@@ -24,16 +24,16 @@ class MuxT1Inputs(RecipeInputs):
 
     participants: list[StrictInt] | None | Keep = Field(
         default=KEEP,
-        description="Unique original tone indices in acquisition order; omission keeps the Form selection; null clears it.",
+        description="Unique original tone indices in acquisition order.",
     )
 
     dual_exp: bool | None | Keep = Field(
         default=KEEP,
-        description="Fit two decay components instead of one. Omission keeps analysis settings; null is passed to the analysis owner.",
+        description="Fit two decay components instead of one. Analysis only; omitted keeps value, null passes to owner.",
     )
     skip: int | None | Keep = Field(
         default=KEEP,
-        description="Points to skip before fitting the decay. Omission keeps analysis settings; null is passed to the analysis owner.",
+        description="Points to skip before fitting the decay. Analysis only; omitted keeps value, null passes to owner.",
     )
 
 

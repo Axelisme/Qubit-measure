@@ -22,40 +22,40 @@ class T1Inputs(RecipeInputs):
 
     readout_ref: str | None | Keep = Field(
         KEEP,
-        description="Readout library key; omission retains the Form value, null clears/disables it.",
+        description="Readout library key.",
     )
     use_reset: str | None | Keep = Field(
         KEEP,
-        description="Preparation module option; omission retains the Form value, null clears/disables it.",
+        description="Preparation module option.",
     )
     pi_ref: str | None | Keep = Field(
         KEEP,
-        description="Calibrated pi-pulse library key; omission retains the Form value, null clears/disables it.",
+        description="Calibrated pi-pulse library key.",
     )
     max_delay_us: float | None | Keep = Field(
         KEEP,
-        description="Delay sweep stop in us; omission retains the Form value, null clears/disables it.",
+        description="Delay sweep stop in us.",
     )
     points: int | None | Keep = Field(
         KEEP,
-        description="Sweep sample count; omission retains the Form value, null clears/disables it.",
+        description="Sweep sample count.",
     )
     reps: int | None | Keep = Field(
         KEEP,
-        description="Acquisition repetition count; omission retains the Form value, null clears/disables it.",
+        description="Acquisition repetition count.",
     )
     rounds: int | None | Keep = Field(
         KEEP,
-        description="Averaging round count; omission retains the Form value, null clears/disables it.",
+        description="Averaging round count.",
     )
 
     dual_exp: bool | None | Keep = Field(
         KEEP,
-        description="Dual exponential; omission retains the analysis value; null is passed to the analysis owner. Analysis only.",
+        description="Dual exponential. Analysis only; omitted keeps value, null passes to owner.",
     )
     skip: int | None | Keep = Field(
         KEEP,
-        description="Skip leading points; omission retains the analysis value; null is passed to the analysis owner. Analysis only.",
+        description="Skip leading points. Analysis only; omitted keeps value, null passes to owner.",
     )
 
 

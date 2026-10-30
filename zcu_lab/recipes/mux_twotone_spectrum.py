@@ -34,24 +34,24 @@ class MuxTwotoneSpectrumInputs(RecipeInputs):
 
     participants: list[StrictInt] | None | Keep = Field(
         default=KEEP,
-        description="Unique original tone indices in acquisition order; omission keeps the Form selection; null clears it.",
+        description="Unique original tone indices in acquisition order.",
     )
     sweeps: list[ToneRangeInputs] | None | Keep = Field(
         default=KEEP,
-        description="Start/stop for every tone in original order, including nonparticipants; omission keeps ranges; null clears their bounds. No per-tone n.",
+        description="Start/stop for every tone in original order, including nonparticipants. No per-tone n.",
     )
     n: Annotated[int, Field(strict=True, gt=0)] | None | Keep = Field(
         default=KEEP,
-        description="Positive hardware scan point count shared by all tones; omission keeps Expts; null clears it.",
+        description="Positive hardware scan point count shared by all tones.",
     )
 
     model_type: Literal["lor", "sinc"] | None | Keep = Field(
         default=KEEP,
-        description="Frequency fit model: Lorentzian or sinc. Omission keeps analysis settings; null is passed to the analysis owner.",
+        description="Frequency fit model: Lorentzian or sinc. Analysis only; omitted keeps value, null passes to owner.",
     )
     plot_fit: bool | None | Keep = Field(
         default=KEEP,
-        description="Draw the fitted frequency curve. Omission keeps analysis settings; null is passed to the analysis owner.",
+        description="Draw the fitted frequency curve. Analysis only; omitted keeps value, null passes to owner.",
     )
 
 

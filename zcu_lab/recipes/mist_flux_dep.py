@@ -43,23 +43,23 @@ class MistFluxDepInputs(RecipeInputs):
 
     flux_half: float | None | Keep = Field(
         KEEP,
-        description="Half-flux device value; omission retains the analysis value; null is passed to the analysis owner. Analysis only.",
+        description="Half-flux device value. Analysis only; omitted keeps value, null passes to owner.",
     )
     flux_period: float | None | Keep = Field(
         KEEP,
-        description="Flux period (device units); omission retains the analysis value; null is passed to the analysis owner. Analysis only.",
+        description="Flux period (device units). Analysis only; omitted keeps value, null passes to owner.",
     )
     ac_coeff: float | None | Keep = Field(
         KEEP,
-        description="Photon coefficient; omission retains the analysis value; null is passed to the analysis owner. Analysis only.",
+        description="Photon coefficient. Analysis only; omitted keeps value, null passes to owner.",
     )
     secondary_xaxis: bool | None | Keep = Field(
         KEEP,
-        description="Secondary device-value axis; omission retains the analysis value; null is passed to the analysis owner. Analysis only.",
+        description="Secondary device-value axis. Analysis only; omitted keeps value, null passes to owner.",
     )
     auto_range: bool | None | Keep = Field(
         KEEP,
-        description="Full acquired range; omission retains the analysis value; null is passed to the analysis owner. Analysis only.",
+        description="Full acquired range. Analysis only; omitted keeps value, null passes to owner.",
     )
 
 

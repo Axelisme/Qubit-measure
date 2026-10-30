@@ -36,7 +36,7 @@ class MuxTwotoneFluxLocalInputs(MuxTwotoneFluxInputs):
 
     flux_sweeps: list[ToneRangeInputs] | None | Keep = Field(
         default=KEEP,
-        description="Native local DC start/stop for every tone in original order; omission keeps ranges; null clears their bounds. No per-tone point count.",
+        description="Native local DC start/stop for every tone in original order. No per-tone point count.",
     )
 
 

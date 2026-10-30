@@ -34,24 +34,24 @@ class MuxLenRabiInputs(RecipeInputs):
 
     participants: list[StrictInt] | None | Keep = Field(
         default=KEEP,
-        description="Unique original tone indices in acquisition order; omission keeps the Form selection; null clears it.",
+        description="Unique original tone indices in acquisition order.",
     )
     sweeps: list[ToneRangeInputs] | None | Keep = Field(
         default=KEEP,
-        description="Start/stop for every tone in original order, including nonparticipants; omission keeps ranges; null clears their bounds. No per-tone n.",
+        description="Start/stop for every tone in original order, including nonparticipants. No per-tone n.",
     )
     n: Annotated[int, Field(strict=True, gt=0)] | None | Keep = Field(
         default=KEEP,
-        description="Positive hardware scan point count shared by all tones; omission keeps Expts; null clears it.",
+        description="Positive hardware scan point count shared by all tones.",
     )
 
     decay: bool | None | Keep = Field(
         default=KEEP,
-        description="Fit a decaying oscillation envelope. Omission keeps analysis settings; null is passed to the analysis owner.",
+        description="Fit a decaying oscillation envelope. Analysis only; omitted keeps value, null passes to owner.",
     )
     fit_phase: bool | None | Keep = Field(
         default=KEEP,
-        description="Fit the oscillation phase offset. Omission keeps analysis settings; null is passed to the analysis owner.",
+        description="Fit the oscillation phase offset. Analysis only; omitted keeps value, null passes to owner.",
     )
 
 

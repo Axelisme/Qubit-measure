@@ -389,8 +389,11 @@ def test_json_overrides_preserve_expression_sweep_nested_objects_and_null(
 
     client = make_client(tmp_path, respond, recipes=(synthetic,))
     try:
-        execution = client.context.session.recipes.start(
-            client.context,
+        schema = client.tools["synthetic"]["inputSchema"]
+        edit_schema = schema["$defs"]["FieldEdit"]
+        assert edit_schema["required"] == ["path", "value"]
+        assert set(edit_schema["properties"]["value"]) == {"description"}
+        reply = client.call(
             "synthetic",
             {
                 "overrides": [
@@ -409,8 +412,7 @@ def test_json_overrides_preserve_expression_sweep_nested_objects_and_null(
                 ],
             },
         )
-        execution.join()
-        assert execution.snapshot().status == "completed", execution.snapshot()
+        assert reply.data["status"] == "completed", reply.data
     finally:
         client.context.session.close()
 

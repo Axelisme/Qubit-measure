@@ -11,7 +11,7 @@ from collections.abc import Callable, Coroutine, Mapping, Sequence
 from dataclasses import dataclass, field
 from inspect import Parameter, iscoroutinefunction, signature
 from math import isfinite
-from typing import TYPE_CHECKING, Literal, Protocol, get_args, get_type_hints
+from typing import TYPE_CHECKING, Annotated, Literal, Protocol, get_args, get_type_hints
 
 from pydantic import (
     BaseModel,
@@ -19,6 +19,7 @@ from pydantic import (
     Field,
     GetCoreSchemaHandler,
     GetJsonSchemaHandler,
+    WithJsonSchema,
     field_validator,
 )
 from pydantic.json_schema import JsonSchemaValue
@@ -158,7 +159,9 @@ class FieldEdit(BaseModel):
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
 
     path: str = Field(min_length=1, description="Nonempty dotted logical Form path.")
-    value: FormValue
+    value: Annotated[FormValue, WithJsonSchema({})] = Field(
+        description='Native Form value in declared units; {"expr": ...} denotes an expression.'
+    )
 
     @field_validator("path")
     @classmethod
@@ -181,7 +184,13 @@ class RecipeInputs(BaseModel):
     overrides defaults to an empty list and does not accept null.
     """
 
-    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+    model_config = ConfigDict(
+        extra="forbid",
+        allow_inf_nan=False,
+        json_schema_extra={
+            "description": "Optional Form inputs: omission keeps the Form value; null clears or disables it."
+        },
+    )
 
     target: str | None | Keep = Field(
         default_factory=lambda: KEEP,
@@ -193,7 +202,7 @@ class RecipeInputs(BaseModel):
     )
     overrides: list[FieldEdit] = Field(
         default_factory=list,
-        description="Ordered edits after experiment values; omitted means no edits, null values clear/disable Form fields.",
+        description="Ordered Form edits after experiment values; omitted means no edits.",
     )
 
     @classmethod
@@ -205,10 +214,6 @@ class RecipeInputs(BaseModel):
             if isinstance(info.default, Keep):
                 info.default = PydanticUndefined
                 info.default_factory = lambda: KEEP
-            if info.description is None or "omission" not in info.description:
-                info.description = (info.description or "") + (
-                    " Omission retains the Form value; null clears/disables nullable input."
-                )
         cls.model_rebuild(force=True)
 
 

@@ -25,15 +25,15 @@ class TwotoneSpectrumInputs(RecipeInputs):
 
     readout_ref: str | None | Keep = Field(
         KEEP,
-        description="Readout library key; omission retains the Form value; null clears/disables it. Sources are chosen by the Form.",
+        description="Readout library key. Sources are chosen by the Form.",
     )
     drive_ref: str | None | Keep = Field(
         KEEP,
-        description="Drive library key; omission retains the Form value; null clears/disables it. No pi calibration is required for this sweep.",
+        description="Drive library key. No pi calibration is required for this sweep.",
     )
     use_reset: str | None | Keep = Field(
         KEEP,
-        description="Reset module option; omission retains the Form selection, null disables it.",
+        description="Reset module option.",
     )
     center_mhz: float = Field(description="Sweep center in MHz.")
     span_mhz: float = Field(
@@ -42,32 +42,32 @@ class TwotoneSpectrumInputs(RecipeInputs):
     )
     gain: float | None | Keep = Field(
         KEEP,
-        description="Fixed pulse amplitude in native gain units; omission retains the Form value; null clears/disables it.",
+        description="Fixed pulse amplitude in native gain units.",
     )
     pulse_length_us: float | None | Keep = Field(
         KEEP,
-        description="Fixed drive pulse duration in us; omission retains the Form value; null clears/disables it.",
+        description="Fixed drive pulse duration in us.",
     )
     points: int = Field(
         ge=2,
-        description="Sweep sample count; omission retains the Form value; null clears/disables it.",
+        description="Sweep sample count.",
     )
     reps: int | None | Keep = Field(
         KEEP,
-        description="Acquisition repetition count; omission retains the Form value; null clears/disables it.",
+        description="Acquisition repetition count.",
     )
     rounds: int | None | Keep = Field(
         KEEP,
-        description="Averaging round count; omission retains the Form value; null clears/disables it.",
+        description="Averaging round count.",
     )
 
     model_type: Literal["lor", "sinc"] | None | Keep = Field(
         KEEP,
-        description="Model type; omission retains the analysis value; null is passed to the analysis owner. Analysis only.",
+        description="Model type. Analysis only; omitted keeps value, null passes to owner.",
     )
     plot_fit: bool | None | Keep = Field(
         KEEP,
-        description="Plot fit; omission retains the analysis value; null is passed to the analysis owner. Analysis only.",
+        description="Plot fit. Analysis only; omitted keeps value, null passes to owner.",
     )
 
 

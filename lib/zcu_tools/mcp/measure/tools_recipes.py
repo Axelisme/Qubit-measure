@@ -3,6 +3,8 @@
 from collections.abc import Sequence
 from functools import partial
 
+from pydantic.json_schema import GenerateJsonSchema
+
 from zcu_tools.mcp.core.reply import ToolReply
 from zcu_tools.mcp.core.stdio_server import ToolTable
 from zcu_tools.mcp.measure.execution_reply import project_execution
@@ -10,6 +12,15 @@ from zcu_tools.mcp.measure.recipe_api import RecipeDeclaration
 from zcu_tools.mcp.measure.tool_context import MeasureToolContext
 
 INITIAL_WAIT_SECONDS = 300.0
+
+
+class RecipeInputSchema(GenerateJsonSchema):
+    """Present recipe properties without generated titles; keep authored titles."""
+
+    def field_title_should_be_set(self, schema: object) -> bool:
+        """Ignore schema; leave property titles to explicit author declarations."""
+        del schema
+        return False
 
 
 def run_recipe(
@@ -88,9 +99,10 @@ def build_recipe_tools(
         **{
             definition.name: {
                 "handler": partial(run_recipe, context, definition),
-                "description": definition.description
-                + " Returns execution, status, authored report and runs. Failed recipes also return failure.phase (operation, result_read, image_save, figure_read or writeback_read) and human failure.reason without a traceback. Explicit questions require answer(execution, request_id, answer). Interactive analysis hands off pending(tab,stage,op). Use status(execution, detail=full) for captured owner evidence; waiting never cancels.",
-                "inputSchema": definition.inputs.model_json_schema(),
+                "description": definition.description,
+                "inputSchema": definition.inputs.model_json_schema(
+                    schema_generator=RecipeInputSchema
+                ),
             }
             for definition in recipes
         },

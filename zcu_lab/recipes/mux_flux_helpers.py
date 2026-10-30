@@ -24,23 +24,23 @@ class MuxFluxInputs(RecipeInputs):
 
     participants: list[StrictInt] | None | Keep = Field(
         default=KEEP,
-        description="Unique original tone indices in acquisition order; omission keeps the Form selection; null clears it.",
+        description="Unique original tone indices in acquisition order.",
     )
     flux_unit: Literal["A", "V", "native"] | None | Keep = Field(
         default=KEEP,
-        description="DC device unit label; omission keeps the Form unit; null clears it. No conversion.",
+        description="DC device unit label. No conversion.",
     )
     flux_n: Annotated[int, Field(strict=True, gt=0)] | None | Keep = Field(
         default=KEEP,
-        description="Shared DC point count; omission keeps Expts; null clears it. Local lines advance in a zip, not a product.",
+        description="Shared DC point count. Local lines advance in a zip, not a product.",
     )
     flux_half: dict[str, float] | None | Keep = Field(
         default=KEEP,
-        description="Initial half-flux line per participant Q in native DC units; omission or null sends per-Q reset commands to use Run capture.",
+        description="Half-flux seed per participant Q (native DC); omitted/null resets each Q to Run capture.",
     )
     flux_integer: dict[str, float] | None | Keep = Field(
         default=KEEP,
-        description="Initial integer-flux line per participant Q in native DC units; omission or null sends per-Q reset commands to use Run capture. Owner field: flux_int.",
+        description="Integer-flux seed per Q (native DC, flux_int); omitted/null resets each Q to Run capture.",
     )
 
 
@@ -49,11 +49,11 @@ class MuxOnetoneFluxInputs(MuxFluxInputs):
 
     df: ToneRangeInputs | None | Keep = Field(
         default=KEEP,
-        description="Common start/stop offsets in MHz added to each base tone frequency; omission keeps the Form range; null clears its bounds.",
+        description="Common start/stop offsets in MHz added to each base tone frequency.",
     )
     n: Annotated[int, Field(strict=True, gt=0)] | None | Keep = Field(
         default=KEEP,
-        description="Shared frequency point count, n → frequency.df Expts; omission keeps the Form count; null clears it.",
+        description="Shared frequency point count, n → frequency.df Expts.",
     )
 
 
@@ -62,11 +62,11 @@ class MuxTwotoneFluxInputs(MuxFluxInputs):
 
     sweeps: list[ToneRangeInputs] | None | Keep = Field(
         default=KEEP,
-        description="Absolute MHz start/stop for every original tone, including nonparticipants; omission keeps ranges; null clears their bounds. No per-tone n.",
+        description="Absolute MHz start/stop for every original tone, including nonparticipants. No per-tone n.",
     )
     n: Annotated[int, Field(strict=True, gt=0)] | None | Keep = Field(
         default=KEEP,
-        description="Shared hardware frequency count, n → frequency.expts; omission keeps Expts; null clears it.",
+        description="Shared hardware frequency count, n → frequency.expts.",
     )
 
 

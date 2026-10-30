@@ -22,44 +22,44 @@ class SingleshotGEInputs(RecipeInputs):
 
     readout_ref: str | None | Keep = Field(
         KEEP,
-        description="Readout library key; omission retains the Form value, null clears/disables it.",
+        description="Readout library key.",
     )
     pi_ref: str | None | Keep = Field(
         KEEP,
-        description="Calibrated pi-pulse library key; omission retains the Form value, null clears/disables it.",
+        description="Calibrated pi-pulse library key.",
     )
     use_reset: str | None | Keep = Field(
         KEEP,
-        description="Preparation module option; omission retains the Form value, null clears/disables it.",
+        description="Preparation module option.",
     )
     init_pulse_ref: str | None | Keep = Field(
         KEEP,
-        description="Preparation module option; omission retains the Form value, null clears/disables it.",
+        description="Preparation module option.",
     )
     shots: int | None | Keep = Field(
         KEEP,
-        description="Probe-off/on shot count; omission retains the Form value, null clears/disables it.",
+        description="Probe-off/on shot count.",
     )
 
     initial_state: Literal["ground", "excited"] | None | Keep = Field(
         KEEP,
-        description="Initial State; omission retains the analysis value; null is passed to the analysis owner. Analysis only.",
+        description="Initial State. Analysis only; omitted keeps value, null passes to owner.",
     )
     backend: Literal["pca", "center"] | None | Keep = Field(
         KEEP,
-        description="Backend; omission retains the analysis value; null is passed to the analysis owner. Analysis only.",
+        description="Backend. Analysis only; omitted keeps value, null passes to owner.",
     )
     logscale: bool | None | Keep = Field(
         KEEP,
-        description="Log Scale; omission retains the analysis value; null is passed to the analysis owner. Analysis only.",
+        description="Log Scale. Analysis only; omitted keeps value, null passes to owner.",
     )
     align_t1: bool | None | Keep = Field(
         KEEP,
-        description="Align T1; omission retains the analysis value; null is passed to the analysis owner. Analysis only.",
+        description="Align T1. Analysis only; omitted keeps value, null passes to owner.",
     )
     length_ratio: float | None | Keep = Field(
         KEEP,
-        description="Length Ratio; omission retains the analysis value; null is passed to the analysis owner. Analysis only.",
+        description="Length Ratio. Analysis only; omitted keeps value, null passes to owner.",
     )
 
 
