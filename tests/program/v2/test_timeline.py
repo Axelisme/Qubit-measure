@@ -60,6 +60,22 @@ def test_timeline_pulses_are_serial_but_native_pulse_stays_at_reference(timeline
     assert shot.end_cycle == 96
 
 
+def test_each_delay_ceil_and_author_sweep_uses_native_affine_steps():
+    def body(prog):
+        prog.delay_timeline(0.2 / 430.08)
+        prog.delay_timeline(0.2 / 430.08)
+        prog.delay_timeline(QickSweep1D("scan", 0.2 / 430.08, 3.8 / 430.08), tag="end")
+        prog.pulse(0, "p0", timeline="default", tag="pulse")
+
+    prog = _program(body, lambda p: p.add_loop("scan", 4))
+    # Two scalar operations add one tick each. Native sweep starts at zero
+    # and truncates its 1.2-tick step to one, giving 0,1,2,3.
+    assert [_waves(s) for s in _shots(prog)] == [[2], [3], [4], [5]]
+    assert prog.get_time_param("end", "t", as_array=True) * 430.08 == pytest.approx([2, 3, 4, 5])
+    assert prog.get_time_param("pulse", "t", as_array=True) * 430.08 == pytest.approx([2, 3, 4, 5])
+    assert prog.compile_datamem() is None
+
+
 def test_sync_rebases_default_and_other_timelines_and_shell_follows_body():
     def body(prog):
         prog.fork("default", into="other")
