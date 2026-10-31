@@ -213,14 +213,16 @@ class TimelineBuilder:
         self._record(replay)
 
     def branch(self, *, by: str) -> AbstractContextManager[BuilderBranchCases]:
-        """Record sweep-selected cases without equal-duration padding.
+        """Record indexed cases, merging static ends without moving reference.
 
         by names an existing sweep loop. The yielded handle's case(index) records
-        a zero-based point, in any order. Omitted points execute no actions. Each case closes only used/local ends;
-        local names expire at its exit and differing external ends stay
-        wait-only. Unknown selectors, invalid indices and timeline errors
-        propagate from the program at build. Calls after build raise ValueError.
-        Close this context before build; its handle expires on exit.
+        a zero-based point, in any order. Omitted points execute no actions.
+        Used timelines resume at the static maximum of their case ends.
+        Unjoined local fork ends merge into their incoming ancestor; explicit
+        joins keep their chosen destination. Local names expire at case exit.
+        Unknown selectors, invalid indices and timeline errors propagate from the
+        program at build. Calls after build raise ValueError. Close this context
+        before build; its handle expires on exit.
         """
         self._ensure_recording()
         return self._branch(by)

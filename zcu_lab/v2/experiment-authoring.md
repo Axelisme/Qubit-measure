@@ -779,8 +779,36 @@ builder.sync()
 `repeat` 的預設母 timeline 都遵守這條規則。
 `fork` 與 `join` 是普通方法，只有 `timeline`、`repeat` 與 `branch` 使用 `with`。
 `branch` 只有 `by` 參數，例如 `with builder.branch(by="scan") as cases:`。
+Case 用 `with cases.case(index):` 宣告指定 sweep 點，index 從 0 開始，可不按順序宣告。
+未宣告的點不發射動作，重複、非整數或超界 index 報 ValueError。
 Case 內仍對原 builder 呼叫 emit，省略名字時沿用當下 timeline 範圍。
-Case 只同步自身使用的 timeline 與局部 fork，不把不等長 case 補成共同長度。
+各 case 結尾可靜態表示時，branch 按 timeline 記下各 case 結尾的最大值，不推進共用 reference。
+後續可在同一 timeline 繼續發射。未使用的 timeline 不因結尾合併而延後。
+局部 fork 名字在 case 結束後失效。未顯式 join 的局部結尾沿 fork lineage 合回入口前祖先；
+已顯式 join 的結尾照 join 結果，不再另外合回祖先。
+
+兩顆 qubit 的準備 pulse 放在各自 fork 的 timeline，才能同時發射。
+以下 body 片段使用本次 build 預先建立的 `x180_f1`、`x180_f2` 與 `readout`。
+若有 reset 或 herald，先 emit 它們，再同步完成時間：
+
+```python
+builder.add_loop("prepared_f1", 2)  # 0 = g, 1 = e, outer
+builder.add_loop("prepared_f2", 2)  # 0 = g, 1 = e, inner
+# Emit optional reset and herald here.
+builder.sync()  # wait for herald/reset to finish before the branch-selected preparation
+builder.fork("default", into=["f1", "f2"])
+with builder.timeline("f1"):
+    with builder.branch(by="prepared_f1") as cases:
+        with cases.case(1):
+            builder.emit(x180_f1)
+with builder.timeline("f2"):
+    with builder.branch(by="prepared_f2") as cases:
+        with cases.case(1):
+            builder.emit(x180_f2)
+builder.join("f1", "f2", into="default")
+builder.emit(readout, tag="terminal")
+```
+
 Repeat 內只可使用母 timeline 及其局部 fork，不能操作另一條外部 timeline。
 
 `DelayAuto` module 是例外，它只可在範圍外且未指定 timeline 時 emit。
