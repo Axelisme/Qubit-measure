@@ -132,7 +132,9 @@ def test_repeat_table_index_keeps_range_and_writer_proof(invalid):
             WriteReg(dst="r", src=0).translate(prog)
 
     def body(prog):
-        with prog.repeat("r", "count", range_hint=(0, 3 if invalid == "index_range" else 2)):
+        with prog.repeat(
+            "r", "count", range_hint=(0, 3 if invalid == "index_range" else 2)
+        ):
             prog.emit(loader)
             prog.timeline_inc("loaded")
             if invalid == "counter_writer":
