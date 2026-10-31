@@ -1205,7 +1205,7 @@ def test_register_time_rejects_out_of_range_producer(value):
         program(body)
 
 
-def test_wait_only_source_rejects_register_delay_but_derived_target_works():
+def test_external_source_and_derived_target_allow_register_delay():
     def body(prog):
         prog.write_reg("duration", 1)
         prog.fork("default", into="external")
@@ -1218,8 +1218,8 @@ def test_wait_only_source_rejects_register_delay_but_derived_target_works():
         prog.delay_timeline("duration", timeline="derived")
         prog.delay_timeline("duration", timeline="external")
 
-    with pytest.raises(ValueError, match="external.*wait"):
-        program(body)
+    result = shots(program(body))
+    assert [s.body_end_cycle - s.start_cycle for s in result] == [101] * 3
 
 
 def test_unknown_register_delay_cannot_be_treated_as_zero():

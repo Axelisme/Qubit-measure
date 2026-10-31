@@ -806,7 +806,7 @@ def test_register_repeat_wait_consumers_use_actual_remaining_end(consumer):
 
 @pytest.mark.parametrize("operation", ["pulse", "trigger", "emit", "delay"])
 @pytest.mark.parametrize("derive", ["none", "join", "fork"])
-def test_register_repeat_wait_source_stays_restricted_after_deriving_schedule_point(
+def test_register_repeat_external_source_allows_placement_after_deriving_point(
     operation, derive
 ):
     from zcu_tools.program.v2.modules.delay import SoftDelay
@@ -837,8 +837,10 @@ def test_register_repeat_wait_source_stays_restricted_after_deriving_schedule_po
         else:
             prog.delay_timeline(0, timeline="external")
 
-    with pytest.raises(ValueError, match="external.*wait"):
-        _program(body, initialize)
+    (shot,) = _shots(_program(body, initialize))
+    assert _waves(shot) == ([100] if operation == "pulse" else [])
+    expected_end = {"pulse": 128, "trigger": 100, "emit": 105, "delay": 100}[operation]
+    assert (shot.body_end_cycle, shot.end_cycle) == (expected_end, expected_end)
 
 
 def _readout_register_initialize(prog: TimelineProgramV2):
@@ -870,7 +872,7 @@ def _send_config(
 @pytest.mark.parametrize("runtime_words", [False, True])
 @pytest.mark.parametrize("offset", [0, 5])
 @pytest.mark.parametrize("transition", ["none", "join", "fork", "partial-native"])
-def test_register_repeat_wait_source_rejects_config_placement(
+def test_register_repeat_external_source_allows_config_placement(
     runtime_words, offset, transition
 ):
     def body(prog):
@@ -883,8 +885,9 @@ def test_register_repeat_wait_source_rejects_config_placement(
             prog.delay(20 / 430.08)
         _send_config(prog, runtime_words, offset, "external")
 
-    with pytest.raises(ValueError, match="external.*wait"):
-        _program(body, _readout_register_initialize)
+    (shot,) = _shots(_program(body, _readout_register_initialize))
+    assert _waves(shot) == [100 + offset]
+    assert (shot.body_end_cycle, shot.end_cycle) == (100 + offset,) * 2
 
 
 @pytest.mark.parametrize("runtime_words", [False, True])
@@ -954,7 +957,7 @@ def test_register_repeat_zero_minimum_preserves_parent_scheduling(actual):
 
 
 @pytest.mark.parametrize("advance", [20, 69])
-def test_partial_native_advance_keeps_wait_only_source_restricted(advance):
+def test_partial_native_advance_preserves_actual_external_placement(advance):
     def body(prog):
         prog.fork("default", into="external")
         prog.delay_timeline(100 / 430.08, timeline="external")
@@ -964,9 +967,12 @@ def test_partial_native_advance_keeps_wait_only_source_restricted(advance):
             prog.sync()
         prog.delay(advance / 430.08)
         prog.delay_timeline(0, timeline="external")
+        prog.pulse(1, "p1", timeline="external")
 
-    with pytest.raises(ValueError, match="external.*wait"):
-        _program(body, _register_initialize)
+    (shot,) = _shots(_program(body, _register_initialize))
+    expected_start = max(100, 45 + advance)
+    assert _waves(shot) == [expected_start]
+    assert (shot.body_end_cycle, shot.end_cycle) == (expected_start + 28,) * 2
 
 
 @pytest.mark.parametrize("consumer", ["sync", "native", "repeat"])
