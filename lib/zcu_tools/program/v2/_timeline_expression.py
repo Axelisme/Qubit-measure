@@ -10,7 +10,6 @@ from numpy.typing import NDArray
 
 from ._timeline_axis import (
     CONST_AXIS,
-    Component,
     Components,
     CycleAxis,
     CycleLimits,
@@ -148,10 +147,6 @@ def evaluate_time(value: TimeExpression, axes: dict[str, int]) -> CycleValues | 
 
 def ceiled_time(value: TimeExpression) -> TimeExpression:
     """Ceil single-axis components exactly; cross-axis branches get fresh errors."""
-    if isinstance(value, TimeAbs):
-        # Runtime integer choices are already integral. Rational clock conversion
-        # only enters the linear producer paths below.
-        return value
     axes = expression_axes(value)
     if len(axes) <= 1:
         points = evaluate_time(value, axes)
@@ -164,16 +159,39 @@ def ceiled_time(value: TimeExpression) -> TimeExpression:
                 dtype=np.int64,
             ).reshape(points.shape)
             return point_time("ceil cycles", axes, rounded, reconstruction=value)
-    denominator = math.lcm(
-        Fraction(value.constant).denominator,
-        *(Fraction(c).denominator for _, c in value.terms),
-    )
+    if isinstance(value, TimeAbs) and _integer_recipe(value):
+        return value
+    denominator = _expression_denominator(value)
     if denominator == 1:
         return value
     error = cycle_axis(
         "ceil rounding", -math.ceil(Fraction(denominator, 10**10)), denominator - 1
     )
     return add_time(value, TimeVariable(terms=((error, Fraction(1, denominator)),)))
+
+
+def _integer_recipe(value: TimeExpression) -> bool:
+    if isinstance(value, TimeVariable):
+        return _expression_denominator(value) == 1
+    operation = value.runtime
+    return (
+        Fraction(operation.coefficient).denominator == 1
+        and all(_integer_recipe(operand) for operand in operation.operands)
+    )
+
+
+def _expression_denominator(value: TimeExpression) -> int:
+    linear, terms = _parts(value)
+    denominators = [
+        Fraction(amount).denominator
+        for _, component in linear.components
+        for amount in np.asarray(component, dtype=object).flat
+    ]
+    denominators.extend(
+        coefficient.denominator * _expression_denominator(argument)
+        for argument, coefficient in terms
+    )
+    return math.lcm(*denominators)
 
 
 def _ceil_fraction(value: Fraction) -> int:
