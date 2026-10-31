@@ -377,6 +377,36 @@ def test_unknown_branch_local_adc_tail_closes_at_runtime_with_constant_shell_wai
     assert wait["TIME"] == "@0"
 
 
+@pytest.mark.parametrize("synchronize", [False, True])
+def test_unknown_adc_tail_uses_actual_maximum_after_optional_sync(synchronize):
+    def initialize(prog):
+        prog.declare_readout(0, length=4 / 307.2)
+
+    def body(prog):
+        prog.write_reg_op("duration", "scan", "+", 40)
+        with prog.branch(by="scan", align_timeline=False) as branch:
+            for index in range(3):
+                with branch.case(index) as case_timeline:
+                    prog.fork(case_timeline, into="local")
+                    prog.delay_timeline("duration", timeline="local")
+                    prog.trigger([0], width=1 / 430.08, timeline="local")
+        prog.delay_timeline(47 / 430.08)
+        if synchronize:
+            prog.sync()
+
+    prog = program(body, reps=2, initialize=initialize)
+    result = shots(prog)
+    assert [
+        [e.cycle - s.start_cycle for e in s.events if e.kind == "data" and e.value]
+        for s in result
+    ] == [[40], [41], [42]] * 2
+    # Four ADC samples take 5.6 cycles: ceil gives 46/47/48, crossing 47.
+    assert [s.body_end_cycle - s.start_cycle for s in result] == [47, 47, 48] * 2
+    assert [s.end_cycle - s.start_cycle for s in result] == [47, 47, 48] * 2
+    (wait,) = [inst for inst in prog.prog_list if inst["CMD"] == "WAIT"]
+    assert wait["TIME"] == "@0"
+
+
 def test_hinted_branch_local_adc_tail_uses_constant_shell_wait_bound():
     class Program(TimelineProgramV2):
         def _initialize(self, cfg):
