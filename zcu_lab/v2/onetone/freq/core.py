@@ -16,9 +16,10 @@ from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     PulseReadout,
+    Reset,
     SweepCfg,
+    TimelineBuilder,
     TablePulseReadout,
-    sweep2param,
 )
 from zcu_tools.program.v2.utils import readout_freq_words
 
@@ -26,7 +27,6 @@ from zcu_lab.v2.onetone._shared import (
     FreqResult as FreqResult,
 )
 from zcu_lab.v2.onetone._shared import (
-    LinearFreqCfg,
     linear_freqs,
     spectrum_buffer,
 )
@@ -65,11 +65,18 @@ class HomophasalSamplingCfg(ConfigBase):
         return self.r_f / self.rf_w
 
 
-class FreqCfg(LinearFreqCfg):
+class FreqCfg(ConfigBase):
+
+
+
     sampling_mode: Annotated[SamplingMode, FieldMeta(label="Sampling mode")] = "linear"
     homophasal: Annotated[
         HomophasalSamplingCfg | None, FieldMeta(label="Homophasal")
     ] = None
+
+
+
+
 
     @model_validator(mode="after")
     def _validate_sampling_cfg(self) -> FreqCfg:
@@ -135,8 +142,8 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
 
     # freq stores Hz on disk -> scale=1e6 (disk = memory * 1e6)
     AXES_SPEC: ClassVar[AxesSpec[FreqResult, FreqCfg]] = AxesSpec(
-        axes=(AxesSpec.Axis("freqs", "Frequency", "Hz", scale=1e6),),
-        z=AxesSpec.Z("signals", "Signal", "a.u."),
+        axes=(AxesSpec.Axis("freqs", label="Frequency", unit="Hz", scale=1e6),),
+        z=AxesSpec.Z("signals", label="Signal", unit="a.u."),
         result_type=FreqResult,
         cfg_type=FreqCfg,
         cfg_schema_version="3.0",
@@ -161,9 +168,9 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
         """
         # 1. Prepare the frequency grid without changing the caller's cfg.
         cfg = deepcopy(config)
-        soc, soccfg = context.soc, context.soccfg
+        soccfg = context.soccfg
         if cfg.sampling_mode == "linear":
-            freqs = linear_freqs(cfg, context=context)
+            freqs = linear_freqs(cfg.freq, cfg.readout, context=context)
         elif cfg.sampling_mode == "homophasal":
             params = cfg.homophasal
             if params is None:
@@ -174,66 +181,49 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
         else:
             raise ValueError(f"Invalid sampling_mode: {cfg.sampling_mode}")
 
-        signals_buffer = spectrum_buffer(freqs, plots=context.plots)
+        if cfg.sampling_mode == "linear":
+            return self._run_linear(cfg, freqs, context=context)
+        return self._run_homophasal(cfg, freqs, context=context)
 
-        with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
-            cfg = sched.cfg
+    def _run_linear(
+        self, cfg: FreqCfg, freqs: NDArray[np.float64], *, context: RunContext,
+    ) -> FreqResult:
+        signals = spectrum_buffer(freqs, plots=context.plots)
+        with Schedule(None, signals, scope=context.scope) as sched:
+            builder = TimelineBuilder(
+                context.soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay,
+            )
+            freq = builder.add_sweep("freq", cfg.freq)
+            builder.emit(Reset("reset", cfg.reset))
+            builder.emit(PulseReadout("readout", cfg.readout, freq=freq))
+            sched.run_acquire(builder.build(), context.soc, rounds=cfg.rounds)
+        return FreqResult(freqs=freqs, signals=signals.array)
 
-            # 2. Reset, read out and sweep frequencies on the FPGA.
-            if cfg.sampling_mode == "linear":
-                freq_sweep = cfg.freq
-                cfg.readout.set_param("freq", sweep2param("freq", freq_sweep))
-                _ = (
-                    sched.prog_builder(
-                        soc,
-                        soccfg,
-                        reps=sched.cfg.reps,
-                        relax_delay=sched.cfg.relax_delay,
-                    )
-                    .add_reset("reset", cfg.reset)
-                    .add(PulseReadout("readout", cfg.readout))
-                    .declare_sweep("freq", freq_sweep)
-                    .build_and_acquire(rounds=cfg.rounds)
-                )
-            else:
-                # Homophasal sampling uses the calibrated DDS table.
-                cfg.readout.set_param("freq", float(freqs[0]))
-                readout_cfg = cfg.readout
-                freq_words, ro_freq_words = readout_freq_words(
-                    soccfg,
-                    freqs,
-                    gen_ch=readout_cfg.gen_ch,
-                    ro_ch=readout_cfg.ro_ch,
-                    mixer_freq=readout_cfg.mixer_freq,
-                    nqz=readout_cfg.nqz,
-                )
-
-                # Update DDS words after each point, wrapping for the next rep;
-                # the table readout preserves the native sweep's phase timing.
-                builder = (
-                    sched.prog_builder(
-                        soc,
-                        soccfg,
-                        reps=sched.cfg.reps,
-                        relax_delay=sched.cfg.relax_delay,
-                    )
-                    .add_reset("reset", cfg.reset)
-                    .add(
-                        TablePulseReadout(
-                            "readout",
-                            cfg.readout,
-                            idx_reg="freq",
-                            freq_words=freq_words,
-                            ro_freq_words=ro_freq_words,
-                        ),
-                    )
-                    .declare_sweep("freq", len(freqs))
-                )
-
-                # 3. Average reps/rounds and retain completed data on cancellation.
-                _ = builder.build_and_acquire(rounds=cfg.rounds)
-
-        return FreqResult(freqs=freqs, signals=signals_buffer.array)
+    def _run_homophasal(
+        self, cfg: FreqCfg, freqs: NDArray[np.float64], *, context: RunContext,
+    ) -> FreqResult:
+        signals = spectrum_buffer(freqs, plots=context.plots)
+        readout_cfg = cfg.readout.with_updates(freq=float(freqs[0]))
+        freq_words, ro_freq_words = readout_freq_words(
+            context.soccfg, freqs, gen_ch=readout_cfg.gen_ch,
+            ro_ch=readout_cfg.ro_ch, mixer_freq=readout_cfg.mixer_freq,
+            nqz=readout_cfg.nqz,
+        )
+        with Schedule(None, signals, scope=context.scope) as sched:
+            builder = TimelineBuilder(
+                context.soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay,
+            )
+            builder.add_loop("freq", len(freqs))
+            builder.emit(Reset("reset", cfg.reset))
+            # DDS table updates wrap for the next rep, preserving phase timing.
+            builder.emit(
+                TablePulseReadout(
+                    "readout", readout_cfg, idx_reg="freq",
+                    freq_words=freq_words, ro_freq_words=ro_freq_words,
+                ),
+            )
+            sched.run_acquire(builder.build(), context.soc, rounds=cfg.rounds)
+        return FreqResult(freqs=freqs, signals=signals.array)
 
     def analyze(
         self,
@@ -242,7 +232,7 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
         *,
         plots: Plots,
     ) -> FreqAnalysis:
-        fig, _ = plots.subplots("fit", figsize=(9, 8))
+        fig, _ = plots.subplots(num="fit", figsize=(9, 8))
         answer = fit_resonance(source.result.freqs, source.result.signals, options, fig)
         return FreqAnalysis(
             freq=answer.freq, fwhm=answer.fwhm, params=dict(answer.params)

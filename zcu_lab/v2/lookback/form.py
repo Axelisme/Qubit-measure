@@ -76,14 +76,6 @@ def make_form(ctx: FormContext) -> Form[LookbackCfg]:
     """
     return Form(
         LookbackCfg,
-        field_order=(
-            "reset",
-            "init_pulse",
-            "readout",
-            "rounds",
-            "relax_delay",
-            "initial_delay",
-        ),
         tree={
             "reset": Hidden(),
             "init_pulse": Hidden(),

@@ -11,9 +11,9 @@ from zcu_tools.experiment import AxesSpec, Experiment
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
-from zcu_tools.program.v2 import PulseReadout, Reset, SweepCfg, sweep2param
+from zcu_tools.program.v2 import PulseReadout, Reset, SweepCfg, TimelineBuilder
 
-from zcu_lab.v2.support import live_heatmap_with_line
+from zcu_lab.v2.support import live_heatmap, live_line
 from zcu_lab.v2.support.device import set_flux
 
 
@@ -29,22 +29,7 @@ def fluxdep_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
 
 
 class FluxDepCfg(ConfigBase):
-    reps: Annotated[
-        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
-    ] = 1
-    rounds: Annotated[
-        int,
-        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
-    ] = 1
-    relax_delay: Annotated[
-        float,
-        FieldMeta(
-            label="Relax delay",
-            unit="us",
-            decimals=3,
-            description="Relaxation delay after each repetition.",
-        ),
-    ] = 1.0
+
     reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
     readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
     flux_dev: Annotated[
@@ -61,6 +46,13 @@ class FluxDepCfg(ConfigBase):
             description="Working unit for the selected flux driver; no conversion.",
         ),
     ]
+    flux: Annotated[
+        SweepCfg,
+        FieldMeta(
+            label="Flux device value",
+            description="Flux device sweep in flux_unit coordinates.",
+        ),
+    ]
     freq: Annotated[
         SweepCfg,
         FieldMeta(
@@ -69,13 +61,22 @@ class FluxDepCfg(ConfigBase):
             description="Readout frequency sweep.",
         ),
     ]
-    flux: Annotated[
-        SweepCfg,
+    reps: Annotated[
+        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+    ] = 1
+    rounds: Annotated[
+        int,
+        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+    ] = 1
+    relax_delay: Annotated[
+        float,
         FieldMeta(
-            label="Flux device value",
-            description="Flux device sweep in flux_unit coordinates.",
+            label="Relax delay",
+            unit="us",
+            decimals=3,
+            description="Relaxation delay after each repetition.",
         ),
-    ]
+    ] = 1.0
 
 
 class FluxDepExp(Experiment[FluxDepResult, FluxDepCfg]):
@@ -83,10 +84,10 @@ class FluxDepExp(Experiment[FluxDepResult, FluxDepCfg]):
     # outer axis = flux device values (a.u.).
     AXES_SPEC: ClassVar[AxesSpec[FluxDepResult, FluxDepCfg]] = AxesSpec(
         axes=(
-            AxesSpec.Axis("freqs", "Frequency", "Hz", scale=1e6),
-            AxesSpec.Axis("values", "Flux device value", "a.u."),
+            AxesSpec.Axis("freqs", label="Frequency", unit="Hz", scale=1e6),
+            AxesSpec.Axis("values", label="Flux device value", unit="a.u."),
         ),
-        z=AxesSpec.Z("signals", "Signal", "a.u."),
+        z=AxesSpec.Z("signals", label="Signal", unit="a.u."),
         result_type=FluxDepResult,
         cfg_type=FluxDepCfg,
         tag="onetone/flux_dep",
@@ -139,26 +140,33 @@ class FluxDepExp(Experiment[FluxDepResult, FluxDepCfg]):
         )
 
         # Display magnitude, but retain complex IQ for each flux/frequency point.
-        viewer = live_heatmap_with_line(
-            context.plots,
-            "measurement",
-            "Flux device value",
-            "Frequency (MHz)",
-            line_axis=1,
-            num_lines=10,
-            uniform=False,
-        )
+        fig, (heat_ax, line_ax) = context.plots.subplots(1, 2, num="measurement")
+        heat_ax.set(xlabel="Flux device value", ylabel="Frequency (MHz)")
+        line_ax.set_xlabel("Frequency (MHz)")
+        heatmap = live_heatmap(heat_ax, uniform=False)
+        lines = live_line(line_ax, num_lines=10)
+        for artist in line_ax.lines[:-1]:
+            artist.set(marker="None", alpha=0.3, color="red")
+        line_ax.lines[-1].set(label="current line", marker=".", color="C0")
+
+        @context.plots.on_plot_thread
+        def update(data):
+            real = fluxdep_signal2real(data)
+            valid = np.flatnonzero(~np.all(np.isnan(real), axis=1))
+            current = int(valid[-1]) if valid.size else -1
+            history = np.full((10, len(freqs)), np.nan)
+            for offset in range(min(10, current + 1)):
+                history[-offset - 1] = real[current - offset]
+            artists = (*heatmap.set(dev_values, freqs, real), *lines.set(freqs, history))
+            return artists
+
+        fig.show()
         signals_buffer = SignalBuffer(
             (len(dev_values), len(freqs)),
-            on_update=lambda data: viewer.update(
-                dev_values,
-                freqs,
-                fluxdep_signal2real(data),
-            ),
+            on_update=update,
         )
-        with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
+        with Schedule(None, signals_buffer, scope=context.scope) as sched:
             for _, step in sched.scan("flux", dev_values.tolist()):
-                cfg = step.cfg
                 set_flux(
                     context.devices[cfg.flux_dev],
                     step.value,
@@ -167,21 +175,15 @@ class FluxDepExp(Experiment[FluxDepResult, FluxDepCfg]):
                     progress=False,
                 )
 
-                freq_sweep = cfg.freq
-                cfg.readout.set_param("freq", sweep2param("freq", freq_sweep))
-
                 # Reset at each frequency, then excite and measure the resonator.
-                _ = (
-                    step.prog_builder(
-                        soc,
-                        soccfg,
-                        reps=step.cfg.reps,
-                        relax_delay=step.cfg.relax_delay,
-                    )
-                    .add_reset("reset", cfg.reset)
-                    .add(PulseReadout("readout", cfg.readout))
-                    .declare_sweep("freq", freq_sweep)
-                    .build_and_acquire(**(acquire_kwargs or {}), rounds=cfg.rounds)
+                builder = TimelineBuilder(
+                    soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay,
+                )
+                freq = builder.add_sweep("freq", cfg.freq)
+                builder.emit(Reset("reset", cfg.reset))
+                builder.emit(PulseReadout("readout", cfg.readout, freq=freq))
+                step.run_acquire(
+                    builder.build(), soc, **(acquire_kwargs or {}), rounds=cfg.rounds,
                 )
 
         # Publish the final map without treating an acquisition error as success.

@@ -52,13 +52,5 @@ def make_form(ctx: FormContext) -> Form[RangeFindCfg]:
     """
     return Form(
         RangeFindCfg,
-        field_order=(
-            "reset",
-            "readout",
-            "freq",
-            "reps",
-            "rounds",
-            "relax_delay",
-        ),
         tree={**initial_spectrum_tree(ctx), "freq": Range(None, None, expts=301)},
     ).with_seed_metadata(pulse_readout_seed_metadata(gain=0.05))

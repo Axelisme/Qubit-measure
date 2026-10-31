@@ -12,12 +12,12 @@ from zcu_tools.cfg_model import ConfigBase, DeviceName, FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment, config
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
-from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
+from zcu_tools.experiment.v2.runtime import RunOptions, Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.experiment.v2.utils.snr import snr_as_signal
 from zcu_tools.experiment.v2.utils.tracker.moment import MomentTracker
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import Branch, Pulse, Readout, Reset, SweepCfg
+from zcu_tools.program.v2 import Pulse, Readout, Reset, SweepCfg, TimelineBuilder
 
 from zcu_lab.v2.support import live_line
 from zcu_lab.v2.support.device import set_rf_frequency
@@ -37,6 +37,26 @@ class FreqAnalysis:
 
 
 class FreqCfg(ConfigBase):
+
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    pi_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Pi pulse")]
+    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
+    jpa_rf_dev: Annotated[
+        DeviceName | None,
+        FieldMeta(
+            label="JPA RF device",
+            description="Connected RF device name; None skips RF control.",
+        ),
+    ] = ""
+    jpa_freq: Annotated[SweepCfg, FieldMeta(label="JPA pump freq", unit="MHz")]
+    skew_penalty: Annotated[
+        float,
+        FieldMeta(
+            label="Skew penalty",
+            decimals=3,
+            description="Nonnegative SNR skew penalty.",
+        ),
+    ] = Field(default=0.0, ge=0.0)
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
     ] = 1
@@ -53,42 +73,13 @@ class FreqCfg(ConfigBase):
             description="Relaxation delay after each repetition.",
         ),
     ] = 1.0
-    jpa_rf_dev: Annotated[
-        DeviceName | None,
-        FieldMeta(
-            label="JPA RF device",
-            description="Connected RF device name; None skips RF control.",
-        ),
-    ] = ""
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
-    pi_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Pi pulse")]
-    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
-    jpa_freq: Annotated[SweepCfg, FieldMeta(label="JPA pump freq", unit="MHz")]
-    skew_penalty: Annotated[
-        float,
-        FieldMeta(
-            label="Skew penalty",
-            decimals=3,
-            description="Nonnegative SNR skew penalty.",
-        ),
-    ] = Field(default=0.0, ge=0.0)
-    seed: Annotated[
-        int | None,
-        FieldMeta(
-            label="Scan-order seed",
-            description=(
-                "Fixes the shuffled order of interior frequencies; empty draws a new "
-                "order each run."
-            ),
-        ),
-    ] = None
 
 
 class FreqExp(Experiment[FreqResult, FreqCfg]):
     # jpa_freq stored as Hz on disk -> scale=1e6; signals are SNR (float64)
     AXES_SPEC: ClassVar[AxesSpec[FreqResult, FreqCfg]] = AxesSpec(
-        axes=(AxesSpec.Axis("freqs", "JPA Frequency", "Hz", scale=1e6),),
-        z=AxesSpec.Z("signals", "Signal", "a.u.", dtype=np.float64),
+        axes=(AxesSpec.Axis("freqs", label="JPA Frequency", unit="Hz", scale=1e6),),
+        z=AxesSpec.Z("signals", label="Signal", unit="a.u.", dtype=np.float64),
         result_type=FreqResult,
         cfg_type=FreqCfg,
         tag="jpa/freq",
@@ -118,53 +109,52 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
             ax.lines[0].set_marker("o")
 
         # Show independent points because neighboring samples need not be nearby.
-        viewer = live_line(
-            context.plots,
-            "measurement",
-            "JPA Frequency (MHz)",
-            "Signal Difference",
-            configure_axes=configure_axes,
-        )
+        fig, ax = context.plots.subplots(num="measurement")
+        ax.set(xlabel="JPA Frequency (MHz)", ylabel="Signal Difference")
+        line = live_line(ax)
+
+        @context.plots.on_plot_thread
+        def update(data):
+            return line.set(jpa_freqs, np.abs(data))
+
+        fig.show()
         signals_buffer = SignalBuffer(
             (len(jpa_freqs),),
             dtype=np.float64,
-            on_update=lambda data: viewer.update(jpa_freqs, np.abs(data)),
+            on_update=update,
         )
 
         # 2. Tune the external pump once per host-side scan point.
-        with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
+        with Schedule(None, signals_buffer, scope=context.scope) as sched:
             for jpa_freq, step in sched.scan("JPA Frequency", jpa_freqs.tolist()):
-                if step.cfg.jpa_rf_dev is not None:
+                if cfg.jpa_rf_dev is not None:
                     set_rf_frequency(
-                        context.devices[step.cfg.jpa_rf_dev], jpa_freq * 1e6
+                        context.devices[cfg.jpa_rf_dev], jpa_freq * 1e6
                     )
 
                 # 3. Compare reset-only and pi-prepared readout in one GE sweep.
                 tracker = MomentTracker()
-                _ = (
-                    step.prog_builder(
-                        soc,
-                        soccfg,
-                        reps=step.cfg.reps,
-                        relax_delay=step.cfg.relax_delay,
-                    )
-                    .add(
-                        Reset("reset", step.cfg.reset),
-                        Branch("ge", [], Pulse("pi_pulse", step.cfg.pi_pulse)),
-                        Readout("readout", step.cfg.readout),
-                    )
-                    .declare_sweep("ge", 2)
-                    .build_and_acquire(
-                        raw2signal_fn=lambda raw, tracker=tracker, skew_penalty=step.cfg.skew_penalty: (
-                            snr_as_signal(
-                                [tracker],
-                                ge_axis=1,
-                                skew_penalty=skew_penalty,
-                            )
+                builder = TimelineBuilder(
+                    soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay,
+                )
+                builder.add_loop("ge", 2)
+                builder.emit(Reset("reset", cfg.reset))
+                builder.sync()
+                # Empty g case has no pi-length padding; preserve each case's readout time.
+                with builder.branch(by="ge", align_timeline=False) as cases:
+                    with cases.case(1):
+                        builder.emit(Pulse("pi_pulse", cfg.pi_pulse))
+                builder.sync()
+                builder.emit(Readout("readout", cfg.readout))
+                prog = builder.build()
+                step.run_acquire(
+                    prog, soc,
+                    options=RunOptions(
+                        converter=lambda _raw, tracker=tracker: snr_as_signal(
+                            [tracker], ge_axis=1, skew_penalty=cfg.skew_penalty,
                         ),
-                        trackers=[tracker],
-                        rounds=cfg.rounds,
-                    )
+                    ),
+                    trackers=[tracker], rounds=cfg.rounds,
                 )
 
         # 4. Keep SNR paired with the actual acquisition-order coordinates.
@@ -191,7 +181,7 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
         max_idx = np.nanargmax(real_signals)
         best_jpa_freq = jpa_freqs[max_idx]
 
-        fig, ax = plots.subplots("fit", figsize=config.figsize)
+        fig, ax = plots.subplots(num="fit", figsize=config.figsize)
         ax.scatter(jpa_freqs, real_signals, label="signal difference", s=2)
         ax.axvline(
             best_jpa_freq,

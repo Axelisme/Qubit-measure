@@ -4,34 +4,37 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass, field
-from typing import ClassVar
+from typing import Annotated, ClassVar
 
 import numpy as np
-from matplotlib.figure import Figure
 from zcu_tools.analysis.dips import DipFinderOptions, find_spectrum_dips
+from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import PulseReadout, sweep2param
+from zcu_tools.program.v2 import PulseReadout, Reset, SweepCfg, TimelineBuilder
 
 from zcu_lab.v2.onetone._shared import (
     FreqResult as RangeFindResult,
 )
 from zcu_lab.v2.onetone._shared import (
-    LinearFreqCfg,
     linear_freqs,
     spectrum_buffer,
 )
 
 
-class RangeFindCfg(LinearFreqCfg):
-    """Pulse-readout acquisition for a wide absolute-frequency survey.
+class RangeFindCfg(ConfigBase):
+    """Pulse-readout acquisition for a wide absolute-frequency survey."""
 
-    Fields match onetone/freq linear. Dip names belong to Analyze options,
-    not to acquisition or the saved cfg.
-    """
+
+
+
+
+
+
+
 
 
 DEFAULT_MIN_SEPARATION_MHZ = 1.0
@@ -110,8 +113,8 @@ class RangeFindExp(Experiment[RangeFindResult, RangeFindCfg]):
     Options = RangeFindOptions
 
     AXES_SPEC: ClassVar[AxesSpec[RangeFindResult, RangeFindCfg]] = AxesSpec(
-        axes=(AxesSpec.Axis("freqs", "Frequency", "Hz", scale=1e6),),
-        z=AxesSpec.Z("signals", "Signal", "a.u."),
+        axes=(AxesSpec.Axis("freqs", label="Frequency", unit="Hz", scale=1e6),),
+        z=AxesSpec.Z("signals", label="Signal", unit="a.u."),
         result_type=RangeFindResult,
         cfg_type=RangeFindCfg,
         cfg_schema_version="3.0",
@@ -126,24 +129,17 @@ class RangeFindExp(Experiment[RangeFindResult, RangeFindCfg]):
         and complex IQ; failures propagate and cancellation preserves partial IQ.
         """
         cfg = deepcopy(config)
-        freqs = linear_freqs(cfg, context=context)
+        freqs = linear_freqs(cfg.freq, cfg.readout, context=context)
         signals = spectrum_buffer(freqs, plots=context.plots)
-        with Schedule(cfg, signals, scope=context.scope) as sched:
-            cfg = sched.cfg
-            freq_sweep = cfg.freq
-            cfg.readout.set_param("freq", sweep2param("freq", freq_sweep))
-            _ = (
-                sched.prog_builder(
-                    context.soc,
-                    context.soccfg,
-                    reps=sched.cfg.reps,
-                    relax_delay=sched.cfg.relax_delay,
-                )
-                .add_reset("reset", cfg.reset)
-                .add(PulseReadout("readout", cfg.readout))
-                .declare_sweep("freq", freq_sweep)
-                .build_and_acquire(rounds=cfg.rounds)
+        with Schedule(None, signals, scope=context.scope) as sched:
+            builder = TimelineBuilder(
+                context.soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay,
             )
+            freq = builder.add_sweep("freq", cfg.freq)
+            builder.emit(Reset("reset", cfg.reset))
+            builder.emit(PulseReadout("readout", cfg.readout, freq=freq))
+            sched.run_acquire(builder.build(), context.soc, rounds=cfg.rounds)
+
         return RangeFindResult(freqs=freqs, signals=signals.array)
 
     def analyze(
@@ -207,10 +203,10 @@ class RangeFindExp(Experiment[RangeFindResult, RangeFindCfg]):
             for position, dip in enumerate(sorted(selected, key=lambda dip: dip.freq))
         )
 
-        plots.subplots("fit", nrows=1, figsize=(9, 4.5))
+        fig, ax = plots.subplots(nrows=1, num="fit", figsize=(9, 4.5))
 
-        def draw(figure: Figure) -> None:
-            (ax,) = figure.axes
+        @plots.on_plot_thread
+        def draw(_):
             ax.plot(freqs, magnitude, label="Measured magnitude")
             for position, dip in enumerate(dips, start=1):
                 label = dip.name if dip.name is not None else f"Dip {position}"
@@ -236,7 +232,8 @@ class RangeFindExp(Experiment[RangeFindResult, RangeFindCfg]):
             ax.set_xlabel("Frequency (MHz)")
             ax.set_ylabel("Magnitude (a.u.)")
             ax.legend(loc="lower center", bbox_to_anchor=(0.5, 1.0), fontsize="small")
-            figure.tight_layout()
+            fig.tight_layout()
+            return (fig,)
 
-        plots.draw("fit", draw)
+        draw(None)
         return dips

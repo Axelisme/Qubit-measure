@@ -12,12 +12,12 @@ from zcu_tools.cfg_model import ConfigBase, DeviceName, FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment, config
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
-from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
+from zcu_tools.experiment.v2.runtime import RunOptions, Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.experiment.v2.utils.snr import snr_as_signal
 from zcu_tools.experiment.v2.utils.tracker.moment import MomentTracker
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import Branch, Pulse, Readout, Reset, SweepCfg
+from zcu_tools.program.v2 import Pulse, Readout, Reset, SweepCfg, TimelineBuilder
 
 from zcu_lab.v2.support import live_line
 from zcu_lab.v2.support.device import set_flux
@@ -37,6 +37,39 @@ class FluxAnalysis:
 
 
 class FluxCfg(ConfigBase):
+
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    pi_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Pi pulse")]
+    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
+    jpa_flux_dev: Annotated[
+        DeviceName | None,
+        FieldMeta(
+            label="JPA flux device",
+            description="Connected flux device name; None skips bias control.",
+        ),
+    ] = None
+    flux_unit: Annotated[
+        Literal["A", "V", "native"],
+        FieldMeta(
+            label="Flux unit",
+            description="Working unit for the selected flux driver; no conversion.",
+        ),
+    ]
+    jpa_flux: Annotated[
+        SweepCfg,
+        FieldMeta(
+            label="JPA flux device value",
+            description="Flux bounds in flux_unit coordinates.",
+        ),
+    ]
+    skew_penalty: Annotated[
+        float,
+        FieldMeta(
+            label="Skew penalty",
+            decimals=3,
+            description="Nonnegative SNR skew penalty.",
+        ),
+    ] = Field(default=0.0, ge=0.0)
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
     ] = 1
@@ -53,45 +86,13 @@ class FluxCfg(ConfigBase):
             description="Relaxation delay after each repetition.",
         ),
     ] = 1.0
-    jpa_flux_dev: Annotated[
-        DeviceName | None,
-        FieldMeta(
-            label="JPA flux device",
-            description="Connected flux device name; None skips bias control.",
-        ),
-    ] = None
-    flux_unit: Annotated[
-        Literal["A", "V", "native"],
-        FieldMeta(
-            label="Flux unit",
-            description="Working unit for the selected flux driver; no conversion.",
-        ),
-    ]
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
-    pi_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Pi pulse")]
-    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
-    jpa_flux: Annotated[
-        SweepCfg,
-        FieldMeta(
-            label="JPA flux device value",
-            description="Flux bounds in flux_unit coordinates.",
-        ),
-    ]
-    skew_penalty: Annotated[
-        float,
-        FieldMeta(
-            label="Skew penalty",
-            decimals=3,
-            description="Nonnegative SNR skew penalty.",
-        ),
-    ] = Field(default=0.0, ge=0.0)
 
 
 class FluxExp(Experiment[FluxResult, FluxCfg]):
     # jpa_flux stored as-is (a.u.) on disk -> scale=IDENTITY; signals are float64
     AXES_SPEC: ClassVar[AxesSpec[FluxResult, FluxCfg]] = AxesSpec(
-        axes=(AxesSpec.Axis("fluxes", "JPA Flux value", "a.u."),),
-        z=AxesSpec.Z("signals", "Signal", "a.u.", dtype=np.float64),
+        axes=(AxesSpec.Axis("fluxes", label="JPA Flux value", unit="a.u."),),
+        z=AxesSpec.Z("signals", label="Signal", unit="a.u.", dtype=np.float64),
         result_type=FluxResult,
         cfg_type=FluxCfg,
         tag="jpa/flux",
@@ -115,53 +116,56 @@ class FluxExp(Experiment[FluxResult, FluxCfg]):
         soc, soccfg = context.soc, context.soccfg
         jpa_fluxs = sweep2array(cfg.jpa_flux, allow_array=True)
 
-        viewer = live_line(
-            context.plots, "measurement", "JPA Flux value (a.u.)", "Signal Difference"
-        )
+        fig, ax = context.plots.subplots(num="measurement")
+        ax.set(xlabel="JPA Flux value (a.u.)", ylabel="Signal Difference")
+        line = live_line(ax)
+
+        @context.plots.on_plot_thread
+        def update(data):
+            return line.set(jpa_fluxs, np.abs(data))
+
+        fig.show()
         signals_buffer = SignalBuffer(
             (len(jpa_fluxs),),
             dtype=np.float64,
-            on_update=lambda data: viewer.update(jpa_fluxs, np.abs(data)),
+            on_update=update,
         )
 
         # 2. Move the external flux bias before each readout comparison.
-        with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
+        with Schedule(None, signals_buffer, scope=context.scope) as sched:
             for jpa_flux, step in sched.scan("JPA Flux value", jpa_fluxs.tolist()):
-                if step.cfg.jpa_flux_dev is not None:
+                if cfg.jpa_flux_dev is not None:
                     set_flux(
-                        context.devices[step.cfg.jpa_flux_dev],
+                        context.devices[cfg.jpa_flux_dev],
                         jpa_flux,
-                        unit=step.cfg.flux_unit,
+                        unit=cfg.flux_unit,
                         stop=context.scope.stop,
                         progress=False,
                     )
 
                 # 3. Compare reset-only and pi-prepared readout in one GE sweep.
                 tracker = MomentTracker()
-                _ = (
-                    step.prog_builder(
-                        soc,
-                        soccfg,
-                        reps=step.cfg.reps,
-                        relax_delay=step.cfg.relax_delay,
-                    )
-                    .add(
-                        Reset("reset", step.cfg.reset),
-                        Branch("ge", [], Pulse("pi_pulse", step.cfg.pi_pulse)),
-                        Readout("readout", step.cfg.readout),
-                    )
-                    .declare_sweep("ge", 2)
-                    .build_and_acquire(
-                        raw2signal_fn=lambda raw, tracker=tracker, skew_penalty=step.cfg.skew_penalty: (
-                            snr_as_signal(
-                                [tracker],
-                                ge_axis=1,
-                                skew_penalty=skew_penalty,
-                            )
+                builder = TimelineBuilder(
+                    soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay,
+                )
+                builder.add_loop("ge", 2)
+                builder.emit(Reset("reset", cfg.reset))
+                builder.sync()
+                # Empty g case has no pi-length padding; preserve each case's readout time.
+                with builder.branch(by="ge", align_timeline=False) as cases:
+                    with cases.case(1):
+                        builder.emit(Pulse("pi_pulse", cfg.pi_pulse))
+                builder.sync()
+                builder.emit(Readout("readout", cfg.readout))
+                prog = builder.build()
+                step.run_acquire(
+                    prog, soc,
+                    options=RunOptions(
+                        converter=lambda _raw, tracker=tracker: snr_as_signal(
+                            [tracker], ge_axis=1, skew_penalty=cfg.skew_penalty,
                         ),
-                        trackers=[tracker],
-                        rounds=cfg.rounds,
-                    )
+                    ),
+                    trackers=[tracker], rounds=cfg.rounds,
                 )
 
         # 4. Return the SNR trace in the requested flux-coordinate order.
@@ -189,7 +193,7 @@ class FluxExp(Experiment[FluxResult, FluxCfg]):
         max_idx = np.argmax(snrs)
         best_jpa_flux = jpa_fluxs[max_idx]
 
-        fig, ax = plots.subplots("fit", figsize=config.figsize)
+        fig, ax = plots.subplots(num="fit", figsize=config.figsize)
         ax.plot(jpa_fluxs, snrs, label="signal difference")
         ax.axvline(
             best_jpa_flux,

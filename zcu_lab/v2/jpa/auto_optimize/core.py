@@ -21,11 +21,11 @@ from zcu_tools.experiment import (
 )
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
-from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
+from zcu_tools.experiment.v2.runtime import RunOptions, Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.snr import snr_as_signal
 from zcu_tools.experiment.v2.utils.tracker.moment import MomentTracker
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import Branch, Pulse, Readout, Reset, SweepCfg
+from zcu_tools.program.v2 import Pulse, Readout, Reset, SweepCfg, TimelineBuilder
 
 from zcu_lab.v2.jpa.auto_optimize.optimizer import JPAOptimizer
 from zcu_lab.v2.support import live_scatter
@@ -53,29 +53,7 @@ class JPAOptimizeAnalysis:
 
 
 class JPAOptCfg(ConfigBase):
-    reps: Annotated[
-        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
-    ] = 1
-    rounds: Annotated[
-        int,
-        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
-    ] = 1
-    relax_delay: Annotated[
-        float,
-        FieldMeta(
-            label="Relax delay",
-            unit="us",
-            decimals=3,
-            description="Relaxation delay after each repetition.",
-        ),
-    ] = 1.0
-    flux_unit: Annotated[
-        Literal["A", "V", "native"],
-        FieldMeta(
-            label="Flux unit",
-            description="Working unit for the selected flux driver; no conversion.",
-        ),
-    ]
+
     reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
     pi_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Pi pulse")]
     readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
@@ -93,6 +71,13 @@ class JPAOptCfg(ConfigBase):
             description="Connected pump RF device driven at each optimizer point.",
         ),
     ] = ""
+    flux_unit: Annotated[
+        Literal["A", "V", "native"],
+        FieldMeta(
+            label="Flux unit",
+            description="Working unit for the selected flux driver; no conversion.",
+        ),
+    ]
     jpa_flux: Annotated[
         SweepCfg,
         FieldMeta(
@@ -131,6 +116,22 @@ class JPAOptCfg(ConfigBase):
             ),
         ),
     ] = None
+    reps: Annotated[
+        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+    ] = 1
+    rounds: Annotated[
+        int,
+        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+    ] = 1
+    relax_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Relax delay",
+            unit="us",
+            decimals=3,
+            description="Relaxation delay after each repetition.",
+        ),
+    ] = 1.0
 
 
 JPA_AUTO_FLUX_VARIABLE = "jpa_flux"
@@ -315,53 +316,51 @@ class AutoOptimizeExp(Experiment[JPAOptimizeResult, JPAOptCfg]):
         phases = np.zeros(num_points, dtype=np.int32)
         point_indices = np.arange(num_points, dtype=np.float64)
         # Show SNR versus iteration and each candidate parameter, colored by phase.
-        figure, initial_ax = context.plots.subplots("measurement", figsize=(8, 5))
+        figure, initial_ax = context.plots.subplots(num="measurement", figsize=(8, 5))
         initial_ax.remove()
         figure.suptitle("JPA Auto Optimization")
         grid = figure.add_gridspec(3, 2, width_ratios=[1.5, 1])
-        viewers = [
-            live_scatter(
-                context.plots,
-                "measurement",
-                label,
-                "SNR (a.u.)",
-                axes=figure.add_subplot(cell),
-            )
-            for label, cell in (
-                ("Iteration", grid[:, 0]),
-                ("JPA Flux value (a.u.)", grid[0, 1]),
-                ("JPA Frequency (MHz)", grid[1, 1]),
-                ("JPA Power (dBm)", grid[2, 1]),
-            )
+        axes = [
+            figure.add_subplot(cell)
+            for cell in (grid[:, 0], grid[0, 1], grid[1, 1], grid[2, 1])
         ]
+        for ax, label in zip(
+            axes,
+            ("Iteration", "JPA Flux value (a.u.)", "JPA Frequency (MHz)", "JPA Power (dBm)"),
+            strict=True,
+        ):
+            ax.set(xlabel=label, ylabel="SNR (a.u.)")
+        viewers = [live_scatter(ax) for ax in axes]
         current_index = 0
 
-        def plot_fn(data: NDArray[np.float64]) -> None:
-            idx = current_index
-            snrs = np.abs(data)
-            cur_flux, cur_freq, cur_gain = params[idx, :]
+        @context.plots.on_plot_thread
+        def update(payload):
+            data, sampled_params, sampled_phases, idx = payload
+            cur_flux, cur_freq, cur_gain = sampled_params[idx, :]
             title = (
-                f"Iteration {idx}, Phase {phases[idx]}, Flux: {cur_flux:.2g} (a.u.), "
+                f"Iteration {idx}, Phase {sampled_phases[idx]}, Flux: {cur_flux:.2g} (a.u.), "
                 f"Freq: {1e-3 * cur_freq:.4g} (GHz), Power: {cur_gain:.2g} (dBm)"
             )
-            colors = phases.astype(np.float64)
-            for viewer, xs, viewer_title in zip(
+            axes[0].set_title(title)
+            artists = []
+            for viewer, xs in zip(
                 viewers,
-                (point_indices, params[:, 0], params[:, 1], params[:, 2]),
-                (title, None, None, None),
+                (point_indices, sampled_params[:, 0], sampled_params[:, 1], sampled_params[:, 2]),
                 strict=True,
             ):
-                viewer.update(
-                    xs, snrs, colors=colors, title=viewer_title, refresh=False
-                )
-            context.plots.refresh("measurement")
+                artists.extend(viewer.set(xs, np.abs(data), colors=sampled_phases.astype(np.float64)))
+            return artists
 
+        def plot_fn(data: NDArray[np.float64]) -> None:
+            update((data, params, phases, current_index))
+
+        figure.show()
         signals_buffer = SignalBuffer(
             (num_points,), dtype=np.float64, on_update=plot_fn
         )
 
         # 2. Use the previous SNR to choose and apply the next pump/bias setting.
-        with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
+        with Schedule(None, signals_buffer, scope=context.scope) as sched:
             for idx, step in sched.scan("Iteration", range(num_points)):
                 current_index = idx
                 last_snr = None
@@ -378,41 +377,40 @@ class AutoOptimizeExp(Experiment[JPAOptimizeResult, JPAOptCfg]):
                 params[idx, :] = cur_params
                 phases[idx] = optimizer.phase
                 set_flux(
-                    context.devices[step.cfg.jpa_flux_dev],
+                    context.devices[cfg.jpa_flux_dev],
                     params[idx, 0],
-                    unit=step.cfg.flux_unit,
+                    unit=cfg.flux_unit,
                     stop=context.scope.stop,
                     progress=False,
                 )
                 set_rf_frequency(
-                    context.devices[step.cfg.jpa_rf_dev], 1e6 * params[idx, 1]
+                    context.devices[cfg.jpa_rf_dev], 1e6 * params[idx, 1]
                 )
-                set_rf_power(context.devices[step.cfg.jpa_rf_dev], params[idx, 2])
+                set_rf_power(context.devices[cfg.jpa_rf_dev], params[idx, 2])
 
                 # 3. Compare reset-only and pi-prepared readout for this candidate.
                 tracker = MomentTracker()
-                _ = (
-                    step.prog_builder(
-                        soc,
-                        soccfg,
-                        reps=step.cfg.reps,
-                        relax_delay=step.cfg.relax_delay,
-                    )
-                    .add(
-                        Reset("reset", step.cfg.reset),
-                        Branch("ge", [], Pulse("pi_pulse", step.cfg.pi_pulse)),
-                        Readout("readout", step.cfg.readout),
-                    )
-                    .declare_sweep("ge", 2)
-                    .build_and_acquire(
-                        raw2signal_fn=lambda raw, tracker=tracker: snr_as_signal(
-                            [tracker],
-                            ge_axis=1,
-                            skew_penalty=sched.cfg.skew_penalty,
+                builder = TimelineBuilder(
+                    soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay,
+                )
+                builder.add_loop("ge", 2)
+                builder.emit(Reset("reset", cfg.reset))
+                builder.sync()
+                # Empty g case has no pi-length padding; preserve each case's readout time.
+                with builder.branch(by="ge", align_timeline=False) as cases:
+                    with cases.case(1):
+                        builder.emit(Pulse("pi_pulse", cfg.pi_pulse))
+                builder.sync()
+                builder.emit(Readout("readout", cfg.readout))
+                prog = builder.build()
+                step.run_acquire(
+                    prog, soc,
+                    options=RunOptions(
+                        converter=lambda _raw, tracker=tracker: snr_as_signal(
+                            [tracker], ge_axis=1, skew_penalty=cfg.skew_penalty,
                         ),
-                        trackers=[tracker],
-                        rounds=cfg.rounds,
-                    )
+                    ),
+                    trackers=[tracker], rounds=cfg.rounds,
                 )
 
         # 4. Keep candidates, search phases, and measured SNR paired by iteration.
@@ -448,7 +446,7 @@ class AutoOptimizeExp(Experiment[JPAOptimizeResult, JPAOptCfg]):
         colors = phases
 
         figsize = (8, 5)
-        fig, initial_ax = plots.subplots("fit", figsize=figsize)
+        fig, initial_ax = plots.subplots(num="fit", figsize=figsize)
         initial_ax.remove()
         gs = fig.add_gridspec(3, 2, width_ratios=[1.5, 1])
 
@@ -503,7 +501,7 @@ class AutoOptimizeExp(Experiment[JPAOptimizeResult, JPAOptCfg]):
         max_snr = np.nanmax(snrs)
         alphas = snrs / max(max_snr, 1e-12)
 
-        _, ax = plots.subplots("sample_params", subplot_kw={"projection": "3d"})
+        _, ax = plots.subplots(num="sample_params", subplot_kw={"projection": "3d"})
         assert isinstance(ax, Axes3D)
 
         cmap = colormaps["viridis"]

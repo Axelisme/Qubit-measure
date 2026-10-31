@@ -101,13 +101,5 @@ def make_form(ctx: FormContext) -> Form[FreqInput]:
     """Build starting values and shape from the captured source availability."""
     return Form(
         FreqInput,
-        field_order=(
-            "reset",
-            "readout",
-            "freq",
-            "reps",
-            "rounds",
-            "relax_delay",
-        ),
         tree=initial_spectrum_tree(ctx),
     ).with_seed_metadata(pulse_readout_seed_metadata(gain=0.05))
