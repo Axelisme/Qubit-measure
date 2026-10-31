@@ -485,11 +485,13 @@ class RunService:
     def cancel_scope(
         self, operation_id: int, scope: str, *, expected: int | None = None
     ) -> CancelResult:
-        """Atomically match a scope in one active Run, without cancelling its owner.
+        """Atomically match and request a stop in one active Run.
 
         Call on the owner thread. A stale/non-Run handle returns scope not active.
         Scope syntax and sequence checks use the shared experiment resolver.
-        Accepted descendant requests set stop_requested without ending the run.
+        Accepted requests set stop_requested before signalling the core. Selecting
+        the run root also requests a cancelled terminal on normal core return;
+        descendant requests leave it finished. Core exceptions remain failed.
         The reason forwarded to the core is opaque frontend request text.
         """
         parse_cancel_scope(scope, expected)
@@ -497,14 +499,21 @@ class RunService:
         operation = self._active_operation
         if operation_id != self._active_token or signal is None or operation is None:
             return CancelResult(False, "scope not active", "")
-        # The worker cannot snapshot completion between signalling and recording intent.
+
+        def record_request(selected: Scope) -> None:
+            operation.stop_requested.set()
+            if selected is signal:
+                operation.cancel_requested.set()
+
+        # The worker snapshots metadata under the same lock. The resolver records
+        # intent for its selected scope before the core can observe the stop.
         with operation.request_lock:
-            result = signal.cancel(
-                scope, expected=expected, reason="GUI Run scope cancellation requested"
+            return signal.cancel(
+                scope,
+                expected=expected,
+                reason="GUI Run scope cancellation requested",
+                on_cancel=record_request,
             )
-            if result.cancelled:
-                operation.stop_requested.set()
-        return result
 
     def cancel_run(self) -> bool:
         """Request cancellation of the active run; best-effort.
