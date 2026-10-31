@@ -58,7 +58,8 @@ class Completed[T]:
 
     value is fn's payload; env.run uses the existing RunRecord with cfg/data.
     stop_requested is true if the operation token was stopped at completion or
-    the host accepted a cancel during this attempt, including a child selector.
+    the host cancelled this operation, an ancestor or a descendant during this
+    attempt. Cancelling an unrelated sibling does not mark this flag.
     It is not a scientific completeness check or a persistence guarantee. facts is the
     required OperationFacts for this delivered attempt, also written to journal
     and the enclosing commit. facts.stopped records the operation token's own

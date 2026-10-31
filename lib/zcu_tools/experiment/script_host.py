@@ -51,11 +51,12 @@ class CallResult[T]:
     """One executor completion with an immutable control snapshot.
 
     result is fn's unchanged payload. epoch is the attempt's starting epoch.
-    stop_requested records an operation stop bit or an accepted host cancel
-    during this attempt, including descendant selectors. It does not assess data
-    completeness. stopped snapshots only the operation token's own stop bit.
-    Both facts and pause have one lock
-    ordering; pause after this snapshot cannot retroactively mark completion.
+    stop_requested records the operation's stop bit or a host cancellation of
+    this operation, an ancestor or a descendant during this attempt. Unrelated
+    sibling cancellation does not mark it. It does not assess data completeness.
+    stopped snapshots only the operation token's own stop bit. Both facts and
+    pause have one lock ordering; pause after this snapshot cannot retroactively
+    mark completion.
     """
 
     result: T
