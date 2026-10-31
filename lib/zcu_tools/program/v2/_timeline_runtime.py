@@ -510,7 +510,10 @@ class RuntimeMath(TimedMacro):
         offset = self.prog.add_timing_dmem(values, owner=owner)
         register = self.allocate()
         index = sweep_table_index(
-            self.prog, axes, name=f"_timeline_index_{len(self.prog.reg_dict)}"
+            self.prog,
+            axes,
+            name=f"_timeline_index_{len(self.prog.reg_dict)}",
+            shared_indices=self.prog._timeline_book.sweep_indices,
         )
         operation = DmemLookup(
             dst=register, index=index, offset=offset, address=self.scratch(3)
