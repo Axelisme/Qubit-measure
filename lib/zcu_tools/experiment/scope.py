@@ -364,6 +364,7 @@ class Scope:
         """Atomically select and stop a live subtree, never its parent.
 
         Select by kind, kind#N, operation:name, or exact full leaf path.
+        A root kind selects the root even while it has live children.
         run aliases operation outside a run root. Multiple matches refuse with
         reason ambiguous and candidate full paths. Missing/stale selectors
         refuse without stopping anything. Invalid syntax raises ValueError.
@@ -382,7 +383,7 @@ class Scope:
             if self._closed:
                 return CancelResult(False, "scope not active", path)
             nodes = self._walk()
-            if "/" in label or label == self.path:
+            if "/" in label or (label == self.path and self.name is not None):
                 matches = [
                     node for node in nodes if node.path == label and not node._children
                 ]
