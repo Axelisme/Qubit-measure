@@ -665,6 +665,8 @@ Scheduled timing analysis 不驗證 CPU 等待與跨 shot 實機排程。
 `config` 提供 `length: SweepCfg`、`pi_pulse: Pulse.Cfg`、`readout: Readout.Cfg`，
 以及 `reps`、`rounds`、`relax_delay`、`acquire_retry` 與 `earlystop_snr`。
 `on_update` 是本次實驗的 live plot callback，接收完整 signal array。
+直接讀取傳入的 `config`，不經 `sched.cfg` 或 `step.cfg` 取得設定。
+需要修改 pulse cfg 時，在 `run()` 開頭自行 deepcopy，不修改 caller 的 config。
 
 ```python
 import numpy as np
@@ -674,24 +676,23 @@ from zcu_tools.program.v2 import Pulse, Readout, TimelineBuilder
 
 signals = SignalBuffer((config.length.expts,), on_update=on_update)
 with Schedule(config, signals, scope=context.scope) as sched:
-    cfg = sched.cfg
     builder = TimelineBuilder(
-        context.soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay,
+        context.soccfg, reps=config.reps, relax_delay=config.relax_delay,
     )
-    delay = builder.add_sweep("length", cfg.length)
+    delay = builder.add_sweep("length", config.length)
 
-    drive = Pulse("pi_pulse", cfg.pi_pulse)
-    readout = Readout("readout", cfg.readout)
+    drive = Pulse("pi_pulse", config.pi_pulse)
+    readout = Readout("readout", config.readout)
     builder.emit(drive)
     builder.delay_timeline(delay)
     builder.emit(readout, tag="terminal")
 
     prog = builder.build()
     sched.run_acquire(
-        prog, context.soc, rounds=cfg.rounds,
+        prog, context.soc, rounds=config.rounds,
         options=RunOptions(
-            retry=cfg.acquire_retry,
-            stop_condition=snr_checker(signals.at(), cfg.earlystop_snr, np.abs),
+            retry=config.acquire_retry,
+            stop_condition=snr_checker(signals.at(), config.earlystop_snr, np.abs),
         ),
     )
 ```

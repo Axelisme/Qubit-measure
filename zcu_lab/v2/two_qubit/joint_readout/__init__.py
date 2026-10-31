@@ -1,7 +1,6 @@
 """Core-only joint readout exports; GUI attachments are explicit."""
 
 from .core import (
-    GECenters,
     JointReadoutAnalysis,
     JointReadoutCfg,
     JointReadoutExp,
@@ -20,7 +19,6 @@ __all__ = [
     "JointReadoutHeraldedCfg",
     "JointReadoutHeraldedExp",
     "JointReadoutHeraldedResult",
-    "GECenters",
     "JointReadoutAnalysis",
     "JointReadoutCfg",
     "JointReadoutExp",
