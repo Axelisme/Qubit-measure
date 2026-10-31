@@ -31,6 +31,7 @@ def test_named_time_operations_keep_end_and_reference_separate(
     mock_soccfg, frontend, operation
 ):
     pulse = _pulse("drive")
+    gap = v2.Delay("gap", 100 / 430.08)
 
     def body(program: v2.TimelineBuilder | v2.TimelineProgramV2) -> None:
         program.emit(pulse)
@@ -39,11 +40,11 @@ def test_named_time_operations_keep_end_and_reference_separate(
             program.timeline_inc(100 / 430.08, timeline="work")
             program.emit(pulse, timeline="work", tag="after")
         else:
-            program.emit(v2.Delay("gap", 100 / 430.08), timeline="work")
+            program.emit(gap, timeline="work")
             program.delay_by_timeline(timeline="work")
             program.emit(pulse, tag="after")
 
-    prog = _compile_scoped(mock_soccfg, frontend, body, (pulse,))
+    prog = _compile_scoped(mock_soccfg, frontend, body, (pulse, gap))
     (shot,) = shots(prog)
     assert waves(shot) == [0, 143]
     assert (shot.body_end_cycle, shot.end_cycle) == (186, 186)
