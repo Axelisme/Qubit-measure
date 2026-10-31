@@ -47,7 +47,6 @@ from ._timeline_runtime import (
     optional_time_bounds,
     source_expression,
     step_time,
-    time_bounds,
 )
 from ._timeline_selected import TimelineSelectedPulse
 from ._timeline_state import (
