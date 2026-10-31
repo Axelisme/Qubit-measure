@@ -150,6 +150,16 @@ def expression_limits(value: TimeExpression) -> tuple[int | None, int | None]:
     paths preserve whatever one-sided bound their alternatives establish.
     """
     if isinstance(value, TimeChoice):
+        # Bound unknown inputs before the nonlinear range capture. This keeps
+        # shared loop coordinates when an independent feedback value survives.
+        # Each resulting linear path still uses source_limits, never a grid.
+        variables = time_variables(value)
+        if variables and all(v.minimum is not None and v.maximum is not None for v in variables) and any(
+            not v.producer.axes or v.producer.interval_points is not None for v in variables
+        ):
+            lower = choose_time(*(bound_unknowns(item, upper=False) for item in value.alternatives), maximum=value.maximum)
+            upper = choose_time(*(bound_unknowns(item, upper=True) for item in value.alternatives), maximum=value.maximum)
+            return expression_limits(lower)[0], expression_limits(upper)[1]
         limits = [expression_limits(item) for item in value.alternatives]
         select = max if value.maximum else min
         lows = [lo for lo, _ in limits if lo is not None]
