@@ -190,9 +190,28 @@ class DelayCfg(ConfigBase):
     acquire_retry: int = 0
 ```
 
-Module 建構時用 keyword 覆寫掃描量的介面**尚未提供，隨 D＋B1 提供**。
-未來例如 `Pulse("probe", cfg.probe, freq=freq)`，不修改 cfg，`None` 表示沿用 cfg。
-目前仍用既有 `set_param` 路徑，不把這個未來片段當成可執行 API。
+Module 建構時可用 keyword 覆寫數值或 sweep，不修改呼叫端 cfg。
+`None` 表示沿用 cfg。以下例子在 builder 上建立頻率 sweep，再交給 Pulse：
+
+```python
+from zcu_tools.program.v2 import SweepCfg, TimelineBuilder, make_mock_soccfg
+from zcu_tools.program.v2.modules import ConstWaveformCfg, Pulse
+
+pulse_cfg = Pulse.Cfg(
+    ch=0, nqz=1, freq=100.0, gain=0.2,
+    waveform=ConstWaveformCfg(length=0.1),
+)
+builder = TimelineBuilder(make_mock_soccfg())
+freq = builder.add_sweep("freq", SweepCfg(start=100.0, stop=102.0, step=1.0, expts=3))
+builder.emit(Pulse("probe", pulse_cfg, freq=freq))
+program = builder.build()
+```
+
+Pulse 支援 `freq`、`gain`、`phase`、`length`。PulseReadout 支援 `freq`、`gain`、`length`、`ro_length`。
+Reset 各變體的參數見 [module 建構參數表](../../lib/zcu_tools/program/v2/modules/README.md#constructor-overrides)。
+不支援 length sweep 的 waveform 仍會報錯，MuxReadout 不接受覆寫。
+接受 `ro_length` sweep 值不代表 QICK 支援 ADC window sweep，編譯會保留既有錯誤。
+既有 `set_param` 仍可用，但它會修改呼叫它的 cfg，應只用在自己持有的 cfg 副本上。
 
 ### 存檔軸用關鍵字，固定座標不塞進 Result
 
@@ -729,10 +748,10 @@ with Schedule(config, signals, scope=context.scope) as sched:
     )
 ```
 
-**每個 program 或 build 都要建立全新的 module 物件。** 不把已被 built program 使用的
-module 傳給另一個 program，也不從 cache 拿出 module 重新 build。
-目前宣告結果仍保存在 module 上，跨 program 共用會混入前一個 program 的資源狀態。
-將宣告狀態搬進 program 是後續工作。
+同一 module 物件可以傳給多個 `TimelineBuilder` 或原生 `TimelineProgramV2`。
+每個 program 依 module 物件身分保存宣告結果，重新 compile 時配置自己的資源。
+錄製或編譯後不要修改 module 或它的 cfg。不同掃描設定仍要建立不同 module。
+Legacy `ModularProgramV2` 仍在 module 上保存宣告狀態，不適用這個重用契約。
 同一 program 內可以多次 emit 同一物件，宣告只做一次，每次 emission 的時間與 tag 各自獨立。
 重複 readout 用不同 tag 區分，例如 `"herald"` 與 `"terminal"`。
 相同 ADC 或 register 不能由兩個不同物件重複占用，衝突會在編譯時指出兩個物件。
@@ -868,7 +887,7 @@ Mux 多 ADC 的 run 也要提供符合 slot 形狀的 converter，不能沿用�
 
 Decimated 範例不使用 sweep。`trace_buffer` 由 caller 按這次 rounded readout window
 預先配置，形狀須符合 backend 的 repetitions 與 samples 軸，並可提供 `on_update`。
-這次建構建立新的 readout，不重用前一個 built program 的物件。
+範例建立新的 readout，也可以重用設定不變的 module；宣告結果由各 program 持有。
 
 ```python
 trace_builder = TimelineBuilder(context.soccfg, reps=1)

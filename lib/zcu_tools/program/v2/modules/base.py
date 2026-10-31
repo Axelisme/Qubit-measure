@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import Sequence
+from collections.abc import Collection, Mapping, Sequence
 from typing import TYPE_CHECKING, Any, TypeAlias
 
 from pydantic import ValidationInfo
@@ -35,6 +35,33 @@ class AbsModuleCfg(ConfigBase, ABC):
     @abstractmethod
     def set_param(self, name: str, value: float | QickParam) -> None:
         """Update a sweep-tunable parameter by name."""
+
+
+def apply_cfg_overrides(
+    cfg: AbsModuleCfg | None,
+    overrides: Mapping[str, object],
+    allowed: Collection[str],
+) -> None:
+    """Apply allowed constructor knobs in place to an already detached cfg.
+
+    overrides maps knob names to scalar numbers, QICK sweeps or None, which
+    keeps cfg. allowed lists the selected constructor TypedDict keys. Pulse,
+    readout and reset constructors share this runtime guard because Python
+    callers can bypass their static keyword contract. Unknown keys, including
+    keys with None values, and nonnumeric values raise TypeError. Non-None
+    values with cfg=None raise ValueError. cfg.set_param errors propagate.
+    """
+    unknown = overrides.keys() - allowed
+    if unknown:
+        raise TypeError(f"Unknown override keywords: {sorted(unknown)}")
+    for knob, value in overrides.items():
+        if value is None:
+            continue
+        if cfg is None:
+            raise ValueError("overrides require a module cfg")
+        if not isinstance(value, (float, int, QickParam)):
+            raise TypeError(f"{knob}: override must be numeric, a QICK sweep or None")
+        cfg.set_param(knob, value)
 
 
 class Module(ABC):

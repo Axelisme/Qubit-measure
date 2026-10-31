@@ -91,10 +91,9 @@ class TimelineBuilder:
 
     soccfg is a QICK compile profile, not a connected SoC. reps counts shots;
     initial_delay and relax_delay are us. Module objects are borrowed by identity:
-    do not mutate them after recording. Use fresh module objects for each
-    program/build; repeated emits may reuse an object within that build only.
-    Cross-program reuse is currently unsupported because declaration mutates
-    module resource state, including waveform and pulse identifiers.
+    do not mutate them after recording. The same module may be recorded in
+    multiple builders or declared in native programs. Each compiled program
+    owns its declaration results, including waveform and pulse identifiers.
     Loops replay in call order, outside in; body actions replay in call order.
     build freezes this builder and compiles a TimelineProgramV2, with no
     acquisition or Schedule dependency. Later recording
