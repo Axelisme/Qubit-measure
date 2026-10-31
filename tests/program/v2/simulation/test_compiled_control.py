@@ -93,10 +93,11 @@ def test_native_branch_selects_each_lane_and_debits_runtime_external_timeline():
 def test_repeat_checks_actual_adc_reads_against_unchanged_static_layout(
     register_count, count
 ):
-    loader = LoadValue("counts", [count], "reps", "count")
+    loader = LoadValue("counts", [count, count], "shot", "count")
 
     def initialize(p):
         if register_count:
+            p.add_loop("shot", 2)
             p.declare(loader)
 
     def body(p):
@@ -115,6 +116,12 @@ def test_repeat_checks_actual_adc_reads_against_unchanged_static_layout(
     if count == 1:
         result = request(prog, env)
         assert len(result.readouts[0].trigger_us) == static == 1
+        if register_count:
+            assert result.point_dims == (2,)
+            assert [
+                len(result.materialize_point(i).readouts[0].trigger_us)
+                for i in range(2)
+            ] == [1, 1]
     elif count == 0 and not register_count:
         with pytest.raises(ValueError, match="ADC 0.*zero-read"):
             request(prog, env)
@@ -125,6 +132,28 @@ def test_repeat_checks_actual_adc_reads_against_unchanged_static_layout(
             request(prog, env)
     assert prog.ro_chs[0]["trigs"] == static
     assert env.soc.binding.last_request is None
+
+
+def test_register_repeat_rejects_point_dependent_adc_counts_against_static_layout():
+    loader = LoadValue("counts", [1, 3], "shot", "count")
+
+    def initialize(p):
+        p.add_loop("shot", 2)
+        p.declare(loader)
+
+    def body(p):
+        p.emit(loader)
+        with p.repeat("inner", "count", range_hint=(1, 3)):
+            p.trigger([0], t=0)
+            p.pulse(0, "p", timeline="default")
+
+    prog, env = program(body, initialize, trigger_time=None, reps=1)
+    static = prog.ro_chs[0]["trigs"]
+    with pytest.raises(ValueError, match=rf"ADC 0: static={static}, actual=3 reads"):
+        request(prog, env)
+    assert prog.ro_chs[0]["trigs"] == static
+    assert env.soc.binding.last_request is None
+    assert env.soc.binding.rounds == ()
 
 
 def test_runtime_timeline_max_floor_fork_join_and_sync_use_selected_table_values():

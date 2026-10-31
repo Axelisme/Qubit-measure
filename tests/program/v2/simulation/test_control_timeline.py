@@ -101,25 +101,29 @@ def test_scanwith_runtime_repeat_count_and_delay_cycles_are_local_to_each_acquir
     scan = ScanWith("scan", [0, 1, 2], val_reg="count").add_content(
         Repeat("repeat", "count", range_hint=(0, 2)).add_content(drive().build("drive"))
     )
-    wait = LoadValue("wait", [43], idx_reg="reps", val_reg="cycles")
+    wait = LoadValue("wait", [43, 86], idx_reg="shot", val_reg="cycles")
     modules = [
         wait,
         scan,
         DelayAuto("wait_loaded", t="cycles"),
         receiver().build("readout"),
     ]
-    request, prog, env = acquire(modules)
-    assert [e.source for e in request.materialize_point(0).events] == [
-        "drive",
-        "drive",
-        "drive",
-        "readout",
-    ]
-    assert request.materialize_point(0).events[-1].start_us == pytest.approx(
-        0.4, abs=0.015
-    )
+    request, prog, env = acquire(modules, sweep=[("shot", 2)])
+    assert request.point_dims == (2,)
+    for point, readout_start in enumerate([0.4, 0.5]):
+        timeline = request.materialize_point(point)
+        assert [e.source for e in timeline.events] == [
+            "drive",
+            "drive",
+            "drive",
+            "readout",
+        ]
+        assert timeline.events[-1].start_us == pytest.approx(readout_start, abs=0.015)
     prog.acquire(env.soc, progress=False)
-    assert request_of(env).materialize_point(0) == request.materialize_point(0)
+    for point in range(2):
+        assert request_of(env).materialize_point(point) == request.materialize_point(
+            point
+        )
 
 
 def test_tablelength_uses_selected_duration_and_sweeps_use_quantized_controls():
@@ -254,9 +258,7 @@ def test_table_readout_wrap_conflicting_with_initial_template_is_rejected():
     readout = TablePulseReadout(
         "readout", receiver(), idx_reg="axis", freq_words=gen, ro_freq_words=adc
     )
-    prog = ModularProgramV2(
-        env.soccfg, modules=[readout], sweep=[("axis", 2)], reps=1
-    )
+    prog = ModularProgramV2(env.soccfg, modules=[readout], sweep=[("axis", 2)], reps=1)
     with pytest.raises(
         ValueError, match=r"MetaInst.*preopt.*axis.*table wrap disagrees"
     ):
