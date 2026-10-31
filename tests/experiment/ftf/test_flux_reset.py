@@ -93,11 +93,11 @@ def reset_template(
     )
     end_us = end_ns / 1000
     flux = PulseEvent(4, ticks(0.0), ticks(end_us), 0.0, 0.0, -0.1, envelope)
-    readout_us = end_us + settling_ns / 1000
-    readout = PulseEvent(0, ticks(readout_us), ticks(0.008), 6000.0, 0.0, 0.1)
-    window = ReadoutWindow(0, 0, 4, TIME_BASE.period_ticks(1000.0), tick_tuple((readout_us,)), (6000.0,), (0.0,))
+    readout_ticks = ticks(end_us) + ticks(settling_ns / 1000)
+    readout = PulseEvent(0, readout_ticks, ticks(0.008), 6000.0, 0.0, 0.1)
+    window = ReadoutWindow(0, 0, 4, TIME_BASE.period_ticks(1000.0), (readout_ticks,), (6000.0,), (0.0,))
     return single_point_template(
-        PointTimeline((), (flux, readout), (window,), ticks(readout_us + 0.008), time_base=TIME_BASE)
+        PointTimeline((), (flux, readout), (window,), readout_ticks + ticks(0.008), time_base=TIME_BASE)
     )
 
 

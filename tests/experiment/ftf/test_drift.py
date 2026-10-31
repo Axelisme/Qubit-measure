@@ -3,6 +3,8 @@
 import json
 from contextlib import contextmanager
 from dataclasses import replace
+
+from tests.core._simulation import TIME_BASE
 from pathlib import Path
 
 import numpy as np
@@ -281,7 +283,7 @@ def test_builder_admission_and_rounds_share_one_physical_clock(tmp_path: Path):
         binding = env.soc.binding
         sequence = binding.begin()
         assert len(truth.read_text().splitlines()) == 3
-        acquire = replace(request(), sequence=sequence, relax_delay_us=125000)
+        acquire = replace(request(), sequence=sequence, relax_delay_ticks=TIME_BASE.ticks(125000))
         duration = 3 * 2 * (125000 + 0.030) / 1e6
         try:
             for index in range(2):

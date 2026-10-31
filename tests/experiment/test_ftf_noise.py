@@ -108,7 +108,7 @@ def test_public_integrated_thermal_mixture_matches_conditional_field_mean() -> N
             raise AssertionError("completed simulation retains its numeric request")
         plan = plan_template(
             settings, env.soc.binding.rounds[0].snapshot, request.templates[0]
-        , time_base=TIME_BASE)
+        , time_base=request.time_base)
         readout_event = plan.readouts[0].batch.events[0][0]
         response = ADC(plan.readouts[0].batch.model, rtol=1e-8, atol=1e-10).response(
             readout_event.pulses, readout_event.grids[0]

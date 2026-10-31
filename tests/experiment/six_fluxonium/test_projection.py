@@ -152,7 +152,7 @@ def test_two_cavity_heralds_keep_conditional_and_independent_shot_histories(
         )
         prepared = single.prepare(subrequest, single.snapshot())
         facts = single.model_facts(single.snapshot())
-        plan = single.plan_template(single.snapshot(), group.templates[0], time_base=TIME_BASE)
+        plan = single.plan_template(single.snapshot(), group.templates[0], time_base=request.time_base)
         rate = facts.readout.rates_per_ns
         elapsed = plan.batch.end_ns[0] - plan.projective_reads[0][0].start_ns
         transition = expm((rate - np.diag(rate.sum(axis=0))) * elapsed).T
@@ -294,7 +294,7 @@ def test_all_sources_preflight_second_adc_template_layout_before_any_evolution(
     conflict = replace(
         second,
         trigger_ticks=np.column_stack(
-            (second.trigger_ticks[:, 0], second.trigger_ticks[:, 0] + ticks(0.008))
+            (second.trigger_ticks[:, 0], second.trigger_ticks[:, 0] + 3 * request.time_base.period_ticks(384.0))
         ),
     )
     other = replace(

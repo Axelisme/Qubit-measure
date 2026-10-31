@@ -42,7 +42,7 @@ def isolated_carrier_plan(addressed_tone: int, phase_reference_us: float):
             base.readouts[0],
             channel=tone + 1,
             generator_channels=np.ones((2, 1), dtype=np.int64),
-            trigger_ticks=(start + 68750)[:, None]  # 22 tProc cycles.,
+            trigger_ticks=(start + 68750)[:, None],  # 22 tProc cycles.
             frequency_mhz=np.full((2, 1), frequency),
             phase_deg=np.full((2, 1), 11.0),
             samples=69,

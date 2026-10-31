@@ -256,12 +256,12 @@ def test_herald_only_observations_keep_an_unobserved_terminal_event() -> None:
             assert tuple(p.frequency_ghz for p in terminal.pulses) == (6.0, 6.08)
 
 
-@pytest.mark.parametrize("trigger", [0.007999999999, 0.0])
-def test_readout_rejects_trigger_without_an_incident_pulse_window(trigger) -> None:
+@pytest.mark.parametrize("trigger_ticks", [ticks(0.008) - 1, 0])
+def test_readout_rejects_trigger_without_an_incident_pulse_window(trigger_ticks) -> None:
     import zcu_tools.experiment.ftf as ftf
 
     base = template()
-    window = replace(base.readouts[0], trigger_ticks=tick_array(np.full((2, 1), trigger)))
+    window = replace(base.readouts[0], trigger_ticks=np.full((2, 1), trigger_ticks, dtype=np.int64))
     with pytest.raises(ValueError, match="trigger"):
         ftf.plan_template(settings(), snapshot(), replace(base, readouts=(window,)), time_base=TIME_BASE)
 

@@ -159,7 +159,7 @@ def test_preparation_rejects_equal_read_counts_with_different_template_events(
     window = herald.readouts[0]
     terminal_start = herald.events[-1].start_ticks[:, None]
     terminal_window = replace(
-        window, trigger_ticks=tick_array(terminal_start + np.array([[0.002, 0.004]]))
+        window, trigger_ticks=terminal_start + np.array([[1, 2]], dtype=np.int64) * window.sample_period_ticks
     )
     terminal = replace(herald, events=(herald.events[-1],), readouts=(terminal_window,))
     herald = replace(herald, points=np.array([1], dtype=np.int64))
@@ -187,7 +187,7 @@ def test_two_projections_retain_complete_markov_outcome_histories(
     prepared = source.prepare(request, source.snapshot())
     readout = prepared.raw.readout
     facts = source.model_facts(source.snapshot())
-    plan = source.plan_template(source.snapshot(), request.templates[0], time_base=TIME_BASE)
+    plan = source.plan_template(source.snapshot(), request.templates[0], time_base=request.time_base)
     rate = facts.readout.rates_per_ns
     generator = rate - np.diag(rate.sum(axis=0))
     times = [event.end_ns[0] for event in plan.read_events]
@@ -253,7 +253,7 @@ def test_terminal_only_raw_statistics_and_traces_match_unprojected_inputs(
     program.acquire(env.soc, progress=False)
     request = env.soc.binding.rounds[0].acquire
     prepared = source.prepare(request, source.snapshot())
-    content = source.plan_template(source.snapshot(), request.templates[0], time_base=TIME_BASE).readout
+    content = source.plan_template(source.snapshot(), request.templates[0], time_base=request.time_base).readout
     model = prepared.raw.batches[0][1].model
     local = local_readout_pulses(content.pulses, model.reference_frequency_ghz)
     baseline = adc.ReadoutBatch(
@@ -319,7 +319,7 @@ def test_program_herald_wait_terminal_matches_conditional_markov_prediction(
     facts = source.model_facts(source.snapshot())
     rate = facts.readout.rates_per_ns
     generator = rate - np.diag(rate.sum(axis=0))
-    plan = source.plan_template(source.snapshot(), request.acquire.templates[0], time_base=TIME_BASE)
+    plan = source.plan_template(source.snapshot(), request.acquire.templates[0], time_base=request.acquire.time_base)
     elapsed = plan.batch.end_ns[0] - plan.projective_reads[0][0].start_ns
     transition = expm(generator * elapsed).T
     weights = projection.weights.reshape(-1, 2)[0]

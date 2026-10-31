@@ -268,7 +268,7 @@ def test_mux_herald_postselection_retains_joint_ground_and_reports_outcomes(
         raw = prog.get_raw()
         assert raw is not None
         captured = env.soc.binding.rounds[0]
-        plan = plan_template(numeric, captured.snapshot, captured.acquire.templates[0], time_base=TIME_BASE)
+        plan = plan_template(numeric, captured.snapshot, captured.acquire.templates[0], time_base=captured.acquire.time_base)
         labels = []
         for read in range(2):
             observed = np.concatenate([shots[:, read] for shots in raw], axis=-1)

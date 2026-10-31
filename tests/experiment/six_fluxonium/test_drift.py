@@ -122,7 +122,7 @@ def routed_request(binding, sequence):
         point_names=("sweep",),
         reps=4,
         templates=(compiled,),
-        relax_delay_us=125000,
+        relax_delay_ticks=TIME_BASE.ticks(125000),
      time_base=TIME_BASE)
 
 

@@ -1,6 +1,6 @@
 """Source-owned noiseless preparations, fresh per-acquire streams and bounded reuse."""
 
-from tests.core._simulation import TIME_BASE, tick_array
+from tests.core._simulation import TIME_BASE, tick_array, ticks
 from contextlib import ExitStack
 from dataclasses import replace
 
