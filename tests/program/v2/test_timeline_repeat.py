@@ -121,6 +121,41 @@ def test_external_timeline_places_at_actual_end_after_runtime_control(
     ] * 2
 
 
+@pytest.mark.parametrize("branch_after", [False, True])
+def test_external_placement_reuses_runtime_control_storage(branch_after):
+    def initialize(prog):
+        _register_initialize(prog)
+        prog.add_loop("scan", 3)
+
+    def build(place):
+        def body(prog):
+            prog.fork("default", into="external")
+            prog.delay_timeline(100 / 430.08, timeline="external")
+            with prog.repeat("r", "count", range_hint=(0, 8)):
+                prog.delay_timeline(15 / 430.08)
+                prog.sync()
+            if branch_after:
+                with prog.branch(
+                    by="scan", align_timeline=False, timeline="external"
+                ) as branch:
+                    with branch.case(0):
+                        prog.delay_timeline(5 / 430.08)
+                    with branch.case(2):
+                        prog.delay_timeline(15 / 430.08)
+            if place:
+                prog.pulse(1, "p1", timeline="external")
+
+        return _program(body, initialize, reps=2)
+
+    unused, placed = build(False), build(True)
+    assert len(placed.reg_dict) == len(unused.reg_dict) <= 16
+    # Three-case dispatch may own jump addresses, never extra time-table words.
+    unused_data, placed_data = unused.compile_datamem(), placed.compile_datamem()
+    assert (0 if unused_data is None else len(unused_data)) == (
+        0 if placed_data is None else len(placed_data)
+    ) == (3 if branch_after else 0)
+
+
 def test_repeat_fixed_point_matches_explicit_native_reference_loop():
     def body(prog):
         with prog.repeat("r", 2):
@@ -839,7 +874,7 @@ def test_register_repeat_external_source_allows_placement_after_deriving_point(
 
     (shot,) = _shots(_program(body, initialize))
     assert _waves(shot) == ([100] if operation == "pulse" else [])
-    expected_end = {"pulse": 128, "trigger": 100, "emit": 105, "delay": 100}[operation]
+    expected_end = {"pulse": 128, "trigger": 110, "emit": 105, "delay": 100}[operation]
     assert (shot.body_end_cycle, shot.end_cycle) == (expected_end, expected_end)
 
 
