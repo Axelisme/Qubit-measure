@@ -35,7 +35,9 @@ from tests.program.v2._mux_support import native_mux
 ProgramKind = Literal["native", "builder", "legacy"]
 
 
-def _module_with_length(cfg: PulseCfg | PulseReadoutCfg | PulseResetCfg, family: str, length: QickParam):
+def _module_with_length(
+    cfg: PulseCfg | PulseReadoutCfg | PulseResetCfg, family: str, length: QickParam
+):
     if isinstance(cfg, PulseCfg):
         return Pulse("module", cfg, length=length)
     if isinstance(cfg, PulseReadoutCfg):
