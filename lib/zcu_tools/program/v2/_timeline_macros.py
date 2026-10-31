@@ -11,6 +11,7 @@ from dataclasses import dataclass, replace
 from fractions import Fraction
 
 from qick.asm_v2 import (
+    AsmInst,
     CondJump,
     Delay,
     Jump,

@@ -184,6 +184,7 @@ class RuntimeEnd:
         covers: tuple["Time", ...] = (),
         deferred: tuple[DeferredCoverage, ...] = (),
         expression: TimeExpression | None = None,
+        *,
         offset: int = 0,
     ) -> None:
         # Endpoints seed a fresh producer only. Existing algebra is authoritative.
@@ -1302,6 +1303,30 @@ class RuntimeMath(TimedMacro):
     def scratch(self, index: int) -> str:
         return self.prog.add_reg(f"_timeline_tmp_{index}", allow_reuse=True)
 
+    def _operation_storage(
+        self,
+        left: RuntimeEnd,
+        operator: str,
+        right: RuntimeEnd | int,
+        target: str | None,
+    ) -> tuple[str, int]:
+        """Lower operand storage, retaining stable register-plus-literal aliases."""
+        literal = operator in ("+", "-") and isinstance(right, int)
+        if literal and operator == "+" and target is None and left.register != "s_out_time":
+            return left.register, left.offset + right
+        if not literal:
+            left = self.cycles(left)
+        if isinstance(right, RuntimeEnd):
+            right = self.cycles(right)
+        rhs = right.register if isinstance(right, RuntimeEnd) else right
+        if literal:
+            rhs = right + left.offset if operator == "+" else right - left.offset
+        register = self.allocate() if target is None else target
+        self.operations.append(
+            WriteRegOp(dst=register, lhs=left.register, op=operator, rhs=rhs)
+        )
+        return register, 0
+
     def op(
         self,
         left: RuntimeEnd,
@@ -1310,25 +1335,8 @@ class RuntimeMath(TimedMacro):
         *,
         limits: tuple[int | None, int | None],
         target: str | None = None,
-        defer_offset: bool = False,
     ) -> RuntimeEnd:
-        if defer_offset and operator == "+" and isinstance(right, int):
-            register = left.register
-            offset = left.offset + right
-        else:
-            literal_offset = left.offset if operator in ("+", "-") and isinstance(right, int) else 0
-            if not literal_offset:
-                left = self.cycles(left)
-            if isinstance(right, RuntimeEnd):
-                right = self.cycles(right)
-            rhs = right.register if isinstance(right, RuntimeEnd) else right
-            if isinstance(rhs, int):
-                rhs += literal_offset if operator == "+" else -literal_offset
-            register = self.allocate() if target is None else target
-            offset = 0
-            self.operations.append(
-                WriteRegOp(dst=register, lhs=left.register, op=operator, rhs=rhs)
-            )
+        register, offset = self._operation_storage(left, operator, right, target)
         covers: tuple[Time, ...] = ()
         deferred: list[DeferredCoverage] = []
         expression = None
@@ -1408,7 +1416,6 @@ class RuntimeMath(TimedMacro):
                 amount,
                 limits=self._sum_limits(left, amount),
                 target=target,
-                defer_offset=target is None and left.register != "s_out_time",
             )
         right = self.cycles(b)
         if right.minimum == right.maximum == 0:
