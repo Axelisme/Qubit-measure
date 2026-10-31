@@ -152,8 +152,8 @@ def test_fractional_event_start_and_trigger_width_ceil_once():
 
 
 @pytest.mark.parametrize("operation", ["pulse", "config", "trigger", "delay"])
-@pytest.mark.parametrize("ticks, rounded", [(5e-11, 1), (1.00000000005, 2), (43, 43)])
-def test_scalar_ceil_preserves_positive_tails_and_exact_grid(operation, ticks, rounded):
+@pytest.mark.parametrize("ticks, rounded", [(119, 119), (0.2, 1), (1.0000000002, 2)])
+def test_scalar_ceil_preserves_grid_roundtrip_and_tails_outside_noise(operation, ticks, rounded):
     def body(prog):
         value = ticks / 430.08
         if operation == "pulse":

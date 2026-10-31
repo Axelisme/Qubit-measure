@@ -265,14 +265,16 @@ def test_affine_waveform_and_post_sweeps_ceil_complete_end(swept_post):
     ] * 2
 
 
-def test_scalar_static_cross_grid_ceil_keeps_small_positive_post():
-    pulse = Pulse("precise", _pulse_cfg(length=25 / 384, pre=0, post=5e-11 / 430.08))
+@pytest.mark.parametrize("post_ticks, end", [(5e-11, 28), (2e-10, 29)])
+def test_scalar_static_cross_grid_ceil_applies_noise_tolerance(post_ticks, end):
+    pulse = Pulse("precise", _pulse_cfg(length=25 / 384, pre=0, post=post_ticks / 430.08))
     prog = _program([pulse], lambda p: p.emit(pulse))
-    # The native waveform is exactly28 tProc ticks. Any positive post needs29.
-    assert [s.body_end_cycle - s.start_cycle for s in shots(prog)] == [29] * 2
+    # Exact 28-tick playback plus post: only the tail outside tolerance adds a tick.
+    assert [s.body_end_cycle - s.start_cycle for s in shots(prog)] == [end] * 2
 
 
-def test_scalar_adc_aggregate_ceil_keeps_small_positive_post():
+@pytest.mark.parametrize("post_ticks, end", [(5e-11, 14), (2e-10, 15)])
+def test_scalar_adc_aggregate_ceil_applies_noise_tolerance(post_ticks, end):
     readout = PulseReadout(
         "precise_adc",
         PulseReadoutCfg(
@@ -282,15 +284,15 @@ def test_scalar_adc_aggregate_ceil_keeps_small_positive_post():
             gain=0.5,
             waveform=ConstWaveformCfg(length=3 / 384),
             pre_delay=0,
-            post_delay=5e-11 / 430.08,
+            post_delay=post_ticks / 430.08,
             ro_ch=0,
             ro_length=10 / 307.2,
             trig_offset=0,
         ),
     )
     prog = _program([readout], lambda p: p.emit(readout))
-    # Ten ADC samples are exactly14 tProc ticks, followed by a positive post.
-    assert [s.body_end_cycle - s.start_cycle for s in shots(prog)] == [15] * 2
+    # Ten ADC samples are exactly 14 ticks; apply tolerance after adding post.
+    assert [s.body_end_cycle - s.start_cycle for s in shots(prog)] == [end] * 2
 
 
 def test_runtime_cross_grid_length_sweep_fails_without_implicit_time_table():

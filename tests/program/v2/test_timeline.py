@@ -60,8 +60,8 @@ def test_timeline_pulses_are_serial_but_native_pulse_stays_at_reference(timeline
     assert shot.end_cycle == 96
 
 
-@pytest.mark.parametrize("subcycle", [0.2, 5e-11])
-def test_each_delay_ceil_and_author_sweep_uses_native_affine_steps(subcycle):
+@pytest.mark.parametrize("subcycle, scalar_end", [(0.2, 2), (5e-11, 0), (2e-10, 2)])
+def test_each_delay_ceil_and_author_sweep_uses_native_affine_steps(subcycle, scalar_end):
     def body(prog):
         prog.delay_timeline(subcycle / 430.08)
         prog.delay_timeline(subcycle / 430.08)
@@ -69,14 +69,15 @@ def test_each_delay_ceil_and_author_sweep_uses_native_affine_steps(subcycle):
         prog.pulse(0, "p0", timeline="default", tag="pulse")
 
     prog = _program(body, lambda p: p.add_loop("scan", 4))
-    # Two scalar operations add one tick each. Native sweep starts at zero
-    # and truncates its 1.2-tick step to one, giving 0,1,2,3.
-    assert [_waves(s) for s in _shots(prog)] == [[2], [3], [4], [5]]
+    # Scalar tails inside 1e-10 ticks are noise; larger tails ceil each time.
+    # Native sweep truncates its 1.2-tick step to one, giving 0,1,2,3.
+    expected = [scalar_end, scalar_end + 1, scalar_end + 2, scalar_end + 3]
+    assert [_waves(s) for s in _shots(prog)] == [[tick] for tick in expected]
     assert prog.get_time_param("end", "t", as_array=True) * 430.08 == pytest.approx(
-        [2, 3, 4, 5]
+        expected
     )
     assert prog.get_time_param("pulse", "t", as_array=True) * 430.08 == pytest.approx(
-        [2, 3, 4, 5]
+        expected
     )
     assert prog.compile_datamem() is None
 

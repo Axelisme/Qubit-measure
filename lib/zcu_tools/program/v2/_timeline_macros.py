@@ -42,7 +42,6 @@ from ._timeline_runtime import (
     align_end,
     known_maximum,
     optional_time_bounds,
-    scalar_cycles,
     source_expression,
     step_time,
     time_bounds,
@@ -321,7 +320,14 @@ class TimelineAdvance(TimedMacro):
                 if isinstance(event.origin, RuntimeEnd)
                 else round(event.origin * get_fclk(prog))
             )
-            duration_cycles = scalar_cycles(prog, duration)
+            ticks = duration * get_fclk(prog)
+            nearest = round(ticks)
+            # Normalize native integer-cycle float noise, never a positive subcycle.
+            duration_cycles = (
+                Fraction(nearest)
+                if nearest != 0 and abs(ticks - nearest) <= 1e-10
+                else Fraction(str(duration)) * Fraction(str(get_fclk(prog)))
+            )
             exact = static_cycles + origin + duration_cycles
             result: Time = -(-exact.numerator // exact.denominator) / get_fclk(prog)
         else:
