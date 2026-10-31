@@ -540,8 +540,8 @@ def _conversion_weight(ratio: Fraction, clock: float, tproc: float) -> int:
 class EventTime(Macro):
     """Write one runtime event time to the transient s14 output register.
 
-    base names a captured runtime origin in integer tProc cycles. offset is an
-    integer tProc-cycle displacement or a RuntimeEnd holding that displacement.
+    base names a captured runtime origin with its literal cycle displacement.
+    offset is integer tProc cycles or a zero-displacement RuntimeEnd operand.
     expression proves the same base + offset event time in relative tProc
     cycles; it is compile-time provenance, not another runtime calculation.
 
@@ -576,17 +576,24 @@ class EventTime(Macro):
                 WriteRegOp(
                     dst="s_out_time", lhs="s_out_time", op="+", rhs=amount
                 ).translate(prog)
-        elif self.offset == 0:
-            WriteReg(dst="s_out_time", src=self.base.register).translate(prog)
-        else:
+        elif isinstance(self.offset, RuntimeEnd):
+            base = self.base.register
+            if self.base.offset:
+                WriteRegOp(
+                    dst="s_out_time", lhs=base, op="+", rhs=self.base.offset
+                ).translate(prog)
+                base = "s_out_time"
             WriteRegOp(
-                dst="s_out_time",
-                lhs=self.base.register,
-                op="+",
-                rhs=self.offset.register
-                if isinstance(self.offset, RuntimeEnd)
-                else self.offset,
+                dst="s_out_time", lhs=base, op="+", rhs=self.offset.register
             ).translate(prog)
+        else:
+            amount = self.base.offset + self.offset
+            if amount:
+                WriteRegOp(
+                    dst="s_out_time", lhs=self.base.register, op="+", rhs=amount
+                ).translate(prog)
+            else:
+                WriteReg(dst="s_out_time", src=self.base.register).translate(prog)
         book.output_time = self.expression
 
 
@@ -622,29 +629,11 @@ class RuntimeMath(TimedMacro):
                 * get_fclk(self.prog)
             )
         )
-        logical_base, logical_operand = base, operand
-        if base.offset:
-            operand = (
-                self.add(operand, base.offset / get_fclk(self.prog))
-                if isinstance(operand, RuntimeEnd)
-                else operand + base.offset
-            )
-            base = replace(
-                base,
-                storage=_CycleStorage(base.register),
-                expression=add_time(
-                    runtime_expression(base), TimeVariable(-base.offset)
-                ),
-                covers=(),
-                deferred=(),
-            )
-        if isinstance(operand, RuntimeEnd):
-            operand = self.cycles(operand)
         result = self._operation_result(
-            logical_base,
+            base,
             "+",
-            logical_operand,
-            limits=self._sum_limits(logical_base, logical_operand),
+            operand,
+            limits=self._sum_limits(base, operand),
             storage=_CycleStorage("s_out_time"),
         )
         self.operations.append(EventTime(base, operand, result.expression))
