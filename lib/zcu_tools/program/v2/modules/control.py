@@ -152,9 +152,11 @@ class Branch(Module):
 
     On TimelineProgramV2, declare registers the children and lower uses native
     branch/case control with compare_reg as the sweep selector. Children execute
-    in order on the selected timeline. Static case ends merge to their maximum
-    without advancing the shared reference or adding waits. Later emissions
-    resume at that maximum. Measurement feedback is not supported.
+    in order on the selected timeline. align_timeline=True joins case ends per
+    timeline, using static max or exact runtime pointwise max. Reference does
+    not advance and no wait is inserted. Later emissions resume at the joined
+    end. Reference-moving children and case-local Repeat fail at build.
+    Measurement feedback is not supported.
 
     Legacy init/run selection uses a dispatch-table island:
 

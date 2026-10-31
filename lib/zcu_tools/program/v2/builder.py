@@ -80,7 +80,8 @@ class BuilderBranchCases:
         Record through the owning builder. Duplicate, non-integer and out-of-range
         indices raise ValueError at build. Calls after branch exit or build,
         and overlapping cases, raise ValueError immediately.
-        Nested branch/repeat structures remain allowed.
+        Nested branches are supported. Repeat in a case fails at build because
+        its entry/backedge advance reference; put Repeat outside the branch.
         """
         return self._record_case(index)
 
