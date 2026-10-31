@@ -13,12 +13,19 @@ def make_form(ctx: FormContext) -> Form[LengthCfg]:
         LengthCfg,
         tree={
             "reset": Slot("$qubit.module.reset"),
-            "qub_pulse": Slot("$qubit.module.x180", fallback=Template("pi_pulse", bindings={"qubit": "$qubit"})),
-            "readout": Slot("$resonator.module.readout", set={"ro_length": Hidden(0.0)}, fallback=Template(
-                "readout",
-                bindings={"resonator": "$resonator"},
+            "qub_pulse": Slot(
+                "$qubit.module.x180",
+                fallback=Template("pi_pulse", bindings={"qubit": "$qubit"}),
+            ),
+            "readout": Slot(
+                "$resonator.module.readout",
                 set={"ro_length": Hidden(0.0)},
-            )),
+                fallback=Template(
+                    "readout",
+                    bindings={"resonator": "$resonator"},
+                    set={"ro_length": Hidden(0.0)},
+                ),
+            ),
             "length": Range(0.01, 3.5, expts=51),
             "relax_delay": t1_initial_time(ctx.parameters, multiplier=5),
             "reps": 1000,

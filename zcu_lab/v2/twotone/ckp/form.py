@@ -16,7 +16,10 @@ def make_form(ctx: FormContext) -> Form[CKP_Cfg]:
         CKP_Cfg,
         tree={
             "reset": Slot("$qubit.module.reset"),
-            "pi_pulse": Slot("$qubit.module.x180", fallback=Template("pi_pulse", bindings={"qubit": "$qubit"})),
+            "pi_pulse": Slot(
+                "$qubit.module.x180",
+                fallback=Template("pi_pulse", bindings={"qubit": "$qubit"}),
+            ),
             "res_pulse": Template(
                 "res_probe",
                 bindings={"resonator": "$resonator"},
@@ -41,7 +44,10 @@ def make_form(ctx: FormContext) -> Form[CKP_Cfg]:
                     "post_delay": Expr(f"{3.1 / (2 * pi)} / $resonator.kappa"),
                 },
             ),
-            "readout": Slot("$resonator.module.readout", fallback=Template("readout", bindings={"resonator": "$resonator"})),
+            "readout": Slot(
+                "$resonator.module.readout",
+                fallback=Template("readout", bindings={"resonator": "$resonator"}),
+            ),
             "res_freq": Range.around(
                 "$resonator.freq", "1.5 * $resonator.kappa", expts=101
             ),

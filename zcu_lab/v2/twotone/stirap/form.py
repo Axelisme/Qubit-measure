@@ -18,7 +18,14 @@ def make_form(ctx: FormContext) -> Form[StirapCfg]:
     return Form(
         StirapCfg,
         tree={
-            "readout": Slot("$resonator.module.readout", fallback=Template("readout", bindings={"resonator": "$resonator"}, seed_metadata=pulse_readout_seed_metadata(gain=0.1))),
+            "readout": Slot(
+                "$resonator.module.readout",
+                fallback=Template(
+                    "readout",
+                    bindings={"resonator": "$resonator"},
+                    seed_metadata=pulse_readout_seed_metadata(gain=0.1),
+                ),
+            ),
             "relax_delay": t1_initial_time(ctx.parameters, multiplier=5),
         },
     )

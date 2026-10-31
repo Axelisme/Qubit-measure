@@ -14,9 +14,18 @@ def make_gain_form(ctx: FormContext) -> Form[ZigZagScanCfg]:
         ZigZagScanCfg,
         tree={
             "reset": Slot("$qubit.module.reset"),
-            "X90_pulse": Slot("$qubit.module.x90", fallback=Template("pi2_pulse", bindings={"qubit": "$qubit"})),
-            "X180_pulse": Slot("$qubit.module.x180", fallback=Template("pi_pulse", bindings={"qubit": "$qubit"})),
-            "readout": Slot("$resonator.module.readout", fallback=Template("readout", bindings={"resonator": "$resonator"})),
+            "X90_pulse": Slot(
+                "$qubit.module.x90",
+                fallback=Template("pi2_pulse", bindings={"qubit": "$qubit"}),
+            ),
+            "X180_pulse": Slot(
+                "$qubit.module.x180",
+                fallback=Template("pi_pulse", bindings={"qubit": "$qubit"}),
+            ),
+            "readout": Slot(
+                "$resonator.module.readout",
+                fallback=Template("readout", bindings={"resonator": "$resonator"}),
+            ),
             "relax_delay": t1_initial_time(ctx.parameters, multiplier=5),
             "n_times": 6,
             "repeat_on": "X180_pulse",
@@ -38,9 +47,18 @@ def make_freq_form(ctx: FormContext) -> Form[ZigZagScanCfg]:
         ZigZagScanCfg,
         tree={
             "reset": Slot("$qubit.module.reset"),
-            "X90_pulse": Slot("$qubit.module.x90", fallback=Template("pi2_pulse", bindings={"qubit": "$qubit"})),
-            "X180_pulse": Slot("$qubit.module.x180", fallback=Template("pi_pulse", bindings={"qubit": "$qubit"})),
-            "readout": Slot("$resonator.module.readout", fallback=Template("readout", bindings={"resonator": "$resonator"})),
+            "X90_pulse": Slot(
+                "$qubit.module.x90",
+                fallback=Template("pi2_pulse", bindings={"qubit": "$qubit"}),
+            ),
+            "X180_pulse": Slot(
+                "$qubit.module.x180",
+                fallback=Template("pi_pulse", bindings={"qubit": "$qubit"}),
+            ),
+            "readout": Slot(
+                "$resonator.module.readout",
+                fallback=Template("readout", bindings={"resonator": "$resonator"}),
+            ),
             "relax_delay": t1_initial_time(ctx.parameters, multiplier=5),
             "n_times": 6,
             "repeat_on": "X180_pulse",

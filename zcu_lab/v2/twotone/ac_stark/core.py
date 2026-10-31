@@ -191,9 +191,7 @@ class AcStarkExp(Experiment[AcStarkResult, AcStarkCfg]):
                     Pulse("stark_tone", cfg.stark_tone, gain=step.value),
                     timeline="stark",
                 )
-                builder.emit(
-                    Pulse("probe", cfg.probe, freq=freq), timeline="probe"
-                )
+                builder.emit(Pulse("probe", cfg.probe, freq=freq), timeline="probe")
                 builder.join("probe", into="default")
                 builder.emit(Readout("readout", cfg.readout))
                 program = builder.build()
