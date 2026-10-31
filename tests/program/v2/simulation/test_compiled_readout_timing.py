@@ -7,10 +7,10 @@ from qick.asm_v2 import QickSweep1D
 from zcu_tools.experiment.simulation import white_noise
 from zcu_tools.program.v2 import TimelineBuilder
 from zcu_tools.program.v2.ir import CompiledRecord, CompiledStream
-from zcu_tools.program.v2.modules import PulseReadout, PulseReadoutCfg
-from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.program.v2.ir.io_instructions import DportWriteInst
 from zcu_tools.program.v2.ir.operands import ImmValue, Register
+from zcu_tools.program.v2.modules import PulseReadout, PulseReadoutCfg
+from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 
 from tests.program.v2.simulation._compiled_support import program, request
 
@@ -254,11 +254,18 @@ def test_shared_adc_modules_keep_each_triggers_frequency_and_generator(second_ge
     env = white_noise(std_adc=0, n_gens=2, n_readouts=1, routes=((0, 0), (1, 0)))
     try:
         cfg = PulseReadoutCfg(
-            gen_ch=0, nqz=1, ro_ch=0, freq=100, gain=0.2,
-            waveform=ConstWaveformCfg(length=0.1), ro_length=0.2,
+            gen_ch=0,
+            nqz=1,
+            ro_ch=0,
+            freq=100,
+            gain=0.2,
+            waveform=ConstWaveformCfg(length=0.1),
+            ro_length=0.2,
         )
         first = PulseReadout("first", cfg)
-        cfg = cfg.with_updates(gen_ch=second_gen, freq=200, trig_offset=0.01, post_delay=0.03)
+        cfg = cfg.with_updates(
+            gen_ch=second_gen, freq=200, trig_offset=0.01, post_delay=0.03
+        )
         second = PulseReadout("second", cfg)
         builder = TimelineBuilder(env.soccfg, initial_delay=0, relax_delay=0)
         builder.emit(first)

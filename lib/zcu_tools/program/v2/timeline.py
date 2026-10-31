@@ -5,10 +5,9 @@ from collections.abc import Generator, Mapping, Sequence
 from contextlib import contextmanager
 from copy import deepcopy
 from inspect import signature
-
-import numpy as np
 from typing import TypedDict, override
 
+import numpy as np
 from qick.asm_v2 import (
     AsmV2,
     ConfigReadout,
@@ -16,8 +15,8 @@ from qick.asm_v2 import (
     OpenLoop,
     Pulse,
     QickParam,
-    QickRawParam,
     QickProgramV2,
+    QickRawParam,
     Trigger,
 )
 
