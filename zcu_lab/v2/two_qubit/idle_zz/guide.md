@@ -18,13 +18,13 @@ Refresh 更新來源與選項，保留已填輸入。修改來源或 aliases 後
 2. 人工填 signed detune，單位 MHz。其絕對值須明顯大於預期 abs(ζ) 加 qubit 頻率誤差，使兩分支留在 detune 選定的同側。單一 projection 的資料不能證明此前提。
 3. 設 delay 的 µs 範圍及點數。分析至少需要 6 個不同、等距的實際 delay，正的時間跨度，並解析數個 fringe 週期。量化後 delay 不可重複。
 4. 只掃 delay 時，DC source 留空，各 source 不變。結果的單點 DC 座標 0 代表該軸停用。要掃 DC 時，填直接 device 名稱、driver 的 working unit 與已授權的 source values 範圍。支援 A、V、native，不做單位轉換或 F1/F2 補償。
-5. 核對 reps、rounds、等待時間與完整 mux 積分窗口，再 Run。每個 DC 點依序取得 I、Xπ 的 delay scans。Live 每條線是一個 DC／branch 的 target ⟨σ⟩。
+5. 核對 reps、rounds、等待時間與完整 mux 積分窗口，再 Run。每個 DC 點用一支 program 在硬體掃 spectator_states 與 delay。DC 要設定外部儀器，因此留在 host。硬體 delay sweep 會產生逐點等待差。若編譯指出收尾 WAIT slack 大於 relax_delay，增加 relax_delay 後再 Run，不把 delay 改回 host scan。Live 每條線是一個 DC／branch 的 target ⟨σ⟩。
 
 DC 操作也可能影響其他 loop。工作點與補償由操作員設定並記錄。結束後 source 維持最後設定，取消或失敗後先核對裝置狀態。
 
 ## FIT 與符號
 
-第二個 target π/2 的 phase 是第一個 pulse 的 phase 加上 `360 * detune * actual_delay`，單位 degree。取數時分類 terminal F1、F2 的 g/e/other，每點保存 9 類計數。分析以目標 qubit 的 `⟨σ⟩ = (N_e − N_g) / N_total` 對 delay 做 free-phase decay cosine fit。Other 留在分母，不旋轉或重分類 IQ。
+第二個 target π/2 的 phase 是第一個 pulse 的 phase 加上 `360 * detune * actual_delay`，單位 degree。取數時分類 terminal F1、F2 的 g/e/other，每點保存 9 類計數。分析以目標 qubit 的 `⟨σ⟩ = (N_e − N_g) / N_total` 對 delay 做 free-phase decay cosine fit。Other 留在分母，不旋轉或重分類 IQ。擬合用計數推得的 shot-noise error 加權，飽和點的 error 下限為 1/N。
 
 Fitter 給非負 fringe magnitude m，單位 MHz。在兩分支同側的前提下，`f = sign(detune) * m`，`ζ = f_Xπ − f_I`。負 detune 也使用 signed frequency 求差。共同人工 phase ramp 在頻差中抵消。
 
@@ -40,10 +40,26 @@ Detune 為 0、點數不足、span 非正、無 Ramsey contrast、非有限不�
 
 ## 取消、保存與重分析
 
-Result 的 sums 是 float64 `DC × 2 branches × delay × 3 × 3` 原始計數。Branch 0 是 spectator I，1 是 Xπ。末兩軸是 terminal F1/F2，各為 g/e/other。Rounds 在取數端累加，不除以 reps 或 rounds，不保存個別 shots 或 IQ。
+Result 的 sums 是 float64 `DC × spectator_states × delay × 3 × 3` 原始計數。spectator_states 存整數 [0, 1]，分別是 spectator I、Xπ。末兩軸是 terminal F1/F2，各為 g/e/other。Rounds 在取數端累加，不除以 reps 或 rounds，不保存個別 shots 或 IQ。
 
 取消保留已完成 rounds 的計數，未量點保持 NaN。Live 可見部分曲線，fit 只接受所有 delay 都完成要求 rounds 的分支。兩支 fit 可用時才算 ζ。總數為 0 的比例是 NaN。
 
-Save 保存 sums、全部座標與本次 cfg。Native Load 不改目前表單。Analyze 只用所載 cfg，不用目前 library；缺 cfg 時拒絕分析。普通版 cfg schema 為 4.0，target 的舊大寫值不作相容轉換。舊 raw-IQ 檔缺少 sums 時明確報錯。
+Save 保存 sums、全部座標與本次 cfg。Native Load 不改目前表單。Analyze 只用所載 cfg，不用目前 library；缺 cfg 時拒絕分析。普通版 cfg schema 為 5.0，target 的舊大寫值不作相容轉換。舊 raw-IQ 檔缺少 sums 時明確報錯。
 
 本實驗不寫回 calibration，也不自動調整 detune 或 DC。
+
+## Notebook
+
+`cfg` 使用與表單相同的 IdleZZCfg。經 NotebookAdapter 保留 RunRecord 與保存流程。
+`point_view` 是儲存目的地已綁定的 `PointView`。保存時以本次 `run()` 回傳的 `record` 作為 `source`。
+
+```python
+from zcu_tools.notebook import NotebookAdapter
+from zcu_lab.v2.two_qubit.idle_zz.core import IdleZZExp
+
+nb_adapter = NotebookAdapter(soc=soc, soccfg=soccfg, device_manager=device_manager)
+exp = nb_adapter(IdleZZExp())
+record = exp.run(cfg)
+exp.analyze(None)
+exp.save_run(point_view, source=record)
+```
