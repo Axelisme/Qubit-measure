@@ -137,10 +137,6 @@ def test_wrong_typed_answer_delivery_stays_waiting_and_can_retry(asking, tmp_pat
     assert run_lease_presence(harness) == lease
     assert not control.close(tab)
     assert harness.handles.known_outcome(token) is None
-    journal = next(tmp_path.rglob("journal.jsonl"))
-    assert "resumed" not in [
-        json.loads(line)["kind"] for line in journal.read_text().splitlines()
-    ]
     assert author.deliveries == []
     assert control.answer(RUN_ID, Decision(value=8), request_id=request_id) == token
     harness.finish_worker()

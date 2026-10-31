@@ -71,7 +71,7 @@ class ScriptRecipeSnapshot:
     """Immutable local progress, without driving author code or sending RPCs.
 
     execution is session-local; recipe is its declaration name. status follows
-    the shared scheduler; phase separates preparation/waiting/paused/terminal.
+    the shared scheduler; phase separates preparation/waiting/terminal.
     pending_question exists only at explicit ask. pending_analysis identifies
     the GUI-owned interactive operation while status is interactive; no second
     runner is started. outcome exists at terminal;
@@ -89,7 +89,7 @@ class ScriptRecipeSnapshot:
     execution: str
     recipe: str
     status: ScriptStatus | Literal["needs_parameters", "interactive"] = "running"
-    phase: Literal["preparing", "waiting", "paused", "terminal"] = "preparing"
+    phase: Literal["preparing", "waiting", "terminal"] = "preparing"
     pending_question: ScriptPendingQuestion | None = None
     pending_analysis: PendingAnalysis | None = None
     outcome: RecipeOutcome[BaseModel] | None = None
@@ -162,7 +162,7 @@ class ScriptRecipeExecution:
             self._condition.wait_for(
                 lambda: (
                     self._progress.status in SCRIPT_TERMINAL
-                    or self._progress.status == "paused"
+                    or self._progress.status == "waiting"
                     or (
                         self._progress.status == "interactive"
                         and (
@@ -330,13 +330,13 @@ class ScriptRecipeExecution:
             if self._progress.status not in SCRIPT_TERMINAL:
                 self._progress = replace(
                     self._progress,
-                    status="paused"
+                    status="waiting"
                     if pending
                     else "interactive"
                     if analysis
                     else "running",
                     pending_analysis=analysis,
-                    phase="paused" if pending else "waiting",
+                    phase="waiting",
                     pending_question=pending,
                 )
                 self._condition.notify_all()

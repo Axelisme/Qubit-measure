@@ -62,7 +62,7 @@ class WorkflowRun[P: BaseModel, T: BaseModel, Summary: BaseModel | None, C]:
     lock serializes short journal/publication sections, never cross-thread host
     acknowledgements or executor drain. start precedes all other operations;
     reserve_execution precedes the one synchronous execute on a caller worker.
-    Controls keep that same worker alive through Ask and Pause.
+    Controls keep that same worker alive through Ask.
     """
 
     def __init__(

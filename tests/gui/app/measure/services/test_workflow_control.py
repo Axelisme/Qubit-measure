@@ -142,7 +142,7 @@ def test_start_records_tunables_and_stale_run_targets_use_same_headless_owner(tm
     assert control.close(tab)
 
 
-def test_pending_and_paused_run_retain_global_lease_and_reject_tab_close(tmp_path):
+def test_pending_run_retains_global_lease_and_rejects_tab_close(tmp_path):
     control, harness = make_control(tmp_path)
     tab = control.open("synthetic")
     other = control.open("synthetic")
