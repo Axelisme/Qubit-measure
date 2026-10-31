@@ -52,8 +52,7 @@ def test_concrete_programs_compile_empty_and_nonempty_dmem(kind, values: Sequenc
         assert prog.binprog["dmem"] is None
 
 
-@pytest.mark.parametrize("kind", ["timeline", "modular"])
-def test_route_protection_is_atomic_and_unprotected_routes_remain_native(kind):
+def test_modular_route_protection_is_atomic_and_unprotected_routes_remain_native():
     def initialize(prog: TimelineProgramV2 | ModularProgramV2):
         prog.declare_gen(0, nqz=1)
         prog.declare_readout(0, length=0.4)
@@ -72,6 +71,36 @@ def test_route_protection_is_atomic_and_unprotected_routes_remain_native(kind):
         prog.declare_readout(1, length=0.2)
         prog.declare_readout(1, length=0.4)
 
-    prog = _program(kind, initialize)
+    prog = _program("modular", initialize)
     assert prog.gen_chs[1]["nqz"] == 2
     assert prog.ro_chs[1]["length"] == 123
+
+
+def test_timeline_direct_declarations_share_settings_and_preserve_explicit_protection():
+    def initialize(prog: TimelineProgramV2 | ModularProgramV2):
+        prog.declare_gen(0, nqz=1)
+        prog.declare_readout(0, length=0.4)
+        with pytest.raises(ValueError, match="readout route 1 is not declared"):
+            prog.protect_readout_routes("missing", 0, [0, 1])
+        prog.protect_readout_routes("readout", 0, [0])
+        # Equivalent positional/default forms share even a protected declaration.
+        prog.declare_gen(0, 1)
+        prog.declare_readout(0, 0.4, phase=0, sel="product")
+        with pytest.raises(ValueError, match="already protected by readout"):
+            prog.protect_readout_routes("other", 0, [0])
+        with pytest.raises(ValueError, match="nqz"):
+            prog.declare_gen(0, nqz=2)
+        with pytest.raises(ValueError, match="ro_length"):
+            prog.declare_readout(0, length=0.2)
+        prog.declare_gen(1, nqz=1)
+        prog.declare_readout(1, length=0.2)
+        with pytest.raises(ValueError, match="nqz"):
+            prog.declare_gen(1, nqz=2)
+        with pytest.raises(ValueError, match="ro_length"):
+            prog.declare_readout(1, length=0.4)
+
+    prog = _program("timeline", initialize)
+    assert prog.gen_chs[0]["nqz"] == 1
+    assert prog.ro_chs[0]["length"] == 123
+    assert prog.gen_chs[1]["nqz"] == 1
+    assert prog.ro_chs[1]["length"] == 61

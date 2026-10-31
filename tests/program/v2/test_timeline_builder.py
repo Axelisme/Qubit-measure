@@ -963,7 +963,8 @@ def test_explicit_scratch_register_reuse_remains_valid(mock_soccfg):
 def test_failed_build_also_freezes_builder(mock_soccfg):
     builder = v2.TimelineBuilder(mock_soccfg)
     builder.emit(_readout("first"))
-    builder.emit(_readout("second"))
+    first = _readout("first")
+    builder.emit(PulseReadout("second", first.cfg, ro_length=0.3))
     with pytest.raises(ValueError, match="readout"):
         builder.build()
     with pytest.raises(ValueError, match="frozen"):
