@@ -35,8 +35,8 @@ class SavedAcquisition[Result]:
     """Acquisition outcome after saving every Completed, including partials.
 
     status is completed or partial, the author's stopped-data classification.
-    result is available only when the operation's own stop bit is false, so stopped data never
-    enters a fit. file is the relative native filename after saving. reason is
+    result is available only when the operation's own stop bit is false.
+    Stopped data never enters a fit. file is the relative native filename after saving. reason is
     stopped for partial and None for completed. Acquisition exceptions propagate.
     """
 
@@ -70,8 +70,7 @@ async def acquire_saved[Cfg: ConfigBase, Result](
     Acquisition exceptions propagate without creating a file. Completions with
     facts.stopped save raw with completion=stopped, then return status=partial
     without fit data. Descendant-only stops leave facts.stopped false and save
-    completion=complete. Other results are
-    returned unchanged.
+    completion=complete. Other results are returned unchanged.
     Acquisition, writer and unexpected framework exceptions propagate.
     """
     outcome = await run_core(scope, experiment, cfg, name=name)

@@ -31,7 +31,6 @@ class OperationReply(TypedDict):
     attempt: int
     started_at: str
     finished_at: str
-
     outcome: OperationOutcome
     reason: str | None
     stopped: bool
