@@ -1,13 +1,13 @@
 """Run → Stop → core return/failure through visible measure controls."""
 
 from collections.abc import Iterator
-from dataclasses import replace
 from pathlib import Path
 
 import pytest
 from qtpy.QtWidgets import QApplication
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
+from zcu_tools.gui.app.measure.adapter import Adapter
 from zcu_tools.gui.app.measure.controller import Controller
 from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.state import State
@@ -35,7 +35,16 @@ def stop_window(
         return SampleAdapter.run(cfg, context=context)
 
     registry = Registry()
-    registry.register("synthetic-stop", replace(SampleAdapter, run=acquire))
+    registry.register(
+        "synthetic-stop",
+        Adapter(
+            spec=SampleAdapter.spec,
+            make_form=SampleAdapter.make_form,
+            run=acquire,
+            guide=None,
+            analysis=SampleAdapter.analysis,
+        ),
+    )
     soccfg = make_mock_soccfg()
     ctrl = Controller(
         State(SessionEnv(parameters=None, soc=soccfg, soccfg=soccfg)),
