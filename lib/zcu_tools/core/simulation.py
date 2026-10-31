@@ -103,24 +103,39 @@ class TimeBase:
         return ticks.numerator
 
     @overload
-    def ns(self, ticks: int | np.int64) -> float: ...
+    def ns(self, ticks: int | np.int64, *, quantum_ns: int | None = None) -> float: ...
 
     @overload
-    def ns(self, ticks: NDArray[np.int64]) -> NDArray[np.float64]: ...
+    def ns(self, ticks: NDArray[np.int64], *, quantum_ns: int | None = None) -> NDArray[np.float64]: ...
 
     def ns(
-        self, ticks: int | np.int64 | NDArray[np.int64]
+        self, ticks: int | np.int64 | NDArray[np.int64], *, quantum_ns: int | None = None
     ) -> float | NDArray[np.float64]:
         """Convert integer ticks to correctly rounded float64 nanoseconds.
 
         Scalars return float; int64 arrays return float64 arrays with identical
         shape. All arithmetic before the final division is integer arithmetic.
+        quantum_ns optionally rounds exact rational times to a positive integer
+        number of ns, ties even, before conversion. Invalid quanta raise ValueError.
         Raise OverflowError unless ticks and intermediates fit int64 and
         abs(ticks * 1000 * frequency.denominator) <= 2**53. Noninteger scalars
         or arrays with a dtype other than int64 raise TypeError.
         """
         self.validate_ticks(ticks)
         scale = 1000 * self.ticks_per_us.denominator
+        if quantum_ns is not None:
+            if type(quantum_ns) is not int or not 0 < quantum_ns <= 2**53:
+                raise ValueError("quantum_ns must be a positive exact integer")
+            divisor = self.ticks_per_us.numerator * quantum_ns
+            if isinstance(ticks, np.ndarray):
+                # Object integers avoid overflowing when the quantum multiplies
+                # a large frequency numerator.
+                numerator = ticks.astype(object) * scale
+                quotient, remainder = np.divmod(numerator, divisor)
+                rounded = quotient + ((2 * remainder > divisor) | ((2 * remainder == divisor) & (quotient % 2 != 0)))
+                return np.asarray(rounded * quantum_ns, dtype=np.float64)
+            quotient, remainder = divmod(int(ticks) * scale, divisor)
+            return float((quotient + (2 * remainder > divisor or (2 * remainder == divisor and quotient % 2 != 0))) * quantum_ns)
         # Both operands are exactly representable in float64. Only the final
         # IEEE division rounds, including for noninteger rational time bases.
         if isinstance(ticks, np.ndarray):
