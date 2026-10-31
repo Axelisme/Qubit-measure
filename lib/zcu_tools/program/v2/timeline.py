@@ -24,6 +24,8 @@ from ._timeline_macros import (
     PreparedTimelineMacro,
     PreparedTimelineOpenLoop,
     ReferenceGuard,
+    RepeatTimelineBody,
+    RepeatTimelineCapture,
     RepeatTimelineEnter,
     RepeatTimelineExit,
     TimelineAdvance,
@@ -47,6 +49,7 @@ from ._timeline_selected import SelectedPlayback, TimelineSelectedPulse
 from ._timeline_state import TimelineBook
 from .base import MyProgramV2
 from .ir import TimingLayout, TimingLoop
+from .ir.instructions import BaseInst, RegWriteInst
 from .macro.delay import DelayRegAuto
 from .macro.table import TableSelection
 from .modules.base import Module
@@ -107,7 +110,8 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
 
     Constructor follows MyProgramV2: reps, initial_delay, relax_delay. Native
     operations retain QICK timing. Named outputs update their relative ends;
-    sync and body completion move reference time. Each compile resets ends.
+    delay_by_timeline and body completion move reference time.
+    Each compile resets ends.
     All instructions share the existing IR and acquisition implementations.
     get_time_param returns actual scalar/affine times. Runtime-only and
     non-affine timeline times raise RuntimeError, including as_array=True.
@@ -137,6 +141,7 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
 
     def _make_asm(self) -> None:
         self._timeline_register_pool = []
+        self._timeline_book.output_time = None
         self._time_bounds = ProducerBounds()
         for macro in self.macro_list:
             self._observe_time_producers(macro)
@@ -189,6 +194,14 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
                     self._observe_time_producers(child)
 
     def _add_asm(self, inst, addr_inc=1):
+        instruction = BaseInst.from_dict(inst)
+        if inst["CMD"] in ("JUMP", "CALL", "RET") or (
+            "s14" in instruction.reg_write
+            and not (
+                isinstance(instruction, RegWriteInst) and instruction.is_pure_self_copy
+            )
+        ):
+            self._timeline_book.output_time = None
         self._time_bounds.emission(
             inst, self.p_addr, self._time_origin, arithmetic=self._timeline_math_active
         )
@@ -208,8 +221,10 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
     def make_program(self) -> None:
         """Build the QICK shell with linked body markers and all-timeline closure.
 
-        Body closure precedes body_end and final_wait/final_delay. Loop hooks,
-        counters, cleanup and subroutines retain AveragerProgramV2's order.
+        Body closure consumes every timeline and any unbounded ADC tail before
+        body_end and the constant final_wait. Finite ADC tails retain their WAIT
+        bound. Loop hooks, counters, cleanup and subroutines retain
+        AveragerProgramV2's order.
         """
         # QICK 0.2.436 provides no public shell boundary hooks.
         self._reset_resources()
@@ -239,7 +254,7 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
             self._body(None)
         finally:
             self._building_body = False
-        self.append_macro(TimelineSync(self._timeline_book, None))
+        self.append_macro(TimelineSync(self._timeline_book, None, close_adc=True))
         self.append_macro(TimelineBoundary(self._timeline_book, "body_end"))
         self.append_macro(TimelineShellWait(self._timeline_book, self.final_wait))
         if self.final_delay is not None:
@@ -433,7 +448,8 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
 
         Applies to emit, pulse, trigger, send_readoutconfig,
         send_readoutconfig_from_regs, pulse_from_regs, pulse_by_reg,
-        pulse_from_length_reg, delay_timeline, sync and the repeat parent.
+        pulse_from_length_reg, timeline_inc, delay_by_timeline and the repeat
+        parent.
         The branch parent uses this default; cases shadow it. Nested
         scopes override it and restore it on exit, including exceptions.
         Explicit names win, including default. This neither forks
@@ -582,7 +598,7 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
     ) -> None:
         """Add an owner's already tProc-aligned rule-a duration in us to its end.
 
-        None selects default. Unlike arbitrary delay_timeline inputs, this value
+        None selects default. Unlike arbitrary timeline_inc inputs, this value
         is not ceiled again. tag names the resolved end via get_time_param.
         """
         self.append_macro(
@@ -595,7 +611,7 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
             )
         )
 
-    def delay_timeline(
+    def timeline_inc(
         self,
         t: float | QickParam | str,
         *,
@@ -720,7 +736,8 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         Both modes allow subsequent placement. Local fork names expire at case
         exit; unjoined local ends are discarded, not merged into their ancestor.
         True requires every end to be reconstructible from branch-entry state.
-        Native delay/delay_auto/sync in cases raise ValueError; use delay_timeline.
+        Native delay/delay_auto/delay_by_timeline in cases raise ValueError;
+        use timeline_inc.
         Repeat may accumulate inside cases; its body obeys the same reference
         prohibition. Branch inside Repeat is supported. Unconditional actions inside this context
         raise ValueError; put them before or after the with block.
@@ -767,15 +784,16 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         timeline: str | None = None,
         range_hint: tuple[int, int] | None = None,
     ) -> Generator[None]:
-        """Repeat on a scoped, accumulating timeline without implicit sync.
+        """Repeat on a scoped, accumulating timeline without moving reference.
 
         timeline=None selects the surrounding scope or default. Only this parent
         and local forks are accessible; local names expire at exit. Times use us.
-        Explicit sync/delay/delay_auto may advance reference except in branch
-        cases or reference-preserving module groups, which raise ValueError.
-        A final top-level sync of the loop timeline and constant-zero entry
-        select lowering without a tail register. Otherwise use a shot-local
-        accumulator. A final sync with nonzero entry warns to sync before entry.
+        Explicit delay_by_timeline/delay/delay_auto may advance reference except
+        in branch cases or reference-preserving module groups, which raise
+        ValueError. A final top-level delay_by_timeline of the loop timeline and
+        constant-zero entry select lowering without a tail register. Otherwise
+        use a shot-local accumulator. A final delay_by_timeline with nonzero
+        entry warns to call delay_by_timeline before entry.
         n is a nonnegative integer or existing count register distinct from name.
         Optional range_hint guarantees a closed nonnegative integer count range,
         without runtime checks. Fixed counts forbid hints. Zero discards the body.
@@ -805,6 +823,7 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
             self.open_inner_loop(name, name, n, range_hint=range_hint)
         else:
             self.append_macro(fixed)
+        self.append_macro(RepeatTimelineBody(entry))
         body_start = len(self.macro_list)
         try:
             yield
@@ -815,6 +834,11 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
                 bool(body)
                 and type(body[-1]) is TimelineSync
                 and body[-1].timeline == parent
+            )
+            entry.accumulator.simple = all(
+                isinstance(macro, (TimelinePlacedPulse, TimelineAdvance))
+                and macro.timeline == parent
+                for macro in body
             )
             self.append_macro(
                 RepeatTimelineExit(
@@ -831,6 +855,7 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
                 self.close_inner_loop(name, name, n)
             elif fixed is not None:
                 self.append_macro(fixed.closing)
+            self.append_macro(RepeatTimelineCapture(entry))
 
     def join(self, *sources: str, into: str) -> None:
         """Merge existing sources and target into target's latest end (us).
@@ -842,7 +867,7 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         """
         self.append_macro(TimelineJoin(self._timeline_book, sources, into))
 
-    def sync(self, *, timeline: str | None = None) -> None:
+    def delay_by_timeline(self, *, timeline: str | None = None) -> None:
         """Move reference to the chosen end and floor every rebased end at zero.
 
         None selects the scoped name, or default outside a scope.
@@ -865,8 +890,9 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         None uses the scoped name, or native reference timing outside a scope.
         Native args are t=0, tag=None. A timeline end becomes the scheduled config
         instant; config length and unrelated ADC windows do not contribute.
-        Wait-only timelines reject placement even at t=0; first sync the bound
-        or establish an ordinary scheduling point with join/fork.
+        Wait-only timelines reject placement even at t=0; first call
+        delay_by_timeline to consume the bound or establish an ordinary
+        scheduling point with join/fork.
         Declaration and timing errors propagate.
         """
         timeline = timeline if timeline is not None else self._timeline_default
@@ -972,8 +998,9 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         None uses the scoped name, or native reference timing outside a scope.
         kwargs are t, tag and freq_reg. A timeline end becomes the scheduled config
         instant, independent of config length. Wait-only timelines reject placement
-        even at t=0; first sync the bound or establish an ordinary scheduling
-        point with join/fork. Native patching and declaration/register validation
+        even at t=0; first call delay_by_timeline to consume the bound or
+        establish an ordinary scheduling point with join/fork.
+        Native patching and declaration/register validation
         are unchanged.
         """
         timeline = timeline if timeline is not None else self._timeline_default
@@ -1013,7 +1040,7 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         Native args are t=0 (us or 'auto'), tag=None. Named 'auto' takes the
         provably later timeline/channel end. Named end includes waveform length,
         rounded up to tProc cycles. Crossing swept maxima raise ValueError with
-        a delay_timeline hint; native declaration errors propagate.
+        a timeline_inc hint; native declaration errors propagate.
         """
         timeline = timeline if timeline is not None else self._timeline_default
         super().pulse(ch, name, *args, **kwargs)

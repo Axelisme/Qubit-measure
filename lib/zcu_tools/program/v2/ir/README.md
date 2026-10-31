@@ -1,6 +1,6 @@
 # IR architecture guide
 
-**Last updated:** 2026-10-30，resolved loop sweep and table definitions
+**Last updated:** 2026-11-01，s14 output offsets and scheduling windows
 
 **讀者：** framework-dev。QICK ASM V2 的 IR 分層、分析與 lowering 契約。
 
@@ -154,6 +154,19 @@ list[Instruction]
 ```
 
 [passes/](passes/) 按 `control_flow`、`dataflow`、`timeline`、`loop` 分目錄。
+
+## Output offsets and scheduling windows
+
+TIME updates the reference clock without reading or writing s14. Untimed port
+writes read s14 as their output offset. A preceding s14 write must survive across
+TIME and remain before the port write.
+
+Loop scheduling windows include literal `s14 = s14 + #N` increments as well as
+literal `TIME inc_ref #N`. Register-driven increments have an unknown window and
+do not trigger time-margin unrolling. Each unrolled copy retains its increment.
+The dataflow pipeline removes unconditional pure register self-copies only when
+UF and other effects are absent. Conditional copies and flag updates remain.
+Instruction counts describe the post-IR stream, not QICK's temporary self-copies.
 
 ## Invariants that passes rely on
 
