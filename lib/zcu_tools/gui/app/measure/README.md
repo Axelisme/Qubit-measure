@@ -290,9 +290,9 @@ imports the lab registry.
 
 `Controller.workflow_control()` returns the headless facet. Each `open(name)`
 creates independent plan/tunables drafts, including repeated names. `tab_id`
-addresses a draft owner; `run_id` addresses its native run. Start, Pause, Resume,
-Stop and Apply use the same runner, operation and RUN lease as experiment tabs.
-Pending and paused runs refuse tab close. Closing the last idle workflow tab
+addresses a draft owner; `run_id` addresses its native run. Start, Stop and Apply
+use the same runner, operation and RUN lease as experiment tabs.
+Busy runs, including Ask waits, refuse tab close. Closing the last idle workflow tab
 does not drain services or disconnect hardware.
 
 Qt workflow panes display these owners and forward commands. A busy workflow's
@@ -300,10 +300,9 @@ local Stop remains available under Remote control. It reclaims locked Local befo
 requesting Stop through the same facet; other mutations still require the holder.
 Tunables Discard restores the latest accepted input and clears local invalid text.
 Before Start, it restores the captured form base. It is enabled only for a changed
-draft while editing is allowed. Running, pausing and paused runs allow tunables
-edits and Apply; stopping locks edits, Apply and Discard. Entering paused selects
-Tunables and shows 「Resume 會重做未提交的點；可先 Apply 新的 tunables」.
-Resume or Stop hides the hint. A new Ask still selects its question page.
+draft while editing is allowed. Running and waiting runs allow tunables edits
+and Apply; stopping locks edits, Apply and Discard. A new Ask selects its
+question page. Waiting means an Ask is awaiting its answer.
 Measure remote calls the same facet without a pane, toggle or selected-tab
 dependency. Form
 `observe_form` prepares one call-local candidate using the owner's fixed env;
@@ -313,12 +312,12 @@ defaults. Tunables Apply with an empty batch submits the current shared draft.
 
 `WorkflowAttachment(script=...)` pairs an async workflow with its native plan,
 live tunables and optional summary types. One Runner worker calls Engine.execute
-through terminal completion. Pause and Ask retain that worker, operation,
-progress and RUN lease. Resume and Answer signal it without another submission.
-Running and paused Apply both publish a complete tunables model and a new revision.
+through terminal completion. Ask retains that worker, operation, progress and
+RUN lease. Answer signals it without another submission.
+Running and waiting Apply both publish a complete tunables model and a new revision.
 The next tun.current read sees it; already captured operation cfg stays unchanged.
-Pause interrupts acquisition and retries only a stale partial after Resume, not
-an entire point. A naturally completed result waits for Resume without retry.
+Each operation calls its callable once. Cooperative child cancellation delivers
+its returned value. Root Stop records completion facts, then raises ScriptCancelled.
 
 `pending_question` returns the detached
 `{request_id, question_type, question, answer_schema}` envelope while that worker

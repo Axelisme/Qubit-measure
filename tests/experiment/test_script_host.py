@@ -7,7 +7,6 @@ import importlib
 import importlib.util
 from concurrent.futures import ThreadPoolExecutor
 from threading import Event, get_ident
-from typing import TYPE_CHECKING
 
 import pytest
 from pydantic import ValidationError

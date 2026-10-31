@@ -141,6 +141,8 @@ Reader 不讀 journal，不從 leftover native files 補造遺失 record。
 ## Ask 與顯示
 
 `await env.ask(question)` 等一題一個 request_id 的 Answer，不回 Optional。
+等答覆時 lifecycle 是 waiting；Answer 讓同一作者 coroutine 繼續一次。
+根 Stop 可中斷等待。Journal 保留成功接受的 QuestionAnswered 事實。
 Engine.parse_answer 先比對 ID 再驗 schema。Engine.answer 通知同一 worker，不另起 execution segment。
 Wrong model、錯誤欄位、stale 或重複 ID 不消耗新問題。QuestionMismatch 帶目前 pending_request_id。
 Accepted answer 的記憶體交接留在 control callback，journal I/O 留在 callback 之外。

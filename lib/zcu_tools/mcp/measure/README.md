@@ -448,7 +448,8 @@ Stdio server 同步處理請求，不保證首次等待期間同連線的控制�
 answer 符合 pending question 的 Answer schema 與 evidence 規則。
 錯誤、遲到、重複答案回 accepted／reason／pending_request_id，
 不消耗問題、不記 answered。
-問題沒有自動預設回答或 timeout。
+問題沒有自動預設回答或 timeout。等答覆時 status 與 phase 都是 waiting。
+Answer 後同一作者 coroutine 繼續一次，根 Stop 可中斷等待。
 
 Terminal recipe summary 回 execution／status／report／runs。Status 另帶 active_path 與結構化 live_paths。
 Failed 另帶 `failure: {phase, reason}`，full detail 也保留同一 failure 與原 error。
@@ -550,7 +551,7 @@ record_type 與 operations。配置目錄順序不等於 commit 順序。Operati
 kind、iteration 內 attempt、started_at/finished_at、run 的呼叫前 device_snapshot、
 outcome、reason 與 stopped，另有一基 iteration。這與作者 Completed.facts 使用同一
 OperationFacts 結構。這些是 framework 事實，不代表作者已保存所有原始量測檔案。
-Running 或 paused 都可 Apply；revision 在下一次 tun.current 讀取生效，不追改當前
+Running 或 waiting 都可 Apply；revision 在下一次 tun.current 讀取生效，不追改當前
 operation 的 cfg。每個 operation 只呼叫一次，合作停止的回傳值直接交給作者。
 Status 仍用公開讀取／polling，不新增 lifecycle subscribe。
 

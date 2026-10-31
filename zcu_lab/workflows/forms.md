@@ -98,7 +98,7 @@ Tunables 使用 retained binding 的唯一 state/env。Complex tag 與 whole tup
 Tuning view 直接呈現 Host 的唯一 FormState，GUI Apply 與 RPC workflow.tunables 共用 facet.apply_tunables。
 兩者整批提交當下普通值，不保存另一個 draft revision guard。
 只有成功才更新 accepted input/base 並清 local text；invalid input 留在 shared draft，RPC 保留 field path/message。
-Running 或 paused 都可 Apply。作者下次讀 `tun.current` 時取得新 revision；已捕捉的 operation request 不變。
+Running 或 waiting 都可 Apply。作者下次讀 `tun.current` 時取得新 revision；已捕捉的 operation request 不變。
 
 Records RPC 直接投影 Engine committed records；point 現在含獨立 stage 與 enabled measurements。
 Live/summary 只建立 enabled lifetime 圖。具名圖/PNG 沿 retained Plots 與 owner-thread renderer，status-only 不渲染。

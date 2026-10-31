@@ -342,7 +342,7 @@ class WorkflowTab[C]:
         self, status: RunStatus | None, error: BackgroundError | None
     ) -> None:
         self.error = None if error is None else str(error)
-        if self.plots is not None and (status is None or status.lifecycle != "waiting"):
+        if self.plots is not None:
             self.plots.finish()
         self._changed()
 

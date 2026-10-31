@@ -1,6 +1,5 @@
 """Native Ask through the registered headless facet and retained operation owner."""
 
-import json
 from contextlib import contextmanager
 from threading import Event, get_ident
 

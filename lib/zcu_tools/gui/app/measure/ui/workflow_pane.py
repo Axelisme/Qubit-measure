@@ -8,7 +8,7 @@ Run state                     Controls
 Idle or terminal              Refresh, Start
 Running                       Stop
 Waiting for an Ask answer     Stop
-Pending or stopping  Stop
+Pending or stopping           Stop
 ============================  ==============
 
 Answer stays in Ask. Ask appears for a pending question or the latest retained

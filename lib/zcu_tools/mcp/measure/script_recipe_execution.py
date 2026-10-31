@@ -71,7 +71,8 @@ class ScriptRecipeSnapshot:
     """Immutable local progress, without driving author code or sending RPCs.
 
     execution is session-local; recipe is its declaration name. status follows
-    the shared scheduler; phase separates preparation/waiting/terminal.
+    the shared scheduler: waiting means an explicit Ask awaits an answer.
+    phase is preparing before host binding, waiting while live, or terminal.
     pending_question exists only at explicit ask. pending_analysis identifies
     the GUI-owned interactive operation while status is interactive; no second
     runner is started. outcome exists at terminal;
