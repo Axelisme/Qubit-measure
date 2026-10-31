@@ -257,7 +257,10 @@ def test_selected_branch_paths_inside_repeat_use_actual_ends(kind):
         prog.add_reg("index")
 
     def body(prog):
-        with prog.repeat("twice", 2), prog.branch(by="path", align_timeline=False) as branch:
+        with (
+            prog.repeat("twice", 2),
+            prog.branch(by="path", align_timeline=False) as branch,
+        ):
             for index in (0, 1):
                 with branch.case(index):
                     prog.write_reg("index", index)

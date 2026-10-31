@@ -739,9 +739,21 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
             yield cases
         finally:
             self._branch_cases.pop()
-        if any(not isinstance(macro, _TimelineScope) for macro in self.macro_list[start:]):
-            raise ValueError("move unconditional branch actions before or after the with block")
-        self.append_macro(TimelineBranch(self._timeline_book, by, cases.cases, name, align_timeline=align_timeline))
+        if any(
+            not isinstance(macro, _TimelineScope) for macro in self.macro_list[start:]
+        ):
+            raise ValueError(
+                "move unconditional branch actions before or after the with block"
+            )
+        self.append_macro(
+            TimelineBranch(
+                self._timeline_book,
+                by,
+                cases.cases,
+                name,
+                align_timeline=align_timeline,
+            )
+        )
 
     @contextmanager
     def repeat(
@@ -771,7 +783,9 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         the body raises ValueError; it is not a timeline duration operation.
         """
         if any(cases.active for cases in self._branch_cases):
-            raise ValueError("move Repeat outside the branch: its entry and backedge advance reference")
+            raise ValueError(
+                "move Repeat outside the branch: its entry and backedge advance reference"
+            )
         selected = timeline if timeline is not None else self._timeline_default
         timeline = selected if selected is not None else "default"
         minimum = _repeat_minimum(name, n, range_hint)

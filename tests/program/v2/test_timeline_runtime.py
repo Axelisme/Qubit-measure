@@ -205,10 +205,13 @@ def test_native_register_reference_advance_preserves_unconsumed_end():
 
 @pytest.mark.parametrize("align_timeline", [True, False])
 @pytest.mark.parametrize("inside_repeat", [False, True])
-def test_static_branch_joins_case_maximum_and_allows_next_placement(align_timeline, inside_repeat):
+def test_static_branch_joins_case_maximum_and_allows_next_placement(
+    align_timeline, inside_repeat
+):
     def body(prog):
         prog.fork("default", into="untouched")
         prog.delay_timeline(7 / 430.08, timeline="untouched")
+
         def selected():
             with prog.branch(by="scan", align_timeline=align_timeline) as branch:
                 with branch.case(0):
@@ -216,6 +219,7 @@ def test_static_branch_joins_case_maximum_and_allows_next_placement(align_timeli
                 with branch.case(2):
                     prog.delay_timeline(30 / 430.08)
             prog.pulse(0, "p0", timeline="default")
+
         if inside_repeat:
             with prog.repeat("twice", 2):
                 selected()
@@ -227,18 +231,30 @@ def test_static_branch_joins_case_maximum_and_allows_next_placement(align_timeli
     # Cases end at 10/0/30, so default resumes at 30 on every point.
     # No closing reference advance may shift untouched's independent cycle 7.
     starts = [30, 30, 30] if align_timeline else [10, 0, 30]
-    expected = [[start, start * 2 + 28, max(7, 2 * (start + 28))] for start in starts] if inside_repeat else [[start, 7] for start in starts]
+    expected = (
+        [[start, start * 2 + 28, max(7, 2 * (start + 28))] for start in starts]
+        if inside_repeat
+        else [[start, 7] for start in starts]
+    )
     assert [waves(s) for s in result] == expected
-    assert [s.body_end_cycle - s.start_cycle for s in result] == [max(row[-1] + 28, (start + 28) * (2 if inside_repeat else 1)) for row, start in zip(expected, starts, strict=True)]
+    assert [s.body_end_cycle - s.start_cycle for s in result] == [
+        max(row[-1] + 28, (start + 28) * (2 if inside_repeat else 1))
+        for row, start in zip(expected, starts, strict=True)
+    ]
 
 
 @pytest.mark.parametrize("explicit_join", [False, True])
 @pytest.mark.parametrize("align_timeline", [True, False])
-def test_branch_local_forks_are_discarded_unless_explicitly_joined(explicit_join, align_timeline):
+def test_branch_local_forks_are_discarded_unless_explicitly_joined(
+    explicit_join, align_timeline
+):
     def body(prog):
         prog.fork("default", into=["p", "q", "untouched"])
         prog.delay_timeline(9 / 430.08, timeline="untouched")
-        with prog.branch(by="scan", align_timeline=align_timeline) as branch, branch.case(1):
+        with (
+            prog.branch(by="scan", align_timeline=align_timeline) as branch,
+            branch.case(1),
+        ):
             prog.delay_timeline(20 / 430.08, timeline="p")
             prog.delay_timeline(40 / 430.08, timeline="q")
             prog.fork("p", into="local")
@@ -256,13 +272,17 @@ def test_branch_local_forks_are_discarded_unless_explicitly_joined(explicit_join
     # leaf ends at 20+80=100. Discarded: p=20,q=40. Explicit: p=20,q=100.
     # Untouched stays at 9, so the native pulse after its sync is at 209.
     selected = [20, 100 if explicit_join else 40, 209]
-    expected = [selected] * 3 if align_timeline else [[0, 0, 209], selected, [0, 0, 209]]
+    expected = (
+        [selected] * 3 if align_timeline else [[0, 0, 209], selected, [0, 0, 209]]
+    )
     assert [waves(s) for s in result] == expected
 
 
 @pytest.mark.parametrize("align_timeline", [True, False])
 @pytest.mark.parametrize("inside_repeat", [False, True])
-def test_runtime_branch_joins_pointwise_without_advancing_reference(align_timeline, inside_repeat):
+def test_runtime_branch_joins_pointwise_without_advancing_reference(
+    align_timeline, inside_repeat
+):
     loader = LoadValue("time", [10, 20, 30], "scan", "loaded")
 
     def body(prog):
@@ -276,6 +296,7 @@ def test_runtime_branch_joins_pointwise_without_advancing_reference(align_timeli
             prog.pulse(0, "p0", timeline="default")
             # Unmanaged output must still see the incoming reference.
             prog.pulse(1, "p1", t=0)
+
         if inside_repeat:
             with prog.repeat("twice", 2):
                 selected()
@@ -284,7 +305,11 @@ def test_runtime_branch_joins_pointwise_without_advancing_reference(align_timeli
 
     result = shots(program(body, initialize=lambda p: p.declare(loader)))
     starts = [25, 25, 30] if align_timeline else [10, 25, 0]
-    expected = [[start, 0, 2 * start + 28, start + 28] for start in starts] if inside_repeat else [[start, 0] for start in starts]
+    expected = (
+        [[start, 0, 2 * start + 28, start + 28] for start in starts]
+        if inside_repeat
+        else [[start, 0] for start in starts]
+    )
     assert [waves(s) for s in result] == expected
 
 
@@ -563,7 +588,9 @@ def test_custom_native_subclass_repeat_count_keeps_author_range_hint():
 @pytest.mark.parametrize("align_timeline", [True, False])
 @pytest.mark.parametrize("overwrite_before_branch", [False, True])
 @pytest.mark.parametrize("external_cycles", [100, 2])
-def test_branch_uses_captured_runtime_entry_after_register_repeat(align_timeline, overwrite_before_branch, external_cycles):
+def test_branch_uses_captured_runtime_entry_after_register_repeat(
+    align_timeline, overwrite_before_branch, external_cycles
+):
     def body(prog):
         prog.append_macro(CustomWrite(dst="duration", src=1, value=3))
         prog.fork("default", into="external")

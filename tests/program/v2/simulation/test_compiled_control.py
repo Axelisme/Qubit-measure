@@ -23,7 +23,10 @@ def test_public_acquire_skips_undeclared_branch_points_without_padding(align_tim
         p.add_pulse(1, "drive", style="const", freq=80, phase=0, gain=0.2, length=0.1)
 
     def body(p):
-        with p.branch(by="scan", align_timeline=align_timeline) as branch, branch.case(1):
+        with (
+            p.branch(by="scan", align_timeline=align_timeline) as branch,
+            branch.case(1),
+        ):
             p.pulse(1, "drive", timeline="default", tag="selected-drive")
         # The routed ADC always needs a carrier, including undeclared points.
         p.pulse(0, "p", t=0, tag="terminal")

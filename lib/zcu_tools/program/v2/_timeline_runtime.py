@@ -366,7 +366,9 @@ class RuntimeMath(TimedMacro):
             self.claimed.update(previous.claimed)
 
     def reconstruct(
-        self, expression: TimeExpression, inputs: dict[CycleVariable, RuntimeEnd],
+        self,
+        expression: TimeExpression,
+        inputs: dict[CycleVariable, RuntimeEnd],
         captured_ends: Sequence[RuntimeEnd] = (),
     ) -> RuntimeEnd:
         """Materialize exact cycle algebra using captured branch-entry inputs.
@@ -386,13 +388,18 @@ class RuntimeMath(TimedMacro):
                 if points is not None and int(points.min()) >= 0:
                     if not np.any(points):
                         return captured
-                    return self.add(captured, self.lookup([int(v) for v in points.flat], axes))
+                    return self.add(
+                        captured, self.lookup([int(v) for v in points.flat], axes)
+                    )
         axes = expression_axes(expression)
         points = evaluate_time(expression, axes)
         if points is not None:
             return self.lookup([int(value) for value in points.flat], axes)
         if isinstance(expression, TimeChoice):
-            values = [self.reconstruct(item, inputs, captured_ends) for item in expression.alternatives]
+            values = [
+                self.reconstruct(item, inputs, captured_ends)
+                for item in expression.alternatives
+            ]
             result = values[0]
             for value in values[1:]:
                 if expression.maximum:
@@ -418,11 +425,17 @@ class RuntimeMath(TimedMacro):
                 magnitude >>= 1
                 if magnitude:
                     term = self.add(term, term)
-            result = self.add(result, scaled) if coefficient > 0 else self.subtract(result, scaled)
+            result = (
+                self.add(result, scaled)
+                if coefficient > 0
+                else self.subtract(result, scaled)
+            )
         return result
 
     def reconstruct_maximum(
-        self, values: Sequence[Time], inputs: dict[CycleVariable, RuntimeEnd],
+        self,
+        values: Sequence[Time],
+        inputs: dict[CycleVariable, RuntimeEnd],
         captured_ends: Sequence[RuntimeEnd],
     ) -> RuntimeEnd:
         """Join case ends using immutable entry values and exact known increments.
@@ -433,14 +446,19 @@ class RuntimeMath(TimedMacro):
         """
         expressions = [time_expression(self.prog, value) for value in values]
         for captured in captured_ends:
-            shifts = [self._captured_delta(value, runtime_expression(captured)) for value in expressions]
+            shifts = [
+                self._captured_delta(value, runtime_expression(captured))
+                for value in expressions
+            ]
             if any(shift is None for shift in shifts):
                 continue
             delta = choose_time(*(shift for shift in shifts if shift is not None))
             axes = expression_axes(delta)
             points = evaluate_time(delta, axes)
             if points is not None and int(points.min()) >= 0:
-                return self.add(captured, self.lookup([int(v) for v in points.flat], axes))
+                return self.add(
+                    captured, self.lookup([int(v) for v in points.flat], axes)
+                )
         return self.reconstruct(choose_time(*expressions), inputs, captured_ends)
 
     def _captured_delta(
@@ -449,14 +467,22 @@ class RuntimeMath(TimedMacro):
         # Addition distributes over max/min. Match the same shift on every
         # alternative before flattening case maxima loses the incoming floor.
         if isinstance(expression, TimeChoice) and isinstance(captured, TimeChoice):
-            if expression.maximum != captured.maximum or len(expression.alternatives) != len(captured.alternatives):
+            if expression.maximum != captured.maximum or len(
+                expression.alternatives
+            ) != len(captured.alternatives):
                 return None
             shifts = [
                 self._captured_delta(value, origin)
-                for value, origin in zip(expression.alternatives, captured.alternatives, strict=True)
+                for value, origin in zip(
+                    expression.alternatives, captured.alternatives, strict=True
+                )
             ]
             first = shifts[0]
-            return first if first is not None and all(shift == first for shift in shifts) else None
+            return (
+                first
+                if first is not None and all(shift == first for shift in shifts)
+                else None
+            )
         return add_time(expression, scale_time(captured, -1))
 
     def source(self, name: str) -> RuntimeEnd:

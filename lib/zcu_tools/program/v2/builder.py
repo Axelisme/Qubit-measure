@@ -212,7 +212,9 @@ class TimelineBuilder:
 
         self._record(replay)
 
-    def branch(self, *, by: str, align_timeline: bool) -> AbstractContextManager[BuilderBranchCases]:
+    def branch(
+        self, *, by: str, align_timeline: bool
+    ) -> AbstractContextManager[BuilderBranchCases]:
         """Record indexed cases without advancing the shared reference.
 
         by names an existing sweep loop. The yielded handle's case(index) records
@@ -235,7 +237,9 @@ class TimelineBuilder:
         return self._branch(by, align_timeline=align_timeline)
 
     @contextmanager
-    def _branch(self, by: str, *, align_timeline: bool) -> Generator[BuilderBranchCases]:
+    def _branch(
+        self, by: str, *, align_timeline: bool
+    ) -> Generator[BuilderBranchCases]:
         self._ensure_recording()
         cases: list[tuple[int, str | None, tuple[_Action, ...]]] = []
         is_open = True

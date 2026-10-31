@@ -669,8 +669,12 @@ class PreparedTimelineMacro(TimedMacro):
         )
 
     def preprocess(self, prog) -> None:
-        if self.book.used is not None and isinstance(self.source, (Delay, NativeTimelineDelay, TimelineRuntimeAdvance)):
-            raise ValueError("branch cases cannot advance reference; use delay_timeline instead")
+        if self.book.used is not None and isinstance(
+            self.source, (Delay, NativeTimelineDelay, TimelineRuntimeAdvance)
+        ):
+            raise ValueError(
+                "branch cases cannot advance reference; use delay_timeline instead"
+            )
         self.math = RuntimeMath(prog)
         previous = self.book.math if self.book.preparing else None
         previous_origin = prog._time_origin
@@ -853,8 +857,13 @@ class BranchCaseState:
 
 class TimelineBranch(Macro):
     def __init__(
-        self, book: TimelineBook, by: str, cases: dict[int, list[Macro]], name: str,
-        *, align_timeline: bool
+        self,
+        book: TimelineBook,
+        by: str,
+        cases: dict[int, list[Macro]],
+        name: str,
+        *,
+        align_timeline: bool,
     ):
         self.book = book
         self.by = by
@@ -891,7 +900,10 @@ class TimelineBranch(Macro):
         initial_defined = prog._time_bounds.defined.copy()
         saved_pins = self.book.pinned.copy()
         self.book.pinned.update(prog._timeline_live_registers())
-        self.book.pinned.update(value.register for value in [*self.entry_inputs.values(), *self.captured_ends])
+        self.book.pinned.update(
+            value.register
+            for value in [*self.entry_inputs.values(), *self.captured_ends]
+        )
         frames = self._save_frames()
         states: list[BranchCaseState] = []
         self.prepared = []
@@ -951,7 +963,12 @@ class TimelineBranch(Macro):
                 for variable in time_variables(expression):
                     if not variable.axes and variable.points is None:
                         self.entry_inputs[variable] = self.entry_math.snapshot(
-                            RuntimeEnd(variable.name, variable.minimum, variable.maximum, expression=expression)
+                            RuntimeEnd(
+                                variable.name,
+                                variable.minimum,
+                                variable.maximum,
+                                expression=expression,
+                            )
                         )
         self.captured_ends = [
             self.entry_math.snapshot(end)
@@ -960,7 +977,11 @@ class TimelineBranch(Macro):
         ]
 
     def _merge_ends(
-        self, prog, initial: dict[str, Time], results: list[dict[str, Time]], used: set[str]
+        self,
+        prog,
+        initial: dict[str, Time],
+        results: list[dict[str, Time]],
+        used: set[str],
     ) -> None:
         self.book.ends = {}
         for name in initial:
@@ -970,7 +991,9 @@ class TimelineBranch(Macro):
             elif not self.align_timeline:
                 self.book.ends[name] = self._merge_values(prog, values, force=True)
             elif any(isinstance(value, RuntimeEnd) for value in values):
-                self.book.ends[name] = self.result_math.reconstruct_maximum(values, self.entry_inputs, self.captured_ends)
+                self.book.ends[name] = self.result_math.reconstruct_maximum(
+                    values, self.entry_inputs, self.captured_ends
+                )
             else:
                 end = values[0]
                 for value in values[1:]:
@@ -983,9 +1006,7 @@ class TimelineBranch(Macro):
             macro.preprocess(prog)
         return prepared
 
-    def _capture_case(
-        self, prog
-    ) -> BranchCaseState:
+    def _capture_case(self, prog) -> BranchCaseState:
         return BranchCaseState(
             self.book.ends.copy(),
             self.book.waiting.copy(),
@@ -1054,7 +1075,8 @@ class TimelineBranch(Macro):
                 (
                     name
                     for name in self.book.ends
-                    if not self.align_timeline and all(
+                    if not self.align_timeline
+                    and all(
                         _same_times([snapshot[ch], result[name]])
                         for snapshot, result in zip(snapshots, results, strict=True)
                     )
