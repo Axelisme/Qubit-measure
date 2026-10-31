@@ -361,6 +361,14 @@ def select_time(
     """Select a branch or table candidate at the same legal loop coordinates."""
     if all(value == values[0] for value in values):
         return values[0]
+    if all(isinstance(value, LinearTime) for value in values):
+        first = values[0]
+        if isinstance(first, LinearTime):
+            common = tuple((variable, coefficient) for variable, coefficient in first.terms
+                           if all(isinstance(value, LinearTime) and (variable, coefficient) in value.terms for value in values))
+            if common:
+                origin = LinearTime(terms=common)
+                return add_time(origin, select_time(selector, tuple(add_time(value, scale_time(origin, -1)) for value in values)))
     axes = expression_axes(selector)
     for value in values:
         axes.update(expression_axes(value))
@@ -428,6 +436,16 @@ def choose_time(*values: TimeExpression, maximum: bool = True) -> TimeExpression
         ):
             return unique[index]
     return TimeChoice(unique, maximum)
+
+
+def substitute_time(value: TimeExpression, replacements: dict[CycleVariable, TimeExpression]) -> TimeExpression:
+    """Replace producer identities in cycle algebra without changing runtime storage."""
+    if isinstance(value, TimeChoice):
+        return choose_time(*(substitute_time(item, replacements) for item in value.alternatives), maximum=value.maximum)
+    result: TimeExpression = LinearTime(value.constant)
+    for variable, coefficient in value.terms:
+        result = add_time(result, scale_time(replacements.get(variable, LinearTime(terms=((variable, 1),))), coefficient))
+    return result
 
 
 def scale_time(value: TimeExpression, coefficient: int) -> TimeExpression:

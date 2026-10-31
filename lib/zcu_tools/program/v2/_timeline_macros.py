@@ -1099,8 +1099,12 @@ class TimelineBranch(Macro):
         self.book.ends = {case_name: initial[self.timeline]}
         self.book.waiting, self.book.used = set(), set()
         prepared = [PreparedTimelineMacro(self.book, macro) for macro in case]
-        for macro in prepared:
-            macro.preprocess(prog)
+        self.book.case_path.append((self.by, index))
+        try:
+            for macro in prepared:
+                macro.preprocess(prog)
+        finally:
+            self.book.case_path.pop()
         case_end = self.book.end(case_name)
         self.book.ends = {**initial, self.timeline: case_end}
         self.book.waiting, self.book.used = waiting, {self.timeline}

@@ -19,6 +19,7 @@ from ._timeline_expression import (
     scale_time,
     select_time,
     slack_variables,
+    substitute_time,
     unbounded_time,
 )
 from ._timeline_guard import PulseGuard as _PulseGuard
@@ -553,6 +554,17 @@ class TimelineBook:
                 "sync it or use join/fork to establish a conservative scheduling point"
             )
         return self.ends[name]
+
+    def check_loop_pulse(self, prog, channel: int, start: Time) -> None:
+        """Prove managed starts against physical tails, cancelling loop origins."""
+        if not self.loop_timelines:
+            return
+        expression = time_expression(prog, start)
+        gap = add_time(expression, scale_time(self.native_expression(prog, channel, generator=True), -1))
+        gap = substitute_time(gap, {frame.progress: LinearTime() for frame in self.loop_timelines})
+        if not unbounded_time(gap) and projected_expression_bounds(gap).minimum < 0:
+            raise ValueError(f"channel {channel} pulse overlap inside repeat; use delay_timeline")
+        self.loop_timelines[-1].starts.append((channel, expression, tuple(self.case_path)))
 
     def require_reference_advance(self) -> None:
         """Reject reference operations inside branch cases or guarded lowering."""

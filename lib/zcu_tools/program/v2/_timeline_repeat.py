@@ -13,6 +13,8 @@ from ._timeline_expression import (
     multiply_time,
     projected_expression_bounds,
     scale_time,
+    select_time,
+    substitute_time,
     unbounded_time,
 )
 from ._timeline_runtime import RuntimeEnd, Time, runtime_expression, time_expression
@@ -83,6 +85,10 @@ class LoopTimelineExit(Macro):
         count = book.repeat_count(prog, self.iterations, self.minimum, self.maximum)
         total = multiply_time(duration, count)
         result_expression = add_time(time_expression(prog, frame.entry), total)
+        self._check_backedge(prog, frame, duration)
+        if book.loop_timelines:
+            for ch, start, path in frame.starts:
+                book.loop_timelines[-1].starts.append((ch, substitute_time(start, {frame.progress: LinearTime()}), path))
         result = _end(frame.origin.register, result_expression)
         book.math.check_end(result)
         operand = book.math.cycles(finish)
@@ -115,6 +121,18 @@ class LoopTimelineExit(Macro):
         book.ends = {**frame.external, frame.parent: result}
         book.waiting = frame.waiting
         book.pinned = frame.pinned
+
+    def _check_backedge(self, prog, frame: LoopTimelineFrame, duration: TimeExpression) -> None:
+        if self.maximum is None or self.maximum < 2:
+            return
+        book = self.entry.book
+        for ch, start, path in frame.starts:
+            gap = add_time(add_time(start, duration), scale_time(book.native_expression(prog, ch, generator=True), -1))
+            gap = substitute_time(gap, {f.progress: LinearTime() for f in [*book.loop_timelines, frame]})
+            for selector, index in reversed(path):
+                gap = select_time(book.repeat_count(prog, selector, 0, prog.loop_dict[selector] - 1), tuple(gap if i == index else LinearTime() for i in range(prog.loop_dict[selector])))
+            if not unbounded_time(gap) and projected_expression_bounds(gap).minimum < 0:
+                raise ValueError(f"repeat: channel {ch} pulse overlap across backedge; use delay_timeline")
 
     def translate(self, prog) -> None:
         pass

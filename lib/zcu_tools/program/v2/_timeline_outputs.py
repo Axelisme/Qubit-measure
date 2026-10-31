@@ -161,6 +161,7 @@ class TimelinePlacedPulse(TimelineObservedPulse):
                 start = end
             else:
                 start = self.book.math.add(end, placement_time(prog, self.relative_t))
+            self.book.check_loop_pulse(prog, self.ch, start)
             self.runtime_start = start
             self.source.t = self.book.math.preprocess_time(start)
             self.source.preprocess(prog)
