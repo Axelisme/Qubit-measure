@@ -125,17 +125,28 @@ def test_isolated_mux_carrier_center_is_invariant_under_readout_translation(
     batch = classical_batch(isolated_carrier_plan(tone, phase_reference_us), tone)
     values = centers(batch, route)
     assert np.linalg.norm(values[0]) > 1, "exercise a nonzero conditional center"
-    # The other carrier is zero: finite-window cross-tone leakage is not an
-    # invariant under translation, but the addressed carrier's phase must be.
+    # A zero-gain companion must not change the addressed carrier's phase.
     np.testing.assert_allclose(values[1], values[0], rtol=1e-7, atol=1e-7)
 
 
 @pytest.mark.parametrize("route", ["integrated", "ode"])
+def test_same_pfb_channel_companion_still_changes_iq(route):
+    frequencies = (6000.0, 6005.0)
+    both = classical_batch(
+        isolated_carrier_plan(None, 0.001, frequencies=frequencies), 0
+    )
+    isolated = classical_batch(
+        isolated_carrier_plan(0, 0.001, frequencies=frequencies), 0
+    )
+    assert np.linalg.norm(centers(both, route) - centers(isolated, route)) > 0.1
+
+
+@pytest.mark.parametrize("route", ["integrated", "ode"])
 def test_reference_carrier_output_is_bitwise_equal_to_unconverted_phase(route):
-    plan = isolated_carrier_plan(0, 0.001)
+    plan = isolated_carrier_plan(0, 0.001, frequencies=(6000.0,))
     batch = classical_batch(plan, 0)
-    # Drop the zero-gain companion for a genuine single-tone response. The
-    # existing common-origin phase expression must remain bit-for-bit intact.
+    # Compare a genuine addressed single carrier to the original common-origin
+    # phase expression, independently of planner phase localization.
     original_phase = float(np.deg2rad(23.0 - 360 * 6000.0 * 0.001))
     single = replace(
         batch,

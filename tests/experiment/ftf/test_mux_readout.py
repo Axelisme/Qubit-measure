@@ -25,7 +25,13 @@ from zcu_tools.simulate.evolution import (
 )
 
 from tests.core._simulation import TIME_BASE, ticks
-from tests.experiment._ftf_templates import request, settings, snapshot, template
+from tests.experiment._ftf_templates import (
+    herald_template,
+    request,
+    settings,
+    snapshot,
+    template,
+)
 
 pytestmark = pytest.mark.sim
 
@@ -96,7 +102,7 @@ def test_planner_applies_optional_background_to_every_receiver(path):
         np.testing.assert_allclose(item.batch.model.receiver.background(6.0), expected)
 
 
-def test_mux_planning_keeps_every_incident_tone_and_independent_adc_grid():
+def test_mux_planning_selects_each_adc_channel_and_keeps_independent_grid():
     plan = ftf_module.plan_template(
         settings(),
         snapshot(),
@@ -106,16 +112,81 @@ def test_mux_planning_keeps_every_incident_tone_and_independent_adc_grid():
     )
     assert tuple(item.channel for item in plan.readouts) == (4, 1)
     np.testing.assert_array_equal(plan.batch.end_ns, [8.0, 10.0])
-    for item, samples, gain in zip(plan.readouts, (4, 3), (1000, 1100), strict=True):
-        assert len(item.batch.events[0][0].pulses) == 2
-        assert item.batch.events[0][0].pulses[0].frequency_ghz == 6.0
-        assert item.batch.events[0][0].pulses[1].frequency_ghz == 6.08
+    for item, samples, gain, frequency in zip(
+        plan.readouts, (4, 3), (1000, 1100), (6.0, 6.08), strict=True
+    ):
+        assert tuple(p.frequency_ghz for p in item.batch.events[0][0].pulses) == (frequency,)
+        assert item.batch.model.reference_frequency_ghz == 6.0
         assert len(item.batch.events[0][0].grids[0].times_ns) == samples
         assert item.batch.model.receiver.gain == gain
     np.testing.assert_array_equal(
         plan.readouts[0].batch.model.frequencies_ghz,
         plan.readouts[1].batch.model.frequencies_ghz,
     )
+
+
+@pytest.mark.parametrize(
+    ("companion_mhz", "retained"),
+    [(6009.599, 2), (6009.601, 1), (6080.0, 1)],
+)
+def test_mux_channel_passband_keeps_only_in_channel_carriers(companion_mhz, retained):
+    base = mux_template()
+    companion = replace(base.events[1], frequency_mhz=np.full(2, companion_mhz))
+    plan = ftf_module.plan_template(
+        settings(),
+        snapshot(),
+        replace(base, events=(base.events[0], companion)),
+        readout=configuration(),
+        time_base=TIME_BASE,
+    )
+    assert len(plan.readouts[0].batch.events[0][0].pulses) == retained
+
+
+def test_mux_excludes_an_off_channel_single_carrier():
+    base = mux_template()
+    plan = ftf_module.plan_template(
+        settings(),
+        snapshot(),
+        replace(base, events=base.events[:1]),
+        readout=configuration(),
+        time_base=TIME_BASE,
+    )
+    batch = plan.readouts[1].batch
+    assert all(not event.pulses for events in batch.events for event in events)
+    np.testing.assert_array_equal(ADC(batch.model).responses(batch).sums, 0)
+
+
+def test_mux_retunes_independently_between_logical_events():
+    base, config = herald_template()
+    plan = ftf_module.plan_template(
+        settings(), snapshot(), base, readout=config, time_base=TIME_BASE
+    )
+    for events in plan.readouts[0].batch.events:
+        assert [tuple(p.frequency_ghz for p in event.pulses) for event in events] == [
+            (5.9,), (6.0,)
+        ]
+    for item in plan.readouts:
+        assert item.batch.model.reference_frequency_ghz == 6.0
+
+
+def test_mux_rejects_grids_in_different_channels_within_one_event():
+    base = mux_template()
+    window = base.readouts[0]
+    retuned = replace(
+        window,
+        trigger_ticks=np.repeat(window.trigger_ticks, 2, axis=1),
+        frequency_mhz=np.tile([6000.0, 6080.0], (2, 1)),
+        phase_deg=np.repeat(window.phase_deg, 2, axis=1),
+        generator_channels=np.ones((2, 2), dtype=np.int64),
+    )
+    with pytest.raises(ValueError, match="ADC 4.*different PFB channels.*one readout event"):
+        ftf_module.plan_template(
+            settings(),
+            snapshot(),
+            replace(base, readouts=(retuned,)),
+            readout=configuration(),
+            time_base=TIME_BASE,
+        )
 
 
 def test_mux_planner_rejects_unbound_receiver_and_different_pulse_start():
